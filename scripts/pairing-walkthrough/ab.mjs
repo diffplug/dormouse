@@ -47,7 +47,7 @@ export class AgentBrowser {
    * collides with the last call's (every body is wrapped in an IIFE), and inline
    * `eval "…"` mangles quoting, so the body goes in over stdin.
    */
-  async eval(js) {
+  async eval(js, { strict = false } = {}) {
     const out = await this.run(['eval', '--stdin'], { input: `(() => {${js}})()` });
     // The CLI JSON-encodes whatever the expression returned, so one parse is
     // the whole transport — the body must not stringify anything itself.
@@ -56,8 +56,13 @@ export class AgentBrowser {
     try {
       return JSON.parse(text);
     } catch {
-      // Not JSON: a diagnostic, or a value the CLI printed raw. Hand it back so
-      // the caller's assertion says what it saw.
+      // Not JSON: a diagnostic the CLI printed instead of a result. `strict`
+      // callers are readiness probes, and a non-empty diagnostic handed back
+      // raw is *truthy* — which would read as "ready" and let a page that never
+      // loaded, or a diagnostic string standing in for a pairing code, straight
+      // through. So they get a throw, which `waitFor` treats as "not yet" and
+      // names if it times out.
+      if (strict) throw new Error(`agent-browser eval answered non-JSON: ${text}`);
       return text;
     }
   }
@@ -72,7 +77,7 @@ export class AgentBrowser {
    * trip, so they cannot disagree (`proc.mjs` → `waitFor`).
    */
   waitUntil(js, options) {
-    return waitFor(() => this.eval(js), options);
+    return waitFor(() => this.eval(js, { strict: true }), options);
   }
 
   /**
@@ -132,7 +137,7 @@ export class AgentBrowser {
    * nothing.
    */
   async openUntil(url, ready, { attempts = 6, settleMs = 1500 } = {}) {
-    const isReady = () => this.eval(ready).catch(() => false);
+    const isReady = () => this.eval(ready, { strict: true }).catch(() => false);
     for (let attempt = 0; attempt <= attempts; attempt++) {
       if (await isReady()) return;
       if (attempt === attempts) break;

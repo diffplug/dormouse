@@ -31,10 +31,11 @@ class CdpSession {
   #pending = new Map();
 
   /** Everything the page logged, in order, as `LEVEL text` lines. */
-  messages = [];
+  messages;
 
-  constructor(ws) {
+  constructor(ws, carry = []) {
     this.#ws = ws;
+    this.messages = [...carry];
     ws.addEventListener('message', (event) => {
       const message = JSON.parse(String(event.data));
       if (message.method) {
@@ -97,7 +98,7 @@ function describeLogEvent({ method, params }) {
  * follows is. `agent-browser console` is not a substitute — it answers empty
  * for a browser it merely connected to.
  */
-export async function attachPage(port, matches, what = 'a page target') {
+export async function attachPage(port, matches, what = 'a page target', carry = []) {
   const target = await waitFor(
     async () => (await pageTargets(port)).find(matches) ?? null,
     { what, timeoutMs: 30_000, intervalMs: 250 },
@@ -109,7 +110,9 @@ export async function attachPage(port, matches, what = 'a page target') {
       once: true,
     });
   });
-  const session = new CdpSession(ws);
+  // `carry` is the previous session's record when this is a re-attach, so
+  // `pocket-console.log` still starts at the first paint.
+  const session = new CdpSession(ws, carry);
   // Both: `Runtime` carries what the page's own code logs, `Log` carries what
   // the browser says about the page — a blocked request, a worker that would
   // not register.

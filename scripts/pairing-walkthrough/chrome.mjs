@@ -160,7 +160,12 @@ export async function launchChrome({
   );
   const version = await waitFor(
     async () => {
-      if (handle.exit) throw new Error(`Chrome exited (see ${logPath})`);
+      // Fatal, so the wait ends here: a Chrome that refused a flag or found its
+      // profile locked is gone, and polling on would report a 60s timeout
+      // instead of the exit in the log.
+      if (handle.exit) {
+        throw Object.assign(new Error(`Chrome exited (see ${logPath})`), { fatal: true });
+      }
       const res = await fetch(`http://127.0.0.1:${port}/json/version`).catch(() => null);
       return res?.ok ? res.json() : null;
     },

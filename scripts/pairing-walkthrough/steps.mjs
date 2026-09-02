@@ -43,7 +43,7 @@ const PAIRING_MODAL = '[role="dialog"][aria-labelledby="remote-pairing-title"]';
 
 /**
  * The setup QR, by the accessible name `QrCode` gives it
- * (`lib/src/remote/host/RemoteControlSection.tsx`) — an accessibility contract
+ * (`lib/src/components/RemoteControlSection.tsx`) — an accessibility contract
  * rather than copy, so it survives the copy pass the way `PAIRING_MODAL` does.
  */
 const SETUP_QR = 'svg[aria-label="Setup code for this machine"]';
@@ -208,9 +208,9 @@ async function stepEnroll(ctx) {
   const ab = ctx.state.hostBrowser;
   const { opts } = ctx;
 
-  await fillField(ab, 'input[type="url"]', ctx.serverOrigin);
-  await fillField(ab, 'input[type="password"]', opts.password);
-  await fillField(ab, 'input[placeholder="e.g. Work laptop"]', opts.machineName);
+  await fillField(ctx, 'input[type="url"]', ctx.serverOrigin);
+  await fillField(ctx, 'input[type="password"]', opts.password);
+  await fillField(ctx, 'input[placeholder="e.g. Work laptop"]', opts.machineName);
   await ctx.shot('03-enroll-form.png');
 
   await ab.eval(`const button = [...document.querySelectorAll('[role="dialog"] button[type="submit"]')]
@@ -418,11 +418,16 @@ async function stepPocket(ctx) {
   // screen is laid out for a phone.
   await ab.run(['set', 'viewport', String(POCKET_VIEWPORT.width), String(POCKET_VIEWPORT.height)]);
 
+  // Recorded before the authenticator is added, not after: `cleanup` writes
+  // `pocket-console.log` out of this session, and an `addVirtualAuthenticator`
+  // that throws would otherwise lose the page's console record on exactly the
+  // failure path that record exists for.
   const session = await openPocket(ctx, ab, port);
+  ctx.state.pocketAuth = { session, authenticatorId: null };
   // Before anything can call `navigator.credentials`: the authenticator belongs
   // to this page target, and a WebAuthn call made without one hangs until its
   // own timeout rather than failing.
-  ctx.state.pocketAuth = { session, authenticatorId: await addVirtualAuthenticator(session) };
+  ctx.state.pocketAuth.authenticatorId = await addVirtualAuthenticator(session);
 
   ctx.record({
     pocket: {
@@ -463,6 +468,7 @@ async function openPocket(ctx, ab, port) {
     port,
     (target) => target.url.startsWith(ctx.serverOrigin),
     'the page target showing Pocket',
+    session.messages,
   );
 }
 
@@ -603,7 +609,7 @@ async function stepTerminal(ctx) {
 async function approveOnHost(ctx) {
   const ab = ctx.state.hostBrowser;
   const code = ctx.state.pairingCode;
-  await fillField(ab, `${PAIRING_MODAL} input`, code);
+  await fillField(ctx, `${PAIRING_MODAL} input`, code);
   // The last button in the modal, and disabled until the field holds two
   // digits — so clicking it exercises that gate rather than working around it.
   const confirm = await clickElement(
@@ -689,8 +695,14 @@ async function ringFromHost(ctx) {
   const startedAt = Date.now();
   const sent = await proveCommand(ctx, NOTIFY_PROOF, { prefix: `${NOTIFY_SEQUENCE}; ` });
   await pocket.run(['click', 'button[aria-label="Sessions input mode"]']);
-  const row = await waitFor(
-    async () => (await pocket.eval(sessionRowsExpr()))?.find((entry) => entry.todo) ?? null,
+  // **The row has to be *this* notification's.** Waiting for any row with a
+  // TODO would be satisfied instantly by one left over from an earlier command
+  // — the assertion would pass having proved nothing — so the row must also be
+  // ringing and carry the escape in the title the Host derived from the command
+  // line, which is the one thing only this command could have produced.
+  const row = await pocket.waitUntil(
+    `${sessionRowsExpr()}
+     return rows && rows.find((r) => r.todo && r.ringing && r.text.includes('777;notify')) || null;`,
     { what: "the Host's notification to reach the phone's session list", timeoutMs: 60_000 },
   );
   ctx.record({
@@ -852,12 +864,14 @@ function wallReadyExpr() {
  * one button carrying the pane's title, its TODO pill, and — when the Host says
  * the pane is ringing — a second icon, the bell
  * (`lib/src/components/MobileTerminalUi.tsx`).
+ *
+ * A statement, not an expression: it leaves the rows in `rows` (falsy while the
+ * reserve is not up) and the caller says what it wants out of them.
  */
 function sessionRowsExpr() {
   return `const modes = document.querySelector('section[aria-label="Input mode"]');
     const reserve = modes && modes.nextElementSibling;
-    if (!reserve) return null;
-    return [...reserve.querySelectorAll('button')].map((row) => ({
+    const rows = reserve && [...reserve.querySelectorAll('button')].map((row) => ({
       text: row.innerText.trim(),
       todo: [...row.querySelectorAll('span')].some((el) => el.textContent.trim() === 'TODO'),
       ringing: row.querySelectorAll('svg').length > 1,
@@ -890,12 +904,21 @@ function shellQuote(value) {
   return `'${value.replaceAll("'", `'\\''`)}'`;
 }
 
-/** `fill`, then read the value back — a controlled input can swallow a paste. */
-async function fillField(ab, selector, value) {
+/**
+ * `fill`, then read the value back — a controlled input can swallow a paste.
+ *
+ * The fallback reaches past React's controlled-input contract to forge the
+ * change, so a run in which it fires is a run where the honest path is broken:
+ * it says so out loud rather than passing quietly.
+ */
+async function fillField(ctx, selector, value) {
+  const ab = ctx.state.hostBrowser;
   await ab.run(['fill', selector, value]);
   const seen = await ab.eval(`const el = document.querySelector(${JSON.stringify(selector)});
     return el ? el.value : null;`);
   if (seen === value) return;
+  ctx.log(`\`fill\` did not stick on ${selector}; forcing the value through React's setter`);
+  ctx.record({ fillFallbacks: [...(ctx.state.fillFallbacks ??= []), selector] });
   // React's own setter, so the controlled component sees a real change event.
   await ab.eval(`const el = document.querySelector(${JSON.stringify(selector)});
     if (!el) throw new Error('no element at ' + ${JSON.stringify(selector)});

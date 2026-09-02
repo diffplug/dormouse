@@ -81,7 +81,7 @@ to tap something there would have found a bug.
 | `--skip-build` | off | Reuse `lib/dist-pocket` and `server/dist` instead of rebuilding them. Ignored (with a warning) when either is missing. |
 | `--password <pw>` | `walkthrough-hunter2` | `DORMOUSE_SETUP_PASSWORD` for the run. |
 | `--machine-name <n>` | `Walkthrough Mac` | The name the Host enrolls under. |
-| `--keep` | off | Leave everything running after the last step; Ctrl-C stops it. Useful for poking at a paired pair by hand. |
+| `--keep` | off | Leave everything running when the run ends — including a failed one, which is when poking by hand is most useful. Ctrl-C stops it. |
 
 `--skip-build` skips the Pocket build, so **a change under
 `lib/src/remote/pocket-app/` or `lib/src/remote/client/` will not be in the run**

@@ -74,7 +74,7 @@ function usage() {
     '  --skip-build       reuse lib/dist-pocket and server/dist instead of rebuilding',
     `  --password <pw>    DORMOUSE_SETUP_PASSWORD for the run (default: ${d.password})`,
     `  --machine-name <n> the name the Host enrolls under (default: ${d.machineName})`,
-    '  --keep             leave the Server and Host running after the last step',
+    '  --keep             leave everything running when the run ends, pass or fail',
     '',
   ].join('\n');
 }
@@ -231,12 +231,17 @@ async function cleanup(state, opts) {
   // The Pocket Chrome answers to neither name — it is not an agent-browser
   // session and not a harness child by the time it matters — so its profile
   // path, which is inside the run directory, is what identifies it.
+  //
+  // No shell, and the run directory escaped: `--out` takes any path, `pgrep -f`
+  // reads its pattern as an ERE, and a directory holding a quote or a paren
+  // would otherwise turn this check into a syntax error that `catch` swallows —
+  // leaving the run silent about processes it failed to stop.
   const marks = ['dev-agent-browser.mjs', opts?.session ?? 'pairing-walkthrough', state.runDir]
     .filter(Boolean)
+    .map((mark) => mark.replaceAll(/[.[\]{}()*+?^$|\\]/g, String.raw`\$&`))
     .join('|');
-  const survivors = await exec('/bin/sh', ['-c', `pgrep -fl '${marks}' || true`]).catch(() => ({
-    stdout: '',
-  }));
+  // pgrep exits 1 when nothing matches, which `exec` reports as a failure.
+  const survivors = await exec('pgrep', ['-fl', marks]).catch(() => ({ stdout: '' }));
   if (survivors.stdout.trim()) {
     console.error(`[walkthrough] processes survived cleanup:\n${survivors.stdout.trim()}`);
   }
@@ -261,6 +266,16 @@ const live = { state: {}, opts: null };
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => { void shutdown(130, live, { exit: true }); });
 }
+// The two ways out that skip `main`'s own `catch`, and the two that would
+// otherwise leave a Server, a Host and two Chromes running with nobody left to
+// stop them: a stream that errors (`spawnLogged`'s log file) and a promise
+// nothing awaited (a CDP `send` outstanding when its socket closes).
+for (const fault of ['uncaughtException', 'unhandledRejection']) {
+  process.on(fault, (err) => {
+    console.error(`[walkthrough] ${fault}: ${err instanceof Error ? err.stack : String(err)}`);
+    void shutdown(1, live, { exit: true });
+  });
+}
 
 let exitCode = 1;
 try {
@@ -268,11 +283,17 @@ try {
 } catch (err) {
   console.error(`[walkthrough] ${err instanceof Error ? err.stack : String(err)}`);
 }
-if (live.opts?.keep && exitCode === 0) {
+if (live.opts?.keep) {
+  // **A failed run is kept too.** Standing in the wreckage is what `--keep` is
+  // for, and tearing down on the way out would remove the only thing left to
+  // look at.
+  //
   // Stay alive rather than detaching: these children write into pipes this
   // process owns, so exiting would close their stdout mid-sentence. Ctrl-C
   // lands on the SIGINT handler above and tears everything down.
-  console.log('[walkthrough] --keep: the Server and Host are still running. Ctrl-C to stop them.');
+  console.log(
+    `[walkthrough] --keep (exit ${exitCode}): what is up is still up. Ctrl-C to stop it.`,
+  );
   await new Promise(() => {});
 } else {
   await shutdown(exitCode, live);

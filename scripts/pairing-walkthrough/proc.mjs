@@ -16,6 +16,7 @@
 import { createWriteStream } from 'node:fs';
 import net from 'node:net';
 import { spawn } from 'node:child_process';
+import { StringDecoder } from 'node:string_decoder';
 import { setTimeout as delay } from 'node:timers/promises';
 
 /** Every child this run started, newest first, so teardown is reverse order. */
@@ -32,6 +33,10 @@ const started = [];
  */
 export function spawnLogged(command, args, { cwd, env, logPath, prefix }) {
   const log = createWriteStream(logPath, { flags: 'a' });
+  // A write stream with no `error` listener throws an uncaught exception on a
+  // full or vanished run directory — losing the log is survivable, so it is
+  // reported and the run carries on.
+  log.on('error', (err) => console.error(`[${prefix}] ${logPath}: ${err.message}`));
   const child = spawn(command, args, {
     cwd,
     env: { ...process.env, ...env },
@@ -40,10 +45,13 @@ export function spawnLogged(command, args, { cwd, env, logPath, prefix }) {
   });
   /** Everything the child has written, newest last, for `waitForLine`. */
   const lines = [];
+  // A decoder rather than `chunk.toString()`, so a multi-byte character split
+  // across two reads survives into `lines`.
+  const decoder = new StringDecoder('utf8');
   let carry = '';
   const consume = (chunk) => {
     log.write(chunk);
-    carry += chunk.toString('utf8');
+    carry += decoder.write(chunk);
     const parts = carry.split('\n');
     carry = parts.pop() ?? '';
     for (const line of parts) lines.push(line);
@@ -85,6 +93,11 @@ export async function waitForLine(handle, re, { timeoutMs = 300_000, what = Stri
  * The value is returned, so a probe can double as the read that follows it —
  * which is what keeps "wait for the QR, then measure it" from being two
  * round trips that can disagree.
+ *
+ * **A probe's throw is "not yet", which is why one needs a way to say "never".**
+ * `err.fatal` is rethrown at once: a browser that exited is not going to open
+ * its port on the next poll, and waiting the deadline out reports the timeout
+ * instead of the death that caused it.
  */
 export async function waitFor(probe, { timeoutMs = 60_000, intervalMs = 400, what }) {
   const deadline = Date.now() + timeoutMs;
@@ -95,6 +108,7 @@ export async function waitFor(probe, { timeoutMs = 60_000, intervalMs = 400, wha
       if (value) return value;
       last = null;
     } catch (err) {
+      if (err?.fatal) throw err;
       last = err;
     }
     if (Date.now() >= deadline) {
@@ -147,20 +161,25 @@ export function exec(command, args, { cwd, env, input, binary = false, timeoutMs
       env: { ...process.env, ...env },
       stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
     });
-    const chunks = [];
-    let stderr = '';
-    child.stdout.on('data', (c) => chunks.push(c));
-    child.stderr.on('data', (c) => { stderr += c; });
-    const stdoutOf = () => (binary ? Buffer.concat(chunks) : chunks.join(''));
+    // Decoded once, at the end, never chunk by chunk: a multi-byte character
+    // straddling a 64 KiB boundary would otherwise come back as two replacement
+    // characters — and the page text this captures is full of `·`, `—` and `‹`,
+    // so the corruption lands in a JSON payload that then fails to parse.
+    const out = [];
+    const err = [];
+    child.stdout.on('data', (c) => out.push(c));
+    child.stderr.on('data', (c) => err.push(c));
     const timer = setTimeout(() => {
       child.kill('SIGKILL');
       reject(new Error(`${command} ${args.join(' ')} timed out after ${timeoutMs}ms`));
     }, timeoutMs);
     timer.unref();
-    child.once('error', (err) => { clearTimeout(timer); reject(err); });
+    child.once('error', (error) => { clearTimeout(timer); reject(error); });
     child.once('close', (code) => {
       clearTimeout(timer);
-      const stdout = stdoutOf();
+      const bytes = Buffer.concat(out);
+      const stdout = binary ? bytes : bytes.toString('utf8');
+      const stderr = Buffer.concat(err).toString('utf8');
       if (code === 0) resolve({ stdout, stderr });
       else reject(new Error(`${command} ${args.join(' ')} exited ${code}\n${stderr || stdout}`));
     });
@@ -192,12 +211,27 @@ export async function signalUntilGone(send, isGone, { graceMs = 3000, killMs = 1
 /** SIGTERM the whole group, then SIGKILL what is left. Never throws. */
 export function killTree(handle, { graceMs = 3000 } = {}) {
   if (!handle) return Promise.resolve(true);
+  const group = handle.child.pid ? -handle.child.pid : null;
+  /**
+   * **Gone means the whole group, not the leader.** `pnpm` routinely exits
+   * before the vite/esbuild/sidecar tree it started, so a check on
+   * `handle.exit` would answer "already dead" and return without signalling
+   * anything — orphaning exactly the tree `detached: true` exists to reach.
+   * Signal 0 to the group answers whether any member is left.
+   */
+  const isGone = () => {
+    if (group === null) return handle.exit !== null;
+    try {
+      process.kill(group, 0);
+      return false;
+    } catch {
+      return true;
+    }
+  };
   return signalUntilGone(
     (signal) => {
-      // The group first — `spawnLogged` detaches, and killing only the pnpm
-      // shim orphans the vite/esbuild tree under it.
       try {
-        process.kill(-handle.child.pid, signal);
+        process.kill(group, signal);
         return true;
       } catch {
         try {
@@ -208,7 +242,7 @@ export function killTree(handle, { graceMs = 3000 } = {}) {
         }
       }
     },
-    () => handle.exit !== null,
+    isGone,
     { graceMs },
   );
 }
