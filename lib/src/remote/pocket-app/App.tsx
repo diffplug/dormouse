@@ -695,6 +695,9 @@ export function UnsupportedBrowser(): React.ReactElement {
  * teach exactly the reflex the ceremony is built to punish
  * (`docs/specs/remote-security-model.md` → Pairing).
  */
+/** The accessible name of the digits; see {@link PairingCodeView}. */
+export const PAIRING_CODE_LABEL = 'Pairing code';
+
 export function PairingCodeView({
   code,
   onCancel,
@@ -709,10 +712,13 @@ export function PairingCodeView({
         <h1 className={PK.headerTitle}>Pairing</h1>
       </header>
       <div className={clsx(PK.body, PK.bodyCenter)}>
-        <p className={PK.code} aria-live="polite">
+        {/* Named and announced structurally, so what identifies this screen — to
+            a screen reader, to the tests, and to the walkthrough harness — is
+            not a sentence the next copy pass is free to rewrite. */}
+        <p className={PK.code} role="status" aria-label={PAIRING_CODE_LABEL} aria-live="polite">
           {code ?? '··'}
         </p>
-        <p className={clsx(PK.lead, 'text-center')}>Type this code on the computer</p>
+        <p className={clsx(PK.lead, 'text-center')}>Type these digits on the computer to approve.</p>
         <button
           type="button"
           className={pkButton({ tone: 'outline', block: true })}

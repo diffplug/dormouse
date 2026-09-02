@@ -16,7 +16,12 @@ import {
   type PushConfigStatus,
 } from './App';
 import type { PushAvailability } from '../client/push-subscribe';
-import { HOSTS, buttonNamed as buttonNamedIn, rowFor as rowForIn } from './app-test-utils';
+import {
+  HOSTS,
+  buttonNamed as buttonNamedIn,
+  pairingCode as pairingCodeIn,
+  rowFor as rowForIn,
+} from './app-test-utils';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -289,8 +294,10 @@ describe('the two-digit waiting screen', () => {
       );
     });
 
-    expect(container.textContent).toContain('07');
-    expect(container.textContent).toContain('Type this code on the computer');
+    // Matched on the live region's accessible name, not on the sentence beside
+    // it: the identity of this screen is an accessibility contract, and the copy
+    // around it is not (`PAIRING_CODE_LABEL`).
+    expect(pairingCodeIn(container)).toBe('07');
   });
 
   it('offers a way out while the outcome is still pending', () => {

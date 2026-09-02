@@ -566,13 +566,19 @@ function scannerUpExpr() {
 /**
  * The two digits off the waiting screen — the only place they exist, since the
  * Host holds the expected ones and never sends them.
+ *
+ * By the live region's accessible name (`PAIRING_CODE_LABEL` in
+ * `lib/src/remote/pocket-app/App.tsx`), not by the sentence beside it: that
+ * sentence is copy under review, while the name is an accessibility contract —
+ * the same reason {@link PAIRING_MODAL} and {@link SETUP_QR} anchor where they
+ * do. The digit test stays, because the element holds a placeholder until the
+ * sampled code lands.
  */
 function pairingCodeExpr() {
-  return `if (!document.body || !document.body.innerText.includes('Type this code on the computer')) return null;
-    const digits = [...document.querySelectorAll('p')]
-      .map((el) => el.textContent.trim())
-      .find((text) => /^\\d\\d$/.test(text));
-    return digits ?? null;`;
+  return `const region = document.querySelector('[role="status"][aria-label="Pairing code"]');
+    if (!region) return null;
+    const digits = region.textContent.trim();
+    return /^\\d\\d$/.test(digits) ? digits : null;`;
 }
 
 /** The Host's pairing modal, as text, or null while it is not up. */

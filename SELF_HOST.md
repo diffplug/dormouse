@@ -443,8 +443,8 @@ Host displays (`docs/specs/server.md` → Setup tokens and the pairing QR).
    problem.
 
 3. **The phone.** In **Settings → Remote control**, press **Set up a phone**
-   for a pairing code. On the phone, open `https://<laptop>.<tailnet>.ts.net` in
-   Safari; a browser that has never been here leads with **Scan a Host QR**.
+   for a setup code. On the phone, open `https://<laptop>.<tailnet>.ts.net` in
+   Safari; a browser that has never been here leads with **Scan a setup code**.
    Scanning (or pasting) that code creates the passkey and signs them in — there
    is no password to type on the phone — bound to this exact origin. For push,
    add Pocket to the Home Screen *before* scanning and do all of this inside the

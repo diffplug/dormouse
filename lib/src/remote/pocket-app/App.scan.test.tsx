@@ -18,6 +18,7 @@ import { generateNoiseKeyPair, toBase64Url, type PairingInvitation } from 'serve
 import App, { CAMERA_BOOTSTRAP_MESSAGE, SCAN_LABEL, UNSUPPORTED_BROWSER_TITLE } from './App';
 import type { ConnectResult, PairingResult } from '../client/pocket-client';
 import {
+  PAIRING_DENIAL_MESSAGES,
   SETUP_CODE_DEAD_MESSAGE,
   ServerRefusalError,
   SetupTokenInvalidError,
@@ -28,6 +29,7 @@ import {
   buttonNamed,
   click,
   invitationUrl as sharedInvitationUrl,
+  pairingCode,
   rowFor,
   settle,
 } from './app-test-utils';
@@ -258,8 +260,10 @@ describe('a first run, from the scan to the terminal', () => {
     expect(fake.pair.mock.calls[0]![0].inviteId).toBe(invitation.inviteId);
 
     // The digits are on screen while the outcome is pending.
-    expect(container.textContent).toContain('07');
-    expect(container.textContent).toContain('Type this code on the computer');
+    // Matched on the live region's accessible name, not on the sentence beside
+    // it: the identity of this screen is an accessibility contract, and the copy
+    // around it is not (`PAIRING_CODE_LABEL`).
+    expect(pairingCode(container)).toBe('07');
 
     const record = await knownHost(invitation.hostId);
     releasePair({ ok: true, record });
@@ -272,12 +276,15 @@ describe('a first run, from the scan to the terminal', () => {
 
   it('reports a pairing the laptop refused, and lands on the Hosts list', async () => {
     const { url } = await invitationUrl();
-    fake.pair.mockResolvedValue({ ok: false, message: 'The pairing was refused on the computer.' });
+    fake.pair.mockResolvedValue({
+      ok: false,
+      message: PAIRING_DENIAL_MESSAGES['user-denied'],
+    });
     await boot();
 
     await pasteCode(url);
 
-    expect(alertText(container)).toBe('The pairing was refused on the computer.');
+    expect(alertText(container)).toBe(PAIRING_DENIAL_MESSAGES['user-denied']);
     expect(fake.connect).not.toHaveBeenCalled();
     expect(buttonNamed(container, 'Refresh')).not.toBeNull();
   });
@@ -567,7 +574,7 @@ describe('leaving the scanner', () => {
     // pairing, so a scan that failed after sign-in has a session and no list.
     // Cancelling into an empty "No computers paired yet" would be a lie.
     const { url } = await invitationUrl();
-    fake.setup.mockRejectedValue(new Error('That pairing code has expired.'));
+    fake.setup.mockRejectedValue(new Error(SETUP_CODE_DEAD_MESSAGE));
     fake.listKnownHosts.mockResolvedValue([await knownHost('host-1')]);
     fake.listHosts.mockResolvedValue([{ hostId: 'host-1', label: '', online: true }]);
     await boot();

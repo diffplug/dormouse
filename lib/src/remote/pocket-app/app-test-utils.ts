@@ -15,7 +15,7 @@ import {
   type PairingInvitation,
 } from 'server-lib-common';
 
-import type { HostView } from './App';
+import { PAIRING_CODE_LABEL, type HostView } from './App';
 import { testRoutingId } from '../test-e2e-client';
 
 /** A live invitation URL, composed by the emitter a Host actually uses. */
@@ -67,6 +67,20 @@ export async function click(container: HTMLElement, label: string | RegExp): Pro
 
 export function alertText(container: HTMLElement): string | null {
   return container.querySelector('[role="alert"]')?.textContent ?? null;
+}
+
+/**
+ * The two digits, off the live region that names them — the same anchor the
+ * walkthrough harness uses (`scripts/pairing-walkthrough/steps.mjs`). Matching
+ * the screen on its accessible name rather than on the sentence beside it is
+ * what lets that sentence be rewritten without touching either.
+ */
+export function pairingCode(container: HTMLElement): string | null {
+  return (
+    container
+      .querySelector(`[role="status"][aria-label="${PAIRING_CODE_LABEL}"]`)
+      ?.textContent?.trim() ?? null
+  );
 }
 
 /** One Host's row, found through its label so the assertions name a Host. */
