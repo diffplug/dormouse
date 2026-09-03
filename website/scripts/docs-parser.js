@@ -222,6 +222,33 @@ export function parseInline(text, line) {
   return nodes;
 }
 
+/**
+ * The index of the `)` that closes the destination opened at `open`, or -1.
+ *
+ * Parentheses nest rather than closing at the first `)`, because a URL is
+ * allowed to contain a balanced pair and several the docs link to do
+ * (`.../wiki/Foo_(bar)`). Stopping at the first one truncates the href and
+ * still emits a link, so the page ships a live anchor pointing somewhere else
+ * — exactly the silent mangling this parser exists to avoid. A `"` toggles a
+ * title span, where a paren is literal.
+ */
+function matchDestination(text, open) {
+  let depth = 1;
+  let inTitle = false;
+  for (let i = open + 1; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '\\') { i++; continue; }
+    if (ch === '"') { inTitle = !inTitle; continue; }
+    if (inTitle) continue;
+    if (ch === '(') depth++;
+    else if (ch === ')') {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
 /** Match `[label](href "title")` starting at `start`. Returns null if not one. */
 function matchLink(text, start) {
   if (text[start] !== '[') return null;
@@ -237,7 +264,7 @@ function matchLink(text, start) {
   }
   if (depth !== 0 || text[i + 1] !== '(') return null;
   const label = text.slice(start + 1, i);
-  const close = text.indexOf(')', i + 2);
+  const close = matchDestination(text, i + 1);
   if (close === -1) return null;
   const target = text.slice(i + 2, close).trim();
   const titleMatch = /^(\S+)\s+"([^"]*)"$/.exec(target);
@@ -252,8 +279,57 @@ function matchLink(text, start) {
 
 const LIST_ITEM = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/;
 
-/** Closing-fence matchers, one per marker character, compiled once. */
-const FENCE_CLOSE = { '`': /^\s*`{3,}\s*$/, '~': /^\s*~{3,}\s*$/ };
+/**
+ * Whether `line` closes a fence opened with `length` copies of `marker`.
+ *
+ * The closing run must be at least as long as the opening one. Without that
+ * length test a ````-fenced block closes at the first ``` inside it — the very
+ * form AGENTS.md prescribes for nesting one code block inside another — so the
+ * block's body spills out and renders as prose, with no error to notice.
+ */
+function closesFence(line, marker, length) {
+  const trimmed = line.trim();
+  return trimmed.length >= length && [...trimmed].every((ch) => ch === marker);
+}
+
+/**
+ * Whether `line` begins a new block, so a paragraph — or a blockquote's lazy
+ * continuation — ends before it instead of swallowing it. `next` supplies the
+ * single line of lookahead a table needs, a `|` row being a table only when a
+ * delimiter row follows it.
+ *
+ * Six of the seven block starts are here: ATX heading, list item, blockquote,
+ * fence, table, and block-level raw HTML. A standalone `<img>` is deliberately
+ * absent — it is inline-level, so GitHub keeps it in the paragraph and so do
+ * we. The seventh, the thematic break, is tested separately at each call site
+ * because `---` is also a setext underline, which has to raise first.
+ */
+function interruptsParagraph(line, next) {
+  return /^(#{1,6})\s+/.test(line)
+    || LIST_ITEM.test(line)
+    || /^\s*>\s?/.test(line)
+    || /^(\s*)(`{3,}|~{3,})/.test(line)
+    || (line.includes('|') && isDelimiterRow(next ?? ''))
+    || (/^\s*<\/?[a-zA-Z]/.test(line) && !/^\s*<img\b/i.test(line));
+}
+
+/**
+ * A setext underline (`===` / `---` under a line of text). GitHub renders one
+ * as a heading; this parser has no block for it, so left alone the underline
+ * joins the paragraph and ships as the literal text `Title ===`. Rejected
+ * rather than supported: `#` is the only heading form the sources use, and an
+ * error names the line instead of leaving a reader to spot the difference.
+ */
+const SETEXT_UNDERLINE = /^\s*(=+|-+)\s*$/;
+
+/**
+ * A thematic break (`***`, `___`, `- - -`). CommonMark lets one interrupt a
+ * paragraph, so without this the line joins the paragraph and `parseInline`
+ * eats the run as an empty emphasis span — `***` ships as a dropped rule and
+ * two lost characters. Checked after `SETEXT_UNDERLINE`, never before: `---`
+ * matches both, and GitHub reads it as a setext heading.
+ */
+const THEMATIC_BREAK = /^\s*([-*_])(\s*\1){2,}\s*$/;
 
 /**
  * Split a table row into cells, honouring backslash-escaped pipes so a cell
@@ -274,8 +350,14 @@ function splitRow(row, line) {
   return cells.map((c) => parseInline(c.trim(), line));
 }
 
+/**
+ * A GFM delimiter row (`| --- | :-- |`). The pipe is required: every `|` in the
+ * pattern is optional, so without this test a bare `---` reads as a one-column
+ * delimiter row and a preceding line that merely contains a pipe becomes a
+ * table — where the `---` is a setext underline, which has to raise instead.
+ */
 function isDelimiterRow(row) {
-  return /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$/.test(row);
+  return row.includes('|') && /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$/.test(row);
 }
 
 function alignmentsFrom(row) {
@@ -310,13 +392,14 @@ export function parseMarkdown(markdown, options = {}) {
     // Fenced code
     const fence = /^(\s*)(`{3,}|~{3,})\s*([\w+-]*)\s*$/.exec(raw);
     if (fence) {
-      const closeRe = FENCE_CLOSE[fence[2][0]];
+      const marker = fence[2][0];
+      const openLength = fence[2].length;
       const lang = fence[3] || null;
       const body = [];
       i++;
       let closed = false;
       while (i < lines.length) {
-        if (closeRe.test(lines[i])) { closed = true; i++; break; }
+        if (closesFence(lines[i], marker, openLength)) { closed = true; i++; break; }
         body.push(lines[i]);
         i++;
       }
@@ -339,7 +422,7 @@ export function parseMarkdown(markdown, options = {}) {
     }
 
     // Thematic break
-    if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(raw)) {
+    if (THEMATIC_BREAK.test(raw)) {
       blocks.push({ type: 'thematicBreak' });
       i++;
       continue;
@@ -362,7 +445,13 @@ export function parseMarkdown(markdown, options = {}) {
     // Blockquote
     if (/^\s*>\s?/.test(raw)) {
       const body = [];
-      while (i < lines.length && (/^\s*>\s?/.test(lines[i]) || (lines[i].trim() !== '' && body.length > 0))) {
+      while (
+        i < lines.length
+        && (/^\s*>\s?/.test(lines[i])
+          || (lines[i].trim() !== '' && body.length > 0
+            && !interruptsParagraph(lines[i], lines[i + 1])
+            && !THEMATIC_BREAK.test(lines[i])))
+      ) {
         body.push(lines[i].replace(/^\s*>\s?/, ''));
         i++;
       }
@@ -395,7 +484,11 @@ export function parseMarkdown(markdown, options = {}) {
     const para = [];
     while (i < lines.length && lines[i].trim() !== '') {
       const l = lines[i];
-      if (para.length > 0 && (/^(#{1,6})\s+/.test(l) || LIST_ITEM.test(l) || /^\s*>\s?/.test(l) || /^(\s*)(`{3,}|~{3,})/.test(l))) break;
+      if (para.length > 0 && interruptsParagraph(l, lines[i + 1])) break;
+      if (para.length > 0 && SETEXT_UNDERLINE.test(l)) {
+        throw new UnsupportedMarkdownError('setext heading underline — use an ATX `#` heading', i + 1);
+      }
+      if (para.length > 0 && THEMATIC_BREAK.test(l)) break;
       para.push(l.trim());
       i++;
     }
@@ -446,6 +539,12 @@ function parseList(lines, start, slug) {
     i++;
     // Continuation lines: indented further, not themselves list items.
     while (i < lines.length && lines[i].trim() !== '' && !LIST_ITEM.test(lines[i]) && /^\s+/.test(lines[i])) {
+      // The same two guards a paragraph applies, so `Headings are ATX only`
+      // holds inside a list item too rather than shipping as literal text.
+      if (SETEXT_UNDERLINE.test(lines[i])) {
+        throw new UnsupportedMarkdownError('setext heading underline — use an ATX `#` heading', i + 1);
+      }
+      if (THEMATIC_BREAK.test(lines[i])) break;
       contentLines.push(lines[i].trim());
       i++;
     }
