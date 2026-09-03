@@ -292,8 +292,8 @@ The stream carries frames, status, tab snapshots, `url`, and native
 `input_mouse` / `input_keyboard` input. **Control envelopes dispatch at any
 size.** **`url` names the active tab at navigation commit; `tabs`
 refreshes only when the driving command completes**
-(for a slow page, after the load; rationale), so header and relaunch target
-follow `url`, title cleared until `tabs` names the page.
+(for a slow page, after the load; rationale), so every commit clears the title
+until `tabs` refreshes, even at the same URL.
 
 **Two-stage paint.** A changed stream JPEG paints at once as a **provisional
 frame** — the first image, and 250ms after pointer input (continuous movement

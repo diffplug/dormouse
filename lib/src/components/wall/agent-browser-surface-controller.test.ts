@@ -619,6 +619,33 @@ describe('relaunch (pop-out / pop-in)', () => {
     expect(platform.agentBrowserPopOut).toHaveBeenCalledWith('sess', expect.objectContaining({ url: 'https://slow.example/' }), undefined);
   });
 
+  it('clears a stale title when navigation commits at the same URL', async () => {
+    const controller = acquireAgentBrowserSurfaceController('id', {
+      session: 'sess', wsPort: 1111, url: 'https://same.example/',
+    });
+    const sink = makeSink();
+    controller.attachView(sink);
+    await flushMicrotasks();
+    const socket = streamSocket(1111);
+    socket?.emitMessage(JSON.stringify({
+      type: 'tabs',
+      tabs: [{ tabId: 't1', title: 'Before reload', url: 'https://same.example/', active: true }],
+    }));
+    expect(getAgentBrowserScreenController('id')?.chrome().title).toBe('Before reload');
+
+    socket?.emitMessage(JSON.stringify({ type: 'url', url: 'https://same.example/' }));
+
+    expect(getAgentBrowserScreenController('id')?.chrome()).toMatchObject({
+      url: 'https://same.example/',
+      title: null,
+    });
+    expect(sink.setTitle).toHaveBeenLastCalledWith('same.example');
+    const titleWrites = sink.setTitle.mock.calls.length;
+
+    socket?.emitMessage(JSON.stringify({ type: 'url', url: 'https://same.example/' }));
+    expect(sink.setTitle).toHaveBeenCalledTimes(titleWrites);
+  });
+
   it('a single {session, wsPort} handover connects once and asks the daemon nothing', async () => {
     const platform = relaunchPlatform();
     const controller = acquireAgentBrowserSurfaceController('id', { renderMode: 'ab-screencast', url: 'https://x.example/' });

@@ -1127,7 +1127,10 @@ export class AgentBrowserSurfaceController {
       this.setTabs([{ tabId: 'stream-active', title: null, url, active: true }]);
       return;
     }
-    if (active.url === url) return;
+    // A reload commits the same URL but invalidates the old document title just
+    // as surely as a different-URL navigation. Once cleared, repeat URL events
+    // are a true no-op until `tabs` supplies the refreshed title.
+    if (active.url === url && active.title === null) return;
     this.setTabs(this.tabs.map((tab) => (tab === active ? { ...tab, url, title: null } : tab)));
   }
 
