@@ -12,12 +12,13 @@ generated from a source that lives next to the code it describes.
 /docs/self-host     the SELF_HOST.md runbook, minus its withheld halves
 ```
 
-`/docs` is deliberately not a page, and the site header carries no **Docs**
-link. The general product guide is `vscode-ext/README.md`, published through
-the Marketplace, Open VSX, and GitHub rather than through this site; the
-machinery that once rendered it at `/docs` is retained and still runs (see
-[Canonical product guide](#canonical-product-guide)). Nothing public may link
-to a bare `/docs`.
+`/docs` is an entrypoint rather than a page: it redirects to the page
+`DOCS_DEFAULT_PATH` names (see [Reference page chrome](#reference-page-chrome)),
+and the marketing nav's desktop **Docs** link is the only public link to it. The
+general product guide is `vscode-ext/README.md`, published through the
+Marketplace, Open VSX, and GitHub rather than through this site; the machinery
+that once rendered it at `/docs` is retained and still runs (see
+[Canonical product guide](#canonical-product-guide)).
 
 | Surface | Purpose | Canonical content |
 | --- | --- | --- |
@@ -485,13 +486,13 @@ verifies:
 - every agent-skill reference target exists in `/docs/dor`;
 - generated command inventory matches the snapshot set exactly;
 - both READMEs link to every reference page in `docs-pages.ts`, except that
-  the root README alone owns `/docs/self-host` — checked as exact URLs so a
-  link to the non-existent `/docs` cannot satisfy a prefix test. The guide carries no
-  self-host obligation: it is a Marketplace listing for the editor extension,
-  and running a relay server is not part of installing one;
-- the homepage links all three root-relatively, and every `/docs` href on it
-  resolves to a published reference — both directions, because a rewritten
-  section can strand a reference's only link or reintroduce a bare `/docs`;
+  the root README alone owns `/docs/self-host` — checked as exact URLs, so the
+  `/docs` entrypoint cannot stand in for a page under a prefix test. The guide
+  carries no self-host obligation: it is a Marketplace listing for the editor
+  extension, and running a relay server is not part of installing one;
+- the homepage links every `/docs` page root-relatively, and every `/docs` href
+  on it resolves to one — both directions, because a rewritten section can
+  strand a page's only link or leave one aimed at the entrypoint;
 - every `vsce` or `ovsx` invocation that packages the extension from source
   passes the site image base;
 - no per-page head tag is hardcoded in the root route, every route that

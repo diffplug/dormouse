@@ -312,7 +312,10 @@ function checkPageHeadTags() {
     if (!rel.startsWith('website/src/pages/') || !/\.tsx$/.test(rel)) continue;
     const source = readRepoFile(rel);
     if (!/export \{[^}]*\bdefault\b[^}]*\} from/.test(source)) continue;
-    if (!/\bmeta\b/.test(source)) {
+    // An export, not the word: `\bmeta\b` also matched the comment above the
+    // re-export explaining why the export must be there, so deleting the export
+    // and keeping the comment passed. Both legitimate spellings count.
+    if (!/export function meta\b|export \{[^}]*\bmeta\b[^}]*\} from/.test(source)) {
       fail(`${rel}: re-exports a page component without meta(); the route would ship the fallback's head`);
     }
   }
