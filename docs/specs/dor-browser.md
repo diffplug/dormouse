@@ -365,7 +365,7 @@ only a launch without a published port fails, including after a zero exit;
 shutdown before its launch**, so a window whose page never loads is still
 closed. **Never query the daemon during the close/reopen gap** (rationale), host and controller
 park/recovery paths alike, so **Dormouse supplies the active-tab URL and the
-host trusts it**. Once `open` returns, only the latest relaunch best-effort
+host trusts it**. Once `open` returns, only a still-current relaunch best-effort
 closes stray `about:blank` tabs, **and only while a real page is open**, so it
 never closes the sole tab (rationale).
 

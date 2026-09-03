@@ -214,6 +214,48 @@ describe('agent-browser host relaunch', () => {
     }
   });
 
+  it('does not run a relaunch blank-tab sweep after the session is explicitly closed', async () => {
+    const session = 'dormouse.1.default';
+    const opened = deferred<SpawnResult>();
+    const explicitClose = deferred<SpawnResult>();
+    let closeCount = 0;
+    const calls = mockSpawnByCommand({
+      close: () => (++closeCount === 1 ? {} : explicitClose.promise),
+      '--headed open': () => opened.promise,
+      tab: () => ({
+        stdout: JSON.stringify({
+          tabs: [
+            { tabId: 'blank', url: 'about:blank', active: false },
+            { tabId: 'real', url: 'https://example.com/', active: true },
+          ],
+        }),
+      }),
+    });
+    const stale = await closedPort();
+    writeState(session, 'pid', DEAD_PID);
+    writeState(session, 'stream', stale);
+    const host = createAgentBrowserHost({ writeClipboardText: vi.fn() });
+    const popOut = host.popOut(session, { url: 'https://example.com/' });
+    await vi.waitFor(() => expect(calls.some((args) => args.includes('--headed'))).toBe(true));
+    const { port, server } = await listen();
+    try {
+      writeState(session, 'pid', DEAD_PID + 1);
+      writeState(session, 'stream', port);
+      expect(await popOut).toEqual({ ok: true, wsPort: port });
+
+      // Pane kill/render-swap enters command('close') and invalidates the
+      // relaunch tail synchronously, before the close queues behind open.
+      void host.command(session, ['close']);
+      await vi.waitFor(() => expect(closeCount).toBe(2));
+      opened.resolve({ code: 1, stderr: 'Operation timed out' });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(calls.some((args) => args.includes('tab'))).toBe(false);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it('open() treats a timed-out page load as a live launch, and a launch with no daemon as a failure', async () => {
     const host = createAgentBrowserHost({ writeClipboardText: vi.fn() });
     let session = '';

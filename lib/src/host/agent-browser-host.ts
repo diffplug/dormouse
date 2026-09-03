@@ -347,8 +347,8 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
   // tab. Best-effort: a failure here must not fail the pop-out/pop-in.
   async function closeStrayBlankTabs(
     session: string,
+    current: () => boolean,
     binaryPath?: string,
-    current: () => boolean = () => true,
   ): Promise<void> {
     if (!current()) return;
     const tabs = await listTabs(session, binaryPath);
@@ -442,8 +442,13 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
       return { exitCode: 1, stdout: '', stderr: `agent-browser get '${args[1] ?? ''}' is not allowed from the webview` };
     }
     // An explicit close (kill / render-swap) tears the session down itself, so
-    // it's no longer ours to clean up on shutdown.
-    if (subcommand === 'close') poppedOutSessions.delete(session);
+    // it's no longer ours to clean up on shutdown. It also invalidates a
+    // post-open sweep left by a fast-returning relaunch: once closed, no later
+    // daemon command may recreate this otherwise-untracked session.
+    if (subcommand === 'close') {
+      poppedOutSessions.delete(session);
+      relaunchGenerations.delete(session);
+    }
     return runWithBinaryFallback(['--session', session, ...args], binaryPath);
   }
 
@@ -636,7 +641,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     }
     const current = () => relaunchGenerations.get(session) === generation;
     void opened
-      .then(() => closeStrayBlankTabs(session, binaryPath, current))
+      .then(() => closeStrayBlankTabs(session, current, binaryPath))
       .catch(() => undefined)
       .finally(() => {
         if (current()) relaunchGenerations.delete(session);

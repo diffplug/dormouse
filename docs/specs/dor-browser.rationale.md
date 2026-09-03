@@ -60,7 +60,7 @@ The persisted `wsPort` mirror can lag the controller's already-live port after a
 
 **Why nothing may query the daemon during the close/reopen gap.** With the old daemon dead and the new one not yet up, a `stream status` or tab query spawns a *competing* daemon at `about:blank` — agent-browser's CLI starts one on demand — and the relaunch then races two daemons for the same session.
 
-A post-open blank-tab sweep can become such a query when a later relaunch starts before the earlier page finishes loading, so the host invalidates the earlier sweep as soon as the later close begins.
+A post-open blank-tab sweep can become such a query when a later relaunch or explicit Surface close starts before the earlier page finishes loading, so the host invalidates the sweep as soon as either close begins.
 
 **Why the stray-`about:blank` sweep is guarded.** The close/reopen pair can leave an extra blank tab beside the navigated one. Sweeping blanks unconditionally is the obvious fix and is wrong: a session whose only tab is legitimately blank would lose it, leaving the pane with nothing to show.
 
