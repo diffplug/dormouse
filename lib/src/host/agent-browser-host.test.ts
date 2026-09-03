@@ -186,11 +186,18 @@ describe('agent-browser host relaunch', () => {
         }),
       }),
     });
+    // Seed the daemon state that pop-out replaces. Wait until headed open has
+    // started before publishing the successor, so a slow CI runner cannot make
+    // killDaemon mistake the successor PID for the one it replaced.
+    const stale = await closedPort();
+    writeState(session, 'pid', DEAD_PID);
+    writeState(session, 'stream', stale);
     const host = createAgentBrowserHost({ writeClipboardText: vi.fn() });
     const popOut = host.popOut(session, { url: 'https://example.com/' });
+    await vi.waitFor(() => expect(calls.some((args) => args.includes('--headed'))).toBe(true));
     const { port, server } = await listen();
     try {
-      writeState(session, 'pid', DEAD_PID);
+      writeState(session, 'pid', DEAD_PID + 1);
       writeState(session, 'stream', port);
       expect(await popOut).toEqual({ ok: true, wsPort: port });
 
