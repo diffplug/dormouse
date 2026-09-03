@@ -10,7 +10,7 @@ generated from a source that lives next to the code it describes.
 /docs/dor           dor CLI reference
 /docs/agent-skill   exact bundled agent skill
 /docs/self-host     the SELF_HOST.md runbook, minus its withheld halves
-/docs/security      the security spec, published whole
+/docs/security      the security spec, every section of it
 ```
 
 `/docs` is an entrypoint rather than a page: it redirects to the page
@@ -569,7 +569,7 @@ spec.
 | --- | --- |
 | `vscode-ext/README.md` | The canonical product guide; published off-site, parsed here |
 | `SELF_HOST.md` | The self-host runbook and Installer contract; the runbook half is published |
-| `docs/specs/security.md` | The security spec, published whole at `/docs/security` |
+| `docs/specs/security.md` | The security spec; every section publishes, its rows split across three pages |
 | `vscode-ext/package.json` | Listing metadata and VS Code command inventory |
 | `README.md` | Repository and contributor entry point |
 | `vscode-ext/images/` | Guide media; the generator copies it to `public/guide/images/`, which the Marketplace listing loads from |

@@ -534,14 +534,6 @@ const buildSelfHost = () =>
   });
 
 /**
- * `/docs/security` from docs/specs/security.md, whole.
- *
- * The file stays canonical in `docs/specs/`: it is a spec, so
- * `scripts/spec-lint.mjs` budgets it and the nightly audit reads it. No
- * `canonicalUrl`, because the delta removes no section — the page is the spec,
- * which is the point of publishing it.
- */
-/**
  * Which page carries which of the security spec's rows and bullets.
  *
  * `/docs/security`, `/docs/self-host`, and `/supply-chain` each show the part
@@ -613,6 +605,16 @@ export function audienceBlocks(page, audiences, audience) {
   return page.blocks.map((block) => swap.get(block) ?? block);
 }
 
+/**
+ * `/docs/security` from docs/specs/security.md, every section of it.
+ *
+ * The file stays canonical in `docs/specs/`: it is a spec, so
+ * `scripts/spec-lint.mjs` budgets it and the nightly audit reads it. No
+ * `canonicalUrl`, because the delta removes no section — the page is the spec,
+ * which is the point of publishing it. `pageBlocks` is the same document with
+ * the three split blocks narrowed to the umbrella's own audience; `blocks`
+ * keeps every entry, for the two pages that render the other two audiences.
+ */
 const buildSecurity = async () => {
   const page = await buildDocument({
     file: 'docs/specs/security.md',

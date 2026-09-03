@@ -1,10 +1,13 @@
 /**
- * `/docs/security` — docs/specs/security.md, published whole.
+ * `/docs/security` — docs/specs/security.md, every section of it.
  *
  * The file is canonical in `docs/specs/`: it is a spec, budgeted by
  * `scripts/spec-lint.mjs` and read by the nightly audit that runs against it.
  * The generator's delta withholds only the `#` title and the front matter; see
- * docs/specs/website-docs.md -> `/docs/security` spec.
+ * docs/specs/website-docs.md -> `/docs/security` spec. The page renders
+ * `pageBlocks`, so the guarantees table and the two lists carry this audience's
+ * entries only — the other two are on `/docs/self-host` and `/supply-chain`,
+ * and the spec file on GitHub is where every entry appears together.
  */
 import { type MetaArgs } from "react-router";
 import { siteMeta } from "../lib/site-meta";

@@ -18,6 +18,11 @@ function renderMain(element: React.ReactElement): string {
   return main!;
 }
 
+/** Every anchor a page offers: the `id` of everything it renders in `<main>`. */
+function anchorsOf(element: React.ReactElement): string[] {
+  return [...renderMain(element).matchAll(/\sid="([^"]+)"/g)].map(([, id]) => id);
+}
+
 /**
  * The hrefs of a block tree's repository links — the ones that classified the
  * entry (`repoPath`), and the one thing a rendered row keeps verbatim. Site
@@ -64,6 +69,23 @@ describe("security-adjacent documentation", () => {
       for (const href of page.links) expect(main).toContain(`href="${href}"`);
     });
   }
+
+  // `assertRouteFragments` holds a fragment into a published page against that
+  // page's headings, but it walks the generated Markdown only — a link written
+  // in a page component is invisible to it, and these pages write three. So
+  // hold them against the anchors the page they name actually renders.
+  it("a fragment into one of these pages names an anchor that page renders", () => {
+    const anchors = new Map(PAGES.map((page) => [page.route, anchorsOf(page.element)]));
+    const crossPage = PAGES.flatMap((page) =>
+      [...renderMain(page.element).matchAll(/href="(\/[^"#]*)#([^"]+)"/g)]
+        .filter(([, route]) => anchors.has(route))
+        .map(([, route, fragment]) => ({ from: page.route, route, fragment })),
+    );
+    expect(crossPage.length).toBeGreaterThan(0);
+    for (const { from, route, fragment } of crossPage) {
+      expect(anchors.get(route), `${from} links ${route}#${fragment}`).toContain(fragment);
+    }
+  });
 });
 
 describe("audience pages", () => {
