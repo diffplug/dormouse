@@ -202,25 +202,23 @@ export default function SupplyChain() {
   return (
     <DocsLayout activePath="/supply-chain" toc={SUPPLY_CHAIN_TOC}>
       <p className="text-base text-[var(--color-text)]/70 mb-2">
-        Dormouse is a terminal, so users trust it with shells, source trees, credentials, and
-        local files. Our security procedures are documented in full — and audited nightly, and
-        immediately before every release — in the{" "}
-        <a href="/docs/security" className={link()}>
-          security spec
-        </a>
-        . Here is a summary:
+        This is the generated inventory of every runtime component Dormouse puts on a
+        user&apos;s machine. It is derived from the dependency graph and pinned bundled
+        runtime; CI rejects a production-dependency change whose refreshed disclosure is
+        missing.
       </p>
-      <ul className="text-base text-[var(--color-text)]/70 mb-2 list-disc space-y-1 pl-5">
-        <li>
-          We wait at least 24 hours before adopting any newly published dependency.
-        </li>
-        <li>
-          Signing and auto-update secrets for the Standalone app are stored offline, never in CI.
-        </li>
-        <li>
-          Publishing secrets for the VS Code extension are stored in CI locked by two separate maintainer accounts.
-        </li>
-      </ul>
+      <p className="text-base text-[var(--color-text)]/70 mb-2">
+        The{" "}
+        <a href="/docs/security#guarantees" className={link()}>
+          security page
+        </a>
+        {" "}explains the dependency cooldown and the release and audit controls behind
+        this disclosure. The coordinating server installed by the{" "}
+        <a href="/docs/self-host#what-the-installer-does" className={link()}>
+          self-host runbook
+        </a>
+        {" "}is included in this inventory.
+      </p>
 
       <p className="text-base text-[var(--color-text)]/70 mb-2">
         All bundled libraries are listed below. Thank you to every author and contributor.

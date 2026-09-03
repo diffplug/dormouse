@@ -258,6 +258,10 @@ navigation rail, an `h1` and intro, and prev/next. The changelog and the supply
 chain are in that list too — a reader meets them the same way, as long-form
 material reached from the rail rather than from the marketing nav.
 
+**Must cross-link `/docs/security`, `/supply-chain`, and `/docs/self-host` within
+their prose**, not only through the rail. `website/src/pages/security-pages.test.tsx`
+pins both outbound links per page.
+
 **The rail is the only table of contents.** It lists every page and expands the
 current one's sections beneath it, so moving between pages and within one is
 the same control. A second "on this page" would restate half of it.
@@ -399,9 +403,8 @@ owns this: a rule matching nothing fails the build naming the rule, so a
 renamed section is a decision rather than a silent republication of what the
 delta meant to hold back.
 
-The page carries one authored paragraph the source does not: a pointer to
-running the runbook with an assistant. It belongs to the page because it is
-advice about reading this document here.
+The page adds a security summary linked to its canonical page and disclosure,
+plus advice to run this document with an assistant.
 
 ## `/docs/security` spec
 
@@ -417,10 +420,8 @@ carry no `## Future` heading and no `Reserved:` paragraph**; `checkSecurityFold`
 pins that, and staged material has to be withheld by a delta rule before it can
 exist in the file.
 
-The page carries one authored paragraph the source does not: that this is the
-spec the audit runs against, and that the four domain specs it links live
-beside it. Those four are not published, and reach the reader as GitHub links
-like every other repository link on the page.
+The page's authored callout identifies it as audited, links the public runbook
+and disclosure, and sends its unpublished domain specs to GitHub.
 
 ## Generated documentation boundary
 

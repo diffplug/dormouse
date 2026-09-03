@@ -38,6 +38,14 @@ export default function SecurityDocs() {
         <a href={SPECS_URL} className={LINK_CLASS} target="_blank" rel="noopener noreferrer">
           the specs directory on GitHub
         </a>
+        . To put the model into operation, follow the{" "}
+        <a href="/docs/self-host" className={LINK_CLASS}>
+          self-host runbook
+        </a>
+        ; to inspect exactly what Dormouse installs, use the{" "}
+        <a href="/supply-chain" className={LINK_CLASS}>
+          generated supply-chain disclosure
+        </a>
         .
       </p>
 

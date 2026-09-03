@@ -142,14 +142,18 @@ describe('security spec', () => {
     ]);
   });
 
-  it('sends its links into the repository to the canonical file', () => {
-    // The spec links its neighbours the way GitHub resolves them; published,
-    // those paths address nothing.
+  it('sends internal specs to GitHub and self-host links to the public runbook', () => {
+    // The audited domain specs stay repository links; the runbook has a public
+    // route, so its canonical site URLs must remain beside this rendered page.
     expect(data.security.repoLinks.length).toBeGreaterThan(0);
     for (const { to } of data.security.repoLinks) expect(to.startsWith(REPO_BLOB_BASE)).toBe(true);
-    expect(data.security.repoLinks).toContainEqual({
-      from: '../../SELF_HOST.md',
-      to: `${REPO_BLOB_BASE}/SELF_HOST.md`,
+    expect(data.security.localizedLinks).toContainEqual({
+      from: 'https://dormouse.sh/docs/self-host',
+      to: '/docs/self-host',
+    });
+    expect(data.security.localizedLinks).toContainEqual({
+      from: 'https://dormouse.sh/docs/self-host#keeping-the-relay-up-while-the-laptop-sleeps',
+      to: '/docs/self-host#keeping-the-relay-up-while-the-laptop-sleeps',
     });
   });
 
