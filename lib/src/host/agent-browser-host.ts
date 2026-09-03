@@ -679,6 +679,10 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
   async function closePoppedOut(): Promise<void> {
     const entries = [...poppedOutSessions.entries()];
     poppedOutSessions.clear();
+    // Shutdown owns every session now, including a headless pop-in that has
+    // already left poppedOutSessions. Invalidate all post-open tails before a
+    // close can release their pending `open` commands and let them query again.
+    relaunchGenerations.clear();
     await Promise.all([
       ...entries.map(([session, binaryPath]) =>
         runWithBinaryFallback(['--session', session, 'close'], binaryPath).catch(() => undefined),

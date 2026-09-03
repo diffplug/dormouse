@@ -371,8 +371,8 @@ never closes the sole tab (rationale).
 
 While popped out, Dormouse keeps a stream/CDP observer so URL/header state
 follows same-tab navigation and a headed window close can auto-revert to
-headless. **Hosts must close tracked popped-out sessions on shutdown** to avoid
-orphan headed windows.
+headless. **Hosts must cancel pending relaunch sweeps before closing popped-out
+sessions on shutdown**.
 
 Source of truth: `lib/src/components/wall/agent-browser-surface-controller.ts` (pop-out state, CDP
 observer, auto-revert), `lib/src/host/agent-browser-host.ts` (`popOut`, `popIn`,
