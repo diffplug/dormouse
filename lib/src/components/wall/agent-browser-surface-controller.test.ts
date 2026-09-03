@@ -375,6 +375,34 @@ describe('updateParams', () => {
     expect(sink.updateParameters.mock.calls.length).toBe(writesBefore);
     expect(streamSockets(1111).length).toBe(1);
   });
+
+  it('reconciles a changed session when its params port already matches the live port', async () => {
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand' | 'agentBrowserPopOut'>;
+    platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
+    platform.agentBrowserPopOut = vi.fn(async () => ({ ok: true, wsPort: 2222 }));
+    setPlatform(platform);
+
+    const controller = acquireAgentBrowserSurfaceController('id', { session: 'old-session', wsPort: 1111 });
+    controller.attachView(makeSink());
+    await flushMicrotasks();
+
+    // The relaunch adopts 2222 immediately, but params.wsPort remains 1111
+    // until the view's buffered write echoes back through updateParams.
+    getAgentBrowserScreenController('id')?.actions.setRenderMode?.('ab-popout');
+    await flushMicrotasks();
+    const oldSessionSocket = streamSocket(2222);
+    expect(oldSessionSocket?.readyState).toBe(1);
+    expect(streamSockets(2222)).toHaveLength(1);
+
+    // The echo also hands over a new session. Since 2222 is already the live
+    // port, setStreamPort no-ops; session reconciliation must still replace the
+    // old-session connection with one keyed to new-session.
+    controller.updateParams({ session: 'new-session', wsPort: 2222 });
+    await flushMicrotasks();
+
+    expect(oldSessionSocket?.readyState).toBe(3);
+    expect(streamSockets(2222)).toHaveLength(2);
+  });
 });
 
 describe('stale-port recovery gating', () => {
@@ -518,5 +546,144 @@ describe('dispose', () => {
     expect(socket?.readyState).toBe(3);
     expect(getAgentBrowserScreenController('id')).toBeNull();
     expect(getAgentBrowserSurfaceController('id')).toBeNull();
+  });
+});
+
+describe('relaunch (pop-out / pop-in)', () => {
+  type RelaunchPlatform = FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand' | 'agentBrowserPopOut' | 'agentBrowserPopIn' | 'agentBrowserStreamStatus'>;
+  function relaunchPlatform(): RelaunchPlatform & { resolvePopOut: (res: { ok: boolean; wsPort?: number }) => void } {
+    const platform = new FakePtyAdapter() as RelaunchPlatform;
+    let resolvePopOut!: (res: { ok: boolean; wsPort?: number }) => void;
+    platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
+    platform.agentBrowserStreamStatus = vi.fn(async () => ({ ok: true, wsPort: 9999 }));
+    platform.agentBrowserPopOut = vi.fn(() => new Promise<{ ok: boolean; wsPort?: number }>((r) => { resolvePopOut = r; }));
+    platform.agentBrowserPopIn = vi.fn(async () => ({ ok: true, wsPort: 5555 }));
+    setPlatform(platform);
+    return Object.assign(platform, { resolvePopOut: (res: { ok: boolean; wsPort?: number }) => resolvePopOut(res) });
+  }
+
+  it('drops the stream up front and connects to the host\'s port only once the relaunch ends', async () => {
+    const platform = relaunchPlatform();
+    const controller = acquireAgentBrowserSurfaceController('id', { session: 'sess', wsPort: 1111 });
+    const sink = makeSink();
+    controller.attachView(sink);
+    await flushMicrotasks();
+    const old = streamSocket(1111);
+    expect(old?.readyState).toBe(1);
+
+    getAgentBrowserScreenController('id')?.actions.setRenderMode?.('ab-popout');
+    await flushMicrotasks();
+    // The host is about to close this browser and kill its daemon: the old
+    // socket is released now rather than left to fail into "ended"/recovery.
+    expect(old?.readyState).toBe(3);
+    expect(controller.snapshot().relaunching).toBe(true);
+    expect(controller.snapshot().poppedOut).toBe(true);
+    // No daemon command while the relaunch is in flight: not even the popped-out
+    // CDP observer's `get cdp-url`.
+    expect(platform.agentBrowserCommand).not.toHaveBeenCalledWith('sess', ['get', 'cdp-url'], undefined);
+
+    platform.resolvePopOut({ ok: true, wsPort: 3456 });
+    await flushMicrotasks();
+    expect(controller.snapshot().relaunching).toBe(false);
+    expect(streamSockets(3456).length).toBe(1);
+    expect(streamSockets(1111).length).toBe(1);
+    expect(platform.agentBrowserCommand).toHaveBeenCalledWith('sess', ['get', 'cdp-url'], undefined);
+    expect(platform.agentBrowserStreamStatus).not.toHaveBeenCalled();
+  });
+
+  it('ignores a second pop-out or pop-in while one is in flight', async () => {
+    const platform = relaunchPlatform();
+    const controller = acquireAgentBrowserSurfaceController('id', { session: 'sess', wsPort: 1111 });
+    controller.attachView(makeSink());
+    await flushMicrotasks();
+
+    getAgentBrowserScreenController('id')?.actions.setRenderMode?.('ab-popout');
+    controller.popIn();
+    getAgentBrowserScreenController('id')?.actions.setRenderMode?.('ab-popout');
+    await flushMicrotasks();
+
+    expect(platform.agentBrowserPopOut).toHaveBeenCalledTimes(1);
+    expect(platform.agentBrowserPopIn).not.toHaveBeenCalled();
+    expect(controller.snapshot().poppedOut).toBe(true);
+
+    platform.resolvePopOut({ ok: true, wsPort: 3456 });
+    await flushMicrotasks();
+    controller.popIn();
+    expect(platform.agentBrowserPopIn).toHaveBeenCalledTimes(1);
+  });
+
+  it('pop-in on a session-less popped-out pane is a no-op', async () => {
+    const platform = relaunchPlatform();
+    const controller = acquireAgentBrowserSurfaceController('id', { renderMode: 'ab-popout' });
+    const sink = makeSink();
+    controller.attachView(sink);
+    await flushMicrotasks();
+
+    controller.popIn();
+    expect(platform.agentBrowserPopIn).not.toHaveBeenCalled();
+    expect(controller.snapshot().poppedOut).toBe(true);
+    expect(sink.updateParameters).not.toHaveBeenCalledWith({ renderMode: 'ab-screencast' });
+  });
+
+  it('a relaunch carries the URL the stream committed, not the one the last tabs snapshot reported', async () => {
+    const platform = relaunchPlatform();
+    const controller = acquireAgentBrowserSurfaceController('id', { session: 'sess', wsPort: 1111, url: 'https://before.example/' });
+    const sink = makeSink();
+    controller.attachView(sink);
+    await flushMicrotasks();
+    const socket = streamSocket(1111);
+    socket?.emitMessage(JSON.stringify({
+      type: 'tabs',
+      tabs: [{ tabId: 't1', title: 'Before', url: 'https://before.example/', active: true }],
+    }));
+    // A navigation commits to a page that is still loading: `tabs` will not
+    // refresh until the load completes.
+    socket?.emitMessage(JSON.stringify({ type: 'url', url: 'https://slow.example/' }));
+    expect(getAgentBrowserScreenController('id')?.chrome().url).toBe('https://slow.example/');
+    expect(getAgentBrowserScreenController('id')?.chrome().title).toBeNull();
+    expect(sink.updateParameters).toHaveBeenCalledWith({ url: 'https://slow.example/' });
+
+    getAgentBrowserScreenController('id')?.actions.setRenderMode?.('ab-popout');
+    expect(platform.agentBrowserPopOut).toHaveBeenCalledWith('sess', expect.objectContaining({ url: 'https://slow.example/' }), undefined);
+  });
+
+  it('clears a stale title when navigation commits at the same URL', async () => {
+    const controller = acquireAgentBrowserSurfaceController('id', {
+      session: 'sess', wsPort: 1111, url: 'https://same.example/',
+    });
+    const sink = makeSink();
+    controller.attachView(sink);
+    await flushMicrotasks();
+    const socket = streamSocket(1111);
+    socket?.emitMessage(JSON.stringify({
+      type: 'tabs',
+      tabs: [{ tabId: 't1', title: 'Before reload', url: 'https://same.example/', active: true }],
+    }));
+    expect(getAgentBrowserScreenController('id')?.chrome().title).toBe('Before reload');
+
+    socket?.emitMessage(JSON.stringify({ type: 'url', url: 'https://same.example/' }));
+
+    expect(getAgentBrowserScreenController('id')?.chrome()).toMatchObject({
+      url: 'https://same.example/',
+      title: null,
+    });
+    expect(sink.setTitle).toHaveBeenLastCalledWith('same.example');
+    const titleWrites = sink.setTitle.mock.calls.length;
+
+    socket?.emitMessage(JSON.stringify({ type: 'url', url: 'https://same.example/' }));
+    expect(sink.setTitle).toHaveBeenCalledTimes(titleWrites);
+  });
+
+  it('a single {session, wsPort} handover connects once and asks the daemon nothing', async () => {
+    const platform = relaunchPlatform();
+    const controller = acquireAgentBrowserSurfaceController('id', { renderMode: 'ab-screencast', url: 'https://x.example/' });
+    controller.attachView(makeSink());
+    await flushMicrotasks();
+    expect(WebSocketMock.instances.length).toBe(0);
+
+    controller.updateParams({ session: 'sess', wsPort: 4321, url: 'https://x.example/' });
+    await flushMicrotasks();
+    expect(streamSockets(4321).length).toBe(1);
+    expect(platform.agentBrowserStreamStatus).not.toHaveBeenCalled();
   });
 });

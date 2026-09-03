@@ -43,6 +43,17 @@ afterEach(() => {
 });
 
 describe('agent-browser connection', () => {
+  it('forwards the stream\'s url message as a navigation event', async () => {
+    const connection = createAgentBrowserConnection({ session: 's', streamPort: 1234 });
+    const events: unknown[] = [];
+    connection.subscribe((event) => { if (event.type === 'url') events.push(event); });
+    await Promise.resolve();
+    WebSocketMock.instances[0].emitMessage(JSON.stringify({ type: 'url', url: 'https://example.com/slow', timestamp: 1 }));
+    WebSocketMock.instances[0].emitMessage(JSON.stringify({ type: 'url' }));
+    expect(events).toEqual([{ type: 'url', url: 'https://example.com/slow' }]);
+    connection.dispose();
+  });
+
   it('closes the stream websocket when disposed', async () => {
     const connection = createAgentBrowserConnection({
       session: 'dormouse.1.default',
@@ -196,6 +207,27 @@ describe('agent-browser connection', () => {
     expect(connection.snapshot().tabs).toHaveLength(80);
     expect(tabsEventCounts).toEqual([80]);
     expect(connection.snapshot().tabs[0]).toMatchObject({ tabId: 't0', active: true });
+  });
+
+  it('routes an oversized URL envelope as control data instead of a frame pulse', async () => {
+    const connection = createAgentBrowserConnection({
+      session: 'dormouse.1.default',
+      streamPort: 1234,
+    });
+    const events: unknown[] = [];
+    connection.subscribe((event) => {
+      if (event.type === 'url' || event.type === 'frame-pulse') events.push(event);
+    });
+
+    await Promise.resolve();
+    const url = `data:text/plain,${'x'.repeat(20_000)}`;
+    const payload = JSON.stringify({ type: 'url', url, timestamp: 1 });
+    expect(payload.length).toBeGreaterThan(16384);
+
+    WebSocketMock.instances[0].emitMessage(payload);
+
+    expect(events).toEqual([{ type: 'url', url }]);
+    connection.dispose();
   });
 
   it('re-primes after a reconnect so the first identical frame/tabs still forwards', async () => {

@@ -36,6 +36,7 @@
  * concern (the standalone webview's `tauri://localhost` origin is accepted, so
  * it connects directly). It stays in the VS Code host.
  */
+import * as net from 'net';
 import * as os from 'os';
 import * as path from 'path';
 import { promises as fs, rmSync } from 'fs';
@@ -79,6 +80,10 @@ const EDIT_SCRIPTS: Record<AgentBrowserEditOp, string> = {
 
 const STREAM_PORT_READ_ATTEMPTS = 4;
 const STREAM_PORT_READ_DELAY_MS = 150;
+// How often a launch re-reads the daemon's state files while `open` is still
+// waiting on the page (docs/specs/dor-browser.md → "Pop-Out").
+const LAUNCH_POLL_MS = 100;
+const PORT_PROBE_TIMEOUT_MS = 500;
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 export interface AgentBrowserHostDeps {
@@ -117,6 +122,17 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
   // Headless sessions are deliberately NOT tracked — they're left alive to
   // reattach across webview reloads (the wsPort/stream-recovery design).
   const poppedOutSessions = new Map<string, string | undefined>();
+  // A relaunch returns once the daemon is streamable, while its `open` command
+  // may remain pending until page load. Key the post-open blank-tab sweep so a
+  // later pop-in/pop-out invalidates every command left behind by the previous
+  // relaunch before starting its own close -> kill -> reopen gap.
+  const relaunchGenerations = new Map<string, number>();
+  let nextRelaunchGeneration = 0;
+  function beginRelaunch(session: string): number {
+    const generation = ++nextRelaunchGeneration;
+    relaunchGenerations.set(session, generation);
+    return generation;
+  }
 
   // The host's PATH is often the GUI login PATH (no nvm/volta shims), so prefer
   // the absolute path `dor ab` resolved in the user's terminal; fall through on
@@ -223,19 +239,39 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     return process.env.AGENT_BROWSER_SOCKET_DIR || path.join(os.homedir(), '.agent-browser');
   }
 
-  async function killDaemon(session: string): Promise<void> {
-    const pidFile = path.join(agentBrowserStateDir(), `${session}.pid`);
-    let pid: number;
+  // The daemon's state files beside its socket: `<session>.pid` and
+  // `<session>.stream` (the stream server's port, written as the daemon comes
+  // up — ~100ms into a launch, long before the page loads). Neither is cleaned
+  // up when the daemon is killed, so a reader must know which daemon wrote it.
+  async function readStateNumber(session: string, ext: 'pid' | 'stream'): Promise<number | undefined> {
     try {
-      pid = Number.parseInt((await fs.readFile(pidFile, 'utf8')).trim(), 10);
+      const value = Number.parseInt((await fs.readFile(path.join(agentBrowserStateDir(), `${session}.${ext}`), 'utf8')).trim(), 10);
+      return Number.isInteger(value) && value > 0 ? value : undefined;
     } catch {
-      return; // no pid file — nothing to kill (already gone, or custom dir)
+      return undefined; // absent (no daemon yet, custom dir, or an older CLI)
     }
-    if (!Number.isInteger(pid) || pid <= 0) return;
+  }
+
+  function portAccepts(port: number): Promise<boolean> {
+    return new Promise((resolve) => {
+      const socket = net.connect({ host: '127.0.0.1', port });
+      const settle = (accepted: boolean) => { socket.destroy(); resolve(accepted); };
+      socket.once('connect', () => settle(true));
+      socket.once('error', () => settle(false));
+      socket.setTimeout(PORT_PROBE_TIMEOUT_MS, () => settle(false));
+    });
+  }
+
+  /** Terminate the session's daemon and wait for it to exit. Returns the pid
+   *  the pid file named (dead or not), so a relaunch can tell the daemon that
+   *  replaces it from the stale state files it leaves behind. */
+  async function killDaemon(session: string): Promise<number | undefined> {
+    const pid = await readStateNumber(session, 'pid');
+    if (pid === undefined) return undefined; // no pid file — nothing to kill (already gone, or custom dir)
     try {
       process.kill(pid, 'SIGTERM');
     } catch {
-      return; // ESRCH: already dead
+      return pid; // ESRCH: already dead
     }
     // Wait for the process to actually exit (signal 0 throws once it's gone), so
     // the relaunch doesn't race a daemon that's still shutting down.
@@ -244,23 +280,86 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
         process.kill(pid, 0);
       } catch {
         log(`[ab-relaunch] daemon ${pid} for ${session} exited after ${i * 50}ms`);
-        return;
+        return pid;
       }
       await delay(50);
     }
     log(`[ab-relaunch] daemon ${pid} for ${session} still alive after 2s; SIGKILL`);
     try { process.kill(pid, 'SIGKILL'); } catch { /* ignore */ }
+    return pid;
+  }
+
+  // `agent-browser open <url>` returns when the page's `load` event fires — up to
+  // the CLI's action timeout (25s in 0.31.1), after which it exits non-zero with
+  // the browser live on the page — and every other daemon command queues behind
+  // it. A transition that awaited it would block for the whole page load and
+  // then read a slow page as a failed launch. So the launch resolves as soon as
+  // the *daemon* is up: its pid file names a pid other than the one a relaunch
+  // just killed, and its stream file names a port that accepts a connection. The
+  // stream serves status/tabs/frames while `open` is still waiting, so the pane
+  // shows the page loading. Only once `open` has returned does the exit code
+  // matter, and then only if no daemon came up at all.
+  type Launch = {
+    wsPort: number | undefined;
+    /** Settles when `open` itself returns — possibly long after the launch. */
+    opened: Promise<AgentBrowserCommandResult>;
+  };
+  async function launch(session: string, args: string[], binaryPath: string | undefined, replacedPid?: number): Promise<Launch> {
+    let settled: AgentBrowserCommandResult | undefined;
+    const opened = runWithBinaryFallback(args, binaryPath).then((result) => {
+      settled = result;
+      return result;
+    });
+    for (;;) {
+      const pid = await readStateNumber(session, 'pid');
+      const daemonUp = pid !== undefined && pid !== replacedPid;
+      if (settled) {
+        // A non-zero exit with the daemon up is a page that has not finished
+        // loading, not a failed launch. Without a pid file (an older CLI) the
+        // exit code is all there is.
+        if (settled.exitCode !== 0 && !daemonUp) return { wsPort: undefined, opened };
+        return { wsPort: await readStreamPort(session, binaryPath), opened };
+      }
+      if (daemonUp) {
+        const port = await readStateNumber(session, 'stream');
+        if (port !== undefined && await portAccepts(port)) return { wsPort: port, opened };
+      }
+      await delay(LAUNCH_POLL_MS);
+    }
+  }
+
+  function logOpened(label: string, opened: Promise<AgentBrowserCommandResult>): void {
+    void opened.then((result) => {
+      log(`[ab-relaunch] ${label} exit=${result.exitCode}${result.stderr.trim() ? ` stderr=${result.stderr.trim()}` : ''}`);
+    });
+  }
+
+  function launchFailure(label: string, result: AgentBrowserCommandResult): string {
+    const stderr = result.stderr.trim();
+    if (stderr) return stderr;
+    return result.exitCode === 0
+      ? `${label} published no stream port`
+      : `${label} exited ${result.exitCode}`;
   }
 
   // After a relaunch, close any stray about:blank tab the close+reopen race can
   // leave behind — but only when a real page is open, so we never close the sole
   // tab. Best-effort: a failure here must not fail the pop-out/pop-in.
-  async function closeStrayBlankTabs(session: string, binaryPath?: string): Promise<void> {
+  async function closeStrayBlankTabs(
+    session: string,
+    current: () => boolean,
+    binaryPath?: string,
+  ): Promise<void> {
+    if (!current()) return;
     const tabs = await listTabs(session, binaryPath);
+    // The list may have queued behind `open`; a newer relaunch can begin while
+    // it waits. Never issue a tab close into that relaunch's daemon gap.
+    if (!current()) return;
     log(`[ab-relaunch] tabs after open: ${JSON.stringify(tabs)}`);
     if (tabs.length < 2 || !tabs.some((t) => usableRelaunchUrl(t.url))) return;
     for (const tab of tabs) {
       if (!usableRelaunchUrl(tab.url)) {
+        if (!current()) return;
         log(`[ab-relaunch] closing stray blank tab ${tab.tabId}`);
         await runWithBinaryFallback(['--session', session, 'tab', 'close', tab.tabId], binaryPath);
       }
@@ -343,8 +442,13 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
       return { exitCode: 1, stdout: '', stderr: `agent-browser get '${args[1] ?? ''}' is not allowed from the webview` };
     }
     // An explicit close (kill / render-swap) tears the session down itself, so
-    // it's no longer ours to clean up on shutdown.
-    if (subcommand === 'close') poppedOutSessions.delete(session);
+    // it's no longer ours to clean up on shutdown. It also invalidates a
+    // post-open sweep left by a fast-returning relaunch: once closed, no later
+    // daemon command may recreate this otherwise-untracked session.
+    if (subcommand === 'close') {
+      poppedOutSessions.delete(session);
+      relaunchGenerations.delete(session);
+    }
     return runWithBinaryFallback(['--session', session, ...args], binaryPath);
   }
 
@@ -473,14 +577,21 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     if (typeof url !== 'string' || !url) return { ok: false, error: 'url is required' };
     const session = generateGuiSession();
     const args = ['--session', session, ...(opts?.headed ? ['--headed'] : []), 'open', url];
-    const opened = await runWithBinaryFallback(args, binaryPath);
-    if (opened.exitCode !== 0) {
-      return { ok: false, error: opened.stderr.trim() || `open exited ${opened.exitCode}` };
-    }
-    // A headed spawn is a real OS window — track it so shutdown can close it.
+    // A headed spawn is a real OS window — track it before the launch so a
+    // window whose page never finishes loading is still closed on shutdown.
     if (opts?.headed) poppedOutSessions.set(session, binaryPath);
-    const wsPort = await readStreamPort(session, binaryPath);
-    return { ok: true, session, ...(wsPort ? { wsPort } : {}), ...(binaryPath ? { binaryPath } : {}) };
+    const { wsPort, opened } = await launch(session, args, binaryPath);
+    logOpened(`open session=${session}`, opened);
+    if (wsPort === undefined) {
+      poppedOutSessions.delete(session);
+      // Nothing came up to bind a surface to. Close whatever did, so a
+      // half-launched browser does not outlive the swap it was spawned for
+      // (a no-op when there is no daemon — `close` starts none).
+      await runWithBinaryFallback(['--session', session, 'close'], binaryPath);
+      const failed = await opened;
+      return { ok: false, error: launchFailure('open', failed) };
+    }
+    return { ok: true, session, wsPort, ...(binaryPath ? { binaryPath } : {}) };
   }
 
   // Pop-out is a relaunch, not a live toggle: Chrome's headed/headless choice is
@@ -495,23 +606,48 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     binaryPath?: string,
   ): Promise<AgentBrowserPopResult> {
     if (typeof session !== 'string' || !session) return { ok: false, error: 'session is required' };
+    const generation = beginRelaunch(session);
     const url = relaunchUrl(opts?.url);
     log(`[ab-relaunch] popOut session=${session} requestedUrl=${JSON.stringify(opts?.url)} -> open ${url}`);
     // Close the browser, then fully stop the daemon so the headed relaunch isn't
     // ignored as "daemon already running" (which would leave it headless).
     await runWithBinaryFallback(['--session', session, 'close'], binaryPath);
-    await killDaemon(session);
-    const opened = await runWithBinaryFallback(['--session', session, '--headed', 'open', url], binaryPath);
-    log(`[ab-relaunch] popOut headed-open exit=${opened.exitCode}${opened.stderr.trim() ? ` stderr=${opened.stderr.trim()}` : ''}`);
-    if (opened.exitCode !== 0) {
-      return { ok: false, error: opened.stderr.trim() || `headed open exited ${opened.exitCode}` };
-    }
-    // Now a real headed OS window — track it so shutdown can close it.
+    const replacedPid = await killDaemon(session);
+    // A real headed OS window from here on — track it before the launch so
+    // shutdown closes it even if its page never finishes loading.
     poppedOutSessions.set(session, binaryPath);
-    await closeStrayBlankTabs(session, binaryPath);
-    const wsPort = await readStreamPort(session, binaryPath);
-    log(`[ab-relaunch] popOut returning wsPort=${wsPort}`);
-    return { ok: true, ...(wsPort ? { wsPort } : {}) };
+    return relaunch('popOut', session, ['--session', session, '--headed', 'open', url], binaryPath, replacedPid, generation);
+  }
+
+  // Shared tail of pop-out/pop-in: launch, and once `open` itself returns —
+  // possibly well after the pane is already streaming — sweep the stray blank
+  // tab the close+reopen can leave (a daemon command, so it must not run while
+  // `open` still holds the queue). A launch that never published a port is the
+  // one failure: the exit code alone is not.
+  async function relaunch(
+    label: string,
+    session: string,
+    args: string[],
+    binaryPath: string | undefined,
+    replacedPid: number | undefined,
+    generation: number,
+  ): Promise<AgentBrowserPopResult> {
+    const { wsPort, opened } = await launch(session, args, binaryPath, replacedPid);
+    logOpened(`${label} open`, opened);
+    if (wsPort === undefined) {
+      if (relaunchGenerations.get(session) === generation) relaunchGenerations.delete(session);
+      const failed = await opened;
+      return { ok: false, error: launchFailure(`${label} open`, failed) };
+    }
+    const current = () => relaunchGenerations.get(session) === generation;
+    void opened
+      .then(() => closeStrayBlankTabs(session, current, binaryPath))
+      .catch(() => undefined)
+      .finally(() => {
+        if (current()) relaunchGenerations.delete(session);
+      });
+    log(`[ab-relaunch] ${label} returning wsPort=${wsPort}`);
+    return { ok: true, wsPort };
   }
 
   // The reverse: close the headed session and relaunch it headless at the active
@@ -522,23 +658,16 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     binaryPath?: string,
   ): Promise<AgentBrowserPopResult> {
     if (typeof session !== 'string' || !session) return { ok: false, error: 'session is required' };
+    const generation = beginRelaunch(session);
     const url = relaunchUrl(opts?.url);
     log(`[ab-relaunch] popIn session=${session} requestedUrl=${JSON.stringify(opts?.url)} -> open ${url}`);
     // Reverse of pop-out: the daemon is headed, so a plain `open` would reattach
     // to it and stay headed. Stop the daemon so the relaunch comes up headless.
     await runWithBinaryFallback(['--session', session, 'close'], binaryPath);
-    await killDaemon(session);
+    const replacedPid = await killDaemon(session);
     // The headed window is gone after the close above; back to headless.
     poppedOutSessions.delete(session);
-    const opened = await runWithBinaryFallback(['--session', session, 'open', url], binaryPath);
-    log(`[ab-relaunch] popIn open exit=${opened.exitCode}${opened.stderr.trim() ? ` stderr=${opened.stderr.trim()}` : ''}`);
-    if (opened.exitCode !== 0) {
-      return { ok: false, error: opened.stderr.trim() || `open exited ${opened.exitCode}` };
-    }
-    await closeStrayBlankTabs(session, binaryPath);
-    const wsPort = await readStreamPort(session, binaryPath);
-    log(`[ab-relaunch] popIn returning wsPort=${wsPort}`);
-    return { ok: true, ...(wsPort ? { wsPort } : {}) };
+    return relaunch('popIn', session, ['--session', session, 'open', url], binaryPath, replacedPid, generation);
   }
 
   // Close every still-popped-out session's headed window. Called from each
@@ -550,6 +679,10 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
   async function closePoppedOut(): Promise<void> {
     const entries = [...poppedOutSessions.entries()];
     poppedOutSessions.clear();
+    // Shutdown owns every session now, including a headless pop-in that has
+    // already left poppedOutSessions. Invalidate all post-open tails before a
+    // close can release their pending `open` commands and let them query again.
+    relaunchGenerations.clear();
     await Promise.all([
       ...entries.map(([session, binaryPath]) =>
         runWithBinaryFallback(['--session', session, 'close'], binaryPath).catch(() => undefined),

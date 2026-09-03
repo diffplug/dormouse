@@ -392,7 +392,13 @@ export function useDorControl({
   revealSurface: (id: string) => void;
   /** The last binary path a `dor ab` surface resolved on a terminal's PATH. */
   lastAgentBrowserBinaryPathRef: MutableRefObject<string | undefined>;
-}): { connectPort: (id: string, url: string) => Promise<void> } {
+}): {
+  connectPort: (id: string, url: string) => Promise<void>;
+  /** Fold a params patch onto a surface (visible pane or minimized door) — the
+   *  one write path a background daemon boot uses to hand a session-less pane
+   *  its `{session, wsPort, binaryPath}`. */
+  updateSurfaceParams: (id: string, patch: Record<string, unknown>) => void;
+} {
   const resolveVisibleSurface = useCallback((
     target: string | undefined,
     callerSurfaceId: string | undefined,
@@ -1096,5 +1102,5 @@ export function useDorControl({
     return () => window.removeEventListener('dormouse:control-request', handler);
   }, [buildDorSurfaces, buildDorSurfaceList, createContentSurface, createSplitSurface, ensureAgentBrowserSurface, findSurfaceIdRunningCommand, killPaneImmediately, requireBrowserSurface, requireListedSurface, requireTerminalSurface, resolveListedSurface, resolveVisibleSurface, surfaceRefForId, lath, nav]);
 
-  return { connectPort };
+  return { connectPort, updateSurfaceParams };
 }

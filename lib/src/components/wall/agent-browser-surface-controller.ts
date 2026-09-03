@@ -168,6 +168,10 @@ export interface AgentBrowserViewSnapshot {
   connectionLost: boolean;
   hasFrame: boolean;
   poppedOut: boolean;
+  /** A headed↔headless relaunch is in flight: the old stream is gone by design
+   *  and the new one is not yet known, so the view shows neither "ended" nor
+   *  a pop-in/pop-out affordance. */
+  relaunching: boolean;
   streamPort: number | undefined;
 }
 
@@ -212,10 +216,13 @@ export class AgentBrowserSurfaceController {
   // Gate auto-revert: only treat a dropped stream as "window closed" once the
   // headed stream has actually connected (avoids reverting mid-relaunch).
   private headedConnected = false;
-  // True while a headed↔headless relaunch is in flight. The relaunch closes the
-  // current stream before reopening on a new port, so that expected drop must
-  // not be read as "the headed window closed" (it would auto-revert mid-pop-out)
-  // nor trigger stale-port recovery (which could spawn a competing daemon).
+  // True while a headed↔headless relaunch is in flight. The host closes the
+  // current browser and kills its daemon before reopening on a new port, so the
+  // connection is dropped up front (reconcileConnection) rather than left to
+  // fail: its close would otherwise read as "the headed window closed" (an
+  // auto-revert mid-pop-out) or as a stale port (a recovery `stream status`
+  // that spawns a competing daemon — the daemon is deliberately not up). The
+  // CDP observer waits for the same reason. The host hands back the port.
   private relaunching = false;
 
   // --- visibility / parking ---
@@ -379,6 +386,7 @@ export class AgentBrowserSurfaceController {
       connectionLost: this.connectionLost,
       hasFrame: this.hasFrame,
       poppedOut: this.poppedOut,
+      relaunching: this.relaunching,
       streamPort: this.streamPort,
     };
   }
@@ -393,6 +401,7 @@ export class AgentBrowserSurfaceController {
       prev.connectionLost === this.connectionLost &&
       prev.hasFrame === this.hasFrame &&
       prev.poppedOut === this.poppedOut &&
+      prev.relaunching === this.relaunching &&
       prev.streamPort === this.streamPort
     ) return;
     this.viewSnapshot = this.buildViewSnapshot();
@@ -541,23 +550,42 @@ export class AgentBrowserSurfaceController {
 
   updateParams(params: AgentBrowserSurfaceParams): void {
     if (this.disposed) return;
+    // Mirror every field first, then reconcile once: `{session, wsPort,
+    // binaryPath}` lands as a single write when a daemon boot hands over a
+    // session-less pane, and reacting per field would fire a `stream status`
+    // for the session before its port is mirrored — a CLI spawn that queues
+    // behind the daemon's in-flight `open` only to be discarded.
+    let sessionChanged = false;
+    let binaryPathChanged = false;
+    let portChanged = false;
     if (params.session !== this.session) {
       this.session = params.session;
       if (params.session) clearAgentBrowserSessionClosed(params.session);
-      this.reconcile();
-      this.emitView();
-      this.maybeRecoverStalePort();
+      sessionChanged = true;
     }
     const nextBinaryPath = allowedBinaryPath(params.binaryPath);
     if (nextBinaryPath !== this.binaryPath) {
       this.binaryPath = nextBinaryPath;
-      this.maybeRecoverStalePort();
+      binaryPathChanged = true;
     }
     if (params.wsPort !== this.wsPort) {
+      this.wsPort = params.wsPort;
+      portChanged = true;
+    }
+    if (portChanged) {
       // Mirrors the old useEffect(() => setStreamPort(wsPort), [wsPort]): a
       // `dor ab` re-run refreshing wsPort reconnects to the new port.
-      this.wsPort = params.wsPort;
       this.setStreamPort(params.wsPort);
+    }
+    // Run this even after the port arm: the persisted params mirror (`wsPort`)
+    // can lag the already-live `streamPort`, making setStreamPort a no-op while
+    // the session identity still changes underneath that connection.
+    if (sessionChanged) {
+      this.reconcile();
+      this.emitView();
+      this.maybeRecoverStalePort();
+    } else if (binaryPathChanged) {
+      this.maybeRecoverStalePort();
     }
     if (params.url !== this.paramsUrl) {
       this.paramsUrl = params.url;
@@ -630,7 +658,7 @@ export class AgentBrowserSurfaceController {
   }
 
   private reconcileConnection(): void {
-    const desired = !this.disposed && !!this.streamPort && !!this.session && !this.parked;
+    const desired = !this.disposed && !!this.streamPort && !!this.session && !this.parked && !this.relaunching;
     // recoverySeq forces a reconnect at the same session/port (a same-port
     // `dor ab` refresh); it is part of the identity key so a bump re-creates.
     const key = desired ? `${this.session}:${this.streamPort}:${this.recoverySeq}` : null;
@@ -693,6 +721,12 @@ export class AgentBrowserSurfaceController {
           this.maybeDisengageSync();
           this.publishScreen();
         }
+      } else if (event.type === 'url') {
+        // A navigation committed. `tabs` catches up only when the driving
+        // command completes — for a slow page, the whole load — so record it now:
+        // the header follows, and a relaunch mid-load carries the page being
+        // loaded rather than the one before it.
+        this.applyStreamUrl(event.url);
       } else if (event.type === 'tabs') {
         const prevActiveId = event.previousTabs.find((t) => t.active)?.tabId;
         const nextActiveId = event.tabs.find((t) => t.active)?.tabId;
@@ -792,7 +826,10 @@ export class AgentBrowserSurfaceController {
   // headed window without polling.
   private reconcileCdp(): void {
     const platform = getPlatform();
-    const desired = !this.disposed && this.poppedOut && !!this.session && !!platform.agentBrowserCommand;
+    // `get cdp-url` is a daemon command: issued mid-relaunch it lands on the
+    // daemon being killed, or spawns a competing one in the gap before the
+    // headed relaunch — which then reattaches headless ("--headed ignored").
+    const desired = !this.disposed && this.poppedOut && !this.relaunching && !!this.session && !!platform.agentBrowserCommand;
     const key = desired ? `${this.session}:${this.streamPort}` : null;
     if (key === this.cdpKey) return;
     this.cdpTeardown?.();
@@ -1083,6 +1120,24 @@ export class AgentBrowserSurfaceController {
       : tab));
   }
 
+  // The stream's `url` message names the active tab's new URL and nothing else;
+  // the previous page's title no longer describes it, so the tab falls back to
+  // its URL until the load completes and `tabs` brings the real title.
+  private applyStreamUrl(url: string): void {
+    if (!isRestorableUrl(url)) return;
+    this.rememberRestorableUrl(url);
+    const active = this.activeTab();
+    if (!active) {
+      this.setTabs([{ tabId: 'stream-active', title: null, url, active: true }]);
+      return;
+    }
+    // A reload commits the same URL but invalidates the old document title just
+    // as surely as a different-URL navigation. Once cleared, repeat URL events
+    // are a true no-op until `tabs` supplies the refreshed title.
+    if (active.url === url && active.title === null) return;
+    this.setTabs(this.tabs.map((tab) => (tab === active ? { ...tab, url, title: null } : tab)));
+  }
+
   private currentRelaunchUrl(): string | undefined {
     return [
       this.latestRestorableUrl,
@@ -1226,67 +1281,79 @@ export class AgentBrowserSurfaceController {
   // pane becomes a stub; the stream stays connected to observe tabs/status and
   // to auto-revert when the window closes. The new Chrome process gets a fresh
   // stream port, which we write into params so the WS reconnects.
+  // Enter/leave the relaunch window. Entering drops the stream connection and
+  // CDP observer (reconcile gates on `relaunching`); leaving reconnects to
+  // whatever port is current, so callers set the host's port BEFORE leaving.
+  private setRelaunching(relaunching: boolean): void {
+    if (this.relaunching === relaunching) return;
+    this.relaunching = relaunching;
+    this.emitView();
+    this.reconcile();
+  }
+
   private popOut(): void {
     const platform = getPlatform();
     const session = this.session;
     if (!session || !platform.agentBrowserPopOut) return;
+    // One relaunch at a time: a second pop-out/pop-in while the host is mid
+    // close→kill→reopen would interleave two relaunches of one session.
+    if (this.relaunching) { abDebugLog('[ab-panel] popOut ignored: relaunch in flight'); return; }
     if (this.closeIfSessionMarkedClosed(session)) return;
     this.headedConnected = false;
-    this.relaunching = true;
+    this.setRelaunching(true);
     this.setPoppedOut(true);
     this.writeParams({ renderMode: 'ab-popout' });
     // Pop-out failed: revert to in-pane unless the stream came back live anyway.
     const revertUnlessLive = () => this.reconcileStreamPort().then((live) => {
-      this.relaunching = false;
-      if (live) return;
-      this.setPoppedOut(false);
-      this.writeParams({ renderMode: 'ab-screencast' });
+      if (!live) {
+        this.setPoppedOut(false);
+        this.writeParams({ renderMode: 'ab-screencast' });
+      }
+      this.setRelaunching(false);
     });
-    // Don't reconcile to the current (headless) port first — it's about to close.
     // Connect to the headed window's fresh port once the relaunch returns it.
     const url = this.currentRelaunchUrl();
     abDebugLog(`[ab-panel] popOut -> ${JSON.stringify({ session, url })}`);
     platform.agentBrowserPopOut(session, { rect: paneScreenRect(this.sink?.viewport), url }, this.binaryPath).then((res) => {
       abDebugLog(`[ab-panel] popOut result ${JSON.stringify(res)}`);
-      if (this.closeIfSessionMarkedClosed(session)) return;
+      if (this.closeIfSessionMarkedClosed(session)) { this.setRelaunching(false); return; }
       if (!res.ok) {
         void revertUnlessLive();
         return;
       }
       void this.reconcileStreamPort(res.wsPort);
-      this.relaunching = false;
+      this.setRelaunching(false);
     }).catch((err) => {
       abDebugLog(`[ab-panel] popOut error ${String(err)}`);
-      if (this.closeIfSessionMarkedClosed(session)) return;
+      if (this.closeIfSessionMarkedClosed(session)) { this.setRelaunching(false); return; }
       void revertUnlessLive();
     });
   }
 
   popIn(): void {
     const session = this.session;
+    // A session-less pane (an eager swap whose daemon is still booting) has
+    // nothing to relaunch yet; the handover lands as a params refresh.
+    if (!session) return;
+    if (this.relaunching) { abDebugLog('[ab-panel] popIn ignored: relaunch in flight'); return; }
     if (this.closeIfSessionMarkedClosed(session)) return;
-    // Same expected mid-relaunch stream drop as pop-out: suppress screenshot
-    // pulses so none relaunches the just-closed browser at about:blank.
-    this.relaunching = true;
+    this.setRelaunching(true);
     this.setPoppedOut(false);
     this.writeParams({ renderMode: 'ab-screencast' });
     const platform = getPlatform();
-    if (!session || !platform.agentBrowserPopIn) { this.relaunching = false; return; }
-    // Don't reconcile to the current (headed) port first — the host is about to
-    // kill that daemon. Querying now would spawn a competing daemon. Connect to
-    // the fresh port the host returns.
+    if (!platform.agentBrowserPopIn) { this.setRelaunching(false); return; }
+    // Connect to the fresh port the host returns; the current (headed) port is
+    // about to die with its daemon.
     const url = this.currentRelaunchUrl();
     abDebugLog(`[ab-panel] popIn -> ${JSON.stringify({ session, url })}`);
     platform.agentBrowserPopIn(session, { url }, this.binaryPath).then((res) => {
       abDebugLog(`[ab-panel] popIn result ${JSON.stringify(res)}`);
-      if (this.closeIfSessionMarkedClosed(session)) { this.relaunching = false; return; }
-      if (res.ok) void this.reconcileStreamPort(res.wsPort);
-      else void this.reconcileStreamPort();
-      this.relaunching = false;
+      if (this.closeIfSessionMarkedClosed(session)) { this.setRelaunching(false); return; }
+      return (res.ok ? this.reconcileStreamPort(res.wsPort) : this.reconcileStreamPort())
+        .then(() => this.setRelaunching(false));
     }).catch(() => {
-      if (this.closeIfSessionMarkedClosed(session)) { this.relaunching = false; return; }
-      void this.reconcileStreamPort();
-      this.relaunching = false;
+      if (this.closeIfSessionMarkedClosed(session)) { this.setRelaunching(false); return; }
+      void this.reconcileStreamPort().then(() => this.setRelaunching(false));
     });
   }
 

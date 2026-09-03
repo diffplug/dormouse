@@ -63,6 +63,11 @@ export type AgentBrowserConnectionEvent =
   | { type: 'connection-error'; port: number }
   | { type: 'status'; status: AgentBrowserStreamStatus }
   | { type: 'tabs'; tabs: AgentBrowserTab[]; previousTabs: AgentBrowserTab[] }
+  /** The active tab committed a navigation. Fires at commit; the `tabs`
+   *  snapshot refreshes only when the driving command completes, which for a
+   *  slow page is the whole load (docs/specs/dor-browser.md → "Agent-Browser
+   *  Connection"). */
+  | { type: 'url'; url: string }
   | {
       type: 'frame-pulse';
       metadata?: AgentBrowserFramePulse;
@@ -255,13 +260,17 @@ export class AgentBrowserConnection {
     if (typeof raw !== 'string') return;
     if (raw.length > FRAME_PULSE_THRESHOLD) {
       // Size alone can't discriminate a frame from a control message: a `tabs`
-      // snapshot with many long URLs/titles crosses the threshold too, and routing
-      // it as a frame would silently drop the tab update. A frame's bulk is a
-      // base64 JPEG body, whose alphabet contains no `"` or `:`, so a compact
-      // `"type":"tabs"`/`"type":"status"` substring can never occur inside a real
-      // frame — it's a zero-false-positive marker for an oversized control message.
-      // Only those pay a parse; frames keep the hash+pulse fast path untouched.
-      if (raw.includes('"type":"tabs"') || raw.includes('"type":"status"')) {
+      // snapshot or URL with enough text crosses the threshold too, and routing
+      // it as a frame would silently drop the update. A frame's bulk is a base64
+      // JPEG body, whose alphabet contains no `"` or `:`, so these compact type
+      // substrings cannot occur inside a real frame — they are zero-false-positive
+      // markers for oversized control messages. Only those pay a parse; frames
+      // keep the hash+pulse fast path untouched.
+      if (
+        raw.includes('"type":"tabs"')
+        || raw.includes('"type":"status"')
+        || raw.includes('"type":"url"')
+      ) {
         this.dispatchControl(raw);
         return;
       }
@@ -310,6 +319,9 @@ export class AgentBrowserConnection {
       this.emit({ type: 'status', status });
     } else if (msg.type === 'tabs' && Array.isArray(msg.tabs)) {
       this.handleTabs(parseAgentBrowserTabs(msg.tabs));
+    } else if (msg.type === 'url' && typeof msg.url === 'string') {
+      this.debug('url', { url: msg.url });
+      this.emit({ type: 'url', url: msg.url });
     }
   }
 

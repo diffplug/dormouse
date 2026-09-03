@@ -200,7 +200,7 @@ size landed**, so a resize transient is not read as an external override.
 
 | From -> To | Behavior |
 | --- | --- |
-| `iframe` -> `ab-screencast` / `ab-popout` | Host spawns a fresh `gui-<hex>` session at the current URL via `agentBrowserOpen`; `ab-popout` spawns headed in one shot, so the surface mounts already popped out. Hidden/inert without that capability. |
+| `iframe` -> `ab-screencast` / `ab-popout` | **The pane swaps at once** to a session-less agent-browser pane — inert, so it cannot race the boot (rationale) — while the host spawns a fresh `gui-<hex>` session at the current URL via `agentBrowserOpen` and hands over `{session, wsPort, binaryPath}` as **one** params refresh. `ab-popout` spawns headed in one shot, so the surface mounts already popped out. A spawn that rejects or yields no session restores the iframe; a Surface minimized meanwhile receives either outcome through its Door, while one killed meanwhile closes a spawned session. Hidden/inert without that capability. |
 | `ab-screencast` <-> `ab-popout` | Same session, headed/headless relaunch in `AgentBrowserPanel`; preserves only the active URL. |
 | `ab-*` -> `iframe` | Uses canonical `params.url`; with multiple tabs, requires the user to press `c` in the warning overlay, because only the active tab survives. |
 
@@ -281,9 +281,19 @@ its own because clients trigger it. Rules park and recovery must not break:
 - **Never set `AGENT_BROWSER_IDLE_TIMEOUT_MS`** for Dormouse-managed sessions —
   daemon self-exit when idle would defeat "alive while parked".
 - **Never query the daemon mid-relaunch** — see [Pop-Out](#pop-out).
+- **A relaunch in flight drops the stream and CDP observer at once**, shows a
+  relaunching placeholder, and reconnects only to the port the host hands back
+  (rationale). **One relaunch at a time**: a pop-out or pop-in issued during
+  one is ignored; a session-less pane has nothing to relaunch.
+- **A `{session, wsPort, binaryPath}` refresh reconciles its session even at the
+  live port**, with no `stream status`.
 
-The stream WebSocket carries frame pulses + status, tab snapshots, and native
-`input_mouse` / `input_keyboard` input.
+The stream carries frames, status, tab snapshots, `url`, and native
+`input_mouse` / `input_keyboard` input. **Control envelopes dispatch at any
+size.** **`url` names the active tab at navigation commit; `tabs`
+refreshes only when the driving command completes**
+(for a slow page, after the load; rationale), so every commit clears the title
+until `tabs` refreshes, even at the same URL.
 
 **Two-stage paint.** A changed stream JPEG paints at once as a **provisional
 frame** — the first image, and 250ms after pointer input (continuous movement
@@ -336,23 +346,33 @@ shared by the stream and `tab list --json`).
 
 `ab-popout` relaunches the same session headed, because Chrome fixes
 headed/headless at daemon launch. The pane becomes a stub with Pop back in, plus
-Bring to front where a host implements `agentBrowserBringToFront`. **State
-carried in v1 is only the active non-blank URL**: other tabs, DOM state, scroll,
-form inputs, session storage, cookies/logins do not survive.
+Bring to front where a host implements `agentBrowserBringToFront`; while the
+window is still opening (a relaunch in flight, or an eager pane without its
+session) the stub offers neither. **State carried in v1 is only the active
+non-blank URL**: other tabs, DOM state, scroll, form inputs, session storage,
+cookies/logins do not survive.
 
 Host sequence: run `close`, **then terminate the daemon by its pid file**
 (`$AGENT_BROWSER_SOCKET_DIR/<session>.pid`, default `~/.agent-browser`) **and
-wait for it to exit** (rationale), then reopen and read a new stream port.
-**Never query the daemon during the close/reopen gap** (rationale), host and
-controller park/recovery paths alike, so **Dormouse supplies the active-tab URL
-and the host trusts it**. After reopening, the host best-effort closes any stray
-`about:blank` tab the close+reopen race left behind, **but only while a real page
-is open**, so it never closes the sole tab (rationale).
+wait for it to exit** (rationale), then reopen. **Never wait for the page to
+load** (rationale): every launch — pop-out, pop-in, `agentBrowserOpen` —
+resolves once the *relaunched* daemon is up (a pid file naming a pid other than
+the killed one, and a `<session>.stream` file naming a port that accepts a
+connection), asking `stream status` only after `open` returns. **A non-zero
+`open` exit with the daemon up is a page still loading, not a failed launch**;
+only a launch without a published port fails, including after a zero exit;
+`agentBrowserOpen` then closes its spawn. **A headed session is tracked for
+shutdown before its launch**, so a window whose page never loads is still
+closed. **Never query the daemon during the close/reopen gap** (rationale), host and controller
+park/recovery paths alike, so **Dormouse supplies the active-tab URL and the
+host trusts it**. Once `open` returns, only a still-current relaunch best-effort
+closes stray `about:blank` tabs, **and only while a real page is open**, so it
+never closes the sole tab (rationale).
 
-While popped out, Dormouse keeps a stream/CDP observer so URL/header state
-follows same-tab navigation and a headed window close can auto-revert to
-headless. **Hosts must close tracked popped-out sessions on shutdown** to avoid
-orphan headed windows.
+While popped out, Dormouse keeps a stream/CDP observer for same-tab URL/header
+updates and headed-window close auto-revert. **Hosts must cancel pending
+relaunch sweeps, then close tracked popped-out sessions on shutdown** so
+quitting orphans no headed window.
 
 Source of truth: `lib/src/components/wall/agent-browser-surface-controller.ts` (pop-out state, CDP
 observer, auto-revert), `lib/src/host/agent-browser-host.ts` (`popOut`, `popIn`,
@@ -371,7 +391,7 @@ sidecar/Rust adapter.
 | `agentBrowserStreamStatus` | Current stream port, for stale-`wsPort` recovery. |
 | `agentBrowserEdit` | select-all/copy/cut via fixed host-owned JS plus an OS clipboard write. |
 | `getAgentBrowserStreamUrl` | Direct stream URL, or the VS Code relay URL. |
-| `agentBrowserOpen` | Spawn a GUI-owned session for iframe -> agent-browser. |
+| `agentBrowserOpen` | Spawn a GUI-owned session for iframe -> agent-browser; resolves when the daemon is up, not when the page loads ([Pop-Out](#pop-out)). |
 | `agentBrowserPopOut` / `agentBrowserPopIn` | Headed/headless relaunch. |
 | `agentBrowserBringToFront` | Optional; no host implements it today. |
 

@@ -1181,7 +1181,7 @@ export function Wall({
   }, [generatePaneId, surfaceRefForId, forgetSurfaceRef, selectPane, enterTerminalMode, showShellSpawnNotice, lath, nav]);
 
   // --- dor control plane (the `dor` CLI's webview handler) ---
-  const { connectPort } = useDorControl({
+  const { connectPort, updateSurfaceParams } = useDorControl({
     lath,
     nav,
     doorsRef,
@@ -1318,7 +1318,10 @@ export function Wall({
         // Canonical params.url (mirrored from the chrome snapshot) first; fall
         // back to the live snapshot for a surface that hasn't reported a tab yet.
         const url = (typeof params?.url === 'string' && params.url) || getAgentBrowserScreenController(id)?.chrome().url;
-        if (!url) return;
+        if (!url) {
+          console.warn(`[dormouse] cannot swap surface '${id}' to iframe: no URL observed yet`);
+          return;
+        }
         replaceSurface(id, {
           params: { surfaceType: 'browser', renderMode: 'iframe', url },
           title: hostPathDisplay(url, true),
@@ -1330,6 +1333,12 @@ export function Wall({
       // spawn a session for the URL (absent ⇒ inert, like other host-gated
       // affordances). ab-popout spawns headed directly so the new surface mounts
       // already popped-out (no headless launch + immediate relaunch flash).
+      //
+      // The swap lands NOW: the iframe is replaced by a session-less agent-browser
+      // pane — inert, so it cannot race the daemon boot — whose placeholder names
+      // what it is waiting for, and the daemon hands it `{session, wsPort,
+      // binaryPath}` as one params refresh. Same shape as the pane context menu's
+      // connect (docs/specs/dor-browser.md → "Pane Context Menu Connect").
       if (currentRenderMode === 'iframe' && (mode === 'ab-screencast' || mode === 'ab-popout')) {
         const chromeUrl = getAgentBrowserScreenController(id)?.chrome().url;
         const url = (typeof chromeUrl === 'string' && chromeUrl)
@@ -1337,28 +1346,55 @@ export function Wall({
         const platform = getPlatform();
         if (!url || !platform.agentBrowserOpen) return;
         const headed = mode === 'ab-popout';
+        const title = hostPathDisplay(url, true);
+        const eagerId = replaceSurface(id, {
+          params: { surfaceType: 'browser', renderMode: mode, url, syncEngaged: true },
+          title,
+        });
+        if (!eagerId) return;
+        const eagerDoorExists = () => doorsRef.current.some((door) => door.id === eagerId);
+        const eagerSurfaceExists = () => (
+          !!lath.getMeta(eagerId) && (lath.store.has(eagerId) || eagerDoorExists())
+        );
+        const restoreIframe = () => {
+          if (lath.isDying(eagerId)) return;
+          if (lath.store.has(eagerId)) {
+            replaceSurface(eagerId, { params: { surfaceType: 'browser', renderMode: 'iframe', url }, title });
+            return;
+          }
+          // A minimized Surface is outside the visible tree but its Door + meta
+          // are still authoritative. Swap the parked body back in place so the
+          // Door does not remain a session-less "Connecting..." pane.
+          if (!eagerDoorExists() || !lath.getMeta(eagerId)) return;
+          disposeAgentBrowserSurfaceController(eagerId);
+          lath.store.updateParams(eagerId, { surfaceType: 'browser', renderMode: 'iframe', url, syncEngaged: false });
+          lath.store.setTitle(eagerId, title);
+        };
         platform.agentBrowserOpen(url, { headed }, lastAgentBrowserBinaryPathRef.current).then((res) => {
-          if (!res.ok || !res.session) return;
+          if (!res.ok || !res.session) {
+            console.warn(`[dormouse] failed to swap iframe surface '${id}' to agent-browser:`, res.error ?? '(no session)');
+            // Nothing came up to bind: give the iframe back if the eager Surface
+            // still exists, whether it is visible or minimized meanwhile.
+            restoreIframe();
+            return;
+          }
           if (res.binaryPath) lastAgentBrowserBinaryPathRef.current = res.binaryPath;
-          const nextParams = {
-            surfaceType: 'browser',
-            renderMode: mode,
+          const bound = {
             session: res.session,
-            url,
             ...(res.wsPort !== undefined ? { wsPort: res.wsPort } : {}),
             ...(res.binaryPath !== undefined ? { binaryPath: res.binaryPath } : {}),
-            syncEngaged: true,
           };
-          const nextId = replaceSurface(id, {
-            params: nextParams,
-            title: hostPathDisplay(url, true),
-          });
-          if (!nextId) {
-            closeAgentBrowserSession(nextParams);
-            console.warn(`[dormouse] failed to replace iframe surface '${id}' with agent-browser surface`);
+          // A Door is a retained Surface even though it is outside the visible
+          // tree. Close only when the eager Surface was genuinely destroyed (or
+          // its visible pane is mid-fade); otherwise hand the session to its meta.
+          if (!eagerSurfaceExists() || lath.isDying(eagerId)) {
+            closeAgentBrowserSession({ renderMode: mode, ...bound });
+            return;
           }
+          updateSurfaceParams(eagerId, bound);
         }).catch((err) => {
           console.warn('[dormouse] failed to swap iframe surface to agent-browser:', err);
+          restoreIframe();
         });
       }
     },
@@ -1378,7 +1414,7 @@ export function Wall({
     resolveSurfaceRef: surfaceRefForId,
     // The pane context menu's "connect a port" action: act like `dor ab open`.
     onConnectPort: connectPort,
-  }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, killPaneImmediately, replaceSurface, buildDorSurfaces, createContentSurface, surfaceRefForId, connectPort, lath, nav]);
+  }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, killPaneImmediately, replaceSurface, buildDorSurfaces, createContentSurface, surfaceRefForId, connectPort, updateSurfaceParams, lath, nav]);
   const wallActionsRef = useRef(wallActions);
   wallActionsRef.current = wallActions;
 
