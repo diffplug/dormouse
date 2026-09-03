@@ -295,8 +295,7 @@ function closesFence(line, marker, length) {
 /**
  * Whether `line` begins a new block, so a paragraph — or a blockquote's lazy
  * continuation — ends before it instead of swallowing it. `next` supplies the
- * single line of lookahead a table needs, a `|` row being a table only when a
- * delimiter row follows it.
+ * single line of lookahead a table needs; `startsTable` holds the test.
  *
  * Six of the seven block starts are here: ATX heading, list item, blockquote,
  * fence, table, and block-level raw HTML. A standalone `<img>` is deliberately
@@ -309,7 +308,7 @@ function interruptsParagraph(line, next) {
     || LIST_ITEM.test(line)
     || /^\s*>\s?/.test(line)
     || /^(\s*)(`{3,}|~{3,})/.test(line)
-    || (line.includes('|') && isDelimiterRow(next ?? ''))
+    || startsTable(line, next ?? '')
     || (/^\s*<\/?[a-zA-Z]/.test(line) && !/^\s*<img\b/i.test(line));
 }
 
@@ -332,10 +331,14 @@ const SETEXT_UNDERLINE = /^\s*(=+|-+)\s*$/;
 const THEMATIC_BREAK = /^\s*([-*_])(\s*\1){2,}\s*$/;
 
 /**
- * Split a table row into cells, honouring backslash-escaped pipes so a cell
- * containing `` `\|` `` (which the shortcut table needs) survives intact.
+ * Split a table row into raw cell strings, honouring backslash-escaped pipes so
+ * a cell containing `` `\|` `` (which the shortcut table needs) survives intact.
+ *
+ * Kept separate from `splitRow` because `startsTable` counts cells
+ * speculatively on every paragraph line, where `parseInline` would raise on
+ * inline content the parser rejects.
  */
-function splitRow(row, line) {
+function splitCells(row) {
   const trimmed = row.trim().replace(/^\|/, '').replace(/\|$/, '');
   const cells = [];
   let cur = '';
@@ -347,7 +350,12 @@ function splitRow(row, line) {
     cur += ch;
   }
   cells.push(cur);
-  return cells.map((c) => parseInline(c.trim(), line));
+  return cells;
+}
+
+/** Split a table row into cells and parse each one's inline content. */
+function splitRow(row, line) {
+  return splitCells(row).map((c) => parseInline(c.trim(), line));
 }
 
 /**
@@ -358,6 +366,18 @@ function splitRow(row, line) {
  */
 function isDelimiterRow(row) {
   return row.includes('|') && /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$/.test(row);
+}
+
+/**
+ * Whether `line` and the delimiter row `next` start a GFM table. The cell
+ * counts have to match: GFM does not recognise a table when they differ, so
+ * `a | b` over `| --- |` is paragraph text, and reading it as a table drops the
+ * delimiter row and restyles the prose with no error.
+ */
+function startsTable(line, next) {
+  return line.includes('|')
+    && isDelimiterRow(next)
+    && splitCells(line).length === splitCells(next).length;
 }
 
 function alignmentsFrom(row) {
@@ -429,7 +449,7 @@ export function parseMarkdown(markdown, options = {}) {
     }
 
     // Table
-    if (raw.includes('|') && i + 1 < lines.length && isDelimiterRow(lines[i + 1])) {
+    if (i + 1 < lines.length && startsTable(raw, lines[i + 1])) {
       const header = splitRow(raw, lineNo);
       const align = alignmentsFrom(lines[i + 1]);
       i += 2;
