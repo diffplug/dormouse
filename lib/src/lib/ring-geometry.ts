@@ -45,7 +45,7 @@ type Point = readonly [x: number, y: number];
  * quadratic from its incoming tangent point, through the box corner as control,
  * to its outgoing tangent point. Corner radii are shrunk by the inset so the
  * stroke centerline stays concentric with the pane it surrounds
- * (`docs/specs/layout.md` → Concentric-Corners Rule).
+ * (`DESIGN.md` -> "The Concentric-Corners Rule").
  */
 function ringPoints(rect: RingRect, shape: RingShape) {
   const { width: w, height: h } = rect;

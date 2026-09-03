@@ -121,8 +121,8 @@ export interface NoiseSession {
  * **Never throws and never rejects**, a missing `globalThis.crypto` included:
  * the callers this exists for are boot-path gates that show a fixed upgrade
  * requirement and perform no remote operation
- * (`docs/specs/remote-security-model.md` -> Host identity). The
- * default is resolved inside the guard for the same reason.
+ * (`docs/specs/remote-security-model.md` -> Host identity). The default is
+ * resolved inside the guard for the same reason.
  */
 export async function probeNoiseSupport(crypto?: WebCryptoLike): Promise<boolean> {
   try {
