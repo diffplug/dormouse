@@ -30,10 +30,13 @@ export const ACCENT_HOVER_BORDER_CLASS = "hover:border-[var(--docs-accent)]";
 /**
  * How far a jumped-to anchor clears the chrome above it.
  *
- * Below `lg` the docs carry a sticky nav bar (~45px) under the fixed site
- * header (64px, 80px at `md`) as well; at `lg` the bar is gone and only the
- * header remains. **Must** stay ahead of both, or a tapped rail entry lands
- * the heading underneath them.
+ * Below `lg` the docs carry a sticky nav bar under the fixed site header as
+ * well; at `lg` the bar is gone and only the header remains. **Must** stay
+ * ahead of both, or a tapped rail entry lands the heading underneath them.
+ *
+ * Measured: the bar is 45px, the header 64px and 80px at `md`, so each step
+ * clears its chrome by 3px. That margin is thin — growing the bar's padding or
+ * its type needs the matching step here raised with it.
  */
 export const SCROLL_MT_CLASS = "scroll-mt-28 md:scroll-mt-32 lg:scroll-mt-24";
 
