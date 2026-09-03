@@ -202,15 +202,19 @@ function checkVsCodeCommands() {
 }
 
 /**
- * The published reference pages, from the route table's own list.
+ * The pages both READMEs must link, from the rail's own list.
  *
  * website/src/lib/docs-pages.ts is the one owner (the routes, the prerender
- * list, and the docs footer all read it); the lint reads its paths rather than
- * keeping a fourth copy that could disagree with what actually ships.
+ * list, and the rail all read it); the lint reads it rather than keeping a
+ * copy that could disagree with what actually ships.
+ *
+ * Keyed on `published`, not on the `/docs/` prefix: the rail also carries the
+ * changelog and the supply chain, which carry no off-site linking obligation,
+ * and a prefix test would quietly start requiring one.
  */
 function referencePaths() {
   const source = readRepoFile(DOCS_PAGES);
-  return [...source.matchAll(/path:\s*"(\/docs\/[^"]+)"/g)].map(([, path]) => path);
+  return [...source.matchAll(/path:\s*"([^"]+)"[^}]*published:\s*true/g)].map(([, path]) => path);
 }
 
 /**

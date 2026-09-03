@@ -12,9 +12,7 @@ export default {
       "/playground/desktop",
       "/playground/pocket",
       "/pocket",
-      "/changelog",
       ...DOCS_PAGES.map((page) => page.path),
-      "/supply-chain",
     ];
   },
 } satisfies Config;
