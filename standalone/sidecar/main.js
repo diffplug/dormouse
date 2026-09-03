@@ -126,8 +126,8 @@ function handleLine(line) {
       case 'pty:getShells':  mgr.getShells(data.requestId); break;
       // Reserved: no standalone caller yet — recovery capture ships for VS Code
       // only, which reaches the same `pty-core` through its own `pty-host.js`
-      // rather than this route (docs/specs/transport.md -> `## Future`, scope
-      // codex-recovery).
+      // rather than this route (docs/specs/vscode.md -> "Capturing agent
+      // recovery").
       case 'pty:interrupt': mgr.interrupt(data.ids, data.requestId); break;
       case 'pty:gracefulKillAll': mgr.gracefulKillAll(data.timeout, data.requestId); break;
       case 'sidecar:shutdown': shutdown(); break;

@@ -1,186 +1,159 @@
 # WebGL Text Rendering (SDF fork + canopy)
 
-> Dormouse's 3D/WebXR terminal effort needs text that stays crisp at any scale
-> and orientation — a texture in a 3D scene, not a 1:1 pixel grid. This spec
-> covers the three layers that deliver that: the diffplug/xterm.js fork
-> pipeline, the signed-distance-field (SDF) glyph architecture inside the
-> forked webgl addon, and the `canopy/` Storybook lab that exercises and
-> regression-tests it.
+> Text in a 3D scene is a texture at arbitrary scale, not a 1:1 pixel grid —
+> hence signed distance fields (SDF).
 >
-> **Two webgl addons, one repo.** Production terminals render through *stock*
+> **Two webgl addons, one repo.** Production terminals render *stock*
 > `@xterm/addon-webgl` (`docs/specs/layout.md` → "Renderer"); only `canopy/`
-> consumes the SDF fork, and everything below is about the fork.
+> consumes the SDF fork, which is what everything below describes.
 >
-> The fork's own process doc is
+> Release recipe:
 > [FORK.md on the `sdf` branch](https://github.com/diffplug/xterm.js/blob/sdf/FORK.md),
-> whose release recipe this spec does not restate. `addons/addon-webgl/` paths
-> below are in the fork repo (cloned at `~/projects/xterm.js`; the release
-> tarball also ships `src/`, so they are readable from `canopy/node_modules`).
+> not restated here. `addons/addon-webgl/` paths are fork-repo paths — clone at
+> `~/projects/xterm.js`, or read them from the release tarball's `src/` under
+> `canopy/node_modules`.
 
 ## Fork pipeline
 
-- **Repo/branches**: `master` on diffplug/xterm.js is a pristine fast-forward
-  mirror of upstream; `sdf` (the default branch) carries our changes.
-  Upstreamable fixes branch off `master` and are cherry-picked into `sdf`.
-- **Versioning**: published as `@diffplug/xterm-addon-webgl-sdf`, versions
-  shaped `<addon-version>-sdf<coreBeta>.<iteration>` (`0.20.0-sdf301.1` = built
-  from `@xterm/xterm@6.1.0-beta.301`, iteration 1). **Consumers must pin the
-  exact core beta named by the tarball's peer dependency** because the addon
-  bundles core internals; the `-sdfNNN` counter alone is not globally unique.
-- **Distribution**: GitHub Release assets consumed as a pnpm tarball-URL
-  dependency, not an npm registry — GitHub Packages requires auth even for
-  public reads, release assets do not. **Never replace a published asset** —
-  the lockfile records a sha512 integrity hash, so cut a new iteration
-  instead.
+- **Repo/branches**: `master` is a pristine fast-forward mirror of upstream,
+  `sdf` (the default) carries our changes; upstreamable fixes branch off
+  `master` and cherry-pick into `sdf`.
+- **Versioning**: `@diffplug/xterm-addon-webgl-sdf`, versions shaped
+  `<addon-version>-sdf<coreBeta>.<iteration>` (`0.20.0-sdf301.1` ⇒
+  `@xterm/xterm@6.1.0-beta.301`, iteration 1). **Consumers must pin the exact
+  core beta named by the tarball's peer dependency**, not the `-sdfNNN`
+  counter — the addon bundles core internals (rationale).
+- **Distribution**: a pnpm tarball-URL dependency on GitHub Release assets,
+  never an npm registry (rationale). **Never replace a published asset**; the
+  lockfile records a sha512 integrity hash, so cut a new iteration.
 - **Canopy's three pins move together.** Renovate ignores canopy's `@xterm/**`
-  because it cannot follow the fork tarball URL; update manually or with
+  (it cannot follow the tarball URL); bump them with
   `node scripts/xterm-bump.mjs --canopy <forkVersion>`. `lib/` and `standalone/`
   may track a newer upstream beta between fork rebases.
-- **Upstream pins are per-commit, not per-latest.** The four `@xterm/*`
-  packages have independent beta counters despite sharing a repo. **Every pin
-  must be exact and every addon's core peer must match its workspace core pin.**
-  `scripts/xterm-lint.mjs` also requires `lib` and `standalone` to agree and
-  checks the canopy tarball tag, filename, counter, and peer as one set.
-  `scripts/xterm-bump.mjs` (`pnpm bump:xterm`) writes the newest coherent
-  per-commit set for `lib` and `standalone`.
-- **Releases are hand-cut today** (build, `npm pack`, `gh release create` per
-  FORK.md); automating this is staged in `## Future`.
+- **Every pin must be exact, and every addon's core peer must equal its
+  workspace's core pin** — the four `@xterm/*` packages share a repo but carry
+  independent beta counters (rationale). `scripts/xterm-lint.mjs` also requires
+  `lib` ≡ `standalone` and checks the canopy tarball's tag, filename, counter
+  and peer as one set; `scripts/xterm-bump.mjs` (`pnpm bump:xterm`) writes the
+  newest coherent per-commit set for `lib` and `standalone`.
+- **Releases are hand-cut today** per FORK.md; automating this is staged in
+  `## Future`.
 - **Dev loop**: `pnpm link ~/projects/xterm.js/addons/addon-webgl` from
-  `canopy/`. **Revert its root `package.json` / `pnpm-workspace.yaml` residue and
-  reinstall before verifying a tarball.**
+  `canopy/`. **Revert its root `package.json` / `pnpm-workspace.yaml` residue
+  and reinstall before verifying a tarball** (rationale).
 
-Source of truth: `canopy/package.json` (pins), `canopy/README.md` (bump flow),
-`scripts/xterm-lint.mjs` + `scripts/xterm-bump.mjs` (the pin invariants and the
-tool that satisfies them), FORK.md in the fork.
+Source of truth: `canopy/package.json`, `canopy/README.md` (bump flow),
+`scripts/xterm-lint.mjs`, `scripts/xterm-bump.mjs`, FORK.md in the fork.
 
 ## Following upstream
 
-**Every `@xterm/*` bump is a trigger to re-evaluate the fork**, not a
-dependency chore that stops at `lib/` and `standalone/`: leaving the fork on an
-older base makes canopy's `UpstreamVsFork` harness compare against an upstream
-we no longer ship, the one thing the harness exists to prevent. Each time
-Renovate opens the grouped `xterm` PR:
+**Every `@xterm/*` bump is a trigger to re-evaluate the fork**, not one that
+stops at `lib/` and `standalone/`: an older fork base makes `UpstreamVsFork`
+compare against an upstream we no longer ship. On each grouped `xterm` Renovate
+PR:
 
-1. **Read the upstream diff first** and decide what it is worth.
-   `node scripts/xterm-bump.mjs --dry-run` names the newest coherent set (often
-   an older core than Renovate proposed), prints the commit range from canopy's
-   fork base to it, and lists that range's files under `addons/addon-webgl/`.
-   Most betas touch none of them, so the bump is a no-op for us and the fork
-   does not move; when they do, that diff is the risk assessment.
-2. **Rebase and release the fork** per the `Merging upstream` section of
-   FORK.md — including its warning that a conflict-free merge is not a correct
-   one, because upstream regularly adds obligations to code we extended without
-   anything conflicting.
-3. **Bump `canopy/package.json`** with `--canopy <forkVersion>`, and update the
-   version/commit triple in both places that record it (see "Canopy lab").
+1. **Read the upstream diff first.** `node scripts/xterm-bump.mjs --dry-run`
+   names the newest coherent set (rationale) and lists the
+   `addons/addon-webgl/` files touched since canopy's fork base. Most betas
+   touch none and the fork does not move; when they do, that diff is the risk
+   assessment.
+2. **Rebase and release the fork** per FORK.md's `Merging upstream` —
+   **a conflict-free merge is not a correct one** (rationale).
+3. **Bump `canopy/package.json`** with `--canopy <forkVersion>` and update the
+   recorded triple (see "Canopy lab").
 
-**Land all of it in the same PR** as the `@xterm/*` bump, so the tree never
-records lib and the fork disagreeing about which upstream they track.
+**Land all of it in one PR** with the `@xterm/*` bump, so the tree never
+records lib and the fork on different upstreams.
 
 ## SDF glyph architecture
 
-Fork-internal, and reachable only through the fork-added addon options
-`sdf: boolean` (default false — upstream behavior is untouched when off) and
-`sdfGlyphSize: number`, documented in the fork's
-`addons/addon-webgl/typings/addon-webgl.d.ts`.
+Fork-internal, behind the fork-added options `sdf: boolean` (default false;
+upstream behavior untouched when off) and `sdfGlyphSize: number`.
 
-- **Eligibility**: plain text glyphs render as SDFs. The pixel-accurate raster
-  path is retained for custom glyphs (box drawing/block/powerline drawn by the
-  custom-glyph rasterizer), powerline-range glyphs, decorated cells
-  (underline/strikethrough/overline), glyphs treated as background colors, and
-  probable color emoji (`isProbablyEmoji`, which widens the shared `isEmoji`
-  range table and errs toward raster — a text symbol going raster only costs
-  crispness; an emoji going SDF would lose its colors).
-- **Rasterization**: `SdfGlyphRasterizer` is a vendored adaptation of
-  mapbox/tiny-sdf (BSD-2-Clause, attribution in its header): xterm's
-  `TEXT_BASELINE` metrics, a dynamically sized scratch canvas for wide/CJK and
-  combined-character strings, per-draw font weight/style. Its padding buffer is
-  sized so the distance field decays to zero inside the bitmap, which
-  guarantees LINEAR atlas sampling never bleeds between packed glyphs.
+- **Eligibility**: plain text renders as SDFs; the pixel-accurate raster path
+  is kept for custom glyphs (box drawing/block/powerline), powerline-range
+  glyphs, decorated cells (underline/strikethrough/overline), glyphs treated as
+  background colors, and probable color emoji. **`isProbablyEmoji` widens the
+  shared `isEmoji` range table and must err toward raster** (rationale).
+- **Rasterization**: `SdfGlyphRasterizer` vendors mapbox/tiny-sdf
+  (BSD-2-Clause, attribution in its header), adapted to xterm's `TEXT_BASELINE`
+  metrics, to wide/CJK and combined-character strings, and to per-draw font
+  weight/style. **Its padding buffer must let the distance field
+  decay to zero inside the bitmap**, so LINEAR atlas sampling never bleeds
+  between packed glyphs.
 - **`sdfGlyphSize`**: the fixed base font size (px) glyphs are rasterized at —
-  explicit, default 32, never derived from the terminal font size or
-  devicePixelRatio. Lower = smaller atlas, softer detail; higher = more corner
-  fidelity under magnification.
-- **Color-free atlas**: the atlas has no notion of color for SDF glyphs.
-  Exactly one texture entry exists per shape (chars + weight + style); each
-  additional color gets a lightweight record sharing that entry with its own
-  tint, registered via `AtlasPage.addGlyphAlias`. Invariant: page merge/delete
-  bookkeeping mutates every registered glyph record in place exactly once — so
-  color variants carry their own coordinate vectors (shared vectors would be
-  transformed multiple times) and must be registered on the page (an
-  unregistered record would go stale after a merge). Aliases do not count
-  toward used-pixels; the canonical record owns the texels.
-- **Texel format**: distance lives in the atlas alpha channel with white RGB
-  (white survives canvas premultiplication exactly; the shader reads only
-  alpha for SDF glyphs). Reserved: each texel holds one plain distance field —
-  no packing of multiple glyphs into separate color channels — so the texel
-  layout stays compatible with the MSDF item in `## Future`.
-- **Shader/renderer**: the instance layout is 16 floats per cell (upstream:
-  11), adding a straight-alpha tint vec4 and an SDF flag. Quads scale by the
-  glyph's `renderScale` (device font px ÷ `sdfGlyphSize`), which is what lets
-  a low-res atlas render crisp at any cell size. The fragment shader
-  reconstructs coverage with an `fwidth`-based smoothstep at the edge
-  threshold `1 - SDF_CUTOFF` (the constant is imported from the rasterizer, so
-  encode and decode cannot drift). Upstream merges that touch GlyphRenderer
-  vertex code need care — FORK.md calls this out.
+  explicit, default 32, **never derived from the terminal font size or
+  devicePixelRatio** (rationale).
+- **Color-free atlas**: exactly one texture entry per shape (chars + weight +
+  style); each additional color is a lightweight record sharing that entry with
+  its own tint, via `AtlasPage.addGlyphAlias`. **A color variant must carry its
+  own coordinate vectors and be registered on the page** — page merge/delete
+  bookkeeping mutates every registered record in place exactly once (rationale).
+  **Aliases do not count toward used-pixels**; the canonical record owns the
+  texels.
+- **Texel format**: distance in the atlas alpha channel with white RGB
+  (rationale); the SDF shader path reads only alpha. Reserved: one plain
+  distance field per texel, never multiple glyphs packed into color channels,
+  keeping the layout compatible with the MSDF item in `## Future`.
+- **Shader/renderer**: 16 floats per cell (upstream: 11), adding a
+  straight-alpha tint vec4 and an SDF flag. Quads scale by the glyph's
+  `renderScale` (device font px ÷ `sdfGlyphSize`) (rationale). The fragment
+  shader reconstructs coverage with an `fwidth`-based smoothstep at the edge
+  threshold `1 - SDF_CUTOFF`, **imported from the rasterizer** so encode and
+  decode cannot drift. **Upstream merges that touch GlyphRenderer vertex code
+  need care** (FORK.md).
 
-Source of truth (fork repo): `addons/addon-webgl/src/SdfGlyphRasterizer.ts`,
-`addons/addon-webgl/src/TextureAtlas.ts` (`_drawToCacheSdf`,
-`_rasterizeSdfShape`, `_allocateGlyphSpace`),
-`addons/addon-webgl/src/GlyphRenderer.ts`.
+Source of truth (fork repo): `SdfGlyphRasterizer` in
+`addons/addon-webgl/src/SdfGlyphRasterizer.ts`; `_drawToCacheSdf`,
+`_rasterizeSdfShape`, `_allocateGlyphSpace`, `addGlyphAlias` in
+`addons/addon-webgl/src/TextureAtlas.ts`; `GlyphRenderer` in
+`addons/addon-webgl/src/GlyphRenderer.ts`;
+`addons/addon-webgl/typings/addon-webgl.d.ts`.
 
 ## Canopy lab
 
 `canopy/` is a Storybook-only workspace package (port 6007, `pnpm dev:canopy`),
-**kept independent of `dormouse-lib`** and outside the production build — the
-root `build` script covers only vscode + website, though canopy's `test` (a
-`tsc` typecheck) does run under `pnpm test`. Its stories are the visual harness
-for the fork:
+**kept independent of `dormouse-lib`** and outside the production build, though
+its `test` (a `tsc` typecheck) runs under `pnpm test`. Stories:
 
-- `ColorsAndGlyphs` / `TextureAtlas` — stock fork rendering (`sdf: false`) and
-  its live glyph atlas.
-- `Sdf` / `SdfTextureAtlas` — SDF rendering and its atlas (white distance
-  fields, one per shape, tinted in the shader).
-- `SdfVsRasterAt3x` — the VR scenario: the same base-size glyph source
-  bitmap-upscaled (blurry) vs shader-rendered from an SDF atlas (crisp).
-- `UpstreamVsFork` — the regression harness: identical content through
-  pristine upstream `@xterm/addon-webgl`, the fork with `sdf: false`, and the
-  fork with `sdf: true`, stacked. **Its upstream addon must come from the fork
-  base commit.** Record the addon/core/commit triple in both
-  `canopy/src/GlTerminal.stories.tsx` and `canopy/README.md`; `--canopy` selects
-  the addon and reminds editors to update both. The harness owns its
-  discriminating `chevronGauntlet` rows.
+| Story | Renders |
+| --- | --- |
+| `ColorsAndGlyphs` / `TextureAtlas` | stock fork (`sdf: false`), and its glyph atlas |
+| `Sdf` / `SdfTextureAtlas` | SDF rendering, and its atlas |
+| `SdfVsRasterAt3x` | the VR scenario: one base-size glyph bitmap-upscaled (blurry) vs SDF-rendered (crisp) |
+| `UpstreamVsFork` | regression harness: identical content through pristine upstream `@xterm/addon-webgl`, fork `sdf: false`, fork `sdf: true`, stacked |
 
-**Never write PUA glyphs as literals; use `\uE0BX` escapes** so invisible
-characters cannot disappear during a rewrite.
+**`UpstreamVsFork`'s upstream addon must come from the fork base commit**, its
+addon/core/commit triple recorded in both `canopy/src/GlTerminal.stories.tsx`
+and `canopy/README.md`. The harness owns its discriminating `chevronGauntlet`
+rows.
+
+**Never write PUA glyphs as literals; use `\uE0BX` escapes** — the literals
+vanish silently in a rewrite (rationale).
 
 Source of truth: `canopy/src/GlTerminal.stories.tsx`, `canopy/README.md`.
 
 ## Future
 
-- **MSDF (multi-channel signed distance fields)** — sharper corners at extreme
-  magnification than single-channel SDF, which rounds them. Generation
-  requires glyph outlines rather than canvas rasterization, which means font
-  file access: either a bundled default font processed at build time (e.g.
-  msdf-atlas-gen) with the runtime SDF path as fallback for uncovered glyphs,
-  or runtime font-byte discovery per host (Tauri/sidecar can read font files;
-  browsers mostly cannot). The atlas texel layout is already reserved for this
-  (one glyph per texel, RGB free — see the Reserved note above); the shader
-  gains a `median(r,g,b)` branch.
-- **SDF decorated cells** — underline/strikethrough/overline currently fall
-  back to raster, so decorated text blurs under magnification. Composing
-  decoration distance fields with the glyph field (or rendering decorations as
-  analytic shapes in the shader) would close the gap.
-- **Fork release automation** — a GitHub Action on the fork that builds and
-  attaches the addon tarball on tag, plus a scheduled upstream-master merge PR
-  into `sdf`. Releases and merges are manual today.
-- **WebXR terminal-as-texture** — render the terminal into a texture
-  composited in a three.js/WebXR scene, moving the SDF smoothstep into the
-  scene shader so crispness holds at any distance/orientation. This is the
-  canopy roadmap's next step and the reason the SDF work exists.
-- **Production adoption** — only canopy consumes the fork today; adopting it
-  in `lib/` / `standalone/` (behind an option) would bring SDF rendering to
-  real Dormouse terminals.
-- **Emoji heuristic refinement** — `isProbablyEmoji` errs toward raster by
-  design; revisit its ranges if real content surfaces text-presentation
-  symbols that deserve SDF crispness or colored glyphs that slip through.
+- **MSDF (multi-channel signed distance fields)** — sharper corners than
+  single-channel SDF, which rounds them at extreme magnification. Needs outlines
+  rather than canvas rasterization, so font-file access: a build-time bundled
+  default font (e.g. msdf-atlas-gen) with the runtime SDF path as fallback for
+  uncovered glyphs, or per-host runtime font-byte discovery (Tauri/sidecar can
+  read font files; browsers mostly cannot). The texel layout is already
+  reserved for it; the shader gains a `median(r,g,b)` branch.
+- **SDF decorated cells** — decorated text blurs under magnification while
+  underline/strikethrough/overline stay on the raster path. Fix by composing
+  decoration distance fields with the glyph field, or by drawing decorations
+  analytically in the shader.
+- **Fork release automation** — a GitHub Action on the fork that attaches the
+  addon tarball on tag, plus a scheduled upstream-master merge PR into `sdf`.
+- **WebXR terminal-as-texture** — the terminal rendered into a texture in a
+  three.js/WebXR scene, with the SDF smoothstep moved into the scene shader so
+  crispness holds at any distance. The canopy roadmap's next step, and why the
+  SDF work exists.
+- **Production adoption** — adopting the fork in `lib/` / `standalone/` (behind
+  an option) would bring SDF rendering to real Dormouse terminals.
+- **Emoji heuristic refinement** — revisit `isProbablyEmoji`'s ranges if real
+  content surfaces text-presentation symbols that deserve SDF crispness, or
+  colored glyphs that slip through.

@@ -2,13 +2,29 @@
 
 > Informative evidence for [dor-browser.md](dor-browser.md), keyed by its headings; nothing here is normative.
 
+## Canonical Params
+
+**What moving a browser Surface's DOM would cost.** A re-parented `<iframe>` reloads, losing every bit of state the frame held — scroll, form contents, live scripts, an open WebSocket. A screencast canvas that moves mid-click breaks click synthesis, whose device coordinates were computed against the old box. Parking the leaf instead of unmounting it is what makes minimize/reattach free rather than a reload.
+
+## Browser Chrome
+
+**What the scheme ladder decides.** A typed `host:port` renders in the iframe, since the proxy frames remote `http://` as readily as loopback. A bare remote host carries no port to mark it a dev server, so `https://` sends it to agent-browser — the path for pages that need real HTTPS or a login.
+
 ## Pane Context Menu Connect
 
 **Why activation moves focus at all.** A repeat activation on an already-connected port only re-navigates to the current URL. Unlike focus-neutral `dor` surface creation, this reveal moves focus so the click has visible feedback.
 
 **Why the eager pane is created before `agent-browser open` runs.** A cold daemon boot is 1–3s. A menu that closes on a pane that appears three seconds later reads as a click that did nothing, so the pane is created synchronously and the CLI work happens behind it.
 
+**Why a session-less eager pane is inert.** `maybeRecoverStalePort` returns early when params carry no `session`, so the pane spawns no CLI of its own. That is what keeps it from firing a `stream status` at a daemon that is still booting and racing the `open` behind it.
+
 **Why the eager pane shows its own placeholder.** The idle placeholder asks for `dor ab open <url>`, wrongly telling the user to repeat the action. `Connecting to browser session…` exposes the pane's actual state.
+
+**Why the handover is a single params refresh.** Setting `session` is what reconciles the controller and connects it, so it must not land ahead of `wsPort`/`binaryPath`, and it is safe only once `agent-browser open` has returned and the daemon is up. Handing the session over even after a failed `open` lets the placeholder name what it is waiting for, instead of reporting into a menu that closed long ago.
+
+## Agent-Browser Renderer
+
+**Why one-session-one-surface is not an invariant.** `dor ab` forwards the user's command and then runs `stream status` before it asks the host for a surface, so a surface killed or render-swapped inside that window is gone by the time the trailing request arrives — and the request mints a fresh pane rather than failing, because the session is still live and needs somewhere to render.
 
 ## Agent-Browser Connection
 
@@ -20,19 +36,33 @@
 
 **Why a stale-dropped capture must leave the loop dirty.** Nothing is guaranteed to pulse the loop again: a single pointer move over a static page pulses exactly once, and that one pulse is consumed by the very capture the provisional paint supersedes. Without the dirty mark, the pane would sit on the blurry provisional frame until the page happened to change on its own.
 
+**Why every non-crisp painter must bump the draw generation.** The byte-dedup compares an incoming capture against the last crisp draw. A resting page whose crisp bytes match that draw dedups to a no-op and strands the pane on the blurry provisional frame; a freshly re-attached canvas mounts blank and has the same problem, which is why re-attach bumps it too.
+
 **Whose limitation the CSS-resolution provisional frame is.** Chromium's `Page.startScreencast` captures in DIP and exposes no DPR knob, so the stream is CSS-resolution no matter what the client asks for. That is upstream Chromium, not something agent-browser chose or could fix.
 
 ## Pop-Out
 
 **The symptom when the daemon is not killed first.** `agent-browser --headed open` against a live headless daemon reattaches to it and exits 0, so the host logs a successful headed open and the mode never changes. The user presses Pop out and gets the pane stub with no OS window anywhere, and nothing in the logs says why. That is what makes the pid-file kill and the wait-for-exit part of the sequence rather than best-effort cleanup.
 
+**Why nothing may query the daemon during the close/reopen gap.** With the old daemon dead and the new one not yet up, a `stream status` or tab query spawns a *competing* daemon at `about:blank` — agent-browser's CLI starts one on demand — and the relaunch then races two daemons for the same session. That is why the active-tab URL travels from Dormouse to the host rather than being asked for.
+
 **Why the stray-`about:blank` sweep is guarded.** The close/reopen pair can leave an extra blank tab beside the navigated one. Sweeping blanks unconditionally is the obvious fix and is wrong: a session whose only tab is legitimately blank would lose it, leaving the pane with nothing to show. Requiring that a real page be open first makes the sweep a no-op in exactly that case.
 
 ## Agent-Browser Host Capabilities
 
+**Why standalone passes a screenshot path, not bytes.** The sidecar stdio is a JSON-lines pipe shared with PTY traffic; a base64 frame on it would bloat every capture and interleave with terminal output. Handing Rust the temp-file path and letting it read the file keeps image bytes off that channel entirely.
+
 **Why `binaryPath` needs a gate of its own.** The subcommand allowlist covers arguments, not the executable: `streamStatus`, `open` and `popOut` supply their own args and each take a `binaryPath`, so an allowlist on subcommands never sees one. And because the value is persisted into the pane's params, an unchecked one is not a one-shot — it is arbitrary local execution in the extension host or the Tauri sidecar on every subsequent launch. Refusing by dropping rather than failing means a stale or hostile value degrades to "resolve it yourself".
 
 **Why the screenshot path is private.** The frame is a picture of the user's authenticated browser, written by an external process under the ambient umask, so a derivable name in the shared temp directory is readable by anything else on the machine for as long as it exists. `standalone/sidecar/clipboard-ops.js` already applies the same discipline, cleanup included, to clipboard images.
+
+## Iframe Renderer
+
+**Why a site's framing refusal is overridden.** The framing headers exist to stop a third party from framing a site to deceive its user; here the embed is the user's own `dor iframe`. That is the same trust boundary the agent-browser renderer already sits on, where Dormouse renders whatever the user points it at.
+
+**Why CSP is dropped whole rather than per-directive.** The injected shim is an inline script, so a surviving `script-src` blocks it as surely as `frame-ancestors` blocks the frame. Salvaging the remaining directives would leave a frame that looks instrumented and silently is not.
+
+**Why a grant gets its own origin instead of a path token.** A dedicated origin keeps root-relative resources and client-side routers working with no body URL rewriting, and makes the origin itself the boundary — a path token would have to survive every link, redirect and `fetch` the page makes.
 
 ## Iframe Shim
 
@@ -48,7 +78,11 @@
 
 **Why the `Origin` rewrite is conditional.** Rewriting vouches that a request came from the upstream's own origin. The grant port is enumerable, so rewriting a foreign origin would let any browser page launder a request; on WebSocket upgrades, which are not protected by CORS, that yields a readable socket the upstream may have refused. Forwarding the foreign origin unchanged leaves that decision with the upstream.
 
+**What dropping the framing controls outright would grant.** The grant port is not a secret, so any page that scanned the ephemeral range gets two things the upstream refused it: a document that answered `DENY` framed anyway, and — through the shim — that document's live URL and anchor hrefs read back. Replacing the headers with a `frame-ancestors` naming our own chain, and targeting the shim's `postMessage` at that chain rather than `'*'`, closes both.
+
 **Why no request header can recognize the embedder.** An iframe navigation carries no `Origin`, and `Sec-Fetch-Site` reads `cross-site` for our own webview and for a page that scanned the ephemeral range alike. That is what forces the recognizer to be a `frame-ancestors` the browser enforces, supplied by the one realm that knows its own chain.
+
+**Why the whole ancestor chain travels, not just the parent.** `frame-ancestors` is checked against every ancestor, and VS Code nests the extension's document two frames deep inside the workbench, so a chain built from the parent alone would not match.
 
 **Why a partial chain is no chain.** A `frame-ancestors` naming a subset of the real ancestors blocks Dormouse's own frame, which is the one embed that must always work. Failing closed to "no chain" instead leaves the caller exactly what the upstream would have served it directly, so the degraded case is safe in both directions.
 

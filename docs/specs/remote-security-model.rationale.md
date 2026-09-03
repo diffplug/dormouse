@@ -1,7 +1,24 @@
 # Remote Security Model — rationale
 
-Evidence behind [remote-security-model.md](./remote-security-model.md), keyed by
-its headings. Informative, not normative: the rules themselves live in the spec.
+> Informative companion to [remote-security-model.md](remote-security-model.md):
+> the evidence, measurements, and dead-approach history behind its rules, keyed
+> by that spec's headings. Nothing here is normative.
+
+## Passkeys
+
+**Why passkey synchronization changes nothing.** iCloud Keychain and Google
+Password Manager put the same passkey on every device in the user's account, so
+a credential that granted Host access would grant it to all of them at once, and
+to whoever compromises the account later. The model spends the passkey on
+*presence* only; the thing a Host authorizes is the per-Host Client static,
+which never syncs because it never leaves the browser that generated it.
+
+**Why both verifiers must demand the same user-presence level.** The Server and
+the Host evaluate the *same* assertion. A Server demanding user verification
+while the Host settles for presence leaves the weaker verifier deciding —
+inverting "the Host is the final authority" through a configuration difference
+rather than an attack — which is why the Server mirrors the flag into enrollment
+instead of each side reading its own environment.
 
 ## Client statics
 
@@ -21,19 +38,41 @@ that link. The Host side is unchanged either way — it only ever sees one key.
 
 ## Host Authorization
 
+**Why the read filter is hygiene rather than authorization.** Every field in a
+persisted record is attacker-choosable by anything that can write the store at
+all, so length and `hostId` checks buy nothing against that attacker; what
+authorizes a record is the local approval that minted it. The filter exists to
+keep malformed and foreign rows out of the conjunction, and it doubles as the
+pre-cutover reader: those records carry neither E2E field, so they are dropped
+rather than migrated, and the phone pairs again.
+
 **Why a delivery id is possession-only, and why that is not anonymity.** The
 Client-facing push routes have no session-scoped alternative: a session is
 authenticated to an *account*, and an account may hold several Clients, so a
 route keyed on the session would let one phone read or delete another's rows. A
 256-bit id the Host mints at approval and hands to exactly one Client makes that
 capability the only thing the route consults; listing one would turn a
-capability into a directory. What it buys is access control and nothing else: the Server still sees which endpoint each id
-registers, when, and against which Host, so it hides nothing about who a
-subscription belongs to. Treating it as an anonymity mechanism would be a
-category error, and the shared-endpoint correlation under
-[Residual metadata](#residual-metadata) is the concrete shape of that.
+capability into a directory. What it buys is access control and nothing else:
+the Server still sees which endpoint each id registers, when, and against which
+Host, so it hides nothing about who a subscription belongs to. Treating it as an
+anonymity mechanism would be a category error, and the shared-endpoint
+correlation under [Residual metadata](#residual-metadata) is the concrete shape
+of that.
 
 ## Presence proofs
+
+**Why an unbound `begin`, or a `finish` with no nonce, is refused outright.**
+Either arm would be answering a challenge that nothing ties to a ceremony — a
+signature the caller could then replay into a pairing or a connection it never
+participated in. Refusing at the route means no code path exists that mints
+presence for an unspecified purpose.
+
+**Why the Host-side verifier never throws.** Its input is attacker-supplied
+plaintext, decrypted inside the process that owns every PTY, so an exception
+escaping it is a denial-of-service surface at best and an unhandled rejection
+that takes the Host down at worst. A rejection is an ordinary denial with an
+ordinary outcome message; nothing about the failure needs to travel as an
+exception.
 
 **Why a first run costs three authenticator prompts, and every ceremony after it
 exactly one.** The three are distinct facts, each proved to a different party:
@@ -66,6 +105,27 @@ code that a camera, a screenshot, and a photograph can all reach names the
 machine to anyone who glances at the screen, while the encrypted outcome
 delivers it to the one phone that completed the ceremony.
 
+**Why a mint whose keygen straddles a teardown is refused.** `generateKey` is
+async, so a relay socket can drop between the call and its resolution. Inserting
+the result would leave a one-use invitation key alive for a socket that no
+longer exists — a code on screen that nothing can complete, and material outside
+the disposal path that tears down everything else the socket owned.
+
+**Why the confirmation runs phone-to-Host, and why one attempt.** The person is
+looking at the Host, so the Host must be the one *checking* rather than
+displaying: a code the Host showed could be read by anyone who can see the
+screen or a screenshot of it, while a code only the phone shows proves the
+person holding the phone is the person at the keyboard. Two digits is what a
+person will actually retype, and the whole 1-in-100 guess bound evaporates with
+retries — a hundred attempts against a two-digit secret is not a secret. Spending
+the invitation on the first wrong answer costs a QR re-render.
+
+**Why every outcome is reported in fixed local copy.** The wire carries a
+discriminant, not a message. Rendering text a peer supplied would let a hostile
+Client paint "paired" on a Host that denied it, or a hostile relay paint success
+on a phone whose code never matched; local copy per outcome means a mismatch
+cannot be made to read as a success in either direction.
+
 **Why an unparseable first control spends the code.** The alternative is a
 retry, and a retry is what turns a single-use invitation into an oracle a peer
 can probe. The step expects exactly one message shape; a peer that cannot
@@ -78,6 +138,32 @@ chain and reaps synchronously, so a code can be retired — by TTL, by the cap, 
 by a lost relay socket — while message 1 is still mid-flight. Reserving it
 afterwards would announce a state change for an entry that is already gone,
 which the QR panel would render as a scan that never happened.
+
+## Connection
+
+**Why a failure before `Split` gets only a generic outer error.** There is no
+session to encrypt a denial on: everything before `Split` is handshake state,
+and any reply would necessarily be plaintext the relay can read and a stranger
+can provoke. A generic outer error tells the Server's pipe that this ceremony is
+over without telling anyone which of the handshake, the challenge, or the ACL
+was the reason — and without letting a flood of `init` frames buy a reply each.
+
+## Push sealing
+
+**Why a push needs a construction of its own.** It is the only message the two
+endpoints exchange with no live session between them: the Host is awake, the
+phone is asleep, and the Server holds the envelope until the push service
+delivers it. Nothing in the Noise session survives that gap, and reconstructing
+one would mean waking the phone to run a handshake before it could show a
+notification.
+
+**Why never a Noise `CipherState` and never Noise's HKDF.** A transport state is
+a shared counter between two live speakers. A phone may receive one push, none,
+or three, days apart and out of order, so a counter-based state would either
+desynchronize permanently or have to tolerate gaps — which is the property Noise
+transport deliberately refuses. A fresh salt-derived key per message has no
+ordering to lose, and deriving it outside Noise's own HKDF keeps the push
+construction from sharing a chaining key with a session it must never affect.
 
 ## Host bounds
 
@@ -100,6 +186,12 @@ that can sign in: a synced or stolen passkey is documented as buying only "the
 ability to ask", and the caps are what stop asking from being a denial of
 service.
 
+**Why a pending pairing gets the pairing TTL and a pending connection the
+challenge TTL.** A pairing is waiting on a human to read two digits off a phone
+and type them, so its deadline is the one a person can meet; a connection is
+waiting on nothing but software, so it dies with the Host challenge it was
+issued against and buys no extra window.
+
 **Why an eviction is answered, and a refused handshake is not.** Evicting a
 pending pairing drops something a person may be looking at, so it sends
 `superseded` and dismisses the modal. A connection `init` that never decrypted
@@ -120,10 +212,36 @@ who can reach the relay could fill it and lock out the phones that are actually
 paired. Applied after the presence proof and the ACL conjunction, the only thing
 that can fill it is authorized phones.
 
+**Why the first invalid ciphertext destroys the session.** A stream cipher has
+no resynchronization point: once a nonce is in doubt there is no later frame
+that can be trusted to re-anchor it, so "skip the bad one and continue" would
+mean accepting an attacker's choice of where the stream resumes. Tearing down
+costs the phone one reconnection.
+
+**Why the raw frame is bounded before `JSON.parse`, and the socket gets the same
+number.** Every other guard reads a value the parse already produced, so the
+parse itself is the first thing an oversized frame reaches — bounding the
+received string is the only check that runs ahead of it. Handing the same
+number to the socket implementation's `maxPayload`, where it takes one, means an
+oversized frame is refused before it is ever buffered rather than after.
+
+**Why the reaper is armed by a timer and not only by traffic.** A Host whose
+relay never delivers another frame — a hostile relay's simplest move — would
+otherwise hold invitations, pending ceremonies, and idle sessions forever, since
+every other trigger is an inbound event that relay controls. The timer runs on
+the Host's own clock over absolute timestamps, so nothing the relay does or
+withholds changes when state is reclaimed.
+
 **Why so little refreshes the idle deadline.** Everything the spec excludes is
 something a Client that has gone silent still produces — a phone in a pocket, a
 relay replaying, a socket a proxy is keeping warm. Only a message this Host
 decrypted on the session's own cipher is evidence the paired phone is there.
+
+**Why losing the relay socket disposes invitations too.** The one-use key behind
+a displayed code belongs to the socket it was minted over: the Client that scans
+it will arrive on a *new* socket, against a Host that no longer holds the
+private half, and there is no path that completes. Keeping the entry would leave
+a code on screen that cannot pair and material alive that nothing will consume.
 
 ## Noise suite
 
@@ -138,6 +256,12 @@ the runtimes this ships to:
   protocol name is part of the transcript, so substituting the cipher is a
   different protocol rather than a configuration choice. A pinned, audited
   JavaScript implementation was the smaller risk.
+
+**Why a failed decrypt must not advance the counter.** The counter is shared
+state between two speakers that never renegotiate it. If a rejected frame
+advanced it, one injected ciphertext would put the receiver a nonce ahead of the
+real sender, and every subsequent genuine frame would fail — an unauthenticated
+peer locking out an authenticated one for the cost of a single packet.
 
 **Why the vector comes from Cacophony.** An expected value computed by the
 implementation under test proves only that it is self-consistent. Cacophony is
@@ -154,6 +278,12 @@ so `server-lib-common/src/security/noise.ts`'s header is the single copy.
 
 ## Host identity
 
+**Why the mint runs before the enrollment request.** A successful
+`POST /api/host/enroll` appends a `hosts.json` row on the Server and spends the
+installer's single-use token, and the Host can undo neither. Minting afterwards
+means a runtime that turns out to lack X25519 has already consumed the operator's
+one-shot credential and left a row nothing can use.
+
 **Why a missing static is backfilled at start rather than gated on.** Minting
 runs once, before enrollment, and is never retried afterwards — so a transient
 WebCrypto failure during that one attempt would leave an enrollment the Server
@@ -162,6 +292,20 @@ turns that into a permanently un-enrolled machine over a moment's failure, and
 the operator's only recovery is deleting `hosts.json` on the Server. The
 backfill persists before the Host runs, so the alternative it replaces — a Host
 running on a static it has not yet written — cannot occur either.
+
+**Why a halves mismatch keeps the Host down.** A private half that does not
+derive its recorded public half is a corrupt state file, but starting anyway
+would not present it as one: the Host would come up under a *different* identity
+than every paired Client has pinned, and each of those Clients would read the
+change as the Host-impersonation signal it is designed to raise. Failing loudly
+at boot is the only outcome that names the real fault.
+
+**Why the probe answers `false` instead of throwing.** Its callers are boot-path
+and pre-ceremony gates — the Host's start and Pocket's sign-in, setup, pairing
+and connection screens — where an exception is an unhandled rejection in a
+context with no error boundary. A missing WebCrypto (an insecure context, an old
+runtime) must read as "unsupported, show the upgrade requirement", which is the
+same answer as a curve the runtime rejects.
 
 ## Client static loss
 
