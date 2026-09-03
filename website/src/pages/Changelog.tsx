@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Link, useParams, type MetaArgs } from "react-router";
 import DocsLayout from "../components/DocsLayout";
-import { ACCENT_TEXT_CLASS } from "../components/docs-tokens";
+import { ACCENT_TEXT_CLASS, SCROLL_MT_CLASS } from "../components/docs-tokens";
 import changelog from "../data/changelog.json";
 import { type TocEntry } from "../lib/docs-pages";
 import { siteMeta } from "../lib/site-meta";
@@ -128,7 +128,7 @@ function ReleaseArticle({ release }: { release: ChangelogRelease }) {
   const date = formatDate(release.date);
 
   return (
-    <article id={release.tag} className="scroll-mt-24 border-t border-[var(--color-text)]/10 py-8">
+    <article id={release.tag} className={`${SCROLL_MT_CLASS} border-t border-[var(--color-text)]/10 py-8`}>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-baseline sm:justify-between">
         <div>
           <h2 className="font-display text-2xl text-[var(--color-text)]">
@@ -166,19 +166,27 @@ function ReleaseArticle({ release }: { release: ChangelogRelease }) {
 export const CHANGELOG_TOC_RELEASES = 5;
 
 /**
- * This page's table of contents: the most recent releases, newest first.
+ * The rail's entries for whichever releases the page is showing.
+ *
+ * **Must** be derived from what actually renders, not from every release:
+ * `/changelog/after/:version` filters the list, so a constant taken off the
+ * newest five would link to anchors the filtered page never emits — and that
+ * is the URL the standalone updater opens (`standalone/src/updater.ts`), where
+ * a reader one version behind sees one article. Pinned by
+ * `website/src/lib/docs-rail.test.tsx`.
  *
  * Each entry is anchored on the tag, which is both the id `ReleaseArticle`
- * gives its `<article>` and the text its `<h2>` shows. Pinned by
- * `website/src/pages/Changelog.test.tsx`.
+ * gives its `<article>` and the text its `<h2>` shows.
  */
-export const CHANGELOG_TOC: TocEntry[] = RELEASES.slice(0, CHANGELOG_TOC_RELEASES).map(
-  (release) => ({ id: release.tag, text: release.tag, children: [] }),
-);
+export function changelogToc(visible: readonly ChangelogRelease[]): TocEntry[] {
+  return visible
+    .slice(0, CHANGELOG_TOC_RELEASES)
+    .map((release) => ({ id: release.tag, text: release.tag, children: [] }));
+}
 
 function FilterNotice({ children }: { children: ReactNode }) {
   return (
-    <div className="mb-8 border-l-2 border-[var(--color-caramel)] pl-4 text-sm text-[var(--color-text)]/75">
+    <div className="mb-8 border-l-2 border-[var(--docs-accent)] pl-4 text-sm text-[var(--color-text)]/75">
       {children}{" "}
       <Link to="/changelog" className={`${ACCENT_TEXT_CLASS} hover:underline`}>
         Show all releases.
@@ -202,7 +210,11 @@ export default function Changelog() {
       : RELEASES;
 
   return (
-    <DocsLayout activePath="/changelog" intro="Release notes for Dormouse." toc={CHANGELOG_TOC}>
+    <DocsLayout
+      activePath="/changelog"
+      intro="Release notes for Dormouse."
+      toc={changelogToc(visibleReleases)}
+    >
       {hasInvalidFilter ? <FilterNotice>No such release "{versionParam}".</FilterNotice> : null}
 
       {baselineVersion ? (

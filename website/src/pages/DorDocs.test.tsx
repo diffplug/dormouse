@@ -22,4 +22,27 @@ describe("dor CLI reference outline", () => {
       expect(headingLevel.get(child.id)).toBe((parent ?? 0) + 1);
     }
   });
+
+  it("keeps each command's own labels below that command's heading", () => {
+    // Command sections carry their own `FLAGS` / `Text output:` headings. Left
+    // fixed while the commands moved down a level, each command and its labels
+    // become one flat run — worse than the outline the nesting replaced.
+    const headings = [...markup.matchAll(/<h([1-6])((?:\s[^>]*)?)>/g)].map(([, level, attrs]) => ({
+      level: Number(level),
+      id: /id="([^"]+)"/.exec(attrs)?.[1],
+    }));
+    const commandIds = new Set(cli.commands.map((c) => c.id));
+    let commandLevel;
+    let checked = 0;
+    for (const heading of headings) {
+      if (heading.id !== undefined) {
+        commandLevel = commandIds.has(heading.id) ? heading.level : undefined;
+        continue;
+      }
+      if (commandLevel === undefined) continue;
+      checked += 1;
+      expect(heading.level).toBeGreaterThan(commandLevel);
+    }
+    expect(checked).toBeGreaterThan(0);
+  });
 });

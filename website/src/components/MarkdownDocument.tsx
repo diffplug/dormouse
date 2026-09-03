@@ -9,7 +9,15 @@
  * See docs/specs/website-docs.md -> Markdown rendering contract.
  */
 import { Fragment, type ReactNode } from "react";
-import { CODE_CLASS, LINK_CLASS, PRE_CLASS, TABLE_CLASS, TABLE_ROW_CLASS, TABLE_WRAP_CLASS } from "./docs-tokens";
+import {
+  CODE_CLASS,
+  LINK_CLASS,
+  PRE_CLASS,
+  SCROLL_MT_CLASS,
+  TABLE_CLASS,
+  TABLE_ROW_CLASS,
+  TABLE_WRAP_CLASS,
+} from "./docs-tokens";
 
 export type InlineNode =
   | { type: "text"; value: string }
@@ -89,7 +97,7 @@ function Inline({ nodes }: { nodes: InlineNode[] }): ReactNode {
   });
 }
 
-const HEADING_BASE = "font-display scroll-mt-24";
+const HEADING_BASE = `font-display ${SCROLL_MT_CLASS}`;
 /** Size per depth; the shared base is applied alongside. */
 const HEADING_TEXT: Record<number, string> = {
   1: "text-3xl",
@@ -201,7 +209,7 @@ function Block({ node }: { node: BlockNode }): ReactNode {
       );
     case "blockquote":
       return (
-        <blockquote className="mb-4 border-l-2 border-[var(--color-caramel)]/50 pl-4 opacity-80">
+        <blockquote className="mb-4 border-l-2 border-[var(--docs-accent)]/50 pl-4 opacity-80">
           <Blocks nodes={node.children} />
         </blockquote>
       );

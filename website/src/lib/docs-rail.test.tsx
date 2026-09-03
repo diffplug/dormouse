@@ -8,11 +8,12 @@
  * exactly why the check belongs here once rather than in each page's own test.
  */
 import { renderToStaticMarkup } from "react-dom/server";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, Route, Routes } from "react-router";
 import { describe, expect, it } from "vitest";
 import { DOCS_PAGES, type TocEntry } from "./docs-pages";
 
-import Changelog, { CHANGELOG_TOC } from "../pages/Changelog";
+import Changelog, { changelogToc } from "../pages/Changelog";
+import changelog from "../data/changelog.json";
 import SupplyChain, { SUPPLY_CHAIN_TOC } from "../pages/SupplyChain";
 import SelfHostDocs from "../pages/SelfHostDocs";
 import AgentSkillDocs from "../pages/AgentSkillDocs";
@@ -23,7 +24,7 @@ import cli from "../data/docs.cli.json";
 
 /** Every page in the rail, with the entries it hands the rail. */
 const PAGES: Record<string, { element: React.ReactElement; toc: TocEntry[] }> = {
-  "/changelog": { element: <Changelog />, toc: CHANGELOG_TOC },
+  "/changelog": { element: <Changelog />, toc: changelogToc(changelog.releases) },
   "/supply-chain": { element: <SupplyChain />, toc: SUPPLY_CHAIN_TOC },
   "/docs/self-host": { element: <SelfHostDocs />, toc: selfhost.toc },
   "/docs/agent-skill": { element: <AgentSkillDocs />, toc: skill.toc },
@@ -54,4 +55,24 @@ describe("every page in the rail", () => {
       for (const id of ids) expect(rendered).toContain(id);
     });
   }
+
+  it("keeps the changelog rail honest on the filtered route the updater opens", () => {
+    // /changelog/after/:version renders only releases newer than the baseline.
+    // A rail built from every release links into articles that route omits.
+    const baseline = changelog.releases[2];
+    const markup = renderToStaticMarkup(
+      <MemoryRouter initialEntries={[`/changelog/after/${baseline.version}`]}>
+        <Routes>
+          <Route path="/changelog/after/:version" element={<Changelog />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const rendered = new Set([...markup.matchAll(/id="([^"]+)"/g)].map(([, id]) => id));
+    const shown = changelog.releases.slice(0, 2);
+    const toc = changelogToc(shown);
+    expect(toc.length).toBe(shown.length);
+    for (const entry of toc) expect(rendered).toContain(entry.id);
+    // And nothing older leaks in.
+    expect(rendered).not.toContain(baseline.tag);
+  });
 });

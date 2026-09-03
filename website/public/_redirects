@@ -1,4 +1,5 @@
 # Follows DOCS_DEFAULT_PATH in website/src/lib/docs-pages.ts; checkDocsEntrypoint
 # pins the pair (docs/specs/website-docs.md -> Reference page chrome).
 /docs /docs/agent-skill 302
+/docs/ /docs/agent-skill 302
 /changelog/after/* /__spa-fallback 200

@@ -8,7 +8,7 @@
  *
  * See docs/specs/website-docs.md -> Reference page chrome.
  */
-import { Suspense, lazy, useEffect, useState, type ReactNode } from "react";
+import { Component, Suspense, lazy, useEffect, useState, type ReactNode } from "react";
 import { ListIcon, XIcon } from "@phosphor-icons/react";
 import { useRestoredTheme } from "dormouse-lib/lib/themes";
 import SiteHeader from "./SiteHeader";
@@ -21,6 +21,24 @@ import { DOCS_THEME_ID } from "../lib/docs-theme";
  *  critical path — including /changelog/after, which the standalone updater
  *  opens and which is SPA-served, so its chunks arrive as a waterfall. */
 const DocsThemeControl = lazy(() => import("./DocsThemeControl"));
+
+/**
+ * Renders nothing if its child fails to load.
+ *
+ * **Must** wrap anything lazily imported here. A reader holding cached HTML
+ * across a redeploy requests a hashed chunk that no longer exists; without
+ * this the rejected import throws through `Suspense` to the route boundary and
+ * replaces the whole article — with a floating colour picker as the cause.
+ */
+class OptionalChunk extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  render() {
+    return this.state.failed ? null : this.props.children;
+  }
+}
 
 /** Repaints the site's own tokens from the picked theme; see index.css. */
 const THEMED_BODY_CLASS = "docs-themed";
@@ -187,6 +205,9 @@ export default function DocsLayout({
             <div
               id="docs-nav-drawer"
               className="max-h-[70dvh] overflow-y-auto border-t border-[var(--color-text)]/15 px-4 py-4 md:px-6"
+              // A section link is a same-document hash, so nothing navigates
+              // and the drawer would sit over the section just jumped to.
+              onClick={() => setNavOpen(false)}
             >
               <DocsNav activePath={activePath} toc={toc} />
             </div>
@@ -195,7 +216,7 @@ export default function DocsLayout({
 
         <div className="mx-auto max-w-6xl px-4 pt-8 md:px-6">
           <div className="grid gap-10 lg:grid-cols-[14rem_1fr] lg:gap-14">
-            <aside className="hidden lg:block">
+            <aside className="hidden lg:block" aria-hidden={navOpen ? true : undefined}>
               {/* Sticky and height-bounded so the sections below can scroll
                   while the page list stays put. */}
               <DocsNav
@@ -236,9 +257,11 @@ export default function DocsLayout({
         </div>
       </div>
 
-      <Suspense fallback={null}>
-        <DocsThemeControl />
-      </Suspense>
+      <OptionalChunk>
+        <Suspense fallback={null}>
+          <DocsThemeControl />
+        </Suspense>
+      </OptionalChunk>
     </>
   );
 }

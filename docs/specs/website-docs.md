@@ -251,11 +251,12 @@ the same control. A second "on this page" would restate half of it.
 
 **The page list never shrinks; the expanded sections scroll.** The rail is a
 bounded flex column whose section list is the only part that gives up space, so
-everything shows when it fits and the five pages stay reachable when it does
+everything shows when it fits and the page list stays reachable when it does
 not. `/docs/dor` nests its subcommands under one `Commands` heading rather than
-listing fourteen entries beside four on every other page, and renders them as
-`h3`: a reader on a screen reader navigates the outline, not the rail, so the
-two must agree (`website/src/pages/DorDocs.test.tsx`).
+listing fourteen entries beside four elsewhere. A reader on a screen reader
+navigates the outline rather than the rail, so **must** keep the two agreeing:
+the commands render a level below that heading, and their own labels a level
+below them again (`website/src/pages/DorDocs.test.tsx`).
 
 **`/docs` is an entrypoint, not an index.** It redirects to the page
 `DOCS_DEFAULT_PATH` names — a 302, because the target is a judgement call we
@@ -520,8 +521,11 @@ spec.
 | `dor/skill.md` | The bundled agent skill, rendered exactly at `/docs/agent-skill` |
 | `dor/test/snapshots/help/` | Tested CLI help, the source for `/docs/dor` |
 | `website/src/lib/site-meta.ts` | Every page's title, description, canonical, and social cards |
-| `website/src/lib/docs-pages.ts` | Which reference pages exist; the routes, the prerender list, the docs footer, and the lint all read it |
-| `website/src/routes.ts`, `website/src/components/SiteHeader.tsx` | The published routes and the header that omits `/docs` |
+| `website/src/lib/docs-pages.ts` | The rail's pages and their order; routes, prerender, rail, and lint all read it |
+| `website/src/lib/docs-rail.test.tsx` | Every entry anchors on an id its page renders |
+| `website/src/pages/Changelog.tsx`, `website/src/pages/SupplyChain.tsx` | Rail pages deriving their own sections |
+| `website/public/_redirects` | The `/docs` entrypoint and the changelog SPA fallback |
+| `website/src/routes.ts`, `website/src/components/SiteHeader.tsx` | The published routes and the marketing nav, which carries `Docs` on desktop |
 | `website/scripts/docs-parser.js` (+ `.test.js`) | Markdown subset parser, slugger, `<img>` allowlist |
 | `website/scripts/help-parser.js` (+ `.test.js`) | Narrow CLI-help parser with losslessness |
 | `website/scripts/generate-docs.js` | Codegen: the delta tables, `buildDocument`, `localizeSiteLinks`, `resolveRemovedAnchors`, `linkSkillHeadings` |

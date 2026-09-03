@@ -4,7 +4,7 @@ import cargoDeps from "../data/dependencies-cargo.json";
 import npmDeps from "../data/dependencies-npm.json";
 import runtimeDeps from "../data/dependencies-runtime.json";
 import DocsLayout from "../components/DocsLayout";
-import { LINK_CLASS } from "../components/docs-tokens";
+import { LINK_CLASS, SCROLL_MT_CLASS } from "../components/docs-tokens";
 import { type MetaArgs } from "react-router";
 import { type TocEntry } from "../lib/docs-pages";
 import { siteMeta } from "../lib/site-meta";
@@ -189,7 +189,7 @@ function DependencySection({ section }: { section: SupplyChainSection }) {
       <div className="mb-4 flex flex-col gap-1 border-b border-[var(--color-text)]/10 pb-3 md:flex-row md:items-end md:justify-between">
         <div>
           <div className="flex items-baseline gap-2">
-            <h2 id={section.id} className="scroll-mt-24 font-display text-xl">{section.title}</h2>
+            <h2 id={section.id} className={`${SCROLL_MT_CLASS} font-display text-xl`}>{section.title}</h2>
             <div className="font-mono text-md opacity-50">({section.count})</div>
           </div>
           <p className="text-sm opacity-60 whitespace-pre-line">{section.description}</p>

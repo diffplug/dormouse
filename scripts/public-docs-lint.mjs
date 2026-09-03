@@ -228,6 +228,12 @@ function checkRoutesToReferences() {
     const url = SITE_ORIGIN + page.path;
     for (const source of page.linkedFrom ?? []) {
       const rel = README_OF[source];
+      // Node strips the `"guide" | "root-readme"` union at runtime, so a typo
+      // here would otherwise skip the page's check and still print "passed".
+      if (!rel) {
+        fail(`docs-pages.ts: ${page.path} names an unknown linkedFrom "${source}"`);
+        continue;
+      }
       if (!parsed[rel]) continue;
       if (!linksIn(rel).some((href) => href === url || href.startsWith(`${url}#`))) {
         fail(`${rel}: does not link to ${url}`);
@@ -235,11 +241,12 @@ function checkRoutesToReferences() {
     }
   }
 
-  // The homepage is the page most able to strand a reference: a section can be
-  // rewritten or cut and take its only link with it. Checked as exact paths,
-  // because `/docs` is an entrypoint rather than a page and a prefix test would
-  // be satisfied by a link to it.
-  const paths = linked.map((page) => page.path);
+  // The homepage owes a link to every `/docs` page, not only the ones a README
+  // also carries: it is the page most able to strand one, and a page added
+  // without a `linkedFrom` would otherwise ship reachable from the rail alone.
+  // Checked as exact paths, because `/docs` is an entrypoint rather than a page
+  // and a prefix test would be satisfied by a link to it.
+  const paths = DOCS_PAGES.map((page) => page.path).filter((path) => path.startsWith('/docs/'));
   const hrefs = [...src[HOMEPAGE].matchAll(/href="(\/docs[^"]*)"/g)].map(([, href]) => href);
   const satisfies = (href, path) => href === path || href.startsWith(`${path}#`);
   for (const path of paths) {

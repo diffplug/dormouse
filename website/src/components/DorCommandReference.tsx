@@ -29,14 +29,21 @@ export type CommandSection = {
  * `depth` keeps the document outline agreeing with the table of contents. The
  * eleven subcommands sit under the page's `Commands` heading, so they render as
  * `h3`; the root `dor` section is that heading's peer and keeps the default.
+ *
+ * **Must** push a section's own labels one level below its heading. Left fixed
+ * at `h3` while the commands moved to `h3`, every `FLAGS` and `Text output:`
+ * became a peer of the command it belongs to, flattening eleven commands and
+ * their labels into one run for a reader navigating by heading. Pinned by
+ * `website/src/pages/DorDocs.test.tsx`.
  */
 export default function DorCommandReference({
   section,
-  depth,
+  depth = 2,
 }: {
   section: CommandSection;
   depth?: number;
 }) {
+  const LabelTag = `h${Math.min(depth + 1, 6)}` as "h3";
   return (
     <section className="mb-14">
       <AnchoredHeading id={section.id} depth={depth} spacing="mb-1">{section.title}</AnchoredHeading>
@@ -56,7 +63,7 @@ export default function DorCommandReference({
 
       {section.definitions.map((group, i) => (
         <div key={i} className="mb-6">
-          <h3 className="mb-2 font-display text-sm uppercase tracking-wide opacity-50">{group.label}</h3>
+          <LabelTag className="mb-2 font-display text-sm uppercase tracking-wide opacity-50">{group.label}</LabelTag>
           <div className={TABLE_WRAP_CLASS}>
             <table className={TABLE_CLASS}>
               <tbody>
@@ -76,7 +83,7 @@ export default function DorCommandReference({
 
       {section.blocks.map((block, i) => (
         <div key={i} className="mb-4">
-          <h3 className="mb-2 font-display text-sm uppercase tracking-wide opacity-50">{block.label}</h3>
+          <LabelTag className="mb-2 font-display text-sm uppercase tracking-wide opacity-50">{block.label}</LabelTag>
           <pre className={PRE_CLASS}>
             <code>{block.body}</code>
           </pre>

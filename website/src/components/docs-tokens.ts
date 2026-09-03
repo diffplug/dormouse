@@ -27,6 +27,16 @@ export const ACCENT_TEXT_CLASS = "text-[var(--docs-accent)]";
 export const ACCENT_HOVER_TEXT_CLASS = "hover:text-[var(--docs-accent)]";
 export const ACCENT_HOVER_BORDER_CLASS = "hover:border-[var(--docs-accent)]";
 
+/**
+ * How far a jumped-to anchor clears the chrome above it.
+ *
+ * Below `lg` the docs carry a sticky nav bar (~45px) under the fixed site
+ * header (64px, 80px at `md`) as well; at `lg` the bar is gone and only the
+ * header remains. **Must** stay ahead of both, or a tapped rail entry lands
+ * the heading underneath them.
+ */
+export const SCROLL_MT_CLASS = "scroll-mt-28 md:scroll-mt-32 lg:scroll-mt-24";
+
 /** A navigation link that sits back until hovered, as the rail's do. */
 export const MUTED_ACCENT_LINK_CLASS = `opacity-70 hover:opacity-100 ${ACCENT_HOVER_TEXT_CLASS}`;
 

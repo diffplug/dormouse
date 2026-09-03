@@ -12,6 +12,12 @@
  * way — long-form material reached from the rail rather than from the
  * marketing nav.
  *
+ * **Must stay erasable-syntax TypeScript with no imports.**
+ * `scripts/public-docs-lint.mjs` imports this module directly and relies on
+ * Node's type stripping, which erases types but resolves nothing: an
+ * extensionless specifier, a path alias, or a browser-only import here fails
+ * `pnpm test` at its first step, far from whatever change caused it.
+ *
  * See docs/specs/website-docs.md -> Reference page chrome.
  */
 export type DocsPage = {
