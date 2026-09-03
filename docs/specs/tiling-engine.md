@@ -190,7 +190,7 @@ The versioned Lath layout rides inside `PersistedSession`, and saves write only 
 
 **The session read boundary resolves the layout once**: `persistedLathLayout` returns the native `lathLayout` when present, else undefined. Everything downstream — the resume gate in `reconnect.ts` (leaf set must match the visible pane set), the `restoredLathLayout` prop threading, the engine's `seed` — sees only a Lath layout, and on an absent, structurally invalid, or empty one `seed` falls back to fresh panes.
 
-Source of truth: `LeafMeta` / `LathPersistedLayout` / `lathLayoutFromStore` / `isLathPersistedLayout` in `lib/src/lib/lath/persistence.ts`; `lathLayout` / `token` in `lib/src/lib/session-types.ts`; the save in `use-session-persistence.ts` / `session-save.ts`; `persistedLathLayout` in `session-restore.ts`, consumed by `reconnect.ts`.
+Source of truth: `LeafMeta` / `LathPersistedLayout` / `lathLayoutFromStore` / `isLathPersistedLayout` in `lib/src/lib/lath/persistence.ts`; `lathLayout` / `token` in `lib/src/lib/session-types.ts`; the save in `lib/src/components/wall/use-session-persistence.ts` / `lib/src/lib/session-save.ts`; `persistedLathLayout` in `lib/src/lib/session-restore.ts`, consumed by `lib/src/lib/reconnect.ts`.
 
 ## Testing
 

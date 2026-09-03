@@ -1,6 +1,6 @@
 /**
  * The X25519 capability probe
- * (docs/specs/remote-security-model.md -> E2E identities and presence).
+ * (docs/specs/remote-security-model.md -> Host identity).
  */
 
 import { test } from 'node:test';

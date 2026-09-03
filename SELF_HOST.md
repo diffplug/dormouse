@@ -705,7 +705,7 @@ Each fails silently unless encoded in the scripts:
 - **Stopping a Scheduled Task does not reap its grandchildren.** (Windows.)
   **Before every start, reap processes belonging to the install root by image
   path and command line, never image name**, and never accept a bare health 200.
-  Source of truth: `Get-DormouseProcess` / `Get-ListeningRelease`.
+  Source of truth: `Get-DormouseProcess` / `Get-ListeningRelease` in `deploy/local/install-windows.ps1`.
 - **Windows `tailscaled` serves its local API to one interactive session at a
   time.** Preflight must match the
   `401 Unauthorized: Tailscale already in use by <user>` string and name the

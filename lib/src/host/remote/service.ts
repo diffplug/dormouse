@@ -503,7 +503,7 @@ export class RemoteHostService {
    * The Noise static gate. **A Host without a usable one does not start**, and
    * so reads as un-enrolled with the Settings dialog offering enrollment again —
    * that is the entire Host-state version
-   * (`docs/specs/remote-security-model.md` → Identities and storage).
+   * (`docs/specs/remote-security-model.md` → Host identity).
    *
    * Two cases, and they end differently on purpose:
    *

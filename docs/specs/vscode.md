@@ -14,7 +14,7 @@ The webview is the shared `lib/` frontend, unmodified for this host (`docs/specs
 
 ### Invariants (VS Code-specific)
 
-- **Capture, then save, then kill.** `deactivate()` runs the agent-recovery capture *first* and both kills *last*, the state flush and live-PTY refresh in between. Source of truth: `extension.ts:deactivate()`.
+- **Capture, then save, then kill.** `deactivate()` runs the agent-recovery capture *first* and both kills *last*, the state flush and live-PTY refresh in between. Source of truth: `deactivate()` in `vscode-ext/src/extension.ts`.
 - **Alert state is global.** One module-level `AlertManager` in `message-router.ts` is shared across all routers, survives router disposal, and is fed by PTY data regardless of webview visibility.
 - **WATCHING rules are host-authoritative.** The first webview after extension-host startup seeds the shared host rule set and **no later webview may replace it**.
 - **Never let a resuming router steal another webview's PTYs.** Each router tracks its PTYs in `ownedPtyIds`; a module-level `globalOwnedPtyIds` set enforces it.

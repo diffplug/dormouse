@@ -70,6 +70,16 @@ How many Workspaces a Window shows at once is host-specific:
 - **Standalone** holds many Workspaces in one Window, mounting only the **active** one; switching mounts the target's Surfaces and unmounts the previous one's, PTYs staying `Live` with Activity flowing. Tab strip and mounting are staged (`docs/specs/layout.md` `## Future`, workspaces-rollout).
 - **VS Code** maps one Workspace to one webview, several visible at once: the sidebar/panel `WebviewView` is the default Workspace, each `dormouse.open` editor-tab `WebviewPanel` an independent one owning its Sessions' PTYs and browser Surfaces (`docs/specs/vscode.md`).
 
+### Wall chrome
+
+| Term | Meaning |
+|---|---|
+| **Wall** | The component rendering one Workspace: its Panes plus the Baseboard (`lib/src/components/Wall.tsx`) |
+| **Baseboard** | The always-visible strip along the bottom of a Wall, holding Doors, the update notice, and the shortcut hint |
+| **Door** | A minimized Surface's tile on the Baseboard — the `Doored` View state |
+
+`docs/specs/layout.md` owns their placement, sizing, and interaction.
+
 ### Workspace union status
 
 A Workspace projects a **union status** over its member Surfaces' Activity:

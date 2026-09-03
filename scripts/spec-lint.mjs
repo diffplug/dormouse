@@ -36,11 +36,33 @@
  *  10. Word-budget ratchet: every checked file stays under its budget in
  *      scripts/spec-word-budgets.json. Growth past the budget fails; the fix
  *      is to cut, or to raise the budget deliberately in the same PR. Budgets
- *      carry small headroom so routine edits don't trip it.
+ *      carry small headroom so routine edits don't trip it. Words are counted
+ *      by scripts/spec-words.mjs, which ignores table plumbing.
+ *  11. Every `(rationale)` marker in a spec sits under a heading (or an
+ *      ancestor heading) that has an entry in the paired rationale file — a
+ *      marker asserts the evidence lives there. A spec with markers but no
+ *      rationale file fails.
+ *  12. A `Source of truth:` paragraph names at least one repo path check 4
+ *      can verify, never a bare file name (`Wall.tsx` dodges check 4 and
+ *      rots silently), and every `symbol` it places `in` a file exists in
+ *      that file.
+ *  13. Every citation of a spec section — `docs/specs/foo.md -> "Heading"`,
+ *      `→ Heading`, `§Heading`, or `` `## Future` `` — in a tracked source
+ *      file or spec names a heading (quoted forms may also name a bolded
+ *      phrase) that exists in the cited file. Code comments cite specs this
+ *      way in hundreds of places and nothing else keeps them honest.
+ *  14. A rationale file states no rule: no paragraph or bullet opens with a
+ *      bolded imperative (**Never …**, **Must …**, …). Those belong in the
+ *      spec.
+ *  15. A spec of RATIONALE_REQUIRED_WORDS or more has a rationale file;
+ *      without one every piece of evidence sits above the fold and the
+ *      ratchet cannot see it.
  */
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, dirname, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
+import { countWords } from './spec-words.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const SPECS_DIR = 'docs/specs';
@@ -290,7 +312,7 @@ for (const spec of foldCheckedFiles) {
 const BUDGETS_FILE = 'scripts/spec-word-budgets.json';
 const budgets = JSON.parse(read(BUDGETS_FILE));
 for (const rel of allFiles) {
-  const words = read(rel).split(/\s+/).filter(Boolean).length;
+  const words = countWords(read(rel));
   const budget = budgets[rel];
   if (budget === undefined) {
     problems.push(`${BUDGETS_FILE}: no budget for ${rel} — add one (currently ${words} words)`);
@@ -304,6 +326,169 @@ for (const rel of allFiles) {
 for (const rel of Object.keys(budgets)) {
   if (!allFiles.includes(rel)) {
     problems.push(`${BUDGETS_FILE}: stale entry for missing file ${rel}`);
+  }
+}
+
+// --- Check 11: (rationale) markers sit under a heading the rationale keys -----
+// A marker is the word `rationale` on its own inside a parenthetical:
+// `(rationale)`, `(rationale; …)`, `(…; rationale)`. A continuation line that
+// closes a parenthetical opened on the line before also counts.
+const MARKER_RE = /\((?:[^()]*;\s*)?rationale(?:\s*;[^()]*)?\)|^[^()]*\brationale\)/;
+for (const spec of specFiles) {
+  const rat = spec.replace(/\.md$/, '.rationale.md');
+  const hasRat = existsSync(join(ROOT, rat));
+  const keys = hasRat
+    ? new Set(headings(rat).filter((h) => h.level === 2).map((h) => slug(h.title)))
+    : new Set();
+  const stack = [];
+  proseLines(spec).forEach((line, i) => {
+    const h = /^(#{1,6})\s+(.*)$/.exec(line);
+    if (h) {
+      const level = h[1].length;
+      while (stack.length && stack[stack.length - 1].level >= level) stack.pop();
+      stack.push({ level, slug: slug(h[2]) });
+      return;
+    }
+    if (!MARKER_RE.test(line)) return;
+    if (!hasRat) {
+      problems.push(`${spec}:${i + 1}: "(rationale)" marker, but ${rat} does not exist`);
+    } else if (!stack.some((s) => keys.has(s.slug))) {
+      const under = stack.length ? stack[stack.length - 1].slug : '(no heading)';
+      problems.push(
+        `${spec}:${i + 1}: "(rationale)" marker under "${under}", but ${rat} has no ` +
+        'entry under that heading or an ancestor of it',
+      );
+    }
+  });
+}
+
+// --- Check 12: Source of truth paragraphs are checkable ---------------------
+const isRepoPath = (t) => TOP_LEVEL_DIRS.some((d) => t.startsWith(d));
+const BARE_BASENAME_RE = /^[\w.-]+\.(?:ts|tsx|js|mjs|cjs|rs|json|css|md|sh|ps1|ya?ml|html|toml)$/;
+const IDENT_RE = /^[A-Za-z_$][\w$]*(?:[.#][\w$]+)*(?:\(\))?$/;
+const SYMBOLS_IN_FILE_RE = new RegExp(
+  '((?:`[^`\\n]+`\\s*(?:\\/|,|and|\\+)?\\s*)+)\\bin\\s+`((?:' +
+  TOP_LEVEL_DIRS.map((d) => d.slice(0, -1).replace('.', '\\.')).join('|') +
+  ')\\/[^`\\n]+)`',
+  'g',
+);
+const sourceCache = new Map();
+const sourceOf = (rel) => {
+  if (!sourceCache.has(rel)) {
+    sourceCache.set(rel, existsSync(join(ROOT, rel)) ? readFileSync(join(ROOT, rel), 'utf-8') : null);
+  }
+  return sourceCache.get(rel);
+};
+for (const spec of foldCheckedFiles) {
+  const lines = proseLines(spec);
+  lines.forEach((line, i) => {
+    const at = line.indexOf('Source of truth:');
+    if (at === -1) return;
+    let para = line.slice(at);
+    let j = i + 1;
+    for (; j < lines.length; j++) {
+      if (lines[j].trim() === '' || /^[-*]\s/.test(lines[j]) || /^#{1,6}\s/.test(lines[j])) break;
+      para += '\n' + lines[j];
+    }
+    // `Source of truth:` may introduce a table; its rows are the pointers.
+    while (j < lines.length && lines[j].trim() === '') j++;
+    for (; j < lines.length && lines[j].trimStart().startsWith('|'); j++) para += '\n' + lines[j];
+    const tokens = [...para.matchAll(TICK_RE)].map((m) => m[1]);
+    if (!tokens.some(isRepoPath)) {
+      problems.push(`${spec}:${i + 1}: Source of truth names no repo path the path check can verify`);
+    }
+    for (const t of tokens) {
+      if (BARE_BASENAME_RE.test(t) && !existsSync(join(ROOT, t))) { // a root file is a path
+        problems.push(`${spec}:${i + 1}: Source of truth names a bare file name \`${t}\` — use the full repo path`);
+      }
+    }
+    for (const m of para.matchAll(SYMBOLS_IN_FILE_RE)) {
+      const src = sourceOf(m[2]);
+      if (src === null) continue; // check 4 reports the missing file
+      for (const sym of [...m[1].matchAll(TICK_RE)].map((x) => x[1])) {
+        if (!IDENT_RE.test(sym)) continue;
+        const leaf = sym.replace(/\(\)$/, '').split(/[.#]/).pop();
+        if (!src.includes(leaf)) {
+          problems.push(`${spec}:${i + 1}: Source of truth places \`${sym}\` in \`${m[2]}\`, which does not contain it`);
+        }
+      }
+    }
+  });
+}
+
+// --- Check 13: spec-section citations resolve, in specs and in code --------
+// `docs/specs/foo.md -> "Heading"`, `→ Heading`, `§Heading`, `` `## Future` ``.
+// Quoted text may also name a bolded phrase in the cited file; an unquoted
+// reference must name a heading (a heading may be a prefix of the captured
+// text, since the citation often runs on).
+const CITATION_RE = /(docs\/specs\/[a-z-]+\.md|SELF_HOST\.md|SECURITY\.md|AGENTS\.md)[`)\]]*\s*(?:(?:->|→)\s*(?:"([^"]+)"|`(#{1,6}\s[^`]+)`|([A-Z][^"`.,;:()\n]*))|§\s*([^.,;:()\n]+))/g;
+const CITING_FILE_RE = /\.(?:ts|tsx|js|mjs|cjs|rs|ya?ml|sh|ps1|md|toml|json)$/;
+// ASCII and Unicode arrows are the same citation.
+const norm = (text) => text.replace(/↔/g, '<->').replace(/→/g, '->');
+const citeTargets = new Map();
+const citeTarget = (rel) => {
+  if (!citeTargets.has(rel)) {
+    citeTargets.set(rel, existsSync(join(ROOT, rel))
+      ? { text: norm(read(rel)), heads: headings(rel).map((h) => norm(h.title)) }
+      : null);
+  }
+  return citeTargets.get(rel);
+};
+const trackedFiles = execFileSync('git', ['ls-files'], { cwd: ROOT, encoding: 'utf8' })
+  .trim().split('\n').filter((f) => CITING_FILE_RE.test(f) && f !== 'scripts/spec-lint.mjs');
+for (const rel of trackedFiles) {
+  let text;
+  try { text = read(rel); } catch { continue; }
+  if (!/docs\/specs\/|SELF_HOST\.md|SECURITY\.md|AGENTS\.md/.test(text)) continue;
+  text.split('\n').forEach((line, i) => {
+    for (const m of line.matchAll(CITATION_RE)) {
+      const t = citeTarget(m[1]);
+      if (!t) continue; // check 4 reports a missing spec
+      const quoted = m[2] !== undefined;
+      const ref = norm((m[2] ?? (m[3] !== undefined ? m[3].replace(/^#+\s*/, '') : (m[4] ?? m[5]))).trim());
+      if (!ref) continue;
+      const names = (r) => t.heads.some((h) => h.includes(r)) || t.text.includes(r);
+      let ok;
+      if (quoted) {
+        ok = names(ref);
+      } else {
+        // An unquoted citation runs on into the sentence; shorten it word by
+        // word; a single word must then name a heading outright.
+        const words = ref.split(/\s+/);
+        ok = false;
+        for (let n = words.length; n >= 1 && !ok; n--) {
+          const r = words.slice(0, n).join(' ');
+          ok = n === 1 ? t.heads.some((h) => h.includes(r)) : names(r);
+        }
+      }
+      if (!ok) {
+        problems.push(
+          `${rel}:${i + 1}: cites ${m[1]} -> "${ref}", which names no heading` +
+          `${quoted ? ' or phrase' : ''} in that file`,
+        );
+      }
+    }
+  });
+}
+
+// --- Check 14: rationale files state no rule ---------------------------------
+const BOLD_IMPERATIVE_RE = /^\s*(?:[-*]\s+)?\*\*(?:Never|Must|Always|May|Do not|Don['’]t|Should|Shall)\b/;
+for (const rat of rationaleFiles) {
+  proseLines(rat).forEach((line, i) => {
+    if (BOLD_IMPERATIVE_RE.test(line)) {
+      problems.push(`${rat}:${i + 1}: opens with a bolded imperative — rules live in the spec, not the rationale`);
+    }
+  });
+}
+
+// --- Check 15: a large spec has a rationale file -----------------------------
+const RATIONALE_REQUIRED_WORDS = 2500;
+for (const spec of specFiles) {
+  const rat = spec.replace(/\.md$/, '.rationale.md');
+  if (existsSync(join(ROOT, rat))) continue;
+  const words = countWords(read(spec));
+  if (words >= RATIONALE_REQUIRED_WORDS) {
+    problems.push(`${spec}: ${words} words and no ${rat} — its evidence has nowhere to go but above the fold`);
   }
 }
 

@@ -261,7 +261,7 @@ One shared Node module, `standalone/sidecar/clipboard-ops.js`, serves both hosts
 - **cmd** — double-quote-wrap, doubling embedded `"`. cmd's own `%NAME%` (and `!NAME!` under delayed expansion) remains a parser limitation of this legacy path.
 - **powershell** — bare when every character is inert in argument mode, else single-quote-wrapped with embedded `'` doubled, reusing `dor`'s `quotePowerShellArg`. **Never reuse the cmd rule here:** PowerShell's *double*-quoted strings are expandable (rationale). The bare set excludes `,` (array operator in argument mode) and `@` (splatting, or another expression form at a token's start).
 
-Source of truth: `lib/src/lib/clipboard.ts` (Session-kind selection), `lib/src/lib/shell-escape.ts` (dispatch + posix/cmd rules, pinned by `shell-escape.test.ts`), `lib/src/lib/terminal-lifecycle.ts` (captured `shellKind`), `dor/src/commands/shell-quote.ts` (`shellCommandKind`, `quotePowerShellArg`), `standalone/src-tauri/src/clipboard_win.rs` (Win32 read), and the live-PTY list contract in `docs/specs/transport.md`.
+Source of truth: `lib/src/lib/clipboard.ts` (Session-kind selection), `lib/src/lib/shell-escape.ts` (dispatch + posix/cmd rules, pinned by `lib/src/lib/shell-escape.test.ts`), `lib/src/lib/terminal-lifecycle.ts` (captured `shellKind`), `dor/src/commands/shell-quote.ts` (`shellCommandKind`, `quotePowerShellArg`), `standalone/src-tauri/src/clipboard_win.rs` (Win32 read), and the live-PTY list contract in `docs/specs/transport.md`.
 
 ### 8.7 Drag-to-Paste
 

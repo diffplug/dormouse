@@ -316,8 +316,9 @@ endpoints when one is sent (rationale).
 
 Source of truth: `sealPush` / `openPush` / `isSealedPushV1` in
 `server-lib-common/src/security/push-seal.ts`, pinned by
-`server-lib-common/test/push-seal.test.mjs`; `RemoteHost.sealPushForClient` /
-`sendPush` in `lib/src/remote/host/push-delivery.ts`;
+`server-lib-common/test/push-seal.test.mjs`; `RemoteHost.sealPushForClient` in
+`lib/src/remote/host/remote-host.ts`, `sendPush` in
+`lib/src/remote/host/push-delivery.ts`;
 `lib/src/remote/pocket-app/sw.ts`.
 
 ## Host bounds

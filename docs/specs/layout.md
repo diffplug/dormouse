@@ -42,7 +42,7 @@ Each pane is one **leaf** in Lath's split tree — a stable, absolutely-position
 
 Panes are separated by a 7px gap (`PANE_GUTTER_PX`), odd so the 1px selection ring centers in it on whole pixels ([Selection overlay](#selection-overlay)).
 
-**Center drop = swap, edge drop = split.** Dragging a pane onto another's *center* swaps their Surfaces exactly as `Cmd/Ctrl+Arrow` does ([Spatial navigation](#spatial-navigation)); onto an *edge* band splits beside that leaf, or beside an ancestor column/row chosen by scroll-wheel depth. `docs/specs/tiling-engine.md` → "Hierarchical drag and drop" owns the model; the Wall owns only the op commit + selection policy. **A baseboard drop is a no-op when `showBaseboard={false}`** — there is nowhere to minimize into. Source of truth: `onProposeMove` / `onProposeMinimize` / `onExternalDrop` in `Wall.tsx`.
+**Center drop = swap, edge drop = split.** Dragging a pane onto another's *center* swaps their Surfaces exactly as `Cmd/Ctrl+Arrow` does ([Spatial navigation](#spatial-navigation)); onto an *edge* band splits beside that leaf, or beside an ancestor column/row chosen by scroll-wheel depth. `docs/specs/tiling-engine.md` → "Hierarchical drag and drop" owns the model; the Wall owns only the op commit + selection policy. **A baseboard drop is a no-op when `showBaseboard={false}`** — there is nowhere to minimize into. Source of truth: `onProposeMove` / `onProposeMinimize` / `onExternalDrop` in `lib/src/components/Wall.tsx`.
 
 ### Pane header
 
@@ -64,7 +64,7 @@ Content, top to bottom:
 
 **The menu owns the keyboard while open**: DOM focus on mount, the previously focused element restored when a dismissal leaves input ownership unchanged, and registration as dialog-keyboard-active so command-mode keys don't fire underneath. `1`–`9` activate the matching port row and **presses during the scan are dropped, never buffered**; `↑`/`↓` rove the rows (wrapping), `Enter`/`Space` activate the focused row, `Tab`/`Shift+Tab` cycle every focusable element, `Escape` closes.
 
-Activating a port row reproduces `dor ab open <url>` for that port and closes the menu at once (`docs/specs/dor-browser.md` → Pane Context Menu Connect): the browser surface becomes the selection in passthrough, reattaching first if minimized — **the one command-mode gesture that moves selection off the pane it targeted and exits command mode** — with loading/errors surfacing in the pane, not the menu. With no `agentBrowserCommand` the rows are inert labels with no digit chips. Source of truth: `PaneHeaderContextMenu.tsx`, `TerminalPaneHeader.tsx`, `handle-pane-shortcuts.ts`.
+Activating a port row reproduces `dor ab open <url>` for that port and closes the menu at once (`docs/specs/dor-browser.md` → Pane Context Menu Connect): the browser surface becomes the selection in passthrough, reattaching first if minimized — **the one command-mode gesture that moves selection off the pane it targeted and exits command mode** — with loading/errors surfacing in the pane, not the menu. With no `agentBrowserCommand` the rows are inert labels with no digit chips. Source of truth: `lib/src/components/wall/PaneHeaderContextMenu.tsx`, `lib/src/components/wall/TerminalPaneHeader.tsx`, `lib/src/components/wall/keyboard/handle-pane-shortcuts.ts`.
 
 ### Pane body
 
@@ -79,7 +79,7 @@ A terminal Session with transient speech-delivery state gets a pointer-transpare
 - **Wash + label at `z-index: 19`** — above terminal content, below the header and below the `z-index: 20` pane-corner mouse-override banner, so neither is tinted (rationale). Both states wash, `SPEAKING` at 20% opacity and `SPOKEN` at half that — `SPOKEN` is an unbounded window, so its haze must stay light enough to read terminal text through. **Never use color-alpha utilities here** — their emitted `color-mix()` is unsupported by the standalone Safari 15 / Chrome 105 targets; the solid alarm color lives on a dedicated child whose element opacity supplies those strengths. The label sits `PANE_HEADER_HEIGHT_PX + 4` from the Pane top, centered, in both states.
 - **Perimeter ring at `z-index: 25`** — above the header so the treatment reads as one rounded rectangle around the whole Pane, below the `z-index: 30` sashes (rationale). 5px for `SPEAKING`, 3px for `SPOKEN`.
 
-Both layers wear the leaf's own rounding (header radius on top, terminal radius on the bottom). Under `SPEAKING` both pulse when motion is allowed and `cfg.alert.ringingPaused` is not set. Source of truth: `AlertSpeechIndicator.tsx`, registered as the `terminal` overlay by `LathHost.tsx`.
+Both layers wear the leaf's own rounding (header radius on top, terminal radius on the bottom). Under `SPEAKING` both pulse when motion is allowed and `cfg.alert.ringingPaused` is not set. Source of truth: `lib/src/components/wall/AlertSpeechIndicator.tsx`, registered as the `terminal` overlay by `lib/src/components/wall/LathHost.tsx`.
 
 ### Pane header responsive sizing
 
@@ -201,7 +201,7 @@ Per-frame writes are **imperative**: `SelectionRing` renders a stable shell once
 - **The unfocus-saturate fade is the one CSS transition** (`filter ${FOCUS_MOTION_MS}ms`, set inline by `SelectionRing.tsx`); neither the snap gate nor reduced motion touches it. Under Chromatic it snapshots already finished (pinned in `lib/.storybook/preview.ts`).
 - Pane↔door selection morphs the corner radii (12px all-round ⇄ `8,8,0,0`) and stroke inset through the same tween, so the shape lerps instead of popping.
 
-Source of truth: `lib/src/lib/rect-tween.ts` (position and velocity), `lib/src/lib/ring-geometry.ts` (outline/smear geometry), `WorkspaceSelectionOverlay.tsx` (the rAF loop), `lib/src/components/wall/SelectionRing.tsx` (the SVG shell).
+Source of truth: `lib/src/lib/rect-tween.ts` (position and velocity), `lib/src/lib/ring-geometry.ts` (outline/smear geometry), `lib/src/components/wall/WorkspaceSelectionOverlay.tsx` (the rAF loop), `lib/src/components/wall/SelectionRing.tsx` (the SVG shell).
 
 #### Directional motion smear
 

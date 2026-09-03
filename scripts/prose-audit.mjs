@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { basename, dirname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { countWords } from './spec-words.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const args = process.argv.slice(2);
@@ -49,7 +50,7 @@ const codeExtensions = new Set([
   '.sh', '.toml', '.ts', '.tsx', '.yaml', '.yml',
 ]);
 const extension = (rel) => /\.[^.\/]+$/.exec(rel)?.[0] ?? '';
-const wordCount = (text) => text.split(/\s+/).filter(Boolean).length;
+const wordCount = countWords;
 const lineOf = (text, offset) => text.slice(0, offset).split('\n').length;
 
 function resolveReference(token, spec) {

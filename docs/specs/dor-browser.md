@@ -49,9 +49,9 @@ Invariants on the flat persisted `BrowserPanelParams`:
   scroll, form, and script state intact. A restart is still a cold load — only
   `url` persists.
 
-Source of truth: `BrowserPanel.tsx` (`BrowserPanelParams`), `browser-surface.ts`,
-`Wall.tsx` (`replaceSurface`), `agent-browser-surface-controller.ts`
-(`rememberRestorableUrl`), `IframePanel.tsx` (`applyFrameUrl`).
+Source of truth: `lib/src/components/wall/BrowserPanel.tsx` (`BrowserPanelParams`), `lib/src/components/wall/browser-surface.ts`,
+`lib/src/components/Wall.tsx` (`replaceSurface`), `lib/src/components/wall/agent-browser-surface-controller.ts`
+(`rememberRestorableUrl`), `lib/src/components/wall/IframePanel.tsx` (`applyFrameUrl`).
 
 ## Placement And Lifetime
 
@@ -82,7 +82,7 @@ Surface lifetime owns backing resources:
 - Iframe proxy grants are reclaimed by the proxy idle sweep, not a per-surface
   teardown hook.
 
-Source of truth: `Wall.tsx` (`createContentSurface`'s `focusNeutral`,
+Source of truth: `lib/src/components/Wall.tsx` (`createContentSurface`'s `focusNeutral`,
 `settleAddSelection`, `killPaneImmediately`, `closeAgentBrowserSession`,
 `replaceSurface`), `lib/src/components/wall/agent-browser-sessions.ts`,
 `lib/src/components/wall/agent-browser-surface-controller.ts`,
@@ -135,7 +135,7 @@ unmatched; reload revalidates optimistically.
 
 Source of truth: `lib/src/components/wall/use-dev-server-ports.ts`,
 `lib/src/components/wall/port-url.ts` (`servesLoopback`),
-`lib/src/components/wall/agent-browser-ports.ts`, `browser-url.ts`.
+`lib/src/components/wall/agent-browser-ports.ts`, `lib/src/components/wall/browser-url.ts`.
 
 ## Pane Context Menu Connect
 
@@ -174,9 +174,9 @@ pane persisted mid-boot restores session-less and stays a `Connecting…`
 placeholder — kill it, or connect again (arm (b) reuses it).
 
 Source of truth: `lib/src/components/wall/connect-port.ts`
-(`connectPortToDefaultBrowser`, `ensureEagerSurface`), `use-dor-control.ts`
+(`connectPortToDefaultBrowser`, `ensureEagerSurface`), `lib/src/components/wall/use-dor-control.ts`
 (`useDorControl`'s `connectPort` and `updateSurfaceParams`, shared with
-`ensureAgentBrowserSurface`), `Wall.tsx` (`revealSurface`), `port-url.ts`
+`ensureAgentBrowserSurface`), `lib/src/components/Wall.tsx` (`revealSurface`), `lib/src/components/wall/port-url.ts`
 (`listenerUrlsByPort`), `lib/src/components/wall/PaneHeaderContextMenu.tsx`.
 
 ## Display Modal And Render Swaps
@@ -205,8 +205,8 @@ size landed**, so a resize transient is not read as an external override.
 | `ab-*` -> `iframe` | Uses canonical `params.url`; with multiple tabs, requires the user to press `c` in the warning overlay, because only the active tab survives. |
 
 Source of truth: `lib/src/components/wall/AgentBrowserScreenModal.tsx`,
-`agent-browser-surface-controller.ts` (`screenActions`, sync effects,
-pop-out/pop-in), `Wall.tsx` (`onSwapRenderMode`), Storybook
+`lib/src/components/wall/agent-browser-surface-controller.ts` (`screenActions`, sync effects,
+pop-out/pop-in), `lib/src/components/Wall.tsx` (`onSwapRenderMode`), Storybook
 `lib/src/stories/AgentBrowserScreenModal.stories.tsx`.
 
 ## Agent-Browser Renderer
@@ -246,8 +246,8 @@ Managed identity:
   (rationale).
 
 Source of truth: `dor/src/commands/agent-browser.ts`, `dor/src/commands/types.ts`
-(`AgentBrowserSurfaceRequest`, `ResolveAgentBrowserSessionRequest`), `Wall.tsx` /
-`use-dor-control.ts` (`findAgentBrowserSurface`, `surface.agentBrowser`,
+(`AgentBrowserSurfaceRequest`, `ResolveAgentBrowserSessionRequest`), `lib/src/components/Wall.tsx` /
+`lib/src/components/wall/use-dor-control.ts` (`findAgentBrowserSurface`, `surface.agentBrowser`,
 `surface.resolveAgentBrowser`).
 
 ### Agent-Browser Connection
@@ -327,9 +327,9 @@ Tabs live in the agent-browser surface: header-integrated for one, an in-body
 strip for two or more, select/close through `agentBrowserCommand`.
 
 Source of truth: `lib/src/components/wall/AgentBrowserPanel.tsx` (`toDevice`, the
-tab strip), `agent-browser-surface-controller.ts`, `agent-browser-connection.ts`,
-`agent-browser-screenshot-loop.ts`, `agent-browser-input.ts`,
-`use-surface-visibility.ts`, `lib/src/lib/agent-browser-tab.ts` (the tab record
+tab strip), `lib/src/components/wall/agent-browser-surface-controller.ts`, `lib/src/components/wall/agent-browser-connection.ts`,
+`lib/src/components/wall/agent-browser-screenshot-loop.ts`, `lib/src/components/wall/agent-browser-input.ts`,
+`lib/src/components/wall/use-surface-visibility.ts`, `lib/src/lib/agent-browser-tab.ts` (the tab record
 shared by the stream and `tab list --json`).
 
 ### Pop-Out
@@ -354,7 +354,7 @@ follows same-tab navigation and a headed window close can auto-revert to
 headless. **Hosts must close tracked popped-out sessions on shutdown** to avoid
 orphan headed windows.
 
-Source of truth: `agent-browser-surface-controller.ts` (pop-out state, CDP
+Source of truth: `lib/src/components/wall/agent-browser-surface-controller.ts` (pop-out state, CDP
 observer, auto-revert), `lib/src/host/agent-browser-host.ts` (`popOut`, `popIn`,
 `killDaemon`, `closePoppedOut`), VS Code/standalone shutdown wiring.
 
@@ -485,7 +485,7 @@ current one, cancel drops it; neither switches the pane to agent-browser.
 Source of truth: `lib/src/host/iframe-proxy-rewrite.ts` (`iframeShim`),
 `lib/src/components/wall/browser-url.ts` (`browserSurfaceUrl`),
 `lib/src/lib/iframe-proxy-registry.ts`,
-`lib/src/components/wall/use-wall-keyboard.ts`, `IframePanel.tsx`.
+`lib/src/components/wall/use-wall-keyboard.ts`, `lib/src/components/wall/IframePanel.tsx`.
 
 ### Iframe Focus And Rendering Notes
 
@@ -502,7 +502,7 @@ Source of truth: `lib/src/host/iframe-proxy-rewrite.ts` (`iframeShim`),
 - **The `allow` attribute grants no device or clipboard-read permission** —
   `autoplay`, `clipboard-write`, `fullscreen` only. (rationale)
 
-Source of truth: `IframePanel.tsx`, `lib/src/components/wall/use-window-focused.ts`,
+Source of truth: `lib/src/components/wall/IframePanel.tsx`, `lib/src/components/wall/use-window-focused.ts`,
 `lib/src/lib/terminal-lifecycle.ts` (`registerSurfaceFocusHandle`, which
 focuses/blurs the iframe element like other surfaces).
 
