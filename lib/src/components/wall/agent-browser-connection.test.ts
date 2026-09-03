@@ -209,6 +209,27 @@ describe('agent-browser connection', () => {
     expect(connection.snapshot().tabs[0]).toMatchObject({ tabId: 't0', active: true });
   });
 
+  it('routes an oversized URL envelope as control data instead of a frame pulse', async () => {
+    const connection = createAgentBrowserConnection({
+      session: 'dormouse.1.default',
+      streamPort: 1234,
+    });
+    const events: unknown[] = [];
+    connection.subscribe((event) => {
+      if (event.type === 'url' || event.type === 'frame-pulse') events.push(event);
+    });
+
+    await Promise.resolve();
+    const url = `data:text/plain,${'x'.repeat(20_000)}`;
+    const payload = JSON.stringify({ type: 'url', url, timestamp: 1 });
+    expect(payload.length).toBeGreaterThan(16384);
+
+    WebSocketMock.instances[0].emitMessage(payload);
+
+    expect(events).toEqual([{ type: 'url', url }]);
+    connection.dispose();
+  });
+
   it('re-primes after a reconnect so the first identical frame/tabs still forwards', async () => {
     vi.useFakeTimers();
     try {

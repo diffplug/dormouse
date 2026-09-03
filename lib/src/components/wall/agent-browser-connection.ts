@@ -260,13 +260,17 @@ export class AgentBrowserConnection {
     if (typeof raw !== 'string') return;
     if (raw.length > FRAME_PULSE_THRESHOLD) {
       // Size alone can't discriminate a frame from a control message: a `tabs`
-      // snapshot with many long URLs/titles crosses the threshold too, and routing
-      // it as a frame would silently drop the tab update. A frame's bulk is a
-      // base64 JPEG body, whose alphabet contains no `"` or `:`, so a compact
-      // `"type":"tabs"`/`"type":"status"` substring can never occur inside a real
-      // frame — it's a zero-false-positive marker for an oversized control message.
-      // Only those pay a parse; frames keep the hash+pulse fast path untouched.
-      if (raw.includes('"type":"tabs"') || raw.includes('"type":"status"')) {
+      // snapshot or URL with enough text crosses the threshold too, and routing
+      // it as a frame would silently drop the update. A frame's bulk is a base64
+      // JPEG body, whose alphabet contains no `"` or `:`, so these compact type
+      // substrings cannot occur inside a real frame — they are zero-false-positive
+      // markers for oversized control messages. Only those pay a parse; frames
+      // keep the hash+pulse fast path untouched.
+      if (
+        raw.includes('"type":"tabs"')
+        || raw.includes('"type":"status"')
+        || raw.includes('"type":"url"')
+      ) {
         this.dispatchControl(raw);
         return;
       }

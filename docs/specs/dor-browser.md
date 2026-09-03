@@ -288,9 +288,10 @@ its own because clients trigger it. Rules park and recovery must not break:
 - **A `{session, wsPort, binaryPath}` refresh reconciles once**, straight to the
   port, with no `stream status`.
 
-The stream WebSocket carries frame pulses + status, tab snapshots, `url`, and
-native `input_mouse` / `input_keyboard` input. **`url` names the active tab at
-navigation commit; `tabs` refreshes only when the driving command completes**
+The stream carries frames, status, tab snapshots, `url`, and native
+`input_mouse` / `input_keyboard` input. **Control envelopes dispatch at any
+size.** **`url` names the active tab at navigation commit; `tabs`
+refreshes only when the driving command completes**
 (for a slow page, after the load; rationale), so header and relaunch target
 follow `url`, title cleared until `tabs` names the page.
 
