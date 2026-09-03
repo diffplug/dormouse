@@ -307,7 +307,7 @@ afterEach(async () => {
 /**
  * A complete `HostAclRecord`. The store's read-back guard checks the whole
  * shape, not just `hostId` — a partial object is dropped, which is the point
- * (`SECURITY.md` -> Remote Control), so fixtures have to be real records. The
+ * (`docs/specs/security-remote.md` -> "Trust boundary"), so fixtures have to be real records. The
  * two E2E fields are base64url of exactly 32 bytes, i.e. 43 characters, and a
  * fixture shorter than that is dropped rather than tested.
  */
@@ -567,7 +567,7 @@ describe('remote host service glue', () => {
         },
       },
     ]);
-    // A service→webview shape: the one-time token is not in it (SECURITY.md).
+    // A service→webview shape: the one-time token is not in it (docs/specs/security-remote.md -> "Trust boundary").
     expect(JSON.stringify(bound.posted)).not.toContain(OFFER.token);
 
     // `enroll` bootstraps the contention, which this window loses — so even the

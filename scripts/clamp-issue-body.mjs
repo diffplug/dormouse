@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Truncate an issue/comment body in place so GitHub cannot reject it as too
- * long. See SECURITY.md -> "CI Validation Contract" for why a rejection loses
+ * long. See docs/specs/security-audit.md -> "Outcomes and reporting" for why a rejection loses
  * the whole finding.
  *
  * Usage: node scripts/clamp-issue-body.mjs <file> [--note "<markdown>"]

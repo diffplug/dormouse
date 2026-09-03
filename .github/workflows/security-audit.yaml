@@ -1,6 +1,6 @@
 name: security-audit
 
-# Audits this repo against SECURITY.md. Runs nightly via the schedule
+# Audits this repo against the security specs (docs/specs/security*.md). Runs nightly via the schedule
 # trigger and on-demand via workflow_dispatch. release.yml dispatches it
 # on the release tag and gates publishing on the result — it dispatches
 # rather than calling this workflow with `uses:` because a tag `push`
@@ -72,11 +72,11 @@ jobs:
         run: |
           [ -n "$AUDIT_PAT" ] && exit 0
           echo "FAIL" > audit-status.txt
-          echo "**FAIL** — \`AUDIT_PAT\` is not present in the \`security-audit\` environment. See [SECURITY.md > CI Validation Contract](https://github.com/$GITHUB_REPOSITORY/blob/main/SECURITY.md#ci-validation-contract) for provisioning." > audit-report.md
+          echo "**FAIL** — \`AUDIT_PAT\` is not present in the \`security-audit\` environment. See [security-audit.md > Environment and AUDIT_PAT](https://github.com/$GITHUB_REPOSITORY/blob/main/docs/specs/security-audit.md#environment-and-audit_pat) for provisioning." > audit-report.md
           echo "::error::AUDIT_PAT secret is not set."
           exit 1
 
-      - name: Audit against SECURITY.md
+      - name: Audit against the security specs
         uses: anthropics/claude-code-action@833fb0f8c9f6686b33d963a8bae0a94f4936ab2a # v1
         env:
           # `claude-code-action` resets `GH_TOKEN` to its own internal
@@ -133,16 +133,17 @@ jobs:
           claude_args: >-
             --allowed-tools "Read,Write,Edit,Bash,Grep,Glob,Task,Agent"
             --disallowed-tools "Workflow"
-            --agents '{"supply-chain":{"description":"Audits the Dependency Supply Chain section of SECURITY.md.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/supply-chain.md`, and follow them exactly."},"ci-and-secrets":{"description":"Audits the CI, tend, release, and audit-contract sections of SECURITY.md.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/ci-and-secrets.md`, and follow them exactly."},"application-security":{"description":"Audits the Remote Control section of SECURITY.md, and sweeps the rest of the product code.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/application-security.md`, and follow them exactly.","model":"opus"}}'
+            --agents '{"supply-chain":{"description":"Audits docs/specs/security-supply-chain.md.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/supply-chain.md`, and follow them exactly."},"ci-and-secrets":{"description":"Audits docs/specs/security.md, docs/specs/security-ci.md, and docs/specs/security-audit.md.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/ci-and-secrets.md`, and follow them exactly."},"application-security":{"description":"Audits docs/specs/security-local.md and docs/specs/security-remote.md, and sweeps the rest of the product code.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/application-security.md`, and follow them exactly.","model":"opus"}}'
           # The prompts live in `.github/audit/`, not inline here: they
           # are long enough to need real diffs in review, they must be
           # runnable locally against the same text CI uses
-          # (`scripts/security-audit-local.sh`), and the `FAIL IF` that
-          # requires every `## ` heading to be owned by exactly one
-          # domain is only a grep when those headings sit in markdown.
-          # Inline, YAML block-scalar wrapping split
-          # `## Automated Maintainer (tend)` across two lines and the
-          # check matched nothing.
+          # (`scripts/security-audit-local.sh`), and each domain's scope
+          # — the bullet list of security specs under its `**Scope` line
+          # — is what `scripts/spec-lint.mjs` (check 16) reads to prove
+          # every `docs/specs/security*.md` has exactly one owner. That
+          # lint cannot read YAML block scalars, and when the scopes were
+          # inline here the ownership check was a grep that wrapping
+          # once broke silently.
           prompt: |
             You are the orchestrator of this repository's nightly
             security audit.
@@ -200,7 +201,7 @@ jobs:
           TRANSCRIPT="$RUNNER_TEMP/claude-execution-output.json"
           # Every sink that the archive step below publishes has to be in
           # the argument list, and the fail-closed `rm -f` has to delete
-          # the same set — SECURITY.md names `audit-report.md`, the three
+          # the same set — docs/specs/security-audit.md names `audit-report.md`, the three
           # per-domain fragments, and the transcript. The fragments are
           # agent output like any other: a subagent that shells out and
           # prints an environment lands the value in its own fragment,
@@ -308,7 +309,7 @@ jobs:
           # write no status file at all in that case — which lands on the
           # MISSING branch below, not on FAIL — but a prompt is not a
           # control: without this check the matching `FAIL IF` in
-          # SECURITY.md is enforced only by the document being audited,
+          # docs/specs/security-audit.md is enforced only by the document being audited,
           # which is circular. Downgrade to MISSING rather than FAIL for the same
           # reason the three outcomes exist above — this is an audit that
           # did not finish, not a security finding — and MISSING already
@@ -457,7 +458,7 @@ jobs:
             HEADLINE="Audit failed at $DATE."
           else
             TITLE="[security-audit] INCONCLUSIVE on $(date -u +%Y-%m-%d)"
-            HEADLINE="Audit reached no usable verdict at $DATE."
+            HEADLINE="Audit reached no usable verdict at $DATE. This is not a security finding: the run ended without deciding."
           fi
 
           {
@@ -483,7 +484,7 @@ jobs:
           } > audit-comment.md
           rm -f "$NOTES"
 
-          # Truncate before posting, non-fatally. See SECURITY.md.
+          # Truncate before posting, non-fatally. See docs/specs/security-audit.md -> "Outcomes and reporting".
           node scripts/clamp-issue-body.mjs audit-comment.md \
             --note "The untruncated \`audit-report.md\` is in this run's \`audit-transcript\` artifact${TRANSCRIPT_URL:+ ([download]($TRANSCRIPT_URL))}." \
             || echo "clamp-issue-body.mjs failed; posting audit-comment.md unclamped." >&2

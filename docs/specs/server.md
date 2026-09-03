@@ -53,7 +53,7 @@ The whole of what `server/src/` reads from the environment:
 | `DORMOUSE_STATE_DIR`      | Where the JSON state files live. Default `./data`.         |
 | `DORMOUSE_POCKET_DIR`     | The built Pocket app served at `/*`. Defaults to `lib/dist-pocket` resolved from the compiled server's own location, never the cwd (rationale). Absent or lacking `index.html`, `GET /` is a plaintext stub naming the build command. |
 | `PORT`                    | Default 3000. Blank reads as unset; an explicit `PORT=0` is a `ConfigError` (rationale). |
-| `DORMOUSE_REQUIRE_USER_VERIFICATION` | Only the exact string `true` demands a *user-verified* passkey assertion (biometric/PIN) rather than mere user presence; off by default (rationale). Applies to sign-in and re-auth alike, and is mirrored to every Host as `ConnectionPolicy.requireUserVerification` in its `HostEnrollResponse` (`SECURITY.md` -> Remote Control). |
+| `DORMOUSE_REQUIRE_USER_VERIFICATION` | Only the exact string `true` demands a *user-verified* passkey assertion (biometric/PIN) rather than mere user presence; off by default (rationale). Applies to sign-in and re-auth alike, and is mirrored to every Host as `ConnectionPolicy.requireUserVerification` in its `HostEnrollResponse` (`docs/specs/security-remote.md` -> "Trust boundary"). |
 | `DORMOUSE_BIND_HOST`      | Interface to listen on; unset binds every interface (below). |
 | `DORMOUSE_VAPID_PUBLIC_KEY` / `DORMOUSE_VAPID_PRIVATE_KEY` | Web Push signing keypair; set both or neither. At startup the Server decodes both, derives the P-256 public point from the private key, and exits on a missing, malformed, or mismatched pair. Unset, it mints a pair on first boot into `vapid.json`. |
 | `DORMOUSE_VAPID_SUBJECT`  | `mailto:`/`https:` contact for push-service operators (RFC 8292), defaulted from `DORMOUSE_ORIGIN` and validated at startup — Web Push below. |
@@ -71,7 +71,7 @@ the plaintext port to the LAN and to the tailnet itself; the selfhost install
 sets `DORMOUSE_BIND_HOST`, and the default stays unbound for containers, where
 the namespace is the boundary. Binding loopback is *containment, not admission* —
 every route is still gated by the setup password or a bearer token, exactly as
-`SECURITY.md` -> "Loopback Listeners" requires; `scripts/loopback-lint.mjs` does
+`docs/specs/security-local.md` -> "Loopback Listeners" requires; `scripts/loopback-lint.mjs` does
 not cover this socket (rationale).
 
 **`DORMOUSE_ORIGIN` is normalized to a bare origin exactly once**, in
@@ -434,7 +434,7 @@ server's one third-party runtime dependency. Host and webview halves:
   HTTPS agent whose connection-time DNS lookup rejects every non-public range,
   refuses a hostname *wholesale* if any answer is blocked, and hands the socket
   the exact address it checked, so rebinding and mixed answers cannot create a
-  second unchecked resolution. Range list: `SECURITY.md` -> "Remote Control".
+  second unchecked resolution. Range list: `docs/specs/security-remote.md` -> "What crosses the boundary".
 - **The payload is sealed, and the Server reads none of it.** A send carries
   `recipients: [{ deliveryId, sealed }]` — one envelope per Client, the seal
   being to that Client's own static — and the Server validates only shape and
@@ -786,7 +786,7 @@ exists to honor:
   state**; enrolled answers `offer: null` without touching disk (rationale).
 - **The offer's token never enters a webview.** `status` carries only the origin;
   `enrollOffer` re-reads the file in the Host service, so an old card cannot
-  reuse a spent offer (`SECURITY.md`).
+  reuse a spent offer (`docs/specs/security-remote.md` -> "Credentials at rest").
 - **The click echoes the origin the card displayed**, and the service refuses a
   file that no longer names it — an installer rerun rewrites the offer with an
   origin nobody reviewed. `enrollOffer` takes `{ origin, label }`: the origin
@@ -969,7 +969,7 @@ HTTPS and proxying to the server on loopback.
 **[SELF_HOST.md](../../SELF_HOST.md) is both the operator runbook and the
 installer spec**: the per-platform mechanism map, the availability shape, the
 invariants the three installers hold, and the mechanical traps they encode live
-there, audited by the `FAIL IF` lines in `SECURITY.md` and checked textually by
+there, audited by the `FAIL IF` lines in `docs/specs/security-remote.md` and checked textually by
 `scripts/deploy-lint.mjs` (`pnpm lint:deploy`). Source of truth:
 `deploy/local/install-macos.sh`, `deploy/local/install-windows.ps1`,
 `deploy/local/install-linux.sh`.

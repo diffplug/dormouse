@@ -1207,7 +1207,7 @@ export function createApp(config: AppConfig): CreatedApp {
           // the three fields it knows and ignores the rest, so `{ hostId,
           // ...sealed }` would let a Host both override the token's `hostId`
           // and smuggle readable text past a Server that must forward neither
-          // (SECURITY.md -> "What crosses the boundary").
+          // (docs/specs/security-remote.md -> "What crosses the boundary").
           JSON.stringify({
             hostId,
             v: sealed.v,
@@ -1399,7 +1399,7 @@ const CSP_HEADER = 'Content-Security-Policy';
  * (`docs/specs/pocket-app.md` -> Deployment).
  *
  * This origin holds a per-Host Client static and the worker that opens sealed
- * pushes, and `SECURITY.md` -> Accepted limitations already names active XSS
+ * pushes, and `docs/specs/security.md` -> "What is not defended" already names active XSS
  * here as the risk it cannot rule out — so it gets the defense in depth the
  * two shipped webview hosts already have.
  *

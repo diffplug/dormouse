@@ -14,7 +14,7 @@ The trust model for remote control: three primitives between the Client
   static generated in the browser and stored non-extractably.
 
 Account compromise is therefore insufficient for host access
-([Security Guarantees](#security-guarantees)). `SECURITY.md` -> "Remote Control"
+([Security Guarantees](#security-guarantees)). `docs/specs/security-remote.md` -> "Remote Control"
 is this model's audited face — the properties checked nightly and the gaps left
 open (revocation, the audit trail).
 
@@ -288,6 +288,10 @@ Source of truth: `RemoteHost.#onConnectionInit` / `#onConnectionTransport` /
 **A push gets its own construction** — no live session exists between the two
 endpoints when one is sent (rationale).
 
+- **Push is opt-in.** A Host that never enrolls to a server sends none, and none
+  of the push limitations apply; an enrolled Host pushes only to a phone that
+  turned push on ([pocket-app.md](./pocket-app.md) -> Installable web app owns
+  the card).
 - **A fresh key per message, from the two pinned statics.**
   `ss = X25519(hostStatic, clientStatic)`, a random 32-byte salt,
   `key = HKDF-SHA-256(ikm = ss, salt, info = "dormouse/push/v1", 32)`, and
@@ -444,7 +448,7 @@ Source of truth: `server-lib-common/src/security/noise.ts`,
 **Each Host mints one permanent Noise static at enrollment**, before the request
 and never in it: `noiseStaticPrivateKey` (PKCS#8, base64url) and
 `noiseStaticPublicKey` (raw 32 bytes, base64url) ride in the enrollment record,
-landing exactly where `hostToken` does (`SECURITY.md` -> "Credentials at rest").
+landing exactly where `hostToken` does (`docs/specs/security-remote.md` -> "Credentials at rest").
 The Host's local label rides there too, reaching a Client only inside an
 encrypted outcome.
 

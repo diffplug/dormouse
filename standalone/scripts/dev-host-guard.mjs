@@ -10,7 +10,7 @@
 //
 // The rule these checks implement is shared with Dormouse's other loopback
 // listeners and is stated once in `lib/src/host/loopback-guard.ts`, with
-// `SECURITY.md` -> "Loopback Listeners" auditing the class. This file keeps its
+// `docs/specs/security-local.md` -> "Loopback Listeners" auditing the class. This file keeps its
 // own copy rather than importing that module: it is a dev-only, unbundled
 // script in another package, and making it depend on built TS to share a few
 // lines would cost more than the duplication does.

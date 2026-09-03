@@ -156,7 +156,7 @@ The website changelog page imports `website/src/data/changelog.json`, but **`CHA
 
 **Non-secret signing identity is hardcoded at the top of `scripts/sign-and-deploy.sh`, never passed through the environment** — Developer ID string, team ID, Apple ID, `jsign` alias, TSA URL. The Developer ID cert lives in the local keychain, the EV cert on the YubiKey; neither is a value the script reads.
 
-`SECURITY.md` -> "Desktop Releases" owns the argv-exposure rules for the three prompted secrets.
+`docs/specs/security-ci.md` -> "Desktop Releases" owns the argv-exposure rules for the three prompted secrets.
 
 ## Future
 

@@ -8,7 +8,7 @@ import bundledThemes from './bundled.json';
 // website/scripts/generate-deps.js appends it to the npm table.
 //
 // Why the two can drift, and why ci.yml's stale-snapshot gate cannot see it:
-// SECURITY.md, "Dependency Supply Chain". `extensionId` is the join key.
+// docs/specs/security-supply-chain.md -> "Disclosure". `extensionId` is the join key.
 describe('bundled.json / bundled-extensions.json disclosure parity', () => {
   // bundled.json ids are `${namespace}.${name}.${slugify(label)}`; the first two
   // segments are the OpenVSX extension the theme was extracted from.

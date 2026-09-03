@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Mechanical check for the self-host installer invariants in `SECURITY.md`
+ * Mechanical check for the self-host installer invariants in `docs/specs/security-remote.md`
  * ("Credentials at rest", "Network posture (self-hosted)"). Runs from the repo
  * root via `pnpm test` (see the root package.json). Exits non-zero with a
  * per-violation report naming the rule that was broken.
@@ -148,7 +148,7 @@ export const RULES = [
     patterns: { Windows: /state\\ could not be enumerated/ },
     skip: {
       macOS:
-        'the per-file walk is Windows-only — `server/src/state.ts` writes 0o600 and it holds on unix, so the mode check on `state/` is the whole control (SECURITY.md, "Credentials at rest")',
+        'the per-file walk is Windows-only — `server/src/state.ts` writes 0o600 and it holds on unix, so the mode check on `state/` is the whole control (docs/specs/security-remote.md -> "Credentials at rest")',
       Linux:
         'the per-file walk is Windows-only, for the reason stated in the macOS skip; Linux checks mode and owner on `state/` itself',
     },
@@ -291,7 +291,7 @@ export const RULES = [
     },
   },
   {
-    // The same ordering control on `config/server.env`, which SECURITY.md's
+    // The same ordering control on `config/server.env`, which docs/specs/security-remote.md's
     // FAIL IF has always required and nothing checked. macOS reaches it with
     // `umask 077` covering the heredoc rather than a chmod on an empty file, so
     // that is what its pattern anchors; the other two bind both operands, for
@@ -380,7 +380,7 @@ export const RULES = [
     },
   },
   {
-    // `run/` is the whole claim — SECURITY.md's FAIL IF carries the why — so
+    // `run/` is the whole claim — docs/specs/security-remote.md's FAIL IF carries the why — so
     // the pattern pins the path segment and not the basename: a rename is not
     // this rule's business, and pinning it would redden the lint for the wrong
     // reason. Two lines as one span, because what decides the placement is the
@@ -537,10 +537,10 @@ export function check() {
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const { failures, checked } = check();
   if (failures.length > 0) {
-    console.error('deploy-lint: the installers no longer hold controls SECURITY.md requires\n');
+    console.error('deploy-lint: the installers no longer hold controls docs/specs/security-remote.md requires\n');
     for (const failure of failures) console.error(`  ${failure}\n`);
     console.error(
-      'Each line above maps to a FAIL IF in SECURITY.md. If a control moved rather than\n' +
+      'Each line above maps to a FAIL IF in docs/specs/security-remote.md. If a control moved rather than\n' +
         'disappeared, update the pattern in scripts/deploy-lint.mjs in the same commit.',
     );
     process.exit(1);

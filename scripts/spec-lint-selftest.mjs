@@ -17,7 +17,7 @@
  * edit-and-restore.
  */
 
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeSelftest, readRepoFile, repoRoot } from './lint-kit.mjs';
 import { countWords } from './spec-md.mjs';
@@ -56,6 +56,55 @@ const selftest = makeSelftest('spec-lint.mjs', '.spec-selftest.bak');
 for (const [name, target, text] of CASES) {
   selftest.withAppended(target, text, `${name}\n      planting this in ${target} stays green — spec-lint cannot see it`);
 }
+
+// Check 16's failures need separate mutations so one ownership diagnostic
+// cannot hide another one regressing.
+const DOMAIN = '.github/audit/supply-chain.md';
+const PLANTED_DOMAIN = '.github/audit/planted-selftest.md';
+selftest.withMutation(
+  PLANTED_DOMAIN,
+  (path) => writeFileSync(path, '# Planted domain with no scope\n'),
+  `check 16: an audit domain with no **Scope line\n      planting ${PLANTED_DOMAIN} stays green — spec-lint cannot see it`,
+);
+
+selftest.withMutation(
+  PLANTED_DOMAIN,
+  (path) => writeFileSync(path, '# Planted empty domain\n\n**Scope — these specs, and no others:**\n'),
+  `check 16: an audit domain whose scope names no spec\n      planting ${PLANTED_DOMAIN} stays green — spec-lint cannot see it`,
+);
+
+selftest.withMutation(
+  DOMAIN,
+  (path) => {
+    const text = readFileSync(path, 'utf8');
+    const planted = text.replace(/^([*-] `docs\/specs\/security-supply-chain\.md`\n)/m, '$1- `docs/specs/security-no-such-spec.md`\n');
+    if (planted === text) throw new Error(`${DOMAIN}: no security spec claim to plant under`);
+    writeFileSync(path, planted);
+  },
+  `check 16: an audit domain claims a security spec that does not exist\n      planting an unknown path in ${DOMAIN} stays green — spec-lint cannot see it`,
+);
+
+selftest.withMutation(
+  '.github/audit/ci-and-secrets.md',
+  (path) => {
+    const text = readFileSync(path, 'utf8');
+    const planted = text.replace(/^[*-] `docs\/specs\/security-ci\.md`\n/m, '');
+    if (planted === text) throw new Error(`${path}: no security-ci claim to remove`);
+    writeFileSync(path, planted);
+  },
+  'check 16: a security spec claimed by no audit domain\n      removing its sole claim stays green — spec-lint cannot see it',
+);
+
+selftest.withMutation(
+  DOMAIN,
+  (path) => {
+    const text = readFileSync(path, 'utf8');
+    const planted = text.replace(/^(\*\*Scope[^\n]*\n\n)/m, '$1- `docs/specs/security-ci.md`\n');
+    if (planted === text) throw new Error(`${DOMAIN}: no "**Scope" line to plant under`);
+    writeFileSync(path, planted);
+  },
+  `check 16: a security spec claimed by two audit domains\n      planting a second claim in ${DOMAIN} stays green — spec-lint cannot see it`,
+);
 
 selftest.finish(
   'spec-lint-selftest',

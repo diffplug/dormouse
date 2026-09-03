@@ -8,7 +8,7 @@
  * unchecked.
  *
  * The changelog and the supply chain live here too. They are not generated
- * from Markdown like the three references, but a reader meets them the same
+ * from Markdown like the four references, but a reader meets them the same
  * way — long-form material reached from the rail rather than from the
  * marketing nav.
  *
@@ -45,6 +45,7 @@ const BOTH_READMES = ["guide", "root-readme"] as const;
 
 export const DOCS_PAGES: readonly DocsPage[] = [
   { path: "/changelog", module: "./pages/Changelog.tsx", label: "Changelog" },
+  { path: "/docs/security", module: "./pages/SecurityDocs.tsx", label: "Security", linkedFrom: ["root-readme"] },
   { path: "/supply-chain", module: "./pages/SupplyChain.tsx", label: "Supply chain" },
   { path: "/docs/self-host", module: "./pages/SelfHostDocs.tsx", label: "Self hosting", linkedFrom: ["root-readme"] },
   { path: "/docs/agent-skill", module: "./pages/AgentSkillDocs.tsx", label: "dor agent skill", linkedFrom: BOTH_READMES },

@@ -20,10 +20,18 @@
  * See docs/specs/website-docs.md.
  */
 
+import { existsSync } from 'node:fs';
 import { readFile, readdir, writeFile, mkdir, copyFile, rm } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname, join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createSlugger, hasScheme, parseMarkdown, slugify, visit } from './docs-parser.js';
+import {
+  createSlugger,
+  hasScheme,
+  isProtocolRelative,
+  parseMarkdown,
+  slugify,
+  visit,
+} from './docs-parser.js';
 import {
   parseSnapshot,
   parseHelp,
@@ -70,8 +78,26 @@ export const SITE_ORIGIN = 'https://dormouse.sh';
  * scripts/public-docs-lint.mjs -> checkImageBaseUrl.
  */
 export const SITE_IMAGE_BASE = `${SITE_ORIGIN}/guide`;
+/**
+ * The repository's own file view, where anything not published here still reads.
+ *
+ * Two rewrites need it: a link into a section the delta withheld, and a link a
+ * source spells relative to its own directory in the repository.
+ */
+export const REPO_BLOB_BASE = 'https://github.com/diffplug/dormouse/blob/main';
+/**
+ * Repository files this site publishes, by route. A link into one of them
+ * resolves to the page rather than to GitHub, so a reader on the site stays on
+ * the site, while the source keeps its repo-relative link — which
+ * `scripts/spec-lint.mjs` verifies down to the fragment, as it cannot for a
+ * URL. `assertRouteFragments` then holds the fragment against the page.
+ */
+export const SITE_ROUTES = {
+  'SELF_HOST.md': '/docs/self-host',
+  'docs/specs/security.md': '/docs/security',
+};
 /** Where the unpublished half of SELF_HOST.md is still readable. */
-const SELF_HOST_CANONICAL_URL = 'https://github.com/diffplug/dormouse/blob/main/SELF_HOST.md';
+const SELF_HOST_CANONICAL_URL = `${REPO_BLOB_BASE}/SELF_HOST.md`;
 
 /** Every page's shell supplies its own title and breadcrumb, so no published
  *  document keeps the `#` heading its file leads with. */
@@ -129,6 +155,25 @@ const SELF_HOST_DELTA = [
     reason: 'The maintainer half of the file, audited by scripts/deploy-lint.mjs.',
     match: headingNamed('Installer contract (maintainers)'),
     operation: 'remove-section',
+  },
+];
+
+/**
+ * The complete security delta, per docs/specs/website-docs.md.
+ *
+ * Every section of docs/specs/security.md publishes — the guarantees, what is
+ * not defended, the gaps, and how each is checked are the point of the page —
+ * so nothing but the file's own title and its spec front matter is withheld.
+ * The per-audience narrowing is `audienceBlocks`, not this delta.
+ */
+const SECURITY_DELTA = [
+  DROP_DOCUMENT_TITLE,
+  {
+    id: 'drop-front-matter',
+    reason:
+      'The opening blockquote is spec front matter — what the file owns and defers; the page shell says what the page is.',
+    match: (block) => block.type === 'blockquote',
+    operation: 'remove',
   },
 ];
 
@@ -230,6 +275,71 @@ function resolveRemovedAnchors(blocks, removedIds, canonicalUrl) {
     rewritten.push({ from: `#${id}`, to: node.href });
   });
   return rewritten;
+}
+
+/**
+ * Send links into the repository to the canonical file on GitHub.
+ *
+ * A source written next to the code it describes links its neighbours the way
+ * GitHub resolves them — `./security-ci.md`, `../../SELF_HOST.md`. Published,
+ * those resolve against a URL path that has no such neighbours, so each is
+ * rewritten to the file's canonical URL in the repository, `#fragment` intact.
+ *
+ * A target that does not exist, or a path that climbs out of the repository,
+ * fails the build. `scripts/spec-lint.mjs` already resolves relative links
+ * inside the specs, but the generator is the last thing between a source and a
+ * published page and must not depend on another lint having run.
+ */
+export function resolveRepoLinks(blocks, sourceFile) {
+  const dir = posix.dirname(sourceFile);
+  const rewritten = [];
+  visit(blocks, (node) => {
+    if (node.type !== 'link' || !node.href) return;
+    // A bare fragment addresses this page; a scheme or `//host` addresses
+    // somewhere else entirely. Neither names a file in the repository.
+    if (node.href.startsWith('#') || hasScheme(node.href) || isProtocolRelative(node.href)) return;
+    const hash = node.href.indexOf('#');
+    const target = hash === -1 ? node.href : node.href.slice(0, hash);
+    const fragment = hash === -1 ? '' : node.href.slice(hash);
+    // `posix` and not `path`: these are repository paths in Markdown, which are
+    // `/`-separated on every platform the build runs on. `join` normalizes, so
+    // `docs/specs/../../SELF_HOST.md` arrives as `SELF_HOST.md`.
+    const resolved = posix.join(dir, target);
+    if (resolved.startsWith('..')) {
+      throw new Error(`${sourceFile}: link "${node.href}" resolves outside the repository`);
+    }
+    if (!existsSync(join(repoRoot, resolved))) {
+      throw new Error(`${sourceFile}: link "${node.href}" resolves to ${resolved}, which does not exist`);
+    }
+    const from = node.href;
+    const route = SITE_ROUTES[resolved];
+    node.href = route ? `${route}${fragment}` : `${REPO_BLOB_BASE}/${resolved}${fragment}`;
+    // Provenance for anything that classifies by what a link names — the
+    // security audiences below — since the href no longer says.
+    node.repoPath = resolved;
+    rewritten.push({ from, to: node.href });
+  });
+  return rewritten;
+}
+
+/** A link into a page this site publishes must name a heading that page renders. */
+export function assertRouteFragments(pages) {
+  const pageByRoute = new Map(
+    Object.entries(SITE_ROUTES).map(([file, route]) => [route, pages.find((page) => page.source === file)]),
+  );
+  for (const page of pages) {
+    visit(page.blocks, (node) => {
+      if (node.type !== 'link' || !node.href) return;
+      const hash = node.href.indexOf('#');
+      if (hash === -1) return;
+      const target = pageByRoute.get(node.href.slice(0, hash));
+      if (!target) return;
+      const id = node.href.slice(hash + 1);
+      if (!target.headings.some((h) => h.id === id)) {
+        throw new Error(`${page.source}: link "${node.href}" names no heading on ${node.href.slice(0, hash)}`);
+      }
+    });
+  }
 }
 
 /** No `#anchor` link may point at an id the page does not contain. */
@@ -352,11 +462,16 @@ async function syncGuideMedia(files) {
 /**
  * One published page from one canonical Markdown file.
  *
- * Both Markdown pages need the same steps in the same order, and the only
+ * Every Markdown page needs the same steps in the same order, and the only
  * difference is an option: `canonicalUrl` sends links into withheld sections
  * off-site rather than leaving them dangling. Written once because two copies
  * of this had already drifted on the order of the last three steps, which is
  * how one page quietly loses a guarantee the other still has.
+ *
+ * The three link rewrites run in one fixed order: a withheld section's anchor
+ * goes off-site first, then a repository-relative path becomes a canonical
+ * GitHub URL, and only then is a link that happens to address this site's own
+ * origin localized like any other.
  */
 async function buildDocument({ file, delta, label, fallbackTitle, canonicalUrl }) {
   const markdown = await readFile(join(repoRoot, file), 'utf8');
@@ -371,9 +486,10 @@ async function buildDocument({ file, delta, label, fallbackTitle, canonicalUrl }
   const headings = headingsOf(blocks);
   assertUniqueIds(headings.map((h) => h.id), label);
 
-  // Both rewrites run before the assertion: a link into a withheld section is
+  // Every rewrite runs before the assertion: a link into a withheld section is
   // not dangling once it has gained the origin that still serves it.
   const withheldLinks = canonicalUrl ? resolveRemovedAnchors(blocks, removedIds, canonicalUrl) : [];
+  const repoLinks = resolveRepoLinks(blocks, file);
   const localizedLinks = localizeSiteLinks(blocks);
   assertAnchorsResolve(blocks, headings, label);
 
@@ -385,6 +501,7 @@ async function buildDocument({ file, delta, label, fallbackTitle, canonicalUrl }
     toc: buildToc(headings),
     delta: applied,
     withheldLinks,
+    repoLinks,
     localizedLinks,
   };
 }
@@ -416,6 +533,99 @@ const buildSelfHost = () =>
     fallbackTitle: 'Self-host',
     canonicalUrl: SELF_HOST_CANONICAL_URL,
   });
+
+/**
+ * Which page carries which of the security spec's rows and bullets.
+ *
+ * `/docs/security`, `/docs/self-host`, and `/supply-chain` each show the part
+ * of the spec a reader there relies on, rendered from this data rather than
+ * restated — the spec is what the nightly audit reads, and a hand-written copy
+ * in a page is the one that rots. The umbrella page is one audience among
+ * three: the local application and the pipeline; the spec file on GitHub is
+ * the one place every row appears together. A guarantee row, an undefended edge, or a known gap belongs to
+ * the audience of the spec its links name, and every link in one entry must
+ * agree. An entry naming no spec, a spec in neither group, or both groups
+ * fails the build: the spec's own pointers are the classification, so a new
+ * spec has to be placed here before its rows can publish anywhere but the
+ * umbrella.
+ */
+export const SECURITY_AUDIENCES = {
+  security: ['docs/specs/security-local.md', 'docs/specs/security-ci.md', 'docs/specs/security-audit.md'],
+  'self-host': ['docs/specs/remote-security-model.md', 'docs/specs/security-remote.md', 'SELF_HOST.md'],
+  'supply-chain': ['docs/specs/security-supply-chain.md'],
+};
+
+/** The umbrella sections that split by audience, and the block each splits. */
+const SECURITY_AUDIENCE_SECTIONS = [
+  { key: 'guarantees', title: 'Guarantees', block: 'table', entries: 'rows' },
+  { key: 'notDefended', title: 'What is not defended', block: 'list', entries: 'items' },
+  { key: 'knownGaps', title: 'Known gaps', block: 'list', entries: 'items' },
+];
+
+function audienceOf(entry, label) {
+  const paths = [];
+  visit(entry, (node) => {
+    if (node.type === 'link' && node.repoPath) paths.push(node.repoPath);
+  });
+  if (paths.length === 0) throw new Error(`${label} names no spec, so it belongs to no audience`);
+  const audiences = new Set(
+    paths.map((path) => Object.keys(SECURITY_AUDIENCES).find((a) => SECURITY_AUDIENCES[a].includes(path))),
+  );
+  if (audiences.size !== 1 || audiences.has(undefined)) {
+    throw new Error(`${label} links ${paths.join(', ')}, which do not name exactly one audience`);
+  }
+  return [...audiences][0];
+}
+
+/** The three blocks the audiences split, each found under its own heading. */
+function securitySections(page) {
+  const headings = page.blocks.filter((b) => b.type === 'heading');
+  return SECURITY_AUDIENCE_SECTIONS.map(({ key, title, block: type, entries }) => {
+    const heading = findExactlyOneHeading(headings, (h) => h.text === title, title);
+    const block = sectionBlocks(page.blocks, heading).find((b) => b.type === type);
+    if (!block) throw new Error(`/docs/security: "${title}" has no ${type} to split by audience`);
+    return { key, title, block, entries };
+  });
+}
+
+export function securityAudiences(page) {
+  const out = Object.fromEntries(Object.keys(SECURITY_AUDIENCES).map((a) => [a, {}]));
+  for (const { key, title, block, entries } of securitySections(page)) {
+    const split = new Map(Object.keys(out).map((a) => [a, []]));
+    block[entries].forEach((entry, i) => {
+      split.get(audienceOf(entry, `/docs/security: "${title}" entry ${i + 1}`)).push(entry);
+    });
+    for (const [audience, mine] of split) out[audience][key] = { ...block, [entries]: mine };
+  }
+  return out;
+}
+
+/** The umbrella's blocks with the three split blocks narrowed to one audience. */
+export function audienceBlocks(page, audiences, audience) {
+  const swap = new Map(securitySections(page).map(({ key, block }) => [block, audiences[audience][key]]));
+  return page.blocks.map((block) => swap.get(block) ?? block);
+}
+
+/**
+ * `/docs/security` from docs/specs/security.md, every section of it.
+ *
+ * The file stays canonical in `docs/specs/`: it is a spec, so
+ * `scripts/spec-lint.mjs` budgets it and the nightly audit reads it. No
+ * `canonicalUrl`, because the delta removes no section — the page is the spec,
+ * which is the point of publishing it. `pageBlocks` is the same document with
+ * the three split blocks narrowed to the umbrella's own audience; `blocks`
+ * keeps every entry, for the two pages that render the other two audiences.
+ */
+const buildSecurity = async () => {
+  const page = await buildDocument({
+    file: 'docs/specs/security.md',
+    delta: SECURITY_DELTA,
+    label: '/docs/security',
+    fallbackTitle: 'Security',
+  });
+  const audiences = securityAudiences(page);
+  return { ...page, audiences, pageBlocks: audienceBlocks(page, audiences, 'security') };
+};
 
 /** Blocks belonging to a heading: everything up to the next heading of <= depth. */
 function sectionBlocks(blocks, heading) {
@@ -587,6 +797,8 @@ function linkSkillHeadings(skill, cli) {
 export async function generateDocs() {
   const guide = await buildGuide();
   const selfhost = await buildSelfHost();
+  const security = await buildSecurity();
+  assertRouteFragments([guide, selfhost, security]);
   const skill = await buildSkill();
   const cli = await buildCli(skill);
   const references = linkSkillHeadings(skill, cli);
@@ -594,6 +806,7 @@ export async function generateDocs() {
   return {
     guide,
     selfhost,
+    security,
     cli,
     skill: {
       source: skill.source,
@@ -617,14 +830,17 @@ async function main() {
     ),
     syncGuideMedia(data.guide.media.available),
   ]);
-  const { guide, selfhost, cli, skill } = data;
+  const { guide, selfhost, security, cli, skill } = data;
+  const markdownPages = [guide, selfhost, security];
   console.log(
     `Wrote docs data: guide ${guide.headings.length} headings, ` +
       `self-host ${selfhost.headings.length} headings (${selfhost.delta.length} delta rules), ` +
+      `security ${security.headings.length} headings (${security.delta.length} delta rules), ` +
       `cli ${cli.commands.length} commands + ${cli.intro.length} intro sections, ` +
       `skill ${Object.keys(skill.references).length} reference links, ` +
       `${guide.media.available.length} media file(s), ` +
-      `${guide.localizedLinks.length + selfhost.localizedLinks.length + skill.localizedLinks.length} link(s) localized`,
+      `${markdownPages.reduce((n, page) => n + page.repoLinks.length, 0)} link(s) sent to the repository, ` +
+      `${markdownPages.reduce((n, page) => n + page.localizedLinks.length, 0) + skill.localizedLinks.length} link(s) localized`,
   );
 }
 

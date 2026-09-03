@@ -51,7 +51,7 @@ export interface HostEnrollment {
    *
    * **The Server never receives it** — the enroll request body is unchanged —
    * and it lives only where the enrollment lives, which is owner-only storage
-   * on both hosts (`SECURITY.md` → "Credentials at rest"). Optional today
+   * on both hosts (`docs/specs/security-remote.md` → "Credentials at rest"). Optional today
    * because an enrollment persisted before this field existed must keep
    * loading; nothing reads it yet.
    */

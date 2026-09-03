@@ -17,7 +17,7 @@ const themeExtensionsPath = resolve(repoRoot, "lib/src/lib/themes/bundled-extens
 // (`standalone/src-tauri/tauri.conf.json` -> `bundle.resources`), node_modules
 // and all, and `server` is installed and run by a selfhoster (SELF_HOST.md) —
 // `web-push` in particular signs with a private key and makes outbound
-// requests. See SECURITY.md, "Dependency Supply Chain".
+// requests. See docs/specs/security-supply-chain.md -> "Disclosure".
 const productDependencyFilters = [
   "dor",
   "dormouse",

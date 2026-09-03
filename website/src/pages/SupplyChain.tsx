@@ -5,6 +5,8 @@ import npmDeps from "../data/dependencies-npm.json";
 import runtimeDeps from "../data/dependencies-runtime.json";
 import DocsLayout from "../components/DocsLayout";
 import { LINK_CLASS, SCROLL_MT_CLASS } from "../components/docs-tokens";
+import MarkdownDocument, { AnchoredHeading, type BlockNode } from "../components/MarkdownDocument";
+import security from "../data/docs.security.json";
 import { type MetaArgs } from "react-router";
 import { type TocEntry } from "../lib/docs-pages";
 import { siteMeta } from "../lib/site-meta";
@@ -33,8 +35,6 @@ type PackageDependency = {
 type DirectCargoDependency = PackageDependency & {
   declaredName: string;
 };
-
-const securityPolicyUrl = "https://github.com/diffplug/dormouse/blob/main/SECURITY.md";
 
 function DependencyName({ dep }: { dep: PackageDependency }) {
   if (!dep.homepage) return dep.name;
@@ -176,12 +176,32 @@ const SECTIONS: readonly SupplyChainSection[] = [
   },
 ];
 
-/** This page's table of contents, off the list that titles its sections. */
-export const SUPPLY_CHAIN_TOC: TocEntry[] = SECTIONS.map((section) => ({
-  id: section.id,
-  text: section.title,
-  children: [],
-}));
+/**
+ * The security spec's rows and bullets for what reaches a user's machine,
+ * rendered from `docs.security.json` rather than restated here
+ * (docs/specs/website-docs.md -> `/docs/security` spec).
+ */
+const CONTRACT = security.audiences["supply-chain"];
+
+/** The spec's subsections this page shows, each only while it has something to say. */
+const CONTRACT_SECTIONS = [
+  { id: "not-defended", text: "What is not defended", block: CONTRACT.notDefended },
+  { id: "known-gaps", text: "Known gaps", block: CONTRACT.knownGaps },
+].filter((section) => section.block.items.length > 0);
+
+/** This page's table of contents, off the list that titles its inventory sections. */
+export const SUPPLY_CHAIN_TOC: TocEntry[] = [
+  {
+    id: "guarantees",
+    text: "Supply-chain guarantees",
+    children: CONTRACT_SECTIONS.map(({ id, text }) => ({ id, text, children: [] })),
+  },
+  ...SECTIONS.map((section) => ({
+    id: section.id,
+    text: section.title,
+    children: [],
+  })),
+];
 
 function DependencySection({ section }: { section: SupplyChainSection }) {
   return (
@@ -203,32 +223,40 @@ function DependencySection({ section }: { section: SupplyChainSection }) {
 export default function SupplyChain() {
   return (
     <DocsLayout activePath="/supply-chain" toc={SUPPLY_CHAIN_TOC}>
+      <AnchoredHeading id="guarantees">Supply-chain guarantees</AnchoredHeading>
       <p className="text-base text-[var(--color-text)]/70 mb-2">
-        Dormouse is a terminal, so users trust it with shells, source trees, credentials, and
-        local files. Our security procedures are documented in full (and audited nightly and immediately before every release) in{" "}
-        <a
-          href={securityPolicyUrl}
-          className={link()}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          SECURITY.md
-        </a>, here is a summary:
+        What reaches a machine, and how it gets there, is governed by these rows of the{" "}
+        <a href="/docs/security" className={link()}>
+          security spec
+        </a>
+        , rendered from the same source the nightly audit reads. Each row names the spec
+        that states the rule and what pins it on every build; the audit that checks all of
+        them is described under{" "}
+        <a href="/docs/security#how-the-guarantees-are-checked" className={link()}>
+          how the guarantees are checked
+        </a>
+        .
       </p>
-      <ul className="text-base text-[var(--color-text)]/70 mb-2 list-disc space-y-1 pl-5">
-        <li>
-          We wait at least 24 hours before adopting any newly published dependency.
-        </li>
-        <li>
-          Signing and auto-update secrets for the Standalone app are stored offline, never in CI.
-        </li>
-        <li>
-          Publishing secrets for the VS Code extension are stored in CI locked by two separate maintainer accounts.
-        </li>
-      </ul>
+      <MarkdownDocument blocks={[CONTRACT.guarantees as BlockNode]} />
+      {CONTRACT_SECTIONS.map(({ id, text, block }) => (
+        <div key={id}>
+          <AnchoredHeading id={id} depth={3}>
+            {text}
+          </AnchoredHeading>
+          <MarkdownDocument blocks={[block as BlockNode]} />
+        </div>
+      ))}
+      <p className="text-base text-[var(--color-text)]/70 mb-2">
+        The optional coordinating server — needed only for phone push notifications,
+        installed by the{" "}
+        <a href="/docs/self-host#what-the-installer-does" className={link()}>
+          self-host runbook
+        </a>{" "}
+        — is included in the inventory below.
+      </p>
 
       <p className="text-base text-[var(--color-text)]/70 mb-2">
-        All bundled libraries are listed below. Thank you to every author and contributor.
+        Thank you to every author and contributor.
         Thanks also to{" "}
         <a
           href="https://github.com/reowens/ascii-splash"

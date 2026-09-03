@@ -9,7 +9,7 @@
  * because the pattern cannot see the API somebody used. That is not
  * hypothetical — an audit added a `serve({ hostname: '127.0.0.1' })` and a
  * `new WebSocketServer({ host: '127.0.0.1' })` to a throwaway repo and this
- * lint stayed green on both, while `SECURITY.md` claimed a new loopback bind
+ * lint stayed green on both, while `docs/specs/security-local.md` claimed a new loopback bind
  * fails the build. A green `loopback-lint` said nothing about that.
  *
  * Each case appends a listener to one real, tracked, unguarded source file and
@@ -57,5 +57,5 @@ selftest.finish(
   'Each case adds one unguarded loopback listener. A case that stays green means\n'
   + 'LISTEN_RE in scripts/loopback-lint.mjs does not match that bind form, so the\n'
   + '"a new loopback bind that does not reference a guard module fails the build"\n'
-  + 'clause in SECURITY.md -> "Loopback Listeners" is not true of it.',
+  + 'clause in docs/specs/security-local.md -> "Loopback Listeners" is not true of it.',
 );

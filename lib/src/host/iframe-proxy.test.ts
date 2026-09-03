@@ -385,7 +385,7 @@ describe('iframe proxy — the two privileges are the embedder’s, not the port
 });
 
 describe('iframe proxy — the upgrade path', () => {
-  // SECURITY.md calls this "the one that matters most": WebSockets are not
+  // docs/specs/security-local.md -> "Loopback Listeners" singles this path out: WebSockets are not
   // subject to CORS, so a laundered Origin does not merely let a stranger
   // write, it hands them a readable socket to a dev server or
   // openvscode-server that would have refused their real origin. It had no

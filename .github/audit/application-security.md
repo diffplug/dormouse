@@ -1,14 +1,15 @@
 # Domain: application-security
 
-**Scope — these sections, and no others:**
+**Scope — these specs, and no others:**
 
-`## Remote Control`
-`## Loopback Listeners`
+- `docs/specs/security-local.md`
+- `docs/specs/security-remote.md`
 
 **Output file:** `audit-application.md`
 
-This is a code-and-specs audit of the product's own remote control stack. You
-need no GitHub API access and no PAT — do not use one.
+This is a code-and-specs audit of the product's own boundaries — the remote
+control stack, and the local application. You need no GitHub API access and no
+PAT — do not use one.
 
 Read, at minimum: `docs/specs/remote-security-model.md` **and its paired
 `docs/specs/remote-security-model.rationale.md`**, `docs/specs/server.md`,
@@ -41,6 +42,14 @@ For `## Loopback Listeners`, read `lib/src/host/loopback-guard.ts` first — it
 states the rule — then each listener it names. Derive the set of listeners by
 searching the shipped trees yourself; the section's own list is a description of
 today's tree, not the scope.
+
+For the rest of `docs/specs/security-local.md`, read each section's owner first
+— `docs/specs/terminal-escapes.md`, `docs/specs/dor-browser.md`,
+`docs/specs/dor-cli.md`, `docs/specs/vscode.md` -> "Webview message
+authentication", `docs/specs/standalone.md` -> "Persistence" — then the parser,
+the iframe shim, the control-socket code, and the persistence path they point
+at. The attacker there is a program printing to the terminal, a page in a
+browser pane, or another local account, never the network.
 
 ## Qualitative pass
 
@@ -103,13 +112,9 @@ Be adversarial, and go past the `FAIL IF` list. Ask specifically:
   and `server.md`'s Relay and E2E framing. `scripts/e2e-lint.mjs` mechanizes the
   structural half of that ("one suite, no negotiation, no plaintext path, no
   legacy discriminant") — check that each of its rules still names a real
-  `SECURITY.md` line and that `scripts/e2e-lint-selftest.mjs` still proves every
-  rule load-bearing, then look for what a *textual* lint cannot see.
-
-Where the section says a risk is accepted (the setup password's hardening) or a
-gap is known (revocation, the audit trail, the two `workflow-audit` window
-evasions), do not re-report it as a finding — report only if the situation has
-changed or is worse than described.
+  `docs/specs/security-remote.md` line and that
+  `scripts/e2e-lint-selftest.mjs` still proves every rule load-bearing, then
+  look for what a *textual* lint cannot see.
 
 You are also the **catch-all** domain, and this is defined by subtraction, not
 by a list: you own everything in the repository that `supply-chain.md` and

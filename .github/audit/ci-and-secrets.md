@@ -1,13 +1,10 @@
 # Domain: ci-and-secrets
 
-**Scope — these sections, and no others:**
+**Scope — these specs, and no others:**
 
-`## GitHub Actions Policies`
-`## Automated Maintainer (tend)`
-`## VS Code Extension Releases`
-`## Desktop Releases`
-`## Reporting a Vulnerability`
-`## CI Validation Contract`
+- `docs/specs/security.md`
+- `docs/specs/security-ci.md`
+- `docs/specs/security-audit.md`
 
 **Output file:** `audit-ci-secrets.md`
 
@@ -24,7 +21,7 @@ GH_TOKEN=$AUDIT_PAT gh api repos/$GITHUB_REPOSITORY/rulesets/16757376
 `$AUDIT_PAT` is a fine-grained, read-only PAT covering Administration +
 Secrets + Environments, guaranteed present by an earlier step. If a prefixed
 call still returns 403, record FAIL with the note "PAT scope drifted from
-SECURITY.md".
+docs/specs/security-audit.md".
 
 **Check effective permissions, not declared ones.** A job with no
 `permissions:` block inherits the repository default, so read

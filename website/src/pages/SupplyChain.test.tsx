@@ -4,12 +4,11 @@ import SupplyChain, { SUPPLY_CHAIN_TOC } from "./SupplyChain";
 
 describe("supply chain table of contents", () => {
   it("names every section heading the page renders, in page order", () => {
-    // The entries and the headings both come off SECTIONS, so this fails the
-    // moment one of them stops. Anchors resolving is checked for every rail
-    // page in website/src/lib/docs-rail.test.tsx.
+    // Anchors resolving is checked for every rail page in
+    // website/src/lib/docs-rail.test.tsx.
     const markup = renderToStaticMarkup(<SupplyChain />);
-    const rendered = [...markup.matchAll(/<h2 id="([^"]+)"[^>]*>([^<]*)<\/h2>/g)].map(
-      ([, id, text]) => [id, text],
+    const rendered = [...markup.matchAll(/<h2 id="([^"]+)"[^>]*>(.*?)<\/h2>/g)].map(
+      ([, id, html]) => [id, html.replace(/<[^>]+>/g, "")],
     );
     expect(SUPPLY_CHAIN_TOC.map((entry) => [entry.id, entry.text])).toEqual(rendered);
   });

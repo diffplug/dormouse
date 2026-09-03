@@ -292,7 +292,7 @@ window, `<app_data_dir>/sessions/<label>.json`:
   blob (rationale).
 
 **Owner-only on disk, before any bytes are written** — the blob carries terminal
-transcripts (`SECURITY.md` -> Remote Control, Credentials at rest).
+transcripts (`docs/specs/security-local.md` -> "Persisted state").
 `restrict_to_owner` sets `0700` on the directory and `0600` on the temp file
 *first*, since the rename preserves its mode; on Windows, where a unix mode is a
 silent no-op, it applies a protected single-entry DACL instead (mechanism in its
