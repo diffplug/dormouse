@@ -165,9 +165,6 @@ therefore supports a deliberate *subset* of CommonMark and raises
 general parser would. The public-doc lint turns that error into a build
 failure, which is what makes a hand-rolled parser safe as the guide grows.
 
-**Headings are ATX only.** **A fence closes only on a run of its own marker at
-least as long as the opener's**, so a longer outer fence nests an inner one.
-
 Raw HTML is disabled except for a narrow `<img>` allowlist carrying only `src`,
 `alt`, `width`, `height`, and `title`, with an `https:` source. Every other tag,
 and every other attribute on `<img>`, is rejected outright. The exception exists
