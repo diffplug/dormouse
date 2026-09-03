@@ -177,8 +177,8 @@ opened from the far right of the baseboard (alarm sections in
 playground navbar — carries none**.
 
 - **VS Code offers none at all** (rationale). `VSCodeAdapter` sets the optional
-  `hostOwnsTheme` capability on `PlatformAdapter`, and the dialog hides its Theme
-  row when set; absent reads as `false`, so every other adapter gets the row.
+  `hostOwnsTheme` capability and the dialog hides its Theme row
+  (`docs/specs/transport.md` → Adapter model).
 - **Each host restores at boot**, since the picker mounts only when the dialog
   opens: `standalone/src/main.tsx` calls `restoreActiveTheme()`; the website
   playground pages and Pocket use `useRestoredTheme()`, which applies at render

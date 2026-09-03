@@ -4,16 +4,16 @@
 
 ## Quit-time install
 
-**Why install runs last.** A Windows NSIS install force-kills the app the moment it starts. Run it before the graceful terminal teardown and the durable final session save, and the kill lands mid-teardown, losing the freshest scrollback — the output the user was looking at when they quit.
+**Why install runs last.** A Windows NSIS install force-kills the app the moment it starts; run it before the graceful terminal teardown and the durable final session save, and the kill lands mid-teardown, losing the freshest scrollback — what the user was looking at when they quit.
 
-**Why Vite dev mode skips `install()`.** The updater resolves its replacement target from the current executable path, which in dev is the dev executable's directory rather than a packaged bundle.
+**Why Vite dev mode skips `install()`.** The updater resolves its replacement target from the current executable path, which in dev is the dev executable's directory, not a packaged bundle.
 
 ## Sidecar teardown on Windows
 
-NSIS cannot overwrite node-pty's loaded `conpty.node` or `conpty.dll`; each pseudoconsole also has an `OpenConsole.exe` child in the sidecar's job object. The ordinary Rust exit handler is too late because `install()` force-kills the app and NSIS begins copying immediately.
+NSIS cannot overwrite node-pty's loaded `conpty.node` or `conpty.dll`; each pseudoconsole also has an `OpenConsole.exe` child in the sidecar's job object. The Rust exit handler runs only after the force-kill, with NSIS already copying.
 
-Polling `try_wait` is required because the reaper thread may already have consumed the job object's completion-port message, making `wait()` block forever after an earlier sidecar crash.
+Polling `try_wait` avoids `wait()`, which blocks forever when the reaper thread has already consumed the job object's completion-port message after an earlier sidecar crash.
 
 ## Debug report on failure
 
-**Why search-before-file, and why the modal exists at all.** An update failure is environment-specific, so the odds that someone has already filed it are high and a seeded search costs the user nothing. The log tail is the only evidence that survives the installer's force-kill, so if the search misses, the report has to carry it.
+**Why two steps.** An update failure is environment-specific, so the odds someone has already filed it are high and a seeded search costs the user nothing. The log tail is the only evidence surviving the installer's force-kill, so the report carries it when the search misses.

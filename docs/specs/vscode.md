@@ -78,17 +78,12 @@ Each hosting primitive uses the chrome it has, following the in-app `<title> <be
 Reflection updates on every owned-PTY `AlertManager.onStateChange` and on `claim` / `release`. Source of truth: `computeWorkspaceUnion` in `lib/src/lib/workspace-union.ts`, `notifyUnion` in `vscode-ext/src/message-router.ts`, `workspaceTitle` / `workspaceBadge` in `vscode-ext/src/workspace-chrome.ts`, `setupPanel` in `vscode-ext/src/extension.ts`, `DormouseViewProvider` in `vscode-ext/src/webview-view-provider.ts`.
 
 WATCHING rules and the alarm settings (`docs/specs/alert.md` → Alarm settings)
-are app-global rather than per-Workspace, so both ride a host-authoritative
-channel of the same shape: each webview offers its persisted copy
-(`alert:initializeWatchedCommands` / `alert:initializeSettings`), **only the first
-offer after extension-host startup seeds the shared host state**, later edits
-arrive as per-key mutations (`alert:setCommandWatched` / `alert:updateSettings`),
-and every attached renderer receives the canonical full snapshot
-(`alert:watchedCommands` / `alert:settings`). Settings differ twice: the host consumes only
-`inactivityTimeoutMs` (installed on the shared `AlertManager`) yet **relays the
-whole blob** so renderer-only fields stay in sync across webviews, and **must
-revalidate** every inbound blob — renderer-supplied numbers that become host
-timers.
+are app-global rather than per-Workspace, so both ride the host-authoritative
+seed / mutate / broadcast channel `docs/specs/transport.md` → Message protocol
+specifies. Two things are this host's: **the seeding offer is the first one
+after extension-host startup**, and the host installs only
+`inactivityTimeoutMs` on the shared `AlertManager` while relaying the whole
+settings blob.
 
 Source of truth: `WatchedCommandHost` in `lib/src/lib/watched-command-host.ts`,
 `AlertSettingsHost` in `lib/src/lib/alert-settings-host.ts`, the alert cases in
@@ -98,7 +93,7 @@ Source of truth: `WatchedCommandHost` in `lib/src/lib/watched-command-host.ts`,
 
 The selected shell name is mirrored into `WebviewView.description`, and `dormouse:selectedShell` keeps the webview's default-shell slot current for split/spawn/restore paths. `shell-selection.ts` reads `workspaceState` before `globalState` for `dormouse.selectedShellPath`, and **a global save clears the workspace value** so it cannot shadow the new default.
 
-`dormouse.newTerminal` focuses the view and posts `dormouse:newTerminal` with the selected shell; Wall selects the new pane and enters passthrough. `dormouse.selectShell` opens a QuickPick, saves the shell path globally or per workspace, applies the description/default-shell update, and — **only when the pick differs from the previous selection** — focuses the view and posts `dormouse:newTerminal` with `replaceUntouched: true` and `announce: true`. Wall then replaces a selected *untouched* terminal in place; a touched one gets an additional pane spawned and focused in passthrough.
+`dormouse.newTerminal` focuses the view and posts `dormouse:newTerminal` with the selected shell; Wall selects the new pane and enters passthrough. `dormouse.selectShell` opens a QuickPick, saves the shell path globally or per workspace, applies the description/default-shell update, and — **only when the pick differs from the previous selection** — focuses the view and posts `dormouse:newTerminal` with `replaceUntouched: true` and `announce: true` (`docs/specs/layout.md` → "Session lifecycle and terminal registry" owns what Wall does with it).
 
 The QuickPick is the only shell control here: `VSCodeAdapter` sets the optional `hostOwnsShells` capability, so the shared Settings dialog hides its Shell row (as `hostOwnsTheme` does for the Theme row).
 
@@ -106,8 +101,8 @@ The QuickPick is the only shell control here: `VSCodeAdapter` sets the optional 
 
 A `WebviewPanelSerializer` registered under the `dormouse` view type restores editor panels after a restart; `onWebviewPanel:dormouse` activates the extension early enough for it to be there. The persisted shapes it round-trips (`PersistedSession` / `PersistedPane` / `PersistedAlertState` / `PersistedDoor`) are transport.md's.
 
-**While running.** The frontend saves via `dormouse:saveState` — debounced 500 ms,
-plus a 30 s heartbeat that fires only when something marked the session dirty. The
+**While running.** The frontend saves via `dormouse:saveState` on the shared
+cadence (`docs/specs/layout.md` → Session persistence). The
 router's `onSaveState` merges in current alert states (`mergeAlertStates()`), then
 the **WebviewView** writes `workspaceState` (`dormouse.session`) while
 **WebviewPanels** persist through VS Code's per-panel `vscode.setState()`, so
@@ -139,8 +134,7 @@ killed mid-poll costs at most a late agent's command and a timeout loses a
 recovery command rather than delaying shutdown.
 
 **On activate**, saved state loads through `readPersistedSession()`
-(`docs/specs/transport.md`), which tolerates both parsed objects and
-JSON-stringified blobs returned by VS Code state APIs, and is passed to routers
+(`docs/specs/transport.md` → "Persisted session types") and is passed to routers
 for cold-start restore. The WebviewView and each deserialized WebviewPanel then
 claim their own pane ids' recovery commands out of the single record, under
 `docs/specs/transport.md` → "Consuming it". **A panel's pane ids come from the
@@ -232,7 +226,7 @@ frame-src   http://127.0.0.1:* http://localhost:*
 
 **The webview CSP carries no relay sources.** Its `connect-src` loopback `ws:` entries are for the agent-browser stream relay only — the remote Host holds its `/ws/host` socket from the *extension host*, which no CSP fences, so the origin allowlist is enforced there instead (see "Remote Host: a service in the extension host").
 
-**That allowlist is a build-time constant, never a runtime value.** `vscode-ext/scripts/esbuild.mjs` substitutes `__DORMOUSE_REMOTE_CONNECT_SRC__` into `dist/extension.js`, defaulting to the SaaS origin (`https://*.dormouse.sh wss://*.dormouse.sh`), and **`assertConnectSrcBaked` fails the build if the define did not reach the bundle** — a lost define would otherwise surface only as a Host silently using the shipped default. **`bakedConnectSrc()` reads it as a `declare const`, never an import**, so the value is a literal nothing at runtime can move. A selfhoster widens it per build with `DORMOUSE_REMOTE_CONNECT_SRC='https://*.ts.net wss://*.ts.net' pnpm dogfood:vscode` — the same variable and opt-in as the standalone binary (`docs/specs/server.md` → "Where a Host may reach a relay server").
+**That allowlist is a build-time constant, never a runtime value**: `vscode-ext/scripts/esbuild.mjs` substitutes `__DORMOUSE_REMOTE_CONNECT_SRC__` into `dist/extension.js`. The default, the replace-not-add override rule, and the two build-time guards are `docs/specs/server.md` → "Where a Host may reach a relay server".
 
 `unsafe-inline` for styles covers the theme CSS variables VS Code injects as inline styles on the body element. Scripts stay nonce-gated on a fresh per-render nonce of 24 CSPRNG bytes (`node:crypto` `randomBytes`) base64url-encoded to 32 characters — **never `Math.random()`**. Vite builds the webview HTML from the `lib` package; at runtime `webview-html.ts` rewrites asset URLs to webview URIs, injects the CSP meta tag, swaps Vite's nonce placeholder for the real one, and appends a nonce-gated inline script carrying the boot globals (message token, initial state, selected shell, recovery commands).
 
@@ -264,9 +258,9 @@ Source of truth: `isHostMessage` in `lib/src/lib/vscode-message-token.ts`, `Webv
 
 ### Remote Host: a service in the extension host
 
-The shared `RemoteHostService` (`lib/src/host/remote/`, specified in `docs/specs/remote-api.md`) runs in the extension host, the process that already owns the PTYs; VS Code's part is where its state lives, which window runs it, and what the webviews still do.
+The shared `RemoteHostService` (`lib/src/host/remote/`, specified in `docs/specs/remote-api.md`) runs in the extension host; VS Code's part is where its state lives, which window runs it, and what the webviews still do.
 
-A webview is a **surface responder plus UI**: it answers what its own panes are called and how big its terminals are, renders the pairing modal, and carries the `window.dormouseRemoteHost` console hook. **Nothing a webview says can widen access** — the ACL and the access decision never leave the extension host (`docs/specs/remote-security-model.md`).
+A webview is a **surface responder plus UI** (`docs/specs/server.md` → "Host side" owns that split). **Nothing a webview says can widen access** — the ACL and the access decision never leave the extension host (`docs/specs/remote-security-model.md`).
 
 **The store.** Enrollment (`{ serverUrl, hostId, hostToken, origin, rpId, label }` plus this machine's Noise static) and ACL split by sensitivity: `hostToken` and the static's private half grant the `/ws/host` socket and this Host's identity, so **the enrollment goes to `SecretStorage`** (OS keychain) and **the ACL — public keys plus each Client's push `deliveryId` — to `globalState`**. Both are global rather than workspace-scoped: a Host identity belongs to the machine, not a folder.
 
@@ -289,7 +283,7 @@ The invariants:
 
 **Trust.** The socket path is derived, not secret — any user on the machine can compute it — so two layers stand between it and this installation's terminals.
 
-*The directory.* On unix the sockets live in a `dormouse-peer-<uid>` directory created 0700, and **before every bind and every connect it is `lstat`-ed and required to be a directory, owned by this uid, at exactly mode 0700, and not a symlink**. A loose directory we own is tightened; anything else is somebody else's and **the peer link stands down for good** rather than spinning against it, releasing the callers waiting on the contention. Windows named pipes carry their own ACL and skip this layer.
+*The directory.* On unix the sockets live in a `dormouse-peer-<uid>` directory created 0700 and held before every bind and every connect to `peerDirIsSafe()`, the same predicate the `dor` control socket uses (`docs/specs/dor-cli.md` → Control-channel security, which states its four checks). A loose directory we own is tightened; anything else is somebody else's and **the peer link stands down for good** rather than spinning against it, releasing the callers waiting on the contention. Windows named pipes carry their own ACL and skip this layer.
 
 *The handshake.* The shared secret is a mode-0600 `remote-host.peer-token` in `globalStorageUri`, **created once with an exclusive `wx` write rather than a rename** so two windows starting together agree on one token. `wx` creates the file before it writes the bytes, so the loser's read can land on a zero-length file: **treat an empty read as *not yet written*, never as the token**, waiting it out (`TOKEN_WRITE_ATTEMPTS` × `TOKEN_WRITE_POLL_MS`) (rationale). **Exhausting the wait latches the same permanent stand-down as an unsafe socket directory**, neither remaining case being fixed by retrying; the throw re-derives which it was, that log line being the only diagnosis (rationale). The token itself **never crosses the socket**; instead three frames prove mutual knowledge of it:
 
@@ -305,9 +299,9 @@ The invariants:
 
 Source of truth: `vscode-ext/src/remote-host.ts` (service glue, provider, command routing), `ensurePeerNet` / `attempt` / `stillOurs` in `vscode-ext/src/peer-link.ts`; pinned by `vscode-ext/test/remote-host.test.ts` and `vscode-ext/test/peer-link.test.ts`.
 
-**The webview bridge.** A webview reaches the service over `RemoteHostLink` (`lib/src/lib/platform/types.ts`), implemented in `vscode-adapter.ts` on three messages: `remoteHost:command { rhId, cmd, params }` out, `remoteHost:result { rhId, result | error }` and `remoteHost:event { name, … }` back. **Everything but those three `postMessage` shapes is the shared client** in `lib/src/host/remote/link-client.ts`, so VS Code, Tauri, and the browser dev harness cannot settle a command differently.
+**The webview bridge.** A webview reaches the service over `RemoteHostLink` (`lib/src/lib/platform/types.ts`), implemented in `vscode-adapter.ts` on three messages: `remoteHost:command { rhId, cmd, params }` out, `remoteHost:result { rhId, result | error }` and `remoteHost:event { name, … }` back. **Everything but those three `postMessage` shapes is the shared client** in `lib/src/host/remote/link-client.ts` (`docs/specs/transport.md` → Message protocol).
 
-Results are **broadcast to every webview in the window** rather than replied to one — safe because an `rhId` carries a per-adapter random tag and is globally unique, so only the asking adapter holds a pending command for it, and one correlation id serves both the in-window fan-out and the cross-window forward below.
+Results are **broadcast to every webview in the window** rather than replied to one (`docs/specs/transport.md`), and one correlation id serves both the in-window fan-out and the cross-window forward below.
 
 Two events are pushed rather than answered: `pairing-queue` (the complete snapshot; the service is authoritative, so **the mirror replaces rather than merges**) and `status { enrolled }`. The queue is pushed only when it *changes*, so **the webview asks for it once on every transition to enrolled** — joining a Host already mid-pairing would otherwise show no modal until that pairing was answered somewhere else.
 
@@ -334,7 +328,7 @@ The service owns the PTYs but not the *view* of them: each webview is its own JS
 
 **Every webview installs the responder**, broker or not; it carries none of the relay, enrollment, or pairing machinery — a registry lookup, the directory collector, a read-only surface resolve, and a resize. **Installing must be idempotent per link, not per flag** — answering already is, the announcing half is not, so a second call would cross into the Host's process twice per change forever (rationale).
 
-**Each webview counts once, and a late answer repairs the snapshot.** The router removes a webview from the outstanding set *before* taking its results, so a duplicate answer cannot contribute the same panes twice. An answer for an already-settled request cannot re-open it, so it **triggers a directory invalidation instead** and the next collect repairs the snapshot (rationale). The sidecar's ask bridge does the same (`docs/specs/standalone.md`).
+**Each webview counts once, and a late answer repairs the snapshot.** The router removes a webview from the outstanding set *before* taking its results, so a duplicate answer cannot contribute the same panes twice; an answer for an already-settled request **triggers a directory invalidation instead** (`docs/specs/remote-api.md` → Directory).
 
 **A peer answer belongs to the authenticated broker socket that asked for it** —
 if that broker disappears mid-fan-out the answer is dropped even when this window

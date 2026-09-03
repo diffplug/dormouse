@@ -98,13 +98,12 @@ webview, where `TauriAdapter` converts dor control requests into the
 ### Remote Host service
 
 The remote Host — relay socket, enrollment, ACL, pairing ceremony, remote-api v1
-— runs **in the sidecar**, the process that owns the PTYs: the same
+— runs **in the sidecar**, never the webview (`docs/specs/server.md` → "Host
+side", which owns that split and what the webview keeps): the same
 `RemoteHostService` the VS Code extension host runs, bound by
 `lib/src/host/remote/sidecar-entry.ts` and bundled to `sidecar/remote-host.cjs`
-with the relay-origin allowlist baked in (`docs/specs/server.md`). The webview
-keeps only the pairing modal, the console hook, ring detection for push, and
-answering for its own panes. **Nothing the webview says can widen access**
-(`docs/specs/remote-security-model.md`).
+with the relay-origin allowlist baked in (`docs/specs/server.md`). **Nothing the
+webview says can widen access** (`docs/specs/remote-security-model.md`).
 
 **State.** Rust creates the app-data directory, locks it owner-only, and passes it
 as `DORMOUSE_STATE_DIR` (§Persistence, "Rust file store"); `FileHostStateStore`
@@ -132,11 +131,9 @@ realm**. Against the shared store contract (`docs/specs/server.md` → "Host sid
 webview is three ordinary stdout events — `remoteHost:result`, `remoteHost:ask`,
 `remoteHost:event` — forwarded by Rust's generic `handle.emit`. **The correlation
 field is `rhId`, never `requestId`**: Rust swallows any sidecar line whose
-`data.requestId` matches a pending invoke (rationale). Both ends share
-`lib/src/host/remote/service-protocol.ts`; the webview half — pending-command
-table, 15s timeout, always-answer rule for asks — is
-`lib/src/host/remote/link-client.ts`, shared with VS Code and the browser dev
-harness so no host settles a command differently.
+`data.requestId` matches a pending invoke (rationale). Everything above those
+shapes is the shared `link-client.ts` (`docs/specs/transport.md` → Message
+protocol).
 
 **Asks and answers.** What the sidecar cannot know — a pane's name, its focus, its
 xterm size — it asks over `remoteHost:ask`, and
@@ -147,16 +144,13 @@ would instead collect until `ASK_BUDGET_MS` (1s), which otherwise only bounds a
 reloading webview — an attach must not hang on one.
 
 **An answer for an ask the bridge no longer holds invalidates the directory**
-rather than being dropped — a settled-empty ask leaves the Host's snapshot missing
-what that answer names, and only the next collect repairs it (rationale). VS
-Code's in-window fan-out does the same (`docs/specs/vscode.md`).
+rather than being dropped (`docs/specs/remote-api.md` → Directory).
 
 **Stripping.** The sidecar hands the webview *raw* PTY bytes, so the service runs
-its own strip-only `TerminalProtocolParser` over each PTY it streams (rationale).
-It discards every event that parser produces, responses included, and supplies a
-constant colour provider so an OSC 10/11/12 `?` query is *consumed* rather than
-declined (`docs/specs/terminal-escapes.md`). One parser **per PTY, not per
-attachment** (rationale).
+its own strip-only `TerminalProtocolParser` over each PTY it streams (rationale),
+supplying a constant colour provider for the OSC 10/11/12 case. Its rules —
+discard every event, consume rather than decline a colour query, one parser per
+PTY — are `docs/specs/terminal-escapes.md` → Parsing location.
 
 **A remote listener must never break the local pipe.** The tap sits inside
 `pty-core`'s event callback in `main.js`, ahead of the send to the webview, and is
@@ -240,11 +234,12 @@ Shell selection lives in the Settings dialog's **Shell** row
 (`lib/src/components/ShellPicker.tsx` over `lib/src/lib/shell-store.ts`), hidden
 when fewer than two shells were detected or when the host owns shell selection
 itself (`hostOwnsShells`, VS Code). Picking one persists the choice in
-`localStorage` under the shell's full identity — path plus ordered arguments —
-publishes it via `setDefaultShellOpts`, and dispatches `dormouse:new-terminal`
-with `replaceUntouched: true, announce: true` (`docs/specs/layout.md`, Shell
-selection replacement) — after dismissing the dialog, so the replacement takes
-keyboard focus on the next animation frame. Edge cases:
+`localStorage` under the shell's full identity, publishes it via
+`setDefaultShellOpts`, and dispatches `dormouse:new-terminal` with
+`replaceUntouched: true, announce: true` (`docs/specs/layout.md` → "Session
+lifecycle and terminal registry", Shell selection replacement) — after dismissing
+the dialog, so the replacement takes keyboard focus on the next animation frame.
+Edge cases:
 
 - A legacy path-only selection restores the first matching entry and gains the
   full identity on the next choice.
@@ -316,24 +311,13 @@ coalescing bursts to at most one in-flight write (latest value wins). Mirrors th
 VS Code adapter's host-injected seed (`docs/specs/vscode.md`).
 
 **Dirty-gated writes.** An idle app must not rewrite the multi-MB blob. A
-generation-counter dirty tracker gates the periodic heartbeat, fed by two trigger
-classes; the cadence is shared frontend code, so every adapter gets it.
+generation-counter dirty tracker gates the periodic heartbeat; the trigger
+taxonomy above it is shared frontend code, so every adapter gets it
+(`docs/specs/layout.md` → Session persistence).
 
-- **Structural** — Lath store commits (layout change, pane add/remove, active
-  pane) *schedule* a 500 ms-debounced save.
-- **Content** — inputs that change the persisted blob with no Lath commit
-  (`onPtyData` for scrollback / OSC CWD / title candidates, `subscribeToActivity`,
-  `subscribeToTerminalPaneState`, door-state changes) **mark dirty and never
-  schedule**, or a busy terminal would rewrite every 500 ms.
-- **The 30 s heartbeat persists only when the tracker is dirty**, so an idle
-  session issues zero writes.
 - **Races resolve conservatively**: a save captures its target generation before
   serializing and clears dirty only on a fulfilled write, so a change arriving
   mid-save costs one redundant save at worst and is never lost.
-- **Flush paths stay unconditional** — PTY exit, `onRequestSessionFlush`,
-  `pagehide`, unmount — the correctness net for any dirty-trigger hole (a program
-  calling `chdir()` emits no event, so its persisted CWD may go stale until the
-  next output — accepted).
 - **Store-level backstop**: `TauriSessionStore.setItem` short-circuits on a blob
   byte-equal to the cached one, valid from the first write because the cache is
   boot-seeded from disk.
@@ -365,11 +349,11 @@ plus adding capture to the quit teardown, whose ordering already fits (flush →
 kill → flush → drain).
 
 **Flip both `PERSIST_SESSION` flags together** — a harness that restored panes
-across a reload would be debugging a path the shipped app never takes
-(`docs/specs/transport.md`, Standalone browser-dev harness). `BrowserSidecarAdapter`
-also **deletes** the `dormouse.browser-sidecar.session` key on `init()` rather than
-ignoring it, since `localStorage` outlives the harness's per-run temp state
-directory (`standalone/scripts/dev-agent-browser.mjs`) (rationale).
+across a reload would be debugging a path the shipped app never takes; the rest
+of the mirroring rule is `docs/specs/transport.md` → Standalone browser-dev
+harness. `BrowserSidecarAdapter` **deletes** the
+`dormouse.browser-sidecar.session` key on `init()` rather than ignoring it
+(rationale).
 
 **What the gate costs on reload is the *layout*, not the Sessions.** Nothing wires
 `shutdown()` to `beforeunload`, so the sidecar's PTYs outlive a page reload and

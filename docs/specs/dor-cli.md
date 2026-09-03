@@ -243,12 +243,10 @@ Invariants:
   target falls back to the caller, then to the focused Surface.
 - Short refs (`surface:1`, `surface:2`, …) are Workspace-scoped stable refs, not
   layout/list positions: each Workspace starts at `surface:1` and assigns the
-  next number when a Surface is created/restored. The live id→ref map and a
-  separate monotonic counter both persist in the session snapshot
-  (`PersistedSession.surfaceRefs` / `surfaceRefsNext`); **the counter — not the
-  max of the surviving map — is the source of truth for the next number**, so a
-  killed Surface's entry drops from the map immediately without its number ever
-  being reused. **Only creation assigns a ref** — layout churn (reorder,
+  next number when a Surface is created/restored. The map and its counter
+  persist in the session snapshot, which is what keeps a retired number from
+  being reused (`docs/specs/transport.md` → "Persisted session types"). **Only
+  creation assigns a ref** — layout churn (reorder,
   minimize/reattach, zoom, focus), replacing an untouched terminal with a
   browser Surface, and browser render-mode swaps all leave it unchanged.
   **Killing a Surface retires its ref; a later target that names it must fail

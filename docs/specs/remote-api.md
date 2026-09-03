@@ -84,6 +84,8 @@ Reserved: a `capabilities` field on the client hello (what the client can render
 
 **Invalidation reaches the session through `watchDirectory`**, and both sources feed the same coalescer: changed pane state, activity, or focus announced by a webview, plus membership changes (a webview attaching or disposing, a peer window joining or dropping) which invalidate unconditionally.
 
+**A late answer — one for an ask that already settled — invalidates the directory rather than being dropped**: only the next collect repairs a snapshot missing what it names. Each host's ask bridge applies it (`docs/specs/standalone.md`, `docs/specs/vscode.md`).
+
 **Browser and iframe surfaces are neither listed nor attachable** — they never enter the xterm registry the directory collects from, so `surface.attach` cannot resolve them either. ([Future](#future) stages browser remoting; iframes stay unsupported even there.)
 
 **`alive` is real PTY-process liveness**, distinct from `exitCode` — the last finished command's shell-integration status: a pane may report `alive: true` with an `exitCode` set, or `alive: false` with none. **An exited pane stays listed at `alive: false`**, since Dormouse keeps it open until the user closes it, and the picker stops offering it — attaching would transfer nothing.

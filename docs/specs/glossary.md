@@ -82,7 +82,7 @@ A Workspace projects a **union status** over its member Surfaces' Activity:
 
 ### Implementation status
 
-The Pane / Surface model, surface kinds, and their persistence are live. Workspace / Window containers exist but are dormant behind the `dormouse.flags.workspaces` flag (off by default — one implicit Workspace); the standalone workspace strip and real `switchWorkspace` mounting are not built. Ledger: `docs/specs/layout.md` `## Future` (**Scope: workspaces-rollout**); this glossary does not track it.
+The Pane / Surface model, surface kinds, and their persistence are live; the Workspace / Window containers are dormant behind `dormouse.flags.workspaces` (`docs/specs/layout.md` → Workspaces), so the app runs one implicit Workspace. Ledger: `docs/specs/layout.md` `## Future` (**Scope: workspaces-rollout**); this glossary does not track it.
 
 ## Modes
 

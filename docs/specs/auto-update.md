@@ -50,15 +50,15 @@ Update status is a text notice in the Baseboard, the always-visible bottom strip
 
 ## Platform behavior at quit
 
-**`quit_proceed` runs on every path** (`docs/specs/standalone.md` §Quit flow), so app exit is uniform; only the install step differs:
+**`quit_proceed` runs on every path** (`docs/specs/standalone.md` §Quit flow), so app exit is uniform (Windows aside); only the install step differs:
 
-| Platform | Install step | App exit |
-|----------|--------------|----------|
-| Windows | Awaits `kill_sidecar_now`, then `install()` runs the NSIS installer in passive mode (progress bar, no interaction), which force-kills the app | NSIS force-kills before `quit_proceed` is reached |
-| macOS | `install()` replaces the `.app` bundle in place | `quit_proceed` → `app.exit(0)` |
-| Linux | `install()` replaces the AppImage in place | `quit_proceed` → `app.exit(0)` |
-| No pending update | — (`installPendingUpdate` not called) | `quit_proceed` → `app.exit(0)` |
-| Vite dev mode | Skips `install()`, which would replace the dev executable directory | `quit_proceed` → `app.exit(0)` |
+| Platform | Install step |
+|----------|--------------|
+| Windows | Awaits `kill_sidecar_now`, then `install()` runs the NSIS installer in passive mode (progress bar, no interaction), which force-kills the app before `quit_proceed` is reached |
+| macOS | `install()` replaces the `.app` bundle in place |
+| Linux | `install()` replaces the AppImage in place |
+| No pending update | — (`installPendingUpdate` not called) |
+| Vite dev mode | Skips `install()`, which would replace the dev executable directory |
 
 ## localStorage
 

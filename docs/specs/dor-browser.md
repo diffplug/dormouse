@@ -319,8 +319,9 @@ Input rules:
   `key.charCodeAt(0)`** (`.` is char 46 = VK_DELETE, so periods would otherwise
   become Delete presses).
 - Local paste is replayed as per-character key input.
-- macOS select-all/copy/cut use the host `agentBrowserEdit` channel. Undo/redo is
-  not emulated.
+- macOS select-all/copy/cut use the host `agentBrowserEdit` channel, since those
+  chords do not survive CDP input, and fall through to the page where the host
+  has none. Undo/redo is not emulated.
 
 Tabs live in the agent-browser surface: header-integrated for one, an in-body
 strip for two or more, select/close through `agentBrowserCommand`.
@@ -523,11 +524,8 @@ VS Code routes this through webview request/response messages to
 `standalone/src/tauri-adapter.ts` -> `standalone/src-tauri/src/lib.rs` ->
 sidecar `iframe:createProxyUrl`.
 
-The VS Code webview CSP must allow loopback frames:
-
-```txt
-frame-src http://127.0.0.1:* http://localhost:*
-```
+The VS Code webview CSP must allow loopback frames (`docs/specs/vscode.md` →
+CSP policy, which prints the directive and its consequence).
 
 Security boundaries:
 

@@ -38,7 +38,7 @@ Wall
 
 ## Content
 
-Each pane is one **leaf** in Lath's split tree — a stable, absolutely-positioned div that is **never re-parented**, so a moved `<iframe>` never reloads and a focused xterm never blurs. **One Surface per leaf, always**; there is no tab stacking. Splitting inserts a sibling leaf; removing collapses single-child splits back.
+Each pane is one **leaf** in Lath's split tree — a stable, absolutely-positioned div that is **never re-parented** (`docs/specs/tiling-engine.md` → "The HTML adapter (LathHost)"). **One Surface per leaf, always**; there is no tab stacking. Splitting inserts a sibling leaf; removing collapses single-child splits back.
 
 Panes are separated by a 7px gap (`PANE_GUTTER_PX`), odd so the 1px selection ring centers in it on whole pixels ([Selection overlay](#selection-overlay)).
 
@@ -76,7 +76,7 @@ A terminal Session with transient speech-delivery state gets a pointer-transpare
 
 **Two layers straddling the header's stacking context** (`.lath-leaf-header` is `position: relative; z-index: 20`):
 
-- **Wash + label at `z-index: 19`** — above terminal content, below the header and below the `z-index: 20` pane-corner mouse-override banner, so neither is tinted (rationale). Both states wash, `SPEAKING` at 20% opacity and `SPOKEN` at half that, `SPOKEN` being unbounded. **Never use color-alpha utilities here** — their emitted `color-mix()` is unsupported by the standalone Safari 15 / Chrome 105 targets; the solid alarm color lives on a dedicated child whose element opacity supplies those strengths. The label sits `PANE_HEADER_HEIGHT_PX + 4` from the Pane top, centered, in both states.
+- **Wash + label at `z-index: 19`** — above terminal content, below the header and below the `z-index: 20` pane-corner mouse-override banner, so neither is tinted (rationale). Both states wash, `SPEAKING` at 20% opacity and `SPOKEN` at half that — `SPOKEN` is an unbounded window, so its haze must stay light enough to read terminal text through. **Never use color-alpha utilities here** — their emitted `color-mix()` is unsupported by the standalone Safari 15 / Chrome 105 targets; the solid alarm color lives on a dedicated child whose element opacity supplies those strengths. The label sits `PANE_HEADER_HEIGHT_PX + 4` from the Pane top, centered, in both states.
 - **Perimeter ring at `z-index: 25`** — above the header so the treatment reads as one rounded rectangle around the whole Pane, below the `z-index: 30` sashes (rationale). 5px for `SPEAKING`, 3px for `SPOKEN`.
 
 Both layers wear the leaf's own rounding (header radius on top, terminal radius on the bottom). Under `SPEAKING` both pulse when motion is allowed and `cfg.alert.ringingPaused` is not set. Source of truth: `AlertSpeechIndicator.tsx`, registered as the `terminal` overlay by `LathHost.tsx`.
@@ -243,7 +243,7 @@ Source of truth: `lib/src/components/wall/WorkspaceSelectionOverlay.tsx`, `lib/s
 
 **A runtime Door is `{ id, token }` and carries no metadata.** Title, params and parked-ness stay in the Lath store, which keeps changing while the Surface is Doored, so no copy can go stale: **every reader — reattach, `dor` param matching, kill/session teardown, `dor list`, the baseboard chip's label, the session save — goes through `lath.getMeta(id)`**, and the persisted `PersistedDoor` row is materialized from the store at save time.
 
-**A minimized browser Surface parks rather than unmounting** (`shouldParkOnMinimize`): its state lives in the DOM — an `<iframe>`'s document, a screencast canvas — so a plain remove would destroy it. Terminals do not park; their state is in the PTY and the registry replays it. **Parking spans the minimize only** — a restart still cold-loads every browser Surface from its persisted URL. `docs/specs/tiling-engine.md` → "Parked leaves" owns the mechanism, the `MAX_PARKED_SURFACES` cap, and the visibility contract.
+**A minimized browser Surface parks rather than unmounting** (`shouldParkOnMinimize`); terminals do not. `docs/specs/tiling-engine.md` → "Parked leaves" owns the mechanism, who parks, the `MAX_PARKED_SURFACES` cap, and the visibility contract.
 
 ### Reattach (click door, `Enter`/`m`/`d` on door, or drag out)
 
@@ -263,7 +263,7 @@ The name `<span>` is replaced by an `InlineEditInput` (shared with the browser U
 
 The field is **controlled by its own draft state**, seeded at mount and untouched by later prop changes, and **the `select()` ref callback has a stable identity** so it runs exactly once (rationale). **Mounting is the reset** — the editor exists only during a rename, so each one starts from the current label. Clipboard chords inside the field are the wall's job on hosts whose webview has no native Edit menu (`docs/specs/mouse-and-clipboard.md` §8.9).
 
-Submitted values are rejected when empty or when they fail the `setTerminalUserTitle` validation that also guards title seeding — no titles starting with the `<idle>` sentinel (`docs/specs/transport.md`). `<unnamed>` is the default panel placeholder but is otherwise allowed as a user pin. **On rejection the input still closes** — it is not a blocking dialog — and a warning popover anchored under it names the offending value, dismissing on the next pointerdown, scroll, resize, `Escape`, or after `cfg.overlays.warningAutoDismissMs` (3s; 0 under Chromatic, pinned in `lib/.storybook/preview.ts`).
+Submitted values are rejected when empty or when they fail the `setTerminalUserTitle` validation that also guards title seeding (`docs/specs/terminal-state.md` → Supported OSC Inputs). `<unnamed>` is the default panel placeholder but is otherwise allowed as a user pin. **On rejection the input still closes** — it is not a blocking dialog — and a warning popover anchored under it names the offending value, dismissing on the next pointerdown, scroll, resize, `Escape`, or after `cfg.overlays.warningAutoDismissMs` (3s; 0 under Chromatic, pinned in `lib/.storybook/preview.ts`).
 
 Source of truth: `lib/src/components/wall/IllegalRenameWarning.tsx`, `lib/src/components/wall/use-dismiss-overlay.ts`.
 
@@ -282,7 +282,7 @@ For a terminal Surface the pane ID is its session ID. `TerminalPane` calls `getO
 
 - **Untouched**: new `getOrCreateTerminal` sessions start untouched; `isUntouched(id)` exposes the flag, user-originated PTY input clears it, and resume/restore seed the persisted one. **Missing legacy snapshot data defaults to touched (`false`)**, keeping close confirmation conservative.
 - **Shell selection replacement**: the standalone Settings dialog's Shell row and the VS Code shell picker send `dormouse:new-terminal` with `replaceUntouched` when the selected shell type changes. **A shell is identified by executable path plus ordered arguments**, so WSL distributions and Windows Developer shells sharing an executable stay distinct. **`Wall` always mints a new session id and a fresh `surface:N` ref.** An untouched selected pane or door has the new terminal take over its leaf via a Lath `replace` op (an atomic identity swap; doors reattach through the normal restore path first), the old session disposed and its ref retired; a touched selection, or none, spawns a new pane beside it. Announced spawns show a transient pane-anchored notice (`Switched to zsh`, `Opened bash`).
-- **Replay-time terminal reports must be dropped; user input must not be.** During **resume** replay xterm.js may emit replies to OSC/CSI/DCS queries embedded in buffered output; the registry drops those before they reach the new shell. **The filter covers query/focus reports only** — never arrows, function keys, or bracketed paste.
+- **Replay-time terminal reports must be dropped; user input must not be** — during **resume** replay the registry drops the replies xterm.js emits to queries embedded in buffered output, before they reach the new shell (`docs/specs/terminal-escapes.md` → "Report filtering on the input side").
 
 Source of truth: `lib/src/lib/terminal-store.ts` (registry maps and pending shell opts, imported directly, including by `lib/src/remote/host/`), `lib/src/lib/terminal-lifecycle.ts` (the ops), `lib/src/lib/terminal-registry.ts` (the facade).
 
@@ -305,19 +305,19 @@ Source of truth: `tryEnableWebglRenderer` in `lib/src/lib/terminal-lifecycle.ts`
 
 ### Session persistence
 
-Layout, cwd, minimized items, user-pinned titles, untouched state and alert state are saved through a debounced (500ms) write, the layout in the native Lath format (`lathLayout`; `docs/specs/tiling-engine.md` → "Persistence"). **Scrollback is never persisted** (`docs/specs/transport.md` → "Retiring the transcripts already on disk"); a transcript in a pre-upgrade blob is scrubbed on read. **Derived command/app labels on minimized doors are display-only** — never persisted as user-pinned titles.
+The snapshot is written through a debounced (500ms) save, its layout in the native Lath format (`lathLayout`; `docs/specs/tiling-engine.md` → "Persistence"); `docs/specs/transport.md` → "Persistence policy" lists what is persisted and owns the never-persist rules. **Derived command/app labels on minimized doors are display-only** — never persisted as user-pinned titles.
 
 Three save triggers, in ascending urgency:
 
 - Any Lath store commit (add/remove/resize/swap/meta, including the active pane the layout records) **schedules** the debounced save.
-- Content changes (terminal output, activity/TODO, pane title/command state, minimized-door changes) only **mark the session dirty**; a 30s heartbeat persists only when dirty, so an idle app stops writing.
-- PTY exit, `pagehide`, and extension shutdown requests **flush immediately and unconditionally** — the correctness net for any dirty-trigger gap.
+- Content changes with no Lath commit — `onPtyData` (terminal output, OSC CWD, title candidates), activity/TODO, pane title/command state, minimized-door changes — only **mark the session dirty**; a 30s heartbeat persists only when dirty, so an idle app stops writing.
+- PTY exit, `onRequestSessionFlush`, `pagehide`, unmount, and extension shutdown requests **flush immediately and unconditionally** — the correctness net for any dirty-trigger gap (a program calling `chdir()` emits no event, so its persisted CWD may go stale until the next output — accepted).
 
 `docs/specs/standalone.md` §Persistence owns the dirty-gating mechanism and the store-level identical-value backstop.
 
-With `dormouse.flags.workspaces` on, standalone wraps each Workspace snapshot in a Window snapshot recording every Workspace (name + layout) and which is active, so all of them survive a restart; off (the default) the store holds a bare `PersistedSession` ([Workspaces](#workspaces)). VS Code persists one Workspace per webview (`WebviewView` / `WebviewPanel`). Container types `PersistedWorkspace` / `PersistedWindow` live in `docs/specs/transport.md`.
+Container shapes and the `dormouse.flags.workspaces` wrapping are `docs/specs/transport.md` → "Persisted session types" ([Workspaces](#workspaces)); VS Code persists one Workspace per webview (`WebviewView` / `WebviewPanel`).
 
-Snapshots are read through `readPersistedSession()`, which accepts the canonical object shape and **defensively parses a JSON-stringified blob before validation**, some hosts handing back serialized JSON. **A present-but-unreadable blob is logged and discarded**, so malformed storage starts fresh rather than blocking startup.
+Snapshots are read through `readPersistedSession()`, which tolerates a stringified blob and logs-and-discards an unreadable one so malformed storage starts fresh rather than blocking startup (`docs/specs/transport.md` → "Persisted session types").
 
 Startup recovery is priority-based:
 1. **Resume** (webview hidden/shown, live PTYs): request PTY list + replay data from the platform, `resumeTerminal()` each (500ms timeout). **Saved pane and door titles are seeded back via `setTerminalUserTitle()`** (`docs/specs/transport.md`), so persisted placeholder labels never replay as user pins. If the saved session covers every live PTY, restore the saved Lath layout when its leaf set matches and reattach saved minimized items as doors. **Never fall through to cold restore just because the visible `paneIds` list is empty** — a wall whose live sessions are all minimized is still a live resume.

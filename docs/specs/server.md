@@ -117,7 +117,9 @@ override.
 `scripts/csp-defaults.mjs` holds the one definition of the default and the
 override rule; `standalone/scripts/build-sidecar-proxy.mjs` and
 `vscode-ext/scripts/esbuild.mjs` esbuild-`define` it into their bundles, where
-`bakedConnectSrc()` in `lib/src/host/remote/connect-src.ts` is the single reader.
+`bakedConnectSrc()` in `lib/src/host/remote/connect-src.ts` is the single reader
+— **reading it as a `declare const`, never an import**, so the value is a literal
+nothing at runtime can move.
 Two build-time guards, both because their failure mode is silent (rationale):
 `assertConnectSrcBaked` greps the bundle for the define, and
 `resolveRemoteConnectSrc` rejects an override the matcher could never read — a
@@ -629,8 +631,9 @@ The Host is a service in the process that owns the PTYs — never a webview:
 (`docs/specs/standalone.md` → "Remote Host service") and in the VS Code extension
 host (`docs/specs/vscode.md` → "Remote Host: a service in the extension host").
 The webview holds only UI — the pairing modal, the `window.dormouseRemoteHost`
-console hook, and answering what its own panes are called — reaching the service
-over the `remoteHost:*` bridge.
+console hook, ring detection for push ([alert.md](./alert.md) -> Push
+notifications), and answering what its own panes are called and how big its
+terminals are — reaching the service over the `remoteHost:*` bridge.
 
 **One service, two bindings.** `lib/src/host/remote/` shares the service, bridge
 contract/client, ask-backed provider, and serialization across both hosts; only
@@ -943,9 +946,8 @@ first** (Setup tokens). A code the phone's *own camera* opens is origin bootstra
 only; scan again from inside the app ([pocket-app.md](./pocket-app.md)).
 
 To test push, **add Pocket to the Home Screen before scanning** and do all of
-the above inside the installed app — iOS delivers Web Push only there, and the
-install is a separate storage partition needing its own pairing
-([pocket-app.md](./pocket-app.md) -> Installable web app). Push is then one tap
+the above inside the installed app ([pocket-app.md](./pocket-app.md) ->
+Installable web app owns why). Push is then one tap
 for the whole device — **Enable push notifications**, on the card above the host
 list, subscribing the browser and registering every paired Host at once. **That
 tap is the user gesture iOS requires; connecting alone does not subscribe.**
@@ -961,18 +963,13 @@ command typed from Pocket. Not in CI.
 ## Installing it
 
 The shipped selfhost deployment is a per-login user agent on the user's own
-machine, reachable only from their tailnet — a LaunchAgent on macOS, a
-Scheduled Task on Windows, a systemd *user* service on Linux — with
-`tailscale serve` terminating HTTPS on the node's MagicDNS name and proxying to
-the server on loopback. There is no cloud relay: an always-on relay is the same
-installer on an always-on tailnet machine. It is down while that machine sleeps,
-is off, or has no logged-in user — usually fine, since there is then no local
-Host to control either.
+machine, reachable only from their tailnet, with `tailscale serve` terminating
+HTTPS and proxying to the server on loopback.
 
 **[SELF_HOST.md](../../SELF_HOST.md) is both the operator runbook and the
-installer spec**: the platform mechanism map, the invariants the three installers
-hold, and the mechanical traps they encode live in its "Installer contract"
-section, audited by the `FAIL IF` lines in `SECURITY.md` and checked textually by
+installer spec**: the per-platform mechanism map, the availability shape, the
+invariants the three installers hold, and the mechanical traps they encode live
+there, audited by the `FAIL IF` lines in `SECURITY.md` and checked textually by
 `scripts/deploy-lint.mjs` (`pnpm lint:deploy`). Source of truth:
 `deploy/local/install-macos.sh`, `deploy/local/install-windows.ps1`,
 `deploy/local/install-linux.sh`.

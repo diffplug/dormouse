@@ -9,7 +9,7 @@
 | Key | Action | Description |
 |-----|--------|-------------|
 | Left ⌘ → Right ⌘ (within 500 ms) | Enter command mode | Only exits passthrough; inert in command mode. |
-| Left ⇧ → Right ⇧ (within 500 ms) | Enter command mode | Independent of the ⌘ track — Left ⌘ then Right ⇧ does not fire. The gesture for keyboards with no right ⌘. |
+| Left ⇧ → Right ⇧ (within 500 ms) | Enter command mode | Independent of the ⌘ track; the gesture for keyboards with no right ⌘. |
 | `Enter` (command) | Enter passthrough mode | Focus the selected pane; reattach the selected door and focus it. |
 
 A focused cross-origin iframe surface swallows the gesture; the proxy shim detects it in-frame and re-posts it to the Wall (`docs/specs/dor-browser.md`).
@@ -58,7 +58,7 @@ Every key not claimed above forwards to the embedded page while a screencast pan
 | Key | Action | Description |
 |-----|--------|-------------|
 | `⌘V` / `Ctrl+V` | Paste into page | Replays the *local* clipboard as per-character key events — the embedded browser's own clipboard is empty. |
-| `⌘`/`Ctrl` + `a` / `c` / `x` | Select all / copy / cut | Routed through the host's `agentBrowserEdit` channel (macOS chords do not survive CDP input); falls through to the page when the host has none. |
+| `⌘`/`Ctrl` + `a` / `c` / `x` | Select all / copy / cut | Routed through the host's `agentBrowserEdit` channel. |
 | `c` / `Esc` (render-swap warning) | Continue / cancel | Confirm dropping the non-active tabs when swapping a multi-tab screencast surface to the `iframe` renderer. |
 
 ## Dialogs, menus & prompts
@@ -75,7 +75,7 @@ Every key not claimed above forwards to the embedded page while a screencast pan
 
 ## VS Code host
 
-Mirrored workbench chords: the terminal still receives the key *and* Dormouse asks the extension host to run the command, which re-validates it against the `lib/src/lib/vscode-keybindings.ts` allowlist ([vscode.md](vscode.md)).
+Mirrored workbench chords — the terminal still receives the key too; [vscode.md](vscode.md) owns the `lib/src/lib/vscode-keybindings.ts` allowlist and its revalidation.
 
 | Key | VS Code command |
 |-----|-----------------|

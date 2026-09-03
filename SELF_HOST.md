@@ -106,10 +106,9 @@ installed release, which the installer and `manage status` both print.
   DORMOUSE_REMOTE_CONNECT_SRC='https://*.ts.net wss://*.ts.net' pnpm dogfood:vscode
   ```
 
-  `standalone/scripts/build-sidecar-proxy.mjs` and
-  `vscode-ext/scripts/esbuild.mjs` bake it into their Node Host bundles; the
-  relay socket is in neither webview, so no webview CSP change widens the
-  allowlist.
+  Both bake it into their Node Host bundles, and the relay socket is in neither
+  webview, so no webview CSP change widens the allowlist
+  (`docs/specs/server.md` → "Where a Host may reach a relay server").
 
 ## What the installer does
 
@@ -366,9 +365,8 @@ Host displays (`docs/specs/server.md` → Setup tokens and the pairing QR).
 3. **The phone, and only then the code.** On the phone, open
    `https://<laptop>.<tailnet>.ts.net` in Safari and confirm it leads with
    **Scan a setup code**. For push, add Pocket to the Home Screen and pair
-   inside the installed app — iOS delivers Web Push only there, and the install
-   is a separate partition needing its own pairing (`docs/specs/pocket-app.md` →
-   Installable web app, which also covers the phone's camera). **A setup code is
+   inside the installed app (`docs/specs/pocket-app.md` → Installable web app
+   owns why, and covers the phone's camera). **A setup code is
    live for five minutes**, so that first load — bundle, service worker, Home
    Screen install — must not happen inside the window. With the phone waiting on
    that screen, press **Set up a phone** in **Settings → Remote control**;
