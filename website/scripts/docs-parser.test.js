@@ -30,6 +30,17 @@ describe('inline', () => {
     expect(nodes.map((n) => n.type)).toEqual(['text', 'code', 'text', 'link', 'text', 'strong']);
   });
 
+  it('keeps a balanced paren inside a link destination', () => {
+    const nodes = parseInline('see [Foo](https://x.test/wiki/Foo_(bar)) now');
+    expect(nodes[1]).toMatchObject({ type: 'link', href: 'https://x.test/wiki/Foo_(bar)' });
+    expect(nodes[2]).toMatchObject({ type: 'text', value: ' now' });
+  });
+
+  it('keeps a paren inside a link title out of the destination scan', () => {
+    const nodes = parseInline('[a](/x "the (title)") end');
+    expect(nodes[0]).toMatchObject({ type: 'link', href: '/x', title: 'the (title)' });
+  });
+
   it('honours backslash escapes', () => {
     expect(inlineToText(parseInline('a \\| b'))).toBe('a | b');
   });
@@ -94,6 +105,30 @@ describe('blocks', () => {
 
   it('throws on an unterminated fence', () => {
     expect(() => parseMarkdown('```\nnope\n')).toThrow(/unterminated fenced code/);
+  });
+
+  it('keeps a shorter fence inside a longer one as code, not prose', () => {
+    const md = '````markdown\n```bash\necho hi\n```\n````\n';
+    const { blocks } = parseMarkdown(md);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toEqual({ type: 'code', lang: 'markdown', value: '```bash\necho hi\n```' });
+  });
+
+  it('rejects a setext underline instead of shipping it as text', () => {
+    expect(() => parseMarkdown('Title\n=====\n')).toThrow(UnsupportedMarkdownError);
+    expect(() => parseMarkdown('Title\n-----\n')).toThrow(/setext heading underline/);
+  });
+
+  it('ends a blockquote at a line that starts a new block', () => {
+    const { blocks } = parseMarkdown('> quoted\n# Heading\n');
+    expect(blocks.map((b) => b.type)).toEqual(['blockquote', 'heading']);
+    expect(blocks[1].id).toBe('heading');
+  });
+
+  it('still folds a lazy continuation line into the blockquote', () => {
+    const { blocks } = parseMarkdown('> quoted\ncontinues\n');
+    expect(blocks).toHaveLength(1);
+    expect(inlineToText(blocks[0].children[0].children)).toBe('quoted continues');
   });
 
   it('parses a table with an escaped pipe inside inline code', () => {
