@@ -17,7 +17,7 @@ accept input from any page in the user's browser, a boundary precisely because
 it does not look like one.
 
 **Only the self-hosted deployment ships.** The relay runs on hardware the user
-owns, reachable from their own tailnet ([self-host runbook](https://dormouse.sh/docs/self-host)).
+owns, reachable from their own tailnet ([SELF_HOST.md](../../SELF_HOST.md)).
 Cloud-hosted operation is staged, and its boundary is re-analyzed before that
 code ships ([security-application.md](./security-application.md#future)).
 
@@ -68,7 +68,7 @@ run this knows what they are taking on.
   compromised; a lost key authorized nothing on its own
   ([Client static loss](./remote-security-model.md#client-static-loss)).
 - **Availability.** The relay is down whenever the laptop is
-  ([Goals](./remote-security-model.md#goals); [keeping it up](https://dormouse.sh/docs/self-host#keeping-the-relay-up-while-the-laptop-sleeps)).
+  ([Goals](./remote-security-model.md#goals); [keeping it up](../../SELF_HOST.md#keeping-the-relay-up-while-the-laptop-sleeps)).
 - **The setup password's hardening is minimal**: a constant-time comparison and
   a fixed delay, with no rate limit or lockout. Accepted because the origin is
   tailnet-only and the password is 32 random bytes the installer wrote. **A

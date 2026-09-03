@@ -1,5 +1,12 @@
+/**
+ * The three security-adjacent pages: each links the other two in its own
+ * prose, and the two specialized pages render their audience's rows and
+ * bullets from the security spec's data rather than restating them
+ * (docs/specs/website-docs.md -> `/docs/security` spec).
+ */
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import security from "../data/docs.security.json";
 import SecurityDocs from "./SecurityDocs";
 import SelfHostDocs from "./SelfHostDocs";
 import SupplyChain from "./SupplyChain";
@@ -11,6 +18,24 @@ function renderMain(element: React.ReactElement): string {
   return main!;
 }
 
+/**
+ * The hrefs of a block tree's repository links — the ones that classified the
+ * entry (`repoPath`), and the one thing a rendered row keeps verbatim. Site
+ * links are left out: both pages link `/supply-chain` in their own prose.
+ */
+function repoHrefsIn(tree: unknown): string[] {
+  const out: string[] = [];
+  const walk = (node: unknown) => {
+    if (Array.isArray(node)) return node.forEach(walk);
+    if (!node || typeof node !== "object") return;
+    const { type, href, repoPath } = node as { type?: string; href?: string; repoPath?: string };
+    if (type === "link" && href && repoPath) out.push(href);
+    Object.values(node).forEach(walk);
+  };
+  walk(tree);
+  return out;
+}
+
 const PAGES = [
   {
     route: "/docs/security",
@@ -20,14 +45,13 @@ const PAGES = [
   {
     route: "/supply-chain",
     element: <SupplyChain />,
-    links: [
-      "/docs/security#how-the-guarantees-are-checked",
-      "/docs/self-host#what-the-installer-does",
-    ],
+    audience: "supply-chain",
+    links: ["/docs/security#how-the-guarantees-are-checked", "/docs/self-host#what-the-installer-does"],
   },
   {
     route: "/docs/self-host",
     element: <SelfHostDocs />,
+    audience: "self-host",
     links: ["/docs/security#how-the-guarantees-are-checked", "/supply-chain"],
   },
 ] as const;
@@ -42,27 +66,32 @@ describe("security-adjacent documentation", () => {
 });
 
 describe("specialized security guidance", () => {
-  it("states the supply-chain guarantees on the supply-chain page", () => {
-    const markup = renderToStaticMarkup(<SupplyChain />);
-    expect(markup).toContain("Every shipped dependency is disclosed.");
-    expect(markup).toContain("No newly published dependency is adopted for 24 hours");
-    expect(markup).toContain("Desktop signing and update keys never enter CI");
-  });
+  const specialized = PAGES.filter((page) => "audience" in page);
+  const audiences = security.audiences as Record<
+    string,
+    Record<"guarantees" | "notDefended" | "knownGaps", unknown>
+  >;
 
-  it("states self-host guarantees and gaps on the self-host page", () => {
-    const markup = renderToStaticMarkup(<SelfHostDocs />);
-    expect(markup).toContain("Payloads are end-to-end protected.");
-    expect(markup).toContain("Only the Host grants access.");
-    expect(markup).toContain("The Server sees metadata, not content.");
-    expect(markup).toContain("There is no revocation UI or activity audit trail");
-  });
+  for (const page of specialized) {
+    it(`${page.route} renders every row and bullet of its audience, and none of the other's`, () => {
+      const main = renderMain(page.element);
+      const mine = audiences[page.audience];
+      const theirs = Object.entries(audiences).find(([name]) => name !== page.audience)![1];
+      for (const key of ["guarantees", "notDefended", "knownGaps"] as const) {
+        const own = repoHrefsIn(mine[key]);
+        expect(own.length).toBeGreaterThan(0);
+        for (const href of own) expect(main).toContain(`href="${href}"`);
+        for (const href of repoHrefsIn(theirs[key])) {
+          if (!own.includes(href)) expect(main).not.toContain(`href="${href}"`);
+        }
+      }
+    });
 
-  it.each([
-    ["supply-chain", <SupplyChain />],
-    ["self-host", <SelfHostDocs />],
-  ])("links %s prose to Security only for audit methodology", (_, element) => {
-    const securityLinks = [...renderMain(element).matchAll(/href="(\/docs\/security[^"]*)"/g)]
-      .map(([, href]) => href);
-    expect(securityLinks).toEqual(["/docs/security#how-the-guarantees-are-checked"]);
-  });
+    it(`${page.route} links the audit method the guarantees rest on`, () => {
+      const securityLinks = [...renderMain(page.element).matchAll(/href="(\/docs\/security[^"]*)"/g)].map(
+        ([, href]) => href,
+      );
+      expect(securityLinks).toContain("/docs/security#how-the-guarantees-are-checked");
+    });
+  }
 });

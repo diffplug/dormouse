@@ -1,5 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { applyDelta, generateDocs, resolveRepoLinks, REPO_BLOB_BASE } from './generate-docs.js';
+import {
+  REPO_BLOB_BASE,
+  SECURITY_AUDIENCES,
+  SITE_ROUTES,
+  applyDelta,
+  assertRouteFragments,
+  generateDocs,
+  resolveRepoLinks,
+  securityAudiences,
+} from './generate-docs.js';
 import { createSlugger, parseMarkdown, visit } from './docs-parser.js';
 
 const data = await generateDocs();
@@ -142,19 +151,71 @@ describe('security spec', () => {
     ]);
   });
 
-  it('sends internal specs to GitHub and self-host links to the public runbook', () => {
-    // The audited domain specs stay repository links; the runbook has a public
-    // route, so its canonical site URLs must remain beside this rendered page.
+  it('sends unpublished specs to GitHub and published files to their pages', () => {
+    // The spec links its neighbours the way GitHub resolves them. Published,
+    // the domain specs have no page, so they go to the repository; the runbook
+    // has one, so a reader on the site stays on the site.
+    const routes = new Set(Object.values(SITE_ROUTES));
     expect(data.security.repoLinks.length).toBeGreaterThan(0);
-    for (const { to } of data.security.repoLinks) expect(to.startsWith(REPO_BLOB_BASE)).toBe(true);
-    expect(data.security.localizedLinks).toContainEqual({
-      from: 'https://dormouse.sh/docs/self-host',
-      to: '/docs/self-host',
-    });
-    expect(data.security.localizedLinks).toContainEqual({
-      from: 'https://dormouse.sh/docs/self-host#keeping-the-relay-up-while-the-laptop-sleeps',
+    for (const { to } of data.security.repoLinks) {
+      expect(to.startsWith(REPO_BLOB_BASE) || routes.has(to.split('#')[0])).toBe(true);
+    }
+    expect(data.security.repoLinks).toContainEqual({ from: '../../SELF_HOST.md', to: '/docs/self-host' });
+    expect(data.security.repoLinks).toContainEqual({
+      from: '../../SELF_HOST.md#keeping-the-relay-up-while-the-laptop-sleeps',
       to: '/docs/self-host#keeping-the-relay-up-while-the-laptop-sleeps',
     });
+  });
+
+  it('splits its guarantees, undefended edges, and gaps by audience, exhaustively', () => {
+    // Every row and bullet lands on exactly one of the two specialized pages,
+    // so nothing the umbrella says is absent from both and nothing is doubled.
+    const audiences = Object.keys(SECURITY_AUDIENCES);
+    const sectionBlock = (title, type) => {
+      const i = data.security.blocks.findIndex((b) => b.type === 'heading' && b.text === title);
+      return data.security.blocks.slice(i + 1).find((b) => b.type === type);
+    };
+    for (const [key, title, type, entries] of [
+      ['guarantees', 'Guarantees', 'table', 'rows'],
+      ['notDefended', 'What is not defended', 'list', 'items'],
+      ['knownGaps', 'Known gaps', 'list', 'items'],
+    ]) {
+      const whole = sectionBlock(title, type)[entries].map((e) => JSON.stringify(e));
+      const split = audiences.flatMap((a) => data.security.audiences[a][key][entries].map((e) => JSON.stringify(e)));
+      expect(split.length).toBe(whole.length);
+      expect(new Set(split).size).toBe(whole.length);
+      for (const entry of split) expect(whole).toContain(entry);
+      for (const a of audiences) expect(data.security.audiences[a][key][entries].length).toBeGreaterThan(0);
+    }
+  });
+
+  it('refuses an entry whose links name no audience, or two', () => {
+    const page = (markdown) => {
+      const blocks = parseMarkdown(markdown, { slug: createSlugger() }).blocks;
+      resolveRepoLinks(blocks, 'docs/specs/security.md');
+      return { blocks };
+    };
+    const doc = (row) =>
+      [
+        '## Guarantees', '', '| G | Rule | Pinned by |', '| --- | --- | --- |', row, '',
+        '## What is not defended', '', '- x ([a](./security-ci.md))', '',
+        '## Known gaps', '', '- y ([b](./security-application.md))',
+      ].join('\n');
+    expect(() => securityAudiences(page(doc('| g | [a](./security-ci.md), [b](./security-application.md) | t |')))).toThrow(
+      /do not name exactly one audience/,
+    );
+    expect(() => securityAudiences(page(doc('| g | no link | t |')))).toThrow(/names no spec/);
+    expect(() => securityAudiences(page(doc('| g | [a](./website-docs.md) | t |')))).toThrow(/exactly one audience/);
+    expect(securityAudiences(page(doc('| g | [a](./security-ci.md) | t |')))['supply-chain'].guarantees.rows).toHaveLength(1);
+  });
+
+  it('fails on a link into a published page whose fragment names no heading there', () => {
+    const target = { source: 'SELF_HOST.md', headings: [{ id: 'prerequisites' }], blocks: [] };
+    const link = (href) => ({ source: 'docs/specs/security.md', headings: [], blocks: [{ type: 'link', href }] });
+    expect(() => assertRouteFragments([target, link('/docs/self-host#prerequisites')])).not.toThrow();
+    expect(() => assertRouteFragments([target, link('/docs/self-host#nowhere')])).toThrow(/names no heading/);
+    // A route nobody generated, and a fragment on this page, are not this check's.
+    expect(() => assertRouteFragments([target, link('/docs/dor#nowhere')])).not.toThrow();
   });
 
   it('keeps the fragment on a link into another spec', () => {
@@ -180,9 +241,19 @@ describe('repository links', () => {
     const rewritten = resolveRepoLinks(blocks, 'docs/specs/security.md');
     expect(hrefs(blocks)).toEqual([
       `${REPO_BLOB_BASE}/docs/specs/security-ci.md#domains`,
-      `${REPO_BLOB_BASE}/SELF_HOST.md`,
+      '/docs/self-host',
     ]);
     expect(rewritten).toHaveLength(2);
+  });
+
+  it('records what each rewritten link named in the repository', () => {
+    const blocks = tree('[a](../../SELF_HOST.md#prerequisites)');
+    resolveRepoLinks(blocks, 'docs/specs/security.md');
+    const paths = [];
+    visit(blocks, (node) => {
+      if (node.type === 'link') paths.push(node.repoPath);
+    });
+    expect(paths).toEqual(['SELF_HOST.md']);
   });
 
   it('leaves anything that does not name a file in the repository alone', () => {

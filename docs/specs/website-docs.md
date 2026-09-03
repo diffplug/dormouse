@@ -190,8 +190,9 @@ delta is structural:
    title.
 2. Generate an on-page table of contents from the remaining headings.
 3. Assign stable, unique heading ids with one checked slugger.
-4. Resolve links into the repository to the canonical file on GitHub, keeping
-   the fragment.
+4. Resolve links into the repository: to the page that publishes the file
+   where one exists (`SITE_ROUTES`), otherwise to the canonical file on GitHub,
+   keeping the fragment.
 5. Rewrite links pointing back at this site to root-relative paths, dropping
    only the origin.
 6. Render the subset using the marketing website's typography, spacing, links,
@@ -207,7 +208,11 @@ introduction out of those same blocks, so every published page inherits one
 rewrite.
 
 **Never** publish a relative repository link as-is; `resolveRepoLinks` sends it
-to the canonical file and fails the build when the target does not exist.
+to the publishing page or the canonical file and fails the build when the
+target does not exist, and `assertRouteFragments` fails it when a fragment into
+a published page names no heading that page renders. A source keeps its
+repo-relative link, which spec-lint verifies down to the fragment as it cannot
+for a URL.
 
 **Never** use a regular expression to turn a canonical source's prose into
 site prose. Channel-specific differences are explicit entries in one fixed
@@ -257,12 +262,6 @@ Every page in `DOCS_PAGES` shares `DocsLayout`: the site header, the left
 navigation rail, an `h1` and intro, and prev/next. The changelog and the supply
 chain are in that list too — a reader meets them the same way, as long-form
 material reached from the rail rather than from the marketing nav.
-
-**Must keep `/supply-chain` self-contained for supply-chain guarantees and
-`/docs/self-host` for its security guarantees, boundaries, and gaps, and link each to
-`/docs/security#how-the-guarantees-are-checked` for shared audit mechanics.**
-All three cross-link in prose; `website/src/pages/security-pages.test.tsx` pins
-the specialized claims and both outbound links per page.
 
 **The rail is the only table of contents.** It lists every page and expands the
 current one's sections beneath it, so moving between pages and within one is
@@ -405,8 +404,10 @@ owns this: a rule matching nothing fails the build naming the rule, so a
 renamed section is a decision rather than a silent republication of what the
 delta meant to hold back.
 
-The page adds a self-contained security model, its installed-component
-disclosure, the shared audit-method link, and advice to use an assistant.
+Above the runbook the page renders the security spec's self-host rows and
+bullets — guarantees, what is not defended, known gaps — from
+`docs.security.json` ([`/docs/security` spec](#docssecurity-spec)), then the
+disclosure link and the advice to use an assistant.
 
 ## `/docs/security` spec
 
@@ -424,6 +425,18 @@ exist in the file.
 
 The page's authored callout identifies it as audited, links the public runbook
 and disclosure, and sends its unpublished domain specs to GitHub.
+
+**Must** derive what `/docs/self-host` and `/supply-chain` say about security
+from `docs.security.json`, never restate it: `securityAudiences` splits the
+guarantees table and the two lists by the spec each entry's links name —
+`remote-security-model.md`, `security-application.md`, and `SELF_HOST.md` to
+the self-host page; `security-supply-chain.md`, `security-ci.md`, and
+`security-audit.md` to the supply-chain page — and an entry naming no spec, a
+spec in neither group, or both groups fails the build. All three pages
+cross-link in prose, and each specialized page links
+`/docs/security#how-the-guarantees-are-checked`;
+`website/src/pages/security-pages.test.tsx` pins the rendered entries and the
+links.
 
 ## Generated documentation boundary
 
@@ -570,7 +583,7 @@ spec.
 | `website/src/routes.ts`, `website/src/components/SiteHeader.tsx` | The published routes and the marketing nav, which carries `Docs` on desktop |
 | `website/scripts/docs-parser.js` (+ `.test.js`) | Markdown subset parser, slugger, `<img>` allowlist |
 | `website/scripts/help-parser.js` (+ `.test.js`) | Narrow CLI-help parser with losslessness |
-| `website/scripts/generate-docs.js` | Codegen: the delta tables, `buildDocument`, `localizeSiteLinks`, `resolveRemovedAnchors`, `resolveRepoLinks`, `linkSkillHeadings` |
+| `website/scripts/generate-docs.js` | Codegen: the delta tables, `buildDocument`, `localizeSiteLinks`, `resolveRemovedAnchors`, `resolveRepoLinks` and `SITE_ROUTES`, `assertRouteFragments`, `securityAudiences`, `linkSkillHeadings` |
 | `website/src/components/MarkdownDocument.tsx` | Renders parsed Markdown blocks |
 | `website/src/components/DocsLayout.tsx` | Docs chrome: header, the rail and its mobile drawer, prev/next, theme restore |
 | `website/src/components/DocsThemeControl.tsx` | The picker's two placements and its first-visit prompt |

@@ -5,7 +5,8 @@ import npmDeps from "../data/dependencies-npm.json";
 import runtimeDeps from "../data/dependencies-runtime.json";
 import DocsLayout from "../components/DocsLayout";
 import { LINK_CLASS, SCROLL_MT_CLASS } from "../components/docs-tokens";
-import { AnchoredHeading } from "../components/MarkdownDocument";
+import MarkdownDocument, { AnchoredHeading, type BlockNode } from "../components/MarkdownDocument";
+import security from "../data/docs.security.json";
 import { type MetaArgs } from "react-router";
 import { type TocEntry } from "../lib/docs-pages";
 import { siteMeta } from "../lib/site-meta";
@@ -175,9 +176,26 @@ const SECTIONS: readonly SupplyChainSection[] = [
   },
 ];
 
+/**
+ * The security spec's rows and bullets for what reaches a user's machine,
+ * rendered from `docs.security.json` rather than restated here
+ * (docs/specs/website-docs.md -> `/docs/security` spec).
+ */
+const CONTRACT = security.audiences["supply-chain"];
+
+/** The spec's subsections this page shows, each only while it has something to say. */
+const CONTRACT_SECTIONS = [
+  { id: "not-defended", text: "What is not defended", block: CONTRACT.notDefended },
+  { id: "known-gaps", text: "Known gaps", block: CONTRACT.knownGaps },
+].filter((section) => section.block.items.length > 0);
+
 /** This page's table of contents, off the list that titles its inventory sections. */
 export const SUPPLY_CHAIN_TOC: TocEntry[] = [
-  { id: "guarantees", text: "Supply-chain guarantees", children: [] },
+  {
+    id: "guarantees",
+    text: "Supply-chain guarantees",
+    children: CONTRACT_SECTIONS.map(({ id, text }) => ({ id, text, children: [] })),
+  },
   ...SECTIONS.map((section) => ({
     id: section.id,
     text: section.title,
@@ -207,48 +225,33 @@ export default function SupplyChain() {
     <DocsLayout activePath="/supply-chain" toc={SUPPLY_CHAIN_TOC}>
       <AnchoredHeading id="guarantees">Supply-chain guarantees</AnchoredHeading>
       <p className="text-base text-[var(--color-text)]/70 mb-2">
-        The inventory below is the visible part of Dormouse&apos;s supply-chain contract:
-      </p>
-      <ul className="mb-4 list-disc space-y-2 pl-5 text-base text-[var(--color-text)]/70">
-        <li>
-          <strong className="font-semibold">Every shipped dependency is disclosed.</strong>{" "}
-          The inventory covers every direct and transitive npm package, every direct and
-          transitive Cargo crate, bundled theme source, and the Node.js runtime. CI rejects
-          a production-dependency change unless the refreshed disclosure is committed.
-        </li>
-        <li>
-          <strong className="font-semibold">The bundled runtime is exactly the version shown.</strong>{" "}
-          The page reads the build&apos;s exact Node.js pin, and the build verifies the binary
-          against it before bundling.
-        </li>
-        <li>
-          <strong className="font-semibold">No newly published dependency is adopted for 24 hours</strong>,
-          including security fixes. The age gate applies to both npm packages and Cargo
-          crates, including automated vulnerability updates.
-        </li>
-        <li>
-          <strong className="font-semibold">Repository automation cannot publish by itself.</strong>{" "}
-          Merges to <code>main</code> and tag creation are admin-only, authored GitHub Actions
-          are pinned by commit, and the bot maintainer cannot merge, tag, or read a release
-          secret.
-        </li>
-        <li>
-          <strong className="font-semibold">Releases keep a human and offline keys in the path.</strong>{" "}
-          Publishing the VS Code extension requires a second person&apos;s approval. Desktop
-          signing and update keys never enter CI; CI&apos;s attestations and hashes are verified
-          locally before its artifacts are signed.
-        </li>
-      </ul>
-      <p className="text-base text-[var(--color-text)]/70 mb-2">
-        The nightly and pre-release audit that checks these claims is described in{" "}
+        What reaches a machine, and how it gets there, is governed by these rows of the{" "}
+        <a href="/docs/security" className={link()}>
+          security spec
+        </a>
+        , rendered from the same source the nightly audit reads. Each row names the spec
+        that states the rule and what pins it on every build; the audit that checks all of
+        them is described under{" "}
         <a href="/docs/security#how-the-guarantees-are-checked" className={link()}>
           how the guarantees are checked
         </a>
-        . The coordinating server installed by the{" "}
+        .
+      </p>
+      <MarkdownDocument blocks={[CONTRACT.guarantees as BlockNode]} />
+      {CONTRACT_SECTIONS.map(({ id, text, block }) => (
+        <div key={id}>
+          <AnchoredHeading id={id} depth={3}>
+            {text}
+          </AnchoredHeading>
+          <MarkdownDocument blocks={[block as BlockNode]} />
+        </div>
+      ))}
+      <p className="text-base text-[var(--color-text)]/70 mb-2">
+        The coordinating server installed by the{" "}
         <a href="/docs/self-host#what-the-installer-does" className={link()}>
           self-host runbook
         </a>
-        {" "}is included in this inventory.
+        {" "}is included in the inventory below.
       </p>
 
       <p className="text-base text-[var(--color-text)]/70 mb-2">
