@@ -486,8 +486,8 @@ Every source is the app's own origin
 * **`connect-src` names the WebSocket origin explicitly** — `DORMOUSE_ORIGIN`
   with the scheme swapped — rather than resting on `'self'` (rationale). It can
   only ever be this deployment's own relay.
-* **`img-src` and `media-src` also admit `data:` and `blob:`**; every other
-  directive is `'self'`.
+* **`img-src` also admits `data:` and `blob:`, `media-src` `blob:`**; every
+  other directive is `'self'`.
 
 **`script-src` stays `'self'`, with no nonce pipeline**, and the build keeps
 earning it: `assertPocketShell` fails `build:pocket` on any inline

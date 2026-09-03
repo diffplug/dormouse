@@ -1414,7 +1414,7 @@ const CSP_HEADER = 'Content-Security-Policy';
  *   `'self'`, whose ws/wss coverage browsers have disagreed about. It is the
  *   configured origin with the scheme swapped, so it can only ever be this
  *   deployment's own relay.
- * * `img-src` and `media-src` also admit `data:` and `blob:` — images and
+ * * `img-src` also admits `data:` and `blob:`, `media-src` `blob:` — images and
  *   media the page builds in memory rather than fetches.
  *
  * `script-src 'self'` needs no exception: the build emits no inline script and

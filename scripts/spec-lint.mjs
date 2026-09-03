@@ -470,8 +470,9 @@ for (const rel of trackedFiles().filter((f) => CITING_FILE_RE.test(f))) {
     for (const m of line.matchAll(CITATION_RE)) {
       const t = citeTarget(m[1]);
       if (!t) {
-        // Check 4 already reports a missing path named from a spec; a source file has nothing else.
-        if (!allFiles.includes(rel)) problems.push(`${rel}:${i + 1}: cites ${m[1]}, which does not exist`);
+        // A backticked path in a spec is check 4's report already; anything else is nobody's.
+        const backticked = allFiles.includes(rel) && line[m.index - 1] === '`';
+        if (!backticked) problems.push(`${rel}:${i + 1}: cites ${m[1]}, which does not exist`);
         continue;
       }
       const quoted = m[2] !== undefined || m[6] !== undefined;
