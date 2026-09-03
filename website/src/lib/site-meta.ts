@@ -42,13 +42,29 @@ export function canonicalUrl(pathname: string): string {
   return new URL(pathname.endsWith("/") ? pathname : `${pathname}/`, SITE_ORIGIN).href;
 }
 
-/** Every per-page head tag, defaulting to the homepage's copy. */
+/**
+ * Every per-page head tag, defaulting to the homepage's copy.
+ *
+ * `indexable: false` is for a route served through the SPA fallback rather than
+ * prerendered. Such a route is handed the fallback's static head, which already
+ * carries the homepage's `canonical` and `og:url`, and React Router's client
+ * `<Meta />` **appends** its own rather than replacing them — so emitting a
+ * second, correct canonical leaves two conflicting ones, which search engines
+ * discard together. These routes make no index claim at all and say so.
+ */
 export function siteMeta(
   pathname: string,
-  page: { title?: string; description?: string } = {},
+  page: { title?: string; description?: string; indexable?: boolean } = {},
 ): MetaDescriptor[] {
   const title = page.title ?? DEFAULT_TITLE;
   const description = page.description ?? DEFAULT_DESCRIPTION;
+  if (page.indexable === false) {
+    return [
+      { title },
+      { name: "description", content: description },
+      { name: "robots", content: "noindex, follow" },
+    ];
+  }
   const url = canonicalUrl(pathname);
   return [
     { title },
