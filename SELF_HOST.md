@@ -688,13 +688,14 @@ origin, build the Host with a matching `DORMOUSE_REMOTE_CONNECT_SRC`, and
 WireGuard, a corporate VPN or a reverse proxy on a home LAN can front it.
 Nothing checks any of the following for you.
 
-- **A DNS name, never an IP address, and at most 103 characters.** The WebAuthn
-  `rpId` is the origin's hostname, and an IP literal is not a valid RP ID.
-  Nothing refuses one: the server boots and answers, and the failure surfaces in
-  the phone's browser at passkey registration. The length cap is the pairing
-  QR's and does fail at mint time (`docs/specs/server.md` → Setup tokens and the
-  pairing QR). A non-default port is fine; the origin carries it, `rpId` does
-  not.
+- **A DNS name, never an IP address, and an origin of at most 103 characters.**
+  The WebAuthn `rpId` is the origin's hostname, and an IP literal is not a valid
+  RP ID. Nothing refuses one: the server boots and answers, and the failure
+  surfaces in the phone's browser at passkey registration. The length cap is the
+  pairing QR's and does fail at mint time (`docs/specs/server.md` → Setup tokens
+  and the pairing QR); it bounds the whole origin, so the scheme and any
+  non-default port come out of the same 103 — 95 characters of hostname under a
+  portless `https://`. `rpId` itself carries no port.
 - **A certificate the phone already trusts.** Passkeys need a secure context.
   Public trust means owning a domain and running ACME — usually DNS-01, since
   the name resolves to a private address, so you hold a renewal credential the
@@ -711,9 +712,11 @@ Nothing checks any of the following for you.
 
 Everything in "Definition of done" is then yours to reproduce by hand: no
 `manage verify`, no release pointers, no rollback, and none of the `FAIL IF`
-lines in `SECURITY.md` that `scripts/deploy-lint.mjs` enforces. The server still
-does its own half — `state/` and every file in it (`SECURITY.md` → "Credentials
-at rest") — leaving `config/` and the service registration to you.
+lines in `SECURITY.md` that `scripts/deploy-lint.mjs` enforces. The server holds
+`state/` itself on unix (`0700`/`0600`); on Windows those modes are a no-op and
+the installer's DACL was the only thing holding it, so there `state/` is yours
+too (`SECURITY.md` → "Credentials at rest"). `config/`, `run/` and the service
+registration are always yours.
 
 A Tailscale-CLI-compatible control plane such as Headscale is untested here. The
 open question is whether it satisfies the certificate `tailscale serve`
