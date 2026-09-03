@@ -46,7 +46,8 @@ The guide is not served by this site. It was rendered at `/docs`; that page and
 every link to it were removed, and the guide is now read where it is published.
 The generator still parses it on every build, for two reasons that outlive the
 page: the pass validates the guide's media against the Marketplace rules and
-copies `vscode-ext/images/` to `website/public/guide/images/`, which the
+copies `vscode-ext/images/` into the generated guide/images tree under
+`website/public/`, which the
 packaged listing resolves its images against, and the parsed guide is what a
 replacement page would render. Its data file is generated and unconsumed. The
 lint's guide checks still run, because they constrain the guide as a
@@ -118,7 +119,7 @@ verified:
 | GitHub | Natively, relative to `vscode-ext/` |
 | Packaged extension pane | From `images/` inside the VSIX, retained by `!images/**` in `.vscodeignore` |
 | Marketplace / Open VSX | `vsce --baseImagesUrl https://dormouse.sh/guide` rewrites both Markdown images **and** raw `<img src>` attributes at package time |
-| `dormouse.sh` | The generator copies `vscode-ext/images/` to `website/public/guide/images/`, which is what `--baseImagesUrl` above resolves against |
+| `dormouse.sh` | The generator copies `vscode-ext/images/` into the generated guide/images tree under `website/public/`, which is what `--baseImagesUrl` above resolves against |
 
 Links back to this site take the same shape of treatment. The guide spells them
 absolutely (`https://dormouse.sh/docs/dor`) because the Marketplace, Open VSX,
@@ -142,7 +143,8 @@ builds a VSIX from source, rather than letting either infer a base (rationale);
 `checkImageBaseUrl` pins them to `SITE_IMAGE_BASE`, exempting a `--packagePath`
 republish.
 
-**Never** write to `website/public/guide/` from anything but the generator,
+**Never** write to the generated guide tree under `website/public/` from
+anything but the generator,
 which deletes it wholesale each build (rationale). Hand-authored assets stay at
 `public/` root, where git tracks them.
 - The same content renders usefully in Open VSX and GitHub Markdown.
@@ -519,7 +521,7 @@ spec.
 | `SELF_HOST.md` | The self-host runbook and Installer contract; the runbook half is published |
 | `vscode-ext/package.json` | Listing metadata and VS Code command inventory |
 | `README.md` | Repository and contributor entry point |
-| `vscode-ext/images/` | Guide media; the generator copies it to `website/public/guide/images/`, which the Marketplace listing loads from |
+| `vscode-ext/images/` | Guide media; the generator copies it into the generated guide/images tree under `website/public/`, which the Marketplace listing loads from |
 | `dor/skill.md` | The bundled agent skill, rendered exactly at `/docs/agent-skill` |
 | `dor/test/snapshots/help/` | Tested CLI help, the source for `/docs/dor` |
 | `website/src/lib/site-meta.ts` | Every page's title, description, canonical, and social cards |
