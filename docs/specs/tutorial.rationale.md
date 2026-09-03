@@ -1,6 +1,6 @@
 # Playground Tutorial — Rationale
 
-> Informative companion to [tutorial.md](tutorial.md): the evidence behind its rules, keyed by that spec's headings (AGENTS.md → "The rationale split"). Nothing here is normative.
+> Informative companion to [tutorial.md](tutorial.md): the evidence behind its rules, keyed by that spec's headings (AGENTS.md → "What, not why"). Nothing here is normative.
 
 ## Profiles
 

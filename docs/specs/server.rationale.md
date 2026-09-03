@@ -1,6 +1,6 @@
 # Server (selfhost) — Rationale
 
-> Informative companion to [server.md](server.md): the evidence, measurements, and dead-approach history behind its rules, keyed by that spec's headings (AGENTS.md → "The rationale split"). Nothing here is normative — every rule it explains is stated in the spec.
+> Informative companion to [server.md](server.md): the evidence, measurements, and dead-approach history behind its rules, keyed by that spec's headings (AGENTS.md → "What, not why"). Nothing here is normative — every rule it explains is stated in the spec.
 
 ## Guardrails
 

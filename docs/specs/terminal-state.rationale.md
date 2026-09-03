@@ -1,6 +1,6 @@
 # Terminal CWD and Command State — Rationale
 
-> Informative companion to [terminal-state.md](terminal-state.md): the evidence behind its rules, keyed by that spec's headings (AGENTS.md → "The rationale split"). Nothing here is normative.
+> Informative companion to [terminal-state.md](terminal-state.md): the evidence behind its rules, keyed by that spec's headings (AGENTS.md → "What, not why"). Nothing here is normative.
 
 ## Supported OSC Inputs
 

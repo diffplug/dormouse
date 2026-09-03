@@ -1,6 +1,6 @@
 # Glossary — Rationale
 
-> Informative companion to [glossary.md](glossary.md): the evidence behind its rules, keyed by that spec's headings (AGENTS.md → "The rationale split"). Nothing here is normative.
+> Informative companion to [glossary.md](glossary.md): the evidence behind its rules, keyed by that spec's headings (AGENTS.md → "What, not why"). Nothing here is normative.
 
 ## Panes and Surfaces
 

@@ -35,9 +35,9 @@
  *      or section-local `Source of truth:` pointers, never both.
  *  10. Word-budget ratchet: every spec (and AGENTS.md, SELF_HOST.md) stays
  *      under its budget in scripts/spec-word-budgets.json. A budget is the
- *      file's size plus BUDGET_HEADROOM words, rounded up to BUDGET_STEP —
- *      room for most of one rule. Growth past it fails; cut to fit, or add
- *      what is needed and re-baseline with `--ratchet <file>` in the same PR.
+ *      file's size rounded up to the nearest BUDGET_STEP words. Growth past
+ *      it fails; cut to fit, or add what is needed and re-baseline with
+ *      `--ratchet <file>` in the same PR.
  *      Rationale files carry no budget. Words are counted by
  *      scripts/spec-md.mjs, which ignores table plumbing.
  *  11. Every `(rationale)` marker in a spec sits under a heading (or an
@@ -325,19 +325,17 @@ for (const spec of foldCheckedFiles) {
 }
 
 // --- Check 10: word-budget ratchet ------------------------------------------
-// A budget is the file's size plus BUDGET_HEADROOM words, rounded up to the
-// nearest BUDGET_STEP: room for most of one rule (a bold-led rule paragraph is
-// 46 words at the corpus median), so adding one means trimming a clause
-// elsewhere or re-baselining deliberately. `--ratchet [file...]` rewrites the
-// budgets of the named files (all of them when none is named) to that formula
-// and drops entries for files that carry none. Rationale files carry none:
-// evidence may grow without limit.
+// A budget is the file's size rounded up to the nearest BUDGET_STEP words, so
+// a rule (46 words at the corpus median) rarely fits without trimming a clause
+// elsewhere, and the budgets file changes only when a size crosses a step.
+// `--ratchet [file...]` rewrites the budgets of the named files (all of them
+// when none is named) to that formula and drops entries for files that carry
+// none. Rationale files carry none: evidence may grow without limit.
 const BUDGETS_FILE = 'scripts/spec-word-budgets.json';
-const BUDGET_HEADROOM = 32;
-const BUDGET_STEP = 10;
+const BUDGET_STEP = 50;
 const budgetedFiles = ['AGENTS.md', 'SELF_HOST.md', ...specFiles];
 const wordsOf = new Map(budgetedFiles.map((rel) => [rel, countWords(read(rel))]));
-const budgetFor = (rel) => Math.ceil((wordsOf.get(rel) + BUDGET_HEADROOM) / BUDGET_STEP) * BUDGET_STEP;
+const budgetFor = (rel) => Math.ceil(wordsOf.get(rel) / BUDGET_STEP) * BUDGET_STEP;
 let budgets = JSON.parse(read(BUDGETS_FILE));
 const ratchetAt = process.argv.indexOf('--ratchet');
 if (ratchetAt !== -1) {
@@ -352,7 +350,7 @@ if (ratchetAt !== -1) {
   for (const rel of chosen) budgets[rel] = budgetFor(rel);
   budgets = Object.fromEntries(budgetedFiles.filter((rel) => rel in budgets).sort().map((rel) => [rel, budgets[rel]]));
   writeFileSync(join(ROOT, BUDGETS_FILE), JSON.stringify(budgets, null, 2) + '\n');
-  console.log(`spec-lint: ratcheted ${chosen.length} budget(s) to size + ${BUDGET_HEADROOM}, rounded up to ${BUDGET_STEP}`);
+  console.log(`spec-lint: ratcheted ${chosen.length} budget(s) to size rounded up to ${BUDGET_STEP}`);
 }
 for (const rel of budgetedFiles) {
   const words = wordsOf.get(rel);
@@ -509,7 +507,7 @@ for (const rat of rationaleFiles) {
 }
 
 // --- Check 15: a large spec has a rationale file -----------------------------
-const RATIONALE_REQUIRED_WORDS = 2500; // stated in AGENTS.md -> "The rationale split"
+const RATIONALE_REQUIRED_WORDS = 2500; // stated in AGENTS.md -> "What, not why"
 for (const spec of specFiles) {
   const rat = spec.replace(/\.md$/, '.rationale.md');
   const words = wordsOf.get(spec);

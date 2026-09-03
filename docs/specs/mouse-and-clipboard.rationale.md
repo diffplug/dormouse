@@ -1,6 +1,6 @@
 # Mouse and Clipboard — Rationale
 
-> Informative companion to [mouse-and-clipboard.md](mouse-and-clipboard.md): the platform quirks, measurements, and provenance behind its rules, keyed by that spec's headings (AGENTS.md → "The rationale split"). Nothing here is normative.
+> Informative companion to [mouse-and-clipboard.md](mouse-and-clipboard.md): the platform quirks, measurements, and provenance behind its rules, keyed by that spec's headings (AGENTS.md → "What, not why"). Nothing here is normative.
 
 ## 3.1 Initiating a Selection
 

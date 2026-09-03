@@ -8,17 +8,29 @@
  * way, a citation in a form the regex cannot see. A green run says nothing
  * about that; a planted defect that stays green does.
  *
- * Each planted text is a few words, well inside the target's word-budget
- * headroom, so a case cannot go red for the budget instead of for its check.
- * Check 15 (a large spec needs a rationale file) is a number, not a pattern,
- * and cannot be planted without also tripping the structural checks, so it is
- * not here. `scripts/lint-kit.mjs` owns the edit-and-restore.
+ * The spec the cases plant into is chosen at run time: one with a rationale
+ * file, no `## Future` (a planted heading must not land after the fold), and
+ * the most room under its word budget, so a case cannot go red for the budget
+ * instead of for its check. Check 15 (a large spec needs a rationale file) is
+ * a number, not a pattern, and cannot be planted without also tripping the
+ * structural checks, so it is not here. `scripts/lint-kit.mjs` owns the
+ * edit-and-restore.
  */
 
-import { makeSelftest } from './lint-kit.mjs';
+import { existsSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { makeSelftest, readRepoFile, repoRoot } from './lint-kit.mjs';
+import { countWords } from './spec-md.mjs';
 
-const SPEC = 'docs/specs/auto-update.md'; // small, has a rationale file, no ## Future
-const RATIONALE = 'docs/specs/auto-update.rationale.md';
+const budgets = JSON.parse(readRepoFile('scripts/spec-word-budgets.json'));
+const SPEC = readdirSync(join(repoRoot, 'docs/specs'))
+  .filter((f) => f.endsWith('.md') && !f.endsWith('.rationale.md'))
+  .map((f) => `docs/specs/${f}`)
+  .filter((f) => existsSync(join(repoRoot, f.replace(/\.md$/, '.rationale.md'))))
+  .filter((f) => !/^##\s+(?:\d+\.\s*)?Future\s*$/m.test(readRepoFile(f)))
+  .map((f) => [f, budgets[f] - countWords(readRepoFile(f))])
+  .sort((a, b) => b[1] - a[1])[0][0];
+const RATIONALE = SPEC.replace(/\.md$/, '.rationale.md');
 const SOURCE = 'scripts/free-dev-port.mjs'; // a comment appended here disturbs nothing
 // Assembled at runtime so this file's own planted citations are invisible to
 // the citation check, which scans every tracked source file, this one included.
@@ -28,8 +40,8 @@ const CASES = [
   ['check 4: a repo path that does not exist', SPEC, '\nSee `lib/src/no-such-file.ts`.\n'],
   ['check 11: a (rationale) marker under a heading the rationale does not key', SPEC, '\n## Planted\n\nA rule (rationale).\n'],
   ['check 11: the marker as the last item of its parenthetical', SPEC, '\n## Planted\n\nA rule (see below; rationale).\n'],
-  ['check 12: a bare file name in Source of truth', SPEC, '\nSource of truth: `updater.ts`.\n'],
-  ['check 12: a symbol the named file lacks', SPEC, '\nSource of truth: `noSuchSymbolXyz` in `standalone/src/updater.ts`.\n'],
+  ['check 12: a bare file name in Source of truth', SPEC, '\nSource of truth: `lint-kit.mjs`.\n'],
+  ['check 12: a symbol the named file lacks', SPEC, '\nSource of truth: `noSuchSymbolXyz` in `scripts/lint-kit.mjs`.\n'],
   ['check 13: a quoted citation of a heading that does not exist', SOURCE, `\n// ${spec('layout.md')} -> "No Such Heading"\n`],
   ['check 13: an unquoted citation of a heading that does not exist', SOURCE, `\n// ${spec('layout.md')} -> No Such Heading Here.\n`],
   ['check 13: a numbered section that does not exist', SOURCE, `\n// ${spec('mouse-and-clipboard.md')} §8.99\n`],
