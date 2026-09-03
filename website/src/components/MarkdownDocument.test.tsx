@@ -19,3 +19,33 @@ describe("MarkdownDocument headings", () => {
     }
   });
 });
+
+describe("inline code wrapping", () => {
+  const render = (value: string) =>
+    renderToStaticMarkup(
+      <MarkdownDocument
+        blocks={[{ type: "paragraph", children: [{ type: "code", value }] }]}
+      />,
+    );
+
+  it("offers a break after every path separator", () => {
+    // The 47-character path below is one unbreakable word to the line breaker,
+    // and on a phone it pushed the whole article sideways rather than just
+    // itself.
+    const markup = render("~/Library/LaunchAgents/sh.dormouse.server.plist");
+    expect(markup).toContain("~/<wbr/>Library/<wbr/>LaunchAgents/<wbr/>sh.<wbr/>dormouse.");
+  });
+
+  it("leaves the copied text exactly as authored", () => {
+    // <wbr> contributes nothing to textContent, so selecting the span still
+    // yields a path a reader can paste into a shell.
+    const value = "~/.config/systemd/user/dormouse-server.service";
+    const text = render(value).replace(/<[^>]*>/g, "");
+    expect(text).toBe(value);
+  });
+
+  it("carries a backstop for a token with no separator to break on", () => {
+    // A long hash offers nowhere to break, so the class has to allow it.
+    expect(render("abcdef0123456789abcdef0123456789")).toMatch(/class="[^"]*break-words/);
+  });
+});

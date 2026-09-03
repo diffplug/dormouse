@@ -47,8 +47,11 @@ export const MUTED_ACCENT_LINK_CLASS = `opacity-70 hover:opacity-100 ${ACCENT_HO
 /** The rule down the left of a nested list, indenting what hangs off it. */
 export const TOC_INDENT_CLASS = "border-l border-[var(--color-text)]/15 pl-3";
 
-/** Inline `code` spans. */
-export const CODE_CLASS = "text-[0.9em] bg-[var(--color-text)]/15 px-1.5 py-0.5 rounded font-mono";
+/** Inline `code` spans. `break-words` is the backstop under CodeSpan's
+ *  separator breaks: a token with no separator at all must still not push the
+ *  page wider than the viewport. */
+export const CODE_CLASS =
+  "text-[0.9em] bg-[var(--color-text)]/15 px-1.5 py-0.5 rounded font-mono break-words";
 
 /** Fenced code blocks and other monospace panels. */
 export const PRE_CLASS =

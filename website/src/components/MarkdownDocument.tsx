@@ -51,13 +51,42 @@ function isExternal(href: string): boolean {
   return /^[a-z][a-z0-9+.-]*:/i.test(href);
 }
 
+/**
+ * An inline code span, wrappable at the separators inside it.
+ *
+ * A path like `~/Library/LaunchAgents/sh.dormouse.server.plist` is one
+ * unbreakable word to the line breaker, so on a phone it pushed the whole page
+ * wider than the viewport — the article scrolled sideways, not just the token.
+ *
+ * `<wbr>` offers a break after each `/`, `.`, `-` and `_` rather than letting
+ * the text break anywhere, so a path splits where a reader expects and not
+ * mid-segment. It contributes nothing to `textContent`, so copying the span
+ * still yields the original string. `CODE_CLASS` carries `break-words` as the
+ * backstop for a token with no separators at all, such as a long hash.
+ *
+ * Pinned by `website/src/components/MarkdownDocument.test.tsx`.
+ */
+function CodeSpan({ value }: { value: string }) {
+  const parts = value.split(/(?<=[/._-])/);
+  return (
+    <code className={CODE_CLASS}>
+      {parts.map((part, i) => (
+        <Fragment key={i}>
+          {part}
+          {i < parts.length - 1 ? <wbr /> : null}
+        </Fragment>
+      ))}
+    </code>
+  );
+}
+
 function Inline({ nodes }: { nodes: InlineNode[] }): ReactNode {
   return nodes.map((node, i) => {
     switch (node.type) {
       case "text":
         return <Fragment key={i}>{node.value}</Fragment>;
       case "code":
-        return <code key={i} className={CODE_CLASS}>{node.value}</code>;
+        return <CodeSpan key={i} value={node.value} />;
       case "strong":
         return <strong key={i} className="font-semibold"><Inline nodes={node.children} /></strong>;
       case "em":
