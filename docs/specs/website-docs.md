@@ -233,11 +233,16 @@ a page overrides by exporting `meta` and calling it with its own.
 
 **Never** hardcode one of those in `root.tsx`'s `<head>`. React Router renders
 only the deepest route's `meta`, and a `<head>` tag is emitted before
-`<Meta />` — so a page with its own `meta` shipped two `<title>` elements, and
-crawlers read the first. **Must** give every page a canonical on its own path;
-one origin-wide canonical asks search engines to treat every page as a
-duplicate of the homepage. Canonicals carry the trailing slash the host
-redirects to. `checkPageHeadTags` and `checkSiteOrigin` pin both.
+`<Meta />` — so a page with its own `meta` ships two `<title>` elements and
+crawlers read the first. **Must** give every prerendered page a canonical on
+its own path; one origin-wide canonical asks search engines to treat every page
+as a duplicate of the homepage. Canonicals carry the trailing slash the host
+redirects to. **Never** claim one from a route served through the SPA fallback:
+the client `<Meta />` reconciles `<title>` text but appends tags, so a second
+canonical joins the fallback's homepage one and both are discarded.
+`siteMeta`'s `indexable: false` sends `robots: noindex, follow` instead.
+`checkPageHeadTags` and `checkSiteOrigin` pin the first two;
+`ChangelogAfter.tsx` is the only route under the third.
 
 ## Reference page chrome
 
