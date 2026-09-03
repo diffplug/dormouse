@@ -24,6 +24,10 @@ import { chromeButton, modalIconButton, OVERLAY_MAX_HEIGHT } from './design';
  */
 export type ThemePickerVariant = 'compact' | 'settings-dialog';
 
+/** Which way `compact` opens its menu. Ignored by `settings-dialog`, which
+ *  anchors off its measured trigger rect instead. */
+export type ThemePickerMenuSide = 'below' | 'above';
+
 export interface ThemePickerProps {
   variant: ThemePickerVariant;
   /** Controlled dropdown state. Omit both for the uncontrolled default; the
@@ -32,6 +36,19 @@ export interface ThemePickerProps {
    *  otherwise swallow the key before the picker ever sees it). */
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  /** Default `below`. A `compact` trigger pinned to the bottom of the viewport
+   *  needs `above`, or its menu opens off-screen. */
+  menuSide?: ThemePickerMenuSide;
+  /**
+   * The user chose a theme from this picker.
+   *
+   * Fires on every selection, including re-selecting the active one — unlike
+   * `subscribeToActiveTheme`, which reports a changed id. A caller asking
+   * "has this person picked a theme yet" needs the choice, not the change:
+   * `restoreActiveTheme` persists an id of its own, so storage cannot answer
+   * it (docs/specs/theme.md).
+   */
+  onPick?: (theme: DormouseTheme) => void;
 }
 
 const useBrowserLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
@@ -44,6 +61,8 @@ export function ThemePicker({
   variant,
   open: controlledOpen,
   onOpenChange,
+  menuSide = 'below',
+  onPick,
 }: ThemePickerProps) {
   // Apply the persisted theme during render initialization, before commit, so
   // the first paint already has --vscode-* on body. Hosts must not *rely* on
@@ -101,6 +120,7 @@ export function ThemePicker({
     setActiveId(id);
     applyTheme(theme);
     setOpen(false);
+    onPick?.(theme);
   };
 
   const deleteTheme = (theme: DormouseTheme) => {
@@ -111,7 +131,15 @@ export function ThemePicker({
     refreshThemes();
   };
 
-  const panelStyle: CSSProperties = inDialog ? { ...styles.panel, ...menuStyle } : styles.panel;
+  // Offsets, not Tailwind classes: the website consumes this component through
+  // the lib's prebuilt stylesheet, so a utility the lib has never emitted
+  // before (`bottom-full`) is simply absent there and the menu falls back to
+  // its static position, off the bottom of the viewport.
+  const compactSideStyle: CSSProperties =
+    menuSide === 'above' ? { bottom: '100%', marginBottom: 4 } : { top: '100%', marginTop: 4 };
+  const panelStyle: CSSProperties = inDialog
+    ? { ...styles.panel, ...menuStyle }
+    : { ...styles.panel, ...compactSideStyle };
 
   return (
     <div ref={rootRef} className="relative flex items-center">
@@ -140,7 +168,7 @@ export function ThemePicker({
           role="menu"
           aria-label="Select theme"
           className={`z-50 flex flex-col overflow-hidden rounded border font-mono shadow-2xl ${OVERLAY_MAX_HEIGHT.popover} ${
-            inDialog ? '' : 'absolute right-0 top-full mt-1 w-[280px]'
+            inDialog ? '' : 'absolute right-0 w-[280px]'
           }`}
           style={panelStyle}
         >

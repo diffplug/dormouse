@@ -50,6 +50,7 @@ One implementation map per spec: an exhaustive `Files` / `Code Map` section or s
 - **`docs/specs/auto-update.md`** — Standalone auto-update: check → approved download → install-on-quit, the Baseboard notice, Windows sidecar teardown, per-platform quit behavior.
 - **`docs/specs/mobile-terminal-ui.md`** — The mobile composition (`MobileTerminalUi` / `MobileWall`): stable viewport + keyboard reserve, touch modes, the radial gesture menu; shipped in the Pocket playground and the Pocket app.
 - **`docs/specs/tutorial.md`** — Website playground tutorial: device-specific routes, the `tut` runner and progress state, desktop and Pocket profiles, the lib hooks for tutorial observability.
+- **`docs/specs/website-docs.md`** — Public documentation on the marketing site: the generated references, the Markdown rendering contract they share, the left rail across the docs section, `vscode-ext/README.md` as the canonical guide published off-site, and the lint that pins their links.
 - **`docs/specs/webgl-text.md`** — SDF text rendering for the 3D/WebXR effort: the diffplug/xterm.js fork pipeline and its version lockstep, the SDF glyph architecture, the canopy Storybook lab.
 - **`docs/specs/remote-security-model.md`** — Remote-control trust model: one Noise channel per ceremony, passkeys proving presence inside it, per-Host Client statics, the Host (not the Server) authorizing the pair. Read first for anything remote.
 - **`docs/specs/remote-api.md`** — What an authorized Client speaks: the shipped terminal-only **protocol-v1** and the staged remainder.
@@ -83,10 +84,11 @@ Specs are written ahead of the code: a new component's spec starts as a full des
 
 `scripts/spec-lint.mjs` (`pnpm lint:specs`, the first step of the root `pnpm test`) enforces the mechanically checkable conventions above — its header comment lists the checks — and ratchets size: every spec and this file carry a word budget in `scripts/spec-word-budgets.json`, its size rounded up to the nearest 50. Rationale files carry none; evidence may grow without limit. Over budget: cut to fit, or re-baseline with `node scripts/spec-lint.mjs --ratchet <spec>` in the same PR. `SELF_HOST.md` rides the same checks. Advisory prose reviews follow `docs/prose-audit.md` (`pnpm audit:prose`).
 
-Four sibling lints run in `pnpm test`, each enforcing one invariant a spec states in prose; each names the line it enforces and fails if that line is gone:
+Five sibling lints run in `pnpm test`, each enforcing one invariant a spec states in prose; each names the line it enforces and fails if that line is gone:
 
 | Lint | Enforces |
 |---|---|
+| `scripts/public-docs-lint.mjs` (`pnpm lint:public-docs`) | The public-doc contracts in `docs/specs/website-docs.md`, every inventory derived from the file that owns it. |
 | `scripts/xterm-lint.mjs` (`pnpm lint:xterm`) | The `@xterm/*` version lockstep in `docs/specs/webgl-text.md`. |
 | `scripts/loopback-lint.mjs` (`pnpm lint:loopback`) | `SECURITY.md` -> "Loopback Listeners": a loopback bind is not an access control — a new listener references a guard module or is allowlisted with a reason. |
 | `scripts/deploy-lint.mjs` (`pnpm lint:deploy`) | `SECURITY.md` -> "Credentials at rest" and "Network posture (self-hosted)": the installer controls binding all three of `deploy/local/install-{macos,windows,linux}`. |

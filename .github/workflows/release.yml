@@ -196,7 +196,7 @@ jobs:
         run: pnpm --filter dormouse build
 
       - name: Package extension
-        run: pnpm --dir vscode-ext exec vsce package --no-dependencies
+        run: pnpm --dir vscode-ext exec vsce package --no-dependencies --baseImagesUrl https://dormouse.sh/guide
 
       - name: Generate artifact manifest
         shell: bash

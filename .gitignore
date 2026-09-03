@@ -16,8 +16,10 @@ lib/.vite/
 
 # VSCode extension
 vscode-ext/dist/
-vscode-ext/dor-cli/
+# The webview bundle's Vite output. Emptied on every build, so guide media
+# lives in vscode-ext/images/ instead (docs/specs/website-docs.md).
 vscode-ext/media/
+vscode-ext/dor-cli/
 vscode-ext/node_modules/
 vscode-ext/*.vsix
 
@@ -40,6 +42,8 @@ standalone/node_modules/
 website/dist/
 website/node_modules/
 website/src/data/changelog.json
+website/src/data/docs.*.json
+website/public/guide/
 
 # OS
 .DS_Store

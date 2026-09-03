@@ -9,6 +9,20 @@
   --color-caramel: #b47624;
 }
 
+/* The reference pages' accent, one definition for the four class strings in
+   website/src/components/docs-tokens.ts that read it (that file carries the
+   contrast reasoning).
+
+   On `body`, not `:root`: `applyTheme` writes --vscode-* onto body.style, and
+   a var() in a declaration on html cannot read a property set on its child, so
+   the chain would silently collapse to the caramel fallback on every theme —
+   the exact contrast failure the fallback exists to avoid. Unscoped by
+   `.docs-themed` so it still resolves during prerender, before DocsLayout's
+   effect adds that class. */
+body {
+  --docs-accent: var(--vscode-textLink-foreground, var(--color-caramel));
+}
+
 html {
   background: var(--color-bg);
   color: var(--color-text);
@@ -35,6 +49,28 @@ html body {
 
 #root {
   height: auto;
+}
+
+/* Reference pages follow the reader's picked theme instead of the site's
+   black; the rest of the site is unaffected because only DocsLayout adds the
+   class (docs/specs/website-docs.md -> Reference page chrome).
+
+   `applyTheme` writes --vscode-* onto body.style, so the remap has to live on
+   body too — html cannot read a custom property set on its child. That leaves
+   html painting the canvas its own black behind the page, which shows on
+   overscroll, so html gives the canvas up and lets body's background
+   propagate. */
+html:has(body.docs-themed) {
+  background: transparent;
+}
+
+body.docs-themed {
+  --color-bg: var(--vscode-editor-background);
+  --color-text: var(--vscode-editor-foreground);
+  --color-surface: var(--vscode-editorWidget-background);
+  background: var(--color-bg);
+  color: var(--color-text);
+  min-height: 100dvh;
 }
 
 html body.pocket-marketing-body {

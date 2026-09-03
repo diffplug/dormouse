@@ -6,12 +6,12 @@
   "type": "module",
   "scripts": {
     "dev": "react-router dev",
-    "predev": "node scripts/generate-changelog.js",
-    "prebuild": "node scripts/generate-changelog.js",
+    "predev": "node scripts/generate-changelog.js && node scripts/generate-docs.js",
+    "prebuild": "node scripts/generate-changelog.js && node scripts/generate-docs.js",
     "build": "react-router build",
     "postbuild": "node scripts/flatten-react-router-build.js",
     "preview": "vite preview --outDir dist --mode test",
-    "pretest": "node scripts/generate-changelog.js",
+    "pretest": "node scripts/generate-changelog.js && node scripts/generate-docs.js",
     "test": "vitest run"
   },
   "dependencies": {

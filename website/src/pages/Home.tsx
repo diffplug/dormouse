@@ -13,7 +13,6 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type 
 import SiteHeader from "../components/SiteHeader";
 import posterUrl from "../assets/video-climb-blink-and-stare.webp";
 import videoUrl from "../assets/video-climb-blink-and-stare.mp4";
-import alertVideoUrl from "../assets/video-alert.mp4";
 import copyPasteVideoUrl from "../assets/video-copy-paste.mp4";
 import tmuxVideoUrl from "../assets/video-tmux.mp4";
 import visualStudioIconUrl from "../assets/visual-studio-icon.svg";
@@ -21,7 +20,7 @@ import tinyIconUrl from "../assets/icon-tiny-dark.png";
 import phoneMockupUrl from "../assets/phone-mockup.webp";
 import standaloneLatest from "@standalone-latest";
 import { prefersReducedMotion } from "dormouse-lib/lib/ui-geometry";
-import { NotifySignupForm } from "../components/NotifySignupForm";
+import { SITE_CODE_CLASS, SITE_LINK_CLASS } from "../components/site-tokens";
 
 /** Multiplier on scroll required to drive the hero animation.
  *  1 = baseline, 2 = half as sensitive, 0.5 = twice as sensitive. */
@@ -759,7 +758,7 @@ export default function Home() {
               terminal
             </span>
             <span ref={word2Ref} style={{ opacity: 0, transform: "translateY(12px)" }}>
-              <span className="text-[var(--color-caramel)]">for mice</span>
+              <span className="text-[var(--color-caramel)]">for mice and thumbs</span>
             </span>
             <p
               ref={footnoteRef}
@@ -774,60 +773,192 @@ export default function Home() {
 
       {/* ── Content sections — pulled up to appear as video starts scrolling ── */}
       <div ref={contentRef} className="relative z-10 bg-[var(--color-bg)]" style={{ marginTop: `-${(1 - UNPIN_THRESHOLD) * RUNWAY_VH}vh` }}>
-        {/* Section 1: narrow text over a full-width video — lead with the tmux story */}
-        <section className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY}`}>
-          <div className="mx-auto max-w-2xl">
-            <h2 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] mb-6">Soft as a mouse, sharp as a tmux</h2>
-            <p className="text-lg leading-relaxed opacity-70 mb-4">
-              Upgrade your VS Code or native terminal with a flexible multipane
-              layout. Sleep the tasks you're not watching down to a compact
-              status indicator.
-            </p>
-            <p className="text-lg leading-relaxed opacity-70">
-              Do it all with the mouse, or keep your hands on the keyboard with
-              tmux keybinds.
-            </p>
+        {/* 1. Distribution + layout — one terminal, two homes */}
+        <section id="features" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY}`}>
+          <div>
+            <h2 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] mb-6">Tmux with browsers, for VS Code and Standalone</h2>
+            <div className="grid gap-x-8 gap-y-4 md:grid-cols-2">
+              <p className="text-lg leading-relaxed opacity-70">
+                Soft as a mouse, sharp as a tmux. A real tiling layout for
+                terminals and browser embeds.
+                Do it all with the mouse, or keep your hands on the keyboard with
+                tmux keybinds.
+              </p>
+              <p className="text-lg leading-relaxed opacity-70">
+                Inside VS Code it follows your theme exactly - hard to tell it isn't built in.
+                Standalone, it's a Tauri app that starts in a blink. Same features in both places.
+              </p>
+            </div>
           </div>
           <FeatureVideo src={tmuxVideoUrl} variant="intrinsic" className="mt-8" />
         </section>
-
         {/* Section 2: image left, text right */}
-        <section id="features" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[3fr_2fr] gap-8 md:gap-12 items-start`}>
-          <FeatureVideo src={alertVideoUrl} className="order-2 md:order-1" />
+        <section id="notify" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[2fr_3fr] gap-8 md:gap-12 items-start`}>
+          <img
+            src={phoneMockupUrl}
+            alt="Dormouse Pocket running on a phone"
+            className="order-2 md:order-1 block w-full max-w-[280px] mx-auto md:max-w-none"
+          />
           <div className="order-1 md:order-2">
-            <h2 className="font-display text-xl mb-6">Stop watching terminals spin</h2>
-            <p className="text-lg leading-relaxed opacity-70 mb-4">
-              Dormouse tracks activity the same way you do — visual motion. When a
-              pane stops changing for two seconds, it marks the task complete and
-              alerts you.
+            <h2 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] text-[var(--color-text)] mb-6">
+              Push notifications you can self-host
+            </h2>
+            <p className="mb-4 text-lg leading-relaxed opacity-70">
+              Your agent hits a permission prompt four minutes after you leave,
+              then sits there until you get back. Dormouse already knows that
+              pane is asking for a human — so it buzzes your phone. A real push
+              notification, delivered by Apple or Google, to an app that's
+              completely closed.
+            </p>
+            <p className="mb-4 text-lg leading-relaxed opacity-70">
+              Then you answer it. Tap the terminal and a radial menu opens under
+              your thumb: drag down-right for{" "}
+              <code className={SITE_CODE_CLASS}>y</code>,
+              up-right for{" "}
+              <code className={SITE_CODE_CLASS}>n</code>,
+              or out to Esc, Ctrl+C, and a quit menu. One drag and the agent's
+              moving again. No keyboard, no squinting.
+            </p>
+            <p className="mb-4 text-lg leading-relaxed opacity-70">
+              The relay is one Node process. No database — state is JSON on
+              disk, and push keys mint themselves on first boot. Put{" "}
+              <code className={SITE_CODE_CLASS}>tailscale serve</code>{" "}
+              in front of it and you're done: no account, no cloud dependency,
+              nothing anyone can shut off. Your laptop decides which phones get
+              notified — the server isn't allowed to choose for it. The{" "}
+              <a href="/docs/self-host" className={SITE_LINK_CLASS}>self-host runbook</a>{" "}
+              walks the whole install.
             </p>
             <p className="text-lg leading-relaxed opacity-70">
-              Works with any CLI tool that prints to a terminal — no plugins, no
-              configuration. Also supports{" "}
-              <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">BEL</code>{" "}
-              and{" "}
-              <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">OSC 9/99/777</code>{" "}
-              for native TUI integration.
+              <a href="/playground/pocket" className={SITE_LINK_CLASS}>Dormouse Pocket</a>{" "}
+              is in development — try the phone interface in your browser, and
+              sign up there to hear when it's ready.
             </p>
           </div>
         </section>
 
-        {/* Section 3: text left, image right */}
-        <section className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[2fr_3fr] gap-8 md:gap-12 items-start`}>
+        {/* 3. Port awareness — text left, context-menu mock right */}
+        <section className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[2fr_3fr] gap-8 md:gap-12 items-center`}>
           <div>
-            <h2 className="font-display text-xl mb-6">Newlines and copy paste like you meant</h2>
+            <h2 className="font-display text-xl mb-6">Terminals that know their ports</h2>
             <p className="text-lg leading-relaxed opacity-70 mb-4">
-              You're used to{" "}
-              <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">Shift+Enter</code>{" "}
-              for a newline in the browser — but it's broken in your terminal?
-              Not anymore. Dormouse works the way you'd expect, no arcane
-              terminal knowledge required.
+              Six panes running and something's serving{" "}
+              <code className={SITE_CODE_CLASS}>:3000</code>.
+              Which one?
             </p>
             <p className="text-lg leading-relaxed opacity-70">
-              Click and drag in a "mouse conformant" terminal doesn't select text;
-              it sends escape code{" "}
-              <code className="text-sm bg-[var(--color-text)]/20 px-1.5 py-0.5 rounded">{"\\e[<0;x;yM"}</code>.
-              Dormouse lets you copy-paste like a human, not a terminal.
+              Right-click a pane and Dormouse lists the ports that pane's
+              process tree is actually listening on — hit a number to open one.
+              No{" "}
+              <code className={SITE_CODE_CLASS}>lsof</code>,
+              no scrolling back to find where Vite printed the URL.
+            </p>
+          </div>
+          <div className="rounded-lg border border-[var(--color-text)]/15 bg-[var(--color-text)]/[0.04] p-4">
+            <div className="mb-3 flex items-center gap-2 text-sm opacity-60">
+              <TerminalIcon size={15} weight="bold" />
+              <span className="font-mono">web — pnpm dev</span>
+            </div>
+            <div className="space-y-1 font-mono text-sm">
+              {[
+                { key: "1", port: "3000", label: "vite" },
+                { key: "2", port: "24678", label: "vite hmr" },
+                { key: "3", port: "5432", label: "postgres" },
+              ].map(({ key, port, label }) => (
+                <div
+                  key={port}
+                  className="flex items-center gap-3 rounded px-2 py-1.5 hover:bg-[var(--color-text)]/10"
+                >
+                  <span className="w-4 text-center opacity-40">{key}</span>
+                  <span className="text-[var(--color-caramel)]">localhost:{port}</span>
+                  <span className="ml-auto opacity-50">{label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* 4. Browser surfaces — transcript + preview left, text right */}
+        <section className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[2fr_3fr] gap-8 md:gap-12 items-center`}>
+          <div className="order-2 md:order-1 space-y-4">
+          {/* Authored transcript. Command syntax tracks dor/test/snapshots/help/;
+              the output lines are illustrative and not generated from a test. */}
+          <div className="overflow-x-auto rounded-lg border border-[var(--color-text)]/15 bg-[var(--color-text)]/[0.04] p-4 font-mono text-sm leading-relaxed">
+            <div><span className="opacity-40">$ </span>dor ensure -- pnpm dev</div>
+            <div className="opacity-60">created surface:3&nbsp;&nbsp;&quot;pnpm dev&quot;</div>
+            <div className="mt-3"><span className="opacity-40">$ </span>dor ab open surface:3</div>
+            <div className="opacity-60">&#8594; <span className="text-[var(--color-caramel)]">http://localhost:5173/</span></div>
+          </div>
+          <div className="overflow-hidden rounded-lg border border-[var(--color-text)]/15 bg-[var(--color-text)]/[0.04]">
+            <div className="flex items-center gap-2 border-b border-[var(--color-text)]/10 px-3 py-2">
+              <span className="size-2.5 rounded-full bg-[var(--color-text)]/20" />
+              <span className="size-2.5 rounded-full bg-[var(--color-text)]/20" />
+              <div className="ml-1 flex-1 truncate rounded bg-[var(--color-text)]/10 px-2 py-1 font-mono text-xs opacity-70">
+                localhost:5173
+              </div>
+              <span className="rounded border border-[var(--color-caramel)]/40 px-1.5 py-0.5 font-mono text-[0.65rem] text-[var(--color-caramel)]">
+                screencast
+              </span>
+            </div>
+            <div className="space-y-2.5 p-4">
+              <div className="h-2.5 w-1/3 rounded bg-[var(--color-text)]/20" />
+              <div className="h-2 w-full rounded bg-[var(--color-text)]/10" />
+              <div className="h-2 w-11/12 rounded bg-[var(--color-text)]/10" />
+              <div className="h-2 w-4/5 rounded bg-[var(--color-text)]/10" />
+              <div className="mt-4 grid grid-cols-3 gap-2.5">
+                <div className="h-12 rounded bg-[var(--color-text)]/10" />
+                <div className="h-12 rounded bg-[var(--color-text)]/10" />
+                <div className="h-12 rounded bg-[var(--color-text)]/10" />
+              </div>
+            </div>
+          </div>
+          </div>
+          <div className="order-1 md:order-2">
+            <h2 className="font-display text-xl mb-6">Browsers for you (and your agents)</h2>
+            <p className="text-lg leading-relaxed opacity-70 mb-4">
+              A browser is just another pane. Park your dev server next to the
+              terminal that's running it — same tiling layout, same keybinds, no
+              alt-tab and no second monitor.
+            </p>
+            <p className="text-lg leading-relaxed opacity-70 mb-4">
+              <code className={SITE_CODE_CLASS}>dor ab open surface:2</code>{" "}
+              aims a browser at the port that terminal is serving — the one from
+              the section above. Your agents run the same command, so when an
+              agent wants to see what it just built, it opens a pane you're
+              already watching. Pop it out to a real OS window when you need the
+              real thing.
+            </p>
+            <p className="text-lg leading-relaxed opacity-70 mb-4">
+              Dormouse drives the{" "}
+              <code className={SITE_CODE_CLASS}>agent-browser</code>{" "}
+              you already have installed — it doesn't ship a browser of its own.
+            </p>
+            <p className="text-base leading-relaxed opacity-60">
+              <a href="/docs/dor#agent-browser" className={SITE_LINK_CLASS}>CLI reference</a>
+              {" · "}
+              <a href="/docs/agent-skill" className={SITE_LINK_CLASS}>Agent skill</a>
+            </p>
+          </div>
+        </section>
+
+        {/* 5. Selection and copy/paste — text left, video right */}
+        <section className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[2fr_3fr] gap-8 md:gap-12 items-start`}>
+          <div>
+            <h2 className="font-display text-xl mb-6">Select and copy-paste like you meant</h2>
+            <p className="text-lg leading-relaxed opacity-70 mb-4">
+              Click and drag in a "mouse conformant" terminal doesn't select
+              text; it fires escape code{" "}
+              <code className={SITE_CODE_CLASS}>{"\\e[<0;x;yM"}</code>{" "}
+              at whatever's running. Dormouse notices when a TUI has grabbed the
+              mouse and hands you a one-click override, so you can just — select
+              the thing.
+            </p>
+            <p className="text-lg leading-relaxed opacity-70">
+              Then copy it the way you meant it. <strong className="font-semibold opacity-100">Raw</strong> keeps
+              the hard wraps; <strong className="font-semibold opacity-100">Rewrapped</strong> joins them back
+              into the line the program actually printed. Tap{" "}
+              <code className={SITE_CODE_CLASS}>e</code>{" "}
+              mid-drag to snap the selection out to the whole URL or file path.
             </p>
           </div>
           <FeatureVideo src={copyPasteVideoUrl} />
@@ -835,7 +966,7 @@ export default function Home() {
 
         <section id="download" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY}`} style={downloadAccentStyle}>
           <h2 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] text-[var(--color-text)]">Get Dormouse</h2>
-          <p className="mb-4 text-lg leading-relaxed opacity-70">A dormouse knows when to wake up. Multitasking terminal for mice.</p>
+          <p className="mb-4 text-lg leading-relaxed opacity-70">A dormouse knows when to wake up. Multitasking terminal for mice and thumbs.</p>
           <DownloadButton
             href="/playground"
             icon={<TerminalIcon size={26} weight="bold" />}
@@ -928,31 +1059,11 @@ export default function Home() {
           </div>
         </section>
 
-        <section id="notify" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY} grid md:grid-cols-[2fr_3fr] gap-8 md:gap-12 items-start`}>
-          <img
-            src={phoneMockupUrl}
-            alt="Dormouse Pocket running on a phone"
-            className="order-2 md:order-1 block w-full max-w-[280px] mx-auto md:max-w-none"
-          />
-          <div className="order-1 md:order-2">
-            <h2 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] text-[var(--color-text)] mb-6">
-              Walk away. Keep going.
-            </h2>
-            <p className="mb-4 text-lg leading-relaxed opacity-70">
-              Coming next: <a href="/playground/pocket" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">Dormouse Pocket</a>.
-              Tether a terminal session to your phone over WebRTC and take a stroll — Dormouse
-              buzzes your phone when something needs attention. A hosted auto-pairing service comes
-              later, so you can close the laptop and walk away, no setup dance.
-            </p>
-            <p className="mb-4 text-lg leading-relaxed opacity-70">
-              Open source and free to self-host, or pay a small monthly fee for our hosted version. Early adopters get a launch discount.
-            </p>
-            <NotifySignupForm />
-          </div>
-        </section>
-
         <footer className="border-t border-[var(--color-text)]/20 py-10">
           <div className="mx-auto max-w-5xl px-4 md:px-6 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-base text-center opacity-50">
+            <a href="/docs/dor" className="underline hover:opacity-100">CLI reference</a>
+            <a href="/docs/agent-skill" className="underline hover:opacity-100">Agent skill</a>
+            <a href="/docs/self-host" className="underline hover:opacity-100">Self-host</a>
             <a href="/supply-chain" className="underline hover:opacity-100">Supply Chain</a>
             <a href="https://github.com/diffplug/dormouse/issues" className="underline hover:opacity-100">Report an issue</a>
             <p>

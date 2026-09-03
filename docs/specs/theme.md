@@ -185,9 +185,19 @@ playground navbar — carries none**.
   init **and repeats after commit** (hydration again). Pocket passes
   `restorePocketTheme` as its `restore` argument so the browser-chrome sync rides
   the same lifecycle.
-- The two `/playground/pocket` marketing mounts keep the free-floating `compact`
-  picker (rationale). **Both variants show the active theme's `ThemeSwatch`** —
-  beside its label on the dialog trigger, beside the word "Theme" in `compact`.
+- The two `/playground/pocket` marketing mounts and the docs pages keep the
+  free-floating `compact` picker (rationale); the docs pages give it two
+  placements, floating at `lg` and inline in the mobile bar. **Both variants
+  show the active theme's `ThemeSwatch`** — beside its label on the dialog
+  trigger, beside the word "Theme" in `compact`.
+- **`compact` takes its menu offset from style, never a Tailwind class**
+  (`menuSide`): the website renders against the lib's *prebuilt* stylesheet, so
+  a utility the lib never emitted is absent there and the menu drops to its
+  static position.
+- **`onPick` reports the choice, not the change.** `restoreActiveTheme` persists
+  the id it resolved, so `dormouse:active-theme` exists whether or not anyone
+  chose, and `subscribeToActiveTheme` is silent on a re-pick. Only the picker
+  can answer "has this person chosen yet".
 - **The host's fallback theme is module state, not a prop.**
   `setDefaultThemeId()` holds it and `restoreActiveTheme()` takes no argument, so
   every path re-resolving the active theme gets the same answer (rationale).

@@ -1,0 +1,46 @@
+// @vitest-environment jsdom
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { DOCS_THEME_ID, dismissThemePrompt, isThemePromptDismissed } from "./docs-theme";
+
+afterEach(() => {
+  // Unstub first: the storage-failure case replaces localStorage entirely.
+  vi.unstubAllGlobals();
+  localStorage.clear();
+});
+
+describe("docs theme prompt", () => {
+  it("starts undismissed and stays dismissed once recorded", () => {
+    // Both the picker's onPick and the prompt's close button record it, so a
+    // reader who declined the offer is not asked again on the next page.
+    expect(isThemePromptDismissed()).toBe(false);
+    dismissThemePrompt();
+    expect(isThemePromptDismissed()).toBe(true);
+  });
+
+  it("does not read the theme store's own key", () => {
+    // `restoreActiveTheme` persists the id it resolved, so this key exists
+    // after any page load whether or not the reader chose anything. A prompt
+    // keyed on it would never show twice (docs/specs/theme.md).
+    localStorage.setItem("dormouse:active-theme", DOCS_THEME_ID);
+    expect(isThemePromptDismissed()).toBe(false);
+  });
+
+  it("reports undismissed rather than throwing when storage is unavailable", () => {
+    // Safari in private mode throws on access; the prompt returning every
+    // visit is the acceptable failure, a page that will not render is not.
+    vi.stubGlobal("localStorage", {
+      get getItem(): never {
+        throw new DOMException("denied");
+      },
+    });
+    expect(isThemePromptDismissed()).toBe(false);
+    expect(() => dismissThemePrompt()).not.toThrow();
+  });
+
+  it("defaults to a theme that actually ships", async () => {
+    // Otherwise the default silently degrades to whichever theme happens to be
+    // first in the bundle, which is what `restoreActiveTheme` falls back to.
+    const { getBundledThemes } = await import("dormouse-lib/lib/themes");
+    expect(getBundledThemes().map((t) => t.id)).toContain(DOCS_THEME_ID);
+  });
+});

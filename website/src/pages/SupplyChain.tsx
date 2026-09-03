@@ -3,15 +3,24 @@ import { tv } from "tailwind-variants";
 import cargoDeps from "../data/dependencies-cargo.json";
 import npmDeps from "../data/dependencies-npm.json";
 import runtimeDeps from "../data/dependencies-runtime.json";
-import SiteHeader, { STATIC_PAGE_HEADER_STYLE } from "../components/SiteHeader";
+import DocsLayout from "../components/DocsLayout";
+import { LINK_CLASS, SCROLL_MT_CLASS } from "../components/docs-tokens";
+import { type MetaArgs } from "react-router";
+import { type TocEntry } from "../lib/docs-pages";
+import { siteMeta } from "../lib/site-meta";
 
-// Single source of truth for caramel links, so links in body copy render at
-// the same full brightness as links in the dependency tables. Body copy is
-// dimmed with a text-color alpha (text-[…]/70) rather than `opacity`, since
-// `opacity` would composite the link along with the surrounding text.
-const link = tv({
-  base: "text-[var(--color-caramel)] underline-offset-2 hover:underline",
-});
+export function meta({ location }: MetaArgs) {
+  return siteMeta(location.pathname, {
+    title: "Supply chain — Dormouse",
+    description:
+      "Every dependency Dormouse ships, with its version, license, and author, generated from the lockfiles.",
+  });
+}
+
+// Wrapped in `tv()` so the tables can compose it. The docs recipe, not the
+// site's caramel: this page follows the reader's theme, where caramel drops
+// below WCAG AA (website/src/components/docs-tokens.ts).
+const link = tv({ base: LINK_CLASS });
 
 type PackageDependency = {
   name: string;
@@ -115,137 +124,149 @@ function DirectCargoTable({ deps }: { deps: DirectCargoDependency[] }) {
   );
 }
 
-function DependencySection({
-  title,
-  count,
-  description,
-  children,
-}: {
+type SupplyChainSection = {
+  /** Anchor the rail links, and the `<h2>`'s id. */
+  id: string;
   title: string;
   count: number;
   description: string;
-  children: ReactNode;
-}) {
+  table: ReactNode;
+};
+
+/**
+ * The page's sections, in order.
+ *
+ * One owner for the heading a reader sees, the anchor it carries, and the
+ * table under it, so the rail cannot name a section the page has renamed or
+ * dropped. Anchors are spelled out rather than slugged from the title, so
+ * rewording a heading does not silently break a link someone saved.
+ */
+const SECTIONS: readonly SupplyChainSection[] = [
+  {
+    id: "bundled-runtime",
+    title: "Bundled Runtime",
+    count: runtimeDeps.length,
+    description:
+      "The Standalone app ships a bundled NodeJS, which bundles other components under their own licenses.\nThe VS Code extension bundles no runtime — it runs on the editor's own Electron Node.",
+    table: <PackageTable deps={runtimeDeps} />,
+  },
+  {
+    id: "npm-dependencies",
+    title: "npm Dependencies",
+    count: npmDeps.length,
+    description:
+      "Runtime npm packages used by the Standalone app, the VS Code extension, and the coordinating server you run yourself to pair a phone with your laptop.",
+    table: <PackageTable deps={npmDeps} />,
+  },
+  {
+    id: "direct-cargo-dependencies",
+    title: "Direct Cargo Dependencies",
+    count: cargoDeps.direct.length,
+    description:
+      "Crates declared directly in standalone/src-tauri/Cargo.toml, including build and target-specific dependencies.",
+    table: <DirectCargoTable deps={cargoDeps.direct} />,
+  },
+  {
+    id: "transitive-cargo-dependencies",
+    title: "Transitive Cargo Dependencies",
+    count: cargoDeps.transitive.length,
+    description:
+      "Every crate the direct dependencies pull into the locked Tauri build graph, including build-time and platform-specific crates that aren't all linked into the final binary.",
+    table: <PackageTable deps={cargoDeps.transitive} />,
+  },
+];
+
+/** This page's table of contents, off the list that titles its sections. */
+export const SUPPLY_CHAIN_TOC: TocEntry[] = SECTIONS.map((section) => ({
+  id: section.id,
+  text: section.title,
+  children: [],
+}));
+
+function DependencySection({ section }: { section: SupplyChainSection }) {
   return (
     <section className="mt-12">
       <div className="mb-4 flex flex-col gap-1 border-b border-[var(--color-text)]/10 pb-3 md:flex-row md:items-end md:justify-between">
         <div>
           <div className="flex items-baseline gap-2">
-            <h2 className="font-display text-xl">{title}</h2>
-            <div className="font-mono text-md opacity-50">({count})</div>
+            <h2 id={section.id} className={`${SCROLL_MT_CLASS} font-display text-xl`}>{section.title}</h2>
+            <div className="font-mono text-md opacity-50">({section.count})</div>
           </div>
-          <p className="text-sm opacity-60 whitespace-pre-line">{description}</p>
+          <p className="text-sm opacity-60 whitespace-pre-line">{section.description}</p>
         </div>
       </div>
-      {children}
+      {section.table}
     </section>
   );
 }
 
 export default function SupplyChain() {
   return (
-    <>
-      <SiteHeader activePath="/supply-chain" style={STATIC_PAGE_HEADER_STYLE} />
+    <DocsLayout activePath="/supply-chain" toc={SUPPLY_CHAIN_TOC}>
+      <p className="text-base text-[var(--color-text)]/70 mb-2">
+        Dormouse is a terminal, so users trust it with shells, source trees, credentials, and
+        local files. Our security procedures are documented in full (and audited nightly and immediately before every release) in{" "}
+        <a
+          href={securityPolicyUrl}
+          className={link()}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          SECURITY.md
+        </a>, here is a summary:
+      </p>
+      <ul className="text-base text-[var(--color-text)]/70 mb-2 list-disc space-y-1 pl-5">
+        <li>
+          We wait at least 24 hours before adopting any newly published dependency.
+        </li>
+        <li>
+          Signing and auto-update secrets for the Standalone app are stored offline, never in CI.
+        </li>
+        <li>
+          Publishing secrets for the VS Code extension are stored in CI locked by two separate maintainer accounts.
+        </li>
+      </ul>
 
-      <div className="min-h-screen bg-[var(--color-bg)] text-[var(--color-text)] pt-24 pb-16">
-        <div className="mx-auto max-w-6xl px-4 md:px-6">
-          <h1 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] mb-2">
-            Supply Chain
-          </h1>
-          <p className="text-base text-[var(--color-text)]/70 mb-2">
-            Dormouse is a terminal, so users trust it with shells, source trees, credentials, and
-            local files. Our security procedures are documented in full (and audited nightly and immediately before every release) in{" "}
-            <a
-              href={securityPolicyUrl}
-              className={link()}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              SECURITY.md
-            </a>, here is a summary:
-          </p>
-          <ul className="text-base text-[var(--color-text)]/70 mb-2 list-disc space-y-1 pl-5">
-            <li>
-              We wait at least 24 hours before adopting any newly published dependency.
-            </li>
-            <li>
-              Signing and auto-update secrets for the Standalone app are stored offline, never in CI.
-            </li>
-            <li>
-              Publishing secrets for the VS Code extension are stored in CI locked by two separate maintainer accounts.
-            </li>
-          </ul>
-
-          <p className="text-base text-[var(--color-text)]/70 mb-2">
-            All bundled libraries are listed below. Thank you to every author and contributor.
-            Thanks also to{" "}
-            <a
-              href="https://github.com/reowens/ascii-splash"
-              className={link()}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              ascii-splash
-            </a>{" "}
-            and{" "}
-            <a
-              href="https://github.com/remix-run/react-router"
-              className={link()}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              react-router
-            </a>{" "}
-            and their transitive dependencies, which power this marketing site but don't ship in the app, so they're not listed below.
-          </p>
-          <div className="grid gap-3 border-y border-[var(--color-text)]/10 py-4 text-sm md:grid-cols-3">
-            <div>
-              <div className="font-mono text-2xl">{npmDeps.length}</div>
-              <div className="opacity-60">npm packages (direct and transitive)</div>
-            </div>
-            <div>
-              <div className="font-mono text-2xl">{cargoDeps.direct.length}</div>
-              <div className="opacity-60">Cargo crates (direct)</div>
-            </div>
-            <div>
-              <div className="font-mono text-2xl">{cargoDeps.transitive.length}</div>
-              <div className="opacity-60">Cargo crates (transitive)</div>
-            </div>
-          </div>
-
-          <DependencySection
-            title="Bundled Runtime"
-            count={runtimeDeps.length}
-            description={"The Standalone app ships a bundled NodeJS, which bundles other components under their own licenses.\nThe VS Code extension bundles no runtime — it runs on the editor's own Electron Node."}
-          >
-            <PackageTable deps={runtimeDeps} />
-          </DependencySection>
-
-          <DependencySection
-            title="npm Dependencies"
-            count={npmDeps.length}
-            description="Runtime npm packages used by the Standalone app, the VS Code extension, and the coordinating server you run yourself to pair a phone with your laptop."
-          >
-            <PackageTable deps={npmDeps} />
-          </DependencySection>
-
-          <DependencySection
-            title="Direct Cargo Dependencies"
-            count={cargoDeps.direct.length}
-            description="Crates declared directly in standalone/src-tauri/Cargo.toml, including build and target-specific dependencies."
-          >
-            <DirectCargoTable deps={cargoDeps.direct} />
-          </DependencySection>
-
-          <DependencySection
-            title="Transitive Cargo Dependencies"
-            count={cargoDeps.transitive.length}
-            description="Every crate the direct dependencies pull into the locked Tauri build graph, including build-time and platform-specific crates that aren't all linked into the final binary."
-          >
-            <PackageTable deps={cargoDeps.transitive} />
-          </DependencySection>
+      <p className="text-base text-[var(--color-text)]/70 mb-2">
+        All bundled libraries are listed below. Thank you to every author and contributor.
+        Thanks also to{" "}
+        <a
+          href="https://github.com/reowens/ascii-splash"
+          className={link()}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          ascii-splash
+        </a>{" "}
+        and{" "}
+        <a
+          href="https://github.com/remix-run/react-router"
+          className={link()}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          react-router
+        </a>{" "}
+        and their transitive dependencies, which power this marketing site but don't ship in the app, so they're not listed below.
+      </p>
+      <div className="grid gap-3 border-y border-[var(--color-text)]/10 py-4 text-sm md:grid-cols-3">
+        <div>
+          <div className="font-mono text-2xl">{npmDeps.length}</div>
+          <div className="opacity-60">npm packages (direct and transitive)</div>
+        </div>
+        <div>
+          <div className="font-mono text-2xl">{cargoDeps.direct.length}</div>
+          <div className="opacity-60">Cargo crates (direct)</div>
+        </div>
+        <div>
+          <div className="font-mono text-2xl">{cargoDeps.transitive.length}</div>
+          <div className="opacity-60">Cargo crates (transitive)</div>
         </div>
       </div>
-    </>
+
+      {SECTIONS.map((section) => (
+        <DependencySection key={section.id} section={section} />
+      ))}
+    </DocsLayout>
   );
 }

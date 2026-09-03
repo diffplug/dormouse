@@ -5,7 +5,21 @@ import {
   Outlet,
   Scripts,
   ScrollRestoration,
+  type MetaArgs,
 } from "react-router";
+import { siteMeta } from "./lib/site-meta";
+
+/**
+ * Every page's title, description, canonical, and social cards.
+ *
+ * A page that wants its own overrides this by exporting `meta` and calling
+ * `siteMeta` itself; one that does not inherits these, still with a canonical
+ * pointing at its own path. None of it may move into `<head>` below — see
+ * website/src/lib/site-meta.ts for what that broke.
+ */
+export function meta({ location }: MetaArgs) {
+  return siteMeta(location.pathname);
+}
 
 export function Layout({ children }: { children: ReactNode }) {
   return (
@@ -13,31 +27,10 @@ export function Layout({ children }: { children: ReactNode }) {
       <head>
         <meta charSet="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-
-        <title>Dormouse — A dormouse knows when to wake up</title>
-        <meta name="description" content="So many terminals — which one needs attention? Dormouse alerts you when a build, agent, or script stops printing. Multitasking terminal for mice, no plugins, no config." />
         <meta name="theme-color" content="#000000" />
-        <link rel="canonical" href="https://dormouse.sh/" />
 
         <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-
-        <meta property="og:type" content="website" />
-        <meta property="og:site_name" content="Dormouse" />
-        <meta property="og:title" content="Dormouse — A dormouse knows when to wake up" />
-        <meta property="og:description" content="So many terminals — which one needs attention? Dormouse alerts you when a build, agent, or script stops printing. Multitasking terminal for mice, no plugins, no config." />
-        <meta property="og:url" content="https://dormouse.sh/" />
-        <meta property="og:image" content="https://dormouse.sh/og-image.jpg" />
-        <meta property="og:image:type" content="image/jpeg" />
-        <meta property="og:image:width" content="1200" />
-        <meta property="og:image:height" content="630" />
-        <meta property="og:image:alt" content="Dormouse — multitasking terminal for mice" />
-
-        <meta name="twitter:card" content="summary_large_image" />
-        <meta name="twitter:title" content="Dormouse — A dormouse knows when to wake up" />
-        <meta name="twitter:description" content="So many terminals — which one needs attention? Dormouse alerts you when a build, agent, or script stops printing. Multitasking terminal for mice, no plugins, no config." />
-        <meta name="twitter:image" content="https://dormouse.sh/og-image.jpg" />
-        <meta name="twitter:image:alt" content="Dormouse — multitasking terminal for mice" />
 
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
