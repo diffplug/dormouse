@@ -369,10 +369,10 @@ host trusts it**. Once `open` returns, only a still-current relaunch best-effort
 closes stray `about:blank` tabs, **and only while a real page is open**, so it
 never closes the sole tab (rationale).
 
-While popped out, Dormouse keeps a stream/CDP observer so URL/header state
-follows same-tab navigation and a headed window close can auto-revert to
-headless. **Hosts must cancel pending relaunch sweeps before closing popped-out
-sessions on shutdown**.
+While popped out, Dormouse keeps a stream/CDP observer for same-tab URL/header
+updates and headed-window close auto-revert. **Hosts must cancel pending
+relaunch sweeps, then close tracked popped-out sessions on shutdown** so
+quitting orphans no headed window.
 
 Source of truth: `lib/src/components/wall/agent-browser-surface-controller.ts` (pop-out state, CDP
 observer, auto-revert), `lib/src/host/agent-browser-host.ts` (`popOut`, `popIn`,
