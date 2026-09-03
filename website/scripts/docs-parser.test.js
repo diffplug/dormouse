@@ -131,6 +131,47 @@ describe('blocks', () => {
     expect(inlineToText(blocks[0].children[0].children)).toBe('quoted continues');
   });
 
+  it('breaks a paragraph at a thematic break instead of eating it as emphasis', () => {
+    const { blocks } = parseMarkdown('Some text\n***\nNext\n');
+    expect(blocks.map((b) => b.type)).toEqual(['paragraph', 'thematicBreak', 'paragraph']);
+    expect(inlineToText(blocks[0].children)).toBe('Some text');
+    expect(inlineToText(blocks[2].children)).toBe('Next');
+  });
+
+  it('still reads a dashed underline as a setext heading, not a thematic break', () => {
+    expect(() => parseMarkdown('Title\n---\n')).toThrow(/setext heading underline/);
+  });
+
+  it('ends a blockquote at a thematic break rather than raising a setext error', () => {
+    const { blocks } = parseMarkdown('> quoted\n---\n');
+    expect(blocks.map((b) => b.type)).toEqual(['blockquote', 'thematicBreak']);
+  });
+
+  it('ends a blockquote at a table rather than swallowing its rows', () => {
+    const { blocks } = parseMarkdown('> quoted\n| a | b |\n|---|---|\n| 1 | 2 |\n');
+    expect(blocks.map((b) => b.type)).toEqual(['blockquote', 'table']);
+    expect(blocks[1].header.map(inlineToText)).toEqual(['a', 'b']);
+  });
+
+  it('ends a blockquote at block-level raw HTML, which then raises', () => {
+    expect(() => parseMarkdown('> quoted\n<div>\n')).toThrow(/raw HTML <div>/);
+  });
+
+  it('keeps a standalone <img> line inside the paragraph it follows', () => {
+    const { blocks } = parseMarkdown('text\n<img src="a.png" alt="a">\n');
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].children.map((n) => n.type)).toEqual(['text', 'image']);
+  });
+
+  it('rejects a setext underline inside a list item too', () => {
+    expect(() => parseMarkdown('- item\n  Title\n  =====\n')).toThrow(/setext heading underline/);
+  });
+
+  it('ends a list item at a thematic break in its continuation', () => {
+    const { blocks } = parseMarkdown('- item\n  ***\n');
+    expect(blocks.map((b) => b.type)).toEqual(['list', 'thematicBreak']);
+  });
+
   it('parses a table with an escaped pipe inside inline code', () => {
     const md = '| Key | Action |\n|-----|--------|\n| `\\|` or tmux `%` | Split |\n';
     const { blocks } = parseMarkdown(md);
