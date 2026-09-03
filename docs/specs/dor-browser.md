@@ -200,7 +200,7 @@ size landed**, so a resize transient is not read as an external override.
 
 | From -> To | Behavior |
 | --- | --- |
-| `iframe` -> `ab-screencast` / `ab-popout` | **The pane swaps at once** to a session-less agent-browser pane — inert, so it cannot race the boot (rationale) — while the host spawns a fresh `gui-<hex>` session at the current URL via `agentBrowserOpen` and hands over `{session, wsPort, binaryPath}` as **one** params refresh. `ab-popout` spawns headed in one shot, so the surface mounts already popped out. A spawn that yields no session restores the iframe; a Surface minimized meanwhile receives either outcome through its Door, while one killed meanwhile closes a spawned session. Hidden/inert without that capability. |
+| `iframe` -> `ab-screencast` / `ab-popout` | **The pane swaps at once** to a session-less agent-browser pane — inert, so it cannot race the boot (rationale) — while the host spawns a fresh `gui-<hex>` session at the current URL via `agentBrowserOpen` and hands over `{session, wsPort, binaryPath}` as **one** params refresh. `ab-popout` spawns headed in one shot, so the surface mounts already popped out. A spawn that rejects or yields no session restores the iframe; a Surface minimized meanwhile receives either outcome through its Door, while one killed meanwhile closes a spawned session. Hidden/inert without that capability. |
 | `ab-screencast` <-> `ab-popout` | Same session, headed/headless relaunch in `AgentBrowserPanel`; preserves only the active URL. |
 | `ab-*` -> `iframe` | Uses canonical `params.url`; with multiple tabs, requires the user to press `c` in the warning overlay, because only the active tab survives. |
 

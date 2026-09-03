@@ -619,6 +619,36 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it('restores an eager render swap to iframe when launch rejects', async () => {
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(true);
+    (fake as PlatformAdapter).agentBrowserOpen = vi.fn(async () => {
+      throw new Error('transport failed');
+    });
+
+    try {
+      await act(async () => {
+        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+      });
+      await flush();
+      const iframeId = (await dispatchIframe('http://localhost:5173/')).id;
+
+      await act(async () => {
+        getAgentBrowserScreenController(iframeId)?.actions.setRenderMode?.('ab-screencast');
+      });
+      await flush();
+
+      const restoredId = container.querySelector<HTMLElement>('[data-lath-leaf]')!.dataset.lathLeaf!;
+      expect(restoredId).not.toBe(iframeId);
+      expect(getAgentBrowserScreenController(restoredId)?.snapshot().renderMode).toBe('iframe');
+      expect(await dispatchResolveAgentBrowser('surface:1')).toEqual({
+        ok: false,
+        error: "surface 'surface:1' is not agent-browser rendered (render_mode: iframe)",
+      });
+    } finally {
+      untouchedSpy.mockRestore();
+    }
+  });
+
   it('resolves a browser surface handle to its agent-browser session, and gates the rest', async () => {
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
     (fake as PlatformAdapter).agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));

@@ -1394,6 +1394,7 @@ export function Wall({
           updateSurfaceParams(eagerId, bound);
         }).catch((err) => {
           console.warn('[dormouse] failed to swap iframe surface to agent-browser:', err);
+          restoreIframe();
         });
       }
     },
