@@ -285,8 +285,8 @@ its own because clients trigger it. Rules park and recovery must not break:
   relaunching placeholder, and reconnects only to the port the host hands back
   (rationale). **One relaunch at a time**: a pop-out or pop-in issued during
   one is ignored; a session-less pane has nothing to relaunch.
-- **A `{session, wsPort, binaryPath}` refresh reconciles once**, straight to the
-  port, with no `stream status`.
+- **A `{session, wsPort, binaryPath}` refresh reconciles its session even at the
+  live port**, with no `stream status`.
 
 The stream carries frames, status, tab snapshots, `url`, and native
 `input_mouse` / `input_keyboard` input. **Control envelopes dispatch at any

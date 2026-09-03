@@ -375,6 +375,34 @@ describe('updateParams', () => {
     expect(sink.updateParameters.mock.calls.length).toBe(writesBefore);
     expect(streamSockets(1111).length).toBe(1);
   });
+
+  it('reconciles a changed session when its params port already matches the live port', async () => {
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand' | 'agentBrowserPopOut'>;
+    platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
+    platform.agentBrowserPopOut = vi.fn(async () => ({ ok: true, wsPort: 2222 }));
+    setPlatform(platform);
+
+    const controller = acquireAgentBrowserSurfaceController('id', { session: 'old-session', wsPort: 1111 });
+    controller.attachView(makeSink());
+    await flushMicrotasks();
+
+    // The relaunch adopts 2222 immediately, but params.wsPort remains 1111
+    // until the view's buffered write echoes back through updateParams.
+    getAgentBrowserScreenController('id')?.actions.setRenderMode?.('ab-popout');
+    await flushMicrotasks();
+    const oldSessionSocket = streamSocket(2222);
+    expect(oldSessionSocket?.readyState).toBe(1);
+    expect(streamSockets(2222)).toHaveLength(1);
+
+    // The echo also hands over a new session. Since 2222 is already the live
+    // port, setStreamPort no-ops; session reconciliation must still replace the
+    // old-session connection with one keyed to new-session.
+    controller.updateParams({ session: 'new-session', wsPort: 2222 });
+    await flushMicrotasks();
+
+    expect(oldSessionSocket?.readyState).toBe(3);
+    expect(streamSockets(2222)).toHaveLength(2);
+  });
 });
 
 describe('stale-port recovery gating', () => {

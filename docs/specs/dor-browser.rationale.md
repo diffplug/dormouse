@@ -22,6 +22,8 @@
 
 **Why the handover is a single params refresh.** Setting `session` is what reconciles the controller and connects it, so landing it ahead of `wsPort`/`binaryPath` — or before `agent-browser open` has returned — connects against a daemon that is not up. Handing it over even after a failed `open` lets the placeholder name what it is waiting for; the menu that would have reported the error closed long ago.
 
+The persisted `wsPort` mirror can lag the controller's already-live port after a buffered write, so a simultaneous session change still reconciles when setting that port itself is a no-op.
+
 ## Display Modal And Render Swaps
 
 **Why the iframe swap is eager.** The same 1–3s daemon boot as the context-menu connect, behind a modal that has already closed; and while the swap awaited `open`, a slow page held the iframe on screen for the whole load and a timed-out `open` dropped the swap silently — leaving an orphan `gui-<hex>` browser nobody could see or close.

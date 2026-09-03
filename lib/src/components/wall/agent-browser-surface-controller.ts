@@ -576,7 +576,11 @@ export class AgentBrowserSurfaceController {
       // Mirrors the old useEffect(() => setStreamPort(wsPort), [wsPort]): a
       // `dor ab` re-run refreshing wsPort reconnects to the new port.
       this.setStreamPort(params.wsPort);
-    } else if (sessionChanged) {
+    }
+    // Run this even after the port arm: the persisted params mirror (`wsPort`)
+    // can lag the already-live `streamPort`, making setStreamPort a no-op while
+    // the session identity still changes underneath that connection.
+    if (sessionChanged) {
       this.reconcile();
       this.emitView();
       this.maybeRecoverStalePort();
