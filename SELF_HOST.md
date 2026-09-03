@@ -1,4 +1,4 @@
-# Run the Dormouse server behind Tailscale
+# Self-host the Dormouse server
 
 > This is an assistant-run setup playbook. Start a fresh Claude instance in
 > this repository and say: `read @SELF_HOST.md and walk me through it`.
@@ -13,12 +13,11 @@ is the whole *scripted* self-host story today. To keep the relay up while that
 machine sleeps, run the same installer on an always-on tailnet box — see
 "Keeping the relay up while the laptop sleeps".
 
-**Tailscale is a front door, not a dependency.** Nothing in the server or the
-Host is Tailscale-aware — `DORMOUSE_ORIGIN` is any absolute URL and
-`DORMOUSE_REMOTE_CONNECT_SRC` any source list. What Tailscale supplies is the
-three things an installer would otherwise have to ask for: a stable DNS name, a
-certificate the phone already trusts, and a reverse proxy in front of the
-loopback server. Another private network supplying all three works, unassisted:
+**Tailscale is the front door this runbook installs, not a dependency.** Nothing
+in the server or the Host is Tailscale-aware; what it supplies is a stable DNS
+name, a certificate the phone already trusts, and a reverse proxy in front of
+the loopback server. Another private network can supply the same, under the
+contract in
 [Bring your own private network](#bring-your-own-private-network).
 
 The installer already exists — one idempotent command that ships in this
@@ -101,10 +100,10 @@ known:
 - **A tailnet.** The user needs a Tailscale account with MagicDNS and HTTPS
   certificates enabled, Tailscale running on this laptop, and Tailscale on the
   phone that will run Pocket. A tailnet-only origin is not reachable merely
-  because the laptop is on the tailnet. All three installers refuse to run
-  without the Tailscale CLI; on another private network, stop here and read
-  [Bring your own private network](#bring-your-own-private-network) with the
-  user rather than improvising around that refusal.
+  because the laptop is on the tailnet. All three installers refuse without the
+  Tailscale CLI; on another private network **never improvise around that
+  refusal** — read
+  [Bring your own private network](#bring-your-own-private-network) instead.
 - **macOS, Windows or Linux.** Each installer refuses to run on the other
   platforms. On a fourth OS, or on a Linux box without systemd, stop and design
   the native service manager with the user rather than translating LaunchAgent,
@@ -145,8 +144,8 @@ known:
 
   `standalone/scripts/build-sidecar-proxy.mjs` and
   `vscode-ext/scripts/esbuild.mjs` bake that variable into their respective
-  Node Host bundles. The value is a source list rather than a Tailscale check,
-  so a non-tailnet origin goes in verbatim. The relay socket no longer lives in
+  Node Host bundles. A non-tailnet origin goes in whole, port included — a
+  source with no port matches 443 only. The relay socket no longer lives in
   either webview, so changing a webview CSP does not widen this allowlist.
 
 ## What the installer does
@@ -683,48 +682,42 @@ install, and is not designed here.
 
 ## Bring your own private network
 
-Every installer refuses without the Tailscale CLI. The server does not care:
-point `DORMOUSE_ORIGIN` at any absolute URL, build the Host with a matching
-`DORMOUSE_REMOTE_CONNECT_SRC`, and WireGuard, a corporate VPN, or a reverse
-proxy on a home LAN all work. There is no script for it, so what follows is a
-contract rather than a runbook — a front door must supply all five:
+A front door is configuration of the shipped server rather than a different
+hosting model, so it needs no design: point `DORMOUSE_ORIGIN` at an `http(s)`
+origin, build the Host with a matching `DORMOUSE_REMOTE_CONNECT_SRC`, and
+WireGuard, a corporate VPN or a reverse proxy on a home LAN can front it.
+Nothing checks any of the following for you.
 
-- **A DNS name, never an IP address.** The WebAuthn `rpId` is the origin's
-  hostname (`server/src/app.ts`), and an IP literal is not a valid RP ID, so no
-  passkey can be registered against `https://10.0.0.4:8443` at all. A
-  non-default port is fine; the origin carries it and `rpId` does not.
+- **A DNS name, never an IP address, and at most 103 characters.** The WebAuthn
+  `rpId` is the origin's hostname, and an IP literal is not a valid RP ID.
+  Nothing refuses one: the server boots and answers, and the failure surfaces in
+  the phone's browser at passkey registration. The length cap is the pairing
+  QR's and does fail at mint time (`docs/specs/server.md` → Setup tokens and the
+  pairing QR). A non-default port is fine; the origin carries it, `rpId` does
+  not.
 - **A certificate the phone already trusts.** Passkeys need a secure context.
-  Publicly trusted means owning a domain and running ACME — usually DNS-01,
-  since the name resolves to a private address — which is a renewal credential
-  the Tailscale path never has to store. A private CA also works, but every
-  phone must install *and* fully trust the root before Pocket will load.
-- **Reachability limited to that network, checked by you.** There is no generic
-  equivalent of the Funnel assertion, so a proxy that starts answering from the
-  internet does it silently. `SECURITY.md` → "The setup password — accepted
-  risk" is the analysis this premise carries; a network reaching further than a
-  tailnet is a materially different risk than the one analyzed there.
-- **The server still bound to `127.0.0.1`.** The listen interface is the
-  boundary whenever the TLS proxy is local (`docs/specs/server.md` →
-  Configuration). A proxy in front of an all-interfaces bind is not a front
-  door, it is a second one.
-- **An origin stable for the life of the passkey.** `DORMOUSE_ORIGIN` is durable
-  WebAuthn identity, so changing it invalidates the registered passkey and every
-  enrolled Host. A DHCP-dependent name is a re-enrollment waiting to happen.
+  Public trust means owning a domain and running ACME — usually DNS-01, since
+  the name resolves to a private address, so you hold a renewal credential the
+  Tailscale path never does. A private CA also works, but every phone must
+  install *and* fully trust the root before Pocket will load.
+- **Reachability no wider than that network.** There is no generic equivalent of
+  the Funnel assertion, so a proxy that starts answering from the internet does
+  it silently — and `SECURITY.md` → "The setup password — accepted risk" is
+  premised on exactly that bound.
+- **The invariants the installer would have held, held by you.** The loopback
+  bind and the durable origin are unchanged ([Installer contract](#invariants)),
+  but nothing pins the first, and nothing refuses to rewrite the second, so a
+  DHCP-dependent name is a re-enrollment waiting to happen.
 
 Everything in "Definition of done" is then yours to reproduce by hand: no
-`manage verify`, no release pointers, no rollback, and none of the `SECURITY.md`
-`FAIL IF` lines `scripts/deploy-lint.mjs` holds the installers to. The
-credential posture is the part to copy first — `config/` and `state/` reachable
-only by the account running the server, the setup password only in `server.env`
-— and the [Installer contract](#installer-contract-maintainers) below is the
-list of what that account is being trusted with.
+`manage verify`, no release pointers, no rollback, and none of the `FAIL IF`
+lines in `SECURITY.md` that `scripts/deploy-lint.mjs` enforces. The server still
+does its own half — `state/` and every file in it (`SECURITY.md` → "Credentials
+at rest") — leaving `config/` and the service registration to you.
 
-The nearest thing to staying on the scripted path is a Tailscale-CLI-compatible
-control plane such as Headscale, where the CLI, MagicDNS and `tailscale serve`
-are unchanged and most of this file still applies. Confirm before committing to
-it that the control plane issues the HTTPS certificate `tailscale serve` asks it
-for; that leg is Tailscale's own control server in the shipped path, and it is
-the one this file leans on hardest.
+A Tailscale-CLI-compatible control plane such as Headscale is untested here. The
+open question is whether it satisfies the certificate `tailscale serve`
+requests, which Serve asks for only after the release switch has landed.
 
 ## Installer contract (maintainers)
 
