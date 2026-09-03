@@ -247,15 +247,16 @@ export default function SupplyChain() {
         </div>
       ))}
       <p className="text-base text-[var(--color-text)]/70 mb-2">
-        The coordinating server installed by the{" "}
+        The optional coordinating server — needed only for phone push notifications,
+        installed by the{" "}
         <a href="/docs/self-host#what-the-installer-does" className={link()}>
           self-host runbook
-        </a>
-        {" "}is included in the inventory below.
+        </a>{" "}
+        — is included in the inventory below.
       </p>
 
       <p className="text-base text-[var(--color-text)]/70 mb-2">
-        All bundled libraries are listed below. Thank you to every author and contributor.
+        Thank you to every author and contributor.
         Thanks also to{" "}
         <a
           href="https://github.com/reowens/ascii-splash"

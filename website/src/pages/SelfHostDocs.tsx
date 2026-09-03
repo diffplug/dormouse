@@ -52,7 +52,7 @@ export default function SelfHostDocs() {
     <DocsLayout
       activePath="/docs/self-host"
       title={selfhost.title}
-      intro="Everything Dormouse needs for phone notifications and remote control runs on hardware you own. This is the runbook."
+      intro="Optional: if you want push notifications and remote control from your phone, then you'll need to run a signalling server. Tailscale makes it easy and secure."
       toc={SELF_HOST_TOC}
     >
       <AnchoredHeading id="security-model">Security model</AnchoredHeading>
@@ -91,7 +91,7 @@ export default function SelfHostDocs() {
         <a href={REPO_URL} className={LINK_CLASS} target="_blank" rel="noopener noreferrer">
           the repository
         </a>
-        , start Claude Code in it, and say{" "}
+        , start a coding agent in it, and say{" "}
         <code className={CODE_CLASS}>
           read @SELF_HOST.md and walk me through it
         </code>
