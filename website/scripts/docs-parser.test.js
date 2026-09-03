@@ -177,6 +177,30 @@ describe('blocks', () => {
     expect(() => parseMarkdown('a | b\n---\n')).toThrow(/setext heading underline/);
   });
 
+  it('reads a delimiter row whose cell count differs from the header as prose', () => {
+    expect(parseMarkdown('Intro\na | b\n| --- |\n').blocks.map((b) => b.type)).toEqual(['paragraph']);
+    expect(parseMarkdown('a | b\n| --- |\n').blocks.map((b) => b.type)).toEqual(['paragraph']);
+    expect(parseMarkdown('a | b | c\n--- | ---\n1 | 2 | 3\n').blocks.map((b) => b.type)).toEqual(['paragraph']);
+  });
+
+  it('keeps a mismatched delimiter row inside the blockquote it lazily continues', () => {
+    const { blocks } = parseMarkdown('> quoted\na | b\n| --- |\n');
+    expect(blocks.map((b) => b.type)).toEqual(['blockquote']);
+  });
+
+  it('still parses a table whose header omits the outer pipes', () => {
+    const { blocks } = parseMarkdown('a|b\n-|-\n1|2\n');
+    expect(blocks[0].type).toBe('table');
+    expect(blocks[0].header.map(inlineToText)).toEqual(['a', 'b']);
+    expect(blocks[0].rows[0].map(inlineToText)).toEqual(['1', '2']);
+  });
+
+  it('counts an escaped pipe in the header as one cell, not two', () => {
+    const { blocks } = parseMarkdown('a \\| b | c\n--- | ---\n1 | 2\n');
+    expect(blocks[0].type).toBe('table');
+    expect(blocks[0].header.map(inlineToText)).toEqual(['a | b', 'c']);
+  });
+
   it('parses a table with an escaped pipe inside inline code', () => {
     const md = '| Key | Action |\n|-----|--------|\n| `\\|` or tmux `%` | Split |\n';
     const { blocks } = parseMarkdown(md);
