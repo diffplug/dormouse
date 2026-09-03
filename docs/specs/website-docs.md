@@ -219,8 +219,10 @@ every page built from a delta, so the guarantee does not depend on remembering
 to ask for it.
 
 The renderer preserves selectable code, authored image alt text, safe
-external-link attributes, mobile table access, and mobile-width media without
-horizontal overflow. No HTML string is ever injected —
+external-link attributes, mobile table access, and mobile-width media and prose
+without horizontal overflow — an inline code span offers a break at each of its
+separators. **Never** let such a hint change what the span's `textContent`
+yields, so a path still pastes into a shell. No HTML string is ever injected —
 `dangerouslySetInnerHTML` is deliberately absent.
 
 ## Per-page head tags
