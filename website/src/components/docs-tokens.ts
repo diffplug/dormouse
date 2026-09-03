@@ -27,6 +27,12 @@ export const ACCENT_TEXT_CLASS = "text-[var(--docs-accent)]";
 export const ACCENT_HOVER_TEXT_CLASS = "hover:text-[var(--docs-accent)]";
 export const ACCENT_HOVER_BORDER_CLASS = "hover:border-[var(--docs-accent)]";
 
+/** A navigation link that sits back until hovered, as the rail's do. */
+export const MUTED_ACCENT_LINK_CLASS = `opacity-70 hover:opacity-100 ${ACCENT_HOVER_TEXT_CLASS}`;
+
+/** The rule down the left of a nested list, indenting what hangs off it. */
+export const TOC_INDENT_CLASS = "border-l border-[var(--color-text)]/15 pl-3";
+
 /** Inline `code` spans. */
 export const CODE_CLASS = "text-[0.9em] bg-[var(--color-text)]/15 px-1.5 py-0.5 rounded font-mono";
 

@@ -27,6 +27,11 @@ import {
   UnsupportedMarkdownError,
 } from '../website/scripts/docs-parser.js';
 import { generateDocs, SITE_ORIGIN, SITE_IMAGE_BASE } from '../website/scripts/generate-docs.js';
+// Imported, not scraped: Node strips the types, so the lint reads the same
+// objects the browser bundle does. A regex over the source silently returned
+// fewer pages when a field was reordered or a flag renamed, and every check
+// here only fails on zero — so a partial miss passed.
+import { DOCS_PAGES, DOCS_DEFAULT_PATH } from '../website/src/lib/docs-pages.ts';
 
 const failures = [];
 const fail = (msg) => failures.push(msg);
@@ -37,7 +42,6 @@ const SKILL = 'dor/skill.md';
 const SELF_HOST = 'SELF_HOST.md';
 const HOMEPAGE = 'website/src/pages/Home.tsx';
 const SPEC = 'docs/specs/website-docs.md';
-const DOCS_PAGES = 'website/src/lib/docs-pages.ts';
 const REDIRECTS = 'website/public/_redirects';
 const ROOT_ROUTE = 'website/src/root.tsx';
 const SITE_META = 'website/src/lib/site-meta.ts';
@@ -203,59 +207,39 @@ function checkVsCodeCommands() {
 }
 
 /**
- * The pages both READMEs must link, from the rail's own list.
+ * Every page reaches the readers its `linkedFrom` names, and the homepage
+ * reaches them all.
  *
- * website/src/lib/docs-pages.ts is the one owner (the routes, the prerender
- * list, and the rail all read it); the lint reads it rather than keeping a
- * copy that could disagree with what actually ships.
- *
- * Keyed on `published`, not on the `/docs/` prefix: the rail also carries the
- * changelog and the supply chain, which carry no off-site linking obligation,
- * and a prefix test would quietly start requiring one.
- */
-function referencePaths() {
-  const source = readRepoFile(DOCS_PAGES);
-  return [...source.matchAll(/path:\s*"([^"]+)"[^}]*published:\s*true/g)].map(([, path]) => path);
-}
-
-/** Every page in the rail, published or not. */
-function referencePathsAll() {
-  return [...readRepoFile(DOCS_PAGES).matchAll(/path:\s*"([^"]+)"/g)].map(([, path]) => path);
-}
-
-/**
- * Both READMEs must route to the published references, and the homepage too.
- *
- * The READMEs render off-site and spell them absolutely; the homepage is
- * on-site and spells them root-relatively. It is the page most able to strand
- * one: a section can be rewritten or cut and take its only link with it.
- *
- * Checked as exact paths rather than a `/docs` prefix: `/docs` itself is not a
- * page, so a prefix test would pass on a link to it and ship a 404.
+ * The READMEs render off-site and spell the URLs absolutely; the homepage is
+ * on-site and spells them root-relatively.
  */
 function checkRoutesToReferences() {
-  const paths = referencePaths();
-  if (paths.length === 0) {
-    fail(`${DOCS_PAGES}: no reference paths found; checkRoutesToReferences enforces nothing without them`);
+  // Each page names the documents that must link it, so the one exemption —
+  // the guide owes nothing to the self-host runbook — lives on the entry it
+  // applies to rather than as a set here.
+  const README_OF = { guide: GUIDE, 'root-readme': ROOT_README };
+  const linked = DOCS_PAGES.filter((page) => page.linkedFrom?.length);
+  if (linked.length === 0) {
+    fail('docs-pages.ts: no page names a README; checkRoutesToReferences enforces nothing');
     return;
   }
 
-  // The product guide is a Marketplace listing for the editor extension, and
-  // running a relay server is not part of installing one, so /docs/self-host is
-  // the root README's obligation alone.
-  const guideExempt = new Set(['/docs/self-host']);
-  for (const rel of [GUIDE, ROOT_README]) {
-    if (!parsed[rel]) continue;
-    const hrefs = linksIn(rel);
-    for (const path of paths) {
-      if (rel === GUIDE && guideExempt.has(path)) continue;
-      const url = SITE_ORIGIN + path;
-      if (!hrefs.some((href) => href === url || href.startsWith(`${url}#`))) {
+  for (const page of linked) {
+    const url = SITE_ORIGIN + page.path;
+    for (const source of page.linkedFrom ?? []) {
+      const rel = README_OF[source];
+      if (!parsed[rel]) continue;
+      if (!linksIn(rel).some((href) => href === url || href.startsWith(`${url}#`))) {
         fail(`${rel}: does not link to ${url}`);
       }
     }
   }
 
+  // The homepage is the page most able to strand a reference: a section can be
+  // rewritten or cut and take its only link with it. Checked as exact paths,
+  // because `/docs` is an entrypoint rather than a page and a prefix test would
+  // be satisfied by a link to it.
+  const paths = linked.map((page) => page.path);
   const hrefs = [...src[HOMEPAGE].matchAll(/href="(\/docs[^"]*)"/g)].map(([, href]) => href);
   const satisfies = (href, path) => href === path || href.startsWith(`${path}#`);
   for (const path of paths) {
@@ -327,22 +311,17 @@ function checkSiteOrigin() {
 }
 
 /**
- * `/docs` sends a reader to the page `DOCS_DEFAULT_PATH` names.
+ * `/docs` sends a reader to the page `DOCS_DEFAULT_PATH` names, with the status
+ * docs/specs/website-docs.md requires.
  *
- * There is no index page, so the redirect is the whole of `/docs`. It lives in
- * `_redirects`, which no test exercises and no build reads, while the constant
- * lives in TypeScript — two spellings of one destination, and a reader changing
- * their mind about the entrypoint would naturally edit only one.
+ * `_redirects` is a deploy artifact no test exercises and no build reads, so
+ * without this the two spellings of one destination drift the first time
+ * someone edits only the constant.
  */
 function checkDocsEntrypoint() {
-  const declared = /DOCS_DEFAULT_PATH = "([^"]+)"/.exec(readRepoFile(DOCS_PAGES));
-  if (!declared) {
-    fail(`${DOCS_PAGES}: no DOCS_DEFAULT_PATH declaration found`);
-    return;
-  }
-  const target = declared[1];
-  if (!referencePathsAll().includes(target)) {
-    fail(`${DOCS_PAGES}: DOCS_DEFAULT_PATH is ${target}, which is not a page in the rail`);
+  const target = DOCS_DEFAULT_PATH;
+  if (!DOCS_PAGES.some((page) => page.path === target)) {
+    fail(`docs-pages.ts: DOCS_DEFAULT_PATH is ${target}, which is not a page in the rail`);
   }
   const rule = readRepoFile(REDIRECTS)
     .split('\n')

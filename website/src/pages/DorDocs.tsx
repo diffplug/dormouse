@@ -21,7 +21,6 @@ export default function DorDocs() {
   return (
     <DocsLayout
       activePath="/docs/dor"
-      title="dor CLI reference"
       intro="dor is on the PATH of every terminal Dormouse launches. This page is generated from the CLI's own help output."
       toc={cli.toc}
     >

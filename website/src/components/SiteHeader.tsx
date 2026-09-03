@@ -1,16 +1,31 @@
 import { forwardRef } from "react";
+import { DOCS_PAGES } from "../lib/docs-pages";
 
 export const STATIC_PAGE_HEADER_STYLE: React.CSSProperties = {
   background: "rgba(10, 10, 10, 0.85)",
   backdropFilter: "blur(12px)",
 };
 
-const NAV_LINKS: readonly { href: string; label: string; external?: boolean; hideOnMobile?: boolean }[] = [
+const NAV_LINKS: readonly {
+  href: string;
+  label: string;
+  external?: boolean;
+  hideOnMobile?: boolean;
+  /** Paths this entry highlights for, when the href itself is never a page. */
+  covers?: readonly string[];
+}[] = [
   { href: "/playground", label: "Playground" },
   { href: "/#download", label: "Download", hideOnMobile: true },
   // Desktop only: on a phone the docs are reached from the homepage's own
   // links, and the four marketing destinations earn the narrow bar first.
-  { href: "/docs", label: "Docs", hideOnMobile: true },
+  // `/docs` only ever redirects, so it can never equal the current path — it
+  // highlights for the pages it leads to instead.
+  {
+    href: "/docs",
+    label: "Docs",
+    hideOnMobile: true,
+    covers: DOCS_PAGES.map((page) => page.path),
+  },
   { href: "https://github.com/diffplug/dormouse", label: "GitHub", external: true },
 ];
 
@@ -98,8 +113,8 @@ const SiteHeader = forwardRef<HTMLElement, SiteHeaderProps>(
           <div className="ml-auto flex min-w-0 items-center gap-3 md:gap-8">
             {controls ? <div className="min-w-0">{controls}</div> : null}
             <nav className="flex shrink-0 items-center gap-5 md:gap-10">
-              {navLinks.map(({ href, label, external, hideOnMobile }) => {
-                const isActive = activePath === href;
+              {navLinks.map(({ href, label, external, hideOnMobile, covers }) => {
+                const isActive = activePath === href || (activePath !== undefined && (covers?.includes(activePath) ?? false));
                 return (
                   <a
                     key={href}

@@ -152,11 +152,8 @@ describe('cli reference', () => {
     // is not on the page, the parent is a link that scrolls nowhere.
     const { commandsHeading, toc } = data.cli;
     expect(toc.map((e) => e.id)).toEqual(['targeting', 'surface-handles', 'dor', commandsHeading.id]);
+    // `anchors` is built from a separate list, so this crosses a real boundary.
     expect(data.cli.anchors).toContain(commandsHeading.id);
-
-    const commands = toc[toc.length - 1];
-    expect(commands.text).toBe(commandsHeading.title);
-    expect(commands.children.map((c) => c.id)).toEqual(data.cli.commands.map((c) => c.id));
     for (const entry of toc.slice(0, -1)) expect(entry.children).toEqual([]);
   });
 

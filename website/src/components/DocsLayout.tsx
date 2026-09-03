@@ -8,14 +8,19 @@
  *
  * See docs/specs/website-docs.md -> Reference page chrome.
  */
-import { useEffect, useState, type ReactNode } from "react";
+import { Suspense, lazy, useEffect, useState, type ReactNode } from "react";
 import { ListIcon, XIcon } from "@phosphor-icons/react";
 import { useRestoredTheme } from "dormouse-lib/lib/themes";
 import SiteHeader from "./SiteHeader";
-import DocsThemeControl from "./DocsThemeControl";
-import { ACCENT_HOVER_TEXT_CLASS, ACCENT_TEXT_CLASS } from "./docs-tokens";
-import { DOCS_PAGES, docsNeighbors, type DocsPage, type TocEntry } from "../lib/docs-pages";
+import { ACCENT_TEXT_CLASS, MUTED_ACCENT_LINK_CLASS, TOC_INDENT_CLASS } from "./docs-tokens";
+import { DOCS_PAGES, docsRailPosition, type DocsPage, type TocEntry } from "../lib/docs-pages";
 import { DOCS_THEME_ID } from "../lib/docs-theme";
+
+/** Nothing needs the floating picker at first paint, and it pulls the theme
+ *  picker chunk with it. Deferred, that weight leaves every docs page's
+ *  critical path — including /changelog/after, which the standalone updater
+ *  opens and which is SPA-served, so its chunks arrive as a waterfall. */
+const DocsThemeControl = lazy(() => import("./DocsThemeControl"));
 
 /** Repaints the site's own tokens from the picked theme; see index.css. */
 const THEMED_BODY_CLASS = "docs-themed";
@@ -30,12 +35,12 @@ const DOCS_HEADER_STYLE: React.CSSProperties = {
 function TocList({ entries, nested = false }: { entries: TocEntry[]; nested?: boolean }) {
   if (entries.length === 0) return null;
   return (
-    <ul className={nested ? "mt-1 space-y-1 border-l border-[var(--color-text)]/15 pl-3" : "space-y-1"}>
+    <ul className={nested ? `mt-1 space-y-1 ${TOC_INDENT_CLASS}` : "space-y-1"}>
       {entries.map((entry) => (
         <li key={entry.id}>
           <a
             href={`#${entry.id}`}
-            className={`block py-0.5 text-sm opacity-70 hover:opacity-100 ${ACCENT_HOVER_TEXT_CLASS}`}
+            className={`block py-0.5 text-sm ${MUTED_ACCENT_LINK_CLASS}`}
           >
             {entry.text}
           </a>
@@ -50,16 +55,25 @@ function TocList({ entries, nested = false }: { entries: TocEntry[]; nested?: bo
  * The rail's contents, shared by the sticky sidebar and the mobile drawer.
  *
  * The current page's sections are the only ones expanded — every page's
- * headings at once would bury the five entries that let a reader leave the
+ * headings at once would bury the entries that let a reader leave the
  * page they are on.
  *
  * Sizing is the caller's: the page list never shrinks, and the expanded
  * sections scroll within whatever height is left. So everything shows when it
- * fits, and when it does not the five pages stay reachable while the sections
+ * fits, and when it does not the page list stays reachable while the sections
  * give up the space.
  */
-function DocsNav({ activePath, toc }: { activePath: string; toc: TocEntry[] }) {
+function DocsNav({
+  activePath,
+  toc,
+  className,
+}: {
+  activePath: string;
+  toc: TocEntry[];
+  className?: string;
+}) {
   return (
+    <nav aria-label="Documentation" className={className}>
     <ul className="flex min-h-0 flex-col gap-1">
       {DOCS_PAGES.map((page) => {
         const active = page.path === activePath;
@@ -69,13 +83,13 @@ function DocsNav({ activePath, toc }: { activePath: string; toc: TocEntry[] }) {
               href={page.path}
               aria-current={active ? "page" : undefined}
               className={`block shrink-0 py-1 font-display text-sm ${
-                active ? ACCENT_TEXT_CLASS : `opacity-70 hover:opacity-100 ${ACCENT_HOVER_TEXT_CLASS}`
+                active ? ACCENT_TEXT_CLASS : MUTED_ACCENT_LINK_CLASS
               }`}
             >
               {page.label}
             </a>
             {active && toc.length > 0 ? (
-              <div className="min-h-0 overflow-y-auto border-l border-[var(--color-text)]/15 pb-2 pl-3">
+              <div className={`min-h-0 overflow-y-auto pb-2 ${TOC_INDENT_CLASS}`}>
                 <TocList entries={toc} />
               </div>
             ) : null}
@@ -83,6 +97,7 @@ function DocsNav({ activePath, toc }: { activePath: string; toc: TocEntry[] }) {
         );
       })}
     </ul>
+    </nav>
   );
 }
 
@@ -111,7 +126,8 @@ export default function DocsLayout({
   children,
 }: {
   activePath: string;
-  title: string;
+  /** Defaults to this page's rail label. */
+  title?: string;
   intro?: ReactNode;
   toc: TocEntry[];
   children: ReactNode;
@@ -134,8 +150,10 @@ export default function DocsLayout({
     return () => document.removeEventListener("keydown", onKey);
   }, [navOpen]);
 
-  const { prev, next } = docsNeighbors(activePath);
-  const current = DOCS_PAGES.find((page) => page.path === activePath);
+  const { current, prev, next } = docsRailPosition(activePath);
+  // Three of five pages name themselves exactly as the rail does; the two that
+  // differ pass their own, so the rail label stays the one owner of the rest.
+  const heading = title ?? current?.label ?? "";
 
   return (
     <>
@@ -143,7 +161,7 @@ export default function DocsLayout({
 
       <div className="min-h-screen bg-[var(--color-bg)] pt-16 pb-16 text-[var(--color-text)] md:pt-20">
         {/* Narrow screens get the rail on demand: the docs are a small part of
-            a phone visit, and five pages plus a page's sections above every
+            a phone visit, and the page list plus a page's sections above every
             article would bury the article. */}
         <div
           className="sticky top-16 z-10 border-b border-[var(--color-text)]/15 md:top-20 lg:hidden"
@@ -170,9 +188,7 @@ export default function DocsLayout({
               id="docs-nav-drawer"
               className="max-h-[70dvh] overflow-y-auto border-t border-[var(--color-text)]/15 px-4 py-4 md:px-6"
             >
-              <nav aria-label="Documentation">
-                <DocsNav activePath={activePath} toc={toc} />
-              </nav>
+              <DocsNav activePath={activePath} toc={toc} />
             </div>
           ) : null}
         </div>
@@ -182,16 +198,15 @@ export default function DocsLayout({
             <aside className="hidden lg:block">
               {/* Sticky and height-bounded so the sections below can scroll
                   while the page list stays put. */}
-              <nav
-                aria-label="Documentation"
+              <DocsNav
+                activePath={activePath}
+                toc={toc}
                 className="sticky top-28 flex max-h-[calc(100dvh-9rem)] flex-col"
-              >
-                <DocsNav activePath={activePath} toc={toc} />
-              </nav>
+              />
             </aside>
 
             <div className="min-w-0">
-              <h1 className="mb-2 font-display text-[clamp(1.75rem,3vw+0.5rem,2.5rem)]">{title}</h1>
+              <h1 className="mb-2 font-display text-[clamp(1.75rem,3vw+0.5rem,2.5rem)]">{heading}</h1>
               {intro && <div className="mb-8 text-lg opacity-70">{intro}</div>}
 
               <main>{children}</main>
@@ -221,7 +236,9 @@ export default function DocsLayout({
         </div>
       </div>
 
-      <DocsThemeControl />
+      <Suspense fallback={null}>
+        <DocsThemeControl />
+      </Suspense>
     </>
   );
 }

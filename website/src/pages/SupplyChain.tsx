@@ -189,7 +189,7 @@ function DependencySection({ section }: { section: SupplyChainSection }) {
       <div className="mb-4 flex flex-col gap-1 border-b border-[var(--color-text)]/10 pb-3 md:flex-row md:items-end md:justify-between">
         <div>
           <div className="flex items-baseline gap-2">
-            <h2 id={section.id} className="font-display text-xl">{section.title}</h2>
+            <h2 id={section.id} className="scroll-mt-24 font-display text-xl">{section.title}</h2>
             <div className="font-mono text-md opacity-50">({section.count})</div>
           </div>
           <p className="text-sm opacity-60 whitespace-pre-line">{section.description}</p>
@@ -202,7 +202,7 @@ function DependencySection({ section }: { section: SupplyChainSection }) {
 
 export default function SupplyChain() {
   return (
-    <DocsLayout activePath="/supply-chain" title="Supply chain" toc={SUPPLY_CHAIN_TOC}>
+    <DocsLayout activePath="/supply-chain" toc={SUPPLY_CHAIN_TOC}>
       <p className="text-base text-[var(--color-text)]/70 mb-2">
         Dormouse is a terminal, so users trust it with shells, source trees, credentials, and
         local files. Our security procedures are documented in full (and audited nightly and immediately before every release) in{" "}

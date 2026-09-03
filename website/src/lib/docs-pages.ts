@@ -22,22 +22,27 @@ export type DocsPage = {
   /** How the left rail names it. */
   label: string;
   /**
-   * Whether both READMEs are required to link this page.
+   * The off-site documents required to link this page.
    *
-   * The three generated references are published off-site — the guide is a
-   * Marketplace listing — so a reader who never reaches the site still needs a
-   * way in. The changelog and supply chain carry no such obligation, and
-   * `checkRoutesToReferences` would fail on them if they did.
+   * The generated references are published where a reader may never reach the
+   * site — the guide is a Marketplace listing — so each names the documents
+   * that must offer a way in. Running a relay server is not part of installing
+   * an editor extension, so the guide carries no self-host obligation.
+   *
+   * Named for the obligation rather than for a state: every page here is
+   * published, routed, and prerendered. `checkRoutesToReferences` reads this.
    */
-  published?: boolean;
+  linkedFrom?: readonly ("guide" | "root-readme")[];
 };
+
+const BOTH_READMES = ["guide", "root-readme"] as const;
 
 export const DOCS_PAGES: readonly DocsPage[] = [
   { path: "/changelog", module: "./pages/Changelog.tsx", label: "Changelog" },
   { path: "/supply-chain", module: "./pages/SupplyChain.tsx", label: "Supply chain" },
-  { path: "/docs/self-host", module: "./pages/SelfHostDocs.tsx", label: "Self hosting", published: true },
-  { path: "/docs/agent-skill", module: "./pages/AgentSkillDocs.tsx", label: "dor agent skill", published: true },
-  { path: "/docs/dor", module: "./pages/DorDocs.tsx", label: "dor CLI reference", published: true },
+  { path: "/docs/self-host", module: "./pages/SelfHostDocs.tsx", label: "Self hosting", linkedFrom: ["root-readme"] },
+  { path: "/docs/agent-skill", module: "./pages/AgentSkillDocs.tsx", label: "dor agent skill", linkedFrom: BOTH_READMES },
+  { path: "/docs/dor", module: "./pages/DorDocs.tsx", label: "dor CLI reference", linkedFrom: BOTH_READMES },
 ];
 
 /**
@@ -52,17 +57,19 @@ export const DOCS_PAGES: readonly DocsPage[] = [
 export type TocEntry = { id: string; text: string; children: TocEntry[] };
 
 /**
- * Where `/docs` sends a reader.
- *
- * There is no index page — `/docs` is a default entrypoint, nothing more.
- * Changing this line changes where it lands, so the redirect is a 302: a 301
- * would be cached in readers' browsers past the next time we change our mind.
+ * Where `/docs` sends a reader. Changing this line changes where it lands;
+ * `website/public/_redirects` follows it, pinned by `checkDocsEntrypoint`
+ * (docs/specs/website-docs.md -> Reference page chrome).
  */
 export const DOCS_DEFAULT_PATH = "/docs/agent-skill";
 
-/** The page before and after `path` in rail order, for prev/next links. */
-export function docsNeighbors(path: string): { prev?: DocsPage; next?: DocsPage } {
+/** Where `path` sits in the rail, and what sits either side of it. */
+export function docsRailPosition(path: string): {
+  current?: DocsPage;
+  prev?: DocsPage;
+  next?: DocsPage;
+} {
   const i = DOCS_PAGES.findIndex((page) => page.path === path);
   if (i === -1) return {};
-  return { prev: DOCS_PAGES[i - 1], next: DOCS_PAGES[i + 1] };
+  return { current: DOCS_PAGES[i], prev: DOCS_PAGES[i - 1], next: DOCS_PAGES[i + 1] };
 }

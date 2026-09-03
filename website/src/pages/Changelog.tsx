@@ -128,7 +128,7 @@ function ReleaseArticle({ release }: { release: ChangelogRelease }) {
   const date = formatDate(release.date);
 
   return (
-    <article id={release.tag} className="border-t border-[var(--color-text)]/10 py-8">
+    <article id={release.tag} className="scroll-mt-24 border-t border-[var(--color-text)]/10 py-8">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-baseline sm:justify-between">
         <div>
           <h2 className="font-display text-2xl text-[var(--color-text)]">
@@ -202,7 +202,7 @@ export default function Changelog() {
       : RELEASES;
 
   return (
-    <DocsLayout activePath="/changelog" title="Changelog" intro="Release notes for Dormouse." toc={CHANGELOG_TOC}>
+    <DocsLayout activePath="/changelog" intro="Release notes for Dormouse." toc={CHANGELOG_TOC}>
       {hasInvalidFilter ? <FilterNotice>No such release "{versionParam}".</FilterNotice> : null}
 
       {baselineVersion ? (

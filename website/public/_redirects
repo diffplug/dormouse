@@ -1,7 +1,4 @@
-# `/docs` is a default entrypoint, not an index page. 302 rather than 301: the
-# target is a judgement call we expect to revisit, and a 301 would sit in
-# readers' browser caches long after we changed it. Kept equal to
-# DOCS_DEFAULT_PATH in website/src/lib/docs-pages.ts by checkDocsEntrypoint in
-# scripts/public-docs-lint.mjs.
+# Follows DOCS_DEFAULT_PATH in website/src/lib/docs-pages.ts; checkDocsEntrypoint
+# pins the pair (docs/specs/website-docs.md -> Reference page chrome).
 /docs /docs/agent-skill 302
 /changelog/after/* /__spa-fallback 200
