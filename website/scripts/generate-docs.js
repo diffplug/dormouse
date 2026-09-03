@@ -161,9 +161,10 @@ const SELF_HOST_DELTA = [
 /**
  * The complete security delta, per docs/specs/website-docs.md.
  *
- * docs/specs/security.md is published whole — the guarantees, what is not
- * defended, the gaps, and how each is checked are the point of the page — so
- * nothing but the file's own title and its spec front matter is withheld.
+ * Every section of docs/specs/security.md publishes — the guarantees, what is
+ * not defended, the gaps, and how each is checked are the point of the page —
+ * so nothing but the file's own title and its spec front matter is withheld.
+ * The per-audience narrowing is `audienceBlocks`, not this delta.
  */
 const SECURITY_DELTA = [
   DROP_DOCUMENT_TITLE,

@@ -28,7 +28,7 @@ that once rendered it at `/docs` is retained and still runs (see
 | `/docs/dor` | Complete CLI reference | Help snapshots in `dor/test/snapshots/help/`, verified against the built CLI |
 | `/docs/agent-skill` | Agent-facing operating guide | Exact `dor/skill.md` |
 | `/docs/self-host` | Running the coordinating server yourself | The runbook half of `SELF_HOST.md` |
-| `/docs/security` | What Dormouse guarantees and how it is checked | Whole `docs/specs/security.md`, minus title and front matter |
+| `/docs/security` | What Dormouse guarantees and how it is checked | Every section of `docs/specs/security.md`, minus title and front matter; its rows split across three pages |
 | GitHub root | Repository overview and contributor entry point | Root `README.md` |
 
 The guide reaches readers through the Marketplace, Open VSX, and GitHub rows of

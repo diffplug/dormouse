@@ -4,8 +4,8 @@
 > knows about, and how all of it is checked. Defers every mechanism to the spec
 > that owns it, and every audited check to the five specs under
 > [How the guarantees are checked](#how-the-guarantees-are-checked). Published
-> as written at `https://dormouse.sh/docs/security`; `docs/specs/website-docs.md`
-> owns the page.
+> at `https://dormouse.sh/docs/security`, whole but for the three blocks split
+> by audience; `docs/specs/website-docs.md` owns the page.
 
 Dormouse is a terminal, so users trust it with shells, source trees,
 credentials, and local files. Three things sit on that boundary. The
