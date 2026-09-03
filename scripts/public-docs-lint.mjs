@@ -303,6 +303,19 @@ function checkPageHeadTags() {
     }
   }
   if (routesWithMeta === 0) fail(`no route module exports meta(); checkPageHeadTags has stopped matching`);
+
+  // A route that re-exports another page's component inherits its rendering but
+  // not its `meta` — the export is per-module. That left /changelog/after/* with
+  // no head tags at all, serving the SPA fallback's homepage title and canonical
+  // on the URL the standalone updater opens.
+  for (const rel of trackedFiles()) {
+    if (!rel.startsWith('website/src/pages/') || !/\.tsx$/.test(rel)) continue;
+    const source = readRepoFile(rel);
+    if (!/export \{[^}]*\bdefault\b[^}]*\} from/.test(source)) continue;
+    if (!/\bmeta\b/.test(source)) {
+      fail(`${rel}: re-exports a page component without meta(); the route would ship the fallback's head`);
+    }
+  }
 }
 
 /** One origin, spelled the same in the build script and the browser bundle. */

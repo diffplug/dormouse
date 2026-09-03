@@ -6,11 +6,15 @@ import changelog from "../data/changelog.json";
 import { type TocEntry } from "../lib/docs-pages";
 import { siteMeta } from "../lib/site-meta";
 
+/** Shared with `/changelog/after/:version`, which is a filtered view of this
+ *  page rather than a document of its own. */
+export const CHANGELOG_META = {
+  title: "Changelog — Dormouse",
+  description: "Every Dormouse release, what changed in it, and when it shipped.",
+};
+
 export function meta({ location }: MetaArgs) {
-  return siteMeta(location.pathname, {
-    title: "Changelog — Dormouse",
-    description: "Every Dormouse release, what changed in it, and when it shipped.",
-  });
+  return siteMeta(location.pathname, CHANGELOG_META);
 }
 
 interface ChangelogItem {
