@@ -11,8 +11,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { ListIcon, XIcon } from "@phosphor-icons/react";
 import {
-  getActiveThemeId,
-  getTheme,
+  getAppliedThemeSnapshot,
   subscribeToActiveTheme,
   useRestoredTheme,
 } from "dormouse-lib/lib/themes";
@@ -151,7 +150,11 @@ export default function DocsLayout({
   // value index.css gives it, so a reader with no JS still gets a legible one.
   useEffect(() => {
     const paint = () => {
-      const theme = getTheme(getActiveThemeId() ?? DOCS_THEME_ID);
+      // The applied snapshot, not the stored id: `getActiveThemeId` already
+      // falls back to the first bundled theme, so a reader without storage
+      // would get the page painted in one theme and its links derived from
+      // another's accent the moment those two stop coinciding.
+      const theme = getAppliedThemeSnapshot()?.theme;
       const background = theme?.vars?.["--vscode-editor-background"];
       const accent = theme?.accent;
       if (!theme || !accent || !background) return;

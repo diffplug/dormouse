@@ -7,17 +7,20 @@
  */
 
 /**
- * Prose links take the active theme's link color, not the site's caramel.
+ * Prose links take the active theme's own accent, corrected for contrast, not
+ * the site's caramel.
  *
  * Caramel is 5.56:1 on the site's black but 3.43–3.78:1 on every bundled light
  * theme, so a reader who picks one would drop the whole page's links below
- * WCAG AA. The registry default behind this var is chosen per theme kind and
- * clears it. Brand caramel stays everywhere the reader cannot retheme it — the
- * wordmark, the site header, the homepage — and is the fallback here for the
- * moment before a theme is applied.
+ * WCAG AA. `--vscode-textLink-foreground` cannot stand in: no bundled theme
+ * defines it, so it resolves to one registry default per theme kind. Brand
+ * caramel stays everywhere the reader cannot retheme it — the wordmark, the
+ * site header, the homepage — and is the fallback here for the moment before a
+ * theme is applied.
  *
- * `--docs-accent` holds that fallback chain; it is defined once in
- * website/src/index.css so the decision has one owner.
+ * `--docs-accent` holds that fallback chain, defined once in
+ * website/src/index.css; DocsLayout's effect overwrites it with the corrected
+ * accent once a theme resolves (website/src/lib/docs-accent.ts).
  */
 export const LINK_CLASS = "text-[var(--docs-accent)] underline-offset-2 hover:underline";
 

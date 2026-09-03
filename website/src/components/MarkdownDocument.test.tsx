@@ -44,6 +44,13 @@ describe("inline code wrapping", () => {
     expect(text).toBe(value);
   });
 
+  it("never offers a break inside a run of separators", () => {
+    // `--watch` parted at its dashes reads as a hyphenated word break, and
+    // `https://` parted at its slashes reads as a typo.
+    expect(render("--watch")).toContain(">--<wbr/>watch<");
+    expect(render("https://host")).toContain(">https://<wbr/>host<");
+  });
+
   it("carries a backstop for a token with no separator to break on", () => {
     // A long hash offers nowhere to break, so the class has to allow it.
     expect(render("abcdef0123456789abcdef0123456789")).toMatch(/class="[^"]*break-words/);

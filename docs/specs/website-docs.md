@@ -272,8 +272,9 @@ saying the same thing. `Docs` joins the marketing nav on desktop only; on a
 phone the docs are reached from the homepage's own links.
 
 **These pages follow the reader's theme; the rest of the site does not.** They
-are long-form reading, so `DocsLayout` restores a theme and floats the
-`compact` `ThemePicker` bottom right, opening upward
+are long-form reading, so `DocsLayout` restores a theme and gives the `compact`
+`ThemePicker` two placements: floating bottom right at `lg`, opening upward, and
+inline at the end of the mobile docs bar below that, opening downward
 ([theme.md](./theme.md) → Where the user picks a theme). The `docs-themed` body
 class redefines the site's own `--color-*` tokens from the applied
 `--vscode-*`, and only `DocsLayout` adds it, so the homepage keeps its black.
@@ -282,11 +283,13 @@ which is why their links moved off caramel.
 `applyTheme` writes to `body.style`, which `html` cannot read, so `html` gives
 up the canvas and lets body's background propagate.
 
-**Prose links take the theme's link color, never brand caramel.** Caramel is
-5.56:1 on the site's black but 3.43–3.78:1 on every bundled light theme, so a
-reader who picks one would drop the page's links below WCAG AA. Caramel stays
-where it cannot be rethemed — the wordmark, the header, the homepage — and is
-the fallback before a theme applies.
+**Prose links take the picked theme's `accent`, contrast-corrected — never
+brand caramel, never `--vscode-textLink-foreground`.** No bundled theme
+defines `textLink.foreground`, so that var gives one registry default per theme
+*kind*, identical across every dark theme. Caramel is 5.56:1 on the site's black
+but 3.43–3.78:1 on every bundled light theme, so it stays where the reader
+cannot retheme it — the wordmark, the header, the homepage — and is the
+fallback before a theme applies.
 
 **A reader is prompted to pick a theme until they answer.** Picking one and
 closing the prompt both count — a reader who declined has seen the offer.
@@ -537,7 +540,8 @@ spec.
 | `website/scripts/generate-docs.js` | Codegen: the delta tables, `buildDocument`, `localizeSiteLinks`, `resolveRemovedAnchors`, `linkSkillHeadings` |
 | `website/src/components/MarkdownDocument.tsx` | Renders parsed Markdown blocks |
 | `website/src/components/DocsLayout.tsx` | Docs chrome: header, the rail and its mobile drawer, prev/next, theme restore |
-| `website/src/components/DocsThemeControl.tsx` | The floating picker and its first-visit prompt |
+| `website/src/components/DocsThemeControl.tsx` | The picker's two placements and its first-visit prompt |
+| `website/src/lib/docs-accent.ts` (+ `.test.ts`) | The themed link color, contrast-corrected per theme |
 | `website/src/lib/docs-theme.ts` | Default docs theme, and whether the reader has chosen |
 | `website/src/components/DorCommandReference.tsx` | One CLI command section |
 | `website/src/pages/DorDocs.tsx` | `/docs/dor` |

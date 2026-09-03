@@ -58,16 +58,18 @@ function isExternal(href: string): boolean {
  * unbreakable word to the line breaker, so on a phone it pushed the whole page
  * wider than the viewport — the article scrolled sideways, not just the token.
  *
- * `<wbr>` offers a break after each `/`, `.`, `-` and `_` rather than letting
- * the text break anywhere, so a path splits where a reader expects and not
- * mid-segment. It contributes nothing to `textContent`, so copying the span
- * still yields the original string. `CODE_CLASS` carries `break-words` as the
- * backstop for a token with no separators at all, such as a long hash.
+ * `<wbr>` offers a break after each *run* of `/`, `.`, `-` and `_` rather than
+ * letting the text break anywhere, so a path splits where a reader expects and
+ * not mid-segment — and never inside a run, which would part `--watch` at its
+ * dashes or `https://` at its slashes. It contributes nothing to `textContent`,
+ * so copying the span still yields the original string. `CODE_CLASS` carries
+ * `break-words` as the backstop for a token with no separators at all, such as
+ * a long hash.
  *
  * Pinned by `website/src/components/MarkdownDocument.test.tsx`.
  */
 function CodeSpan({ value }: { value: string }) {
-  const parts = value.split(/(?<=[/._-])/);
+  const parts = value.split(/(?<=[/._-])(?![/._-])/);
   return (
     <code className={CODE_CLASS}>
       {parts.map((part, i) => (

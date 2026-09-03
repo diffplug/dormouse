@@ -13,9 +13,10 @@
  * background and four carry alpha, so using them directly would undo the
  * contrast work that moved these links off brand caramel in the first place.
  *
- * Correction walks the accent toward white or black — whichever the background
- * is not — and stops at the first step that clears the threshold, so a theme
- * keeps as much of its accent as contrast allows. Pinned by
+ * Correction walks the accent toward whichever of white or black contrasts
+ * more with the background, stopping at the first step that clears the
+ * threshold, so a theme keeps as much of its accent as contrast allows.
+ * Pinned by
  * `website/src/lib/docs-accent.test.ts`, which checks every bundled theme.
  */
 
@@ -27,8 +28,8 @@ type Rgb = [number, number, number];
 /** `#rgb`, `#rrggbb`, and `#rrggbbaa`; alpha separated out. */
 function parseHex(color: string): { rgb: Rgb; alpha: number } | null {
   const hex = color.trim().replace(/^#/, "");
-  const full =
-    hex.length === 3 ? [...hex].map((c) => c + c).join("") : hex.length === 4 ? [...hex].map((c) => c + c).join("") : hex;
+  // `#rgb` and `#rgba` both expand by doubling each digit.
+  const full = hex.length === 3 || hex.length === 4 ? [...hex].map((c) => c + c).join("") : hex;
   if (!/^[0-9a-f]{6}([0-9a-f]{2})?$/i.test(full)) return null;
   const n = (i: number) => parseInt(full.slice(i, i + 2), 16);
   return { rgb: [n(0), n(2), n(4)], alpha: full.length === 8 ? n(6) / 255 : 1 };
@@ -75,12 +76,18 @@ export function docsAccentFor(
   const base = fg.alpha < 1 ? mix(bg.rgb, fg.rgb, fg.alpha) : fg.rgb;
   if (contrastRatio(base, bg.rgb) >= minContrast) return toHex(base);
 
-  const toward: Rgb = luminance(bg.rgb) < 0.5 ? [255, 255, 255] : [0, 0, 0];
+  // Whichever end contrasts more, measured rather than guessed from a
+  // luminance midpoint: that is not where the crossover sits, and a mid-tone
+  // background is neither light nor dark.
+  const white: Rgb = [255, 255, 255];
+  const black: Rgb = [0, 0, 0];
+  const toward: Rgb = contrastRatio(white, bg.rgb) >= contrastRatio(black, bg.rgb) ? white : black;
+
+  // The last step is `toward` itself, so the best available colour is always
+  // among these — there is nothing left to fall back to.
   for (let step = 1; step <= 20; step += 1) {
     const candidate = mix(base, toward, step / 20);
     if (contrastRatio(candidate, bg.rgb) >= minContrast) return toHex(candidate);
   }
-  // Nothing on the ramp cleared it, so take the end of it — pure white or
-  // black always beats any mid-point against this background.
   return toHex(toward);
 }
