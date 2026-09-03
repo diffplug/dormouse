@@ -715,7 +715,7 @@ test('an extra field on the envelope reaches no phone, not even the hostId', asy
   // `isSealedPushV1` bounds the three fields it knows and ignores the rest, so
   // the route must copy those three rather than spread — a spread would let a
   // Host override the token's `hostId` and smuggle readable text through a
-  // Server that holds no key and must forward neither (docs/specs/security-application.md -> "What
+  // Server that holds no key and must forward neither (docs/specs/security-remote.md -> "What
   // crosses the boundary").
   const { app, sender, host, sessionToken } = await pushApp();
   const deliveryId = newDeliveryId();

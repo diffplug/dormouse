@@ -2,7 +2,7 @@
 
 > Owns the guarantees Dormouse makes, what it does not defend, the gaps it
 > knows about, and how all of it is checked. Defers every mechanism to the spec
-> that owns it, and every audited check to the four specs under
+> that owns it, and every audited check to the five specs under
 > [How the guarantees are checked](#how-the-guarantees-are-checked). Published
 > as written at `https://dormouse.sh/docs/security`; `docs/specs/website-docs.md`
 > owns the page.
@@ -19,7 +19,7 @@ it does not look like one.
 **Only the self-hosted deployment ships.** The relay runs on hardware the user
 owns, reachable from their own tailnet ([SELF_HOST.md](../../SELF_HOST.md)).
 Cloud-hosted operation is staged, and its boundary is re-analyzed before that
-code ships ([security-application.md](./security-application.md#future)).
+code ships ([security-remote.md](./security-remote.md#future)).
 
 ## Guarantees
 
@@ -30,16 +30,20 @@ last column means nothing cheaper does.
 
 | Guarantee | Rule | Pinned by |
 | --- | --- | --- |
+| **A program printing to your terminal cannot reach past the screen.** It can raise an alert, set a title, or mark a prompt; it cannot write your clipboard, open a link without your confirmation, read a file, or steal focus. | [Terminal output](./security-local.md#terminal-output) | `lib/src/lib/terminal-protocol.test.ts`, `lib/src/lib/external-links.test.ts` |
+| **A page in a browser pane cannot impersonate Dormouse.** It can post to its parent, but in VS Code every host message carries a per-boot token it cannot read, and the standalone adapters have no inbox for it to post to. | [Browser panes](./security-local.md#browser-panes) | `lib/src/lib/platform/vscode-adapter.test.ts` |
+| **Only your own account can drive your terminals through `dor`.** The socket sits in a directory only you can open, and its token never crosses the wire. | [The dor control socket](./security-local.md#the-dor-control-socket) | `standalone/sidecar/dor-control-server.test.js` |
+| **A loopback listener grants a stranger nothing it could not get from the upstream directly.** | [Loopback Listeners](./security-local.md#loopback-listeners) | `scripts/loopback-lint.mjs` |
+| **Terminal scrollback is never written to disk**, and the session state that is written belongs to your account alone. | [Persisted state](./security-local.md#persisted-state) | audit |
 | **Nothing but a human at the laptop can authorize a phone.** The only path into a Host's ACL is typing, on that Host, the two digits the phone shows, and the Host makes every access decision. | [Pairing](./remote-security-model.md#pairing), [Host Authorization](./remote-security-model.md#host-authorization) | `server-lib-common/test/security-guarantees.test.mjs` |
 | **The Server reads nothing.** One end-to-end channel per ceremony; the relay routes ciphertext it holds no key for, so a compromised Server gains no plaintext and no authorization. | [Trust Model](./remote-security-model.md#trust-model), [Noise suite](./remote-security-model.md#noise-suite) | `scripts/e2e-lint.mjs` |
-| **A push notification is sealed to the one phone that receives it.** | [Push sealing](./remote-security-model.md#push-sealing) | `server-lib-common/test/push-seal.test.mjs` |
+| **Push notifications are opt-in, and a push is sealed to the one phone that receives it.** | [Push sealing](./remote-security-model.md#push-sealing) | `server-lib-common/test/push-seal.test.mjs` |
 | **A stolen or synced passkey buys sign-in, not a terminal.** Every connection also needs the phone's own paired key and a fresh presence proof bound to that connection. | [Passkeys](./remote-security-model.md#passkeys), [Presence proofs](./remote-security-model.md#presence-proofs) | `server-lib-common/test/security-guarantees.test.mjs` |
 | **A hostile relay cannot exhaust a Host.** Every bound runs on the Host's own clock, and a rejected frame costs it nothing. | [Host bounds](./remote-security-model.md#host-bounds) | `lib/src/remote/host/remote-host-bounds.test.ts`, `server/test/malicious-relay.test.mjs` |
-| **A Host talks only to the relay its build was pointed at**, and refuses before any credential leaves the machine. | [Where a Host may reach a relay server](./security-application.md#where-a-host-may-reach-a-relay-server) | `lib/src/host/remote/connect-src.test.ts` |
-| **Credentials at rest are readable only by the account that installed them**, on macOS, Windows, and Linux alike. | [Credentials at rest](./security-application.md#credentials-at-rest) | `scripts/deploy-lint.mjs` |
-| **The self-host server listens on loopback only, behind the tailnet**, and a public Funnel fails its own verification. | [Network posture](./security-application.md#network-posture-self-hosted) | `scripts/deploy-lint.mjs`, `scripts/installer-verify-test.mjs` |
-| **Web Push cannot be aimed back into the tailnet.** | [What crosses the boundary](./security-application.md#what-crosses-the-boundary) | `server/test/push-endpoint.test.mjs` |
-| **A loopback listener grants a stranger nothing it could not get from the upstream directly.** | [Loopback Listeners](./security-application.md#loopback-listeners) | `scripts/loopback-lint.mjs` |
+| **A Host talks only to the relay its build was pointed at**, and refuses before any credential leaves the machine. | [Where a Host may reach a relay server](./security-remote.md#where-a-host-may-reach-a-relay-server) | `lib/src/host/remote/connect-src.test.ts` |
+| **Credentials at rest are readable only by the account that installed them**, on macOS, Windows, and Linux alike. | [Credentials at rest](./security-remote.md#credentials-at-rest) | `scripts/deploy-lint.mjs` |
+| **The self-host server listens on loopback only, behind the tailnet**, and a public Funnel fails its own verification. | [Network posture](./security-remote.md#network-posture-self-hosted) | `scripts/deploy-lint.mjs`, `scripts/installer-verify-test.mjs` |
+| **Push, when enabled, cannot be aimed back into the tailnet.** | [What crosses the boundary](./security-remote.md#what-crosses-the-boundary) | `server/test/push-endpoint.test.mjs` |
 | **Every dependency that reaches a machine is disclosed** at [dormouse.sh/supply-chain](https://dormouse.sh/supply-chain), and a change without the disclosure fails CI. | [Disclosure](./security-supply-chain.md#disclosure) | `.github/workflows/ci.yml` |
 | **The bundled runtime is the version disclosed.** The build verifies the binary against the pin. | [Bundled runtime](./security-supply-chain.md#bundled-runtime) | `standalone/src-tauri/build.rs` |
 | **No newly published dependency is adopted for 24 hours**, security fixes included. | [Cooldown and alerts](./security-supply-chain.md#cooldown-and-alerts) | audit |
@@ -53,6 +57,16 @@ last column means nothing cheaper does.
 Stated so the audit does not rediscover them and a reader deciding whether to
 run this knows what they are taking on.
 
+- **A process running as you.** `dor`, its socket, and every file mode bound
+  other local accounts, never a program already running under your own account;
+  an agent holding `dor` has exactly the power of the person at the keyboard
+  ([The dor control socket](./security-local.md#the-dor-control-socket)).
+- **The Windows `dor` pipe carries no ACL of ours.** A named pipe has no
+  directory to harden, so an unguessable name and the token handshake are the
+  whole of it ([The dor control socket](./security-local.md#the-dor-control-socket)).
+- **What VS Code does with the pane state it stores.** Structure persists in VS
+  Code's own storage under its modes, never a transcript
+  ([Persisted state](./security-local.md#persisted-state)).
 - **A compromised browser or operating system, on either end.** Active XSS in
   the Pocket origin can *use* the phone's key without extracting it. Exactly
   two endpoints are trusted: the distributed Host binaries and the exact Pocket
@@ -60,9 +74,9 @@ run this knows what they are taking on.
 - **Traffic analysis.** The Server sees who talks to whom, when, how often, and
   how large each ciphertext is, and keystroke timing, never keystroke values
   ([Residual metadata](./remote-security-model.md#residual-metadata)).
-- **Push replay.** A push proves confidentiality, not freshness: a Server that
+- **Push replay, when push is enabled.** A push proves confidentiality, not freshness: a Server that
   kept an envelope can re-deliver it ([Push sealing](./remote-security-model.md#push-sealing)).
-- **Per-Host unlinkability.** One push endpoint per browser lets the Server see
+- **Per-Host unlinkability, when push is enabled.** One push endpoint per browser lets the Server see
   every Host one phone registered ([Residual metadata](./remote-security-model.md#residual-metadata)).
 - **Phone-key durability.** Clearing site data means pairing again. Nothing is
   compromised; a lost key authorized nothing on its own
@@ -73,7 +87,7 @@ run this knows what they are taking on.
   a fixed delay, with no rate limit or lockout. Accepted because the origin is
   tailnet-only and the password is 32 random bytes the installer wrote. **A
   self-host origin reachable from the internet is a different risk than the one
-  analyzed** ([The setup password](./security-application.md#the-setup-password)).
+  analyzed** ([The setup password](./security-remote.md#the-setup-password)).
 - **The bot's upstream is pinned by tag, not commit**, so a hostile upstream
   could change what the bot runs without a diff here. Accepted: the trust equals
   what the harness already holds ([Automated Maintainer](./security-ci.md#automated-maintainer-tend)).
@@ -87,14 +101,18 @@ run this knows what they are taking on.
 
 Gaps rather than accepted risks: we intend to close them.
 
+- **The standalone log file is written at the umask**, readable by another
+  local account wherever the temp directory is shared, and records the `dor`
+  socket path; no terminal output reaches it
+  ([Persisted state](./security-local.md#persisted-state)).
 - **Revocation has no mechanism.** Revoking a lost phone is editing the Host's
   ACL file and restarting the Host
-  ([Revocation and the audit trail](./security-application.md#revocation-and-the-audit-trail)).
+  ([Revocation and the audit trail](./security-remote.md#revocation-and-the-audit-trail)).
 - **There is no audit trail.** Nothing records connects, attaches, denials, or
-  writes ([same](./security-application.md#revocation-and-the-audit-trail)).
+  writes ([same](./security-remote.md#revocation-and-the-audit-trail)).
 - **Owner checks are uneven across installers.** Linux verifies mode and owner
   on every credential path; macOS verifies modes only, and Windows the DACL but
-  never the owner ([Credentials at rest](./security-application.md#credentials-at-rest)).
+  never the owner ([Credentials at rest](./security-remote.md#credentials-at-rest)).
 - **The workflow audit's window has two evasions**: a backdated committer date,
   and a branch pushed, run, and deleted before the nightly fetch
   ([Automated Maintainer](./security-ci.md#automated-maintainer-tend)).
@@ -132,7 +150,7 @@ ones are the record of what tripped and what changed.
 
 | Domain | Specs | Covers |
 | --- | --- | --- |
-| `application-security` | [security-application.md](./security-application.md) | remote control, loopback listeners, and every path no other domain claims |
+| `application-security` | [security-local.md](./security-local.md), [security-remote.md](./security-remote.md) | the local application's boundaries, remote control, and every path no other domain claims |
 | `supply-chain` | [security-supply-chain.md](./security-supply-chain.md) | the dependency graph, the lockfile, the disclosure and its generator |
 | `ci-and-secrets` | [security-ci.md](./security-ci.md), [security-audit.md](./security-audit.md), this spec | GitHub Actions, the bot, releases, secrets, and the audit itself |
 

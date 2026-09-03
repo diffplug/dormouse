@@ -185,8 +185,15 @@ describe('security spec', () => {
       expect(split.length).toBe(whole.length);
       expect(new Set(split).size).toBe(whole.length);
       for (const entry of split) expect(whole).toContain(entry);
-      for (const a of audiences) expect(data.security.audiences[a][key][entries].length).toBeGreaterThan(0);
     }
+    for (const a of audiences) expect(data.security.audiences[a].guarantees.rows.length).toBeGreaterThan(0);
+  });
+
+  it('renders its own page as one audience, every other block untouched', () => {
+    const own = data.security.audiences.security;
+    const swapped = data.security.pageBlocks.filter((b, i) => b !== data.security.blocks[i]);
+    expect(swapped).toEqual([own.guarantees, own.notDefended, own.knownGaps]);
+    expect(data.security.pageBlocks).toHaveLength(data.security.blocks.length);
   });
 
   it('refuses an entry whose links name no audience, or two', () => {
@@ -199,14 +206,14 @@ describe('security spec', () => {
       [
         '## Guarantees', '', '| G | Rule | Pinned by |', '| --- | --- | --- |', row, '',
         '## What is not defended', '', '- x ([a](./security-ci.md))', '',
-        '## Known gaps', '', '- y ([b](./security-application.md))',
+        '## Known gaps', '', '- y ([b](./security-remote.md))',
       ].join('\n');
-    expect(() => securityAudiences(page(doc('| g | [a](./security-ci.md), [b](./security-application.md) | t |')))).toThrow(
+    expect(() => securityAudiences(page(doc('| g | [a](./security-ci.md), [b](./security-remote.md) | t |')))).toThrow(
       /do not name exactly one audience/,
     );
     expect(() => securityAudiences(page(doc('| g | no link | t |')))).toThrow(/names no spec/);
     expect(() => securityAudiences(page(doc('| g | [a](./website-docs.md) | t |')))).toThrow(/exactly one audience/);
-    expect(securityAudiences(page(doc('| g | [a](./security-ci.md) | t |')))['supply-chain'].guarantees.rows).toHaveLength(1);
+    expect(securityAudiences(page(doc('| g | [a](./security-ci.md) | t |'))).security.guarantees.rows).toHaveLength(1);
   });
 
   it('fails on a link into a published page whose fragment names no heading there', () => {

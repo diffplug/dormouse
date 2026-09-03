@@ -34,7 +34,7 @@
  *     discoverable in seconds.
  *
  * The boundary is three checks, and which one applies depends on what is being
- * asked for (`./loopback-guard.ts`, `docs/specs/security-application.md` → "Loopback Listeners"):
+ * asked for (`./loopback-guard.ts`, `docs/specs/security-local.md` → "Loopback Listeners"):
  *   - `Host` names this grant's own port, so DNS rebinding fails. Both paths.
  *   - `Origin` is this grant's own before the proxy will relabel it as the
  *     upstream's. Vouching for a stranger is what turns a transparent proxy

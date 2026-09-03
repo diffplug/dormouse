@@ -32,24 +32,25 @@ export default function SecurityDocs() {
       toc={security.toc}
     >
       <p className="mb-8 rounded-lg border border-[var(--color-caramel)]/30 bg-[var(--color-caramel)]/[0.06] p-4 leading-relaxed opacity-80">
-        This page is the spec the audit runs against, published as written from
-        the repository — not a summary of one. The four audited checklists it
-        links to live beside it, in{" "}
-        <a href={SPECS_URL} className={LINK_CLASS} target="_blank" rel="noopener noreferrer">
-          the specs directory on GitHub
-        </a>
-        . To put the model into operation, follow the{" "}
+        This page is the spec the audit runs against, published from the
+        repository — not a summary of one. It shows the guarantees for the
+        local application and the release pipeline; remote control and
+        self-hosting are on the{" "}
         <a href="/docs/self-host" className={LINK_CLASS}>
           self-host runbook
         </a>
-        ; to inspect exactly what Dormouse installs, use the{" "}
+        , and what reaches your machine is on the{" "}
         <a href="/supply-chain" className={LINK_CLASS}>
-          generated supply-chain disclosure
+          supply-chain disclosure
+        </a>
+        . The five audited checklists behind all three live beside the spec, in{" "}
+        <a href={SPECS_URL} className={LINK_CLASS} target="_blank" rel="noopener noreferrer">
+          the specs directory on GitHub
         </a>
         .
       </p>
 
-      <MarkdownDocument blocks={security.blocks as BlockNode[]} />
+      <MarkdownDocument blocks={security.pageBlocks as BlockNode[]} />
     </DocsLayout>
   );
 }

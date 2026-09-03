@@ -417,23 +417,23 @@ it as the contract it audits against. `SECURITY_DELTA` withholds the `#` title
 and the front-matter blockquote — the page shell supplies both — and nothing
 else.
 
-**Must** publish everything else. A reader deciding whether to run this is
-owed the gaps and the undefended edges beside the guarantees, so **the spec may
+**Must** publish every section. A reader deciding whether to run this is owed
+the gaps and the undefended edges beside the guarantees, so **the spec may
 carry no `## Future` heading and no `Reserved:` paragraph**; `checkSecurityFold`
 pins that, and staged material has to be withheld by a delta rule before it can
 exist in the file.
 
-The page's authored callout identifies it as audited, links the public runbook
-and disclosure, and sends its unpublished domain specs to GitHub.
-
-**Must** derive what `/docs/self-host` and `/supply-chain` say about security
-from `docs.security.json`, never restate it: `securityAudiences` splits the
-guarantees table and the two lists by the spec each entry's links name —
-`remote-security-model.md`, `security-application.md`, and `SELF_HOST.md` to
-the self-host page; `security-supply-chain.md`, `security-ci.md`, and
-`security-audit.md` to the supply-chain page — and an entry naming no spec, a
-spec in neither group, or both groups fails the build. All three pages
-cross-link in prose, and each specialized page links
+**Must** render the guarantees table and the two lists by audience, from
+`docs.security.json`, never restated: `securityAudiences` splits each entry by
+the spec its links name — `security-local.md`, `security-ci.md`, and
+`security-audit.md` to this page; `remote-security-model.md`,
+`security-remote.md`, and `SELF_HOST.md` to `/docs/self-host`;
+`security-supply-chain.md` to `/supply-chain` — and an entry naming no spec, a
+spec in no group, or two groups fails the build. `audienceBlocks` gives this
+page its own audience's three blocks with every other block whole, so the spec
+file on GitHub is the one place every entry appears together. All three pages
+cross-link in prose, this page's callout naming where the other two audiences
+are, and each specialized page links
 `/docs/security#how-the-guarantees-are-checked`;
 `website/src/pages/security-pages.test.tsx` pins the rendered entries and the
 links.
@@ -583,7 +583,7 @@ spec.
 | `website/src/routes.ts`, `website/src/components/SiteHeader.tsx` | The published routes and the marketing nav, which carries `Docs` on desktop |
 | `website/scripts/docs-parser.js` (+ `.test.js`) | Markdown subset parser, slugger, `<img>` allowlist |
 | `website/scripts/help-parser.js` (+ `.test.js`) | Narrow CLI-help parser with losslessness |
-| `website/scripts/generate-docs.js` | Codegen: the delta tables, `buildDocument`, `localizeSiteLinks`, `resolveRemovedAnchors`, `resolveRepoLinks` and `SITE_ROUTES`, `assertRouteFragments`, `securityAudiences`, `linkSkillHeadings` |
+| `website/scripts/generate-docs.js` | Codegen: the delta tables, `buildDocument`, `localizeSiteLinks`, `resolveRemovedAnchors`, `resolveRepoLinks` and `SITE_ROUTES`, `assertRouteFragments`, `securityAudiences` and `audienceBlocks`, `linkSkillHeadings` |
 | `website/src/components/MarkdownDocument.tsx` | Renders parsed Markdown blocks |
 | `website/src/components/DocsLayout.tsx` | Docs chrome: header, the rail and its mobile drawer, prev/next, theme restore |
 | `website/src/components/DocsThemeControl.tsx` | The picker's two placements and its first-visit prompt |

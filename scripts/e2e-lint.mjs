@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Mechanical check for the structural half of the end-to-end boundary in
- * `docs/specs/security-application.md` ("Remote Control"). Runs from the repo
+ * `docs/specs/security-remote.md` ("Remote Control"). Runs from the repo
  * root via `pnpm test` (see the root package.json). Exits non-zero with a
  * per-violation report naming the rule that was broken and the spec line it
  * enforces.
@@ -54,7 +54,7 @@ import { readRepoFile, repoRoot, trackedFiles } from './lint-kit.mjs';
 const NOISE_PROTOCOL_NAME = 'Noise_IK_25519_ChaChaPoly_SHA256';
 
 /** The spec whose "Remote Control" lines every rule below pins. */
-export const SECURITY_SPEC = 'docs/specs/security-application.md';
+export const SECURITY_SPEC = 'docs/specs/security-remote.md';
 
 /**
  * The modules that carry the end-to-end boundary. Scoped explicitly rather than

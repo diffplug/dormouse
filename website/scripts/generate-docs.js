@@ -544,10 +544,12 @@ const buildSelfHost = () =>
 /**
  * Which page carries which of the security spec's rows and bullets.
  *
- * `/docs/self-host` and `/supply-chain` show the part of the spec a reader
- * there relies on, rendered from this data rather than restated — the spec is
- * what the nightly audit reads, and a hand-written copy in a page is the one
- * that rots. A guarantee row, an undefended edge, or a known gap belongs to
+ * `/docs/security`, `/docs/self-host`, and `/supply-chain` each show the part
+ * of the spec a reader there relies on, rendered from this data rather than
+ * restated — the spec is what the nightly audit reads, and a hand-written copy
+ * in a page is the one that rots. The umbrella page is one audience among
+ * three: the local application and the pipeline; the spec file on GitHub is
+ * the one place every row appears together. A guarantee row, an undefended edge, or a known gap belongs to
  * the audience of the spec its links name, and every link in one entry must
  * agree. An entry naming no spec, a spec in neither group, or both groups
  * fails the build: the spec's own pointers are the classification, so a new
@@ -555,8 +557,9 @@ const buildSelfHost = () =>
  * umbrella.
  */
 export const SECURITY_AUDIENCES = {
-  'self-host': ['docs/specs/remote-security-model.md', 'docs/specs/security-application.md', 'SELF_HOST.md'],
-  'supply-chain': ['docs/specs/security-supply-chain.md', 'docs/specs/security-ci.md', 'docs/specs/security-audit.md'],
+  security: ['docs/specs/security-local.md', 'docs/specs/security-ci.md', 'docs/specs/security-audit.md'],
+  'self-host': ['docs/specs/remote-security-model.md', 'docs/specs/security-remote.md', 'SELF_HOST.md'],
+  'supply-chain': ['docs/specs/security-supply-chain.md'],
 };
 
 /** The umbrella sections that split by audience, and the block each splits. */
@@ -581,13 +584,20 @@ function audienceOf(entry, label) {
   return [...audiences][0];
 }
 
-export function securityAudiences(page) {
+/** The three blocks the audiences split, each found under its own heading. */
+function securitySections(page) {
   const headings = page.blocks.filter((b) => b.type === 'heading');
-  const out = Object.fromEntries(Object.keys(SECURITY_AUDIENCES).map((a) => [a, {}]));
-  for (const { key, title, block: type, entries } of SECURITY_AUDIENCE_SECTIONS) {
+  return SECURITY_AUDIENCE_SECTIONS.map(({ key, title, block: type, entries }) => {
     const heading = findExactlyOneHeading(headings, (h) => h.text === title, title);
     const block = sectionBlocks(page.blocks, heading).find((b) => b.type === type);
     if (!block) throw new Error(`/docs/security: "${title}" has no ${type} to split by audience`);
+    return { key, title, block, entries };
+  });
+}
+
+export function securityAudiences(page) {
+  const out = Object.fromEntries(Object.keys(SECURITY_AUDIENCES).map((a) => [a, {}]));
+  for (const { key, title, block, entries } of securitySections(page)) {
     const split = new Map(Object.keys(out).map((a) => [a, []]));
     block[entries].forEach((entry, i) => {
       split.get(audienceOf(entry, `/docs/security: "${title}" entry ${i + 1}`)).push(entry);
@@ -597,6 +607,12 @@ export function securityAudiences(page) {
   return out;
 }
 
+/** The umbrella's blocks with the three split blocks narrowed to one audience. */
+export function audienceBlocks(page, audiences, audience) {
+  const swap = new Map(securitySections(page).map(({ key, block }) => [block, audiences[audience][key]]));
+  return page.blocks.map((block) => swap.get(block) ?? block);
+}
+
 const buildSecurity = async () => {
   const page = await buildDocument({
     file: 'docs/specs/security.md',
@@ -604,7 +620,8 @@ const buildSecurity = async () => {
     label: '/docs/security',
     fallbackTitle: 'Security',
   });
-  return { ...page, audiences: securityAudiences(page) };
+  const audiences = securityAudiences(page);
+  return { ...page, audiences, pageBlocks: audienceBlocks(page, audiences, 'security') };
 };
 
 /** Blocks belonging to a heading: everything up to the next heading of <= depth. */

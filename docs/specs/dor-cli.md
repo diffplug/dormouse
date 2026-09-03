@@ -164,7 +164,7 @@ control server both hosts load:
 
 **The server picks the path, and picks it unguessably.** POSIX:
 `<tmpdir>/dormouse-dor-<uid>/<8 random bytes>.sock`, the parent directory
-created `0700` and re-checked on every use — a real directory, not a symlink,
+created `0700` and checked before every bind — a real directory, not a symlink,
 owned by this uid, at exactly mode `0700`. One of ours that is merely loose gets
 tightened; anything else **stands the channel down** (the same predicate as
 `peerDirIsSafe()`). 8 random bytes rather than 16, so the POSIX path clears

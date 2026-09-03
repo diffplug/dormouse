@@ -12,7 +12,8 @@ intend to do about it; there is no bounty.
 **What Dormouse guarantees, what it does not, and how that is checked** is the
 security spec, [`docs/specs/security.md`](docs/specs/security.md), published as
 written at <https://dormouse.sh/docs/security>. It names the four audited
-checklists beside it — [application](docs/specs/security-application.md),
+checklists beside it — [local](docs/specs/security-local.md),
+[remote control](docs/specs/security-remote.md),
 [supply chain](docs/specs/security-supply-chain.md),
 [CI and releases](docs/specs/security-ci.md), and
 [the audit itself](docs/specs/security-audit.md) — whose `FAIL IF` lines a

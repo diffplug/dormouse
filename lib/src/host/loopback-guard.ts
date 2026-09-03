@@ -33,7 +33,7 @@
  * and let the browser enforce it, through `frame-ancestors`. See
  * `./iframe-proxy-rewrite.ts` → `FRAMING_RESPONSE_HEADERS`.
  *
- * `docs/specs/security-application.md` → "Loopback Listeners" is the authority on which listeners
+ * `docs/specs/security-local.md` → "Loopback Listeners" is the authority on which listeners
  * exist and how each answers; it is deliberately not restated here, since it
  * tells its reader to derive that set by search rather than trust a list.
  */

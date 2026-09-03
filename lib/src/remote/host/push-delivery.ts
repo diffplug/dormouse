@@ -112,7 +112,7 @@ export interface AlertPushDeps {
  *
  * **The delivery id is the join key and stops here.** It is a bearer capability
  * for that Client's push rows, the caller is the webview realm, and the dialog
- * renders labels only (`docs/specs/security-application.md` → "What crosses the boundary").
+ * renders labels only (`docs/specs/security-remote.md` → "What crosses the boundary").
  */
 export async function loadPushDevices(deps: AlertPushDeps): Promise<PushDevice[]> {
   const response = await hostFetch(deps, API_ROUTES.pushDevices);

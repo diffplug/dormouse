@@ -486,7 +486,7 @@ export class PushSubscriptionStore extends JsonFileStore {
    * whatever this returns, so the count is for tests and logs only.
    *
    * **Not scoped to an account**, and correct only because selfhost has exactly
-   * one (`SELFHOST_ACCOUNT_ID`, which `docs/specs/security-application.md` -> "Trust boundary" pins). A delivery id is
+   * one (`SELFHOST_ACCOUNT_ID`, which `docs/specs/security-remote.md` -> "Trust boundary" pins). A delivery id is
    * unguessable, so possession is the authorization — but multi-tenant would
    * still have to key the delete on the calling account, since a leaked id
    * would otherwise reach across tenants (`docs/specs/server.md` `## Future`).

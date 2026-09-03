@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Mechanical check for the loopback-listener invariant in `docs/specs/security-application.md`
+ * Mechanical check for the loopback-listener invariant in `docs/specs/security-local.md`
  * ("Loopback Listeners"). Runs from the repo root via `pnpm test` (see the root
  * package.json). Exits non-zero with a per-violation report.
  *
@@ -78,7 +78,7 @@ const GUARD_REFERENCES = ['loopback-guard', 'dev-host-guard'];
 // A TCP listener is not only `.listen(`. Every library in this tree that can
 // bind one gets its own spelling, because a check that sees one API is a check
 // an author leaves by picking another — which is what an audit found: `ws` and
-// `@hono/node-server` binds were invisible here while `docs/specs/security-application.md` claimed a
+// `@hono/node-server` binds were invisible here while `docs/specs/security-local.md` claimed a
 // new loopback bind fails the build.
 //
 //   .listen(<port>, '127.0.0.1', …)             node, positional
@@ -90,7 +90,7 @@ const GUARD_REFERENCES = ['loopback-guard', 'dev-host-guard'];
 // For `.listen` the host argument is what separates a TCP bind from a
 // UDS/named-pipe listen, which passes a single path and must not match. `ws` is
 // the exception: a `WebSocketServer` given a `port` binds every interface,
-// loopback included, and it is the one API `docs/specs/security-application.md`'s "HTTP **and
+// loopback included, and it is the one API `docs/specs/security-local.md`'s "HTTP **and
 // WebSocket**" names — so it matches on the port alone, while the `noServer`
 // form (no port, no bind) does not match. Applied to the whole file rather than
 // line by line: a bind is routinely wrapped across lines, and the `\s*` /
@@ -158,7 +158,7 @@ for (const rel of sourceFiles()) {
     + '      A loopback bind is not an access control: a page in the user\'s own browser\n'
     + '      reaches 127.0.0.1 too, and the port is not a secret. Check Host and\n'
     + '      authenticate the caller — see lib/src/host/loopback-guard.ts and\n'
-    + '      docs/specs/security-application.md -> "Loopback Listeners" — or add an ALLOWED entry in this\n'
+    + '      docs/specs/security-local.md -> "Loopback Listeners" — or add an ALLOWED entry in this\n'
     + '      script saying why this one is safe without them.',
   );
 }
@@ -186,7 +186,7 @@ if (listeners.length === 0) {
 if (problems.length > 0) {
   console.error(`loopback-lint: ${problems.length} problem(s)\n`);
   for (const p of problems) console.error(`  ${p}`);
-  console.error('\nThe rule is in docs/specs/security-application.md ("Loopback Listeners").');
+  console.error('\nThe rule is in docs/specs/security-local.md ("Loopback Listeners").');
   process.exit(1);
 }
 console.log(

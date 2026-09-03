@@ -55,7 +55,7 @@ For replay (`pty:replay`) the frontend re-parses the buffered raw stream, so sem
 | `OSC 1337 ; CurrentDir=<cwd> ST` | CWD (iTerm2 compatibility) | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
 | `OSC 1337 ; <anything else> ST` | Unsupported iTerm2 extension; consumed and ignored. | This spec |
 | `OSC 50 ; <font> ST` | Unsupported dynamic font change; consumed and ignored. | This spec |
-| `OSC 52 ; <selection> ; <data> ST` | Unsupported clipboard write; consumed and ignored — untrusted PTY output cannot write the user's clipboard. | [mouse-and-clipboard.md](mouse-and-clipboard.md) |
+| `OSC 52 ; <selection> ; <data> ST` | Unsupported clipboard write; consumed and ignored — untrusted PTY output cannot write the user's clipboard. | This spec |
 
 **A `BEL` that terminates an OSC is part of that sequence, never a bell**; the `BEL` row covers a standalone one, parsed and stripped at the same boundary.
 

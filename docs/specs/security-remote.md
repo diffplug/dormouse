@@ -1,7 +1,7 @@
-# Application Security
+# Remote Control Security
 
-> See `docs/specs/glossary.md` for Pane and the Surface model; this spec uses them bare.
-> Owns the two boundaries the product's own code presents — the network, through remote control, and the user's browser, through loopback listeners. Defers the trust model to `docs/specs/remote-security-model.md`, the Server runtime to `docs/specs/server.md`, and the self-host deployment to `SELF_HOST.md`.
+> See `docs/specs/glossary.md` for Pane; this spec uses it bare.
+> Owns the boundary the product presents to the network: remote control. Defers the trust model to `docs/specs/remote-security-model.md`, the Server runtime to `docs/specs/server.md`, the self-host deployment to `SELF_HOST.md`, and the boundaries a local user has to `docs/specs/security-local.md`.
 > Read `docs/specs/security.md` first; `docs/specs/security-audit.md` says how the `FAIL IF` lines here are run.
 
 ## Remote Control
@@ -73,7 +73,7 @@ Host may reach a relay server (self-host builds)".
 
 ### Credentials at rest
 
-**Five credentials outlive a process, and each is a full bypass of some layer if it
+**Four credentials outlive a process, and each is a full bypass of some layer if it
 leaks to another local account.** Protection states the *property* — reachable only by
 the owning user account — and every row reaches it the same way, the caption of the
 column: mode `0700`/`0600` on unix, a one-ACE DACL on Windows, where Node's file modes
@@ -85,7 +85,6 @@ are a silent no-op. Rows carry only what is additional.
 | Enrollment offer | `run/enroll-offer.json` in the install root, under an owner-only `run/` | mode and DACL both applied before the token is written; one-time (`docs/specs/server.md` -> "Configuration"); never printed, the service definition and wrapper carrying only its path |
 | `hostToken` (the `/ws/host` bearer) and the Host's Noise static private key | server `hosts.json` (the token only); Host side both in the enrollment record, the Noise static minted locally and never sent to the server (`docs/specs/remote-security-model.md` -> "Host identity") | the server state dir and every file in it; on Windows the files inherit the installer's DACL on `state`, so `manage verify` checks them individually. Host side a `0600` file in standalone (on Windows the app-data-dir DACL the Rust side applies), `SecretStorage` (the OS keychain) in VS Code — never a webview realm |
 | VAPID private key | server `vapid.json` | nothing additional |
-| Session snapshots | `sessions/` under the standalone app-data dir | best-effort. `PersistedWindow` blobs carrying terminal **transcripts**, a superset of every other secret here (rationale) |
 | Host ACL | `HostStateStore`, keyed per `hostId` | a `0600` file in standalone; VS Code `globalState`. Mostly public keys, with one exception: each record's `deliveryId` is a bearer capability for that Client's push rows, so a reader could delete or hijack a subscription — not reach a terminal. Neither store provides *integrity* against a same-user process and nothing here claims otherwise; the mode only stops another local **account** adding a record (rationale). Deliberately never on the Server |
 
 **Without explicit modes these files inherit the umask and end up world-readable**,
@@ -94,7 +93,6 @@ per-Host statics are the exception that needs no file protection: non-extractabl
 `CryptoKey`s in IndexedDB, never exported.
 
 - **FAIL IF** `server/src/state.ts` stops creating `$DORMOUSE_STATE_DIR` mode `0o700`, or stops writing every file through `writeAtomic` at mode `0o600`. The "every file" clause is a negative search over `server/src/`: no `writeFile`, `appendFile`, or `createWriteStream` may target the state directory outside `writeAtomic`. A cheap default, not a cross-platform guarantee; the installer's directory permissions below protect the installed server's state (rationale).
-- **FAIL IF** `write_session_to` in `standalone/src-tauri/src/lib.rs` stops restricting the `sessions/` directory and the snapshot to the owning user on **every** platform `restrict_to_owner` has an arm for — `0700`/`0600` on unix, and on Windows a DACL protected from inheritance carrying exactly one ACE for the current user, asserted by `restrict_to_owner_leaves_one_owner_only_ace`. Windows is not optional here and the mode is not the control there. The mode is applied to the temp file *before* any bytes are written (rationale).
 - **FAIL IF** `FileHostStateStore` (`lib/src/host/remote/host-state-store.ts`) stops creating its directory `0o700` and writing `0o600` on non-Windows platforms, or if `VsCodeHostStateStore` stops keeping the **enrollment** in `SecretStorage`. The ACL's home in `globalState` is deliberate and is not a finding; the enrollment's is what carries `hostToken`.
 - **FAIL IF** `remote_host_state_dir` in `standalone/src-tauri/src/lib.rs` stops calling `restrict_to_owner` on the state directory **before** spawning the sidecar — on Windows those Node modes are no-ops and Node cannot set an ACL, so the guarantee is held one layer down. That call carries both legs: a newly written enrollment file *inherits* the owner-only entry, and one a prior version already left under the `%LOCALAPPDATA%` ACL — with a live `hostToken` in it — has that entry *propagated* onto it, the half `restrict_to_owner_leaves_one_owner_only_ace` covers with its pre-existing `before.json`.
 - **FAIL IF** any installer stops generating the setup password locally from at least 32 bytes of a cryptographic RNG — `/dev/urandom` in `deploy/local/install-macos.sh`, `RandomNumberGenerator` in `deploy/local/install-windows.ps1`, and the staged release runtime's `crypto.randomBytes(32)` (OpenSSL `RAND_bytes`) in `deploy/local/install-linux.sh` — one named CSPRNG per installer, never `$RANDOM`, a timestamp, or any other non-CSPRNG source. All three length guards are in hex characters, so each must require 64, not 32 (rationale).
@@ -173,8 +171,8 @@ the ACL is the entire gate; outbound, terminal bytes reach a phone and notificat
 originates in a renderer and is Pane-derived, so it is **bounded on the Host before
 sealing and re-bounded at the render sink** (below; rationale).
 
-**Web Push is the one path where the Server makes an outbound request to an address a
-Client supplied**, which on a server *inside* a tailnet is a live SSRF concern:
+**Web Push, when a phone has turned it on, is the one path where the Server makes an
+outbound request to an address a Client supplied**, which on a server *inside* a tailnet is a live SSRF concern:
 `100.64/10` is exactly the range a push endpoint must not be allowed to reach.
 Registration rejects credentials, localhost, and non-public IP literals; delivery goes
 through a dedicated agent whose connection-time DNS lookup rejects loopback, private,
@@ -208,43 +206,6 @@ every established session. Server-pushed propagation is staged in
 and nothing records connects, attaches, denials, or writes. A self-hoster cannot answer
 "did anyone connect to my laptop last night", which also means an ACL entry added by
 any of the paths above would be invisible after the fact.
-
-## Loopback Listeners
-
-Dormouse binds loopback HTTP and WebSocket servers to render its own surfaces.
-
-**A loopback bind is not an access control.** `127.0.0.1` keeps out the network, but
-the attacker that matters is a page open in the user's own browser, which reaches
-loopback exactly as easily as our webview does; **an ephemeral port is not a secret
-either** (rationale).
-
-**The rule is about privilege, not admission: no listener may grant an unrecognized
-caller anything it could not already obtain by reaching the upstream directly.** Every
-such listener answers two questions on every request — **was I addressed by my own
-loopback name**, and **do I recognize this caller** — and differs in what it does with
-the second. Two refuse the request outright. The iframe proxy admits everyone and
-instead declines to **vouch** (rationale). **The recognition mechanism differs per
-listener because their URLs differ, and the differences are forced, not stylistic**: a
-URL token is available to the browser-dev harness, which owns its page's URL, and never
-to the iframe proxy (rationale).
-
-**A third question has no request-header answer at all: who is allowed to frame me?**
-A response that confers something on its *embedder* must name that embedder and let the
-browser enforce it, which no request header can do — so the webview supplies its own
-ancestor chain, not merely its origin (the check walks the whole chain), with each
-request for a proxy URL, and that chain is what the proxy's `frame-ancestors` names
-(rationale).
-
-- **FAIL IF** any loopback HTTP or WebSocket listener grants an unrecognized caller a privilege it could not obtain by reaching the upstream directly. Refusing the request is one way; the iframe proxy's *admits all, vouches for none, names its embedder* is another, and is not a violation (rationale). `scripts/loopback-lint.mjs` (`pnpm test`) makes the cheap half deterministic — a new loopback bind that does not reference a guard module fails the build — but only in the bind forms it knows: `.listen` positional and options-object, `@hono/node-server`'s `serve({ hostname })`, and `ws`'s `new WebSocketServer({ port | host })`, each proved load-bearing by `scripts/loopback-lint-selftest.mjs`. **Adding a server dependency means adding its bind spelling there**; a host built at runtime is invisible to a regex in any spelling. It also only sees that a file *knows* a guard exists, never that the guard is called on every request, so this bullet still has to be read. Derive the set by searching the shipped trees for `createServer`, `.listen(`, `serve(` and `WebSocketServer` rather than trusting this list. Today the set is three: the iframe proxy (`lib/src/host/iframe-proxy.ts`), the VS Code agent-browser stream relay (`vscode-ext/src/agent-browser-host.ts`), and the browser-dev bridge (`standalone/scripts/dev-agent-browser.mjs`). A Unix-domain socket or named pipe is not in scope — no browser can reach one — which is why the `dor` control channel is bounded by socket permissions instead.
-- **FAIL IF** the iframe proxy rewrites `Origin` to the upstream's own origin for a caller whose inbound `Origin` is not the proxy's own — in `handleRequest` **or** `handleUpgrade`. A foreign `Origin` must be forwarded untouched rather than blocked, so the upstream sees the truth and applies its own policy (rationale).
-- **FAIL IF** the iframe proxy stops checking that `Host` names its own grant port, on either path. Its per-grant ephemeral port and one-fixed-upstream binding are real mitigations but neither is a secret, so the `Host` check is what makes DNS rebinding fail.
-- **FAIL IF** the iframe proxy **drops** an upstream's `X-Frame-Options` / CSP `frame-ancestors` without **replacing** them with a `frame-ancestors` naming the embedder chain the webview supplied, or injects its shim with any `postMessage` target but that chain's own origin. With no usable chain the proxy must strip nothing and inject nothing, which leaves the caller exactly what the upstream would have given it directly (rationale).
-- **FAIL IF** a request bearing a *foreign* `Origin` refreshes a grant's idle timer: a grant holds a live upstream binding, and a stranger polling it keeps a closed pane's binding open. An *absent* `Origin` must keep refreshing it — that is what a live frame's own navigations and sub-resources send.
-- **FAIL IF** the stream relay's grant stops being single-use, TTL-bounded, and pinned to one target port, or if it begins rewriting `Origin` rather than dropping it. It needs no `Host` check while the token holds (rationale).
-- **FAIL IF** the browser-dev bridge drops any of its four gates — the per-run token, the loopback `Host` check, the `application/json` content-type required of every non-GET, and the exact-origin `access-control-allow-origin`. The first three live together in the gate that runs before routing, so a route that never reads a body is covered by all of them. It is dev-only and ships in nothing, but it dispatches `pty_spawn` with caller-supplied `shell`, `args`, `cwd` and `env` — arbitrary command execution on a maintainer or CI-agent machine (`docs/specs/security-ci.md` -> "Automated Maintainer (tend)"). The content-type rule is a security control, not tidiness (rationale).
-
-Source of truth: the shared rule and predicates — `isLoopbackHost`, `isOwnOrigin`,
-`isForeignOrigin` — in `lib/src/host/loopback-guard.ts`.
 
 ## Future
 

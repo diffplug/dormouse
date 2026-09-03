@@ -313,7 +313,7 @@ describe('status', () => {
       offer: { origin: OFFER.origin },
     } satisfies RemoteHostConsoleStatus);
     // The one-time token is a bearer credential and this is a service→webview
-    // shape (docs/specs/security-application.md -> "Trust boundary"), so it must not appear anywhere in what was sent.
+    // shape (docs/specs/security-remote.md -> "Trust boundary"), so it must not appear anywhere in what was sent.
     expect(JSON.stringify(sent)).not.toContain(OFFER.token);
   });
 

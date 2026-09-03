@@ -23,7 +23,7 @@
 |---|---|
 | `supply-chain` | `docs/specs/security-supply-chain.md` |
 | `ci-and-secrets` | `docs/specs/security-ci.md`, `docs/specs/security-audit.md`, `docs/specs/security.md` |
-| `application-security` | `docs/specs/security-application.md` |
+| `application-security` | `docs/specs/security-local.md`, `docs/specs/security-remote.md` |
 
 **The separation is one of context, not of credential.** `AUDIT_PAT` is a step-level `env:` on the one job, so every subagent inherits it, and only the prompt tells `application-security` not to use it. **Known gap:** a prompt is not a control; a real separation needs a second job outside the `security-audit` environment, passing fragments as artifacts — worth doing, not done. Three contexts each *read* less; none *holds* less.
 
@@ -38,7 +38,7 @@
 - `application-security` — **everything else**, worked out from `ls -A` rather than from a list, including `.impeccable/`. **Dotfile directories are named explicitly wherever they land**, here and in the prompt files. **The subtraction is recursive**: where another domain claims a subdirectory rather than a whole tree — as both do inside `website/` — the remainder of that tree belongs here.
 
 - **FAIL IF** a `docs/specs/security*.md` spec is in no domain's scope, or in two, or a scope names a file that does not exist (rationale).
-- **FAIL IF** the audit stops fanning out to a dedicated `application-security` subagent scoped to `docs/specs/security-application.md`, or that scope is merged back into a context that also carries the supply-chain or CI domains (rationale).
+- **FAIL IF** the audit stops fanning out to a dedicated `application-security` subagent scoped to `docs/specs/security-local.md` and `docs/specs/security-remote.md`, or that scope is merged back into a context that also carries the supply-chain or CI domains (rationale).
 - **FAIL IF** `application-security` does not run on a stronger model than the mechanical domains, in **both** `.github/workflows/security-audit.yaml`'s `--agents` and `scripts/security-audit-local.sh` (rationale).
 - **FAIL IF** `.github/audit/` is missing a prompt file the workflow names, or `scripts/security-audit-local.sh` stops running the audit from those same files (rationale).
 - **FAIL IF** the union of the subagents' qualitative scopes does not cover every top-level path in the repository (rationale).

@@ -40,6 +40,7 @@ const PAGES = [
   {
     route: "/docs/security",
     element: <SecurityDocs />,
+    audience: "security",
     links: ["/supply-chain", "/docs/self-host"],
   },
   {
@@ -65,28 +66,41 @@ describe("security-adjacent documentation", () => {
   }
 });
 
-describe("specialized security guidance", () => {
-  const specialized = PAGES.filter((page) => "audience" in page);
+describe("audience pages", () => {
   const audiences = security.audiences as Record<
     string,
     Record<"guarantees" | "notDefended" | "knownGaps", unknown>
   >;
 
-  for (const page of specialized) {
-    it(`${page.route} renders every row and bullet of its audience, and none of the other's`, () => {
+  it("names every audience the generator splits", () => {
+    expect(PAGES.map((page) => page.audience).sort()).toEqual(Object.keys(audiences).sort());
+  });
+
+  for (const page of PAGES) {
+    it(`${page.route} renders every row and bullet of its audience, and none of the others'`, () => {
       const main = renderMain(page.element);
       const mine = audiences[page.audience];
-      const theirs = Object.entries(audiences).find(([name]) => name !== page.audience)![1];
+      const others = Object.entries(audiences)
+        .filter(([name]) => name !== page.audience)
+        .map(([, sections]) => sections);
+      // The umbrella's own paragraphs link the specs too ("Every pull request
+      // … Disclosure"); only its rows and bullets are audience-scoped.
+      const prose =
+        page.audience === "security"
+          ? repoHrefsIn((security.pageBlocks as { type: string }[]).filter((b) => b.type === "paragraph"))
+          : [];
       for (const key of ["guarantees", "notDefended", "knownGaps"] as const) {
         const own = repoHrefsIn(mine[key]);
-        expect(own.length).toBeGreaterThan(0);
         for (const href of own) expect(main).toContain(`href="${href}"`);
-        for (const href of repoHrefsIn(theirs[key])) {
-          if (!own.includes(href)) expect(main).not.toContain(`href="${href}"`);
+        for (const href of others.flatMap((sections) => repoHrefsIn(sections[key]))) {
+          if (!own.includes(href) && !prose.includes(href)) expect(main).not.toContain(`href="${href}"`);
         }
       }
+      expect(repoHrefsIn(mine.guarantees).length).toBeGreaterThan(0);
     });
+  }
 
+  for (const page of PAGES.filter((page) => page.audience !== "security")) {
     it(`${page.route} links the audit method the guarantees rest on`, () => {
       const securityLinks = [...renderMain(page.element).matchAll(/href="(\/docs\/security[^"]*)"/g)].map(
         ([, href]) => href,

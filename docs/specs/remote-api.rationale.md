@@ -12,7 +12,7 @@
 
 ## Envelope
 
-**Why the clamp's upper bound is the security-relevant half.** A local resize is derived from element geometry and cannot be large, but `terminal.resize` carries a peer-supplied number straight into `term.resize` in the webview that owns the pane, and xterm bounds only the minimum before allocating `rows × cols` cells. Unbounded, one frame asking for a million by a million wedges every terminal in that window, reachable by any authorized Client (`docs/specs/security-application.md` → "Trust boundary"). `MAX_TERMINAL_DIMENSION` is 2000 — far past any real display, since a 4K screen at an unreadably small font is on the order of 800 columns — while capping the worst a peer can request at a few million cells.
+**Why the clamp's upper bound is the security-relevant half.** A local resize is derived from element geometry and cannot be large, but `terminal.resize` carries a peer-supplied number straight into `term.resize` in the webview that owns the pane, and xterm bounds only the minimum before allocating `rows × cols` cells. Unbounded, one frame asking for a million by a million wedges every terminal in that window, reachable by any authorized Client (`docs/specs/security-remote.md` → "Trust boundary"). `MAX_TERMINAL_DIMENSION` is 2000 — far past any real display, since a 4K screen at an unreadably small font is on the order of 800 columns — while capping the worst a peer can request at a few million cells.
 
 ## Directory (the phone's picker)
 

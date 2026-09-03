@@ -809,7 +809,7 @@ export const MAX_TERMINAL_DIMENSION = 2000;
  * in the webview that owns the pane, and xterm bounds only the minimum before
  * allocating `rows × cols` cells. Unbounded, one frame asking for a million by
  * a million wedges every terminal in that window — reachable by any authorized
- * Client (`docs/specs/security-application.md` -> "Trust boundary").
+ * Client (`docs/specs/security-remote.md` -> "Trust boundary").
  */
 export function clampTerminalDimension(value: number | undefined, fallback: number): number {
   if (value === undefined || !Number.isFinite(value)) return fallback;

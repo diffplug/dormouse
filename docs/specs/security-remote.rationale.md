@@ -1,4 +1,4 @@
-# Application Security — rationale
+# Remote Control Security — rationale
 
 ## Trust boundary
 
@@ -107,15 +107,6 @@ runs.
 against a process running as the same user, and nothing in the table claims it does — a
 same-user compromise already reads the terminals.
 
-**Why session snapshots are the biggest item in the table.** They are terminal
-transcripts — whatever the user's shells printed, a superset of every other secret
-here — and they inherited the umask as `0644` until this was tightened. On Windows,
-without the DACL the directory keeps whatever `%LOCALAPPDATA%` hands down, which is
-never owner-only: always SYSTEM and Administrators, plus whatever stale entries earlier
-installs left behind. The mode goes on the temp file before any bytes are written
-because the atomic rename preserves it; tightening after the rename would leave a
-window where the transcript is world-readable.
-
 **Why `manage verify` walks `state/` on Windows.** `server/src/state.ts`'s `0o600` is a
 no-op there, so the files are covered only by what they inherit from the directory. An
 enumeration that fails has to fail verify, because a directory the walk could not read
@@ -218,47 +209,3 @@ Both gaps are stated in this spec rather than left in a Future list for two reas
 the audit's qualitative pass should not keep rediscovering them as findings, and a
 reader deciding whether to run this needs to know that "revoke a device" is not
 currently something they can do quickly.
-
-## Loopback Listeners
-
-**What the browser gives an attacker page.** An ephemeral port is not a secret — the
-range scans in seconds. A POST with a simple content-type needs no preflight, so it
-*executes* even when the attacker cannot read the reply; and WebSockets are not subject
-to CORS at all, so a socket that connects is a socket that can be read.
-
-**Why a URL token is not available to the iframe proxy.** It would land in
-`location.pathname` and break client-side routers, and it would not survive onto
-root-relative sub-resource requests at all. The browser-dev harness owns its page's URL,
-so it can carry one.
-
-**Why no request header answers "who is allowed to frame me".** An iframe navigation
-carries no `Origin`, and `Sec-Fetch-Site` reads `cross-site` for our own webview and for
-an attacker page alike, so only an embedder named in `frame-ancestors` and enforced by
-the browser distinguishes them.
-
-**Why the iframe proxy admits everyone.** Vouching for a stranger is what turns a
-transparent proxy into an amplifier, so it declines to vouch rather than to admit;
-refusing outright would be worse, because forwarding the caller's real `Origin` lets
-the upstream apply its own policy. That is also why the upgrade path matters most: a
-laundered `Origin` there does not merely let a stranger write, it hands them a readable
-socket to a dev server or `openvscode-server` that would have refused their real
-origin.
-
-**How the proxy once handed a stranger two privileges.** Dropping an upstream's
-`X-Frame-Options` / CSP `frame-ancestors` for everyone gave a page that scanned the
-port two things the upstream had refused it: framing a document that answered `DENY`,
-and reading that document's live URL and anchor hrefs back cross-origin. No request
-header can tell that page apart from Dormouse's webview, which is why the replacement
-`frame-ancestors` has to name the embedder chain the webview supplied.
-
-**Why the listener set is derived, not trusted.** An enumeration goes stale the moment
-someone adds a listener — the same failure mode that once left `.vscode/` owned by
-nobody.
-
-**Why the stream relay needs no `Host` check.** Rebinding exists to make
-same-origin-looking requests to loopback, which buys nothing against a listener
-demanding an unguessable one-shot secret.
-
-**Why the browser-dev bridge's content-type gate is a security control.** Without it
-the endpoint is CORS-simple and needs no preflight to survive, and what it dispatches
-is `pty_spawn` with caller-supplied `shell`, `args`, `cwd` and `env`.

@@ -1207,7 +1207,7 @@ export function createApp(config: AppConfig): CreatedApp {
           // the three fields it knows and ignores the rest, so `{ hostId,
           // ...sealed }` would let a Host both override the token's `hostId`
           // and smuggle readable text past a Server that must forward neither
-          // (docs/specs/security-application.md -> "What crosses the boundary").
+          // (docs/specs/security-remote.md -> "What crosses the boundary").
           JSON.stringify({
             hostId,
             v: sealed.v,

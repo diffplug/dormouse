@@ -542,7 +542,7 @@ Security boundaries:
 
 **Must replace the upstream's framing controls with a `frame-ancestors` naming
 the embedder chain, never merely drop them**, and **the shim's `postMessage` must
-target that chain's origin, never `'*'`** (rationale; `docs/specs/security-application.md` → "Loopback
+target that chain's origin, never `'*'`** (rationale; `docs/specs/security-local.md` → "Loopback
 Listeners"). **With no chain the proxy strips nothing and injects nothing.**
 
 **Must refresh a grant's idle timer for every caller except one that named itself
@@ -553,10 +553,10 @@ foreign.** `isOwnOrigin` and `isForeignOrigin` are not each other's negation —
 origin unchanged and keep an absent origin absent, on request and upgrade paths;
 `Referer` only substitutes the proxy's own origin. (rationale) The shared rule
 for all loopback listeners lives in `lib/src/host/loopback-guard.ts` and is
-audited by `docs/specs/security-application.md` → "Loopback Listeners".
+audited by `docs/specs/security-local.md` → "Loopback Listeners".
 
 **Never relax** the `Host` validation, the conditional `Origin` gate, or the
-`frame-ancestors` replacement without updating that `docs/specs/security-application.md` audit. Pinned
+`frame-ancestors` replacement without updating that `docs/specs/security-local.md` audit. Pinned
 by `lib/src/host/iframe-proxy.test.ts`, which covers the upgrade path as well as
 the request path.
 

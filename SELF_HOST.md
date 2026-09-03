@@ -354,7 +354,7 @@ Host displays (`docs/specs/server.md` → Setup tokens and the pairing QR).
    setup password; the typed form behind "Enroll with a different server…"
    covers a server elsewhere or a spent offer (`docs/specs/server.md`, "Remote
    control, in the Settings dialog"). Enrollment persists in the Host service's
-   own store (`docs/specs/security-application.md` → "Credentials at rest"), so later launches connect
+   own store (`docs/specs/security-remote.md` → "Credentials at rest"), so later launches connect
    on their own; the section then shows the server, the relay connection and the
    paired-device count.
 
@@ -560,7 +560,7 @@ branches.
 
 The security properties this deployment is audited against are the "Network
 posture (self-hosted)" and "Credentials at rest" `FAIL IF` lines in
-`docs/specs/security-application.md`. **Those lines bind all three installers** — a control present in
+`docs/specs/security-remote.md`. **Those lines bind all three installers** — a control present in
 one and absent from another is a finding — and `scripts/deploy-lint.mjs`
 (`pnpm lint:deploy`, part of `pnpm test`) checks each one textually against each
 installer, with `scripts/deploy-lint-selftest.mjs` deleting each matched control
@@ -627,14 +627,14 @@ reports which mode is live rather than asserting either.
   pruning succeed — so a failure leaves the previous offer unspent.
   `run-server` exports `DORMOUSE_ENROLL_TOKEN_FILE`; unset, the server refuses
   every offer (`docs/specs/server.md` → Configuration). Generation and
-  protection: `docs/specs/security-application.md` → "Credentials at rest".
+  protection: `docs/specs/security-remote.md` → "Credentials at rest".
 - **Loopback only, and tailnet-only.** The install pins
   `DORMOUSE_BIND_HOST=127.0.0.1` and refuses to proceed without it
   (`docs/specs/server.md` → Configuration). Port 3100, not 3000, so the service
   coexists with `pnpm dev:server` / `pnpm dev:pocket-server`. **`verify` also
   fails on an active `tailscale funnel`** — one configuration surface with
   Serve, and a Funnel publishes this origin, and the password behind it, to the
-  public internet (`docs/specs/security-application.md` → "Network posture").
+  public internet (`docs/specs/security-remote.md` → "Network posture").
 - **`DORMOUSE_ORIGIN` is durable WebAuthn identity**, derived from the node's
   MagicDNS name. An installation recording a different origin stops the
   installer, because rewriting silently invalidates the registered passkey and
@@ -646,7 +646,7 @@ reports which mode is live rather than asserting either.
   principal satisfies the mode and inverts it; Linux's `manage verify` asserts
   both legs on `config/`, `state/`, `run/` and `config/server.env`. *(macOS
   checks the modes only, Windows' `Test-OwnerOnly` the DACL but never the owner
-  — two known gaps, `docs/specs/security-application.md` → "Credentials at rest".)*
+  — two known gaps, `docs/specs/security-remote.md` → "Credentials at rest".)*
 - **A failed update is a failure.** The candidate release is health-checked on
   an ephemeral port against a throwaway state dir *before* `current` moves; if
   the live service then fails to answer, `current` is restored to `previous` and
