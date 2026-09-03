@@ -8,37 +8,19 @@
  *
  * See docs/specs/website-docs.md -> Reference page chrome.
  */
-import { Component, Suspense, lazy, useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { ListIcon, XIcon } from "@phosphor-icons/react";
 import { useRestoredTheme } from "dormouse-lib/lib/themes";
 import SiteHeader from "./SiteHeader";
+// Imported statically, not lazily. The control renders twice — once in the
+// mobile bar, once floating — and a second `Suspense` boundary over the same
+// `lazy()` component never resolved, leaving the bar's picker a permanent
+// `<template>`. The chunk that saved was ~6KB gzip; a picker that never
+// appears is the worse trade.
+import DocsThemeControl from "./DocsThemeControl";
 import { ACCENT_TEXT_CLASS, MUTED_ACCENT_LINK_CLASS, TOC_INDENT_CLASS } from "./docs-tokens";
 import { DOCS_PAGES, docsRailPosition, type DocsPage, type TocEntry } from "../lib/docs-pages";
 import { DOCS_THEME_ID } from "../lib/docs-theme";
-
-/** Nothing needs the floating picker at first paint, and it pulls the theme
- *  picker chunk with it. Deferred, that weight leaves every docs page's
- *  critical path — including /changelog/after, which the standalone updater
- *  opens and which is SPA-served, so its chunks arrive as a waterfall. */
-const DocsThemeControl = lazy(() => import("./DocsThemeControl"));
-
-/**
- * Renders nothing if its child fails to load.
- *
- * **Must** wrap anything lazily imported here. A reader holding cached HTML
- * across a redeploy requests a hashed chunk that no longer exists; without
- * this the rejected import throws through `Suspense` to the route boundary and
- * replaces the whole article — with a floating colour picker as the cause.
- */
-class OptionalChunk extends Component<{ children: ReactNode }, { failed: boolean }> {
-  state = { failed: false };
-  static getDerivedStateFromError() {
-    return { failed: true };
-  }
-  render() {
-    return this.state.failed ? null : this.props.children;
-  }
-}
 
 /** Repaints the site's own tokens from the picked theme; see index.css. */
 const THEMED_BODY_CLASS = "docs-themed";
@@ -185,12 +167,13 @@ export default function DocsLayout({
           className="sticky top-16 z-10 border-b border-[var(--color-text)]/15 md:top-20 lg:hidden"
           style={DOCS_HEADER_STYLE}
         >
+          <div className="flex items-center gap-2 pr-3 md:pr-5">
           <button
             type="button"
             aria-expanded={navOpen}
             aria-controls="docs-nav-drawer"
             onClick={() => setNavOpen((open) => !open)}
-            className="flex w-full items-center gap-2 px-4 py-3 text-sm md:px-6"
+            className="flex min-w-0 flex-1 items-center gap-2 px-4 py-3 text-left text-sm md:px-6"
           >
             {navOpen ? <XIcon size={16} weight="bold" /> : <ListIcon size={16} weight="bold" />}
             <span className="font-display opacity-70">Docs</span>
@@ -201,6 +184,8 @@ export default function DocsLayout({
               </>
             ) : null}
           </button>
+          <DocsThemeControl variant="inline" />
+          </div>
           {navOpen ? (
             <div
               id="docs-nav-drawer"
@@ -257,11 +242,7 @@ export default function DocsLayout({
         </div>
       </div>
 
-      <OptionalChunk>
-        <Suspense fallback={null}>
-          <DocsThemeControl />
-        </Suspense>
-      </OptionalChunk>
+      <DocsThemeControl />
     </>
   );
 }
