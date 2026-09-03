@@ -350,8 +350,14 @@ function splitRow(row, line) {
   return cells.map((c) => parseInline(c.trim(), line));
 }
 
+/**
+ * A GFM delimiter row (`| --- | :-- |`). The pipe is required: every `|` in the
+ * pattern is optional, so without this test a bare `---` reads as a one-column
+ * delimiter row and a preceding line that merely contains a pipe becomes a
+ * table — where the `---` is a setext underline, which has to raise instead.
+ */
 function isDelimiterRow(row) {
-  return /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$/.test(row);
+  return row.includes('|') && /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$/.test(row);
 }
 
 function alignmentsFrom(row) {

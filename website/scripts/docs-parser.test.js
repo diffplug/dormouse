@@ -172,6 +172,11 @@ describe('blocks', () => {
     expect(blocks.map((b) => b.type)).toEqual(['list', 'thematicBreak']);
   });
 
+  it('reads a pipeless dashed underline as a setext heading, not a table delimiter row', () => {
+    expect(() => parseMarkdown('Intro\na | b\n---\n')).toThrow(/setext heading underline/);
+    expect(() => parseMarkdown('a | b\n---\n')).toThrow(/setext heading underline/);
+  });
+
   it('parses a table with an escaped pipe inside inline code', () => {
     const md = '| Key | Action |\n|-----|--------|\n| `\\|` or tmux `%` | Split |\n';
     const { blocks } = parseMarkdown(md);
