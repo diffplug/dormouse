@@ -38,10 +38,13 @@ function parseHex(color: string): { rgb: Rgb; alpha: number } | null {
 const toHex = ([r, g, b]: Rgb) =>
   `#${[r, g, b].map((v) => Math.round(Math.min(255, Math.max(0, v))).toString(16).padStart(2, "0")).join("")}`;
 
+/** Rounded, because `toHex` rounds: an unrounded candidate can clear the
+ *  threshold while the colour actually returned falls under it. Covers the
+ *  alpha flatten too, which goes through here. */
 const mix = (a: Rgb, b: Rgb, t: number): Rgb => [
-  a[0] + (b[0] - a[0]) * t,
-  a[1] + (b[1] - a[1]) * t,
-  a[2] + (b[2] - a[2]) * t,
+  Math.round(a[0] + (b[0] - a[0]) * t),
+  Math.round(a[1] + (b[1] - a[1]) * t),
+  Math.round(a[2] + (b[2] - a[2]) * t),
 ];
 
 function luminance([r, g, b]: Rgb): number {

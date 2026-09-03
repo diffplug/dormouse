@@ -40,6 +40,14 @@ describe("docs link colour", () => {
     expect(distinct.size).toBeGreaterThan(2);
   });
 
+  it("clears AA after rounding, not merely before it", () => {
+    // `toHex` rounds, so a candidate measured unrounded can clear 4.5 while the
+    // colour actually returned falls under it. This pair did, at 4.479:1 — and
+    // every bundled theme clears with room, so nothing else here would catch it.
+    const link = docsAccentFor("#007fd4", "#c1c1c1")!;
+    expect(contrastRatio(rgb(link), rgb("#c1c1c1"))).toBeGreaterThanOrEqual(4.5);
+  });
+
   it("keeps an accent that already contrasts, rather than washing it out", () => {
     // #99947c on #272822 is 4.87:1 already, so it should come back untouched.
     expect(docsAccentFor("#99947c", "#272822")).toBe("#99947c");
