@@ -147,6 +147,19 @@ describe('cli reference', () => {
     }
   });
 
+  it('nests every command under one heading, and that heading is an anchor', () => {
+    // Flat, this page alone is fourteen rail entries; nested under an id that
+    // is not on the page, the parent is a link that scrolls nowhere.
+    const { commandsHeading, toc } = data.cli;
+    expect(toc.map((e) => e.id)).toEqual(['targeting', 'surface-handles', 'dor', commandsHeading.id]);
+    expect(data.cli.anchors).toContain(commandsHeading.id);
+
+    const commands = toc[toc.length - 1];
+    expect(commands.text).toBe(commandsHeading.title);
+    expect(commands.children.map((c) => c.id)).toEqual(data.cli.commands.map((c) => c.id));
+    for (const entry of toc.slice(0, -1)) expect(entry.children).toEqual([]);
+  });
+
   it('lifts its intro sections from the skill rather than re-authoring them', () => {
     expect(data.cli.intro.map((s) => s.id)).toEqual(['targeting', 'surface-handles']);
     for (const section of data.cli.intro) expect(section.blocks.length).toBeGreaterThan(0);

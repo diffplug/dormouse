@@ -6,6 +6,7 @@ import runtimeDeps from "../data/dependencies-runtime.json";
 import SiteHeader, { STATIC_PAGE_HEADER_STYLE } from "../components/SiteHeader";
 import { SITE_LINK_CLASS } from "../components/site-tokens";
 import { type MetaArgs } from "react-router";
+import { type TocEntry } from "../lib/docs-pages";
 import { siteMeta } from "../lib/site-meta";
 
 export function meta({ location }: MetaArgs) {
@@ -122,29 +123,78 @@ function DirectCargoTable({ deps }: { deps: DirectCargoDependency[] }) {
   );
 }
 
-function DependencySection({
-  title,
-  count,
-  description,
-  children,
-}: {
+type SupplyChainSection = {
+  /** Anchor the rail links, and the `<h2>`'s id. */
+  id: string;
   title: string;
   count: number;
   description: string;
-  children: ReactNode;
-}) {
+  table: ReactNode;
+};
+
+/**
+ * The page's sections, in order.
+ *
+ * One owner for the heading a reader sees, the anchor it carries, and the
+ * table under it, so the rail cannot name a section the page has renamed or
+ * dropped. Anchors are spelled out rather than slugged from the title, so
+ * rewording a heading does not silently break a link someone saved.
+ */
+const SECTIONS: readonly SupplyChainSection[] = [
+  {
+    id: "bundled-runtime",
+    title: "Bundled Runtime",
+    count: runtimeDeps.length,
+    description:
+      "The Standalone app ships a bundled NodeJS, which bundles other components under their own licenses.\nThe VS Code extension bundles no runtime — it runs on the editor's own Electron Node.",
+    table: <PackageTable deps={runtimeDeps} />,
+  },
+  {
+    id: "npm-dependencies",
+    title: "npm Dependencies",
+    count: npmDeps.length,
+    description:
+      "Runtime npm packages used by the Standalone app, the VS Code extension, and the coordinating server you run yourself to pair a phone with your laptop.",
+    table: <PackageTable deps={npmDeps} />,
+  },
+  {
+    id: "direct-cargo-dependencies",
+    title: "Direct Cargo Dependencies",
+    count: cargoDeps.direct.length,
+    description:
+      "Crates declared directly in standalone/src-tauri/Cargo.toml, including build and target-specific dependencies.",
+    table: <DirectCargoTable deps={cargoDeps.direct} />,
+  },
+  {
+    id: "transitive-cargo-dependencies",
+    title: "Transitive Cargo Dependencies",
+    count: cargoDeps.transitive.length,
+    description:
+      "Every crate the direct dependencies pull into the locked Tauri build graph, including build-time and platform-specific crates that aren't all linked into the final binary.",
+    table: <PackageTable deps={cargoDeps.transitive} />,
+  },
+];
+
+/** This page's table of contents, off the list that titles its sections. */
+export const SUPPLY_CHAIN_TOC: TocEntry[] = SECTIONS.map((section) => ({
+  id: section.id,
+  text: section.title,
+  children: [],
+}));
+
+function DependencySection({ section }: { section: SupplyChainSection }) {
   return (
     <section className="mt-12">
       <div className="mb-4 flex flex-col gap-1 border-b border-[var(--color-text)]/10 pb-3 md:flex-row md:items-end md:justify-between">
         <div>
           <div className="flex items-baseline gap-2">
-            <h2 className="font-display text-xl">{title}</h2>
-            <div className="font-mono text-md opacity-50">({count})</div>
+            <h2 id={section.id} className="font-display text-xl">{section.title}</h2>
+            <div className="font-mono text-md opacity-50">({section.count})</div>
           </div>
-          <p className="text-sm opacity-60 whitespace-pre-line">{description}</p>
+          <p className="text-sm opacity-60 whitespace-pre-line">{section.description}</p>
         </div>
       </div>
-      {children}
+      {section.table}
     </section>
   );
 }
@@ -220,37 +270,9 @@ export default function SupplyChain() {
             </div>
           </div>
 
-          <DependencySection
-            title="Bundled Runtime"
-            count={runtimeDeps.length}
-            description={"The Standalone app ships a bundled NodeJS, which bundles other components under their own licenses.\nThe VS Code extension bundles no runtime — it runs on the editor's own Electron Node."}
-          >
-            <PackageTable deps={runtimeDeps} />
-          </DependencySection>
-
-          <DependencySection
-            title="npm Dependencies"
-            count={npmDeps.length}
-            description="Runtime npm packages used by the Standalone app, the VS Code extension, and the coordinating server you run yourself to pair a phone with your laptop."
-          >
-            <PackageTable deps={npmDeps} />
-          </DependencySection>
-
-          <DependencySection
-            title="Direct Cargo Dependencies"
-            count={cargoDeps.direct.length}
-            description="Crates declared directly in standalone/src-tauri/Cargo.toml, including build and target-specific dependencies."
-          >
-            <DirectCargoTable deps={cargoDeps.direct} />
-          </DependencySection>
-
-          <DependencySection
-            title="Transitive Cargo Dependencies"
-            count={cargoDeps.transitive.length}
-            description="Every crate the direct dependencies pull into the locked Tauri build graph, including build-time and platform-specific crates that aren't all linked into the final binary."
-          >
-            <PackageTable deps={cargoDeps.transitive} />
-          </DependencySection>
+          {SECTIONS.map((section) => (
+            <DependencySection key={section.id} section={section} />
+          ))}
         </div>
       </div>
     </>

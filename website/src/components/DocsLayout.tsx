@@ -9,7 +9,7 @@ import { useRestoredTheme } from "dormouse-lib/lib/themes";
 import SiteHeader from "./SiteHeader";
 import DocsThemeControl from "./DocsThemeControl";
 import { ACCENT_HOVER_TEXT_CLASS } from "./docs-tokens";
-import { DOCS_PAGES } from "../lib/docs-pages";
+import { DOCS_PAGES, type TocEntry } from "../lib/docs-pages";
 import { DOCS_THEME_ID } from "../lib/docs-theme";
 
 /** Repaints the site's own tokens from the picked theme; see index.css. */
@@ -21,8 +21,6 @@ const DOCS_HEADER_STYLE: React.CSSProperties = {
   background: "color-mix(in srgb, var(--color-bg) 85%, transparent)",
   backdropFilter: "blur(12px)",
 };
-
-export type TocEntry = { id: string; text: string; children: TocEntry[] };
 
 function TocList({ entries, nested = false }: { entries: TocEntry[]; nested?: boolean }) {
   if (entries.length === 0) return null;

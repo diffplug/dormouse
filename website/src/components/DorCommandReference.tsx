@@ -25,10 +25,21 @@ export type CommandSection = {
   raw: string;
 };
 
-export default function DorCommandReference({ section }: { section: CommandSection }) {
+/**
+ * `depth` keeps the document outline agreeing with the table of contents. The
+ * eleven subcommands sit under the page's `Commands` heading, so they render as
+ * `h3`; the root `dor` section is that heading's peer and keeps the default.
+ */
+export default function DorCommandReference({
+  section,
+  depth,
+}: {
+  section: CommandSection;
+  depth?: number;
+}) {
   return (
     <section className="mb-14">
-      <AnchoredHeading id={section.id} spacing="mb-1">{section.title}</AnchoredHeading>
+      <AnchoredHeading id={section.id} depth={depth} spacing="mb-1">{section.title}</AnchoredHeading>
       <p className="mb-4 font-mono text-sm opacity-60">{section.invocation}</p>
 
       {section.usage.length > 0 && (

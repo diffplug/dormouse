@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Link, useParams, type MetaArgs } from "react-router";
 import SiteHeader, { STATIC_PAGE_HEADER_STYLE } from "../components/SiteHeader";
 import changelog from "../data/changelog.json";
+import { type TocEntry } from "../lib/docs-pages";
 import { siteMeta } from "../lib/site-meta";
 
 export function meta({ location }: MetaArgs) {
@@ -154,6 +155,25 @@ function ReleaseArticle({ release }: { release: ChangelogRelease }) {
     </article>
   );
 }
+
+/**
+ * How many releases the rail lists.
+ *
+ * The page renders every release; the rail carries four other pages beside
+ * this one, and an entry per release would be longer than all of them.
+ */
+export const CHANGELOG_TOC_RELEASES = 5;
+
+/**
+ * This page's table of contents: the most recent releases, newest first.
+ *
+ * Each entry is anchored on the tag, which is both the id `ReleaseArticle`
+ * gives its `<article>` and the text its `<h2>` shows. Pinned by
+ * `website/src/pages/Changelog.test.tsx`.
+ */
+export const CHANGELOG_TOC: TocEntry[] = RELEASES.slice(0, CHANGELOG_TOC_RELEASES).map(
+  (release) => ({ id: release.tag, text: release.tag, children: [] }),
+);
 
 function FilterNotice({ children }: { children: ReactNode }) {
   return (

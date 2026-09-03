@@ -142,6 +142,15 @@ const SELF_HOST_DELTA = [
 const CLI_INTRO_SECTIONS = ['Targeting', 'Surface handles'];
 
 /**
+ * The heading every command section sits under on /docs/dor.
+ *
+ * Emitted rather than spelled in the page, because the table of contents nests
+ * every command under it and a parent whose id is not on the page links
+ * nowhere; one record is what keeps the two the same id.
+ */
+const CLI_COMMANDS_SECTION = { id: 'commands', title: 'Commands' };
+
+/**
  * Apply one document's delta.
  *
  * `remove` drops the single matched block. `remove-section` drops a matched
@@ -487,24 +496,39 @@ async function buildCli(skill) {
   const rootSection = toSection(root);
   const commands = inventory.map((name) => toSection(snapshots.get(name)));
 
-  // Every id addressable on /docs/dor, from all three of its sources: the
-  // intro sections, the root section, the command sections, and any heading
-  // inside a lifted intro block. Nothing else may collide with a command
-  // anchor that SKILL_REFERENCES links into.
+  // Every id addressable on /docs/dor, from all of its sources: the intro
+  // sections, the root section, the Commands heading, the command sections,
+  // and any heading inside a lifted intro block. Nothing else may collide with
+  // a command anchor that SKILL_REFERENCES links into.
   const anchors = [
     ...intro.map((s) => s.id),
     ...intro.flatMap((s) => headingsOf(s.blocks).map((h) => h.id)),
     'dor',
+    CLI_COMMANDS_SECTION.id,
     ...commands.map((c) => c.id),
   ];
   assertUniqueIds(anchors, '/docs/dor');
 
   // Emitted, not assembled in the page: every docs page reads `toc` off its own
-  // data file, so the table of contents has one owner for all three.
+  // data file, so the table of contents has one owner for all three. The
+  // commands nest one level down, so the rail shows this page as four entries
+  // rather than fourteen.
   const entry = ({ id, title }) => ({ id, text: title, children: [] });
-  const toc = [...intro.map(entry), entry(rootSection), ...commands.map(entry)];
+  const toc = [
+    ...intro.map(entry),
+    entry(rootSection),
+    { ...entry(CLI_COMMANDS_SECTION), children: commands.map(entry) },
+  ];
 
-  return { source: 'dor/test/snapshots/help/', intro, root: rootSection, commands, anchors, toc };
+  return {
+    source: 'dor/test/snapshots/help/',
+    intro,
+    root: rootSection,
+    commandsHeading: CLI_COMMANDS_SECTION,
+    commands,
+    anchors,
+    toc,
+  };
 }
 
 async function buildSkill() {

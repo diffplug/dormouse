@@ -33,8 +33,13 @@ export default function DorDocs() {
       ))}
 
       <DorCommandReference section={cli.root as CommandSection} />
+
+      {/* The anchor the table of contents nests every command under. */}
+      <AnchoredHeading id={cli.commandsHeading.id} spacing="mb-8">
+        {cli.commandsHeading.title}
+      </AnchoredHeading>
       {cli.commands.map((section) => (
-        <DorCommandReference key={section.id} section={section as CommandSection} />
+        <DorCommandReference key={section.id} section={section as CommandSection} depth={3} />
       ))}
     </DocsLayout>
   );
