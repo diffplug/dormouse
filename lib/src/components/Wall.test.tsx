@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SURFACE_CONTROL_METHODS } from 'dor/protocol';
 import { sessionForKey } from 'dor-lib-common/agent-browser';
 import { Wall } from './Wall';
+import { getAgentBrowserScreenController } from './wall/agent-browser-screen';
 import { setPlatform } from '../lib/platform';
 import { FakePtyAdapter } from '../lib/platform/fake-adapter';
 import type { PlatformAdapter } from '../lib/platform/types';
@@ -520,6 +521,99 @@ describe('Wall on the Lath engine', () => {
 
       expect((await dispatchKill(browserId))?.ok).toBe(true);
       expect(agentBrowserCommand).toHaveBeenCalledWith(defaultSession, ['close'], undefined);
+    } finally {
+      untouchedSpy.mockRestore();
+    }
+  });
+
+  it('hands an eager render-swap session to a Surface minimized during launch', async () => {
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(true);
+    let resolveOpen!: (result: { ok: boolean; session?: string; wsPort?: number; binaryPath?: string }) => void;
+    const openResult = new Promise<{ ok: boolean; session?: string; wsPort?: number; binaryPath?: string }>((resolve) => {
+      resolveOpen = resolve;
+    });
+    (fake as PlatformAdapter).agentBrowserOpen = vi.fn(() => openResult);
+    const agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
+    (fake as PlatformAdapter).agentBrowserCommand = agentBrowserCommand;
+
+    try {
+      await act(async () => {
+        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+      });
+      await flush();
+      const iframeId = (await dispatchIframe('http://localhost:5173/')).id;
+
+      await act(async () => {
+        getAgentBrowserScreenController(iframeId)?.actions.setRenderMode?.('ab-screencast');
+      });
+      await flush();
+      const eagerLeaf = container.querySelector<HTMLElement>('[data-lath-leaf]')!;
+      const eagerId = eagerLeaf.dataset.lathLeaf!;
+      expect(eagerId).not.toBe(iframeId);
+
+      await act(async () => {
+        eagerLeaf.querySelector<HTMLButtonElement>('[aria-label="Minimize"]')!.click();
+      });
+      await flush();
+      expect(container.querySelector(`[data-door-id="${eagerId}"]`)).not.toBeNull();
+
+      await act(async () => {
+        resolveOpen({ ok: true, session: 'dormouse.1.gui-minimized', wsPort: 4321, binaryPath: '/usr/bin/agent-browser' });
+        await openResult;
+      });
+      await flush();
+
+      expect(await dispatchResolveAgentBrowser(eagerId)).toEqual({
+        ok: true,
+        result: { surfaceId: eagerId, surfaceRef: 'surface:1', session: 'dormouse.1.gui-minimized' },
+      });
+      expect(agentBrowserCommand).not.toHaveBeenCalledWith(
+        'dormouse.1.gui-minimized',
+        ['close'],
+        '/usr/bin/agent-browser',
+      );
+    } finally {
+      untouchedSpy.mockRestore();
+    }
+  });
+
+  it('restores a minimized eager render swap to iframe when launch returns no session', async () => {
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(true);
+    let resolveOpen!: (result: { ok: boolean; error?: string }) => void;
+    const openResult = new Promise<{ ok: boolean; error?: string }>((resolve) => {
+      resolveOpen = resolve;
+    });
+    (fake as PlatformAdapter).agentBrowserOpen = vi.fn(() => openResult);
+
+    try {
+      await act(async () => {
+        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+      });
+      await flush();
+      const iframeId = (await dispatchIframe('http://localhost:5173/')).id;
+
+      await act(async () => {
+        getAgentBrowserScreenController(iframeId)?.actions.setRenderMode?.('ab-screencast');
+      });
+      await flush();
+      const eagerLeaf = container.querySelector<HTMLElement>('[data-lath-leaf]')!;
+      const eagerId = eagerLeaf.dataset.lathLeaf!;
+      await act(async () => {
+        eagerLeaf.querySelector<HTMLButtonElement>('[aria-label="Minimize"]')!.click();
+      });
+      await flush();
+
+      await act(async () => {
+        resolveOpen({ ok: false, error: 'launch failed' });
+        await openResult;
+      });
+      await flush();
+
+      expect(container.querySelector(`[data-door-id="${eagerId}"]`)).not.toBeNull();
+      expect(await dispatchResolveAgentBrowser(eagerId)).toEqual({
+        ok: false,
+        error: "surface 'surface:1' is not agent-browser rendered (render_mode: iframe)",
+      });
     } finally {
       untouchedSpy.mockRestore();
     }

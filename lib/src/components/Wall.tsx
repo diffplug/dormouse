@@ -1352,12 +1352,30 @@ export function Wall({
           title,
         });
         if (!eagerId) return;
+        const eagerDoorExists = () => doorsRef.current.some((door) => door.id === eagerId);
+        const eagerSurfaceExists = () => (
+          !!lath.getMeta(eagerId) && (lath.store.has(eagerId) || eagerDoorExists())
+        );
+        const restoreIframe = () => {
+          if (lath.isDying(eagerId)) return;
+          if (lath.store.has(eagerId)) {
+            replaceSurface(eagerId, { params: { surfaceType: 'browser', renderMode: 'iframe', url }, title });
+            return;
+          }
+          // A minimized Surface is outside the visible tree but its Door + meta
+          // are still authoritative. Swap the parked body back in place so the
+          // Door does not remain a session-less "Connecting..." pane.
+          if (!eagerDoorExists() || !lath.getMeta(eagerId)) return;
+          disposeAgentBrowserSurfaceController(eagerId);
+          lath.store.updateParams(eagerId, { surfaceType: 'browser', renderMode: 'iframe', url, syncEngaged: false });
+          lath.store.setTitle(eagerId, title);
+        };
         platform.agentBrowserOpen(url, { headed }, lastAgentBrowserBinaryPathRef.current).then((res) => {
           if (!res.ok || !res.session) {
             console.warn(`[dormouse] failed to swap iframe surface '${id}' to agent-browser:`, res.error ?? '(no session)');
-            // Nothing came up to bind: give the iframe back, if the eager pane is
-            // still on screen (a no-op when it was killed or minimized meanwhile).
-            replaceSurface(eagerId, { params: { surfaceType: 'browser', renderMode: 'iframe', url }, title });
+            // Nothing came up to bind: give the iframe back if the eager Surface
+            // still exists, whether it is visible or minimized meanwhile.
+            restoreIframe();
             return;
           }
           if (res.binaryPath) lastAgentBrowserBinaryPathRef.current = res.binaryPath;
@@ -1366,9 +1384,10 @@ export function Wall({
             ...(res.wsPort !== undefined ? { wsPort: res.wsPort } : {}),
             ...(res.binaryPath !== undefined ? { binaryPath: res.binaryPath } : {}),
           };
-          // The eager pane was killed (or is mid-fade) while the daemon booted:
-          // the session has no pane to live in, so close it rather than leak it.
-          if (!lath.store.has(eagerId) || lath.isDying(eagerId)) {
+          // A Door is a retained Surface even though it is outside the visible
+          // tree. Close only when the eager Surface was genuinely destroyed (or
+          // its visible pane is mid-fade); otherwise hand the session to its meta.
+          if (!eagerSurfaceExists() || lath.isDying(eagerId)) {
             closeAgentBrowserSession({ renderMode: mode, ...bound });
             return;
           }
