@@ -15,7 +15,7 @@ A **Surface** is the durable occupant of a Pane — the content in a slot. Two k
 
 A **Pane** is one Lath leaf, a slot in the tiling layout (`docs/specs/tiling-engine.md`); `lib/src/components/Wall.tsx` owns Panes and Surfaces both.
 
-A Pane holds exactly one Surface today, but the model reserves several (a future in-pane surface strip), so **`dor` targets content — `read` / `send` / `kill` — by Surface ref (`surface:N`)**, holding Pane refs back for layout-only commands (rationale).
+A Pane holds exactly one Surface today, but the model reserves several (a future in-pane surface strip), so **`dor` targets content — `read` / `send` / `await` / `kill` — by Surface ref (`surface:N`)**, holding Pane refs back for layout-only commands (rationale).
 
 **Surface kinds** — the `kind` a `dor` handle reports, derived from the Pane's params, never stored on the id:
 
