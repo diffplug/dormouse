@@ -5,6 +5,7 @@ import npmDeps from "../data/dependencies-npm.json";
 import runtimeDeps from "../data/dependencies-runtime.json";
 import DocsLayout from "../components/DocsLayout";
 import { LINK_CLASS, SCROLL_MT_CLASS } from "../components/docs-tokens";
+import { AnchoredHeading } from "../components/MarkdownDocument";
 import { type MetaArgs } from "react-router";
 import { type TocEntry } from "../lib/docs-pages";
 import { siteMeta } from "../lib/site-meta";
@@ -174,12 +175,15 @@ const SECTIONS: readonly SupplyChainSection[] = [
   },
 ];
 
-/** This page's table of contents, off the list that titles its sections. */
-export const SUPPLY_CHAIN_TOC: TocEntry[] = SECTIONS.map((section) => ({
-  id: section.id,
-  text: section.title,
-  children: [],
-}));
+/** This page's table of contents, off the list that titles its inventory sections. */
+export const SUPPLY_CHAIN_TOC: TocEntry[] = [
+  { id: "guarantees", text: "Supply-chain guarantees", children: [] },
+  ...SECTIONS.map((section) => ({
+    id: section.id,
+    text: section.title,
+    children: [],
+  })),
+];
 
 function DependencySection({ section }: { section: SupplyChainSection }) {
   return (
@@ -201,19 +205,46 @@ function DependencySection({ section }: { section: SupplyChainSection }) {
 export default function SupplyChain() {
   return (
     <DocsLayout activePath="/supply-chain" toc={SUPPLY_CHAIN_TOC}>
+      <AnchoredHeading id="guarantees">Supply-chain guarantees</AnchoredHeading>
       <p className="text-base text-[var(--color-text)]/70 mb-2">
-        This is the generated inventory of every runtime component Dormouse puts on a
-        user&apos;s machine. It is derived from the dependency graph and pinned bundled
-        runtime; CI rejects a production-dependency change whose refreshed disclosure is
-        missing.
+        The inventory below is the visible part of Dormouse&apos;s supply-chain contract:
       </p>
+      <ul className="mb-4 list-disc space-y-2 pl-5 text-base text-[var(--color-text)]/70">
+        <li>
+          <strong className="font-semibold">Every shipped dependency is disclosed.</strong>{" "}
+          The inventory covers every direct and transitive npm package, every direct and
+          transitive Cargo crate, bundled theme source, and the Node.js runtime. CI rejects
+          a production-dependency change unless the refreshed disclosure is committed.
+        </li>
+        <li>
+          <strong className="font-semibold">The bundled runtime is exactly the version shown.</strong>{" "}
+          The page reads the build&apos;s exact Node.js pin, and the build verifies the binary
+          against it before bundling.
+        </li>
+        <li>
+          <strong className="font-semibold">No newly published dependency is adopted for 24 hours</strong>,
+          including security fixes. The age gate applies to both npm packages and Cargo
+          crates, including automated vulnerability updates.
+        </li>
+        <li>
+          <strong className="font-semibold">Repository automation cannot publish by itself.</strong>{" "}
+          Merges to <code>main</code> and tag creation are admin-only, authored GitHub Actions
+          are pinned by commit, and the bot maintainer cannot merge, tag, or read a release
+          secret.
+        </li>
+        <li>
+          <strong className="font-semibold">Releases keep a human and offline keys in the path.</strong>{" "}
+          Publishing the VS Code extension requires a second person&apos;s approval. Desktop
+          signing and update keys never enter CI; CI&apos;s attestations and hashes are verified
+          locally before its artifacts are signed.
+        </li>
+      </ul>
       <p className="text-base text-[var(--color-text)]/70 mb-2">
-        The{" "}
-        <a href="/docs/security#guarantees" className={link()}>
-          security page
+        The nightly and pre-release audit that checks these claims is described in{" "}
+        <a href="/docs/security#how-the-guarantees-are-checked" className={link()}>
+          how the guarantees are checked
         </a>
-        {" "}explains the dependency cooldown and the release and audit controls behind
-        this disclosure. The coordinating server installed by the{" "}
+        . The coordinating server installed by the{" "}
         <a href="/docs/self-host#what-the-installer-does" className={link()}>
           self-host runbook
         </a>

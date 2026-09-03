@@ -26,7 +26,11 @@ export function meta({ location }: MetaArgs) {
 const REPO_URL = "https://github.com/diffplug/dormouse";
 
 export const SELF_HOST_TOC: TocEntry[] = [
-  { id: "security-model", text: "Security model", children: [] },
+  {
+    id: "security-model",
+    text: "Security model",
+    children: [{ id: "security-boundaries", text: "Boundaries and current gaps", children: [] }],
+  },
   ...(selfhost.toc as TocEntry[]),
 ];
 
@@ -41,12 +45,7 @@ export default function SelfHostDocs() {
       <AnchoredHeading id="security-model">Security model</AnchoredHeading>
       <p className="mb-4 text-lg leading-relaxed opacity-80">
         The coordinating server is a rendezvous and ciphertext relay, not a trusted
-        terminal gateway. The complete guarantees, accepted risks, and known gaps live
-        in the{" "}
-        <a href="/docs/security" className={LINK_CLASS}>
-          security spec
-        </a>
-        ; these are the consequences that matter while operating it:
+        terminal gateway. Its access-control and confidentiality guarantees are:
       </p>
       <ul className="mb-4 list-disc space-y-2 pl-6 text-lg opacity-80">
         <li className="leading-relaxed">
@@ -64,6 +63,12 @@ export default function SelfHostDocs() {
           passkey or Server account alone cannot add an entry.
         </li>
         <li className="leading-relaxed">
+          <strong className="font-semibold">A stolen or synced passkey is not terminal access.</strong>{" "}
+          Every connection also needs the phone&apos;s paired key and a fresh presence proof
+          bound to that connection. Clearing the phone browser&apos;s site data loses that key
+          and requires pairing again; it grants nobody access.
+        </li>
+        <li className="leading-relaxed">
           <strong className="font-semibold">The Server sees metadata, not content.</strong>{" "}
           It observes account and passkey authentication data, IP addresses, Host IDs and
           online state, routing relationships, reauthentication, push endpoints, and
@@ -72,24 +77,60 @@ export default function SelfHostDocs() {
           Host label, pairing decision, or notification text.
         </li>
         <li className="leading-relaxed">
+          <strong className="font-semibold">Push notifications are sealed to one phone.</strong>{" "}
+          The Server relays an encrypted envelope and never receives notification plaintext.
+          Push endpoints must be public HTTPS URLs and cannot be aimed into the tailnet.
+        </li>
+        <li className="leading-relaxed">
+          <strong className="font-semibold">A hostile Server has bounded leverage.</strong>{" "}
+          It cannot authorize a phone or make rejected frames consume unbounded Host work.
+          The Host connects only to the relay origin built into it and refuses a different
+          origin before sending credentials.
+        </li>
+        <li className="leading-relaxed">
+          <strong className="font-semibold">The deployment keeps plaintext off the network.</strong>{" "}
+          The backend listens on loopback behind the tailnet, the installer rejects Tailscale
+          Funnel, and credential files are restricted to the account that installed them.
+        </li>
+        <li className="leading-relaxed">
           <strong className="font-semibold">An authorized phone has full terminal power.</strong>{" "}
           Remote control is raw keyboard access to a live shell, not a restricted or
           read-only session.
         </li>
       </ul>
+      <AnchoredHeading id="security-boundaries" depth={3}>
+        Boundaries and current gaps
+      </AnchoredHeading>
+      <ul className="mb-4 list-disc space-y-2 pl-6 text-lg opacity-80">
+        <li className="leading-relaxed">
+          The trusted endpoints are the Host binaries and the exact Pocket application this
+          origin serves. A compromised browser or operating system, active XSS, or a modified
+          Pocket build is outside the model.
+        </li>
+        <li className="leading-relaxed">
+          Encrypted notifications can be replayed, and one push endpoint per browser lets the
+          Server associate that phone with each Host it registers.
+        </li>
+        <li className="leading-relaxed">
+          The relay can deny service, and it is unavailable whenever the machine running it
+          sleeps. There is no revocation UI or activity audit trail; revoking a lost phone
+          currently means editing the Host ACL file and restarting the Host.
+        </li>
+        <li className="leading-relaxed">
+          Installer verification is uneven: Linux checks credential mode and owner, macOS
+          checks modes only, and Windows checks the DACL but not the owner.
+        </li>
+        <li className="leading-relaxed">
+          The setup password has a fixed delay but no rate limit or lockout. The analyzed
+          deployment is tailnet-only; exposing its origin to the public internet is a
+          different security model.
+        </li>
+      </ul>
       <p className="mb-4 text-lg leading-relaxed opacity-80">
-        The trusted endpoints are the Host binaries and the exact Pocket application this
-        origin serves; a compromised browser or operating system, active XSS, or modified
-        Pocket build is outside the model. The relay can deny availability, and today there
-        is no revocation UI or activity audit trail. The deployment also assumes a
-        tailnet-only origin, a loopback-only plaintext backend, and no Tailscale Funnel—the
-        setup password is not hardened for public exposure. See{" "}
-        <a href="/docs/security#what-is-not-defended" className={LINK_CLASS}>
-          what is not defended
-        </a>
-        {" "}and the{" "}
-        <a href="/docs/security#known-gaps" className={LINK_CLASS}>
-          known gaps
+        The CI checks and nightly and pre-release audit that hold these claims to the code
+        are described in{" "}
+        <a href="/docs/security#how-the-guarantees-are-checked" className={LINK_CLASS}>
+          how the guarantees are checked
         </a>
         .
       </p>

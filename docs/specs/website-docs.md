@@ -258,9 +258,11 @@ navigation rail, an `h1` and intro, and prev/next. The changelog and the supply
 chain are in that list too — a reader meets them the same way, as long-form
 material reached from the rail rather than from the marketing nav.
 
-**Must cross-link `/docs/security`, `/supply-chain`, and `/docs/self-host` within
-their prose**, not only through the rail. `website/src/pages/security-pages.test.tsx`
-pins both outbound links per page.
+**Must keep `/supply-chain` self-contained for supply-chain guarantees and
+`/docs/self-host` for its security guarantees, boundaries, and gaps, and link each to
+`/docs/security#how-the-guarantees-are-checked` for shared audit mechanics.**
+All three cross-link in prose; `website/src/pages/security-pages.test.tsx` pins
+the specialized claims and both outbound links per page.
 
 **The rail is the only table of contents.** It lists every page and expands the
 current one's sections beneath it, so moving between pages and within one is
@@ -403,8 +405,8 @@ owns this: a rule matching nothing fails the build naming the rule, so a
 renamed section is a decision rather than a silent republication of what the
 delta meant to hold back.
 
-The page adds a security summary linked to its canonical page and disclosure,
-plus advice to run this document with an assistant.
+The page adds a self-contained security model, its installed-component
+disclosure, the shared audit-method link, and advice to use an assistant.
 
 ## `/docs/security` spec
 
