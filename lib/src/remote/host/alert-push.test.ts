@@ -495,18 +495,20 @@ describe('sealed push', () => {
 describe('push device list', () => {
   it('joins server subscriptions to ACL labels', async () => {
     // By `deliveryId`: the Server knows the capability and nothing else, so the
-    // Host is the only party that can put a human name against a row.
+    // Host is the only party that can put a human name against a row. The id is
+    // the join key and stops here — it is a bearer capability, and the dialog
+    // that reads this renders labels (`SECURITY.md` -> the outbound FAIL IF).
     await refreshPushDevices(deps());
     expect(getPushDevices()).toEqual({
       status: 'ready',
-      devices: [{ deliveryId: PHONE, label: 'iPhone Safari' }],
+      devices: [{ label: 'iPhone Safari' }],
     });
   });
 
   it('omits a subscribed device that is no longer in the ACL', async () => {
     subscribed = [PHONE, REVOKED];
     await refreshPushDevices(deps());
-    expect(getPushDevices().devices).toEqual([{ deliveryId: PHONE, label: 'iPhone Safari' }]);
+    expect(getPushDevices().devices).toEqual([{ label: 'iPhone Safari' }]);
   });
 
   it('reports error rather than an empty list when the server is unreachable', async () => {
@@ -566,7 +568,7 @@ describe('push device list', () => {
     );
 
     await newer;
-    expect(getPushDevices().devices).toEqual([{ deliveryId: TABLET, label: 'iPad' }]);
+    expect(getPushDevices().devices).toEqual([{ label: 'iPad' }]);
 
     resolveOlder({
       ok: true,
@@ -574,6 +576,6 @@ describe('push device list', () => {
     } as Response);
     await older;
 
-    expect(getPushDevices().devices).toEqual([{ deliveryId: TABLET, label: 'iPad' }]);
+    expect(getPushDevices().devices).toEqual([{ label: 'iPad' }]);
   });
 });

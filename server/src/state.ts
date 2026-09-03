@@ -4,7 +4,14 @@ import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 
-import { E2E_ID_BYTE_LENGTH, SELFHOST_ACCOUNT_ID, isE2eId, toBase64Url } from 'server-lib-common';
+import {
+  E2E_ID_BYTE_LENGTH,
+  SELFHOST_ACCOUNT_ID,
+  base64UrlLength,
+  isE2eId,
+  isExactBase64Url,
+  toBase64Url,
+} from 'server-lib-common';
 import type { PushSubscriptionPayload } from 'server-lib-common';
 
 import { secretEquals } from './secrets.js';
@@ -166,6 +173,38 @@ export interface StoredHost {
 }
 
 /**
+ * The one shape a `hostToken` has: 32 random bytes, base64url. Minted here and
+ * required at every lookup, the way `hostId` is pinned to `isE2eId`
+ * (`docs/specs/server.md` -> State files).
+ */
+const HOST_TOKEN_BYTE_LENGTH = 32;
+export const HOST_TOKEN_LENGTH = base64UrlLength(HOST_TOKEN_BYTE_LENGTH);
+
+/** Whether `value` could be a token this Server minted. */
+export function isHostToken(value: unknown): value is string {
+  return isExactBase64Url(value, HOST_TOKEN_LENGTH);
+}
+
+/**
+ * How many Hosts one account may have enrolled.
+ *
+ * Enrollment is credential-gated, so this is not a flood defense — it is the
+ * bound on a file that is otherwise append-only and is re-read, re-parsed and
+ * compared row by row on every host-gated request and every `/ws/host`
+ * upgrade. Far above the machines a person owns; revocation (deleting a row by
+ * hand) is what makes room.
+ */
+export const MAX_ENROLLED_HOSTS = 32;
+
+/** Thrown by {@link HostStore.enroll} when {@link MAX_ENROLLED_HOSTS} is reached. */
+export class HostLimitReachedError extends Error {
+  constructor() {
+    super(`this server already has ${MAX_ENROLLED_HOSTS} hosts enrolled`);
+    this.name = 'HostLimitReachedError';
+  }
+}
+
+/**
  * Persistent host enrollment (`hosts.json`). Mirrors {@link AccountStore}: an
  * append-only JSON array, atomic writes, and a mutex so concurrent enrollments
  * cannot lose a write. Revocation is deleting a line by hand (POC guardrail).
@@ -213,8 +252,15 @@ export class HostStore extends JsonFileStore {
    * The token is a secret, so it is compared with `secretEquals` rather than
    * `===`, whose early-exit leaks byte positions. Every host is checked without
    * an early break so the work does not depend on which entry matches.
+   *
+   * **A value of the wrong shape never reaches the file.** This runs
+   * unauthenticated, on `requireHost` and on every `/ws/host` upgrade, and the
+   * lookup costs a `readFile` + `JSON.parse` + two SHA-256 per row — so a probe
+   * that cannot possibly be a token this Server minted must not buy any of it.
+   * The same reasoning `isDeliveryId` applies at the push routes.
    */
   async findByToken(hostToken: string): Promise<StoredHost | undefined> {
+    if (!isHostToken(hostToken)) return undefined;
     const hosts = await this.list();
     let match: StoredHost | undefined;
     for (const h of hosts) {
@@ -251,9 +297,13 @@ export class HostStore extends JsonFileStore {
     return this.mutate(async () => {
       await beforeEnroll(!(await this.exists()));
       const hosts = await this.list();
+      // After the credential gate, never before: a caller that has not proved
+      // anything must not learn from the refusal whether the server is full.
+      // Inside the mutex, so two concurrent enrollments cannot both pass it.
+      if (hosts.length >= MAX_ENROLLED_HOSTS) throw new HostLimitReachedError();
       const host: StoredHost = {
         hostId: toBase64Url(randomBytes(E2E_ID_BYTE_LENGTH)),
-        hostToken: toBase64Url(randomBytes(32)),
+        hostToken: toBase64Url(randomBytes(HOST_TOKEN_BYTE_LENGTH)),
         enrolledAt: this.now(),
       };
       hosts.push(host);
@@ -392,6 +442,9 @@ export class PushSubscriptionStore extends JsonFileStore {
    * * **Drop rows matched on the endpoint**, which is what reaches siblings
    *   holding delivery ids this request never names.
    *
+   * The committed set is then capped ({@link capSubscriptions}), because a
+   * self-chosen `deliveryId` makes every request a fresh row otherwise.
+   *
    * `docs/specs/server.md` -> State files owns the rule and the gap it leaves.
    */
   upsert(
@@ -405,12 +458,14 @@ export class PushSubscriptionStore extends JsonFileStore {
           .filter((s) => s.deliveryId === record.deliveryId && s.endpoint !== record.endpoint)
           .map((s) => s.endpoint),
       );
-      const kept = all.filter(
-        (s) =>
-          !(s.hostId === record.hostId && s.deliveryId === record.deliveryId) &&
-          !replacedEndpoints.has(s.endpoint),
+      const kept = capSubscriptions(
+        all.filter(
+          (s) =>
+            !(s.hostId === record.hostId && s.deliveryId === record.deliveryId) &&
+            !replacedEndpoints.has(s.endpoint),
+        ),
+        stored,
       );
-      kept.push(stored);
       await this.writeAtomic(kept);
       const endpointHostIds = [
         ...new Set(
@@ -464,6 +519,55 @@ export class PushSubscriptionStore extends JsonFileStore {
       return all.length - kept.length;
     });
   }
+}
+
+/**
+ * How many subscription rows one Host, and the whole file, may hold.
+ *
+ * `POST /api/push/subscribe` needs a session token and a `deliveryId` the
+ * caller picks for itself — the Server cannot check one against a Host's ACL,
+ * by design — so without a cap one signed-in caller appends a durable row per
+ * request, and every push route thereafter re-reads and re-parses the file.
+ * Every sibling transient store is capped (`MAX_PENDING_REAUTH_NONCES_PER_SESSION`,
+ * `MAX_TOKENS_PER_HOST`); this is the durable one, so it matters more.
+ *
+ * Far above any real use: the per-Host cap is phones paired with one laptop,
+ * the total is that across every laptop an account enrolled.
+ */
+export const MAX_PUSH_SUBSCRIPTIONS_PER_HOST = 32;
+export const MAX_PUSH_SUBSCRIPTIONS_TOTAL = 256;
+
+/**
+ * Drop the oldest rows until both caps hold, never `keep` — the row this
+ * mutation just committed, which the caller is about to be told about.
+ *
+ * Oldest `subscribedAt` first, and applied to every Host rather than only
+ * `keep`'s, so a hand-edited file over the cap converges on the next write. An
+ * evicted Client reads as un-registered and repairs by pressing Enable again,
+ * which is the same recovery a dropped row already has
+ * (`docs/specs/server.md` -> State files).
+ */
+function capSubscriptions(
+  rows: readonly StoredPushSubscription[],
+  keep: StoredPushSubscription,
+): StoredPushSubscription[] {
+  const all = [...rows, keep];
+  if (all.length <= MAX_PUSH_SUBSCRIPTIONS_PER_HOST) return all;
+  const perHost = new Map<string, number>();
+  for (const row of all) perHost.set(row.hostId, (perHost.get(row.hostId) ?? 0) + 1);
+  let total = all.length;
+  const dropped = new Set<StoredPushSubscription>();
+  for (const row of [...all].sort((a, b) => a.subscribedAt - b.subscribedAt)) {
+    if (row === keep) continue;
+    const forHost = perHost.get(row.hostId) ?? 0;
+    if (total <= MAX_PUSH_SUBSCRIPTIONS_TOTAL && forHost <= MAX_PUSH_SUBSCRIPTIONS_PER_HOST) {
+      continue;
+    }
+    dropped.add(row);
+    perHost.set(row.hostId, forHost - 1);
+    total -= 1;
+  }
+  return all.filter((row) => !dropped.has(row));
 }
 
 /**

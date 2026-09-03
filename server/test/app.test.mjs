@@ -13,16 +13,23 @@ import { freshApp } from './helpers.mjs';
  * while reading as correct. `readConfig` normalizes for the entrypoint; this is
  * the boundary refusing to be handed one that was not.
  */
-test('createApp refuses an origin that is not already bare', () => {
+test('createApp refuses an origin that is not already bare, or not http(s)', () => {
   for (const origin of [
     'https://dor.example.ts.net/',
     'https://dor.example.ts.net/pocket',
     'https://Dor.Example.TS.NET',
     'dor.example.ts.net',
+    // `isOrigin` alone admits every WHATWG special scheme, and everything
+    // downstream reads this as http(s): no browser sends one as
+    // `clientData.origin`, and the Pocket CSP derives its WebSocket source by
+    // slicing `http` off the front.
+    'ws://dor.example.ts.net',
+    'wss://dor.example.ts.net',
+    'ftp://dor.example.ts.net',
   ]) {
     assert.throws(
       () => createApp({ setupPassword: 'pw', origin, stateDir: '/nonexistent' }),
-      /bare origin/,
+      /bare http\(s\) origin/,
       origin,
     );
   }

@@ -23,7 +23,11 @@
  *     variable, passes here. The security audit still owns that.
  *   - It says nothing about the *generated* `manage` scripts beyond the fact
  *     that the installer writes the checks into them. Whether `manage verify`
- *     passes on a real install is what `manage verify` is for.
+ *     passes on a real install is what `manage verify` is for. The decisions
+ *     that turn on searching unbounded CLI output are executed rather than
+ *     read: `scripts/installer-verify-test.mjs` extracts those functions from
+ *     these files and drives them, because each once matched the right string
+ *     and returned the wrong answer.
  *   - Windows is checked at the same depth as the other two, which is worth
  *     stating plainly: nothing in CI can execute PowerShell here, so for that
  *     file this lint is the *only* automated signal that a control survives.
@@ -124,6 +128,32 @@ export const RULES = [
     },
   },
   {
+    // The same rule from the other side: a search of a definition that could
+    // not be read finds no password either. The unix pair read a file and fail
+    // when it is missing; Windows exports over CIM, which can hand back $null
+    // for reasons that have nothing to do with the task, and used to answer
+    // that with the reassuring line.
+    rule: 'Credentials at rest — manage verify fails when the service definition could not be read at all',
+    patterns: {
+      macOS: /fail "LaunchAgent plist missing or invalid/,
+      Linux: /fail "unit file missing/,
+      Windows: /the task definition could not be exported -- verify cannot say it carries no credential/,
+    },
+  },
+  {
+    // Windows-only, and the only thing enforcing owner-only on `hosts.json`
+    // there, so an enumeration that failed must not print the same Note as an
+    // account that was never created.
+    rule: 'Credentials at rest — manage verify fails when state\\ cannot be enumerated',
+    patterns: { Windows: /state\\ could not be enumerated/ },
+    skip: {
+      macOS:
+        'the per-file walk is Windows-only — `server/src/state.ts` writes 0o600 and it holds on unix, so the mode check on `state/` is the whole control (SECURITY.md, "Credentials at rest")',
+      Linux:
+        'the per-file walk is Windows-only, for the reason stated in the macOS skip; Linux checks mode and owner on `state/` itself',
+    },
+  },
+  {
     rule: 'Network posture — the installer refuses to rewrite a mismatched DORMOUSE_ORIGIN',
     patterns: {
       macOS: /refusing to silently rewrite the origin/,
@@ -142,11 +172,28 @@ export const RULES = [
     },
   },
   {
+    // Anchored on the match itself, not the phrase: a bare /funnel on/i is
+    // also satisfied by any comment that names the state being matched for —
+    // this file's own rule about prose satisfying rules, found by the
+    // self-test the first time such a comment was written.
     rule: 'Network posture — manage verify fails on an active Tailscale Funnel',
     patterns: {
-      macOS: /funnel on/i,
-      Linux: /funnel on/i,
-      Windows: /funnel on/i,
+      macOS: /grep -qi 'funnel on'/,
+      Linux: /grep -qi 'funnel on'/,
+      Windows: /-match '\(\?i\)funnel on'/,
+    },
+  },
+  {
+    // The other half of that rule, and the half the pattern above cannot see:
+    // the string it matches is equally present in a check that never ran. An
+    // unavailable Tailscale CLI prints nothing, nothing matches `funnel on`,
+    // and the reassuring line is what the operator gets. Anchored on the
+    // failure message, which only the unknown verdict says.
+    rule: 'Network posture — manage verify fails when the Funnel check could not run',
+    patterns: {
+      macOS: /could not check tailscale funnel/,
+      Linux: /could not check tailscale funnel/,
+      Windows: /could not check tailscale funnel/,
     },
   },
   {
@@ -254,6 +301,82 @@ export const RULES = [
       macOS: /umask 077\n\s*cat > "\$ENV_FILE"/,
       Linux: /: > "\$ENV_FILE"\n\s*chmod 0600 "\$ENV_FILE"/,
       Windows: /\[IO\.File\]::WriteAllText\(\$ENV_FILE, ''\)\n\s*Protect-Path -Path \$ENV_FILE\b/,
+    },
+  },
+  {
+    // A gate, not a report, which is why it is its own rule: past the pipe
+    // buffer the piped ladder took NEITHER branch, so `confirm` never ran and
+    // the install repointed the operator's root Serve path without asking.
+    //
+    // Every root-path Serve match, counted: the gate's two arms, plus
+    // `serve_proxies_root`, which asks the same question about the same output
+    // for `manage verify` and for uninstall — the rule below counts those two
+    // consumers, since this one cannot. All are scoped to the root line and
+    // right-bounded — an unscoped port match said "already ours" for a config
+    // whose root was foreign, and for one on :31000.
+    rule: 'Network posture — every root-path Serve match is scoped to / and bounded on the port',
+    patterns: {
+      macOS: /grep -qE '\^\\\|-- \/ \+proxy \.\*127\\\.0\\\.0\\\.1:'"\$1"'\(\[\^0-9\]\|\$\)' <<<"\$2"|grep -qE '\^\\\|-- \/ \+proxy' <<<"\$2"/,
+      Linux: /grep -qE '\^\\\|-- \/ \+proxy \.\*127\\\.0\\\.0\\\.1:'"\$1"'\(\[\^0-9\]\|\$\)' <<<"\$2"|grep -qE '\^\\\|-- \/ \+proxy' <<<"\$2"/,
+    },
+    skip: {
+      Windows:
+        'its ladder, verify and uninstall checks are all `-match` over a string already captured from `Invoke-Tailscale`, so there is no pipeline to take SIGPIPE; the root scoping and the port bound are pinned on this platform by the rule below, which counts all three inline `-match` sites',
+    },
+    exactMatches: { macOS: 3, Linux: 3 },
+  },
+  {
+    // The rule above counts the helper's own text, so it stays green when a
+    // CALLER stops asking — `serve_proxies_root` survives on `manage verify`'s
+    // call alone, and the shell test pins that its answer is right, never that
+    // uninstall consults it. Reviewing this branch proved it: the uninstall
+    // scoping was deletable on all three platforms with every gate green. This
+    // counts the consumers instead.
+    //
+    // Windows spells the match inline at all three sites rather than through a
+    // helper, so the pattern is variable-agnostic — $PORT in `Invoke-Verify`
+    // and `Invoke-Uninstall`, $LOOPBACK_PORT at the install-time gate — and runs
+    // through the `([^0-9]|$)` tail. Both halves are load-bearing and neither
+    // was covered at first: stopping the pattern before the tail left the
+    // right-bound deletable at the two $PORT sites, and counting only $PORT
+    // left the gate — the one arm where a wrong answer is a mutation, not a
+    // report — pinned by nothing at all. Each revert kept every gate green.
+    // `SERVE_AFTER` is excluded on purpose: it is bounded but not root-scoped,
+    // because it asserts our own `serve --bg` landed rather than auditing a
+    // foreign config.
+    rule: 'Network posture — every root-path Serve decision consults the root-scoped match',
+    patterns: {
+      macOS: /if serve_proxies_root "\$PORT" "\$serve_out"; then/,
+      Linux: /if serve_proxies_root "\$PORT" "\$serve_out"; then/,
+      Windows:
+        /-match \('\(\?m\)\^\\\|--\\s\+\/\\s\+proxy\.\*' \+ \[regex\]::Escape\("127\.0\.0\.1:\$(?:LOOPBACK_)?PORT"\) \+ '\(\[\^0-9\]\|\$\)'\)/,
+    },
+    exactMatches: { macOS: 2, Linux: 2, Windows: 3 },
+  },
+  {
+    // Windows takes the same match inline rather than through a helper, so it
+    // is pinned on what the check says instead. The `/` in the message is the
+    // control: it is the difference between a claim about the origin serving
+    // Pocket at the root and a claim about the port appearing somewhere.
+    rule: 'Network posture — manage verify names the root path in its Serve verdict',
+    patterns: {
+      macOS: /Serve does not proxy \/ to 127\.0\.0\.1:/,
+      Linux: /Serve does not proxy \/ to 127\.0\.0\.1:/,
+      Windows: /Serve does not proxy \/ to 127\.0\.0\.1:/,
+    },
+  },
+  {
+    // The other half of "preserved byte-for-byte": a file that exists is not
+    // necessarily one an install finished writing, and the preserve branch
+    // cannot tell. Anchored on the message, since that is the whole control —
+    // it names the missing keys and sends the operator to `rm`, where the
+    // bind-host guard below it says "fix it" about a file with nothing in it.
+    // `scripts/installer-verify-test.mjs` drives the unix `env_missing_keys`.
+    rule: 'Credentials at rest — a half-written config/server.env is named, not preserved',
+    patterns: {
+      macOS: /config\/server\.env is missing installer-owned keys/,
+      Linux: /config\/server\.env is missing installer-owned keys/,
+      Windows: /config\\server\.env is missing installer-owned keys/,
     },
   },
   {

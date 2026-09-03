@@ -260,7 +260,7 @@ export async function performEnrollment(
  * that can never answer a pairing or a connection. Failing the exchange here is
  * the probe gate's Host half: the message names the missing capability rather
  * than leaving the operator with a Host that enrolled and then does nothing
- * (`docs/specs/remote-security-model.md` → Cryptographic suite).
+ * (`docs/specs/remote-security-model.md` → Noise suite).
  */
 async function mintNoiseStatic(): Promise<{
   noiseStaticPrivateKey: string;

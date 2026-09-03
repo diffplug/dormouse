@@ -17,16 +17,22 @@
  * for shipped code, `standalone/scripts/dev-host-guard.mjs` for the dev
  * harness — or sit on ALLOWED below with a stated reason.
  *
+ * `scripts/loopback-lint-selftest.mjs` proves each bind form is load-bearing by
+ * adding one and requiring this lint to go red.
+ *
  * What it deliberately does NOT do, so nobody mistakes it for the whole rule:
  *   - It cannot tell whether the guard is actually *called* on every request,
  *     only that the file knows the guard exists. The audit still owns that.
- *   - It matches only an explicit loopback host, in either of Node's two
- *     spellings (positional and options-object). A listener that binds every
- *     interface (`.listen(port)` with no host) is a different and larger
- *     problem, and `server/` does it deliberately from config, so flagging it
- *     here would be noise. A host built at runtime (`.listen(port, hostVar)`)
- *     is invisible to a regex and always will be — that is the ceiling of a
- *     textual check, and the audit is what covers above it.
+ *   - It knows the bind forms listed at LISTEN_RE and no others. A library
+ *     nobody has added yet spells its bind some way this file has never seen,
+ *     so adding a server dependency means adding its spelling here.
+ *   - Outside `ws`, it matches only an explicit loopback host. A listener that
+ *     binds every interface (`.listen(port)` with no host) is a different and
+ *     larger problem, and `server/` does it deliberately from config, so
+ *     flagging it here would be noise. A host built at runtime
+ *     (`.listen(port, hostVar)`, `serve({ hostname: bindHost })`) is invisible
+ *     to a regex and always will be — that is the ceiling of a textual check,
+ *     and the audit is what covers above it.
  *   - Unix-domain sockets and named pipes are out of scope by design: no
  *     browser can reach one, which is why the `dor` control channel is bounded
  *     by socket permissions instead.
@@ -69,26 +75,51 @@ const ALLOWED = {
 };
 
 const GUARD_REFERENCES = ['loopback-guard', 'dev-host-guard'];
-// Node accepts two spellings of a loopback TCP bind, and both must match:
-//   .listen(<port>, '127.0.0.1', …)      positional
-//   .listen({ host: '127.0.0.1', … })    options object, either key order
-// The host argument is what distinguishes a TCP bind from a UDS/named-pipe
-// listen, which passes a single path and must not match. Applied to the whole
-// file rather than line by line — `.listen(` is routinely wrapped across lines,
-// and the `\s*`/`[^)]*?` spans already cross newlines.
+// A TCP listener is not only `.listen(`. Every library in this tree that can
+// bind one gets its own spelling, because a check that sees one API is a check
+// an author leaves by picking another — which is what an audit found: `ws` and
+// `@hono/node-server` binds were invisible here while `SECURITY.md` claimed a
+// new loopback bind fails the build.
+//
+//   .listen(<port>, '127.0.0.1', …)             node, positional
+//   .listen({ host: '127.0.0.1', … })           node, options object
+//   serve({ hostname: '127.0.0.1', … })         @hono/node-server
+//   new WebSocketServer({ host: '127.0.0.1' })  ws, explicit loopback
+//   new WebSocketServer({ port: … })            ws, any port at all
+//
+// For `.listen` the host argument is what separates a TCP bind from a
+// UDS/named-pipe listen, which passes a single path and must not match. `ws` is
+// the exception: a `WebSocketServer` given a `port` binds every interface,
+// loopback included, and it is the one API `SECURITY.md`'s "HTTP **and
+// WebSocket**" names — so it matches on the port alone, while the `noServer`
+// form (no port, no bind) does not match. Applied to the whole file rather than
+// line by line: a bind is routinely wrapped across lines, and the `\s*` /
+// `[^}]*?` spans already cross newlines.
 const LOOPBACK = "['\"](?:127\\.0\\.0\\.1|localhost)['\"]";
 const LISTEN_RE = new RegExp(
-  `\\.listen\\(\\s*(?:`
-  + `[^,)]+,\\s*${LOOPBACK}`                        // positional
-  + `|\\{[^}]*?host\\s*:\\s*${LOOPBACK}`             // options object
-  + `)`,
+  '(?:'
+  + `\\.listen\\(\\s*(?:`
+  + `[^,)]+,\\s*${LOOPBACK}`                          // node, positional
+  + `|\\{[^}]*?host\\s*:\\s*${LOOPBACK}`               // node, options object
+  + `)`
+  + `|\\bserve\\(\\s*\\{[^}]*?hostname\\s*:\\s*${LOOPBACK}` // @hono/node-server
+  + '|\\bnew\\s+(?:WebSocket\\.Server|WebSocketServer)\\(\\s*\\{[^}]*?'
+  + `(?:host\\s*:\\s*${LOOPBACK}|port\\s*:)`           // ws
+  + ')',
   's',
 );
 
 const SOURCE_EXT = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/;
 const IS_TEST = /(?:\.test\.|\.spec\.|[\\/]tests?[\\/])/;
-// This file documents the pattern it looks for, so it matches itself.
-const SELF = 'scripts/loopback-lint.mjs';
+// These two files spell out the pattern this lint looks for — one documenting
+// it, one adding each form to prove it is load-bearing — so they match
+// themselves. Excluded by name rather than exempted by a guard reference: an
+// exemption would leave them counted as listeners, which is a count nobody can
+// read.
+const SELF = new Set([
+  'scripts/loopback-lint.mjs',
+  'scripts/loopback-lint-selftest.mjs',
+]);
 
 /** Every tracked, non-test source file, as repo-relative POSIX paths. */
 function sourceFiles() {
@@ -99,7 +130,7 @@ function sourceFiles() {
     maxBuffer: 64 * 1024 * 1024,
   });
   return out.split('\0').filter((rel) => (
-    rel && rel !== SELF && SOURCE_EXT.test(rel) && !IS_TEST.test(rel)
+    rel && !SELF.has(rel) && SOURCE_EXT.test(rel) && !IS_TEST.test(rel)
   ));
 }
 

@@ -5,6 +5,7 @@ import type { AwaitHandle, AwaitOptions, AwaitOutcome } from '../alert-manager';
 import type { AlertSettings } from '../alert-settings';
 import { readInjectedRecoveryCommands } from '../vscode-recovery-global';
 import { setDefaultShellOpts } from '../shell-defaults';
+import { embedderOrigins } from '../embedder-origins';
 import {
   collectTerminalSemanticEvents,
   TerminalProtocolParser,
@@ -398,7 +399,9 @@ export class VSCodeAdapter implements PlatformAdapter {
     // iframe-proxy-host.ts). On timeout, report unreachable so the panel shows a
     // hint rather than hanging on a never-loading frame.
     const result = await this.requestResponse<IframeProxyResult>(
-      'iframe:createProxyUrl', 'iframe:proxyUrl', { url },
+      // The webview's ancestor chain is only knowable here: it decides who may
+      // frame the proxy (`lib/src/lib/embedder-origins.ts`).
+      'iframe:createProxyUrl', 'iframe:proxyUrl', { url, embedderOrigins: embedderOrigins() },
       (msg) => msg.result,
       5000,
     );

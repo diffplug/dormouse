@@ -34,7 +34,7 @@ export type WebviewMessage =
   | { type: 'agentBrowser:open'; url: string; headed?: boolean; binaryPath?: string; requestId: string }
   | { type: 'agentBrowser:popOut'; session: string; url?: string; rect?: { x: number; y: number; width: number; height: number }; binaryPath?: string; requestId: string }
   | { type: 'agentBrowser:popIn'; session: string; url?: string; binaryPath?: string; requestId: string }
-  | { type: 'iframe:createProxyUrl'; url: string; requestId: string }
+  | { type: 'iframe:createProxyUrl'; url: string; embedderOrigins: string[]; requestId: string }
   // Peer surfaces: the remote Host runs in the extension host, but the terminals
   // live in whichever webview opened them. See docs/specs/vscode.md → "Peer
   // surfaces". `op` is opaque to the router: the operation map lives in

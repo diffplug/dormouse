@@ -54,6 +54,12 @@ const OSC99_PENDING_TTL_MS = 60_000;
 const OSC99_MAX_PENDING_IDS = 64;
 const TITLE_LIMIT = 256;
 const BODY_LIMIT = 4096;
+// The OSC 633 `E` command line. Bounded and sanitized like every other value
+// that comes off the wire and is then *retained*: it is re-tokenized on every
+// header derivation and is the key `dor ensure --restart` matches on, and
+// `decodeOsc633Value` actively re-introduces control characters that the
+// emit-side escaping had removed (`docs/specs/terminal-escapes.md`).
+const COMMAND_LINE_LIMIT = 2048;
 const OSC99_PENDING_TITLE_LIMIT = 2048;
 const OSC99_PENDING_BODY_LIMIT = 16_384;
 const OSC99_SUPPORT_PAYLOAD = 'o=always:p=title,body';
@@ -387,7 +393,16 @@ function parseOsc633(content: string): TerminalProtocolEvent[] {
     // that send raw, unescaped semicolons will see their command truncated; this
     // matches VS Code's contract rather than guessing a delimiter.
     const rawCommand = content.slice(prefix.length).split(';', 1)[0] ?? '';
-    return [{ kind: 'semantic', event: { type: 'commandLine', commandLine: decodeOsc633Value(rawCommand) } }];
+    // Bounded *before* the unescape, so a megabyte of `\xNN` is not decoded to
+    // be thrown away, and sanitized after it, because the unescape is what puts
+    // control characters back. An all-control command line reduces to nothing
+    // and is dropped rather than stored empty.
+    const commandLine = sanitizeText(
+      decodeOsc633Value(truncateText(rawCommand, COMMAND_LINE_LIMIT * 4)),
+      COMMAND_LINE_LIMIT,
+    );
+    if (commandLine === null) return [];
+    return [{ kind: 'semantic', event: { type: 'commandLine', commandLine } }];
   }
   if (fields[1] === 'P') {
     return parseOsc633Property(content.slice('633;P;'.length));

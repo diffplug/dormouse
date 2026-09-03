@@ -78,6 +78,8 @@ chromatic-diagnostics.json
 audit-*.md
 audit-status.txt
 
-# deploy-lint-selftest / e2e-lint-selftest backups, if a signal interrupts one mid-run
+# lint self-test backups, if a signal interrupts one mid-run
 *.selftest.bak
 *.e2e-selftest.bak
+*.loopback-selftest.bak
+*.spec-selftest.bak

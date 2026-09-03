@@ -73,7 +73,7 @@ export function createMaliciousRelay({ hostId, guards = true }) {
   if (guards) {
     const hub = new RelayHub();
     const host = hub.registerHost(hostId, toHost);
-    const client = hub.registerClient(toClient);
+    const client = hub.registerClient(toClient, { expiresAt: Number.POSITIVE_INFINITY });
     relayClientEnd.addEventListener('message', (ev) => {
       seen.push({ from: 'client', to: 'relay', frame: JSON.parse(ev.data) });
       hub.onClientFrame(client, ev.data);

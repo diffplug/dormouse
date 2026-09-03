@@ -55,8 +55,9 @@ const ENROLLMENT: HostEnrollment = {
   origin: 'https://relay.example',
   rpId: 'relay.example',
   // The Host's Noise static rides with the enrollment, so this store is where
-  // its private half lives (`docs/specs/remote-security-model.md` → E2E
-  // identities and presence). Shapes, not real keys — `isEnrollment` checks
+  // its private half lives
+  // (`docs/specs/remote-security-model.md` → Host identity). Shapes, not real
+  // keys — `isEnrollment` checks
   // the encoding and the decoded lengths on the way back in.
   noiseStaticPrivateKey: toBase64Url(new Uint8Array(48)),
   noiseStaticPublicKey: toBase64Url(new Uint8Array(32)),

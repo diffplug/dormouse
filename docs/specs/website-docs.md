@@ -137,16 +137,14 @@ bare scheme check. A new documentation source rendered through that component
 through `localizeSiteLinks` too, or its site links will open in a new tab
 pointed at production.
 
-`--baseImagesUrl` is passed explicitly rather than letting `vsce` or `ovsx`
-infer a base, because inference uses the repository root and this extension
-lives in a subdirectory. **Must pass** it on every `vsce` or `ovsx` invocation
-that builds a VSIX from source; `checkImageBaseUrl` pins them to
-`SITE_IMAGE_BASE`, exempting a `--packagePath` republish whose URLs were already
-rewritten.
+**Must pass** `--baseImagesUrl` on every `vsce` or `ovsx` invocation that
+builds a VSIX from source, rather than letting either infer a base (rationale);
+`checkImageBaseUrl` pins them to `SITE_IMAGE_BASE`, exempting a `--packagePath`
+republish.
 
 **Never** write to `website/public/guide/` from anything but the generator,
-which deletes it wholesale each build. Hand-authored assets stay at `public/`
-root, where git tracks them.
+which deletes it wholesale each build (rationale). Hand-authored assets stay at
+`public/` root, where git tracks them.
 - The same content renders usefully in Open VSX and GitHub Markdown.
 
 The listing's discovery contract also includes `displayName`, `description`,
@@ -231,16 +229,14 @@ horizontal overflow. No HTML string is ever injected —
 canonical, and social cards. The root route calls it with the homepage's copy;
 a page overrides by exporting `meta` and calling it with its own.
 
-**Never** hardcode one of those in `root.tsx`'s `<head>`. React Router renders
-only the deepest route's `meta`, and a `<head>` tag is emitted before
-`<Meta />` — so a page with its own `meta` ships two `<title>` elements and
-crawlers read the first. **Must** give every prerendered page a canonical on
-its own path; one origin-wide canonical asks search engines to treat every page
-as a duplicate of the homepage. Canonicals carry the trailing slash the host
-redirects to. **Never** claim one from a route served through the SPA fallback:
-the client `<Meta />` reconciles `<title>` text but appends tags, so a second
-canonical joins the fallback's homepage one and both are discarded.
-`siteMeta`'s `indexable: false` sends `robots: noindex, follow` instead.
+**Never** hardcode one of those in `root.tsx`'s `<head>`: a `<head>` tag is
+emitted before `<Meta />`, so a page with its own `meta` ships two `<title>`
+elements and crawlers read the first (rationale). **Must** give every
+prerendered page a canonical on its own path, carrying the trailing slash the
+host redirects to. **Never** claim one from a route served through the SPA
+fallback — the client `<Meta />` appends rather than replaces, so a second
+canonical joins the fallback's and both are discarded; `siteMeta`'s
+`indexable: false` sends `robots: noindex, follow` instead.
 `checkPageHeadTags` and `checkSiteOrigin` pin the first two;
 `ChangelogAfter.tsx` is the only route under the third.
 
@@ -284,12 +280,9 @@ which is why their links moved off caramel.
 up the canvas and lets body's background propagate.
 
 **Prose links take the picked theme's `accent`, contrast-corrected — never
-brand caramel, never `--vscode-textLink-foreground`.** No bundled theme
-defines `textLink.foreground`, so that var gives one registry default per theme
-*kind*, identical across every dark theme. Caramel is 5.56:1 on the site's black
-but 3.43–3.78:1 on every bundled light theme, so it stays where the reader
-cannot retheme it — the wordmark, the header, the homepage — and is the
-fallback before a theme applies.
+brand caramel, never `--vscode-textLink-foreground`** (rationale). Caramel
+stays where the reader cannot retheme it — the wordmark, the header, the
+homepage — and is the fallback before a theme applies.
 
 **A reader is prompted to pick a theme until they answer.** Picking one and
 closing the prompt both count — a reader who declined has seen the offer.

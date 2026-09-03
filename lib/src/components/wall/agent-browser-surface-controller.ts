@@ -5,6 +5,7 @@
  * only; Wall owns daemon teardown.
  */
 import { getPlatform } from '../../lib/platform';
+import { isAllowedAgentBrowserBinary } from '../../lib/agent-browser-binary';
 import { readTextFromClipboard } from '../../lib/clipboard';
 import { isAbDebugLogsEnabled } from '../../lib/feature-flags';
 import {
@@ -124,6 +125,19 @@ export interface AgentBrowserSurfaceParams {
   binaryPath?: string;
   url?: string;
   syncEngaged?: boolean;
+}
+
+/**
+ * `binaryPath` names a program the *host* will spawn, and these params come off
+ * the persisted session blob — a plain record with no schema
+ * (`lib/src/lib/session-types.ts`). Editing that file must not be a way to have
+ * the sidecar exec something on the next launch, so the value is checked here,
+ * before it is ever sent, as well as at the spawn itself
+ * (`lib/src/host/agent-browser-host.ts`). A refused path simply falls back to
+ * the host's own resolution.
+ */
+function allowedBinaryPath(candidate: unknown): string | undefined {
+  return isAllowedAgentBrowserBinary(candidate) ? candidate : undefined;
 }
 
 /** The live DOM bindings a mounted view lends the controller. `attachView`
@@ -290,7 +304,7 @@ export class AgentBrowserSurfaceController {
   constructor(id: string, params: AgentBrowserSurfaceParams) {
     this.id = id;
     this.session = params.session;
-    this.binaryPath = params.binaryPath;
+    this.binaryPath = allowedBinaryPath(params.binaryPath);
     this.wsPort = params.wsPort;
     this.streamPort = params.wsPort;
     this.paramsUrl = params.url;
@@ -534,8 +548,9 @@ export class AgentBrowserSurfaceController {
       this.emitView();
       this.maybeRecoverStalePort();
     }
-    if (params.binaryPath !== this.binaryPath) {
-      this.binaryPath = params.binaryPath;
+    const nextBinaryPath = allowedBinaryPath(params.binaryPath);
+    if (nextBinaryPath !== this.binaryPath) {
+      this.binaryPath = nextBinaryPath;
       this.maybeRecoverStalePort();
     }
     if (params.wsPort !== this.wsPort) {

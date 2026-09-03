@@ -26,6 +26,7 @@ import {
   type RemoteHostCommand,
   type RemoteHostResult,
 } from "dormouse-lib/host/remote/service-protocol";
+import { embedderOrigins } from "dormouse-lib/lib/embedder-origins";
 import { AlertManager } from "dormouse-lib/lib/alert-manager";
 import type { AwaitHandle, AwaitOptions } from "dormouse-lib/lib/alert-manager";
 import type { AlertSettings } from "dormouse-lib/lib/alert-settings";
@@ -162,7 +163,10 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
 
   async createIframeProxyUrl(targetUrl: string): Promise<IframeProxyResult> {
     try {
-      return await this.host.invoke("iframe_create_proxy_url", { target: targetUrl });
+      return await this.host.invoke("iframe_create_proxy_url", {
+        target: targetUrl,
+        embedderOrigins: embedderOrigins(),
+      });
     } catch (err) {
       return { ok: false, reason: "unreachable", detail: errMessage(err) };
     }

@@ -10,6 +10,9 @@ import { createIframeProxyUrl as createProxy } from '../../lib/src/host/iframe-p
 import type { IframeProxyResult } from '../../lib/src/lib/platform/types';
 import { log } from './log';
 
-export function createIframeProxyUrl(targetUrl: string): Promise<IframeProxyResult> {
-  return createProxy(targetUrl, { log: (msg) => log.info(msg) });
+export function createIframeProxyUrl(
+  targetUrl: string,
+  embedderOrigins: unknown,
+): Promise<IframeProxyResult> {
+  return createProxy(targetUrl, { log: (msg) => log.info(msg), embedderOrigins });
 }

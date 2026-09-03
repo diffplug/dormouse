@@ -135,7 +135,7 @@ function checkImages() {
  * Every `vsce` or `ovsx` invocation that packages the extension from source
  * must pass the site's image base.
  *
- * docs/specs/website-docs.md -> "`--baseImagesUrl` is passed explicitly" — the
+ * docs/specs/website-docs.md -> Canonical product guide — the
  * guide's images are repo-relative, both packagers infer a base from the
  * repository root, and this extension lives in a subdirectory, so an
  * invocation without the flag ships a listing whose images 404. Only a human
@@ -144,7 +144,7 @@ function checkImages() {
  * already-packaged VSIX, whose URLs were rewritten when it was built.
  */
 function checkImageBaseUrl() {
-  const claim = '`--baseImagesUrl` is passed explicitly';
+  const claim = '**Must pass** `--baseImagesUrl` on every';
   if (!readRepoFile(SPEC).includes(claim)) {
     fail(`${SPEC}: no longer says ${claim} — the rule and its prose must move together`);
   }

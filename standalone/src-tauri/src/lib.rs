@@ -508,11 +508,18 @@ async fn pty_graceful_kill_all(
 fn iframe_create_proxy_url(
     state: tauri::State<'_, SidecarState>,
     target: String,
+    // The webview's own ancestor chain, which is what decides who may frame the
+    // proxy. Forwarded verbatim and validated in the proxy itself
+    // (`normalizeEmbedderOrigins`), so this stays a bridge and nothing more.
+    embedder_origins: Option<Vec<String>>,
 ) -> Result<JsonValue, String> {
     let response = request_from_sidecar_timeout(
         &state,
         "iframe:createProxyUrl",
-        serde_json::json!({ "target": target }),
+        serde_json::json!({
+            "target": target,
+            "embedderOrigins": embedder_origins.unwrap_or_default(),
+        }),
         Duration::from_secs(5),
     )?;
     Ok(response.get("result").cloned().unwrap_or(JsonValue::Null))

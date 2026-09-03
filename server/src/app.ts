@@ -9,6 +9,7 @@ import { readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 
 import { Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import { cors } from 'hono/cors';
 import type { Context, MiddlewareHandler } from 'hono';
 import { createNodeWebSocket } from '@hono/node-ws';
@@ -18,9 +19,13 @@ import {
   API_ROUTES,
   CEREMONY_FIELD_LIMIT,
   DELIVERY_ID_LENGTH,
+  E2E_ID_LENGTH,
   HELLO_ROUTE,
   HostChallengeIssuer,
+  MAX_CLIENT_ID_LENGTH,
+  MAX_E2E_CIPHERTEXT_LENGTH,
   MAX_PUSH_QUERY_DELIVERY_IDS,
+  MAX_SEALED_PUSH_LENGTH,
   SELFHOST_ACCOUNT_ID,
   SETUP_TOKEN_INVALID_ERROR,
   BAD_PASSWORD_ERROR,
@@ -30,6 +35,7 @@ import {
   WS_TOKEN_PARAM,
   fromBase64Url,
   getWebCrypto,
+  boundedPushText,
   helloResponse,
   isBoundedBase64Url,
   isExactBase64Url,
@@ -74,7 +80,12 @@ import type {
 } from 'server-lib-common';
 
 import { invalidateEnrollOffer, redeemEnrollToken } from './enroll-token.js';
-import { RelayHub } from './relay.js';
+import {
+  RelayHub,
+  WS_CLOSE_TRY_AGAIN_LATER,
+  WS_CLOSE_UNAUTHORIZED,
+  WS_CLOSE_UNAUTHORIZED_REASON,
+} from './relay.js';
 import type { ClientConn, HostConn } from './relay.js';
 import { secretEquals } from './secrets.js';
 import { SetupTokenIssuer } from './setup-token.js';
@@ -82,13 +93,14 @@ import type { SetupTokenEntry } from './setup-token.js';
 import {
   AccountStore,
   DuplicateCredentialError,
+  HostLimitReachedError,
   HostStore,
   PushSubscriptionStore,
 } from './state.js';
 import type { StoredHost, StoredPushSubscription } from './state.js';
 import { sendWithinDeadline } from './push.js';
 import type { PushSender } from './push.js';
-import { isPublicHttpsPushEndpoint } from './push-endpoint.js';
+import { MAX_PUSH_ENDPOINT_LENGTH, isPublicHttpsPushEndpoint } from './push-endpoint.js';
 
 /** Runtime configuration; see `index.ts` for how env maps onto this. */
 export interface AppConfig {
@@ -174,14 +186,35 @@ const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
  */
 const REAUTH_NONCE_TTL_MS = 2 * 60 * 1000;
 /**
- * How many unredeemed presence nonces the process will hold.
+ * How many unredeemed presence nonces ONE SESSION will hold.
  *
  * `POST /api/reauth/begin` needs only a session token, so without a cap one
  * signed-in caller can grow this map for the process's lifetime by asking —
  * exactly the reason `HostChallengeIssuer.issue` sweeps. Far above any real
  * use: a phone holds one nonce at a time, per ceremony.
+ *
+ * **Per session, never global.** A nonce is minted *before* its WebAuthn
+ * prompt, so it waits out seconds of human latency; a global cap made a flood
+ * from any other session evict a legitimate phone's nonce inside that window,
+ * failing every pairing and connection ceremony for as long as the flood ran.
+ * A caller can now only ever evict its own.
  */
-const MAX_PENDING_REAUTH_NONCES = 64;
+const MAX_PENDING_REAUTH_NONCES_PER_SESSION = 8;
+/**
+ * How many sessions may hold nonces at once. The second half of the bound:
+ * per-session caps alone leave the total riding on the session count, so the
+ * store holds at most this many buckets — least-recently-used dropped whole —
+ * which puts the ceiling at 32 x 8. Reaching it takes 32 distinct sign-ins,
+ * each a WebAuthn assertion, rather than 65 bare POSTs.
+ */
+const MAX_REAUTH_NONCE_SESSIONS = 32;
+/**
+ * How many unredeemed WebAuthn challenges either issuer will hold. Sized like
+ * its siblings — a person signs in from a handful of devices, and every
+ * challenge dies in two minutes — and applied because `signinChallenges` is
+ * minted by an unauthenticated, bodyless route.
+ */
+export const MAX_PENDING_CHALLENGES = 64;
 /**
  * How often {@link CreatedApp.sweepRevokedHosts} should be run. `index.ts` owns
  * the timer — `createApp` starts no background work of its own.
@@ -192,8 +225,70 @@ const MAX_PENDING_REAUTH_NONCES = 64;
  * — puts a disk read on the path every keystroke takes.
  */
 export const HOST_REVOCATION_SWEEP_MS = 60_000;
+/**
+ * How often {@link CreatedApp.sweepRelaySockets} should be run. Far more often
+ * than the revocation sweep, because it touches no disk — it closes expired
+ * Client sessions and pings the rest.
+ */
+export const RELAY_SWEEP_MS = 30_000;
+/**
+ * How long a relay socket may go unheard-from before it is closed. Three sweeps
+ * of silence: a live peer answers the first ping, so reaching this means the
+ * connection is half-open, not idle. Generous against a phone whose radio has
+ * dozed, which reconnects anyway.
+ */
+export const RELAY_IDLE_TIMEOUT_MS = 3 * RELAY_SWEEP_MS;
+/** A socket closed for silence, not for anything it did. */
+const WS_CLOSE_IDLE = 1001;
+const WS_CLOSE_IDLE_REASON = 'no response to heartbeat';
+/**
+ * The largest frame `ws` may buffer for us. Derived from the wire bounds the
+ * relay's own guards enforce — a maximal `ct` plus the envelope around it —
+ * because without it `ws` buffers up to 100 MiB before any guard has run.
+ * `MAX_CLIENT_ID_LENGTH` is in here because a Host frame carries one.
+ */
+export const MAX_RELAY_FRAME_BYTES =
+  MAX_E2E_CIPHERTEXT_LENGTH + MAX_CLIENT_ID_LENGTH + 2 * E2E_ID_LENGTH + 1024;
+/**
+ * Longest passkey label `account.json` will hold, in code points. A device
+ * name, so this is generous — and it is a bound at all because the file is
+ * durable and is re-read and re-parsed on every sign-in and every re-auth,
+ * while the two sibling fields on the same route are already bounded.
+ */
+const MAX_PASSKEY_LABEL_LENGTH = 64;
+
 /** A small fixed delay on a rejected credential — the extent of POC brute-force hardening. */
 const CREDENTIAL_FAILURE_DELAY_MS = 250;
+
+/**
+ * Longest request body any route but `/api/push/send` will read.
+ *
+ * Unauthenticated routes — `/api/host/enroll`, `/api/setup/*`,
+ * `/api/signin/finish` — read their body BEFORE the credential gate, so
+ * without this any page on the tailnet could make the process buffer gigabytes
+ * with no auth, no rate limit, and no delay. Every body this server actually
+ * takes is a handful of base64url fields, so 64 KiB is orders of magnitude
+ * above real use.
+ */
+export const MAX_REQUEST_BODY_BYTES = 64 * 1024;
+
+/**
+ * The one route whose legitimate body outgrows {@link MAX_REQUEST_BODY_BYTES}:
+ * a fan-out of `MAX_PUSH_QUERY_DELIVERY_IDS` sealed envelopes, each already
+ * bounded by `MAX_SEALED_PUSH_LENGTH`. Derived from those two rather than
+ * written out, so tightening either tightens this with it; the per-recipient
+ * allowance covers the delivery id, the salt, and the JSON around them.
+ */
+const PUSH_SEND_RECIPIENT_OVERHEAD_BYTES = 256;
+export const MAX_PUSH_SEND_BODY_BYTES =
+  MAX_PUSH_QUERY_DELIVERY_IDS *
+    (DELIVERY_ID_LENGTH + MAX_SEALED_PUSH_LENGTH + PUSH_SEND_RECIPIENT_OVERHEAD_BYTES) +
+  PUSH_SEND_RECIPIENT_OVERHEAD_BYTES;
+
+/** The one answer to an over-long body: 413, before any route has run. */
+function tooLarge(c: Context<AppEnv>): Response {
+  return c.json({ error: 'request body too large' }, 413);
+}
 
 /** The credential fields `pickCredential` reads. */
 type CredentialBody = { password?: unknown; enrollToken?: unknown };
@@ -251,40 +346,88 @@ interface PendingPresenceNonce {
  * whatever the caller sends back.
  */
 class PresenceNonceStore {
-  readonly #pending = new Map<string, PendingPresenceNonce>();
+  /**
+   * One bucket per session, keyed by the {@link Session} object `SessionStore`
+   * minted — a stable identity per session token that no request body can name.
+   * Map iteration is insertion order, so re-inserting a bucket on every write
+   * makes the front of this map the least recently used one.
+   */
+  readonly #bySession = new Map<Session, Map<string, PendingPresenceNonce>>();
+  /** Every live nonce, so `consume` stays one lookup rather than a bucket scan. */
+  readonly #owner = new Map<string, Session>();
   readonly #now: () => number;
 
   constructor(now: () => number) {
     this.#now = now;
   }
 
-  /** Hold `binding` against `serverNonce` for {@link REAUTH_NONCE_TTL_MS}. */
-  remember(serverNonce: string, binding: PresenceBinding): void {
+  /**
+   * Hold `binding` against `serverNonce` for {@link REAUTH_NONCE_TTL_MS}, in
+   * `session`'s own bucket. Eviction never leaves that bucket, so one caller
+   * cannot cost another its live nonce.
+   */
+  remember(session: Session, serverNonce: string, binding: PresenceBinding): void {
     const now = this.#now();
-    for (const [nonce, entry] of this.#pending) {
-      if (now >= entry.expiresAt) this.#pending.delete(nonce);
-    }
-    // Oldest first: Map iterates in insertion order and every entry carries the
-    // same TTL, so the front of the map is the closest to expiring anyway.
-    while (this.#pending.size >= MAX_PENDING_REAUTH_NONCES) {
-      const oldest = this.#pending.keys().next();
+    this.#sweepExpired(now);
+    const bucket = this.#bySession.get(session) ?? new Map<string, PendingPresenceNonce>();
+    // Re-inserted on every write, so this bucket becomes the most recently used.
+    this.#bySession.delete(session);
+    // Oldest first, within this session only: every entry carries the same TTL,
+    // so a bucket's insertion order is its expiry order.
+    while (bucket.size >= MAX_PENDING_REAUTH_NONCES_PER_SESSION) {
+      const oldest = bucket.keys().next();
       if (oldest.done) break;
-      this.#pending.delete(oldest.value);
+      bucket.delete(oldest.value);
+      this.#owner.delete(oldest.value);
     }
-    this.#pending.set(serverNonce, { binding, expiresAt: now + REAUTH_NONCE_TTL_MS });
+    bucket.set(serverNonce, { binding, expiresAt: now + REAUTH_NONCE_TTL_MS });
+    this.#bySession.set(session, bucket);
+    this.#owner.set(serverNonce, session);
+    // Whole buckets, least recently used first: a session at the ceiling is one
+    // that has not asked for a nonce in longer than any other.
+    while (this.#bySession.size > MAX_REAUTH_NONCE_SESSIONS) {
+      const stalest = this.#bySession.keys().next();
+      if (stalest.done) break;
+      this.#forget(stalest.value);
+    }
   }
 
   /**
    * Spend `serverNonce`, or `null` when it is unknown or expired. Removed
    * either way, so it can never become valid again — single use is what stops
    * one WebAuthn prompt from proving presence for two ceremonies.
+   *
+   * Not scoped to the consuming session: a nonce is 256 unguessable bits and
+   * the ceremony it belongs to is the *account's*, so which of that account's
+   * sessions redeems it is not a distinction this store may invent.
    */
   consume(serverNonce: unknown): PendingPresenceNonce | null {
     if (typeof serverNonce !== 'string') return null;
-    const entry = this.#pending.get(serverNonce);
+    const session = this.#owner.get(serverNonce);
+    if (session === undefined) return null;
+    const bucket = this.#bySession.get(session);
+    const entry = bucket?.get(serverNonce);
+    this.#owner.delete(serverNonce);
+    bucket?.delete(serverNonce);
+    if (bucket?.size === 0) this.#bySession.delete(session);
     if (entry === undefined) return null;
-    this.#pending.delete(serverNonce);
     return this.#now() < entry.expiresAt ? entry : null;
+  }
+
+  #sweepExpired(now: number): void {
+    for (const [session, bucket] of this.#bySession) {
+      for (const [nonce, entry] of bucket) {
+        if (now < entry.expiresAt) continue;
+        bucket.delete(nonce);
+        this.#owner.delete(nonce);
+      }
+      if (bucket.size === 0) this.#bySession.delete(session);
+    }
+  }
+
+  #forget(session: Session): void {
+    for (const nonce of this.#bySession.get(session)?.keys() ?? []) this.#owner.delete(nonce);
+    this.#bySession.delete(session);
   }
 }
 
@@ -310,6 +453,24 @@ export interface CreatedApp {
    * instead of a timer.
    */
   readonly sweepRevokedHosts: () => Promise<number>;
+  /**
+   * Close the Client sockets whose session has expired, then ping the rest and
+   * close whatever has not been heard from within
+   * {@link RELAY_IDLE_TIMEOUT_MS}. Reports what it closed. `index.ts` runs it
+   * every {@link RELAY_SWEEP_MS}; exposed for the same reason
+   * {@link CreatedApp.sweepRevokedHosts} is.
+   */
+  readonly sweepRelaySockets: () => { expired: number; idle: number };
+}
+
+/**
+ * The `ws` slice the heartbeat needs. Structural rather than an import: `ws` is
+ * `@hono/node-ws`'s dependency, not this package's, and a socket that does not
+ * answer this shape simply goes unwatched.
+ */
+interface PingableSocket {
+  ping(): void;
+  on(event: 'pong' | 'message', listener: () => void): void;
 }
 
 export function createApp(config: AppConfig): CreatedApp {
@@ -318,8 +479,15 @@ export function createApp(config: AppConfig): CreatedApp {
   // Enforced, not assumed: every compare below is a string compare against this
   // value, so a `https://host/` that slipped past `readConfig` (a direct caller,
   // a test) would fail each of them while reading as correct.
-  if (!isOrigin(origin)) {
-    throw new Error(`createApp needs a bare origin (scheme, host, port), got '${origin}'.`);
+  //
+  // **The scheme too, not merely "bare".** `isOrigin` admits any WHATWG special
+  // scheme — `ws://x` reduces to itself — and everything downstream reads this
+  // as `http(s)`: no browser can send one as `clientData.origin`, and
+  // `pocketContentSecurityPolicy` swaps the scheme by slicing off `http`. The
+  // env path has the same guard in `requireOrigin` (`server/src/config.ts`);
+  // this is the one every direct caller passes through.
+  if (!isOrigin(origin) || !(origin.startsWith('http://') || origin.startsWith('https://'))) {
+    throw new Error(`createApp needs a bare http(s) origin (scheme, host, port), got '${origin}'.`);
   }
   // The one parse, and only for the host part.
   const rpId = new URL(origin).hostname;
@@ -331,8 +499,12 @@ export function createApp(config: AppConfig): CreatedApp {
   const sessions = new SessionStore(now);
   const hub = new RelayHub();
   // Separate issuers per flow: a setup challenge cannot be redeemed at sign-in.
-  const setupChallenges = new HostChallengeIssuer({ now });
-  const signinChallenges = new HostChallengeIssuer({ now });
+  // Both are capped as well as swept: `POST /api/signin/begin` needs no auth
+  // and no body, so the expiry sweep alone only makes the map plateau at
+  // request-rate x TTL. A flood evicts abandoned challenges of its own making —
+  // a real ceremony that loses one retries — and cannot forge or extend any.
+  const setupChallenges = new HostChallengeIssuer({ now, maxPending: MAX_PENDING_CHALLENGES });
+  const signinChallenges = new HostChallengeIssuer({ now, maxPending: MAX_PENDING_CHALLENGES });
   // The presence nonces of `/api/reauth/*`. Its own store for the same reason
   // the issuers above are separate — a nonce minted for one flow may never be
   // redeemed in another — and it holds the binding the challenge was derived
@@ -347,7 +519,12 @@ export function createApp(config: AppConfig): CreatedApp {
 
   const credentialFailureDelayMs = config.credentialFailureDelayMs ?? CREDENTIAL_FAILURE_DELAY_MS;
 
-  // Every rejected credential answers 401 the same way, after the same delay.
+  // One 401 shape and one delay, for the credentials whose rejection is worth
+  // slowing down: the setup password, an enroll token, a setup token, and a
+  // host token. NOT the session token — an in-memory `Map` lookup costs the
+  // server nothing, so a delay there would buy an attacker held connections
+  // rather than cost them anything — and not a failed assertion, which is
+  // expensive to produce in the first place.
   async function credentialFailure(c: Context<AppEnv>, error: string): Promise<Response> {
     await delay(credentialFailureDelayMs);
     return c.json({ error }, 401);
@@ -424,7 +601,49 @@ export function createApp(config: AppConfig): CreatedApp {
   const app = new Hono<AppEnv>();
   // The WS relay routes need the http server that `serve()` builds later, so the
   // adapter is created here and `injectWebSocket` is handed back to the caller.
-  const { upgradeWebSocket, injectWebSocket } = createNodeWebSocket({ app });
+  const { upgradeWebSocket, injectWebSocket, wss } = createNodeWebSocket({ app });
+  // `ws` defaults to a 100 MiB frame, which the relay would buffer whole before
+  // any guard ran. Read at upgrade time, so setting it on the options here is
+  // what every socket this adapter accepts is built with.
+  wss.options.maxPayload = MAX_RELAY_FRAME_BYTES;
+
+  /**
+   * Liveness bookkeeping for one relay socket. A half-open TCP connection sends
+   * nothing and closes nothing, so its entry — and its Host binding — would
+   * live until the OS gave up. WebSocket ping/pong is what distinguishes it
+   * from a socket that is merely idle, which a terminal legitimately is.
+   */
+  interface RelayHeartbeat {
+    lastSeenAt: number;
+    readonly ping: () => void;
+    readonly close: () => void;
+  }
+  const heartbeats = new Set<RelayHeartbeat>();
+
+  /** Track `ws` for the heartbeat; returns the teardown for its `onClose`. */
+  function watchLiveness(ws: { raw?: unknown; close: (code?: number, reason?: string) => void }) {
+    const raw = ws.raw as PingableSocket | undefined;
+    if (typeof raw?.ping !== 'function' || typeof raw.on !== 'function') return () => {};
+    const entry: RelayHeartbeat = {
+      lastSeenAt: now(),
+      ping: () => {
+        raw.ping();
+      },
+      close: () => {
+        ws.close(WS_CLOSE_IDLE, WS_CLOSE_IDLE_REASON);
+      },
+    };
+    // Any traffic at all proves the peer is there; a pong is what proves it for
+    // a socket that has nothing to say.
+    raw.on('pong', () => {
+      entry.lastSeenAt = now();
+    });
+    raw.on('message', () => {
+      entry.lastSeenAt = now();
+    });
+    heartbeats.add(entry);
+    return () => heartbeats.delete(entry);
+  }
 
   // The Host (standalone webview) and dev Pocket builds call the API from
   // other origins, so preflights must succeed. Permissive CORS is safe here:
@@ -432,6 +651,15 @@ export function createApp(config: AppConfig): CreatedApp {
   // token, or a bearer token — and no cookies exist for a foreign origin to
   // ride on.
   app.use('/api/*', cors({ origin: '*', allowHeaders: ['Content-Type', 'Authorization'] }));
+
+  // Staged after CORS so a 413 carries the headers a browser needs to read it,
+  // and before every route so no credential gate is reached by way of a body
+  // the process already buffered.
+  const smallBodies = bodyLimit({ maxSize: MAX_REQUEST_BODY_BYTES, onError: tooLarge });
+  const sendBodies = bodyLimit({ maxSize: MAX_PUSH_SEND_BODY_BYTES, onError: tooLarge });
+  app.use('*', (c, next) =>
+    (c.req.path === API_ROUTES.pushSend ? sendBodies : smallBodies)(c, next),
+  );
 
   // Shared greeting, kept from the skeleton so `lib` and `server` stay agreed.
   app.get(HELLO_ROUTE, (c) => c.json(helloResponse()));
@@ -501,7 +729,13 @@ export function createApp(config: AppConfig): CreatedApp {
         await accounts.appendPasskey({
           credentialId: body.credentialId,
           publicKey: body.publicKey,
-          label: typeof body.label === 'string' ? body.label : '',
+          // Reduced rather than refused, so a long device name still
+          // registers, and bounded because `account.json` is durable and is
+          // re-read and re-parsed on every sign-in and every re-auth. The same
+          // `boundedPushText` the Host reduces a pairing label with, so a
+          // control or bidi character cannot reorder what an operator reads
+          // out of the file either.
+          label: boundedPushText(body.label, { limit: MAX_PASSKEY_LABEL_LENGTH, fallback: '' }),
         });
       } catch (err) {
         if (err instanceof DuplicateCredentialError) {
@@ -629,6 +863,13 @@ export function createApp(config: AppConfig): CreatedApp {
       if (err instanceof EnrollmentCredentialRejected) {
         return credentialFailure(c, UNAUTHORIZED_ERROR);
       }
+      if (err instanceof HostLimitReachedError) {
+        // Reached only past a valid credential, so it pays the same delay as
+        // every other refusal here, and it names the remedy: revocation is
+        // hand-editing `hosts.json` (docs/specs/server.md -> Guardrails).
+        await delay(credentialFailureDelayMs);
+        return c.json({ error: `${err.message}; remove one from hosts.json first` }, 409);
+      }
       if (err instanceof EnrollmentOfferNotInvalidated) {
         // Reached only after a valid bootstrap credential, so answering fast
         // would confirm it. Keep the same delay while retaining the operator-
@@ -663,10 +904,17 @@ export function createApp(config: AppConfig): CreatedApp {
 
   // Gate a route on a valid `Authorization: Bearer` host token. Mirrors
   // `requireSession`, resolving through the constant-time `findByToken`.
+  //
+  // **Rejection pays the same delay the setup password does.** This gate is
+  // unauthenticated by definition and its lookup is the most expensive one on
+  // the server — a `readFile` + `JSON.parse` + two SHA-256 per row — so
+  // answering instantly made probing cheaper for the caller than for us.
+  // `findByToken` refuses a wrong-shaped token before the read; this covers the
+  // rest.
   const requireHost: MiddlewareHandler<AppEnv> = async (c, next) => {
     const token = bearerToken(c);
     const host = token ? await hostStore.findByToken(token) : undefined;
-    if (!host) return c.json({ error: 'unauthorized' }, 401);
+    if (!host) return credentialFailure(c, UNAUTHORIZED_ERROR);
     c.set('host', host);
     await next();
   };
@@ -700,7 +948,8 @@ export function createApp(config: AppConfig): CreatedApp {
       // remembered, so a broken binding costs a 400 rather than a map entry.
       return c.json({ error: 'malformed presence binding' }, 400);
     }
-    presenceNonces.remember(serverNonce, binding);
+    // The caller's own session owns the entry, so a flood can only evict its own.
+    presenceNonces.remember(c.get('session'), serverNonce, binding);
     const res: ReauthBeginResponse = {
       challenge,
       rpId,
@@ -1013,7 +1262,9 @@ export function createApp(config: AppConfig): CreatedApp {
     async (c, next) => {
       const token = c.req.query(WS_TOKEN_PARAM);
       const host = token ? await hostStore.findByToken(token) : undefined;
-      if (!host) return c.json({ error: 'unknown host token' }, 401);
+      // The same delay `requireHost` pays: this is the other unauthenticated
+      // door onto the same expensive lookup.
+      if (!host) return credentialFailure(c, 'unknown host token');
       c.set('host', host);
       return next();
     },
@@ -1021,14 +1272,17 @@ export function createApp(config: AppConfig): CreatedApp {
       // The auth middleware above ran on this same context and stashed `host`.
       const host = (c as Context<AppEnv>).get('host');
       let conn: HostConn | undefined;
+      let unwatch = () => {};
       return {
         onOpen: (_evt, ws) => {
           conn = hub.registerHost(host.hostId, ws);
+          unwatch = watchLiveness(ws);
         },
         onMessage: (evt) => {
           if (conn && typeof evt.data === 'string') hub.onHostFrame(conn, evt.data);
         },
         onClose: () => {
+          unwatch();
           if (conn) hub.unregisterHost(conn);
         },
       };
@@ -1048,23 +1302,57 @@ export function createApp(config: AppConfig): CreatedApp {
       // between that check and the upgrade.
       const token = c.req.query(WS_TOKEN_PARAM);
       let conn: ClientConn | undefined;
+      let unwatch = () => {};
       return {
         onOpen: (_evt, ws) => {
-          if (!token || !sessions.validate(token)) {
-            ws.close(1008, 'unauthorized');
+          const session = token ? sessions.validate(token) : null;
+          if (!session) {
+            ws.close(WS_CLOSE_UNAUTHORIZED, WS_CLOSE_UNAUTHORIZED_REASON);
             return;
           }
-          conn = hub.registerClient(ws);
+          // The session rides along so the sweep can re-check it: this gate
+          // runs once and the socket outlives it by up to twelve hours.
+          const registered = hub.registerClient(ws, session);
+          if (!registered) {
+            ws.close(WS_CLOSE_TRY_AGAIN_LATER, 'too many client sockets');
+            return;
+          }
+          conn = registered;
+          unwatch = watchLiveness(ws);
         },
         onMessage: (evt) => {
           if (conn && typeof evt.data === 'string') hub.onClientFrame(conn, evt.data);
         },
         onClose: () => {
+          unwatch();
           if (conn) hub.unregisterClient(conn);
         },
       };
     }),
   );
+
+  /**
+   * The socket-level sweep: expire, then probe. `docs/specs/server.md` -> Relay
+   * owns both rules. Synchronous and cheap — it touches no disk — so `index.ts`
+   * can run it far more often than the revocation sweep.
+   */
+  function sweepRelaySockets(): { expired: number; idle: number } {
+    const at = now();
+    const expired = hub.closeExpiredClients(at);
+    let idle = 0;
+    for (const entry of [...heartbeats]) {
+      if (at - entry.lastSeenAt > RELAY_IDLE_TIMEOUT_MS) {
+        heartbeats.delete(entry);
+        entry.close();
+        idle += 1;
+        continue;
+      }
+      // A socket with nothing to say is not a dead one; the pong is what tells
+      // the two apart, and it refreshes `lastSeenAt` when it lands.
+      entry.ping();
+    }
+    return { expired, idle };
+  }
 
   /** `docs/specs/server.md` -> Guardrails owns the rule this enforces. */
   async function sweepRevokedHosts(): Promise<number> {
@@ -1091,9 +1379,67 @@ export function createApp(config: AppConfig): CreatedApp {
 
   // --- Static Pocket app: GET /* fallback, registered LAST so every API and
   //     /ws route above wins. Missing build → a stub with the build command.
-  registerPocketServing(app, config.pocketDir);
+  registerPocketServing(app, config.pocketDir, pocketContentSecurityPolicy(origin));
 
-  return { app, sessions, requireSession, hub, injectWebSocket, sweepRevokedHosts };
+  return {
+    app,
+    sessions,
+    requireSession,
+    hub,
+    injectWebSocket,
+    sweepRevokedHosts,
+    sweepRelaySockets,
+  };
+}
+
+const CSP_HEADER = 'Content-Security-Policy';
+
+/**
+ * The Pocket origin's Content-Security-Policy
+ * (`docs/specs/pocket-app.md` -> Deployment).
+ *
+ * This origin holds a per-Host Client static and the worker that opens sealed
+ * pushes, and `SECURITY.md` -> Accepted limitations already names active XSS
+ * here as the risk it cannot rule out — so it gets the defense in depth the
+ * two shipped webview hosts already have.
+ *
+ * Every source is the app's own origin. The loosenings are load-bearing and no
+ * wider than they must be:
+ *
+ * * `style-src 'unsafe-inline'` — the shell carries an inline `<style>` for
+ *   viewport plumbing that has to apply before first paint, and React writes
+ *   `style` attributes. A hash covers the first but not the second, and CSS is
+ *   not where the risk this policy exists for lives.
+ * * `connect-src` names the WebSocket origin explicitly rather than resting on
+ *   `'self'`, whose ws/wss coverage browsers have disagreed about. It is the
+ *   configured origin with the scheme swapped, so it can only ever be this
+ *   deployment's own relay.
+ * * `img-src` also admits `data:` and `blob:`, `media-src` `blob:` — images and
+ *   media the page builds in memory rather than fetches.
+ *
+ * `script-src 'self'` needs no exception: the build emits no inline script and
+ * loads nothing off-origin, which `server/test/static.test.mjs` pins against
+ * the built output.
+ */
+export function pocketContentSecurityPolicy(origin: string): string {
+  // `createApp` refuses anything but a bare `http(s)` origin, which is what
+  // makes this slice exact rather than a guess.
+  const wsOrigin = `ws${origin.slice('http'.length)}`;
+  return [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "font-src 'self'",
+    "media-src 'self' blob:",
+    `connect-src 'self' ${wsOrigin}`,
+    "worker-src 'self'",
+    "manifest-src 'self'",
+    "object-src 'none'",
+    "frame-ancestors 'none'",
+    "base-uri 'none'",
+    "form-action 'self'",
+  ].join('; ');
 }
 
 /** Message shown at `GET /` when the Pocket app has not been built yet. */
@@ -1106,7 +1452,7 @@ const POCKET_MISSING_MESSAGE =
  * `index.html` for any non-file GET (the app is a single page). When the
  * directory or its `index.html` is absent, keep the old stub at `GET /`.
  */
-function registerPocketServing(app: Hono<AppEnv>, pocketDir?: string): void {
+function registerPocketServing(app: Hono<AppEnv>, pocketDir: string | undefined, csp: string): void {
   const indexHtmlPath = pocketDir ? join(pocketDir, 'index.html') : null;
   if (!pocketDir || !indexHtmlPath || !existsSync(indexHtmlPath)) {
     app.get('/', (c) => c.text(POCKET_MISSING_MESSAGE));
@@ -1122,6 +1468,7 @@ function registerPocketServing(app: Hono<AppEnv>, pocketDir?: string): void {
     // `serveStatic`'s `onFound` hook, which runs *after* the Response has been
     // built and so cannot add a header to it.
     c.header('Cache-Control', pocketCacheControl(c.req.path));
+    c.header(CSP_HEADER, csp);
     return serveFile(c, next);
   });
   // Re-read the SPA shell per deep-link fallback: a Pocket rebuild swaps in an
@@ -1133,6 +1480,7 @@ function registerPocketServing(app: Hono<AppEnv>, pocketDir?: string): void {
     // for, so the class the static handler staged from the *request* path is
     // wrong here — a response's cache policy describes the response.
     c.header('Cache-Control', POCKET_SHELL_CACHE_CONTROL);
+    c.header(CSP_HEADER, csp);
     // A subresource miss is not a routing question, and the shell is never a
     // useful answer to one. Answering it put an HTML body under a hashed-asset
     // URL: `immutable` then meant the browser could never revalidate it away,
@@ -1211,17 +1559,40 @@ function isSealedPushRecipient(value: unknown): value is SealedPushRecipient {
   return isDeliveryId(v.deliveryId) && isSealedPushV1(v.sealed);
 }
 
-/** True if `value` is a `PushSubscriptionPayload` with both encryption keys. */
+/**
+ * Longest `keys.p256dh` / `keys.auth` this Server will store. RFC 8291 fixes
+ * both: `p256dh` is an uncompressed P-256 point (65 bytes) and `auth` is the
+ * 16-byte auth secret, so the caps are their base64 encodings *with* padding —
+ * browsers emit unpadded base64url, and a padded serialization must not be the
+ * thing that breaks a real subscription.
+ *
+ * **Every stored field is bounded.** These two plus
+ * {@link MAX_PUSH_ENDPOINT_LENGTH} are the whole row, and a durable row of
+ * unknown size is re-read and re-parsed by every push route
+ * (`docs/specs/server.md` -> State files).
+ */
+const MAX_PUSH_KEY_P256DH_LENGTH = 88;
+const MAX_PUSH_KEY_AUTH_LENGTH = 24;
+
+/**
+ * True if `value` is a `PushSubscriptionPayload` with both encryption keys,
+ * each of a length RFC 8291 could actually have produced. Non-empty, because a
+ * blank key is a row `web-push` can never encrypt to.
+ */
 function isSubscriptionPayload(value: unknown): value is PushSubscriptionPayload {
   if (!value || typeof value !== 'object') return false;
   const v = value as PushSubscriptionPayload;
   return (
-    typeof v.endpoint === 'string' &&
+    isBoundedNonEmptyString(v.endpoint, MAX_PUSH_ENDPOINT_LENGTH) &&
     !!v.keys &&
     typeof v.keys === 'object' &&
-    typeof v.keys.p256dh === 'string' &&
-    typeof v.keys.auth === 'string'
+    isBoundedNonEmptyString(v.keys.p256dh, MAX_PUSH_KEY_P256DH_LENGTH) &&
+    isBoundedNonEmptyString(v.keys.auth, MAX_PUSH_KEY_AUTH_LENGTH)
   );
+}
+
+function isBoundedNonEmptyString(value: unknown, max: number): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= max;
 }
 
 /** Decode base64url clientDataJSON to its parsed object, or `null` if malformed. */

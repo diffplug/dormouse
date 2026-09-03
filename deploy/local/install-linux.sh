@@ -652,6 +652,17 @@ random_hex32() {
   "$STAGE/runtime/node" -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))'
 }
 
+# Which installer-owned keys is the env file $1 missing (absent, or present
+# with an empty value)? Echoes them space-separated; empty output means the
+# file is one a run of this installer finished writing.
+env_missing_keys() {
+  local key missing=""
+  for key in DORMOUSE_SETUP_PASSWORD DORMOUSE_ORIGIN DORMOUSE_STATE_DIR DORMOUSE_BIND_HOST PORT; do
+    grep -q "^$key=." "$1" || missing="$missing $key"
+  done
+  printf '%s' "$missing"
+}
+
 if [ ! -f "$ENV_FILE" ]; then
   SETUP_PASSWORD="$(random_hex32)"
   # 32 random bytes is 64 hex characters. The guard counts characters, so it
@@ -685,6 +696,20 @@ else
   chmod 0600 "$ENV_FILE"
   ok "preserved the existing config/server.env"
 fi
+
+# A file that exists is not necessarily one an install finished writing. Killed
+# between creating config/server.env and filling it, it leaves a truncated file
+# that the branch above happily "preserves" — and then the bind-host guard below
+# tells the operator to *fix* a file whose repair is `rm`, on every run, forever.
+# The two cases are indistinguishable from here and their repairs are opposite,
+# so this names what is missing and changes nothing: DORMOUSE_ORIGIN is durable
+# WebAuthn identity, and the password may already have enrolled a Host.
+ENV_MISSING="$(env_missing_keys "$ENV_FILE")"
+[ -z "$ENV_MISSING" ] || die "config/server.env is missing installer-owned keys:$ENV_MISSING
+An install interrupted between creating that file and writing it leaves exactly this. Nothing has been changed. The repair depends on which one it is:
+  - nothing enrolled yet (no $STATE_DIR/hosts.json): remove the file and re-run this installer
+      rm '$ENV_FILE'
+  - otherwise: restore the missing key(s) by hand, and leave DORMOUSE_ORIGIN exactly as it is — it is durable WebAuthn identity, and rewriting it invalidates the registered passkey and every enrolled Host."
 
 # The bind host is a security boundary whenever the TLS proxy is local: Serve
 # reaches the app over loopback, so an unbound socket would also publish the
@@ -909,6 +934,63 @@ wait_for_health() {
   return 1
 }
 
+# Is Tailscale Funnel on for this node? Echoes `on`, `off`, or `unknown`.
+# $1 = the exit status of `tailscale funnel status`, $2 = `serve status` output,
+# $3 = `funnel status` output.
+#
+# `unknown` is a first-class answer, and the reason this is a function: a check
+# that could not run must not report the reassuring one. Every way the CLI can
+# be unavailable — off PATH, tailscaled down, `funnel status` unknown to an
+# older CLI — yields no output, and no output greps clean. Only the exit status
+# separates that from a node with no Funnel, so it is what decides.
+#
+# The search runs over text captured beforehand, never `printf … | grep -q`:
+# `grep -q` exits at the first match, the writer takes SIGPIPE, and under
+# `set -o pipefail` the pipeline's 141 reads exactly like "no match" — so a
+# Funnel that is ON reported as off as soon as the CLI's combined output
+# outgrew the 64 KiB pipe buffer. A here-string has no writer to signal.
+# Evidence of `on` outranks a failed probe: `serve status` naming a Funnel is
+# an answer even when `funnel status` could not run.
+#
+# Source of truth for the behavior: `scripts/installer-verify-test.mjs` drives
+# this function, extracted from this file, over inputs larger than that buffer.
+funnel_state() {
+  if grep -qi 'funnel on' <<<"$2"$'\n'"$3"; then
+    printf 'on\n'
+    return 0
+  fi
+  [ "$1" = "0" ] || { printf 'unknown\n'; return 0; }
+  printf 'off\n'
+}
+
+# Is anything in a captured listener list bound off-loopback? $1 = the port
+# (unused: `ss` was already filtered to it, and the address column is what this
+# reads), $2 = the `ss -lntH` lines. Exit 0 when at least one is off-loopback.
+#
+# Captured, for the reason `funnel_state` states: `printf … | awk … | grep -qv`
+# exits at the first non-matching line, and the writer's SIGPIPE becomes the
+# pipeline's status under `set -o pipefail` — reporting "bound only to
+# 127.0.0.1" for a list that opens with an off-loopback bind.
+has_off_loopback() {
+  local addrs
+  addrs="$(awk '{print $4}' <<<"$2")"
+  grep -qv '^127\.0\.0\.1:' <<<"$addrs"
+}
+
+# Does captured `serve status` output ($2) map the ROOT path to 127.0.0.1:$1?
+# Root-scoped and right-bounded for the two reasons the installer's own
+# `serve_state` carries: `/api` on this port is not `/` on this port, and
+# `127.0.0.1:31000` contains `127.0.0.1:3100`. Either one green-ticked a node
+# whose origin served someone else's app at `/`.
+#
+# This bets on `serve status`'s layout, which the installer's conflict gate
+# already bets on. The bet fails toward a red verify on a healthy node rather
+# than a green one on a broken node, which is the direction this command exists
+# to get right.
+serve_proxies_root() {
+  grep -qE '^\|-- / +proxy .*127\.0\.0\.1:'"$1"'([^0-9]|$)' <<<"$2"
+}
+
 cmd_status() {
   printf '\nDormouse selfhost server\n'
   printf '  install root : %s\n' "$ROOT"
@@ -1046,7 +1128,7 @@ cmd_verify() {
     if [ -z "$listeners" ]; then
       fail "nothing this system can see is listening on port $PORT"
       note "if /api/hello answered above, the responder is outside this kernel's view"
-    elif printf '%s\n' "$listeners" | awk '{print $4}' | grep -qv '^127\.0\.0\.1:'; then
+    elif has_off_loopback "$PORT" "$listeners"; then
       fail "port $PORT is bound off-loopback — fix DORMOUSE_BIND_HOST=127.0.0.1"
       printf '%s\n' "$listeners" | sed 's/^/      /'
     else
@@ -1071,13 +1153,13 @@ cmd_verify() {
   if [ -z "$serve_out" ]; then
     fail "tailscale serve reports no configuration"
   else
-    if printf '%s' "$serve_out" | grep -q "127.0.0.1:$PORT"; then
-      pass "Serve proxies to 127.0.0.1:$PORT"
+    if serve_proxies_root "$PORT" "$serve_out"; then
+      pass "Serve proxies / to 127.0.0.1:$PORT"
     else
-      fail "Serve does not proxy to 127.0.0.1:$PORT"
+      fail "Serve does not proxy / to 127.0.0.1:$PORT"
       printf '%s\n' "$serve_out" | sed 's/^/      /'
     fi
-    if [ -n "$ORIGIN" ] && printf '%s' "$serve_out" | grep -q "${ORIGIN#https://}"; then
+    if [ -n "$ORIGIN" ] && grep -q "${ORIGIN#https://}" <<<"$serve_out"; then
       pass "Serve origin matches DORMOUSE_ORIGIN ($ORIGIN)"
     else
       fail "Serve origin does not match DORMOUSE_ORIGIN ($ORIGIN)"
@@ -1088,15 +1170,26 @@ cmd_verify() {
   # exact origin to the public internet. The whole security analysis of the
   # selfhost server assumes a tailnet-only origin — most of all the setup
   # password, whose hardening is a constant-time compare and a 250ms delay
-  # (SECURITY.md, "The setup password"). So this is checked, never assumed.
-  local funnel_out
-  funnel_out="$(ts funnel status 2>/dev/null || true)"
-  if printf '%s\n%s' "$serve_out" "$funnel_out" | grep -qi 'funnel on'; then
-    fail "tailscale funnel is ON — this origin is published to the public internet"
-    printf '%s\n' "$funnel_out" | sed 's/^/      /'
-  else
-    pass "tailscale funnel is off (the origin stays tailnet-only)"
-  fi
+  # (SECURITY.md, "The setup password"). So this is checked, never assumed —
+  # and "assumed" is what `2>/dev/null || true` hid: it threw away the one
+  # signal that separates a node with no Funnel from a CLI that never ran, so
+  # an unavailable Tailscale printed the reassuring line. The status is kept,
+  # and `funnel_state` answers `unknown` rather than `off`.
+  local funnel_out funnel_rc
+  funnel_out="$(ts funnel status 2>&1)" && funnel_rc=0 || funnel_rc=$?
+  case "$(funnel_state "$funnel_rc" "$serve_out" "$funnel_out")" in
+    on)
+      fail "tailscale funnel is ON — this origin is published to the public internet"
+      printf '%s\n' "$funnel_out" | sed 's/^/      /'
+      ;;
+    unknown)
+      fail "could not check tailscale funnel: \`tailscale funnel status\` exited $funnel_rc — verify cannot say this origin stays tailnet-only"
+      if [ -n "$funnel_out" ]; then printf '%s\n' "$funnel_out" | sed 's/^/      /'; fi
+      ;;
+    *)
+      pass "tailscale funnel is off (the origin stays tailnet-only)"
+      ;;
+  esac
 
   # The property is "reachable only by the installing user", and on unix that
   # is mode AND owner: a 0700 directory owned by someone else satisfies the mode
@@ -1255,14 +1348,20 @@ cmd_uninstall() {
   rm -f "$UNIT_FILE"
   systemctl --user daemon-reload 2>/dev/null || true
   # Turn off only the mapping this installer owns.
-  if ts serve status 2>/dev/null | grep -q "127.0.0.1:$PORT"; then
+  local serve_out
+  serve_out="$(ts serve status 2>/dev/null || true)"
+  # Root-scoped, because `serve --bg off` resets the node's whole Serve config:
+  # an unscoped port match turned off a root mapping this install never owned —
+  # the operator's own, which the installer itself refuses to repoint without a
+  # confirm — whenever our port happened to sit on some other path.
+  if serve_proxies_root "$PORT" "$serve_out"; then
     if ts serve --bg off 2>/dev/null; then
       printf 'turned off the Serve mapping to 127.0.0.1:%s\n' "$PORT"
     else
       printf 'could not turn off the Serve mapping; check "tailscale serve status" and remove it by hand\n' >&2
     fi
   else
-    printf 'left the Serve config alone (it does not point at 127.0.0.1:%s)\n' "$PORT"
+    printf 'left the Serve config alone (it does not map / to 127.0.0.1:%s)\n' "$PORT"
   fi
   # bin/run-server, not bin: this script lives there too, and "purge" — the
   # command the message above points at — is unreachable once it is deleted.
@@ -1570,6 +1669,46 @@ fi
 
 step "Configuring Tailscale Serve"
 
+# What does an existing Serve configuration say about the root path? Echoes
+# `loopback` (already proxying to the port $1), `conflict` (root mapped
+# somewhere else), or `none`. $2 is captured `tailscale serve status` output.
+#
+# Captured, and searched with a here-string, because the pipe form decided a
+# gate rather than a report: `printf … | grep -q` exits at the first match, the
+# writer takes SIGPIPE, and under `set -o pipefail` the 141 reads as "no
+# match". Past the pipe buffer, `serve status` carrying a foreign root mapping
+# took NEITHER branch — so the `confirm` below never ran and the install
+# repointed the operator's root path silently.
+serve_state() {
+  # Both arms are scoped to the root line, because that is the path this
+  # function answers about. A bare `127.0.0.1:$1` anywhere in the output said
+  # `loopback` for a config whose ROOT was foreign and whose /api happened to
+  # sit on this port: the confirm was skipped, the mutation was skipped, and
+  # the install ended reporting the origin as ours while / served someone else.
+  if grep -qE '^\|-- / +proxy .*127\.0\.0\.1:'"$1"'([^0-9]|$)' <<<"$2"; then
+    printf 'loopback\n'
+  elif grep -qE '^\|-- / +proxy' <<<"$2"; then
+    printf 'conflict\n'
+  else
+    printf 'none\n'
+  fi
+}
+
+# The first root-path proxy target in captured `serve status` output ($1), or
+# nothing. The first line is taken by parameter expansion rather than `| head
+# -1`, which exits after one line and leaves `sed` to die of SIGPIPE. That 141
+# is absorbed here by two facts, neither of them "this is a helper": `printf`
+# runs last, so $? is 0 by return, and the single call site below is a `$( )`,
+# which bash enters without `errexit` absent `inherit_errexit` (bash 3.2 has
+# none). Lose either — end on the failing assignment, or call this outside a
+# substitution — and the 141 aborts the install again, so the expansion stays.
+# It is hygiene rather than a pinned control, which is why nothing lints it.
+serve_root_target() {
+  local targets
+  targets="$(sed -n 's%^|-- / *proxy *%%p' <<<"$1")"
+  printf '%s' "${targets%%$'\n'*}"
+}
+
 SERVE_BEFORE="$(ts serve status 2>&1 || true)"
 if [ -n "$SERVE_BEFORE" ]; then
   detail "existing Serve configuration:"
@@ -1577,16 +1716,19 @@ if [ -n "$SERVE_BEFORE" ]; then
 fi
 
 NEEDS_SERVE=1
-if printf '%s' "$SERVE_BEFORE" | grep -q "127.0.0.1:$LOOPBACK_PORT"; then
-  ok "Serve already proxies to 127.0.0.1:$LOOPBACK_PORT"
-  NEEDS_SERVE=0
-elif printf '%s' "$SERVE_BEFORE" | grep -qE '^\|-- / +proxy'; then
-  EXISTING_TARGET="$(printf '%s' "$SERVE_BEFORE" | sed -n 's%^|-- / *proxy *%%p' | head -1)"
-  warn "the root HTTPS path is already mapped to something else: ${EXISTING_TARGET:-<unknown>}"
-  warn "Dormouse needs / on this node to serve the Pocket app at the passkey origin."
-  confirm "Repoint / to 127.0.0.1:$LOOPBACK_PORT?" \
-    || die "left the Serve config alone. Resolve the hostname/path conflict, then re-run."
-fi
+case "$(serve_state "$LOOPBACK_PORT" "$SERVE_BEFORE")" in
+  loopback)
+    ok "Serve already proxies to 127.0.0.1:$LOOPBACK_PORT"
+    NEEDS_SERVE=0
+    ;;
+  conflict)
+    EXISTING_TARGET="$(serve_root_target "$SERVE_BEFORE")"
+    warn "the root HTTPS path is already mapped to something else: ${EXISTING_TARGET:-<unknown>}"
+    warn "Dormouse needs / on this node to serve the Pocket app at the passkey origin."
+    confirm "Repoint / to 127.0.0.1:$LOOPBACK_PORT?" \
+      || die "left the Serve config alone. Resolve the hostname/path conflict, then re-run."
+    ;;
+esac
 
 if [ "$TEST_MODE" = "1" ]; then
   warn "test mode: skipping the Serve mutation"
@@ -1608,9 +1750,14 @@ fi
 
 if [ "$TEST_MODE" != "1" ]; then
   SERVE_AFTER="$(ts serve status 2>&1 || true)"
-  printf '%s' "$SERVE_AFTER" | grep -q "127.0.0.1:$LOOPBACK_PORT" \
+  # Not root-scoped, unlike the gate above and `manage verify`: this asserts
+  # that OUR mutation landed, and both branches that reach it ran
+  # `ts serve --bg` or found / already ours, so / is ours here unless Tailscale
+  # returned 0 having done nothing. A root-scoped `die` at this point would
+  # abort an install whose service is already up, the day the layout changes.
+  grep -qE "127\.0\.0\.1:$LOOPBACK_PORT([^0-9]|\$)" <<<"$SERVE_AFTER" \
     || { printf '%s\n' "$SERVE_AFTER" >&2; die "Serve does not report a proxy to 127.0.0.1:$LOOPBACK_PORT."; }
-  printf '%s' "$SERVE_AFTER" | grep -q "$TS_DNS" \
+  grep -q "$TS_DNS" <<<"$SERVE_AFTER" \
     || { printf '%s\n' "$SERVE_AFTER" >&2; die "Serve does not report the expected HTTPS origin $ORIGIN."; }
   ok "Serve reports $ORIGIN -> 127.0.0.1:$LOOPBACK_PORT"
 fi

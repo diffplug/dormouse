@@ -129,7 +129,7 @@ export default function App({
    * Whether this runtime can run the protocol at all. **Null until the probe
    * settles, and no remote operation happens before it does**: a runtime
    * without X25519 is gated, never degraded
-   * (`docs/specs/remote-security-model.md` → Runtime gating).
+   * (`docs/specs/remote-security-model.md` → Host identity).
    */
   const [noiseSupported, setNoiseSupported] = useState<boolean | null>(null);
   useEffect(() => {
@@ -669,7 +669,7 @@ function hasPriorUseNow(client: PocketClient, passkeyAlreadyRegistered: boolean)
  * The whole of what a runtime without X25519 gets. **No action, and no remote
  * operation behind it**: every ceremony this app has needs the primitive this
  * browser lacks, so an offer here would be one that cannot work
- * (`docs/specs/remote-security-model.md` → Runtime gating).
+ * (`docs/specs/remote-security-model.md` → Host identity).
  */
 export function UnsupportedBrowser(): React.ReactElement {
   return (

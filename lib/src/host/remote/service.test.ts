@@ -1067,9 +1067,12 @@ describe('pushDevices', () => {
     createService({ enrollment: ENROLLMENT, acl: { [HOST_ID]: [aclRecord('1')] } });
     await service.start();
 
-    // The second subscribed delivery id is no longer on any ACL record.
+    // The second subscribed delivery id is no longer on any ACL record — and
+    // the surviving one crosses to the webview as a label alone: a delivery id
+    // is a bearer capability for that Client's push rows, and no route in the
+    // webview realm takes one.
     expect((await command('pushDevices')).result).toEqual({
-      devices: [{ deliveryId: aclRecord('1').deliveryId, label: 'iPhone Safari' }],
+      devices: [{ label: 'iPhone Safari' }],
     });
   });
 

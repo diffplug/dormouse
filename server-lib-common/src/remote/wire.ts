@@ -558,6 +558,21 @@ export const MAX_E2E_CIPHERTEXT_LENGTH = base64UrlLength(NOISE_MAX_MESSAGE_LENGT
  */
 export const MAX_CLIENT_ID_LENGTH = 256;
 
+/**
+ * The longest raw server → Host frame text a Host will hand to `JSON.parse`.
+ *
+ * Every other bound in this file is measured on a value the parser already
+ * produced, so none of them is reached until the whole frame has been buffered
+ * and parsed. The relay is assumed hostile and the Host is the process that
+ * owns every PTY, so the parse itself needs a bound of its own: the largest
+ * legal frame is one maximal ciphertext plus its routing fields, and the slack
+ * covers the JSON punctuation, the two fixed-length ids, `t`/`kind`/`step`, and
+ * any key ordering. Every legal field is ASCII, so this bounds bytes and UTF-16
+ * code units alike and can also be handed to `ws` as `maxPayload`.
+ */
+export const MAX_SERVER_TO_HOST_FRAME_LENGTH =
+  MAX_E2E_CIPHERTEXT_LENGTH + MAX_CLIENT_ID_LENGTH + 512;
+
 /** Client → server. */
 export interface E2eClientFrame {
   t: 'e2e';

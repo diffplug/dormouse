@@ -863,6 +863,28 @@ try {
     Write-Ok "preserved the existing config/server.env"
   }
 
+  # A file that exists is not necessarily one an install finished writing. Killed
+  # between creating config\server.env and filling it, it leaves a truncated file
+  # that the branch above happily "preserves" -- and then the bind-host guard
+  # below tells the operator to *fix* a file whose repair is `del`, on every run,
+  # forever. The two cases are indistinguishable from here and their repairs are
+  # opposite, so this names what is missing and changes nothing: DORMOUSE_ORIGIN
+  # is durable WebAuthn identity, and the password may already have enrolled a
+  # Host.
+  $envMissing = @()
+  foreach ($key in @('DORMOUSE_SETUP_PASSWORD', 'DORMOUSE_ORIGIN', 'DORMOUSE_STATE_DIR', 'DORMOUSE_BIND_HOST', 'PORT')) {
+    if (-not (Get-EnvFileValue -Path $ENV_FILE -Key $key)) { $envMissing += $key }
+  }
+  if ($envMissing.Count -gt 0) {
+    Die @"
+config\server.env is missing installer-owned keys: $($envMissing -join ' ')
+An install interrupted between creating that file and writing it leaves exactly this. Nothing has been changed. The repair depends on which one it is:
+  - nothing enrolled yet (no $STATE_DIR\hosts.json): remove the file and re-run this installer
+      del "$ENV_FILE"
+  - otherwise: restore the missing key(s) by hand, and leave DORMOUSE_ORIGIN exactly as it is -- it is durable WebAuthn identity, and rewriting it invalidates the registered passkey and every enrolled Host.
+"@
+  }
+
   # The bind host is a security boundary whenever the TLS proxy is local: Serve
   # reaches the app over loopback, so an unbound socket would also publish the
   # plaintext port to the LAN and to the tailnet.
@@ -1412,6 +1434,13 @@ function Invoke-Verify {
   # Both are consulted by two separate checks below. Export-ScheduledTask is a
   # CIM round trip into the Task Scheduler service -- the priciest call in this
   # whole path -- so it is made once here rather than once per check.
+  #
+  # It can also come back $null: CIM blocked by policy, the Task Scheduler
+  # service momentarily unavailable, or the task unregistered between Get-Task
+  # and here. Both consumers below treat that as its own outcome and fail,
+  # because a credential search through nothing found nothing. macOS and Linux
+  # reach the same place by failing outright when the plist or unit file is
+  # missing.
   $taskXml = Export-ScheduledTask -TaskName $LABEL -TaskPath $TASK_PATH -ErrorAction SilentlyContinue
   $wrapper = Join-Path $Root 'bin\run-server.ps1'
   $wrapperText = ''
@@ -1457,7 +1486,9 @@ function Invoke-Verify {
       Fail "bin\run-server.ps1 is missing or has no supervision loop"
     }
 
-    if ($taskXml -and ($taskXml -match 'DORMOUSE_SETUP_PASSWORD')) {
+    if (-not $taskXml) {
+      Fail "the task definition could not be exported -- verify cannot say it carries no credential"
+    } elseif ($taskXml -match 'DORMOUSE_SETUP_PASSWORD') {
       Fail "the task definition contains the setup password -- it must live only in config\server.env"
     } else {
       Pass "the task definition carries no credential"
@@ -1531,10 +1562,13 @@ function Invoke-Verify {
   if (-not $serveText.Trim()) {
     Fail "tailscale serve reports no configuration"
   } else {
-    if ($serveText -match [regex]::Escape("127.0.0.1:$PORT")) {
-      Pass "Serve proxies to 127.0.0.1:$PORT"
+    # Root-scoped, not merely bounded: `/api` on this port is not `/` on this
+    # port, and a green tick here is a claim about the origin serving Pocket at
+    # `/`. Same match as the unix `serve_proxies_root`.
+    if ($serveText -match ('(?m)^\|--\s+/\s+proxy.*' + [regex]::Escape("127.0.0.1:$PORT") + '([^0-9]|$)')) {
+      Pass "Serve proxies / to 127.0.0.1:$PORT"
     } else {
-      Fail "Serve does not proxy to 127.0.0.1:$PORT"
+      Fail "Serve does not proxy / to 127.0.0.1:$PORT"
       foreach ($l in $serveText.Split("`n")) { if ($l.Trim()) { Write-Host "      $($l.TrimEnd())" } }
     }
     if ($ORIGIN -and ($serveText -match [regex]::Escape($ORIGIN.Replace('https://', '')))) {
@@ -1548,11 +1582,21 @@ function Invoke-Verify {
   # exact origin to the public internet. The whole security analysis of the
   # selfhost server assumes a tailnet-only origin -- most of all the setup
   # password, whose hardening is a constant-time compare and a 250ms delay
-  # (SECURITY.md, "The setup password"). So this is checked, never assumed.
+  # (SECURITY.md, "The setup password"). So this is checked, never assumed --
+  # and a check that could not run has assumed. Every way the CLI can be
+  # unavailable (off PATH, tailscaled down, `funnel status` unknown to an older
+  # CLI) yields text that matches nothing, which is indistinguishable from a
+  # node with no Funnel until the exit status is consulted. So it is -- after
+  # the match, not before it: evidence of `on` outranks a failed probe, since
+  # `serve status` naming a Funnel is an answer even when `funnel status` is
+  # what broke. Same precedence as `funnel_state` on the other two.
   $funnel = Invoke-Tailscale @('funnel', 'status')
   $funnelText = $funnel.StdOut + $funnel.StdErr
-  if (($serveText + $funnelText) -match '(?i)funnel on') {
+  if (($serveText + "`n" + $funnelText) -match '(?i)funnel on') {
     Fail "tailscale funnel is ON -- this origin is published to the public internet"
+    foreach ($l in $funnelText.Split("`n")) { if ($l.Trim()) { Write-Host "      $($l.TrimEnd())" } }
+  } elseif ($funnel.ExitCode -ne 0) {
+    Fail "could not check tailscale funnel: ``tailscale funnel status`` exited $($funnel.ExitCode) -- verify cannot say this origin stays tailnet-only"
     foreach ($l in $funnelText.Split("`n")) { if ($l.Trim()) { Write-Host "      $($l.TrimEnd())" } }
   } else {
     Pass "tailscale funnel is off (the origin stays tailnet-only)"
@@ -1577,8 +1621,15 @@ function Invoke-Verify {
   # the ACE those files inherit from state\. So the files are checked here
   # rather than assumed from the directory -- this is the Windows half of the
   # "Credentials at rest" posture, and nothing else enforces it.
-  $stateFiles = @(Get-ChildItem -LiteralPath $StateDir -File -Force -ErrorAction SilentlyContinue)
-  if ($stateFiles.Count -eq 0) {
+  # An enumeration that failed and a directory with nothing in it both arrive
+  # here as zero files, and only one of them is healthy: reporting the Note for
+  # the other would retire the one check that holds this property on Windows.
+  # The error is kept, so they can be told apart.
+  $stateErr = $null
+  $stateFiles = @(Get-ChildItem -LiteralPath $StateDir -File -Force -ErrorAction SilentlyContinue -ErrorVariable stateErr)
+  if ($stateErr -and $stateErr.Count -gt 0) {
+    Fail "state\ could not be enumerated, so its files were not checked: $($stateErr[0].Exception.Message)"
+  } elseif ($stateFiles.Count -eq 0) {
     Note "no state files yet (no account created -- see SELF_HOST.md checkpoint 4)"
   } else {
     $leaky = @()
@@ -1633,8 +1684,9 @@ function Invoke-Verify {
   if ($src) {
     $refs = $false
     if ($wrapperText -match [regex]::Escape($src)) { $refs = $true }
-    if ($taskXml -and ($taskXml -match [regex]::Escape($src))) { $refs = $true }
+    if ($taskXml -match [regex]::Escape($src)) { $refs = $true }
     if ($refs) { Fail "the Scheduled Task or wrapper references the source checkout ($src)" }
+    elseif (-not $taskXml) { Fail "the task definition could not be exported -- only the wrapper was searched for the source checkout" }
     else { Pass "the installed service does not reference the source checkout" }
   }
 
@@ -1810,12 +1862,15 @@ function Invoke-Uninstall {
 
   # Turn off only the mapping this installer owns.
   $serve = Invoke-Tailscale @('serve', 'status')
-  if (($serve.StdOut + $serve.StdErr) -match [regex]::Escape("127.0.0.1:$PORT")) {
+  # Root-scoped, like the unix `serve_proxies_root`: `serve --bg off` resets the
+  # node's whole Serve config, so an unscoped port match turned off a root
+  # mapping this install never owned whenever our port sat on another path.
+  if (($serve.StdOut + $serve.StdErr) -match ('(?m)^\|--\s+/\s+proxy.*' + [regex]::Escape("127.0.0.1:$PORT") + '([^0-9]|$)')) {
     $off = Invoke-Tailscale @('serve', '--bg', 'off')
     if ($off.ExitCode -eq 0) { Write-Host "turned off the Serve mapping to 127.0.0.1:$PORT" }
     else { [Console]::Error.WriteLine('could not turn off the Serve mapping; check "tailscale serve status" and remove it by hand') }
   } else {
-    Write-Host "left the Serve config alone (it does not point at 127.0.0.1:$PORT)"
+    Write-Host "left the Serve config alone (it does not map / to 127.0.0.1:$PORT)"
   }
 
   foreach ($p in @((Join-Path $Root 'releases'), (Join-Path $Root 'run'))) {
@@ -2178,7 +2233,12 @@ rem directly.
   }
 
   $NEEDS_SERVE = $true
-  if ($SERVE_BEFORE -match [regex]::Escape("127.0.0.1:$LOOPBACK_PORT")) {
+  # Root-scoped and right-bounded, for the two reasons the unix `serve_state`
+  # carries: a bare port match said "already ours" for a config whose ROOT was
+  # foreign and whose other path sat on this port, and `127.0.0.1:31000`
+  # contains `127.0.0.1:3100`. Either one skips the confirm below and the
+  # mutation with it, leaving / foreign while the install reports success.
+  if ($SERVE_BEFORE -match ('(?m)^\|--\s+/\s+proxy.*' + [regex]::Escape("127.0.0.1:$LOOPBACK_PORT") + '([^0-9]|$)')) {
     Write-Ok "Serve already proxies to 127.0.0.1:$LOOPBACK_PORT"
     $NEEDS_SERVE = $false
   } elseif ($SERVE_BEFORE -match '(?m)^\|--\s+/\s+proxy') {
@@ -2206,7 +2266,7 @@ rem directly.
   if (-not $TEST_MODE) {
     $after = Invoke-Tailscale @('serve', 'status')
     $SERVE_AFTER = ($after.StdOut + $after.StdErr).TrimEnd()
-    if ($SERVE_AFTER -notmatch [regex]::Escape("127.0.0.1:$LOOPBACK_PORT")) {
+    if ($SERVE_AFTER -notmatch ([regex]::Escape("127.0.0.1:$LOOPBACK_PORT") + '([^0-9]|$)')) {
       Write-Host $SERVE_AFTER
       Die "Serve does not report a proxy to 127.0.0.1:$LOOPBACK_PORT."
     }

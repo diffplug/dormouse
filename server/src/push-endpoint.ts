@@ -86,10 +86,21 @@ export function isPublicNetworkAddress(address: string): boolean {
 }
 
 /**
+ * Longest push endpoint this Server will store. A real one is a provider URL a
+ * couple of hundred characters long (FCM, APNs and Mozilla autopush all sit
+ * well under this), so the cap is several times the headroom any of them needs
+ * — and it is what keeps a stored row a known size, since every push route
+ * re-reads and re-parses the whole file
+ * (`docs/specs/server.md` -> State files).
+ */
+export const MAX_PUSH_ENDPOINT_LENGTH = 1024;
+
+/**
  * Cheap admission check. Hostnames are revalidated through DNS at connection
  * time; literals and the special localhost namespace can be rejected now.
  */
 export function isPublicHttpsPushEndpoint(value: string): boolean {
+  if (value.length > MAX_PUSH_ENDPOINT_LENGTH) return false;
   let parsed: URL;
   try {
     parsed = new URL(value);
