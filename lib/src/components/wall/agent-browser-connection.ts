@@ -63,6 +63,11 @@ export type AgentBrowserConnectionEvent =
   | { type: 'connection-error'; port: number }
   | { type: 'status'; status: AgentBrowserStreamStatus }
   | { type: 'tabs'; tabs: AgentBrowserTab[]; previousTabs: AgentBrowserTab[] }
+  /** The active tab committed a navigation. Fires at commit; the `tabs`
+   *  snapshot refreshes only when the driving command completes, which for a
+   *  slow page is the whole load (docs/specs/dor-browser.md → "Agent-Browser
+   *  Connection"). */
+  | { type: 'url'; url: string }
   | {
       type: 'frame-pulse';
       metadata?: AgentBrowserFramePulse;
@@ -310,6 +315,9 @@ export class AgentBrowserConnection {
       this.emit({ type: 'status', status });
     } else if (msg.type === 'tabs' && Array.isArray(msg.tabs)) {
       this.handleTabs(parseAgentBrowserTabs(msg.tabs));
+    } else if (msg.type === 'url' && typeof msg.url === 'string') {
+      this.debug('url', { url: msg.url });
+      this.emit({ type: 'url', url: msg.url });
     }
   }
 

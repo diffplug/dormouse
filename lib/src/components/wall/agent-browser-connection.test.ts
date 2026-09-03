@@ -43,6 +43,17 @@ afterEach(() => {
 });
 
 describe('agent-browser connection', () => {
+  it('forwards the stream\'s url message as a navigation event', async () => {
+    const connection = createAgentBrowserConnection({ session: 's', streamPort: 1234 });
+    const events: unknown[] = [];
+    connection.subscribe((event) => { if (event.type === 'url') events.push(event); });
+    await Promise.resolve();
+    WebSocketMock.instances[0].emitMessage(JSON.stringify({ type: 'url', url: 'https://example.com/slow', timestamp: 1 }));
+    WebSocketMock.instances[0].emitMessage(JSON.stringify({ type: 'url' }));
+    expect(events).toEqual([{ type: 'url', url: 'https://example.com/slow' }]);
+    connection.dispose();
+  });
+
   it('closes the stream websocket when disposed', async () => {
     const connection = createAgentBrowserConnection({
       session: 'dormouse.1.default',

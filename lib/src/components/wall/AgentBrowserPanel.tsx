@@ -65,7 +65,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   );
 
   const snapshot = useSyncExternalStore(controller.subscribe, controller.snapshot);
-  const { tabs, status, connectionLost, hasFrame, poppedOut, streamPort } = snapshot;
+  const { tabs, status, connectionLost, hasFrame, poppedOut, relaunching, streamPort } = snapshot;
 
   const interactive = mode === 'passthrough' && selectedId === id;
   const interactiveRef = useRef(interactive);
@@ -313,6 +313,9 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
     // It is mid-boot, not idle — telling the user to run `dor ab open` here would
     // ask them to redo the click they just made.
     if (!session) return 'Connecting to browser session…';
+    // Mid pop-in: the headed browser is closed by design and the headless one
+    // is booting — not a session that ended.
+    if (relaunching) return 'Relaunching browser…';
     if (!streamPort) return `Waiting for browser session ${session} — run dor ab open <url>`;
     if (connectionLost || status?.connected === false) {
       return `Browser session ${session ?? ''} ended — run dor ab open <url> to restart it, or close this surface.`;
@@ -381,10 +384,13 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
           }}
         />
         {poppedOut ? (
-          // Popped out to a headed OS window — the pane is a clean stub.
+          // Popped out to a headed OS window — the pane is a clean stub. While
+          // the window is still being opened (a relaunch in flight, or an eager
+          // swap whose daemon has not yet named its session) there is nothing to
+          // bring to front or pop back in, so the affordances wait with it.
           <div className="flex flex-col items-center gap-3 px-4 text-center text-sm text-muted">
-            <div>This browser is running in a separate window.</div>
-            <div className="flex gap-2 text-xs">
+            <div>{!session || relaunching ? 'Opening the browser window…' : 'This browser is running in a separate window.'}</div>
+            {session && !relaunching && <div className="flex gap-2 text-xs">
               {getPlatform().agentBrowserBringToFront && (
                 <button
                   type="button"
@@ -409,7 +415,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
               >
                 Pop back in
               </button>
-            </div>
+            </div>}
           </div>
         ) : placeholder ? (
           <div className="px-4 text-center text-sm text-muted">{placeholder}</div>

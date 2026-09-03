@@ -1,4 +1,5 @@
 import { existsSync, mkdtempSync, promises as fsp, statSync, writeFileSync } from 'fs';
+import { createServer, type Server } from 'net';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -7,6 +8,59 @@ import { createAgentBrowserHost } from './agent-browser-host';
 type SpawnResult = { stdout?: string; stderr?: string; code?: number };
 
 const spawnMock = vi.hoisted(() => vi.fn());
+
+// A pid no process on this machine can hold (macOS/Linux pid_max is far lower),
+// so `process.kill(pid, 0)` answers ESRCH: "the daemon exited".
+const DEAD_PID = 2147483000;
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((r) => { resolve = r; });
+  return { promise, resolve };
+}
+
+const spawnResult = (result: SpawnResult) => ({
+  ok: true as const,
+  exitCode: result.code ?? 0,
+  stdout: result.stdout ?? '',
+  stderr: result.stderr ?? '',
+});
+
+/** Dispatch spawns by their subcommand (the args after `--session <name>`),
+ *  for flows where `open` must stay pending while other commands answer. */
+function mockSpawnByCommand(handlers: Record<string, (args: string[]) => Promise<SpawnResult> | SpawnResult>) {
+  const calls: string[][] = [];
+  spawnMock.mockImplementation(async (_binary: string, args: string[]) => {
+    calls.push(args);
+    const rest = args[0] === '--session' ? args.slice(2) : args;
+    const key = rest[0] === '--headed' ? `--headed ${rest[1]}` : rest[0];
+    const handler = handlers[key];
+    if (!handler) throw new Error(`unexpected spawn: ${args.join(' ')}`);
+    return spawnResult(await handler(args));
+  });
+  return calls;
+}
+
+/** A listener standing in for the daemon's stream server, so a port named in
+ *  `<session>.stream` actually accepts connections. */
+async function listen(): Promise<{ port: number; server: Server }> {
+  const server = createServer();
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('no port');
+  return { port: address.port, server };
+}
+
+/** A port nothing listens on: bind, read it, release it. */
+async function closedPort(): Promise<number> {
+  const { port, server } = await listen();
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  return port;
+}
+
+function writeState(session: string, ext: 'pid' | 'stream', value: number): void {
+  writeFileSync(join(process.env.AGENT_BROWSER_SOCKET_DIR!, `${session}.${ext}`), `${value}\n`);
+}
 
 // The host spawns through dor-lib-common's spawnAndCapture; mock just that
 // boundary (not its internal cross-spawn — spawnAndCapture's own behavior is
@@ -45,9 +99,12 @@ describe('agent-browser host relaunch', () => {
   });
 
   it('closes a stray about:blank tab when tab list reports CLI-style id fields', async () => {
+    // No pid file here (an older CLI): the port comes from `stream status` once
+    // `open` has returned, and the sweep runs after that.
     enqueueSpawnResults([
       {}, // close
       {}, // --headed open
+      { stdout: JSON.stringify({ port: 61218 }) },
       {
         stdout: JSON.stringify({
           tabs: [
@@ -57,17 +114,84 @@ describe('agent-browser host relaunch', () => {
         }),
       },
       {}, // tab close blank-tab
-      { stdout: JSON.stringify({ port: 61218 }) },
     ]);
 
     const host = createAgentBrowserHost({ writeClipboardText: vi.fn() });
     const result = await host.popOut('dormouse.1.default', { url: 'https://example.com/' }, '/usr/local/bin/agent-browser');
 
     expect(result).toEqual({ ok: true, wsPort: 61218 });
-    expect(spawnMock).toHaveBeenCalledWith(
-      '/usr/local/bin/agent-browser',
-      ['--session', 'dormouse.1.default', 'tab', 'close', 'blank-tab'],
-    );
+    await vi.waitFor(() => {
+      expect(spawnMock).toHaveBeenCalledWith(
+        '/usr/local/bin/agent-browser',
+        ['--session', 'dormouse.1.default', 'tab', 'close', 'blank-tab'],
+      );
+    });
+  });
+
+  it('pop-out returns the relaunched daemon\'s port while `open` is still waiting on the page', async () => {
+    // The killed daemon leaves its state files behind: a dead pid and a port
+    // nothing listens on. The relaunch must not read those as the new daemon.
+    const session = 'dormouse.1.default';
+    const stale = await closedPort();
+    writeState(session, 'pid', DEAD_PID);
+    writeState(session, 'stream', stale);
+    const opened = deferred<SpawnResult>();
+    const calls = mockSpawnByCommand({
+      close: () => ({}),
+      '--headed open': () => opened.promise,
+      tab: (args) => (args.includes('list')
+        ? { stdout: JSON.stringify({ tabs: [{ tabId: 'blank', url: 'about:blank', active: false }, { tabId: 'real', url: 'https://example.com/', active: true }] }) }
+        : {}),
+    });
+    const host = createAgentBrowserHost({ writeClipboardText: vi.fn() });
+    const popOut = host.popOut(session, { url: 'https://example.com/' });
+
+    // While the stale files are all there is, the launch waits.
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    expect(calls.some((args) => args.includes('tab'))).toBe(false);
+    // The new daemon comes up: a fresh pid and a port that accepts connections.
+    const { port, server } = await listen();
+    try {
+      writeState(session, 'pid', DEAD_PID + 1);
+      writeState(session, 'stream', port);
+      expect(await popOut).toEqual({ ok: true, wsPort: port });
+      // `open` has not returned, so no daemon command (the blank-tab sweep) has
+      // been queued behind it.
+      expect(calls.some((args) => args.includes('tab'))).toBe(false);
+      expect(calls.some((args) => args.includes('stream'))).toBe(false);
+
+      opened.resolve({ code: 1, stderr: 'Operation timed out. The page may still be loading' });
+      await vi.waitFor(() => {
+        expect(calls).toContainEqual(['--session', session, 'tab', 'close', 'blank']);
+      });
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('open() treats a timed-out page load as a live launch, and a launch with no daemon as a failure', async () => {
+    const host = createAgentBrowserHost({ writeClipboardText: vi.fn() });
+    let session = '';
+    // Timed out, daemon up (pid file present): the browser is on the page.
+    mockSpawnByCommand({
+      open: (args) => {
+        session = args[1];
+        writeState(session, 'pid', DEAD_PID);
+        return { code: 1, stderr: 'Operation timed out. The page may still be loading' };
+      },
+      stream: () => ({ stdout: JSON.stringify({ port: 61219 }) }),
+    });
+    expect(await host.open('https://slow.example/', {})).toEqual({ ok: true, session: expect.stringMatching(/^dormouse\.1\.gui-/), wsPort: 61219 });
+
+    // Failed with no daemon at all: fail, and close so nothing half-launched
+    // outlives the swap.
+    const calls = mockSpawnByCommand({
+      open: () => ({ code: 1, stderr: 'boom' }),
+      close: () => ({}),
+    });
+    expect(await host.open('https://slow.example/', {})).toEqual({ ok: false, error: 'boom' });
+    expect(calls.some((args) => args[2] === 'close')).toBe(true);
+    expect(calls.some((args) => args[2] === 'stream')).toBe(false);
   });
 });
 
