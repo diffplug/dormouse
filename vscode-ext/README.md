@@ -45,6 +45,8 @@ Dormouse never guesses which commands deserve an alert. Watching is a rule you c
 
 Whichever way a pane rings, the ring becomes a **TODO** — a marker beside the pane's title that outlives the alert, so a ring you dismissed does not disappear without a trace. Clear it by clicking it or pressing `t` in command mode.
 
+Spoken alarms use your browser or system voice today. An optional [managed ElevenLabs voice](https://dormouse.sh/hosted#voice) is coming for people who want something more natural without managing a separate voice account.
+
 Watching a command's output requires shell integration (`OSC 633` / `OSC 133`) so Dormouse can tell where one command ends and the next begins. Shells that do not report command boundaries — `cmd.exe`, `fish`, or any shell where the integration did not take — never engage watching. The protocol and command-exit alerts above work regardless.
 
 ## Browsers for you and your agents
@@ -142,6 +144,7 @@ Dormouse also bundles an agent skill describing all of this in the form agents e
 ## Help and project links
 
 - [Browser playground](https://dormouse.sh/playground) — no install required
+- [Dormouse Hosted](https://dormouse.sh/hosted) — upcoming managed remote control and voice
 - [Report an issue](https://github.com/diffplug/dormouse/issues)
 - [Source on GitHub](https://github.com/diffplug/dormouse)
 - [Supply chain](https://dormouse.sh/supply-chain)

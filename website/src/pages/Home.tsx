@@ -1,10 +1,12 @@
 import {
   AppleLogoIcon,
   CheckCircleIcon,
+  CloudArrowUpIcon,
   CubeIcon,
   DesktopIcon,
   DotsThreeOutlineIcon,
   LinuxLogoIcon,
+  SpeakerHighIcon,
   StorefrontIcon,
   TerminalIcon,
   WindowsLogoIcon,
@@ -829,7 +831,9 @@ export default function Home() {
               <a href="/docs/security" className={SITE_LINK_CLASS}>security spec</a>{" "}
               says exactly what that guarantees. The{" "}
               <a href="/docs/self-host" className={SITE_LINK_CLASS}>self-host runbook</a>{" "}
-              walks the whole install.
+              walks the whole install. If you would rather skip running it,
+              {" "}<a href="/hosted#remote-control" className={SITE_LINK_CLASS}>Dormouse Hosted</a>{" "}
+              is coming soon.
             </p>
             <p className="text-lg leading-relaxed opacity-70">
               <a href="/playground/pocket" className={SITE_LINK_CLASS}>Dormouse Pocket</a>{" "}
@@ -966,6 +970,42 @@ export default function Home() {
           <FeatureVideo src={copyPasteVideoUrl} />
         </section>
 
+        <section id="hosted" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY}`}>
+          <div className="border-y border-[var(--color-text)]/20 py-8">
+            <p className="mb-2 font-display text-sm uppercase tracking-wider text-[var(--color-caramel)]">
+              Coming soon
+            </p>
+            <h2 className="mb-4 font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)]">
+              Dormouse, with less to run yourself
+            </h2>
+            <p className="mb-7 max-w-3xl text-lg leading-relaxed opacity-70">
+              Keep Dormouse free and local, then pay only if you want the
+              coordinating server operated for you or a more natural voice for spoken alerts.
+            </p>
+            <div className="grid gap-7 md:grid-cols-2">
+              <div>
+                <CloudArrowUpIcon size={26} weight="duotone" className="mb-3 text-[var(--color-caramel)]" aria-hidden="true" />
+                <h3 className="mb-2 font-display text-xl">Managed remote control</h3>
+                <p className="leading-relaxed opacity-70">
+                  Use Pocket without deploying and maintaining the coordinating server.
+                  Your terminals still run on your computer.
+                </p>
+              </div>
+              <div>
+                <SpeakerHighIcon size={26} weight="duotone" className="mb-3 text-[var(--color-caramel)]" aria-hidden="true" />
+                <h3 className="mb-2 font-display text-xl">ElevenLabs voice</h3>
+                <p className="leading-relaxed opacity-70">
+                  Choose a managed natural voice for spoken alerts, while browser and
+                  system speech stay available.
+                </p>
+              </div>
+            </div>
+            <p className="mt-7 text-lg">
+              <a href="/hosted" className={SITE_LINK_CLASS}>See what’s coming and join the list</a>
+            </p>
+          </div>
+        </section>
+
         <section id="download" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY}`} style={downloadAccentStyle}>
           <h2 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] text-[var(--color-text)]">Get Dormouse</h2>
           <p className="mb-4 text-lg leading-relaxed opacity-70">A dormouse knows when to wake up. Multitasking terminal for mice and thumbs.</p>
@@ -1066,6 +1106,7 @@ export default function Home() {
             <a href="/docs/dor" className="underline hover:opacity-100">CLI reference</a>
             <a href="/docs/agent-skill" className="underline hover:opacity-100">Agent skill</a>
             <a href="/docs/self-host" className="underline hover:opacity-100">Self-host</a>
+            <a href="/hosted" className="underline hover:opacity-100">Hosted</a>
             <a href="/docs/security" className="underline hover:opacity-100">Security</a>
             <a href="/supply-chain" className="underline hover:opacity-100">Supply Chain</a>
             <a href="https://github.com/diffplug/dormouse/issues" className="underline hover:opacity-100">Report an issue</a>

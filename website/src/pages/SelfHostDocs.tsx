@@ -52,7 +52,16 @@ export default function SelfHostDocs() {
     <DocsLayout
       activePath="/docs/self-host"
       title={selfhost.title}
-      intro="Optional: if you want push notifications and remote control from your phone, then you'll need to run a signalling server. Tailscale makes it easy and secure."
+      intro={
+        <>
+          Push notifications and phone remote control need a coordinating server. You can
+          run it yourself with Tailscale, or{" "}
+          <a href="/hosted#remote-control" className={LINK_CLASS}>
+            join the list for Dormouse Hosted
+          </a>{" "}
+          and have it operated for you.
+        </>
+      }
       toc={SELF_HOST_TOC}
     >
       <AnchoredHeading id="security-model">Security model</AnchoredHeading>

@@ -51,7 +51,7 @@ const ACTIVE_ITEM_GLYPH = "●";
 const STAR_PROMPT_TITLE = "Starred on GitHub";
 const FLAPPY_TITLE = "🐭 FlappyTerm 🐭";
 const FLAPPY_DESKTOP_GAME_OVER_PROMPT = "Read about Dormouse Pocket  [p]";
-const FLAPPY_POCKET_GAME_OVER_PROMPT = "Notify me when Pocket ships [n]";
+const FLAPPY_POCKET_GAME_OVER_PROMPT = "Dormouse Hosted updates [n]";
 
 // --- Flappy Term game constants (ported from flappy-term.html) ---
 const FLAPPY_TICK_MS = 60;

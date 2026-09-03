@@ -30,6 +30,7 @@ import {
 } from '../lib/terminal-registry';
 
 const TITLE_ID = 'settings-dialog-title';
+const HOSTED_VOICE_URL = 'https://dormouse.sh/hosted#voice';
 
 /** Every section but the first draws its own divider. */
 const SECTION = 'mt-4 border-t border-border pt-3';
@@ -205,7 +206,16 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
         onToggle={(speakEnabled) => updateAlertSettings({ speakEnabled })}
         onCommitDelay={(speakDelayMs) => updateAlertSettings({ speakDelayMs })}
         action={<SpeakTestButton />}
-      />
+      >
+        Uses your browser or system voice.{' '}
+        <button
+          type="button"
+          onClick={() => getPlatform().openExternal?.(HOSTED_VOICE_URL)}
+          className="text-foreground underline underline-offset-2 hover:text-muted"
+        >
+          Managed ElevenLabs voice is coming soon.
+        </button>
+      </AlarmSinkSection>
 
       <AlarmSinkSection
         switchLabel="Send push notification if not attended"

@@ -41,7 +41,7 @@ Every visible pane gets a `TutorialShell` via `PlaygroundShellRegistry`. **`ensu
 
 Esc / `q` pop back one screen (section → menu → exit); Ctrl+C exits the runner from any screen; re-running `tut` re-enters. The menu shows `[N/M complete]` per section; drilling in lists that section's items, each `✓` complete, `●` active, or `·` later. **`Reset progress` requires the user type `reset`**, then clears all three storage keys and returns to the profile's initial screen.
 
-Below the sections: `Starred on GitHub` (persisted separately, `onOpenGithub`), `🐭 FlappyTerm 🐭`, `Reset progress` — **none of the three ever counts toward `N/M`**. Flappy stays `[LOCKED N/M]` until every section checklist item is complete, then shows `[High score: N]` and unlocks a runner-local mini-game whose game-over screen cross-links the other surface (desktop `p` → `onOpenPocket`, Pocket `n` → `onNotifyPocket`, wired by the pages).
+Below the sections: `Starred on GitHub` (persisted separately, `onOpenGithub`), `🐭 FlappyTerm 🐭`, `Reset progress` — **none of the three ever counts toward `N/M`**. Flappy stays `[LOCKED N/M]` until every section checklist item is complete, then shows `[High score: N]` and unlocks a runner-local mini-game whose game-over screen cross-links the other surface (desktop `p` → `onOpenPocket`; Pocket `n` → `onNotifyPocket` → `/hosted#remote-control`, wired by the pages).
 
 ### Runner-local intercepts
 

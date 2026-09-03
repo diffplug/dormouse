@@ -125,6 +125,7 @@ export default function Hosted() {
           buttonLabel="Tell me when Hosted launches"
           emailId="hosted-notify-email"
           announcement="Dormouse Hosted"
+          variant="docs"
         />
       </section>
     </DocsLayout>

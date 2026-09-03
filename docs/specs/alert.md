@@ -248,6 +248,9 @@ The alarm settings are a second app-global store beside the WATCHING rule set, e
 | `speakEnabled` / `speakDelayMs` | Spoken alarms, below. |
 | `pushEnabled` / `pushDelayMs` | Push notifications, below. |
 
+The speech row's managed-voice link follows
+[website-docs.md](./website-docs.md) -> `/hosted` preview.
+
 Rules:
 
 - **Validate and clamp every field on read *and* on write** (`normalizeAlertSettings`), so a hand-edited `localStorage` blob or a hostile message can never install a `NaN` or absurd timer. Unknown keys are dropped and missing keys defaulted, so the blob evolves additively with no version field. `cfg.alert` owns the inactivity default; `DEFAULT_ALERT_SETTINGS` owns the sink and boolean defaults.

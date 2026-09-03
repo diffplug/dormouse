@@ -192,6 +192,7 @@ describe('RemoteControlSection', () => {
     platform = { remoteHost: makeLink(async () => NOT_ENROLLED) };
     await render();
     expect(text()).toContain('Connect this machine to a Dormouse server');
+    expect(text()).toContain('Prefer not to run one? Hosted is coming soon.');
     expect(buttonLabelled('Connect')).toBeTruthy();
   });
 
