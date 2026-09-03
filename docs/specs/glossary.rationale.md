@@ -4,7 +4,7 @@
 
 ## Panes and Surfaces
 
-**Why `dor` addresses content by Surface ref, not Pane ref.** Once an in-pane surface strip puts several Surfaces in one Pane, every `read` / `send` / `kill` spelled against a Pane becomes ambiguous, while the layout-only commands still mean one thing — so Pane refs are left unspent for those.
+**Why `dor` addresses content by Surface ref, not Pane ref.** Once an in-pane surface strip puts several Surfaces in one Pane, every `read` / `send` / `await` / `kill` spelled against a Pane becomes ambiguous, while the layout-only commands still mean one thing — so Pane refs are left unspent for those.
 
 **Why every row carries both capability flags.** `kind` is an enum, so a caller that branches on `kind === 'terminal'` silently stops matching the day a kind carrying both capabilities ships — the staged `tool` (`docs/specs/dor-tool.md`) is that kind. `has_terminal` / `has_browser` express the same fact in a form that keeps matching, so a script written against today's two kinds still selects correctly against three; emitting them unconditionally, rather than only where they differ from the kind, is what makes that free to rely on.
 

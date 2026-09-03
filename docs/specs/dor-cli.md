@@ -462,9 +462,9 @@ Source of truth: `extractSessionFlags` / `resolveSession` in
 These scenarios are the CLI's product-level acceptance tests: the commands must
 *compose*, not merely work alone. All reduce to one shape — **discover the
 target Surface with `dor list` (filtered), then act on it with a handle-taking
-command.** So matching lives in `dor list` alone; `read` / `send` / `kill`
-**must not grow their own match syntax**, and a bare `dor kill "npm dev"` stays
-unsupported.
+command.** So matching lives in `dor list` alone; `read` / `send` / `await` /
+`kill` **must not grow their own match syntax**, and a bare `dor kill "npm dev"`
+stays unsupported.
 
 **Identity follows the Surface, not a user-supplied key:** a terminal Surface is
 named by its Workspace-stable `surface:N` ref, or rediscovered after layout
