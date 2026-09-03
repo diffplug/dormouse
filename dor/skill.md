@@ -27,9 +27,9 @@ Action commands (`read`, `send`, `await`, `kill`) take a surface handle — ther
 deliberately no `dor kill "npm dev"`. You name the surface you want one of
 three ways:
 
-1. **Hold the handle.** Commands that create surfaces (`split`, `ensure`,
-   `iframe`) print the new ref (`created surface:3`). Capture it and act on
-   it directly — refs stay valid across any layout churn.
+1. **Hold the handle.** Commands that create surfaces (`split`, `ensure`)
+   print the new ref (`created surface:3`). Capture it and act on it
+   directly — refs stay valid across any layout churn.
 2. **Address by identity key.** Surfaces with a natural identity skip handle
    bookkeeping: `dor ensure -- <command>` uses its exact command + cwd as an
    implicit key (match-or-create in one idempotent call), and browser
@@ -263,8 +263,8 @@ dor kill surface:N --confirm-if-read "npm run dev"
   -- <command>`, or a bare-terminal `dor split --`) never steal focus. Only a
   bare `dor split` with no `--` does — never run that in automation; use
   `dor split --` for an empty pane instead.
-- **Take refs from responses.** Capture the ref that `split`/`ensure`/`iframe`
-  print rather than re-listing and guessing.
+- **Take refs from responses.** Capture the ref that `split`/`ensure` print
+  rather than re-listing and guessing.
 - **`--command` is exact.** Match the command string you launched with,
   including its flags.
 - **Prefer `--confirm-if-read` over `--confirm-dangerously`** unless you have
