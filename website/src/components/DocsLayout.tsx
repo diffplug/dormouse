@@ -10,7 +10,12 @@
  */
 import { useEffect, useState, type ReactNode } from "react";
 import { ListIcon, XIcon } from "@phosphor-icons/react";
-import { useRestoredTheme } from "dormouse-lib/lib/themes";
+import {
+  getActiveThemeId,
+  getTheme,
+  subscribeToActiveTheme,
+  useRestoredTheme,
+} from "dormouse-lib/lib/themes";
 import SiteHeader from "./SiteHeader";
 // Imported statically, not lazily. The control renders twice — once in the
 // mobile bar, once floating — and a second `Suspense` boundary over the same
@@ -21,6 +26,7 @@ import DocsThemeControl from "./DocsThemeControl";
 import { ACCENT_TEXT_CLASS, MUTED_ACCENT_LINK_CLASS, TOC_INDENT_CLASS } from "./docs-tokens";
 import { DOCS_PAGES, docsRailPosition, type DocsPage, type TocEntry } from "../lib/docs-pages";
 import { DOCS_THEME_ID } from "../lib/docs-theme";
+import { docsAccentFor } from "../lib/docs-accent";
 
 /** Repaints the site's own tokens from the picked theme; see index.css. */
 const THEMED_BODY_CLASS = "docs-themed";
@@ -138,6 +144,22 @@ export default function DocsLayout({
   useEffect(() => {
     document.body.classList.add(THEMED_BODY_CLASS);
     return () => document.body.classList.remove(THEMED_BODY_CLASS);
+  }, []);
+
+  // Links follow the picked theme's own accent rather than a per-kind default
+  // (website/src/lib/docs-accent.ts). Left alone, `--docs-accent` keeps the
+  // value index.css gives it, so a reader with no JS still gets a legible one.
+  useEffect(() => {
+    const paint = () => {
+      const theme = getTheme(getActiveThemeId() ?? DOCS_THEME_ID);
+      const background = theme?.vars?.["--vscode-editor-background"];
+      const accent = theme?.accent;
+      if (!theme || !accent || !background) return;
+      const link = docsAccentFor(accent, background);
+      if (link) document.body.style.setProperty("--docs-accent", link);
+    };
+    paint();
+    return subscribeToActiveTheme(paint);
   }, []);
 
   const [navOpen, setNavOpen] = useState(false);
