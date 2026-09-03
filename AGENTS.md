@@ -58,7 +58,7 @@ One implementation map per spec: an exhaustive `Files` / `Code Map` section or s
 - **`SELF_HOST.md`** (repo root) — Self-host deployment: the assistant-run install runbook plus the Installer contract that `docs/specs/security-remote.md`'s `FAIL IF` lines and `scripts/deploy-lint.mjs` audit.
 - **`docs/specs/pocket-app.md`** — Pocket: the remote session is a `PlatformAdapter` (`RemotePtyAdapter`), so Pocket is auth screens plus the mobile composition; owns the same-origin deployment rule.
 - **`docs/specs/deploy.md`** — Release process: artifact matrix, release checklist, two-stage sign-and-release pipeline, updater manifest, changelog flow.
-- **`docs/specs/security.md`** — The guarantees Dormouse makes, what it does not defend, the known gaps, and how it is all checked; published whole at `/docs/security`. Read first for anything security. Root `SECURITY.md` is the GitHub policy pointer at it.
+- **`docs/specs/security.md`** — The guarantees Dormouse makes, what it does not defend, the known gaps, and how it is all checked; published at `/docs/security`, rows split by audience. Read first for anything security. Root `SECURITY.md` is the GitHub policy pointer at it.
 - **`docs/specs/security-local.md`** — The boundaries a user of the local application has: terminal output, browser panes, the `dor` control socket, loopback listeners, persisted state.
 - **`docs/specs/security-remote.md`** — The audited checks on remote control: trust boundary, relay allowlist, credentials at rest, the setup password, network posture, what crosses the boundary, revocation.
 - **`docs/specs/security-supply-chain.md`** — Disclosure of everything that reaches a user's machine, the bundled runtime pin, dependency cooldown and alerts.
