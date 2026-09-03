@@ -104,7 +104,7 @@ For shells without OSC 133/633 integration, the command is read off the screen r
 - **Boundary mode, plus a trailing-boundary trim.** Stripping runs in **boundary mode** (every control becomes a line break), as resume detection does (`docs/specs/transport.md`). **A genuine trailing newline must keep reading as `null`; a trailing boundary must not** — stripping the same text *without* boundaries leaves exactly the real breaks, which tells the two apart. Both directions pinned by `lib/src/lib/terminal-state-store.test.ts`. (rationale)
 - **Per-pane retirement.** **The keystroke fallback and real OSC 633/133 integration are mutually exclusive per pane.** The first authentic OSC boundary (`promptStart`/`promptEnd`/`commandFinish` always, or a `commandStart` sourced `osc633_boundaries`/`osc133_boundaries`) promotes the pane to **OSC-driven**: `recordTerminalUserInput` early-returns and no further `user_input` `commandStart`/`commandLine` is synthesized, so injected shells never double-count. **The fallback's own synthesized prompt markers carry a `keystrokeHeuristic` flag and must not trigger promotion**, or it would retire the path emitting them. The flag is per-pane runtime state, seeded fresh, cleared on pane reset/removal, **never persisted**; `isPaneOscDriven()` exposes it for `dor ensure --restart` (`docs/specs/dor-cli.md`).
 
-Source of truth, all in `lib/src/lib/`: `detectPromptSubmit` (`terminal-command-input.ts`), `readLogicalLineFromBuffer` (`terminal-buffer-read.ts`), `derivePromptShape`/`extractCommand` (`terminal-prompt-shape.ts`), `detectReturnedShellPrompt`/`recordTerminalUserInput` (`terminal-state-store.ts`), `stripTerminalControls` (`terminal-controls.ts`).
+Source of truth: `detectPromptSubmit` in `lib/src/lib/terminal-command-input.ts`, `readLogicalLineFromBuffer` in `lib/src/lib/terminal-buffer-read.ts`, `derivePromptShape` / `extractCommand` in `lib/src/lib/terminal-prompt-shape.ts`, `detectReturnedShellPrompt` / `recordTerminalUserInput` in `lib/src/lib/terminal-state-store.ts`, `stripTerminalControls` in `lib/src/lib/terminal-controls.ts`.
 
 ### CWD precedence
 
@@ -143,7 +143,7 @@ Callers showing one Session's label use `deriveSurfaceLabel()` = `deriveHeader` 
 
 **Duplicate primary labels get a shortest unique directory secondary label** — from `currentCommand.cwdAtStart` while a command runs, else `pane.cwd`.
 
-Source of truth, all in `lib/src/lib/terminal-state.ts`: `deriveHeader`, `deriveSurfaceLabel`, `resolveDisplayPrimary`, `meaningfulTerminalTitle`.
+Source of truth: `deriveHeader` / `deriveSurfaceLabel` / `resolveDisplayPrimary` / `meaningfulTerminalTitle` in `lib/src/lib/terminal-state.ts`.
 
 ## Grouping
 
@@ -151,4 +151,4 @@ Source of truth, all in `lib/src/lib/terminal-state.ts`: `deriveHeader`, `derive
 - **Windows UNC display labels keep `\\server\share\` as the path root** and do not repeat the server/share in the trailing path segments.
 - **`prompt` and `editing` collapse into one `idle` bucket**; **`finished` stays distinct** so a recently-completed pane can be filtered separately though its header label carries the same `<idle>` prefix. `statusBucket` projects the 5 `ShellActivity.kind` values onto 4.
 
-Source of truth, all in `lib/src/lib/terminal-state.ts`: `groupTerminalPanes`, `TerminalGroupingMode`, `cwdIdentity`, `statusBucket`.
+Source of truth: `groupTerminalPanes` / `TerminalGroupingMode` / `cwdIdentity` / `statusBucket` in `lib/src/lib/terminal-state.ts`.

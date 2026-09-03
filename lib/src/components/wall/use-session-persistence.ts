@@ -150,7 +150,7 @@ export function useSessionPersistence({
     const unsubscribeStore = lath.store.subscribe(scheduleSessionSave);
 
     // Content inputs mark dirty but never schedule — the heartbeat persists them
-    // (full rationale: docs/specs/standalone.md §Persistence). Untouched flips ride
+    // (docs/specs/layout.md → "Session persistence"). Untouched flips ride
     // the pty echo of the keystroke, not the pane-state store (the registry mutates
     // silently).
     platform.onPtyData(markDirty);

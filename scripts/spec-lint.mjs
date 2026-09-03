@@ -44,15 +44,16 @@
  *      ancestor heading) that has an entry in the paired rationale file — a
  *      marker asserts the evidence lives there. A spec with markers but no
  *      rationale file fails.
- *  12. A `Source of truth:` paragraph names at least one repo path check 4
- *      can verify, never a bare file name (`Wall.tsx` dodges check 4 and
- *      rots silently), and every `symbol` it places `in` a file exists in
- *      that file.
- *  13. Every citation of a spec section — `docs/specs/foo.md -> "Heading"`,
+ *  12. A `Source of truth` paragraph, however its lead-in is punctuated,
+ *      names at least one repo path check 4 can verify, never a bare file
+ *      name (`Wall.tsx` dodges check 4 and rots silently), and every `symbol`
+ *      it places `in` a file exists in that file. `Source of truth (<name>
+ *      repo):` points outside this repo and is left alone.
+ *  13. Every citation of a spec section — `docs/specs/<name>.md -> "Heading"`,
  *      `→ Heading`, `§Heading`, or `` `## Future` `` — in a tracked source
- *      file or spec names a heading (quoted forms may also name a bolded
- *      phrase) that exists in the cited file. Code comments cite specs this
- *      way in hundreds of places and nothing else keeps them honest.
+ *      file or spec names a spec that exists and a heading (quoted forms may
+ *      also name a bolded phrase) that exists in it. Code comments cite specs
+ *      this way in hundreds of places and nothing else keeps them honest.
  *  14. A rationale file states no rule: no paragraph or bullet opens with a
  *      bolded imperative (**Never …**, **Must …**, …). Those belong in the
  *      spec.
@@ -411,9 +412,10 @@ const SYMBOLS_IN_FILE_RE = /((?:`[^`\n]+`\s*(?:\/|,|and|\+)?\s*)+)\bin\s+`([^`\n
 for (const spec of foldCheckedFiles) {
   const lines = proseLines(spec);
   lines.forEach((line, i) => {
-    const at = line.indexOf('Source of truth:');
-    if (at === -1) return;
-    const para = blockAt(lines, i, line.slice(at));
+    const lead = /Source of truth\b([^:\n]*):/.exec(line);
+    if (!lead) return;
+    if (/\brepo\)/.test(lead[1])) return; // `Source of truth (<name> repo):` — outside this repo
+    const para = blockAt(lines, i, line.slice(lead.index));
     const tokens = [...para.matchAll(TICK_RE)].map((m) => m[1]);
     if (!tokens.some(checkablePath)) {
       problems.push(`${spec}:${i + 1}: Source of truth names no repo path the path check can verify`);
@@ -438,7 +440,7 @@ for (const spec of foldCheckedFiles) {
 }
 
 // --- Check 13: spec-section citations resolve, in specs and in code --------
-// `docs/specs/foo.md -> "Heading"`, `→ Heading`, `("Heading")`, `§8.9`, or
+// `docs/specs/<name>.md -> "Heading"`, `→ Heading`, `("Heading")`, `§8.9`, or
 // `` `## Future` ``. A quoted reference may also name a bolded phrase; an
 // unquoted one runs on into the sentence, so its prefixes are tried, and a
 // lone word must open a heading. A numbered `§` names the heading that carries
@@ -467,7 +469,11 @@ for (const rel of trackedFiles().filter((f) => CITING_FILE_RE.test(f))) {
     if (!line.includes('.md')) return; // every citable name ends in .md; this guard is exact, and cheaper than the regex
     for (const m of line.matchAll(CITATION_RE)) {
       const t = citeTarget(m[1]);
-      if (!t) continue; // check 4 reports a missing spec
+      if (!t) {
+        // Check 4 already reports a missing path named from a spec; a source file has nothing else.
+        if (!allFiles.includes(rel)) problems.push(`${rel}:${i + 1}: cites ${m[1]}, which does not exist`);
+        continue;
+      }
       const quoted = m[2] !== undefined || m[6] !== undefined;
       const ref = (m[2] ?? m[3] ?? m[4] ?? m[5] ?? m[6]).replace(/^#+\s*/, '').trim();
       if (!ref) continue;
