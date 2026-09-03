@@ -169,6 +169,44 @@ describe('agent-browser host relaunch', () => {
     }
   });
 
+  it('does not run an earlier relaunch\'s blank-tab sweep after a later relaunch begins', async () => {
+    const session = 'dormouse.1.default';
+    const firstOpened = deferred<SpawnResult>();
+    const secondClose = deferred<SpawnResult>();
+    let closeCount = 0;
+    const calls = mockSpawnByCommand({
+      close: () => (++closeCount === 1 ? {} : secondClose.promise),
+      '--headed open': () => firstOpened.promise,
+      tab: () => ({
+        stdout: JSON.stringify({
+          tabs: [
+            { tabId: 'blank', url: 'about:blank', active: false },
+            { tabId: 'real', url: 'https://example.com/', active: true },
+          ],
+        }),
+      }),
+    });
+    const host = createAgentBrowserHost({ writeClipboardText: vi.fn() });
+    const popOut = host.popOut(session, { url: 'https://example.com/' });
+    const { port, server } = await listen();
+    try {
+      writeState(session, 'pid', DEAD_PID);
+      writeState(session, 'stream', port);
+      expect(await popOut).toEqual({ ok: true, wsPort: port });
+
+      // The second relaunch invalidates the first one's post-open tail before
+      // its close queues behind that still-pending `open` command.
+      void host.popIn(session, { url: 'https://example.com/' });
+      await vi.waitFor(() => expect(closeCount).toBe(2));
+      firstOpened.resolve({ code: 1, stderr: 'Operation timed out' });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(calls.some((args) => args.includes('tab'))).toBe(false);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it('open() treats a timed-out page load as a live launch, and a launch with no daemon as a failure', async () => {
     const host = createAgentBrowserHost({ writeClipboardText: vi.fn() });
     let session = '';

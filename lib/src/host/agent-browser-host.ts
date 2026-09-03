@@ -122,6 +122,17 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
   // Headless sessions are deliberately NOT tracked — they're left alive to
   // reattach across webview reloads (the wsPort/stream-recovery design).
   const poppedOutSessions = new Map<string, string | undefined>();
+  // A relaunch returns once the daemon is streamable, while its `open` command
+  // may remain pending until page load. Key the post-open blank-tab sweep so a
+  // later pop-in/pop-out invalidates every command left behind by the previous
+  // relaunch before starting its own close -> kill -> reopen gap.
+  const relaunchGenerations = new Map<string, number>();
+  let nextRelaunchGeneration = 0;
+  function beginRelaunch(session: string): number {
+    const generation = ++nextRelaunchGeneration;
+    relaunchGenerations.set(session, generation);
+    return generation;
+  }
 
   // The host's PATH is often the GUI login PATH (no nvm/volta shims), so prefer
   // the absolute path `dor ab` resolved in the user's terminal; fall through on
@@ -326,12 +337,21 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
   // After a relaunch, close any stray about:blank tab the close+reopen race can
   // leave behind — but only when a real page is open, so we never close the sole
   // tab. Best-effort: a failure here must not fail the pop-out/pop-in.
-  async function closeStrayBlankTabs(session: string, binaryPath?: string): Promise<void> {
+  async function closeStrayBlankTabs(
+    session: string,
+    binaryPath?: string,
+    current: () => boolean = () => true,
+  ): Promise<void> {
+    if (!current()) return;
     const tabs = await listTabs(session, binaryPath);
+    // The list may have queued behind `open`; a newer relaunch can begin while
+    // it waits. Never issue a tab close into that relaunch's daemon gap.
+    if (!current()) return;
     log(`[ab-relaunch] tabs after open: ${JSON.stringify(tabs)}`);
     if (tabs.length < 2 || !tabs.some((t) => usableRelaunchUrl(t.url))) return;
     for (const tab of tabs) {
       if (!usableRelaunchUrl(tab.url)) {
+        if (!current()) return;
         log(`[ab-relaunch] closing stray blank tab ${tab.tabId}`);
         await runWithBinaryFallback(['--session', session, 'tab', 'close', tab.tabId], binaryPath);
       }
@@ -573,6 +593,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     binaryPath?: string,
   ): Promise<AgentBrowserPopResult> {
     if (typeof session !== 'string' || !session) return { ok: false, error: 'session is required' };
+    const generation = beginRelaunch(session);
     const url = relaunchUrl(opts?.url);
     log(`[ab-relaunch] popOut session=${session} requestedUrl=${JSON.stringify(opts?.url)} -> open ${url}`);
     // Close the browser, then fully stop the daemon so the headed relaunch isn't
@@ -582,7 +603,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     // A real headed OS window from here on — track it before the launch so
     // shutdown closes it even if its page never finishes loading.
     poppedOutSessions.set(session, binaryPath);
-    return relaunch('popOut', session, ['--session', session, '--headed', 'open', url], binaryPath, replacedPid);
+    return relaunch('popOut', session, ['--session', session, '--headed', 'open', url], binaryPath, replacedPid, generation);
   }
 
   // Shared tail of pop-out/pop-in: launch, and once `open` itself returns —
@@ -590,14 +611,28 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
   // tab the close+reopen can leave (a daemon command, so it must not run while
   // `open` still holds the queue). A launch that never published a port is the
   // one failure: the exit code alone is not.
-  async function relaunch(label: string, session: string, args: string[], binaryPath: string | undefined, replacedPid: number | undefined): Promise<AgentBrowserPopResult> {
+  async function relaunch(
+    label: string,
+    session: string,
+    args: string[],
+    binaryPath: string | undefined,
+    replacedPid: number | undefined,
+    generation: number,
+  ): Promise<AgentBrowserPopResult> {
     const { wsPort, opened } = await launch(session, args, binaryPath, replacedPid);
     logOpened(`${label} open`, opened);
     if (wsPort === undefined) {
+      if (relaunchGenerations.get(session) === generation) relaunchGenerations.delete(session);
       const failed = await opened;
       return { ok: false, error: failed.stderr.trim() || `${label} open exited ${failed.exitCode}` };
     }
-    void opened.then(() => closeStrayBlankTabs(session, binaryPath)).catch(() => undefined);
+    const current = () => relaunchGenerations.get(session) === generation;
+    void opened
+      .then(() => closeStrayBlankTabs(session, binaryPath, current))
+      .catch(() => undefined)
+      .finally(() => {
+        if (current()) relaunchGenerations.delete(session);
+      });
     log(`[ab-relaunch] ${label} returning wsPort=${wsPort}`);
     return { ok: true, wsPort };
   }
@@ -610,6 +645,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     binaryPath?: string,
   ): Promise<AgentBrowserPopResult> {
     if (typeof session !== 'string' || !session) return { ok: false, error: 'session is required' };
+    const generation = beginRelaunch(session);
     const url = relaunchUrl(opts?.url);
     log(`[ab-relaunch] popIn session=${session} requestedUrl=${JSON.stringify(opts?.url)} -> open ${url}`);
     // Reverse of pop-out: the daemon is headed, so a plain `open` would reattach
@@ -618,7 +654,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     const replacedPid = await killDaemon(session);
     // The headed window is gone after the close above; back to headless.
     poppedOutSessions.delete(session);
-    return relaunch('popIn', session, ['--session', session, 'open', url], binaryPath, replacedPid);
+    return relaunch('popIn', session, ['--session', session, 'open', url], binaryPath, replacedPid, generation);
   }
 
   // Close every still-popped-out session's headed window. Called from each

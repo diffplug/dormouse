@@ -365,9 +365,9 @@ closes what it spawned. **A headed session is tracked for shutdown before its
 launch**, so a window whose page never loads is still closed. **Never query the
 daemon during the close/reopen gap** (rationale), host and controller
 park/recovery paths alike, so **Dormouse supplies the active-tab URL and the
-host trusts it**. Once `open` returns, the host best-effort closes any stray
-`about:blank` tab the close+reopen race left behind, **but only while a real
-page is open**, so it never closes the sole tab (rationale).
+host trusts it**. Once `open` returns, only the latest relaunch best-effort
+closes stray `about:blank` tabs, **and only while a real page is open**, so it
+never closes the sole tab (rationale).
 
 While popped out, Dormouse keeps a stream/CDP observer so URL/header state
 follows same-tab navigation and a headed window close can auto-revert to
