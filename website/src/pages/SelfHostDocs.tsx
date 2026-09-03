@@ -55,11 +55,11 @@ export default function SelfHostDocs() {
       intro={
         <>
           Push notifications and phone remote control need a coordinating server. You can
-          run it yourself with Tailscale, or{" "}
-          <a href="/hosted#remote-control" className={LINK_CLASS}>
-            join the list for Dormouse Hosted
+          run it yourself with Tailscale today, or{" "}
+          <a href="/hosted/#remote-control" className={LINK_CLASS}>
+            join the devlog for updates on the planned paid Hosted option
           </a>{" "}
-          and have it operated for you.
+          that will operate it for you.
         </>
       }
       toc={SELF_HOST_TOC}

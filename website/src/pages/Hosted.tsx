@@ -35,7 +35,7 @@ export default function Hosted() {
     <DocsLayout
       activePath="/hosted"
       title="Dormouse Hosted"
-      intro="Optional managed services for people who want Dormouse without another server to run—or want a more natural voice when a terminal needs them."
+      intro="Two paid managed services are planned, and neither is available yet: a coordinating server for Pocket remote control, and optional ElevenLabs speech. Dormouse itself remains local; self-hosting and browser speech will stay available."
       toc={HOSTED_TOC}
     >
       <div className="mb-10 rounded-xl border border-[var(--docs-accent)]/35 bg-[var(--docs-accent)]/[0.07] p-5">
@@ -58,15 +58,26 @@ export default function Hosted() {
             <AnchoredHeading id="remote-control">
               Remote control, without running the server
             </AnchoredHeading>
-            <p className="mb-4 text-lg leading-relaxed opacity-80">
-              Dormouse Pocket needs a coordinating server to introduce your phone to
-              your computer and relay encrypted traffic when a direct connection is not
-              available. Dormouse Hosted will operate that server for you.
+            <p className="mb-3 font-display text-xs uppercase tracking-wider text-[var(--docs-accent)]">
+              Planned paid service · not available yet
             </p>
-            <p className="leading-relaxed opacity-70">
+            <p className="mb-4 text-lg leading-relaxed opacity-80">
+              Use Dormouse Pocket without deploying or maintaining a coordinating server.
+              Dormouse Hosted will run the coordinator that connects your phone to your
+              computer and relays traffic between them.
+            </p>
+            <p className="mb-4 leading-relaxed opacity-70">
               Your terminals still run on your computer, and it still needs to be awake
               and online. Hosted removes the deployment and maintenance work; it does not
               move your terminal into the cloud.
+            </p>
+            <p className="leading-relaxed opacity-70">
+              Security details for the paid service will be published before launch.
+            </p>
+            <p className="mt-4">
+              <a href="#updates" className={LINK_CLASS}>
+                Interested in managed remote control? Follow the launch →
+              </a>
             </p>
           </div>
           <img
@@ -85,6 +96,9 @@ export default function Hosted() {
           aria-hidden="true"
         />
         <AnchoredHeading id="voice">A better voice for spoken alerts</AnchoredHeading>
+        <p className="mb-3 font-display text-xs uppercase tracking-wider text-[var(--docs-accent)]">
+          Planned paid service · not available yet
+        </p>
         <p className="mb-4 text-lg leading-relaxed opacity-80">
           Dormouse can speak an unattended terminal’s name using your browser or system
           voice today. A hosted ElevenLabs option will add a more natural voice without
@@ -103,11 +117,11 @@ export default function Hosted() {
           className="mb-3 text-[var(--docs-accent)]"
           aria-hidden="true"
         />
-        <AnchoredHeading id="self-hosting">Free self-hosting stays</AnchoredHeading>
+        <AnchoredHeading id="self-hosting">Self-hosting stays</AnchoredHeading>
         <p className="text-lg leading-relaxed opacity-80">
-          The coordinating server remains open source and free to run yourself. Hosted is
-          the paid convenience option, not a replacement. If you would rather operate it,
-          the{" "}
+          The coordinating server remains available in the repository under
+          FSL-1.1-MIT and free for internal use. Hosted will be a paid convenience option,
+          not a replacement. If you would rather operate it, the{" "}
           <a href="/docs/self-host" className={LINK_CLASS}>
             self-hosting guide
           </a>{" "}
@@ -116,13 +130,14 @@ export default function Hosted() {
       </section>
 
       <section id="updates" className="mt-10 scroll-mt-28 md:scroll-mt-32 lg:scroll-mt-24">
-        <h2 className="mb-3 font-display text-2xl">Hear when it’s ready</h2>
+        <h2 className="mb-3 font-display text-2xl">Follow the launch</h2>
         <p className="mb-5 max-w-2xl text-lg leading-relaxed opacity-75">
-          Pricing and launch dates are not set yet. Leave your email and I’ll send the
-          announcement when Dormouse Hosted opens.
+          Pricing and dates are not set. Subscribe to my personal devlog on Substack and
+          I’ll announce managed remote control and ElevenLabs voice there. This is not a
+          product-only waitlist; you’ll also receive other devlog posts.
         </p>
         <NotifySignupForm
-          buttonLabel="Tell me when Hosted launches"
+          buttonLabel="Continue to nedshed.dev"
           emailId="hosted-notify-email"
           announcement="Dormouse Hosted"
           variant="docs"

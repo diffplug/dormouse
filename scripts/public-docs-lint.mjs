@@ -263,6 +263,7 @@ function checkRoutesToReferences() {
 
   for (const page of linked) {
     const url = SITE_ORIGIN + page.path;
+    const canonicalUrl = url.endsWith('/') ? url : `${url}/`;
     for (const source of page.linkedFrom ?? []) {
       const rel = README_OF[source];
       // Node strips the `"guide" | "root-readme"` union at runtime, so a typo
@@ -272,7 +273,12 @@ function checkRoutesToReferences() {
         continue;
       }
       if (!parsed[rel]) continue;
-      if (!linksIn(rel).some((href) => href === url || href.startsWith(`${url}#`))) {
+      if (!linksIn(rel).some((href) =>
+        href === url
+        || href.startsWith(`${url}#`)
+        || href === canonicalUrl
+        || href.startsWith(`${canonicalUrl}#`)
+      )) {
         fail(`${rel}: does not link to ${url}`);
       }
     }

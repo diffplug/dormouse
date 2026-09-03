@@ -30,7 +30,7 @@ import {
 } from '../lib/terminal-registry';
 
 const TITLE_ID = 'settings-dialog-title';
-const HOSTED_VOICE_URL = 'https://dormouse.sh/hosted#voice';
+const HOSTED_VOICE_URL = 'https://dormouse.sh/hosted/#voice';
 
 /** Every section but the first draws its own divider. */
 const SECTION = 'mt-4 border-t border-border pt-3';

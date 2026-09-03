@@ -825,14 +825,15 @@ export default function Home() {
               The relay is one Node process. No database — state is JSON on
               disk, and push keys mint themselves on first boot. Put{" "}
               <code className={SITE_CODE_CLASS}>tailscale serve</code>{" "}
-              in front of it and you're done: no account, no cloud dependency,
-              nothing anyone can shut off. Your laptop decides which phones get
+              in front of it and you're done: no Dormouse account or
+              Dormouse-operated cloud. The coordinating server stays on your own
+              machine, inside your tailnet. Your laptop decides which phones get
               notified — the server isn't allowed to choose for it, and the{" "}
               <a href="/docs/security" className={SITE_LINK_CLASS}>security spec</a>{" "}
               says exactly what that guarantees. The{" "}
               <a href="/docs/self-host" className={SITE_LINK_CLASS}>self-host runbook</a>{" "}
               walks the whole install. If you would rather skip running it,
-              {" "}<a href="/hosted#remote-control" className={SITE_LINK_CLASS}>Dormouse Hosted</a>{" "}
+              {" "}<a href="/hosted/#remote-control" className={SITE_LINK_CLASS}>Dormouse Hosted</a>{" "}
               is coming soon.
             </p>
             <p className="text-lg leading-relaxed opacity-70">
@@ -1001,7 +1002,7 @@ export default function Home() {
               </div>
             </div>
             <p className="mt-7 text-lg">
-              <a href="/hosted" className={SITE_LINK_CLASS}>See what’s coming and join the list</a>
+              <a href="/hosted/" className={SITE_LINK_CLASS}>Compare the planned services and follow the launch</a>
             </p>
           </div>
         </section>
@@ -1106,7 +1107,7 @@ export default function Home() {
             <a href="/docs/dor" className="underline hover:opacity-100">CLI reference</a>
             <a href="/docs/agent-skill" className="underline hover:opacity-100">Agent skill</a>
             <a href="/docs/self-host" className="underline hover:opacity-100">Self-host</a>
-            <a href="/hosted" className="underline hover:opacity-100">Hosted</a>
+            <a href="/hosted/" className="underline hover:opacity-100">Hosted</a>
             <a href="/docs/security" className="underline hover:opacity-100">Security</a>
             <a href="/supply-chain" className="underline hover:opacity-100">Supply Chain</a>
             <a href="https://github.com/diffplug/dormouse/issues" className="underline hover:opacity-100">Report an issue</a>

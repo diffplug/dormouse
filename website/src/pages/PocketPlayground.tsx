@@ -49,12 +49,15 @@ function DesktopPocketPlaygroundPage() {
           </p>
           <p className="mb-4 text-lg leading-relaxed opacity-70">
             Run the coordinating server yourself, or{" "}
-            <a href="/hosted#remote-control" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">
+            <a href="/hosted/#remote-control" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">
               join the list for Dormouse Hosted
             </a>, where I’ll operate it for you. Your terminal still runs on your awake,
             online computer; Hosted removes the server setup and maintenance.
           </p>
-          <NotifySignupForm announcement="Dormouse Pocket and Hosted" />
+          <NotifySignupForm
+            buttonLabel="Join the devlog for Pocket + Hosted updates"
+            announcement="Dormouse Pocket and Hosted"
+          />
         </section>
 
         <section aria-label="Dormouse Pocket phone preview" className="mx-auto w-full max-w-[390px]">
