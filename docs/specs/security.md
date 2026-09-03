@@ -18,6 +18,8 @@ it does not look like one.
 
 **Only the self-hosted deployment ships.** The relay runs on hardware the user
 owns, reachable from their own tailnet ([SELF_HOST.md](../../SELF_HOST.md)).
+**Nothing about remote control applies to a Host that never enrolls with a
+server**: enrollment is where the relay, the phone, and push begin.
 Cloud-hosted operation is staged, and its boundary is re-analyzed before that
 code ships ([security-remote.md](./security-remote.md#future)).
 

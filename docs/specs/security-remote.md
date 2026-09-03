@@ -11,7 +11,9 @@ the one part of the product that takes input from the network. **An authorized C
 is equivalent to a person at that laptop's keyboard** — `terminal.write` is raw
 keystroke injection into a live PTY and protocol-v1 has no restricted session — so the
 model exists to make *authorized* hard to reach and impossible to reach by accident.
-Two deployment modes are defined (`docs/specs/remote-api.md` -> "Transport"); all of
+**Nothing here applies to a Host that never enrolls with a server**: enrollment is
+where the relay, the phone, and push begin, and a Host that never enrolls has none
+of them. Two deployment modes are defined (`docs/specs/remote-api.md` -> "Transport"); all of
 the below is **self-hosted**, the only one that ships. Cloud-hosted is staged
 ([Cloud-hosted mode](#cloud-hosted-mode)).
 
@@ -171,8 +173,8 @@ the ACL is the entire gate; outbound, terminal bytes reach a phone and notificat
 originates in a renderer and is Pane-derived, so it is **bounded on the Host before
 sealing and re-bounded at the render sink** (below; rationale).
 
-**Web Push, when a phone has turned it on, is the one path where the Server makes an
-outbound request to an address a Client supplied**, which on a server *inside* a tailnet is a live SSRF concern:
+**Web Push is the one path where the Server makes an outbound request to an address a
+Client supplied**, which on a server *inside* a tailnet is a live SSRF concern:
 `100.64/10` is exactly the range a push endpoint must not be allowed to reach.
 Registration rejects credentials, localhost, and non-public IP literals; delivery goes
 through a dedicated agent whose connection-time DNS lookup rejects loopback, private,
