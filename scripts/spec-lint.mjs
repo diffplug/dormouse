@@ -33,11 +33,13 @@
  *      specs: they skip checks 1, 2, and 5 but ride 3 and 4.
  *   9. A spec uses one implementation map: either `## Files` / `## Code Map`
  *      or section-local `Source of truth:` pointers, never both.
- *  10. Word-budget ratchet: every checked file stays under its budget in
- *      scripts/spec-word-budgets.json. Growth past the budget fails; the fix
- *      is to cut, or to raise the budget deliberately in the same PR. Budgets
- *      carry small headroom so routine edits don't trip it. Words are counted
- *      by scripts/spec-md.mjs, which ignores table plumbing.
+ *  10. Word-budget ratchet: every spec (and AGENTS.md, SELF_HOST.md) stays
+ *      under its budget in scripts/spec-word-budgets.json. A budget is the
+ *      file's size plus BUDGET_HEADROOM words, rounded up to BUDGET_STEP —
+ *      room for most of one rule. Growth past it fails; cut to fit, or add
+ *      what is needed and re-baseline with `--ratchet <file>` in the same PR.
+ *      Rationale files carry no budget. Words are counted by
+ *      scripts/spec-md.mjs, which ignores table plumbing.
  *  11. Every `(rationale)` marker in a spec sits under a heading (or an
  *      ancestor heading) that has an entry in the paired rationale file — a
  *      marker asserts the evidence lives there. A spec with markers but no
@@ -61,7 +63,7 @@
  * scripts/spec-lint-selftest.mjs plants one defect per finding check and
  * requires this lint to go red.
  */
-import { readdirSync, existsSync } from 'node:fs';
+import { readdirSync, existsSync, writeFileSync } from 'node:fs';
 import { join, dirname, normalize } from 'node:path';
 import { readRepoFile, repoRoot as ROOT, trackedFiles } from './lint-kit.mjs';
 import { countWords, proseLines as proseLinesOf, SOURCE_EXTENSIONS } from './spec-md.mjs';
@@ -323,24 +325,51 @@ for (const spec of foldCheckedFiles) {
 }
 
 // --- Check 10: word-budget ratchet ------------------------------------------
+// A budget is the file's size plus BUDGET_HEADROOM words, rounded up to the
+// nearest BUDGET_STEP: room for most of one rule (a bold-led rule paragraph is
+// 46 words at the corpus median), so adding one means trimming a clause
+// elsewhere or re-baselining deliberately. `--ratchet [file...]` rewrites the
+// budgets of the named files (all of them when none is named) to that formula
+// and drops entries for files that carry none. Rationale files carry none:
+// evidence may grow without limit.
 const BUDGETS_FILE = 'scripts/spec-word-budgets.json';
-const budgets = JSON.parse(read(BUDGETS_FILE));
-const wordsOf = new Map(allFiles.map((rel) => [rel, countWords(read(rel))]));
-for (const rel of allFiles) {
+const BUDGET_HEADROOM = 32;
+const BUDGET_STEP = 10;
+const budgetedFiles = ['AGENTS.md', 'SELF_HOST.md', ...specFiles];
+const wordsOf = new Map(budgetedFiles.map((rel) => [rel, countWords(read(rel))]));
+const budgetFor = (rel) => Math.ceil((wordsOf.get(rel) + BUDGET_HEADROOM) / BUDGET_STEP) * BUDGET_STEP;
+let budgets = JSON.parse(read(BUDGETS_FILE));
+const ratchetAt = process.argv.indexOf('--ratchet');
+if (ratchetAt !== -1) {
+  const named = process.argv.slice(ratchetAt + 1).filter((a) => !a.startsWith('-'));
+  for (const rel of named) {
+    if (!budgetedFiles.includes(rel)) {
+      console.error(`spec-lint: --ratchet ${rel}: not a budgeted file (specs, AGENTS.md, SELF_HOST.md)`);
+      process.exit(2);
+    }
+  }
+  const chosen = named.length ? named : budgetedFiles;
+  for (const rel of chosen) budgets[rel] = budgetFor(rel);
+  budgets = Object.fromEntries(budgetedFiles.filter((rel) => rel in budgets).sort().map((rel) => [rel, budgets[rel]]));
+  writeFileSync(join(ROOT, BUDGETS_FILE), JSON.stringify(budgets, null, 2) + '\n');
+  console.log(`spec-lint: ratcheted ${chosen.length} budget(s) to size + ${BUDGET_HEADROOM}, rounded up to ${BUDGET_STEP}`);
+}
+for (const rel of budgetedFiles) {
   const words = wordsOf.get(rel);
   const budget = budgets[rel];
   if (budget === undefined) {
-    problems.push(`${BUDGETS_FILE}: no budget for ${rel} — add one (currently ${words} words)`);
+    problems.push(`${BUDGETS_FILE}: no budget for ${rel} — run \`node scripts/spec-lint.mjs --ratchet ${rel}\` (currently ${words} words)`);
   } else if (words > budget) {
     problems.push(
-      `${rel}: ${words} words exceeds its ${budget}-word budget — cut, ` +
-      `or raise the budget in ${BUDGETS_FILE} deliberately in the same PR`,
+      `${rel}: ${words} words exceeds its ${budget}-word budget — cut to fit, or add what is ` +
+      `needed and run \`node scripts/spec-lint.mjs --ratchet ${rel}\` in the same PR`,
     );
   }
 }
 for (const rel of Object.keys(budgets)) {
-  if (!allFiles.includes(rel)) {
-    problems.push(`${BUDGETS_FILE}: stale entry for missing file ${rel}`);
+  if (!budgetedFiles.includes(rel)) {
+    const why = rel.endsWith('.rationale.md') ? 'rationale files carry no budget' : 'no such spec';
+    problems.push(`${BUDGETS_FILE}: stale entry for ${rel} — ${why}; run \`node scripts/spec-lint.mjs --ratchet\``);
   }
 }
 

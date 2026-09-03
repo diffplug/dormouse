@@ -20,6 +20,9 @@ import { makeSelftest } from './lint-kit.mjs';
 const SPEC = 'docs/specs/auto-update.md'; // small, has a rationale file, no ## Future
 const RATIONALE = 'docs/specs/auto-update.rationale.md';
 const SOURCE = 'scripts/free-dev-port.mjs'; // a comment appended here disturbs nothing
+// Assembled at runtime so this file's own planted citations are invisible to
+// the citation check, which scans every tracked source file, this one included.
+const spec = (name) => ['docs/specs', name].join('/');
 
 const CASES = [
   ['check 4: a repo path that does not exist', SPEC, '\nSee `lib/src/no-such-file.ts`.\n'],
@@ -27,9 +30,9 @@ const CASES = [
   ['check 11: the marker as the last item of its parenthetical', SPEC, '\n## Planted\n\nA rule (see below; rationale).\n'],
   ['check 12: a bare file name in Source of truth', SPEC, '\nSource of truth: `updater.ts`.\n'],
   ['check 12: a symbol the named file lacks', SPEC, '\nSource of truth: `noSuchSymbolXyz` in `standalone/src/updater.ts`.\n'],
-  ['check 13: a quoted citation of a heading that does not exist', SOURCE, '\n// docs/specs/layout.md -> "No Such Heading"\n'],
-  ['check 13: an unquoted citation of a heading that does not exist', SOURCE, '\n// docs/specs/layout.md -> No Such Heading Here.\n'],
-  ['check 13: a numbered section that does not exist', SOURCE, '\n// docs/specs/mouse-and-clipboard.md §8.99\n'],
+  ['check 13: a quoted citation of a heading that does not exist', SOURCE, `\n// ${spec('layout.md')} -> "No Such Heading"\n`],
+  ['check 13: an unquoted citation of a heading that does not exist', SOURCE, `\n// ${spec('layout.md')} -> No Such Heading Here.\n`],
+  ['check 13: a numbered section that does not exist', SOURCE, `\n// ${spec('mouse-and-clipboard.md')} §8.99\n`],
   ['check 14: a rule stated in a rationale file', RATIONALE, '\n**Never plant rules here.**\n'],
 ];
 
