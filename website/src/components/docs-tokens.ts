@@ -34,9 +34,10 @@ export const ACCENT_HOVER_BORDER_CLASS = "hover:border-[var(--docs-accent)]";
  * well; at `lg` the bar is gone and only the header remains. **Must** stay
  * ahead of both, or a tapped rail entry lands the heading underneath them.
  *
- * Measured: the bar is 45px, the header 64px and 80px at `md`, so each step
- * clears its chrome by 3px. That margin is thin — growing the bar's padding or
- * its type needs the matching step here raised with it.
+ * Measured: the bar is 45px and the header 64px, 80px from `md` up (it has no
+ * `lg` step). So the two steps that clear both — 112px and 128px — have 3px in
+ * hand, while `lg` clears the header alone by 16px. Growing the bar's padding
+ * or its type needs the two tight steps raised with it.
  */
 export const SCROLL_MT_CLASS = "scroll-mt-28 md:scroll-mt-32 lg:scroll-mt-24";
 
