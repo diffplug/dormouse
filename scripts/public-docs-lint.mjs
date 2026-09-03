@@ -38,6 +38,7 @@ const SELF_HOST = 'SELF_HOST.md';
 const HOMEPAGE = 'website/src/pages/Home.tsx';
 const SPEC = 'docs/specs/website-docs.md';
 const DOCS_PAGES = 'website/src/lib/docs-pages.ts';
+const REDIRECTS = 'website/public/_redirects';
 const ROOT_ROUTE = 'website/src/root.tsx';
 const SITE_META = 'website/src/lib/site-meta.ts';
 
@@ -217,6 +218,11 @@ function referencePaths() {
   return [...source.matchAll(/path:\s*"([^"]+)"[^}]*published:\s*true/g)].map(([, path]) => path);
 }
 
+/** Every page in the rail, published or not. */
+function referencePathsAll() {
+  return [...readRepoFile(DOCS_PAGES).matchAll(/path:\s*"([^"]+)"/g)].map(([, path]) => path);
+}
+
 /**
  * Both READMEs must route to the published references, and the homepage too.
  *
@@ -320,6 +326,37 @@ function checkSiteOrigin() {
   }
 }
 
+/**
+ * `/docs` sends a reader to the page `DOCS_DEFAULT_PATH` names.
+ *
+ * There is no index page, so the redirect is the whole of `/docs`. It lives in
+ * `_redirects`, which no test exercises and no build reads, while the constant
+ * lives in TypeScript — two spellings of one destination, and a reader changing
+ * their mind about the entrypoint would naturally edit only one.
+ */
+function checkDocsEntrypoint() {
+  const declared = /DOCS_DEFAULT_PATH = "([^"]+)"/.exec(readRepoFile(DOCS_PAGES));
+  if (!declared) {
+    fail(`${DOCS_PAGES}: no DOCS_DEFAULT_PATH declaration found`);
+    return;
+  }
+  const target = declared[1];
+  if (!referencePathsAll().includes(target)) {
+    fail(`${DOCS_PAGES}: DOCS_DEFAULT_PATH is ${target}, which is not a page in the rail`);
+  }
+  const rule = readRepoFile(REDIRECTS)
+    .split('\n')
+    .find((line) => /^\/docs\s/.test(line));
+  if (!rule) {
+    fail(`${REDIRECTS}: no /docs rule; the entrypoint would 404`);
+    return;
+  }
+  const [, to, status] = rule.trim().split(/\s+/);
+  if (to !== target) fail(`${REDIRECTS}: /docs goes to ${to}, but DOCS_DEFAULT_PATH is ${target}`);
+  // A 301 outlives the next time we change our mind about the entrypoint.
+  if (status !== '302') fail(`${REDIRECTS}: /docs must redirect with 302, not ${status ?? '(none)'}`);
+}
+
 /** Generated data must be internally consistent. */
 async function checkGenerated() {
   let data;
@@ -367,6 +404,7 @@ const checks = [
   checkVsCodeCommands,
   checkPageHeadTags,
   checkSiteOrigin,
+  checkDocsEntrypoint,
   checkRoutesToReferences,
   checkGenerated,
   checkNoStagedClaims,

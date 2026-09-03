@@ -8,6 +8,9 @@ export const STATIC_PAGE_HEADER_STYLE: React.CSSProperties = {
 const NAV_LINKS: readonly { href: string; label: string; external?: boolean; hideOnMobile?: boolean }[] = [
   { href: "/playground", label: "Playground" },
   { href: "/#download", label: "Download", hideOnMobile: true },
+  // Desktop only: on a phone the docs are reached from the homepage's own
+  // links, and the four marketing destinations earn the narrow bar first.
+  { href: "/docs", label: "Docs", hideOnMobile: true },
   { href: "https://github.com/diffplug/dormouse", label: "GitHub", external: true },
 ];
 

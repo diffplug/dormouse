@@ -240,11 +240,29 @@ redirects to. `checkPageHeadTags` and `checkSiteOrigin` pin both.
 
 ## Reference page chrome
 
-All three published pages share `DocsLayout`: the site header, an `h1` and
-intro, a sticky on-page table of contents, and a footer linking the CLI
-reference, the agent skill, the self-host runbook, the issue tracker, and the
-supply chain. There is no breadcrumb — with no `/docs` above them, the pages
-are siblings, not children.
+Every page in `DOCS_PAGES` shares `DocsLayout`: the site header, the left
+navigation rail, an `h1` and intro, and prev/next. The changelog and the supply
+chain are in that list too — a reader meets them the same way, as long-form
+material reached from the rail rather than from the marketing nav.
+
+**The rail is the only table of contents.** It lists every page and expands the
+current one's sections beneath it, so moving between pages and within one is
+the same control. A second "on this page" would restate half of it.
+
+**The page list never shrinks; the expanded sections scroll.** The rail is a
+bounded flex column whose section list is the only part that gives up space, so
+everything shows when it fits and the five pages stay reachable when it does
+not. `/docs/dor` nests its subcommands under one `Commands` heading rather than
+listing fourteen entries beside four on every other page, and renders them as
+`h3`: a reader on a screen reader navigates the outline, not the rail, so the
+two must agree (`website/src/pages/DorDocs.test.tsx`).
+
+**`/docs` is an entrypoint, not an index.** It redirects to the page
+`DOCS_DEFAULT_PATH` names — a 302, because the target is a judgement call we
+expect to revisit and a 301 outlives it in readers' caches. There is no page at
+`/docs` itself, and `checkDocsEntrypoint` keeps the redirect and the constant
+saying the same thing. `Docs` joins the marketing nav on desktop only; on a
+phone the docs are reached from the homepage's own links.
 
 **These pages follow the reader's theme; the rest of the site does not.** They
 are long-form reading, so `DocsLayout` restores a theme and floats the
@@ -252,6 +270,8 @@ are long-form reading, so `DocsLayout` restores a theme and floats the
 ([theme.md](./theme.md) → Where the user picks a theme). The `docs-themed` body
 class redefines the site's own `--color-*` tokens from the applied
 `--vscode-*`, and only `DocsLayout` adds it, so the homepage keeps its black.
+The changelog and the supply chain joined that rule when they joined the rail,
+which is why their links moved off caramel.
 `applyTheme` writes to `body.style`, which `html` cannot read, so `html` gives
 up the canvas and lets body's background propagate.
 
@@ -476,6 +496,8 @@ verifies:
 - no per-page head tag is hardcoded in the root route, every route that
   exports `meta` builds it with `siteMeta`, and the two spellings of the site
   origin agree;
+- `/docs` redirects to a page the rail actually lists, with the status the
+  entrypoint's own constant expects;
 - public copy does not present staged WebRTC as shipped, for as long as WebRTC
   is still under `## Future` in [remote-api.md](remote-api.md).
 
@@ -504,7 +526,7 @@ spec.
 | `website/scripts/help-parser.js` (+ `.test.js`) | Narrow CLI-help parser with losslessness |
 | `website/scripts/generate-docs.js` | Codegen: the delta tables, `buildDocument`, `localizeSiteLinks`, `resolveRemovedAnchors`, `linkSkillHeadings` |
 | `website/src/components/MarkdownDocument.tsx` | Renders parsed Markdown blocks |
-| `website/src/components/DocsLayout.tsx` | Reference page chrome: header, TOC, footer, theme restore |
+| `website/src/components/DocsLayout.tsx` | Docs chrome: header, the rail and its mobile drawer, prev/next, theme restore |
 | `website/src/components/DocsThemeControl.tsx` | The floating picker and its first-visit prompt |
 | `website/src/lib/docs-theme.ts` | Default docs theme, and whether the reader has chosen |
 | `website/src/components/DorCommandReference.tsx` | One CLI command section |
@@ -546,5 +568,6 @@ pipeline work. Whoever does it should first answer the question that removed
 the page: what this rendering gives a reader that the Marketplace and GitHub
 renderings do not.
 
-Until then, `/docs` must stay a 404. A link to it from public copy is a bug,
-which is why the lint checks reference URLs exactly rather than by prefix.
+The lint checks reference URLs exactly rather than by prefix, so a link to a
+`/docs/...` page that does not exist is caught rather than satisfied by the
+entrypoint redirect.

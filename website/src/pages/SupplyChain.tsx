@@ -3,8 +3,8 @@ import { tv } from "tailwind-variants";
 import cargoDeps from "../data/dependencies-cargo.json";
 import npmDeps from "../data/dependencies-npm.json";
 import runtimeDeps from "../data/dependencies-runtime.json";
-import SiteHeader, { STATIC_PAGE_HEADER_STYLE } from "../components/SiteHeader";
-import { SITE_LINK_CLASS } from "../components/site-tokens";
+import DocsLayout from "../components/DocsLayout";
+import { LINK_CLASS } from "../components/docs-tokens";
 import { type MetaArgs } from "react-router";
 import { type TocEntry } from "../lib/docs-pages";
 import { siteMeta } from "../lib/site-meta";
@@ -17,9 +17,10 @@ export function meta({ location }: MetaArgs) {
   });
 }
 
-// Wrapped in `tv()` so the tables can compose it; the recipe itself is the
-// site-wide one, so links here render at the same brightness as everywhere.
-const link = tv({ base: SITE_LINK_CLASS });
+// Wrapped in `tv()` so the tables can compose it. The docs recipe, not the
+// site's caramel: this page follows the reader's theme, where caramel drops
+// below WCAG AA (website/src/components/docs-tokens.ts).
+const link = tv({ base: LINK_CLASS });
 
 type PackageDependency = {
   name: string;
@@ -201,80 +202,71 @@ function DependencySection({ section }: { section: SupplyChainSection }) {
 
 export default function SupplyChain() {
   return (
-    <>
-      <SiteHeader activePath="/supply-chain" style={STATIC_PAGE_HEADER_STYLE} />
+    <DocsLayout activePath="/supply-chain" title="Supply chain" toc={SUPPLY_CHAIN_TOC}>
+      <p className="text-base text-[var(--color-text)]/70 mb-2">
+        Dormouse is a terminal, so users trust it with shells, source trees, credentials, and
+        local files. Our security procedures are documented in full (and audited nightly and immediately before every release) in{" "}
+        <a
+          href={securityPolicyUrl}
+          className={link()}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          SECURITY.md
+        </a>, here is a summary:
+      </p>
+      <ul className="text-base text-[var(--color-text)]/70 mb-2 list-disc space-y-1 pl-5">
+        <li>
+          We wait at least 24 hours before adopting any newly published dependency.
+        </li>
+        <li>
+          Signing and auto-update secrets for the Standalone app are stored offline, never in CI.
+        </li>
+        <li>
+          Publishing secrets for the VS Code extension are stored in CI locked by two separate maintainer accounts.
+        </li>
+      </ul>
 
-      <div className="min-h-screen bg-[var(--color-bg)] text-[var(--color-text)] pt-24 pb-16">
-        <div className="mx-auto max-w-6xl px-4 md:px-6">
-          <h1 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] mb-2">
-            Supply Chain
-          </h1>
-          <p className="text-base text-[var(--color-text)]/70 mb-2">
-            Dormouse is a terminal, so users trust it with shells, source trees, credentials, and
-            local files. Our security procedures are documented in full (and audited nightly and immediately before every release) in{" "}
-            <a
-              href={securityPolicyUrl}
-              className={link()}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              SECURITY.md
-            </a>, here is a summary:
-          </p>
-          <ul className="text-base text-[var(--color-text)]/70 mb-2 list-disc space-y-1 pl-5">
-            <li>
-              We wait at least 24 hours before adopting any newly published dependency.
-            </li>
-            <li>
-              Signing and auto-update secrets for the Standalone app are stored offline, never in CI.
-            </li>
-            <li>
-              Publishing secrets for the VS Code extension are stored in CI locked by two separate maintainer accounts.
-            </li>
-          </ul>
-
-          <p className="text-base text-[var(--color-text)]/70 mb-2">
-            All bundled libraries are listed below. Thank you to every author and contributor.
-            Thanks also to{" "}
-            <a
-              href="https://github.com/reowens/ascii-splash"
-              className={link()}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              ascii-splash
-            </a>{" "}
-            and{" "}
-            <a
-              href="https://github.com/remix-run/react-router"
-              className={link()}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              react-router
-            </a>{" "}
-            and their transitive dependencies, which power this marketing site but don't ship in the app, so they're not listed below.
-          </p>
-          <div className="grid gap-3 border-y border-[var(--color-text)]/10 py-4 text-sm md:grid-cols-3">
-            <div>
-              <div className="font-mono text-2xl">{npmDeps.length}</div>
-              <div className="opacity-60">npm packages (direct and transitive)</div>
-            </div>
-            <div>
-              <div className="font-mono text-2xl">{cargoDeps.direct.length}</div>
-              <div className="opacity-60">Cargo crates (direct)</div>
-            </div>
-            <div>
-              <div className="font-mono text-2xl">{cargoDeps.transitive.length}</div>
-              <div className="opacity-60">Cargo crates (transitive)</div>
-            </div>
-          </div>
-
-          {SECTIONS.map((section) => (
-            <DependencySection key={section.id} section={section} />
-          ))}
+      <p className="text-base text-[var(--color-text)]/70 mb-2">
+        All bundled libraries are listed below. Thank you to every author and contributor.
+        Thanks also to{" "}
+        <a
+          href="https://github.com/reowens/ascii-splash"
+          className={link()}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          ascii-splash
+        </a>{" "}
+        and{" "}
+        <a
+          href="https://github.com/remix-run/react-router"
+          className={link()}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          react-router
+        </a>{" "}
+        and their transitive dependencies, which power this marketing site but don't ship in the app, so they're not listed below.
+      </p>
+      <div className="grid gap-3 border-y border-[var(--color-text)]/10 py-4 text-sm md:grid-cols-3">
+        <div>
+          <div className="font-mono text-2xl">{npmDeps.length}</div>
+          <div className="opacity-60">npm packages (direct and transitive)</div>
+        </div>
+        <div>
+          <div className="font-mono text-2xl">{cargoDeps.direct.length}</div>
+          <div className="opacity-60">Cargo crates (direct)</div>
+        </div>
+        <div>
+          <div className="font-mono text-2xl">{cargoDeps.transitive.length}</div>
+          <div className="opacity-60">Cargo crates (transitive)</div>
         </div>
       </div>
-    </>
+
+      {SECTIONS.map((section) => (
+        <DependencySection key={section.id} section={section} />
+      ))}
+    </DocsLayout>
   );
 }

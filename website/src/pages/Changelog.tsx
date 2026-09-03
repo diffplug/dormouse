@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Link, useParams, type MetaArgs } from "react-router";
-import SiteHeader, { STATIC_PAGE_HEADER_STYLE } from "../components/SiteHeader";
+import DocsLayout from "../components/DocsLayout";
+import { ACCENT_TEXT_CLASS } from "../components/docs-tokens";
 import changelog from "../data/changelog.json";
 import { type TocEntry } from "../lib/docs-pages";
 import { siteMeta } from "../lib/site-meta";
@@ -76,7 +77,7 @@ function renderInlineMarkdown(text: string) {
         <a
           key={`link-${key}`}
           href={match[3]}
-          className="text-[var(--color-caramel)] hover:underline"
+          className={`${ACCENT_TEXT_CLASS} hover:underline`}
           target="_blank"
           rel="noopener noreferrer"
         >
@@ -111,7 +112,7 @@ function ChangelogListItem({ item }: { item: ChangelogItem }) {
 function ReleaseSection({ section }: { section: ChangelogSection }) {
   return (
     <section className="mt-5">
-      <h3 className="mb-2 font-display text-base text-[var(--color-caramel)]">
+      <h3 className={`mb-2 font-display text-base ${ACCENT_TEXT_CLASS}`}>
         {section.title}
       </h3>
       <ul className="ml-5 list-disc space-y-2 text-base leading-relaxed text-[var(--color-text)]/85">
@@ -141,7 +142,7 @@ function ReleaseArticle({ release }: { release: ChangelogRelease }) {
         </div>
         <a
           href={`https://github.com/diffplug/dormouse/releases/tag/${release.tag}`}
-          className="text-sm text-[var(--color-caramel)] hover:underline"
+          className={`text-sm ${ACCENT_TEXT_CLASS} hover:underline`}
           target="_blank"
           rel="noopener noreferrer"
         >
@@ -179,7 +180,7 @@ function FilterNotice({ children }: { children: ReactNode }) {
   return (
     <div className="mb-8 border-l-2 border-[var(--color-caramel)] pl-4 text-sm text-[var(--color-text)]/75">
       {children}{" "}
-      <Link to="/changelog" className="text-[var(--color-caramel)] hover:underline">
+      <Link to="/changelog" className={`${ACCENT_TEXT_CLASS} hover:underline`}>
         Show all releases.
       </Link>
     </div>
@@ -201,39 +202,22 @@ export default function Changelog() {
       : RELEASES;
 
   return (
-    <>
-      <SiteHeader activePath="/changelog" style={STATIC_PAGE_HEADER_STYLE} />
+    <DocsLayout activePath="/changelog" title="Changelog" intro="Release notes for Dormouse." toc={CHANGELOG_TOC}>
+      {hasInvalidFilter ? <FilterNotice>No such release "{versionParam}".</FilterNotice> : null}
 
-      <main className="min-h-screen bg-[var(--color-bg)] px-4 pt-24 pb-16 text-[var(--color-text)] md:px-6">
-        <div className="mx-auto max-w-3xl">
-          <div className="mb-10">
-            <h1 className="mb-2 font-display text-[clamp(1.75rem,3vw+0.5rem,2.75rem)]">
-              Changelog
-            </h1>
-            <p className="text-base leading-relaxed text-[var(--color-text)]/60">
-              Release notes for Dormouse.
-            </p>
-          </div>
+      {baselineVersion ? (
+        <FilterNotice>Showing releases newer than v{baselineVersion}.</FilterNotice>
+      ) : null}
 
-          {hasInvalidFilter ? (
-            <FilterNotice>No such release "{versionParam}".</FilterNotice>
-          ) : null}
+      {visibleReleases.map((release) => (
+        <ReleaseArticle key={release.version} release={release} />
+      ))}
 
-          {baselineVersion ? (
-            <FilterNotice>Showing releases newer than v{baselineVersion}.</FilterNotice>
-          ) : null}
-
-          {visibleReleases.map((release) => (
-            <ReleaseArticle key={release.version} release={release} />
-          ))}
-
-          {baselineVersion && visibleReleases.length === 0 ? (
-            <div className="border-t border-[var(--color-text)]/10 py-8 text-[var(--color-text)]/60">
-              No releases newer than v{baselineVersion}.
-            </div>
-          ) : null}
+      {baselineVersion && visibleReleases.length === 0 ? (
+        <div className="border-t border-[var(--color-text)]/10 py-8 text-[var(--color-text)]/60">
+          No releases newer than v{baselineVersion}.
         </div>
-      </main>
-    </>
+      ) : null}
+    </DocsLayout>
   );
 }
