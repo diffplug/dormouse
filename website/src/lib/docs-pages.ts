@@ -10,7 +10,8 @@
  * The changelog and the supply chain live here too. They are not generated
  * from Markdown like the four references, but a reader meets them the same
  * way — long-form material reached from the rail rather than from the
- * marketing nav.
+ * marketing nav. The hosted-services preview is authored marketing, but
+ * shares that reading surface so it sits beside the self-host alternative.
  *
  * **Must stay erasable-syntax TypeScript with no imports.**
  * `scripts/public-docs-lint.mjs` imports this module directly and relies on
@@ -48,6 +49,7 @@ export const DOCS_PAGES: readonly DocsPage[] = [
   { path: "/docs/security", module: "./pages/SecurityDocs.tsx", label: "Security", linkedFrom: ["root-readme"] },
   { path: "/supply-chain", module: "./pages/SupplyChain.tsx", label: "Supply chain" },
   { path: "/docs/self-host", module: "./pages/SelfHostDocs.tsx", label: "Self hosting", linkedFrom: ["root-readme"] },
+  { path: "/hosted", module: "./pages/Hosted.tsx", label: "Hosted" },
   { path: "/docs/agent-skill", module: "./pages/AgentSkillDocs.tsx", label: "dor agent skill", linkedFrom: BOTH_READMES },
   { path: "/docs/dor", module: "./pages/DorDocs.tsx", label: "dor CLI reference", linkedFrom: BOTH_READMES },
 ];

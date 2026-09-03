@@ -3,8 +3,9 @@
 > See `docs/specs/glossary.md` for canonical Surface / Session / Pane
 > vocabulary used by the public product guide and browser workflow.
 
-Dormouse publishes four specialized references on the marketing site, each
-generated from a source that lives next to the code it describes.
+Dormouse publishes four specialized references and a hosted-services preview
+on the marketing site. Each reference is generated from a source that lives
+next to the code it describes.
 
 ```text
 /docs/dor           dor CLI reference
@@ -28,6 +29,7 @@ that once rendered it at `/docs` is retained and still runs (see
 | `/docs/dor` | Complete CLI reference | Help snapshots in `dor/test/snapshots/help/`, verified against the built CLI |
 | `/docs/agent-skill` | Agent-facing operating guide | Exact `dor/skill.md` |
 | `/docs/self-host` | Running the coordinating server yourself | The runbook half of `SELF_HOST.md` |
+| `/hosted` | Prelaunch overview of optional paid managed services | `website/src/pages/Hosted.tsx` |
 | `/docs/security` | What Dormouse guarantees and how it is checked | Every section of `docs/specs/security.md`, minus title and front matter; its rows split across three pages |
 | GitHub root | Repository overview and contributor entry point | Root `README.md` |
 
@@ -260,8 +262,8 @@ canonical joins the fallback's and both are discarded; `siteMeta`'s
 
 Every page in `DOCS_PAGES` shares `DocsLayout`: the site header, the left
 navigation rail, an `h1` and intro, and prev/next. The changelog and the supply
-chain are in that list too — a reader meets them the same way, as long-form
-material reached from the rail rather than from the marketing nav.
+chain are in that list too. `/hosted` shares the chrome as an authored
+marketing page and follows `/docs/self-host` in the rail.
 
 **The rail is the only table of contents.** It lists every page and expands the
 current one's sections beneath it, so moving between pages and within one is
@@ -309,6 +311,16 @@ Keyed on the website's own `dormouse:docs-theme-prompt-dismissed`, because
 `localStorage`, then reconcile after hydration. Until then the prompt stays
 hidden, so a returning reader never sees dismissed UI flash. Pinned by
 `website/src/components/DocsThemeControl.test.tsx`.
+
+## `/hosted` preview
+
+**Must present both paid services as coming soon until purchasing is
+available:** Dormouse Hosted operates the coordinating server, while the
+optional ElevenLabs service replaces browser speech with a managed voice.
+**Must keep current behavior explicit:** terminals remain on an awake, online
+computer; browser speech and free self-hosting remain available. Signup goes
+through `NotifySignupForm`, which discloses that it redirects to the
+`nedshed.dev` personal devlog.
 
 ## `/docs/dor` reference
 
@@ -593,6 +605,7 @@ spec.
 | `website/src/pages/DorDocs.tsx` | `/docs/dor` |
 | `website/src/pages/AgentSkillDocs.tsx` | `/docs/agent-skill` |
 | `website/src/pages/SelfHostDocs.tsx` | `/docs/self-host` |
+| `website/src/pages/Hosted.tsx` | `/hosted`, its two coming-soon offers and signup |
 | `website/src/pages/SecurityDocs.tsx` | `/docs/security` |
 | `scripts/public-docs-lint.mjs` | Public-doc validation |
 

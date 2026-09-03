@@ -5,7 +5,15 @@ import { SITE_LINK_CLASS } from "./site-tokens";
 const EMAIL_REGEX =
   /^[a-zA-Z0-9.!#$%&'*+\/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
 
-export function NotifySignupForm() {
+export function NotifySignupForm({
+  buttonLabel = "Notify me when Pocket ships",
+  emailId = "notify-email",
+  announcement = "the Dormouse launch",
+}: {
+  buttonLabel?: string;
+  emailId?: string;
+  announcement?: string;
+}) {
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState("");
   const [redirecting, setRedirecting] = useState(false);
@@ -45,12 +53,12 @@ export function NotifySignupForm() {
   return (
     <>
       <form onSubmit={handleSubmit} className="flex flex-col gap-2">
-        <label htmlFor="notify-email" className="font-display text-sm opacity-50">
+        <label htmlFor={emailId} className="font-display text-sm opacity-50">
           Email
         </label>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
           <input
-            id="notify-email"
+            id={emailId}
             type="email"
             name="email"
             value={email}
@@ -67,7 +75,7 @@ export function NotifySignupForm() {
             type="submit"
             className="min-h-12 inline-flex items-center justify-center rounded-md border border-[var(--color-caramel)] bg-[var(--color-caramel)]/15 px-6 py-3 text-base font-display text-[var(--color-caramel)] transition hover:bg-[var(--color-caramel)]/25 sm:w-auto"
           >
-            Notify me when Pocket ships
+            {buttonLabel}
           </button>
         </div>
         {message && (
@@ -84,7 +92,7 @@ export function NotifySignupForm() {
         >
           nedshed.dev
         </a>{" "}
-        on Substack. The next post will be the launch post, you can unsubscribe any time.
+        on Substack. I’ll announce {announcement} there; you can unsubscribe any time.
       </p>
     </>
   );
