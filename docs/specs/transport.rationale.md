@@ -8,7 +8,7 @@
 
 ## Standalone browser-dev harness
 
-**Why the bridge needs authentication at all.** Loopback is not an access control: any web page open in the developer's own browser reaches `127.0.0.1` as readily as the dev page does, and an unauthenticated bridge hands it arbitrary command execution as the developer (`SECURITY.md` → "Loopback Listeners").
+**Why the bridge needs authentication at all.** Loopback is not an access control: any web page open in the developer's own browser reaches `127.0.0.1` as readily as the dev page does, and an unauthenticated bridge hands it arbitrary command execution as the developer (`docs/specs/security-application.md` → "Loopback Listeners").
 
 **Why the token is digested before comparison.** `timingSafeEqual` throws on unequal-length inputs, so raw-string comparison turns a wrong-length guess into an exception rather than a refusal; hashing both sides to SHA-256 makes every comparison equal-length.
 

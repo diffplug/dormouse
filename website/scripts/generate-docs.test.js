@@ -1,12 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { applyDelta, generateDocs } from './generate-docs.js';
+import { applyDelta, generateDocs, resolveRepoLinks, REPO_BLOB_BASE } from './generate-docs.js';
 import { createSlugger, parseMarkdown, visit } from './docs-parser.js';
 
 const data = await generateDocs();
 
 /**
- * Every link href in the generated data: both published pages, plus the guide
- * data, which has no page today but is generated and must stay correct.
+ * Every link href in the generated data: all three published pages, plus the
+ * guide data, which has no page today but is generated and must stay correct.
  */
 function generatedHrefs() {
   const hrefs = [];
@@ -16,6 +16,7 @@ function generatedHrefs() {
     });
   collect(data.guide.blocks);
   collect(data.selfhost.blocks);
+  collect(data.security.blocks);
   collect(data.skill.blocks);
   for (const section of data.cli.intro) collect(section.blocks);
   return hrefs;
@@ -119,6 +120,87 @@ describe('self-host runbook', () => {
       }
     });
     expect(dangling).toEqual([]);
+  });
+});
+
+describe('security spec', () => {
+  it('drops exactly the document title and the front matter', () => {
+    // Published whole is the point of the page: a delta that grew a third rule
+    // is withholding something a reader was promised.
+    expect(data.security.delta.map((r) => r.id)).toEqual(['drop-document-title', 'drop-front-matter']);
+    expect(data.security.blocks.some((b) => b.type === 'heading' && b.depth === 1)).toBe(false);
+    expect(data.security.blocks.some((b) => b.type === 'blockquote')).toBe(false);
+  });
+
+  it('keeps every section, in order', () => {
+    expect(data.security.headings.map((h) => h.id)).toEqual([
+      'guarantees',
+      'what-is-not-defended',
+      'known-gaps',
+      'how-the-guarantees-are-checked',
+      'reporting-a-vulnerability',
+    ]);
+  });
+
+  it('sends its links into the repository to the canonical file', () => {
+    // The spec links its neighbours the way GitHub resolves them; published,
+    // those paths address nothing.
+    expect(data.security.repoLinks.length).toBeGreaterThan(0);
+    for (const { to } of data.security.repoLinks) expect(to.startsWith(REPO_BLOB_BASE)).toBe(true);
+    expect(data.security.repoLinks).toContainEqual({
+      from: '../../SELF_HOST.md',
+      to: `${REPO_BLOB_BASE}/SELF_HOST.md`,
+    });
+  });
+
+  it('keeps the fragment on a link into another spec', () => {
+    expect(data.security.repoLinks).toContainEqual({
+      from: './remote-security-model.md#pairing',
+      to: `${REPO_BLOB_BASE}/docs/specs/remote-security-model.md#pairing`,
+    });
+  });
+});
+
+describe('repository links', () => {
+  const tree = (markdown) => parseMarkdown(markdown, { slug: createSlugger() }).blocks;
+  const hrefs = (blocks) => {
+    const out = [];
+    visit(blocks, (node) => {
+      if (node.type === 'link' && node.href) out.push(node.href);
+    });
+    return out;
+  };
+
+  it('resolves a relative path against the source file\'s own directory', () => {
+    const blocks = tree('[a](./security-ci.md#domains) and [b](../../SELF_HOST.md)');
+    const rewritten = resolveRepoLinks(blocks, 'docs/specs/security.md');
+    expect(hrefs(blocks)).toEqual([
+      `${REPO_BLOB_BASE}/docs/specs/security-ci.md#domains`,
+      `${REPO_BLOB_BASE}/SELF_HOST.md`,
+    ]);
+    expect(rewritten).toHaveLength(2);
+  });
+
+  it('leaves anything that does not name a file in the repository alone', () => {
+    const untouched = [
+      '#a-heading-on-this-page',
+      'https://dormouse.sh/supply-chain',
+      'mailto:nobody@example.com',
+      '//example.com/x',
+    ];
+    const blocks = tree(untouched.map((href, i) => `[${i}](${href})`).join(' '));
+    expect(resolveRepoLinks(blocks, 'docs/specs/security.md')).toEqual([]);
+    expect(hrefs(blocks)).toEqual(untouched);
+  });
+
+  it('fails on a target that does not exist, rather than publishing a 404', () => {
+    const blocks = tree('[gone](./security-nowhere.md)');
+    expect(() => resolveRepoLinks(blocks, 'docs/specs/security.md')).toThrow(/does not exist/);
+  });
+
+  it('fails on a path that climbs out of the repository', () => {
+    const blocks = tree('[out](../../../etc/passwd)');
+    expect(() => resolveRepoLinks(blocks, 'docs/specs/security.md')).toThrow(/outside the repository/);
   });
 });
 
@@ -228,6 +310,15 @@ describe('same-site links', () => {
   it('leaves no absolute site link in the generated data', () => {
     const offenders = generatedHrefs().filter((href) => href.startsWith('https://dormouse.sh'));
     expect(offenders, 'these would navigate off the current origin').toEqual([]);
+  });
+
+  it('leaves no relative link in the generated data', () => {
+    // A page is not served from the repository tree, so a path relative to the
+    // source file resolves against the URL it was published at instead.
+    const relative = generatedHrefs().filter(
+      (href) => !href.startsWith('#') && !href.startsWith('/') && !/^[a-z][a-z0-9+.-]*:/i.test(href),
+    );
+    expect(relative, 'these would resolve against the page URL, not the repository').toEqual([]);
   });
 
   it('does not touch links to other origins', () => {

@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 /**
  * Mechanical check for the structural half of the end-to-end boundary in
- * `SECURITY.md` ("Remote Control"). Runs from the repo root via `pnpm test`
- * (see the root package.json). Exits non-zero with a per-violation report
- * naming the rule that was broken and the `SECURITY.md` line it enforces.
+ * `docs/specs/security-application.md` ("Remote Control"). Runs from the repo
+ * root via `pnpm test` (see the root package.json). Exits non-zero with a
+ * per-violation report naming the rule that was broken and the spec line it
+ * enforces.
  *
  * Why this exists: the properties the trust boundary rests on are *absences* —
  * one Noise suite and no way to select another, no JavaScript curve, no
@@ -33,8 +34,8 @@
  *     assert they are *rejected*, and a lint that reddened on those would push
  *     someone to delete the regression tests.
  *
- * Every rule names the `SECURITY.md` line it enforces, and that line is checked
- * to still exist — a rule whose prose was deleted is a rule nobody agreed to.
+ * Every rule names the spec line it enforces, and that line is checked to
+ * still exist — a rule whose prose was deleted is a rule nobody agreed to.
  * `scripts/e2e-lint-selftest.mjs` is what keeps the patterns honest: it
  * re-introduces each forbidden thing in turn and requires this lint to fail.
  */
@@ -51,6 +52,9 @@ import { readRepoFile, repoRoot, trackedFiles } from './lint-kit.mjs';
  * renaming the suite would rename the expectation with it.
  */
 const NOISE_PROTOCOL_NAME = 'Noise_IK_25519_ChaChaPoly_SHA256';
+
+/** The spec whose "Remote Control" lines every rule below pins. */
+export const SECURITY_SPEC = 'docs/specs/security-application.md';
 
 /**
  * The modules that carry the end-to-end boundary. Scoped explicitly rather than
@@ -98,8 +102,10 @@ const FRAME_MODULES = [
 const SOURCE_TREES = ['server-lib-common/src/', 'lib/src/', 'server/src/'];
 
 /**
- * One entry per structural property. Every rule states the `SECURITY.md` line
- * it enforces in `security`, which must still appear in that file.
+ * One entry per structural property. Every rule states the `SECURITY_SPEC`
+ * line it enforces in `security`, which must still appear in that file — as a
+ * substring of the raw text, so the phrase has to sit on one line: reflow the
+ * spec paragraph around it rather than let a hard wrap split it.
  *
  * Rule kinds:
  *   - `forbid`   — the pattern must not match in any file of `files`. `allow`
@@ -310,15 +316,15 @@ export function check() {
     return text;
   };
 
-  const security = existsSync(join(repoRoot, 'SECURITY.md')) ? read('SECURITY.md') : '';
+  const security = existsSync(join(repoRoot, SECURITY_SPEC)) ? read(SECURITY_SPEC) : '';
 
   for (const rule of RULES) {
-    // A rule whose SECURITY.md line is gone is a rule nobody agreed to. Checked
-    // first, so a deleted invariant is reported as that rather than as whatever
-    // the pattern happens to find.
+    // A rule whose spec line is gone is a rule nobody agreed to. Checked first,
+    // so a deleted invariant is reported as that rather than as whatever the
+    // pattern happens to find.
     if (!security.includes(rule.security)) {
       failures.push(
-        `${rule.rule}\n    SECURITY.md no longer says "${rule.security}" — the rule and its prose must move together`,
+        `${rule.rule}\n    ${SECURITY_SPEC} no longer says "${rule.security}" — the rule and its prose must move together`,
       );
     }
 
@@ -383,10 +389,10 @@ export function check() {
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const { failures, checked } = check();
   if (failures.length > 0) {
-    console.error('e2e-lint: the end-to-end boundary no longer holds what SECURITY.md requires\n');
+    console.error(`e2e-lint: the end-to-end boundary no longer holds what ${SECURITY_SPEC} requires\n`);
     for (const failure of failures) console.error(`  ${failure}\n`);
     console.error(
-      'Each line above maps to the "Remote Control" section of SECURITY.md. If a\n' +
+      `Each line above maps to the "Remote Control" section of ${SECURITY_SPEC}. If a\n` +
         'control moved rather than disappeared, update the rule in scripts/e2e-lint.mjs\n' +
         'in the same commit — and add the self-test case that proves it load-bearing.',
     );

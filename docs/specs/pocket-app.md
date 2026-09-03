@@ -475,7 +475,7 @@ prefix**: the manifest's `start_url`/`scope`, the worker's registration scope,
 and the shell's manifest/icon links are all root-absolute.
 
 **The origin is served with a Content-Security-Policy**, the defense in depth
-around the active XSS `SECURITY.md` -> Accepted limitations names (rationale).
+around the active XSS `docs/specs/security.md` -> "What is not defended" names (rationale).
 Every source is the app's own origin
 (`default-src 'self'`, with `frame-ancestors`, `base-uri` and `object-src`
 `'none'`), with three loosenings:

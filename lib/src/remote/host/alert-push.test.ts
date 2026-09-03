@@ -497,7 +497,7 @@ describe('push device list', () => {
     // By `deliveryId`: the Server knows the capability and nothing else, so the
     // Host is the only party that can put a human name against a row. The id is
     // the join key and stops here — it is a bearer capability, and the dialog
-    // that reads this renders labels (`SECURITY.md` -> the outbound FAIL IF).
+    // that reads this renders labels (`docs/specs/security-application.md` -> "Trust boundary", the outbound FAIL IF).
     await refreshPushDevices(deps());
     expect(getPushDevices()).toEqual({
       status: 'ready',

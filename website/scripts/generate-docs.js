@@ -20,10 +20,18 @@
  * See docs/specs/website-docs.md.
  */
 
+import { existsSync } from 'node:fs';
 import { readFile, readdir, writeFile, mkdir, copyFile, rm } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname, join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createSlugger, hasScheme, parseMarkdown, slugify, visit } from './docs-parser.js';
+import {
+  createSlugger,
+  hasScheme,
+  isProtocolRelative,
+  parseMarkdown,
+  slugify,
+  visit,
+} from './docs-parser.js';
 import {
   parseSnapshot,
   parseHelp,
@@ -70,8 +78,15 @@ export const SITE_ORIGIN = 'https://dormouse.sh';
  * scripts/public-docs-lint.mjs -> checkImageBaseUrl.
  */
 export const SITE_IMAGE_BASE = `${SITE_ORIGIN}/guide`;
+/**
+ * The repository's own file view, where anything not published here still reads.
+ *
+ * Two rewrites need it: a link into a section the delta withheld, and a link a
+ * source spells relative to its own directory in the repository.
+ */
+export const REPO_BLOB_BASE = 'https://github.com/diffplug/dormouse/blob/main';
 /** Where the unpublished half of SELF_HOST.md is still readable. */
-const SELF_HOST_CANONICAL_URL = 'https://github.com/diffplug/dormouse/blob/main/SELF_HOST.md';
+const SELF_HOST_CANONICAL_URL = `${REPO_BLOB_BASE}/SELF_HOST.md`;
 
 /** Every page's shell supplies its own title and breadcrumb, so no published
  *  document keeps the `#` heading its file leads with. */
@@ -129,6 +144,24 @@ const SELF_HOST_DELTA = [
     reason: 'The maintainer half of the file, audited by scripts/deploy-lint.mjs.',
     match: headingNamed('Installer contract (maintainers)'),
     operation: 'remove-section',
+  },
+];
+
+/**
+ * The complete security delta, per docs/specs/website-docs.md.
+ *
+ * docs/specs/security.md is published whole — the guarantees, what is not
+ * defended, the gaps, and how each is checked are the point of the page — so
+ * nothing but the file's own title and its spec front matter is withheld.
+ */
+const SECURITY_DELTA = [
+  DROP_DOCUMENT_TITLE,
+  {
+    id: 'drop-front-matter',
+    reason:
+      'The opening blockquote is spec front matter — what the file owns and defers; the page shell says what the page is.',
+    match: (block) => block.type === 'blockquote',
+    operation: 'remove',
   },
 ];
 
@@ -228,6 +261,47 @@ function resolveRemovedAnchors(blocks, removedIds, canonicalUrl) {
     if (!removed.has(id)) return;
     node.href = `${canonicalUrl}#${id}`;
     rewritten.push({ from: `#${id}`, to: node.href });
+  });
+  return rewritten;
+}
+
+/**
+ * Send links into the repository to the canonical file on GitHub.
+ *
+ * A source written next to the code it describes links its neighbours the way
+ * GitHub resolves them — `./security-ci.md`, `../../SELF_HOST.md`. Published,
+ * those resolve against a URL path that has no such neighbours, so each is
+ * rewritten to the file's canonical URL in the repository, `#fragment` intact.
+ *
+ * A target that does not exist, or a path that climbs out of the repository,
+ * fails the build. `scripts/spec-lint.mjs` already resolves relative links
+ * inside the specs, but the generator is the last thing between a source and a
+ * published page and must not depend on another lint having run.
+ */
+export function resolveRepoLinks(blocks, sourceFile) {
+  const dir = posix.dirname(sourceFile);
+  const rewritten = [];
+  visit(blocks, (node) => {
+    if (node.type !== 'link' || !node.href) return;
+    // A bare fragment addresses this page; a scheme or `//host` addresses
+    // somewhere else entirely. Neither names a file in the repository.
+    if (node.href.startsWith('#') || hasScheme(node.href) || isProtocolRelative(node.href)) return;
+    const hash = node.href.indexOf('#');
+    const target = hash === -1 ? node.href : node.href.slice(0, hash);
+    const fragment = hash === -1 ? '' : node.href.slice(hash);
+    // `posix` and not `path`: these are repository paths in Markdown, which are
+    // `/`-separated on every platform the build runs on. `join` normalizes, so
+    // `docs/specs/../../SELF_HOST.md` arrives as `SELF_HOST.md`.
+    const resolved = posix.join(dir, target);
+    if (resolved.startsWith('..')) {
+      throw new Error(`${sourceFile}: link "${node.href}" resolves outside the repository`);
+    }
+    if (!existsSync(join(repoRoot, resolved))) {
+      throw new Error(`${sourceFile}: link "${node.href}" resolves to ${resolved}, which does not exist`);
+    }
+    const from = node.href;
+    node.href = `${REPO_BLOB_BASE}/${resolved}${fragment}`;
+    rewritten.push({ from, to: node.href });
   });
   return rewritten;
 }
@@ -352,11 +426,16 @@ async function syncGuideMedia(files) {
 /**
  * One published page from one canonical Markdown file.
  *
- * Both Markdown pages need the same steps in the same order, and the only
+ * Every Markdown page needs the same steps in the same order, and the only
  * difference is an option: `canonicalUrl` sends links into withheld sections
  * off-site rather than leaving them dangling. Written once because two copies
  * of this had already drifted on the order of the last three steps, which is
  * how one page quietly loses a guarantee the other still has.
+ *
+ * The three link rewrites run in one fixed order: a withheld section's anchor
+ * goes off-site first, then a repository-relative path becomes a canonical
+ * GitHub URL, and only then is a link that happens to address this site's own
+ * origin localized like any other.
  */
 async function buildDocument({ file, delta, label, fallbackTitle, canonicalUrl }) {
   const markdown = await readFile(join(repoRoot, file), 'utf8');
@@ -371,9 +450,10 @@ async function buildDocument({ file, delta, label, fallbackTitle, canonicalUrl }
   const headings = headingsOf(blocks);
   assertUniqueIds(headings.map((h) => h.id), label);
 
-  // Both rewrites run before the assertion: a link into a withheld section is
+  // Every rewrite runs before the assertion: a link into a withheld section is
   // not dangling once it has gained the origin that still serves it.
   const withheldLinks = canonicalUrl ? resolveRemovedAnchors(blocks, removedIds, canonicalUrl) : [];
+  const repoLinks = resolveRepoLinks(blocks, file);
   const localizedLinks = localizeSiteLinks(blocks);
   assertAnchorsResolve(blocks, headings, label);
 
@@ -385,6 +465,7 @@ async function buildDocument({ file, delta, label, fallbackTitle, canonicalUrl }
     toc: buildToc(headings),
     delta: applied,
     withheldLinks,
+    repoLinks,
     localizedLinks,
   };
 }
@@ -415,6 +496,22 @@ const buildSelfHost = () =>
     label: '/docs/self-host',
     fallbackTitle: 'Self-host',
     canonicalUrl: SELF_HOST_CANONICAL_URL,
+  });
+
+/**
+ * `/docs/security` from docs/specs/security.md, whole.
+ *
+ * The file stays canonical in `docs/specs/`: it is a spec, so
+ * `scripts/spec-lint.mjs` budgets it and the nightly audit reads it. No
+ * `canonicalUrl`, because the delta removes no section — the page is the spec,
+ * which is the point of publishing it.
+ */
+const buildSecurity = () =>
+  buildDocument({
+    file: 'docs/specs/security.md',
+    delta: SECURITY_DELTA,
+    label: '/docs/security',
+    fallbackTitle: 'Security',
   });
 
 /** Blocks belonging to a heading: everything up to the next heading of <= depth. */
@@ -587,6 +684,7 @@ function linkSkillHeadings(skill, cli) {
 export async function generateDocs() {
   const guide = await buildGuide();
   const selfhost = await buildSelfHost();
+  const security = await buildSecurity();
   const skill = await buildSkill();
   const cli = await buildCli(skill);
   const references = linkSkillHeadings(skill, cli);
@@ -594,6 +692,7 @@ export async function generateDocs() {
   return {
     guide,
     selfhost,
+    security,
     cli,
     skill: {
       source: skill.source,
@@ -617,14 +716,17 @@ async function main() {
     ),
     syncGuideMedia(data.guide.media.available),
   ]);
-  const { guide, selfhost, cli, skill } = data;
+  const { guide, selfhost, security, cli, skill } = data;
+  const markdownPages = [guide, selfhost, security];
   console.log(
     `Wrote docs data: guide ${guide.headings.length} headings, ` +
       `self-host ${selfhost.headings.length} headings (${selfhost.delta.length} delta rules), ` +
+      `security ${security.headings.length} headings (${security.delta.length} delta rules), ` +
       `cli ${cli.commands.length} commands + ${cli.intro.length} intro sections, ` +
       `skill ${Object.keys(skill.references).length} reference links, ` +
       `${guide.media.available.length} media file(s), ` +
-      `${guide.localizedLinks.length + selfhost.localizedLinks.length + skill.localizedLinks.length} link(s) localized`,
+      `${markdownPages.reduce((n, page) => n + page.repoLinks.length, 0)} link(s) sent to the repository, ` +
+      `${markdownPages.reduce((n, page) => n + page.localizedLinks.length, 0) + skill.localizedLinks.length} link(s) localized`,
   );
 }
 

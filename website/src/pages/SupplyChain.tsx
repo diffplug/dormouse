@@ -34,8 +34,6 @@ type DirectCargoDependency = PackageDependency & {
   declaredName: string;
 };
 
-const securityPolicyUrl = "https://github.com/diffplug/dormouse/blob/main/SECURITY.md";
-
 function DependencyName({ dep }: { dep: PackageDependency }) {
   if (!dep.homepage) return dep.name;
 
@@ -205,15 +203,12 @@ export default function SupplyChain() {
     <DocsLayout activePath="/supply-chain" toc={SUPPLY_CHAIN_TOC}>
       <p className="text-base text-[var(--color-text)]/70 mb-2">
         Dormouse is a terminal, so users trust it with shells, source trees, credentials, and
-        local files. Our security procedures are documented in full (and audited nightly and immediately before every release) in{" "}
-        <a
-          href={securityPolicyUrl}
-          className={link()}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          SECURITY.md
-        </a>, here is a summary:
+        local files. Our security procedures are documented in full — and audited nightly, and
+        immediately before every release — in the{" "}
+        <a href="/docs/security" className={link()}>
+          security spec
+        </a>
+        . Here is a summary:
       </p>
       <ul className="text-base text-[var(--color-text)]/70 mb-2 list-disc space-y-1 pl-5">
         <li>

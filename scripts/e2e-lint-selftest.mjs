@@ -8,7 +8,7 @@
  * test. Every rule here checks that something is *absent*, and the
  * characteristic failure of an absence check is passing because the pattern
  * cannot see the thing it names — a regex anchored on a spelling nobody uses, a
- * scope that resolves to no files, a `SECURITY.md` phrase that drifted. A green
+ * scope that resolves to no files, a spec phrase that drifted. A green
  * `e2e-lint` says nothing about any of that. "The lint goes red when each
  * forbidden thing comes back" is the property that matters, and it is checkable.
  *
@@ -17,8 +17,8 @@
  * proves that scope resolves — a `trees` rule whose filter excluded every file
  * would stay green.
  *
- * Every rule also names a `SECURITY.md` line, and the lint checks that line
- * still exists. That check is proved here too, by deleting the line: a rule
+ * Every rule also names a line of `SECURITY_SPEC`, and the lint checks that
+ * line still exists. That check is proved here too, by deleting the line: a rule
  * whose prose was removed is a rule nobody agreed to, and it must not go on
  * passing quietly. Once per *line*, not once per rule — several rules cite the
  * same sentence, and re-deleting it proves nothing new.
@@ -28,7 +28,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { makeSelftest, repoRoot } from './lint-kit.mjs';
-import { filesFor, RULES } from './e2e-lint.mjs';
+import { filesFor, RULES, SECURITY_SPEC } from './e2e-lint.mjs';
 
 const selftest = makeSelftest('e2e-lint.mjs', '.e2e-selftest.bak');
 
@@ -79,16 +79,16 @@ for (const rule of RULES) {
   );
 }
 
-const security = readFileSync(join(repoRoot, 'SECURITY.md'), 'utf8');
+const security = readFileSync(join(repoRoot, SECURITY_SPEC), 'utf8');
 for (const line of new Set(RULES.map((rule) => rule.security))) {
   if (!security.includes(line)) {
-    selftest.weak.push(`SECURITY.md does not contain the line a rule names: "${line}"`);
+    selftest.weak.push(`${SECURITY_SPEC} does not contain the line a rule names: "${line}"`);
     continue;
   }
   selftest.withMutation(
-    'SECURITY.md',
+    SECURITY_SPEC,
     (path) => writeFileSync(path, security.replace(line, '')),
-    `deleting "${line}" from SECURITY.md stays green — a rule would outlive the prose`,
+    `deleting "${line}" from ${SECURITY_SPEC} stays green — a rule would outlive the prose`,
   );
 }
 

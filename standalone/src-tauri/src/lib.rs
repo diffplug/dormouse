@@ -825,7 +825,7 @@ fn restrict_to_owner(path: &Path, mode: u32) -> Result<(), String> {
 /// the caller, not on this function: `write_session_to` runs on the quit path
 /// and would rather keep a snapshot under the ACL Windows gave it than lose it,
 /// while `remote_host_state_dir` runs at sidecar start and is — per
-/// `SECURITY.md`, "Credentials at rest" — the *only* thing restricting
+/// `docs/specs/security-application.md` -> "Credentials at rest" — the *only* thing restricting
 /// `hostToken` on Windows, so a failure there is a silent downgrade of the one
 /// control and must reach the log.
 #[cfg(windows)]

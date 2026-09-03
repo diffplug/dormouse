@@ -155,7 +155,7 @@ consumed-key list; `lib/src/lib/themes/consumed-keys.test.ts` pins the two.
 
 **Never** ship a theme in `bundled.json` without its `bundled-extensions.json`
 record, or keep a record no theme uses — that file is the provenance the
-supply-chain page publishes ([SECURITY.md](../../SECURITY.md)). Records carry the
+supply-chain page publishes ([security-supply-chain.md](./security-supply-chain.md#disclosure)). Records carry the
 `extensionId` joining them to the `<extensionId>.<slug>` theme ids;
 `lib/src/lib/themes/bundled-extensions.test.ts` pins both directions.
 

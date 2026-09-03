@@ -17,7 +17,7 @@
  * edit-and-restore.
  */
 
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeSelftest, readRepoFile, repoRoot } from './lint-kit.mjs';
 import { countWords } from './spec-md.mjs';
@@ -56,6 +56,20 @@ const selftest = makeSelftest('spec-lint.mjs', '.spec-selftest.bak');
 for (const [name, target, text] of CASES) {
   selftest.withAppended(target, text, `${name}\n      planting this in ${target} stays green — spec-lint cannot see it`);
 }
+
+// Check 16 is not an append: a second claim has to land inside a domain's scope
+// block, so it is planted as the first bullet under `**Scope` in one prompt.
+const DOMAIN = '.github/audit/supply-chain.md';
+selftest.withMutation(
+  DOMAIN,
+  (path) => {
+    const text = readFileSync(path, 'utf8');
+    const planted = text.replace(/^(\*\*Scope[^\n]*\n\n)/m, '$1- `docs/specs/security-ci.md`\n');
+    if (planted === text) throw new Error(`${DOMAIN}: no "**Scope" line to plant under`);
+    writeFileSync(path, planted);
+  },
+  `check 16: a security spec claimed by two audit domains\n      planting a second claim in ${DOMAIN} stays green — spec-lint cannot see it`,
+);
 
 selftest.finish(
   'spec-lint-selftest',

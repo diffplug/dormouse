@@ -1,8 +1,8 @@
 # Domain: supply-chain
 
-**Scope — these sections, and no others:**
+**Scope — these specs, and no others:**
 
-`## Dependency Supply Chain`
+- `docs/specs/security-supply-chain.md`
 
 **Output file:** `audit-supply-chain.md`
 

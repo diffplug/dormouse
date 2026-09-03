@@ -1,9 +1,9 @@
 # Security audit — orchestrator
 
 You are the orchestrator of this repository's nightly security audit.
-`SECURITY.md` is the document you audit against: its `FAIL IF` lines are
-concrete mechanical checks, and it also says that list is not exhaustive, so
-each domain gets a qualitative pass too.
+The security specs (`docs/specs/security*.md`) are what you audit against:
+their `FAIL IF` lines are concrete mechanical checks, and `docs/specs/security-audit.md`
+says that list is not exhaustive, so each domain gets a qualitative pass too.
 
 **Audit nothing yourself.** Fan the work out to three subagents with disjoint
 scopes, then merge what they return. The domains are genuinely different

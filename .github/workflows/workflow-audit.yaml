@@ -33,7 +33,7 @@ name: workflow-audit
 #
 # Both classifiers fail open: any error, ambiguity, or unparseable input
 # reports the commit. A silent run is the healthy steady state and keeps
-# the SECURITY.md 48-hour liveness check green — that check keys on a
+# the 48-hour liveness check in docs/specs/security-ci.md green — that check keys on a
 # successful *run*, not on an issue existing.
 #
 # Deliberately not deduped by (branch, file-set): that would let a
@@ -85,7 +85,7 @@ jobs:
           echo "Auditing commits since: $SINCE"
 
           # .github/audit/ is in the window because it holds the security
-          # audit's own prompts — which domain owns which SECURITY.md section,
+          # audit's own prompts — which domain owns which security spec,
           # what each one is told to check, and the rule that keeps the
           # orchestrator from ending its turn. A bot that edits those changes
           # what gets audited without touching a single workflow file, which is
@@ -100,14 +100,14 @@ jobs:
           # folder — the same persistence-on-checkout shape a workflow gives,
           # reached without touching .github/.
           #
-          # SECURITY.md is deliberately NOT in the window, though it was
-          # briefly. Two reasons, and the second is why the first is not enough
+          # The security specs (docs/specs/security*.md) are deliberately NOT in
+          # the window, though SECURITY.md was briefly. Two reasons, and the second is why the first is not enough
           # on its own. What this job watches is code that *executes from any
           # branch*: a workflow runs on a bot-pushed branch, and a folderOpen
-          # task runs when someone checks one out. SECURITY.md is inert until
+          # task runs when someone checks one out. A security spec is inert until
           # it is merged to main, which is admin-gated — so the branch-wide
-          # watch buys nothing PR review does not already give. And it changes
-          # in nearly every security commit, so including it would report a
+          # watch buys nothing PR review does not already give. And they change
+          # in nearly every security commit, so including them would report a
           # commit on almost every such PR; a control that cries wolf on
           # routine work is one people learn to skim.
           #
@@ -175,7 +175,7 @@ jobs:
           # still repoint `actions/checkout` at `evil/action`, which is why the
           # action name is compared. The residual is a ref selected by Renovate
           # within that action's own repo — the same trust Renovate bumps already
-          # rest on (see "GitHub Actions Policies" in SECURITY.md).
+          # rest on (see docs/specs/security-ci.md -> "Automated Maintainer (tend)").
           is_renovate_pin_bump() {
             local sha="$1" login pr_authors diff changed removed added
 

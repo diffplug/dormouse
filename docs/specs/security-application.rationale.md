@@ -1,0 +1,264 @@
+# Application Security — rationale
+
+## Trust boundary
+
+**Why a Server compromise buys no authorization.** A forged account, a forged presence
+stamp, and an injected ceremony frame all arrive in front of a Host that decrypts the
+request itself, recomputes the WebAuthn challenge from its *own* transcript, and checks
+its own ACL under the `ConnectionPolicy` recorded at enrollment. It cannot make the
+Host trust a Client the user never approved. On an established session every frame is
+authenticated under a `CipherState` from a handshake the Server does not hold a key
+for, and the first invalid ciphertext destroys the session rather than resynchronizing.
+Web Push is no exception for confidentiality — the Host seals every notification to the
+recipient's own static and the Server forwards ciphertext it holds no key for — and is
+one for freshness, which is accepted residual rather than a gap the seal closes.
+
+**Why the host-token edge exists.** A `hostToken` mints setup tokens and a setup token
+is the only thing that registers an owner passkey, so account takeover is transitive
+rather than direct. That is deliberate: the QR *is* the credential, so whatever can
+mint one can be set up by one. It still buys no Host access for a structural reason —
+pairing runs Noise IK against an invitation keypair the Host generated locally and
+never sent anywhere, so the Host has no invitation to match a stolen setup token
+against.
+
+**Why `requireUserVerification` is mirrored.** The Host is the final authority, so a
+Server demanding user verification while the Host did not would leave the weaker
+verifier deciding.
+
+**Why the webview can relay a confirmation safely.** Reading the two digits requires
+holding the device — a relayed or injected request has no screen to read from. The
+confirmation arrives as a bridge command carrying the displayed ceremony's immutable
+`pairingId` and the typed digits; the service, not the webview, holds the expected code
+and decides whether that ceremony is still confirmable, which is what leaves the webview
+unable to choose what is authorized, to satisfy a confirmation without the phone, or to
+fabricate a request. A mirrored code would make the confirmation something anything in
+the webview realm could satisfy, and a leaked invitation key would let a photographed QR
+be completed by whoever holds it.
+
+**Why the pending maps need caps on both sides.** Every `e2e` frame allocates under a
+`clientId` the relay chooses, in both `RemoteHost`'s client map and the service's
+mirrored queue, and the only thing that removes one is a `client-gone` a hostile relay
+simply never sends. Oldest-first eviction runs on both because either can be fed
+independently, and a cap only one side honors is not a cap. The whole surface is
+reachable by anything that can sign in — a synced or stolen passkey buys "the ability
+to ask" — and these caps are what stop asking from being a denial of service.
+
+**Why the bounds are Host-local.** A bound that needs the relay to send `client-gone`,
+or a Server gate, is not a bound: the relay is the party this model assumes is hostile.
+`lib/src/remote/host/remote-host-bounds.test.ts` counts the crypto a rejected frame
+buys and drives every deadline off an injected clock, and
+`server/test/malicious-relay.test.mjs` shows a relay holding no guards of its own
+weakening none of the frame refusals those bounds sit behind.
+
+**Why the Host revalidates a frame the relay already checked.** The relay runs its own
+overlapping guard, and that is exactly why the Host cannot rely on it: the routing
+values become map keys and the ciphertext becomes WebCrypto work in the process that
+owns every PTY. The Client's device label gets the same treatment because it is
+attacker-chosen text rendered in the one dialog the ACL rests on.
+
+**Why the QR credentials cross outbound.** A QR that is never displayed sets up
+nothing, so the Server's setup token and the invitation's public half ride out inside
+`SetupQrResult.url` on purpose — which is why they are minted only on request,
+single-use, and short-lived. `deliveryId` is the counter-example: it addresses a
+Client's push rows, so `PushDevicesResult` carries labels only. Inbound is a different
+matter because enrolling is initiated from the webview — the Settings dialog or the
+`window.dormouseRemoteHost` console hook — which is why `EnrollParams` carries the
+setup password by design.
+
+**Why WebCrypto and not a JavaScript curve.** WebCrypto-only X25519 is what lets a Host
+static and a Client static exist as non-extractable `CryptoKey`s rather than as bytes
+in a process that owns every PTY, so a JavaScript curve is a downgrade even where it
+computes the same point. ChaCha20-Poly1305 is the one bundled primitive because no
+shipping WebCrypto has an interoperable one.
+
+**Why a Noise static mismatch keeps the Host down.** Starting anyway would present a
+changed Host identity to every paired Client, rather than the corrupt state file it
+actually is.
+
+**Why the lint and its self-test both run.** The lint is what makes "one suite, no
+negotiation, no plaintext path, no legacy discriminant" a build failure rather than a
+reading; the self-test is what keeps a rule from passing for the wrong reason, which is
+a textual lint's characteristic failure.
+
+## Where a Host may reach a relay server
+
+**Why the build asserts the define landed.** A lost esbuild define compiles green and
+shows up only as a Host silently using the shipped default instead of the selfhoster's
+origins. The watch branch of the VS Code script is named explicitly because it is the
+build people iterate in, and therefore where a lost define most plausibly survives.
+
+**Why `redirect: 'error'`.** A Node process does not re-check a redirect target the way
+a browser re-applies CSP, so a followed redirect could carry the setup password or the
+`hostToken` outside the allowlist. That is also why any new Host→Server call goes
+through `hostFetch`.
+
+## Credentials at rest
+
+**Where the `0o700` state directory earns its place.** On a multi-user unix host,
+home-directory permissions vary by distro — `0700` on RHEL, `0755` historically on
+Debian, `0750` on Ubuntu since 21.04 — so without an explicit mode, whether a second
+account can read `hosts.json` depends on which distro the selfhoster happened to pick.
+It buys nothing on Windows, where modes are a no-op and the profile ACL already
+excludes other accounts; nothing in a container, where the namespace is the boundary;
+and nothing on a serverless deployment backed by a database, where this file never
+runs.
+
+**What the Host ACL's file mode does not buy.** Neither store defends its records
+against a process running as the same user, and nothing in the table claims it does — a
+same-user compromise already reads the terminals.
+
+**Why session snapshots are the biggest item in the table.** They are terminal
+transcripts — whatever the user's shells printed, a superset of every other secret
+here — and they inherited the umask as `0644` until this was tightened. On Windows,
+without the DACL the directory keeps whatever `%LOCALAPPDATA%` hands down, which is
+never owner-only: always SYSTEM and Administrators, plus whatever stale entries earlier
+installs left behind. The mode goes on the temp file before any bytes are written
+because the atomic rename preserves it; tightening after the rename would leave a
+window where the transcript is world-readable.
+
+**Why `manage verify` walks `state/` on Windows.** `server/src/state.ts`'s `0o600` is a
+no-op there, so the files are covered only by what they inherit from the directory. An
+enumeration that fails has to fail verify, because a directory the walk could not read
+would otherwise report as one with no account in it yet.
+
+**Why an existing `config/server.env` is preserved rather than repaired.** A file that
+exists is not necessarily one an install finished writing, and a half-written file and
+a hand-edited one are indistinguishable — while their repairs are opposite: `rm` for
+the first, and never for the second, whose `DORMOUSE_ORIGIN` is durable WebAuthn
+identity. Before this check the bind-host guard told the operator to *fix* a zero-byte
+file, on every run, forever.
+
+**Why the length guards count 64.** They are stated in hex characters, so a guard
+reading `-ge 32` passes a regression to half the entropy.
+
+**Why the enrollment offer lives in `run/`.** A credential that expires in 24 hours and
+is unlinked on redemption belongs in neither `config/` nor `state/`. The directory is
+owner-only because it governs who may replace or delete the credential, not only who
+may read it.
+
+**Why an unreadable service definition fails the same way as a leaking one.** A search
+through nothing finds nothing, so a missing plist or unit file, or an
+`Export-ScheduledTask` returning `$null` because CIM was blocked or the task vanished,
+has to be a failure rather than a pass.
+
+## The setup password
+
+**Why `cors({ origin: '*' })` is acceptable.** There are no cookies — every credential
+is a header or a body field — so no cookies exist for a foreign origin to ride on, and
+CSRF is not the exposure. What it does mean is that the guessing surface is not limited
+to something reachable only by a deliberate client, which is why the tailnet-only
+origin is load-bearing.
+
+## Network posture (self-hosted)
+
+**Why the deploy lint carries a self-test.** A textual rule's characteristic failure is
+passing for the wrong reason: review of the first version found three rules satisfied
+by an unrelated occurrence, one of them the entropy guard's own explanatory comment.
+
+**Why an elevated install is refused.** The install belongs to one user account and its
+whole credential posture is that account owning the files; an elevated run would write
+them owned by another principal and register the service for it.
+
+**Why the Funnel check is node-scoped.** Any Funnel on the node that fronts this server
+is a thing to look at, and parsing a mapping out of CLI prose would fail open the day
+the wording changes — so the blunter test is the deliberate choice.
+
+**Why a nonzero exit status is its own verdict.** A Tailscale CLI that is absent,
+unauthenticated, or too old for `funnel status` produces output that matches nothing,
+which is indistinguishable from a node with no Funnel until the exit status is
+consulted. Discarding it with `2>/dev/null || true` would report `off`.
+
+**Why `grep -q` and `head -1` are banned on these decisions.** The installers and
+`manage` run under `set -o pipefail`; `grep -q` exits at the first match, and the
+writer's SIGPIPE makes the pipeline 141, which an `if` reads as "no match" and an
+assignment turns into an abort. Past the pipe buffer that reported a live Funnel as
+off, an off-loopback bind as loopback-only, and — the one that mutates rather than
+reports — a `serve status` carrying a foreign root mapping as no conflict at all, so
+the `confirm` guarding the operator's existing Serve config never ran.
+
+**Why the Serve checks are scoped to the root line with the port right-bounded.** `/api`
+on this port is not `/` on it, and `127.0.0.1:31000` contains `127.0.0.1:3100` — either
+of which skipped the conflict `confirm`, green-ticked `manage verify` on an origin
+serving someone else at `/`, or made uninstall reset a root mapping this install never
+owned. `SERVE_AFTER` is exempt because it asserts our own `serve --bg` landed rather
+than auditing a foreign config.
+
+**Why `serve_root_target` is held by neither enforcement.** A `| head -1` in there
+raises 141 that nothing propagates: `printf` runs last, and its one caller is a `$( )`,
+which bash carries no `errexit` into without `inherit_errexit` — absent from bash 3.2 —
+so the parameter expansion is hygiene rather than a control. Neither fact is a property
+of being in a helper: the `head -1` half of the rule binds every site whose 141 can
+still reach an `if` or an assignment, which is an inline substitution always, and a
+helper the moment the failing assignment is its last command or a caller invokes it
+outside `$( )`.
+
+**Why enforcement splits between two scripts.** Only
+`scripts/installer-verify-test.mjs` runs installer code, so reverting `funnel_state`,
+`has_off_loopback` or `serve_state` to a pipe goes red there; it cannot see
+`serve_proxies_root`'s `<<<`, which only `scripts/deploy-lint.mjs`'s pattern holds.
+That lint also counts the decisions consulting these helpers, since a helper whose
+answer is right survives a caller that stops asking.
+
+## What crosses the boundary
+
+**Why the worker is the second sanitizer.** The Server used to be a second pair of eyes
+on notification text and cannot be one on ciphertext — it cannot sanitize what it
+cannot read — so a worker that renders what it decrypted without re-bounding it would
+leave the property with one enforcer instead of two.
+
+**Why the relay holds no state.** Only the Host knows whether a ceremony succeeded, so
+a gate, a challenge memory, or a notion of an authorized session on the Server would be
+a second opinion nobody asked for. Routing an opaque envelope needs no notion of what a
+`DirectoryEntry` is, which is what makes a Server-side protocol-v1 type import the
+leading indicator.
+
+## Revocation and the audit trail
+
+Both gaps are stated in this spec rather than left in a Future list for two reasons:
+the audit's qualitative pass should not keep rediscovering them as findings, and a
+reader deciding whether to run this needs to know that "revoke a device" is not
+currently something they can do quickly.
+
+## Loopback Listeners
+
+**What the browser gives an attacker page.** An ephemeral port is not a secret — the
+range scans in seconds. A POST with a simple content-type needs no preflight, so it
+*executes* even when the attacker cannot read the reply; and WebSockets are not subject
+to CORS at all, so a socket that connects is a socket that can be read.
+
+**Why a URL token is not available to the iframe proxy.** It would land in
+`location.pathname` and break client-side routers, and it would not survive onto
+root-relative sub-resource requests at all. The browser-dev harness owns its page's URL,
+so it can carry one.
+
+**Why no request header answers "who is allowed to frame me".** An iframe navigation
+carries no `Origin`, and `Sec-Fetch-Site` reads `cross-site` for our own webview and for
+an attacker page alike, so only an embedder named in `frame-ancestors` and enforced by
+the browser distinguishes them.
+
+**Why the iframe proxy admits everyone.** Vouching for a stranger is what turns a
+transparent proxy into an amplifier, so it declines to vouch rather than to admit;
+refusing outright would be worse, because forwarding the caller's real `Origin` lets
+the upstream apply its own policy. That is also why the upgrade path matters most: a
+laundered `Origin` there does not merely let a stranger write, it hands them a readable
+socket to a dev server or `openvscode-server` that would have refused their real
+origin.
+
+**How the proxy once handed a stranger two privileges.** Dropping an upstream's
+`X-Frame-Options` / CSP `frame-ancestors` for everyone gave a page that scanned the
+port two things the upstream had refused it: framing a document that answered `DENY`,
+and reading that document's live URL and anchor hrefs back cross-origin. No request
+header can tell that page apart from Dormouse's webview, which is why the replacement
+`frame-ancestors` has to name the embedder chain the webview supplied.
+
+**Why the listener set is derived, not trusted.** An enumeration goes stale the moment
+someone adds a listener — the same failure mode that once left `.vscode/` owned by
+nobody.
+
+**Why the stream relay needs no `Host` check.** Rebinding exists to make
+same-origin-looking requests to loopback, which buys nothing against a listener
+demanding an unguessable one-shot secret.
+
+**Why the browser-dev bridge's content-type gate is a security control.** Without it
+the endpoint is CORS-simple and needs no preflight to survive, and what it dispatches
+is `pty_spawn` with caller-supplied `shell`, `args`, `cwd` and `env`.

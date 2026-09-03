@@ -317,10 +317,10 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
     console.error(
       'The two verify verdicts must be taken over captured text, never a pipe into\n' +
         '`grep -q`: under `set -o pipefail` the early exit SIGPIPEs the writer and 141\n' +
-        'reads as "no match" (SECURITY.md -> "Network posture (self-hosted)").\n' +
+        'reads as "no match" (docs/specs/security-application.md -> "Network posture (self-hosted)").\n' +
         '`env_missing_keys` must name every installer-owned key a half-written\n' +
         'config/server.env lacks, so the install says `rm` rather than "fix it"\n' +
-        '(SECURITY.md -> "Credentials at rest").',
+        '(docs/specs/security-application.md -> "Credentials at rest").',
     );
     process.exit(1);
   }

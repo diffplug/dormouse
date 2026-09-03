@@ -14,7 +14,7 @@ The trust model for remote control: three primitives between the Client
   static generated in the browser and stored non-extractably.
 
 Account compromise is therefore insufficient for host access
-([Security Guarantees](#security-guarantees)). `SECURITY.md` -> "Remote Control"
+([Security Guarantees](#security-guarantees)). `docs/specs/security-application.md` -> "Remote Control"
 is this model's audited face — the properties checked nightly and the gaps left
 open (revocation, the audit trail).
 
@@ -444,7 +444,7 @@ Source of truth: `server-lib-common/src/security/noise.ts`,
 **Each Host mints one permanent Noise static at enrollment**, before the request
 and never in it: `noiseStaticPrivateKey` (PKCS#8, base64url) and
 `noiseStaticPublicKey` (raw 32 bytes, base64url) ride in the enrollment record,
-landing exactly where `hostToken` does (`SECURITY.md` -> "Credentials at rest").
+landing exactly where `hostToken` does (`docs/specs/security-application.md` -> "Credentials at rest").
 The Host's local label rides there too, reaching a Client only inside an
 encrypted outcome.
 

@@ -3,13 +3,14 @@
 > See `docs/specs/glossary.md` for canonical Surface / Session / Pane
 > vocabulary used by the public product guide and browser workflow.
 
-Dormouse publishes three specialized references on the marketing site, each
+Dormouse publishes four specialized references on the marketing site, each
 generated from a source that lives next to the code it describes.
 
 ```text
 /docs/dor           dor CLI reference
 /docs/agent-skill   exact bundled agent skill
 /docs/self-host     the SELF_HOST.md runbook, minus its withheld halves
+/docs/security      the security spec, published whole
 ```
 
 `/docs` is an entrypoint rather than a page: it redirects to the page
@@ -22,19 +23,21 @@ that once rendered it at `/docs` is retained and still runs (see
 
 | Surface | Purpose | Canonical content |
 | --- | --- | --- |
-| Homepage | Product marketing, visual proof, conversion, and the way in to all three references | `website/src/pages/Home.tsx` |
+| Homepage | Product marketing, visual proof, conversion, and the way in to every reference | `website/src/pages/Home.tsx` |
 | Marketplace and Open VSX | Extension discovery, evaluation, and basic onboarding | `vscode-ext/README.md` plus public metadata in `vscode-ext/package.json` |
 | `/docs/dor` | Complete CLI reference | Help snapshots in `dor/test/snapshots/help/`, verified against the built CLI |
 | `/docs/agent-skill` | Agent-facing operating guide | Exact `dor/skill.md` |
 | `/docs/self-host` | Running the coordinating server yourself | The runbook half of `SELF_HOST.md` |
+| `/docs/security` | What Dormouse guarantees and how it is checked | Whole `docs/specs/security.md`, minus title and front matter |
 | GitHub root | Repository overview and contributor entry point | Root `README.md` |
 
 The guide reaches readers through the Marketplace, Open VSX, and GitHub rows of
 that table. It has no row of its own on this site.
 
-Internal specs remain maintainer references. Public docs are written from
-shipped behavior above each spec's fold and do not expose host plumbing,
-internal state shapes, or staged `## Future` material.
+Internal specs remain maintainer references, the one exception being the
+security spec, published whole. Public docs are otherwise written from shipped
+behavior above each spec's fold and do not expose host plumbing, internal state
+shapes, or staged `## Future` material.
 
 ## Canonical product guide
 
@@ -187,25 +190,31 @@ delta is structural:
    title.
 2. Generate an on-page table of contents from the remaining headings.
 3. Assign stable, unique heading ids with one checked slugger.
-4. Rewrite links pointing back at this site to root-relative paths, dropping
+4. Resolve links into the repository to the canonical file on GitHub, keeping
+   the fragment.
+5. Rewrite links pointing back at this site to root-relative paths, dropping
    only the origin.
-5. Render the subset using the marketing website's typography, spacing, links,
+6. Render the subset using the marketing website's typography, spacing, links,
    code blocks, tables, and responsive raster-media treatment.
-6. Add the shared site header and footer.
-7. Mark same-site and external navigation appropriately.
+7. Add the shared site header and footer.
+8. Mark same-site and external navigation appropriately.
 
-Operations 1–4 live in the generator; 5–7 live in the page components.
-Operations 1–3 apply to the guide, which has no page today, and to the
-self-host runbook; operation 4 runs over the guide, the runbook, and
-`dor/skill.md`, the last before `/docs/dor` lifts its introduction out of those
-same blocks, so every published page inherits one rewrite.
+Operations 1–5 live in the generator; 6–8 live in the page components.
+Operations 1–4 run in `buildDocument`, so they apply to the guide, which has no
+page today, the self-host runbook, and the security spec; operation 5 runs over
+those three and `dor/skill.md`, the last before `/docs/dor` lifts its
+introduction out of those same blocks, so every published page inherits one
+rewrite.
+
+**Never** publish a relative repository link as-is; `resolveRepoLinks` sends it
+to the canonical file and fails the build when the target does not exist.
 
 **Never** use a regular expression to turn a canonical source's prose into
 site prose. Channel-specific differences are explicit entries in one fixed
 delta table per document — `DOCS_DELTA` for the guide, `SELF_HOST_DELTA` for
-the runbook. Each entry names exactly one source target and fails the build
-when its target matches zero blocks or more than one. Fuzzy text and
-line-number patches are forbidden.
+the runbook, `SECURITY_DELTA` for the security spec. Each entry names exactly
+one source target and fails the build when its target matches zero blocks or
+more than one. Fuzzy text and line-number patches are forbidden.
 
 Two operations exist. `remove` drops the matched block. `remove-section`
 requires a heading and drops it with every block up to the next heading of the
@@ -394,6 +403,25 @@ The page carries one authored paragraph the source does not: a pointer to
 running the runbook with an assistant. It belongs to the page because it is
 advice about reading this document here.
 
+## `/docs/security` spec
+
+`docs/specs/security.md` stays canonical in `docs/specs/` because it is a spec:
+`scripts/spec-lint.mjs` budgets it like any other, and the nightly audit reads
+it as the contract it audits against. `SECURITY_DELTA` withholds the `#` title
+and the front-matter blockquote — the page shell supplies both — and nothing
+else.
+
+**Must** publish everything else. A reader deciding whether to run this is
+owed the gaps and the undefended edges beside the guarantees, so **the spec may
+carry no `## Future` heading and no `Reserved:` paragraph**; `checkSecurityFold`
+pins that, and staged material has to be withheld by a delta rule before it can
+exist in the file.
+
+The page carries one authored paragraph the source does not: that this is the
+spec the audit runs against, and that the four domain specs it links live
+beside it. Those four are not published, and reach the reader as GitHub links
+like every other repository link on the page.
+
 ## Generated documentation boundary
 
 One build-time generator reads the canonical inputs and writes a gitignored
@@ -405,6 +433,7 @@ website/scripts/docs-parser.js
 website/scripts/help-parser.js
 website/src/data/docs.guide.json    generated, no page consumes it today
 website/src/data/docs.selfhost.json
+website/src/data/docs.security.json
 website/src/data/docs.cli.json
 website/src/data/docs.skill.json
 ```
@@ -417,6 +446,7 @@ Inputs:
 ```text
 vscode-ext/README.md
 SELF_HOST.md
+docs/specs/security.md
 dor/test/snapshots/help/*.md
 dor/skill.md
 ```
@@ -458,8 +488,8 @@ legible, selectable, and accessible without requiring animation.
 
 Root `README.md` is shorter than the canonical product guide and does not
 duplicate it. It carries a product image and one-sentence cross-platform
-description, playground/Marketplace/Open VSX/standalone links, links to the two
-published references, a concise current feature summary, contributor setup and
+description, playground/Marketplace/Open VSX/standalone links, links to every
+published reference, a concise current feature summary, contributor setup and
 repository structure
 with links to `AGENTS.md` and the internal specs, and license and supply-chain
 links.
@@ -475,12 +505,15 @@ verifies:
 
 - the canonical guide carries every section listed in the `text` fence above,
   read out of this spec rather than restated in the lint;
-- neither public README nor `SELF_HOST.md` contains `TODO:` placeholders;
+- neither public README nor `SELF_HOST.md` nor `docs/specs/security.md`
+  contains `TODO:` placeholders;
 - every canonical Markdown source stays inside the parser's supported subset;
 - public links use canonical HTTPS URLs, and a local link resolves — read off
   the parsed tree, so a link-shaped string in a code span is not a link.
-  `SELF_HOST.md` gets only the HTTPS half; spec-lint already resolves its
-  relative links and validates their fragments;
+  `SELF_HOST.md` and the security spec get only the HTTPS half; spec-lint
+  already resolves their relative links and validates their fragments;
+- the security spec carries no `## Future` heading and no `Reserved:`
+  paragraph, because it is published whole (`checkSecurityFold`);
 - guide images are repo-relative files that exist under `vscode-ext/images/`,
   with no remote URLs and no SVG, and every file there is referenced;
 - VS Code commands named by the guide exist in `vscode-ext/package.json`, and
@@ -489,10 +522,11 @@ verifies:
 - every agent-skill reference target exists in `/docs/dor`;
 - generated command inventory matches the snapshot set exactly;
 - both READMEs link to every reference page in `docs-pages.ts`, except that
-  the root README alone owns `/docs/self-host` — checked as exact URLs, so the
-  `/docs` entrypoint cannot stand in for a page under a prefix test. The guide
-  carries no self-host obligation: it is a Marketplace listing for the editor
-  extension, and running a relay server is not part of installing one;
+  the root README alone owns `/docs/self-host` and `/docs/security` — checked
+  as exact URLs, so the `/docs` entrypoint cannot stand in for a page under a
+  prefix test. The guide carries neither obligation: it is a Marketplace
+  listing for the editor extension, and neither running a relay server nor
+  auditing the repository is part of installing one;
 - the homepage links every `/docs` page root-relatively, and every `/docs` href
   on it resolves to one — both directions, because a rewritten section can
   strand a page's only link or leave one aimed at the entrypoint;
@@ -519,6 +553,7 @@ spec.
 | --- | --- |
 | `vscode-ext/README.md` | The canonical product guide; published off-site, parsed here |
 | `SELF_HOST.md` | The self-host runbook and Installer contract; the runbook half is published |
+| `docs/specs/security.md` | The security spec, published whole at `/docs/security` |
 | `vscode-ext/package.json` | Listing metadata and VS Code command inventory |
 | `README.md` | Repository and contributor entry point |
 | `vscode-ext/images/` | Guide media; the generator copies it to `public/guide/images/`, which the Marketplace listing loads from |
@@ -532,7 +567,7 @@ spec.
 | `website/src/routes.ts`, `website/src/components/SiteHeader.tsx` | The published routes and the marketing nav, which carries `Docs` on desktop |
 | `website/scripts/docs-parser.js` (+ `.test.js`) | Markdown subset parser, slugger, `<img>` allowlist |
 | `website/scripts/help-parser.js` (+ `.test.js`) | Narrow CLI-help parser with losslessness |
-| `website/scripts/generate-docs.js` | Codegen: the delta tables, `buildDocument`, `localizeSiteLinks`, `resolveRemovedAnchors`, `linkSkillHeadings` |
+| `website/scripts/generate-docs.js` | Codegen: the delta tables, `buildDocument`, `localizeSiteLinks`, `resolveRemovedAnchors`, `resolveRepoLinks`, `linkSkillHeadings` |
 | `website/src/components/MarkdownDocument.tsx` | Renders parsed Markdown blocks |
 | `website/src/components/DocsLayout.tsx` | Docs chrome: header, the rail and its mobile drawer, prev/next, theme restore |
 | `website/src/components/DocsThemeControl.tsx` | The picker's two placements and its first-visit prompt |
@@ -542,6 +577,7 @@ spec.
 | `website/src/pages/DorDocs.tsx` | `/docs/dor` |
 | `website/src/pages/AgentSkillDocs.tsx` | `/docs/agent-skill` |
 | `website/src/pages/SelfHostDocs.tsx` | `/docs/self-host` |
+| `website/src/pages/SecurityDocs.tsx` | `/docs/security` |
 | `scripts/public-docs-lint.mjs` | Public-doc validation |
 
 ## Future

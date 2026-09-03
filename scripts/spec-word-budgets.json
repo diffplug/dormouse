@@ -1,5 +1,6 @@
 {
-  "AGENTS.md": 2600,
+  "AGENTS.md": 2750,
+  "SECURITY.md": 200,
   "SELF_HOST.md": 6000,
   "docs/specs/alert.md": 6350,
   "docs/specs/auto-update.md": 1000,
@@ -14,6 +15,11 @@
   "docs/specs/pocket-app.md": 4000,
   "docs/specs/remote-api.md": 3250,
   "docs/specs/remote-security-model.md": 4050,
+  "docs/specs/security-application.md": 5800,
+  "docs/specs/security-audit.md": 1750,
+  "docs/specs/security-ci.md": 2500,
+  "docs/specs/security-supply-chain.md": 1150,
+  "docs/specs/security.md": 1550,
   "docs/specs/server.md": 9800,
   "docs/specs/shortcuts.md": 1000,
   "docs/specs/standalone.md": 4000,
@@ -25,5 +31,5 @@
   "docs/specs/tutorial.md": 1900,
   "docs/specs/vscode.md": 7050,
   "docs/specs/webgl-text.md": 1200,
-  "docs/specs/website-docs.md": 4400
+  "docs/specs/website-docs.md": 4650
 }

@@ -693,7 +693,7 @@ sign_windows() {
     # file indirection (checked against jsign's own `--help`). The exposure is
     # `ps` on this machine for the duration of the call, and the PIN alone is
     # inert without the physical YubiKey it unlocks. Accepted, not overlooked —
-    # see SECURITY.md, "Desktop Releases".
+    # see docs/specs/security-ci.md -> "Desktop Releases".
     log "Signing inner executable: $exe_path"
     jsign \
         --storetype PIV \

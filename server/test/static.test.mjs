@@ -104,7 +104,7 @@ test('falls back to the build-instructions stub when no Pocket build exists', as
 
 // --- Content-Security-Policy -----------------------------------------------
 // The Pocket origin holds a per-Host Client static and the worker that opens
-// sealed pushes, and `SECURITY.md` names active XSS here as an accepted risk —
+// sealed pushes, and `docs/specs/security.md` -> "What is not defended" names active XSS here as an accepted risk —
 // so the policy is the defense in depth around it
 // (docs/specs/pocket-app.md -> Deployment).
 

@@ -1,9 +1,8 @@
 # Domain: application-security
 
-**Scope — these sections, and no others:**
+**Scope — these specs, and no others:**
 
-`## Remote Control`
-`## Loopback Listeners`
+- `docs/specs/security-application.md`
 
 **Output file:** `audit-application.md`
 
@@ -103,13 +102,9 @@ Be adversarial, and go past the `FAIL IF` list. Ask specifically:
   and `server.md`'s Relay and E2E framing. `scripts/e2e-lint.mjs` mechanizes the
   structural half of that ("one suite, no negotiation, no plaintext path, no
   legacy discriminant") — check that each of its rules still names a real
-  `SECURITY.md` line and that `scripts/e2e-lint-selftest.mjs` still proves every
-  rule load-bearing, then look for what a *textual* lint cannot see.
-
-Where the section says a risk is accepted (the setup password's hardening) or a
-gap is known (revocation, the audit trail, the two `workflow-audit` window
-evasions), do not re-report it as a finding — report only if the situation has
-changed or is worse than described.
+  `docs/specs/security-application.md` line and that
+  `scripts/e2e-lint-selftest.mjs` still proves every rule load-bearing, then
+  look for what a *textual* lint cannot see.
 
 You are also the **catch-all** domain, and this is defined by subtraction, not
 by a list: you own everything in the repository that `supply-chain.md` and

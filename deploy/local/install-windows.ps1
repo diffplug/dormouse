@@ -619,7 +619,7 @@ if ($GIT_DIRTY -eq 'true') {
 $rootPkg = Get-Content -Raw -LiteralPath (Join-Path $REPO_ROOT 'package.json') | ConvertFrom-Json
 $NODE_PIN = Get-JsonValue -Object $rootPkg -Path 'devEngines.runtime.version'
 if (-not $NODE_PIN) {
-  Die "root package.json has no devEngines.runtime.version. SECURITY.md keys a mechanical FAIL IF to that exact field."
+  Die "root package.json has no devEngines.runtime.version. docs/specs/security-supply-chain.md keys a mechanical FAIL IF to that exact field."
 }
 if ($NODE_PIN -notmatch '^\d+\.\d+\.\d+$') {
   Die "devEngines.runtime.version must be an exact MAJOR.MINOR.PATCH version, got '$NODE_PIN'."
@@ -831,7 +831,7 @@ try {
     $SETUP_PASSWORD = New-RandomHex32
     # 32 random bytes is 64 hex characters. The guard counts characters, so it
     # must be 64, not 32 -- a guard reading 32 would pass a regression to half
-    # the entropy SECURITY.md claims.
+    # the entropy docs/specs/security-application.md claims.
     if ($SETUP_PASSWORD.Length -lt 64) {
       Die "generated setup password is implausibly short; refusing to install it."
     }
@@ -1582,7 +1582,7 @@ function Invoke-Verify {
   # exact origin to the public internet. The whole security analysis of the
   # selfhost server assumes a tailnet-only origin -- most of all the setup
   # password, whose hardening is a constant-time compare and a 250ms delay
-  # (SECURITY.md, "The setup password"). So this is checked, never assumed --
+  # (docs/specs/security-application.md -> "The setup password"). So this is checked, never assumed --
   # and a check that could not run has assumed. Every way the CLI can be
   # unavailable (off PATH, tailscaled down, `funnel status` unknown to an older
   # CLI) yields text that matches nothing, which is indistinguishable from a
@@ -2301,7 +2301,7 @@ rem directly.
   # ------------------------------------------------------------ enroll offer ---
 
   # run\enroll-offer.json, the one-time offer redeemed at POST /api/host/enroll
-  # in place of the setup password (SECURITY.md -> "Credentials at rest").
+  # in place of the setup password (docs/specs/security-application.md -> "Credentials at rest").
   #
   # Last state mutation: minting burns the previous unspent offer, so the
   # release, HTTPS Serve mapping, and pruning must all have succeeded first. The

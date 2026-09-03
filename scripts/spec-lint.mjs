@@ -60,6 +60,12 @@
  *  15. A spec of RATIONALE_REQUIRED_WORDS or more has a rationale file;
  *      without one every piece of evidence sits above the fold and the
  *      ratchet cannot see it.
+ *  16. Every security spec (docs/specs/security*.md) is claimed by exactly one
+ *      audit domain: the bullet list under the `**Scope` line of a domain
+ *      prompt in .github/audit/ names it, and names no file that does not
+ *      exist. docs/specs/security-audit.md -> "Domains" states the rule; a
+ *      spec claimed by nobody is unaudited, one claimed twice gets
+ *      contradictory verdicts.
  *
  * scripts/spec-lint-selftest.mjs plants one defect per finding check and
  * requires this lint to go red.
@@ -110,7 +116,10 @@ const rationaleFiles = specDirFiles.filter((f) => f.endsWith('.rationale.md'));
 const specFiles = specDirFiles.filter((f) => !f.endsWith('.rationale.md'));
 // SELF_HOST.md is a root-level spec (the self-host deployment: runbook +
 // installer contract); it rides checks 2-4 alongside the docs/specs files.
-const allFiles = ['AGENTS.md', 'SELF_HOST.md', ...specFiles, ...rationaleFiles];
+// SECURITY.md is the GitHub security policy — a pointer at the security specs,
+// budgeted so it cannot regrow into the 17,000-word spec it once was; it rides
+// the link, path, and budget checks only.
+const allFiles = ['AGENTS.md', 'SECURITY.md', 'SELF_HOST.md', ...specFiles, ...rationaleFiles];
 const foldCheckedFiles = ['SELF_HOST.md', ...specFiles];
 const problems = [];
 
@@ -334,7 +343,7 @@ for (const spec of foldCheckedFiles) {
 // none. Rationale files carry none: evidence may grow without limit.
 const BUDGETS_FILE = 'scripts/spec-word-budgets.json';
 const BUDGET_STEP = 50;
-const budgetedFiles = ['AGENTS.md', 'SELF_HOST.md', ...specFiles];
+const budgetedFiles = ['AGENTS.md', 'SECURITY.md', 'SELF_HOST.md', ...specFiles];
 const wordsOf = new Map(budgetedFiles.map((rel) => [rel, countWords(read(rel))]));
 const budgetFor = (rel) => Math.ceil(wordsOf.get(rel) / BUDGET_STEP) * BUDGET_STEP;
 let budgets = JSON.parse(read(BUDGETS_FILE));
@@ -343,7 +352,7 @@ if (ratchetAt !== -1) {
   const named = process.argv.slice(ratchetAt + 1).filter((a) => !a.startsWith('-'));
   for (const rel of named) {
     if (!budgetedFiles.includes(rel)) {
-      console.error(`spec-lint: --ratchet ${rel}: not a budgeted file (specs, AGENTS.md, SELF_HOST.md)`);
+      console.error(`spec-lint: --ratchet ${rel}: not a budgeted file (specs, AGENTS.md, SECURITY.md, SELF_HOST.md)`);
       process.exit(2);
     }
   }
@@ -521,6 +530,40 @@ for (const spec of specFiles) {
   if (!hasRationale.has(rat) && words >= RATIONALE_REQUIRED_WORDS) {
     problems.push(`${spec}: ${words} words and no ${rat} — its evidence has nowhere to go but above the fold`);
   }
+}
+
+// --- Check 16: every security spec is claimed by exactly one audit domain ----
+// Ownership is by file, declared in each domain prompt's scope block — the
+// bullet list directly under its `**Scope` line — as backticked repo paths.
+// The preamble and the orchestrator are not domains and claim nothing.
+const AUDIT_DIR = '.github/audit';
+const domainFiles = readdirSync(join(ROOT, AUDIT_DIR))
+  .filter((f) => f.endsWith('.md') && !f.startsWith('_') && f !== 'orchestrator.md')
+  .map((f) => `${AUDIT_DIR}/${f}`);
+const claimants = new Map(specFiles.filter((f) => /\/security[a-z-]*\.md$/.test(f)).map((f) => [f, []]));
+if (domainFiles.length === 0) problems.push(`${AUDIT_DIR}: no domain prompt files — check 16 enforces nothing`);
+for (const rel of domainFiles) {
+  const lines = proseLines(rel);
+  const at = lines.findIndex((l) => /^\*\*Scope\b/.test(l));
+  if (at === -1) {
+    problems.push(`${rel}: no "**Scope" line — the domain claims no spec`);
+    continue;
+  }
+  let j = at + 1;
+  while (j < lines.length && lines[j].trim() === '') j++;
+  const claimed = [];
+  for (; j < lines.length && /^[-*]\s/.test(lines[j]); j++) {
+    for (const m of lines[j].matchAll(TICK_RE)) claimed.push(m[1]);
+  }
+  if (claimed.length === 0) problems.push(`${rel}: the bullet list under "**Scope" names no spec`);
+  for (const path of claimed) {
+    if (claimants.has(path)) claimants.get(path).push(rel);
+    else problems.push(`${rel}: scope names ${path}, which is not a security spec (docs/specs/security*.md) that exists`);
+  }
+}
+for (const [spec, by] of claimants) {
+  if (by.length === 0) problems.push(`${spec}: in no audit domain's scope (${AUDIT_DIR}) — unaudited`);
+  else if (by.length > 1) problems.push(`${spec}: in the scope of ${by.join(' and ')} — one domain owns a spec, or their verdicts contradict`);
 }
 
 // -----------------------------------------------------------------------------

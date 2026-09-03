@@ -13,6 +13,10 @@
  * carries its own copy of a list is a second owner, and the copy is the one
  * that rots.
  *
+ * The sources it reads: the canonical product guide, the root README, the
+ * bundled agent skill, the self-host runbook, the security spec, the homepage,
+ * and the route table, redirects, and head-tag plumbing that publish them.
+ *
  * Run by the root `pnpm test`.
  */
 
@@ -21,6 +25,7 @@ import { dirname, join } from 'node:path';
 import { repoRoot, readRepoFile, trackedFiles } from './lint-kit.mjs';
 import {
   hasScheme,
+  inlineToText,
   isProtocolRelative,
   parseMarkdown,
   visit,
@@ -40,6 +45,7 @@ const GUIDE = 'vscode-ext/README.md';
 const ROOT_README = 'README.md';
 const SKILL = 'dor/skill.md';
 const SELF_HOST = 'SELF_HOST.md';
+const SECURITY_SPEC = 'docs/specs/security.md';
 const HOMEPAGE = 'website/src/pages/Home.tsx';
 const SPEC = 'docs/specs/website-docs.md';
 const REDIRECTS = 'website/public/_redirects';
@@ -52,12 +58,13 @@ const src = {
   [ROOT_README]: readRepoFile(ROOT_README),
   [SKILL]: readRepoFile(SKILL),
   [SELF_HOST]: readRepoFile(SELF_HOST),
+  [SECURITY_SPEC]: readRepoFile(SECURITY_SPEC),
   [HOMEPAGE]: readRepoFile(HOMEPAGE),
 };
 
 /** Parsed form, or null when the source is outside the supported subset. */
 const parsed = {};
-for (const rel of [GUIDE, ROOT_README, SKILL, SELF_HOST]) {
+for (const rel of [GUIDE, ROOT_README, SKILL, SELF_HOST, SECURITY_SPEC]) {
   try {
     parsed[rel] = parseMarkdown(src[rel]);
   } catch (error) {
@@ -80,7 +87,7 @@ function linksIn(rel) {
 }
 
 function checkNoPlaceholders() {
-  for (const rel of [GUIDE, ROOT_README, SELF_HOST]) {
+  for (const rel of [GUIDE, ROOT_README, SELF_HOST, SECURITY_SPEC]) {
     if (/\bTODO:/.test(src[rel])) fail(`${rel}: contains a TODO: placeholder`);
   }
 }
@@ -168,12 +175,13 @@ function checkImageBaseUrl() {
  * Read off the parsed tree, like checkImages: a regex over raw Markdown also
  * matches link-shaped text inside code spans and fenced samples.
  *
- * SELF_HOST.md gets only the https half. scripts/spec-lint.mjs already resolves
- * its relative links and validates their `#fragment` against real headings,
- * which is strictly more than this check could say.
+ * SELF_HOST.md and the security spec get only the https half.
+ * scripts/spec-lint.mjs already resolves both files' relative links and
+ * validates their `#fragment` against real headings, which is strictly more
+ * than this check could say.
  */
 function checkLinks() {
-  for (const rel of [GUIDE, ROOT_README, SELF_HOST]) {
+  for (const rel of [GUIDE, ROOT_README, SELF_HOST, SECURITY_SPEC]) {
     if (!parsed[rel]) continue;
     for (const href of linksIn(rel)) {
       if (href.startsWith('#')) continue;
@@ -183,11 +191,40 @@ function checkLinks() {
         continue;
       }
       if (hasScheme(href) || isProtocolRelative(href)) continue;
-      if (rel === SELF_HOST) continue;
+      if (rel === SELF_HOST || rel === SECURITY_SPEC) continue;
       const target = join(repoRoot, dirname(rel), href.split('#')[0]);
       if (!existsSync(target)) fail(`${rel}: local link does not resolve — ${href}`);
     }
   }
+}
+
+/**
+ * The security spec is published whole, so it may carry nothing staged.
+ *
+ * Every other spec keeps unbuilt design under `## Future` and marks what
+ * constrains present code `Reserved:`. This one has no fold: `SECURITY_DELTA`
+ * withholds the title and the front matter and nothing else, so anything
+ * staged in the file ships to dormouse.sh as a promise
+ * (docs/specs/website-docs.md -> `/docs/security` spec).
+ *
+ * Read off the parsed tree, so `## Future` inside a fenced example and a code
+ * span reading `Reserved:` are not findings.
+ */
+function checkSecurityFold() {
+  if (!parsed[SECURITY_SPEC]) return;
+  const where = `${SPEC} -> "/docs/security"`;
+  const remedy = 'staged material must be withheld by a delta rule before it can exist there';
+  for (const heading of parsed[SECURITY_SPEC].headings) {
+    // Any depth, numbered or not: the fold is a fold wherever it is written.
+    if (heading.depth >= 2 && /^(?:\d+\.\s*)?Future$/.test(heading.text)) {
+      fail(`${SECURITY_SPEC}: carries a "${heading.text}" heading, but is published whole (${where}) — ${remedy}`);
+    }
+  }
+  visit(parsed[SECURITY_SPEC].blocks, (node) => {
+    if (node.type !== 'paragraph') return;
+    if (!inlineToText(node.children ?? []).startsWith('Reserved:')) return;
+    fail(`${SECURITY_SPEC}: carries a Reserved: paragraph, but is published whole (${where}) — ${remedy}`);
+  });
 }
 
 /** Commands the guide tells people to run must exist in the extension manifest. */
@@ -403,6 +440,7 @@ const checks = [
   checkImages,
   checkImageBaseUrl,
   checkLinks,
+  checkSecurityFold,
   checkVsCodeCommands,
   checkPageHeadTags,
   checkSiteOrigin,

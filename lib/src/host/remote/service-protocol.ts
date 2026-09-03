@@ -196,7 +196,7 @@ export interface EnrollResult {
  * at this machine, and displaying it *is* the local-presence act
  * (`docs/specs/remote-security-model.md` → Pairing). They are the only
  * credentials in this contract that cross that seam: `hostToken` still never
- * does (`SECURITY.md` → the no-`hostToken`-in-a-webview FAIL IF), and neither
+ * does (`docs/specs/security-application.md` → "Trust boundary", the no-`hostToken`-in-a-webview FAIL IF), and neither
  * does the installer offer's token ({@link RemoteHostConsoleStatus.offer}), nor
  * the invitation's *private* key, which never leaves the Host.
  */
@@ -241,7 +241,7 @@ export interface RemoteHostConsoleStatus {
    * owns the re-read-at-click rule and what makes the card safe to press).
    *
    * **The offer's `token` is never here.** This is a service→webview shape, and
-   * the token is a bearer credential exactly like `hostToken` (`SECURITY.md` →
+   * the token is a bearer credential exactly like `hostToken` (`docs/specs/security-application.md` → "Trust boundary",
    * the no-`hostToken`-in-a-webview FAIL IF).
    */
   offer: { origin: string } | null;
@@ -253,7 +253,7 @@ export interface RemoteHostConsoleStatus {
  *
  * Labels only. The ACL record's `deliveryId` is a bearer capability for that
  * Client's push rows and never crosses into the webview realm, which has no
- * route that takes one (`SECURITY.md` → "What crosses the boundary").
+ * route that takes one (`docs/specs/security-application.md` → "What crosses the boundary").
  */
 export type PushDevicesResult = { devices: Array<{ label: string }> } | null;
 

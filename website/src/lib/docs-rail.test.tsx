@@ -3,7 +3,7 @@
  *
  * A `TocEntry` is a link to an anchor on the page it belongs to, so every id
  * the rail names must be an id that page actually renders — nested entries
- * included. The five pages produce their entries three different ways (a
+ * included. The six pages produce their entries three different ways (a
  * Markdown generator, a JSON changelog, a hand-written section list), which is
  * exactly why the check belongs here once rather than in each page's own test.
  */
@@ -15,9 +15,11 @@ import { DOCS_PAGES, type TocEntry } from "./docs-pages";
 import Changelog, { changelogToc } from "../pages/Changelog";
 import changelog from "../data/changelog.json";
 import SupplyChain, { SUPPLY_CHAIN_TOC } from "../pages/SupplyChain";
+import SecurityDocs from "../pages/SecurityDocs";
 import SelfHostDocs from "../pages/SelfHostDocs";
 import AgentSkillDocs from "../pages/AgentSkillDocs";
 import DorDocs from "../pages/DorDocs";
+import security from "../data/docs.security.json";
 import selfhost from "../data/docs.selfhost.json";
 import skill from "../data/docs.skill.json";
 import cli from "../data/docs.cli.json";
@@ -25,6 +27,7 @@ import cli from "../data/docs.cli.json";
 /** Every page in the rail, with the entries it hands the rail. */
 const PAGES: Record<string, { element: React.ReactElement; toc: TocEntry[] }> = {
   "/changelog": { element: <Changelog />, toc: changelogToc(changelog.releases) },
+  "/docs/security": { element: <SecurityDocs />, toc: security.toc },
   "/supply-chain": { element: <SupplyChain />, toc: SUPPLY_CHAIN_TOC },
   "/docs/self-host": { element: <SelfHostDocs />, toc: selfhost.toc },
   "/docs/agent-skill": { element: <AgentSkillDocs />, toc: skill.toc },

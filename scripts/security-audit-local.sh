@@ -31,7 +31,7 @@ for f in _preamble orchestrator supply-chain ci-and-secrets application-security
 done
 
 # One domain, in the foreground. This is the loop you actually iterate in while
-# editing SECURITY.md: no orchestrator, no waiting, no merge — just the domain
+# editing a security spec: no orchestrator, no waiting, no merge — just the domain
 # under test, writing its own fragment.
 run_domain() {
   local domain="$1" out
@@ -50,7 +50,7 @@ run_domain() {
   # domains unpinned inherits whatever the operator's `~/.claude/settings.json`
   # names, which is not necessarily weaker than Opus — on a machine defaulting
   # to `opus[1m]` it is *stronger* (same family, larger context), inverting the
-  # relation SECURITY.md requires and making a local run no longer a rehearsal
+  # relation docs/specs/security-audit.md requires and making a local run no longer a rehearsal
   # of the nightly. CI gets this for free: its session default is Sonnet and
   # only application-security carries an override.
   #
