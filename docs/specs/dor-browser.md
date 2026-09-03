@@ -360,10 +360,10 @@ resolves once the *relaunched* daemon is up (a pid file naming a pid other than
 the killed one, and a `<session>.stream` file naming a port that accepts a
 connection), asking `stream status` only after `open` returns. **A non-zero
 `open` exit with the daemon up is a page still loading, not a failed launch**;
-only a launch that never publishes a port fails, and then `agentBrowserOpen`
-closes what it spawned. **A headed session is tracked for shutdown before its
-launch**, so a window whose page never loads is still closed. **Never query the
-daemon during the close/reopen gap** (rationale), host and controller
+only a launch without a published port fails, including after a zero exit;
+`agentBrowserOpen` then closes its spawn. **A headed session is tracked for
+shutdown before its launch**, so a window whose page never loads is still
+closed. **Never query the daemon during the close/reopen gap** (rationale), host and controller
 park/recovery paths alike, so **Dormouse supplies the active-tab URL and the
 host trusts it**. Once `open` returns, only the latest relaunch best-effort
 closes stray `about:blank` tabs, **and only while a real page is open**, so it

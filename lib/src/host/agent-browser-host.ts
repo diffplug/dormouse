@@ -334,6 +334,14 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     });
   }
 
+  function launchFailure(label: string, result: AgentBrowserCommandResult): string {
+    const stderr = result.stderr.trim();
+    if (stderr) return stderr;
+    return result.exitCode === 0
+      ? `${label} published no stream port`
+      : `${label} exited ${result.exitCode}`;
+  }
+
   // After a relaunch, close any stray about:blank tab the close+reopen race can
   // leave behind — but only when a real page is open, so we never close the sole
   // tab. Best-effort: a failure here must not fail the pop-out/pop-in.
@@ -576,7 +584,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
       // (a no-op when there is no daemon — `close` starts none).
       await runWithBinaryFallback(['--session', session, 'close'], binaryPath);
       const failed = await opened;
-      return { ok: false, error: failed.stderr.trim() || `open exited ${failed.exitCode}` };
+      return { ok: false, error: launchFailure('open', failed) };
     }
     return { ok: true, session, wsPort, ...(binaryPath ? { binaryPath } : {}) };
   }
@@ -624,7 +632,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     if (wsPort === undefined) {
       if (relaunchGenerations.get(session) === generation) relaunchGenerations.delete(session);
       const failed = await opened;
-      return { ok: false, error: failed.stderr.trim() || `${label} open exited ${failed.exitCode}` };
+      return { ok: false, error: launchFailure(`${label} open`, failed) };
     }
     const current = () => relaunchGenerations.get(session) === generation;
     void opened

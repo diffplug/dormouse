@@ -231,6 +231,29 @@ describe('agent-browser host relaunch', () => {
     expect(calls.some((args) => args[2] === 'close')).toBe(true);
     expect(calls.some((args) => args[2] === 'stream')).toBe(false);
   });
+
+  it('reports a zero-exit launch that publishes no stream port without claiming it exited unsuccessfully', async () => {
+    const host = createAgentBrowserHost({ writeClipboardText: vi.fn() });
+    mockSpawnByCommand({
+      open: () => ({}),
+      stream: () => ({ stdout: '{}' }),
+      close: () => ({}),
+    });
+    expect(await host.open('https://example.com/', {})).toEqual({
+      ok: false,
+      error: 'open published no stream port',
+    });
+
+    mockSpawnByCommand({
+      close: () => ({}),
+      '--headed open': () => ({}),
+      stream: () => ({ stdout: '{}' }),
+    });
+    expect(await host.popOut('dormouse.1.default', { url: 'https://example.com/' })).toEqual({
+      ok: false,
+      error: 'popOut open published no stream port',
+    });
+  });
 });
 
 describe('agent-browser host screenshot transport', () => {
