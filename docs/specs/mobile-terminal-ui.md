@@ -214,9 +214,9 @@ direction while the drag keeps pushing that way**, and **the compass stays
 visually collapsed while that push is brisk, latching expanded once the drag
 settles** (`OPTION_EXPAND_RELEASE`). (rationale)
 
-Source of truth: `advanceOptionOrigin` (the ratchet) /
-`MOBILE_GESTURE_OPTION_DIRECTIONS` (exploded-option directions per group) in
-`lib/src/lib/mobile-gesture-menu.ts`.
+Source of truth: `advanceOptionOrigin` / `MOBILE_GESTURE_OPTION_DIRECTIONS` in
+`lib/src/lib/mobile-gesture-menu.ts` — the ratchet, and exploded-option
+directions per group.
 
 ## Input mode selector
 

@@ -41,6 +41,7 @@ const CASES = [
   ['check 11: a (rationale) marker under a heading the rationale does not key', SPEC, '\n## Planted\n\nA rule (rationale).\n'],
   ['check 11: the marker as the last item of its parenthetical', SPEC, '\n## Planted\n\nA rule (see below; rationale).\n'],
   ['check 12: a bare file name in Source of truth', SPEC, '\nSource of truth: `lint-kit.mjs`.\n'],
+  ['check 12: a bare file name under a punctuated lead-in', SPEC, '\nSource of truth, all in `lib/src/lib/`: `Wall.tsx`.\n'],
   ['check 12: a symbol the named file lacks', SPEC, '\nSource of truth: `noSuchSymbolXyz` in `scripts/lint-kit.mjs`.\n'],
   ['check 13: a quoted citation of a heading that does not exist', SOURCE, `\n// ${spec('layout.md')} -> "No Such Heading"\n`],
   ['check 13: an unquoted citation of a heading that does not exist', SOURCE, `\n// ${spec('layout.md')} -> No Such Heading Here.\n`],
