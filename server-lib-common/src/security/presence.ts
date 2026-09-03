@@ -1,6 +1,6 @@
 /**
  * The presence challenge both ceremonies prove freshness with
- * (`docs/specs/remote-security-model.md` -> E2E identities and presence).
+ * (`docs/specs/remote-security-model.md` -> Presence proofs).
  *
  * The WebAuthn challenge is derived, not random: it is a hash over the
  * ceremony this assertion belongs to, so an assertion produced for one pairing

@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { basename, dirname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { countWords as wordCount, proseLines, SOURCE_EXTENSIONS } from './spec-md.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const args = process.argv.slice(2);
@@ -44,12 +45,8 @@ const specFiles = readdirSync(join(ROOT, 'docs/specs'))
   .sort();
 specFiles.push('SELF_HOST.md');
 const budgets = JSON.parse(read('scripts/spec-word-budgets.json'));
-const codeExtensions = new Set([
-  '.cjs', '.css', '.html', '.js', '.json', '.jsx', '.mjs', '.ps1', '.rs',
-  '.sh', '.toml', '.ts', '.tsx', '.yaml', '.yml',
-]);
+const codeExtensions = new Set(SOURCE_EXTENSIONS.map((ext) => `.${ext}`));
 const extension = (rel) => /\.[^.\/]+$/.exec(rel)?.[0] ?? '';
-const wordCount = (text) => text.split(/\s+/).filter(Boolean).length;
 const lineOf = (text, offset) => text.slice(0, offset).split('\n').length;
 
 function resolveReference(token, spec) {
@@ -87,13 +84,7 @@ function referencesOf(spec, text) {
   return { refs: [...refs].sort(), unresolved: [...unresolved].sort() };
 }
 
-function proseOnly(text) {
-  let inFence = false;
-  return text.split('\n').map((line) => {
-    if (/^\s*```/.test(line)) { inFence = !inFence; return ''; }
-    return inFence ? '' : line;
-  }).join('\n');
-}
+const proseOnly = (text) => proseLines(text).join('\n');
 
 function proseCandidates(text) {
   const prose = proseOnly(text);

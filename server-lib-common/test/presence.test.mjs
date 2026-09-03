@@ -1,6 +1,6 @@
 /**
  * The derived WebAuthn presence challenge
- * (docs/specs/remote-security-model.md -> E2E identities and presence).
+ * (docs/specs/remote-security-model.md -> Presence proofs).
  */
 
 import { test } from 'node:test';

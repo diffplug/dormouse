@@ -159,7 +159,7 @@ describe('the pairing walkthrough mirrors the copy it clicks', () => {
   });
 });
 
-// docs/specs/standalone.md -> "Rust <-> sidecar bridge"
+// docs/specs/standalone.md -> "Rust ↔ sidecar bridge"
 describe('OPEN_PORT_TIMEOUT_MS mirrors', () => {
   it('matches the sidecar copy in standalone/sidecar/pty-core.js', () => {
     const file = 'standalone/sidecar/pty-core.js';

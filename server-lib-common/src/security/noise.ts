@@ -121,8 +121,8 @@ export interface NoiseSession {
  * **Never throws and never rejects**, a missing `globalThis.crypto` included:
  * the callers this exists for are boot-path gates that show a fixed upgrade
  * requirement and perform no remote operation
- * (`docs/specs/remote-security-model.md` -> E2E identities and presence). The
- * default is resolved inside the guard for the same reason.
+ * (`docs/specs/remote-security-model.md` -> Host identity). The default is
+ * resolved inside the guard for the same reason.
  */
 export async function probeNoiseSupport(crypto?: WebCryptoLike): Promise<boolean> {
   try {
@@ -269,7 +269,7 @@ export function isNoiseStaticMaterial(publicKey: string, privateKeyPkcs8: string
  * halves of different keypairs pass {@link isNoiseStaticMaterial}, which is
  * shape only, and a mismatch would read as a *changed Host identity* at every
  * paired Client rather than as the corrupt state file it is
- * (`docs/specs/remote-security-model.md` → Identities and storage).
+ * (`docs/specs/remote-security-model.md` → Host identity).
  *
  * The private key is imported extractable for exactly this call and discarded;
  * the copy the Host actually holds still comes from

@@ -1403,8 +1403,8 @@ const CSP_HEADER = 'Content-Security-Policy';
  * here as the risk it cannot rule out — so it gets the defense in depth the
  * two shipped webview hosts already have.
  *
- * Every source is the app's own origin. The two loosenings are load-bearing
- * and no wider than they must be:
+ * Every source is the app's own origin. The loosenings are load-bearing and no
+ * wider than they must be:
  *
  * * `style-src 'unsafe-inline'` — the shell carries an inline `<style>` for
  *   viewport plumbing that has to apply before first paint, and React writes
@@ -1414,6 +1414,8 @@ const CSP_HEADER = 'Content-Security-Policy';
  *   `'self'`, whose ws/wss coverage browsers have disagreed about. It is the
  *   configured origin with the scheme swapped, so it can only ever be this
  *   deployment's own relay.
+ * * `img-src` also admits `data:` and `blob:`, `media-src` `blob:` — images and
+ *   media the page builds in memory rather than fetches.
  *
  * `script-src 'self'` needs no exception: the build emits no inline script and
  * loads nothing off-origin, which `server/test/static.test.mjs` pins against

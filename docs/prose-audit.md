@@ -29,7 +29,7 @@ The command is dependency-free and advisory. Its thresholds intentionally favor 
    - `CANONICAL` — let generated help, a type, constant, registry, or test own an exact shape.
 
 4. Apply only high-confidence edits. Preserve invariants, edge cases, message direction, cross-package ownership, and the `## Future` fold.
-5. Run `node scripts/spec-lint.mjs`, relevant focused tests, and `git diff --check`. Lower changed word budgets to retain a small ratchet margin.
+5. Run `node scripts/spec-lint.mjs`, relevant focused tests, and `git diff --check`. Re-baseline a changed spec with `node scripts/spec-lint.mjs --ratchet <spec>`.
 6. Commit a coherent cluster so reviewers can distinguish mechanical compression from behavior changes.
 
 ## Cadence

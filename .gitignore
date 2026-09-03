@@ -78,3 +78,4 @@ audit-status.txt
 *.selftest.bak
 *.e2e-selftest.bak
 *.loopback-selftest.bak
+*.spec-selftest.bak

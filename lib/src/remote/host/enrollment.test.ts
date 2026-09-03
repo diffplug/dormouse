@@ -97,7 +97,7 @@ describe('remote-host enrollment', () => {
   it('mints a Noise static the server never sees', async () => {
     // The Host's permanent end-to-end identity is generated on this machine
     // and persisted with the enrollment; the enroll request body is unchanged
-    // (docs/specs/remote-security-model.md → E2E identities and presence).
+    // (docs/specs/remote-security-model.md → Host identity).
     stubLocalStorage();
     const fetchMock = vi.fn(async () =>
       new Response(

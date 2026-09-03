@@ -1,5 +1,6 @@
 /**
- * The plumbing `deploy-lint` and `e2e-lint` share with their self-tests.
+ * The plumbing `spec-lint`, `deploy-lint` and `e2e-lint` share with their
+ * self-tests.
  *
  * Rules and patterns stay in each lint — this is only the machinery around
  * them, factored out because the self-test contract is the part that must never
