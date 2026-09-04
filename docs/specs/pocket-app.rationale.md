@@ -30,6 +30,8 @@
 
 **Why an installed iOS Pocket can never receive a scanned hash.** The two storage partitions never meet, so no link text can route a `#pair?` fragment from the OS camera's Safari into the install's realm; keys have to be minted in the partition that will hold them.
 
+**Why inline images are not size-gated on the relay.** A 4 MB image becomes roughly 5.4 MB after base64url and JSON framing, per attached Client, in one frame. A cap would have to either truncate the sequence — leaving ImageAddon holding a partial payload it cannot render — or drop it silently, and both are worse on a link the user is watching than a slow frame. The exposure is bounded in practice: images are rare in a phone session, only the attached pane streams, and the payload is transient rather than retained (`docs/specs/terminal-escapes.rationale.md` -> "Inline graphics").
+
 ## Design system and theming
 
 **Why the theme is restored in `main.tsx` rather than by the Wall.** Pocket has no VS Code host handing it tokens, and boots into auth screens long before any Wall exists, so without a boot-time restore the first paint would be unthemed. The same call syncs what no in-app host needs: root `color-scheme` drives native form controls and scrollbars, `<meta name="theme-color">` tints the browser's own address bar.

@@ -98,6 +98,11 @@ performing no remote operation
 — remote panes are Host-owned; v1 grants no phone-side kill/layout authority.
 (rationale)
 
+**Inline images cross the relay unbounded and unchunked**, since Pocket builds
+panes through the same `createXtermHost` and so loads ImageAddon. **Accepted
+rather than gated**: a slow frame beats a cap that truncates an image
+(rationale).
+
 `RemotePtyAdapter` exposes the adapter-specific `setActivePane(id)`: v1 allows
 one attachment per session, so pane switching is detach → attach, whose repaint
 (resize) redraws the screen. **Writes and resizes for a non-attached pane are
