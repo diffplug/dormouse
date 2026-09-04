@@ -8,8 +8,8 @@
 The coordinating Server from the remote security model, in selfhost mode, cut
 down to the smallest thing that completes this loop:
 
-> Run the server with a setup password. Enroll your laptop's Dormouse Terminal
-> with it. Point your phone's camera at the code that Host shows: it creates a
+> Run the server; it generates its setup password. Enroll your laptop's Dormouse
+> Terminal with it. Point your phone's camera at the code that Host shows: it creates a
 > passkey, signs in, and pairs. Pick up a running terminal session from the
 > laptop on the phone.
 
@@ -48,7 +48,6 @@ The whole of what `server/src/` reads from the environment:
 
 | Env var                   | Meaning                                                    |
 | ------------------------- | ---------------------------------------------------------- |
-| `DORMOUSE_SETUP_PASSWORD` | Required: 64 lowercase hex characters (32 CSPRNG bytes). Gates Host enrollment, not passkey registration; config boundaries enforce the shape. |
 | `DORMOUSE_ORIGIN`         | External origin, e.g. `https://dormouse.tailnet.ts.net`; source of the WebAuthn `rpId`/`origin` and the Host's `ConnectionPolicy`. Defaults to `http://localhost:<port>` for dev. |
 | `DORMOUSE_STATE_DIR`      | Where the JSON state files live. Default `./data`.         |
 | `DORMOUSE_POCKET_DIR`     | The built Pocket app served at `/*`. Defaults to `lib/dist-pocket` resolved from the compiled server's own location, never the cwd (rationale). Absent or lacking `index.html`, `GET /` is a plaintext stub naming the build command. |
@@ -61,6 +60,13 @@ The whole of what `server/src/` reads from the environment:
 | `DORMOUSE_RELEASE_ID`     | The release directory's name, supplied by the installer's `run-server` wrapper, recorded in the runtime file. `null` when the server was not started by an installer. |
 | `DORMOUSE_ENROLL_TOKEN_FILE` | Absolute installer offer path — `{origin, token, mintedAt}`, the token 64 hex characters, shape in `server-lib-common/src/remote/enroll-offer.ts` — which `POST /api/host/enroll` accepts in place of the setup password; unset, one-click enrollment is off. A relative value is a `ConfigError` (rationale). **The offer lasts until the first Host enrollment or 24 hours, whichever comes first**, `hosts.json` being the durable marker (rationale); the Host-store mutex serializes password/token requests. **Redemption atomically renames the file before minting**, so exactly one concurrent redemption wins, and a mismatched claim is restored by no-clobber hard link so a newer installer generation wins. The installer rotates offers only before `hosts.json` exists. |
 
+**Must generate the setup password inside the Server on first boot, never accept
+it as configuration, and persist it as `setup-password.json`.** Use 32
+`crypto.randomBytes` bytes as lowercase hex; reject a malformed record. Source of truth:
+`generateSetupPassword` in `server/src/setup-password.ts`,
+`SetupPasswordStore` in `server/src/state.ts`, and `server/src/index.ts`; test:
+`server/test/setup-password-store.test.mjs`.
+
 **The server itself always speaks plain HTTP**, and WebAuthn requires a secure
 context: `localhost` works for development, a real phone needs TLS in front
 (`tailscale serve` is the intended selfhost path; any reverse proxy works).
@@ -70,7 +76,7 @@ reaches the app over loopback and a socket left on every interface also publishe
 the plaintext port to the LAN and to the tailnet itself; the selfhost install
 sets `DORMOUSE_BIND_HOST`, and the default stays unbound for containers, where
 the namespace is the boundary. **Every developer and test entrypoint opts back
-in**, each carrying a published credential: `server/scripts/dev.mjs`,
+in**: `server/scripts/dev.mjs`,
 `server/test/helpers.mjs`, `server/test/spawn-server.mjs`. An explicit value
 wins, as `server/test/bind-host.test.mjs` proves. Binding loopback is *containment, not admission* —
 every route is still gated by the setup password or a bearer token, exactly as
@@ -158,13 +164,20 @@ host would foreclose it.
 
 ## State files
 
-The entire persistent state is four JSON files. The row shapes are sketched here
-because hand-editing them is the *documented* revocation mechanism:
+The persistent state is five JSON files, their row shapes sketched here because
+hand-editing them is the documented revocation mechanism (Guardrails):
 
 - `account.json` — `{ accountId, passkeys: [{ credentialId, publicKey /* SPKI b64u */, label, createdAt }] }`
 - `hosts.json` — `[{ hostId, hostToken, enrolledAt }]`; **no label** — the Server keeps no name for a Host
 - `push-subscriptions.json` — `[{ hostId, deliveryId, endpoint, keys, vapidPublicKey, subscribedAt }]`
 - `vapid.json` — `{ publicKey, privateKey, createdAt }`; exists only when no keypair is configured by env
+- `setup-password.json` — `{ password, createdAt }`; Server-generated once
+
+**Must refuse a malformed singleton record** (`account.json`, `vapid.json`,
+`setup-password.json`) rather than read it as first boot and mint over it — a
+whole-file `null` is otherwise indistinguishable from absence. The collection files
+keep their row-level tolerance. Source of truth: `loadRecord` in
+`server/src/state.ts`; test: `server/test/state-records.test.mjs`.
 
 **The Host's ACL is never here** — it lives on the Host, in the process that owns
 the PTYs (`lib/src/host/remote/host-state-store.ts`).
@@ -172,8 +185,9 @@ the PTYs (`lib/src/host/remote/host-state-store.ts`).
 **Every write is temp-file-plus-rename and every mutation is serialized through
 a per-store promise chain**, so a crash cannot leave an unparseable file and two
 concurrent read-modify-writes cannot lose each other. `hosts.json` stores
-`hostToken` — the host↔server relay bearer secret — in plaintext and `vapid.json`
-a private key, so the state dir is created `0o700` and every write lands in a
+`hostToken` — the host↔server relay bearer secret — in plaintext,
+`setup-password.json` the enrollment credential, and `vapid.json` a private key,
+so the state dir is created `0o700` and every write lands in a
 `0o600` temp file before the rename. **Any new file under `$DORMOUSE_STATE_DIR`
 must go through `writeAtomic`.** **Never build anything on that mode**
 (rationale); what protects the *installed* server's state is the installer's
@@ -905,7 +919,7 @@ The loop at the top of this spec is implemented end to end. To test:
 **1. Server + Pocket** (one terminal):
 
 ```sh
-DORMOUSE_SETUP_PASSWORD="$(openssl rand -hex 32)" pnpm dev:server
+pnpm dev:server
 ```
 
 Builds the Pocket app (`lib/dist-pocket`) and the server, then serves both on
@@ -919,7 +933,7 @@ enables it with no further configuration; to exercise push on localhost, supply
 a contact:
 
 ```sh
-DORMOUSE_SETUP_PASSWORD="$(openssl rand -hex 32)" DORMOUSE_VAPID_SUBJECT=mailto:you@example.com \
+DORMOUSE_VAPID_SUBJECT=mailto:you@example.com \
   pnpm dev:server
 ```
 
@@ -934,7 +948,8 @@ DORMOUSE_REMOTE_CONNECT_SRC='http://localhost:3000 ws://localhost:3000' pnpm dev
 
 Then enroll once, in **Settings → Remote control** (the sliders icon at the far
 right of the baseboard): server `http://localhost:3000`, the setup password, and
-a name for this machine. The same from the webview's devtools console, the
+a name for this machine. Read `password` from the generated
+`setup-password.json` state record. The same from the webview's devtools console, the
 scripting seam:
 
 ```js
@@ -942,11 +957,9 @@ await window.dormouseRemoteHost.enroll('http://localhost:3000', '<64 hex charact
 ```
 
 Enrollment persists in the service's own store, and later launches connect by
-themselves. (Every command rides on that object; the dev loop has no installer
-offer.) For a headless stand-in host instead:
-`DORMOUSE_SETUP_PASSWORD='<64 hex characters>' node server/scripts/fake-host.mjs http://localhost:3000`
-— it instantiates the test harness's `FakeHost`, prints a pairing URL to paste
-into Pocket, and differs from a real Host only in auto-approving and logging.
+themselves. For a headless stand-in host instead:
+`node server/scripts/fake-host.mjs http://localhost:3000`
+— it reads the same state, prints a pairing URL, auto-approves, and logs.
 
 **3. Phone** (or any other browser profile): open the server origin there first,
 then show a code on the laptop (**Settings → Remote control → Set up a phone**).
@@ -1035,8 +1048,8 @@ BYOT.
 Selfhost (everything above the fold) stays as-is; SaaS is a parallel deployment
 that lifts each single-tenant simplification, every one chosen to be liftable:
 
-* **Accounts.** One `accountId: "owner"` gated by a shared
-  `DORMOUSE_SETUP_PASSWORD` becomes many accounts, each created by email +
+* **Accounts.** One `accountId: "owner"` behind a shared setup password becomes
+  many accounts, each created by email +
   passkey. The two hand-edited JSON files (`account.json`, `hosts.json`) become
   a real per-tenant store with per-tenant revocation, and Host enrollment moves
   from the global setup password to the authenticated account.

@@ -119,7 +119,7 @@ the first, and never for the second, whose `DORMOUSE_ORIGIN` is durable WebAuthn
 identity. Before this check the bind-host guard told the operator to *fix* a zero-byte
 file, on every run, forever.
 
-**Why the length guards count 64.** They are stated in hex characters, so a guard
+**Why the enrollment-offer length guards count 64.** They are stated in hex characters, so a guard
 reading `-ge 32` passes a regression to half the entropy.
 
 **Why the enrollment offer lives in `run/`.** A credential that expires in 24 hours and
@@ -127,12 +127,14 @@ is unlinked on redemption belongs in neither `config/` nor `state/`. The directo
 owner-only because it governs who may replace or delete the credential, not only who
 may read it.
 
-**Why an unreadable service definition fails the same way as a leaking one.** A search
-through nothing finds nothing, so a missing plist or unit file, or an
-`Export-ScheduledTask` returning `$null` because CIM was blocked or the task vanished,
-has to be a failure rather than a pass.
-
 ## The setup password
+
+**Why the Server owns generation.** A format check can reject a short password, but cannot
+distinguish 32 random bytes from 64 zeroes. Accepting the value from configuration
+therefore made manual and container deployments weaker than installer deployments.
+The state directory already has to persist for accounts and enrolled Hosts, so making
+the credential another server-generated state record removes that choice without a
+new durability requirement.
 
 **Why the admission bucket is global.** An IP-keyed limiter would make the reverse
 proxy's forwarding policy part of authentication and lets a distributed caller buy one

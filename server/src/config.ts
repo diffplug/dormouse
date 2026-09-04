@@ -10,7 +10,6 @@ import { fileURLToPath } from 'node:url';
 import { normalizeOrigin } from 'server-lib-common';
 
 import { defaultVapidSubject, type VapidKeys } from './push.js';
-import { isSetupPassword } from './setup-password.js';
 
 /** Everything the entrypoint needs, resolved from the environment. */
 export interface ServerConfig {
@@ -22,7 +21,6 @@ export interface ServerConfig {
    * reachable from the LAN or a tailnet.
    */
   bindHost: string | undefined;
-  setupPassword: string;
   origin: string;
   stateDir: string;
   pocketDir: string;
@@ -83,14 +81,6 @@ export function readConfig(env: Env = process.env): ServerConfig {
     throw new ConfigError(`PORT must be an integer between 1 and 65535, got ${env.PORT}`);
   }
 
-  const setupPassword = env.DORMOUSE_SETUP_PASSWORD;
-  if (!isSetupPassword(setupPassword)) {
-    throw new ConfigError(
-      'DORMOUSE_SETUP_PASSWORD must be 64 lowercase hexadecimal characters ' +
-        'generated from 32 random bytes — it gates host enrollment.',
-    );
-  }
-
   const bindHost = env.DORMOUSE_BIND_HOST?.trim() || undefined;
   // Opt-in, and only the exact string: an unset or misspelled value must read
   // as "off" rather than as "on", because turning this on without
@@ -134,7 +124,6 @@ export function readConfig(env: Env = process.env): ServerConfig {
     port,
     bindHost,
     requireUserVerification,
-    setupPassword,
     origin,
     stateDir,
     pocketDir,

@@ -93,7 +93,6 @@ const listenerFixtures = {
 const ENV_COMPLETE = [
   '# Dormouse selfhost server — installer-owned runtime configuration.',
   '# Generated 2026-01-01T00:00:00Z. Preserved byte-for-byte across updates.',
-  'DORMOUSE_SETUP_PASSWORD=' + 'a'.repeat(64),
   'DORMOUSE_ORIGIN=https://laptop.tail.ts.net',
   'DORMOUSE_STATE_DIR=/home/me/.local/share/dormouse-server/state',
   'DORMOUSE_BIND_HOST=127.0.0.1',
@@ -109,10 +108,10 @@ function writeEnvFixtures(dir) {
     empty: '',
     // Died inside the heredoc, at three points.
     headerOnly: head.slice(0, 2).join('\n'),
-    throughPassword: head.slice(0, 3).join('\n'),
-    throughBindHost: head.slice(0, 6).join('\n'),
+    throughOrigin: head.slice(0, 3).join('\n'),
+    throughBindHost: head.slice(0, 5).join('\n'),
     // A key present with no value is as absent as a missing line.
-    emptyPassword: ENV_COMPLETE.replace(/^DORMOUSE_SETUP_PASSWORD=.*$/m, 'DORMOUSE_SETUP_PASSWORD='),
+    emptyOrigin: ENV_COMPLETE.replace(/^DORMOUSE_ORIGIN=.*$/m, 'DORMOUSE_ORIGIN='),
     // An operator's own addition is not a defect.
     extraKey: `${ENV_COMPLETE}\nDORMOUSE_LOG_LEVEL=debug`,
   };
@@ -169,17 +168,17 @@ function cases(platform, env) {
     [
       'env_missing_keys: created and never filled',
       `printf '[%s]\\n' "$(env_missing_keys '${env.empty}')"`,
-      '[ DORMOUSE_SETUP_PASSWORD DORMOUSE_ORIGIN DORMOUSE_STATE_DIR DORMOUSE_BIND_HOST PORT]',
+      '[ DORMOUSE_ORIGIN DORMOUSE_STATE_DIR DORMOUSE_BIND_HOST PORT]',
     ],
     [
       'env_missing_keys: died after the comment header',
       `printf '[%s]\\n' "$(env_missing_keys '${env.headerOnly}')"`,
-      '[ DORMOUSE_SETUP_PASSWORD DORMOUSE_ORIGIN DORMOUSE_STATE_DIR DORMOUSE_BIND_HOST PORT]',
+      '[ DORMOUSE_ORIGIN DORMOUSE_STATE_DIR DORMOUSE_BIND_HOST PORT]',
     ],
     [
-      'env_missing_keys: died after the password line',
-      `printf '[%s]\\n' "$(env_missing_keys '${env.throughPassword}')"`,
-      '[ DORMOUSE_ORIGIN DORMOUSE_STATE_DIR DORMOUSE_BIND_HOST PORT]',
+      'env_missing_keys: died after the origin line',
+      `printf '[%s]\\n' "$(env_missing_keys '${env.throughOrigin}')"`,
+      '[ DORMOUSE_STATE_DIR DORMOUSE_BIND_HOST PORT]',
     ],
     [
       'env_missing_keys: died one line from the end',
@@ -188,8 +187,8 @@ function cases(platform, env) {
     ],
     [
       'env_missing_keys: a key with no value is as absent as a missing line',
-      `printf '[%s]\\n' "$(env_missing_keys '${env.emptyPassword}')"`,
-      '[ DORMOUSE_SETUP_PASSWORD]',
+      `printf '[%s]\\n' "$(env_missing_keys '${env.emptyOrigin}')"`,
+      '[ DORMOUSE_ORIGIN]',
     ],
     [
       "env_missing_keys: an operator's extra key is not a defect",
