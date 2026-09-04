@@ -51,13 +51,18 @@ describe('ThemePicker', () => {
     return container.querySelector<HTMLDivElement>('[role="menu"]')!;
   }
 
-  it('offsets the compact menu with style, not a utility class', () => {
-    // The website renders this against the lib's prebuilt stylesheet, where a
-    // never-emitted utility simply does not exist and the menu would fall back
-    // to its static position (docs/specs/theme.md).
-    expect(openCompact({ menuSide: 'above' }).style.bottom).toBe('100%');
-    act(() => root.render(<></>));
-    expect(openCompact().style.top).toBe('100%');
+  it('owns compact touch and menu geometry without a host stylesheet', () => {
+    act(() => root.render(<ThemePicker variant="compact" />));
+    const trigger = container.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!;
+    expect(trigger.style.minHeight).toBe('44px');
+    expect(trigger.style.minWidth).toBe('44px');
+
+    act(() => trigger.click());
+    const menu = container.querySelector<HTMLDivElement>('[role="menu"]')!;
+    expect(menu.style.position).toBe('fixed');
+    expect(menu.style.width).toBe('280px');
+    expect(menu.style.maxHeight).toContain('100dvh - 24px');
+    expect(menu.style.display).toBe('flex');
   });
 
   it('reports a pick even when it does not change the active theme', () => {

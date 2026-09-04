@@ -1,3 +1,5 @@
+import type { CSSProperties } from 'react';
+
 /** Inline styles for the theme picker. Uses --vscode-* tokens so the picker
  *  blends into a VS Code shell while still rendering correctly outside one. */
 export const themePickerStyles = {
@@ -13,7 +15,19 @@ export const themePickerStyles = {
     borderColor: 'var(--vscode-panel-border, #2b2b2b)',
     color: 'var(--vscode-editor-foreground, #cccccc)',
     boxShadow: '0 12px 32px rgba(0, 0, 0, 0.35)',
-  },
+    display: 'flex',
+    flexDirection: 'column',
+    maxHeight: 'var(--overlay-max-h-popover, calc(100dvh - 24px))',
+    overflow: 'hidden',
+  } satisfies CSSProperties,
+  compactTrigger: { minHeight: 44, minWidth: 44 } satisfies CSSProperties,
+  list: {
+    flex: '1 1 auto',
+    minHeight: 0,
+    maxHeight: 320,
+    overflowY: 'auto',
+  } satisfies CSSProperties,
+  footer: { flexShrink: 0 } satisfies CSSProperties,
   border: { borderColor: 'var(--vscode-panel-border, #2b2b2b)' },
   activeRow: {
     backgroundColor: 'var(--vscode-list-activeSelectionBackground, #094771)',

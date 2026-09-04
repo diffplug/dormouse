@@ -83,7 +83,7 @@ export default function DocsThemeControl({
     ) : null;
 
   const picker = (
-    <div className="rounded border px-1.5 py-1 shadow-2xl" style={PANEL_STYLE}>
+    <div className="rounded border shadow-2xl" style={PANEL_STYLE}>
       <ThemePicker
         variant="compact"
         menuSide={inline ? "below" : "above"}

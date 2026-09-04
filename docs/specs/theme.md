@@ -192,10 +192,9 @@ playground navbar — carries none**.
   trigger, beside the word "Theme" in `compact`.
 - **ThemePicker renders the bundled default through hydration, then reconciles
   stored themes and selection in a layout effect** (rationale).
-- **`compact` takes its menu offset from style, never a Tailwind class**
-  (`menuSide`): the website renders against the lib's *prebuilt* stylesheet, so
-  a utility the lib never emitted is absent there and the menu drops to its
-  static position.
+- **`compact` takes its measured menu position, viewport cap, stacking, and
+  flex layout from inline styles, never Tailwind alone** (`menuSide`), because
+  the website consumes its JSX without the library stylesheet.
 - **`onPick` reports the choice, not the change.** `restoreActiveTheme` persists
   the id it resolved, so `dormouse:active-theme` exists whether or not anyone
   chose, and `subscribeToActiveTheme` is silent on a re-pick. Only the picker
@@ -210,9 +209,9 @@ playground navbar — carries none**.
   `WatchedCommandList`'s remove control in the same dialog, and **the picker
   row's `X` keeps a gap from the row's select target** (rationale).
 - **The dropdown renders `position: fixed`, anchored off the measured trigger
-  rect**, because the `overflow-y-auto` dialog surface would clip an
-  absolutely-positioned one; it closes on scroll. Anchoring and dismissal are
-  shared with the dialog's Shell row. **The dialog owns the dropdown's open
+  rect and clamped to the viewport**, because an ancestor may clip an absolute
+  one; it closes on scroll. Anchoring and dismissal are shared with the dialog's
+  Shell row. **The dialog owns the dropdown's open
   state** so `Escape` closes the menu before the dialog; `ModalFrame`'s
   capture-phase handler would otherwise swallow the key.
 - **Heights follow the viewport, never a fixed pixel budget**: both surfaces cap

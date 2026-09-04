@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { CaretDownIcon, XIcon } from '@phosphor-icons/react';
 import type { DormouseTheme } from '../lib/themes';
 import {
@@ -92,9 +92,10 @@ export function ThemePicker({
   const inDialog = variant === 'settings-dialog';
   const activeTheme = themes.find((theme) => theme.id === activeId) ?? themes[0];
 
-  // Only the dialog variant anchors off its trigger; `compact` floats free and
-  // positions itself with the absolute classes below.
-  const { setTriggerEl, setMenuEl, menuStyle } = useAnchoredMenu(inDialog && open, MENU_WIDTH_PX);
+  const { setTriggerEl, setMenuEl, menuStyle } = useAnchoredMenu(open, MENU_WIDTH_PX, {
+    side: inDialog ? 'below' : menuSide,
+    align: inDialog ? 'start' : 'end',
+  });
 
   // Hosts restore the visible body theme at boot. The picker separately
   // reconciles its stored rows and selected value after hydration so its first
@@ -132,15 +133,10 @@ export function ThemePicker({
     refreshThemes();
   };
 
-  // Offsets, not Tailwind classes: the website consumes this component through
-  // the lib's prebuilt stylesheet, so a utility the lib has never emitted
-  // before (`bottom-full`) is simply absent there and the menu falls back to
-  // its static position, off the bottom of the viewport.
-  const compactSideStyle: CSSProperties =
-    menuSide === 'above' ? { bottom: '100%', marginBottom: 4 } : { top: '100%', marginTop: 4 };
-  const panelStyle: CSSProperties = inDialog
-    ? { ...styles.panel, ...menuStyle }
-    : { ...styles.panel, ...compactSideStyle };
+  // Critical geometry is inline and owned by the component. The docs website
+  // consumes raw library JSX without the lib stylesheet, so utility classes
+  // alone cannot carry the viewport cap, stacking, or flex-shrink contract.
+  const panelStyle = { ...styles.panel, ...menuStyle };
 
   return (
     <div ref={rootRef} className="relative flex items-center">
@@ -152,6 +148,7 @@ export function ThemePicker({
         aria-label={`Theme: ${activeTheme?.label ?? 'Select theme'}`}
         onClick={() => setOpen(!open)}
         className={chromeButton({ kind: 'labeled' })}
+        style={inDialog ? undefined : styles.compactTrigger}
       >
         {activeTheme ? <ThemeSwatch theme={activeTheme} /> : null}
         <span className="min-w-0 truncate">
@@ -168,14 +165,12 @@ export function ThemePicker({
           ref={setMenuEl}
           role="menu"
           aria-label="Select theme"
-          className={`z-50 flex flex-col overflow-hidden rounded border font-mono shadow-2xl ${OVERLAY_MAX_HEIGHT.popover} ${
-            inDialog ? '' : 'absolute right-0 w-[280px]'
-          }`}
+          className={`z-50 flex flex-col overflow-hidden rounded border font-mono shadow-2xl ${OVERLAY_MAX_HEIGHT.popover}`}
           style={panelStyle}
         >
           {/* max-h-80 is a ceiling on a tall screen, never a floor: the
               panel's own viewport cap shrinks this further on a short one. */}
-          <div className="max-h-80 min-h-0 flex-1 overflow-y-auto py-1">
+          <div className="max-h-80 min-h-0 flex-1 overflow-y-auto py-1" style={styles.list}>
             {themes.map((theme) => {
               const isActive = theme.id === activeId;
               const isInstalled = theme.origin.kind === 'installed';
@@ -222,7 +217,7 @@ export function ThemePicker({
             })}
           </div>
 
-          <div className="shrink-0 border-t p-1" style={styles.border}>
+          <div className="shrink-0 border-t p-1" style={{ ...styles.border, ...styles.footer }}>
             <button
               type="button"
               onClick={() => {

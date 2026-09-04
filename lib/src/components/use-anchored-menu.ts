@@ -5,6 +5,11 @@ import { clampOverlayPosition } from '../lib/ui-geometry';
 /** Gap between the trigger's bottom edge and the top of the menu. */
 const MENU_GAP_PX = 4;
 
+interface AnchoredMenuOptions {
+  side?: 'above' | 'below';
+  align?: 'start' | 'end';
+}
+
 /**
  * Position a dropdown menu off its trigger's measured rect, `position: fixed`.
  *
@@ -27,6 +32,7 @@ const MENU_GAP_PX = 4;
 export function useAnchoredMenu(
   open: boolean,
   widthPx: number,
+  { side = 'below', align = 'start' }: AnchoredMenuOptions = {},
 ): {
   setTriggerEl: (element: HTMLElement | null) => void;
   setMenuEl: (element: HTMLElement | null) => void;
@@ -41,12 +47,16 @@ export function useAnchoredMenu(
   const menuStyle: CSSProperties = {
     width: widthPx,
     zIndex: MODAL_LAYERS.app,
-    ...(triggerRect
+    ...(triggerRect && menuRect
       ? clampOverlayPosition({
-          left: triggerRect.left,
-          top: triggerRect.top + triggerRect.height + MENU_GAP_PX,
+          left: align === 'end'
+            ? triggerRect.left + triggerRect.width - widthPx
+            : triggerRect.left,
+          top: side === 'above'
+            ? triggerRect.top - menuRect.height - MENU_GAP_PX
+            : triggerRect.top + triggerRect.height + MENU_GAP_PX,
           width: widthPx,
-          height: menuRect?.height ?? 0,
+          height: menuRect.height,
         })
       : { position: 'fixed', visibility: 'hidden' }),
   };
