@@ -52,6 +52,8 @@ Rows 1–2 are why a blanket second press is wrong; `Press Ctrl-C again` was abs
 
 **`'strict-dynamic'` could not be shown load-bearing by experiment.** With the `<meta property="csp-nonce">` in place, Vite's runtime preload helper nonces the `<link>` it injects ahead of a lazy `import()`, which populates the module map and lets the import resolve — including with `build.modulePreload` disabled (2026-08). That is an emergent interaction between a bundler's preload helper and the module map, not a policy guarantee.
 
+**Why the WebAssembly grant is `'wasm-unsafe-eval'` and not the token the error names.** Chromium reports the block as `'unsafe-eval' is not an allowed source of script`, and that token would indeed unblock it — while also re-enabling `eval`, `new Function`, and string timers for the whole document. `'wasm-unsafe-eval'` grants compilation and nothing else. It surfaced exactly where it should have, as `webview-boot.smoketest.ts` catching `CompileError: WebAssembly.instantiate() ...` on the first push of the inline-images branch (2026-09); no unit test could have, since CSP enforcement is the thing under test. An engine that does not know the token ignores it, leaving the pre-token behaviour rather than a regression.
+
 ## Webview message authentication
 
 **What a forged message would buy.** A `writePty`: `dor:controlRequest` becomes a `dormouse:control-request` event that `use-dor-control.ts` can turn into one, and the `pty:*` family drives what the user sees in a terminal.

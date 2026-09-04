@@ -493,10 +493,11 @@ Every source is the app's own origin
 * **`img-src` also admits `data:` and `blob:`, `media-src` `blob:`**; every
   other directive is `'self'`.
 
-**`script-src` stays `'self'`, with no nonce pipeline**, and the build keeps
-earning it: `assertPocketShell` fails `build:pocket` on any inline
-`<script>` body or off-origin `src`/`href` in the emitted `index.html`.
-(rationale)
+**`script-src` stays `'self'` plus `'wasm-unsafe-eval'`
+([terminal-escapes.md](./terminal-escapes.md#inline-graphics)), with no nonce
+pipeline**, and the build keeps earning it: `assertPocketShell`
+fails `build:pocket` on any inline `<script>` body or off-origin `src`/`href`
+in the emitted `index.html`. (rationale)
 
 One lib-owned bundle, two deployments:
 

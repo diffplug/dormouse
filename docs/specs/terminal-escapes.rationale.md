@@ -56,6 +56,8 @@ Keying this on the disposition rather than on an IIP command list also fixes the
 
 **Why prompt filtering is stateful.** The keystroke fallback reads a rolling 1,024-character output tail. A stateless control stripper removes a complete `APC G`, SIXEL DCS, or IIP OSC, but a later PTY chunk begins with bare base64 after the introducer fell out of that window. Carrying only the string-control state across reads removes the payload without changing what xterm receives.
 
+**Why the WebAssembly grant is every host's problem, not the VS Code webview's.** The decoder is instantiated from `ImageAddon.activate()`, so it compiles when a Session is created rather than when an image arrives: a host whose policy omits the grant fails at boot with SIXEL silently dead thereafter, while IIP and Kitty — which decode through the browser's own image pipeline — keep working, so the gap does not present as "images are broken". All three shipped hosts load the addon from the same `createXtermHost`, which is why one omission would be a per-host bug rather than a shared one.
+
 ## Report filtering on the input side
 
 **Why replayed reports are dropped rather than forwarded.** Replayed scrollback routinely contains terminal-generated replies from a long-dead app — cursor-position reports, device attributes, focus events. Forwarding them into the freshly spawned shell corrupts whatever it was parsing, and the user sees garbage typed into a prompt they never touched.
