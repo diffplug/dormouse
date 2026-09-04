@@ -333,7 +333,7 @@ Where it surfaces is host-specific:
 
 The header shows an alert bell, a fixed-text `TODO` pill when `todo === true`, a hover/focus notification preview when TODO has `notification`, and a dialog opened by right-click or by some left-click actions. Placement, sizing, and width tiers belong to `docs/specs/layout.md`.
 
-Bell visual state is a pure function of public status. **The bell names the command it would act on** ("Alert on all `claude`"), not an abstract toggle — that is the scope of what a click changes.
+Bell visual state is a pure function of public status. **On entry to `ALERT_RINGING`, ring the bell for four 800ms cycles, then hold it at 45° until the ring clears** (test: `runs a finite ringing burst and then holds the bell at 45 degrees` in `lib/src/components/bell-icon-class.test.ts`; rationale). **The bell names the command it would act on** ("Alert on all `claude`"), not an abstract toggle — that is the scope of what a click changes.
 
 Bell interactions — one transition table, in `dismissOrToggleAlert`:
 

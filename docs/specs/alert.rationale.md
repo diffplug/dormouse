@@ -84,7 +84,9 @@
 
 ## Pane Header
 
-**Why `cfg.alert.ringingPaused` suppresses the pulse.** It is the Chromatic freeze that pins the bell: an infinite opacity cycle would otherwise snapshot at an arbitrary phase and diff against itself on every run.
+**Why the bell rings only four times.** With four focused ringing bells, the former infinite animation added 6.89 MB of embedder memory, 1,127 style recalculations, and 3.99 seconds of renderer CPU over three minutes. Pausing only those animations in the same loaded document reduced that to 0.13 MB, two recalculations, and 0.025 seconds. After bounding the burst, two consecutive three-minute windows each had zero live animations, one recalculation, under 0.40 MB of non-cumulative embedder drift, and at most 0.024 seconds of renderer CPU (measured in Chrome 150, 2026-09). Four cycles preserve the entry cue without leaving a per-Session animation running for the lifetime of an unattended alert.
+
+**Why `cfg.alert.ringingPaused` suppresses the burst.** It is the Chromatic freeze that pins the bell; even a bounded animation could otherwise snapshot at an arbitrary phase during its first 3.2 seconds.
 
 ## Text And Security
 
