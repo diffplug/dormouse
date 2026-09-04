@@ -44,3 +44,14 @@ it('keeps the icon across a re-render at the same ring counter', async () => {
   await act(async () => root.render(<AlertBell status="ALERT_RINGING" ringSeq={1} size={14} className="shrink-0" />));
   expect(bell()).toBe(first);
 });
+
+it('replays the finite burst when a ringing presentation remounts', async () => {
+  await act(async () => root.render(<AlertBell status="ALERT_RINGING" ringSeq={1} size={14} />));
+  const first = bell();
+
+  await act(async () => root.render(null));
+  await act(async () => root.render(<AlertBell status="ALERT_RINGING" ringSeq={1} size={14} />));
+
+  expect(bell()).not.toBe(first);
+  expect(bell()?.getAttribute('class')).toContain('animate-bell-ring');
+});
