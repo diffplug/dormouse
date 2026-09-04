@@ -138,16 +138,11 @@ export class VSCodeAdapter implements PlatformAdapter {
           handler({ requestId: msg.requestId });
         }
       } else if (msg.type === 'alert:state') {
+        // The host posts the whole `AlertState`; forwarding it wholesale is what
+        // keeps a new alert field from needing an edit on this path alone.
+        const { type: _type, ...detail } = msg;
         for (const handler of this.alertStateHandlers) {
-          handler({
-            id: msg.id,
-            status: msg.status,
-            watchingEnabled: msg.watchingEnabled,
-            todo: msg.todo,
-            notification: msg.notification ?? null,
-            attentionDismissedRing: msg.attentionDismissedRing,
-            awaited: msg.awaited,
-          });
+          handler(detail);
         }
       } else if (msg.type === 'alert:watchedCommands') {
         for (const handler of this.watchedCommandHandlers) {

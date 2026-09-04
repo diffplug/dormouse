@@ -10,7 +10,6 @@ import { join, relative } from 'node:path';
 
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
-import { cors } from 'hono/cors';
 import type { Context, MiddlewareHandler } from 'hono';
 import { createNodeWebSocket } from '@hono/node-ws';
 import type { NodeWebSocket } from '@hono/node-ws';
@@ -46,6 +45,7 @@ import {
   utf8Decode,
   isSealedPushV1,
   verifyPasskeyAssertion,
+  TokenBucket,
 } from 'server-lib-common';
 import type {
   HostEnrollRequest,
@@ -101,6 +101,7 @@ import type { StoredHost, StoredPushSubscription } from './state.js';
 import { sendWithinDeadline } from './push.js';
 import type { PushSender } from './push.js';
 import { MAX_PUSH_ENDPOINT_LENGTH, isPublicHttpsPushEndpoint } from './push-endpoint.js';
+import { isSetupPassword } from './setup-password.js';
 
 /** Runtime configuration; see `index.ts` for how env maps onto this. */
 export interface AppConfig {
@@ -140,13 +141,13 @@ export interface AppConfig {
   /** Injectable clock (epoch ms) for tests; defaults to `Date.now`. */
   readonly now?: () => number;
   /**
-   * Delay before answering a rejected credential; defaults to
-   * {@link CREDENTIAL_FAILURE_DELAY_MS}. Injectable for the same reason as
+   * The wait before answering a rejected Host-enrollment credential; defaults
+   * to {@link CREDENTIAL_FAILURE_DELAY_MS}. Injectable for the same reason as
    * `pushSendDeadlineMs` — a suite that pays the real delay on every rejection
    * spends most of its wall time asleep — and never mapped from env: shortening
    * it is a test affordance, not a deployment knob.
    */
-  readonly credentialFailureDelayMs?: number;
+  readonly credentialFailureDelay?: () => Promise<void>;
   /**
    * Base64url VAPID public key handed to browsers so they can subscribe. Absent
    * disables push: the config route reports `null` and subscribe/send 503,
@@ -257,8 +258,14 @@ export const MAX_RELAY_FRAME_BYTES =
  */
 const MAX_PASSKEY_LABEL_LENGTH = 64;
 
-/** A small fixed delay on a rejected credential — the extent of POC brute-force hardening. */
+/** A small fixed delay on a rejected credential. */
 const CREDENTIAL_FAILURE_DELAY_MS = 250;
+
+/** Initial Host-enrollment attempts admitted before the global bucket refills. */
+export const HOST_ENROLL_ATTEMPT_BURST = 8;
+
+/** Sustained Host-enrollment admission: one attempt per second. */
+export const HOST_ENROLL_ATTEMPT_REFILL_MS = 1_000;
 
 /**
  * Longest request body any route but `/api/push/send` will read.
@@ -476,6 +483,15 @@ interface PingableSocket {
 export function createApp(config: AppConfig): CreatedApp {
   const now = config.now ?? (() => Date.now());
   const origin = config.origin;
+  // The entrypoint enforces this in `readConfig`; direct callers pass the same
+  // boundary here, just as they do for the normalized origin below. A Server
+  // must never silently turn an operator-chosen word into its bootstrap secret.
+  if (!isSetupPassword(config.setupPassword)) {
+    throw new Error(
+      'createApp needs a setup password of 64 lowercase hexadecimal characters ' +
+        'generated from 32 random bytes.',
+    );
+  }
   // Enforced, not assumed: every compare below is a string compare against this
   // value, so a `https://host/` that slipped past `readConfig` (a direct caller,
   // a test) would fail each of them while reading as correct.
@@ -513,20 +529,31 @@ export function createApp(config: AppConfig): CreatedApp {
   // Not an issuer: a setup token remembers the Host that minted it, so a
   // revoked Host's outstanding tokens die with it.
   const setupTokens = new SetupTokenIssuer({ now });
+  // Deliberately global, not keyed by a caller-controlled or proxy-supplied
+  // address: this bounds work when the origin is public and sources rotate.
+  // Every POST spends before its body is read; a refusal creates no per-caller
+  // timer, map entry, or queue item.
+  const hostEnrollAttempts = new TokenBucket({
+    capacity: HOST_ENROLL_ATTEMPT_BURST,
+    refillIntervalMs: HOST_ENROLL_ATTEMPT_REFILL_MS,
+    now,
+  });
 
   const passwordOk = (provided: unknown): boolean =>
     typeof provided === 'string' && secretEquals(provided, config.setupPassword);
 
-  const credentialFailureDelayMs = config.credentialFailureDelayMs ?? CREDENTIAL_FAILURE_DELAY_MS;
+  const waitForEnrollmentFailure =
+    config.credentialFailureDelay ?? (() => delay(CREDENTIAL_FAILURE_DELAY_MS));
 
-  // One 401 shape and one delay, for the credentials whose rejection is worth
-  // slowing down: the setup password, an enroll token, a setup token, and a
-  // host token. NOT the session token — an in-memory `Map` lookup costs the
-  // server nothing, so a delay there would buy an attacker held connections
-  // rather than cost them anything — and not a failed assertion, which is
-  // expensive to produce in the first place.
-  async function credentialFailure(c: Context<AppEnv>, error: string): Promise<Response> {
-    await delay(credentialFailureDelayMs);
+  // Only Host enrollment delays a rejected credential. Its global admission
+  // bucket bounds these retained timers; random setup, Host, and session
+  // bearers answer immediately because delaying them only buys an attacker
+  // held requests and their 256-bit values are not online-guessable.
+  async function enrollmentCredentialFailure(
+    c: Context<AppEnv>,
+    error: string,
+  ): Promise<Response> {
+    await waitForEnrollmentFailure();
     return c.json({ error }, 401);
   }
 
@@ -556,10 +583,10 @@ export function createApp(config: AppConfig): CreatedApp {
     if (token !== undefined) {
       // The shared `UNAUTHORIZED_ERROR`: only a Host sends an enroll token, so
       // no Client recovery keys on it.
-      if (typeof token !== 'string') return credentialFailure(c, UNAUTHORIZED_ERROR);
+      if (typeof token !== 'string') return enrollmentCredentialFailure(c, UNAUTHORIZED_ERROR);
       return { token };
     }
-    if (!passwordOk(password)) return credentialFailure(c, BAD_PASSWORD_ERROR);
+    if (!passwordOk(password)) return enrollmentCredentialFailure(c, BAD_PASSWORD_ERROR);
     return { token: null };
   }
 
@@ -579,22 +606,21 @@ export function createApp(config: AppConfig): CreatedApp {
    * Either gate also re-checks that the minting Host is still enrolled, since a
    * revoked Host's outstanding tokens must die with it rather than stay
    * redeemable for the rest of their TTL. Absent, mistyped, unknown, expired,
-   * spent and revoked-minter are one delayed 401: none of them may tell a caller
+   * spent and revoked-minter are one 401: none of them may tell a caller
    * which one it hit.
    */
   async function readSetupGated<T extends { setupToken?: unknown }>(
     c: Context<AppEnv>,
     gate: 'peek' | 'consume',
   ): Promise<{ body: T; spent: SpentSetupToken | null } | Response> {
+    const invalid = () => c.json({ error: SETUP_TOKEN_INVALID_ERROR }, 401);
     const body = await readJson<T>(c);
     const token: unknown = body?.setupToken;
-    if (typeof token !== 'string') return credentialFailure(c, SETUP_TOKEN_INVALID_ERROR);
+    if (typeof token !== 'string') return invalid();
     const entry = gate === 'consume' ? setupTokens.consume(token) : setupTokens.peek(token);
-    if (!entry) return credentialFailure(c, SETUP_TOKEN_INVALID_ERROR);
+    if (!entry) return invalid();
     // Nothing is restored here: a revoked minter's token is dead, not unlucky.
-    if (!(await hostStore.has(entry.hostId))) {
-      return credentialFailure(c, SETUP_TOKEN_INVALID_ERROR);
-    }
+    if (!(await hostStore.has(entry.hostId))) return invalid();
     return { body: body as T, spent: gate === 'consume' ? { token, entry } : null };
   }
 
@@ -645,16 +671,18 @@ export function createApp(config: AppConfig): CreatedApp {
     return () => heartbeats.delete(entry);
   }
 
-  // The Host (standalone webview) and dev Pocket builds call the API from
-  // other origins, so preflights must succeed. Permissive CORS is safe here:
-  // every endpoint is gated by a credential — the setup password, a setup
-  // token, or a bearer token — and no cookies exist for a foreign origin to
-  // ride on.
-  app.use('/api/*', cors({ origin: '*', allowHeaders: ['Content-Type', 'Authorization'] }));
+  // Before bodyLimit on purpose: oversized and malformed requests spend from
+  // the same budget as a correct-looking guess. OPTIONS is not an attempt.
+  app.use(API_ROUTES.hostEnroll, async (c, next) => {
+    if (c.req.method !== 'POST') return next();
+    const retryAfterMs = hostEnrollAttempts.take();
+    if (retryAfterMs === null) return next();
+    c.header('Retry-After', String(Math.ceil(retryAfterMs / 1_000)));
+    return c.json({ error: 'too many enrollment attempts' }, 429);
+  });
 
-  // Staged after CORS so a 413 carries the headers a browser needs to read it,
-  // and before every route so no credential gate is reached by way of a body
-  // the process already buffered.
+  // Before every route so no credential gate is reached by way of a body the
+  // process already buffered.
   const smallBodies = bodyLimit({ maxSize: MAX_REQUEST_BODY_BYTES, onError: tooLarge });
   const sendBodies = bodyLimit({ maxSize: MAX_PUSH_SEND_BODY_BYTES, onError: tooLarge });
   app.use('*', (c, next) =>
@@ -861,20 +889,20 @@ export function createApp(config: AppConfig): CreatedApp {
       });
     } catch (err) {
       if (err instanceof EnrollmentCredentialRejected) {
-        return credentialFailure(c, UNAUTHORIZED_ERROR);
+        return enrollmentCredentialFailure(c, UNAUTHORIZED_ERROR);
       }
       if (err instanceof HostLimitReachedError) {
         // Reached only past a valid credential, so it pays the same delay as
         // every other refusal here, and it names the remedy: revocation is
         // hand-editing `hosts.json` (docs/specs/server.md -> Guardrails).
-        await delay(credentialFailureDelayMs);
+        await waitForEnrollmentFailure();
         return c.json({ error: `${err.message}; remove one from hosts.json first` }, 409);
       }
       if (err instanceof EnrollmentOfferNotInvalidated) {
         // Reached only after a valid bootstrap credential, so answering fast
         // would confirm it. Keep the same delay while retaining the operator-
         // visible 500: no Host was minted against an offer still on disk.
-        await delay(credentialFailureDelayMs);
+        await waitForEnrollmentFailure();
         return c.json({ error: 'could not invalidate the enroll token' }, 500);
       }
       throw err;
@@ -904,17 +932,11 @@ export function createApp(config: AppConfig): CreatedApp {
 
   // Gate a route on a valid `Authorization: Bearer` host token. Mirrors
   // `requireSession`, resolving through the constant-time `findByToken`.
-  //
-  // **Rejection pays the same delay the setup password does.** This gate is
-  // unauthenticated by definition and its lookup is the most expensive one on
-  // the server — a `readFile` + `JSON.parse` + two SHA-256 per row — so
-  // answering instantly made probing cheaper for the caller than for us.
-  // `findByToken` refuses a wrong-shaped token before the read; this covers the
-  // rest.
+  // Wrong-shaped values short-circuit before the store read.
   const requireHost: MiddlewareHandler<AppEnv> = async (c, next) => {
     const token = bearerToken(c);
     const host = token ? await hostStore.findByToken(token) : undefined;
-    if (!host) return credentialFailure(c, UNAUTHORIZED_ERROR);
+    if (!host) return c.json({ error: UNAUTHORIZED_ERROR }, 401);
     c.set('host', host);
     await next();
   };
@@ -1262,9 +1284,7 @@ export function createApp(config: AppConfig): CreatedApp {
     async (c, next) => {
       const token = c.req.query(WS_TOKEN_PARAM);
       const host = token ? await hostStore.findByToken(token) : undefined;
-      // The same delay `requireHost` pays: this is the other unauthenticated
-      // door onto the same expensive lookup.
-      if (!host) return credentialFailure(c, 'unknown host token');
+      if (!host) return c.json({ error: 'unknown host token' }, 401);
       c.set('host', host);
       return next();
     },

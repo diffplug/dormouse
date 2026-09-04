@@ -4,12 +4,12 @@ import assert from 'node:assert/strict';
 import { HELLO_ROUTE } from 'server-lib-common';
 
 import { createApp } from '../dist/app.js';
-import { freshApp } from './helpers.mjs';
+import { PASSWORD, freshApp } from './helpers.mjs';
 
 /**
  * `createApp` compares `config.origin` as a string — the WebAuthn
- * `clientData.origin` check, the CORS allowlist, the enrollment `origin` a Host
- * composes its QR from — so anything but a bare origin fails every one of them
+ * `clientData.origin` check and the enrollment `origin` a Host composes its QR
+ * from — so anything but a bare origin fails every one of them
  * while reading as correct. `readConfig` normalizes for the entrypoint; this is
  * the boundary refusing to be handed one that was not.
  */
@@ -28,9 +28,19 @@ test('createApp refuses an origin that is not already bare, or not http(s)', () 
     'ftp://dor.example.ts.net',
   ]) {
     assert.throws(
-      () => createApp({ setupPassword: 'pw', origin, stateDir: '/nonexistent' }),
+      () => createApp({ setupPassword: PASSWORD, origin, stateDir: '/nonexistent' }),
       /bare http\(s\) origin/,
       origin,
+    );
+  }
+});
+
+test('createApp refuses a setup password outside the canonical 32-byte hex shape', () => {
+  for (const setupPassword of ['word', 'a'.repeat(63), 'A'.repeat(64), 'g'.repeat(64)]) {
+    assert.throws(
+      () => createApp({ setupPassword, origin: 'http://localhost:3000', stateDir: '/nonexistent' }),
+      /64 lowercase hexadecimal characters/,
+      setupPassword,
     );
   }
 });

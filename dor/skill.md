@@ -23,13 +23,13 @@ The rest of this guide is how to do everything well.
 
 ## Targeting: three ways to name a surface
 
-Action commands (`read`, `send`, `kill`) take a surface handle — there is
+Action commands (`read`, `send`, `await`, `kill`) take a surface handle — there is
 deliberately no `dor kill "npm dev"`. You name the surface you want one of
 three ways:
 
-1. **Hold the handle.** Commands that create surfaces (`split`, `ensure`,
-   `iframe`) print the new ref (`created surface:3`). Capture it and act on
-   it directly — refs stay valid across any layout churn.
+1. **Hold the handle.** Commands that create surfaces (`split`, `ensure`)
+   print the new ref (`created surface:3`). Capture it and act on it
+   directly — refs stay valid across any layout churn.
 2. **Address by identity key.** Surfaces with a natural identity skip handle
    bookkeeping: `dor ensure -- <command>` uses its exact command + cwd as an
    implicit key (match-or-create in one idempotent call), and browser
@@ -139,6 +139,20 @@ dor read surface:3                       # visible screen, printed directly
 dor read surface:3 --scrollback --lines 200
 ```
 
+### `dor await` — wait for a terminal to finish
+
+```sh
+dor await surface:3 --until quiet
+dor await surface:3 --until exit --timeout 1800
+```
+
+Use `--until quiet` for agents that may stay alive after answering; it wakes
+when the terminal settles, its foreground command exits, or it rings. Use
+`--until exit` for builds, tests, and migrations that can fall silent before
+their command finishes. `await` prints the reason it woke, not the terminal
+text, so follow it with `dor read` when you need the result. Waiting absorbs
+the alert it receives because the program has handled it.
+
 ### `dor kill` — kill a surface (confirmation required)
 
 ```sh
@@ -158,6 +172,7 @@ so the user watches what you drive.
 
 ```sh
 dor ab open http://localhost:5173         # key "default"
+dor ab open surface:3                     # auto-detect that terminal's port
 dor ab --key server open http://localhost:3000
 dor ab click @e3                          # further args are agent-browser's own
 dor ab --key server reload
@@ -169,33 +184,23 @@ one surface, reused across commands. Use distinct keys when you need
 independent browsers at once.
 
 `--surface <handle>` drives whatever browser a handle names, so a ref from
-`dor list` works here exactly as it does for `read` / `send` / `kill`. Prefer
-it whenever you hold a ref rather than a key — it is the only way to reach a
-browser the *user* opened from the GUI, which has no key. It fails on a
+`dor list` works here exactly as it does for `read` / `send` / `await` / `kill`.
+Prefer it whenever you hold a ref rather than a key — it is the only way to
+reach a browser the *user* opened from the GUI, which has no key. It fails on a
 terminal (no browser), and on an `iframe`-rendered surface (nothing to drive —
-open it with `dor ab` instead). The three identity flags are mutually
-exclusive.
+open it with `dor ab` instead). The three identity flags are mutually exclusive.
 
 `dor ab` has no `--json` of its own; any JSON flags belong to `agent-browser`.
 
-### `dor iframe` — high-fidelity URL pane for the user
-
-```sh
-dor iframe http://localhost:6006     # absolute http(s) URL required
-```
-
-For *showing* a page to the human at full fidelity (no automation hooks).
-Provisional: some sites refuse framing. To *drive* a page, use `dor ab`.
-
 ## Recipes
 
-**Run a dev server and show it to the user.** Ensure it, find its port, open a
-browser on it:
+**Run a dev server and show it to the user.** Keep the surface handle from
+`ensure` and open a browser against it; Dormouse detects the server's port:
 
 ```sh
-dor ensure -- npm run dev
-dor list --command "npm run dev" --cwd . --ports   # read the port
-dor ab open http://localhost:<port>
+$ dor ensure -- npm run dev
+created surface:3  "npm run dev"
+$ dor ab open surface:3
 ```
 
 **Launch and drive a sub-agent** (another CLI agent in a sibling pane):
@@ -258,8 +263,8 @@ dor kill surface:N --confirm-if-read "npm run dev"
   -- <command>`, or a bare-terminal `dor split --`) never steal focus. Only a
   bare `dor split` with no `--` does — never run that in automation; use
   `dor split --` for an empty pane instead.
-- **Take refs from responses.** Capture the ref that `split`/`ensure`/`iframe`
-  print rather than re-listing and guessing.
+- **Take refs from responses.** Capture the ref that `split`/`ensure` print
+  rather than re-listing and guessing.
 - **`--command` is exact.** Match the command string you launched with,
   including its flags.
 - **Prefer `--confirm-if-read` over `--confirm-dangerously`** unless you have

@@ -305,11 +305,15 @@ describe('saveSession', () => {
 
   it('persists local browser surface TODO state in the browser pane alert field', async () => {
     const platform = createPlatform(null);
+    // A full live ActivityState, so the assertion below shows the projection
+    // dropping the fields `docs/specs/alert.md` -> Public State forbids on disk.
     terminalRegistryMocks.getActivity.mockReturnValue({
       status: 'WATCHING_DISABLED',
       watchingEnabled: false,
       todo: true,
       notification: null,
+      awaited: false,
+      ringSeq: 3,
     });
 
     await saveSession(platform, [
@@ -319,7 +323,6 @@ describe('saveSession', () => {
     const saved = vi.mocked(platform.saveState).mock.calls[0]![0] as PersistedSession;
     expect(saved.panes.find((p) => p.id === 'pane-web')!.alert).toEqual({
       status: 'WATCHING_DISABLED',
-      watchingEnabled: false,
       todo: true,
       notification: null,
     });

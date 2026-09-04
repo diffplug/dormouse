@@ -25,7 +25,7 @@ afterEach(() => {
 describe('Door spoken-alarm state', () => {
   it('inverts and animates the whole Door while its Session is speaking', () => {
     act(() => root.render(
-      <Door title="build-server" status="ALERT_RINGING" todo speechState="speaking" />,
+      <Door title="build-server" status="ALERT_RINGING" ringSeq={1} todo speechState="speaking" />,
     ));
 
     const door = container.querySelector<HTMLButtonElement>('[data-alert-speech-state="speaking"]');
@@ -38,7 +38,7 @@ describe('Door spoken-alarm state', () => {
 
   it('marks SPOKEN with a static inset ring rather than motion', () => {
     act(() => root.render(
-      <Door title="build-server" status="ALERT_RINGING" speechState="spoken" />,
+      <Door title="build-server" status="ALERT_RINGING" ringSeq={1} speechState="spoken" />,
     ));
 
     const door = container.querySelector<HTMLButtonElement>('[data-alert-speech-state="spoken"]');
@@ -55,7 +55,7 @@ describe('Door spoken-alarm state', () => {
    */
   it('keeps the bell and TODO pill visible while SPOKEN persists', () => {
     act(() => root.render(
-      <Door title="build-server" status="ALERT_RINGING" todo speechState="spoken" />,
+      <Door title="build-server" status="ALERT_RINGING" ringSeq={1} todo speechState="spoken" />,
     ));
 
     const door = container.querySelector<HTMLButtonElement>('[data-alert-speech-state="spoken"]');

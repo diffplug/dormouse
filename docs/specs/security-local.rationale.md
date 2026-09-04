@@ -46,7 +46,10 @@ downstream instead — exiting passthrough, selecting a pane, an `http:`/`https:
 only `browserSurfaceUrl` behind an open prompt, and a frame-URL reading that may
 lie. `use-wall-keyboard`'s leader channel accepts any live grant rather than one
 panel's, so a page in one browser pane can exit passthrough while another is
-focused.
+focused. The nested-frame relay preserves this boundary: it accepts only the
+same proxy origin and reconstructs one of the three pane-level shapes, so
+document-level locations, unrelated application messages, and every foreign
+origin stop at the child frame.
 
 Why "the standalone adapters" and not "the standalone webview". The Wall's two
 proxy-origin `message` listeners (`use-wall-keyboard.ts`, `IframePanel.tsx`) are
@@ -115,6 +118,13 @@ port two things the upstream had refused it: framing a document that answered `D
 and reading that document's live URL and anchor hrefs back cross-origin. No request
 header can tell that page apart from Dormouse's webview, which is why the replacement
 `frame-ancestors` has to name the embedder chain the webview supplied.
+
+**Why same-grant framing is an accepted relaxation.** Storybook and similar apps put
+same-origin documents in nested frames, which an app-only policy blocks. The extra
+`'self'` source also permits a proxy page loaded top-level to frame another document
+from that grant, but one grant is one origin and one fixed upstream: those documents
+already share same-origin authority. A foreign page still appears in the ancestor
+chain and fails the policy, and a different grant has a different origin.
 
 **Why the listener set is derived, not trusted.** An enumeration goes stale the moment
 someone adds a listener — the same failure mode that once left `.vscode/` owned by

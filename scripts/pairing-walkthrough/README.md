@@ -74,7 +74,7 @@ it.
 
 | # | Step | What happens |
 | --- | --- | --- |
-| 1 | `server` | `pnpm dev:pocket-server` with an isolated `DORMOUSE_STATE_DIR`, then waits for `:3000` to answer. |
+| 1 | `server` | `pnpm dev:server` with an isolated `DORMOUSE_STATE_DIR`, then waits for `:3000` to answer. |
 | 2 | `host` | `pnpm dev:standalone:ab` with `DORMOUSE_REMOTE_CONNECT_SRC` pointed at that Server, then waits for the app's first terminal. → `01-host-booted.png` |
 | 3 | `settings` | Clicks the baseboard's Settings button and scrolls to Remote control. → `02-settings-open.png` |
 | 4 | `enroll` | Types the server URL, the setup password and the machine name into the real form, submits, and waits for **Connected**. → `03-enroll-form.png`, `04-enrolled.png` |
@@ -109,7 +109,6 @@ to tap something there would have found a bug.
 | `--until <step>` | the scenario's last | Stop after this step. |
 | `--out <dir>` | `$TMPDIR/pairing-walkthrough/<timestamp>` | Run directory. |
 | `--skip-build` | off | Reuse `lib/dist-pocket` and `server/dist` instead of rebuilding them. Ignored (with a warning) when either is missing. |
-| `--password <pw>` | `walkthrough-hunter2` | `DORMOUSE_SETUP_PASSWORD` for the run. |
 | `--machine-name <n>` | `Walkthrough Mac` | The name the Host enrolls under. |
 | `--keep` | off | Leave everything running when the run ends — including a failed one, which is when poking by hand is most useful. Ctrl-C stops it. |
 
@@ -162,7 +161,9 @@ not healthier than one that has them.
 `summary.json` also carries what only a run can know: the decoded pairing URL
 and how much of its TTL was left, the round trip from Enter to the file the
 laptop's shell wrote (`terminal.roundTripMs`, ~220 ms here), the Enter-to-bell
-time, and the authenticator's `signCount` after each ceremony.
+time, and the authenticator's `signCount` after each ceremony. `options` holds
+what the run chose for itself, including the `password` it minted — which is
+what a `--keep` run is signed into by hand with.
 
 ## State isolation
 
@@ -195,6 +196,11 @@ Pocket browser's debugging port from 100 above the second of them.
 `localhost`, never `127.0.0.1` — WebAuthn's secure-context rule and the `rpId`
 the Server derives from its own origin
 ([`docs/specs/server.md`](../../docs/specs/server.md) → Running it).
+
+Every listener a run starts binds loopback only — the server is pinned with
+`DORMOUSE_BIND_HOST=127.0.0.1`, the Host bridge and both Chrome debugging ports
+already are, and a step that adds one holds to the same rule
+([`docs/specs/server.md`](../../docs/specs/server.md) → Configuration).
 
 ## Known limitations
 

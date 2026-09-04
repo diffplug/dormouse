@@ -11,9 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { createApp } from '../dist/app.js';
-
-const PASSWORD = 'correct horse battery staple';
-const ORIGIN = 'http://localhost:3000';
+import { ORIGIN, PASSWORD } from './fixtures.mjs';
 
 async function makePocketDir() {
   const dir = await mkdtemp(join(tmpdir(), 'dormouse-pocket-'));

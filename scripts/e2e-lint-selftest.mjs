@@ -3,9 +3,10 @@
  * Proves `e2e-lint.mjs` is load-bearing: for every rule, re-introduce exactly
  * the thing it forbids and require the lint to fail.
  *
- * Why this exists, and why it is the inverse of `deploy-lint-selftest.mjs`: the
- * installer lint checks that controls are *present*, so removing one is the
- * test. Every rule here checks that something is *absent*, and the
+ * Why this exists: `deploy-lint-selftest.mjs` is mostly the other direction —
+ * the installer lint mostly checks that controls are *present*, so removing one
+ * is the test there (its one `forbidden` rule mutates this way instead). Every
+ * rule here checks that something is *absent*, and the
  * characteristic failure of an absence check is passing because the pattern
  * cannot see the thing it names — a regex anchored on a spelling nobody uses, a
  * scope that resolves to no files, a spec phrase that drifted. A green

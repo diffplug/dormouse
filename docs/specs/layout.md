@@ -91,13 +91,13 @@ A ResizeObserver picks one of three tiers by header width:
 
 ## Baseboard
 
-The baseboard (`h-7`, 28px) sits below the content area, visible by default, with no top divider. The content area ends 2px above it, leaving a theme-colored gap that keeps rounded pane corners distinct; its horizontal padding matches the content wrapper's 7px inset, so doors align with the panes above. With no doors and more than 350px of width it shows a platform-aware shortcut hint — `LCmd → RCmd to enter command mode` on macOS, `LShift → RShift to enter command mode` elsewhere.
+The baseboard (`h-7`, 28px) sits below content, visible by default, with no top divider. A 2px theme-colored gap preserves pane corners; 7px horizontal padding aligns doors with panes. With no doors above 350px wide, it shows `LCmd → RCmd to enter command mode` on macOS and `LShift → RShift to enter command mode` elsewhere.
 
 `Wall showBaseboard={false}` serves an embedder with no door/minimize workflow: no strip, the content wrapper's bottom inset grown from 2px to 7px, a baseboard drop a no-op. **It is a seam, not a shipped configuration** — no production host passes it (rationale), so the app shell always has a baseboard.
 
 The far right is one right-aligned flex cluster: the `N more →` overflow arrow, the host-supplied `notice` slot (standalone puts the update banner there), then three always-present 24px **Settings** controls — 16px speaker/slashed-speaker for spoken alarms, 16px ringing-bell/slashed-bell for push notifications, 16px sliders for the dialog itself. **Shape and accessible text both carry each state**, so status never relies on color. All three open the same app-global Settings dialog (`docs/specs/alert.md` → Alarm settings); **the status controls never toggle settings directly**. Every baseboard-level button shares one class constant in `Baseboard.tsx`.
 
-A minimized session becomes a **door**, showing the pane header's derived label plus the alert/TODO/speech badge cluster (`docs/specs/alert.md` → Door owns which badge shows when; both speech states also name themselves in the Door's `title` and accessible name). A Door uses the window's bottom edge as its bottom border, with left, top, and right borders taking the shared terminal top radius from `lib/src/components/design.tsx` — a mouse hole matching pane rounding. Dimensions: `min-w-[68px] max-w-[220px] h-6`.
+A minimized session becomes a **door**, showing its label plus the alert/TODO/speech badge cluster (`docs/specs/alert.md` → Door owns which badge shows when; both speech states also name themselves in the Door's `title` and accessible name). **A Door's label is header-derived only for a terminal-backed Surface** (`hasTerminal`); any other keeps its stored title, and a browser Door adds the display glyphs from `docs/specs/dor-browser.md` → "Browser Chrome". A Door uses the window's bottom edge as its bottom border, with left, top, and right borders taking the shared terminal top radius from `lib/src/components/design.tsx` — a mouse hole matching pane rounding. Dimensions: `min-w-[68px] max-w-[220px] h-6`.
 
 ### Door interaction
 
@@ -183,7 +183,7 @@ A fixed-positioned element on top of the Lath host, covering the active element'
 
 - **Exactly one pane or door is active at a time**, drawn by one SVG renderer (`SelectionRing`, `variant: 'ants' | 'solid'`).
 - **Passthrough:** `variant='solid'` — a 1px solid SVG stroke, centerline `strokeWidth/2` inside the div edge for panes and doors alike, no glow (rationale).
-- **Command:** `variant='ants'` — animated marching-ants border (`cfg.marchingAnts`: 10px segment, 60% dash / 40% gap, 0.4s cycle, 2px stroke), unchanged while the ring travels; the motion smear is a separate layer behind it ([Ring travel](#ring-travel)). The animation pauses while the window is unfocused, and the whole ring drops to `saturate(0.3)` then.
+- **Command:** `variant='ants'` — marching-ants border (`cfg.marchingAnts`: 10px segment, 60% dash, four 0.4s cycles, 2px stroke). **Run the burst on command entry or identity change, then hold still** (test: `starts a finite burst on command entry and remounts the outline on a selection change` in `lib/src/components/wall/WorkspaceSelectionOverlay.test.tsx`; rationale). Keep it unchanged during travel and draw the smear separately ([Ring travel](#ring-travel)). **While unfocused, pause it and apply `saturate(0.3)` to the ring.**
 - Border radius follows DESIGN.md's Concentric-Corners Rule: the pane ring's radius is the pane radius plus the inflate (`PANE_SELECTION_RING_RADIUS_PX`), with the marching-ants path inset so its stroke centerline sits on the same gutter midline; doors sit at zero offset and keep `0.5rem 0.5rem 0 0`.
 - Color is the resolved `--color-focus-ring`, **re-read whenever `document.body`'s class/style changes**, because the dynamic palette publishes it there (`useFocusRingColor`).
 - `z-index: 50`, `pointer-events: none`.
@@ -192,7 +192,7 @@ A fixed-positioned element on top of the Lath host, covering the active element'
 
 The ring's rect (and its `{tl,tr,br,bl,inset}` shape) is driven **per-frame by a JS tween, never a CSS transition**; DESIGN.md's ban on animating layout properties does not reach it (rationale). Motion is `FOCUS_MOTION_MS` (220ms — half `LATH_MOTION_MS`) on the house curve `cubic-bezier(0.22, 1, 0.36, 1)`.
 
-Per-frame writes are **imperative**: `SelectionRing` renders a stable shell once (per variant/color/focus change) and lifts its DOM nodes back to the overlay via refs; the rAF loop writes rect, path `d`, marching-ants dash, and every smear piece's `d`/width/opacity directly, then **re-applies once after any structural render, pre-paint**, so a freshly mounted ring never flashes. **Never reintroduce per-frame React state** — reconciling this subtree every frame competes with the travel for the frame budget (rationale).
+Per-frame writes are **imperative**: `SelectionRing` gives the overlay refs to its stable shell; the rAF loop writes rect, path `d`, marching dash, and smear geometry, then **re-applies after structural renders, pre-paint**, so fresh nodes do not flash. **Never reintroduce per-frame React state** — reconciling this subtree competes with travel for the frame budget (rationale).
 
 - **Identity change → tween.** A measurement whose identity (`${selectedType}:${selectedId}`) differs from the one on screen glides from the current interpolated position to the new target, **clock restarted**, so arrow-key spam stays responsive.
 - **Same identity → snap 1:1.** A same-identity re-measure with no tween in flight (sash drag, window resize, a settled leaf's store commit) writes the new rect directly, tracking the geometry exactly instead of easing behind it.

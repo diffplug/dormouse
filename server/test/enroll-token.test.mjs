@@ -14,7 +14,7 @@ import { dirname, join } from 'node:path';
 import { API_ROUTES, UNAUTHORIZED_ERROR } from 'server-lib-common';
 
 import { redeemEnrollToken } from '../dist/enroll-token.js';
-import { ORIGIN, PASSWORD, RP_ID, freshApp, post } from './helpers.mjs';
+import { ORIGIN, PASSWORD, RP_ID, freshApp, post, sleep } from './helpers.mjs';
 
 const TOKEN = 'a1b2c3d4'.repeat(8);
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -130,14 +130,15 @@ const CANNOT_DENY_UNLINK = {
       : false,
 };
 
-// The one test that measures the credential-failure delay, so it injects a
-// value big enough to see and small enough to pay: the constant's real 250ms is
-// a policy choice, and asserting it here would only buy sleep.
+// The one test that measures the credential-failure delay, so it injects a wait
+// big enough to see and small enough to pay: the constant's real 250ms is a
+// policy choice, and asserting it here would only buy sleep.
 const MEASURABLE_DELAY_MS = 60;
+const measurableDelay = () => sleep(MEASURABLE_DELAY_MS);
 
 test('a token that cannot be invalidated is not redeemed', CANNOT_DENY_UNLINK, async () => {
   const { app, enrollTokenFile, stateDir } = await appWithOffer(offer(), {
-    credentialFailureDelayMs: MEASURABLE_DELAY_MS,
+    credentialFailureDelay: measurableDelay,
   });
   await chmod(dirname(enrollTokenFile), 0o500);
   try {

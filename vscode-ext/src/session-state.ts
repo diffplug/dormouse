@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as ptyManager from './pty-manager';
 import type { AlertState } from '../../lib/src/lib/alert-manager';
-import { browserPersistedPane, readPersistedSession, type PersistedAlertState, type PersistedPane, type PersistedSession } from '../../lib/src/lib/session-types';
+import { browserPersistedPane, readPersistedSession, toPersistedAlertState, type PersistedAlertState, type PersistedPane, type PersistedSession } from '../../lib/src/lib/session-types';
 import { detectResumeCommand } from '../../lib/src/lib/resume-patterns';
 import { stripTerminalControls } from '../../lib/src/lib/terminal-controls';
 import { log } from './log';
@@ -20,12 +20,8 @@ export function saveSessionState(context: vscode.ExtensionContext, state: unknow
 }
 
 function toPersistedAlert(alert: AlertState | undefined, fallback: PersistedAlertState | null | undefined): PersistedAlertState | null {
-  if (!alert) return fallback ?? null;
-  return {
-    status: alert.status,
-    todo: alert.todo,
-    notification: alert.notification,
-  };
+  const current = alert ?? fallback;
+  return current ? toPersistedAlertState(current) : null;
 }
 
 /**
@@ -64,7 +60,7 @@ export async function refreshSavedSessionStateFromPtys(
     saved.panes.map(async (pane) => {
       if (pane.surfaceType === 'browser') {
         log.info(`[session] ${pane.id}: browser surface, skipping PTY refresh`);
-        return browserPersistedPane(pane, pane.alert ?? null);
+        return browserPersistedPane(pane, toPersistedAlert(undefined, pane.alert));
       }
 
       const alert = toPersistedAlert(alertStates?.get(pane.id), pane.alert);

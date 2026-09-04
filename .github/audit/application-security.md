@@ -24,8 +24,8 @@ in one and quietly absent from another is a finding.
 
 The end-to-end boundary is where the depth goes. Its modules are
 `server-lib-common/src/security/noise.ts`, `noise-transport.ts`,
-`e2e-ceremony.ts`, `e2e-bounds.ts`, `push-seal.ts`, `pairing-invitation.ts`,
-`presence.ts` and `acl.ts`;
+`e2e-ceremony.ts`, `e2e-bounds.ts`, `token-bucket.ts`, `push-seal.ts`,
+`pairing-invitation.ts`, `presence.ts` and `acl.ts`;
 `server-lib-common/src/remote/wire.ts` (the frame shapes and their guards);
 `lib/src/remote/host/remote-host.ts` (both ceremonies, every Host bound);
 `lib/src/remote/host/push-delivery.ts`; `lib/src/remote/client/pocket-client.ts`
@@ -55,6 +55,14 @@ browser pane, or another local account, never the network.
 
 Be adversarial, and go past the `FAIL IF` list. Ask specifically:
 
+- **Would public Funnel exposure change any security conclusion?** Assume the
+  entire HTTPS origin is reachable from the public internet; reliance on a
+  source IP, tailnet membership, or Funnel being off is a finding. Hunt for what
+  the `FAIL IF` pass cannot name: an unauthenticated caller that grows a durable
+  collection, retains a timer or socket, or amplifies a request. Then trace what
+  a stolen bootstrap credential grants — no Client reaches a terminal without
+  approval on that Host. Availability is out of scope; attacker-grown retained
+  state is not.
 - Can anything reach a Host's ACL without a human approving on that Host? Trace
   every writer — including the ACL read filter, anything that rehydrates a
   record from disk, and what a compromised webview or a compromised Server could
@@ -105,6 +113,15 @@ Be adversarial, and go past the `FAIL IF` list. Ask specifically:
 - Where does untrusted input enter — relay frames, push endpoints, terminal
   bytes, notification text, state files read back from disk — and what happens
   on a malformed, oversized, or hostile value?
+- Does the iframe proxy replace framing controls with exactly `'self'` plus the
+  fully validated app ancestor chain, and only when that chain is usable? Treat
+  `'self'` as the explicit same-grant nesting relaxation: confirm each grant is
+  one origin bound to one upstream, no wildcard or foreign source is admitted,
+  and the no-chain path preserves the upstream controls and injects no shim.
+  Trace nested shim messages too: each hop must accept only its proxy origin,
+  reconstruct and relay only the registered pane-level shapes, never relay a
+  nested document's location, and target only that origin plus the validated
+  app origin—never a wildcard or foreign origin.
 - Does the shipped code still match what the specs and this section claim? Spec
   drift is a finding; say which side is wrong. The newest sections are the ones
   most likely to have drifted: `remote-security-model.md`'s Presence proofs,

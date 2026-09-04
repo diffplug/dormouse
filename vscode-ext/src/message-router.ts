@@ -451,16 +451,7 @@ export function attachRouter(
 
     const removeAlertListener = alertManager.onStateChange((id, state) => {
       if (!ownedPtyIds.has(id)) return;
-      post({
-        type: 'alert:state',
-        id,
-        status: state.status,
-        watchingEnabled: state.watchingEnabled,
-        todo: state.todo,
-        notification: state.notification,
-        attentionDismissedRing: state.attentionDismissedRing,
-        awaited: state.awaited,
-      } satisfies ExtensionMessage);
+      post({ type: 'alert:state', id, ...state } satisfies ExtensionMessage);
       notifyUnion();
     });
 
@@ -768,16 +759,7 @@ export function attachRouter(
         for (const [id] of reconnectable) {
           const alertState = alertManager.getState(id);
           log.info(`[alert-reconnect] ${id}: sending ${alertState.status} (todo=${alertState.todo})`);
-          post({
-            type: 'alert:state',
-            id,
-            status: alertState.status,
-            watchingEnabled: alertState.watchingEnabled,
-            todo: alertState.todo,
-            notification: alertState.notification,
-            attentionDismissedRing: alertState.attentionDismissedRing,
-            awaited: alertState.awaited,
-          } satisfies ExtensionMessage);
+          post({ type: 'alert:state', id, ...alertState } satisfies ExtensionMessage);
         }
         break;
       }

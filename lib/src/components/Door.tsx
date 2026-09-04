@@ -1,9 +1,12 @@
 import { type PointerEvent as ReactPointerEvent } from 'react';
 import { clsx } from 'clsx';
-import { BellIcon, SpeakerHighIcon } from '@phosphor-icons/react';
+import { SpeakerHighIcon } from '@phosphor-icons/react';
 import type { AlertSpeechState, SessionStatus, TodoState } from '../lib/terminal-registry';
+import type { BrowserDisplayMode } from './wall/agent-browser-screen';
+import { BROWSER_DISPLAY_LABEL, BrowserDisplayIcon } from './wall/BrowserDisplayIcon';
 import { useTodoPillContent } from './TodoPillBody';
-import { alertSpeakingAnimationClass, bellIconClass } from './bell-icon-class';
+import { alertSpeakingAnimationClass } from './bell-icon-class';
+import { AlertBell } from './AlertBell';
 import {
   ALERT_SPEECH_TRACKING_CLASS,
   TERMINAL_TOP_RADIUS_CLASS,
@@ -13,7 +16,13 @@ import {
 export interface DoorProps {
   doorId?: string;
   title: string;
+  /** A browser Surface's display identity (`docs/specs/dor-browser.md` -> Browser
+   *  Chrome). Door draws the glyph pair and names it, so the visible and
+   *  accessible meanings cannot drift apart. */
+  browserDisplay?: BrowserDisplayMode;
   status?: SessionStatus;
+  /** `ActivityState.ringSeq`; a change replays the ringing burst. */
+  ringSeq: number;
   todo?: TodoState;
   speechState?: AlertSpeechState;
   onClick?: () => void;
@@ -27,7 +36,9 @@ export interface DoorProps {
 export function Door({
   doorId,
   title,
+  browserDisplay,
   status = 'WATCHING_DISABLED',
+  ringSeq,
   todo = false,
   speechState,
   onClick,
@@ -38,6 +49,8 @@ export function Door({
   const todoPill = useTodoPillContent(todo);
   const speaking = speechState === 'speaking';
   const spoken = speechState === 'spoken';
+  const detail = browserDisplay ? BROWSER_DISPLAY_LABEL[browserDisplay] : undefined;
+  const nameParts = [title, detail, speechState].filter(Boolean);
 
   const onPointerDown = onDragPress
     ? (e: ReactPointerEvent<HTMLButtonElement>): void => {
@@ -60,10 +73,11 @@ export function Door({
       )}
       onClick={onClick}
       onPointerDown={onPointerDown}
-      title={speechState ? `${title} — ${speechState}` : title}
-      aria-label={speechState ? `${title}, ${speechState}` : undefined}
+      title={nameParts.join(' — ')}
+      aria-label={detail || speechState ? nameParts.join(', ') : undefined}
       data-alert-speech-state={speechState}
     >
+      {browserDisplay && <BrowserDisplayIcon mode={browserDisplay} size={12} />}
       <span className="min-w-0 flex-1 truncate">
         {title}
       </span>
@@ -89,7 +103,7 @@ export function Door({
           )}
           {showBell && (
             <span className={alertRinging ? 'text-alarm-vs-door' : ''}>
-              <BellIcon size={11} weight="fill" className={bellIconClass(status)} />
+              <AlertBell status={status} ringSeq={ringSeq} size={11} />
             </span>
           )}
         </span>

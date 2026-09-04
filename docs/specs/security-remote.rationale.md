@@ -134,11 +134,26 @@ has to be a failure rather than a pass.
 
 ## The setup password
 
-**Why `cors({ origin: '*' })` is acceptable.** There are no cookies — every credential
-is a header or a body field — so no cookies exist for a foreign origin to ride on, and
-CSRF is not the exposure. What it does mean is that the guessing surface is not limited
-to something reachable only by a deliberate client, which is why the tailnet-only
-origin is load-bearing.
+**Why the admission bucket is global.** An IP-keyed limiter would make the reverse
+proxy's forwarding policy part of authentication and lets a distributed caller buy one
+burst per address. One allocation-free bucket keeps the bound independent of network
+topology. It gates only rare Host enrollment, so an exhausted bucket cannot interrupt
+an enrolled Host, a signed-in phone, or an existing relay session.
+
+## Cross-origin access
+
+**What the old permissive grant rested on, and why it went.** `cors({ origin: '*' })`
+was safe against CSRF — every credential is a header or body field, so no cookie
+existed for a foreign origin to ride — but it left the guessing surface reachable from
+any page in any browser rather than from a deliberate client, which the tailnet-only
+origin was silently covering. The compatibility it bought was already stale: the
+standalone webview's enrollment moved to the Node host service, and dev Pocket builds
+are served from the same origin as the API.
+
+**Why the cookie clause travels with the grant.** Either one alone is recoverable and
+the pair is not: a cookie with no grant still rides a cross-site POST, and a grant with
+no cookie still lets a foreign page read what a stolen bearer provokes. Auditing them
+apart is how a future route reintroduces one on the reasoning that the other is absent.
 
 ## Network posture (self-hosted)
 
@@ -150,21 +165,17 @@ by an unrelated occurrence, one of them the entropy guard's own explanatory comm
 whole credential posture is that account owning the files; an elevated run would write
 them owned by another principal and register the service for it.
 
-**Why the Funnel check is node-scoped.** Any Funnel on the node that fronts this server
-is a thing to look at, and parsing a mapping out of CLI prose would fail open the day
-the wording changes — so the blunter test is the deliberate choice.
-
-**Why a nonzero exit status is its own verdict.** A Tailscale CLI that is absent,
-unauthenticated, or too old for `funnel status` produces output that matches nothing,
-which is indistinguishable from a node with no Funnel until the exit status is
-consulted. Discarding it with `2>/dev/null || true` would report `off`.
+**Why Funnel is not a health verdict.** Tailnet privacy is useful defense in depth, but
+making it load-bearing left the setup endpoint safe only while a separate CLI reported
+the intended configuration. Auditing the credential, admission, browser, and
+Host-authorization boundaries directly makes accidental public exposure fail safe.
 
 **Why `grep -q` and `head -1` are banned on these decisions.** The installers and
 `manage` run under `set -o pipefail`; `grep -q` exits at the first match, and the
 writer's SIGPIPE makes the pipeline 141, which an `if` reads as "no match" and an
-assignment turns into an abort. Past the pipe buffer that reported a live Funnel as
-off, an off-loopback bind as loopback-only, and — the one that mutates rather than
-reports — a `serve status` carrying a foreign root mapping as no conflict at all, so
+assignment turns into an abort. Past the pipe buffer that reported an off-loopback bind
+as loopback-only and — the one that mutates rather than reports — a `serve status`
+carrying a foreign root mapping as no conflict at all, so
 the `confirm` guarding the operator's existing Serve config never ran.
 
 **Why the Serve checks are scoped to the root line with the port right-bounded.** `/api`
@@ -184,7 +195,7 @@ helper the moment the failing assignment is its last command or a caller invokes
 outside `$( )`.
 
 **Why enforcement splits between two scripts.** Only
-`scripts/installer-verify-test.mjs` runs installer code, so reverting `funnel_state`,
+`scripts/installer-verify-test.mjs` runs installer code, so reverting
 `has_off_loopback` or `serve_state` to a pipe goes red there; it cannot see
 `serve_proxies_root`'s `<<<`, which only `scripts/deploy-lint.mjs`'s pattern holds.
 That lint also counts the decisions consulting these helpers, since a helper whose

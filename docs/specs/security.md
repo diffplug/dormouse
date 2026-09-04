@@ -17,7 +17,8 @@ accept input from any page in the user's browser, a boundary precisely because
 it does not look like one.
 
 **Only the self-hosted deployment ships.** The relay runs on hardware the user
-owns, reachable from their own tailnet ([SELF_HOST.md](../../SELF_HOST.md)).
+owns and is private to their tailnet by default, but its application boundary
+assumes the HTTPS origin is public ([SELF_HOST.md](../../SELF_HOST.md)).
 **Nothing about remote control applies to a Host that never enrolls with a
 server**: enrollment is where the relay, the phone, and push begin.
 Cloud-hosted operation is staged, and its boundary is re-analyzed before that
@@ -44,7 +45,7 @@ last column means nothing cheaper does.
 | **A hostile relay cannot exhaust a Host.** Every bound runs on the Host's own clock, and a rejected frame costs it nothing. | [Host bounds](./remote-security-model.md#host-bounds) | `lib/src/remote/host/remote-host-bounds.test.ts`, `server/test/malicious-relay.test.mjs` |
 | **A Host talks only to the relay its build was pointed at**, and refuses before any credential leaves the machine. | [Where a Host may reach a relay server](./security-remote.md#where-a-host-may-reach-a-relay-server) | `lib/src/host/remote/connect-src.test.ts` |
 | **Credentials at rest are readable only by the account that installed them**, on macOS, Windows, and Linux alike. | [Credentials at rest](./security-remote.md#credentials-at-rest) | `scripts/deploy-lint.mjs` |
-| **The self-host server listens on loopback only, behind the tailnet**, and a public Funnel fails its own verification. | [Network posture](./security-remote.md#network-posture-self-hosted) | `scripts/deploy-lint.mjs`, `scripts/installer-verify-test.mjs` |
+| **The self-host HTTPS origin may be public; its plaintext backend may not.** Setup credentials are generated 256-bit values, Host enrollment is globally admission-limited, cross-origin browsers receive no grant, and terminal access still needs local Host approval. | [The setup password](./security-remote.md#the-setup-password), [Cross-origin access](./security-remote.md#cross-origin-access), [Network posture](./security-remote.md#network-posture-self-hosted) | `server/test/config.test.mjs`, `server/test/app.test.mjs`, `server/test/token-bucket.test.mjs`, `server/test/cors.test.mjs`, `scripts/deploy-lint.mjs` |
 | **Push, when enabled, cannot be aimed back into the tailnet.** | [What crosses the boundary](./security-remote.md#what-crosses-the-boundary) | `server/test/push-endpoint.test.mjs` |
 | **Every dependency that reaches a machine is disclosed** at [dormouse.sh/supply-chain](https://dormouse.sh/supply-chain), and a change without the disclosure fails CI. | [Disclosure](./security-supply-chain.md#disclosure) | `.github/workflows/ci.yml` |
 | **The bundled runtime is the version disclosed.** The build verifies the binary against the pin. | [Bundled runtime](./security-supply-chain.md#bundled-runtime) | `standalone/src-tauri/build.rs` |
@@ -85,11 +86,6 @@ run this knows what they are taking on.
   ([Client static loss](./remote-security-model.md#client-static-loss)).
 - **Availability.** The relay is down whenever the laptop is
   ([Goals](./remote-security-model.md#goals); [keeping it up](../../SELF_HOST.md#keeping-the-relay-up-while-the-laptop-sleeps)).
-- **The setup password's hardening is minimal**: a constant-time comparison and
-  a fixed delay, with no rate limit or lockout. Accepted because the origin is
-  tailnet-only and the password is 32 random bytes the installer wrote. **A
-  self-host origin reachable from the internet is a different risk than the one
-  analyzed** ([The setup password](./security-remote.md#the-setup-password)).
 - **The bot's upstream is pinned by tag, not commit**, so a hostile upstream
   could change what the bot runs without a diff here. Accepted: the trust equals
   what the harness already holds ([Automated Maintainer](./security-ci.md#automated-maintainer-tend)).

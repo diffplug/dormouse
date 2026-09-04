@@ -97,7 +97,8 @@ per-Host statics are the exception that needs no file protection: non-extractabl
 - **FAIL IF** `server/src/state.ts` stops creating `$DORMOUSE_STATE_DIR` mode `0o700`, or stops writing every file through `writeAtomic` at mode `0o600`. The "every file" clause is a negative search over `server/src/`: no `writeFile`, `appendFile`, or `createWriteStream` may target the state directory outside `writeAtomic`. A cheap default, not a cross-platform guarantee; the installer's directory permissions below protect the installed server's state (rationale).
 - **FAIL IF** `FileHostStateStore` (`lib/src/host/remote/host-state-store.ts`) stops creating its directory `0o700` and writing `0o600` on non-Windows platforms, or if `VsCodeHostStateStore` stops keeping the **enrollment** in `SecretStorage`. The ACL's home in `globalState` is deliberate and is not a finding; the enrollment's is what carries `hostToken`.
 - **FAIL IF** `remote_host_state_dir` in `standalone/src-tauri/src/lib.rs` stops calling `restrict_to_owner` on the state directory **before** spawning the sidecar — on Windows those Node modes are no-ops and Node cannot set an ACL, so the guarantee is held one layer down. That call carries both legs: a newly written enrollment file *inherits* the owner-only entry, and one a prior version already left under the `%LOCALAPPDATA%` ACL — with a live `hostToken` in it — has that entry *propagated* onto it, the half `restrict_to_owner_leaves_one_owner_only_ace` covers with its pre-existing `before.json`.
-- **FAIL IF** any installer stops generating the setup password locally from at least 32 bytes of a cryptographic RNG — `/dev/urandom` in `deploy/local/install-macos.sh`, `RandomNumberGenerator` in `deploy/local/install-windows.ps1`, and the staged release runtime's `crypto.randomBytes(32)` (OpenSSL `RAND_bytes`) in `deploy/local/install-linux.sh` — one named CSPRNG per installer, never `$RANDOM`, a timestamp, or any other non-CSPRNG source. All three length guards are in hex characters, so each must require 64, not 32 (rationale).
+- **FAIL IF** any installer stops generating the setup password from 32 local CSPRNG bytes: `/dev/urandom` on macOS, `RandomNumberGenerator` on Windows, and the release runtime's `crypto.randomBytes(32)` on Linux. Each hex-length guard requires 64, not 32 (rationale).
+- **FAIL IF** `readConfig` or `createApp` accepts anything but 64 lowercase hex characters as the setup password; pinned by `server/test/config.test.mjs` and `server/test/app.test.mjs`.
 - **FAIL IF** any installer stops making `config/`, `state/`, and `config/server.env` reachable only by the installing user — the effective property `manage verify` tests: no principal other than that user may appear in the effective permissions. macOS and Linux achieve it with `0700`/`0600` under `umask 077`; Windows with a DACL protected from inheritance carrying exactly one ACE, which is how `Protect-Path` does it today but is not itself the invariant — a path that inherits that single ACE from an already-locked parent satisfies the property, and `Test-OwnerOnly` deliberately accepts it. The Windows and Linux installers must also create `server.env` and lock it — the DACL on Windows, `chmod 0600` on an empty file on Linux — *before* the password is written (rationale).
 - **FAIL IF** `manage verify` stops asserting **both** legs of the unix property — mode **and** owner — on `config/`, `state/`, `run/`, `config/server.env`, and, while it is there, the enrollment offer; a `0700` directory owned by another principal satisfies the mode and inverts the property. Linux does. **Two known gaps, in those installers rather than accepted limits:** macOS checks the modes only and not yet the owner, on every one of those paths, and Windows `Test-OwnerOnly` reads the DACL and never `$acl.Owner`, so a path another principal owns passes while that owner keeps implicit `WRITE_DAC` over it.
 - **FAIL IF** `manage verify` stops walking the files inside `state/` on Windows, where `server/src/state.ts`'s `0o600` is a no-op and they are covered by what they inherit from the directory. An enumeration that fails fails verify, because that walk is the only thing holding the property there (rationale).
@@ -114,21 +115,24 @@ per-Host statics are the exception that needs no file protection: non-extractabl
 only endpoint, but an enrolled Host mints setup tokens and a setup token registers an
 owner passkey, so the account is one step behind it rather than beside it.
 
-**Its hardening is minimal and is accepted, not overlooked.** A constant-time
-comparison and a fixed failure delay are the whole of it: no rate limit, no lockout, no
-attempt counter, no expiry or rotation after setup completes. `/api/*` also carries
-`cors({ origin: '*' })`, so any web page open in any browser on the tailnet can drive
-those routes and read the responses — safe from CSRF, since there are no cookies, but
-the guessing surface is not limited to a deliberate client (rationale).
+**Online guessing is bounded without trusting network identity.** Both config
+boundaries require the installer credential's 64-character lowercase-hex shape. Every
+Host-enrollment POST then spends from one process-global bucket before its body is
+read, answering 429 with `Retry-After` when empty ([server.md](./server.md#http-api)
+holds the burst and refill). The comparison is constant-time and a rejected credential
+pays a fixed delay (rationale).
 
-**Accepted because** the origin is tailnet-only, the password is 32 bytes of
-`/dev/urandom` written by the installer rather than chosen by a human, and the layer it
-protects still cannot reach a Host without local approval. Two consequences: **the
-tailnet is doing real work here**, and a self-host origin that becomes
-internet-reachable is a materially different risk than the one analyzed.
+- **FAIL IF** the setup password comparison stops being constant-time, its rate-limited rejection loses the fixed delay, or a random setup/Host bearer rejection gains that delay and lets public traffic retain requests. `secretEquals` in `server/src/secrets.ts` compares SHA-256 digests with `timingSafeEqual`; `CREDENTIAL_FAILURE_DELAY_MS` in `server/src/app.ts` is the 250 ms, and `server/test/hosts.test.mjs` pins which rejections pay it.
+- **FAIL IF** `POST /api/host/enroll` stops spending from one process-global `TokenBucket` before body parsing, admits more than `HOST_ENROLL_ATTEMPT_BURST` at once, refills faster than one per `HOST_ENROLL_ATTEMPT_REFILL_MS`, or allocates state per caller. Every POST counts; OPTIONS does not. `server/test/token-bucket.test.mjs` pins ordering, concurrency and 429 `Retry-After`; `server-lib-common/test/token-bucket.test.mjs` pins the refill arithmetic the Host's crypto budget shares.
 
-- **FAIL IF** the setup password comparison stops being constant-time or loses its fixed failure delay. The halves live apart: `secretEquals` in `server/src/secrets.ts` compares SHA-256 digests with `timingSafeEqual`, and `CREDENTIAL_FAILURE_DELAY_MS` in `server/src/app.ts` is the fixed 250 ms every rejected credential costs.
-- **FAIL IF** the permissive CORS policy is widened beyond `/api/*`, or if any endpoint begins accepting credentials via cookies — "no cookies exist for a foreign origin to ride on" is the whole basis for `origin: '*'` being acceptable.
+### Cross-origin access
+
+**No browser origin but the configured one may drive the API.** Pocket is served
+with the API at that origin and calls it with relative URLs; a Host's HTTP client runs
+in its Node service, not a webview. No supported caller is a cross-origin browser, so
+a grant would widen the guessing surface and buy no compatibility (rationale).
+
+- **FAIL IF** the Server installs CORS middleware, emits `Access-Control-Allow-Origin`, or accepts authentication from a cookie — the two clauses hold each other up (rationale). Pinned by `server/test/cors.test.mjs`.
 
 ### Network posture (self-hosted)
 
@@ -148,21 +152,25 @@ follow, the same on all three:
 - **The server always speaks plain HTTP, so the listen interface *is* a security boundary when the TLS proxy is local.** An unbound socket publishes the plaintext port to the LAN and to the tailnet itself, so the install pins `DORMOUSE_BIND_HOST=127.0.0.1` and refuses to proceed without it.
 - **`DORMOUSE_ORIGIN` is durable WebAuthn identity.** Rewriting it silently invalidates the registered passkey and every enrolled Host, so the installer stops rather than rewriting a mismatch.
 
-**Tailscale is network-layer defense-in-depth *under* the passkey/ACL model, never a
-substitute for it** — but the analysis above leans on the origin being tailnet-only.
-`tailscale serve` and `tailscale funnel` share one configuration surface, and a Funnel
-on this node publishes the same origin to the public internet, where the setup password
-becomes an internet-facing guessing target with none of the mitigations above.
+**May publish the HTTPS origin publicly.** Tailnet-only Serve is the installer default and
+network-layer defense-in-depth, never an authentication premise. Enabling Tailscale
+Funnel publishes the same TLS origin and stays inside this analysis: public admission
+is owned by [The setup password](#the-setup-password), and a Client still reaches no
+Host without the Host-local authorization above.
+
+**Must not make Funnel state an install or health verdict.** The installers configure
+Serve but neither inspect, warn about, enable, nor disable Funnel; `manage verify`
+checks the local TLS-to-loopback path, while CI and this audit check application
+controls.
 
 - **FAIL IF** `deploy/local/install-macos.sh`, `deploy/local/install-windows.ps1`, or `deploy/local/install-linux.sh` stops requiring `DORMOUSE_BIND_HOST=127.0.0.1` in `config/server.env`, or if any `manage verify` stops asserting that the plaintext port is unreachable on the node's Tailscale IP.
 - **FAIL IF** the unset default of `DORMOUSE_BIND_HOST` in `server/src/config.ts` stops being `undefined` — listen on every interface, what a container wants, where the namespace is the boundary — or if `server/test/bind-host.test.mjs` stops spawning the real entrypoint to prove the plaintext port is unreachable off-loopback when it *is* set.
 - **FAIL IF** any installer stops refusing to rewrite a `DORMOUSE_ORIGIN` that no longer matches the node's DNS name.
 - **FAIL IF** any installer stops refusing to run with elevated privileges — `id -u` on macOS and Linux, the `Administrator` role check on Windows (rationale).
-- **FAIL IF** `manage verify` does not fail on Funnel being on for this node. It matches `funnel on` across `tailscale serve status` and `tailscale funnel status`; that is node-scoped, not scoped to the served origin, and is deliberately the blunter test (rationale).
-- **FAIL IF** that check reports `off` when it could not run. A nonzero exit status is its own verdict and fails verify, never discarded with `2>/dev/null || true`: a check that could not run has not passed (rationale).
+- **FAIL IF** an installer or `manage` names `tailscale funnel` or `AllowFunnel` at all — invoking it, judging its state, or changing it all begin there, and public reachability must exercise the application controls rather than become a forbidden deployment state. Held by `scripts/deploy-lint.mjs` as its one `forbidden` rule (rationale).
 - **FAIL IF** any decision taken on Tailscale CLI or listener output is reached by piping that output into `grep -q`, or into a `head -1` that exits first; every such search is over text captured first. The `head -1` half binds every site whose 141 can still reach an `if` or an assignment — an inline substitution always, and a helper the moment the failing assignment is its last command or a caller invokes it outside `$( )` (rationale).
 - **FAIL IF** any decision about whether Serve maps `/` to us — the install-time conflict gate, `manage verify`, and the uninstall that turns Serve off — is not additionally scoped to the root line with the port right-bounded: `/api` on this port is not `/` on it, and `127.0.0.1:31000` contains `127.0.0.1:3100`. The post-mutation `SERVE_AFTER` assertion is the one deliberate exception, since it asserts our own `serve --bg` landed rather than auditing a foreign config (rationale).
-- **FAIL IF** `scripts/installer-verify-test.mjs` stops extracting `funnel_state`, `has_off_loopback` and `serve_state` and driving them over inputs larger than the pipe buffer, or stops pinning `serve_proxies_root`'s root scoping and its port bound. Enforcement splits by control, not by helper: `scripts/deploy-lint.mjs` holds that helper's `<<<` pattern and counts the decisions that consult these helpers, since a helper whose answer is right survives a caller that stops asking, and `serve_root_target` is held by neither on purpose (rationale).
+- **FAIL IF** `scripts/installer-verify-test.mjs` stops driving `has_off_loopback` and `serve_state` over inputs larger than the pipe buffer, or stops pinning `serve_proxies_root`'s root scoping and port bound. `scripts/deploy-lint.mjs` holds that helper's `<<<` pattern and counts its consumers; `serve_root_target` is held by neither on purpose (rationale).
 
 ### What crosses the boundary
 

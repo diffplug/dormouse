@@ -11,6 +11,7 @@ import { join } from 'node:path';
 
 import { API_ROUTES, E2E_ID_LENGTH, WS_ROUTES, WS_TOKEN_PARAM, isE2eId } from 'server-lib-common';
 
+import { HOST_ENROLL_ATTEMPT_REFILL_MS } from '../dist/app.js';
 import { HOST_TOKEN_LENGTH, HostStore, MAX_ENROLLED_HOSTS } from '../dist/state.js';
 
 import {
@@ -18,6 +19,7 @@ import {
   connectHost,
   enrollHost,
   freshApp,
+  makeClock,
   ownerSession,
   post,
   startServer,
@@ -190,44 +192,55 @@ test('enrollment mirrors requireUserVerification to the Host, and omits it when 
   assert.equal('requireUserVerification' in uvOff, false);
 });
 
-// --- probing a host token costs the prober too -----------------------------
-// `requireHost` and the `/ws/host` gate both run unauthenticated over the most
-// expensive lookup on the server: a `readFile` + `JSON.parse` + two SHA-256 per
-// row. Answering instantly, and reading the file for a value no Host could have
-// been minted, made probing cheaper for the caller than for us.
-
-test('a rejected host token pays the credential-failure delay', async () => {
-  const delayMs = 60;
-  const { app } = await freshApp({ credentialFailureDelayMs: delayMs });
+test('only Host-enrollment rejection invokes the retained-request delay', async () => {
+  let delayCalls = 0;
+  const { app } = await freshApp({
+    credentialFailureDelay: async () => {
+      delayCalls += 1;
+    },
+  });
   await enrollHost(app);
 
-  const started = Date.now();
-  const res = await app.request(API_ROUTES.pushDevices, {
-    headers: { Authorization: `Bearer ${'A'.repeat(HOST_TOKEN_LENGTH)}` },
-  });
-  const elapsed = Date.now() - started;
+  assert.equal(
+    (
+      await app.request(API_ROUTES.pushDevices, {
+        headers: { Authorization: `Bearer ${'A'.repeat(HOST_TOKEN_LENGTH)}` },
+      })
+    ).status,
+    401,
+  );
+  assert.equal(
+    (
+      await app.request(`${WS_ROUTES.host}?${WS_TOKEN_PARAM}=${'A'.repeat(HOST_TOKEN_LENGTH)}`)
+    ).status,
+    401,
+  );
+  assert.equal((await post(app, API_ROUTES.setupBegin, { setupToken: 'unknown' })).status, 401);
+  assert.equal(delayCalls, 0);
 
-  assert.equal(res.status, 401);
-  assert.ok(elapsed >= delayMs, `answered in ${elapsed}ms, under the ${delayMs}ms delay`);
+  assert.equal((await post(app, API_ROUTES.hostEnroll, { password: 'wrong' })).status, 401);
+  assert.equal(delayCalls, 1);
 });
 
-test('the /ws/host upgrade pays the same delay on a bad token', async () => {
-  const delayMs = 60;
-  const { app } = await freshApp({ credentialFailureDelayMs: delayMs });
-  await enrollHost(app);
+test('a hand-edited hosts.json revokes through the read cache', async () => {
+  // `findByToken` runs unauthenticated on every host-gated request, so its read
+  // is cached against the file's stat. Deleting a row by hand is the documented
+  // revocation mechanism (docs/specs/server.md -> Guardrails), so a cache that
+  // outlived an edit would keep a revoked Host working.
+  const { app, stateDir } = await freshApp();
+  const { body: host } = await enrollHost(app);
+  const authorized = { headers: { Authorization: `Bearer ${host.hostToken}` } };
 
-  const started = Date.now();
-  const res = await app.request(
-    `${WS_ROUTES.host}?${WS_TOKEN_PARAM}=${'A'.repeat(HOST_TOKEN_LENGTH)}`,
-  );
-  const elapsed = Date.now() - started;
+  assert.equal((await app.request(API_ROUTES.pushDevices, authorized)).status, 200);
+  // Warm the cache, so the edit below has something stale to defeat.
+  assert.equal((await app.request(API_ROUTES.pushDevices, authorized)).status, 200);
 
-  assert.equal(res.status, 401);
-  assert.ok(elapsed >= delayMs, `answered in ${elapsed}ms, under the ${delayMs}ms delay`);
+  await writeFile(join(stateDir, 'hosts.json'), '[]');
+  assert.equal((await app.request(API_ROUTES.pushDevices, authorized)).status, 401);
 });
 
 test('a token of a shape no Host was ever minted never reaches hosts.json', async () => {
-  const { app, stateDir } = await freshApp({ credentialFailureDelayMs: 1 });
+  const { app, stateDir } = await freshApp();
   const { body: host } = await enrollHost(app);
   assert.equal(host.hostToken.length, HOST_TOKEN_LENGTH);
 
@@ -241,16 +254,25 @@ test('a token of a shape no Host was ever minted never reaches hosts.json', asyn
   await assert.rejects(store.findByToken('A'.repeat(HOST_TOKEN_LENGTH)));
 });
 
+/**
+ * An app holding `MAX_ENROLLED_HOSTS`. The clock advances a refill interval per
+ * enrollment because the global admission bucket is smaller than the cap.
+ */
+async function appAtHostCap() {
+  const clock = makeClock();
+  const { app } = await freshApp({ now: clock.now });
+  for (let i = 0; i < MAX_ENROLLED_HOSTS; i += 1) {
+    assert.equal((await enrollHost(app)).res.status, 200, `host ${i}`);
+    clock.advance(HOST_ENROLL_ATTEMPT_REFILL_MS);
+  }
+  return app;
+}
+
 test('enrollment is capped, and the refusal names the remedy', async () => {
   // Credential-gated, so this is not a flood defense: it is the bound on a file
   // that is otherwise append-only and is compared row by row on every
   // host-gated request and every `/ws/host` upgrade.
-  const { app } = await freshApp({ credentialFailureDelayMs: 1 });
-  for (let i = 0; i < MAX_ENROLLED_HOSTS; i += 1) {
-    assert.equal((await enrollHost(app)).res.status, 200, `host ${i}`);
-  }
-
-  const { res, body } = await enrollHost(app);
+  const { res, body } = await enrollHost(await appAtHostCap());
   assert.equal(res.status, 409);
   assert.match(body.error, /hosts\.json/);
 });
@@ -258,11 +280,6 @@ test('enrollment is capped, and the refusal names the remedy', async () => {
 test('the enrollment cap is checked after the credential, never before', async () => {
   // A caller that has proved nothing must not learn from the refusal whether
   // the server is full.
-  const { app } = await freshApp({ credentialFailureDelayMs: 1 });
-  for (let i = 0; i < MAX_ENROLLED_HOSTS; i += 1) {
-    assert.equal((await enrollHost(app)).res.status, 200);
-  }
-
-  const res = await post(app, API_ROUTES.hostEnroll, { password: 'wrong' });
+  const res = await post(await appAtHostCap(), API_ROUTES.hostEnroll, { password: 'wrong' });
   assert.equal(res.status, 401);
 });

@@ -11,7 +11,6 @@ import {
 } from 'react';
 import {
   ArticleNyTimesIcon,
-  BellIcon,
   ClockCounterClockwiseIcon,
   CursorClickIcon,
   CursorTextIcon,
@@ -20,7 +19,7 @@ import {
   TextTIcon,
 } from '@phosphor-icons/react';
 import { clsx } from 'clsx';
-import { bellIconClass } from './bell-icon-class';
+import { AlertBell } from './AlertBell';
 import {
   MobileGestureConfirmDialog,
   MobileGestureRadialMenu,
@@ -53,6 +52,8 @@ export interface MobileTerminalSessionItem {
   secondary?: string | null;
   active?: boolean;
   status?: SessionStatus;
+  /** `ActivityState.ringSeq`; a change replays the ringing burst. */
+  ringSeq: number;
   todo?: boolean;
 }
 
@@ -355,13 +356,13 @@ function SessionsPane({
                 </span>
               ) : null}
               {ringing ? (
-                <BellIcon
+                <AlertBell
                   size={14}
-                  weight="fill"
+                  status={session.status ?? 'ALERT_RINGING'}
+                  ringSeq={session.ringSeq}
                   className={clsx(
                     'shrink-0',
                     active ? 'text-alarm-vs-header-active' : 'text-alarm-vs-door',
-                    bellIconClass(session.status ?? 'ALERT_RINGING'),
                   )}
                 />
               ) : null}

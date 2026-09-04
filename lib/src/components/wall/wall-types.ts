@@ -1,3 +1,6 @@
+import type { SurfaceKind } from 'dor/commands/types';
+import type { BrowserDisplayMode } from './agent-browser-screen';
+
 /** A minimized Surface's baseboard chip, at RUNTIME: an identity plus the Lath
  *  restore `token` that says where it goes back. Deliberately carries no
  *  title/params/component — the store owns a Doored Surface's metadata, which keeps
@@ -10,7 +13,14 @@ export type DooredItem = { id: string; token?: unknown };
  *  fallback title, projected fresh from the store on each render rather than stored.
  *  Structurally a `DooredItem`, so it passes straight back to the reattach/drag
  *  callbacks. */
-export type DoorChip = DooredItem & { title: string };
+export type DoorChip = DooredItem & {
+  title: string;
+  /** The Surface's kind, so the Baseboard gates its label on the capability it
+   *  needs (`hasTerminal`) rather than on the presence of a browser glyph. */
+  kind: SurfaceKind;
+  /** Browser-only presentation identity. Terminals omit it. */
+  browserDisplay?: BrowserDisplayMode;
+};
 
 /** The visible-pane projection (`lath.listPanes()`). Shared by the Wall helpers,
  *  dev-server correlation, and session persistence. */

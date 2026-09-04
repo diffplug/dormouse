@@ -426,6 +426,10 @@ describe('Wall on the Lath engine', () => {
       expect((parked as HTMLElement).dataset.lathParked).toBe('');
       // It is a door now, so it is not a visible pane.
       expect(container.querySelectorAll('[data-lath-leaf]:not([data-lath-parked])').length).toBe(1);
+      const door = container.querySelector<HTMLElement>(`[data-door-id="${surfaceId}"]`);
+      expect(door?.textContent).toContain('localhost:5173');
+      expect(door?.textContent).not.toContain('<idle>');
+      expect(door?.querySelector('[data-browser-display-mode="iframe"]')).not.toBeNull();
 
       // Killing the door releases the Surface for real — the parked DOM goes with it.
       expect((await dispatchKill(surfaceId))?.ok).toBe(true);

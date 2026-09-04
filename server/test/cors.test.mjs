@@ -2,47 +2,40 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { API_ROUTES } from 'server-lib-common';
-import { freshApp } from './helpers.mjs';
+import { ORIGIN, freshApp } from './helpers.mjs';
 
-// The standalone webview (Host) enrolls from a different origin than the
-// server, so the JSON POST triggers a CORS preflight. Without an OPTIONS
-// handler the preflight 404s and the fetch never happens.
-test('preflight for host enrollment succeeds cross-origin', async () => {
-  const { app } = await freshApp();
-  const res = await app.request(API_ROUTES.hostEnroll, {
-    method: 'OPTIONS',
-    headers: {
-      origin: 'http://localhost:1420',
-      'access-control-request-method': 'POST',
-      'access-control-request-headers': 'content-type',
-    },
+// A preflight is how a browser asks for the grant, so its 404 is the assertion:
+// no OPTIONS handler exists to answer one, on a body-credentialed route or a
+// bearer one.
+for (const [label, route, method, header] of [
+  ['host enrollment', API_ROUTES.hostEnroll, 'POST', 'content-type'],
+  ['a bearer route', API_ROUTES.hosts, 'GET', 'authorization'],
+]) {
+  test(`a foreign preflight for ${label} receives no CORS grant`, async () => {
+    const { app } = await freshApp();
+    const res = await app.request(route, {
+      method: 'OPTIONS',
+      headers: {
+        origin: 'http://localhost:1420',
+        'access-control-request-method': method,
+        'access-control-request-headers': header,
+      },
+    });
+    assert.equal(res.status, 404);
+    assert.equal(res.headers.get('access-control-allow-origin'), null);
+    assert.equal(res.headers.get('access-control-allow-methods'), null);
+    assert.equal(res.headers.get('access-control-allow-headers'), null);
   });
-  assert.equal(res.status, 204);
-  assert.equal(res.headers.get('access-control-allow-origin'), '*');
-  assert.match(res.headers.get('access-control-allow-headers') ?? '', /content-type/i);
-});
+}
 
-test('cross-origin API responses carry the allow-origin header', async () => {
+test('API responses emit no cross-origin grant', async () => {
   const { app } = await freshApp();
   const res = await app.request(API_ROUTES.signinBegin, {
     method: 'POST',
-    headers: { origin: 'http://localhost:1420', 'content-type': 'application/json' },
+    headers: { origin: ORIGIN, 'content-type': 'application/json' },
     body: '{}',
   });
   assert.equal(res.status, 200);
-  assert.equal(res.headers.get('access-control-allow-origin'), '*');
-});
-
-test('bearer-authed routes allow the Authorization header in preflight', async () => {
-  const { app } = await freshApp();
-  const res = await app.request(API_ROUTES.hosts, {
-    method: 'OPTIONS',
-    headers: {
-      origin: 'http://localhost:1420',
-      'access-control-request-method': 'GET',
-      'access-control-request-headers': 'authorization',
-    },
-  });
-  assert.equal(res.status, 204);
-  assert.match(res.headers.get('access-control-allow-headers') ?? '', /authorization/i);
+  assert.equal(res.headers.get('access-control-allow-origin'), null);
+  assert.equal(res.headers.get('access-control-allow-credentials'), null);
 });

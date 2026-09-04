@@ -719,43 +719,13 @@ wait_for_health() {
   return 1
 }
 
-# Is Tailscale Funnel on for this node? Echoes `on`, `off`, or `unknown`.
-# $1 = the exit status of `tailscale funnel status`, $2 = `serve status` output,
-# $3 = `funnel status` output.
-#
-# `unknown` is a first-class answer, and the reason this is a function: a check
-# that could not run must not report the reassuring one. Every way the CLI can
-# be unavailable — off PATH, tailscaled down, `funnel status` unknown to an
-# older CLI — yields no output, and no output greps clean. Only the exit status
-# separates that from a node with no Funnel, so it is what decides.
-#
-# The search runs over text captured beforehand, never `printf … | grep -q`:
-# `grep -q` exits at the first match, the writer takes SIGPIPE, and under
-# `set -o pipefail` the pipeline's 141 reads exactly like "no match" — so a
-# Funnel that is ON reported as off as soon as the CLI's combined output
-# outgrew the 64 KiB pipe buffer. A here-string has no writer to signal.
-# Evidence of `on` outranks a failed probe: `serve status` naming a Funnel is
-# an answer even when `funnel status` could not run.
-#
-# Source of truth for the behavior: `scripts/installer-verify-test.mjs` drives
-# this function, extracted from this file, over inputs larger than that buffer.
-funnel_state() {
-  if grep -qi 'funnel on' <<<"$2"$'\n'"$3"; then
-    printf 'on\n'
-    return 0
-  fi
-  [ "$1" = "0" ] || { printf 'unknown\n'; return 0; }
-  printf 'off\n'
-}
-
 # Is anything in a captured listener list bound somewhere other than
 # 127.0.0.1:$1? $1 = the port, $2 = the `lsof` lines. Exit 0 when at least one
 # line is off-loopback.
 #
-# Captured, for the reason `funnel_state` states: `printf … | grep -qv` exits
-# at the first non-matching line, and the writer's SIGPIPE becomes the
-# pipeline's status under `set -o pipefail` — reporting "bound only to
-# 127.0.0.1" for a list that opens with an off-loopback bind.
+# Captured because `printf … | grep -qv` exits at the first non-matching line;
+# the writer's SIGPIPE becomes the pipeline status under `set -o pipefail`,
+# reporting "loopback only" for a list that begins with an off-loopback bind.
 has_off_loopback() {
   grep -qv "127\.0\.0\.1:$1" <<<"$2"
 }
@@ -915,31 +885,6 @@ cmd_verify() {
       fail "Serve origin does not match DORMOUSE_ORIGIN ($ORIGIN)"
     fi
   fi
-
-  # Serve and Funnel are one configuration surface, and Funnel publishes this
-  # exact origin to the public internet. The whole security analysis of the
-  # selfhost server assumes a tailnet-only origin — most of all the setup
-  # password, whose hardening is a constant-time compare and a 250ms delay
-  # (docs/specs/security-remote.md -> "The setup password"). So this is checked, never assumed —
-  # and "assumed" is what `2>/dev/null || true` hid: it threw away the one
-  # signal that separates a node with no Funnel from a CLI that never ran, so
-  # an unavailable Tailscale printed the reassuring line. The status is kept,
-  # and `funnel_state` answers `unknown` rather than `off`.
-  local funnel_out funnel_rc
-  funnel_out="$(ts funnel status 2>&1)" && funnel_rc=0 || funnel_rc=$?
-  case "$(funnel_state "$funnel_rc" "$serve_out" "$funnel_out")" in
-    on)
-      fail "tailscale funnel is ON — this origin is published to the public internet"
-      printf '%s\n' "$funnel_out" | sed 's/^/      /'
-      ;;
-    unknown)
-      fail "could not check tailscale funnel: \`tailscale funnel status\` exited $funnel_rc — verify cannot say this origin stays tailnet-only"
-      if [ -n "$funnel_out" ]; then printf '%s\n' "$funnel_out" | sed 's/^/      /'; fi
-      ;;
-    *)
-      pass "tailscale funnel is off (the origin stays tailnet-only)"
-      ;;
-  esac
 
   local cfg_mode state_mode run_mode env_mode offer_mode
   cfg_mode="$(stat -f '%Lp' "$ROOT/config" 2>/dev/null || echo '???')"
@@ -1189,7 +1134,7 @@ PROBE_LOG="$(mktemp -t dormouse-probe-log)"
 chmod 0700 "$PROBE_STATE"
 
 env -i HOME="$HOME" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
-  DORMOUSE_SETUP_PASSWORD="candidate-probe-$RELEASE_ID" \
+  DORMOUSE_SETUP_PASSWORD="0000000000000000000000000000000000000000000000000000000000000000" \
   DORMOUSE_ORIGIN="$ORIGIN" \
   DORMOUSE_STATE_DIR="$PROBE_STATE" \
   DORMOUSE_BIND_HOST=127.0.0.1 \

@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import {
   ArrowLineDownIcon,
-  BellIcon,
   XIcon,
 } from '@phosphor-icons/react';
 import { HeaderActionButton } from './HeaderActionButton';
 import { TerminalPane } from './TerminalPane';
-import { bellIconClass } from './bell-icon-class';
+import { AlertBell } from './AlertBell';
 import { TODO_PILL_TRACKING_CLASS } from './design';
 import { useTodoPillContent } from './TodoPillBody';
 import type { MobileTerminalSessionItem } from './MobileTerminalUi';
@@ -87,6 +86,7 @@ export function useMobileWallSessionItems(
       secondary: derivedHeader.secondary,
       active: session.id === activeSessionId,
       status: activity.status,
+      ringSeq: activity.ringSeq,
       todo: activity.todo,
     };
   }), [activeSessionId, activityStates, appTitleForPane, sessions, terminalStates, visiblePaneStates]);
@@ -204,11 +204,7 @@ function MobileWallHeader({
           dataAlertButtonFor={session.id}
         >
           <span className="flex items-center justify-center">
-            {status === 'WATCHING_DISABLED' ? (
-              <BellIcon size={14} />
-            ) : (
-              <BellIcon size={14} weight="fill" className={bellIconClass(status)} />
-            )}
+            <AlertBell status={status} ringSeq={session.ringSeq} size={14} />
           </span>
         </HeaderActionButton>
         {session.secondary ? (

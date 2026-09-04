@@ -8,6 +8,12 @@
 
 ## Browser Chrome
 
+**Why the robot is independent of presentation.** Agent visibility is the
+important capability boundary: an in-pane screencast and an iframe share the
+same human geometry, while only the screencast is available to an agent. A
+separate presentation glyph then distinguishes pane-sized, fixed, and popped-out
+views without weakening that first signal.
+
 **What the scheme ladder decides.** A typed `host:port` renders in the iframe: the proxy frames remote `http://` as readily as loopback. A bare remote host carries no port to mark it a dev server, so `https://` sends it to agent-browser — the path for pages needing real HTTPS or a login.
 
 ## Pane Context Menu Connect
@@ -84,6 +90,8 @@ A post-open blank-tab sweep can become such a query when a later relaunch, expli
 
 **Why the CLI's own check is not enough.** `open-window` carries a string the framed page chose, and the new-tab prompt in front of it is user consent, not a boundary — the user is agreeing to open a pane, not vetting a scheme. The same check gates `surface.iframe`, a wire protocol on the control socket rather than the CLI, so nothing upstream of it has already filtered.
 
+**Why each shim hop has two explicit targets.** An injected document cannot tell whether its parent is the app or another document on the grant's proxy origin. It posts to both known origins; the browser delivers only the matching one. A same-origin parent reconstructs and relays only the three pane-level shapes upward; location is document-level, so only the outer document reports it. No wildcard or foreign origin enters the path.
+
 ## Iframe Focus And Rendering Notes
 
 **Why the raw fallback is sandboxed too.** Reading "raw" as the trusted path and the proxy as the one needing containment is backwards: the raw fallback is the case with *no* proxy in front of the page at all.
@@ -101,5 +109,7 @@ A post-open blank-tab sweep can become such a query when a later relaunch, expli
 **Why the whole ancestor chain travels, not just the parent.** `frame-ancestors` is checked against every ancestor, and VS Code nests the extension's document two frames deep inside the workbench, so a chain built from the parent alone would not match.
 
 **Why a partial chain is no chain.** A `frame-ancestors` naming a subset of the real ancestors blocks Dormouse's own frame, the one embed that must always work. Failing closed to "no chain" instead leaves the caller exactly what the upstream would have served it directly.
+
+**Why the policy also admits `'self'`.** Storybook and similar apps render same-origin documents in nested frames, so an app-only ancestor list blocks their inner document. Each proxy origin belongs to one grant and one fixed upstream; documents already executing there share same-origin authority. Admitting `'self'` deliberately lets a proxy document frame another document from that grant, including after a top-level navigation, but no foreign ancestor matches and no grant can frame another grant.
 
 **Why the idle timer refreshes for an absent `Origin`.** "Own origin only" would expire a grant the user is still looking at, because a live frame's navigations and sub-resource loads carry no `Origin` at all. What a foreign `Origin` must not buy is keeping a closed pane's grant — and its live upstream binding — alive indefinitely by polling.

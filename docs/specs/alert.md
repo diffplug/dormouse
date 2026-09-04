@@ -336,7 +336,7 @@ Where it surfaces is host-specific:
 
 The header shows an alert bell, a fixed-text `TODO` pill when `todo === true`, a hover/focus notification preview when TODO has `notification`, and a dialog opened by right-click or by some left-click actions. Placement, sizing, and width tiers belong to `docs/specs/layout.md`.
 
-Bell visual state is a pure function of public status. **The bell names the command it would act on** ("Alert on all `claude`"), not an abstract toggle — that is the scope of what a click changes.
+Bell rotation follows public status; motion follows latch edges. **When a track latches, ring each mounted bell for four 800ms cycles, then hold 45° until the ring clears** (test: `runs a finite ringing burst and then holds the bell at 45 degrees` in `lib/src/components/bell-icon-class.test.ts`; rationale). **A newly mounted ringing bell may replay once without advancing `ringSeq`** (test: `replays the finite burst when a ringing presentation remounts` in `lib/src/components/AlertBell.test.tsx`; rationale). **A newly latched track replays the burst; further reports on that track only enrich its summons.** `AlertState.ringSeq` counts per-Session latches and is compared by `alertStatesEqual` (tests: `counts a second track ringing behind an already-latched one` and `does not count a track that is already ringing` in `lib/src/lib/alert-manager.test.ts`, `replaces the icon when the ring counter advances` in `lib/src/components/AlertBell.test.tsx`; rationale). **Remote Clients have no counter:** `DirectoryEntry.ringing` is an edgeless boolean, so Pocket rings on mount and holds. **The bell names the command it would act on** ("Alert on all `claude`"), not an abstract toggle — that is the scope of what a click changes.
 
 Bell interactions — one transition table, in `dismissOrToggleAlert`:
 
@@ -354,7 +354,7 @@ The TODO pill always displays `TODO`; remote notification text belongs in previe
 
 Spoken-alarm delivery is much louder than the bell: a pointer-transparent treatment spans the whole terminal Pane, labelled `SPEAKING` while the engine actually speaks and `SPOKEN` — quieter, and unbounded — until the ring resolves. **`prefers-reduced-motion` keeps the strong static treatment and suppresses only the pulse**, as does `cfg.alert.ringingPaused` (rationale). The layers, their strengths, placement, and sizing belong to `docs/specs/layout.md` → Spoken-alarm overlay.
 
-Source of truth: `bellIconClass` in `lib/src/components/bell-icon-class.ts`; `dismissOrToggleAlert` in `lib/src/lib/session-activity-store.ts`; `lib/src/components/TodoPillBody.tsx`; `lib/src/components/wall/AlertSpeechIndicator.tsx`.
+Source of truth: `AlertBell` in `lib/src/components/AlertBell.tsx`; `bellIconClass` in `lib/src/components/bell-icon-class.ts`; `latchRing` in `lib/src/lib/alert-manager.ts`; `dismissOrToggleAlert` in `lib/src/lib/session-activity-store.ts`; `lib/src/components/TodoPillBody.tsx`; `lib/src/components/wall/AlertSpeechIndicator.tsx`.
 
 ### Door
 

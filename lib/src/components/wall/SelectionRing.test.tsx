@@ -33,6 +33,7 @@ it('renders the smear transform origin without a React DOM-property warning', as
     await act(async () => root.render(
       <SelectionRing
         variant="ants"
+        animationKey="pane:a"
         color="#fff"
         windowFocused
         containerRef={null}

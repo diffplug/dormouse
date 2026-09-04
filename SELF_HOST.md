@@ -71,8 +71,9 @@ installed release, which the installer and `manage status` both print.
 ## Prerequisites
 
 - **A tailnet** with MagicDNS and HTTPS certificates enabled, Tailscale running
-  on this laptop and on the phone that will run Pocket. A tailnet-only origin is
-  not reachable merely because the laptop is on the tailnet.
+  on this laptop and on the phone that will run Pocket. Whether the HTTPS origin
+  stays private is a deployment choice, not a security premise
+  (`docs/specs/security-remote.md` → "Network posture").
 - **macOS, Windows or Linux.** Each installer refuses the others. On a fourth
   OS, or Linux without systemd, design the native service manager with the user
   rather than translating LaunchAgent, Scheduled Task or unit-file commands
@@ -186,8 +187,8 @@ what keeps the task free of a stored password; Linux alone opts out, with
 - **Port 3100 is bound only to `127.0.0.1`**, and the plaintext port is
   unreachable on the laptop's Tailscale IP.
 - **`tailscale serve` proxies `/` to `127.0.0.1:3100` at the origin recorded in
-  `config/server.env`, and `tailscale funnel` is off.** A Funnel check that
-  could not run fails too — only its exit status separates "off" from "unknown".
+  `config/server.env`.** Funnel may be on or off; verification does not treat
+  public HTTPS reachability as a defect.
 - **`config/`, `state/`, `run/` and `config/server.env` are readable only by the
   installing user**, by the per-platform means in the
   [Mechanism map](#mechanism-map) and [Invariants](#invariants).
@@ -229,7 +230,7 @@ Establish with the user what the script cannot:
 - **Their phone runs Tailscale** and is signed in to the same tailnet.
 - **Port 3100 is free.** Unchecked by the installer, and a stale process there
   would let the post-install health check pass against the wrong server
-  (`pnpm dev:server` and `pnpm dev:pocket-server` use 3000):
+  (`pnpm dev:server` uses 3000):
 
   ```sh
   # macOS
@@ -628,13 +629,12 @@ reports which mode is live rather than asserting either.
   `run-server` exports `DORMOUSE_ENROLL_TOKEN_FILE`; unset, the server refuses
   every offer (`docs/specs/server.md` → Configuration). Generation and
   protection: `docs/specs/security-remote.md` → "Credentials at rest".
-- **Loopback only, and tailnet-only.** The install pins
+- **Loopback backend, publicly safe HTTPS origin.** The install pins
   `DORMOUSE_BIND_HOST=127.0.0.1` and refuses to proceed without it
   (`docs/specs/server.md` → Configuration). Port 3100, not 3000, so the service
-  coexists with `pnpm dev:server` / `pnpm dev:pocket-server`. **`verify` also
-  fails on an active `tailscale funnel`** — one configuration surface with
-  Serve, and a Funnel publishes this origin, and the password behind it, to the
-  public internet (`docs/specs/security-remote.md` → "Network posture").
+  coexists with `pnpm dev:server`. Serve is the private default; Funnel is safe
+  to enable because the application controls, not network privacy, govern
+  admission (`docs/specs/security-remote.md` → "Network posture").
 - **`DORMOUSE_ORIGIN` is durable WebAuthn identity**, derived from the node's
   MagicDNS name. An installation recording a different origin stops the
   installer, because rewriting silently invalidates the registered passkey and
@@ -673,8 +673,8 @@ reports which mode is live rather than asserting either.
   Configuration); the server records `{pid, releaseId, port, origin, startedAt}`
   there once **bound**, so `listening_release` (macOS, Linux) /
   `Get-ListeningRelease` (Windows) is a file read, a port match and a liveness
-  check. **It cannot go in `/api/hello`**, which is unauthenticated, CORS-`*`
-  and reachable through `tailscale serve`. **Empty means unknown, never
+  check. **It cannot go in `/api/hello`**, which is unauthenticated and reachable
+  through the HTTPS proxy. **Empty means unknown, never
   "nobody"** — a stale file with a dead pid, a server started outside the
   installer, and a foreign port-holder all fail the comparison. A clean exit
   removes the file; a crash leaves it, which the liveness check reads correctly.

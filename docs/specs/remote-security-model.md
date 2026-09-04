@@ -391,9 +391,12 @@ omits `client-gone`, invents client IDs, or reorders frames.
   **losing the Host's own relay socket disposes everything, invitations
   included** (rationale).
 
-Source of truth: `lib/src/remote/host/remote-host.ts`. Pinned by
-`lib/src/remote/host/remote-host-bounds.test.ts` and
-`server/test/malicious-relay.test.mjs`.
+Source of truth: `lib/src/remote/host/remote-host.ts`, and `TokenBucket` in
+`server-lib-common/src/security/token-bucket.ts` — the same primitive the Server
+admits Host enrollment with ([server.md](./server.md#http-api)). Pinned by
+`lib/src/remote/host/remote-host-bounds.test.ts`,
+`server/test/malicious-relay.test.mjs` and
+`server-lib-common/test/token-bucket.test.mjs`.
 
 ## Noise suite
 

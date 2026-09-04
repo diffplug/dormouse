@@ -36,7 +36,8 @@ Source of truth: `lib/src/components/wall/BrowserPanel.tsx`,
 Invariants on the flat persisted `BrowserPanelParams`:
 
 - **`renderMode` is canonical**; an absent one resolves to `iframe`, never to a
-  live agent-browser.
+  live agent-browser. **Only params may omit it** — a live `ScreenSnapshot`
+  always carries one, so nothing defaults it a second time.
 - **`url` is the canonical target** across render swaps and relaunches.
   Agent-browser mirrors the newest non-blank active tab URL into it; iframe
   persists only navigations initiated by Dormouse chrome.
@@ -90,37 +91,42 @@ Source of truth: `lib/src/components/Wall.tsx` (`createContentSurface`'s `focusN
 
 ## Browser Chrome
 
-Chrome is keyed by a screen controller, which **both renderers register
-unconditionally**, so `dor iframe` gets the same header on every host; the
-iframe → agent-browser swap is gated separately by host capabilities.
+Chrome is keyed by a screen controller. **Both renderers must register one
+unconditionally**; render swaps are separately host-gated.
 
 Header contract:
 
-- Far-left chip opens the Display modal and names the backend: frame glyph for
-  `iframe`, external-window for `ab-popout`, link/lock for `ab-screencast` by
-  whether viewport CSS size matches pane CSS size.
-- Primary text is the URL — host+path, query omitted (an iframe surface's
-  persisted *title* keeps it), HTML title as tooltip/secondary state; behind a
-  dev-server chip it collapses to the path.
-- Clicking the URL opens an inline editor — pane rename's `InlineEditInput`
-  (`docs/specs/layout.md` → "Inline rename"), pre-filled and pre-selected, except
-  that blur discards like a browser omnibox. **Both headers share
-  `normalizeNavUrl`, which must pick a scheme exactly as the CLI does**
-  (`docs/specs/dor-cli.md` → Browser Open Target Resolution), plus a rule for the
-  portless host the CLI rejects: bare loopback → `http://`, bare remote →
-  `https://` (rationale).
-- Back/forward/reload are always enabled: agent-browser sends native `back` /
-  `forward` / `reload`, iframe uses parent-side history and re-resolves the proxy
-  on each.
-- Non-default managed `--key` renders as its own quiet badge, **never as a title
-  prefix**. Raw `--session` and iframe surfaces show no key badge.
-- Split/zoom buttons hide below `420px`, nav buttons below `360px`; minimize and
-  kill remain.
+- **Must open the Display modal from this capability-first identity**
+  (rationale):
+
+  | Display | Icon cluster |
+  | --- | --- |
+  | agent-browser resizes with pane (`syncEngaged`) | wide robot + frame corners |
+  | agent-browser fixed size | wide robot + picture-in-picture |
+  | agent-browser popout | wide robot + arrow-square-out |
+  | iframe embed | frame corners only |
+
+- **Must reuse this mapping in browser Doors** (`docs/specs/layout.md` →
+  Baseboard owns the Door label rule).
+- **Must show the URL as primary text:** host+path without query, or path behind
+  a dev-server chip; the HTML title is its tooltip. An iframe surface's
+  persisted title keeps the query.
+- **Must open a pre-selected `InlineEditInput` from the URL.** Blur discards;
+  `normalizeNavUrl` follows CLI scheme selection plus bare loopback → `http://`
+  and bare remote → `https://` (rationale).
+- **Must keep back/forward/reload enabled.** Agent-browser uses native commands;
+  iframe uses parent history and re-resolves its proxy.
+- **Must show non-default managed `--key` as a badge, never a title prefix.**
+- **Must hide split/zoom below `420px` and nav below `360px`;** minimize and kill
+  remain.
 
 Source of truth: `lib/src/components/wall/SurfacePaneHeader.tsx`,
 `lib/src/components/wall/agent-browser-screen.ts`,
+`lib/src/components/wall/BrowserDisplayIcon.tsx`,
+`lib/src/components/Door.tsx`,
 `lib/src/components/wall/browser-url.ts`, Storybook
-`lib/src/stories/BrowserChromeHeader.stories.tsx`.
+`lib/src/stories/BrowserChromeHeader.stories.tsx`,
+`lib/src/stories/Baseboard.stories.tsx`.
 
 ## Dev-Server Chip
 
@@ -181,10 +187,12 @@ Source of truth: `lib/src/components/wall/connect-port.ts`
 
 ## Display Modal And Render Swaps
 
-The Display modal is the sole GUI for render mode and screencast resolution. It
-offers all three `renderMode`s — the `ab-screencast` canvas fed by the
-agent-browser stream, `ab-popout` (hidden where the host lacks
-`agentBrowserPopOut`), and the proxied `iframe`, which agents cannot drive.
+**Must make the Display modal the sole GUI for render mode and screencast
+resolution.** It splits the Browser Chrome icon pair across its nesting: the
+robot rides the `ab-screencast` parent, each nested resolution row carrying only
+its presentation glyph.
+
+**Must hide the popout option where the host lacks `agentBrowserPopOut`.**
 
 Resolution controls apply only to `ab-screencast`, as GUI wrappers around native
 commands: **Resize with pane** is Dormouse-owned sync issuing
@@ -456,7 +464,7 @@ What is rewritten, exactly:
 | request | `Origin` | upstream origin **only** when it is the proxy's own; else forwarded untouched (absent stays absent) |
 | request | `Referer` | proxy origin substituted for the upstream origin |
 | request | `Accept-Encoding` | deleted, so HTML comes back identity for rewriting |
-| response | `X-Frame-Options`, `Content-Security-Policy`, `Content-Security-Policy-Report-Only` | dropped **whole**, never per-directive (rationale) |
+| response | `X-Frame-Options`, `Content-Security-Policy`, `Content-Security-Policy-Report-Only` | replaced **whole** by `frame-ancestors 'self' <validated chain>` (rationale) |
 | response | hop-by-hop (RFC 7230 §6.1) | dropped |
 | response | `Location` | upstream origin rewritten back to the proxy origin, so a redirect stays inside the proxy |
 | response body | `<meta http-equiv="content-security-policy">` | removed, like the header |
@@ -481,14 +489,13 @@ Source of truth: `lib/src/components/wall/IframePanel.tsx`,
 
 ### Iframe Shim
 
-**The injected shim is fixed Dormouse-owned code, never user-provided eval.** It
-posts only these messages to the parent:
+**Must send these fixed, never-user-provided shim messages to the app:**
 
-- `leader`: dual-tap Meta/Shift leader chord.
-- `pointerdown`: genuine click inside the frame, used to select/focus the pane.
-- `location`: same-frame navigation after history/hash/page events, and after a
-  same-frame anchor click the page did not cancel.
-- `open-window`: intercepted `target=_blank` anchor or `window.open` URL.
+- `leader`: dual-tap Meta/Shift leader chord; relayed from nested documents.
+- `pointerdown`: genuine click, used to select/focus the pane; relayed.
+- `location`: outer-document history/hash/page events and uncancelled same-frame
+  anchor clicks; never relayed from nested documents.
+- `open-window`: intercepted `target=_blank` anchor or `window.open` URL; relayed.
 
 **A URL from the frame is re-checked before it becomes a pane.** `open-window`
 and the control socket's `surface.iframe` both go through `browserSurfaceUrl`;
@@ -560,10 +567,11 @@ Security boundaries:
 - every other user-supplied `http://` target is trusted as the user's command,
   at the cost of the upstream's own XSS policy inside the frame.
 
-**Must replace the upstream's framing controls with a `frame-ancestors` naming
-the embedder chain, never merely drop them**, and **the shim's `postMessage` must
-target that chain's origin, never `'*'`** (rationale; `docs/specs/security-local.md` → "Loopback
-Listeners"). **With no chain the proxy strips nothing and injects nothing.**
+**Must replace framing controls with exactly `frame-ancestors 'self'
+<validated embedder chain>`.** `'self'` permits same-grant nesting; foreign
+ancestors fail. **Each shim hop must target only its origin and that chain's
+innermost origin, never `'*'`** (rationale; `docs/specs/security-local.md` →
+"Loopback Listeners"). **With no chain it preserves headers and injects nothing.**
 
 **Must refresh a grant's idle timer for every caller except one that named itself
 foreign.** `isOwnOrigin` and `isForeignOrigin` are not each other's negation — an

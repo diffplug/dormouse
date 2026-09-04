@@ -20,34 +20,16 @@ import {
   ZoomedIdContext,
   type WallActions,
 } from './wall-context';
-import { stubWallActions as stubActions } from './wall-test-utils';
+import { registerStubScreen, STUB_CHROME, STUB_SCREEN, stubWallActions as stubActions } from './wall-test-utils';
 import { setNativeFieldValue } from '../../lib/dom';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
-const SCREEN: ScreenSnapshot = {
-  state: 'SYNCED',
-  viewport: { w: 1280, h: 720, dpr: 1 },
-  paneCss: { w: 1280, h: 720 },
-  displayDpr: 1,
-  syncEngaged: true,
-};
+const SCREEN = STUB_SCREEN;
+const CHROME = STUB_CHROME;
 
-const CHROME: ChromeSnapshot = {
-  url: 'http://localhost:5173/app',
-  displayUrl: 'localhost:5173/app',
-  title: 'Vite + React',
-  key: 'storybook',
-};
-
-function register(id: string, chrome: ChromeSnapshot = CHROME) {
-  return registerAgentBrowserScreen(id, {
-    snapshot: SCREEN,
-    actions: { engageSync: vi.fn(), applyDevice: vi.fn(), applyViewport: vi.fn(), openModal: vi.fn() },
-    chrome,
-    chromeActions: { navigate: vi.fn(), back: vi.fn(), forward: vi.fn(), reload: vi.fn() },
-    hostCapable: true,
-  });
+function register(id: string, chrome: ChromeSnapshot = CHROME, snapshot: ScreenSnapshot = SCREEN) {
+  return registerStubScreen(id, { chrome, snapshot });
 }
 
 function headerProps(id: string, title: string): PaneProps {
@@ -93,6 +75,29 @@ function renderHeader(
 }
 
 describe('SurfacePaneHeader — browser chrome', () => {
+  it('uses the shared capability-first icon pair for every browser display mode', () => {
+    const cases = [
+      [{ ...SCREEN, renderMode: 'ab-screencast', syncEngaged: true }, 'ab-resize', 2],
+      [{ ...SCREEN, renderMode: 'ab-screencast', syncEngaged: false }, 'ab-fixed', 2],
+      [{ ...SCREEN, renderMode: 'ab-popout', syncEngaged: false }, 'ab-popout', 2],
+      [{ ...SCREEN, renderMode: 'iframe', syncEngaged: false }, 'iframe', 1],
+    ] as const;
+
+    for (const [snapshot, displayMode, iconCount] of cases) {
+      const id = `pane-${displayMode}`;
+      const registration = register(id, CHROME, snapshot);
+      renderHeader(headerProps(id, 'Browser'), stubActions());
+      const trigger = container.querySelector<HTMLButtonElement>('[data-browser-display-trigger]');
+      const display = trigger?.querySelector(`[data-browser-display-mode="${displayMode}"]`);
+      expect(display).not.toBeNull();
+      expect(display?.querySelectorAll('svg'), displayMode).toHaveLength(iconCount);
+      const capability = display?.querySelector('[data-agent-capability-icon="robot-wide"]');
+      if (displayMode === 'iframe') expect(capability, displayMode).toBeNull();
+      else expect(capability, displayMode).not.toBeNull();
+      registration.dispose();
+    }
+  });
+
   it('inverts only its own Unzoom control against the active header palette', () => {
     const props = headerProps('pane-zoom', 'Zoomed');
     renderHeader(props, stubActions(), { active: true, zoomedId: 'pane-zoom' });

@@ -25,8 +25,11 @@ export interface EnrollmentOffer {
   readonly mintedAt: string;
 }
 
+/** The canonical encoding of a 32-byte value shared across remote credentials. */
+export const HEX_ENCODED_32_BYTES_PATTERN = /^[0-9a-f]{64}$/;
+
 /** The token's public format, so a redeemer can refuse junk before reading disk. */
-export const ENROLL_TOKEN_PATTERN = /^[0-9a-f]{64}$/;
+export const ENROLL_TOKEN_PATTERN = HEX_ENCODED_32_BYTES_PATTERN;
 
 /** How long a bootstrap offer stays redeemable before the first Host enrolls. */
 export const ENROLL_OFFER_MAX_AGE_MS = 24 * 60 * 60 * 1000;

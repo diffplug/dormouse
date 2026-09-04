@@ -409,6 +409,7 @@ function makeDoorItem(id: string, title: string): DoorChip {
   return {
     id,
     title,
+    kind: 'terminal',
   };
 }
 

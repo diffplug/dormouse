@@ -1,7 +1,10 @@
 import type { CSSProperties } from 'react';
 import { cfg } from '../cfg';
 
-/** Even-odd cross-product test for a convex polygon. Vertices may run in either winding order. */
+/** Same-side cross-product test: inside means every edge turns the same way toward
+ *  the point. Vertices may run in either winding order, and a point exactly on an
+ *  edge counts as inside. **Convex only** — a concave or self-intersecting polygon
+ *  reports false for points it does contain. */
 export function pointInConvexPolygon(
   x: number,
   y: number,
