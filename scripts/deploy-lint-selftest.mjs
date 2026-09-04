@@ -38,7 +38,7 @@ import { INSTALLERS, RULES } from './deploy-lint.mjs';
 
 const selftest = makeSelftest('deploy-lint.mjs', '.selftest.bak');
 
-for (const { rule, patterns, skip = {}, exactMatches = {}, forbidden = false, sample } of RULES) {
+for (const { rule, patterns, skip = {}, exactMatches = {}, forbidden = false, violation } of RULES) {
   for (const { platform, file } of INSTALLERS) {
     if (platform in skip) continue;
     const pattern = patterns[platform];
@@ -57,7 +57,7 @@ for (const { rule, patterns, skip = {}, exactMatches = {}, forbidden = false, sa
       }
       selftest.withAppended(
         file,
-        `\n${sample}\n`,
+        `\n${violation}\n`,
         `${platform.padEnd(8)} ${rule}\n      the forbidden text stays green — the rule checks nothing`,
       );
       continue;

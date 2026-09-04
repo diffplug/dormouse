@@ -18,11 +18,7 @@ import { PASSWORD } from './fixtures.mjs';
 test('a bound server records its pid, release and port, owner-only', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'dormouse-rt-'));
   const runtimeFile = join(dir, 'run', 'server.json');
-  // Bound explicitly: the shared helper leaves DORMOUSE_BIND_HOST unset because
-  // bind-host.test.mjs needs that case, and unset means every interface — with
-  // the helper's known setup password, for the length of the test.
   const { child, port } = await startServer({
-    DORMOUSE_BIND_HOST: '127.0.0.1',
     DORMOUSE_RUNTIME_FILE: runtimeFile,
     DORMOUSE_RELEASE_ID: '20260101T000000Z-abc1234',
   });

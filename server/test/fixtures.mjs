@@ -8,8 +8,8 @@ export const ORIGIN = 'http://localhost:3000';
 export const RP_ID = 'localhost';
 
 /**
- * A setup password of the only shape `readConfig` and `createApp` accept: 64
- * lowercase hex characters. Deterministic, not random — every suite that needs
- * one takes it from here so a change to that shape is a single edit.
+ * A setup password of the only shape `readConfig` and `createApp` accept, which
+ * `HEX_ENCODED_32_BYTES_PATTERN` in `server-lib-common` defines. Deterministic,
+ * not random: every suite in this package takes it from here.
  */
 export const PASSWORD = '0123456789abcdef'.repeat(4);

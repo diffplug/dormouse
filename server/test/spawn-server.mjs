@@ -48,6 +48,11 @@ export async function startServer(extraEnv = {}) {
     env: {
       ...process.env,
       DORMOUSE_SETUP_PASSWORD: PASSWORD,
+      // Before `extraEnv`, so a case can opt out with `''` (which `readConfig`
+      // reads as unset) and every other case is loopback: `PASSWORD` is checked
+      // in, and unset would stand that on the LAN and the tailnet for the
+      // length of the test (`docs/specs/server.md` -> Configuration).
+      DORMOUSE_BIND_HOST: '127.0.0.1',
       DORMOUSE_STATE_DIR: stateDir,
       DORMOUSE_POCKET_DIR: join(stateDir, 'no-pocket-build'),
       PORT: String(port),

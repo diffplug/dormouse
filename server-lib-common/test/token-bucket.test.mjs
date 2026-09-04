@@ -9,12 +9,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { TokenBucket } from '../dist/index.js';
-
-/** A manually-advanced clock, so refill is asserted rather than waited out. */
-function makeClock(startMs = 1_700_000_000_000) {
-  let ms = startMs;
-  return { now: () => ms, advance: (delta) => (ms += delta) };
-}
+import { makeClock } from './harness/clock.mjs';
 
 test('the bucket admits one burst, then refills one token per interval', () => {
   const clock = makeClock();
@@ -41,4 +36,20 @@ test('a backwards clock refills nothing', () => {
   assert.equal(bucket.take(), null);
   clock.advance(-10_000);
   assert.equal(bucket.take(), 1_000);
+});
+
+test('a bucket that would never refuse is refused at construction', () => {
+  // `refillIntervalMs: 0` divides to Infinity: every call would refill the
+  // bucket whole, and the bound two `FAIL IF` clauses rest on would be gone
+  // while every call still returned `null` as though it were working.
+  for (const options of [
+    { capacity: 0, refillIntervalMs: 1_000 },
+    { capacity: -1, refillIntervalMs: 1_000 },
+    { capacity: 1.5, refillIntervalMs: 1_000 },
+    { capacity: 8, refillIntervalMs: 0 },
+    { capacity: 8, refillIntervalMs: -1 },
+    { capacity: 8, refillIntervalMs: 1.5 },
+  ]) {
+    assert.throws(() => new TokenBucket(options), /positive safe integer/, JSON.stringify(options));
+  }
 });

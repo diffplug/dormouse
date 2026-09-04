@@ -21,6 +21,15 @@ export class TokenBucket {
   #lastRefillAt: number;
 
   constructor({ capacity, refillIntervalMs, now = Date.now }: TokenBucketOptions) {
+    // Checked because this is exported: two `FAIL IF` clauses rest on the bound
+    // it computes, and a `refillIntervalMs` of 0 divides to `Infinity` — a
+    // bucket that refills fully on every call, which reads as working.
+    if (!Number.isSafeInteger(capacity) || capacity < 1) {
+      throw new Error('token bucket capacity must be a positive safe integer');
+    }
+    if (!Number.isSafeInteger(refillIntervalMs) || refillIntervalMs < 1) {
+      throw new Error('token bucket refill interval must be a positive safe integer');
+    }
     this.#capacity = capacity;
     this.#refillIntervalMs = refillIntervalMs;
     this.#now = now;

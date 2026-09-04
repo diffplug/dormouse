@@ -197,12 +197,10 @@ Pocket browser's debugging port from 100 above the second of them.
 the Server derives from its own origin
 ([`docs/specs/server.md`](../../docs/specs/server.md) → Running it).
 
-**Every listener a run starts binds loopback only.** The server is pinned with
-`DORMOUSE_BIND_HOST=127.0.0.1`, which it does not default to
-([`docs/specs/security-remote.md`](../../docs/specs/security-remote.md) →
-Network posture (self-hosted)); the Host bridge and both Chrome debugging ports
-already do. A step that adds one holds it to the same rule: a run must not put a
-server on the LAN or the tailnet for the length of it.
+Every listener a run starts binds loopback only — the server is pinned with
+`DORMOUSE_BIND_HOST=127.0.0.1`, the Host bridge and both Chrome debugging ports
+already are, and a step that adds one holds to the same rule
+([`docs/specs/server.md`](../../docs/specs/server.md) → Configuration).
 
 ## Known limitations
 

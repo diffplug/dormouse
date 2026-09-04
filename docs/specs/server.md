@@ -69,8 +69,10 @@ context: `localhost` works for development, a real phone needs TLS in front
 reaches the app over loopback and a socket left on every interface also publishes
 the plaintext port to the LAN and to the tailnet itself; the selfhost install
 sets `DORMOUSE_BIND_HOST`, and the default stays unbound for containers, where
-the namespace is the boundary. `pnpm dev:server` opts a laptop in through
-`server/scripts/dev.mjs`, which an explicit value still overrides. Binding loopback is *containment, not admission* —
+the namespace is the boundary. **Every developer and test entrypoint opts back
+in**, each carrying a published credential: `server/scripts/dev.mjs`,
+`server/test/helpers.mjs`, `server/test/spawn-server.mjs`. An explicit value
+wins, as `server/test/bind-host.test.mjs` proves. Binding loopback is *containment, not admission* —
 every route is still gated by the setup password or a bearer token, exactly as
 `docs/specs/security-local.md` -> "Loopback Listeners" requires; `scripts/loopback-lint.mjs` does
 not cover this socket (rationale).
@@ -87,7 +89,7 @@ hostname.
 app** — the only disk half of an otherwise pure env→config mapping.
 
 Source of truth: `readConfig` in `server/src/config.ts`,
-`server/src/enroll-token.ts`; pinned by `server/test/config.test.mjs`,
+`server/src/enroll-token.ts`, `server/scripts/dev.mjs`; pinned by `server/test/config.test.mjs`,
 `server/test/runtime-file.test.mjs`, `server/test/bind-host.test.mjs`,
 `server/test/enroll-token.test.mjs`.
 

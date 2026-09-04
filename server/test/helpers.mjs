@@ -16,18 +16,8 @@ import { createApp } from '../dist/app.js';
 import { SimAuthenticator } from '../../server-lib-common/test/harness/actors.mjs';
 import { ORIGIN, PASSWORD, RP_ID } from './fixtures.mjs';
 
-export { ORIGIN, PASSWORD, RP_ID } from './fixtures.mjs';
-
-/** A manually-advanced clock for TTL/expiry tests. */
-export function makeClock(startMs = 1_700_000_000_000) {
-  let ms = startMs;
-  return {
-    now: () => ms,
-    advance(delta) {
-      ms += delta;
-    },
-  };
-}
+export * from './fixtures.mjs';
+export { makeClock } from '../../server-lib-common/test/harness/clock.mjs';
 
 /**
  * No app here pays the real `CREDENTIAL_FAILURE_DELAY_MS`: a suite full of 401s
@@ -190,7 +180,9 @@ const OPEN_SOCKETS = new Set();
 
 export function startServer(created) {
   return new Promise((resolve) => {
-    const server = serve({ fetch: created.app.fetch, port: 0 }, (info) => {
+    // Loopback for the reason `spawn-server.mjs` states: these carry the
+    // checked-in `PASSWORD`, and a test suite must not publish one.
+    const server = serve({ fetch: created.app.fetch, port: 0, hostname: '127.0.0.1' }, (info) => {
       created.injectWebSocket(server);
       resolve({
         server,

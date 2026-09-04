@@ -632,10 +632,9 @@ reports which mode is live rather than asserting either.
 - **Loopback backend, publicly safe HTTPS origin.** The install pins
   `DORMOUSE_BIND_HOST=127.0.0.1` and refuses to proceed without it
   (`docs/specs/server.md` → Configuration). Port 3100, not 3000, so the service
-  coexists with `pnpm dev:server`. Serve is the
-  private default; Funnel is safe to enable because the application controls,
-  not network privacy, govern admission (`docs/specs/security-remote.md` →
-  "Network posture").
+  coexists with `pnpm dev:server`. Serve is the private default; Funnel is safe
+  to enable because the application controls, not network privacy, govern
+  admission (`docs/specs/security-remote.md` → "Network posture").
 - **`DORMOUSE_ORIGIN` is durable WebAuthn identity**, derived from the node's
   MagicDNS name. An installation recording a different origin stops the
   installer, because rewriting silently invalidates the registered passkey and

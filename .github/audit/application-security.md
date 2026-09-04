@@ -24,8 +24,8 @@ in one and quietly absent from another is a finding.
 
 The end-to-end boundary is where the depth goes. Its modules are
 `server-lib-common/src/security/noise.ts`, `noise-transport.ts`,
-`e2e-ceremony.ts`, `e2e-bounds.ts`, `push-seal.ts`, `pairing-invitation.ts`,
-`presence.ts` and `acl.ts`;
+`e2e-ceremony.ts`, `e2e-bounds.ts`, `token-bucket.ts`, `push-seal.ts`,
+`pairing-invitation.ts`, `presence.ts` and `acl.ts`;
 `server-lib-common/src/remote/wire.ts` (the frame shapes and their guards);
 `lib/src/remote/host/remote-host.ts` (both ceremonies, every Host bound);
 `lib/src/remote/host/push-delivery.ts`; `lib/src/remote/client/pocket-client.ts`

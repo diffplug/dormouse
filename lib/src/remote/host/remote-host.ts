@@ -358,6 +358,11 @@ export class RemoteHost {
    */
   readonly #initTokens: TokenBucket;
 
+  /** `take()` answers `null` on success; neither call site wants the wait. */
+  #spendInitToken(): boolean {
+    return this.#initTokens.take() === null;
+  }
+
   /** Cancels the armed reaper timer, or null when none is armed. */
   #cancelReaper: (() => void) | null = null;
   /** The instant the armed timer is for, so an unchanged deadline is not re-armed. */
@@ -930,7 +935,7 @@ export class RemoteHost {
     if (!held || held.state !== 'live') return;
     // The last gate before any WebCrypto runs, so a flood that names live
     // invitations costs a map lookup each and nothing more.
-    if (this.#initTokens.take() !== null) return;
+    if (!this.#spendInitToken()) return;
     let handshakeHash: string;
     let clientStaticPublicKey: string;
     let session: NoiseTransportSession;
@@ -1184,7 +1189,7 @@ export class RemoteHost {
     // Before the await, so a refused frame cannot even reach the one-time
     // import behind it: a bucket that gated only the responder would still let
     // a flood decide when this Host does WebCrypto.
-    if (this.#initTokens.take() !== null) return;
+    if (!this.#spendInitToken()) return;
     const staticKeyPair = await this.#loadNoiseStatic();
     if (!staticKeyPair) return;
     let session: NoiseTransportSession;

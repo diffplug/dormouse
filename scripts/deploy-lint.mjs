@@ -62,10 +62,11 @@ export const INSTALLERS = [
  * matched control in turn and requires this lint to fail.
  *
  * `forbidden` inverts the rule: the pattern must match NOTHING, for a `FAIL IF`
- * that names a thing an installer must not do. Anchored on a non-comment line
- * so prose explaining why the thing is absent is not itself the violation, and
- * paired with `sample` — the text `deploy-lint-selftest.mjs` appends to prove
- * the absence is checked rather than merely true.
+ * that names a thing an installer must not do. Anchored on the act the spec
+ * forbids rather than on the subject, so prose explaining why the thing is
+ * absent is not itself the violation, and paired with `violation` — the text
+ * `deploy-lint-selftest.mjs` appends to prove the absence is checked rather
+ * than merely true. `exactMatches` is meaningless beside it and is refused.
  *
  * `exactMatches` is for a control the installer writes at several sites on
  * purpose — in its own body and into the generated `manage` — where matching
@@ -181,15 +182,16 @@ export const RULES = [
     // The inverse of a control: Funnel is a deployment choice the application
     // boundary is expected to survive, so an installer that inspects, warns
     // about, or flips it would re-introduce the tailnet-only premise the
-    // analysis no longer makes. Matched on a non-comment line, so a comment
-    // saying verify deliberately does not check it stays legal.
+    // analysis no longer makes. Anchored on the invocation and the setting, not
+    // on the word — every way to judge Funnel state has to obtain it first, and
+    // banning the word would outlaw the prose that explains the absence.
     rule: 'Network posture — no installer or `manage` makes Funnel state a verdict',
     forbidden: true,
-    sample: 'tailscale funnel status',
+    violation: 'tailscale funnel status',
     patterns: {
-      macOS: /^\s*[^#\s][^\n]*funnel/im,
-      Linux: /^\s*[^#\s][^\n]*funnel/im,
-      Windows: /^\s*[^#\s][^\n]*funnel/im,
+      macOS: /(?:tailscale|ts)\s+funnel|AllowFunnel/i,
+      Linux: /(?:tailscale|ts)\s+funnel|AllowFunnel/i,
+      Windows: /(?:tailscale|Invoke-Tailscale).{0,20}funnel|AllowFunnel/i,
     },
   },
   {
@@ -493,6 +495,9 @@ export function check() {
   let checked = 0;
 
   for (const { rule, patterns, skip = {}, exactMatches = {}, forbidden = false } of RULES) {
+  if (forbidden && Object.keys(exactMatches).length > 0) {
+    throw new Error(`${rule}: a forbidden rule counts to zero, so exactMatches cannot apply`);
+  }
   for (const { platform, file } of INSTALLERS) {
     if (platform in skip) continue;
     const pattern = patterns[platform];
