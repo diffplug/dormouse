@@ -317,6 +317,39 @@ describe('TerminalProtocolParser', () => {
     ]);
   });
 
+  it('leaves a C1 device-attributes run inside a forwarded payload alone', () => {
+    // `\x9b>q` is only a query in ground text. Inside a sixel or Kitty payload
+    // those are the sequence's own bytes: deleting them corrupts the image on
+    // its way to xterm.js and answers a query nobody asked. The `ESC` spelling
+    // cannot reach here — it would have ended the string.
+    const complete = new TerminalProtocolParser();
+    const result = complete.process('\x1bPq\x9b>qAAA\x1b\\');
+
+    expect(result.visibleData).toBe('\x1bPq\x9b>qAAA\x1b\\');
+    expect(result.events).toEqual([]);
+
+    // Ground text either side of the same chunk is still answered.
+    const mixed = new TerminalProtocolParser();
+    const both = mixed.process('a\x1b[>q\x1bPq\x9b>qAAA\x1b\\b');
+    expect(both.visibleData).toBe('a\x1bPq\x9b>qAAA\x1b\\b');
+    expect(both.events).toEqual([
+      { kind: 'response', data: ITERM2_DEVICE_ATTRIBUTES_RESPONSE },
+    ]);
+  });
+
+  it('never holds a byte of a forwarded payload back as a pending query', () => {
+    // A chunk that begins forwarding ends inside the payload, so the trailing
+    // `\x9b` is the sequence's. Held as a partial query it would be stripped
+    // now and re-emitted after the string's terminator, since the forwarding
+    // path never reads `pending`.
+    const parser = new TerminalProtocolParser();
+    const first = parser.process('\x1bPqAAA\x9b');
+    const second = parser.process('BBB\x1b\\');
+
+    expect(first.visibleData + second.visibleData).toBe('\x1bPqAAA\x9bBBB\x1b\\');
+    expect(first.events).toEqual([]);
+  });
+
   it('frames a string control split in every position', () => {
     // Introducer split: `ESC` ends one chunk, `P` starts the next.
     const introducer = new TerminalProtocolParser();
