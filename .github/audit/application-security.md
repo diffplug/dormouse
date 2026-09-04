@@ -105,6 +105,11 @@ Be adversarial, and go past the `FAIL IF` list. Ask specifically:
 - Where does untrusted input enter — relay frames, push endpoints, terminal
   bytes, notification text, state files read back from disk — and what happens
   on a malformed, oversized, or hostile value?
+- Does the iframe proxy replace framing controls with exactly `'self'` plus the
+  fully validated app ancestor chain, and only when that chain is usable? Treat
+  `'self'` as the explicit same-grant nesting relaxation: confirm each grant is
+  one origin bound to one upstream, no wildcard or foreign source is admitted,
+  and the no-chain path preserves the upstream controls and injects no shim.
 - Does the shipped code still match what the specs and this section claim? Spec
   drift is a finding; say which side is wrong. The newest sections are the ones
   most likely to have drifted: `remote-security-model.md`'s Presence proofs,

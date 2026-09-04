@@ -103,9 +103,11 @@ describe('normalizeEmbedderOrigins', () => {
     }
   });
 
-  it('renders every ancestor into the policy', () => {
+  it("allows only 'self' and every validated app ancestor", () => {
+    expect(frameAncestorsCsp(['tauri://localhost']))
+      .toBe("frame-ancestors 'self' tauri://localhost");
     expect(frameAncestorsCsp(['vscode-webview://abc-123', 'vscode-file://vscode-app']))
-      .toBe('frame-ancestors vscode-webview://abc-123 vscode-file://vscode-app');
+      .toBe("frame-ancestors 'self' vscode-webview://abc-123 vscode-file://vscode-app");
   });
 });
 

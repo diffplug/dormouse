@@ -102,4 +102,6 @@ A post-open blank-tab sweep can become such a query when a later relaunch, expli
 
 **Why a partial chain is no chain.** A `frame-ancestors` naming a subset of the real ancestors blocks Dormouse's own frame, the one embed that must always work. Failing closed to "no chain" instead leaves the caller exactly what the upstream would have served it directly.
 
+**Why the policy also admits `'self'`.** Storybook and similar apps render same-origin documents in nested frames, so an app-only ancestor list blocks their inner document. Each proxy origin belongs to one grant and one fixed upstream; documents already executing there share same-origin authority. Admitting `'self'` deliberately lets a proxy document frame another document from that grant, including after a top-level navigation, but no foreign ancestor matches and no grant can frame another grant.
+
 **Why the idle timer refreshes for an absent `Origin`.** "Own origin only" would expire a grant the user is still looking at, because a live frame's navigations and sub-resource loads carry no `Origin` at all. What a foreign `Origin` must not buy is keeping a closed pane's grant — and its live upstream binding — alive indefinitely by polling.

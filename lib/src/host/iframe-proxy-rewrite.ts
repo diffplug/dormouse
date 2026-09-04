@@ -28,9 +28,11 @@ export const HOP_BY_HOP_RESPONSE_HEADERS = new Set([
  * alike) can tell the two embedders apart at request time. So the recognizer
  * cannot be a request header — it is the *embedder* that has to be named, and
  * `frame-ancestors` is the mechanism browsers already enforce for exactly that
- * question. With it, a stranger's frame never loads; without a known embedder
- * origin the upstream's own "do not embed" is forwarded untouched, which grants
- * the caller nothing it could not get by reaching the upstream directly.
+ * question. The replacement also admits `'self'`: documents already inside one
+ * fixed-upstream grant may frame each other, which is required by apps such as
+ * Storybook whose preview is a nested iframe. A stranger's foreign ancestor
+ * still never matches; without a known app embedder origin the upstream's own
+ * "do not embed" is forwarded untouched.
  */
 export const FRAMING_RESPONSE_HEADERS = new Set([
   'x-frame-options', 'content-security-policy', 'content-security-policy-report-only',
@@ -68,9 +70,13 @@ export function normalizeEmbedderOrigins(value: unknown): string[] | null {
   return out;
 }
 
-/** The `Content-Security-Policy` the proxy serves in place of the upstream's. */
+/**
+ * The `Content-Security-Policy` the proxy serves in place of the upstream's.
+ * `'self'` permits nested documents within this one per-grant origin; every
+ * external ancestor must still be in the validated app chain.
+ */
 export function frameAncestorsCsp(embedderOrigins: string[]): string {
-  return `frame-ancestors ${embedderOrigins.join(' ')}`;
+  return `frame-ancestors 'self' ${embedderOrigins.join(' ')}`;
 }
 
 // The fixed, Dormouse-owned shim — like agent-browser's EDIT_SCRIPTS, never

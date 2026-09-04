@@ -116,6 +116,13 @@ and reading that document's live URL and anchor hrefs back cross-origin. No requ
 header can tell that page apart from Dormouse's webview, which is why the replacement
 `frame-ancestors` has to name the embedder chain the webview supplied.
 
+**Why same-grant framing is an accepted relaxation.** Storybook and similar apps put
+same-origin documents in nested frames, which an app-only policy blocks. The extra
+`'self'` source also permits a proxy page loaded top-level to frame another document
+from that grant, but one grant is one origin and one fixed upstream: those documents
+already share same-origin authority. A foreign page still appears in the ancestor
+chain and fails the policy, and a different grant has a different origin.
+
 **Why the listener set is derived, not trusted.** An enumeration goes stale the moment
 someone adds a listener — the same failure mode that once left `.vscode/` owned by
 nobody.

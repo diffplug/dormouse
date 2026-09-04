@@ -456,7 +456,7 @@ What is rewritten, exactly:
 | request | `Origin` | upstream origin **only** when it is the proxy's own; else forwarded untouched (absent stays absent) |
 | request | `Referer` | proxy origin substituted for the upstream origin |
 | request | `Accept-Encoding` | deleted, so HTML comes back identity for rewriting |
-| response | `X-Frame-Options`, `Content-Security-Policy`, `Content-Security-Policy-Report-Only` | dropped **whole**, never per-directive (rationale) |
+| response | `X-Frame-Options`, `Content-Security-Policy`, `Content-Security-Policy-Report-Only` | replaced **whole** by `frame-ancestors 'self' <validated chain>` (rationale) |
 | response | hop-by-hop (RFC 7230 §6.1) | dropped |
 | response | `Location` | upstream origin rewritten back to the proxy origin, so a redirect stays inside the proxy |
 | response body | `<meta http-equiv="content-security-policy">` | removed, like the header |
@@ -560,10 +560,11 @@ Security boundaries:
 - every other user-supplied `http://` target is trusted as the user's command,
   at the cost of the upstream's own XSS policy inside the frame.
 
-**Must replace the upstream's framing controls with a `frame-ancestors` naming
-the embedder chain, never merely drop them**, and **the shim's `postMessage` must
-target that chain's origin, never `'*'`** (rationale; `docs/specs/security-local.md` → "Loopback
-Listeners"). **With no chain the proxy strips nothing and injects nothing.**
+**Must replace framing controls with exactly `frame-ancestors 'self'
+<validated embedder chain>`.** `'self'` permits same-grant nesting; foreign
+ancestors fail. **The shim's `postMessage` must target that
+chain's origin, never `'*'`** (rationale; `docs/specs/security-local.md` →
+"Loopback Listeners"). **With no chain it preserves headers and injects nothing.**
 
 **Must refresh a grant's idle timer for every caller except one that named itself
 foreign.** `isOwnOrigin` and `isForeignOrigin` are not each other's negation — an

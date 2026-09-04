@@ -168,10 +168,10 @@ describe('iframe proxy — serving', () => {
 
     expect(res.status).toBe(200);
     expect(res.headers['x-frame-options']).toBeUndefined();
-    // Replaced, not merely dropped: only this webview's own ancestor chain may
-    // frame what the upstream said nobody could.
+    // Replaced, not merely dropped: same-grant documents may nest, while every
+    // external ancestor still has to belong to this webview's validated chain.
     expect(res.headers['content-security-policy'])
-      .toBe('frame-ancestors vscode-webview://abc-123 vscode-file://vscode-app');
+      .toBe("frame-ancestors 'self' vscode-webview://abc-123 vscode-file://vscode-app");
     expect(res.body).not.toMatch(/http-equiv=["']?content-security-policy/i);
     expect(res.body).toContain('__dormouse');
     expect(res.body).toMatch(/<\/script><\/head>/);
@@ -211,7 +211,7 @@ describe('iframe proxy — serving', () => {
     expect(res.body).not.toContain('__dormouse');
     expect(res.headers['x-frame-options']).toBeUndefined();
     expect(res.headers['content-security-policy'])
-      .toBe('frame-ancestors vscode-webview://abc-123 vscode-file://vscode-app');
+      .toBe("frame-ancestors 'self' vscode-webview://abc-123 vscode-file://vscode-app");
   });
 
   it('rewrites an upstream-origin Location redirect onto the proxy origin', async () => {
@@ -311,12 +311,12 @@ describe('iframe proxy — the two privileges are the embedder’s, not the port
     s.end('<html><head></head><body>secret</body></html>');
   };
 
-  it('names only the app’s ancestor chain as allowed to frame it', async () => {
+  it("allows only the grant itself and the app's ancestor chain to frame it", async () => {
     const port = await upstream((_q, s) => DENY_HTML(s));
     const res = await get(await frame(`http://127.0.0.1:${port}/`));
 
     expect(res.headers['content-security-policy'])
-      .toBe('frame-ancestors vscode-webview://abc-123 vscode-file://vscode-app');
+      .toBe("frame-ancestors 'self' vscode-webview://abc-123 vscode-file://vscode-app");
     expect(res.headers['x-frame-options']).toBeUndefined();
     expect(res.body).toContain('__dormouse');
   });
