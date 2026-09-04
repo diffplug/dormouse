@@ -115,9 +115,8 @@ per-Host statics are the exception that needs no file protection: non-extractabl
 only endpoint, but an enrolled Host mints setup tokens and a setup token registers an
 owner passkey, so the account is one step behind it rather than beside it.
 
-**The operator cannot choose a weak setup password.** The Server generates 32
-CSPRNG bytes on first boot, persists the lowercase-hex value owner-only, and
-refuses malformed stored state instead of replacing it.
+**The Server generates it, never the operator** (`docs/specs/server.md` ->
+"Configuration").
 
 **Online guessing is bounded without trusting network identity.** Every
 Host-enrollment POST spends from one process-global bucket before its body is read,

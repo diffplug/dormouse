@@ -16,13 +16,12 @@
  * pair repeatedly against it.
  */
 
-import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { API_ROUTES, formatPairingInvitationUrl, generateNoiseKeyPair } from 'server-lib-common';
 
-import { isSetupPassword } from '../dist/setup-password.js';
+import { SetupPasswordStore } from '../dist/state.js';
 import { FakeHost } from '../test/harness/fake-host.mjs';
 
 const serverUrl = (process.argv[2] ?? 'http://localhost:3000').replace(/\/$/, '');
@@ -32,11 +31,13 @@ const stateDir =
 const label = process.env.FAKE_HOST_LABEL ?? 'Fake Host (script)';
 
 async function main() {
-  const stored = JSON.parse(await readFile(join(stateDir, 'setup-password.json'), 'utf8'));
-  if (!isSetupPassword(stored?.password)) {
-    throw new Error(`${join(stateDir, 'setup-password.json')} has no valid setup password`);
+  // The store the Server writes through, so the record's shape and its
+  // validity rule are read from the product rather than mirrored here.
+  const stored = await new SetupPasswordStore(stateDir).load();
+  if (stored === null) {
+    throw new Error(`no setup password in ${stateDir} — start the server against it first`);
   }
-  const password = stored.password;
+  const { password } = stored;
   const res = await fetch(`${serverUrl}${API_ROUTES.hostEnroll}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },

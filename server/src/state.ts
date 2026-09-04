@@ -40,6 +40,35 @@ export class DuplicateCredentialError extends Error {
 }
 
 /**
+ * A state file that is present but does not hold what its store expects.
+ *
+ * Thrown rather than read as first boot, because the caller's next move is to
+ * mint a replacement *over* it: a `vapid.json` holding `null` that reads as
+ * absence costs every phone its push subscription, and an `account.json` that
+ * does the same starts a fresh account under the next registration.
+ */
+export class CorruptStateError extends Error {
+  constructor(
+    readonly path: string,
+    what: string,
+  ) {
+    super(`${path} does not contain a valid ${what}`);
+    this.name = 'CorruptStateError';
+  }
+}
+
+/**
+ * What {@link JsonFileStore.loadRecord} needs to know about a *singleton
+ * record* — a file that is either there and whole or not there at all, as
+ * opposed to the collection files whose rows are filtered individually.
+ */
+interface RecordShape<T> {
+  /** Names the record in the error an operator reads, e.g. `VAPID keypair`. */
+  readonly what: string;
+  isValid(value: unknown): value is T;
+}
+
+/**
  * A tiny JSON-file store: the whole file is one JSON value, written through a
  * temp-file-plus-rename so a crash mid-write can never leave a half-written
  * (unparseable) file, with mutations serialized through a promise chain so two
@@ -71,11 +100,24 @@ abstract class JsonFileStore {
    * is not the same fact as a file that lists nobody.
    */
   protected async readIfPresent<T>(): Promise<T | null> {
+    return (await this.readIfExists<T>()) ?? null;
+  }
+
+  /**
+   * {@link readIfPresent}, reporting absence as `undefined` so it stays distinct
+   * from a file whose whole content is the JSON value `null`. JSON cannot encode
+   * `undefined`, so the two can never collide.
+   *
+   * For a store whose record is always an object, `null` on disk is corrupt
+   * state rather than first boot, and telling them apart with a second `stat`
+   * would read the filesystem at a different instant than the read it explains.
+   */
+  protected async readIfExists<T>(): Promise<T | undefined> {
     let raw: string;
     try {
       raw = await readFile(this.#path, 'utf8');
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
       throw err;
     }
     return JSON.parse(raw) as T;
@@ -158,6 +200,47 @@ abstract class JsonFileStore {
     this.#tail = result.catch(() => undefined);
     return result;
   }
+
+  /**
+   * Read a singleton record, validating it on the way in. `undefined` means the
+   * file is not there; a present file that fails `shape` throws
+   * {@link CorruptStateError}.
+   *
+   * `readIfExists`, not `readIfPresent`: a file whose whole content is `null`
+   * is corrupt state, and the two are indistinguishable once absence is `null`
+   * too.
+   */
+  protected async loadRecord<T>(shape: RecordShape<T>): Promise<T | undefined> {
+    const stored = await this.readIfExists<unknown>();
+    if (stored === undefined) return undefined;
+    if (!shape.isValid(stored)) throw new CorruptStateError(this.#path, shape.what);
+    return stored;
+  }
+
+  /**
+   * Return the persisted record, minting and saving one on first boot. Under
+   * the mutex like every other write — note it is per-process, so two servers
+   * sharing a state dir would still race; sharing one is already unsupported.
+   *
+   * The mint is validated against the same shape the read uses, so a regression
+   * in a generator cannot persist a record the next boot would refuse. A
+   * refused mint writes nothing.
+   */
+  protected loadOrCreateRecord<T extends { readonly createdAt: number }>(
+    shape: RecordShape<T>,
+    create: () => Omit<T, 'createdAt'>,
+  ): Promise<T> {
+    return this.mutate(async () => {
+      const existing = await this.loadRecord(shape);
+      if (existing !== undefined) return existing;
+      const created = { ...create(), createdAt: this.now() } as T;
+      if (!shape.isValid(created)) {
+        throw new Error(`the generated ${shape.what} is not valid; nothing was written`);
+      }
+      await this.writeAtomic(created);
+      return created;
+    });
+  }
 }
 
 /** The server-owned Host-enrollment credential stored in `setup-password.json`. */
@@ -178,49 +261,29 @@ export class SetupPasswordStore extends JsonFileStore {
 
   /** Load and validate the durable credential, or `null` before first boot. */
   async load(): Promise<StoredSetupPassword | null> {
-    const stored = await this.readIfPresent<unknown>();
-    // `readIfPresent` uses null for absence, but JSON itself can contain null.
-    // A present `null` is corrupt state and must not be mistaken for first boot.
-    if (stored === null) {
-      if (await this.exists()) {
-        throw new Error('setup-password.json does not contain a valid server-generated credential');
-      }
-      return null;
-    }
-    if (!isStoredSetupPassword(stored)) {
-      throw new Error('setup-password.json does not contain a valid server-generated credential');
-    }
-    return stored;
+    return (await this.loadRecord(SETUP_PASSWORD_RECORD)) ?? null;
   }
 
-  /**
-   * Return the persisted credential, minting and saving it on first boot.
-   * Refuse a broken generator result instead of persisting a credential whose
-   * entropy or encoding no longer matches the enrollment boundary.
-   */
-  loadOrCreate(generate: () => string): Promise<string> {
-    return this.mutate(async () => {
-      const existing = await this.load();
-      if (existing !== null) return existing.password;
-      const password = generate();
-      if (!isSetupPassword(password)) {
-        throw new Error('setup-password generator did not return 32 bytes as lowercase hex');
-      }
-      const created: StoredSetupPassword = { password, createdAt: this.now() };
-      await this.writeAtomic(created);
-      return password;
-    });
+  /** Return the persisted credential, minting and saving it on first boot. */
+  async loadOrCreate(generate: () => string): Promise<string> {
+    const stored = await this.loadOrCreateRecord(SETUP_PASSWORD_RECORD, () => ({
+      password: generate(),
+    }));
+    return stored.password;
   }
 }
 
+const SETUP_PASSWORD_RECORD: RecordShape<StoredSetupPassword> = {
+  what: 'setup password',
+  isValid: isStoredSetupPassword,
+};
+
 function isStoredSetupPassword(value: unknown): value is StoredSetupPassword {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  if (!value || typeof value !== 'object') return false;
   const stored = value as Record<string, unknown>;
-  return (
-    isSetupPassword(stored.password) &&
-    typeof stored.createdAt === 'number' &&
-    Number.isFinite(stored.createdAt)
-  );
+  // An array fails on `password` alone, and `Number.isFinite` does not coerce,
+  // so it carries the `typeof` too.
+  return isSetupPassword(stored.password) && Number.isFinite(stored.createdAt);
 }
 
 export class AccountStore extends JsonFileStore {
@@ -229,8 +292,8 @@ export class AccountStore extends JsonFileStore {
   }
 
   /** Read `account.json`, or `null` if the account has not been created yet. */
-  load(): Promise<Account | null> {
-    return this.read<Account | null>(null);
+  async load(): Promise<Account | null> {
+    return (await this.loadRecord(ACCOUNT_RECORD)) ?? null;
   }
 
   /** Look up a stored passkey by its base64url credential id. */
@@ -259,6 +322,22 @@ export class AccountStore extends JsonFileStore {
     });
   }
 }
+
+/**
+ * The envelope only. Passkey rows are left as they are found: this file is a
+ * documented hand-edit target (Guardrails) and deleting a row is how a passkey
+ * is revoked, so the shape check belongs around the array rather than inside
+ * it. What the envelope catches is the file being replaced wholesale — `null`
+ * most of all, which would otherwise read as "no account yet" and let the next
+ * registration start a fresh one over it.
+ */
+function isAccount(value: unknown): value is Account {
+  if (!value || typeof value !== 'object') return false;
+  const stored = value as Record<string, unknown>;
+  return typeof stored.accountId === 'string' && Array.isArray(stored.passkeys);
+}
+
+const ACCOUNT_RECORD: RecordShape<Account> = { what: 'account record', isValid: isAccount };
 
 /**
  * An enrolled Host as stored in `hosts.json`. `hostToken` is the WS bearer
@@ -730,23 +809,35 @@ export class VapidStore extends JsonFileStore {
     super(stateDir, 'vapid.json', now);
   }
 
-  load(): Promise<StoredVapidKeys | null> {
-    return this.read<StoredVapidKeys | null>(null);
+  async load(): Promise<StoredVapidKeys | null> {
+    return (await this.loadRecord(VAPID_RECORD)) ?? null;
   }
 
-  /**
-   * Return the persisted keypair, generating and saving one on first call.
-   * Serialized with this store's other writes like every other mutation — note
-   * the mutex is per-process, so two servers sharing a state dir would still
-   * race; sharing one is already unsupported.
-   */
+  /** Return the persisted keypair, generating and saving one on first call. */
   loadOrCreate(generate: () => { publicKey: string; privateKey: string }): Promise<StoredVapidKeys> {
-    return this.mutate(async () => {
-      const existing = await this.load();
-      if (existing) return existing;
-      const created: StoredVapidKeys = { ...generate(), createdAt: this.now() };
-      await this.writeAtomic(created);
-      return created;
-    });
+    return this.loadOrCreateRecord(VAPID_RECORD, generate);
   }
 }
+
+/**
+ * The envelope only: two non-empty strings and a timestamp. Whether they are a
+ * real P-256 keypair is `assertVapidKeyPair`'s question, asked once at the
+ * entrypoint over the configured pair and this record alike — duplicating it
+ * here would be a second definition of a valid key.
+ */
+function isStoredVapidKeys(value: unknown): value is StoredVapidKeys {
+  if (!value || typeof value !== 'object') return false;
+  const stored = value as Record<string, unknown>;
+  return (
+    typeof stored.publicKey === 'string' &&
+    stored.publicKey.length > 0 &&
+    typeof stored.privateKey === 'string' &&
+    stored.privateKey.length > 0 &&
+    Number.isFinite(stored.createdAt)
+  );
+}
+
+const VAPID_RECORD: RecordShape<StoredVapidKeys> = {
+  what: 'VAPID keypair',
+  isValid: isStoredVapidKeys,
+};

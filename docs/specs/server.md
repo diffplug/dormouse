@@ -164,13 +164,20 @@ host would foreclose it.
 
 ## State files
 
-The persistent JSON files are:
+The persistent state is five JSON files, their row shapes sketched here because
+hand-editing them is the documented revocation mechanism (Guardrails):
 
 - `account.json` — `{ accountId, passkeys: [{ credentialId, publicKey /* SPKI b64u */, label, createdAt }] }`
 - `hosts.json` — `[{ hostId, hostToken, enrolledAt }]`; **no label** — the Server keeps no name for a Host
 - `push-subscriptions.json` — `[{ hostId, deliveryId, endpoint, keys, vapidPublicKey, subscribedAt }]`
 - `vapid.json` — `{ publicKey, privateKey, createdAt }`; exists only when no keypair is configured by env
 - `setup-password.json` — `{ password, createdAt }`; Server-generated once
+
+**Must refuse a malformed singleton record** (`account.json`, `vapid.json`,
+`setup-password.json`) rather than read it as first boot and mint over it — a
+whole-file `null` is otherwise indistinguishable from absence. The collection files
+keep their row-level tolerance. Source of truth: `loadRecord` in
+`server/src/state.ts`; test: `server/test/state-records.test.mjs`.
 
 **The Host's ACL is never here** — it lives on the Host, in the process that owns
 the PTYs (`lib/src/host/remote/host-state-store.ts`).

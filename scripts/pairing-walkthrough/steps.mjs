@@ -242,10 +242,17 @@ async function stepServer(ctx) {
     { what: `${ctx.serverOrigin} to answer`, timeoutMs: 60_000 },
   );
 
-  // The Server, not this harness, owns the credential. Read the state it
-  // generated only after the listening line, then type that exact value into
-  // the real enrollment form below.
-  opts.password = JSON.parse(readFileSync(join(stateDir, 'setup-password.json'), 'utf8')).password;
+  // The Server, not this harness, owns the credential, and the store it wrote
+  // through is what reads it back — the same "read the shipped module rather
+  // than a copy" rule {@link securityModule} follows, so a change to the
+  // record's shape cannot leave this typing `undefined` into the form below.
+  // Only after the listening line: first boot is what mints it.
+  const { SetupPasswordStore } = await import(
+    pathToFileURL(join(repoRoot, 'server', 'dist', 'state.js')).href
+  );
+  const storedPassword = await new SetupPasswordStore(stateDir).load();
+  if (storedPassword === null) throw new Error(`no setup password under ${stateDir}`);
+  ctx.state.setupPassword = storedPassword.password;
 
   // Held for the scenarios that take the Server away mid-story; nothing on the
   // happy path touches it.
@@ -322,7 +329,7 @@ async function stepEnroll(ctx) {
   const { opts } = ctx;
 
   await fillField(ctx, 'input[type="url"]', ctx.serverOrigin);
-  await fillField(ctx, 'input[type="password"]', opts.password);
+  await fillField(ctx, 'input[type="password"]', ctx.state.setupPassword);
   await fillField(ctx, 'input[placeholder="e.g. Work laptop"]', opts.machineName);
   await ctx.shot('03-enroll-form.png');
 

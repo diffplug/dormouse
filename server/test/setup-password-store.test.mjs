@@ -8,8 +8,7 @@ import { join } from 'node:path';
 
 import { generateSetupPassword, isSetupPassword } from '../dist/setup-password.js';
 import { SetupPasswordStore } from '../dist/state.js';
-
-const PASSWORD = '0123456789abcdef'.repeat(4);
+import { PASSWORD } from './fixtures.mjs';
 
 test('the setup password is minted once and persisted owner-only', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dormouse-setup-password-'));
@@ -49,7 +48,7 @@ test('malformed persisted credentials are refused, never silently replaced', asy
     await writeFile(join(stateDir, 'setup-password.json'), contents);
     await assert.rejects(
       new SetupPasswordStore(stateDir).loadOrCreate(() => PASSWORD),
-      /does not contain a valid server-generated credential/,
+      /setup-password\.json does not contain a valid setup password/,
     );
   }
 });
@@ -58,7 +57,7 @@ test('an invalid generator result is refused without creating state', async () =
   const stateDir = await mkdtemp(join(tmpdir(), 'dormouse-setup-password-'));
   await assert.rejects(
     new SetupPasswordStore(stateDir).loadOrCreate(() => 'not-random'),
-    /generator did not return 32 bytes as lowercase hex/,
+    /the generated setup password is not valid/,
   );
   await assert.rejects(readFile(join(stateDir, 'setup-password.json')), /ENOENT/);
 });

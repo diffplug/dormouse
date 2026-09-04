@@ -100,13 +100,19 @@ export const RULES = [
     // The setup password belongs to Server state. Supplying the former
     // environment input from any installer path would restore the exact
     // operator-chosen credential this audit is meant to exclude.
+    //
+    // Anchored on the assignment, not the bare identifier: the name alone would
+    // make a comment telling an operator the key is now inert a lint failure —
+    // `config/server.env` is preserved byte-for-byte, so an upgraded install
+    // keeps exporting a dead one and naming it is how that gets explained.
     rule: 'Credentials at rest — no installer supplies a setup password as configuration',
     forbidden: true,
     violation: 'DORMOUSE_SETUP_PASSWORD=weak',
     patterns: {
-      macOS: /DORMOUSE_SETUP_PASSWORD/,
-      Linux: /DORMOUSE_SETUP_PASSWORD/,
-      Windows: /DORMOUSE_SETUP_PASSWORD/,
+      macOS: /DORMOUSE_SETUP_PASSWORD\s*=/,
+      Linux: /DORMOUSE_SETUP_PASSWORD\s*=/,
+      // The PowerShell supply site is a hashtable index, not a `KEY=` line.
+      Windows: /DORMOUSE_SETUP_PASSWORD\s*=|EnvironmentVariables\['DORMOUSE_SETUP_PASSWORD'\]/,
     },
   },
   {
@@ -118,7 +124,21 @@ export const RULES = [
       Linux: /password_file="\$STATE_DIR\/setup-password\.json"/,
       Windows: /Join-Path \$StateDir 'setup-password\.json'/,
     },
-    exactMatches: { macOS: 1, Linux: 1, Windows: 1 },
+  },
+  {
+    // Each installer reads the record twice — `manage show-password` and the
+    // candidate probe — in scopes that cannot share a helper, and each spells
+    // the shape out. `isSetupPassword` in `server/src/setup-password.ts` is the
+    // real definition; nothing links these copies to it, so a drift to `{32}`
+    // would halve the entropy the audit claims with every other rule green.
+    // Counted, because matching one copy would let the other be relaxed alone.
+    rule: 'Credentials at rest — every installer setup-password reader requires 64 hex characters',
+    patterns: {
+      macOS: /\[0-9a-f\]\{64\}/,
+      Linux: /\[0-9a-f\]\{64\}/,
+      Windows: /\[0-9a-f\]\{64\}/,
+    },
+    exactMatches: { macOS: 2, Linux: 2, Windows: 2 },
   },
   {
     // Windows-only, and the only thing enforcing owner-only on `hosts.json`

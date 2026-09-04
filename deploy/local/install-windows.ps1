@@ -267,6 +267,32 @@ function Protect-Path {
   (Get-Item -LiteralPath $Path -Force).SetAccessControl($sec)
 }
 
+# The read counterpart of Protect-Path, and the installer-scope twin of the
+# Test-OwnerOnly `manage` carries: no principal other than the current user may
+# appear in the DACL. Duplicated per scope like Remove-Tree, Invoke-NodeScript
+# and the other helpers both halves of this file need -- the manage body below
+# is a verbatim here-string and cannot be called from here.
+#
+# Deliberately NOT a check that the DACL is protected from inheritance: a file
+# the server creates inside an already-locked directory inherits that single
+# owner-only ACE, which is the property wanted.
+$script:CurrentUserSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+function Test-OwnerOnly {
+  param([Parameter(Mandatory)][string]$Path)
+  if (-not (Test-Path -LiteralPath $Path)) { return [pscustomobject]@{ Ok = $false; Reason = 'missing' } }
+  $acl = Get-Acl -LiteralPath $Path
+  $others = @()
+  foreach ($rule in $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
+    if ($rule.IdentityReference.Value -ne $script:CurrentUserSid) {
+      $others += $rule.IdentityReference.Value
+    }
+  }
+  if ($others.Count -gt 0) {
+    return [pscustomobject]@{ Ok = $false; Reason = "also grants $(($others | Select-Object -Unique) -join ', ')" }
+  }
+  return [pscustomobject]@{ Ok = $true; Reason = '' }
+}
+
 # 32 bytes of the platform CSPRNG as 64 lowercase hex characters. The enrollment
 # offer is the one secret this installer mints; the Server owns its setup
 # password and persists it under state/ on first boot. Never substitute
@@ -1470,7 +1496,11 @@ function Invoke-Verify {
       Fail "bin\run-server.ps1 is missing or has no supervision loop"
     }
 
-    if (-not $taskXml) { Fail "the task definition could not be exported" }
+    # The only consumer left is the source-checkout search near the end, so an
+    # export that failed means that search covered the wrapper alone. Reported
+    # here, inside the registered-task branch, so an unregistered task fails
+    # once rather than twice.
+    if (-not $taskXml) { Fail "the task definition could not be exported -- it was not searched for the source checkout" }
   } else {
     Fail "Scheduled Task $TASK_PATH$LABEL is not registered"
   }
@@ -1640,8 +1670,7 @@ function Invoke-Verify {
     if ($wrapperText -match [regex]::Escape($src)) { $refs = $true }
     if ($taskXml -match [regex]::Escape($src)) { $refs = $true }
     if ($refs) { Fail "the Scheduled Task or wrapper references the source checkout ($src)" }
-    elseif (-not $taskXml) { Fail "the task definition could not be exported -- only the wrapper was searched for the source checkout" }
-    else { Pass "the installed service does not reference the source checkout" }
+    elseif ($taskXml) { Pass "the installed service does not reference the source checkout" }
   }
 
   Write-Host ""

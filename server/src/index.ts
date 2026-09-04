@@ -17,7 +17,7 @@ import {
 } from './push.js';
 import { removeRuntimeFile, writeRuntimeFile } from './runtime-file.js';
 import { generateSetupPassword } from './setup-password.js';
-import { SetupPasswordStore, VapidStore } from './state.js';
+import { CorruptStateError, SetupPasswordStore, VapidStore } from './state.js';
 
 function loadConfig() {
   try {
@@ -35,14 +35,37 @@ const { port, bindHost, vapidKeys, vapidSubject, runtimeFile, releaseId, ...appC
   loadConfig();
 const { origin, stateDir } = appConfig;
 
-// Enrollment's bootstrap credential is server state, never configuration an
-// operator can weaken. Like the VAPID private key below, it is minted once and
-// persisted through the state store's owner-only atomic write.
-const setupPassword = await new SetupPasswordStore(stateDir).loadOrCreate(generateSetupPassword);
+/**
+ * The two records the Server mints for itself. Two independent state files, so
+ * one round of I/O rather than two before the port is bound: enrollment's
+ * bootstrap credential is server state, never configuration an operator can
+ * weaken, and the VAPID keypair is the one part of that story which is not a
+ * pure env read. Each is minted once and persisted through its store's
+ * owner-only atomic write.
+ *
+ * A corrupt record stops the boot rather than being minted over, so this exits
+ * the way a bad `DORMOUSE_VAPID_*` pair does instead of as an unhandled
+ * rejection — the repair is the operator's to choose, and both directions cost
+ * something: replacing the setup password re-enrolls every Host, replacing the
+ * VAPID keypair invalidates every phone's push subscription.
+ */
+async function loadMintedState() {
+  try {
+    return await Promise.all([
+      new SetupPasswordStore(stateDir).loadOrCreate(generateSetupPassword),
+      vapidKeys ?? new VapidStore(stateDir).loadOrCreate(generateVapidKeys),
+    ]);
+  } catch (err) {
+    if (err instanceof CorruptStateError) {
+      console.error(`Corrupt server state: ${err.message}`);
+      console.error(`Restore a good copy of ${err.path}, or delete it to mint a replacement.`);
+      process.exit(1);
+    }
+    throw err;
+  }
+}
 
-// The one part of the VAPID story that is not a pure env read: with no keys
-// configured, mint a pair once and persist it (0o600).
-const vapid = vapidKeys ?? (await new VapidStore(stateDir).loadOrCreate(generateVapidKeys));
+const [setupPassword, vapid] = await loadMintedState();
 try {
   assertVapidKeyPair(vapid);
   if (vapidSubject !== null) assertVapidSubject(vapidSubject);

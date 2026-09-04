@@ -805,7 +805,7 @@ env_value() {
 
 PORT="$(env_value PORT || echo 3100)"
 ORIGIN="$(env_value DORMOUSE_ORIGIN || echo "")"
-NODE_FOR_HTTP="$ROOT/current/runtime/node"
+NODE_BIN="$ROOT/current/runtime/node"
 
 TS_BIN=""
 command -v tailscale >/dev/null 2>&1 && TS_BIN="$(command -v tailscale)"
@@ -820,8 +820,8 @@ http_ok() {
     curl -sf -o /dev/null --max-time "$timeout" "$url"
     return $?
   fi
-  [ -x "$NODE_FOR_HTTP" ] || return 2
-  "$NODE_FOR_HTTP" -e '
+  [ -x "$NODE_BIN" ] || return 2
+  "$NODE_BIN" -e '
 const http = require("http");
 const req = http.get(process.argv[1], { timeout: Number(process.argv[2]) * 1000 }, (res) => {
   res.resume();
@@ -1216,7 +1216,7 @@ cmd_show_password() {
   read -r reply || true
   case "$reply" in y|Y|yes|YES) ;; *) printf 'aborted\n'; return 1 ;; esac
   local password_file="$STATE_DIR/setup-password.json" password
-  if ! password="$("$NODE_FOR_HTTP" -e '
+  if ! password="$("$NODE_BIN" -e '
 const fs = require("fs");
 const stored = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
 if (!stored || !/^[0-9a-f]{64}$/.test(stored.password)) process.exit(1);

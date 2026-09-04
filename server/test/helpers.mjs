@@ -180,8 +180,8 @@ const OPEN_SOCKETS = new Set();
 
 export function startServer(created) {
   return new Promise((resolve) => {
-    // Loopback for the reason `spawn-server.mjs` states: these carry the
-    // checked-in `PASSWORD`, and a test suite must not publish one.
+    // Loopback: these are built with the checked-in `PASSWORD` from
+    // `fixtures.mjs`, and a test suite must not publish one.
     const server = serve({ fetch: created.app.fetch, port: 0, hostname: '127.0.0.1' }, (info) => {
       created.injectWebSocket(server);
       resolve({

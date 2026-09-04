@@ -599,7 +599,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="$ROOT/config/server.env"
 OFFER_FILE="$ROOT/run/enroll-offer.json"
 STATE_DIR="$ROOT/state"
-NODE_FOR_STATE="$ROOT/current/runtime/node"
+NODE_BIN="$ROOT/current/runtime/node"
 LOG_DIR="$HOME/Library/Logs/Dormouse Server"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 # A test install (DORMOUSE_INSTALL_ROOT) keeps its logs and plist inside its own
@@ -968,7 +968,7 @@ cmd_show_password() {
   read -r reply || true
   case "$reply" in y|Y|yes|YES) ;; *) printf 'aborted\n'; return 1 ;; esac
   local password_file="$STATE_DIR/setup-password.json" password
-  if ! password="$("$NODE_FOR_STATE" -e '
+  if ! password="$("$NODE_BIN" -e '
 const fs = require("fs");
 const stored = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
 if (!stored || !/^[0-9a-f]{64}$/.test(stored.password)) process.exit(1);
@@ -1146,6 +1146,18 @@ probe_cleanup() {
   rm -f "$PROBE_LOG"
 }
 
+# One exit for every candidate failure, the counterpart of the Linux installer's:
+# show what the candidate said, tear the probe down, discard the half-staged
+# release, and say the live service was never touched. Typing it out per check
+# is how a check that forgets `rm -rf "$STAGE"` gets written.
+die_candidate() {
+  echo "--- candidate output ---" >&2
+  cat "$PROBE_LOG" >&2
+  probe_cleanup
+  rm -rf "$STAGE"
+  die "$1 The live service was left untouched."
+}
+
 PROBE_OK=0
 i=0
 while [ $i -lt 60 ]; do
@@ -1155,33 +1167,19 @@ while [ $i -lt 60 ]; do
   i=$((i + 1))
 done
 
-if [ "$PROBE_OK" != "1" ]; then
-  echo "--- candidate output ---" >&2
-  cat "$PROBE_LOG" >&2
-  probe_cleanup
-  rm -rf "$STAGE"
-  die "the candidate release did not answer /api/hello. The live service was left untouched."
-fi
+[ "$PROBE_OK" = "1" ] || die_candidate "the candidate release did not answer /api/hello."
 ok "candidate answers /api/hello (scrubbed PATH, ephemeral port $PROBE_PORT)"
 
-if curl -sf -o /dev/null "http://127.0.0.1:$PROBE_PORT/"; then
-  ok "candidate serves the Pocket app"
-else
-  probe_cleanup
-  rm -rf "$STAGE"
-  die "the candidate release did not serve the Pocket index. The live service was left untouched."
-fi
-if ! "$STAGE/runtime/node" -e '
+curl -sf -o /dev/null "http://127.0.0.1:$PROBE_PORT/" || die_candidate "the candidate release did not serve the Pocket index."
+ok "candidate serves the Pocket app"
+
+"$STAGE/runtime/node" -e '
 const fs = require("fs");
 const file = process.argv[1];
 const stored = JSON.parse(fs.readFileSync(file, "utf8"));
 if (!stored || !/^[0-9a-f]{64}$/.test(stored.password)) process.exit(1);
 if ((fs.statSync(file).mode & 0o777) !== 0o600) process.exit(1);
-' "$PROBE_STATE/setup-password.json"; then
-  probe_cleanup
-  rm -rf "$STAGE"
-  die "the candidate did not generate an owner-only setup password. The live service was left untouched."
-fi
+' "$PROBE_STATE/setup-password.json" || die_candidate "the candidate did not generate an owner-only setup password."
 ok "candidate generated its setup password in owner-only state"
 probe_cleanup
 
