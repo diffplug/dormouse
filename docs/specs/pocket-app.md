@@ -15,8 +15,8 @@ remote-api v1 terminal protocol:
 | ------------------------ | --------------------------------------- |
 | `onPtyList`              | `directory.snapshot`                    |
 | attach semantics         | `surface.attach` (attach-is-the-resize) |
-| `onPtyData`              | `terminal.data`                         |
-| `writePty`               | `terminal.write`                        |
+| `onPtyData`              | `terminal.data`, both projections        |
+| `writePty`               | `terminal.write`, minus renderer replies |
 | `resizePty`              | `terminal.resize`                       |
 | `onPtyExit`              | `terminal.closed`                       |
 

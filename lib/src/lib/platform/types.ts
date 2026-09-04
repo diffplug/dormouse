@@ -159,7 +159,10 @@ export interface RemoteHostLink {
  * renders; `textData` is the same chunk with string-control payloads removed,
  * for consumers reading it as text. **Omitted when identical to `data`**, which
  * is the common case, so the two never cost twice the bytes over a transport
- * (`docs/specs/transport.md`).
+ * (`docs/specs/transport.md`). The same pair crosses every Host seam and the
+ * remote wire — `ProcessedPtyChunk` in
+ * `lib/src/remote/host/host-surface-provider.ts`, `TerminalDataEvent` in
+ * `server-lib-common/src/remote/wire.ts` — under the same omitted/present rule.
  */
 export interface PtyDataDetail {
   id: string;

@@ -11,7 +11,7 @@ import { toBase64Url, utf8Encode, type DirectoryEntry } from 'server-lib-common'
 
 import { RemotePtyAdapter, type RemoteAdapterClient } from './remote-adapter';
 import type { TerminalHandlers } from './pocket-client';
-import type { PtyInfo } from '../../lib/platform/types';
+import type { PtyDataDetail, PtyInfo } from '../../lib/platform/types';
 
 interface AttachCall {
   surfaceId: string;
@@ -194,13 +194,40 @@ describe('RemotePtyAdapter attach / active pane', () => {
   it('decodes terminal.data (base64url utf8) into an onPtyData string', async () => {
     const client = new FakeClient();
     const adapter = new RemotePtyAdapter(client);
-    const data: Array<{ id: string; data: string }> = [];
+    const data: PtyDataDetail[] = [];
     adapter.onPtyData((d) => data.push(d));
 
     await adapter.setActivePane('s1', 80, 24);
-    client.lastAttach().handlers.onData(toBase64Url(utf8Encode('héllo ▲')));
+    client.lastAttach().handlers.onData({ bytes: toBase64Url(utf8Encode('héllo ▲')) });
 
-    expect(data).toEqual([{ id: 's1', data: 'héllo ▲' }]);
+    // No `text` means the two projections are identical, so `textData` stays
+    // omitted and `terminal-lifecycle`'s `textData ?? data` fallback is right.
+    expect(data).toEqual([{ id: 's1', data: 'héllo ▲', textData: undefined }]);
+  });
+
+  it('passes the text projection through, empty included', async () => {
+    const client = new FakeClient();
+    const adapter = new RemotePtyAdapter(client);
+    const data: PtyDataDetail[] = [];
+    adapter.onPtyData((d) => data.push(d));
+
+    await adapter.setActivePane('s1', 80, 24);
+    const image = 'pre\x1b]1337;File=inline=1:AAAA\x07post';
+    client.lastAttach().handlers.onData({
+      bytes: toBase64Url(utf8Encode(image)),
+      text: toBase64Url(utf8Encode('prepost')),
+    });
+    // Present and empty is authoritative: the image base64 must not reach the
+    // prompt heuristic through the `textData ?? data` fallback.
+    client.lastAttach().handlers.onData({
+      bytes: toBase64Url(utf8Encode('\x1b]1337;File=inline=1:AAAA\x07')),
+      text: toBase64Url(utf8Encode('')),
+    });
+
+    expect(data).toEqual([
+      { id: 's1', data: image, textData: 'prepost' },
+      { id: 's1', data: '\x1b]1337;File=inline=1:AAAA\x07', textData: '' },
+    ]);
   });
 
   it('routes write and resize only to the attached pane', async () => {

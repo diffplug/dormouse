@@ -162,7 +162,10 @@ export class TerminalProtocolParser {
     return {
       visibleData: stripped.visibleData,
       events: filterTerminalBellEvents(events),
-      textData,
+      // The query sat in ground text, so it reached `textData` as well; a
+      // consumed sequence belongs to neither projection, and `textData` must
+      // stay a subset of `visibleData` for a stream that ships both.
+      textData: textData.replace(DEVICE_ATTRIBUTE_QUERY, ''),
     };
   }
 
@@ -713,6 +716,8 @@ function truncateText(input: string, limit: number): string {
 }
 
 const DEVICE_ATTRIBUTE_PENDING_SUFFIXES = ['\x1b[>', '\x1b[', '\x1b', '\x9b>', '\x9b'];
+/** The iTerm2 extended-DA query, in both its ESC and C1 spellings. */
+const DEVICE_ATTRIBUTE_QUERY = /\x1b\[>q|\x9b>q/g;
 
 function stripDeviceAttributeQueries(
   visibleData: string,
@@ -720,26 +725,10 @@ function stripDeviceAttributeQueries(
 ): { visibleData: string; pending: string } {
   const pending = takeDeviceAttributePendingSuffix(visibleData);
   const searchableData = pending ? visibleData.slice(0, -pending.length) : visibleData;
-
-  if (searchableData.indexOf('\x1b[>q') === -1 && searchableData.indexOf('\x9b>q') === -1) {
-    return { visibleData: searchableData, pending };
-  }
-
-  let stripped = '';
-  let index = 0;
-  while (index < searchableData.length) {
-    const escQueryIndex = searchableData.indexOf('\x1b[>q', index);
-    const c1QueryIndex = searchableData.indexOf('\x9b>q', index);
-    if (escQueryIndex === -1 && c1QueryIndex === -1) {
-      stripped += searchableData.slice(index);
-      break;
-    }
-    const useEsc = escQueryIndex !== -1 && (c1QueryIndex === -1 || escQueryIndex < c1QueryIndex);
-    const queryIndex = useEsc ? escQueryIndex : c1QueryIndex;
-    stripped += searchableData.slice(index, queryIndex);
+  const stripped = searchableData.replace(DEVICE_ATTRIBUTE_QUERY, () => {
     events.push({ kind: 'response', data: ITERM2_DEVICE_ATTRIBUTES_RESPONSE });
-    index = queryIndex + (useEsc ? 4 : 3);
-  }
+    return '';
+  });
   return { visibleData: stripped, pending };
 }
 

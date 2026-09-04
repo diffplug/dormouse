@@ -474,6 +474,9 @@ describe('TerminalProtocolParser', () => {
     const result = parser.process(`before\x1b[>qafter`);
 
     expect(result.visibleData).toBe('beforeafter');
+    // A consumed sequence belongs to neither projection: it sat in ground text,
+    // so it has to be taken back out of the text one too.
+    expect(result.textData).toBe('beforeafter');
     expect(result.events).toEqual([
       { kind: 'response', data: ITERM2_DEVICE_ATTRIBUTES_RESPONSE },
     ]);

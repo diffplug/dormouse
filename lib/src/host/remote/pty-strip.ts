@@ -20,6 +20,7 @@
  */
 
 import { TerminalProtocolParser } from '../../lib/terminal-protocol';
+import type { ProcessedPtyChunk } from '../../remote/host/host-surface-provider';
 
 /**
  * A colour for the parser to answer OSC 10/11/12 queries with.
@@ -37,7 +38,10 @@ const CONSUME_COLOR_QUERIES = (): string => '#000000';
  * A per-attachment stripper. Stateful — an OSC split across two PTY chunks is
  * held until it completes — so one is created per stream and never shared.
  */
-export function createPtyStrip(): (data: string) => string {
+export function createPtyStrip(): (data: string) => ProcessedPtyChunk {
   const parser = new TerminalProtocolParser(CONSUME_COLOR_QUERIES);
-  return (data) => parser.process(data).visibleData;
+  return (data) => {
+    const { visibleData, textData } = parser.process(data);
+    return textData === visibleData ? { data: visibleData } : { data: visibleData, textData };
+  };
 }

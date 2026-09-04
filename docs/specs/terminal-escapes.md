@@ -22,7 +22,7 @@ State-driving and security-sensitive OSCs — plus the `CSI > q` query — are p
 
 **Every semantic value `TerminalProtocolParser` *retains* is bounded and stripped of control characters before storage**, whatever the emitter: `TITLE_LIMIT` / `BODY_LIMIT` for titles and notification bodies, whose whitespace controls collapse to spaces before the trim; `COMMAND_LINE_LIMIT` for the OSC 633 `E` command line, bounded *before* the `\xNN` unescape and sanitized *after* it (rationale); `MAX_CWD_LENGTH` for every CWD source, interior whitespace preserved. **Every limit counts code points**, so a cut never splits a surrogate pair. **A value that reduces to nothing is dropped, never stored empty.**
 
-The remote Host in the Tauri sidecar is a second, **strip-only** parse site, **one parser per PTY it streams to a phone, never per attachment** (rationale). **Every event it produces must be discarded, responses included** — the webview that owns the terminal already answers, and a second answer writes duplicate bytes into the PTY's input. **OSC 10/11/12 queries must still be consumed there**, reply thrown away: a *declined* query stays in `visibleData` and the phone's xterm answers it. The VS Code Host needs no such parser ([vscode.md](vscode.md)).
+The remote Host in the Tauri sidecar is a second, **strip-only** parse site, **one parser per PTY it streams to a phone, never per attachment** (rationale). **Every event it produces must be discarded, responses included** — the owner answers ([remote-api.md](remote-api.md#terminal-surfaces)). **OSC 10/11/12 queries must still be consumed there**, reply thrown away: a *declined* query stays in `visibleData` and the phone's xterm answers it. **It yields the projection pair, not `visibleData` alone** ([remote-api.md](remote-api.md#terminal-surfaces)). The VS Code Host needs no such parser ([vscode.md](vscode.md)); its one parser already produces the pair.
 
 Source of truth: `oscDispositionAt` in `lib/src/lib/terminal-protocol.ts`, `boundedCwdValue` in `lib/src/lib/terminal-state.ts`, `lib/src/host/remote/pty-strip.ts`, `lib/src/host/remote/sidecar-entry.ts`.
 
@@ -109,7 +109,7 @@ Dormouse intervenes only in these cases.
 
 **Must remove string-control payloads statefully before the keystroke prompt heuristic's 1,024-character window**, including chunks that begin or end mid-sequence, so image base64 cannot be read as a returned prompt. Live PTY/replay bytes still reach xterm.js unchanged.
 
-Every renderer over one PTY parses these queries; only the owner's answer reaches the program ([remote-api.md](remote-api.md#terminal-surfaces) → "Terminal surfaces").
+Every renderer over one PTY parses these queries; only the owner's answer reaches the program ([remote-api.md](remote-api.md#terminal-surfaces)).
 
 Source of truth: `IMAGE_ADDON_OPTIONS` in `lib/src/lib/terminal-lifecycle.ts`; `OSC1337_FORWARDED` and `TerminalProtocolParser.processForwardedOsc` in `lib/src/lib/terminal-protocol.ts`; `TerminalControlStreamFilter` in `lib/src/lib/terminal-controls.ts`.
 

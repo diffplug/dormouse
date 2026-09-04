@@ -150,8 +150,10 @@ export interface PocketClientDeps {
 
 /** Terminal stream callbacks for {@link PocketClient.attach}. */
 export interface TerminalHandlers {
-  /** Base64url PTY output bytes. */
-  onData(bytes: string): void;
+  /** One `terminal.data` payload: the renderer projection, and the text one
+   *  when it differs. Passed whole rather than as bytes so the pair cannot be
+   *  split here (`docs/specs/remote-api.md` → "Terminal surfaces"). */
+  onData(event: TerminalDataEvent): void;
   onClosed?(exitCode?: number): void;
 }
 
@@ -937,7 +939,7 @@ export class PocketClient {
       (event) => {
         switch (event.event) {
           case REMOTE_EVENTS.terminalData:
-            handlers.onData((event.data as TerminalDataEvent).bytes);
+            handlers.onData(event.data as TerminalDataEvent);
             return;
           case REMOTE_EVENTS.terminalClosed:
             handlers.onClosed?.((event.data as TerminalClosedEvent).exitCode);

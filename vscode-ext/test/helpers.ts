@@ -15,7 +15,10 @@ import type {
   RemoteHostResult,
 } from '../../lib/src/host/remote/service-protocol';
 import type { PeerLinkClient, PeerLinkDeps } from '../src/peer-link';
-import { createProcessedPtyStreams } from '../src/processed-pty-streams';
+import {
+  createProcessedPtyStreams,
+  type ProcessedPtyChunk,
+} from '../src/processed-pty-streams';
 
 export async function tempStorageDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), 'dormouse-ext-'));
@@ -93,7 +96,7 @@ export function fakeWindow(
     ownPtyIds?: string[];
   } = {},
 ) {
-  const dataListeners = new Set<(id: string, data: string) => void>();
+  const dataListeners = new Set<(id: string, data: string, textData?: string) => void>();
   const exitListeners = new Set<(id: string, exitCode: number) => void>();
   const ptyStatuses = new Map<string, { alive: boolean; exitCode?: number }>();
   const streams = createProcessedPtyStreams(
@@ -123,9 +126,9 @@ export function fakeWindow(
     uiEvents: [] as unknown[],
     /** Windows that finished the handshake with this one as the broker. */
     joined: [] as PeerLinkClient[],
-    emitData(id: string, data: string) {
+    emitData(id: string, data: string, textData?: string) {
       ptyStatuses.set(id, { alive: true });
-      for (const listener of dataListeners) listener(id, data);
+      for (const listener of dataListeners) listener(id, data, textData);
     },
     emitExit(id: string, exitCode: number) {
       ptyStatuses.set(id, { alive: false, exitCode });
@@ -161,10 +164,14 @@ export function fakeWindow(
 /** A sink standing in for whatever a routed PTY is streamed into. */
 export function fakeSink() {
   return {
-    data: [] as string[],
+    chunks: [] as ProcessedPtyChunk[],
     exits: [] as number[],
-    onData(chunk: string) {
-      this.data.push(chunk);
+    /** The renderer projection alone, for assertions that only care about it. */
+    get data(): string[] {
+      return this.chunks.map((chunk) => chunk.data);
+    },
+    onData(chunk: ProcessedPtyChunk) {
+      this.chunks.push(chunk);
     },
     onExit(code: number) {
       this.exits.push(code);

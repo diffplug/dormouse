@@ -270,11 +270,12 @@ export interface PeerLinkClient {
   handshakeTimer: ReturnType<typeof setTimeout> | null;
 }
 
-/** Where bytes from another window's PTY go, once something asks for them. */
-export interface RemotePtySink {
-  onData(data: string): void;
-  onExit(exitCode: number): void;
-}
+/**
+ * Where another window's PTY output goes, once something asks for it. The same
+ * sink the local registry serves — a foreign stream is the local one with a
+ * socket in the middle, so it must not be a second shape.
+ */
+export type RemotePtySink = PtySink;
 
 let server: Server | null = null;
 /**
@@ -682,7 +683,11 @@ function onServerFrame(client: PeerLinkClient, frame: unknown): void {
   const response = message as PeerLinkResponse;
   if (response.kind === 'data') {
     for (const routeId of matchingRoutes(client, response.ptyId)) {
-      for (const sink of remoteSinks.get(routeId) ?? []) sink.onData(response.data);
+      const chunk =
+        response.textData === undefined
+          ? { data: response.data }
+          : { data: response.data, textData: response.textData };
+      for (const sink of remoteSinks.get(routeId) ?? []) sink.onData(chunk);
     }
     return;
   }
@@ -876,7 +881,7 @@ async function onClientFrame(socket: Socket, frame: unknown): Promise<void> {
       const { ptyId } = request;
       let exitedWhileSubscribing = false;
       const stop = deps.streamPty(ptyId, {
-        onData: (data) => respondTo(socket, { kind: 'data', ptyId, data }),
+        onData: ({ data, textData }) => respondTo(socket, { kind: 'data', ptyId, data, textData }),
         onExit: (exitCode) => {
           exitedWhileSubscribing = true;
           respondTo(socket, { kind: 'exit', ptyId, exitCode });

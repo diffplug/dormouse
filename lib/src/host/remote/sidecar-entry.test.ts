@@ -4,7 +4,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { PtySink } from '../../remote/host/host-surface-provider';
+import type { ProcessedPtyChunk, PtySink } from '../../remote/host/host-surface-provider';
 import { createSidecarSurfaceBridge, type SidecarSurfaceBridge } from './sidecar-entry';
 import { ASK_BUDGET_MS, type RemoteHostAsk } from './service-protocol';
 
@@ -23,11 +23,15 @@ function answer(ask: RemoteHostAsk, results: unknown[]): void {
   bridge.onAnswer({ rhId: ask.rhId, results });
 }
 
-function sink(): PtySink & { data: string[]; exits: number[] } {
+function sink(): PtySink & { chunks: ProcessedPtyChunk[]; data: string[]; exits: number[] } {
   const record = {
-    data: [] as string[],
+    chunks: [] as ProcessedPtyChunk[],
     exits: [] as number[],
-    onData: (chunk: string) => void record.data.push(chunk),
+    /** The renderer projection alone, for the assertions that only care about it. */
+    get data(): string[] {
+      return record.chunks.map((chunk) => chunk.data);
+    },
+    onData: (chunk: ProcessedPtyChunk) => void record.chunks.push(chunk),
     onExit: (code: number) => void record.exits.push(code),
   };
   return record;
@@ -194,6 +198,19 @@ describe('PTYs', () => {
     bridge.onPtyEvent('data', { id: 'pty-1', data: `\x1b]133;A\x07$ ` });
     expect(one.data).toEqual(['$ ']);
     expect(two.data).toEqual([]);
+  });
+
+  it('carries the text projection only when it differs from the renderer one', () => {
+    const one = sink();
+    bridge.provider.streamPty('pty-1', one);
+
+    bridge.onPtyEvent('data', { id: 'pty-1', data: 'plain' });
+    bridge.onPtyEvent('data', { id: 'pty-1', data: `pre\x1b]1337;File=inline=1:AAAA\x07post` });
+
+    expect(one.chunks).toEqual([
+      { data: 'plain' },
+      { data: `pre\x1b]1337;File=inline=1:AAAA\x07post`, textData: 'prepost' },
+    ]);
   });
 
   it('drops a chunk that was nothing but protocol', () => {

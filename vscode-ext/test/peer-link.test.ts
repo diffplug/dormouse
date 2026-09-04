@@ -521,6 +521,24 @@ describe('bind-as-lease', () => {
     expect(sink.data).toEqual(['output from the other window']);
   });
 
+  it('carries the text projection across the link, omitted when it is the same', async () => {
+    const peerSide = farWindow();
+    const { broker } = await linkedPair(fakeWindow(), peerSide);
+    const handle = await attachFar(broker);
+
+    const sink = fakeSink();
+    broker.remoteSubscribe(handle.ptyId, sink);
+    await tick();
+    peerSide.emitData('pty-far', 'plain');
+    peerSide.emitData('pty-far', 'pre\x1b]1337;File=inline=1:AAAA\x07post', 'prepost');
+
+    await waitFor(() => sink.chunks.length > 1);
+    expect(sink.chunks).toEqual([
+      { data: 'plain' },
+      { data: 'pre\x1b]1337;File=inline=1:AAAA\x07post', textData: 'prepost' },
+    ]);
+  });
+
   it('does not stream PTYs it never subscribed to', async () => {
     const peerSide = farWindow();
     const { broker } = await linkedPair(fakeWindow(), peerSide);

@@ -5,18 +5,30 @@ const ESC = '\x1b';
 const BEL = '\x07';
 
 describe('createPtyStrip', () => {
-  it('passes ordinary output through untouched', () => {
+  it('passes ordinary output through untouched, with no separate text projection', () => {
     const strip = createPtyStrip();
-    expect(strip('hello\r\n$ ')).toBe('hello\r\n$ ');
+    // Omitting `textData` is the contract for "identical to `data`", so a chunk
+    // with no string control costs one string on the wire, not two.
+    expect(strip('hello\r\n$ ')).toEqual({ data: 'hello\r\n$ ' });
   });
 
   it('removes the semantic OSCs the webview would have stripped', () => {
     const strip = createPtyStrip();
     // The phone renders the same bytes the laptop's xterm does, and the laptop
     // never sees these (docs/specs/terminal-escapes.md).
-    expect(strip(`${ESC}]7;file:///tmp${BEL}ready`)).toBe('ready');
-    expect(strip(`${ESC}]133;A${BEL}$ `)).toBe('$ ');
-    expect(strip(`${ESC}]0;my title${BEL}x`)).toBe('x');
+    expect(strip(`${ESC}]7;file:///tmp${BEL}ready`)).toEqual({ data: 'ready' });
+    expect(strip(`${ESC}]133;A${BEL}$ `)).toEqual({ data: '$ ' });
+    expect(strip(`${ESC}]0;my title${BEL}x`)).toEqual({ data: 'x' });
+  });
+
+  it('carries the text projection whenever it differs from the renderer one', () => {
+    const strip = createPtyStrip();
+    // A forwarded image sequence stays in `data` for ImageAddon and is absent
+    // from `textData`, so its base64 never reaches a prompt heuristic.
+    expect(strip(`pre${ESC}]1337;File=inline=1:AAAA${BEL}post`)).toEqual({
+      data: `pre${ESC}]1337;File=inline=1:AAAA${BEL}post`,
+      textData: 'prepost',
+    });
   });
 
   it('never surfaces a protocol response as output', () => {
@@ -24,13 +36,13 @@ describe('createPtyStrip', () => {
     // The iTerm2 identity query is answered by the webview that owns the
     // terminal; a second answer from here would corrupt the PTY's input, so the
     // query is stripped and its answer discarded.
-    expect(strip(`${ESC}[>qdone`)).toBe('done');
+    expect(strip(`${ESC}[>qdone`)).toEqual({ data: 'done' });
   });
 
   it('holds an OSC split across two chunks until it completes', () => {
     const strip = createPtyStrip();
-    expect(strip(`a${ESC}]133;`)).toBe('a');
-    expect(strip(`A${BEL}b`)).toBe('b');
+    expect(strip(`a${ESC}]133;`)).toEqual({ data: 'a' });
+    expect(strip(`A${BEL}b`)).toEqual({ data: 'b' });
   });
 
   it('keeps per-stream state to itself', () => {
@@ -38,7 +50,7 @@ describe('createPtyStrip', () => {
     const second = createPtyStrip();
     first(`${ESC}]133;`);
     // The second stream's bytes must not be swallowed by the first's pending OSC.
-    expect(second('plain')).toBe('plain');
+    expect(second('plain')).toEqual({ data: 'plain' });
   });
 
   it('swallows a color query rather than passing it to the phone', () => {
@@ -48,9 +60,9 @@ describe('createPtyStrip', () => {
     // the second reply is written into the PTY's input — so it is consumed here
     // and the answer generated for it is thrown away.
     const out = strip(`before${ESC}]11;?${BEL}after`);
-    expect(out).toBe('beforeafter');
-    expect(out).not.toContain('?');
-    expect(out).not.toContain('rgb:');
-    expect(strip(`${ESC}]10;?${BEL}x${ESC}]12;?${BEL}y`)).toBe('xy');
+    expect(out).toEqual({ data: 'beforeafter' });
+    expect(out.data).not.toContain('?');
+    expect(out.data).not.toContain('rgb:');
+    expect(strip(`${ESC}]10;?${BEL}x${ESC}]12;?${BEL}y`)).toEqual({ data: 'xy' });
   });
 });
