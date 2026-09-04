@@ -146,9 +146,17 @@ export function createSidecarSurfaceBridge(
           options.send('terminal:semanticEvents', { id, events: semanticEvents });
         }
         // Written from here, never from a viewer: the owner is the sole reply
-        // authority (`docs/specs/remote-api.md` → Terminal surfaces).
+        // authority (`docs/specs/remote-api.md` → Terminal surfaces). Guarded
+        // because a PTY that died between the read and this write throws —
+        // `pty-core`'s own `interrupt` wraps the same call — and this runs ahead
+        // of the `pty:data` below. Losing the reply is survivable; losing the
+        // chunk the webview is about to render is not.
         for (const response of collectTerminalProtocolResponses(events)) {
-          options.mgr.write(id, response);
+          try {
+            options.mgr.write(id, response);
+          } catch (error) {
+            console.error(`[remote-host] response write failed for ${id}: ${String(error)}`);
+          }
         }
       },
       onChunk(chunk) {
@@ -268,17 +276,20 @@ export function createSidecarSurfaceBridge(
     },
 
     onPtySpawn(id) {
-      // A reused id is a new generation, and a parser holding the last one's
-      // half-read sequence would splice it onto the new PTY's first bytes.
+      // A reused id is a new generation: the parser must not carry the last
+      // one's half-read sequence into its first bytes, and the new PTY has not
+      // exited whatever the old one did.
       if (typeof id !== 'string') return;
-      exits.delete(id);
       const stream = streams.get(id);
+      const exitCode = exits.get(id) ?? 0;
+      exits.delete(id);
       if (!stream) return;
       streams.delete(id);
       // `pty-core` lets a spawn displace a live generation without killing it,
-      // and the exit it eventually reports belongs to the new stream. Close the
-      // sinks here or they wait on a PTY nothing will ever report for them.
-      for (const sink of stream.sinks.keys()) sink.onExit(0);
+      // and any exit it eventually reports belongs to the stream that replaced
+      // this one. Close these sinks here or they wait on a PTY that will never
+      // be reported to them, leaving the Client on a frozen pane.
+      for (const sink of stream.sinks.keys()) sink.onExit(exitCode);
     },
 
     setThemeColors(colors) {

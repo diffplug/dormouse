@@ -12,6 +12,8 @@ let sent: Array<{ event: string; data: unknown }>;
 let written: Array<{ id: string; data: string }>;
 let resized: Array<{ id: string; cols: number; rows: number }>;
 let livePtys: Set<string>;
+/** A PTY that died between the read and a reply write. */
+let writeThrows: boolean;
 let bridge: SidecarSurfaceBridge;
 
 /** The ask the bridge is waiting on, most recent last. */
@@ -49,10 +51,14 @@ beforeEach(() => {
   written = [];
   resized = [];
   livePtys = new Set(['pty-1', 'pty-2']);
+  writeThrows = false;
   bridge = createSidecarSurfaceBridge({
     send: (event, data) => sent.push({ event, data }),
     mgr: {
-      write: (id, data) => void written.push({ id, data }),
+      write: (id, data) => {
+        if (writeThrows) throw new Error('write EIO');
+        written.push({ id, data });
+      },
       resize: (id, cols, rows) => void resized.push({ id, cols, rows }),
       hasPty: (id) => livePtys.has(id),
     },
@@ -366,6 +372,20 @@ describe('the webview’s half of the parse', () => {
         ],
       },
     ]);
+  });
+
+  it('still sends the chunk when the reply write throws', () => {
+    // A PTY that died between the read and the reply write throws out of
+    // `mgr.write`; the webview must still get what the parse produced.
+    const noise = vi.spyOn(console, 'error').mockImplementation(() => {});
+    bridge.setThemeColors({ foreground: '#ffffff', background: '#102030', cursor: '#abcdef' });
+    writeThrows = true;
+
+    expect(() =>
+      bridge.onPtyEvent('data', { id: 'pty-1', data: `\x1b]11;?\x07visible` }),
+    ).not.toThrow();
+    expect(emitted('pty:data')).toEqual([{ id: 'pty-1', data: 'visible' }]);
+    noise.mockRestore();
   });
 
   it('never forwards a response — the owner writes it to the PTY itself', () => {

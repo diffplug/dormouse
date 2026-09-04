@@ -158,9 +158,9 @@ xterm.js**, and **a malformed push is ignored, never half-applied.**
 **A remote sink must never break the local pipe.** The tap sits inside
 `pty-core`'s event callback in `main.js` and is wrapped: a throw is logged to
 stderr and every non-`data` `pty:*` event goes out either way. Inside the parse,
-the webview's `pty:data` is emitted before any Client sink runs and **each sink
-is called under its own guard**, so one that throws costs itself the chunk and
-nobody else anything. Exit codes are
+**each sink is guarded, and so is the reply write ahead of them** — a PTY that
+died since the read throws — so nothing can cost the webview its `pty:data`.
+Exit codes are
 retained so a stream installed after surface resolution can replay liveness
 before attach acknowledgement, and **a spawn or an exit retires that PTY
 generation's parser** so a half-read sequence cannot splice onto the next one.
