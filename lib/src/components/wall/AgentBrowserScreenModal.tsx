@@ -21,7 +21,6 @@ import {
   CheckIcon,
   FrameCornersIcon,
   PictureInPictureIcon,
-  RobotIcon,
   XIcon,
 } from '@phosphor-icons/react';
 import {
@@ -34,7 +33,7 @@ import {
 } from '../design';
 import type { RenderMode, ScreenController, ScreenSnapshot } from './agent-browser-screen';
 import { useAgentBrowserScreenSnapshot } from './agent-browser-screen';
-import { BrowserDisplayIcon } from './BrowserDisplayIcon';
+import { AgentRobotIcon, BrowserDisplayIcon } from './BrowserDisplayIcon';
 
 // Fixed registry — the CLI's own device set. No custom descriptors; touch +
 // mobile UA come only bundled inside `set device` (verified against 0.27.0).
@@ -226,7 +225,7 @@ export function AgentBrowserScreenModal({
           <RenderOption
             checked={renderMode === 'ab-screencast'}
             onSelect={() => setRenderMode('ab-screencast')}
-            icon={<RobotIcon size={14} className="shrink-0 text-muted" />}
+            icon={<AgentRobotIcon size={14} className="shrink-0 text-muted" />}
             label="agent-browser screencast"
             features={[[true, 'agents can read/write'], [true, 'any URL'], [false, 'laggy for humans']]}
           >

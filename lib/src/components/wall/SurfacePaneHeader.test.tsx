@@ -109,6 +109,8 @@ describe('SurfacePaneHeader — browser chrome', () => {
       const display = trigger?.querySelector(`[data-browser-display-mode="${displayMode}"]`);
       expect(display).not.toBeNull();
       expect(display?.querySelectorAll('svg')).toHaveLength(iconCount);
+      expect(display?.querySelector('[data-agent-capability-icon="robot-wide"]') !== null)
+        .toBe(displayMode !== 'iframe');
       registration.dispose();
     }
   });

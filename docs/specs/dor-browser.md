@@ -100,9 +100,9 @@ Header contract:
 
   | Display | Icon cluster |
   | --- | --- |
-  | agent-browser, resize with pane (`syncEngaged`) | robot + frame corners |
-  | agent-browser, fixed size | robot + picture-in-picture |
-  | agent-browser, popout | robot + arrow-square-out |
+  | agent-browser, resize with pane (`syncEngaged`) | wide robot + frame corners |
+  | agent-browser, fixed size | wide robot + picture-in-picture |
+  | agent-browser, popout | wide robot + arrow-square-out |
   | iframe embed | frame corners only |
 
 - **Must reuse this mapping in browser Doors.** A browser Door uses
@@ -186,9 +186,10 @@ Source of truth: `lib/src/components/wall/connect-port.ts`
 ## Display Modal And Render Swaps
 
 **Must make the Display modal the sole GUI for render mode and screencast
-resolution.** Compact icons compose its hierarchy: robot on `ab-screencast`,
-frame corners on **Resize with pane**, picture-in-picture on **Fixed**, robot plus
-arrow-square-out on `ab-popout`, and frame corners on `iframe`.
+resolution.** Compact icons compose its hierarchy: wide robot on
+`ab-screencast`, frame corners on **Resize with pane**, picture-in-picture on
+**Fixed**, wide robot plus arrow-square-out on `ab-popout`, and frame corners on
+`iframe`.
 
 Resolution controls apply only to `ab-screencast`, as GUI wrappers around native
 commands: **Resize with pane** is Dormouse-owned sync issuing

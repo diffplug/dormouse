@@ -73,6 +73,9 @@ describe('AgentBrowserScreenModal display icons', () => {
     expect(option('Fixed size')?.querySelectorAll('svg')).toHaveLength(1);
     expect(option('agent-browser popout')?.querySelectorAll('svg')).toHaveLength(2);
     expect(option('iframe embed')?.querySelectorAll('svg')).toHaveLength(1);
+    expect(option('agent-browser screencast')?.querySelector('[data-agent-capability-icon="robot-wide"]')).not.toBeNull();
+    expect(option('agent-browser popout')?.querySelector('[data-agent-capability-icon="robot-wide"]')).not.toBeNull();
+    expect(option('iframe embed')?.querySelector('[data-agent-capability-icon]')).toBeNull();
 
     for (const icon of container.querySelectorAll('label svg')) {
       expect(icon.getAttribute('width')).toBe('14');
