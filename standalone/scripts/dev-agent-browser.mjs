@@ -101,6 +101,7 @@ const fireAndForget = {
   pty_spawn: ({ id, options }) => writeSidecar('pty:spawn', { id, options }),
   pty_write: ({ id, data }) => writeSidecar('pty:input', { id, data }),
   pty_resize: ({ id, cols, rows }) => writeSidecar('pty:resize', { id, cols, rows }),
+  pty_theme_colors: ({ colors }) => writeSidecar('pty:themeColors', colors),
   pty_kill: ({ id }) => writeSidecar('pty:kill', { id }),
   pty_request_init: () => writeSidecar('pty:requestInit'),
   dor_control_response: ({ response }) => writeSidecar('dor:controlResponse', response),

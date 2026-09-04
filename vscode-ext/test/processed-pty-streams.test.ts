@@ -1,8 +1,8 @@
 /**
  * The keyed registry both consumers of this window's own PTY output share. What
- * matters here is the tax: these listeners run on every chunk of every terminal,
- * so there must be exactly one pair no matter how many attachments exist, and
- * none at all when there are none.
+ * matters here is the tax: an attachment costs one subscription on the PTY it
+ * watches and nothing on any other terminal, and a window with nothing attached
+ * costs nothing at all.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -11,19 +11,25 @@ import {
   type ProcessedPtyChunk,
 } from '../src/processed-pty-streams';
 
-/** Stands in for `message-router`'s processed-data fan-out, counting listeners. */
+/** Stands in for `message-router`'s per-PTY owner streams, counting subscriptions. */
 function fakeSource() {
-  const data = new Set<(id: string, chunk: string, textData?: string) => void>();
+  const chunks = new Map<string, Set<(chunk: ProcessedPtyChunk) => void>>();
   const exit = new Set<(id: string, exitCode: number) => void>();
   const statuses = new Map<string, { alive: boolean; exitCode?: number }>();
   return {
-    /** How many listener pairs are installed right now. */
-    get installed(): number {
-      return data.size + exit.size;
+    /** How many chunk subscriptions are installed right now. */
+    get subscribed(): number {
+      let total = 0;
+      for (const sinks of chunks.values()) total += sinks.size;
+      return total;
     },
-    emitData(id: string, chunk: string, textData?: string): void {
+    /** How many exit listeners are installed right now. */
+    get exitListeners(): number {
+      return exit.size;
+    },
+    emitData(id: string, chunk: ProcessedPtyChunk): void {
       statuses.set(id, { alive: true });
-      for (const listener of [...data]) listener(id, chunk, textData);
+      for (const listener of [...(chunks.get(id) ?? [])]) listener(chunk);
     },
     emitExit(id: string, exitCode: number): void {
       // The real manager records liveness before it fans out the processed
@@ -36,9 +42,15 @@ function fakeSource() {
     },
     streams: () =>
       createProcessedPtyStreams(
-        (listener) => {
-          data.add(listener);
-          return () => void data.delete(listener);
+        (ptyId, onChunk) => {
+          let sinks = chunks.get(ptyId);
+          if (!sinks) {
+            sinks = new Set();
+            chunks.set(ptyId, sinks);
+          }
+          const subscribed = sinks;
+          subscribed.add(onChunk);
+          return () => void subscribed.delete(onChunk);
         },
         (listener) => {
           exit.add(listener);
@@ -70,18 +82,22 @@ describe('processed pty streams', () => {
   it('costs nothing until something attaches, and nothing again after', () => {
     const source = fakeSource();
     const streams = source.streams();
-    expect(source.installed).toBe(0);
+    expect(source.subscribed).toBe(0);
+    expect(source.exitListeners).toBe(0);
 
     const stop = streams.streamPty('pty-1', sink());
-    expect(source.installed).toBe(2);
+    expect(source.subscribed).toBe(1);
+    expect(source.exitListeners).toBe(1);
 
     stop();
-    expect(source.installed).toBe(0);
+    expect(source.subscribed).toBe(0);
+    expect(source.exitListeners).toBe(0);
   });
 
-  it('installs one listener pair for every attachment there is', () => {
-    // The whole point: a pair per attachment would tax every keystroke of every
-    // terminal in the window once per attached surface.
+  it('subscribes each attachment on its own, and only to the PTY it watches', () => {
+    // One subscription per sink is what lets a sink that joins mid-sequence be
+    // held while the one already attached keeps receiving; a shared one could
+    // not. Terminals nobody watches stay untouched either way.
     const source = fakeSource();
     const streams = source.streams();
     const stops = [
@@ -90,13 +106,17 @@ describe('processed pty streams', () => {
       streams.streamPty('pty-2', sink()),
     ];
 
-    expect(source.installed).toBe(2);
-    // And the pair stays until the *last* attachment goes.
+    expect(source.subscribed).toBe(3);
+    // One exit listener for the window, however many attachments there are, and
+    // it stays until the *last* one goes.
+    expect(source.exitListeners).toBe(1);
     stops[0]!();
     stops[1]!();
-    expect(source.installed).toBe(2);
+    expect(source.subscribed).toBe(1);
+    expect(source.exitListeners).toBe(1);
     stops[2]!();
-    expect(source.installed).toBe(0);
+    expect(source.subscribed).toBe(0);
+    expect(source.exitListeners).toBe(0);
   });
 
   it('fans one PTY to every sink watching it, and to no others', () => {
@@ -109,22 +129,25 @@ describe('processed pty streams', () => {
     streams.streamPty('pty-1', second);
     streams.streamPty('pty-2', elsewhere);
 
-    source.emitData('pty-1', 'hello');
-    source.emitData('pty-3', 'nobody is watching this');
+    source.emitData('pty-1', { data: 'hello' });
+    source.emitData('pty-3', { data: 'nobody is watching this' });
 
     expect(first.data).toEqual(['hello']);
     expect(second.data).toEqual(['hello']);
     expect(elsewhere.data).toEqual([]);
   });
 
-  it('fans out both projections, omitting the text one when it is the same', () => {
+  it('hands the sink the chunk the owner parsed, both projections and all', () => {
     const source = fakeSource();
     const streams = source.streams();
     const only = sink();
     streams.streamPty('pty-1', only);
 
-    source.emitData('pty-1', 'plain');
-    source.emitData('pty-1', 'pre\x1b]1337;File=inline=1:AAAA\x07post', 'prepost');
+    source.emitData('pty-1', { data: 'plain' });
+    source.emitData('pty-1', {
+      data: 'pre\x1b]1337;File=inline=1:AAAA\x07post',
+      textData: 'prepost',
+    });
 
     // The parser already computed both for the owning webview; dropping one
     // here left a Client re-deriving it from bytes it cannot tell apart.
@@ -143,7 +166,7 @@ describe('processed pty streams', () => {
     streams.streamPty('pty-1', second);
 
     stopFirst();
-    source.emitData('pty-1', 'still flowing');
+    source.emitData('pty-1', { data: 'still flowing' });
 
     expect(first.data).toEqual([]);
     expect(second.data).toEqual(['still flowing']);
@@ -168,10 +191,11 @@ describe('processed pty streams', () => {
 
     // Nothing is attached any more, so the terminals go back to costing nothing
     // — without anyone having to call the unsubscribe.
-    expect(source.installed).toBe(0);
+    expect(source.subscribed).toBe(0);
+    expect(source.exitListeners).toBe(0);
     // And an unsubscribe afterwards is a no-op rather than an error.
     expect(() => stopFirst()).not.toThrow();
-    source.emitData('pty-1', 'after the exit');
+    source.emitData('pty-1', { data: 'after the exit' });
     expect(first.data).toEqual([]);
   });
 
@@ -184,7 +208,8 @@ describe('processed pty streams', () => {
     const stop = streams.streamPty('pty-1', late);
 
     expect(late.exits).toEqual([23]);
-    expect(source.installed).toBe(0);
+    expect(source.subscribed).toBe(0);
+    expect(source.exitListeners).toBe(0);
     expect(() => stop()).not.toThrow();
   });
 
@@ -205,7 +230,23 @@ describe('processed pty streams', () => {
 
     expect(() => source.emitExit('pty-1', 9)).not.toThrow();
     expect(seen).toEqual([9]);
-    expect(source.installed).toBe(0);
+    expect(source.subscribed).toBe(0);
+    expect(source.exitListeners).toBe(0);
+  });
+
+  it('drops the subscription when it attaches to a PTY that already exited', () => {
+    // The registry stands a subscription up before it can know the PTY is dead;
+    // whatever the owner created to serve it must not outlive the attempt, since
+    // the exit that would have retired it has already been and gone.
+    const source = fakeSource();
+    const streams = source.streams();
+    source.emitExit('pty-1', 7);
+
+    const late = sink();
+    streams.streamPty('pty-1', late);
+
+    expect(late.exits).toEqual([7]);
+    expect(source.subscribed).toBe(0);
   });
 
   it('gives a re-attach after an exit a stream of its own', () => {
@@ -220,9 +261,10 @@ describe('processed pty streams', () => {
     streams.streamPty('pty-1', after);
     // The dead attachment's unsubscribe must not reach into the live one.
     stopBefore();
-    source.emitData('pty-1', 'a new terminal on the same id');
+    source.emitData('pty-1', { data: 'a new terminal on the same id' });
 
     expect(after.data).toEqual(['a new terminal on the same id']);
-    expect(source.installed).toBe(2);
+    expect(source.subscribed).toBe(1);
+    expect(source.exitListeners).toBe(1);
   });
 });

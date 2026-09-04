@@ -100,7 +100,8 @@ v1 grants no phone-side kill or layout authority (rationale).
 **An inline image crosses the relay as the ordered `terminal.data` messages its
 PTY chunks produce**, reassembled by Pocket's own xterm — panes are built through
 the same `createXtermHost`, so ImageAddon is loaded. **Nothing coalesces them and
-no size gates them** (rationale).
+no size gates them** (rationale); each is bounded only by what the Host feeds
+its parser ([remote-api.md](./remote-api.md) → Terminal surfaces).
 
 `RemotePtyAdapter` exposes the adapter-specific `setActivePane(id)`: v1 allows
 one attachment per session, so pane switching is detach → attach, whose repaint

@@ -4,10 +4,13 @@
  */
 
 import type { DirectoryEntry } from 'server-lib-common';
+// The chunk a sink receives is the one the PTY owner's parser produced, so the
+// projection pair is defined beside that parse rather than restated here.
+import type { ProcessedPtyChunk } from '../../lib/processed-pty-stream';
 
 // Re-exported so an implementor can name the entry type without depending on
 // `server-lib-common` itself; vscode-ext's project does not resolve it.
-export type { DirectoryEntry };
+export type { DirectoryEntry, ProcessedPtyChunk };
 
 export interface SurfaceHandle {
   /**
@@ -22,18 +25,6 @@ export interface SurfaceHandle {
   resize(cols: number, rows: number): Promise<{ cols: number; rows: number }>;
   /** Let go: stops a peer's stream, nothing to undo for a local pane. */
   release(): void;
-}
-
-/**
- * One chunk of processed PTY output: the projection pair `PtyDataDetail`
- * carries locally (`lib/src/lib/platform/types.ts`), minus the id a sink does
- * not need. `data` is what a renderer writes; `textData` is the same chunk with
- * string-control payloads removed, **omitted when identical to `data`** and
- * authoritative when present, empty included.
- */
-export interface ProcessedPtyChunk {
-  data: string;
-  textData?: string;
 }
 
 /**

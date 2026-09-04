@@ -31,8 +31,11 @@ export function getTerminalTheme(): Record<string, string> {
 
 /**
  * Answers OSC 10/11/12 foreground/background/cursor color queries from the live
- * xterm theme. Read lazily per query so it tracks theme changes. Frontend
- * platform adapters pass this to their `TerminalProtocolParser`s.
+ * xterm theme. Read lazily per query so it tracks theme changes. Every parser
+ * in a realm that *has* the theme takes this — the fake adapter, and each
+ * webview's one-shot replay parser; a parser that declines leaves the query in
+ * `visibleData` for xterm.js to answer into the PTY. The two hosts whose owner
+ * has no DOM are pushed these same colors instead.
  */
 export const themeColorProvider: TerminalColorProvider = (target) => getTerminalTheme()[target] ?? null;
 

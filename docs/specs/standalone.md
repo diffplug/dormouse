@@ -146,24 +146,29 @@ reloading webview — an attach must not hang on one.
 **An answer for an ask the bridge no longer holds invalidates the directory**
 rather than being dropped (`docs/specs/remote-api.md` → Directory).
 
-**Stripping.** The sidecar hands the webview *raw* PTY bytes, so the service runs
-its own strip-only `TerminalProtocolParser` over each PTY it streams (rationale),
-supplying a constant colour provider for the OSC 10/11/12 case. Its rules —
-discard every event, consume rather than decline a colour query, one parser per
-PTY, yield the projection pair — are `docs/specs/terminal-escapes.md` → Parsing
-location. Deleting this second parse site is the **wire-boundary** scope
-(`docs/specs/remote-api.md` → Future).
+**The sidecar owns the parse**, standalone's only one
+(`docs/specs/terminal-escapes.md` → Parsing location, which owns the rules): a
+`pty-core` `data` event reaches the webview as the `pty:data`,
+`terminal:semanticEvents` and `terminal:protocolEvents` the bridge emits, never
+raw, and every attached Client reads the same parse. **The webview pushes its
+resolved terminal colours** (`pty_theme_colors` → `pty:themeColors`) because this
+process has no DOM; **null before the first push falls a colour query through to
+xterm.js**, and **a malformed push is ignored, never half-applied.**
 
-**A remote listener must never break the local pipe.** The tap sits inside
-`pty-core`'s event callback in `main.js`, ahead of the send to the webview, and is
-wrapped: a throw is logged to stderr and the `pty:*` event goes out either way.
-Exit codes are retained so a stream installed after surface resolution can replay
-liveness before attach acknowledgement.
+**A remote sink must never break the local pipe.** The tap sits inside
+`pty-core`'s event callback in `main.js` and is wrapped: a throw is logged to
+stderr and every non-`data` `pty:*` event goes out either way. Inside the parse,
+**each sink is guarded, and so is the reply write ahead of them** — a PTY that
+died since the read throws — so nothing can cost the webview its `pty:data`.
+Exit codes are
+retained so a stream installed after surface resolution can replay liveness
+before attach acknowledgement, and **a spawn or an exit retires that PTY
+generation's parser** so a half-read sequence cannot splice onto the next one.
 
 Source of truth: `lib/src/host/remote/service.ts`,
-`lib/src/host/remote/sidecar-entry.ts`, `lib/src/host/remote/pty-strip.ts`,
+`createSidecarSurfaceBridge` in `lib/src/host/remote/sidecar-entry.ts`,
 `standalone/sidecar/main.js` (the tap and the `remoteHost:command` case),
-`remote_host_command` / `remote_host_state_dir` in
+`remote_host_command` / `remote_host_state_dir` / `pty_theme_colors` in
 `standalone/src-tauri/src/lib.rs`.
 
 ### Windows node subsystem

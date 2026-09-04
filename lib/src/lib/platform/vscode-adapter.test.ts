@@ -21,6 +21,10 @@ vi.mock('../terminal-theme', () => ({
     terminalThemeMocks.listeners.add(cb);
     return () => terminalThemeMocks.listeners.delete(cb);
   },
+  // The replay one-shot parser answers colour queries from this, exactly as the
+  // real one reads the live xterm theme.
+  themeColorProvider: (target: 'foreground' | 'background' | 'cursor') =>
+    terminalThemeMocks.getTerminalTheme()[target] ?? null,
 }));
 
 import {
@@ -240,6 +244,23 @@ describe('VSCodeAdapter PTY exit handling', () => {
       type: 'cwd',
       cwd: { path: '/Users/me/project', source: 'osc7' },
     });
+  });
+
+  it('consumes a buffered colour query rather than replaying it into xterm.js', () => {
+    // A *declined* query is not consumed, so it survives into the replayed
+    // bytes for xterm.js to answer — and answering is the owner's alone
+    // (docs/specs/terminal-escapes.md).
+    const adapter = new VSCodeAdapter();
+    const replays: Array<{ id: string; data: string }> = [];
+    adapter.onPtyReplay((detail) => replays.push(detail));
+
+    windowTarget.dispatchEvent(hostMessage({
+      type: 'pty:replay',
+      id: 'pane-1',
+      data: 'before\x1b]11;?\x07after',
+    }));
+
+    expect(replays).toEqual([{ id: 'pane-1', data: 'beforeafter' }]);
   });
 
   it('forwards extension-host semantic events to the pane state store', () => {

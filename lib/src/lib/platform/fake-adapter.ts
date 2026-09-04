@@ -13,6 +13,7 @@ import {
 import {
   applyTerminalSemanticEventsByPtyId,
 } from '../terminal-state-store';
+import { themeColorProvider } from '../terminal-theme';
 
 export interface FakeScenario {
   name: string;
@@ -123,7 +124,7 @@ export class FakePtyAdapter implements PlatformAdapter {
 
   spawnPty(id: string, options?: { cols?: number; rows?: number }): void {
     this.terminals.add(id);
-    this.protocolParsers.set(id, new TerminalProtocolParser());
+    this.protocolParsers.set(id, new TerminalProtocolParser(themeColorProvider));
     this.terminalSizes.set(id, {
       cols: options?.cols ?? DEFAULT_PTY_SIZE.cols,
       rows: options?.rows ?? DEFAULT_PTY_SIZE.rows,
@@ -377,7 +378,7 @@ export class FakePtyAdapter implements PlatformAdapter {
   private getProtocolParser(id: string): TerminalProtocolParser {
     let parser = this.protocolParsers.get(id);
     if (!parser) {
-      parser = new TerminalProtocolParser();
+      parser = new TerminalProtocolParser(themeColorProvider);
       this.protocolParsers.set(id, parser);
     }
     return parser;

@@ -52,6 +52,14 @@ export interface TerminalProtocolParseResult {
    * the chunk carries no string control, which is the common case.
    */
   textData: string;
+  /**
+   * Where a consumer that joined *inside* the string control open when this
+   * chunk arrived may start reading `visibleData`: `0` when none was open, the
+   * offset just past that string once it ends, and `null` while it is still
+   * unterminated. Only a forwarded string can be open — a consumed one never
+   * reaches `visibleData` at all.
+   */
+  resumedStringEnd: number | null;
 }
 
 interface Osc99PendingNotification {
@@ -115,10 +123,25 @@ export class TerminalProtocolParser {
   /** Resolves OSC 10/11/12 queries; null lets xterm.js handle the sequence. */
   constructor(private readonly colorProvider?: TerminalColorProvider) {}
 
+  /**
+   * Whether a string control is streaming through to xterm.js right now, so a
+   * consumer joining here would start mid-payload. Its counterpart is
+   * {@link TerminalProtocolParseResult.resumedStringEnd}, which says where that
+   * payload stops.
+   */
+  get isForwardingString(): boolean {
+    return this.forwarding !== null;
+  }
+
   process(data: string): TerminalProtocolParseResult {
     if (this.forwarding !== null) return this.processForwarded(data);
     if (this.pending === '' && !NEEDS_PARSE_RE.test(data)) {
-      return { visibleData: data, events: NO_EVENTS as TerminalProtocolEvent[], textData: data };
+      return {
+        visibleData: data,
+        events: NO_EVENTS as TerminalProtocolEvent[],
+        textData: data,
+        resumedStringEnd: 0,
+      };
     }
     const text = this.pending + data;
     this.pending = '';
@@ -195,6 +218,9 @@ export class TerminalProtocolParser {
       visibleData,
       events: filterTerminalBellEvents(events),
       textData,
+      // Nothing was open when this chunk arrived: whatever `pending` holds is
+      // being consumed, so it reaches no consumer at all.
+      resumedStringEnd: 0,
     };
   }
 
@@ -207,6 +233,7 @@ export class TerminalProtocolParser {
         visibleData: this.beginForwarding(kind, text),
         events: NO_EVENTS as TerminalProtocolEvent[],
         textData: '',
+        resumedStringEnd: null,
       };
     }
 
@@ -218,6 +245,10 @@ export class TerminalProtocolParser {
       visibleData: text.slice(0, controlEnd.end) + parsedRest.visibleData,
       events: parsedRest.events,
       textData: parsedRest.textData,
+      // The resumed payload is exactly the prefix above; the remainder was read
+      // from ground, so a late consumer may start there — cancel included, since
+      // the bytes that cancelled the string open a sequence of their own.
+      resumedStringEnd: controlEnd.end,
     };
   }
 
@@ -362,10 +393,12 @@ export class TerminalProtocolParser {
 /**
  * The optional half of the projection pair a parse result carries to its
  * consumers: **omitted whenever it equals `visibleData`**, which is every chunk
- * with no string control in it. One helper because that rule holds at each of
- * the four parse sites and at every seam past them (`docs/specs/transport.md`).
+ * with no string control in it. One helper because that rule holds at every
+ * parse site and at every seam past them (`docs/specs/transport.md`).
  */
-export function textProjectionOf(parsed: TerminalProtocolParseResult): string | undefined {
+export function textProjectionOf(
+  parsed: Pick<TerminalProtocolParseResult, 'visibleData' | 'textData'>,
+): string | undefined {
   return parsed.textData === parsed.visibleData ? undefined : parsed.textData;
 }
 
@@ -381,6 +414,18 @@ export function applyTerminalProtocolEvents(
       sink.updateProtocolProgress(id, event.progress);
     }
   }
+}
+
+/**
+ * The notification and progress events {@link applyTerminalProtocolEvents} acts
+ * on. An owner whose `AlertManager` lives in another process — standalone's
+ * sidecar, whose webview holds it — forwards exactly these; every other kind is
+ * the owner's own to settle, a response above all.
+ */
+export function collectTerminalProtocolAlerts(
+  events: TerminalProtocolEvent[],
+): TerminalProtocolEvent[] {
+  return events.filter((event) => event.kind === 'notification' || event.kind === 'progress');
 }
 
 export function collectTerminalProtocolResponses(events: TerminalProtocolEvent[]): string[] {

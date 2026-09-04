@@ -13,7 +13,7 @@ import {
 import {
   applyTerminalSemanticEventsByPtyId,
 } from '../terminal-state-store';
-import { getTerminalTheme, onTerminalThemeChange } from '../terminal-theme';
+import { getTerminalTheme, onTerminalThemeChange, themeColorProvider } from '../terminal-theme';
 import { isHostMessage, readHostMessageToken } from '../vscode-message-token';
 import { cancelDorControlRequest, dispatchDorControlRequest } from './dor-control-dispatch';
 import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
@@ -124,8 +124,12 @@ export class VSCodeAdapter implements PlatformAdapter {
         // Replay arrives as raw buffered output in a single chunk. Live pty:data
         // is pre-parsed by the extension host, so we only need a one-shot parser
         // here to reconstruct semantic state from the buffered bytes and strip
-        // OSCs before xterm sees them. See docs/specs/vscode.md.
-        const parser = new TerminalProtocolParser();
+        // OSCs before xterm sees them. See docs/specs/vscode.md. It gets the
+        // theme for the same reason every other parser does: a *declined* query
+        // is not consumed, so it reaches xterm.js, and answering is the owner's
+        // alone. The replay report filter catches the reply that provokes — a
+        // backstop, not the contract.
+        const parser = new TerminalProtocolParser(themeColorProvider);
         const parsed = parser.process(msg.data);
         applyTerminalSemanticEventsByPtyId(msg.id, collectTerminalSemanticEvents(parsed.events));
         for (const handler of this.replayHandlers) {

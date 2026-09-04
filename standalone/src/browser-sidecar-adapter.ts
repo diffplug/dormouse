@@ -36,11 +36,11 @@ import { loadSessionState, saveSessionState } from "dormouse-lib/lib/window-pers
 import {
   applyTerminalProtocolEvents,
   collectTerminalSemanticEvents,
-  collectTerminalProtocolResponses,
   TerminalProtocolParser,
-  textProjectionOf,
+  type TerminalProtocolEvent,
 } from "dormouse-lib/lib/terminal-protocol";
-import { themeColorProvider } from "dormouse-lib/lib/terminal-theme";
+import { getTerminalTheme, onTerminalThemeChange, themeColorProvider } from "dormouse-lib/lib/terminal-theme";
+import type { TerminalSemanticEvent } from "dormouse-lib/lib/terminal-state";
 import { applyTerminalSemanticEventsByPtyId } from "dormouse-lib/lib/terminal-state-store";
 import type { DorControlCancelPayload, DorControlRequestPayload } from "dor/protocol";
 import {
@@ -64,7 +64,6 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   private listHandlers = new Set<(detail: { ptys: PtyInfo[] }) => void>();
   private replayHandlers = new Set<(detail: { id: string; data: string }) => void>();
   private alertStateHandlers = new Set<(detail: AlertStateDetail) => void>();
-  private protocolParsers = new Map<string, TerminalProtocolParser>();
   private alertManager = new AlertManager();
   private unlistenHost: (() => void) | null = null;
   // Remote-host bridge, identical in shape to TauriAdapter's — the dev harness
@@ -81,6 +80,10 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     this.alertManager.onStateChange((id, state) => {
       for (const handler of this.alertStateHandlers) handler({ id, ...state });
     });
+
+    // See TauriAdapter: the sidecar parses and has no DOM, so it is told the
+    // resolved terminal colors whenever they change.
+    onTerminalThemeChange(() => this.pushThemeColors());
 
     // Some of these get called through detached references (e.g. the iframe
     // panel does `const createProxy = getPlatform().createIframeProxyUrl`), which
@@ -105,7 +108,6 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
 
   shutdown(): void {
     this.alertManager.dispose();
-    this.protocolParsers.clear();
     this.unlistenHost?.();
     this.unlistenHost = null;
     this.remoteHostClient.dispose();
@@ -126,7 +128,6 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   }
 
   spawnPty(id: string, options?: { cols?: number; rows?: number; cwd?: string; shell?: string; args?: string[] }): void {
-    this.protocolParsers.set(id, new TerminalProtocolParser(themeColorProvider));
     this.host.send("pty_spawn", { id, options });
   }
 
@@ -139,7 +140,6 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   }
 
   killPty(id: string): void {
-    this.protocolParsers.delete(id);
     this.host.send("pty_kill", { id });
   }
 
@@ -232,7 +232,10 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   offPtyData(handler: (detail: PtyDataDetail) => void): void { this.dataHandlers.delete(handler); }
   onPtyExit(handler: (detail: { id: string; exitCode: number }) => void): void { this.exitHandlers.add(handler); }
   offPtyExit(handler: (detail: { id: string; exitCode: number }) => void): void { this.exitHandlers.delete(handler); }
-  requestInit(): void { this.host.send("pty_request_init"); }
+  requestInit(): void {
+    this.host.send("pty_request_init");
+    this.pushThemeColors();
+  }
   onPtyList(handler: (detail: { ptys: PtyInfo[] }) => void): void { this.listHandlers.add(handler); }
   offPtyList(handler: (detail: { ptys: PtyInfo[] }) => void): void { this.listHandlers.delete(handler); }
   onPtyReplay(handler: (detail: { id: string; data: string }) => void): void { this.replayHandlers.add(handler); }
@@ -294,27 +297,29 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
 
   private handleHostEvent(event: string, data: unknown): void {
     if (event === "pty:data") {
-      const { id, data: text } = data as { id: string; data: string };
-      const parsed = this.getProtocolParser(id).process(text);
-      applyTerminalProtocolEvents(this.alertManager, id, parsed.events);
-      const semanticEvents = collectTerminalSemanticEvents(parsed.events);
-      this.alertManager.applyTerminalSemanticEvents(id, semanticEvents);
-      applyTerminalSemanticEventsByPtyId(id, semanticEvents);
-      for (const response of collectTerminalProtocolResponses(parsed.events)) this.writePty(id, response);
-      if (parsed.visibleData.length === 0) return;
-      this.alertManager.onData(id);
-      const textData = textProjectionOf(parsed);
-      for (const handler of this.dataHandlers) handler({ id, data: parsed.visibleData, textData });
+      // Already parsed by the sidecar, which owns the PTY; its events arrive as
+      // the two messages below (docs/specs/terminal-escapes.md).
+      const payload = data as PtyDataDetail;
+      this.alertManager.onData(payload.id);
+      for (const handler of this.dataHandlers) handler(payload);
+    } else if (event === "terminal:protocolEvents") {
+      const payload = data as { id: string; events: TerminalProtocolEvent[] };
+      applyTerminalProtocolEvents(this.alertManager, payload.id, payload.events);
+    } else if (event === "terminal:semanticEvents") {
+      const { id, events } = data as { id: string; events: TerminalSemanticEvent[] };
+      this.alertManager.applyTerminalSemanticEvents(id, events);
+      applyTerminalSemanticEventsByPtyId(id, events);
     } else if (event === "pty:exit") {
       const payload = data as { id: string; exitCode: number };
       this.alertManager.onExit(payload.id, payload.exitCode);
-      this.protocolParsers.delete(payload.id);
       for (const handler of this.exitHandlers) handler(payload);
     } else if (event === "pty:list") {
       for (const handler of this.listHandlers) handler(data as { ptys: PtyInfo[] });
     } else if (event === "pty:replay") {
+      // The one stream the sidecar does not parse; see TauriAdapter, including
+      // why the one-shot parser still needs the theme.
       const { id, data: text } = data as { id: string; data: string };
-      const parsed = this.getProtocolParser(id).process(text);
+      const parsed = new TerminalProtocolParser(themeColorProvider).process(text);
       applyTerminalSemanticEventsByPtyId(id, collectTerminalSemanticEvents(parsed.events));
       for (const handler of this.replayHandlers) handler({ id, data: parsed.visibleData });
     } else if (event === REMOTE_HOST_RESULT_EVENT) {
@@ -336,13 +341,16 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     }
   }
 
-  private getProtocolParser(id: string): TerminalProtocolParser {
-    let parser = this.protocolParsers.get(id);
-    if (!parser) {
-      parser = new TerminalProtocolParser(themeColorProvider);
-      this.protocolParsers.set(id, parser);
-    }
-    return parser;
+  /** See TauriAdapter.pushThemeColors: the sidecar's parser answers OSC 10/11/12. */
+  private pushThemeColors(): void {
+    const theme = getTerminalTheme();
+    this.host.send("pty_theme_colors", {
+      colors: {
+        foreground: theme.foreground,
+        background: theme.background,
+        cursor: theme.cursor,
+      },
+    });
   }
 
   private installConsoleForwarder(): void {

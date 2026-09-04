@@ -402,6 +402,18 @@ fn pty_resize(state: tauri::State<'_, SidecarState>, id: String, cols: u16, rows
     send_to_sidecar(&state, msg.to_string());
 }
 
+// The webview's resolved terminal colors, so the sidecar's parser can answer
+// OSC 10/11/12 (docs/specs/terminal-escapes.md). Opaque here: the shape belongs
+// to the parser at the other end, and Rust has no reason to know it.
+#[tauri::command]
+fn pty_theme_colors(state: tauri::State<'_, SidecarState>, colors: JsonValue) {
+    let msg = serde_json::json!({
+        "event": "pty:themeColors",
+        "data": colors
+    });
+    send_to_sidecar(&state, msg.to_string());
+}
+
 #[tauri::command]
 fn pty_kill(state: tauri::State<'_, SidecarState>, id: String) {
     let msg = serde_json::json!({
@@ -1619,6 +1631,7 @@ pub fn run() {
             pty_spawn,
             pty_write,
             pty_resize,
+            pty_theme_colors,
             pty_kill,
             pty_get_cwd,
             pty_get_open_ports,

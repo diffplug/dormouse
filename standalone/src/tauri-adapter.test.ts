@@ -16,6 +16,8 @@ vi.mock("@tauri-apps/plugin-shell", () => ({
 
 import { invoke as rawInvoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import type { AlertStateDetail, PtyDataDetail } from "dormouse-lib/lib/platform/types";
+import { getTerminalPaneState } from "dormouse-lib/lib/terminal-state-store";
 import { TauriAdapter } from "./tauri-adapter";
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
@@ -186,5 +188,102 @@ describe("TauriAdapter remote host link", () => {
     const pending = adapter.remoteHost.command("status");
     adapter.shutdown();
     await expect(pending).rejects.toThrow("remote host bridge closed");
+  });
+});
+
+// The sidecar owns the parse (docs/specs/terminal-escapes.md → "Parsing
+// location"), so this adapter forwards what it is given and never re-derives
+// it. What is covered here is exactly that boundary.
+describe("TauriAdapter terminal stream", () => {
+  async function listening() {
+    const handlers = new Map<string, (event: { payload: unknown }) => void>();
+    vi.mocked(listen).mockImplementation((async (
+      event: string,
+      handler: (e: { payload: unknown }) => void,
+    ) => {
+      handlers.set(event, handler);
+      return () => {};
+    }) as unknown as typeof listen);
+    const invoke = vi.mocked(rawInvoke);
+    invoke.mockClear();
+    invoke.mockResolvedValue(undefined);
+
+    const adapter = new TauriAdapter();
+    await adapter.init();
+    invoke.mockClear();
+
+    return {
+      adapter,
+      invoke,
+      deliver: (event: string, payload: unknown) => void handlers.get(event)?.({ payload }),
+    };
+  }
+
+  it("forwards the projection pair it was handed, parsing nothing again", async () => {
+    const { adapter, deliver, invoke } = await listening();
+    const seen: PtyDataDetail[] = [];
+    adapter.onPtyData((detail) => void seen.push(detail));
+
+    // An image sequence: a second parse here would strip nothing but would
+    // answer the query below twice.
+    deliver("pty:data", {
+      id: "t1",
+      data: "pre\x1b]1337;File=inline=1:AAAA\x07post",
+      textData: "prepost",
+    });
+    deliver("pty:data", { id: "t1", data: "\x1b]11;?\x07" });
+
+    expect(seen).toEqual([
+      { id: "t1", data: "pre\x1b]1337;File=inline=1:AAAA\x07post", textData: "prepost" },
+      { id: "t1", data: "\x1b]11;?\x07", textData: undefined },
+    ]);
+    // No reply written back: the owner answered, or deliberately did not.
+    expect(invoke.mock.calls.filter(([cmd]) => cmd === "pty_write")).toEqual([]);
+  });
+
+  it("applies the semantic and alert events the sidecar derived", async () => {
+    const { adapter, deliver } = await listening();
+    const alerts: AlertStateDetail[] = [];
+    adapter.onAlertState((detail) => void alerts.push(detail));
+
+    deliver("terminal:semanticEvents", {
+      id: "sem-pty",
+      events: [
+        {
+          type: "cwd",
+          cwd: {
+            path: "/tmp/here",
+            pathKind: "posix",
+            isRemote: false,
+            source: "osc7",
+            updatedAt: 1,
+          },
+        },
+      ],
+    });
+    deliver("terminal:protocolEvents", {
+      id: "sem-pty",
+      events: [
+        { kind: "notification", notification: { source: "OSC 9", title: null, body: "done" } },
+      ],
+    });
+
+    expect(getTerminalPaneState("sem-pty").cwd?.path).toBe("/tmp/here");
+    expect(alerts.some((detail) => detail.id === "sem-pty")).toBe(true);
+  });
+
+  it("pushes the resolved theme so the sidecar can answer a colour query", async () => {
+    const { adapter, invoke } = await listening();
+    adapter.requestInit();
+
+    const pushed = invoke.mock.calls.filter(([cmd]) => cmd === "pty_theme_colors");
+    expect(pushed).toHaveLength(1);
+    expect(pushed[0]![1]).toEqual({
+      colors: {
+        foreground: expect.any(String),
+        background: expect.any(String),
+        cursor: expect.any(String),
+      },
+    });
   });
 });

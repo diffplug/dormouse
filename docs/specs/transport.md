@@ -121,7 +121,10 @@ Two rules the table encodes:
 | Webview → host | `pty:getOpenPorts` | TCP listening ports of a PTY's shell **and all of its descendant subprocesses**, resolved from the root pid, answered with `pty:openPorts`. `getOpenPortsForPid()` in `standalone/sidecar/pty-core.js` (VS Code loads it through the `lib/pty-core.cjs` shim). |
 | Host → webview | `pty:openPorts` | `ports: OpenPort[]` (`{ protocol, family, address, port, pid, processName }`), de-duplicated by `(family, address, port)`, sorted by port then address. Empty when the PTY is gone or enumeration fails. |
 | Host → webview | `pty:data` | PTY output after state-driving supported OSCs are parsed/stripped; `OSC 8` and ImageAddon's inline-image `OSC 1337` forms are preserved for xterm.js, routed only to the owning router. **Carries an optional `textData`** (string-control payloads removed, for the prompt heuristic), **omitted when it would equal `data`**. |
-| Host → webview | `pty:replay` | Buffered raw output since spawn; the webview parses semantic OSCs during replay reconstruction. |
+| Host → webview | `terminal:semanticEvents` | Normalized CWD / prompt-command / title events the owner's parser derived, in stream order. |
+| Host → webview | `terminal:protocolEvents` | Standalone only: notification and progress events for the webview's `AlertManager`. VS Code holds its own in the extension host, so it needs no message. |
+| Webview → host | `dormouse:themeColors` (VS Code) / `pty_theme_colors` (standalone) | Resolved foreground / background / cursor, so the owner's parser can answer OSC 10/11/12. |
+| Host → webview | `pty:replay` | Buffered raw output since spawn; the webview runs a one-shot parser over it, the only re-parse there is. |
 | Host → webview | `dormouse:newTerminal` | May carry `shell`, `args`, display `name`, `replaceUntouched`, `announce`. The webview replaces the selected untouched terminal in place only when `replaceUntouched` is true, otherwise spawns a new pane. |
 
 **Two app-global stores relay on one pattern**: WATCHING rules (`alert:initializeWatchedCommands`, `alert:setCommandWatched` → host; `alert:watchedCommands` → webview) and alarm settings (`alert:initializeSettings`, `alert:updateSettings` → host; `alert:settings` → webview; `docs/specs/alert.md` → Alarm settings). An `initialize*` offers the renderer's persisted copy as a startup seed, and **a multi-webview host accepts only the first seed of its lifetime**. A mutation replaces the host's copy — `setCommandWatched` adds or removes one bare command key without touching unrelated rules, `updateSettings` sends the whole blob, renderer-only fields included, so every webview agrees. Either way the host broadcasts a canonical snapshot, and **every renderer replaces and persists its local mirror from it**.
@@ -130,7 +133,7 @@ Two rules the table encodes:
 
 **Never add a third app-global store on this pattern** — a third collapses them into one keyed channel with a host-side key→normalizer registry (rationale).
 
-OSC parsing/stripping rules producing `pty:data` and `terminal:semanticEvents`: `docs/specs/terminal-escapes.md`.
+OSC parsing/stripping rules for those rows, and the rule that **only the process owning a PTY parses it**: `docs/specs/terminal-escapes.md` → "Parsing location".
 
 ## Persisted session types
 

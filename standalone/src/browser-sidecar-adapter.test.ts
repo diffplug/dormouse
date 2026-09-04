@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { PlatformAdapter } from "dormouse-lib/lib/platform/types";
+import type { PlatformAdapter, PtyDataDetail } from "dormouse-lib/lib/platform/types";
 
 // Stub the Tauri modules so `./tauri-adapter` imports and constructs outside a
 // Tauri webview — same reason as tauri-adapter.test.ts. Nothing here exercises
@@ -82,5 +82,53 @@ describe("BrowserSidecarAdapter session persistence", () => {
     const adapter = new BrowserSidecarAdapter(host);
     await adapter.init();
     expect(localStorage.getItem(KEY)).toBeNull();
+  });
+});
+
+// The harness rides the same sidecar, so the parse boundary is the same one
+// TauriAdapter has: forward the pair, apply the events, push the theme.
+describe("BrowserSidecarAdapter terminal stream", () => {
+  async function listening() {
+    const host = new BrowserSidecarHost("http://localhost:1234");
+    let emit: (event: { event: string; data: unknown }) => void = () => {};
+    vi.spyOn(host, "init").mockResolvedValue(undefined);
+    vi.spyOn(host, "onEvent").mockImplementation((listener) => {
+      emit = listener;
+      return () => {};
+    });
+    const send = vi.spyOn(host, "send").mockImplementation(() => {});
+    (window as typeof window & { __DORMOUSE_BROWSER_CONSOLE_PATCHED__?: boolean })
+      .__DORMOUSE_BROWSER_CONSOLE_PATCHED__ = true;
+
+    const adapter = new BrowserSidecarAdapter(host);
+    await adapter.init();
+    send.mockClear();
+    return { adapter, send, deliver: (event: string, data: unknown) => emit({ event, data }) };
+  }
+
+  it("forwards the projection pair it was handed, parsing nothing again", async () => {
+    const { adapter, send, deliver } = await listening();
+    const seen: PtyDataDetail[] = [];
+    adapter.onPtyData((detail) => void seen.push(detail));
+
+    deliver("pty:data", { id: "b1", data: "\x1b]11;?\x07tail", textData: "tail" });
+
+    expect(seen).toEqual([{ id: "b1", data: "\x1b]11;?\x07tail", textData: "tail" }]);
+    expect(send.mock.calls.filter(([cmd]) => cmd === "pty_write")).toEqual([]);
+  });
+
+  it("pushes the resolved theme so the sidecar can answer a colour query", async () => {
+    const { adapter, send } = await listening();
+    adapter.requestInit();
+
+    const pushed = send.mock.calls.filter(([cmd]) => cmd === "pty_theme_colors");
+    expect(pushed).toHaveLength(1);
+    expect(pushed[0]![1]).toEqual({
+      colors: {
+        foreground: expect.any(String),
+        background: expect.any(String),
+        cursor: expect.any(String),
+      },
+    });
   });
 });
