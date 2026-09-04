@@ -22,7 +22,7 @@ import { type TocEntry } from "../lib/docs-pages";
 
 export function meta({ location }: MetaArgs) {
   return siteMeta(location.pathname, {
-    title: "Self-host — Dormouse",
+    title: "How to self-host — Dormouse",
     description:
       "Run the Dormouse coordinating server on your own machine, reachable only from your tailnet. One installer, no database, no account.",
   });
@@ -51,7 +51,7 @@ export default function SelfHostDocs() {
   return (
     <DocsLayout
       activePath="/docs/self-host"
-      title={selfhost.title}
+      title="How to self-host"
       intro={
         <>
           Push notifications and phone remote control need a coordinating server. You can

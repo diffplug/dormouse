@@ -216,7 +216,9 @@ export default function DocsLayout({
             {current ? (
               <>
                 <span aria-hidden="true" className="opacity-30">/</span>
-                <span className={`font-display ${ACCENT_TEXT_CLASS}`}>{current.label}</span>
+                <span className={`min-w-0 truncate font-display ${ACCENT_TEXT_CLASS}`}>
+                  {current.label}
+                </span>
               </>
             ) : null}
           </button>

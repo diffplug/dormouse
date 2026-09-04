@@ -1106,8 +1106,8 @@ export default function Home() {
           <div className="mx-auto max-w-5xl px-4 md:px-6 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-base text-center opacity-50">
             <a href="/docs/dor" className="underline hover:opacity-100">CLI reference</a>
             <a href="/docs/agent-skill" className="underline hover:opacity-100">Agent skill</a>
-            <a href="/docs/self-host" className="underline hover:opacity-100">Self-host</a>
-            <a href="/hosted/" className="underline hover:opacity-100">Hosted</a>
+            <a href="/docs/self-host" className="underline hover:opacity-100">How to self-host</a>
+            <a href="/hosted/" className="underline hover:opacity-100">Pay us to host</a>
             <a href="/docs/security" className="underline hover:opacity-100">Security</a>
             <a href="/supply-chain" className="underline hover:opacity-100">Supply Chain</a>
             <a href="https://github.com/diffplug/dormouse/issues" className="underline hover:opacity-100">Report an issue</a>

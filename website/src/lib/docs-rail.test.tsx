@@ -68,6 +68,22 @@ describe("every page in the rail", () => {
     expect(markup).toContain("remote-security-model.md");
   });
 
+  it("names the two hosting choices as actions", () => {
+    expect(DOCS_PAGES.find((page) => page.path === "/docs/self-host")?.label)
+      .toBe("How to self-host");
+    expect(DOCS_PAGES.find((page) => page.path === "/hosted")?.label)
+      .toBe("Pay us to host");
+
+    const selfHostMarkup = renderToStaticMarkup(
+      <MemoryRouter><SelfHostDocs /></MemoryRouter>,
+    );
+    const hostedMarkup = renderToStaticMarkup(
+      <MemoryRouter><Hosted /></MemoryRouter>,
+    );
+    expect(selfHostMarkup).toMatch(/<h1[^>]*>How to self-host<\/h1>/);
+    expect(hostedMarkup).toMatch(/<h1[^>]*>Pay us to host<\/h1>/);
+  });
+
   it("keeps the changelog rail honest on the filtered route the updater opens", () => {
     // /changelog/after/:version renders only releases newer than the baseline.
     // A rail built from every release links into articles that route omits.

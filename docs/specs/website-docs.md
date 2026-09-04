@@ -260,12 +260,14 @@ canonical joins the fallback's and both are discarded; `siteMeta`'s
 
 ## Reference page chrome
 
-Every `DOCS_PAGES` entry shares `DocsLayout`: site header, left rail, `h1`,
-intro, and prev/next. `/hosted` is authored marketing after `/docs/self-host`;
-the others are references.
+`DOCS_PAGES` pages use `DocsLayout` for header, rail, `h1`, intro, and
+prev/next. `/hosted` follows `/docs/self-host`.
 
-**The rail is the only table of contents.** It lists every page and expands the
-current one's sections, so page and in-page navigation share one control.
+**Must title `/docs/self-host` “How to self-host” and `/hosted` “Pay us to host”
+in chrome and metadata while keeping URLs stable.**
+
+**The rail is the only table of contents.** List all pages; expand only current
+sections.
 
 **The page list never shrinks; the expanded sections scroll.** The rail is a
 bounded flex column whose section list is the only part that gives up space, so

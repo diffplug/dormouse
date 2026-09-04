@@ -14,7 +14,7 @@ import { siteMeta } from "../lib/site-meta";
 
 export function meta({ location }: MetaArgs) {
   return siteMeta(location.pathname, {
-    title: "Dormouse Hosted — managed remote control and voice",
+    title: "Pay us to host — Dormouse",
     description:
       "Coming soon: a managed Dormouse coordinating server and optional ElevenLabs voice, without giving up free self-hosting.",
   });
@@ -36,7 +36,7 @@ export default function Hosted() {
   return (
     <DocsLayout
       activePath="/hosted"
-      title="Dormouse Hosted"
+      title="Pay us to host"
       intro="Use Dormouse Pocket without deploying a coordinating server. Hosted remote control is planned as a paid convenience; your terminals stay on your computer, and free self-hosting stays available."
       toc={HOSTED_TOC}
     >

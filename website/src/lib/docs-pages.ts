@@ -48,8 +48,8 @@ export const DOCS_PAGES: readonly DocsPage[] = [
   { path: "/changelog", module: "./pages/Changelog.tsx", label: "Changelog" },
   { path: "/docs/security", module: "./pages/SecurityDocs.tsx", label: "Security", linkedFrom: ["root-readme"] },
   { path: "/supply-chain", module: "./pages/SupplyChain.tsx", label: "Supply chain" },
-  { path: "/docs/self-host", module: "./pages/SelfHostDocs.tsx", label: "Self hosting", linkedFrom: ["root-readme"] },
-  { path: "/hosted", module: "./pages/Hosted.tsx", label: "Hosted", linkedFrom: BOTH_READMES },
+  { path: "/docs/self-host", module: "./pages/SelfHostDocs.tsx", label: "How to self-host", linkedFrom: ["root-readme"] },
+  { path: "/hosted", module: "./pages/Hosted.tsx", label: "Pay us to host", linkedFrom: BOTH_READMES },
   { path: "/docs/agent-skill", module: "./pages/AgentSkillDocs.tsx", label: "dor agent skill", linkedFrom: BOTH_READMES },
   { path: "/docs/dor", module: "./pages/DorDocs.tsx", label: "dor CLI reference", linkedFrom: BOTH_READMES },
 ];
