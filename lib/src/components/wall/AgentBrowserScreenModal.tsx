@@ -13,8 +13,8 @@
  *     Specific to screencast, so it nests under that option and greys out
  *     whenever a different render mode is selected.
  *
- * It reads the live snapshot on open and pre-selects accordingly, reflecting
- * reality rather than a stored intent.
+ * It snapshots the opening render/resolution intent for pre-selection; the
+ * live snapshot still drives the current-state readout.
  */
 import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { CheckIcon, XIcon } from '@phosphor-icons/react';
@@ -68,11 +68,10 @@ export function AgentBrowserScreenModal({
   const cancelRef = useRef<HTMLButtonElement>(null);
   const hostCapable = controller.hostCapable;
 
-  // Pre-select: Sync if engaged + actually synced; otherwise Custom prefilled
-  // with the current dims. (A device can't be pre-matched — the CLI doesn't
-  // expose device dims up front, so there's no dims map to compare against.)
-  const initialTarget: Target =
-    initial?.syncEngaged && initial.state === 'SYNCED' ? 'sync' : 'custom';
+  // Pre-select from intent, not the transient dimension comparison: while a
+  // resize is landing, sync stays engaged even though the live state is SCALED.
+  // A fixed device can't be pre-matched — the CLI exposes no dims map.
+  const initialTarget: Target = initial?.syncEngaged ? 'sync' : 'custom';
   const [target, setTarget] = useState<Target>(initialTarget);
   const [device, setDevice] = useState<string>(DEVICES[1]); // iPhone 16
   const [customW, setCustomW] = useState(String(initial?.viewport.w ?? 1280));

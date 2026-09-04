@@ -109,7 +109,8 @@ Header contract:
 - **Must reuse this mapping in browser Doors** (`docs/specs/layout.md` →
   Baseboard owns the Door label rule).
 - **Must show the URL as primary text:** host+path without query, or path behind
-  a dev-server chip; the HTML title is its tooltip.
+  a dev-server chip; the HTML title is its tooltip. An iframe surface's
+  persisted title keeps the query.
 - **Must open a pre-selected `InlineEditInput` from the URL.** Blur discards;
   `normalizeNavUrl` follows CLI scheme selection plus bare loopback → `http://`
   and bare remote → `https://` (rationale).
@@ -190,6 +191,8 @@ Source of truth: `lib/src/components/wall/connect-port.ts`
 resolution.** It splits the Browser Chrome icon pair across its nesting: the
 robot rides the `ab-screencast` parent, each nested resolution row carrying only
 its presentation glyph.
+
+**Must hide the popout option where the host lacks `agentBrowserPopOut`.**
 
 Resolution controls apply only to `ab-screencast`, as GUI wrappers around native
 commands: **Resize with pane** is Dormouse-owned sync issuing

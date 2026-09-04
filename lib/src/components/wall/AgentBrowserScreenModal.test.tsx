@@ -24,7 +24,7 @@ afterEach(() => {
   container.remove();
 });
 
-describe('AgentBrowserScreenModal display icons', () => {
+describe('AgentBrowserScreenModal', () => {
   it('composes compact capability and presentation glyphs through the modal hierarchy', () => {
     const registration = registerStubScreen('browser-1', {
       snapshot: { ...STUB_SCREEN, renderMode: 'ab-screencast' },
@@ -60,6 +60,39 @@ describe('AgentBrowserScreenModal display icons', () => {
       expect(icon.getAttribute('width')).toBe('14');
       expect(icon.getAttribute('height')).toBe('14');
     }
+
+    registration.dispose();
+  });
+
+  it('keeps resize selected while an engaged sync is transiently scaled', () => {
+    const registration = registerStubScreen('browser-transient', {
+      snapshot: {
+        ...STUB_SCREEN,
+        state: 'SCALED',
+        renderMode: 'ab-screencast',
+        syncEngaged: true,
+      },
+    });
+    const controller = getAgentBrowserScreenController('browser-transient');
+    expect(controller).not.toBeNull();
+
+    act(() => root.render(
+      <AgentBrowserScreenModal controller={controller!} label="surface:3" onClose={() => {}} />,
+    ));
+
+    const optionInput = (title: string) =>
+      [...container.querySelectorAll('label')]
+        .find((label) => label.textContent?.includes(title))
+        ?.querySelector<HTMLInputElement>('input[type="radio"]');
+
+    expect(optionInput('Resize with pane')?.checked).toBe(true);
+    expect(optionInput('Fixed size')?.checked).toBe(false);
+
+    const apply = [...container.querySelectorAll('button')]
+      .find((button) => button.textContent === 'Apply');
+    act(() => apply?.click());
+    expect(controller!.actions.engageSync).toHaveBeenCalledOnce();
+    expect(controller!.actions.applyViewport).not.toHaveBeenCalled();
 
     registration.dispose();
   });
