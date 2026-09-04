@@ -28,7 +28,12 @@ import {
 } from '../design';
 import type { RenderMode, ScreenController, ScreenSnapshot } from './agent-browser-screen';
 import { useAgentBrowserScreenSnapshot } from './agent-browser-screen';
-import { AgentRobotIcon, BrowserDisplayIcon, BrowserPresentationIcon } from './BrowserDisplayIcon';
+import {
+  AgentRobotIcon,
+  BROWSER_DISPLAY_LABEL,
+  BrowserDisplayIcon,
+  BrowserPresentationIcon,
+} from './BrowserDisplayIcon';
 
 // Fixed registry — the CLI's own device set. No custom descriptors; touch +
 // mobile UA come only bundled inside `set device` (verified against 0.27.0).
@@ -232,7 +237,7 @@ export function AgentBrowserScreenModal({
               checked={renderMode === 'ab-popout'}
               onSelect={() => setRenderMode('ab-popout')}
               icon={<BrowserDisplayIcon mode="ab-popout" size={14} className="text-muted" />}
-              label="agent-browser popout"
+              label={BROWSER_DISPLAY_LABEL['ab-popout']}
               features={[[true, 'agents can read/write'], [true, 'any URL'], [true, 'native human experience']]}
             />
           )}
@@ -241,7 +246,7 @@ export function AgentBrowserScreenModal({
             checked={renderMode === 'iframe'}
             onSelect={() => setRenderMode('iframe')}
             icon={<BrowserDisplayIcon mode="iframe" size={14} className="text-muted" />}
-            label="iframe embed"
+            label={BROWSER_DISPLAY_LABEL.iframe}
             features={[[false, 'agents cannot read/write'], [false, 'http only'], [true, 'native human experience']]}
           />
         </div>

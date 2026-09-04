@@ -16,6 +16,7 @@ import {
 
 const SNAPSHOT: ScreenSnapshot = {
   state: 'SCALED',
+  renderMode: 'ab-screencast',
   viewport: { w: 1280, h: 720, dpr: 1 },
   paneCss: { w: 980, h: 560 },
   displayDpr: 2,

@@ -41,6 +41,7 @@ export function ensureResizeObserver(): void {
 
 export const STUB_SCREEN: ScreenSnapshot = {
   state: 'SYNCED',
+  renderMode: 'ab-screencast',
   viewport: { w: 1280, h: 720, dpr: 1 },
   paneCss: { w: 1280, h: 720 },
   displayDpr: 1,

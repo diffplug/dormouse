@@ -36,7 +36,8 @@ Source of truth: `lib/src/components/wall/BrowserPanel.tsx`,
 Invariants on the flat persisted `BrowserPanelParams`:
 
 - **`renderMode` is canonical**; an absent one resolves to `iframe`, never to a
-  live agent-browser.
+  live agent-browser. **Only params may omit it** — a live `ScreenSnapshot`
+  always carries one, so nothing defaults it a second time.
 - **`url` is the canonical target** across render swaps and relaunches.
   Agent-browser mirrors the newest non-blank active tab URL into it; iframe
   persists only navigations initiated by Dormouse chrome.
@@ -102,7 +103,7 @@ Header contract:
   | --- | --- |
   | agent-browser, resize with pane (`syncEngaged`) | wide robot + frame corners |
   | agent-browser, fixed size | wide robot + picture-in-picture |
-  | agent-browser, popout | wide robot + arrow-square-out |
+  | agent-browser popout | wide robot + arrow-square-out |
   | iframe embed | frame corners only |
 
 - **Must reuse this mapping in browser Doors** (`docs/specs/layout.md` →
