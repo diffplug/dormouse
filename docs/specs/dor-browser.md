@@ -456,7 +456,7 @@ What is rewritten, exactly:
 | request | `Origin` | upstream origin **only** when it is the proxy's own; else forwarded untouched (absent stays absent) |
 | request | `Referer` | proxy origin substituted for the upstream origin |
 | request | `Accept-Encoding` | deleted, so HTML comes back identity for rewriting |
-| response | `X-Frame-Options`, `Content-Security-Policy`, `Content-Security-Policy-Report-Only` | dropped **whole**, never per-directive (rationale) |
+| response | `X-Frame-Options`, `Content-Security-Policy`, `Content-Security-Policy-Report-Only` | replaced **whole** by `frame-ancestors 'self' <validated chain>` (rationale) |
 | response | hop-by-hop (RFC 7230 §6.1) | dropped |
 | response | `Location` | upstream origin rewritten back to the proxy origin, so a redirect stays inside the proxy |
 | response body | `<meta http-equiv="content-security-policy">` | removed, like the header |
@@ -481,14 +481,13 @@ Source of truth: `lib/src/components/wall/IframePanel.tsx`,
 
 ### Iframe Shim
 
-**The injected shim is fixed Dormouse-owned code, never user-provided eval.** It
-posts only these messages to the parent:
+**Must send these fixed, never-user-provided shim messages to the app:**
 
-- `leader`: dual-tap Meta/Shift leader chord.
-- `pointerdown`: genuine click inside the frame, used to select/focus the pane.
-- `location`: same-frame navigation after history/hash/page events, and after a
-  same-frame anchor click the page did not cancel.
-- `open-window`: intercepted `target=_blank` anchor or `window.open` URL.
+- `leader`: dual-tap Meta/Shift leader chord; relayed from nested documents.
+- `pointerdown`: genuine click, used to select/focus the pane; relayed.
+- `location`: outer-document history/hash/page events and uncancelled same-frame
+  anchor clicks; never relayed from nested documents.
+- `open-window`: intercepted `target=_blank` anchor or `window.open` URL; relayed.
 
 **A URL from the frame is re-checked before it becomes a pane.** `open-window`
 and the control socket's `surface.iframe` both go through `browserSurfaceUrl`;
@@ -560,10 +559,11 @@ Security boundaries:
 - every other user-supplied `http://` target is trusted as the user's command,
   at the cost of the upstream's own XSS policy inside the frame.
 
-**Must replace the upstream's framing controls with a `frame-ancestors` naming
-the embedder chain, never merely drop them**, and **the shim's `postMessage` must
-target that chain's origin, never `'*'`** (rationale; `docs/specs/security-local.md` → "Loopback
-Listeners"). **With no chain the proxy strips nothing and injects nothing.**
+**Must replace framing controls with exactly `frame-ancestors 'self'
+<validated embedder chain>`.** `'self'` permits same-grant nesting; foreign
+ancestors fail. **Each shim hop must target only its origin and that chain's
+innermost origin, never `'*'`** (rationale; `docs/specs/security-local.md` →
+"Loopback Listeners"). **With no chain it preserves headers and injects nothing.**
 
 **Must refresh a grant's idle timer for every caller except one that named itself
 foreign.** `isOwnOrigin` and `isForeignOrigin` are not each other's negation — an

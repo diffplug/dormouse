@@ -46,9 +46,10 @@
  *     back out. Neither is per-request (an iframe navigation carries no
  *     `Origin`, and `Sec-Fetch-Site` says `cross-site` for our own webview and
  *     for an attacker page alike), so both are conditioned on a
- *     `frame-ancestors` naming the app's own chain, which the browser enforces.
- *     With no chain the proxy takes nothing away and injects nothing, which
- *     leaves a caller exactly what the upstream would have given it directly.
+ *     `frame-ancestors` allowing only the grant's own origin (for nested frames)
+ *     and the app's validated chain, which the browser enforces. With no chain
+ *     the proxy takes nothing away and injects nothing, which leaves a caller
+ *     exactly what the upstream would have given it directly.
  */
 import * as http from 'http';
 import * as net from 'net';
@@ -248,11 +249,11 @@ function handleRequest(grant: Grant, req: http.IncomingMessage, res: http.Server
     }
     // Any http upstream is framed, loopback or remote: sanitizeResponseHeaders
     // replaces its frame-blocking headers (X-Frame-Options / CSP
-    // frame-ancestors) with one naming this webview's own ancestor chain, and
-    // streamHtml injects the shim. A site's "do not embed" is overridden
-    // because the embed is the user's own `dor iframe`, not a third party
-    // framing them — but only for that one embedder, so a stranger who scans
-    // the port and frames it is refused by their own browser.
+    // frame-ancestors) with one allowing same-grant nesting plus this webview's
+    // own ancestor chain, and streamHtml injects the shim. A site's "do not
+    // embed" is overridden because the embed is the user's own `dor iframe`,
+    // not a third party framing them — a stranger's foreign ancestor still
+    // fails the policy.
     streamHtml(grant, embedder, upstreamRes, res);
   });
   upstreamReq.on('error', (err) => {
@@ -340,8 +341,9 @@ function sanitizeResponseHeaders(grant: Grant, headers: http.IncomingHttpHeaders
     const lower = name.toLowerCase();
     if (HOP_BY_HOP_RESPONSE_HEADERS.has(lower)) continue;
     // Replaced, never merely dropped: this proxy may only take the upstream's
-    // "do not embed" away if it puts back one that names the single embedder
-    // entitled to frame it (`FRAMING_RESPONSE_HEADERS`).
+    // "do not embed" away if it puts back one that names the exact allowed set:
+    // this per-grant origin plus the app's validated ancestor chain
+    // (`FRAMING_RESPONSE_HEADERS`).
     if (replaceFraming && FRAMING_RESPONSE_HEADERS.has(lower)) continue;
     out[name] = value;
   }

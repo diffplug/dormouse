@@ -64,13 +64,15 @@ fails closed when no token was injected (`docs/specs/vscode.md` -> "Webview
 message authentication"). **The standalone adapters have no forgeable inbox**:
 host events arrive over Tauri IPC, never `window.postMessage`.
 
-**The shim the proxy injects addresses the embedder chain's innermost origin,
-never `'*'`**, and with no usable chain the proxy injects nothing and strips no
-framing header (`docs/specs/dor-browser.md` -> "Iframe Host Capability And CSP").
-What it grants a *caller* is [Loopback Listeners](#loopback-listeners)'s
-business.
+**Each injected shim hop must address only its proxy origin and the embedder
+chain's innermost origin, never `'*'`.** Nested frames relay the three pane-level
+messages through same-origin parents; their document-level locations stop there.
+With no usable chain the proxy injects
+nothing and strips no framing header (`docs/specs/dor-browser.md` -> "Iframe
+Host Capability And CSP"). What it grants a *caller* is [Loopback
+Listeners](#loopback-listeners)'s business.
 
-- **FAIL IF** the injected shim targets anything but the embedder chain's innermost origin, or the proxy uses a chain it did not validate in full: `iframeShim` and `normalizeEmbedderOrigins` in `lib/src/host/iframe-proxy-rewrite.ts`, applied in `lib/src/host/iframe-proxy.ts`. Pinned by `lib/src/host/iframe-proxy-rewrite.test.ts` and `lib/src/host/iframe-proxy.test.ts`.
+- **FAIL IF** an injected shim targets anything but its proxy origin or the embedder chain's innermost origin, relays a nested `location`, a foreign-origin message, or an unregistered message, or the proxy uses a chain it did not validate in full: `iframeShim` and `normalizeEmbedderOrigins` in `lib/src/host/iframe-proxy-rewrite.ts`, applied in `lib/src/host/iframe-proxy.ts`. Pinned by `lib/src/host/iframe-proxy-rewrite.test.ts` and `lib/src/host/iframe-proxy.test.ts`.
 - **FAIL IF** a `VSCodeAdapter` host-channel listener acts on a message before `isHostMessage` (`lib/src/lib/vscode-message-token.ts`) accepts it, or the token stops being minted per serve and attached only by `WebviewChannel.post` in `vscode-ext/src/webview-messaging.ts`: `dor:controlRequest` is one of the shapes a framed page could otherwise claim. The proxy-origin listeners above are guarded by origin, not the token. Pinned by the `host message authentication` block in `lib/src/lib/platform/vscode-adapter.test.ts`.
 
 Source of truth: `isProxyOrigin` in `lib/src/lib/iframe-proxy-registry.ts`, the
@@ -126,17 +128,15 @@ listener because their URLs differ, and the differences are forced, not stylisti
 URL token is available to the browser-dev harness, which owns its page's URL, and never
 to the iframe proxy (rationale).
 
-**A third question has no request-header answer at all: who is allowed to frame me?**
-A response that confers something on its *embedder* must name that embedder and let the
-browser enforce it, which no request header can do — so the webview supplies its own
-ancestor chain, not merely its origin (the check walks the whole chain), with each
-request for a proxy URL, and that chain is what the proxy's `frame-ancestors` names
-(rationale).
+**The replacement policy must allow exactly `'self'` plus the full validated
+ancestor chain the webview supplies with each proxy URL request.** `'self'` allows
+same-grant nesting; any foreign ancestor fails. No request header identifies the
+embedder, and the browser checks the whole chain (rationale).
 
 - **FAIL IF** any loopback HTTP or WebSocket listener grants an unrecognized caller a privilege it could not obtain by reaching the upstream directly. Refusing the request is one way; the iframe proxy's *admits all, vouches for none, names its embedder* is another, and is not a violation (rationale). `scripts/loopback-lint.mjs` (`pnpm test`) makes the cheap half deterministic — a new loopback bind that does not reference a guard module fails the build — but only in the bind forms it knows: `.listen` positional and options-object, `@hono/node-server`'s `serve({ hostname })`, and `ws`'s `new WebSocketServer({ port | host })`, each proved load-bearing by `scripts/loopback-lint-selftest.mjs`. **Adding a server dependency means adding its bind spelling there**; a host built at runtime is invisible to a regex in any spelling. It also only sees that a file *knows* a guard exists, never that the guard is called on every request, so this bullet still has to be read. Derive the set by searching the shipped trees for `createServer`, `.listen(`, `serve(` and `WebSocketServer` rather than trusting this list. Today the set is three: the iframe proxy (`lib/src/host/iframe-proxy.ts`), the VS Code agent-browser stream relay (`vscode-ext/src/agent-browser-host.ts`), and the browser-dev bridge (`standalone/scripts/dev-agent-browser.mjs`). A Unix-domain socket or named pipe is not in scope — no browser can reach one — which is why the `dor` control channel is bounded by socket permissions instead.
 - **FAIL IF** the iframe proxy rewrites `Origin` to the upstream's own origin for a caller whose inbound `Origin` is not the proxy's own — in `handleRequest` **or** `handleUpgrade`. A foreign `Origin` must be forwarded untouched rather than blocked, so the upstream sees the truth and applies its own policy (rationale).
 - **FAIL IF** the iframe proxy stops checking that `Host` names its own grant port, on either path. Its per-grant ephemeral port and one-fixed-upstream binding are real mitigations but neither is a secret, so the `Host` check is what makes DNS rebinding fail.
-- **FAIL IF** the iframe proxy **drops** an upstream's `X-Frame-Options` / CSP `frame-ancestors` without **replacing** them with a `frame-ancestors` naming the embedder chain the webview supplied, or injects its shim with any `postMessage` target but that chain's own origin. With no usable chain the proxy must strip nothing and inject nothing, which leaves the caller exactly what the upstream would have given it directly (rationale).
+- **FAIL IF** the iframe proxy drops upstream `X-Frame-Options` / CSP `frame-ancestors` without replacing them with exactly `frame-ancestors 'self' <validated embedder chain>`, admits another source, or targets the shim anywhere but its own proxy origin and that chain's innermost origin. With no usable chain it must preserve the headers and inject nothing (rationale).
 - **FAIL IF** a request bearing a *foreign* `Origin` refreshes a grant's idle timer: a grant holds a live upstream binding, and a stranger polling it keeps a closed pane's binding open. An *absent* `Origin` must keep refreshing it — that is what a live frame's own navigations and sub-resources send.
 - **FAIL IF** the stream relay's grant stops being single-use, TTL-bounded, and pinned to one target port, or if it begins rewriting `Origin` rather than dropping it. It needs no `Host` check while the token holds (rationale).
 - **FAIL IF** the browser-dev bridge drops any of its four gates — the per-run token, the loopback `Host` check, the `application/json` content-type required of every non-GET, and the exact-origin `access-control-allow-origin`. The first three live together in the gate that runs before routing, so a route that never reads a body is covered by all of them. It is dev-only and ships in nothing, but it dispatches `pty_spawn` with caller-supplied `shell`, `args`, `cwd` and `env` — arbitrary command execution on a maintainer or CI-agent machine (`docs/specs/security-ci.md` -> "Automated Maintainer (tend)"). The content-type rule is a security control, not tidiness (rationale).
