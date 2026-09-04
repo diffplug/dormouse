@@ -310,6 +310,13 @@ export function createSidecarSurfaceBridge(
   };
 }
 
+/**
+ * What Pocket calls this Burrow's app, so a laptop running both this and the VS
+ * Code extension lists two distinguishable rows (`service.ts` →
+ * `suggestedBurrowLabel`).
+ */
+const APP_NAME = 'Dormouse';
+
 export interface SidecarBurrowOptions extends SidecarSurfaceBridgeOptions {
   /**
    * Where the enrollment + ACL file lives. The browser dev harness passes a
@@ -338,6 +345,7 @@ export function createSidecarBurrow(options: SidecarBurrowOptions): SidecarBurro
   const service = new BurrowService({
     store,
     provider: bridge.provider,
+    appName: APP_NAME,
     sendToUi: options.send,
     connectSrc: bakedConnectSrc(),
   });

@@ -488,7 +488,7 @@ function useEnrollmentActions() {
 }
 
 /** The one field the offer card and the typed form both ask for. */
-function MachineNameField({
+function BurrowNameField({
   value,
   onChange,
 }: {
@@ -497,7 +497,7 @@ function MachineNameField({
 }) {
   return (
     <label className="mt-2 block">
-      <span className={FIELD_LABEL}>Name for this machine</span>
+      <span className={FIELD_LABEL}>Name for this Burrow</span>
       <TextInput
         value={value}
         onChange={onChange}
@@ -687,7 +687,7 @@ function OfferCard({
         {origin}
       </ModalReviewBlock>
 
-      <MachineNameField value={label} onChange={setLabel} />
+      <BurrowNameField value={label} onChange={setLabel} />
 
       {error ? <div className="mt-2 text-sm leading-relaxed text-error">{error}</div> : null}
 
@@ -1059,7 +1059,7 @@ function EnrollForm({
         />
       </label>
 
-      <MachineNameField value={label} onChange={setLabel} />
+      <BurrowNameField value={label} onChange={setLabel} />
 
       {error ? <div className="mt-2 text-sm leading-relaxed text-error">{error}</div> : null}
 

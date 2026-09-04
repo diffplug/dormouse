@@ -221,6 +221,7 @@ function startService(): void {
   service = new BurrowService({
     store: burrowStateStore(context),
     provider: createBurrowProvider(bound),
+    appName: APP_NAME,
     createWebSocket: createRelaySocket,
     sendToUi: (event, data) => {
       if (event === BURROW_RESULT_EVENT) {
@@ -280,6 +281,13 @@ onPeerLinkSettled(() => drainQueuedCommands());
 const commandRoutes = new Map<string, PeerLinkClient>();
 
 const NO_BURROW = 'no Burrow is reachable';
+
+/**
+ * What Pocket calls this Burrow's app, so a laptop running both this and
+ * standalone lists two distinguishable rows (`service.ts` →
+ * `suggestedBurrowLabel`).
+ */
+const APP_NAME = 'VS Code';
 
 /**
  * Deliver one result to whoever is owed it — the one window that forwarded the
@@ -482,7 +490,7 @@ async function idleStatus(): Promise<BurrowConsoleStatus> {
   // The snapshot itself is the service's own builder, so the two answers to the
   // same question — including the offer's origin-only projection — cannot drift.
   // `readEnrollmentOffer` never rejects (its own doc), hence no guard here.
-  return unenrolledStatus(await readEnrollmentOffer());
+  return unenrolledStatus(await readEnrollmentOffer(), APP_NAME);
 }
 
 /** Refuse one command — or answer it as an idle service would ({@link idleAnswer}). */

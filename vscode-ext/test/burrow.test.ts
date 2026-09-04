@@ -572,7 +572,7 @@ describe('burrow service glue', () => {
           burrowId: null,
           connection: 'stopped',
           pairedClients: 0,
-          suggestedLabel: hostname(),
+          suggestedLabel: `${hostname()} (VS Code)`,
           offer: { origin: OFFER.origin },
         },
       },
@@ -721,6 +721,7 @@ describe('burrow service glue', () => {
         resizePty: () => {},
         streamPty: () => () => {},
       },
+      appName: 'VS Code',
       sendToUi: (event, data) => void sent.push({ event, data: data as never }),
       connectSrc: 'https://*.dormouse.sh wss://*.dormouse.sh',
     });

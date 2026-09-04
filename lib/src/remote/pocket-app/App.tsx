@@ -742,7 +742,7 @@ export function PairingCodeView({
  * (`docs/specs/pocket-app.md` → The seam: the remote session is a platform
  * adapter).
  */
-export const BURROWS_TITLE = 'Computers';
+export const BURROWS_TITLE = 'Burrows';
 
 /** The connected Pocket shell: burrow navigation chrome over the remote wall. */
 export function ConnectedView({

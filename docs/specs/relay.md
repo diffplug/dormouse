@@ -705,7 +705,9 @@ memo invalidation — live in that burrow's spec.
   read would answer `enrolled: false` after the `{ enrolled: true }` event,
   disarming the edge-triggered webview gate. The un-enrolled snapshot is one
   exported builder, `unenrolledStatus`, shared with the VS Code glue
-  ([vscode.md](./vscode.md)).
+  ([vscode.md](./vscode.md)). **`suggestedLabel` names the app beside the
+  hostname** (`suggestedBurrowLabel`): standalone and the extension are two
+  Burrows on one machine, and Pocket lists them as two rows.
 
   **Order matters, and the store goes first**: the `burrowToken` exists nowhere
   else and cannot be re-minted from the same exchange, so the save is awaited
@@ -797,8 +799,9 @@ notifications). Only the first has a section beneath it, so only the first says
 "below". `describePushTargets` takes the seam as an argument; the `PushNoBurrow` /
 `PushNotEnrolled` story pair holds the two apart.
 
-Un-enrolled it is a three-field form (Relay, setup password, machine name —
-prefilled with the hostname `status` carries) calling the service's `enroll`;
+Un-enrolled it is a three-field form (Relay, setup password, Burrow name —
+prefilled with the `suggestedLabel` `status` carries) calling the service's
+`enroll`;
 enrolled it shows the Relay URL, relay connection state, and paired-device
 count, with `Disconnect` and — only on `displaced` — `Reconnect`. Rules the UI
 exists to honor:

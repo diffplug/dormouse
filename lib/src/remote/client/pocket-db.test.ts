@@ -1,6 +1,6 @@
 /**
  * Pocket's IndexedDB layout (`docs/specs/pocket-app.md` → "What Pocket
- * stores"): the v3 upgrade, and the two stores that survive it.
+ * stores"): the v4 upgrade, and the two stores it leaves behind.
  *
  * `fake-indexeddb` structured-clones what it is handed, and a `CryptoKey` is
  * not cloneable there, so the records below carry plain stand-ins where the
@@ -18,6 +18,7 @@ import {
   PENDING_DELETIONS_STORE,
   POCKET_DB_NAME,
   POCKET_DB_VERSION,
+  RETIRED_KNOWN_HOSTS_STORE,
   indexedDbKnownBurrowStore,
   indexedDbPendingDeletionStore,
   openPocketDb,
@@ -89,27 +90,35 @@ describe('the pocket database', () => {
   });
 
   /**
-   * Both earlier versions land in the same shape. The device key is gone with
+   * Every earlier version lands in the same shape. The device key is gone with
    * the protocol that used it, and a key nothing can use is only a credential
-   * left lying about.
+   * left lying about; the Host-named stores go the same way at v4, their records
+   * naming a `hostId` nothing here reads.
    */
-  it.each([1, 2])('upgrades a v%i database by deleting the device key', async (from) => {
+  it.each([1, 2, 3])('upgrades a v%i database by deleting the retired stores', async (from) => {
     const older = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open(POCKET_DB_NAME, from);
       request.onupgradeneeded = () => {
         const db = request.result;
-        db.createObjectStore(DEVICE_KEY_STORE);
+        if (from < 3) db.createObjectStore(DEVICE_KEY_STORE);
         if (from >= 2) {
-          db.createObjectStore(KNOWN_BURROWS_STORE, { keyPath: 'burrowId' });
+          db.createObjectStore(RETIRED_KNOWN_HOSTS_STORE, { keyPath: 'hostId' });
           db.createObjectStore(PENDING_DELETIONS_STORE);
         }
       };
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
-    const seed = older.transaction(DEVICE_KEY_STORE, 'readwrite');
-    seed.objectStore(DEVICE_KEY_STORE).put({ devicePublicKey: 'BDevice' }, 'default');
-    await promisifyTransaction(seed);
+    if (from < 3) {
+      const seed = older.transaction(DEVICE_KEY_STORE, 'readwrite');
+      seed.objectStore(DEVICE_KEY_STORE).put({ devicePublicKey: 'BDevice' }, 'default');
+      await promisifyTransaction(seed);
+    }
+    if (from >= 2) {
+      const seed = older.transaction(PENDING_DELETIONS_STORE, 'readwrite');
+      seed.objectStore(PENDING_DELETIONS_STORE).put({ hostId: 'h', deliveryId: 'd' }, 'h/d');
+      await promisifyTransaction(seed);
+    }
     older.close();
 
     const db = await openPocketDb();
@@ -120,6 +129,12 @@ describe('the pocket database', () => {
         PENDING_DELETIONS_STORE,
       ]);
       expect(db.objectStoreNames.contains(DEVICE_KEY_STORE)).toBe(false);
+      expect(db.objectStoreNames.contains(RETIRED_KNOWN_HOSTS_STORE)).toBe(false);
+      // Same name, incompatible records: v4 empties it rather than re-keying.
+      const read = db.transaction(PENDING_DELETIONS_STORE, 'readonly');
+      const all = read.objectStore(PENDING_DELETIONS_STORE).getAll();
+      await promisifyTransaction(read);
+      expect(all.result).toEqual([]);
     } finally {
       db.close();
     }

@@ -120,7 +120,7 @@ Three details the table leaves implicit:
   wall filters them out of selectable sessions and the active-pane default.
 
 **The pinned record picks a row's one action.** The Burrows view — titled
-**Computers** (rationale) — lists the `KnownBurrowV1` records (no record, no row),
+**Burrows** (rationale) — lists the `KnownBurrowV1` records (no record, no row),
 labeled from the record and stamped online from `GET /api/burrows`, offering
 Connect alone or **Pair again** alone, never a Connect that can only fail.
 **Nothing asks the Burrow**: only an authenticated

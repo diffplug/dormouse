@@ -64,6 +64,13 @@ import {
 export interface BurrowServiceOptions {
   store: BurrowStateStore;
   provider: BurrowSurfaceProvider;
+  /**
+   * What to call the app this Burrow is — `Dormouse` in standalone, `VS Code` in
+   * the extension. It only shapes {@link suggestedBurrowLabel}, but one machine
+   * runs both and Pocket lists them side by side, so a bare hostname would name
+   * two rows the same.
+   */
+  appName: string;
   /** Emit one of the `burrow:*` events to the webview. */
   sendToUi: (event: string, data: unknown) => void;
   /** The CSP-shaped allowlist this build was compiled with (`connect-src.ts`). */
@@ -106,16 +113,29 @@ function safeHostname(): string {
  * (`service-protocol.ts` → `BurrowConsoleStatus.offer`) — so the two must
  * not drift.
  */
-export function unenrolledStatus(offer: EnrollmentOffer | null): BurrowConsoleStatus {
+export function unenrolledStatus(
+  offer: EnrollmentOffer | null,
+  appName: string,
+): BurrowConsoleStatus {
   return {
     enrolled: false,
     relayUrl: null,
     burrowId: null,
     connection: 'stopped',
     pairedClients: 0,
-    suggestedLabel: safeHostname(),
+    suggestedLabel: suggestedBurrowLabel(appName),
     offer: offer ? { origin: offer.origin } : null,
   };
+}
+
+/**
+ * The label the enrollment form starts with. Names the app as well as the
+ * machine, because standalone and VS Code on one laptop are two Burrows and
+ * Pocket lists them as two rows — a hostname alone would label both the same.
+ */
+export function suggestedBurrowLabel(appName: string): string {
+  const machine = safeHostname();
+  return machine ? `${machine} (${appName})` : appName;
 }
 
 export class BurrowService {
@@ -123,6 +143,7 @@ export class BurrowService {
   readonly #provider: BurrowSurfaceProvider;
   readonly #sendToUi: (event: string, data: unknown) => void;
   readonly #connectSrc: string;
+  readonly #appName: string;
   readonly #createWebSocket?: (url: string) => WebSocketLike;
   readonly #fetch?: typeof globalThis.fetch;
   readonly #now: () => number;
@@ -155,6 +176,7 @@ export class BurrowService {
     this.#provider = options.provider;
     this.#sendToUi = options.sendToUi;
     this.#connectSrc = options.connectSrc;
+    this.#appName = options.appName;
     this.#createWebSocket = options.createWebSocket;
     this.#fetch = options.fetch;
     this.#now = options.now ?? (() => Date.now());
@@ -329,14 +351,14 @@ export class BurrowService {
   async #status(): Promise<BurrowConsoleStatus> {
     const offer = this.#enrollment ? null : await this.#readOffer();
     const enrollment = this.#enrollment;
-    if (!enrollment) return unenrolledStatus(offer);
+    if (!enrollment) return unenrolledStatus(offer, this.#appName);
     return {
       enrolled: true,
       relayUrl: enrollment.relayUrl,
       burrowId: enrollment.burrowId,
       connection: this.#burrow?.status ?? 'stopped',
       pairedClients: this.#burrow?.activeRecords.length ?? 0,
-      suggestedLabel: safeHostname(),
+      suggestedLabel: suggestedBurrowLabel(this.#appName),
       offer: null,
     };
   }

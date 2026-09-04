@@ -13,16 +13,30 @@ export const POCKET_DB_NAME = 'dormouse-pocket';
 
 /**
  * v1 was `device-key` alone; v2 added the two E2E stores beside it; v3 deletes
- * `device-key`, which nothing reads any more. A phone arriving from either
- * earlier version lands in the same shape, and the deletion is what stops a
- * superseded Client identity from outliving the protocol that used it.
+ * `device-key`, which nothing reads any more; v4 replaces both E2E stores with
+ * their Burrow-named selves. A phone arriving from any earlier version lands in
+ * the same shape, and each deletion is what stops a superseded Client identity
+ * from outliving the protocol that used it.
+ *
+ * **The version only ever goes up.** Re-numbering the Burrow stores back to v1
+ * would have every phone that already opened this database fail its next
+ * `indexedDB.open` with a `VersionError`, permanently.
  */
-export const POCKET_DB_VERSION = 3;
+export const POCKET_DB_VERSION = 4;
 
 /** Deleted at v3; named only so the upgrade and its test can say what goes. */
 export const DEVICE_KEY_STORE = 'device-key';
 export const KNOWN_BURROWS_STORE = 'known-burrows';
 export const PENDING_DELETIONS_STORE = 'pending-deletions';
+
+/**
+ * What {@link KNOWN_BURROWS_STORE} was called before the Burrow rename. Dropped
+ * at v4 rather than re-keyed: every record in it names a `hostId` this build has
+ * no reader for, and the Relay forgot the pairing it describes, so the phone has
+ * to pair again either way. {@link PENDING_DELETIONS_STORE} kept its name but
+ * not its record shape, so v4 empties it for the same reason.
+ */
+export const RETIRED_KNOWN_HOSTS_STORE = 'known-hosts';
 
 /** How this Client stands with one Burrow, once a pairing has answered. */
 export type KnownBurrowAuthorization =
@@ -110,10 +124,10 @@ export function pendingDeletionKey(burrowId: string, deliveryId: string): string
 
 /**
  * Open the database, creating whatever stores this version is missing and
- * deleting the one it has retired.
+ * deleting the ones it has retired.
  *
- * The upgrade is written as "create what is absent, drop what is gone" rather
- * than as a chain of per-version steps: a browser arriving from v1, from v2, or
+ * The upgrade is written as "drop what is gone, create what is absent" rather
+ * than as a chain of per-version steps: a browser arriving from v1, v2, v3, or
  * with no database at all lands in exactly the same shape.
  */
 export function openPocketDb(): Promise<IDBDatabase> {
@@ -131,16 +145,14 @@ export function openPocketDb(): Promise<IDBDatabase> {
       // The idiom holds only while no upgrade transforms *data*: the first one
       // that re-keys records or backfills an index has to branch on
       // `event.oldVersion` instead.
-      if (db.objectStoreNames.contains(DEVICE_KEY_STORE)) {
-        db.deleteObjectStore(DEVICE_KEY_STORE);
+      for (const retired of [DEVICE_KEY_STORE, RETIRED_KNOWN_HOSTS_STORE, PENDING_DELETIONS_STORE]) {
+        if (db.objectStoreNames.contains(retired)) db.deleteObjectStore(retired);
       }
       if (!db.objectStoreNames.contains(KNOWN_BURROWS_STORE)) {
         db.createObjectStore(KNOWN_BURROWS_STORE, { keyPath: 'burrowId' });
       }
       // Explicit keys: the key is a pair of fields, not one of them.
-      if (!db.objectStoreNames.contains(PENDING_DELETIONS_STORE)) {
-        db.createObjectStore(PENDING_DELETIONS_STORE);
-      }
+      db.createObjectStore(PENDING_DELETIONS_STORE);
     };
     // A connection on a build older than the one that added the
     // `versionchange` handler below can hold the upgrade off; neither `success`

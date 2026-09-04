@@ -24,7 +24,7 @@
 
 **Why Pocket hides `MobileWall`'s Kill button.** Closing a local xterm view without a Burrow-side close leaves the Burrow attachment live: the pane vanishes on the phone and stays open on the laptop.
 
-**Why the Burrows view is titled "Computers".** That is the word the rest of Pocket already uses for the machine on the other end; "Burrows" is protocol vocabulary that appears nowhere else the user can see.
+**Why the Burrows view is titled "Burrows".** It was "Computers", the word the rest of Pocket used for the machine on the other end. One computer runs two Burrows — standalone and the VS Code extension enroll separately — so "Computers" named the wrong thing as soon as both were listed, and the two rows had to be told apart by something. `suggestedBurrowLabel` names the app beside the hostname for the same reason.
 
 **Why `pairing-required` keeps the pin while dropping authorization.** The pinned Burrow static makes the next ceremony a re-pair rather than a first meeting with an unknown key, so an ACL reset or a revocation on the laptop recovers through the ordinary ceremony, with the same identity checks as the first one.
 
