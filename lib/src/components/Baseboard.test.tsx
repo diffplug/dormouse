@@ -234,7 +234,7 @@ describe('Baseboard browser Doors', () => {
     expect(door?.querySelector('[data-browser-display-mode="ab-fixed"] svg')).not.toBeNull();
     expect(door?.querySelectorAll('[data-browser-display-mode="ab-fixed"] svg')).toHaveLength(2);
     expect(door?.getAttribute('aria-label')).toBe(
-      'localhost:5173/app, agent-browser, fixed size',
+      'localhost:5173/app, agent-browser fixed size',
     );
   });
 });

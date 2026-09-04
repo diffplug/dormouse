@@ -8,8 +8,8 @@ import {
 import type { BrowserDisplayMode } from './agent-browser-screen';
 
 export const BROWSER_DISPLAY_LABEL: Record<BrowserDisplayMode, string> = {
-  'ab-resize': 'agent-browser, resizes with pane',
-  'ab-fixed': 'agent-browser, fixed size',
+  'ab-resize': 'agent-browser resizes with pane',
+  'ab-fixed': 'agent-browser fixed size',
   'ab-popout': 'agent-browser popout',
   iframe: 'iframe embed',
 };

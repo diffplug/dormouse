@@ -890,7 +890,7 @@ export function Wall({
       const activity = activityStates.get(source.id);
       const shellActivity = terminalBacked ? state.activity : null;
       const title = terminalBacked
-        ? deriveSurfaceLabel(state, states, appTitleForPane, source.title ?? source.id)
+        ? deriveSurfaceLabel(state, appTitleForPane, source.title ?? source.id)
         : (source.title ?? source.id);
       const view: DorSurfaceView = source.minimized
         ? 'minimized'

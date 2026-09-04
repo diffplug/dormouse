@@ -101,8 +101,8 @@ Header contract:
 
   | Display | Icon cluster |
   | --- | --- |
-  | agent-browser, resize with pane (`syncEngaged`) | wide robot + frame corners |
-  | agent-browser, fixed size | wide robot + picture-in-picture |
+  | agent-browser resizes with pane (`syncEngaged`) | wide robot + frame corners |
+  | agent-browser fixed size | wide robot + picture-in-picture |
   | agent-browser popout | wide robot + arrow-square-out |
   | iframe embed | frame corners only |
 

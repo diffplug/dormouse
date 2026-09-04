@@ -26,7 +26,7 @@ import {
   subscribeToAlertSpeech,
   subscribeToTerminalPaneState,
 } from '../lib/terminal-registry';
-import { createTerminalPaneState, deriveSurfaceLabel, type TerminalPaneState } from '../lib/terminal-state';
+import { createTerminalPaneState, deriveSurfaceLabel } from '../lib/terminal-state';
 
 /** Shared look for every baseboard-level button (DESIGN.md -> Navigation). */
 const BASEBOARD_BUTTON_CLASS =
@@ -48,7 +48,6 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   const speechStates = useSyncExternalStore(subscribeToAlertSpeech, getAlertSpeechSnapshot);
   const settings = useSyncExternalStore(subscribeToAlertSettings, getAlertSettings);
   const terminalStates = useSyncExternalStore(subscribeToTerminalPaneState, getTerminalPaneStateSnapshot);
-  const allPaneStates = useMemo(() => [...terminalStates.values()], [terminalStates]);
   const appTitleForPane = useMemo(
     () => buildAppTitleResolver(terminalStates, activityStates),
     [terminalStates, activityStates],
@@ -207,7 +206,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
       // Only a terminal-backed Surface has shell state to derive a label from;
       // anything else keeps the store-backed title it already carries.
       title: hasTerminal(item.kind)
-        ? deriveDoorTitle(item.title, item.id, terminalStates, allPaneStates, appTitleForPane)
+        ? deriveSurfaceLabel(terminalStates.get(item.id) ?? createTerminalPaneState(), appTitleForPane, item.title)
         : item.title,
       browserDisplay: item.browserDisplay,
       status: activity.status,
@@ -325,14 +324,3 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   );
 }
 
-function deriveDoorTitle(
-  savedTitle: string,
-  id: string,
-  terminalStates: Map<string, TerminalPaneState>,
-  allPaneStates: TerminalPaneState[],
-  appTitleForPane: (pane: TerminalPaneState) => string | null | undefined,
-): string {
-  const paneState = terminalStates.get(id) ?? createTerminalPaneState();
-  const visible = allPaneStates.length > 0 ? allPaneStates : [paneState];
-  return deriveSurfaceLabel(paneState, visible, appTitleForPane, savedTitle);
-}
