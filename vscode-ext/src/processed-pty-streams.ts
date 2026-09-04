@@ -1,7 +1,8 @@
 /**
- * One keyed PTY-stream registry for this window. It installs one listener pair
- * while anything is subscribed. Input is already protocol-processed; adding a
- * second parser here would answer terminal queries twice.
+ * One keyed PTY-stream registry for this window, over the extension host's
+ * per-PTY parse (`lib/src/lib/processed-pty-stream.ts`). Input is already
+ * protocol-processed; adding a second parser here would answer terminal queries
+ * twice.
  */
 
 import type {
@@ -26,60 +27,54 @@ export interface PtyStatus {
 }
 
 export function createProcessedPtyStreams(
-  onProcessedPtyData: (
-    listener: (id: string, data: string, textData?: string) => void,
+  subscribeProcessedPty: (
+    ptyId: string,
+    onChunk: (chunk: ProcessedPtyChunk) => void,
   ) => () => void,
   onProcessedPtyExit: (listener: (id: string, exitCode: number) => void) => () => void,
   getPtyStatus: (id: string) => PtyStatus | undefined,
 ): ProcessedPtyStreams {
-  const streams = new Map<string, Set<PtySink>>();
-  let stopListeners: (() => void) | null = null;
+  /** Every attached sink, holding the unsubscribe from its own subscription. */
+  const streams = new Map<string, Map<PtySink, () => void>>();
+  let stopExitListener: (() => void) | null = null;
 
   /** Back to costing this window's terminals nothing once nothing is attached. */
   const uninstallIfIdle = (): void => {
-    if (streams.size > 0 || !stopListeners) return;
-    stopListeners();
-    stopListeners = null;
+    if (streams.size > 0 || !stopExitListener) return;
+    stopExitListener();
+    stopExitListener = null;
   };
 
   const install = (): void => {
-    if (stopListeners) return;
-    const offData = onProcessedPtyData((id, data, textData) => {
-      const targets = streams.get(id);
-      if (!targets) return;
-      // The parser already computed both projections for the owning webview;
-      // dropping one here would make a Client re-derive it from bytes it can no
-      // longer tell apart.
-      const chunk: ProcessedPtyChunk = { data, textData };
-      // Iterated live rather than copied: a sink can only unsubscribe itself
-      // from here, which a Set tolerates mid-iteration.
-      for (const target of targets) target.onData(chunk);
-    });
-    const offExit = onProcessedPtyExit((id, exitCode) => {
+    if (stopExitListener) return;
+    stopExitListener = onProcessedPtyExit((id, exitCode) => {
       const targets = streams.get(id);
       if (!targets) return;
       // Dropped before the fan-out, so a sink that unsubscribes from inside its
       // own `onExit` finds nothing left to take out — and so a re-subscribe
-      // during the fan-out keeps the listener pair rather than losing it below.
+      // during the fan-out keeps the listener rather than losing it below.
       streams.delete(id);
-      for (const target of targets) target.onExit(exitCode);
+      for (const [target, stopChunks] of targets) {
+        stopChunks();
+        target.onExit(exitCode);
+      }
       uninstallIfIdle();
     });
-    stopListeners = () => {
-      offData();
-      offExit();
-    };
   };
 
   return {
     streamPty(ptyId, sink) {
       let sinks = streams.get(ptyId);
       if (!sinks) {
-        sinks = new Set();
+        sinks = new Map();
         streams.set(ptyId, sinks);
       }
       const subscribed = sinks;
-      subscribed.add(sink);
+      // One subscription per sink rather than one per PTY: a sink that attaches
+      // while a string control is streaming has to be held to the next ground
+      // byte on its own account (`docs/specs/terminal-escapes.md` → "Parsing
+      // location"), which a shared subscription could not do.
+      subscribed.set(sink, subscribeProcessedPty(ptyId, (chunk) => sink.onData(chunk)));
       install();
 
       const unsubscribe = () => {
@@ -87,13 +82,16 @@ export function createProcessedPtyStreams(
         // exit replaces nothing but does remove it, and a later attachment to
         // the same id gets a fresh one that this unsubscribe has no claim on.
         if (streams.get(ptyId) !== subscribed) return;
+        const stopChunks = subscribed.get(sink);
+        if (!stopChunks) return;
         subscribed.delete(sink);
+        stopChunks();
         if (subscribed.size > 0) return;
         streams.delete(ptyId);
         uninstallIfIdle();
       };
 
-      // Install first, then inspect the host's durable liveness record. If the
+      // Subscribe first, then inspect the host's durable liveness record. If the
       // exit happened before installation the record closes the gap; if it
       // happens after the inspection, the listener above receives it. These
       // synchronous steps cannot interleave on the extension-host event loop.

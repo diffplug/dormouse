@@ -7,11 +7,14 @@ import {
   applyTerminalProtocolEvents,
   collectTerminalSemanticEvents,
   collectTerminalProtocolResponses,
-  TerminalProtocolParser,
-  textProjectionOf,
   type TerminalColorProvider,
   type TerminalColors,
 } from '../../lib/src/lib/terminal-protocol';
+import {
+  createProcessedPtyStream,
+  type ProcessedPtyChunk,
+  type ProcessedPtyStream,
+} from '../../lib/src/lib/processed-pty-stream';
 import { normalizeExternalUri } from '../../lib/src/lib/external-links';
 import { VSCODE_WORKBENCH_COMMANDS } from '../../lib/src/lib/vscode-keybindings';
 import { computeWorkspaceUnion, type WorkspaceUnion } from '../../lib/src/lib/workspace-union';
@@ -66,7 +69,7 @@ interface PendingRequest {
 }
 const peerRequests = new Map<string, PendingRequest>();
 const processedPtyStreams = createProcessedPtyStreams(
-  onProcessedPtyData,
+  subscribeProcessedPty,
   onProcessedPtyExit,
   ptyManager.getPtyStatus,
 );
@@ -163,7 +166,13 @@ const ALLOWED_WORKBENCH_COMMANDS = new Set<string>(VSCODE_WORKBENCH_COMMANDS);
 const alertManager = new AlertManager();
 const watchedCommandHost = new WatchedCommandHost(alertManager);
 const alertSettingsHost = new AlertSettingsHost(alertManager);
-const alertProtocolParsers = new Map<string, TerminalProtocolParser>();
+/**
+ * This window's parse sites: one per PTY generation, created at spawn and fed
+ * every chunk from there, so the extension host answers each query once and both
+ * projections reach every consumer (`docs/specs/terminal-escapes.md` → "Parsing
+ * location").
+ */
+const ownerPtyStreams = new Map<string, ProcessedPtyStream>();
 
 // The extension-host parser has no DOM, so webviews push their resolved terminal
 // theme colors (see VSCodeAdapter.pushThemeColors). Cached here and read lazily
@@ -206,21 +215,7 @@ alertManager.onStateChange((id, state) => {
 ptyManager.addCallbacks({
   onData(id: string, data: string) {
     const before = alertManager.getState(id).status;
-    const parsed = getAlertProtocolParser(id).process(data);
-    applyTerminalProtocolEvents(alertManager, id, parsed.events);
-    const semanticEvents = collectTerminalSemanticEvents(parsed.events);
-    alertManager.applyTerminalSemanticEvents(id, semanticEvents);
-    if (semanticEvents.length > 0) {
-      for (const listener of semanticEventsListeners) listener(id, semanticEvents);
-    }
-    for (const response of collectTerminalProtocolResponses(parsed.events)) {
-      ptyManager.write(id, response);
-    }
-    if (parsed.visibleData.length > 0) {
-      alertManager.onData(id);
-      const textData = textProjectionOf(parsed);
-      for (const listener of processedDataListeners) listener(id, parsed.visibleData, textData);
-    }
+    getOwnerPtyStream(id).write(data);
     const after = alertManager.getState(id).status;
     if (before !== after) {
       log.info(`[alert-feed] ${id}: ${before} → ${after}`);
@@ -229,7 +224,7 @@ ptyManager.addCallbacks({
   onExit(id: string, exitCode: number) {
     log.info(`[alert-feed] ${id}: PTY exited`);
     alertManager.onExit(id, exitCode);
-    alertProtocolParsers.delete(id);
+    ownerPtyStreams.delete(id);
     for (const listener of processedExitListeners) listener(id, exitCode);
   },
 });
@@ -261,13 +256,55 @@ ptyManager.onDorControlCancel((cancel) => {
   broadcastToWebviews({ type: 'dor:controlCancel', requestId: cancel.requestId });
 });
 
-function getAlertProtocolParser(id: string): TerminalProtocolParser {
-  let parser = alertProtocolParsers.get(id);
-  if (!parser) {
-    parser = new TerminalProtocolParser(themeColorProvider);
-    alertProtocolParsers.set(id, parser);
+function createOwnerPtyStream(id: string): ProcessedPtyStream {
+  return createProcessedPtyStream({
+    colorProvider: themeColorProvider,
+    onEvents(events) {
+      applyTerminalProtocolEvents(alertManager, id, events);
+      const semanticEvents = collectTerminalSemanticEvents(events);
+      alertManager.applyTerminalSemanticEvents(id, semanticEvents);
+      if (semanticEvents.length > 0) {
+        for (const listener of semanticEventsListeners) listener(id, semanticEvents);
+      }
+      for (const response of collectTerminalProtocolResponses(events)) {
+        ptyManager.write(id, response);
+      }
+    },
+    onChunk(chunk) {
+      alertManager.onData(id);
+      for (const listener of processedDataListeners) listener(id, chunk.data, chunk.textData);
+    },
+  });
+}
+
+function getOwnerPtyStream(id: string): ProcessedPtyStream {
+  let stream = ownerPtyStreams.get(id);
+  if (!stream) {
+    stream = createOwnerPtyStream(id);
+    ownerPtyStreams.set(id, stream);
   }
-  return parser;
+  return stream;
+}
+
+/**
+ * Attach one remote sink to a PTY's own parse, so it inherits the byte
+ * boundaries of everything that came before it — and, when it lands inside a
+ * forwarded string control, waits out that payload.
+ */
+function subscribeProcessedPty(
+  ptyId: string,
+  onChunk: (chunk: ProcessedPtyChunk) => void,
+): () => void {
+  const stream = getOwnerPtyStream(ptyId);
+  const unsubscribe = stream.subscribe(onChunk);
+  return () => {
+    unsubscribe();
+    // A stream stood up only to serve an attachment to a PTY this window does
+    // not have has nothing left to parse; without this the window retains one
+    // parser per surface id that was ever attached to.
+    if (stream.hasSinks || ptyManager.hasPty(ptyId)) return;
+    if (ownerPtyStreams.get(ptyId) === stream) ownerPtyStreams.delete(ptyId);
+  };
 }
 
 export function getAlertStates() {
@@ -469,7 +506,7 @@ export function attachRouter(
     switch (msg.type) {
       case 'pty:spawn': {
         claim(msg.id);
-        alertProtocolParsers.set(msg.id, new TerminalProtocolParser(themeColorProvider));
+        ownerPtyStreams.set(msg.id, createOwnerPtyStream(msg.id));
         const spawnOptions = { ...msg.options };
         if (!spawnOptions.cwd) {
           spawnOptions.cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -485,7 +522,7 @@ export function attachRouter(
         break;
       case 'pty:kill':
         release(msg.id);
-        alertProtocolParsers.delete(msg.id);
+        ownerPtyStreams.delete(msg.id);
         ptyManager.kill(msg.id);
         break;
       case 'pty:getCwd':
@@ -733,7 +770,7 @@ export function attachRouter(
               claim(pane.id);
             }
             if (pane.alert) {
-              alertProtocolParsers.delete(pane.id);
+              ownerPtyStreams.delete(pane.id);
               alertManager.seed(pane.id, pane.alert);
             }
           }
@@ -879,7 +916,7 @@ export function attachRouter(
       for (const id of ownedPtyIds) {
         globalOwnedPtyIds.delete(id);
         if (killOnDispose) {
-          alertProtocolParsers.delete(id);
+          ownerPtyStreams.delete(id);
           ptyManager.kill(id);
         }
       }

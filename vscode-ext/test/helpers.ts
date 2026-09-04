@@ -96,13 +96,19 @@ export function fakeWindow(
     ownPtyIds?: string[];
   } = {},
 ) {
-  const dataListeners = new Set<(id: string, data: string, textData?: string) => void>();
+  const chunkListeners = new Map<string, Set<(chunk: ProcessedPtyChunk) => void>>();
   const exitListeners = new Set<(id: string, exitCode: number) => void>();
   const ptyStatuses = new Map<string, { alive: boolean; exitCode?: number }>();
   const streams = createProcessedPtyStreams(
-    (listener) => {
-      dataListeners.add(listener);
-      return () => void dataListeners.delete(listener);
+    (ptyId, onChunk) => {
+      let listeners = chunkListeners.get(ptyId);
+      if (!listeners) {
+        listeners = new Set();
+        chunkListeners.set(ptyId, listeners);
+      }
+      const subscribed = listeners;
+      subscribed.add(onChunk);
+      return () => void subscribed.delete(onChunk);
     },
     (listener) => {
       exitListeners.add(listener);
@@ -128,7 +134,8 @@ export function fakeWindow(
     joined: [] as PeerLinkClient[],
     emitData(id: string, data: string, textData?: string) {
       ptyStatuses.set(id, { alive: true });
-      for (const listener of dataListeners) listener(id, data, textData);
+      const chunk: ProcessedPtyChunk = textData === undefined ? { data } : { data, textData };
+      for (const listener of [...(chunkListeners.get(id) ?? [])]) listener(chunk);
     },
     emitExit(id: string, exitCode: number) {
       ptyStatuses.set(id, { alive: false, exitCode });
