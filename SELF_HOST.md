@@ -673,8 +673,8 @@ reports which mode is live rather than asserting either.
   Configuration); the server records `{pid, releaseId, port, origin, startedAt}`
   there once **bound**, so `listening_release` (macOS, Linux) /
   `Get-ListeningRelease` (Windows) is a file read, a port match and a liveness
-  check. **It cannot go in `/api/hello`**, which is unauthenticated, CORS-`*`
-  and reachable through `tailscale serve`. **Empty means unknown, never
+  check. **It cannot go in `/api/hello`**, which is unauthenticated and reachable
+  through the HTTPS proxy. **Empty means unknown, never
   "nobody"** — a stale file with a dead pid, a server started outside the
   installer, and a foreign port-holder all fail the comparison. A clean exit
   removes the file; a crash leaves it, which the liveness check reads correctly.

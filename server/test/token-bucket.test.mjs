@@ -71,7 +71,7 @@ test('oversized enrollment bodies spend admission before they are read', async (
   }
   assert.equal((await send()).status, 429);
 
-  // A preflight is not a credential attempt and spends nothing.
+  // An OPTIONS probe is not a credential attempt and spends nothing.
   const fresh = await freshApp();
   assert.equal(
     (
@@ -80,7 +80,7 @@ test('oversized enrollment bodies spend admission before they are read', async (
         headers: { origin: 'https://example.test', 'access-control-request-method': 'POST' },
       })
     ).status,
-    204,
+    404,
   );
   assert.equal((await post(fresh.app, API_ROUTES.hostEnroll, {})).status, 400);
 });

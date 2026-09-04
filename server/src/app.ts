@@ -10,7 +10,6 @@ import { join, relative } from 'node:path';
 
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
-import { cors } from 'hono/cors';
 import type { Context, MiddlewareHandler } from 'hono';
 import { createNodeWebSocket } from '@hono/node-ws';
 import type { NodeWebSocket } from '@hono/node-ws';
@@ -671,13 +670,6 @@ export function createApp(config: AppConfig): CreatedApp {
     return () => heartbeats.delete(entry);
   }
 
-  // The Host (standalone webview) and dev Pocket builds call the API from
-  // other origins, so preflights must succeed. Permissive CORS is safe here:
-  // every endpoint is gated by a credential — the setup password, a setup
-  // token, or a bearer token — and no cookies exist for a foreign origin to
-  // ride on.
-  app.use('/api/*', cors({ origin: '*', allowHeaders: ['Content-Type', 'Authorization'] }));
-
   // Before bodyLimit on purpose: oversized and malformed requests spend from
   // the same budget as a correct-looking guess. OPTIONS is not an attempt.
   app.use(API_ROUTES.hostEnroll, async (c, next) => {
@@ -688,9 +680,8 @@ export function createApp(config: AppConfig): CreatedApp {
     return c.json({ error: 'too many enrollment attempts' }, 429);
   });
 
-  // Staged after CORS so a 413 carries the headers a browser needs to read it,
-  // and before every route so no credential gate is reached by way of a body
-  // the process already buffered.
+  // Before every route so no credential gate is reached by way of a body the
+  // process already buffered.
   const smallBodies = bodyLimit({ maxSize: MAX_REQUEST_BODY_BYTES, onError: tooLarge });
   const sendBodies = bodyLimit({ maxSize: MAX_PUSH_SEND_BODY_BYTES, onError: tooLarge });
   app.use('*', (c, next) =>

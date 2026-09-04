@@ -274,7 +274,7 @@ The whole route surface; paths and request/response shapes live in
 
 | Route                            | Auth           | Does                                              |
 | -------------------------------- | -------------- | ------------------------------------------------- |
-| `GET /api/hello`                 | —              | The shared greeting. **Carries no release identity** — unauthenticated, CORS-`*`, reachable through `tailscale serve`; the runtime file carries it ("Installing it") |
+| `GET /api/hello`                 | —              | The shared greeting. **Carries no release identity** — it is unauthenticated and reachable through the HTTPS proxy; the runtime file carries it ("Installing it") |
 | `POST /api/setup/begin`          | setup token    | Issues a registration challenge, gated exactly as `finish` is so neither is softer. Answers the account's credential ids for a retry's `excludeCredentials`, so no passkey that already signs in is duplicated — an orphan the Server never registered is absent, and is still replaced |
 | `POST /api/setup/finish`         | setup token    | Registers the passkey in `account.json`; the token is spent at the gate and put back if registration then fails. `label` is **reduced, not refused** — the same `boundedPushText` a pairing label goes through, to `MAX_PASSKEY_LABEL_LENGTH` code points with control and bidi characters stripped |
 | `POST /api/setup/retire`         | session token  | Spends a live setup token without registering anything (rationale). 204, or 401 `SETUP_TOKEN_INVALID_ERROR` after the same fixed delay |
@@ -295,10 +295,10 @@ The whole route surface; paths and request/response shapes live in
 | `GET /ws/client`                 | session token  | A Client's relay socket                            |
 | `GET /*`                         | —              | The built Pocket app, registered last so every route above wins. Cache policy and SPA fallback: [pocket-app.md](./pocket-app.md) |
 
-`/api/*` is CORS-`*` — every endpoint is gated by a credential and no cookies
-exist for a foreign origin to ride on, and the Host and dev Pocket builds call
-from other origins. WS auth rides the `token` query param, since browsers cannot
-set WebSocket headers.
+**Must emit no CORS grant.** Pocket calls relative URLs at the configured origin,
+and Host HTTP runs in Node; no supported caller is a cross-origin browser. WS
+auth rides the `token` query param because browsers cannot set WebSocket headers.
+Test: `server/test/cors.test.mjs`.
 
 **Every request body is bounded before any route runs**, at
 `MAX_REQUEST_BODY_BYTES` (64 KiB), answering 413 — the routes carrying their
@@ -308,9 +308,8 @@ the body, never on the caller**: a correct credential inside an over-long body i
 still 413. **One route is exempt**, its legitimate body being larger:
 `/api/push/send`, whose `MAX_PUSH_SEND_BODY_BYTES` is *derived* from
 `MAX_PUSH_QUERY_DELIVERY_IDS` and `MAX_SEALED_PUSH_LENGTH` so it cannot drift
-from what a maximal fan-out costs. **The limit is staged after CORS**, so a 413
-carries the headers a browser needs to read it. Source of truth:
-`server/src/app.ts`, pinned by `server/test/body-limit.test.mjs`.
+from what a maximal fan-out costs. Source of truth: `server/src/app.ts`, pinned
+by `server/test/body-limit.test.mjs`.
 
 **Must admit Host enrollment through one process-global bucket before body
 parsing.** Every POST counts; OPTIONS does not. Burst 8

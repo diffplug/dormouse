@@ -140,10 +140,9 @@ burst per address. One allocation-free bucket keeps the bound independent of net
 topology. It gates only rare Host enrollment, so an exhausted bucket cannot interrupt
 an enrolled Host, a signed-in phone, or an existing relay session.
 
-**Why `cors({ origin: '*' })` is acceptable.** There are no cookies — every credential
-is a header or a body field — so no cookies exist for a foreign origin to ride on, and
-CSRF is not the exposure. A foreign page can spend admission tokens, but the global
-bucket bounds its work and the setup credential has 256 generated bits.
+**Why there is no CORS grant.** Pocket calls relative routes from the configured
+origin, and Host HTTP runs in its Node service rather than the webview. No supported
+caller is a cross-origin browser, so a grant creates exposure without compatibility.
 
 ## Network posture (self-hosted)
 
