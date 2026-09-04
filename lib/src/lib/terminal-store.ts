@@ -10,6 +10,8 @@ export interface ActivityState {
   notification: ActivityNotification | null;
   /** A `dor await` is parked on this Session (`docs/specs/alert.md` -> Await). */
   awaited: boolean;
+  /** Mirrored from the host (`AlertState.ringSeq`). */
+  ringSeq: number;
 }
 
 export interface TerminalEntry {
@@ -28,6 +30,7 @@ export interface TerminalEntry {
   notification: ActivityNotification | null;
   attentionDismissedRing: boolean;
   awaited: boolean;
+  ringSeq: number;
   isReplaying: boolean;
   untouched: boolean;
   /**

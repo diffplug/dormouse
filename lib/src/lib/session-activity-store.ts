@@ -1,7 +1,7 @@
 import type { SessionStatus } from './alert-manager';
 import type { AlertStateDetail } from './platform/types';
 import { applyAlertSettingsFromHost, publishAlertSettings } from './alert-settings';
-import type { PersistedAlertState, PersistedPane } from './session-types';
+import { toPersistedAlertState, type PersistedAlertState, type PersistedPane } from './session-types';
 import { getPlatform } from './platform';
 import { getRunningCommandArgv0 } from './terminal-state-store';
 import {
@@ -32,6 +32,7 @@ export const DEFAULT_ACTIVITY_STATE: ActivityState = {
   todo: false,
   notification: null,
   awaited: false,
+  ringSeq: 0,
 };
 
 const activityListeners = new Set<() => void>();
@@ -88,6 +89,7 @@ function readLiveActivity(id: string): ActivityState | null {
     todo: entry.todo,
     notification: entry.notification,
     awaited: entry.awaited,
+    ringSeq: entry.ringSeq,
   };
 }
 
@@ -107,12 +109,7 @@ function readActivity(id: string): ActivityState | null {
 
 export function getLivePersistedAlertState(id: string): PersistedAlertState | null {
   const state = readLiveActivity(id);
-  if (!state) return null;
-  return {
-    status: state.status,
-    todo: state.todo,
-    notification: state.notification,
-  };
+  return state && toPersistedAlertState(state);
 }
 
 export function primeActivity(id: string, state: Partial<ActivityState>): void {
@@ -180,6 +177,7 @@ function handleAlertState(detail: AlertStateDetail): void {
   const entry = getEntryByPtyId(detail.id);
   if (entry) {
     entry.alertStatus = detail.status;
+    entry.ringSeq = detail.ringSeq;
     entry.watchingEnabled = detail.watchingEnabled;
     entry.todo = detail.todo;
     entry.notification = detail.notification;
@@ -190,6 +188,7 @@ function handleAlertState(detail: AlertStateDetail): void {
   } else {
     primeActivity(detail.id, {
       status: detail.status,
+      ringSeq: detail.ringSeq,
       watchingEnabled: detail.watchingEnabled,
       todo: detail.todo,
       notification: detail.notification,

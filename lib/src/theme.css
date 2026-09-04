@@ -85,7 +85,7 @@
   --color-input-border: var(--vscode-input-border);
 
   /* Animation */
-  --animate-bell-ring: bell-ring 800ms ease-in-out infinite;
+  --animate-bell-ring: bell-ring 800ms ease-in-out 4;
   --animate-speech-alarm-pulse: speech-alarm-pulse 650ms ease-in-out infinite;
   --animate-shake-x: shake-x 400ms ease-out;
 }
@@ -127,8 +127,8 @@ body {
 }
 
 @keyframes bell-ring {
-  0%, 100% { transform: rotate(45deg); }
-  50%      { transform: rotate(-45deg); }
+  0%, 100% { rotate: 45deg; }
+  50%      { rotate: -45deg; }
 }
 
 @keyframes speech-alarm-pulse {

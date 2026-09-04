@@ -11,7 +11,7 @@ export function bellIconClass(status: SessionStatus): string {
     status === 'ALERT_RINGING' && (
       cfg.alert.ringingPaused
         ? 'rotate-45'
-        : 'motion-safe:animate-bell-ring motion-reduce:rotate-45'
+        : 'rotate-45 motion-safe:animate-bell-ring'
     ),
   ].filter(Boolean).join(' ');
 }

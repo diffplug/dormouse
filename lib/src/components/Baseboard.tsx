@@ -215,6 +215,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
               key={item.id}
               title={title}
               status={activity.status}
+              ringSeq={activity.ringSeq}
               todo={activity.todo}
               speechState={speechStates.get(item.id)}
             />
@@ -250,6 +251,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
             doorId={item.id}
             title={title}
             status={activity.status}
+            ringSeq={activity.ringSeq}
             todo={activity.todo}
             speechState={speechStates.get(item.id)}
             onClick={() => onReattach(item)}

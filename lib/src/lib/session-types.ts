@@ -22,6 +22,20 @@ export interface PersistedPane {
   surfaceType?: PersistedSurfaceType;
 }
 
+/**
+ * Narrow live Activity down to what may reach disk. An explicit projection, not
+ * a structurally-assignable pass-through: `ActivityState` is a superset, and
+ * `JSON.stringify` writes every extra field it grows
+ * (`docs/specs/alert.md` -> Public State, "Persist only").
+ */
+export function toPersistedAlertState(state: PersistedAlertState): PersistedAlertState {
+  return {
+    status: state.status,
+    todo: state.todo,
+    notification: state.notification ?? null,
+  };
+}
+
 /** Shared browser-pane projection for renderer saves and VS Code host refresh. */
 export function browserPersistedPane(
   pane: { id: string; title: string },

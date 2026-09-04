@@ -32,6 +32,8 @@ The passthrough `solid` variant replaced an original `border: 1px solid ${color}
 
 **The inflate arithmetic.** With `SELECTION_RING_INFLATE_PX` at 4, the 1px passthrough border spans [3px, 4px] from the pane edge — dead centre of the 7px gutter, on whole pixels because the gutter is odd. That is the whole reason `PANE_GUTTER_PX` is odd.
 
+**Why marching is burst-bound.** An infinite SVG stroke animation kept Chrome's renderer active at 60 style recalculations per second while Dormouse was otherwise idle. Measured in Chrome for Testing 150 (2026-09): five focused minutes added 3.77 MB of reclaimable embedder heap and used 24.33 seconds of renderer CPU; pausing only that animation held embedder heap flat (-29 KB) and used 0.017 seconds across a three-minute control. Four cycles preserve the mode/selection cue without leaving a standing allocator after interaction stops.
+
 ## Ring travel
 
 **Why the JS tween is not what DESIGN.md bans.** That rule bans CSS *transitions* on layout properties, which the compositor cannot run off the main thread; the overlay writes true interpolated values each rAF frame, inside the same pointer-events-none carve-out the Lath animator holds.

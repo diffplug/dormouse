@@ -266,9 +266,30 @@ describe('SelectionRing settled render', () => {
     expect(path!.getAttribute('stroke-opacity')).toBeNull();
   });
 
-  // The path element is shared across variants and the dash is an imperative write
-  // React never reconciles away — a command→passthrough flip must clear it, or the
-  // 1px solid ring renders the ants' dash as a dotted line.
+  // The finite burst starts when command mode adds the animation, and a selection
+  // change restarts it by remounting only the keyed outline.
+  it('starts a finite burst on command entry and remounts the outline on a selection change', async () => {
+    const store = makeStore();
+    const panes = twoPanes();
+    await act(async () => root.render(<Harness selectedId="a" mode="passthrough" store={store} panes={panes} />));
+
+    const passthroughPath = container.querySelector('[data-ring="outline"]') as SVGPathElement;
+    expect(passthroughPath.style.animation).toBe('');
+
+    await act(async () => root.render(<Harness selectedId="a" mode="command" store={store} panes={panes} />));
+
+    const path = container.querySelector('[data-ring="outline"]') as SVGPathElement;
+    expect(path).toBe(passthroughPath);
+    expect(path.style.animation).toBe(
+      `marching-ants ${cfg.marchingAnts.cycleDuration}s linear ${cfg.marchingAnts.cyclesPerSelection}`,
+    );
+
+    await act(async () => root.render(<Harness selectedId="b" mode="command" store={store} panes={panes} />));
+    expect(container.querySelector('[data-ring="outline"]')).not.toBe(path);
+  });
+
+  // The dash is an imperative write React never reconciles away, so the reverse
+  // mode flip must clear it or the 1px solid ring stays dotted.
   it('clears the ants dash when flipping command → passthrough', async () => {
     const store = makeStore();
     const panes = twoPanes();
@@ -410,10 +431,13 @@ describe('SelectionRing motion smear', () => {
 
     // Mid-travel the ring is a different size, so the dash resizes with it — but
     // the period must still be exactly one dash+gap or the keyframe jumps.
-    const [d2, g2] = dashOf(path);
-    expect(path.style.getPropertyValue('--march-offset')).toBe(`-${d2 + g2}px`);
+    // Re-queried, not reused: the selection change remounted the outline (see the
+    // burst-restart case above), and the geometry lands on the replacement node.
+    const movedPath = container.querySelector('[data-ring="outline"]')!;
+    const [d2, g2] = dashOf(movedPath);
+    expect(movedPath.style.getPropertyValue('--march-offset')).toBe(`-${d2 + g2}px`);
     expect(d2 / (d2 + g2)).toBeCloseTo(cfg.marchingAnts.dashFraction, 9);
-    expect(path.getAttribute('transform')).toBeNull();
-    expect(path.getAttribute('stroke-opacity')).toBeNull();
+    expect(movedPath.getAttribute('transform')).toBeNull();
+    expect(movedPath.getAttribute('stroke-opacity')).toBeNull();
   });
 });
