@@ -9,6 +9,7 @@ const BASE_TIME = 1_700_000_000_000;
 const makeItem = (id: string, title: string): DoorChip => ({
   id,
   title,
+  kind: 'terminal',
 });
 
 function withState(items: DoorChip[], byId: Record<string, Record<string, unknown>>) {
@@ -74,6 +75,25 @@ const extremeTitleWithBothIndicatorsItems = [
   makeItem('p2', 'my-extremely-long-running-background-process-with-a-very-descriptive-name'),
   makeItem('p3', 'another'),
 ];
+const browserSurfaceItems: DoorChip[] = [
+  { id: 'browser-resize', kind: 'browser', title: 'localhost:5173/app', browserDisplay: 'ab-resize' },
+  { id: 'browser-fixed', kind: 'browser', title: 'mobile checkout', browserDisplay: 'ab-fixed' },
+  { id: 'browser-popout', kind: 'browser', title: 'docs.example.com', browserDisplay: 'ab-popout' },
+  { id: 'browser-iframe', kind: 'browser', title: 'localhost:6006', browserDisplay: 'iframe' },
+];
+
+/** Browser Doors keep the same capability/presentation identity as their pane
+ *  header and retain the page label instead of acquiring terminal idle state. */
+export const BrowserSurfaces: Story = {
+  args: { items: browserSurfaceItems },
+  decorators: [
+    (Story) => (
+      <div style={{ width: 920 }}>
+        <Story />
+      </div>
+    ),
+  ],
+};
 
 export const OneRingingDoor: Story = {
   args: {

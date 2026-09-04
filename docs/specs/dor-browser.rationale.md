@@ -8,6 +8,12 @@
 
 ## Browser Chrome
 
+**Why the robot is independent of presentation.** Agent visibility is the
+important capability boundary: an in-pane screencast and an iframe share the
+same human geometry, while only the screencast is available to an agent. A
+separate presentation glyph then distinguishes pane-sized, fixed, and popped-out
+views without weakening that first signal.
+
 **What the scheme ladder decides.** A typed `host:port` renders in the iframe: the proxy frames remote `http://` as readily as loopback. A bare remote host carries no port to mark it a dev server, so `https://` sends it to agent-browser — the path for pages needing real HTTPS or a login.
 
 ## Pane Context Menu Connect

@@ -20,7 +20,7 @@ export function deriveSessionLabel(id: string, fallbackTitle: string | null = nu
   const state = states.get(id);
   if (state) {
     const appTitleForPane = buildAppTitleResolver(states, getActivitySnapshot());
-    const primary = deriveSurfaceLabel(state, [state], appTitleForPane, fallbackTitle);
+    const primary = deriveSurfaceLabel(state, appTitleForPane, fallbackTitle);
     if (primary && primary !== DEFAULT_IDLE_TITLE) return primary;
   }
   return fallbackTitle?.trim() || 'terminal';

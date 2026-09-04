@@ -13,19 +13,12 @@
  *     Specific to screencast, so it nests under that option and greys out
  *     whenever a different render mode is selected.
  *
- * It reads the live snapshot on open and pre-selects accordingly, reflecting
- * reality rather than a stored intent.
+ * It snapshots the opening render/resolution intent for pre-selection; the
+ * live snapshot tracks the current render mode so Apply can detect a backend
+ * swap.
  */
 import { useMemo, useRef, useState, type ReactNode } from 'react';
-import {
-  ArrowSquareOutIcon,
-  CheckIcon,
-  FrameCornersIcon,
-  type Icon,
-  LinkIcon,
-  LockSimpleIcon,
-  XIcon,
-} from '@phosphor-icons/react';
+import { CheckIcon, XIcon } from '@phosphor-icons/react';
 import {
   MODAL_OVERLAY_INSET,
   modalActionButton,
@@ -36,6 +29,12 @@ import {
 } from '../design';
 import type { RenderMode, ScreenController, ScreenSnapshot } from './agent-browser-screen';
 import { useAgentBrowserScreenSnapshot } from './agent-browser-screen';
+import {
+  AgentRobotIcon,
+  BROWSER_DISPLAY_LABEL,
+  BrowserDisplayIcon,
+  BrowserPresentationIcon,
+} from './BrowserDisplayIcon';
 
 // Fixed registry — the CLI's own device set. No custom descriptors; touch +
 // mobile UA come only bundled inside `set device` (verified against 0.27.0).
@@ -63,18 +62,18 @@ export function AgentBrowserScreenModal({
 }) {
   const live = useAgentBrowserScreenSnapshot(controller);
   // Snapshot the state the modal opened with for pre-selection; the live one
-  // still drives the "Currently" readout so it tracks external changes.
+  // still tracks the current render mode so external changes update whether
+  // Apply is swapping backends.
   const [initial] = useState<ScreenSnapshot | null>(() => controller.snapshot());
   const snapshot = live ?? initial;
 
   const cancelRef = useRef<HTMLButtonElement>(null);
   const hostCapable = controller.hostCapable;
 
-  // Pre-select: Sync if engaged + actually synced; otherwise Custom prefilled
-  // with the current dims. (A device can't be pre-matched — the CLI doesn't
-  // expose device dims up front, so there's no dims map to compare against.)
-  const initialTarget: Target =
-    initial?.syncEngaged && initial.state === 'SYNCED' ? 'sync' : 'custom';
+  // Pre-select from intent, not the transient dimension comparison: while a
+  // resize is landing, sync stays engaged even though the live state is SCALED.
+  // A fixed device can't be pre-matched — the CLI exposes no dims map.
+  const initialTarget: Target = initial?.syncEngaged ? 'sync' : 'custom';
   const [target, setTarget] = useState<Target>(initialTarget);
   const [device, setDevice] = useState<string>(DEVICES[1]); // iPhone 16
   const [customW, setCustomW] = useState(String(initial?.viewport.w ?? 1280));
@@ -151,7 +150,7 @@ export function AgentBrowserScreenModal({
             checked={target === 'sync'}
             onChange={() => setTarget('sync')}
           />
-          <LinkIcon size={14} className="shrink-0 text-muted" />
+          <BrowserPresentationIcon mode="ab-resize" size={14} className="shrink-0 text-muted" />
           <span className="text-foreground">Resize with pane</span>
         </label>
 
@@ -164,8 +163,8 @@ export function AgentBrowserScreenModal({
                 checked={isFixed}
                 onChange={() => setTarget('custom')}
               />
-              <LockSimpleIcon size={14} className="shrink-0 text-muted" />
-              <span className="text-foreground">Fixed</span>
+              <BrowserPresentationIcon mode="ab-fixed" size={14} className="shrink-0 text-muted" />
+              <span className="text-foreground">Fixed size</span>
             </label>
             {/* Dimensions inline; or pick a device via Emulate below (emulating
                 disables the dims — they fill in from the next frames). */}
@@ -221,12 +220,13 @@ export function AgentBrowserScreenModal({
 
       {canSwapRender ? (
         <div className="mt-4 flex flex-col gap-3">
-          {/* Screencast has no mode icon of its own — its two resolution modes
-              (resize-with-pane / fixed) carry the link / lock glyphs, and the
-              resolution controls nest under it, greying out for the other modes. */}
+          {/* Screencast owns the robot capability glyph; its nested resolution
+              modes append the presentation glyph. The controls grey out for
+              the other render modes. */}
           <RenderOption
             checked={renderMode === 'ab-screencast'}
             onSelect={() => setRenderMode('ab-screencast')}
+            icon={<AgentRobotIcon size={14} className="shrink-0 text-muted" />}
             label="agent-browser screencast"
             features={[[true, 'agents can read/write'], [true, 'any URL'], [false, 'laggy for humans']]}
           >
@@ -237,8 +237,8 @@ export function AgentBrowserScreenModal({
             <RenderOption
               checked={renderMode === 'ab-popout'}
               onSelect={() => setRenderMode('ab-popout')}
-              icon={ArrowSquareOutIcon}
-              label="agent-browser popout"
+              icon={<BrowserDisplayIcon mode="ab-popout" size={14} className="text-muted" />}
+              label={BROWSER_DISPLAY_LABEL['ab-popout']}
               features={[[true, 'agents can read/write'], [true, 'any URL'], [true, 'native human experience']]}
             />
           )}
@@ -246,8 +246,8 @@ export function AgentBrowserScreenModal({
           <RenderOption
             checked={renderMode === 'iframe'}
             onSelect={() => setRenderMode('iframe')}
-            icon={FrameCornersIcon}
-            label="iframe embed"
+            icon={<BrowserDisplayIcon mode="iframe" size={14} className="text-muted" />}
+            label={BROWSER_DISPLAY_LABEL.iframe}
             features={[[false, 'agents cannot read/write'], [false, 'http only'], [true, 'native human experience']]}
           />
         </div>
@@ -291,14 +291,14 @@ export function AgentBrowserScreenModal({
 function RenderOption({
   checked,
   onSelect,
-  icon: ModeIcon,
+  icon,
   label,
   features,
   children,
 }: {
   checked: boolean;
   onSelect: () => void;
-  icon?: Icon;
+  icon?: ReactNode;
   label: string;
   features: [boolean, string][];
   children?: ReactNode;
@@ -307,7 +307,7 @@ function RenderOption({
     <div className="flex flex-col gap-1.5 text-sm">
       <label className="flex cursor-pointer items-center gap-2">
         <input type="radio" name="render-mode" checked={checked} onChange={onSelect} />
-        {ModeIcon && <ModeIcon size={14} className="shrink-0 text-muted" />}
+        {icon}
         <span className="text-foreground">{label}</span>
       </label>
       <div className="ml-6 flex flex-col gap-0.5 text-xs">
