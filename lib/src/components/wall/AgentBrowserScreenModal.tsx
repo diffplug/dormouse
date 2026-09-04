@@ -14,7 +14,8 @@
  *     whenever a different render mode is selected.
  *
  * It snapshots the opening render/resolution intent for pre-selection; the
- * live snapshot still drives the current-state readout.
+ * live snapshot tracks the current render mode so Apply can detect a backend
+ * swap.
  */
 import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { CheckIcon, XIcon } from '@phosphor-icons/react';
@@ -61,7 +62,8 @@ export function AgentBrowserScreenModal({
 }) {
   const live = useAgentBrowserScreenSnapshot(controller);
   // Snapshot the state the modal opened with for pre-selection; the live one
-  // still drives the "Currently" readout so it tracks external changes.
+  // still tracks the current render mode so external changes update whether
+  // Apply is swapping backends.
   const [initial] = useState<ScreenSnapshot | null>(() => controller.snapshot());
   const snapshot = live ?? initial;
 
