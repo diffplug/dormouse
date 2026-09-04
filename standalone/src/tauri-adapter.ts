@@ -167,8 +167,8 @@ export class TauriAdapter implements PlatformAdapter {
         // not parse. A one-shot parser here repopulates semantic state and
         // strips OSCs before xterm sees them; its responses are dropped, since
         // the asker is long gone (docs/specs/terminal-escapes.md). It still
-        // needs the theme: a *declined* colour query survives into `visibleData`
-        // and xterm.js answers it, which is the very re-fire replay must not do.
+        // needs the theme: a *declined* colour query is not consumed, so it
+        // reaches xterm.js instead, and answering is the owner's alone.
         const { id, data } = event.payload;
         const parsed = new TerminalProtocolParser(themeColorProvider).process(data);
         applyTerminalSemanticEventsByPtyId(id, collectTerminalSemanticEvents(parsed.events));

@@ -247,9 +247,9 @@ describe('VSCodeAdapter PTY exit handling', () => {
   });
 
   it('consumes a buffered colour query rather than replaying it into xterm.js', () => {
-    // A *declined* query survives into the replayed bytes, and the xterm that
-    // receives them answers it into the live PTY — the re-fire replay exists to
-    // prevent (docs/specs/terminal-escapes.md).
+    // A *declined* query is not consumed, so it survives into the replayed
+    // bytes for xterm.js to answer — and answering is the owner's alone
+    // (docs/specs/terminal-escapes.md).
     const adapter = new VSCodeAdapter();
     const replays: Array<{ id: string; data: string }> = [];
     adapter.onPtyReplay((detail) => replays.push(detail));

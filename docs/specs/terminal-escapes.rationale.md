@@ -22,6 +22,8 @@
 
 ## `pty:data` strip semantics
 
+**Why the replay parser takes the theme too, and what it is not.** Consuming the query is the rule; the replay report filter is a backstop. `inputIsReplayTerminalReport` does drop an OSC reply xterm generates while `isReplaying`, so a provider-less one-shot parser was not in fact writing colour reports into a live PTY — but that window covers one `writeReplay` call, and it catches the reply rather than preventing the query from being asked of the wrong answerer. A parser that declines has consumed nothing, and the owner is the sole reply authority everywhere else.
+
 **Why replay is inert.** Buffered scrollback is a recording of protocol traffic, so re-parsing it without suppression would re-ring alerts for notifications the user dismissed weeks ago, re-fire quiesce transitions for commands that finished long ago, and write answers to queries whose asker is dead — all of it on every reload of a resumed Session. CWD, prompt/command and title survive the suppression because they are state rather than events.
 
 ## Supported OSCs
