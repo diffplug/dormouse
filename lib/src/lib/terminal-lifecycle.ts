@@ -17,6 +17,7 @@ import {
   removeMouseSelectionState,
   setSelection as setMouseSelection,
 } from './mouse-selection';
+import { dropSourcesForTerminal } from './notepad/notepad-store';
 import { extractSelectionText } from './selection-text';
 import { normalizeResumeCommand } from './resume-patterns';
 import {
@@ -611,6 +612,9 @@ export function disposeSession(id: string): void {
   const entry = registry.get(id);
   if (!entry) return;
   getPlatform().alertRemove(entry.ptyId);
+  // Before the xterm instance goes: its markers are what notepad pins hold, and
+  // a disposed marker cannot be dropped cleanly afterwards. The notes stay.
+  dropSourcesForTerminal(id);
   entry.cleanup();
   getPlatform().killPty(entry.ptyId);
   entry.element.remove();

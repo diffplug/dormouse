@@ -32,6 +32,7 @@ import { AlertManager } from "dormouse-lib/lib/alert-manager";
 import type { AwaitHandle, AwaitOptions } from "dormouse-lib/lib/alert-manager";
 import type { AlertSettings } from "dormouse-lib/lib/alert-settings";
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
+import { createMemoryNotepadArchivePort } from "dormouse-lib/lib/notepad/memory-archive-port";
 import { loadSessionState, saveSessionState } from "dormouse-lib/lib/window-persistence";
 import {
   applyTerminalProtocolEvents,
@@ -286,6 +287,17 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
       return null;
     }
   }
+
+  // The notepad archive as memory, not the Tauri file: this harness is a browser
+  // tab with no app-data directory, and a dev run must not write into (or read)
+  // the installed app's archive. Notes last as long as the page
+  // (docs/specs/notepad.md).
+  readonly notepadArchive = createMemoryNotepadArchivePort();
+
+  // Cmd/Ctrl+N opens a browser window before any listener sees it, so the
+  // harness shows no chord and binds none — the same reason the website's demo
+  // adapter sets this. The shipped Tauri build owns its keyboard and does not.
+  readonly browserReservesNotepadChord = true;
 
   // Delete (not just ignore) pre-gate blobs: they carry transcripts and localStorage
   // outlives the harness's per-run temp state dir.

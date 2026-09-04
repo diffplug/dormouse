@@ -4,6 +4,11 @@ import type { AwaitHandle, AwaitOptions } from '../alert-manager';
 import type { AlertSettings } from '../alert-settings';
 import { normalizeExternalUri } from '../external-links';
 import {
+  createMemoryNotepadArchivePort,
+  type MemoryNotepadArchivePort,
+} from '../notepad/memory-archive-port';
+import type { NotepadArchiveV1 } from '../notepad/types';
+import {
   applyTerminalProtocolEvents,
   collectTerminalSemanticEvents,
   collectTerminalProtocolResponses,
@@ -64,6 +69,14 @@ export class FakePtyAdapter implements PlatformAdapter {
   // for the stories that are *about* that section.
   remoteHost?: RemoteHostLink;
 
+  /**
+   * The notepad archive as memory — the website demo's real implementation and
+   * what tests and stories archive into. Public and concrete (not the narrower
+   * port type) so a caller can seed or corrupt it; `seedNotepadArchive` and
+   * `corruptNotepadArchive` below are the two moves worth naming.
+   */
+  notepadArchive: MemoryNotepadArchivePort = createMemoryNotepadArchivePort();
+
   constructor() {
     this.alertManager.onStateChange((id, state) => {
       for (const handler of this.alertStateHandlers) {
@@ -91,6 +104,18 @@ export class FakePtyAdapter implements PlatformAdapter {
 
   clearScenario(id: string): void {
     this.scenarioMap.delete(id);
+  }
+
+  /** Start from a populated archive (stories, tests) without going through a
+   *  Surface closure. */
+  seedNotepadArchive(archive: NotepadArchiveV1): void {
+    this.notepadArchive.seed(archive);
+  }
+
+  /** Store something the validator rejects, so the Archive view's unreadable
+   *  state and its one user-initiated recovery can be exercised. */
+  corruptNotepadArchive(raw?: unknown): void {
+    this.notepadArchive.corrupt(raw);
   }
 
   reset(): void {

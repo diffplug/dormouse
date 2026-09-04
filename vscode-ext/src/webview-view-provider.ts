@@ -3,6 +3,7 @@ import * as path from 'path';
 import { attachRouter, getAlertStates } from './message-router';
 import { serveWebview, type WebviewChannel } from './webview-messaging';
 import { takeRecoveryCommands, getSavedSessionState, saveSessionState, mergeAlertStates } from './session-state';
+import { snapshotForLiveResume } from './notepad-volatile';
 import type { ExtensionMessage } from './message-types';
 import * as ptyManager from './pty-manager';
 import { resolveSelectedShell } from './shell-selection';
@@ -81,12 +82,23 @@ export class DormouseViewProvider implements vscode.WebviewViewProvider {
       this.context,
       (savedSession?.panes ?? []).map((pane) => pane.id),
     );
-    this.channel = serveWebview(view.webview, mediaPath, savedSession, this.selectedShell, recoveryCommands);
+    // The one path that hydrates the notepad mirror: this view's `onDidDispose`
+    // leaves its PTYs alive, so a re-resolve (a move between panel containers) is
+    // a live resume and the notes for those panes are still in extension-host
+    // memory. Same pane ids as the recovery claim above; a cold restore finds
+    // nothing mirrored and gets `null` (docs/specs/notepad.md).
+    const notepadVolatile = snapshotForLiveResume(
+      (savedSession?.panes ?? []).map((pane) => pane.id),
+    );
+    this.channel = serveWebview(
+      view.webview, mediaPath, savedSession, this.selectedShell, recoveryCommands, notepadVolatile,
+    );
 
     this.routerDisposable?.dispose();
     this.routerDisposable = attachRouter(this.channel, {
       reconnect: true,
       savedSession,
+      context: this.context,
       onSaveState: (state) => {
         void saveSessionState(this.context, mergeAlertStates(state, getAlertStates()));
       },

@@ -25,6 +25,13 @@ import type { WebviewMessage, ExtensionMessage } from './message-types';
 import type { DorControlRequest } from './pty-manager';
 import { createStreamRelayUrl, runAgentBrowserCommand, runAgentBrowserEdit, runAgentBrowserOpen, runAgentBrowserPopIn, runAgentBrowserPopOut, runAgentBrowserScreenshot, runAgentBrowserStreamStatus } from './agent-browser-host';
 import { createIframeProxyUrl } from './iframe-proxy-host';
+import {
+  archiveVolatileMirror,
+  loadNotepadArchive,
+  resetUnreadableNotepadArchive,
+  saveNotepadArchive,
+} from './notepad-archive-store';
+import { setVolatileForRouter, takeVolatileForRouter } from './notepad-volatile';
 import { ASK_BUDGET_MS } from '../../lib/src/host/remote/service-protocol';
 import { configurePeerLink, remoteNotifyPeerChange } from './peer-link';
 import { createProcessedPtyStreams } from './processed-pty-streams';
@@ -159,6 +166,9 @@ function broadcastToWebviews(message: ExtensionMessage): void {
 
 const activeRouters = new Set<ActiveRouter>();
 let nextFlushRequestId = 0;
+/** Tags each router's contribution to the volatile notepad mirror. Per
+ *  extension-host lifetime, like the mirror itself (`notepad-volatile.ts`). */
+let nextNotepadRouterId = 0;
 const ALLOWED_WORKBENCH_COMMANDS = new Set<string>(VSCODE_WORKBENCH_COMMANDS);
 
 // Shared alert manager — survives router disposal so alert state persists
@@ -329,10 +339,15 @@ export function attachRouter(
     // (owned-PTY alert state, or a PTY claimed/released). The host reflects it
     // onto native chrome (tab title / view badge). See docs/specs/vscode.md.
     onUnion?: (union: WorkspaceUnion) => void;
+    // Only the notepad archive needs it: `globalState` is reachable nowhere else
+    // (docs/specs/notepad.md). Absent, the archive requests answer `ok: false`
+    // rather than hang.
+    context?: vscode.ExtensionContext;
   },
 ): vscode.Disposable {
   const reconnect = options?.reconnect ?? false;
   const killOnDispose = options?.killOnDispose ?? false;
+  const notepadRouterId = `notepad-router-${++nextNotepadRouterId}`;
 
   // The router's only send path — it stamps this webview's message token, which
   // the webview requires (docs/specs/vscode.md → "Webview message
@@ -468,6 +483,34 @@ export function attachRouter(
           error: `Failed to forward dor request: ${err?.message ?? err}`,
         });
       },
+    );
+  }
+
+  /**
+   * Answer one notepad-archive request.
+   *
+   * Every outcome crosses back, failures included: the webview's port has no
+   * deadline of its own, and an archive that cannot be written has to surface as
+   * the closure error path rather than as a Surface that never closes
+   * (docs/specs/notepad.md → Archive and Lifecycle).
+   */
+  function respondNotepad(
+    requestId: string,
+    work: (context: vscode.ExtensionContext) => Promise<unknown>,
+  ): void {
+    const context = options?.context;
+    if (!context) {
+      void post({
+        type: 'notepad:result', requestId, ok: false,
+        error: 'the notepad archive is unavailable in this window',
+      } satisfies ExtensionMessage);
+      return;
+    }
+    work(context).then(
+      (result) => post({ type: 'notepad:result', requestId, ok: true, result } satisfies ExtensionMessage),
+      (err) => post({
+        type: 'notepad:result', requestId, ok: false, error: String(err?.message ?? err),
+      } satisfies ExtensionMessage),
     );
   }
 
@@ -713,6 +756,20 @@ export function attachRouter(
       case 'remoteHost:command':
         handleRemoteHostCommand(msg.payload);
         break;
+      case 'notepad:load':
+        respondNotepad(msg.requestId, (context) => loadNotepadArchive(context));
+        break;
+      case 'notepad:save':
+        respondNotepad(msg.requestId, (context) => saveNotepadArchive(context, msg.state, msg.baseRevision));
+        break;
+      case 'notepad:reset':
+        respondNotepad(msg.requestId, (context) => resetUnreadableNotepadArchive(context));
+        break;
+      case 'notepad:volatile':
+        // Memory only, and nothing to answer: the mirror exists so a teardown
+        // that finds no webview left can still archive (docs/specs/notepad.md).
+        setVolatileForRouter(notepadRouterId, msg.snapshot);
+        break;
       case 'dormouse:themeColors':
         // Webview reports its resolved terminal theme; cache for OSC color replies.
         latestThemeColors = { foreground: msg.foreground, background: msg.background, cursor: msg.cursor };
@@ -926,6 +983,22 @@ export function attachRouter(
       }
       ownedPtyIds.clear();
       messageDisposable.dispose();
+      // An editor panel closing is a deliberate ending, so this router's mirrored
+      // notes are archived here: the webview is already gone and cannot run its
+      // own close coordinator. A `WebviewView` disposal is *not* an ending — its
+      // PTYs stay alive — so its mirror is left in place for the next resolve to
+      // hydrate (docs/specs/notepad.md → Archive and Lifecycle).
+      //
+      // Best-effort: VS Code destroys the tab whatever we say, so a failure is
+      // logged rather than allowed to reject out of `dispose`.
+      const notepadContext = options?.context;
+      if (killOnDispose && notepadContext) {
+        // Draining is what keeps `deactivate()` from archiving these a second
+        // time under a fresh batch id; an empty mirror writes nothing.
+        void archiveVolatileMirror(notepadContext, takeVolatileForRouter(notepadRouterId)).catch((err) => {
+          log.error('[notepad] could not archive a closing panel\'s notes:', String(err));
+        });
+      }
     },
   };
 

@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { HOST_MESSAGE_TOKEN_FIELD } from '../../lib/src/lib/vscode-message-token';
 import { getWebviewHtml } from './webview-html';
 import type { ExtensionMessage } from './message-types';
+import type { VolatileNotepadSnapshot } from '../../lib/src/lib/notepad/types';
 
 /**
  * The host's handle on a served webview. `serveWebview` returns one of these
@@ -30,8 +31,11 @@ export function serveWebview(
   initialState?: unknown,
   selectedShell?: { shell?: string; args?: string[] } | null,
   recoveryCommands?: Record<string, string> | null,
+  notepadVolatile?: VolatileNotepadSnapshot | null,
 ): WebviewChannel {
-  const { html, messageToken } = getWebviewHtml(webview, mediaPath, initialState, selectedShell, recoveryCommands);
+  const { html, messageToken } = getWebviewHtml(
+    webview, mediaPath, initialState, selectedShell, recoveryCommands, notepadVolatile,
+  );
   webview.html = html;
 
   return {

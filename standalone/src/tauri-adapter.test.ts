@@ -16,6 +16,7 @@ vi.mock("@tauri-apps/plugin-shell", () => ({
 
 import { invoke as rawInvoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import type { NotepadArchiveV1 } from "dormouse-lib/lib/notepad/types";
 import type { AlertStateDetail, PtyDataDetail } from "dormouse-lib/lib/platform/types";
 import { getTerminalPaneState } from "dormouse-lib/lib/terminal-state-store";
 import { TauriAdapter } from "./tauri-adapter";
@@ -98,6 +99,72 @@ describe("TauriAdapter legacy session cleanup", () => {
     expect(invoke).toHaveBeenNthCalledWith(1, "load_session");
     expect(invoke).toHaveBeenNthCalledWith(2, "clear_session");
     adapter.shutdown();
+  });
+});
+
+// The archive port is a thin bridge to three Rust commands (docs/specs/notepad.md).
+// What is covered here is exactly what this side owns: the None → null mapping,
+// serialization, and passing the stored string through unparsed — the
+// compare-and-swap itself is Rust's, and validation is the shared layer's.
+describe("TauriAdapter notepad archive", () => {
+  const archive: NotepadArchiveV1 = { version: 1, batches: [] };
+
+  function invoking(impl: (cmd: string, args?: Record<string, unknown>) => unknown) {
+    const invoke = vi.mocked(rawInvoke);
+    invoke.mockClear();
+    invoke.mockImplementation((async (cmd: string, args?: Record<string, unknown>) =>
+      impl(cmd, args)) as unknown as typeof rawInvoke);
+    return { adapter: new TauriAdapter(), invoke };
+  }
+
+  it("reads a missing archive as null", async () => {
+    const { adapter } = invoking(() => null);
+    expect(await adapter.notepadArchive.load()).toBeNull();
+  });
+
+  it("hands the stored string through unparsed, with its revision", async () => {
+    // Deliberately not valid JSON: an unreadable archive has to reach the shared
+    // validator as-is, not fail here (its recovery is a user decision).
+    const { adapter } = invoking(() => ["{ not an archive", "7"]);
+    expect(await adapter.notepadArchive.load()).toEqual({
+      raw: "{ not an archive",
+      revision: "7",
+    });
+  });
+
+  it("serializes a save and names the revision it read", async () => {
+    const { adapter, invoke } = invoking(() => "ok");
+    expect(await adapter.notepadArchive.save(archive, "3")).toBe("ok");
+    expect(invoke).toHaveBeenCalledWith("save_notepad_archive", {
+      state: JSON.stringify(archive),
+      baseRevision: "3",
+    });
+
+    // Nothing stored yet: the base revision is null, not omitted.
+    await adapter.notepadArchive.save(archive, null);
+    expect(invoke).toHaveBeenLastCalledWith("save_notepad_archive", {
+      state: JSON.stringify(archive),
+      baseRevision: null,
+    });
+  });
+
+  it("reports a conflict rather than throwing, so the caller can retry", async () => {
+    const { adapter } = invoking(() => "conflict");
+    expect(await adapter.notepadArchive.save(archive, "0")).toBe("conflict");
+  });
+
+  it("moves an unreadable archive aside through the Rust command", async () => {
+    const { adapter, invoke } = invoking(() => undefined);
+    await adapter.notepadArchive.resetUnreadable();
+    expect(invoke).toHaveBeenCalledWith("reset_notepad_archive");
+  });
+
+  it("rejects when the host cannot store the archive", async () => {
+    // A closure that cannot archive its notes must take the failure path.
+    const { adapter } = invoking(() => {
+      throw new Error("disk full");
+    });
+    await expect(adapter.notepadArchive.save(archive, null)).rejects.toThrow("disk full");
   });
 });
 
