@@ -36,7 +36,11 @@ test('host enrollment has one process-global budget across concurrent callers', 
 });
 
 test('oversized enrollment bodies spend admission before they are read', async () => {
-  const { app } = await freshApp();
+  // Frozen, like the case above: nine requests have to land inside one refill
+  // interval or the last is a 413, and a wall-clock margin on a shared runner
+  // would read as a regression in the ordering this exists to pin.
+  const clock = makeClock();
+  const { app } = await freshApp({ now: clock.now });
   const send = () =>
     post(app, API_ROUTES.hostEnroll, { pad: 'A'.repeat(MAX_REQUEST_BODY_BYTES + 1) });
 
@@ -46,7 +50,7 @@ test('oversized enrollment bodies spend admission before they are read', async (
   assert.equal((await send()).status, 429);
 
   // An OPTIONS probe is not a credential attempt and spends nothing.
-  const fresh = await freshApp();
+  const fresh = await freshApp({ now: clock.now });
   assert.equal(
     (
       await fresh.app.request(API_ROUTES.hostEnroll, {
