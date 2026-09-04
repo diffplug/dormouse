@@ -38,6 +38,7 @@ import {
   collectTerminalSemanticEvents,
   collectTerminalProtocolResponses,
   TerminalProtocolParser,
+  textProjectionOf,
 } from "dormouse-lib/lib/terminal-protocol";
 import { themeColorProvider } from "dormouse-lib/lib/terminal-theme";
 import { applyTerminalSemanticEventsByPtyId } from "dormouse-lib/lib/terminal-state-store";
@@ -228,7 +229,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   // report. Implementing it would claim the capability and never fire.
 
   onPtyData(handler: (detail: PtyDataDetail) => void): void { this.dataHandlers.add(handler); }
-  offPtyData(handler: (detail: { id: string; data: string }) => void): void { this.dataHandlers.delete(handler); }
+  offPtyData(handler: (detail: PtyDataDetail) => void): void { this.dataHandlers.delete(handler); }
   onPtyExit(handler: (detail: { id: string; exitCode: number }) => void): void { this.exitHandlers.add(handler); }
   offPtyExit(handler: (detail: { id: string; exitCode: number }) => void): void { this.exitHandlers.delete(handler); }
   requestInit(): void { this.host.send("pty_request_init"); }
@@ -302,7 +303,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
       for (const response of collectTerminalProtocolResponses(parsed.events)) this.writePty(id, response);
       if (parsed.visibleData.length === 0) return;
       this.alertManager.onData(id);
-      const textData = parsed.textData === parsed.visibleData ? undefined : parsed.textData;
+      const textData = textProjectionOf(parsed);
       for (const handler of this.dataHandlers) handler({ id, data: parsed.visibleData, textData });
     } else if (event === "pty:exit") {
       const payload = data as { id: string; exitCode: number };

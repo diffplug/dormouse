@@ -43,6 +43,7 @@ import {
   collectTerminalSemanticEvents,
   collectTerminalProtocolResponses,
   TerminalProtocolParser,
+  textProjectionOf,
 } from "dormouse-lib/lib/terminal-protocol";
 import { themeColorProvider } from "dormouse-lib/lib/terminal-theme";
 import {
@@ -135,7 +136,7 @@ export class TauriAdapter implements PlatformAdapter {
         if (parsed.visibleData.length === 0) return;
         // Feed visible data to alert manager for visual activity monitoring.
         this.alertManager.onData(id);
-        const textData = parsed.textData === parsed.visibleData ? undefined : parsed.textData;
+        const textData = textProjectionOf(parsed);
         for (const handler of this.dataHandlers) {
           handler({ id, data: parsed.visibleData, textData });
         }
@@ -411,7 +412,7 @@ export class TauriAdapter implements PlatformAdapter {
     this.dataHandlers.add(handler);
   }
 
-  offPtyData(handler: (detail: { id: string; data: string }) => void): void {
+  offPtyData(handler: (detail: PtyDataDetail) => void): void {
     this.dataHandlers.delete(handler);
   }
 

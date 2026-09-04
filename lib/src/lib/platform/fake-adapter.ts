@@ -8,6 +8,7 @@ import {
   collectTerminalSemanticEvents,
   collectTerminalProtocolResponses,
   TerminalProtocolParser,
+  textProjectionOf,
 } from '../terminal-protocol';
 import {
   applyTerminalSemanticEventsByPtyId,
@@ -185,7 +186,7 @@ export class FakePtyAdapter implements PlatformAdapter {
     this.dataHandlers.add(handler);
   }
 
-  offPtyData(handler: (detail: { id: string; data: string }) => void): void {
+  offPtyData(handler: (detail: PtyDataDetail) => void): void {
     this.dataHandlers.delete(handler);
   }
 
@@ -395,7 +396,7 @@ export class FakePtyAdapter implements PlatformAdapter {
 
     if (parsed.visibleData.length === 0) return;
     if (!options.skipActivity) this.alertManager.onData(id);
-    const textData = parsed.textData === parsed.visibleData ? undefined : parsed.textData;
+    const textData = textProjectionOf(parsed);
     for (const handler of this.dataHandlers) {
       handler({ id, data: parsed.visibleData, textData });
     }

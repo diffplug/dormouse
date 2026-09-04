@@ -270,12 +270,6 @@ export interface PeerLinkClient {
   handshakeTimer: ReturnType<typeof setTimeout> | null;
 }
 
-/**
- * Where another window's PTY output goes, once something asks for it. The same
- * sink the local registry serves — a foreign stream is the local one with a
- * socket in the middle, so it must not be a second shape.
- */
-export type RemotePtySink = PtySink;
 
 let server: Server | null = null;
 /**
@@ -302,7 +296,10 @@ const routePtyIds = new Map<string, string>();
 const remotePtyHandles = new Set<string>();
 /** Stable handles for repeated resolves of one PTY on one live peer socket. */
 const peerRouteIds = new WeakMap<PeerLinkClient, Map<string, string>>();
-const remoteSinks = new Map<string, Set<RemotePtySink>>();
+/** Where another window's PTY output goes, once something asks for it. The
+ *  same sink shape the local registry serves — a foreign stream is the local
+ *  one with a socket in the middle, not a second contract. */
+const remoteSinks = new Map<string, Set<PtySink>>();
 
 interface PendingRemoteSubscription {
   client: PeerLinkClient;
@@ -521,7 +518,7 @@ export function isRemotePtyHandle(ptyId: string): boolean {
 }
 
 /** Resolve once the owning window has installed the sink and checked liveness. */
-export function remoteSubscribe(ptyId: string, sink: RemotePtySink): Promise<void> {
+export function remoteSubscribe(ptyId: string, sink: PtySink): Promise<void> {
   const client = routes.get(ptyId);
   const ownerPtyId = routePtyIds.get(ptyId);
   if (!client || !ownerPtyId) {
@@ -546,7 +543,7 @@ export function remoteSubscribe(ptyId: string, sink: RemotePtySink): Promise<voi
     : Promise.resolve();
 }
 
-export function remoteUnsubscribe(ptyId: string, sink: RemotePtySink): void {
+export function remoteUnsubscribe(ptyId: string, sink: PtySink): void {
   const sinks = remoteSinks.get(ptyId);
   if (!sinks?.delete(sink) || sinks.size > 0) return;
   // Last viewer gone: stop the owner forwarding. The route stays — "nobody is
@@ -683,10 +680,7 @@ function onServerFrame(client: PeerLinkClient, frame: unknown): void {
   const response = message as PeerLinkResponse;
   if (response.kind === 'data') {
     for (const routeId of matchingRoutes(client, response.ptyId)) {
-      const chunk =
-        response.textData === undefined
-          ? { data: response.data }
-          : { data: response.data, textData: response.textData };
+      const chunk = { data: response.data, textData: response.textData };
       for (const sink of remoteSinks.get(routeId) ?? []) sink.onData(chunk);
     }
     return;

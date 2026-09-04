@@ -50,7 +50,7 @@ export function createProcessedPtyStreams(
       // The parser already computed both projections for the owning webview;
       // dropping one here would make a Client re-derive it from bytes it can no
       // longer tell apart.
-      const chunk: ProcessedPtyChunk = textData === undefined ? { data } : { data, textData };
+      const chunk: ProcessedPtyChunk = { data, textData };
       // Iterated live rather than copied: a sink can only unsubscribe itself
       // from here, which a Set tolerates mid-iteration.
       for (const target of targets) target.onData(chunk);

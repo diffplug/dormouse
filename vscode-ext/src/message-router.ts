@@ -8,6 +8,7 @@ import {
   collectTerminalSemanticEvents,
   collectTerminalProtocolResponses,
   TerminalProtocolParser,
+  textProjectionOf,
   type TerminalColorProvider,
   type TerminalColors,
 } from '../../lib/src/lib/terminal-protocol';
@@ -217,9 +218,8 @@ ptyManager.addCallbacks({
     }
     if (parsed.visibleData.length > 0) {
       alertManager.onData(id);
-      for (const listener of processedDataListeners) {
-        listener(id, parsed.visibleData, parsed.textData === parsed.visibleData ? undefined : parsed.textData);
-      }
+      const textData = textProjectionOf(parsed);
+      for (const listener of processedDataListeners) listener(id, parsed.visibleData, textData);
     }
     const after = alertManager.getState(id).status;
     if (before !== after) {
