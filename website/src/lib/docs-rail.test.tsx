@@ -61,6 +61,13 @@ describe("every page in the rail", () => {
     });
   }
 
+  it("labels Hosted security as a reviewed design target, not a current guarantee", () => {
+    const markup = renderToStaticMarkup(<MemoryRouter><Hosted /></MemoryRouter>);
+    expect(markup).toContain("These are design targets, not launched guarantees");
+    expect(markup).toContain("pass independent review");
+    expect(markup).toContain("remote-security-model.md");
+  });
+
   it("keeps the changelog rail honest on the filtered route the updater opens", () => {
     // /changelog/after/:version renders only releases newer than the baseline.
     // A rail built from every release links into articles that route omits.

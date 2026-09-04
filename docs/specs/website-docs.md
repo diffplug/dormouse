@@ -316,13 +316,16 @@ hidden, so a returning reader never sees dismissed UI flash. Pinned by
 
 ## `/hosted` preview
 
-**Must present both paid services as coming soon until purchasing is
-available:** Dormouse Hosted operates the coordinating server, while the
-optional ElevenLabs service replaces browser speech with a managed voice.
+**Must present both paid services as unavailable:** Hosted operates Pocket's
+coordinator, while optional ElevenLabs speech replaces browser voice.
 **Must keep current behavior explicit:** terminals remain on an awake, online
 computer; browser speech and free self-hosting remain available. Signup goes
 through `NotifySignupForm`, which discloses that it redirects to the
 `nedshed.dev` personal devlog.
+
+**Must label paid-relay encryption and metadata behavior as design targets
+until independent review permits a hosted guarantee**, and link the self-hosted
+model. `website/src/lib/docs-rail.test.tsx` pins this.
 
 **Must link the preview from each decision point:** homepage, Pocket marketing
 and tutorial, self-host docs, both public READMEs, and the speech and remote
