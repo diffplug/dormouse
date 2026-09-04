@@ -90,7 +90,7 @@
 
 **Why a presentation mount may replay.** Minimizing and reattaching move the visible cue between a Pane and a Door. Replaying once makes the cue legible in its new location without carrying the CSS animation clock through Activity state; the finite burst still expires without further input.
 
-**Why latches and not notifications.** Counting every ring rule instead would have made the counter unbounded: past the first latch `deferOrDeliverNotification` stops deferring, so a Session bell-ing in a loop emits one host→webview update per PTY chunk, each one restarting a 3.2s burst that then never finishes — the always-running animation the finite burst exists to remove. Counting latches bounds it at three per Session per dismissal and matches the model that function already states: an existing ring means enrichment, not a fresh summons. A timestamp floor would bound it too, but it would put the CSS duration in the manager.
+**Why latches and not notifications.** Counting every ring rule instead would let a Session bell-ing in a loop emit one host→webview update per PTY chunk, each restarting a 3.2s burst that never finishes — the always-running animation the finite burst exists to remove. A latch advances the counter at most once while that track remains latched; after release, relatching is a fresh summons and may replay. That matches the model `deferOrDeliverNotification` already states: an existing ring is enrichment, not a fresh summons. A timestamp floor would bound notifications too, but it would put the CSS duration in the manager.
 
 **Why `cfg.alert.ringingPaused` suppresses the burst.** It is the Chromatic freeze that pins the bell; even a bounded animation could otherwise snapshot at an arbitrary phase during its first 3.2 seconds.
 
