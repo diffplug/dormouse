@@ -1,4 +1,4 @@
-import type { AgentBrowserCommandResult, AgentBrowserEditOp, AgentBrowserEditResult, AgentBrowserOpenResult, AgentBrowserPopResult, AgentBrowserScreenshotResult, AgentBrowserStreamStatusResult, AlertStateDetail, IframeProxyResult, OpenPort, PlatformAdapter, PtyInfo, RemoteHostLink } from './types';
+import type { AgentBrowserCommandResult, AgentBrowserEditOp, AgentBrowserEditResult, AgentBrowserOpenResult, AgentBrowserPopResult, AgentBrowserScreenshotResult, AgentBrowserStreamStatusResult, AlertStateDetail, IframeProxyResult, OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, RemoteHostLink } from './types';
 import { OPEN_PORT_TIMEOUT_MS } from './types';
 import { createRemoteHostLinkClient } from '../../host/remote/link-client';
 import type { AwaitHandle, AwaitOptions, AwaitOutcome } from '../alert-manager';
@@ -42,7 +42,7 @@ export class VSCodeAdapter implements PlatformAdapter {
   // at webview boot — so a later same-document write can't move the goalposts.
   // Every `message` listener below checks it before reading anything else.
   private readonly hostMessageToken = readHostMessageToken();
-  private dataHandlers = new Set<(detail: { id: string; data: string }) => void>();
+  private dataHandlers = new Set<(detail: PtyDataDetail) => void>();
   private exitHandlers = new Set<(detail: { id: string; exitCode: number }) => void>();
   private listHandlers = new Set<(detail: { ptys: PtyInfo[] }) => void>();
   private replayHandlers = new Set<(detail: { id: string; data: string }) => void>();
@@ -110,7 +110,7 @@ export class VSCodeAdapter implements PlatformAdapter {
 
       if (msg.type === 'pty:data') {
         for (const handler of this.dataHandlers) {
-          handler({ id: msg.id, data: msg.data });
+          handler({ id: msg.id, data: msg.data, textData: msg.textData });
         }
       } else if (msg.type === 'pty:exit') {
         for (const handler of this.exitHandlers) {
@@ -403,11 +403,11 @@ export class VSCodeAdapter implements PlatformAdapter {
     return result ?? { ok: false, reason: 'unreachable', detail: 'iframe proxy request timed out' };
   }
 
-  onPtyData(handler: (detail: { id: string; data: string }) => void): void {
+  onPtyData(handler: (detail: PtyDataDetail) => void): void {
     this.dataHandlers.add(handler);
   }
 
-  offPtyData(handler: (detail: { id: string; data: string }) => void): void {
+  offPtyData(handler: (detail: PtyDataDetail) => void): void {
     this.dataHandlers.delete(handler);
   }
 

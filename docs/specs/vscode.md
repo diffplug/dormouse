@@ -215,7 +215,7 @@ The directives, with `randomSecret()` supplying the nonce:
 ```
 default-src 'none'
 style-src   <cspSource> 'unsafe-inline'
-script-src  'nonce-…' 'strict-dynamic'
+script-src  'nonce-…' 'strict-dynamic' 'wasm-unsafe-eval'
 font-src    <cspSource>
 img-src     <cspSource> data: blob:
 connect-src <cspSource> ws://127.0.0.1:* ws://localhost:*
@@ -236,6 +236,8 @@ frame-src   http://127.0.0.1:* http://localhost:*
 - **`'strict-dynamic'` covers the fetches no tag represents:** the entry's own static imports and every lazy `import()`. It widens what an already-trusted script may *load*, never what may be *written into* the document, and nothing here grants `script-src 'unsafe-inline'`. It also makes host-source expressions inert, so **adding `webview.cspSource` to `script-src` would be dead weight**.
 
 **Keep `'strict-dynamic'`** even though no experiment shows it load-bearing (rationale): it is the mechanism CSP specifies for "a script the nonce vouched for may load more", and the alternative that happens to work would make the policy correct by accident.
+
+**`'wasm-unsafe-eval'` permits WebAssembly compilation and nothing else** — `eval` stays blocked, and unlike a host source it survives `'strict-dynamic'`. What needs it is [terminal-escapes.md](terminal-escapes.md#inline-graphics). (rationale)
 
 Chromium enforces CSP and a failure presents remote from its cause, so **string inspection proves nothing** (rationale) and two checks cover it, **neither replacing the other**: `vscode-ext/test/webview-boot.smoketest.ts` loads the real bundle under the real policy in a real engine, and `vscode-ext/test/webview-html.test.ts` pins the transform against a fixture of real Vite output.
 
@@ -347,7 +349,7 @@ bursts on one microtask (a focus move alone emits `focusout` plus `focusin`).
 
 **Which webview owns a pane never reaches the protocol layer.** `resolveSurface` / `SurfaceHandle` are `docs/specs/remote-api.md`'s and the ask-backed half of the provider is shared with standalone (`createAskSurfaceProvider`); VS Code's part is that **the first read-only resolve answer is the answer**, and the mutating attach plus every later handle resize are addressed only to that selected tier/window. A resize nobody answered leaves the last known size standing.
 
-**No second strip parser.** The extension host already parses each PTY chunk and answers its queries (`message-router.ts`); webviews receive the stripped `visibleData` via `onProcessedPtyData` / `onProcessedPtyExit`, which is exactly what the service's `streamPty` taps. **A second parser would answer every query twice and corrupt the PTY** (`docs/specs/terminal-escapes.md`, which owns the sidecar's opposite case).
+**No second strip parser.** The extension host already parses each PTY chunk and answers its queries (`message-router.ts`); webviews receive that parser's projection pair via `onProcessedPtyData` / `onProcessedPtyExit`, which is exactly what the service's `streamPty` taps. **A second parser would answer every query twice and corrupt the PTY** (`docs/specs/terminal-escapes.md`, which owns the sidecar's opposite case).
 
 **Local streams go through one keyed registry and one listener pair for the whole window**, shared by the Host provider and the peer-link forwarder and dispatching by id to registered sinks — they run on every chunk of every terminal, so per-consumer pairs would tax every keystroke once per consumer. **The pair is installed on the first attachment and removed when the last goes**, so a window with no remote viewer pays nothing.
 

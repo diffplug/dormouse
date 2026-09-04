@@ -21,6 +21,10 @@ implement, so emitters offer it many more than it models; every one of those
 arrives from an untrusted program, and the only safe disposition for a sequence
 with no behavior behind it is silence.
 
+Why inline IIP does not reopen file access. The addon's `File` name is base64 metadata and is never used, while a transfer without `inline=1` is rejected before decoding. The only bytes reaching the image decoder are carried inside the control sequence itself; no path is resolved and no download is written.
+
+Why image data has different bounds from semantic text. Titles, commands, and directories become long-lived strings and keys, so code-point caps plus control stripping are their boundary. Graphics are streaming binary payloads decoded into RGBA storage; encoded-byte, pixel-count, and per-Session FIFO caps bound the actual allocation dimensions instead.
+
 Why the `OSC 633` terminator filter is emit-side. The parser scans raw bytes for
 the three terminators `findOscTerminator` knows — `BEL`, `ESC \`, the C1 ST — so
 a directory name or command line carrying one ends the `633` sequence early and

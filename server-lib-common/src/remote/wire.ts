@@ -770,8 +770,20 @@ export interface TerminalAttachResult {
 }
 
 export interface TerminalDataEvent {
-  /** Base64url PTY output bytes. */
+  /**
+   * Base64url of the UTF-8 *renderer* projection — Dormouse-processed and
+   * renderer-unparsed, so it is what the Host's own xterm writes, not raw PTY
+   * output.
+   */
   bytes: string;
+  /**
+   * Base64url of the UTF-8 text projection: the same chunk with string-control
+   * payloads removed, for a consumer reading output as text. Omitted means
+   * identical to `bytes`; present is authoritative, an empty string included.
+   * Additive on protocol-v1 — an older Client that ignores it falls back to
+   * `bytes`, which is what it always used.
+   */
+  text?: string;
 }
 export interface TerminalClosedEvent {
   exitCode?: number;

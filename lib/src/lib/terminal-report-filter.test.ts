@@ -31,6 +31,7 @@ describe('terminal-report-filter: inputIsSyntheticTerminalReport', () => {
     expect(inputIsSyntheticTerminalReport('\x1b[3;4R')).toBe(true); // cursor position report
     expect(inputIsSyntheticTerminalReport('\x1bOP')).toBe(true); // SS3 (F1)
     expect(inputIsSyntheticTerminalReport('\x1b]0;title\x07')).toBe(true); // OSC (BEL-terminated)
+    expect(inputIsSyntheticTerminalReport('\x1b_Gi=1;OK\x1b\\')).toBe(true); // Kitty graphics response
   });
 
   it('accepts several concatenated reports', () => {
@@ -56,6 +57,8 @@ describe('terminal-report-filter: inputIsReplayTerminalReport', () => {
     expect(inputIsReplayTerminalReport('\x1b[?1;2c')).toBe(true); // primary device attributes
     expect(inputIsReplayTerminalReport('\x1b[I')).toBe(true); // focus in
     expect(inputIsReplayTerminalReport('\x1b[O')).toBe(true); // focus out
+    expect(inputIsReplayTerminalReport('\x1b[?1;0;4096S')).toBe(true); // graphics attributes
+    expect(inputIsReplayTerminalReport('\x1b_Gi=1;OK\x1b\\')).toBe(true); // Kitty graphics response
   });
 
   it('rejects empty input', () => {

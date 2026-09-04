@@ -25,12 +25,24 @@ export interface SurfaceHandle {
 }
 
 /**
+ * One chunk of processed PTY output: the projection pair `PtyDataDetail`
+ * carries locally (`lib/src/lib/platform/types.ts`), minus the id a sink does
+ * not need. `data` is what a renderer writes; `textData` is the same chunk with
+ * string-control payloads removed, **omitted when identical to `data`** and
+ * authoritative when present, empty included.
+ */
+export interface ProcessedPtyChunk {
+  data: string;
+  textData?: string;
+}
+
+/**
  * One attachment's view of a PTY. Exit carries no id: a sink is subscribed to
  * exactly one PTY, so there is nothing to filter and no way to mistake another
  * PTY's death for this one's.
  */
 export interface PtySink {
-  onData(data: string): void;
+  onData(chunk: ProcessedPtyChunk): void;
   onExit(exitCode: number): void;
 }
 

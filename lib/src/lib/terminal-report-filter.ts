@@ -8,13 +8,20 @@ export function inputContainsEnter(data: string): boolean {
 const REPORT_CSI = /\x1b\[[0-?]*[ -/]*[@-~]/;
 const REPORT_SS3 = /\x1bO[@-~]/;
 const REPORT_OSC = /\x1b\][\s\S]*?(?:\x07|\x1b\\)/;
-const REPORT_TOKENS = new RegExp(`${REPORT_CSI.source}|${REPORT_SS3.source}|${REPORT_OSC.source}|.`, 'gs');
-const REPORT_VALIDATE = new RegExp(`^(?:${REPORT_CSI.source}|${REPORT_SS3.source}|${REPORT_OSC.source})$`);
-const REPLAY_REPORT_CSI = /\x1b\[(?:\??\d+(?:;\d+)*[Rn]|[?>=]?\d*(?:;\d+)*c|\d+(?:;\d+)*[tx]|\??\d+(?:;\d+)*\$y)/;
+const REPORT_APC = /\x1b_[\s\S]*?\x1b\\/;
+// Each classifier needs a tokenizer and a validator over the same alternation;
+// building both from one list keeps them from drifting as families are added.
+const tokenizer = (...parts: RegExp[]) => new RegExp(`${parts.map((p) => p.source).join('|')}|.`, 'gs');
+const validator = (...parts: RegExp[]) => new RegExp(`^(?:${parts.map((p) => p.source).join('|')})$`);
+const REPORT_PARTS = [REPORT_CSI, REPORT_SS3, REPORT_OSC, REPORT_APC];
+const REPORT_TOKENS = tokenizer(...REPORT_PARTS);
+const REPORT_VALIDATE = validator(...REPORT_PARTS);
+const REPLAY_REPORT_CSI = /\x1b\[(?:\??\d+(?:;\d+)*[Rn]|[?>=]?\d*(?:;\d+)*c|\d+(?:;\d+)*[tx]|\??\d+(?:;\d+)*\$y|\?\d+(?:;\d+)*S)/;
 const REPLAY_REPORT_FOCUS = /\x1b\[[IO]/;
 const REPORT_DCS = /\x1bP[\s\S]*?\x1b\\/;
-const REPLAY_REPORT_TOKENS = new RegExp(`${REPLAY_REPORT_CSI.source}|${REPLAY_REPORT_FOCUS.source}|${REPORT_OSC.source}|${REPORT_DCS.source}|.`, 'gs');
-const REPLAY_REPORT_VALIDATE = new RegExp(`^(?:${REPLAY_REPORT_CSI.source}|${REPLAY_REPORT_FOCUS.source}|${REPORT_OSC.source}|${REPORT_DCS.source})$`);
+const REPLAY_REPORT_PARTS = [REPLAY_REPORT_CSI, REPLAY_REPORT_FOCUS, REPORT_OSC, REPORT_DCS, REPORT_APC];
+const REPLAY_REPORT_TOKENS = tokenizer(...REPLAY_REPORT_PARTS);
+const REPLAY_REPORT_VALIDATE = validator(...REPLAY_REPORT_PARTS);
 const MOUSE_REPORT_X10 = /\x1b\[M[\s\S]{3}/;
 const MOUSE_REPORT_SGR = /\x1b\[<\d+;\d+;\d+[mM]/;
 const MOUSE_REPORT_URXVT = /\x1b\[\d+;\d+;\d+M/;

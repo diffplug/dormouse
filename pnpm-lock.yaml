@@ -92,6 +92,9 @@ importers:
       '@xterm/addon-fit':
         specifier: 0.12.0-beta.301
         version: 0.12.0-beta.301(@xterm/xterm@6.1.0-beta.304)
+      '@xterm/addon-image':
+        specifier: 0.10.0-beta.301
+        version: 0.10.0-beta.301(@xterm/xterm@6.1.0-beta.304)
       '@xterm/addon-unicode-graphemes':
         specifier: 0.5.0-beta.301
         version: 0.5.0-beta.301(@xterm/xterm@6.1.0-beta.304)
@@ -239,6 +242,9 @@ importers:
       '@xterm/addon-fit':
         specifier: 0.12.0-beta.301
         version: 0.12.0-beta.301(@xterm/xterm@6.1.0-beta.304)
+      '@xterm/addon-image':
+        specifier: 0.10.0-beta.301
+        version: 0.10.0-beta.301(@xterm/xterm@6.1.0-beta.304)
       '@xterm/addon-unicode-graphemes':
         specifier: 0.5.0-beta.301
         version: 0.5.0-beta.301(@xterm/xterm@6.1.0-beta.304)
@@ -2377,6 +2383,11 @@ packages:
 
   '@xterm/addon-fit@0.12.0-beta.301':
     resolution: {integrity: sha512-MukRyJLAFQrW/++aM209jBZ8G9J/Ioe4SGS6c3ba87v+zYuX/I66JrDB7sVfykQ9t7DlT+c1MWl1jTlX2kyx1w==}
+    peerDependencies:
+      '@xterm/xterm': ^6.1.0-beta.304
+
+  '@xterm/addon-image@0.10.0-beta.301':
+    resolution: {integrity: sha512-PJZL4GlQ1ReIgbffFMaOAFxc3wOit21/G2UEM82RpH3hNHjn6MH8ilz3ToDeBjYuOqU7ienBaeIuMbNktX4/HA==}
     peerDependencies:
       '@xterm/xterm': ^6.1.0-beta.304
 
@@ -6452,6 +6463,10 @@ snapshots:
   '@webcontainer/env@1.1.1': {}
 
   '@xterm/addon-fit@0.12.0-beta.301(@xterm/xterm@6.1.0-beta.304)':
+    dependencies:
+      '@xterm/xterm': 6.1.0-beta.304
+
+  '@xterm/addon-image@0.10.0-beta.301(@xterm/xterm@6.1.0-beta.304)':
     dependencies:
       '@xterm/xterm': 6.1.0-beta.304
 

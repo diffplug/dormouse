@@ -15,7 +15,10 @@ import type { EnrollmentOffer } from 'server-lib-common';
 import { ENROLLMENT_KEY } from '../../lib/src/remote/host/store';
 import type { ExtensionMessage } from '../src/message-types';
 import { FrameDecoder, encodeFrame } from '../src/peer-link-protocol';
-import { createProcessedPtyStreams } from '../src/processed-pty-streams';
+import {
+  createProcessedPtyStreams,
+  type ProcessedPtyChunk,
+} from '../src/processed-pty-streams';
 import {
   derivedSocketPath as socketPathFor,
   fakeSink,
@@ -142,7 +145,7 @@ function fakeContext(options: { deferGlobalWrites?: PendingGlobalWrite[] } = {})
 function fakeDeps() {
   const posted: ExtensionMessage[] = [];
   const asked: Array<{ op: string; params: unknown }> = [];
-  const dataListeners = new Set<(id: string, data: string) => void>();
+  const dataListeners = new Set<(id: string, data: string, textData?: string) => void>();
   const exitListeners = new Set<(id: string, exitCode: number) => void>();
   const ptyStatuses = new Map<string, { alive: boolean; exitCode?: number }>();
   const streams = createProcessedPtyStreams(
@@ -159,9 +162,9 @@ function fakeDeps() {
   return {
     posted,
     asked,
-    emitData: (id: string, data: string) => {
+    emitData: (id: string, data: string, textData?: string) => {
       ptyStatuses.set(id, { alive: true });
-      for (const listener of dataListeners) listener(id, data);
+      for (const listener of dataListeners) listener(id, data, textData);
     },
     emitExit: (id: string, exitCode: number) => {
       ptyStatuses.set(id, { alive: false, exitCode });
@@ -830,20 +833,22 @@ describe('remote host provider', () => {
     const mod = await freshHost();
     const bound = fakeDeps();
     const provider = mod.createRemoteHostProvider(bound.deps());
-    const seen: string[] = [];
+    const seen: ProcessedPtyChunk[] = [];
     const exits: number[] = [];
     const stream = provider.streamPty('pty-1', {
-      onData: (data) => void seen.push(data),
+      onData: (chunk) => void seen.push(chunk),
       onExit: (code) => void exits.push(code),
     });
     await stream.ready;
 
-    bound.emitData('pty-1', 'hello\x1b]0;title\x07');
+    bound.emitData('pty-1', 'hello\x1b]0;title\x07', 'hello');
     bound.emitData('pty-other', 'not mine');
     bound.emitExit('pty-other', 3);
     bound.emitExit('pty-1', 7);
 
-    expect(seen).toEqual(['hello\x1b]0;title\x07']);
+    // Both projections reach the provider: the parser computed them once, and
+    // the Client needs the same pair the local xterm's consumers get.
+    expect(seen).toEqual([{ data: 'hello\x1b]0;title\x07', textData: 'hello' }]);
     expect(exits).toEqual([7]);
 
     stream.stop();

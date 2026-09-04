@@ -5,7 +5,7 @@
  * repo root via `pnpm test` (see the root package.json). Exits non-zero with a
  * per-violation report.
  *
- * Why this exists: the four `@xterm/*` packages ship from one repo but carry
+ * Why this exists: the `@xterm/*` packages ship from one repo but carry
  * INDEPENDENT beta counters, and each addon's
  * `peerDependencies['@xterm/xterm']` is exactly `^<the core version published
  * from the same commit>`. So "latest of each" is routinely a set built from two

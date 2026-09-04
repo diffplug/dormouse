@@ -1,9 +1,11 @@
 import { Terminal, type IBufferRange } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { ImageAddon, type IImageAddonOptions } from '@xterm/addon-image';
 import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { shellCommandKind, type ShellCommandKind } from 'dor/commands/shell-quote';
 import { getPlatform, IS_MAC, IS_WINDOWS, PLATFORM_STRING } from './platform';
+import type { PtyDataDetail } from './platform/types';
 import { DIM, RESET } from './ansi';
 import { cfg } from '../cfg';
 import { requestExternalLinkConfirmation } from './external-link-confirmation';
@@ -54,6 +56,31 @@ import {
 import { readLogicalLineFromBuffer, type BufferLike } from './terminal-buffer-read';
 import { UNNAMED_PANEL_TITLE } from './terminal-state';
 import { vscodeWorkbenchCommandForKeydown } from './vscode-keybindings';
+
+// Only `pixelLimit` and `storageLimit` differ from the pinned addon's
+// `DEFAULT_OPTIONS` (2^24 pixels, 128 MB); every other line below restates a
+// default, so that a bump which lowers one cannot silently shrink the bound
+// without failing review here. Per-Session limits are explicit because Sessions
+// survive unmount/minimize and a product Window can retain many at once: 2^23
+// pixels still admits a 3840x2160 image without granting every orphaned Session
+// the addon's ceiling. `storageLimit` must stay at or above `pixelLimit` * 4
+// bytes (the addon derives its cache capacity as `storageLimit / 4 * 1e6`
+// pixels), or admitting one full-size image evicts every other image first and
+// still lands over budget.
+const IMAGE_ADDON_OPTIONS = {
+  enableSizeReports: true,
+  pixelLimit: 8_388_608,
+  storageLimit: 34,
+  showPlaceholder: true,
+  sixelSupport: true,
+  sixelScrolling: true,
+  sixelPaletteLimit: 4_096,
+  sixelSizeLimit: 33_554_432,
+  iipSupport: true,
+  iipSizeLimit: 33_554_432,
+  kittySupport: true,
+  kittySizeLimit: 33_554_432,
+} satisfies IImageAddonOptions;
 
 function makePromptLineReader(terminal: Terminal): PromptLineReader {
   return {
@@ -205,6 +232,7 @@ function createXtermHost(): { terminal: Terminal; fit: FitAddon; element: HTMLDi
   terminal.loadAddon(new UnicodeGraphemesAddon());
   const fit = new FitAddon();
   terminal.loadAddon(fit);
+  if (cfg.terminal.inlineImages) terminal.loadAddon(new ImageAddon(IMAGE_ADDON_OPTIONS));
 
   const element = document.createElement('div');
   element.style.width = '100%';
@@ -218,9 +246,11 @@ function createXtermHost(): { terminal: Terminal; fit: FitAddon; element: HTMLDi
 /** PTY data/exit listeners. Returns the unsubscribe pair. */
 function wirePtyEvents(id: string, terminal: Terminal): () => void {
   const platform = getPlatform();
-  const handleData = (detail: { id: string; data: string }) => {
+  const handleData = (detail: PtyDataDetail) => {
     if (detail.id === id) {
-      recordTerminalOutputByPtyId(id, detail.data);
+      // The parser already told us which bytes are text; `textData` is omitted
+      // when it would equal `data`.
+      recordTerminalOutputByPtyId(id, detail.textData ?? detail.data);
       terminal.write(detail.data);
     }
   };

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { TerminalProtocolParser } from './terminal-protocol';
 import {
   applyTerminalSemanticEvents,
   countRunningSessions,
@@ -124,6 +125,29 @@ describe('terminal semantic state store command input fallback', () => {
     recordTerminalOutput('pane', 'still working\r\n\x1b]0;user@host:~/repo$ ');
 
     expect(getTerminalPaneState('pane').currentCommand?.displayCommand).toBe('lazygit');
+  });
+
+  it('keeps chunked inline-image payloads out of the prompt window', () => {
+    // End to end over the real boundary: raw PTY bytes through the parser, its
+    // `textData` into the store, exactly as `wirePtyEvents` wires them.
+    const parser = new TerminalProtocolParser();
+    const feed = (raw: string) => {
+      const parsed = parser.process(raw);
+      // The heuristic is offered no part of an image, however it is chunked.
+      recordTerminalOutput('pane', parsed.textData);
+      return parsed.textData;
+    };
+
+    submit('pane', 'lazygit');
+    // Split so the middle chunk carries no introducer of its own — the case a
+    // stateless stripper cannot classify once the introducer leaves the window.
+    expect(feed(`\x1bPq${'~'.repeat(1_200)}`)).toBe('');
+    expect(feed('~~~~ user@host repo % ')).toBe('');
+    expect(getTerminalPaneState('pane').currentCommand?.displayCommand).toBe('lazygit');
+
+    // Ground text resumes at the terminator, and the real prompt still lands.
+    expect(feed(`\x1b\\\r\n${PROMPT}`)).toBe(`\r\n${PROMPT}`);
+    expect(getTerminalPaneState('pane').currentCommand).toBeNull();
   });
 
   it('still sees a real prompt trailed by a half-arrived title OSC', () => {
@@ -262,6 +286,14 @@ describe('terminal command input via rendered buffer', () => {
     // Reconnect to a live pty: the shell won't re-emit its prompt, so the shape
     // must come from the replayed scrollback that ends at the idle prompt.
     seedPromptShapeFromScrollback('pane', `earlier output\r\n${PROMPT}`);
+    recordTerminalUserInput('pane', 'pnpm build\r', lineReader(`${PROMPT}pnpm build`));
+
+    expect(getTerminalPaneState('pane').currentCommand?.rawCommandLine).toBe('pnpm build');
+  });
+
+  it('seeds through image payloads longer than the prompt scan window', () => {
+    const image = `\x1b]1337;File=inline=1:${'A'.repeat(2_000)}\x07`;
+    seedPromptShapeFromScrollback('pane', `earlier output\r\n${image}${PROMPT}`);
     recordTerminalUserInput('pane', 'pnpm build\r', lineReader(`${PROMPT}pnpm build`));
 
     expect(getTerminalPaneState('pane').currentCommand?.rawCommandLine).toBe('pnpm build');

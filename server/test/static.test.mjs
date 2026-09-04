@@ -131,9 +131,11 @@ test('the policy is same-origin everywhere, and unframeable', async () => {
   const { app: hono } = app({ pocketDir: await makePocketDir() });
   const policy = policyOf(await hono.request('/'));
 
-  // No exception for scripts: the build emits none inline and loads nothing
-  // off-origin, which the built-output case below pins.
-  assert.deepEqual(policy['script-src'], ["'self'"]);
+  // No *script* exception: the build emits none inline and loads nothing
+  // off-origin, which the built-output case below pins. `wasm-unsafe-eval` is
+  // the addon's SIXEL decoder and permits WebAssembly compilation only — it is
+  // pinned here so a widening to `'unsafe-eval'` cannot pass as the same thing.
+  assert.deepEqual(policy['script-src'], ["'self'", "'wasm-unsafe-eval'"]);
   assert.deepEqual(policy['default-src'], ["'self'"]);
   assert.deepEqual(policy['worker-src'], ["'self'"]);
   assert.deepEqual(policy['object-src'], ["'none'"]);
@@ -158,6 +160,6 @@ test('connect-src names this deployment own relay and no other host', async () =
   }
 });
 
-// The other half of `script-src 'self'` — that the BUILT shell carries no inline
+// The other half of `script-src` — that the BUILT shell carries no inline
 // script and nothing off-origin — is asserted by `lib/scripts/assert-pocket-worker.mjs`
 // inside `build:pocket`, because no test suite builds the app first.

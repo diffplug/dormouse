@@ -15,8 +15,8 @@ remote-api v1 terminal protocol:
 | ------------------------ | --------------------------------------- |
 | `onPtyList`              | `directory.snapshot`                    |
 | attach semantics         | `surface.attach` (attach-is-the-resize) |
-| `onPtyData`              | `terminal.data`                         |
-| `writePty`               | `terminal.write`                        |
+| `onPtyData`              | `terminal.data`, both projections        |
+| `writePty`               | `terminal.write`, minus renderer replies |
 | `resizePty`              | `terminal.resize`                       |
 | `onPtyExit`              | `terminal.closed`                       |
 
@@ -94,9 +94,13 @@ setup, pairing, or connection, and `false` renders a fixed upgrade requirement,
 performing no remote operation
 ([remote-security-model.md](./remote-security-model.md) → Host identity).
 
-**Pocket hides `MobileWall`'s local Kill affordance** (`showKillButton={false}`)
-— remote panes are Host-owned; v1 grants no phone-side kill/layout authority.
-(rationale)
+**Pocket hides `MobileWall`'s local Kill affordance** (`showKillButton={false}`):
+v1 grants no phone-side kill or layout authority (rationale).
+
+**An inline image crosses the relay as the ordered `terminal.data` messages its
+PTY chunks produce**, reassembled by Pocket's own xterm — panes are built through
+the same `createXtermHost`, so ImageAddon is loaded. **Nothing coalesces them and
+no size gates them** (rationale).
 
 `RemotePtyAdapter` exposes the adapter-specific `setActivePane(id)`: v1 allows
 one attachment per session, so pane switching is detach → attach, whose repaint
@@ -489,10 +493,11 @@ Every source is the app's own origin
 * **`img-src` also admits `data:` and `blob:`, `media-src` `blob:`**; every
   other directive is `'self'`.
 
-**`script-src` stays `'self'`, with no nonce pipeline**, and the build keeps
-earning it: `assertPocketShell` fails `build:pocket` on any inline
-`<script>` body or off-origin `src`/`href` in the emitted `index.html`.
-(rationale)
+**`script-src` stays `'self'` plus `'wasm-unsafe-eval'`
+([terminal-escapes.md](./terminal-escapes.md#inline-graphics)), with no nonce
+pipeline**, and the build keeps earning it: `assertPocketShell`
+fails `build:pocket` on any inline `<script>` body or off-origin `src`/`href`
+in the emitted `index.html`. (rationale)
 
 One lib-owned bundle, two deployments:
 

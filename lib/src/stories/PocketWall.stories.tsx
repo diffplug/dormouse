@@ -61,7 +61,7 @@ class FakeRemoteClient implements RemoteAdapterClient {
   async attach(_surfaceId: string, cols: number, rows: number, handlers: TerminalHandlers) {
     const subId = `attach-${++this.#n}`;
     // Push after the pane's xterm (and its onPtyData handler) is mounted.
-    queueMicrotask(() => handlers.onData(SPLASH));
+    queueMicrotask(() => handlers.onData({ bytes: SPLASH }));
     return { subId, result: { cols, rows } };
   }
 

@@ -4,7 +4,11 @@
  * the JSON-lines bridge, so all logging goes to stderr.
  */
 
-import type { HostSurfaceProvider, PtySink } from '../../remote/host/host-surface-provider';
+import type {
+  HostSurfaceProvider,
+  ProcessedPtyChunk,
+  PtySink,
+} from '../../remote/host/host-surface-provider';
 import { createAskSurfaceProvider } from './ask-surface-provider';
 import { bakedConnectSrc } from './connect-src';
 import { createEphemeralHostStateStore, FileHostStateStore } from './host-state-store';
@@ -86,7 +90,7 @@ export function createSidecarSurfaceBridge(
      * never be mixed with another's. A late joiner inherits the state from
      * before it joined, which beats a fresh parser starting mid-sequence.
      */
-    strip: (data: string) => string;
+    strip: (data: string) => ProcessedPtyChunk;
     sinks: Set<PtySink>;
   }
   const streams = new Map<string, Stream>();
@@ -186,11 +190,13 @@ export function createSidecarSurfaceBridge(
       if (event === 'data') {
         const chunk = (detail as { data?: unknown }).data;
         if (typeof chunk !== 'string') return;
-        const visible = stream.strip(chunk);
-        if (visible === '') return;
+        const processed = stream.strip(chunk);
+        // The text projection is a subset of the renderer one, so an empty
+        // renderer chunk carries no text either and there is nothing to send.
+        if (processed.data === '') return;
         // Iterated live rather than copied: a sink can only unsubscribe itself
         // from here, which a Set tolerates mid-iteration.
-        for (const sink of stream.sinks) sink.onData(visible);
+        for (const sink of stream.sinks) sink.onData(processed);
         return;
       }
       if (event === 'exit') {

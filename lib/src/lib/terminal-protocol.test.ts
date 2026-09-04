@@ -62,7 +62,7 @@ describe('TerminalProtocolParser', () => {
   it('handles chunked OSC sequences terminated by ST', () => {
     const parser = new TerminalProtocolParser();
 
-    expect(parser.process('\x1b]777;notify;Title;Bo')).toEqual({ visibleData: '', events: [] });
+    expect(parser.process('\x1b]777;notify;Title;Bo')).toMatchObject({ visibleData: '', events: [] });
     const result = parser.process('dy\x1b\\tail');
 
     expect(result.visibleData).toBe('tail');
@@ -157,6 +157,235 @@ describe('TerminalProtocolParser', () => {
 
     expect(result.visibleData).toBe(`see ${hyperlink} now`);
     expect(result.events).toEqual([]);
+  });
+
+  it('passes supported iTerm image commands through but still consumes other OSC 1337 commands', () => {
+    const parser = new TerminalProtocolParser();
+    const image = '\x1b]1337;File=inline=1;size=4:AAAA\x07';
+    const multipart =
+      '\x1b]1337;MultipartFile=inline=1;size=4\x07' +
+      '\x1b]1337;FilePart=AAAA\x07' +
+      '\x1b]1337;FileEnd\x07';
+    const report = '\x1b]1337;ReportCellSize\x1b\\';
+    const result = parser.process(`${image}${multipart}${report}\x1b]1337;SetMark\x07done`);
+
+    expect(result.visibleData).toBe(`${image}${multipart}${report}done`);
+    expect(result.events).toEqual([]);
+  });
+
+  it('streams a chunked iTerm image past the ordinary incomplete-OSC limit', () => {
+    const parser = new TerminalProtocolParser();
+    const prefix = '\x1b]1337;File=inline=1;size=20000:';
+    const firstPayload = 'A'.repeat(17_000);
+
+    expect(parser.process(prefix + firstPayload)).toMatchObject({
+      visibleData: prefix + firstPayload,
+      events: [],
+      // The payload is not text, so prompt detection never sees it.
+      textData: '',
+    });
+    expect(parser.process('BBBB\x1b')).toMatchObject({ visibleData: 'BBBB', events: [] });
+
+    const end = parser.process('\\after\x1b]7;file:///tmp\x07tail');
+    expect(end.visibleData).toBe('\x1b\\aftertail');
+    expect(end.events).toEqual([
+      {
+        kind: 'semantic',
+        event: expect.objectContaining({ type: 'cwd' }),
+      },
+    ]);
+  });
+
+  it('streams any OSC it does not consume past the incomplete-OSC limit', () => {
+    const parser = new TerminalProtocolParser();
+    // OSC 8 is xterm's, so an oversized hyperlink streams rather than vanishing.
+    const link = `\x1b]8;;https://example.com/${'p'.repeat(17_000)}`;
+
+    expect(parser.process(link)).toMatchObject({ visibleData: link, events: [] });
+    expect(parser.process('\x1b\\text').visibleData).toBe('\x1b\\text');
+  });
+
+  it('still drops an oversized OSC it would consume itself', () => {
+    const parser = new TerminalProtocolParser();
+    const title = `\x1b]0;${'t'.repeat(17_000)}`;
+
+    expect(parser.process(title)).toMatchObject({ visibleData: '', events: [] });
+    // The held bytes were dropped, so the tail is read as fresh ground text.
+    expect(parser.process('\x07after').visibleData).toBe('after');
+  });
+
+  it('waits for the id to settle before routing a split OSC introducer', () => {
+    const consuming = new TerminalProtocolParser();
+    expect(consuming.process('\x1b]133').visibleData).toBe('');
+    expect(consuming.process(';A\x07').events).toEqual([
+      { kind: 'semantic', event: expect.objectContaining({ type: 'promptStart' }) },
+    ]);
+
+    // The same three bytes are the start of a forwarded 1337 image.
+    const forwarding = new TerminalProtocolParser();
+    expect(forwarding.process('\x1b]133').visibleData).toBe('');
+    expect(forwarding.process('7;File=inline=1:AAAA').visibleData).toBe('\x1b]1337;File=inline=1:AAAA');
+  });
+
+  it('frames DCS and APC, so a BEL inside sixel or Kitty data is not a bell', () => {
+    const parser = new TerminalProtocolParser();
+    const sixel = '\x1bPq#0;2;0;0;0#0~~\x07~~\x1b\\';
+    const kitty = '\x1b_Gf=100,a=T;iVBORw0\x07KGgo\x1b\\';
+    const result = parser.process(`a${sixel}b${kitty}c`);
+
+    // Both reach xterm.js untouched, and neither payload raised a bell event.
+    expect(result.visibleData).toBe(`a${sixel}b${kitty}c`);
+    expect(result.events).toEqual([]);
+    // Only the ground text is offered as text.
+    expect(result.textData).toBe('abc');
+  });
+
+  it('streams an unterminated DCS or APC rather than buffering it', () => {
+    const parser = new TerminalProtocolParser();
+    const head = `\x1b_Gf=100,a=T;${'Q'.repeat(17_000)}`;
+
+    expect(parser.process(head)).toMatchObject({ visibleData: head, textData: '' });
+    expect(parser.process('\x1b\\tail')).toMatchObject({
+      visibleData: '\x1b\\tail',
+      textData: 'tail',
+    });
+  });
+
+  it('frames a C1 introducer with nothing else in the chunk', () => {
+    // The fast path used to notice only C1 OSC, so a chunk whose sole
+    // introducer was C1 DCS/SOS/PM/APC was returned unchanged as `textData`.
+    const parser = new TerminalProtocolParser();
+    const sixel = '\x90q#0;2;0;0;0#0~~\x9c';
+    const kitty = '\x9fGf=100,a=T;iVBORw0\x9c';
+    const result = parser.process(`a${sixel}b${kitty}c`);
+
+    expect(result.visibleData).toBe(`a${sixel}b${kitty}c`);
+    expect(result.textData).toBe('abc');
+    expect(result.events).toEqual([]);
+  });
+
+  it('reads a BEL in a forwarded continuation chunk as payload, not a terminator', () => {
+    const parser = new TerminalProtocolParser();
+    // The forwarding state used to resume every string as an OSC, so the first
+    // BEL in a later sixel or Kitty chunk cut the sequence in half.
+    expect(parser.process('\x1bPq#0;2;0;0;0').visibleData).toBe('\x1bPq#0;2;0;0;0');
+    expect(parser.process('#0~~\x07~~')).toMatchObject({
+      visibleData: '#0~~\x07~~',
+      events: [],
+      textData: '',
+    });
+    expect(parser.process('\x1b\\tail')).toMatchObject({
+      visibleData: '\x1b\\tail',
+      textData: 'tail',
+    });
+  });
+
+  it('drops a consumed OSC that CAN or SUB aborted, and reads on as ground text', () => {
+    for (const abort of ['\x18', '\x1a']) {
+      const parser = new TerminalProtocolParser();
+      const result = parser.process(`before\x1b]133;A${abort}after`);
+
+      // Nothing the aborted sequence carried is trusted, so no prompt boundary
+      // — and the abort byte goes with it rather than reaching xterm.js.
+      expect(result.events).toEqual([]);
+      expect(result.visibleData).toBe('beforeafter');
+      expect(result.textData).toBe('beforeafter');
+    }
+  });
+
+  it('forwards an aborted sequence xterm.js owns, cancel byte included', () => {
+    const parser = new TerminalProtocolParser();
+    const result = parser.process('\x1bPq#0;2\x18rest');
+
+    expect(result.visibleData).toBe('\x1bPq#0;2\x18rest');
+    expect(result.textData).toBe('rest');
+  });
+
+  it('lets a bare ESC cancel a string and handles the sequence that follows', () => {
+    const parser = new TerminalProtocolParser();
+    const result = parser.process('\x1b]133;A\x1b[mtext');
+
+    // No prompt boundary from the cancelled OSC, and the SGR that cancelled it
+    // is the sequence it actually is.
+    expect(result.events).toEqual([]);
+    expect(result.visibleData).toBe('\x1b[mtext');
+
+    // A real OSC after the cancel is still parsed.
+    const second = new TerminalProtocolParser();
+    expect(second.process('\x1b]0;dropped\x1b]7;file:///tmp\x07').events).toEqual([
+      { kind: 'semantic', event: expect.objectContaining({ type: 'cwd' }) },
+    ]);
+  });
+
+  it('leaves a C1 device-attributes run inside a forwarded payload alone', () => {
+    // `\x9b>q` is only a query in ground text. Inside a sixel or Kitty payload
+    // those are the sequence's own bytes: deleting them corrupts the image on
+    // its way to xterm.js and answers a query nobody asked. The `ESC` spelling
+    // cannot reach here — it would have ended the string.
+    const complete = new TerminalProtocolParser();
+    const result = complete.process('\x1bPq\x9b>qAAA\x1b\\');
+
+    expect(result.visibleData).toBe('\x1bPq\x9b>qAAA\x1b\\');
+    expect(result.events).toEqual([]);
+
+    // Ground text either side of the same chunk is still answered.
+    const mixed = new TerminalProtocolParser();
+    const both = mixed.process('a\x1b[>q\x1bPq\x9b>qAAA\x1b\\b');
+    expect(both.visibleData).toBe('a\x1bPq\x9b>qAAA\x1b\\b');
+    expect(both.events).toEqual([
+      { kind: 'response', data: ITERM2_DEVICE_ATTRIBUTES_RESPONSE },
+    ]);
+  });
+
+  it('never holds a byte of a forwarded payload back as a pending query', () => {
+    // A chunk that begins forwarding ends inside the payload, so the trailing
+    // `\x9b` is the sequence's. Held as a partial query it would be stripped
+    // now and re-emitted after the string's terminator, since the forwarding
+    // path never reads `pending`.
+    const parser = new TerminalProtocolParser();
+    const first = parser.process('\x1bPqAAA\x9b');
+    const second = parser.process('BBB\x1b\\');
+
+    expect(first.visibleData + second.visibleData).toBe('\x1bPqAAA\x9bBBB\x1b\\');
+    expect(first.events).toEqual([]);
+  });
+
+  it('frames a string control split in every position', () => {
+    // Introducer split: `ESC` ends one chunk, `P` starts the next.
+    const introducer = new TerminalProtocolParser();
+    expect(introducer.process('a\x1b')).toMatchObject({ visibleData: 'a', textData: 'a' });
+    expect(introducer.process('P;payload\x1b\\b')).toMatchObject({
+      visibleData: '\x1bP;payload\x1b\\b',
+      textData: 'b',
+    });
+
+    // Terminator split: the held ESC must not be emitted as text on its own.
+    const terminator = new TerminalProtocolParser();
+    expect(terminator.process('\x1bPfoo').visibleData).toBe('\x1bPfoo');
+    expect(terminator.process('\x1b').visibleData).toBe('');
+    expect(terminator.process('\\rest')).toMatchObject({
+      visibleData: '\x1b\\rest',
+      textData: 'rest',
+    });
+
+    // Cancel split: the same held ESC turns out to open a new sequence.
+    const cancel = new TerminalProtocolParser();
+    expect(cancel.process('\x1bPfoo').visibleData).toBe('\x1bPfoo');
+    expect(cancel.process('\x1b').visibleData).toBe('');
+    expect(cancel.process('[mrest')).toMatchObject({
+      visibleData: '\x1b[mrest',
+      textData: '\x1b[mrest',
+    });
+  });
+
+  it('keeps a real bell outside a string control', () => {
+    const parser = new TerminalProtocolParser();
+    const result = parser.process('done\x07');
+
+    expect(result.events).toEqual([
+      { kind: 'notification', notification: { source: 'BEL', title: 'Terminal bell', body: null } },
+    ]);
+    expect(result.textData).toBe('done');
   });
 
   it('strips known unsupported iTerm2 and clipboard OSC sequences', () => {
@@ -372,6 +601,9 @@ describe('TerminalProtocolParser', () => {
     const result = parser.process(`before\x1b[>qafter`);
 
     expect(result.visibleData).toBe('beforeafter');
+    // A consumed sequence belongs to neither projection: the query is stripped
+    // from each ground run before it is appended, so it never enters the text one.
+    expect(result.textData).toBe('beforeafter');
     expect(result.events).toEqual([
       { kind: 'response', data: ITERM2_DEVICE_ATTRIBUTES_RESPONSE },
     ]);
@@ -380,8 +612,8 @@ describe('TerminalProtocolParser', () => {
   it('buffers split iTerm2 extended device attribute queries', () => {
     const parser = new TerminalProtocolParser();
 
-    expect(parser.process('before\x1b')).toEqual({ visibleData: 'before', events: [] });
-    expect(parser.process('[>')).toEqual({ visibleData: '', events: [] });
+    expect(parser.process('before\x1b')).toMatchObject({ visibleData: 'before', events: [] });
+    expect(parser.process('[>')).toMatchObject({ visibleData: '', events: [] });
     const result = parser.process('qafter');
 
     expect(result.visibleData).toBe('after');
@@ -393,7 +625,7 @@ describe('TerminalProtocolParser', () => {
   it('buffers split C1 extended device attribute queries', () => {
     const parser = new TerminalProtocolParser();
 
-    expect(parser.process('before\x9b>')).toEqual({ visibleData: 'before', events: [] });
+    expect(parser.process('before\x9b>')).toMatchObject({ visibleData: 'before', events: [] });
     const result = parser.process('qafter');
 
     expect(result.visibleData).toBe('after');
@@ -405,8 +637,8 @@ describe('TerminalProtocolParser', () => {
   it('releases buffered CSI prefixes when they are not device attribute queries', () => {
     const parser = new TerminalProtocolParser();
 
-    expect(parser.process('\x1b[')).toEqual({ visibleData: '', events: [] });
-    expect(parser.process('31mred')).toEqual({ visibleData: '\x1b[31mred', events: [] });
+    expect(parser.process('\x1b[')).toMatchObject({ visibleData: '', events: [] });
+    expect(parser.process('31mred')).toMatchObject({ visibleData: '\x1b[31mred', events: [] });
   });
 
   it('answers an OSC 11 background color query from the theme and consumes it', () => {
@@ -433,7 +665,7 @@ describe('TerminalProtocolParser', () => {
   it('buffers a split OSC 11 background query and still answers it', () => {
     const parser = new TerminalProtocolParser(() => '#1e1e1e');
 
-    expect(parser.process('\x1b]11;')).toEqual({ visibleData: '', events: [] });
+    expect(parser.process('\x1b]11;')).toMatchObject({ visibleData: '', events: [] });
     const result = parser.process('?\x1b\\done');
 
     expect(result.visibleData).toBe('done');

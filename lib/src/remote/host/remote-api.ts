@@ -19,9 +19,11 @@ import {
   type RemoteRequest,
   type RemoteResponse,
   type TerminalAttachResult,
+  type TerminalDataEvent,
   type TerminalResizeParams,
   type TerminalWriteParams,
 } from 'server-lib-common';
+import { inputIsReplayTerminalReport } from '../../lib/terminal-report-filter';
 import type { HostSurfaceProvider, SurfaceHandle } from './host-surface-provider';
 
 /** Coalesce window for directory re-snapshots (remote-api.md: "Host coalesces"). */
@@ -326,13 +328,13 @@ export class RemoteApiSession {
       }
     };
     const stream = this.#provider.streamPty(ptyId, {
-      onData: (data) => {
-        // The PTY delivers strings on this path; be defensive about the
-        // Uint8Array path some adapters use. Either way it goes out as
-        // base64url PTY bytes.
-        const raw: unknown = data;
-        const bytes = typeof raw === 'string' ? utf8Encode(raw) : (raw as Uint8Array);
-        emitOrBuffer(REMOTE_EVENTS.terminalData, { bytes: toBase64Url(bytes) });
+      onData: (chunk) => {
+        // Both projections cross, so the Client's text consumers see what the
+        // owner's do. `text` is omitted whenever the two are identical, which
+        // is every chunk carrying no string control.
+        const event: TerminalDataEvent = { bytes: toBase64Url(utf8Encode(chunk.data)) };
+        if (chunk.textData !== undefined) event.text = toBase64Url(utf8Encode(chunk.textData));
+        emitOrBuffer(REMOTE_EVENTS.terminalData, event);
       },
       onExit: (exitCode) => {
         // Deliver the close to the client first, then drop the attachment so a
@@ -478,8 +480,17 @@ export class RemoteApiSession {
     const resolved = this.#attachedParams<TerminalWriteParams>(request);
     if (!resolved) return;
     const { params, attachment } = resolved;
+    const text = utf8Decode(fromBase64Url(params.bytes));
+    // A mirror's xterm answers the queries its own renderer sees; the owner has
+    // already answered them (remote-api.md -> "Terminal surfaces"). Dropped
+    // rather than refused: the write is well-formed, and the client is not
+    // owed an error for bytes it never chose to send.
+    if (inputIsReplayTerminalReport(text)) {
+      this.#ok(request, {});
+      return;
+    }
     // Feed the existing PTY input path; the local echo returns via the stream.
-    this.#provider.writePty(attachment.handle.ptyId, utf8Decode(fromBase64Url(params.bytes)));
+    this.#provider.writePty(attachment.handle.ptyId, text);
     this.#ok(request, {});
   }
 

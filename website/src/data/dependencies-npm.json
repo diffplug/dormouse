@@ -63,6 +63,13 @@
     "homepage": "https://github.com/xtermjs/xterm.js/tree/master/addons/addon-fit"
   },
   {
+    "name": "@xterm/addon-image",
+    "version": "0.10.0-beta.301",
+    "license": "MIT",
+    "author": "The xterm.js authors",
+    "homepage": "https://github.com/xtermjs/xterm.js/tree/master/addons/addon-image"
+  },
+  {
     "name": "@xterm/addon-unicode-graphemes",
     "version": "0.5.0-beta.301",
     "license": "MIT",

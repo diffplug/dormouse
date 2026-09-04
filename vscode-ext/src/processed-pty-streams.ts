@@ -4,9 +4,12 @@
  * second parser here would answer terminal queries twice.
  */
 
-import type { PtySink } from '../../lib/src/remote/host/host-surface-provider';
+import type {
+  ProcessedPtyChunk,
+  PtySink,
+} from '../../lib/src/remote/host/host-surface-provider';
 
-export type { PtySink };
+export type { ProcessedPtyChunk, PtySink };
 
 export interface ProcessedPtyStreams {
   /**
@@ -23,7 +26,9 @@ export interface PtyStatus {
 }
 
 export function createProcessedPtyStreams(
-  onProcessedPtyData: (listener: (id: string, data: string) => void) => () => void,
+  onProcessedPtyData: (
+    listener: (id: string, data: string, textData?: string) => void,
+  ) => () => void,
   onProcessedPtyExit: (listener: (id: string, exitCode: number) => void) => () => void,
   getPtyStatus: (id: string) => PtyStatus | undefined,
 ): ProcessedPtyStreams {
@@ -39,12 +44,16 @@ export function createProcessedPtyStreams(
 
   const install = (): void => {
     if (stopListeners) return;
-    const offData = onProcessedPtyData((id, data) => {
+    const offData = onProcessedPtyData((id, data, textData) => {
       const targets = streams.get(id);
       if (!targets) return;
+      // The parser already computed both projections for the owning webview;
+      // dropping one here would make a Client re-derive it from bytes it can no
+      // longer tell apart.
+      const chunk: ProcessedPtyChunk = { data, textData };
       // Iterated live rather than copied: a sink can only unsubscribe itself
       // from here, which a Set tolerates mid-iteration.
-      for (const target of targets) target.onData(data);
+      for (const target of targets) target.onData(chunk);
     });
     const offExit = onProcessedPtyExit((id, exitCode) => {
       const targets = streams.get(id);

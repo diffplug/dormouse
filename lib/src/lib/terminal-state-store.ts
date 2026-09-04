@@ -16,7 +16,7 @@ import {
   type PromptSubmitState,
 } from './terminal-command-input';
 import { derivePromptShape, extractCommand, type PromptShape } from './terminal-prompt-shape';
-import { stripTerminalControls } from './terminal-controls';
+import { stripTerminalControls, TerminalControlStreamFilter } from './terminal-controls';
 import { getSessionIdByPtyId } from './terminal-store';
 
 const paneStates = new Map<string, TerminalPaneState>();
@@ -97,20 +97,23 @@ export function ensureTerminalPaneState(id: string, initial?: Partial<TerminalPa
   return next;
 }
 
-export function resetTerminalPaneState(id: string, initial?: Partial<TerminalPaneState>): void {
+/** Drops every per-pane scratch map keyed by `id`; `paneStates` is the caller's
+ * to set or delete. Add new per-pane state here, not at the two call sites. */
+function clearPaneScratch(id: string): void {
   promptSubmitStates.delete(id);
   promptShapes.delete(id);
   promptOutputBuffers.delete(id);
   oscDrivenPanes.delete(id);
+}
+
+export function resetTerminalPaneState(id: string, initial?: Partial<TerminalPaneState>): void {
+  clearPaneScratch(id);
   paneStates.set(id, createTerminalPaneState(initial));
   notifyTerminalPaneStateListeners();
 }
 
 export function removeTerminalPaneState(id: string): void {
-  promptSubmitStates.delete(id);
-  promptShapes.delete(id);
-  promptOutputBuffers.delete(id);
-  oscDrivenPanes.delete(id);
+  clearPaneScratch(id);
   if (!paneStates.delete(id)) return;
   notifyTerminalPaneStateListeners();
 }
@@ -203,6 +206,13 @@ export function finishLaunchedCommandByPtyId(ptyId: string, exitCode: number): v
   applyTerminalSemanticEventsByPtyId(ptyId, [{ type: 'commandFinish', exitCode }]);
 }
 
+/**
+ * Records a chunk of a pane's output for the keystroke prompt heuristic.
+ * **Takes `TerminalProtocolParseResult.textData`, not the raw chunk** — the
+ * parser has already dropped string-control payloads, so a chunked inline image
+ * can never reach the 1,024-character prompt window
+ * (`docs/specs/terminal-state.md`).
+ */
 export function recordTerminalOutput(id: string, output: string): void {
   if (!output) return;
 
@@ -240,7 +250,13 @@ export function recordTerminalOutputByPtyId(ptyId: string, output: string): void
 // prompt. Learn-only — fires no idle transition.
 export function seedPromptShapeFromScrollback(id: string, scrollback: string): void {
   if (!scrollback) return;
-  const promptLine = detectReturnedShellPrompt(scrollback.slice(-1024));
+  // Replay arrives as `visibleData`, which still carries the string controls the
+  // parser forwards, so this path filters for itself. It is one shot over a
+  // bounded tail rather than the live stream: the prompt is in the last few
+  // hundred characters, and 64 KiB is ample runway to resync the control state
+  // before the 1024 the result is cut to.
+  const text = new TerminalControlStreamFilter().process(scrollback.slice(-65_536));
+  const promptLine = detectReturnedShellPrompt(text.slice(-1024));
   if (!promptLine) return;
   const shape = derivePromptShape(promptLine);
   if (shape) promptShapes.set(id, shape);

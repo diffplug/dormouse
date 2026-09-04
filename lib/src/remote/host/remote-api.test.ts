@@ -133,8 +133,9 @@ class FakeProvider implements HostSurfaceProvider {
   }
 
   /** Only a subscriber hears anything — the per-PTY subscription *is* the filter. */
-  emitData(ptyId: string, data: string): void {
-    for (const sink of this.#sinks.get(ptyId) ?? []) sink.onData(data);
+  emitData(ptyId: string, data: string, textData?: string): void {
+    const chunk = textData === undefined ? { data } : { data, textData };
+    for (const sink of this.#sinks.get(ptyId) ?? []) sink.onData(chunk);
   }
 
   emitExit(ptyId: string, exitCode: number): void {
@@ -480,6 +481,33 @@ describe('RemoteApiSession surface.attach', () => {
     // buffered and flushed after the response — never ahead of it.
     expect(sent[1]).toMatchObject({ subId: 'attach-1', event: REMOTE_EVENTS.terminalData });
     expect(decodeTerminalData(sent[1]!)).toBe('terminal-resize:100x30');
+  });
+
+  it('carries the text projection on terminal.data only when it differs', async () => {
+    const provider = new FakeProvider();
+    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    const { session, sent } = makeSession(provider);
+
+    await attach(session, 100, 30);
+    sent.length = 0;
+
+    provider.emitData('pty-1', 'plain');
+    provider.emitData('pty-1', 'pre\x1b]1337;File=inline=1:AAAA\x07post', 'prepost');
+    // Present-and-empty is authoritative: a chunk of nothing but a forwarded
+    // image sequence has a text projection, and it is the empty string.
+    provider.emitData('pty-1', '\x1b]1337;File=inline=1:AAAA\x07', '');
+
+    expect(sent.map((payload) => (payload as RemoteEventMsg).data)).toEqual([
+      { bytes: toBase64Url(utf8Encode('plain')) },
+      {
+        bytes: toBase64Url(utf8Encode('pre\x1b]1337;File=inline=1:AAAA\x07post')),
+        text: toBase64Url(utf8Encode('prepost')),
+      },
+      {
+        bytes: toBase64Url(utf8Encode('\x1b]1337;File=inline=1:AAAA\x07')),
+        text: toBase64Url(utf8Encode('')),
+      },
+    ]);
   });
 
   it('falls back to the surface size for a missing dimension', async () => {
@@ -900,6 +928,47 @@ describe('RemoteApiSession terminal input', () => {
       ok: false,
       error: 'terminal resize failed: owner unavailable',
     });
+  });
+
+  it('discards a terminal report a mirror answered, and still answers ok', async () => {
+    const provider = new FakeProvider();
+    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    const { session, sent } = makeSession(provider);
+    await attach(session, 100, 30);
+    sent.length = 0;
+
+    const reports = {
+      da1: '\x1b[?1;2c',
+      cpr: '\x1b[24;80R',
+      kitty: '\x1b_Gi=1;OK\x1b\\',
+      xtsmgraphics: '\x1b[?2;1;4096S',
+      cellSize: '\x1b]1337;ReportCellSize=14.0;7.0;1.0\x07',
+    };
+    for (const [name, bytes] of Object.entries(reports)) {
+      session.handle({
+        requestId: `write-${name}`,
+        method: REMOTE_METHODS.terminalWrite,
+        params: { surfaceId: 'surface-1', bytes: toBase64Url(utf8Encode(bytes)) },
+      });
+    }
+
+    expect(provider.writes).toEqual([]);
+    expect(sent).toEqual(
+      Object.keys(reports).map((name) => ({ requestId: `write-${name}`, ok: true, result: {} })),
+    );
+
+    // Real input is untouched, bracketed paste and a report glued to keystrokes
+    // included — the classifier requires every token of the chunk to be a report.
+    const inputs = ['ls\r', '\x1b[200~pasted\x1b[201~', '\x1b[A', '\x1b[13;5u', '\x1b[?1;2cls'];
+    for (const [index, bytes] of inputs.entries()) {
+      session.handle({
+        requestId: `input-${index}`,
+        method: REMOTE_METHODS.terminalWrite,
+        params: { surfaceId: 'surface-1', bytes: toBase64Url(utf8Encode(bytes)) },
+      });
+    }
+
+    expect(provider.writes).toEqual(inputs.map((bytes) => ['pty-1', bytes]));
   });
 });
 

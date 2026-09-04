@@ -25,7 +25,9 @@ export type PeerLinkRequest =
 export type PeerLinkResponse =
   | { kind: 'result'; id: string; results: unknown[] }
   | { kind: 'subscribed'; id: string; ptyId: string }
-  | { kind: 'data'; ptyId: string; data: string }
+  // `textData` rides the frame under the `ProcessedPtyChunk` rule: omitted when
+  // it equals `data` (`lib/src/remote/host/host-surface-provider.ts`).
+  | { kind: 'data'; ptyId: string; data: string; textData?: string }
   | { kind: 'exit'; ptyId: string; exitCode: number }
   | { kind: 'notify' }
   | { kind: 'command'; payload: RemoteHostCommand };

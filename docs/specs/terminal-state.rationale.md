@@ -28,6 +28,10 @@
 
 **Why alt-screen spans are dropped.** Fullscreen TUIs (vim, lazygit, less) render into the alt buffer, so a `$` painted there is the program's, not the user's prompt.
 
+**Why the heuristic reads `textData` rather than filtering for itself.** The protocol parser has already framed every string control on that chunk, so a separate scanner in front of the prompt detector re-derived a classification the parser threw away — and did it per character over 100% of PTY output, which measured 5.9 ms/MB on plain text. Projecting the answer the parser already has costs nothing on the wire (the field is omitted when it would equal `data`) and leaves one classifier instead of three.
+
+**Why replay seeding still filters locally.** `pty:replay` reaches the webview as `visibleData`, which still carries the string controls the parser forwards, and it is one bounded pass at restore rather than the live stream — so a one-shot `TerminalControlStreamFilter` over a 64 KiB tail is proportionate there. The 1,024-character window is cut from its output; 64 KiB is ample runway to resync the control state.
+
 **Why boundary mode is needed, and why its trailing boundary must be trimmed.** Deleting a redraw's cursor move welds text never adjacent on screen: `building...\x1b[1;1HC:\Users\me>` reads as one line starting with `building`, which no anchored shape matches. But a boundary is not a real line break. A genuine trailing newline means nothing is painted on the current line yet — no prompt, and reading one as a prompt flips a running command back to idle. A trailing *boundary* means only that a control closed the line, which is what a prompt clearing to end-of-line after painting itself emits (`C:\Users\me>\x1b[K`); reading it as an empty last line would hide every such prompt.
 
 **Why `isPaneOscDriven()` is exposed.** `dor ensure --restart` can only match a surface whose shell re-reports its command, so it must know whether this pane's command state came from real OSC boundaries or the heuristic.

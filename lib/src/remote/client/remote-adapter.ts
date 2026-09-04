@@ -12,9 +12,11 @@ import {
   utf8Encode,
   type DirectoryEntry,
   type TerminalAttachResult,
+  type TerminalDataEvent,
 } from 'server-lib-common';
 import type { AwaitHandle, AwaitOutcome } from '../../lib/alert-manager';
-import type { PlatformAdapter, PtyInfo, OpenPort } from '../../lib/platform/types';
+import type { PlatformAdapter, PtyDataDetail, PtyInfo, OpenPort } from '../../lib/platform/types';
+import { inputIsReplayTerminalReport } from '../../lib/terminal-report-filter';
 import type { TerminalHandlers } from './pocket-client';
 
 /**
@@ -47,7 +49,7 @@ interface Size {
 
 const DEFAULT_SIZE: Size = { cols: 80, rows: 24 };
 
-type DataHandler = (detail: { id: string; data: string }) => void;
+type DataHandler = (detail: PtyDataDetail) => void;
 type ExitHandler = (detail: { id: string; exitCode: number }) => void;
 type ListHandler = (detail: { ptys: PtyInfo[] }) => void;
 type DirectoryListener = (entries: DirectoryEntry[]) => void;
@@ -201,7 +203,7 @@ export class RemotePtyAdapter implements PlatformAdapter {
     if (generation !== this.#activeGeneration) return; // superseded mid-detach
 
     const handlers: TerminalHandlers = {
-      onData: (bytes) => this.#emitData(id, bytes),
+      onData: (event) => this.#emitData(id, event),
       onClosed: (exitCode) => this.#emitExit(id, exitCode),
     };
     const { subId } = await this.#client.attach(id, size.cols, size.rows, handlers);
@@ -223,6 +225,9 @@ export class RemotePtyAdapter implements PlatformAdapter {
 
   writePty(id: string, data: string): void {
     if (this.#attached?.surfaceId !== id) return; // Host only accepts the attached pane
+    // The Host discards these anyway (remote-api.md -> "Terminal surfaces"), so
+    // don't spend the relay on them.
+    if (inputIsReplayTerminalReport(data)) return;
     void this.#client.write(id, toBase64Url(utf8Encode(data)));
   }
 
@@ -252,9 +257,13 @@ export class RemotePtyAdapter implements PlatformAdapter {
     this.#exitHandlers.delete(handler);
   }
 
-  #emitData(id: string, bytes: string): void {
-    const data = utf8Decode(fromBase64Url(bytes));
-    for (const handler of this.#dataHandlers) handler({ id, data });
+  #emitData(id: string, event: TerminalDataEvent): void {
+    const data = utf8Decode(fromBase64Url(event.bytes));
+    // Omitted `text` means the two projections are identical, which is what an
+    // omitted `textData` means downstream — so it is passed through as omitted
+    // rather than filled in, and an explicit empty one survives as empty.
+    const textData = event.text === undefined ? undefined : utf8Decode(fromBase64Url(event.text));
+    for (const handler of this.#dataHandlers) handler({ id, data, textData });
   }
 
   #emitExit(id: string, exitCode?: number): void {

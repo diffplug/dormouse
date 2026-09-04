@@ -8,6 +8,7 @@ import {
   collectTerminalSemanticEvents,
   collectTerminalProtocolResponses,
   TerminalProtocolParser,
+  textProjectionOf,
   type TerminalColorProvider,
   type TerminalColors,
 } from '../../lib/src/lib/terminal-protocol';
@@ -174,7 +175,7 @@ const themeColorProvider: TerminalColorProvider = (target) => latestThemeColors?
 // Subscribers that want each PTY chunk *after* OSC sequences have been parsed
 // out (display path). Decoupled from ptyManager.addCallbacks so we only run
 // the protocol parser once per chunk regardless of webview count.
-type ProcessedDataListener = (id: string, visibleData: string) => void;
+type ProcessedDataListener = (id: string, visibleData: string, textData?: string) => void;
 const processedDataListeners = new Set<ProcessedDataListener>();
 type ProcessedExitListener = (id: string, exitCode: number) => void;
 const processedExitListeners = new Set<ProcessedExitListener>();
@@ -217,7 +218,8 @@ ptyManager.addCallbacks({
     }
     if (parsed.visibleData.length > 0) {
       alertManager.onData(id);
-      for (const listener of processedDataListeners) listener(id, parsed.visibleData);
+      const textData = textProjectionOf(parsed);
+      for (const listener of processedDataListeners) listener(id, parsed.visibleData, textData);
     }
     const after = alertManager.getState(id).status;
     if (before !== after) {
@@ -436,9 +438,9 @@ export function attachRouter(
    * Returns a cleanup function that unsubscribes everything.
    */
   function connectWebview(): () => void {
-    const removeProcessedListener = onProcessedPtyData((id, visibleData) => {
+    const removeProcessedListener = onProcessedPtyData((id, visibleData, textData) => {
       if (!ownedPtyIds.has(id)) return;
-      post({ type: 'pty:data', id, data: visibleData } satisfies ExtensionMessage);
+      post({ type: 'pty:data', id, data: visibleData, textData } satisfies ExtensionMessage);
     });
     const removeSemanticListener = onTerminalSemanticEvents((id, events) => {
       if (!ownedPtyIds.has(id)) return;

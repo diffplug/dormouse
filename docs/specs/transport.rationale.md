@@ -48,6 +48,8 @@
 
 **Why an unterminated control swallows the rest of the window.** Otherwise a window title cut mid-sequence reads back as terminal output, and a tail ending `\x1b[38;5` surrenders `38;5` to the greedy id pattern; swallowing is the fail-closed direction. The inverse case — a payload whose *introducer* fell off the front of the window — is unrecoverable here, and grants no more than ordinary output already does.
 
+**Why a bare C1 introducer counts.** The batch stripper honored the C1 *terminator* (`\x9c`) but only the 7-bit `ESC` *introducer*, so an emitter using 8-bit controls could get its payload promoted to visible text — the one place the codebase's grammar disagreed with itself, since both the streaming filter and `TerminalProtocolParser` frame the C1 forms. Unifying them means `stripTerminalControls` now swallows the tail after a stray `\x9f`, which can hide a resume command that follows it in the same window. That direction is the safer trade: a missed offer to resume is recoverable and visible, while an APC payload matched *as* a resume command puts attacker-chosen bytes into executable state. Resolved by making `stripTerminalControls` run `TerminalControlStreamFilter` rather than keeping a second regex copy of the grammar.
+
 **Why "terminated" is xterm's definition, not ECMA-48's.** The renderer aborts a string control on CAN/SUB and on a bare ESC, so a stripper waiting for a formal ST would treat as payload what the terminal already treated as ended.
 
 **Why the Fe range is not enough to match an escape.** `ESC 7` / `ESC 8` and `ESC c` have final bytes outside it, so a matcher keyed on the introducer alone strips the ESC and leaks the final byte into the text.

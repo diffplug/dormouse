@@ -19,6 +19,8 @@ import {
   E2E_KEEPALIVE_INTERVAL_MS,
   ESTABLISHED_E2E_IDLE_TIMEOUT_MS,
   KEEPALIVE_BODY_SIZE,
+  REMOTE_EVENTS,
+  REMOTE_METHODS,
   SELFHOST_ACCOUNT_ID,
   SETUP_TOKEN_INVALID_ERROR,
   formatPairingInvitationUrl,
@@ -36,6 +38,8 @@ import {
   type PairingInvitation,
   type PasskeyAssertion,
   type PresenceBinding,
+  type TerminalDataEvent,
+  utf8Encode,
 } from 'server-lib-common';
 
 import {
@@ -72,6 +76,11 @@ const ORIGIN = 'https://pocket.example';
 const RP_ID = 'pocket.example';
 const HOST_LABEL = 'Ned’s laptop';
 const SESSION_TOKEN = 'tok-abc';
+/** What the stub Host streams on attach: a chunk whose two projections differ. */
+const STREAMED_CHUNK: TerminalDataEvent = {
+  bytes: toBase64Url(utf8Encode('pre\x1b]1337;File=inline=1:AAAA\x07post')),
+  text: toBase64Url(utf8Encode('prepost')),
+};
 
 /** A base64url string usable where a real 32-byte secret goes. */
 function secret(): string {
@@ -398,13 +407,22 @@ async function makeE2eHarness(
       // Enough protocol-v1 to prove the byte stream: every request is answered
       // with its own `requestId`, which is what `hello` correlates on.
       handle: (data) => {
-        const request = data as { requestId?: unknown };
+        const request = data as { requestId?: unknown; method?: unknown };
         if (typeof request.requestId !== 'string') return;
         send({
           requestId: request.requestId,
           ok: true,
           result: { protocolVersion: 1, hostId, grants: { input: true, layout: false } },
         });
+        // An attach opens its stream under the request's own id, so one canned
+        // event proves the subscription path as well as the request one.
+        if (request.method === REMOTE_METHODS.surfaceAttach) {
+          send({
+            subId: request.requestId,
+            event: REMOTE_EVENTS.terminalData,
+            data: STREAMED_CHUNK,
+          });
+        }
       },
       dispose: () => {},
     }),
@@ -705,6 +723,19 @@ describe('connecting, end to end', () => {
     expect(harness.client.connectedHostId).toBe(harness.hostId);
     // The same Noise session carries the terminal protocol.
     expect(await harness.client.hello()).toMatchObject({ protocolVersion: 1 });
+  });
+
+  it('hands an attached surface the whole terminal.data payload, both projections', async () => {
+    const harness = await makeE2eHarness();
+    await harness.pairAndApprove(await harness.mintInvitation());
+    await harness.client.connect(harness.hostId);
+
+    const chunks: TerminalDataEvent[] = [];
+    await harness.client.attach('surface-1', 80, 24, { onData: (event) => chunks.push(event) });
+
+    // The pair travels whole: splitting it here is what left Pocket feeding
+    // image base64 to the prompt heuristic (docs/specs/remote-api.md).
+    expect(chunks).toEqual([STREAMED_CHUNK]);
   });
 
   it('needs a record: an unpinned Host is a pairing, not a connection', async () => {

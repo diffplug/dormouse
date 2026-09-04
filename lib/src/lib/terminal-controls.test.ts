@@ -1,5 +1,60 @@
 import { describe, expect, it } from 'vitest';
-import { stripTerminalControls } from './terminal-controls';
+import { stripTerminalControls, TerminalControlStreamFilter } from './terminal-controls';
+import { TerminalProtocolParser } from './terminal-protocol';
+
+describe('one string-control grammar', () => {
+  // The parser and this filter are separate state machines over the same bytes,
+  // and every place they disagreed was a bug: a C1 introducer one saw and the
+  // other did not, a BEL one read as a terminator inside a DCS, a cancel only
+  // one honoured. They share the tokenizer now, so the same chunks must project
+  // to the same text through either (docs/specs/terminal-escapes.md → Families).
+  const cases: Array<{ name: string; chunks: string[] }> = [
+    { name: 'a C1 DCS whose payload contains a BEL', chunks: ['\x90q#0;2', '~~\x07~~\x9c', 'tail'] },
+    { name: 'a consumed OSC aborted by CAN', chunks: ['\x1b]0;title\x18', 'after'] },
+    { name: 'a consumed OSC aborted by SUB', chunks: ['\x1b]0;title\x1a', 'after'] },
+    { name: 'a C1 APC cancelled by a split bare ESC', chunks: ['\x9fGf=100;xx', '\x1b', '[mrest'] },
+    {
+      name: 'a forwarded OSC whose ST terminator is split',
+      chunks: ['\x1b]1337;File=inline=1:AAAA', 'BBBB\x1b', '\\done'],
+    },
+  ];
+
+  for (const { name, chunks } of cases) {
+    it(`projects the same text for ${name}`, () => {
+      const parser = new TerminalProtocolParser();
+      const filter = new TerminalControlStreamFilter();
+      for (const chunk of chunks) {
+        expect(parser.process(chunk).textData).toBe(filter.process(chunk));
+      }
+    });
+  }
+});
+
+describe('TerminalControlStreamFilter', () => {
+  it('removes image string payloads split across PTY reads', () => {
+    const filter = new TerminalControlStreamFilter();
+
+    expect(filter.process('before\x1b]1337;File=inline=1:ZmFrZQ==')).toBe('before');
+    expect(filter.process('dXNlckBob3N0IHJlcG8gJSA=\x1b')).toBe('');
+    expect(filter.process('\\after')).toBe('after');
+  });
+
+  it('handles SIXEL DCS, Kitty APC, C1 introducers, and aborts', () => {
+    const filter = new TerminalControlStreamFilter();
+
+    expect(filter.process('\x1bPqfake prompt')).toBe('');
+    expect(filter.process('\x1b\\sixel done')).toBe('sixel done');
+    expect(filter.process('\x1b_Gf=100;fake prompt\x18kitty aborted')).toBe('kitty aborted');
+    expect(filter.process('\x9d1337;File=inline=1:AAAA\x9cc1 done')).toBe('c1 done');
+  });
+
+  it('preserves ordinary escape sequences across chunk boundaries', () => {
+    const filter = new TerminalControlStreamFilter();
+
+    expect(filter.process('red\x1b')).toBe('red');
+    expect(filter.process('[31mtext')).toBe('\x1b[31mtext');
+  });
+});
 
 describe('stripTerminalControls', () => {
   it('removes terminated string controls with their payload', () => {
@@ -75,7 +130,18 @@ describe('stripTerminalControls', () => {
 
   it('keeps LF, CR and TAB as text boundaries and drops other control bytes', () => {
     expect(stripTerminalControls('a\r\nb\tc')).toBe('a\r\nb\tc');
-    expect(stripTerminalControls('a\x00\x07\x7f\x9fb')).toBe('ab');
+    expect(stripTerminalControls('a\x00\x07\x7fb')).toBe('ab');
+  });
+
+  it('reads a bare C1 introducer as a string control, as the parser does', () => {
+    // 0x9f is APC, not an incidental byte: it opens a string whose unterminated
+    // tail is swallowed rather than promoted to text. Same grammar as
+    // TerminalControlStreamFilter and TerminalProtocolParser — an 8-bit emitter
+    // must not be able to pass a payload off as visible output.
+    expect(stripTerminalControls('a\x00\x07\x7f\x9fb')).toBe('a');
+    expect(stripTerminalControls('\x9d1337;File=inline=1:AAAA\x9cc1 done')).toBe('c1 done');
+    // The 7-bit forms are unchanged.
+    expect(stripTerminalControls('a\x1b]0;title\x07b')).toBe('ab');
   });
 
   describe('boundaries', () => {

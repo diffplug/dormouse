@@ -6,11 +6,14 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { createProcessedPtyStreams } from '../src/processed-pty-streams';
+import {
+  createProcessedPtyStreams,
+  type ProcessedPtyChunk,
+} from '../src/processed-pty-streams';
 
 /** Stands in for `message-router`'s processed-data fan-out, counting listeners. */
 function fakeSource() {
-  const data = new Set<(id: string, chunk: string) => void>();
+  const data = new Set<(id: string, chunk: string, textData?: string) => void>();
   const exit = new Set<(id: string, exitCode: number) => void>();
   const statuses = new Map<string, { alive: boolean; exitCode?: number }>();
   return {
@@ -18,9 +21,9 @@ function fakeSource() {
     get installed(): number {
       return data.size + exit.size;
     },
-    emitData(id: string, chunk: string): void {
+    emitData(id: string, chunk: string, textData?: string): void {
       statuses.set(id, { alive: true });
-      for (const listener of [...data]) listener(id, chunk);
+      for (const listener of [...data]) listener(id, chunk, textData);
     },
     emitExit(id: string, exitCode: number): void {
       // The real manager records liveness before it fans out the processed
@@ -48,10 +51,14 @@ function fakeSource() {
 
 function sink() {
   return {
-    data: [] as string[],
+    chunks: [] as ProcessedPtyChunk[],
     exits: [] as number[],
-    onData(chunk: string) {
-      this.data.push(chunk);
+    /** The renderer projection alone, for assertions that only care about it. */
+    get data(): string[] {
+      return this.chunks.map((chunk) => chunk.data);
+    },
+    onData(chunk: ProcessedPtyChunk) {
+      this.chunks.push(chunk);
     },
     onExit(code: number) {
       this.exits.push(code);
@@ -108,6 +115,23 @@ describe('processed pty streams', () => {
     expect(first.data).toEqual(['hello']);
     expect(second.data).toEqual(['hello']);
     expect(elsewhere.data).toEqual([]);
+  });
+
+  it('fans out both projections, omitting the text one when it is the same', () => {
+    const source = fakeSource();
+    const streams = source.streams();
+    const only = sink();
+    streams.streamPty('pty-1', only);
+
+    source.emitData('pty-1', 'plain');
+    source.emitData('pty-1', 'pre\x1b]1337;File=inline=1:AAAA\x07post', 'prepost');
+
+    // The parser already computed both for the owning webview; dropping one
+    // here left a Client re-deriving it from bytes it cannot tell apart.
+    expect(only.chunks).toEqual([
+      { data: 'plain' },
+      { data: 'pre\x1b]1337;File=inline=1:AAAA\x07post', textData: 'prepost' },
+    ]);
   });
 
   it('stops one sink without silencing the other', () => {
