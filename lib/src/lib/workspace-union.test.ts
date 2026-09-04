@@ -3,7 +3,14 @@ import { computeWorkspaceUnion, EMPTY_WORKSPACE_UNION } from './workspace-union'
 import type { ActivityState } from './session-activity-store';
 
 function activity(entries: Record<string, Partial<ActivityState>>): Map<string, ActivityState> {
-  const base: ActivityState = { status: 'WATCHING_DISABLED', watchingEnabled: false, todo: false, notification: null };
+  const base: ActivityState = {
+    status: 'WATCHING_DISABLED',
+    watchingEnabled: false,
+    todo: false,
+    notification: null,
+    awaited: false,
+    ringSeq: 0,
+  };
   return new Map(Object.entries(entries).map(([id, partial]) => [id, { ...base, ...partial }]));
 }
 

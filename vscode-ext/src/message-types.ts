@@ -1,9 +1,6 @@
 import type {
-  ActivityNotification,
   AwaitOutcome,
   AwaitUntil,
-  SessionStatus,
-  TodoState,
 } from '../../lib/src/lib/alert-manager';
 import type { AlertSettings } from '../../lib/src/lib/alert-settings';
 import type { TerminalSemanticEvent } from '../../lib/src/lib/terminal-state';
