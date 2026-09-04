@@ -312,14 +312,19 @@ from what a maximal fan-out costs. **The limit is staged after CORS**, so a 413
 carries the headers a browser needs to read it. Source of truth:
 `server/src/app.ts`, pinned by `server/test/body-limit.test.mjs`.
 
-**The setup password is compared in constant time** (SHA-256 digests, so length
-never branches) with a small fixed delay on failure; host tokens resolve the same
-way, checking every row without an early break. **The same delay answers a
-rejected host token**, on `requireHost` and on the `/ws/host` upgrade; the
-session token gets neither it nor a shape check (rationale). **A `hostToken` is
-pinned to its minted shape**, 32 bytes base64url, refused before `hosts.json` is
-read at all, the way `isDeliveryId` guards the push routes. That is the extent of
-the hardening today.
+**Must admit Host enrollment through one process-global bucket before body
+parsing.** Every POST counts; OPTIONS does not. Burst 8
+refills each second; empty answers 429 with
+`Retry-After`.
+Source of truth: `TokenBucket` in `server/src/token-bucket.ts` and
+`HOST_ENROLL_ATTEMPT_*` in `server/src/app.ts`; test:
+`server/test/token-bucket.test.mjs`.
+
+**Must compare the setup password in constant time and delay failure 250 ms.**
+`secretEquals` hashes both lengths first. Host tokens use the same full-row scan
+and delay; session tokens are in-memory lookups and use neither (rationale).
+**Must reject a `hostToken` outside its minted 32-byte base64url shape before
+reading `hosts.json`**, as `isDeliveryId` guards push routes.
 
 Every session-gated route — including the `/ws/client` upgrade, rejected before
 `injectWebSocket` sees it — answers an unknown or expired token 401 with the

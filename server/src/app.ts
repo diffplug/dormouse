@@ -102,6 +102,7 @@ import { sendWithinDeadline } from './push.js';
 import type { PushSender } from './push.js';
 import { MAX_PUSH_ENDPOINT_LENGTH, isPublicHttpsPushEndpoint } from './push-endpoint.js';
 import { isSetupPassword } from './setup-password.js';
+import { TokenBucket } from './token-bucket.js';
 
 /** Runtime configuration; see `index.ts` for how env maps onto this. */
 export interface AppConfig {
@@ -258,8 +259,14 @@ export const MAX_RELAY_FRAME_BYTES =
  */
 const MAX_PASSKEY_LABEL_LENGTH = 64;
 
-/** A small fixed delay on a rejected credential — the extent of POC brute-force hardening. */
+/** A small fixed delay on a rejected credential. */
 const CREDENTIAL_FAILURE_DELAY_MS = 250;
+
+/** Initial Host-enrollment attempts admitted before the global bucket refills. */
+export const HOST_ENROLL_ATTEMPT_BURST = 8;
+
+/** Sustained Host-enrollment admission: one attempt per second. */
+export const HOST_ENROLL_ATTEMPT_REFILL_MS = 1_000;
 
 /**
  * Longest request body any route but `/api/push/send` will read.
@@ -523,6 +530,15 @@ export function createApp(config: AppConfig): CreatedApp {
   // Not an issuer: a setup token remembers the Host that minted it, so a
   // revoked Host's outstanding tokens die with it.
   const setupTokens = new SetupTokenIssuer({ now });
+  // Deliberately global, not keyed by a caller-controlled or proxy-supplied
+  // address: this bounds work when the origin is public and sources rotate.
+  // Every POST spends before its body is read; a refusal creates no per-caller
+  // timer, map entry, or queue item.
+  const hostEnrollAttempts = new TokenBucket({
+    capacity: HOST_ENROLL_ATTEMPT_BURST,
+    refillIntervalMs: HOST_ENROLL_ATTEMPT_REFILL_MS,
+    now,
+  });
 
   const passwordOk = (provided: unknown): boolean =>
     typeof provided === 'string' && secretEquals(provided, config.setupPassword);
@@ -661,6 +677,16 @@ export function createApp(config: AppConfig): CreatedApp {
   // token, or a bearer token — and no cookies exist for a foreign origin to
   // ride on.
   app.use('/api/*', cors({ origin: '*', allowHeaders: ['Content-Type', 'Authorization'] }));
+
+  // Before bodyLimit on purpose: oversized and malformed requests spend from
+  // the same budget as a correct-looking guess. OPTIONS is not an attempt.
+  app.use(API_ROUTES.hostEnroll, async (c, next) => {
+    if (c.req.method !== 'POST') return next();
+    const retryAfterMs = hostEnrollAttempts.take();
+    if (retryAfterMs === null) return next();
+    c.header('Retry-After', String(Math.ceil(retryAfterMs / 1_000)));
+    return c.json({ error: 'too many enrollment attempts' }, 429);
+  });
 
   // Staged after CORS so a 413 carries the headers a browser needs to read it,
   // and before every route so no credential gate is reached by way of a body

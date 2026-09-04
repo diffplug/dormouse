@@ -115,20 +115,19 @@ per-Host statics are the exception that needs no file protection: non-extractabl
 only endpoint, but an enrolled Host mints setup tokens and a setup token registers an
 owner passkey, so the account is one step behind it rather than beside it.
 
-**Its hardening is minimal and is accepted, not overlooked.** A constant-time
-comparison and a fixed failure delay are the whole of it: no rate limit, no lockout, no
-attempt counter, no expiry or rotation after setup completes. `/api/*` also carries
-`cors({ origin: '*' })`, so any web page open in any browser on the tailnet can drive
-those routes and read the responses — safe from CSRF, since there are no cookies, but
-the guessing surface is not limited to a deliberate client (rationale).
+**Online guessing is bounded without trusting network identity.** Both config
+boundaries require the installer credential's 64-character lowercase-hex shape. Every
+Host-enrollment POST then spends from one process-global bucket before its body is
+read: burst 8, one token per second, 429 with `Retry-After` when empty. The comparison
+is constant-time and a rejected credential pays a fixed delay (rationale).
 
-**Accepted because** the origin is tailnet-only, the password is 32 bytes of
-`/dev/urandom` written by the installer rather than chosen by a human, and the layer it
-protects still cannot reach a Host without local approval. Two consequences: **the
-tailnet is doing real work here**, and a self-host origin that becomes
-internet-reachable is a materially different risk than the one analyzed.
+**Permissive CORS remains a nuisance boundary, not an authentication assumption.** No
+cookies exist for a foreign page to ride on, but such a page can spend the global
+enrollment budget. The tailnet reduces that availability nuisance; it is not required
+to keep the 256-bit credential unguessable.
 
 - **FAIL IF** the setup password comparison stops being constant-time or loses its fixed failure delay. The halves live apart: `secretEquals` in `server/src/secrets.ts` compares SHA-256 digests with `timingSafeEqual`, and `CREDENTIAL_FAILURE_DELAY_MS` in `server/src/app.ts` is the fixed 250 ms every rejected credential costs.
+- **FAIL IF** `POST /api/host/enroll` stops spending from one process-global `TokenBucket` before body parsing, admits more than `HOST_ENROLL_ATTEMPT_BURST` at once, refills faster than one per `HOST_ENROLL_ATTEMPT_REFILL_MS`, or allocates state per caller. Every POST counts; OPTIONS does not. `server/test/token-bucket.test.mjs` pins ordering, concurrency, refill, and 429 `Retry-After`.
 - **FAIL IF** the permissive CORS policy is widened beyond `/api/*`, or if any endpoint begins accepting credentials via cookies — "no cookies exist for a foreign origin to ride on" is the whole basis for `origin: '*'` being acceptable.
 
 ### Network posture (self-hosted)

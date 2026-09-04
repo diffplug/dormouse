@@ -134,11 +134,16 @@ has to be a failure rather than a pass.
 
 ## The setup password
 
+**Why the admission bucket is global.** An IP-keyed limiter would make the reverse
+proxy's forwarding policy part of authentication and lets a distributed caller buy one
+burst per address. One allocation-free bucket keeps the bound independent of network
+topology. It gates only rare Host enrollment, so an exhausted bucket cannot interrupt
+an enrolled Host, a signed-in phone, or an existing relay session.
+
 **Why `cors({ origin: '*' })` is acceptable.** There are no cookies — every credential
 is a header or a body field — so no cookies exist for a foreign origin to ride on, and
-CSRF is not the exposure. What it does mean is that the guessing surface is not limited
-to something reachable only by a deliberate client, which is why the tailnet-only
-origin is load-bearing.
+CSRF is not the exposure. A foreign page can spend admission tokens, but the global
+bucket bounds its work and the setup credential has 256 generated bits.
 
 ## Network posture (self-hosted)
 

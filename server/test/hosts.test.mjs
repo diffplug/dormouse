@@ -11,6 +11,7 @@ import { join } from 'node:path';
 
 import { API_ROUTES, E2E_ID_LENGTH, WS_ROUTES, WS_TOKEN_PARAM, isE2eId } from 'server-lib-common';
 
+import { HOST_ENROLL_ATTEMPT_REFILL_MS } from '../dist/app.js';
 import { HOST_TOKEN_LENGTH, HostStore, MAX_ENROLLED_HOSTS } from '../dist/state.js';
 
 import {
@@ -18,6 +19,7 @@ import {
   connectHost,
   enrollHost,
   freshApp,
+  makeClock,
   ownerSession,
   post,
   startServer,
@@ -245,9 +247,11 @@ test('enrollment is capped, and the refusal names the remedy', async () => {
   // Credential-gated, so this is not a flood defense: it is the bound on a file
   // that is otherwise append-only and is compared row by row on every
   // host-gated request and every `/ws/host` upgrade.
-  const { app } = await freshApp({ credentialFailureDelayMs: 1 });
+  const clock = makeClock();
+  const { app } = await freshApp({ credentialFailureDelayMs: 1, now: clock.now });
   for (let i = 0; i < MAX_ENROLLED_HOSTS; i += 1) {
     assert.equal((await enrollHost(app)).res.status, 200, `host ${i}`);
+    clock.advance(HOST_ENROLL_ATTEMPT_REFILL_MS);
   }
 
   const { res, body } = await enrollHost(app);
@@ -258,9 +262,11 @@ test('enrollment is capped, and the refusal names the remedy', async () => {
 test('the enrollment cap is checked after the credential, never before', async () => {
   // A caller that has proved nothing must not learn from the refusal whether
   // the server is full.
-  const { app } = await freshApp({ credentialFailureDelayMs: 1 });
+  const clock = makeClock();
+  const { app } = await freshApp({ credentialFailureDelayMs: 1, now: clock.now });
   for (let i = 0; i < MAX_ENROLLED_HOSTS; i += 1) {
     assert.equal((await enrollHost(app)).res.status, 200);
+    clock.advance(HOST_ENROLL_ATTEMPT_REFILL_MS);
   }
 
   const res = await post(app, API_ROUTES.hostEnroll, { password: 'wrong' });
