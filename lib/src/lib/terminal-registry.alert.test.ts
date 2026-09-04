@@ -140,6 +140,7 @@ import {
 import { pasteFilePaths } from './clipboard';
 import { registry } from './terminal-store';
 import { REPLAY_MODE_RESET } from './terminal-report-filter';
+import { cfg } from '../cfg';
 
 interface MockTerminalInstance {
   writes: string[];
@@ -329,11 +330,22 @@ describe('terminal-registry alert behavior', () => {
 
     expect(addon?.options).toMatchObject({
       pixelLimit: 8_388_608,
-      storageLimit: 32,
+      storageLimit: 34,
       sixelSupport: true,
       iipSupport: true,
       kittySupport: true,
     });
+  });
+
+  it('loads no image addon when inline images are turned off', () => {
+    const previous = cfg.terminal.inlineImages;
+    cfg.terminal.inlineImages = false;
+    try {
+      const entry = createSession('image-addon-off');
+      expect(entry.terminal.addons.some((a) => a.constructor.name === 'ImageAddon')).toBe(false);
+    } finally {
+      cfg.terminal.inlineImages = previous;
+    }
   });
 
   it('carries a primed ring counter into the terminal entry', () => {

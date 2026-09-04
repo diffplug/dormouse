@@ -58,12 +58,15 @@ import { vscodeWorkbenchCommandForKeydown } from './vscode-keybindings';
 
 // Per-Session limits are explicit because Sessions survive unmount/minimize and
 // a product Window can retain many of them at once. 2^23 pixels still admits a
-// 3840x2160 image; 32 MB keeps one such RGBA image without granting every
-// orphaned Session the addon's 128 MB default cache.
+// 3840x2160 image without granting every orphaned Session the addon's 2^24-pixel
+// and 128 MB defaults. `storageLimit` must stay at or above `pixelLimit` * 4
+// bytes (the addon derives its cache capacity as `storageLimit / 4 * 1e6`
+// pixels), or admitting one full-size image evicts every other image first and
+// still lands over budget.
 const IMAGE_ADDON_OPTIONS = {
   enableSizeReports: true,
   pixelLimit: 8_388_608,
-  storageLimit: 32,
+  storageLimit: 34,
   showPlaceholder: true,
   sixelSupport: true,
   sixelScrolling: true,
@@ -225,7 +228,7 @@ function createXtermHost(): { terminal: Terminal; fit: FitAddon; element: HTMLDi
   terminal.loadAddon(new UnicodeGraphemesAddon());
   const fit = new FitAddon();
   terminal.loadAddon(fit);
-  terminal.loadAddon(new ImageAddon(IMAGE_ADDON_OPTIONS));
+  if (cfg.terminal.inlineImages) terminal.loadAddon(new ImageAddon(IMAGE_ADDON_OPTIONS));
 
   const element = document.createElement('div');
   element.style.width = '100%';

@@ -68,7 +68,7 @@ Pane headers re-render on every activity, terminal-state, and palette change. An
 
 **Context budget.** The per-page live-context cap was measured at 16 in Safari 26.5, evicted oldest-first. The `onContextLoss` → dispose-the-addon → DOM-fallback path was verified live by exhausting the budget and watching the demoted panes keep painting.
 
-**Why image support loads before the renderer.** An ImageAddon registers protocol handlers and draws into canvas layers separate from the text renderer; its renderer hook removes those layers during a WebGL/DOM swap and the next image render recreates them. Loading it only at mount would lose graphics emitted while a Session was minimized. The 32 MB cache and 2^23-pixel ceiling are per Session because minimized Sessions remain live; the upstream 128 MB and 2^24-pixel defaults multiply poorly across a terminal wall, while 2^23 still admits a 3840×2160 image.
+**Why image support loads before the renderer.** An ImageAddon registers protocol handlers and draws into canvas layers separate from the text renderer; its renderer hook removes those layers during a WebGL/DOM swap and the next image render recreates them. Loading it only at mount would lose graphics emitted while a Session was minimized — unlike the GL context, which no minimized pane needs. The limits themselves are `docs/specs/terminal-escapes.rationale.md` -> "Inline graphics".
 
 **Verification status.** The numbers above are Safari 26.5; Chrome was checked structurally. Not yet verified inside Tauri's WKWebView (as of 2026-08) — same engine as Safari, and Tauri does not disable the GPU; read `data-renderer` on a pane's host element to confirm.
 

@@ -98,22 +98,24 @@ export function ensureTerminalPaneState(id: string, initial?: Partial<TerminalPa
   return next;
 }
 
-export function resetTerminalPaneState(id: string, initial?: Partial<TerminalPaneState>): void {
+/** Drops every per-pane scratch map keyed by `id`; `paneStates` is the caller's
+ * to set or delete. Add new per-pane state here, not at the two call sites. */
+function clearPaneScratch(id: string): void {
   promptSubmitStates.delete(id);
   promptShapes.delete(id);
   promptOutputBuffers.delete(id);
   promptControlFilters.delete(id);
   oscDrivenPanes.delete(id);
+}
+
+export function resetTerminalPaneState(id: string, initial?: Partial<TerminalPaneState>): void {
+  clearPaneScratch(id);
   paneStates.set(id, createTerminalPaneState(initial));
   notifyTerminalPaneStateListeners();
 }
 
 export function removeTerminalPaneState(id: string): void {
-  promptSubmitStates.delete(id);
-  promptShapes.delete(id);
-  promptOutputBuffers.delete(id);
-  promptControlFilters.delete(id);
-  oscDrivenPanes.delete(id);
+  clearPaneScratch(id);
   if (!paneStates.delete(id)) return;
   notifyTerminalPaneStateListeners();
 }
@@ -209,11 +211,8 @@ export function finishLaunchedCommandByPtyId(ptyId: string, exitCode: number): v
 export function recordTerminalOutput(id: string, output: string): void {
   if (!output) return;
 
-  let filter = promptControlFilters.get(id);
-  if (!filter) {
-    filter = new TerminalControlStreamFilter();
-    promptControlFilters.set(id, filter);
-  }
+  const filter = promptControlFilters.get(id) ?? new TerminalControlStreamFilter();
+  promptControlFilters.set(id, filter);
   const textOutput = filter.process(output);
   if (!textOutput) return;
 
@@ -251,7 +250,10 @@ export function recordTerminalOutputByPtyId(ptyId: string, output: string): void
 // prompt. Learn-only — fires no idle transition.
 export function seedPromptShapeFromScrollback(id: string, scrollback: string): void {
   if (!scrollback) return;
-  const text = new TerminalControlStreamFilter().process(scrollback);
+  // Filter a bounded tail, not the whole (up to 1 MB) scrollback: the prompt is
+  // in the last few hundred characters and 64 KiB is ample runway to resync the
+  // string-control state before the 1024 the result is cut to.
+  const text = new TerminalControlStreamFilter().process(scrollback.slice(-65_536));
   const promptLine = detectReturnedShellPrompt(text.slice(-1024));
   if (!promptLine) return;
   const shape = derivePromptShape(promptLine);

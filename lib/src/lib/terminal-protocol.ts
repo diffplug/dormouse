@@ -78,15 +78,16 @@ export const ITERM2_DEVICE_ATTRIBUTES_RESPONSE = `\x1bP>|iTerm2 ${ITERM2_COMPAT_
 
 export class TerminalProtocolParser {
   private pending = '';
-  private streamingIip = false;
-  private streamingIipPending = '';
+  // Non-null while a recognized IIP payload streams straight through: holds a
+  // lone trailing ESC so a split `ESC \` terminator is never emitted as text.
+  private streamingIipPending: string | null = null;
   private osc99Pending = new Map<string, Osc99PendingNotification>();
 
   /** Resolves OSC 10/11/12 queries; null lets xterm.js handle the sequence. */
   constructor(private readonly colorProvider?: TerminalColorProvider) {}
 
   process(data: string): TerminalProtocolParseResult {
-    if (this.streamingIip) return this.processStreamingIip(data);
+    if (this.streamingIipPending !== null) return this.processStreamingIip(data);
     if (this.pending === '' && !NEEDS_PARSE_RE.test(data)) {
       return { visibleData: data, events: NO_EVENTS as TerminalProtocolEvent[] };
     }
@@ -107,15 +108,9 @@ export class TerminalProtocolParser {
       const terminator = findOscTerminator(text, osc.contentStart);
       if (!terminator) {
         const incomplete = text.slice(osc.index);
-        const content = text.slice(osc.contentStart);
-        if (IIP_STREAMING_PREFIXES.some((prefix) => content.startsWith(prefix))) {
-          this.streamingIip = true;
-          if (incomplete.endsWith('\x1b')) {
-            visibleData += incomplete.slice(0, -1);
-            this.streamingIipPending = '\x1b';
-          } else {
-            visibleData += incomplete;
-          }
+        if (isStreamingIipAt(text, osc.contentStart)) {
+          this.streamingIipPending = '';
+          visibleData += this.holdTrailingEsc(incomplete);
         } else if (incomplete.length <= OSC_INCOMPLETE_LIMIT) {
           this.pending = incomplete;
         }
@@ -138,36 +133,28 @@ export class TerminalProtocolParser {
     return { visibleData: stripped.visibleData, events: filterTerminalBellEvents(events) };
   }
 
-  reset(): void {
-    this.pending = '';
-    this.streamingIip = false;
-    this.streamingIipPending = '';
-    this.osc99Pending.clear();
-  }
-
   private processStreamingIip(data: string): TerminalProtocolParseResult {
     const text = this.streamingIipPending + data;
     this.streamingIipPending = '';
     const terminator = findOscTerminator(text, 0);
     if (!terminator) {
-      if (text.endsWith('\x1b')) {
-        this.streamingIipPending = '\x1b';
-        return { visibleData: text.slice(0, -1), events: NO_EVENTS as TerminalProtocolEvent[] };
-      }
-      return { visibleData: text, events: NO_EVENTS as TerminalProtocolEvent[] };
+      return { visibleData: this.holdTrailingEsc(text), events: NO_EVENTS as TerminalProtocolEvent[] };
     }
 
-    this.streamingIip = false;
-    const sequenceEnd = text.slice(0, terminator.end);
-    const rest = text.slice(terminator.end);
-    if (!rest) {
-      return { visibleData: sequenceEnd, events: NO_EVENTS as TerminalProtocolEvent[] };
-    }
-    const parsedRest = this.process(rest);
+    this.streamingIipPending = null;
+    const parsedRest = this.process(text.slice(terminator.end));
     return {
-      visibleData: sequenceEnd + parsedRest.visibleData,
+      visibleData: text.slice(0, terminator.end) + parsedRest.visibleData,
       events: parsedRest.events,
     };
+  }
+
+  /** Holds a lone trailing ESC back so a split `ESC \` terminator is never
+   * emitted as text; the next chunk re-joins it. */
+  private holdTrailingEsc(text: string): string {
+    if (!text.endsWith('\x1b')) return text;
+    this.streamingIipPending = '\x1b';
+    return text.slice(0, -1);
   }
 
   private parseOsc(content: string): TerminalProtocolEvent[] | null {
@@ -480,9 +467,15 @@ function parseOsc633Property(rawProperties: string): TerminalProtocolEvent[] {
   return [];
 }
 
+/** True when the OSC content starting at `from` is an IIP command whose payload
+ * ImageAddon owns, so the parser forwards it instead of buffering it. */
+function isStreamingIipAt(text: string, from: number): boolean {
+  return IIP_STREAMING_PREFIXES.some((prefix) => text.startsWith(prefix, from));
+}
+
 function parseOsc1337(content: string): TerminalProtocolEvent[] | null {
   if (
-    IIP_STREAMING_PREFIXES.some((prefix) => content.startsWith(prefix)) ||
+    isStreamingIipAt(content, 0) ||
     content === '1337;FileEnd' ||
     content === '1337;ReportCellSize'
   ) {

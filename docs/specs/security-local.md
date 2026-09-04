@@ -10,7 +10,7 @@ The attacker is any program writing to a PTY.
 
 **Must bound retained output by representation**: `TerminalProtocolParser` semantic values by code points and control stripping, an incomplete semantic OSC at 16,384 code units, and ImageAddon data by encoded bytes, decoded pixels, and FIFO storage (`docs/specs/terminal-escapes.md` -> "Parsing location", "Inline graphics").
 
-**Never let untrusted PTY output write the clipboard or access a file**: consume `OSC 52`, `OSC 50`, and unsupported `OSC 1337`; IIP accepts carried inline bytes only and ignores non-inline transfers and filenames (`docs/specs/terminal-escapes.md` -> "Inline graphics").
+**Never let untrusted PTY output write the clipboard or access a file**: consume `OSC 52`, `OSC 50`, and unsupported `OSC 1337`. **Inline images carry their own bytes**: no path is resolved, ImageAddon dropping any non-`inline=1` transfer (`docs/specs/terminal-escapes.md` -> "Inline graphics").
 
 **An `OSC 8` hyperlink opens only after a confirmation dialog**; a target whose
 display text names a different host gets **no open action at all** — close and

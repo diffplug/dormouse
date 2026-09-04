@@ -101,11 +101,11 @@ Dormouse intervenes only in these cases.
 
 ### Inline graphics
 
-**Must support SIXEL (`DCS ... q ... ST`), iTerm IIP (the `OSC 1337` rows above), and Kitty graphics (`APC G ... ST`) in every Session through stock `@xterm/addon-image`**; Kitty support follows the addon's alpha-quality subset. IIP renders inline PNG, JPEG, GIF (first frame), QOI, WebP, and AVIF data; browser-native formats remain limited by the host engine.
+**Must support SIXEL (`DCS ... q ... ST`), iTerm IIP (the `OSC 1337` rows above), and Kitty graphics (`APC G ... ST`) in every Session through stock `@xterm/addon-image`**, gated by `cfg.terminal.inlineImages`; Kitty support follows the addon's alpha-quality subset. **Must load the addon at Session creation, never on the first image**: it answers the DA1, XTSMGRAPHICS, and cell-size probes a program reads before sending one (rationale). IIP renders inline PNG, JPEG, GIF (first frame), QOI, WebP, and AVIF data; browser-native formats remain limited by the host engine.
 
-**Must bound each Session to 8,388,608 pixels per image, 33,554,432 bytes per SIXEL/IIP/Kitty sequence, and 32 MB of FIFO image storage** (rationale). Evicted cells show the addon's placeholder. IIP accepts only inline data: non-inline transfers are ignored, the encoded filename is unused, and no path is read or download written.
+**Must bound each Session to 8,388,608 pixels per image, 33,554,432 bytes per SIXEL/IIP/Kitty sequence, and 34 MB of FIFO image storage** — the storage figure at or above `pixelLimit` × 4 bytes, or one full-size image evicts the whole Session cache (rationale). Evicted cells show the addon's placeholder. **Dormouse forwards only the bytes carried in the sequence and resolves no filename**; ImageAddon discards a transfer without `inline=1`.
 
-**Must remove string-control payloads statefully before the keystroke prompt heuristic's 1,024-character window**, including chunks that begin or end mid-sequence, so image base64 cannot become a prompt or command label. Live PTY/replay bytes still reach xterm.js unchanged.
+**Must remove string-control payloads statefully before the keystroke prompt heuristic's 1,024-character window**, including chunks that begin or end mid-sequence, so image base64 cannot be read as a returned prompt. Live PTY/replay bytes still reach xterm.js unchanged.
 
 Source of truth: `IMAGE_ADDON_OPTIONS` in `lib/src/lib/terminal-lifecycle.ts`; `IIP_STREAMING_PREFIXES` and `TerminalProtocolParser.processStreamingIip` in `lib/src/lib/terminal-protocol.ts`; `TerminalControlStreamFilter` in `lib/src/lib/terminal-controls.ts`.
 
