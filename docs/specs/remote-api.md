@@ -98,7 +98,9 @@ Source of truth: `RemoteApiSession.#emitDirectory` in `lib/src/remote/host/remot
 
 ### Terminal surfaces
 
-Replicated, not screencast: the client renders its own xterm from the same data the host UI consumes. **That is the *processed* stream** — protocol sequences already parsed and stripped, every generated response discarded, so the phone never answers a query the laptop's own xterm already answered ([terminal-escapes.md](./terminal-escapes.md)).
+Replicated, not screencast: the client renders its own xterm from the same data the host UI consumes. **That is the *processed* stream** — Dormouse-owned sequences parsed, stripped, and answered at the Host; renderer-owned ones remain, and every renderer parses them for itself ([terminal-escapes.md](./terminal-escapes.md)).
+
+**The Host discards terminal reports arriving from a remote session** — the owner's xterm is the sole reply authority for renderer-owned queries (device attributes, DSR/CPR, window ops, XTSMGRAPHICS, cell size, kitty graphics responses). **A mirror renders and may take size authority, but never answers.** (rationale) The Client drops the same chunks rather than spending the relay on them. Pinned by `inputIsReplayTerminalReport` in `lib/src/lib/terminal-report-filter.ts`, which requires every token of a chunk to be a report shape, so keystrokes and pastes never match.
 
 #### Attach is the resize
 

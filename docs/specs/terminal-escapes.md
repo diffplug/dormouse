@@ -57,7 +57,7 @@ For replay (`pty:replay`) the frontend re-parses the buffered raw stream, so sem
 | `OSC 777 ; notify ; <title> ; <body> ST` | rxvt/WezTerm notification | [alert.md](alert.md#terminal-reports) |
 | `OSC 1337 ; CurrentDir=<cwd> ST` | CWD (iTerm2 compatibility) | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
 | `OSC 1337 ; File=...:<data> ST` / `MultipartFile=...` / `FilePart=...` / `FileEnd` | iTerm2 inline image protocol (IIP); passed through to ImageAddon. | [Inline graphics](#inline-graphics) |
-| `OSC 1337 ; ReportCellSize ST` | iTerm2 cell-size query; passed through and answered by ImageAddon. | [Inline graphics](#inline-graphics) |
+| `OSC 1337 ; ReportCellSize ST` | iTerm2 cell-size query; passed through and answered by the owner's ImageAddon. | [Inline graphics](#inline-graphics) |
 | `OSC 1337 ; <anything else> ST` | Unsupported iTerm2 extension; consumed and ignored. | This spec |
 | `OSC 50 ; <font> ST` | Unsupported dynamic font change; consumed and ignored. | This spec |
 | `OSC 52 ; <selection> ; <data> ST` | Unsupported clipboard write; consumed and ignored — untrusted PTY output cannot write the user's clipboard. | This spec |
@@ -96,10 +96,10 @@ Dormouse intervenes only in these cases.
 | `CSI ? ... h` (DECSET) / `CSI ? ... l` (DECRST) | Private-mode set/reset, including mouse tracking and bracketed paste | Observed via xterm.js parser hooks returning false, so xterm still handles the sequence; the mouse-selection store reads `terminal.modes` in a microtask. | [mouse-and-clipboard.md](mouse-and-clipboard.md), `lib/src/lib/mouse-mode-observer.ts` |
 | Kitty keyboard protocol | Disambiguated key-event reporting (CSI u with modifiers, e.g. Shift+Enter distinguishable from Enter) | Enabled by `vtExtensions: { kittyKeyboard: true }` on the xterm.js `Terminal` constructor; xterm.js handles the push/pop (`CSI > u` / `CSI < u`) and the modified key reports. | `lib/src/lib/terminal-lifecycle.ts` |
 | `CSI ? 9001 h/l` (win32-input-mode) | Faithful Win32 `INPUT_RECORD` key reporting for ConPTY apps reading via the Console API — Codex on Windows, which cannot negotiate the kitty protocol there (rationale) | Advertised **only on Windows** (`vtExtensions: { win32InputMode: IS_WINDOWS }`); xterm.js then emits `CSI Vk;Sc;Uc;Kd;Cs;Rc _` key records. **Mutually exclusive with the kitty protocol**, so a per-pane arbiter watches `CSI > … u` / `CSI < … u` — counting nested pushes, honoring the pop count — and toggles the option off while any kitty consumer is on the stack (rationale). | `lib/src/lib/keyboard-protocol-arbiter.ts` |
-| `CSI c` | Primary device-attributes query | ImageAddon answers `CSI ? 62 ; 4 ; 9 ; 22 c`, advertising SIXEL. | [Inline graphics](#inline-graphics) |
-| `CSI 14 t` / `CSI 16 t` / `CSI 18 t` | Window-pixel, cell-pixel, and window-character size queries | Enabled and answered by xterm.js for image preparation. | [Inline graphics](#inline-graphics) |
+| `CSI c` | Primary device-attributes query | The owner's ImageAddon answers `CSI ? 62 ; 4 ; 9 ; 22 c`, advertising SIXEL. | [Inline graphics](#inline-graphics) |
+| `CSI 14 t` / `CSI 16 t` / `CSI 18 t` | Window-pixel, cell-pixel, and window-character size queries | Enabled and answered by the owner's xterm.js for image preparation. | [Inline graphics](#inline-graphics) |
 | `CSI ? 80 h/l` | SIXEL scrolling off/on | Observed by ImageAddon; xterm.js continues handling the private mode. | [Inline graphics](#inline-graphics) |
-| `CSI ? <item> ; <action> [; <value>] S` | XTSMGRAPHICS palette/canvas geometry | ImageAddon answers supported read/set actions and an error status for the rest. | [Inline graphics](#inline-graphics) |
+| `CSI ? <item> ; <action> [; <value>] S` | XTSMGRAPHICS palette/canvas geometry | The owner's ImageAddon answers supported read/set actions and an error status for the rest. | [Inline graphics](#inline-graphics) |
 
 ### Inline graphics
 
@@ -108,6 +108,8 @@ Dormouse intervenes only in these cases.
 **Must bound each Session to 8,388,608 pixels per image, 33,554,432 bytes per SIXEL/IIP/Kitty sequence, and 34 MB of FIFO image storage** — the storage figure at or above `pixelLimit` × 4 bytes, or one full-size image evicts the whole Session cache (rationale). Evicted cells show the addon's placeholder. **Dormouse forwards only the bytes carried in the sequence and resolves no filename**; ImageAddon discards a transfer without `inline=1`.
 
 **Must remove string-control payloads statefully before the keystroke prompt heuristic's 1,024-character window**, including chunks that begin or end mid-sequence, so image base64 cannot be read as a returned prompt. Live PTY/replay bytes still reach xterm.js unchanged.
+
+Every renderer over one PTY parses these queries; only the owner's answer reaches the program ([remote-api.md](remote-api.md#terminal-surfaces) → "Terminal surfaces").
 
 Source of truth: `IMAGE_ADDON_OPTIONS` in `lib/src/lib/terminal-lifecycle.ts`; `OSC1337_FORWARDED` and `TerminalProtocolParser.processForwardedOsc` in `lib/src/lib/terminal-protocol.ts`; `TerminalControlStreamFilter` in `lib/src/lib/terminal-controls.ts`.
 

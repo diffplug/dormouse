@@ -15,6 +15,7 @@ import {
 } from 'server-lib-common';
 import type { AwaitHandle, AwaitOutcome } from '../../lib/alert-manager';
 import type { PlatformAdapter, PtyInfo, OpenPort } from '../../lib/platform/types';
+import { inputIsReplayTerminalReport } from '../../lib/terminal-report-filter';
 import type { TerminalHandlers } from './pocket-client';
 
 /**
@@ -223,6 +224,9 @@ export class RemotePtyAdapter implements PlatformAdapter {
 
   writePty(id: string, data: string): void {
     if (this.#attached?.surfaceId !== id) return; // Host only accepts the attached pane
+    // The Host discards these anyway (remote-api.md -> "Terminal surfaces"), so
+    // don't spend the relay on them.
+    if (inputIsReplayTerminalReport(data)) return;
     void this.#client.write(id, toBase64Url(utf8Encode(data)));
   }
 

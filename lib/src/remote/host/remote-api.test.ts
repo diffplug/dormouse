@@ -901,6 +901,47 @@ describe('RemoteApiSession terminal input', () => {
       error: 'terminal resize failed: owner unavailable',
     });
   });
+
+  it('discards a terminal report a mirror answered, and still answers ok', async () => {
+    const provider = new FakeProvider();
+    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    const { session, sent } = makeSession(provider);
+    await attach(session, 100, 30);
+    sent.length = 0;
+
+    const reports = {
+      da1: '\x1b[?1;2c',
+      cpr: '\x1b[24;80R',
+      kitty: '\x1b_Gi=1;OK\x1b\\',
+      xtsmgraphics: '\x1b[?2;1;4096S',
+      cellSize: '\x1b]1337;ReportCellSize=14.0;7.0;1.0\x07',
+    };
+    for (const [name, bytes] of Object.entries(reports)) {
+      session.handle({
+        requestId: `write-${name}`,
+        method: REMOTE_METHODS.terminalWrite,
+        params: { surfaceId: 'surface-1', bytes: toBase64Url(utf8Encode(bytes)) },
+      });
+    }
+
+    expect(provider.writes).toEqual([]);
+    expect(sent).toEqual(
+      Object.keys(reports).map((name) => ({ requestId: `write-${name}`, ok: true, result: {} })),
+    );
+
+    // Real input is untouched, bracketed paste and a report glued to keystrokes
+    // included — the classifier requires every token of the chunk to be a report.
+    const inputs = ['ls\r', '\x1b[200~pasted\x1b[201~', '\x1b[A', '\x1b[13;5u', '\x1b[?1;2cls'];
+    for (const [index, bytes] of inputs.entries()) {
+      session.handle({
+        requestId: `input-${index}`,
+        method: REMOTE_METHODS.terminalWrite,
+        params: { surfaceId: 'surface-1', bytes: toBase64Url(utf8Encode(bytes)) },
+      });
+    }
+
+    expect(provider.writes).toEqual(inputs.map((bytes) => ['pty-1', bytes]));
+  });
 });
 
 describe('RemoteApiSession surface.detach', () => {

@@ -22,6 +22,7 @@ import {
   type TerminalResizeParams,
   type TerminalWriteParams,
 } from 'server-lib-common';
+import { inputIsReplayTerminalReport } from '../../lib/terminal-report-filter';
 import type { HostSurfaceProvider, SurfaceHandle } from './host-surface-provider';
 
 /** Coalesce window for directory re-snapshots (remote-api.md: "Host coalesces"). */
@@ -478,8 +479,17 @@ export class RemoteApiSession {
     const resolved = this.#attachedParams<TerminalWriteParams>(request);
     if (!resolved) return;
     const { params, attachment } = resolved;
+    const text = utf8Decode(fromBase64Url(params.bytes));
+    // A mirror's xterm answers the queries its own renderer sees; the owner has
+    // already answered them (remote-api.md -> "Terminal surfaces"). Dropped
+    // rather than refused: the write is well-formed, and the client is not
+    // owed an error for bytes it never chose to send.
+    if (inputIsReplayTerminalReport(text)) {
+      this.#ok(request, {});
+      return;
+    }
     // Feed the existing PTY input path; the local echo returns via the stream.
-    this.#provider.writePty(attachment.handle.ptyId, utf8Decode(fromBase64Url(params.bytes)));
+    this.#provider.writePty(attachment.handle.ptyId, text);
     this.#ok(request, {});
   }
 

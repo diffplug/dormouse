@@ -217,6 +217,24 @@ describe('RemotePtyAdapter attach / active pane', () => {
     expect(client.resizes).toEqual([{ surfaceId: 's1', cols: 90, rows: 20 }]);
   });
 
+  it('never spends the relay on a report this mirror answered', async () => {
+    const client = new FakeClient();
+    const adapter = new RemotePtyAdapter(client);
+    await adapter.setActivePane('s1', 80, 24);
+
+    // What this xterm and its ImageAddon answer on `onData`; the owner's xterm
+    // has already answered, and the Host discards these anyway.
+    adapter.writePty('s1', '\x1b[?1;2c');
+    adapter.writePty('s1', '\x1b[24;80R');
+    adapter.writePty('s1', '\x1b_Gi=1;OK\x1b\\');
+    adapter.writePty('s1', '\x1b[?2;1;4096S');
+    adapter.writePty('s1', '\x1b]1337;ReportCellSize=14.0;7.0;1.0\x07');
+    expect(client.writes).toEqual([]);
+
+    adapter.writePty('s1', 'ls\r');
+    expect(client.writes).toEqual([{ surfaceId: 's1', bytes: toBase64Url(utf8Encode('ls\r')) }]);
+  });
+
   it('spawnPty / killPty are no-ops (panes are Host-owned)', async () => {
     const client = new FakeClient();
     const adapter = new RemotePtyAdapter(client);
