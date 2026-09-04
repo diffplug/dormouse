@@ -60,7 +60,7 @@ One implementation map per spec: an exhaustive `Files` / `Code Map` section or s
 - **`docs/specs/deploy.md`** — Release process: artifact matrix, release checklist, two-stage sign-and-release pipeline, updater manifest, changelog flow.
 - **`docs/specs/security.md`** — The guarantees Dormouse makes, what it does not defend, the known gaps, and how it is all checked; published at `/docs/security`, rows split by audience. Read first for anything security. Root `SECURITY.md` is the GitHub policy pointer at it.
 - **`docs/specs/security-local.md`** — The boundaries a user of the local application has: terminal output, browser panes, the `dor` control socket, loopback listeners, persisted state.
-- **`docs/specs/security-remote.md`** — The audited checks on remote control: trust boundary, relay allowlist, credentials at rest, the setup password, network posture, what crosses the boundary, revocation.
+- **`docs/specs/security-remote.md`** — The audited checks on remote control: trust boundary, relay allowlist, credentials at rest, the setup password, cross-origin access, network posture, what crosses the boundary, revocation.
 - **`docs/specs/security-supply-chain.md`** — Disclosure of everything that reaches a user's machine, the bundled runtime pin, dependency cooldown and alerts.
 - **`docs/specs/security-ci.md`** — GitHub Actions, the tend bot, and the two release paths: what each identity can reach and what stays admin-gated.
 - **`docs/specs/security-audit.md`** — The nightly audit contract: schedule and release gate, the domains and their prompts in `.github/audit/`, orchestration, outcomes, reporting, `AUDIT_PAT`. `scripts/security-audit-local.sh` runs it locally.

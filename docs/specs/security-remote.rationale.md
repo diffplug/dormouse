@@ -140,9 +140,20 @@ burst per address. One allocation-free bucket keeps the bound independent of net
 topology. It gates only rare Host enrollment, so an exhausted bucket cannot interrupt
 an enrolled Host, a signed-in phone, or an existing relay session.
 
-**Why there is no CORS grant.** Pocket calls relative routes from the configured
-origin, and Host HTTP runs in its Node service rather than the webview. No supported
-caller is a cross-origin browser, so a grant creates exposure without compatibility.
+## Cross-origin access
+
+**What the old permissive grant rested on, and why it went.** `cors({ origin: '*' })`
+was safe against CSRF — every credential is a header or body field, so no cookie
+existed for a foreign origin to ride — but it left the guessing surface reachable from
+any page in any browser rather than from a deliberate client, which the tailnet-only
+origin was silently covering. The compatibility it bought was already stale: the
+standalone webview's enrollment moved to the Node host service, and dev Pocket builds
+are served from the same origin as the API.
+
+**Why the cookie clause travels with the grant.** Either one alone is recoverable and
+the pair is not: a cookie with no grant still rides a cross-site POST, and a grant with
+no cookie still lets a foreign page read what a stolen bearer provokes. Auditing them
+apart is how a future route reintroduces one on the reasoning that the other is absent.
 
 ## Network posture (self-hosted)
 
@@ -156,8 +167,8 @@ them owned by another principal and register the service for it.
 
 **Why Funnel is not a health verdict.** Tailnet privacy is useful defense in depth, but
 making it load-bearing left the setup endpoint safe only while a separate CLI reported
-the intended configuration. Auditing the credential, admission, browser, and Host-
-authorization boundaries directly makes accidental public exposure fail safe.
+the intended configuration. Auditing the credential, admission, browser, and
+Host-authorization boundaries directly makes accidental public exposure fail safe.
 
 **Why `grep -q` and `head -1` are banned on these decisions.** The installers and
 `manage` run under `set -o pipefail`; `grep -q` exits at the first match, and the

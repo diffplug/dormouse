@@ -130,14 +130,15 @@ const CANNOT_DENY_UNLINK = {
       : false,
 };
 
-// The one test that measures the credential-failure delay, so it injects a
-// value big enough to see and small enough to pay: the constant's real 250ms is
-// a policy choice, and asserting it here would only buy sleep.
+// The one test that measures the credential-failure delay, so it injects a wait
+// big enough to see and small enough to pay: the constant's real 250ms is a
+// policy choice, and asserting it here would only buy sleep.
 const MEASURABLE_DELAY_MS = 60;
+const measurableDelay = () => new Promise((resolve) => setTimeout(resolve, MEASURABLE_DELAY_MS));
 
 test('a token that cannot be invalidated is not redeemed', CANNOT_DENY_UNLINK, async () => {
   const { app, enrollTokenFile, stateDir } = await appWithOffer(offer(), {
-    credentialFailureDelayMs: MEASURABLE_DELAY_MS,
+    credentialFailureDelay: measurableDelay,
   });
   await chmod(dirname(enrollTokenFile), 0o500);
   try {

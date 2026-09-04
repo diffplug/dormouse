@@ -57,16 +57,11 @@ Be adversarial, and go past the `FAIL IF` list. Ask specifically:
 
 - **Would public Funnel exposure change any security conclusion?** Assume the
   entire HTTPS origin is reachable from the public internet; reliance on a
-  source IP, tailnet membership, or Funnel being off is a finding. Verify the
-  setup password is generated from 32 CSPRNG bytes and rejected outside its
-  canonical shape at both config boundaries; every Host-enrollment POST spends
-  the allocation-free global budget before body parsing; only that limited path
-  retains a failure-delay timer; the Server emits no CORS grant and accepts no
-  credential cookie; request bodies, unauthenticated challenge stores, relay
-  sockets, and frames keep their caps; and no unauthenticated caller can grow a
-  durable collection. Finally trace what a stolen bootstrap credential grants:
-  no Client reaches a terminal without approval on that Host. Availability is
-  out of scope, but an application amplification or attacker-grown retained
+  source IP, tailnet membership, or Funnel being off is a finding. Hunt for what
+  the `FAIL IF` pass cannot name: an unauthenticated caller that grows a durable
+  collection, retains a timer or socket, or amplifies a request. Then trace what
+  a stolen bootstrap credential grants — no Client reaches a terminal without
+  approval on that Host. Availability is out of scope; attacker-grown retained
   state is not.
 - Can anything reach a Host's ACL without a human approving on that Host? Trace
   every writer — including the ACL read filter, anything that rehydrates a

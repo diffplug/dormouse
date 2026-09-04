@@ -118,16 +118,21 @@ owner passkey, so the account is one step behind it rather than beside it.
 **Online guessing is bounded without trusting network identity.** Both config
 boundaries require the installer credential's 64-character lowercase-hex shape. Every
 Host-enrollment POST then spends from one process-global bucket before its body is
-read: burst 8, one token per second, 429 with `Retry-After` when empty. The comparison
-is constant-time and a rejected credential pays a fixed delay (rationale).
+read, answering 429 with `Retry-After` when empty ([server.md](./server.md#http-api)
+holds the burst and refill). The comparison is constant-time and a rejected credential
+pays a fixed delay (rationale).
 
-**Cross-origin browser access is absent.** Pocket is served with the API at the
-configured origin, while the Host calls from Node. The Server installs no CORS
-middleware and emits no cross-origin grant; authentication never uses cookies.
+- **FAIL IF** the setup password comparison stops being constant-time, its rate-limited rejection loses the fixed delay, or a random setup/Host bearer rejection gains that delay and lets public traffic retain requests. `secretEquals` in `server/src/secrets.ts` compares SHA-256 digests with `timingSafeEqual`; `CREDENTIAL_FAILURE_DELAY_MS` in `server/src/app.ts` is the 250 ms, and `server/test/hosts.test.mjs` pins which rejections pay it.
+- **FAIL IF** `POST /api/host/enroll` stops spending from one process-global `TokenBucket` before body parsing, admits more than `HOST_ENROLL_ATTEMPT_BURST` at once, refills faster than one per `HOST_ENROLL_ATTEMPT_REFILL_MS`, or allocates state per caller. Every POST counts; OPTIONS does not. `server/test/token-bucket.test.mjs` pins ordering, concurrency and 429 `Retry-After`; `server-lib-common/test/token-bucket.test.mjs` pins the refill arithmetic the Host's crypto budget shares.
 
-- **FAIL IF** the setup password comparison stops being constant-time, its rate-limited rejection loses the fixed 250 ms delay, or a random setup/Host bearer rejection gains that delay and lets public traffic retain requests. `secretEquals` owns the compare; `server/test/hosts.test.mjs` pins the delay's scope.
-- **FAIL IF** `POST /api/host/enroll` stops spending from one process-global `TokenBucket` before body parsing, admits more than `HOST_ENROLL_ATTEMPT_BURST` at once, refills faster than one per `HOST_ENROLL_ATTEMPT_REFILL_MS`, or allocates state per caller. Every POST counts; OPTIONS does not. `server/test/token-bucket.test.mjs` pins ordering, concurrency, refill, and 429 `Retry-After`.
-- **FAIL IF** the Server installs CORS middleware, emits `Access-Control-Allow-Origin`, or accepts authentication from a cookie; pinned by `server/test/cors.test.mjs`.
+### Cross-origin access
+
+**No browser origin but the configured one may drive the API.** Pocket is served
+with the API at that origin and calls it with relative URLs; a Host's HTTP client runs
+in its Node service, not a webview. No supported caller is a cross-origin browser, so
+a grant would widen the guessing surface and buy no compatibility (rationale).
+
+- **FAIL IF** the Server installs CORS middleware, emits `Access-Control-Allow-Origin`, or accepts authentication from a cookie — the two clauses hold each other up (rationale). Pinned by `server/test/cors.test.mjs`.
 
 ### Network posture (self-hosted)
 
@@ -162,7 +167,7 @@ controls.
 - **FAIL IF** the unset default of `DORMOUSE_BIND_HOST` in `server/src/config.ts` stops being `undefined` — listen on every interface, what a container wants, where the namespace is the boundary — or if `server/test/bind-host.test.mjs` stops spawning the real entrypoint to prove the plaintext port is unreachable off-loopback when it *is* set.
 - **FAIL IF** any installer stops refusing to rewrite a `DORMOUSE_ORIGIN` that no longer matches the node's DNS name.
 - **FAIL IF** any installer stops refusing to run with elevated privileges — `id -u` on macOS and Linux, the `Administrator` role check on Windows (rationale).
-- **FAIL IF** an installer or `manage` invokes `tailscale funnel`, treats Funnel state as a warning or failure, or changes it; public reachability must exercise the application controls, not become a forbidden deployment state (rationale).
+- **FAIL IF** an installer or `manage` invokes `tailscale funnel`, treats Funnel state as a warning or failure, or changes it; public reachability must exercise the application controls, not become a forbidden deployment state. Held by `scripts/deploy-lint.mjs` as its one `forbidden` rule (rationale).
 - **FAIL IF** any decision taken on Tailscale CLI or listener output is reached by piping that output into `grep -q`, or into a `head -1` that exits first; every such search is over text captured first. The `head -1` half binds every site whose 141 can still reach an `if` or an assignment — an inline substitution always, and a helper the moment the failing assignment is its last command or a caller invokes it outside `$( )` (rationale).
 - **FAIL IF** any decision about whether Serve maps `/` to us — the install-time conflict gate, `manage verify`, and the uninstall that turns Serve off — is not additionally scoped to the root line with the port right-bounded: `/api` on this port is not `/` on it, and `127.0.0.1:31000` contains `127.0.0.1:3100`. The post-mutation `SERVE_AFTER` assertion is the one deliberate exception, since it asserts our own `serve --bg` landed rather than auditing a foreign config (rationale).
 - **FAIL IF** `scripts/installer-verify-test.mjs` stops driving `has_off_loopback` and `serve_state` over inputs larger than the pipe buffer, or stops pinning `serve_proxies_root`'s root scoping and port bound. `scripts/deploy-lint.mjs` holds that helper's `<<<` pattern and counts its consumers; `serve_root_target` is held by neither on purpose (rationale).

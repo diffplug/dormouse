@@ -26,10 +26,9 @@ import {
   setupQrResult,
   UNENROLLED_STATUS as NOT_ENROLLED,
 } from '../host/remote/test-remote-host-link';
+import { TEST_SETUP_PASSWORD } from '../remote/test-setup-password';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
-
-const SETUP_PASSWORD = '0123456789abcdef'.repeat(4);
 
 type Handler = (data: unknown) => void;
 
@@ -208,7 +207,7 @@ describe('RemoteControlSection', () => {
     expect(buttonLabelled('Connect')!.disabled).toBe(true);
     await type('input[type="url"]', 'https://laptop.tailnet.ts.net');
     expect(buttonLabelled('Connect')!.disabled).toBe(true);
-    await type('input[type="password"]', SETUP_PASSWORD);
+    await type('input[type="password"]', TEST_SETUP_PASSWORD);
     expect(buttonLabelled('Connect')!.disabled).toBe(false);
     // And it is still a required field, not a decoration.
     await type(name, '   ');
@@ -228,13 +227,13 @@ describe('RemoteControlSection', () => {
     await render();
 
     await type('input[type="url"]', '  https://laptop.tailnet.ts.net  ');
-    await type('input[type="password"]', SETUP_PASSWORD);
+    await type('input[type="password"]', TEST_SETUP_PASSWORD);
     await type('input:not([type="url"]):not([type="password"])', '  Work laptop  ');
     await act(async () => buttonLabelled('Connect')!.click());
 
     expect(link.command).toHaveBeenCalledWith('enroll', {
       serverUrl: 'https://laptop.tailnet.ts.net',
-      password: SETUP_PASSWORD,
+      password: TEST_SETUP_PASSWORD,
       label: 'Work laptop',
     });
     // The status re-read after enrolling is what flips the view.
@@ -251,7 +250,7 @@ describe('RemoteControlSection', () => {
     await render();
 
     await type('input[type="url"]', 'https://evil.example.com');
-    await type('input[type="password"]', SETUP_PASSWORD);
+    await type('input[type="password"]', TEST_SETUP_PASSWORD);
     await type('input:not([type="url"]):not([type="password"])', 'Work laptop');
     await act(async () => buttonLabelled('Connect')!.click());
 
@@ -419,7 +418,7 @@ describe('RemoteControlSection', () => {
 
     await act(async () => disclosure()!.click());
     await type('input[type="url"]', 'https://elsewhere.example');
-    await type('input[type="password"]', SETUP_PASSWORD);
+    await type('input[type="password"]', TEST_SETUP_PASSWORD);
 
     await act(async () => {
       buttonLabelled('Enroll')!.click();

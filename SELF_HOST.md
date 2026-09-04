@@ -71,9 +71,9 @@ installed release, which the installer and `manage status` both print.
 ## Prerequisites
 
 - **A tailnet** with MagicDNS and HTTPS certificates enabled, Tailscale running
-  on this laptop and on the phone that will run Pocket. Serve is private by
-  default; Funnel may also publish the HTTPS origin without weakening Dormouse's
-  application boundary.
+  on this laptop and on the phone that will run Pocket. Whether the HTTPS origin
+  stays private is a deployment choice, not a security premise
+  (`docs/specs/security-remote.md` → "Network posture").
 - **macOS, Windows or Linux.** Each installer refuses the others. On a fourth
   OS, or Linux without systemd, design the native service manager with the user
   rather than translating LaunchAgent, Scheduled Task or unit-file commands
@@ -230,7 +230,7 @@ Establish with the user what the script cannot:
 - **Their phone runs Tailscale** and is signed in to the same tailnet.
 - **Port 3100 is free.** Unchecked by the installer, and a stale process there
   would let the post-install health check pass against the wrong server
-  (`pnpm dev:server` and `pnpm dev:pocket-server` use 3000):
+  (`pnpm dev:server` uses 3000):
 
   ```sh
   # macOS
@@ -632,7 +632,7 @@ reports which mode is live rather than asserting either.
 - **Loopback backend, publicly safe HTTPS origin.** The install pins
   `DORMOUSE_BIND_HOST=127.0.0.1` and refuses to proceed without it
   (`docs/specs/server.md` → Configuration). Port 3100, not 3000, so the service
-  coexists with `pnpm dev:server` / `pnpm dev:pocket-server`. Serve is the
+  coexists with `pnpm dev:server`. Serve is the
   private default; Funnel is safe to enable because the application controls,
   not network privacy, govern admission (`docs/specs/security-remote.md` →
   "Network posture").

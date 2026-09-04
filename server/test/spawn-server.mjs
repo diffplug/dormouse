@@ -16,6 +16,8 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
+import { PASSWORD } from './fixtures.mjs';
+
 const here = dirname(fileURLToPath(import.meta.url));
 
 /** The built entrypoint. These suites spawn it rather than importing the app. */
@@ -45,7 +47,7 @@ export async function startServer(extraEnv = {}) {
   const child = spawn(process.execPath, [ENTRYPOINT], {
     env: {
       ...process.env,
-      DORMOUSE_SETUP_PASSWORD: '0123456789abcdef'.repeat(4),
+      DORMOUSE_SETUP_PASSWORD: PASSWORD,
       DORMOUSE_STATE_DIR: stateDir,
       DORMOUSE_POCKET_DIR: join(stateDir, 'no-pocket-build'),
       PORT: String(port),

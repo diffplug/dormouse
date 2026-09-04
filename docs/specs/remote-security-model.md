@@ -353,7 +353,9 @@ omits `client-gone`, invents client IDs, or reorders frames.
   other entry**. Pending caps and the token bucket stay active at the cap.
 - **A Host-global token bucket gates the WebCrypto an accepted `init` buys**, on
   the Host's own clock, and **answers a refused frame with nothing** — as do
-  refusals by shape, size, or a pending cap (rationale).
+  refusals by shape, size, or a pending cap (rationale). Source of truth:
+  `TokenBucket` in `server-lib-common/src/security/token-bucket.ts`, the same
+  primitive the Server admits Host enrollment with ([server.md](./server.md#http-api)).
 - **A message is processed only for its exact pending ID and expected step**:
   unknown IDs are dropped without decryption, established frames decrypt only at
   their session's next nonce, and **the first invalid ciphertext destroys its

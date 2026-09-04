@@ -13,8 +13,7 @@ import { join } from 'node:path';
 
 import { readConfig } from '../dist/config.js';
 import { startServer, stopServer } from './spawn-server.mjs';
-
-const SETUP_PASSWORD = '0123456789abcdef'.repeat(4);
+import { PASSWORD } from './fixtures.mjs';
 
 test('a bound server records its pid, release and port, owner-only', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'dormouse-rt-'));
@@ -69,7 +68,7 @@ test('nothing is written when no installer asked for it', async () => {
 
 test('a relative runtime path is refused rather than resolved against the cwd', () => {
   const env = {
-    DORMOUSE_SETUP_PASSWORD: SETUP_PASSWORD,
+    DORMOUSE_SETUP_PASSWORD: PASSWORD,
     DORMOUSE_ORIGIN: 'https://example.ts.net',
     DORMOUSE_RUNTIME_FILE: 'run/server.json',
   };
@@ -77,7 +76,7 @@ test('a relative runtime path is refused rather than resolved against the cwd', 
 });
 
 test('an unset or blank runtime path yields null, not a stray relative write', () => {
-  const base = { DORMOUSE_SETUP_PASSWORD: SETUP_PASSWORD, DORMOUSE_ORIGIN: 'https://example.ts.net' };
+  const base = { DORMOUSE_SETUP_PASSWORD: PASSWORD, DORMOUSE_ORIGIN: 'https://example.ts.net' };
   assert.equal(readConfig(base).runtimeFile, null);
   assert.equal(readConfig({ ...base, DORMOUSE_RUNTIME_FILE: '   ' }).runtimeFile, null);
   assert.equal(readConfig(base).releaseId, null);

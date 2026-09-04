@@ -8,6 +8,7 @@ import {
   UNENROLLED_STATUS,
   setupQrResult,
 } from '../host/remote/test-remote-host-link';
+import { TEST_SETUP_PASSWORD } from '../remote/test-setup-password';
 
 /**
  * The Settings dialog's Remote control section — the one step a self-hoster
@@ -106,7 +107,7 @@ export const EnrollRefused: Story = {
 
     await canvas.findByLabelText('Server');
     fill('Server', 'https://ned-mac.tail9c2f1.ts.net');
-    fill('Setup password', '0123456789abcdef'.repeat(4));
+    fill('Setup password', TEST_SETUP_PASSWORD);
     fill('Name for this machine', 'Work laptop');
     await userEvent.click(canvas.getByRole('button', { name: 'Connect' }));
     await canvas.findByText(/This build will not connect/);

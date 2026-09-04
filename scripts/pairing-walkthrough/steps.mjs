@@ -214,7 +214,7 @@ async function stepServer(ctx) {
 
   const handle = spawnLogged(
     'pnpm',
-    skipBuild ? ['--filter', 'server', 'start'] : ['dev:pocket-server'],
+    skipBuild ? ['--filter', 'server', 'start'] : ['dev:server'],
     {
       cwd: repoRoot,
       logPath: ctx.path('server.log'),
@@ -222,6 +222,11 @@ async function stepServer(ctx) {
       env: {
         DORMOUSE_SETUP_PASSWORD: opts.password,
         DORMOUSE_STATE_DIR: stateDir,
+        // Everything in a run is local to this machine, so the walkthrough's
+        // server has no reason to answer the LAN or the tailnet for the length
+        // of it (`docs/specs/security-remote.md` -> "Network posture
+        // (self-hosted)"): unset, the server binds every interface.
+        DORMOUSE_BIND_HOST: '127.0.0.1',
         PORT: String(ctx.serverPort),
       },
     },

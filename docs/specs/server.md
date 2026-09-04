@@ -69,7 +69,8 @@ context: `localhost` works for development, a real phone needs TLS in front
 reaches the app over loopback and a socket left on every interface also publishes
 the plaintext port to the LAN and to the tailnet itself; the selfhost install
 sets `DORMOUSE_BIND_HOST`, and the default stays unbound for containers, where
-the namespace is the boundary. Binding loopback is *containment, not admission* —
+the namespace is the boundary. `pnpm dev:server` opts a laptop in through
+`server/scripts/dev.mjs`, which an explicit value still overrides. Binding loopback is *containment, not admission* —
 every route is still gated by the setup password or a bearer token, exactly as
 `docs/specs/security-local.md` -> "Loopback Listeners" requires; `scripts/loopback-lint.mjs` does
 not cover this socket (rationale).
@@ -295,10 +296,9 @@ The whole route surface; paths and request/response shapes live in
 | `GET /ws/client`                 | session token  | A Client's relay socket                            |
 | `GET /*`                         | —              | The built Pocket app, registered last so every route above wins. Cache policy and SPA fallback: [pocket-app.md](./pocket-app.md) |
 
-**Must emit no CORS grant.** Pocket calls relative URLs at the configured origin,
-and Host HTTP runs in Node; no supported caller is a cross-origin browser. WS
-auth rides the `token` query param because browsers cannot set WebSocket headers.
-Test: `server/test/cors.test.mjs`.
+The Server emits no cross-origin grant
+([security-remote.md](./security-remote.md#cross-origin-access)). **WS auth rides
+the `token` query param**, since browsers cannot set WebSocket headers.
 
 **Every request body is bounded before any route runs**, at
 `MAX_REQUEST_BODY_BYTES` (64 KiB), answering 413 — the routes carrying their
@@ -312,18 +312,17 @@ from what a maximal fan-out costs. Source of truth: `server/src/app.ts`, pinned
 by `server/test/body-limit.test.mjs`.
 
 **Must admit Host enrollment through one process-global bucket before body
-parsing.** Every POST counts; OPTIONS does not. Burst 8
-refills each second; empty answers 429 with
-`Retry-After`.
-Source of truth: `TokenBucket` in `server/src/token-bucket.ts` and
-`HOST_ENROLL_ATTEMPT_*` in `server/src/app.ts`; test:
+parsing**, at `HOST_ENROLL_ATTEMPT_BURST` and `HOST_ENROLL_ATTEMPT_REFILL_MS`;
+empty answers 429 with `Retry-After`. Every POST counts; OPTIONS does not.
+Source of truth: `TokenBucket` in `server-lib-common/src/security/token-bucket.ts`
+and `HOST_ENROLL_ATTEMPT_*` in `server/src/app.ts`; test:
 `server/test/token-bucket.test.mjs`.
 
-**Must compare the setup password in constant time and delay failure 250 ms.**
-`secretEquals` hashes both lengths first. Only the globally limited Host-
-enrollment route delays: retaining rejected setup, Host, or session bearer
-requests would grant public traffic a resource sink for unguessable tokens
-(rationale). Host tokens still use a constant-time full-row scan.
+**Must compare the setup password in constant time, and delay only that
+rejection.** `secretEquals` hashes both lengths first. Retaining rejected setup,
+Host, or session bearer requests would give public traffic a resource sink for
+tokens nobody can guess (rationale); the delayed route is the one the bucket
+already bounds. Host tokens still use a constant-time full-row scan.
 **Must reject a `hostToken` outside its minted 32-byte base64url shape before
 reading `hosts.json`**, as `isDeliveryId` guards push routes.
 
@@ -899,7 +898,7 @@ The loop at the top of this spec is implemented end to end. To test:
 **1. Server + Pocket** (one terminal):
 
 ```sh
-DORMOUSE_SETUP_PASSWORD="$(openssl rand -hex 32)" pnpm dev:pocket-server
+DORMOUSE_SETUP_PASSWORD="$(openssl rand -hex 32)" pnpm dev:server
 ```
 
 Builds the Pocket app (`lib/dist-pocket`) and the server, then serves both on
@@ -914,7 +913,7 @@ a contact:
 
 ```sh
 DORMOUSE_SETUP_PASSWORD="$(openssl rand -hex 32)" DORMOUSE_VAPID_SUBJECT=mailto:you@example.com \
-  pnpm dev:pocket-server
+  pnpm dev:server
 ```
 
 **2. Host** (the laptop being controlled). A default build's baked allowlist

@@ -45,6 +45,7 @@ import {
   utf8Decode,
   isSealedPushV1,
   verifyPasskeyAssertion,
+  TokenBucket,
 } from 'server-lib-common';
 import type {
   HostEnrollRequest,
@@ -101,7 +102,6 @@ import { sendWithinDeadline } from './push.js';
 import type { PushSender } from './push.js';
 import { MAX_PUSH_ENDPOINT_LENGTH, isPublicHttpsPushEndpoint } from './push-endpoint.js';
 import { isSetupPassword } from './setup-password.js';
-import { TokenBucket } from './token-bucket.js';
 
 /** Runtime configuration; see `index.ts` for how env maps onto this. */
 export interface AppConfig {
@@ -141,14 +141,12 @@ export interface AppConfig {
   /** Injectable clock (epoch ms) for tests; defaults to `Date.now`. */
   readonly now?: () => number;
   /**
-   * Delay before answering a rejected Host-enrollment credential; defaults to
-   * {@link CREDENTIAL_FAILURE_DELAY_MS}. Injectable for the same reason as
+   * The wait before answering a rejected Host-enrollment credential; defaults
+   * to {@link CREDENTIAL_FAILURE_DELAY_MS}. Injectable for the same reason as
    * `pushSendDeadlineMs` — a suite that pays the real delay on every rejection
    * spends most of its wall time asleep — and never mapped from env: shortening
    * it is a test affordance, not a deployment knob.
    */
-  readonly credentialFailureDelayMs?: number;
-  /** Injectable implementation for tests; never mapped from environment. */
   readonly credentialFailureDelay?: () => Promise<void>;
   /**
    * Base64url VAPID public key handed to browsers so they can subscribe. Absent
@@ -544,9 +542,8 @@ export function createApp(config: AppConfig): CreatedApp {
   const passwordOk = (provided: unknown): boolean =>
     typeof provided === 'string' && secretEquals(provided, config.setupPassword);
 
-  const credentialFailureDelayMs = config.credentialFailureDelayMs ?? CREDENTIAL_FAILURE_DELAY_MS;
   const waitForEnrollmentFailure =
-    config.credentialFailureDelay ?? (() => delay(credentialFailureDelayMs));
+    config.credentialFailureDelay ?? (() => delay(CREDENTIAL_FAILURE_DELAY_MS));
 
   // Only Host enrollment delays a rejected credential. Its global admission
   // bucket bounds these retained timers; random setup, Host, and session
@@ -616,15 +613,14 @@ export function createApp(config: AppConfig): CreatedApp {
     c: Context<AppEnv>,
     gate: 'peek' | 'consume',
   ): Promise<{ body: T; spent: SpentSetupToken | null } | Response> {
+    const invalid = () => c.json({ error: SETUP_TOKEN_INVALID_ERROR }, 401);
     const body = await readJson<T>(c);
     const token: unknown = body?.setupToken;
-    if (typeof token !== 'string') return c.json({ error: SETUP_TOKEN_INVALID_ERROR }, 401);
+    if (typeof token !== 'string') return invalid();
     const entry = gate === 'consume' ? setupTokens.consume(token) : setupTokens.peek(token);
-    if (!entry) return c.json({ error: SETUP_TOKEN_INVALID_ERROR }, 401);
+    if (!entry) return invalid();
     // Nothing is restored here: a revoked minter's token is dead, not unlucky.
-    if (!(await hostStore.has(entry.hostId))) {
-      return c.json({ error: SETUP_TOKEN_INVALID_ERROR }, 401);
-    }
+    if (!(await hostStore.has(entry.hostId))) return invalid();
     return { body: body as T, spent: gate === 'consume' ? { token, entry } : null };
   }
 

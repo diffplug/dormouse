@@ -4,9 +4,7 @@ import assert from 'node:assert/strict';
 import { HELLO_ROUTE } from 'server-lib-common';
 
 import { createApp } from '../dist/app.js';
-import { freshApp } from './helpers.mjs';
-
-const SETUP_PASSWORD = '0123456789abcdef'.repeat(4);
+import { PASSWORD, freshApp } from './helpers.mjs';
 
 /**
  * `createApp` compares `config.origin` as a string — the WebAuthn
@@ -30,7 +28,7 @@ test('createApp refuses an origin that is not already bare, or not http(s)', () 
     'ftp://dor.example.ts.net',
   ]) {
     assert.throws(
-      () => createApp({ setupPassword: SETUP_PASSWORD, origin, stateDir: '/nonexistent' }),
+      () => createApp({ setupPassword: PASSWORD, origin, stateDir: '/nonexistent' }),
       /bare http\(s\) origin/,
       origin,
     );

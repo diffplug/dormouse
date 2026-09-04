@@ -1,3 +1,9 @@
+/**
+ * Host-enrollment admission: the wiring of the shared `TokenBucket`
+ * (`server-lib-common/test/token-bucket.test.mjs` pins its arithmetic) onto
+ * the one route that accepts a bootstrap credential.
+ */
+
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -8,38 +14,11 @@ import {
   HOST_ENROLL_ATTEMPT_REFILL_MS,
   MAX_REQUEST_BODY_BYTES,
 } from '../dist/app.js';
-import { TokenBucket } from '../dist/token-bucket.js';
 import { freshApp, makeClock, post } from './helpers.mjs';
-
-test('the bucket admits one burst, then refills one token per interval', () => {
-  const clock = makeClock();
-  const bucket = new TokenBucket({ capacity: 2, refillIntervalMs: 1_000, now: clock.now });
-
-  assert.equal(bucket.take(), null);
-  assert.equal(bucket.take(), null);
-  assert.equal(bucket.take(), 1_000);
-  clock.advance(999);
-  assert.equal(bucket.take(), 1);
-  clock.advance(1);
-  assert.equal(bucket.take(), null);
-  assert.equal(bucket.take(), 1_000);
-  clock.advance(10_000);
-  assert.equal(bucket.take(), null);
-  assert.equal(bucket.take(), null);
-  assert.equal(bucket.take(), 1_000);
-});
-
-test('a backwards clock refills nothing', () => {
-  const clock = makeClock();
-  const bucket = new TokenBucket({ capacity: 1, refillIntervalMs: 1_000, now: clock.now });
-  assert.equal(bucket.take(), null);
-  clock.advance(-10_000);
-  assert.equal(bucket.take(), 1_000);
-});
 
 test('host enrollment has one process-global budget across concurrent callers', async () => {
   const clock = makeClock();
-  const { app } = await freshApp({ now: clock.now, credentialFailureDelayMs: 1 });
+  const { app } = await freshApp({ now: clock.now });
   const responses = await Promise.all(
     Array.from({ length: HOST_ENROLL_ATTEMPT_BURST + 3 }, () =>
       post(app, API_ROUTES.hostEnroll, { password: 'wrong' }),
@@ -58,13 +37,8 @@ test('host enrollment has one process-global budget across concurrent callers', 
 
 test('oversized enrollment bodies spend admission before they are read', async () => {
   const { app } = await freshApp();
-  const oversized = JSON.stringify({ pad: 'A'.repeat(MAX_REQUEST_BODY_BYTES + 1) });
   const send = () =>
-    app.request(API_ROUTES.hostEnroll, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: oversized,
-    });
+    post(app, API_ROUTES.hostEnroll, { pad: 'A'.repeat(MAX_REQUEST_BODY_BYTES + 1) });
 
   for (let i = 0; i < HOST_ENROLL_ATTEMPT_BURST; i += 1) {
     assert.equal((await send()).status, 413);

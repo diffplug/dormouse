@@ -14,10 +14,9 @@ import { API_ROUTES, WS_ROUTES, WS_TOKEN_PARAM, toBase64Url, utf8Encode } from '
 
 import { createApp } from '../dist/app.js';
 import { SimAuthenticator } from '../../server-lib-common/test/harness/actors.mjs';
+import { ORIGIN, PASSWORD, RP_ID } from './fixtures.mjs';
 
-export const ORIGIN = 'http://localhost:3000';
-export const RP_ID = 'localhost';
-export const PASSWORD = '0123456789abcdef'.repeat(4);
+export { ORIGIN, PASSWORD, RP_ID } from './fixtures.mjs';
 
 /** A manually-advanced clock for TTL/expiry tests. */
 export function makeClock(startMs = 1_700_000_000_000) {
@@ -31,11 +30,11 @@ export function makeClock(startMs = 1_700_000_000_000) {
 }
 
 /**
- * The rejected-credential delay every app here runs with. Short enough that a
- * suite full of 401s does not spend its wall time asleep; the real
- * `CREDENTIAL_FAILURE_DELAY_MS` is pinned by one test that injects its own.
+ * No app here pays the real `CREDENTIAL_FAILURE_DELAY_MS`: a suite full of 401s
+ * would spend its wall time asleep. The one test that measures the delay
+ * injects its own wait.
  */
-export const TEST_CREDENTIAL_FAILURE_DELAY_MS = 5;
+const NO_CREDENTIAL_FAILURE_DELAY = async () => {};
 
 export async function freshApp({
   password = PASSWORD,
@@ -48,8 +47,7 @@ export async function freshApp({
   // deadline it is meant to be proving.
   pushSendDeadlineMs,
   enrollTokenFile,
-  credentialFailureDelayMs = TEST_CREDENTIAL_FAILURE_DELAY_MS,
-  credentialFailureDelay,
+  credentialFailureDelay = NO_CREDENTIAL_FAILURE_DELAY,
 } = {}) {
   const stateDir = await mkdtemp(join(tmpdir(), 'dormouse-server-'));
   const created = createApp({
@@ -62,7 +60,6 @@ export async function freshApp({
     pushSender,
     pushSendDeadlineMs,
     enrollTokenFile,
-    credentialFailureDelayMs,
     credentialFailureDelay,
   });
   return { ...created, stateDir, origin, rpId: new URL(origin).hostname };

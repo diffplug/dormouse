@@ -61,6 +61,12 @@ export const INSTALLERS = [
  * `scripts/deploy-lint-selftest.mjs` is what keeps that honest: it removes each
  * matched control in turn and requires this lint to fail.
  *
+ * `forbidden` inverts the rule: the pattern must match NOTHING, for a `FAIL IF`
+ * that names a thing an installer must not do. Anchored on a non-comment line
+ * so prose explaining why the thing is absent is not itself the violation, and
+ * paired with `sample` — the text `deploy-lint-selftest.mjs` appends to prove
+ * the absence is checked rather than merely true.
+ *
  * `exactMatches` is for a control the installer writes at several sites on
  * purpose — in its own body and into the generated `manage` — where matching
  * only one would let the others be deleted silently. Setting it is a claim that
@@ -169,6 +175,21 @@ export const RULES = [
       macOS: /do not run this as root/,
       Linux: /do not run this as root/,
       Windows: /IsInRole\(\[Security\.Principal\.WindowsBuiltInRole\]::Administrator\)/,
+    },
+  },
+  {
+    // The inverse of a control: Funnel is a deployment choice the application
+    // boundary is expected to survive, so an installer that inspects, warns
+    // about, or flips it would re-introduce the tailnet-only premise the
+    // analysis no longer makes. Matched on a non-comment line, so a comment
+    // saying verify deliberately does not check it stays legal.
+    rule: 'Network posture — no installer or `manage` makes Funnel state a verdict',
+    forbidden: true,
+    sample: 'tailscale funnel status',
+    patterns: {
+      macOS: /^\s*[^#\s][^\n]*funnel/im,
+      Linux: /^\s*[^#\s][^\n]*funnel/im,
+      Windows: /^\s*[^#\s][^\n]*funnel/im,
     },
   },
   {
@@ -471,7 +492,7 @@ export function check() {
   const failures = [];
   let checked = 0;
 
-  for (const { rule, patterns, skip = {}, exactMatches = {} } of RULES) {
+  for (const { rule, patterns, skip = {}, exactMatches = {}, forbidden = false } of RULES) {
   for (const { platform, file } of INSTALLERS) {
     if (platform in skip) continue;
     const pattern = patterns[platform];
@@ -487,7 +508,7 @@ export function check() {
       failures.push(`${rule}\n    ${file}: missing`);
       continue;
     }
-    const want = exactMatches[platform];
+    const want = forbidden ? 0 : exactMatches[platform];
     const found =
       text.match(new RegExp(pattern.source, `${pattern.flags.replace('g', '')}g`))?.length ?? 0;
     if (want === undefined) {
@@ -500,7 +521,9 @@ export function check() {
       );
     } else if (found > want) {
       failures.push(
-        `FAIL IF ${rule}\n    ${file} matches ${pattern} ${found}x, expected exactly ${want} — if a site was added on purpose, bump exactMatches in the same commit`,
+        forbidden
+          ? `FAIL IF ${rule}\n    ${file} matches ${pattern} ${found}x, expected none — the spec forbids this, so remove it rather than relaxing the rule`
+          : `FAIL IF ${rule}\n    ${file} matches ${pattern} ${found}x, expected exactly ${want} — if a site was added on purpose, bump exactMatches in the same commit`,
       );
     }
   }

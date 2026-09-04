@@ -468,10 +468,11 @@ public-site → private-network fetches. Pocket holds itself to it by constructi
 — an empty API base, a `wsBase` from `location.origin` — and the Server enforces
 it: a registration or assertion whose `clientDataJSON.origin` is
 not the configured `DORMOUSE_ORIGIN` is rejected ([server.md](./server.md);
-rationale). **The Server emits no CORS grant**; the Host's HTTP client runs in
-Node, so no supported client needs one. **The bundle mounts at the origin root,
-never under a path prefix**: the manifest's `start_url`/`scope`, the worker's
-registration scope, and the shell's manifest/icon links are all root-absolute.
+rationale); the Server emits no cross-origin grant
+([security-remote.md](./security-remote.md#cross-origin-access)). **The bundle
+mounts at the origin root, never under a path prefix**: the manifest's
+`start_url`/`scope`, the worker's registration scope, and the shell's
+manifest/icon links are all root-absolute.
 
 **The origin is served with a Content-Security-Policy**, the defense in depth
 around the active XSS `docs/specs/security.md` -> "What is not defended" names (rationale).

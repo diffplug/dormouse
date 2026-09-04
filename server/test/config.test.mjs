@@ -7,9 +7,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { ConfigError, readConfig } from '../dist/config.js';
+import { PASSWORD } from './fixtures.mjs';
 
-const SETUP_PASSWORD = '0123456789abcdef'.repeat(4);
-const MINIMAL = { DORMOUSE_SETUP_PASSWORD: SETUP_PASSWORD };
+const MINIMAL = { DORMOUSE_SETUP_PASSWORD: PASSWORD };
 
 test('defaults: port 3000, every interface, localhost origin', () => {
   const config = readConfig({ ...MINIMAL });

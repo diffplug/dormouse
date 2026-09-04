@@ -223,7 +223,7 @@ test('only Host-enrollment rejection invokes the retained-request delay', async 
 });
 
 test('a token of a shape no Host was ever minted never reaches hosts.json', async () => {
-  const { app, stateDir } = await freshApp({ credentialFailureDelayMs: 1 });
+  const { app, stateDir } = await freshApp();
   const { body: host } = await enrollHost(app);
   assert.equal(host.hostToken.length, HOST_TOKEN_LENGTH);
 
@@ -237,18 +237,25 @@ test('a token of a shape no Host was ever minted never reaches hosts.json', asyn
   await assert.rejects(store.findByToken('A'.repeat(HOST_TOKEN_LENGTH)));
 });
 
-test('enrollment is capped, and the refusal names the remedy', async () => {
-  // Credential-gated, so this is not a flood defense: it is the bound on a file
-  // that is otherwise append-only and is compared row by row on every
-  // host-gated request and every `/ws/host` upgrade.
+/**
+ * An app holding `MAX_ENROLLED_HOSTS`. The clock advances a refill interval per
+ * enrollment because the global admission bucket is smaller than the cap.
+ */
+async function appAtHostCap() {
   const clock = makeClock();
-  const { app } = await freshApp({ credentialFailureDelayMs: 1, now: clock.now });
+  const { app } = await freshApp({ now: clock.now });
   for (let i = 0; i < MAX_ENROLLED_HOSTS; i += 1) {
     assert.equal((await enrollHost(app)).res.status, 200, `host ${i}`);
     clock.advance(HOST_ENROLL_ATTEMPT_REFILL_MS);
   }
+  return app;
+}
 
-  const { res, body } = await enrollHost(app);
+test('enrollment is capped, and the refusal names the remedy', async () => {
+  // Credential-gated, so this is not a flood defense: it is the bound on a file
+  // that is otherwise append-only and is compared row by row on every
+  // host-gated request and every `/ws/host` upgrade.
+  const { res, body } = await enrollHost(await appAtHostCap());
   assert.equal(res.status, 409);
   assert.match(body.error, /hosts\.json/);
 });
@@ -256,13 +263,6 @@ test('enrollment is capped, and the refusal names the remedy', async () => {
 test('the enrollment cap is checked after the credential, never before', async () => {
   // A caller that has proved nothing must not learn from the refusal whether
   // the server is full.
-  const clock = makeClock();
-  const { app } = await freshApp({ credentialFailureDelayMs: 1, now: clock.now });
-  for (let i = 0; i < MAX_ENROLLED_HOSTS; i += 1) {
-    assert.equal((await enrollHost(app)).res.status, 200);
-    clock.advance(HOST_ENROLL_ATTEMPT_REFILL_MS);
-  }
-
-  const res = await post(app, API_ROUTES.hostEnroll, { password: 'wrong' });
+  const res = await post(await appAtHostCap(), API_ROUTES.hostEnroll, { password: 'wrong' });
   assert.equal(res.status, 401);
 });
