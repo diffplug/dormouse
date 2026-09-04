@@ -51,7 +51,7 @@ function defaults() {
     scenario: DEFAULT_SCENARIO,
     out: '$TMPDIR/pairing-walkthrough/<timestamp>',
     skipBuild: false,
-    password: 'walkthrough-hunter2',
+    password: '0123456789abcdef'.repeat(4),
     machineName: 'Walkthrough Mac',
     keep: false,
   };

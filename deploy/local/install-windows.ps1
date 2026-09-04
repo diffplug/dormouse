@@ -2016,7 +2016,7 @@ rem directly.
   $psi.EnvironmentVariables['TMP'] = $env:TMP
   $psi.EnvironmentVariables['PATH'] = (Join-Path $env:SystemRoot 'System32') + ';' + $env:SystemRoot
   $psi.EnvironmentVariables['SystemDrive'] = $env:SystemDrive
-  $psi.EnvironmentVariables['DORMOUSE_SETUP_PASSWORD'] = "candidate-probe-$RELEASE_ID"
+  $psi.EnvironmentVariables['DORMOUSE_SETUP_PASSWORD'] = ('0' * 64)
   $psi.EnvironmentVariables['DORMOUSE_ORIGIN'] = $ORIGIN
   $psi.EnvironmentVariables['DORMOUSE_STATE_DIR'] = $PROBE_STATE
   $psi.EnvironmentVariables['DORMOUSE_BIND_HOST'] = '127.0.0.1'

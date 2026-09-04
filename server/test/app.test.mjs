@@ -6,6 +6,8 @@ import { HELLO_ROUTE } from 'server-lib-common';
 import { createApp } from '../dist/app.js';
 import { freshApp } from './helpers.mjs';
 
+const SETUP_PASSWORD = '0123456789abcdef'.repeat(4);
+
 /**
  * `createApp` compares `config.origin` as a string — the WebAuthn
  * `clientData.origin` check, the CORS allowlist, the enrollment `origin` a Host
@@ -28,9 +30,19 @@ test('createApp refuses an origin that is not already bare, or not http(s)', () 
     'ftp://dor.example.ts.net',
   ]) {
     assert.throws(
-      () => createApp({ setupPassword: 'pw', origin, stateDir: '/nonexistent' }),
+      () => createApp({ setupPassword: SETUP_PASSWORD, origin, stateDir: '/nonexistent' }),
       /bare http\(s\) origin/,
       origin,
+    );
+  }
+});
+
+test('createApp refuses a setup password outside the canonical 32-byte hex shape', () => {
+  for (const setupPassword of ['word', 'a'.repeat(63), 'A'.repeat(64), 'g'.repeat(64)]) {
+    assert.throws(
+      () => createApp({ setupPassword, origin: 'http://localhost:3000', stateDir: '/nonexistent' }),
+      /64 lowercase hexadecimal characters/,
+      setupPassword,
     );
   }
 });

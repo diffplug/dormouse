@@ -101,6 +101,7 @@ import type { StoredHost, StoredPushSubscription } from './state.js';
 import { sendWithinDeadline } from './push.js';
 import type { PushSender } from './push.js';
 import { MAX_PUSH_ENDPOINT_LENGTH, isPublicHttpsPushEndpoint } from './push-endpoint.js';
+import { isSetupPassword } from './setup-password.js';
 
 /** Runtime configuration; see `index.ts` for how env maps onto this. */
 export interface AppConfig {
@@ -476,6 +477,15 @@ interface PingableSocket {
 export function createApp(config: AppConfig): CreatedApp {
   const now = config.now ?? (() => Date.now());
   const origin = config.origin;
+  // The entrypoint enforces this in `readConfig`; direct callers pass the same
+  // boundary here, just as they do for the normalized origin below. A Server
+  // must never silently turn an operator-chosen word into its bootstrap secret.
+  if (!isSetupPassword(config.setupPassword)) {
+    throw new Error(
+      'createApp needs a setup password of 64 lowercase hexadecimal characters ' +
+        'generated from 32 random bytes.',
+    );
+  }
   // Enforced, not assumed: every compare below is a string compare against this
   // value, so a `https://host/` that slipped past `readConfig` (a direct caller,
   // a test) would fail each of them while reading as correct.

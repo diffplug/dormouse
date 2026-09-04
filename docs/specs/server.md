@@ -48,7 +48,7 @@ The whole of what `server/src/` reads from the environment:
 
 | Env var                   | Meaning                                                    |
 | ------------------------- | ---------------------------------------------------------- |
-| `DORMOUSE_SETUP_PASSWORD` | Required. Gates host enrollment; registers no passkey — `/api/setup/*` takes a Host-minted setup token only. |
+| `DORMOUSE_SETUP_PASSWORD` | Required: 64 lowercase hex characters (32 CSPRNG bytes). Gates Host enrollment, not passkey registration; config boundaries enforce the shape. |
 | `DORMOUSE_ORIGIN`         | External origin, e.g. `https://dormouse.tailnet.ts.net`; source of the WebAuthn `rpId`/`origin` and the Host's `ConnectionPolicy`. Defaults to `http://localhost:<port>` for dev. |
 | `DORMOUSE_STATE_DIR`      | Where the JSON state files live. Default `./data`.         |
 | `DORMOUSE_POCKET_DIR`     | The built Pocket app served at `/*`. Defaults to `lib/dist-pocket` resolved from the compiled server's own location, never the cwd (rationale). Absent or lacking `index.html`, `GET /` is a plaintext stub naming the build command. |
@@ -893,7 +893,7 @@ The loop at the top of this spec is implemented end to end. To test:
 **1. Server + Pocket** (one terminal):
 
 ```sh
-DORMOUSE_SETUP_PASSWORD=hunter2 pnpm dev:pocket-server
+DORMOUSE_SETUP_PASSWORD="$(openssl rand -hex 32)" pnpm dev:pocket-server
 ```
 
 Builds the Pocket app (`lib/dist-pocket`) and the server, then serves both on
@@ -907,7 +907,7 @@ enables it with no further configuration; to exercise push on localhost, supply
 a contact:
 
 ```sh
-DORMOUSE_SETUP_PASSWORD=hunter2 DORMOUSE_VAPID_SUBJECT=mailto:you@example.com \
+DORMOUSE_SETUP_PASSWORD="$(openssl rand -hex 32)" DORMOUSE_VAPID_SUBJECT=mailto:you@example.com \
   pnpm dev:pocket-server
 ```
 
@@ -926,13 +926,13 @@ a name for this machine. The same from the webview's devtools console, the
 scripting seam:
 
 ```js
-await window.dormouseRemoteHost.enroll('http://localhost:3000', 'hunter2', 'My Laptop')
+await window.dormouseRemoteHost.enroll('http://localhost:3000', '<64 hex characters>', 'My Laptop')
 ```
 
 Enrollment persists in the service's own store, and later launches connect by
 themselves. (Every command rides on that object; the dev loop has no installer
 offer.) For a headless stand-in host instead:
-`DORMOUSE_SETUP_PASSWORD=hunter2 node server/scripts/fake-host.mjs http://localhost:3000`
+`DORMOUSE_SETUP_PASSWORD='<64 hex characters>' node server/scripts/fake-host.mjs http://localhost:3000`
 — it instantiates the test harness's `FakeHost`, prints a pairing URL to paste
 into Pocket, and differs from a real Host only in auto-approving and logging.
 

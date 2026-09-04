@@ -106,7 +106,7 @@ export const EnrollRefused: Story = {
 
     await canvas.findByLabelText('Server');
     fill('Server', 'https://ned-mac.tail9c2f1.ts.net');
-    fill('Setup password', 'correct horse battery staple');
+    fill('Setup password', '0123456789abcdef'.repeat(4));
     fill('Name for this machine', 'Work laptop');
     await userEvent.click(canvas.getByRole('button', { name: 'Connect' }));
     await canvas.findByText(/This build will not connect/);

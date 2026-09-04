@@ -8,6 +8,8 @@ import {
 } from 'server-lib-common';
 import { isEnrollment, performEnrollment } from './enrollment';
 
+const SETUP_PASSWORD = '0123456789abcdef'.repeat(4);
+
 // A real `hostId`: base64url of 16 bytes, the one shape `isEnrollment`
 // accepts, because it is also the routing id every `e2e` envelope carries.
 const HOST_ID = 'S6kyjjqOS7mw3l8ye89U3g';
@@ -65,7 +67,7 @@ describe('remote-host enrollment', () => {
     // Trailing slash should be stripped before appending the route.
     const enrollment = await performEnrollment(
       'https://dormouse.example/',
-      { password: 'hunter2' },
+      { password: SETUP_PASSWORD },
       'My Laptop',
     );
 
@@ -74,7 +76,7 @@ describe('remote-host enrollment', () => {
       expect.objectContaining({ method: 'POST', redirect: 'error' }),
     );
     const body = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string);
-    expect(body).toEqual({ password: 'hunter2' });
+    expect(body).toEqual({ password: SETUP_PASSWORD });
 
     expect(enrollment).toEqual({
       serverUrl: 'https://dormouse.example',
@@ -114,7 +116,7 @@ describe('remote-host enrollment', () => {
 
     const enrollment = await performEnrollment(
       'https://dormouse.example',
-      { password: 'hunter2' },
+      { password: SETUP_PASSWORD },
       'My Laptop',
     );
 
@@ -129,7 +131,7 @@ describe('remote-host enrollment', () => {
       string,
       unknown
     >;
-    expect(body).toEqual({ password: 'hunter2' });
+    expect(body).toEqual({ password: SETUP_PASSWORD });
   });
 
   it('refuses to enroll when the runtime cannot mint the static it needs', async () => {
@@ -143,7 +145,7 @@ describe('remote-host enrollment', () => {
     // A runtime with no X25519 at all.
     vi.mocked(mintNoiseStaticKeyPair).mockRejectedValueOnce(new Error('unsupported curve'));
     await expect(
-      performEnrollment('https://dormouse.example', { password: 'hunter2' }, 'My Laptop'),
+      performEnrollment('https://dormouse.example', { password: SETUP_PASSWORD }, 'My Laptop'),
     ).rejects.toThrow(/cannot generate the X25519 key/);
 
     // And one whose PKCS#8 falls outside what `isEnrollment` accepts: caught
@@ -153,7 +155,7 @@ describe('remote-host enrollment', () => {
       publicKey: toBase64Url(new Uint8Array(32)),
     });
     await expect(
-      performEnrollment('https://dormouse.example', { password: 'hunter2' }, 'My Laptop'),
+      performEnrollment('https://dormouse.example', { password: SETUP_PASSWORD }, 'My Laptop'),
     ).rejects.toThrow(/not a shape this build persists/);
 
     expect(store.size).toBe(0);
@@ -216,7 +218,7 @@ describe('remote-host enrollment', () => {
       }),
     );
 
-    const pending = performEnrollment('https://dormouse.example', { password: 'hunter2' }, 'x');
+    const pending = performEnrollment('https://dormouse.example', { password: SETUP_PASSWORD }, 'x');
     // Awaited rather than asserted synchronously: the X25519 mint runs before
     // the exchange (see "mints the Noise static before the exchange"), so the
     // request is one WebCrypto round trip away rather than in this tick.
@@ -254,7 +256,7 @@ describe('remote-host enrollment', () => {
     stubLocalStorage();
     vi.stubGlobal('fetch', vi.fn(async () => new Response('Unauthorized', { status: 401 })));
     await expect(
-      performEnrollment('https://dormouse.example', { password: 'hunter2' }, 'x'),
+      performEnrollment('https://dormouse.example', { password: SETUP_PASSWORD }, 'x'),
     ).rejects.toThrow('The server refused the enrollment (HTTP 401): Unauthorized');
   });
 
@@ -264,7 +266,7 @@ describe('remote-host enrollment', () => {
     stubLocalStorage();
     vi.stubGlobal('fetch', vi.fn(async () => new Response('gateway is asleep', { status: 502 })));
     await expect(
-      performEnrollment('https://dormouse.example', { password: 'hunter2' }, 'x'),
+      performEnrollment('https://dormouse.example', { password: SETUP_PASSWORD }, 'x'),
     ).rejects.toThrow('The server refused the enrollment (HTTP 502): gateway is asleep');
   });
 
@@ -275,7 +277,7 @@ describe('remote-host enrollment', () => {
     const page = `<html>\n<head><title>502 Bad Gateway</title></head>\n${'<hr>'.repeat(200)}`;
     vi.stubGlobal('fetch', vi.fn(async () => new Response(page, { status: 502 })));
     await expect(
-      performEnrollment('https://dormouse.example', { password: 'hunter2' }, 'x'),
+      performEnrollment('https://dormouse.example', { password: SETUP_PASSWORD }, 'x'),
     ).rejects.toThrow('The server refused the enrollment (HTTP 502): <html>');
   });
 
@@ -296,7 +298,7 @@ describe('remote-host enrollment', () => {
       ),
     );
 
-    await expect(performEnrollment('https://dormouse.example', { password: 'hunter2' }, 'x')).rejects.toThrow(
+    await expect(performEnrollment('https://dormouse.example', { password: SETUP_PASSWORD }, 'x')).rejects.toThrow(
       /missing or invalid: origin, rpId/,
     );
   });
@@ -316,7 +318,7 @@ describe('remote-host enrollment', () => {
       ),
     );
 
-    await expect(performEnrollment('https://dormouse.example', { password: 'hunter2' }, 'x')).rejects.toThrow(
+    await expect(performEnrollment('https://dormouse.example', { password: SETUP_PASSWORD }, 'x')).rejects.toThrow(
       /missing or invalid: hostId/,
     );
   });
@@ -354,7 +356,7 @@ describe('remote-host enrollment', () => {
       ),
     );
     await expect(
-      performEnrollment('https://dormouse.example', { password: 'hunter2' }, 'x'),
+      performEnrollment('https://dormouse.example', { password: SETUP_PASSWORD }, 'x'),
     ).rejects.toThrow(/missing or invalid: hostId/);
   });
 
@@ -366,7 +368,7 @@ describe('remote-host enrollment', () => {
       vi.fn(async () => new Response('<html>not your server</html>', { status: 200 })),
     );
 
-    await expect(performEnrollment('https://dormouse.example', { password: 'hunter2' }, 'x')).rejects.toThrow(
+    await expect(performEnrollment('https://dormouse.example', { password: SETUP_PASSWORD }, 'x')).rejects.toThrow(
       /did not answer JSON/,
     );
   });

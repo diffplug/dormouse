@@ -45,7 +45,7 @@ export async function startServer(extraEnv = {}) {
   const child = spawn(process.execPath, [ENTRYPOINT], {
     env: {
       ...process.env,
-      DORMOUSE_SETUP_PASSWORD: 'correct horse battery staple',
+      DORMOUSE_SETUP_PASSWORD: '0123456789abcdef'.repeat(4),
       DORMOUSE_STATE_DIR: stateDir,
       DORMOUSE_POCKET_DIR: join(stateDir, 'no-pocket-build'),
       PORT: String(port),

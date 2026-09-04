@@ -17,7 +17,7 @@ import { SimAuthenticator } from '../../server-lib-common/test/harness/actors.mj
 
 export const ORIGIN = 'http://localhost:3000';
 export const RP_ID = 'localhost';
-export const PASSWORD = 'correct horse battery staple';
+export const PASSWORD = '0123456789abcdef'.repeat(4);
 
 /** A manually-advanced clock for TTL/expiry tests. */
 export function makeClock(startMs = 1_700_000_000_000) {

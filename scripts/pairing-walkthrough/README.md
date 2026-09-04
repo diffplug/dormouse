@@ -109,7 +109,7 @@ to tap something there would have found a bug.
 | `--until <step>` | the scenario's last | Stop after this step. |
 | `--out <dir>` | `$TMPDIR/pairing-walkthrough/<timestamp>` | Run directory. |
 | `--skip-build` | off | Reuse `lib/dist-pocket` and `server/dist` instead of rebuilding them. Ignored (with a warning) when either is missing. |
-| `--password <pw>` | `walkthrough-hunter2` | `DORMOUSE_SETUP_PASSWORD` for the run. |
+| `--password <pw>` | 64-character deterministic test credential | `DORMOUSE_SETUP_PASSWORD` for the run. |
 | `--machine-name <n>` | `Walkthrough Mac` | The name the Host enrolls under. |
 | `--keep` | off | Leave everything running when the run ends — including a failed one, which is when poking by hand is most useful. Ctrl-C stops it. |
 

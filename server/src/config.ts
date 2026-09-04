@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { normalizeOrigin } from 'server-lib-common';
 
 import { defaultVapidSubject, type VapidKeys } from './push.js';
+import { isSetupPassword } from './setup-password.js';
 
 /** Everything the entrypoint needs, resolved from the environment. */
 export interface ServerConfig {
@@ -83,9 +84,10 @@ export function readConfig(env: Env = process.env): ServerConfig {
   }
 
   const setupPassword = env.DORMOUSE_SETUP_PASSWORD;
-  if (!setupPassword) {
+  if (!isSetupPassword(setupPassword)) {
     throw new ConfigError(
-      'DORMOUSE_SETUP_PASSWORD is required — it gates host enrollment.',
+      'DORMOUSE_SETUP_PASSWORD must be 64 lowercase hexadecimal characters ' +
+        'generated from 32 random bytes — it gates host enrollment.',
     );
   }
 

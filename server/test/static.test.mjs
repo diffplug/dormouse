@@ -12,7 +12,7 @@ import { join } from 'node:path';
 
 import { createApp } from '../dist/app.js';
 
-const PASSWORD = 'correct horse battery staple';
+const PASSWORD = '0123456789abcdef'.repeat(4);
 const ORIGIN = 'http://localhost:3000';
 
 async function makePocketDir() {
