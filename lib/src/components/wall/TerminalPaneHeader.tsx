@@ -5,7 +5,6 @@ import {
   ArrowLineDownIcon,
   ArrowsInIcon,
   ArrowsOutIcon,
-  BellIcon,
   CursorClickIcon,
   CursorTextIcon,
   SplitHorizontalIcon,
@@ -15,7 +14,7 @@ import {
 import { HeaderActionButton } from '../HeaderActionButton';
 import { TodoAlertDialog } from '../TodoAlertDialog';
 import { HEADER_PALETTE_TRANSITION_CLASS, paneZoomButtonClass, POPUP_SURFACE_CLASS, TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from '../design';
-import { bellIconClass } from '../bell-icon-class';
+import { AlertBell } from '../AlertBell';
 import { useTodoPillContent } from '../TodoPillBody';
 import type { PaneProps } from './pane-props';
 import { IllegalRenameWarning, type RenameRejection } from './IllegalRenameWarning';
@@ -264,11 +263,7 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
           dataAlertButtonFor={id}
         >
           <span className="flex items-center justify-center">
-            {activity.status === 'WATCHING_DISABLED' ? (
-              <BellIcon size={14} />
-            ) : (
-              <BellIcon size={14} weight="fill" className={bellIconClass(activity.status)} />
-            )}
+            <AlertBell status={activity.status} ringSeq={activity.ringSeq} size={14} />
           </span>
         </HeaderActionButton>
         {showTodoPill && (

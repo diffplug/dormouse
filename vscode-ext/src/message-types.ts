@@ -9,7 +9,7 @@ import type { AlertSettings } from '../../lib/src/lib/alert-settings';
 import type { TerminalSemanticEvent } from '../../lib/src/lib/terminal-state';
 import type { TerminalColors } from '../../lib/src/lib/terminal-protocol';
 import type { DorControlCancelPayload, DorControlRequestPayload, DorControlResponsePayload } from '../../dor/src/protocol';
-import type { AgentBrowserStreamStatusResult, IframeProxyResult, OpenPort } from '../../lib/src/lib/platform/types';
+import type { AgentBrowserStreamStatusResult, AlertStateDetail, IframeProxyResult, OpenPort } from '../../lib/src/lib/platform/types';
 import type { VSCodeWorkbenchCommand } from '../../lib/src/lib/vscode-keybindings';
 import type { RemoteHostCommand, RemoteHostResult } from '../../lib/src/host/remote/service-protocol';
 
@@ -112,17 +112,9 @@ export type ExtensionMessage =
   | { type: 'dormouse:flushSessionSave'; requestId: string }
   | ({ type: 'dor:controlRequest' } & DorControlRequestPayload)
   | ({ type: 'dor:controlCancel' } & DorControlCancelPayload)
-  // Alert state updates
-  | {
-    type: 'alert:state';
-    id: string;
-    status: SessionStatus;
-    watchingEnabled: boolean;
-    todo: TodoState;
-    notification: ActivityNotification | null;
-    attentionDismissedRing: boolean;
-    awaited: boolean;
-  }
+  // Alert state updates. The whole `AlertState` crosses as one piece, so a new
+  // alert field needs no edit here — the other three adapters already spread it.
+  | ({ type: 'alert:state' } & AlertStateDetail)
   | { type: 'alert:awaitResult'; requestId: string; outcome: AwaitOutcome }
   | { type: 'alert:watchedCommands'; names: string[] }
   | { type: 'alert:settings'; settings: AlertSettings };

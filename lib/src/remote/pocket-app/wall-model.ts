@@ -40,6 +40,10 @@ export function directorySessionItems(
     secondary: secondaryLine(entry),
     active: entry.surfaceId === activeSurfaceId,
     status: statusFor(entry),
+    // `DirectoryEntry.ringing` is a boolean union with no per-ring edge, so a
+    // remote bell rings once on mount and then holds (`docs/specs/alert.md` ->
+    // Pane Header). Carrying the count on the wire is what would fix it.
+    ringSeq: 0,
     todo: entry.hasTODO,
   }));
 }

@@ -401,6 +401,53 @@ describe('AlertManager in isolation', () => {
     });
   });
 
+  // `docs/specs/alert.md` -> Pane Header.
+  it('counts a second track ringing behind an already-latched one', () => {
+    const id = 'ring-seq-cross-track';
+    const seqs: number[] = [];
+    manager.onStateChange((_id, state) => {
+      if (_id === id) seqs.push(state.ringSeq);
+    });
+
+    manager.attend(id);
+    manager.applyTerminalSemanticEvents(id, [
+      { type: 'commandLine', commandLine: 'pnpm build' },
+      { type: 'commandStart', source: 'osc633_E', startedAt: Date.now() },
+    ]);
+    vi.advanceTimersByTime(15_000);
+
+    applyTerminalProtocolEvents(manager, id, [
+      { kind: 'notification', notification: { source: 'BEL', title: 'Terminal bell', body: null } },
+    ]);
+    const rung = manager.getState(id);
+    expect(rung.status).toBe('ALERT_RINGING');
+
+    // The command-exit track latches behind the protocol one. Everything else the
+    // renderer could have keyed on is unchanged across this ring.
+    manager.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }]);
+    const again = manager.getState(id);
+    expect(again.status).toBe(rung.status);
+    expect(again.notification).toEqual(rung.notification);
+    expect(again.ringSeq).toBeGreaterThan(rung.ringSeq);
+    // And it has to reach subscribers: `alertStatesEqual` would otherwise call
+    // these two states equal and drop the update before it left the host.
+    expect(seqs).toContain(again.ringSeq);
+  });
+
+  // The counter is bounded by construction: a repeated notification on a track
+  // that is already ringing enriches the standing summons rather than raising a
+  // new one, so bell spam cannot restart the burst faster than it can play.
+  it('does not count a track that is already ringing', () => {
+    const id = 'ring-seq-same-track';
+    const bell = { source: 'BEL', title: 'Terminal bell', body: null } as const;
+
+    applyTerminalProtocolEvents(manager, id, [{ kind: 'notification', notification: bell }]);
+    const first = manager.getState(id).ringSeq;
+    applyTerminalProtocolEvents(manager, id, [{ kind: 'notification', notification: bell }]);
+
+    expect(manager.getState(id).ringSeq).toBe(first);
+  });
+
   it('finishes an armed command-exit watch when the PTY exits without commandFinish', () => {
     const id = 'command-exit-pty-exit';
 

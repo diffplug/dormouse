@@ -347,6 +347,7 @@ function setupTerminalEntry(id: string, options: { shell?: string; untouched?: b
     element,
     cleanup,
     alertStatus: 'WATCHING_DISABLED',
+    ringSeq: 0,
     watchingEnabled: false,
     todo: false,
     notification: null,

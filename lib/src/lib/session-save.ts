@@ -1,5 +1,5 @@
 import type { PlatformAdapter } from './platform/types';
-import { browserPersistedPane, readPersistedSession, type PersistedDoor, type PersistedPane, type PersistedSession, type PersistedSurfaceRefs, type PersistedSurfaceType } from './session-types';
+import { browserPersistedPane, readPersistedSession, toPersistedAlertState, type PersistedDoor, type PersistedPane, type PersistedSession, type PersistedSurfaceRefs, type PersistedSurfaceType } from './session-types';
 import { getActivity, getLivePersistedAlertState, getTerminalPaneState, isUntouched, resolveTerminalSessionId } from './terminal-registry';
 import { UNNAMED_PANEL_TITLE } from './terminal-state';
 
@@ -49,9 +49,9 @@ export async function saveSession(
       const previousPane = previousPanes.get(pane.id);
       if (pane.surfaceType === 'browser') {
         // The activity store already holds this surface's TODO; persist it as the
-        // alert blob (ActivityState is assignable to PersistedAlertState).
+        // alert blob, projected to the persisted fields.
         const activity = getActivity(pane.id);
-        return browserPersistedPane(pane, activity.todo ? activity : null);
+        return browserPersistedPane(pane, activity.todo ? toPersistedAlertState(activity) : null);
       }
 
       const liveAlert = getLivePersistedAlertState(pane.id);
