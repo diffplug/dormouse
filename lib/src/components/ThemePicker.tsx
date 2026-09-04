@@ -4,6 +4,7 @@ import type { DormouseTheme } from '../lib/themes';
 import {
   applyTheme,
   getAllThemes,
+  getBundledThemes,
   getTheme,
   removeInstalledTheme,
   restoreActiveTheme,
@@ -64,15 +65,13 @@ export function ThemePicker({
   menuSide = 'below',
   onPick,
 }: ThemePickerProps) {
-  // Apply the persisted theme during render initialization, before commit, so
-  // the first paint already has --vscode-* on body. Hosts must not *rely* on
-  // this: inside the Settings dialog the picker only mounts once the user opens
-  // it, so each host restores its own theme at boot.
+  // The server and first client render must agree. Installed themes and the
+  // active id come from browser storage, so reading either here leaves React
+  // with an attribute mismatch it deliberately will not patch during hydration.
   const initialState = useRef<{ themes: DormouseTheme[]; activeId: string }>(null);
   if (initialState.current === null) {
-    const restored = restoreActiveTheme();
-    const themes = getAllThemes();
-    initialState.current = { themes, activeId: restored?.id ?? themes[0]?.id ?? '' };
+    const themes = getBundledThemes();
+    initialState.current = { themes, activeId: themes[0]?.id ?? '' };
   }
   const [themes, setThemes] = useState(initialState.current.themes);
   const [activeId, setActiveId] = useState(initialState.current.activeId);
@@ -97,10 +96,12 @@ export function ThemePicker({
   // positions itself with the absolute classes below.
   const { setTriggerEl, setMenuEl, menuStyle } = useAnchoredMenu(inDialog && open, MENU_WIDTH_PX);
 
-  // React Router document hydration can reconcile render-time theme
-  // application away; repeat once after commit so xterm sees real colors.
+  // Hosts restore the visible body theme at boot. The picker separately
+  // reconciles its stored rows and selected value after hydration so its first
+  // markup stays deterministic without leaving its label or swatch stale.
   useBrowserLayoutEffect(() => {
     const theme = restoreActiveTheme();
+    setThemes(getAllThemes());
     if (theme) setActiveId(theme.id);
   }, []);
 

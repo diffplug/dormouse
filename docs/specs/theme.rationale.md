@@ -32,6 +32,12 @@
 
 **Why `/playground/pocket` keeps the `compact` picker.** Those two mounts render a mobile prototype: no baseboard, so no Settings dialog to put the picker in. The dialog trigger keeps its label so it reads as the same control as the row it stands in for; `compact` stands alone and needs only the swatch.
 
+**Why the picker reconciles storage after hydration.** The server cannot read
+installed themes or the stored active id. Reading them during the first client
+render made its label and swatch differ from the prerendered markup; React
+reported the mismatch and kept the stale server attributes even while the body
+showed the stored theme.
+
 **Why the host fallback is module state.** Uninstalling the active theme is reachable from two depths — the picker row's `X` and the store dialog's `Remove` — and a prop-held fallback goes missing on one, dropping to the first bundled theme instead of the host's. `setDefaultThemeId()` is the same module-state shape as `lib/src/lib/shell-defaults.ts`.
 
 **Why `useRestoredTheme()` latches the fallback ahead of any child render.** On the desktop Pocket page the header's picker mounts before the component that calls the hook, so a latch deferred to an effect would let the picker re-resolve against no fallback at all.

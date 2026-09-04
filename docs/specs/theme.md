@@ -190,6 +190,8 @@ playground navbar — carries none**.
   placements, floating at `lg` and inline in the mobile bar. **Both variants
   show the active theme's `ThemeSwatch`** — beside its label on the dialog
   trigger, beside the word "Theme" in `compact`.
+- **ThemePicker renders the bundled default through hydration, then reconciles
+  stored themes and selection in a layout effect** (rationale).
 - **`compact` takes its menu offset from style, never a Tailwind class**
   (`menuSide`): the website renders against the lib's *prebuilt* stylesheet, so
   a utility the lib never emitted is absent there and the menu drops to its
