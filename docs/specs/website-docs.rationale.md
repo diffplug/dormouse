@@ -68,6 +68,10 @@ only while the rounded returned color stays at or above 4.5:1, so hierarchy is
 as quiet as each theme safely allows without depending on the surface beneath
 the element.
 
+The signup action originally reused the corrected link color on 10% and 20%
+tints of itself. Those composites pulled every bundled theme below AA, so its
+foreground is corrected against the stronger hover tint and checked on both.
+
 Anchor offsets are tight by measurement, not by estimate. The mobile bar is
 45px and the site header 64px, 80px from `md` up with no `lg` step, so the two
 steps that clear both have 3px in hand and `lg` clears the header alone by

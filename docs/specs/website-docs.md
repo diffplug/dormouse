@@ -258,10 +258,21 @@ canonical joins the fallback's and both are discarded; `siteMeta`'s
 `checkPageHeadTags` and `checkSiteOrigin` pin the first two;
 `ChangelogAfter.tsx` is the only route under the third.
 
+**Every in-site link spells that served path** — `sitePath` in components, the
+generator's rewrites in reference prose — so no reader lands on a redirect.
+Exempt: `/` with its anchors, and the `/docs` entrypoint, which names no page.
+`<Link to>` never leaves the client, so it is unaffected.
+`checkInSiteHrefsAreServed` pins it.
+
 ## Reference page chrome
 
 `DOCS_PAGES` pages use `DocsLayout` for header, rail, `h1`, intro, and
 prev/next. `/hosted` follows `/docs/self-host`.
+
+**Each page's `linkedFrom` names every document owing it a link** — the two
+READMEs and the homepage — so the obligation is registry-driven, never inferred
+from the path. The changelog names none; the rail and the updater's deep link
+are its way in. `checkRoutesToReferences` reads it.
 
 **Must title `/docs/self-host` “How to self-host” and `/hosted` “Pay us to host”
 in chrome and metadata while keeping URLs stable.**
@@ -302,9 +313,13 @@ brand caramel, never `--vscode-textLink-foreground`** (rationale). Caramel
 stays where the reader cannot retheme it — the wordmark, the header, the
 homepage — and is the fallback before a theme applies.
 
+**Must derive docs call-to-action text against its strongest accent-tinted
+state and clear WCAG AA both at rest and on hover** (rationale).
+
 **Muted reference text uses an opaque foreground-derived color that clears
 WCAG AA; never dim text with opacity** (rationale). `docsMutedTextFor` and
-`website/src/lib/docs-accent.test.ts` pin bundled themes.
+`website/src/lib/docs-accent.test.ts` pin bundled themes;
+`checkNoDimmedDocsText` pins the call sites, allowlisting what is not text.
 
 **A reader is prompted to pick a theme until they answer.** Picking one and
 closing the prompt both count — a reader who declined has seen the offer.
@@ -330,8 +345,8 @@ requests. `/docs/self-host` links `/hosted`; `/hosted` labels hosting pending re
 discloses metadata, and links the model.
 `website/src/lib/docs-rail.test.tsx` pins this.
 
-**Must link the preview from:** homepage, Pocket marketing/tutorial, self-host
-docs, both READMEs, speech settings, and remote-control settings.
+**Must also link the preview from** Pocket marketing/tutorial, self-host docs,
+and the speech and remote-control settings; `linkedFrom` owns the rest.
 
 ## `/docs/dor` reference
 
@@ -610,7 +625,7 @@ spec.
 | `website/src/components/MarkdownDocument.tsx` | Renders parsed Markdown blocks |
 | `website/src/components/DocsLayout.tsx` | Docs chrome: header, the rail and its mobile drawer, prev/next, theme restore |
 | `website/src/components/DocsThemeControl.tsx` | The picker's two placements and its first-visit prompt |
-| `website/src/lib/docs-accent.ts` (+ `.test.ts`) | The themed link color, contrast-corrected per theme |
+| `website/src/lib/docs-accent.ts` (+ `.test.ts`) | The themed text colors, contrast-corrected per rendered surface |
 | `website/src/lib/docs-theme.ts` | Default docs theme, and whether the reader has chosen |
 | `website/src/components/DorCommandReference.tsx` | One CLI command section |
 | `website/src/pages/DorDocs.tsx` | `/docs/dor` |

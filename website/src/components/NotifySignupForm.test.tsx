@@ -28,6 +28,7 @@ describe("NotifySignupForm", () => {
     expect(markup).toContain('action="https://nedshed.dev/subscribe"');
     expect(markup).toContain('method="get"');
     expect(markup).toContain("One more step on Substack");
+    expect(markup).toContain("text-[var(--docs-button-text)]");
     expect(markup).not.toContain("Opening nedshed.dev");
   });
 

@@ -60,6 +60,36 @@ export function contrastRatio(a: Rgb, b: Rgb): number {
   return (hi + 0.05) / (lo + 0.05);
 }
 
+/** The opaque colour CSS paints when `foreground` is drawn over `background`
+ *  at `opacity`. This keeps contrast derivations on the same surface the
+ *  browser renders for Tailwind's colour/opacity utilities. */
+export function compositeColor(
+  foreground: string,
+  background: string,
+  opacity: number,
+): string | null {
+  const fg = parseHex(foreground);
+  const bg = parseHex(background);
+  if (!fg || !bg) return null;
+  return toHex(mix(bg.rgb, fg.rgb, Math.min(1, Math.max(0, fg.alpha * opacity))));
+}
+
+/**
+ * Both colours as opaque RGB, or `null` when either is unreadable.
+ *
+ * Alpha is against the page, so a translucent foreground is flattened onto the
+ * background before anything measures it.
+ */
+function flatten(
+  foreground: string,
+  background: string,
+): { base: Rgb; bg: Rgb } | null {
+  const fg = parseHex(foreground);
+  const bg = parseHex(background);
+  if (!fg || !bg) return null;
+  return { base: fg.alpha < 1 ? mix(bg.rgb, fg.rgb, fg.alpha) : fg.rgb, bg: bg.rgb };
+}
+
 /**
  * A link colour for `accent` that is legible on `background`.
  *
@@ -71,26 +101,23 @@ export function docsAccentFor(
   background: string,
   minContrast = MIN_CONTRAST,
 ): string | null {
-  const fg = parseHex(accent);
-  const bg = parseHex(background);
-  if (!fg || !bg) return null;
-
-  // Alpha is against the page, so flatten before measuring anything.
-  const base = fg.alpha < 1 ? mix(bg.rgb, fg.rgb, fg.alpha) : fg.rgb;
-  if (contrastRatio(base, bg.rgb) >= minContrast) return toHex(base);
+  const flat = flatten(accent, background);
+  if (!flat) return null;
+  const { base, bg } = flat;
+  if (contrastRatio(base, bg) >= minContrast) return toHex(base);
 
   // Whichever end contrasts more, measured rather than guessed from a
   // luminance midpoint: that is not where the crossover sits, and a mid-tone
   // background is neither light nor dark.
   const white: Rgb = [255, 255, 255];
   const black: Rgb = [0, 0, 0];
-  const toward: Rgb = contrastRatio(white, bg.rgb) >= contrastRatio(black, bg.rgb) ? white : black;
+  const toward: Rgb = contrastRatio(white, bg) >= contrastRatio(black, bg) ? white : black;
 
   // The last step is `toward` itself, so the best available colour is always
   // among these — there is nothing left to fall back to.
   for (let step = 1; step <= 20; step += 1) {
     const candidate = mix(base, toward, step / 20);
-    if (contrastRatio(candidate, bg.rgb) >= minContrast) return toHex(candidate);
+    if (contrastRatio(candidate, bg) >= minContrast) return toHex(candidate);
   }
   return toHex(toward);
 }
@@ -109,19 +136,20 @@ export function docsMutedTextFor(
   background: string,
   minContrast = MIN_CONTRAST,
 ): string | null {
-  const fg = parseHex(foreground);
-  const bg = parseHex(background);
-  if (!fg || !bg) return null;
+  const flat = flatten(foreground, background);
+  if (!flat) return null;
+  const { base, bg } = flat;
 
-  const base = fg.alpha < 1 ? mix(bg.rgb, fg.rgb, fg.alpha) : fg.rgb;
-  if (contrastRatio(base, bg.rgb) < minContrast) {
+  // Already too faint to be body text: there is nothing to quieten, so borrow
+  // the accent path's boost away from the background instead.
+  if (contrastRatio(base, bg) < minContrast) {
     return docsAccentFor(toHex(base), background, minContrast);
   }
 
   let quietest = base;
   for (let step = 1; step <= 100; step += 1) {
-    const candidate = mix(base, bg.rgb, step / 100);
-    if (contrastRatio(candidate, bg.rgb) < minContrast) break;
+    const candidate = mix(base, bg, step / 100);
+    if (contrastRatio(candidate, bg) < minContrast) break;
     quietest = candidate;
   }
   return toHex(quietest);

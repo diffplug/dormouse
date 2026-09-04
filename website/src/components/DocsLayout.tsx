@@ -30,9 +30,8 @@ import {
 } from "./docs-tokens";
 import { DOCS_PAGES, docsRailPosition, type DocsPage, type TocEntry } from "../lib/docs-pages";
 import { DOCS_THEME_ID } from "../lib/docs-theme";
-import { docsAccentFor, docsMutedTextFor } from "../lib/docs-accent";
-
-const pageHref = (path: string): string => (path.endsWith("/") ? path : `${path}/`);
+import { compositeColor, docsAccentFor, docsMutedTextFor } from "../lib/docs-accent";
+import { sitePath } from "../lib/site-meta";
 
 /** Repaints the site's own tokens from the picked theme; see index.css. */
 const THEMED_BODY_CLASS = "docs-themed";
@@ -92,7 +91,7 @@ function DocsNav({
         return (
           <li key={page.path} className={active ? "flex min-h-0 flex-col" : "shrink-0"}>
             <a
-              href={pageHref(page.path)}
+              href={sitePath(page.path)}
               aria-current={active ? "page" : undefined}
               className={`block shrink-0 py-1 font-display text-sm ${
                 active ? ACCENT_TEXT_CLASS : MUTED_ACCENT_LINK_CLASS
@@ -118,7 +117,7 @@ function NeighborLink({ page, rel }: { page: DocsPage | undefined; rel: "prev" |
   if (!page) return <span />;
   return (
     <a
-      href={pageHref(page.path)}
+      href={sitePath(page.path)}
       rel={rel}
       className={`group flex flex-col gap-1 ${rel === "next" ? "text-right" : ""}`}
     >
@@ -168,7 +167,12 @@ export default function DocsLayout({
       const accent = theme?.accent;
       if (!theme || !accent || !background || !foreground) return;
       const link = docsAccentFor(accent, background);
-      if (link) document.body.style.setProperty("--docs-accent", link);
+      if (link) {
+        document.body.style.setProperty("--docs-accent", link);
+        const actionHoverSurface = compositeColor(link, background, 0.2);
+        const actionText = actionHoverSurface && docsAccentFor(link, actionHoverSurface);
+        if (actionText) document.body.style.setProperty("--docs-button-text", actionText);
+      }
       const muted = docsMutedTextFor(foreground, background);
       if (muted) document.body.style.setProperty("--docs-text-muted", muted);
     };

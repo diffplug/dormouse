@@ -29,6 +29,10 @@ export const LINK_CLASS = "text-[var(--docs-accent)] underline-offset-2 hover:un
 export const ACCENT_TEXT_CLASS = "text-[var(--docs-accent)]";
 export const ACCENT_HOVER_TEXT_CLASS = "hover:text-[var(--docs-accent)]";
 export const ACCENT_HOVER_BORDER_CLASS = "hover:border-[var(--docs-accent)]";
+export const ACCENT_BORDER_CLASS = "border-[var(--docs-accent)]";
+
+/** Accent-derived text corrected against an accent-tinted action surface. */
+export const ACTION_TEXT_CLASS = "text-[var(--docs-button-text)]";
 
 /** Opaque secondary text, derived per active theme to retain body-text AA. */
 export const MUTED_TEXT_CLASS = "text-[var(--docs-text-muted)]";
@@ -59,6 +63,22 @@ export const TOC_INDENT_CLASS = "border-l border-[var(--color-text)]/15 pl-3";
 export const CODE_CLASS =
   "text-[0.9em] bg-[var(--color-text)]/15 px-1.5 py-0.5 rounded font-mono break-words";
 
+/** A panel of prose set off from the flow — `PRE_CLASS`'s tint without the
+ *  monospace. `CARD_ACCENT_CLASS` is the variant that draws attention with the
+ *  theme's accent instead of the quiet rule. */
+const CARD_BASE = "rounded-xl border bg-[var(--color-text)]/[0.04] p-5 sm:p-6";
+export const CARD_CLASS = `${CARD_BASE} border-[var(--color-text)]/15`;
+export const CARD_ACCENT_CLASS = `${CARD_BASE} ${ACCENT_BORDER_CLASS}`;
+
+/** The caramel aside both hosting pages open with. Caramel rather than the
+ *  reader's accent: it flags an editorial note, not a link target. */
+export const NOTE_CLASS =
+  "rounded-lg border border-[var(--color-caramel)]/30 bg-[var(--color-caramel)]/[0.06] p-4 leading-relaxed";
+
+/** Reference body prose: the shared size, leading, and muted colour. Callers
+ *  add their own flow margin. */
+export const BODY_TEXT_CLASS = `text-lg leading-relaxed ${MUTED_TEXT_CLASS}`;
+
 /** Fenced code blocks and other monospace panels. */
 export const PRE_CLASS =
   "overflow-x-auto rounded-lg border border-[var(--color-text)]/15 bg-[var(--color-text)]/[0.04] p-4 font-mono text-sm";
@@ -69,3 +89,7 @@ export const PRE_CLASS =
 export const TABLE_WRAP_CLASS = "overflow-x-auto";
 export const TABLE_CLASS = "w-full border-collapse text-left";
 export const TABLE_ROW_CLASS = "border-b border-[var(--color-text)]/10";
+/** The header row's rule is heavier than a body row's, so the head reads as a
+ *  head without a second colour level doing the work. */
+export const TABLE_HEAD_ROW_CLASS = "border-b border-[var(--color-text)]/25";
+export const TH_CLASS = "py-2 pr-4 font-display font-normal whitespace-nowrap";

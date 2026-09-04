@@ -1,6 +1,7 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { completeThemeVars, getBundledThemes } from "dormouse-lib/lib/themes";
-import { contrastRatio, docsAccentFor, docsMutedTextFor } from "./docs-accent";
+import { compositeColor, contrastRatio, docsAccentFor, docsMutedTextFor } from "./docs-accent";
 
 const rgb = (hex: string): [number, number, number] => {
   const h = hex.replace("#", "");
@@ -69,6 +70,26 @@ describe("docs link colour", () => {
   });
 });
 
+describe("docs action colour", () => {
+  it("clears WCAG AA on the resting and hover tints in every bundled theme", () => {
+    for (const t of themes) {
+      const accent = docsAccentFor(t.accent, t.background)!;
+      const restingSurface = compositeColor(accent, t.background, 0.1)!;
+      const hoverSurface = compositeColor(accent, t.background, 0.2)!;
+      const action = docsAccentFor(accent, hoverSurface)!;
+
+      expect(
+        contrastRatio(rgb(action), rgb(restingSurface)),
+        `${t.id} resting (${action} on ${restingSurface})`,
+      ).toBeGreaterThanOrEqual(4.5);
+      expect(
+        contrastRatio(rgb(action), rgb(hoverSurface)),
+        `${t.id} hover (${action} on ${hoverSurface})`,
+      ).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+});
+
 describe("docs muted text colour", () => {
   it("clears WCAG AA on every bundled theme", () => {
     for (const t of themes) {
@@ -89,5 +110,14 @@ describe("docs muted text colour", () => {
 
   it("returns null on a colour it cannot read", () => {
     expect(docsMutedTextFor("var(--nope)", "#000000")).toBeNull();
+  });
+
+  it("agrees with the static fallback index.css declares", () => {
+    // The site's own palette is fixed, so its muted level is precomputed there
+    // rather than left to DocsLayout's effect — otherwise the prerendered page
+    // has no muted level at all. Keep the two in step.
+    const css = readFileSync(new URL("../index.css", import.meta.url), "utf8");
+    const declared = css.match(/--docs-text-muted:\s*(#[0-9a-f]{6})/i)?.[1];
+    expect(declared).toBe(docsMutedTextFor("#dedede", "#000000"));
   });
 });
