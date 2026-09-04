@@ -506,7 +506,9 @@ export function attachRouter(
     switch (msg.type) {
       case 'pty:spawn': {
         claim(msg.id);
-        ownerPtyStreams.set(msg.id, createOwnerPtyStream(msg.id));
+        // A fresh generation under this id: retire the parser rather than let
+        // its half-read sequence splice onto the new PTY's first bytes.
+        ownerPtyStreams.delete(msg.id);
         const spawnOptions = { ...msg.options };
         if (!spawnOptions.cwd) {
           spawnOptions.cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;

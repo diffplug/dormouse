@@ -47,7 +47,8 @@ export interface ProcessedPtyStreamOptions {
   /**
    * Everything one chunk's parse produced, delivered once per chunk and never
    * per sink — a response fanned out per attachment would be written to the PTY
-   * as many times as there are viewers.
+   * as many times as there are viewers. Not called for a chunk that produced
+   * none, which is the common case.
    */
   onEvents(events: TerminalProtocolEvent[]): void;
   /**
@@ -83,16 +84,16 @@ export function createProcessedPtyStream(options: ProcessedPtyStreamOptions): Pr
   const subscriptions = new Set<Subscription>();
 
   function deliver(piece: string): void {
-    const parsed = parser.process(piece);
-    options.onEvents(parsed.events);
-    const { visibleData, textData, resumedStringEnd } = parsed;
+    const { visibleData, textData, events, resumedStringEnd } = parser.process(piece);
+    if (events.length > 0) options.onEvents(events);
+    const chunk = visibleData === '' ? null : chunkOf(visibleData, textData);
     // The owner first: a sink that throws must not cost the renderer its output.
-    if (visibleData !== '') options.onChunk(chunkOf(visibleData, textData));
+    if (chunk) options.onChunk(chunk);
     // Iterated live rather than copied: a sink can only unsubscribe itself from
     // here, which a Set tolerates mid-iteration.
     for (const subscription of subscriptions) {
       if (!subscription.held) {
-        if (visibleData !== '') subscription.sink(chunkOf(visibleData, textData));
+        if (chunk) subscription.sink(chunk);
         continue;
       }
       if (resumedStringEnd === null) continue;

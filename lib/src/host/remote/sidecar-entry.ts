@@ -201,6 +201,10 @@ export function createSidecarSurfaceBridge(
       } else {
         const exitCode = exits.get(ptyId) ?? 0;
         unsubscribe();
+        // Nothing will feed this parser or retire it: the exit that would have
+        // has already been and gone. Without this the sidecar keeps one per
+        // surface id that was ever attached to after its PTY died.
+        if (subscribed.sinks.size === 0 && streams.get(ptyId) === subscribed) streams.delete(ptyId);
         sink.onExit(exitCode);
       }
 
@@ -250,16 +254,17 @@ export function createSidecarSurfaceBridge(
         return;
       }
       if (event !== 'exit') return;
-      const exitCode = (detail as { exitCode?: unknown }).exitCode;
+      const reported = (detail as { exitCode?: unknown }).exitCode;
+      const exitCode = typeof reported === 'number' ? reported : 0;
       // Durable: a surface resolution may already be in flight without a sink.
-      exits.set(id, typeof exitCode === 'number' ? exitCode : 0);
+      exits.set(id, exitCode);
       const stream = streams.get(id);
       if (!stream) return;
       // Dropped before the fan-out, so a sink that unsubscribes from inside its
       // own `onExit` finds nothing left to take out. The parser goes with the
       // generation that filled it; a post-exit flush starts a fresh one.
       streams.delete(id);
-      for (const sink of stream.sinks.keys()) sink.onExit(exits.get(id) ?? 0);
+      for (const sink of stream.sinks.keys()) sink.onExit(exitCode);
     },
 
     onPtySpawn(id) {

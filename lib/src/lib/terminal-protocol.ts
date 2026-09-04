@@ -393,8 +393,8 @@ export class TerminalProtocolParser {
 /**
  * The optional half of the projection pair a parse result carries to its
  * consumers: **omitted whenever it equals `visibleData`**, which is every chunk
- * with no string control in it. One helper because that rule holds at each of
- * the four parse sites and at every seam past them (`docs/specs/transport.md`).
+ * with no string control in it. One helper because that rule holds at every
+ * parse site and at every seam past them (`docs/specs/transport.md`).
  */
 export function textProjectionOf(
   parsed: Pick<TerminalProtocolParseResult, 'visibleData' | 'textData'>,
