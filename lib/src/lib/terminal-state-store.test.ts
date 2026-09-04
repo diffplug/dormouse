@@ -126,6 +126,17 @@ describe('terminal semantic state store command input fallback', () => {
     expect(getTerminalPaneState('pane').currentCommand?.displayCommand).toBe('lazygit');
   });
 
+  it('does not read chunked inline-image payloads as returned prompts', () => {
+    submit('pane', 'lazygit');
+    recordTerminalOutput('pane', '\x1b_Gf=100;dXNlckBob3N0IHJlcG8gJSA=');
+    recordTerminalOutput('pane', 'dXNlckBob3N0IHJlcG8gJSA=');
+
+    expect(getTerminalPaneState('pane').currentCommand?.displayCommand).toBe('lazygit');
+
+    recordTerminalOutput('pane', `\x1b\\\r\n${PROMPT}`);
+    expect(getTerminalPaneState('pane').currentCommand).toBeNull();
+  });
+
   it('still sees a real prompt trailed by a half-arrived title OSC', () => {
     submit('pane', 'lazygit');
     recordTerminalOutput('pane', '\r\nuser@host repo % \x1b]0;~/re');
@@ -262,6 +273,14 @@ describe('terminal command input via rendered buffer', () => {
     // Reconnect to a live pty: the shell won't re-emit its prompt, so the shape
     // must come from the replayed scrollback that ends at the idle prompt.
     seedPromptShapeFromScrollback('pane', `earlier output\r\n${PROMPT}`);
+    recordTerminalUserInput('pane', 'pnpm build\r', lineReader(`${PROMPT}pnpm build`));
+
+    expect(getTerminalPaneState('pane').currentCommand?.rawCommandLine).toBe('pnpm build');
+  });
+
+  it('seeds through image payloads longer than the prompt scan window', () => {
+    const image = `\x1b]1337;File=inline=1:${'A'.repeat(2_000)}\x07`;
+    seedPromptShapeFromScrollback('pane', `earlier output\r\n${image}${PROMPT}`);
     recordTerminalUserInput('pane', 'pnpm build\r', lineReader(`${PROMPT}pnpm build`));
 
     expect(getTerminalPaneState('pane').currentCommand?.rawCommandLine).toBe('pnpm build');

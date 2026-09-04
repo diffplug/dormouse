@@ -8,14 +8,9 @@
 
 The attacker is any program writing to a PTY.
 
-**Every value the parser retains is bounded in code points and stripped of
-control characters before storage**, and an unterminated OSC is buffered only to
-`OSC_INCOMPLETE_LIMIT` (16,384 code units) before it is dropped
-(`docs/specs/terminal-escapes.md` -> "Parsing location").
+**Must bound retained output by representation**: `TerminalProtocolParser` semantic values by code points and control stripping, an incomplete semantic OSC at 16,384 code units, and ImageAddon data by encoded bytes, decoded pixels, and FIFO storage (`docs/specs/terminal-escapes.md` -> "Parsing location", "Inline graphics").
 
-**Untrusted PTY output can never write the user's clipboard**: `OSC 52` is
-consumed and never re-emitted, with `OSC 50` and every `OSC 1337`
-(`docs/specs/terminal-escapes.md` -> "Supported OSCs").
+**Never let untrusted PTY output write the clipboard or access a file**: consume `OSC 52`, `OSC 50`, and unsupported `OSC 1337`; IIP accepts carried inline bytes only and ignores non-inline transfers and filenames (`docs/specs/terminal-escapes.md` -> "Inline graphics").
 
 **An `OSC 8` hyperlink opens only after a confirmation dialog**; a target whose
 display text names a different host gets **no open action at all** — close and
@@ -36,11 +31,7 @@ before speech or push (`docs/specs/alert.md` -> "Text And Security").
 shell-integration scripts — the parser scans raw bytes and cannot defend it
 (`docs/specs/terminal-escapes.md` -> "Shell-integration injection"; rationale).
 
-**Output's whole reach is the screen and the Session's own state** — an alert, a
-title candidate, a prompt or command boundary, a CWD, an `OSC 8` region — plus
-**exactly three answers Dormouse writes back into the PTY**: `OSC 10/11/12 ; ?`
-color, `OSC 99` capability, `CSI > q` device. xterm.js answers standard cursor,
-device and focus reports itself
+**Must confine output to the screen, Session state, and bounded terminal reports** — rendered text/images, alerts, titles, prompt/command boundaries, CWD, and `OSC 8`. **The PTY-boundary parser writes exactly three answer families**: `OSC 10/11/12 ; ?` color, `OSC 99` capability, `CSI > q` device. xterm.js and ImageAddon answer cursor, device, focus, size, and graphics reports
 (`docs/specs/terminal-escapes.md` -> "Report filtering on the input side").
 
 - **FAIL IF** `isKnownUnsupportedIterm2Osc` in `lib/src/lib/terminal-protocol.ts` stops consuming `OSC 52`, or a parse site stops running `TerminalProtocolParser` before `pty:data` leaves it (rationale). Pinned by `lib/src/lib/terminal-protocol.test.ts`.

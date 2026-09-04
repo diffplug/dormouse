@@ -1,5 +1,31 @@
 import { describe, expect, it } from 'vitest';
-import { stripTerminalControls } from './terminal-controls';
+import { stripTerminalControls, TerminalControlStreamFilter } from './terminal-controls';
+
+describe('TerminalControlStreamFilter', () => {
+  it('removes image string payloads split across PTY reads', () => {
+    const filter = new TerminalControlStreamFilter();
+
+    expect(filter.process('before\x1b]1337;File=inline=1:ZmFrZQ==')).toBe('before');
+    expect(filter.process('dXNlckBob3N0IHJlcG8gJSA=\x1b')).toBe('');
+    expect(filter.process('\\after')).toBe('after');
+  });
+
+  it('handles SIXEL DCS, Kitty APC, C1 introducers, and aborts', () => {
+    const filter = new TerminalControlStreamFilter();
+
+    expect(filter.process('\x1bPqfake prompt')).toBe('');
+    expect(filter.process('\x1b\\sixel done')).toBe('sixel done');
+    expect(filter.process('\x1b_Gf=100;fake prompt\x18kitty aborted')).toBe('kitty aborted');
+    expect(filter.process('\x9d1337;File=inline=1:AAAA\x9cc1 done')).toBe('c1 done');
+  });
+
+  it('preserves ordinary escape sequences across chunk boundaries', () => {
+    const filter = new TerminalControlStreamFilter();
+
+    expect(filter.process('red\x1b')).toBe('red');
+    expect(filter.process('[31mtext')).toBe('\x1b[31mtext');
+  });
+});
 
 describe('stripTerminalControls', () => {
   it('removes terminated string controls with their payload', () => {

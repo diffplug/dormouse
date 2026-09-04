@@ -31,7 +31,7 @@
   `node scripts/xterm-bump.mjs --canopy <forkVersion>`. `lib/` and `standalone/`
   may track a newer upstream beta between fork rebases.
 - **Every pin must be exact, and every addon's core peer must equal its
-  workspace's core pin** — the four `@xterm/*` packages share a repo but carry
+  workspace's core pin** — the first-party `@xterm/*` packages share a repo but carry
   independent beta counters (rationale). `scripts/xterm-lint.mjs` also requires
   `lib` ≡ `standalone` and checks the canopy tarball's tag, filename, counter
   and peer as one set; `scripts/xterm-bump.mjs` (`pnpm bump:xterm`) writes the

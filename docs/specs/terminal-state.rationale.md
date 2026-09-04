@@ -28,6 +28,8 @@
 
 **Why alt-screen spans are dropped.** Fullscreen TUIs (vim, lazygit, less) render into the alt buffer, so a `$` painted there is the program's, not the user's prompt.
 
+**Why string-control state survives PTY reads.** Inline-image payloads are much larger than the 1,024-character prompt scan and arrive over many reads. Stripping each read independently removes the introducer but promotes every middle chunk's base64 to plain output, which can evict the real prompt tail or imitate one; retaining only whether the stream is inside OSC/DCS/APC removes that ambiguity without retaining the payload.
+
 **Why boundary mode is needed, and why its trailing boundary must be trimmed.** Deleting a redraw's cursor move welds text never adjacent on screen: `building...\x1b[1;1HC:\Users\me>` reads as one line starting with `building`, which no anchored shape matches. But a boundary is not a real line break. A genuine trailing newline means nothing is painted on the current line yet — no prompt, and reading one as a prompt flips a running command back to idle. A trailing *boundary* means only that a control closed the line, which is what a prompt clearing to end-of-line after painting itself emits (`C:\Users\me>\x1b[K`); reading it as an empty last line would hide every such prompt.
 
 **Why `isPaneOscDriven()` is exposed.** `dor ensure --restart` can only match a surface whose shell re-reports its command, so it must know whether this pane's command state came from real OSC boundaries or the heuristic.

@@ -12,6 +12,14 @@ vi.mock('@xterm/addon-fit', () => {
   return { FitAddon };
 });
 
+vi.mock('@xterm/addon-image', () => {
+  class ImageAddon {
+    constructor(readonly options: Record<string, unknown>) {}
+  }
+
+  return { ImageAddon };
+});
+
 vi.mock('@xterm/addon-unicode-graphemes', () => {
   class UnicodeGraphemesAddon {}
 
@@ -21,6 +29,7 @@ vi.mock('@xterm/addon-unicode-graphemes', () => {
 vi.mock('@xterm/xterm', () => {
   class MockTerminal {
     writes: string[] = [];
+    addons: unknown[] = [];
     private dataListeners = new Set<(data: string) => void>();
     private resizeListeners = new Set<(size: { cols: number; rows: number }) => void>();
 
@@ -32,7 +41,9 @@ vi.mock('@xterm/xterm', () => {
       bracketedPasteMode: false,
     };
 
-    loadAddon(): void {}
+    loadAddon(addon: unknown): void {
+      this.addons.push(addon);
+    }
 
     open(): void {}
 
@@ -132,6 +143,7 @@ import { REPLAY_MODE_RESET } from './terminal-report-filter';
 
 interface MockTerminalInstance {
   writes: string[];
+  addons: Array<{ constructor: { name: string }; options?: Record<string, unknown> }>;
   emitInput(data: string): void;
   emitResize(cols: number, rows: number): void;
 }
@@ -309,6 +321,19 @@ describe('terminal-registry alert behavior', () => {
     createSession(id);
 
     expect(isUntouched(id)).toBe(true);
+  });
+
+  it('loads inline-image support with per-Session resource limits', () => {
+    const entry = createSession('image-addon');
+    const addon = entry.terminal.addons.find((candidate) => candidate.constructor.name === 'ImageAddon');
+
+    expect(addon?.options).toMatchObject({
+      pixelLimit: 8_388_608,
+      storageLimit: 32,
+      sixelSupport: true,
+      iipSupport: true,
+      kittySupport: true,
+    });
   });
 
   it('carries a primed ring counter into the terminal entry', () => {

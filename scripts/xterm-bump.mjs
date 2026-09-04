@@ -4,7 +4,7 @@
  * upstream commit — and writes it into `lib/` and `standalone/`.
  *
  * Renovate proposes the newest version of each package independently, which is
- * usually a set spanning two commits: the four packages ship from one repo but
+ * usually a set spanning two commits: the packages ship from one repo but
  * carry independent beta counters, and an addon is only published when its own
  * content changes. `scripts/xterm-lint.mjs` rejects such a set; this script
  * produces the one to replace it with.
@@ -27,7 +27,12 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const CORE = '@xterm/xterm';
-const ADDONS = ['@xterm/addon-fit', '@xterm/addon-unicode-graphemes', '@xterm/addon-webgl'];
+const ADDONS = [
+  '@xterm/addon-fit',
+  '@xterm/addon-image',
+  '@xterm/addon-unicode-graphemes',
+  '@xterm/addon-webgl',
+];
 const FORK_ADDON = '@diffplug/xterm-addon-webgl-sdf';
 const UPSTREAM_REPO = 'xtermjs/xterm.js';
 
@@ -148,12 +153,12 @@ for (const version of coreVersions) {
     const missing = ADDONS.filter((n) => !(n in set)).map((n) => n.replace('@xterm/', ''));
     console.log(
       `note: newest core ${version} has no matching publish of ${missing.join(', ')} — ` +
-      'falling back to the newest commit that published all four\n',
+      'falling back to the newest commit that published every tracked package\n',
     );
   }
 }
 if (!chosen) {
-  console.error('no upstream commit has all four packages published — check the registry by hand');
+  console.error('no upstream commit has every tracked package published — check the registry by hand');
   process.exit(1);
 }
 

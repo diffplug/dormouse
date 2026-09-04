@@ -273,7 +273,7 @@ For a terminal Surface the pane ID is its session ID. `TerminalPane` calls `getO
 
 | Op | Behavior |
 |---|---|
-| **Create** `getOrCreateTerminal` | Spawns xterm.js + UnicodeGraphemesAddon + FitAddon + PTY; returns the existing entry if already created. `allowProposedApi: true`, since UnicodeGraphemesAddon needs xterm's proposed Unicode API. **The WebGL addon is not loaded here** ([Renderer](#renderer)). |
+| **Create** `getOrCreateTerminal` | Creates xterm.js with UnicodeGraphemes, Fit, and Image addons plus a PTY; reuses an existing entry. `allowProposedApi: true` enables UnicodeGraphemesAddon. **The WebGL addon is not loaded here** ([Renderer](#renderer)). |
 | **Resume** `resumeTerminal` | Creates the xterm entry and writes replay data, spawning no PTY. Webview recreated while the host retains Live PTYs (Link: Severed → Resuming → Live). |
 | **Restore** `restoreTerminal` | Creates the xterm entry and spawns a new PTY with the saved cwd; **replays no transcript** (`docs/specs/transport.md` → "What is persisted"). Cold start from a saved Snapshot (Link: Cold → Live). |
 | **mount / unmount** | `mountElement` reparents the persistent DOM element into a container, `unmountElement` removes it. **The Registry entry survives.** |
@@ -292,7 +292,7 @@ On cold restore, a terminal pane with a host-captured recovery invocation runs i
 
 ### Renderer
 
-Every terminal renders through stock `@xterm/addon-webgl`. **Claim the GL context on a session's first `mountElement`, never at creation**, guarded by `TerminalEntry.webglAttempted` so each session claims at most one (rationale). **xterm's built-in DOM renderer is the fallback, never the default** — its per-cell span rebuild makes a truecolor-dense TUI an order of magnitude slower (rationale).
+Text uses `@xterm/addon-webgl`; ImageAddon uses canvas layers (rationale). **Claim the GL context on a session's first `mountElement`, never at creation**, guarded by `TerminalEntry.webglAttempted` so each session claims at most one (rationale). **xterm's built-in DOM renderer is the fallback, never the default** — its per-cell span rebuild makes a truecolor-dense TUI an order of magnitude slower (rationale). Image rules: `docs/specs/terminal-escapes.md` → "Inline graphics".
 
 **Fallback to the DOM renderer must stay automatic** — two expected failure modes:
 
@@ -301,7 +301,7 @@ Every terminal renders through stock `@xterm/addon-webgl`. **Claim the GL contex
 
 **Degradation is one-way**: a demoted pane stays on the DOM renderer even after other panes close. Re-arming is unbuilt — see `## Future`. The outcome is recorded as `data-renderer="webgl"|"dom"` on the host element, including after a context loss demotes a pane. `cfg.terminal.webglRenderer` disables the whole path, and it is off under Chromatic (pinned in `lib/.storybook/preview.ts`).
 
-Source of truth: `tryEnableWebglRenderer` in `lib/src/lib/terminal-lifecycle.ts`. Not the SDF fork of `docs/specs/webgl-text.md`, a different addon consumed only by `canopy/`.
+Source of truth: `tryEnableWebglRenderer` and `createXtermHost` in `lib/src/lib/terminal-lifecycle.ts`. Not the SDF fork of `docs/specs/webgl-text.md`, a different addon consumed only by `canopy/`.
 
 ### Session persistence
 

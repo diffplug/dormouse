@@ -159,6 +159,41 @@ describe('TerminalProtocolParser', () => {
     expect(result.events).toEqual([]);
   });
 
+  it('passes supported iTerm image commands through but still consumes other OSC 1337 commands', () => {
+    const parser = new TerminalProtocolParser();
+    const image = '\x1b]1337;File=inline=1;size=4:AAAA\x07';
+    const multipart =
+      '\x1b]1337;MultipartFile=inline=1;size=4\x07' +
+      '\x1b]1337;FilePart=AAAA\x07' +
+      '\x1b]1337;FileEnd\x07';
+    const report = '\x1b]1337;ReportCellSize\x1b\\';
+    const result = parser.process(`${image}${multipart}${report}\x1b]1337;SetMark\x07done`);
+
+    expect(result.visibleData).toBe(`${image}${multipart}${report}done`);
+    expect(result.events).toEqual([]);
+  });
+
+  it('streams a chunked iTerm image past the ordinary incomplete-OSC limit', () => {
+    const parser = new TerminalProtocolParser();
+    const prefix = '\x1b]1337;File=inline=1;size=20000:';
+    const firstPayload = 'A'.repeat(17_000);
+
+    expect(parser.process(prefix + firstPayload)).toEqual({
+      visibleData: prefix + firstPayload,
+      events: [],
+    });
+    expect(parser.process('BBBB\x1b')).toEqual({ visibleData: 'BBBB', events: [] });
+
+    const end = parser.process('\\after\x1b]7;file:///tmp\x07tail');
+    expect(end.visibleData).toBe('\x1b\\aftertail');
+    expect(end.events).toEqual([
+      {
+        kind: 'semantic',
+        event: expect.objectContaining({ type: 'cwd' }),
+      },
+    ]);
+  });
+
   it('strips known unsupported iTerm2 and clipboard OSC sequences', () => {
     const parser = new TerminalProtocolParser();
     const result = parser.process('a\x1b]52;c;SGVsbG8=\x07b\x1b]50;Monaco\x07c');

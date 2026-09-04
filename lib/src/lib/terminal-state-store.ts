@@ -16,13 +16,14 @@ import {
   type PromptSubmitState,
 } from './terminal-command-input';
 import { derivePromptShape, extractCommand, type PromptShape } from './terminal-prompt-shape';
-import { stripTerminalControls } from './terminal-controls';
+import { stripTerminalControls, TerminalControlStreamFilter } from './terminal-controls';
 import { getSessionIdByPtyId } from './terminal-store';
 
 const paneStates = new Map<string, TerminalPaneState>();
 const promptSubmitStates = new Map<string, PromptSubmitState>();
 const promptShapes = new Map<string, PromptShape>();
 const promptOutputBuffers = new Map<string, string>();
+const promptControlFilters = new Map<string, TerminalControlStreamFilter>();
 // Panes with authentic OSC 633/133 boundaries; the keystroke fallback stands
 // down for each id here until the pane is reset or removed.
 const oscDrivenPanes = new Set<string>();
@@ -101,6 +102,7 @@ export function resetTerminalPaneState(id: string, initial?: Partial<TerminalPan
   promptSubmitStates.delete(id);
   promptShapes.delete(id);
   promptOutputBuffers.delete(id);
+  promptControlFilters.delete(id);
   oscDrivenPanes.delete(id);
   paneStates.set(id, createTerminalPaneState(initial));
   notifyTerminalPaneStateListeners();
@@ -110,6 +112,7 @@ export function removeTerminalPaneState(id: string): void {
   promptSubmitStates.delete(id);
   promptShapes.delete(id);
   promptOutputBuffers.delete(id);
+  promptControlFilters.delete(id);
   oscDrivenPanes.delete(id);
   if (!paneStates.delete(id)) return;
   notifyTerminalPaneStateListeners();
@@ -206,7 +209,15 @@ export function finishLaunchedCommandByPtyId(ptyId: string, exitCode: number): v
 export function recordTerminalOutput(id: string, output: string): void {
   if (!output) return;
 
-  const buffer = `${promptOutputBuffers.get(id) ?? ''}${output}`.slice(-1024);
+  let filter = promptControlFilters.get(id);
+  if (!filter) {
+    filter = new TerminalControlStreamFilter();
+    promptControlFilters.set(id, filter);
+  }
+  const textOutput = filter.process(output);
+  if (!textOutput) return;
+
+  const buffer = `${promptOutputBuffers.get(id) ?? ''}${textOutput}`.slice(-1024);
   promptOutputBuffers.set(id, buffer);
   const promptLine = detectReturnedShellPrompt(buffer);
   if (!promptLine) return;
@@ -240,7 +251,8 @@ export function recordTerminalOutputByPtyId(ptyId: string, output: string): void
 // prompt. Learn-only — fires no idle transition.
 export function seedPromptShapeFromScrollback(id: string, scrollback: string): void {
   if (!scrollback) return;
-  const promptLine = detectReturnedShellPrompt(scrollback.slice(-1024));
+  const text = new TerminalControlStreamFilter().process(scrollback);
+  const promptLine = detectReturnedShellPrompt(text.slice(-1024));
   if (!promptLine) return;
   const shape = derivePromptShape(promptLine);
   if (shape) promptShapes.set(id, shape);

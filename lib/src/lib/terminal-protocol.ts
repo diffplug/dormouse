@@ -64,6 +64,11 @@ const OSC99_PENDING_TITLE_LIMIT = 2048;
 const OSC99_PENDING_BODY_LIMIT = 16_384;
 const OSC99_SUPPORT_PAYLOAD = 'o=always:p=title,body';
 const OSC99_RESPONSE_ID_RE = /^[^\s:;\x00-\x1f\x7f-\x9f]+$/;
+const IIP_STREAMING_PREFIXES = [
+  '1337;File=',
+  '1337;MultipartFile=',
+  '1337;FilePart=',
+] as const;
 const TERMINAL_BELL_NOTIFICATION: ActivityNotification = { source: 'BEL', title: 'Terminal bell', body: null };
 // Mirrors ITERM2_COMPAT_VERSION in standalone/sidecar/pty-core.js — pinned by
 // mirrored-constants.test.ts (terminal-escapes.md: one compatibility version
@@ -73,12 +78,15 @@ export const ITERM2_DEVICE_ATTRIBUTES_RESPONSE = `\x1bP>|iTerm2 ${ITERM2_COMPAT_
 
 export class TerminalProtocolParser {
   private pending = '';
+  private streamingIip = false;
+  private streamingIipPending = '';
   private osc99Pending = new Map<string, Osc99PendingNotification>();
 
   /** Resolves OSC 10/11/12 queries; null lets xterm.js handle the sequence. */
   constructor(private readonly colorProvider?: TerminalColorProvider) {}
 
   process(data: string): TerminalProtocolParseResult {
+    if (this.streamingIip) return this.processStreamingIip(data);
     if (this.pending === '' && !NEEDS_PARSE_RE.test(data)) {
       return { visibleData: data, events: NO_EVENTS as TerminalProtocolEvent[] };
     }
@@ -99,7 +107,18 @@ export class TerminalProtocolParser {
       const terminator = findOscTerminator(text, osc.contentStart);
       if (!terminator) {
         const incomplete = text.slice(osc.index);
-        if (incomplete.length <= OSC_INCOMPLETE_LIMIT) this.pending = incomplete;
+        const content = text.slice(osc.contentStart);
+        if (IIP_STREAMING_PREFIXES.some((prefix) => content.startsWith(prefix))) {
+          this.streamingIip = true;
+          if (incomplete.endsWith('\x1b')) {
+            visibleData += incomplete.slice(0, -1);
+            this.streamingIipPending = '\x1b';
+          } else {
+            visibleData += incomplete;
+          }
+        } else if (incomplete.length <= OSC_INCOMPLETE_LIMIT) {
+          this.pending = incomplete;
+        }
         break;
       }
 
@@ -121,7 +140,34 @@ export class TerminalProtocolParser {
 
   reset(): void {
     this.pending = '';
+    this.streamingIip = false;
+    this.streamingIipPending = '';
     this.osc99Pending.clear();
+  }
+
+  private processStreamingIip(data: string): TerminalProtocolParseResult {
+    const text = this.streamingIipPending + data;
+    this.streamingIipPending = '';
+    const terminator = findOscTerminator(text, 0);
+    if (!terminator) {
+      if (text.endsWith('\x1b')) {
+        this.streamingIipPending = '\x1b';
+        return { visibleData: text.slice(0, -1), events: NO_EVENTS as TerminalProtocolEvent[] };
+      }
+      return { visibleData: text, events: NO_EVENTS as TerminalProtocolEvent[] };
+    }
+
+    this.streamingIip = false;
+    const sequenceEnd = text.slice(0, terminator.end);
+    const rest = text.slice(terminator.end);
+    if (!rest) {
+      return { visibleData: sequenceEnd, events: NO_EVENTS as TerminalProtocolEvent[] };
+    }
+    const parsedRest = this.process(rest);
+    return {
+      visibleData: sequenceEnd + parsedRest.visibleData,
+      events: parsedRest.events,
+    };
   }
 
   private parseOsc(content: string): TerminalProtocolEvent[] | null {
@@ -434,7 +480,14 @@ function parseOsc633Property(rawProperties: string): TerminalProtocolEvent[] {
   return [];
 }
 
-function parseOsc1337(content: string): TerminalProtocolEvent[] {
+function parseOsc1337(content: string): TerminalProtocolEvent[] | null {
+  if (
+    IIP_STREAMING_PREFIXES.some((prefix) => content.startsWith(prefix)) ||
+    content === '1337;FileEnd' ||
+    content === '1337;ReportCellSize'
+  ) {
+    return null;
+  }
   const prefix = '1337;CurrentDir=';
   if (!content.startsWith(prefix)) return [];
   const cwd = cwdFromOsc1337(content.slice(prefix.length));

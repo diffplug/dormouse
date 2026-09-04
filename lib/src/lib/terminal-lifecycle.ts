@@ -1,5 +1,6 @@
 import { Terminal, type IBufferRange } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { ImageAddon, type IImageAddonOptions } from '@xterm/addon-image';
 import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { shellCommandKind, type ShellCommandKind } from 'dor/commands/shell-quote';
@@ -54,6 +55,25 @@ import {
 import { readLogicalLineFromBuffer, type BufferLike } from './terminal-buffer-read';
 import { UNNAMED_PANEL_TITLE } from './terminal-state';
 import { vscodeWorkbenchCommandForKeydown } from './vscode-keybindings';
+
+// Per-Session limits are explicit because Sessions survive unmount/minimize and
+// a product Window can retain many of them at once. 2^23 pixels still admits a
+// 3840x2160 image; 32 MB keeps one such RGBA image without granting every
+// orphaned Session the addon's 128 MB default cache.
+const IMAGE_ADDON_OPTIONS = {
+  enableSizeReports: true,
+  pixelLimit: 8_388_608,
+  storageLimit: 32,
+  showPlaceholder: true,
+  sixelSupport: true,
+  sixelScrolling: true,
+  sixelPaletteLimit: 4_096,
+  sixelSizeLimit: 33_554_432,
+  iipSupport: true,
+  iipSizeLimit: 33_554_432,
+  kittySupport: true,
+  kittySizeLimit: 33_554_432,
+} satisfies IImageAddonOptions;
 
 function makePromptLineReader(terminal: Terminal): PromptLineReader {
   return {
@@ -205,6 +225,7 @@ function createXtermHost(): { terminal: Terminal; fit: FitAddon; element: HTMLDi
   terminal.loadAddon(new UnicodeGraphemesAddon());
   const fit = new FitAddon();
   terminal.loadAddon(fit);
+  terminal.loadAddon(new ImageAddon(IMAGE_ADDON_OPTIONS));
 
   const element = document.createElement('div');
   element.style.width = '100%';

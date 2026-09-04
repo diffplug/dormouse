@@ -18,6 +18,8 @@
 
 **Why the color queries are answered rather than passed through.** A TUI that adapts to a light or dark background asks with `OSC 11 ; ?`; with no answer it assumes dark, and on a light theme its adaptive chrome — Codex's composer "pill", for one — renders unreadable. xterm.js does not answer the query itself, so the parse boundary is the only place holding the real theme.
 
+**Why IIP streams past the OSC buffer.** The semantic parser normally waits for an OSC terminator so it can decide whether to retain, strip, or forward the sequence. An inline image is routinely megabytes and split across PTY reads, so routing it through the 16 KiB incomplete-sequence buffer drops almost every real image. Once `File`, `MultipartFile`, or `FilePart` is known, no semantic rule needs its payload; forwarding chunks lets ImageAddon's streaming decoder enforce the larger purpose-built byte/pixel bounds without allocating a second whole-sequence copy.
+
 ## OSC color queries on Windows require the bundled ConPTY
 
 **Two ConPTY backends, one of which eats the query.** Which backend node-pty spawns with decides whether a program's query reaches the consumer at all: under the in-box `CreatePseudoConsole` it never does, so nothing can answer and the light-theme failure under [Supported OSCs](#supported-oscs) is unavoidable on Windows. The bundled OpenConsole path is the same passthrough Windows Terminal itself relies on, which is what makes the extra prebuilds worth their packaging cost on both distributions.
@@ -27,6 +29,12 @@
 **Why win32-input-mode exists alongside the kitty protocol.** A ConPTY app that reads through the Console API rather than the VT stream — Codex on Windows — cannot negotiate the kitty protocol at all, so without win32-input-mode a key like Shift+Enter or Ctrl+J reaches it as a bare byte, or not at all.
 
 **Why an arbiter rather than a static choice.** xterm.js gives win32-input-mode precedence per keypress, and ConPTY's conhost enables it proactively rather than on the app's behalf, so leaving it on would silently break every kitty consumer in the window — and a kitty TUI (Claude Code) and a win32 TUI (Codex) routinely run in the same one.
+
+## Inline graphics
+
+**Why the limits are below the addon's defaults.** ImageAddon storage is per Terminal instance, while Dormouse keeps minimized Sessions and their xterm instances alive. The upstream 128 MB cache and 16,777,216-pixel ceiling can therefore multiply across every visible and minimized pane. A 32 MB cache holds one 3840×2160 RGBA image, and the 8,388,608-pixel ceiling admits that image while halving the addon's worst decode-buffer footprint; the 32 MiB sequence cap retains the upstream streaming bound.
+
+**Why prompt filtering is stateful.** The keystroke fallback reads a rolling 1,024-character output tail. A stateless control stripper removes a complete `APC G`, SIXEL DCS, or IIP OSC, but a later PTY chunk begins with bare base64 after the introducer fell out of that window. Carrying only the string-control state across reads removes the payload without changing what xterm receives.
 
 ## Report filtering on the input side
 

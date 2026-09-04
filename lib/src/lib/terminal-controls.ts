@@ -6,6 +6,95 @@ export interface StripTerminalControlsOptions {
   boundaries?: boolean;
 }
 
+type TerminalControlStreamState =
+  | 'ground'
+  | 'escape'
+  | 'osc'
+  | 'string'
+  | 'oscEscape'
+  | 'stringEscape';
+
+/**
+ * Removes OSC/DCS/SOS/PM/APC strings without promoting payload bytes to text
+ * when a PTY read ends in the middle of one. The returned stream deliberately
+ * keeps every other control for `stripTerminalControls` to interpret with its
+ * boundary option at the point of use.
+ */
+export class TerminalControlStreamFilter {
+  private state: TerminalControlStreamState = 'ground';
+
+  process(input: string): string {
+    let output = '';
+
+    for (let i = 0; i < input.length; i += 1) {
+      const char = input[i];
+      const code = input.charCodeAt(i);
+
+      switch (this.state) {
+        case 'ground':
+          if (char === '\x1b') {
+            this.state = 'escape';
+          } else if (code === 0x9d) {
+            this.state = 'osc';
+          } else if (code === 0x90 || code === 0x98 || code === 0x9e || code === 0x9f) {
+            this.state = 'string';
+          } else {
+            output += char;
+          }
+          break;
+
+        case 'escape':
+          if (char === ']') {
+            this.state = 'osc';
+          } else if (char === 'P' || char === 'X' || char === '^' || char === '_') {
+            this.state = 'string';
+          } else {
+            // It was an ordinary ESC sequence. Preserve the introducer and
+            // re-read this byte in ground state so the stateless stripper sees
+            // the complete sequence, even when ESC ended the previous chunk.
+            output += '\x1b';
+            this.state = 'ground';
+            i -= 1;
+          }
+          break;
+
+        case 'osc':
+          if (char === '\x07' || char === '\x18' || char === '\x1a' || code === 0x9c) {
+            this.state = 'ground';
+          } else if (char === '\x1b') {
+            this.state = 'oscEscape';
+          }
+          break;
+
+        case 'string':
+          if (char === '\x18' || char === '\x1a' || code === 0x9c) {
+            this.state = 'ground';
+          } else if (char === '\x1b') {
+            this.state = 'stringEscape';
+          }
+          break;
+
+        case 'oscEscape':
+        case 'stringEscape':
+          if (char === '\\') {
+            this.state = 'ground';
+          } else {
+            // A bare ESC cancels the string and starts a new escape sequence.
+            this.state = 'escape';
+            i -= 1;
+          }
+          break;
+      }
+    }
+
+    return output;
+  }
+
+  reset(): void {
+    this.state = 'ground';
+  }
+}
+
 /** Remove presentation controls safely from slices that may start or end
  * mid-sequence. Shared by resume-hint and returned-prompt detection. */
 export function stripTerminalControls(input: string, options: StripTerminalControlsOptions = {}): string {
