@@ -64,13 +64,14 @@ fails closed when no token was injected (`docs/specs/vscode.md` -> "Webview
 message authentication"). **The standalone adapters have no forgeable inbox**:
 host events arrive over Tauri IPC, never `window.postMessage`.
 
-**The shim the proxy injects addresses the embedder chain's innermost origin,
-never `'*'`**, and with no usable chain the proxy injects nothing and strips no
-framing header (`docs/specs/dor-browser.md` -> "Iframe Host Capability And CSP").
-What it grants a *caller* is [Loopback Listeners](#loopback-listeners)'s
-business.
+**Each injected shim hop must address only its proxy origin and the embedder
+chain's innermost origin, never `'*'`.** Nested frames relay the four registered
+messages through same-origin parents. With no usable chain the proxy injects
+nothing and strips no framing header (`docs/specs/dor-browser.md` -> "Iframe
+Host Capability And CSP"). What it grants a *caller* is [Loopback
+Listeners](#loopback-listeners)'s business.
 
-- **FAIL IF** the injected shim targets anything but the embedder chain's innermost origin, or the proxy uses a chain it did not validate in full: `iframeShim` and `normalizeEmbedderOrigins` in `lib/src/host/iframe-proxy-rewrite.ts`, applied in `lib/src/host/iframe-proxy.ts`. Pinned by `lib/src/host/iframe-proxy-rewrite.test.ts` and `lib/src/host/iframe-proxy.test.ts`.
+- **FAIL IF** an injected shim targets anything but its proxy origin or the embedder chain's innermost origin, relays a foreign-origin or unregistered message, or the proxy uses a chain it did not validate in full: `iframeShim` and `normalizeEmbedderOrigins` in `lib/src/host/iframe-proxy-rewrite.ts`, applied in `lib/src/host/iframe-proxy.ts`. Pinned by `lib/src/host/iframe-proxy-rewrite.test.ts` and `lib/src/host/iframe-proxy.test.ts`.
 - **FAIL IF** a `VSCodeAdapter` host-channel listener acts on a message before `isHostMessage` (`lib/src/lib/vscode-message-token.ts`) accepts it, or the token stops being minted per serve and attached only by `WebviewChannel.post` in `vscode-ext/src/webview-messaging.ts`: `dor:controlRequest` is one of the shapes a framed page could otherwise claim. The proxy-origin listeners above are guarded by origin, not the token. Pinned by the `host message authentication` block in `lib/src/lib/platform/vscode-adapter.test.ts`.
 
 Source of truth: `isProxyOrigin` in `lib/src/lib/iframe-proxy-registry.ts`, the

@@ -84,7 +84,9 @@ export function frameAncestorsCsp(embedderOrigins: string[]): string {
 // this is why the upstream CSP is dropped whole rather than per-directive (an
 // inline script needs `script-src` gone as much as the frame needs
 // `frame-ancestors` gone). It posts four message kinds to the Wall and nothing
-// else (every other keystroke flows to the tool):
+// else (every other keystroke flows to the tool). A nested document relays them
+// through its same-origin proxy parents until the outer document reaches the
+// app:
 //   - `leader`: the reserved dual-tap ⌘/⇧ chord (matching handle-dual-tap.ts),
 //     so the global chord keeps working with the frame focused.
 //   - `pointerdown`: a click landed in the frame. A cross-origin click reaches
@@ -101,11 +103,18 @@ export function iframeShim(embedderOrigin: string): string {
   var P=window.parent;
   var TARGET=${JSON.stringify(embedderOrigin)};
   if(!P||P===window)return;
-  // Addressed to the app's own origin, never '*': every message here is a
-  // cross-origin *read* of the framed page — its live URL, its anchor hrefs —
-  // that the same-origin policy would otherwise forbid, and postMessage only
-  // delivers when the target window's origin matches.
-  function post(t,d){try{var m={__dormouse:t};if(d)for(var k in d)m[k]=d[k];P.postMessage(m,TARGET);}catch(e){}}
+  // Address each hop to the proxy's own origin and the app origin, never '*'.
+  // Exactly one matches: a nested frame reaches its same-origin parent, while
+  // the outer frame reaches the app. Relays accept only the four fixed shapes
+  // below, so unrelated same-origin application messages never escape.
+  function send(m){try{P.postMessage(m,location.origin);}catch(e){}try{P.postMessage(m,TARGET);}catch(e){}}
+  function post(t,d){var m={__dormouse:t};if(d)for(var k in d)m[k]=d[k];send(m);}
+  addEventListener('message',function(e){
+    if(e.origin!==location.origin)return;
+    var d=e.data,t=d&&d.__dormouse;
+    if(t==='leader'||t==='pointerdown')post(t);
+    else if((t==='location'||t==='open-window')&&typeof d.url==='string')post(t,{url:d.url});
+  },true);
   function postLocation(){post('location',{url:String(location.href)});}
   function anchorHref(e){
     var n=e&&e.target;

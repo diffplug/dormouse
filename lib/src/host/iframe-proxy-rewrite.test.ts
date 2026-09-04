@@ -1,3 +1,4 @@
+import { runInNewContext } from 'node:vm';
 import { describe, it, expect } from 'vitest';
 import {
   frameAncestorsCsp,
@@ -11,7 +12,39 @@ import {
 } from './iframe-proxy-rewrite';
 
 const APP = 'vscode-webview://abc-123';
+const PROXY = 'http://127.0.0.1:4321';
 const IFRAME_SHIM = iframeShim(APP);
+
+type ShimListener = (event: Record<string, unknown>) => void;
+
+function shimFrame(parentOrigin: string, deliver: (data: unknown) => void) {
+  const listeners = new Map<string, ShimListener[]>();
+  const addEventListener = (type: string, listener: ShimListener) => {
+    const current = listeners.get(type) ?? [];
+    current.push(listener);
+    listeners.set(type, current);
+  };
+  const parent = {
+    postMessage(data: unknown, target: string) {
+      if (target === parentOrigin) deliver(JSON.parse(JSON.stringify(data)));
+    },
+  };
+  const window = { parent, open: undefined as unknown };
+  runInNewContext(IFRAME_SHIM, {
+    window,
+    location: { origin: PROXY, href: `${PROXY}/story` },
+    document: { readyState: 'loading' },
+    history: {},
+    addEventListener,
+    setTimeout: () => 0,
+    URL,
+  });
+  return {
+    emit(type: string, event: Record<string, unknown>) {
+      for (const listener of listeners.get(type) ?? []) listener(event);
+    },
+  };
+}
 
 describe('instrumentHtml', () => {
   it('injects the shim before </head>', () => {
@@ -64,11 +97,31 @@ describe('instrumentHtml', () => {
 // The shim reads the framed page's live URL and its anchor hrefs and hands them
 // out — reads the same-origin policy would otherwise forbid. `'*'` handed them
 // to whoever had framed the proxy, which the port scan makes anybody.
-describe('the shim addresses the app, not the world', () => {
-  it('posts to the embedder origin and never to a wildcard', () => {
+describe('the shim addresses the grant and app, not the world', () => {
+  it('posts only to the proxy and embedder origins', () => {
     expect(IFRAME_SHIM).toContain(`var TARGET="${APP}"`);
+    expect(IFRAME_SHIM).toContain('P.postMessage(m,location.origin)');
     expect(IFRAME_SHIM).toContain('P.postMessage(m,TARGET)');
     expect(IFRAME_SHIM).not.toContain("postMessage(m,'*')");
+  });
+
+  it('relays registered messages through same-origin nested frames', () => {
+    const delivered: unknown[] = [];
+    const outer = shimFrame(APP, (data) => delivered.push(data));
+    const inner = shimFrame(PROXY, (data) => outer.emit('message', { origin: PROXY, data }));
+
+    inner.emit('pointerdown', {});
+    expect(delivered).toEqual([{ __dormouse: 'pointerdown' }]);
+
+    outer.emit('message', { origin: PROXY, data: { __dormouse: 'unknown', secret: 'x' } });
+    outer.emit('message', { origin: 'https://evil.example', data: { __dormouse: 'leader' } });
+    expect(delivered).toHaveLength(1);
+
+    outer.emit('message', {
+      origin: PROXY,
+      data: { __dormouse: 'location', url: `${PROXY}/next`, secret: 'x' },
+    });
+    expect(delivered[1]).toEqual({ __dormouse: 'location', url: `${PROXY}/next` });
   });
 });
 

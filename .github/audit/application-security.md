@@ -110,6 +110,9 @@ Be adversarial, and go past the `FAIL IF` list. Ask specifically:
   `'self'` as the explicit same-grant nesting relaxation: confirm each grant is
   one origin bound to one upstream, no wildcard or foreign source is admitted,
   and the no-chain path preserves the upstream controls and injects no shim.
+  Trace nested shim messages too: each hop must accept only its proxy origin and
+  the four registered shapes, reconstruct the message, and target only that
+  origin plus the validated app origin—never a wildcard or foreign origin.
 - Does the shipped code still match what the specs and this section claim? Spec
   drift is a finding; say which side is wrong. The newest sections are the ones
   most likely to have drifted: `remote-security-model.md`'s Presence proofs,

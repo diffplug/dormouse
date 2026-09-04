@@ -481,8 +481,8 @@ Source of truth: `lib/src/components/wall/IframePanel.tsx`,
 
 ### Iframe Shim
 
-**The injected shim is fixed Dormouse-owned code, never user-provided eval.** It
-posts only these messages to the parent:
+**Must relay only these fixed, never-user-provided shim messages through
+same-origin proxy parents to the app:**
 
 - `leader`: dual-tap Meta/Shift leader chord.
 - `pointerdown`: genuine click inside the frame, used to select/focus the pane.
@@ -562,8 +562,8 @@ Security boundaries:
 
 **Must replace framing controls with exactly `frame-ancestors 'self'
 <validated embedder chain>`.** `'self'` permits same-grant nesting; foreign
-ancestors fail. **The shim's `postMessage` must target that
-chain's origin, never `'*'`** (rationale; `docs/specs/security-local.md` →
+ancestors fail. **Each shim hop must target only `'self'` and that chain's
+origin, never `'*'`** (rationale; `docs/specs/security-local.md` →
 "Loopback Listeners"). **With no chain it preserves headers and injects nothing.**
 
 **Must refresh a grant's idle timer for every caller except one that named itself

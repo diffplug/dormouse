@@ -84,6 +84,8 @@ A post-open blank-tab sweep can become such a query when a later relaunch, expli
 
 **Why the CLI's own check is not enough.** `open-window` carries a string the framed page chose, and the new-tab prompt in front of it is user consent, not a boundary — the user is agreeing to open a pane, not vetting a scheme. The same check gates `surface.iframe`, a wire protocol on the control socket rather than the CLI, so nothing upstream of it has already filtered.
 
+**Why each shim hop has two explicit targets.** An injected document cannot tell whether its parent is the app or another document on the grant's proxy origin. It posts to both known origins; the browser delivers only the matching one. A same-origin parent relays only the four registered shapes upward, reconstructing each message, until the outer document reaches the app. No wildcard or foreign origin enters the path.
+
 ## Iframe Focus And Rendering Notes
 
 **Why the raw fallback is sandboxed too.** Reading "raw" as the trusted path and the proxy as the one needing containment is backwards: the raw fallback is the case with *no* proxy in front of the page at all.
