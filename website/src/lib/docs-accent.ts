@@ -136,20 +136,50 @@ export function docsMutedTextFor(
   background: string,
   minContrast = MIN_CONTRAST,
 ): string | null {
-  const flat = flatten(foreground, background);
-  if (!flat) return null;
-  const { base, bg } = flat;
+  return docsMutedTextForSurfaces(foreground, [background], minContrast);
+}
+
+/**
+ * One muted text colour that clears body-text AA on every surface it may
+ * occupy. The least-contrasting surface sets the direction toward quiet; each
+ * candidate is checked against the whole set, so nested tints cannot disappear
+ * from the derivation merely because the token has one CSS variable.
+ */
+export function docsMutedTextForSurfaces(
+  foreground: string,
+  backgrounds: readonly string[],
+  minContrast = MIN_CONTRAST,
+): string | null {
+  if (backgrounds.length === 0) return null;
+  const flats = backgrounds.map((background) => flatten(foreground, background));
+  if (flats.some((flat) => flat === null)) return null;
+  const resolved = flats as Array<{ base: Rgb; bg: Rgb }>;
+  const limiting = resolved.reduce((worst, candidate) =>
+    contrastRatio(candidate.base, candidate.bg) < contrastRatio(worst.base, worst.bg)
+      ? candidate
+      : worst,
+  );
+  const clearsEverySurface = (candidate: Rgb) =>
+    resolved.every(({ bg }) => contrastRatio(candidate, bg) >= minContrast);
+  const { base, bg } = limiting;
 
   // Already too faint to be body text: there is nothing to quieten, so borrow
-  // the accent path's boost away from the background instead.
-  if (contrastRatio(base, bg) < minContrast) {
-    return docsAccentFor(toHex(base), background, minContrast);
+  // the accent path's boost away from the surfaces instead.
+  if (!clearsEverySurface(base)) {
+    const white: Rgb = [255, 255, 255];
+    const black: Rgb = [0, 0, 0];
+    const toward = contrastRatio(white, bg) >= contrastRatio(black, bg) ? white : black;
+    for (let step = 1; step <= 20; step += 1) {
+      const candidate = mix(base, toward, step / 20);
+      if (clearsEverySurface(candidate)) return toHex(candidate);
+    }
+    return null;
   }
 
   let quietest = base;
   for (let step = 1; step <= 100; step += 1) {
     const candidate = mix(base, bg, step / 100);
-    if (contrastRatio(candidate, bg) < minContrast) break;
+    if (!clearsEverySurface(candidate)) break;
     quietest = candidate;
   }
   return toHex(quietest);

@@ -1,7 +1,13 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { completeThemeVars, getBundledThemes } from "dormouse-lib/lib/themes";
-import { compositeColor, contrastRatio, docsAccentFor, docsMutedTextFor } from "./docs-accent";
+import {
+  compositeColor,
+  contrastRatio,
+  docsAccentFor,
+  docsMutedTextFor,
+  docsMutedTextForSurfaces,
+} from "./docs-accent";
 import { TINTED_DOCS_SURFACES } from "../components/docs-tokens";
 
 /** The site's own palette, which `website/src/index.css` declares as literals
@@ -18,6 +24,18 @@ const tintFor = (tintVar: string, foreground: string): string => {
   if (tintVar === "--color-caramel") return SITE_CARAMEL;
   throw new Error(`docs-accent.test.ts has no colour for tintVar ${tintVar}`);
 };
+
+const surfacesFor = (
+  surfaceVariants: (typeof TINTED_DOCS_SURFACES)[number]["surfaceVariants"],
+  foreground: string,
+  background: string,
+): string[] =>
+  surfaceVariants.map((layers) =>
+    layers.reduce((surface, { tintVar, tintAlpha }) => {
+      const tint = tintFor(tintVar, foreground);
+      return compositeColor(tint, surface, tintAlpha)!;
+    }, background),
+  );
 
 const rgb = (hex: string): [number, number, number] => {
   const h = hex.replace("#", "");
@@ -119,17 +137,18 @@ describe("docs muted text colour", () => {
   });
 
   it.each(TINTED_DOCS_SURFACES)(
-    "clears WCAG AA on the $token surface in every bundled theme",
-    ({ tintVar, tintAlpha }) => {
+    "clears WCAG AA on every $token surface in every bundled theme",
+    ({ surfaceVariants }) => {
       for (const t of themes) {
-        const tint = tintFor(tintVar, t.foreground);
-        const surface = compositeColor(tint, t.background, tintAlpha)!;
-        const muted = docsMutedTextFor(t.foreground, surface);
+        const surfaces = surfacesFor(surfaceVariants, t.foreground, t.background);
+        const muted = docsMutedTextForSurfaces(t.foreground, surfaces);
         expect(muted, t.id).not.toBeNull();
-        expect(
-          contrastRatio(rgb(muted!), rgb(surface)),
-          `${t.id} (${muted} on ${surface})`,
-        ).toBeGreaterThanOrEqual(4.5);
+        for (const surface of surfaces) {
+          expect(
+            contrastRatio(rgb(muted!), rgb(surface)),
+            `${t.id} (${muted} on ${surface})`,
+          ).toBeGreaterThanOrEqual(4.5);
+        }
       }
     },
   );
@@ -155,12 +174,11 @@ describe("docs muted text colour", () => {
 
   it.each(TINTED_DOCS_SURFACES)(
     "agrees with the static $token fallback index.css declares",
-    ({ token, tintVar, tintAlpha }) => {
+    ({ token, surfaceVariants }) => {
       const css = readFileSync(new URL("../index.css", import.meta.url), "utf8");
       const declared = css.match(new RegExp(`${token}:\\s*(#[0-9a-f]{6})`, "i"))?.[1];
-      const tint = tintFor(tintVar, SITE_FOREGROUND);
-      const surface = compositeColor(tint, SITE_BACKGROUND, tintAlpha)!;
-      expect(declared).toBe(docsMutedTextFor(SITE_FOREGROUND, surface));
+      const surfaces = surfacesFor(surfaceVariants, SITE_FOREGROUND, SITE_BACKGROUND);
+      expect(declared).toBe(docsMutedTextForSurfaces(SITE_FOREGROUND, surfaces));
     },
   );
 });

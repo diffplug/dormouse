@@ -31,7 +31,12 @@ import {
 } from "./docs-tokens";
 import { DOCS_PAGES, docsRailPosition, type DocsPage, type TocEntry } from "../lib/docs-pages";
 import { DOCS_THEME_ID } from "../lib/docs-theme";
-import { compositeColor, docsAccentFor, docsMutedTextFor } from "../lib/docs-accent";
+import {
+  compositeColor,
+  docsAccentFor,
+  docsMutedTextFor,
+  docsMutedTextForSurfaces,
+} from "../lib/docs-accent";
 import { sitePath } from "../lib/site-meta";
 
 /** Repaints the site's own tokens from the picked theme; see index.css. */
@@ -177,14 +182,23 @@ export default function DocsLayout({
       const muted = docsMutedTextFor(foreground, background);
       if (muted) document.body.style.setProperty("--docs-text-muted", muted);
 
-      // One pass per tinted container, so a new one is an entry in the table
-      // rather than another pair of lines whose alpha has to match a class
-      // string somewhere else (website/src/components/docs-tokens.ts).
+      // One pass per tinted container, so a new one (or a nested tint stack) is
+      // an entry in the table rather than another pair of lines whose alpha
+      // has to match a class string somewhere else
+      // (website/src/components/docs-tokens.ts).
       const styles = getComputedStyle(document.body);
-      for (const { token, tintVar, tintAlpha } of TINTED_DOCS_SURFACES) {
-        const tint = styles.getPropertyValue(tintVar).trim();
-        const surface = tint && compositeColor(tint, background, tintAlpha);
-        const surfaceMuted = surface && docsMutedTextFor(foreground, surface);
+      for (const { token, surfaceVariants } of TINTED_DOCS_SURFACES) {
+        const surfaces = surfaceVariants.map((layers) =>
+          layers.reduce<string | null>((surface, { tintVar, tintAlpha }) => {
+            const tint = styles.getPropertyValue(tintVar).trim();
+            return surface && tint ? compositeColor(tint, surface, tintAlpha) : null;
+          }, background),
+        );
+        const allSurfacesResolved = surfaces.every(
+          (surface): surface is string => Boolean(surface),
+        );
+        const surfaceMuted =
+          allSurfacesResolved && docsMutedTextForSurfaces(foreground, surfaces);
         if (surfaceMuted) document.body.style.setProperty(token, surfaceMuted);
       }
     };
