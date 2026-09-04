@@ -1,6 +1,10 @@
 import { useEffect, useState, type CSSProperties, type RefObject } from 'react';
 import { MODAL_LAYERS, OVERLAY_MAX_HEIGHT_CSS, useMeasuredElementRect } from './design';
-import { clampOverlayPosition, OVERLAY_VIEWPORT_MARGIN_PX } from '../lib/ui-geometry';
+import {
+  clampOverlayPosition,
+  overlayViewportHeight,
+  OVERLAY_VIEWPORT_MARGIN_PX,
+} from '../lib/ui-geometry';
 
 /** Gap between the trigger's near edge and the menu. */
 const MENU_GAP_PX = 4;
@@ -75,15 +79,17 @@ export function useAnchoredMenu(
     };
   }, [open]);
 
-  const space = triggerRect
+  const viewportHeight = triggerRect ? overlayViewportHeight() : null;
+  const space = triggerRect && viewportHeight !== null
     ? {
         above: Math.max(0, triggerRect.top - MENU_GAP_PX - OVERLAY_VIEWPORT_MARGIN_PX),
         below: Math.max(
           0,
-          window.innerHeight
+          viewportHeight
             - (triggerRect.top + triggerRect.height + MENU_GAP_PX)
             - OVERLAY_VIEWPORT_MARGIN_PX,
         ),
+        viewportHeight,
       }
     : null;
   const otherSide = side === 'above' ? 'below' : 'above';
@@ -95,7 +101,7 @@ export function useAnchoredMenu(
         space.above,
         space.below,
         space.above === 0 && space.below === 0
-          ? window.innerHeight - OVERLAY_VIEWPORT_MARGIN_PX * 2
+          ? space.viewportHeight - OVERLAY_VIEWPORT_MARGIN_PX * 2
           : 0,
       )
     : null;

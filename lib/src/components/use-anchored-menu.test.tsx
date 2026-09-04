@@ -30,10 +30,35 @@ let triggerBounds: Bounds;
 let menuBounds: Bounds;
 const originalWidth = window.innerWidth;
 const originalHeight = window.innerHeight;
+const originalVisualViewport = Object.getOwnPropertyDescriptor(window, 'visualViewport');
 
 function setViewport(width: number, height: number): void {
   Object.defineProperty(window, 'innerWidth', { value: width, configurable: true });
   Object.defineProperty(window, 'innerHeight', { value: height, configurable: true });
+}
+
+function setVisualViewport(width: number, height: number): EventTarget & {
+  width: number;
+  height: number;
+} {
+  const viewport = new EventTarget() as EventTarget & { width: number; height: number };
+  Object.defineProperties(viewport, {
+    width: { value: width, writable: true, configurable: true },
+    height: { value: height, writable: true, configurable: true },
+  });
+  Object.defineProperty(window, 'visualViewport', {
+    value: viewport,
+    configurable: true,
+  });
+  return viewport;
+}
+
+function restoreVisualViewport(): void {
+  if (originalVisualViewport) {
+    Object.defineProperty(window, 'visualViewport', originalVisualViewport);
+  } else {
+    delete (window as unknown as { visualViewport?: VisualViewport }).visualViewport;
+  }
 }
 
 function Harness({ side = 'below' }: { side?: 'above' | 'below' }) {
@@ -69,6 +94,7 @@ afterEach(() => {
   act(() => root.unmount());
   container.remove();
   setViewport(originalWidth, originalHeight);
+  restoreVisualViewport();
 });
 
 describe('useAnchoredMenu', () => {
@@ -93,6 +119,22 @@ describe('useAnchoredMenu', () => {
       window.dispatchEvent(new Event('resize'));
     });
 
+    expect(menu().style.maxHeight).toContain('84px');
+    expect(menu().style.top).toBe('12px');
+  });
+
+  it('uses visual-viewport height when the layout viewport does not shrink', () => {
+    const viewport = setVisualViewport(1000, 800);
+    act(() => root.render(<Harness />));
+    expect(menu().style.maxHeight).toContain('664px');
+    expect(menu().style.top).toBe('124px');
+
+    act(() => {
+      viewport.height = 210;
+      viewport.dispatchEvent(new Event('resize'));
+    });
+
+    expect(window.innerHeight).toBe(800);
     expect(menu().style.maxHeight).toContain('84px');
     expect(menu().style.top).toBe('12px');
   });

@@ -38,6 +38,13 @@ export function motionIsInstant(): boolean {
 /** Shared inset for fixed overlays clamped to the viewport. */
 export const OVERLAY_VIEWPORT_MARGIN_PX = 12;
 
+/** The vertical viewport fixed overlays can actually occupy. Mobile browser
+ *  chrome and the on-screen keyboard may shrink this while the layout viewport
+ *  is unchanged. */
+export function overlayViewportHeight(): number {
+  return window.visualViewport?.height ?? window.innerHeight;
+}
+
 /** Clamp a fixed-position overlay so it stays inside the viewport with a margin. */
 export function clampOverlayPosition({ left, top, width, height }: {
   left: number;
@@ -47,7 +54,7 @@ export function clampOverlayPosition({ left, top, width, height }: {
 }): CSSProperties {
   const margin = OVERLAY_VIEWPORT_MARGIN_PX;
   const maxLeft = Math.max(margin, window.innerWidth - width - margin);
-  const maxTop = Math.max(margin, window.innerHeight - height - margin);
+  const maxTop = Math.max(margin, overlayViewportHeight() - height - margin);
 
   return {
     position: 'fixed',

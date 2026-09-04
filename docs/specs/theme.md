@@ -220,6 +220,9 @@ playground navbar — carries none**.
   viewport-clamped `fixed` strategy; `compact` takes `absolute`, which measures
   nothing (rationale). Both prefer the requested `side`, flip to the roomier
   side, and recompute their cap when the trigger, menu, or viewport changes.
+  **Must clamp and cap against the visual viewport when the browser exposes
+  it**, so mobile browser chrome and the on-screen keyboard stay outside the
+  menu's usable area.
   They close on scroll and share dismissal with the Shell row. **The dialog owns
   the open state** so `Escape` closes the menu first, which `ModalFrame`'s
   capture-phase handler would otherwise swallow.
