@@ -18,7 +18,7 @@ The webview is the shared `lib/` frontend, unmodified for this host (`docs/specs
 - **Alert state is global.** One module-level `AlertManager` in `message-router.ts` is shared across all routers, survives router disposal, and is fed by PTY data regardless of webview visibility.
 - **WATCHING rules are host-authoritative.** The first webview after extension-host startup seeds the shared host rule set and **no later webview may replace it**.
 - **Never let a resuming router steal another webview's PTYs.** Each router tracks its PTYs in `ownedPtyIds`; a module-level `globalOwnedPtyIds` set enforces it.
-- **Every save path must merge current alert states.** The frontend periodic save (`onSaveState`) and the backend deactivate refresh (`refreshSavedSessionStateFromPtys`) both call `mergeAlertStates` — missing it reverts alert state on restore.
+- **Every save path must merge current alert states through the shared persistence projection.** The frontend periodic save (`onSaveState`) and the backend deactivate refresh (`refreshSavedSessionStateFromPtys`) both narrow alerts with `toPersistedAlertState`; missing the merge reverts alert state on restore, while passing live state through persists transient fields.
 - **retainContextWhenHidden.** Set on both `WebviewPanel` and `WebviewView` so xterm.js DOM, scrollback, and PTY subscriptions survive panel hide/show without a resume.
 - **Two save sources must produce consistent state**: the frontend's periodic `dormouse:saveState` and the backend's deactivate flush-then-refresh.
 - **Every host → webview send carries the message token**, and **never add a `message` listener that skips `isHostMessage`**.
