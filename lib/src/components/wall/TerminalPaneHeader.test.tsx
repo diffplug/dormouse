@@ -12,6 +12,13 @@ import { FakePtyAdapter } from '../../lib/platform/fake-adapter';
 import { setPlatform } from '../../lib/platform';
 import { setNativeFieldValue } from '../../lib/dom';
 import { removeTerminalPaneState } from '../../lib/terminal-registry';
+import { removeMouseSelectionState, setMouseReporting } from '../../lib/mouse-selection';
+import {
+  addPlainNote,
+  clearAllNotepads,
+  getOpenNotepadId,
+  setOpenNotepadId,
+} from '../../lib/notepad/notepad-store';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -141,5 +148,102 @@ describe('TerminalPaneHeader — inline rename', () => {
     act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
 
     expect(document.body.textContent).toContain('<idle> nope');
+  });
+});
+
+describe('TerminalPaneHeader — notepad icon', () => {
+  // The tier is ResizeObserver-driven, so the suite's inert stub can only ever
+  // show `full`. This one reports a width the test picks.
+  let headerWidth = 400;
+  let previousObserver: typeof ResizeObserver;
+
+  beforeEach(() => {
+    headerWidth = 400;
+    previousObserver = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = class {
+      constructor(private readonly callback: ResizeObserverCallback) {}
+      observe(target: Element): void {
+        this.callback(
+          [{ target, contentRect: { width: headerWidth } } as unknown as ResizeObserverEntry],
+          this as unknown as ResizeObserver,
+        );
+      }
+      unobserve(): void {}
+      disconnect(): void {}
+    } as unknown as typeof ResizeObserver;
+  });
+
+  afterEach(() => {
+    globalThis.ResizeObserver = previousObserver;
+    // Still mounted at this point (the outer hook unmounts), so both stores
+    // notify a live header.
+    act(() => {
+      clearAllNotepads();
+      removeMouseSelectionState('term-1');
+    });
+  });
+
+  function notepadButton(): HTMLButtonElement | null {
+    return container.querySelector<HTMLButtonElement>('[aria-label^="Notepad"]');
+  }
+
+  it('sits after the mouse-override icon and before the split controls', () => {
+    setMouseReporting('term-1', 'any');
+    renderHeader(stubActions(), null);
+
+    const labels = Array.from(container.querySelectorAll<HTMLElement>('button[aria-label]'))
+      .map((button) => button.getAttribute('aria-label'));
+    expect(labels).toEqual([
+      'Alerts are per command',
+      'Override mouse capture',
+      'Notepad',
+      'Split left/right',
+      'Split top/bottom',
+      'Zoom',
+      'Minimize',
+      'Kill',
+    ]);
+  });
+
+  it('fills the icon and names the count once the Surface has notes', () => {
+    renderHeader(stubActions(), null);
+    const empty = notepadButton()!.innerHTML;
+    expect(notepadButton()!.getAttribute('aria-label')).toBe('Notepad');
+
+    act(() => { addPlainNote('term-1', 'a note'); });
+
+    expect(notepadButton()!.getAttribute('aria-label')).toBe('Notepad · 1 note');
+    expect(notepadButton()!.innerHTML).not.toBe(empty);
+
+    act(() => { addPlainNote('term-1', 'another'); });
+    expect(notepadButton()!.getAttribute('aria-label')).toBe('Notepad · 2 notes');
+  });
+
+  it('keeps its place at the compact tier and yields it at minimal only when empty', () => {
+    headerWidth = 200;
+    renderHeader(stubActions(), null);
+    expect(notepadButton()).not.toBeNull();
+
+    headerWidth = 100;
+    act(() => root.unmount());
+    root = createRoot(container);
+    renderHeader(stubActions(), null);
+    expect(notepadButton()).toBeNull();
+
+    // Notes are never invisible: the icon comes back to carry them.
+    act(() => { addPlainNote('term-1', 'a note'); });
+    expect(notepadButton()).not.toBeNull();
+  });
+
+  it('toggles the one open notepad', () => {
+    renderHeader(stubActions(), null);
+
+    act(() => { notepadButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(getOpenNotepadId()).toBe('term-1');
+
+    act(() => { notepadButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(getOpenNotepadId()).toBeNull();
+
+    setOpenNotepadId(null);
   });
 });

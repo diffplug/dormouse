@@ -178,6 +178,27 @@ export const ManyRules: Story = {
   },
 };
 
+/**
+ * The Notepad archive entry, last in the dialog. Every host but Pocket has an
+ * archive port, so the entry is present in every story here — this one is the
+ * one that scrolls to it and proves it opens the Archive view in place rather
+ * than stacking a second modal (`NotepadArchiveView.stories.tsx` covers the
+ * view itself).
+ */
+export const NotepadArchiveEntry: Story = {
+  parameters: {
+    primedWatchedCommands: ['claude'],
+    primedAlertSettings: {},
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const open = await canvas.findByRole('button', { name: 'Open archive' });
+    open.scrollIntoView();
+    await userEvent.click(open);
+    await canvas.findByRole('button', { name: /Back to Settings/ });
+  },
+};
+
 /** Opens the picker whose trigger matches `name`.
  *
  *  Storybook's `play` runs before the snapshot, but the menu positions itself

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useMemo, useLayoutEffect, useContext, useSyncExternalStore, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, useMemo, useLayoutEffect, useContext, useSyncExternalStore, type ReactNode } from 'react';
 import {
   BellRingingIcon,
   BellSlashIcon,
@@ -10,10 +10,17 @@ import {
 } from '@phosphor-icons/react';
 import { SettingsDialog } from './SettingsDialog';
 import { Door } from './Door';
+import { DoorNotepadPopover } from './DoorNotepadPopover';
 import { DialogKeyboardContext, DoorElementsContext } from './wall/wall-context';
 import type { DoorChip, DooredItem } from './wall/wall-types';
 import { hasTerminal } from 'dor/commands/types';
 import { IS_MAC } from '../lib/platform';
+import {
+  getNotepadSnapshot,
+  setOpenNotepadId,
+  subscribeToNotepad,
+} from '../lib/notepad/notepad-store';
+import { revealNoteSource } from '../lib/notepad/pin';
 import {
   buildAppTitleResolver,
   DEFAULT_ACTIVITY_STATE,
@@ -47,6 +54,10 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   const speechStates = useSyncExternalStore(subscribeToAlertSpeech, getAlertSpeechSnapshot);
   const settings = useSyncExternalStore(subscribeToAlertSettings, getAlertSettings);
   const terminalStates = useSyncExternalStore(subscribeToTerminalPaneState, getTerminalPaneStateSnapshot);
+  // One subscription for every Door's note count, like the activity one above.
+  // Whether a count earns a button is the Door's own call (a host with no
+  // notepad never draws one).
+  const notepadNotes = useSyncExternalStore(subscribeToNotepad, getNotepadSnapshot);
   const appTitleForPane = useMemo(
     () => buildAppTitleResolver(terminalStates, activityStates),
     [terminalStates, activityStates],
@@ -67,6 +78,12 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   const [rightClusterWidth, setRightClusterWidth] = useState(0);
   const layoutMetrics = useRef({ doorGap: 0, arrowWidth: 0 });
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Which Door's notepad popover is open, with the rect it was anchored on. The
+  // rect is kept rather than re-read: a pin reattaches the Surface, so the Door
+  // may be gone by the time the popover reopens to report a dead source.
+  const [doorNotepad, setDoorNotepad] = useState<
+    { id: string; rect: DOMRect; unavailableNoteId: string | null } | null
+  >(null);
   const setDialogKeyboardActive = useContext(DialogKeyboardContext);
 
   // Suppress command-mode key dispatch while the Settings dialog owns the
@@ -121,7 +138,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
     if (arrowMeasureEl.current) {
       layoutMetrics.current.arrowWidth = arrowMeasureEl.current.offsetWidth;
     }
-  }, [items, activityStates, speechStates, terminalStates]);
+  }, [items, activityStates, speechStates, terminalStates, notepadNotes]);
 
   // Reset startIndex when the set of door items changes (not just count)
   const itemKey = useMemo(() => items.map(i => i.id).join('\0'), [items]);
@@ -212,8 +229,38 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
       ringSeq: activity.ringSeq,
       todo: activity.todo,
       speechState: speechStates.get(item.id),
+      noteCount: notepadNotes.get(item.id)?.length ?? 0,
     };
   };
+
+  // Opening a Door's notepad closes the attached one: a Wall shows a single
+  // notepad, whichever Surface it belongs to (`docs/specs/notepad.md`).
+  const openDoorNotepad = useCallback((item: DoorChip, anchor: HTMLElement) => {
+    setOpenNotepadId(null);
+    setDoorNotepad((current) => current?.id === item.id
+      ? null
+      : { id: item.id, rect: anchor.getBoundingClientRect(), unavailableNoteId: null });
+  }, []);
+
+  const closeDoorNotepad = useCallback(() => setDoorNotepad(null), []);
+
+  /**
+   * A pin in a Door's popover: close it, reattach the Surface, then follow the
+   * source. The reveal waits a frame because it resolves against the live
+   * terminal the reattach is only now mounting; a source that no longer exists
+   * brings the popover back to say so.
+   */
+  const revealDoorSource = useCallback((noteId: string) => {
+    const open = doorNotepad;
+    if (!open) return;
+    const item = items.find((candidate) => candidate.id === open.id);
+    setDoorNotepad(null);
+    if (item) onReattach(item);
+    requestAnimationFrame(() => {
+      if (revealNoteSource(open.id, noteId).ok) return;
+      setDoorNotepad({ ...open, unavailableNoteId: noteId });
+    });
+  }, [doorNotepad, items, onReattach]);
 
   const scrollLeft = () => setStartIndex(Math.max(0, startIndex - 1));
   const scrollRight = () => setStartIndex(Math.min(items.length - 1, startIndex + 1));
@@ -254,6 +301,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
           {...doorProps(item)}
           onClick={() => onReattach(item)}
           onDragPress={onDoorDragStart ? (press) => onDoorDragStart(item, press) : undefined}
+          onOpenNotepad={(anchor) => openDoorNotepad(item, anchor)}
         />
       ))}
 
@@ -314,6 +362,17 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
           </button>
         </div>
       </div>
+
+      {doorNotepad && (
+        <DoorNotepadPopover
+          surfaceId={doorNotepad.id}
+          anchorRect={doorNotepad.rect}
+          sourceUnavailableNoteId={doorNotepad.unavailableNoteId}
+          onClose={closeDoorNotepad}
+          onRevealSource={revealDoorSource}
+          onKeyboardActiveChange={setDialogKeyboardActive}
+        />
+      )}
 
       {settingsOpen && (
         <SettingsDialog

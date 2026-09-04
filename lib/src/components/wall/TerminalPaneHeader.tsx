@@ -7,6 +7,7 @@ import {
   ArrowsOutIcon,
   CursorClickIcon,
   CursorTextIcon,
+  NotepadIcon,
   SplitHorizontalIcon,
   SplitVerticalIcon,
   XIcon,
@@ -16,6 +17,9 @@ import { TodoAlertDialog } from '../TodoAlertDialog';
 import { HEADER_PALETTE_TRANSITION_CLASS, paneZoomButtonClass, POPUP_SURFACE_CLASS, TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from '../design';
 import { AlertBell } from '../AlertBell';
 import { useTodoPillContent } from '../TodoPillBody';
+import { notepadLabel, useNoteCount, useOpenNotepadId } from '../use-notepad';
+import { hasNotepadArchive } from '../../lib/notepad/archive-service';
+import { setOpenNotepadId } from '../../lib/notepad/notepad-store';
 import type { PaneProps } from './pane-props';
 import { IllegalRenameWarning, type RenameRejection } from './IllegalRenameWarning';
 import { InlineEditInput } from './InlineEditInput';
@@ -111,6 +115,8 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
   const displayTitleBase = showsFailGlyph
     ? displayTitle.slice(0, -` ${COMMAND_FAIL_GLYPH}`.length)
     : displayTitle;
+  const notes = useNoteCount(id);
+  const notepadOpen = useOpenNotepadId() === id;
   const mouseState = mouseStates.get(id) ?? DEFAULT_MOUSE_SELECTION_STATE;
   const showMouseIcon = mouseState.mouseReporting !== 'none';
   const inOverride = mouseState.override !== 'off';
@@ -133,6 +139,9 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
   const todoPill = useTodoPillContent(activity.todo);
   const titleCandidates = useMemo(() => titleCandidatesForDisplay(paneState), [paneState]);
   const showTodoPill = todoPill.visible && tier !== 'minimal';
+  // At the minimal tier an empty notepad yields its 20px to the title; one with
+  // notes stays, so notes are never invisible (`docs/specs/notepad.md`).
+  const showNotepad = hasNotepadArchive() && (tier !== 'minimal' || notes > 0);
   const runningArgv0 = paneState.currentCommand?.rawCommandLine
     ? commandArgv0(paneState.currentCommand.rawCommandLine)
     : null;
@@ -311,6 +320,22 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
                     <CursorClickIcon size={14} />
                   )}
                 </span>
+              </HeaderActionButton>
+            </div>
+          )}
+          {showNotepad && (
+            <div className="ml-1 shrink-0">
+              <HeaderActionButton
+                className="flex h-5 min-w-5 items-center justify-center rounded transition-colors shrink-0 hover:bg-current/10"
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setOpenNotepadId(notepadOpen ? null : id);
+                }}
+                ariaLabel={notepadLabel(notes)}
+                tooltip={notepadLabel(notes)}
+              >
+                <NotepadIcon size={14} weight={notes > 0 ? 'fill' : 'regular'} />
               </HeaderActionButton>
             </div>
           )}

@@ -6,12 +6,13 @@ import {
   getMouseSelectionState,
   setSelection as setMouseSelection,
 } from '../../../lib/mouse-selection';
+import { addSelectionToNotepad, isNotepadChordBound } from '../../../lib/notepad/capture';
 import { hasCopyModifier, hasPasteModifier } from './chords';
 import type { WallKeyboardCtx } from './types';
 
 /**
  * Mouse-selection-aware shortcuts: token extension + Escape during drag,
- * Cmd-C / Cmd-Shift-C / Cmd-V outside drag. Returns true if handled.
+ * Cmd-C / Cmd-Shift-C / Cmd-N / Cmd-V outside drag. Returns true if handled.
  */
 export function handleMouseSelectionKeys(e: KeyboardEvent, ctx: WallKeyboardCtx): boolean {
   // Don't shadow native clipboard ops when focus is inside a real text
@@ -64,6 +65,18 @@ export function handleMouseSelectionKeys(e: KeyboardEvent, ctx: WallKeyboardCtx)
     void (rewrapped ? copyRewrapped(sid) : copyRaw(sid)).then(() => {
       flashCopy(sid, rewrapped ? 'rewrapped' : 'raw');
     });
+    return true;
+  }
+  // Only ever with a finalized selection: with none, Ctrl+N has to reach the
+  // program as readline's next-history. `stopImmediatePropagation` on this
+  // capture-phase window listener (`use-wall-keyboard.ts`) is also what keeps
+  // the chord out of VS Code's keydown forwarding to the workbench
+  // (`docs/specs/vscode.md` → "Webview hosting").
+  const notepadChord = !!sel && !sel.dragging && hasCopyModifier(e) && !e.shiftKey && keyLower === 'n';
+  if (notepadChord && isNotepadChordBound()) {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (addSelectionToNotepad(sid)) flashCopy(sid, 'notepad');
     return true;
   }
   // Paste takes either modifier on every platform (see `hasPasteModifier`).

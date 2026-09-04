@@ -7,7 +7,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../lib/platform', () => ({
   IS_MAC: false,
-  getPlatform: () => ({ alertPublishSettings: vi.fn() }),
+  // An archive port present ⇒ this host has a notepad, which is what puts the
+  // button on a Door that has notes.
+  getPlatform: () => ({ alertPublishSettings: vi.fn(), notepadArchive: {} }),
 }));
 
 import { Baseboard } from './Baseboard';
@@ -21,6 +23,7 @@ import {
   type DormouseTheme,
 } from '../lib/themes';
 import { resetShellStore, seedShellStore } from '../lib/shell-store';
+import { addPlainNote, clearAllNotepads } from '../lib/notepad/notepad-store';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -236,5 +239,41 @@ describe('Baseboard browser Doors', () => {
     expect(door?.getAttribute('aria-label')).toBe(
       'localhost:5173/app, agent-browser fixed size',
     );
+  });
+});
+
+describe('Baseboard Door notepad', () => {
+  afterEach(() => {
+    act(() => clearAllNotepads());
+  });
+
+  it('opens the popover on the Door with notes without reattaching it', () => {
+    addPlainNote('pane-a', 'from the door');
+    const onReattach = vi.fn();
+    act(() => root.render(
+      <Baseboard
+        items={[
+          { id: 'pane-a', kind: 'terminal', title: 'noted' },
+          { id: 'pane-b', kind: 'terminal', title: 'quiet' },
+        ]}
+        onReattach={onReattach}
+      />,
+    ));
+
+    // Only the Door holding notes grows the button.
+    expect(container.querySelectorAll('[data-door-notepad-for]')).toHaveLength(1);
+
+    const notepad = container.querySelector<HTMLButtonElement>('[data-door-notepad-for="pane-a"]')!;
+    act(() => { notepad.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    const popover = document.querySelector('[data-notepad-popover-for="pane-a"]');
+    expect(popover).not.toBeNull();
+    expect(popover?.querySelector('textarea')?.value).toBe('from the door');
+    expect(onReattach).not.toHaveBeenCalled();
+
+    // Escape dismisses it, and still nothing reattached.
+    act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+    expect(document.querySelector('[data-notepad-popover-for="pane-a"]')).toBeNull();
+    expect(onReattach).not.toHaveBeenCalled();
   });
 });

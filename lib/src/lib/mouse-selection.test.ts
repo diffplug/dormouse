@@ -288,6 +288,24 @@ describe('mouse-selection: flashCopy race', () => {
     expect(getMouseSelectionState('a').copyFlash).toBeNull();
     expect(getMouseSelectionState('a').selection?.startRow).toBe(10);
   });
+
+  it("a notepad capture's flash clears the selection like a copy's, dismissing the popup", () => {
+    vi.useFakeTimers();
+    try {
+      beginDrag('a', { row: 0, col: 0, altKey: false, startedInScrollback: false });
+      endDrag('a');
+
+      flashCopy('a', 'notepad', 500);
+      expect(getMouseSelectionState('a').copyFlash).toBe('notepad');
+      expect(getMouseSelectionState('a').selection).not.toBeNull();
+
+      vi.advanceTimersByTime(500);
+      expect(getMouseSelectionState('a').copyFlash).toBeNull();
+      expect(getMouseSelectionState('a').selection).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('mouse-selection: snapshot caching', () => {

@@ -8,14 +8,17 @@ import {
   OnOffSwitch,
   Shortcut,
   UNDER_SWITCH_INDENT,
+  modalActionButton,
 } from './design';
 import { ExternalTextLink } from './ExternalTextLink';
+import { NotepadArchiveView } from './NotepadArchiveView';
 import { ThemePicker } from './ThemePicker';
 import { ShellPicker } from './ShellPicker';
 import { WatchedCommandList } from './WatchedCommandList';
 import { RemoteControlSection } from './RemoteControlSection';
 import { PushTestButton, SpeakTestButton } from './AlarmTestButtons';
 import { getPlatform } from '../lib/platform';
+import { hasNotepadArchive } from '../lib/notepad/archive-service';
 import { getShellsSnapshot, subscribeToShells } from '../lib/shell-store';
 import {
   clampAlertDelayMs,
@@ -92,6 +95,10 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   // One union rather than a boolean per picker, so two menus can never be open
   // at once and Escape has a single thing to close.
   const [openMenu, setOpenMenu] = useState<'theme' | 'shell' | null>(null);
+  // The archive replaces this dialog's content rather than stacking a second
+  // modal on it: one dialog, two views, so the baseboard button that opened it
+  // still owns exactly one thing (docs/specs/notepad.md -> Archive).
+  const [view, setView] = useState<'settings' | 'archive'>('settings');
   // Stable, because an open picker feeds this to `useCloseOnOutsideAndEscape`:
   // a fresh arrow each render would tear down and re-add its three window
   // listeners on every re-render of this dialog.
@@ -110,9 +117,18 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   // above it cannot promise a section this build does not render.
   const hasHostService = getPlatform().remoteHost !== undefined;
 
+  // Pocket has no archive port at all, and neither does a build before its
+  // platform is installed. An entry to a view that can only say "no archive
+  // here" is worse than no entry.
+  const showArchive = hasNotepadArchive();
+
   // A phone can enable alerts long after this machine booted, so re-read the
   // list on open rather than showing whatever was true at Host start.
   useEffect(() => refreshPushDevicesNow(), []);
+
+  if (view === 'archive') {
+    return <NotepadArchiveView onBack={() => setView('settings')} onClose={onClose} />;
+  }
 
   return (
     <ModalFrame
@@ -226,10 +242,29 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
         {describePushTargets(push, hasHostService)}
       </AlarmSinkSection>
 
-      {/* Last, and directly under the push section that points at it: push is
-          the feature that makes a reader care, and "no Host" is the reason it
-          has nowhere to go. Renders nothing on a build with no Host service. */}
+      {/* Directly under the push section that points at it: push is the feature
+          that makes a reader care, and "no Host" is the reason it has nowhere to
+          go. Renders nothing on a build with no Host service. */}
       <RemoteControlSection />
+
+      {/* Last: the only row here that leads somewhere instead of setting
+          something, so it reads as the door it is. */}
+      {showArchive ? (
+        <section className={SECTION}>
+          <div className="text-sm text-foreground">Notepad archive</div>
+          <div className="mt-1 text-sm leading-relaxed text-muted">
+            Notes kept from terminals and browsers that have closed. They stay
+            until you delete them.
+          </div>
+          <button
+            type="button"
+            className={`${modalActionButton()} mt-2`}
+            onClick={() => setView('archive')}
+          >
+            Open archive
+          </button>
+        </section>
+      ) : null}
     </ModalFrame>
   );
 }
