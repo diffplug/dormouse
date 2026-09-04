@@ -116,6 +116,8 @@ See [PRODUCT.md](PRODUCT.md) for users, brand personality, and aesthetic directi
 The concrete type scale, color strategy (surfaces, foregrounds, header palette, dynamic door bg, selection ring), and shared chrome constants live in
 [`lib/src/components/design.tsx`](lib/src/components/design.tsx) — read it
 before adding or changing any `text-*`, `bg-*`, `text-color-*`, or border
-class anywhere in `lib/src/`. The actual `@theme` token definitions are in
-[`lib/src/theme.css`](lib/src/theme.css); when adding or removing a token,
-update both files together.
+class anywhere in `lib/src/`. The `@theme` token definitions are split: colors
+in [`lib/src/theme-colors.css`](lib/src/theme-colors.css), which a host can
+import on its own, and the type scale, fonts, and animation tokens in
+[`lib/src/theme.css`](lib/src/theme.css). When adding or removing a color
+token, update `theme-colors.css` and `design.tsx` together.

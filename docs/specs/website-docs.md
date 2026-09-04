@@ -318,7 +318,7 @@ state and clear WCAG AA both at rest and on hover** (rationale).
 
 **Muted reference text uses an opaque foreground-derived color that clears
 WCAG AA against the surface carrying it; never dim text with opacity**
-(rationale). `docsMutedTextFor` and `website/src/lib/docs-accent.test.ts` pin
+(rationale). `docsMutedTextForSurfaces` and `website/src/lib/docs-accent.test.ts` pin
 the base and every registered tinted surface composition across bundled themes;
 `checkNoDimmedDocsText` pins the call sites, allowlisting what is not text.
 

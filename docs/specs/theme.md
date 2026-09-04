@@ -107,7 +107,7 @@ before the first pass) render before `useDynamicPalette()` publishes refined
 values.
 
 **Never put hardcoded color defaults or `var(..., fallback)` chains in
-`theme.css`** (Host-Theme-Only Rule): hosts plus the resolver provide every
+`theme-colors.css` or `theme.css`** (Host-Theme-Only Rule): hosts plus the resolver provide every
 consumed `--vscode-*` before Dormouse renders.
 
 Color IDs with `null` registry defaults are materialized component-equivalently,

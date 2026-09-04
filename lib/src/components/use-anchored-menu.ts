@@ -2,7 +2,7 @@ import { useEffect, useState, type CSSProperties, type RefObject } from 'react';
 import { MODAL_LAYERS, OVERLAY_MAX_HEIGHT_CSS, useMeasuredElementRect } from './design';
 import {
   clampOverlayPosition,
-  overlayViewportHeight,
+  overlayViewportBounds,
   OVERLAY_VIEWPORT_MARGIN_PX,
 } from '../lib/ui-geometry';
 
@@ -66,30 +66,40 @@ export function useAnchoredMenu(
   // leaves the element fixed in place. The geometry below still depends on the
   // viewport, so subscribe independently instead of relying on a coincidental
   // rect allocation. `visualViewport` covers mobile browser chrome and the
-  // on-screen keyboard on engines that report those separately.
+  // on-screen keyboard on engines that report those separately; its scroll
+  // event carries origin changes that do not resize either viewport.
   const [, setViewportRevision] = useState(0);
   useEffect(() => {
     if (!open) return;
     const update = () => setViewportRevision((revision) => revision + 1);
+    const visualViewport = window.visualViewport;
     window.addEventListener('resize', update);
-    window.visualViewport?.addEventListener('resize', update);
+    visualViewport?.addEventListener('resize', update);
+    visualViewport?.addEventListener('scroll', update);
     return () => {
       window.removeEventListener('resize', update);
-      window.visualViewport?.removeEventListener('resize', update);
+      visualViewport?.removeEventListener('resize', update);
+      visualViewport?.removeEventListener('scroll', update);
     };
   }, [open]);
 
-  const viewportHeight = triggerRect ? overlayViewportHeight() : null;
-  const space = triggerRect && viewportHeight !== null
+  const viewport = triggerRect ? overlayViewportBounds() : null;
+  const space = triggerRect && viewport
     ? {
-        above: Math.max(0, triggerRect.top - MENU_GAP_PX - OVERLAY_VIEWPORT_MARGIN_PX),
+        above: Math.max(
+          0,
+          triggerRect.top
+            - MENU_GAP_PX
+            - viewport.top
+            - OVERLAY_VIEWPORT_MARGIN_PX,
+        ),
         below: Math.max(
           0,
-          viewportHeight
+          viewport.bottom
             - (triggerRect.top + triggerRect.height + MENU_GAP_PX)
             - OVERLAY_VIEWPORT_MARGIN_PX,
         ),
-        viewportHeight,
+        viewportHeight: viewport.height,
       }
     : null;
   const otherSide = side === 'above' ? 'below' : 'above';

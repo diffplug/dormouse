@@ -79,9 +79,14 @@ describe('clampOverlayPosition', () => {
     Object.defineProperty(window, 'innerHeight', { value: height, configurable: true });
   }
 
-  function setVisualViewport(height: number): void {
+  function setVisualViewport(
+    width: number,
+    height: number,
+    offsetLeft = 0,
+    offsetTop = 0,
+  ): void {
     Object.defineProperty(window, 'visualViewport', {
-      value: { height },
+      value: { width, height, offsetLeft, offsetTop },
       configurable: true,
     });
   }
@@ -110,10 +115,23 @@ describe('clampOverlayPosition', () => {
 
   it('clamps vertically to the visual viewport when the layout viewport stays tall', () => {
     setViewport(1000, 800);
-    setVisualViewport(400);
+    setVisualViewport(1000, 400);
     const m = OVERLAY_VIEWPORT_MARGIN_PX;
     expect(clampOverlayPosition({ left: 900, top: 780, width: 300, height: 150 }))
       .toEqual({ position: 'fixed', left: 1000 - 300 - m, top: 400 - 150 - m });
+  });
+
+  it('clamps inside an offset visual viewport on both axes', () => {
+    setViewport(1000, 800);
+    setVisualViewport(600, 400, 200, 400);
+    const m = OVERLAY_VIEWPORT_MARGIN_PX;
+
+    expect(clampOverlayPosition({ left: 250, top: 450, width: 300, height: 150 }))
+      .toEqual({ position: 'fixed', left: 250, top: 450 });
+    expect(clampOverlayPosition({ left: 0, top: 0, width: 300, height: 150 }))
+      .toEqual({ position: 'fixed', left: 200 + m, top: 400 + m });
+    expect(clampOverlayPosition({ left: 900, top: 780, width: 300, height: 150 }))
+      .toEqual({ position: 'fixed', left: 200 + 600 - 300 - m, top: 400 + 400 - 150 - m });
   });
 
   it('pushes a position above the margin back down to it', () => {

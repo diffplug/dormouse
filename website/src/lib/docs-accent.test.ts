@@ -159,6 +159,14 @@ describe("docs muted text colour", () => {
     expect(contrastRatio(rgb(muted), rgb("#000000"))).toBeGreaterThanOrEqual(4.5);
   });
 
+  it("boosts an under-contrast foreground away from every target surface", () => {
+    const surfaces = ["#555555", "#595959"];
+    const muted = docsMutedTextForSurfaces("#666666", surfaces)!;
+    for (const surface of surfaces) {
+      expect(contrastRatio(rgb(muted), rgb(surface))).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
   it("returns null on a colour it cannot read", () => {
     expect(docsMutedTextFor("var(--nope)", "#000000")).toBeNull();
   });

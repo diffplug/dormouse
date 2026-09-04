@@ -40,11 +40,20 @@ function setViewport(width: number, height: number): void {
 function setVisualViewport(width: number, height: number): EventTarget & {
   width: number;
   height: number;
+  offsetLeft: number;
+  offsetTop: number;
 } {
-  const viewport = new EventTarget() as EventTarget & { width: number; height: number };
+  const viewport = new EventTarget() as EventTarget & {
+    width: number;
+    height: number;
+    offsetLeft: number;
+    offsetTop: number;
+  };
   Object.defineProperties(viewport, {
     width: { value: width, writable: true, configurable: true },
     height: { value: height, writable: true, configurable: true },
+    offsetLeft: { value: 0, writable: true, configurable: true },
+    offsetTop: { value: 0, writable: true, configurable: true },
   });
   Object.defineProperty(window, 'visualViewport', {
     value: viewport,
@@ -137,5 +146,22 @@ describe('useAnchoredMenu', () => {
     expect(window.innerHeight).toBe(800);
     expect(menu().style.maxHeight).toContain('84px');
     expect(menu().style.top).toBe('12px');
+  });
+
+  it('recomputes against a scrolled visual viewport origin', () => {
+    const viewport = setVisualViewport(1000, 400);
+    viewport.offsetTop = 350;
+    triggerBounds = { top: 450, left: 100, width: 100, height: 20 };
+    act(() => root.render(<Harness />));
+    expect(menu().style.maxHeight).toContain('264px');
+    expect(menu().style.top).toBe('474px');
+
+    act(() => {
+      viewport.offsetTop = 400;
+      viewport.dispatchEvent(new Event('scroll'));
+    });
+
+    expect(menu().style.maxHeight).toContain('314px');
+    expect(menu().style.top).toBe('474px');
   });
 });

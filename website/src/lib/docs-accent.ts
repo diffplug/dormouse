@@ -90,6 +90,28 @@ function flatten(
   return { base: fg.alpha < 1 ? mix(bg.rgb, fg.rgb, fg.alpha) : fg.rgb, bg: bg.rgb };
 }
 
+/** Walk `base` toward the higher-contrast extreme until `clears` accepts it. */
+function boostAway(
+  base: Rgb,
+  bg: Rgb,
+  clears: (candidate: Rgb) => boolean,
+): string | null {
+  // Measure the direction rather than guessing from a luminance midpoint: that
+  // is not where the contrast crossover sits, and a mid-tone background is
+  // neither light nor dark.
+  const white: Rgb = [255, 255, 255];
+  const black: Rgb = [0, 0, 0];
+  const toward = contrastRatio(white, bg) >= contrastRatio(black, bg) ? white : black;
+
+  // The final candidate is `toward` itself. If even it cannot clear every
+  // requested surface, no candidate along this direction can satisfy them.
+  for (let step = 1; step <= 20; step += 1) {
+    const candidate = mix(base, toward, step / 20);
+    if (clears(candidate)) return toHex(candidate);
+  }
+  return null;
+}
+
 /**
  * A link colour for `accent` that is legible on `background`.
  *
@@ -105,21 +127,7 @@ export function docsAccentFor(
   if (!flat) return null;
   const { base, bg } = flat;
   if (contrastRatio(base, bg) >= minContrast) return toHex(base);
-
-  // Whichever end contrasts more, measured rather than guessed from a
-  // luminance midpoint: that is not where the crossover sits, and a mid-tone
-  // background is neither light nor dark.
-  const white: Rgb = [255, 255, 255];
-  const black: Rgb = [0, 0, 0];
-  const toward: Rgb = contrastRatio(white, bg) >= contrastRatio(black, bg) ? white : black;
-
-  // The last step is `toward` itself, so the best available colour is always
-  // among these — there is nothing left to fall back to.
-  for (let step = 1; step <= 20; step += 1) {
-    const candidate = mix(base, toward, step / 20);
-    if (contrastRatio(candidate, bg) >= minContrast) return toHex(candidate);
-  }
-  return toHex(toward);
+  return boostAway(base, bg, (candidate) => contrastRatio(candidate, bg) >= minContrast);
 }
 
 /**
@@ -166,14 +174,7 @@ export function docsMutedTextForSurfaces(
   // Already too faint to be body text: there is nothing to quieten, so borrow
   // the accent path's boost away from the surfaces instead.
   if (!clearsEverySurface(base)) {
-    const white: Rgb = [255, 255, 255];
-    const black: Rgb = [0, 0, 0];
-    const toward = contrastRatio(white, bg) >= contrastRatio(black, bg) ? white : black;
-    for (let step = 1; step <= 20; step += 1) {
-      const candidate = mix(base, toward, step / 20);
-      if (clearsEverySurface(candidate)) return toHex(candidate);
-    }
-    return null;
+    return boostAway(base, bg, clearsEverySurface);
   }
 
   let quietest = base;
