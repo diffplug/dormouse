@@ -46,8 +46,8 @@ export function isBrowserParams(params: unknown): boolean {
 /** Browser display identity projected from canonical persisted params. An old
  *  agent-browser row with no `syncEngaged` keeps the controller's default:
  *  resize with pane. */
-export function browserDisplayModeFromParams(params: unknown): BrowserDisplayMode | null {
-  if (!isBrowserParams(params)) return null;
+export function browserDisplayModeFromParams(params: unknown): BrowserDisplayMode | undefined {
+  if (!isBrowserParams(params)) return undefined;
   const p = asParams(params);
   return browserDisplayMode({
     renderMode: resolveRenderMode(p),

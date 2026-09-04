@@ -9,6 +9,7 @@ const BASE_TIME = 1_700_000_000_000;
 const makeItem = (id: string, title: string): DoorChip => ({
   id,
   title,
+  kind: 'terminal',
 });
 
 function withState(items: DoorChip[], byId: Record<string, Record<string, unknown>>) {
@@ -75,10 +76,10 @@ const extremeTitleWithBothIndicatorsItems = [
   makeItem('p3', 'another'),
 ];
 const browserSurfaceItems: DoorChip[] = [
-  { id: 'browser-resize', title: 'localhost:5173/app', browserDisplay: 'ab-resize' },
-  { id: 'browser-fixed', title: 'mobile checkout', browserDisplay: 'ab-fixed' },
-  { id: 'browser-popout', title: 'docs.example.com', browserDisplay: 'ab-popout' },
-  { id: 'browser-iframe', title: 'localhost:6006', browserDisplay: 'iframe' },
+  { id: 'browser-resize', kind: 'browser', title: 'localhost:5173/app', browserDisplay: 'ab-resize' },
+  { id: 'browser-fixed', kind: 'browser', title: 'mobile checkout', browserDisplay: 'ab-fixed' },
+  { id: 'browser-popout', kind: 'browser', title: 'docs.example.com', browserDisplay: 'ab-popout' },
+  { id: 'browser-iframe', kind: 'browser', title: 'localhost:6006', browserDisplay: 'iframe' },
 ];
 
 /** Browser Doors keep the same capability/presentation identity as their pane

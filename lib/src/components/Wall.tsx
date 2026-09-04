@@ -399,11 +399,11 @@ export function Wall({
   const doorChips = useMemo<DoorChip[]>(
     () => doors.map((door) => {
       const meta = lath.getMeta(door.id);
-      const browserDisplay = browserDisplayModeFromParams(meta?.params);
       return {
         ...door,
         title: persistedPanelTitle(meta?.title),
-        ...(browserDisplay ? { browserDisplay } : {}),
+        kind: surfaceKindFromParams(meta?.params),
+        browserDisplay: browserDisplayModeFromParams(meta?.params),
       };
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `doorDisplayMetadata` is the store read

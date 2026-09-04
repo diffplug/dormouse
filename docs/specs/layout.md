@@ -97,9 +97,7 @@ The baseboard (`h-7`, 28px) sits below content, visible by default, with no top 
 
 The far right is one right-aligned flex cluster: the `N more →` overflow arrow, the host-supplied `notice` slot (standalone puts the update banner there), then three always-present 24px **Settings** controls — 16px speaker/slashed-speaker for spoken alarms, 16px ringing-bell/slashed-bell for push notifications, 16px sliders for the dialog itself. **Shape and accessible text both carry each state**, so status never relies on color. All three open the same app-global Settings dialog (`docs/specs/alert.md` → Alarm settings); **the status controls never toggle settings directly**. Every baseboard-level button shares one class constant in `Baseboard.tsx`.
 
-A minimized session becomes a **door**, showing the pane header's derived label plus the alert/TODO/speech badge cluster (`docs/specs/alert.md` → Door owns which badge shows when; both speech states also name themselves in the Door's `title` and accessible name). A Door uses the window's bottom edge as its bottom border, with left, top, and right borders taking the shared terminal top radius from `lib/src/components/design.tsx` — a mouse hole matching pane rounding. Dimensions: `min-w-[68px] max-w-[220px] h-6`.
-
-Browser Door content defers to `docs/specs/dor-browser.md` → "Browser Chrome".
+A minimized session becomes a **door**, showing its label plus the alert/TODO/speech badge cluster (`docs/specs/alert.md` → Door owns which badge shows when; both speech states also name themselves in the Door's `title` and accessible name). **A Door's label is header-derived only for a terminal-backed Surface** (`hasTerminal`); any other keeps its stored title, and a browser Door adds the display glyphs from `docs/specs/dor-browser.md` → "Browser Chrome". A Door uses the window's bottom edge as its bottom border, with left, top, and right borders taking the shared terminal top radius from `lib/src/components/design.tsx` — a mouse hole matching pane rounding. Dimensions: `min-w-[68px] max-w-[220px] h-6`.
 
 ### Door interaction
 

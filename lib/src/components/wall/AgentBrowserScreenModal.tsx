@@ -17,12 +17,7 @@
  * reality rather than a stored intent.
  */
 import { useMemo, useRef, useState, type ReactNode } from 'react';
-import {
-  CheckIcon,
-  FrameCornersIcon,
-  PictureInPictureIcon,
-  XIcon,
-} from '@phosphor-icons/react';
+import { CheckIcon, XIcon } from '@phosphor-icons/react';
 import {
   MODAL_OVERLAY_INSET,
   modalActionButton,
@@ -33,7 +28,7 @@ import {
 } from '../design';
 import type { RenderMode, ScreenController, ScreenSnapshot } from './agent-browser-screen';
 import { useAgentBrowserScreenSnapshot } from './agent-browser-screen';
-import { AgentRobotIcon, BrowserDisplayIcon } from './BrowserDisplayIcon';
+import { AgentRobotIcon, BrowserDisplayIcon, BrowserPresentationIcon } from './BrowserDisplayIcon';
 
 // Fixed registry — the CLI's own device set. No custom descriptors; touch +
 // mobile UA come only bundled inside `set device` (verified against 0.27.0).
@@ -149,7 +144,7 @@ export function AgentBrowserScreenModal({
             checked={target === 'sync'}
             onChange={() => setTarget('sync')}
           />
-          <FrameCornersIcon size={14} className="shrink-0 text-muted" />
+          <BrowserPresentationIcon mode="ab-resize" size={14} className="shrink-0 text-muted" />
           <span className="text-foreground">Resize with pane</span>
         </label>
 
@@ -162,7 +157,7 @@ export function AgentBrowserScreenModal({
                 checked={isFixed}
                 onChange={() => setTarget('custom')}
               />
-              <PictureInPictureIcon size={14} className="shrink-0 text-muted" />
+              <BrowserPresentationIcon mode="ab-fixed" size={14} className="shrink-0 text-muted" />
               <span className="text-foreground">Fixed size</span>
             </label>
             {/* Dimensions inline; or pick a device via Emulate below (emulating

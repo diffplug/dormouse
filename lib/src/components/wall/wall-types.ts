@@ -1,3 +1,4 @@
+import type { SurfaceKind } from 'dor/commands/types';
 import type { BrowserDisplayMode } from './agent-browser-screen';
 
 /** A minimized Surface's baseboard chip, at RUNTIME: an identity plus the Lath
@@ -14,7 +15,10 @@ export type DooredItem = { id: string; token?: unknown };
  *  callbacks. */
 export type DoorChip = DooredItem & {
   title: string;
-  /** Browser-only capability/presentation identity. Terminals omit it. */
+  /** The Surface's kind, so the Baseboard gates its label on the capability it
+   *  needs (`hasTerminal`) rather than on the presence of a browser glyph. */
+  kind: SurfaceKind;
+  /** Browser-only presentation identity. Terminals omit it. */
   browserDisplay?: BrowserDisplayMode;
 };
 

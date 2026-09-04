@@ -105,8 +105,8 @@ Header contract:
   | agent-browser, popout | wide robot + arrow-square-out |
   | iframe embed | frame corners only |
 
-- **Must reuse this mapping in browser Doors.** A browser Door uses
-  its store-backed title directly, never terminal-derived `<idle>`.
+- **Must reuse this mapping in browser Doors** (`docs/specs/layout.md` →
+  Baseboard owns the Door label rule).
 - **Must show the URL as primary text:** host+path without query, or path behind
   a dev-server chip; the HTML title is its tooltip.
 - **Must open a pre-selected `InlineEditInput` from the URL.** Blur discards;
@@ -121,7 +121,7 @@ Header contract:
 Source of truth: `lib/src/components/wall/SurfacePaneHeader.tsx`,
 `lib/src/components/wall/agent-browser-screen.ts`,
 `lib/src/components/wall/BrowserDisplayIcon.tsx`,
-`lib/src/components/Baseboard.tsx`,
+`lib/src/components/Door.tsx`,
 `lib/src/components/wall/browser-url.ts`, Storybook
 `lib/src/stories/BrowserChromeHeader.stories.tsx`,
 `lib/src/stories/Baseboard.stories.tsx`.
@@ -186,10 +186,9 @@ Source of truth: `lib/src/components/wall/connect-port.ts`
 ## Display Modal And Render Swaps
 
 **Must make the Display modal the sole GUI for render mode and screencast
-resolution.** Compact icons compose its hierarchy: wide robot on
-`ab-screencast`, frame corners on **Resize with pane**, picture-in-picture on
-**Fixed**, wide robot plus arrow-square-out on `ab-popout`, and frame corners on
-`iframe`.
+resolution.** It splits the Browser Chrome icon pair across its nesting: the
+robot rides the `ab-screencast` parent, each nested resolution row carrying only
+its presentation glyph.
 
 Resolution controls apply only to `ab-screencast`, as GUI wrappers around native
 commands: **Resize with pane** is Dormouse-owned sync issuing

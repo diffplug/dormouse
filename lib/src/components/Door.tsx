@@ -1,7 +1,9 @@
-import { type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { type PointerEvent as ReactPointerEvent } from 'react';
 import { clsx } from 'clsx';
 import { BellIcon, SpeakerHighIcon } from '@phosphor-icons/react';
 import type { AlertSpeechState, SessionStatus, TodoState } from '../lib/terminal-registry';
+import type { BrowserDisplayMode } from './wall/agent-browser-screen';
+import { BROWSER_DISPLAY_LABEL, BrowserDisplayIcon } from './wall/BrowserDisplayIcon';
 import { useTodoPillContent } from './TodoPillBody';
 import { alertSpeakingAnimationClass, bellIconClass } from './bell-icon-class';
 import {
@@ -13,9 +15,10 @@ import {
 export interface DoorProps {
   doorId?: string;
   title: string;
-  leading?: ReactNode;
-  /** Extra visible-state meaning carried by `leading`, repeated accessibly. */
-  detail?: string;
+  /** A browser Surface's display identity (`docs/specs/dor-browser.md` -> Browser
+   *  Chrome). Door draws the glyph pair and names it, so the visible and
+   *  accessible meanings cannot drift apart. */
+  browserDisplay?: BrowserDisplayMode;
   status?: SessionStatus;
   todo?: TodoState;
   speechState?: AlertSpeechState;
@@ -30,8 +33,7 @@ export interface DoorProps {
 export function Door({
   doorId,
   title,
-  leading,
-  detail,
+  browserDisplay,
   status = 'WATCHING_DISABLED',
   todo = false,
   speechState,
@@ -43,7 +45,8 @@ export function Door({
   const todoPill = useTodoPillContent(todo);
   const speaking = speechState === 'speaking';
   const spoken = speechState === 'spoken';
-  const accessibleTitle = detail ? `${title}, ${detail}` : title;
+  const detail = browserDisplay ? BROWSER_DISPLAY_LABEL[browserDisplay] : undefined;
+  const nameParts = [title, detail, speechState].filter(Boolean);
 
   const onPointerDown = onDragPress
     ? (e: ReactPointerEvent<HTMLButtonElement>): void => {
@@ -66,13 +69,11 @@ export function Door({
       )}
       onClick={onClick}
       onPointerDown={onPointerDown}
-      title={[title, detail, speechState].filter(Boolean).join(' — ')}
-      aria-label={detail || speechState
-        ? [accessibleTitle, speechState].filter(Boolean).join(', ')
-        : undefined}
+      title={nameParts.join(' — ')}
+      aria-label={detail || speechState ? nameParts.join(', ') : undefined}
       data-alert-speech-state={speechState}
     >
-      {leading}
+      {browserDisplay && <BrowserDisplayIcon mode={browserDisplay} size={12} />}
       <span className="min-w-0 flex-1 truncate">
         {title}
       </span>

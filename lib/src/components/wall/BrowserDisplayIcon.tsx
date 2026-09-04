@@ -1,6 +1,8 @@
+import { clsx } from 'clsx';
 import {
   ArrowSquareOutIcon,
   FrameCornersIcon,
+  type Icon,
   PictureInPictureIcon,
 } from '@phosphor-icons/react';
 import type { BrowserDisplayMode } from './agent-browser-screen';
@@ -12,10 +14,19 @@ export const BROWSER_DISPLAY_LABEL: Record<BrowserDisplayMode, string> = {
   iframe: 'iframe embed',
 };
 
+/** How the human view is presented, keyed like `BROWSER_DISPLAY_LABEL` so a new
+ *  mode is a compile error in both rather than a silent fall-through. */
+const PRESENTATION_ICON: Record<BrowserDisplayMode, Icon> = {
+  'ab-resize': FrameCornersIcon,
+  'ab-fixed': PictureInPictureIcon,
+  'ab-popout': ArrowSquareOutIcon,
+  iframe: FrameCornersIcon,
+};
+
 /** Compact custom robot whose wide silhouette survives the 12–14px chrome. */
 export function AgentRobotIcon({
   size,
-  className = '',
+  className,
 }: {
   size: number;
   className?: string;
@@ -40,32 +51,41 @@ export function AgentRobotIcon({
   );
 }
 
+/** The presentation half on its own — for the Display modal's resolution rows,
+ *  which nest under a parent that already carries the robot. */
+export function BrowserPresentationIcon({
+  mode,
+  size,
+  className,
+}: {
+  mode: BrowserDisplayMode;
+  size: number;
+  className?: string;
+}) {
+  const Glyph = PRESENTATION_ICON[mode];
+  return <Glyph size={size} className={className} />;
+}
+
 /** One visual grammar for browser presentation everywhere it appears. The
  *  robot means an agent can see/control the page; the companion glyph describes
  *  the human view. iframe intentionally omits the agent glyph. */
 export function BrowserDisplayIcon({
   mode,
   size,
-  className = '',
+  className,
 }: {
   mode: BrowserDisplayMode;
   size: number;
   className?: string;
 }) {
-  const presentation = mode === 'ab-popout'
-    ? <ArrowSquareOutIcon size={size} />
-    : mode === 'ab-fixed'
-      ? <PictureInPictureIcon size={size} />
-      : <FrameCornersIcon size={size} />;
-
   return (
     <span
       aria-hidden="true"
       data-browser-display-mode={mode}
-      className={`inline-flex shrink-0 items-center ${size >= 24 ? 'gap-1.5' : 'gap-0.5'} ${className}`}
+      className={clsx('inline-flex shrink-0 items-center gap-0.5', className)}
     >
       {mode !== 'iframe' && <AgentRobotIcon size={size} />}
-      {presentation}
+      <BrowserPresentationIcon mode={mode} size={size} />
     </span>
   );
 }

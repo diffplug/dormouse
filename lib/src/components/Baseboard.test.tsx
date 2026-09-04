@@ -223,7 +223,7 @@ describe('Baseboard browser Doors', () => {
   it('keeps the browser display icon and page label instead of deriving a terminal idle title', () => {
     act(() => root.render(
       <Baseboard
-        items={[{ id: 'browser-1', title: 'localhost:5173/app', browserDisplay: 'ab-fixed' }]}
+        items={[{ id: 'browser-1', kind: 'browser', title: 'localhost:5173/app', browserDisplay: 'ab-fixed' }]}
         onReattach={() => {}}
       />,
     ));

@@ -12,6 +12,7 @@ import { SettingsDialog } from './SettingsDialog';
 import { Door } from './Door';
 import { DialogKeyboardContext, DoorElementsContext } from './wall/wall-context';
 import type { DoorChip, DooredItem } from './wall/wall-types';
+import { hasTerminal } from 'dor/commands/types';
 import { IS_MAC } from '../lib/platform';
 import {
   buildAppTitleResolver,
@@ -26,7 +27,6 @@ import {
   subscribeToTerminalPaneState,
 } from '../lib/terminal-registry';
 import { createTerminalPaneState, deriveSurfaceLabel, type TerminalPaneState } from '../lib/terminal-state';
-import { BROWSER_DISPLAY_LABEL, BrowserDisplayIcon } from './wall/BrowserDisplayIcon';
 
 /** Shared look for every baseboard-level button (DESIGN.md -> Navigation). */
 const BASEBOARD_BUTTON_CLASS =
@@ -198,6 +198,24 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
     bumpVersion();
   }, [items, startIndex, endIndex, doorElements, bumpVersion]);
 
+  // Every per-item Door prop is projected once, here: the hidden pass exists to
+  // measure the visible one, so the two must draw a Door identically or the
+  // widths it feeds go stale.
+  const doorProps = (item: DoorChip) => {
+    const activity = activityStates.get(item.id) ?? DEFAULT_ACTIVITY_STATE;
+    return {
+      // Only a terminal-backed Surface has shell state to derive a label from;
+      // anything else keeps the store-backed title it already carries.
+      title: hasTerminal(item.kind)
+        ? deriveDoorTitle(item.title, item.id, terminalStates, allPaneStates, appTitleForPane)
+        : item.title,
+      browserDisplay: item.browserDisplay,
+      status: activity.status,
+      todo: activity.todo,
+      speechState: speechStates.get(item.id),
+    };
+  };
+
   const scrollLeft = () => setStartIndex(Math.max(0, startIndex - 1));
   const scrollRight = () => setStartIndex(Math.min(items.length - 1, startIndex + 1));
 
@@ -208,23 +226,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
     >
       {/* Hidden measurement pass — doors + overflow arrow */}
       <div ref={measureEl} className="absolute -left-[9999px] flex gap-1.5" aria-hidden>
-        {items.map(item => {
-          const activity = activityStates.get(item.id) ?? DEFAULT_ACTIVITY_STATE;
-          const title = item.browserDisplay
-            ? item.title
-            : deriveDoorTitle(item.title, item.id, terminalStates, allPaneStates, appTitleForPane);
-          return (
-            <Door
-              key={item.id}
-              title={title}
-              leading={item.browserDisplay ? <BrowserDisplayIcon mode={item.browserDisplay} size={12} /> : undefined}
-              detail={item.browserDisplay ? BROWSER_DISPLAY_LABEL[item.browserDisplay] : undefined}
-              status={activity.status}
-              todo={activity.todo}
-              speechState={speechStates.get(item.id)}
-            />
-          );
-        })}
+        {items.map(item => <Door key={item.id} {...doorProps(item)} />)}
       </div>
       <button ref={arrowMeasureEl} className={`absolute -left-[9999px] ${BASEBOARD_BUTTON_CLASS}`} aria-hidden tabIndex={-1}>
         9 more <CaretRightIcon size={10} weight="bold" />
@@ -246,26 +248,15 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
         </button>
       )}
 
-      {items.slice(startIndex, endIndex).map(item => {
-        const activity = activityStates.get(item.id) ?? DEFAULT_ACTIVITY_STATE;
-        const title = item.browserDisplay
-          ? item.title
-          : deriveDoorTitle(item.title, item.id, terminalStates, allPaneStates, appTitleForPane);
-        return (
-          <Door
-            key={item.id}
-            doorId={item.id}
-            title={title}
-            leading={item.browserDisplay ? <BrowserDisplayIcon mode={item.browserDisplay} size={12} /> : undefined}
-            detail={item.browserDisplay ? BROWSER_DISPLAY_LABEL[item.browserDisplay] : undefined}
-            status={activity.status}
-            todo={activity.todo}
-            speechState={speechStates.get(item.id)}
-            onClick={() => onReattach(item)}
-            onDragPress={onDoorDragStart ? (press) => onDoorDragStart(item, press) : undefined}
-          />
-        );
-      })}
+      {items.slice(startIndex, endIndex).map(item => (
+        <Door
+          key={item.id}
+          doorId={item.id}
+          {...doorProps(item)}
+          onClick={() => onReattach(item)}
+          onDragPress={onDoorDragStart ? (press) => onDoorDragStart(item, press) : undefined}
+        />
+      ))}
 
       {/* One right-hand cluster. Previously the overflow arrow and the notice
           each carried their own `ml-auto`, which split the free space between

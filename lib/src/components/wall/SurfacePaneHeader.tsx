@@ -17,7 +17,6 @@ import {
   useAgentBrowserScreenController,
   useAgentBrowserScreenSnapshot,
   browserDisplayMode,
-  type ScreenSnapshot,
 } from './agent-browser-screen';
 import { BROWSER_DISPLAY_LABEL, BrowserDisplayIcon } from './BrowserDisplayIcon';
 import { InlineEditInput } from './InlineEditInput';
@@ -33,14 +32,6 @@ import {
   ZoomedIdContext,
 } from './wall-context';
 
-/** The far-left chip uses the same capability-first identity as the Display
- *  modal and minimized Door. Returns mode + label together so its visible and
- *  accessible meanings cannot drift. */
-function screenChip(s: ScreenSnapshot) {
-  const mode = browserDisplayMode(s);
-  return { mode, label: `${BROWSER_DISPLAY_LABEL[mode]} — change display` };
-}
-
 export function SurfacePaneHeader({ id, title }: PaneProps) {
   const mode = useContext(ModeContext);
   const selectedId = useContext(SelectedIdContext);
@@ -55,7 +46,11 @@ export function SurfacePaneHeader({ id, title }: PaneProps) {
   const screen = useAgentBrowserScreenController(id);
   const screenSnapshot = useAgentBrowserScreenSnapshot(screen);
   const chrome = useAgentBrowserChromeSnapshot(screen);
-  const chip = screenSnapshot ? screenChip(screenSnapshot) : null;
+  // The far-left chip uses the same capability-first identity as the Display
+  // modal and minimized Door, keyed once so its visible and accessible meanings
+  // cannot drift.
+  const displayMode = screenSnapshot ? browserDisplayMode(screenSnapshot) : null;
+  const displayLabel = displayMode ? `${BROWSER_DISPLAY_LABEL[displayMode]} — change display` : undefined;
 
   // Dev-server connection: when the active tab is loopback, correlate its port
   // to the Dormouse terminal pane serving it (resolved Wall-side). Hooks run
@@ -102,12 +97,12 @@ export function SurfacePaneHeader({ id, title }: PaneProps) {
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); screen.actions.openModal(); }}
-            aria-label={chip?.label}
-            title={chip?.label}
+            aria-label={displayLabel}
+            title={displayLabel}
             data-browser-display-trigger="true"
             className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded transition-colors hover:bg-current/10"
           >
-            {chip && <BrowserDisplayIcon mode={chip.mode} size={14} />}
+            {displayMode && <BrowserDisplayIcon mode={displayMode} size={14} />}
           </button>
 
           {/* Back / forward / refresh — native agent-browser commands; always
