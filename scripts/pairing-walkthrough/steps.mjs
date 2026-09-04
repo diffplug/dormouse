@@ -220,7 +220,6 @@ async function stepServer(ctx) {
       logPath: ctx.path('server.log'),
       prefix: 'server',
       env: {
-        DORMOUSE_SETUP_PASSWORD: opts.password,
         DORMOUSE_STATE_DIR: stateDir,
         // Everything in a run is local to this machine, so the walkthrough's
         // server has no reason to answer the LAN or the tailnet for the length
@@ -242,6 +241,18 @@ async function stepServer(ctx) {
     async () => (await fetch(`${ctx.serverOrigin}/`).catch(() => null))?.ok,
     { what: `${ctx.serverOrigin} to answer`, timeoutMs: 60_000 },
   );
+
+  // The Server, not this harness, owns the credential, and the store it wrote
+  // through is what reads it back — the same "read the shipped module rather
+  // than a copy" rule {@link securityModule} follows, so a change to the
+  // record's shape cannot leave this typing `undefined` into the form below.
+  // Only after the listening line: first boot is what mints it.
+  const { SetupPasswordStore } = await import(
+    pathToFileURL(join(repoRoot, 'server', 'dist', 'state.js')).href
+  );
+  const storedPassword = await new SetupPasswordStore(stateDir).load();
+  if (storedPassword === null) throw new Error(`no setup password under ${stateDir}`);
+  ctx.state.setupPassword = storedPassword.password;
 
   // Held for the scenarios that take the Server away mid-story; nothing on the
   // happy path touches it.
@@ -318,7 +329,7 @@ async function stepEnroll(ctx) {
   const { opts } = ctx;
 
   await fillField(ctx, 'input[type="url"]', ctx.serverOrigin);
-  await fillField(ctx, 'input[type="password"]', opts.password);
+  await fillField(ctx, 'input[type="password"]', ctx.state.setupPassword);
   await fillField(ctx, 'input[placeholder="e.g. Work laptop"]', opts.machineName);
   await ctx.shot('03-enroll-form.png');
 

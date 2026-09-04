@@ -162,8 +162,9 @@ not healthier than one that has them.
 and how much of its TTL was left, the round trip from Enter to the file the
 laptop's shell wrote (`terminal.roundTripMs`, ~220 ms here), the Enter-to-bell
 time, and the authenticator's `signCount` after each ceremony. `options` holds
-what the run chose for itself, including the `password` it minted — which is
-what a `--keep` run is signed into by hand with.
+what the run chose for itself. The setup password is not among them — the
+Server mints its own, and a `--keep` run is signed into by hand with the
+`password` in `<run>/server-state/setup-password.json`.
 
 ## State isolation
 

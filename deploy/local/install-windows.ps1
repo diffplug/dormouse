@@ -234,7 +234,7 @@ function Get-ReleasePointer {
 # the same reason macOS drops group and other -- an administrator can still take
 # ownership, exactly as root can still read a 0600 file, and the point is that
 # no ordinary second account on this PC can read the setup password or the
-# Host bearer credentials in state/.
+# other bearer credentials in state/.
 # Built from a FRESH security object rather than Get-Acl + Set-Acl.
 #
 # Get-Acl returns owner, group and audit sections alongside the DACL, and
@@ -267,10 +267,36 @@ function Protect-Path {
   (Get-Item -LiteralPath $Path -Force).SetAccessControl($sec)
 }
 
-# 32 bytes of the platform CSPRNG as 64 lowercase hex characters. Both secrets
-# this installer mints -- the setup password and the enrollment offer's token --
-# come from here, so there is one generator to audit rather than one per secret.
-# Never substitute Get-Random, which is not a CSPRNG.
+# The read counterpart of Protect-Path, and the installer-scope twin of the
+# Test-OwnerOnly `manage` carries: no principal other than the current user may
+# appear in the DACL. Duplicated per scope like Remove-Tree, Invoke-NodeScript
+# and the other helpers both halves of this file need -- the manage body below
+# is a verbatim here-string and cannot be called from here.
+#
+# Deliberately NOT a check that the DACL is protected from inheritance: a file
+# the server creates inside an already-locked directory inherits that single
+# owner-only ACE, which is the property wanted.
+$script:CurrentUserSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+function Test-OwnerOnly {
+  param([Parameter(Mandatory)][string]$Path)
+  if (-not (Test-Path -LiteralPath $Path)) { return [pscustomobject]@{ Ok = $false; Reason = 'missing' } }
+  $acl = Get-Acl -LiteralPath $Path
+  $others = @()
+  foreach ($rule in $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
+    if ($rule.IdentityReference.Value -ne $script:CurrentUserSid) {
+      $others += $rule.IdentityReference.Value
+    }
+  }
+  if ($others.Count -gt 0) {
+    return [pscustomobject]@{ Ok = $false; Reason = "also grants $(($others | Select-Object -Unique) -join ', ')" }
+  }
+  return [pscustomobject]@{ Ok = $true; Reason = '' }
+}
+
+# 32 bytes of the platform CSPRNG as 64 lowercase hex characters. The enrollment
+# offer is the one secret this installer mints; the Server owns its setup
+# password and persists it under state/ on first boot. Never substitute
+# Get-Random, which is not a CSPRNG.
 function New-RandomHex32 {
   $bytes = New-Object byte[] 32
   $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
@@ -828,14 +854,6 @@ try {
   Write-Step "Runtime configuration"
 
   if (-not (Test-Path -LiteralPath $ENV_FILE)) {
-    $SETUP_PASSWORD = New-RandomHex32
-    # 32 random bytes is 64 hex characters. The guard counts characters, so it
-    # must be 64, not 32 -- a guard reading 32 would pass a regression to half
-    # the entropy docs/specs/security-remote.md claims.
-    if ($SETUP_PASSWORD.Length -lt 64) {
-      Die "generated setup password is implausibly short; refusing to install it."
-    }
-
     $envLines = @(
       '# Dormouse selfhost server -- installer-owned runtime configuration.'
       "# Generated $BUILT_AT. Preserved byte-for-byte across updates."
@@ -843,21 +861,17 @@ try {
       '# DORMOUSE_ORIGIN is durable WebAuthn identity (passkey rpId + Host'
       '# ConnectionPolicy). Changing it invalidates the registered passkey and every'
       '# enrolled Host. See docs/specs/server.md, "Configuration".'
-      "DORMOUSE_SETUP_PASSWORD=$SETUP_PASSWORD"
       "DORMOUSE_ORIGIN=$ORIGIN"
       "DORMOUSE_STATE_DIR=$STATE_DIR"
       'DORMOUSE_BIND_HOST=127.0.0.1'
       "PORT=$LOOPBACK_PORT"
       'NODE_ENV=production'
     ) -join "`r`n"
-    # Create the file with an owner-only ACL BEFORE the password is written, so
-    # there is no window in which the secret sits under an inherited ACL.
+    # Keep configuration owner-only: an operator may add a VAPID private key.
     [IO.File]::WriteAllText($ENV_FILE, '')
     Protect-Path -Path $ENV_FILE
     [IO.File]::WriteAllText($ENV_FILE, $envLines + "`r`n")
-    Remove-Variable SETUP_PASSWORD
-    Write-Ok "generated config/server.env (owner-only ACL) with a locally generated setup password"
-    Write-Detail "the password was not printed; retrieve it with: manage show-password"
+    Write-Ok "generated config/server.env (owner-only ACL)"
   } else {
     Protect-Path -Path $ENV_FILE
     Write-Ok "preserved the existing config/server.env"
@@ -869,10 +883,9 @@ try {
   # below tells the operator to *fix* a file whose repair is `del`, on every run,
   # forever. The two cases are indistinguishable from here and their repairs are
   # opposite, so this names what is missing and changes nothing: DORMOUSE_ORIGIN
-  # is durable WebAuthn identity, and the password may already have enrolled a
-  # Host.
+  # is durable WebAuthn identity and may already have enrolled a Host.
   $envMissing = @()
-  foreach ($key in @('DORMOUSE_SETUP_PASSWORD', 'DORMOUSE_ORIGIN', 'DORMOUSE_STATE_DIR', 'DORMOUSE_BIND_HOST', 'PORT')) {
+  foreach ($key in @('DORMOUSE_ORIGIN', 'DORMOUSE_STATE_DIR', 'DORMOUSE_BIND_HOST', 'PORT')) {
     if (-not (Get-EnvFileValue -Path $ENV_FILE -Key $key)) { $envMissing += $key }
   }
   if ($envMissing.Count -gt 0) {
@@ -931,9 +944,8 @@ if (-not (Test-Path -LiteralPath $EnvFile)) {
 }
 [void][IO.Directory]::CreateDirectory($LogDir)
 
-# Parse KEY=VALUE lines. Deliberately not Invoke-Expression or dot-sourcing:
-# this file holds the setup password, and a config file should not be able to
-# execute code.
+# Parse KEY=VALUE lines. Deliberately not Invoke-Expression or dot-sourcing: a
+# config file should not be able to execute code.
 $EnvVars = @{}
 foreach ($line in [IO.File]::ReadAllLines($EnvFile)) {
   $t = $line.Trim()
@@ -1437,10 +1449,8 @@ function Invoke-Verify {
   #
   # It can also come back $null: CIM blocked by policy, the Task Scheduler
   # service momentarily unavailable, or the task unregistered between Get-Task
-  # and here. Both consumers below treat that as its own outcome and fail,
-  # because a credential search through nothing found nothing. macOS and Linux
-  # reach the same place by failing outright when the plist or unit file is
-  # missing.
+  # and here. Treat that as its own outcome and fail rather than verifying a
+  # definition we could not inspect.
   $taskXml = Export-ScheduledTask -TaskName $LABEL -TaskPath $TASK_PATH -ErrorAction SilentlyContinue
   $wrapper = Join-Path $Root 'bin\run-server.ps1'
   $wrapperText = ''
@@ -1486,13 +1496,11 @@ function Invoke-Verify {
       Fail "bin\run-server.ps1 is missing or has no supervision loop"
     }
 
-    if (-not $taskXml) {
-      Fail "the task definition could not be exported -- verify cannot say it carries no credential"
-    } elseif ($taskXml -match 'DORMOUSE_SETUP_PASSWORD') {
-      Fail "the task definition contains the setup password -- it must live only in config\server.env"
-    } else {
-      Pass "the task definition carries no credential"
-    }
+    # The only consumer left is the source-checkout search near the end, so an
+    # export that failed means that search covered the wrapper alone. Reported
+    # here, inside the registered-task branch, so an unregistered task fails
+    # once rather than twice.
+    if (-not $taskXml) { Fail "the task definition could not be exported -- it was not searched for the source checkout" }
   } else {
     Fail "Scheduled Task $TASK_PATH$LABEL is not registered"
   }
@@ -1606,7 +1614,7 @@ function Invoke-Verify {
   if ($stateErr -and $stateErr.Count -gt 0) {
     Fail "state\ could not be enumerated, so its files were not checked: $($stateErr[0].Exception.Message)"
   } elseif ($stateFiles.Count -eq 0) {
-    Note "no state files yet (no account created -- see SELF_HOST.md checkpoint 4)"
+    Note "no state files yet (the Server has not completed first boot)"
   } else {
     $leaky = @()
     foreach ($f in $stateFiles) {
@@ -1662,8 +1670,7 @@ function Invoke-Verify {
     if ($wrapperText -match [regex]::Escape($src)) { $refs = $true }
     if ($taskXml -match [regex]::Escape($src)) { $refs = $true }
     if ($refs) { Fail "the Scheduled Task or wrapper references the source checkout ($src)" }
-    elseif (-not $taskXml) { Fail "the task definition could not be exported -- only the wrapper was searched for the source checkout" }
-    else { Pass "the installed service does not reference the source checkout" }
+    elseif ($taskXml) { Pass "the installed service does not reference the source checkout" }
   }
 
   Write-Host ""
@@ -1742,8 +1749,20 @@ function Invoke-ShowPassword {
   }
   $reply = Read-Host 'Print it? [y/N]'
   if (@('y', 'Y', 'yes', 'YES') -notcontains $reply) { Write-Host 'aborted'; return 1 }
+  $passwordFile = Join-Path $StateDir 'setup-password.json'
+  try {
+    $stored = [IO.File]::ReadAllText($passwordFile) | ConvertFrom-Json
+    $password = [string]$stored.password
+  } catch {
+    [Console]::Error.WriteLine("could not read the server-generated setup password from $passwordFile")
+    return 1
+  }
+  if ($password -notmatch '^[0-9a-f]{64}$') {
+    [Console]::Error.WriteLine("$passwordFile has no valid server-generated setup password")
+    return 1
+  }
   Write-Host ""
-  Write-Host "  $(Get-EnvValue 'DORMOUSE_SETUP_PASSWORD')"
+  Write-Host "  $password"
   Write-Host ""
   return 0
 }
@@ -1961,9 +1980,9 @@ rem directly.
 
   Write-Step "Health-checking the candidate release"
 
-  # Disposable: a throwaway state dir, a throwaway password and an ephemeral
-  # port, so nothing touches the live service or the real state while we prove
-  # the new code boots and serves.
+  # Disposable: a throwaway state dir and an ephemeral port, so nothing touches
+  # the live service or the real state while we prove the new code boots, mints
+  # its credential, and serves.
   $portJs = 'const n=require("net");const s=n.createServer();s.listen(0,"127.0.0.1",()=>{const p=s.address().port;s.close(()=>process.stdout.write(String(p)));});'
   $r = Invoke-NodeScript -NodeBin $STAGED_NODE -Script $portJs
   $PROBE_PORT = $r.StdOut.Trim()
@@ -1992,7 +2011,6 @@ rem directly.
   $psi.EnvironmentVariables['TMP'] = $env:TMP
   $psi.EnvironmentVariables['PATH'] = (Join-Path $env:SystemRoot 'System32') + ';' + $env:SystemRoot
   $psi.EnvironmentVariables['SystemDrive'] = $env:SystemDrive
-  $psi.EnvironmentVariables['DORMOUSE_SETUP_PASSWORD'] = ('0' * 64)
   $psi.EnvironmentVariables['DORMOUSE_ORIGIN'] = $ORIGIN
   $psi.EnvironmentVariables['DORMOUSE_STATE_DIR'] = $PROBE_STATE
   $psi.EnvironmentVariables['DORMOUSE_BIND_HOST'] = '127.0.0.1'
@@ -2042,6 +2060,17 @@ rem directly.
   } else {
     Stop-ProbeAndDie "the candidate release did not serve the Pocket index. The live service was left untouched."
   }
+  $probePasswordFile = Join-Path $PROBE_STATE 'setup-password.json'
+  try {
+    $probePassword = [IO.File]::ReadAllText($probePasswordFile) | ConvertFrom-Json
+    $probePasswordAcl = Test-OwnerOnly -Path $probePasswordFile
+  } catch {
+    Stop-ProbeAndDie "the candidate did not generate a readable setup password. The live service was left untouched."
+  }
+  if ($probePassword.password -notmatch '^[0-9a-f]{64}$' -or -not $probePasswordAcl.Ok) {
+    Stop-ProbeAndDie "the candidate did not generate an owner-only setup password. The live service was left untouched."
+  }
+  Write-Ok "candidate generated its setup password in owner-only state"
   Stop-Probe
 
   # ----------------------------------------------------------- switch release --
@@ -2347,7 +2376,7 @@ fs.renameSync(process.argv[2], process.argv[3]);
   Write-Host ""
 
   if ($FIRST_INSTALL) {
-    Write-Host "    First install. Retrieve the generated setup password when you are ready"
+    Write-Host "    First install. Retrieve the server-generated setup password when you are ready"
     Write-Host "    to enroll a Host by hand (the one-time offer card in the Host's"
     Write-Host "    Remote control settings needs no password):"
     Write-Host ""

@@ -63,6 +63,12 @@ Be adversarial, and go past the `FAIL IF` list. Ask specifically:
   a stolen bootstrap credential grants — no Client reaches a terminal without
   approval on that Host. Availability is out of scope; attacker-grown retained
   state is not.
+- **Can an operator choose the bootstrap credential?** Trace first boot from the
+  entrypoint through generation and atomic persistence: it must be 32 Server-CSPRNG
+  bytes in owner-only state, never an environment, argument, installer, or weak
+  default; `DORMOUSE_SETUP_PASSWORD` must not be a runtime input. A malformed
+  existing record must stop startup rather than rotate the credential or fall
+  back to configuration.
 - Can anything reach a Host's ACL without a human approving on that Host? Trace
   every writer — including the ACL read filter, anything that rehydrates a
   record from disk, and what a compromised webview or a compromised Server could
