@@ -33,7 +33,7 @@ export type DocsPage = {
    *
    * The generated references are published where a reader may never reach the
    * site — the guide is a Marketplace listing — so each names the documents
-   * that must offer a way in. Running a relay server is not part of installing
+   * that must offer a way in. Running a Relay is not part of installing
    * an editor extension, so the guide carries no self-host obligation.
    *
    * `homepage` is the on-site obligation: the marketing page is the one most

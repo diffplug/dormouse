@@ -1,17 +1,17 @@
 /**
- * The enrollment offer a Dormouse Server installer left on *this* machine, read
+ * The enrollment offer a Dormouse Relay installer left on *this* machine, read
  * from the Node side of a Host so the Settings dialog can offer one-click
- * enrollment (`docs/specs/server.md` → "Remote control, in the Settings
+ * enrollment (`docs/specs/relay.md` → "Remote control, in the Settings
  * dialog").
  *
- * The file is the installer's `run/enroll-offer.json` — the same one the Server
+ * The file is the installer's `run/enroll-offer.json` — the same one the Relay
  * redeems through `DORMOUSE_ENROLL_TOKEN_FILE`, shape and guard shared in
  * `remote-lib-common/src/remote/enroll-offer.ts`. There is no handshake between
  * the two processes: both simply know where the installer puts it.
  *
- * Freshness is shared with the Server. This process reads the file from the
+ * Freshness is shared with the Relay. This process reads the file from the
  * same machine that stamped it, so an expired offer disappears from Settings
- * instead of leading with a button the Server can only reject.
+ * instead of leading with a button the Relay can only reject.
  */
 
 import { readFile } from 'node:fs/promises';
@@ -46,21 +46,21 @@ export function enrollmentOfferPath(
 ): string | null {
   switch (platform) {
     case 'darwin':
-      return join(home, 'Library', 'Application Support', 'Dormouse Server', OFFER_FILE);
+      return join(home, 'Library', 'Application Support', 'Dormouse Relay', OFFER_FILE);
     case 'win32':
       // No `%LOCALAPPDATA%` is not a path to guess at: the installer joins onto
       // that variable, so without it this machine's install root is unknown.
-      return env.LOCALAPPDATA ? join(env.LOCALAPPDATA, 'Dormouse Server', OFFER_FILE) : null;
+      return env.LOCALAPPDATA ? join(env.LOCALAPPDATA, 'Dormouse Relay', OFFER_FILE) : null;
     default:
       // `||` and not `??`, matching the installers' `${XDG_DATA_HOME:-…}`: an
       // empty value is unset, not a root at the filesystem's top.
-      return join(env.XDG_DATA_HOME || join(home, '.local', 'share'), 'dormouse-server', OFFER_FILE);
+      return join(env.XDG_DATA_HOME || join(home, '.local', 'share'), 'dormouse-relay', OFFER_FILE);
   }
 }
 
 /**
  * The offer on this machine, or `null` — silently, for every failure including
- * the ENOENT that is the *normal* answer: most machines run no server, and a
+ * the ENOENT that is the *normal* answer: most machines run no Relay, and a
  * Host that logged about a missing file would log it on every status read.
  *
  * **Never rejects.** Both call sites are status paths that have no better

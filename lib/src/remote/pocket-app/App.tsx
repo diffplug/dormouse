@@ -18,7 +18,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clsx } from 'clsx';
 import {
   PocketClient,
-  ServerRefusalError,
+  RelayRefusalError,
   SessionExpiredError,
   type ConnectResult,
   type PocketSocket,
@@ -60,7 +60,7 @@ type Phase =
   | { readonly at: 'hosts' }
   | { readonly at: 'wall'; readonly host: HostView };
 
-/** One row of the Hosts view: a pinned record, plus what the Server knows. */
+/** One row of the Hosts view: a pinned record, plus what the Relay knows. */
 export interface HostView {
   hostId: string;
   label: string;
@@ -154,7 +154,7 @@ export default function App({
 
   /**
    * The authenticator refused to register because it already holds a passkey
-   * the Server has. Not stored: we learn that one exists, never its id or its
+   * the Relay has. Not stored: we learn that one exists, never its id or its
    * key, and {@link PocketClient.hasPriorUse} answers from material this
    * browser can actually use. So it lives here, for this screen, until the
    * sign-in it steers to caches the real thing.
@@ -172,7 +172,7 @@ export default function App({
   /** Set by Cancel on the waiting screen, so the abort is not reported as a failure. */
   const cancelledPairingRef = useRef(false);
   const [pushState, setPushState] = useState<PushAvailability | null>(null);
-  /** Null while the Server's answer is unknown — see the effect below. */
+  /** Null while the Relay's answer is unknown — see the effect below. */
   const [pushSubscribedHostIds, setPushSubscribedHostIds] = useState<Set<string> | null>(null);
   const [pushSubscriptionCurrent, setPushSubscriptionCurrent] = useState(false);
   const [pushConfig, setPushConfig] = useState<PushConfigState>({ status: 'loading' });
@@ -186,7 +186,7 @@ export default function App({
   const adapterRef = useRef<RemotePtyAdapter | null>(null);
 
   /**
-   * The Server's VAPID key, and whether this browser's subscription still
+   * The Relay's VAPID key, and whether this browser's subscription still
    * matches it. One operation, two callers: the Hosts-entry load below (which
    * commits only while its run token is current) and the Retry action.
    */
@@ -238,7 +238,7 @@ export default function App({
     });
     // Which Hosts this device already registered with, asked by presenting this
     // browser's own delivery ids. Without it a reload re-offers Enable for every
-    // Host, including ones the Server already holds a row for. Authoritative
+    // Host, including ones the Relay already holds a row for. Authoritative
     // rather than merged, so a row pruned after a 410 stops claiming push is on.
     // Null means unanswered, which `isPushOn` below reads as not-on rather than
     // settling it at empty.
@@ -258,7 +258,7 @@ export default function App({
   /**
    * Whether this device is registered for push notifications with one Host.
    *
-   * Demands both a Server row and a browser subscription that still matches it,
+   * Demands both a Relay row and a browser subscription that still matches it,
    * since either half missing means the repair path has to stay offered — and
    * an unanswered read (in flight, or failed) is not a row.
    */
@@ -313,7 +313,7 @@ export default function App({
 
   /**
    * The Hosts list: the pinned records, with online state stamped on from the
-   * Server. **A Host with no record is not shown** — the Server's list is
+   * Relay. **A Host with no record is not shown** — the Relay's list is
    * discovery, and a row for a computer this phone holds no key for would offer
    * an action that cannot exist.
    */
@@ -323,7 +323,7 @@ export default function App({
     setHosts(records.map((record) => toHostView(record, online.get(record.hostId) ?? false)));
     setPhase({ at: 'hosts' });
     // Owed deletions retry here: this runs after every sign-in and on every
-    // return to the list, and a tombstone clears only on the Server's answer.
+    // return to the list, and a tombstone clears only on the Relay's answer.
     // Never awaited: it is best-effort, never throws, and nothing on the list
     // it just painted depends on it — a backlog is N serial DELETEs.
     void client.retirePendingDeletions();
@@ -397,21 +397,21 @@ export default function App({
             try {
               await client.signin();
             } catch (err) {
-              // **A Server that says it has never heard of this credential
+              // **A Relay that says it has never heard of this credential
               // outranks this browser's own record of prior use.** `setup`
               // caches the passkey before `setupFinish`, so a first run whose
-              // `finish` never reached the Server leaves a browser that reads
+              // `finish` never reached the Relay leaves a browser that reads
               // as returning while holding a credential the account never got.
               // Without this, every later scan signs in, fails, and clearing
               // site data is the only way out.
               //
               // **Only the 404.** Every other refusal — a challenge that
               // expired while the user sat at the Face ID prompt, a rejected
-              // assertion, a restarting server's 502 — refuses *this attempt*
+              // assertion, a restarting Relay's 502 — refuses *this attempt*
               // and proves nothing; registering on one would spend the
               // single-use setup token and mint a redundant second passkey. A
               // dismissed prompt or a dead radio propagates as before.
-              if (!(err instanceof ServerRefusalError) || err.status !== 404) throw err;
+              if (!(err instanceof RelayRefusalError) || err.status !== 404) throw err;
               mustRegister = true;
             }
           }
@@ -494,18 +494,18 @@ export default function App({
   const onEnablePush = () =>
     run(PUSH_OP, async () => {
       if (pushConfig.status !== 'ready') {
-        throw new Error('Could not read this server’s push settings. Try again.');
+        throw new Error('Could not read this Relay’s push settings. Try again.');
       }
       try {
         const subscription = await subscribeToPushInBrowser(pushConfig.key, () => {
-          // The scope no longer holds an address the Server can reach, so no Host
+          // The scope no longer holds an address the Relay can reach, so no Host
           // may keep claiming push notifications through it. The moment it becomes
           // true, which is what re-offers Enable if minting the replacement then
           // throws and there is no response to correct the UI with.
           setPushSubscriptionCurrent(false);
         });
         // Owed deletions first: a replacement registered while a superseded
-        // delivery row is still on the Server would leave that row reachable.
+        // delivery row is still on the Relay would leave that row reachable.
         await client.retirePendingDeletions();
         // Every paired Host, not only the unregistered ones, so one tap also
         // repairs a rotated endpoint everywhere. Each response commits as it
@@ -810,7 +810,7 @@ export function SetupOrSignin({
    */
   arrivedByCamera?: boolean;
   /**
-   * The authenticator holds a passkey the Server already registered. The only
+   * The authenticator holds a passkey the Relay already registered. The only
    * evidence that outranks everything else on this screen: it is proof a
    * sign-in from this device succeeds, where `hasPriorUse` is merely stored
    * material, so sign-in leads even on a browser that stored nothing.
@@ -929,7 +929,7 @@ const INSTALL_RITUAL = (
  * terminal.
  *
  * Push notifications are deliberately not mentioned: whether they work at all
- * depends on the Server's push config, which {@link InstallNotice} and the Hosts
+ * depends on the Relay's push config, which {@link InstallNotice} and the Hosts
  * view's push rows gate on. Identity is true regardless, and carries the notice.
  */
 function InstallFirstNotice(): React.ReactElement {
@@ -986,17 +986,17 @@ const PUSH_PITCH =
 const PUSH_BLOCKED: Record<Exclude<PushAvailability, 'ready' | 'needs-install'>, string> = {
   denied: 'Notifications are blocked for this site in your browser settings.',
   unsupported: 'This browser cannot receive push notifications.',
-  'no-worker': 'Push needs the server to be reached over https.',
+  'no-worker': 'Push needs the Relay to be reached over https.',
 };
 
 /**
  * The fourth blocked reason, and the only one with nothing behind it for the
- * person holding the phone: it is the Server's config, so say so rather than
+ * person holding the phone: it is the Relay's config, so say so rather than
  * leave them hunting through iOS settings for a switch that would not help.
  * Not in {@link PUSH_BLOCKED}, which is keyed by browser availability.
  */
 export const PUSH_SERVER_DISABLED =
-  'This server has push notifications turned off. Nothing on this phone can turn them on.';
+  'This Relay has push notifications turned off. Nothing on this phone can turn them on.';
 
 /** What the one push card says; `on` is the settled state and carries no action. */
 export type PushNoticeState =
@@ -1011,7 +1011,7 @@ export type PushNoticeState =
  *
  * **Push is asked for once per device, never once per Host.** The permission
  * prompt and the `PushSubscription` belong to the whole service-worker scope;
- * only the Server row is per (Host, device), and that is bookkeeping the user
+ * only the Relay row is per (Host, device), and that is bookkeeping the user
  * has no reason to perform once per Host. So the paired Hosts are read as a set:
  * one card offering Enable while any of them lacks a row, one quiet line once
  * they all have one.
@@ -1035,7 +1035,7 @@ export function pushNoticeState({
   if (pairedHostIds.length === 0) return null;
   // An unprobed browser is not a claim about anything, in either direction.
   if (availability === null) return null;
-  // Outranks every browser state, a settled `on` included: a Server that no
+  // Outranks every browser state, a settled `on` included: a Relay that no
   // longer holds VAPID keys cannot deliver through the rows it still stores.
   if (configStatus === 'disabled') return { kind: 'blocked', reason: PUSH_SERVER_DISABLED };
   if (pairedHostIds.every(isPushSubscribed)) return { kind: 'on' };
@@ -1086,9 +1086,9 @@ function PushNotice({
     state.kind === 'blocked'
       ? state.reason
       : state.kind === 'checking'
-        ? 'Checking whether this server can send push notifications…'
+        ? 'Checking whether this Relay can send push notifications…'
         : state.kind === 'retry'
-          ? 'Could not check whether this server can send push notifications.'
+          ? 'Could not check whether this Relay can send push notifications.'
           : PUSH_PITCH;
   return (
     <div className={PK.notice}>
@@ -1128,11 +1128,11 @@ export function HostsView({
   hosts: HostView[];
   busy: string | null;
   error: string | null;
-  /** True only where this device holds a Server push row for that Host. */
+  /** True only where this device holds a Relay push row for that Host. */
   isPushSubscribed: (hostId: string) => boolean;
   /** Null until the browser has been asked; see the effect in `App`. */
   pushState: PushAvailability | null;
-  /** Whether the Server's VAPID public key is already cached for a permission tap. */
+  /** Whether the Relay's VAPID public key is already cached for a permission tap. */
   pushConfigStatus?: PushConfigStatus;
   onRefresh: () => void;
   onScan: () => void;
@@ -1164,7 +1164,7 @@ export function HostsView({
       </header>
       <div className={PK.body}>
         {error ? <ErrorRow message={error} /> : null}
-        {/* Install advice is moot when the server cannot push at all — the
+        {/* Install advice is moot when the Relay cannot push at all — the
             rows below already say push is disabled, and the ritual the notice
             describes would end at that same message. */}
         {pushConfigStatus !== 'disabled' && pushState === 'needs-install' ? (

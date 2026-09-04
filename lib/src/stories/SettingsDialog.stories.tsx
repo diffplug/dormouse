@@ -298,7 +298,7 @@ export const HostOwnsShells: Story = {
  * settings whose `no-host` copy points at it. Every other story here leaves
  * `primedRemoteHost` unset, which is a build with no Host service behind the
  * webview: the section renders nothing at all rather than offering a form the
- * build cannot honor (`docs/specs/server.md`). `RemoteControlSection.stories`
+ * build cannot honor (`docs/specs/relay.md`). `RemoteControlSection.stories`
  * covers its own states.
  */
 export const WithRemoteControl: Story = {

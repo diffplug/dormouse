@@ -40,16 +40,16 @@ export type StartScan = (
 /** What the viewfinder is doing. Every state that is not `live` is explained. */
 type CameraState = 'starting' | 'live' | 'denied' | 'unsupported';
 
-export const SCAN_REJECTED_MESSAGE = 'That is not a Dormouse setup code for this server.';
+export const SCAN_REJECTED_MESSAGE = 'That is not a Dormouse setup code for this Relay.';
 
 /**
  * The two sentences a refused code can get, chosen here and never on the wire.
  *
- * A code this server *would* have taken had it been scanned sooner is the one
+ * A code this Relay *would* have taken had it been scanned sooner is the one
  * failure with a different fix — show a fresh code, rather than point the phone
  * at something else — and it is by far the likeliest, the codes living five
  * minutes. Everything else, a foreign-origin invitation included, is not a
- * setup code for this server: expired or not, there is no fresh code on this
+ * setup code for this Relay: expired or not, there is no fresh code on this
  * computer to go and get.
  */
 async function rejectionFor(text: string, appOrigin: string): Promise<string> {

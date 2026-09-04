@@ -6,7 +6,7 @@
  * The ring detection, delay, and cancellation rules are shared with spoken
  * alarms (`lib/src/lib/alert-ring-watch.ts`); this module is the webview half of
  * the push sink — the watch, the pane label, and the settings dialog's device
- * list. The Server calls themselves are in `push-delivery.ts`, which a
+ * list. The Relay calls themselves are in `push-delivery.ts`, which a
  * Node-resident Host runs without any of this.
  *
  * It lives under `remote/host/` rather than `lib/` because it is only meaningful

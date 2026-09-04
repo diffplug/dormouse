@@ -43,7 +43,7 @@ const HOST_ID = 'S6kyjjqOS7mw3l8ye89U3g';
 /**
  * The installer's offer file is the one thing an idle `status` reads off the
  * real disk, and whether the machine running these tests happens to have a
- * Dormouse server installed must not decide whether they pass. Mocked at the
+ * Dormouse Relay installed must not decide whether they pass. Mocked at the
  * module both readers share — the glue's `idleStatus` and the service's own
  * default `readOffer`.
  */
@@ -343,7 +343,7 @@ describe('host state store', () => {
     const { context, store } = fakeContext();
     const target = new VsCodeHostStateStore(context);
     const enrollment = {
-      serverUrl: 'https://relay.dormouse.sh',
+      relayUrl: 'https://relay.dormouse.sh',
       hostId: HOST_ID,
       hostToken: 'token',
       origin: 'https://relay.dormouse.sh',
@@ -365,7 +365,7 @@ describe('host state store', () => {
     const { VsCodeHostStateStore } = await import('../src/remote-host-store');
     const { context, store } = fakeContext();
     const enrollment = {
-      serverUrl: 'https://relay.dormouse.sh',
+      relayUrl: 'https://relay.dormouse.sh',
       hostId: HOST_ID,
       hostToken: 'token',
       origin: 'https://relay.dormouse.sh',
@@ -390,7 +390,7 @@ describe('host state store', () => {
     const { VsCodeHostStateStore } = await import('../src/remote-host-store');
     const { context, store } = fakeContext();
     const enrollment = {
-      serverUrl: 'https://relay.dormouse.sh',
+      relayUrl: 'https://relay.dormouse.sh',
       hostId: HOST_ID,
       hostToken: 'token',
       origin: 'https://relay.dormouse.sh',
@@ -419,7 +419,7 @@ describe('host state store', () => {
     const changes: number[] = [];
     const target = new VsCodeHostStateStore(context, () => changes.push(1));
     const enrollment = {
-      serverUrl: 'https://relay.dormouse.sh',
+      relayUrl: 'https://relay.dormouse.sh',
       hostId: HOST_ID,
       hostToken: 'token',
       origin: 'https://relay.dormouse.sh',
@@ -507,7 +507,7 @@ describe('remote host service glue', () => {
     mod.handleRemoteHostCommand({
       rhId: 'rh-1',
       cmd: 'enroll',
-      params: { serverUrl: 'https://evil.example', password: 'p', label: 'Laptop' },
+      params: { relayUrl: 'https://evil.example', password: 'p', label: 'Laptop' },
     });
 
     await waitFor(() => results(bound.posted).length > 0);
@@ -568,7 +568,7 @@ describe('remote host service glue', () => {
         rhId: 'rh-1',
         result: {
           enrolled: false,
-          serverUrl: null,
+          relayUrl: null,
           hostId: null,
           connection: 'stopped',
           pairedClients: 0,
@@ -582,7 +582,7 @@ describe('remote host service glue', () => {
 
     // `enroll` bootstraps the contention, which this window loses — so even the
     // bootstrap ends up forwarded rather than starting a second Host.
-    const params = { serverUrl: 'https://relay.dormouse.sh', password: 'p', label: 'Laptop' };
+    const params = { relayUrl: 'https://relay.dormouse.sh', password: 'p', label: 'Laptop' };
     mod.handleRemoteHostCommand({ rhId: 'rh-2', cmd: 'enroll', params });
 
     await waitFor(() => squat.frames.some((frame) => frame.kind === 'command'));
@@ -634,7 +634,7 @@ describe('remote host service glue', () => {
     store.secrets.set(
       ENROLLMENT_KEY,
       JSON.stringify({
-        serverUrl: 'https://relay.example.com',
+        relayUrl: 'https://relay.example.com',
         hostId: HOST_ID,
         hostToken: 'token',
         origin: 'https://relay.example.com',
@@ -672,7 +672,7 @@ describe('remote host service glue', () => {
     mod.handleRemoteHostCommand({
       rhId: 'rh-1',
       cmd: 'enroll',
-      params: { serverUrl: 'https://relay.dormouse.sh', password: 'p', label: 'Laptop' },
+      params: { relayUrl: 'https://relay.dormouse.sh', password: 'p', label: 'Laptop' },
     });
 
     await tick(0);
@@ -684,8 +684,8 @@ describe('remote host service glue', () => {
     // contends the moment an enrollment exists anywhere, so reaching the
     // refusal means there genuinely is none. Erroring there broke each
     // caller's contract: `pushDevices` answers `null` for "nowhere to push"
-    // and rejects only when the server could not be asked, so the Settings
-    // dialog was reporting an unreachable server on an un-enrolled machine.
+    // and rejects only when the Relay could not be asked, so the Settings
+    // dialog was reporting an unreachable Relay on an un-enrolled machine.
     const mod = await freshHost();
     const bound = fakeDeps();
     mod.configureRemoteHost(bound.deps());
@@ -758,7 +758,7 @@ describe('remote host service glue', () => {
     store.secrets.set(
       ENROLLMENT_KEY,
       JSON.stringify({
-        serverUrl: 'https://relay.example.com',
+        relayUrl: 'https://relay.example.com',
         hostId: HOST_ID,
         hostToken: 'token',
         origin: 'https://relay.example.com',
@@ -1102,7 +1102,7 @@ describe('serving the other windows', () => {
     mod.handleRemoteHostCommand({
       rhId: 'rh-0',
       cmd: 'enroll',
-      params: { serverUrl: 'https://evil.example', password: 'p', label: 'Laptop' },
+      params: { relayUrl: 'https://evil.example', password: 'p', label: 'Laptop' },
     });
     await waitFor(() => opened!.isPeerBroker());
 
@@ -1125,7 +1125,7 @@ describe('serving the other windows', () => {
     mod.handleRemoteHostCommand({
       rhId: 'rh-0',
       cmd: 'enroll',
-      params: { serverUrl: 'https://evil.example', password: 'p', label: 'Laptop' },
+      params: { relayUrl: 'https://evil.example', password: 'p', label: 'Laptop' },
     });
     await waitFor(() => opened!.isPeerBroker());
 

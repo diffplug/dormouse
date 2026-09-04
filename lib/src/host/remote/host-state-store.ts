@@ -79,7 +79,7 @@ export class FileHostStateStore implements HostStateStore {
   readonly #path: string;
   #state: Promise<HostStateFile> | null = null;
   /**
-   * Serializes mutations, the way `server/src/state.ts` does: every save is a
+   * Serializes mutations, the way `relay/src/state.ts` does: every save is a
    * read-modify-write of the whole file, so two of them running together can
    * interleave their writes and renames and land the older one last.
    */

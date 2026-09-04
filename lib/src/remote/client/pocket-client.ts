@@ -1,6 +1,6 @@
 /**
  * UI-free Pocket protocol client. It speaks exactly one wire: the `e2e`
- * envelope of `docs/specs/server.md` → Relay, carrying the two end-to-end
+ * envelope of `docs/specs/relay.md` → Relay, carrying the two end-to-end
  * ceremonies of `docs/specs/remote-security-model.md` (Pairing, Connection) and
  * — once a connection is established — protocol-v1 as application messages on
  * the same Noise session (`docs/specs/remote-api.md` owns their correlation).
@@ -31,7 +31,7 @@ import {
   generateNoiseKeyPair,
   hashPasskeyPublicKey,
   isConnectionOutcomeV1,
-  isE2eServerToClientFrame,
+  isE2eRelayToClientFrame,
   isNoisePublicKey,
   isPairingOutcomeV1,
   pairingInvitationPrologue,
@@ -49,7 +49,7 @@ import {
   type E2eClientFrame,
   type E2eClientStep,
   type E2eKind,
-  type E2eServerToClientFrame,
+  type E2eRelayToClientFrame,
   type HelloResult,
   type HostsResponse,
   type PairingDenialCode,
@@ -65,7 +65,7 @@ import {
   type ReauthFinishResponse,
   type RemoteEventMsg,
   type RemoteResponse,
-  type ServerToClientFrame,
+  type RelayToClientFrame,
   type SetupBeginResponse,
   type SetupFinishResponse,
   type SigninBeginResponse,
@@ -93,7 +93,7 @@ export type PocketSocket = RemoteWebSocket;
 /**
  * Persistent per-device state that is *not* an end-to-end identity — those live
  * in IndexedDB ({@link KnownHostStore}). Passkey public keys are cached by
- * credential id at registration *and* at sign-in — the Server returns the
+ * credential id at registration *and* at sign-in — the Relay returns the
  * asserted key — so any browser profile holding a synced passkey can build a
  * presence proof, not only the one that performed the registration.
  */
@@ -102,14 +102,14 @@ export interface PocketStorage {
   setPasskeyPublicKey(credentialId: string, publicKey: string): void;
   /**
    * Drop a cached key again. Only {@link PocketClient.setup} calls it, for a
-   * credential it cached moments earlier and the Server then refused, so it
+   * credential it cached moments earlier and the Relay then refused, so it
    * never has an older visit's key to lose.
    */
   forgetPasskeyPublicKey(credentialId: string): void;
   /** Credential ids this device has stored a public key for (may be empty). */
   knownCredentialIds(): string[];
   /**
-   * Digest of the delivery address last registered with the Server, or null if
+   * Digest of the delivery address last registered with the Relay, or null if
    * this device has never registered one. Per device, not per Host: one
    * service-worker scope holds one subscription, so if it rotates, every Host
    * row for this device is stale at once.
@@ -158,26 +158,26 @@ export interface TerminalHandlers {
 }
 
 /**
- * A failure the Server *answered* with — any response it rejected — as opposed
+ * A failure the Relay *answered* with — any response it rejected — as opposed
  * to a request that never got an answer at all (DNS, TLS, the radio), which
  * leaves `fetch`'s own `TypeError` to propagate untouched. The distinction is
  * load-bearing exactly once, in {@link PocketClient.setup}: it decides whether
- * the Server can be assumed to hold nothing.
+ * the Relay can be assumed to hold nothing.
  */
-export class ServerRefusalError extends Error {
+export class RelayRefusalError extends Error {
   /**
    * The HTTP status behind the refusal, `0` where none was read.
    *
-   * Carried because "the Server answered" and "the Server answered *this*" are
+   * Carried because "the Relay answered" and "the Relay answered *this*" are
    * different facts, and a caller that acts on a refusal usually means one
-   * status: a 404 is proof the Server holds nothing, while a 400, a 401, or a
+   * status: a 404 is proof the Relay holds nothing, while a 400, a 401, or a
    * 502 is a refusal of this attempt and proof of nothing at all.
    */
   readonly status: number;
 
   constructor(message: string, status = 0) {
     super(message);
-    this.name = 'ServerRefusalError';
+    this.name = 'RelayRefusalError';
     this.status = status;
   }
 }
@@ -190,21 +190,21 @@ export class ServerRefusalError extends Error {
 export const HOST_SESSION_REAPED_MESSAGE =
   'This phone was away too long, so the computer let the session go. Connect again to resume.';
 
-/** Shown when the Server no longer accepts our session token. */
+/** Shown when the Relay no longer accepts our session token. */
 export const SESSION_EXPIRED_MESSAGE = 'Your session expired. Sign in again to continue.';
 
 /**
- * The Server rejected our session token, so nothing works until the user signs
+ * The Relay rejected our session token, so nothing works until the user signs
  * in again. Distinct from an ordinary failure because the UI must react rather
- * than report: sessions live only in the Server's memory (docs/specs/server.md),
- * so they die on a 12h expiry *and* on every Server restart, and an installed
+ * than report: sessions live only in the Relay's memory (docs/specs/relay.md),
+ * so they die on a 12h expiry *and* on every Relay restart, and an installed
  * Pocket has no address bar to reload from. Left as a message, the user is
  * stuck holding a dead token with force-quitting the app as the only way out.
  *
  * {@link PocketClient} clears the token before throwing this, so recovery is
  * exactly "sign in again" with the passkey cache and the pinned Hosts intact.
  */
-export class SessionExpiredError extends ServerRefusalError {
+export class SessionExpiredError extends RelayRefusalError {
   constructor() {
     super(SESSION_EXPIRED_MESSAGE, 401);
     this.name = 'SessionExpiredError';
@@ -216,14 +216,14 @@ export const SETUP_CODE_DEAD_MESSAGE =
   'That setup code has expired. Show a new one on the computer and scan it again.';
 
 /**
- * The Server refused the `setupToken` off a scanned code
+ * The Relay refused the `setupToken` off a scanned code
  * ({@link SETUP_TOKEN_INVALID_ERROR}). Its own class for the reason
  * {@link SessionExpiredError} is: the UI must react rather than report — drop
  * the dead code and send the user back to the computer for a fresh one — and
- * the Server answers 401 for an unknown session too, so only the body
+ * the Relay answers 401 for an unknown session too, so only the body
  * separates them ({@link SETUP_CODE_DEAD_MESSAGE} is what the user reads).
  */
-export class SetupTokenInvalidError extends ServerRefusalError {
+export class SetupTokenInvalidError extends RelayRefusalError {
   constructor() {
     super(SETUP_CODE_DEAD_MESSAGE, 401);
     this.name = 'SetupTokenInvalidError';
@@ -424,10 +424,10 @@ export class PocketClient {
    */
   async setup({ setupToken }: { setupToken: string }, label: string): Promise<SetupFinishResponse> {
     const begin = await this.#setupApi<SetupBeginResponse>(API_ROUTES.setupBegin, { setupToken });
-    // Excluded from the Server's list, not this browser's: a retry — after a
+    // Excluded from the Relay's list, not this browser's: a retry — after a
     // refusal, or on a device that stored nothing — must not silently mint a
     // duplicate of a credential the account already holds, while an orphan the
-    // Server never registered is absent from it and is replaced as it should be.
+    // Relay never registered is absent from it and is replaced as it should be.
     let registration: PasskeyRegistration;
     try {
       registration = await this.#webauthn.registerPasskey(
@@ -439,7 +439,7 @@ export class PocketClient {
     } catch (err) {
       // Translated at this seam, not inside the browser wrapper, so every
       // `WebAuthnClient` — the real one and the fakes — reports the refusal the
-      // same way. It is actionable: the list came from the Server, so the
+      // same way. It is actionable: the list came from the Relay, so the
       // credential blocking us is one that can sign in from this device.
       if (isPasskeyAlreadyRegistered(err)) throw new PasskeyAlreadyRegisteredError();
       throw err;
@@ -460,16 +460,16 @@ export class PocketClient {
         label,
       });
     } catch (err) {
-      // A refusal is proof the Server has nothing; a lost answer is not. So a
+      // A refusal is proof the Relay has nothing; a lost answer is not. So a
       // rejected `finish` (a dead `setupToken`, any answered error) takes the
       // cache back down — kept, it would make `hasPriorUse` promise a sign-in
       // that cannot succeed — while an unanswered one leaves it standing.
-      if (err instanceof ServerRefusalError) {
+      if (err instanceof RelayRefusalError) {
         this.#storage.forgetPasskeyPublicKey(registration.credentialId);
       }
       throw err;
     }
-    // Only once the Server has acknowledged it: this names the credential a
+    // Only once the Relay has acknowledged it: this names the credential a
     // pairing's presence proof is built from. Sign-in refreshes it.
     this.#credentialId = registration.credentialId;
     return finish;
@@ -480,7 +480,7 @@ export class PocketClient {
    *
    * A phone that is already signed in has no passkey to create, and a code left
    * redeemable is one a photograph of the laptop's screen could still register
-   * with (`docs/specs/server.md` → Setup tokens).
+   * with (`docs/specs/relay.md` → Setup tokens).
    */
   async retireSetupToken(setupToken: string): Promise<void> {
     await this.#setupApi<unknown>(API_ROUTES.setupRetire, { setupToken }, this.#auth());
@@ -510,7 +510,7 @@ export class PocketClient {
     const finish = await this.#api<SigninFinishResponse>(API_ROUTES.signinFinish, { assertion });
     this.#sessionToken = finish.sessionToken;
     this.#credentialId = assertion.credentialId;
-    // Signing in is enough to pair from here. The Server returns the asserted
+    // Signing in is enough to pair from here. The Relay returns the asserted
     // passkey's public key, so a browser profile that never performed the
     // registration — an iOS Home Screen install, a second browser — can still
     // build presence proofs instead of being pushed into creating a redundant
@@ -536,7 +536,7 @@ export class PocketClient {
 
   /**
    * Forget one Host locally: the tombstone is written *before* the record that
-   * holds the delivery id is deleted, so an unreachable Server cannot strand a
+   * holds the delivery id is deleted, so an unreachable Relay cannot strand a
    * push row nothing can name again.
    */
   async forgetHost(hostId: string): Promise<void> {
@@ -552,7 +552,7 @@ export class PocketClient {
 
   /**
    * The VAPID public key a browser needs before it can subscribe, or `null`
-   * when the server has push disabled. Unauthenticated — the key is public by
+   * when the Relay has push disabled. Unauthenticated — the key is public by
    * construction.
    */
   async getPushConfig(): Promise<string | null> {
@@ -566,9 +566,9 @@ export class PocketClient {
    * The Hosts **this device** is already registered to receive push from.
    *
    * Asked by capability rather than by identity: the query names this browser's
-   * own delivery ids and the Server reports only on those, so there is no
+   * own delivery ids and the Relay reports only on those, so there is no
    * endpoint that reports on a row the caller does not already hold the
-   * capability for (`docs/specs/server.md` → Web Push).
+   * capability for (`docs/specs/relay.md` → Web Push).
    */
   async listPushSubscribedHosts(): Promise<string[]> {
     const deliveryIds = (await this.#knownHosts.list())
@@ -605,13 +605,13 @@ export class PocketClient {
       { hostId, deliveryId: record.authorization.deliveryId, subscription },
       this.#auth(),
     );
-    // Recorded only once the Server has the row: this is a note about what the
-    // Server holds, not about what the browser minted.
+    // Recorded only once the Relay has the row: this is a note about what the
+    // Relay holds, not about what the browser minted.
     this.#storage.setRegisteredPushEndpoint(await pushEndpointFingerprint(subscription.endpoint));
     return result;
   }
 
-  /** Idempotent, and the Server always answers 204. */
+  /** Idempotent, and the Relay always answers 204. */
   async deletePushSubscription(deliveryId: string): Promise<void> {
     await this.#api<unknown>(pushSubscriptionDeletePath(deliveryId), undefined, {
       method: 'DELETE',
@@ -620,7 +620,7 @@ export class PocketClient {
   }
 
   /**
-   * Drain the tombstone queue, clearing each entry only on a Server answer.
+   * Drain the tombstone queue, clearing each entry only on a Relay answer.
    *
    * Best-effort and never throws: its callers are boot, sign-in, and the step
    * before registering a replacement, none of which may fail over a deletion
@@ -1030,7 +1030,7 @@ export class PocketClient {
    *
    * **One authenticator prompt per proof, never cached and never reused.** The
    * challenge is derived from the binding, so an assertion produced here
-   * authenticates no other pairing or connection; the Server's `finish` proves
+   * authenticates no other pairing or connection; the Relay's `finish` proves
    * nothing to the Host, which recomputes the challenge and verifies the same
    * assertion itself.
    */
@@ -1048,12 +1048,12 @@ export class PocketClient {
     );
     await this.#api<ReauthFinishResponse>(
       API_ROUTES.reauthFinish,
-      { serverNonce: begin.serverNonce, assertion },
+      { relayNonce: begin.relayNonce, assertion },
       auth,
     );
     return {
       binding,
-      serverNonce: begin.serverNonce,
+      relayNonce: begin.relayNonce,
       accountId: SELFHOST_ACCOUNT_ID,
       passkeyCredentialId: binding.passkeyCredentialId,
       passkeyPublicKey: this.#requirePasskeyPublicKey(binding.passkeyCredentialId),
@@ -1139,7 +1139,7 @@ export class PocketClient {
    * The Host disposes an established session it has not decrypted a Client
    * message on for `ESTABLISHED_E2E_IDLE_TIMEOUT_MS` and sends nothing when it
    * does — there is no frame to send, and the relay socket this Client holds is
-   * to the *Server*, so nothing closes. Keepalives pause while the page is
+   * to the *Relay*, so nothing closes. Keepalives pause while the page is
    * hidden, so a phone in a pocket crosses that line on its own, and without
    * this check it comes back to a wall whose every request hangs forever with
    * no error and no way out but a reload
@@ -1265,9 +1265,9 @@ export class PocketClient {
   }
 
   #onFrame(raw: unknown): void {
-    let frame: ServerToClientFrame;
+    let frame: RelayToClientFrame;
     try {
-      frame = JSON.parse(typeof raw === 'string' ? raw : '') as ServerToClientFrame;
+      frame = JSON.parse(typeof raw === 'string' ? raw : '') as RelayToClientFrame;
     } catch {
       return;
     }
@@ -1276,8 +1276,8 @@ export class PocketClient {
       case 'e2e':
         // The shared guard bounds every routing value before any of them is
         // used as a map key or decoded; this Client runs it rather than
-        // trusting the relay to have (`docs/specs/server.md` → Relay).
-        if (isE2eServerToClientFrame(frame)) this.#onE2e(frame);
+        // trusting the relay to have (`docs/specs/relay.md` → Relay).
+        if (isE2eRelayToClientFrame(frame)) this.#onE2e(frame);
         return;
       case 'host-gone':
         this.#disposeCeremony();
@@ -1299,7 +1299,7 @@ export class PocketClient {
     }
   }
 
-  #onE2e(frame: E2eServerToClientFrame): void {
+  #onE2e(frame: E2eRelayToClientFrame): void {
     const established = this.#established;
     if (
       established &&
@@ -1433,9 +1433,9 @@ export class PocketClient {
       throw new SessionExpiredError();
     }
     // A refusal, not a bare Error: an answer arrived, which is what `setup`
-    // reads to decide whether the Server can be assumed to hold nothing.
+    // reads to decide whether the Relay can be assumed to hold nothing.
     if (!response.ok) {
-      throw new ServerRefusalError(
+      throw new RelayRefusalError(
         parsed.error ?? `request failed (${response.status})`,
         response.status,
       );

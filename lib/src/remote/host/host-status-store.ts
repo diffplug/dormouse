@@ -102,7 +102,7 @@ const STATUS_FIELDS: {
   ) => boolean;
 } = {
   enrolled: Object.is,
-  serverUrl: Object.is,
+  relayUrl: Object.is,
   hostId: Object.is,
   connection: Object.is,
   pairedClients: Object.is,
@@ -256,23 +256,23 @@ async function readRemoteHostStatus(): Promise<void> {
 }
 
 /**
- * Enroll this machine with a coordinating server.
+ * Enroll this machine with a coordinating Relay.
  *
  * The password is a bearer credential and is passed straight through to the
- * service, which is what talks to the server; it is never stored here. The
+ * service, which is what talks to the Relay; it is never stored here. The
  * service refuses an origin outside this build's baked relay allowlist *before*
- * the password leaves the machine (`docs/specs/server.md`, "Where a Host may
- * reach a relay server"), so a mistyped origin fails closed rather than leaking
+ * the password leaves the machine (`docs/specs/relay.md`, "Where a Host may
+ * reach a Relay"), so a mistyped origin fails closed rather than leaking
  * it. Rejections propagate verbatim — the caller renders them.
  */
 export async function enrollRemoteHost(
-  serverUrl: string,
+  relayUrl: string,
   password: string,
   label: string,
 ): Promise<void> {
   const active = link();
   if (!active) throw new Error('This build has no remote Host service.');
-  await active.command('enroll', { serverUrl, password, label });
+  await active.command('enroll', { relayUrl, password, label });
   await refreshAfterMutation();
 }
 
@@ -286,7 +286,7 @@ export async function enrollRemoteHost(
  * the file along with the token this realm never sees.
  *
  * Rejections propagate verbatim, including the same allowlist refusal the typed
- * form gets: a server installed on this machine can still be an origin this
+ * form gets: a Relay installed on this machine can still be an origin this
  * build was not compiled to reach.
  */
 export async function enrollOfferRemoteHost(origin: string, label: string): Promise<void> {
@@ -299,7 +299,7 @@ export async function enrollOfferRemoteHost(origin: string, label: string): Prom
 /**
  * Take the relay slot back after `displaced` — which is terminal by design, so
  * nothing reconnects on its own. This displaces the other instance in turn
- * (`docs/specs/server.md`, "Relay socket policy").
+ * (`docs/specs/relay.md`, "Relay socket policy").
  */
 export async function reconnectRemoteHost(): Promise<void> {
   const active = link();
@@ -321,14 +321,14 @@ export async function clearRemoteHostEnrollment(): Promise<void> {
 }
 
 /**
- * Mint the code behind this machine's setup QR (`docs/specs/server.md` → Setup
+ * Mint the code behind this machine's setup QR (`docs/specs/relay.md` → Setup
  * tokens). Unlike everything above it, this changes nothing the status reports,
  * so it does not re-read one.
  *
  * The token rides back inside the URL, which is the point: it exists to be shown
  * to whoever is standing at this machine (`service-protocol.ts` →
  * `SetupQrResult`). Rejections propagate verbatim — a relay that is down and a
- * server that refuses both have to read as themselves.
+ * Relay that refuses both have to read as themselves.
  */
 export async function mintSetupQr(): Promise<SetupQrResult> {
   const active = link();
@@ -378,9 +378,9 @@ export function subscribeToInvitation(
  * (`PushSendSummary` in `service-protocol.ts` — the same type the service's
  * `pushTest` command answers with, so the two ends cannot drift).
  *
- * Rejects when there is no service, no enrollment, or the server refused —
+ * Rejects when there is no service, no enrollment, or the Relay refused —
  * unlike the ring path, which swallows everything so a failed push can never
- * break an alarm (`docs/specs/server.md` -> Web Push). A test button is the one
+ * break an alarm (`docs/specs/relay.md` -> Web Push). A test button is the one
  * caller that needs the failure.
  *
  * Lives here rather than beside the ring watcher in `alert-push.ts`: that

@@ -20,7 +20,7 @@ vi.mock('remote-lib-common', async (importOriginal) => {
   return { ...actual, mintNoiseStaticKeyPair: vi.fn(actual.mintNoiseStaticKeyPair) };
 });
 
-/** A server answering a well-formed enrollment; the body is what varies. */
+/** A Relay answering a well-formed enrollment; the body is what varies. */
 function enrollResponder(): ReturnType<typeof vi.fn> {
   return vi.fn(async () =>
     new Response(
@@ -78,7 +78,7 @@ describe('remote-host enrollment', () => {
     expect(body).toEqual({ password: TEST_SETUP_PASSWORD });
 
     expect(enrollment).toEqual({
-      serverUrl: 'https://dormouse.example',
+      relayUrl: 'https://dormouse.example',
       hostId: HOST_ID,
       hostToken: 'tok-xyz',
       origin: 'https://dormouse.example',
@@ -95,7 +95,7 @@ describe('remote-host enrollment', () => {
     expect(store.size).toBe(0);
   });
 
-  it('mints a Noise static the server never sees', async () => {
+  it('mints a Noise static the Relay never sees', async () => {
     // The Host's permanent end-to-end identity is generated on this machine
     // and persisted with the enrollment; the enroll request body is unchanged
     // (docs/specs/remote-security-model.md → Host identity).
@@ -161,7 +161,7 @@ describe('remote-host enrollment', () => {
   });
 
   it('sends the installer’s one-time token in place of the password', async () => {
-    // `HostEnrollRequest` is a union of exactly one credential, and the server
+    // `HostEnrollRequest` is a union of exactly one credential, and the Relay
     // answers 400 for both or neither — so the body must carry the token alone.
     stubLocalStorage();
     const fetchMock = vi.fn(async () =>
@@ -195,7 +195,7 @@ describe('remote-host enrollment', () => {
     ).rejects.toThrow(/cannot generate the X25519 key/);
     // A successful POST appends a `hosts.json` row and spends the installer's
     // single-use token, neither of which this side can undo — so a runtime that
-    // cannot mint must fail while the Server still has nothing to forget.
+    // cannot mint must fail while the Relay still has nothing to forget.
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -236,12 +236,12 @@ describe('remote-host enrollment', () => {
   const refused = (error: string) =>
     vi.fn(async () => new Response(JSON.stringify({ error }), { status: 401 }));
 
-  it('names the credential the Server says it refused', async () => {
+  it('names the credential the Relay says it refused', async () => {
     stubLocalStorage();
     vi.stubGlobal('fetch', refused(BAD_PASSWORD_ERROR));
     await expect(
       performEnrollment('https://dormouse.example', { password: 'wrong' }, 'x'),
-    ).rejects.toThrow('The server did not accept that setup password.');
+    ).rejects.toThrow('The Relay did not accept that setup password.');
 
     vi.stubGlobal('fetch', refused(UNAUTHORIZED_ERROR));
     await expect(
@@ -249,24 +249,24 @@ describe('remote-host enrollment', () => {
     ).rejects.toThrow(/enrollment offer is no longer valid/);
   });
 
-  it('does not blame a credential for a 401 the Server did not raise', async () => {
+  it('does not blame a credential for a 401 the Relay did not raise', async () => {
     // A reverse proxy, a rate limiter. Telling the operator to retype a password
     // that was fine is worse than saying only what is known.
     stubLocalStorage();
     vi.stubGlobal('fetch', vi.fn(async () => new Response('Unauthorized', { status: 401 })));
     await expect(
       performEnrollment('https://dormouse.example', { password: TEST_SETUP_PASSWORD }, 'x'),
-    ).rejects.toThrow('The server refused the enrollment (HTTP 401): Unauthorized');
+    ).rejects.toThrow('The Relay refused the enrollment (HTTP 401): Unauthorized');
   });
 
-  it('keeps the status and the server text on any other refusal', async () => {
+  it('keeps the status and the Relay text on any other refusal', async () => {
     // Nothing here is a user action to name — a reverse proxy, a restarting
-    // server — so the operator gets both halves of what the Server said.
+    // Relay — so the operator gets both halves of what the Relay said.
     stubLocalStorage();
     vi.stubGlobal('fetch', vi.fn(async () => new Response('gateway is asleep', { status: 502 })));
     await expect(
       performEnrollment('https://dormouse.example', { password: TEST_SETUP_PASSWORD }, 'x'),
-    ).rejects.toThrow('The server refused the enrollment (HTTP 502): gateway is asleep');
+    ).rejects.toThrow('The Relay refused the enrollment (HTTP 502): gateway is asleep');
   });
 
   it('keeps a proxy’s error page from becoming the sentence', async () => {
@@ -277,7 +277,7 @@ describe('remote-host enrollment', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(page, { status: 502 })));
     await expect(
       performEnrollment('https://dormouse.example', { password: TEST_SETUP_PASSWORD }, 'x'),
-    ).rejects.toThrow('The server refused the enrollment (HTTP 502): <html>');
+    ).rejects.toThrow('The Relay refused the enrollment (HTTP 502): <html>');
   });
 
   it('refuses a 200 whose body is not an enrollment', async () => {
@@ -327,15 +327,15 @@ describe('remote-host enrollment', () => {
     // stored: it routes every `e2e` envelope and is the second field of every QR
     // fragment, both of which accept exactly 16 bytes as base64url. Accepted
     // here, a wrong-length id would leave this Host minting codes no phone can
-    // parse, with nothing anywhere to explain it. The Server pins the same shape
-    // at the mint (`server/src/state.ts`).
+    // parse, with nothing anywhere to explain it. The Relay pins the same shape
+    // at the mint (`relay/src/state.ts`).
     for (const hostId of ['host-abc', '', `${HOST_ID}A`, HOST_ID.slice(0, 21), `${HOST_ID}==`]) {
       expect(
-        isEnrollment({ serverUrl: 's', hostId, hostToken: 't', origin: 'o', rpId: 'r' }),
+        isEnrollment({ relayUrl: 's', hostId, hostToken: 't', origin: 'o', rpId: 'r' }),
       ).toBe(false);
     }
     expect(
-      isEnrollment({ serverUrl: 's', hostId: HOST_ID, hostToken: 't', origin: 'o', rpId: 'r' }),
+      isEnrollment({ relayUrl: 's', hostId: HOST_ID, hostToken: 't', origin: 'o', rpId: 'r' }),
     ).toBe(true);
 
     // And the exchange fails naming the field rather than persisting one.
@@ -364,7 +364,7 @@ describe('remote-host enrollment', () => {
     stubLocalStorage();
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => new Response('<html>not your server</html>', { status: 200 })),
+      vi.fn(async () => new Response('<html>not your Relay</html>', { status: 200 })),
     );
 
     await expect(performEnrollment('https://dormouse.example', { password: TEST_SETUP_PASSWORD }, 'x')).rejects.toThrow(
@@ -378,7 +378,7 @@ describe('remote-host enrollment', () => {
     // believed it had an identity it cannot use is worse than one that knows
     // it has none.
     const base = {
-      serverUrl: 's',
+      relayUrl: 's',
       hostId: HOST_ID,
       hostToken: 't',
       origin: 'o',

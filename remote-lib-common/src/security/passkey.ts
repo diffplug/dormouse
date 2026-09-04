@@ -4,10 +4,10 @@
  * Passkeys authenticate the user account; they never independently grant Host
  * access (they are user credentials, not device identities — they sync across
  * devices). This module verifies a WebAuthn authentication assertion so that
- * BOTH the Server and the Host can independently check fresh user presence.
+ * BOTH the Relay and the Host can independently check fresh user presence.
  * The Host stores only a hash of each paired passkey's public key; the Client
  * presents the full key at connection time and the Host checks it against the
- * hash, so a compromised Server cannot substitute a different passkey.
+ * hash, so a compromised Relay cannot substitute a different passkey.
  *
  * Only ES256 (ECDSA P-256 / SHA-256) is supported — the mandatory-to-implement
  * WebAuthn algorithm and what every mainstream passkey provider issues.
@@ -50,7 +50,7 @@ export interface PasskeyAssertionExpectations {
 /**
  * The standing half of {@link PasskeyAssertionExpectations} — everything but
  * the per-ceremony challenge. This is what a Host records at enrollment and
- * what both verifiers demand of an assertion, so a Server that demands user
+ * what both verifiers demand of an assertion, so a Relay that demands user
  * verification while the Host does not cannot leave the weaker verifier
  * deciding access (`docs/specs/remote-security-model.md`).
  */

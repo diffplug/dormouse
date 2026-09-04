@@ -274,7 +274,7 @@ const preview: Preview = {
 
       // And the same seam again for the Settings dialog's Remote control
       // section, which renders nothing without a Host service behind the
-      // webview (`docs/specs/server.md`). Absent is the honest default for a
+      // webview (`docs/specs/relay.md`). Absent is the honest default for a
       // fake platform, so only the stories about that section prime a stub.
       // Read during render like the two above: the store reads `remoteHost`
       // when the section first subscribes, which is after this decorator's

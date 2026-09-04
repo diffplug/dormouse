@@ -5,21 +5,21 @@
  *
  * Registration returns exactly what `POST /api/setup/finish` wants
  * (`{ credentialId, publicKey, clientDataJSON }`, all base64url); assertions
- * return the wire {@link PasskeyAssertion} shape the server and Host both
+ * return the wire {@link PasskeyAssertion} shape the Relay and Host both
  * verify with `verifyPasskeyAssertion`.
  */
 
 import { fromBase64Url, toBase64Url, utf8Encode, type PasskeyAssertion } from 'remote-lib-common';
 
-/** Shown when this device already holds a passkey the Server has registered. */
+/** Shown when this device already holds a passkey the Relay has registered. */
 export const PASSKEY_ALREADY_REGISTERED_MESSAGE =
-  'This device already has a passkey for this server. Sign in with it instead.';
+  'This device already has a passkey for this Relay. Sign in with it instead.';
 
 /**
  * The authenticator refused to create a credential because one named in
  * `excludeCredentials` is already on it. Its own class, like
  * `SetupTokenInvalidError`, because the UI must act rather than report: the
- * exclusion list is what the *Server* holds, so this is proof that a sign-in
+ * exclusion list is what the *Relay* holds, so this is proof that a sign-in
  * from this very device will work — the one case where prior use is certain
  * even when this browser stored nothing.
  */
@@ -56,7 +56,7 @@ export interface WebAuthnClient {
   /**
    * Create a passkey for `accountId`. Pass `excludeCredentialIds` (base64url,
    * from `SetupBeginResponse`) to stop the authenticator minting a duplicate of
-   * a credential the Server already holds.
+   * a credential the Relay already holds.
    */
   registerPasskey(
     challenge: string,
@@ -86,7 +86,7 @@ function toBufferSource(bytes: Uint8Array): ArrayBuffer {
 }
 
 /**
- * Create a discoverable ES256 passkey. `attestation: 'none'` keeps the server
+ * Create a discoverable ES256 passkey. `attestation: 'none'` keeps the Relay
  * dependency-free (it trusts the browser-provided SPKI key).
  *
  * **ES256 alone in `pubKeyCredParams` is deliberate, and Chrome warns about
@@ -99,7 +99,7 @@ function toBufferSource(bytes: Uint8Array): ArrayBuffer {
  * silently produce) would register fine and then never be able to sign in —
  * better to fail here, where re-running setup is a one-tap recovery.
  *
- * `excludeCredentialIds` is the account's registered passkeys as the *Server*
+ * `excludeCredentialIds` is the account's registered passkeys as the *Relay*
  * knows them, so the authenticator refuses a duplicate of one that can already
  * sign in, while an orphan it holds — created, then refused at `finish` — is
  * absent from the list and correctly replaced rather than blocking setup.

@@ -24,7 +24,7 @@ import type { RemoteHostLink } from '../../lib/platform/types';
 /** A machine that has never enrolled: the section shows its three-field form. */
 export const UNENROLLED_STATUS: RemoteHostConsoleStatus = {
   enrolled: false,
-  serverUrl: null,
+  relayUrl: null,
   hostId: null,
   connection: 'idle',
   pairedClients: 0,
@@ -33,7 +33,7 @@ export const UNENROLLED_STATUS: RemoteHostConsoleStatus = {
 };
 
 /**
- * Un-enrolled *and* a Dormouse server installed on this machine: the section
+ * Un-enrolled *and* a Dormouse Relay installed on this machine: the section
  * leads with the one-click offer card and folds the typed form away.
  */
 export const OFFER_STATUS: RemoteHostConsoleStatus = {
@@ -47,7 +47,7 @@ export function enrolledStatus(
 ): RemoteHostConsoleStatus {
   return {
     enrolled: true,
-    serverUrl: 'https://ned-mac.tail9c2f1.ts.net',
+    relayUrl: 'https://ned-mac.tail9c2f1.ts.net',
     hostId: 'host-6f1c2a90',
     connection: 'connected',
     pairedClients: 0,
@@ -67,7 +67,7 @@ export function enrolledStatus(
  * The expiry is relative to *now* rather than a fixed epoch, because the panel
  * renders the minutes left — a frozen timestamp would render "expired" in every
  * story. `DEFAULT_PAIRING_TTL_MS` out, which is the real TTL
- * (`server/src/setup-token.ts`), so the copy reads as it does in the app.
+ * (`relay/src/setup-token.ts`), so the copy reads as it does in the app.
  */
 export function setupQrResult(over: Partial<SetupQrResult> = {}): SetupQrResult {
   const expiresAt = Date.now() + DEFAULT_PAIRING_TTL_MS;
@@ -101,7 +101,7 @@ export interface PrimedRemoteHost {
   enrollError?: string;
   /** What `setupQr` answers; defaults to {@link setupQrResult}. */
   setupQr?: SetupQrResult;
-  /** Make `setupQr` reject — the relay is down, or the server refused. */
+  /** Make `setupQr` reject — the relay is down, or the Relay refused. */
   setupQrError?: string;
   /**
    * Fire one `invitation` event as soon as something subscribes, so the panel
@@ -124,7 +124,7 @@ export interface PrimedRemoteHost {
  * Deliberately not a scenario engine: a story is one frame, so `enroll`,
  * `enrollOffer`, `reconnect` and `clearEnrollment` resolve without changing the
  * answer. The exception is `enrollError`, because a refused origin is a state the
- * form must render (`docs/specs/server.md`, "Remote control, in the Settings
+ * form must render (`docs/specs/relay.md`, "Remote control, in the Settings
  * dialog") and a rejected enroll is the only way to reach it.
  */
 export function makeStubRemoteHostLink(primed: PrimedRemoteHost): RemoteHostLink {

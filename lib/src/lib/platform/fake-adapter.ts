@@ -60,7 +60,7 @@ export class FakePtyAdapter implements PlatformAdapter {
 
   // Same reason, one layer up: a fake platform has no Host service behind it, so
   // this stays undefined and the Settings dialog's Remote control section renders
-  // nothing (`docs/specs/server.md`). The preview decorator installs a stub link
+  // nothing (`docs/specs/relay.md`). The preview decorator installs a stub link
   // for the stories that are *about* that section.
   remoteHost?: RemoteHostLink;
 

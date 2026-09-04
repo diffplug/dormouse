@@ -2,8 +2,8 @@
 
 > See `docs/specs/glossary.md` for Session / Pane vocabulary.
 > How the phone client (Dormouse Pocket) is structured and deployed. The
-> protocol is [remote-api.md](./remote-api.md); the selfhost server is
-> [server.md](./server.md).
+> protocol is [remote-api.md](./remote-api.md); the selfhost Relay is
+> [relay.md](./relay.md).
 
 ## The seam: the remote session is a platform adapter
 
@@ -41,7 +41,7 @@ the scan beside it (rationale). **Prior use is stored passkey material**
 
 **The local record must not lag the registration, nor outlive a refusal**:
 `setup` caches the public key between `registerPasskey` and `finish`, and a
-`finish` the Server *answered* by rejecting clears it. **Blocked site data costs
+`finish` the Relay *answered* by rejecting clears it. **Blocked site data costs
 persistence, not the visit** — `localStoragePocketStorage` mirrors writes in
 memory and reads the mirror first. (rationale)
 
@@ -54,12 +54,12 @@ is a flag leading the auth screen with *Scan again from inside Dormouse Pocket*.
 **The scanner reads a code as data.** `ScanInvitation` lazy-loads
 `@zxing/browser` for a rear-camera scan (iOS has no `BarcodeDetector`), never
 navigates, and hands the text to `parsePairingInvitationUrl`
-([server.md](./server.md) owns the grammar); a paste field feeds the same parser
+([relay.md](./relay.md) owns the grammar); a paste field feeds the same parser
 (rationale).
 
 * **A `null` parse is one of two fixed lines**: a code that would have parsed
   before it expired says so; everything else — a foreign-origin invitation
-  included — is not a setup code for this server. `pairingInvitationExpired`
+  included — is not a setup code for this Relay. `pairingInvitationExpired`
   re-runs that same parser at the epoch, so the grammar has no second copy.
 * **The camera tracks stop on every way out** — accepted, cancelled, errored,
   unmounted, and on a start that finished after the screen was gone. Only a
@@ -283,14 +283,14 @@ for "already installed, wrong window."
 registration promise**, never `navigator.serviceWorker.ready`, which never
 settles after a failed registration.
 
-**The Server's VAPID public key is prefetched before Pocket offers Enable**, in
+**The Relay's VAPID public key is prefetched before Pocket offers Enable**, in
 an explicit config state (`loading`, `ready`, `disabled`, or `error`): a failed
 fetch offers Retry, which only caches the key, and the next tap reveals Enable.
 **Permission is requested on that separate, fresh tap** — a network round trip
 can consume an iOS gesture's transient activation. (rationale)
 
 Browser availability and Host registration are separate states: a
-`PushSubscription` belongs to the service-worker scope; the Server stores one row
+`PushSubscription` belongs to the service-worker scope; the Relay stores one row
 per `(hostId, deliveryId)`.
 
 **Push is asked for once per device, on one card, on the Hosts view** — the
@@ -307,12 +307,12 @@ Every card state is one pure predicate over (paired set, registrations,
 availability, config); `needs-install` is the one it declines to render, since
 `InstallNotice` is the push card for that state.
 
-**Which Hosts this device is registered with is read from the Server on entering
+**Which Hosts this device is registered with is read from the Relay on entering
 the Hosts list**, never tracked locally, and the connect neither refetches nor
 drops it (rationale). **The readback is by capability, never by identity**
 (rationale):
 `POST /api/push/subscriptions/query` presents this browser's own delivery ids and
-reports only on those ([server.md](./server.md) → Web Push).
+reports only on those ([relay.md](./relay.md) → Web Push).
 `POST /api/push/subscribe` answers with the same thing — every Host this device
 is registered with after the mutation — so **both are complete answers, never
 deltas**: only which is newer. One run token drops any read a newer load, or a
@@ -320,13 +320,13 @@ completed registration, already overtook. **A read in flight or failed never
 settles at empty on its own behalf**: the card re-offers its idempotent Enable.
 (rationale)
 
-**A Server row is necessary but not sufficient for Push notifications on.**
+**A Relay row is necessary but not sufficient for Push notifications on.**
 Pocket also checks that permission is still granted, that the scope holds a
-`PushSubscription` minted for the Server's current VAPID key, and that it points
+`PushSubscription` minted for the Relay's current VAPID key, and that it points
 at the registered address; any of the four failing re-exposes Enable. **The
-Server likewise omits rows under an old VAPID key** (rationale).
+Relay likewise omits rows under an old VAPID key** (rationale).
 
-**Pocket records a SHA-256 digest of the address each time the Server accepts a
+**Pocket records a SHA-256 digest of the address each time the Relay accepts a
 registration** (`dormouse-pocket:push-endpoint`, beside the `:passkey:` cache)
 and compares it on open (rationale) — a digest, not the address, since it is a
 bearer capability. **One key per device, not per Host**: one scope holds one
@@ -341,9 +341,9 @@ credential** [remote-security-model.md](./remote-security-model.md) does not
 grant.
 
 **Registering another Host, or retrying that POST, reuses the scope's existing
-`PushSubscription`** when its `applicationServerKey` matches the Server's VAPID
+`PushSubscription`** when its `applicationServerKey` matches the Relay's VAPID
 key byte-for-byte; a new endpoint is minted only when the key differs
-(rationale). **When it does rotate, the Server drops that device's other Host
+(rationale). **When it does rotate, the Relay drops that device's other Host
 rows in the same mutation** and its response lists what survived, which makes a
 committed POST whose response was lost self-repairing (rationale).
 
@@ -357,7 +357,7 @@ transition, a re-pair that mints a new id, and an explicit **Remove** each write
 the old `{ hostId, deliveryId }` to `PendingDeliveryDeletionV1` *before* the
 record forgets it (rationale), then call the idempotent deletion route.
 Tombstones retry after sign-in, on every entry to the Hosts list, and before
-registering a replacement, and clear only on a Server answer. **This deletes the
+registering a replacement, and clear only on a Relay answer. **This deletes the
 delivery row alone** — never the scope's shared `PushSubscription`, and never
 another Host's row.
 
@@ -371,7 +371,7 @@ Source of truth: `isInstalledWebApp` / `requiresInstallForPush` /
 `lib/src/remote/client/pocket-client.ts`;
 `lib/src/remote/pocket-app/service-worker.ts`; `pushEndpointFingerprint` in
 `remote-lib-common/src/security/push.ts`; `PushSubscriptionStore.upsert` and
-`vapidPublicKey` in `server/src/state.ts`; `server/src/app.ts`.
+`vapidPublicKey` in `relay/src/state.ts`; `relay/src/app.ts`.
 
 ## What Pocket stores
 
@@ -417,7 +417,7 @@ previous build's hashed assets (rationale). Two rules make it hold:
   response's cache policy describes the response, and the shell is never a useful
   answer to a subresource miss. (rationale)
 
-Source of truth: `registerPocketServing` in `server/src/app.ts`.
+Source of truth: `registerPocketServing` in `relay/src/app.ts`.
 
 ## A backgrounded phone loses its Host session
 
@@ -436,15 +436,15 @@ a fresh Noise handshake and one WebAuthn prompt. (rationale)
 **Pocket runs the same deadline against its own last send**, before a keepalive
 and before every request, and reports host loss when it passes. **A reap sends
 nothing** — there is no frame to send — and this Client's relay socket is to the
-*Server*, so it stays open. (rationale)
+*Relay*, so it stays open. (rationale)
 
 Source of truth: `PocketClient.sendKeepalive` / `#reapedByHost` and the injected
 timer, clock, and visibility seams in `lib/src/remote/client/pocket-client.ts`.
 
 ## An expired session drops to sign-in
 
-Sessions live only in the Server's memory ([server.md](./server.md)), so they end
-on their 12h expiry *and* on every Server restart, while the passkey and
+Sessions live only in the Relay's memory ([relay.md](./relay.md)), so they end
+on their 12h expiry *and* on every Relay restart, while the passkey and
 paired-host markers in `localStorage` outlive both. **Pocket therefore treats a
 dead session as actionable, not reportable** (rationale): `PocketClient` clears
 its in-memory token and throws `SessionExpiredError`; the app tears down any live
@@ -470,10 +470,10 @@ Source of truth: `SessionExpiredError` in
 **The Pocket app is always served same-origin with its API.** WebAuthn binds
 passkeys to the serving origin, and Chrome's Private Network Access rules block
 public-site → private-network fetches. Pocket holds itself to it by construction
-— an empty API base, a `wsBase` from `location.origin` — and the Server enforces
+— an empty API base, a `wsBase` from `location.origin` — and the Relay enforces
 it: a registration or assertion whose `clientDataJSON.origin` is
-not the configured `DORMOUSE_ORIGIN` is rejected ([server.md](./server.md);
-rationale); the Server emits no cross-origin grant
+not the configured `DORMOUSE_ORIGIN` is rejected ([relay.md](./relay.md);
+rationale); the Relay emits no cross-origin grant
 ([security-remote.md](./security-remote.md#cross-origin-access)). **The bundle
 mounts at the origin root, never under a path prefix**: the manifest's
 `start_url`/`scope`, the worker's registration scope, and the shell's
@@ -502,7 +502,7 @@ in the emitted `index.html`. (rationale)
 
 One lib-owned bundle, two deployments:
 
-* **Selfhost (shipped):** the Node server serves the bundle (`lib/dist-pocket`);
+* **Selfhost (shipped):** the Relay serves the bundle (`lib/dist-pocket`);
   selfhost auth never depends on dormouse.sh existing.
 * **SaaS (staged — see [Future](#future)):** CloudFlare serves the static site
   and routes `/api/*` and `/ws/*` to the dynamic backend (CloudFlare proxies
@@ -512,7 +512,7 @@ One lib-owned bundle, two deployments:
 worlds**, sharing all terminal UI through `lib` and never duplicating Pocket
 code.
 
-Source of truth: `pocketContentSecurityPolicy` in `server/src/app.ts`,
+Source of truth: `pocketContentSecurityPolicy` in `relay/src/app.ts`,
 `assertPocketShell` in `lib/scripts/assert-pocket-worker.mjs`.
 
 ## Future
@@ -526,4 +526,4 @@ Source of truth: `pocketContentSecurityPolicy` in `server/src/app.ts`,
    no picker; add the shared `ThemePicker` (and its theme-debugger entry) once
    its dropdown is phone-friendly.
 4. **Onboarding friction** — Pocket carries the phone-side items of the
-   **selfhost-onboarding** scope ([server.md](./server.md) `## Future`).
+   **selfhost-onboarding** scope ([relay.md](./relay.md) `## Future`).

@@ -1,6 +1,6 @@
 /**
  * The relay, in memory: two {@link FakeSocket}s bridged by the routing rules of
- * `docs/specs/server.md` → Relay.
+ * `docs/specs/relay.md` → Relay.
  *
  * Test-only, and shared for the reason `test-fake-socket.ts` and
  * `test-e2e-client.ts` are: the Pocket client and the Host both have to be
@@ -8,8 +8,8 @@
  * would be two opinions about which frames reach whom. It stamps `clientId` on
  * the way to the Host and `hostId` on the way back, binds each Client socket on
  * its own `init`, forwards `transport` only inside that binding, and decodes no
- * ciphertext. `server/src/relay.ts` is the original of those rules and
- * `server/test/e2e-relay.test.mjs` is what pins them there; nothing mechanically
+ * ciphertext. `relay/src/relay.ts` is the original of those rules and
+ * `relay/test/e2e-relay.test.mjs` is what pins them there; nothing mechanically
  * ties this copy to it, so an edit to either belongs in both.
  *
  * Everything it deliberately does *not* do is the point of the harness: it

@@ -10,7 +10,7 @@
  * the enrollment and the ACL, which only the Host holds. Nothing here touches
  * the DOM or a store, so it runs unchanged in a webview or in the sidecar.
  *
- * Delivery is an HTTP POST to the Server rather than a relay frame: the relay
+ * Delivery is an HTTP POST to the Relay rather than a relay frame: the relay
  * routes between two live sockets, and the whole point of a push is reaching a
  * phone whose app is closed.
  */
@@ -62,11 +62,11 @@ export const PUSH_TEST_TITLE = 'Dormouse test — nothing needs attention';
 export const PUSH_TEST_TAG = 'dormouse-push-test';
 
 /**
- * Headroom over the Server's own per-attempt deadline, covering the round trip
+ * Headroom over the Relay's own per-attempt deadline, covering the round trip
  * and the fan-out's bookkeeping. Small on purpose: the timeout is still there
  * to stop a wedged relay holding the Host.
  *
- * This is the one Host→Server call that runs *past* the webview's 15 s command
+ * This is the one Host→Relay call that runs *past* the webview's 15 s command
  * budget, and deliberately: a send is normally fired by the alert path inside
  * the Host process, where no webview is waiting at all. Only the Settings
  * dialog's test push is webview-initiated, and there the button giving up first
@@ -85,7 +85,7 @@ export function toPushText(label: string): string {
 
 /** A `HostFetchOptions` (`host-fetch.ts`) plus the authority on who is reached. */
 export interface AlertPushDeps {
-  readonly enrollment: Pick<HostEnrollment, 'serverUrl' | 'hostToken'>;
+  readonly enrollment: Pick<HostEnrollment, 'relayUrl' | 'hostToken'>;
   /** The Host's active ACL records — the authority on who may be reached. */
   readonly activeRecords: () => readonly HostAclRecord[];
   /**
@@ -102,11 +102,11 @@ export interface AlertPushDeps {
 }
 
 /**
- * The devices the settings dialog names: subscribed on the Server **and** still
+ * The devices the settings dialog names: subscribed on the Relay **and** still
  * active in the Host's ACL, joined by `deliveryId` to the ACL's human labels.
  *
  * Only the Host can do this join — it holds the records that mint delivery ids,
- * and the Server never learns a label
+ * and the Relay never learns a label
  * (`docs/specs/remote-security-model.md`). The send path does not need it, and
  * deliberately does not pay for it; see {@link sendPush}.
  *
@@ -181,16 +181,16 @@ export async function sendPush(
   }
 
   const response = await hostFetch(
-    // The one call that outlives the shared budget: the Server holds a send open
+    // The one call that outlives the shared budget: the Relay holds a send open
     // for up to `PUSH_SEND_DEADLINE_MS` per attempt, so aborting at the default
     // 10 s would report deliveries that actually succeeded as failures. Derived
-    // from the Server's own bound plus a margin for the round trip.
+    // from the Relay's own bound plus a margin for the round trip.
     { ...deps, timeoutMs: PUSH_SEND_DEADLINE_MS + PUSH_SEND_MARGIN_MS },
     API_ROUTES.pushSend,
     { recipients } satisfies PushSendRequest,
   );
   // `hostFetch` threw on a non-2xx; this is the quieter failure class — the
-  // Server accepted the send but a push service refused delivery, which it
+  // Relay accepted the send but a push service refused delivery, which it
   // reports in counts on an HTTP 200. Without this check an all-failed fan-out
   // is indistinguishable from success.
   const result = (await response.json()) as PushSendResponse;

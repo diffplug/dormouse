@@ -119,7 +119,7 @@ test('the wrong Host key opens nothing', async () => {
   const { host, client, other } = await parties();
   const sealed = await seal(host, client);
 
-  // The pin is what authenticates the sender: a Server that swapped the Host
+  // The pin is what authenticates the sender: a Relay that swapped the Host
   // static a phone believes in still cannot produce a readable push.
   assert.equal(await open(client, other, sealed), null);
 });
@@ -175,7 +175,7 @@ test('a maximal plaintext seals inside the bound, and one byte more does not', a
   const maximal = await seal(host, client, new Uint8Array(MAX_SEALED_PUSH_PLAINTEXT_LENGTH));
   assert.ok(isSealedPushV1(maximal));
   assert.ok(maximal.ct.length <= MAX_SEALED_PUSH_LENGTH);
-  // The whole envelope, as the Server forwards it, stays far inside the ~4 KB
+  // The whole envelope, as the Relay forwards it, stays far inside the ~4 KB
   // every push service allows.
   const wire = JSON.stringify({ hostId: toBase64Url(new Uint8Array(16)), ...maximal });
   assert.ok(wire.length < 4096, `envelope is ${wire.length} bytes`);

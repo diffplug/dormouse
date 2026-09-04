@@ -153,7 +153,7 @@ describe('remote host bridge mode', () => {
       expect.arrayContaining(['enroll', 'status', 'reconnect', 'clearEnrollment']),
     );
     expect(link.commands.find((c) => c.cmd === 'enroll')?.params).toEqual({
-      serverUrl: 'https://relay.dormouse.sh',
+      relayUrl: 'https://relay.dormouse.sh',
       password: 'password',
       label: 'Laptop',
     });

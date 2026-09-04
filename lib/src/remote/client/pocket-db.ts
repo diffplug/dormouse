@@ -50,7 +50,7 @@ export interface KnownHostV1 {
   readonly accountId: string;
   /**
    * What to call this machine. The Host's own label, as it arrived inside the
-   * encrypted pairing outcome — never the Server's copy, which a Client is not
+   * encrypted pairing outcome — never the Relay's copy, which a Client is not
    * told and which stops existing in stage 4c.
    */
   readonly label: string;
@@ -69,7 +69,7 @@ export interface KnownHostV1 {
 }
 
 /**
- * A delivery mapping this Client owes the Server a deletion for, written
+ * A delivery mapping this Client owes the Relay a deletion for, written
  * *before* the `KnownHostV1` forgets the id — the id is the only handle that
  * can delete the row, so losing it before the deletion lands strands it.
  */
@@ -101,7 +101,7 @@ export interface PendingDeletionStore {
  *
  * **Neither half may contain `:`**, or two different pairs could file under one
  * key. Both are base64url today — a `hostId` is `toBase64Url(randomBytes(16))`
- * from the Server — so the separator is unambiguous; a component that stops
+ * from the Relay — so the separator is unambiguous; a component that stops
  * being base64url needs a framed key, not a longer separator.
  */
 export function pendingDeletionKey(hostId: string, deliveryId: string): string {

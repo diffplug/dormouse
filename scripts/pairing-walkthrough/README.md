@@ -1,10 +1,10 @@
 # Pairing walkthrough
 
-Drives the self-host setup → pairing story against the **real** Server and the
+Drives the self-host setup → pairing story against the **real** Relay and the
 **real** Host, in real browsers, and leaves every screenshot, log and captured
 image behind in one run directory.
 
-The whole loop, in one command: a Server, a Host enrolling through its own form,
+The whole loop, in one command: a Relay, a Host enrolling through its own form,
 a QR on the laptop's screen read by a phone's camera, a passkey, two digits typed
 back on the laptop — and then a command typed on the phone whose output the
 laptop's filesystem is holding half a second later. Every claim it makes is
@@ -34,7 +34,7 @@ selectors), `ab.mjs` (`agent-browser`), `chrome.mjs` (the Pocket browser),
 | `agent-browser` ≥ 0.31 on `PATH` | Drives both browsers. `agent-browser doctor` if it misbehaves. |
 | Chrome / Chromium | `agent-browser install` puts one where it wants it. |
 | `ffmpeg` on `PATH` | Every pixel operation: crop, upscale, Y4M. Override with `FFMPEG_BIN`. |
-| `pnpm install` already run | The Server, the Host and the QR decoder all come from the workspace. |
+| `pnpm install` already run | The Relay, the Host and the QR decoder all come from the workspace. |
 | A free `:3000` | Not negotiable — see *Ports* below. The run refuses to start otherwise. |
 | Two free ports from `:15540` | The Host harness's Vite server and its dev bridge; picked at startup. |
 
@@ -74,10 +74,10 @@ it.
 
 | # | Step | What happens |
 | --- | --- | --- |
-| 1 | `server` | `pnpm dev:server` with an isolated `DORMOUSE_STATE_DIR`, then waits for `:3000` to answer. |
-| 2 | `host` | `pnpm dev:standalone:ab` with `DORMOUSE_REMOTE_CONNECT_SRC` pointed at that Server, then waits for the app's first terminal. → `01-host-booted.png` |
+| 1 | `server` | `pnpm dev:relay` with an isolated `DORMOUSE_STATE_DIR`, then waits for `:3000` to answer. |
+| 2 | `host` | `pnpm dev:standalone:ab` with `DORMOUSE_REMOTE_CONNECT_SRC` pointed at that Relay, then waits for the app's first terminal. → `01-host-booted.png` |
 | 3 | `settings` | Clicks the baseboard's Settings button and scrolls to Remote control. → `02-settings-open.png` |
-| 4 | `enroll` | Types the server URL, the setup password and the machine name into the real form, submits, and waits for **Connected**. → `03-enroll-form.png`, `04-enrolled.png` |
+| 4 | `enroll` | Types the Relay URL, the setup password and the machine name into the real form, submits, and waits for **Connected**. → `03-enroll-form.png`, `04-enrolled.png` |
 | 5 | `qr` | Clicks **Set up a phone**, waits for the code, screenshots, crops to the QR, makes a camera-shaped Y4M, and decodes the crop to prove it is legible. → `qr-full.png`, `qr.png`, `qr.y4m`, `invitation-url.txt` |
 | 6 | `pocket` | Launches a second, isolated Chrome with the fake camera pointed at `qr.y4m`, attaches with `agent-browser connect <port>`, opens the **plain origin**, and gives the page a CDP virtual authenticator. → `05-pocket-first-run.png` |
 | 7 | `code` | Taps **Scan a setup code**; Pocket's own scanner decodes the fake camera, registers a passkey with the scanned token, signs in, and shows two digits. Reads them, and waits for the Host's modal to open. → `06-scanner.png`, `07-code-screen.png`, `08-host-pairing-modal.png`, `pairing-code.txt` |
@@ -88,7 +88,7 @@ it.
 
 Everything a later step needs from an earlier one is on `ctx.state` —
 `hostBrowser`, `pocketBrowser`, `pocketAuth` (the live CDP session holding the
-authenticator), `serverHandle`, `invitationUrl`, `pairingCode`, and `signCount`
+authenticator), `relayHandle`, `invitationUrl`, `pairingCode`, and `signCount`
 — or in `summary.json`.
 
 Per-step milliseconds land in `summary.json`. With warm builds the whole run is
@@ -108,7 +108,7 @@ to tap something there would have found a bug.
 | `--scenario <name>` | `happy` | Which ending to drive — see *Scenarios*. |
 | `--until <step>` | the scenario's last | Stop after this step. |
 | `--out <dir>` | `$TMPDIR/pairing-walkthrough/<timestamp>` | Run directory. |
-| `--skip-build` | off | Reuse `lib/dist-pocket` and `server/dist` instead of rebuilding them. Ignored (with a warning) when either is missing. |
+| `--skip-build` | off | Reuse `lib/dist-pocket` and `relay/dist` instead of rebuilding them. Ignored (with a warning) when either is missing. |
 | `--machine-name <n>` | `Walkthrough Mac` | The name the Host enrolls under. |
 | `--keep` | off | Leave everything running when the run ends — including a failed one, which is when poking by hand is most useful. Ctrl-C stops it. |
 
@@ -124,7 +124,7 @@ Everything lands in the run directory, whose path is printed at the start and
 at the end. **Nothing is written into the repo.**
 
 ```
-server.log            the Server's whole stdout/stderr
+server.log            the Relay's whole stdout/stderr
 host.log              the dev:standalone:ab harness, sidecar and Vite
 01-host-booted.png … one screenshot per UI step
 qr-full.png           the Host webview at the moment the QR was measured
@@ -163,7 +163,7 @@ and how much of its TTL was left, the round trip from Enter to the file the
 laptop's shell wrote (`terminal.roundTripMs`, ~220 ms here), the Enter-to-bell
 time, and the authenticator's `signCount` after each ceremony. `options` holds
 what the run chose for itself. The setup password is not among them — the
-Server mints its own, and a `--keep` run is signed into by hand with the
+Relay mints its own, and a `--keep` run is signed into by hand with the
 `password` in `<run>/server-state/setup-password.json`.
 
 ## State isolation
@@ -171,7 +171,7 @@ Server mints its own, and a `--keep` run is signed into by hand with the
 A walkthrough that starts half-enrolled is not a walkthrough, so both sides get
 a store of their own. The *why* of each is at the code; what it means for you:
 
-- **Server** — `DORMOUSE_STATE_DIR` is set to `<run>/server-state`, so the
+- **Relay** — `DORMOUSE_STATE_DIR` is set to `<run>/server-state`, so the
   default `./data` in the repo is neither read nor written.
 - **Host** — nothing to set; `standalone/scripts/dev-agent-browser.mjs` already
   uses a per-pid temp directory. The path it picked is in `summary.json` as
@@ -195,13 +195,13 @@ Host harness's two ports are searched for from `:15540` and passed in, and the
 Pocket browser's debugging port from 100 above the second of them.
 
 `localhost`, never `127.0.0.1` — WebAuthn's secure-context rule and the `rpId`
-the Server derives from its own origin
-([`docs/specs/server.md`](../../docs/specs/server.md) → Running it).
+the Relay derives from its own origin
+([`docs/specs/relay.md`](../../docs/specs/relay.md) → Running it).
 
-Every listener a run starts binds loopback only — the server is pinned with
+Every listener a run starts binds loopback only — the Relay is pinned with
 `DORMOUSE_BIND_HOST=127.0.0.1`, the Host bridge and both Chrome debugging ports
 already are, and a step that adds one holds to the same rule
-([`docs/specs/server.md`](../../docs/specs/server.md) → Configuration).
+([`docs/specs/relay.md`](../../docs/specs/relay.md) → Configuration).
 
 ## Known limitations
 
@@ -221,8 +221,8 @@ already are, and a step that adds one holds to the same rule
   nearest-neighbour enlargement (`qr-large.png`) — closer to what a phone camera
   sees than the raw crop is, but worth knowing when a decode gets marginal.
 - **Push is off**, because a loopback origin has no routable VAPID subject
-  ([`docs/specs/server.md`](../../docs/specs/server.md) → Configuration). So the
-  Hosts view's card reads *Push notifications are off · This server has push
+  ([`docs/specs/relay.md`](../../docs/specs/relay.md) → Configuration). So the
+  Hosts view's card reads *Push notifications are off · This Relay has push
   notifications turned off* (`13-pocket-hosts.txt`), the alarm settings say no
   paired phone has push on, and **the whole delivery-keyed push path — Enable,
   the sealed payload, the worker's notification — is untested here.** Only the

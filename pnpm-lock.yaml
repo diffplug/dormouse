@@ -187,17 +187,7 @@ importers:
         specifier: ^4.1.6
         version: 4.1.11(@types/node@24.13.3)(jsdom@29.1.1)(vite@8.2.2(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0))
 
-  remote-lib-common:
-    dependencies:
-      '@noble/ciphers':
-        specifier: 2.4.0
-        version: 2.4.0
-    devDependencies:
-      typescript:
-        specifier: ^6.0.3
-        version: 6.0.3
-
-  server:
+  relay:
     dependencies:
       '@hono/node-server':
         specifier: ^2.0.0
@@ -221,6 +211,16 @@ importers:
       '@types/web-push':
         specifier: ^3.6.4
         version: 3.6.4
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+
+  remote-lib-common:
+    dependencies:
+      '@noble/ciphers':
+        specifier: 2.4.0
+        version: 2.4.0
+    devDependencies:
       typescript:
         specifier: ^6.0.3
         version: 6.0.3

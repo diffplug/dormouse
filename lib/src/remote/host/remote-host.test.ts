@@ -82,7 +82,7 @@ describe('RemoteHost end-to-end ceremonies', () => {
   beforeAll(async () => {
     const material = await mintNoiseStaticKeyPair();
     enrollment = {
-      serverUrl: ORIGIN,
+      relayUrl: ORIGIN,
       hostId: testRoutingId(),
       hostToken: 'tok',
       origin: ORIGIN,
@@ -348,7 +348,7 @@ describe('RemoteHost end-to-end ceremonies', () => {
     // `consumed` on its own reads the same whether the pairing succeeded or the
     // digits were mistyped — and the paired count, the only other signal, is
     // absolute, so on a machine that already has a phone it does not move
-    // either (`docs/specs/server.md` → "Remote control, in the Settings dialog").
+    // either (`docs/specs/relay.md` → "Remote control, in the Settings dialog").
     makeHost();
     const authenticator = await newAuthenticator();
     const ended = async (clientId: string) => {
@@ -419,7 +419,7 @@ describe('RemoteHost end-to-end ceremonies', () => {
       kind: 'pairing',
       hostId: enrollment.hostId,
       // Not this transcript's hash: exactly what a proof lifted from another
-      // ceremony, or minted by a Server that never saw one, looks like.
+      // ceremony, or minted by a Relay that never saw one, looks like.
       handshakeHash: randomBase64Url(32),
       passkeyCredentialId: authenticator.credentialId,
     };
@@ -485,7 +485,7 @@ describe('RemoteHost end-to-end ceremonies', () => {
     expect(await openPairing('c1', invitation, await generateNoiseKeyPair())).not.toBeNull();
   });
 
-  it('caps outstanding invitations at the Server’s own bound, oldest first', async () => {
+  it('caps outstanding invitations at the Relay’s own bound, oldest first', async () => {
     makeHost();
     const first = await mintInvitation();
     for (let i = 1; i < MAX_TOKENS_PER_HOST; i += 1) await mintInvitation();
@@ -501,7 +501,7 @@ describe('RemoteHost end-to-end ceremonies', () => {
   it('holds the cap when two mints overlap across the keygen', async () => {
     // The one await in `mintInvitation` is `generateNoiseKeyPair`. Evicting
     // before it lets two mints read the same pre-await size, each evict one,
-    // and then both insert — one past the cap the Server's setup-token bound is
+    // and then both insert — one past the cap the Relay's setup-token bound is
     // shared with.
     makeHost();
     for (let i = 0; i < MAX_TOKENS_PER_HOST; i += 1) await mintInvitation();
@@ -742,7 +742,7 @@ describe('RemoteHost end-to-end ceremonies', () => {
     const connectionId = testRoutingId();
     const { session, hostChallenge } = await openConnection('c1', clientStatic, connectionId);
     const binding = connectionBinding(connectionId, hostChallenge, session, authenticator.credentialId);
-    // The Server substituting a challenge it minted for another ceremony: the
+    // The Relay substituting a challenge it minted for another ceremony: the
     // binding is this connection's, the signature is not.
     const presence = await presenceProofFor(authenticator, binding, {
       assertionBinding: { ...binding, connectionId: testRoutingId() },

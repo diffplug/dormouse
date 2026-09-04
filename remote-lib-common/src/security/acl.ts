@@ -2,7 +2,7 @@
  * The Host ACL: the authorization primitive.
  *
  * Each Host maintains its own local list of approved Clients; it is the
- * authoritative record — the Server cannot add to it. An approved Client is
+ * authoritative record — the Relay cannot add to it. An approved Client is
  * the *pair* of a passkey credential (who) and a per-Host Client static public
  * key (which browser): a connection is authorized only when both appear on the
  * same active record.

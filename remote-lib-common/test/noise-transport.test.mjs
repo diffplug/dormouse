@@ -1,7 +1,7 @@
 /**
- * The E2E transport framing (docs/specs/server.md -> Relay -> "E2E framing").
- * The relay-integrated half — the same framing through a real server — is
- * `server/test/e2e-relay.test.mjs`.
+ * The E2E transport framing (docs/specs/relay.md -> Relay -> "E2E framing").
+ * The relay-integrated half — the same framing through a real Relay — is
+ * `relay/test/e2e-relay.test.mjs`.
  */
 
 import { test } from 'node:test';

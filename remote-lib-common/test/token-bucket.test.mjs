@@ -1,7 +1,7 @@
 /**
  * The shared token bucket. Its two consumers — the Host's crypto budget
- * (`lib/src/remote/host/remote-host.ts`) and the Server's Host-enrollment
- * admission (`server/src/app.ts`) — pin their own wiring; what this file pins
+ * (`lib/src/remote/host/remote-host.ts`) and the Relay's Host-enrollment
+ * admission (`relay/src/app.ts`) — pin their own wiring; what this file pins
  * is the refill arithmetic both rely on.
  */
 

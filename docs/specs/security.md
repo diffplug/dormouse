@@ -20,7 +20,7 @@ it does not look like one.
 owns and is private to their tailnet by default, but its application boundary
 assumes the HTTPS origin is public ([SELF_HOST.md](../../SELF_HOST.md)).
 **Nothing about remote control applies to a Host that never enrolls with a
-server**: enrollment is where the relay, the phone, and push begin.
+Relay**: enrollment is where the relay, the phone, and push begin.
 Cloud-hosted operation is staged, and its boundary is re-analyzed before that
 code ships ([security-remote.md](./security-remote.md#future)).
 
@@ -39,14 +39,14 @@ last column means nothing cheaper does.
 | **A loopback listener grants a stranger nothing it could not get from the upstream directly.** | [Loopback Listeners](./security-local.md#loopback-listeners) | `scripts/loopback-lint.mjs` |
 | **Terminal scrollback is never written to disk**, and the session state that is written belongs to your account alone. | [Persisted state](./security-local.md#persisted-state) | audit |
 | **Nothing but a human at the laptop can authorize a phone.** The only path into a Host's ACL is typing, on that Host, the two digits the phone shows, and the Host makes every access decision. | [Pairing](./remote-security-model.md#pairing), [Host Authorization](./remote-security-model.md#host-authorization) | `remote-lib-common/test/security-guarantees.test.mjs` |
-| **The Server reads nothing.** One end-to-end channel per ceremony; the relay routes ciphertext it holds no key for, so a compromised Server gains no plaintext and no authorization. | [Trust Model](./remote-security-model.md#trust-model), [Noise suite](./remote-security-model.md#noise-suite) | `scripts/e2e-lint.mjs` |
+| **The Relay reads nothing.** One end-to-end channel per ceremony; the relay routes ciphertext it holds no key for, so a compromised Relay gains no plaintext and no authorization. | [Trust Model](./remote-security-model.md#trust-model), [Noise suite](./remote-security-model.md#noise-suite) | `scripts/e2e-lint.mjs` |
 | **Push notifications are opt-in, and a push is sealed to the one phone that receives it.** | [Push sealing](./remote-security-model.md#push-sealing) | `remote-lib-common/test/push-seal.test.mjs` |
 | **A stolen or synced passkey buys sign-in, not a terminal.** Every connection also needs the phone's own paired key and a fresh presence proof bound to that connection. | [Passkeys](./remote-security-model.md#passkeys), [Presence proofs](./remote-security-model.md#presence-proofs) | `remote-lib-common/test/security-guarantees.test.mjs` |
-| **A hostile relay cannot exhaust a Host.** Every bound runs on the Host's own clock, and a rejected frame costs it nothing. | [Host bounds](./remote-security-model.md#host-bounds) | `lib/src/remote/host/remote-host-bounds.test.ts`, `server/test/malicious-relay.test.mjs` |
-| **A Host talks only to the relay its build was pointed at**, and refuses before any credential leaves the machine. | [Where a Host may reach a relay server](./security-remote.md#where-a-host-may-reach-a-relay-server) | `lib/src/host/remote/connect-src.test.ts` |
+| **A hostile relay cannot exhaust a Host.** Every bound runs on the Host's own clock, and a rejected frame costs it nothing. | [Host bounds](./remote-security-model.md#host-bounds) | `lib/src/remote/host/remote-host-bounds.test.ts`, `relay/test/malicious-relay.test.mjs` |
+| **A Host talks only to the relay its build was pointed at**, and refuses before any credential leaves the machine. | [Where a Host may reach a Relay](./security-remote.md#where-a-host-may-reach-a-relay) | `lib/src/host/remote/connect-src.test.ts` |
 | **Credentials at rest are readable only by the account that installed them**, on macOS, Windows, and Linux alike. | [Credentials at rest](./security-remote.md#credentials-at-rest) | `scripts/deploy-lint.mjs` |
-| **The self-host HTTPS origin may be public; its plaintext backend may not.** The Server generates its 256-bit setup credential with no operator-supplied value, Host enrollment is globally admission-limited, cross-origin browsers receive no grant, and terminal access still needs local Host approval. | [The setup password](./security-remote.md#the-setup-password), [Cross-origin access](./security-remote.md#cross-origin-access), [Network posture](./security-remote.md#network-posture-self-hosted) | `server/test/setup-password-store.test.mjs`, `server/test/config.test.mjs`, `server/test/token-bucket.test.mjs`, `server/test/cors.test.mjs`, `scripts/deploy-lint.mjs` |
-| **Push, when enabled, cannot be aimed back into the tailnet.** | [What crosses the boundary](./security-remote.md#what-crosses-the-boundary) | `server/test/push-endpoint.test.mjs` |
+| **The self-host HTTPS origin may be public; its plaintext backend may not.** The Relay generates its 256-bit setup credential with no operator-supplied value, Host enrollment is globally admission-limited, cross-origin browsers receive no grant, and terminal access still needs local Host approval. | [The setup password](./security-remote.md#the-setup-password), [Cross-origin access](./security-remote.md#cross-origin-access), [Network posture](./security-remote.md#network-posture-self-hosted) | `relay/test/setup-password-store.test.mjs`, `relay/test/config.test.mjs`, `relay/test/token-bucket.test.mjs`, `relay/test/cors.test.mjs`, `scripts/deploy-lint.mjs` |
+| **Push, when enabled, cannot be aimed back into the tailnet.** | [What crosses the boundary](./security-remote.md#what-crosses-the-boundary) | `relay/test/push-endpoint.test.mjs` |
 | **Every dependency that reaches a machine is disclosed** at [dormouse.sh/supply-chain](https://dormouse.sh/supply-chain), and a change without the disclosure fails CI. | [Disclosure](./security-supply-chain.md#disclosure) | `.github/workflows/ci.yml` |
 | **The bundled runtime is the version disclosed.** The build verifies the binary against the pin. | [Bundled runtime](./security-supply-chain.md#bundled-runtime) | `standalone/src-tauri/build.rs` |
 | **No newly published dependency is adopted for 24 hours**, security fixes included. | [Cooldown and alerts](./security-supply-chain.md#cooldown-and-alerts) | audit |
@@ -74,12 +74,12 @@ run this knows what they are taking on.
   the Pocket origin can *use* the phone's key without extracting it. Exactly
   two endpoints are trusted: the distributed Host binaries and the exact Pocket
   artifact the origin serves ([Trust Model](./remote-security-model.md#trust-model)).
-- **Traffic analysis.** The Server sees who talks to whom, when, how often, and
+- **Traffic analysis.** The Relay sees who talks to whom, when, how often, and
   how large each ciphertext is, and keystroke timing, never keystroke values
   ([Residual metadata](./remote-security-model.md#residual-metadata)).
-- **Push replay, when push is enabled.** A push proves confidentiality, not freshness: a Server that
+- **Push replay, when push is enabled.** A push proves confidentiality, not freshness: a Relay that
   kept an envelope can re-deliver it ([Push sealing](./remote-security-model.md#push-sealing)).
-- **Per-Host unlinkability, when push is enabled.** One push endpoint per browser lets the Server see
+- **Per-Host unlinkability, when push is enabled.** One push endpoint per browser lets the Relay see
   every Host one phone registered ([Residual metadata](./remote-security-model.md#residual-metadata)).
 - **Phone-key durability.** Clearing site data means pairing again. Nothing is
   compromised; a lost key authorized nothing on its own
@@ -170,7 +170,7 @@ public issue describing a live path into a Host's ACL is a disclosure, not a
 report.
 
 **Never open a public issue, and never email the maintainer.** Include the
-version or commit, the deployment (self-hosted server, standalone app, VS Code
+version or commit, the deployment (self-hosted Relay, standalone app, VS Code
 extension), and the shortest reproduction. Every advisory is acknowledged with
 what we intend to do about it. There is no bounty, and a fix that needs a
 coordinated release says so in the advisory rather than promising a date; this

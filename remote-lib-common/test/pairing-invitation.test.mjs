@@ -1,5 +1,5 @@
 /**
- * The QR grammar and its one parser (docs/specs/server.md -> `## Future` -> QR
+ * The QR grammar and its one parser (docs/specs/relay.md -> `## Future` -> QR
  * grammar, Parser).
  *
  * The fragment is positional and carries no field names, so the emitter and the
@@ -175,7 +175,7 @@ test('the parser refuses anything that is not a string', async () => {
 test('the parser refuses a URL that is not this app, served over HTTPS, at the root', async () => {
   for (const [why, text] of [
     ['not a URL at all', `pocket.example/${PAIRING_HASH_PREFIX}${FIELDS.join('.')}`],
-    // A fragment is invisible to the Server, so the origin compare is the only
+    // A fragment is invisible to the Relay, so the origin compare is the only
     // thing that stops a code bootstrapping a different deployment's Pocket.
     ['plain http', `http://pocket.example/${PAIRING_HASH_PREFIX}${FIELDS.join('.')}`],
     // Credentials would let a code name an origin the compare accepts while the

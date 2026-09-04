@@ -119,7 +119,7 @@ const KNOWN: KnownHostV1[] = ['host-1', 'host-2'].map((hostId, index) => ({
   authorization: { state: 'paired', deliveryId: `delivery-${hostId}`, approvedAt: 1 },
 }));
 
-/** What the fake Server has stored for this device, across a subscribe loop. */
+/** What the fake Relay has stored for this device, across a subscribe loop. */
 const registered = new Set<string>();
 
 let container: HTMLDivElement;
@@ -166,7 +166,7 @@ async function signIn() {
 describe('the one Enable on the Hosts view', () => {
   /**
    * The permission prompt and the PushSubscription it mints belong to the whole
-   * service-worker scope; only the Server rows are per (Host, device). So the
+   * service-worker scope; only the Relay rows are per (Host, device). So the
    * browser is asked once and the rows are filled in behind it — a per-Host
    * button would have made the user tap through the same grant twice.
    */
@@ -187,7 +187,7 @@ describe('the one Enable on the Hosts view', () => {
 
   /**
    * A replacement registered while a superseded delivery row is still on the
-   * Server would leave that row reachable, so the queue drains first.
+   * Relay would leave that row reachable, so the queue drains first.
    */
   it('retires owed deletions before registering a replacement', async () => {
     fake.subscribeInBrowser.mockResolvedValue({ endpoint: 'https://push.example/abc' });
@@ -207,14 +207,14 @@ describe('the one Enable on the Hosts view', () => {
   it('keeps what a partly-failed loop already registered', async () => {
     fake.subscribeInBrowser.mockResolvedValue({ endpoint: 'https://push.example/abc' });
     fake.subscribeToPush.mockImplementation(async (hostId) => {
-      if (hostId === 'host-2') throw new Error('The server refused the registration.');
+      if (hostId === 'host-2') throw new Error('The Relay refused the registration.');
       return { hostIds: [...registered.add(hostId)] };
     });
     await signIn();
 
     await click(container, ENABLE);
 
-    expect(alertText(container)).toBe('The server refused the registration.');
+    expect(alertText(container)).toBe('The Relay refused the registration.');
     // The first Host is on, so the card stays up for the second alone.
     expect(rowText('First laptop')).toContain('Push on');
     expect(rowText('Second laptop')).not.toContain('Push on');
@@ -239,7 +239,7 @@ describe('the one Enable on the Hosts view', () => {
     await signIn();
 
     expect(container.textContent).not.toContain('Push notifications on.');
-    // Both halves are required: the Server row *and* a browser subscription
+    // Both halves are required: the Relay row *and* a browser subscription
     // that still matches it, which `hasCurrentPushSubscription` denies here.
     expect(buttonNamed(container, ENABLE)).not.toBeNull();
   });

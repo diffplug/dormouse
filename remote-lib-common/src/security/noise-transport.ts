@@ -1,6 +1,6 @@
 /**
  * What rides inside a Noise transport message once `Split` has run
- * (`docs/specs/server.md` -> Relay -> "E2E framing").
+ * (`docs/specs/relay.md` -> Relay -> "E2E framing").
  *
  * One implementation, so no two speakers can disagree about what a transport
  * plaintext is; today the harness is the only one. It knows nothing about the
@@ -365,7 +365,7 @@ export type TransportReceipt =
  * the handshake hash the application authenticates against, and the framing
  * above.
  *
- * **The first failure is permanent** (server.md -> E2E framing): a decrypt
+ * **The first failure is permanent** (relay.md -> E2E framing): a decrypt
  * failure, a nonce gap or reorder, or a framing violation poisons the session
  * and every later call throws. A session that kept going after one rejected
  * frame would be one an attacker can steer by dropping frames.

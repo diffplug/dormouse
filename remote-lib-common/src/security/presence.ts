@@ -5,7 +5,7 @@
  * The WebAuthn challenge is derived, not random: it is a hash over the
  * ceremony this assertion belongs to, so an assertion produced for one pairing
  * or connection authenticates nothing anywhere else. Shared, because the
- * Server mints the challenge and the Host recomputes it — a second
+ * Relay mints the challenge and the Host recomputes it — a second
  * implementation of these bytes would be a second opinion about what a valid
  * assertion is.
  */
@@ -56,7 +56,7 @@ export type PresenceBinding =
 
 /**
  * Structural validation of a {@link PresenceBinding} off the wire, run by
- * every side that receives one: the Server takes it from a Client, and the
+ * every side that receives one: the Relay takes it from a Client, and the
  * Host takes it from inside a transport payload it has decrypted but not yet
  * believed.
  *
@@ -93,7 +93,7 @@ function bounded(value: unknown): value is string {
 /**
  * The WebAuthn challenge for one presence assertion:
  * `SHA-256(lengthPrefixedConcat(domain, kind, …binding fields in declared
- * order, serverNonce))`, base64url. Which fields go in decoded and which as
+ * order, relayNonce))`, base64url. Which fields go in decoded and which as
  * UTF-8 is the spec's rule, listed there and pinned by an independently
  * computed vector in `remote-lib-common/test/presence.test.mjs`;
  * {@link bindingFields} is where it is applied.
@@ -107,17 +107,17 @@ function bounded(value: unknown): value is string {
  */
 export async function presenceChallenge(
   binding: PresenceBinding,
-  serverNonce: string,
+  relayNonce: string,
   crypto: WebCryptoLike = getWebCrypto(),
 ): Promise<string> {
-  if (!bounded(serverNonce)) throw new Error('presence nonce is missing or over the field limit');
+  if (!bounded(relayNonce)) throw new Error('presence nonce is missing or over the field limit');
   const digest = await crypto.subtle.digest(
     'SHA-256',
     lengthPrefixedConcat([
       utf8Encode(PRESENCE_DOMAIN),
       utf8Encode(binding.kind),
       ...bindingFields(binding),
-      fromBase64Url(serverNonce),
+      fromBase64Url(relayNonce),
     ]),
   );
   return toBase64Url(new Uint8Array(digest));

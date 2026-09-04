@@ -1,5 +1,5 @@
 /**
- * The pairing invitation and its QR grammar (`docs/specs/server.md` → "Setup
+ * The pairing invitation and its QR grammar (`docs/specs/relay.md` → "Setup
  * tokens" → QR grammar).
  *
  * A Host mints an invitation, renders it as one URL, and a phone reads it back
@@ -82,7 +82,7 @@ export interface PairingInvitation {
   readonly inviteId: string;
   /** Epoch **seconds**; an advisory Client fail-fast, never the authority. */
   readonly expiry: number;
-  /** The Server's single-use setup token, base64url of 32 bytes. */
+  /** The Relay's single-use setup token, base64url of 32 bytes. */
   readonly setupToken: string;
   /** The one-use Host Noise responder key for this invitation, raw 32 bytes. */
   readonly ephPub: Uint8Array;
@@ -172,7 +172,7 @@ export function formatPairingInvitationUrl(origin: string, invitation: PairingIn
  * either usable or it is not.
  *
  * `appOrigin` is the origin the running app is served from, and the URL's must
- * equal it exactly: a fragment is invisible to the Server, so the only thing
+ * equal it exactly: a fragment is invisible to the Relay, so the only thing
  * that keeps a code from bootstrapping a *different* deployment's Pocket is
  * this compare.
  *
@@ -257,7 +257,7 @@ export async function parsePairingInvitationUrl(
  * **Never `true` for anything the parser refuses on any other rule.** Answered
  * by running that same parser at the epoch, so the structural rules and the
  * origin compare are literally the shipped ones and cannot drift from a second
- * copy — a foreign-origin code is not a setup code for this server whether or
+ * copy — a foreign-origin code is not a setup code for this Relay whether or
  * not its expiry has passed. It reads nothing the user is not already holding.
  */
 export async function pairingInvitationExpired(

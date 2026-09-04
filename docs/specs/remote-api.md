@@ -1,7 +1,7 @@
 # Remote Surface API
 
 > See `docs/specs/glossary.md` for the canonical Pane / Surface / Session model; this spec uses that vocabulary and adds only remote-specific terms (Viewer, and the wire-level `DirectoryEntry` projection of a pane).
-> Owns the protocol a Client speaks to view and control a Host's surfaces. [remote-security-model.md](./remote-security-model.md) owns authorization; `docs/specs/server.md` owns the relay and framing underneath.
+> Owns the protocol a Client speaks to view and control a Host's surfaces. [remote-security-model.md](./remote-security-model.md) owns authorization; `docs/specs/relay.md` owns the relay and framing underneath.
 
 **Every message below travels inside one authorized session, and the Host may terminate that session — and every stream in it — at any time.**
 
@@ -33,7 +33,7 @@ Source of truth: `remote-lib-common/src/remote/wire.ts` (the fixed wire contract
 
 ### The provider seam
 
-**The Host runs in the process that owns the PTYs, never a webview** (`docs/specs/server.md` → "Host side"). Within it, `RemoteApiSession` speaks this protocol and nothing else: surface ids, PTY ids, sizes, bytes.
+**The Host runs in the process that owns the PTYs, never a webview** (`docs/specs/relay.md` → "Host side"). Within it, `RemoteApiSession` speaks this protocol and nothing else: surface ids, PTY ids, sizes, bytes.
 
 **Every environment-specific answer sits behind `HostSurfaceProvider`** — `collectDirectory` / `watchDirectory`, `resolveSurface` returning a `SurfaceHandle`, `writePty` / `resizePty` / `streamPty` — because *where* a named surface lives is a deployment fact, not a protocol concept. **The session imports no platform adapter, no store, and no `document`**, and both installations share the ask-backed half, so an attach cannot be answered differently in one host than the other.
 
@@ -52,7 +52,7 @@ Source of truth: the surface model the wire shapes reuse — `dor/src/protocol.t
 
 ## Transport
 
-**Every message below is JSON, carried as one length-prefixed application message on one authorized Noise session** that the WebSocket relay pipes without decoding, the Host multiplexing every session over its single relay socket (`docs/specs/server.md` → "Relay", "E2E framing"). **Terminal data rides that same stream** — it is small and ordering matters; media channels arrive with browser surfaces ([Future](#future)). **The API and the security model are identical in selfhost and (future) SaaS modes**, where only account creation differs (`docs/specs/server.md` → Future).
+**Every message below is JSON, carried as one length-prefixed application message on one authorized Noise session** that the WebSocket relay pipes without decoding, the Host multiplexing every session over its single relay socket (`docs/specs/relay.md` → "Relay", "E2E framing"). **Terminal data rides that same stream** — it is small and ordering matters; media channels arrive with browser surfaces ([Future](#future)). **The API and the security model are identical in selfhost and (future) SaaS modes**, where only account creation differs (`docs/specs/relay.md` → Future).
 
 **A `RemoteApiSession` exists only for an authorized session.** Created at promotion — presence proof and ACL conjunction both passed ([remote-security-model.md](./remote-security-model.md) → Connection) — and disposed when the Client disconnects, when the Host reaps the session, and by any promotion that replaces it, so **a re-authorizing Client can never inherit the previous session's attachment**.
 
@@ -273,7 +273,7 @@ These are the methods the dor CLI speaks today; the remote API reuses their requ
 
 ### 8. WebRTC rendezvous
 
-Latency. WebRTC replaces only the relay *transport* of the same Noise transport messages ([Transport](#transport)), and only after authorization: the Server signals but is never trusted with authorization, and the presence protocol is inherited unless separately reviewed.
+Latency. WebRTC replaces only the relay *transport* of the same Noise transport messages ([Transport](#transport)), and only after authorization: the Relay signals but is never trusted with authorization, and the presence protocol is inherited unless separately reviewed.
 
 ### 9. Audio
 

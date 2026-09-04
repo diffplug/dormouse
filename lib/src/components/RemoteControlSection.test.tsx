@@ -63,10 +63,10 @@ function qr(over: Partial<SetupQrResult> = {}): SetupQrResult {
   };
 }
 
-/** The shared fixture, keeping this file's own server/host values. */
+/** The shared fixture, keeping this file's own Relay/host values. */
 const enrolled = (over: Partial<RemoteHostConsoleStatus> = {}) =>
   enrolledStatus({
-    serverUrl: 'https://laptop.tailnet.ts.net',
+    relayUrl: 'https://laptop.tailnet.ts.net',
     hostId: 'host-1',
     pairedClients: 1,
     ...over,
@@ -130,7 +130,7 @@ function buttonLabelled(label: string): HTMLButtonElement | undefined {
 /** The disclosure carries a `+`/`−` prefix, so match on its words rather than all of it. */
 function disclosure(): HTMLButtonElement | undefined {
   return [...container.querySelectorAll('button')].find((button) =>
-    button.textContent?.includes('Enroll with a different server'),
+    button.textContent?.includes('Enroll with a different Relay'),
   ) as HTMLButtonElement | undefined;
 }
 
@@ -141,7 +141,7 @@ function disclosure(): HTMLButtonElement | undefined {
  */
 function typedForm(): HTMLFormElement {
   const form = [...container.querySelectorAll('form')].find((candidate) =>
-    candidate.textContent?.includes('Connect this machine to a Dormouse server'),
+    candidate.textContent?.includes('Connect this machine to a Dormouse Relay'),
   );
   if (!form) throw new Error('the typed enroll form is not mounted');
   return form;
@@ -192,7 +192,7 @@ describe('RemoteControlSection', () => {
   it('offers the enroll form when the machine is not enrolled', async () => {
     platform = { remoteHost: makeLink(async () => NOT_ENROLLED) };
     await render();
-    expect(text()).toContain('Connect this machine to a Dormouse server');
+    expect(text()).toContain('Connect this machine to a Dormouse Relay');
     expect(text()).toContain('Prefer not to run one? Hosted is coming soon.');
     expect(buttonLabelled('Connect')).toBeTruthy();
   });
@@ -220,7 +220,7 @@ describe('RemoteControlSection', () => {
     const link = makeLink(async (cmd) => {
       if (cmd === 'enroll') {
         status = enrolled();
-        return { hostId: 'host-1', serverUrl: 'https://laptop.tailnet.ts.net' };
+        return { hostId: 'host-1', relayUrl: 'https://laptop.tailnet.ts.net' };
       }
       return status;
     });
@@ -233,7 +233,7 @@ describe('RemoteControlSection', () => {
     await act(async () => buttonLabelled('Connect')!.click());
 
     expect(link.command).toHaveBeenCalledWith('enroll', {
-      serverUrl: 'https://laptop.tailnet.ts.net',
+      relayUrl: 'https://laptop.tailnet.ts.net',
       password: TEST_SETUP_PASSWORD,
       label: 'Work laptop',
     });
@@ -244,7 +244,7 @@ describe('RemoteControlSection', () => {
 
   it('surfaces an enrollment refusal instead of silently failing', async () => {
     const link = makeLink(async (cmd) => {
-      if (cmd === 'enroll') throw new Error('server origin is not allowed by this build');
+      if (cmd === 'enroll') throw new Error('relay origin is not allowed by this build');
       return NOT_ENROLLED;
     });
     platform = { remoteHost: link };
@@ -255,7 +255,7 @@ describe('RemoteControlSection', () => {
     await type('input:not([type="url"]):not([type="password"])', 'Work laptop');
     await act(async () => buttonLabelled('Connect')!.click());
 
-    expect(text()).toContain('server origin is not allowed by this build');
+    expect(text()).toContain('relay origin is not allowed by this build');
     // Still on the form, so the user can correct the origin and retry.
     expect(buttonLabelled('Connect')).toBeTruthy();
   });
@@ -264,7 +264,7 @@ describe('RemoteControlSection', () => {
     platform = { remoteHost: makeLink(async () => OFFER_STATUS) };
     await render();
 
-    expect(text()).toContain('A Dormouse server is installed on this machine.');
+    expect(text()).toContain('A Dormouse Relay is installed on this machine.');
     expect(text()).toContain('https://ned-mac.tail9c2f1.ts.net');
     expect(buttonLabelled('Enroll')).toBeTruthy();
     // The three-field form is behind the disclosure, not beside the card —
@@ -280,7 +280,7 @@ describe('RemoteControlSection', () => {
     const link = makeLink(async (cmd) => {
       if (cmd === 'enrollOffer') {
         status = enrolled();
-        return { hostId: 'host-1', serverUrl: 'https://laptop.tailnet.ts.net' };
+        return { hostId: 'host-1', relayUrl: 'https://laptop.tailnet.ts.net' };
       }
       return status;
     });
@@ -319,7 +319,7 @@ describe('RemoteControlSection', () => {
         await vi.advanceTimersByTimeAsync(2000);
       });
 
-      expect(text()).toContain('A Dormouse server is installed on this machine.');
+      expect(text()).toContain('A Dormouse Relay is installed on this machine.');
       expect(typedForm().hidden).toBe(true);
       expect(container.querySelector<HTMLInputElement>('input[type="url"]')!.value).toBe(
         'https://elsewhere.example',
@@ -358,10 +358,10 @@ describe('RemoteControlSection', () => {
       expect(text()).toContain('https://ned-mac.tail9c2f1.ts.net');
 
       await act(async () => {
-        failEnroll(new Error('The server did not accept that setup password.'));
+        failEnroll(new Error('The Relay did not accept that setup password.'));
         await Promise.resolve();
       });
-      expect(text()).toContain('The server did not accept that setup password.');
+      expect(text()).toContain('The Relay did not accept that setup password.');
     } finally {
       vi.useRealTimers();
     }
@@ -369,20 +369,20 @@ describe('RemoteControlSection', () => {
 
   it('renders a one-click refusal where the typed form renders its own', async () => {
     const link = makeLink(async (cmd) => {
-      if (cmd === 'enrollOffer') throw new Error('server origin is not allowed by this build');
+      if (cmd === 'enrollOffer') throw new Error('relay origin is not allowed by this build');
       return OFFER_STATUS;
     });
     platform = { remoteHost: link };
     await render();
 
     await act(async () => buttonLabelled('Enroll')!.click());
-    expect(text()).toContain('server origin is not allowed by this build');
+    expect(text()).toContain('relay origin is not allowed by this build');
     // Still on the card, and the typed form is still one click away.
     expect(buttonLabelled('Enroll')).toBeTruthy();
     expect(disclosure()).toBeTruthy();
   });
 
-  it('unfolds the typed form for a server that is somewhere else', async () => {
+  it('unfolds the typed form for a Relay that is somewhere else', async () => {
     platform = { remoteHost: makeLink(async () => OFFER_STATUS) };
     await render();
 
@@ -411,7 +411,7 @@ describe('RemoteControlSection', () => {
           finishOffer = resolve;
         });
       }
-      if (cmd === 'enroll') return { hostId: 'wrong-racer', serverUrl: 'https://elsewhere' };
+      if (cmd === 'enroll') return { hostId: 'wrong-racer', relayUrl: 'https://elsewhere' };
       return OFFER_STATUS;
     });
     platform = { remoteHost: link };
@@ -436,12 +436,12 @@ describe('RemoteControlSection', () => {
     expect(buttonLabelled('Connect')!.disabled).toBe(true);
 
     await act(async () => {
-      finishOffer({ hostId: 'host-1', serverUrl: OFFER_STATUS.offer!.origin });
+      finishOffer({ hostId: 'host-1', relayUrl: OFFER_STATUS.offer!.origin });
       await Promise.resolve();
     });
   });
 
-  it('shows the server and paired-device count when enrolled', async () => {
+  it('shows the Relay and paired-device count when enrolled', async () => {
     platform = { remoteHost: makeLink(async () => enrolled({ pairedClients: 2 })) };
     await render();
     expect(text()).toContain('https://laptop.tailnet.ts.net');
@@ -454,7 +454,7 @@ describe('RemoteControlSection', () => {
     platform = { remoteHost: link };
     await render();
 
-    expect(text()).toContain('took this server’s slot');
+    expect(text()).toContain('took this Relay’s slot');
     await act(async () => buttonLabelled('Reconnect')!.click());
     expect(link.command).toHaveBeenCalledWith('reconnect');
   });
@@ -870,7 +870,7 @@ describe('RemoteControlSection', () => {
   });
 
   it('drops the panel when the machine enrolls somewhere else under it', async () => {
-    // A code belongs to the server that minted it. The console hook can swap
+    // A code belongs to the Relay that minted it. The console hook can swap
     // enrollments with this dialog open, and a QR left on screen would point a
     // camera at a machine this one no longer talks to.
     vi.useFakeTimers();
@@ -884,7 +884,7 @@ describe('RemoteControlSection', () => {
       await settleQrChunk();
       expect(container.querySelector('svg[role="img"]')).toBeTruthy();
 
-      status = enrolled({ hostId: 'host-2', serverUrl: 'https://other.tailnet.ts.net' });
+      status = enrolled({ hostId: 'host-2', relayUrl: 'https://other.tailnet.ts.net' });
       await act(async () => {
         await vi.advanceTimersByTimeAsync(2000);
       });
@@ -963,7 +963,7 @@ describe('RemoteControlSection', () => {
   });
 
   it('lets New code disarm the refresh the old code armed', async () => {
-    // Every mint spends a code on the Server, so the timer armed against the
+    // Every mint spends a code on the Relay, so the timer armed against the
     // code being replaced must not fire on top of the replacement.
     vi.useFakeTimers();
     try {
@@ -995,7 +995,7 @@ describe('RemoteControlSection', () => {
   });
 
   it('never re-mints in a loop when the two clocks disagree', async () => {
-    // `expiresAt` is the Server's clock and the subtraction is against this
+    // `expiresAt` is the Relay's clock and the subtraction is against this
     // one's. A laptop minutes fast computes a delay at or below zero, and the
     // unclamped version re-minted several times a second — each one spending a
     // real single-use token.
@@ -1025,8 +1025,8 @@ describe('RemoteControlSection', () => {
     }
   });
 
-  it('refreshes by the real TTL when the Server clock is far ahead', async () => {
-    // Ten minutes of negative webview skew makes a five-minute Server token
+  it('refreshes by the real TTL when the Relay clock is far ahead', async () => {
+    // Ten minutes of negative webview skew makes a five-minute Relay token
     // look fifteen minutes long. It still needs replacement before its real
     // five-minute expiry, with the ordinary 20-second lead.
     vi.useFakeTimers();
@@ -1112,7 +1112,7 @@ describe('RemoteControlSection', () => {
     await act(async () => buttonLabelled('Set up a phone')!.click());
     expect(text()).toContain('Getting a code…');
 
-    // And the token exists on the Server either way; what must not happen is a
+    // And the token exists on the Relay either way; what must not happen is a
     // live code rendering into a panel the user already dismissed.
     await act(async () => buttonLabelled('Done')!.click());
     await act(async () => {
@@ -1196,7 +1196,7 @@ describe('RemoteControlSection', () => {
     const link = makeLink(async () => status);
     platform = { remoteHost: link };
     await render();
-    expect(text()).toContain('Connect this machine to a Dormouse server');
+    expect(text()).toContain('Connect this machine to a Dormouse Relay');
 
     // Another window enrolled: the event carries only `{ enrolled }`, so the
     // section must re-read rather than patch a field.

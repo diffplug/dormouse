@@ -13,9 +13,9 @@ import {
   isE2eCiphertext,
   isE2eClientFrame,
   isE2eHostFrame,
-  isE2eServerToClientFrame,
+  isE2eRelayToClientFrame,
   isE2eId,
-  isE2eServerToHostFrame,
+  isE2eRelayToHostFrame,
   isSetupTokenResponse,
   pushSubscriptionDeletePath,
 } from '../dist/index.js';
@@ -49,17 +49,17 @@ const MINT = { token: 'aZ0-_abc', expiresAt: 1 };
 
 test('isSetupTokenResponse accepts a real mint', () => {
   assert.equal(isSetupTokenResponse(MINT), true);
-  // Additive fields are fine: an older Host reading a newer server still works.
+  // Additive fields are fine: an older Host reading a newer Relay still works.
   assert.equal(isSetupTokenResponse({ ...MINT, extra: true }), true);
   // A real token is base64url of 32 bytes, comfortably inside the bound.
   assert.equal(isSetupTokenResponse({ ...MINT, token: 'a'.repeat(128) }), true);
 });
 
 test('isSetupTokenResponse no longer demands a mint handle', () => {
-  // Redemption at the Server flips nothing on the Host any more — the
+  // Redemption at the Relay flips nothing on the Host any more — the
   // invitation the same QR carries is Host memory, and its state is what the
   // panel renders — so `mintId` is gone from the response and from the guard. A
-  // server that still sends one is accepted as any other additive field.
+  // Relay that still sends one is accepted as any other additive field.
   assert.equal(isSetupTokenResponse({ token: 'aZ0-_abc', expiresAt: 1 }), true);
   assert.equal(isSetupTokenResponse({ ...MINT, mintId: 'mint-1' }), true);
   assert.equal(isSetupTokenResponse({ ...MINT, mintId: 42 }), true);
@@ -109,8 +109,8 @@ test('the route table carries the E2E surface and nothing it replaced', () => {
   assert.equal(API_ROUTES.pushSubscriptionDelete, '/api/push/subscriptions/:deliveryId');
 });
 
-test('pushSubscriptionDeletePath fills the route pattern the server registers', () => {
-  // One builder, so the server's registration and the client's fetch cannot
+test('pushSubscriptionDeletePath fills the route pattern the Relay registers', () => {
+  // One builder, so the Relay's registration and the client's fetch cannot
   // spell the parameter differently.
   const deliveryId = 'aZ0-_'.repeat(9).slice(0, 43);
   assert.equal(
@@ -194,11 +194,11 @@ test('isE2eClientFrame accepts a real frame and refuses every malformed one', ()
   }
 });
 
-test('isE2eServerToHostFrame additionally proves the relay-stamped clientId', () => {
-  assert.equal(isE2eServerToHostFrame(E2E_CLIENT), false, 'no clientId');
-  assert.equal(isE2eServerToHostFrame({ ...E2E_CLIENT, clientId: 'c-1' }), true);
+test('isE2eRelayToHostFrame additionally proves the relay-stamped clientId', () => {
+  assert.equal(isE2eRelayToHostFrame(E2E_CLIENT), false, 'no clientId');
+  assert.equal(isE2eRelayToHostFrame({ ...E2E_CLIENT, clientId: 'c-1' }), true);
   assert.equal(
-    isE2eServerToHostFrame({ ...E2E_CLIENT, clientId: 'c'.repeat(MAX_CLIENT_ID_LENGTH + 1) }),
+    isE2eRelayToHostFrame({ ...E2E_CLIENT, clientId: 'c'.repeat(MAX_CLIENT_ID_LENGTH + 1) }),
     false,
     'the id is a map key on a path the model does not trust',
   );
@@ -218,12 +218,12 @@ test('isE2eHostFrame takes the host steps and no hostId', () => {
   }
 });
 
-test('isE2eServerToClientFrame takes the host steps with a stamped hostId', () => {
+test('isE2eRelayToClientFrame takes the host steps with a stamped hostId', () => {
   // The mirror of the Host's guard: the relay stamps `hostId` on the way out,
   // and the Client trusts the relay no further than the Host does.
   const stamped = { t: 'e2e', hostId: E2E_CLIENT.hostId, kind: 'connection', id: E2E_CLIENT.id, step: 'response', ct: E2E_CLIENT.ct };
-  assert.equal(isE2eServerToClientFrame(stamped), true);
-  assert.equal(isE2eServerToClientFrame({ ...stamped, step: 'transport' }), true);
+  assert.equal(isE2eRelayToClientFrame(stamped), true);
+  assert.equal(isE2eRelayToClientFrame({ ...stamped, step: 'transport' }), true);
   for (const frame of [
     null,
     'nope',
@@ -236,6 +236,6 @@ test('isE2eServerToClientFrame takes the host steps with a stamped hostId', () =
     { ...stamped, ct: '' },
     { ...stamped, ct: 'a'.repeat(MAX_E2E_CIPHERTEXT_LENGTH + 1) },
   ]) {
-    assert.equal(isE2eServerToClientFrame(frame), false, JSON.stringify(frame));
+    assert.equal(isE2eRelayToClientFrame(frame), false, JSON.stringify(frame));
   }
 });

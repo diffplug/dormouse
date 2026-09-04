@@ -1,6 +1,6 @@
 /**
  * Host enrollment: the exchange, and the shape every store validates a record
- * against. `docs/specs/server.md` → "Host side" owns the persistence contract.
+ * against. `docs/specs/relay.md` → "Host side" owns the persistence contract.
  */
 
 import {
@@ -16,8 +16,8 @@ import {
 import { HOST_REQUEST_TIMEOUT_MS } from './host-fetch';
 
 export interface HostEnrollment {
-  /** Origin the Server is reachable at, e.g. `https://dormouse.tailnet.ts.net`. */
-  serverUrl: string;
+  /** Origin the Relay is reachable at, e.g. `https://dormouse.tailnet.ts.net`. */
+  relayUrl: string;
   hostId: string;
   /** Bearer credential for the `token` query param of `/ws/host`. */
   hostToken: string;
@@ -30,14 +30,14 @@ export interface HostEnrollment {
    * at enrollment.
    *
    * **Local only.** It is delivered to a Client inside the encrypted pairing and
-   * connection outcomes and nowhere else; the Server never stores or sees it
+   * connection outcomes and nowhere else; the Relay never stores or sees it
    * past the enroll request. Optional because an enrollment persisted before
    * this field existed must keep loading rather than reading as un-enrolled.
    */
   label?: string;
   /**
    * The Host's `ConnectionPolicy.requireUserVerification`, mirrored from the
-   * Server at enrollment so the two cannot disagree about what a valid
+   * Relay at enrollment so the two cannot disagree about what a valid
    * assertion is.
    *
    * Optional, and absent means `false`: an enrollment persisted by an older
@@ -49,7 +49,7 @@ export interface HostEnrollment {
    * This Host's permanent Noise static, minted locally at enrollment: PKCS#8
    * of the X25519 private key, base64url.
    *
-   * **The Server never receives it** — the enroll request body is unchanged —
+   * **The Relay never receives it** — the enroll request body is unchanged —
    * and it lives only where the enrollment lives, which is owner-only storage
    * on both hosts (`docs/specs/security-remote.md` → "Credentials at rest"). Optional today
    * because an enrollment persisted before this field existed must keep
@@ -70,12 +70,12 @@ export function isEnrollment(value: unknown): value is HostEnrollment {
   if (!value || typeof value !== 'object') return false;
   const v = value as Record<string, unknown>;
   return (
-    typeof v.serverUrl === 'string' &&
+    typeof v.relayUrl === 'string' &&
     // The shape, not merely the type: this `hostId` is the routing id of every
     // `e2e` envelope and the second field of every QR fragment, both of which
-    // accept exactly `isE2eId`. A Server that answered another length — or a
+    // accept exactly `isE2eId`. A Relay that answered another length — or a
     // hand-edited store — would otherwise leave this Host minting codes no
-    // phone can parse, with nothing to explain it (`docs/specs/server.md` ->
+    // phone can parse, with nothing to explain it (`docs/specs/relay.md` ->
     // State files, which pins the same shape at the mint).
     isE2eId(v.hostId) &&
     typeof v.hostToken === 'string' &&
@@ -108,7 +108,7 @@ function hasValidNoiseStatic(v: Record<string, unknown>): boolean {
 
 /**
  * What proves this machine may enroll: the setup password the operator typed,
- * or the one-time token of an installer's offer for a Host on the server's own
+ * or the one-time token of an installer's offer for a Host on the Relay's own
  * machine (`lib/src/host/remote/enroll-offer.ts`). Exactly one — the wire type
  * `HostEnrollRequest` is the same union, and both or neither is a 400.
  */
@@ -129,28 +129,28 @@ function boundedDetail(detail: string): string {
 /**
  * What the settings form shows for a refused enrollment.
  *
- * **The 401 splits on which credential the Server says it refused**, because
+ * **The 401 splits on which credential the Relay says it refused**, because
  * only one of them is something the person at the laptop can retype: a rejected
  * password is a typo, while a rejected offer token means the installer's
  * one-time offer is spent or was rewritten, and no amount of retrying that
- * button will help. The Server names which in the body — the two strings are
+ * button will help. The Relay names which in the body — the two strings are
  * shared for exactly this — so a 401 raised by anything in front of it falls
  * through to the generic message rather than confidently sending the user to
  * retype a password that was fine.
  *
- * Every other status keeps the number and the server's own text: there is no
+ * Every other status keeps the number and the Relay's own text: there is no
  * user action to name, and an operator debugging a reverse proxy needs both.
  */
 function refusalMessage(status: number, detail: string): string {
   if (status === 401) {
     const error = refusedError(detail);
-    if (error === BAD_PASSWORD_ERROR) return 'The server did not accept that setup password.';
+    if (error === BAD_PASSWORD_ERROR) return 'The Relay did not accept that setup password.';
     if (error === UNAUTHORIZED_ERROR) {
-      return 'This machine’s enrollment offer is no longer valid. Enroll with the server address and setup password instead.';
+      return 'This machine’s enrollment offer is no longer valid. Enroll with the Relay address and setup password instead.';
     }
   }
   const shown = boundedDetail(detail);
-  return `The server refused the enrollment (HTTP ${status})${shown ? `: ${shown}` : ''}`;
+  return `The Relay refused the enrollment (HTTP ${status})${shown ? `: ${shown}` : ''}`;
 }
 
 /** The `error` a JSON refusal names, or `null` for a body that is not one. */
@@ -165,7 +165,7 @@ function refusedError(detail: string): string | null {
 
 /**
  * `POST /api/host/enroll` with one {@link HostEnrollCredential} and map the
- * response to an enrollment. Throws with the server's status text on failure —
+ * response to an enrollment. Throws with the Relay's status text on failure —
  * or with what the response was missing when it answered 200 with something
  * that is not one — so the caller (console hook / settings UI) can surface it.
  * What this returns has passed {@link isEnrollment}, so the mint site and every
@@ -173,30 +173,30 @@ function refusedError(detail: string): string | null {
  *
  * Persists nothing: the service that ran it decides where the credentials live
  * (`lib/src/host/remote/host-state-store.ts`), while the exchange itself is one
- * exchange, and a second copy of it could drift from the Server's contract.
+ * exchange, and a second copy of it could drift from the Relay's contract.
  */
 export async function performEnrollment(
-  serverUrl: string,
+  relayUrl: string,
   credential: HostEnrollCredential,
   label: string,
 ): Promise<HostEnrollment> {
-  const base = serverUrl.replace(/\/+$/, '');
+  const base = relayUrl.replace(/\/+$/, '');
   // Minted BEFORE the exchange. A successful POST appends a `hosts.json` row
   // and spends the installer's single-use `enrollToken`, neither of which this
   // side can undo — so a runtime that cannot produce an X25519 key must fail
-  // while the Server still has nothing to forget. Nothing about it reaches the
+  // while the Relay still has nothing to forget. Nothing about it reaches the
   // request body below.
   const noiseStatic = await mintNoiseStatic();
   const response = await fetch(`${base}${API_ROUTES.hostEnroll}`, {
     method: 'POST',
-    // The same budget every Host→Server call runs under (`host-fetch.ts`), and
+    // The same budget every Host→Relay call runs under (`host-fetch.ts`), and
     // this is the one that most needs it: it runs on the service's lifecycle
     // chain, where everything that starts or stops the Host queues behind it.
     signal: AbortSignal.timeout(HOST_REQUEST_TIMEOUT_MS),
     // The Node-resident Host has no browser CSP to check each redirect hop.
     // Failing here keeps an allowed origin's open redirect from forwarding the
     // credential — the setup password or the offer's one-time token, whichever
-    // this body carries — to a server outside the build-time allowlist.
+    // this body carries — to a Relay outside the build-time allowlist.
     redirect: 'error',
     headers: { 'content-type': 'application/json' },
     // The credential and nothing else — in particular no `label`, which stays
@@ -208,23 +208,23 @@ export async function performEnrollment(
     throw new Error(refusalMessage(response.status, detail));
   }
   // The response body is untrusted like any other, so it goes through the same
-  // guard every *read* of an enrollment uses. Without it a server that answers
+  // guard every *read* of an enrollment uses. Without it a Relay that answers
   // 200 with a field missing — a version skew, a reverse proxy that rewrote the
   // body — mints an enrollment that is accepted here and rejected by
   // `isEnrollment` on the next read: the Host runs for this session with an
   // `undefined` in the `ConnectionPolicy` it authenticates passkeys against, and
   // the machine silently un-enrolls itself at the next launch with nothing in
   // the log to explain it. Failing the exchange instead keeps the old Host
-  // running and names what the server got wrong.
+  // running and names what the Relay got wrong.
   let body: unknown;
   try {
     body = await response.json();
   } catch (error) {
-    throw new Error(`Could not enroll: the server did not answer JSON (${errorMessage(error)})`);
+    throw new Error(`Could not enroll: the Relay did not answer JSON (${errorMessage(error)})`);
   }
   const enrolled = body as Partial<HostEnrollResponse> | null;
   const enrollment = {
-    serverUrl: base,
+    relayUrl: base,
     hostId: enrolled?.hostId,
     hostToken: enrolled?.hostToken,
     // Untrusted like the rest of the body, and `isEnrollment` only checks that
@@ -234,19 +234,19 @@ export async function performEnrollment(
     rpId: enrolled?.rpId,
     // Never sent, never returned: the operator's answer, kept here.
     label,
-    // Only when the server actually sent a boolean: spreading `undefined` in
+    // Only when the Relay actually sent a boolean: spreading `undefined` in
     // would make the key present-and-undefined, which the guard treats the
     // same but a store round-trip would not.
     ...(typeof enrolled?.requireUserVerification === 'boolean'
       ? { requireUserVerification: enrolled.requireUserVerification }
       : {}),
-    // Minted above and never sent to the Server. Persisting it is the caller's
+    // Minted above and never sent to the Relay. Persisting it is the caller's
     // job, alongside `hostToken`.
     ...noiseStatic,
   };
   if (!isEnrollment(enrollment)) {
     throw new Error(
-      `Could not enroll: the server's answer is missing or invalid: ${missingEnrollmentFields(enrollment).join(', ')}`,
+      `Could not enroll: the Relay's answer is missing or invalid: ${missingEnrollmentFields(enrollment).join(', ')}`,
     );
   }
   return enrollment;
@@ -287,8 +287,8 @@ async function mintNoiseStatic(): Promise<{
 }
 
 /**
- * Which `HostEnrollResponse` fields the server left out or sent wrong, for the
- * error above. Mirrors {@link isEnrollment} minus `serverUrl`, which is set
+ * Which `HostEnrollResponse` fields the Relay left out or sent wrong, for the
+ * error above. Mirrors {@link isEnrollment} minus `relayUrl`, which is set
  * locally and can never be the one at fault — including its *shape* checks, so
  * a rejection can never name nothing. Pinned by `enrollment.test.ts`.
  */

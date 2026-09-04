@@ -98,11 +98,11 @@ webview, where `TauriAdapter` converts dor control requests into the
 ### Remote Host service
 
 The remote Host — relay socket, enrollment, ACL, pairing ceremony, remote-api v1
-— runs **in the sidecar**, never the webview (`docs/specs/server.md` → "Host
+— runs **in the sidecar**, never the webview (`docs/specs/relay.md` → "Host
 side", which owns that split and what the webview keeps): the same
 `RemoteHostService` the VS Code extension host runs, bound by
 `lib/src/host/remote/sidecar-entry.ts` and bundled to `sidecar/remote-host.cjs`
-with the relay-origin allowlist baked in (`docs/specs/server.md`). **Nothing the
+with the relay-origin allowlist baked in (`docs/specs/relay.md`). **Nothing the
 webview says can widen access** (`docs/specs/remote-security-model.md`).
 
 **State.** Rust creates the app-data directory, locks it owner-only, and passes it
@@ -110,7 +110,7 @@ as `DORMOUSE_STATE_DIR` (§Persistence, "Rust file store"); `FileHostStateStore`
 keeps enrollment and ACL there as **one** `remote-host.json`, 0600 in a 0700
 directory via temp-then-rename — one file, so a write is one atomic rename
 (rationale). `hostToken` is a bearer credential and **never enters a webview
-realm**. Against the shared store contract (`docs/specs/server.md` → "Host side"):
+realm**. Against the shared store contract (`docs/specs/relay.md` → "Host side"):
 
 - **Reads fail closed.** Only `ENOENT` and a read-but-unparseable file answer
   empty; the parse failure warns. Any other read error is neither answered nor
@@ -507,8 +507,8 @@ Source of truth: `standalone/package.json` (package scripts),
   for self-host relay origins is baked into the sidecar's remote-host bundle by
   `build-sidecar-proxy.mjs` — the Host runs in the sidecar, so the webview CSP has
   no relay sources at all, which `standalone/scripts/tauri-conf.test.mjs` asserts
-  against `tauri.conf.json` (`docs/specs/server.md`, "Where a Host may reach a
-  relay server").
+  against `tauri.conf.json` (`docs/specs/relay.md`, "Where a Host may reach a
+  Relay").
 - The Tauri bundle ships the whole sidecar via the `../sidecar/**/*` resources
   glob — including node-pty's prebuilds + bundled ConPTY and the
   shell-integration scripts (`docs/specs/terminal-escapes.md`).

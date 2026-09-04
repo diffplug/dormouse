@@ -3,7 +3,7 @@
  * Installable web app).
  *
  * The worker is the only party that can read a push — the Host seals to this
- * Client's static and the Server forwards ciphertext
+ * Client's static and the Relay forwards ciphertext
  * (`docs/specs/remote-security-model.md` -> Push sealing) — so what is under
  * test is the whole decision table, and the one rule that spans it: **every
  * delivery ends in a notification**, because `userVisibleOnly: true` makes
@@ -28,7 +28,7 @@ import {
 import type { KnownHostStore, KnownHostV1 } from '../client/pocket-db';
 import { GENERIC_PUSH_NOTIFICATION, installPocketWorker, type WorkerScope } from './sw';
 
-/** A `hostId` in the shape the Server mints: base64url of 16 bytes. */
+/** A `hostId` in the shape the Relay mints: base64url of 16 bytes. */
 const HOST_ID = toBase64Url(new Uint8Array(16).fill(7));
 const OTHER_HOST_ID = toBase64Url(new Uint8Array(16).fill(9));
 
@@ -198,7 +198,7 @@ describe('Pocket push service worker', () => {
   });
 
   it('re-bounds and re-sanitizes what it decrypts', async () => {
-    // The Host bounds before sealing, but the Server can no longer be the
+    // The Host bounds before sealing, but the Relay can no longer be the
     // second pair of eyes it was, so the sink applies the rule itself.
     const worker = await harness();
 

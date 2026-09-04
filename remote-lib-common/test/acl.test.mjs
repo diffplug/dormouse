@@ -164,7 +164,7 @@ test('re-approving the same pair supersedes the old record', () => {
 });
 
 test('re-pairing mints a new delivery id without disturbing the old rows', () => {
-  // The delivery id is the bearer capability the Client presents to the Server
+  // The delivery id is the bearer capability the Client presents to the Relay
   // for its push rows, so a superseding approval must not reuse the one the
   // revoked record carried.
   const { acl } = makeAcl();

@@ -448,8 +448,8 @@ function refuse(rhId: string): void {
  * one (`hostStateStore`) — so "there is no Host" is the ordinary un-enrolled
  * state, not a failure. Erroring for it broke the contract each caller reads:
  * `pushDevices` answers `null` for "nowhere to push" and a rejection for "the
- * server could not be asked", so the Settings dialog was reporting an
- * unreachable server on a machine that had simply never enrolled
+ * Relay could not be asked", so the Settings dialog was reporting an
+ * unreachable Relay on a machine that had simply never enrolled
  * (`lib/src/lib/push-devices.ts`), and `enrolled-gate.ts` seeds from `status`.
  * The sidecar has no such path — it always has a service — so these are exactly
  * what one with no enrollment returns (`lib/src/host/remote/service.ts`).

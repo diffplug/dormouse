@@ -78,7 +78,7 @@ import { countWords, proseLines as proseLinesOf, SOURCE_EXTENSIONS } from './spe
 const SPECS_DIR = 'docs/specs';
 
 const TOP_LEVEL_DIRS = [
-  'lib/', 'standalone/', 'vscode-ext/', 'website/', 'server/',
+  'lib/', 'standalone/', 'vscode-ext/', 'website/', 'relay/',
   'remote-lib-common/', 'dor/', 'dor-lib-common/', 'canopy/', 'docs/',
   'scripts/', 'deploy/', '.github/', '.claude/', '.vscode/',
 ];

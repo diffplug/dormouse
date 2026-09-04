@@ -1,6 +1,6 @@
 /**
- * Where a Host is allowed to reach a relay server, enforced in the process that
- * holds the socket (docs/specs/server.md → "Where a Host may reach a relay server").
+ * Where a Host is allowed to reach a Relay, enforced in the process that
+ * holds the socket (docs/specs/relay.md → "Where a Host may reach a Relay").
  *
  * The allowlist is written as a CSP source list because that is what it used to
  * be: while the Host lived in a webview, `connect-src` was the enforcement. A
@@ -14,7 +14,7 @@
  */
 
 /**
- * The remote-server sources baked into published builds. Kept equal to
+ * The Relay origins baked into published builds. Kept equal to
  * `scripts/csp-defaults.mjs` by `connect-src.test.ts` — the build scripts read
  * the `.mjs`, the service reads this, and a drift between them would ship a
  * binary that refuses the origin its own CSP allows.

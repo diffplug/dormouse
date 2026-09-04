@@ -25,7 +25,7 @@ import type { ConnectResult, PairingResult } from '../client/pocket-client';
 import {
   PAIRING_DENIAL_MESSAGES,
   SETUP_CODE_DEAD_MESSAGE,
-  ServerRefusalError,
+  RelayRefusalError,
   SetupTokenInvalidError,
 } from '../client/pocket-client';
 import type { KnownHostV1 } from '../client/pocket-db';
@@ -223,7 +223,7 @@ describe('the capability gate', () => {
    * without it gets a fixed upgrade requirement and performs no remote
    * operation at all.
    */
-  it('shows a fixed upgrade requirement and asks the Server nothing', async () => {
+  it('shows a fixed upgrade requirement and asks the Relay nothing', async () => {
     fake.noiseSupported = false;
 
     await boot();
@@ -361,7 +361,7 @@ describe('a phone that is already signed in', () => {
   });
 
   /**
-   * A code the Server refuses is dead: pairing with it would fail at the Host
+   * A code the Relay refuses is dead: pairing with it would fail at the Host
    * anyway, and the only recovery is a fresh one from the computer.
    */
   it('aborts on a refused retirement and says to scan a new code', async () => {
@@ -377,16 +377,16 @@ describe('a phone that is already signed in', () => {
     expect(fake.pair).not.toHaveBeenCalled();
   });
 
-  it('registers when the Server has never heard of the credential this browser holds', async () => {
+  it('registers when the Relay has never heard of the credential this browser holds', async () => {
     // `setup` caches the passkey before `setupFinish`, so a first run whose
-    // `finish` never reached the Server leaves a browser that reads as
+    // `finish` never reached the Relay leaves a browser that reads as
     // returning while holding a credential the account never got. Every later
     // scan would sign in, fail, and leave clearing site data as the only way
-    // out — so the Server's 404 outranks this browser's own record.
+    // out — so the Relay's 404 outranks this browser's own record.
     const { url, invitation } = await invitationUrl();
     fake.hasPriorUse = true;
     fake.signin.mockReset().mockImplementationOnce(async () => {
-      throw new ServerRefusalError('unknown credential', 404);
+      throw new RelayRefusalError('unknown credential', 404);
     });
     fake.signin.mockImplementation(async () => {
       fake.sessionToken = 'tok';
@@ -406,10 +406,10 @@ describe('a phone that is already signed in', () => {
 
   it('does not register when the sign-in failed for any other reason', async () => {
     // A dismissed authenticator prompt or a dead radio proves nothing about
-    // what the Server holds, so it must not spend the scanned token. Nor does
+    // what the Relay holds, so it must not spend the scanned token. Nor does
     // any *other* refusal: a signin challenge that expired while the user sat
     // at the Face ID prompt answers 400, a rejected assertion 401, and a
-    // restarting self-hosted server 502 — registering on one of those would
+    // restarting self-hosted Relay 502 — registering on one of those would
     // spend the single-use setup token and mint a redundant second passkey.
     const { url } = await invitationUrl();
     fake.hasPriorUse = true;
@@ -427,7 +427,7 @@ describe('a phone that is already signed in', () => {
     fake.hasPriorUse = true;
     fake.signin
       .mockReset()
-      .mockRejectedValue(new ServerRefusalError('refused this attempt', status));
+      .mockRejectedValue(new RelayRefusalError('refused this attempt', status));
     await boot();
 
     await pasteCode(url);
@@ -451,14 +451,14 @@ describe('a phone that is already signed in', () => {
 });
 
 describe('the Hosts list', () => {
-  it('shows the pinned records, labeled locally, with the Server’s online state', async () => {
+  it('shows the pinned records, labeled locally, with the Relay’s online state', async () => {
     fake.hasPriorUse = true;
     fake.listKnownHosts.mockResolvedValue([
       await knownHost('host-1', 'First laptop'),
       await knownHost('host-2', 'Second laptop'),
     ]);
     fake.listHosts.mockResolvedValue([
-      { hostId: 'host-1', label: 'a name the Server holds', online: true },
+      { hostId: 'host-1', label: 'a name the Relay holds', online: true },
       // Enrolled, but this phone has no record for it: not a row.
       { hostId: 'host-3', label: 'Someone else’s', online: true },
     ]);
@@ -467,7 +467,7 @@ describe('the Hosts list', () => {
     await click(container, 'Sign in with passkey');
 
     expect(container.textContent).toContain('First laptop');
-    expect(container.textContent).not.toContain('a name the Server holds');
+    expect(container.textContent).not.toContain('a name the Relay holds');
     expect(container.textContent).not.toContain('Someone else’s');
     // No `GET /api/hosts` row means offline, not absent.
     expect(rowFor(container, 'Second laptop').textContent).toContain('Offline');
@@ -646,7 +646,7 @@ it('leads with the camera-bootstrap copy when the fragment brought us here', asy
   await boot({ arrivedByCamera: true });
 
   expect(container.textContent).toContain(CAMERA_BOOTSTRAP_MESSAGE);
-  // Nothing was spent: the run has no token, and no Server call was made.
+  // Nothing was spent: the run has no token, and no Relay call was made.
   expect(fake.setup).not.toHaveBeenCalled();
   expect(fake.retireSetupToken).not.toHaveBeenCalled();
 });

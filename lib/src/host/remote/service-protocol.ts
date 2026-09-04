@@ -136,14 +136,14 @@ export interface InvitationEvent {
 // --- Command parameter shapes ---
 
 export interface EnrollParams {
-  serverUrl: string;
+  relayUrl: string;
   password: string;
   label: string;
 }
 
 /**
  * One-click enrollment against the offer an installer left on this machine
- * (`docs/specs/server.md` → "Remote control, in the Settings dialog").
+ * (`docs/specs/relay.md` → "Remote control, in the Settings dialog").
  */
 export interface EnrollOfferParams {
   /**
@@ -184,7 +184,7 @@ export interface AnswerParams {
 
 export interface EnrollResult {
   hostId: string;
-  serverUrl: string;
+  relayUrl: string;
 }
 
 /**
@@ -204,7 +204,7 @@ export interface SetupQrResult {
   /**
    * The pairing URL, composed by the service from the origin this Host enrolled
    * against — `remote-lib-common`'s `formatPairingInvitationUrl` owns its
-   * grammar (`docs/specs/server.md` → QR grammar).
+   * grammar (`docs/specs/relay.md` → QR grammar).
    */
   url: string;
   /**
@@ -217,12 +217,12 @@ export interface SetupQrResult {
 }
 
 /**
- * What `window.dormouseRemoteHost.status()` prints. `docs/specs/server.md`
+ * What `window.dormouseRemoteHost.status()` prints. `docs/specs/relay.md`
  * documents the console hook, so these field names are user-facing surface.
  */
 export interface RemoteHostConsoleStatus {
   enrolled: boolean;
-  serverUrl: string | null;
+  relayUrl: string | null;
   hostId: string | null;
   /**
    * The relay socket's state. `displaced` is the one that needs acting on:
@@ -237,7 +237,7 @@ export interface RemoteHostConsoleStatus {
   /**
    * The installer's enrollment offer on this machine, when there is one and this
    * Host has not enrolled — the Settings dialog's one-click path
-   * (`docs/specs/server.md` → "Remote control, in the Settings dialog", which
+   * (`docs/specs/relay.md` → "Remote control, in the Settings dialog", which
    * owns the re-read-at-click rule and what makes the card safe to press).
    *
    * **The offer's `token` is never here.** This is a service→webview shape, and
@@ -249,7 +249,7 @@ export interface RemoteHostConsoleStatus {
 
 /**
  * The devices a push would reach, or `null` when no Host is running — which is
- * "nowhere to push", not "the server could not be asked" (`push-devices.ts`).
+ * "nowhere to push", not "the Relay could not be asked" (`push-devices.ts`).
  *
  * Labels only. The ACL record's `deliveryId` is a bearer capability for that
  * Client's push rows and never crosses into the webview realm, which has no

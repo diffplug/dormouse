@@ -331,7 +331,7 @@ interface E2eHarness {
   approvals: PendingPairing[];
   savedAcl: HostAclRecord[];
   calls: FetchCall[];
-  /** The harness's own `fetch`, for a second client on the same fake Server. */
+  /** The harness's own `fetch`, for a second client on the same fake Relay. */
   fetch: typeof fetch;
   /** The Client's relay socket, once one is open — what a keepalive lands on. */
   clientSocket(): FakeSocket;
@@ -348,7 +348,7 @@ interface E2eHarness {
  * A real Host, a real relay, and a real client — the whole loop in memory.
  *
  * `/api/reauth/*` is faked, but faithfully: `begin` derives the challenge from
- * the presented binding with the shared builder, exactly as the Server does, so
+ * the presented binding with the shared builder, exactly as the Relay does, so
  * the assertion the authenticator produces is one `verifyPresenceProof`
  * accepts. Nothing else about the proof is simulated.
  */
@@ -383,7 +383,7 @@ async function makeE2eHarness(
   let savedAcl: HostAclRecord[] = [];
 
   const enrollment: HostEnrollment = {
-    serverUrl: ORIGIN,
+    relayUrl: ORIGIN,
     hostId,
     hostToken: 'host-tok',
     origin: ORIGIN,
@@ -431,7 +431,7 @@ async function makeE2eHarness(
   hostSocket.open();
   const relay = createTestRelay({ hostId, hostSocket });
 
-  // The presence routes, derived exactly as the Server derives them.
+  // The presence routes, derived exactly as the Relay derives them.
   const nonces = new Map<string, PresenceBinding>();
   const routes: Record<string, RouteHandler> = {
     ...AUTH_ROUTES,
@@ -447,20 +447,20 @@ async function makeE2eHarness(
     }),
     '/api/reauth/begin': async (body) => {
       const binding = (body as { binding: PresenceBinding }).binding;
-      const serverNonce = secret();
-      nonces.set(serverNonce, binding);
+      const relayNonce = secret();
+      nonces.set(relayNonce, binding);
       return {
         json: {
-          challenge: await presenceChallenge(binding, serverNonce),
+          challenge: await presenceChallenge(binding, relayNonce),
           rpId: RP_ID,
-          serverNonce,
+          relayNonce,
           allowCredentials: [binding.passkeyCredentialId],
         },
       };
     },
     '/api/reauth/finish': (body) => {
-      const { serverNonce } = body as { serverNonce: string };
-      if (!nonces.delete(serverNonce)) return { status: 400, json: { error: 'unknown nonce' } };
+      const { relayNonce } = body as { relayNonce: string };
+      if (!nonces.delete(relayNonce)) return { status: 400, json: { error: 'unknown nonce' } };
       return { json: { verifiedAt: 1 } };
     },
   };
@@ -561,7 +561,7 @@ describe('pairing, end to end', () => {
     const record = harness.knownHosts.records.get(harness.hostId)!;
     expect(record.hostStaticPublicKey).toBe(harness.noiseStatic.publicKey);
     // The Host's own label reached the phone inside the encrypted outcome; the
-    // Server never had it.
+    // Relay never had it.
     expect(record.label).toBe(HOST_LABEL);
     expect(record.passkeyCredentialId).toBe(harness.authenticator.credentialId);
     expect(record.passkeyPublicKeyHash).toBe(
@@ -751,7 +751,7 @@ describe('connecting, end to end', () => {
   /**
    * The ACL is the Host's, and it can lose this Client without the pin
    * changing. The tombstone is written before the record forgets the delivery
-   * id — that id is the only handle that can ever delete the Server's row.
+   * id — that id is the only handle that can ever delete the Relay's row.
    */
   it('drops authorization on pairing-required, tombstoning the delivery id first', async () => {
     const paired = await makeE2eHarness();
@@ -783,7 +783,7 @@ describe('connecting, end to end', () => {
     expect(paired.knownHosts.records.get(paired.hostId)!.hostStaticPublicKey).toBe(
       paired.noiseStatic.publicKey,
     );
-    // Deleted at the Server, so the tombstone cleared; the id was queued first.
+    // Deleted at the Relay, so the tombstone cleared; the id was queued first.
     expect(reset.calls.some((c) => c.url.endsWith(deliveryId) && c.method === 'DELETE')).toBe(true);
     expect([...paired.pendingDeletions.records.values()]).toEqual([]);
   });
@@ -1015,7 +1015,7 @@ describe('keepalives on an established session', () => {
   it('ends a session the Host has already reaped, rather than hanging on it', async () => {
     // The Host disposes a session it has not decrypted a Client message on for
     // `ESTABLISHED_E2E_IDLE_TIMEOUT_MS` and sends nothing when it does; the
-    // relay socket is to the *Server*, so nothing closes. Keepalives pause
+    // relay socket is to the *Relay*, so nothing closes. Keepalives pause
     // while the page is hidden, so a phone in a pocket crosses that line on its
     // own — and without this it comes back to a wall whose every request hangs
     // forever with no error.
@@ -1127,7 +1127,7 @@ describe('setup + signin', () => {
 
   /**
    * The exclusion doing its job. Named rather than generic because the app has
-   * to act on it: the list came from the Server, so an authenticator refusing
+   * to act on it: the list came from the Relay, so an authenticator refusing
    * over it is proof a sign-in from this very device succeeds.
    */
   it('names the authenticator’s refusal to duplicate a registered passkey', async () => {
@@ -1150,10 +1150,10 @@ describe('setup + signin', () => {
 
   /**
    * The two halves of the cache-before-`finish` rule: a refusal is proof the
-   * Server has nothing, a lost answer is not.
+   * Relay has nothing, a lost answer is not.
    */
   describe('the passkey cached between registerPasskey and finish', () => {
-    it('is dropped when finish is refused, since the Server registered nothing', async () => {
+    it('is dropped when finish is refused, since the Relay registered nothing', async () => {
       const harness = makeClient({
         ...AUTH_ROUTES,
         '/api/setup/finish': () => ({ status: 401, json: { error: SETUP_TOKEN_INVALID_ERROR } }),
@@ -1166,7 +1166,7 @@ describe('setup + signin', () => {
       expect(harness.client.hasPriorUse()).toBe(false);
     });
 
-    it('survives a finish whose answer never arrived, since the Server may hold it', async () => {
+    it('survives a finish whose answer never arrived, since the Relay may hold it', async () => {
       const harness = makeClient({
         ...AUTH_ROUTES,
         '/api/setup/finish': () => {
@@ -1277,7 +1277,7 @@ describe('push registration by capability', () => {
 });
 
 describe('the durable deletion queue', () => {
-  it('drains a tombstone and clears it only on the Server’s answer', async () => {
+  it('drains a tombstone and clears it only on the Relay’s answer', async () => {
     let live = false;
     const harness = await signedIn({
       '/api/push/subscriptions/delivery-h1': () =>
@@ -1505,9 +1505,9 @@ describe('localStoragePocketStorage', () => {
   }
 
   /**
-   * `setup` commits the Server's passkey *before* caching its public key, so a
+   * `setup` commits the Relay's passkey *before* caching its public key, so a
    * write that throws here would strand the visit past the point of no return —
-   * and every retry would mint another orphan passkey server-side.
+   * and every retry would mint another orphan passkey Relay-side.
    */
   it('does not throw on any write when storage is blocked', () => {
     vi.stubGlobal('localStorage', blockedLocalStorage());

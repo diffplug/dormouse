@@ -58,7 +58,7 @@ describe('dor control-socket proof-domain mirrors', () => {
   }
 });
 
-// docs/specs/server.md -> "Remote control, in the Settings dialog". The Host
+// docs/specs/relay.md -> "Remote control, in the Settings dialog". The Host
 // reads the installer's enrollment offer from the path each installer writes it
 // to, and nothing links the two sides at build time — a drift is a one-click
 // enrollment that silently never appears. The whole path is followed, root and
@@ -119,7 +119,7 @@ describe('enrollment-offer path mirrors the installers', () => {
 // scripts/pairing-walkthrough/README.md -> Steps. The walkthrough drives the
 // built Pocket app from plain Node, so it cannot import either constant; a
 // drift is not a failed build but a run that stalls against a live Chrome and a
-// real Server, saying only that it never found the button.
+// real Relay, saying only that it never found the button.
 describe('the pairing walkthrough mirrors the copy it clicks', () => {
   const file = 'scripts/pairing-walkthrough/steps.mjs';
   const source = readRepoFile(file);

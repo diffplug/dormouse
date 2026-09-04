@@ -12,8 +12,8 @@
  *
  * Enroll from the devtools console:
  *
- *   await window.dormouseRemoteHost.enroll('https://your-server', 'SETUP_PASSWORD', 'My Laptop')
- *   await window.dormouseRemoteHost.enrollOffer('https://your-server', 'My Laptop')  // installer's offer, this machine
+ *   await window.dormouseRemoteHost.enroll('https://your-relay', 'SETUP_PASSWORD', 'My Laptop')
+ *   await window.dormouseRemoteHost.enrollOffer('https://your-relay', 'My Laptop')  // installer's offer, this machine
  *   window.dormouseRemoteHost.status()
  *   window.dormouseRemoteHost.reconnect()      // needed after `displaced`
  *   window.dormouseRemoteHost.clearEnrollment()
@@ -107,12 +107,12 @@ function installBridgeMode(link: RemoteHostLink): void {
 
   const target = globalThis as unknown as { dormouseRemoteHost?: unknown };
   if (target.dormouseRemoteHost) return;
-  // Same method names and result shapes as the legacy hook (docs/specs/server.md
+  // Same method names and result shapes as the legacy hook (docs/specs/relay.md
   // → "Running it"), one round trip further away — so `status()` and
   // `reconnect()` are promises here.
   target.dormouseRemoteHost = {
-    enroll: (serverUrl: string, password: string, label: string) =>
-      link.command('enroll', { serverUrl, password, label }),
+    enroll: (relayUrl: string, password: string, label: string) =>
+      link.command('enroll', { relayUrl, password, label }),
     // Origin-first, like `enroll` — but this one is an *echo* of the origin the
     // caller reviewed (`status().offer.origin`), not what is enrolled against:
     // that and the one-time token come off the installer's file in the service,

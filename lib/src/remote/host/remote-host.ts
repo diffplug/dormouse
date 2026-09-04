@@ -2,7 +2,7 @@
  * Host-side relay controller. The Host speaks exactly two frames — the `e2e`
  * envelope and `client-gone` — and runs both end-to-end ceremonies itself:
  * `docs/specs/remote-security-model.md` owns Pairing, Connection, and the Host
- * bounds; `docs/specs/server.md` → Relay owns the envelope it rides in. The
+ * bounds; `docs/specs/relay.md` → Relay owns the envelope it rides in. The
  * remote-api session is injected, keeping this module environment-free.
  */
 
@@ -32,7 +32,7 @@ import {
   importNoiseStaticPrivateKey,
   isBoundedString,
   isConnectionRequestV1,
-  isE2eServerToHostFrame,
+  isE2eRelayToHostFrame,
   isPairingRequestV1,
   MAX_CLIENT_ID_LENGTH,
   MAX_SERVER_TO_HOST_FRAME_LENGTH,
@@ -47,7 +47,7 @@ import {
   DELIVERY_ID_BYTE_LENGTH,
   type ConnectionOutcomeV1,
   type ConnectionPolicy,
-  type E2eServerToHostFrame,
+  type E2eRelayToHostFrame,
   type HostAclRecord,
   type HostFrame,
   type NoiseKeyPair,
@@ -56,7 +56,7 @@ import {
   type PairingOutcomeV1,
   type PresenceBinding,
   type SealedPushV1,
-  type ServerToHostFrame,
+  type RelayToHostFrame,
 } from 'remote-lib-common';
 import type { HostEnrollment } from './enrollment';
 import { hostTimer, type RemoteTimer, type RemoteWebSocket } from '../ws';
@@ -160,7 +160,7 @@ interface HeldInvitation {
   readonly invitation: PairingInvitation;
   /** The one-use responder keypair; erased with the entry. */
   readonly keyPair: NoiseKeyPair;
-  /** This Host's own clock, never the Server's — see {@link RemoteHost.mintInvitation}. */
+  /** This Host's own clock, never the Relay's — see {@link RemoteHost.mintInvitation}. */
   readonly expiresAt: number;
   state: 'live' | 'reserved';
 }
@@ -305,7 +305,7 @@ export class RemoteHost {
   /**
    * The invitations this Host has minted and not yet spent, `inviteId → entry`.
    *
-   * **The one-use responder key lives only here.** It never reaches the Server,
+   * **The one-use responder key lives only here.** It never reaches the Relay,
    * the webview, or the state file: the QR carries its *public* half to a phone
    * camera and no further, and completing IK against it is what proves the
    * scanning phone is talking to the machine whose screen it photographed
@@ -314,7 +314,7 @@ export class RemoteHost {
    * Kept on the Host rather than in the service that composes the QR so its
    * lifetime *is* this Host's: a new Host starts with none, and a Host that
    * reconnects keeps the codes still on screen. Capped at
-   * {@link MAX_TOKENS_PER_HOST}, the Server's own bound on the setup tokens
+   * {@link MAX_TOKENS_PER_HOST}, the Relay's own bound on the setup tokens
    * these ride with, so the two sides agree on live-versus-spent.
    */
   readonly #invitations = new Map<string, HeldInvitation>();
@@ -382,8 +382,8 @@ export class RemoteHost {
     this.#policy = {
       rpId: options.enrollment.rpId,
       origin: options.enrollment.origin,
-      // Mirrored from the Server at enrollment. Both sides must demand the
-      // same thing: the Host is the final authority, so a Server enforcing UV
+      // Mirrored from the Relay at enrollment. Both sides must demand the
+      // same thing: the Host is the final authority, so a Relay enforcing UV
       // while the Host does not would leave the weaker verifier deciding.
       requireUserVerification: options.enrollment.requireUserVerification ?? false,
     };
@@ -454,7 +454,7 @@ export class RemoteHost {
    * keypair, and the expiry the code advertises.
    *
    * **One clock.** The Host's own `now` plus the shared pairing TTL bounds the
-   * entry; `serverExpiresAtMs` is the Server's opinion about its setup token,
+   * entry; `relayExpiresAtMs` is the Relay's opinion about its setup token,
    * and only the *earlier* of the two reaches the QR — an advisory value that
    * over-promised would send a phone into a handshake this Host will refuse.
    *
@@ -466,14 +466,14 @@ export class RemoteHost {
    * one synchronous stretch.** `generateNoiseKeyPair` is the only await here,
    * and two mints overlapping across it would each evict against the same
    * pre-await size and then both insert — leaving `MAX_TOKENS_PER_HOST + 1`
-   * live invitations, which is the cap the Server's own setup-token bound is
+   * live invitations, which is the cap the Relay's own setup-token bound is
    * shared with. A teardown in that same window is the other half, and it is
    * guarded by the epoch {@link RemoteHost.#enqueue} uses rather than by
    * `#stopped`: invitations go with the socket, so a close — not only a
    * `stop()` — retires them, and inserting afterwards would re-arm the reaper
    * and return a QR the panel paints `live` over a relay socket that is gone.
    */
-  async mintInvitation(setupToken: string, serverExpiresAtMs: number): Promise<PairingInvitation> {
+  async mintInvitation(setupToken: string, relayExpiresAtMs: number): Promise<PairingInvitation> {
     const epoch = this.#epoch;
     const keyPair = await generateNoiseKeyPair();
     // Worded for every teardown the epoch covers, not only `stop()`: a dropped
@@ -482,7 +482,7 @@ export class RemoteHost {
     // string is what the person tapping *Show a code* is shown.
     if (this.#epoch !== epoch) {
       throw new Error(
-        'could not mint a setup code: this machine’s connection to the server dropped. Try again.',
+        'could not mint a setup code: this machine’s connection to the Relay dropped. Try again.',
       );
     }
     this.#reap();
@@ -494,7 +494,7 @@ export class RemoteHost {
       // by insertion whatever it happens to be doing.
       this.#retireInvitation(oldest.value[0]);
     }
-    const expiresAt = Math.min(now + DEFAULT_PAIRING_TTL_MS, serverExpiresAtMs);
+    const expiresAt = Math.min(now + DEFAULT_PAIRING_TTL_MS, relayExpiresAtMs);
     const inviteId = randomBase64Url(LOCAL_ID_BYTE_LENGTH);
     const invitation: PairingInvitation = {
       hostId: this.#enrollment.hostId,
@@ -734,7 +734,7 @@ export class RemoteHost {
   #connect(): void {
     if (this.#ws || this.#stopped || this.#displaced) return;
     this.#status = 'connecting';
-    const wsBase = this.#enrollment.serverUrl.replace(/^http/, 'ws');
+    const wsBase = this.#enrollment.relayUrl.replace(/^http/, 'ws');
     const url = `${wsBase}${WS_ROUTES.host}?${WS_TOKEN_PARAM}=${encodeURIComponent(this.#enrollment.hostToken)}`;
     const ws = this.#createWebSocket(url);
     this.#ws = ws;
@@ -768,7 +768,7 @@ export class RemoteHost {
     }
     if (code === WS_CLOSE_HOST_REPLACED) {
       // Another Host claimed this hostId and the relay evicted us on purpose
-      // (server/src/relay.ts `registerHost`). Reconnecting would evict that one,
+      // (relay/src/relay.ts `registerHost`). Reconnecting would evict that one,
       // which would reconnect and evict us, forever — so this close is terminal
       // and coming back requires an explicit `start()`.
       this.#displaced = true;
@@ -861,9 +861,9 @@ export class RemoteHost {
     // takes one (`vscode-ext/src/remote-host.ts`); this is the bound that holds
     // on every implementation.
     if (typeof raw !== 'string' || raw.length > MAX_SERVER_TO_HOST_FRAME_LENGTH) return;
-    let frame: ServerToHostFrame;
+    let frame: RelayToHostFrame;
     try {
-      frame = JSON.parse(raw) as ServerToHostFrame;
+      frame = JSON.parse(raw) as RelayToHostFrame;
     } catch {
       return;
     }
@@ -885,8 +885,8 @@ export class RemoteHost {
     if (frame.t !== 'e2e') return;
     // The shape guard bounds every routing value — including `clientId`, before
     // the ciphertext scan — and this Host runs it rather than trusting the relay
-    // to have (`docs/specs/server.md` → Relay).
-    if (!isE2eServerToHostFrame(frame)) return;
+    // to have (`docs/specs/relay.md` → Relay).
+    if (!isE2eRelayToHostFrame(frame)) return;
     const e2e = frame;
     this.#enqueue((epoch) => this.#onE2e(e2e, epoch));
   }
@@ -913,7 +913,7 @@ export class RemoteHost {
       });
   }
 
-  async #onE2e(frame: E2eServerToHostFrame, epoch: number): Promise<void> {
+  async #onE2e(frame: E2eRelayToHostFrame, epoch: number): Promise<void> {
     // An `init` is the frame that allocates, so it is the one that reaps first.
     // A transport frame checks its own pending record's deadline, and the armed
     // timer covers everything else — sweeping the whole Host on every keystroke
@@ -930,7 +930,7 @@ export class RemoteHost {
   // --- Pairing -------------------------------------------------------------
 
   /** Noise message 1 against one invitation's key; an unknown id costs a map lookup. */
-  async #onPairingInit(frame: E2eServerToHostFrame, epoch: number): Promise<void> {
+  async #onPairingInit(frame: E2eRelayToHostFrame, epoch: number): Promise<void> {
     const held = this.#invitations.get(frame.id);
     if (!held || held.state !== 'live') return;
     // The last gate before any WebCrypto runs, so a flood that names live
@@ -999,7 +999,7 @@ export class RemoteHost {
    * carrying the two digits, the device label, and the presence proof. Anything
    * else is terminal (`docs/specs/remote-security-model.md` → Pairing).
    */
-  async #onPairingTransport(frame: E2eServerToHostFrame): Promise<void> {
+  async #onPairingTransport(frame: E2eRelayToHostFrame): Promise<void> {
     const state = this.#clients.get(frame.clientId);
     const pending = state?.pairing;
     // Processed only for its exact pending id: an unknown one is dropped
@@ -1185,7 +1185,7 @@ export class RemoteHost {
    * the fresh challenge the proof must bind to
    * (`docs/specs/remote-security-model.md` → Connection).
    */
-  async #onConnectionInit(frame: E2eServerToHostFrame, epoch: number): Promise<void> {
+  async #onConnectionInit(frame: E2eRelayToHostFrame, epoch: number): Promise<void> {
     // Before the await, so a refused frame cannot even reach the one-time
     // import behind it: a bucket that gated only the responder would still let
     // a flood decide when this Host does WebCrypto.
@@ -1241,7 +1241,7 @@ export class RemoteHost {
    * Transport on a connection: the authorization control while one is pending,
    * then protocol-v1 application messages once it is established.
    */
-  async #onConnectionTransport(frame: E2eServerToHostFrame): Promise<void> {
+  async #onConnectionTransport(frame: E2eRelayToHostFrame): Promise<void> {
     const state = this.#clients.get(frame.clientId);
     if (!state) return;
     if (state.established?.connectionId === frame.id) {
@@ -1530,7 +1530,7 @@ export class RemoteHost {
 
   /**
    * One control message on a ceremony session; the transport pads every one to
-   * the same size (`docs/specs/server.md` → E2E framing).
+   * the same size (`docs/specs/relay.md` → E2E framing).
    */
   #sendControl(
     clientId: string,

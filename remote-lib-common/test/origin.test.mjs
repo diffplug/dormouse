@@ -1,5 +1,5 @@
 /**
- * The one reduction of a URL to a bare scheme-host-port, shared by the Server's
+ * The one reduction of a URL to a bare scheme-host-port, shared by the Relay's
  * `DORMOUSE_ORIGIN`, the `origin` a Host reads off an enrollment response, and
  * the installer offer file's own field.
  */

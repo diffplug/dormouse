@@ -209,7 +209,7 @@ const NOISE_STATIC_PKCS8_MAX_LENGTH = 128;
  *
  * The returned private key is the one secret in this module that exists
  * outside WebCrypto, so the caller owns getting it to owner-only storage and
- * nowhere else — in particular, never to the Server.
+ * nowhere else — in particular, never to the Relay.
  */
 export async function mintNoiseStaticKeyPair(
   crypto: WebCryptoLike = getWebCrypto(),

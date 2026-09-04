@@ -13,18 +13,18 @@ import * as PocketWall from '../../lib/src/stories/PocketWall.stories';
 # Pairing a phone with your laptop
 
 Everything it takes to control a laptop's terminals from a phone, in the order
-you meet it: stand up a server, build a Host that is allowed to reach it, enroll
+you meet it: stand up a Relay, build a Host that is allowed to reach it, enroll
 the laptop, scan its code with the phone, approve the pairing, connect.
 
 The screens below are the real components, rendered from the same stories
-Chromatic watches. They are static — nothing here is wired to a live server.
+Chromatic watches. They are static — nothing here is wired to a live Relay.
 One of them carries `autoplay` because a docs page does not run a story's `play`
 by default, and its state — a painted terminal — only exists after it runs.
 
 > **This is a walkthrough, not a spec.** It lives outside `docs/specs/`, so the
 > fold discipline in `AGENTS.md` does not apply to it and `spec-lint` does not
 > check it. Where it disagrees with a spec, the spec is right. The three it
-> leans on are `server.md` (what the server and the installer do),
+> leans on are `relay.md` (what the Relay and the installer do),
 > `remote-security-model.md` (why the ceremony has the shape it has), and
 > `pocket-app.md` (the phone).
 
@@ -36,7 +36,7 @@ by default, and its state — a painted terminal — only exists after it runs.
 | --- | --- |
 | **Client** (Dormouse Pocket) | the phone. Holds a passkey and one X25519 key per paired Host. |
 | **Host** (Dormouse Terminal) | the laptop being controlled. Holds the ACL. **Final authority for access decisions.** |
-| **Server** | the coordinating service: accounts, passkey registration, challenges, and relay. *Not* the authority for Host access, and it reads none of what it relays. |
+| **Relay** | the coordinating service: accounts, passkey registration, challenges, and relay. *Not* the authority for Host access, and it reads none of what it relays. |
 
 Access is deliberately split across five layers, and a connection needs all of
 them to agree:
@@ -52,15 +52,15 @@ them to agree:
 Two consequences shape every screen after this one. **Adding a passkey to your
 account does not grant a new phone access to any machine** — passkeys sync,
 authorization does not, so each browser must be approved on each laptop, in
-person, once. And **the server is a ciphertext pipe**: it never learns a pairing
+person, once. And **the Relay is a ciphertext pipe**: it never learns a pairing
 decision, a machine's name, a keystroke, or a notification's text, so nothing
 below asks you to trust it with any of them.
 
 ---
 
-## 1. Stand up the server
+## 1. Stand up the Relay
 
-The whole self-host story today is one coordinating server on your own laptop,
+The whole self-host story today is one coordinating Relay on your own laptop,
 reachable only from your tailnet. One idempotent command builds the current
 checkout into a self-contained release and installs it:
 
@@ -82,7 +82,7 @@ LaunchAgent (RunAtLoad + KeepAlive)
   — a Windows Scheduled Task at logon, or a systemd user unit —
         |
         v
-Dormouse Node server on 127.0.0.1:3100
+Dormouse Relay on 127.0.0.1:3100
         |
         v
 tailscale serve --bg terminates private HTTPS
@@ -94,8 +94,8 @@ https://<laptop>.<tailnet>.ts.net
 Then check it and read the generated password out in your own terminal:
 
 ```sh
-"$HOME/Library/Application Support/Dormouse Server/bin/manage" verify
-"$HOME/Library/Application Support/Dormouse Server/bin/manage" show-password
+"$HOME/Library/Application Support/Dormouse Relay/bin/manage" verify
+"$HOME/Library/Application Support/Dormouse Relay/bin/manage" show-password
 ```
 
 Two things to carry forward:
@@ -108,10 +108,10 @@ Two things to carry forward:
 - **HTTPS is not optional.** WebAuthn needs a secure context and only
   `localhost` is exempt, so a real phone needs the TLS origin. For a
   desktop-only dev loop, the shortcut is
-  `pnpm dev:server` on `localhost:3000`; the Server writes its generated
+  `pnpm dev:relay` on `localhost:3000`; the Relay writes its generated
   password to `setup-password.json` in its data directory.
 
-The Server-generated setup password gates exactly one thing: enrolling a Host from somewhere
+The Relay-generated setup password gates exactly one thing: enrolling a Host from somewhere
 else. It never leaves your machine except to that endpoint — and on a happy path
 you never read it out at all: a Host on *this* laptop enrolls from the one-time
 offer the installer leaves it (section 3), and the phone sets itself up from a
@@ -141,13 +141,13 @@ locally, before any credential leaves the machine.
 ## 3. Enroll the laptop
 
 **Settings → Remote control**, at the bottom of the app-global Settings dialog
-(the sliders icon at the far right of the baseboard). Because the server from
+(the sliders icon at the far right of the baseboard). Because the Relay from
 section 1 is installed on this very laptop, there is nothing to type:
 
 <Canvas of={RemoteControl.OfferAvailable} />
 
 The installer left a `run/enroll-offer.json` next to its state — this install's
-origin plus a one-time token the server redeems in place of the setup password
+origin plus a one-time token the Relay redeems in place of the setup password
 — and the Host reads that same file from the well-known path for the platform.
 It lasts for 24 hours or until the first Host enrolls, whichever comes first.
 Press **Enroll** and the machine is connected.
@@ -160,13 +160,13 @@ safe to press: redeeming an offer unlinks it, so a spent one fails with a
 message saying so rather than half-enrolling. The echo covers the other half of
 the same hour — if the installer ran again and rewrote the offer, the origin on
 disk no longer matches the one you read, and the service refuses rather than
-spend a one-time token on a server you were never shown.
+spend a one-time token on a Relay you were never shown.
 
-### The typed form, for a server somewhere else
+### The typed form, for a Relay somewhere else
 
-"Enroll with a different server…" unfolds the original three-field form, which
+"Enroll with a different Relay…" unfolds the original three-field form, which
 is also what you get on a laptop with no local install — a second machine
-enrolling against the first one's server, or an offer already redeemed.
+enrolling against the first one’s Relay, or an offer already redeemed.
 
 <Canvas of={RemoteControl.Unenrolled} />
 
@@ -174,7 +174,7 @@ This is UI rather than a console incantation because it is the one step a
 self-hoster cannot skip. Three rules it exists to honor:
 
 - **The password is passed through, never held.** It goes straight to the Host
-  service — the party that actually talks to the server — and is cleared on
+  service — the party that actually talks to the Relay — and is cleared on
   success only. A failed enroll is usually a typo in one of the other fields,
   and wiping the password would make every retry a fresh trip to the password
   manager.
@@ -186,11 +186,11 @@ self-hoster cannot skip. Three rules it exists to honor:
   in those words is what keeps it from reading as a wrong password.
 
 - **The bearer token never comes back.** Enrollment answers
-  `{ hostId, serverUrl }`; the `hostToken` stays in the Host service and on
+  `{ hostId, relayUrl }`; the `hostToken` stays in the Host service and on
   disk, and never enters the webview.
 
 On success the section flips to the enrolled view. Note the last line —
-enrolling connects the machine to a server; it pairs it with nothing.
+enrolling connects the machine to a Relay; it pairs it with nothing.
 
 <Canvas of={RemoteControl.ConnectedNoDevices} />
 
@@ -201,12 +201,12 @@ An enrolled machine can mint one, on request:
 <Canvas of={RemoteControl.SetupPhoneQr} />
 
 That code is the origin you would otherwise type into mobile Safari, carrying a
-**setup token** the server issues and will redeem in place of the setup
+**setup token** the Relay issues and will redeem in place of the setup
 password, plus an **invitation**: an id and a one-use public key that are the
-*laptop's own* and never go near the server. The invitation's private half stays
+*laptop's own* and never go near the Relay. The invitation's private half stays
 in the laptop's Host process, so a phone that completes a handshake against it
 has provably read this screen — which is what makes it worth something in §6.
-(`docs/specs/server.md` → Setup tokens and the pairing QR owns the grammar.)
+(`docs/specs/relay.md` → Setup tokens and the pairing QR owns the grammar.)
 
 Neither lives long: five minutes, one use. The code is shown on request rather
 than left standing on screen, and the panel says so the moment a phone completes
@@ -226,7 +226,7 @@ where nobody decided anything:
 
 ## 4. Scan it with the phone
 
-Open the server origin on the phone. A browser that has never been here has
+Open the Relay origin on the phone. A browser that has never been here has
 exactly one thing it can do, and the screen leads with it:
 
 <Canvas of={SetupOrSignin.FirstRun} />
@@ -240,7 +240,7 @@ above the action rather than after it:
 
 **Scan a setup code** opens a rear-camera scanner inside Pocket. It reads the code
 as *data* — nothing navigates, and the text goes straight to the one parser that
-decides whether it is a setup code for this server — with a paste field beside
+decides whether it is a setup code for this Relay — with a paste field beside
 it, because a desktop browser and the localhost dev loop have no camera:
 
 <Canvas of={ScanInvitation.Scanning} />
@@ -294,9 +294,9 @@ to §6 for what happens on the first run instead.
 <Canvas of={HostsView.MixedList} />
 
 One row per machine **this phone holds a key for** — a Host enrolled on the
-server but never paired with this browser is not a row at all. The label comes
+Relay but never paired with this browser is not a row at all. The label comes
 from the record, which learned it inside an encrypted pairing outcome; only the
-online dot comes from the server. The card above them is push, which §7 comes
+online dot comes from the Relay. The card above them is push, which §7 comes
 back to.
 
 Each row offers exactly one action, and nothing is asked to decide which.
@@ -311,11 +311,11 @@ the only handle that can name that row again.
 
 ## 6. The pairing ceremony
 
-Pairing runs end to end between the phone and the laptop, through a server that
+Pairing runs end to end between the phone and the laptop, through a Relay that
 routes ciphertext and reads none of it:
 
 ```text
-phone                        server                        host (laptop)
+phone                        relay                        host (laptop)
   |-- e2e init (Noise msg 1) -->|-- e2e init {clientId} ------>|  against the key
   |<-- e2e response ------------|<-- e2e response ------------ |  the QR carried
   |-- reauth begin/finish ----->|  challenge bound to this     |
@@ -327,7 +327,7 @@ phone                        server                        host (laptop)
 
 The handshake runs against the one-use key printed in the QR, which never left
 the laptop, so a phone that completes it has provably read *this* screen. The
-server sees two routing ids and a handshake hash.
+Relay sees two routing ids and a handshake hash.
 
 Then the phone shows two digits, and the laptop asks for them. The phone paints
 them the moment they exist, before it knows how any of this ends:
@@ -384,7 +384,7 @@ enough to wrap.
 Pairing is once. Connecting is every session, and it re-proves everything:
 
 ```text
-phone                        server                        host
+phone                        relay                        host
   |-- e2e init (Noise msg 1) -->|-- e2e init {clientId} ------>|  against the key
   |<-- e2e response ------------|<-- msg 2 = 32-byte challenge |  the phone pinned
   |   ONE biometric prompt,     |                              |
@@ -426,13 +426,13 @@ to a line and each paired row says **Push on** for itself:
 
 <Canvas of={HostsView.PushSubscribed} />
 
-The offer appears only where push can work — an installed app on a server with
+The offer appears only where push can work — an installed app on a Relay with
 push configured (§1). A phone in a Safari tab is told to add Dormouse to the Home
-Screen instead, which is also where a server with push disabled says so.
+Screen instead, which is also where a Relay with push disabled says so.
 
 A notification is the one message the two ends exchange with no live session
 between them, so it gets the same treatment as everything else: the laptop seals
-each one to that phone's own key, and the server forwards a sealed envelope it
+each one to that phone's own key, and the Relay forwards a sealed envelope it
 holds no key for. The service worker on the phone is what opens it — and if
 anything about that fails, it shows a content-free "something needs attention"
 rather than nothing, because a worker that shows nothing gets the browser's own
@@ -448,7 +448,7 @@ Back on the laptop, the section now counts what is paired:
 
 The push alarm's settings, directly above that section, carry the proof of the
 whole chain you just built: **Send test push**. Nothing about it is simulated —
-the test goes through the same Host, the same ACL, and the same server a real
+the test goes through the same Host, the same ACL, and the same Relay a real
 alarm would, so a phone that buzzes is evidence of everything from §1 to §6 at
 once. Its answers are kept deliberately distinct, because they call for
 different responses: on a machine that has enrolled (§3) but has no phone with
@@ -497,7 +497,7 @@ So nothing above reads as a promise:
 
 - **Revocation is editing a JSON file by hand.** There is no management UI and
   no relay frame carries a revocation. Deleting a *machine* takes effect within
-  a minute — the server re-reads the file and drops that machine's socket — but
+  a minute — the Relay re-reads the file and drops that machine's socket — but
   withdrawing one *phone's* approval is the laptop's own list, and takes effect
   when that laptop restarts. **Remove** on the phone is not that list: it
   forgets the machine locally, and a phone that pairs again arrives with a new

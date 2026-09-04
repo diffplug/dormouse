@@ -1,7 +1,7 @@
 /**
  * End-to-end scenarios for each guarantee in
  * docs/specs/remote-security-model.md § Security Guarantees, driven through
- * the full Client / Server / Host flow of the harness actors — the real QR
+ * the full Client / Relay / Host flow of the harness actors — the real QR
  * grammar, the real IK handshakes, the real presence verifier, and the real
  * ACL conjunction.
  *
@@ -44,7 +44,7 @@ test('pairing then connecting succeeds end to end', async () => {
   assert.equal(paired.record.label, 'iPhone Safari');
   // The success carries the Host's long-term static — the Client's pin from
   // here on — its local label, and the delivery capability. None of the three
-  // exists anywhere on the Server.
+  // exists anywhere on the Relay.
   assert.equal(paired.outcome.hostStaticPublicKey, host.staticPublicKey);
   assert.equal(paired.outcome.hostLabel, 'Laptop');
   assert.equal(client.pins.get(host.hostId), host.staticPublicKey);
@@ -62,7 +62,7 @@ test('adding a new passkey does not grant host access', async () => {
   const { server, host, authenticator, client } = await world();
   await client.pair(host, { accountId: ACCOUNT, authenticator });
 
-  // The account gains a second passkey — entirely legitimate on the server —
+  // The account gains a second passkey — entirely legitimate on the Relay —
   // and an attacker (or new browser) holds it in an unpaired browser profile.
   const newPasskey = await SimAuthenticator.create({ rpId: RP_ID });
   server.registerPasskey(ACCOUNT, newPasskey);
@@ -87,11 +87,11 @@ test('adding a new passkey does not grant host access', async () => {
   assert.deepEqual(fromPairedBrowser.misses, ['passkey-not-paired']);
 });
 
-test('compromising the server does not grant host access', async () => {
+test('compromising the Relay does not grant host access', async () => {
   const { host, authenticator, client } = await world();
   const paired = await client.pair(host, { accountId: ACCOUNT, authenticator });
 
-  // The attacker controls the coordinating server: it vouches for any account
+  // The attacker controls the coordinating Relay: it vouches for any account
   // and mints a presence challenge for any binding. They hold a passkey and a
   // browser of their own, and the Host's static is public, so they can even
   // complete the handshake.
@@ -108,14 +108,14 @@ test('compromising the server does not grant host access', async () => {
   assert.ok(decision.misses.includes('passkey-not-paired'));
   assert.ok(decision.misses.includes('client-not-paired'));
 
-  // The server also has no write path into the host's ACL: nothing about the
+  // The Relay also has no write path into the host's ACL: nothing about the
   // attack changed what the host trusts.
   assert.equal(host.acl.records().length, 1);
   assert.equal(host.acl.records()[0].clientStaticPublicKey, client.staticPublicKeyFor(host));
   assert.equal(host.acl.records()[0].deliveryId, paired.record.deliveryId);
 });
 
-test('a compromised server cannot substitute a passkey it does hold', async () => {
+test('a compromised Relay cannot substitute a passkey it does hold', async () => {
   // The sharper half of server compromise: the attacker replays the *paired*
   // credential id, which they can read off any relayed binding. The record
   // stores a hash of the paired key, the assertion is verified against the
@@ -160,7 +160,7 @@ test('passkey synchronization does not automatically create trusted clients', as
   assert.equal(new Set(active.map((r) => r.deliveryId)).size, 2);
 });
 
-// The guarantee that a compromised Server reveals no *notification text*. A
+// The guarantee that a compromised Relay reveals no *notification text*. A
 // push runs outside both ceremonies — the phone is asleep and there is no live
 // session — so it is sealed on its own construction
 // (docs/specs/remote-security-model.md § Push sealing); the mechanics of that
@@ -181,7 +181,7 @@ test('a push the Host seals is readable only by the Client it names', async () =
     plaintext,
   });
 
-  // Everything the Server holds about this pair — the hostId, the delivery
+  // Everything the Relay holds about this pair — the hostId, the delivery
   // capability, the account — is on the envelope's outside and opens nothing.
   assert.equal(JSON.stringify({ hostId: host.hostId, ...sealed }).includes('build finished'), false);
 
@@ -341,10 +341,10 @@ test('a mistyped confirmation code consumes the invitation and grants nothing', 
   );
 });
 
-test("the server cannot pair on the user's behalf: unapproved invitations grant nothing", async () => {
+test("the Relay cannot pair on the user's behalf: unapproved invitations grant nothing", async () => {
   const { host, authenticator, client } = await world();
 
-  // A malicious server floods the Host with pairing requests; none are
+  // A malicious Relay floods the Host with pairing requests; none are
   // approved locally, so none authorize anything and each invitation is spent.
   for (let i = 0; i < 3; i++) {
     const attempt = await client.pair(host, { accountId: ACCOUNT, authenticator, approve: false });
@@ -369,7 +369,7 @@ test('an expired invitation never reaches a handshake', async () => {
 });
 
 test('a QR minted by one Host cannot pair a Client served from another origin', async () => {
-  // The fragment is invisible to the Server, so the origin compare in the
+  // The fragment is invisible to the Relay, so the origin compare in the
   // parser is the only thing that keeps a code from bootstrapping a different
   // deployment's Pocket.
   const { host, authenticator } = await world();

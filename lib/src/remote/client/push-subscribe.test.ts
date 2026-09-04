@@ -199,7 +199,7 @@ describe('hasCurrentPushSubscription', () => {
     await expect(hasCurrentPushSubscription('AQID', null)).resolves.toBe(false);
   });
 
-  it('rejects a missing browser subscription even if the Server may still hold a row', async () => {
+  it('rejects a missing browser subscription even if the Relay may still hold a row', async () => {
     stubBrowser({ permission: 'granted' });
     getRegistration.mockResolvedValue(registration(null));
 
@@ -208,7 +208,7 @@ describe('hasCurrentPushSubscription', () => {
 
   it('rejects an endpoint the push service rotated behind our back', async () => {
     // The VAPID key still matches and the subscription is perfectly valid — it
-    // just points somewhere new, so every row the Server holds is unreachable.
+    // just points somewhere new, so every row the Relay holds is unreachable.
     stubBrowser({ permission: 'granted' });
     getRegistration.mockResolvedValue(
       registration({

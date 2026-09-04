@@ -580,7 +580,7 @@ verifies:
   the root README alone owns `/docs/self-host` and `/docs/security` — checked
   as exact URLs, so the `/docs` entrypoint cannot stand in for a page under a
   prefix test. The guide carries neither obligation: it is a Marketplace
-  listing for the editor extension, and neither running a relay server nor
+  listing for the editor extension, and neither running a Relay nor
   auditing the repository is part of installing one;
 - the homepage links every `/docs` page root-relatively, and every `/docs` href
   on it resolves to one — both directions, because a rewritten section can

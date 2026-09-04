@@ -11,8 +11,8 @@ const csp = conf.app.security.csp;
 // The remote Host moved into the sidecar, so the webview never speaks to a relay
 // server and its connect-src must not be able to. The allowlist that does apply
 // is baked into the sidecar bundle by build-sidecar-proxy.mjs
-// (docs/specs/server.md → "Where a Host may reach a relay server").
-test('the webview cannot reach a relay server', () => {
+// (docs/specs/relay.md → "Where a Host may reach a Relay").
+test('the webview cannot reach a Relay', () => {
   assert.ok(!csp.includes('dormouse.sh'), 'no SaaS relay sources in the webview CSP');
   // Secure by default: no scheme-wide `https:`/`wss:` in connect-src that
   // would let the webview reach an arbitrary internet host.

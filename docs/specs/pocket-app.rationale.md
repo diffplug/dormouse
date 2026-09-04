@@ -20,7 +20,7 @@
 
 **Why a refusing `excludeCredentials` sends the user to sign-in.** The authenticator is reporting that it already holds a credential for this account, so every retry of that registration fails identically; sign-in is the only branch that can succeed, and leading with it saves a loop with no exit.
 
-**Why a refused `POST /api/setup/retire` aborts the ceremony.** The Server refusing to retire the code means the code is already dead, and the Host would refuse the pairing that follows for the same reason. Continuing spends a WebAuthn prompt and a Noise handshake to reach that refusal further from the recovery.
+**Why a refused `POST /api/setup/retire` aborts the ceremony.** The Relay refusing to retire the code means the code is already dead, and the Host would refuse the pairing that follows for the same reason. Continuing spends a WebAuthn prompt and a Noise handshake to reach that refusal further from the recovery.
 
 **Why Pocket hides `MobileWall`'s Kill button.** Closing a local xterm view without a Host-side close leaves the Host attachment live: the pane vanishes on the phone and stays open on the laptop.
 
@@ -60,15 +60,15 @@
 
 **Why the tracked registration promise is awaited instead of `navigator.serviceWorker.ready`.** That promise never settles when registration failed, so a subscribe path built on it hangs the button the user just tapped, with no error and no timeout.
 
-**Why the registration set is read from the Server, once, on entering the Hosts list.** Which paired Hosts the Server holds a push row for is not local knowledge: tracking it locally would re-offer an action already taken after any reload, and would let a row the Server pruned on a 410 go on claiming push is on. Skipping the refetch on connect keeps the terminal path free of a call it does not need.
+**Why the registration set is read from the Relay, once, on entering the Hosts list.** Which paired Hosts the Relay holds a push row for is not local knowledge: tracking it locally would re-offer an action already taken after any reload, and would let a row the Relay pruned on a 410 go on claiming push is on. Skipping the refetch on connect keeps the terminal path free of a call it does not need.
 
 **Why the readback is by capability.** `POST /api/push/subscriptions/query` answers only about delivery ids the caller already presented, so no one can enumerate another device's registrations by guessing at ids.
 
 **Why a failed or in-flight read never settles at empty.** An empty result and "not yet known" would render the same card. Re-offering the idempotent Enable costs a redundant registration at worst, while a stale **Push notifications on.** claim hides the repair entirely.
 
-**Why the Server omits rows under an old VAPID key.** After a key rotation those rows can never be delivered to. Serving them would let a device that repaired one Host see another Host's dead endpoint as current, and stop offering the Enable that would fix it.
+**Why the Relay omits rows under an old VAPID key.** After a key rotation those rows can never be delivered to. Serving them would let a device that repaired one Host see another Host's dead endpoint as current, and stop offering the Enable that would fix it.
 
-**Why the push endpoint is fingerprinted.** A push service may rotate an address on its own with the VAPID key unchanged: the subscription stays valid and correctly keyed while every stored Server row points somewhere unreachable — a state no other check can see. One scope holds one subscription, so a move invalidates every Host row for that device at once, and one recorded digest covers them all.
+**Why the push endpoint is fingerprinted.** A push service may rotate an address on its own with the VAPID key unchanged: the subscription stays valid and correctly keyed while every stored Relay row points somewhere unreachable — a state no other check can see. One scope holds one subscription, so a move invalidates every Host row for that device at once, and one recorded digest covers them all.
 
 **Why a matching subscription is reused rather than replaced.** Calling `subscribe()` again with a matching `applicationServerKey` mints a new endpoint and invalidates the one already stored for every other Host — turning a single Host's registration into a silent outage for all of them.
 
@@ -76,7 +76,7 @@
 
 **Why a lost `POST /api/push/subscribe` response repairs itself.** The idempotent retry cannot re-announce a deletion it already performed, but it can always say what is registered now; a response listing the surviving rows is complete regardless of how many attempts preceded it.
 
-**Why the tombstone is written before the record is forgotten.** The delivery id is the only handle that can ever name that Server row again. Forgetting the record first leaves nothing to retry with if the call fails, and the row outlives the Client that could have retired it.
+**Why the tombstone is written before the record is forgotten.** The delivery id is the only handle that can ever name that Relay row again. Forgetting the record first leaves nothing to retry with if the call fails, and the row outlives the Client that could have retired it.
 
 ## What Pocket stores
 
@@ -100,7 +100,7 @@
 
 **Why the Host's idle reap is worth a fresh handshake and a WebAuthn prompt.** It is the price of the Host reclaiming state that a hostile relay would otherwise never let it reclaim: without a deadline the Host holds sessions open at a peer's discretion.
 
-**Why the Client runs the Host's deadline against its own last send.** The relay socket is to the Server and stays open across the reap, so nothing on the wire tells the phone its Host session is gone. Without the local check a returning phone holds a session the Host has forgotten: every request hangs with no error, and only a reload escapes.
+**Why the Client runs the Host's deadline against its own last send.** The relay socket is to the Relay and stays open across the reap, so nothing on the wire tells the phone its Host session is gone. Without the local check a returning phone holds a session the Host has forgotten: every request hangs with no error, and only a reload escapes.
 
 ## An expired session drops to sign-in
 
@@ -110,7 +110,7 @@
 
 ## Deployment: same-origin, always
 
-**What the origin check buys.** A Pocket served anywhere else cannot sign in at all, since WebAuthn binds the passkey to the serving origin — so the rule is enforced by the Server, not merely observed by the client.
+**What the origin check buys.** A Pocket served anywhere else cannot sign in at all, since WebAuthn binds the passkey to the serving origin — so the rule is enforced by the Relay, not merely observed by the client.
 
 **Why the origin carries a CSP at all.** Pocket holds a per-Host Client static and the worker that opens sealed pushes, and `docs/specs/security.md` -> "What is not defended" already names active XSS here as a risk it cannot rule out. Both shipped webview hosts already have a policy, leaving Pocket the one origin without one.
 

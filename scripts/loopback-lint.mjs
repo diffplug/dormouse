@@ -28,7 +28,7 @@
  *     so adding a server dependency means adding its spelling here.
  *   - Outside `ws`, it matches only an explicit loopback host. A listener that
  *     binds every interface (`.listen(port)` with no host) is a different and
- *     larger problem, and `server/` does it deliberately from config, so
+ *     larger problem, and `relay/` does it deliberately from config, so
  *     flagging it here would be noise. A host built at runtime
  *     (`.listen(port, hostVar)`, `serve({ hostname: bindHost })`) is invisible
  *     to a regex and always will be — that is the ceiling of a textual check,
@@ -103,7 +103,7 @@ const LISTEN_RE = new RegExp(
   + `|\\{[^}]*?host\\s*:\\s*${LOOPBACK}`               // node, options object
   + `)`
   + `|\\bserve\\(\\s*\\{[^}]*?hostname\\s*:\\s*${LOOPBACK}` // @hono/node-server
-  + '|\\bnew\\s+(?:WebSocket\\.Server|WebSocketServer)\\(\\s*\\{[^}]*?'
+  + '|\\bnew\\s+(?:WebSocket\\.Relay|WebSocketServer)\\(\\s*\\{[^}]*?'
   + `(?:host\\s*:\\s*${LOOPBACK}|port\\s*:)`           // ws
   + ')',
   's',

@@ -12,7 +12,7 @@ import { TEST_SETUP_PASSWORD } from '../remote/test-setup-password';
 
 /**
  * The Settings dialog's Remote control section — the one step a self-hoster
- * cannot skip (`docs/specs/server.md`, "Remote control, in the Settings
+ * cannot skip (`docs/specs/relay.md`, "Remote control, in the Settings
  * dialog"). Rendered on its own rather than through `SettingsDialog` so these
  * stories are about the enrollment states themselves; `SettingsDialog`'s
  * `WithRemoteControl` covers it in place.
@@ -105,8 +105,8 @@ export const EnrollRefused: Story = {
     const fill = (label: string, value: string) =>
       fireEvent.change(canvas.getByLabelText(label), { target: { value } });
 
-    await canvas.findByLabelText('Server');
-    fill('Server', 'https://ned-mac.tail9c2f1.ts.net');
+    await canvas.findByLabelText('Relay');
+    fill('Relay', 'https://ned-mac.tail9c2f1.ts.net');
     fill('Setup password', TEST_SETUP_PASSWORD);
     fill('Name for this machine', 'Work laptop');
     await userEvent.click(canvas.getByRole('button', { name: 'Connect' }));
@@ -117,7 +117,7 @@ export const EnrollRefused: Story = {
 /**
  * The installer ran on this machine, so there is nothing to type: the offer
  * card leads with the origin it found and a name already filled in, and the
- * three-field form folds away behind "Enroll with a different server…". The
+ * three-field form folds away behind "Enroll with a different Relay…". The
  * refusal {@link EnrollRefused} shows reaches this card in the same words —
  * `RemoteControlSection.test.tsx` pins that.
  */
@@ -126,7 +126,7 @@ export const OfferAvailable: Story = {
     primedRemoteHost: { status: OFFER_STATUS },
     docs: { story: { height: '300px' } },
   },
-  play: settled('A Dormouse server is installed on this machine.'),
+  play: settled('A Dormouse Relay is installed on this machine.'),
 };
 
 /** Enrolled, relay socket still opening. No event fires for this → the 2 s poll. */
@@ -152,7 +152,7 @@ export const ConnectedManyDevices: Story = {
   parameters: {
     primedRemoteHost: {
       status: enrolledStatus({
-        serverUrl: 'https://neds-16-inch-macbook-pro-2026.tail9c2f1.ts.net',
+        relayUrl: 'https://neds-16-inch-macbook-pro-2026.tail9c2f1.ts.net',
         pairedClients: 4,
       }),
     },
@@ -186,7 +186,7 @@ export const ConfirmingDisconnect: Story = {
 /**
  * The QR-first path: the enrolled section mints a setup code and shows it, so a
  * phone is set up by pointing a camera at the laptop rather than by typing an
- * origin and a 64-hex password (`docs/specs/server.md`, Setup tokens).
+ * origin and a 64-hex password (`docs/specs/relay.md`, Setup tokens).
  */
 export const SetupPhoneQr: Story = {
   parameters: {
@@ -203,7 +203,7 @@ export const SetupPhoneQr: Story = {
 };
 
 /**
- * The phone redeemed the code. The Server tells the Host that minted it, which
+ * The phone redeemed the code. The Relay tells the Host that minted it, which
  * is the only way this panel can know — the redemption happened on the phone —
  * and a spent code must stop being offered.
  */
@@ -260,7 +260,7 @@ export const SetupPhoneExpired: Story = {
  * They all spend the code and dismiss the modal, and the paired count above is
  * absolute — so without these the panel said the same thing for a phone that
  * paired and for one whose digits were mistyped
- * (`docs/specs/server.md` → "Remote control, in the Settings dialog").
+ * (`docs/specs/relay.md` → "Remote control, in the Settings dialog").
  */
 export const PairingOutcomePaired: Story = {
   parameters: {
@@ -325,7 +325,7 @@ export const PairingOutcomeWithPanelClosed: Story = {
 };
 
 /**
- * The mint failed — a relay that is down, a server that refused. It lands in the
+ * The mint failed — a relay that is down, a Relay that refused. It lands in the
  * enrolled view's one error slot, the same one Reconnect and Disconnect use.
  */
 export const SetupPhoneRefused: Story = {

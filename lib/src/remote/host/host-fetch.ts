@@ -1,5 +1,5 @@
 /**
- * The Host's authenticated HTTP calls to its own Server — push delivery
+ * The Host's authenticated HTTP calls to its own Relay — push delivery
  * (`push-delivery.ts`) and setup-token minting (`lib/src/host/remote/service.ts`
  * → `#setupQr`) — under one transport policy, so neither can drift from it.
  *
@@ -10,24 +10,24 @@
 import type { HostEnrollment } from './enrollment';
 
 /**
- * How long a Host→Server call waits before it gives up, unless the caller names
+ * How long a Host→Relay call waits before it gives up, unless the caller names
  * its own budget.
  *
  * Under the webview's own 15 s command budget (`link-client.ts`), so a command
  * that ran one of these surfaces the real failure rather than a bare timeout —
- * and, for the calls that run on the service's lifecycle chain, so a server that
+ * and, for the calls that run on the service's lifecycle chain, so a Relay that
  * accepts the connection and then answers nothing cannot wedge every later
  * command for the platform's default socket timeout, which is minutes.
  *
- * **A route the Server may legitimately hold open for longer needs its own
+ * **A route the Relay may legitimately hold open for longer needs its own
  * `timeoutMs`**, or a request that succeeded reports as a failure: push delivery
  * is the one such route today (`push-delivery.ts`).
  */
 export const HOST_REQUEST_TIMEOUT_MS = 10_000;
 
 export interface HostFetchOptions {
-  /** Who this Host is to that Server, and the bearer that proves it. */
-  readonly enrollment: Pick<HostEnrollment, 'serverUrl' | 'hostToken'>;
+  /** Who this Host is to that Relay, and the bearer that proves it. */
+  readonly enrollment: Pick<HostEnrollment, 'relayUrl' | 'hostToken'>;
   /** Injectable for tests. */
   readonly fetch?: typeof globalThis.fetch;
   readonly timeoutMs?: number;
@@ -50,7 +50,7 @@ export async function hostFetch(
   body?: unknown,
 ): Promise<Response> {
   const doFetch = options.fetch ?? globalThis.fetch;
-  const response = await doFetch(`${options.enrollment.serverUrl}${route}`, {
+  const response = await doFetch(`${options.enrollment.relayUrl}${route}`, {
     ...(body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) }),
     // The service replaced a webview whose CSP checked every redirect target,
     // and a Node process re-checks nothing. Do not let an allowed origin's open

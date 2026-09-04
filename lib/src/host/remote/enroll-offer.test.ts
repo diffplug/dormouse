@@ -37,7 +37,7 @@ describe('enrollmentOfferPath', () => {
   it('treats an empty XDG_DATA_HOME as unset, not as the filesystem root', () => {
     // `${XDG_DATA_HOME:-…}` in the installer, which is `||` and not `??`.
     expect(enrollmentOfferPath('linux', { XDG_DATA_HOME: '' }, '/home/ned')).toBe(
-      '/home/ned/.local/share/dormouse-server/run/enroll-offer.json',
+      '/home/ned/.local/share/dormouse-relay/run/enroll-offer.json',
     );
   });
 });
@@ -60,7 +60,7 @@ describe('readEnrollmentOffer', () => {
 
   it('is silently null for every failure', async () => {
     const dir = await tempDir();
-    // The normal answer on almost every machine: no server installed.
+    // The normal answer on almost every machine: no Relay installed.
     expect(await readEnrollmentOffer(join(dir, 'absent.json'), MINTED_AT)).toBeNull();
     // A path this platform has no answer for.
     expect(await readEnrollmentOffer(null, MINTED_AT)).toBeNull();

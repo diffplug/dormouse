@@ -161,7 +161,7 @@ describe('RemoteHost bounds', () => {
   beforeAll(async () => {
     const material = await mintNoiseStaticKeyPair();
     enrollment = {
-      serverUrl: ORIGIN,
+      relayUrl: ORIGIN,
       hostId: testRoutingId(),
       hostToken: 'tok',
       origin: ORIGIN,

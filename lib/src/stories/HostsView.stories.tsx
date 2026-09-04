@@ -168,7 +168,7 @@ export const PushNothingPaired: Story = {
  * iOS, running in a Safari tab. Web Push only reaches an installed app and
  * there is no API to prompt for that, so the notice describes the steps — and
  * allows for someone who already installed it and opened the wrong window,
- * which a tab cannot distinguish. A definitively push-disabled Server hides the
+ * which a tab cannot distinguish. A definitively push-disabled Relay hides the
  * notice so it cannot disagree with the push card, which then names the real
  * reason instead.
  */

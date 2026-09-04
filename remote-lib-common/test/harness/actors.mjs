@@ -1,7 +1,7 @@
 /**
  * In-memory actors simulating the three parties of the remote security model
  * (docs/specs/remote-security-model.md): Client (Dormouse Pocket), Host
- * (Dormouse Terminal), and coordinating Server.
+ * (Dormouse Terminal), and coordinating Relay.
  *
  * Everything here runs the *real* primitives — the QR grammar and its parser,
  * the IK handshake against the invitation key and then the pinned Host static,
@@ -54,7 +54,7 @@ export function randomRoutingId() {
   return toBase64Url(randomBytes(16));
 }
 
-/** Base64url of 32 random bytes — setup tokens, delivery ids, Server nonces. */
+/** Base64url of 32 random bytes — setup tokens, delivery ids, Relay nonces. */
 export function randomSecret() {
   return toBase64Url(randomBytes(32));
 }
@@ -163,7 +163,7 @@ export class SimAuthenticator {
 }
 
 /**
- * The coordinating Server: accounts, passkey registration, and the presence
+ * The coordinating Relay: accounts, passkey registration, and the presence
  * challenge it mints for one ceremony (`POST /api/reauth/begin`). Never
  * authoritative — it learns only routing values and a handshake hash, and its
  * answer authorizes nothing.
@@ -180,7 +180,7 @@ export class SimServer {
     this.#accounts.get(accountId).add(authenticator.credentialId);
   }
 
-  /** Requirement 2: "The Server recognizes the account." */
+  /** Requirement 2: "The Relay recognizes the account." */
   validateAccount(accountId, credentialId) {
     const credentials = this.#accounts.get(accountId);
     if (!credentials) throw new Error(`server: unknown account ${accountId}`);
@@ -196,18 +196,18 @@ export class SimServer {
    */
   async beginReauth({ accountId, credentialId, binding }) {
     this.validateAccount(accountId, credentialId);
-    const serverNonce = randomSecret();
+    const relayNonce = randomSecret();
     return {
-      serverNonce,
-      challenge: await presenceChallenge(binding, serverNonce),
+      relayNonce,
+      challenge: await presenceChallenge(binding, relayNonce),
       allowCredentials: [credentialId],
     };
   }
 }
 
 /**
- * A compromised coordinating Server: vouches for anyone. Used to prove the
- * Host denies access even when every Server-side check is attacker-controlled.
+ * A compromised coordinating Relay: vouches for anyone. Used to prove the
+ * Host denies access even when every Relay-side check is attacker-controlled.
  */
 export class CompromisedServer extends SimServer {
   validateAccount() {}
@@ -265,7 +265,7 @@ export class SimHost {
   }
 
   /**
-   * Mint one invitation: a 16-byte id, an expiry, the Server's setup token, and
+   * Mint one invitation: a 16-byte id, an expiry, the Relay's setup token, and
    * a one-use X25519 responder keypair. The long-term static is deliberately
    * absent — a first-time Client has no key to check a signature with, so IK
    * possession of the scanned key is what it gets instead.
@@ -457,7 +457,7 @@ export class SimHost {
     if (!auth.record) return deny('pairing-required', { misses: auth.reasons });
     // The record is the conjunction of four values, not two: the account and
     // the passkey key hash are checked against the same row the two identities
-    // selected, so a Server that swapped either grants nothing.
+    // selected, so a Relay that swapped either grants nothing.
     if (auth.record.accountId !== request.presence.accountId) {
       return deny('pairing-required', { misses: ['account-mismatch'] });
     }
@@ -526,11 +526,11 @@ export class SimClient {
   }
 
   /**
-   * The proof both ceremonies carry: ask the Server for a nonce over this
+   * The proof both ceremonies carry: ask the Relay for a nonce over this
    * binding, then assert with the passkey over the challenge it derives.
    */
   async presenceProof({ binding, accountId, authenticator, rpId, server = this.server, tamper = {} }) {
-    const { serverNonce, challenge } = await server.beginReauth({
+    const { relayNonce, challenge } = await server.beginReauth({
       accountId,
       credentialId: authenticator.credentialId,
       binding,
@@ -543,7 +543,7 @@ export class SimClient {
     });
     return {
       binding,
-      serverNonce,
+      relayNonce,
       accountId,
       passkeyCredentialId: authenticator.credentialId,
       passkeyPublicKey: authenticator.publicKey,

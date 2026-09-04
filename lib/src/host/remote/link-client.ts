@@ -19,7 +19,7 @@ import type { RemoteHostCommand, RemoteHostResult } from './service-protocol';
 
 /**
  * How long a command may wait for the service. Generous — `enroll` makes an
- * HTTP round trip to the relay server — but finite, so a sidecar that died or a
+ * HTTP round trip to the Relay — but finite, so a sidecar that died or a
  * broker window that closed surfaces as a rejected promise instead of a hung
  * console call.
  */

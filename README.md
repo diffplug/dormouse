@@ -14,8 +14,8 @@ A multitasking terminal for VS Code and the desktop — a real tiling layout, tm
 
 - [CLI reference](https://dormouse.sh/docs/dor) — every `dor` command
 - [Agent skill](https://dormouse.sh/docs/agent-skill) — the operating guide Dormouse bundles for coding agents
-- [Self-host](https://dormouse.sh/docs/self-host) — run the coordinating server on your own tailnet
-- [Hosted](https://dormouse.sh/hosted/) — upcoming managed server and ElevenLabs voice options
+- [Self-host](https://dormouse.sh/docs/self-host) — run the coordinating Relay on your own tailnet
+- [Hosted](https://dormouse.sh/hosted/) — upcoming managed Relay and ElevenLabs voice options
 - [Security](https://dormouse.sh/docs/security) — what Dormouse guarantees, what it does not, and how that is checked
 
 ## Features
@@ -40,7 +40,7 @@ The terminal is currently hosted by `node-pty`, but we plan on switching to a Ru
 pnpm install
 pnpm dev:website    # vite hotreload at http://localhost:5173
 pnpm dev:standalone # tauri hotreload
-pnpm dev:server     # selfhost relay server + Pocket, for remote control
+pnpm dev:relay     # selfhost Relay + Pocket, for remote control
 
 pnpm dogfood:vscode # builds the VSCode extension and installs it into your local VSCode
 pnpm dogfood:standalone              # installs your local build overtop of your existing system installation
@@ -59,7 +59,7 @@ pnpm lint:specs   # docs/specs conventions only
 | `website/` | dormouse.sh — marketing, playground, and the generated docs pages |
 | `standalone/` | Tauri desktop app and its Node PTY sidecar |
 | `vscode-ext/` | VS Code extension (the README there is the canonical product guide) |
-| `server/` | Selfhost coordinating server for remote control |
+| `relay/` | Selfhost coordinating Relay for remote control |
 | `dor/` | The `dor` CLI staged onto every Dormouse terminal's `PATH` |
 | `docs/specs/` | Internal specs — the reference for how everything actually behaves |
 

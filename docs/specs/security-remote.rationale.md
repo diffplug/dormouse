@@ -2,15 +2,15 @@
 
 ## Trust boundary
 
-**Why a Server compromise buys no authorization.** A forged account, a forged presence
+**Why a Relay compromise buys no authorization.** A forged account, a forged presence
 stamp, and an injected ceremony frame all arrive in front of a Host that decrypts the
 request itself, recomputes the WebAuthn challenge from its *own* transcript, and checks
 its own ACL under the `ConnectionPolicy` recorded at enrollment. It cannot make the
 Host trust a Client the user never approved. On an established session every frame is
-authenticated under a `CipherState` from a handshake the Server does not hold a key
+authenticated under a `CipherState` from a handshake the Relay does not hold a key
 for, and the first invalid ciphertext destroys the session rather than resynchronizing.
 Web Push is no exception for confidentiality — the Host seals every notification to the
-recipient's own static and the Server forwards ciphertext it holds no key for — and is
+recipient's own static and the Relay forwards ciphertext it holds no key for — and is
 one for freshness, which is accepted residual rather than a gap the seal closes.
 
 **Why the host-token edge exists.** A `hostToken` mints setup tokens and a setup token
@@ -22,7 +22,7 @@ never sent anywhere, so the Host has no invitation to match a stolen setup token
 against.
 
 **Why `requireUserVerification` is mirrored.** The Host is the final authority, so a
-Server demanding user verification while the Host did not would leave the weaker
+Relay demanding user verification while the Host did not would leave the weaker
 verifier deciding.
 
 **Why the webview can relay a confirmation safely.** Reading the two digits requires
@@ -44,10 +44,10 @@ reachable by anything that can sign in — a synced or stolen passkey buys "the 
 to ask" — and these caps are what stop asking from being a denial of service.
 
 **Why the bounds are Host-local.** A bound that needs the relay to send `client-gone`,
-or a Server gate, is not a bound: the relay is the party this model assumes is hostile.
+or a Relay gate, is not a bound: the relay is the party this model assumes is hostile.
 `lib/src/remote/host/remote-host-bounds.test.ts` counts the crypto a rejected frame
 buys and drives every deadline off an injected clock, and
-`server/test/malicious-relay.test.mjs` shows a relay holding no guards of its own
+`relay/test/malicious-relay.test.mjs` shows a relay holding no guards of its own
 weakening none of the frame refusals those bounds sit behind.
 
 **Why the Host revalidates a frame the relay already checked.** The relay runs its own
@@ -57,7 +57,7 @@ owns every PTY. The Client's device label gets the same treatment because it is
 attacker-chosen text rendered in the one dialog the ACL rests on.
 
 **Why the QR credentials cross outbound.** A QR that is never displayed sets up
-nothing, so the Server's setup token and the invitation's public half ride out inside
+nothing, so the Relay's setup token and the invitation's public half ride out inside
 `SetupQrResult.url` on purpose — which is why they are minted only on request,
 single-use, and short-lived. `deliveryId` is the counter-example: it addresses a
 Client's push rows, so `PushDevicesResult` carries labels only. Inbound is a different
@@ -80,7 +80,7 @@ negotiation, no plaintext path, no legacy discriminant" a build failure rather t
 reading; the self-test is what keeps a rule from passing for the wrong reason, which is
 a textual lint's characteristic failure.
 
-## Where a Host may reach a relay server
+## Where a Host may reach a Relay
 
 **Why the build asserts the define landed.** A lost esbuild define compiles green and
 shows up only as a Host silently using the shipped default instead of the selfhoster's
@@ -89,7 +89,7 @@ build people iterate in, and therefore where a lost define most plausibly surviv
 
 **Why `redirect: 'error'`.** A Node process does not re-check a redirect target the way
 a browser re-applies CSP, so a followed redirect could carry the setup password or the
-`hostToken` outside the allowlist. That is also why any new Host→Server call goes
+`hostToken` outside the allowlist. That is also why any new Host→Relay call goes
 through `hostFetch`.
 
 ## Credentials at rest
@@ -107,12 +107,12 @@ runs.
 against a process running as the same user, and nothing in the table claims it does — a
 same-user compromise already reads the terminals.
 
-**Why `manage verify` walks `state/` on Windows.** `server/src/state.ts`'s `0o600` is a
+**Why `manage verify` walks `state/` on Windows.** `relay/src/state.ts`'s `0o600` is a
 no-op there, so the files are covered only by what they inherit from the directory. An
 enumeration that fails has to fail verify, because a directory the walk could not read
 would otherwise report as one with no account in it yet.
 
-**Why an existing `config/server.env` is preserved rather than repaired.** A file that
+**Why an existing `config/relay.env` is preserved rather than repaired.** A file that
 exists is not necessarily one an install finished writing, and a half-written file and
 a hand-edited one are indistinguishable — while their repairs are opposite: `rm` for
 the first, and never for the second, whose `DORMOUSE_ORIGIN` is durable WebAuthn
@@ -129,11 +129,11 @@ may read it.
 
 ## The setup password
 
-**Why the Server owns generation.** A format check can reject a short password, but cannot
+**Why the Relay owns generation.** A format check can reject a short password, but cannot
 distinguish 32 random bytes from 64 zeroes. Accepting the value from configuration
 therefore made manual and container deployments weaker than installer deployments.
 The state directory already has to persist for accounts and enrolled Hosts, so making
-the credential another server-generated state record removes that choice without a
+the credential another Relay-generated state record removes that choice without a
 new durability requirement.
 
 **Why the admission bucket is global.** An IP-keyed limiter would make the reverse
@@ -205,15 +205,15 @@ answer is right survives a caller that stops asking.
 
 ## What crosses the boundary
 
-**Why the worker is the second sanitizer.** The Server used to be a second pair of eyes
+**Why the worker is the second sanitizer.** The Relay used to be a second pair of eyes
 on notification text and cannot be one on ciphertext — it cannot sanitize what it
 cannot read — so a worker that renders what it decrypted without re-bounding it would
 leave the property with one enforcer instead of two.
 
 **Why the relay holds no state.** Only the Host knows whether a ceremony succeeded, so
-a gate, a challenge memory, or a notion of an authorized session on the Server would be
+a gate, a challenge memory, or a notion of an authorized session on the Relay would be
 a second opinion nobody asked for. Routing an opaque envelope needs no notion of what a
-`DirectoryEntry` is, which is what makes a Server-side protocol-v1 type import the
+`DirectoryEntry` is, which is what makes a Relay-side protocol-v1 type import the
 leading indicator.
 
 ## Revocation and the audit trail

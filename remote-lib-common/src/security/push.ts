@@ -43,7 +43,7 @@ export async function pushEndpointFingerprint(
  * Shared by the Host (which builds the payload from a Pane label, before
  * sealing it) and the Pocket service worker (which re-bounds at the render
  * sink), so the rule has one implementation across both runtimes rather than a
- * strong copy and a weak one. The Server is not one of them: it forwards
+ * strong copy and a weak one. The Relay is not one of them: it forwards
  * ciphertext (`docs/specs/remote-security-model.md` -> Push sealing).
  *
  * The label is ultimately terminal-supplied — `OSC 0`/`2`/`9` titles reach the

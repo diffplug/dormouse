@@ -52,7 +52,7 @@ let ENROLLMENT: HostEnrollment;
 beforeAll(async () => {
   const material = await mintNoiseStaticKeyPair();
   ENROLLMENT = {
-    serverUrl: ORIGIN,
+    relayUrl: ORIGIN,
     hostId: HOST_ID,
     hostToken: 'tok',
     origin: ORIGIN,
@@ -131,14 +131,14 @@ let store: MemoryStore;
 let service: RemoteHostService;
 let commandSeq = 0;
 
-/** How many setup tokens the fake server has minted, so each one is distinct. */
+/** How many setup tokens the fake Relay has minted, so each one is distinct. */
 let setupTokensMinted: number;
 /** Make `POST /api/host/setup-token` answer a 200 that is not a setup token. */
 let setupTokenMalformed: boolean;
-/** What the fake server puts in `expiresAt`; a test moves it to expire one. */
+/** What the fake Relay puts in `expiresAt`; a test moves it to expire one. */
 let setupTokenTtlMs: number;
 
-/** A server that answers enroll, setup-token, push/send, and push/devices. */
+/** A Relay that answers enroll, setup-token, push/send, and push/devices. */
 function fakeFetch(): typeof globalThis.fetch {
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -189,7 +189,7 @@ function fakeFetch(): typeof globalThis.fetch {
 /**
  * The offer reader is always injected, never the real one: whether these tests
  * pass must not depend on whether the machine running them has a Dormouse
- * server installed. `offerReads` counts the calls, which is how the "an enrolled
+ * Relay installed. `offerReads` counts the calls, which is how the "an enrolled
  * Host does not touch the disk" case is stated.
  */
 let offer: EnrollmentOffer | null;
@@ -289,7 +289,7 @@ describe('status', () => {
     await service.start();
     expect((await command('status')).result).toEqual({
       enrolled: false,
-      serverUrl: null,
+      relayUrl: null,
       hostId: null,
       connection: 'stopped',
       pairedClients: 0,
@@ -305,7 +305,7 @@ describe('status', () => {
 
     expect((await command('status')).result).toEqual({
       enrolled: false,
-      serverUrl: null,
+      relayUrl: null,
       hostId: null,
       connection: 'stopped',
       pairedClients: 0,
@@ -335,7 +335,7 @@ describe('status', () => {
 
     expect((await command('status')).result).toEqual({
       enrolled: true,
-      serverUrl: ENROLLMENT.serverUrl,
+      relayUrl: ENROLLMENT.relayUrl,
       hostId: HOST_ID,
       connection: 'connected',
       pairedClients: 1,
@@ -365,7 +365,7 @@ describe('status', () => {
     // Now enroll, all the way through the `{ enrolled: true }` event...
     offerGate = null;
     await command('enroll', {
-      serverUrl: 'https://relay.dormouse.sh',
+      relayUrl: 'https://relay.dormouse.sh',
       password: 'setup',
       label: 'Laptop',
     });
@@ -386,7 +386,7 @@ describe('enroll', () => {
   it('refuses an origin outside the build’s allowed sources', async () => {
     createService();
     const result = await command('enroll', {
-      serverUrl: 'https://relay.example.com',
+      relayUrl: 'https://relay.example.com',
       password: 'setup',
       label: 'Laptop',
     });
@@ -400,12 +400,12 @@ describe('enroll', () => {
   it('enrolls, persists, and starts against an allowed origin', async () => {
     createService();
     const result = await command('enroll', {
-      serverUrl: 'https://relay.dormouse.sh/',
+      relayUrl: 'https://relay.dormouse.sh/',
       password: 'setup',
       label: 'Laptop',
     });
 
-    expect(result.result).toEqual({ hostId: HOST_ID, serverUrl: ORIGIN });
+    expect(result.result).toEqual({ hostId: HOST_ID, relayUrl: ORIGIN });
     expect(store.enrollment?.hostToken).toBe('tok');
     expect(sockets).toHaveLength(1);
   });
@@ -416,7 +416,7 @@ describe('enroll', () => {
     sockets[0]!.open();
 
     await command('enroll', {
-      serverUrl: 'https://other.dormouse.sh',
+      relayUrl: 'https://other.dormouse.sh',
       password: 'setup',
       label: 'Laptop',
     });
@@ -436,7 +436,7 @@ describe('enroll', () => {
     };
 
     const result = await command('enroll', {
-      serverUrl: 'https://other.dormouse.sh',
+      relayUrl: 'https://other.dormouse.sh',
       password: 'setup',
       label: 'Laptop',
     });
@@ -446,7 +446,7 @@ describe('enroll', () => {
     expect(sockets[0]!.readyState).toBe(1);
     expect((await command('status')).result).toMatchObject({
       enrolled: true,
-      serverUrl: ENROLLMENT.serverUrl,
+      relayUrl: ENROLLMENT.relayUrl,
       connection: 'connected',
     });
   });
@@ -454,15 +454,15 @@ describe('enroll', () => {
   it('cycles the enrolled gate when it swaps one running Host for another', async () => {
     // The webviews' gate is edge-triggered (`enrolled-gate.ts`), and what it
     // holds — the mirrored pairing queue, the push device list — belongs to the
-    // server being left. With no `false` between the two Hosts the gate never
-    // cycles and the Settings dialog keeps naming the old server's devices.
+    // Relay being left. With no `false` between the two Hosts the gate never
+    // cycles and the Settings dialog keeps naming the old Relay's devices.
     createService({ enrollment: ENROLLMENT });
     await service.start();
     sockets[0]!.open();
     expect(statusEvents()).toEqual([true]);
 
     await command('enroll', {
-      serverUrl: 'https://other.dormouse.sh',
+      relayUrl: 'https://other.dormouse.sh',
       password: 'setup',
       label: 'Laptop',
     });
@@ -478,7 +478,7 @@ describe('enrollOffer', () => {
 
     const result = await command('enrollOffer', { origin: OFFER.origin, label: 'Laptop' });
 
-    expect(result.result).toEqual({ hostId: HOST_ID, serverUrl: OFFER.origin });
+    expect(result.result).toEqual({ hostId: HOST_ID, relayUrl: OFFER.origin });
     expect(requests).toHaveLength(1);
     // The credential and nothing else: the label the operator typed stays local.
     expect(requestBody(0)).toEqual({ enrollToken: OFFER.token });
@@ -507,7 +507,7 @@ describe('enrollOffer', () => {
 
   it('refuses an offer whose origin is not the one the card displayed', async () => {
     // An installer rerun between the render and the click rewrites the file.
-    // Enrolling against the new origin would spend a one-time token on a server
+    // Enrolling against the new origin would spend a one-time token on a Relay
     // the user was never shown, so the webview's echo is what authorizes it.
     offer = OFFER;
     createService();
@@ -524,7 +524,7 @@ describe('enrollOffer', () => {
   });
 
   it('refuses an offer origin outside the build’s allowed sources', async () => {
-    // The allowlist gate is the typed form's, unchanged: a server installed on
+    // The allowlist gate is the typed form's, unchanged: a Relay installed on
     // this machine is not thereby an origin this build may reach, and the
     // one-time token must not leave before that is checked.
     offer = { ...OFFER, origin: 'https://relay.example.com' };
@@ -542,9 +542,9 @@ describe('enrollOffer', () => {
 });
 
 describe('start', () => {
-  it('stays idle, loudly, when the persisted server is no longer allowed', async () => {
+  it('stays idle, loudly, when the persisted Relay is no longer allowed', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    createService({ enrollment: { ...ENROLLMENT, serverUrl: 'https://relay.example.com' } });
+    createService({ enrollment: { ...ENROLLMENT, relayUrl: 'https://relay.example.com' } });
     await service.start();
 
     expect(sockets).toEqual([]);
@@ -564,7 +564,7 @@ describe('start', () => {
     // Both read `#host`, both await the store, and both then act on what they
     // read. Unserialized they each see no Host and each build one — and the
     // second holds a relay socket nothing has a reference to, so it can never
-    // be stopped and the two displace each other on the server forever.
+    // be stopped and the two displace each other on the Relay forever.
     createService({ enrollment: ENROLLMENT });
     let release: () => void = () => {};
     const gate = new Promise<void>((resolve) => {
@@ -643,7 +643,7 @@ describe('start', () => {
     expect(sockets[0]!.readyState).toBe(1);
     expect((await command('status')).result).toMatchObject({
       enrolled: true,
-      serverUrl: ENROLLMENT.serverUrl,
+      relayUrl: ENROLLMENT.relayUrl,
       connection: 'connected',
     });
     expect(statusEvents()).toEqual([true]);
@@ -671,7 +671,7 @@ describe('status events', () => {
 
   it('announces the Host an enroll started', async () => {
     createService();
-    await command('enroll', { serverUrl: ORIGIN, password: 'setup', label: 'Laptop' });
+    await command('enroll', { relayUrl: ORIGIN, password: 'setup', label: 'Laptop' });
     expect(statusEvents()).toEqual([true]);
   });
 });
@@ -875,7 +875,7 @@ describe('setup QR', () => {
     const { qr, invitation } = await mint();
 
     const posted = requests.at(-1)!;
-    expect(posted.url).toBe(`${QR_ENROLLMENT.serverUrl}${API_ROUTES.hostSetupToken}`);
+    expect(posted.url).toBe(`${QR_ENROLLMENT.relayUrl}${API_ROUTES.hostSetupToken}`);
     expect((posted.init!.headers as Record<string, string>).authorization).toBe(
       'Bearer host-bearer-secret',
     );
@@ -919,7 +919,7 @@ describe('setup QR', () => {
   it('carries how the ceremony ended to the webview, mistyped or not', async () => {
     // The panel behind the modal has no other way to tell a success from a
     // mistyped confirmation: both spend the code and dismiss the request
-    // (`docs/specs/server.md` → "Remote control, in the Settings dialog").
+    // (`docs/specs/relay.md` → "Remote control, in the Settings dialog").
     const socket = await running();
     for (const [clientId, typed, expected] of [
       ['c1', (code: string) => code, 'paired'],
@@ -955,7 +955,7 @@ describe('setup QR', () => {
     expect(requests).toEqual([]);
   });
 
-  it('fails the mint when the server answers a 200 that is not a setup token', async () => {
+  it('fails the mint when the Relay answers a 200 that is not a setup token', async () => {
     await running();
     setupTokenMalformed = true;
     // An `undefined` token would go straight into the QR encoder.
@@ -964,12 +964,12 @@ describe('setup QR', () => {
 
   it('paints nothing for a mint that resolves onto a different Host', async () => {
     // The round trip can straddle an enroll elsewhere. The code belongs to the
-    // server we just left, so it must fail rather than mint an invitation onto
+    // Relay we just left, so it must fail rather than mint an invitation onto
     // a replacement that could never complete it.
     await running();
     const minting = command('setupQr');
     await command('clearEnrollment');
-    expect((await minting).error).toContain('reconnected to a different server');
+    expect((await minting).error).toContain('reconnected to a different Relay');
   });
 
   it('forgets its invitations when the enrollment they belong to goes', async () => {
@@ -977,7 +977,7 @@ describe('setup QR', () => {
     const { invitation } = await mint();
 
     await command('clearEnrollment');
-    await command('enroll', { serverUrl: ORIGIN, password: 'setup', label: 'Laptop' });
+    await command('enroll', { relayUrl: ORIGIN, password: 'setup', label: 'Laptop' });
     const reconnected = sockets.at(-1)!;
     reconnected.open();
 
@@ -1023,7 +1023,7 @@ describe('push', () => {
   });
 
   it('seals what the webview named rather than posting it', async () => {
-    // The Server forwards this body and can read none of it
+    // The Relay forwards this body and can read none of it
     // (docs/specs/remote-security-model.md -> Push sealing). That the label is
     // bounded *before* it is sealed is `lib/src/remote/host/alert-push.test.ts`,
     // which holds the key to open one.
@@ -1043,7 +1043,7 @@ describe('push', () => {
     expect(requests).toEqual([]);
   });
 
-  it('warns rather than failing the command when the server rejects it', async () => {
+  it('warns rather than failing the command when the Relay rejects it', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     store = memoryStore({ enrollment: ENROLLMENT, acl: { [HOST_ID]: [aclRecord('device-1')] } });
     service = new RemoteHostService({
@@ -1063,7 +1063,7 @@ describe('push', () => {
 });
 
 describe('pushDevices', () => {
-  it('joins the server’s subscriptions to the ACL’s labels', async () => {
+  it('joins the Relay’s subscriptions to the ACL’s labels', async () => {
     createService({ enrollment: ENROLLMENT, acl: { [HOST_ID]: [aclRecord('1')] } });
     await service.start();
 
@@ -1082,7 +1082,7 @@ describe('pushDevices', () => {
     expect((await command('pushDevices')).result).toBeNull();
   });
 
-  it('errors when the server cannot be asked', async () => {
+  it('errors when the Relay cannot be asked', async () => {
     store = memoryStore({ enrollment: ENROLLMENT, acl: { [HOST_ID]: [aclRecord('device-1')] } });
     service = new RemoteHostService({
       store,
@@ -1099,7 +1099,7 @@ describe('pushDevices', () => {
 });
 
 describe('pushTest', () => {
-  it('refuses when this machine is not connected to a server', async () => {
+  it('refuses when this machine is not connected to a Relay', async () => {
     createService();
     // The inverse of the ring path, which swallows everything: a test button
     // that reported success here would be worse than no button.

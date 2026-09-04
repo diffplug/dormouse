@@ -1,5 +1,5 @@
 /**
- * The wire contract for the selfhost POC (docs/specs/server.md): HTTP routes
+ * The wire contract for the selfhost POC (docs/specs/relay.md): HTTP routes
  * and payloads, relay frames, and the terminal-only remote-api v1 messages.
  * Shared by `server`, the Host module in `lib`, and the Pocket UI so the
  * three sides cannot drift — the same pattern as HELLO_ROUTE.
@@ -17,7 +17,7 @@ import type { PresenceBinding } from '../security/presence.js';
 import type { SealedPushV1 } from '../security/push-seal.js';
 
 // ---------------------------------------------------------------------------
-// HTTP API (see server.md "HTTP API")
+// HTTP API (see relay.md "HTTP API")
 
 export const API_ROUTES = {
   setupBegin: '/api/setup/begin',
@@ -35,7 +35,7 @@ export const API_ROUTES = {
   pushSubscriptionsQuery: '/api/push/subscriptions/query',
   /**
    * The route *pattern* one delivery row is deleted at. The concrete path comes
-   * from {@link pushSubscriptionDeletePath}, so the server's registration and
+   * from {@link pushSubscriptionDeletePath}, so the Relay's registration and
    * the client's fetch cannot spell the parameter differently.
    */
   pushSubscriptionDelete: '/api/push/subscriptions/:deliveryId',
@@ -77,7 +77,7 @@ export const SETUP_TOKEN_INVALID_ERROR = 'invalid setup token';
  * and the two have different recoveries — retype the password, or stop pressing
  * the installer's one-click offer and use the typed form. A Host that guessed
  * from the credential it happened to send would name the wrong one for a 401
- * raised by anything in front of the Server.
+ * raised by anything in front of the Relay.
  */
 export const BAD_PASSWORD_ERROR = 'invalid setup password';
 
@@ -91,7 +91,7 @@ export const WS_TOKEN_PARAM = 'token';
 
 /**
  * Close code the relay sends to a Host socket it displaces when a newer socket
- * claims the same `hostId` (only one socket may own a hostId — see server.md
+ * claims the same `hostId` (only one socket may own a hostId — see relay.md
  * "Relay"). In the 4000-4999 application-private range.
  *
  * This lives on the wire contract rather than inside `server` because the Host
@@ -140,7 +140,7 @@ export interface SetupBeginResponse {
   accountId: string;
   /**
    * Base64url ids of the passkeys the account already holds, for the
-   * registration's `excludeCredentials`. The Server is the authority on what is
+   * registration's `excludeCredentials`. The Relay is the authority on what is
    * registered, so it is the only side that can answer this — a browser's own
    * cache is empty on a fresh install and cleared again by a refused `finish`.
    */
@@ -196,11 +196,11 @@ export interface SigninFinishResponse {
 /**
  * Mint the WebAuthn challenge for one ceremony's presence proof (session-token
  * auth). The binding is **required** and kind-tagged: the challenge is
- * `presenceChallenge(binding, serverNonce)`, so an assertion produced for one
+ * `presenceChallenge(binding, relayNonce)`, so an assertion produced for one
  * pairing or connection authenticates nothing anywhere else
  * (`docs/specs/remote-security-model.md` → Presence proofs).
  *
- * The Server learns only routing values and a handshake hash, which the relay
+ * The Relay learns only routing values and a handshake hash, which the relay
  * already sees, and the exchange extends nothing: the session's life and the
  * relay socket are untouched.
  */
@@ -208,11 +208,11 @@ export interface ReauthBeginRequest {
   binding: PresenceBinding;
 }
 export interface ReauthBeginResponse {
-  /** Base64url `presenceChallenge(binding, serverNonce)`. */
+  /** Base64url `presenceChallenge(binding, relayNonce)`. */
   challenge: string;
   rpId: string;
   /** Single-use, short-TTL; echoed back by `finish` and carried in the proof. */
-  serverNonce: string;
+  relayNonce: string;
   /**
    * The one credential the ceremony may assert with — the binding's own. A
    * `get()` that could answer with any of the account's passkeys would let a
@@ -222,18 +222,18 @@ export interface ReauthBeginResponse {
 }
 
 export interface ReauthFinishRequest {
-  serverNonce: string;
+  relayNonce: string;
   assertion: PasskeyAssertion;
 }
 export interface ReauthFinishResponse {
-  /** Epoch ms the Server verified this assertion at. */
+  /** Epoch ms the Relay verified this assertion at. */
   verifiedAt: number;
 }
 
 /**
  * Enroll a Host. Exactly one credential must be present — the setup password,
  * or the one-time `token` of an installer's `EnrollmentOffer` (enroll-offer.ts)
- * for a Host on the server's own machine. Both, or neither, is a 400.
+ * for a Host on the Relay's own machine. Both, or neither, is a 400.
  *
  * **No label.** The name a machine presents is its own, kept beside the
  * enrollment on the Host and told to a Client only inside an encrypted ceremony
@@ -253,11 +253,11 @@ export interface HostEnrollResponse {
    * Whether the Host must demand a user-verified assertion (biometric/PIN,
    * not merely presence).
    *
-   * Optional and additive: an older Host reading a newer server's response
-   * ignores it, and a newer Host reading an older server's sees `undefined`,
+   * Optional and additive: an older Host reading a newer Relay's response
+   * ignores it, and a newer Host reading an older Relay's sees `undefined`,
    * which is the same as `false`. It travels here rather than being
    * configured on the Host because the invariant is that the two sides
-   * *mirror* — a Server demanding UV while the Host does not means the Host is
+   * *mirror* — a Relay demanding UV while the Host does not means the Host is
    * the weaker verifier, and the Host is the one that decides access.
    */
   requireUserVerification?: boolean;
@@ -266,10 +266,10 @@ export interface HostEnrollResponse {
 /**
  * Host-token auth. The single-use setup credential an enrolled Host mints for
  * its pairing QR: the token only, since the Host composes the URL itself from
- * the origin it enrolled against, and a URL minted server-side would be one
+ * the origin it enrolled against, and a URL minted Relay-side would be one
  * more place the deployment's own address is decided.
  *
- * **No mint handle.** Redemption at the Server no longer flips anything on the
+ * **No mint handle.** Redemption at the Relay no longer flips anything on the
  * Host: the invitation the same QR carries is Host memory, and its state — not
  * the token's — is what the QR panel renders
  * (`docs/specs/remote-security-model.md` → Pairing). A phone that already holds
@@ -292,11 +292,11 @@ export interface SetupRetireRequest {
 
 /**
  * How many unspent setup tokens ONE Host may hold, capping both sides of the
- * credential: the Server's issuer map and the Host's own map of the nonces it
+ * credential: the Relay's issuer map and the Host's own map of the nonces it
  * paired with them. One constant, so live-on-one-side and spent-on-the-other
  * cannot drift. A human scans one at a time, so it is far above any real use.
  *
- * Source of truth for the eviction rule: `server/src/setup-token.ts`.
+ * Source of truth for the eviction rule: `relay/src/setup-token.ts`.
  */
 export const MAX_TOKENS_PER_HOST = 8;
 
@@ -304,7 +304,7 @@ export const MAX_TOKENS_PER_HOST = 8;
  * The longest setup token this Host will put in a QR.
  *
  * A real one is base64url of 32 bytes (43 characters). The bound is what keeps
- * a 200 off a hostile or broken server from reaching the QR encoder, which
+ * a 200 off a hostile or broken Relay from reaching the QR encoder, which
  * throws above its capacity — inside the app-wide ErrorBoundary, taking every
  * terminal down with it.
  */
@@ -320,7 +320,7 @@ function isSetupTokenHandle(value: unknown): value is string {
  * field added here cannot be silently accepted by the Host that reads one.
  *
  * The Host runs it on the 200 body for the reason `isEnrollment` exists: a
- * server that answers 200 with `token` missing — a version skew, a proxy that
+ * Relay that answers 200 with `token` missing — a version skew, a proxy that
  * rewrote the body — would otherwise put `undefined` in the QR's URL. The
  * charset and length bounds are not hygiene: the token goes straight into a QR
  * encoder, and `expiresAt` straight into a `setTimeout` delay.
@@ -338,7 +338,7 @@ export function isSetupTokenResponse(value: unknown): value is SetupTokenRespons
 
 /**
  * Discovery only: which Hosts this account has enrolled, and which are
- * connected. **No label** — the Server holds none, and a Client renders the one
+ * connected. **No label** — the Relay holds none, and a Client renders the one
  * its own pinned record carries (`docs/specs/pocket-app.md`).
  */
 export interface HostsResponse {
@@ -346,7 +346,7 @@ export interface HostsResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Web Push (see alert.md "Push notifications" and server.md "HTTP API").
+// Web Push (see alert.md "Push notifications" and relay.md "HTTP API").
 //
 // Two audiences with different credentials: the Pocket Client registers, queries
 // and deletes its own rows with a session token plus the `deliveryId` the Host
@@ -357,7 +357,7 @@ export interface HostsResponse {
 // **The delivery id is the proof.** It is 256 unguessable bits known only to
 // the Host's ACL record and that Client's own pinned record, so possession is
 // what authorizes registering, querying, and deleting — there is no challenge
-// and no signature, and the Server never lists ids to a session.
+// and no signature, and the Relay never lists ids to a session.
 
 /** Public VAPID key, needed by the browser before it can subscribe. */
 export interface PushConfigResponse {
@@ -384,7 +384,7 @@ export interface PushSubscribeResponse {
    * state, not the delta. When *this* delivery's own row changes address, every
    * row still on the endpoint it replaced goes in the same mutation; a row for
    * some other delivery whose phone rotated without re-registering is left to
-   * the provider's own 404/410 pruning, since the Server holds no cross-Host
+   * the provider's own 404/410 pruning, since the Relay holds no cross-Host
    * device identity that could link the two.
    *
    * Reporting the result rather than the event is what makes a lost response
@@ -423,7 +423,7 @@ export const MAX_PUSH_QUERY_DELIVERY_IDS = 64;
 
 /**
  * Host-token auth. Returns delivery ids only — the Host holds the ACL and is
- * the only side that can turn one into a human label, so the Server never
+ * the only side that can turn one into a human label, so the Relay never
  * learns one (docs/specs/remote-security-model.md).
  */
 export interface PushDevicesResponse {
@@ -444,10 +444,10 @@ export interface SealedPushRecipient {
 
 /**
  * Host-token auth. `recipients` is required and non-empty: the Host holds the
- * ACL and is the only party that may decide who a push reaches, so the Server
+ * ACL and is the only party that may decide who a push reaches, so the Relay
  * never selects recipients itself.
  *
- * **The Server reads no notification text.** Title, body, and the per-Session
+ * **The Relay reads no notification text.** Title, body, and the per-Session
  * collapse tag are bounded on the Host, sealed, and re-sanitized in the service
  * worker at the render sink; what crosses this route is ciphertext plus a
  * delivery address ([alert.md](../../../docs/specs/alert.md) -> Push
@@ -458,7 +458,7 @@ export interface PushSendRequest {
 }
 
 /**
- * What the Server forwards to the push service, verbatim: the sealed envelope
+ * What the Relay forwards to the push service, verbatim: the sealed envelope
  * plus the `hostId` from the sending Host's own token, which is how the worker
  * picks the pinned record to decrypt against.
  */
@@ -468,9 +468,9 @@ export interface SealedPushPayload extends SealedPushV1 {
 /**
  * Wall-clock bound the send route holds one delivery attempt under, so a hung
  * push service cannot hold the handler open indefinitely
- * (`sendWithinDeadline` in `server/src/push.ts`).
+ * (`sendWithinDeadline` in `relay/src/push.ts`).
  *
- * Shared because it is the Host's contract too: this is how long the Server may
+ * Shared because it is the Host's contract too: this is how long the Relay may
  * legitimately take to answer `POST /api/push/send`, so the Host's own request
  * timeout has to sit *above* it or a delivery that succeeded reports as a
  * failure (`lib/src/remote/host/push-delivery.ts`).
@@ -493,8 +493,8 @@ export interface PushSendResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Relay frames (see server.md "Relay"). One JSON frame per WS message.
-// `clientId` is assigned by the server per client socket; the client itself
+// Relay frames (see relay.md "Relay"). One JSON frame per WS message.
+// `clientId` is assigned by the Relay per client socket; the client itself
 // never sees or sends it.
 
 /**
@@ -503,14 +503,14 @@ export interface PushSendResponse {
  */
 export type ClientFrame = E2eClientFrame;
 
-/** Server → client. */
-export type ServerToClientFrame =
+/** Relay → client. */
+export type RelayToClientFrame =
   | { t: 'host-gone' }
   | { t: 'error'; error: string }
-  | E2eServerToClientFrame;
+  | E2eRelayToClientFrame;
 
-/** Server → host. Every frame addresses one Client by its server-assigned `clientId`. */
-export type ServerToHostFrame = { t: 'client-gone'; clientId: string } | E2eServerToHostFrame;
+/** Relay → host. Every frame addresses one Client by its Relay-assigned `clientId`. */
+export type RelayToHostFrame = { t: 'client-gone'; clientId: string } | E2eRelayToHostFrame;
 
 /** Host → server. */
 export type HostFrame = E2eHostFrame;
@@ -518,7 +518,7 @@ export type HostFrame = E2eHostFrame;
 // ---------------------------------------------------------------------------
 // The `e2e` relay envelope: one end-to-end Noise message per frame, in a
 // bounded routing envelope — the whole of what the relay routes
-// (server.md -> Relay).
+// (relay.md -> Relay).
 
 /** Which ceremony a frame belongs to; a session is scoped to one kind and id. */
 export type E2eKind = 'pairing' | 'connection';
@@ -584,8 +584,8 @@ export interface E2eClientFrame {
   ct: string;
 }
 
-/** Server → host: the Client's frame with the server-assigned `clientId`. */
-export interface E2eServerToHostFrame extends E2eClientFrame {
+/** Relay → host: the Client's frame with the Relay-assigned `clientId`. */
+export interface E2eRelayToHostFrame extends E2eClientFrame {
   clientId: string;
 }
 
@@ -599,8 +599,8 @@ export interface E2eHostFrame {
   ct: string;
 }
 
-/** Server → client: the Host's frame with `hostId` stamped from its socket. */
-export interface E2eServerToClientFrame extends Omit<E2eHostFrame, 'clientId'> {
+/** Relay → client: the Host's frame with `hostId` stamped from its socket. */
+export interface E2eRelayToClientFrame extends Omit<E2eHostFrame, 'clientId'> {
   hostId: string;
 }
 
@@ -620,10 +620,10 @@ export function isE2eCiphertext(value: unknown): value is string {
 
 /**
  * The shape guard both a relay and a Host run on a Client-originated `e2e`
- * frame — the both-sides rule the relay and the Host share (server.md ->
+ * frame — the both-sides rule the relay and the Host share (relay.md ->
  * Relay). It cannot check the ciphertext, so all it enforces is that the
  * routing values are bounded. Pinned by `remote-lib-common/test/wire.test.mjs`
- * and, against real relay-minted ids, `server/test/e2e-relay.test.mjs`.
+ * and, against real relay-minted ids, `relay/test/e2e-relay.test.mjs`.
  */
 export function isE2eClientFrame(value: unknown): value is E2eClientFrame {
   if (!value || typeof value !== 'object') return false;
@@ -646,7 +646,7 @@ export function isE2eClientFrame(value: unknown): value is E2eClientFrame {
  * follow costs ~33 µs on a maximal `ct`, and a hostile relay can send those at
  * line rate.
  */
-export function isE2eServerToHostFrame(value: unknown): value is E2eServerToHostFrame {
+export function isE2eRelayToHostFrame(value: unknown): value is E2eRelayToHostFrame {
   return (
     isBoundedString((value as { clientId?: unknown } | null)?.clientId, MAX_CLIENT_ID_LENGTH) &&
     isE2eClientFrame(value)
@@ -655,11 +655,11 @@ export function isE2eServerToHostFrame(value: unknown): value is E2eServerToHost
 
 /**
  * The shape guard a **Client** runs on what the relay hands it — the mirror of
- * {@link isE2eServerToHostFrame}, and run for the same reason: the Client does
+ * {@link isE2eRelayToHostFrame}, and run for the same reason: the Client does
  * not trust the relay to have bounded anything, and every value here is a map
  * key or a base64url decode away from being work.
  */
-export function isE2eServerToClientFrame(value: unknown): value is E2eServerToClientFrame {
+export function isE2eRelayToClientFrame(value: unknown): value is E2eRelayToClientFrame {
   if (!value || typeof value !== 'object') return false;
   const frame = value as Record<string, unknown>;
   return (
@@ -687,7 +687,7 @@ export function isE2eHostFrame(value: unknown): value is E2eHostFrame {
 }
 
 // ---------------------------------------------------------------------------
-// Remote-api v1, terminal-only (see remote-api.md "v1 scope" and server.md).
+// Remote-api v1, terminal-only (see remote-api.md "v1 scope" and relay.md).
 // These ride as application messages on an authorized Noise session.
 
 export interface RemoteRequest {

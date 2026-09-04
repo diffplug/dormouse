@@ -197,7 +197,7 @@ describe('SetupOrSignin: scanning versus signing in', () => {
   });
 
   /**
-   * `excludeCredentials` carries what the *Server* holds, so an authenticator
+   * `excludeCredentials` carries what the *Relay* holds, so an authenticator
    * refusing over it is proof a sign-in from this device works — where an empty
    * store is merely unproven.
    */
@@ -419,7 +419,7 @@ describe('the one push card on the Hosts view', () => {
     expect(onEnablePush).toHaveBeenCalledWith();
   });
 
-  it('keeps offering while any paired Host still lacks a Server row', () => {
+  it('keeps offering while any paired Host still lacks a Relay row', () => {
     // A PushSubscription is scope-wide, so a browser that can receive push says
     // nothing about which Hosts hold a row. The row marker is what names the
     // Host the card is still offering to register.
@@ -462,7 +462,7 @@ describe('the one push card on the Hosts view', () => {
     expect(buttonNamed('Enable push notifications')).toBeNull();
   });
 
-  it('reports a server with push disabled rather than the browser state', () => {
+  it('reports a Relay with push disabled rather than the browser state', () => {
     renderHosts({ pushConfigStatus: 'disabled' });
 
     expect(pushCard()!.textContent).toContain(PUSH_SERVER_DISABLED);
@@ -477,7 +477,7 @@ describe('the one push card on the Hosts view', () => {
     expect(pushCard()).toBeNull();
   });
 
-  it('does not advise installing when the server cannot push at all', () => {
+  it('does not advise installing when the Relay cannot push at all', () => {
     // The install ritual the notice describes would end at the same "push is
     // disabled" copy — advice and card must not contradict each other.
     renderHosts({ pushState: 'needs-install', pushConfigStatus: 'disabled' });
@@ -489,7 +489,7 @@ describe('the one push card on the Hosts view', () => {
   it('does not offer Enable until the VAPID key is cached', () => {
     renderHosts({ pushConfigStatus: 'loading' });
 
-    expect(pushCard()!.textContent).toContain('Checking whether this server can send push');
+    expect(pushCard()!.textContent).toContain('Checking whether this Relay can send push');
     expect(buttonNamed('Enable push notifications')).toBeNull();
   });
 
@@ -558,8 +558,8 @@ describe('pushNoticeState', () => {
     expect(noticeState({ availability: null, isPushSubscribed: () => true })).toBeNull();
   });
 
-  it('lets a push-disabled server outrank a Server row this device still holds', () => {
-    // The rows survive a server restarted without VAPID keys; the delivery does
+  it('lets a push-disabled Relay outrank a Relay row this device still holds', () => {
+    // The rows survive a Relay restarted without VAPID keys; the delivery does
     // not, so "Push notifications on." would be a lie.
     expect(noticeState({ configStatus: 'disabled', isPushSubscribed: () => true })).toEqual({
       kind: 'blocked',

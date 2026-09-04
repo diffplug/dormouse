@@ -123,7 +123,7 @@ export async function createTestAuthenticator(options: {
 /**
  * The proof a Client puts in its first transport payload.
  *
- * The Server's nonce is unguessable to the Host, which recomputes the challenge
+ * The Relay's nonce is unguessable to the Host, which recomputes the challenge
  * rather than trusting one, so a test supplies its own. `assertionBinding`
  * signs over a *different* binding than the one sent — which is how a
  * substituted or replayed proof is spelled.
@@ -133,11 +133,11 @@ export async function presenceProofFor(
   binding: PresenceBinding,
   over: { accountId?: string; assertionBinding?: PresenceBinding; origin?: string } = {},
 ): Promise<PresenceProofV1> {
-  const serverNonce = randomBase64Url(32);
-  const challenge = await presenceChallenge(over.assertionBinding ?? binding, serverNonce);
+  const relayNonce = randomBase64Url(32);
+  const challenge = await presenceChallenge(over.assertionBinding ?? binding, relayNonce);
   return {
     binding,
-    serverNonce,
+    relayNonce,
     accountId: over.accountId ?? 'owner',
     passkeyCredentialId: authenticator.credentialId,
     passkeyPublicKey: authenticator.publicKey,

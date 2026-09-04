@@ -1,23 +1,23 @@
 /**
- * The enrollment offer an installer leaves on disk: the origin its server
+ * The enrollment offer an installer leaves on disk: the origin its Relay
  * answers on, plus a one-time token that redeems for a Host enrollment in
- * place of the setup password (docs/specs/server.md, "Configuration" ->
+ * place of the setup password (docs/specs/relay.md, "Configuration" ->
  * `DORMOUSE_ENROLL_TOKEN_FILE`).
  *
  * The shape lives here because two processes read the same file: a Host on
- * that machine, which offers one-click enrollment from it, and the Server,
+ * that machine, which offers one-click enrollment from it, and the Relay,
  * which redeems the token against its own copy.
  */
 
 import { isOrigin } from './origin.js';
 
 export interface EnrollmentOffer {
-  /** Where the server answers, e.g. `https://dormouse.tailnet.ts.net`. */
+  /** Where the Relay answers, e.g. `https://dormouse.tailnet.ts.net`. */
   readonly origin: string;
   /** 64 lowercase hex characters — 32 bytes from the installer's CSPRNG. */
   readonly token: string;
   /**
-   * ISO-8601 stamp of the mint. Load-bearing, not informational: the Server
+   * ISO-8601 stamp of the mint. Load-bearing, not informational: the Relay
    * refuses an offer whose stamp will not `Date.parse` or is more than 24 hours
    * old, so a writer that stamps this in a
    * non-invariant format mints a token nothing can redeem.
@@ -62,9 +62,9 @@ export function isEnrollmentOffer(value: unknown): value is EnrollmentOffer {
  * one — not JSON, wrong shape. Never throws.
  *
  * Here rather than in either reader because both of them parse the same file:
- * the Server redeeming the token (`server/src/enroll-token.ts`) and the Host
+ * the Relay redeeming the token (`relay/src/enroll-token.ts`) and the Host
  * offering one-click enrollment from it (`lib/src/host/remote/enroll-offer.ts`).
- * Each keeps its own `fs` handling — and the Server its warn-on-unusable — but
+ * Each keeps its own `fs` handling — and the Relay its warn-on-unusable — but
  * one format has one parser.
  */
 export function parseEnrollmentOffer(text: string): EnrollmentOffer | null {
@@ -77,7 +77,7 @@ export function parseEnrollmentOffer(text: string): EnrollmentOffer | null {
 }
 
 /**
- * Whether an offer is still inside the shared Server/Host display window.
+ * Whether an offer is still inside the shared Relay/Host display window.
  * A future stamp passes: one machine writes and reads the file, so clock skew
  * is not evidence of anything and must not brick the one-click path.
  */

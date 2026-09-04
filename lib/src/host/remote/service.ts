@@ -1,6 +1,6 @@
 /**
  * Environment-free remote Host service shared by both Node hosts; see
- * `docs/specs/server.md` → "Host side". Surface ownership is injected through
+ * `docs/specs/relay.md` → "Host side". Surface ownership is injected through
  * {@link HostSurfaceProvider}.
  */
 
@@ -74,7 +74,7 @@ export interface RemoteHostServiceOptions {
   /**
    * The installer's enrollment offer on this machine, if any. Defaults to the
    * real well-known path (`enroll-offer.ts`); injected by the tests, which must
-   * not depend on whether the machine running them has a server installed.
+   * not depend on whether the machine running them has a Relay installed.
    *
    * **Must never reject** — a failed read is `null`, like a file that is not
    * there. That contract is what lets the status path await it bare, so the
@@ -109,7 +109,7 @@ function safeHostname(): string {
 export function unenrolledStatus(offer: EnrollmentOffer | null): RemoteHostConsoleStatus {
   return {
     enrolled: false,
-    serverUrl: null,
+    relayUrl: null,
     hostId: null,
     connection: 'stopped',
     pairedClients: 0,
@@ -137,7 +137,7 @@ export class RemoteHostService {
    * what it read — so overlapping them (an activation `start` and a reconnect
    * during an enroll) lets two of them both see no Host and both build one. The second `RemoteHost` would hold a relay socket nothing
    * has a reference to and could not be stopped, and the two would displace each
-   * other on the server forever.
+   * other on the Relay forever.
    */
   readonly #serialize = createSerialQueue();
   /** Disposal is terminal: no in-flight store read may resurrect the Host. */
@@ -170,12 +170,12 @@ export class RemoteHostService {
   async #start(): Promise<void> {
     const enrollment = await this.#store.loadEnrollment();
     if (!enrollment) return;
-    if (!this.#allowed(enrollment.serverUrl)) {
+    if (!this.#allowed(enrollment.relayUrl)) {
       // Enrolled against an origin this build cannot connect to — a binary
-      // downgraded from a custom build, or a moved server. Idle rather than
-      // connect: the allowlist is the whole boundary (docs/specs/server.md).
+      // downgraded from a custom build, or a moved Relay. Idle rather than
+      // connect: the allowlist is the whole boundary (docs/specs/relay.md).
       console.warn(
-        `[remote-host] enrolled server ${enrollment.serverUrl} is outside this build's allowed sources (${this.#connectSrc}); staying idle`,
+        `[remote-host] enrolled Relay ${enrollment.relayUrl} is outside this build's allowed sources (${this.#connectSrc}); staying idle`,
       );
       return;
     }
@@ -242,12 +242,12 @@ export class RemoteHostService {
   // --- Commands ---
 
   #enroll(params: EnrollParams): Promise<EnrollResult> {
-    return this.#enrollWith(params.serverUrl, { password: params.password }, params.label);
+    return this.#enrollWith(params.relayUrl, { password: params.password }, params.label);
   }
 
   /**
    * One-click enrollment from the offer an installer left on this machine
-   * (`docs/specs/server.md` → "Remote control, in the Settings dialog").
+   * (`docs/specs/relay.md` → "Remote control, in the Settings dialog").
    */
   async #enrollOffer(params: EnrollOfferParams): Promise<EnrollResult> {
     const offer = await this.#readOffer();
@@ -261,7 +261,7 @@ export class RemoteHostService {
       // The webview echoes the origin its card displayed, and this is where that
       // echo is spent: an installer re-run between the render and the click
       // rewrites the file, and enrolling against the new origin would spend a
-      // one-time token on a server the user never reviewed.
+      // one-time token on a Relay the user never reviewed.
       throw new Error(
         `The enrollment offer changed — it now names ${offer.origin}, not ${params.origin}. ` +
           'Reopen this dialog to review the new one.',
@@ -276,20 +276,20 @@ export class RemoteHostService {
    * status edge the webview gate needs.
    */
   async #enrollWith(
-    serverUrl: string,
+    relayUrl: string,
     credential: HostEnrollCredential,
     label: string,
   ): Promise<EnrollResult> {
-    if (!this.#allowed(serverUrl)) {
+    if (!this.#allowed(relayUrl)) {
       // Refused before the credential leaves the machine — including an offer's
       // token, which is a bearer credential like the password. Self-hosters widen
-      // the list in their own build (docs/specs/server.md → "Where a Host may reach a relay server").
+      // the list in their own build (docs/specs/relay.md → "Where a Host may reach a Relay").
       throw new Error(
-        `${serverUrl} is outside this build's allowed remote sources (${this.#connectSrc}). ` +
+        `${relayUrl} is outside this build's allowed remote sources (${this.#connectSrc}). ` +
           'A self-host build bakes its own via DORMOUSE_REMOTE_CONNECT_SRC.',
       );
     }
-    const enrollment = await performEnrollment(serverUrl, credential, label);
+    const enrollment = await performEnrollment(relayUrl, credential, label);
     // Persist before touching the running Host. The credential we just minted
     // exists nowhere else and cannot be minted again from the same exchange — a
     // spent offer's token least of all — so a save that fails after the old Host
@@ -301,16 +301,16 @@ export class RemoteHostService {
       // Swapping one running Host for another. The gate the webviews arm their
       // outbound work on is edge-triggered (`enrolled-gate.ts`), and everything
       // it holds — the mirrored pairing queue, the push device list — belongs
-      // to the server we are leaving. Without a `false` between the two Hosts
+      // to the Relay we are leaving. Without a `false` between the two Hosts
       // the gate never cycles: the Settings dialog keeps naming the old
-      // server's devices, and a device fetch already on the wire can land after
+      // Relay's devices, and a device fetch already on the wire can land after
       // the swap and put them back.
       this.#stopHost();
       this.#enrollment = null;
       this.#emitStatus();
     }
     await this.#startHost(enrollment);
-    return { hostId: enrollment.hostId, serverUrl: enrollment.serverUrl };
+    return { hostId: enrollment.hostId, relayUrl: enrollment.relayUrl };
   }
 
   /**
@@ -332,7 +332,7 @@ export class RemoteHostService {
     if (!enrollment) return unenrolledStatus(offer);
     return {
       enrolled: true,
-      serverUrl: enrollment.serverUrl,
+      relayUrl: enrollment.relayUrl,
       hostId: enrollment.hostId,
       connection: this.#host?.status ?? 'stopped',
       pairedClients: this.#host?.activeRecords.length ?? 0,
@@ -376,10 +376,10 @@ export class RemoteHostService {
   }
 
   /**
-   * Compose this machine's pairing QR: the Server's single-use setup token,
+   * Compose this machine's pairing QR: the Relay's single-use setup token,
    * minted over the Host's own authenticated channel because this service is
    * the half that holds the bearer, plus an invitation the `RemoteHost` mints
-   * locally — an id and a one-use X25519 responder key the Server never sees.
+   * locally — an id and a one-use X25519 responder key the Relay never sees.
    *
    * The URL is composed here, from the origin this Host enrolled against, for
    * the reason `SetupTokenResponse` carries the token alone: a URL minted
@@ -389,7 +389,7 @@ export class RemoteHostService {
     const enrollment = this.#enrollment;
     const host = this.#host;
     if (!enrollment || !host) {
-      throw new Error('This machine is not connected to a Dormouse server.');
+      throw new Error('This machine is not connected to a Dormouse Relay.');
     }
     const response = await hostFetch(
       { enrollment, fetch: this.#fetch, errorPrefix: 'could not mint a setup code' },
@@ -402,25 +402,25 @@ export class RemoteHostService {
     // Guarded like every other 200 off this wire: an `undefined` token would go
     // into the QR, and an unbounded one throws inside the encoder.
     if (!isSetupTokenResponse(body)) {
-      throw new Error('could not mint a setup code: the server’s answer was not a setup token.');
+      throw new Error('could not mint a setup code: the Relay’s answer was not a setup token.');
     }
     // The Host captured above, not whatever `#host` holds now: a swap during the
-    // round trip means this code belongs to the server we just left, so it is
+    // round trip means this code belongs to the Relay we just left, so it is
     // dropped rather than minted onto the replacement — which could not verify
-    // it anyway, and whose panel must not paint a code for the old server.
+    // it anyway, and whose panel must not paint a code for the old Relay.
     if (this.#host !== host) {
       throw new Error(
-        'could not mint a setup code: this machine reconnected to a different server.',
+        'could not mint a setup code: this machine reconnected to a different Relay.',
       );
     }
     // The invitation, and the half that makes the ceremony unforgeable by the
-    // Server: its private key exists only in this Host's memory, and a phone
+    // Relay: its private key exists only in this Host's memory, and a phone
     // completing IK against the public half has proved it is talking to the
     // machine whose screen it photographed.
     const invitation = await host.mintInvitation(body.token, body.expiresAt);
     // `enrollment.origin` is the phone-facing WebAuthn origin — where Pocket is
     // served and where the passkey will be registered — not necessarily the
-    // `serverUrl` this Host posts to. The formatter refuses a URL too long to
+    // `relayUrl` this Host posts to. The formatter refuses a URL too long to
     // scan before any encoder sees it.
     return {
       url: formatPairingInvitationUrl(enrollment.origin, invitation),
@@ -456,7 +456,7 @@ export class RemoteHostService {
 
   async #push(params: PushParams): Promise<Record<string, never>> {
     const deps = this.#pushDeps();
-    // No Host means no ACL and no server to post to; the ring is simply not
+    // No Host means no ACL and no Relay to post to; the ring is simply not
     // pushed. Nothing to report to the webview, which cannot act on it either.
     if (deps) {
       // A push that fails must never break the alert path.
@@ -472,13 +472,13 @@ export class RemoteHostService {
    *
    * The inverse of {@link #push} in the one way that matters: nothing is
    * swallowed. A test whose whole purpose is to report an outcome must let the
-   * failure through, so an unenrolled machine, an unreachable server, and a
+   * failure through, so an unenrolled machine, an unreachable Relay, and a
    * fan-out that reached nobody all read differently at the button.
    */
   async #pushTest(): Promise<PushSendSummary> {
     const deps = this.#pushDeps();
     if (!deps) {
-      throw new Error('This machine is not connected to a Dormouse server.');
+      throw new Error('This machine is not connected to a Dormouse Relay.');
     }
     // A fixed tag, so pressing the button repeatedly replaces the notification
     // on the phone rather than stacking copies — the same per-Session collapse
@@ -494,8 +494,8 @@ export class RemoteHostService {
 
   // --- Host lifecycle ---
 
-  #allowed(serverUrl: string): boolean {
-    const origin = normalizeOrigin(serverUrl);
+  #allowed(relayUrl: string): boolean {
+    const origin = normalizeOrigin(relayUrl);
     return origin !== null && originAllowedByConnectSrc(origin, this.#connectSrc);
   }
 
@@ -622,7 +622,7 @@ export class RemoteHostService {
   #stopHost(): void {
     this.#host?.stop();
     // Invitations go with it: their one-use keys live on the `RemoteHost`
-    // precisely so a code the old server's QR carried cannot complete a
+    // precisely so a code the old Relay's QR carried cannot complete a
     // handshake against the new one.
     this.#host = null;
     // `stop()` dismisses every in-flight pairing, which empties the queue and

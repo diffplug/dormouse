@@ -7,7 +7,7 @@
  * the context that will own them — on iOS, the Home Screen install is a
  * different storage partition from the Safari tab a camera opens — so the run
  * that arrives this way spends nothing, retains nothing, and asks the user to
- * scan again from inside Pocket. `docs/specs/server.md` → Setup tokens owns the
+ * scan again from inside Pocket. `docs/specs/relay.md` → Setup tokens owns the
  * grammar this only ever looks at the prefix of.
  */
 

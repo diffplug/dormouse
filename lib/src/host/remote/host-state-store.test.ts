@@ -49,7 +49,7 @@ import type { HostEnrollment } from '../../remote/host/enrollment';
 import { createEphemeralHostStateStore, FileHostStateStore } from './host-state-store';
 
 const ENROLLMENT: HostEnrollment = {
-  serverUrl: 'https://relay.example',
+  relayUrl: 'https://relay.example',
   hostId: 'S6kyjjqOS7mw3l8ye89U3g',
   hostToken: 'tok',
   origin: 'https://relay.example',

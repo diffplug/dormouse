@@ -75,11 +75,11 @@ function connectionBinding(overrides = {}) {
 }
 
 /** A proof the real verifier accepts, unless `tamper` breaks exactly one thing. */
-async function proofFor(binding, { serverNonce = randomSecret(), tamper = {}, who = authenticator } = {}) {
-  const challenge = await presenceChallenge(binding, serverNonce);
+async function proofFor(binding, { relayNonce = randomSecret(), tamper = {}, who = authenticator } = {}) {
+  const challenge = await presenceChallenge(binding, relayNonce);
   return {
     binding,
-    serverNonce,
+    relayNonce,
     accountId: ACCOUNT,
     passkeyCredentialId: who.credentialId,
     passkeyPublicKey: who.publicKey,
@@ -96,7 +96,7 @@ test('a proof over the expected binding verifies and yields the presented key ha
     assert.deepEqual(result, {
       ok: true,
       // The assertion is verified against the *presented* key and its hash
-      // returned for the ACL compare, so a compromised Server cannot substitute
+      // returned for the ACL compare, so a compromised Relay cannot substitute
       // a passkey: the hash on the record is what the Host trusts.
       passkeyPublicKeyHash: await hashPasskeyPublicKey(authenticator.publicKey),
     });
@@ -112,8 +112,8 @@ test('a proof that is not a PresenceProofV1 at all is malformed', async () => {
     ['no binding', { ...valid, binding: undefined }],
     ['a binding with an extra key', { ...valid, binding: { ...binding, extra: 'x' } }],
     ['a binding of no known kind', { ...valid, binding: { ...binding, kind: 'terminal' } }],
-    ['a non-string nonce', { ...valid, serverNonce: 42 }],
-    ['an over-long nonce', { ...valid, serverNonce: 'a'.repeat(CEREMONY_FIELD_LIMIT + 1) }],
+    ['a non-string nonce', { ...valid, relayNonce: 42 }],
+    ['an over-long nonce', { ...valid, relayNonce: 'a'.repeat(CEREMONY_FIELD_LIMIT + 1) }],
     ['an over-long account', { ...valid, accountId: 'a'.repeat(CEREMONY_FIELD_LIMIT + 1) }],
     ['no assertion', { ...valid, assertion: undefined }],
     ['an assertion missing a field', { ...valid, assertion: { ...valid.assertion, signature: undefined } }],
@@ -201,7 +201,7 @@ test('a binding the challenge builder cannot hash is underivable, not a crash', 
   const binding = pairingBinding({ handshakeHash: 'not base64url!!' });
   const proof = {
     binding,
-    serverNonce: randomSecret(),
+    relayNonce: randomSecret(),
     accountId: ACCOUNT,
     passkeyCredentialId: authenticator.credentialId,
     passkeyPublicKey: authenticator.publicKey,
@@ -213,7 +213,7 @@ test('a binding the challenge builder cannot hash is underivable, not a crash', 
   });
   // Same for a nonce that is not base64url: it is decoded into the hash too,
   // and on the Host's recompute path it arrives from the Client.
-  const bad = { ...(await proofFor(pairingBinding())), serverNonce: 'nonce!!' };
+  const bad = { ...(await proofFor(pairingBinding())), relayNonce: 'nonce!!' };
   assert.deepEqual(await verifyPresenceProof(bad, pairingBinding(), POLICY), {
     ok: false,
     reason: 'challenge-underivable',
@@ -258,8 +258,8 @@ test('the verifier never throws, whatever the decrypted payload turns out to be'
     '',
     [],
     { binding: null },
-    { binding, serverNonce: {}, assertion: [] },
-    { binding, serverNonce: '', accountId: '', passkeyCredentialId: '', passkeyPublicKey: '', assertion: {} },
+    { binding, relayNonce: {}, assertion: [] },
+    { binding, relayNonce: '', accountId: '', passkeyCredentialId: '', passkeyPublicKey: '', assertion: {} },
     Object.create(null),
     new Map(),
   ]) {

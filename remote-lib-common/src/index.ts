@@ -1,6 +1,6 @@
 /**
  * Code shared between the frontend (`lib`) and the backend (`server`) — the
- * server-side counterpart to `dor-lib-common`.
+ * Relay-side counterpart to `dor-lib-common`.
  *
  * Keep this package runtime-agnostic: it is compiled into both a browser bundle
  * (via `lib`) and a Node process (`server`), so it must not reach for Node or

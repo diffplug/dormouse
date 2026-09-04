@@ -1,7 +1,7 @@
 /**
  * One reduction of a URL to a bare scheme-host-port, wherever an origin is
- * compared rather than merely displayed: the Server's `DORMOUSE_ORIGIN`
- * (`server/src/config.ts`), the `origin` a Host reads back off an enrollment
+ * compared rather than merely displayed: the Relay's `DORMOUSE_ORIGIN`
+ * (`relay/src/config.ts`), the `origin` a Host reads back off an enrollment
  * response (`lib/src/remote/host/enrollment.ts`), the offer file's own field
  * ({@link isEnrollmentOffer}), and the relay/push allowlist checks.
  */

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Drive the self-host setup → pairing story against the real Server and the
+ * Drive the self-host setup → pairing story against the real Relay and the
  * real Host, with real browsers, and leave every artifact behind.
  * `scripts/pairing-walkthrough/README.md` is the operator's guide — what it
  * needs, what it leaves behind, and what it does not cover; this file is the
@@ -23,7 +23,7 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
  * `DORMOUSE_REMOTE_CONNECT_SRC` at stage time, and Pocket must be same-origin
  * with its own API, so both sides of a run are pinned to one origin.
  */
-const SERVER_PORT = 3000;
+const RELAY_PORT = 3000;
 
 /** The scenario a bare run drives, and the one `--until` is checked against. */
 const DEFAULT_SCENARIO = 'happy';
@@ -101,7 +101,7 @@ function usage() {
     '  --until <step>     stop after this step (default: the scenario\'s last)',
     `                     ${DEFAULT_SCENARIO}: ${steps}`,
     `  --out <dir>        run directory (default: ${d.out})`,
-    '  --skip-build       reuse lib/dist-pocket and server/dist instead of rebuilding',
+    '  --skip-build       reuse lib/dist-pocket and relay/dist instead of rebuilding',
     `  --machine-name <n> the name the Host enrolls under (default: ${d.machineName})`,
     '  --keep             leave everything running when the run ends, pass or fail',
     '',
@@ -127,10 +127,10 @@ async function main(live) {
     : join(tmpdir(), 'pairing-walkthrough', stamp);
   mkdirSync(runDir, { recursive: true });
 
-  if (!(await isPortFree(SERVER_PORT))) {
+  if (!(await isPortFree(RELAY_PORT))) {
     throw new Error(
-      `something is already listening on :${SERVER_PORT}; stop it first ` +
-        '(the Server origin is baked into the Host bundle, so this port is not negotiable)',
+      `something is already listening on :${RELAY_PORT}; stop it first ` +
+        '(the Relay origin is baked into the Host bundle, so this port is not negotiable)',
     );
   }
   opts.vitePort = await findFreePort(15540);
@@ -161,8 +161,8 @@ async function main(live) {
     runDir,
     opts,
     state,
-    serverPort: SERVER_PORT,
-    serverOrigin: `http://localhost:${SERVER_PORT}`,
+    relayPort: RELAY_PORT,
+    relayOrigin: `http://localhost:${RELAY_PORT}`,
     viteOrigin: `http://localhost:${opts.vitePort}`,
     log: (message) => console.log(`[walkthrough] ${message}`),
     record: (facts) => Object.assign(summary.facts, facts),
@@ -203,10 +203,10 @@ async function main(live) {
     ctx.keep(log);
   }
 
-  ctx.record({ serverOrigin: ctx.serverOrigin });
+  ctx.record({ relayOrigin: ctx.relayOrigin });
   console.log(`[walkthrough] run directory: ${runDir}`);
   console.log(`[walkthrough] scenario ${opts.scenario}: ${scenario.expect}`);
-  console.log(`[walkthrough] server ${ctx.serverOrigin} · vite ${ctx.viteOrigin} · bridge :${opts.hostPort}`);
+  console.log(`[walkthrough] server ${ctx.relayOrigin} · vite ${ctx.viteOrigin} · bridge :${opts.hostPort}`);
   console.log(`[walkthrough] agent-browser session: ${opts.session}`);
 
   const lastIndex = scenario.steps.findIndex((step) => step.name === opts.until);
@@ -330,7 +330,7 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => { void shutdown(130, live, { exit: true }); });
 }
 // The two ways out that skip `main`'s own `catch`, and the two that would
-// otherwise leave a Server, a Host and two Chromes running with nobody left to
+// otherwise leave a Relay, a Host and two Chromes running with nobody left to
 // stop them: a stream that errors (`spawnLogged`'s log file) and a promise
 // nothing awaited (a CDP `send` outstanding when its socket closes).
 for (const fault of ['uncaughtException', 'unhandledRejection']) {

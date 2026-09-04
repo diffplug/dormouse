@@ -18,7 +18,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const libHost = path.resolve(here, '../../lib/src/host');
 const sidecar = path.resolve(here, '../sidecar');
 
-// Where the remote Host may reach a relay server. The Host runs in the sidecar,
+// Where the remote Host may reach a Relay. The Host runs in the sidecar,
 // so this is the enforcement point — there is no webview CSP in front of it.
 const remoteSrc = resolveRemoteConnectSrc(process.env, 'sidecar');
 

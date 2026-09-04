@@ -11,7 +11,7 @@
 // (`standalone/scripts/build-sidecar-proxy.mjs`, which bakes the same value into
 // the sidecar's Host) so both Hosts widen the same way with the same variable.
 // `scripts/csp-defaults.mjs` is the one definition of the default for both. See
-// docs/specs/server.md → "Where a Host may reach a relay server".
+// docs/specs/relay.md → "Where a Host may reach a Relay".
 
 import * as esbuild from 'esbuild';
 

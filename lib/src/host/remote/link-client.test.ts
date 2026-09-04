@@ -55,7 +55,7 @@ describe('commands', () => {
   it('rejects with the error the service reported', async () => {
     const transport = fakeTransport();
     const client = transport.client();
-    const pending = client.link.command('enroll', { serverUrl: 'https://nope' });
+    const pending = client.link.command('enroll', { relayUrl: 'https://nope' });
     client.onResult({ rhId: transport.sent[0]!.rhId, error: 'outside the allowed sources' });
     await expect(pending).rejects.toThrow('outside the allowed sources');
   });

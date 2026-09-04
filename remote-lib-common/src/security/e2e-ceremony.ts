@@ -7,7 +7,7 @@
  * Every message here travels as a `control` transport plaintext, which is
  * NUL-padded to a fixed size — so an approval and a denial are the same number
  * of bytes on the wire and the relay learns nothing from a length
- * (`docs/specs/server.md` → E2E framing).
+ * (`docs/specs/relay.md` → E2E framing).
  */
 
 import { isBoundedString } from './bytes.js';
@@ -43,8 +43,8 @@ function bounded(value: unknown): value is string {
  */
 export interface PresenceProofV1 {
   readonly binding: PresenceBinding;
-  /** The Server's single-use nonce from `POST /api/reauth/begin`, base64url. */
-  readonly serverNonce: string;
+  /** The Relay's single-use nonce from `POST /api/reauth/begin`, base64url. */
+  readonly relayNonce: string;
   readonly accountId: string;
   readonly passkeyCredentialId: string;
   /** The canonical SPKI public key, base64url — presented in full, checked by hash. */
@@ -75,7 +75,7 @@ export function isPresenceProofV1(value: unknown): value is PresenceProofV1 {
   const proof = value as Record<string, unknown>;
   return (
     isPresenceBinding(proof.binding) &&
-    bounded(proof.serverNonce) &&
+    bounded(proof.relayNonce) &&
     bounded(proof.accountId) &&
     bounded(proof.passkeyCredentialId) &&
     bounded(proof.passkeyPublicKey) &&
@@ -125,7 +125,7 @@ export async function verifyPresenceProof(
   }
   let challenge: string;
   try {
-    challenge = await presenceChallenge(proof.binding, proof.serverNonce, crypto);
+    challenge = await presenceChallenge(proof.binding, proof.relayNonce, crypto);
   } catch {
     // A non-base64url binding field or an over-long nonce; the builder throws
     // and the caller treats it exactly as a mismatch.
@@ -240,7 +240,7 @@ export type PairingOutcomeV1 =
       readonly ok: true;
       /** The Host's long-term Noise static, base64url — the Client's pin from here on. */
       readonly hostStaticPublicKey: string;
-      /** The Host's local label; it exists nowhere on the Server. */
+      /** The Host's local label; it exists nowhere on the Relay. */
       readonly hostLabel: string;
       readonly accountId: string;
       readonly passkeyCredentialId: string;

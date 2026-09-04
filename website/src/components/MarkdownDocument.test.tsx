@@ -32,14 +32,14 @@ describe("inline code wrapping", () => {
     // The 47-character path below is one unbreakable word to the line breaker,
     // and on a phone it pushed the whole article sideways rather than just
     // itself.
-    const markup = render("~/Library/LaunchAgents/sh.dormouse.server.plist");
+    const markup = render("~/Library/LaunchAgents/sh.dormouse.relay.plist");
     expect(markup).toContain("~/<wbr/>Library/<wbr/>LaunchAgents/<wbr/>sh.<wbr/>dormouse.");
   });
 
   it("leaves the copied text exactly as authored", () => {
     // <wbr> contributes nothing to textContent, so selecting the span still
     // yields a path a reader can paste into a shell.
-    const value = "~/.config/systemd/user/dormouse-server.service";
+    const value = "~/.config/systemd/user/dormouse-relay.service";
     const text = render(value).replace(/<[^>]*>/g, "");
     expect(text).toBe(value);
   });

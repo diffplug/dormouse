@@ -3,7 +3,7 @@ import { ModalFrame, ModalReviewBlock, modalActionButton } from '../../component
 import { PAIRING_CODE_LENGTH } from 'remote-lib-common';
 
 /**
- * The Host's local pairing confirmation (server.md → "Pairing approval modal";
+ * The Host's local pairing confirmation (relay.md → "Pairing approval modal";
  * same pattern as KillConfirm). Confirming here is the only path that writes
  * the ACL.
  *

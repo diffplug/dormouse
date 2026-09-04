@@ -137,7 +137,7 @@ describe('reading a code', () => {
     expect((onScanned.mock.calls[0]![0] as PairingInvitation).inviteId).toBe(invitation.inviteId);
   });
 
-  it('says one fixed line for anything that is not a code for this server', async () => {
+  it('says one fixed line for anything that is not a code for this Relay', async () => {
     const { onScanned } = render();
     await settle();
     // A real code for a different deployment: the origin compare is the only
@@ -163,7 +163,7 @@ describe('reading a code', () => {
     expect(container.querySelector('[role="alert"]')?.textContent).toBe(SETUP_CODE_DEAD_MESSAGE);
   });
 
-  it('calls a dead code for another server not a code for this one', async () => {
+  it('calls a dead code for another Relay not a code for this one', async () => {
     // Expiry is not the first question: there is no fresh code to go and get on
     // a computer this phone was never pointed at.
     const { onScanned } = render();

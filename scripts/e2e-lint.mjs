@@ -9,7 +9,7 @@
  * Why this exists: the properties the trust boundary rests on are *absences* —
  * one Noise suite and no way to select another, no JavaScript curve, no
  * plaintext relay route, no legacy frame discriminant left to answer, no
- * Server-side view of protocol-v1, no checked-in service worker shadowing the
+ * Relay-side view of protocol-v1, no checked-in service worker shadowing the
  * built one. An absence is exactly what a reviewer stops noticing: nothing in a
  * diff says "a second cipher suite is now reachable", and the nightly audit is
  * thorough but probabilistic. This makes the cheap half deterministic, so
@@ -93,13 +93,13 @@ const NOISE_MODULES = [
  */
 const FRAME_MODULES = [
   'remote-lib-common/src/remote/wire.ts',
-  'server/src/relay.ts',
+  'relay/src/relay.ts',
   'lib/src/remote/host/remote-host.ts',
   'lib/src/remote/client/pocket-client.ts',
 ];
 
 /** The three shipped source trees, scanned whole for the dependency rules. */
-const SOURCE_TREES = ['remote-lib-common/src/', 'lib/src/', 'server/src/'];
+const SOURCE_TREES = ['remote-lib-common/src/', 'lib/src/', 'relay/src/'];
 
 /**
  * One entry per structural property. Every rule states the `SECURITY_SPEC`
@@ -168,7 +168,7 @@ export const RULES = [
     kind: 'forbid',
     files: E2E_MODULES,
     // Scoped to the e2e modules so WebAuthn's mandatory ES256 — `ECDSA` /
-    // `P-256` in `passkey.ts`, `ecdsa.ts`, and the Server's SPKI import — is
+    // `P-256` in `passkey.ts`, `ecdsa.ts`, and the Relay's SPKI import — is
     // not swept up. Inside these files there is one key agreement (X25519) and
     // one signature scheme (none).
     pattern: /['"](?:ECDH|ECDSA|P-256|P-384|P-521|Ed25519)['"]|\bnamedCurve\b/g,
@@ -202,25 +202,25 @@ export const RULES = [
     security: 'no plaintext relay route, and no reader for any of the pre-cutover frames',
     kind: 'forbid',
     files: FRAME_MODULES,
-    // The tags of the Server-readable protocol this replaced. A reader for one
+    // The tags of the Relay-readable protocol this replaced. A reader for one
     // is a path a hostile relay could still drive; the shipped set is `e2e`,
     // `host-gone`, `error`, and `client-gone`.
     pattern:
       /['"](?:pair|pair-status|connect|connect2|msg|pair-result|challenge|decision|setup-token-redeemed)['"]/g,
-    violationFile: 'server/src/relay.ts',
+    violationFile: 'relay/src/relay.ts',
     violation: "\nconst __selftest = { t: 'connect2' };\n",
   },
   {
-    rule: 'The Server never names a protocol-v1 plaintext type',
-    security: 'Server-side type import from the protocol-v1 half',
+    rule: 'The Relay never names a protocol-v1 plaintext type',
+    security: 'Relay-side type import from the protocol-v1 half',
     kind: 'forbid',
-    trees: ['server/src/'],
+    trees: ['relay/src/'],
     // Naming one is not itself a read, but it is the only reason a relay would
-    // have to: the Server routes an opaque envelope, so a file that knows what
+    // have to: the Relay routes an opaque envelope, so a file that knows what
     // a `DirectoryEntry` is has started to care what it is carrying.
     pattern:
       /\b(?:RemoteRequest|RemoteResponse|RemoteEventMsg|DirectoryEntry|DirectorySnapshot|TerminalDataEvent|TerminalClosedEvent|TerminalSemanticEvent|AttachParams|TerminalAttachResult|TerminalWriteParams|TerminalResizeParams|HelloParams|HelloResult|REMOTE_METHODS|REMOTE_EVENTS|MAX_TERMINAL_DIMENSION|clampTerminalDimension)\b/g,
-    violationFile: 'server/src/relay.ts',
+    violationFile: 'relay/src/relay.ts',
     violation: "\nimport type { DirectoryEntry } from 'remote-lib-common';\n",
   },
   {
@@ -273,7 +273,7 @@ export const RULES = [
     security: 'the worker in `lib/src/remote/pocket-app/sw.ts` is the only thing that opens one',
     kind: 'require',
     file: 'package.json',
-    // Anchored inside the `build` script, not on the command: `dev:server`
+    // Anchored inside the `build` script, not on the command: `dev:relay`
     // runs the same line, so a bare match stayed green after `build` stopped
     // building the worker at all.
     pattern: /"build":\s*"[^"]*pnpm --filter dormouse-lib build:pocket/,

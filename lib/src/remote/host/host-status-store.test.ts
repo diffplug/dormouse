@@ -77,7 +77,7 @@ describe('re-reading after a mutation', () => {
 
     const statusAnswer = () => ({
       enrolled,
-      serverUrl: 'https://laptop.tailnet.ts.net',
+      relayUrl: 'https://laptop.tailnet.ts.net',
       hostId: 'host-1',
       connection: 'connected',
       pairedClients: 1,
@@ -140,7 +140,7 @@ describe('re-subscribing', () => {
           releases.push(() =>
             resolve({
               enrolled: true,
-              serverUrl: 'https://laptop.tailnet.ts.net',
+              relayUrl: 'https://laptop.tailnet.ts.net',
               hostId: 'host-1',
               connection: 'connected',
               pairedClients: 1,
@@ -188,7 +188,7 @@ describe('publishing', () => {
     vi.useFakeTimers();
     const status = {
       enrolled: true,
-      serverUrl: 'https://laptop.tailnet.ts.net',
+      relayUrl: 'https://laptop.tailnet.ts.net',
       hostId: 'host-1',
       connection: 'connected',
       pairedClients: 1,
@@ -232,7 +232,7 @@ describe('publishing', () => {
     let origin: string | null = 'https://ned-mac.tail9c2f1.ts.net';
     const command = vi.fn(async () => ({
       enrolled: false,
-      serverUrl: null,
+      relayUrl: null,
       hostId: null,
       connection: 'stopped',
       pairedClients: 0,

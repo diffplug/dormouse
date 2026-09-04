@@ -52,7 +52,7 @@ function ResultLine({ result }: { result: { text: string; tone: 'ok' | 'bad' } |
 }
 
 /**
- * Speak a fixed phrase now. Synchronous and local — there is no server in this
+ * Speak a fixed phrase now. Synchronous and local — there is no Relay in this
  * path — so the only failure worth reporting is a webview with no speech
  * backend at all, which would otherwise be indistinguishable from a working one
  * with the volume down.
@@ -78,7 +78,7 @@ export function SpeakTestButton() {
 }
 
 /**
- * Send a real push through the real path — same Host, same ACL, same server —
+ * Send a real push through the real path — same Host, same ACL, same Relay —
  * so what it proves is what the alarm will do.
  *
  * Hidden entirely where no Host service exists, matching the Remote control

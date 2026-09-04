@@ -10,7 +10,7 @@ Each adapter wraps a PTY-spawning runtime and a transport channel between webvie
 |---|---|---|
 | VS Code extension | extension host (Node.js) | `vscode.Webview.postMessage` ↔ `acquireVsCodeApi().postMessage` |
 | Standalone (Tauri) | sidecar process | Tauri command/event bridge |
-| Standalone browser-dev | sidecar + local dev HTTP bridge | fetch commands + Server-Sent Events |
+| Standalone browser-dev | sidecar + local dev HTTP bridge | fetch commands + Relay-Sent Events |
 | Pocket (`RemotePtyAdapter`) | the paired laptop's Host | remote protocol-v1 over the relay (`docs/specs/remote-api.md`) |
 | Fake (tests, playground) | in-process | direct calls / event emitter |
 

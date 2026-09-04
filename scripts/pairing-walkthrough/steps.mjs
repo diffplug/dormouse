@@ -149,7 +149,7 @@ function securityModule(repoRoot) {
 /**
  * How long a setup code stays redeemable, read out of the workspace rather than
  * copied here — a harness that mirrors the number would keep claiming the old
- * one after somebody changed it. `server/src/setup-token.ts` pins the Server's
+ * one after somebody changed it. `relay/src/setup-token.ts` pins the Relay's
  * TTL to this same constant, and `RemoteControlSection.tsx` mints a replacement
  * 20s before it, so the capture → scan gap has to stay comfortably under it.
  *
@@ -191,14 +191,14 @@ function hostReadyExpr(vitePort) {
 }
 
 /**
- * Boot the real Server with a state directory of its own.
+ * Boot the real Relay with a state directory of its own.
  *
  * `DORMOUSE_STATE_DIR` under the run directory is what makes a run repeatable:
  * the default `./data` accumulates accounts, hosts and a VAPID keypair across
  * runs, so a second run would find the Host already enrolled and never show the
  * enroll form this walkthrough is here to drive.
  */
-async function stepServer(ctx) {
+async function stepRelay(ctx) {
   const { repoRoot, opts } = ctx;
   // Prefixed like every other run-directory name: two scenarios sharing one
   // `--out` and one state dir would leave the second already enrolled, which is
@@ -209,12 +209,12 @@ async function stepServer(ctx) {
     existsSync(join(repoRoot, 'server', 'dist', 'index.js'));
   const skipBuild = opts.skipBuild && built;
   if (opts.skipBuild && !built) {
-    ctx.log('--skip-build ignored: lib/dist-pocket or server/dist is missing');
+    ctx.log('--skip-build ignored: lib/dist-pocket or relay/dist is missing');
   }
 
   const handle = spawnLogged(
     'pnpm',
-    skipBuild ? ['--filter', 'server', 'start'] : ['dev:server'],
+    skipBuild ? ['--filter', 'server', 'start'] : ['dev:relay'],
     {
       cwd: repoRoot,
       logPath: ctx.path('server.log'),
@@ -224,25 +224,25 @@ async function stepServer(ctx) {
         // Everything in a run is local to this machine, so the walkthrough's
         // server has no reason to answer the LAN or the tailnet for the length
         // of it (`docs/specs/security-remote.md` -> "Network posture
-        // (self-hosted)"): unset, the server binds every interface.
+        // (self-hosted)"): unset, the Relay binds every interface.
         DORMOUSE_BIND_HOST: '127.0.0.1',
-        PORT: String(ctx.serverPort),
+        PORT: String(ctx.relayPort),
       },
     },
   );
 
-  await waitForLine(handle, /server listening on/, {
+  await waitForLine(handle, /relay listening on/, {
     timeoutMs: skipBuild ? 60_000 : 600_000,
-    what: 'the server to bind',
+    what: 'the Relay to bind',
   });
   // The log line lands from inside the `listen` callback; a request is what
   // proves the socket actually answers.
   await waitFor(
-    async () => (await fetch(`${ctx.serverOrigin}/`).catch(() => null))?.ok,
-    { what: `${ctx.serverOrigin} to answer`, timeoutMs: 60_000 },
+    async () => (await fetch(`${ctx.relayOrigin}/`).catch(() => null))?.ok,
+    { what: `${ctx.relayOrigin} to answer`, timeoutMs: 60_000 },
   );
 
-  // The Server, not this harness, owns the credential, and the store it wrote
+  // The Relay, not this harness, owns the credential, and the store it wrote
   // through is what reads it back — the same "read the shipped module rather
   // than a copy" rule {@link securityModule} follows, so a change to the
   // record's shape cannot leave this typing `undefined` into the form below.
@@ -254,10 +254,10 @@ async function stepServer(ctx) {
   if (storedPassword === null) throw new Error(`no setup password under ${stateDir}`);
   ctx.state.setupPassword = storedPassword.password;
 
-  // Held for the scenarios that take the Server away mid-story; nothing on the
+  // Held for the scenarios that take the Relay away mid-story; nothing on the
   // happy path touches it.
-  ctx.state.serverHandle = handle;
-  ctx.record({ serverStateDir: stateDir, serverBuilt: !skipBuild });
+  ctx.state.relayHandle = handle;
+  ctx.record({ relayStateDir: stateDir, relayBuilt: !skipBuild });
 }
 
 /**
@@ -275,7 +275,7 @@ async function stepHost(ctx) {
     logPath: ctx.path('host.log'),
     prefix: 'host',
     env: {
-      DORMOUSE_REMOTE_CONNECT_SRC: `${ctx.serverOrigin} ${ctx.serverOrigin.replace(/^http/, 'ws')}`,
+      DORMOUSE_REMOTE_CONNECT_SRC: `${ctx.relayOrigin} ${ctx.relayOrigin.replace(/^http/, 'ws')}`,
       DORMOUSE_BROWSER_DEV_AB_SESSION: opts.session,
       DORMOUSE_BROWSER_DEV_VITE_PORT: String(opts.vitePort),
       DORMOUSE_BROWSER_DEV_HOST_PORT: String(opts.hostPort),
@@ -328,7 +328,7 @@ async function stepEnroll(ctx) {
   const ab = ctx.state.hostBrowser;
   const { opts } = ctx;
 
-  await fillField(ctx, 'input[type="url"]', ctx.serverOrigin);
+  await fillField(ctx, 'input[type="url"]', ctx.relayOrigin);
   await fillField(ctx, 'input[type="password"]', ctx.state.setupPassword);
   await fillField(ctx, 'input[placeholder="e.g. Work laptop"]', opts.machineName);
   await ctx.shot('03-enroll-form.png');
@@ -354,7 +354,7 @@ async function stepEnroll(ctx) {
 
   // `connected` is the Host's relay socket, which is a second round trip after
   // the enrollment POST; a walkthrough that stops at "enrolled" would mint a
-  // setup code the Server has no socket to tell this Host about.
+  // setup code the Relay has no socket to tell this Host about.
   await ab.waitUntil(
     `const section = ${REMOTE_SECTION};
      return section && /Connected/.test(section.innerText) ? true : null;`,
@@ -576,16 +576,16 @@ async function stepPocket(ctx) {
 async function openPocket(ctx, ab, port) {
   const session = await attachPage(port, () => true, 'the Pocket browser to have a page');
   await ab.openUntil(
-    `${ctx.serverOrigin}/`,
+    `${ctx.relayOrigin}/`,
     `return !!document.body && document.body.innerText.includes(${JSON.stringify(SCAN_LABEL)});`,
   );
-  if ((await pageUrl(session)).startsWith(ctx.serverOrigin)) return session;
+  if ((await pageUrl(session)).startsWith(ctx.relayOrigin)) return session;
 
   ctx.log('the attached page is not the one Pocket opened in; re-attaching');
   session.close();
   return attachPage(
     port,
-    (target) => target.url.startsWith(ctx.serverOrigin),
+    (target) => target.url.startsWith(ctx.relayOrigin),
     'the page target showing Pocket',
     session.messages,
   );
@@ -651,7 +651,7 @@ async function stepCode(ctx) {
  * between the two steps can straddle that. Chrome opens the capture file at
  * `getUserMedia` time, so rewriting it here — before the scanner mounts — is
  * enough; without this the scan would simply never decode into anything the
- * Server still honours, and the failure would read as a broken scanner.
+ * Relay still honours, and the failure would read as a broken scanner.
  */
 async function ensureCapturedCodeIsLive(ctx) {
   const ab = ctx.state.hostBrowser;
@@ -773,7 +773,7 @@ async function denyOnHost(ctx) {
  * The modal closing only means the request was answered. **What it was answered
  * *as* is the panel behind it**, which is the only place the two decisions
  * differ: both spend the code, and the paired count is absolute, so a mismatch
- * moves nothing (`docs/specs/server.md` → "Remote control, in the Settings
+ * moves nothing (`docs/specs/relay.md` → "Remote control, in the Settings
  * dialog"). Waiting for that report is also what keeps the screenshot below
  * from catching the panel one event early.
  */
@@ -853,7 +853,7 @@ async function pairedNothing(ctx, { decide, hostShot, pocketShot, as, complaint,
   await ctx.shot(hostShot);
 
   // "Nothing was paired" is an absence, and the count is re-read on a 2 s poll
-  // (`docs/specs/server.md`), so it is given a cycle to move before being
+  // (`docs/specs/relay.md`), so it is given a cycle to move before being
   // believed — a count read the instant the outcome lands would pass whether or
   // not the Host wrote a record.
   await delay(2_500);
@@ -1083,7 +1083,7 @@ async function ringFromHost(ctx) {
 
 /**
  * Leave the wall and come back the way a phone comes back from a dropped socket
- * (`docs/specs/server.md` → "Running it"): the Hosts view, then Connect.
+ * (`docs/specs/relay.md` → "Running it"): the Hosts view, then Connect.
  *
  * Also the only screenshot of the Hosts view with a row on it — every earlier
  * step passes straight through it.
@@ -1291,14 +1291,14 @@ async function fillField(ctx, selector, value, ab = ctx.state.hostBrowser) {
 }
 
 /**
- * Everything before anything is scanned: a Server, a Host, an enrollment, a QR,
+ * Everything before anything is scanned: a Relay, a Host, an enrollment, a QR,
  * and a phone. Named rather than counted from the end of {@link PRELUDE},
  * because `expired-code` is exactly "this and no scan" — and a step appended to
  * the prelude must not silently start a ceremony that scenario says it never
  * starts.
  */
 const SETUP = [
-  { name: 'server', title: 'Start the coordinating server', run: stepServer },
+  { name: 'server', title: 'Start the coordinating Relay', run: stepRelay },
   { name: 'host', title: 'Start the Host in the agent-browser harness', run: stepHost },
   { name: 'settings', title: 'Open Settings → Remote control', run: stepSettings },
   { name: 'enroll', title: 'Enroll this machine through the form', run: stepEnroll },
@@ -1353,12 +1353,12 @@ export const SCENARIOS = {
   // ceremony and no two digits.
   'expired-code': {
     expect:
-      'a setup code that ran out of time is told apart from one that was never for this server, and neither starts a ceremony',
+      'a setup code that ran out of time is told apart from one that was never for this Relay, and neither starts a ceremony',
     steps: [
       ...SETUP,
       {
         name: 'dead-code',
-        title: 'Paste a code that expired, then one for another server',
+        title: 'Paste a code that expired, then one for another Relay',
         run: stepDeadCode,
       },
     ],

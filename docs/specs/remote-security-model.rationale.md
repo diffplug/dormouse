@@ -13,7 +13,7 @@ to whoever compromises the account later. What a Host authorizes instead never
 syncs: the per-Host Client static never leaves the browser that generated it.
 
 **Why both verifiers must demand the same user-presence level.** Both evaluate
-the *same* assertion, so a Server demanding user verification while the Host
+the *same* assertion, so a Relay demanding user verification while the Host
 settles for presence leaves the weaker verifier deciding — inverting "the Host
 is the final authority" through a configuration difference rather than an
 attack. Mirroring the flag into enrollment stops each side reading its own
@@ -48,7 +48,7 @@ Client-facing push routes have no session-scoped alternative: a session is
 authenticated to an *account*, and an account may hold several Clients, so a
 route keyed on the session would let one phone read or delete another's rows;
 listing one would turn a capability into a directory. What the id buys is access
-control and nothing else — the Server still sees which endpoint each id
+control and nothing else — the Relay still sees which endpoint each id
 registers, when, and against which Host. The shared-endpoint correlation under
 [Residual metadata](#residual-metadata) is the concrete shape of that.
 
@@ -68,18 +68,18 @@ that takes the Host down at worst.
 **Why a first run costs three authenticator prompts, and every ceremony after it
 exactly one.** The three are distinct facts, each proved to a different party:
 `navigator.credentials.create` mints the passkey, sign-in proves it to the
-Server for the session token a relay socket needs, and the presence proof proves
+Relay for the session token a relay socket needs, and the presence proof proves
 it to the *Host* over that ceremony's own handshake. Collapsing any pair means
 one party trusting another's attestation of freshness — the substitution "the
 Host is the final authority" forbids. The rejected alternative, a
-Server-attested presence window, removes two prompts by handing the Server the
+Relay-attested presence window, removes two prompts by handing the Relay the
 ability to mint presence.
 
 **Why there is no app-session signing key beside the bearer token.** A second
 key would sign requests already carried over TLS to an origin the passkey is
 bound to, against an attacker who by assumption cannot read that channel — no
 threat in scope moves. It would also be a long-lived secret in browser storage
-that authorizes a Server request with no fresh assertion behind it, where the
+that authorizes a Relay request with no fresh assertion behind it, where the
 Client static authorizes nothing without one.
 
 ## Pairing
@@ -130,14 +130,14 @@ which the QR panel would render as a scan that never happened.
 **Why a failure before `Split` gets only a generic outer error.** There is no
 session to encrypt a denial on: everything before `Split` is handshake state,
 and any reply would be plaintext the relay can read and a stranger can provoke.
-A generic outer error ends the ceremony on the Server's pipe without naming
+A generic outer error ends the ceremony on the Relay's pipe without naming
 which of the handshake, the challenge, or the ACL was the reason — and without
 letting a flood of `init` frames buy a reply each.
 
 ## Push sealing
 
 **Why a push needs a construction of its own.** The Host is awake, the phone is
-asleep, and the Server holds the envelope until the push service delivers it.
+asleep, and the Relay holds the envelope until the push service delivers it.
 Nothing in the Noise session survives that gap, and reconstructing one would
 mean waking the phone to run a handshake before it could show a notification.
 
@@ -151,7 +151,7 @@ chaining key with a session it must never affect.
 
 ## Host bounds
 
-**Why the eight-invitation cap is shared with the Server's token cap.** The two
+**Why the eight-invitation cap is shared with the Relay's token cap.** The two
 credentials ride in one QR and die together: an invitation whose setup token has
 been evicted is a code that cannot register a passkey, and a token whose
 invitation is gone is a code that cannot pair. One `MAX_TOKENS_PER_HOST` keeps
@@ -257,17 +257,17 @@ as well would give a bump two places to update and one to forget.
 ## Host identity
 
 **Why the mint runs before the enrollment request.** A successful
-`POST /api/host/enroll` appends a `hosts.json` row on the Server and spends the
+`POST /api/host/enroll` appends a `hosts.json` row on the Relay and spends the
 installer's single-use token, and the Host can undo neither. Minting afterwards
 means a runtime that turns out to lack X25519 has already consumed the operator's
 one-shot credential and left a row nothing can use.
 
 **Why a missing static is backfilled at start rather than gated on.** Minting
 runs once, before enrollment, and is never retried afterwards, so a transient
-WebCrypto failure during that one attempt would leave an enrollment the Server
+WebCrypto failure during that one attempt would leave an enrollment the Relay
 has already committed and the Host can never complete. A gate with no backfill
 turns that into a permanently un-enrolled machine over a moment's failure, whose
-only operator recovery is deleting `hosts.json` on the Server. Persisting before
+only operator recovery is deleting `hosts.json` on the Relay. Persisting before
 the Host runs rules out the other alternative, a Host running on a static it has
 not yet written.
 
@@ -314,10 +314,10 @@ considers timing part of its threat model needs a different transport, not a
 different padding policy.
 
 **Why a shared push endpoint correlates across Hosts.** One service-worker scope
-holds exactly one `PushSubscription`, and the Server stores one row per
+holds exactly one `PushSubscription`, and the Relay stores one row per
 `(hostId, deliveryId)` against the endpoint that phone presented, so every
 `deliveryId` a Pocket profile registers lands on the same endpoint string and
-the Server can read off the set of Hosts one phone is paired with — information
+the Relay can read off the set of Hosts one phone is paired with — information
 the ACL deliberately keeps on each Host. Per-Host endpoints are not available:
 the browser mints subscriptions per scope, and a scope per Host would mean a
 service worker per Host.

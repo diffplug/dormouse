@@ -89,7 +89,7 @@ export class HostChallengeIssuer {
    *
    * `issue` has to do this because nothing else reclaims: `consume` removes only
    * challenges someone actually redeemed, and every flow here routinely abandons
-   * one. `POST /api/signin/begin` (`server/src/app.ts`) is the sharp case — it
+   * one. `POST /api/signin/begin` (`relay/src/app.ts`) is the sharp case — it
    * mints before the caller is authenticated at all, so without a sweep an
    * unauthenticated client can grow `#pending` for the process's lifetime just
    * by asking.

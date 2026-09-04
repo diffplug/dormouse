@@ -1,4 +1,4 @@
-// The one definition of where a Host may reach a relay server, shared by both
+// The one definition of where a Host may reach a Relay, shared by both
 // Hosts' build scripts.
 //
 // Both Hosts now run outside any webview — standalone's in the sidecar, VS
@@ -7,7 +7,7 @@
 // `vscode-ext/scripts/esbuild.mjs`), where the service refuses any origin
 // outside it. The *fact* is one fact — duplicating it meant a change to the
 // SaaS origin could ship one Host pointed at the old one. See
-// docs/specs/server.md → "Where a Host may reach a relay server".
+// docs/specs/relay.md → "Where a Host may reach a Relay".
 
 import { readFileSync } from 'node:fs';
 

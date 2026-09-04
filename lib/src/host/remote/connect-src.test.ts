@@ -32,7 +32,7 @@ describe('originAllowedByConnectSrc', () => {
   });
 
   it('treats https and wss as one scheme', () => {
-    // A Host reaches the same server over both, and the source list names both;
+    // A Host reaches the same Relay over both, and the source list names both;
     // either entry must answer for either scheme.
     expect(originAllowedByConnectSrc('https://x.example', 'wss://x.example')).toBe(true);
     expect(originAllowedByConnectSrc('wss://x.example', 'https://x.example')).toBe(true);
@@ -95,7 +95,7 @@ describe('the build-time check on a self-hoster’s override', () => {
 
   it('fails the build on an override the Host could never match', () => {
     // Each silently matches nothing at runtime, so the binary builds green and
-    // then refuses to enroll against the server it was built for.
+    // then refuses to enroll against the Relay it was built for.
     for (const bad of [
       'https://relay.example.ts.net/',
       'relay.example.ts.net',

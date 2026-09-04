@@ -3,7 +3,7 @@
  * (`docs/specs/pocket-app.md` -> Installable web app).
  *
  * **This is where a push is finally readable** — the Host seals to this
- * Client's own static and the Server forwards ciphertext
+ * Client's own static and the Relay forwards ciphertext
  * (`docs/specs/remote-security-model.md` -> Push sealing) — which is why the
  * worker is bundled rather than hand-copied, and imports the same `openPush`
  * and `boundedPushText` the rest of the system runs.
@@ -28,7 +28,7 @@ import type { KnownHostStore } from '../client/pocket-db';
  * Longest title/body this sink will render. The Host caps the same fields
  * before sealing them; this is the belt to that suspenders, applied where the
  * untrusted string is finally displayed and where — unlike before the seal —
- * it is the *only* remaining boundary, since the Server cannot read what it
+ * it is the *only* remaining boundary, since the Relay cannot read what it
  * forwards (`docs/specs/alert.md` -> Push notifications).
  */
 const PUSH_TEXT_LIMIT = 200;
@@ -97,7 +97,7 @@ async function openNotification(
   if (!fields || typeof fields !== 'object') return null;
   const { title, body, tag } = fields as { title?: unknown; body?: unknown; tag?: unknown };
   // Re-validated and re-bounded at the sink even though the Host bounded it:
-  // this text is terminal-supplied, and the Server can no longer be the second
+  // this text is terminal-supplied, and the Relay can no longer be the second
   // pair of eyes it used to be.
   const bounded = (value: unknown, fallback: string) =>
     boundedPushText(value, { limit: PUSH_TEXT_LIMIT, fallback });

@@ -17,7 +17,7 @@
  */
 
 export interface PendingPairing {
-  /** Server-assigned client socket id. */
+  /** Relay-assigned client socket id. */
   clientId: string;
   /** Immutable ceremony id; approve/deny must name this exact request. */
   pairingId: string;

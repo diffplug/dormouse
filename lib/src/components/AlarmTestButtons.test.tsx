@@ -146,7 +146,7 @@ describe('PushTestButton', () => {
     platform = {
       remoteHost: {
         command: vi.fn(async () => {
-          throw new Error('This machine is not connected to a Dormouse server.');
+          throw new Error('This machine is not connected to a Dormouse Relay.');
         }),
         on: () => () => {},
         respond: () => {},
@@ -156,6 +156,6 @@ describe('PushTestButton', () => {
     await act(async () => root.render(<PushTestButton />));
     await act(async () => button().click());
 
-    expect(text()).toContain('not connected to a Dormouse server');
+    expect(text()).toContain('not connected to a Dormouse Relay');
   });
 });

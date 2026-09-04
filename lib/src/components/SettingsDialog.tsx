@@ -43,13 +43,13 @@ const SECTION = 'mt-4 border-t border-border pt-3';
  * separate argument — see the comment on that branch below.
  *
  * The list is deliberately scoped to *this* machine, not the account: the ACL
- * that authorizes these devices lives on the Host and never on the Server
+ * that authorizes these devices lives on the Host and never on the Relay
  * (`docs/specs/remote-security-model.md`), so there is no account-wide device
  * list to show and the copy must not imply one.
  */
 function describePushTargets(push: PushDevicesState, hasHostService: boolean): string {
   if (push.status === 'loading') return 'Looking for phones…';
-  if (push.status === 'error') return 'Could not reach the server to list phones.';
+  if (push.status === 'error') return 'Could not reach the Relay to list phones.';
   // `no-host` covers two builds: one whose Host service simply has not enrolled,
   // and one with no Host service at all (`push-devices.ts` — the website leaves
   // it here forever). Only the first has a Remote control section beneath this
@@ -58,8 +58,8 @@ function describePushTargets(push: PushDevicesState, hasHostService: boolean): s
   // `no-host`.
   if (push.status === 'no-host') {
     return hasHostService
-      ? 'Connect this machine to a Dormouse server below to send push.'
-      : 'Connect this machine to a Dormouse server to send push.';
+      ? 'Connect this machine to a Dormouse Relay below to send push.'
+      : 'Connect this machine to a Dormouse Relay to send push.';
   }
   // Reached both before anything is paired and right after a pairing, so it
   // must read as true in each: not "nothing is paired" (the phone may well be

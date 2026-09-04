@@ -1,4 +1,4 @@
-/** Browser-only push setup; `PocketClient.subscribeToPush` registers it with the Server. */
+/** Browser-only push setup; `PocketClient.subscribeToPush` registers it with the Relay. */
 
 import {
   fromBase64Url,
@@ -56,7 +56,7 @@ export async function getPushAvailability(): Promise<PushAvailability> {
 }
 
 /**
- * Whether permission and the local subscription still match the Server row.
+ * Whether permission and the local subscription still match the Relay row.
  * A null endpoint digest is “no opinion,” preserving pre-fingerprint registrations.
  */
 export async function hasCurrentPushSubscription(
@@ -96,7 +96,7 @@ export async function subscribeToPushInBrowser(
   if (!registration) {
     throw new Error(
       'Dormouse could not start its background worker, so it cannot receive push. ' +
-        'This usually means the server is not being served over https.',
+        'This usually means the Relay is not being served over https.',
     );
   }
 

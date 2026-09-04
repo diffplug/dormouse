@@ -17,7 +17,7 @@ import {
   type PushSendRequest,
 } from 'remote-lib-common';
 import { commitPushDevices, invalidatePushDeviceRefreshes, watchPushRings } from './alert-push';
-// Delivery — the Server calls, the recipient rule, the title bounds — runs in
+// Delivery — the Relay calls, the recipient rule, the title bounds — runs in
 // the Host's process, so it lives beside neither webview nor sidecar.
 import { loadPushDevices, sendPush, toPushText, type AlertPushDeps } from './push-delivery';
 import { applyAlertSettingsFromHost, DEFAULT_ALERT_SETTINGS } from '../../lib/alert-settings';
@@ -26,7 +26,7 @@ import { clearPrimedActivity, primeActivity } from '../../lib/session-activity-s
 
 const PUSH_DELAY_MS = 20_000;
 
-const ENROLLMENT = { serverUrl: 'https://relay.example', hostToken: 'host-token' };
+const ENROLLMENT = { relayUrl: 'https://relay.example', hostToken: 'host-token' };
 
 /**
  * Base64url of exactly 32 bytes is 43 characters, and `isHostAclRecord` checks
@@ -40,7 +40,7 @@ function id32(name: string): string {
 /** Delivery is keyed on the record's `deliveryId`, never on who holds it. */
 const PHONE = id32('delivery-phone');
 const TABLET = id32('delivery-tablet');
-/** Still subscribed on the Server, no longer on this Host's ACL. */
+/** Still subscribed on the Relay, no longer on this Host's ACL. */
 const REVOKED = id32('delivery-revoked');
 
 /**
@@ -248,7 +248,7 @@ describe('alarm push', () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(lastRecipients()).toEqual([PHONE]);
     // The label and the collapse tag are sealed, so nothing readable rides on
-    // the request the Server sees.
+    // the request the Relay sees.
     const body = String(requests.at(-1)!.init?.body);
     expect(body).not.toContain('terminal');
     expect(body).not.toContain('pty-1');
@@ -277,9 +277,9 @@ describe('alarm push', () => {
   });
 
   it('names only devices still active in the ACL', async () => {
-    // The server still holds a subscription for a revoked client — nothing
+    // The Relay still holds a subscription for a revoked client — nothing
     // propagates a revocation — so the Host must not address it. It stays out
-    // of the request because the ACL, not the server's list, chooses targets.
+    // of the request because the ACL, not the Relay's list, chooses targets.
     subscribed = [PHONE, REVOKED];
     records = [aclRecord(PHONE, 'iPhone Safari')];
     stop = startPush(deps());
@@ -290,7 +290,7 @@ describe('alarm push', () => {
   });
 
   it('costs one request per alarm, not a lookup then a send', async () => {
-    // The ACL is local, and the Server intersects the names it is given with
+    // The ACL is local, and the Relay intersects the names it is given with
     // its own subscriptions anyway — so asking it first would only add a round
     // trip to the one path whose whole value is timeliness.
     stop = startPush(deps());
@@ -310,7 +310,7 @@ describe('alarm push', () => {
     expect(requests[0]!.init?.redirect).toBe('error');
   });
 
-  it('warns when the server accepted the send but no phone got it', async () => {
+  it('warns when the Relay accepted the send but no phone got it', async () => {
     // The send route answers 200 with counts even when every delivery failed —
     // a rotated VAPID key or a wedged push service must not be silent.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -329,7 +329,7 @@ describe('alarm push', () => {
     warn.mockRestore();
   });
 
-  it('warns rather than failing silently when the server rejects the send', async () => {
+  it('warns rather than failing silently when the Relay rejects the send', async () => {
     // A 401 from a revoked host token would otherwise resolve normally and
     // leave push permanently broken with nothing in the console.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -364,7 +364,7 @@ describe('alarm push', () => {
     expect(lastSend()).toBeNull();
   });
 
-  it('survives a server that cannot be reached', async () => {
+  it('survives a Relay that cannot be reached', async () => {
     const failing = deps({
       fetch: (async () => {
         throw new Error('network down');
@@ -381,7 +381,7 @@ describe('alarm push', () => {
 });
 
 /**
- * The seal itself, against real statics: the Server forwards these and reads
+ * The seal itself, against real statics: the Relay forwards these and reads
  * nothing (`docs/specs/remote-security-model.md` -> Push sealing). Driven
  * through `sendPush` rather than `sealPush` directly, so what is under test is
  * the payload the Host actually posts.
@@ -394,7 +394,7 @@ describe('sealed push', () => {
     const recipients = lastSend()!.recipients;
     expect(recipients.map((r) => r.deliveryId)).toEqual([PHONE, TABLET]);
     // Same plaintext, two Client statics, two salts: nothing about the pair of
-    // envelopes tells the Server they carry the same notification.
+    // envelopes tells the Relay they carry the same notification.
     expect(recipients[0]!.sealed.ct).not.toEqual(recipients[1]!.sealed.ct);
     expect(recipients[0]!.sealed.salt).not.toEqual(recipients[1]!.sealed.salt);
 
@@ -439,7 +439,7 @@ describe('sealed push', () => {
   });
 
   it('clamps the fan-out to the newest devices the send route accepts', async () => {
-    // The Server refuses the whole POST past this bound, so an unclamped Host
+    // The Relay refuses the whole POST past this bound, so an unclamped Host
     // would reach nobody rather than most — and the end it keeps matters:
     // `activeRecords()` is in approval order and a re-paired phone mints a new
     // record without superseding the old one, so the front of the list is where
@@ -493,8 +493,8 @@ describe('sealed push', () => {
 });
 
 describe('push device list', () => {
-  it('joins server subscriptions to ACL labels', async () => {
-    // By `deliveryId`: the Server knows the capability and nothing else, so the
+  it('joins Relay subscriptions to ACL labels', async () => {
+    // By `deliveryId`: the Relay knows the capability and nothing else, so the
     // Host is the only party that can put a human name against a row. The id is
     // the join key and stops here — it is a bearer capability, and the dialog
     // that reads this renders labels (`docs/specs/security-remote.md` -> "Trust boundary", the outbound FAIL IF).
@@ -511,7 +511,7 @@ describe('push device list', () => {
     expect(getPushDevices().devices).toEqual([{ label: 'iPhone Safari' }]);
   });
 
-  it('reports error rather than an empty list when the server is unreachable', async () => {
+  it('reports error rather than an empty list when the Relay is unreachable', async () => {
     // "We could not ask" and "nothing is subscribed" must not look the same.
     await refreshPushDevices(
       deps({

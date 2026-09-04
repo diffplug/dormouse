@@ -66,7 +66,7 @@ const PUSH_SEAL_INFO = utf8Encode(PUSH_SEAL_DOMAIN);
 /** The 96-bit nonce, spent exactly once because the key is minted per message. */
 const ZERO_NONCE = new Uint8Array(12);
 
-/** The sealed envelope, as it travels through the Server. */
+/** The sealed envelope, as it travels through the Relay. */
 export interface SealedPushV1 {
   readonly v: 1;
   /** The HKDF salt: 32 fresh random bytes, base64url. */
@@ -81,7 +81,7 @@ export interface SealedPushV1 {
  *
  * Exact lengths, not ranges: the salt is one fixed size and a different one is
  * a value nothing this side produced. The ciphertext bound is what keeps a
- * relay from asking a Server to forward, or a worker to decrypt, an
+ * relay from asking a Relay to forward, or a worker to decrypt, an
  * unboundedly large blob.
  */
 export function isSealedPushV1(value: unknown): value is SealedPushV1 {
@@ -134,7 +134,7 @@ export async function sealPush(
 /**
  * Open one sealed notification, or `null`.
  *
- * **Never throws.** Its input arrives from a push service by way of a Server
+ * **Never throws.** Its input arrives from a push service by way of a Relay
  * that may have substituted anything at all, and its caller is a service worker
  * that must answer every delivery with a visible notification
  * (`docs/specs/pocket-app.md` -> Installable web app). Every failure — a wrong
