@@ -24,7 +24,7 @@ export function meta({ location }: MetaArgs) {
   return siteMeta(location.pathname, {
     title: "Pay us to host — Dormouse",
     description:
-      "Coming soon: a managed Dormouse coordinating server and optional ElevenLabs voice, without giving up free self-hosting.",
+      "Coming soon: a managed Dormouse Relay and optional ElevenLabs voice, without giving up free self-hosting.",
   });
 }
 
@@ -53,14 +53,14 @@ export default function Hosted() {
               aria-hidden="true"
             />
             <AnchoredHeading id="remote-control" spacing="mt-0 mb-3">
-              Remote control, without running the server
+              Remote control, without running the Relay
             </AnchoredHeading>
             <p className={`mb-4 font-display text-sm ${ACCENT_TEXT_CLASS}`}>
               Coming soon · paid convenience
             </p>
             <p className="mb-5 text-xl leading-relaxed">
-              Use Dormouse Pocket without deploying or maintaining a coordinating server.
-              Hosted will run the coordinator that connects your phone to your computer.
+              Use Dormouse Pocket without deploying or maintaining a Relay. Hosted operates
+              the Relay that connects your phone to your computer.
             </p>
             <a
               href="#updates"
@@ -72,7 +72,7 @@ export default function Hosted() {
             <dl className="mt-8 grid gap-4 border-t border-[var(--color-text)]/15 pt-5 text-sm sm:grid-cols-3">
               <div>
                 <dt className="font-display">Hosted runs</dt>
-                <dd className={`mt-1 ${MUTED_TEXT_CLASS}`}>The coordinating server</dd>
+                <dd className={`mt-1 ${MUTED_TEXT_CLASS}`}>The Relay</dd>
               </div>
               <div>
                 <dt className="font-display">You keep</dt>
@@ -84,7 +84,7 @@ export default function Hosted() {
               </div>
             </dl>
             <p className="mt-3 text-sm">
-              Prefer to operate the server yourself?{" "}
+              Prefer to run your own Relay?{" "}
               <a href="#self-hosting" className={LINK_CLASS}>
                 Self-hosting stays free
               </a>
@@ -129,7 +129,7 @@ export default function Hosted() {
         />
         <AnchoredHeading id="self-hosting" spacing="mt-0 mb-4">Self-hosting stays</AnchoredHeading>
         <p className="text-lg leading-relaxed">
-          The coordinating server remains available in the repository under
+          The Relay remains available in the repository under
           FSL-1.1-MIT and free for internal use. Hosted will be a paid convenience option,
           not a replacement. If you would rather operate it, the{" "}
           <a href={sitePath("/docs/self-host")} className={LINK_CLASS}>

@@ -168,7 +168,7 @@ export class SimAuthenticator {
  * authoritative — it learns only routing values and a handshake hash, and its
  * answer authorizes nothing.
  */
-export class SimServer {
+export class SimRelay {
   #accounts = new Map(); // accountId -> Set of credentialIds
 
   registerAccount(accountId) {
@@ -183,9 +183,9 @@ export class SimServer {
   /** Requirement 2: "The Relay recognizes the account." */
   validateAccount(accountId, credentialId) {
     const credentials = this.#accounts.get(accountId);
-    if (!credentials) throw new Error(`server: unknown account ${accountId}`);
+    if (!credentials) throw new Error(`relay: unknown account ${accountId}`);
     if (!credentials.has(credentialId)) {
-      throw new Error(`server: credential ${credentialId} not registered to ${accountId}`);
+      throw new Error(`relay: credential ${credentialId} not registered to ${accountId}`);
     }
   }
 
@@ -209,7 +209,7 @@ export class SimServer {
  * A compromised coordinating Relay: vouches for anyone. Used to prove the
  * Burrow denies access even when every Relay-side check is attacker-controlled.
  */
-export class CompromisedServer extends SimServer {
+export class CompromisedRelay extends SimRelay {
   validateAccount() {}
 }
 
@@ -473,17 +473,17 @@ export class SimBurrow {
  * **per Burrow**, the Burrow statics it has pinned, and the passkey it signs with.
  */
 export class SimClient {
-  static async create({ label = 'Test Client', origin, server } = {}) {
-    return new SimClient({ label, origin, server });
+  static async create({ label = 'Test Client', origin, relay } = {}) {
+    return new SimClient({ label, origin, relay });
   }
 
   /** burrowId -> NoiseKeyPair; different Burrows never share a Client key. */
   #statics = new Map();
 
-  constructor({ label, origin, server }) {
+  constructor({ label, origin, relay }) {
     this.label = label;
     this.origin = origin;
-    this.server = server;
+    this.relay = relay;
     /** burrowId -> the Burrow static this Client pinned at pairing, base64url. */
     this.pins = new Map();
     /** burrowId -> the fields a `KnownBurrowV1` keeps after a successful pairing. */
@@ -529,8 +529,8 @@ export class SimClient {
    * The proof both ceremonies carry: ask the Relay for a nonce over this
    * binding, then assert with the passkey over the challenge it derives.
    */
-  async presenceProof({ binding, accountId, authenticator, rpId, server = this.server, tamper = {} }) {
-    const { relayNonce, challenge } = await server.beginReauth({
+  async presenceProof({ binding, accountId, authenticator, rpId, relay = this.relay, tamper = {} }) {
+    const { relayNonce, challenge } = await relay.beginReauth({
       accountId,
       credentialId: authenticator.credentialId,
       binding,
@@ -565,7 +565,7 @@ export class SimClient {
     {
       accountId,
       authenticator,
-      server = this.server,
+      relay = this.relay,
       approve = true,
       approvedBy = 'burrow-user',
       label,
@@ -608,7 +608,7 @@ export class SimClient {
         accountId,
         authenticator,
         rpId: burrow.policy.rpId,
-        server,
+        relay,
         tamper,
       }));
     // Pocket samples the two digits it displays; the person reads them off the
@@ -661,9 +661,9 @@ export class SimClient {
    */
   async connect(
     burrow,
-    { accountId, authenticator, server = this.server, connectionId = randomRoutingId(), tamper = {} } = {},
+    { accountId, authenticator, relay = this.relay, connectionId = randomRoutingId(), tamper = {} } = {},
   ) {
-    if (server) server.validateAccount(accountId, authenticator.credentialId);
+    if (relay) relay.validateAccount(accountId, authenticator.credentialId);
     const staticKeyPair = await this.#staticFor(burrow.burrowId);
     // An unpaired Client has no pin, so it uses the Burrow's public static
     // directly. That models an attacker who already knows it — which every
@@ -695,7 +695,7 @@ export class SimClient {
         accountId,
         authenticator,
         rpId: burrow.policy.rpId,
-        server,
+        relay,
         tamper,
       }));
     const answered = await burrow.handleConnectionRequest(

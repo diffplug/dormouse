@@ -68,7 +68,7 @@ describe("every page in the rail", () => {
     expect(markup).toContain("remote-security-model.md");
   });
 
-  it("opens both hosting choices with the server boundary", () => {
+  it("opens both hosting choices with the Relay boundary", () => {
     const selfHostMarkup = renderToStaticMarkup(
       <MemoryRouter><SelfHostDocs /></MemoryRouter>,
     );
@@ -78,7 +78,7 @@ describe("every page in the rail", () => {
 
     for (const markup of [selfHostMarkup, hostedMarkup]) {
       expect(markup).toContain("Dormouse is just a terminal — it needs no server or hosting.");
-      expect(markup).toContain("They require a signalling server");
+      expect(markup).toContain("They require a Relay to");
       expect(markup).toContain("Dormouse’s remote features make no network requests");
     }
     expect(selfHostMarkup.indexOf("Dormouse is just a terminal —"))

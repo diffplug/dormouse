@@ -15,12 +15,12 @@ import assert from 'node:assert/strict';
 
 import { fromBase64Url, openPush, sealPush, utf8Decode, utf8Encode } from '../dist/index.js';
 import {
-  CompromisedServer,
+  CompromisedRelay,
   FakeClock,
   SimAuthenticator,
   SimClient,
   SimBurrow,
-  SimServer,
+  SimRelay,
 } from './harness/actors.mjs';
 
 const RP_ID = 'dormouse.dev';
@@ -29,12 +29,12 @@ const ACCOUNT = 'ned@dormouse.dev';
 
 async function world() {
   const clock = new FakeClock();
-  const server = new SimServer();
+  const relay = new SimRelay();
   const burrow = await SimBurrow.create({ label: 'Laptop', rpId: RP_ID, origin: ORIGIN, clock });
   const authenticator = await SimAuthenticator.create({ rpId: RP_ID });
-  const client = await SimClient.create({ label: 'iPhone Safari', origin: ORIGIN, server });
-  server.registerPasskey(ACCOUNT, authenticator);
-  return { clock, server, burrow, authenticator, client };
+  const client = await SimClient.create({ label: 'iPhone Safari', origin: ORIGIN, relay });
+  relay.registerPasskey(ACCOUNT, authenticator);
+  return { clock, relay, burrow, authenticator, client };
 }
 
 test('pairing then connecting succeeds end to end', async () => {
@@ -59,14 +59,14 @@ test('pairing then connecting succeeds end to end', async () => {
 });
 
 test('adding a new passkey does not grant burrow access', async () => {
-  const { server, burrow, authenticator, client } = await world();
+  const { relay, burrow, authenticator, client } = await world();
   await client.pair(burrow, { accountId: ACCOUNT, authenticator });
 
   // The account gains a second passkey — entirely legitimate on the Relay —
   // and an attacker (or new browser) holds it in an unpaired browser profile.
   const newPasskey = await SimAuthenticator.create({ rpId: RP_ID });
-  server.registerPasskey(ACCOUNT, newPasskey);
-  const newBrowser = await SimClient.create({ label: 'New Browser', origin: ORIGIN, server });
+  relay.registerPasskey(ACCOUNT, newPasskey);
+  const newBrowser = await SimClient.create({ label: 'New Browser', origin: ORIGIN, relay });
 
   const fromNewBrowser = await newBrowser.connect(burrow, {
     accountId: ACCOUNT,
@@ -95,9 +95,9 @@ test('compromising the Relay does not grant burrow access', async () => {
   // and mints a presence challenge for any binding. They hold a passkey and a
   // browser of their own, and the Burrow's static is public, so they can even
   // complete the handshake.
-  const evilServer = new CompromisedServer();
+  const evilRelay = new CompromisedRelay();
   const attackerPasskey = await SimAuthenticator.create({ rpId: RP_ID });
-  const attacker = await SimClient.create({ label: 'Attacker', origin: ORIGIN, server: evilServer });
+  const attacker = await SimClient.create({ label: 'Attacker', origin: ORIGIN, relay: evilRelay });
 
   const decision = await attacker.connect(burrow, {
     accountId: ACCOUNT,
@@ -116,7 +116,7 @@ test('compromising the Relay does not grant burrow access', async () => {
 });
 
 test('a compromised Relay cannot substitute a passkey it does hold', async () => {
-  // The sharper half of server compromise: the attacker replays the *paired*
+  // The sharper half of Relay compromise: the attacker replays the *paired*
   // credential id, which they can read off any relayed binding. The record
   // stores a hash of the paired key, the assertion is verified against the
   // presented key, and the two must agree — so a passkey they can actually
@@ -124,10 +124,10 @@ test('a compromised Relay cannot substitute a passkey it does hold', async () =>
   const { burrow, authenticator, client } = await world();
   await client.pair(burrow, { accountId: ACCOUNT, authenticator });
 
-  const evilServer = new CompromisedServer();
+  const evilRelay = new CompromisedRelay();
   const impostor = await SimAuthenticator.create({ rpId: RP_ID });
   impostor.credentialId = authenticator.credentialId;
-  const attacker = await SimClient.create({ label: 'Attacker', origin: ORIGIN, server: evilServer });
+  const attacker = await SimClient.create({ label: 'Attacker', origin: ORIGIN, relay: evilRelay });
 
   const decision = await attacker.connect(burrow, { accountId: ACCOUNT, authenticator: impostor });
   assert.equal(decision.ok, false);
@@ -138,12 +138,12 @@ test('a compromised Relay cannot substitute a passkey it does hold', async () =>
 });
 
 test('passkey synchronization does not automatically create trusted clients', async () => {
-  const { server, burrow, authenticator, client } = await world();
+  const { relay, burrow, authenticator, client } = await world();
   await client.pair(burrow, { accountId: ACCOUNT, authenticator });
 
   // The same passkey syncs to a second device (same SimAuthenticator, new
   // SimClient) — exactly what iCloud Keychain does.
-  const synced = await SimClient.create({ label: 'iPad Safari', origin: ORIGIN, server });
+  const synced = await SimClient.create({ label: 'iPad Safari', origin: ORIGIN, relay });
   const beforePairing = await synced.connect(burrow, { accountId: ACCOUNT, authenticator });
   assert.equal(beforePairing.ok, false);
   assert.deepEqual(beforePairing.misses, ['client-not-paired']);
@@ -166,9 +166,9 @@ test('passkey synchronization does not automatically create trusted clients', as
 // (docs/specs/remote-security-model.md § Push sealing); the mechanics of that
 // seal are `push-seal.test.mjs`, and what this pins is the end-to-end claim.
 test('a push the Burrow seals is readable only by the Client it names', async () => {
-  const { server, burrow, authenticator, client } = await world();
+  const { relay, burrow, authenticator, client } = await world();
   await client.pair(burrow, { accountId: ACCOUNT, authenticator });
-  const other = await SimClient.create({ label: 'iPad Safari', origin: ORIGIN, server });
+  const other = await SimClient.create({ label: 'iPad Safari', origin: ORIGIN, relay });
   await other.pair(burrow, { accountId: ACCOUNT, authenticator });
 
   const plaintext = utf8Encode(JSON.stringify({ title: 'build finished', tag: 'pty-1' }));
@@ -375,7 +375,7 @@ test('a QR minted by one Burrow cannot pair a Client served from another origin'
   const { burrow, authenticator } = await world();
   const foreign = await SimClient.create({ label: 'Wrong Origin', origin: 'https://evil.example' });
   await assert.rejects(
-    foreign.pair(burrow, { accountId: ACCOUNT, authenticator, server: new SimServer() }),
+    foreign.pair(burrow, { accountId: ACCOUNT, authenticator, relay: new SimRelay() }),
     /cannot parse/,
   );
 });

@@ -296,7 +296,7 @@ test('an expired code is the one refusal a caller can tell apart', async () => {
   assert.equal(await pairingInvitationExpired(EXPECTED_URL, ORIGIN, PAST), true);
   assert.equal(await pairingInvitationExpired(`${ORIGIN}/#pair?nonsense`, ORIGIN, PAST), false);
   // A real code for a different deployment, long dead: still not a setup code
-  // for *this* server, which is what the user needs to hear.
+  // for *this* relay, which is what the user needs to hear.
   const foreign = EXPECTED_URL.replace(ORIGIN, 'https://pocket.evil');
   assert.equal(await pairingInvitationExpired(foreign, ORIGIN, PAST), false);
   // The live side of the boundary is the parser's own: expiry second inclusive.

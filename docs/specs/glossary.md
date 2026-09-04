@@ -94,6 +94,18 @@ A Workspace projects a **union status** over its member Surfaces' Activity:
 
 The Pane / Surface model, surface kinds, and their persistence are live; the Workspace / Window containers are dormant behind `dormouse.flags.workspaces` (`docs/specs/layout.md` → Workspaces), so the app runs one implicit Workspace. Ledger: `docs/specs/layout.md` `## Future` (**Scope: workspaces-rollout**); this glossary does not track it.
 
+## Roles
+
+Remote control has exactly three roles. `docs/specs/remote-security-model.md` owns the trust between them; these are the names.
+
+| Role | What it is | What it decides |
+|---|---|---|
+| **Burrow** | The app that owns terminal Surfaces and the processes behind them: the Standalone app, or the VS Code extension. **Two on one machine are two Burrows**, enrolled and paired separately, and Pocket lists them as two rows. | Every remote-access grant. Pairing approval and the ACL live here and nowhere else. |
+| **Client** | What controls a Burrow from somewhere else. **Pocket** is the phone Client (`docs/specs/pocket-app.md`); Canopy is a future one (`## Future`). | Nothing on its own — a Client asks. |
+| **Relay** | The coordinating server: accounts, presence, push fan-out, and an encrypted byte pipe between Client and Burrow (`docs/specs/relay.md`). **Dormouse Hosted** is the managed Relay; `SELF_HOST.md` runs your own. | Routing. It holds no terminal and no authorization. |
+
+**A Burrow *is* a platform host** — the process behind the webview that owns the PTYs — seen from the side a Client pairs with. *Host* stays the implementation word for that side (`lib/src/host/`, webview↔host messages, `pty-host`, VS Code's extension host) and keeps its `Host`-header, hostname, and self-host senses; **never use *Host* for the remote-control role, or *Server* for the Relay.**
+
 ## Modes
 
 A Wall is always in exactly one input mode; `docs/specs/layout.md` owns the switching gestures and per-mode behavior. Canonical names:
@@ -252,6 +264,8 @@ Use glossary names instead. A left-column term retains meaning only where noted.
 | **surface** | Not retired. **Session** names only the terminal kind; **Surface** covers both. |
 | **panel / pane / leaf** | Prefer **pane** for the layout slot; **leaf** is Lath's tree node for it (1:1). "panel" survives only in React component names (`TerminalPanel`, `BrowserPanel`, `IframePanel`, `AgentBrowserPanel`). |
 | **face** | Retired — capabilities are named by the kinds: "console face" → **terminal**, "web face" → **browser**. Gate with `hasTerminal` / `hasBrowser`, never a face-set. |
+| **Host** | Retired as the remote-control role → **Burrow** ([Roles](#roles)). Keeps the platform sense — the process behind the webview — plus the `Host` header, hostnames, and "self-host". |
+| **Server** | Retired for the coordinating server → **Relay**. Keeps HTTP servers, `net.Server`, dev servers, and "self-host". |
 | **tether** | Remote-control only (`docs/specs/remote-api.md`): a display showing "tethering to \<device\>" has ceded terminal size authority to a remote viewer — the semantics hold today, the display is staged. Never a layout term, never for Pane/Door relationships. |
 
 Remote-only vocabulary (**Viewer**, and the wire-level `DirectoryEntry` projection of a pane) is defined in `docs/specs/remote-api.md`.
@@ -269,3 +283,5 @@ Remote-only vocabulary (**Viewer**, and the wire-level `DirectoryEntry` projecti
 ## Future
 
 - **Typed precondition errors.** The Liskov contract's enforcement: a gated call against the wrong state (e.g. `writePty` on a non-`Live` Process) fails with a typed error naming the violated precondition, replacing today's silent early return.
+- **Canopy — a VR Client.** The 3D/WebXR rendering lab (`docs/specs/webgl-text.md`) becomes a second [Client](#roles) beside Pocket, controlling a Burrow over the same protocol. Nothing of the Client half is built; canopy is Storybook-only.
+- **Dormouse Burrow — a headless Burrow.** A Burrow with no local UI, so a machine nobody sits at can still be paired with. It changes no role: the same enrollment, ACL, and pairing approval, with the approval surfaced somewhere other than a Wall.
