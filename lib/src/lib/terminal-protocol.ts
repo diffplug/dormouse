@@ -101,6 +101,13 @@ export const ITERM2_COMPAT_VERSION = '3.5.0';
 export const ITERM2_DEVICE_ATTRIBUTES_RESPONSE = `\x1bP>|iTerm2 ${ITERM2_COMPAT_VERSION}\x1b\\`;
 
 export class TerminalProtocolParser {
+  /**
+   * Bytes re-read at the head of the next chunk: an unterminated OSC this
+   * parser will consume, or a partial `CSI > q` in ground text. **Never set
+   * while {@link forwarding} is** — the two are assigned in branches that each
+   * end the chunk, and `processForwarded` never reads this, so a byte held here
+   * mid-string would rejoin the stream after the string it belonged inside.
+   */
   private pending = '';
   /**
    * Non-null while a string control the parser does not consume streams
@@ -148,13 +155,24 @@ export class TerminalProtocolParser {
     while (index < text.length) {
       const control = findNextStringControl(text, index);
       if (!control) {
+        // The chunk ends in ground text, so hold back a trailing partial
+        // `CSI > q` for the next one rather than emitting it.
         const tail = stripStandaloneBells(text.slice(index), events);
-        visibleData += tail;
-        textData += tail;
+        this.pending = takeDeviceAttributePendingSuffix(tail);
+        const ground = answerDeviceAttributeQueries(
+          this.pending ? tail.slice(0, -this.pending.length) : tail,
+          events,
+        );
+        visibleData += ground;
+        textData += ground;
         break;
       }
 
-      const gap = stripStandaloneBells(text.slice(index, control.index), events);
+      // A gap ends where an introducer begins, so nothing of it is ever held.
+      const gap = answerDeviceAttributeQueries(
+        stripStandaloneBells(text.slice(index, control.index), events),
+        events,
+      );
       visibleData += gap;
       textData += gap;
 
@@ -196,21 +214,12 @@ export class TerminalProtocolParser {
       index = controlEnd.end;
     }
 
-    const stripped = stripDeviceAttributeQueries(visibleData, events);
-    if (stripped.pending) {
-      this.pending = stripped.pending + this.pending;
-      // Those bytes are re-read next chunk; don't let them land in textData twice.
-      if (textData.endsWith(stripped.pending)) textData = textData.slice(0, -stripped.pending.length);
-    }
     return {
-      visibleData: stripped.visibleData,
+      visibleData,
       events: filterTerminalBellEvents(events),
-      // The query sat in ground text, so it reached `textData` as well; a
-      // consumed sequence belongs to neither projection, and `textData` must
-      // stay a subset of `visibleData` for a stream that ships both.
-      textData: textData.replace(DEVICE_ATTRIBUTE_QUERY, ''),
-      // Nothing was open when this chunk arrived: whatever `pending` holds is a
-      // sequence being consumed, which reaches no consumer at all.
+      textData,
+      // Nothing was open when this chunk arrived: whatever `pending` holds is
+      // being consumed, so it reaches no consumer at all.
       resumedStringEnd: 0,
     };
   }
@@ -798,17 +807,21 @@ const DEVICE_ATTRIBUTE_PENDING_SUFFIXES = ['\x1b[>', '\x1b[', '\x1b', '\x9b>', '
 /** The iTerm2 extended-DA query, in both its ESC and C1 spellings. */
 const DEVICE_ATTRIBUTE_QUERY = /\x1b\[>q|\x9b>q/g;
 
-function stripDeviceAttributeQueries(
-  visibleData: string,
-  events: TerminalProtocolEvent[],
-): { visibleData: string; pending: string } {
-  const pending = takeDeviceAttributePendingSuffix(visibleData);
-  const searchableData = pending ? visibleData.slice(0, -pending.length) : visibleData;
-  const stripped = searchableData.replace(DEVICE_ATTRIBUTE_QUERY, () => {
+/**
+ * Consume every `CSI > q` in a run of **ground text** and queue its answer.
+ *
+ * Ground only. The same bytes inside a string control belong to that sequence:
+ * deleting them corrupts a sixel or Kitty payload on its way to xterm.js *and*
+ * writes an answer nobody asked for into the PTY's input. Only the C1 spelling
+ * can arrive that way — an `ESC` would have ended the string
+ * ({@link findStringControlEnd}) — which is precisely why scanning the
+ * assembled output rather than its ground runs read as safe.
+ */
+function answerDeviceAttributeQueries(ground: string, events: TerminalProtocolEvent[]): string {
+  return ground.replace(DEVICE_ATTRIBUTE_QUERY, () => {
     events.push({ kind: 'response', data: ITERM2_DEVICE_ATTRIBUTES_RESPONSE });
     return '';
   });
-  return { visibleData: stripped, pending };
 }
 
 function takeDeviceAttributePendingSuffix(visibleData: string): string {

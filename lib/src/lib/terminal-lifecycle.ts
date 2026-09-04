@@ -57,10 +57,13 @@ import { readLogicalLineFromBuffer, type BufferLike } from './terminal-buffer-re
 import { UNNAMED_PANEL_TITLE } from './terminal-state';
 import { vscodeWorkbenchCommandForKeydown } from './vscode-keybindings';
 
-// Per-Session limits are explicit because Sessions survive unmount/minimize and
-// a product Window can retain many of them at once. 2^23 pixels still admits a
-// 3840x2160 image without granting every orphaned Session the addon's 2^24-pixel
-// and 128 MB defaults. `storageLimit` must stay at or above `pixelLimit` * 4
+// Only `pixelLimit` and `storageLimit` differ from the pinned addon's
+// `DEFAULT_OPTIONS` (2^24 pixels, 128 MB); every other line below restates a
+// default, so that a bump which lowers one cannot silently shrink the bound
+// without failing review here. Per-Session limits are explicit because Sessions
+// survive unmount/minimize and a product Window can retain many at once: 2^23
+// pixels still admits a 3840x2160 image without granting every orphaned Session
+// the addon's ceiling. `storageLimit` must stay at or above `pixelLimit` * 4
 // bytes (the addon derives its cache capacity as `storageLimit / 4 * 1e6`
 // pixels), or admitting one full-size image evicts every other image first and
 // still lands over budget.
