@@ -63,8 +63,8 @@ describe("every page in the rail", () => {
 
   it("labels Hosted security as a reviewed design target, not a current guarantee", () => {
     const markup = renderToStaticMarkup(<MemoryRouter><Hosted /></MemoryRouter>);
-    expect(markup).toContain("These are design targets, not launched guarantees");
-    expect(markup).toContain("pass independent review");
+    expect(markup).toContain("Paid hosting remains a design target pending independent review");
+    expect(markup).toContain("would still see connection metadata");
     expect(markup).toContain("remote-security-model.md");
   });
 
@@ -77,16 +77,16 @@ describe("every page in the rail", () => {
     );
 
     for (const markup of [selfHostMarkup, hostedMarkup]) {
-      expect(markup).toContain("Dormouse is just a terminal!");
-      expect(markup).toContain("does not need a server or hosting of any kind");
-      expect(markup).toContain("who is connected to whom");
+      expect(markup).toContain("Dormouse is just a terminal — it needs no server or hosting.");
+      expect(markup).toContain("They require a signalling server");
+      expect(markup).toContain("Dormouse’s remote features make no network requests");
     }
-    expect(selfHostMarkup.indexOf("Dormouse is just a terminal!"))
+    expect(selfHostMarkup.indexOf("Dormouse is just a terminal —"))
       .toBeLessThan(selfHostMarkup.indexOf('id="security-model"'));
-    expect(hostedMarkup.indexOf("Dormouse is just a terminal!"))
+    expect(hostedMarkup.indexOf("Dormouse is just a terminal —"))
       .toBeLessThan(hostedMarkup.indexOf('id="remote-control"'));
-    expect(selfHostMarkup).toContain("encrypted end to end");
-    expect(hostedMarkup).toContain("These are design targets, not launched guarantees");
+    expect(selfHostMarkup).toContain("See the planned paid option");
+    expect(hostedMarkup).toContain("Paid hosting remains a design target pending independent review");
   });
 
   it("names the two hosting choices as actions", () => {

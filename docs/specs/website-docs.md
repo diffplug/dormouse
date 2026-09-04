@@ -325,9 +325,9 @@ the `nedshed.dev` devlog handoff and keeps email per tab;
 `website/src/components/NotifySignupForm.test.tsx` pins both.
 
 **Must open both hosting pages with the server boundary:** Dormouse needs none;
-push and phone control need coordination. `/docs/self-host` states
-shipped E2E, Host authorization, and residual metadata; `/hosted` marks these as
-pending-review targets and links the current model.
+remote features require a configured signalling server and otherwise make no network
+requests. `/docs/self-host` links `/hosted`; `/hosted` labels hosting pending review,
+discloses metadata, and links the model.
 `website/src/lib/docs-rail.test.tsx` pins this.
 
 **Must link the preview from:** homepage, Pocket marketing/tutorial, self-host
