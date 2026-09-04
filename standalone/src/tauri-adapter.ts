@@ -13,6 +13,7 @@ import type {
   IframeProxyResult,
   OpenPort,
   PlatformAdapter,
+  PtyDataDetail,
   PtyInfo,
   RemoteHostLink,
 } from "dormouse-lib/lib/platform/types";
@@ -75,7 +76,7 @@ const errMessage = (err: unknown): string =>
  *   Shell processes
  */
 export class TauriAdapter implements PlatformAdapter {
-  private dataHandlers = new Set<(detail: { id: string; data: string }) => void>();
+  private dataHandlers = new Set<(detail: PtyDataDetail) => void>();
   private exitHandlers = new Set<(detail: { id: string; exitCode: number }) => void>();
   private listHandlers = new Set<(detail: { ptys: PtyInfo[] }) => void>();
   private replayHandlers = new Set<(detail: { id: string; data: string }) => void>();
@@ -134,8 +135,9 @@ export class TauriAdapter implements PlatformAdapter {
         if (parsed.visibleData.length === 0) return;
         // Feed visible data to alert manager for visual activity monitoring.
         this.alertManager.onData(id);
+        const textData = parsed.textData === parsed.visibleData ? undefined : parsed.textData;
         for (const handler of this.dataHandlers) {
-          handler({ id, data: parsed.visibleData });
+          handler({ id, data: parsed.visibleData, textData });
         }
       }),
 
@@ -405,7 +407,7 @@ export class TauriAdapter implements PlatformAdapter {
     return () => { this.filesDroppedHandlers.delete(handler); };
   }
 
-  onPtyData(handler: (detail: { id: string; data: string }) => void): void {
+  onPtyData(handler: (detail: PtyDataDetail) => void): void {
     this.dataHandlers.add(handler);
   }
 

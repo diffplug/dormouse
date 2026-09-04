@@ -73,7 +73,10 @@ export interface PtyInfo {
 
 // Messages from extension host → webview
 export type ExtensionMessage =
-  | { type: 'pty:data'; id: string; data: string }
+  // `textData` is the chunk with string-control payloads removed, for the
+  // prompt heuristic. Omitted when it would equal `data` — the common case —
+  // so this never doubles the bytes on the wire (docs/specs/transport.md).
+  | { type: 'pty:data'; id: string; data: string; textData?: string }
   | { type: 'pty:exit'; id: string; exitCode: number }
   | { type: 'terminal:semanticEvents'; id: string; events: TerminalSemanticEvent[] }
   | { type: 'pty:list'; ptys: PtyInfo[] }

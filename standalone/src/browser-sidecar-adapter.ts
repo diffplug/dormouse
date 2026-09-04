@@ -10,6 +10,7 @@ import type {
   IframeProxyResult,
   OpenPort,
   PlatformAdapter,
+  PtyDataDetail,
   PtyInfo,
   RemoteHostLink,
 } from "dormouse-lib/lib/platform/types";
@@ -57,7 +58,7 @@ function decodeBase64Bytes(base64: string): Uint8Array {
 }
 
 export class BrowserSidecarAdapter implements PlatformAdapter {
-  private dataHandlers = new Set<(detail: { id: string; data: string }) => void>();
+  private dataHandlers = new Set<(detail: PtyDataDetail) => void>();
   private exitHandlers = new Set<(detail: { id: string; exitCode: number }) => void>();
   private listHandlers = new Set<(detail: { ptys: PtyInfo[] }) => void>();
   private replayHandlers = new Set<(detail: { id: string; data: string }) => void>();
@@ -226,7 +227,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   // where a drop yields `File` objects and no host paths, so there is nothing to
   // report. Implementing it would claim the capability and never fire.
 
-  onPtyData(handler: (detail: { id: string; data: string }) => void): void { this.dataHandlers.add(handler); }
+  onPtyData(handler: (detail: PtyDataDetail) => void): void { this.dataHandlers.add(handler); }
   offPtyData(handler: (detail: { id: string; data: string }) => void): void { this.dataHandlers.delete(handler); }
   onPtyExit(handler: (detail: { id: string; exitCode: number }) => void): void { this.exitHandlers.add(handler); }
   offPtyExit(handler: (detail: { id: string; exitCode: number }) => void): void { this.exitHandlers.delete(handler); }
@@ -301,7 +302,8 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
       for (const response of collectTerminalProtocolResponses(parsed.events)) this.writePty(id, response);
       if (parsed.visibleData.length === 0) return;
       this.alertManager.onData(id);
-      for (const handler of this.dataHandlers) handler({ id, data: parsed.visibleData });
+      const textData = parsed.textData === parsed.visibleData ? undefined : parsed.textData;
+      for (const handler of this.dataHandlers) handler({ id, data: parsed.visibleData, textData });
     } else if (event === "pty:exit") {
       const payload = data as { id: string; exitCode: number };
       this.alertManager.onExit(payload.id, payload.exitCode);

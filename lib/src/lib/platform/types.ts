@@ -154,6 +154,19 @@ export interface RemoteHostLink {
   on(name: string, listener: (data: unknown) => void): () => void;
 }
 
+/**
+ * One chunk of PTY output after protocol parsing. `data` is what xterm.js
+ * renders; `textData` is the same chunk with string-control payloads removed,
+ * for consumers reading it as text. **Omitted when identical to `data`**, which
+ * is the common case, so the two never cost twice the bytes over a transport
+ * (`docs/specs/transport.md`).
+ */
+export interface PtyDataDetail {
+  id: string;
+  data: string;
+  textData?: string;
+}
+
 export interface PlatformAdapter {
   // Lifecycle
   init(): Promise<void>;
@@ -299,8 +312,8 @@ export interface PlatformAdapter {
   agentBrowserBringToFront?(session: string, binaryPath?: string): Promise<void>;
 
   // PTY event listeners
-  onPtyData(handler: (detail: { id: string; data: string }) => void): void;
-  offPtyData(handler: (detail: { id: string; data: string }) => void): void;
+  onPtyData(handler: (detail: PtyDataDetail) => void): void;
+  offPtyData(handler: (detail: PtyDataDetail) => void): void;
   onPtyExit(handler: (detail: { id: string; exitCode: number }) => void): void;
   offPtyExit(handler: (detail: { id: string; exitCode: number }) => void): void;
 

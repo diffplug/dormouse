@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { TerminalProtocolParser } from './terminal-protocol';
 import {
   applyTerminalSemanticEvents,
   countRunningSessions,
@@ -126,14 +127,26 @@ describe('terminal semantic state store command input fallback', () => {
     expect(getTerminalPaneState('pane').currentCommand?.displayCommand).toBe('lazygit');
   });
 
-  it('does not read chunked inline-image payloads as returned prompts', () => {
-    submit('pane', 'lazygit');
-    recordTerminalOutput('pane', '\x1b_Gf=100;dXNlckBob3N0IHJlcG8gJSA=');
-    recordTerminalOutput('pane', 'dXNlckBob3N0IHJlcG8gJSA=');
+  it('keeps chunked inline-image payloads out of the prompt window', () => {
+    // End to end over the real boundary: raw PTY bytes through the parser, its
+    // `textData` into the store, exactly as `wirePtyEvents` wires them.
+    const parser = new TerminalProtocolParser();
+    const feed = (raw: string) => {
+      const parsed = parser.process(raw);
+      // The heuristic is offered no part of an image, however it is chunked.
+      recordTerminalOutput('pane', parsed.textData);
+      return parsed.textData;
+    };
 
+    submit('pane', 'lazygit');
+    // Split so the middle chunk carries no introducer of its own — the case a
+    // stateless stripper cannot classify once the introducer leaves the window.
+    expect(feed(`\x1bPq${'~'.repeat(1_200)}`)).toBe('');
+    expect(feed('~~~~ user@host repo % ')).toBe('');
     expect(getTerminalPaneState('pane').currentCommand?.displayCommand).toBe('lazygit');
 
-    recordTerminalOutput('pane', `\x1b\\\r\n${PROMPT}`);
+    // Ground text resumes at the terminator, and the real prompt still lands.
+    expect(feed(`\x1b\\\r\n${PROMPT}`)).toBe(`\r\n${PROMPT}`);
     expect(getTerminalPaneState('pane').currentCommand).toBeNull();
   });
 

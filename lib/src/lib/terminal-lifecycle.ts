@@ -5,6 +5,7 @@ import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { shellCommandKind, type ShellCommandKind } from 'dor/commands/shell-quote';
 import { getPlatform, IS_MAC, IS_WINDOWS, PLATFORM_STRING } from './platform';
+import type { PtyDataDetail } from './platform/types';
 import { DIM, RESET } from './ansi';
 import { cfg } from '../cfg';
 import { requestExternalLinkConfirmation } from './external-link-confirmation';
@@ -242,9 +243,11 @@ function createXtermHost(): { terminal: Terminal; fit: FitAddon; element: HTMLDi
 /** PTY data/exit listeners. Returns the unsubscribe pair. */
 function wirePtyEvents(id: string, terminal: Terminal): () => void {
   const platform = getPlatform();
-  const handleData = (detail: { id: string; data: string }) => {
+  const handleData = (detail: PtyDataDetail) => {
     if (detail.id === id) {
-      recordTerminalOutputByPtyId(id, detail.data);
+      // The parser already told us which bytes are text; `textData` is omitted
+      // when it would equal `data`.
+      recordTerminalOutputByPtyId(id, detail.textData ?? detail.data);
       terminal.write(detail.data);
     }
   };

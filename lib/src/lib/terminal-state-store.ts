@@ -23,7 +23,6 @@ const paneStates = new Map<string, TerminalPaneState>();
 const promptSubmitStates = new Map<string, PromptSubmitState>();
 const promptShapes = new Map<string, PromptShape>();
 const promptOutputBuffers = new Map<string, string>();
-const promptControlFilters = new Map<string, TerminalControlStreamFilter>();
 // Panes with authentic OSC 633/133 boundaries; the keystroke fallback stands
 // down for each id here until the pane is reset or removed.
 const oscDrivenPanes = new Set<string>();
@@ -104,7 +103,6 @@ function clearPaneScratch(id: string): void {
   promptSubmitStates.delete(id);
   promptShapes.delete(id);
   promptOutputBuffers.delete(id);
-  promptControlFilters.delete(id);
   oscDrivenPanes.delete(id);
 }
 
@@ -208,15 +206,17 @@ export function finishLaunchedCommandByPtyId(ptyId: string, exitCode: number): v
   applyTerminalSemanticEventsByPtyId(ptyId, [{ type: 'commandFinish', exitCode }]);
 }
 
+/**
+ * Records a chunk of a pane's output for the keystroke prompt heuristic.
+ * **Takes `TerminalProtocolParseResult.textData`, not the raw chunk** — the
+ * parser has already dropped string-control payloads, so a chunked inline image
+ * can never reach the 1,024-character prompt window
+ * (`docs/specs/terminal-state.md`).
+ */
 export function recordTerminalOutput(id: string, output: string): void {
   if (!output) return;
 
-  const filter = promptControlFilters.get(id) ?? new TerminalControlStreamFilter();
-  promptControlFilters.set(id, filter);
-  const textOutput = filter.process(output);
-  if (!textOutput) return;
-
-  const buffer = `${promptOutputBuffers.get(id) ?? ''}${textOutput}`.slice(-1024);
+  const buffer = `${promptOutputBuffers.get(id) ?? ''}${output}`.slice(-1024);
   promptOutputBuffers.set(id, buffer);
   const promptLine = detectReturnedShellPrompt(buffer);
   if (!promptLine) return;
@@ -250,9 +250,11 @@ export function recordTerminalOutputByPtyId(ptyId: string, output: string): void
 // prompt. Learn-only — fires no idle transition.
 export function seedPromptShapeFromScrollback(id: string, scrollback: string): void {
   if (!scrollback) return;
-  // Filter a bounded tail, not the whole (up to 1 MB) scrollback: the prompt is
-  // in the last few hundred characters and 64 KiB is ample runway to resync the
-  // string-control state before the 1024 the result is cut to.
+  // Replay arrives as `visibleData`, which still carries the string controls the
+  // parser forwards, so this path filters for itself. It is one shot over a
+  // bounded tail rather than the live stream: the prompt is in the last few
+  // hundred characters, and 64 KiB is ample runway to resync the control state
+  // before the 1024 the result is cut to.
   const text = new TerminalControlStreamFilter().process(scrollback.slice(-65_536));
   const promptLine = detectReturnedShellPrompt(text.slice(-1024));
   if (!promptLine) return;

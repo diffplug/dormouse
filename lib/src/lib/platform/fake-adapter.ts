@@ -1,4 +1,4 @@
-import type { AlertStateDetail, OpenPort, PlatformAdapter, PtyInfo, RemoteHostLink } from './types';
+import type { AlertStateDetail, OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, RemoteHostLink } from './types';
 import { AlertManager } from '../alert-manager';
 import type { AwaitHandle, AwaitOptions } from '../alert-manager';
 import type { AlertSettings } from '../alert-settings';
@@ -35,7 +35,7 @@ export interface FakePtyResizeDetail extends FakePtySize {
 const DEFAULT_PTY_SIZE: FakePtySize = { cols: 80, rows: 30 };
 
 export class FakePtyAdapter implements PlatformAdapter {
-  private dataHandlers = new Set<(detail: { id: string; data: string }) => void>();
+  private dataHandlers = new Set<(detail: PtyDataDetail) => void>();
   private exitHandlers = new Set<(detail: { id: string; exitCode: number }) => void>();
   private resizeHandlers = new Set<(detail: FakePtyResizeDetail) => void>();
   private alertStateHandlers = new Set<(detail: AlertStateDetail) => void>();
@@ -181,7 +181,7 @@ export class FakePtyAdapter implements PlatformAdapter {
     }
   }
 
-  onPtyData(handler: (detail: { id: string; data: string }) => void): void {
+  onPtyData(handler: (detail: PtyDataDetail) => void): void {
     this.dataHandlers.add(handler);
   }
 
@@ -395,8 +395,9 @@ export class FakePtyAdapter implements PlatformAdapter {
 
     if (parsed.visibleData.length === 0) return;
     if (!options.skipActivity) this.alertManager.onData(id);
+    const textData = parsed.textData === parsed.visibleData ? undefined : parsed.textData;
     for (const handler of this.dataHandlers) {
-      handler({ id, data: parsed.visibleData });
+      handler({ id, data: parsed.visibleData, textData });
     }
   }
 }
