@@ -22,10 +22,22 @@ import SiteHeader from "./SiteHeader";
 // `<template>`. The chunk that saved was ~6KB gzip; a picker that never
 // appears is the worse trade.
 import DocsThemeControl from "./DocsThemeControl";
-import { ACCENT_TEXT_CLASS, MUTED_ACCENT_LINK_CLASS, TOC_INDENT_CLASS } from "./docs-tokens";
+import {
+  ACCENT_TEXT_CLASS,
+  MUTED_ACCENT_LINK_CLASS,
+  MUTED_TEXT_CLASS,
+  TINTED_DOCS_SURFACES,
+  TOC_INDENT_CLASS,
+} from "./docs-tokens";
 import { DOCS_PAGES, docsRailPosition, type DocsPage, type TocEntry } from "../lib/docs-pages";
 import { DOCS_THEME_ID } from "../lib/docs-theme";
-import { docsAccentFor } from "../lib/docs-accent";
+import {
+  compositeColor,
+  docsAccentFor,
+  docsMutedTextFor,
+  docsMutedTextForSurfaces,
+} from "../lib/docs-accent";
+import { sitePath } from "../lib/site-meta";
 
 /** Repaints the site's own tokens from the picked theme; see index.css. */
 const THEMED_BODY_CLASS = "docs-themed";
@@ -85,7 +97,7 @@ function DocsNav({
         return (
           <li key={page.path} className={active ? "flex min-h-0 flex-col" : "shrink-0"}>
             <a
-              href={page.path}
+              href={sitePath(page.path)}
               aria-current={active ? "page" : undefined}
               className={`block shrink-0 py-1 font-display text-sm ${
                 active ? ACCENT_TEXT_CLASS : MUTED_ACCENT_LINK_CLASS
@@ -111,11 +123,11 @@ function NeighborLink({ page, rel }: { page: DocsPage | undefined; rel: "prev" |
   if (!page) return <span />;
   return (
     <a
-      href={page.path}
+      href={sitePath(page.path)}
       rel={rel}
       className={`group flex flex-col gap-1 ${rel === "next" ? "text-right" : ""}`}
     >
-      <span className="text-xs uppercase tracking-wide opacity-50">
+      <span className={`text-xs uppercase tracking-wide ${MUTED_TEXT_CLASS}`}>
         {rel === "prev" ? "Previous" : "Next"}
       </span>
       <span className={`font-display group-hover:underline ${ACCENT_TEXT_CLASS}`}>{page.label}</span>
@@ -154,12 +166,41 @@ export default function DocsLayout({
       // falls back to the first bundled theme, so a reader without storage
       // would get the page painted in one theme and its links derived from
       // another's accent the moment those two stop coinciding.
-      const theme = getAppliedThemeSnapshot()?.theme;
-      const background = theme?.vars?.["--vscode-editor-background"];
+      const snapshot = getAppliedThemeSnapshot();
+      const theme = snapshot?.theme;
+      const background = snapshot?.resolvedVars["--vscode-editor-background"];
+      const foreground = snapshot?.resolvedVars["--vscode-editor-foreground"];
       const accent = theme?.accent;
-      if (!theme || !accent || !background) return;
+      if (!theme || !accent || !background || !foreground) return;
       const link = docsAccentFor(accent, background);
-      if (link) document.body.style.setProperty("--docs-accent", link);
+      if (link) {
+        document.body.style.setProperty("--docs-accent", link);
+        const actionHoverSurface = compositeColor(link, background, 0.2);
+        const actionText = actionHoverSurface && docsAccentFor(link, actionHoverSurface);
+        if (actionText) document.body.style.setProperty("--docs-button-text", actionText);
+      }
+      const muted = docsMutedTextFor(foreground, background);
+      if (muted) document.body.style.setProperty("--docs-text-muted", muted);
+
+      // One pass per tinted container, so a new one (or a nested tint stack) is
+      // an entry in the table rather than another pair of lines whose alpha
+      // has to match a class string somewhere else
+      // (website/src/components/docs-tokens.ts).
+      const styles = getComputedStyle(document.body);
+      for (const { token, surfaceVariants } of TINTED_DOCS_SURFACES) {
+        const surfaces = surfaceVariants.map((layers) =>
+          layers.reduce<string | null>((surface, { tintVar, tintAlpha }) => {
+            const tint = styles.getPropertyValue(tintVar).trim();
+            return surface && tint ? compositeColor(tint, surface, tintAlpha) : null;
+          }, background),
+        );
+        const allSurfacesResolved = surfaces.every(
+          (surface): surface is string => Boolean(surface),
+        );
+        const surfaceMuted =
+          allSurfacesResolved && docsMutedTextForSurfaces(foreground, surfaces);
+        if (surfaceMuted) document.body.style.setProperty(token, surfaceMuted);
+      }
     };
     paint();
     return subscribeToActiveTheme(paint);
@@ -201,11 +242,13 @@ export default function DocsLayout({
             className="flex min-w-0 flex-1 items-center gap-2 px-4 py-3 text-left text-sm md:px-6"
           >
             {navOpen ? <XIcon size={16} weight="bold" /> : <ListIcon size={16} weight="bold" />}
-            <span className="font-display opacity-70">Docs</span>
+            <span className={`font-display ${MUTED_TEXT_CLASS}`}>Docs</span>
             {current ? (
               <>
                 <span aria-hidden="true" className="opacity-30">/</span>
-                <span className={`font-display ${ACCENT_TEXT_CLASS}`}>{current.label}</span>
+                <span className={`min-w-0 truncate font-display ${ACCENT_TEXT_CLASS}`}>
+                  {current.label}
+                </span>
               </>
             ) : null}
           </button>
@@ -238,7 +281,7 @@ export default function DocsLayout({
 
             <div className="min-w-0">
               <h1 className="mb-2 font-display text-[clamp(1.75rem,3vw+0.5rem,2.5rem)]">{heading}</h1>
-              {intro && <div className="mb-8 text-lg opacity-70">{intro}</div>}
+              {intro && <div className={`mb-8 text-lg ${MUTED_TEXT_CLASS}`}>{intro}</div>}
 
               <main>{children}</main>
 
@@ -252,7 +295,7 @@ export default function DocsLayout({
                 </nav>
               ) : null}
 
-              <footer className="mt-10 text-sm opacity-60">
+              <footer className={`mt-10 text-sm ${MUTED_TEXT_CLASS}`}>
                 <a
                   href="https://github.com/diffplug/dormouse/issues"
                   className="hover:underline"

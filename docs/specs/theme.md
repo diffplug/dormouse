@@ -66,8 +66,14 @@ MobileTerminalUi, publishes on `document.body`); exports in
 ## Runtime model
 
 Two layers: `--vscode-*` holds imported or host-provided VSCode color data;
-`--color-*` in `lib/src/theme.css` provides the semantic Tailwind tokens
+`--color-*` in `lib/src/theme-colors.css` provides the semantic Tailwind tokens
 (`bg-app-bg`, `text-app-fg`, `bg-header-active-bg`).
+
+**The colour tokens are a file a host can import without the app.**
+`theme-colors.css` carries `--color-*` alone; `theme.css` layers the type scale,
+fonts, animations, and component classes over it. A host rendering library
+components inside its own design takes the first and never the second
+(rationale).
 
 `applyTheme()` writes the theme's `--vscode-*` to `document.body`, fills missing
 consumed variables through the resolver, adds `vscode-light` / `vscode-dark` for
@@ -88,19 +94,20 @@ them over `sideBar.background` first (rationale).
 `document.body`**, and **ThemePicker re-restores in a layout effect after mount**
 — React Router document hydration can reconcile those writes away (rationale).
 
-`theme.css` declares the theme-dependent tokens twice: at document level
+Each layer declares its theme-dependent tokens twice: at document level
 (`@theme` so Tailwind generates utility classes, or `:root`) and on `body`, the
 runtime source of truth. **Every token whose value contains `var()` — indirect
 chains included — must appear at both levels with the same value**, since only
 the `body` copy sees what `applyTheme()` writes to `body.style` (rationale).
-`lib/src/lib/themes/consumed-keys.test.ts` enforces it. **The seven
+`lib/src/lib/themes/consumed-keys.test.ts` enforces it **per file**, because a
+host may import either layer alone. **The seven
 dynamic-palette tokens also carry body-level baselines** matching their `@theme`
 declarations, so direct CSS-var consumers (the mobile gesture SVG, a bell ringing
 before the first pass) render before `useDynamicPalette()` publishes refined
 values.
 
 **Never put hardcoded color defaults or `var(..., fallback)` chains in
-`theme.css`** (Host-Theme-Only Rule): hosts plus the resolver provide every
+`theme-colors.css` or `theme.css`** (Host-Theme-Only Rule): hosts plus the resolver provide every
 consumed `--vscode-*` before Dormouse renders.
 
 Color IDs with `null` registry defaults are materialized component-equivalently,
@@ -186,14 +193,15 @@ playground navbar — carries none**.
   `restorePocketTheme` as its `restore` argument so the browser-chrome sync rides
   the same lifecycle.
 - The two `/playground/pocket` marketing mounts and the docs pages keep the
-  free-floating `compact` picker (rationale); the docs pages give it two
-  placements, floating at `lg` and inline in the mobile bar. **Both variants
-  show the active theme's `ThemeSwatch`** — beside its label on the dialog
-  trigger, beside the word "Theme" in `compact`.
-- **`compact` takes its menu offset from style, never a Tailwind class**
-  (`menuSide`): the website renders against the lib's *prebuilt* stylesheet, so
-  a utility the lib never emitted is absent there and the menu drops to its
-  static position.
+  free-floating `compact` picker (rationale), the docs placing it floating at
+  `lg` and inline in the mobile bar. **Both variants show the active theme's
+  `ThemeSwatch`** — beside its label on the dialog trigger, beside the word
+  "Theme" in `compact`.
+- **The picker renders the bundled default through hydration, then reconciles
+  stored themes and selection in a layout effect** (rationale).
+- **The picker styles itself in `--color-*` utilities like any other
+  component.** A host rendering library JSX scans `lib/src` and imports
+  `theme-colors.css`, or none of those utilities reach it (rationale).
 - **`onPick` reports the choice, not the change.** `restoreActiveTheme` persists
   the id it resolved, so `dormouse:active-theme` exists whether or not anyone
   chose, and `subscribeToActiveTheme` is silent on a re-pick. Only the picker
@@ -207,24 +215,30 @@ playground navbar — carries none**.
   (`DESIGN.md` → "Don't"; rationale). Uninstalling is a single click, matching
   `WatchedCommandList`'s remove control in the same dialog, and **the picker
   row's `X` keeps a gap from the row's select target** (rationale).
-- **The dropdown renders `position: fixed`, anchored off the measured trigger
-  rect**, because the `overflow-y-auto` dialog surface would clip an
-  absolutely-positioned one; it closes on scroll. Anchoring and dismissal are
-  shared with the dialog's Shell row. **The dialog owns the dropdown's open
-  state** so `Escape` closes the menu before the dialog; `ModalFrame`'s
-  capture-phase handler would otherwise swallow the key.
+- **`useAnchoredMenu` returns a dropdown's whole geometry; a caller never
+  re-implements placement beside it.** Dialog dropdowns take its measured,
+  viewport-clamped `fixed` strategy; `compact` takes `absolute`, which measures
+  nothing (rationale). Both prefer the requested `side`, flip to the roomier
+  side, and recompute their cap when the trigger, menu, or viewport changes.
+  **Must clamp and cap against the visual viewport when the browser exposes
+  it**, so mobile browser chrome and the on-screen keyboard stay outside the
+  menu's usable area.
+  They close on scroll and share dismissal with the Shell row. **The dialog owns
+  the open state** so `Escape` closes the menu first, which `ModalFrame`'s
+  capture-phase handler would otherwise swallow.
 - **Heights follow the viewport, never a fixed pixel budget**: both surfaces cap
-  at `OVERLAY_MAX_HEIGHT` (dialog `.modal`, dropdown `.popover`), not a `dvh` of
-  their own. The list's `max-h-80` is a *ceiling*, not a floor — the panel cap
-  shrinks it on a short screen while the footer actions stay put. Pinned by the
-  `OpenOnShortViewport` story, not a unit test (rationale).
+  at `OVERLAY_MAX_HEIGHT` (dialog `.modal`, dropdown `.popover`). The list's cap
+  is a *ceiling*, not a floor —
+  the panel cap shrinks it on a short screen while the footer stays put. Pinned
+  by the `OpenOnShortViewport` story, not a unit test (rationale).
 
 Source of truth: `lib/src/components/SettingsDialog.tsx`; `setDefaultThemeId()` /
 `restoreActiveTheme()` in `lib/src/lib/themes/apply.ts`; `useRestoredTheme()` in
 `lib/src/lib/themes/use-restored-theme.ts`; `restorePocketTheme` in
 `lib/src/remote/pocket-app/pocket-theme.ts`; `useAnchoredMenu` /
 `useCloseOnOutsideAndEscape` in `lib/src/components/use-anchored-menu.ts`;
-`OVERLAY_MAX_HEIGHT` in `lib/src/components/design.tsx`.
+`OVERLAY_MAX_HEIGHT*` in `lib/src/components/design.tsx`; the colour import,
+`@source`, and its exclusions in `website/src/index.css`.
 
 ## Storybook simulation
 

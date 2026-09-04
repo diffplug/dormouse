@@ -26,11 +26,11 @@
   "docs/specs/standalone.md": 4050,
   "docs/specs/terminal-escapes.md": 3750,
   "docs/specs/terminal-state.md": 2200,
-  "docs/specs/theme.md": 1900,
+  "docs/specs/theme.md": 2000,
   "docs/specs/tiling-engine.md": 4400,
   "docs/specs/transport.md": 4100,
   "docs/specs/tutorial.md": 1900,
   "docs/specs/vscode.md": 7100,
   "docs/specs/webgl-text.md": 1200,
-  "docs/specs/website-docs.md": 4800
+  "docs/specs/website-docs.md": 5050
 }

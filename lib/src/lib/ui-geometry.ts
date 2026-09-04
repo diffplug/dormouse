@@ -38,6 +38,18 @@ export function motionIsInstant(): boolean {
 /** Shared inset for fixed overlays clamped to the viewport. */
 export const OVERLAY_VIEWPORT_MARGIN_PX = 12;
 
+/** The layout-coordinate bounds fixed overlays can actually occupy. Mobile
+ *  browser chrome and the on-screen keyboard may shrink and offset these while
+ *  the layout viewport is unchanged. */
+export function overlayViewportBounds() {
+  const viewport = window.visualViewport;
+  const left = viewport?.offsetLeft ?? 0;
+  const top = viewport?.offsetTop ?? 0;
+  const width = viewport?.width ?? window.innerWidth;
+  const height = viewport?.height ?? window.innerHeight;
+  return { left, top, right: left + width, bottom: top + height, width, height };
+}
+
 /** Clamp a fixed-position overlay so it stays inside the viewport with a margin. */
 export function clampOverlayPosition({ left, top, width, height }: {
   left: number;
@@ -46,12 +58,15 @@ export function clampOverlayPosition({ left, top, width, height }: {
   height: number;
 }): CSSProperties {
   const margin = OVERLAY_VIEWPORT_MARGIN_PX;
-  const maxLeft = Math.max(margin, window.innerWidth - width - margin);
-  const maxTop = Math.max(margin, window.innerHeight - height - margin);
+  const viewport = overlayViewportBounds();
+  const minLeft = viewport.left + margin;
+  const minTop = viewport.top + margin;
+  const maxLeft = Math.max(minLeft, viewport.right - width - margin);
+  const maxTop = Math.max(minTop, viewport.bottom - height - margin);
 
   return {
     position: 'fixed',
-    left: Math.min(Math.max(left, margin), maxLeft),
-    top: Math.min(Math.max(top, margin), maxTop),
+    left: Math.min(Math.max(left, minLeft), maxLeft),
+    top: Math.min(Math.max(top, minTop), maxTop),
   };
 }

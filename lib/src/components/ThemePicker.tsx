@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { CaretDownIcon, XIcon } from '@phosphor-icons/react';
 import type { DormouseTheme } from '../lib/themes';
 import {
   applyTheme,
   getAllThemes,
+  getBundledThemes,
   getTheme,
   removeInstalledTheme,
   restoreActiveTheme,
@@ -13,8 +14,7 @@ import { ThemeDebuggerDialog } from './ThemeDebugger';
 import { ThemeSwatch } from './theme-picker/ThemeSwatch';
 import { ThemeStoreDialog } from './theme-picker/ThemeStoreDialog';
 import { useAnchoredMenu, useCloseOnOutsideAndEscape } from './use-anchored-menu';
-import { themePickerStyles as styles } from './theme-picker/styles';
-import { chromeButton, modalIconButton, OVERLAY_MAX_HEIGHT } from './design';
+import { chromeButton, modalIconButton, OVERLAY_MAX_HEIGHT, POPUP_SURFACE_CLASS } from './design';
 
 /**
  * `compact` is the free-floating trigger used by the website's Pocket
@@ -53,8 +53,7 @@ export interface ThemePickerProps {
 
 const useBrowserLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
 
-/** Menu width. Mirrored by the `w-[280px]` literal on the non-dialog variant,
- *  which Tailwind must be able to scan statically. */
+/** Menu width, applied inline by `useAnchoredMenu` for both variants. */
 const MENU_WIDTH_PX = 280;
 
 export function ThemePicker({
@@ -64,18 +63,13 @@ export function ThemePicker({
   menuSide = 'below',
   onPick,
 }: ThemePickerProps) {
-  // Apply the persisted theme during render initialization, before commit, so
-  // the first paint already has --vscode-* on body. Hosts must not *rely* on
-  // this: inside the Settings dialog the picker only mounts once the user opens
-  // it, so each host restores its own theme at boot.
-  const initialState = useRef<{ themes: DormouseTheme[]; activeId: string }>(null);
-  if (initialState.current === null) {
-    const restored = restoreActiveTheme();
-    const themes = getAllThemes();
-    initialState.current = { themes, activeId: restored?.id ?? themes[0]?.id ?? '' };
-  }
-  const [themes, setThemes] = useState(initialState.current.themes);
-  const [activeId, setActiveId] = useState(initialState.current.activeId);
+  // The server and first client render must agree. Installed themes and the
+  // active id come from browser storage, so reading either here leaves React
+  // with an attribute mismatch it deliberately will not patch during hydration.
+  // `getBundledThemes` is the same module array every call, so both initializers
+  // are stable without a ref to latch them.
+  const [themes, setThemes] = useState(getBundledThemes);
+  const [activeId, setActiveId] = useState(() => themes[0]?.id ?? '');
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const [storeOpen, setStoreOpen] = useState(false);
   const [debuggerOpen, setDebuggerOpen] = useState(false);
@@ -93,16 +87,13 @@ export function ThemePicker({
   const inDialog = variant === 'settings-dialog';
   const activeTheme = themes.find((theme) => theme.id === activeId) ?? themes[0];
 
-  // Only the dialog variant anchors off its trigger; `compact` floats free and
-  // positions itself with the absolute classes below.
-  const { setTriggerEl, setMenuEl, menuStyle } = useAnchoredMenu(inDialog && open, MENU_WIDTH_PX);
-
-  // React Router document hydration can reconcile render-time theme
-  // application away; repeat once after commit so xterm sees real colors.
-  useBrowserLayoutEffect(() => {
-    const theme = restoreActiveTheme();
-    if (theme) setActiveId(theme.id);
-  }, []);
+  // `compact` stays absolute to its trigger: a fixed descendant of the docs'
+  // sticky mobile bar is offset by that containing block in Chromium.
+  const { setTriggerEl, setMenuEl, menuStyle } = useAnchoredMenu(
+    open,
+    MENU_WIDTH_PX,
+    inDialog ? undefined : { side: menuSide, align: 'end', strategy: 'absolute' },
+  );
 
   const closeDropdown = useCallback(() => setOpen(false), [setOpen]);
   useCloseOnOutsideAndEscape(open, rootRef, closeDropdown);
@@ -112,6 +103,11 @@ export function ThemePicker({
     const theme = restoreActiveTheme();
     if (theme) setActiveId(theme.id);
   }, []);
+
+  // Hosts restore the visible body theme at boot. The picker separately
+  // reconciles its stored rows and selected value after hydration so its first
+  // markup stays deterministic without leaving its label or swatch stale.
+  useBrowserLayoutEffect(refreshThemes, [refreshThemes]);
 
   const selectTheme = (id: string) => {
     const theme = getTheme(id);
@@ -131,16 +127,6 @@ export function ThemePicker({
     refreshThemes();
   };
 
-  // Offsets, not Tailwind classes: the website consumes this component through
-  // the lib's prebuilt stylesheet, so a utility the lib has never emitted
-  // before (`bottom-full`) is simply absent there and the menu falls back to
-  // its static position, off the bottom of the viewport.
-  const compactSideStyle: CSSProperties =
-    menuSide === 'above' ? { bottom: '100%', marginBottom: 4 } : { top: '100%', marginTop: 4 };
-  const panelStyle: CSSProperties = inDialog
-    ? { ...styles.panel, ...menuStyle }
-    : { ...styles.panel, ...compactSideStyle };
-
   return (
     <div ref={rootRef} className="relative flex items-center">
       <button
@@ -150,7 +136,9 @@ export function ThemePicker({
         aria-expanded={open}
         aria-label={`Theme: ${activeTheme?.label ?? 'Select theme'}`}
         onClick={() => setOpen(!open)}
-        className={chromeButton({ kind: 'labeled' })}
+        // The compact trigger stands alone on a touch surface, so it takes the
+        // 44px minimum the dialog row inherits from the dialog around it.
+        className={`${chromeButton({ kind: 'labeled' })} ${inDialog ? '' : 'min-h-11 min-w-11'}`}
       >
         {activeTheme ? <ThemeSwatch theme={activeTheme} /> : null}
         <span className="min-w-0 truncate">
@@ -159,21 +147,19 @@ export function ThemePicker({
         <CaretDownIcon size={10} weight="bold" className="shrink-0 opacity-65" aria-hidden="true" />
       </button>
 
-      {/* z-50 is here for `compact`, which ignores `menuStyle` and so gets no
-          stacking from `useAnchoredMenu` (the dialog variant takes it from
-          there, and the class is a harmless restatement). */}
+      {/* `OVERLAY_MAX_HEIGHT.popover` is the cap for the frame before the
+          trigger has been measured; `menuStyle` narrows it to the space
+          actually left beside the trigger from then on. */}
       {open ? (
         <div
           ref={setMenuEl}
           role="menu"
           aria-label="Select theme"
-          className={`z-50 flex flex-col overflow-hidden rounded border font-mono shadow-2xl ${OVERLAY_MAX_HEIGHT.popover} ${
-            inDialog ? '' : 'absolute right-0 w-[280px]'
-          }`}
-          style={panelStyle}
+          className={`${POPUP_SURFACE_CLASS} flex flex-col overflow-hidden ${OVERLAY_MAX_HEIGHT.popover}`}
+          style={menuStyle}
         >
-          {/* max-h-80 is a ceiling on a tall screen, never a floor: the
-              panel's own viewport cap shrinks this further on a short one. */}
+          {/* max-h-80 is a ceiling on a tall screen, never a floor: the panel's
+              own viewport cap shrinks this further on a short one. */}
           <div className="max-h-80 min-h-0 flex-1 overflow-y-auto py-1">
             {themes.map((theme) => {
               const isActive = theme.id === activeId;
@@ -181,8 +167,11 @@ export function ThemePicker({
               return (
                 <div
                   key={theme.id}
-                  className="flex items-center transition-colors"
-                  style={isActive ? styles.activeRow : styles.foreground}
+                  className={`flex items-center transition-colors ${
+                    isActive
+                      ? 'bg-header-active-bg text-header-active-fg'
+                      : 'text-foreground'
+                  }`}
                 >
                   <button
                     type="button"
@@ -221,15 +210,14 @@ export function ThemePicker({
             })}
           </div>
 
-          <div className="shrink-0 border-t p-1" style={styles.border}>
+          <div className="shrink-0 border-t border-border p-1">
             <button
               type="button"
               onClick={() => {
                 setOpen(false);
                 setDebuggerOpen(true);
               }}
-              className="w-full rounded px-3 py-1.5 text-left text-sm font-medium transition-opacity hover:opacity-85"
-              style={styles.foreground}
+              className="w-full rounded px-3 py-1.5 text-left text-sm font-medium text-foreground transition-opacity hover:opacity-85"
             >
               Debug current theme
             </button>
@@ -239,8 +227,7 @@ export function ThemePicker({
                 setOpen(false);
                 setStoreOpen(true);
               }}
-              className="w-full rounded px-3 py-1.5 text-left text-sm font-medium transition-opacity hover:opacity-85"
-              style={styles.link}
+              className="w-full rounded px-3 py-1.5 text-left text-sm font-medium text-link transition-opacity hover:opacity-85"
             >
               Install theme from OpenVSX
             </button>

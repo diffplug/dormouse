@@ -25,6 +25,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -51,13 +52,34 @@ describe('ThemePicker', () => {
     return container.querySelector<HTMLDivElement>('[role="menu"]')!;
   }
 
-  it('offsets the compact menu with style, not a utility class', () => {
-    // The website renders this against the lib's prebuilt stylesheet, where a
-    // never-emitted utility simply does not exist and the menu would fall back
-    // to its static position (docs/specs/theme.md).
-    expect(openCompact({ menuSide: 'above' }).style.bottom).toBe('100%');
-    act(() => root.render(<></>));
-    expect(openCompact().style.top).toBe('100%');
+  // Only the geometry `useAnchoredMenu` computes — the rest of the panel is
+  // Tailwind, and asserting a class list would fail on any equivalent restyle
+  // while passing on real breakage (docs/specs/theme.rationale.md).
+  it('offsets the compact menu off its trigger, capped to the viewport', () => {
+    const menu = openCompact();
+    expect(menu.style.position).toBe('absolute');
+    expect(menu.style.right).toBe('0px');
+    expect(menu.style.top).toBe('calc(100% + 4px)');
+    expect(menu.style.width).toBe('280px');
+    expect(menu.style.maxHeight).toContain('min(');
+    expect(menu.style.maxHeight).toContain('100dvh - 24px');
+  });
+
+  it('opens the compact menu upward when asked, off the same edge', () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      x: 700,
+      y: 700,
+      top: 700,
+      left: 700,
+      width: 60,
+      height: 20,
+      right: 760,
+      bottom: 720,
+      toJSON: () => ({}),
+    });
+    const menu = openCompact({ menuSide: 'above' });
+    expect(menu.style.bottom).toBe('calc(100% + 4px)');
+    expect(menu.style.top).toBe('');
   });
 
   it('reports a pick even when it does not change the active theme', () => {

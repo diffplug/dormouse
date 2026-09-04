@@ -11,9 +11,8 @@ import { ThemePicker } from '../components/ThemePicker';
  * a baseboard uses the `settings-dialog` variant instead, which
  * `Modals/SettingsDialog` covers in place.
  *
- * Right-aligned with headroom below, matching both real mounts: the menu opens
- * `right-0` from the trigger, so it needs room to its left, and the open list
- * needs room beneath.
+ * Right-aligned with headroom below, matching both real mounts. The shared
+ * anchored-menu geometry keeps the fixed panel inside the viewport.
  */
 function PickerStory({ maxHeight }: { maxHeight?: string }) {
   return (

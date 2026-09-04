@@ -1,5 +1,21 @@
 @import "tailwindcss";
 
+/* Library components compile from source here (the `dormouse-lib` alias in
+   vite.config.ts), so Tailwind must scan them or their utilities are never
+   emitted — silently, with no build error. The colour half of the library's
+   theme comes with them; its app layer (`lib/src/theme.css`) deliberately does
+   not, because that one retunes the type scale for a terminal UI. See
+   docs/specs/theme.md -> Where the user picks a theme. */
+@import "../../lib/src/theme-colors.css";
+@source "../../lib/src";
+/* Tests and stories are 180 of the library's 430 files and render nowhere on
+   this site. Excluding them can only drop a utility that appears *nowhere
+   else*, so every shipped component keeps its classes. */
+@source not "../../lib/src/**/*.test.ts";
+@source not "../../lib/src/**/*.test.tsx";
+@source not "../../lib/src/**/*.stories.ts";
+@source not "../../lib/src/**/*.stories.tsx";
+
 @theme {
   --font-display: "Ubuntu Sans Mono", ui-monospace, monospace;
   --font-body: "Ubuntu Mono", ui-monospace, monospace;
@@ -21,6 +37,22 @@
    effect adds that class. */
 body {
   --docs-accent: var(--vscode-textLink-foreground, var(--color-caramel));
+  /* The site's caramel already clears AA against its strongest (20%) button
+     tint. DocsLayout replaces this alias with the theme-derived correction. */
+  --docs-button-text: var(--docs-accent);
+  /* #767676 is `docsMutedTextFor("#dedede", "#000000")` — the site's own
+     palette, precomputed. A fallback of the plain foreground would leave every
+     muted element identical to body text until DocsLayout's effect runs, which
+     is the whole prerendered page and the no-JS reading of it.
+     `docs-accent.test.ts` pins the value. */
+  --docs-text-muted: #767676;
+  /* #787878 is the same foreground derived against the 4% card surface,
+     #7b7977 against the note's 6% caramel, and #909090 against every surface
+     an inline-code tint may stack over; `docs-accent.test.ts` pins every
+     composite in `TINTED_DOCS_SURFACES` and its fallback. */
+  --docs-card-text-muted: #787878;
+  --docs-note-text-muted: #7b7977;
+  --docs-code-text-muted: #909090;
 }
 
 html {

@@ -15,6 +15,7 @@ A multitasking terminal for VS Code and the desktop — a real tiling layout, tm
 - [CLI reference](https://dormouse.sh/docs/dor) — every `dor` command
 - [Agent skill](https://dormouse.sh/docs/agent-skill) — the operating guide Dormouse bundles for coding agents
 - [Self-host](https://dormouse.sh/docs/self-host) — run the coordinating server on your own tailnet
+- [Hosted](https://dormouse.sh/hosted/) — upcoming managed server and ElevenLabs voice options
 - [Security](https://dormouse.sh/docs/security) — what Dormouse guarantees, what it does not, and how that is checked
 
 ## Features

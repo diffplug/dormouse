@@ -5,11 +5,7 @@ import { act } from "react";
 import { hydrateRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-
-vi.mock("@phosphor-icons/react", () => ({ XIcon: () => null }));
-vi.mock("dormouse-lib/components/ThemePicker", () => ({
-  ThemePicker: () => <button type="button">Theme picker</button>,
-}));
+import { getBundledThemes, setActiveThemeId } from "dormouse-lib/lib/themes";
 
 import DocsThemeControl from "./DocsThemeControl";
 import { dismissThemePrompt } from "../lib/docs-theme";
@@ -70,5 +66,23 @@ describe("DocsThemeControl hydration", () => {
     const hydrated = await hydrate(markup);
 
     expect(hydrated.querySelector('[role="status"]')?.textContent).toContain("Don't like the colors?");
+  });
+
+  it("reconciles a persisted picker value without a hydration mismatch", async () => {
+    const themes = getBundledThemes();
+    const stored = themes[themes.length - 1];
+    expect(stored).toBeDefined();
+    setActiveThemeId(stored.id);
+
+    const markup = prerender();
+    expect(markup).toContain(`Theme: ${themes[0].label}`);
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const hydrated = await hydrate(markup);
+
+    expect(
+      hydrated.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')?.getAttribute("aria-label"),
+    ).toBe(`Theme: ${stored.label}`);
+    expect(consoleError.mock.calls.flat().join(" ")).not.toMatch(/hydration/i);
   });
 });

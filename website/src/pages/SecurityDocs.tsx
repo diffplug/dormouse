@@ -10,10 +10,10 @@
  * and the spec file on GitHub is where every entry appears together.
  */
 import { type MetaArgs } from "react-router";
-import { siteMeta } from "../lib/site-meta";
+import { siteMeta, sitePath } from "../lib/site-meta";
 import security from "../data/docs.security.json";
 import DocsLayout from "../components/DocsLayout";
-import { LINK_CLASS } from "../components/docs-tokens";
+import { LINK_CLASS, NOTE_CLASS, NOTE_MUTED_TEXT_CLASS } from "../components/docs-tokens";
 import MarkdownDocument, { type BlockNode } from "../components/MarkdownDocument";
 
 export function meta({ location }: MetaArgs) {
@@ -34,16 +34,16 @@ export default function SecurityDocs() {
       intro="What Dormouse promises, what it does not, and the audit that holds it to the difference."
       toc={security.toc}
     >
-      <p className="mb-8 rounded-lg border border-[var(--color-caramel)]/30 bg-[var(--color-caramel)]/[0.06] p-4 leading-relaxed opacity-80">
+      <p className={`mb-8 ${NOTE_CLASS} ${NOTE_MUTED_TEXT_CLASS}`}>
         This page is the spec the audit runs against, published from the
         repository — not a summary of one. It shows the guarantees for the
         local application and the release pipeline; remote control and
         self-hosting are on the{" "}
-        <a href="/docs/self-host" className={LINK_CLASS}>
+        <a href={sitePath("/docs/self-host")} className={LINK_CLASS}>
           self-host runbook
         </a>
         , and what reaches your machine is on the{" "}
-        <a href="/supply-chain" className={LINK_CLASS}>
+        <a href={sitePath("/supply-chain")} className={LINK_CLASS}>
           supply-chain disclosure
         </a>
         . The five audited checklists behind all three live beside the spec, in{" "}

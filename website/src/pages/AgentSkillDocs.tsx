@@ -11,7 +11,7 @@ import { siteMeta } from "../lib/site-meta";
 import { useState } from "react";
 import skill from "../data/docs.skill.json";
 import DocsLayout from "../components/DocsLayout";
-import { ACCENT_HOVER_BORDER_CLASS, ACCENT_HOVER_TEXT_CLASS, LINK_CLASS } from "../components/docs-tokens";
+import { ACCENT_HOVER_BORDER_CLASS, ACCENT_HOVER_TEXT_CLASS, LINK_CLASS, MUTED_TEXT_CLASS } from "../components/docs-tokens";
 import MarkdownDocument, { type BlockNode } from "../components/MarkdownDocument";
 
 export function meta({ location }: MetaArgs) {
@@ -65,7 +65,7 @@ export default function AgentSkillDocs() {
           const reference = references[heading.id];
           if (!reference) return null;
           return (
-            <p className="-mt-2 mb-4 text-sm opacity-60">
+            <p className={`-mt-2 mb-4 text-sm ${MUTED_TEXT_CLASS}`}>
               CLI reference:{" "}
               <a href={reference.href} className={`${LINK_CLASS} font-mono`}>
                 {reference.label}

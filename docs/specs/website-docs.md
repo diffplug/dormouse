@@ -3,8 +3,9 @@
 > See `docs/specs/glossary.md` for canonical Surface / Session / Pane
 > vocabulary used by the public product guide and browser workflow.
 
-Dormouse publishes four specialized references on the marketing site, each
-generated from a source that lives next to the code it describes.
+Dormouse publishes four specialized references and a hosted-services preview
+on the marketing site. Each reference is generated from a source that lives
+next to the code it describes.
 
 ```text
 /docs/dor           dor CLI reference
@@ -28,6 +29,7 @@ that once rendered it at `/docs` is retained and still runs (see
 | `/docs/dor` | Complete CLI reference | Help snapshots in `dor/test/snapshots/help/`, verified against the built CLI |
 | `/docs/agent-skill` | Agent-facing operating guide | Exact `dor/skill.md` |
 | `/docs/self-host` | Running the coordinating server yourself | The runbook half of `SELF_HOST.md` |
+| `/hosted` | Prelaunch overview of optional paid managed services | `website/src/pages/Hosted.tsx` |
 | `/docs/security` | What Dormouse guarantees and how it is checked | Every section of `docs/specs/security.md`, minus title and front matter; its rows split across three pages |
 | GitHub root | Repository overview and contributor entry point | Root `README.md` |
 
@@ -256,16 +258,27 @@ canonical joins the fallback's and both are discarded; `siteMeta`'s
 `checkPageHeadTags` and `checkSiteOrigin` pin the first two;
 `ChangelogAfter.tsx` is the only route under the third.
 
+**Every in-site link spells that served path** — `sitePath` in components, the
+generator's rewrites in reference prose — so no reader lands on a redirect.
+Exempt: `/` with its anchors, and the `/docs` entrypoint, which names no page.
+`<Link to>` never leaves the client, so it is unaffected.
+`checkInSiteHrefsAreServed` pins it.
+
 ## Reference page chrome
 
-Every page in `DOCS_PAGES` shares `DocsLayout`: the site header, the left
-navigation rail, an `h1` and intro, and prev/next. The changelog and the supply
-chain are in that list too — a reader meets them the same way, as long-form
-material reached from the rail rather than from the marketing nav.
+`DOCS_PAGES` pages use `DocsLayout` for header, rail, `h1`, intro, and
+prev/next. `/hosted` follows `/docs/self-host`.
 
-**The rail is the only table of contents.** It lists every page and expands the
-current one's sections beneath it, so moving between pages and within one is
-the same control. A second "on this page" would restate half of it.
+**Each page's `linkedFrom` names every document owing it a link** — the two
+READMEs and the homepage — so the obligation is registry-driven, never inferred
+from the path. The changelog names none; the rail and the updater's deep link
+are its way in. `checkRoutesToReferences` reads it.
+
+**Must title `/docs/self-host` “How to self-host” and `/hosted` “Pay us to host”
+in chrome and metadata while keeping URLs stable.**
+
+**The rail is the only table of contents.** List all pages; expand only current
+sections.
 
 **The page list never shrinks; the expanded sections scroll.** The rail is a
 bounded flex column whose section list is the only part that gives up space, so
@@ -300,6 +313,15 @@ brand caramel, never `--vscode-textLink-foreground`** (rationale). Caramel
 stays where the reader cannot retheme it — the wordmark, the header, the
 homepage — and is the fallback before a theme applies.
 
+**Must derive docs call-to-action text against its strongest accent-tinted
+state and clear WCAG AA both at rest and on hover** (rationale).
+
+**Muted reference text uses an opaque foreground-derived color that clears
+WCAG AA against the surface carrying it; never dim text with opacity**
+(rationale). `docsMutedTextForSurfaces` and `website/src/lib/docs-accent.test.ts` pin
+the base and every registered tinted surface composition across bundled themes;
+`checkNoDimmedDocsText` pins the call sites, allowlisting what is not text.
+
 **A reader is prompted to pick a theme until they answer.** Picking one and
 closing the prompt both count — a reader who declined has seen the offer.
 Keyed on the website's own `dormouse:docs-theme-prompt-dismissed`, because
@@ -309,6 +331,23 @@ Keyed on the website's own `dormouse:docs-theme-prompt-dismissed`, because
 `localStorage`, then reconcile after hydration. Until then the prompt stays
 hidden, so a returning reader never sees dismissed UI flash. Pinned by
 `website/src/components/DocsThemeControl.test.tsx`.
+
+## `/hosted` preview
+
+**Must mark both services unavailable:** Hosted operates Pocket's coordinator;
+optional ElevenLabs replaces browser voice. Terminals stay on an awake, online
+computer; browser speech and self-hosting remain. `NotifySignupForm` exposes
+the `nedshed.dev` devlog handoff and keeps email per tab;
+`website/src/components/NotifySignupForm.test.tsx` pins both.
+
+**Must open both hosting pages with the server boundary:** Dormouse needs none;
+remote features require a configured signalling server and otherwise make no network
+requests. `/docs/self-host` links `/hosted`; `/hosted` labels hosting pending review,
+discloses metadata, and links the model.
+`website/src/lib/docs-rail.test.tsx` pins this.
+
+**Must also link the preview from** Pocket marketing/tutorial, self-host docs,
+and the speech and remote-control settings; `linkedFrom` owns the rest.
 
 ## `/docs/dor` reference
 
@@ -587,12 +626,12 @@ spec.
 | `website/src/components/MarkdownDocument.tsx` | Renders parsed Markdown blocks |
 | `website/src/components/DocsLayout.tsx` | Docs chrome: header, the rail and its mobile drawer, prev/next, theme restore |
 | `website/src/components/DocsThemeControl.tsx` | The picker's two placements and its first-visit prompt |
-| `website/src/lib/docs-accent.ts` (+ `.test.ts`) | The themed link color, contrast-corrected per theme |
+| `website/src/lib/docs-accent.ts` (+ `.test.ts`) | The themed text colors, contrast-corrected per rendered surface |
 | `website/src/lib/docs-theme.ts` | Default docs theme, and whether the reader has chosen |
 | `website/src/components/DorCommandReference.tsx` | One CLI command section |
 | `website/src/pages/DorDocs.tsx` | `/docs/dor` |
 | `website/src/pages/AgentSkillDocs.tsx` | `/docs/agent-skill` |
-| `website/src/pages/SelfHostDocs.tsx` | `/docs/self-host` |
+| `website/src/pages/SelfHostDocs.tsx`, `website/src/pages/Hosted.tsx`; `website/src/components/HostingRequirementNotice.tsx` | The two hosting choices and their shared server boundary |
 | `website/src/pages/SecurityDocs.tsx` | `/docs/security` |
 | `scripts/public-docs-lint.mjs` | Public-doc validation |
 

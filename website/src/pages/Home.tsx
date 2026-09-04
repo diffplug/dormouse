@@ -1,10 +1,12 @@
 import {
   AppleLogoIcon,
   CheckCircleIcon,
+  CloudArrowUpIcon,
   CubeIcon,
   DesktopIcon,
   DotsThreeOutlineIcon,
   LinuxLogoIcon,
+  SpeakerHighIcon,
   StorefrontIcon,
   TerminalIcon,
   WindowsLogoIcon,
@@ -21,6 +23,7 @@ import phoneMockupUrl from "../assets/phone-mockup.webp";
 import standaloneLatest from "@standalone-latest";
 import { prefersReducedMotion } from "dormouse-lib/lib/ui-geometry";
 import { SITE_CODE_CLASS, SITE_LINK_CLASS } from "../components/site-tokens";
+import { sitePath } from "../lib/site-meta";
 
 /** Multiplier on scroll required to drive the hero animation.
  *  1 = baseline, 2 = half as sensitive, 0.5 = twice as sensitive. */
@@ -823,16 +826,19 @@ export default function Home() {
               The relay is one Node process. No database — state is JSON on
               disk, and push keys mint themselves on first boot. Put{" "}
               <code className={SITE_CODE_CLASS}>tailscale serve</code>{" "}
-              in front of it and you're done: no account, no cloud dependency,
-              nothing anyone can shut off. Your laptop decides which phones get
+              in front of it and you're done: no Dormouse account or
+              Dormouse-operated cloud. The coordinating server stays on your own
+              machine, inside your tailnet. Your laptop decides which phones get
               notified — the server isn't allowed to choose for it, and the{" "}
-              <a href="/docs/security" className={SITE_LINK_CLASS}>security spec</a>{" "}
+              <a href={sitePath("/docs/security")} className={SITE_LINK_CLASS}>security spec</a>{" "}
               says exactly what that guarantees. The{" "}
-              <a href="/docs/self-host" className={SITE_LINK_CLASS}>self-host runbook</a>{" "}
-              walks the whole install.
+              <a href={sitePath("/docs/self-host")} className={SITE_LINK_CLASS}>self-host runbook</a>{" "}
+              walks the whole install. If you would rather skip running it,
+              {" "}<a href={`${sitePath("/hosted")}#remote-control`} className={SITE_LINK_CLASS}>Dormouse Hosted</a>{" "}
+              is coming soon.
             </p>
             <p className="text-lg leading-relaxed opacity-70">
-              <a href="/playground/pocket" className={SITE_LINK_CLASS}>Dormouse Pocket</a>{" "}
+              <a href={sitePath("/playground/pocket")} className={SITE_LINK_CLASS}>Dormouse Pocket</a>{" "}
               is in development — try the phone interface in your browser, and
               sign up there to hear when it's ready.
             </p>
@@ -936,9 +942,9 @@ export default function Home() {
               you already have installed — it doesn't ship a browser of its own.
             </p>
             <p className="text-base leading-relaxed opacity-60">
-              <a href="/docs/dor#agent-browser" className={SITE_LINK_CLASS}>CLI reference</a>
+              <a href={`${sitePath("/docs/dor")}#agent-browser`} className={SITE_LINK_CLASS}>CLI reference</a>
               {" · "}
-              <a href="/docs/agent-skill" className={SITE_LINK_CLASS}>Agent skill</a>
+              <a href={sitePath("/docs/agent-skill")} className={SITE_LINK_CLASS}>Agent skill</a>
             </p>
           </div>
         </section>
@@ -966,11 +972,44 @@ export default function Home() {
           <FeatureVideo src={copyPasteVideoUrl} />
         </section>
 
+        <section id="hosted" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY}`}>
+          <div className="border-y border-[var(--color-text)]/20 py-8">
+            <h2 className="mb-4 font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)]">
+              Dormouse, with less to run yourself
+            </h2>
+            <p className="mb-7 max-w-3xl text-lg leading-relaxed opacity-70">
+              Keep Dormouse free and local, then pay only if you want the
+              coordinating server operated for you or a more natural voice for spoken alerts.
+            </p>
+            <div className="grid gap-7 md:grid-cols-2">
+              <div>
+                <CloudArrowUpIcon size={26} weight="duotone" className="mb-3 text-[var(--color-caramel)]" aria-hidden="true" />
+                <h3 className="mb-2 font-display text-xl">Managed remote control</h3>
+                <p className="leading-relaxed opacity-70">
+                  Use Pocket without deploying and maintaining the coordinating server.
+                  Your terminals still run on your computer.
+                </p>
+              </div>
+              <div>
+                <SpeakerHighIcon size={26} weight="duotone" className="mb-3 text-[var(--color-caramel)]" aria-hidden="true" />
+                <h3 className="mb-2 font-display text-xl">ElevenLabs voice</h3>
+                <p className="leading-relaxed opacity-70">
+                  Choose a managed natural voice for spoken alerts, while browser and
+                  system speech stay available.
+                </p>
+              </div>
+            </div>
+            <p className="mt-7 text-lg">
+              <a href={sitePath("/hosted")} className={SITE_LINK_CLASS}>Compare the planned services and follow the launch</a>
+            </p>
+          </div>
+        </section>
+
         <section id="download" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY}`} style={downloadAccentStyle}>
           <h2 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] text-[var(--color-text)]">Get Dormouse</h2>
           <p className="mb-4 text-lg leading-relaxed opacity-70">A dormouse knows when to wake up. Multitasking terminal for mice and thumbs.</p>
           <DownloadButton
-            href="/playground"
+            href={sitePath("/playground")}
             icon={<TerminalIcon size={26} weight="bold" />}
             peek="playground"
           >
@@ -1063,11 +1102,12 @@ export default function Home() {
 
         <footer className="border-t border-[var(--color-text)]/20 py-10">
           <div className="mx-auto max-w-5xl px-4 md:px-6 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-base text-center opacity-50">
-            <a href="/docs/dor" className="underline hover:opacity-100">CLI reference</a>
-            <a href="/docs/agent-skill" className="underline hover:opacity-100">Agent skill</a>
-            <a href="/docs/self-host" className="underline hover:opacity-100">Self-host</a>
-            <a href="/docs/security" className="underline hover:opacity-100">Security</a>
-            <a href="/supply-chain" className="underline hover:opacity-100">Supply Chain</a>
+            <a href={sitePath("/docs/dor")} className="underline hover:opacity-100">CLI reference</a>
+            <a href={sitePath("/docs/agent-skill")} className="underline hover:opacity-100">Agent skill</a>
+            <a href={sitePath("/docs/self-host")} className="underline hover:opacity-100">How to self-host</a>
+            <a href={sitePath("/hosted")} className="underline hover:opacity-100">Pay us to host</a>
+            <a href={sitePath("/docs/security")} className="underline hover:opacity-100">Security</a>
+            <a href={sitePath("/supply-chain")} className="underline hover:opacity-100">Supply Chain</a>
             <a href="https://github.com/diffplug/dormouse/issues" className="underline hover:opacity-100">Report an issue</a>
             <p>
               Built by{" "}

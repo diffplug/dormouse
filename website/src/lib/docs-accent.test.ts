@@ -1,17 +1,56 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { getBundledThemes } from "dormouse-lib/lib/themes";
-import { contrastRatio, docsAccentFor } from "./docs-accent";
+import { completeThemeVars, getBundledThemes } from "dormouse-lib/lib/themes";
+import {
+  compositeColor,
+  contrastRatio,
+  docsAccentFor,
+  docsMutedTextFor,
+  docsMutedTextForSurfaces,
+} from "./docs-accent";
+import { TINTED_DOCS_SURFACES } from "../components/docs-tokens";
+
+/** The site's own palette, which `website/src/index.css` declares as literals
+ *  because the marketing pages are locked to it and prerender without JS. */
+const SITE_BACKGROUND = "#000000";
+const SITE_FOREGROUND = "#dedede";
+const SITE_CARAMEL = "#b47624";
+
+/** `--color-text` follows the reader's theme on a docs page; `--color-caramel`
+ *  is the fixed brand colour. A new `tintVar` is unmapped until it is added
+ *  here, so the table cannot grow an entry these tests silently mis-cover. */
+const tintFor = (tintVar: string, foreground: string): string => {
+  if (tintVar === "--color-text") return foreground;
+  if (tintVar === "--color-caramel") return SITE_CARAMEL;
+  throw new Error(`docs-accent.test.ts has no colour for tintVar ${tintVar}`);
+};
+
+const surfacesFor = (
+  surfaceVariants: (typeof TINTED_DOCS_SURFACES)[number]["surfaceVariants"],
+  foreground: string,
+  background: string,
+): string[] =>
+  surfaceVariants.map((layers) =>
+    layers.reduce((surface, { tintVar, tintAlpha }) => {
+      const tint = tintFor(tintVar, foreground);
+      return compositeColor(tint, surface, tintAlpha)!;
+    }, background),
+  );
 
 const rgb = (hex: string): [number, number, number] => {
   const h = hex.replace("#", "");
   return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16)) as [number, number, number];
 };
 
-const themes = getBundledThemes().map((theme) => ({
-  id: theme.id,
-  accent: theme.accent,
-  background: (theme.vars ?? {})["--vscode-editor-background"],
-}));
+const themes = getBundledThemes().map((theme) => {
+  const vars = completeThemeVars(theme.vars ?? {}, theme.type);
+  return {
+    id: theme.id,
+    accent: theme.accent,
+    background: vars["--vscode-editor-background"],
+    foreground: vars["--vscode-editor-foreground"],
+  };
+});
 
 describe("docs link colour", () => {
   it("has a theme to derive from at all", () => {
@@ -63,4 +102,91 @@ describe("docs link colour", () => {
     expect(docsAccentFor("var(--nope)", "#000000")).toBeNull();
     expect(docsAccentFor("#000000", "rgb(0 0 0)")).toBeNull();
   });
+});
+
+describe("docs action colour", () => {
+  it("clears WCAG AA on the resting and hover tints in every bundled theme", () => {
+    for (const t of themes) {
+      const accent = docsAccentFor(t.accent, t.background)!;
+      const restingSurface = compositeColor(accent, t.background, 0.1)!;
+      const hoverSurface = compositeColor(accent, t.background, 0.2)!;
+      const action = docsAccentFor(accent, hoverSurface)!;
+
+      expect(
+        contrastRatio(rgb(action), rgb(restingSurface)),
+        `${t.id} resting (${action} on ${restingSurface})`,
+      ).toBeGreaterThanOrEqual(4.5);
+      expect(
+        contrastRatio(rgb(action), rgb(hoverSurface)),
+        `${t.id} hover (${action} on ${hoverSurface})`,
+      ).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+});
+
+describe("docs muted text colour", () => {
+  it("clears WCAG AA on every bundled theme", () => {
+    for (const t of themes) {
+      const muted = docsMutedTextFor(t.foreground, t.background);
+      expect(muted, t.id).not.toBeNull();
+      expect(
+        contrastRatio(rgb(muted!), rgb(t.background)),
+        `${t.id} (${muted})`,
+      ).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it.each(TINTED_DOCS_SURFACES)(
+    "clears WCAG AA on every $token surface in every bundled theme",
+    ({ surfaceVariants }) => {
+      for (const t of themes) {
+        const surfaces = surfacesFor(surfaceVariants, t.foreground, t.background);
+        const muted = docsMutedTextForSurfaces(t.foreground, surfaces);
+        expect(muted, t.id).not.toBeNull();
+        for (const surface of surfaces) {
+          expect(
+            contrastRatio(rgb(muted!), rgb(surface)),
+            `${t.id} (${muted} on ${surface})`,
+          ).toBeGreaterThanOrEqual(4.5);
+        }
+      }
+    },
+  );
+
+  it("moves a high-contrast foreground toward its background", () => {
+    const muted = docsMutedTextFor("#ffffff", "#000000")!;
+    expect(muted).not.toBe("#ffffff");
+    expect(contrastRatio(rgb(muted), rgb("#000000"))).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("boosts an under-contrast foreground away from every target surface", () => {
+    const surfaces = ["#555555", "#595959"];
+    const muted = docsMutedTextForSurfaces("#666666", surfaces)!;
+    for (const surface of surfaces) {
+      expect(contrastRatio(rgb(muted), rgb(surface))).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it("returns null on a colour it cannot read", () => {
+    expect(docsMutedTextFor("var(--nope)", "#000000")).toBeNull();
+  });
+
+  it("agrees with the static fallback index.css declares", () => {
+    // The site's own palette is fixed, so its muted level is precomputed there
+    // rather than left to DocsLayout's effect — otherwise the prerendered page
+    // has no muted level at all. Keep the two in step.
+    const css = readFileSync(new URL("../index.css", import.meta.url), "utf8");
+    const declared = css.match(/--docs-text-muted:\s*(#[0-9a-f]{6})/i)?.[1];
+    expect(declared).toBe(docsMutedTextFor("#dedede", "#000000"));
+  });
+
+  it.each(TINTED_DOCS_SURFACES)(
+    "agrees with the static $token fallback index.css declares",
+    ({ token, surfaceVariants }) => {
+      const css = readFileSync(new URL("../index.css", import.meta.url), "utf8");
+      const declared = css.match(new RegExp(`${token}:\\s*(#[0-9a-f]{6})`, "i"))?.[1];
+      const surfaces = surfacesFor(surfaceVariants, SITE_FOREGROUND, SITE_BACKGROUND);
+      expect(declared).toBe(docsMutedTextForSurfaces(SITE_FOREGROUND, surfaces));
+    },
+  );
 });

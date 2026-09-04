@@ -9,6 +9,7 @@ import {
   Shortcut,
   UNDER_SWITCH_INDENT,
 } from './design';
+import { ExternalTextLink } from './ExternalTextLink';
 import { ThemePicker } from './ThemePicker';
 import { ShellPicker } from './ShellPicker';
 import { WatchedCommandList } from './WatchedCommandList';
@@ -30,6 +31,7 @@ import {
 } from '../lib/terminal-registry';
 
 const TITLE_ID = 'settings-dialog-title';
+const HOSTED_VOICE_URL = 'https://dormouse.sh/hosted/#voice';
 
 /** Every section but the first draws its own divider. */
 const SECTION = 'mt-4 border-t border-border pt-3';
@@ -205,7 +207,12 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
         onToggle={(speakEnabled) => updateAlertSettings({ speakEnabled })}
         onCommitDelay={(speakDelayMs) => updateAlertSettings({ speakDelayMs })}
         action={<SpeakTestButton />}
-      />
+      >
+        Uses your browser or system voice.{' '}
+        <ExternalTextLink href={HOSTED_VOICE_URL}>
+          Managed ElevenLabs voice is coming soon.
+        </ExternalTextLink>
+      </AlarmSinkSection>
 
       <AlarmSinkSection
         switchLabel="Send push notification if not attended"

@@ -145,7 +145,7 @@ Every literal color the Host-Theme-Only Rule below permits, in full. Each is her
 - **Setup QR** (`#ffffff` ground, `#000000` modules, in `lib/src/components/QrCode.tsx`): a phone camera reads this control, not a person. Scanners expect dark-on-light and many refuse an inverted code, and no theme token promises either the polarity or the contrast ratio in both light and dark.
 
 ### Named Rules
-**The Host-Theme-Only Rule.** Never write a hex value or `oklch()` literal into `theme.css` or a component. Never use `var(..., fallback)` chains. Every color must resolve through `--vscode-*` or one of the body-published runtime picks (`--color-door-*`, `--color-focus-ring`, `--color-alarm-vs-*`). The only exceptions are the ones rostered under Fixed Exceptions above, and adding one means adding it there.
+**The Host-Theme-Only Rule.** Never write a hex value or `oklch()` literal into `theme-colors.css`, `theme.css`, or a component. Never use `var(..., fallback)` chains. Every color must resolve through `--vscode-*` or one of the body-published runtime picks (`--color-door-*`, `--color-focus-ring`, `--color-alarm-vs-*`). The only exceptions are the ones rostered under Fixed Exceptions above, and adding one means adding it there.
 
 **The Bg-Only Chrome Rule.** Pane headers, doors, and the baseboard convey hierarchy through background shifts only. Do not add borders or shadows to "make the hierarchy work." If a high-contrast theme makes a header look flat against the app bg, that is the user's theme speaking; do not override.
 
@@ -278,7 +278,7 @@ When selection moves between panes/doors, the focus ring **glides** to the new t
 
 ### Don't:
 - **Don't** write a hex color outside the Fixed Exceptions roster above — and adding one is an edit to that roster, not a local judgement call. No `oklch()` literals either; even those bypass the host theme.
-- **Don't** add `var(--vscode-*, #fallback)` fallback chains in `theme.css`. The runtime host plus the resolver are responsible for providing the variable; a fallback hides a real bug.
+- **Don't** add `var(--vscode-*, #fallback)` fallback chains in `theme-colors.css` or `theme.css`. The runtime host plus the resolver are responsible for providing the variable; a fallback hides a real bug.
 - **Don't** add borders or shadows to pane headers or doors to "make the hierarchy work." The hierarchy is `header-active-bg` vs. `header-inactive-bg`. If a high-contrast theme makes that look flat, accept it.
 - **Don't** introduce a `text-muted` color inside an active or inactive pane header. Header-internal text inherits the header foreground; muting inside it breaks the focus signal.
 - **Don't** use rounded SaaS cards, gradient accents, gradient text, or glassmorphism. PRODUCT.md names these directly: "Generic SaaS (rounded cards, gradients, startup illustrations)," "Electron bloat (Slack — heavy, slow-feeling, too much chrome)."
@@ -287,4 +287,4 @@ When selection moves between panes/doors, the focus ring **glides** to the new t
 - **Don't** add an emoji, mascot, or illustration to chrome. PRODUCT.md is explicit: "Overly playful (too many animations, emojis, mascots)."
 - **Don't** gate app chrome on `window.alert` / `confirm` / `prompt`. Native dialogs are not dependable in the desktop webview: the theme uninstall was gated on `confirm` and silently did nothing there, because the call returned without ever showing a dialog. Whether a given webview suppresses the panel or never implements it, a control gated on one cannot be trusted to run. Use `ModalFrame`, or make the action a single click when it is cheap and reversible. The marketing website is exempt — it only ever runs in a real browser, where `ShareUrlButton`'s `prompt` is a reasonable last-resort clipboard fallback.
 - **Don't** wrap things in containers. Most surfaces don't need one; the host's sidebar already is the container.
-- **Don't** introduce a new pass-through `--mt-*` token or a one-off color for tabs, badges, accents, or button hovers. If a new rendered surface truly needs a token that isn't in the hierarchy above, update `theme.css` and `design.tsx` together, document the addition in `docs/specs/theme.md`, and update `CONSUMED_VSCODE_KEYS` in `bundle-themes.mjs`.
+- **Don't** introduce a new pass-through `--mt-*` token or a one-off color for tabs, badges, accents, or button hovers. If a new rendered surface truly needs a token that isn't in the hierarchy above, update `theme-colors.css` and `design.tsx` together, document the addition in `docs/specs/theme.md`, and update `CONSUMED_VSCODE_KEYS` in `bundle-themes.mjs`.

@@ -783,6 +783,8 @@ webview's client half).
 Enrolling is the one step a self-hoster cannot skip, so it is UI, not a console
 incantation: a **Remote control** section at the bottom of the app-global
 Settings dialog ([alert.md](./alert.md) -> Settings dialog).
+Its managed-server link follows [website-docs.md](./website-docs.md) ->
+`/hosted` preview.
 
 **It renders nothing at all where `getPlatform().remoteHost` is absent** — the
 website and lib dev server have no Host service, so the form would promise what

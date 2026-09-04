@@ -60,6 +60,58 @@ export function contrastRatio(a: Rgb, b: Rgb): number {
   return (hi + 0.05) / (lo + 0.05);
 }
 
+/** The opaque colour CSS paints when `foreground` is drawn over `background`
+ *  at `opacity`. This keeps contrast derivations on the same surface the
+ *  browser renders for Tailwind's colour/opacity utilities. */
+export function compositeColor(
+  foreground: string,
+  background: string,
+  opacity: number,
+): string | null {
+  const fg = parseHex(foreground);
+  const bg = parseHex(background);
+  if (!fg || !bg) return null;
+  return toHex(mix(bg.rgb, fg.rgb, Math.min(1, Math.max(0, fg.alpha * opacity))));
+}
+
+/**
+ * Both colours as opaque RGB, or `null` when either is unreadable.
+ *
+ * Alpha is against the page, so a translucent foreground is flattened onto the
+ * background before anything measures it.
+ */
+function flatten(
+  foreground: string,
+  background: string,
+): { base: Rgb; bg: Rgb } | null {
+  const fg = parseHex(foreground);
+  const bg = parseHex(background);
+  if (!fg || !bg) return null;
+  return { base: fg.alpha < 1 ? mix(bg.rgb, fg.rgb, fg.alpha) : fg.rgb, bg: bg.rgb };
+}
+
+/** Walk `base` toward the higher-contrast extreme until `clears` accepts it. */
+function boostAway(
+  base: Rgb,
+  bg: Rgb,
+  clears: (candidate: Rgb) => boolean,
+): string | null {
+  // Measure the direction rather than guessing from a luminance midpoint: that
+  // is not where the contrast crossover sits, and a mid-tone background is
+  // neither light nor dark.
+  const white: Rgb = [255, 255, 255];
+  const black: Rgb = [0, 0, 0];
+  const toward = contrastRatio(white, bg) >= contrastRatio(black, bg) ? white : black;
+
+  // The final candidate is `toward` itself. If even it cannot clear every
+  // requested surface, no candidate along this direction can satisfy them.
+  for (let step = 1; step <= 20; step += 1) {
+    const candidate = mix(base, toward, step / 20);
+    if (clears(candidate)) return toHex(candidate);
+  }
+  return null;
+}
+
 /**
  * A link colour for `accent` that is legible on `background`.
  *
@@ -71,26 +123,65 @@ export function docsAccentFor(
   background: string,
   minContrast = MIN_CONTRAST,
 ): string | null {
-  const fg = parseHex(accent);
-  const bg = parseHex(background);
-  if (!fg || !bg) return null;
+  const flat = flatten(accent, background);
+  if (!flat) return null;
+  const { base, bg } = flat;
+  if (contrastRatio(base, bg) >= minContrast) return toHex(base);
+  return boostAway(base, bg, (candidate) => contrastRatio(candidate, bg) >= minContrast);
+}
 
-  // Alpha is against the page, so flatten before measuring anything.
-  const base = fg.alpha < 1 ? mix(bg.rgb, fg.rgb, fg.alpha) : fg.rgb;
-  if (contrastRatio(base, bg.rgb) >= minContrast) return toHex(base);
+/**
+ * The quietest version of `foreground` that still clears body-text AA on
+ * `background`.
+ *
+ * Element opacity made the same text land at a different effective contrast on
+ * every reader-picked theme. The caller supplies the actual rendered surface,
+ * so base-page and tinted-card tokens can each be quiet without dropping below
+ * AA; typography carries the hierarchy when colour cannot safely do so.
+ */
+export function docsMutedTextFor(
+  foreground: string,
+  background: string,
+  minContrast = MIN_CONTRAST,
+): string | null {
+  return docsMutedTextForSurfaces(foreground, [background], minContrast);
+}
 
-  // Whichever end contrasts more, measured rather than guessed from a
-  // luminance midpoint: that is not where the crossover sits, and a mid-tone
-  // background is neither light nor dark.
-  const white: Rgb = [255, 255, 255];
-  const black: Rgb = [0, 0, 0];
-  const toward: Rgb = contrastRatio(white, bg.rgb) >= contrastRatio(black, bg.rgb) ? white : black;
+/**
+ * One muted text colour that clears body-text AA on every surface it may
+ * occupy. The least-contrasting surface sets the direction toward quiet; each
+ * candidate is checked against the whole set, so nested tints cannot disappear
+ * from the derivation merely because the token has one CSS variable.
+ */
+export function docsMutedTextForSurfaces(
+  foreground: string,
+  backgrounds: readonly string[],
+  minContrast = MIN_CONTRAST,
+): string | null {
+  if (backgrounds.length === 0) return null;
+  const flats = backgrounds.map((background) => flatten(foreground, background));
+  if (flats.some((flat) => flat === null)) return null;
+  const resolved = flats as Array<{ base: Rgb; bg: Rgb }>;
+  const limiting = resolved.reduce((worst, candidate) =>
+    contrastRatio(candidate.base, candidate.bg) < contrastRatio(worst.base, worst.bg)
+      ? candidate
+      : worst,
+  );
+  const clearsEverySurface = (candidate: Rgb) =>
+    resolved.every(({ bg }) => contrastRatio(candidate, bg) >= minContrast);
+  const { base, bg } = limiting;
 
-  // The last step is `toward` itself, so the best available colour is always
-  // among these — there is nothing left to fall back to.
-  for (let step = 1; step <= 20; step += 1) {
-    const candidate = mix(base, toward, step / 20);
-    if (contrastRatio(candidate, bg.rgb) >= minContrast) return toHex(candidate);
+  // Already too faint to be body text: there is nothing to quieten, so borrow
+  // the accent path's boost away from the surfaces instead.
+  if (!clearsEverySurface(base)) {
+    return boostAway(base, bg, clearsEverySurface);
   }
-  return toHex(toward);
+
+  let quietest = base;
+  for (let step = 1; step <= 100; step += 1) {
+    const candidate = mix(base, bg, step / 100);
+    if (!clearsEverySurface(candidate)) break;
+    quietest = candidate;
+  }
+  return toHex(quietest);
 }

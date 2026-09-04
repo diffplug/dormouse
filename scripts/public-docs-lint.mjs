@@ -47,10 +47,52 @@ const SKILL = 'dor/skill.md';
 const SELF_HOST = 'SELF_HOST.md';
 const SECURITY_SPEC = 'docs/specs/security.md';
 const HOMEPAGE = 'website/src/pages/Home.tsx';
+/** The `/docs` redirect entrypoint `website/public/_redirects` owns; it names
+ *  no page, so `sitePath` has nothing to point it at. */
+const DOCS_ENTRYPOINT_PATH = '/docs';
+/** The `linkedFrom` source naming {@link HOMEPAGE}, as `docs-pages.ts` spells it. */
+const HOMEPAGE_SOURCE = 'homepage';
 const SPEC = 'docs/specs/website-docs.md';
 const REDIRECTS = 'website/public/_redirects';
 const ROOT_ROUTE = 'website/src/root.tsx';
 const SITE_META = 'website/src/lib/site-meta.ts';
+const WEBSITE_SRC = 'website/src';
+
+/**
+ * Every `.tsx` a reference page renders, reached transitively from the route
+ * table's own modules.
+ *
+ * Derived rather than listed, like every other inventory here: a hand-kept copy
+ * of "which files are docs surfaces" is a second owner of the route table, and
+ * a component added to a page — or a page added to `DOCS_PAGES` — would quietly
+ * fall outside whatever check reads it. `DocsLayout` is seeded explicitly
+ * because it is what makes a page a docs surface (it adds `docs-themed`), and
+ * pages reach it through their own imports anyway.
+ */
+function docsSurfaces() {
+  const seed = [
+    `${WEBSITE_SRC}/components/DocsLayout.tsx`,
+    ...DOCS_PAGES.map((page) => `${WEBSITE_SRC}/${page.module.replace(/^\.\//, '')}`),
+  ];
+  const tracked = new Set(trackedFiles());
+  const seen = new Set();
+  const queue = [...seed];
+  while (queue.length > 0) {
+    const rel = queue.shift();
+    if (seen.has(rel) || !tracked.has(rel)) continue;
+    seen.add(rel);
+    for (const [, spec] of readRepoFile(rel).matchAll(/from\s+["'](\.[^"']+)["']/g)) {
+      const resolved = join(dirname(rel), spec);
+      for (const ext of ['.tsx', '.ts']) {
+        if (tracked.has(resolved + ext)) queue.push(resolved + ext);
+      }
+    }
+  }
+  for (const rel of seed) {
+    if (!tracked.has(rel)) fail(`${rel}: docsSurfaces seed names a file that does not exist`);
+  }
+  return [...seen].filter((rel) => rel.endsWith('.tsx')).sort();
+}
 
 /** Each source read once and parsed once, then shared by every check. */
 const src = {
@@ -255,7 +297,18 @@ function checkRoutesToReferences() {
   // the guide owes nothing to the self-host runbook — lives on the entry it
   // applies to rather than as a set here.
   const README_OF = { guide: GUIDE, 'root-readme': ROOT_README };
-  const linked = DOCS_PAGES.filter((page) => page.linkedFrom?.length);
+  // A link to the page itself, or to an anchor on it — in either spelling,
+  // because the host 308s the bare path to the trailing-slash one (`sitePath`
+  // in `website/src/lib/site-meta.ts`), so a document that writes the
+  // destination directly is as correct as one that writes the redirect.
+  const satisfies = (href, path) =>
+    [path, `${path}/`].some((form) => href === form || href.startsWith(`${form}#`));
+  // Pages owing a README a link. Scoped past `homepage`, which the second half
+  // checks — counting it here would leave this tripwire armed by a page whose
+  // only obligation is on-site, so the README half could enforce nothing and
+  // still print "passed".
+  const linked = DOCS_PAGES.filter((page) =>
+    page.linkedFrom?.some((source) => source !== HOMEPAGE_SOURCE));
   if (linked.length === 0) {
     fail('docs-pages.ts: no page names a README; checkRoutesToReferences enforces nothing');
     return;
@@ -264,33 +317,56 @@ function checkRoutesToReferences() {
   for (const page of linked) {
     const url = SITE_ORIGIN + page.path;
     for (const source of page.linkedFrom ?? []) {
+      // The homepage is on-site and spells its links root-relatively; it is
+      // checked below, against the same registry.
+      if (source === HOMEPAGE_SOURCE) continue;
       const rel = README_OF[source];
-      // Node strips the `"guide" | "root-readme"` union at runtime, so a typo
-      // here would otherwise skip the page's check and still print "passed".
+      // Node strips the `"guide" | "root-readme" | "homepage"` union at
+      // runtime, so a typo here would otherwise skip the page's check and
+      // still print "passed".
       if (!rel) {
         fail(`docs-pages.ts: ${page.path} names an unknown linkedFrom "${source}"`);
         continue;
       }
       if (!parsed[rel]) continue;
-      if (!linksIn(rel).some((href) => href === url || href.startsWith(`${url}#`))) {
+      if (!linksIn(rel).some((href) => satisfies(href, url))) {
         fail(`${rel}: does not link to ${url}`);
       }
     }
   }
 
-  // The homepage owes a link to every `/docs` page, not only the ones a README
-  // also carries: it is the page most able to strand one, and a page added
-  // without a `linkedFrom` would otherwise ship reachable from the rail alone.
-  // Checked as exact paths, because `/docs` is an entrypoint rather than a page
-  // and a prefix test would be satisfied by a link to it.
-  const paths = DOCS_PAGES.map((page) => page.path).filter((path) => path.startsWith('/docs/'));
-  const hrefs = [...src[HOMEPAGE].matchAll(/href="(\/docs[^"]*)"/g)].map(([, href]) => href);
-  const satisfies = (href, path) => href === path || href.startsWith(`${path}#`);
-  for (const path of paths) {
-    if (!hrefs.some((href) => satisfies(href, path))) fail(`${HOMEPAGE}: does not link to ${path}`);
+  // Which pages the homepage owes a link to is the registry's call, not a
+  // guess from the path: `/hosted` and `/supply-chain` are owed one and do not
+  // sit under `/docs`, while `/changelog` sits in the rail on purpose.
+  const owed = DOCS_PAGES.filter((page) => page.linkedFrom?.includes(HOMEPAGE_SOURCE));
+  if (owed.length === 0) {
+    fail(`docs-pages.ts: no page names the homepage; ${HOMEPAGE} enforces nothing`);
+    return;
   }
-  for (const href of hrefs) {
-    if (!paths.some((path) => satisfies(href, path))) {
+  // The homepage routes every in-site link through `sitePath("<path>")`
+  // (`checkInSiteHrefsAreServed`), so the path is read from the call rather
+  // than from a rendered href. An anchor on the page still counts as a link
+  // to it, and that suffix is outside the call.
+  const homeHrefs = [...src[HOMEPAGE].matchAll(/sitePath\("(\/[^"]*)"\)/g)].map(([, href]) => href);
+  if (homeHrefs.length === 0) {
+    fail(`${HOMEPAGE}: no sitePath() links found — the homepage link checks are looking `
+      + 'at nothing. Has the href form changed?');
+    return;
+  }
+  for (const page of owed) {
+    if (!homeHrefs.some((href) => satisfies(href, page.path))) {
+      fail(`${HOMEPAGE}: does not link to ${page.path}`);
+    }
+  }
+
+  // A homepage link *shaped* like a reference must be one. Scoped to `/docs`
+  // because that namespace is only ever references, so a typo there is
+  // detectable; a mistyped top-level path is just a broken link, which no
+  // prefix rule can tell from a real page. Exact paths, because `/docs` is an
+  // entrypoint rather than a page and a prefix test would accept a link to it.
+  const docsPaths = DOCS_PAGES.map((page) => page.path).filter((path) => path.startsWith('/docs/'));
+  for (const href of homeHrefs.filter((href) => href.startsWith('/docs'))) {
+    if (!docsPaths.some((path) => satisfies(href, path))) {
       fail(`${HOMEPAGE}: links to ${href}, which is not a published reference`);
     }
   }
@@ -434,6 +510,115 @@ function checkNoStagedClaims() {
   }
 }
 
+/**
+ * The reference pages must not render text in a translucent colour.
+ *
+ * `docs/specs/website-docs.md` -> "Reference page chrome" states the rule, and
+ * `website/src/lib/docs-accent.ts` supplies the replacement: an opaque colour
+ * walked toward the background only as far as WCAG AA allows. Translucency
+ * cannot do that — it composites against whatever surface it lands on, so the
+ * same class measured 5.03:1 on one bundled theme and 2.01:1 on another.
+ *
+ * Both spellings count. `opacity-50` and `text-[var(--color-text)]/50` differ
+ * only in whether the alpha rides the element or the colour, and banning one
+ * merely moves the failure to the other — which is what happened: the pages
+ * converted off `opacity-*` still dimmed prose with `text-…/70`.
+ *
+ * Only *resting* translucency, and only below full: a `hover:`/`focus:` variant
+ * is a transient state over a colour that already passed, and `/100` and
+ * `opacity-100` are opaque.
+ *
+ * Scoped to the surfaces a reference page actually renders, derived below. The
+ * marketing pages are painted in colours the reader cannot retheme, so their
+ * contrast is fixed at authoring time and translucency there is safe.
+ */
+function checkNoDimmedDocsText() {
+  // Files whose resting translucency is not reading text: the exact classes
+  // exempted, each with the reason. Keyed by class rather than by file so a
+  // file that later grows a *different* dimmed class still fails — an
+  // exemption covers the element someone justified, not the module.
+  const ALLOWED = {
+    [`${WEBSITE_SRC}/components/DocsLayout.tsx`]: {
+      'opacity-30':
+        'An aria-hidden "/" separating the rail crumb from the page title. '
+        + 'Decoration, never read, and not a contrast surface.',
+    },
+    [`${WEBSITE_SRC}/components/DocsThemeControl.tsx`]: {
+      'opacity-50':
+        'The theme prompt\'s dismiss button — an icon affordance that comes to '
+        + 'full strength on hover, not body copy.',
+    },
+    [`${WEBSITE_SRC}/components/NotifySignupForm.tsx`]: {
+      'opacity-50': 'The `site` palette\'s muted label and placeholder.',
+      'text-[var(--color-text)]/70': 'The `site` palette\'s input text.',
+    },
+  };
+
+  const surfaces = docsSurfaces();
+  const matchedAllowed = new Map();
+  for (const rel of surfaces) {
+    // `(?<![\w:-])` rejects `hover:opacity-100`; `(?!100)` skips the opaque end
+    // of both scales.
+    const hits = new Set([...readRepoFile(rel).matchAll(
+      /(?<![\w:-])opacity-(?!100\b)\d+|text-\[[^\]]*\]\/(?!100\b)\d+/g,
+    )].map(([m]) => m));
+    if (hits.size === 0) continue;
+    const allowed = ALLOWED[rel] ?? {};
+    matchedAllowed.set(rel, hits);
+    const unexplained = [...hits].filter((hit) => !(hit in allowed));
+    if (unexplained.length === 0) continue;
+    fail(`${rel}: dims text with ${unexplained.join(', ')} — use MUTED_TEXT_CLASS `
+      + '(website/src/components/docs-tokens.ts), or add an ALLOWED entry in '
+      + 'scripts/public-docs-lint.mjs saying why this one is not reading text.');
+  }
+
+  // A stale entry silently exempts nothing, or worse, exempts the next thing
+  // that file grows.
+  for (const [rel, allowed] of Object.entries(ALLOWED)) {
+    if (!surfaces.includes(rel)) {
+      fail(`${rel}: ALLOWED entry in checkNoDimmedDocsText is not a docs surface — drop it.`);
+      continue;
+    }
+    const hits = matchedAllowed.get(rel) ?? new Set();
+    for (const hit of Object.keys(allowed)) {
+      if (!hits.has(hit)) {
+        fail(`${rel}: ALLOWED entry in checkNoDimmedDocsText exempts "${hit}", which the `
+          + 'file no longer uses — drop it.');
+      }
+    }
+  }
+}
+/**
+ * Every in-site `href` spells the path the host actually serves.
+ *
+ * The host answers `/supply-chain` with a 308 to `/supply-chain/`, so a
+ * hand-written bare path costs the reader a redirect on a full page load —
+ * which is every in-site link here, since these are plain `<a href>` and not
+ * React Router `<Link to>`. `sitePath` in `website/src/lib/site-meta.ts` owns
+ * the rule; this stops the twenty-first href from quietly re-deriving it.
+ *
+ * Both spellings of a written href: the JSX attribute and the `href:` property
+ * of a nav-link table. `/` is exempt as already-served, and `/docs` because
+ * `website/public/_redirects` owns it as an entrypoint rather than a page.
+ */
+function checkInSiteHrefsAreServed() {
+  const files = trackedFiles().filter(
+    (rel) => /^website\/src\/(pages|components)\/.*\.tsx$/.test(rel) && !rel.endsWith('.test.tsx'),
+  );
+  if (files.length === 0) {
+    fail('checkInSiteHrefsAreServed matched no files — its path filter has rotted.');
+    return;
+  }
+  for (const rel of files) {
+    for (const [, href] of readRepoFile(rel).matchAll(/href[=:] ?"(\/[^"]*)"/g)) {
+      // `/` and an anchor on it are already the served form.
+      if (href === '/' || href.startsWith('/#') || href === DOCS_ENTRYPOINT_PATH) continue;
+      fail(`${rel}: hand-written in-site href "${href}" — wrap it in sitePath() `
+        + '(website/src/lib/site-meta.ts) so it points at the page rather than a redirect.');
+    }
+  }
+}
+
 const checks = [
   checkNoPlaceholders,
   checkGuideSections,
@@ -448,6 +633,8 @@ const checks = [
   checkRoutesToReferences,
   checkGenerated,
   checkNoStagedClaims,
+  checkNoDimmedDocsText,
+  checkInSiteHrefsAreServed,
 ];
 
 // Each check is isolated: one throwing check must not abort the run, or a

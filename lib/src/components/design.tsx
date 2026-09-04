@@ -4,6 +4,7 @@ import { XIcon } from '@phosphor-icons/react';
 import { forwardRef, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ButtonHTMLAttributes, ComponentProps, CSSProperties, HTMLAttributes, InputHTMLAttributes, ReactNode, RefObject } from 'react';
 import { stepFocus } from './focus-step';
+import { OVERLAY_VIEWPORT_MARGIN_PX } from '../lib/ui-geometry';
 
 // App-wide type scale, color strategy, and chrome conventions: see
 // docs/specs/theme.md and AGENTS.md.
@@ -185,6 +186,15 @@ export const OVERLAY_MAX_HEIGHT = {
   modal: 'max-h-[var(--overlay-max-h-modal,calc(100dvh-3rem))]',
   /** An anchored popover, matching `clampOverlayPosition`'s viewport margin. */
   popover: 'max-h-[var(--overlay-max-h-popover,calc(100dvh-24px))]',
+} as const;
+
+/**
+ * The same caps as `OVERLAY_MAX_HEIGHT`, for an inline `style` rather than a
+ * class. Assembled from the constants — only Tailwind needs whole literals, so
+ * an inline consumer has no excuse to hand-roll a second copy.
+ */
+export const OVERLAY_MAX_HEIGHT_CSS = {
+  popover: `var(${OVERLAY_MAX_HEIGHT_VAR.popover}, calc(100dvh - ${OVERLAY_VIEWPORT_MARGIN_PX * 2}px))`,
 } as const;
 
 export const modalSurface = tv({
@@ -409,14 +419,20 @@ export function useMeasuredElementRect(element: HTMLElement | null): ModalRect |
       return;
     }
 
+    // `resize` fires tens of times during a window drag and `ResizeObserver`
+    // reports every intermediate frame; keeping the previous object when the
+    // numbers match spares every consumer a re-render per event.
     const update = () => {
       const next = element.getBoundingClientRect();
-      setRect({
-        top: next.top,
-        left: next.left,
-        width: next.width,
-        height: next.height,
-      });
+      setRect((previous) =>
+        previous
+        && previous.top === next.top
+        && previous.left === next.left
+        && previous.width === next.width
+        && previous.height === next.height
+          ? previous
+          : { top: next.top, left: next.left, width: next.width, height: next.height },
+      );
     };
 
     update();

@@ -4,12 +4,21 @@ import cargoDeps from "../data/dependencies-cargo.json";
 import npmDeps from "../data/dependencies-npm.json";
 import runtimeDeps from "../data/dependencies-runtime.json";
 import DocsLayout from "../components/DocsLayout";
-import { LINK_CLASS, SCROLL_MT_CLASS } from "../components/docs-tokens";
+import {
+  LINK_CLASS,
+  MUTED_TEXT_CLASS,
+  SCROLL_MT_CLASS,
+  TABLE_CLASS,
+  TABLE_HEAD_ROW_CLASS,
+  TABLE_ROW_CLASS,
+  TABLE_WRAP_CLASS,
+  TH_CLASS,
+} from "../components/docs-tokens";
 import MarkdownDocument, { AnchoredHeading, type BlockNode } from "../components/MarkdownDocument";
 import security from "../data/docs.security.json";
 import { type MetaArgs } from "react-router";
 import { type TocEntry } from "../lib/docs-pages";
-import { siteMeta } from "../lib/site-meta";
+import { siteMeta, sitePath } from "../lib/site-meta";
 
 export function meta({ location }: MetaArgs) {
   return siteMeta(location.pathname, {
@@ -32,10 +41,6 @@ type PackageDependency = {
   homepage: string | null;
 };
 
-type DirectCargoDependency = PackageDependency & {
-  declaredName: string;
-};
-
 function DependencyName({ dep }: { dep: PackageDependency }) {
   if (!dep.homepage) return dep.name;
 
@@ -51,71 +56,40 @@ function DependencyName({ dep }: { dep: PackageDependency }) {
   );
 }
 
-function EmptyAwareText({ value }: { value: string | null | undefined }) {
-  return value ? value : <span className="opacity-45">Unknown</span>;
-}
-
-function PackageTable({ deps }: { deps: PackageDependency[] }) {
+/** `declaredName` differs from `name` only when a Cargo manifest renames the
+ *  crate; every other source leaves it undefined. */
+function DependencyTable({
+  nameLabel,
+  deps,
+}: {
+  nameLabel: string;
+  deps: readonly (PackageDependency & { declaredName?: string })[];
+}) {
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[760px] text-sm">
+    <div className={TABLE_WRAP_CLASS}>
+      <table className={`${TABLE_CLASS} min-w-[760px] text-sm`}>
         <thead>
-          <tr className="text-left border-b border-[var(--color-text)]/10">
-            <th className="pb-2 pr-4 opacity-70">Package</th>
-            <th className="pb-2 pr-4 opacity-70">Version</th>
-            <th className="pb-2 pr-4 opacity-70">License</th>
-            <th className="pb-2 opacity-70">Author</th>
+          <tr className={TABLE_HEAD_ROW_CLASS}>
+            <th className={TH_CLASS}>{nameLabel}</th>
+            <th className={TH_CLASS}>Version</th>
+            <th className={TH_CLASS}>License</th>
+            <th className={TH_CLASS}>Author</th>
           </tr>
         </thead>
         <tbody>
           {deps.map((dep) => (
-            <tr key={`${dep.name}@${dep.version}`} className="border-b border-[var(--color-text)]/5">
+            <tr key={`${dep.name}@${dep.version}`} className={TABLE_ROW_CLASS}>
               <td className="py-1.5 pr-4">
                 <DependencyName dep={dep} />
-              </td>
-              <td className="py-1.5 pr-4 opacity-50 font-mono whitespace-nowrap">{dep.version}</td>
-              <td className="py-1.5 pr-4 opacity-50 whitespace-nowrap">
-                <EmptyAwareText value={dep.license} />
-              </td>
-              <td className="py-1.5 opacity-50">
-                <EmptyAwareText value={dep.author} />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function DirectCargoTable({ deps }: { deps: DirectCargoDependency[] }) {
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[760px] text-sm">
-        <thead>
-          <tr className="text-left border-b border-[var(--color-text)]/10">
-            <th className="pb-2 pr-4 opacity-70">Crate</th>
-            <th className="pb-2 pr-4 opacity-70">Version</th>
-            <th className="pb-2 pr-4 opacity-70">License</th>
-            <th className="pb-2 opacity-70">Author</th>
-          </tr>
-        </thead>
-        <tbody>
-          {deps.map((dep) => (
-            <tr key={`${dep.name}@${dep.version}`} className="border-b border-[var(--color-text)]/5">
-              <td className="py-1.5 pr-4">
-                <DependencyName dep={dep} />
-                {dep.declaredName !== dep.name ? (
-                  <div className="font-mono text-xs opacity-45">{dep.declaredName}</div>
+                {dep.declaredName && dep.declaredName !== dep.name ? (
+                  <div className={`font-mono text-xs ${MUTED_TEXT_CLASS}`}>{dep.declaredName}</div>
                 ) : null}
               </td>
-              <td className="py-1.5 pr-4 opacity-50 font-mono whitespace-nowrap">{dep.version}</td>
-              <td className="py-1.5 pr-4 opacity-50 whitespace-nowrap">
-                <EmptyAwareText value={dep.license} />
-              </td>
-              <td className="py-1.5 opacity-50">
-                <EmptyAwareText value={dep.author} />
-              </td>
+              <td className={`py-1.5 pr-4 font-mono whitespace-nowrap ${MUTED_TEXT_CLASS}`}>{dep.version}</td>
+              {/* The cell already carries the muted colour, so an empty value
+                  needs the fallback text and no wrapper of its own. */}
+              <td className={`py-1.5 pr-4 whitespace-nowrap ${MUTED_TEXT_CLASS}`}>{dep.license || "Unknown"}</td>
+              <td className={`py-1.5 ${MUTED_TEXT_CLASS}`}>{dep.author || "Unknown"}</td>
             </tr>
           ))}
         </tbody>
@@ -148,7 +122,7 @@ const SECTIONS: readonly SupplyChainSection[] = [
     count: runtimeDeps.length,
     description:
       "The Standalone app ships a bundled NodeJS, which bundles other components under their own licenses.\nThe VS Code extension bundles no runtime — it runs on the editor's own Electron Node.",
-    table: <PackageTable deps={runtimeDeps} />,
+    table: <DependencyTable nameLabel="Package" deps={runtimeDeps} />,
   },
   {
     id: "npm-dependencies",
@@ -156,7 +130,7 @@ const SECTIONS: readonly SupplyChainSection[] = [
     count: npmDeps.length,
     description:
       "Runtime npm packages used by the Standalone app, the VS Code extension, and the coordinating server you run yourself to pair a phone with your laptop.",
-    table: <PackageTable deps={npmDeps} />,
+    table: <DependencyTable nameLabel="Package" deps={npmDeps} />,
   },
   {
     id: "direct-cargo-dependencies",
@@ -164,7 +138,7 @@ const SECTIONS: readonly SupplyChainSection[] = [
     count: cargoDeps.direct.length,
     description:
       "Crates declared directly in standalone/src-tauri/Cargo.toml, including build and target-specific dependencies.",
-    table: <DirectCargoTable deps={cargoDeps.direct} />,
+    table: <DependencyTable nameLabel="Crate" deps={cargoDeps.direct} />,
   },
   {
     id: "transitive-cargo-dependencies",
@@ -172,7 +146,7 @@ const SECTIONS: readonly SupplyChainSection[] = [
     count: cargoDeps.transitive.length,
     description:
       "Every crate the direct dependencies pull into the locked Tauri build graph, including build-time and platform-specific crates that aren't all linked into the final binary.",
-    table: <PackageTable deps={cargoDeps.transitive} />,
+    table: <DependencyTable nameLabel="Package" deps={cargoDeps.transitive} />,
   },
 ];
 
@@ -210,9 +184,9 @@ function DependencySection({ section }: { section: SupplyChainSection }) {
         <div>
           <div className="flex items-baseline gap-2">
             <h2 id={section.id} className={`${SCROLL_MT_CLASS} font-display text-xl`}>{section.title}</h2>
-            <div className="font-mono text-md opacity-50">({section.count})</div>
+            <div className={`font-mono text-md ${MUTED_TEXT_CLASS}`}>({section.count})</div>
           </div>
-          <p className="text-sm opacity-60 whitespace-pre-line">{section.description}</p>
+          <p className={`text-sm whitespace-pre-line ${MUTED_TEXT_CLASS}`}>{section.description}</p>
         </div>
       </div>
       {section.table}
@@ -224,15 +198,15 @@ export default function SupplyChain() {
   return (
     <DocsLayout activePath="/supply-chain" toc={SUPPLY_CHAIN_TOC}>
       <AnchoredHeading id="guarantees">Supply-chain guarantees</AnchoredHeading>
-      <p className="text-base text-[var(--color-text)]/70 mb-2">
+      <p className={`text-base mb-2 ${MUTED_TEXT_CLASS}`}>
         What reaches a machine, and how it gets there, is governed by these rows of the{" "}
-        <a href="/docs/security" className={link()}>
+        <a href={sitePath("/docs/security")} className={link()}>
           security spec
         </a>
         , rendered from the same source the nightly audit reads. Each row names the spec
         that states the rule and what pins it on every build; the audit that checks all of
         them is described under{" "}
-        <a href="/docs/security#how-the-guarantees-are-checked" className={link()}>
+        <a href={`${sitePath("/docs/security")}#how-the-guarantees-are-checked`} className={link()}>
           how the guarantees are checked
         </a>
         .
@@ -246,16 +220,16 @@ export default function SupplyChain() {
           <MarkdownDocument blocks={[block as BlockNode]} />
         </div>
       ))}
-      <p className="text-base text-[var(--color-text)]/70 mb-2">
+      <p className={`text-base mb-2 ${MUTED_TEXT_CLASS}`}>
         The optional coordinating server — needed only for phone push notifications,
         installed by the{" "}
-        <a href="/docs/self-host#what-the-installer-does" className={link()}>
+        <a href={`${sitePath("/docs/self-host")}#what-the-installer-does`} className={link()}>
           self-host runbook
         </a>{" "}
         — is included in the inventory below.
       </p>
 
-      <p className="text-base text-[var(--color-text)]/70 mb-2">
+      <p className={`text-base mb-2 ${MUTED_TEXT_CLASS}`}>
         Thank you to every author and contributor.
         Thanks also to{" "}
         <a
@@ -280,15 +254,15 @@ export default function SupplyChain() {
       <div className="grid gap-3 border-y border-[var(--color-text)]/10 py-4 text-sm md:grid-cols-3">
         <div>
           <div className="font-mono text-2xl">{npmDeps.length}</div>
-          <div className="opacity-60">npm packages (direct and transitive)</div>
+          <div className={MUTED_TEXT_CLASS}>npm packages (direct and transitive)</div>
         </div>
         <div>
           <div className="font-mono text-2xl">{cargoDeps.direct.length}</div>
-          <div className="opacity-60">Cargo crates (direct)</div>
+          <div className={MUTED_TEXT_CLASS}>Cargo crates (direct)</div>
         </div>
         <div>
           <div className="font-mono text-2xl">{cargoDeps.transitive.length}</div>
-          <div className="opacity-60">Cargo crates (transitive)</div>
+          <div className={MUTED_TEXT_CLASS}>Cargo crates (transitive)</div>
         </div>
       </div>
 

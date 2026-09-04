@@ -1,32 +1,56 @@
 import { useEffect, useState, type CSSProperties, type RefObject } from 'react';
-import { MODAL_LAYERS, useMeasuredElementRect } from './design';
-import { clampOverlayPosition } from '../lib/ui-geometry';
+import { MODAL_LAYERS, OVERLAY_MAX_HEIGHT_CSS, useMeasuredElementRect } from './design';
+import {
+  clampOverlayPosition,
+  overlayViewportBounds,
+  OVERLAY_VIEWPORT_MARGIN_PX,
+} from '../lib/ui-geometry';
 
-/** Gap between the trigger's bottom edge and the top of the menu. */
+/** Gap between the trigger's near edge and the menu. */
 const MENU_GAP_PX = 4;
 
+interface AnchoredMenuOptions {
+  /** Which side of the trigger the menu prefers. */
+  side?: 'above' | 'below';
+  /** Which of the menu's edges lines up with the trigger's matching edge. */
+  align?: 'start' | 'end';
+  /**
+   * `fixed` measures the menu and positions it in viewport coordinates;
+   * `absolute` offsets it off the trigger in CSS alone.
+   *
+   * Fixed is the default because the Settings dialog surface is
+   * `overflow-y-auto` and would clip an absolutely-positioned menu; a fixed
+   * descendant escapes ancestor overflow because no modal ancestor sets
+   * `transform`. Absolute is for a trigger inside a `position: sticky`
+   * ancestor, which Chromium treats as the containing block for fixed
+   * descendants and so offsets them by it.
+   */
+  strategy?: 'fixed' | 'absolute';
+}
+
 /**
- * Position a dropdown menu off its trigger's measured rect, `position: fixed`.
+ * Position a dropdown menu off its trigger's measured rect.
  *
- * Fixed rather than absolute because the Settings dialog surface is
- * `overflow-y-auto` and would clip an absolutely-positioned menu; a fixed
- * descendant escapes ancestor overflow because no modal ancestor sets
- * `transform`. The menu's own rect feeds the viewport clamp, so a long list
- * can't run off the bottom of a short window — it is 0 on the first pass, which
- * is why the returned style keeps the menu hidden until it has been measured.
- * Any height cap belongs on the panel, not in this style.
+ * The returned style is the menu's whole geometry — width, stacking, height
+ * cap, and placement — so no caller re-implements placement beside it.
+ *
+ * The height cap reserves the roomier side of the trigger, flipping away from
+ * the preferred side when needed; a full-viewport cap alone is too tall once
+ * the panel starts below the top edge. Under `fixed` the menu's own rect feeds
+ * the final viewport clamp. It is unmeasured on the first pass, which is why
+ * the style keeps the menu hidden until then.
  *
  * The style also carries the stacking (`MODAL_LAYERS.app`): inside the Settings
  * dialog the alarm sections' `opacity-50` wrappers are stacking contexts too,
  * and being later in tree order they would otherwise paint through the menu.
  *
- * `open` gates the measurement, so pass `false` for a variant that positions
- * itself some other way (`ThemePicker`'s free-floating `compact`) and ignore
- * `menuStyle` there — such a variant owns its own stacking.
+ * `open` gates the measurement so closed pickers do not keep observers alive,
+ * and `absolute` never measures the menu at all.
  */
 export function useAnchoredMenu(
   open: boolean,
   widthPx: number,
+  { side = 'below', align = 'start', strategy = 'fixed' }: AnchoredMenuOptions = {},
 ): {
   setTriggerEl: (element: HTMLElement | null) => void;
   setMenuEl: (element: HTMLElement | null) => void;
@@ -36,19 +60,94 @@ export function useAnchoredMenu(
   const [menuEl, setMenuEl] = useState<HTMLElement | null>(null);
 
   const triggerRect = useMeasuredElementRect(open ? triggerEl : null);
-  const menuRect = useMeasuredElementRect(open ? menuEl : null);
+  const menuRect = useMeasuredElementRect(open && strategy === 'fixed' ? menuEl : null);
+
+  // `useMeasuredElementRect` deliberately preserves its object when a resize
+  // leaves the element fixed in place. The geometry below still depends on the
+  // viewport, so subscribe independently instead of relying on a coincidental
+  // rect allocation. `visualViewport` covers mobile browser chrome and the
+  // on-screen keyboard on engines that report those separately; its scroll
+  // event carries origin changes that do not resize either viewport.
+  const [, setViewportRevision] = useState(0);
+  useEffect(() => {
+    if (!open) return;
+    const update = () => setViewportRevision((revision) => revision + 1);
+    const visualViewport = window.visualViewport;
+    window.addEventListener('resize', update);
+    visualViewport?.addEventListener('resize', update);
+    visualViewport?.addEventListener('scroll', update);
+    return () => {
+      window.removeEventListener('resize', update);
+      visualViewport?.removeEventListener('resize', update);
+      visualViewport?.removeEventListener('scroll', update);
+    };
+  }, [open]);
+
+  const viewport = triggerRect ? overlayViewportBounds() : null;
+  const space = triggerRect && viewport
+    ? {
+        above: Math.max(
+          0,
+          triggerRect.top
+            - MENU_GAP_PX
+            - viewport.top
+            - OVERLAY_VIEWPORT_MARGIN_PX,
+        ),
+        below: Math.max(
+          0,
+          viewport.bottom
+            - (triggerRect.top + triggerRect.height + MENU_GAP_PX)
+            - OVERLAY_VIEWPORT_MARGIN_PX,
+        ),
+        viewportHeight: viewport.height,
+      }
+    : null;
+  const otherSide = side === 'above' ? 'below' : 'above';
+  const resolvedSide = space && space[otherSide] > space[side] ? otherSide : side;
+  // If a malformed/off-screen trigger leaves no room on either side, fixed
+  // placement can still clamp a usable panel over it; never collapse to 0px.
+  const availableHeight = space
+    ? Math.max(
+        space.above,
+        space.below,
+        space.above === 0 && space.below === 0
+          ? space.viewportHeight - OVERLAY_VIEWPORT_MARGIN_PX * 2
+          : 0,
+      )
+    : null;
+  const effectiveMenuHeight = menuRect && availableHeight !== null
+    ? Math.min(menuRect.height, availableHeight)
+    : null;
+
+  const placement: CSSProperties =
+    strategy === 'absolute'
+      ? {
+          position: 'absolute',
+          ...(align === 'end' ? { right: 0 } : { left: 0 }),
+          ...(resolvedSide === 'above'
+            ? { bottom: `calc(100% + ${MENU_GAP_PX}px)` }
+            : { top: `calc(100% + ${MENU_GAP_PX}px)` }),
+        }
+      : triggerRect && menuRect && effectiveMenuHeight !== null
+        ? clampOverlayPosition({
+            left: align === 'end'
+              ? triggerRect.left + triggerRect.width - widthPx
+              : triggerRect.left,
+            top: resolvedSide === 'above'
+              ? triggerRect.top - effectiveMenuHeight - MENU_GAP_PX
+              : triggerRect.top + triggerRect.height + MENU_GAP_PX,
+            width: widthPx,
+            height: effectiveMenuHeight,
+          })
+        : { position: 'fixed', visibility: 'hidden' };
 
   const menuStyle: CSSProperties = {
     width: widthPx,
     zIndex: MODAL_LAYERS.app,
-    ...(triggerRect
-      ? clampOverlayPosition({
-          left: triggerRect.left,
-          top: triggerRect.top + triggerRect.height + MENU_GAP_PX,
-          width: widthPx,
-          height: menuRect?.height ?? 0,
-        })
-      : { position: 'fixed', visibility: 'hidden' }),
+    ...(availableHeight === null
+      ? null
+      : { maxHeight: `min(${OVERLAY_MAX_HEIGHT_CSS.popover}, ${availableHeight}px)` }),
+    ...placement,
   };
 
   return { setTriggerEl, setMenuEl, menuStyle };

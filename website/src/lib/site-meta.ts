@@ -32,14 +32,28 @@ const OG_IMAGE = `${SITE_ORIGIN}/og-image.jpg`;
 const OG_IMAGE_ALT = "Dormouse — multitasking terminal for mice";
 
 /**
- * The absolute URL a page should claim as its own.
+ * The form of a site path the host actually serves: a request for
+ * `/supply-chain` is answered with a 308 to `/supply-chain/`. A canonical
+ * pointing at a redirect is a weaker signal than one pointing at the page, and
+ * an in-site href pointing at one costs the reader a round trip.
  *
- * Trailing slash because that is what the host actually serves: a request for
- * `/supply-chain` is answered with a 308 to `/supply-chain/`, and a canonical
- * pointing at a redirect is a weaker signal than one pointing at the page.
+ * The owner of the rule for hrefs written in `website/src`: every in-site
+ * `href` goes through it, and `checkInSiteHrefsAreServed` fails a build that
+ * hand-writes one. React Router `<Link to>` does not — that navigation never
+ * leaves the client, so there is no redirect to avoid.
+ * `scripts/public-docs-lint.mjs` still accepts either spelling from a README,
+ * which is written by hand and read off-site. `localizeSiteLinks` in
+ * `website/scripts/generate-docs.js` applies the same rule at build time to
+ * Markdown links, where an arbitrary URL may also name a file rather than a
+ * route.
  */
+export function sitePath(pathname: string): string {
+  return pathname.endsWith("/") ? pathname : `${pathname}/`;
+}
+
+/** The absolute URL a page should claim as its own. */
 export function canonicalUrl(pathname: string): string {
-  return new URL(pathname.endsWith("/") ? pathname : `${pathname}/`, SITE_ORIGIN).href;
+  return new URL(sitePath(pathname), SITE_ORIGIN).href;
 }
 
 /**

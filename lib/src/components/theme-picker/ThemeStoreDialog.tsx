@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { OpenVSXExtension } from '../../lib/themes';
+import { modalSurface } from '../design';
 import {
   addInstalledTheme,
   applyTheme,
@@ -10,7 +11,6 @@ import {
   searchThemes,
   setActiveThemeId,
 } from '../../lib/themes';
-import { themePickerStyles as styles } from './styles';
 
 export function ThemeStoreDialog({
   open,
@@ -128,17 +128,15 @@ export function ThemeStoreDialog({
     <dialog
       ref={dialogRef}
       onClose={onClose}
-      className="fixed inset-0 z-50 m-auto h-[420px] w-[min(380px,calc(100vw-2rem))] rounded border p-0 font-mono shadow-2xl backdrop:bg-black/50"
-      style={styles.panel}
+      className={`${modalSurface({ padding: 'none', elevation: 'modal' })} fixed inset-0 z-50 m-auto h-[420px] w-[min(380px,calc(100vw-2rem))] backdrop:bg-black/50`}
     >
       <div className="flex h-full flex-col">
-        <div className="flex items-center justify-between border-b px-4 py-3" style={styles.border}>
+        <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <span className="text-sm font-medium">Install theme from OpenVSX</span>
           <button
             type="button"
             onClick={onClose}
-            className="text-sm transition-opacity hover:opacity-100"
-            style={styles.muted}
+            className="text-sm text-muted transition-opacity hover:opacity-100"
             aria-label="Close theme store"
           >
             X
@@ -152,23 +150,22 @@ export function ThemeStoreDialog({
             onChange={(event) => handleInput(event.target.value)}
             placeholder="Search themes..."
             autoFocus
-            className="w-full rounded border px-3 py-1.5 text-sm outline-none placeholder:opacity-65"
-            style={styles.trigger(false)}
+            className="w-full rounded border border-input-border bg-input-bg px-3 py-1.5 text-sm text-foreground outline-none placeholder:opacity-65"
           />
         </div>
 
         <div className="flex-1 overflow-y-auto px-4 pb-3">
           {error ? (
-            <div className="rounded px-3 py-2 text-sm" style={styles.error}>
+            <div className="rounded px-3 py-2 text-sm text-error">
               {error}
             </div>
           ) : null}
-          {loading ? <div className="py-8 text-center text-sm" style={styles.muted}>Searching...</div> : null}
+          {loading ? <div className="py-8 text-center text-sm text-muted">Searching...</div> : null}
           {!loading && results.length === 0 && query.trim() ? (
-            <div className="py-8 text-center text-sm" style={styles.muted}>No themes found</div>
+            <div className="py-8 text-center text-sm text-muted">No themes found</div>
           ) : null}
           {!loading && !query.trim() ? (
-            <div className="py-8 text-center text-sm" style={styles.muted}>
+            <div className="py-8 text-center text-sm text-muted">
               Search for a VS Code theme to install
             </div>
           ) : null}
@@ -182,15 +179,14 @@ export function ThemeStoreDialog({
                   <img src={extension.files.icon} alt="" className="h-8 w-8 shrink-0 rounded" />
                 ) : (
                   <div
-                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded text-sm"
-                    style={{ ...styles.trigger(false), ...styles.muted }}
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-input-border bg-input-bg text-sm text-muted"
                   >
                     VS
                   </div>
                 )}
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-medium">{extension.displayName || extension.name}</div>
-                  <div className="truncate text-sm" style={styles.muted}>
+                  <div className="truncate text-sm text-muted">
                     {extension.namespace} - {extension.downloadCount.toLocaleString()} downloads
                   </div>
                 </div>
@@ -198,8 +194,7 @@ export function ThemeStoreDialog({
                   <button
                     type="button"
                     onClick={() => handleRemoveExtension(key)}
-                    className="shrink-0 rounded px-2 py-1 text-sm transition-opacity hover:opacity-100"
-                    style={styles.muted}
+                    className="shrink-0 rounded px-2 py-1 text-sm text-muted transition-opacity hover:opacity-100"
                   >
                     Remove
                   </button>
@@ -208,8 +203,7 @@ export function ThemeStoreDialog({
                     type="button"
                     onClick={() => handleInstall(extension)}
                     disabled={isInstallingThis}
-                    className="shrink-0 rounded px-2 py-1 text-sm transition-opacity hover:opacity-90 disabled:opacity-50"
-                    style={styles.button}
+                    className="shrink-0 rounded bg-button-bg px-2 py-1 text-sm text-button-fg transition-opacity hover:opacity-90 disabled:opacity-50"
                   >
                     {isInstallingThis ? 'Installing...' : 'Install'}
                   </button>

@@ -36,9 +36,13 @@ describe('CONSUMED_VSCODE_KEYS / bundle-themes.mjs parity', () => {
 // mirrored onto body with the same value, or it resolves to nothing outside
 // VS Code — rationale in docs/specs/theme.md. Values are compared, not just
 // presence, so repointing one level's binding without the other fails too.
-describe('theme.css var() bindings are mirrored onto body', () => {
+// Checked per file, not across the pair: `theme-colors.css` is imported on its
+// own by a host that wants the colours without the app shell
+// (`website/src/index.css`), so its own mirror has to be complete. A token
+// mirrored from the other file would resolve to nothing there.
+describe.each(['theme-colors.css', 'theme.css'])('%s var() bindings are mirrored onto body', (file) => {
   const here = dirname(fileURLToPath(import.meta.url));
-  const themeCss = readFileSync(resolve(here, '../../theme.css'), 'utf8');
+  const themeCss = readFileSync(resolve(here, '../..', file), 'utf8');
 
   function declarations(block: string): Map<string, string> {
     const out = new Map<string, string>();
@@ -54,17 +58,25 @@ describe('theme.css var() bindings are mirrored onto body', () => {
   // next, and it can't match the prose `@theme` mentions in theme.css's file
   // comment, since neither of those lines contains a `{`.
   function blockBodies(pattern: RegExp): string[] {
-    const bodies = [...themeCss.matchAll(pattern)].map((m) => m[1]);
-    if (bodies.length === 0) throw new Error(`Could not locate ${pattern} in theme.css`);
-    return bodies;
+    return [...themeCss.matchAll(pattern)].map((m) => m[1]);
   }
 
-  const documentLevel = new Map(
-    [/@theme\b[^{}\n]*\{([\s\S]*?)\n\}/g, /\n:root \{([\s\S]*?)\n\}/g]
-      .flatMap((pattern) => blockBodies(pattern))
-      .flatMap((block) => [...declarations(block)]),
-  );
-  const bodyLevel = declarations(blockBodies(/\nbody \{([\s\S]*?)\n\}/g).join('\n'));
+  // Either document-level block kind may be absent from a given layer —
+  // `theme-colors.css` carries no `:root` — but a file with neither has had its
+  // tokens moved out from under this check, so the pair must find something.
+  const documentBlocks = [
+    /@theme\b[^{}\n]*\{([\s\S]*?)\n\}/g,
+    /\n:root \{([\s\S]*?)\n\}/g,
+  ].flatMap((pattern) => blockBodies(pattern));
+  const bodyBlocks = blockBodies(/\nbody \{([\s\S]*?)\n\}/g);
+
+  it('declares tokens at document level and mirrors them onto body', () => {
+    expect(documentBlocks.length).toBeGreaterThan(0);
+    expect(bodyBlocks.length).toBeGreaterThan(0);
+  });
+
+  const documentLevel = new Map(documentBlocks.flatMap((block) => [...declarations(block)]));
+  const bodyLevel = declarations(bodyBlocks.join('\n'));
 
   it('every document-level token bound to a var() chain is mirrored onto body', () => {
     const missing = [...documentLevel]

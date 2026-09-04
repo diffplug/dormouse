@@ -11,6 +11,7 @@ import {
 } from 'react';
 import { DEFAULT_PAIRING_TTL_MS } from 'server-lib-common';
 import { ModalReviewBlock, TextInput, modalActionButton } from './design';
+import { ExternalTextLink } from './ExternalTextLink';
 import type { RemoteHostConsoleStatus, SetupQrResult } from '../host/remote/service-protocol';
 import type {
   PairingOutcome,
@@ -76,6 +77,7 @@ const TONE_CLASS = {
 } as const;
 
 const FIELD_LABEL = 'text-xs text-muted';
+const HOSTED_REMOTE_URL = 'https://dormouse.sh/hosted/#remote-control';
 
 /**
  * How far ahead of `expiresAt` the phone-setup panel mints a replacement code.
@@ -1028,6 +1030,10 @@ function EnrollForm({
     >
       <div className="text-sm leading-relaxed text-muted">
         Connect this machine to a Dormouse server to control it from your phone.
+        {' '}
+        <ExternalTextLink href={HOSTED_REMOTE_URL}>
+          Prefer not to run one? Hosted is coming soon.
+        </ExternalTextLink>
       </div>
 
       <label className="mt-2 block">

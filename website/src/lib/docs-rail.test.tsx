@@ -3,7 +3,7 @@
  *
  * A `TocEntry` is a link to an anchor on the page it belongs to, so every id
  * the rail names must be an id that page actually renders — nested entries
- * included. The six pages produce their entries three different ways (a
+ * included. The seven pages produce their entries four different ways (a
  * Markdown generator, a JSON changelog, a hand-written section list), which is
  * exactly why the check belongs here once rather than in each page's own test.
  */
@@ -17,6 +17,7 @@ import changelog from "../data/changelog.json";
 import SupplyChain, { SUPPLY_CHAIN_TOC } from "../pages/SupplyChain";
 import SecurityDocs from "../pages/SecurityDocs";
 import SelfHostDocs, { SELF_HOST_TOC } from "../pages/SelfHostDocs";
+import Hosted, { HOSTED_TOC } from "../pages/Hosted";
 import AgentSkillDocs from "../pages/AgentSkillDocs";
 import DorDocs from "../pages/DorDocs";
 import security from "../data/docs.security.json";
@@ -30,6 +31,7 @@ const PAGES: Record<string, { element: React.ReactElement; toc: TocEntry[] }> = 
   "/docs/security": { element: <SecurityDocs />, toc: security.toc },
   "/supply-chain": { element: <SupplyChain />, toc: SUPPLY_CHAIN_TOC },
   "/docs/self-host": { element: <SelfHostDocs />, toc: SELF_HOST_TOC },
+  "/hosted": { element: <Hosted />, toc: HOSTED_TOC },
   "/docs/agent-skill": { element: <AgentSkillDocs />, toc: skill.toc },
   "/docs/dor": { element: <DorDocs />, toc: cli.toc },
 };
@@ -58,6 +60,50 @@ describe("every page in the rail", () => {
       for (const id of ids) expect(rendered).toContain(id);
     });
   }
+
+  it("labels Hosted security as a reviewed design target, not a current guarantee", () => {
+    const markup = renderToStaticMarkup(<MemoryRouter><Hosted /></MemoryRouter>);
+    expect(markup).toContain("Paid hosting remains a design target pending independent review");
+    expect(markup).toContain("would still see connection metadata");
+    expect(markup).toContain("remote-security-model.md");
+  });
+
+  it("opens both hosting choices with the server boundary", () => {
+    const selfHostMarkup = renderToStaticMarkup(
+      <MemoryRouter><SelfHostDocs /></MemoryRouter>,
+    );
+    const hostedMarkup = renderToStaticMarkup(
+      <MemoryRouter><Hosted /></MemoryRouter>,
+    );
+
+    for (const markup of [selfHostMarkup, hostedMarkup]) {
+      expect(markup).toContain("Dormouse is just a terminal — it needs no server or hosting.");
+      expect(markup).toContain("They require a signalling server");
+      expect(markup).toContain("Dormouse’s remote features make no network requests");
+    }
+    expect(selfHostMarkup.indexOf("Dormouse is just a terminal —"))
+      .toBeLessThan(selfHostMarkup.indexOf('id="security-model"'));
+    expect(hostedMarkup.indexOf("Dormouse is just a terminal —"))
+      .toBeLessThan(hostedMarkup.indexOf('id="remote-control"'));
+    expect(selfHostMarkup).toContain("See the planned paid option");
+    expect(hostedMarkup).toContain("Paid hosting remains a design target pending independent review");
+  });
+
+  it("names the two hosting choices as actions", () => {
+    expect(DOCS_PAGES.find((page) => page.path === "/docs/self-host")?.label)
+      .toBe("How to self-host");
+    expect(DOCS_PAGES.find((page) => page.path === "/hosted")?.label)
+      .toBe("Pay us to host");
+
+    const selfHostMarkup = renderToStaticMarkup(
+      <MemoryRouter><SelfHostDocs /></MemoryRouter>,
+    );
+    const hostedMarkup = renderToStaticMarkup(
+      <MemoryRouter><Hosted /></MemoryRouter>,
+    );
+    expect(selfHostMarkup).toMatch(/<h1[^>]*>How to self-host<\/h1>/);
+    expect(hostedMarkup).toMatch(/<h1[^>]*>Pay us to host<\/h1>/);
+  });
 
   it("keeps the changelog rail honest on the filtered route the updater opens", () => {
     // /changelog/after/:version renders only releases newer than the baseline.

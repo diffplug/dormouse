@@ -11,6 +11,7 @@ import {
   HEADER_PALETTE_TRANSITION_CLASS,
   MODAL_OVERLAY_INSET,
   OVERLAY_MAX_HEIGHT,
+  OVERLAY_MAX_HEIGHT_CSS,
   OVERLAY_MAX_HEIGHT_VAR,
 } from './design';
 import { OVERLAY_VIEWPORT_MARGIN_PX } from '../lib/ui-geometry';
@@ -60,6 +61,15 @@ describe('viewport-bounded overlay caps', () => {
   it('the popover cap matches clampOverlayPosition\'s viewport margin', () => {
     expect(OVERLAY_VIEWPORT_MARGIN_PX).toBe(12);
     expect(OVERLAY_MAX_HEIGHT.popover).toContain(`calc(100dvh-${OVERLAY_VIEWPORT_MARGIN_PX * 2}px)`);
+  });
+
+  it('the inline popover cap says the same thing as the class', () => {
+    // Two spellings of one cap: Tailwind needs a whole literal, an inline style
+    // does not. Only the class is hand-written, so pin it against the assembled
+    // value rather than re-spelling the assembly.
+    expect(OVERLAY_MAX_HEIGHT.popover).toBe(
+      `max-h-[${OVERLAY_MAX_HEIGHT_CSS.popover.replaceAll(' ', '')}]`,
+    );
   });
 
   it('the modal cap matches the overlay inset it sits inside', () => {

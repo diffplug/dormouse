@@ -10,7 +10,8 @@
  * The changelog and the supply chain live here too. They are not generated
  * from Markdown like the four references, but a reader meets them the same
  * way — long-form material reached from the rail rather than from the
- * marketing nav.
+ * marketing nav. The hosted-services preview is authored marketing, but
+ * shares that reading surface so it sits beside the self-host alternative.
  *
  * **Must stay erasable-syntax TypeScript with no imports.**
  * `scripts/public-docs-lint.mjs` imports this module directly and relies on
@@ -28,28 +29,36 @@ export type DocsPage = {
   /** How the left rail names it. */
   label: string;
   /**
-   * The off-site documents required to link this page.
+   * The documents required to link this page.
    *
    * The generated references are published where a reader may never reach the
    * site — the guide is a Marketplace listing — so each names the documents
    * that must offer a way in. Running a relay server is not part of installing
    * an editor extension, so the guide carries no self-host obligation.
    *
+   * `homepage` is the on-site obligation: the marketing page is the one most
+   * able to strand a reference, so a page reachable from the rail alone must
+   * say so by omitting it. The changelog is the deliberate omission — readers
+   * reach it from the rail and from the standalone updater's deep link, and
+   * the homepage sells the product rather than its release history.
+   *
    * Named for the obligation rather than for a state: every page here is
    * published, routed, and prerendered. `checkRoutesToReferences` reads this.
    */
-  linkedFrom?: readonly ("guide" | "root-readme")[];
+  linkedFrom?: readonly ("guide" | "root-readme" | "homepage")[];
 };
 
-const BOTH_READMES = ["guide", "root-readme"] as const;
+const EVERYWHERE = ["guide", "root-readme", "homepage"] as const;
+const ROOT_README_AND_HOME = ["root-readme", "homepage"] as const;
 
 export const DOCS_PAGES: readonly DocsPage[] = [
   { path: "/changelog", module: "./pages/Changelog.tsx", label: "Changelog" },
-  { path: "/docs/security", module: "./pages/SecurityDocs.tsx", label: "Security", linkedFrom: ["root-readme"] },
-  { path: "/supply-chain", module: "./pages/SupplyChain.tsx", label: "Supply chain" },
-  { path: "/docs/self-host", module: "./pages/SelfHostDocs.tsx", label: "Self hosting", linkedFrom: ["root-readme"] },
-  { path: "/docs/agent-skill", module: "./pages/AgentSkillDocs.tsx", label: "dor agent skill", linkedFrom: BOTH_READMES },
-  { path: "/docs/dor", module: "./pages/DorDocs.tsx", label: "dor CLI reference", linkedFrom: BOTH_READMES },
+  { path: "/docs/security", module: "./pages/SecurityDocs.tsx", label: "Security", linkedFrom: ROOT_README_AND_HOME },
+  { path: "/supply-chain", module: "./pages/SupplyChain.tsx", label: "Supply chain", linkedFrom: ["homepage"] },
+  { path: "/docs/self-host", module: "./pages/SelfHostDocs.tsx", label: "How to self-host", linkedFrom: ROOT_README_AND_HOME },
+  { path: "/hosted", module: "./pages/Hosted.tsx", label: "Pay us to host", linkedFrom: EVERYWHERE },
+  { path: "/docs/agent-skill", module: "./pages/AgentSkillDocs.tsx", label: "dor agent skill", linkedFrom: EVERYWHERE },
+  { path: "/docs/dor", module: "./pages/DorDocs.tsx", label: "dor CLI reference", linkedFrom: EVERYWHERE },
 ];
 
 /**

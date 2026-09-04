@@ -41,7 +41,7 @@ const GESTURE_ARROW_INPUTS = new Set<MobileGestureInputId>([
   "right",
 ]);
 const GITHUB_URL = "https://github.com/diffplug/dormouse";
-const POCKET_NOTIFY_URL = "https://nedshed.dev/about";
+const POCKET_NOTIFY_URL = "/hosted/#remote-control";
 
 export function PocketTerminalExperience({
   interactive,

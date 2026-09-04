@@ -60,6 +60,21 @@ clears the threshold. Direction is measured rather than taken from a luminance
 midpoint, which is not where the contrast crossover sits: `#808080` needs to
 darken, and a luminance test sends it toward white.
 
+Muted reference text originally used `opacity-50` through `opacity-80` over
+the picked foreground. On Solarized Light that reduced 5.03:1 base contrast to
+2.01:1–3.40:1, including the Hosted signup disclosure. Several dark themes
+failed too. The opaque derived token walks the foreground toward its background
+only while the rounded returned color stays at or above 4.5:1. The base page,
+foreground-tinted cards, and caramel-tinted notes therefore derive separate
+muted tokens against the surfaces that actually carry them. Code spans share
+one token derived against all three places their own tint can stack: the base
+page, a card, or a note; deriving it against the base alone measured 4.16:1 in
+a card and 4.24:1 in a note on the site palette.
+
+The signup action originally reused the corrected link color on 10% and 20%
+tints of itself. Those composites pulled every bundled theme below AA, so its
+foreground is corrected against the stronger hover tint and checked on both.
+
 Anchor offsets are tight by measurement, not by estimate. The mobile bar is
 45px and the site header 64px, 80px from `md` up with no `lg` step, so the two
 steps that clear both have 3px in hand and `lg` clears the header alone by

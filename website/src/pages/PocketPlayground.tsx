@@ -9,6 +9,8 @@ import { ShareUrlButton } from "../components/ShareUrlButton";
 import { ThemePicker } from "dormouse-lib/components/ThemePicker";
 import { useRestoredTheme } from "dormouse-lib/lib/themes";
 import { POCKET_PLAYGROUND_PATH, usePreferredPlayground } from "../lib/playground-routing";
+import { sitePath } from "../lib/site-meta";
+import { SITE_LINK_CLASS } from "../components/site-tokens";
 
 function MobilePocketPlaygroundPage() {
   useRestoredTheme(POCKET_THEME_ID);
@@ -44,15 +46,20 @@ function DesktopPocketPlaygroundPage() {
             to try it out! (WIP)
           </p>
           <p className="mb-4 text-lg leading-relaxed opacity-70">
-            Tether a terminal session to your phone over WebRTC and take a stroll. Dormouse
-            buzzes your phone when something needs attention. A hosted auto-pairing service comes
-            later, so you can close the laptop and walk away, no setup dance.
+            Take a terminal session to your phone and go for a stroll. Dormouse buzzes
+            your phone when something needs attention, then lets you answer from Pocket.
           </p>
           <p className="mb-4 text-lg leading-relaxed opacity-70">
-            Open source and free to self-host, or pay a small monthly fee for our hosted version.
-            Early adopters get a launch discount.
+            Run the coordinating server yourself, or{" "}
+            <a href={`${sitePath("/hosted")}#remote-control`} className={SITE_LINK_CLASS}>
+              join the list for Dormouse Hosted
+            </a>, where I’ll operate it for you. Your terminal still runs on your awake,
+            online computer; Hosted removes the server setup and maintenance.
           </p>
-          <NotifySignupForm />
+          <NotifySignupForm
+            buttonLabel="Join the devlog for Pocket + Hosted updates"
+            announcement="Dormouse Pocket and Hosted"
+          />
         </section>
 
         <section aria-label="Dormouse Pocket phone preview" className="mx-auto w-full max-w-[390px]">

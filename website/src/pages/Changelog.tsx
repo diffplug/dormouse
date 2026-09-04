@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Link, useParams, type MetaArgs } from "react-router";
 import DocsLayout from "../components/DocsLayout";
-import { ACCENT_TEXT_CLASS, SCROLL_MT_CLASS } from "../components/docs-tokens";
+import { ACCENT_TEXT_CLASS, MUTED_TEXT_CLASS, SCROLL_MT_CLASS } from "../components/docs-tokens";
 import changelog from "../data/changelog.json";
 import { type TocEntry } from "../lib/docs-pages";
 import { siteMeta } from "../lib/site-meta";
@@ -103,7 +103,7 @@ function ChangelogListItem({ item }: { item: ChangelogItem }) {
     <li className="pl-1">
       <span>{renderInlineMarkdown(item.text)}</span>
       {item.children.length > 0 ? (
-        <ul className="mt-1.5 ml-5 list-disc space-y-1.5 text-[var(--color-text)]/75">
+        <ul className={`mt-1.5 ml-5 list-disc space-y-1.5 ${MUTED_TEXT_CLASS}`}>
           {item.children.map((child) => (
             <ChangelogListItem key={child.text} item={child} />
           ))}
@@ -119,7 +119,7 @@ function ReleaseSection({ section }: { section: ChangelogSection }) {
       <h3 className={`mb-2 font-display text-base ${ACCENT_TEXT_CLASS}`}>
         {section.title}
       </h3>
-      <ul className="ml-5 list-disc space-y-2 text-base leading-relaxed text-[var(--color-text)]/85">
+      <ul className={`ml-5 list-disc space-y-2 text-base leading-relaxed ${MUTED_TEXT_CLASS}`}>
         {section.items.map((item) => (
           <ChangelogListItem key={item.text} item={item} />
         ))}
@@ -139,7 +139,7 @@ function ReleaseArticle({ release }: { release: ChangelogRelease }) {
             {release.tag}
           </h2>
           {date ? (
-            <time className="text-sm text-[var(--color-text)]/50" dateTime={release.date ?? undefined}>
+            <time className={`text-sm ${MUTED_TEXT_CLASS}`} dateTime={release.date ?? undefined}>
               {date}
             </time>
           ) : null}
@@ -190,7 +190,7 @@ export function changelogToc(visible: readonly ChangelogRelease[]): TocEntry[] {
 
 function FilterNotice({ children }: { children: ReactNode }) {
   return (
-    <div className="mb-8 border-l-2 border-[var(--docs-accent)] pl-4 text-sm text-[var(--color-text)]/75">
+    <div className={`mb-8 border-l-2 border-[var(--docs-accent)] pl-4 text-sm ${MUTED_TEXT_CLASS}`}>
       {children}{" "}
       <Link to="/changelog" className={`${ACCENT_TEXT_CLASS} hover:underline`}>
         Show all releases.
@@ -230,7 +230,7 @@ export default function Changelog() {
       ))}
 
       {baselineVersion && visibleReleases.length === 0 ? (
-        <div className="border-t border-[var(--color-text)]/10 py-8 text-[var(--color-text)]/60">
+        <div className={`border-t border-[var(--color-text)]/10 py-8 ${MUTED_TEXT_CLASS}`}>
           No releases newer than v{baselineVersion}.
         </div>
       ) : null}
