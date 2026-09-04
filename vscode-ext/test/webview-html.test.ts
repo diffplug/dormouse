@@ -57,16 +57,38 @@ function nonceOf(html: string): string {
   return match[1];
 }
 
+/**
+ * One CSP directive's sources, as a list. Split rather than substring-matched:
+ * `'unsafe-eval'` is a suffix of `'wasm-unsafe-eval'`, so a `toContain` check
+ * for the dangerous one would read the safe one as a hit — or, worse, miss a
+ * real widening that happened to sit next to it.
+ */
+function cspSources(html: string, directive: string): string[] {
+  const csp = /content="([^"]*)"/.exec(html)?.[1] ?? '';
+  const found = csp
+    .split(';')
+    .map((part) => part.trim().split(/\s+/))
+    .find((parts) => parts[0] === directive);
+  if (!found) throw new Error(`no ${directive} in the CSP`);
+  return found.slice(1);
+}
+
 describe('getWebviewHtml', () => {
   it("pairs the nonce with 'strict-dynamic' so split chunks can load", () => {
     const { html } = getWebviewHtml(webview, mediaPath);
     // A lazy `import()` carries no nonce — a nonce is not inherited through the
     // module graph — so without `strict-dynamic` it is blocked, surfacing as a
     // render error naming a chunk that is present on disk.
-    expect(html).toContain(`script-src 'nonce-${nonceOf(html)}' 'strict-dynamic'`);
-    // `strict-dynamic` widens what a trusted script may load, never what may be
-    // written into the document.
-    expect(/script-src[^;]*'unsafe-inline'/.test(html)).toBe(false);
+    // The whole source list, not a substring: `strict-dynamic` widens what a
+    // trusted script may load and `wasm-unsafe-eval` permits WebAssembly
+    // compilation, but neither is a way to run injected script text — and an
+    // exact list is what makes `'unsafe-inline'` or `'unsafe-eval'` appearing
+    // beside them a failure rather than an unnoticed addition.
+    expect(cspSources(html, 'script-src')).toEqual([
+      `'nonce-${nonceOf(html)}'`,
+      `'strict-dynamic'`,
+      `'wasm-unsafe-eval'`,
+    ]);
   });
 
   it('carries the real nonce on every tag Vite marked, and leaves no placeholder', () => {

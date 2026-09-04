@@ -1437,9 +1437,12 @@ const CSP_HEADER = 'Content-Security-Policy';
  * * `img-src` also admits `data:` and `blob:`, `media-src` `blob:` — images and
  *   media the page builds in memory rather than fetches.
  *
- * `script-src 'self'` needs no exception: the build emits no inline script and
- * loads nothing off-origin, which `server/test/static.test.mjs` pins against
- * the built output.
+ * `script-src` needs no *script* exception: the build emits no inline script
+ * and loads nothing off-origin, which `server/test/static.test.mjs` pins
+ * against the built output. Its one addition is `'wasm-unsafe-eval'`, which
+ * `@xterm/addon-image` needs to compile the SIXEL decoder it vendors, at pane
+ * creation. It permits WebAssembly compilation and nothing else — `eval` and
+ * friends stay blocked, which `'unsafe-eval'` would not have done.
  */
 export function pocketContentSecurityPolicy(origin: string): string {
   // `createApp` refuses anything but a bare `http(s)` origin, which is what
@@ -1447,7 +1450,7 @@ export function pocketContentSecurityPolicy(origin: string): string {
   const wsOrigin = `ws${origin.slice('http'.length)}`;
   return [
     "default-src 'self'",
-    "script-src 'self'",
+    "script-src 'self' 'wasm-unsafe-eval'",
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self'",

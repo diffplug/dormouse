@@ -24,13 +24,13 @@
   "docs/specs/server.md": 9850,
   "docs/specs/shortcuts.md": 1000,
   "docs/specs/standalone.md": 4050,
-  "docs/specs/terminal-escapes.md": 3700,
+  "docs/specs/terminal-escapes.md": 3750,
   "docs/specs/terminal-state.md": 2200,
   "docs/specs/theme.md": 1900,
   "docs/specs/tiling-engine.md": 4400,
   "docs/specs/transport.md": 4100,
   "docs/specs/tutorial.md": 1900,
-  "docs/specs/vscode.md": 7050,
+  "docs/specs/vscode.md": 7100,
   "docs/specs/webgl-text.md": 1200,
   "docs/specs/website-docs.md": 4800
 }

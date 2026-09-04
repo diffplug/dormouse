@@ -215,7 +215,7 @@ The directives, with `randomSecret()` supplying the nonce:
 ```
 default-src 'none'
 style-src   <cspSource> 'unsafe-inline'
-script-src  'nonce-…' 'strict-dynamic'
+script-src  'nonce-…' 'strict-dynamic' 'wasm-unsafe-eval'
 font-src    <cspSource>
 img-src     <cspSource> data: blob:
 connect-src <cspSource> ws://127.0.0.1:* ws://localhost:*
@@ -236,6 +236,8 @@ frame-src   http://127.0.0.1:* http://localhost:*
 - **`'strict-dynamic'` covers the fetches no tag represents:** the entry's own static imports and every lazy `import()`. It widens what an already-trusted script may *load*, never what may be *written into* the document, and nothing here grants `script-src 'unsafe-inline'`. It also makes host-source expressions inert, so **adding `webview.cspSource` to `script-src` would be dead weight**.
 
 **Keep `'strict-dynamic'`** even though no experiment shows it load-bearing (rationale): it is the mechanism CSP specifies for "a script the nonce vouched for may load more", and the alternative that happens to work would make the policy correct by accident.
+
+**`'wasm-unsafe-eval'` permits WebAssembly compilation and nothing else** — `eval` stays blocked, and unlike a host source it survives `'strict-dynamic'`. What needs it is [terminal-escapes.md](terminal-escapes.md#inline-graphics). (rationale)
 
 Chromium enforces CSP and a failure presents remote from its cause, so **string inspection proves nothing** (rationale) and two checks cover it, **neither replacing the other**: `vscode-ext/test/webview-boot.smoketest.ts` loads the real bundle under the real policy in a real engine, and `vscode-ext/test/webview-html.test.ts` pins the transform against a fixture of real Vite output.
 
@@ -349,7 +351,7 @@ bursts on one microtask (a focus move alone emits `focusout` plus `focusin`).
 
 **No second strip parser.** The extension host already parses each PTY chunk and answers its queries (`message-router.ts`); webviews receive that parser's projection pair, and the service's `streamPty` subscribes to the very same parse. **A second parser would answer every query twice and corrupt the PTY** (`docs/specs/terminal-escapes.md`, which owns the rule for both hosts).
 
-**Local streams go through one keyed registry**, shared by the Host provider and the peer-link forwarder, holding each sink's own subscription to the owning PTY's parse plus one window-wide exit listener. **A sink subscribes to the PTY it watches and to no other**, so a terminal nobody is attached to costs nothing, and each sink gets its own mid-string hold (`docs/specs/terminal-escapes.md`). **The exit listener is installed on the first attachment and removed when the last goes**, so a window with no remote viewer pays nothing.
+**Local streams go through one keyed registry**, shared by the Host provider and the peer-link forwarder, holding each sink's own subscription to its PTY's parse plus one window-wide exit listener. **A sink subscribes to the PTY it watches and to no other**, so an unattached terminal costs nothing and each sink gets its own mid-string hold (`docs/specs/terminal-escapes.md`). **The exit listener goes in on the first attachment and out with the last**, so a window with no remote viewer pays nothing.
 
 Source of truth: `installPeerSurfaceResponder` and the operation map in `lib/src/remote/host/peer-surfaces.ts`, wired from `lib/src/main.tsx` (pinned by `lib/src/remote/host/peer-surfaces.test.ts`), `vscode-ext/src/processed-pty-streams.ts`.
 

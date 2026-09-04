@@ -18,17 +18,17 @@
 
 ## Parsing location
 
-State-driving and security-sensitive OSCs — plus the `CSI > q` query — are parsed by the process that owns the PTY: **one parser per PTY generation, fed from spawn, never one per consumer**, because **a second parser over the same bytes answers every query twice and writes the duplicate into the PTY's input**. One site per host — the VS Code extension host (`ptyManager.addCallbacks`) and the standalone sidecar (`main.js`'s `pty-core` tap) — each before `pty:data` reaches any webview; the fake adapter is the same rule with the owner in the browser.
+State-driving and security-sensitive OSCs — plus the `CSI > q` query — are parsed by the process that owns the PTY: **one parser per PTY generation, fed from spawn, never one per consumer**, because **a second over the same bytes answers every query twice and writes the duplicate into the PTY's input**. One site per host — the VS Code extension host (`ptyManager.addCallbacks`), the standalone sidecar (`main.js`'s `pty-core` tap) — each ahead of `pty:data`; the fake adapter is the same rule with the owner in the browser.
 
 **An unterminated OSC the parser will consume is buffered across chunks up to `OSC_INCOMPLETE_LIMIT` (16 KiB), then dropped — never buffered without bound** (rationale). It bounds only *unterminated* sequences; a complete one in a single read is parsed whole. **An unterminated OSC the parser will forward streams to xterm.js instead**, preserving a split `ESC \` terminator (rationale). **Route by the OSC id, and decide nothing while more digits could follow** — `133` becomes `1337` — for `1337` by the subcommand ([Inline graphics](#inline-graphics)).
 
 **Every semantic value `TerminalProtocolParser` *retains* is bounded and stripped of control characters before storage**, whatever the emitter: `TITLE_LIMIT` / `BODY_LIMIT` for titles and notification bodies, whose whitespace controls collapse to spaces before the trim; `COMMAND_LINE_LIMIT` for the OSC 633 `E` command line, bounded *before* the `\xNN` unescape and sanitized *after* it (rationale); `MAX_CWD_LENGTH` for every CWD source, interior whitespace preserved. **Every limit counts code points**, so a cut never splits a surrogate pair. **A value that reduces to nothing is dropped, never stored empty.**
 
-**The owner alone acts on the events** its parse produced — writing the responses, recording the semantic state — and hands every consumer, its own renderer and each attached Client, the same chunk ([remote-api.md](remote-api.md#terminal-surfaces)).
+**The owner alone acts on the events** its parse produced — writing the responses, recording the semantic state — and hands every consumer the same chunk ([remote-api.md](remote-api.md#terminal-surfaces)).
 
-**A sink that subscribes inside a forwarded string control starts at the next ground byte**, a cancel releasing it as surely as a terminator (rationale). Only a late attachment is ever held; the owner's renderer is there from spawn.
+**A sink that subscribes inside a forwarded string control starts at the next ground byte**, a cancel releasing it as surely as a terminator (rationale); only a late attachment is ever held, the owner's renderer being there from spawn.
 
-**The owner splits a PTY read above `MAX_PARSER_INPUT_CHARS` (64 Ki UTF-16 code units) before parsing it, and never through a surrogate pair**, so **both** projections of one chunk fit the 1 MiB application-message cap after base64url and JSON framing — they cross as one message (rationale; [remote-api.md](remote-api.md)).
+**The owner splits a PTY read above `MAX_PARSER_INPUT_CHARS` (64 Ki UTF-16 code units) before parsing it, and never through a surrogate pair**, so **both** projections — one message, not two — fit the 1 MiB application-message cap after base64url and JSON framing (rationale; [remote-api.md](remote-api.md)).
 
 Source of truth: `oscDispositionAt` in `lib/src/lib/terminal-protocol.ts`, `boundedCwdValue` in `lib/src/lib/terminal-state.ts`, `createProcessedPtyStream` in `lib/src/lib/processed-pty-stream.ts`, `lib/src/host/remote/sidecar-entry.ts`.
 
@@ -36,7 +36,7 @@ Source of truth: `oscDispositionAt` in `lib/src/lib/terminal-protocol.ts`, `boun
 
 **Supported semantic sequences are consumed and never re-emitted** — empty or unparseable payloads, unrecognized `OSC 1337` subcommands and `OSC 50` / `OSC 52` included. **`OSC 8` and the recognized ImageAddon `OSC 1337` forms are the exceptions**: they stay in `pty:data` so xterm.js owns hyperlink regions and inline graphics. Dormouse supplies only the hyperlink activation-confirmation handler. Every other OSC family passes through unchanged, so xterm.js handles standard behavior Dormouse does not model.
 
-**`textData` is the same chunk with every string-control payload removed**, for consumers reading output as text; every other control is left for `stripTerminalControls`. The webview receives them apart: `pty:data` (the stripped output; feeds xterm.js) and `terminal:semanticEvents` (normalized CWD / prompt-command / title events; feeds `TerminalPaneState`, command boundaries also feeding the command-exit alert track in [alert.md](alert.md#command-exit-track)). **Notification-derived state never travels as `pty:data`**: it reaches whichever process holds the `AlertManager` — direct calls in VS Code, `terminal:protocolEvents` in standalone ([transport.md](transport.md)).
+**`textData` is the same chunk with every string-control payload removed**, for consumers reading output as text; every other control is left for `stripTerminalControls`. The webview receives them apart: `pty:data` (the stripped output; feeds xterm.js) and `terminal:semanticEvents` (normalized CWD / prompt-command / title events; feeds `TerminalPaneState`, command boundaries also feeding the command-exit alert track in [alert.md](alert.md#command-exit-track)). **Notification-derived state never travels as `pty:data`**: it reaches whichever process holds the `AlertManager` — direct calls in VS Code, `terminal:protocolEvents` in standalone.
 
 Each chunk is also classified for the quiesce detector: **the activity monitor's `onData()` fires only when `visibleData` is non-empty**, so a chunk of nothing but notification/progress OSCs is not meaningful output, while one carrying visible output alongside them is.
 
@@ -117,7 +117,9 @@ Dormouse intervenes only in these cases.
 
 Every renderer over one PTY parses these queries; only the owner's answer reaches the program ([remote-api.md](remote-api.md#terminal-surfaces)).
 
-Source of truth: `IMAGE_ADDON_OPTIONS` in `lib/src/lib/terminal-lifecycle.ts`; `OSC1337_FORWARDED` and `processForwarded` in `lib/src/lib/terminal-protocol.ts`; `TerminalControlStreamFilter` in `lib/src/lib/terminal-controls.ts`.
+**Every host's CSP must grant `'wasm-unsafe-eval'`, never `'unsafe-eval'`** — the addon compiles a vendored WebAssembly SIXEL decoder from `activate()`, making this a Session-creation requirement rather than a first-image one (rationale).
+
+Source of truth: `getWebviewHtml` in `vscode-ext/src/webview-html.ts`, `app.security.csp` in `standalone/src-tauri/tauri.conf.json`, `pocketContentSecurityPolicy` in `server/src/app.ts`; `IMAGE_ADDON_OPTIONS` in `lib/src/lib/terminal-lifecycle.ts`; `OSC1337_FORWARDED` and `processForwarded` in `lib/src/lib/terminal-protocol.ts`; `TerminalControlStreamFilter` in `lib/src/lib/terminal-controls.ts`.
 
 ### Report filtering on the input side
 

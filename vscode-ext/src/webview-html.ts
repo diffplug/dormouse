@@ -55,7 +55,12 @@ export function getWebviewHtml(
     // a lazy `import()` — are blocked. `strict-dynamic` also makes host-source
     // expressions inert, so `webview.cspSource` beside it would be dead weight;
     // inline scripts stay blocked, since nothing here grants `unsafe-inline`.
-    `script-src 'nonce-${nonce}' 'strict-dynamic'`,
+    //
+    // `wasm-unsafe-eval` is what `@xterm/addon-image` needs to compile the SIXEL
+    // decoder it vendors, at Session creation. It permits WebAssembly
+    // compilation and nothing else — `eval` and friends stay blocked, which
+    // `unsafe-eval` would not have done (docs/specs/vscode.md → "CSP policy").
+    `script-src 'nonce-${nonce}' 'strict-dynamic' 'wasm-unsafe-eval'`,
     `font-src ${webview.cspSource}`,
     `img-src ${webview.cspSource} data: blob:`,
     // ws: entries cover the agent-browser stream relay (frames + input for
