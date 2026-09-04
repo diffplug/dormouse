@@ -1,0 +1,104 @@
+/* Dormouse colour tokens.
+ *
+ * The half of the theme system a host can adopt without adopting the app:
+ * every `--color-*` Tailwind utility the library renders with, bound to the
+ * `--vscode-*` variables VS Code injects and `applyTheme()` writes onto body
+ * everywhere else.
+ *
+ * Split out so a host that renders library components inside its *own* design
+ * — the marketing site's docs pages — can `@import` these colours without
+ * `theme.css`'s type scale and app-shell rules, which are tuned for a dense
+ * terminal UI and would resize that host's own type. See docs/specs/theme.md.
+ *
+ * No hardcoded defaults, by design: a runtime host must supply real VS Code
+ * variables, from VS Code itself or from a bundled/installed Dormouse theme.
+ */
+
+@theme {
+  /* Surfaces — bg-only chrome; surface-raised is for floating surfaces only
+   * (popovers, dialogs), never resting structure. See docs/specs/theme.md. */
+  --color-surface-raised: var(--vscode-editorWidget-background);
+  --color-app-bg: var(--vscode-sideBar-background);
+  --color-app-fg: var(--vscode-sideBar-foreground);
+
+  /* Text */
+  --color-foreground: var(--vscode-editor-foreground);
+  --color-muted: var(--vscode-descriptionForeground);
+
+  /* Borders */
+  --color-border: var(--vscode-panel-border);
+
+  /* Chrome palette — anchored on VSCode file-tree list.* tokens. Pane headers
+   * use these four; doors take the dynamic pair below. */
+  --color-header-active-bg: var(--vscode-list-activeSelectionBackground);
+  --color-header-active-fg: var(--vscode-list-activeSelectionForeground);
+  --color-header-inactive-bg: var(--vscode-list-inactiveSelectionBackground);
+  --color-header-inactive-fg: var(--vscode-list-inactiveSelectionForeground);
+
+  /* Dynamic palette — useDynamicPalette() overrides these on body at runtime
+   * from the shared dynamic-palette helper, picking by OKLab distance/chroma.
+   *
+   *   --color-door-*    pick: (header-inactive bg/fg) or (terminal bg/fg)
+   *   --color-focus-ring  pick: focusBorder or header-active-bg */
+  --color-door-bg: var(--color-header-inactive-bg);
+  --color-door-fg: var(--color-header-inactive-fg);
+  --color-focus-ring: var(--vscode-focusBorder);
+
+  /* Terminal — xterm.js content, orthogonal to chrome */
+  --color-terminal-bg: var(--vscode-terminal-background);
+  --color-terminal-fg: var(--vscode-terminal-foreground);
+
+  /* Semantic status — use the active terminal palette. */
+  --color-error: var(--vscode-terminal-ansiRed);
+  --color-success: var(--vscode-terminal-ansiGreen);
+
+  /* Alarm — per-surface black/white contrast pick, computed at runtime by
+   * dynamic-palette.ts from the OKLab lightness of the bg the bell sits on.
+   * The binding below is only the baseline before the dynamic pass runs. */
+  --color-alarm-vs-header-active: var(--vscode-terminal-ansiYellow);
+  --color-alarm-vs-header-inactive: var(--vscode-terminal-ansiYellow);
+  --color-alarm-vs-door: var(--vscode-terminal-ansiYellow);
+  --color-alarm-vs-terminal: var(--vscode-terminal-ansiYellow);
+
+  /* Inputs — theme picker chrome and the Pocket auth fields */
+  --color-input-bg: var(--vscode-input-background);
+  --color-input-border: var(--vscode-input-border);
+
+  /* Links and buttons inside library chrome. */
+  --color-link: var(--vscode-textLink-foreground, var(--vscode-focusBorder));
+  --color-button-bg: var(--vscode-button-background);
+  --color-button-fg: var(--vscode-button-foreground);
+}
+
+/* Runtime source of truth: only body-level declarations can see the --vscode-*
+ * variables applyTheme() writes to body.style. Every var()-bound token above
+ * must be mirrored here with the same value (consumed-keys.test.ts enforces
+ * this; rationale in docs/specs/theme.md). */
+body {
+  --color-surface-raised: var(--vscode-editorWidget-background);
+  --color-app-bg: var(--vscode-sideBar-background);
+  --color-app-fg: var(--vscode-sideBar-foreground);
+  --color-foreground: var(--vscode-editor-foreground);
+  --color-muted: var(--vscode-descriptionForeground);
+  --color-border: var(--vscode-panel-border);
+  --color-header-active-bg: var(--vscode-list-activeSelectionBackground);
+  --color-header-active-fg: var(--vscode-list-activeSelectionForeground);
+  --color-header-inactive-bg: var(--vscode-list-inactiveSelectionBackground);
+  --color-header-inactive-fg: var(--vscode-list-inactiveSelectionForeground);
+  --color-door-bg: var(--color-header-inactive-bg);
+  --color-door-fg: var(--color-header-inactive-fg);
+  --color-focus-ring: var(--vscode-focusBorder);
+  --color-terminal-bg: var(--vscode-terminal-background);
+  --color-terminal-fg: var(--vscode-terminal-foreground);
+  --color-error: var(--vscode-terminal-ansiRed);
+  --color-success: var(--vscode-terminal-ansiGreen);
+  --color-alarm-vs-header-active: var(--vscode-terminal-ansiYellow);
+  --color-alarm-vs-header-inactive: var(--vscode-terminal-ansiYellow);
+  --color-alarm-vs-door: var(--vscode-terminal-ansiYellow);
+  --color-alarm-vs-terminal: var(--vscode-terminal-ansiYellow);
+  --color-input-bg: var(--vscode-input-background);
+  --color-input-border: var(--vscode-input-border);
+  --color-link: var(--vscode-textLink-foreground, var(--vscode-focusBorder));
+  --color-button-bg: var(--vscode-button-background);
+  --color-button-fg: var(--vscode-button-foreground);
+}
