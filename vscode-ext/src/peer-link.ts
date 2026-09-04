@@ -110,18 +110,10 @@ const RETRY_MS = 1_000;
  */
 const HANDSHAKE_BUDGET_MS = 5_000;
 
-/**
- * What {@link TOKEN_FILE} was called before the Burrow rename. Deleted unread on
- * init: it is a shared secret this build no longer honours, so leaving it would
- * strand a credential nothing can revoke.
- */
-const RETIRED_TOKEN_FILE = 'remote-host.peer-token';
-
 let context: vscode.ExtensionContext | null = null;
 
 export function initPeerLink(ctx: vscode.ExtensionContext): void {
   context = ctx;
-  void rm(join(ctx.globalStorageUri.fsPath, RETIRED_TOKEN_FILE), { force: true }).catch(() => {});
 }
 
 function tokenPath(): string | null {
@@ -289,7 +281,7 @@ let server: Server | null = null;
  * verdict `server !== null` is true while this window may be about to give the
  * socket up, so every *role* answer reads this instead — otherwise an enroll or
  * a secrets-change landing inside that window is told it is the broker, starts
- * a service, and the stand-down never tears it down: two Hosts under one burrowId,
+ * a service, and the stand-down never tears it down: two Burrows under one burrowId,
  * displacing each other on the relay forever.
  */
 let brokerConfirmed = false;

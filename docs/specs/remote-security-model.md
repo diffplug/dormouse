@@ -336,7 +336,7 @@ omits `client-gone`, invents client IDs, or reorders frames.
 | `MAX_PENDING_PAIRINGS` | 8 | `remote-lib-common/src/security/pairing.ts` |
 | `MAX_TOKENS_PER_BURROW` | 8 | `remote-lib-common/src/remote/wire.ts`, shared with the Relay's setup-token cap (rationale) |
 | `MAX_CLIENT_ID_LENGTH` | 256 | `remote-lib-common/src/remote/wire.ts` |
-| `MAX_SERVER_TO_BURROW_FRAME_LENGTH` | one maximal `ct` + `MAX_CLIENT_ID_LENGTH` + 512 | same |
+| `MAX_RELAY_TO_BURROW_FRAME_LENGTH` | one maximal `ct` + `MAX_CLIENT_ID_LENGTH` + 512 | same |
 | `MAX_PENDING_CONNECTION_HANDSHAKES` | 8 | `lib/src/remote/burrow/burrow-runtime.ts` |
 | `MAX_ESTABLISHED_E2E_SESSIONS` | 16 | `remote-lib-common/src/security/e2e-bounds.ts` |
 | `ESTABLISHED_E2E_IDLE_TIMEOUT_MS` | 120 000 | same |
@@ -359,7 +359,7 @@ omits `client-gone`, invents client IDs, or reorders frames.
   their session's next nonce, and **the first invalid ciphertext destroys its
   session** (rationale).
 - **Rejected frames perform no WebCrypto operation and allocate no entry.**
-  **`MAX_SERVER_TO_BURROW_FRAME_LENGTH` is measured on the received string before
+  **`MAX_RELAY_TO_BURROW_FRAME_LENGTH` is measured on the received string before
   `JSON.parse`** (a non-string payload is dropped) and given to the socket
   implementation's `maxPayload` where it takes one (rationale); the wire guard
   then bounds every routing value, `clientId` first, before the ciphertext

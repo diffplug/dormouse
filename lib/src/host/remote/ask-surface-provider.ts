@@ -7,7 +7,7 @@
  * extension host (`vscode-ext/src/burrow.ts`) — differ in how an ask
  * travels and in who owns the PTYs, and in nothing else. So those two are
  * injected and the protocol-shaped middle lives here once: a Burrow that answered
- * an attach differently in one burrow than the other would be a protocol-v1
+ * an attach differently in one host than the other would be a protocol-v1
  * divergence nobody would see until a phone attached.
  */
 

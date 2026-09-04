@@ -2,7 +2,7 @@
  * Burrow-side relay controller. The Burrow speaks exactly two frames — the `e2e`
  * envelope and `client-gone` — and runs both end-to-end ceremonies itself:
  * `docs/specs/remote-security-model.md` owns Pairing, Connection, and the Burrow
- * bounds; `docs/specs/relay.md` → Relay owns the envelope it rides in. The
+ * bounds; `docs/specs/relay.md` → "Routing" owns the envelope it rides in. The
  * remote-api session is injected, keeping this module environment-free.
  */
 
@@ -35,7 +35,7 @@ import {
   isE2eRelayToBurrowFrame,
   isPairingRequestV1,
   MAX_CLIENT_ID_LENGTH,
-  MAX_SERVER_TO_BURROW_FRAME_LENGTH,
+  MAX_RELAY_TO_BURROW_FRAME_LENGTH,
   pairingInvitationPrologue,
   e2eConnectionPrologue,
   randomBase64Url,
@@ -59,7 +59,7 @@ import {
   type RelayToBurrowFrame,
 } from 'remote-lib-common';
 import type { BurrowEnrollment } from './enrollment';
-import { burrowTimer, type RemoteTimer, type RemoteWebSocket } from '../ws';
+import { realTimer, type RemoteTimer, type RemoteWebSocket } from '../ws';
 import { loadBurrowAcl } from './acl';
 import type { PendingPairing } from './pairing-approval';
 
@@ -78,7 +78,7 @@ export type WebSocketLike = RemoteWebSocket;
  * by relative path without `remote-lib-common` on their own resolution path.
  * Two numbers here would be two bounds that could drift.
  */
-export { MAX_SERVER_TO_BURROW_FRAME_LENGTH } from 'remote-lib-common';
+export { MAX_RELAY_TO_BURROW_FRAME_LENGTH } from 'remote-lib-common';
 
 /**
  * How many connection handshakes may be mid-flight across every client.
@@ -403,7 +403,7 @@ export class BurrowRuntime {
     this.#requestApproval = options.requestApproval;
     this.#dismissApproval = options.dismissApproval;
     this.#onInvitationChanged = options.onInvitationChanged ?? (() => {});
-    this.#setTimer = options.setTimer ?? burrowTimer;
+    this.#setTimer = options.setTimer ?? realTimer;
     this.#reconnect = options.reconnect ?? true;
   }
 
@@ -860,7 +860,7 @@ export class BurrowRuntime {
     // socket's own `maxPayload` is the same number where the implementation
     // takes one (`vscode-ext/src/burrow.ts`); this is the bound that holds
     // on every implementation.
-    if (typeof raw !== 'string' || raw.length > MAX_SERVER_TO_BURROW_FRAME_LENGTH) return;
+    if (typeof raw !== 'string' || raw.length > MAX_RELAY_TO_BURROW_FRAME_LENGTH) return;
     let frame: RelayToBurrowFrame;
     try {
       frame = JSON.parse(raw) as RelayToBurrowFrame;
@@ -885,7 +885,7 @@ export class BurrowRuntime {
     if (frame.t !== 'e2e') return;
     // The shape guard bounds every routing value — including `clientId`, before
     // the ciphertext scan — and this Burrow runs it rather than trusting the relay
-    // to have (`docs/specs/relay.md` → Relay).
+    // to have (`docs/specs/relay.md` → "Routing").
     if (!isE2eRelayToBurrowFrame(frame)) return;
     const e2e = frame;
     this.#enqueue((epoch) => this.#onE2e(e2e, epoch));
@@ -908,7 +908,7 @@ export class BurrowRuntime {
       .catch((error: unknown) => {
       // A ceremony step must never reject into the chain: this Burrow runs in
       // Node, where an unhandled rejection can take the sidecar or the extension
-      // burrow down rather than merely logging in a webview.
+      // host down rather than merely logging in a webview.
         console.warn('[burrow] frame handling failed', error);
       });
   }

@@ -1,6 +1,6 @@
 /**
  * The relay, in memory: two {@link FakeSocket}s bridged by the routing rules of
- * `docs/specs/relay.md` → Relay.
+ * `docs/specs/relay.md` → "Routing".
  *
  * Test-only, and shared for the reason `test-fake-socket.ts` and
  * `test-e2e-client.ts` are: the Pocket client and the Burrow both have to be

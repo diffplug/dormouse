@@ -1,6 +1,6 @@
 /**
  * UI-free Pocket protocol client. It speaks exactly one wire: the `e2e`
- * envelope of `docs/specs/relay.md` → Relay, carrying the two end-to-end
+ * envelope of `docs/specs/relay.md` → "Routing", carrying the two end-to-end
  * ceremonies of `docs/specs/remote-security-model.md` (Pairing, Connection) and
  * — once a connection is established — protocol-v1 as application messages on
  * the same Noise session (`docs/specs/remote-api.md` owns their correlation).
@@ -85,7 +85,7 @@ import {
   type KnownBurrowV1,
   type PendingDeletionStore,
 } from './pocket-db';
-import { burrowTimer, type RemoteTimer, type RemoteWebSocket } from '../ws';
+import { realTimer, type RemoteTimer, type RemoteWebSocket } from '../ws';
 
 /** The slice of a WebSocket the client uses; a browser `WebSocket` satisfies it. */
 export type PocketSocket = RemoteWebSocket;
@@ -369,7 +369,7 @@ export class PocketClient {
     this.#pendingDeletions = deps.pendingDeletions;
     this.#storage = deps.storage ?? localStoragePocketStorage();
     this.#now = deps.now ?? (() => Date.now());
-    this.#setTimer = deps.setTimer ?? burrowTimer;
+    this.#setTimer = deps.setTimer ?? realTimer;
     this.#visibility = deps.visibility ?? documentVisibility();
   }
 
@@ -1276,7 +1276,7 @@ export class PocketClient {
       case 'e2e':
         // The shared guard bounds every routing value before any of them is
         // used as a map key or decoded; this Client runs it rather than
-        // trusting the relay to have (`docs/specs/relay.md` → Relay).
+        // trusting the relay to have (`docs/specs/relay.md` → "Routing").
         if (isE2eRelayToClientFrame(frame)) this.#onE2e(frame);
         return;
       case 'burrow-gone':

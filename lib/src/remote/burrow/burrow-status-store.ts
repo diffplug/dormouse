@@ -129,7 +129,7 @@ function sameState(a: BurrowStatusState, b: BurrowStatusState): boolean {
 }
 
 /**
- * `getPlatform` throws before `initPlatform`, and a burrow may simply have no
+ * `getPlatform` throws before `initPlatform`, and a host may simply have no
  * service. Both mean the same thing here: nothing to ask.
  */
 function link(): BurrowLink | undefined {
@@ -350,7 +350,7 @@ export async function mintSetupQr(): Promise<SetupQrResult> {
  *
  * **Membership is not checked here**, only that the field is a string: the
  * closed set lives in the copy table the panel renders from, and importing it
- * would be a *value* import of `burrow.ts` from the main chunk — the whole
+ * would be a *value* import of `burrow-runtime.ts` from the main chunk — the whole
  * stack this module exists to stay out of. A member this build does not know
  * therefore lands as an outcome nothing has a sentence for, and the panel falls
  * back to what it said before there were outcomes at all.
@@ -386,7 +386,7 @@ export function subscribeToInvitation(
  * Lives here rather than beside the ring watcher in `alert-push.ts`: that
  * module is deliberately inside the lazily-imported `RemotePairingModalHost`
  * chunk, and importing it from the Settings dialog would pull the whole
- * burrow stack into the main bundle on every burrow.
+ * Burrow stack into the main bundle on every host.
  */
 export async function sendTestPush(): Promise<PushSendSummary> {
   const active = link();

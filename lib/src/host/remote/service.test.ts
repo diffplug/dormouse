@@ -39,7 +39,6 @@ import type {
 } from './service-protocol';
 
 const CONNECT_SRC = 'https://*.dormouse.sh wss://*.dormouse.sh';
-const APP_NAME = 'Test App';
 const BURROW_ID = testRoutingId();
 const ORIGIN = 'https://relay.dormouse.sh';
 
@@ -209,7 +208,7 @@ function createService(seed?: Partial<Pick<MemoryStore, 'enrollment' | 'acl'>>):
   service = new BurrowService({
     store,
     provider: fakeProvider(),
-    appName: APP_NAME,
+    kind: 'vscode',
     sendToUi: (event, data) => sent.push({ event, data: data as Record<string, unknown> }),
     connectSrc: CONNECT_SRC,
     createWebSocket: () => {
@@ -295,7 +294,7 @@ describe('status', () => {
       burrowId: null,
       connection: 'stopped',
       pairedClients: 0,
-      suggestedLabel: `${hostname()} (${APP_NAME})`,
+      suggestedLabel: `${hostname()} (VS Code)`,
       offer: null,
     } satisfies BurrowConsoleStatus);
   });
@@ -311,7 +310,7 @@ describe('status', () => {
       burrowId: null,
       connection: 'stopped',
       pairedClients: 0,
-      suggestedLabel: `${hostname()} (${APP_NAME})`,
+      suggestedLabel: `${hostname()} (VS Code)`,
       offer: { origin: OFFER.origin },
     } satisfies BurrowConsoleStatus);
     // The one-time token is a bearer credential and this is a service→webview
@@ -341,7 +340,7 @@ describe('status', () => {
       burrowId: BURROW_ID,
       connection: 'connected',
       pairedClients: 1,
-      suggestedLabel: `${hostname()} (${APP_NAME})`,
+      suggestedLabel: `${hostname()} (VS Code)`,
       offer: null,
     } satisfies BurrowConsoleStatus);
   });
@@ -1051,7 +1050,7 @@ describe('push', () => {
     service = new BurrowService({
       store,
       provider: fakeProvider(),
-      appName: APP_NAME,
+      kind: 'vscode',
       sendToUi: (event, data) => sent.push({ event, data: data as Record<string, unknown> }),
       connectSrc: CONNECT_SRC,
       createWebSocket: () => new FakeSocket(),
@@ -1090,7 +1089,7 @@ describe('pushDevices', () => {
     service = new BurrowService({
       store,
       provider: fakeProvider(),
-      appName: APP_NAME,
+      kind: 'vscode',
       sendToUi: (event, data) => sent.push({ event, data: data as Record<string, unknown> }),
       connectSrc: CONNECT_SRC,
       createWebSocket: () => new FakeSocket(),
@@ -1145,7 +1144,7 @@ describe('pushTest', () => {
     service = new BurrowService({
       store,
       provider: fakeProvider(),
-      appName: APP_NAME,
+      kind: 'vscode',
       sendToUi: (event, data) => sent.push({ event, data: data as Record<string, unknown> }),
       connectSrc: CONNECT_SRC,
       createWebSocket: () => new FakeSocket(),

@@ -65,12 +65,11 @@ export interface BurrowServiceOptions {
   store: BurrowStateStore;
   provider: BurrowSurfaceProvider;
   /**
-   * What to call the app this Burrow is — `Dormouse` in standalone, `VS Code` in
-   * the extension. It only shapes {@link suggestedBurrowLabel}, but one machine
-   * runs both and Pocket lists them side by side, so a bare hostname would name
-   * two rows the same.
+   * Which app this Burrow is. A closed set rather than a display string, so
+   * nothing can pass a name that names neither; read only by
+   * {@link suggestedBurrowLabel} today.
    */
-  appName: string;
+  kind: BurrowKind;
   /** Emit one of the `burrow:*` events to the webview. */
   sendToUi: (event: string, data: unknown) => void;
   /** The CSP-shaped allowlist this build was compiled with (`connect-src.ts`). */
@@ -115,7 +114,7 @@ function safeHostname(): string {
  */
 export function unenrolledStatus(
   offer: EnrollmentOffer | null,
-  appName: string,
+  kind: BurrowKind,
 ): BurrowConsoleStatus {
   return {
     enrolled: false,
@@ -123,19 +122,31 @@ export function unenrolledStatus(
     burrowId: null,
     connection: 'stopped',
     pairedClients: 0,
-    suggestedLabel: suggestedBurrowLabel(appName),
+    suggestedLabel: suggestedBurrowLabel(kind),
     offer: offer ? { origin: offer.origin } : null,
   };
 }
+
+/** Which app a Burrow is. Standalone and VS Code enroll separately. */
+export type BurrowKind = 'standalone' | 'vscode';
+
+/** The one place a {@link BurrowKind} becomes words a person reads. */
+const KIND_NAMES: Record<BurrowKind, string> = {
+  standalone: 'Dormouse',
+  vscode: 'VS Code',
+};
 
 /**
  * The label the enrollment form starts with. Names the app as well as the
  * machine, because standalone and VS Code on one laptop are two Burrows and
  * Pocket lists them as two rows — a hostname alone would label both the same.
+ *
+ * It is only a *suggestion*: the field is editable, so this makes the two rows
+ * distinguishable by default rather than guaranteeing they stay that way.
  */
-export function suggestedBurrowLabel(appName: string): string {
+export function suggestedBurrowLabel(kind: BurrowKind): string {
   const machine = safeHostname();
-  return machine ? `${machine} (${appName})` : appName;
+  return machine ? `${machine} (${KIND_NAMES[kind]})` : KIND_NAMES[kind];
 }
 
 export class BurrowService {
@@ -143,7 +154,7 @@ export class BurrowService {
   readonly #provider: BurrowSurfaceProvider;
   readonly #sendToUi: (event: string, data: unknown) => void;
   readonly #connectSrc: string;
-  readonly #appName: string;
+  readonly #kind: BurrowKind;
   readonly #createWebSocket?: (url: string) => WebSocketLike;
   readonly #fetch?: typeof globalThis.fetch;
   readonly #now: () => number;
@@ -156,8 +167,9 @@ export class BurrowService {
    *
    * Each of those reads `#burrow`, awaits a store round trip, and then acts on
    * what it read — so overlapping them (an activation `start` and a reconnect
-   * during an enroll) lets two of them both see no Burrow and both build one. The second `BurrowRuntime` would hold a relay socket nothing
-   * has a reference to and could not be stopped, and the two would displace each
+   * during an enroll) lets two of them both see no Burrow and both build one.
+   * The second `BurrowRuntime` would hold a relay socket nothing has a
+   * reference to and could not be stopped, and the two would displace each
    * other on the Relay forever.
    */
   readonly #serialize = createSerialQueue();
@@ -176,7 +188,7 @@ export class BurrowService {
     this.#provider = options.provider;
     this.#sendToUi = options.sendToUi;
     this.#connectSrc = options.connectSrc;
-    this.#appName = options.appName;
+    this.#kind = options.kind;
     this.#createWebSocket = options.createWebSocket;
     this.#fetch = options.fetch;
     this.#now = options.now ?? (() => Date.now());
@@ -351,14 +363,14 @@ export class BurrowService {
   async #status(): Promise<BurrowConsoleStatus> {
     const offer = this.#enrollment ? null : await this.#readOffer();
     const enrollment = this.#enrollment;
-    if (!enrollment) return unenrolledStatus(offer, this.#appName);
+    if (!enrollment) return unenrolledStatus(offer, this.#kind);
     return {
       enrolled: true,
       relayUrl: enrollment.relayUrl,
       burrowId: enrollment.burrowId,
       connection: this.#burrow?.status ?? 'stopped',
       pairedClients: this.#burrow?.activeRecords.length ?? 0,
-      suggestedLabel: suggestedBurrowLabel(this.#appName),
+      suggestedLabel: suggestedBurrowLabel(this.#kind),
       offer: null,
     };
   }
@@ -703,7 +715,7 @@ export class BurrowService {
       state,
       // Spread rather than always set: this crosses a JSON bridge, and an
       // explicit `outcome: undefined` is a key the VS Code side would drop and
-      // the Tauri side would keep, leaving the two burrows sending different
+      // the Tauri side would keep, leaving the two hosts sending different
       // events for the same retirement.
       ...(outcome ? { outcome } : {}),
     } satisfies InvitationEvent);

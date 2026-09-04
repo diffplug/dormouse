@@ -1,7 +1,7 @@
 /**
  * The wire contract for the selfhost POC (docs/specs/relay.md): HTTP routes
  * and payloads, relay frames, and the terminal-only remote-api v1 messages.
- * Shared by `server`, the Burrow module in `lib`, and the Pocket UI so the
+ * Shared by `relay`, the Burrow module in `lib`, and the Pocket UI so the
  * three sides cannot drift — the same pattern as HELLO_ROUTE.
  */
 
@@ -94,7 +94,7 @@ export const WS_TOKEN_PARAM = 'token';
  * claims the same `burrowId` (only one socket may own a burrowId — see relay.md
  * "Relay"). In the 4000-4999 application-private range.
  *
- * This lives on the wire contract rather than inside `server` because the Burrow
+ * This lives on the wire contract rather than inside `relay` because the Burrow
  * keys its reconnect policy on it: every other close is transient and gets
  * backoff-reconnected, but this one is deliberate and terminal, so the evicted
  * Burrow stands down instead of reconnecting. If the two sides disagreed on the
@@ -498,7 +498,7 @@ export interface PushSendResponse {
 // never sees or sends it.
 
 /**
- * Client → server: the end-to-end envelope, and nothing else. Anything the
+ * Client → Relay: the end-to-end envelope, and nothing else. Anything the
  * relay cannot route is answered with an `error`.
  */
 export type ClientFrame = E2eClientFrame;
@@ -512,13 +512,13 @@ export type RelayToClientFrame =
 /** Relay → burrow. Every frame addresses one Client by its Relay-assigned `clientId`. */
 export type RelayToBurrowFrame = { t: 'client-gone'; clientId: string } | E2eRelayToBurrowFrame;
 
-/** Burrow → server. */
+/** Burrow → Relay. */
 export type BurrowFrame = E2eBurrowFrame;
 
 // ---------------------------------------------------------------------------
 // The `e2e` relay envelope: one end-to-end Noise message per frame, in a
 // bounded routing envelope — the whole of what the relay routes
-// (relay.md -> Relay).
+// (relay.md -> "Routing").
 
 /** Which ceremony a frame belongs to; a session is scoped to one kind and id. */
 export type E2eKind = 'pairing' | 'connection';
@@ -559,7 +559,7 @@ export const MAX_E2E_CIPHERTEXT_LENGTH = base64UrlLength(NOISE_MAX_MESSAGE_LENGT
 export const MAX_CLIENT_ID_LENGTH = 256;
 
 /**
- * The longest raw server → Burrow frame text a Burrow will hand to `JSON.parse`.
+ * The longest raw Relay → Burrow frame text a Burrow will hand to `JSON.parse`.
  *
  * Every other bound in this file is measured on a value the parser already
  * produced, so none of them is reached until the whole frame has been buffered
@@ -570,10 +570,10 @@ export const MAX_CLIENT_ID_LENGTH = 256;
  * any key ordering. Every legal field is ASCII, so this bounds bytes and UTF-16
  * code units alike and can also be handed to `ws` as `maxPayload`.
  */
-export const MAX_SERVER_TO_BURROW_FRAME_LENGTH =
+export const MAX_RELAY_TO_BURROW_FRAME_LENGTH =
   MAX_E2E_CIPHERTEXT_LENGTH + MAX_CLIENT_ID_LENGTH + 512;
 
-/** Client → server. */
+/** Client → Relay. */
 export interface E2eClientFrame {
   t: 'e2e';
   burrowId: string;
@@ -589,7 +589,7 @@ export interface E2eRelayToBurrowFrame extends E2eClientFrame {
   clientId: string;
 }
 
-/** Burrow → server. */
+/** Burrow → Relay. */
 export interface E2eBurrowFrame {
   t: 'e2e';
   clientId: string;

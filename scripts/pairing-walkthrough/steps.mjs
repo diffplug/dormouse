@@ -206,7 +206,7 @@ async function stepRelay(ctx) {
   const stateDir = ctx.path('server-state');
   const built =
     existsSync(join(repoRoot, 'lib', 'dist-pocket', 'index.html')) &&
-    existsSync(join(repoRoot, 'server', 'dist', 'index.js'));
+    existsSync(join(repoRoot, 'relay', 'dist', 'index.js'));
   const skipBuild = opts.skipBuild && built;
   if (opts.skipBuild && !built) {
     ctx.log('--skip-build ignored: lib/dist-pocket or relay/dist is missing');
@@ -214,11 +214,11 @@ async function stepRelay(ctx) {
 
   const handle = spawnLogged(
     'pnpm',
-    skipBuild ? ['--filter', 'server', 'start'] : ['dev:relay'],
+    skipBuild ? ['--filter', 'relay', 'start'] : ['dev:relay'],
     {
       cwd: repoRoot,
       logPath: ctx.path('server.log'),
-      prefix: 'server',
+      prefix: 'relay',
       env: {
         DORMOUSE_STATE_DIR: stateDir,
         // Everything in a run is local to this machine, so the walkthrough's
@@ -248,7 +248,7 @@ async function stepRelay(ctx) {
   // record's shape cannot leave this typing `undefined` into the form below.
   // Only after the listening line: first boot is what mints it.
   const { SetupPasswordStore } = await import(
-    pathToFileURL(join(repoRoot, 'server', 'dist', 'state.js')).href
+    pathToFileURL(join(repoRoot, 'relay', 'dist', 'state.js')).href
   );
   const storedPassword = await new SetupPasswordStore(stateDir).load();
   if (storedPassword === null) throw new Error(`no setup password under ${stateDir}`);
@@ -278,7 +278,7 @@ async function stepBurrow(ctx) {
       DORMOUSE_REMOTE_CONNECT_SRC: `${ctx.relayOrigin} ${ctx.relayOrigin.replace(/^http/, 'ws')}`,
       DORMOUSE_BROWSER_DEV_AB_SESSION: opts.session,
       DORMOUSE_BROWSER_DEV_VITE_PORT: String(opts.vitePort),
-      DORMOUSE_BROWSER_DEV_BURROW_PORT: String(opts.burrowPort),
+      DORMOUSE_BROWSER_DEV_HOST_PORT: String(opts.hostPort),
     },
   });
 
@@ -515,7 +515,7 @@ async function stepPocket(ctx) {
 
   const chrome = resolveChrome();
   ctx.log(`pocket browser: ${chrome.path} (${chrome.from})`);
-  const port = await findFreePort(opts.burrowPort + 100);
+  const port = await findFreePort(opts.hostPort + 100);
   const userDataDir = ctx.path('pocket-profile');
   mkdirSync(userDataDir, { recursive: true });
   const launched = await launchChrome({
@@ -1298,7 +1298,7 @@ async function fillField(ctx, selector, value, ab = ctx.state.burrowBrowser) {
  * starts.
  */
 const SETUP = [
-  { name: 'server', title: 'Start the coordinating Relay', run: stepRelay },
+  { name: 'relay', title: 'Start the coordinating Relay', run: stepRelay },
   { name: 'burrow', title: 'Start the Burrow in the agent-browser harness', run: stepBurrow },
   { name: 'settings', title: 'Open Settings → Remote control', run: stepSettings },
   { name: 'enroll', title: 'Enroll this machine through the form', run: stepEnroll },

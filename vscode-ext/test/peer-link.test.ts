@@ -241,7 +241,7 @@ describe('bind-as-lease', () => {
     // `stillOurs` spends 250 ms watching for a window that cleared the same
     // corpse and bound after us. An enroll landing inside that window used to
     // see a bound socket, start a service, and the stand-down path
-    // (`closeServer(false)`) never tears one down — two Hosts under one burrowId.
+    // (`closeServer(false)`) never tears one down — two Burrows under one burrowId.
     const path = derivedSocketPath();
     await mkdir(dirname(path), { recursive: true, mode: 0o700 });
     const corpse = spawn(process.execPath, [
@@ -912,7 +912,7 @@ describe('bind-as-lease', () => {
     broker.sendCommandResult(brokerSide.forwarded[0].from, { burrowRequestId: 'rh-1', result: {} });
 
     await waitFor(() => peerSide.results.length > 0);
-    // An `burrowRequestId` is unique across every window, so a result sent to the wrong one
+    // A `burrowRequestId` is unique across every window, so a result sent to the wrong one
     // would settle nothing there and leak this one's Burrow state.
     await tick(100);
     expect(thirdSide.results).toEqual([]);

@@ -1001,7 +1001,7 @@ function EnrollForm({
   error: string | null;
   onEnroll: (relayUrl: string, password: string, label: string) => Promise<boolean>;
 }) {
-  const [relayUrl, setServerUrl] = useState('');
+  const [relayUrl, setRelayUrl] = useState('');
   const [password, setPassword] = useState('');
   const [label, setLabel] = useState(suggestedLabel);
 
@@ -1040,7 +1040,7 @@ function EnrollForm({
         <span className={FIELD_LABEL}>Relay</span>
         <TextInput
           value={relayUrl}
-          onChange={setServerUrl}
+          onChange={setRelayUrl}
           type="url"
           autoComplete="off"
           spellCheck={false}

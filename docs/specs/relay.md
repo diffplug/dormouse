@@ -85,7 +85,7 @@ not cover this socket (rationale).
 
 **`DORMOUSE_ORIGIN` is normalized to a bare origin exactly once**, in
 `readConfig` by the shared `normalizeOrigin` in `remote-lib-common`; a value that
-is not a URL with a burrow is a `ConfigError` naming the variable (rationale).
+is not a URL with a host is a `ConfigError` naming the variable (rationale).
 WebAuthn clientData checks, passkey assertion verification, the Burrow enrollment
 policy and the pairing URL a Burrow composes all compare against that string
 rather than re-parsing it; `createApp` parses it only to take `rpId` from the
@@ -132,7 +132,7 @@ nothing at runtime can move.
 Two build-time guards, both because their failure mode is silent (rationale):
 `assertConnectSrcBaked` greps the bundle for the define, and
 `resolveRemoteConnectSrc` rejects an override the matcher could never read — a
-trailing slash, a path, a bare burrow, a scheme outside `http`/`https`/`ws`/`wss`,
+trailing slash, a path, a bare host, a scheme outside `http`/`https`/`ws`/`wss`,
 a port outside 1–65535. The grammar is one regex duplicated into the `.mjs`,
 which cannot import TypeScript; `connect-src.test.ts` pins both patterns, and
 both copies of the default, as identical.
@@ -484,7 +484,7 @@ Relay's one third-party runtime dependency. Burrow and webview halves:
   subject** is configured: the config route reports `null` and subscribe/send
   answer 503; a phone registered against a key the Relay has no contact to sign
   with would be subscribed to a push it can never receive.
-- **A VAPID subject naming a loopback burrow is a startup error, not a default**
+- **A VAPID subject naming a loopback host is a startup error, not a default**
   (rationale). The default is `DORMOUSE_ORIGIN` when that origin is https and not
   loopback; otherwise there is none, and a loopback dev server turns push off
   rather than guessing a placeholder contact. An invalid configured value exits.
@@ -493,7 +493,7 @@ Source of truth: `relay/src/push-endpoint.ts`, wired into registration by the
 push routes in `relay/src/app.ts` and into delivery by `relay/src/push.ts`,
 which also holds `defaultVapidSubject` / `assertVapidSubject`.
 
-## Relay
+## Routing
 
 The Relay routes JSON envelopes between client sockets and burrow sockets
 (`@hono/node-ws`). **`clientId` is a Relay-assigned secret** stamped onto every
@@ -653,7 +653,7 @@ relay by `relay/test/e2e-relay.test.mjs`.
 The Burrow is a service in the process that owns the PTYs — never a webview:
 `BurrowService`, installed in the Tauri sidecar
 (`docs/specs/standalone.md` → "Burrow service") and in the VS Code extension
-burrow (`docs/specs/vscode.md` → "Burrow: a service in the extension host").
+host (`docs/specs/vscode.md` → "Burrow: a service in the extension host").
 The webview holds only UI — the pairing modal, the `window.dormouseBurrow`
 console hook, ring detection for push ([alert.md](./alert.md) -> Push
 notifications), and answering what its own panes are called and how big its

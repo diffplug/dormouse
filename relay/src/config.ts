@@ -16,7 +16,7 @@ export interface RelayConfig {
   port: number;
   /**
    * Interface to bind. `undefined` listens on every interface, which is what a
-   * container wants; a burrow that fronts the Relay with a TLS proxy on the same
+   * container wants; a host that fronts the Relay with a TLS proxy on the same
    * machine must set `DORMOUSE_BIND_HOST=127.0.0.1` so the plaintext port is not
    * reachable from the LAN or a tailnet.
    */
@@ -136,11 +136,11 @@ export function readConfig(env: Env = process.env): RelayConfig {
 }
 
 /**
- * `DORMOUSE_ORIGIN` reduced to a bare scheme-burrow-port, once, here — everything
+ * `DORMOUSE_ORIGIN` reduced to a bare scheme-host-port, once, here — everything
  * downstream compares against this string rather than parsing it again. A
  * trailing slash or a path reads as correct in an `.env` and fails every one of
  * those compares, so it is normalized rather than refused; a value that is not
- * an http(s) URL with a burrow cannot be guessed at.
+ * an http(s) URL with a host cannot be guessed at.
  */
 function requireOrigin(raw: string): string {
   const origin = normalizeOrigin(raw);
@@ -150,7 +150,7 @@ function requireOrigin(raw: string): string {
   // config. (`origin` is bare here, so the prefix test is exact.)
   if (origin === null || !(origin.startsWith('http://') || origin.startsWith('https://'))) {
     throw new ConfigError(
-      `DORMOUSE_ORIGIN must be an absolute URL with a burrow, e.g. https://dormouse.tailnet.ts.net, got '${raw}'.`,
+      `DORMOUSE_ORIGIN must be an absolute URL with a host, e.g. https://dormouse.tailnet.ts.net, got '${raw}'.`,
     );
   }
   return origin;

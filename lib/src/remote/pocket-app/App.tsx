@@ -744,7 +744,7 @@ export function PairingCodeView({
  */
 export const BURROWS_TITLE = 'Burrows';
 
-/** The connected Pocket shell: burrow navigation chrome over the remote wall. */
+/** The connected Pocket shell: Burrow navigation chrome over the remote wall. */
 export function ConnectedView({
   burrow,
   adapter,
@@ -762,7 +762,7 @@ export function ConnectedView({
         </button>
         <h1 className={PK.headerTitle}>{burrow.label || burrow.burrowId}</h1>
       </header>
-      <div className={PK.wallBurrow}>
+      <div className={PK.wallHost}>
         <PocketWall adapter={adapter} />
       </div>
     </div>
@@ -995,7 +995,7 @@ const PUSH_BLOCKED: Record<Exclude<PushAvailability, 'ready' | 'needs-install'>,
  * leave them hunting through iOS settings for a switch that would not help.
  * Not in {@link PUSH_BLOCKED}, which is keyed by browser availability.
  */
-export const PUSH_SERVER_DISABLED =
+export const PUSH_RELAY_DISABLED =
   'This Relay has push notifications turned off. Nothing on this phone can turn them on.';
 
 /** What the one push card says; `on` is the settled state and carries no action. */
@@ -1037,7 +1037,7 @@ export function pushNoticeState({
   if (availability === null) return null;
   // Outranks every browser state, a settled `on` included: a Relay that no
   // longer holds VAPID keys cannot deliver through the rows it still stores.
-  if (configStatus === 'disabled') return { kind: 'blocked', reason: PUSH_SERVER_DISABLED };
+  if (configStatus === 'disabled') return { kind: 'blocked', reason: PUSH_RELAY_DISABLED };
   if (pairedBurrowIds.every(isPushSubscribed)) return { kind: 'on' };
   // `InstallNotice` is the push card for this state, and it is on screen
   // exactly when this branch is reached — a second card saying "see above"

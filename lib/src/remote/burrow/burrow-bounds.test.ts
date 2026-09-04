@@ -2,7 +2,7 @@
  * The Burrow bounds, instrumented: what a rejected frame actually *costs*
  * (`docs/specs/remote-security-model.md` → Burrow bounds).
  *
- * The ceremonies themselves are `burrow.test.ts`. What this file adds is
+ * The ceremonies themselves are `burrow-runtime.test.ts`. What this file adds is
  * measurement — a counting wrapper over the injected `WebCryptoLike` and a spy
  * on `NoiseTransportSession.receive` — because "performs no WebCrypto
  * operation and allocates nothing" is not a property the wire can show. Every
@@ -22,7 +22,7 @@ import {
   MAX_ESTABLISHED_E2E_SESSIONS,
   MAX_E2E_CIPHERTEXT_LENGTH,
   MAX_CLIENT_ID_LENGTH,
-  MAX_SERVER_TO_BURROW_FRAME_LENGTH,
+  MAX_RELAY_TO_BURROW_FRAME_LENGTH,
   NoiseTransportSession,
   fromBase64Url,
   utf8Encode,
@@ -56,7 +56,7 @@ import {
   type TestAuthenticator,
 } from '../test-e2e-client';
 
-const ORIGIN = 'https://burrow.example';
+const ORIGIN = 'https://burrow-machine.example';
 const RP_ID = 'burrow.example';
 const START = 1_700_000_000_000;
 
@@ -360,18 +360,18 @@ describe('BurrowRuntime bounds', () => {
       step: 'init',
       ct: 'A'.repeat(MAX_E2E_CIPHERTEXT_LENGTH),
     });
-    expect(maximalLegal.length).toBeLessThanOrEqual(MAX_SERVER_TO_BURROW_FRAME_LENGTH);
+    expect(maximalLegal.length).toBeLessThanOrEqual(MAX_RELAY_TO_BURROW_FRAME_LENGTH);
 
     const parse = vi.spyOn(JSON, 'parse');
     try {
       const pad = (length: number) => `{"t":"nonsense","pad":"${'a'.repeat(length)}"}`;
-      socket.receiveRaw(pad(MAX_SERVER_TO_BURROW_FRAME_LENGTH));
+      socket.receiveRaw(pad(MAX_RELAY_TO_BURROW_FRAME_LENGTH));
       socket.receiveRaw(new ArrayBuffer(8));
       expect(parse).not.toHaveBeenCalled();
 
       // At the cap it still parses: this bounds burrowility, not use.
-      const atCap = pad(MAX_SERVER_TO_BURROW_FRAME_LENGTH - '{"t":"nonsense","pad":""}'.length);
-      expect(atCap.length).toBe(MAX_SERVER_TO_BURROW_FRAME_LENGTH);
+      const atCap = pad(MAX_RELAY_TO_BURROW_FRAME_LENGTH - '{"t":"nonsense","pad":""}'.length);
+      expect(atCap.length).toBe(MAX_RELAY_TO_BURROW_FRAME_LENGTH);
       socket.receiveRaw(atCap);
       expect(parse).toHaveBeenCalledTimes(1);
     } finally {

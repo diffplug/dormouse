@@ -334,14 +334,14 @@ hidden, so a returning reader never sees dismissed UI flash. Pinned by
 
 ## `/hosted` preview
 
-**Must mark both services unavailable:** Hosted operates Pocket's coordinator;
+**Must mark both services unavailable:** Hosted operates Pocket's Relay;
 optional ElevenLabs replaces browser voice. Terminals stay on an awake, online
 computer; browser speech and self-hosting remain. `NotifySignupForm` exposes
 the `nedshed.dev` devlog handoff and keeps email per tab;
 `website/src/components/NotifySignupForm.test.tsx` pins both.
 
-**Must open both hosting pages with the server boundary:** Dormouse needs none;
-remote features require a configured signalling server and otherwise make no network
+**Must open both hosting pages with the Relay boundary:** Dormouse needs none;
+remote features require a configured Relay and otherwise make no network
 requests. `/docs/self-host` links `/hosted`; `/hosted` labels hosting pending review,
 discloses metadata, and links the model.
 `website/src/lib/docs-rail.test.tsx` pins this.
@@ -524,7 +524,7 @@ a browser Surface preview, and links to `/docs/dor#agent-browser` and
 `/docs/agent-skill`.
 
 The transcript is **authored literals in `Home.tsx`, not generated or tested.**
-Proving it end to end would need a live Host and a real `agent-browser` in CI,
+Proving it end to end would need a live Burrow and a real `agent-browser` in CI,
 and a captured dev-server port is not stable enough to commit — a busy 5173
 silently becomes 5174. The accepted cost is that the transcript can drift from
 real output with no test to catch it.

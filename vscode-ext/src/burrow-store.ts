@@ -23,7 +23,6 @@ import { isEnrollment, type BurrowEnrollment } from '../../lib/src/remote/burrow
 // Imported, not mirrored: a key that drifted between the two sides would strand
 // an enrollment that is still on disk.
 import { ENROLLMENT_KEY } from '../../lib/src/remote/burrow/store';
-import { log } from './log';
 
 export class VsCodeBurrowStateStore implements BurrowStateStore {
   /** Writes here survive a restart (`BurrowStateStore.persistent`). */
@@ -56,7 +55,6 @@ export class VsCodeBurrowStateStore implements BurrowStateStore {
       this.#enrollment = null;
       onEnrollmentChanged?.();
     });
-    void forgetRetiredState(context);
   }
 
   /** Stop listening; the store is otherwise stateless and can be dropped. */
@@ -141,28 +139,4 @@ const ACL_KEY_PREFIX = 'dormouse.burrow.acl.';
 /** Keyed per burrow so a re-enrollment cannot inherit a stale ACL. */
 function aclKey(burrowId: string): string {
   return `${ACL_KEY_PREFIX}${burrowId}`;
-}
-
-/** What the two keys above were called before the Burrow rename. */
-const RETIRED_ENROLLMENT_KEY = 'dormouse.remote-host.enrollment';
-const RETIRED_ACL_KEY_PREFIX = 'dormouse.remote-host.acl.';
-
-/**
- * Delete what the retired key names hold, without reading either. The
- * enrollment carries a `burrowToken`, and `SecretStorage` cannot be enumerated:
- * a key nothing deletes by name is a credential that outlives every build that
- * knew it existed. `globalState` can be enumerated, so the ACL entries go by
- * prefix.
- */
-async function forgetRetiredState(context: vscode.ExtensionContext): Promise<void> {
-  try {
-    await context.secrets.delete(RETIRED_ENROLLMENT_KEY);
-    for (const key of context.globalState.keys()) {
-      if (key.startsWith(RETIRED_ACL_KEY_PREFIX)) {
-        await context.globalState.update(key, undefined);
-      }
-    }
-  } catch (error) {
-    log.error(`[burrow] could not drop the retired remote-host state: ${String(error)}`);
-  }
 }

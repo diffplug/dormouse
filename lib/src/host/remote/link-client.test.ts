@@ -1,7 +1,7 @@
 /**
- * The webview's end of the bridge, minus the transport — the part every burrow
+ * The webview's end of the bridge, minus the transport — the part every host
  * shares, so a rule proved here holds in the Tauri app, the dev harness, and VS
- * Code alike. What each burrow adds on top (which message carries what) is
+ * Code alike. What each host adds on top (which message carries what) is
  * covered by its own adapter test.
  */
 

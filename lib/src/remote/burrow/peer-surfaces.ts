@@ -102,7 +102,7 @@ let announcingFor: BurrowLink | null = null;
 
 /**
  * Make this webview's terminals reachable from the Burrow service in the process
- * that owns the PTYs. Idempotent, and a no-op on a burrow with no service behind
+ * that owns the PTYs. Idempotent, and a no-op on a host with no service behind
  * it (the website).
  */
 export function installPeerSurfaceResponder(): void {

@@ -2,7 +2,7 @@
  * Minimal structural typings for the WebCrypto API.
  *
  * This package compiles with `"lib": ["ES2022"]` and `"types": []` so it can
- * ship to both the browser (`lib`) and Node (`server`) without pulling in DOM
+ * ship to both the browser (`lib`) and Node (`relay`) without pulling in DOM
  * or Node type definitions. Both runtimes expose the same WebCrypto
  * implementation on `globalThis.crypto`; the interfaces here describe just the
  * slice of it that the security primitives use, and real `CryptoKey` /

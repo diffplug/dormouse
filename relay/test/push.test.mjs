@@ -97,7 +97,7 @@ test('VAPID subject validation rejects loopback contacts', () => {
     'https://127.0.0.1:3000',
     'https://[::1]:3000',
   ]) {
-    assert.throws(() => assertVapidSubject(subject), /loopback burrow/, subject);
+    assert.throws(() => assertVapidSubject(subject), /loopback host/, subject);
   }
 });
 

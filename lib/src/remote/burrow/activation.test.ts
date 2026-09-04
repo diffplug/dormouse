@@ -2,7 +2,7 @@
  * The webview's end of the Burrow service (`lib/src/host/remote/service.ts`): it
  * forwards console commands, mirrors the pairing queue, and reports rings. It
  * starts no `BurrowRuntime` of its own and holds no Burrow state — there is no
- * webview-resident mode left to fall back to, so a burrow with no service behind
+ * webview-resident mode left to fall back to, so a host with no service behind
  * it gets nothing at all.
  */
 

@@ -160,7 +160,7 @@ invocation per Surface, no buffer, unlinked as it is read
 (`docs/specs/vscode.md` -> "Capturing agent recovery").
 
 **The VS Code peer-link token is a local credential at rest** —
-`remote-host.peer-token` in the extension's global storage, written mode `0600`
+`burrow.peer-token` in the extension's global storage, written mode `0600`
 with `wx`, its socket directory re-checked on every contention round. **Neither
 control does anything on Windows** (rationale).
 

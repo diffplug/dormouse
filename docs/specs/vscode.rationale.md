@@ -64,7 +64,7 @@ Rows 1–2 are why a blanket second press is wrong; `Press Ctrl-C again` was abs
 
 ## Burrow: a service in the extension host
 
-**Why every enrolled window cannot just start a Host.** They would all connect `/ws/burrow` against the same enrollment; the server closes the displaced socket (`relay/src/relay.ts`), whose `close` handler reconnects and displaces the next one — and each window arms its own alarm push meanwhile.
+**Why every enrolled window cannot just start a Burrow.** They would all connect `/ws/burrow` against the same enrollment; the Relay closes the displaced socket (`relay/src/relay.ts`), whose `close` handler reconnects and displaces the next one — and each window arms its own alarm push meanwhile.
 
 **Why the socket path is hashed.** macOS caps a unix socket path near 104 bytes, and `context.globalStorageUri.fsPath` is most of that on its own — joining a name onto it overflows.
 
@@ -78,7 +78,7 @@ Rows 1–2 are why a blanket second press is wrong; `Press Ctrl-C again` was abs
 
 **Why `stillOurs` compares full filesystem identity.** Two windows can find the same corpse, both unlink, and the second bind silently displaces the first, leaving the loser serving a socket no client can reach; nothing on the bind path detects that. Inode alone is reused too readily to distinguish "still ours" from "replaced".
 
-**What an unverified bind would cost.** During `RECLAIM_VERIFY_MS` the socket is bound but may still be given up. A command landing inside that window and told "broker" would start a service the stand-down path never tears down — two Hosts under one burrowId, and the endless relay displacement above.
+**What an unverified bind would cost.** During `RECLAIM_VERIFY_MS` the socket is bound but may still be given up. A command landing inside that window and told "broker" would start a service the stand-down path never tears down — two Burrows under one burrowId, and the endless relay displacement above.
 
 **Why `listen`-time errors are logged rather than thrown.** The sockets already accepted are unaffected by an accept-time failure, and a listener that has genuinely died is noticed by the windows that can no longer reach it.
 
@@ -104,7 +104,7 @@ Rows 1–2 are why a blanket second press is wrong; `Press Ctrl-C again` was abs
 
 **Why the route outlives the last unsubscribe.** Re-attaching an already-attached surface resolves the new route first and only then tears the old attachment down, so dropping the route on unsubscribe would delete the fresh one and strand every later write.
 
-**Why a result is never broadcast when a route exists.** Ids are globally unique, so broadcasting another window's answer settles nothing anywhere — and it puts that window's Host state in front of webviews that never asked for it.
+**Why a result is never broadcast when a route exists.** Ids are globally unique, so broadcasting another window's answer settles nothing anywhere — and it puts that window's Burrow state in front of webviews that never asked for it.
 
 **Why `pushDevices` answers `null` instead of refusing.** When an un-enrolled window refused the read-only commands, the Settings dialog reported an unreachable server on machines that had simply never enrolled.
 

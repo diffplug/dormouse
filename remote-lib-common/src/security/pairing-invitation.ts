@@ -40,13 +40,13 @@ const MAX_UINT32 = 0xffff_ffff;
 
 /**
  * The three origins the documented dev loop serves Pocket from, and the whole
- * of the parser's HTTPS exemption. **Matched by exact burrow, and deliberately
+ * of the parser's HTTPS exemption. **Matched by exact host, and deliberately
  * narrower than the platform's own secure-context rule**, which also trusts
  * `*.localhost` and all of `127.0.0.0/8`: this is a policy list, not a
  * re-derivation, so widening it is a decision rather than a correction.
  * `URL.hostname` spells the IPv6 loopback bracketed, so that is the form here.
  */
-const LOOPBACK_BURROWS = new Set(['localhost', '127.0.0.1', '[::1]']);
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 
 /** How many dot-delimited fields the fragment carries. */
 const FRAGMENT_FIELD_COUNT = 6;
@@ -176,7 +176,7 @@ export function formatPairingInvitationUrl(origin: string, invitation: PairingIn
  * that keeps a code from bootstrapping a *different* deployment's Pocket is
  * this compare.
  *
- * **HTTPS, or plain HTTP on one of {@link LOOPBACK_BURROWS}.** Every one of those
+ * **HTTPS, or plain HTTP on one of {@link LOOPBACK_HOSTS}.** Every one of those
  * is a secure context by the platform's own rule, so the exemption admits no
  * origin WebAuthn or a service worker would refuse to run on.
  */
@@ -191,8 +191,8 @@ export async function parsePairingInvitationUrl(
   const url = parseUrl(text);
   if (!url) return null;
   // The origin compare below still has to pass, so this widens nothing a
-  // remote code could reach — see {@link LOOPBACK_BURROWS}.
-  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && LOOPBACK_BURROWS.has(url.hostname))) {
+  // remote code could reach — see {@link LOOPBACK_HOSTS}.
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && LOOPBACK_HOSTS.has(url.hostname))) {
     return null;
   }
   // Credentials in the authority would let a code name an origin the compare

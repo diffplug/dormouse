@@ -16,7 +16,7 @@
 
 ## Burrow service
 
-**Why one file rather than one per value.** Per-value files leave a window between two writes in which the enrollment can end up describing a different Host than the ACL records approved under it.
+**Why one file rather than one per value.** Per-value files leave a window between two writes in which the enrollment can end up describing a different Burrow than the ACL records approved under it.
 
 **Why the correlation field cannot be `requestId`.** A `burrow:*` payload reusing that field has its results consumed by the invoke table, vanishing at random.
 

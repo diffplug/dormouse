@@ -12,7 +12,7 @@ import { PRESENCE_DOMAIN, isPresenceBinding, presenceChallenge } from '../dist/i
 const HANDSHAKE_HASH = Buffer.alloc(32, 0x11).toString('base64url');
 const BURROW_CHALLENGE = Buffer.alloc(32, 0x22).toString('base64url');
 const CONNECTION_ID = Buffer.alloc(16, 0x33).toString('base64url');
-const SERVER_NONCE = Buffer.alloc(32, 0x44).toString('base64url');
+const RELAY_NONCE = Buffer.alloc(32, 0x44).toString('base64url');
 
 const PAIRING = {
   kind: 'pairing',
@@ -57,9 +57,9 @@ test('the pairing challenge is the documented bytes', async () => {
     utf8('burrow-1'),
     b64u(HANDSHAKE_HASH),
     utf8('cred-1'),
-    b64u(SERVER_NONCE),
+    b64u(RELAY_NONCE),
   ]);
-  assert.equal(await presenceChallenge(PAIRING, SERVER_NONCE), expected);
+  assert.equal(await presenceChallenge(PAIRING, RELAY_NONCE), expected);
   assert.match(expected, /^[A-Za-z0-9_-]{43}$/);
 });
 
@@ -72,22 +72,22 @@ test('the connection challenge is the documented bytes, in declared order', asyn
     b64u(BURROW_CHALLENGE),
     b64u(HANDSHAKE_HASH),
     utf8('cred-1'),
-    b64u(SERVER_NONCE),
+    b64u(RELAY_NONCE),
   ]);
-  assert.equal(await presenceChallenge(CONNECTION, SERVER_NONCE), expected);
+  assert.equal(await presenceChallenge(CONNECTION, RELAY_NONCE), expected);
 });
 
 test('the two kinds never collide', async () => {
   // A pairing proof presented at connect time must not verify, which starts
   // with the kind being part of the hashed statement.
   assert.notEqual(
-    await presenceChallenge(PAIRING, SERVER_NONCE),
-    await presenceChallenge(CONNECTION, SERVER_NONCE),
+    await presenceChallenge(PAIRING, RELAY_NONCE),
+    await presenceChallenge(CONNECTION, RELAY_NONCE),
   );
 });
 
 test('every field and the nonce change the challenge', async () => {
-  const base = await presenceChallenge(CONNECTION, SERVER_NONCE);
+  const base = await presenceChallenge(CONNECTION, RELAY_NONCE);
   const other = Buffer.alloc(32, 0x55).toString('base64url');
   for (const change of [
     { burrowId: 'burrow-2' },
@@ -96,7 +96,7 @@ test('every field and the nonce change the challenge', async () => {
     { handshakeHash: other },
     { passkeyCredentialId: 'cred-2' },
   ]) {
-    assert.notEqual(await presenceChallenge({ ...CONNECTION, ...change }, SERVER_NONCE), base);
+    assert.notEqual(await presenceChallenge({ ...CONNECTION, ...change }, RELAY_NONCE), base);
   }
   assert.notEqual(await presenceChallenge(CONNECTION, other), base);
 });
@@ -105,10 +105,10 @@ test('the fields cannot be slid past each other', async () => {
   // `lengthPrefixedConcat` puts the boundaries in the hash: without it,
   // moving a character between two adjacent text fields would collide.
   assert.notEqual(
-    await presenceChallenge(PAIRING, SERVER_NONCE),
+    await presenceChallenge(PAIRING, RELAY_NONCE),
     await presenceChallenge(
       { ...PAIRING, burrowId: 'burrow-', passkeyCredentialId: '1cred-1' },
-      SERVER_NONCE,
+      RELAY_NONCE,
     ),
   );
 });
@@ -159,6 +159,6 @@ test('the nonce is bounded too, since no binding guard covers it', async () => {
 test('a field that is not base64url throws rather than hashing garbage', async () => {
   // The guard runs first and a throw is a failed presence check, not a
   // silently different challenge.
-  await assert.rejects(presenceChallenge({ ...PAIRING, handshakeHash: 'not base64url!' }, SERVER_NONCE));
+  await assert.rejects(presenceChallenge({ ...PAIRING, handshakeHash: 'not base64url!' }, RELAY_NONCE));
   await assert.rejects(presenceChallenge(PAIRING, 'not base64url!'));
 });

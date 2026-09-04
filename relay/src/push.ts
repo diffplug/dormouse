@@ -60,9 +60,9 @@ export interface VapidKeys {
  * https origin were accepted. Apple does not check that the contact is
  * *reachable*, only that it is not loopback.
  */
-const LOOPBACK_SUBJECT_BURROWS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
+const LOOPBACK_SUBJECT_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 
-/** The burrow a subject names: the domain half for `mailto:`, the hostname otherwise. */
+/** The host a subject names: the domain half for `mailto:`, the hostname otherwise. */
 function subjectBurrow(subject: URL): string {
   if (subject.protocol === 'mailto:') {
     const at = subject.pathname.lastIndexOf('@');
@@ -73,7 +73,7 @@ function subjectBurrow(subject: URL): string {
 
 function isLoopbackSubjectBurrow(burrow: string): boolean {
   if (!burrow) return false;
-  if (LOOPBACK_SUBJECT_BURROWS.has(burrow)) return true;
+  if (LOOPBACK_SUBJECT_HOSTS.has(burrow)) return true;
   // RFC 6761 reserves the whole `.localhost` TLD for loopback.
   if (burrow.endsWith('.localhost')) return true;
   return /^127\./.test(burrow);
@@ -160,7 +160,7 @@ export function assertVapidSubject(subject: string): void {
   }
   if (isLoopbackSubjectBurrow(subjectBurrow(parsed))) {
     throw new Error(
-      'VAPID subject must not name a loopback burrow — Apple rejects such a JWT with ' +
+      'VAPID subject must not name a loopback host — Apple rejects such a JWT with ' +
         'BadJwtToken, so every push to an iPhone would fail. Use a routable contact, ' +
         "e.g. this Relay's https origin or a real mailto: address.",
     );

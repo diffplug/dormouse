@@ -52,7 +52,7 @@ Source of truth: the surface model the wire shapes reuse — `dor/src/protocol.t
 
 ## Transport
 
-**Every message below is JSON, carried as one length-prefixed application message on one authorized Noise session** that the WebSocket relay pipes without decoding, the Burrow multiplexing every session over its single relay socket (`docs/specs/relay.md` → "Relay", "E2E framing"). **Terminal data rides that same stream** — it is small and ordering matters; media channels arrive with browser surfaces ([Future](#future)). **The API and the security model are identical in selfhost and (future) SaaS modes**, where only account creation differs (`docs/specs/relay.md` → Future).
+**Every message below is JSON, carried as one length-prefixed application message on one authorized Noise session** that the WebSocket relay pipes without decoding, the Burrow multiplexing every session over its single relay socket (`docs/specs/relay.md` → "Routing", "E2E framing"). **Terminal data rides that same stream** — it is small and ordering matters; media channels arrive with browser surfaces ([Future](#future)). **The API and the security model are identical in selfhost and (future) SaaS modes**, where only account creation differs (`docs/specs/relay.md` → Future).
 
 **A `RemoteApiSession` exists only for an authorized session.** Created at promotion — presence proof and ACL conjunction both passed ([remote-security-model.md](./remote-security-model.md) → Connection) — and disposed when the Client disconnects, when the Burrow reaps the session, and by any promotion that replaces it, so **a re-authorizing Client can never inherit the previous session's attachment**.
 

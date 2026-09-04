@@ -9,7 +9,7 @@ import { installBurrowConsoleHook } from './activation';
 /**
  * Renders the head of the pairing-approval queue and, on mount, wires this
  * webview to the Burrow service and installs the console hook. Wired next to the
- * other modal burrows in the wall — additive, and inert unless the user has
+ * other modal hosts in the wall — additive, and inert unless the user has
  * enrolled a Burrow.
  */
 export function RemotePairingModalHost({

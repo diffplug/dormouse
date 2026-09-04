@@ -1,14 +1,14 @@
 /**
  * The webview's end of the Burrow service bridge, minus the transport.
  *
- * Every burrow that runs a Burrow service gives its webview the same
+ * Every host that runs a Burrow service gives its webview the same
  * {@link BurrowLink}: commands out with a bounded wait for their result,
  * asks in with an answer that always comes back, and pushed events fanned to
  * whoever subscribed. What differs between the Tauri app, the browser dev
  * harness, and VS Code is only how a message travels — one Rust invoke, one dev
  * WebSocket, one `postMessage` — so that is the injected part and everything
  * else lives here. Three copies of the correlation and timeout rules is three
- * chances for one burrow to settle a command the others would not.
+ * chances for one host to settle a command the others would not.
  *
  * The contract on the wire is `service-protocol.ts`; this is the client half of
  * it.
@@ -25,7 +25,7 @@ import type { BurrowCommand, BurrowResult } from './service-protocol';
  */
 export const BURROW_COMMAND_TIMEOUT_MS = 15_000;
 
-/** How this burrow moves a message to the service. */
+/** How this host moves a message to the service. */
 export interface BurrowLinkTransport {
   /** Send one command; its result arrives back through {@link BurrowLinkClient.onResult}. */
   sendCommand(cmd: BurrowCommand): void;

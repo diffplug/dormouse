@@ -257,7 +257,7 @@ export function Wall({
   /**
    * Opt in to the Burrow (the "Pocket" pairing seam). Only the
    * standalone desktop/sidecar runtime sets this; the website playground and
-   * vscode webview leave it off so the burrow stack and its
+   * vscode webview leave it off so the Burrow stack and its
    * `window.dormouseBurrow` console hook never load there.
    */
   enableBurrow?: boolean;

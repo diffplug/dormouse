@@ -1,6 +1,6 @@
 /**
  * What rides inside a Noise transport message once `Split` has run
- * (`docs/specs/relay.md` -> Relay -> "E2E framing").
+ * (`docs/specs/relay.md` -> "Routing" -> "E2E framing").
  *
  * One implementation, so no two speakers can disagree about what a transport
  * plaintext is; today the harness is the only one. It knows nothing about the

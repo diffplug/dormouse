@@ -1,5 +1,5 @@
 /**
- * What bounds a relay socket (docs/specs/relay.md -> Relay).
+ * What bounds a relay socket (docs/specs/relay.md -> "Routing").
  *
  * The frame gates and routing rules live in `relay.test.mjs`; these are the
  * resource bounds around them — how many Client sockets exist, how large a

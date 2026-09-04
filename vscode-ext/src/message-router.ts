@@ -150,7 +150,7 @@ function brokerRequest(op: string, params: unknown): Promise<unknown[]> {
  * Post one message to every live webview in this window.
  *
  * The Burrow's results ride this rather than a reply to one webview: the service
- * answers an `burrowRequestId`, and only the adapter that minted it holds a pending
+ * answers a `burrowRequestId`, and only the adapter that minted it holds a pending
  * command for it (`lib/src/lib/platform/vscode-adapter.ts`).
  */
 function broadcastToWebviews(message: ExtensionMessage): void {

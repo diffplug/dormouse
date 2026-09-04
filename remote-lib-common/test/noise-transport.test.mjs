@@ -1,5 +1,5 @@
 /**
- * The E2E transport framing (docs/specs/relay.md -> Relay -> "E2E framing").
+ * The E2E transport framing (docs/specs/relay.md -> "Routing" -> "E2E framing").
  * The relay-integrated half — the same framing through a real Relay — is
  * `relay/test/e2e-relay.test.mjs`.
  */

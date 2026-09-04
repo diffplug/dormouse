@@ -112,7 +112,7 @@
 
 **What the origin check buys.** A Pocket served anywhere else cannot sign in at all, since WebAuthn binds the passkey to the serving origin — so the rule is enforced by the Relay, not merely observed by the client.
 
-**Why the origin carries a CSP at all.** Pocket holds a per-Burrow Client static and the worker that opens sealed pushes, and `docs/specs/security.md` -> "What is not defended" already names active XSS here as a risk it cannot rule out. Both shipped webview burrows already have a policy, leaving Pocket the one origin without one.
+**Why the origin carries a CSP at all.** Pocket holds a per-Burrow Client static and the worker that opens sealed pushes, and `docs/specs/security.md` -> "What is not defended" already names active XSS here as a risk it cannot rule out. Both shipped webview hosts already have a policy, leaving Pocket the one origin without one.
 
 **Why `connect-src` names the WebSocket origin instead of resting on `'self'`.** Browsers have disagreed about whether `'self'` covers `ws:`/`wss:` at the same origin, so a policy that relied on it would break the relay on some engines and not others. Naming `DORMOUSE_ORIGIN` with the scheme swapped is unambiguous everywhere.
 

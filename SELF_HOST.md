@@ -501,7 +501,7 @@ about any of them.
   `ss -lntp 'sport = :3100'` names that process — unless it cannot see it, as
   under WSL with `networkingMode=mirrored`, where the listener may be a Windows
   process (a Windows Dormouse Relay install does exactly this). Stop it, or
-  install on a burrow not sharing loopback.
+  install on a host not sharing loopback.
 - **The HTTPS URL returns 502:** check the loopback health endpoint first, then
   `tailscale serve status`; service and Serve configuration have separate
   lifecycles, and `manage serve` re-applies a mapping a dev session repointed.

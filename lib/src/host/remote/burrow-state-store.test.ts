@@ -46,7 +46,11 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 });
 import { toBase64Url, type BurrowAclRecord } from 'remote-lib-common';
 import type { BurrowEnrollment } from '../../remote/burrow/enrollment';
-import { createEphemeralBurrowStateStore, FileBurrowStateStore } from './burrow-state-store';
+import {
+  createEphemeralBurrowStateStore,
+  FileBurrowStateStore,
+  forgetRetiredState,
+} from './burrow-state-store';
 
 const ENROLLMENT: BurrowEnrollment = {
   relayUrl: 'https://relay.example',
@@ -332,5 +336,32 @@ describe('createEphemeralBurrowStateStore', () => {
     const store = createEphemeralBurrowStateStore(() => {});
     await store.saveAcl('burrow-1', [aclRecord('other', 'client-1')]);
     expect(await store.loadAcl('burrow-1')).toEqual([]);
+  });
+});
+
+describe('forgetting the retired state file', () => {
+  it('deletes the pre-rename file unread, and leaves the live one alone', async () => {
+    // It carries a `burrowToken` this build can no longer revoke
+    // (`docs/specs/security-remote.md` -> "Credentials at rest").
+    const retired = join(dir, 'remote-host.json');
+    await writeFile(retired, JSON.stringify({ enrollment: { burrowToken: 'secret' } }));
+    const store = new FileBurrowStateStore(dir);
+    await store.saveEnrollment(ENROLLMENT);
+
+    await forgetRetiredState(dir);
+
+    await expect(readFile(retired, 'utf8')).rejects.toThrow(/ENOENT/);
+    expect(await store.loadEnrollment()).toEqual(ENROLLMENT);
+  });
+
+  it('is quiet on a directory that never held one', async () => {
+    const warnings: unknown[] = [];
+    const warn = vi.spyOn(console, 'warn').mockImplementation((...args) => void warnings.push(args));
+    try {
+      await expect(forgetRetiredState(dir)).resolves.toBeUndefined();
+      expect(warnings).toEqual([]);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

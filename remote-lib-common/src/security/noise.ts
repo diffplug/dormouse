@@ -23,7 +23,7 @@
  *     (2.4.0).
  *   - Inputs are copied before use, and MAC input must be `Uint8Array` —
  *     strings are no longer accepted (2.0.0).
- *   - Big-endian burrows handled explicitly (`swap32IfBE`) and zeroization
+ *   - Big-endian hosts handled explicitly (`swap32IfBE`) and zeroization
  *     tightened (2.2.0).
  *   - Passing AAD to a cipher that does not support it throws instead of being
  *     silently ignored (2.3.0); ChaCha20-Poly1305 supports AAD, so this suite

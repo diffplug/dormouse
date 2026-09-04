@@ -59,7 +59,7 @@ export function randomSecret() {
   return toBase64Url(randomBytes(32));
 }
 
-/** A SimBurrow, or a bare burrowId string; both name one Burrow to these actors. */
+/** A SimBurrow, or a bare hostId string; both name one Burrow to these actors. */
 function burrowIdOf(burrow) {
   return typeof burrow === 'string' ? burrow : burrow.burrowId;
 }

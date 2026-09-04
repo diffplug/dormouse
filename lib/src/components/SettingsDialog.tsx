@@ -103,7 +103,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const showTheme = !getPlatform().hostOwnsTheme;
 
   // Same for the shell, plus: with nothing to switch between there is nothing
-  // to offer. That also covers every burrow whose adapter detects no shells and
+  // to offer. That also covers every host whose adapter detects no shells and
   // every burrow that never seeds the store (fake = 1, remote = 0).
   const showShell = !getPlatform().hostOwnsShells && shellState.shells.length >= 2;
   // The same seam `RemoteControlSection` gates on, read here so the push line

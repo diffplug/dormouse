@@ -721,7 +721,7 @@ describe('burrow service glue', () => {
         resizePty: () => {},
         streamPty: () => () => {},
       },
-      appName: 'VS Code',
+      kind: 'vscode',
       sendToUi: (event, data) => void sent.push({ event, data: data as never }),
       connectSrc: 'https://*.dormouse.sh wss://*.dormouse.sh',
     });
@@ -777,7 +777,7 @@ describe('the relay socket', () => {
   /** A `ws` server that greets, echoes one frame, and closes with a code. */
   async function wsServer() {
     const { WebSocketServer } = await import('ws');
-    const server = new WebSocketServer({ burrow: '127.0.0.1', port: 0 });
+    const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
     await new Promise((resolve) => server.on('listening', resolve));
     server.on('connection', (socket) => {
       socket.send('hello from the relay');
@@ -1136,7 +1136,7 @@ describe('serving the other windows', () => {
 
     await waitFor(() => far.results.length > 0);
     expect(far.results[0]).toMatchObject({ burrowRequestId: 'rh-9', result: { enrolled: false } });
-    // Not broadcast here as well: an `burrowRequestId` belongs to one window's adapter, so
+    // Not broadcast here as well: a `burrowRequestId` belongs to one window's adapter, so
     // a copy would settle nothing and would show that window's Burrow state to
     // webviews that never asked.
     expect(results(bound.posted).some((result) => result.burrowRequestId === 'rh-9')).toBe(false);

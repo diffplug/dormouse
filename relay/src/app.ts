@@ -493,7 +493,7 @@ export function createApp(config: AppConfig): CreatedApp {
     );
   }
   // Enforced, not assumed: every compare below is a string compare against this
-  // value, so a `https://burrow/` that slipped past `readConfig` (a direct caller,
+  // value, so a `https://host/` that slipped past `readConfig` (a direct caller,
   // a test) would fail each of them while reading as correct.
   //
   // **The scheme too, not merely "bare".** `isOrigin` admits any WHATWG special
@@ -784,7 +784,7 @@ export function createApp(config: AppConfig): CreatedApp {
     }
   });
 
-  // --- Sign-in: passkey assertion → session token -------------------------
+  // --- Sign-in: passkey assertion → session token --------------------------
 
   app.post(API_ROUTES.signinBegin, (c) => {
     const { challenge } = signinChallenges.issue();
@@ -854,7 +854,7 @@ export function createApp(config: AppConfig): CreatedApp {
     return c.json(res);
   });
 
-  // --- Burrow enrollment: credential-gated, appends to burrows.json ------------
+  // --- Burrow enrollment: credential-gated, appends to burrows.json --------
 
   app.post(API_ROUTES.burrowEnroll, async (c) => {
     const body = await readJson<BurrowEnrollRequest>(c);
@@ -1023,7 +1023,7 @@ export function createApp(config: AppConfig): CreatedApp {
     return c.json(res);
   });
 
-  // --- Burrow presence: enrolled burrows + whether each is connected -----------
+  // --- Burrow presence: enrolled burrows + whether each is connected -------
 
   app.get(API_ROUTES.burrows, requireSession, async (c) => {
     const burrows = await burrowStore.list();
@@ -1033,7 +1033,7 @@ export function createApp(config: AppConfig): CreatedApp {
     return c.json(res);
   });
 
-  // --- Setup tokens: the credential behind a Burrow's QR ---------------------
+  // --- Setup tokens: the credential behind a Burrow's QR -------------------
 
   app.post(API_ROUTES.burrowSetupToken, requireBurrow, (c) => {
     // The token only; the Burrow composes the QR's URL (`SetupTokenResponse`)
@@ -1275,7 +1275,7 @@ export function createApp(config: AppConfig): CreatedApp {
     return subscriptions.filter(isVapidCurrent);
   }
 
-  // --- The relay: one burrow socket per burrowId, many client sockets ----------
+  // --- The relay: one burrow socket per burrowId, many client sockets ------
   // Auth rides the `token` query param (browsers cannot set WS headers). A bad
   // token short-circuits with 401 here, so `injectWebSocket` never upgrades it.
 
@@ -1352,7 +1352,7 @@ export function createApp(config: AppConfig): CreatedApp {
   );
 
   /**
-   * The socket-level sweep: expire, then probe. `docs/specs/relay.md` -> Relay
+   * The socket-level sweep: expire, then probe. `docs/specs/relay.md` -> "Routing"
    * owns both rules. Synchronous and cheap — it touches no disk — so `index.ts`
    * can run it far more often than the revocation sweep.
    */
@@ -1421,7 +1421,7 @@ const CSP_HEADER = 'Content-Security-Policy';
  * This origin holds a per-Burrow Client static and the worker that opens sealed
  * pushes, and `docs/specs/security.md` -> "What is not defended" already names active XSS
  * here as the risk it cannot rule out — so it gets the defense in depth the
- * two shipped webview burrows already have.
+ * two shipped webview hosts already have.
  *
  * Every source is the app's own origin. The loosenings are load-bearing and no
  * wider than they must be:

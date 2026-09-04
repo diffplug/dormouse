@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   CAMERA_BOOTSTRAP_MESSAGE,
   BurrowsView,
-  PUSH_SERVER_DISABLED,
+  PUSH_RELAY_DISABLED,
   SCAN_LABEL,
   PairingCodeView,
   SetupOrSignin,
@@ -465,7 +465,7 @@ describe('the one push card on the Burrows view', () => {
   it('reports a Relay with push disabled rather than the browser state', () => {
     renderBurrows({ pushConfigStatus: 'disabled' });
 
-    expect(pushCard()!.textContent).toContain(PUSH_SERVER_DISABLED);
+    expect(pushCard()!.textContent).toContain(PUSH_RELAY_DISABLED);
     expect(buttonNamed('Enable push notifications')).toBeNull();
   });
 
@@ -483,7 +483,7 @@ describe('the one push card on the Burrows view', () => {
     renderBurrows({ pushState: 'needs-install', pushConfigStatus: 'disabled' });
 
     expect(container.textContent).not.toContain('Add Dormouse to your Home Screen');
-    expect(pushCard()!.textContent).toContain(PUSH_SERVER_DISABLED);
+    expect(pushCard()!.textContent).toContain(PUSH_RELAY_DISABLED);
   });
 
   it('does not offer Enable until the VAPID key is cached', () => {
@@ -563,7 +563,7 @@ describe('pushNoticeState', () => {
     // not, so "Push notifications on." would be a lie.
     expect(noticeState({ configStatus: 'disabled', isPushSubscribed: () => true })).toEqual({
       kind: 'blocked',
-      reason: PUSH_SERVER_DISABLED,
+      reason: PUSH_RELAY_DISABLED,
     });
   });
 

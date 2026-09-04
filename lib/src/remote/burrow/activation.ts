@@ -5,9 +5,9 @@
  *
  * The Burrow itself is a service in the process that owns the PTYs
  * (`lib/src/host/remote/service.ts`) — the Tauri sidecar, the VS Code extension
- * burrow. This module is its client: it forwards console commands, mirrors the
+ * host. This module is its client: it forwards console commands, mirrors the
  * pairing queue, and reports rings. It starts no Burrow, holds no relay socket,
- * and reads no ACL. A burrow with no service behind it (the website) gets nothing
+ * and reads no ACL. A host with no service behind it (the website) gets nothing
  * at all, which is why every entry point here tolerates a missing link.
  *
  * Enroll from the devtools console:
@@ -41,7 +41,7 @@ export type { BurrowConsoleStatus };
 /** Install the `window.dormouseBurrow` console hook and connect. Idempotent. */
 export function installBurrowConsoleHook(): void {
   const link = getPlatform().burrow;
-  // No service behind this burrow (the website): there is no Burrow to reach, and
+  // No service behind this host (the website): there is no Burrow to reach, and
   // nothing here degrades to a webview-resident one.
   if (link) installBridgeMode(link);
 }

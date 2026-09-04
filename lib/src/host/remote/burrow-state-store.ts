@@ -4,7 +4,7 @@
  * ACL (the authorization primitive, which per the security model lives on the
  * Burrow and nowhere else — docs/specs/remote-security-model.md).
  *
- * The interface is async because the burrows that implement it are: a file the
+ * The interface is async because the hosts that implement it are: a file the
  * sidecar owns here, `VsCodeBurrowStateStore` there (enrollment in
  * `SecretStorage`, ACL in `globalState` — `docs/specs/vscode.md`). {@link FileBurrowStateStore}
  * is the sidecar's: one file, 0600, under a directory the app passes in.
@@ -42,13 +42,23 @@ export interface BurrowStateStore {
 
 const FILE_NAME = 'burrow.json';
 
-/**
- * What this file was called before the Burrow rename. Nothing reads it — it is
- * deleted unread, because it holds a live `burrowToken` and an install upgraded
- * across the rename would otherwise leave that credential on disk forever with
- * no code left that knows the name.
- */
+/** What {@link FILE_NAME} was called before the Burrow rename. */
 const RETIRED_FILE_NAME = 'remote-host.json';
+
+/**
+ * Delete what the rename stranded in `stateDir`. Called once at boot
+ * (`sidecar-entry.ts`), never from a read: the retired file holds a live
+ * `burrowToken`, and an install upgraded across the rename would otherwise keep
+ * that credential on disk with no code left that knows the name.
+ *
+ * **Never fatal** — nothing here is read, so a failure is logged and stepped
+ * over. `docs/specs/security-remote.md` → "Credentials at rest".
+ */
+export async function forgetRetiredState(stateDir: string): Promise<void> {
+  await rm(join(stateDir, RETIRED_FILE_NAME), { force: true }).catch((error: unknown) => {
+    console.warn(`[burrow] could not remove the retired ${RETIRED_FILE_NAME}`, error);
+  });
+}
 
 interface BurrowStateFile {
   version: 1;
@@ -163,12 +173,6 @@ export class FileBurrowStateStore implements BurrowStateStore {
   }
 
   async #readOnce(): Promise<BurrowStateFile> {
-    // Never read, only removed: the retired file's `burrowToken` is a credential
-    // this build can no longer revoke. A failure here is not fatal — the state
-    // this store owns is elsewhere — so it is logged and stepped over.
-    await rm(join(this.#dir, RETIRED_FILE_NAME), { force: true }).catch((error: unknown) => {
-      console.warn(`[burrow] could not remove the retired ${RETIRED_FILE_NAME}`, error);
-    });
     let raw: string;
     try {
       raw = await readFile(this.#path, 'utf8');

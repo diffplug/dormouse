@@ -94,7 +94,7 @@ through `burrowFetch`.
 
 ## Credentials at rest
 
-**Where the `0o700` state directory earns its place.** On a multi-user unix burrow,
+**Where the `0o700` state directory earns its place.** On a multi-user unix host,
 home-directory permissions vary by distro — `0700` on RHEL, `0755` historically on
 Debian, `0750` on Ubuntu since 21.04 — so without an explicit mode, whether a second
 account can read `burrows.json` depends on which distro the selfhoster happened to pick.

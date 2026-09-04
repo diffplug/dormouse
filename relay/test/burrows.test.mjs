@@ -41,7 +41,7 @@ test('enroll happy path returns burrow credentials and policy', async () => {
   assert.equal(res.status, 200);
   // Pinned at enrollment: `e2e` routes on `burrowId`, and `isE2eId` accepts only
   // base64url of 16 bytes — a Burrow of any other shape is one no Client could
-  // ever address (docs/specs/relay.md -> Relay).
+  // ever address (docs/specs/relay.md -> "Routing").
   assert.equal(isE2eId(body.burrowId), true);
   assert.equal(body.burrowId.length, E2E_ID_LENGTH);
   assert.equal(typeof body.burrowToken, 'string');

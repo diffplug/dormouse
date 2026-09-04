@@ -827,9 +827,9 @@ export default function Home() {
               disk, and push keys mint themselves on first boot. Put{" "}
               <code className={SITE_CODE_CLASS}>tailscale serve</code>{" "}
               in front of it and you're done: no Dormouse account or
-              Dormouse-operated cloud. The coordinating server stays on your own
+              Dormouse-operated cloud. The Relay stays on your own
               machine, inside your tailnet. Your laptop decides which phones get
-              notified — the server isn't allowed to choose for it, and the{" "}
+              notified — the Relay isn't allowed to choose for it, and the{" "}
               <a href={sitePath("/docs/security")} className={SITE_LINK_CLASS}>security spec</a>{" "}
               says exactly what that guarantees. The{" "}
               <a href={sitePath("/docs/self-host")} className={SITE_LINK_CLASS}>self-host runbook</a>{" "}
@@ -979,14 +979,14 @@ export default function Home() {
             </h2>
             <p className="mb-7 max-w-3xl text-lg leading-relaxed opacity-70">
               Keep Dormouse free and local, then pay only if you want the
-              coordinating server operated for you or a more natural voice for spoken alerts.
+              Relay operated for you or a more natural voice for spoken alerts.
             </p>
             <div className="grid gap-7 md:grid-cols-2">
               <div>
                 <CloudArrowUpIcon size={26} weight="duotone" className="mb-3 text-[var(--color-caramel)]" aria-hidden="true" />
                 <h3 className="mb-2 font-display text-xl">Managed remote control</h3>
                 <p className="leading-relaxed opacity-70">
-                  Use Pocket without deploying and maintaining the coordinating server.
+                  Use Pocket without deploying and maintaining a Relay.
                   Your terminals still run on your computer.
                 </p>
               </div>

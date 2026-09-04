@@ -11,7 +11,7 @@
  *
  * It lives under `remote/burrow/` rather than `lib/` because it is only meaningful
  * with a Burrow behind it, and because that keeps it inside the lazily-imported
- * `RemotePairingModalHost` chunk — so a burrow that never sets `enableBurrow`
+ * `RemotePairingModalHost` chunk — so a host that never sets `enableBurrow`
  * never fetches it.
  */
 

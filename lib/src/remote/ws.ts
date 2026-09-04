@@ -22,7 +22,7 @@ export interface RemoteWebSocket {
 export type RemoteTimer = (run: () => void, delayMs: number) => () => void;
 
 /** {@link RemoteTimer} over the burrow environment's own `setTimeout`. */
-export const burrowTimer: RemoteTimer = (run, delayMs) => {
+export const realTimer: RemoteTimer = (run, delayMs) => {
   const timer = setTimeout(run, delayMs);
   return () => clearTimeout(timer);
 };

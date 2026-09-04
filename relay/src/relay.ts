@@ -1,5 +1,5 @@
 /**
- * In-memory relay hub; `docs/specs/relay.md` → "Relay" owns its frame gates,
+ * In-memory relay hub; `docs/specs/relay.md` → "Routing" owns its frame gates,
  * Burrow authority, replacement, and routing contracts.
  */
 
@@ -54,7 +54,7 @@ export interface ClientConn {
    * The session that authorized the upgrade. Held so it can be re-checked: the
    * upgrade gate runs once and a socket outlives it, exactly the reason
    * `sweepRevokedBurrows` exists for the other socket kind
-   * (`docs/specs/relay.md` -> Relay).
+   * (`docs/specs/relay.md` -> "Routing").
    */
   readonly session: RelaySession;
   /** The Burrow this client is currently talking to, or `null` if unbound. */
@@ -109,7 +109,7 @@ export class RelayHub {
     return true;
   }
 
-  // --- Burrow lifecycle -------------------------------------------------------
+  // --- Burrow lifecycle ----------------------------------------------------
 
   /**
    * Register a freshly-opened Burrow socket. Only one socket may own a `burrowId`,
@@ -160,7 +160,7 @@ export class RelayHub {
     if (client.burrowId !== burrow.burrowId) return;
     // No `authorized` gate: the relay never learns whether the Burrow authorized
     // anything, so the binding checked above is the whole routing rule
-    // (relay.md -> Relay).
+    // (relay.md -> "Routing").
     this.#toClient(client, {
       t: 'e2e',
       burrowId: burrow.burrowId,
@@ -196,7 +196,7 @@ export class RelayHub {
     }
   }
 
-  // --- Client lifecycle -----------------------------------------------------
+  // --- Client lifecycle ----------------------------------------------------
 
   /** How many Client sockets are live right now. */
   get clientCount(): number {
@@ -225,7 +225,7 @@ export class RelayHub {
    * how many. The `/ws/client` counterpart of {@link RelayHub.closeBurrow}'s
    * sweep: the upgrade gate runs once, so a socket opened a minute before a
    * 12-hour session expires would otherwise relay for the process's lifetime
-   * (`docs/specs/relay.md` -> Relay). Closed with the code and reason the
+   * (`docs/specs/relay.md` -> "Routing"). Closed with the code and reason the
    * upgrade itself uses, so Pocket's recovery is the one it already has.
    */
   closeExpiredClients(now: number): number {
@@ -248,7 +248,7 @@ export class RelayHub {
     // so forwarding it would name a `clientId` the Burrow was told a moment ago
     // was gone — and an `init` in that window would open a fresh ceremony for
     // the session the sweep just expired, which is the whole point of expiring
-    // it (`docs/specs/relay.md` -> Relay).
+    // it (`docs/specs/relay.md` -> "Routing").
     if (this.#clients.get(client.clientId) !== client) return;
     const frame = parseFrame<ClientFrame>(raw);
     if (!frame || typeof frame.t !== 'string') {
@@ -335,7 +335,7 @@ export class RelayHub {
     return burrow;
   }
 
-  // --- Sending --------------------------------------------------------------
+  // --- Sending -------------------------------------------------------------
 
   #toClient(client: ClientConn, frame: RelayToClientFrame): void {
     safeSend(client.socket, frame);

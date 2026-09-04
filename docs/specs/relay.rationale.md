@@ -26,13 +26,13 @@
 
 ## Where a Burrow may reach a Relay (self-host builds)
 
-**The two build-time guards.** A lost esbuild `define` compiles fine, surfacing only as a Burrow quietly using the shipped `*.dormouse.sh` default instead of the selfhoster's origins — a build that looks correct and refuses the only Relay it was meant for, so `assertConnectSrcBaked` greps the emitted bundle for the value. An override outside the grammar (trailing slash, path, bare burrow, foreign scheme, out-of-range port) matches nothing at runtime, so without `resolveRemoteConnectSrc`'s check the build goes green and ships the same silent refusal.
+**The two build-time guards.** A lost esbuild `define` compiles fine, surfacing only as a Burrow quietly using the shipped `*.dormouse.sh` default instead of the selfhoster's origins — a build that looks correct and refuses the only Relay it was meant for, so `assertConnectSrcBaked` greps the emitted bundle for the value. An override outside the grammar (trailing slash, path, bare host, foreign scheme, out-of-range port) matches nothing at runtime, so without `resolveRemoteConnectSrc`'s check the build goes green and ships the same silent refusal.
 
 ## State files
 
 **What an unguarded row costs.** A `burrows.json` row with a null `burrowToken` makes `findByToken`'s digest compare throw, and that lookup runs on every relay upgrade and every push route — so one typo during the *documented* hand-edit revocation becomes a 500 on `/ws/burrow` and on every push endpoint until the file is repaired; dropping the row degrades exactly one burrow's access instead.
 
-**Where `0600` earns its place, and where it does not.** It matters on a multi-user unix burrow: home-directory permissions vary by distro, so without an explicit mode whether a second local account can read `burrows.json` depends on which distro the selfhoster picked. It buys nothing where file modes are not the mechanism — Windows, a container, a database-backed deployment.
+**Where `0600` earns its place, and where it does not.** It matters on a multi-user unix host: home-directory permissions vary by distro, so without an explicit mode whether a second local account can read `burrows.json` depends on which distro the selfhoster picked. It buys nothing where file modes are not the mechanism — Windows, a container, a database-backed deployment.
 
 **Why `burrowId` has one pinned shape.** Every `e2e` envelope routes on it and the QR fragment carries it at a fixed width: another shape is a Burrow the relay admits, no Client can address, and whose codes no phone can parse — un-enrolled is what the person hand-editing the file was reaching for.
 
@@ -70,7 +70,7 @@
 
 **A loopback VAPID subject: measured, not guessed.** Apple answers `403 {"reason":"BadJwtToken"}` — verified against `web.push.apple.com` (2026-08) for `mailto:admin@localhost` and `https://localhost:3000`, while `mailto:admin@example.com` and an ordinary https origin were accepted; the rule is loopback specifically, not reachability of the contact. `web-push` warns only about the https form, at send time, and nothing at all about `mailto:` at `localhost`. The previous default, `mailto:admin@localhost`, let a Relay boot clean, answer 200 on send, and deliver to no iPhone — the one platform the feature targets.
 
-## Relay
+## Routing
 
 **Why the Burrow cannot lean on the Relay's shape guard.** Trusting the relay's own `isE2eClientFrame` would take a relay-supplied object on faith where that is least acceptable: the routing values it uses as map keys, and the ciphertext it is about to spend WebCrypto on. The relay's copy keeps a bad frame off the wire; the Burrow's exists because the model does not trust the relay.
 

@@ -26,7 +26,7 @@ import type {
   PeerSurfaceResult,
 } from '../../lib/src/remote/burrow/peer-surfaces';
 import {
-  MAX_SERVER_TO_BURROW_FRAME_LENGTH,
+  MAX_RELAY_TO_BURROW_FRAME_LENGTH,
   type WebSocketLike,
 } from '../../lib/src/remote/burrow/burrow-runtime';
 import type { ExtensionMessage } from './message-types';
@@ -193,7 +193,7 @@ export function notifyDirectoryChanged(): void {
  *
  * `globalThis.WebSocket` only landed in Node 22, and `engines.vscode` here is
  * `^1.85.0` — VS Code 1.85 shipped Electron 25 / Node 18, and the supported
- * range spans the boundary — so on an older burrow there is no global to use and
+ * range spans the boundary — so on an older host there is no global to use and
  * the bundled `ws` is the only implementation. Its socket satisfies the same
  * surface `BurrowRuntime` reads and nothing more: `send`, `close`, `readyState`,
  * `addEventListener`, with `message` events carrying `.data` and `close` events
@@ -212,7 +212,7 @@ export function createRelaySocket(url: string): WebSocketLike {
   const global = globalThis.WebSocket;
   if (global) return new global(url) as unknown as WebSocketLike;
   const Ws = (require('ws') as typeof import('ws')).WebSocket;
-  return new Ws(url, { maxPayload: MAX_SERVER_TO_BURROW_FRAME_LENGTH }) as unknown as WebSocketLike;
+  return new Ws(url, { maxPayload: MAX_RELAY_TO_BURROW_FRAME_LENGTH }) as unknown as WebSocketLike;
 }
 
 function startService(): void {
@@ -221,7 +221,7 @@ function startService(): void {
   service = new BurrowService({
     store: burrowStateStore(context),
     provider: createBurrowProvider(bound),
-    appName: APP_NAME,
+    kind: 'vscode',
     createWebSocket: createRelaySocket,
     sendToUi: (event, data) => {
       if (event === BURROW_RESULT_EVENT) {
@@ -273,7 +273,7 @@ onPeerLinkSettled(() => drainQueuedCommands());
 
 /**
  * Which window is owed each in-flight answer, for the commands that came over
- * the link. An `burrowRequestId` is minted with a per-adapter random tag, so it is unique
+ * the link. A `burrowRequestId` is minted with a per-adapter random tag, so it is unique
  * across every window and needs no second correlation id of its own.
  *
  * Only the broker ever has entries: a client window forwards rather than runs.
@@ -282,12 +282,6 @@ const commandRoutes = new Map<string, PeerLinkClient>();
 
 const NO_BURROW = 'no Burrow is reachable';
 
-/**
- * What Pocket calls this Burrow's app, so a laptop running both this and
- * standalone lists two distinguishable rows (`service.ts` →
- * `suggestedBurrowLabel`).
- */
-const APP_NAME = 'VS Code';
 
 /**
  * Deliver one result to whoever is owed it — the one window that forwarded the
@@ -490,7 +484,7 @@ async function idleStatus(): Promise<BurrowConsoleStatus> {
   // The snapshot itself is the service's own builder, so the two answers to the
   // same question — including the offer's origin-only projection — cannot drift.
   // `readEnrollmentOffer` never rejects (its own doc), hence no guard here.
-  return unenrolledStatus(await readEnrollmentOffer(), APP_NAME);
+  return unenrolledStatus(await readEnrollmentOffer(), 'vscode');
 }
 
 /** Refuse one command — or answer it as an idle service would ({@link idleAnswer}). */

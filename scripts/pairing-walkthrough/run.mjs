@@ -134,7 +134,7 @@ async function main(live) {
     );
   }
   opts.vitePort = await findFreePort(15540);
-  opts.burrowPort = await findFreePort(opts.vitePort + 1);
+  opts.hostPort = await findFreePort(opts.vitePort + 1);
   opts.session = `pairing-walkthrough-${stamp}`;
   const scenario = SCENARIOS[opts.scenario];
 
@@ -206,7 +206,7 @@ async function main(live) {
   ctx.record({ relayOrigin: ctx.relayOrigin });
   console.log(`[walkthrough] run directory: ${runDir}`);
   console.log(`[walkthrough] scenario ${opts.scenario}: ${scenario.expect}`);
-  console.log(`[walkthrough] server ${ctx.relayOrigin} · vite ${ctx.viteOrigin} · bridge :${opts.burrowPort}`);
+  console.log(`[walkthrough] relay ${ctx.relayOrigin} · vite ${ctx.viteOrigin} · bridge :${opts.hostPort}`);
   console.log(`[walkthrough] agent-browser session: ${opts.session}`);
 
   const lastIndex = scenario.steps.findIndex((step) => step.name === opts.until);

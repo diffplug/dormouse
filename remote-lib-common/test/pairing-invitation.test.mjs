@@ -194,7 +194,7 @@ test('the parser refuses a URL that is not this app, served over HTTPS, at the r
   }
 });
 
-test('plain HTTP is accepted on a loopback burrow, and nowhere else', async () => {
+test('plain HTTP is accepted on a loopback host, and nowhere else', async () => {
   // The documented dev loop serves Pocket on `http://localhost:3000`, which is
   // a secure context by the platform's own rule — the same exemption WebAuthn
   // and service workers get. Every other plain-HTTP origin stays refused.

@@ -25,7 +25,11 @@ import type {
 } from '../../remote/burrow/burrow-surface-provider';
 import { createAskSurfaceProvider } from './ask-surface-provider';
 import { bakedConnectSrc } from './connect-src';
-import { createEphemeralBurrowStateStore, FileBurrowStateStore } from './burrow-state-store';
+import {
+  createEphemeralBurrowStateStore,
+  FileBurrowStateStore,
+  forgetRetiredState,
+} from './burrow-state-store';
 import { BurrowService } from './service';
 import {
   ASK_BUDGET_MS,
@@ -310,13 +314,6 @@ export function createSidecarSurfaceBridge(
   };
 }
 
-/**
- * What Pocket calls this Burrow's app, so a laptop running both this and the VS
- * Code extension lists two distinguishable rows (`service.ts` →
- * `suggestedBurrowLabel`).
- */
-const APP_NAME = 'Dormouse';
-
 export interface SidecarBurrowOptions extends SidecarSurfaceBridgeOptions {
   /**
    * Where the enrollment + ACL file lives. The browser dev harness passes a
@@ -339,13 +336,16 @@ export function createSidecarBurrow(options: SidecarBurrowOptions): SidecarBurro
   const store = options.stateDir
     ? new FileBurrowStateStore(options.stateDir)
     : createEphemeralBurrowStateStore((message) => console.error(message));
+  // Boot work, not read work: nothing waits on it, and nothing reads what it
+  // deletes (`burrow-state-store.ts`).
+  if (options.stateDir) void forgetRetiredState(options.stateDir);
 
   const bridge = createSidecarSurfaceBridge(options);
 
   const service = new BurrowService({
     store,
     provider: bridge.provider,
-    appName: APP_NAME,
+    kind: 'standalone',
     sendToUi: options.send,
     connectSrc: bakedConnectSrc(),
   });

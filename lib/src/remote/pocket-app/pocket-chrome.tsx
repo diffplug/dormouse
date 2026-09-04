@@ -61,7 +61,7 @@ export const PK = {
   // scrollable, and accepted, because a plain `justify-center` fallback would
   // reintroduce the unreachable overflow on exactly the devices that lack it.
   bodyCenter: 'justify-center-safe',
-  wallBurrow: 'flex min-h-0 flex-1 flex-col',
+  wallHost: 'flex min-h-0 flex-1 flex-col',
   // Burrow row = the INACTIVE header pair (a list item lifted off the page).
   row: 'flex w-full items-center gap-3 rounded-lg bg-header-inactive-bg px-3.5 py-3 text-left text-header-inactive-fg',
   rowOffline: 'opacity-55', // presence = intensity, no extra color

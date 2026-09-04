@@ -48,7 +48,7 @@ import {
   type TestAuthenticator,
 } from '../test-e2e-client';
 
-const ORIGIN = 'https://burrow.example';
+const ORIGIN = 'https://burrow-machine.example';
 const RP_ID = 'burrow.example';
 const BURROW_LABEL = 'Ned’s laptop';
 const ACCOUNT = 'owner';

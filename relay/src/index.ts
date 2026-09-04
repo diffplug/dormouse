@@ -133,7 +133,7 @@ if (runtimeFile !== null) {
   }
 }
 
-// Bind the relay's WS upgrade handler onto the running Relay (@hono/node-ws).
+// Bind the relay's WS upgrade handler onto the running HTTP server (@hono/node-ws).
 injectWebSocket(server);
 
 // Revocation is hand-editing `burrows.json`, and the `/ws/burrow` token is checked
@@ -149,7 +149,7 @@ setInterval(() => {
 
 // The socket-level sweep, on the same terms and for the same reason: the
 // `/ws/client` session is checked once at the upgrade, and a half-open TCP
-// connection closes nothing on its own (`docs/specs/relay.md` -> Relay). It
+// connection closes nothing on its own (`docs/specs/relay.md` -> "Routing"). It
 // touches no disk, so it runs far more often and cannot throw.
 setInterval(() => {
   sweepRelaySockets();

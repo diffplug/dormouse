@@ -98,7 +98,7 @@ webview, where `TauriAdapter` converts dor control requests into the
 ### Burrow service
 
 The Burrow — relay socket, enrollment, ACL, pairing ceremony, remote-api v1
-— runs **in the sidecar**, never the webview (`docs/specs/relay.md` → "Host
+— runs **in the sidecar**, never the webview (`docs/specs/relay.md` → "Burrow
 side", which owns that split and what the webview keeps): the same
 `BurrowService` the VS Code extension host runs, bound by
 `lib/src/host/remote/sidecar-entry.ts` and bundled to `sidecar/burrow.cjs`
@@ -507,7 +507,7 @@ Source of truth: `standalone/package.json` (package scripts),
   for self-host relay origins is baked into the sidecar's burrow bundle by
   `build-sidecar-proxy.mjs` — the Burrow runs in the sidecar, so the webview CSP has
   no relay sources at all, which `standalone/scripts/tauri-conf.test.mjs` asserts
-  against `tauri.conf.json` (`docs/specs/relay.md`, "Where a Host may reach a
+  against `tauri.conf.json` (`docs/specs/relay.md`, "Where a Burrow may reach a
   Relay").
 - The Tauri bundle ships the whole sidecar via the `../sidecar/**/*` resources
   glob — including node-pty's prebuilds + bundled ConPTY and the

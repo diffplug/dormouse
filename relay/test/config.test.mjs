@@ -52,13 +52,13 @@ test('DORMOUSE_ORIGIN is normalized to a bare origin', () => {
   assert.equal(shouted.origin, 'https://dor.example.ts.net');
 });
 
-test('a DORMOUSE_ORIGIN that is not a URL with a burrow is a ConfigError', () => {
+test('a DORMOUSE_ORIGIN that is not a URL with a host is a ConfigError', () => {
   assert.throws(() => readConfig({ DORMOUSE_ORIGIN: 'dor.example.ts.net' }), ConfigError);
   assert.throws(() => readConfig({ DORMOUSE_ORIGIN: 'mailto:ned@example.com' }), ConfigError);
 });
 
 test('a DORMOUSE_ORIGIN on a non-web scheme is a ConfigError', () => {
-  // `ws://…` reduces to a bare origin, so "absolute URL with a burrow" passes it
+  // `ws://…` reduces to a bare origin, so "absolute URL with a host" passes it
   // — and the Relay would boot on an origin no browser can ever send as
   // `clientData.origin`, failing every WebAuthn check with a config that reads
   // as correct.

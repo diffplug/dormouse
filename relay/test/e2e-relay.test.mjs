@@ -1,6 +1,6 @@
 /**
  * The `e2e` relay envelope driven end to end through the real Relay
- * (docs/specs/relay.md -> Relay): one Noise IK ceremony between a fake Client
+ * (docs/specs/relay.md -> "Routing"): one Noise IK ceremony between a fake Client
  * and a fake Burrow, with both statics injected by the test.
  *
  * What it proves, in the order the scope asks for it
