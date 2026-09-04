@@ -47,8 +47,9 @@ only `browserSurfaceUrl` behind an open prompt, and a frame-URL reading that may
 lie. `use-wall-keyboard`'s leader channel accepts any live grant rather than one
 panel's, so a page in one browser pane can exit passthrough while another is
 focused. The nested-frame relay preserves this boundary: it accepts only the
-same proxy origin and reconstructs one of those four shapes, so unrelated
-application messages and every foreign origin stop at the child frame.
+same proxy origin and reconstructs one of the three pane-level shapes, so
+document-level locations, unrelated application messages, and every foreign
+origin stop at the child frame.
 
 Why "the standalone adapters" and not "the standalone webview". The Wall's two
 proxy-origin `message` listeners (`use-wall-keyboard.ts`, `IframePanel.tsx`) are

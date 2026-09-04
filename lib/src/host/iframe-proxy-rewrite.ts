@@ -84,9 +84,10 @@ export function frameAncestorsCsp(embedderOrigins: string[]): string {
 // this is why the upstream CSP is dropped whole rather than per-directive (an
 // inline script needs `script-src` gone as much as the frame needs
 // `frame-ancestors` gone). It posts four message kinds to the Wall and nothing
-// else (every other keystroke flows to the tool). A nested document relays them
-// through its same-origin proxy parents until the outer document reaches the
-// app:
+// else (every other keystroke flows to the tool). A nested document relays the
+// three pane-level kinds through its same-origin proxy parents until the outer
+// document reaches the app; its document-level location stays inside the outer
+// frame:
 //   - `leader`: the reserved dual-tap ⌘/⇧ chord (matching handle-dual-tap.ts),
 //     so the global chord keeps working with the frame focused.
 //   - `pointerdown`: a click landed in the frame. A cross-origin click reaches
@@ -105,15 +106,16 @@ export function iframeShim(embedderOrigin: string): string {
   if(!P||P===window)return;
   // Address each hop to the proxy's own origin and the app origin, never '*'.
   // Exactly one matches: a nested frame reaches its same-origin parent, while
-  // the outer frame reaches the app. Relays accept only the four fixed shapes
-  // below, so unrelated same-origin application messages never escape.
+  // the outer frame reaches the app. Relays accept only the three pane-level
+  // shapes below, so unrelated same-origin application messages and a nested
+  // document's location never escape.
   function send(m){try{P.postMessage(m,location.origin);}catch(e){}try{P.postMessage(m,TARGET);}catch(e){}}
   function post(t,d){var m={__dormouse:t};if(d)for(var k in d)m[k]=d[k];send(m);}
   addEventListener('message',function(e){
     if(e.origin!==location.origin)return;
     var d=e.data,t=d&&d.__dormouse;
     if(t==='leader'||t==='pointerdown')post(t);
-    else if((t==='location'||t==='open-window')&&typeof d.url==='string')post(t,{url:d.url});
+    else if(t==='open-window'&&typeof d.url==='string')post(t,{url:d.url});
   },true);
   function postLocation(){post('location',{url:String(location.href)});}
   function anchorHref(e){

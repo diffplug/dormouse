@@ -105,7 +105,7 @@ describe('the shim addresses the grant and app, not the world', () => {
     expect(IFRAME_SHIM).not.toContain("postMessage(m,'*')");
   });
 
-  it('relays registered messages through same-origin nested frames', () => {
+  it('relays pane-level messages but not nested locations through same-origin frames', () => {
     const delivered: unknown[] = [];
     const outer = shimFrame(APP, (data) => delivered.push(data));
     const inner = shimFrame(PROXY, (data) => outer.emit('message', { origin: PROXY, data }));
@@ -121,7 +121,13 @@ describe('the shim addresses the grant and app, not the world', () => {
       origin: PROXY,
       data: { __dormouse: 'location', url: `${PROXY}/next`, secret: 'x' },
     });
-    expect(delivered[1]).toEqual({ __dormouse: 'location', url: `${PROXY}/next` });
+    expect(delivered).toHaveLength(1);
+
+    outer.emit('message', {
+      origin: PROXY,
+      data: { __dormouse: 'open-window', url: `${PROXY}/next`, secret: 'x' },
+    });
+    expect(delivered[1]).toEqual({ __dormouse: 'open-window', url: `${PROXY}/next` });
   });
 });
 

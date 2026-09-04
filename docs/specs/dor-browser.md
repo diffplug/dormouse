@@ -481,14 +481,13 @@ Source of truth: `lib/src/components/wall/IframePanel.tsx`,
 
 ### Iframe Shim
 
-**Must relay only these fixed, never-user-provided shim messages through
-same-origin proxy parents to the app:**
+**Must send these fixed, never-user-provided shim messages to the app:**
 
-- `leader`: dual-tap Meta/Shift leader chord.
-- `pointerdown`: genuine click inside the frame, used to select/focus the pane.
-- `location`: same-frame navigation after history/hash/page events, and after a
-  same-frame anchor click the page did not cancel.
-- `open-window`: intercepted `target=_blank` anchor or `window.open` URL.
+- `leader`: dual-tap Meta/Shift leader chord; relayed from nested documents.
+- `pointerdown`: genuine click, used to select/focus the pane; relayed.
+- `location`: outer-document history/hash/page events and uncancelled same-frame
+  anchor clicks; never relayed from nested documents.
+- `open-window`: intercepted `target=_blank` anchor or `window.open` URL; relayed.
 
 **A URL from the frame is re-checked before it becomes a pane.** `open-window`
 and the control socket's `surface.iframe` both go through `browserSurfaceUrl`;
@@ -562,8 +561,8 @@ Security boundaries:
 
 **Must replace framing controls with exactly `frame-ancestors 'self'
 <validated embedder chain>`.** `'self'` permits same-grant nesting; foreign
-ancestors fail. **Each shim hop must target only `'self'` and that chain's
-origin, never `'*'`** (rationale; `docs/specs/security-local.md` →
+ancestors fail. **Each shim hop must target only its origin and that chain's
+innermost origin, never `'*'`** (rationale; `docs/specs/security-local.md` →
 "Loopback Listeners"). **With no chain it preserves headers and injects nothing.**
 
 **Must refresh a grant's idle timer for every caller except one that named itself
