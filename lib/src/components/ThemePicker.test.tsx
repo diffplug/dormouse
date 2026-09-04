@@ -59,9 +59,12 @@ describe('ThemePicker', () => {
 
     act(() => trigger.click());
     const menu = container.querySelector<HTMLDivElement>('[role="menu"]')!;
-    expect(menu.style.position).toBe('fixed');
+    expect(menu.style.position).toBe('absolute');
+    expect(menu.style.right).toBe('0px');
+    expect(menu.style.top).toBe('calc(100% + 4px)');
     expect(menu.style.width).toBe('280px');
     expect(menu.style.maxHeight).toContain('100dvh - 24px');
+    expect(menu.style.maxHeight).toContain('min(');
     expect(menu.style.display).toBe('flex');
   });
 

@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties, type RefObject } from 'react';
 import { MODAL_LAYERS, useMeasuredElementRect } from './design';
-import { clampOverlayPosition } from '../lib/ui-geometry';
+import { clampOverlayPosition, OVERLAY_VIEWPORT_MARGIN_PX } from '../lib/ui-geometry';
 
 /** Gap between the trigger's bottom edge and the top of the menu. */
 const MENU_GAP_PX = 4;
@@ -19,15 +19,15 @@ interface AnchoredMenuOptions {
  * `transform`. The menu's own rect feeds the viewport clamp, so a long list
  * can't run off the bottom of a short window — it is 0 on the first pass, which
  * is why the returned style keeps the menu hidden until it has been measured.
- * Any height cap belongs on the panel, not in this style.
+ * The returned height cap also reserves the real space between the trigger and
+ * the viewport edge; a full-viewport cap alone is too tall once the panel starts
+ * below the top edge.
  *
  * The style also carries the stacking (`MODAL_LAYERS.app`): inside the Settings
  * dialog the alarm sections' `opacity-50` wrappers are stacking contexts too,
  * and being later in tree order they would otherwise paint through the menu.
  *
- * `open` gates the measurement, so pass `false` for a variant that positions
- * itself some other way (`ThemePicker`'s free-floating `compact`) and ignore
- * `menuStyle` there — such a variant owns its own stacking.
+ * `open` gates the measurement so closed pickers do not keep observers alive.
  */
 export function useAnchoredMenu(
   open: boolean,
@@ -44,9 +44,25 @@ export function useAnchoredMenu(
   const triggerRect = useMeasuredElementRect(open ? triggerEl : null);
   const menuRect = useMeasuredElementRect(open ? menuEl : null);
 
+  const availableHeight = triggerRect
+    ? Math.max(
+        0,
+        side === 'above'
+          ? triggerRect.top - MENU_GAP_PX - OVERLAY_VIEWPORT_MARGIN_PX
+          : window.innerHeight
+            - (triggerRect.top + triggerRect.height + MENU_GAP_PX)
+            - OVERLAY_VIEWPORT_MARGIN_PX,
+      )
+    : null;
+
   const menuStyle: CSSProperties = {
     width: widthPx,
     zIndex: MODAL_LAYERS.app,
+    ...(availableHeight === null
+      ? null
+      : {
+          maxHeight: `min(var(--overlay-max-h-popover, calc(100dvh - 24px)), ${availableHeight}px)`,
+        }),
     ...(triggerRect && menuRect
       ? clampOverlayPosition({
           left: align === 'end'

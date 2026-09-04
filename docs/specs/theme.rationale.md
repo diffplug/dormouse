@@ -46,4 +46,6 @@ showed the stored theme.
 
 **Why the picker row's `X` keeps a gap from the select target.** The two paths above do not recover symmetrically: `Remove` leaves the extension row on screen to re-install, while the `X` means re-finding the extension through an OpenVSX search. The gap prices in the harder undo.
 
-**Why a story, not a unit test, pins the short-viewport cap.** The cap is a computed height under real layout, invisible to jsdom; a unit test asserting the class list would fail on any equivalent restyle and pass on real breakage. `lib/src/components/design.test.ts` pins the cap to its constants, the Chromatic story the rendered result.
+**Why a story, not a unit test, pins the short-viewport cap.** The cap includes the measured space left on the requested side of the trigger under real layout, which jsdom cannot represent; a unit test asserting classes would fail on an equivalent restyle and pass on real breakage. `lib/src/components/design.test.ts` pins the viewport inset, the Chromatic story the rendered result.
+
+**Why `compact` anchors absolutely.** Chromium offsets a fixed descendant of the docs' sticky mobile bar by that containing block; the dialog variants need fixed positioning to escape their scroll container, while the compact mounts do not.

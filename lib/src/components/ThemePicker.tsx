@@ -136,7 +136,22 @@ export function ThemePicker({
   // Critical geometry is inline and owned by the component. The docs website
   // consumes raw library JSX without the lib stylesheet, so utility classes
   // alone cannot carry the viewport cap, stacking, or flex-shrink contract.
-  const panelStyle = { ...styles.panel, ...menuStyle };
+  // Compact stays absolute to its trigger: a fixed descendant of the docs'
+  // sticky mobile bar is offset by that containing block in Chromium.
+  const compactMenuStyle = {
+    width: menuStyle.width,
+    zIndex: menuStyle.zIndex,
+    maxHeight: menuStyle.maxHeight,
+    position: 'absolute',
+    right: 0,
+    ...(menuSide === 'above'
+      ? { bottom: 'calc(100% + 4px)' }
+      : { top: 'calc(100% + 4px)' }),
+  } satisfies React.CSSProperties;
+  const panelStyle = {
+    ...styles.panel,
+    ...(inDialog ? menuStyle : compactMenuStyle),
+  };
 
   return (
     <div ref={rootRef} className="relative flex items-center">
@@ -157,9 +172,8 @@ export function ThemePicker({
         <CaretDownIcon size={10} weight="bold" className="shrink-0 opacity-65" aria-hidden="true" />
       </button>
 
-      {/* z-50 is here for `compact`, which ignores `menuStyle` and so gets no
-          stacking from `useAnchoredMenu` (the dialog variant takes it from
-          there, and the class is a harmless restatement). */}
+      {/* The class is a harmless fallback; inline geometry owns the panel in
+          hosts that do not compile the library's utilities. */}
       {open ? (
         <div
           ref={setMenuEl}

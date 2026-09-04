@@ -208,9 +208,10 @@ playground navbar — carries none**.
   (`DESIGN.md` → "Don't"; rationale). Uninstalling is a single click, matching
   `WatchedCommandList`'s remove control in the same dialog, and **the picker
   row's `X` keeps a gap from the row's select target** (rationale).
-- **The dropdown renders `position: fixed`, anchored off the measured trigger
-  rect and clamped to the viewport**, because an ancestor may clip an absolute
-  one; it closes on scroll. Anchoring and dismissal are shared with the dialog's
+- **Dialog dropdowns render `position: fixed`, anchored off the measured
+  trigger rect and clamped to the viewport; `compact` renders `position:
+  absolute` off its trigger.** Both cap to the remaining space on the requested
+  side and close on scroll. Anchoring and dismissal are shared with the dialog's
   Shell row. **The dialog owns the dropdown's open
   state** so `Escape` closes the menu before the dialog; `ModalFrame`'s
   capture-phase handler would otherwise swallow the key.
