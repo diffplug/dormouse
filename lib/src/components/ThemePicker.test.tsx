@@ -25,6 +25,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -65,6 +66,17 @@ describe('ThemePicker', () => {
   });
 
   it('opens the compact menu upward when asked, off the same edge', () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      x: 700,
+      y: 700,
+      top: 700,
+      left: 700,
+      width: 60,
+      height: 20,
+      right: 760,
+      bottom: 720,
+      toJSON: () => ({}),
+    });
     const menu = openCompact({ menuSide: 'above' });
     expect(menu.style.bottom).toBe('calc(100% + 4px)');
     expect(menu.style.top).toBe('');

@@ -116,7 +116,7 @@ export function NotifySignupForm({
         >
           nedshed.dev
         </a>{" "}
-        on Substack. I’ll announce {announcement} there; you can unsubscribe any time.
+        and I’ll announce {announcement} there; you can unsubscribe any time.
       </p>
     </>
   );

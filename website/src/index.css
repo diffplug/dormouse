@@ -51,6 +51,7 @@ body {
      composite in `TINTED_DOCS_SURFACES` and its fallback. */
   --docs-card-text-muted: #787878;
   --docs-note-text-muted: #7b7977;
+  --docs-code-text-muted: #898989;
 }
 
 html {

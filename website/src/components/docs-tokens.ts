@@ -43,6 +43,9 @@ export const CARD_MUTED_TEXT_CLASS = "text-[var(--docs-card-text-muted)]";
 /** Opaque secondary text corrected for `NOTE_CLASS`'s caramel tint. */
 export const NOTE_MUTED_TEXT_CLASS = "text-[var(--docs-note-text-muted)]";
 
+/** Opaque secondary text corrected for an inline code span's foreground tint. */
+export const CODE_MUTED_TEXT_CLASS = "text-[var(--docs-code-text-muted)]";
+
 /**
  * How far a jumped-to anchor clears the chrome above it.
  *
@@ -67,7 +70,7 @@ export const TOC_INDENT_CLASS = "border-l border-[var(--color-text)]/15 pl-3";
  *  separator breaks: a token with no separator at all must still not push the
  *  page wider than the viewport. */
 export const CODE_CLASS =
-  "text-[0.9em] bg-[var(--color-text)]/15 px-1.5 py-0.5 rounded font-mono break-words";
+  `text-[0.9em] bg-[var(--color-text)]/15 px-1.5 py-0.5 rounded font-mono break-words ${CODE_MUTED_TEXT_CLASS}`;
 
 /** A panel of prose set off from the flow — `PRE_CLASS`'s tint without the
  *  monospace. `CARD_ACCENT_CLASS` is the variant that draws attention with the
@@ -101,6 +104,7 @@ export const NOTE_CLASS =
 export const TINTED_DOCS_SURFACES = [
   { token: "--docs-card-text-muted", tintVar: "--color-text", tintAlpha: 0.04 },
   { token: "--docs-note-text-muted", tintVar: "--color-caramel", tintAlpha: 0.06 },
+  { token: "--docs-code-text-muted", tintVar: "--color-text", tintAlpha: 0.15 },
 ] as const;
 
 /** Reference body prose: the shared size, leading, and muted colour. Callers

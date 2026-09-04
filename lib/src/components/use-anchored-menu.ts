@@ -6,7 +6,7 @@ import { clampOverlayPosition, OVERLAY_VIEWPORT_MARGIN_PX } from '../lib/ui-geom
 const MENU_GAP_PX = 4;
 
 interface AnchoredMenuOptions {
-  /** Which side of the trigger the menu opens toward. */
+  /** Which side of the trigger the menu prefers. */
   side?: 'above' | 'below';
   /** Which of the menu's edges lines up with the trigger's matching edge. */
   align?: 'start' | 'end';
@@ -30,11 +30,11 @@ interface AnchoredMenuOptions {
  * The returned style is the menu's whole geometry — width, stacking, height
  * cap, and placement — so no caller re-implements placement beside it.
  *
- * The height cap reserves the real space between the trigger and the viewport
- * edge; a full-viewport cap alone is too tall once the panel starts below the
- * top edge. Under `fixed` the menu's own rect also feeds the viewport clamp, so
- * a long list can't run off the bottom of a short window — it is unmeasured on
- * the first pass, which is why the style keeps the menu hidden until then.
+ * The height cap reserves the roomier side of the trigger, flipping away from
+ * the preferred side when needed; a full-viewport cap alone is too tall once
+ * the panel starts below the top edge. Under `fixed` the menu's own rect feeds
+ * the final viewport clamp. It is unmeasured on the first pass, which is why
+ * the style keeps the menu hidden until then.
  *
  * The style also carries the stacking (`MODAL_LAYERS.app`): inside the Settings
  * dialog the alarm sections' `opacity-50` wrappers are stacking contexts too,
@@ -58,15 +58,49 @@ export function useAnchoredMenu(
   const triggerRect = useMeasuredElementRect(open ? triggerEl : null);
   const menuRect = useMeasuredElementRect(open && strategy === 'fixed' ? menuEl : null);
 
-  const availableHeight = triggerRect
-    ? Math.max(
-        0,
-        side === 'above'
-          ? triggerRect.top - MENU_GAP_PX - OVERLAY_VIEWPORT_MARGIN_PX
-          : window.innerHeight
+  // `useMeasuredElementRect` deliberately preserves its object when a resize
+  // leaves the element fixed in place. The geometry below still depends on the
+  // viewport, so subscribe independently instead of relying on a coincidental
+  // rect allocation. `visualViewport` covers mobile browser chrome and the
+  // on-screen keyboard on engines that report those separately.
+  const [, setViewportRevision] = useState(0);
+  useEffect(() => {
+    if (!open) return;
+    const update = () => setViewportRevision((revision) => revision + 1);
+    window.addEventListener('resize', update);
+    window.visualViewport?.addEventListener('resize', update);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.visualViewport?.removeEventListener('resize', update);
+    };
+  }, [open]);
+
+  const space = triggerRect
+    ? {
+        above: Math.max(0, triggerRect.top - MENU_GAP_PX - OVERLAY_VIEWPORT_MARGIN_PX),
+        below: Math.max(
+          0,
+          window.innerHeight
             - (triggerRect.top + triggerRect.height + MENU_GAP_PX)
             - OVERLAY_VIEWPORT_MARGIN_PX,
+        ),
+      }
+    : null;
+  const otherSide = side === 'above' ? 'below' : 'above';
+  const resolvedSide = space && space[otherSide] > space[side] ? otherSide : side;
+  // If a malformed/off-screen trigger leaves no room on either side, fixed
+  // placement can still clamp a usable panel over it; never collapse to 0px.
+  const availableHeight = space
+    ? Math.max(
+        space.above,
+        space.below,
+        space.above === 0 && space.below === 0
+          ? window.innerHeight - OVERLAY_VIEWPORT_MARGIN_PX * 2
+          : 0,
       )
+    : null;
+  const effectiveMenuHeight = menuRect && availableHeight !== null
+    ? Math.min(menuRect.height, availableHeight)
     : null;
 
   const placement: CSSProperties =
@@ -74,20 +108,20 @@ export function useAnchoredMenu(
       ? {
           position: 'absolute',
           ...(align === 'end' ? { right: 0 } : { left: 0 }),
-          ...(side === 'above'
+          ...(resolvedSide === 'above'
             ? { bottom: `calc(100% + ${MENU_GAP_PX}px)` }
             : { top: `calc(100% + ${MENU_GAP_PX}px)` }),
         }
-      : triggerRect && menuRect
+      : triggerRect && menuRect && effectiveMenuHeight !== null
         ? clampOverlayPosition({
             left: align === 'end'
               ? triggerRect.left + triggerRect.width - widthPx
               : triggerRect.left,
-            top: side === 'above'
-              ? triggerRect.top - menuRect.height - MENU_GAP_PX
+            top: resolvedSide === 'above'
+              ? triggerRect.top - effectiveMenuHeight - MENU_GAP_PX
               : triggerRect.top + triggerRect.height + MENU_GAP_PX,
             width: widthPx,
-            height: menuRect.height,
+            height: effectiveMenuHeight,
           })
         : { position: 'fixed', visibility: 'hidden' };
 

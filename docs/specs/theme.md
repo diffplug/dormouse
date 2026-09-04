@@ -218,8 +218,9 @@ playground navbar — carries none**.
 - **`useAnchoredMenu` returns a dropdown's whole geometry; a caller never
   re-implements placement beside it.** Dialog dropdowns take its measured,
   viewport-clamped `fixed` strategy; `compact` takes `absolute`, which measures
-  nothing (rationale). Both cap to the space left on the requested `side`,
-  close on scroll, and share dismissal with the Shell row. **The dialog owns
+  nothing (rationale). Both prefer the requested `side`, flip to the roomier
+  side, and recompute their cap when the trigger, menu, or viewport changes.
+  They close on scroll and share dismissal with the Shell row. **The dialog owns
   the open state** so `Escape` closes the menu first, which `ModalFrame`'s
   capture-phase handler would otherwise swallow.
 - **Heights follow the viewport, never a fixed pixel budget**: both surfaces cap
