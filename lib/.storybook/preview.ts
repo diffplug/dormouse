@@ -31,9 +31,9 @@ import {
 } from '../src/lib/alert-speech-state';
 import { VSCODE_THEMES, VSCODE_THEME_TYPES } from './themes';
 import {
-  makeStubRemoteHostLink,
-  type PrimedRemoteHost,
-} from '../src/host/remote/test-remote-host-link';
+  makeStubBurrowLink,
+  type PrimedBurrow,
+} from '../src/host/remote/test-burrow-link';
 import { cfg } from '../src/cfg';
 import type { DormouseTheme } from '../src/lib/themes';
 import { clearPersistedShellSelection, seedShellStore } from '../src/lib/shell-store';
@@ -276,14 +276,14 @@ const preview: Preview = {
       // section, which renders nothing without a Host service behind the
       // webview (`docs/specs/relay.md`). Absent is the honest default for a
       // fake platform, so only the stories about that section prime a stub.
-      // Read during render like the two above: the store reads `remoteHost`
+      // Read during render like the two above: the store reads `burrow`
       // when the section first subscribes, which is after this decorator's
       // render body and before any effect.
-      const primedRemoteHost = context.parameters?.primedRemoteHost as
-        | PrimedRemoteHost
+      const primedBurrow = context.parameters?.primedBurrow as
+        | PrimedBurrow
         | undefined;
-      platform.remoteHost = primedRemoteHost
-        ? makeStubRemoteHostLink(primedRemoteHost)
+      platform.burrow = primedBurrow
+        ? makeStubBurrowLink(primedBurrow)
         : undefined;
 
       // Installed themes normally arrive from OpenVSX and live in localStorage,
@@ -331,7 +331,7 @@ const preview: Preview = {
           // resets every field it does not name.
           applyAlertSettingsFromHost(primedAlertSettings);
           // The push-device list is renderer-only derived state normally written
-          // by the remote Host, which no story runs — so a story that wants the
+          // by the Burrow, which no story runs — so a story that wants the
           // Alarm dialog's device line names one, and every other story resets
           // to `no-host`.
           setPushDevices(primedPushDevices ?? { status: 'no-host', devices: [] });

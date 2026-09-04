@@ -2,7 +2,7 @@
  * A session-scoped `agent-browser` wrapper for the pairing walkthrough
  * (`scripts/pairing-walkthrough/README.md`).
  *
- * One instance is one `--session`, which is one isolated browser. The Host runs
+ * One instance is one `--session`, which is one isolated browser. The Burrow runs
  * in the session the `dev:standalone:ab` harness opened; the Pocket browser is a
  * second instance with its own session name, which is why this is a class rather
  * than a module of free functions.
@@ -132,7 +132,7 @@ export class AgentBrowser {
    * this issues and re-checks rather than trusting the first one.
    *
    * **Checks before it opens**, because `open` on a live page is a real
-   * navigation: when the Host harness has already put the app there, opening
+   * navigation: when the Burrow harness has already put the app there, opening
    * again would tear down the page's bridge connection and rebuild it for
    * nothing.
    */
@@ -166,7 +166,7 @@ export class AgentBrowser {
    * that nothing will ever read again.
    *
    * The shipped app carries the same workaround for the same reason
-   * (`lib/src/host/agent-browser-host.ts`); a CLI that grows a `session stop`
+   * (`lib/src/host/agent-browser-burrow.ts`); a CLI that grows a `session stop`
    * retires both.
    */
   async killDaemon() {

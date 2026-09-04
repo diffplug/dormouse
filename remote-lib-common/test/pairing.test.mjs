@@ -1,6 +1,6 @@
 /**
  * What is left of `pairing.ts` after the E2E cutover: the label reducer both
- * ceremonies share. The Host's own ceremony is `e2e-ceremony.test.mjs`.
+ * ceremonies share. The Burrow's own ceremony is `e2e-ceremony.test.mjs`.
  */
 
 import { test } from 'node:test';

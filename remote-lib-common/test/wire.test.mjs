@@ -12,10 +12,10 @@ import {
   clampTerminalDimension,
   isE2eCiphertext,
   isE2eClientFrame,
-  isE2eHostFrame,
+  isE2eBurrowFrame,
   isE2eRelayToClientFrame,
   isE2eId,
-  isE2eRelayToHostFrame,
+  isE2eRelayToBurrowFrame,
   isSetupTokenResponse,
   pushSubscriptionDeletePath,
 } from '../dist/index.js';
@@ -49,15 +49,15 @@ const MINT = { token: 'aZ0-_abc', expiresAt: 1 };
 
 test('isSetupTokenResponse accepts a real mint', () => {
   assert.equal(isSetupTokenResponse(MINT), true);
-  // Additive fields are fine: an older Host reading a newer Relay still works.
+  // Additive fields are fine: an older Burrow reading a newer Relay still works.
   assert.equal(isSetupTokenResponse({ ...MINT, extra: true }), true);
   // A real token is base64url of 32 bytes, comfortably inside the bound.
   assert.equal(isSetupTokenResponse({ ...MINT, token: 'a'.repeat(128) }), true);
 });
 
 test('isSetupTokenResponse no longer demands a mint handle', () => {
-  // Redemption at the Relay flips nothing on the Host any more — the
-  // invitation the same QR carries is Host memory, and its state is what the
+  // Redemption at the Relay flips nothing on the Burrow any more — the
+  // invitation the same QR carries is Burrow memory, and its state is what the
   // panel renders — so `mintId` is gone from the response and from the guard. A
   // Relay that still sends one is accepted as any other additive field.
   assert.equal(isSetupTokenResponse({ token: 'aZ0-_abc', expiresAt: 1 }), true);
@@ -66,7 +66,7 @@ test('isSetupTokenResponse no longer demands a mint handle', () => {
 });
 
 test('isSetupTokenResponse rejects a 200 that is not one', () => {
-  // The Host puts the token straight into a QR encoder and `expiresAt` straight
+  // The Burrow puts the token straight into a QR encoder and `expiresAt` straight
   // into a `setTimeout` delay, so a missing, mistyped, oversized, or
   // out-of-charset field has to fail the exchange rather than reach either.
   for (const body of [
@@ -131,7 +131,7 @@ test('pushSubscriptionDeletePath encodes an id that would otherwise be a path', 
 });
 
 test('a subscriptions query is bounded, so the route is not a bulk oracle', () => {
-  // A browser holds one delivery id per paired Host; the cap is far above any
+  // A browser holds one delivery id per paired Burrow; the cap is far above any
   // real use and is what keeps the readback from being an enumeration.
   assert.equal(MAX_PUSH_QUERY_DELIVERY_IDS, 64);
 });
@@ -140,13 +140,13 @@ test('a subscriptions query is bounded, so the route is not a bulk oracle', () =
 
 const E2E_CLIENT = {
   t: 'e2e',
-  hostId: 'AAAAAAAAAAAAAAAAAAAAAA',
+  burrowId: 'AAAAAAAAAAAAAAAAAAAAAA',
   kind: 'connection',
   id: 'BBBBBBBBBBBBBBBBBBBBBB',
   step: 'init',
   ct: 'Zm9v',
 };
-const E2E_HOST = {
+const E2E_BURROW = {
   t: 'e2e',
   clientId: 'c-1',
   kind: 'pairing',
@@ -181,10 +181,10 @@ test('isE2eClientFrame accepts a real frame and refuses every malformed one', ()
     null,
     'nope',
     { ...E2E_CLIENT, t: 'msg' },
-    { ...E2E_CLIENT, hostId: 'short' },
+    { ...E2E_CLIENT, burrowId: 'short' },
     { ...E2E_CLIENT, kind: 'terminal' },
     { ...E2E_CLIENT, id: 'short' },
-    // `response` is the Host's step; a Client claiming it is not this frame.
+    // `response` is the Burrow's step; a Client claiming it is not this frame.
     { ...E2E_CLIENT, step: 'response' },
     { ...E2E_CLIENT, step: 'init2' },
     { ...E2E_CLIENT, ct: 'a'.repeat(MAX_E2E_CIPHERTEXT_LENGTH + 1) },
@@ -194,34 +194,34 @@ test('isE2eClientFrame accepts a real frame and refuses every malformed one', ()
   }
 });
 
-test('isE2eRelayToHostFrame additionally proves the relay-stamped clientId', () => {
-  assert.equal(isE2eRelayToHostFrame(E2E_CLIENT), false, 'no clientId');
-  assert.equal(isE2eRelayToHostFrame({ ...E2E_CLIENT, clientId: 'c-1' }), true);
+test('isE2eRelayToBurrowFrame additionally proves the relay-stamped clientId', () => {
+  assert.equal(isE2eRelayToBurrowFrame(E2E_CLIENT), false, 'no clientId');
+  assert.equal(isE2eRelayToBurrowFrame({ ...E2E_CLIENT, clientId: 'c-1' }), true);
   assert.equal(
-    isE2eRelayToHostFrame({ ...E2E_CLIENT, clientId: 'c'.repeat(MAX_CLIENT_ID_LENGTH + 1) }),
+    isE2eRelayToBurrowFrame({ ...E2E_CLIENT, clientId: 'c'.repeat(MAX_CLIENT_ID_LENGTH + 1) }),
     false,
     'the id is a map key on a path the model does not trust',
   );
 });
 
-test('isE2eHostFrame takes the host steps and no hostId', () => {
-  assert.equal(isE2eHostFrame(E2E_HOST), true);
-  assert.equal(isE2eHostFrame({ ...E2E_HOST, step: 'transport' }), true);
+test('isE2eBurrowFrame takes the burrow steps and no burrowId', () => {
+  assert.equal(isE2eBurrowFrame(E2E_BURROW), true);
+  assert.equal(isE2eBurrowFrame({ ...E2E_BURROW, step: 'transport' }), true);
   for (const frame of [
-    { ...E2E_HOST, step: 'init' },
-    { ...E2E_HOST, clientId: 42 },
-    { ...E2E_HOST, kind: 'nope' },
-    { ...E2E_HOST, id: 'short' },
-    { ...E2E_HOST, ct: 'has spaces' },
+    { ...E2E_BURROW, step: 'init' },
+    { ...E2E_BURROW, clientId: 42 },
+    { ...E2E_BURROW, kind: 'nope' },
+    { ...E2E_BURROW, id: 'short' },
+    { ...E2E_BURROW, ct: 'has spaces' },
   ]) {
-    assert.equal(isE2eHostFrame(frame), false, JSON.stringify(frame));
+    assert.equal(isE2eBurrowFrame(frame), false, JSON.stringify(frame));
   }
 });
 
-test('isE2eRelayToClientFrame takes the host steps with a stamped hostId', () => {
-  // The mirror of the Host's guard: the relay stamps `hostId` on the way out,
-  // and the Client trusts the relay no further than the Host does.
-  const stamped = { t: 'e2e', hostId: E2E_CLIENT.hostId, kind: 'connection', id: E2E_CLIENT.id, step: 'response', ct: E2E_CLIENT.ct };
+test('isE2eRelayToClientFrame takes the burrow steps with a stamped burrowId', () => {
+  // The mirror of the Burrow's guard: the relay stamps `burrowId` on the way out,
+  // and the Client trusts the relay no further than the Burrow does.
+  const stamped = { t: 'e2e', burrowId: E2E_CLIENT.burrowId, kind: 'connection', id: E2E_CLIENT.id, step: 'response', ct: E2E_CLIENT.ct };
   assert.equal(isE2eRelayToClientFrame(stamped), true);
   assert.equal(isE2eRelayToClientFrame({ ...stamped, step: 'transport' }), true);
   for (const frame of [
@@ -230,7 +230,7 @@ test('isE2eRelayToClientFrame takes the host steps with a stamped hostId', () =>
     { ...stamped, t: 'msg' },
     // `init` is the Client's own step; the relay never sends one back.
     { ...stamped, step: 'init' },
-    { ...stamped, hostId: 'short' },
+    { ...stamped, burrowId: 'short' },
     { ...stamped, kind: 'terminal' },
     { ...stamped, id: 'short' },
     { ...stamped, ct: '' },

@@ -2,102 +2,102 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { RelayHub } from '../dist/relay.js';
-import { e2eClientFrame, e2eHostFrame, newE2eId } from './harness/e2e.mjs';
+import { e2eClientFrame, e2eBurrowFrame, newE2eId } from './harness/e2e.mjs';
 import { recordingSocket } from './harness/memory-socket.mjs';
 
 /** A session that never expires: these cases are about sockets, not TTLs. */
 const LIVE_SESSION = { expiresAt: Number.POSITIVE_INFINITY };
 
 /**
- * Unit tests for the displaced-host-socket guard, driving RelayHub directly
- * with fake sockets: a socket replaced by a host reconnect may still deliver
+ * Unit tests for the displaced-burrow-socket guard, driving RelayHub directly
+ * with fake sockets: a socket replaced by a burrow reconnect may still deliver
  * queued frames, and those must never reach a Client the replacement never
  * handshook with.
  */
 
-const HOST_A = newE2eId();
-const HOST_B = newE2eId();
+const BURROW_A = newE2eId();
+const BURROW_B = newE2eId();
 
 // `RelayHub` is driven with raw strings here, one level below the socket.
-const clientFrame = (hostId, overrides) => JSON.stringify(e2eClientFrame(hostId, overrides));
-const hostFrame = (clientId, overrides) => JSON.stringify(e2eHostFrame(clientId, overrides));
+const clientFrame = (burrowId, overrides) => JSON.stringify(e2eClientFrame(burrowId, overrides));
+const burrowFrame = (clientId, overrides) => JSON.stringify(e2eBurrowFrame(clientId, overrides));
 
-/** Register a client and bind it to `hostId`. */
-function boundClient(hub, hostId) {
+/** Register a client and bind it to `burrowId`. */
+function boundClient(hub, burrowId) {
   const socket = recordingSocket();
   const client = hub.registerClient(socket, LIVE_SESSION);
-  hub.onClientFrame(client, clientFrame(hostId));
-  assert.equal(client.hostId, hostId, 'precondition: bound');
+  hub.onClientFrame(client, clientFrame(burrowId));
+  assert.equal(client.burrowId, burrowId, 'precondition: bound');
   return { socket, client };
 }
 
-test('frames from a displaced host socket are ignored', () => {
+test('frames from a displaced burrow socket are ignored', () => {
   const hub = new RelayHub();
   const oldSocket = recordingSocket();
-  const oldConn = hub.registerHost(HOST_A, oldSocket);
-  const { socket: clientSocket, client } = boundClient(hub, HOST_A);
+  const oldConn = hub.registerBurrow(BURROW_A, oldSocket);
+  const { socket: clientSocket, client } = boundClient(hub, BURROW_A);
 
-  // The host reconnects: the old socket is displaced and the binding dropped.
+  // The burrow reconnects: the old socket is displaced and the binding dropped.
   const newSocket = recordingSocket();
-  const newConn = hub.registerHost(HOST_A, newSocket);
+  const newConn = hub.registerBurrow(BURROW_A, newSocket);
   assert.equal(oldSocket.closed, true);
-  assert.equal(client.hostId, null);
-  assert.ok(clientSocket.sent.some((f) => f.t === 'host-gone'));
+  assert.equal(client.burrowId, null);
+  assert.ok(clientSocket.sent.some((f) => f.t === 'burrow-gone'));
 
   const sentBefore = clientSocket.sent.length;
-  hub.onHostFrame(oldConn, hostFrame(client.clientId));
+  hub.onBurrowFrame(oldConn, burrowFrame(client.clientId));
   assert.equal(clientSocket.sent.length, sentBefore, 'no frames routed from the displaced socket');
 
   // The replacement socket still works end to end.
-  hub.onClientFrame(client, clientFrame(HOST_A));
+  hub.onClientFrame(client, clientFrame(BURROW_A));
   assert.ok(newSocket.sent.some((f) => f.t === 'e2e'));
-  hub.onHostFrame(newConn, hostFrame(client.clientId, { ct: 'bGl2ZQ' }));
+  hub.onBurrowFrame(newConn, burrowFrame(client.clientId, { ct: 'bGl2ZQ' }));
   assert.ok(clientSocket.sent.some((f) => f.t === 'e2e' && f.ct === 'bGl2ZQ'));
 });
 
 test('a displaced socket is also ignored after the replacement disconnects', () => {
   const hub = new RelayHub();
-  const oldConn = hub.registerHost(HOST_A, recordingSocket());
-  const { socket: clientSocket, client } = boundClient(hub, HOST_A);
+  const oldConn = hub.registerBurrow(BURROW_A, recordingSocket());
+  const { socket: clientSocket, client } = boundClient(hub, BURROW_A);
 
-  const newConn = hub.registerHost(HOST_A, recordingSocket());
-  hub.unregisterHost(newConn); // host fully offline now
+  const newConn = hub.registerBurrow(BURROW_A, recordingSocket());
+  hub.unregisterBurrow(newConn); // burrow fully offline now
   const sentBefore = clientSocket.sent.length;
 
-  hub.onHostFrame(oldConn, hostFrame(client.clientId));
+  hub.onBurrowFrame(oldConn, burrowFrame(client.clientId));
   assert.equal(
     clientSocket.sent.length,
     sentBefore,
-    'stale socket cannot speak for an offline host',
+    'stale socket cannot speak for an offline burrow',
   );
 });
 
-test('late frames from a host the client left are ignored', () => {
+test('late frames from a burrow the client left are ignored', () => {
   const hub = new RelayHub();
-  const hostA = hub.registerHost(HOST_A, recordingSocket());
-  hub.registerHost(HOST_B, recordingSocket());
+  const burrowA = hub.registerBurrow(BURROW_A, recordingSocket());
+  hub.registerBurrow(BURROW_B, recordingSocket());
   const clientSocket = recordingSocket();
   const client = hub.registerClient(clientSocket, LIVE_SESSION);
 
-  hub.onClientFrame(client, clientFrame(HOST_A));
-  hub.onClientFrame(client, clientFrame(HOST_B));
-  assert.equal(client.hostId, HOST_B);
+  hub.onClientFrame(client, clientFrame(BURROW_A));
+  hub.onClientFrame(client, clientFrame(BURROW_B));
+  assert.equal(client.burrowId, BURROW_B);
 
-  hub.onHostFrame(hostA, hostFrame(client.clientId));
-  assert.deepEqual(clientSocket.sent, [], 'stale host frames must not reach the client');
-  assert.equal(client.hostId, HOST_B);
+  hub.onBurrowFrame(burrowA, burrowFrame(client.clientId));
+  assert.deepEqual(clientSocket.sent, [], 'stale burrow frames must not reach the client');
+  assert.equal(client.burrowId, BURROW_B);
 });
 
-test('rebinding a client tells the previous host client-gone', () => {
+test('rebinding a client tells the previous burrow client-gone', () => {
   const hub = new RelayHub();
-  const hostA = hub.registerHost(HOST_A, recordingSocket());
-  const hostB = hub.registerHost(HOST_B, recordingSocket());
-  const { client } = boundClient(hub, HOST_A);
+  const burrowA = hub.registerBurrow(BURROW_A, recordingSocket());
+  const burrowB = hub.registerBurrow(BURROW_B, recordingSocket());
+  const { client } = boundClient(hub, BURROW_A);
 
-  hub.onClientFrame(client, clientFrame(HOST_B));
+  hub.onClientFrame(client, clientFrame(BURROW_B));
 
-  assert.deepEqual(hostA.socket.sent.at(-1), { t: 'client-gone', clientId: client.clientId });
-  assert.equal(hostB.socket.sent.at(-1)?.t, 'e2e');
-  assert.equal(hostB.socket.sent.at(-1)?.clientId, client.clientId);
-  assert.equal(client.hostId, HOST_B);
+  assert.deepEqual(burrowA.socket.sent.at(-1), { t: 'client-gone', clientId: client.clientId });
+  assert.equal(burrowB.socket.sent.at(-1)?.t, 'e2e');
+  assert.equal(burrowB.socket.sent.at(-1)?.clientId, client.clientId);
+  assert.equal(client.burrowId, BURROW_B);
 });

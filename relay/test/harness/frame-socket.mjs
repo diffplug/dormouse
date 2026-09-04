@@ -2,13 +2,13 @@
  * The relay socket both harness halves speak over: a real `WebSocket`, JSON
  * frames in and out, and the `frames` / `sent` arrays every assertion reads.
  *
- * Shared so `FakeHost` and `FakeClient` cannot drift into two opinions about
+ * Shared so `FakeBurrow` and `FakeClient` cannot drift into two opinions about
  * teardown or frame recording. It stays free of `relay/test/helpers.mjs` —
- * `scripts/fake-host.mjs` imports `FakeHost` without a built Relay.
+ * `scripts/fake-burrow.mjs` imports `FakeBurrow` without a built Relay.
  */
 
 /**
- * The most frames either log keeps. A test case sends tens; `scripts/fake-host.mjs`
+ * The most frames either log keeps. A test case sends tens; `scripts/fake-burrow.mjs`
  * is a long-running dev stand-in driving a live echo terminal, and would
  * otherwise retain every relayed PTY byte for the life of the process.
  */

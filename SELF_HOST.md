@@ -24,7 +24,7 @@ mixing them is the main way this runbook goes wrong. Each checkpoint that
 differs gives all three forms; the [Mechanism map](#mechanism-map) has the rest.
 
 This runbook covers running the installer and finishing what it cannot — the
-passkey, the Host build, the backup — with no code for anyone to write or edit.
+passkey, the Burrow build, the backup — with no code for anyone to write or edit.
 
 ## Instructions to the assistant
 
@@ -41,7 +41,7 @@ change to both.
 
 Before acting:
 
-1. Read `docs/specs/relay.md` ("Configuration", "Where a Host may reach a Relay (self-host builds)"), `docs/specs/remote-security-model.md` for the
+1. Read `docs/specs/relay.md` ("Configuration", "Where a Burrow may reach a Relay (self-host builds)"), `docs/specs/remote-security-model.md` for the
    trust model, and the [Installer contract](#installer-contract-maintainers).
 2. Establish the OS and pick the installer column; run its `--help` / `-Help`,
    skim the script, and quote its errors rather than paraphrasing — they are
@@ -97,18 +97,18 @@ installed release, which the installer and `manage status` both print.
   profile fails every `tailscale` call with
   `401 Unauthorized: Tailscale already in use by <user>`; that user must sign
   out or quit the tray app. Preflight detects it and names the account.
-- **A Host build that can reach a `*.ts.net` origin.** The shipped standalone
-  and VS Code Hosts bake in the SaaS-only relay allowlist, so a self-host relay
-  needs a local build of whichever Host the user runs:
+- **A Burrow build that can reach a `*.ts.net` origin.** The shipped standalone
+  and VS Code Burrows bake in the SaaS-only relay allowlist, so a self-host relay
+  needs a local build of whichever Burrow the user runs:
 
   ```sh
   DORMOUSE_REMOTE_CONNECT_SRC='https://*.ts.net wss://*.ts.net' pnpm dogfood:standalone
   DORMOUSE_REMOTE_CONNECT_SRC='https://*.ts.net wss://*.ts.net' pnpm dogfood:vscode
   ```
 
-  Both bake it into their Node Host bundles, and the relay socket is in neither
+  Both bake it into their Node Burrow bundles, and the relay socket is in neither
   webview, so no webview CSP change widens the allowlist
-  (`docs/specs/relay.md` → "Where a Host may reach a Relay").
+  (`docs/specs/relay.md` → "Where a Burrow may reach a Relay").
 
 ## What the installer does
 
@@ -138,7 +138,7 @@ administrator rights:
     relay.json
   state/
     account.json
-    hosts.json
+    burrows.json
     push-subscriptions.json
     vapid.json
 ```
@@ -148,10 +148,10 @@ Windows, `~/.local/state/dormouse-relay/logs` on Linux. Service definition:
 `~/Library/LaunchAgents/sh.dormouse.relay.plist`, the Scheduled Task
 `\Dormouse Relay`, or `~/.config/systemd/user/dormouse-relay.service`.
 
-Before the first Host enrollment, `run/enroll-offer.json` holds the origin and a
-token that `POST /api/host/enroll` accepts in place of the setup password, and a
-Dormouse Host on this machine offers one-click enrollment from it (checkpoint 4,
-step 2). It expires after 24 hours; either credential path's first Host
+Before the first Burrow enrollment, `run/enroll-offer.json` holds the origin and a
+token that `POST /api/burrow/enroll` accepts in place of the setup password, and a
+Dormouse Burrow on this machine offers one-click enrollment from it (checkpoint 4,
+step 2). It expires after 24 hours; either credential path's first Burrow
 enrollment removes it, and no later run recreates it.
 
 No installer will **ever**: run `git pull`, fetch, or switch branches; install a
@@ -160,10 +160,10 @@ rewrite an origin that no longer matches the node's DNS name; or touch `config/`
 and `state/`, which survive every update, prune, and uninstall.
 
 Two [Invariants](#invariants) set day-to-day expectations. **An update is a
-short intentional restart**: Host and Pocket WebSockets disconnect and
+short intentional restart**: Burrow and Pocket WebSockets disconnect and
 reconnect. **A per-login agent is unavailable while the laptop sleeps, is shut
 down, or has no logged-in user** — normally fine, since there is then no local
-Dormouse Host to control either. Windows' at-logon `LogonType=Interactive` is
+Dormouse Burrow to control either. Windows' at-logon `LogonType=Interactive` is
 what keeps the task free of a stored password; Linux alone opts out, with
 `--linger` (Prerequisites).
 
@@ -202,7 +202,7 @@ These cannot be proven from the laptop, and are the checkpoints below: the HTTPS
 origin answering from a second tailnet device and stopping when that device
 leaves the tailnet; the service manager restarting the Relay after a real kill;
 state surviving a reinstall from a newer checkout, with rollback returning the
-previous release; Pocket passkey setup and Host enrollment completing against
+previous release; Pocket passkey setup and Burrow enrollment completing against
 this origin, and one command typed from the phone coming back with the laptop's
 own output; and the install root backed up somewhere off this laptop.
 
@@ -335,25 +335,25 @@ Serve mapping both return without rerunning the installer.
 
 ## Checkpoint 4: first-run setup
 
-The Relay has no account, no passkey, and no enrolled Host. Same sequence as
+The Relay has no account, no passkey, and no enrolled Burrow. Same sequence as
 `docs/specs/relay.md` → "Running it", run against the tailnet origin, with the
 Relay's generated password.
 
-**The Host comes first**: a passkey is registered only off a code an enrolled
-Host displays (`docs/specs/relay.md` → Setup tokens and the pairing QR).
+**The Burrow comes first**: a passkey is registered only off a code an enrolled
+Burrow displays (`docs/specs/relay.md` → Setup tokens and the pairing QR).
 
 1. **The setup password.** Needed only if the step-2 offer card is gone or the
-   Host is elsewhere: have the user run `manage show-password` in their own
+   Burrow is elsewhere: have the user run `manage show-password` in their own
    terminal, which warns before printing. Never ask for the value, and never
    print it into the conversation.
 
-2. **The Host.** On this same machine, launch the standalone or VS Code build
+2. **The Burrow.** On this same machine, launch the standalone or VS Code build
    made with `DORMOUSE_REMOTE_CONNECT_SRC` (Prerequisites) and open
    **Settings → Remote control** — the sliders icon at the far right of the
    baseboard. While the offer is unspent, its card enrolls in one click with no
    setup password; the typed form behind "Enroll with a different Relay…"
    covers a Relay elsewhere or a spent offer (`docs/specs/relay.md`, "Remote
-   control, in the Settings dialog"). Enrollment persists in the Host service's
+   control, in the Settings dialog"). Enrollment persists in the Burrow service's
    own store (`docs/specs/security-remote.md` → "Credentials at rest"), so later launches connect
    on their own; the section then shows the Relay, the relay connection and the
    paired-device count.
@@ -376,11 +376,11 @@ Host displays (`docs/specs/relay.md` → Setup tokens and the pairing QR).
 4. **A real session.** The scan runs straight into pairing: read the two digits
    off the phone, type them into the modal on the laptop, and **approve — the
    last thing anyone does**. The phone answers its own biometric prompt and
-   lands on the machine's terminal. (**Connect**, on the Hosts row, is for later
+   lands on the machine's terminal. (**Connect**, on the Burrows row, is for later
    sessions.) Only now have HTTPS proxying, the WebSocket upgrade, and the
    security flow been exercised together.
 
-5. **State.** Confirm `account.json`, `hosts.json` and `vapid.json` — plus
+5. **State.** Confirm `account.json`, `burrows.json` and `vapid.json` — plus
    `push-subscriptions.json` if push was enabled — now exist in `state/`. Record
    ownership and checksums without printing contents; checkpoint 5 checks them
    against a reinstall.
@@ -417,7 +417,7 @@ Make these explicit: the relay is down while the laptop sleeps, is shut down,
 has Tailscale disconnected, or is logged out; the installer does not follow
 `main`, so updates happen only when the user reruns it; the HTTPS origin is tied
 to the laptop's Tailscale node name, so renaming or re-enrolling that node means
-redoing the passkey and every Host enrollment, and the installer stops rather
+redoing the passkey and every Burrow enrollment, and the installer stops rather
 than rewriting the origin; and Tailscale network policy still controls which
 tailnet members reach the laptop — review existing grants if the tailnet has
 other users.
@@ -429,7 +429,7 @@ Déjà Dup/restic/borg. **Check the coverage rather than assuming it**:
 OneDrive's Known Folder Move, and `~/.local/share` from dotfile-oriented backup
 rules, so on both the install root is very likely unprotected until added
 explicitly. A second directory on the same disk is not a backup; these files
-hold Host bearer credentials and a VAPID private key. Rehearse a small restore
+hold Burrow bearer credentials and a VAPID private key. Rehearse a small restore
 without overwriting live state.
 
 ## Final handoff
@@ -437,7 +437,7 @@ without overwriting live state.
 Report concisely: the Pocket URL and its WebAuthn-origin significance; the exact
 installed Git SHA and whether the build was dirty; where runtime config, state,
 release metadata and logs live; the rollback command; backup status and restore
-location; any skipped acceptance test or remaining manual Host/Pocket setup;
+location; any skipped acceptance test or remaining manual Burrow/Pocket setup;
 that updates happen only when the user reruns the installer for their platform,
 plus the sleep/shutdown/logout availability limit; and the installed
 `manage status`, `manage verify`, `manage logs` and `manage restart` commands.
@@ -448,7 +448,7 @@ plus the sleep/shutdown/logout availability limit; and the installed
 
 - Dormouse Relay runtime and state contract: `docs/specs/relay.md`
 - Dormouse trust model: `docs/specs/remote-security-model.md`
-- Host installations: `docs/specs/standalone.md`, `docs/specs/vscode.md`
+- Burrow installations: `docs/specs/standalone.md`, `docs/specs/vscode.md`
 - [Install Tailscale on macOS](https://tailscale.com/docs/install/mac)
 - [Tailscale variants on macOS](https://tailscale.com/docs/concepts/macos-variants)
 - [Install Tailscale on Windows](https://tailscale.com/docs/install/windows)
@@ -501,7 +501,7 @@ about any of them.
   `ss -lntp 'sport = :3100'` names that process — unless it cannot see it, as
   under WSL with `networkingMode=mirrored`, where the listener may be a Windows
   process (a Windows Dormouse Relay install does exactly this). Stop it, or
-  install on a host not sharing loopback.
+  install on a burrow not sharing loopback.
 - **The HTTPS URL returns 502:** check the loopback health endpoint first, then
   `tailscale serve status`; service and Serve configuration have separate
   lifecycles, and `manage serve` re-applies a mapping a dev session repointed.
@@ -509,12 +509,12 @@ about any of them.
   `DORMOUSE_BIND_HOST=127.0.0.1` in `config/relay.env`. Tailscale access
   control is not a reason to expose the plaintext backend.
 - **The installer stops on an origin mismatch:** it is refusing to invalidate
-  the registered passkey and every enrolled Host. Establish whether the node was
+  the registered passkey and every enrolled Burrow. Establish whether the node was
   renamed or re-enrolled, then restore the old name or plan the re-enrollment.
 - **Pocket loads but passkey setup fails:** compare the browser URL
   byte-for-byte with `DORMOUSE_ORIGIN` in `config/relay.env`; confirm HTTPS and
   the node hostname.
-- **A Host cannot connect while Pocket can:** that Host build almost certainly
+- **A Burrow cannot connect while Pocket can:** that Burrow build almost certainly
   lacks the `*.ts.net` `DORMOUSE_REMOTE_CONNECT_SRC` setting.
 - **State disappears:** verify the absolute state path for this platform's
   install root and the installed config. Never initialize a new account until
@@ -523,9 +523,9 @@ about any of them.
 ## Keeping the relay up while the laptop sleeps
 
 A per-login agent is down whenever its machine is — fine until the user controls
-a Host that is *not* this laptop.
+a Burrow that is *not* this laptop.
 
-That needs no new machinery: the phone reaches the origin and the Host dials
+That needs no new machinery: the phone reaches the origin and the Burrow dials
 *out* to it, so the relay need not run on the laptop. Run the Linux installer
 with `--linger` on any always-on tailnet machine — a spare box, a NUC, a small
 VM — and that node's own MagicDNS name becomes the origin:
@@ -537,12 +537,12 @@ VM — and that node's own MagicDNS name becomes the origin:
 Lingering is what makes it survive logout and come back at boot
 (Prerequisites); `manage verify` reports which mode is live. Two things follow,
 both the same ones any origin change brings: **`DORMOUSE_ORIGIN` becomes that
-machine's name**, so the passkey and every Host enrollment are redone against it
+machine's name**, so the passkey and every Burrow enrollment are redone against it
 — a deliberate migration, not an upgrade path, which is why the installers
-refuse to rewrite an origin; and **the Host still needs a build whose baked
+refuse to rewrite an origin; and **the Burrow still needs a build whose baked
 allowlist admits `*.ts.net`** (Prerequisites). That machine needs the same
 backup story as any other install (checkpoint 6): `config/` and `state/` hold
-Host bearer credentials and a VAPID private key.
+Burrow bearer credentials and a VAPID private key.
 
 A managed cloud deployment would buy a stable origin independent of any one
 machine's name — the one thing the above does not give — and belongs with the
@@ -607,7 +607,7 @@ reports which mode is live rather than asserting either.
 ### Invariants
 
 - **One replica; an update is a short intentional restart.** Relay transient
-  state is in memory (`docs/specs/relay.md` → Guardrails), so Hosts and Pocket
+  state is in memory (`docs/specs/relay.md` → Guardrails), so Burrows and Pocket
   clients reconnect across a release switch; no zero-downtime swap to attempt.
 - **State outlives code.** `config/` and `state/` sit outside `releases/`, are
   readable only by the installing user, and survive every update, prune and
@@ -618,8 +618,8 @@ reports which mode is live rather than asserting either.
   **A preserved file missing installer-owned keys is half-written**: name them
   and stop, never rewrite values that cannot be proven stale. **`manage verify`
   walks every file in `state\` on Windows**, where Node's modes are a no-op.
-- **The enrollment offer rotates on every run before the first Host enrolls**,
-  including updates that preserve `relay.env`; `state/hosts.json` then disables
+- **The enrollment offer rotates on every run before the first Burrow enrolls**,
+  including updates that preserve `relay.env`; `state/burrows.json` then disables
   it permanently until a state purge. **Minted last** — after release, Serve and
   pruning succeed — so a failure leaves the previous offer unspent.
   `run-relay` exports `DORMOUSE_ENROLL_TOKEN_FILE`; unset, the Relay refuses
@@ -634,7 +634,7 @@ reports which mode is live rather than asserting either.
 - **`DORMOUSE_ORIGIN` is durable WebAuthn identity**, derived from the node's
   MagicDNS name. An installation recording a different origin stops the
   installer, because rewriting silently invalidates the registered passkey and
-  every enrolled Host.
+  every enrolled Burrow.
 - **The install belongs to one user account.** Every installer refuses to run
   privileged — root on macOS/Linux, elevated on Windows — because that account
   owning `config/` and `state/` is the whole credential posture. **On unix the
@@ -676,7 +676,7 @@ reports which mode is live rather than asserting either.
   removes the file; a crash leaves it, which the liveness check reads correctly.
   **Linux still leads with `systemctl --user is-active`**, which catches a
   responder no port lookup can see: a foreign network namespace, or WSL with
-  `networkingMode=mirrored`, where loopback is shared with the Windows host.
+  `networkingMode=mirrored`, where loopback is shared with the Windows burrow.
   Two known exceptions: Windows `manage restart` still accepts a bare 200, and
   `manage status` on all three reports what the pointers say by design.
   Source of truth: `relay/src/runtime-file.ts`.
@@ -738,7 +738,7 @@ releases, the pointers, `run/` and `bin/run-relay`, but not the `bin` directory
 `manage` lives in — deleting that strands `config/` and `state/`, the data its
 own message tells you to `purge`. **`purge` deletes `state/`, `config/` and
 `run/`** after its typed confirmation — `run/` because an unspent offer redeems
-for a Host enrollment with no account in existence — and, once `bin/run-relay`
+for a Burrow enrollment with no account in existence — and, once `bin/run-relay`
 is gone, prints the one command that removes what is left, since it cannot
 delete itself from under the running shell. That command names the
 dormouse-owned log directory alongside the install root, because on Linux and

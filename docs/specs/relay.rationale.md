@@ -4,7 +4,7 @@
 
 ## Guardrails
 
-**Why the pruning matters.** Transient state is cheap to mint: `POST /api/signin/begin` needs no auth, and a `connect` frame needs only a session — not a pairing — yet issues a challenge in the Host process on the user's laptop. Unpruned, single-use/TTL stores grow from traffic nobody had to earn authority to send, on laptop as on the Relay.
+**Why the pruning matters.** Transient state is cheap to mint: `POST /api/signin/begin` needs no auth, and a `connect` frame needs only a session — not a pairing — yet issues a challenge in the Burrow process on the user's laptop. Unpruned, single-use/TTL stores grow from traffic nobody had to earn authority to send, on laptop as on the Relay.
 
 **Why the presence-nonce cap is per session.** A presence nonce is minted *before* its WebAuthn prompt, so it waits out human latency; under a global cap, any other session's flood evicted it mid-prompt and failed every pairing and connection ceremony for as long as the flood ran.
 
@@ -12,7 +12,7 @@
 
 **Loopback-lint scope.** The lint covers browser-reachable proxies whose loopback literal appears in source; the Relay binds from `DORMOUSE_BIND_HOST`, never a literal, so the spec's containment argument covers what text matching cannot.
 
-**Why `hosts.json` existence closes bootstrap.** Its first atomic write commits the first enrollment. Row count would reopen bootstrap after documented revocation removes the last row; a separate marker would duplicate the transition.
+**Why `burrows.json` existence closes bootstrap.** Its first atomic write commits the first enrollment. Row count would reopen bootstrap after documented revocation removes the last row; a separate marker would duplicate the transition.
 
 **Why a relative path is a `ConfigError`.** `DORMOUSE_RUNTIME_FILE` and `DORMOUSE_ENROLL_TOKEN_FILE` come from the installer's `run-relay` wrapper, which a service manager launches with a working directory that is not the installer's — a relative value lands where neither side can predict. The same drift is why `DORMOUSE_POCKET_DIR` resolves from the compiled Relay's own location: a service manager could otherwise change what is served.
 
@@ -24,25 +24,25 @@
 
 **Why the origin is normalized rather than compared as typed.** A trailing slash reads as correct in an `.env` file and then fails every compare it reaches, unless every compare site re-parses it first.
 
-## Where a Host may reach a Relay (self-host builds)
+## Where a Burrow may reach a Relay (self-host builds)
 
-**The two build-time guards.** A lost esbuild `define` compiles fine, surfacing only as a Host quietly using the shipped `*.dormouse.sh` default instead of the selfhoster's origins — a build that looks correct and refuses the only Relay it was meant for, so `assertConnectSrcBaked` greps the emitted bundle for the value. An override outside the grammar (trailing slash, path, bare host, foreign scheme, out-of-range port) matches nothing at runtime, so without `resolveRemoteConnectSrc`'s check the build goes green and ships the same silent refusal.
+**The two build-time guards.** A lost esbuild `define` compiles fine, surfacing only as a Burrow quietly using the shipped `*.dormouse.sh` default instead of the selfhoster's origins — a build that looks correct and refuses the only Relay it was meant for, so `assertConnectSrcBaked` greps the emitted bundle for the value. An override outside the grammar (trailing slash, path, bare burrow, foreign scheme, out-of-range port) matches nothing at runtime, so without `resolveRemoteConnectSrc`'s check the build goes green and ships the same silent refusal.
 
 ## State files
 
-**What an unguarded row costs.** A `hosts.json` row with a null `hostToken` makes `findByToken`'s digest compare throw, and that lookup runs on every relay upgrade and every push route — so one typo during the *documented* hand-edit revocation becomes a 500 on `/ws/host` and on every push endpoint until the file is repaired; dropping the row degrades exactly one host's access instead.
+**What an unguarded row costs.** A `burrows.json` row with a null `burrowToken` makes `findByToken`'s digest compare throw, and that lookup runs on every relay upgrade and every push route — so one typo during the *documented* hand-edit revocation becomes a 500 on `/ws/burrow` and on every push endpoint until the file is repaired; dropping the row degrades exactly one burrow's access instead.
 
-**Where `0600` earns its place, and where it does not.** It matters on a multi-user unix host: home-directory permissions vary by distro, so without an explicit mode whether a second local account can read `hosts.json` depends on which distro the selfhoster picked. It buys nothing where file modes are not the mechanism — Windows, a container, a database-backed deployment.
+**Where `0600` earns its place, and where it does not.** It matters on a multi-user unix burrow: home-directory permissions vary by distro, so without an explicit mode whether a second local account can read `burrows.json` depends on which distro the selfhoster picked. It buys nothing where file modes are not the mechanism — Windows, a container, a database-backed deployment.
 
-**Why `hostId` has one pinned shape.** Every `e2e` envelope routes on it and the QR fragment carries it at a fixed width: another shape is a Host the relay admits, no Client can address, and whose codes no phone can parse — un-enrolled is what the person hand-editing the file was reaching for.
+**Why `burrowId` has one pinned shape.** Every `e2e` envelope routes on it and the QR fragment carries it at a fixed width: another shape is a Burrow the relay admits, no Client can address, and whose codes no phone can parse — un-enrolled is what the person hand-editing the file was reaching for.
 
-**Why a fresh `deliveryId` cannot close the endpoint gap.** Linking a new delivery id to its scope's previous address would take cross-Host device identity on the Relay, which the model does not have; until the push service 404/410s them, the stale rows are the price.
+**Why a fresh `deliveryId` cannot close the endpoint gap.** Linking a new delivery id to its scope's previous address would take cross-Burrow device identity on the Relay, which the model does not have; until the push service 404/410s them, the stale rows are the price.
 
-**Why the subscription store gets per-field bounds and row caps.** A `deliveryId` is the caller's own choice and no Relay can check one against a Host's ACL, and every push route re-parses the whole file, so unchecked growth is paid on every request. An evicted Client reads as un-registered and repairs by pressing Enable, the recovery a dropped row already has.
+**Why the subscription store gets per-field bounds and row caps.** A `deliveryId` is the caller's own choice and no Relay can check one against a Burrow's ACL, and every push route re-parses the whole file, so unchecked growth is paid on every request. An evicted Client reads as un-registered and repairs by pressing Enable, the recovery a dropped row already has.
 
 ## WebAuthn without a WebAuthn library
 
-**Two facts made the dependency unnecessary.** The browser hands the new credential's public key back as SPKI DER, and `remote-lib-common` already carried a full assertion verifier — written for the Host — that works against an SPKI key. Nothing was left for a library to do.
+**Two facts made the dependency unnecessary.** The browser hands the new credential's public key back as SPKI DER, and `remote-lib-common` already carried a full assertion verifier — written for the Burrow — that works against an SPKI key. Nothing was left for a library to do.
 
 **Why the challenge issuers are capped as well as swept.** The mint is unauthenticated (Guardrails), so expiry alone lets the map plateau at request-rate × TTL rather than at a bound the process chose. A flood evicts abandoned challenges of its own making, the ceremony that loses one retries, and single use is untouched.
 
@@ -50,9 +50,9 @@
 
 **Why the body bound runs before the credential gate.** Those routes must read the body to find its credential, so an unbounded reader would let a public caller make the process buffer arbitrary input before proving anything.
 
-**What three route answers are protecting.** `POST /api/setup/retire` exists so a QR a phone scanned but will not register with cannot stay redeemable in a photograph. `/api/host/enroll` checks its `MAX_ENROLLED_HOSTS` cap after the credential so a caller that proved nothing cannot learn the Relay is full. `/api/push/subscribe` 404s an unknown `hostId` so no subscription row strands where no Host can read or prune it.
+**What three route answers are protecting.** `POST /api/setup/retire` exists so a QR a phone scanned but will not register with cannot stay redeemable in a photograph. `/api/burrow/enroll` checks its `MAX_ENROLLED_BURROWS` cap after the credential so a caller that proved nothing cannot learn the Relay is full. `/api/push/subscribe` 404s an unknown `burrowId` so no subscription row strands where no Burrow can read or prune it.
 
-**Why only Host enrollment pays the failure delay.** A delay retains a request. The setup password route is protected by the process-global admission bucket, so its retained work is bounded. Setup, Host, and session tokens are random bearer capabilities with no plausible online search; delaying their rejection buys public traffic held connections without protecting a human secret.
+**Why only Burrow enrollment pays the failure delay.** A delay retains a request. The setup password route is protected by the process-global admission bucket, so its retained work is bounded. Setup, Burrow, and session tokens are random bearer capabilities with no plausible online search; delaying their rejection buys public traffic held connections without protecting a human secret.
 
 ## Setup tokens and the pairing QR
 
@@ -62,33 +62,33 @@
 
 ## Web Push
 
-**Why the log carries the service's reason body.** A status alone does not separate a bad subject from a bad key from a bad payload, and the service's own explanation is visible nowhere else — the route answers 200 either way and the Host sees only a `failed` count.
+**Why the log carries the service's reason body.** A status alone does not separate a bad subject from a bad key from a bad payload, and the service's own explanation is visible nowhere else — the route answers 200 either way and the Burrow sees only a `failed` count.
 
 **The outer deadline protects the handler, not the socket.** `web-push` accepts no `AbortSignal`: a request that loses the race keeps running under its own inactivity timeout. The route-level deadline stops a wedged push service from holding the handler open while successive alarms stack sends behind it, and catches what socket inactivity cannot — trickled bytes or a stall mid-handshake reset that timer forever. Every send in a fan-out starts at once, so one wall-clock bound covers the route at any device count.
 
-**Why a stale-VAPID row is hidden rather than reported.** Such an endpoint cannot receive a send signed by the current key, so listing it would let the Host name and retry an unreachable device; omitting it surfaces Pocket's re-registration action instead.
+**Why a stale-VAPID row is hidden rather than reported.** Such an endpoint cannot receive a send signed by the current key, so listing it would let the Burrow name and retry an unreachable device; omitting it surfaces Pocket's re-registration action instead.
 
 **A loopback VAPID subject: measured, not guessed.** Apple answers `403 {"reason":"BadJwtToken"}` — verified against `web.push.apple.com` (2026-08) for `mailto:admin@localhost` and `https://localhost:3000`, while `mailto:admin@example.com` and an ordinary https origin were accepted; the rule is loopback specifically, not reachability of the contact. `web-push` warns only about the https form, at send time, and nothing at all about `mailto:` at `localhost`. The previous default, `mailto:admin@localhost`, let a Relay boot clean, answer 200 on send, and deliver to no iPhone — the one platform the feature targets.
 
 ## Relay
 
-**Why the Host cannot lean on the Relay's shape guard.** Trusting the relay's own `isE2eClientFrame` would take a relay-supplied object on faith where that is least acceptable: the routing values it uses as map keys, and the ciphertext it is about to spend WebCrypto on. The relay's copy keeps a bad frame off the wire; the Host's exists because the model does not trust the relay.
+**Why the Burrow cannot lean on the Relay's shape guard.** Trusting the relay's own `isE2eClientFrame` would take a relay-supplied object on faith where that is least acceptable: the routing values it uses as map keys, and the ciphertext it is about to spend WebCrypto on. The relay's copy keeps a bad frame off the wire; the Burrow's exists because the model does not trust the relay.
 
 ## E2E framing
 
 **Why reassembled bodies compact into one buffer.** A peer may legally split one application message into single-byte bodies, so a queue of bodies is bounded in bytes but unbounded in entries, and concatenating each body onto the accumulated bytes as it arrives would be quadratic. A geometrically-grown buffer is neither.
 
-## Host side (`lib` + the two Node hosts)
+## Burrow side (`lib` + the two Node hosts)
 
 **Why two rapid ACL writes are serialized.** Two pairing approvals in quick succession each write a whole ACL snapshot, the second larger; out of order, the older lands last and erases the device the newer one had just added.
 
-**Why `WS_CLOSE_HOST_REPLACED` is terminal rather than retried.** Reconnecting on it would evict the newer Host, which would reconnect and evict this one, forever; an explicit `reconnect()` breaks the loop.
+**Why `WS_CLOSE_BURROW_REPLACED` is terminal rather than retried.** Reconnecting on it would evict the newer Burrow, which would reconnect and evict this one, forever; an explicit `reconnect()` breaks the loop.
 
 **Where a bad enrollment record would surface.** A record minted with an `undefined` in its `ConnectionPolicy` fails at no point during enrollment; it fails at the *next* read, where the store rejects it, so the machine silently un-enrolls at the next launch — an app-restart away from the response that caused it. Failing the exchange on the spot names the missing fields instead.
 
 **Why the enrollment request's 10 s timeout is the shorter one.** It runs on the service's lifecycle chain, where every later start/stop command queues behind it, so an enrollment hanging past the webview's own 15 s command budget would replace the real error with a timeout and stall every command queued after it.
 
-**What losing the `hostToken` costs.** The alternative ordering — stop the running Host, then save — strands the machine with no Host, a status that says otherwise, and a credential that cannot be re-minted from the same password exchange; the only recovery is a fresh enrollment against the Relay.
+**What losing the `burrowToken` costs.** The alternative ordering — stop the running Burrow, then save — strands the machine with no Burrow, a status that says otherwise, and a credential that cannot be re-minted from the same password exchange; the only recovery is a fresh enrollment against the Relay.
 
 ## Remote control, in the Settings dialog
 

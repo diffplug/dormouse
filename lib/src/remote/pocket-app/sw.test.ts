@@ -2,7 +2,7 @@
  * The Pocket service worker's push path (`docs/specs/pocket-app.md` ->
  * Installable web app).
  *
- * The worker is the only party that can read a push — the Host seals to this
+ * The worker is the only party that can read a push — the Burrow seals to this
  * Client's static and the Relay forwards ciphertext
  * (`docs/specs/remote-security-model.md` -> Push sealing) — so what is under
  * test is the whole decision table, and the one rule that spans it: **every
@@ -25,12 +25,12 @@ import {
   type SealedPushPayload,
 } from 'remote-lib-common';
 
-import type { KnownHostStore, KnownHostV1 } from '../client/pocket-db';
+import type { KnownBurrowStore, KnownBurrowV1 } from '../client/pocket-db';
 import { GENERIC_PUSH_NOTIFICATION, installPocketWorker, type WorkerScope } from './sw';
 
-/** A `hostId` in the shape the Relay mints: base64url of 16 bytes. */
-const HOST_ID = toBase64Url(new Uint8Array(16).fill(7));
-const OTHER_HOST_ID = toBase64Url(new Uint8Array(16).fill(9));
+/** A `burrowId` in the shape the Relay mints: base64url of 16 bytes. */
+const BURROW_ID = toBase64Url(new Uint8Array(16).fill(7));
+const OTHER_BURROW_ID = toBase64Url(new Uint8Array(16).fill(9));
 
 type PushListener = (event: {
   data?: { json(): unknown } | null;
@@ -40,23 +40,23 @@ type PushListener = (event: {
 interface Harness {
   readonly push: PushListener;
   readonly showNotification: ReturnType<typeof vi.fn>;
-  readonly hostStatic: NoiseKeyPair;
+  readonly burrowStatic: NoiseKeyPair;
   readonly clientStatic: NoiseKeyPair;
-  readonly put: (record: KnownHostV1) => void;
+  readonly put: (record: KnownBurrowV1) => void;
   readonly shown: () => { title: string; body: string; tag?: string };
 }
 
-/** One paired Host record, with real statics so the seal is the real one. */
-function knownHost(
-  hostStatic: NoiseKeyPair,
+/** One paired Burrow record, with real statics so the seal is the real one. */
+function knownBurrow(
+  burrowStatic: NoiseKeyPair,
   clientStatic: NoiseKeyPair,
-  authorization: KnownHostV1['authorization'],
-): KnownHostV1 {
+  authorization: KnownBurrowV1['authorization'],
+): KnownBurrowV1 {
   return {
-    hostId: HOST_ID,
+    burrowId: BURROW_ID,
     accountId: 'owner',
     label: 'Work laptop',
-    hostStaticPublicKey: toBase64Url(hostStatic.publicKey),
+    burrowStaticPublicKey: toBase64Url(burrowStatic.publicKey),
     clientStaticKeyPair: {
       privateKey: clientStatic.privateKey as CryptoKey,
       publicKeyRaw: toBase64Url(clientStatic.publicKey),
@@ -68,15 +68,15 @@ function knownHost(
 }
 
 async function harness(): Promise<Harness> {
-  const hostStatic = await generateNoiseKeyPair();
+  const burrowStatic = await generateNoiseKeyPair();
   const clientStatic = await generateNoiseKeyPair();
-  const records = new Map<string, KnownHostV1>();
-  records.set(HOST_ID, knownHost(hostStatic, clientStatic, { state: 'paired', deliveryId: 'd', approvedAt: 1 }));
+  const records = new Map<string, KnownBurrowV1>();
+  records.set(BURROW_ID, knownBurrow(burrowStatic, clientStatic, { state: 'paired', deliveryId: 'd', approvedAt: 1 }));
 
-  const store: KnownHostStore = {
-    get: async (hostId) => records.get(hostId) ?? null,
-    put: async (record) => void records.set(record.hostId, record),
-    delete: async (hostId) => void records.delete(hostId),
+  const store: KnownBurrowStore = {
+    get: async (burrowId) => records.get(burrowId) ?? null,
+    put: async (record) => void records.set(record.burrowId, record),
+    delete: async (burrowId) => void records.delete(burrowId),
     list: async () => [...records.values()],
   };
 
@@ -93,9 +93,9 @@ async function harness(): Promise<Harness> {
   return {
     push: listeners.get('push') as PushListener,
     showNotification,
-    hostStatic,
+    burrowStatic,
     clientStatic,
-    put: (record) => void records.set(record.hostId, record),
+    put: (record) => void records.set(record.burrowId, record),
     shown: () => {
       const [title, options] = showNotification.mock.calls.at(-1) as unknown as [
         string,
@@ -124,22 +124,22 @@ async function deliver(worker: Harness, payload: unknown): Promise<void> {
   await Promise.all(pending);
 }
 
-/** What the Host puts on the wire: the sealed envelope plus its `hostId`. */
+/** What the Burrow puts on the wire: the sealed envelope plus its `burrowId`. */
 async function sealedPayload(
   worker: Harness,
   fields: unknown,
-  hostId = HOST_ID,
+  burrowId = BURROW_ID,
 ): Promise<SealedPushPayload> {
   const sealed = await sealPush({
-    hostStaticPrivateKey: worker.hostStatic.privateKey,
+    burrowStaticPrivateKey: worker.burrowStatic.privateKey,
     clientStaticPublicKey: worker.clientStatic.publicKey,
     plaintext: utf8Encode(JSON.stringify(fields)),
   });
-  return { hostId, ...sealed };
+  return { burrowId, ...sealed };
 }
 
 describe('Pocket push service worker', () => {
-  it('decrypts a sealed push and shows what the Host sent', async () => {
+  it('decrypts a sealed push and shows what the Burrow sent', async () => {
     const worker = await harness();
 
     await deliver(worker, await sealedPayload(worker, {
@@ -163,9 +163,9 @@ describe('Pocket push service worker', () => {
     expect(worker.shown()).toMatchObject(GENERIC_PUSH_NOTIFICATION);
   });
 
-  it('shows the generic notification for a Host this Client never paired with', async () => {
+  it('shows the generic notification for a Burrow this Client never paired with', async () => {
     const worker = await harness();
-    await deliver(worker, await sealedPayload(worker, { title: 'secret' }, OTHER_HOST_ID));
+    await deliver(worker, await sealedPayload(worker, { title: 'secret' }, OTHER_BURROW_ID));
     expect(worker.shown()).toMatchObject(GENERIC_PUSH_NOTIFICATION);
   });
 
@@ -182,14 +182,14 @@ describe('Pocket push service worker', () => {
 
   it('shows the generic notification when the plaintext is not a notification', async () => {
     const worker = await harness();
-    // Sealed correctly by the right Host, and still unusable.
+    // Sealed correctly by the right Burrow, and still unusable.
     await deliver(worker, await sealedPayload(worker, ['not', 'an', 'object']));
     expect(worker.shown()).toMatchObject({ title: GENERIC_PUSH_NOTIFICATION.title });
 
     await deliver(worker, {
-      hostId: HOST_ID,
+      burrowId: BURROW_ID,
       ...(await sealPush({
-        hostStaticPrivateKey: worker.hostStatic.privateKey,
+        burrowStaticPrivateKey: worker.burrowStatic.privateKey,
         clientStaticPublicKey: worker.clientStatic.publicKey,
         plaintext: utf8Encode('{ not json'),
       })),
@@ -198,7 +198,7 @@ describe('Pocket push service worker', () => {
   });
 
   it('re-bounds and re-sanitizes what it decrypts', async () => {
-    // The Host bounds before sealing, but the Relay can no longer be the
+    // The Burrow bounds before sealing, but the Relay can no longer be the
     // second pair of eyes it was, so the sink applies the rule itself.
     const worker = await harness();
 
@@ -220,10 +220,10 @@ describe('Pocket push service worker', () => {
 
   it('treats a pairing-required record as one it cannot read', async () => {
     // The record kept its pin and lost its authorization; it is not a live
-    // Client, so its Host's pushes are not this worker's to render.
+    // Client, so its Burrow's pushes are not this worker's to render.
     const worker = await harness();
     const payload = await sealedPayload(worker, { title: 'build finished' });
-    worker.put(knownHost(worker.hostStatic, worker.clientStatic, { state: 'pairing-required' }));
+    worker.put(knownBurrow(worker.burrowStatic, worker.clientStatic, { state: 'pairing-required' }));
 
     await deliver(worker, payload);
     expect(worker.shown()).toMatchObject(GENERIC_PUSH_NOTIFICATION);
@@ -233,7 +233,7 @@ describe('Pocket push service worker', () => {
     const worker = await harness();
     await deliver(worker, undefined);
     await deliver(worker, await sealedPayload(worker, { title: 'build finished' }));
-    await deliver(worker, { hostId: HOST_ID, v: 1, salt: 'nope', ct: 'nope' });
+    await deliver(worker, { burrowId: BURROW_ID, v: 1, salt: 'nope', ct: 'nope' });
     expect(worker.showNotification).toHaveBeenCalledTimes(3);
   });
 

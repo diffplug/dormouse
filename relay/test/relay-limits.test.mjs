@@ -18,7 +18,7 @@ import { MAX_RELAY_CLIENT_SOCKETS } from '../dist/relay.js';
 
 import {
   connectClient,
-  connectHost,
+  connectBurrow,
   freshApp,
   makeClock,
   ownerSession,
@@ -83,11 +83,11 @@ test('a maximal legal frame still fits under the cap', async (t) => {
 
   const socket = open();
   await socket.ready;
-  // Well-formed but addressed to no live Host, so the answer is the routing
+  // Well-formed but addressed to no live Burrow, so the answer is the routing
   // error — which is the point: the frame was read rather than rejected by size.
   socket.send({
     t: 'e2e',
-    hostId: 'A'.repeat(22),
+    burrowId: 'A'.repeat(22),
     kind: 'connection',
     id: 'B'.repeat(22),
     step: 'init',
@@ -126,13 +126,13 @@ test('a socket that stops answering the heartbeat is closed; a live one is not',
   const created = await freshApp({ now: clock.now });
   const server = await startRelay(created);
   t.after(() => server.close());
-  const { socket } = await connectHost(created.app, server);
-  await until(() => created.hub.onlineHostIds().length === 1);
+  const { socket } = await connectBurrow(created.app, server);
+  await until(() => created.hub.onlineBurrowIds().length === 1);
 
   // Two sweeps at the same instant leave it alone: silence is not death.
   assert.equal(created.sweepRelaySockets().idle, 0);
   assert.equal(created.sweepRelaySockets().idle, 0);
-  assert.equal(created.hub.onlineHostIds().length, 1);
+  assert.equal(created.hub.onlineBurrowIds().length, 1);
 
   // Past the idle timeout with nothing heard from it since.
   clock.advance(10 * 60 * 1000);
@@ -142,20 +142,20 @@ test('a socket that stops answering the heartbeat is closed; a live one is not',
   assert.equal(closed.code, 1001);
 });
 
-test('the expiry sweep tells a Host client-gone exactly once', async () => {
+test('the expiry sweep tells a Burrow client-gone exactly once', async () => {
   // The sweep tears down and THEN closes, so the socket's own `onClose` reaches
   // `unregisterClient` a second time. Driven at the hub rather than over a real
   // socket, because what needs proving is that the second call is a no-op, not
   // how long a close handshake takes.
   const { hub } = await freshApp();
-  const hostId = newE2eId();
-  const hostSocket = recordingSocket();
-  hub.registerHost(hostId, hostSocket);
+  const burrowId = newE2eId();
+  const burrowSocket = recordingSocket();
+  hub.registerBurrow(burrowId, burrowSocket);
   const clientSocket = recordingSocket();
   const client = hub.registerClient(clientSocket, { expiresAt: 1000 });
-  // `client-gone` only reaches a Host the client is bound to.
-  hub.onClientFrame(client, JSON.stringify(e2eClientFrame(hostId)));
-  assert.equal(client.hostId, hostId, 'precondition: bound');
+  // `client-gone` only reaches a Burrow the client is bound to.
+  hub.onClientFrame(client, JSON.stringify(e2eClientFrame(burrowId)));
+  assert.equal(client.burrowId, burrowId, 'precondition: bound');
 
   assert.equal(hub.closeExpiredClients(1000), 1);
   assert.equal(clientSocket.closeCode, 1008);
@@ -163,33 +163,33 @@ test('the expiry sweep tells a Host client-gone exactly once', async () => {
   hub.unregisterClient(client);
 
   assert.deepEqual(
-    hostSocket.sent.filter((frame) => frame.t === 'client-gone').length,
+    burrowSocket.sent.filter((frame) => frame.t === 'client-gone').length,
     1,
   );
 });
 
-test('a frame in flight when the sweep closed a socket reaches no Host', async () => {
+test('a frame in flight when the sweep closed a socket reaches no Burrow', async () => {
   // `close()` starts a handshake rather than ending the socket, so a frame
   // already buffered still arrives carrying the torn-down conn. Forwarding it
-  // would name a `clientId` the Host was just told was gone — and an `init`
+  // would name a `clientId` the Burrow was just told was gone — and an `init`
   // would open a fresh ceremony for the session the sweep expired, which is
   // exactly what expiring it exists to stop.
   const { hub } = await freshApp();
-  const hostId = newE2eId();
-  const hostSocket = recordingSocket();
-  hub.registerHost(hostId, hostSocket);
+  const burrowId = newE2eId();
+  const burrowSocket = recordingSocket();
+  hub.registerBurrow(burrowId, burrowSocket);
   const clientSocket = recordingSocket();
   const client = hub.registerClient(clientSocket, { expiresAt: 1000 });
-  hub.onClientFrame(client, JSON.stringify(e2eClientFrame(hostId)));
-  assert.equal(hostSocket.sent.at(-1).t, 'e2e', 'precondition: it was routing');
+  hub.onClientFrame(client, JSON.stringify(e2eClientFrame(burrowId)));
+  assert.equal(burrowSocket.sent.at(-1).t, 'e2e', 'precondition: it was routing');
 
   assert.equal(hub.closeExpiredClients(1000), 1);
-  const afterSweep = hostSocket.sent.length;
+  const afterSweep = burrowSocket.sent.length;
 
   // Both shapes: a transport frame inside the old binding, and an `init` that
   // would otherwise bind afresh.
-  hub.onClientFrame(client, JSON.stringify(e2eClientFrame(hostId, { step: 'transport' })));
-  hub.onClientFrame(client, JSON.stringify(e2eClientFrame(hostId)));
+  hub.onClientFrame(client, JSON.stringify(e2eClientFrame(burrowId, { step: 'transport' })));
+  hub.onClientFrame(client, JSON.stringify(e2eClientFrame(burrowId)));
 
-  assert.equal(hostSocket.sent.length, afterSweep, 'a torn-down conn still routed');
+  assert.equal(burrowSocket.sent.length, afterSweep, 'a torn-down conn still routed');
 });

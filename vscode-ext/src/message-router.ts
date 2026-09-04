@@ -29,15 +29,15 @@ import { ASK_BUDGET_MS } from '../../lib/src/host/remote/service-protocol';
 import { configurePeerLink, remoteNotifyPeerChange } from './peer-link';
 import { createProcessedPtyStreams } from './processed-pty-streams';
 import {
-  configureRemoteHost,
+  configureBurrow,
   deliverCommandResult,
   deliverUiEvent,
   dropForwardedCommands,
   greetPeerWindow,
   handleForwardedCommand,
-  handleRemoteHostCommand,
+  handleBurrowCommand,
   notifyDirectoryChanged,
-} from './remote-host';
+} from './burrow';
 import { log } from './log';
 import type { WebviewChannel } from './webview-messaging';
 
@@ -86,7 +86,7 @@ configurePeerLink({
   // outside this window's real PTY namespace so local ids always fall through
   // to the manager that owns them.
   ownsPty: (ptyId) => ptyManager.hasPty(ptyId) || globalOwnedPtyIds.has(ptyId),
-  // The Host half: which of these fire depends on which side of the bind this
+  // The Burrow half: which of these fire depends on which side of the bind this
   // window landed on, and the link is what knows that.
   handleForwardedCommand,
   dropForwardedCommands,
@@ -95,7 +95,7 @@ configurePeerLink({
   onClientAuthenticated: greetPeerWindow,
 });
 
-configureRemoteHost({
+configureBurrow({
   brokerRequest,
   broadcastToWebviews,
   streamPty: processedPtyStreams.streamPty,
@@ -107,19 +107,19 @@ configureRemoteHost({
  * Put one question to every webview in this window and settle with everything
  * they answered.
  *
- * The remote Host runs in the extension host, but a window's terminals are
- * spread across its webviews — each has its own xterm registry, so the Host can
+ * The Burrow runs in the extension host, but a window's terminals are
+ * spread across its webviews — each has its own xterm registry, so the Burrow can
  * neither list nor attach to a pane without asking. See docs/specs/vscode.md →
  * "Peer surfaces".
  *
  * `op` and `params` are opaque here on purpose: the operation map lives in
- * `lib/src/remote/host/peer-surfaces.ts`, and one fan-out rule covers all of
+ * `lib/src/remote/burrow/peer-surfaces.ts`, and one fan-out rule covers all of
  * it — every webview answers with zero or more results, so a webview that owns
  * nothing settles the request as fast as the one that does. The budget is the
  * backstop for a webview with no live content, which must not hang the phone's
  * picker; it is the *inner* one, deliberately shorter than the broker's
  * cross-window `PEER_REPLY_BUDGET_MS`, which has to contain a whole run of this
- * plus two socket hops. The asker is this window's own Host service, or the
+ * plus two socket hops. The asker is this window's own Burrow service, or the
  * broker window's over the link, never a webview; that is why it is a plain
  * promise rather than message plumbing.
  */
@@ -149,8 +149,8 @@ function brokerRequest(op: string, params: unknown): Promise<unknown[]> {
 /**
  * Post one message to every live webview in this window.
  *
- * The Host's results ride this rather than a reply to one webview: the service
- * answers an `rhId`, and only the adapter that minted it holds a pending
+ * The Burrow's results ride this rather than a reply to one webview: the service
+ * answers an `burrowRequestId`, and only the adapter that minted it holds a pending
  * command for it (`lib/src/lib/platform/vscode-adapter.ts`).
  */
 function broadcastToWebviews(message: ExtensionMessage): void {
@@ -689,7 +689,7 @@ export function attachRouter(
         // what was asked about actually lives in another window.
         const request = peerRequests.get(msg.requestId);
         if (!request) {
-          // Late: the budget already expired and the Host rendered a snapshot
+          // Late: the budget already expired and the Burrow rendered a snapshot
           // without whatever this webview owns. Nothing can re-open a settled
           // request, so mark the directory stale instead — the next collect
           // asks again and repairs it. Without this an idle machine never
@@ -710,8 +710,8 @@ export function attachRouter(
         notifyDirectoryChanged();
         remoteNotifyPeerChange();
         break;
-      case 'remoteHost:command':
-        handleRemoteHostCommand(msg.payload);
+      case 'burrow:command':
+        handleBurrowCommand(msg.payload);
         break;
       case 'dormouse:themeColors':
         // Webview reports its resolved terminal theme; cache for OSC color replies.

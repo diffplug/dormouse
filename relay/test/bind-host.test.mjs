@@ -21,10 +21,10 @@ function externalIpv4() {
   return undefined;
 }
 
-/** Resolves true if /api/hello answers at `host` within a short budget. */
-async function reachable(host, port) {
+/** Resolves true if /api/hello answers at `burrow` within a short budget. */
+async function reachable(burrow, port) {
   try {
-    const res = await fetch(`http://${host}:${port}/api/hello`, {
+    const res = await fetch(`http://${burrow}:${port}/api/hello`, {
       signal: AbortSignal.timeout(3_000),
     });
     return res.ok;

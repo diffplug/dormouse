@@ -1,7 +1,7 @@
 /**
  * The wire contract for the selfhost POC (docs/specs/relay.md): HTTP routes
  * and payloads, relay frames, and the terminal-only remote-api v1 messages.
- * Shared by `server`, the Host module in `lib`, and the Pocket UI so the
+ * Shared by `server`, the Burrow module in `lib`, and the Pocket UI so the
  * three sides cannot drift — the same pattern as HELLO_ROUTE.
  */
 
@@ -27,9 +27,9 @@ export const API_ROUTES = {
   signinFinish: '/api/signin/finish',
   reauthBegin: '/api/reauth/begin',
   reauthFinish: '/api/reauth/finish',
-  hostEnroll: '/api/host/enroll',
-  hostSetupToken: '/api/host/setup-token',
-  hosts: '/api/hosts',
+  burrowEnroll: '/api/burrow/enroll',
+  burrowSetupToken: '/api/burrow/setup-token',
+  burrows: '/api/burrows',
   pushConfig: '/api/push/config',
   pushSubscribe: '/api/push/subscribe',
   pushSubscriptionsQuery: '/api/push/subscriptions/query',
@@ -63,7 +63,7 @@ export const UNAUTHORIZED_ERROR = 'unauthorized';
 
 /**
  * The `error` the setup routes answer 401 with when a `setupToken` is mistyped,
- * unknown, expired, already spent, or was minted by a Host since revoked.
+ * unknown, expired, already spent, or was minted by a Burrow since revoked.
  * Distinct from {@link UNAUTHORIZED_ERROR} because Pocket keys recovery flows on
  * bodies and Pocket itself sends setup tokens: a spent one means "re-scan", not
  * "sign in again", and the shared string would drive the wrong recovery.
@@ -71,18 +71,18 @@ export const UNAUTHORIZED_ERROR = 'unauthorized';
 export const SETUP_TOKEN_INVALID_ERROR = 'invalid setup token';
 
 /**
- * The `error` `POST /api/host/enroll` answers 401 with when the *setup password*
+ * The `error` `POST /api/burrow/enroll` answers 401 with when the *setup password*
  * was wrong, as against {@link UNAUTHORIZED_ERROR} for a rejected enroll token.
  * Shared for the same reason as its two siblings: the status alone is ambiguous
  * and the two have different recoveries — retype the password, or stop pressing
- * the installer's one-click offer and use the typed form. A Host that guessed
+ * the installer's one-click offer and use the typed form. A Burrow that guessed
  * from the credential it happened to send would name the wrong one for a 401
  * raised by anything in front of the Relay.
  */
 export const BAD_PASSWORD_ERROR = 'invalid setup password';
 
 export const WS_ROUTES = {
-  host: '/ws/host',
+  burrow: '/ws/burrow',
   client: '/ws/client',
 } as const;
 
@@ -90,43 +90,43 @@ export const WS_ROUTES = {
 export const WS_TOKEN_PARAM = 'token';
 
 /**
- * Close code the relay sends to a Host socket it displaces when a newer socket
- * claims the same `hostId` (only one socket may own a hostId — see relay.md
+ * Close code the relay sends to a Burrow socket it displaces when a newer socket
+ * claims the same `burrowId` (only one socket may own a burrowId — see relay.md
  * "Relay"). In the 4000-4999 application-private range.
  *
- * This lives on the wire contract rather than inside `server` because the Host
+ * This lives on the wire contract rather than inside `server` because the Burrow
  * keys its reconnect policy on it: every other close is transient and gets
  * backoff-reconnected, but this one is deliberate and terminal, so the evicted
- * Host stands down instead of reconnecting. If the two sides disagreed on the
- * number, two Hosts would evict each other in an endless loop.
+ * Burrow stands down instead of reconnecting. If the two sides disagreed on the
+ * number, two Burrows would evict each other in an endless loop.
  */
-export const WS_CLOSE_HOST_REPLACED = 4000;
+export const WS_CLOSE_BURROW_REPLACED = 4000;
 
-/** Human-readable reason paired with {@link WS_CLOSE_HOST_REPLACED}. */
-export const WS_CLOSE_HOST_REPLACED_REASON = 'replaced by a newer host connection';
+/** Human-readable reason paired with {@link WS_CLOSE_BURROW_REPLACED}. */
+export const WS_CLOSE_BURROW_REPLACED_REASON = 'replaced by a newer burrow connection';
 
 /**
- * The Host's `hosts.json` row is gone, so its bearer token names nothing.
+ * The Burrow's `burrows.json` row is gone, so its bearer token names nothing.
  *
- * A distinct code from {@link WS_CLOSE_HOST_REPLACED} because the two mean
- * opposite things to a reconnect: a replaced Host must stand down, while a
+ * A distinct code from {@link WS_CLOSE_BURROW_REPLACED} because the two mean
+ * opposite things to a reconnect: a replaced Burrow must stand down, while a
  * revoked one may retry as often as it likes — the upgrade will simply 401,
  * which is the whole of what revocation is.
  */
-export const WS_CLOSE_HOST_REVOKED = 4001;
+export const WS_CLOSE_BURROW_REVOKED = 4001;
 
-/** Human-readable reason paired with {@link WS_CLOSE_HOST_REVOKED}. */
-export const WS_CLOSE_HOST_REVOKED_REASON = 'this host is no longer enrolled';
+/** Human-readable reason paired with {@link WS_CLOSE_BURROW_REVOKED}. */
+export const WS_CLOSE_BURROW_REVOKED_REASON = 'this burrow is no longer enrolled';
 
 /** The selfhost mode has exactly one account. */
 export const SELFHOST_ACCOUNT_ID = 'owner';
 
 /**
  * What gates the two setup routes: the single-use `token` of a
- * {@link SetupTokenResponse} an enrolled Host minted for its QR, and nothing
+ * {@link SetupTokenResponse} an enrolled Burrow minted for its QR, and nothing
  * else. Registering a passkey therefore always begins at a code an enrolled
- * Host displayed; the setup password enrolls Hosts and no longer registers
- * anything ({@link HostEnrollRequest}).
+ * Burrow displayed; the setup password enrolls Burrows and no longer registers
+ * anything ({@link BurrowEnrollRequest}).
  */
 export interface SetupCredential {
   setupToken: string;
@@ -171,7 +171,7 @@ export interface SigninFinishRequest {
   assertion: PasskeyAssertion;
 }
 export interface SigninFinishResponse {
-  /** Bearer token for `/api/hosts` and the `token` param of /ws/client. */
+  /** Bearer token for `/api/burrows` and the `token` param of /ws/client. */
   sessionToken: string;
   accountId: string;
   expiresAt: number;
@@ -184,7 +184,7 @@ export interface SigninFinishResponse {
    * having performed the registration itself — which forced a second passkey
    * on every new browser profile, most visibly an iOS Home Screen install.
    *
-   * Handing it out costs nothing. It is a *public* key the Host is given inside
+   * Handing it out costs nothing. It is a *public* key the Burrow is given inside
    * every presence proof anyway, and possessing it authorizes nothing: a
    * connection still requires a fresh assertion, the Client static the Noise
    * handshake authenticated, and both halves on one active ACL record
@@ -216,7 +216,7 @@ export interface ReauthBeginResponse {
   /**
    * The one credential the ceremony may assert with — the binding's own. A
    * `get()` that could answer with any of the account's passkeys would let a
-   * synced credential the Host never paired satisfy a proof bound to one it did.
+   * synced credential the Burrow never paired satisfy a proof bound to one it did.
    */
   allowCredentials: string[];
 }
@@ -231,46 +231,46 @@ export interface ReauthFinishResponse {
 }
 
 /**
- * Enroll a Host. Exactly one credential must be present — the setup password,
+ * Enroll a Burrow. Exactly one credential must be present — the setup password,
  * or the one-time `token` of an installer's `EnrollmentOffer` (enroll-offer.ts)
- * for a Host on the Relay's own machine. Both, or neither, is a 400.
+ * for a Burrow on the Relay's own machine. Both, or neither, is a 400.
  *
  * **No label.** The name a machine presents is its own, kept beside the
- * enrollment on the Host and told to a Client only inside an encrypted ceremony
- * outcome (`docs/specs/remote-security-model.md` → Host identity).
+ * enrollment on the Burrow and told to a Client only inside an encrypted ceremony
+ * outcome (`docs/specs/remote-security-model.md` → Burrow identity).
  */
-export type HostEnrollRequest =
+export type BurrowEnrollRequest =
   | { password: string; enrollToken?: never }
   | { password?: never; enrollToken: string };
-export interface HostEnrollResponse {
-  hostId: string;
-  /** Bearer credential for the `token` param of /ws/host. */
-  hostToken: string;
-  /** What the Host must enforce as its ConnectionPolicy. */
+export interface BurrowEnrollResponse {
+  burrowId: string;
+  /** Bearer credential for the `token` param of /ws/burrow. */
+  burrowToken: string;
+  /** What the Burrow must enforce as its ConnectionPolicy. */
   origin: string;
   rpId: string;
   /**
-   * Whether the Host must demand a user-verified assertion (biometric/PIN,
+   * Whether the Burrow must demand a user-verified assertion (biometric/PIN,
    * not merely presence).
    *
-   * Optional and additive: an older Host reading a newer Relay's response
-   * ignores it, and a newer Host reading an older Relay's sees `undefined`,
+   * Optional and additive: an older Burrow reading a newer Relay's response
+   * ignores it, and a newer Burrow reading an older Relay's sees `undefined`,
    * which is the same as `false`. It travels here rather than being
-   * configured on the Host because the invariant is that the two sides
-   * *mirror* — a Relay demanding UV while the Host does not means the Host is
-   * the weaker verifier, and the Host is the one that decides access.
+   * configured on the Burrow because the invariant is that the two sides
+   * *mirror* — a Relay demanding UV while the Burrow does not means the Burrow is
+   * the weaker verifier, and the Burrow is the one that decides access.
    */
   requireUserVerification?: boolean;
 }
 
 /**
- * Host-token auth. The single-use setup credential an enrolled Host mints for
- * its pairing QR: the token only, since the Host composes the URL itself from
+ * Burrow-token auth. The single-use setup credential an enrolled Burrow mints for
+ * its pairing QR: the token only, since the Burrow composes the URL itself from
  * the origin it enrolled against, and a URL minted Relay-side would be one
  * more place the deployment's own address is decided.
  *
  * **No mint handle.** Redemption at the Relay no longer flips anything on the
- * Host: the invitation the same QR carries is Host memory, and its state — not
+ * Burrow: the invitation the same QR carries is Burrow memory, and its state — not
  * the token's — is what the QR panel renders
  * (`docs/specs/remote-security-model.md` → Pairing). A phone that already holds
  * a session retires the token itself through `POST /api/setup/retire`.
@@ -291,17 +291,17 @@ export interface SetupRetireRequest {
 }
 
 /**
- * How many unspent setup tokens ONE Host may hold, capping both sides of the
- * credential: the Relay's issuer map and the Host's own map of the nonces it
+ * How many unspent setup tokens ONE Burrow may hold, capping both sides of the
+ * credential: the Relay's issuer map and the Burrow's own map of the nonces it
  * paired with them. One constant, so live-on-one-side and spent-on-the-other
  * cannot drift. A human scans one at a time, so it is far above any real use.
  *
  * Source of truth for the eviction rule: `relay/src/setup-token.ts`.
  */
-export const MAX_TOKENS_PER_HOST = 8;
+export const MAX_TOKENS_PER_BURROW = 8;
 
 /**
- * The longest setup token this Host will put in a QR.
+ * The longest setup token this Burrow will put in a QR.
  *
  * A real one is base64url of 32 bytes (43 characters). The bound is what keeps
  * a 200 off a hostile or broken Relay from reaching the QR encoder, which
@@ -317,9 +317,9 @@ function isSetupTokenHandle(value: unknown): value is string {
 
 /**
  * Structural validation of a {@link SetupTokenResponse}, beside the type so a
- * field added here cannot be silently accepted by the Host that reads one.
+ * field added here cannot be silently accepted by the Burrow that reads one.
  *
- * The Host runs it on the 200 body for the reason `isEnrollment` exists: a
+ * The Burrow runs it on the 200 body for the reason `isEnrollment` exists: a
  * Relay that answers 200 with `token` missing — a version skew, a proxy that
  * rewrote the body — would otherwise put `undefined` in the QR's URL. The
  * charset and length bounds are not hygiene: the token goes straight into a QR
@@ -337,25 +337,25 @@ export function isSetupTokenResponse(value: unknown): value is SetupTokenRespons
 }
 
 /**
- * Discovery only: which Hosts this account has enrolled, and which are
+ * Discovery only: which Burrows this account has enrolled, and which are
  * connected. **No label** — the Relay holds none, and a Client renders the one
  * its own pinned record carries (`docs/specs/pocket-app.md`).
  */
-export interface HostsResponse {
-  hosts: Array<{ hostId: string; online: boolean }>;
+export interface BurrowsResponse {
+  burrows: Array<{ burrowId: string; online: boolean }>;
 }
 
 // ---------------------------------------------------------------------------
 // Web Push (see alert.md "Push notifications" and relay.md "HTTP API").
 //
 // Two audiences with different credentials: the Pocket Client registers, queries
-// and deletes its own rows with a session token plus the `deliveryId` the Host
-// minted for it; the Host reads and sends with its `hostToken`. Rows are keyed
-// on the PAIR (hostId, deliveryId), so a Client subscribes once per Host it is
-// paired with and a Host can only ever see or reach its own subscribers.
+// and deletes its own rows with a session token plus the `deliveryId` the Burrow
+// minted for it; the Burrow reads and sends with its `burrowToken`. Rows are keyed
+// on the PAIR (burrowId, deliveryId), so a Client subscribes once per Burrow it is
+// paired with and a Burrow can only ever see or reach its own subscribers.
 //
 // **The delivery id is the proof.** It is 256 unguessable bits known only to
-// the Host's ACL record and that Client's own pinned record, so possession is
+// the Burrow's ACL record and that Client's own pinned record, so possession is
 // what authorizes registering, querying, and deleting — there is no challenge
 // and no signature, and the Relay never lists ids to a session.
 
@@ -372,19 +372,19 @@ export interface PushSubscriptionPayload {
 }
 
 export interface PushSubscribeRequest {
-  hostId: string;
-  /** Base64url of 32 bytes — the capability this Host minted for this Client. */
+  burrowId: string;
+  /** Base64url of 32 bytes — the capability this Burrow minted for this Client. */
   deliveryId: string;
   subscription: PushSubscriptionPayload;
 }
 export interface PushSubscribeResponse {
   subscribedAt: number;
   /**
-   * Every Host whose rows carry the presented endpoint after the mutation — the
+   * Every Burrow whose rows carry the presented endpoint after the mutation — the
    * state, not the delta. When *this* delivery's own row changes address, every
    * row still on the endpoint it replaced goes in the same mutation; a row for
    * some other delivery whose phone rotated without re-registering is left to
-   * the provider's own 404/410 pruning, since the Relay holds no cross-Host
+   * the provider's own 404/410 pruning, since the Relay holds no cross-Burrow
    * device identity that could link the two.
    *
    * Reporting the result rather than the event is what makes a lost response
@@ -392,13 +392,13 @@ export interface PushSubscribeResponse {
    * performed, but it can always answer what is there now, so the Client needs
    * no memory of what it did.
    */
-  hostIds: string[];
+  burrowIds: string[];
 }
 
 /**
  * Session auth. Which of the caller's **own** delivery ids are registered, and
- * for which Host — the readback a reloaded Client uses instead of re-offering
- * Enable for every Host.
+ * for which Burrow — the readback a reloaded Client uses instead of re-offering
+ * Enable for every Burrow.
  *
  * Parameterized by capability rather than by identity: the caller must already
  * hold each id it asks about, so this is proof of possession rather than the
@@ -409,12 +409,12 @@ export interface PushSubscriptionsQueryRequest {
 }
 export interface PushSubscriptionsQueryResponse {
   /** Only rows matching a presented id, and only under the current VAPID key. */
-  registered: Array<{ hostId: string; deliveryId: string }>;
+  registered: Array<{ burrowId: string; deliveryId: string }>;
 }
 
 /**
  * The most delivery ids one request may name — a query's `deliveryIds`, and a
- * send's `recipients`. A browser holds one per paired Host and a Host has one
+ * send's `recipients`. A browser holds one per paired Burrow and a Burrow has one
  * ACL record per paired Client, so this is far above any real use on either
  * route: what it buys the query is not being a bulk oracle, and what it buys
  * the send is a bound on the sealed envelopes one POST can carry.
@@ -422,7 +422,7 @@ export interface PushSubscriptionsQueryResponse {
 export const MAX_PUSH_QUERY_DELIVERY_IDS = 64;
 
 /**
- * Host-token auth. Returns delivery ids only — the Host holds the ACL and is
+ * Burrow-token auth. Returns delivery ids only — the Burrow holds the ACL and is
  * the only side that can turn one into a human label, so the Relay never
  * learns one (docs/specs/remote-security-model.md).
  */
@@ -443,12 +443,12 @@ export interface SealedPushRecipient {
 }
 
 /**
- * Host-token auth. `recipients` is required and non-empty: the Host holds the
+ * Burrow-token auth. `recipients` is required and non-empty: the Burrow holds the
  * ACL and is the only party that may decide who a push reaches, so the Relay
  * never selects recipients itself.
  *
  * **The Relay reads no notification text.** Title, body, and the per-Session
- * collapse tag are bounded on the Host, sealed, and re-sanitized in the service
+ * collapse tag are bounded on the Burrow, sealed, and re-sanitized in the service
  * worker at the render sink; what crosses this route is ciphertext plus a
  * delivery address ([alert.md](../../../docs/specs/alert.md) -> Push
  * notifications).
@@ -459,21 +459,21 @@ export interface PushSendRequest {
 
 /**
  * What the Relay forwards to the push service, verbatim: the sealed envelope
- * plus the `hostId` from the sending Host's own token, which is how the worker
+ * plus the `burrowId` from the sending Burrow's own token, which is how the worker
  * picks the pinned record to decrypt against.
  */
 export interface SealedPushPayload extends SealedPushV1 {
-  hostId: string;
+  burrowId: string;
 }
 /**
  * Wall-clock bound the send route holds one delivery attempt under, so a hung
  * push service cannot hold the handler open indefinitely
  * (`sendWithinDeadline` in `relay/src/push.ts`).
  *
- * Shared because it is the Host's contract too: this is how long the Relay may
- * legitimately take to answer `POST /api/push/send`, so the Host's own request
+ * Shared because it is the Burrow's contract too: this is how long the Relay may
+ * legitimately take to answer `POST /api/push/send`, so the Burrow's own request
  * timeout has to sit *above* it or a delivery that succeeded reports as a
- * failure (`lib/src/remote/host/push-delivery.ts`).
+ * failure (`lib/src/remote/burrow/push-delivery.ts`).
  */
 export const PUSH_SEND_DEADLINE_MS = 15_000;
 
@@ -482,11 +482,11 @@ export interface PushSendResponse {
   delivered: number;
   /** Subscriptions the push service rejected as gone; these are now dropped. */
   expired: number;
-  /** Named delivery ids with no subscription for this Host. */
+  /** Named delivery ids with no subscription for this Burrow. */
   unknown: number;
   /**
    * Deliveries the push service refused for a transient-looking reason; the
-   * rows are kept. Reported so the Host can tell an all-failed fan-out from
+   * rows are kept. Reported so the Burrow can tell an all-failed fan-out from
    * success — the HTTP status is 200 either way.
    */
   failed: number;
@@ -505,15 +505,15 @@ export type ClientFrame = E2eClientFrame;
 
 /** Relay → client. */
 export type RelayToClientFrame =
-  | { t: 'host-gone' }
+  | { t: 'burrow-gone' }
   | { t: 'error'; error: string }
   | E2eRelayToClientFrame;
 
-/** Relay → host. Every frame addresses one Client by its Relay-assigned `clientId`. */
-export type RelayToHostFrame = { t: 'client-gone'; clientId: string } | E2eRelayToHostFrame;
+/** Relay → burrow. Every frame addresses one Client by its Relay-assigned `clientId`. */
+export type RelayToBurrowFrame = { t: 'client-gone'; clientId: string } | E2eRelayToBurrowFrame;
 
-/** Host → server. */
-export type HostFrame = E2eHostFrame;
+/** Burrow → server. */
+export type BurrowFrame = E2eBurrowFrame;
 
 // ---------------------------------------------------------------------------
 // The `e2e` relay envelope: one end-to-end Noise message per frame, in a
@@ -526,11 +526,11 @@ export type E2eKind = 'pairing' | 'connection';
 /** A Client speaks message 1 (`init`), then transport. */
 export type E2eClientStep = 'init' | 'transport';
 
-/** A Host answers message 2 (`response`), then transport. */
-export type E2eHostStep = 'response' | 'transport';
+/** A Burrow answers message 2 (`response`), then transport. */
+export type E2eBurrowStep = 'response' | 'transport';
 
 /**
- * Every routing id on this envelope — `hostId`, `id`, `clientId` — is this many
+ * Every routing id on this envelope — `burrowId`, `id`, `clientId` — is this many
  * bytes. Exported so a minter and {@link isE2eId} cannot drift: an id built at
  * any other length is one the shared guard silently refuses.
  */
@@ -551,7 +551,7 @@ export const E2E_ID_LENGTH = base64UrlLength(E2E_ID_BYTE_LENGTH);
 export const MAX_E2E_CIPHERTEXT_LENGTH = base64UrlLength(NOISE_MAX_MESSAGE_LENGTH);
 
 /**
- * The longest `clientId` a Host will act on. The relay mints these as base64url
+ * The longest `clientId` a Burrow will act on. The relay mints these as base64url
  * of 16 random bytes; the headroom exists because the id is a *map key* on a
  * hostile-relay path — bounding every other field while leaving the key free
  * would bound only the part that was already bounded.
@@ -559,24 +559,24 @@ export const MAX_E2E_CIPHERTEXT_LENGTH = base64UrlLength(NOISE_MAX_MESSAGE_LENGT
 export const MAX_CLIENT_ID_LENGTH = 256;
 
 /**
- * The longest raw server → Host frame text a Host will hand to `JSON.parse`.
+ * The longest raw server → Burrow frame text a Burrow will hand to `JSON.parse`.
  *
  * Every other bound in this file is measured on a value the parser already
  * produced, so none of them is reached until the whole frame has been buffered
- * and parsed. The relay is assumed hostile and the Host is the process that
+ * and parsed. The relay is assumed hostile and the Burrow is the process that
  * owns every PTY, so the parse itself needs a bound of its own: the largest
  * legal frame is one maximal ciphertext plus its routing fields, and the slack
  * covers the JSON punctuation, the two fixed-length ids, `t`/`kind`/`step`, and
  * any key ordering. Every legal field is ASCII, so this bounds bytes and UTF-16
  * code units alike and can also be handed to `ws` as `maxPayload`.
  */
-export const MAX_SERVER_TO_HOST_FRAME_LENGTH =
+export const MAX_SERVER_TO_BURROW_FRAME_LENGTH =
   MAX_E2E_CIPHERTEXT_LENGTH + MAX_CLIENT_ID_LENGTH + 512;
 
 /** Client → server. */
 export interface E2eClientFrame {
   t: 'e2e';
-  hostId: string;
+  burrowId: string;
   kind: E2eKind;
   id: string;
   step: E2eClientStep;
@@ -584,24 +584,24 @@ export interface E2eClientFrame {
   ct: string;
 }
 
-/** Relay → host: the Client's frame with the Relay-assigned `clientId`. */
-export interface E2eRelayToHostFrame extends E2eClientFrame {
+/** Relay → burrow: the Client's frame with the Relay-assigned `clientId`. */
+export interface E2eRelayToBurrowFrame extends E2eClientFrame {
   clientId: string;
 }
 
-/** Host → server. */
-export interface E2eHostFrame {
+/** Burrow → server. */
+export interface E2eBurrowFrame {
   t: 'e2e';
   clientId: string;
   kind: E2eKind;
   id: string;
-  step: E2eHostStep;
+  step: E2eBurrowStep;
   ct: string;
 }
 
-/** Relay → client: the Host's frame with `hostId` stamped from its socket. */
-export interface E2eRelayToClientFrame extends Omit<E2eHostFrame, 'clientId'> {
-  hostId: string;
+/** Relay → client: the Burrow's frame with `burrowId` stamped from its socket. */
+export interface E2eRelayToClientFrame extends Omit<E2eBurrowFrame, 'clientId'> {
+  burrowId: string;
 }
 
 export function isE2eKind(value: unknown): value is E2eKind {
@@ -619,8 +619,8 @@ export function isE2eCiphertext(value: unknown): value is string {
 }
 
 /**
- * The shape guard both a relay and a Host run on a Client-originated `e2e`
- * frame — the both-sides rule the relay and the Host share (relay.md ->
+ * The shape guard both a relay and a Burrow run on a Client-originated `e2e`
+ * frame — the both-sides rule the relay and the Burrow share (relay.md ->
  * Relay). It cannot check the ciphertext, so all it enforces is that the
  * routing values are bounded. Pinned by `remote-lib-common/test/wire.test.mjs`
  * and, against real relay-minted ids, `relay/test/e2e-relay.test.mjs`.
@@ -630,9 +630,9 @@ export function isE2eClientFrame(value: unknown): value is E2eClientFrame {
   const frame = value as Record<string, unknown>;
   return (
     frame.t === 'e2e' &&
-    // A `hostId` is minted the same way an invitation or connection id is, so
+    // A `burrowId` is minted the same way an invitation or connection id is, so
     // one length rule covers every routing id the Client puts on an envelope.
-    isE2eId(frame.hostId) &&
+    isE2eId(frame.burrowId) &&
     isE2eKind(frame.kind) &&
     isE2eId(frame.id) &&
     (frame.step === 'init' || frame.step === 'transport') &&
@@ -641,12 +641,12 @@ export function isE2eClientFrame(value: unknown): value is E2eClientFrame {
 }
 
 /**
- * {@link isE2eClientFrame} plus the relay-stamped `clientId` a Host reads. The
+ * {@link isE2eClientFrame} plus the relay-stamped `clientId` a Burrow reads. The
  * free `clientId` bound runs first: the ciphertext scan it would otherwise
  * follow costs ~33 µs on a maximal `ct`, and a hostile relay can send those at
  * line rate.
  */
-export function isE2eRelayToHostFrame(value: unknown): value is E2eRelayToHostFrame {
+export function isE2eRelayToBurrowFrame(value: unknown): value is E2eRelayToBurrowFrame {
   return (
     isBoundedString((value as { clientId?: unknown } | null)?.clientId, MAX_CLIENT_ID_LENGTH) &&
     isE2eClientFrame(value)
@@ -655,7 +655,7 @@ export function isE2eRelayToHostFrame(value: unknown): value is E2eRelayToHostFr
 
 /**
  * The shape guard a **Client** runs on what the relay hands it — the mirror of
- * {@link isE2eRelayToHostFrame}, and run for the same reason: the Client does
+ * {@link isE2eRelayToBurrowFrame}, and run for the same reason: the Client does
  * not trust the relay to have bounded anything, and every value here is a map
  * key or a base64url decode away from being work.
  */
@@ -664,7 +664,7 @@ export function isE2eRelayToClientFrame(value: unknown): value is E2eRelayToClie
   const frame = value as Record<string, unknown>;
   return (
     frame.t === 'e2e' &&
-    isE2eId(frame.hostId) &&
+    isE2eId(frame.burrowId) &&
     isE2eKind(frame.kind) &&
     isE2eId(frame.id) &&
     (frame.step === 'response' || frame.step === 'transport') &&
@@ -672,8 +672,8 @@ export function isE2eRelayToClientFrame(value: unknown): value is E2eRelayToClie
   );
 }
 
-/** The shape guard a relay runs on a Host-originated `e2e` frame. */
-export function isE2eHostFrame(value: unknown): value is E2eHostFrame {
+/** The shape guard a relay runs on a Burrow-originated `e2e` frame. */
+export function isE2eBurrowFrame(value: unknown): value is E2eBurrowFrame {
   if (!value || typeof value !== 'object') return false;
   const frame = value as Record<string, unknown>;
   return (
@@ -731,7 +731,7 @@ export interface HelloParams {
 }
 export interface HelloResult {
   protocolVersion: 1;
-  hostId: string;
+  burrowId: string;
   grants: { input: boolean; layout: boolean };
 }
 
@@ -772,7 +772,7 @@ export interface TerminalAttachResult {
 export interface TerminalDataEvent {
   /**
    * Base64url of the UTF-8 *renderer* projection — Dormouse-processed and
-   * renderer-unparsed, so it is what the Host's own xterm writes, not raw PTY
+   * renderer-unparsed, so it is what the Burrow's own xterm writes, not raw PTY
    * output.
    */
   bytes: string;
@@ -812,7 +812,7 @@ export const MAX_TERMINAL_DIMENSION = 2000;
 /**
  * Coerce a requested terminal dimension (cols or rows) to a positive integer,
  * falling back to `fallback` when the value is absent or not finite. Shared so
- * the Host api, the client adapter, and the test harness all sanitize sizes the
+ * the Burrow api, the client adapter, and the test harness all sanitize sizes the
  * same way.
  *
  * Clamped at **both** ends, and the upper bound is the security-relevant half:

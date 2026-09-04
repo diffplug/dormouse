@@ -7,7 +7,7 @@ import type { SessionStatus } from '../../lib/terminal-registry';
 
 const DEFAULT_TITLE = 'Terminal';
 
-/** Title for a surface, falling back to a friendly default when the Host sends none. */
+/** Title for a surface, falling back to a friendly default when the Burrow sends none. */
 function paneTitle(entry: DirectoryEntry): string {
   return entry.title || DEFAULT_TITLE;
 }
@@ -16,7 +16,7 @@ export function attachableDirectoryEntries(entries: DirectoryEntry[]): Directory
   return entries.filter((entry) => entry.alive);
 }
 
-/** The `{id,title}` sessions `MobileWall` mounts, in Host order. */
+/** The `{id,title}` sessions `MobileWall` mounts, in Burrow order. */
 export function directoryWallSessions(entries: DirectoryEntry[]): MobileWallSession[] {
   return attachableDirectoryEntries(entries).map((entry) => ({
     id: entry.surfaceId,

@@ -7,7 +7,7 @@
  * — installs no listeners, structurally rather than by sniffing `globalThis`.
  */
 
-import { indexedDbKnownHostStore } from '../client/pocket-db';
+import { indexedDbKnownBurrowStore } from '../client/pocket-db';
 import { installPocketWorker, type WorkerScope } from './sw';
 
-installPocketWorker(self as unknown as WorkerScope, indexedDbKnownHostStore());
+installPocketWorker(self as unknown as WorkerScope, indexedDbKnownBurrowStore());

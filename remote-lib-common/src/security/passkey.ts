@@ -1,12 +1,12 @@
 /**
  * Passkeys: the fresh-user-presence primitive.
  *
- * Passkeys authenticate the user account; they never independently grant Host
+ * Passkeys authenticate the user account; they never independently grant Burrow
  * access (they are user credentials, not device identities — they sync across
  * devices). This module verifies a WebAuthn authentication assertion so that
- * BOTH the Relay and the Host can independently check fresh user presence.
- * The Host stores only a hash of each paired passkey's public key; the Client
- * presents the full key at connection time and the Host checks it against the
+ * BOTH the Relay and the Burrow can independently check fresh user presence.
+ * The Burrow stores only a hash of each paired passkey's public key; the Client
+ * presents the full key at connection time and the Burrow checks it against the
  * hash, so a compromised Relay cannot substitute a different passkey.
  *
  * Only ES256 (ECDSA P-256 / SHA-256) is supported — the mandatory-to-implement
@@ -49,9 +49,9 @@ export interface PasskeyAssertionExpectations {
 
 /**
  * The standing half of {@link PasskeyAssertionExpectations} — everything but
- * the per-ceremony challenge. This is what a Host records at enrollment and
+ * the per-ceremony challenge. This is what a Burrow records at enrollment and
  * what both verifiers demand of an assertion, so a Relay that demands user
- * verification while the Host does not cannot leave the weaker verifier
+ * verification while the Burrow does not cannot leave the weaker verifier
  * deciding access (`docs/specs/remote-security-model.md`).
  */
 export type ConnectionPolicy = Omit<PasskeyAssertionExpectations, 'challenge'>;
@@ -170,7 +170,7 @@ export async function verifyPasskeyAssertion(
 }
 
 /**
- * The Host ACL stores this hash (not the key itself) at pairing time; at
+ * The Burrow ACL stores this hash (not the key itself) at pairing time; at
  * connection time the presented key must hash to the stored value.
  */
 export async function hashPasskeyPublicKey(

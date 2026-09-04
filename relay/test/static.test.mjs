@@ -54,7 +54,7 @@ test('SPA fallback returns index.html for an unknown non-file path', async () =>
 test('API routes still win over static serving', async () => {
   const { app: hono } = app({ pocketDir: await makePocketDir() });
   // No bearer token → the session-gated API route answers, not the static app.
-  const res = await hono.request('/api/hosts');
+  const res = await hono.request('/api/burrows');
   assert.equal(res.status, 401);
   const body = await res.json();
   assert.equal(body.error, 'unauthorized');
@@ -101,7 +101,7 @@ test('falls back to the build-instructions stub when no Pocket build exists', as
 });
 
 // --- Content-Security-Policy -----------------------------------------------
-// The Pocket origin holds a per-Host Client static and the worker that opens
+// The Pocket origin holds a per-Burrow Client static and the worker that opens
 // sealed pushes, and `docs/specs/security.md` -> "What is not defended" names active XSS here as an accepted risk —
 // so the policy is the defense in depth around it
 // (docs/specs/pocket-app.md -> Deployment).
@@ -147,9 +147,9 @@ test('the policy is same-origin everywhere, and unframeable', async () => {
   assert.deepEqual(policy['style-src'], ["'self'", "'unsafe-inline'"]);
 });
 
-test('connect-src names this deployment own relay and no other host', async () => {
+test('connect-src names this deployment own relay and no other burrow', async () => {
   // `'self'` alone leaves ws/wss to browsers that have disagreed about whether
-  // it covers them, and a bare `ws:` would admit every host on the network.
+  // it covers them, and a bare `ws:` would admit every burrow on the network.
   for (const [origin, expected] of [
     ['https://dormouse.tailnet.ts.net', 'wss://dormouse.tailnet.ts.net'],
     ['http://localhost:3000', 'ws://localhost:3000'],

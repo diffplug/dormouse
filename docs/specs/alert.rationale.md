@@ -70,13 +70,13 @@
 
 ## Push notifications
 
-**Why both halves live under `remote/host/`.** The sink rides the lazily-imported `RemotePairingModalHost` chunk; the shared ring machine and the device store stay in the common bundle instead, since speech and the settings dialog need them everywhere.
+**Why both halves live under `remote/burrow/`.** The sink rides the lazily-imported `RemotePairingModalHost` chunk; the shared ring machine and the device store stay in the common bundle instead, since speech and the settings dialog need them everywhere.
 
 **Why `toPushText` is not `toSpokenText`.** The angle-bracket rule exists only because WebKit's synthesizer wedges on them (Spoken alarms); an OS notification has no such failure, and instead has bidi and zero-width formatting that can visually reorder or hide text.
 
-**Why the Host, not the Relay, chooses recipients.** A revoked Client keeps its subscription row on the Relay, nothing propagating a revocation today (`docs/specs/remote-security-model.md` → Future), so a Relay picking recipients from its own rows would keep pushing Pane labels to a de-authorized phone.
+**Why the Burrow, not the Relay, chooses recipients.** A revoked Client keeps its subscription row on the Relay, nothing propagating a revocation today (`docs/specs/remote-security-model.md` → Future), so a Relay picking recipients from its own rows would keep pushing Pane labels to a de-authorized phone.
 
-**Why the Host does not ask which devices are subscribed first.** The Relay intersects the Host's targets with its own subscriptions regardless, so the target set is identical either way; asking first would cost the alarm a second round trip.
+**Why the Burrow does not ask which devices are subscribed first.** The Relay intersects the Burrow's targets with its own subscriptions regardless, so the target set is identical either way; asking first would cost the alarm a second round trip.
 
 ## Settings dialog
 

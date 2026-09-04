@@ -1,21 +1,21 @@
 /**
  * In-memory actors simulating the three parties of the remote security model
- * (docs/specs/remote-security-model.md): Client (Dormouse Pocket), Host
+ * (docs/specs/remote-security-model.md): Client (Dormouse Pocket), Burrow
  * (Dormouse Terminal), and coordinating Relay.
  *
  * Everything here runs the *real* primitives — the QR grammar and its parser,
- * the IK handshake against the invitation key and then the pinned Host static,
- * the fixed-size padded control messages, the one presence verifier, the Host
- * challenge issuer, and the Host ACL. Only the relay is imaginary: a Client
- * hands its Noise messages straight to a Host object.
+ * the IK handshake against the invitation key and then the pinned Burrow static,
+ * the fixed-size padded control messages, the one presence verifier, the Burrow
+ * challenge issuer, and the Burrow ACL. Only the relay is imaginary: a Client
+ * hands its Noise messages straight to a Burrow object.
  *
  * Tampering is a first-class feature: every actor accepts overrides so tests
  * can forge exactly one field at a time and assert the precise deny reason.
  */
 
 import {
-  HostAcl,
-  HostChallengeIssuer,
+  BurrowAcl,
+  ChallengeIssuer,
   NoiseTransportSession,
   boundedPairingLabel,
   concatBytes,
@@ -59,9 +59,9 @@ export function randomSecret() {
   return toBase64Url(randomBytes(32));
 }
 
-/** A SimHost, or a bare hostId string; both name one Host to these actors. */
-function hostIdOf(host) {
-  return typeof host === 'string' ? host : host.hostId;
+/** A SimBurrow, or a bare burrowId string; both name one Burrow to these actors. */
+function burrowIdOf(burrow) {
+  return typeof burrow === 'string' ? burrow : burrow.burrowId;
 }
 
 /** Deterministic, manually-advanced clock shared by actors in a scenario. */
@@ -207,20 +207,20 @@ export class SimServer {
 
 /**
  * A compromised coordinating Relay: vouches for anyone. Used to prove the
- * Host denies access even when every Relay-side check is attacker-controlled.
+ * Burrow denies access even when every Relay-side check is attacker-controlled.
  */
 export class CompromisedServer extends SimServer {
   validateAccount() {}
 }
 
 /**
- * The Host (Dormouse Terminal): the ACL, the challenge issuer, one long-term
+ * The Burrow (Dormouse Terminal): the ACL, the challenge issuer, one long-term
  * Noise static, and the per-invitation one-use keypairs. It is the only party
  * that writes the ACL, and the only one that decides a connection.
  */
-export class SimHost {
+export class SimBurrow {
   static async create({
-    hostId = randomRoutingId(),
+    burrowId = randomRoutingId(),
     label = 'Laptop',
     rpId,
     origin,
@@ -229,12 +229,12 @@ export class SimHost {
     ttlMs,
     invitationTtlSeconds = 300,
   } = {}) {
-    const host = new SimHost({ hostId, label, rpId, origin, clock, policy, ttlMs, invitationTtlSeconds });
+    const burrow = new SimBurrow({ burrowId, label, rpId, origin, clock, policy, ttlMs, invitationTtlSeconds });
     // The long-term static a paired Client pins and every later connection
-    // runs IK against. Public: the Host hands it out in every PairingOutcomeV1.
-    host.staticKeyPair = await generateNoiseKeyPair();
-    host.staticPublicKey = toBase64Url(host.staticKeyPair.publicKey);
-    return host;
+    // runs IK against. Public: the Burrow hands it out in every PairingOutcomeV1.
+    burrow.staticKeyPair = await generateNoiseKeyPair();
+    burrow.staticPublicKey = toBase64Url(burrow.staticKeyPair.publicKey);
+    return burrow;
   }
 
   /** inviteId -> { invitation, keyPair, state, session, clientStaticPublicKey } */
@@ -242,17 +242,17 @@ export class SimHost {
   /** connectionId -> { session, clientStaticPublicKey, challenge } */
   #connections = new Map();
 
-  constructor({ hostId, label, rpId, origin, clock, policy, ttlMs, invitationTtlSeconds }) {
-    this.hostId = hostId;
+  constructor({ burrowId, label, rpId, origin, clock, policy, ttlMs, invitationTtlSeconds }) {
+    this.burrowId = burrowId;
     this.label = label;
     this.clock = clock;
     this.invitationTtlSeconds = invitationTtlSeconds;
     this.policy = { rpId, origin, ...policy };
-    // The origin the Host enrolled against, and the only prefix its QR carries.
+    // The origin the Burrow enrolled against, and the only prefix its QR carries.
     this.appOrigin =
       typeof this.policy.origin === 'string' ? this.policy.origin : this.policy.origin[0];
-    this.acl = new HostAcl(hostId, { now: clock.now });
-    this.challenges = new HostChallengeIssuer({ now: clock.now, ttlMs });
+    this.acl = new BurrowAcl(burrowId, { now: clock.now });
+    this.challenges = new ChallengeIssuer({ now: clock.now, ttlMs });
   }
 
   issueChallenge() {
@@ -273,7 +273,7 @@ export class SimHost {
   async mintInvitation({ ttlSeconds = this.invitationTtlSeconds } = {}) {
     const keyPair = await generateNoiseKeyPair();
     const invitation = {
-      hostId: this.hostId,
+      burrowId: this.burrowId,
       inviteId: randomRoutingId(),
       expiry: Math.floor(this.clock.now() / 1000) + ttlSeconds,
       setupToken: randomSecret(),
@@ -284,7 +284,7 @@ export class SimHost {
     return invitation;
   }
 
-  /** The URL the Host renders as its QR. */
+  /** The URL the Burrow renders as its QR. */
   invitationUrl(invitation) {
     return formatPairingInvitationUrl(this.appOrigin, invitation);
   }
@@ -320,7 +320,7 @@ export class SimHost {
   async handlePairingRequest(
     inviteId,
     ciphertext,
-    { approve = true, typedCode, approvedBy = 'host-user', label } = {},
+    { approve = true, typedCode, approvedBy = 'burrow-user', label } = {},
   ) {
     const pending = this.#invitations.get(inviteId);
     if (!pending || pending.state !== 'reserved') throw new Error(`no reserved invitation ${inviteId}`);
@@ -345,13 +345,13 @@ export class SimHost {
     }
     // Exactly one attempt: the invitation is spent whatever happens next.
     pending.state = 'consumed';
-    if (!isPairingRequestV1(request)) return deny('host-error', 'malformed-request');
+    if (!isPairingRequestV1(request)) return deny('burrow-error', 'malformed-request');
 
     const expected = {
       kind: 'pairing',
-      hostId: this.hostId,
+      burrowId: this.burrowId,
       handshakeHash: toBase64Url(pending.session.handshakeHash),
-      // The one binding field that is not Host state. The verifier requires the
+      // The one binding field that is not Burrow state. The verifier requires the
       // assertion and the proof to name this same credential, which is what
       // keeps the verified key and the bound identity one identity.
       passkeyCredentialId: request.presence.binding.passkeyCredentialId,
@@ -374,8 +374,8 @@ export class SimHost {
     return answer(
       {
         ok: true,
-        hostStaticPublicKey: this.staticPublicKey,
-        hostLabel: this.label,
+        burrowStaticPublicKey: this.staticPublicKey,
+        burrowLabel: this.label,
         accountId: record.accountId,
         passkeyCredentialId: record.passkeyCredentialId,
         passkeyPublicKeyHash: record.passkeyPublicKeyHash,
@@ -387,11 +387,11 @@ export class SimHost {
 
   /**
    * Noise message 1 of a connection against the long-term static; answers
-   * message 2 carrying a fresh 32-byte Host challenge as its payload.
+   * message 2 carrying a fresh 32-byte Burrow challenge as its payload.
    */
   async readConnectionInit(connectionId, message1) {
     const responder = await createNoiseResponder({
-      prologue: e2eConnectionPrologue(this.hostId, connectionId),
+      prologue: e2eConnectionPrologue(this.burrowId, connectionId),
       staticKeyPair: this.staticKeyPair,
     });
     await responder.readMessage(message1);
@@ -409,7 +409,7 @@ export class SimHost {
    * Authorization = proof ∧ conjunction. The specific miss is reported on the
    * returned object — the owner-local log — while the `ConnectionOutcomeV1`
    * itself carries only `pairing-required`. That separation is the point:
-   * which half of the conjunction failed never leaves the Host.
+   * which half of the conjunction failed never leaves the Burrow.
    */
   async handleConnectionRequest(connectionId, ciphertext) {
     const pending = this.#connections.get(connectionId);
@@ -441,9 +441,9 @@ export class SimHost {
 
     const expected = {
       kind: 'connection',
-      hostId: this.hostId,
+      burrowId: this.burrowId,
       connectionId,
-      hostChallenge: pending.challenge,
+      burrowChallenge: pending.challenge,
       handshakeHash: toBase64Url(pending.session.handshakeHash),
       passkeyCredentialId: request.presence.binding.passkeyCredentialId,
     };
@@ -464,64 +464,64 @@ export class SimHost {
     if (auth.record.passkeyPublicKeyHash !== proof.passkeyPublicKeyHash) {
       return deny('pairing-required', { misses: ['passkey-key-mismatch'] });
     }
-    return answer({ ok: true, hostLabel: this.label }, { record: auth.record });
+    return answer({ ok: true, burrowLabel: this.label }, { record: auth.record });
   }
 }
 
 /**
  * A Client (Dormouse Pocket): one browser profile holding one X25519 static
- * **per Host**, the Host statics it has pinned, and the passkey it signs with.
+ * **per Burrow**, the Burrow statics it has pinned, and the passkey it signs with.
  */
 export class SimClient {
   static async create({ label = 'Test Client', origin, server } = {}) {
     return new SimClient({ label, origin, server });
   }
 
-  /** hostId -> NoiseKeyPair; different Hosts never share a Client key. */
+  /** burrowId -> NoiseKeyPair; different Burrows never share a Client key. */
   #statics = new Map();
 
   constructor({ label, origin, server }) {
     this.label = label;
     this.origin = origin;
     this.server = server;
-    /** hostId -> the Host static this Client pinned at pairing, base64url. */
+    /** burrowId -> the Burrow static this Client pinned at pairing, base64url. */
     this.pins = new Map();
-    /** hostId -> the fields a `KnownHostV1` keeps after a successful pairing. */
-    this.knownHosts = new Map();
+    /** burrowId -> the fields a `KnownBurrowV1` keeps after a successful pairing. */
+    this.knownBurrows = new Map();
   }
 
-  async #staticFor(hostId) {
-    let pair = this.#statics.get(hostId);
+  async #staticFor(burrowId) {
+    let pair = this.#statics.get(burrowId);
     if (!pair) {
       pair = await generateNoiseKeyPair();
-      this.#statics.set(hostId, pair);
+      this.#statics.set(burrowId, pair);
     }
     return pair;
   }
 
   /**
-   * This Client's keypair for one Host, or undefined if unscanned. The private
+   * This Client's keypair for one Burrow, or undefined if unscanned. The private
    * half is what opens a push sealed to this Client.
    */
-  staticKeyPairFor(host) {
-    return this.#statics.get(hostIdOf(host));
+  staticKeyPairFor(burrow) {
+    return this.#statics.get(burrowIdOf(burrow));
   }
 
-  /** This Client's static for one Host, base64url, or undefined if unscanned. */
-  staticPublicKeyFor(host) {
-    const pair = this.staticKeyPairFor(host);
+  /** This Client's static for one Burrow, base64url, or undefined if unscanned. */
+  staticPublicKeyFor(burrow) {
+    const pair = this.staticKeyPairFor(burrow);
     return pair ? toBase64Url(pair.publicKey) : undefined;
   }
 
   /**
-   * Browser-data loss: this Host's static is gone and a fresh one replaces it.
+   * Browser-data loss: this Burrow's static is gone and a fresh one replaces it.
    * Returns the lost public key so a test can revoke the stranded record.
    */
-  async losePerHostStatic(host) {
-    const hostId = hostIdOf(host);
-    const previous = this.staticPublicKeyFor(hostId);
-    this.#statics.delete(hostId);
-    await this.#staticFor(hostId);
+  async losePerBurrowStatic(burrow) {
+    const burrowId = burrowIdOf(burrow);
+    const previous = this.staticPublicKeyFor(burrowId);
+    this.#statics.delete(burrowId);
+    await this.#staticFor(burrowId);
     return previous;
   }
 
@@ -557,17 +557,17 @@ export class SimClient {
    * one control message carrying the proof and the displayed code, and the
    * single outcome.
    *
-   * `record` on the result is the Host's own row — a simulation convenience for
+   * `record` on the result is the Burrow's own row — a simulation convenience for
    * assertions, never something the Client is sent.
    */
   async pair(
-    host,
+    burrow,
     {
       accountId,
       authenticator,
       server = this.server,
       approve = true,
-      approvedBy = 'host-user',
+      approvedBy = 'burrow-user',
       label,
       code = samplePairingCode(),
       typedCode,
@@ -575,29 +575,29 @@ export class SimClient {
       tamper = {},
     } = {},
   ) {
-    const minted = invitation ?? (await host.mintInvitation());
-    // The real scan path: the Host renders a URL, the Client parses it back.
+    const minted = invitation ?? (await burrow.mintInvitation());
+    // The real scan path: the Burrow renders a URL, the Client parses it back.
     // Anything the parser rejects never reaches a handshake.
     const scanned = await parsePairingInvitationUrl(
-      host.invitationUrl(minted),
+      burrow.invitationUrl(minted),
       this.origin,
-      host.clock.now(),
+      burrow.clock.now(),
     );
-    if (!scanned) throw new Error('the Host minted a QR its own Client cannot parse');
+    if (!scanned) throw new Error('the Burrow minted a QR its own Client cannot parse');
 
-    const staticKeyPair = await this.#staticFor(scanned.hostId);
+    const staticKeyPair = await this.#staticFor(scanned.burrowId);
     const initiator = await createNoiseInitiator({
       prologue: pairingInvitationPrologue(scanned),
       staticKeyPair,
       remoteStaticPublicKey: scanned.ephPub,
     });
     const message1 = await initiator.writeMessage();
-    await initiator.readMessage(await host.readPairingInit(scanned.inviteId, message1));
+    await initiator.readMessage(await burrow.readPairingInit(scanned.inviteId, message1));
     const session = new NoiseTransportSession(initiator.session);
 
     const binding = {
       kind: 'pairing',
-      hostId: scanned.hostId,
+      burrowId: scanned.burrowId,
       handshakeHash: toBase64Url(session.handshakeHash),
       passkeyCredentialId: authenticator.credentialId,
     };
@@ -607,14 +607,14 @@ export class SimClient {
         binding,
         accountId,
         authenticator,
-        rpId: host.policy.rpId,
+        rpId: burrow.policy.rpId,
         server,
         tamper,
       }));
     // Pocket samples the two digits it displays; the person reads them off the
-    // phone and types them on the Host, which is what `typedCode` models.
+    // phone and types them on the Burrow, which is what `typedCode` models.
     const request = { code, label: this.label, presence, ...(tamper.request ?? {}) };
-    const answered = await host.handlePairingRequest(scanned.inviteId, session.sendControl(request), {
+    const answered = await burrow.handlePairingRequest(scanned.inviteId, session.sendControl(request), {
       approve,
       typedCode: typedCode ?? code,
       approvedBy,
@@ -629,12 +629,12 @@ export class SimClient {
     const receipt = session.receive(answered.ciphertext);
     const outcome = receipt.kind === 'control' && isPairingOutcomeV1(receipt.value) ? receipt.value : null;
     if (outcome?.ok === true) {
-      const pinned = this.pins.get(scanned.hostId);
-      if (pinned !== undefined && pinned !== outcome.hostStaticPublicKey) {
-        throw new Error('the Host static changed under an existing pin');
+      const pinned = this.pins.get(scanned.burrowId);
+      if (pinned !== undefined && pinned !== outcome.burrowStaticPublicKey) {
+        throw new Error('the Burrow static changed under an existing pin');
       }
-      this.pins.set(scanned.hostId, outcome.hostStaticPublicKey);
-      this.knownHosts.set(scanned.hostId, {
+      this.pins.set(scanned.burrowId, outcome.burrowStaticPublicKey);
+      this.knownBurrows.set(scanned.burrowId, {
         deliveryId: outcome.deliveryId,
         accountId: outcome.accountId,
         passkeyCredentialId: outcome.passkeyCredentialId,
@@ -652,39 +652,39 @@ export class SimClient {
   }
 
   /**
-   * The whole connection ceremony: IK against the pinned Host static, the
+   * The whole connection ceremony: IK against the pinned Burrow static, the
    * challenge that arrives in message 2, one control message carrying the
    * proof, and the single outcome.
    *
-   * `misses` is the Host's owner-local reason list; the outcome the Client is
+   * `misses` is the Burrow's owner-local reason list; the outcome the Client is
    * actually sent never names it.
    */
   async connect(
-    host,
+    burrow,
     { accountId, authenticator, server = this.server, connectionId = randomRoutingId(), tamper = {} } = {},
   ) {
     if (server) server.validateAccount(accountId, authenticator.credentialId);
-    const staticKeyPair = await this.#staticFor(host.hostId);
-    // An unpaired Client has no pin, so it uses the Host's public static
+    const staticKeyPair = await this.#staticFor(burrow.burrowId);
+    // An unpaired Client has no pin, so it uses the Burrow's public static
     // directly. That models an attacker who already knows it — which every
     // paired Client does — and makes the denial strictly stronger evidence.
-    const remoteStatic = fromBase64Url(this.pins.get(host.hostId) ?? host.staticPublicKey);
+    const remoteStatic = fromBase64Url(this.pins.get(burrow.burrowId) ?? burrow.staticPublicKey);
     const initiator = await createNoiseInitiator({
-      prologue: e2eConnectionPrologue(host.hostId, connectionId),
+      prologue: e2eConnectionPrologue(burrow.burrowId, connectionId),
       staticKeyPair,
       remoteStaticPublicKey: remoteStatic,
     });
     const message1 = await initiator.writeMessage();
     const challengeBytes = await initiator.readMessage(
-      await host.readConnectionInit(connectionId, message1),
+      await burrow.readConnectionInit(connectionId, message1),
     );
     const session = new NoiseTransportSession(initiator.session);
 
     const binding = {
       kind: 'connection',
-      hostId: host.hostId,
+      burrowId: burrow.burrowId,
       connectionId,
-      hostChallenge: toBase64Url(challengeBytes),
+      burrowChallenge: toBase64Url(challengeBytes),
       handshakeHash: toBase64Url(session.handshakeHash),
       passkeyCredentialId: authenticator.credentialId,
     };
@@ -694,11 +694,11 @@ export class SimClient {
         binding,
         accountId,
         authenticator,
-        rpId: host.policy.rpId,
+        rpId: burrow.policy.rpId,
         server,
         tamper,
       }));
-    const answered = await host.handleConnectionRequest(
+    const answered = await burrow.handleConnectionRequest(
       connectionId,
       session.sendControl({ presence, ...(tamper.request ?? {}) }),
     );

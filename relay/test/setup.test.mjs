@@ -3,9 +3,9 @@
  * token is the only gate, the clientDataJSON sanity checks, single-use
  * challenges, and the account.json that lands on disk.
  *
- * Every registration here mints its token through a real enrolled Host
+ * Every registration here mints its token through a real enrolled Burrow
  * (`mintSetupToken`), which is the only way a passkey is registered at all —
- * the setup password enrolls Hosts and registers nothing.
+ * the setup password enrolls Burrows and registers nothing.
  */
 
 import { test } from 'node:test';
@@ -18,7 +18,7 @@ import {
   PASSWORD,
   RP_ID,
   freshApp,
-  enrollHost,
+  enrollBurrow,
   mintSetupToken,
   newAuthenticator,
   padBase64Url,
@@ -90,7 +90,7 @@ test('setup/begin names the credentials the account already holds', async () => 
 
 test('the setup password no longer registers anything', async () => {
   // The whole of what 4c deleted: a caller holding the password can enroll a
-  // Host, and reaches `/api/setup/*` no further than an unauthenticated one.
+  // Burrow, and reaches `/api/setup/*` no further than an unauthenticated one.
   const { app } = await freshApp();
   for (const body of [{ password: PASSWORD }, {}]) {
     const res = await post(app, API_ROUTES.setupBegin, body);
@@ -258,8 +258,8 @@ test('origin/rpId derive from config', async () => {
 
 // The configured origin — already bare, since `readConfig` normalizes it and
 // `config.test.mjs` pins that — reaching all three of setup's rpId, the
-// clientData check, and the policy a Host enrolls with.
-test('the configured origin drives setup and Host policy', async () => {
+// clientData check, and the policy a Burrow enrolls with.
+test('the configured origin drives setup and Burrow policy', async () => {
   const { app } = await freshApp({ origin: 'https://example.com' });
   const authenticator = await newAuthenticator();
   const { token } = await mintSetupToken(app);
@@ -276,7 +276,7 @@ test('the configured origin drives setup and Host policy', async () => {
   });
   assert.equal(finish.status, 200);
 
-  const { res, body } = await enrollHost(app);
+  const { res, body } = await enrollBurrow(app);
   assert.equal(res.status, 200);
   assert.equal(body.origin, 'https://example.com');
   assert.equal(body.rpId, 'example.com');

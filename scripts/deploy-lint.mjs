@@ -154,7 +154,7 @@ export const RULES = [
     exactMatches: { macOS: 2, Linux: 2, Windows: 2 },
   },
   {
-    // Windows-only, and the only thing enforcing owner-only on `hosts.json`
+    // Windows-only, and the only thing enforcing owner-only on `burrows.json`
     // there, so an enumeration that failed must not print the same Note as an
     // account that was never created.
     rule: 'Credentials at rest — manage verify fails when state\\ cannot be enumerated',
@@ -245,14 +245,14 @@ export const RULES = [
     },
   },
   {
-    rule: 'Credentials at rest — hosts.json permanently closes installer offer bootstrap',
+    rule: 'Credentials at rest — burrows.json permanently closes installer offer bootstrap',
     patterns: {
       macOS:
-        /if \[ -e "\$STATE_DIR\/hosts\.json" \]; then\n\s*rm -f "\$ENROLL_OFFER_FILE"/,
+        /if \[ -e "\$STATE_DIR\/burrows\.json" \]; then\n\s*rm -f "\$ENROLL_OFFER_FILE"/,
       Linux:
-        /if \[ -e "\$STATE_DIR\/hosts\.json" \]; then\n\s*rm -f "\$ENROLL_OFFER_FILE"/,
+        /if \[ -e "\$STATE_DIR\/burrows\.json" \]; then\n\s*rm -f "\$ENROLL_OFFER_FILE"/,
       Windows:
-        /if \(Test-Path -LiteralPath \(Join-Path \$STATE_DIR 'hosts\.json'\)\) \{\n\s*Remove-Item -LiteralPath \$ENROLL_OFFER_FILE/,
+        /if \(Test-Path -LiteralPath \(Join-Path \$STATE_DIR 'burrows\.json'\)\) \{\n\s*Remove-Item -LiteralPath \$ENROLL_OFFER_FILE/,
     },
   },
   {
@@ -396,7 +396,7 @@ export const RULES = [
     //
     // Placement is textual; lifecycle is executable. CI's Linux test-mode
     // install requires rotation across two pre-enrollment runs, then creates
-    // hosts.json and requires a third run to leave no offer.
+    // burrows.json and requires a third run to leave no offer.
     rule: 'Credentials at rest — the enrollment offer is written under run/, never config/ or state/',
     patterns: {
       macOS: /RUN_DIR="\$INSTALL_ROOT\/run"\n\s*ENROLL_OFFER_FILE="\$RUN_DIR\//,

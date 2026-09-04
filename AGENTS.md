@@ -13,7 +13,7 @@ pnpm build       # build lib, vscode extension, Pocket, and website
 
 - **`lib/`** — Shared React + TailwindCSS frontend library: components, tests, Storybook.
   - `lib/src/lib/platform/` — platform abstraction (`PlatformAdapter` interface, fake + VSCode adapters)
-  - `lib/src/host/` — Node-side host modules bundled into both hosts: the iframe proxy, the agent-browser host, and `remote/` (the `RemoteHostService` that runs in the Tauri sidecar and the VS Code extension host)
+  - `lib/src/host/` — Node-side host modules bundled into both hosts: the iframe proxy, the agent-browser host, and `remote/` (the `BurrowService` that runs in the Tauri sidecar and the VS Code extension host)
   - `lib/src/remote/` — remote control: `host/` (laptop side: protocol-v1 session, security, the webview's responder + pairing UI), `client/` (phone-side protocol + `RemotePtyAdapter`), `pocket-app/` (Pocket shell), `ws.ts` (shared socket surface)
 - **`standalone/`** — Tauri desktop app (Rust + Vite frontend).
   - `standalone/sidecar/` — Node.js PTY manager (native PTY via node-pty), bundled as the Tauri sidecar

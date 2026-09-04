@@ -480,11 +480,11 @@ if [ -f "$ENV_FILE" ]; then
     warn "  derived:   $ORIGIN"
     warn ""
     warn "DORMOUSE_ORIGIN is durable WebAuthn identity: it is the source of the"
-    warn "passkey rpId and of the Host's ConnectionPolicy. Rewriting it invalidates"
-    warn "the registered passkey and every enrolled Host — they must be re-enrolled."
+    warn "passkey rpId and of the Burrow's ConnectionPolicy. Rewriting it invalidates"
+    warn "the registered passkey and every enrolled Burrow — they must be re-enrolled."
     warn ""
     warn "This usually means the Tailscale node was renamed or re-enrolled."
-    die "refusing to silently rewrite the origin. Decide deliberately: restore the old node name, or plan the passkey + Host re-enrollment and remove $ENV_FILE by hand."
+    die "refusing to silently rewrite the origin. Decide deliberately: restore the old node name, or plan the passkey + Burrow re-enrollment and remove $ENV_FILE by hand."
   fi
 fi
 
@@ -673,9 +673,9 @@ if [ ! -f "$ENV_FILE" ]; then
 # Dormouse selfhost Relay — installer-owned runtime configuration.
 # Generated $BUILT_AT. Preserved byte-for-byte across updates.
 #
-# DORMOUSE_ORIGIN is durable WebAuthn identity (passkey rpId + Host
+# DORMOUSE_ORIGIN is durable WebAuthn identity (passkey rpId + Burrow
 # ConnectionPolicy). Changing it invalidates the registered passkey and every
-# enrolled Host. See docs/specs/relay.md, "Configuration".
+# enrolled Burrow. See docs/specs/relay.md, "Configuration".
 DORMOUSE_ORIGIN=$ORIGIN
 DORMOUSE_STATE_DIR=$STATE_DIR
 DORMOUSE_BIND_HOST=127.0.0.1
@@ -694,15 +694,15 @@ fi
 # tells the operator to *fix* a file whose repair is `rm`, on every run, forever.
 # The two cases are indistinguishable from here and their repairs are opposite,
 # so this names what is missing and changes nothing: DORMOUSE_ORIGIN is durable
-# WebAuthn identity and may already have enrolled a Host.
+# WebAuthn identity and may already have enrolled a Burrow.
 ENV_MISSING="$(env_missing_keys "$ENV_FILE")"
 [ -z "$ENV_MISSING" ] || die "config/relay.env is missing installer-owned keys:$ENV_MISSING
 An install interrupted between creating that file and writing it leaves exactly this. Nothing has been changed. The repair depends on which one it is:
-  - nothing enrolled yet (no $STATE_DIR/hosts.json): remove the file and re-run this installer
+  - nothing enrolled yet (no $STATE_DIR/burrows.json): remove the file and re-run this installer
       rm '$ENV_FILE'
-  - otherwise: restore the missing key(s) by hand, and leave DORMOUSE_ORIGIN exactly as it is — it is durable WebAuthn identity, and rewriting it invalidates the registered passkey and every enrolled Host."
+  - otherwise: restore the missing key(s) by hand, and leave DORMOUSE_ORIGIN exactly as it is — it is durable WebAuthn identity, and rewriting it invalidates the registered passkey and every enrolled Burrow."
 
-# The bind host is a security boundary whenever the TLS proxy is local: Serve
+# The bind burrow is a security boundary whenever the TLS proxy is local: Serve
 # reaches the app over loopback, so an unbound socket would also publish the
 # plaintext port to the LAN and to the tailnet.
 grep -q '^DORMOUSE_BIND_HOST=127\.0\.0\.1$' "$ENV_FILE" \
@@ -756,7 +756,7 @@ ENTRY="$ROOT/current/relay/dist/index.js"
 # is answering?" without reconstructing it from the process table. Set here
 # rather than in relay.env because it is derived from `current`, which moves.
 export DORMOUSE_RUNTIME_FILE="$ROOT/run/relay.json"
-# The installer mints this only until hosts.json records the first enrollment.
+# The installer mints this only until burrows.json records the first enrollment.
 export DORMOUSE_ENROLL_TOKEN_FILE="$ROOT/run/enroll-offer.json"
 RELEASE_TARGET="$(readlink "$ROOT/current" 2>/dev/null || true)"
 [ -n "$RELEASE_TARGET" ] && export DORMOUSE_RELEASE_ID="${RELEASE_TARGET##*/}"
@@ -1204,7 +1204,7 @@ cmd_restart() {
 }
 
 cmd_show_password() {
-  printf '\n%sWARNING%s the setup password gates Host enrollment.\n' "$C_YEL" "$C_OFF"
+  printf '\n%sWARNING%s the setup password gates Burrow enrollment.\n' "$C_YEL" "$C_OFF"
   printf 'It is about to be printed to this terminal. Make sure nobody is looking\n'
   printf 'over your shoulder and that this session is not being recorded or shared.\n\n'
   if [ ! -t 0 ]; then
@@ -1314,15 +1314,15 @@ cmd_uninstall() {
 }
 
 cmd_purge() {
-  printf '\n%sIRREVERSIBLE%s This deletes the account, enrolled Hosts, push\n' "$C_RED" "$C_OFF"
+  printf '\n%sIRREVERSIBLE%s This deletes the account, enrolled Burrows, push\n' "$C_RED" "$C_OFF"
   printf 'subscriptions, the VAPID key, and any unspent enrollment offer:\n  %s\n  %s\n  %s\n\n' \
     "$STATE_DIR" "$ROOT/config" "$ROOT/run"
-  printf 'Registered passkeys and enrolled Hosts will have to be set up again.\n\n'
+  printf 'Registered passkeys and enrolled Burrows will have to be set up again.\n\n'
   printf 'Type exactly: DELETE DORMOUSE STATE\n> '
   local reply=""
   read -r reply || true
   if [ "$reply" != "DELETE DORMOUSE STATE" ]; then printf 'aborted\n'; return 1; fi
-  # run/ too: an unspent enroll-offer.json redeems for a Host enrollment without
+  # run/ too: an unspent enroll-offer.json redeems for a Burrow enrollment without
   # any existing account, and redemption mkdir-recreates the state this command
   # just deleted. Leaving it behind would make "IRREVERSIBLE" false for a day.
   rm -rf "$STATE_DIR" "$ROOT/config" "$ROOT/run"
@@ -1738,18 +1738,18 @@ fi
 
 # ------------------------------------------------------------ enroll offer ---
 
-# run/enroll-offer.json, the one-time offer redeemed at POST /api/host/enroll in
+# run/enroll-offer.json, the one-time offer redeemed at POST /api/burrow/enroll in
 # place of the setup password (docs/specs/security-remote.md → "Credentials at rest").
 #
 # Last state mutation: minting burns the previous unspent offer, so the release,
 # HTTPS Serve mapping, and pruning must all have succeeded first. The Relay
 # reads this file fresh; nothing needs it at service start.
 #
-# hosts.json is the durable "first Host happened" marker. Emptying its rows
-# revokes Hosts but does not silently reopen this bootstrap credential.
-if [ -e "$STATE_DIR/hosts.json" ]; then
+# burrows.json is the durable "first Burrow happened" marker. Emptying its rows
+# revokes Burrows but does not silently reopen this bootstrap credential.
+if [ -e "$STATE_DIR/burrows.json" ]; then
   rm -f "$ENROLL_OFFER_FILE"
-  ok "a Host has already enrolled — no one-click enrollment offer minted"
+  ok "a Burrow has already enrolled — no one-click enrollment offer minted"
 else
   ENROLL_TOKEN="$(random_hex32)"
   [ ${#ENROLL_TOKEN} -ge 64 ] || die "generated enroll token is implausibly short; refusing to write the enrollment offer."
@@ -1774,7 +1774,7 @@ else
   fi
   unset ENROLL_OFFER_TMP
   unset ENROLL_TOKEN
-  ok "minted run/enroll-offer.json (mode 0600) — a one-time enrollment offer for a Host on this machine"
+  ok "minted run/enroll-offer.json (mode 0600) — a one-time enrollment offer for a Burrow on this machine"
 fi
 
 # ---------------------------------------------------------------- summary ---
@@ -1795,7 +1795,7 @@ printf '\n'
 
 if [ "$FIRST_INSTALL" = "1" ]; then
   printf '    First install. Retrieve the Relay-generated setup password when you are ready\n'
-  printf '    to enroll a Host by hand (the one-time offer card in the Host'"'"'s\n'
+  printf '    to enroll a Burrow by hand (the one-time offer card in the Burrow'"'"'s\n'
   printf '    Remote control settings needs no password):\n\n'
   printf '        "%s" show-password\n\n' "$BIN_DIR/manage"
 fi

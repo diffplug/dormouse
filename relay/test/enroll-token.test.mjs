@@ -1,6 +1,6 @@
 /**
  * One-click enrollment (docs/specs/relay.md, Configuration ->
- * `DORMOUSE_ENROLL_TOKEN_FILE`): `POST /api/host/enroll` redeeming the
+ * `DORMOUSE_ENROLL_TOKEN_FILE`): `POST /api/burrow/enroll` redeeming the
  * installer's single-use offer file instead of the setup password.
  */
 
@@ -63,17 +63,17 @@ async function appWithOffer(contents, options = {}) {
 }
 
 function enroll(app, body) {
-  return post(app, API_ROUTES.hostEnroll, body);
+  return post(app, API_ROUTES.burrowEnroll, body);
 }
 
-test('a valid enroll token enrolls the host and consumes the offer', async () => {
+test('a valid enroll token enrolls the burrow and consumes the offer', async () => {
   const { app, enrollTokenFile } = await appWithOffer(offer());
   const res = await enroll(app, { enrollToken: TOKEN });
   assert.equal(res.status, 200);
   const body = await res.json();
-  assert.equal(typeof body.hostId, 'string');
-  assert.equal(typeof body.hostToken, 'string');
-  assert.notEqual(body.hostId, body.hostToken);
+  assert.equal(typeof body.burrowId, 'string');
+  assert.equal(typeof body.burrowToken, 'string');
+  assert.notEqual(body.burrowId, body.burrowToken);
   assert.equal(body.origin, ORIGIN);
   assert.equal(body.rpId, RP_ID);
   assert.equal(existsSync(enrollTokenFile), false);
@@ -149,8 +149,8 @@ test('a token that cannot be invalidated is not redeemed', CANNOT_DENY_UNLINK, a
     // credential-failure delay: a fast distinct answer would confirm a valid
     // token to a guesser without spending it.
     assert.equal(Date.now() - started >= MEASURABLE_DELAY_MS, true);
-    // The point of the ordering: no host may exist against a token still on disk.
-    assert.equal(existsSync(join(stateDir, 'hosts.json')), false);
+    // The point of the ordering: no burrow may exist against a token still on disk.
+    assert.equal(existsSync(join(stateDir, 'burrows.json')), false);
   } finally {
     await chmod(dirname(enrollTokenFile), 0o700);
   }
@@ -208,9 +208,9 @@ test('the first password enrollment consumes the offer', async () => {
   const { app, enrollTokenFile } = await appWithOffer(offer());
   const res = await enroll(app, { password: PASSWORD });
   assert.equal(res.status, 200);
-  assert.equal(typeof (await res.json()).hostToken, 'string');
+  assert.equal(typeof (await res.json()).burrowToken, 'string');
   assert.equal(existsSync(enrollTokenFile), false);
-  // Recreating the file cannot reopen bootstrap: hosts.json records that the
+  // Recreating the file cannot reopen bootstrap: burrows.json records that the
   // first enrollment already happened, and the stale file is cleaned up.
   await writeFile(enrollTokenFile, JSON.stringify(offer()));
   assert.equal((await enroll(app, { enrollToken: TOKEN })).status, 401);
@@ -223,7 +223,7 @@ test('a first password enrollment stops if the offer cannot be invalidated', CAN
   try {
     const res = await enroll(app, { password: PASSWORD });
     assert.equal(res.status, 500);
-    assert.equal(existsSync(join(stateDir, 'hosts.json')), false);
+    assert.equal(existsSync(join(stateDir, 'burrows.json')), false);
   } finally {
     await chmod(dirname(enrollTokenFile), 0o700);
   }
@@ -236,7 +236,7 @@ test('concurrent redemptions of one offer have exactly one winner', async () => 
   // Every one of these presents the correct token, and they all read the offer
   // before any of them claims it. Only the rename can separate them: deleting
   // cannot, because two concurrent unlinks of one path both report success on
-  // APFS, which would mint a Host enrollment per racer off a single-use offer.
+  // APFS, which would mint a Burrow enrollment per racer off a single-use offer.
   const results = await Promise.all(
     Array.from({ length: 8 }, () => redeemEnrollToken(path, TOKEN)),
   );

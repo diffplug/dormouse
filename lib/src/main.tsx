@@ -4,14 +4,14 @@ import { initPlatform } from "./lib/platform";
 import { resumeOrRestore } from "./lib/reconnect";
 import { initAlertStateReceiver } from "./lib/terminal-registry";
 import { installVscodeThemeVarResolver } from "./lib/themes/vscode-color-observer";
-import { installPeerSurfaceResponder } from "./remote/host/peer-surfaces";
+import { installPeerSurfaceResponder } from "./remote/burrow/peer-surfaces";
 import App from "./App";
 import "./index.css";
 
 const platform = initPlatform();
 
 // This entry serves the VS Code webview and the lib dev server. Only the
-// former has a remote Host behind it: the Host runs in the extension host,
+// former has a Burrow behind it: the Host runs in the extension host,
 // next to the PTYs, and the dev server has neither.
 const isVscode = typeof acquireVsCodeApi === "function";
 
@@ -30,7 +30,7 @@ initAlertStateReceiver();
 resumeOrRestore(platform).then((result) => {
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
-      <App initialPaneIds={result.paneIds} restoredLathLayout={result.lathLayout} initialDoors={result.doors} initialSurfaceRefs={result.surfaceRefs} initialSurfaceRefsNext={result.surfaceRefsNext} enableRemoteHost={isVscode} />
+      <App initialPaneIds={result.paneIds} restoredLathLayout={result.lathLayout} initialDoors={result.doors} initialSurfaceRefs={result.surfaceRefs} initialSurfaceRefsNext={result.surfaceRefsNext} enableBurrow={isVscode} />
     </StrictMode>,
   );
 });

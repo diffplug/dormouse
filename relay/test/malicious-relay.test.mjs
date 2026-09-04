@@ -1,13 +1,13 @@
 /**
  * The relay, hostile: what an operator who records, drops, reorders,
  * duplicates, modifies, and invents frames can actually obtain
- * (docs/specs/remote-security-model.md -> Host bounds, Security Guarantees).
+ * (docs/specs/remote-security-model.md -> Burrow bounds, Security Guarantees).
  *
  * `e2e-relay.test.mjs` drives the same two peers through the *honest* relay;
  * this file replaces it with one that is trying, so the assertions are about
  * what stays impossible rather than what still works. The relay wraps the real
  * `RelayHub` — its routing is the shipped routing — and the last case removes
- * its own `ct`/`id`/shape guards to show they are defense in depth: the Host
+ * its own `ct`/`id`/shape guards to show they are defense in depth: the Burrow
  * runs the same guard on arrival and its bounds do not move.
  *
  * HTTP is a real Relay, because the presence proofs go through the real
@@ -23,7 +23,7 @@ import {
   fromBase64Url,
   generateNoiseKeyPair,
   isE2eClientFrame,
-  isE2eRelayToHostFrame,
+  isE2eRelayToBurrowFrame,
   toBase64Url,
   utf8Encode,
 } from 'remote-lib-common';
@@ -34,36 +34,36 @@ import { createMaliciousRelay } from './harness/malicious-relay.mjs';
 
 /** The shared E2E fixture, with a relay this test controls in its middle. */
 function hostileFixture({ guards = true } = {}) {
-  return e2eFixture({ relayFor: (hostId) => createMaliciousRelay({ hostId, guards }) });
+  return e2eFixture({ relayFor: (burrowId) => createMaliciousRelay({ burrowId, guards }) });
 }
 
 test('a recording relay learns no decision, label, api message, or terminal byte', async () => {
   const fixture = await hostileFixture();
-  const { host, client, relay, hostStatic, clientStatic } = fixture;
-  const MARKER = 'DORMOUSE-HOSTILE-RELAY-ORACLE-4c1d';
+  const { burrow, client, relay, burrowStatic, clientStatic } = fixture;
+  const MARKER = 'DORMOUSE-BURROWILE-RELAY-ORACLE-4c1d';
   try {
     await establish(fixture);
-    const seen = watch(host);
-    const entry = host.e2eEntry(relay.clientId);
+    const seen = watch(burrow);
+    const entry = burrow.e2eEntry(relay.clientId);
 
     client.sendApp(utf8Encode(`terminal.write ${MARKER}`));
-    host.e2eSendApp(relay.clientId, utf8Encode(`terminal.data ${MARKER}`));
+    burrow.e2eSendApp(relay.clientId, utf8Encode(`terminal.data ${MARKER}`));
     await until(() => seen.receipts.length >= 1);
     await client.nextTransport();
 
     const view = relay.view();
     for (const [what, secret] of [
       ['plaintext', MARKER],
-      ["the Host's label", host.label],
-      ['the pairing code', client.knownHost.deliveryId],
-      ['the host static', toBase64Url(hostStatic.publicKey)],
+      ["the Burrow's label", burrow.label],
+      ['the pairing code', client.knownBurrow.deliveryId],
+      ['the burrow static', toBase64Url(burrowStatic.publicKey)],
       ['the client static', toBase64Url(clientStatic.publicKey)],
       ['the handshake hash', toBase64Url(entry.session.handshakeHash)],
     ]) {
       assert.equal(view.includes(secret), false, `${what} must never cross the relay`);
     }
-    // What it does see is routing: the hostId it is already routing by.
-    assert.ok(view.includes(fixture.enrollment.hostId));
+    // What it does see is routing: the burrowId it is already routing by.
+    assert.ok(view.includes(fixture.enrollment.burrowId));
   } finally {
     await fixture.close();
   }
@@ -71,10 +71,10 @@ test('a recording relay learns no decision, label, api message, or terminal byte
 
 test('a relay that forges a pairing outcome is not believed', async () => {
   const fixture = await hostileFixture();
-  const { host, client, relay } = fixture;
+  const { burrow, client, relay } = fixture;
   try {
-    const invitation = await host.mintInvitation();
-    // Every Host->Client transport frame is rewritten: the relay cannot produce
+    const invitation = await burrow.mintInvitation();
+    // Every Burrow->Client transport frame is rewritten: the relay cannot produce
     // a ciphertext the Client's own receive state accepts, so the best it can
     // do is corrupt one.
     relay.tamper = (frame, to) =>
@@ -89,10 +89,10 @@ test('a relay that forges a pairing outcome is not believed', async () => {
     );
     assert.equal(client.session.isPoisoned, true);
     assert.equal(client.pin, null, 'nothing was pinned');
-    assert.equal(client.knownHost, null);
-    // The Host really did approve — so the only thing the relay achieved is
+    assert.equal(client.knownBurrow, null);
+    // The Burrow really did approve — so the only thing the relay achieved is
     // denying its own user a pairing, which is availability, not authorization.
-    assert.equal(host.acl.activeRecords().length, 1);
+    assert.equal(burrow.acl.activeRecords().length, 1);
   } finally {
     await fixture.close();
   }
@@ -100,18 +100,18 @@ test('a relay that forges a pairing outcome is not believed', async () => {
 
 test('a relay that invents a control message poisons the session and nothing else', async () => {
   const fixture = await hostileFixture();
-  const { host, client, relay } = fixture;
-  const seen = watch(host);
+  const { burrow, client, relay } = fixture;
+  const seen = watch(burrow);
   try {
     await establish(fixture);
-    const before = host.attachments.size;
+    const before = burrow.attachments.size;
 
     // A frame the relay made up entirely, on the live connection: the only
     // thing it can choose is the ciphertext, and it cannot choose a valid one.
-    relay.injectTo('host', {
+    relay.injectTo('burrow', {
       t: 'e2e',
       clientId: relay.clientId,
-      hostId: fixture.enrollment.hostId,
+      burrowId: fixture.enrollment.burrowId,
       kind: 'connection',
       id: client.id,
       step: 'transport',
@@ -119,8 +119,8 @@ test('a relay that invents a control message poisons the session and nothing els
     });
     await until(() => seen.errors.length === 1);
     assert.match(String(seen.errors[0].error), /authentication failed/);
-    assert.equal(host.e2eEntry(relay.clientId).session.isPoisoned, true);
-    assert.equal(host.attachments.size, before, 'no remote-api call was made');
+    assert.equal(burrow.e2eEntry(relay.clientId).session.isPoisoned, true);
+    assert.equal(burrow.attachments.size, before, 'no remote-api call was made');
   } finally {
     await fixture.close();
   }
@@ -129,13 +129,13 @@ test('a relay that invents a control message poisons the session and nothing els
 test('duplicating, reordering, or dropping a transport frame is terminal, not steerable', async () => {
   for (const mode of ['duplicate', 'reorder', 'modify']) {
     const fixture = await hostileFixture();
-    const { host, client, relay } = fixture;
-    const seen = watch(host);
+    const { burrow, client, relay } = fixture;
+    const seen = watch(burrow);
     try {
       await establish(fixture);
       const held = [];
       relay.tamper = (frame, to) => {
-        if (to !== 'host' || frame.t !== 'e2e' || frame.step !== 'transport') return [frame];
+        if (to !== 'burrow' || frame.t !== 'e2e' || frame.step !== 'transport') return [frame];
         if (mode === 'duplicate') return [frame, frame];
         if (mode === 'modify') return [{ ...frame, ct: flip(frame.ct) }];
         // Reorder: hold the first, release it behind the second.
@@ -147,7 +147,7 @@ test('duplicating, reordering, or dropping a transport frame is terminal, not st
       client.sendKeepalive();
       if (mode === 'reorder') client.sendKeepalive();
       await until(() => seen.errors.length > errorsBefore);
-      assert.equal(host.e2eEntry(relay.clientId).session.isPoisoned, true, mode);
+      assert.equal(burrow.e2eEntry(relay.clientId).session.isPoisoned, true, mode);
       // **Exactly the receiving side.** Poison follows the failed decrypt; the
       // Client's own cipher states never saw the tampered bytes, so a relay
       // cannot use one direction to take down the other.
@@ -168,39 +168,39 @@ test('duplicating, reordering, or dropping a transport frame is terminal, not st
 
 test('dropping every frame denies service and nothing more', async () => {
   const fixture = await hostileFixture();
-  const { host, client, relay } = fixture;
+  const { burrow, client, relay } = fixture;
   try {
     relay.tamper = () => [];
-    const invitation = await host.mintInvitation();
+    const invitation = await burrow.mintInvitation();
     await assert.rejects(
       // A short deadline: what is under test is that nothing arrives at all,
       // and the harness's two-second default would be two seconds of the suite.
       () => client.pair({ invitation, authenticator: fixture.authenticator, timeout: 100 }),
       /no matching frame in time/,
     );
-    // The Host never saw a scan, so the code on its screen is still live and
+    // The Burrow never saw a scan, so the code on its screen is still live and
     // the ACL is still empty: a silent relay authorizes nothing.
-    assert.equal(host.invitationState(invitation.inviteId), 'live');
-    assert.equal(host.acl.activeRecords().length, 0);
+    assert.equal(burrow.invitationState(invitation.inviteId), 'live');
+    assert.equal(burrow.acl.activeRecords().length, 0);
   } finally {
     await fixture.close();
   }
 });
 
-test('a relay with no guards at all weakens no Host bound', async () => {
-  // The relay's `ct` / `id` / shape checks are defense in depth: the Host runs
+test('a relay with no guards at all weakens no Burrow bound', async () => {
+  // The relay's `ct` / `id` / shape checks are defense in depth: the Burrow runs
   // the same guard on arrival because the routing values become map keys and
   // the ciphertext becomes WebCrypto work. Here the relay has none, so every
-  // refusal below is the Host's own.
+  // refusal below is the Burrow's own.
   const fixture = await hostileFixture({ guards: false });
-  const { host, client, relay, enrollment } = fixture;
-  const seen = watch(host);
+  const { burrow, client, relay, enrollment } = fixture;
+  const seen = watch(burrow);
   try {
-    const invitation = await host.mintInvitation();
+    const invitation = await burrow.mintInvitation();
     const base = {
       t: 'e2e',
       clientId: relay.clientId,
-      hostId: enrollment.hostId,
+      burrowId: enrollment.burrowId,
       kind: 'pairing',
       id: invitation.inviteId,
       step: 'init',
@@ -215,15 +215,15 @@ test('a relay with no guards at all weakens no Host bound', async () => {
       // The two only a relay can choose: the `clientId` it stamps itself.
       { ...base, clientId: 'x'.repeat(MAX_CLIENT_ID_LENGTH + 1) },
       { ...base, clientId: 42 },
-      { ...base, hostId: 'not-a-host-id' },
+      { ...base, burrowId: 'not-a-burrow-id' },
       { ...base, kind: 'terminal' },
       { ...base, step: 'response' },
     ];
     for (const frame of refused) {
-      assert.equal(isE2eRelayToHostFrame(frame), false, JSON.stringify(frame));
-      relay.injectTo('host', frame);
+      assert.equal(isE2eRelayToBurrowFrame(frame), false, JSON.stringify(frame));
+      relay.injectTo('burrow', frame);
     }
-    // Plus the two a guard would have let through and the Host still drops
+    // Plus the two a guard would have let through and the Burrow still drops
     // without decrypting: an id nothing is pending under, and transport before
     // any handshake.
     const dropped = {
@@ -233,24 +233,24 @@ test('a relay with no guards at all weakens no Host bound', async () => {
       step: 'transport',
       ct: toBase64Url(new Uint8Array(64)),
     };
-    assert.equal(isE2eRelayToHostFrame(dropped), true, 'well-formed, and still refused');
-    relay.injectTo('host', dropped);
+    assert.equal(isE2eRelayToBurrowFrame(dropped), true, 'well-formed, and still refused');
+    relay.injectTo('burrow', dropped);
 
     await until(() => seen.errors.length >= refused.length);
     assert.equal(seen.errors.length, refused.length, 'one refusal each, and no decrypt');
     for (const error of seen.errors) assert.match(String(error.error), /malformed e2e frame/);
     assert.equal(seen.opens.length, 0, 'nothing established');
-    assert.equal(host.clients.size, 0, 'no entry under a relay-chosen key');
-    assert.equal(host.invitationState(invitation.inviteId), 'live', 'no scanner was spent');
+    assert.equal(burrow.clients.size, 0, 'no entry under a relay-chosen key');
+    assert.equal(burrow.invitationState(invitation.inviteId), 'live', 'no scanner was spent');
 
     // A Client sending a malformed frame through the same relay reaches the
-    // Host unfiltered — the leg `isE2eClientFrame` would have stopped — and is
+    // Burrow unfiltered — the leg `isE2eClientFrame` would have stopped — and is
     // refused there too.
-    const fromClient = { t: 'e2e', hostId: enrollment.hostId, kind: 'pairing', id: 'short', step: 'init', ct: 'AAAA' };
+    const fromClient = { t: 'e2e', burrowId: enrollment.burrowId, kind: 'pairing', id: 'short', step: 'init', ct: 'AAAA' };
     assert.equal(isE2eClientFrame(fromClient), false);
     client.sendFrame(fromClient);
     await until(() => seen.errors.length === refused.length + 1);
-    assert.equal(host.clients.size, 0);
+    assert.equal(burrow.clients.size, 0);
 
     // And the honest ceremony still completes through the same guard-less
     // relay, so the assertions above are about refusal, not about a dead wire.

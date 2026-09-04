@@ -29,54 +29,54 @@ import {
 
 const PLAINTEXT = utf8Encode(JSON.stringify({ title: 'build finished', body: 'zsh', tag: 'pty-1' }));
 
-/** A Host and two Clients, the shape every case below needs. */
+/** A Burrow and two Clients, the shape every case below needs. */
 async function parties() {
-  const host = await generateNoiseKeyPair();
+  const burrow = await generateNoiseKeyPair();
   const client = await generateNoiseKeyPair();
   const other = await generateNoiseKeyPair();
-  return { host, client, other };
+  return { burrow, client, other };
 }
 
-function seal(host, client, plaintext = PLAINTEXT) {
+function seal(burrow, client, plaintext = PLAINTEXT) {
   return sealPush({
-    hostStaticPrivateKey: host.privateKey,
+    burrowStaticPrivateKey: burrow.privateKey,
     clientStaticPublicKey: client.publicKey,
     plaintext,
   });
 }
 
-function open(client, host, sealed) {
+function open(client, burrow, sealed) {
   return openPush({
     clientStaticPrivateKey: client.privateKey,
-    hostStaticPublicKey: host.publicKey,
+    burrowStaticPublicKey: burrow.publicKey,
     sealed,
   });
 }
 
 test('a sealed push round-trips between the paired statics', async () => {
-  const { host, client } = await parties();
+  const { burrow, client } = await parties();
 
-  const sealed = await seal(host, client);
+  const sealed = await seal(burrow, client);
   assert.equal(sealed.v, 1);
   assert.ok(isSealedPushV1(sealed));
   assert.equal(fromBase64Url(sealed.salt).length, PUSH_SEAL_SALT_LENGTH);
 
-  const opened = await open(client, host, sealed);
+  const opened = await open(client, burrow, sealed);
   assert.deepEqual(utf8Decode(opened), utf8Decode(PLAINTEXT));
 });
 
 test('every message gets its own salt, and so its own key and ciphertext', async () => {
-  const { host, client } = await parties();
+  const { burrow, client } = await parties();
 
-  const first = await seal(host, client);
-  const second = await seal(host, client);
+  const first = await seal(burrow, client);
+  const second = await seal(burrow, client);
 
   // Same plaintext, same statics: only the salt makes these differ, which is
   // what lets one fixed nonce be safe.
   assert.notEqual(first.salt, second.salt);
   assert.notEqual(first.ct, second.ct);
-  assert.deepEqual(utf8Decode(await open(client, host, first)), utf8Decode(PLAINTEXT));
-  assert.deepEqual(utf8Decode(await open(client, host, second)), utf8Decode(PLAINTEXT));
+  assert.deepEqual(utf8Decode(await open(client, burrow, first)), utf8Decode(PLAINTEXT));
+  assert.deepEqual(utf8Decode(await open(client, burrow, second)), utf8Decode(PLAINTEXT));
 });
 
 // The all-zero nonce is spent once per key *by construction*: a key exists only
@@ -84,18 +84,18 @@ test('every message gets its own salt, and so its own key and ciphertext', async
 // a ciphertext under a second salt is the observable form of reusing that
 // nonce under a different key, and it must not open.
 test('a ciphertext is bound to the salt its key came from', async () => {
-  const { host, client } = await parties();
+  const { burrow, client } = await parties();
 
-  const first = await seal(host, client);
-  const second = await seal(host, client);
+  const first = await seal(burrow, client);
+  const second = await seal(burrow, client);
 
-  assert.equal(await open(client, host, { v: 1, salt: second.salt, ct: first.ct }), null);
-  assert.equal(await open(client, host, { v: 1, salt: first.salt, ct: second.ct }), null);
+  assert.equal(await open(client, burrow, { v: 1, salt: second.salt, ct: first.ct }), null);
+  assert.equal(await open(client, burrow, { v: 1, salt: first.salt, ct: second.ct }), null);
 });
 
 test('any tampered byte opens as null rather than as plaintext', async () => {
-  const { host, client } = await parties();
-  const sealed = await seal(host, client);
+  const { burrow, client } = await parties();
+  const sealed = await seal(burrow, client);
 
   for (const field of ['ct', 'salt']) {
     const bytes = fromBase64Url(sealed[field]);
@@ -103,29 +103,29 @@ test('any tampered byte opens as null rather than as plaintext', async () => {
       const flipped = Uint8Array.from(bytes);
       flipped[i] ^= 0x01;
       const attempt = { ...sealed, [field]: toBase64Url(flipped) };
-      assert.equal(await open(client, host, attempt), null, `${field}[${i}]`);
+      assert.equal(await open(client, burrow, attempt), null, `${field}[${i}]`);
     }
   }
 });
 
 test('the wrong Client key opens nothing', async () => {
-  const { host, client, other } = await parties();
-  const sealed = await seal(host, client);
+  const { burrow, client, other } = await parties();
+  const sealed = await seal(burrow, client);
 
-  assert.equal(await open(other, host, sealed), null);
+  assert.equal(await open(other, burrow, sealed), null);
 });
 
-test('the wrong Host key opens nothing', async () => {
-  const { host, client, other } = await parties();
-  const sealed = await seal(host, client);
+test('the wrong Burrow key opens nothing', async () => {
+  const { burrow, client, other } = await parties();
+  const sealed = await seal(burrow, client);
 
-  // The pin is what authenticates the sender: a Relay that swapped the Host
+  // The pin is what authenticates the sender: a Relay that swapped the Burrow
   // static a phone believes in still cannot produce a readable push.
   assert.equal(await open(client, other, sealed), null);
 });
 
 test('an all-zero shared secret is a failure, never a key', async () => {
-  const { host, client } = await parties();
+  const { burrow, client } = await parties();
   // A low-order point: X25519 with it agrees to all zeroes, which every other
   // peer can compute too. Node rejects it outright; either way nothing seals.
   const lowOrder = new Uint8Array(32);
@@ -133,7 +133,7 @@ test('an all-zero shared secret is a failure, never a key', async () => {
   await assert.rejects(
     () =>
       sealPush({
-        hostStaticPrivateKey: host.privateKey,
+        burrowStaticPrivateKey: burrow.privateKey,
         clientStaticPublicKey: lowOrder,
         plaintext: PLAINTEXT,
       }),
@@ -141,16 +141,16 @@ test('an all-zero shared secret is a failure, never a key', async () => {
   assert.equal(
     await openPush({
       clientStaticPrivateKey: client.privateKey,
-      hostStaticPublicKey: lowOrder,
-      sealed: await seal(host, client),
+      burrowStaticPublicKey: lowOrder,
+      sealed: await seal(burrow, client),
     }),
     null,
   );
 });
 
 test('the guard refuses a malformed or unbounded envelope before any crypto runs', async () => {
-  const { host, client } = await parties();
-  const sealed = await seal(host, client);
+  const { burrow, client } = await parties();
+  const sealed = await seal(burrow, client);
 
   for (const bad of [
     null,
@@ -165,23 +165,23 @@ test('the guard refuses a malformed or unbounded envelope before any crypto runs
     { v: 1, salt: sealed.salt },
   ]) {
     assert.equal(isSealedPushV1(bad), false, JSON.stringify(bad));
-    assert.equal(await open(client, host, bad), null);
+    assert.equal(await open(client, burrow, bad), null);
   }
 });
 
 test('a maximal plaintext seals inside the bound, and one byte more does not', async () => {
-  const { host, client } = await parties();
+  const { burrow, client } = await parties();
 
-  const maximal = await seal(host, client, new Uint8Array(MAX_SEALED_PUSH_PLAINTEXT_LENGTH));
+  const maximal = await seal(burrow, client, new Uint8Array(MAX_SEALED_PUSH_PLAINTEXT_LENGTH));
   assert.ok(isSealedPushV1(maximal));
   assert.ok(maximal.ct.length <= MAX_SEALED_PUSH_LENGTH);
   // The whole envelope, as the Relay forwards it, stays far inside the ~4 KB
   // every push service allows.
-  const wire = JSON.stringify({ hostId: toBase64Url(new Uint8Array(16)), ...maximal });
+  const wire = JSON.stringify({ burrowId: toBase64Url(new Uint8Array(16)), ...maximal });
   assert.ok(wire.length < 4096, `envelope is ${wire.length} bytes`);
 
   await assert.rejects(
-    () => seal(host, client, new Uint8Array(MAX_SEALED_PUSH_PLAINTEXT_LENGTH + 1)),
+    () => seal(burrow, client, new Uint8Array(MAX_SEALED_PUSH_PLAINTEXT_LENGTH + 1)),
     /too long/,
   );
 });

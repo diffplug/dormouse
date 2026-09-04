@@ -1,4 +1,4 @@
-/** The real entrypoint wires its persisted setup password into Host enrollment. */
+/** The real entrypoint wires its persisted setup password into Burrow enrollment. */
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -16,7 +16,7 @@ test('the running Relay accepts the setup password it persisted', async (t) => {
   const { password } = JSON.parse(
     await readFile(join(stateDir, 'setup-password.json'), 'utf8'),
   );
-  const response = await fetch(`http://127.0.0.1:${port}${API_ROUTES.hostEnroll}`, {
+  const response = await fetch(`http://127.0.0.1:${port}${API_ROUTES.burrowEnroll}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ password }),

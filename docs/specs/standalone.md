@@ -22,7 +22,7 @@ Source of truth: `standalone/src/main.tsx` (`bootstrap()`).
 2. `setPlatform(platform)`, then `await platform.init()` **before**
    `resumeOrRestore` — init registers the listeners resume replay arrives on and
    hydrates the session cache (§Persistence).
-3. `installPeerSurfaceResponder()` **after `init()`, never before** (§Remote Host
+3. `installPeerSurfaceResponder()` **after `init()`, never before** (§Burrow service
    service) — the responder seeds itself with a `status` command that the adapter
    must already have listeners for (rationale).
 4. `getAvailableShells()` **without awaiting**, so its webview → Rust → sidecar
@@ -38,8 +38,8 @@ Source of truth: `standalone/src/main.tsx` (`bootstrap()`).
 8. `resumeOrRestore(platform)` — the priority-based recovery from
    `docs/specs/transport.md`.
 9. `startUpdateCheck()` (`docs/specs/auto-update.md`), then render `AppBar` +
-   `App` with `enableRemoteHost` — the mount gate for the lazily-imported
-   remote-Host UI chunk (§Remote Host service); the Host itself runs in the
+   `App` with `enableBurrow` — the mount gate for the lazily-imported
+   Burrow UI chunk (§Burrow service); the Burrow itself runs in the
    sidecar regardless. `<ConnectedUpdateBanner />` rides the `baseboardNotice`
    slot, `<QuitConfirmModalHost />` the `dialogHost` slot.
 
@@ -95,22 +95,22 @@ webview, where `TauriAdapter` converts dor control requests into the
 `resource_dir()` once at the boundary so every derived path is plain
 (`docs/specs/dor-cli.md`, Bundling And PATH).
 
-### Remote Host service
+### Burrow service
 
-The remote Host — relay socket, enrollment, ACL, pairing ceremony, remote-api v1
+The Burrow — relay socket, enrollment, ACL, pairing ceremony, remote-api v1
 — runs **in the sidecar**, never the webview (`docs/specs/relay.md` → "Host
 side", which owns that split and what the webview keeps): the same
-`RemoteHostService` the VS Code extension host runs, bound by
-`lib/src/host/remote/sidecar-entry.ts` and bundled to `sidecar/remote-host.cjs`
+`BurrowService` the VS Code extension host runs, bound by
+`lib/src/host/remote/sidecar-entry.ts` and bundled to `sidecar/burrow.cjs`
 with the relay-origin allowlist baked in (`docs/specs/relay.md`). **Nothing the
 webview says can widen access** (`docs/specs/remote-security-model.md`).
 
 **State.** Rust creates the app-data directory, locks it owner-only, and passes it
-as `DORMOUSE_STATE_DIR` (§Persistence, "Rust file store"); `FileHostStateStore`
-keeps enrollment and ACL there as **one** `remote-host.json`, 0600 in a 0700
+as `DORMOUSE_STATE_DIR` (§Persistence, "Rust file store"); `FileBurrowStateStore`
+keeps enrollment and ACL there as **one** `burrow.json`, 0600 in a 0700
 directory via temp-then-rename — one file, so a write is one atomic rename
-(rationale). `hostToken` is a bearer credential and **never enters a webview
-realm**. Against the shared store contract (`docs/specs/relay.md` → "Host side"):
+(rationale). `burrowToken` is a bearer credential and **never enters a webview
+realm**. Against the shared store contract (`docs/specs/relay.md` → "Burrow side"):
 
 - **Reads fail closed.** Only `ENOENT` and a read-but-unparseable file answer
   empty; the parse failure warns. Any other read error is neither answered nor
@@ -118,7 +118,7 @@ realm**. Against the shared store contract (`docs/specs/relay.md` → "Host side
   later read recovers.
 - **The in-memory view advances only after the rename succeeds.** Re-tightening a
   directory Rust already created is best-effort; failing the save over it would
-  lose the Host instead.
+  lose the Burrow instead.
 - **`persistent` is declared, never inferred.** With no state directory — Rust
   passes an empty value when it cannot create one — the fallback store still
   *holds* both values in memory, warns once, and reports `persistent: false`. The
@@ -126,19 +126,19 @@ realm**. Against the shared store contract (`docs/specs/relay.md` → "Host side
   enrollment live and die with the run.
 
 **The bridge.** Webview → sidecar is one generic passthrough invoke,
-`remote_host_command(payload)`, writing `{"event":"remoteHost:command",
+`burrow_command(payload)`, writing `{"event":"burrow:command",
 "data":payload}` to stdin for the dispatch table's `handleCommand`. Sidecar →
-webview is three ordinary stdout events — `remoteHost:result`, `remoteHost:ask`,
-`remoteHost:event` — forwarded by Rust's generic `handle.emit`. **The correlation
-field is `rhId`, never `requestId`**: Rust swallows any sidecar line whose
+webview is three ordinary stdout events — `burrow:result`, `burrow:ask`,
+`burrow:event` — forwarded by Rust's generic `handle.emit`. **The correlation
+field is `burrowRequestId`, never `requestId`**: Rust swallows any sidecar line whose
 `data.requestId` matches a pending invoke (rationale). Everything above those
 shapes is the shared `link-client.ts` (`docs/specs/transport.md` → Message
 protocol).
 
 **Asks and answers.** What the sidecar cannot know — a pane's name, its focus, its
-xterm size — it asks over `remoteHost:ask`, and
-`lib/src/remote/host/peer-surfaces.ts` answers as an ordinary `answer` command
-naming the ask's own `rhId`. **The first answer settles the ask**: standalone ships
+xterm size — it asks over `burrow:ask`, and
+`lib/src/remote/burrow/peer-surfaces.ts` answers as an ordinary `answer` command
+naming the ask's own `burrowRequestId`. **The first answer settles the ask**: standalone ships
 one window, so there is exactly one answerer. *Multi-window seam*: a second window
 would instead collect until `ASK_BUDGET_MS` (1s), which otherwise only bounds a
 reloading webview — an attach must not hang on one.
@@ -167,8 +167,8 @@ generation's parser** so a half-read sequence cannot splice onto the next one.
 
 Source of truth: `lib/src/host/remote/service.ts`,
 `createSidecarSurfaceBridge` in `lib/src/host/remote/sidecar-entry.ts`,
-`standalone/sidecar/main.js` (the tap and the `remoteHost:command` case),
-`remote_host_command` / `remote_host_state_dir` / `pty_theme_colors` in
+`standalone/sidecar/main.js` (the tap and the `burrow:command` case),
+`burrow_command` / `burrow_state_dir` / `pty_theme_colors` in
 `standalone/src-tauri/src/lib.rs`.
 
 ### Windows node subsystem
@@ -204,7 +204,7 @@ ordered**:
    headed Chrome window, and a hung agent-browser must not wedge the exit (as in
    the VS Code host's `deactivate()`; `docs/specs/dor-browser.md`).
 2. Close the dor control socket.
-3. Dispose the remote Host service, dropping the relay socket and settling every
+3. Dispose the Burrow service, dropping the relay socket and settling every
    outstanding ask so nothing waits on a webview that is going away.
 4. `mgr.killAll()` (all PTYs), then `process.exit(0)`.
 
@@ -214,7 +214,7 @@ force-killed, and an orphaned sidecar keeps `conpty.node`/`conpty.dll` loaded an
 blocks the NSIS installer (`docs/specs/auto-update.md`, Sidecar teardown on
 Windows).
 
-Host-side ordering: every quit trigger is driven through the webview quit
+Burrow-side ordering: every quit trigger is driven through the webview quit
 orchestrator (§Quit flow, which owns the teardown/install/exit sequence); Tauri's
 `RunEvent::Exit` then runs `shutdown_sidecar_and_wait` as a final backstop
 (harmless post-teardown — the PTY map is already empty, so `killAll` no-ops).
@@ -303,11 +303,11 @@ transcripts (`docs/specs/security-local.md` -> "Persisted state").
 `restrict_to_owner` sets `0700` on the directory and `0600` on the temp file
 *first*, since the rename preserves its mode; on Windows, where a unix mode is a
 silent no-op, it applies a protected single-entry DACL instead (mechanism in its
-doc comment). `remote_host_state_dir` locks the sidecar's state directory with the
+doc comment). `burrow_state_dir` locks the sidecar's state directory with the
 same call and relies on it reaching a file that already *existed*, which
 `restrict_to_owner_leaves_one_owner_only_ace` pins (rationale). **Neither call is
 fatal**, but the state-dir one logs a `WARNING` naming the path rather than
-failing silently, because on Windows it is the only thing restricting `hostToken`.
+failing silently, because on Windows it is the only thing restricting `burrowToken`.
 
 **Boot + the synchronous-read constraint.** `getState()` is synchronous —
 cold-start restore reads it before React mounts — but a Tauri `invoke` is async, so
@@ -504,8 +504,8 @@ Source of truth: `standalone/package.json` (package scripts),
   `lib/src/host/` sources into the sidecar `.cjs` files).
 - The `tauri` script stages, then runs `standalone/scripts/tauri.mjs`, which
   delegates to the Tauri CLI. The `DORMOUSE_REMOTE_CONNECT_SRC` build-time override
-  for self-host relay origins is baked into the sidecar's remote-host bundle by
-  `build-sidecar-proxy.mjs` — the Host runs in the sidecar, so the webview CSP has
+  for self-host relay origins is baked into the sidecar's burrow bundle by
+  `build-sidecar-proxy.mjs` — the Burrow runs in the sidecar, so the webview CSP has
   no relay sources at all, which `standalone/scripts/tauri-conf.test.mjs` asserts
   against `tauri.conf.json` (`docs/specs/relay.md`, "Where a Host may reach a
   Relay").

@@ -62,7 +62,7 @@ export class RemotePtyAdapter implements PlatformAdapter {
   readonly #listHandlers = new Set<ListHandler>();
   readonly #directoryListeners = new Set<DirectoryListener>();
 
-  /** Latest directory snapshot, in Host order. */
+  /** Latest directory snapshot, in Burrow order. */
   #entries: DirectoryEntry[] = [];
 
   /** Memoized directory.watch start; also the "started" guard. */
@@ -224,8 +224,8 @@ export class RemotePtyAdapter implements PlatformAdapter {
   // --- PTY core ------------------------------------------------------------
 
   writePty(id: string, data: string): void {
-    if (this.#attached?.surfaceId !== id) return; // Host only accepts the attached pane
-    // The Host discards these anyway (remote-api.md -> "Terminal surfaces"), so
+    if (this.#attached?.surfaceId !== id) return; // Burrow only accepts the attached pane
+    // The Burrow discards these anyway (remote-api.md -> "Terminal surfaces"), so
     // don't spend the relay on them.
     if (inputIsReplayTerminalReport(data)) return;
     void this.#client.write(id, toBase64Url(utf8Encode(data)));
@@ -237,7 +237,7 @@ export class RemotePtyAdapter implements PlatformAdapter {
     void this.#client.resize(id, cols, rows);
   }
 
-  // Panes are Host-owned: the phone never spawns or kills them.
+  // Panes are Burrow-owned: the phone never spawns or kills them.
   spawnPty(): void {}
   killPty(): void {}
 
@@ -269,7 +269,7 @@ export class RemotePtyAdapter implements PlatformAdapter {
   #emitExit(id: string, exitCode?: number): void {
     if (this.#attached?.surfaceId === id) this.#attached = null;
     // An absent exitCode is an UNKNOWN termination (signal-only, killed, or a
-    // non-selfhost Host that never reports one) — not a clean exit. Coercing it
+    // non-selfhost Burrow that never reports one) — not a clean exit. Coercing it
     // to 0 would paint an abnormal close as success. Map it to the same -1
     // sentinel the local path uses (terminal-lifecycle.ts `exitCode ?? -1`),
     // which renders as a nonzero "failure" exit, so remote and local agree.
@@ -298,16 +298,16 @@ export class RemotePtyAdapter implements PlatformAdapter {
     return null;
   }
 
-  // Resume-path replay: the Host has no per-pane replay buffer in v1, so ignore.
+  // Resume-path replay: the Burrow has no per-pane replay buffer in v1, so ignore.
   onPtyReplay(): void {}
   offPtyReplay(): void {}
 
-  // Host-initiated persistence flush: not driven from the phone.
+  // Burrow-initiated persistence flush: not driven from the phone.
   onRequestSessionFlush(): void {}
   offRequestSessionFlush(): void {}
   notifySessionFlushComplete(): void {}
 
-  // Alerts are Host-authoritative (surfaced via the directory snapshot), so the
+  // Alerts are Burrow-authoritative (surfaced via the directory snapshot), so the
   // phone-side alert controls are inert.
   alertRemove(): void {}
   alertSetWatchedCommands(): void {}

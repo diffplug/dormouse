@@ -13,7 +13,7 @@ export const DEFAULT_PAIRING_TTL_MS = 5 * 60 * 1000;
 
 /**
  * How many pairing requests may await local approval at once, across the
- * Host's own client map and the service's mirrored queue.
+ * Burrow's own client map and the service's mirrored queue.
  *
  * Small, because this is the number a *human* is being asked to look at: past a
  * handful the modal is not a decision any more. Oldest is evicted first — the
@@ -47,7 +47,7 @@ export function boundedPairingLabel(value: unknown): string {
 }
 
 /**
- * The Host's *own* label, reduced before it goes on the wire.
+ * The Burrow's *own* label, reduced before it goes on the wire.
  *
  * Not attacker-chosen — it is the machine's name — but the Client's outcome
  * guards refuse any field over `CEREMONY_FIELD_LIMIT`, so an unbounded one
@@ -55,6 +55,6 @@ export function boundedPairingLabel(value: unknown): string {
  * permanently disagreeing about whether they are paired. Empty is a legal
  * answer, unlike a device label nobody would recognize unnamed.
  */
-export function boundedHostLabel(value: unknown): string {
+export function boundedBurrowLabel(value: unknown): string {
   return boundedPushText(value, { limit: PAIRING_LABEL_LIMIT, fallback: '' });
 }

@@ -8,7 +8,7 @@
  * cases drive a camera that behaves exactly as a real one does — resolving,
  * refusing, or never starting — without one. What is *not* faked is the parse:
  * `parsePairingInvitationUrl` is the shipped one, so a code accepted here is a
- * code a Host could have minted.
+ * code a Burrow could have minted.
  */
 import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

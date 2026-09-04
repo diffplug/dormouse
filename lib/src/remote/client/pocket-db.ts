@@ -21,91 +21,91 @@ export const POCKET_DB_VERSION = 3;
 
 /** Deleted at v3; named only so the upgrade and its test can say what goes. */
 export const DEVICE_KEY_STORE = 'device-key';
-export const KNOWN_HOSTS_STORE = 'known-hosts';
+export const KNOWN_BURROWS_STORE = 'known-burrows';
 export const PENDING_DELETIONS_STORE = 'pending-deletions';
 
-/** How this Client stands with one Host, once a pairing has answered. */
-export type KnownHostAuthorization =
+/** How this Client stands with one Burrow, once a pairing has answered. */
+export type KnownBurrowAuthorization =
   | {
       readonly state: 'paired';
-      /** The capability the Host minted for push delivery to this Client. */
+      /** The capability the Burrow minted for push delivery to this Client. */
       readonly deliveryId: string;
       readonly approvedAt: number;
     }
   /**
-   * Authorization is gone, the pin is not. Re-pairing against a Host whose
+   * Authorization is gone, the pin is not. Re-pairing against a Burrow whose
    * static changed is a security error rather than a fresh start, so the
    * record survives losing its authorization.
    */
   | { readonly state: 'pairing-required' };
 
 /**
- * One Host this Client has paired with, keyed by `hostId`.
+ * One Burrow this Client has paired with, keyed by `burrowId`.
  *
- * The Client static is per Host and never shared between them, and its private
+ * The Client static is per Burrow and never shared between them, and its private
  * half is a nonextractable `CryptoKey` stored directly — never exported.
  */
-export interface KnownHostV1 {
-  readonly hostId: string;
+export interface KnownBurrowV1 {
+  readonly burrowId: string;
   readonly accountId: string;
   /**
-   * What to call this machine. The Host's own label, as it arrived inside the
+   * What to call this machine. The Burrow's own label, as it arrived inside the
    * encrypted pairing outcome — never the Relay's copy, which a Client is not
    * told and which stops existing in stage 4c.
    */
   readonly label: string;
-  /** The pinned Host Noise static, base64url. A change is a terminal error. */
-  readonly hostStaticPublicKey: string;
-  /** This Client's static for this Host; only the private half is a key object. */
+  /** The pinned Burrow Noise static, base64url. A change is a terminal error. */
+  readonly burrowStaticPublicKey: string;
+  /** This Client's static for this Burrow; only the private half is a key object. */
   readonly clientStaticKeyPair: {
     readonly privateKey: CryptoKey;
     /** The raw 32-byte public half, base64url — what the ACL records. */
     readonly publicKeyRaw: string;
   };
-  /** The sole `allowCredentials` entry for this Host. */
+  /** The sole `allowCredentials` entry for this Burrow. */
   readonly passkeyCredentialId: string;
   readonly passkeyPublicKeyHash: string;
-  readonly authorization: KnownHostAuthorization;
+  readonly authorization: KnownBurrowAuthorization;
 }
 
 /**
  * A delivery mapping this Client owes the Relay a deletion for, written
- * *before* the `KnownHostV1` forgets the id — the id is the only handle that
+ * *before* the `KnownBurrowV1` forgets the id — the id is the only handle that
  * can delete the row, so losing it before the deletion lands strands it.
  */
 export interface PendingDeliveryDeletionV1 {
-  readonly hostId: string;
+  readonly burrowId: string;
   readonly deliveryId: string;
   readonly queuedAt: number;
 }
 
-/** Where {@link KnownHostV1} records live; faked in tests. */
-export interface KnownHostStore {
-  get(hostId: string): Promise<KnownHostV1 | null>;
-  put(record: KnownHostV1): Promise<void>;
-  delete(hostId: string): Promise<void>;
-  list(): Promise<KnownHostV1[]>;
+/** Where {@link KnownBurrowV1} records live; faked in tests. */
+export interface KnownBurrowStore {
+  get(burrowId: string): Promise<KnownBurrowV1 | null>;
+  put(record: KnownBurrowV1): Promise<void>;
+  delete(burrowId: string): Promise<void>;
+  list(): Promise<KnownBurrowV1[]>;
 }
 
 /** Where {@link PendingDeliveryDeletionV1} tombstones live; faked in tests. */
 export interface PendingDeletionStore {
   put(record: PendingDeliveryDeletionV1): Promise<void>;
-  delete(hostId: string, deliveryId: string): Promise<void>;
+  delete(burrowId: string, deliveryId: string): Promise<void>;
   list(): Promise<PendingDeliveryDeletionV1[]>;
 }
 
 /**
- * The key one tombstone is filed under. A pair rather than the `hostId` alone,
- * because a Host that has been re-paired can owe deletions for more than one
+ * The key one tombstone is filed under. A pair rather than the `burrowId` alone,
+ * because a Burrow that has been re-paired can owe deletions for more than one
  * delivery id at a time.
  *
  * **Neither half may contain `:`**, or two different pairs could file under one
- * key. Both are base64url today — a `hostId` is `toBase64Url(randomBytes(16))`
+ * key. Both are base64url today — a `burrowId` is `toBase64Url(randomBytes(16))`
  * from the Relay — so the separator is unambiguous; a component that stops
  * being base64url needs a framed key, not a longer separator.
  */
-export function pendingDeletionKey(hostId: string, deliveryId: string): string {
-  return `${hostId}:${deliveryId}`;
+export function pendingDeletionKey(burrowId: string, deliveryId: string): string {
+  return `${burrowId}:${deliveryId}`;
 }
 
 /**
@@ -134,8 +134,8 @@ export function openPocketDb(): Promise<IDBDatabase> {
       if (db.objectStoreNames.contains(DEVICE_KEY_STORE)) {
         db.deleteObjectStore(DEVICE_KEY_STORE);
       }
-      if (!db.objectStoreNames.contains(KNOWN_HOSTS_STORE)) {
-        db.createObjectStore(KNOWN_HOSTS_STORE, { keyPath: 'hostId' });
+      if (!db.objectStoreNames.contains(KNOWN_BURROWS_STORE)) {
+        db.createObjectStore(KNOWN_BURROWS_STORE, { keyPath: 'burrowId' });
       }
       // Explicit keys: the key is a pair of fields, not one of them.
       if (!db.objectStoreNames.contains(PENDING_DELETIONS_STORE)) {
@@ -235,30 +235,30 @@ export async function withPocketStore<T>(
   }
 }
 
-/** The IndexedDB-backed {@link KnownHostStore}. */
-export function indexedDbKnownHostStore(): KnownHostStore {
+/** The IndexedDB-backed {@link KnownBurrowStore}. */
+export function indexedDbKnownBurrowStore(): KnownBurrowStore {
   return {
-    get: (hostId) =>
-      withPocketStore(KNOWN_HOSTS_STORE, 'readonly', async (store) => {
-        const value = await promisifyRequest<KnownHostV1 | undefined>(store.get(hostId));
+    get: (burrowId) =>
+      withPocketStore(KNOWN_BURROWS_STORE, 'readonly', async (store) => {
+        const value = await promisifyRequest<KnownBurrowV1 | undefined>(store.get(burrowId));
         return value ?? null;
       }),
     async put(record) {
       // Before the first write, per the storage-durability rule.
       await requestPersistenceOnce();
-      await withPocketStore(KNOWN_HOSTS_STORE, 'readwrite', (store) => {
+      await withPocketStore(KNOWN_BURROWS_STORE, 'readwrite', (store) => {
         store.put(record);
         return promisifyTransaction(store.transaction);
       });
     },
-    delete: (hostId) =>
-      withPocketStore(KNOWN_HOSTS_STORE, 'readwrite', (store) => {
-        store.delete(hostId);
+    delete: (burrowId) =>
+      withPocketStore(KNOWN_BURROWS_STORE, 'readwrite', (store) => {
+        store.delete(burrowId);
         return promisifyTransaction(store.transaction);
       }),
     list: () =>
-      withPocketStore(KNOWN_HOSTS_STORE, 'readonly', (store) =>
-        promisifyRequest<KnownHostV1[]>(store.getAll()),
+      withPocketStore(KNOWN_BURROWS_STORE, 'readonly', (store) =>
+        promisifyRequest<KnownBurrowV1[]>(store.getAll()),
       ),
   };
 }
@@ -269,13 +269,13 @@ export function indexedDbPendingDeletionStore(): PendingDeletionStore {
     async put(record) {
       await requestPersistenceOnce();
       await withPocketStore(PENDING_DELETIONS_STORE, 'readwrite', (store) => {
-        store.put(record, pendingDeletionKey(record.hostId, record.deliveryId));
+        store.put(record, pendingDeletionKey(record.burrowId, record.deliveryId));
         return promisifyTransaction(store.transaction);
       });
     },
-    delete: (hostId, deliveryId) =>
+    delete: (burrowId, deliveryId) =>
       withPocketStore(PENDING_DELETIONS_STORE, 'readwrite', (store) => {
-        store.delete(pendingDeletionKey(hostId, deliveryId));
+        store.delete(pendingDeletionKey(burrowId, deliveryId));
         return promisifyTransaction(store.transaction);
       }),
     list: () =>

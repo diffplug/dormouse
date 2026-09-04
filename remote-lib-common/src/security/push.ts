@@ -4,10 +4,10 @@
  *
  * A Web Push subscription is a bearer capability: anyone holding the endpoint
  * and its keys can send that phone a notification. What it emphatically does
- * NOT do is confer access — it is a delivery address the Host may choose to
- * write to, and the Host's ACL remains the only thing that decides what a
+ * NOT do is confer access — it is a delivery address the Burrow may choose to
+ * write to, and the Burrow's ACL remains the only thing that decides what a
  * Client may reach (docs/specs/remote-security-model.md). The authorization for
- * a subscription row is possession of the `deliveryId` the Host minted at
+ * a subscription row is possession of the `deliveryId` the Burrow minted at
  * pairing, so nothing here signs anything.
  */
 import { toBase64Url, utf8Encode } from './bytes.js';
@@ -40,7 +40,7 @@ export async function pushEndpointFingerprint(
 /**
  * Reduce untrusted text to something safe to put in an OS notification.
  *
- * Shared by the Host (which builds the payload from a Pane label, before
+ * Shared by the Burrow (which builds the payload from a Pane label, before
  * sealing it) and the Pocket service worker (which re-bounds at the render
  * sink), so the rule has one implementation across both runtimes rather than a
  * strong copy and a weak one. The Relay is not one of them: it forwards

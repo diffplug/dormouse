@@ -1,5 +1,5 @@
 /**
- * Turning the Host's on-screen QR into something a fake camera can play, and
+ * Turning the Burrow's on-screen QR into something a fake camera can play, and
  * proving it still decodes (`scripts/pairing-walkthrough/README.md`).
  *
  * `ffmpeg` does every pixel operation — crop, scale, pad, Y4M — so the harness
@@ -80,7 +80,7 @@ export async function toY4m(source, out) {
  * A camera-shaped Y4M with nothing in it, replacing whatever `out` held.
  *
  * For the scenarios about codes that arrive by hand: a viewfinder still pointed
- * at the Host's live QR decodes it the moment the scanner mounts, which would
+ * at the Burrow's live QR decodes it the moment the scanner mounts, which would
  * start a real ceremony underneath the one being driven. White rather than
  * black, so the screenshots show a viewfinder that is plainly looking at
  * nothing rather than one that looks broken.

@@ -8,7 +8,7 @@ import { PASSWORD, freshApp } from './helpers.mjs';
 
 /**
  * `createApp` compares `config.origin` as a string — the WebAuthn
- * `clientData.origin` check and the enrollment `origin` a Host composes its QR
+ * `clientData.origin` check and the enrollment `origin` a Burrow composes its QR
  * from — so anything but a bare origin fails every one of them
  * while reading as correct. `readConfig` normalizes for the entrypoint; this is
  * the boundary refusing to be handed one that was not.

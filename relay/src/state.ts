@@ -132,7 +132,7 @@ abstract class JsonFileStore {
    * {@link readIfPresent}, reusing the last parse while the file is unchanged.
    *
    * For the reads an unauthenticated caller provokes: `findByToken` runs on
-   * every host-gated request and every `/ws/host` upgrade, so without this a
+   * every burrow-gated request and every `/ws/burrow` upgrade, so without this a
    * well-shaped guess buys a `readFile` and a `JSON.parse` for the price of one
    * request — and the origin may be public
    * (`docs/specs/security-remote.md` -> "Network posture (self-hosted)").
@@ -163,11 +163,11 @@ abstract class JsonFileStore {
   }
 
   /**
-   * Overwrite the whole file atomically (temp file + rename). `hosts.json`
-   * holds `hostToken` in plaintext, so the directory is owner-only (`0o700`)
+   * Overwrite the whole file atomically (temp file + rename). `burrows.json`
+   * holds `burrowToken` in plaintext, so the directory is owner-only (`0o700`)
    * and every file owner-read/write (`0o600`) — without an explicit mode both
    * inherit the umask, which on a typical Linux box yields world-readable
-   * `0o755`/`0o644` and leaks live host tokens to every other local account.
+   * `0o755`/`0o644` and leaks live burrow tokens to every other local account.
    * The mode only applies when the file is created, so `rename` onto an
    * existing path keeps the temp file's `0o600`.
    */
@@ -251,7 +251,7 @@ abstract class JsonFileStore {
   }
 }
 
-/** The Relay-owned Host-enrollment credential stored in `setup-password.json`. */
+/** The Relay-owned Burrow-enrollment credential stored in `setup-password.json`. */
 export interface StoredSetupPassword {
   readonly password: string;
   readonly createdAt: number;
@@ -348,178 +348,178 @@ function isAccount(value: unknown): value is Account {
 const ACCOUNT_RECORD: RecordShape<Account> = { what: 'account record', isValid: isAccount };
 
 /**
- * An enrolled Host as stored in `hosts.json`. `hostToken` is the WS bearer
- * secret. **No label**: the name a Host presents is its own, and a Client only
+ * An enrolled Burrow as stored in `burrows.json`. `burrowToken` is the WS bearer
+ * secret. **No label**: the name a Burrow presents is its own, and a Client only
  * ever learns it inside an encrypted ceremony outcome
- * (`docs/specs/remote-security-model.md` → Host identity). A row written before
+ * (`docs/specs/remote-security-model.md` → Burrow identity). A row written before
  * that cutover carries one; it is simply ignored.
  */
-export interface StoredHost {
-  readonly hostId: string;
-  readonly hostToken: string;
+export interface StoredBurrow {
+  readonly burrowId: string;
+  readonly burrowToken: string;
   readonly enrolledAt: number;
 }
 
 /**
- * The one shape a `hostToken` has: 32 random bytes, base64url. Minted here and
- * required at every lookup, the way `hostId` is pinned to `isE2eId`
+ * The one shape a `burrowToken` has: 32 random bytes, base64url. Minted here and
+ * required at every lookup, the way `burrowId` is pinned to `isE2eId`
  * (`docs/specs/relay.md` -> State files).
  */
-const HOST_TOKEN_BYTE_LENGTH = 32;
-export const HOST_TOKEN_LENGTH = base64UrlLength(HOST_TOKEN_BYTE_LENGTH);
+const BURROW_TOKEN_BYTE_LENGTH = 32;
+export const BURROW_TOKEN_LENGTH = base64UrlLength(BURROW_TOKEN_BYTE_LENGTH);
 
 /** Whether `value` could be a token this Relay minted. */
-export function isHostToken(value: unknown): value is string {
-  return isExactBase64Url(value, HOST_TOKEN_LENGTH);
+export function isBurrowToken(value: unknown): value is string {
+  return isExactBase64Url(value, BURROW_TOKEN_LENGTH);
 }
 
 /**
- * How many Hosts one account may have enrolled.
+ * How many Burrows one account may have enrolled.
  *
  * Enrollment is credential-gated, so this is not a flood defense — it is the
  * bound on a file that is otherwise append-only and is re-read, re-parsed and
- * compared row by row on every host-gated request and every `/ws/host`
+ * compared row by row on every burrow-gated request and every `/ws/burrow`
  * upgrade. Far above the machines a person owns; revocation (deleting a row by
  * hand) is what makes room.
  */
-export const MAX_ENROLLED_HOSTS = 32;
+export const MAX_ENROLLED_BURROWS = 32;
 
-/** Thrown by {@link HostStore.enroll} when {@link MAX_ENROLLED_HOSTS} is reached. */
-export class HostLimitReachedError extends Error {
+/** Thrown by {@link BurrowStore.enroll} when {@link MAX_ENROLLED_BURROWS} is reached. */
+export class BurrowLimitReachedError extends Error {
   constructor() {
-    super(`this Relay already has ${MAX_ENROLLED_HOSTS} hosts enrolled`);
-    this.name = 'HostLimitReachedError';
+    super(`this Relay already has ${MAX_ENROLLED_BURROWS} burrows enrolled`);
+    this.name = 'BurrowLimitReachedError';
   }
 }
 
 /**
- * Persistent host enrollment (`hosts.json`). Mirrors {@link AccountStore}: an
+ * Persistent burrow enrollment (`burrows.json`). Mirrors {@link AccountStore}: an
  * append-only JSON array, atomic writes, and a mutex so concurrent enrollments
  * cannot lose a write. Revocation is deleting a line by hand (POC guardrail).
  */
-export class HostStore extends JsonFileStore {
+export class BurrowStore extends JsonFileStore {
   constructor(stateDir: string, now: () => number = () => Date.now()) {
-    super(stateDir, 'hosts.json', now);
+    super(stateDir, 'burrows.json', now);
   }
 
   /**
-   * Read `hosts.json`, or `[]` if no host has been enrolled yet, dropping any
+   * Read `burrows.json`, or `[]` if no burrow has been enrolled yet, dropping any
    * row that is not a well-formed enrollment.
    *
    * Validated on read for the same reason `PushSubscriptionStore.list` is:
    * hand-editing this file is the *documented* revocation mechanism
    * (Guardrails), so a half-finished edit is an expected state, not a
-   * corruption. Unguarded, a row with a null `hostToken` makes `findByToken`'s
-   * `secretEquals` throw, which 500s every `/ws/host` upgrade and every push
+   * corruption. Unguarded, a row with a null `burrowToken` makes `findByToken`'s
+   * `secretEquals` throw, which 500s every `/ws/burrow` upgrade and every push
    * route — the whole Relay, over one bad line. Dropping the row instead
-   * makes that host un-enrolled, which is what the person editing it was
+   * makes that burrow un-enrolled, which is what the person editing it was
    * reaching for anyway.
    */
-  async list(): Promise<StoredHost[]> {
+  async list(): Promise<StoredBurrow[]> {
     return (await this.listIfPresent()) ?? [];
   }
 
   /**
-   * The enrolled set, or `null` when `hosts.json` is not there at all.
+   * The enrolled set, or `null` when `burrows.json` is not there at all.
    *
    * **An absent file is not an empty one.** The relay's revocation sweep closes
-   * the socket of every Host the answer omits, and a file is briefly absent
+   * the socket of every Burrow the answer omits, and a file is briefly absent
    * whenever it is replaced by rename rather than truncated in place — which is
    * how an editor saves. Reading that instant as "nobody is enrolled" would
    * drop every live session over it. Revoking is emptying the *array*, which
    * still answers an enrolled set of zero and still closes everything.
    */
-  async listIfPresent(): Promise<StoredHost[] | null> {
+  async listIfPresent(): Promise<StoredBurrow[] | null> {
     const rows = await this.readCached<unknown[]>();
     if (rows === null) return null;
-    return Array.isArray(rows) ? rows.filter(isStoredHost) : [];
+    return Array.isArray(rows) ? rows.filter(isStoredBurrow) : [];
   }
 
   /**
-   * Look up an enrolled host by its bearer token (the `/ws/host` credential).
+   * Look up an enrolled burrow by its bearer token (the `/ws/burrow` credential).
    * The token is a secret, so it is compared with `secretEquals` rather than
-   * `===`, whose early-exit leaks byte positions. Every host is checked without
+   * `===`, whose early-exit leaks byte positions. Every burrow is checked without
    * an early break so the work does not depend on which entry matches.
    *
    * **A value of the wrong shape never reaches the file.** This runs
-   * unauthenticated, on `requireHost` and on every `/ws/host` upgrade, and the
+   * unauthenticated, on `requireBurrow` and on every `/ws/burrow` upgrade, and the
    * lookup costs a `readFile` + `JSON.parse` + two SHA-256 per row — so a probe
    * that cannot possibly be a token this Relay minted must not buy any of it.
    * The same reasoning `isDeliveryId` applies at the push routes.
    */
-  async findByToken(hostToken: string): Promise<StoredHost | undefined> {
-    if (!isHostToken(hostToken)) return undefined;
-    const hosts = await this.list();
-    let match: StoredHost | undefined;
-    for (const h of hosts) {
-      if (secretEquals(h.hostToken, hostToken)) match = h;
+  async findByToken(burrowToken: string): Promise<StoredBurrow | undefined> {
+    if (!isBurrowToken(burrowToken)) return undefined;
+    const burrows = await this.list();
+    let match: StoredBurrow | undefined;
+    for (const h of burrows) {
+      if (secretEquals(h.burrowToken, burrowToken)) match = h;
     }
     return match;
   }
 
   /**
-   * Whether `hostId` is still enrolled, read fresh off disk like
-   * {@link findByToken}: deleting a row from `hosts.json` is the documented
-   * revocation mechanism, so anything gating on a Host's continued existence —
+   * Whether `burrowId` is still enrolled, read fresh off disk like
+   * {@link findByToken}: deleting a row from `burrows.json` is the documented
+   * revocation mechanism, so anything gating on a Burrow's continued existence —
    * redeeming a setup token it minted, accepting a push subscription for it —
-   * must see that edit without a restart. A plain compare: a `hostId` is an
+   * must see that edit without a restart. A plain compare: a `burrowId` is an
    * identifier the account can already list, not a secret.
    */
-  async has(hostId: string): Promise<boolean> {
-    return (await this.list()).some((h) => h.hostId === hostId);
+  async has(burrowId: string): Promise<boolean> {
+    return (await this.list()).some((h) => h.burrowId === burrowId);
   }
 
   /**
-   * Enroll a new host: run `beforeEnroll` with whether this is the first Host
-   * ever persisted, mint a random `hostId` ({@link E2E_ID_BYTE_LENGTH} bytes)
-   * and `hostToken` (32 bytes), append them, and return the record. The
+   * Enroll a new burrow: run `beforeEnroll` with whether this is the first Burrow
+   * ever persisted, mint a random `burrowId` ({@link E2E_ID_BYTE_LENGTH} bytes)
+   * and `burrowToken` (32 bytes), append them, and return the record. The
    * callback and write share the mutex, so two credential paths cannot both
    * authorize themselves as the first enrollment.
    *
    * File existence, not the current row count, is the durable boundary: hand-
-   * editing every row away revokes those Hosts but does not reopen bootstrap.
+   * editing every row away revokes those Burrows but does not reopen bootstrap.
    */
   enroll(
     beforeEnroll: (firstEnrollment: boolean) => void | Promise<void> = () => {},
-  ): Promise<StoredHost> {
+  ): Promise<StoredBurrow> {
     return this.mutate(async () => {
       await beforeEnroll(!(await this.exists()));
-      const hosts = await this.list();
+      const burrows = await this.list();
       // After the credential gate, never before: a caller that has not proved
       // anything must not learn from the refusal whether the Relay is full.
       // Inside the mutex, so two concurrent enrollments cannot both pass it.
-      if (hosts.length >= MAX_ENROLLED_HOSTS) throw new HostLimitReachedError();
-      const host: StoredHost = {
-        hostId: toBase64Url(randomBytes(E2E_ID_BYTE_LENGTH)),
-        hostToken: toBase64Url(randomBytes(HOST_TOKEN_BYTE_LENGTH)),
+      if (burrows.length >= MAX_ENROLLED_BURROWS) throw new BurrowLimitReachedError();
+      const burrow: StoredBurrow = {
+        burrowId: toBase64Url(randomBytes(E2E_ID_BYTE_LENGTH)),
+        burrowToken: toBase64Url(randomBytes(BURROW_TOKEN_BYTE_LENGTH)),
         enrolledAt: this.now(),
       };
-      hosts.push(host);
-      await this.writeAtomic(hosts);
-      return host;
+      burrows.push(burrow);
+      await this.writeAtomic(burrows);
+      return burrow;
     });
   }
 }
 
-// Minted and read at the one shape `isE2eId` accepts, since a `hostId` is the
+// Minted and read at the one shape `isE2eId` accepts, since a `burrowId` is the
 // routing id every `e2e` envelope carries (docs/specs/relay.md -> State files).
-function isStoredHost(row: unknown): row is StoredHost {
+function isStoredBurrow(row: unknown): row is StoredBurrow {
   if (!row || typeof row !== 'object') return false;
   const candidate = row as Record<string, unknown>;
   return (
-    isE2eId(candidate.hostId) &&
-    typeof candidate.hostToken === 'string' &&
+    isE2eId(candidate.burrowId) &&
+    typeof candidate.burrowToken === 'string' &&
     typeof candidate.enrolledAt === 'number'
   );
 }
 
 /** A Web Push subscription as stored in `push-subscriptions.json`. */
 export interface StoredPushSubscription {
-  readonly hostId: string;
+  readonly burrowId: string;
   /**
-   * The bearer capability the Host minted for this Client at pairing;
+   * The bearer capability the Burrow minted for this Client at pairing;
    * possession of it is the whole authorization for this row
-   * (`docs/specs/remote-security-model.md` → Host Authorization).
+   * (`docs/specs/remote-security-model.md` → Burrow Authorization).
    */
   readonly deliveryId: string;
   readonly endpoint: string;
@@ -532,18 +532,18 @@ export interface StoredPushSubscription {
 export interface PushSubscriptionUpsertResult {
   readonly subscription: StoredPushSubscription;
   /**
-   * Every Host whose surviving rows carry the presented endpoint under the same
+   * Every Burrow whose surviving rows carry the presented endpoint under the same
    * VAPID key — the state the mutation left behind, not the delta. Computed
    * inside the mutex, so it is the whole truth at the instant it was committed,
    * which is what makes a lost response repairable by an idempotent retry.
    */
-  readonly endpointHostIds: readonly string[];
+  readonly endpointBurrowIds: readonly string[];
 }
 
 /**
  * Push subscriptions (`push-subscriptions.json`), keyed on the PAIR
- * (`hostId`, `deliveryId`) — one Client subscribes once per Host it is paired
- * with, and a Host can only ever see or reach its own subscribers.
+ * (`burrowId`, `deliveryId`) — one Client subscribes once per Burrow it is paired
+ * with, and a Burrow can only ever see or reach its own subscribers.
  *
  * Unlike its append-only siblings this store deletes: a push service reports a
  * dead subscription with 404/410, and re-subscribing after a browser rotates
@@ -553,21 +553,21 @@ export interface PushSubscriptionUpsertResult {
  * No secret of ours lives here, but the endpoint plus its keys IS a bearer
  * capability to notify that phone, so the inherited `0o600` still matters.
  *
- * **Removing a `hosts.json` row cascades.** {@link list} drops every row whose
- * Host is no longer enrolled, so the read boundary that already handles
+ * **Removing a `burrows.json` row cascades.** {@link list} drops every row whose
+ * Burrow is no longer enrolled, so the read boundary that already handles
  * malformed rows handles orphans too, and the next mutation writes the pruned
- * set back. Deleting a Host by hand is the documented revocation mechanism, so
- * this is read fresh rather than cached — the same rule `HostStore.has`
- * follows. An *absent* `hosts.json` cascades to nothing: it is a file in
+ * set back. Deleting a Burrow by hand is the documented revocation mechanism, so
+ * this is read fresh rather than cached — the same rule `BurrowStore.has`
+ * follows. An *absent* `burrows.json` cascades to nothing: it is a file in
  * flight, not a revocation.
  */
 export class PushSubscriptionStore extends JsonFileStore {
-  /** Which Hosts are still enrolled. Required, so no caller can skip the join. */
-  readonly #hosts: HostStore;
+  /** Which Burrows are still enrolled. Required, so no caller can skip the join. */
+  readonly #burrows: BurrowStore;
 
-  constructor(stateDir: string, now: () => number, hosts: HostStore) {
+  constructor(stateDir: string, now: () => number, burrows: BurrowStore) {
     super(stateDir, 'push-subscriptions.json', now);
-    this.#hosts = hosts;
+    this.#burrows = burrows;
   }
 
   /**
@@ -582,29 +582,29 @@ export class PushSubscriptionStore extends JsonFileStore {
    * Pocket repairs by re-offering Enable, instead of as a live one that
    * cannot be delivered to.
    *
-   * A row naming a Host that is no longer in `hosts.json` is dropped the same
-   * way — silently, because a deleted Host is a deliberate revocation rather
+   * A row naming a Burrow that is no longer in `burrows.json` is dropped the same
+   * way — silently, because a deleted Burrow is a deliberate revocation rather
    * than an edit to complain about, and the Client repairs it by re-registering
-   * against a Host that exists.
+   * against a Burrow that exists.
    */
   async list(): Promise<StoredPushSubscription[]> {
     const rows = await this.read<unknown>([]);
     if (!Array.isArray(rows)) return [];
     const kept = rows.filter(isStoredPushSubscription);
     if (kept.length !== rows.length) warnOnceAboutDroppedRows();
-    // An absent `hosts.json` is not an empty one — the same distinction the
+    // An absent `burrows.json` is not an empty one — the same distinction the
     // relay's revocation sweep makes, and it matters more here because
     // `upsert` writes this answer back: joining against `[]` inside the rename
     // window of a hand edit would make the truncation durable.
-    const hosts = await this.#hosts.listIfPresent();
-    if (hosts === null) return kept;
-    const enrolled = new Set(hosts.map((h) => h.hostId));
-    return kept.filter((s) => enrolled.has(s.hostId));
+    const burrows = await this.#burrows.listIfPresent();
+    if (burrows === null) return kept;
+    const enrolled = new Set(burrows.map((h) => h.burrowId));
+    return kept.filter((s) => enrolled.has(s.burrowId));
   }
 
-  async listForHost(hostId: string): Promise<StoredPushSubscription[]> {
+  async listForBurrow(burrowId: string): Promise<StoredPushSubscription[]> {
     const all = await this.list();
-    return all.filter((s) => s.hostId === hostId);
+    return all.filter((s) => s.burrowId === burrowId);
   }
 
   /**
@@ -618,14 +618,14 @@ export class PushSubscriptionStore extends JsonFileStore {
   }
 
   /**
-   * Replace any existing subscription for this (host, delivery), or add one.
+   * Replace any existing subscription for this (burrow, delivery), or add one.
    *
-   * A service-worker scope has one subscription shared by every Host, so an
-   * address this delivery is moving off is dead under every Host at once and
+   * A service-worker scope has one subscription shared by every Burrow, so an
+   * address this delivery is moving off is dead under every Burrow at once and
    * goes in the same mutation. Two keys, because they reach different rows:
    *
    * * **Read the replaced addresses from every row carrying this
-   *   `deliveryId`**, not only this Host's — one delivery id speaks for one
+   *   `deliveryId`**, not only this Burrow's — one delivery id speaks for one
    *   worker scope.
    * * **Drop rows matched on the endpoint**, which is what reaches siblings
    *   holding delivery ids this request never names.
@@ -649,27 +649,27 @@ export class PushSubscriptionStore extends JsonFileStore {
       const kept = capSubscriptions(
         all.filter(
           (s) =>
-            !(s.hostId === record.hostId && s.deliveryId === record.deliveryId) &&
+            !(s.burrowId === record.burrowId && s.deliveryId === record.deliveryId) &&
             !replacedEndpoints.has(s.endpoint),
         ),
         stored,
       );
       await this.writeAtomic(kept);
-      const endpointHostIds = [
+      const endpointBurrowIds = [
         ...new Set(
           kept
             .filter(
               (s) => s.endpoint === record.endpoint && s.vapidPublicKey === record.vapidPublicKey,
             )
-            .map((s) => s.hostId),
+            .map((s) => s.burrowId),
         ),
       ];
-      return { subscription: stored, endpointHostIds };
+      return { subscription: stored, endpointBurrowIds };
     });
   }
 
   /**
-   * Forget every row carrying `deliveryId`, across Hosts. The Client holding
+   * Forget every row carrying `deliveryId`, across Burrows. The Client holding
    * the capability is the normal lifecycle initiator; the route answers 204
    * whatever this returns, so the count is for tests and logs only.
    *
@@ -710,26 +710,26 @@ export class PushSubscriptionStore extends JsonFileStore {
 }
 
 /**
- * How many subscription rows one Host, and the whole file, may hold.
+ * How many subscription rows one Burrow, and the whole file, may hold.
  *
  * `POST /api/push/subscribe` needs a session token and a `deliveryId` the
- * caller picks for itself — the Relay cannot check one against a Host's ACL,
+ * caller picks for itself — the Relay cannot check one against a Burrow's ACL,
  * by design — so without a cap one signed-in caller appends a durable row per
  * request, and every push route thereafter re-reads and re-parses the file.
  * Every sibling transient store is capped (`MAX_PENDING_REAUTH_NONCES_PER_SESSION`,
- * `MAX_TOKENS_PER_HOST`); this is the durable one, so it matters more.
+ * `MAX_TOKENS_PER_BURROW`); this is the durable one, so it matters more.
  *
- * Far above any real use: the per-Host cap is phones paired with one laptop,
+ * Far above any real use: the per-Burrow cap is phones paired with one laptop,
  * the total is that across every laptop an account enrolled.
  */
-export const MAX_PUSH_SUBSCRIPTIONS_PER_HOST = 32;
+export const MAX_PUSH_SUBSCRIPTIONS_PER_BURROW = 32;
 export const MAX_PUSH_SUBSCRIPTIONS_TOTAL = 256;
 
 /**
  * Drop the oldest rows until both caps hold, never `keep` — the row this
  * mutation just committed, which the caller is about to be told about.
  *
- * Oldest `subscribedAt` first, and applied to every Host rather than only
+ * Oldest `subscribedAt` first, and applied to every Burrow rather than only
  * `keep`'s, so a hand-edited file over the cap converges on the next write. An
  * evicted Client reads as un-registered and repairs by pressing Enable again,
  * which is the same recovery a dropped row already has
@@ -740,19 +740,19 @@ function capSubscriptions(
   keep: StoredPushSubscription,
 ): StoredPushSubscription[] {
   const all = [...rows, keep];
-  if (all.length <= MAX_PUSH_SUBSCRIPTIONS_PER_HOST) return all;
-  const perHost = new Map<string, number>();
-  for (const row of all) perHost.set(row.hostId, (perHost.get(row.hostId) ?? 0) + 1);
+  if (all.length <= MAX_PUSH_SUBSCRIPTIONS_PER_BURROW) return all;
+  const perBurrow = new Map<string, number>();
+  for (const row of all) perBurrow.set(row.burrowId, (perBurrow.get(row.burrowId) ?? 0) + 1);
   let total = all.length;
   const dropped = new Set<StoredPushSubscription>();
   for (const row of [...all].sort((a, b) => a.subscribedAt - b.subscribedAt)) {
     if (row === keep) continue;
-    const forHost = perHost.get(row.hostId) ?? 0;
-    if (total <= MAX_PUSH_SUBSCRIPTIONS_TOTAL && forHost <= MAX_PUSH_SUBSCRIPTIONS_PER_HOST) {
+    const forBurrow = perBurrow.get(row.burrowId) ?? 0;
+    if (total <= MAX_PUSH_SUBSCRIPTIONS_TOTAL && forBurrow <= MAX_PUSH_SUBSCRIPTIONS_PER_BURROW) {
       continue;
     }
     dropped.add(row);
-    perHost.set(row.hostId, forHost - 1);
+    perBurrow.set(row.burrowId, forBurrow - 1);
     total -= 1;
   }
   return all.filter((row) => !dropped.has(row));
@@ -770,7 +770,7 @@ function capSubscriptions(
 function isStoredPushSubscription(row: unknown): row is StoredPushSubscription {
   const s = row as Partial<StoredPushSubscription> | null;
   return (
-    typeof s?.hostId === 'string' &&
+    typeof s?.burrowId === 'string' &&
     typeof s.deliveryId === 'string' &&
     typeof s.endpoint === 'string' &&
     typeof s.keys?.p256dh === 'string' &&

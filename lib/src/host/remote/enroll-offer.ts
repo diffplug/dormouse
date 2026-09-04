@@ -1,6 +1,6 @@
 /**
  * The enrollment offer a Dormouse Relay installer left on *this* machine, read
- * from the Node side of a Host so the Settings dialog can offer one-click
+ * from the Node side of a Burrow so the Settings dialog can offer one-click
  * enrollment (`docs/specs/relay.md` → "Remote control, in the Settings
  * dialog").
  *
@@ -61,7 +61,7 @@ export function enrollmentOfferPath(
 /**
  * The offer on this machine, or `null` — silently, for every failure including
  * the ENOENT that is the *normal* answer: most machines run no Relay, and a
- * Host that logged about a missing file would log it on every status read.
+ * Burrow that logged about a missing file would log it on every status read.
  *
  * **Never rejects.** Both call sites are status paths that have no better
  * answer than "no offer" for a failed read, so callers may await it bare rather
@@ -69,7 +69,7 @@ export function enrollmentOfferPath(
  * null for every failure" in `enroll-offer.test.ts`.
  *
  * Resolves the path per call rather than caching it, because the answer changes
- * under a running Host: the installer mints an offer, and redeeming one unlinks
+ * under a running Burrow: the installer mints an offer, and redeeming one unlinks
  * the file.
  */
 export async function readEnrollmentOffer(

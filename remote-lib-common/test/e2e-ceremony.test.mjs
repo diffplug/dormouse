@@ -3,7 +3,7 @@
  * presence verifier they share (docs/specs/remote-security-model.md ->
  * `## Future` -> Presence proofs, Pairing, Connection).
  *
- * The verifier is the whole of "the Host checks freshness itself", so every
+ * The verifier is the whole of "the Burrow checks freshness itself", so every
  * failure reason gets its own case; the fixed-size control padding is the whole
  * of "the relay learns nothing from a length", so the outcome messages are
  * measured on the wire rather than argued about.
@@ -40,7 +40,7 @@ const ACCOUNT = 'ned@dormouse.dev';
 const POLICY = { rpId: RP_ID, origin: ORIGIN, requireUserVerification: true };
 
 /**
- * Base64url of exactly 32 bytes — a handshake hash, a Host challenge, a key
+ * Base64url of exactly 32 bytes — a handshake hash, a Burrow challenge, a key
  * hash. The trailing `A` is load-bearing: 43 characters carry two spare bits,
  * and `presenceChallenge` decodes these fields, so a final character with
  * nonzero low bits is not a spelling of any byte string.
@@ -55,7 +55,7 @@ const authenticator = await SimAuthenticator.create({ rpId: RP_ID });
 function pairingBinding(overrides = {}) {
   return {
     kind: 'pairing',
-    hostId: routingId('host'),
+    burrowId: routingId('burrow'),
     handshakeHash: digest('hh1'),
     passkeyCredentialId: authenticator.credentialId,
     ...overrides,
@@ -65,9 +65,9 @@ function pairingBinding(overrides = {}) {
 function connectionBinding(overrides = {}) {
   return {
     kind: 'connection',
-    hostId: routingId('host'),
+    burrowId: routingId('burrow'),
     connectionId: routingId('conn'),
-    hostChallenge: digest('ch1'),
+    burrowChallenge: digest('ch1'),
     handshakeHash: digest('hh1'),
     passkeyCredentialId: authenticator.credentialId,
     ...overrides,
@@ -97,7 +97,7 @@ test('a proof over the expected binding verifies and yields the presented key ha
       ok: true,
       // The assertion is verified against the *presented* key and its hash
       // returned for the ACL compare, so a compromised Relay cannot substitute
-      // a passkey: the hash on the record is what the Host trusts.
+      // a passkey: the hash on the record is what the Burrow trusts.
       passkeyPublicKeyHash: await hashPasskeyPublicKey(authenticator.publicKey),
     });
   }
@@ -127,11 +127,11 @@ test('a proof that is not a PresenceProofV1 at all is malformed', async () => {
   }
 });
 
-test('every binding field must equal the Host expectation, of the same kind', async () => {
-  // What stops a proof for one ceremony authenticating another: the Host built
+test('every binding field must equal the Burrow expectation, of the same kind', async () => {
+  // What stops a proof for one ceremony authenticating another: the Burrow built
   // `expected` from its own state, so this compare is the freshness check.
   const pairingMutations = [
-    ['hostId', { hostId: routingId('other') }],
+    ['burrowId', { burrowId: routingId('other') }],
     ['handshakeHash', { handshakeHash: digest('hh2') }],
     // The binding compare runs before the credential compare, so a proof for
     // another credential fails here rather than at `credential-mismatch`.
@@ -147,9 +147,9 @@ test('every binding field must equal the Host expectation, of the same kind', as
   }
 
   const connectionMutations = [
-    ['hostId', { hostId: routingId('other') }],
+    ['burrowId', { burrowId: routingId('other') }],
     ['connectionId', { connectionId: routingId('other') }],
-    ['hostChallenge', { hostChallenge: digest('ch2') }],
+    ['burrowChallenge', { burrowChallenge: digest('ch2') }],
     ['handshakeHash', { handshakeHash: digest('hh2') }],
   ];
   for (const [field, override] of connectionMutations) {
@@ -163,7 +163,7 @@ test('every binding field must equal the Host expectation, of the same kind', as
 
   // A pairing proof presented at connect time, and the reverse. A `connection`
   // binding that could be read as a `pairing` one would be a pairing proof
-  // replayed against a Host challenge it never saw.
+  // replayed against a Burrow challenge it never saw.
   assert.deepEqual(await verifyPresenceProof(await proofFor(pairingBinding()), connectionBinding(), POLICY), {
     ok: false,
     reason: 'binding-mismatch',
@@ -196,7 +196,7 @@ test('the assertion and the proof must name the credential the binding does', as
 
 test('a binding the challenge builder cannot hash is underivable, not a crash', async () => {
   // `presenceChallenge` decodes the base64url fields, so a binding carrying
-  // something else throws there. The Host treats it exactly as a mismatch —
+  // something else throws there. The Burrow treats it exactly as a mismatch —
   // the alternative is an unhandled rejection in the sidecar process.
   const binding = pairingBinding({ handshakeHash: 'not base64url!!' });
   const proof = {
@@ -212,7 +212,7 @@ test('a binding the challenge builder cannot hash is underivable, not a crash', 
     reason: 'challenge-underivable',
   });
   // Same for a nonce that is not base64url: it is decoded into the hash too,
-  // and on the Host's recompute path it arrives from the Client.
+  // and on the Burrow's recompute path it arrives from the Client.
   const bad = { ...(await proofFor(pairingBinding())), relayNonce: 'nonce!!' };
   assert.deepEqual(await verifyPresenceProof(bad, pairingBinding(), POLICY), {
     ok: false,
@@ -248,7 +248,7 @@ test('every way an assertion can fail collapses to assertion-invalid', async () 
 
 test('the verifier never throws, whatever the decrypted payload turns out to be', async () => {
   // Its input is attacker-supplied plaintext from inside a Noise session, and a
-  // rejection in the Node Host must be an ordinary denial rather than an
+  // rejection in the Node Burrow must be an ordinary denial rather than an
   // unhandled async failure that can take the sidecar down.
   const binding = pairingBinding();
   for (const garbage of [
@@ -329,8 +329,8 @@ test('isPairingRequestV1 wants a code, a bounded label, and a real proof', async
 test('isPairingOutcomeV1 takes the success shape or one of six fixed denials', () => {
   const success = {
     ok: true,
-    hostStaticPublicKey: digest('hs1'),
-    hostLabel: 'Laptop',
+    burrowStaticPublicKey: digest('hs1'),
+    burrowLabel: 'Laptop',
     accountId: ACCOUNT,
     passkeyCredentialId: 'cred-1',
     passkeyPublicKeyHash: digest('ph1'),
@@ -343,7 +343,7 @@ test('isPairingOutcomeV1 takes the success shape or one of six fixed denials', (
     'presence-rejected',
     'invitation-expired',
     'superseded',
-    'host-error',
+    'burrow-error',
   ]) {
     assert.equal(isPairingOutcomeV1({ ok: false, code }), true, code);
   }
@@ -354,7 +354,7 @@ test('isPairingOutcomeV1 takes the success shape or one of six fixed denials', (
     ['a denial code the Client has no copy for', { ok: false, code: 'because-i-said-so' }],
     ['a denial with no code', { ok: false }],
     ['a success missing the delivery id', { ...success, deliveryId: undefined }],
-    ['a success with an over-long host label', { ...success, hostLabel: 'a'.repeat(CEREMONY_FIELD_LIMIT + 1) }],
+    ['a success with an over-long burrow label', { ...success, burrowLabel: 'a'.repeat(CEREMONY_FIELD_LIMIT + 1) }],
   ]) {
     assert.equal(isPairingOutcomeV1(value), false, why);
   }
@@ -370,8 +370,8 @@ test('isConnectionRequestV1 is the presence proof and nothing else', async () =>
 });
 
 test('isConnectionOutcomeV1 takes a labelled success or one of five fixed denials', () => {
-  assert.equal(isConnectionOutcomeV1({ ok: true, hostLabel: 'Laptop' }), true);
-  for (const code of ['pairing-required', 'presence-rejected', 'protocol-rejected', 'host-busy', 'host-error']) {
+  assert.equal(isConnectionOutcomeV1({ ok: true, burrowLabel: 'Laptop' }), true);
+  for (const code of ['pairing-required', 'presence-rejected', 'protocol-rejected', 'burrow-busy', 'burrow-error']) {
     assert.equal(isConnectionOutcomeV1({ ok: false, code }), true, code);
   }
   for (const [why, value] of [
@@ -390,14 +390,14 @@ test('isConnectionOutcomeV1 takes a labelled success or one of five fixed denial
 
 /** One established session pair, so control messages are measured on the wire. */
 async function established() {
-  const prologue = e2eConnectionPrologue(routingId('host'), routingId('conn'));
-  const hostStatic = await generateNoiseKeyPair();
+  const prologue = e2eConnectionPrologue(routingId('burrow'), routingId('conn'));
+  const burrowStatic = await generateNoiseKeyPair();
   const initiator = await createNoiseInitiator({
     prologue,
     staticKeyPair: await generateNoiseKeyPair(),
-    remoteStaticPublicKey: hostStatic.publicKey,
+    remoteStaticPublicKey: burrowStatic.publicKey,
   });
-  const responder = await createNoiseResponder({ prologue, staticKeyPair: hostStatic });
+  const responder = await createNoiseResponder({ prologue, staticKeyPair: burrowStatic });
   await responder.readMessage(await initiator.writeMessage());
   await initiator.readMessage(await responder.writeMessage());
   return new NoiseTransportSession(responder.session);
@@ -406,11 +406,11 @@ async function established() {
 test('a pairing approval and every pairing denial are the same size on the wire', async () => {
   // The relay sees the ciphertext and nothing else, so an approval that was
   // longer than a denial would leak the decision by length alone.
-  const host = await established();
-  const success = host.sendControl({
+  const burrow = await established();
+  const success = burrow.sendControl({
     ok: true,
-    hostStaticPublicKey: toBase64Url(new Uint8Array(32)),
-    hostLabel: "Ned's MacBook Pro (16-inch, 2025)",
+    burrowStaticPublicKey: toBase64Url(new Uint8Array(32)),
+    burrowLabel: "Ned's MacBook Pro (16-inch, 2025)",
     accountId: ACCOUNT,
     passkeyCredentialId: randomRoutingId(),
     passkeyPublicKeyHash: digest('ph1'),
@@ -422,20 +422,20 @@ test('a pairing approval and every pairing denial are the same size on the wire'
     'presence-rejected',
     'invitation-expired',
     'superseded',
-    'host-error',
+    'burrow-error',
   ]) {
-    assert.equal(host.sendControl({ ok: false, code }).length, success.length, code);
+    assert.equal(burrow.sendControl({ ok: false, code }).length, success.length, code);
   }
 });
 
 test('a connection success and every connection denial are the same size on the wire', async () => {
-  const host = await established();
-  const success = host.sendControl({ ok: true, hostLabel: "Ned's MacBook Pro (16-inch, 2025)" });
-  for (const code of ['pairing-required', 'presence-rejected', 'protocol-rejected', 'host-busy', 'host-error']) {
-    assert.equal(host.sendControl({ ok: false, code }).length, success.length, code);
+  const burrow = await established();
+  const success = burrow.sendControl({ ok: true, burrowLabel: "Ned's MacBook Pro (16-inch, 2025)" });
+  for (const code of ['pairing-required', 'presence-rejected', 'protocol-rejected', 'burrow-busy', 'burrow-error']) {
+    assert.equal(burrow.sendControl({ ok: false, code }).length, success.length, code);
   }
   // And the two ceremonies' outcomes are indistinguishable from each other too:
   // every control message pads to the same size, whatever it says.
-  const pairing = host.sendControl({ ok: false, code: 'user-denied' });
+  const pairing = burrow.sendControl({ ok: false, code: 'user-denied' });
   assert.equal(pairing.length, success.length);
 });

@@ -133,7 +133,7 @@ export async function waitFor(probe, { timeoutMs = 60_000, intervalMs = 400, wha
  */
 export function isPortFree(port) {
   return new Promise((resolve) => {
-    const socket = net.connect({ port, host: '127.0.0.1' });
+    const socket = net.connect({ port, burrow: '127.0.0.1' });
     const settle = (free) => {
       socket.destroy();
       resolve(free);

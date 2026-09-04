@@ -1,5 +1,5 @@
 /**
- * Host-enrollment admission: the wiring of the shared `TokenBucket`
+ * Burrow-enrollment admission: the wiring of the shared `TokenBucket`
  * (`remote-lib-common/test/token-bucket.test.mjs` pins its arithmetic) onto
  * the one route that accepts a bootstrap credential.
  */
@@ -10,29 +10,29 @@ import assert from 'node:assert/strict';
 import { API_ROUTES } from 'remote-lib-common';
 
 import {
-  HOST_ENROLL_ATTEMPT_BURST,
-  HOST_ENROLL_ATTEMPT_REFILL_MS,
+  BURROW_ENROLL_ATTEMPT_BURST,
+  BURROW_ENROLL_ATTEMPT_REFILL_MS,
   MAX_REQUEST_BODY_BYTES,
 } from '../dist/app.js';
 import { freshApp, makeClock, post } from './helpers.mjs';
 
-test('host enrollment has one process-global budget across concurrent callers', async () => {
+test('burrow enrollment has one process-global budget across concurrent callers', async () => {
   const clock = makeClock();
   const { app } = await freshApp({ now: clock.now });
   const responses = await Promise.all(
-    Array.from({ length: HOST_ENROLL_ATTEMPT_BURST + 3 }, () =>
-      post(app, API_ROUTES.hostEnroll, { password: 'wrong' }),
+    Array.from({ length: BURROW_ENROLL_ATTEMPT_BURST + 3 }, () =>
+      post(app, API_ROUTES.burrowEnroll, { password: 'wrong' }),
     ),
   );
 
-  assert.equal(responses.filter((res) => res.status === 401).length, HOST_ENROLL_ATTEMPT_BURST);
+  assert.equal(responses.filter((res) => res.status === 401).length, BURROW_ENROLL_ATTEMPT_BURST);
   assert.equal(responses.filter((res) => res.status === 429).length, 3);
   assert.equal(responses.at(-1).headers.get('retry-after'), '1');
 
-  clock.advance(HOST_ENROLL_ATTEMPT_REFILL_MS - 1);
-  assert.equal((await post(app, API_ROUTES.hostEnroll, {})).status, 429);
+  clock.advance(BURROW_ENROLL_ATTEMPT_REFILL_MS - 1);
+  assert.equal((await post(app, API_ROUTES.burrowEnroll, {})).status, 429);
   clock.advance(1);
-  assert.equal((await post(app, API_ROUTES.hostEnroll, {})).status, 400);
+  assert.equal((await post(app, API_ROUTES.burrowEnroll, {})).status, 400);
 });
 
 test('oversized enrollment bodies spend admission before they are read', async () => {
@@ -42,9 +42,9 @@ test('oversized enrollment bodies spend admission before they are read', async (
   const clock = makeClock();
   const { app } = await freshApp({ now: clock.now });
   const send = () =>
-    post(app, API_ROUTES.hostEnroll, { pad: 'A'.repeat(MAX_REQUEST_BODY_BYTES + 1) });
+    post(app, API_ROUTES.burrowEnroll, { pad: 'A'.repeat(MAX_REQUEST_BODY_BYTES + 1) });
 
-  for (let i = 0; i < HOST_ENROLL_ATTEMPT_BURST; i += 1) {
+  for (let i = 0; i < BURROW_ENROLL_ATTEMPT_BURST; i += 1) {
     assert.equal((await send()).status, 413);
   }
   assert.equal((await send()).status, 429);
@@ -53,12 +53,12 @@ test('oversized enrollment bodies spend admission before they are read', async (
   const fresh = await freshApp({ now: clock.now });
   assert.equal(
     (
-      await fresh.app.request(API_ROUTES.hostEnroll, {
+      await fresh.app.request(API_ROUTES.burrowEnroll, {
         method: 'OPTIONS',
         headers: { origin: 'https://example.test', 'access-control-request-method': 'POST' },
       })
     ).status,
     404,
   );
-  assert.equal((await post(fresh.app, API_ROUTES.hostEnroll, {})).status, 400);
+  assert.equal((await post(fresh.app, API_ROUTES.burrowEnroll, {})).status, 400);
 });

@@ -2,7 +2,7 @@
  * The pairing invitation and its QR grammar (`docs/specs/relay.md` → "Setup
  * tokens" → QR grammar).
  *
- * A Host mints an invitation, renders it as one URL, and a phone reads it back
+ * A Burrow mints an invitation, renders it as one URL, and a phone reads it back
  * with {@link parsePairingInvitationUrl}. Both halves live here so the emitter
  * and the parser cannot drift: the fragment is positional and carries no field
  * names, so a single disagreement about order or length would be a silent
@@ -40,13 +40,13 @@ const MAX_UINT32 = 0xffff_ffff;
 
 /**
  * The three origins the documented dev loop serves Pocket from, and the whole
- * of the parser's HTTPS exemption. **Matched by exact host, and deliberately
+ * of the parser's HTTPS exemption. **Matched by exact burrow, and deliberately
  * narrower than the platform's own secure-context rule**, which also trusts
  * `*.localhost` and all of `127.0.0.0/8`: this is a policy list, not a
  * re-derivation, so widening it is a decision rather than a correction.
  * `URL.hostname` spells the IPv6 loopback bracketed, so that is the form here.
  */
-const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+const LOOPBACK_BURROWS = new Set(['localhost', '127.0.0.1', '[::1]']);
 
 /** How many dot-delimited fields the fragment carries. */
 const FRAGMENT_FIELD_COUNT = 6;
@@ -64,7 +64,7 @@ export const PAIRING_FRAGMENT_LENGTH =
   (FRAGMENT_FIELD_COUNT - 1);
 
 /**
- * The longest complete pairing URL a Host will mint.
+ * The longest complete pairing URL a Burrow will mint.
  *
  * A QR encoder throws above its capacity — inside the app-wide ErrorBoundary,
  * taking every terminal down with it — so the cap is enforced *before* the
@@ -74,17 +74,17 @@ export const PAIRING_FRAGMENT_LENGTH =
  */
 export const PAIRING_QR_URL_MAX_LENGTH = 256;
 
-/** One invitation, as the Host holds it and the Client reads it back. */
+/** One invitation, as the Burrow holds it and the Client reads it back. */
 export interface PairingInvitation {
   /** The relay destination, base64url of 16 bytes. */
-  readonly hostId: string;
-  /** Single-use invitation id, base64url of 16 bytes; lives only in Host memory. */
+  readonly burrowId: string;
+  /** Single-use invitation id, base64url of 16 bytes; lives only in Burrow memory. */
   readonly inviteId: string;
   /** Epoch **seconds**; an advisory Client fail-fast, never the authority. */
   readonly expiry: number;
   /** The Relay's single-use setup token, base64url of 32 bytes. */
   readonly setupToken: string;
-  /** The one-use Host Noise responder key for this invitation, raw 32 bytes. */
+  /** The one-use Burrow Noise responder key for this invitation, raw 32 bytes. */
   readonly ephPub: Uint8Array;
   /** The same key as it appears in the fragment and the prologue. */
   readonly ephPubBase64Url: string;
@@ -113,7 +113,7 @@ export function formatInvitationExpiry(expirySeconds: number): string {
 
 /**
  * The invitation fields the pairing prologue binds, in the order the QR carries
- * them — the version first, then everything but the `hostId`, which
+ * them — the version first, then everything but the `burrowId`, which
  * {@link e2ePairingPrologue} already binds itself.
  *
  * One builder, so the initiator and the responder cannot disagree about the
@@ -132,13 +132,13 @@ export function pairingInvitationFields(
   ];
 }
 
-/** The pairing prologue for one invitation: the `hostId` plus every field above. */
+/** The pairing prologue for one invitation: the `burrowId` plus every field above. */
 export function pairingInvitationPrologue(invitation: PairingInvitation): Uint8Array {
-  return e2ePairingPrologue(invitation.hostId, pairingInvitationFields(invitation));
+  return e2ePairingPrologue(invitation.burrowId, pairingInvitationFields(invitation));
 }
 
 /**
- * Compose the URL a Host renders as its QR.
+ * Compose the URL a Burrow renders as its QR.
  *
  * **Throws over {@link PAIRING_QR_URL_MAX_LENGTH}, before any encoder runs.**
  * The only variable-length part is the origin, so the failure is always "this
@@ -147,15 +147,15 @@ export function pairingInvitationPrologue(invitation: PairingInvitation): Uint8A
  */
 export function formatPairingInvitationUrl(origin: string, invitation: PairingInvitation): string {
   // Through {@link pairingInvitationFields}, so the fragment and the prologue
-  // cannot disagree about order: the version leads, the `hostId` follows it, and
+  // cannot disagree about order: the version leads, the `burrowId` follows it, and
   // the rest is exactly what the transcript binds.
   const [version, ...rest] = pairingInvitationFields(invitation);
-  const fragment = [version, invitation.hostId, ...rest].join(FIELD_SEPARATOR);
+  const fragment = [version, invitation.burrowId, ...rest].join(FIELD_SEPARATOR);
   const url = `${origin}/${PAIRING_HASH_PREFIX}${fragment}`;
   if (url.length > PAIRING_QR_URL_MAX_LENGTH) {
     throw new Error(
       `pairing URL is ${url.length} characters, over the ${PAIRING_QR_URL_MAX_LENGTH} limit; ` +
-        'the origin this Host enrolled against is too long for a scannable code.',
+        'the origin this Burrow enrolled against is too long for a scannable code.',
     );
   }
   return url;
@@ -176,7 +176,7 @@ export function formatPairingInvitationUrl(origin: string, invitation: PairingIn
  * that keeps a code from bootstrapping a *different* deployment's Pocket is
  * this compare.
  *
- * **HTTPS, or plain HTTP on one of {@link LOOPBACK_HOSTS}.** Every one of those
+ * **HTTPS, or plain HTTP on one of {@link LOOPBACK_BURROWS}.** Every one of those
  * is a secure context by the platform's own rule, so the exemption admits no
  * origin WebAuthn or a service worker would refuse to run on.
  */
@@ -191,8 +191,8 @@ export async function parsePairingInvitationUrl(
   const url = parseUrl(text);
   if (!url) return null;
   // The origin compare below still has to pass, so this widens nothing a
-  // remote code could reach — see {@link LOOPBACK_HOSTS}.
-  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && LOOPBACK_HOSTS.has(url.hostname))) {
+  // remote code could reach — see {@link LOOPBACK_BURROWS}.
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && LOOPBACK_BURROWS.has(url.hostname))) {
     return null;
   }
   // Credentials in the authority would let a code name an origin the compare
@@ -206,7 +206,7 @@ export async function parsePairingInvitationUrl(
   if (fragment.length !== PAIRING_FRAGMENT_LENGTH) return null;
   const fields = fragment.split(FIELD_SEPARATOR);
   if (fields.length !== FRAGMENT_FIELD_COUNT) return null;
-  const [version, hostId, inviteId, expiryText, setupToken, ephPubBase64Url] = fields as [
+  const [version, burrowId, inviteId, expiryText, setupToken, ephPubBase64Url] = fields as [
     string,
     string,
     string,
@@ -215,14 +215,14 @@ export async function parsePairingInvitationUrl(
     string,
   ];
   if (version !== PAIRING_INVITATION_VERSION) return null;
-  if (!isExactBase64Url(hostId, ROUTING_ID_LENGTH) || !isExactBase64Url(inviteId, ROUTING_ID_LENGTH))
+  if (!isExactBase64Url(burrowId, ROUTING_ID_LENGTH) || !isExactBase64Url(inviteId, ROUTING_ID_LENGTH))
     return null;
   if (!isExactBase64Url(setupToken, SECRET_LENGTH) || !isExactBase64Url(ephPubBase64Url, SECRET_LENGTH))
     return null;
   if (!EXPIRY_PATTERN.test(expiryText)) return null;
   const expiry = Number(expiryText);
   if (expiry > MAX_UINT32) return null;
-  // Advisory only — the Host's own memory stays authoritative — but a code that
+  // Advisory only — the Burrow's own memory stays authoritative — but a code that
   // is already dead should fail here rather than after a handshake.
   if (expiry * 1000 < now) return null;
 
@@ -240,7 +240,7 @@ export async function parsePairingInvitationUrl(
   } catch {
     return null;
   }
-  return { hostId, inviteId, expiry, setupToken, ephPub, ephPubBase64Url };
+  return { burrowId, inviteId, expiry, setupToken, ephPub, ephPubBase64Url };
 }
 
 /**

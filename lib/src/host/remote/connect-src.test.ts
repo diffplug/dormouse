@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-// The build scripts read the `.mjs` and the Host service reads the `.ts`; the
+// The build scripts read the `.mjs` and the Burrow service reads the `.ts`; the
 // last describe here is what keeps them one fact.
 import {
   CONNECT_SRC_SOURCE_PATTERN as BUILD_PATTERN,
@@ -32,7 +32,7 @@ describe('originAllowedByConnectSrc', () => {
   });
 
   it('treats https and wss as one scheme', () => {
-    // A Host reaches the same Relay over both, and the source list names both;
+    // A Burrow reaches the same Relay over both, and the source list names both;
     // either entry must answer for either scheme.
     expect(originAllowedByConnectSrc('https://x.example', 'wss://x.example')).toBe(true);
     expect(originAllowedByConnectSrc('wss://x.example', 'https://x.example')).toBe(true);
@@ -75,7 +75,7 @@ describe('originAllowedByConnectSrc', () => {
     expect(originAllowedByConnectSrc('not a url', SAAS)).toBe(false);
     expect(originAllowedByConnectSrc('https://x.example', '')).toBe(false);
     expect(originAllowedByConnectSrc('https://x.example', "'self'")).toBe(false);
-    // A scheme a Host cannot speak is never a relay.
+    // A scheme a Burrow cannot speak is never a relay.
     expect(originAllowedByConnectSrc('file:///etc/passwd', 'file://')).toBe(false);
   });
 
@@ -88,12 +88,12 @@ describe('the build-time check on a self-hoster’s override', () => {
   it('reads a source with exactly the grammar the matcher does', () => {
     // `scripts/csp-defaults.mjs` is a build script and cannot import this file,
     // so it keeps a copy. A copy that drifted would either fail a build over a
-    // source the Host accepts, or pass one it silently never matches.
+    // source the Burrow accepts, or pass one it silently never matches.
     expect(BUILD_PATTERN.source).toBe(CONNECT_SRC_SOURCE_PATTERN.source);
     expect(BUILD_PATTERN.flags).toBe(CONNECT_SRC_SOURCE_PATTERN.flags);
   });
 
-  it('fails the build on an override the Host could never match', () => {
+  it('fails the build on an override the Burrow could never match', () => {
     // Each silently matches nothing at runtime, so the binary builds green and
     // then refuses to enroll against the Relay it was built for.
     for (const bad of [

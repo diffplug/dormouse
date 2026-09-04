@@ -22,7 +22,7 @@ class MemorySocket {
     list.push(handler);
     this.handlers.set(type, list);
     // A late `open` listener still fires. The two peers are handed to their
-    // halves several awaits apart — the Client is built after the Host's own
+    // halves several awaits apart — the Client is built after the Burrow's own
     // upgrade and a sign-in — so a one-shot event would be missed by whichever
     // half attached second, and its `ready` would never settle.
     if (type === 'open' && this.opened) queueMicrotask(() => handler({}));

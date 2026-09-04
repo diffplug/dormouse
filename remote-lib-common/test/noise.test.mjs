@@ -259,7 +259,7 @@ test('a mismatched prologue fails the handshake', async () => {
 
 test('an initiator pointed at the wrong static key fails the handshake', async () => {
   // IK's whole point: the initiator commits to `rs` before speaking, so a
-  // substituted Host static never decrypts.
+  // substituted Burrow static never decrypts.
   const wrong = await generateNoiseKeyPair();
   const initiator = await newInitiator({ remoteStaticPublicKey: wrong.publicKey });
   const responder = await newResponder();
@@ -344,18 +344,18 @@ test('a keyless CipherState is a passthrough, and a keyed one needs 32 bytes', (
 });
 
 test('a generated keypair round-trips through a real handshake', async () => {
-  const host = await generateNoiseKeyPair();
+  const burrow = await generateNoiseKeyPair();
   const client = await generateNoiseKeyPair();
-  assert.equal(host.publicKey.length, 32);
-  assert.equal(host.privateKey.extractable, false);
+  assert.equal(burrow.publicKey.length, 32);
+  assert.equal(burrow.privateKey.extractable, false);
 
   const prologue = Uint8Array.of(0xde, 0xad, 0xbe, 0xef);
   const initiator = await createNoiseInitiator({
     prologue,
     staticKeyPair: client,
-    remoteStaticPublicKey: host.publicKey,
+    remoteStaticPublicKey: burrow.publicKey,
   });
-  const responder = await createNoiseResponder({ prologue, staticKeyPair: host });
+  const responder = await createNoiseResponder({ prologue, staticKeyPair: burrow });
 
   const hello = Uint8Array.of(0x01, 0x02);
   assert.equal(hex(await responder.readMessage(await initiator.writeMessage(hello))), '0102');
@@ -373,7 +373,7 @@ test('a generated keypair round-trips through a real handshake', async () => {
 // --- Regressions pinned by the stage-1 code review ---
 
 test('a Buffer message is copied, not aliased, before the handshake needs it again', async () => {
-  // Node aliases `Buffer.prototype.slice` to `subarray`, so a host reading a
+  // Node aliases `Buffer.prototype.slice` to `subarray`, so a burrow reading a
   // WebSocket frame into a reused buffer would otherwise have its `re` change
   // underneath the `ee` DH that message 2 still owes.
   const initiator = await newInitiator();
@@ -382,7 +382,7 @@ test('a Buffer message is copied, not aliased, before the handshake needs it aga
   await responder.readMessage(wire);
 
   const remoteStatic = responder.remoteStaticPublicKey;
-  wire.fill(0); // the host recycles its read buffer
+  wire.fill(0); // the burrow recycles its read buffer
   assert.equal(hex(remoteStatic), hex(keys.initStatic.publicKey));
 
   // Message 2 still matches the vector: `re` was copied out of the recycled buffer.
@@ -472,7 +472,7 @@ test('the role follows the remote static, so it can never be mismatched', async 
 });
 
 test('a minted static round-trips through its persisted form', async () => {
-  // What the Host state file holds: PKCS#8 for the private half, raw for the
+  // What the Burrow state file holds: PKCS#8 for the private half, raw for the
   // public one, both base64url.
   const material = await mintNoiseStaticKeyPair();
   assert.match(material.publicKey, /^[A-Za-z0-9_-]{43}$/);
@@ -510,7 +510,7 @@ test('a restored static is nonextractable', async () => {
 test('a private key that is not one fails as a NoiseError', async () => {
   // The state file is attacker-writable by anything that can write it at all,
   // so a malformed value has to be a typed failure rather than a DOMException
-  // escaping the Host's start path.
+  // escaping the Burrow's start path.
   await assert.rejects(importNoiseStaticPrivateKey('not base64url!'), NoiseError);
   await assert.rejects(importNoiseStaticPrivateKey(''), NoiseError);
   await assert.rejects(importNoiseStaticPrivateKey('AAAA'), NoiseError);

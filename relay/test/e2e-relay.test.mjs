@@ -1,11 +1,11 @@
 /**
  * The `e2e` relay envelope driven end to end through the real Relay
  * (docs/specs/relay.md -> Relay): one Noise IK ceremony between a fake Client
- * and a fake Host, with both statics injected by the test.
+ * and a fake Burrow, with both statics injected by the test.
  *
  * What it proves, in the order the scope asks for it
  * (docs/specs/remote-security-model.md -> `## Future` -> **Scope:
- * e2e-client-host**, stage 3): prologue and transcript binding, directional
+ * e2e-client-burrow**, stage 3): prologue and transcript binding, directional
  * cipher states, counters, framing, teardown, relay opacity, tamper rejection,
  * and the relay's own bounds. The framing in isolation is
  * `remote-lib-common/test/noise-transport.test.mjs`.
@@ -16,7 +16,7 @@ import assert from 'node:assert/strict';
 
 import {
   MAX_E2E_CIPHERTEXT_LENGTH,
-  WS_CLOSE_HOST_REPLACED,
+  WS_CLOSE_BURROW_REPLACED,
   e2eConnectionPrologue,
   fromBase64Url,
   generateNoiseKeyPair,
@@ -36,9 +36,9 @@ function relayView(...peers) {
 
 test('an established session round-trips every transport kind through the relay', async () => {
   const fixture = await e2eFixture();
-  const { host, client, clientStatic } = fixture;
+  const { burrow, client, clientStatic } = fixture;
   const opens = [];
-  host.on('e2e-open', (ev) => opens.push(ev));
+  burrow.on('e2e-open', (ev) => opens.push(ev));
   try {
     await establish(fixture);
     // The connection handshake: both sides agree on the transcript, and IK
@@ -47,8 +47,8 @@ test('an established session round-trips every transport kind through the relay'
     assert.deepEqual(entry.session.handshakeHash, client.session.handshakeHash);
     assert.equal(entry.clientStaticPublicKey, toBase64Url(clientStatic.publicKey));
 
-    // Client → Host, all three kinds.
-    const seen = watch(host);
+    // Client → Burrow, all three kinds.
+    const seen = watch(burrow);
     const payload = utf8Encode('terminal.write rides in here');
     client.sendKeepalive();
     client.sendControl({ presence: 'proof' });
@@ -58,20 +58,20 @@ test('an established session round-trips every transport kind through the relay'
     assert.deepEqual(seen.receipts[1].receipt, { kind: 'control', value: { presence: 'proof' } });
     assert.deepEqual(seen.receipts[2].receipt.messages, [payload]);
 
-    // Host → Client, on the other direction's cipher state.
+    // Burrow → Client, on the other direction's cipher state.
     const reply = utf8Encode('terminal.data rides back');
-    host.e2eSendApp(entry.clientId, reply);
+    burrow.e2eSendApp(entry.clientId, reply);
     const frame = await client.nextTransport();
-    assert.equal(frame.hostId, fixture.enrollment.hostId, 'the relay stamps hostId');
+    assert.equal(frame.burrowId, fixture.enrollment.burrowId, 'the relay stamps burrowId');
     assert.deepEqual(client.receiveFrame(frame).messages, [reply]);
 
     // The envelope is the whole surface: an established session opens no other
     // pipe, and every other frame type is simply unknown.
-    const hostFramesBefore = host.frames.length;
+    const burrowFramesBefore = burrow.frames.length;
     client.sendFrame({ t: 'msg', data: { forbidden: true } });
     const refusal = await client.waitFor((f) => f.t === 'error');
     assert.equal(refusal.error, 'unknown frame type');
-    assert.equal(host.frames.length, hostFramesBefore, 'nothing else reaches the Host');
+    assert.equal(burrow.frames.length, burrowFramesBefore, 'nothing else reaches the Burrow');
   } finally {
     await fixture.close();
   }
@@ -79,22 +79,22 @@ test('an established session round-trips every transport kind through the relay'
 
 test('the transcript binds: a wrong prologue fails message 1', async () => {
   const fixture = await e2eFixture();
-  const { host, client } = fixture;
-  const seen = watch(host);
+  const { burrow, client } = fixture;
+  const seen = watch(burrow);
   try {
     const id = newE2eId();
     await client.open({
       id,
       // The same ceremony, a different connection id in the prologue only.
-      prologue: e2eConnectionPrologue(fixture.enrollment.hostId, newE2eId()),
+      prologue: e2eConnectionPrologue(fixture.enrollment.burrowId, newE2eId()),
       awaitResponse: false,
     });
     await until(() => seen.errors.length === 1);
     assert.equal(seen.opens.length, 0, 'no session was established');
-    assert.equal(await client.quiet(), true, 'the Host answered nothing');
+    assert.equal(await client.quiet(), true, 'the Burrow answered nothing');
     // The relay forwarded it all the same: it cannot tell a bound transcript
     // from an unbound one, which is the point.
-    assert.ok(host.frames.some((f) => f.t === 'e2e' && f.id === id && f.step === 'init'));
+    assert.ok(burrow.frames.some((f) => f.t === 'e2e' && f.id === id && f.step === 'init'));
   } finally {
     await fixture.close();
   }
@@ -102,8 +102,8 @@ test('the transcript binds: a wrong prologue fails message 1', async () => {
 
 test('the transcript binds: a wrong rs fails message 1', async () => {
   const fixture = await e2eFixture();
-  const { host, client } = fixture;
-  const seen = watch(host);
+  const { burrow, client } = fixture;
+  const seen = watch(burrow);
   try {
     const impostor = await generateNoiseKeyPair();
     await client.open({ remoteStaticPublicKey: impostor.publicKey, awaitResponse: false });
@@ -117,11 +117,11 @@ test('the transcript binds: a wrong rs fails message 1', async () => {
 
 test('the transcript binds: a Client that lies about its static fails message 1', async () => {
   const fixture = await e2eFixture();
-  const { host, client } = fixture;
-  const seen = watch(host);
+  const { burrow, client } = fixture;
+  const seen = watch(burrow);
   try {
     // `ss` is computed with the private half, and the public half is what the
-    // Host mixes: presenting someone else's static breaks message 1's payload.
+    // Burrow mixes: presenting someone else's static breaks message 1's payload.
     const other = await generateNoiseKeyPair();
     await client.open({
       staticKeyPair: { privateKey: fixture.clientStatic.privateKey, publicKey: other.publicKey },
@@ -137,8 +137,8 @@ test('the transcript binds: a Client that lies about its static fails message 1'
 
 test('cipher states are directional: a frame reflected to its sender is rejected', async () => {
   const fixture = await e2eFixture();
-  const { host, client } = fixture;
-  const seen = watch(host);
+  const { burrow, client } = fixture;
+  const seen = watch(burrow);
   try {
     await client.open();
     await until(() => seen.opens.length === 1);
@@ -148,7 +148,7 @@ test('cipher states are directional: a frame reflected to its sender is rejected
     await until(() => seen.receipts.length === 1);
 
     // The relay reflects the Client's own ciphertext back at it.
-    host.e2eSendCiphertext(seen.opens[0], sent.ct);
+    burrow.e2eSendCiphertext(seen.opens[0], sent.ct);
     const reflected = await client.waitFor((f) => f.t === 'e2e' && f.step === 'transport');
     assert.throws(() => client.receiveFrame(reflected), /authentication failed/);
     assert.equal(client.session.isPoisoned, true);
@@ -159,8 +159,8 @@ test('cipher states are directional: a frame reflected to its sender is rejected
 
 test('a replayed transport frame poisons the session permanently', async () => {
   const fixture = await e2eFixture();
-  const { host, client } = fixture;
-  const seen = watch(host);
+  const { burrow, client } = fixture;
+  const seen = watch(burrow);
   try {
     await client.open();
     await until(() => seen.opens.length === 1);
@@ -184,8 +184,8 @@ test('a replayed transport frame poisons the session permanently', async () => {
 
 test('a reordered transport frame poisons the session', async () => {
   const fixture = await e2eFixture();
-  const { host, client } = fixture;
-  const seen = watch(host);
+  const { burrow, client } = fixture;
+  const seen = watch(burrow);
   try {
     await client.open();
     await until(() => seen.opens.length === 1);
@@ -205,10 +205,10 @@ test('a reordered transport frame poisons the session', async () => {
 
 test('a 100 KiB application message chunks across frames and reassembles byte-exact', async () => {
   const fixture = await e2eFixture();
-  const { host, client } = fixture;
+  const { burrow, client } = fixture;
   try {
     await establish(fixture);
-    const seen = watch(host);
+    const seen = watch(burrow);
 
     const message = new Uint8Array(100 * 1024);
     for (let i = 0; i < message.length; i++) message[i] = (i * 131) & 0xff;
@@ -230,8 +230,8 @@ test('a 100 KiB application message chunks across frames and reassembles byte-ex
 
 test('an application message declaring more than 1 MiB is a hard failure', async () => {
   const fixture = await e2eFixture();
-  const { host, client } = fixture;
-  const seen = watch(host);
+  const { burrow, client } = fixture;
+  const seen = watch(burrow);
   try {
     await client.open();
     await until(() => seen.opens.length === 1);
@@ -257,10 +257,10 @@ test('an application message declaring more than 1 MiB is a hard failure', async
 
 test('keepalives and control messages are one fixed size each', async () => {
   const fixture = await e2eFixture();
-  const { host, client } = fixture;
+  const { burrow, client } = fixture;
   try {
     await establish(fixture);
-    const seen = watch(host);
+    const seen = watch(burrow);
     const before = client.sent.length;
 
     client.sendKeepalive();
@@ -282,45 +282,45 @@ test('keepalives and control messages are one fixed size each', async () => {
   }
 });
 
-test('teardown: a closed Client socket tells the Host client-gone', async () => {
+test('teardown: a closed Client socket tells the Burrow client-gone', async () => {
   const fixture = await e2eFixture();
-  const { host, client } = fixture;
-  const seen = watch(host);
+  const { burrow, client } = fixture;
+  const seen = watch(burrow);
   try {
     await client.open();
     await until(() => seen.opens.length === 1);
     const { clientId } = seen.opens[0];
 
     client.close();
-    await until(() => host.frames.some((f) => f.t === 'client-gone' && f.clientId === clientId));
-    assert.equal(host.e2eEntry(clientId), undefined, 'the ceremony went with the client');
+    await until(() => burrow.frames.some((f) => f.t === 'client-gone' && f.clientId === clientId));
+    assert.equal(burrow.e2eEntry(clientId), undefined, 'the ceremony went with the client');
   } finally {
     await fixture.close();
   }
 });
 
-test('teardown: a replaced Host is host-gone and its late frames are dropped', async () => {
+test('teardown: a replaced Burrow is burrow-gone and its late frames are dropped', async () => {
   const fixture = await e2eFixture();
-  const { host, client } = fixture;
-  const seen = watch(host);
+  const { burrow, client } = fixture;
+  const seen = watch(burrow);
   try {
     await client.open();
     await until(() => seen.opens.length === 1);
     const entry = seen.opens[0];
 
-    const replacement = await fixture.replacementHost();
+    const replacement = await fixture.replacementBurrow();
     const replaced = watch(replacement);
-    await client.waitFor((f) => f.t === 'host-gone');
-    const closed = await host.closed;
-    assert.equal(closed.code, WS_CLOSE_HOST_REPLACED);
+    await client.waitFor((f) => f.t === 'burrow-gone');
+    const closed = await burrow.closed;
+    assert.equal(closed.code, WS_CLOSE_BURROW_REPLACED);
 
     // The displaced socket speaks for nobody: the hub's map already points at
     // the replacement, so a late transport frame is not forwarded.
-    host.e2eSendCiphertext(entry, entry.session.sendKeepalive());
+    burrow.e2eSendCiphertext(entry, entry.session.sendKeepalive());
     assert.equal(await client.quiet(), true);
 
     // The replacement is reachable, and its ceremonies are its own: a restarted
-    // Host has no memory of the session the Client held with its predecessor.
+    // Burrow has no memory of the session the Client held with its predecessor.
     await client.open();
     await until(() => replaced.opens.length === 1);
     assert.notDeepEqual(replaced.opens[0].session.handshakeHash, entry.session.handshakeHash);
@@ -329,22 +329,22 @@ test('teardown: a replaced Host is host-gone and its late frames are dropped', a
   }
 });
 
-test('a Host e2e frame for a Client bound elsewhere is not forwarded', async () => {
+test('a Burrow e2e frame for a Client bound elsewhere is not forwarded', async () => {
   const fixture = await e2eFixture();
-  const { host, client } = fixture;
-  const seen = watch(host);
+  const { burrow, client } = fixture;
+  const seen = watch(burrow);
   try {
     await client.open();
     await until(() => seen.opens.length === 1);
     const entry = seen.opens[0];
 
-    // The Client rebinds to a different Host; the first one is told so.
-    const second = await fixture.secondHost();
-    await client.open({ hostId: second.hostId });
-    await until(() => host.frames.some((f) => f.t === 'client-gone'));
+    // The Client rebinds to a different Burrow; the first one is told so.
+    const second = await fixture.secondBurrow();
+    await client.open({ burrowId: second.burrowId });
+    await until(() => burrow.frames.some((f) => f.t === 'client-gone'));
 
-    host.e2eSendCiphertext(entry, entry.session.sendKeepalive());
-    assert.equal(await client.quiet(), true, 'the old Host cannot reach the client');
+    burrow.e2eSendCiphertext(entry, entry.session.sendKeepalive());
+    assert.equal(await client.quiet(), true, 'the old Burrow cannot reach the client');
   } finally {
     await fixture.close();
   }
@@ -352,41 +352,41 @@ test('a Host e2e frame for a Client bound elsewhere is not forwarded', async () 
 
 test('the relay is opaque: no plaintext, static, or handshake hash crosses it', async () => {
   const fixture = await e2eFixture();
-  const { host, client, hostStatic, clientStatic } = fixture;
+  const { burrow, client, burrowStatic, clientStatic } = fixture;
   const MARKER = 'DORMOUSE-PLAINTEXT-ORACLE-9f3a';
   const opens = [];
-  host.on('e2e-open', (ev) => opens.push(ev));
+  burrow.on('e2e-open', (ev) => opens.push(ev));
   try {
     await establish(fixture);
-    const seen = watch(host);
+    const seen = watch(burrow);
     const entry = opens.at(-1);
 
     client.sendControl({ note: MARKER });
     client.sendApp(utf8Encode(`app ${MARKER}`));
-    host.e2eSendApp(entry.clientId, utf8Encode(`reply ${MARKER}`));
+    burrow.e2eSendApp(entry.clientId, utf8Encode(`reply ${MARKER}`));
     await until(() => seen.receipts.length === 2);
     await client.nextTransport();
 
-    const view = relayView(client, host);
+    const view = relayView(client, burrow);
     assert.equal(view.includes(MARKER), false, 'no plaintext crosses the relay');
     for (const [what, key] of [
-      ['host static', hostStatic.publicKey],
+      ['burrow static', burrowStatic.publicKey],
       ['client static', clientStatic.publicKey],
       ['handshake hash', client.session.handshakeHash],
     ]) {
       assert.equal(view.includes(toBase64Url(key)), false, `${what} must never appear`);
     }
     // What it *does* see is routing only.
-    assert.ok(view.includes(fixture.enrollment.hostId));
+    assert.ok(view.includes(fixture.enrollment.burrowId));
   } finally {
     await fixture.close();
   }
 });
 
-test('tampering with message 1 is rejected by the Host, and the relay cannot tell', async () => {
+test('tampering with message 1 is rejected by the Burrow, and the relay cannot tell', async () => {
   const fixture = await e2eFixture();
-  const { host, client } = fixture;
-  const seen = watch(host);
+  const { burrow, client } = fixture;
+  const seen = watch(burrow);
   try {
     const id = newE2eId();
     await client.open({ id, tamper: (ct) => flip(ct), awaitResponse: false });
@@ -394,7 +394,7 @@ test('tampering with message 1 is rejected by the Host, and the relay cannot tel
     assert.equal(seen.opens.length, 0);
     assert.equal(await client.quiet(), true);
     // Forwarded, unexamined, exactly as the untampered one would have been.
-    assert.ok(host.frames.some((f) => f.t === 'e2e' && f.id === id && f.step === 'init'));
+    assert.ok(burrow.frames.some((f) => f.t === 'e2e' && f.id === id && f.step === 'init'));
   } finally {
     await fixture.close();
   }
@@ -402,8 +402,8 @@ test('tampering with message 1 is rejected by the Host, and the relay cannot tel
 
 test('tampering with message 2 is rejected by the Client', async () => {
   const fixture = await e2eFixture();
-  const { host, client } = fixture;
-  const seen = watch(host);
+  const { burrow, client } = fixture;
+  const seen = watch(burrow);
   try {
     const { handshake, id } = await client.open({ awaitResponse: false });
     const response = await client.waitFor(
@@ -414,7 +414,7 @@ test('tampering with message 2 is rejected by the Client', async () => {
       () => handshake.readMessage(fromBase64Url(flip(response.ct))),
       /authentication failed/,
     );
-    // The Host still believes it completed — which is why the Client's first
+    // The Burrow still believes it completed — which is why the Client's first
     // transport payload, not `Split`, is what authorizes anything.
     assert.equal(seen.opens.length, 1);
   } finally {
@@ -424,8 +424,8 @@ test('tampering with message 2 is rejected by the Client', async () => {
 
 test('tampering with a transport frame is rejected and poisons the session', async () => {
   const fixture = await e2eFixture();
-  const { host, client } = fixture;
-  const seen = watch(host);
+  const { burrow, client } = fixture;
+  const seen = watch(burrow);
   try {
     await client.open();
     await until(() => seen.opens.length === 1);
@@ -439,19 +439,19 @@ test('tampering with a transport frame is rejected and poisons the session', asy
   }
 });
 
-test('the relay refuses malformed e2e frames before they reach the Host', async () => {
+test('the relay refuses malformed e2e frames before they reach the Burrow', async () => {
   const fixture = await e2eFixture();
-  const { host, client, enrollment } = fixture;
+  const { burrow, client, enrollment } = fixture;
   try {
     const base = {
       t: 'e2e',
-      hostId: enrollment.hostId,
+      burrowId: enrollment.burrowId,
       kind: 'connection',
       id: newE2eId(),
       step: 'init',
       ct: 'Zm9v',
     };
-    const before = host.frames.length;
+    const before = burrow.frames.length;
     const bad = [
       { ...base, ct: 'a'.repeat(MAX_E2E_CIPHERTEXT_LENGTH + 1) },
       { ...base, id: 'too-short' },
@@ -459,7 +459,7 @@ test('the relay refuses malformed e2e frames before they reach the Host', async 
       { ...base, kind: 'terminal' },
       { ...base, step: 'response' },
       { ...base, step: 'go' },
-      { ...base, hostId: 'not-a-host-id' },
+      { ...base, burrowId: 'not-a-burrow-id' },
       { ...base, ct: '' },
     ];
     for (const frame of bad) {
@@ -468,11 +468,11 @@ test('the relay refuses malformed e2e frames before they reach the Host', async 
       assert.equal(error.error, 'malformed e2e frame', JSON.stringify(frame));
       client.frames.length = 0; // consume, so the next wait sees a fresh one
     }
-    assert.equal(host.frames.length, before, 'nothing malformed reached the Host');
+    assert.equal(burrow.frames.length, before, 'nothing malformed reached the Burrow');
 
-    // A well-formed frame naming a Host that is not connected is the ordinary
+    // A well-formed frame naming a Burrow that is not connected is the ordinary
     // offline refusal, not a malformed one.
-    client.sendFrame({ ...base, hostId: newE2eId() });
+    client.sendFrame({ ...base, burrowId: newE2eId() });
     const offline = await client.waitFor((f) => f.t === 'error');
     assert.match(offline.error, /is offline/);
   } finally {
@@ -482,11 +482,11 @@ test('the relay refuses malformed e2e frames before they reach the Host', async 
 
 test('a transport pipelined behind its init is handled after it, not beside it', async () => {
   const fixture = await e2eFixture();
-  const { host, client } = fixture;
-  const seen = watch(host);
+  const { burrow, client } = fixture;
+  const seen = watch(burrow);
   try {
     // Reading message 1 awaits three times before the session is recorded. A
-    // Host that handled socket frames concurrently would run this transport
+    // Burrow that handled socket frames concurrently would run this transport
     // against a Map that does not hold the ceremony yet and answer "no e2e
     // session" — the wrong diagnosis, and in stage 4 a dropped first payload.
     const id = newE2eId();
@@ -507,21 +507,21 @@ test('a transport pipelined behind its init is handled after it, not beside it',
 
 test('a transport frame before any init is dropped, not forwarded', async () => {
   const fixture = await e2eFixture();
-  const { host, client, enrollment } = fixture;
+  const { burrow, client, enrollment } = fixture;
   try {
     // A well-formed transport frame from a Client that has never bound: there
     // is no binding to forward it within, so the relay drops it silently.
-    const before = host.frames.length;
+    const before = burrow.frames.length;
     client.sendFrame({
       t: 'e2e',
-      hostId: enrollment.hostId,
+      burrowId: enrollment.burrowId,
       kind: 'connection',
       id: newE2eId(),
       step: 'transport',
       ct: 'Zm9vYmFy',
     });
     assert.equal(await client.quiet(), true, 'not even an error is answered');
-    assert.equal(host.frames.length, before, 'transport never reaches an unbound Host');
+    assert.equal(burrow.frames.length, before, 'transport never reaches an unbound Burrow');
   } finally {
     await fixture.close();
   }
@@ -529,19 +529,19 @@ test('a transport frame before any init is dropped, not forwarded', async () => 
 
 test('a transport frame outside the binding is dropped, not forwarded', async () => {
   const fixture = await e2eFixture();
-  const { host, client } = fixture;
-  const seen = watch(host);
+  const { burrow, client } = fixture;
+  const seen = watch(burrow);
   try {
     await client.open();
     await until(() => seen.opens.length === 1);
-    const second = await fixture.secondHost();
+    const second = await fixture.secondBurrow();
 
-    // A transport frame naming a Host this Client is not bound to.
+    // A transport frame naming a Burrow this Client is not bound to.
     const before = second.frames.length;
     client.sendCiphertext(client.session.sendKeepalive(), {});
-    client.sendFrame({ ...client.sent.at(-1), hostId: second.hostId });
+    client.sendFrame({ ...client.sent.at(-1), burrowId: second.burrowId });
     assert.equal(await client.quiet(), true);
-    assert.equal(second.frames.length, before, 'transport never binds a Host');
+    assert.equal(second.frames.length, before, 'transport never binds a Burrow');
   } finally {
     await fixture.close();
   }

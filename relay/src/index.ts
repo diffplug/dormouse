@@ -7,7 +7,7 @@
 
 import { serve } from '@hono/node-server';
 
-import { createApp, HOST_REVOCATION_SWEEP_MS, RELAY_SWEEP_MS } from './app.js';
+import { createApp, BURROW_REVOCATION_SWEEP_MS, RELAY_SWEEP_MS } from './app.js';
 import { ConfigError, readConfig } from './config.js';
 import {
   assertVapidKeyPair,
@@ -46,7 +46,7 @@ const { origin, stateDir } = appConfig;
  * A corrupt record stops the boot rather than being minted over, so this exits
  * the way a bad `DORMOUSE_VAPID_*` pair does instead of as an unhandled
  * rejection — the repair is the operator's to choose, and both directions cost
- * something: replacing the setup password re-enrolls every Host, replacing the
+ * something: replacing the setup password re-enrolls every Burrow, replacing the
  * VAPID keypair invalidates every phone's push subscription.
  */
 async function loadMintedState() {
@@ -80,7 +80,7 @@ if (vapidSubject === null) {
   );
 }
 
-const { app, injectWebSocket, sweepRevokedHosts, sweepRelaySockets } = createApp({
+const { app, injectWebSocket, sweepRevokedBurrows, sweepRelaySockets } = createApp({
   ...appConfig,
   setupPassword,
   // Both together or neither: advertising a key the Relay has no subject to
@@ -136,16 +136,16 @@ if (runtimeFile !== null) {
 // Bind the relay's WS upgrade handler onto the running Relay (@hono/node-ws).
 injectWebSocket(server);
 
-// Revocation is hand-editing `hosts.json`, and the `/ws/host` token is checked
-// only at the upgrade, so a connected Host has to be re-checked on a clock
+// Revocation is hand-editing `burrows.json`, and the `/ws/burrow` token is checked
+// only at the upgrade, so a connected Burrow has to be re-checked on a clock
 // (`docs/specs/relay.md` -> Guardrails). `unref`'d: nothing here is work the
 // Relay owes anyone, so it must not be a reason the process stays alive.
 setInterval(() => {
-  void sweepRevokedHosts().catch(() => {
-    // A `hosts.json` caught mid-edit is an expected state (State files); the
+  void sweepRevokedBurrows().catch(() => {
+    // A `burrows.json` caught mid-edit is an expected state (State files); the
     // next sweep reads it again.
   });
-}, HOST_REVOCATION_SWEEP_MS).unref();
+}, BURROW_REVOCATION_SWEEP_MS).unref();
 
 // The socket-level sweep, on the same terms and for the same reason: the
 // `/ws/client` session is checked once at the upgrade, and a half-open TCP

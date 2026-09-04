@@ -2,7 +2,7 @@
  * Request bodies are bounded before any route runs
  * (docs/specs/relay.md -> HTTP API).
  *
- * The routes that matter are the unauthenticated ones — `/api/host/enroll`,
+ * The routes that matter are the unauthenticated ones — `/api/burrow/enroll`,
  * `/api/setup/*`, `/api/signin/finish` — which read their body BEFORE the
  * credential gate, so an unbounded reader lets any page on the tailnet make
  * the process buffer whatever it likes with no auth and no rate limit. The one
@@ -22,7 +22,7 @@ import {
 } from 'remote-lib-common';
 
 import { MAX_PUSH_SEND_BODY_BYTES, MAX_REQUEST_BODY_BYTES } from '../dist/app.js';
-import { PASSWORD, enrollHost, fakePushSender, freshApp, ownerSession } from './helpers.mjs';
+import { PASSWORD, enrollBurrow, fakePushSender, freshApp, ownerSession } from './helpers.mjs';
 
 const VAPID_PUBLIC = 'BJxKIjEEuJH0dLHTAcMFVYRnLsIBWcuMt5S1FCdDLbxCkmpUuLfHTFzWSFCPFTFsFvT8sVFTFxKIjEE';
 
@@ -45,7 +45,7 @@ test('an over-long body is 413 before the credential gate on every unauthenticat
   const oversized = padded(MAX_REQUEST_BODY_BYTES + 1);
 
   for (const path of [
-    API_ROUTES.hostEnroll,
+    API_ROUTES.burrowEnroll,
     API_ROUTES.setupBegin,
     API_ROUTES.setupFinish,
     API_ROUTES.signinFinish,
@@ -63,7 +63,7 @@ test('a correct credential inside an over-long body still 413s', async () => {
   const { app } = await freshApp();
   const res = await rawPost(
     app,
-    API_ROUTES.hostEnroll,
+    API_ROUTES.burrowEnroll,
     padded(MAX_REQUEST_BODY_BYTES + 1, { password: PASSWORD }),
   );
   assert.equal(res.status, 413);
@@ -71,7 +71,7 @@ test('a correct credential inside an over-long body still 413s', async () => {
 
 test('a lying content-length is refused on the header alone', async () => {
   const { app } = await freshApp();
-  const res = await rawPost(app, API_ROUTES.hostEnroll, JSON.stringify({ password: PASSWORD }), {
+  const res = await rawPost(app, API_ROUTES.burrowEnroll, JSON.stringify({ password: PASSWORD }), {
     'content-length': String(MAX_REQUEST_BODY_BYTES + 1),
   });
   assert.equal(res.status, 413);
@@ -79,14 +79,14 @@ test('a lying content-length is refused on the header alone', async () => {
 
 test('an ordinary body is untouched by the limit', async () => {
   const { app } = await freshApp();
-  const res = await rawPost(app, API_ROUTES.hostEnroll, JSON.stringify({ password: PASSWORD }));
+  const res = await rawPost(app, API_ROUTES.burrowEnroll, JSON.stringify({ password: PASSWORD }));
   assert.equal(res.status, 200);
 });
 
 test('push send takes a full fan-out, which is larger than the default cap', async () => {
   const sender = fakePushSender();
   const { app } = await freshApp({ vapidPublicKey: VAPID_PUBLIC, pushSender: sender });
-  const { body: host } = await enrollHost(app);
+  const { body: burrow } = await enrollBurrow(app);
   await ownerSession(app);
 
   // The largest legal send: every recipient slot filled with a maximal envelope.
@@ -102,7 +102,7 @@ test('push send takes a full fan-out, which is larger than the default cap', asy
   assert.ok(body.length <= MAX_PUSH_SEND_BODY_BYTES, 'the derived cap admits a maximal fan-out');
 
   const res = await rawPost(app, API_ROUTES.pushSend, body, {
-    Authorization: `Bearer ${host.hostToken}`,
+    Authorization: `Bearer ${burrow.burrowToken}`,
   });
   assert.equal(res.status, 200);
   // No subscriptions exist, so every recipient is `unknown` — the point here is
@@ -113,10 +113,10 @@ test('push send takes a full fan-out, which is larger than the default cap', asy
 test('push send is still bounded, one route-sized cap above the default', async () => {
   const sender = fakePushSender();
   const { app } = await freshApp({ vapidPublicKey: VAPID_PUBLIC, pushSender: sender });
-  const { body: host } = await enrollHost(app);
+  const { body: burrow } = await enrollBurrow(app);
 
   const res = await rawPost(app, API_ROUTES.pushSend, padded(MAX_PUSH_SEND_BODY_BYTES + 1), {
-    Authorization: `Bearer ${host.hostToken}`,
+    Authorization: `Bearer ${burrow.burrowToken}`,
   });
   assert.equal(res.status, 413);
   // Derived from the wire bounds, so it cannot drift away from what a maximal

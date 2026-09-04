@@ -1,6 +1,6 @@
 /**
- * Tauri-sidecar binding of {@link RemoteHostService}; see
- * `docs/specs/standalone.md` → "Remote Host service". Stdout is reserved for
+ * Tauri-sidecar binding of {@link BurrowService}; see
+ * `docs/specs/standalone.md` → "Burrow service". Stdout is reserved for
  * the JSON-lines bridge, so all logging goes to stderr.
  *
  * The sidecar owns the PTYs, so it is also standalone's terminal-protocol parse
@@ -20,21 +20,21 @@ import {
   type TerminalColors,
 } from '../../lib/terminal-protocol';
 import type {
-  HostSurfaceProvider,
+  BurrowSurfaceProvider,
   PtySink,
-} from '../../remote/host/host-surface-provider';
+} from '../../remote/burrow/burrow-surface-provider';
 import { createAskSurfaceProvider } from './ask-surface-provider';
 import { bakedConnectSrc } from './connect-src';
-import { createEphemeralHostStateStore, FileHostStateStore } from './host-state-store';
-import { RemoteHostService } from './service';
+import { createEphemeralBurrowStateStore, FileBurrowStateStore } from './burrow-state-store';
+import { BurrowService } from './service';
 import {
   ASK_BUDGET_MS,
-  REMOTE_HOST_ASK_EVENT,
-  isRemoteHostCommand,
+  BURROW_ASK_EVENT,
+  isBurrowCommand,
   type AnswerParams,
 } from './service-protocol';
 
-/** The slice of `pty-core`'s manager the Host drives. */
+/** The slice of `pty-core`'s manager the Burrow drives. */
 export interface SidecarPtyManager {
   write(id: string, data: string): void;
   resize(id: string, cols: number, rows: number): void;
@@ -49,7 +49,7 @@ export interface SidecarSurfaceBridgeOptions {
 }
 
 export interface SidecarSurfaceBridge {
-  provider: HostSurfaceProvider;
+  provider: BurrowSurfaceProvider;
   /** An `answer` command: settles the ask it names. */
   onAnswer(params: AnswerParams | undefined): void;
   /** A `notify` command: something the directory depends on changed. */
@@ -71,8 +71,8 @@ export interface SidecarSurfaceBridge {
 
 /**
  * The provider half: PTYs answered locally, everything about the *view* of them
- * asked of the webview. Separate from {@link createSidecarRemoteHost} so it can
- * be driven directly by tests, and so the next Host to move into its own process
+ * asked of the webview. Separate from {@link createSidecarBurrow} so it can
+ * be driven directly by tests, and so the next Burrow to move into its own process
  * can reuse the ask machinery without the sidecar's file store.
  */
 export function createSidecarSurfaceBridge(
@@ -85,24 +85,24 @@ export function createSidecarSurfaceBridge(
   let askSeq = 0;
 
   function ask(op: string, params: unknown): Promise<unknown[]> {
-    const rhId = `ask-${++askSeq}`;
+    const burrowRequestId = `ask-${++askSeq}`;
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         // Budget spent. An attach must not hang on a webview that is reloading,
         // and a directory that missed a pane re-collects on the next change.
-        asks.delete(rhId);
+        asks.delete(burrowRequestId);
         resolve([]);
       }, ASK_BUDGET_MS);
       // An outstanding ask must never hold the sidecar's event loop open.
       (timer as unknown as { unref?: () => void }).unref?.();
-      asks.set(rhId, {
+      asks.set(burrowRequestId, {
         settle: (results) => {
           clearTimeout(timer);
-          asks.delete(rhId);
+          asks.delete(burrowRequestId);
           resolve(results);
         },
       });
-      options.send(REMOTE_HOST_ASK_EVENT, { rhId, op, params });
+      options.send(BURROW_ASK_EVENT, { burrowRequestId, op, params });
     });
   }
 
@@ -155,7 +155,7 @@ export function createSidecarSurfaceBridge(
           try {
             options.mgr.write(id, response);
           } catch (error) {
-            console.error(`[remote-host] response write failed for ${id}: ${String(error)}`);
+            console.error(`[burrow] response write failed for ${id}: ${String(error)}`);
           }
         }
       },
@@ -230,11 +230,11 @@ export function createSidecarSurfaceBridge(
      * budget".
      */
     onAnswer(params) {
-      if (!params || typeof params.rhId !== 'string') return;
-      const pending = asks.get(params.rhId);
+      if (!params || typeof params.burrowRequestId !== 'string') return;
+      const pending = asks.get(params.burrowRequestId);
       if (!pending) {
         // The budget expired before this answer arrived, so the snapshot the
-        // Host already rendered is missing whatever it names — an empty
+        // Burrow already rendered is missing whatever it names — an empty
         // directory on a machine that does have terminals. Nothing re-opens a
         // settled ask, so mark the directory stale and let the next collect
         // repair it; otherwise an idle machine has no other reason to
@@ -310,7 +310,7 @@ export function createSidecarSurfaceBridge(
   };
 }
 
-export interface SidecarRemoteHostOptions extends SidecarSurfaceBridgeOptions {
+export interface SidecarBurrowOptions extends SidecarSurfaceBridgeOptions {
   /**
    * Where the enrollment + ACL file lives. The browser dev harness passes a
    * per-run temp dir; standalone passes an empty value only when Rust could not
@@ -319,8 +319,8 @@ export interface SidecarRemoteHostOptions extends SidecarSurfaceBridgeOptions {
   stateDir?: string;
 }
 
-export interface SidecarRemoteHost {
-  /** One `remoteHost:command` line from the webview. */
+export interface SidecarBurrow {
+  /** One `burrow:command` line from the webview. */
   handleCommand(data: unknown): void;
   onPtyEvent(event: string, data: unknown): void;
   onPtySpawn(id: unknown): void;
@@ -328,26 +328,26 @@ export interface SidecarRemoteHost {
   dispose(): void;
 }
 
-export function createSidecarRemoteHost(options: SidecarRemoteHostOptions): SidecarRemoteHost {
+export function createSidecarBurrow(options: SidecarBurrowOptions): SidecarBurrow {
   const store = options.stateDir
-    ? new FileHostStateStore(options.stateDir)
-    : createEphemeralHostStateStore((message) => console.error(message));
+    ? new FileBurrowStateStore(options.stateDir)
+    : createEphemeralBurrowStateStore((message) => console.error(message));
 
   const bridge = createSidecarSurfaceBridge(options);
 
-  const service = new RemoteHostService({
+  const service = new BurrowService({
     store,
     provider: bridge.provider,
     sendToUi: options.send,
     connectSrc: bakedConnectSrc(),
   });
   void service.start().catch((error: unknown) => {
-    console.error(`[remote-host] failed to start: ${String(error)}`);
+    console.error(`[burrow] failed to start: ${String(error)}`);
   });
 
   return {
     handleCommand(data) {
-      if (!isRemoteHostCommand(data)) return;
+      if (!isBurrowCommand(data)) return;
       const command = data;
       // Both of these feed something already waiting on this side, so they
       // answer nothing and never reach the service's dispatch.

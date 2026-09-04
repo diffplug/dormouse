@@ -3,7 +3,7 @@
 // TypeScript source while the sidecar itself stays plain CJS.
 //   - lib/src/host/iframe-proxy.ts        → sidecar/iframe-proxy.cjs
 //   - lib/src/host/agent-browser-host.ts  → sidecar/agent-browser-host.cjs
-//   - lib/src/host/remote/sidecar-entry.ts → sidecar/remote-host.cjs
+//   - lib/src/host/remote/sidecar-entry.ts → sidecar/burrow.cjs
 // See docs/specs/dor-browser.md and docs/specs/remote-api.md.
 import { build } from 'esbuild';
 import { fileURLToPath } from 'node:url';
@@ -18,7 +18,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const libHost = path.resolve(here, '../../lib/src/host');
 const sidecar = path.resolve(here, '../sidecar');
 
-// Where the remote Host may reach a Relay. The Host runs in the sidecar,
+// Where the Burrow may reach a Relay. The Burrow runs in the sidecar,
 // so this is the enforcement point — there is no webview CSP in front of it.
 const remoteSrc = resolveRemoteConnectSrc(process.env, 'sidecar');
 
@@ -27,7 +27,7 @@ const bundles = [
   { entry: 'agent-browser-host.ts', out: 'agent-browser-host.cjs' },
   {
     entry: 'remote/sidecar-entry.ts',
-    out: 'remote-host.cjs',
+    out: 'burrow.cjs',
     define: { [CONNECT_SRC_PLACEHOLDER]: JSON.stringify(remoteSrc) },
     assertBaked: true,
   },

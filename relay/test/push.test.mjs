@@ -2,12 +2,12 @@
  * Web Push subscriptions and delivery (docs/specs/alert.md -> Push
  * notifications, docs/specs/relay.md -> HTTP API).
  *
- * Rows are keyed on the pair (`hostId`, `deliveryId`), and the delivery id is
- * the whole authorization: 256 unguessable bits the Host minted at pairing and
+ * Rows are keyed on the pair (`burrowId`, `deliveryId`), and the delivery id is
+ * the whole authorization: 256 unguessable bits the Burrow minted at pairing and
  * handed to exactly one Client, so registering, querying and deleting need no
  * challenge and no signature. The cases that matter are the ones where a caller
  * must NOT learn about a row it does not already hold the capability for, and
- * where a Host must not reach another Host's subscribers.
+ * where a Burrow must not reach another Burrow's subscribers.
  */
 
 import { test } from 'node:test';
@@ -39,11 +39,11 @@ import {
 } from '../dist/push.js';
 import { MAX_PUSH_ENDPOINT_LENGTH } from '../dist/push-endpoint.js';
 import {
-  HostStore,
-  MAX_PUSH_SUBSCRIPTIONS_PER_HOST,
+  BurrowStore,
+  MAX_PUSH_SUBSCRIPTIONS_PER_BURROW,
   PushSubscriptionStore,
 } from '../dist/state.js';
-import { enrollHost, fakePushSender, freshApp, ownerSession, post } from './helpers.mjs';
+import { enrollBurrow, fakePushSender, freshApp, ownerSession, post } from './helpers.mjs';
 
 const VAPID_PUBLIC = 'BJxKIjEEuJH0dLHTAcMFVYRnLsIBWcuMt5S1FCdDLbxCkmpUuLfHTFzWSFCPFTFsFvT8sVFTFxKIjEE';
 
@@ -97,7 +97,7 @@ test('VAPID subject validation rejects loopback contacts', () => {
     'https://127.0.0.1:3000',
     'https://[::1]:3000',
   ]) {
-    assert.throws(() => assertVapidSubject(subject), /loopback host/, subject);
+    assert.throws(() => assertVapidSubject(subject), /loopback burrow/, subject);
   }
 });
 
@@ -129,18 +129,18 @@ function subscription(endpoint = 'https://push.example.com/sub/abc') {
   return { endpoint, keys: { p256dh: 'BFakeP256dhKey', auth: 'FakeAuthSecret' } };
 }
 
-/** A delivery id in the shape a Host mints: base64url of 32 random bytes. */
+/** A delivery id in the shape a Burrow mints: base64url of 32 random bytes. */
 function newDeliveryId() {
   return randomBase64Url(32);
 }
 
-/** A fresh app with push configured, plus an enrolled host and a signed-in owner. */
+/** A fresh app with push configured, plus an enrolled burrow and a signed-in owner. */
 async function pushApp(overrides = {}) {
   const sender = fakePushSender();
   const app = await freshApp({ vapidPublicKey: VAPID_PUBLIC, pushSender: sender, ...overrides });
-  const { body: host } = await enrollHost(app.app);
+  const { body: burrow } = await enrollBurrow(app.app);
   const { sessionToken } = await ownerSession(app.app);
-  return { ...app, sender, host, sessionToken };
+  return { ...app, sender, burrow, sessionToken };
 }
 
 function authed(app, path, token, body) {
@@ -151,10 +151,10 @@ function authed(app, path, token, body) {
   });
 }
 
-/** Register `deliveryId` against `host`; there is no challenge and no signature. */
-function subscribe(app, { sessionToken, host, deliveryId, sub = subscription() }) {
+/** Register `deliveryId` against `burrow`; there is no challenge and no signature. */
+function subscribe(app, { sessionToken, burrow, deliveryId, sub = subscription() }) {
   return authed(app, API_ROUTES.pushSubscribe, sessionToken, {
-    hostId: host.hostId,
+    burrowId: burrow.burrowId,
     deliveryId,
     subscription: sub,
   });
@@ -171,8 +171,8 @@ function removeDelivery(app, sessionToken, deliveryId) {
   });
 }
 
-function sendAs(app, hostToken, body) {
-  return authed(app, API_ROUTES.pushSend, hostToken, body);
+function sendAs(app, burrowToken, body) {
+  return authed(app, API_ROUTES.pushSend, burrowToken, body);
 }
 
 /**
@@ -222,7 +222,7 @@ test('config reports null when push is unconfigured, and subscribe is unavailabl
   const { sessionToken } = await ownerSession(app);
   const attempt = await subscribe(app, {
     sessionToken,
-    host: { hostId: 'x' },
+    burrow: { burrowId: 'x' },
     deliveryId: newDeliveryId(),
   });
   assert.equal(attempt.status, 503);
@@ -231,18 +231,18 @@ test('config reports null when push is unconfigured, and subscribe is unavailabl
 // --- subscribe -------------------------------------------------------------
 
 test('subscribe round-trip persists the subscription owner-only', async () => {
-  const { app, stateDir, host, sessionToken } = await pushApp();
+  const { app, stateDir, burrow, sessionToken } = await pushApp();
   const deliveryId = newDeliveryId();
 
-  const res = await subscribe(app, { sessionToken, host, deliveryId });
+  const res = await subscribe(app, { sessionToken, burrow, deliveryId });
   assert.equal(res.status, 200);
   const body = await res.json();
   assert.equal(typeof body.subscribedAt, 'number');
-  assert.deepEqual(body.hostIds, [host.hostId]);
+  assert.deepEqual(body.burrowIds, [burrow.burrowId]);
 
   const stored = await storedRows(stateDir);
   assert.equal(stored.length, 1);
-  assert.equal(stored[0].hostId, host.hostId);
+  assert.equal(stored[0].burrowId, burrow.burrowId);
   assert.equal(stored[0].deliveryId, deliveryId);
   assert.equal(stored[0].vapidPublicKey, VAPID_PUBLIC);
   assert.equal(stored[0].devicePublicKey, undefined, 'the device key is gone with its ceremony');
@@ -251,9 +251,9 @@ test('subscribe round-trip persists the subscription owner-only', async () => {
 });
 
 test('subscribe requires a session', async () => {
-  const { app, host } = await pushApp();
+  const { app, burrow } = await pushApp();
   const res = await post(app, API_ROUTES.pushSubscribe, {
-    hostId: host.hostId,
+    burrowId: burrow.burrowId,
     deliveryId: newDeliveryId(),
     subscription: subscription(),
   });
@@ -261,18 +261,18 @@ test('subscribe requires a session', async () => {
 });
 
 test('a delivery id that is not 32 base64url bytes is refused before it becomes a key', async () => {
-  const { app, host, sessionToken } = await pushApp();
+  const { app, burrow, sessionToken } = await pushApp();
   for (const deliveryId of [undefined, '', 'too-short', `${newDeliveryId()}x`, 'not!base64url!', 42]) {
-    const res = await subscribe(app, { sessionToken, host, deliveryId });
+    const res = await subscribe(app, { sessionToken, burrow, deliveryId });
     assert.equal(res.status, 400, String(deliveryId));
   }
 });
 
 test('a non-https endpoint is rejected', async () => {
-  const { app, host, sessionToken } = await pushApp();
+  const { app, burrow, sessionToken } = await pushApp();
   const res = await subscribe(app, {
     sessionToken,
-    host,
+    burrow,
     deliveryId: newDeliveryId(),
     sub: subscription('http://192.168.1.1/internal'),
   });
@@ -280,7 +280,7 @@ test('a non-https endpoint is rejected', async () => {
 });
 
 test('private and link-local https endpoints are rejected', async () => {
-  const { app, host, sessionToken } = await pushApp();
+  const { app, burrow, sessionToken } = await pushApp();
   for (const endpoint of [
     'https://127.0.0.1/push',
     'https://169.254.169.254/latest/meta-data',
@@ -289,7 +289,7 @@ test('private and link-local https endpoints are rejected', async () => {
   ]) {
     const res = await subscribe(app, {
       sessionToken,
-      host,
+      burrow,
       deliveryId: newDeliveryId(),
       sub: subscription(endpoint),
     });
@@ -297,11 +297,11 @@ test('private and link-local https endpoints are rejected', async () => {
   }
 });
 
-test('subscribing to an unknown host is rejected', async () => {
+test('subscribing to an unknown burrow is rejected', async () => {
   const { app, sessionToken } = await pushApp();
   const res = await subscribe(app, {
     sessionToken,
-    host: { hostId: 'not-a-real-host' },
+    burrow: { burrowId: 'not-a-real-burrow' },
     deliveryId: newDeliveryId(),
   });
   assert.equal(res.status, 404);
@@ -314,12 +314,12 @@ test('subscribing to an unknown host is rejected', async () => {
 // (`docs/specs/relay.md` -> State files).
 
 test('an over-long endpoint is refused before it becomes a durable row', async () => {
-  const { app, stateDir, host, sessionToken } = await pushApp();
+  const { app, stateDir, burrow, sessionToken } = await pushApp();
   const endpoint = `https://push.example.com/sub/${'a'.repeat(MAX_PUSH_ENDPOINT_LENGTH)}`;
 
   const res = await subscribe(app, {
     sessionToken,
-    host,
+    burrow,
     deliveryId: newDeliveryId(),
     sub: subscription(endpoint),
   });
@@ -329,7 +329,7 @@ test('an over-long endpoint is refused before it becomes a durable row', async (
 });
 
 test('over-long encryption keys are refused; RFC 8291 fixes both lengths', async () => {
-  const { app, stateDir, host, sessionToken } = await pushApp();
+  const { app, stateDir, burrow, sessionToken } = await pushApp();
   const long = 'A'.repeat(4096);
 
   for (const keys of [
@@ -341,7 +341,7 @@ test('over-long encryption keys are refused; RFC 8291 fixes both lengths', async
   ]) {
     const res = await subscribe(app, {
       sessionToken,
-      host,
+      burrow,
       deliveryId: newDeliveryId(),
       sub: { endpoint: 'https://push.example.com/sub/abc', keys },
     });
@@ -351,10 +351,10 @@ test('over-long encryption keys are refused; RFC 8291 fixes both lengths', async
 });
 
 test('a padded base64 p256dh still registers — browsers serialize both ways', async () => {
-  const { app, host, sessionToken } = await pushApp();
+  const { app, burrow, sessionToken } = await pushApp();
   const res = await subscribe(app, {
     sessionToken,
-    host,
+    burrow,
     deliveryId: newDeliveryId(),
     // 65 and 16 raw bytes as PADDED base64: the longest either can really be.
     sub: {
@@ -365,17 +365,17 @@ test('a padded base64 p256dh still registers — browsers serialize both ways', 
   assert.equal(res.status, 200);
 });
 
-test('the per-host row cap evicts the oldest subscription, never the new one', async () => {
-  const { app, stateDir, host, sessionToken } = await pushApp();
+test('the per-burrow row cap evicts the oldest subscription, never the new one', async () => {
+  const { app, stateDir, burrow, sessionToken } = await pushApp();
   const ids = [];
   // One past the cap, each a fresh delivery id and a fresh endpoint — the shape
   // a caller minting its own ids produces.
-  for (let i = 0; i <= MAX_PUSH_SUBSCRIPTIONS_PER_HOST; i += 1) {
+  for (let i = 0; i <= MAX_PUSH_SUBSCRIPTIONS_PER_BURROW; i += 1) {
     const deliveryId = newDeliveryId();
     ids.push(deliveryId);
     const res = await subscribe(app, {
       sessionToken,
-      host,
+      burrow,
       deliveryId,
       sub: subscription(`https://push.example.com/sub/${i}`),
     });
@@ -383,18 +383,18 @@ test('the per-host row cap evicts the oldest subscription, never the new one', a
   }
 
   const stored = await storedRows(stateDir);
-  assert.equal(stored.length, MAX_PUSH_SUBSCRIPTIONS_PER_HOST);
+  assert.equal(stored.length, MAX_PUSH_SUBSCRIPTIONS_PER_BURROW);
   const kept = new Set(stored.map((row) => row.deliveryId));
   assert.equal(kept.has(ids[0]), false, 'the oldest row was evicted');
   assert.equal(kept.has(ids.at(-1)), true, 'the row just committed survives');
 });
 
 test('re-subscribing replaces the row rather than accumulating one per rotation', async () => {
-  const { app, stateDir, host, sessionToken } = await pushApp();
+  const { app, stateDir, burrow, sessionToken } = await pushApp();
   const deliveryId = newDeliveryId();
 
-  await subscribe(app, { sessionToken, host, deliveryId, sub: subscription('https://push.example.com/1') });
-  await subscribe(app, { sessionToken, host, deliveryId, sub: subscription('https://push.example.com/2') });
+  await subscribe(app, { sessionToken, burrow, deliveryId, sub: subscription('https://push.example.com/1') });
+  await subscribe(app, { sessionToken, burrow, deliveryId, sub: subscription('https://push.example.com/2') });
 
   const stored = await storedRows(stateDir);
   assert.equal(stored.length, 1);
@@ -403,64 +403,64 @@ test('re-subscribing replaces the row rather than accumulating one per rotation'
 
 test('rotating the endpoint drops every row still carrying the replaced one', async () => {
   // One worker scope has one address, so a delivery whose endpoint changed
-  // means every row still on the old endpoint — whichever Host, whichever
+  // means every row still on the old endpoint — whichever Burrow, whichever
   // delivery id — points somewhere the browser no longer listens.
-  const { app, stateDir, host, sessionToken } = await pushApp();
-  const { body: other } = await enrollHost(app);
+  const { app, stateDir, burrow, sessionToken } = await pushApp();
+  const { body: other } = await enrollBurrow(app);
   const original = subscription('https://push.example.com/original');
-  const forHost = newDeliveryId();
+  const forBurrow = newDeliveryId();
   const forOther = newDeliveryId();
 
-  assert.equal((await subscribe(app, { sessionToken, host, deliveryId: forHost, sub: original })).status, 200);
+  assert.equal((await subscribe(app, { sessionToken, burrow, deliveryId: forBurrow, sub: original })).status, 200);
   assert.equal(
-    (await subscribe(app, { sessionToken, host: other, deliveryId: forOther, sub: original })).status,
+    (await subscribe(app, { sessionToken, burrow: other, deliveryId: forOther, sub: original })).status,
     200,
   );
 
   const replacement = await subscribe(app, {
     sessionToken,
-    host,
-    deliveryId: forHost,
+    burrow,
+    deliveryId: forBurrow,
     sub: subscription('https://push.example.com/replacement'),
   });
   const body = await replacement.json();
   assert.equal(typeof body.subscribedAt, 'number');
   // The response is the surviving set for the presented endpoint, so the
   // dropped sibling is reported by its absence rather than by a flag.
-  assert.deepEqual(body.hostIds, [host.hostId]);
+  assert.deepEqual(body.burrowIds, [burrow.burrowId]);
 
   const stored = await storedRows(stateDir);
   assert.equal(stored.length, 1);
-  assert.equal(stored[0].hostId, host.hostId);
-  assert.equal(stored[0].deliveryId, forHost);
+  assert.equal(stored[0].burrowId, burrow.burrowId);
+  assert.equal(stored[0].deliveryId, forBurrow);
   assert.equal(stored[0].endpoint, 'https://push.example.com/replacement');
 });
 
-test('a moved delivery drops its own stale rows under every Host that holds it', async () => {
+test('a moved delivery drops its own stale rows under every Burrow that holds it', async () => {
   // The addresses a subscribe replaces are read from every row carrying this
-  // delivery id, not only the row for this Host. A delivery id names one
+  // delivery id, not only the row for this Burrow. A delivery id names one
   // Client's pairing, so any row holding it speaks for the same worker scope —
-  // and reading only `(hostId, deliveryId)` left a sibling row sitting on an
+  // and reading only `(burrowId, deliveryId)` left a sibling row sitting on an
   // address the browser had already moved off, which the possession query then
   // reported as registered.
-  const { app, stateDir, host, sessionToken } = await pushApp();
-  const { body: other } = await enrollHost(app);
+  const { app, stateDir, burrow, sessionToken } = await pushApp();
+  const { body: other } = await enrollBurrow(app);
   const deliveryId = newDeliveryId();
   const old = subscription('https://push.example.com/old');
 
   assert.equal(
-    (await subscribe(app, { sessionToken, host: other, deliveryId, sub: old })).status,
+    (await subscribe(app, { sessionToken, burrow: other, deliveryId, sub: old })).status,
     200,
   );
-  // A different Host, the same delivery, a new address: this Host has no row of
+  // A different Burrow, the same delivery, a new address: this Burrow has no row of
   // its own to read the replaced endpoint from.
   const moved = await subscribe(app, {
     sessionToken,
-    host,
+    burrow,
     deliveryId,
     sub: subscription('https://push.example.com/new'),
   });
-  assert.deepEqual((await moved.json()).hostIds, [host.hostId]);
+  assert.deepEqual((await moved.json()).burrowIds, [burrow.burrowId]);
 
   const stored = await storedRows(stateDir);
   assert.deepEqual(
@@ -469,31 +469,31 @@ test('a moved delivery drops its own stale rows under every Host that holds it',
   );
   // And the query no longer reports the dead address as registered.
   const answered = await (await query(app, sessionToken, [deliveryId])).json();
-  assert.deepEqual(answered.registered, [{ hostId: host.hostId, deliveryId }]);
+  assert.deepEqual(answered.registered, [{ burrowId: burrow.burrowId, deliveryId }]);
 });
 
-test('subscribe answers every Host whose rows carry the presented endpoint', async () => {
-  const { app, host, sessionToken } = await pushApp();
-  const { body: other } = await enrollHost(app);
-  const forHost = newDeliveryId();
+test('subscribe answers every Burrow whose rows carry the presented endpoint', async () => {
+  const { app, burrow, sessionToken } = await pushApp();
+  const { body: other } = await enrollBurrow(app);
+  const forBurrow = newDeliveryId();
   const forOther = newDeliveryId();
 
-  const first = await subscribe(app, { sessionToken, host, deliveryId: forHost });
-  assert.deepEqual((await first.json()).hostIds, [host.hostId]);
+  const first = await subscribe(app, { sessionToken, burrow, deliveryId: forBurrow });
+  assert.deepEqual((await first.json()).burrowIds, [burrow.burrowId]);
 
-  // Same address, second Host: both rows survive, and the answer grows.
-  const second = await subscribe(app, { sessionToken, host: other, deliveryId: forOther });
-  assert.deepEqual((await second.json()).hostIds.sort(), [host.hostId, other.hostId].sort());
+  // Same address, second Burrow: both rows survive, and the answer grows.
+  const second = await subscribe(app, { sessionToken, burrow: other, deliveryId: forOther });
+  assert.deepEqual((await second.json()).burrowIds.sort(), [burrow.burrowId, other.burrowId].sort());
 
   // A different phone's rows are never mixed in — the answer is scoped to the
   // endpoint that was presented, not to the account.
   const foreign = await subscribe(app, {
     sessionToken,
-    host,
+    burrow,
     deliveryId: newDeliveryId(),
     sub: subscription('https://push.example.com/other-phone'),
   });
-  assert.deepEqual((await foreign.json()).hostIds, [host.hostId]);
+  assert.deepEqual((await foreign.json()).burrowIds, [burrow.burrowId]);
 });
 
 test('a retried subscribe whose first response was lost still reports the truth', async () => {
@@ -501,33 +501,33 @@ test('a retried subscribe whose first response was lost still reports the truth'
   // The mutation is idempotent and cannot re-announce the sibling rows it
   // already deleted — but it can always answer what is registered now, which is
   // what lets the Client repair its view without remembering what it did.
-  const { app, host, sessionToken } = await pushApp();
-  const { body: other } = await enrollHost(app);
-  const forHost = newDeliveryId();
+  const { app, burrow, sessionToken } = await pushApp();
+  const { body: other } = await enrollBurrow(app);
+  const forBurrow = newDeliveryId();
   const forOther = newDeliveryId();
-  await subscribe(app, { sessionToken, host, deliveryId: forHost });
-  await subscribe(app, { sessionToken, host: other, deliveryId: forOther });
+  await subscribe(app, { sessionToken, burrow, deliveryId: forBurrow });
+  await subscribe(app, { sessionToken, burrow: other, deliveryId: forOther });
 
   const rotated = subscription('https://push.example.com/rotated');
-  const committed = await subscribe(app, { sessionToken, host, deliveryId: forHost, sub: rotated });
-  assert.deepEqual((await committed.json()).hostIds, [host.hostId]);
+  const committed = await subscribe(app, { sessionToken, burrow, deliveryId: forBurrow, sub: rotated });
+  assert.deepEqual((await committed.json()).burrowIds, [burrow.burrowId]);
 
-  const retry = await subscribe(app, { sessionToken, host, deliveryId: forHost, sub: rotated });
+  const retry = await subscribe(app, { sessionToken, burrow, deliveryId: forBurrow, sub: rotated });
   assert.equal(retry.status, 200);
-  assert.deepEqual((await retry.json()).hostIds, [host.hostId]);
+  assert.deepEqual((await retry.json()).burrowIds, [burrow.burrowId]);
 });
 
 // --- subscriptions/query (client-facing, capability-parameterized) ----------
 
 test('query reports the presented ids, and never one the caller did not name', async () => {
-  const { app, host, sessionToken } = await pushApp();
-  const { body: other } = await enrollHost(app);
+  const { app, burrow, sessionToken } = await pushApp();
+  const { body: other } = await enrollBurrow(app);
   const mine = newDeliveryId();
   const someone = newDeliveryId();
-  await subscribe(app, { sessionToken, host, deliveryId: mine });
+  await subscribe(app, { sessionToken, burrow, deliveryId: mine });
   await subscribe(app, {
     sessionToken,
-    host: other,
+    burrow: other,
     deliveryId: someone,
     sub: subscription('https://push.example.com/someone'),
   });
@@ -537,16 +537,16 @@ test('query reports the presented ids, and never one the caller did not name', a
   // The account owns both rows and the session is the same one — possession of
   // the id is what the answer is scoped to, which is the whole point of keying
   // the read on a capability instead of an identity.
-  assert.deepEqual(await res.json(), { registered: [{ hostId: host.hostId, deliveryId: mine }] });
+  assert.deepEqual(await res.json(), { registered: [{ burrowId: burrow.burrowId, deliveryId: mine }] });
 
   const unnamed = await query(app, sessionToken, [newDeliveryId()]);
   assert.deepEqual(await unnamed.json(), { registered: [] });
 });
 
 test('query is bounded, and requires a session', async () => {
-  const { app, host, sessionToken } = await pushApp();
+  const { app, burrow, sessionToken } = await pushApp();
   const deliveryId = newDeliveryId();
-  await subscribe(app, { sessionToken, host, deliveryId });
+  await subscribe(app, { sessionToken, burrow, deliveryId });
 
   for (const deliveryIds of [
     undefined,
@@ -562,9 +562,9 @@ test('query is bounded, and requires a session', async () => {
 });
 
 test('query hides rows registered under an old VAPID key', async () => {
-  const { app, stateDir, host, sessionToken } = await pushApp();
+  const { app, stateDir, burrow, sessionToken } = await pushApp();
   const deliveryId = newDeliveryId();
-  await subscribe(app, { sessionToken, host, deliveryId });
+  await subscribe(app, { sessionToken, burrow, deliveryId });
 
   await rotateStoredVapidKey(stateDir);
 
@@ -575,17 +575,17 @@ test('query hides rows registered under an old VAPID key', async () => {
 // --- DELETE /api/push/subscriptions/:deliveryId ------------------------------
 
 test('deleting is idempotent and answers 204 whether or not a row existed', async () => {
-  const { app, stateDir, host, sessionToken } = await pushApp();
-  const { body: other } = await enrollHost(app);
+  const { app, stateDir, burrow, sessionToken } = await pushApp();
+  const { body: other } = await enrollBurrow(app);
   const deliveryId = newDeliveryId();
-  await subscribe(app, { sessionToken, host, deliveryId });
-  await subscribe(app, { sessionToken, host: other, deliveryId });
+  await subscribe(app, { sessionToken, burrow, deliveryId });
+  await subscribe(app, { sessionToken, burrow: other, deliveryId });
 
   const live = await removeDelivery(app, sessionToken, deliveryId);
   assert.equal(live.status, 204);
   assert.equal(await live.text(), '');
-  // Every row carrying that id goes, across Hosts: the capability is what the
-  // Client is forgetting, not one Host's registration.
+  // Every row carrying that id goes, across Burrows: the capability is what the
+  // Client is forgetting, not one Burrow's registration.
   assert.deepEqual(await storedRows(stateDir), []);
 
   // A repeat and an id that never existed answer identically — the route must
@@ -599,47 +599,47 @@ test('deleting is idempotent and answers 204 whether or not a row existed', asyn
 
 // --- devices ---------------------------------------------------------------
 
-test('devices lists this host subscribers by delivery id, never a label', async () => {
-  const { app, host, sessionToken } = await pushApp();
+test('devices lists this burrow subscribers by delivery id, never a label', async () => {
+  const { app, burrow, sessionToken } = await pushApp();
   const deliveryId = newDeliveryId();
-  await subscribe(app, { sessionToken, host, deliveryId });
+  await subscribe(app, { sessionToken, burrow, deliveryId });
 
   const res = await app.request(API_ROUTES.pushDevices, {
-    headers: { Authorization: `Bearer ${host.hostToken}` },
+    headers: { Authorization: `Bearer ${burrow.burrowToken}` },
   });
   assert.equal(res.status, 200);
   const { devices } = await res.json();
   assert.equal(devices.length, 1);
   assert.equal(devices[0].deliveryId, deliveryId);
   assert.equal(typeof devices[0].subscribedAt, 'number');
-  // The Host holds the ACL; the Relay must never learn a human name.
+  // The Burrow holds the ACL; the Relay must never learn a human name.
   assert.equal(devices[0].label, undefined);
 });
 
-test('a host cannot see another host subscribers', async () => {
-  const { app, host, sessionToken } = await pushApp();
-  const { body: other } = await enrollHost(app);
-  await subscribe(app, { sessionToken, host, deliveryId: newDeliveryId() });
+test('a burrow cannot see another burrow subscribers', async () => {
+  const { app, burrow, sessionToken } = await pushApp();
+  const { body: other } = await enrollBurrow(app);
+  await subscribe(app, { sessionToken, burrow, deliveryId: newDeliveryId() });
 
   const res = await app.request(API_ROUTES.pushDevices, {
-    headers: { Authorization: `Bearer ${other.hostToken}` },
+    headers: { Authorization: `Bearer ${other.burrowToken}` },
   });
   assert.deepEqual(await res.json(), { devices: [] });
 });
 
 test('devices hides subscriptions registered under an old VAPID key', async () => {
-  const { app, stateDir, host, sessionToken } = await pushApp();
-  await subscribe(app, { sessionToken, host, deliveryId: newDeliveryId() });
+  const { app, stateDir, burrow, sessionToken } = await pushApp();
+  await subscribe(app, { sessionToken, burrow, deliveryId: newDeliveryId() });
 
   await rotateStoredVapidKey(stateDir);
 
   const res = await app.request(API_ROUTES.pushDevices, {
-    headers: { Authorization: `Bearer ${host.hostToken}` },
+    headers: { Authorization: `Bearer ${burrow.burrowToken}` },
   });
   assert.deepEqual(await res.json(), { devices: [] });
 });
 
-test('devices rejects a session token — it is host-gated', async () => {
+test('devices rejects a session token — it is burrow-gated', async () => {
   const { app, sessionToken } = await pushApp();
   const res = await app.request(API_ROUTES.pushDevices, {
     headers: { Authorization: `Bearer ${sessionToken}` },
@@ -650,54 +650,54 @@ test('devices rejects a session token — it is host-gated', async () => {
 // --- send ------------------------------------------------------------------
 //
 // Every send carries one sealed envelope per recipient and no readable text:
-// the Host seals to each Client's own static and the Relay forwards ciphertext
+// the Burrow seals to each Client's own static and the Relay forwards ciphertext
 // (docs/specs/remote-security-model.md -> Push sealing). What it can still
-// check is shape, bounds, and that a Host reaches only its own subscribers.
+// check is shape, bounds, and that a Burrow reaches only its own subscribers.
 
 test('send fans out to every named delivery', async () => {
-  const { app, sender, host, sessionToken } = await pushApp();
+  const { app, sender, burrow, sessionToken } = await pushApp();
   const phone = newDeliveryId();
   const tablet = newDeliveryId();
-  await subscribe(app, { sessionToken, host, deliveryId: phone, sub: subscription('https://push.example.com/phone') });
-  await subscribe(app, { sessionToken, host, deliveryId: tablet, sub: subscription('https://push.example.com/tablet') });
+  await subscribe(app, { sessionToken, burrow, deliveryId: phone, sub: subscription('https://push.example.com/phone') });
+  await subscribe(app, { sessionToken, burrow, deliveryId: tablet, sub: subscription('https://push.example.com/tablet') });
 
   const recipients = [
     { deliveryId: phone, sealed: fakeSealed() },
     { deliveryId: tablet, sealed: fakeSealed() },
   ];
-  const res = await sendAs(app, host.hostToken, { recipients });
+  const res = await sendAs(app, burrow.burrowToken, { recipients });
   assert.equal(res.status, 200);
   assert.deepEqual(await res.json(), { delivered: 2, expired: 0, unknown: 0, failed: 0 });
   assert.equal(sender.sent.length, 2);
-  // Each phone gets its own envelope, verbatim, under the sending Host's id.
+  // Each phone gets its own envelope, verbatim, under the sending Burrow's id.
   for (const [i, recipient] of recipients.entries()) {
     assert.deepEqual(JSON.parse(sender.sent[i].payload), {
-      hostId: host.hostId,
+      burrowId: burrow.burrowId,
       ...recipient.sealed,
     });
   }
 });
 
 test('the forwarded payload is the sealed envelope and nothing else', async () => {
-  // Sealed for real, so the assertion is against what a Host actually mints:
+  // Sealed for real, so the assertion is against what a Burrow actually mints:
   // the Relay holds no key, cannot open it, and must not add, drop, or
   // re-encode a field on the way through.
-  const { app, sender, host, sessionToken } = await pushApp();
+  const { app, sender, burrow, sessionToken } = await pushApp();
   const deliveryId = newDeliveryId();
-  await subscribe(app, { sessionToken, host, deliveryId });
+  await subscribe(app, { sessionToken, burrow, deliveryId });
 
-  const hostStatic = await generateNoiseKeyPair();
+  const burrowStatic = await generateNoiseKeyPair();
   const clientStatic = await generateNoiseKeyPair();
   const plaintext = utf8Encode(JSON.stringify({ title: 'build finished', body: 'zsh', tag: 'pty-1' }));
   const sealed = await sealPush({
-    hostStaticPrivateKey: hostStatic.privateKey,
+    burrowStaticPrivateKey: burrowStatic.privateKey,
     clientStaticPublicKey: clientStatic.publicKey,
     plaintext,
   });
 
-  await sendAs(app, host.hostToken, { recipients: [{ deliveryId, sealed }] });
+  await sendAs(app, burrow.burrowToken, { recipients: [{ deliveryId, sealed }] });
   const payload = sender.sent[0].payload;
-  assert.equal(payload, JSON.stringify({ hostId: host.hostId, ...sealed }));
+  assert.equal(payload, JSON.stringify({ burrowId: burrow.burrowId, ...sealed }));
   // The whole point: none of the notification text survives to this boundary.
   for (const secret of ['build finished', 'zsh', 'pty-1']) {
     assert.equal(payload.includes(secret), false, secret);
@@ -705,55 +705,55 @@ test('the forwarded payload is the sealed envelope and nothing else', async () =
   // And what did arrive still opens on the recipient's key.
   const opened = await openPush({
     clientStaticPrivateKey: clientStatic.privateKey,
-    hostStaticPublicKey: hostStatic.publicKey,
+    burrowStaticPublicKey: burrowStatic.publicKey,
     sealed: JSON.parse(payload),
   });
   assert.equal(utf8Decode(opened), utf8Decode(plaintext));
 });
 
-test('an extra field on the envelope reaches no phone, not even the hostId', async () => {
+test('an extra field on the envelope reaches no phone, not even the burrowId', async () => {
   // `isSealedPushV1` bounds the three fields it knows and ignores the rest, so
   // the route must copy those three rather than spread — a spread would let a
-  // Host override the token's `hostId` and smuggle readable text through a
+  // Burrow override the token's `burrowId` and smuggle readable text through a
   // Relay that holds no key and must forward neither (docs/specs/security-remote.md -> "What
   // crosses the boundary").
-  const { app, sender, host, sessionToken } = await pushApp();
+  const { app, sender, burrow, sessionToken } = await pushApp();
   const deliveryId = newDeliveryId();
-  await subscribe(app, { sessionToken, host, deliveryId });
+  await subscribe(app, { sessionToken, burrow, deliveryId });
 
-  const sealed = { ...fakeSealed(), hostId: 'AAAAAAAAAAAAAAAAAAAAAA', title: 'build finished' };
-  await sendAs(app, host.hostToken, { recipients: [{ deliveryId, sealed }] });
+  const sealed = { ...fakeSealed(), burrowId: 'AAAAAAAAAAAAAAAAAAAAAA', title: 'build finished' };
+  await sendAs(app, burrow.burrowToken, { recipients: [{ deliveryId, sealed }] });
 
   const forwarded = JSON.parse(sender.sent[0].payload);
-  assert.deepEqual(Object.keys(forwarded).sort(), ['ct', 'hostId', 'salt', 'v']);
-  assert.equal(forwarded.hostId, host.hostId);
+  assert.deepEqual(Object.keys(forwarded).sort(), ['burrowId', 'ct', 'salt', 'v']);
+  assert.equal(forwarded.burrowId, burrow.burrowId);
   assert.equal(sender.sent[0].payload.includes('build finished'), false);
 });
 
-test('send without recipients is rejected — the Host must choose them', async () => {
-  // The Host holds the ACL; a Relay that picked recipients itself would keep
-  // notifying a Client the Host had revoked.
-  const { app, sender, host, sessionToken } = await pushApp();
-  await subscribe(app, { sessionToken, host, deliveryId: newDeliveryId() });
+test('send without recipients is rejected — the Burrow must choose them', async () => {
+  // The Burrow holds the ACL; a Relay that picked recipients itself would keep
+  // notifying a Client the Burrow had revoked.
+  const { app, sender, burrow, sessionToken } = await pushApp();
+  await subscribe(app, { sessionToken, burrow, deliveryId: newDeliveryId() });
 
   for (const body of [{}, { recipients: [] }, { recipients: 'all' }]) {
-    const res = await sendAs(app, host.hostToken, body);
+    const res = await sendAs(app, burrow.burrowToken, body);
     assert.equal(res.status, 400, JSON.stringify(body));
   }
   assert.equal(sender.sent.length, 0);
 });
 
 test('send bounds the recipient list and every envelope in it', async () => {
-  const { app, sender, host, sessionToken } = await pushApp();
+  const { app, sender, burrow, sessionToken } = await pushApp();
   const deliveryId = newDeliveryId();
-  await subscribe(app, { sessionToken, host, deliveryId });
+  await subscribe(app, { sessionToken, burrow, deliveryId });
   const good = fakeSealed();
 
   const tooMany = Array.from({ length: MAX_PUSH_QUERY_DELIVERY_IDS + 1 }, () => ({
     deliveryId: newDeliveryId(),
     sealed: fakeSealed(),
   }));
-  assert.equal((await sendAs(app, host.hostToken, { recipients: tooMany })).status, 400);
+  assert.equal((await sendAs(app, burrow.burrowToken, { recipients: tooMany })).status, 400);
 
   // `readJson` caps nothing and the envelope is forwarded verbatim, so its
   // bounds are the Relay's only defense against a huge push payload.
@@ -765,44 +765,44 @@ test('send bounds the recipient list and every envelope in it', async () => {
     { ...good, ct: '' },
     { salt: good.salt, ct: good.ct },
   ]) {
-    const res = await sendAs(app, host.hostToken, { recipients: [{ deliveryId, sealed }] });
+    const res = await sendAs(app, burrow.burrowToken, { recipients: [{ deliveryId, sealed }] });
     assert.equal(res.status, 400, JSON.stringify(sealed));
   }
   assert.equal(sender.sent.length, 0);
 });
 
 test('send addresses only the named deliveries', async () => {
-  const { app, sender, host, sessionToken } = await pushApp();
+  const { app, sender, burrow, sessionToken } = await pushApp();
   const phone = newDeliveryId();
   const tablet = newDeliveryId();
-  await subscribe(app, { sessionToken, host, deliveryId: phone, sub: subscription('https://push.example.com/phone') });
-  await subscribe(app, { sessionToken, host, deliveryId: tablet, sub: subscription('https://push.example.com/tablet') });
+  await subscribe(app, { sessionToken, burrow, deliveryId: phone, sub: subscription('https://push.example.com/phone') });
+  await subscribe(app, { sessionToken, burrow, deliveryId: tablet, sub: subscription('https://push.example.com/tablet') });
 
-  const res = await sendAs(app, host.hostToken, to(phone));
+  const res = await sendAs(app, burrow.burrowToken, to(phone));
   assert.deepEqual(await res.json(), { delivered: 1, expired: 0, unknown: 0, failed: 0 });
   assert.equal(sender.sent.length, 1);
   assert.equal(sender.sent[0].endpoint, 'https://push.example.com/phone');
 });
 
 test('a named delivery with no subscription counts as unknown, not delivered', async () => {
-  const { app, host } = await pushApp();
-  const res = await sendAs(app, host.hostToken, to(newDeliveryId()));
+  const { app, burrow } = await pushApp();
+  const res = await sendAs(app, burrow.burrowToken, to(newDeliveryId()));
   assert.deepEqual(await res.json(), { delivered: 0, expired: 0, unknown: 1, failed: 0 });
 });
 
 // Every route that names a delivery id bounds it the way subscribe does. A
-// value no Host could have minted names no row, and `readJson` caps nothing —
+// value no Burrow could have minted names no row, and `readJson` caps nothing —
 // so the bound is what keeps a session-holder from posting megabytes that get
 // hashed into a Set and compared against every stored row.
-test('every delivery-id route refuses an id no Host could have minted', async () => {
-  const { app, host, sessionToken } = await pushApp();
+test('every delivery-id route refuses an id no Burrow could have minted', async () => {
+  const { app, burrow, sessionToken } = await pushApp();
   // Hundreds of times the legal length, but inside `MAX_REQUEST_BODY_BYTES`:
   // past that the body limit refuses it with a 413 first, which is what
   // `body-limit.test.mjs` covers.
   const oversized = 'A'.repeat(10_000);
   for (const bad of ['never-subscribed', oversized, `${newDeliveryId()}x`]) {
     assert.equal((await query(app, sessionToken, [bad])).status, 400, `query ${bad.length}`);
-    const sent = await sendAs(app, host.hostToken, to(bad));
+    const sent = await sendAs(app, burrow.burrowToken, to(bad));
     assert.equal(sent.status, 400, `send ${bad.length}`);
   }
   // The delete stays idempotent-and-silent whatever it is handed: answering a
@@ -812,36 +812,36 @@ test('every delivery-id route refuses an id no Host could have minted', async ()
 });
 
 test('send treats a subscription registered under an old VAPID key as unknown', async () => {
-  const { app, sender, stateDir, host, sessionToken } = await pushApp();
+  const { app, sender, stateDir, burrow, sessionToken } = await pushApp();
   const deliveryId = newDeliveryId();
-  await subscribe(app, { sessionToken, host, deliveryId });
+  await subscribe(app, { sessionToken, burrow, deliveryId });
 
   await rotateStoredVapidKey(stateDir);
 
-  const res = await sendAs(app, host.hostToken, to(deliveryId));
+  const res = await sendAs(app, burrow.burrowToken, to(deliveryId));
   assert.deepEqual(await res.json(), { delivered: 0, expired: 0, unknown: 1, failed: 0 });
   assert.equal(sender.sent.length, 0);
 });
 
 test('a subscription the push service calls gone is dropped', async () => {
-  const { app, sender, stateDir, host, sessionToken } = await pushApp();
+  const { app, sender, stateDir, burrow, sessionToken } = await pushApp();
   const deliveryId = newDeliveryId();
-  await subscribe(app, { sessionToken, host, deliveryId, sub: subscription('https://push.example.com/dead') });
+  await subscribe(app, { sessionToken, burrow, deliveryId, sub: subscription('https://push.example.com/dead') });
   sender.expire('https://push.example.com/dead');
 
-  const res = await sendAs(app, host.hostToken, to(deliveryId));
+  const res = await sendAs(app, burrow.burrowToken, to(deliveryId));
   assert.deepEqual(await res.json(), { delivered: 0, expired: 1, unknown: 0, failed: 0 });
 
   assert.deepEqual(await storedRows(stateDir), []);
 });
 
 test('a transient failure leaves the subscription in place', async () => {
-  const { app, sender, stateDir, host, sessionToken } = await pushApp();
+  const { app, sender, stateDir, burrow, sessionToken } = await pushApp();
   const deliveryId = newDeliveryId();
-  await subscribe(app, { sessionToken, host, deliveryId, sub: subscription('https://push.example.com/flaky') });
+  await subscribe(app, { sessionToken, burrow, deliveryId, sub: subscription('https://push.example.com/flaky') });
   sender.fail('https://push.example.com/flaky');
 
-  const res = await sendAs(app, host.hostToken, to(deliveryId));
+  const res = await sendAs(app, burrow.burrowToken, to(deliveryId));
   assert.deepEqual(await res.json(), { delivered: 0, expired: 0, unknown: 0, failed: 1 });
 
   assert.equal((await storedRows(stateDir)).length, 1);
@@ -851,13 +851,13 @@ test('a send that never answers is bounded and leaves the subscription in place'
   // A push service can accept the connection and then go quiet, which resets
   // the socket-inactivity timer forever. Without a wall-clock bound the handler
   // stays open and successive alarms stack concurrent sends on top of it.
-  const { app, sender, stateDir, host, sessionToken } = await pushApp({ pushSendDeadlineMs: 30 });
+  const { app, sender, stateDir, burrow, sessionToken } = await pushApp({ pushSendDeadlineMs: 30 });
   const deliveryId = newDeliveryId();
   const endpoint = 'https://push.example.com/wedged';
-  await subscribe(app, { sessionToken, host, deliveryId, sub: subscription(endpoint) });
+  await subscribe(app, { sessionToken, burrow, deliveryId, sub: subscription(endpoint) });
   sender.hang(endpoint);
 
-  const res = await sendAs(app, host.hostToken, to(deliveryId));
+  const res = await sendAs(app, burrow.burrowToken, to(deliveryId));
   // Transient, like any other failure — so the row survives to be retried,
   // rather than being pruned the way a 404/410 would prune it.
   assert.deepEqual(await res.json(), { delivered: 0, expired: 0, unknown: 0, failed: 1 });
@@ -865,65 +865,65 @@ test('a send that never answers is bounded and leaves the subscription in place'
 });
 
 test('one wedged device does not hold up the rest of the fan-out', async () => {
-  const { app, sender, host, sessionToken } = await pushApp({ pushSendDeadlineMs: 30 });
+  const { app, sender, burrow, sessionToken } = await pushApp({ pushSendDeadlineMs: 30 });
   const wedged = newDeliveryId();
   const healthy = newDeliveryId();
-  await subscribe(app, { sessionToken, host, deliveryId: wedged, sub: subscription('https://push.example.com/wedged') });
-  await subscribe(app, { sessionToken, host, deliveryId: healthy, sub: subscription('https://push.example.com/healthy') });
+  await subscribe(app, { sessionToken, burrow, deliveryId: wedged, sub: subscription('https://push.example.com/wedged') });
+  await subscribe(app, { sessionToken, burrow, deliveryId: healthy, sub: subscription('https://push.example.com/healthy') });
   sender.hang('https://push.example.com/wedged');
 
-  const res = await sendAs(app, host.hostToken, to(wedged, healthy));
+  const res = await sendAs(app, burrow.burrowToken, to(wedged, healthy));
   assert.deepEqual(await res.json(), { delivered: 1, expired: 0, unknown: 0, failed: 1 });
 });
 
-test('a host cannot push to another host subscribers', async () => {
-  const { app, sender, host, sessionToken } = await pushApp();
-  const { body: other } = await enrollHost(app);
+test('a burrow cannot push to another burrow subscribers', async () => {
+  const { app, sender, burrow, sessionToken } = await pushApp();
+  const { body: other } = await enrollBurrow(app);
   const deliveryId = newDeliveryId();
-  await subscribe(app, { sessionToken, host, deliveryId });
+  await subscribe(app, { sessionToken, burrow, deliveryId });
 
-  // Naming the delivery explicitly must not escape the token's own host scope.
-  const res = await sendAs(app, other.hostToken, to(deliveryId));
+  // Naming the delivery explicitly must not escape the token's own burrow scope.
+  const res = await sendAs(app, other.burrowToken, to(deliveryId));
   assert.deepEqual(await res.json(), { delivered: 0, expired: 0, unknown: 1, failed: 0 });
   assert.equal(sender.sent.length, 0);
 });
 
-test('send rejects an unknown host token', async () => {
+test('send rejects an unknown burrow token', async () => {
   const { app } = await pushApp();
-  const res = await sendAs(app, 'not-a-host-token', to(newDeliveryId()));
+  const res = await sendAs(app, 'not-a-burrow-token', to(newDeliveryId()));
   assert.equal(res.status, 401);
 });
 
-// --- the hosts.json cascade -------------------------------------------------
+// --- the burrows.json cascade -------------------------------------------------
 
-test('a row whose Host is no longer enrolled is dropped on read', async () => {
-  // Deleting a line from `hosts.json` is the documented revocation mechanism,
-  // so a subscription registered against that Host must stop being reported as
+test('a row whose Burrow is no longer enrolled is dropped on read', async () => {
+  // Deleting a line from `burrows.json` is the documented revocation mechanism,
+  // so a subscription registered against that Burrow must stop being reported as
   // live — Pocket would otherwise show push as on for a machine that is gone.
-  const { app, stateDir, host, sessionToken } = await pushApp();
+  const { app, stateDir, burrow, sessionToken } = await pushApp();
   const deliveryId = newDeliveryId();
-  await subscribe(app, { sessionToken, host, deliveryId });
+  await subscribe(app, { sessionToken, burrow, deliveryId });
   assert.deepEqual(await (await query(app, sessionToken, [deliveryId])).json(), {
-    registered: [{ hostId: host.hostId, deliveryId }],
+    registered: [{ burrowId: burrow.burrowId, deliveryId }],
   });
 
-  // A second Host survives the edit, so the row that goes is the orphan.
-  const { body: survivor } = await enrollHost(app);
+  // A second Burrow survives the edit, so the row that goes is the orphan.
+  const { body: survivor } = await enrollBurrow(app);
   const survivorDelivery = newDeliveryId();
-  const hosts = JSON.parse(await readFile(join(stateDir, 'hosts.json'), 'utf8'));
+  const burrows = JSON.parse(await readFile(join(stateDir, 'burrows.json'), 'utf8'));
   await writeFile(
-    join(stateDir, 'hosts.json'),
-    `${JSON.stringify(hosts.filter((h) => h.hostId !== host.hostId), null, 2)}\n`,
+    join(stateDir, 'burrows.json'),
+    `${JSON.stringify(burrows.filter((h) => h.burrowId !== burrow.burrowId), null, 2)}\n`,
   );
 
-  // Read fresh, so revoking a Host takes effect without a restart.
+  // Read fresh, so revoking a Burrow takes effect without a restart.
   assert.deepEqual(await (await query(app, sessionToken, [deliveryId])).json(), {
     registered: [],
   });
   // And the next mutation writes the pruned set back to disk.
   await subscribe(app, {
     sessionToken,
-    host: survivor,
+    burrow: survivor,
     deliveryId: survivorDelivery,
     sub: subscription('https://push.example.com/survivor'),
   });
@@ -933,30 +933,30 @@ test('a row whose Host is no longer enrolled is dropped on read', async () => {
   );
 });
 
-test('a `hosts.json` absent for an instant revokes nobody, and truncates nothing', async () => {
+test('a `burrows.json` absent for an instant revokes nobody, and truncates nothing', async () => {
   // An editor saves by rename, so the file is briefly absent — the same
   // absent-vs-empty distinction the relay's revocation sweep makes. Emptying
   // the array is the revocation; losing the file for an instant is not.
-  const { app, stateDir, host, sessionToken } = await pushApp();
+  const { app, stateDir, burrow, sessionToken } = await pushApp();
   const deliveryId = newDeliveryId();
-  await subscribe(app, { sessionToken, host, deliveryId });
+  await subscribe(app, { sessionToken, burrow, deliveryId });
 
-  const path = join(stateDir, 'hosts.json');
-  const hosts = await readFile(path, 'utf8');
+  const path = join(stateDir, 'burrows.json');
+  const burrows = await readFile(path, 'utf8');
   await rm(path);
 
   assert.deepEqual(await (await query(app, sessionToken, [deliveryId])).json(), {
-    registered: [{ hostId: host.hostId, deliveryId }],
+    registered: [{ burrowId: burrow.burrowId, deliveryId }],
   });
 
   // And the read that matters most is the one `upsert` writes back: joining
   // against an empty enrolled set would not hide the rows, it would delete
   // them. The routes 404 a subscribe while the file is gone, so this is the
   // store's own guarantee, held whatever a future caller reaches it through.
-  const store = new PushSubscriptionStore(stateDir, () => Date.now(), new HostStore(stateDir));
+  const store = new PushSubscriptionStore(stateDir, () => Date.now(), new BurrowStore(stateDir));
   const second = newDeliveryId();
   await store.upsert({
-    hostId: host.hostId,
+    burrowId: burrow.burrowId,
     deliveryId: second,
     ...subscription('https://push.example.com/second'),
     vapidPublicKey: VAPID_PUBLIC,
@@ -967,7 +967,7 @@ test('a `hosts.json` absent for an instant revokes nobody, and truncates nothing
   );
 
   // Restored with the row gone, the cascade still fires.
-  await writeFile(path, JSON.stringify(JSON.parse(hosts).filter(() => false)));
+  await writeFile(path, JSON.stringify(JSON.parse(burrows).filter(() => false)));
   assert.deepEqual(await (await query(app, sessionToken, [deliveryId])).json(), {
     registered: [],
   });
@@ -980,9 +980,9 @@ test('a `hosts.json` absent for an instant revokes nobody, and truncates nothing
 // depend on declaration order to see it.
 
 test('a pre-cutover or hand-mangled row is dropped on read, with exactly one warning', async () => {
-  const { app, stateDir, host, sessionToken } = await pushApp();
+  const { app, stateDir, burrow, sessionToken } = await pushApp();
   const deliveryId = newDeliveryId();
-  await subscribe(app, { sessionToken, host, deliveryId });
+  await subscribe(app, { sessionToken, burrow, deliveryId });
   const path = join(stateDir, 'push-subscriptions.json');
 
   const warnings = [];
@@ -1016,7 +1016,7 @@ test('a pre-cutover or hand-mangled row is dropped on read, with exactly one war
   }
 
   // And re-subscribing over it succeeds instead of throwing out of the route.
-  const repair = await subscribe(app, { sessionToken, host, deliveryId });
+  const repair = await subscribe(app, { sessionToken, burrow, deliveryId });
   assert.equal(repair.status, 200);
-  assert.deepEqual((await repair.json()).hostIds, [host.hostId]);
+  assert.deepEqual((await repair.json()).burrowIds, [burrow.burrowId]);
 });

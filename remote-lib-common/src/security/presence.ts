@@ -5,7 +5,7 @@
  * The WebAuthn challenge is derived, not random: it is a hash over the
  * ceremony this assertion belongs to, so an assertion produced for one pairing
  * or connection authenticates nothing anywhere else. Shared, because the
- * Relay mints the challenge and the Host recomputes it — a second
+ * Relay mints the challenge and the Burrow recomputes it — a second
  * implementation of these bytes would be a second opinion about what a valid
  * assertion is.
  */
@@ -32,23 +32,23 @@ export const PRESENCE_FIELD_LIMIT = 1024;
 /**
  * What one presence assertion is bound to. Kind-tagged and closed: `pairing`
  * has no connection to name yet, and a `connection` binding that could omit
- * its Host challenge would be a pairing proof replayed at connect time.
+ * its Burrow challenge would be a pairing proof replayed at connect time.
  */
 export type PresenceBinding =
   | {
       readonly kind: 'pairing';
-      readonly hostId: string;
+      readonly burrowId: string;
       /** Noise's final handshake hash, base64url. */
       readonly handshakeHash: string;
       readonly passkeyCredentialId: string;
     }
   | {
       readonly kind: 'connection';
-      readonly hostId: string;
+      readonly burrowId: string;
       /** This connection's id, base64url. */
       readonly connectionId: string;
-      /** The Host's single-use challenge, base64url. */
-      readonly hostChallenge: string;
+      /** The Burrow's single-use challenge, base64url. */
+      readonly burrowChallenge: string;
       /** Noise's final handshake hash, base64url. */
       readonly handshakeHash: string;
       readonly passkeyCredentialId: string;
@@ -57,12 +57,12 @@ export type PresenceBinding =
 /**
  * Structural validation of a {@link PresenceBinding} off the wire, run by
  * every side that receives one: the Relay takes it from a Client, and the
- * Host takes it from inside a transport payload it has decrypted but not yet
+ * Burrow takes it from inside a transport payload it has decrypted but not yet
  * believed.
  *
  * **Exactly the fields of one kind — no more.** Only what
  * {@link presenceChallenge} hashes is covered by the assertion, so a binding
- * carrying an extra key would hand the Host unauthenticated data inside a
+ * carrying an extra key would hand the Burrow unauthenticated data inside a
  * structure it has just verified.
  */
 export function isPresenceBinding(value: unknown): value is PresenceBinding {
@@ -76,11 +76,11 @@ export function isPresenceBinding(value: unknown): value is PresenceBinding {
 }
 
 /** Every key one binding may carry, `kind` included, in declared order. */
-const PAIRING_FIELDS = ['hostId', 'handshakeHash', 'passkeyCredentialId', 'kind'] as const;
+const PAIRING_FIELDS = ['burrowId', 'handshakeHash', 'passkeyCredentialId', 'kind'] as const;
 const CONNECTION_FIELDS = [
-  'hostId',
+  'burrowId',
   'connectionId',
-  'hostChallenge',
+  'burrowChallenge',
   'handshakeHash',
   'passkeyCredentialId',
   'kind',
@@ -101,7 +101,7 @@ function bounded(value: unknown): value is string {
  * **Throws on a field that is not base64url, and on an unbounded nonce.**
  * Callers run {@link isPresenceBinding} first and treat a throw as a failed
  * presence check, the same as a mismatch. The nonce is checked here rather
- * than there because it is not part of the binding: on the Host's recompute
+ * than there because it is not part of the binding: on the Burrow's recompute
  * path it arrives from the Client, and nothing else would stop a megabyte of
  * base64url from being decoded and hashed.
  */
@@ -127,15 +127,15 @@ export async function presenceChallenge(
 function bindingFields(binding: PresenceBinding): Uint8Array[] {
   if (binding.kind === 'pairing') {
     return [
-      utf8Encode(binding.hostId),
+      utf8Encode(binding.burrowId),
       fromBase64Url(binding.handshakeHash),
       utf8Encode(binding.passkeyCredentialId),
     ];
   }
   return [
-    utf8Encode(binding.hostId),
+    utf8Encode(binding.burrowId),
     fromBase64Url(binding.connectionId),
-    fromBase64Url(binding.hostChallenge),
+    fromBase64Url(binding.burrowChallenge),
     fromBase64Url(binding.handshakeHash),
     utf8Encode(binding.passkeyCredentialId),
   ];

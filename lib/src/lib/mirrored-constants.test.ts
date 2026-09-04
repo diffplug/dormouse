@@ -58,7 +58,7 @@ describe('dor control-socket proof-domain mirrors', () => {
   }
 });
 
-// docs/specs/relay.md -> "Remote control, in the Settings dialog". The Host
+// docs/specs/relay.md -> "Remote control, in the Settings dialog". The Burrow
 // reads the installer's enrollment offer from the path each installer writes it
 // to, and nothing links the two sides at build time — a drift is a one-click
 // enrollment that silently never appears. The whole path is followed, root and

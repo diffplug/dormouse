@@ -37,7 +37,7 @@ function bounded(value: unknown): value is string {
 
 /**
  * What a Client presents to prove fresh user presence inside a ceremony. It
- * travels only inside the first Client→Host transport payload, so it is
+ * travels only inside the first Client→Burrow transport payload, so it is
  * confidential to the pair and bound to their transcript through
  * {@link PresenceBinding}.
  */
@@ -66,7 +66,7 @@ function isPasskeyAssertion(value: unknown): value is PasskeyAssertion {
 }
 
 /**
- * Structural validation of a {@link PresenceProofV1} the Host has decrypted but
+ * Structural validation of a {@link PresenceProofV1} the Burrow has decrypted but
  * not yet believed. Bounded field by field: the payload is authenticated by
  * Noise, which proves *who* sent it, never that its contents are well-formed.
  */
@@ -152,16 +152,16 @@ function bindingEquals(left: PresenceBinding, right: PresenceBinding): boolean {
   if (left.kind !== right.kind) return false;
   if (left.kind === 'pairing' && right.kind === 'pairing') {
     return (
-      left.hostId === right.hostId &&
+      left.burrowId === right.burrowId &&
       left.handshakeHash === right.handshakeHash &&
       left.passkeyCredentialId === right.passkeyCredentialId
     );
   }
   if (left.kind === 'connection' && right.kind === 'connection') {
     return (
-      left.hostId === right.hostId &&
+      left.burrowId === right.burrowId &&
       left.connectionId === right.connectionId &&
-      left.hostChallenge === right.hostChallenge &&
+      left.burrowChallenge === right.burrowChallenge &&
       left.handshakeHash === right.handshakeHash &&
       left.passkeyCredentialId === right.passkeyCredentialId
     );
@@ -204,9 +204,9 @@ export function isPairingCode(value: unknown): value is string {
 // ---------------------------------------------------------------------------
 // Pairing
 
-/** The first Client→Host control message of a pairing ceremony. */
+/** The first Client→Burrow control message of a pairing ceremony. */
 export interface PairingRequestV1 {
-  /** The two digits the phone is displaying; the person types them on the Host. */
+  /** The two digits the phone is displaying; the person types them on the Burrow. */
   readonly code: string;
   /** The Client's own name for itself, shown in the approval modal. */
   readonly label: string;
@@ -229,23 +229,23 @@ const PAIRING_DENIALS = [
   'presence-rejected',
   'invitation-expired',
   'superseded',
-  'host-error',
+  'burrow-error',
 ] as const;
 
 export type PairingDenialCode = (typeof PAIRING_DENIALS)[number];
 
-/** The single Host→Client control message that ends a pairing, either way. */
+/** The single Burrow→Client control message that ends a pairing, either way. */
 export type PairingOutcomeV1 =
   | {
       readonly ok: true;
-      /** The Host's long-term Noise static, base64url — the Client's pin from here on. */
-      readonly hostStaticPublicKey: string;
-      /** The Host's local label; it exists nowhere on the Relay. */
-      readonly hostLabel: string;
+      /** The Burrow's long-term Noise static, base64url — the Client's pin from here on. */
+      readonly burrowStaticPublicKey: string;
+      /** The Burrow's local label; it exists nowhere on the Relay. */
+      readonly burrowLabel: string;
       readonly accountId: string;
       readonly passkeyCredentialId: string;
       readonly passkeyPublicKeyHash: string;
-      /** The bearer capability for this Client's push rows on this Host. */
+      /** The bearer capability for this Client's push rows on this Burrow. */
       readonly deliveryId: string;
     }
   | { readonly ok: false; readonly code: PairingDenialCode };
@@ -256,8 +256,8 @@ export function isPairingOutcomeV1(value: unknown): value is PairingOutcomeV1 {
   if (outcome.ok === false) return includesCode(PAIRING_DENIALS, outcome.code);
   if (outcome.ok !== true) return false;
   return (
-    bounded(outcome.hostStaticPublicKey) &&
-    bounded(outcome.hostLabel) &&
+    bounded(outcome.burrowStaticPublicKey) &&
+    bounded(outcome.burrowLabel) &&
     bounded(outcome.accountId) &&
     bounded(outcome.passkeyCredentialId) &&
     bounded(outcome.passkeyPublicKeyHash) &&
@@ -268,7 +268,7 @@ export function isPairingOutcomeV1(value: unknown): value is PairingOutcomeV1 {
 // ---------------------------------------------------------------------------
 // Connection
 
-/** The first Client→Host control message of a connection ceremony. */
+/** The first Client→Burrow control message of a connection ceremony. */
 export interface ConnectionRequestV1 {
   readonly presence: PresenceProofV1;
 }
@@ -287,22 +287,22 @@ const CONNECTION_DENIALS = [
   'pairing-required',
   'presence-rejected',
   'protocol-rejected',
-  'host-busy',
-  'host-error',
+  'burrow-busy',
+  'burrow-error',
 ] as const;
 
 export type ConnectionDenialCode = (typeof CONNECTION_DENIALS)[number];
 
-/** The single Host→Client control message that ends a connection attempt. */
+/** The single Burrow→Client control message that ends a connection attempt. */
 export type ConnectionOutcomeV1 =
-  | { readonly ok: true; readonly hostLabel: string }
+  | { readonly ok: true; readonly burrowLabel: string }
   | { readonly ok: false; readonly code: ConnectionDenialCode };
 
 export function isConnectionOutcomeV1(value: unknown): value is ConnectionOutcomeV1 {
   if (!value || typeof value !== 'object') return false;
   const outcome = value as Record<string, unknown>;
   if (outcome.ok === false) return includesCode(CONNECTION_DENIALS, outcome.code);
-  return outcome.ok === true && bounded(outcome.hostLabel);
+  return outcome.ok === true && bounded(outcome.burrowLabel);
 }
 
 /** Membership in a denial list, without widening the list's literal type. */

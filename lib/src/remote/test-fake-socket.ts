@@ -1,7 +1,7 @@
 /**
  * The fake `WebSocket` both ends of the remote stack are tested against.
  *
- * Test-only, and shared on purpose: the Host controller, the Host service, and
+ * Test-only, and shared on purpose: the Burrow controller, the Burrow service, and
  * the Pocket client all speak {@link RemoteWebSocket} and all need the same four
  * things — record what was sent, deliver a Relay frame, open, and close with a
  * code. Three private copies drifted into three different ideas of what a close

@@ -109,7 +109,7 @@ export async function subscribeToPushInBrowser(
     );
   }
 
-  // One scope subscription serves every Host; rotate only when the VAPID key changed.
+  // One scope subscription serves every Burrow; rotate only when the VAPID key changed.
   const applicationServerKeyBytes = fromBase64Url(applicationServerKey);
   let subscription = await registration.pushManager.getSubscription();
   if (

@@ -29,7 +29,7 @@ import {
 const ORIGIN = 'https://pocket.example';
 
 /** 16 bytes 0x00..0x0f, 16 bytes 0xf0..0xe1, 32 bytes 0x80.., 32 bytes 0x00.. */
-const HOST_ID = 'AAECAwQFBgcICQoLDA0ODw';
+const BURROW_ID = 'AAECAwQFBgcICQoLDA0ODw';
 const INVITE_ID = '8O_u7ezr6uno5-bl5OPi4Q';
 const SETUP_TOKEN = 'gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8';
 const EPH_PUB = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8';
@@ -39,7 +39,7 @@ const EXPIRY = 1_700_000_300;
 const NOW = 1_700_000_000_000;
 
 const INVITATION = {
-  hostId: HOST_ID,
+  burrowId: BURROW_ID,
   inviteId: INVITE_ID,
   expiry: EXPIRY,
   setupToken: SETUP_TOKEN,
@@ -47,7 +47,7 @@ const INVITATION = {
   ephPubBase64Url: EPH_PUB,
 };
 
-/** The exact URL a Host with this origin and this invitation must render. */
+/** The exact URL a Burrow with this origin and this invitation must render. */
 const EXPECTED_URL =
   'https://pocket.example/#pair?1.AAECAwQFBgcICQoLDA0ODw.8O_u7ezr6uno5-bl5OPi4Q.1700000300' +
   '.gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8.AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8';
@@ -74,9 +74,9 @@ test('the fragment is exactly 146 characters of six positional fields', () => {
   );
   assert.equal(fragment.length, 146);
   assert.equal(fragment.length, PAIRING_FRAGMENT_LENGTH);
-  const [version, hostId, inviteId, expiry, setupToken, ephPub] = fragment.split('.');
+  const [version, burrowId, inviteId, expiry, setupToken, ephPub] = fragment.split('.');
   assert.equal(version, PAIRING_INVITATION_VERSION);
-  assert.equal(hostId.length, 22);
+  assert.equal(burrowId.length, 22);
   assert.equal(inviteId.length, 22);
   assert.equal(expiry, '1700000300');
   assert.equal(setupToken.length, 43);
@@ -86,7 +86,7 @@ test('the fragment is exactly 146 characters of six positional fields', () => {
 test('a minted URL parses back to the same invitation', async () => {
   const parsed = await parsePairingInvitationUrl(EXPECTED_URL, ORIGIN, NOW);
   assert.ok(parsed);
-  assert.equal(parsed.hostId, HOST_ID);
+  assert.equal(parsed.burrowId, BURROW_ID);
   assert.equal(parsed.inviteId, INVITE_ID);
   assert.equal(parsed.expiry, EXPIRY);
   assert.equal(parsed.setupToken, SETUP_TOKEN);
@@ -106,8 +106,8 @@ test('the expiry is exactly ten zero-padded digits', () => {
   }
 });
 
-test('the prologue binds every invitation field but the hostId, in QR order', () => {
-  // `e2ePairingPrologue` already binds the hostId, so repeating it would be
+test('the prologue binds every invitation field but the burrowId, in QR order', () => {
+  // `e2ePairingPrologue` already binds the burrowId, so repeating it would be
   // two spellings of one fact. A disagreement here surfaces as a decrypt
   // failure at message 1 and reads like a bug in the suite, which is why one
   // builder serves both sides.
@@ -120,7 +120,7 @@ test('the prologue binds every invitation field but the hostId, in QR order', ()
   ]);
   assert.deepEqual(
     pairingInvitationPrologue(INVITATION),
-    e2ePairingPrologue(HOST_ID, pairingInvitationFields(INVITATION)),
+    e2ePairingPrologue(BURROW_ID, pairingInvitationFields(INVITATION)),
   );
 });
 
@@ -134,9 +134,9 @@ const MAX_ORIGIN_LENGTH = PAIRING_QR_URL_MAX_LENGTH - 1 - PAIRING_HASH_PREFIX.le
 
 /** A real origin of exactly `length` characters, with DNS-legal labels. */
 function originOfLength(length) {
-  const host = length - 'https://'.length - '.dev'.length;
-  const first = Math.min(host, 63);
-  const rest = host - first - 1;
+  const burrow = length - 'https://'.length - '.dev'.length;
+  const first = Math.min(burrow, 63);
+  const rest = burrow - first - 1;
   return `https://${'a'.repeat(first)}${rest >= 0 ? `.${'b'.repeat(rest)}` : ''}.dev`;
 }
 
@@ -194,16 +194,16 @@ test('the parser refuses a URL that is not this app, served over HTTPS, at the r
   }
 });
 
-test('plain HTTP is accepted on a loopback host, and nowhere else', async () => {
+test('plain HTTP is accepted on a loopback burrow, and nowhere else', async () => {
   // The documented dev loop serves Pocket on `http://localhost:3000`, which is
   // a secure context by the platform's own rule — the same exemption WebAuthn
   // and service workers get. Every other plain-HTTP origin stays refused.
   for (const origin of ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://[::1]:3000']) {
     const url = `${origin}/${PAIRING_HASH_PREFIX}${FIELDS.join('.')}`;
     const parsed = await parsePairingInvitationUrl(url, origin, NOW);
-    assert.equal(parsed?.hostId, HOST_ID, origin);
+    assert.equal(parsed?.burrowId, BURROW_ID, origin);
   }
-  // By host, never by suffix: a name that merely ends in `localhost` is an
+  // By burrow, never by suffix: a name that merely ends in `localhost` is an
   // ordinary remote origin a self-hoster could be pointed at.
   for (const origin of ['http://evil.localhost', 'http://127.0.0.1.evil.example', 'http://pocket.example']) {
     const url = `${origin}/${PAIRING_HASH_PREFIX}${FIELDS.join('.')}`;
@@ -248,7 +248,7 @@ test('every field is canonical base64url at its exact length', async () => {
   // Same length, one character outside the alphabet. Padding is refused even
   // though the decoder tolerates it, so a byte string has one spelling here.
   for (const [why, index, value] of [
-    ['a padded hostId', 1, `${HOST_ID.slice(0, 21)}=`],
+    ['a padded burrowId', 1, `${BURROW_ID.slice(0, 21)}=`],
     ['a base64 (not base64url) inviteId', 2, `${INVITE_ID.slice(0, 21)}+`],
     ['a setup token with a slash', 4, `${SETUP_TOKEN.slice(0, 42)}/`],
     ['an invitation key with a tilde', 5, `${EPH_PUB.slice(0, 42)}~`],
@@ -256,11 +256,11 @@ test('every field is canonical base64url at its exact length', async () => {
     assert.equal(await parsePairingInvitationUrl(urlWithField(index, value), ORIGIN, NOW), null, why);
   }
 
-  // A character borrowed from the hostId and given to the inviteId keeps the
+  // A character borrowed from the burrowId and given to the inviteId keeps the
   // fragment at 146 and is still refused: each field's length is its own rule,
   // not a consequence of the total.
   const borrowed = [...FIELDS];
-  borrowed[1] = HOST_ID.slice(0, 21);
+  borrowed[1] = BURROW_ID.slice(0, 21);
   borrowed[2] = `${INVITE_ID}A`;
   const url = `${ORIGIN}/${PAIRING_HASH_PREFIX}${borrowed.join('.')}`;
   assert.equal(url.length, EXPECTED_URL.length);
@@ -278,7 +278,7 @@ test('the expiry is ten decimal digits inside a uint32, and not already past', a
   ]) {
     assert.equal(await parsePairingInvitationUrl(urlWithField(3, expiry), ORIGIN, NOW), null, why);
   }
-  // Advisory only — the Host's memory stays authoritative — but a code that is
+  // Advisory only — the Burrow's memory stays authoritative — but a code that is
   // already dead should fail here rather than after a handshake.
   assert.equal(await parsePairingInvitationUrl(EXPECTED_URL, ORIGIN, EXPIRY * 1000 + 1), null);
   assert.ok(await parsePairingInvitationUrl(EXPECTED_URL, ORIGIN, EXPIRY * 1000));
@@ -323,7 +323,7 @@ test('nothing the parser refuses on another rule is ever called expired', async 
     ['a short fragment', `${ORIGIN}/${PAIRING_HASH_PREFIX}${FIELDS.slice(0, 5).join('.')}`],
     ['a long fragment', `${EXPECTED_URL}.x`],
     ['a version that is not 1', urlWithField(0, '2')],
-    ['a padded hostId', urlWithField(1, `${HOST_ID.slice(0, 21)}=`)],
+    ['a padded burrowId', urlWithField(1, `${BURROW_ID.slice(0, 21)}=`)],
     ['a base64 inviteId', urlWithField(2, `${INVITE_ID.slice(0, 21)}+`)],
     ['a non-numeric expiry', urlWithField(3, '+123456789')],
     ['an expiry over uint32', urlWithField(3, '9999999999')],

@@ -14,26 +14,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   DEVICE_KEY_STORE,
-  KNOWN_HOSTS_STORE,
+  KNOWN_BURROWS_STORE,
   PENDING_DELETIONS_STORE,
   POCKET_DB_NAME,
   POCKET_DB_VERSION,
-  indexedDbKnownHostStore,
+  indexedDbKnownBurrowStore,
   indexedDbPendingDeletionStore,
   openPocketDb,
   pendingDeletionKey,
   persistStorage,
   promisifyRequest,
   promisifyTransaction,
-  type KnownHostV1,
+  type KnownBurrowV1,
 } from './pocket-db';
 
-function knownHost(hostId: string, overrides: Partial<KnownHostV1> = {}): KnownHostV1 {
+function knownBurrow(burrowId: string, overrides: Partial<KnownBurrowV1> = {}): KnownBurrowV1 {
   return {
-    hostId,
+    burrowId,
     accountId: 'owner',
     label: 'Laptop',
-    hostStaticPublicKey: 'aG9zdC1zdGF0aWM',
+    burrowStaticPublicKey: 'aG9zdC1zdGF0aWM',
     clientStaticKeyPair: {
       // A stand-in: see the file header.
       privateKey: { kind: 'private' } as unknown as CryptoKey,
@@ -61,11 +61,11 @@ describe('the pocket database', () => {
     const persist = vi.fn(async () => true);
     vi.stubGlobal('navigator', { storage: { persist } });
 
-    const hosts = indexedDbKnownHostStore();
-    await hosts.put(knownHost('host-1'));
-    await hosts.put(knownHost('host-2'));
+    const burrows = indexedDbKnownBurrowStore();
+    await burrows.put(knownBurrow('burrow-1'));
+    await burrows.put(knownBurrow('burrow-2'));
     await indexedDbPendingDeletionStore().put({
-      hostId: 'host-1',
+      burrowId: 'burrow-1',
       deliveryId: 'delivery-1',
       queuedAt: 1,
     });
@@ -100,7 +100,7 @@ describe('the pocket database', () => {
         const db = request.result;
         db.createObjectStore(DEVICE_KEY_STORE);
         if (from >= 2) {
-          db.createObjectStore(KNOWN_HOSTS_STORE, { keyPath: 'hostId' });
+          db.createObjectStore(KNOWN_BURROWS_STORE, { keyPath: 'burrowId' });
           db.createObjectStore(PENDING_DELETIONS_STORE);
         }
       };
@@ -116,7 +116,7 @@ describe('the pocket database', () => {
     try {
       expect(db.version).toBe(POCKET_DB_VERSION);
       expect([...db.objectStoreNames].sort()).toEqual([
-        KNOWN_HOSTS_STORE,
+        KNOWN_BURROWS_STORE,
         PENDING_DELETIONS_STORE,
       ]);
       expect(db.objectStoreNames.contains(DEVICE_KEY_STORE)).toBe(false);
@@ -188,7 +188,7 @@ describe('the pocket database', () => {
     try {
       expect(db.version).toBe(POCKET_DB_VERSION);
       expect([...db.objectStoreNames].sort()).toEqual([
-        KNOWN_HOSTS_STORE,
+        KNOWN_BURROWS_STORE,
         PENDING_DELETIONS_STORE,
       ]);
     } finally {
@@ -196,35 +196,35 @@ describe('the pocket database', () => {
     }
   });
 
-  it('puts, gets, lists, and deletes known hosts by hostId', async () => {
-    const store = indexedDbKnownHostStore();
-    expect(await store.get('host-1')).toBeNull();
+  it('puts, gets, lists, and deletes known burrows by burrowId', async () => {
+    const store = indexedDbKnownBurrowStore();
+    expect(await store.get('burrow-1')).toBeNull();
 
-    await store.put(knownHost('host-1'));
-    await store.put(knownHost('host-2', { authorization: { state: 'pairing-required' } }));
-    expect((await store.get('host-1'))?.label).toBe('Laptop');
-    expect((await store.get('host-2'))?.authorization).toEqual({ state: 'pairing-required' });
-    expect((await store.list()).map((record) => record.hostId).sort()).toEqual([
-      'host-1',
-      'host-2',
+    await store.put(knownBurrow('burrow-1'));
+    await store.put(knownBurrow('burrow-2', { authorization: { state: 'pairing-required' } }));
+    expect((await store.get('burrow-1'))?.label).toBe('Laptop');
+    expect((await store.get('burrow-2'))?.authorization).toEqual({ state: 'pairing-required' });
+    expect((await store.list()).map((record) => record.burrowId).sort()).toEqual([
+      'burrow-1',
+      'burrow-2',
     ]);
 
-    // Keyed by `hostId`, so a second put for the same Host replaces it.
-    await store.put(knownHost('host-1', { label: 'Renamed' }));
+    // Keyed by `burrowId`, so a second put for the same Burrow replaces it.
+    await store.put(knownBurrow('burrow-1', { label: 'Renamed' }));
     expect(await store.list()).toHaveLength(2);
-    expect((await store.get('host-1'))?.label).toBe('Renamed');
+    expect((await store.get('burrow-1'))?.label).toBe('Renamed');
 
-    await store.delete('host-1');
-    expect(await store.get('host-1')).toBeNull();
+    await store.delete('burrow-1');
+    expect(await store.get('burrow-1')).toBeNull();
     expect(await store.list()).toHaveLength(1);
   });
 
-  it('files a pending deletion under hostId:deliveryId', async () => {
+  it('files a pending deletion under burrowId:deliveryId', async () => {
     const store = indexedDbPendingDeletionStore();
-    await store.put({ hostId: 'host-1', deliveryId: 'delivery-1', queuedAt: 1 });
-    // Two deliveries for one Host is the normal case after a re-pair, so the
-    // key cannot be the hostId alone.
-    await store.put({ hostId: 'host-1', deliveryId: 'delivery-2', queuedAt: 2 });
+    await store.put({ burrowId: 'burrow-1', deliveryId: 'delivery-1', queuedAt: 1 });
+    // Two deliveries for one Burrow is the normal case after a re-pair, so the
+    // key cannot be the burrowId alone.
+    await store.put({ burrowId: 'burrow-1', deliveryId: 'delivery-2', queuedAt: 2 });
     expect(await store.list()).toHaveLength(2);
 
     const db = await openPocketDb();
@@ -235,18 +235,18 @@ describe('the pocket database', () => {
           .objectStore(PENDING_DELETIONS_STORE)
           .getAllKeys(),
       );
-      expect(keys).toEqual(['host-1:delivery-1', 'host-1:delivery-2']);
-      expect(pendingDeletionKey('host-1', 'delivery-1')).toBe('host-1:delivery-1');
+      expect(keys).toEqual(['burrow-1:delivery-1', 'burrow-1:delivery-2']);
+      expect(pendingDeletionKey('burrow-1', 'delivery-1')).toBe('burrow-1:delivery-1');
     } finally {
       db.close();
     }
 
-    await store.delete('host-1', 'delivery-1');
+    await store.delete('burrow-1', 'delivery-1');
     expect(await store.list()).toEqual([
-      { hostId: 'host-1', deliveryId: 'delivery-2', queuedAt: 2 },
+      { burrowId: 'burrow-1', deliveryId: 'delivery-2', queuedAt: 2 },
     ]);
     // Deleting one that is not there is not an error: the queue is drained by
     // retry, and a duplicate drain must not fail.
-    await store.delete('host-1', 'delivery-1');
+    await store.delete('burrow-1', 'delivery-1');
   });
 });

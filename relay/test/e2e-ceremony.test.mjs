@@ -1,9 +1,9 @@
 /**
  * Both end-to-end ceremonies driven through the real Relay
  * (`docs/specs/remote-security-model.md` -> `## Future` -> **Scope:
- * e2e-client-host**, stage 4): a phone scans a Host's QR, registers a passkey
+ * e2e-client-burrow**, stage 4): a phone scans a Burrow's QR, registers a passkey
  * off the setup token that QR carries, signs in, pairs over IK against the
- * invitation key, and then connects against the Host static it pinned.
+ * invitation key, and then connects against the Burrow static it pinned.
  *
  * Nothing is stubbed but the transport is loopback: real WebAuthn
  * (`SimAuthenticator`), the real `/api/reauth/*` routes behind every presence
@@ -17,7 +17,7 @@ import assert from 'node:assert/strict';
 
 import {
   API_ROUTES,
-  MAX_TOKENS_PER_HOST,
+  MAX_TOKENS_PER_BURROW,
   REMOTE_METHODS,
   SELFHOST_ACCOUNT_ID,
   fromBase64Url,
@@ -27,7 +27,7 @@ import {
 } from 'remote-lib-common';
 
 import {
-  enrollHost,
+  enrollBurrow,
   freshApp,
   newAuthenticator,
   register,
@@ -35,9 +35,9 @@ import {
   startRelay,
 } from './helpers.mjs';
 import { FakeClient } from './harness/fake-client.mjs';
-import { FakeHost } from './harness/fake-host.mjs';
+import { FakeBurrow } from './harness/fake-burrow.mjs';
 
-const HOST_LABEL = 'Ned Laptop';
+const BURROW_LABEL = 'Ned Laptop';
 
 /** A well-formed base64url 32-byte value that is nobody's real handshake hash. */
 function foreignHash() {
@@ -45,7 +45,7 @@ function foreignHash() {
 }
 
 /**
- * A live Relay, one enrolled Host holding a Noise static and connected to the
+ * A live Relay, one enrolled Burrow holding a Noise static and connected to the
  * relay, and one phone that scanned its QR: registered off the invitation's own
  * setup token, signed in, and holding a `/ws/client` socket.
  *
@@ -56,41 +56,41 @@ function foreignHash() {
 async function ceremonyFixture({ autoApprove = false } = {}) {
   const created = await freshApp();
   const server = await startRelay(created);
-  const { body: enrollment } = await enrollHost(created.app);
-  const hostStatic = await generateNoiseKeyPair();
-  const host = new FakeHost({
+  const { body: enrollment } = await enrollBurrow(created.app);
+  const burrowStatic = await generateNoiseKeyPair();
+  const burrow = new FakeBurrow({
     relayUrl: server.wsUrl,
-    hostToken: enrollment.hostToken,
-    hostId: enrollment.hostId,
+    burrowToken: enrollment.burrowToken,
+    burrowId: enrollment.burrowId,
     origin: created.origin,
     rpId: created.rpId,
-    label: HOST_LABEL,
+    label: BURROW_LABEL,
     autoApprove,
-    noiseStaticKeyPair: hostStatic,
+    noiseStaticKeyPair: burrowStatic,
   });
-  await host.ready;
+  await burrow.ready;
 
-  const opened = [host];
+  const opened = [burrow];
   const fixture = {
     app: created.app,
     server,
     created,
     enrollment,
-    host,
-    hostStatic,
-    /** Mint a Relay setup token and wrap it in one Host invitation. */
+    burrow,
+    burrowStatic,
+    /** Mint a Relay setup token and wrap it in one Burrow invitation. */
     async invite() {
-      const res = await created.app.request(API_ROUTES.hostSetupToken, {
+      const res = await created.app.request(API_ROUTES.burrowSetupToken, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${enrollment.hostToken}` },
+        headers: { Authorization: `Bearer ${enrollment.burrowToken}` },
       });
       const { token, expiresAt } = await res.json();
-      return host.mintInvitation({ setupToken: token, expiresAt });
+      return burrow.mintInvitation({ setupToken: token, expiresAt });
     },
     /**
      * A phone: a passkey registered off `credential` (the setup password when
-     * the case is not about scanning), a sign-in session, and its own per-Host
-     * Noise static — different Hosts, and different browsers, never share one.
+     * the case is not about scanning), a sign-in session, and its own per-Burrow
+     * Noise static — different Burrows, and different browsers, never share one.
      */
     async phone({ credential, label = 'iPhone Safari' } = {}) {
       const authenticator = await newAuthenticator();
@@ -105,9 +105,9 @@ async function ceremonyFixture({ autoApprove = false } = {}) {
       const client = new FakeClient({
         relayUrl: server.wsUrl,
         sessionToken,
-        hostId: enrollment.hostId,
+        burrowId: enrollment.burrowId,
         staticKeyPair: await generateNoiseKeyPair(),
-        hostStaticPublicKey: hostStatic.publicKey,
+        burrowStaticPublicKey: burrowStatic.publicKey,
         origin: created.origin,
         rpId: created.rpId,
         label,
@@ -124,9 +124,9 @@ async function ceremonyFixture({ autoApprove = false } = {}) {
   return fixture;
 }
 
-/** Type `code` at the Host the moment its approval modal would open. */
-function typeAtHost(host, code) {
-  host.once('pairing-request', ({ clientId }) => host.confirmPairing(clientId, code));
+/** Type `code` at the Burrow the moment its approval modal would open. */
+function typeAtBurrow(burrow, code) {
+  burrow.once('pairing-request', ({ clientId }) => burrow.confirmPairing(clientId, code));
 }
 
 // --- The whole loop ---------------------------------------------------------
@@ -141,7 +141,7 @@ test('a phone scans, registers off the token, pairs, and is told everything it p
       credential: { setupToken: invitation.setupToken },
     });
 
-    typeAtHost(fixture.host, '42');
+    typeAtBurrow(fixture.burrow, '42');
     const paired = await client.pair({ invitation, authenticator, code: '42' });
 
     assert.equal(paired.ok, true, JSON.stringify(paired.outcome));
@@ -149,9 +149,9 @@ test('a phone scans, registers off the token, pairs, and is told everything it p
       ok: true,
       // The pin every later connection runs IK against — deliberately absent
       // from the QR, so a first-time Client learns it only inside the session.
-      hostStaticPublicKey: toBase64Url(fixture.hostStatic.publicKey),
-      // The Host's local label exists nowhere on the Relay.
-      hostLabel: HOST_LABEL,
+      burrowStaticPublicKey: toBase64Url(fixture.burrowStatic.publicKey),
+      // The Burrow's local label exists nowhere on the Relay.
+      burrowLabel: BURROW_LABEL,
       accountId: SELFHOST_ACCOUNT_ID,
       passkeyCredentialId: authenticator.credentialId,
       passkeyPublicKeyHash: await hashPasskeyPublicKey(authenticator.publicKey),
@@ -160,8 +160,8 @@ test('a phone scans, registers off the token, pairs, and is told everything it p
     assert.match(paired.outcome.deliveryId, /^[A-Za-z0-9_-]{43}$/, '32 bytes, base64url');
 
     // One record, binding all four identities plus the delivery capability.
-    const [record] = fixture.host.acl.activeRecords();
-    assert.equal(record.hostId, fixture.enrollment.hostId);
+    const [record] = fixture.burrow.acl.activeRecords();
+    assert.equal(record.burrowId, fixture.enrollment.burrowId);
     assert.equal(record.passkeyCredentialId, authenticator.credentialId);
     assert.equal(record.clientStaticPublicKey, toBase64Url(client.staticKeyPair.publicKey));
     assert.equal(record.deliveryId, paired.outcome.deliveryId);
@@ -169,21 +169,21 @@ test('a phone scans, registers off the token, pairs, and is told everything it p
 
     // The invitation is spent whatever the outcome: a code answered once can
     // never be reserved by a second phone.
-    assert.equal(fixture.host.invitationState(invitation.inviteId), 'consumed');
+    assert.equal(fixture.burrow.invitationState(invitation.inviteId), 'consumed');
   } finally {
     await fixture.close();
   }
 });
 
-test('evicting at the cap reports what the code was doing, as the real Host does', async () => {
-  // The harness exists to fail where a real Host would, so it has to make the
-  // same `dropped`-vs-`consumed` call `RemoteHost.#retireInvitation` makes:
+test('evicting at the cap reports what the code was doing, as the real Burrow does', async () => {
+  // The harness exists to fail where a real Burrow would, so it has to make the
+  // same `dropped`-vs-`consumed` call `BurrowRuntime.#retireInvitation` makes:
   // `dropped` says nobody scanned it, and reporting that for a code a phone is
   // mid-ceremony against would tell the panel to offer a replacement.
   const fixture = await ceremonyFixture();
   try {
     const events = [];
-    fixture.host.on('invitation', (e) => events.push(e));
+    fixture.burrow.on('invitation', (e) => events.push(e));
 
     const scanned = await fixture.invite();
     const { client } = await fixture.phone({
@@ -191,12 +191,12 @@ test('evicting at the cap reports what the code was doing, as the real Host does
     });
     // The IK handshake only: the invitation is now `reserved`, not yet spent.
     await client.openPairing(scanned);
-    assert.equal(fixture.host.invitationState(scanned.inviteId), 'reserved');
+    assert.equal(fixture.burrow.invitationState(scanned.inviteId), 'reserved');
 
     const untouched = await fixture.invite();
     events.length = 0;
     // Mint past the cap so both of the above are evicted by insertion order.
-    for (let i = 0; i < MAX_TOKENS_PER_HOST; i += 1) await fixture.invite();
+    for (let i = 0; i < MAX_TOKENS_PER_BURROW; i += 1) await fixture.invite();
 
     assert.deepEqual(
       events.filter((e) => e.inviteId === scanned.inviteId),
@@ -222,7 +222,7 @@ test('a paired phone connects and speaks protocol-v1 inside the session', async 
 
     const connected = await client.connect({ authenticator });
     assert.equal(connected.ok, true, JSON.stringify(connected.outcome));
-    assert.deepEqual(connected.outcome, { ok: true, hostLabel: HOST_LABEL });
+    assert.deepEqual(connected.outcome, { ok: true, burrowLabel: BURROW_LABEL });
 
     // protocol-v1 rides the established session's byte stream; nothing about it
     // changes (docs/specs/remote-api.md).
@@ -234,7 +234,7 @@ test('a paired phone connects and speaks protocol-v1 inside the session', async 
     assert.equal(hello.ok, true);
     assert.deepEqual(hello.result, {
       protocolVersion: 1,
-      hostId: fixture.enrollment.hostId,
+      burrowId: fixture.enrollment.burrowId,
       grants: { input: true, layout: false },
     });
 
@@ -249,7 +249,7 @@ test('a paired phone connects and speaks protocol-v1 inside the session', async 
 
 // --- Every denial stage 4 can produce ---------------------------------------
 
-test('confirmation-mismatch: the digits typed at the Host are not the ones displayed', async () => {
+test('confirmation-mismatch: the digits typed at the Burrow are not the ones displayed', async () => {
   const fixture = await ceremonyFixture();
   try {
     const invitation = await fixture.invite();
@@ -257,20 +257,20 @@ test('confirmation-mismatch: the digits typed at the Host are not the ones displ
       credential: { setupToken: invitation.setupToken },
     });
 
-    typeAtHost(fixture.host, '99');
+    typeAtBurrow(fixture.burrow, '99');
     const paired = await client.pair({ invitation, authenticator, code: '42' });
     assert.deepEqual(paired.outcome, { ok: false, code: 'confirmation-mismatch' });
-    assert.deepEqual(fixture.host.acl.activeRecords(), []);
+    assert.deepEqual(fixture.burrow.acl.activeRecords(), []);
 
     // Exactly one attempt: the invitation is spent, so typing the right digits
     // now reaches nothing.
-    assert.equal(fixture.host.invitationState(invitation.inviteId), 'consumed');
+    assert.equal(fixture.burrow.invitationState(invitation.inviteId), 'consumed');
   } finally {
     await fixture.close();
   }
 });
 
-test('user-denied: the person at the Host refuses', async () => {
+test('user-denied: the person at the Burrow refuses', async () => {
   const fixture = await ceremonyFixture();
   try {
     const invitation = await fixture.invite();
@@ -278,16 +278,16 @@ test('user-denied: the person at the Host refuses', async () => {
       credential: { setupToken: invitation.setupToken },
     });
 
-    fixture.host.once('pairing-request', ({ clientId }) => fixture.host.denyPairing(clientId));
+    fixture.burrow.once('pairing-request', ({ clientId }) => fixture.burrow.denyPairing(clientId));
     const paired = await client.pair({ invitation, authenticator });
     assert.deepEqual(paired.outcome, { ok: false, code: 'user-denied' });
-    assert.deepEqual(fixture.host.acl.activeRecords(), []);
+    assert.deepEqual(fixture.burrow.acl.activeRecords(), []);
   } finally {
     await fixture.close();
   }
 });
 
-test('presence-rejected: a proof bound to a handshake this Host never ran', async () => {
+test('presence-rejected: a proof bound to a handshake this Burrow never ran', async () => {
   const fixture = await ceremonyFixture({ autoApprove: true });
   try {
     const invitation = await fixture.invite();
@@ -296,20 +296,20 @@ test('presence-rejected: a proof bound to a handshake this Host never ran', asyn
     });
 
     // The Relay happily mints a nonce for any well-formed binding — it is not
-    // the authority. The Host builds `expected` from its OWN transcript, which
+    // the authority. The Burrow builds `expected` from its OWN transcript, which
     // is what makes an assertion produced for one ceremony useless in another.
     const paired = await client.pair({
       invitation,
       authenticator,
       binding: {
         kind: 'pairing',
-        hostId: fixture.enrollment.hostId,
+        burrowId: fixture.enrollment.burrowId,
         handshakeHash: foreignHash(),
         passkeyCredentialId: authenticator.credentialId,
       },
     });
     assert.deepEqual(paired.outcome, { ok: false, code: 'presence-rejected' });
-    assert.deepEqual(fixture.host.acl.activeRecords(), []);
+    assert.deepEqual(fixture.burrow.acl.activeRecords(), []);
   } finally {
     await fixture.close();
   }
@@ -328,9 +328,9 @@ test('presence-rejected on a connection: a proof bound to another transcript', a
     const presence = await client.presenceProof({
       binding: {
         kind: 'connection',
-        hostId: fixture.enrollment.hostId,
+        burrowId: fixture.enrollment.burrowId,
         connectionId: opened.connectionId,
-        hostChallenge: opened.hostChallenge,
+        burrowChallenge: opened.burrowChallenge,
         handshakeHash: foreignHash(),
         passkeyCredentialId: authenticator.credentialId,
       },
@@ -350,7 +350,7 @@ test('presence-rejected on a connection: a proof bound to another transcript', a
 test('pairing-required: an unpaired Client static, even with a registered passkey', async () => {
   const fixture = await ceremonyFixture({ autoApprove: true });
   try {
-    // Never paired at all: the passkey is on the account and the Host static is
+    // Never paired at all: the passkey is on the account and the Burrow static is
     // public, which models an attacker who already knows both.
     const { authenticator, client } = await fixture.phone();
     const connected = await client.connect({ authenticator });
@@ -363,7 +363,7 @@ test('pairing-required: an unpaired Client static, even with a registered passke
 test('pairing-required: halves on different records are not authorization', async () => {
   const fixture = await ceremonyFixture({ autoApprove: true });
   try {
-    // Two pairings on this Host: (passkey A, static A) and (passkey B, static B).
+    // Two pairings on this Burrow: (passkey A, static A) and (passkey B, static B).
     const inviteA = await fixture.invite();
     const first = await fixture.phone({ credential: { setupToken: inviteA.setupToken } });
     assert.equal(
@@ -377,7 +377,7 @@ test('pairing-required: halves on different records are not authorization', asyn
       (await second.client.pair({ invitation: inviteB, authenticator: second.authenticator })).ok,
       true,
     );
-    assert.equal(fixture.host.acl.activeRecords().length, 2);
+    assert.equal(fixture.burrow.acl.activeRecords().length, 2);
 
     // Passkey A on browser B: each half is paired, but never together, so no
     // record holds both — and the denial says only `pairing-required`.
@@ -419,7 +419,7 @@ test('an approval and a denial are the same number of bytes on the wire', async 
     const approved = await fixture.phone({
       credential: { setupToken: approvedInvite.setupToken },
     });
-    typeAtHost(fixture.host, '07');
+    typeAtBurrow(fixture.burrow, '07');
     const yes = await approved.client.pair({
       invitation: approvedInvite,
       authenticator: approved.authenticator,
@@ -429,14 +429,14 @@ test('an approval and a denial are the same number of bytes on the wire', async 
 
     const deniedInvite = await fixture.invite();
     const denied = await fixture.phone();
-    fixture.host.once('pairing-request', ({ clientId }) => fixture.host.denyPairing(clientId));
+    fixture.burrow.once('pairing-request', ({ clientId }) => fixture.burrow.denyPairing(clientId));
     const no = await denied.client.pair({
       invitation: deniedInvite,
       authenticator: denied.authenticator,
     });
     assert.equal(no.ok, false);
 
-    // The success carries a Host static, a label, three passkey fields and a
+    // The success carries a Burrow static, a label, three passkey fields and a
     // delivery id; the denial carries one word. NUL padding is what keeps the
     // relay from reading the answer off a length.
     assert.equal(yes.ct.length, no.ct.length);

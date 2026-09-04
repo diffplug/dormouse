@@ -2,7 +2,7 @@
  * Web Push delivery (docs/specs/alert.md -> Push notifications, docs/specs/relay.md).
  *
  * The relay cannot do this job: it routes between two live sockets and answers
- * "host <id> is offline" when a peer is missing. A push has to reach a phone
+ * "burrow <id> is offline" when a peer is missing. A push has to reach a phone
  * whose app is backgrounded or closed, which means handing the payload to the
  * platform's push service (APNs for Safari, FCM for Chrome) and letting it do
  * the waking.
@@ -53,17 +53,17 @@ export interface VapidKeys {
 }
 
 /**
- * Hosts a push service will not accept in a VAPID subject. Apple answers
+ * Burrows a push service will not accept in a VAPID subject. Apple answers
  * `403 {"reason":"BadJwtToken"}` for a loopback subject — verified against
  * `web.push.apple.com` for both `mailto:admin@localhost` and
  * `https://localhost:3000`, while `mailto:admin@example.com` and an ordinary
  * https origin were accepted. Apple does not check that the contact is
  * *reachable*, only that it is not loopback.
  */
-const LOOPBACK_SUBJECT_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
+const LOOPBACK_SUBJECT_BURROWS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 
-/** The host a subject names: the domain half for `mailto:`, the hostname otherwise. */
-function subjectHost(subject: URL): string {
+/** The burrow a subject names: the domain half for `mailto:`, the hostname otherwise. */
+function subjectBurrow(subject: URL): string {
   if (subject.protocol === 'mailto:') {
     const at = subject.pathname.lastIndexOf('@');
     return at === -1 ? '' : subject.pathname.slice(at + 1).toLowerCase();
@@ -71,12 +71,12 @@ function subjectHost(subject: URL): string {
   return subject.hostname.toLowerCase();
 }
 
-function isLoopbackSubjectHost(host: string): boolean {
-  if (!host) return false;
-  if (LOOPBACK_SUBJECT_HOSTS.has(host)) return true;
+function isLoopbackSubjectBurrow(burrow: string): boolean {
+  if (!burrow) return false;
+  if (LOOPBACK_SUBJECT_BURROWS.has(burrow)) return true;
   // RFC 6761 reserves the whole `.localhost` TLD for loopback.
-  if (host.endsWith('.localhost')) return true;
-  return /^127\./.test(host);
+  if (burrow.endsWith('.localhost')) return true;
+  return /^127\./.test(burrow);
 }
 
 /**
@@ -102,7 +102,7 @@ export function defaultVapidSubject(origin: string): string | null {
     return null;
   }
   if (parsed.protocol !== 'https:') return null;
-  if (isLoopbackSubjectHost(parsed.hostname.toLowerCase())) return null;
+  if (isLoopbackSubjectBurrow(parsed.hostname.toLowerCase())) return null;
   return parsed.origin;
 }
 
@@ -158,9 +158,9 @@ export function assertVapidSubject(subject: string): void {
   if (parsed.protocol !== 'mailto:' && parsed.protocol !== 'https:') {
     throw new Error('VAPID subject must be a valid mailto: or https: URL.');
   }
-  if (isLoopbackSubjectHost(subjectHost(parsed))) {
+  if (isLoopbackSubjectBurrow(subjectBurrow(parsed))) {
     throw new Error(
-      'VAPID subject must not name a loopback host — Apple rejects such a JWT with ' +
+      'VAPID subject must not name a loopback burrow — Apple rejects such a JWT with ' +
         'BadJwtToken, so every push to an iPhone would fail. Use a routable contact, ' +
         "e.g. this Relay's https origin or a real mailto: address.",
     );
@@ -191,7 +191,7 @@ export const PUSH_REQUEST_TIMEOUT_MS = 10_000;
 // The third bound of the trio, `PUSH_SEND_DEADLINE_MS`, lives in
 // `remote-lib-common` rather than here: it is deliberately above
 // PUSH_REQUEST_TIMEOUT_MS so it only fires where socket inactivity cannot, and
-// the Host has to size its own request timeout above it in turn.
+// the Burrow has to size its own request timeout above it in turn.
 
 /**
  * Run one send under a wall-clock deadline, reporting `failed` if it does not

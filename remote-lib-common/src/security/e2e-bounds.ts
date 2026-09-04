@@ -1,21 +1,21 @@
 /**
  * The bounds an end-to-end session lives inside.
  *
- * Every one is Host-enforced and independent of the relay; what each means and
+ * Every one is Burrow-enforced and independent of the relay; what each means and
  * why it is where it is belongs to `docs/specs/remote-security-model.md` ->
- * Host bounds. They live together — rather than inside the Host — because two
- * of them are the Client's business too: the Host reaps on the idle timeout and
+ * Burrow bounds. They live together — rather than inside the Burrow — because two
+ * of them are the Client's business too: the Burrow reaps on the idle timeout and
  * the Client keepalives against it, so two copies would be two opinions about
  * when a live session looks dead. The pending-ceremony caps stay beside the
  * work they bound: `MAX_PENDING_PAIRINGS` in `pairing.ts`,
- * `MAX_PENDING_CONNECTION_HANDSHAKES` in the Host itself.
+ * `MAX_PENDING_CONNECTION_HANDSHAKES` in the Burrow itself.
  *
  * The relationships between these numbers are pinned by
- * `remote-lib-common/test/e2e-bounds.test.mjs`; what the Host does with them is
- * `lib/src/remote/host/remote-host-bounds.test.ts`.
+ * `remote-lib-common/test/e2e-bounds.test.mjs`; what the Burrow does with them is
+ * `lib/src/remote/burrow/burrow-bounds.test.ts`.
  */
 
-/** How many authorized sessions one Host will hold at once. */
+/** How many authorized sessions one Burrow will hold at once. */
 export const MAX_ESTABLISHED_E2E_SESSIONS = 16;
 
 /**
@@ -27,7 +27,7 @@ export const E2E_KEEPALIVE_INTERVAL_MS = 30_000;
 
 /**
  * How long an established session may go without a successfully decrypted
- * Client->Host message before the Host disposes it.
+ * Client->Burrow message before the Burrow disposes it.
  *
  * Four keepalive intervals: a phone that misses one to a radio gap or a
  * garbage-collected timer is still inside the window, and one suspended in the
@@ -36,7 +36,7 @@ export const E2E_KEEPALIVE_INTERVAL_MS = 30_000;
 export const ESTABLISHED_E2E_IDLE_TIMEOUT_MS = 120_000;
 
 /**
- * The Host's crypto token bucket: how many `init` frames may be answered back
+ * The Burrow's crypto token bucket: how many `init` frames may be answered back
  * to back before the sustained rate applies.
  *
  * Eight, the pending-ceremony caps' own number — a burst larger than the

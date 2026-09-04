@@ -5,7 +5,7 @@
  *
  * Registration returns exactly what `POST /api/setup/finish` wants
  * (`{ credentialId, publicKey, clientDataJSON }`, all base64url); assertions
- * return the wire {@link PasskeyAssertion} shape the Relay and Host both
+ * return the wire {@link PasskeyAssertion} shape the Relay and Burrow both
  * verify with `verifyPasskeyAssertion`.
  */
 

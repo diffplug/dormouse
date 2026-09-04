@@ -8,8 +8,8 @@ import { ORIGIN, freshApp } from './helpers.mjs';
 // no OPTIONS handler exists to answer one, on a body-credentialed route or a
 // bearer one.
 for (const [label, route, method, header] of [
-  ['host enrollment', API_ROUTES.hostEnroll, 'POST', 'content-type'],
-  ['a bearer route', API_ROUTES.hosts, 'GET', 'authorization'],
+  ['burrow enrollment', API_ROUTES.burrowEnroll, 'POST', 'content-type'],
+  ['a bearer route', API_ROUTES.burrows, 'GET', 'authorization'],
 ]) {
   test(`a foreign preflight for ${label} receives no CORS grant`, async () => {
     const { app } = await freshApp();

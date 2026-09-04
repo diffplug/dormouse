@@ -21,7 +21,7 @@ test('DORMOUSE_BIND_HOST pins the listen interface', () => {
   assert.equal(config.bindHost, '127.0.0.1');
 });
 
-test('a blank DORMOUSE_BIND_HOST is treated as unset, not as an empty host', () => {
+test('a blank DORMOUSE_BIND_HOST is treated as unset, not as an empty burrow', () => {
   assert.equal(readConfig({ DORMOUSE_BIND_HOST: '' }).bindHost, undefined);
   assert.equal(readConfig({ DORMOUSE_BIND_HOST: '   ' }).bindHost, undefined);
 });
@@ -40,9 +40,9 @@ test('DORMOUSE_ORIGIN wins over the port-derived default', () => {
 
 test('DORMOUSE_ORIGIN is normalized to a bare origin', () => {
   // The only normalization there is — `createApp` compares against this string
-  // rather than re-parsing it. A trailing slash, a path, or a capitalized host
+  // rather than re-parsing it. A trailing slash, a path, or a capitalized burrow
   // reads as correct in an `.env` and fails every compare it reaches: the
-  // WebAuthn `clientData.origin` check, and the `<origin>/#pair?…` QR a Host
+  // WebAuthn `clientData.origin` check, and the `<origin>/#pair?…` QR a Burrow
   // composes, which would scan to `//#pair`.
   const trailing = readConfig({ DORMOUSE_ORIGIN: 'https://dor.example.ts.net/' });
   assert.equal(trailing.origin, 'https://dor.example.ts.net');
@@ -52,13 +52,13 @@ test('DORMOUSE_ORIGIN is normalized to a bare origin', () => {
   assert.equal(shouted.origin, 'https://dor.example.ts.net');
 });
 
-test('a DORMOUSE_ORIGIN that is not a URL with a host is a ConfigError', () => {
+test('a DORMOUSE_ORIGIN that is not a URL with a burrow is a ConfigError', () => {
   assert.throws(() => readConfig({ DORMOUSE_ORIGIN: 'dor.example.ts.net' }), ConfigError);
   assert.throws(() => readConfig({ DORMOUSE_ORIGIN: 'mailto:ned@example.com' }), ConfigError);
 });
 
 test('a DORMOUSE_ORIGIN on a non-web scheme is a ConfigError', () => {
-  // `ws://…` reduces to a bare origin, so "absolute URL with a host" passes it
+  // `ws://…` reduces to a bare origin, so "absolute URL with a burrow" passes it
   // — and the Relay would boot on an origin no browser can ever send as
   // `clientData.origin`, failing every WebAuthn check with a config that reads
   // as correct.

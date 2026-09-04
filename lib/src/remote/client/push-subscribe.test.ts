@@ -286,7 +286,7 @@ describe('subscribeToPushInBrowser', () => {
     });
     expect(unsubscribe).not.toHaveBeenCalled();
     expect(subscribe).not.toHaveBeenCalled();
-    // The address other Hosts registered is still live, so nothing was replaced.
+    // The address other Burrows registered is still live, so nothing was replaced.
     expect(onReplaced).not.toHaveBeenCalled();
   });
 
@@ -329,7 +329,7 @@ describe('subscribeToPushInBrowser', () => {
 
   it('reports the replaced delivery address even when subscribe throws', async () => {
     // The old endpoint is dead as soon as `unsubscribe` resolves. If the
-    // failure swallowed that fact, every other Host would keep claiming push
+    // failure swallowed that fact, every other Burrow would keep claiming push
     // notifications through an address nothing can reach.
     stubBrowser({});
     (globalThis.Notification as unknown as { requestPermission: unknown }).requestPermission =

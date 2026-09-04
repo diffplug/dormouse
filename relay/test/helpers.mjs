@@ -110,23 +110,23 @@ export function padBase64Url(text) {
 }
 
 /**
- * Enroll a throwaway Host and mint one setup token from it — the only credential
+ * Enroll a throwaway Burrow and mint one setup token from it — the only credential
  * `/api/setup/*` takes, so every registration in this suite starts at a code an
- * enrolled Host displayed. Pass `host` to mint another from one already enrolled.
+ * enrolled Burrow displayed. Pass `burrow` to mint another from one already enrolled.
  */
-export async function mintSetupToken(app, host) {
-  const minter = host ?? (await enrollHost(app)).body;
-  const res = await app.request(API_ROUTES.hostSetupToken, {
+export async function mintSetupToken(app, burrow) {
+  const minter = burrow ?? (await enrollBurrow(app)).body;
+  const res = await app.request(API_ROUTES.burrowSetupToken, {
     method: 'POST',
-    headers: { authorization: `Bearer ${minter.hostToken}` },
+    headers: { authorization: `Bearer ${minter.burrowToken}` },
   });
   const { token } = await res.json();
-  return { token, host: minter };
+  return { token, burrow: minter };
 }
 
 /**
  * begin → finish registration for `authenticator`; returns the finish Response.
- * `credential` is `{ setupToken }`, freshly minted through a Host unless the
+ * `credential` is `{ setupToken }`, freshly minted through a Burrow unless the
  * caller supplies one it wants to control (spent, revoked minter, reused).
  */
 export async function register(app, authenticator, options = {}) {
@@ -173,7 +173,7 @@ export async function until(fn, { timeout = 1000, interval = 5 } = {}) {
 /**
  * Boot a real listening server for a `createApp` result (WS needs a socket, not
  * `app.request`). Binds port 0 and reports the OS-assigned port; the returned
- * `wsUrl` is ready for `/ws/host` / `/ws/client`.
+ * `wsUrl` is ready for `/ws/burrow` / `/ws/client`.
  */
 /** Every {@link wsConnect} socket, so a Relay teardown can force them shut. */
 const OPEN_SOCKETS = new Set();
@@ -258,9 +258,9 @@ export function wsConnect(url) {
   };
 }
 
-/** POST /api/host/enroll with the setup password; returns the JSON body. */
-export async function enrollHost(app) {
-  const res = await post(app, API_ROUTES.hostEnroll, { password: PASSWORD });
+/** POST /api/burrow/enroll with the setup password; returns the JSON body. */
+export async function enrollBurrow(app) {
+  const res = await post(app, API_ROUTES.burrowEnroll, { password: PASSWORD });
   return { res, body: await res.json() };
 }
 
@@ -273,12 +273,12 @@ export async function ownerSession(app) {
   return { authenticator, sessionToken };
 }
 
-/** Enroll a host and open its `/ws/host` socket (awaiting the upgrade). */
-export async function connectHost(app, server) {
-  const { body } = await enrollHost(app);
-  const socket = wsConnect(`${server.wsUrl}${WS_ROUTES.host}?${WS_TOKEN_PARAM}=${body.hostToken}`);
+/** Enroll a burrow and open its `/ws/burrow` socket (awaiting the upgrade). */
+export async function connectBurrow(app, server) {
+  const { body } = await enrollBurrow(app);
+  const socket = wsConnect(`${server.wsUrl}${WS_ROUTES.burrow}?${WS_TOKEN_PARAM}=${body.burrowToken}`);
   await socket.ready;
-  return { host: body, socket };
+  return { burrow: body, socket };
 }
 
 /** Register+sign-in an owner and open a `/ws/client` socket (awaiting the upgrade). */

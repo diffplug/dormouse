@@ -1,7 +1,7 @@
 /**
- * Host challenges: the freshness primitive.
+ * Burrow challenges: the freshness primitive.
  *
- * Every connection attempt consumes a challenge that the Host itself issued
+ * Every connection attempt consumes a challenge that the Burrow itself issued
  * moments earlier. Challenges are unguessable (256 bits), expire quickly, and
  * are single-use — consuming one removes it whether or not the rest of the
  * connection attempt succeeds, so a captured request can never be replayed.
@@ -20,7 +20,7 @@ export interface IssuedChallenge {
   readonly expiresAt: number;
 }
 
-export interface HostChallengeIssuerOptions {
+export interface ChallengeIssuerOptions {
   readonly ttlMs?: number;
   /** Clock returning epoch milliseconds; injectable for tests. */
   readonly now?: () => number;
@@ -37,14 +37,14 @@ export interface HostChallengeIssuerOptions {
   readonly maxPending?: number;
 }
 
-export class HostChallengeIssuer {
+export class ChallengeIssuer {
   readonly #pending = new Map<string, number>();
   readonly #ttlMs: number;
   readonly #now: () => number;
   readonly #crypto: WebCryptoLike;
   readonly #maxPending: number;
 
-  constructor(options: HostChallengeIssuerOptions = {}) {
+  constructor(options: ChallengeIssuerOptions = {}) {
     this.#ttlMs = options.ttlMs ?? DEFAULT_CHALLENGE_TTL_MS;
     this.#now = options.now ?? (() => Date.now());
     this.#crypto = options.crypto ?? getWebCrypto();

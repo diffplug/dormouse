@@ -23,7 +23,7 @@
  *     (2.4.0).
  *   - Inputs are copied before use, and MAC input must be `Uint8Array` —
  *     strings are no longer accepted (2.0.0).
- *   - Big-endian hosts handled explicitly (`swap32IfBE`) and zeroization
+ *   - Big-endian burrows handled explicitly (`swap32IfBE`) and zeroization
  *     tightened (2.2.0).
  *   - Passing AAD to a cipher that does not support it throws instead of being
  *     silently ignored (2.3.0); ChaCha20-Poly1305 supports AAD, so this suite
@@ -121,7 +121,7 @@ export interface NoiseSession {
  * **Never throws and never rejects**, a missing `globalThis.crypto` included:
  * the callers this exists for are boot-path gates that show a fixed upgrade
  * requirement and perform no remote operation
- * (`docs/specs/remote-security-model.md` -> Host identity). The default is
+ * (`docs/specs/remote-security-model.md` -> Burrow identity). The default is
  * resolved inside the guard for the same reason.
  */
 export async function probeNoiseSupport(crypto?: WebCryptoLike): Promise<boolean> {
@@ -182,7 +182,7 @@ async function generateX25519(
  * private half as PKCS#8 and the public half raw, both base64url.
  *
  * Only a *long-term* static is ever exported. Ephemerals and imported statics
- * stay nonextractable `CryptoKey`s; this shape exists because a Host must come
+ * stay nonextractable `CryptoKey`s; this shape exists because a Burrow must come
  * back as the same party after a restart, and its state file is the only place
  * that can remember.
  */
@@ -265,14 +265,14 @@ export function isNoiseStaticMaterial(publicKey: string, privateKeyPkcs8: string
 /**
  * The public half of a persisted static, derived from the private one.
  *
- * Whatever first consumes a Host static checks that its halves correspond: two
+ * Whatever first consumes a Burrow static checks that its halves correspond: two
  * halves of different keypairs pass {@link isNoiseStaticMaterial}, which is
- * shape only, and a mismatch would read as a *changed Host identity* at every
+ * shape only, and a mismatch would read as a *changed Burrow identity* at every
  * paired Client rather than as the corrupt state file it is
- * (`docs/specs/remote-security-model.md` → Host identity).
+ * (`docs/specs/remote-security-model.md` → Burrow identity).
  *
  * The private key is imported extractable for exactly this call and discarded;
- * the copy the Host actually holds still comes from
+ * the copy the Burrow actually holds still comes from
  * {@link importNoiseStaticPrivateKey}. JWK is the only WebCrypto route from an
  * X25519 private key to its public point — `deriveBits` yields a shared secret,
  * never the point — and `x` is the raw public key in unpadded base64url, which
@@ -756,7 +756,7 @@ function requireKey(key: Uint8Array, what: string): void {
 /**
  * The 32 bytes at `offset`, always copied. Never `.slice()`: Node aliases
  * `Buffer.prototype.slice` to `subarray`, so a `Buffer` argument — what a
- * Node host gets from a WebSocket frame — would hand back a live view that
+ * Node burrow gets from a WebSocket frame — would hand back a live view that
  * changes under us if the caller reuses its read buffer.
  */
 function copyKey(source: Uint8Array, offset: number): Uint8Array {

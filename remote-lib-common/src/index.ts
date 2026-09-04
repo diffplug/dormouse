@@ -9,7 +9,7 @@
  * The `security/` modules implement the primitives of
  * `docs/specs/remote-security-model.md`: the Noise suite and its transport
  * framing, presence proofs, pairing invitations, the two ceremonies' control
- * messages, host challenges, passkey assertion verification, and the Host ACL.
+ * messages, burrow challenges, passkey assertion verification, and the Burrow ACL.
  */
 
 export * from './remote/wire.js';

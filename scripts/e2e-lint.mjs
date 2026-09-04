@@ -29,7 +29,7 @@
  *     dependency reached through a re-export is invisible to a regex and always
  *     will be.
  *   - Test files are out of scope for the discriminant rules on purpose:
- *     `lib/src/remote/host/remote-host.test.ts` and
+ *     `lib/src/remote/burrow/burrow-runtime.test.ts` and
  *     `remote-lib-common/test/wire.test.mjs` name the retired tags precisely to
  *     assert they are *rejected*, and a lint that reddened on those would push
  *     someone to delete the regression tests.
@@ -75,8 +75,8 @@ const E2E_MODULES = [
   'remote-lib-common/src/security/presence.ts',
   'remote-lib-common/src/security/acl.ts',
   'remote-lib-common/src/remote/wire.ts',
-  'lib/src/remote/host/remote-host.ts',
-  'lib/src/remote/host/push-delivery.ts',
+  'lib/src/remote/burrow/burrow-runtime.ts',
+  'lib/src/remote/burrow/push-delivery.ts',
   'lib/src/remote/client/pocket-client.ts',
   'lib/src/remote/pocket-app/sw.ts',
 ];
@@ -94,7 +94,7 @@ const NOISE_MODULES = [
 const FRAME_MODULES = [
   'remote-lib-common/src/remote/wire.ts',
   'relay/src/relay.ts',
-  'lib/src/remote/host/remote-host.ts',
+  'lib/src/remote/burrow/burrow-runtime.ts',
   'lib/src/remote/client/pocket-client.ts',
 ];
 
@@ -204,7 +204,7 @@ export const RULES = [
     files: FRAME_MODULES,
     // The tags of the Relay-readable protocol this replaced. A reader for one
     // is a path a hostile relay could still drive; the shipped set is `e2e`,
-    // `host-gone`, `error`, and `client-gone`.
+    // `burrow-gone`, `error`, and `client-gone`.
     pattern:
       /['"](?:pair|pair-status|connect|connect2|msg|pair-result|challenge|decision|setup-token-redeemed)['"]/g,
     violationFile: 'relay/src/relay.ts',

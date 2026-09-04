@@ -27,9 +27,9 @@ import { PasskeyAlreadyRegisteredError, browserWebAuthn } from '../client/webaut
 import { SCAN_LABEL } from '../setup-copy';
 import { probeNoiseSupport, type PairingInvitation } from 'remote-lib-common';
 import {
-  indexedDbKnownHostStore,
+  indexedDbKnownBurrowStore,
   indexedDbPendingDeletionStore,
-  type KnownHostV1,
+  type KnownBurrowV1,
 } from '../client/pocket-db';
 import {
   getPushAvailability,
@@ -48,7 +48,7 @@ import { ErrorRow, PK, pkButton } from './pocket-chrome';
 
 /**
  * Which screen is up, carrying whatever only that screen has. The two pieces
- * that used to sit beside it — the pairing digits and the connected Host — are
+ * that used to sit beside it — the pairing digits and the connected Burrow — are
  * in here because they are meaningless anywhere else, and keeping them in
  * lockstep with a separate `phase` string was four places to get it wrong.
  */
@@ -57,12 +57,12 @@ type Phase =
   | { readonly at: 'scan' }
   /** `code` is null for the moment between the handshake and the sampled code. */
   | { readonly at: 'pairing'; readonly code: string | null }
-  | { readonly at: 'hosts' }
-  | { readonly at: 'wall'; readonly host: HostView };
+  | { readonly at: 'burrows' }
+  | { readonly at: 'wall'; readonly burrow: BurrowView };
 
-/** One row of the Hosts view: a pinned record, plus what the Relay knows. */
-export interface HostView {
-  hostId: string;
+/** One row of the Burrows view: a pinned record, plus what the Relay knows. */
+export interface BurrowView {
+  burrowId: string;
   label: string;
   online: boolean;
   /**
@@ -85,7 +85,7 @@ export type PushConfigStatus = PushConfigState['status'];
  * The label this Client suggests at pairing.
  *
  * One phone can hold two Client identities — a Safari tab and a Home Screen
- * install have separate storage and therefore separate per-Host statics — and
+ * install have separate storage and therefore separate per-Burrow statics — and
  * they are genuinely separate delivery targets that cannot be merged. Naming
  * the mode is what lets the person approving on the laptop, and the alarm
  * dialog afterwards, tell them apart.
@@ -119,7 +119,7 @@ export default function App({
         fetch: window.fetch.bind(window),
         webauthn: browserWebAuthn,
         createWebSocket: (url) => new WebSocket(url) as unknown as PocketSocket,
-        knownHosts: indexedDbKnownHostStore(),
+        knownBurrows: indexedDbKnownBurrowStore(),
         pendingDeletions: indexedDbPendingDeletionStore(),
       }),
     [],
@@ -129,7 +129,7 @@ export default function App({
    * Whether this runtime can run the protocol at all. **Null until the probe
    * settles, and no remote operation happens before it does**: a runtime
    * without X25519 is gated, never degraded
-   * (`docs/specs/remote-security-model.md` → Host identity).
+   * (`docs/specs/remote-security-model.md` → Burrow identity).
    */
   const [noiseSupported, setNoiseSupported] = useState<boolean | null>(null);
   useEffect(() => {
@@ -168,12 +168,12 @@ export default function App({
    */
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [hosts, setHosts] = useState<HostView[]>([]);
+  const [burrows, setBurrows] = useState<BurrowView[]>([]);
   /** Set by Cancel on the waiting screen, so the abort is not reported as a failure. */
   const cancelledPairingRef = useRef(false);
   const [pushState, setPushState] = useState<PushAvailability | null>(null);
   /** Null while the Relay's answer is unknown — see the effect below. */
-  const [pushSubscribedHostIds, setPushSubscribedHostIds] = useState<Set<string> | null>(null);
+  const [pushSubscribedBurrowIds, setPushSubscribedBurrowIds] = useState<Set<string> | null>(null);
   const [pushSubscriptionCurrent, setPushSubscriptionCurrent] = useState(false);
   const [pushConfig, setPushConfig] = useState<PushConfigState>({ status: 'loading' });
   /**
@@ -187,7 +187,7 @@ export default function App({
 
   /**
    * The Relay's VAPID key, and whether this browser's subscription still
-   * matches it. One operation, two callers: the Hosts-entry load below (which
+   * matches it. One operation, two callers: the Burrows-entry load below (which
    * commits only while its run token is current) and the Retry action.
    */
   const loadPushConfig = useCallback(
@@ -213,10 +213,10 @@ export default function App({
 
   // Availability depends on browser state the app cannot change (permission,
   // whether it was launched from the Home Screen), so it is read on entering the
-  // Hosts list rather than tracked as a store — that per-visit probe is the
+  // Burrows list rather than tracked as a store — that per-visit probe is the
   // authoritative one.
   //
-  // Keyed to the `hosts` phase alone, so the hop onto the wall neither refetches
+  // Keyed to the `burrows` phase alone, so the hop onto the wall neither refetches
   // it nor throws it away; the run token (above) is what supersedes an in-flight
   // read instead of a cleanup. (`App` never unmounts between phases, so there is
   // nothing to tear down on the way out.)
@@ -226,7 +226,7 @@ export default function App({
   // across one.
   const at = phase.at;
   useEffect(() => {
-    if (at !== 'hosts') return;
+    if (at !== 'burrows') return;
     const run = ++pushLoadRunRef.current;
     const current = () => pushLoadRunRef.current === run;
     setPushSubscriptionCurrent(false);
@@ -236,36 +236,36 @@ export default function App({
     void loadPushConfig(current).catch(() => {
       // Reported by the card's Retry state; a failed prefetch is not an alert.
     });
-    // Which Hosts this device already registered with, asked by presenting this
+    // Which Burrows this device already registered with, asked by presenting this
     // browser's own delivery ids. Without it a reload re-offers Enable for every
-    // Host, including ones the Relay already holds a row for. Authoritative
+    // Burrow, including ones the Relay already holds a row for. Authoritative
     // rather than merged, so a row pruned after a 410 stops claiming push is on.
     // Null means unanswered, which `isPushOn` below reads as not-on rather than
     // settling it at empty.
-    setPushSubscribedHostIds(null);
+    setPushSubscribedBurrowIds(null);
     void client
-      .listPushSubscribedHosts()
-      .then((hostIds) => {
-        if (current()) setPushSubscribedHostIds(new Set(hostIds));
+      .listPushSubscribedBurrows()
+      .then((burrowIds) => {
+        if (current()) setPushSubscribedBurrowIds(new Set(burrowIds));
       })
       .catch(() => {
         // Stay unanswered. A read that failed learned nothing, so the card
         // re-offers its idempotent Enable rather than claiming push is on; the
-        // next Hosts entry re-reads.
+        // next Burrows entry re-reads.
       });
   }, [at, client, loadPushConfig]);
 
   /**
-   * Whether this device is registered for push notifications with one Host.
+   * Whether this device is registered for push notifications with one Burrow.
    *
    * Demands both a Relay row and a browser subscription that still matches it,
    * since either half missing means the repair path has to stay offered — and
    * an unanswered read (in flight, or failed) is not a row.
    */
-  const isPushOn = (hostId: string): boolean =>
-    pushSubscriptionCurrent && (pushSubscribedHostIds?.has(hostId) ?? false);
+  const isPushOn = (burrowId: string): boolean =>
+    pushSubscriptionCurrent && (pushSubscribedBurrowIds?.has(burrowId) ?? false);
 
-  /** Tear down the live session and return to the hosts list. */
+  /** Tear down the live session and return to the burrows list. */
   const teardownAdapter = useCallback(() => {
     void adapterRef.current?.dispose();
     adapterRef.current = null;
@@ -277,7 +277,7 @@ export default function App({
    * without an adapter.** Every way out of a live wall lands here — leaving it,
    * an expired session, an adapter that could not stand up — so the three
    * cannot drift into different ideas of what "ended" means. The two paths that
-   * deliberately do only half are `setOnHostGone` (the socket is already gone)
+   * deliberately do only half are `setOnBurrowGone` (the socket is already gone)
    * and `onCancelPairing` (there is no adapter yet).
    */
   const endSession = useCallback(() => {
@@ -296,7 +296,7 @@ export default function App({
         // already discarded, so every view above sign-in would fail the same
         // way, and an installed Pocket has no reload affordance to escape with.
         // Drop to sign-in, where one passkey prompt restores everything —
-        // the pinned Hosts and push registration both outlive the session.
+        // the pinned Burrows and push registration both outlive the session.
         if (err instanceof SessionExpiredError) {
           endSession();
           setPhase({ at: 'auth' });
@@ -312,16 +312,16 @@ export default function App({
   );
 
   /**
-   * The Hosts list: the pinned records, with online state stamped on from the
-   * Relay. **A Host with no record is not shown** — the Relay's list is
+   * The Burrows list: the pinned records, with online state stamped on from the
+   * Relay. **A Burrow with no record is not shown** — the Relay's list is
    * discovery, and a row for a computer this phone holds no key for would offer
    * an action that cannot exist.
    */
-  const loadHosts = useCallback(async () => {
-    const [records, enrolled] = await Promise.all([client.listKnownHosts(), client.listHosts()]);
-    const online = new Map(enrolled.map((host) => [host.hostId, host.online]));
-    setHosts(records.map((record) => toHostView(record, online.get(record.hostId) ?? false)));
-    setPhase({ at: 'hosts' });
+  const loadBurrows = useCallback(async () => {
+    const [records, enrolled] = await Promise.all([client.listKnownBurrows(), client.listBurrows()]);
+    const online = new Map(enrolled.map((burrow) => [burrow.burrowId, burrow.online]));
+    setBurrows(records.map((record) => toBurrowView(record, online.get(record.burrowId) ?? false)));
+    setPhase({ at: 'burrows' });
     // Owed deletions retry here: this runs after every sign-in and on every
     // return to the list, and a tombstone clears only on the Relay's answer.
     // Never awaited: it is best-effort, never throws, and nothing on the list
@@ -329,24 +329,24 @@ export default function App({
     void client.retirePendingDeletions();
   }, [client]);
 
-  // Socket drop / host-gone: dispose the adapter and fall back to Hosts.
+  // Socket drop / burrow-gone: dispose the adapter and fall back to Burrows.
   useEffect(() => {
-    client.setOnHostGone(() => {
+    client.setOnBurrowGone(() => {
       teardownAdapter();
       setError('The connection to the computer ended.');
-      setPhase({ at: 'hosts' });
+      setPhase({ at: 'burrows' });
     });
-    return () => client.setOnHostGone(null);
+    return () => client.setOnBurrowGone(null);
   }, [client, teardownAdapter]);
 
   /** The connect half, shared so a fresh pairing can continue straight into it. */
   const connectTo = useCallback(
-    async (host: HostView) => {
-      const decision: ConnectResult = await client.connect(host.hostId);
+    async (burrow: BurrowView) => {
+      const decision: ConnectResult = await client.connect(burrow.burrowId);
       if (!decision.ok) {
-        // The record has already been rewritten where the Host said
+        // The record has already been rewritten where the Burrow said
         // `pairing-required`; re-reading is what puts *Pair again* on the row.
-        if (decision.pairingRequired) await loadHosts();
+        if (decision.pairingRequired) await loadBurrows();
         throw new Error(decision.message);
       }
       await client.hello();
@@ -362,20 +362,20 @@ export default function App({
         await adapter.init();
       } catch (err) {
         // The session is already established, and the throw sends the user back
-        // to the Hosts list — where nothing can end it. Leaving it up keeps
-        // this phone keepaliving a Host it is not attached to and holding one
-        // of the Host's session slots, while the next Connect handshakes over
+        // to the Burrows list — where nothing can end it. Leaving it up keeps
+        // this phone keepaliving a Burrow it is not attached to and holding one
+        // of the Burrow's session slots, while the next Connect handshakes over
         // the top of it.
         endSession();
         throw err;
       }
 
-      setPhase({ at: 'wall', host });
+      setPhase({ at: 'wall', burrow });
     },
-    [client, endSession, loadHosts],
+    [client, endSession, loadBurrows],
   );
 
-  const onConnect = (host: HostView) => run('connect', () => connectTo(host));
+  const onConnect = (burrow: BurrowView) => run('connect', () => connectTo(burrow));
 
   /**
    * A scanned or pasted invitation, from the moment it parses to the moment the
@@ -430,7 +430,7 @@ export default function App({
         }
         // A signed-in phone has no passkey to create, so it spends the code
         // rather than leaving a photographed QR redeemable. A refusal aborts:
-        // the code is dead, and pairing with it would fail at the Host anyway.
+        // the code is dead, and pairing with it would fail at the Burrow anyway.
         if (!spentOnSetup) await client.retireSetupToken(invitation.setupToken);
         await client.retirePendingDeletions();
 
@@ -438,8 +438,8 @@ export default function App({
         // **Nothing may throw out of here while the pairing screen is up.** It
         // shows two digits and a Cancel button and renders no error, so a throw
         // left standing hides the one sentence the path exists to deliver —
-        // `HostIdentityMismatchError` above all, but equally a dismissed
-        // authenticator prompt or a connect the Host refused after approving the
+        // `BurrowIdentityMismatchError` above all, but equally a dismissed
+        // authenticator prompt or a connect the Burrow refused after approving the
         // pair. `pair` and `connect` report denials as results and throw for the
         // rest, so the whole span is covered rather than either call.
         try {
@@ -451,42 +451,42 @@ export default function App({
           if (cancelledPairingRef.current) {
             // The user stopped waiting; whatever the ceremony answered afterwards
             // is not a failure to report at them.
-            await loadHosts();
+            await loadBurrows();
             return;
           }
           if (!result.ok) {
-            await loadHosts();
+            await loadBurrows();
             throw new Error(result.message);
           }
           // Approving on the laptop should land the phone in a terminal, not back
           // on a list. Re-labelling busy keeps the screen showing progress.
           setBusy('connect');
-          setHosts((prev) => withRecord(prev, result.record));
-          await connectTo(toHostView(result.record, true));
+          setBurrows((prev) => withRecord(prev, result.record));
+          await connectTo(toBurrowView(result.record, true));
         } catch (err) {
           // Leave first, then re-read, so a failed re-read cannot strand them
           // either. Both are no-ops once a successful connect has moved on.
-          setPhase((current) => (current.at === 'pairing' ? { at: 'hosts' } : current));
-          await loadHosts().catch(() => undefined);
+          setPhase((current) => (current.at === 'pairing' ? { at: 'burrows' } : current));
+          await loadBurrows().catch(() => undefined);
           throw err;
         }
       }),
-    [client, connectTo, loadHosts, passkeyAlreadyRegistered, run],
+    [client, connectTo, loadBurrows, passkeyAlreadyRegistered, run],
   );
 
   const onCancelPairing = () => {
     cancelledPairingRef.current = true;
     // Closing the socket is what ends a ceremony there is no other way out of:
-    // the Host's own invitation is spent by the outcome or by its TTL, and the
+    // the Burrow's own invitation is spent by the outcome or by its TTL, and the
     // waiter this drops is the only thing still holding the screen.
     client.close();
-    setPhase({ at: 'hosts' });
+    setPhase({ at: 'burrows' });
   };
 
-  const onForget = (host: HostView) =>
+  const onForget = (burrow: BurrowView) =>
     run('forget', async () => {
-      await client.forgetHost(host.hostId);
-      await loadHosts();
+      await client.forgetBurrow(burrow.burrowId);
+      await loadBurrows();
     });
 
   // Must stay free of network round trips before the permission prompt — see
@@ -498,7 +498,7 @@ export default function App({
       }
       try {
         const subscription = await subscribeToPushInBrowser(pushConfig.key, () => {
-          // The scope no longer holds an address the Relay can reach, so no Host
+          // The scope no longer holds an address the Relay can reach, so no Burrow
           // may keep claiming push notifications through it. The moment it becomes
           // true, which is what re-offers Enable if minting the replacement then
           // throws and there is no response to correct the UI with.
@@ -507,12 +507,12 @@ export default function App({
         // Owed deletions first: a replacement registered while a superseded
         // delivery row is still on the Relay would leave that row reachable.
         await client.retirePendingDeletions();
-        // Every paired Host, not only the unregistered ones, so one tap also
+        // Every paired Burrow, not only the unregistered ones, so one tap also
         // repairs a rotated endpoint everywhere. Each response commits as it
         // lands rather than after the loop: a registration that fails on the
-        // third Host must not throw away the first two.
-        for (const host of hosts.filter((h) => !h.needsPairing)) {
-          const { hostIds } = await client.subscribeToPush(host.hostId, subscription);
+        // third Burrow must not throw away the first two.
+        for (const burrow of burrows.filter((h) => !h.needsPairing)) {
+          const { burrowIds } = await client.subscribeToPush(burrow.burrowId, subscription);
           // Newer than any load still in flight — it answered the same question
           // about the same device, later — so it takes the token from the load
           // whole, dropping every continuation at once rather than each carrying
@@ -520,11 +520,11 @@ export default function App({
           // device, so it replaces the set rather than adding to it.
           pushLoadRunRef.current++;
           setPushSubscriptionCurrent(true);
-          setPushSubscribedHostIds(new Set(hostIds));
+          setPushSubscribedBurrowIds(new Set(burrowIds));
         }
       } catch (err) {
         // A denied permission prompt is a failure that changes availability, and
-        // availability is only probed on entering Hosts — so without this the
+        // availability is only probed on entering Burrows — so without this the
         // card stays up offering an Enable that can only throw again. Re-probed
         // before rethrowing, so the error still gets its one showing.
         void getPushAvailability().then(setPushState);
@@ -538,7 +538,7 @@ export default function App({
 
   const leaveWall = () => {
     endSession();
-    setPhase({ at: 'hosts' });
+    setPhase({ at: 'burrows' });
   };
 
   // --- Views ---------------------------------------------------------------
@@ -566,13 +566,13 @@ export default function App({
             // A scan that signed in but failed afterwards has a session and no
             // list: `onScanned` only reads one on a path that reaches pairing.
             // So the way back is the read, not a bare phase change — otherwise
-            // the Hosts view claims nothing is paired until Refresh.
+            // the Burrows view claims nothing is paired until Refresh.
             if (client.sessionToken === null) {
               setError(null);
               setPhase({ at: 'auth' });
               return;
             }
-            void run('refresh', loadHosts);
+            void run('refresh', loadBurrows);
           }}
         />
       );
@@ -594,7 +594,7 @@ export default function App({
           onSignin={() =>
             run('signin', async () => {
               await client.signin();
-              await loadHosts();
+              await loadBurrows();
             })
           }
         />
@@ -603,20 +603,20 @@ export default function App({
       // The adapter is stood up before the phase moves, so the ref is set
       // whenever this branch is reachable.
       return adapterRef.current ? (
-        <ConnectedView host={phase.host} adapter={adapterRef.current} onLeave={leaveWall} />
+        <ConnectedView burrow={phase.burrow} adapter={adapterRef.current} onLeave={leaveWall} />
       ) : (
         <Waiting />
       );
-    case 'hosts':
+    case 'burrows':
       return (
-        <HostsView
-          hosts={hosts}
+        <BurrowsView
+          burrows={burrows}
           busy={busy}
           error={error}
           isPushSubscribed={isPushOn}
           pushState={pushState}
           pushConfigStatus={pushConfig.status}
-          onRefresh={() => run('refresh', loadHosts)}
+          onRefresh={() => run('refresh', loadBurrows)}
           onScan={openScanner}
           onConnect={onConnect}
           onForget={onForget}
@@ -637,21 +637,21 @@ function Waiting(): React.ReactElement {
 }
 
 /** One pinned record as the list renders it. */
-function toHostView(record: KnownHostV1, online: boolean): HostView {
+function toBurrowView(record: KnownBurrowV1, online: boolean): BurrowView {
   return {
-    hostId: record.hostId,
-    label: record.label || record.hostId,
+    burrowId: record.burrowId,
+    label: record.label || record.burrowId,
     online,
     needsPairing: record.authorization.state !== 'paired',
   };
 }
 
 /** Splice a freshly paired record into the list without waiting for a re-read. */
-function withRecord(hosts: HostView[], record: KnownHostV1): HostView[] {
-  const view = toHostView(record, true);
-  const index = hosts.findIndex((host) => host.hostId === record.hostId);
-  if (index < 0) return [...hosts, view];
-  return hosts.map((host, at) => (at === index ? view : host));
+function withRecord(burrows: BurrowView[], record: KnownBurrowV1): BurrowView[] {
+  const view = toBurrowView(record, true);
+  const index = burrows.findIndex((burrow) => burrow.burrowId === record.burrowId);
+  if (index < 0) return [...burrows, view];
+  return burrows.map((burrow, at) => (at === index ? view : burrow));
 }
 
 /**
@@ -669,7 +669,7 @@ function hasPriorUseNow(client: PocketClient, passkeyAlreadyRegistered: boolean)
  * The whole of what a runtime without X25519 gets. **No action, and no remote
  * operation behind it**: every ceremony this app has needs the primitive this
  * browser lacks, so an offer here would be one that cannot work
- * (`docs/specs/remote-security-model.md` → Host identity).
+ * (`docs/specs/remote-security-model.md` → Burrow identity).
  */
 export function UnsupportedBrowser(): React.ReactElement {
   return (
@@ -742,15 +742,15 @@ export function PairingCodeView({
  * (`docs/specs/pocket-app.md` → The seam: the remote session is a platform
  * adapter).
  */
-export const HOSTS_TITLE = 'Computers';
+export const BURROWS_TITLE = 'Computers';
 
-/** The connected Pocket shell: host navigation chrome over the remote wall. */
+/** The connected Pocket shell: burrow navigation chrome over the remote wall. */
 export function ConnectedView({
-  host,
+  burrow,
   adapter,
   onLeave,
 }: {
-  host: HostView;
+  burrow: BurrowView;
   adapter: RemotePtyAdapter;
   onLeave: () => void;
 }): React.ReactElement {
@@ -758,11 +758,11 @@ export function ConnectedView({
     <div className={PK.app}>
       <header className={PK.header}>
         <button type="button" className={pkButton({ tone: 'ghost', size: 'sm' })} onClick={onLeave}>
-          ‹ {HOSTS_TITLE}
+          ‹ {BURROWS_TITLE}
         </button>
-        <h1 className={PK.headerTitle}>{host.label || host.hostId}</h1>
+        <h1 className={PK.headerTitle}>{burrow.label || burrow.burrowId}</h1>
       </header>
-      <div className={PK.wallHost}>
+      <div className={PK.wallBurrow}>
         <PocketWall adapter={adapter} />
       </div>
     </div>
@@ -920,7 +920,7 @@ const INSTALL_RITUAL = (
 
 /**
  * iOS, in a browser tab, on the screen about to mint this Client's identity.
- * The installed app is a separate storage partition, so a passkey and per-Host
+ * The installed app is a separate storage partition, so a passkey and per-Burrow
  * key created in the tab are not the ones it will hold — setting up here means
  * doing all of it, the laptop's pairing approval included, a second time.
  *
@@ -929,7 +929,7 @@ const INSTALL_RITUAL = (
  * terminal.
  *
  * Push notifications are deliberately not mentioned: whether they work at all
- * depends on the Relay's push config, which {@link InstallNotice} and the Hosts
+ * depends on the Relay's push config, which {@link InstallNotice} and the Burrows
  * view's push rows gate on. Identity is true regardless, and carries the notice.
  */
 function InstallFirstNotice(): React.ReactElement {
@@ -947,7 +947,7 @@ function InstallFirstNotice(): React.ReactElement {
   );
 }
 
-// --- HostsView -------------------------------------------------------------
+// --- BurrowsView -------------------------------------------------------------
 
 /**
  * The same advice on the surface that offers push notifications, for a tab that
@@ -1009,10 +1009,10 @@ export type PushNoticeState =
 /**
  * What the push card says, or `null` for nothing to say.
  *
- * **Push is asked for once per device, never once per Host.** The permission
+ * **Push is asked for once per device, never once per Burrow.** The permission
  * prompt and the `PushSubscription` belong to the whole service-worker scope;
- * only the Relay row is per (Host, device), and that is bookkeeping the user
- * has no reason to perform once per Host. So the paired Hosts are read as a set:
+ * only the Relay row is per (Burrow, device), and that is bookkeeping the user
+ * has no reason to perform once per Burrow. So the paired Burrows are read as a set:
  * one card offering Enable while any of them lacks a row, one quiet line once
  * they all have one.
  *
@@ -1020,25 +1020,25 @@ export type PushNoticeState =
  * on is the whole feature; the rendering half only reads it.
  */
 export function pushNoticeState({
-  pairedHostIds,
+  pairedBurrowIds,
   isPushSubscribed,
   availability,
   configStatus,
 }: {
-  pairedHostIds: readonly string[];
-  isPushSubscribed: (hostId: string) => boolean;
+  pairedBurrowIds: readonly string[];
+  isPushSubscribed: (burrowId: string) => boolean;
   /** Null until the browser has been asked; see the effect in `App`. */
   availability: PushAvailability | null;
   configStatus: PushConfigStatus;
 }): PushNoticeState | null {
   // Nothing to register against, and pairing is the step that comes first.
-  if (pairedHostIds.length === 0) return null;
+  if (pairedBurrowIds.length === 0) return null;
   // An unprobed browser is not a claim about anything, in either direction.
   if (availability === null) return null;
   // Outranks every browser state, a settled `on` included: a Relay that no
   // longer holds VAPID keys cannot deliver through the rows it still stores.
   if (configStatus === 'disabled') return { kind: 'blocked', reason: PUSH_SERVER_DISABLED };
-  if (pairedHostIds.every(isPushSubscribed)) return { kind: 'on' };
+  if (pairedBurrowIds.every(isPushSubscribed)) return { kind: 'on' };
   // `InstallNotice` is the push card for this state, and it is on screen
   // exactly when this branch is reached — a second card saying "see above"
   // would be the whole of its contribution.
@@ -1110,8 +1110,8 @@ function PushNotice({
   );
 }
 
-export function HostsView({
-  hosts,
+export function BurrowsView({
+  burrows,
   busy,
   error,
   isPushSubscribed,
@@ -1124,27 +1124,27 @@ export function HostsView({
   onEnablePush,
   onRetryPushConfig,
 }: {
-  /** The pinned records; a Host with no record is not one of these. */
-  hosts: HostView[];
+  /** The pinned records; a Burrow with no record is not one of these. */
+  burrows: BurrowView[];
   busy: string | null;
   error: string | null;
-  /** True only where this device holds a Relay push row for that Host. */
-  isPushSubscribed: (hostId: string) => boolean;
+  /** True only where this device holds a Relay push row for that Burrow. */
+  isPushSubscribed: (burrowId: string) => boolean;
   /** Null until the browser has been asked; see the effect in `App`. */
   pushState: PushAvailability | null;
   /** Whether the Relay's VAPID public key is already cached for a permission tap. */
   pushConfigStatus?: PushConfigStatus;
   onRefresh: () => void;
   onScan: () => void;
-  onConnect: (host: HostView) => void;
+  onConnect: (burrow: BurrowView) => void;
   /** Remove this phone's record for one computer, tombstoning its delivery id. */
-  onForget: (host: HostView) => void;
-  /** Registers every paired Host at once — see {@link pushNoticeState}. */
+  onForget: (burrow: BurrowView) => void;
+  /** Registers every paired Burrow at once — see {@link pushNoticeState}. */
   onEnablePush: () => void;
   onRetryPushConfig: () => void;
 }): React.ReactElement {
   const pushNotice = pushNoticeState({
-    pairedHostIds: hosts.filter((h) => !h.needsPairing).map((h) => h.hostId),
+    pairedBurrowIds: burrows.filter((h) => !h.needsPairing).map((h) => h.burrowId),
     isPushSubscribed,
     availability: pushState,
     configStatus: pushConfigStatus,
@@ -1152,7 +1152,7 @@ export function HostsView({
   return (
     <div className={PK.app}>
       <header className={PK.header}>
-        <h1 className={PK.headerTitle}>{HOSTS_TITLE}</h1>
+        <h1 className={PK.headerTitle}>{BURROWS_TITLE}</h1>
         <button
           type="button"
           className={pkButton({ tone: 'ghost', size: 'sm' })}
@@ -1178,31 +1178,31 @@ export function HostsView({
             onRetryConfig={onRetryPushConfig}
           />
         ) : null}
-        {hosts.length === 0 ? (
+        {burrows.length === 0 ? (
           <div className={PK.empty}>
             No computers paired yet. On a computer, open Settings → Remote control → Set up a
             phone, then scan the code.
           </div>
         ) : (
-          hosts.map((host) => {
-            // Push is device-wide to turn on but per-Host to hold, so the row
-            // carries the marker: it is the only thing that says *which* Host
+          burrows.map((burrow) => {
+            // Push is device-wide to turn on but per-Burrow to hold, so the row
+            // carries the marker: it is the only thing that says *which* Burrow
             // the card above is still offering to register.
             const status = [
-              !host.online ? 'Offline' : host.needsPairing ? 'Pairing needed' : 'Paired',
-              ...(!host.needsPairing && isPushSubscribed(host.hostId) ? ['Push on'] : []),
+              !burrow.online ? 'Offline' : burrow.needsPairing ? 'Pairing needed' : 'Paired',
+              ...(!burrow.needsPairing && isPushSubscribed(burrow.burrowId) ? ['Push on'] : []),
             ].join(' · ');
             // The one-action invariant, stated once: which verb this row offers
             // and what its button says, on a single split. The local record is
-            // what picks it — the Host is never asked, because an authenticated
+            // what picks it — the Burrow is never asked, because an authenticated
             // `pairing-required` is the only thing that can move a row here.
-            const action = host.needsPairing
+            const action = burrow.needsPairing
               ? { label: busy === 'pair' ? '…' : 'Pair again', run: () => onScan() }
-              : { label: busy === 'connect' ? '…' : 'Connect', run: () => onConnect(host) };
+              : { label: busy === 'connect' ? '…' : 'Connect', run: () => onConnect(burrow) };
             return (
-              <div key={host.hostId} className={clsx(PK.row, !host.online && PK.rowOffline)}>
+              <div key={burrow.burrowId} className={clsx(PK.row, !burrow.online && PK.rowOffline)}>
                 <div className={PK.rowMain}>
-                  <div className={PK.rowTitle}>{host.label || host.hostId}</div>
+                  <div className={PK.rowTitle}>{burrow.label || burrow.burrowId}</div>
                   <div className={PK.rowSecondary}>{status}</div>
                 </div>
                 <div className={PK.rowActions}>
@@ -1210,9 +1210,9 @@ export function HostsView({
                     type="button"
                     className={pkButton({ tone: 'primary', size: 'sm' })}
                     // Pairing again starts at the scanner, which needs no relay
-                    // socket and no online Host — the code on the computer's
+                    // socket and no online Burrow — the code on the computer's
                     // screen is what says whether it is there.
-                    disabled={busy !== null || (!host.online && !host.needsPairing)}
+                    disabled={busy !== null || (!burrow.online && !burrow.needsPairing)}
                     onClick={action.run}
                   >
                     {action.label}
@@ -1224,8 +1224,8 @@ export function HostsView({
                     type="button"
                     className={pkButton({ tone: 'outline', size: 'sm' })}
                     disabled={busy !== null}
-                    aria-label={`Remove ${host.label || host.hostId}`}
-                    onClick={() => onForget(host)}
+                    aria-label={`Remove ${burrow.label || burrow.burrowId}`}
+                    onClick={() => onForget(burrow)}
                   >
                     {busy === 'forget' ? '…' : 'Remove'}
                   </button>

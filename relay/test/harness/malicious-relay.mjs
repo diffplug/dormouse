@@ -8,11 +8,11 @@
  * may drop, reorder, duplicate, modify, or invent one on either egress leg.
  *
  * `guards: false` removes the relay's own `ct` / `id` / shape checks, which are
- * defense in depth and nothing more: a Host runs the same guard on arrival, so
- * a guard-less relay must weaken no Host bound
- * (`docs/specs/remote-security-model.md` -> Host bounds).
+ * defense in depth and nothing more: a Burrow runs the same guard on arrival, so
+ * a guard-less relay must weaken no Burrow bound
+ * (`docs/specs/remote-security-model.md` -> Burrow bounds).
  *
- * Hand `clientSocket` to a `FakeClient` and `hostSocket` to a `FakeHost`; both
+ * Hand `clientSocket` to a `FakeClient` and `burrowSocket` to a `FakeBurrow`; both
  * accept an injected socket for exactly this.
  */
 
@@ -23,15 +23,15 @@ import { toBase64Url } from 'remote-lib-common';
 import { RelayHub } from '../../dist/relay.js';
 import { memorySocketPair } from './memory-socket.mjs';
 
-export function createMaliciousRelay({ hostId, guards = true }) {
+export function createMaliciousRelay({ burrowId, guards = true }) {
   const [clientSocket, relayClientEnd] = memorySocketPair();
-  const [hostSocket, relayHostEnd] = memorySocketPair();
+  const [burrowSocket, relayBurrowEnd] = memorySocketPair();
 
   /** Every frame this relay handled, in order: `{ from, to, frame }`. */
   const seen = [];
   const relay = {
     clientSocket,
-    hostSocket,
+    burrowSocket,
     seen,
     /**
      * What actually leaves the relay: `(frame, to) => frame[]`. Return `[]` to
@@ -49,13 +49,13 @@ export function createMaliciousRelay({ hostId, guards = true }) {
     },
     close() {
       relayClientEnd.close();
-      relayHostEnd.close();
+      relayBurrowEnd.close();
     },
   };
 
   /** Put one frame on a peer's socket, after the tamper hook has had it. */
   function deliver(to, frame) {
-    const end = to === 'client' ? relayClientEnd : relayHostEnd;
+    const end = to === 'client' ? relayClientEnd : relayBurrowEnd;
     const outgoing = relay.tamper ? relay.tamper(frame, to) : [frame];
     for (const one of outgoing) {
       seen.push({ from: 'relay', to, frame: one });
@@ -68,19 +68,19 @@ export function createMaliciousRelay({ hostId, guards = true }) {
   }
 
   const toClient = { send: (data) => deliver('client', JSON.parse(data)), close: () => {} };
-  const toHost = { send: (data) => deliver('host', JSON.parse(data)), close: () => {} };
+  const toBurrow = { send: (data) => deliver('burrow', JSON.parse(data)), close: () => {} };
 
   if (guards) {
     const hub = new RelayHub();
-    const host = hub.registerHost(hostId, toHost);
+    const burrow = hub.registerBurrow(burrowId, toBurrow);
     const client = hub.registerClient(toClient, { expiresAt: Number.POSITIVE_INFINITY });
     relayClientEnd.addEventListener('message', (ev) => {
       seen.push({ from: 'client', to: 'relay', frame: JSON.parse(ev.data) });
       hub.onClientFrame(client, ev.data);
     });
-    relayHostEnd.addEventListener('message', (ev) => {
-      seen.push({ from: 'host', to: 'relay', frame: JSON.parse(ev.data) });
-      hub.onHostFrame(host, ev.data);
+    relayBurrowEnd.addEventListener('message', (ev) => {
+      seen.push({ from: 'burrow', to: 'relay', frame: JSON.parse(ev.data) });
+      hub.onBurrowFrame(burrow, ev.data);
     });
     relay.clientId = client.clientId;
     return relay;
@@ -96,17 +96,17 @@ export function createMaliciousRelay({ hostId, guards = true }) {
     if (!frame) return;
     seen.push({ from: 'client', to: 'relay', frame });
     if (frame.t !== 'e2e') return;
-    if (frame.step === 'init') bound = frame.hostId;
-    else if (bound !== frame.hostId) return;
-    deliver('host', { ...frame, clientId });
+    if (frame.step === 'init') bound = frame.burrowId;
+    else if (bound !== frame.burrowId) return;
+    deliver('burrow', { ...frame, clientId });
   });
-  relayHostEnd.addEventListener('message', (ev) => {
+  relayBurrowEnd.addEventListener('message', (ev) => {
     const frame = safeParse(ev.data);
     if (!frame) return;
-    seen.push({ from: 'host', to: 'relay', frame });
+    seen.push({ from: 'burrow', to: 'relay', frame });
     if (frame.t !== 'e2e' || frame.clientId !== clientId) return;
     const { clientId: _stripped, ...rest } = frame;
-    deliver('client', { ...rest, hostId });
+    deliver('client', { ...rest, burrowId });
   });
   return relay;
 }

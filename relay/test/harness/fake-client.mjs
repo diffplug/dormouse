@@ -2,22 +2,22 @@
  * A headless Client (Dormouse Pocket) speaking only the `e2e` relay envelope —
  * the initiator half of the harness in
  * `docs/specs/remote-security-model.md` -> `## Future` -> **Scope:
- * e2e-client-host**. Deliberately `PocketClient`-free: it is a bare
+ * e2e-client-burrow**. Deliberately `PocketClient`-free: it is a bare
  * `/ws/client` socket plus the real ceremonies, so the suite tests the wire
  * rather than a production class that does not send these frames yet.
  *
  * It runs both ceremonies end to end against a live Relay: {@link pair} scans
- * a Host invitation, runs IK against its one-use key, obtains its presence
+ * a Burrow invitation, runs IK against its one-use key, obtains its presence
  * proof through the **real** `/api/reauth/begin` + `/finish` routes, and
  * decrypts the `PairingOutcomeV1`; {@link connect} does the same against the
- * pinned Host static and then speaks protocol-v1 inside the session.
+ * pinned Burrow static and then speaks protocol-v1 inside the session.
  *
  * {@link open}, {@link sendCiphertext} and the `tamper` hook stay as the
  * low-level door for the transport cases in `relay/test/e2e-relay.test.mjs`.
  *
- * Constructor: `{ relayUrl, sessionToken, hostId, staticKeyPair,
- * hostStaticPublicKey, origin, rpId, label }`. `relayUrl` may be
- * `http(s)://…` or `ws(s)://…`. Together with the Host's, this peer's `frames`
+ * Constructor: `{ relayUrl, sessionToken, burrowId, staticKeyPair,
+ * burrowStaticPublicKey, origin, rpId, label }`. `relayUrl` may be
+ * `http(s)://…` or `ws(s)://…`. Together with the Burrow's, this peer's `frames`
  * and `sent` are exactly what the relay saw, which is what the opacity
  * assertions read.
  */
@@ -56,26 +56,26 @@ export class FakeClient extends EventEmitter {
   constructor({
     relayUrl,
     sessionToken,
-    hostId,
+    burrowId,
     staticKeyPair,
-    hostStaticPublicKey,
+    burrowStaticPublicKey,
     origin,
     rpId,
     label = 'Fake Phone',
     socket,
   }) {
     super();
-    this.hostId = hostId;
+    this.burrowId = burrowId;
     this.sessionToken = sessionToken;
     this.staticKeyPair = staticKeyPair;
-    this.hostStaticPublicKey = hostStaticPublicKey;
+    this.burrowStaticPublicKey = burrowStaticPublicKey;
     this.origin = origin;
     this.rpId = rpId;
     this.label = label;
-    /** The Host static this Client pinned at pairing, base64url. */
+    /** The Burrow static this Client pinned at pairing, base64url. */
     this.pin = null;
-    /** What a `KnownHostV1` keeps after a successful pairing. */
-    this.knownHost = null;
+    /** What a `KnownBurrowV1` keeps after a successful pairing. */
+    this.knownBurrow = null;
     /** The live ceremony, once {@link open} / {@link pair} / {@link connect} completes. */
     this.kind = null;
     this.id = null;
@@ -136,10 +136,10 @@ export class FakeClient extends EventEmitter {
   async open({
     kind = 'connection',
     id = newE2eId(),
-    hostId = this.hostId,
+    burrowId = this.burrowId,
     staticKeyPair = this.staticKeyPair,
-    remoteStaticPublicKey = this.hostStaticPublicKey,
-    prologue = e2ePrologueFor({ kind, hostId, id }),
+    remoteStaticPublicKey = this.burrowStaticPublicKey,
+    prologue = e2ePrologueFor({ kind, burrowId, id }),
     tamper,
     awaitResponse = true,
   } = {}) {
@@ -153,7 +153,7 @@ export class FakeClient extends EventEmitter {
     this.id = id;
     this.sendFrame({
       t: 'e2e',
-      hostId,
+      burrowId,
       kind,
       id,
       step: 'init',
@@ -174,7 +174,7 @@ export class FakeClient extends EventEmitter {
   sendCiphertext(ciphertext, { kind = this.kind, id = this.id } = {}) {
     this.sendFrame({
       t: 'e2e',
-      hostId: this.hostId,
+      burrowId: this.burrowId,
       kind,
       id,
       step: 'transport',
@@ -208,9 +208,9 @@ export class FakeClient extends EventEmitter {
    * The proof both ceremonies carry, through the real routes: `begin` mints the
    * nonce and derives the challenge from the binding, the authenticator signs
    * it, and `finish` verifies. The Relay's success authorizes nothing — the
-   * Host recomputes the same challenge and verifies the same assertion — so the
+   * Burrow recomputes the same challenge and verifies the same assertion — so the
    * `finish` call is here because a Client makes it, not because it proves
-   * anything to the Host.
+   * anything to the Burrow.
    */
   async presenceProof({ binding, accountId = SELFHOST_ACCOUNT_ID, authenticator }) {
     const begin = await this.#post(API_ROUTES.reauthBegin, { binding });
@@ -258,7 +258,7 @@ export class FakeClient extends EventEmitter {
     this.id = invitation.inviteId;
     this.sendFrame({
       t: 'e2e',
-      hostId: invitation.hostId,
+      burrowId: invitation.burrowId,
       kind: 'pairing',
       id: invitation.inviteId,
       step: 'init',
@@ -300,7 +300,7 @@ export class FakeClient extends EventEmitter {
     });
     const bound = binding ?? {
       kind: 'pairing',
-      hostId: invitation.hostId,
+      burrowId: invitation.burrowId,
       handshakeHash,
       passkeyCredentialId: authenticator.credentialId,
     };
@@ -314,9 +314,9 @@ export class FakeClient extends EventEmitter {
     if (outcome?.ok === true) {
       // A changed static under an existing pin is a terminal security error on
       // the real Client; here it is simply the pin this Client now holds.
-      this.pin = outcome.hostStaticPublicKey;
-      this.knownHost = {
-        hostId: invitation.hostId,
+      this.pin = outcome.burrowStaticPublicKey;
+      this.knownBurrow = {
+        burrowId: invitation.burrowId,
         deliveryId: outcome.deliveryId,
         accountId: outcome.accountId,
         passkeyCredentialId: outcome.passkeyCredentialId,
@@ -328,18 +328,18 @@ export class FakeClient extends EventEmitter {
 
   // --- Connection -----------------------------------------------------------
 
-  /** IK against the pinned Host static; message 2 carries the Host challenge. */
+  /** IK against the pinned Burrow static; message 2 carries the Burrow challenge. */
   async openConnection({
     connectionId = newE2eId(),
-    hostStaticPublicKey = this.pin ?? this.hostStaticPublicKey,
+    burrowStaticPublicKey = this.pin ?? this.burrowStaticPublicKey,
     staticKeyPair = this.staticKeyPair,
   } = {}) {
     const remoteStaticPublicKey =
-      typeof hostStaticPublicKey === 'string'
-        ? fromBase64Url(hostStaticPublicKey)
-        : hostStaticPublicKey;
+      typeof burrowStaticPublicKey === 'string'
+        ? fromBase64Url(burrowStaticPublicKey)
+        : burrowStaticPublicKey;
     const initiator = await createNoiseInitiator({
-      prologue: e2eConnectionPrologue(this.hostId, connectionId),
+      prologue: e2eConnectionPrologue(this.burrowId, connectionId),
       staticKeyPair,
       remoteStaticPublicKey,
     });
@@ -348,7 +348,7 @@ export class FakeClient extends EventEmitter {
     this.id = connectionId;
     this.sendFrame({
       t: 'e2e',
-      hostId: this.hostId,
+      burrowId: this.burrowId,
       kind: 'connection',
       id: connectionId,
       step: 'init',
@@ -358,37 +358,37 @@ export class FakeClient extends EventEmitter {
       (f) =>
         f.t === 'e2e' && f.kind === 'connection' && f.id === connectionId && f.step === 'response',
     );
-    const hostChallenge = await initiator.readMessage(fromBase64Url(response.ct));
+    const burrowChallenge = await initiator.readMessage(fromBase64Url(response.ct));
     this.noise = initiator.session;
     this.session = new NoiseTransportSession(initiator.session);
     return {
       session: this.session,
       connectionId,
-      hostChallenge: toBase64Url(hostChallenge),
+      burrowChallenge: toBase64Url(burrowChallenge),
       handshakeHash: toBase64Url(this.session.handshakeHash),
     };
   }
 
   /**
-   * The whole connection ceremony. `record` is this Client's own `KnownHostV1`
-   * (what {@link pair} returned), used only for its `accountId`; the Host
+   * The whole connection ceremony. `record` is this Client's own `KnownBurrowV1`
+   * (what {@link pair} returned), used only for its `accountId`; the Burrow
    * static comes from the pin unless one is supplied.
    */
   async connect({
-    record = this.knownHost,
+    record = this.knownBurrow,
     authenticator,
     accountId = record?.accountId ?? SELFHOST_ACCOUNT_ID,
-    hostStaticPublicKey,
+    burrowStaticPublicKey,
     staticKeyPair,
     connectionId,
     binding,
   } = {}) {
-    const opened = await this.openConnection({ connectionId, hostStaticPublicKey, staticKeyPair });
+    const opened = await this.openConnection({ connectionId, burrowStaticPublicKey, staticKeyPair });
     const bound = binding ?? {
       kind: 'connection',
-      hostId: this.hostId,
+      burrowId: this.burrowId,
       connectionId: opened.connectionId,
-      hostChallenge: opened.hostChallenge,
+      burrowChallenge: opened.burrowChallenge,
       handshakeHash: opened.handshakeHash,
       passkeyCredentialId: authenticator.credentialId,
     };
@@ -403,7 +403,7 @@ export class FakeClient extends EventEmitter {
 
   /**
    * One protocol-v1 request/response inside the established session. Anything
-   * that is not the awaited response — an event the Host pushed first — is kept
+   * that is not the awaited response — an event the Burrow pushed first — is kept
    * on {@link appMessages} rather than dropped.
    */
   async remoteRequest(request) {

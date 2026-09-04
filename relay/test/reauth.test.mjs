@@ -5,7 +5,7 @@
  *
  * The challenge is derived from a kind-tagged binding rather than random, which
  * is what makes an assertion produced for one pairing or connection useless in
- * any other. The Relay is not the authority here — the Host recomputes the
+ * any other. The Relay is not the authority here — the Burrow recomputes the
  * same challenge and verifies the same assertion — so these cases are about the
  * one thing the Relay *is* responsible for: minting a nonce it can be held to,
  * spending it once, and never extending anything in the process.
@@ -35,7 +35,7 @@ function random32() {
 function pairingBinding(authenticator, overrides = {}) {
   return {
     kind: 'pairing',
-    hostId: 'host-1',
+    burrowId: 'burrow-1',
     handshakeHash: random32(),
     passkeyCredentialId: authenticator.credentialId,
     ...overrides,
@@ -77,13 +77,13 @@ test('begin answers the challenge derived from the binding, and only that creden
   const res = await begin(app, sessionToken, { binding });
   assert.equal(res.status, 200);
   const body = await res.json();
-  // Independently recomputed: the Host runs exactly this to check the proof, so
+  // Independently recomputed: the Burrow runs exactly this to check the proof, so
   // a Relay that derived it differently would deny every ceremony.
   assert.equal(body.challenge, await presenceChallenge(binding, body.relayNonce));
   assert.equal(body.rpId, RP_ID);
   // The one credential the ceremony may assert with. A `get()` that could
   // answer with any of the account's passkeys would let a synced credential the
-  // Host never paired satisfy a proof bound to one it did.
+  // Burrow never paired satisfy a proof bound to one it did.
   assert.deepEqual(body.allowCredentials, [authenticator.credentialId]);
   assert.match(body.relayNonce, /^[A-Za-z0-9_-]{43}$/, '32 bytes, base64url');
 });
@@ -105,13 +105,13 @@ test('begin refuses a malformed binding rather than deriving something from it',
   const { authenticator, sessionToken } = await ownerSession(app);
 
   const malformed = [
-    // Not a kind at all, and a connection binding missing its Host challenge:
+    // Not a kind at all, and a connection binding missing its Burrow challenge:
     // the closed shape is what keeps unauthenticated data out of a structure
-    // the Host has just verified.
-    { kind: 'nonsense', hostId: 'h', handshakeHash: random32(), passkeyCredentialId: 'c' },
+    // the Burrow has just verified.
+    { kind: 'nonsense', burrowId: 'h', handshakeHash: random32(), passkeyCredentialId: 'c' },
     {
       kind: 'connection',
-      hostId: 'h',
+      burrowId: 'h',
       connectionId: random32(),
       handshakeHash: random32(),
       passkeyCredentialId: authenticator.credentialId,
@@ -147,7 +147,7 @@ test('finish verifies the assertion, extends nothing, and spends the nonce', asy
   assert.deepEqual(await res.json(), { verifiedAt: clock.now() });
 
   // The session is authentication-plane only: this exchange is not reusable
-  // proof of presence for a Host, so it does not extend the token's life.
+  // proof of presence for a Burrow, so it does not extend the token's life.
   const after = sessions.validate(sessionToken);
   assert.equal(after.expiresAt, before.expiresAt);
 
@@ -166,7 +166,7 @@ test('finish refuses a nonce past its TTL, and one that was never minted', async
   const { authenticator, sessionToken } = await ownerSession(app);
   const proof = await proveFor(app, sessionToken, authenticator, pairingBinding(authenticator));
 
-  // Two minutes, like a Host challenge: both bound one ceremony's prompt.
+  // Two minutes, like a Burrow challenge: both bound one ceremony's prompt.
   clock.advance(2 * 60 * 1000 + 1);
   const late = await finish(app, sessionToken, {
     relayNonce: proof.relayNonce,
@@ -185,7 +185,7 @@ test('finish refuses an assertion by a credential the binding did not name', asy
   const { app } = await freshApp();
   const { authenticator, sessionToken } = await ownerSession(app);
   // A second registered passkey: on the account, so the stored key exists, but
-  // not the one this ceremony bound — and the Host will check the ACL against
+  // not the one this ceremony bound — and the Burrow will check the ACL against
   // the bound identity, not against "some passkey of this account".
   const other = await newAuthenticator();
   assert.equal((await register(app, other)).status, 200);

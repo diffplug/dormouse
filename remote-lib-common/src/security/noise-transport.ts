@@ -69,17 +69,17 @@ export class NoiseTransportError extends NoiseError {
 // Prologues
 
 /**
- * The connection prologue: the E2E version, the ceremony kind, the `hostId`,
+ * The connection prologue: the E2E version, the ceremony kind, the `burrowId`,
  * and this connection's id. Both sides build it from the same routing values
- * they put on the envelope, so a handshake replayed against another Host, id,
+ * they put on the envelope, so a handshake replayed against another Burrow, id,
  * or ceremony fails at message 1.
  */
-export function e2eConnectionPrologue(hostId: string, connectionId: string): Uint8Array {
-  return e2ePrologue('connection', hostId, [connectionId]);
+export function e2eConnectionPrologue(burrowId: string, connectionId: string): Uint8Array {
+  return e2ePrologue('connection', burrowId, [connectionId]);
 }
 
 /**
- * The pairing prologue: the version, the kind, the `hostId`, and every
+ * The pairing prologue: the version, the kind, the `burrowId`, and every
  * invitation field in the order the QR carries them.
  *
  * Positional, and the order is `pairingInvitationFields`' to say
@@ -87,23 +87,23 @@ export function e2eConnectionPrologue(hostId: string, connectionId: string): Uin
  * and the grammar it binds stay in one file each.
  */
 export function e2ePairingPrologue(
-  hostId: string,
+  burrowId: string,
   invitationFields: readonly string[],
 ): Uint8Array {
-  return e2ePrologue('pairing', hostId, invitationFields);
+  return e2ePrologue('pairing', burrowId, invitationFields);
 }
 
 // `kind` is the `E2eKind` of the envelope this transcript binds; spelled as a
 // literal union because `remote/wire.ts` imports this layer, not the reverse.
 function e2ePrologue(
   kind: 'connection' | 'pairing',
-  hostId: string,
+  burrowId: string,
   extra: readonly string[],
 ): Uint8Array {
   return lengthPrefixedConcat([
     utf8Encode(E2E_PROLOGUE_DOMAIN),
     utf8Encode(kind),
-    utf8Encode(hostId),
+    utf8Encode(burrowId),
     ...extra.map((field) => utf8Encode(field)),
   ]);
 }

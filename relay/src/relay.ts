@@ -1,24 +1,24 @@
 /**
  * In-memory relay hub; `docs/specs/relay.md` → "Relay" owns its frame gates,
- * Host authority, replacement, and routing contracts.
+ * Burrow authority, replacement, and routing contracts.
  */
 
 import { randomBytes } from 'node:crypto';
 
 import {
-  WS_CLOSE_HOST_REPLACED,
-  WS_CLOSE_HOST_REPLACED_REASON,
-  WS_CLOSE_HOST_REVOKED,
-  WS_CLOSE_HOST_REVOKED_REASON,
+  WS_CLOSE_BURROW_REPLACED,
+  WS_CLOSE_BURROW_REPLACED_REASON,
+  WS_CLOSE_BURROW_REVOKED,
+  WS_CLOSE_BURROW_REVOKED_REASON,
   isE2eClientFrame,
-  isE2eHostFrame,
+  isE2eBurrowFrame,
   toBase64Url,
 } from 'remote-lib-common';
 import type {
   ClientFrame,
-  HostFrame,
+  BurrowFrame,
   RelayToClientFrame,
-  RelayToHostFrame,
+  RelayToBurrowFrame,
 } from 'remote-lib-common';
 
 /**
@@ -31,9 +31,9 @@ export interface RelaySocket {
   close(code?: number, reason?: string): void;
 }
 
-/** A live Host socket. */
-export interface HostConn {
-  readonly hostId: string;
+/** A live Burrow socket. */
+export interface BurrowConn {
+  readonly burrowId: string;
   readonly socket: RelaySocket;
 }
 
@@ -46,19 +46,19 @@ export interface RelaySession {
   readonly expiresAt: number;
 }
 
-/** A live Client socket and its (single) relationship to a Host. */
+/** A live Client socket and its (single) relationship to a Burrow. */
 export interface ClientConn {
   readonly clientId: string;
   readonly socket: RelaySocket;
   /**
    * The session that authorized the upgrade. Held so it can be re-checked: the
    * upgrade gate runs once and a socket outlives it, exactly the reason
-   * `sweepRevokedHosts` exists for the other socket kind
+   * `sweepRevokedBurrows` exists for the other socket kind
    * (`docs/specs/relay.md` -> Relay).
    */
   readonly session: RelaySession;
-  /** The Host this client is currently talking to, or `null` if unbound. */
-  hostId: string | null;
+  /** The Burrow this client is currently talking to, or `null` if unbound. */
+  burrowId: string | null;
 }
 
 /**
@@ -83,87 +83,87 @@ export const WS_CLOSE_UNAUTHORIZED = 1008;
 export const WS_CLOSE_UNAUTHORIZED_REASON = 'unauthorized';
 
 export class RelayHub {
-  readonly #hosts = new Map<string, HostConn>();
+  readonly #burrows = new Map<string, BurrowConn>();
   readonly #clients = new Map<string, ClientConn>();
 
-  /** True while a socket for `hostId` is connected — drives `GET /api/hosts` presence. */
-  isHostOnline(hostId: string): boolean {
-    return this.#hosts.has(hostId);
+  /** True while a socket for `burrowId` is connected — drives `GET /api/burrows` presence. */
+  isBurrowOnline(burrowId: string): boolean {
+    return this.#burrows.has(burrowId);
   }
 
-  /** Every `hostId` with a live socket right now. */
-  onlineHostIds(): string[] {
-    return [...this.#hosts.keys()];
+  /** Every `burrowId` with a live socket right now. */
+  onlineBurrowIds(): string[] {
+    return [...this.#burrows.keys()];
   }
 
   /**
-   * Evict a revoked Host: close its socket and drop its clients, exactly as a
+   * Evict a revoked Burrow: close its socket and drop its clients, exactly as a
    * disconnect would. `createApp`'s sweep is the one caller
    * (`docs/specs/relay.md` -> Guardrails).
    */
-  closeHost(hostId: string): boolean {
-    const conn = this.#hosts.get(hostId);
+  closeBurrow(burrowId: string): boolean {
+    const conn = this.#burrows.get(burrowId);
     if (!conn) return false;
-    this.unregisterHost(conn);
-    safeClose(conn.socket, WS_CLOSE_HOST_REVOKED, WS_CLOSE_HOST_REVOKED_REASON);
+    this.unregisterBurrow(conn);
+    safeClose(conn.socket, WS_CLOSE_BURROW_REVOKED, WS_CLOSE_BURROW_REVOKED_REASON);
     return true;
   }
 
-  // --- Host lifecycle -------------------------------------------------------
+  // --- Burrow lifecycle -------------------------------------------------------
 
   /**
-   * Register a freshly-opened Host socket. Only one socket may own a `hostId`,
+   * Register a freshly-opened Burrow socket. Only one socket may own a `burrowId`,
    * so an existing one is displaced and closed; the displaced socket's `close`
-   * event is ignored by {@link unregisterHost} because the map already points
+   * event is ignored by {@link unregisterBurrow} because the map already points
    * at the new connection (a generation guard).
    *
-   * A replacement also drops every Client bound to the OLD Host process: the
+   * A replacement also drops every Client bound to the OLD Burrow process: the
    * new process has a fresh ACL and no memory of them, so their in-flight
    * frames must not keep flowing to it under a binding it never made. Handling
    * this on disconnect alone is not enough; because the displaced socket's
    * `close` is a no-op here, the drop has to happen at replacement time too.
    *
-   * The eviction is announced with {@link WS_CLOSE_HOST_REPLACED} rather than a
-   * plain close so the evicted Host can tell it apart from a network drop: it
+   * The eviction is announced with {@link WS_CLOSE_BURROW_REPLACED} rather than a
+   * plain close so the evicted Burrow can tell it apart from a network drop: it
    * stands down on this code instead of backing off and reconnecting, which
    * would evict the replacement and start an endless swap.
    */
-  registerHost(hostId: string, socket: RelaySocket): HostConn {
-    const conn: HostConn = { hostId, socket };
-    const existing = this.#hosts.get(hostId);
-    this.#hosts.set(hostId, conn);
+  registerBurrow(burrowId: string, socket: RelaySocket): BurrowConn {
+    const conn: BurrowConn = { burrowId, socket };
+    const existing = this.#burrows.get(burrowId);
+    this.#burrows.set(burrowId, conn);
     if (existing) {
-      this.#dropClientsOf(hostId);
-      safeClose(existing.socket, WS_CLOSE_HOST_REPLACED, WS_CLOSE_HOST_REPLACED_REASON);
+      this.#dropClientsOf(burrowId);
+      safeClose(existing.socket, WS_CLOSE_BURROW_REPLACED, WS_CLOSE_BURROW_REPLACED_REASON);
     }
     return conn;
   }
 
-  /** Handle one raw frame from a Host socket. Unknown/malformed frames are ignored. */
-  onHostFrame(host: HostConn, raw: string): void {
-    // Only the socket the map points at speaks for a hostId: a socket displaced
-    // by registerHost can still deliver queued frames, and treating them as
-    // current would carry ciphertext from the dead host process into a binding
+  /** Handle one raw frame from a Burrow socket. Unknown/malformed frames are ignored. */
+  onBurrowFrame(burrow: BurrowConn, raw: string): void {
+    // Only the socket the map points at speaks for a burrowId: a socket displaced
+    // by registerBurrow can still deliver queued frames, and treating them as
+    // current would carry ciphertext from the dead burrow process into a binding
     // the replacement never made.
-    if (this.#hosts.get(host.hostId) !== host) return;
-    const frame = parseFrame<HostFrame>(raw);
+    if (this.#burrows.get(burrow.burrowId) !== burrow) return;
+    const frame = parseFrame<BurrowFrame>(raw);
     // The shape guard bounds `clientId` before it is used as a map key, and the
     // ciphertext before it is copied onto another socket.
-    if (!frame || !isE2eHostFrame(frame)) return;
-    // Every host frame addresses a specific client; if it has already gone,
+    if (!frame || !isE2eBurrowFrame(frame)) return;
+    // Every burrow frame addresses a specific client; if it has already gone,
     // there is nothing to route.
     const client = this.#clients.get(frame.clientId);
     if (!client) return;
-    // Host replies are only meaningful while the client is still bound to that
-    // host. A client socket may leave host A for host B before A answers; late
+    // Burrow replies are only meaningful while the client is still bound to that
+    // burrow. A client socket may leave burrow A for burrow B before A answers; late
     // frames from A must not reach the active client.
-    if (client.hostId !== host.hostId) return;
-    // No `authorized` gate: the relay never learns whether the Host authorized
+    if (client.burrowId !== burrow.burrowId) return;
+    // No `authorized` gate: the relay never learns whether the Burrow authorized
     // anything, so the binding checked above is the whole routing rule
     // (relay.md -> Relay).
     this.#toClient(client, {
       t: 'e2e',
-      hostId: host.hostId,
+      burrowId: burrow.burrowId,
       kind: frame.kind,
       id: frame.id,
       step: frame.step,
@@ -172,26 +172,26 @@ export class RelayHub {
   }
 
   /**
-   * Tear down a Host socket. Guarded so a socket displaced by
-   * {@link registerHost} is a no-op. Its clients are told `host-gone` and their
+   * Tear down a Burrow socket. Guarded so a socket displaced by
+   * {@link registerBurrow} is a no-op. Its clients are told `burrow-gone` and their
    * bindings cleared (no resume protocol — they reconnect).
    */
-  unregisterHost(host: HostConn): void {
-    if (this.#hosts.get(host.hostId) !== host) return; // already replaced
-    this.#hosts.delete(host.hostId);
-    this.#dropClientsOf(host.hostId);
+  unregisterBurrow(burrow: BurrowConn): void {
+    if (this.#burrows.get(burrow.burrowId) !== burrow) return; // already replaced
+    this.#burrows.delete(burrow.burrowId);
+    this.#dropClientsOf(burrow.burrowId);
   }
 
   /**
-   * Tell every client bound to `hostId` its Host is gone and clear the binding,
-   * so nothing can flow to a Host that is no longer the one it handshook with.
-   * Used on both Host disconnect and Host replacement.
+   * Tell every client bound to `burrowId` its Burrow is gone and clear the binding,
+   * so nothing can flow to a Burrow that is no longer the one it handshook with.
+   * Used on both Burrow disconnect and Burrow replacement.
    */
-  #dropClientsOf(hostId: string): void {
+  #dropClientsOf(burrowId: string): void {
     for (const client of this.#clients.values()) {
-      if (client.hostId === hostId) {
-        this.#toClient(client, { t: 'host-gone' });
-        client.hostId = null;
+      if (client.burrowId === burrowId) {
+        this.#toClient(client, { t: 'burrow-gone' });
+        client.burrowId = null;
       }
     }
   }
@@ -215,14 +215,14 @@ export class RelayHub {
   registerClient(socket: RelaySocket, session: RelaySession): ClientConn | null {
     if (this.#clients.size >= MAX_RELAY_CLIENT_SOCKETS) return null;
     const clientId = toBase64Url(randomBytes(16));
-    const conn: ClientConn = { clientId, socket, session, hostId: null };
+    const conn: ClientConn = { clientId, socket, session, burrowId: null };
     this.#clients.set(clientId, conn);
     return conn;
   }
 
   /**
    * Close every Client socket whose session has expired by `now`, and report
-   * how many. The `/ws/client` counterpart of {@link RelayHub.closeHost}'s
+   * how many. The `/ws/client` counterpart of {@link RelayHub.closeBurrow}'s
    * sweep: the upgrade gate runs once, so a socket opened a minute before a
    * 12-hour session expires would otherwise relay for the process's lifetime
    * (`docs/specs/relay.md` -> Relay). Closed with the code and reason the
@@ -241,11 +241,11 @@ export class RelayHub {
 
   /** Handle one raw frame from a Client socket. Malformed/unknown frames get an `error`. */
   onClientFrame(client: ClientConn, raw: string): void {
-    // The client-side twin of {@link onHostFrame}'s guard. `closeExpiredClients`
+    // The client-side twin of {@link onBurrowFrame}'s guard. `closeExpiredClients`
     // unregisters and *then* closes, and `close()` starts a handshake rather
     // than ending the socket, so a frame already in the receive buffer still
-    // arrives carrying this same conn. `hostId` is never cleared on teardown,
-    // so forwarding it would name a `clientId` the Host was told a moment ago
+    // arrives carrying this same conn. `burrowId` is never cleared on teardown,
+    // so forwarding it would name a `clientId` the Burrow was told a moment ago
     // was gone — and an `init` in that window would open a fresh ceremony for
     // the session the sweep just expired, which is the whole point of expiring
     // it (`docs/specs/relay.md` -> Relay).
@@ -266,19 +266,19 @@ export class RelayHub {
       this.#toClient(client, { t: 'error', error: 'malformed e2e frame' });
       return;
     }
-    const host = this.#resolveHost(client, frame.hostId);
-    if (!host) return;
+    const burrow = this.#resolveBurrow(client, frame.burrowId);
+    if (!burrow) return;
     if (frame.step === 'init') {
-      this.#bindClientToHost(client, frame.hostId);
-    } else if (client.hostId !== frame.hostId) {
-      // Transport outside the binding: the client is talking to a Host it is
+      this.#bindClientToBurrow(client, frame.burrowId);
+    } else if (client.burrowId !== frame.burrowId) {
+      // Transport outside the binding: the client is talking to a Burrow it is
       // not bound to, so there is nothing to forward it to.
       return;
     }
-    this.#toHost(host, {
+    this.#toBurrow(burrow, {
       t: 'e2e',
       clientId: client.clientId,
-      hostId: frame.hostId,
+      burrowId: frame.burrowId,
       kind: frame.kind,
       id: frame.id,
       step: frame.step,
@@ -287,52 +287,52 @@ export class RelayHub {
   }
 
   /**
-   * Tear down a Client socket: tell its Host `client-gone`, then forget it.
+   * Tear down a Client socket: tell its Burrow `client-gone`, then forget it.
    *
-   * Guarded so a second call is a no-op, the way {@link unregisterHost} is:
+   * Guarded so a second call is a no-op, the way {@link unregisterBurrow} is:
    * {@link closeExpiredClients} tears down and *then* closes, so the socket's
    * own `onClose` arrives here again, and a second `client-gone` for the same
-   * `clientId` would be a frame naming a ceremony the Host has already
+   * `clientId` would be a frame naming a ceremony the Burrow has already
    * disposed.
    */
   unregisterClient(client: ClientConn): void {
     if (this.#clients.get(client.clientId) !== client) return; // already torn down
     this.#clients.delete(client.clientId);
-    if (client.hostId !== null) {
-      const host = this.#hosts.get(client.hostId);
-      if (host) this.#toHost(host, { t: 'client-gone', clientId: client.clientId });
+    if (client.burrowId !== null) {
+      const burrow = this.#burrows.get(client.burrowId);
+      if (burrow) this.#toBurrow(burrow, { t: 'client-gone', clientId: client.clientId });
     }
   }
 
   /**
-   * Bind a client socket to `hostId` — the one place that transition is
-   * written. A client holds at most one binding: moving to a new Host tells the
-   * old one the client is gone, so its Host-side ceremonies and sessions are
+   * Bind a client socket to `burrowId` — the one place that transition is
+   * written. A client holds at most one binding: moving to a new Burrow tells the
+   * old one the client is gone, so its Burrow-side ceremonies and sessions are
    * disposed immediately.
    */
-  #bindClientToHost(client: ClientConn, hostId: string): void {
-    if (client.hostId !== null && client.hostId !== hostId) {
-      const previousHost = this.#hosts.get(client.hostId);
-      if (previousHost) {
-        this.#toHost(previousHost, { t: 'client-gone', clientId: client.clientId });
+  #bindClientToBurrow(client: ClientConn, burrowId: string): void {
+    if (client.burrowId !== null && client.burrowId !== burrowId) {
+      const previousBurrow = this.#burrows.get(client.burrowId);
+      if (previousBurrow) {
+        this.#toBurrow(previousBurrow, { t: 'client-gone', clientId: client.clientId });
       }
     }
-    client.hostId = hostId;
+    client.burrowId = burrowId;
   }
 
   /**
-   * Resolve the Host a client frame addresses, answering the one refusal
+   * Resolve the Burrow a client frame addresses, answering the one refusal
    * (offline) itself. The shape is already proved — only `isE2eClientFrame`
    * reaches here — so resolution is the whole job; binding is
-   * {@link RelayHub.#bindClientToHost}.
+   * {@link RelayHub.#bindClientToBurrow}.
    */
-  #resolveHost(client: ClientConn, hostId: string): HostConn | null {
-    const host = this.#hosts.get(hostId);
-    if (!host) {
-      this.#toClient(client, { t: 'error', error: `host ${hostId} is offline` });
+  #resolveBurrow(client: ClientConn, burrowId: string): BurrowConn | null {
+    const burrow = this.#burrows.get(burrowId);
+    if (!burrow) {
+      this.#toClient(client, { t: 'error', error: `burrow ${burrowId} is offline` });
       return null;
     }
-    return host;
+    return burrow;
   }
 
   // --- Sending --------------------------------------------------------------
@@ -341,8 +341,8 @@ export class RelayHub {
     safeSend(client.socket, frame);
   }
 
-  #toHost(host: HostConn, frame: RelayToHostFrame): void {
-    safeSend(host.socket, frame);
+  #toBurrow(burrow: BurrowConn, frame: RelayToBurrowFrame): void {
+    safeSend(burrow.socket, frame);
   }
 }
 

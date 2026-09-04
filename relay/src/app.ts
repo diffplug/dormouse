@@ -20,7 +20,7 @@ import {
   DELIVERY_ID_LENGTH,
   E2E_ID_LENGTH,
   HELLO_ROUTE,
-  HostChallengeIssuer,
+  ChallengeIssuer,
   MAX_CLIENT_ID_LENGTH,
   MAX_E2E_CIPHERTEXT_LENGTH,
   MAX_PUSH_QUERY_DELIVERY_IDS,
@@ -48,9 +48,9 @@ import {
   TokenBucket,
 } from 'remote-lib-common';
 import type {
-  HostEnrollRequest,
-  HostEnrollResponse,
-  HostsResponse,
+  BurrowEnrollRequest,
+  BurrowEnrollResponse,
+  BurrowsResponse,
   PasskeyAssertion,
   PresenceBinding,
   PushConfigResponse,
@@ -86,18 +86,18 @@ import {
   WS_CLOSE_UNAUTHORIZED,
   WS_CLOSE_UNAUTHORIZED_REASON,
 } from './relay.js';
-import type { ClientConn, HostConn } from './relay.js';
+import type { ClientConn, BurrowConn } from './relay.js';
 import { secretEquals } from './secrets.js';
 import { SetupTokenIssuer } from './setup-token.js';
 import type { SetupTokenEntry } from './setup-token.js';
 import {
   AccountStore,
   DuplicateCredentialError,
-  HostLimitReachedError,
-  HostStore,
+  BurrowLimitReachedError,
+  BurrowStore,
   PushSubscriptionStore,
 } from './state.js';
-import type { StoredHost, StoredPushSubscription } from './state.js';
+import type { StoredBurrow, StoredPushSubscription } from './state.js';
 import { sendWithinDeadline } from './push.js';
 import type { PushSender } from './push.js';
 import { MAX_PUSH_ENDPOINT_LENGTH, isPublicHttpsPushEndpoint } from './push-endpoint.js';
@@ -106,8 +106,8 @@ import { isSetupPassword } from './setup-password.js';
 /** Runtime configuration; see `index.ts` for how env maps onto this. */
 export interface AppConfig {
   /**
-   * Gates Host enrollment (`POST /api/host/enroll`). It no longer registers a
-   * passkey: `/api/setup/*` takes a Host-minted setup token only.
+   * Gates Burrow enrollment (`POST /api/burrow/enroll`). It no longer registers a
+   * passkey: `/api/setup/*` takes a Burrow-minted setup token only.
    */
   readonly setupPassword: string;
   /**
@@ -119,7 +119,7 @@ export interface AppConfig {
   readonly origin: string;
   /**
    * Demand the authenticator's user-verification flag (biometric/PIN) on every
-   * assertion this Relay verifies, and mirror it to each Host as its
+   * assertion this Relay verifies, and mirror it to each Burrow as its
    * `ConnectionPolicy.requireUserVerification` so the two cannot disagree on
    * what a valid assertion is. Omitted/false keeps the presence-only behavior;
    * a deployment opts in explicitly (env → config in `index.ts`).
@@ -141,7 +141,7 @@ export interface AppConfig {
   /** Injectable clock (epoch ms) for tests; defaults to `Date.now`. */
   readonly now?: () => number;
   /**
-   * The wait before answering a rejected Host-enrollment credential; defaults
+   * The wait before answering a rejected Burrow-enrollment credential; defaults
    * to {@link CREDENTIAL_FAILURE_DELAY_MS}. Injectable for the same reason as
    * `pushSendDeadlineMs` — a suite that pays the real delay on every rejection
    * spends most of its wall time asleep — and never mapped from env: shortening
@@ -175,15 +175,15 @@ export interface Session {
   readonly expiresAt: number;
 }
 
-type AppEnv = { Variables: { session: Session; host: StoredHost } };
+type AppEnv = { Variables: { session: Session; burrow: StoredBurrow } };
 
 /** Sessions live 12 hours (relay.md: "hours-scale TTL"). */
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 /**
- * How long a presence nonce stays redeemable. The same two minutes a Host
+ * How long a presence nonce stays redeemable. The same two minutes a Burrow
  * challenge lasts: both bound one ceremony's WebAuthn prompt, and a longer
  * window would only widen the gap between "the user touched the sensor" and
- * "the Host believed it".
+ * "the Burrow believed it".
  */
 const REAUTH_NONCE_TTL_MS = 2 * 60 * 1000;
 /**
@@ -191,7 +191,7 @@ const REAUTH_NONCE_TTL_MS = 2 * 60 * 1000;
  *
  * `POST /api/reauth/begin` needs only a session token, so without a cap one
  * signed-in caller can grow this map for the process's lifetime by asking —
- * exactly the reason `HostChallengeIssuer.issue` sweeps. Far above any real
+ * exactly the reason `ChallengeIssuer.issue` sweeps. Far above any real
  * use: a phone holds one nonce at a time, per ceremony.
  *
  * **Per session, never global.** A nonce is minted *before* its WebAuthn
@@ -217,7 +217,7 @@ const MAX_REAUTH_NONCE_SESSIONS = 32;
  */
 export const MAX_PENDING_CHALLENGES = 64;
 /**
- * How often {@link CreatedApp.sweepRevokedHosts} should be run. `index.ts` owns
+ * How often {@link CreatedApp.sweepRevokedBurrows} should be run. `index.ts` owns
  * the timer — `createApp` starts no background work of its own.
  *
  * A minute is chosen against what revocation is: a person editing a file after
@@ -225,7 +225,7 @@ export const MAX_PENDING_CHALLENGES = 64;
  * nothing, while the alternative — re-reading the store on every relayed frame
  * — puts a disk read on the path every keystroke takes.
  */
-export const HOST_REVOCATION_SWEEP_MS = 60_000;
+export const BURROW_REVOCATION_SWEEP_MS = 60_000;
 /**
  * How often {@link CreatedApp.sweepRelaySockets} should be run. Far more often
  * than the revocation sweep, because it touches no disk — it closes expired
@@ -246,7 +246,7 @@ const WS_CLOSE_IDLE_REASON = 'no response to heartbeat';
  * The largest frame `ws` may buffer for us. Derived from the wire bounds the
  * relay's own guards enforce — a maximal `ct` plus the envelope around it —
  * because without it `ws` buffers up to 100 MiB before any guard has run.
- * `MAX_CLIENT_ID_LENGTH` is in here because a Host frame carries one.
+ * `MAX_CLIENT_ID_LENGTH` is in here because a Burrow frame carries one.
  */
 export const MAX_RELAY_FRAME_BYTES =
   MAX_E2E_CIPHERTEXT_LENGTH + MAX_CLIENT_ID_LENGTH + 2 * E2E_ID_LENGTH + 1024;
@@ -261,16 +261,16 @@ const MAX_PASSKEY_LABEL_LENGTH = 64;
 /** A small fixed delay on a rejected credential. */
 const CREDENTIAL_FAILURE_DELAY_MS = 250;
 
-/** Initial Host-enrollment attempts admitted before the global bucket refills. */
-export const HOST_ENROLL_ATTEMPT_BURST = 8;
+/** Initial Burrow-enrollment attempts admitted before the global bucket refills. */
+export const BURROW_ENROLL_ATTEMPT_BURST = 8;
 
-/** Sustained Host-enrollment admission: one attempt per second. */
-export const HOST_ENROLL_ATTEMPT_REFILL_MS = 1_000;
+/** Sustained Burrow-enrollment admission: one attempt per second. */
+export const BURROW_ENROLL_ATTEMPT_REFILL_MS = 1_000;
 
 /**
  * Longest request body any route but `/api/push/send` will read.
  *
- * Unauthenticated routes — `/api/host/enroll`, `/api/setup/*`,
+ * Unauthenticated routes — `/api/burrow/enroll`, `/api/setup/*`,
  * `/api/signin/finish` — read their body BEFORE the credential gate, so
  * without this any page on the tailnet could make the process buffer gigabytes
  * with no auth, no rate limit, and no delay. Every body this Relay actually
@@ -300,7 +300,7 @@ function tooLarge(c: Context<AppEnv>): Response {
 /** The credential fields `pickCredential` reads. */
 type CredentialBody = { password?: unknown; enrollToken?: unknown };
 
-/** Internal control flow out of HostStore's serialized pre-enrollment gate. */
+/** Internal control flow out of BurrowStore's serialized pre-enrollment gate. */
 class EnrollmentCredentialRejected extends Error {}
 class EnrollmentOfferNotInvalidated extends Error {}
 
@@ -347,7 +347,7 @@ interface PendingPresenceNonce {
  * The Relay nonces `POST /api/reauth/begin` mints and `finish` consumes
  * (`docs/specs/remote-security-model.md` → Presence proofs).
  *
- * Not a {@link HostChallengeIssuer} — whose single-use and TTL rules this
+ * Not a {@link ChallengeIssuer} — whose single-use and TTL rules this
  * otherwise shares — because the entry has to carry the *binding*, so `finish`
  * recomputes the challenge from what `begin` signed off on rather than from
  * whatever the caller sends back.
@@ -442,9 +442,9 @@ class PresenceNonceStore {
 export interface CreatedApp {
   readonly app: Hono<AppEnv>;
   readonly sessions: SessionStore;
-  /** Middleware for session-gated routes (`/api/hosts`, etc.). */
+  /** Middleware for session-gated routes (`/api/burrows`, etc.). */
   readonly requireSession: MiddlewareHandler<AppEnv>;
-  /** The relay hub; exposed so `/api/hosts` presence and tests can read it. */
+  /** The relay hub; exposed so `/api/burrows` presence and tests can read it. */
   readonly hub: RelayHub;
   /**
    * Bind the WS relay onto the http server returned by `serve()`. `index.ts`
@@ -453,19 +453,19 @@ export interface CreatedApp {
    */
   readonly injectWebSocket: NodeWebSocket['injectWebSocket'];
   /**
-   * Close the relay socket of every connected Host whose `hosts.json` row is
+   * Close the relay socket of every connected Burrow whose `burrows.json` row is
    * gone, and report how many. `index.ts` runs it every
-   * {@link HOST_REVOCATION_SWEEP_MS}; exposed rather than scheduled here so
+   * {@link BURROW_REVOCATION_SWEEP_MS}; exposed rather than scheduled here so
    * `createApp` starts no background work, and so a test drives the decision
    * instead of a timer.
    */
-  readonly sweepRevokedHosts: () => Promise<number>;
+  readonly sweepRevokedBurrows: () => Promise<number>;
   /**
    * Close the Client sockets whose session has expired, then ping the rest and
    * close whatever has not been heard from within
    * {@link RELAY_IDLE_TIMEOUT_MS}. Reports what it closed. `index.ts` runs it
    * every {@link RELAY_SWEEP_MS}; exposed for the same reason
-   * {@link CreatedApp.sweepRevokedHosts} is.
+   * {@link CreatedApp.sweepRevokedBurrows} is.
    */
   readonly sweepRelaySockets: () => { expired: number; idle: number };
 }
@@ -493,7 +493,7 @@ export function createApp(config: AppConfig): CreatedApp {
     );
   }
   // Enforced, not assumed: every compare below is a string compare against this
-  // value, so a `https://host/` that slipped past `readConfig` (a direct caller,
+  // value, so a `https://burrow/` that slipped past `readConfig` (a direct caller,
   // a test) would fail each of them while reading as correct.
   //
   // **The scheme too, not merely "bare".** `isOrigin` admits any WHATWG special
@@ -505,13 +505,13 @@ export function createApp(config: AppConfig): CreatedApp {
   if (!isOrigin(origin) || !(origin.startsWith('http://') || origin.startsWith('https://'))) {
     throw new Error(`createApp needs a bare http(s) origin (scheme, host, port), got '${origin}'.`);
   }
-  // The one parse, and only for the host part.
+  // The one parse, and only for the burrow part.
   const rpId = new URL(origin).hostname;
   const accounts = new AccountStore(config.stateDir, now);
-  const hostStore = new HostStore(config.stateDir, now);
-  // Joined against the Host store so a row outliving its `hosts.json` line is
+  const burrowStore = new BurrowStore(config.stateDir, now);
+  // Joined against the Burrow store so a row outliving its `burrows.json` line is
   // dropped on read (docs/specs/relay.md -> State files).
-  const pushStore = new PushSubscriptionStore(config.stateDir, now, hostStore);
+  const pushStore = new PushSubscriptionStore(config.stateDir, now, burrowStore);
   const sessions = new SessionStore(now);
   const hub = new RelayHub();
   // Separate issuers per flow: a setup challenge cannot be redeemed at sign-in.
@@ -519,23 +519,23 @@ export function createApp(config: AppConfig): CreatedApp {
   // and no body, so the expiry sweep alone only makes the map plateau at
   // request-rate x TTL. A flood evicts abandoned challenges of its own making —
   // a real ceremony that loses one retries — and cannot forge or extend any.
-  const setupChallenges = new HostChallengeIssuer({ now, maxPending: MAX_PENDING_CHALLENGES });
-  const signinChallenges = new HostChallengeIssuer({ now, maxPending: MAX_PENDING_CHALLENGES });
+  const setupChallenges = new ChallengeIssuer({ now, maxPending: MAX_PENDING_CHALLENGES });
+  const signinChallenges = new ChallengeIssuer({ now, maxPending: MAX_PENDING_CHALLENGES });
   // The presence nonces of `/api/reauth/*`. Its own store for the same reason
   // the issuers above are separate — a nonce minted for one flow may never be
   // redeemed in another — and it holds the binding the challenge was derived
   // from, which an issuer cannot.
   const presenceNonces = new PresenceNonceStore(now);
-  // Not an issuer: a setup token remembers the Host that minted it, so a
-  // revoked Host's outstanding tokens die with it.
+  // Not an issuer: a setup token remembers the Burrow that minted it, so a
+  // revoked Burrow's outstanding tokens die with it.
   const setupTokens = new SetupTokenIssuer({ now });
   // Deliberately global, not keyed by a caller-controlled or proxy-supplied
   // address: this bounds work when the origin is public and sources rotate.
   // Every POST spends before its body is read; a refusal creates no per-caller
   // timer, map entry, or queue item.
-  const hostEnrollAttempts = new TokenBucket({
-    capacity: HOST_ENROLL_ATTEMPT_BURST,
-    refillIntervalMs: HOST_ENROLL_ATTEMPT_REFILL_MS,
+  const burrowEnrollAttempts = new TokenBucket({
+    capacity: BURROW_ENROLL_ATTEMPT_BURST,
+    refillIntervalMs: BURROW_ENROLL_ATTEMPT_REFILL_MS,
     now,
   });
 
@@ -545,8 +545,8 @@ export function createApp(config: AppConfig): CreatedApp {
   const waitForEnrollmentFailure =
     config.credentialFailureDelay ?? (() => delay(CREDENTIAL_FAILURE_DELAY_MS));
 
-  // Only Host enrollment delays a rejected credential. Its global admission
-  // bucket bounds these retained timers; random setup, Host, and session
+  // Only Burrow enrollment delays a rejected credential. Its global admission
+  // bucket bounds these retained timers; random setup, Burrow, and session
   // bearers answer immediately because delaying them only buys an attacker
   // held requests and their 256-bit values are not online-guessable.
   async function enrollmentCredentialFailure(
@@ -558,7 +558,7 @@ export function createApp(config: AppConfig): CreatedApp {
   }
 
   /**
-   * The credential ladder behind `/api/host/enroll`: exactly one of `password`
+   * The credential ladder behind `/api/burrow/enroll`: exactly one of `password`
    * or `enrollToken`, counted by presence rather than by type.
    *
    * Both-or-neither is a 400 rather than a try-each fallback because trying
@@ -568,7 +568,7 @@ export function createApp(config: AppConfig): CreatedApp {
    * 401 — never the 400 for shape.
    *
    * Answers `{ token }` with the caller's still-unverified token — the route
-   * redeems it under the Host-store mutex — or `{ token: null }` once the
+   * redeems it under the Burrow-store mutex — or `{ token: null }` once the
    * password has been checked here, or a ready `Response` to return as-is.
    */
   async function pickCredential(
@@ -581,7 +581,7 @@ export function createApp(config: AppConfig): CreatedApp {
       return c.json({ error: 'supply exactly one of password or enrollToken' }, 400);
     }
     if (token !== undefined) {
-      // The shared `UNAUTHORIZED_ERROR`: only a Host sends an enroll token, so
+      // The shared `UNAUTHORIZED_ERROR`: only a Burrow sends an enroll token, so
       // no Client recovery keys on it.
       if (typeof token !== 'string') return enrollmentCredentialFailure(c, UNAUTHORIZED_ERROR);
       return { token };
@@ -603,8 +603,8 @@ export function createApp(config: AppConfig): CreatedApp {
    * concurrency, so its caller must restore the entry on every failure after
    * this point (see the route).
    *
-   * Either gate also re-checks that the minting Host is still enrolled, since a
-   * revoked Host's outstanding tokens must die with it rather than stay
+   * Either gate also re-checks that the minting Burrow is still enrolled, since a
+   * revoked Burrow's outstanding tokens must die with it rather than stay
    * redeemable for the rest of their TTL. Absent, mistyped, unknown, expired,
    * spent and revoked-minter are one 401: none of them may tell a caller
    * which one it hit.
@@ -620,7 +620,7 @@ export function createApp(config: AppConfig): CreatedApp {
     const entry = gate === 'consume' ? setupTokens.consume(token) : setupTokens.peek(token);
     if (!entry) return invalid();
     // Nothing is restored here: a revoked minter's token is dead, not unlucky.
-    if (!(await hostStore.has(entry.hostId))) return invalid();
+    if (!(await burrowStore.has(entry.burrowId))) return invalid();
     return { body: body as T, spent: gate === 'consume' ? { token, entry } : null };
   }
 
@@ -635,7 +635,7 @@ export function createApp(config: AppConfig): CreatedApp {
 
   /**
    * Liveness bookkeeping for one relay socket. A half-open TCP connection sends
-   * nothing and closes nothing, so its entry — and its Host binding — would
+   * nothing and closes nothing, so its entry — and its Burrow binding — would
    * live until the OS gave up. WebSocket ping/pong is what distinguishes it
    * from a socket that is merely idle, which a terminal legitimately is.
    */
@@ -673,9 +673,9 @@ export function createApp(config: AppConfig): CreatedApp {
 
   // Before bodyLimit on purpose: oversized and malformed requests spend from
   // the same budget as a correct-looking guess. OPTIONS is not an attempt.
-  app.use(API_ROUTES.hostEnroll, async (c, next) => {
+  app.use(API_ROUTES.burrowEnroll, async (c, next) => {
     if (c.req.method !== 'POST') return next();
-    const retryAfterMs = hostEnrollAttempts.take();
+    const retryAfterMs = burrowEnrollAttempts.take();
     if (retryAfterMs === null) return next();
     c.header('Retry-After', String(Math.ceil(retryAfterMs / 1_000)));
     return c.json({ error: 'too many enrollment attempts' }, 429);
@@ -693,8 +693,8 @@ export function createApp(config: AppConfig): CreatedApp {
   app.get(HELLO_ROUTE, (c) => c.json(helloResponse()));
 
   // --- Setup: token-gated passkey registration -----------------------------
-  // The credential is a Host's single-use setup token and nothing else: the
-  // only way to register a passkey is off a QR an enrolled Host displayed.
+  // The credential is a Burrow's single-use setup token and nothing else: the
+  // only way to register a passkey is off a QR an enrolled Burrow displayed.
   // `begin` is what mints the WebAuthn registration challenge, so both routes
   // gate identically and neither is the softer path.
 
@@ -760,7 +760,7 @@ export function createApp(config: AppConfig): CreatedApp {
           // Reduced rather than refused, so a long device name still
           // registers, and bounded because `account.json` is durable and is
           // re-read and re-parsed on every sign-in and every re-auth. The same
-          // `boundedPushText` the Host reduces a pairing label with, so a
+          // `boundedPushText` the Burrow reduces a pairing label with, so a
           // control or bidi character cannot reorder what an operator reads
           // out of the file either.
           label: boundedPushText(body.label, { limit: MAX_PASSKEY_LABEL_LENGTH, fallback: '' }),
@@ -854,18 +854,18 @@ export function createApp(config: AppConfig): CreatedApp {
     return c.json(res);
   });
 
-  // --- Host enrollment: credential-gated, appends to hosts.json ------------
+  // --- Burrow enrollment: credential-gated, appends to burrows.json ------------
 
-  app.post(API_ROUTES.hostEnroll, async (c) => {
-    const body = await readJson<HostEnrollRequest>(c);
+  app.post(API_ROUTES.burrowEnroll, async (c) => {
+    const body = await readJson<BurrowEnrollRequest>(c);
     // The shape ladder runs out here, ahead of the gate below, which holds only
     // the redemption that has to be serialized.
     const picked = await pickCredential(body, c);
     if (picked instanceof Response) return picked;
     const enrollToken = picked.token;
-    let host: StoredHost;
+    let burrow: StoredBurrow;
     try {
-      host = await hostStore.enroll(async (firstEnrollment) => {
+      burrow = await burrowStore.enroll(async (firstEnrollment) => {
         if (enrollToken !== null) {
           if (!firstEnrollment) {
             // The offer is already dead by durable Relay state. Best-effort
@@ -880,7 +880,7 @@ export function createApp(config: AppConfig): CreatedApp {
           if (redemption === 'rejected') throw new EnrollmentCredentialRejected();
           if (redemption === 'not-invalidated') throw new EnrollmentOfferNotInvalidated();
         } else if (firstEnrollment) {
-          // A setup-password enrollment can win the same first-Host race. Take
+          // A setup-password enrollment can win the same first-Burrow race. Take
           // the offer away before minting its sibling credential.
           if ((await invalidateEnrollOffer(config.enrollTokenFile)) === 'not-invalidated') {
             throw new EnrollmentOfferNotInvalidated();
@@ -891,30 +891,30 @@ export function createApp(config: AppConfig): CreatedApp {
       if (err instanceof EnrollmentCredentialRejected) {
         return enrollmentCredentialFailure(c, UNAUTHORIZED_ERROR);
       }
-      if (err instanceof HostLimitReachedError) {
+      if (err instanceof BurrowLimitReachedError) {
         // Reached only past a valid credential, so it pays the same delay as
         // every other refusal here, and it names the remedy: revocation is
-        // hand-editing `hosts.json` (docs/specs/relay.md -> Guardrails).
+        // hand-editing `burrows.json` (docs/specs/relay.md -> Guardrails).
         await waitForEnrollmentFailure();
-        return c.json({ error: `${err.message}; remove one from hosts.json first` }, 409);
+        return c.json({ error: `${err.message}; remove one from burrows.json first` }, 409);
       }
       if (err instanceof EnrollmentOfferNotInvalidated) {
         // Reached only after a valid bootstrap credential, so answering fast
         // would confirm it. Keep the same delay while retaining the operator-
-        // visible 500: no Host was minted against an offer still on disk.
+        // visible 500: no Burrow was minted against an offer still on disk.
         await waitForEnrollmentFailure();
         return c.json({ error: 'could not invalidate the enroll token' }, 500);
       }
       throw err;
     }
-    // The Host enforces `origin`/`rpId` as its ConnectionPolicy (relay.md).
-    const res: HostEnrollResponse = {
-      hostId: host.hostId,
-      hostToken: host.hostToken,
+    // The Burrow enforces `origin`/`rpId` as its ConnectionPolicy (relay.md).
+    const res: BurrowEnrollResponse = {
+      burrowId: burrow.burrowId,
+      burrowToken: burrow.burrowToken,
       origin,
       rpId,
-      // Mirrored to the Host so both sides demand the same thing. The Host
-      // is the final authority, so a Relay that demands UV while the Host
+      // Mirrored to the Burrow so both sides demand the same thing. The Burrow
+      // is the final authority, so a Relay that demands UV while the Burrow
       // does not would leave the weaker verifier deciding access.
       ...(config.requireUserVerification ? { requireUserVerification: true } : {}),
     };
@@ -930,14 +930,14 @@ export function createApp(config: AppConfig): CreatedApp {
     await next();
   };
 
-  // Gate a route on a valid `Authorization: Bearer` host token. Mirrors
+  // Gate a route on a valid `Authorization: Bearer` burrow token. Mirrors
   // `requireSession`, resolving through the constant-time `findByToken`.
   // Wrong-shaped values short-circuit before the store read.
-  const requireHost: MiddlewareHandler<AppEnv> = async (c, next) => {
+  const requireBurrow: MiddlewareHandler<AppEnv> = async (c, next) => {
     const token = bearerToken(c);
-    const host = token ? await hostStore.findByToken(token) : undefined;
-    if (!host) return c.json({ error: UNAUTHORIZED_ERROR }, 401);
-    c.set('host', host);
+    const burrow = token ? await burrowStore.findByToken(token) : undefined;
+    if (!burrow) return c.json({ error: UNAUTHORIZED_ERROR }, 401);
+    c.set('burrow', burrow);
     await next();
   };
 
@@ -978,7 +978,7 @@ export function createApp(config: AppConfig): CreatedApp {
       relayNonce,
       // The one credential this ceremony may assert with. A `get()` that could
       // answer with any of the account's passkeys would let a synced credential
-      // the Host never paired satisfy a proof bound to one it did.
+      // the Burrow never paired satisfy a proof bound to one it did.
       allowCredentials: [binding.passkeyCredentialId],
     };
     return c.json(res);
@@ -1001,7 +1001,7 @@ export function createApp(config: AppConfig): CreatedApp {
       return c.json({ error: 'malformed assertion' }, 400);
     }
     // The assertion must be by the credential the binding named — the one the
-    // Host will check the ACL against — not merely by some registered passkey.
+    // Burrow will check the ACL against — not merely by some registered passkey.
     if (assertion.credentialId !== pending.binding.passkeyCredentialId) {
       return c.json({ error: 'assertion is for a different credential' }, 401);
     }
@@ -1017,29 +1017,29 @@ export function createApp(config: AppConfig): CreatedApp {
       requireUserVerification: config.requireUserVerification,
     });
     if (!result.ok) return c.json({ error: `assertion rejected: ${result.reason}` }, 401);
-    // It extends nothing: no session TTL, no presence stamp. The Host is what
+    // It extends nothing: no session TTL, no presence stamp. The Burrow is what
     // consumes this proof, and it verifies the assertion itself.
     const res: ReauthFinishResponse = { verifiedAt: now() };
     return c.json(res);
   });
 
-  // --- Host presence: enrolled hosts + whether each is connected -----------
+  // --- Burrow presence: enrolled burrows + whether each is connected -----------
 
-  app.get(API_ROUTES.hosts, requireSession, async (c) => {
-    const hosts = await hostStore.list();
-    const res: HostsResponse = {
-      hosts: hosts.map((h) => ({ hostId: h.hostId, online: hub.isHostOnline(h.hostId) })),
+  app.get(API_ROUTES.burrows, requireSession, async (c) => {
+    const burrows = await burrowStore.list();
+    const res: BurrowsResponse = {
+      burrows: burrows.map((h) => ({ burrowId: h.burrowId, online: hub.isBurrowOnline(h.burrowId) })),
     };
     return c.json(res);
   });
 
-  // --- Setup tokens: the credential behind a Host's QR ---------------------
+  // --- Setup tokens: the credential behind a Burrow's QR ---------------------
 
-  app.post(API_ROUTES.hostSetupToken, requireHost, (c) => {
-    // The token only; the Host composes the QR's URL (`SetupTokenResponse`)
+  app.post(API_ROUTES.burrowSetupToken, requireBurrow, (c) => {
+    // The token only; the Burrow composes the QR's URL (`SetupTokenResponse`)
     // around the invitation it holds in memory, and redemption here no longer
     // flips anything on that side.
-    const { token, expiresAt } = setupTokens.issue(c.get('host').hostId);
+    const { token, expiresAt } = setupTokens.issue(c.get('burrow').burrowId);
     const res: SetupTokenResponse = { token, expiresAt };
     return c.json(res);
   });
@@ -1050,7 +1050,7 @@ export function createApp(config: AppConfig): CreatedApp {
    * register a passkey afterwards.
    *
    * Every refusal — mistyped, unknown, expired, already spent, or minted by a
-   * since-revoked Host — is the one delayed 401 the setup gates answer with,
+   * since-revoked Burrow — is the one delayed 401 the setup gates answer with,
    * for the same reason: none of them may tell a caller which one it hit.
    */
   app.post(API_ROUTES.setupRetire, requireSession, async (c) => {
@@ -1062,7 +1062,7 @@ export function createApp(config: AppConfig): CreatedApp {
     return c.body(null, 204);
   });
 
-  // --- Web Push: subscriptions (client-facing) and delivery (host-facing) --
+  // --- Web Push: subscriptions (client-facing) and delivery (burrow-facing) --
   // Two audiences, two credentials, and possession of the `deliveryId` is the
   // whole Client-facing authorization: `remote-lib-common/src/remote/wire.ts`
   // -> "Web Push" states the contract, docs/specs/relay.md -> Web Push the
@@ -1080,7 +1080,7 @@ export function createApp(config: AppConfig): CreatedApp {
     const body = await readJson<PushSubscribeRequest>(c);
     if (
       !body ||
-      typeof body.hostId !== 'string' ||
+      typeof body.burrowId !== 'string' ||
       !isDeliveryId(body.deliveryId) ||
       !isSubscriptionPayload(body.subscription)
     ) {
@@ -1094,14 +1094,14 @@ export function createApp(config: AppConfig): CreatedApp {
       return c.json({ error: 'endpoint must be a public https URL' }, 400);
     }
 
-    // Subscribing to a host that does not exist would strand a row no Host can
+    // Subscribing to a burrow that does not exist would strand a row no Burrow can
     // ever read or prune.
-    if (!(await hostStore.has(body.hostId))) {
-      return c.json({ error: 'unknown host' }, 404);
+    if (!(await burrowStore.has(body.burrowId))) {
+      return c.json({ error: 'unknown burrow' }, 404);
     }
 
     const stored = await pushStore.upsert({
-      hostId: body.hostId,
+      burrowId: body.burrowId,
       deliveryId: body.deliveryId,
       endpoint: body.subscription.endpoint,
       keys: body.subscription.keys,
@@ -1112,7 +1112,7 @@ export function createApp(config: AppConfig): CreatedApp {
     // re-announce a deletion but can always answer what is there now.
     const res: PushSubscribeResponse = {
       subscribedAt: stored.subscription.subscribedAt,
-      hostIds: [...stored.endpointHostIds],
+      burrowIds: [...stored.endpointBurrowIds],
     };
     return c.json(res);
   });
@@ -1128,7 +1128,7 @@ export function createApp(config: AppConfig): CreatedApp {
       deliveryIds.length === 0 ||
       deliveryIds.length > MAX_PUSH_QUERY_DELIVERY_IDS ||
       // Every id is bounded here, as it is at subscribe: `readJson` caps
-      // nothing, and a value no Host ever minted cannot match a row anyway.
+      // nothing, and a value no Burrow ever minted cannot match a row anyway.
       deliveryIds.some((id) => !isDeliveryId(id))
     ) {
       return c.json(
@@ -1139,14 +1139,14 @@ export function createApp(config: AppConfig): CreatedApp {
     // Parameterized by capability, never by identity: only rows whose id the
     // caller PRESENTED are reported, so this can never enumerate a row the
     // caller does not already hold the capability for. Current-VAPID only, for
-    // the same reason the Host views are — a row under a rotated key cannot
+    // the same reason the Burrow views are — a row under a rotated key cannot
     // receive a send signed by the current one, so reporting it would leave
     // Pocket believing push is on.
     const rows = await pushStore.listForDeliveryIds(deliveryIds as string[]);
     const res: PushSubscriptionsQueryResponse = {
       registered: rows
         .filter(isVapidCurrent)
-        .map((s) => ({ hostId: s.hostId, deliveryId: s.deliveryId })),
+        .map((s) => ({ burrowId: s.burrowId, deliveryId: s.deliveryId })),
     };
     return c.json(res);
   });
@@ -1157,7 +1157,7 @@ export function createApp(config: AppConfig): CreatedApp {
    * into an oracle for whether a guessed delivery id names a row.
    */
   app.delete(API_ROUTES.pushSubscriptionDelete, requireSession, async (c) => {
-    // Bounded like every other delivery id, and still 204: an id no Host could
+    // Bounded like every other delivery id, and still 204: an id no Burrow could
     // have minted names no row, so refusing it early only avoids reading the
     // file for a value that cannot match.
     const deliveryId = c.req.param('deliveryId');
@@ -1165,9 +1165,9 @@ export function createApp(config: AppConfig): CreatedApp {
     return c.body(null, 204);
   });
 
-  app.get(API_ROUTES.pushDevices, requireHost, async (c) => {
-    const subscriptions = await currentPushSubscriptionsForHost(c.get('host').hostId);
-    // Delivery ids only. The Host holds the ACL and is the only side that can
+  app.get(API_ROUTES.pushDevices, requireBurrow, async (c) => {
+    const subscriptions = await currentPushSubscriptionsForBurrow(c.get('burrow').burrowId);
+    // Delivery ids only. The Burrow holds the ACL and is the only side that can
     // turn one into a human label, so the Relay never learns one.
     const res: PushDevicesResponse = {
       devices: subscriptions.map((s) => ({
@@ -1178,13 +1178,13 @@ export function createApp(config: AppConfig): CreatedApp {
     return c.json(res);
   });
 
-  app.post(API_ROUTES.pushSend, requireHost, async (c) => {
+  app.post(API_ROUTES.pushSend, requireBurrow, async (c) => {
     const sender = config.pushSender;
     if (!sender) return c.json({ error: 'push is not configured' }, 503);
     const body = await readJson<PushSendRequest>(c);
-    // Recipients are required, one sealed envelope each. The Host holds the ACL
+    // Recipients are required, one sealed envelope each. The Burrow holds the ACL
     // and is the only party that may decide who a push reaches; a Relay that
-    // fanned out on its own would keep notifying a Client the Host had revoked,
+    // fanned out on its own would keep notifying a Client the Burrow had revoked,
     // since nothing propagates a revocation today
     // (docs/specs/remote-security-model.md).
     const recipients: unknown = body?.recipients;
@@ -1204,12 +1204,12 @@ export function createApp(config: AppConfig): CreatedApp {
       );
     }
 
-    // The Host is identified by its token, never by the body: a Host can only
-    // ever reach subscriptions registered against itself. The same `hostId`
+    // The Burrow is identified by its token, never by the body: a Burrow can only
+    // ever reach subscriptions registered against itself. The same `burrowId`
     // rides in the payload, because it is how the worker picks the pinned
     // record to decrypt against — taken from the token for the same reason.
-    const { hostId } = c.get('host');
-    const subscriptions = await currentPushSubscriptionsForHost(hostId);
+    const { burrowId } = c.get('burrow');
+    const subscriptions = await currentPushSubscriptionsForBurrow(burrowId);
     const byDelivery = new Map(subscriptions.map((s) => [s.deliveryId, s]));
     const targets = recipients.flatMap((recipient) => {
       const subscription = byDelivery.get(recipient.deliveryId);
@@ -1217,7 +1217,7 @@ export function createApp(config: AppConfig): CreatedApp {
     });
 
     // Every send starts at once, so one deadline per send also bounds the whole
-    // route regardless of how many devices a Host has.
+    // route regardless of how many devices a Burrow has.
     const deadlineMs = config.pushSendDeadlineMs ?? PUSH_SEND_DEADLINE_MS;
     const results = await Promise.all(
       targets.map(async ({ subscription, sealed }) => ({
@@ -1226,12 +1226,12 @@ export function createApp(config: AppConfig): CreatedApp {
           sender,
           { endpoint: subscription.endpoint, keys: subscription.keys },
           // Field by field, never a spread of `sealed`: `isSealedPushV1` bounds
-          // the three fields it knows and ignores the rest, so `{ hostId,
-          // ...sealed }` would let a Host both override the token's `hostId`
+          // the three fields it knows and ignores the rest, so `{ burrowId,
+          // ...sealed }` would let a Burrow both override the token's `burrowId`
           // and smuggle readable text past a Relay that must forward neither
           // (docs/specs/security-remote.md -> "What crosses the boundary").
           JSON.stringify({
-            hostId,
+            burrowId,
             v: sealed.v,
             salt: sealed.salt,
             ct: sealed.ct,
@@ -1257,7 +1257,7 @@ export function createApp(config: AppConfig): CreatedApp {
 
   /**
    * Whether a stored row was minted for the active VAPID key, and is therefore
-   * deliverable. The one definition both the Client readback and the Host-facing
+   * deliverable. The one definition both the Client readback and the Burrow-facing
    * views below filter on; they differ only in what an unconfigured key means.
    */
   function isVapidCurrent(s: StoredPushSubscription): boolean {
@@ -1267,43 +1267,43 @@ export function createApp(config: AppConfig): CreatedApp {
   /**
    * Only subscriptions minted for the active VAPID key are deliverable.
    * Old-key rows remain on disk so Pocket can diagnose and repair a rotation,
-   * but they must never appear in the Host's device view or send fan-out.
+   * but they must never appear in the Burrow's device view or send fan-out.
    */
-  async function currentPushSubscriptionsForHost(hostId: string) {
+  async function currentPushSubscriptionsForBurrow(burrowId: string) {
     if (!config.vapidPublicKey) return [];
-    const subscriptions = await pushStore.listForHost(hostId);
+    const subscriptions = await pushStore.listForBurrow(burrowId);
     return subscriptions.filter(isVapidCurrent);
   }
 
-  // --- The relay: one host socket per hostId, many client sockets ----------
+  // --- The relay: one burrow socket per burrowId, many client sockets ----------
   // Auth rides the `token` query param (browsers cannot set WS headers). A bad
   // token short-circuits with 401 here, so `injectWebSocket` never upgrades it.
 
   app.get(
-    WS_ROUTES.host,
+    WS_ROUTES.burrow,
     async (c, next) => {
       const token = c.req.query(WS_TOKEN_PARAM);
-      const host = token ? await hostStore.findByToken(token) : undefined;
-      if (!host) return c.json({ error: 'unknown host token' }, 401);
-      c.set('host', host);
+      const burrow = token ? await burrowStore.findByToken(token) : undefined;
+      if (!burrow) return c.json({ error: 'unknown burrow token' }, 401);
+      c.set('burrow', burrow);
       return next();
     },
     upgradeWebSocket((c) => {
-      // The auth middleware above ran on this same context and stashed `host`.
-      const host = (c as Context<AppEnv>).get('host');
-      let conn: HostConn | undefined;
+      // The auth middleware above ran on this same context and stashed `burrow`.
+      const burrow = (c as Context<AppEnv>).get('burrow');
+      let conn: BurrowConn | undefined;
       let unwatch = () => {};
       return {
         onOpen: (_evt, ws) => {
-          conn = hub.registerHost(host.hostId, ws);
+          conn = hub.registerBurrow(burrow.burrowId, ws);
           unwatch = watchLiveness(ws);
         },
         onMessage: (evt) => {
-          if (conn && typeof evt.data === 'string') hub.onHostFrame(conn, evt.data);
+          if (conn && typeof evt.data === 'string') hub.onBurrowFrame(conn, evt.data);
         },
         onClose: () => {
           unwatch();
-          if (conn) hub.unregisterHost(conn);
+          if (conn) hub.unregisterBurrow(conn);
         },
       };
     }),
@@ -1375,10 +1375,10 @@ export function createApp(config: AppConfig): CreatedApp {
   }
 
   /** `docs/specs/relay.md` -> Guardrails owns the rule this enforces. */
-  async function sweepRevokedHosts(): Promise<number> {
-    const online = hub.onlineHostIds();
+  async function sweepRevokedBurrows(): Promise<number> {
+    const online = hub.onlineBurrowIds();
     if (online.length === 0) return 0;
-    // One read for the whole sweep: `has()` reads the file per call, and a Host
+    // One read for the whole sweep: `has()` reads the file per call, and a Burrow
     // deleted mid-sweep is caught by the next one.
     //
     // **Nothing is closed on an answer this sweep did not actually read.**
@@ -1386,13 +1386,13 @@ export function createApp(config: AppConfig): CreatedApp {
     // `listIfPresent` is what covers the other half, an absent file — both are
     // ordinary states for a file whose editing *is* the revocation mechanism,
     // and reading either as "nobody is enrolled" would drop every session.
-    const rows = await hostStore.listIfPresent();
+    const rows = await burrowStore.listIfPresent();
     if (rows === null) return 0;
-    const enrolled = new Set(rows.map((h) => h.hostId));
+    const enrolled = new Set(rows.map((h) => h.burrowId));
     let closed = 0;
-    for (const hostId of online) {
-      if (enrolled.has(hostId)) continue;
-      if (hub.closeHost(hostId)) closed += 1;
+    for (const burrowId of online) {
+      if (enrolled.has(burrowId)) continue;
+      if (hub.closeBurrow(burrowId)) closed += 1;
     }
     return closed;
   }
@@ -1407,7 +1407,7 @@ export function createApp(config: AppConfig): CreatedApp {
     requireSession,
     hub,
     injectWebSocket,
-    sweepRevokedHosts,
+    sweepRevokedBurrows,
     sweepRelaySockets,
   };
 }
@@ -1418,10 +1418,10 @@ const CSP_HEADER = 'Content-Security-Policy';
  * The Pocket origin's Content-Security-Policy
  * (`docs/specs/pocket-app.md` -> Deployment).
  *
- * This origin holds a per-Host Client static and the worker that opens sealed
+ * This origin holds a per-Burrow Client static and the worker that opens sealed
  * pushes, and `docs/specs/security.md` -> "What is not defended" already names active XSS
  * here as the risk it cannot rule out — so it gets the defense in depth the
- * two shipped webview hosts already have.
+ * two shipped webview burrows already have.
  *
  * Every source is the app's own origin. The loosenings are load-bearing and no
  * wider than they must be:
@@ -1563,8 +1563,8 @@ function bearerToken(c: Context<AppEnv>): string | null {
 }
 
 /**
- * Base64url of exactly {@link DELIVERY_ID_LENGTH} characters — the Host mints
- * 32 random bytes, so anything else is not an id any Host ever issued and must
+ * Base64url of exactly {@link DELIVERY_ID_LENGTH} characters — the Burrow mints
+ * 32 random bytes, so anything else is not an id any Burrow ever issued and must
  * be refused before it becomes a row key.
  */
 function isDeliveryId(value: unknown): value is string {

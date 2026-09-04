@@ -34,9 +34,9 @@ export const PUSH_SEAL_SALT_LENGTH = 32;
  * Longest plaintext this seal will carry, in bytes.
  *
  * The plaintext is the JSON of one bounded `{ title, body, tag }`
- * (`lib/src/remote/host/push-delivery.ts`), whose fields are capped in code
+ * (`lib/src/remote/burrow/push-delivery.ts`), whose fields are capped in code
  * points; four UTF-8 bytes per code point plus JSON's own punctuation is what
- * this number is sized from, with room to spare. Enforced on seal so a Host can
+ * this number is sized from, with room to spare. Enforced on seal so a Burrow can
  * never mint an envelope its own guard would refuse.
  */
 export const MAX_SEALED_PUSH_PLAINTEXT_LENGTH = 1536;
@@ -46,7 +46,7 @@ export const MAX_SEALED_PUSH_PLAINTEXT_LENGTH = 1536;
  * plus the Poly1305 tag.
  *
  * A Web Push payload is limited to about 4 KB by every push service, and the
- * envelope on the wire is this ciphertext plus a `hostId`, a salt, and a
+ * envelope on the wire is this ciphertext plus a `burrowId`, a salt, and a
  * version. Keeping the ciphertext here leaves the whole envelope near 2 KB,
  * comfortably inside that ceiling with no per-service tuning.
  */
@@ -77,7 +77,7 @@ export interface SealedPushV1 {
 
 /**
  * Shape and bounds only — a value that passes still fails to open unless it was
- * sealed by the pinned Host to this exact Client.
+ * sealed by the pinned Burrow to this exact Client.
  *
  * Exact lengths, not ranges: the salt is one fixed size and a different one is
  * a value nothing this side produced. The ciphertext bound is what keeps a
@@ -96,18 +96,18 @@ export function isSealedPushV1(value: unknown): value is SealedPushV1 {
 }
 
 export interface SealPushRequest {
-  /** The Host's Noise static, a nonextractable `deriveBits` key. */
-  readonly hostStaticPrivateKey: CryptoKeyLike;
-  /** The recipient's per-Host static, raw 32 bytes. */
+  /** The Burrow's Noise static, a nonextractable `deriveBits` key. */
+  readonly burrowStaticPrivateKey: CryptoKeyLike;
+  /** The recipient's per-Burrow static, raw 32 bytes. */
   readonly clientStaticPublicKey: Uint8Array;
   readonly plaintext: Uint8Array;
 }
 
 export interface OpenPushRequest {
-  /** This Client's per-Host static, a nonextractable `deriveBits` key. */
+  /** This Client's per-Burrow static, a nonextractable `deriveBits` key. */
   readonly clientStaticPrivateKey: CryptoKeyLike;
-  /** The pinned Host Noise static, raw 32 bytes. */
-  readonly hostStaticPublicKey: Uint8Array;
+  /** The pinned Burrow Noise static, raw 32 bytes. */
+  readonly burrowStaticPublicKey: Uint8Array;
   readonly sealed: SealedPushV1;
 }
 
@@ -115,18 +115,18 @@ export interface OpenPushRequest {
  * Seal one notification to one Client.
  *
  * Throws on a plaintext past the bound or on any crypto failure: this runs on
- * the Host, where a failure is a bug in our own code rather than attacker
+ * the Burrow, where a failure is a bug in our own code rather than attacker
  * input, and a silent `null` would ship a push nobody can read.
  */
 export async function sealPush(
-  { hostStaticPrivateKey, clientStaticPublicKey, plaintext }: SealPushRequest,
+  { burrowStaticPrivateKey, clientStaticPublicKey, plaintext }: SealPushRequest,
   crypto: WebCryptoLike = getWebCrypto(),
 ): Promise<SealedPushV1> {
   if (plaintext.length > MAX_SEALED_PUSH_PLAINTEXT_LENGTH) {
     throw new Error('sealed push plaintext is too long');
   }
   const salt = crypto.getRandomValues(new Uint8Array(PUSH_SEAL_SALT_LENGTH));
-  const key = await sealKey(crypto, hostStaticPrivateKey, clientStaticPublicKey, salt);
+  const key = await sealKey(crypto, burrowStaticPrivateKey, clientStaticPublicKey, salt);
   const ct = chacha20poly1305(key, ZERO_NONCE).encrypt(plaintext);
   return { v: 1, salt: toBase64Url(salt), ct: toBase64Url(ct) };
 }
@@ -142,13 +142,13 @@ export async function sealPush(
  * `null`, which the worker renders as the generic notice.
  */
 export async function openPush(
-  { clientStaticPrivateKey, hostStaticPublicKey, sealed }: OpenPushRequest,
+  { clientStaticPrivateKey, burrowStaticPublicKey, sealed }: OpenPushRequest,
   crypto: WebCryptoLike = getWebCrypto(),
 ): Promise<Uint8Array | null> {
   try {
     if (!isSealedPushV1(sealed)) return null;
     const salt = fromBase64Url(sealed.salt);
-    const key = await sealKey(crypto, clientStaticPrivateKey, hostStaticPublicKey, salt);
+    const key = await sealKey(crypto, clientStaticPrivateKey, burrowStaticPublicKey, salt);
     return chacha20poly1305(key, ZERO_NONCE).decrypt(fromBase64Url(sealed.ct));
   } catch {
     return null;

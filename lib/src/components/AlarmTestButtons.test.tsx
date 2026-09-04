@@ -5,7 +5,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-let platform: { remoteHost?: unknown } = {};
+let platform: { burrow?: unknown } = {};
 
 vi.mock('../lib/platform', () => ({
   IS_MAC: false,
@@ -74,7 +74,7 @@ describe('SpeakTestButton', () => {
 });
 
 describe('PushTestButton', () => {
-  it('renders nothing where there is no Host service', async () => {
+  it('renders nothing where there is no Burrow service', async () => {
     platform = {};
     await act(async () => root.render(<PushTestButton />));
     expect(container.innerHTML).toBe('');
@@ -82,7 +82,7 @@ describe('PushTestButton', () => {
 
   it('reports a delivered push', async () => {
     platform = {
-      remoteHost: {
+      burrow: {
         command: vi.fn(async () => ({ targeted: 2, delivered: 2, failed: 0 })),
         on: () => () => {},
         respond: () => {},
@@ -97,7 +97,7 @@ describe('PushTestButton', () => {
 
   it('distinguishes "nowhere to send it" from a failure', async () => {
     platform = {
-      remoteHost: {
+      burrow: {
         command: vi.fn(async () => ({ targeted: 0, delivered: 0, failed: 0 })),
         on: () => () => {},
         respond: () => {},
@@ -114,7 +114,7 @@ describe('PushTestButton', () => {
 
   it('reports a fan-out that reached nobody', async () => {
     platform = {
-      remoteHost: {
+      burrow: {
         command: vi.fn(async () => ({ targeted: 2, delivered: 0, failed: 2 })),
         on: () => () => {},
         respond: () => {},
@@ -129,7 +129,7 @@ describe('PushTestButton', () => {
 
   it('names what a partly-failed fan-out reached, like every other outcome', async () => {
     platform = {
-      remoteHost: {
+      burrow: {
         command: vi.fn(async () => ({ targeted: 3, delivered: 2, failed: 1 })),
         on: () => () => {},
         respond: () => {},
@@ -144,7 +144,7 @@ describe('PushTestButton', () => {
 
   it('surfaces the service error', async () => {
     platform = {
-      remoteHost: {
+      burrow: {
         command: vi.fn(async () => {
           throw new Error('This machine is not connected to a Dormouse Relay.');
         }),

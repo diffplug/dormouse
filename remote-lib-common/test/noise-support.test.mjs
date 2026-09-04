@@ -1,6 +1,6 @@
 /**
  * The X25519 capability probe
- * (docs/specs/remote-security-model.md -> Host identity).
+ * (docs/specs/remote-security-model.md -> Burrow identity).
  */
 
 import { test } from 'node:test';

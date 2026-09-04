@@ -1141,7 +1141,7 @@ module.exports.create = function create(send, ptyModule) {
     if (p) p.resize(cols, rows);
   }
 
-  // Synchronous lifetime observation for the remote Host's atomic
+  // Synchronous lifetime observation for the Burrow's atomic
   // subscribe-then-check. Natural exits delete the generation from `ptys`, and
   // a spawn under the same id installs the new generation before it can emit.
   function hasPty(id) {

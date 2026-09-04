@@ -33,7 +33,7 @@ async function readEnrollmentOffer(path: string): Promise<EnrollmentOffer | null
     if (errnoOf(err) !== 'ENOENT') warnUnusable(path);
     return null;
   }
-  // The parse itself is shared with the Host-side reader of the same file
+  // The parse itself is shared with the Burrow-side reader of the same file
   // (`remote-lib-common/src/remote/enroll-offer.ts`); the warn is this side's.
   const offer = parseEnrollmentOffer(text);
   if (offer === null) warnUnusable(path);
@@ -71,7 +71,7 @@ export async function redeemEnrollToken(
   const offer = await readEnrollmentOffer(path);
   // Only the token is compared. Whoever can write this file chooses every
   // field, so checking the offer's `origin` here would authorize nothing — it
-  // is for the Host-side reader (`lib/src/host/remote/enroll-offer.ts`), which
+  // is for the Burrow-side reader (`lib/src/host/remote/enroll-offer.ts`), which
   // uses it to name the Relay it is about to enroll against.
   if (offer === null || !isEnrollmentOfferFresh(offer) || !secretEquals(supplied, offer.token)) {
     return 'rejected';
@@ -81,7 +81,7 @@ export async function redeemEnrollToken(
 }
 
 /**
- * Remove any offer before a setup-password enrollment becomes the first Host.
+ * Remove any offer before a setup-password enrollment becomes the first Burrow.
  * Absence is already the desired state; every other rename failure means the
  * first enrollment must stop rather than leave a second bootstrap credential.
  */

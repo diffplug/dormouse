@@ -73,7 +73,7 @@ describe('MobileWall', () => {
     expect(container.querySelector('button[aria-label="Kill"]')).not.toBeNull();
   });
 
-  it('can hide the local Kill control for Host-owned remote panes', () => {
+  it('can hide the local Kill control for Burrow-owned remote panes', () => {
     renderWall(false);
 
     expect(container.querySelector('button[aria-label="Kill"]')).toBeNull();

@@ -1,7 +1,7 @@
 /**
  * The envelope facts every E2E test shares: which prologue a ceremony binds,
  * and what a well-formed `e2e` frame looks like on each side of the relay.
- * Shared so the fake Client and the fake Host cannot drift into two opinions
+ * Shared so the fake Client and the fake Burrow cannot drift into two opinions
  * about the transcript — a drift that would show up as a decrypt failure and
  * read like a bug in the suite — and so a change to the envelope is one edit.
  */
@@ -18,12 +18,12 @@ import {
   toBase64Url,
 } from 'remote-lib-common';
 
-import { enrollHost, freshApp, ownerSession, startRelay } from '../helpers.mjs';
+import { enrollBurrow, freshApp, ownerSession, startRelay } from '../helpers.mjs';
 import { FakeClient } from './fake-client.mjs';
-import { FakeHost } from './fake-host.mjs';
+import { FakeBurrow } from './fake-burrow.mjs';
 
 /**
- * The prologue for one ceremony: the E2E version, the kind, the `hostId`, and —
+ * The prologue for one ceremony: the E2E version, the kind, the `burrowId`, and —
  * for a connection — the connection id.
  *
  * The low-level door only: a real pairing binds every invitation field through
@@ -31,8 +31,8 @@ import { FakeHost } from './fake-host.mjs';
  * The empty field list here is what a transcript-binding test wants — a
  * prologue neither side's ceremony would ever build.
  */
-export function e2ePrologueFor({ kind, hostId, id }) {
-  return kind === 'connection' ? e2eConnectionPrologue(hostId, id) : e2ePairingPrologue(hostId, []);
+export function e2ePrologueFor({ kind, burrowId, id }) {
+  return kind === 'connection' ? e2eConnectionPrologue(burrowId, id) : e2ePairingPrologue(burrowId, []);
 }
 
 /** A fresh routing id, minted at the one length `isE2eId` accepts. */
@@ -44,12 +44,12 @@ export function newE2eId() {
  * A well-formed Client-originated `e2e` frame; the relay never decodes `ct`.
  * `overrides` is how a test malforms exactly one field.
  */
-export function e2eClientFrame(hostId, overrides = {}) {
-  return { t: 'e2e', hostId, kind: 'pairing', id: newE2eId(), step: 'init', ct: 'Zm9v', ...overrides };
+export function e2eClientFrame(burrowId, overrides = {}) {
+  return { t: 'e2e', burrowId, kind: 'pairing', id: newE2eId(), step: 'init', ct: 'Zm9v', ...overrides };
 }
 
-/** Its Host-originated twin, addressed to `clientId` and carrying no `hostId`. */
-export function e2eHostFrame(clientId, overrides = {}) {
+/** Its Burrow-originated twin, addressed to `clientId` and carrying no `burrowId`. */
+export function e2eBurrowFrame(clientId, overrides = {}) {
   return {
     t: 'e2e',
     clientId,
@@ -62,11 +62,11 @@ export function e2eHostFrame(clientId, overrides = {}) {
 }
 
 /**
- * A live Relay, one Host with a Noise static, and one Client that pins it.
+ * A live Relay, one Burrow with a Noise static, and one Client that pins it.
  *
- * `relayFor` — `(hostId) => relay` — puts a peer the test controls between the
+ * `relayFor` — `(burrowId) => relay` — puts a peer the test controls between the
  * two halves (`./malicious-relay.mjs`); without it both open real sockets to
- * the Relay's own relay. A factory because the relay binds the `hostId` this
+ * the Relay's own relay. A factory because the relay binds the `burrowId` this
  * fixture only learns at enrollment. Shared so the honest and hostile suites
  * cannot drift into two fixtures — the difference between them has to be the
  * relay and nothing else.
@@ -74,66 +74,66 @@ export function e2eHostFrame(clientId, overrides = {}) {
 export async function e2eFixture({ relayFor } = {}) {
   const created = await freshApp();
   const server = await startRelay(created);
-  const { body: enrollment } = await enrollHost(created.app);
-  const relay = relayFor ? relayFor(enrollment.hostId) : null;
-  const hostStatic = await generateNoiseKeyPair();
+  const { body: enrollment } = await enrollBurrow(created.app);
+  const relay = relayFor ? relayFor(enrollment.burrowId) : null;
+  const burrowStatic = await generateNoiseKeyPair();
   const clientStatic = await generateNoiseKeyPair();
-  const host = new FakeHost({
+  const burrow = new FakeBurrow({
     relayUrl: server.wsUrl,
-    hostToken: enrollment.hostToken,
-    hostId: enrollment.hostId,
+    burrowToken: enrollment.burrowToken,
+    burrowId: enrollment.burrowId,
     origin: created.origin,
     rpId: created.rpId,
-    noiseStaticKeyPair: hostStatic,
-    socket: relay?.hostSocket,
+    noiseStaticKeyPair: burrowStatic,
+    socket: relay?.burrowSocket,
   });
-  await host.ready;
+  await burrow.ready;
   const { sessionToken, authenticator } = await ownerSession(created.app);
   const client = new FakeClient({
     relayUrl: server.wsUrl,
     sessionToken,
-    hostId: enrollment.hostId,
+    burrowId: enrollment.burrowId,
     staticKeyPair: clientStatic,
-    hostStaticPublicKey: hostStatic.publicKey,
+    burrowStaticPublicKey: burrowStatic.publicKey,
     origin: created.origin,
     rpId: created.rpId,
     socket: relay?.clientSocket,
   });
   await client.ready;
-  const opened = [host, client];
+  const opened = [burrow, client];
   return {
     app: created.app,
     server,
-    host,
+    burrow,
     client,
     relay,
     authenticator,
     enrollment,
-    hostStatic,
+    burrowStatic,
     clientStatic,
-    /** A second Host socket for the same enrollment — models a Host restart. */
-    async replacementHost() {
-      const replacement = new FakeHost({
+    /** A second Burrow socket for the same enrollment — models a Burrow restart. */
+    async replacementBurrow() {
+      const replacement = new FakeBurrow({
         relayUrl: server.wsUrl,
-        hostToken: enrollment.hostToken,
-        hostId: enrollment.hostId,
+        burrowToken: enrollment.burrowToken,
+        burrowId: enrollment.burrowId,
         origin: created.origin,
         rpId: created.rpId,
-        noiseStaticKeyPair: hostStatic,
+        noiseStaticKeyPair: burrowStatic,
       });
       await replacement.ready;
       opened.push(replacement);
       return replacement;
     },
-    async secondHost() {
-      const { body } = await enrollHost(created.app);
-      const second = new FakeHost({
+    async secondBurrow() {
+      const { body } = await enrollBurrow(created.app);
+      const second = new FakeBurrow({
         relayUrl: server.wsUrl,
-        hostToken: body.hostToken,
-        hostId: body.hostId,
+        burrowToken: body.burrowToken,
+        burrowId: body.burrowId,
         origin: created.origin,
         rpId: created.rpId,
-        noiseStaticKeyPair: hostStatic,
+        noiseStaticKeyPair: burrowStatic,
       });
       await second.ready;
       opened.push(second);
@@ -151,11 +151,11 @@ export async function e2eFixture({ relayFor } = {}) {
  * Pair and connect this fixture's Client, leaving an authorized session.
  *
  * The transport cases ride one, because that is where a Client's traffic
- * actually lives: on a *pending* connection the Host answers the first control
- * with an outcome and stops, exactly as `RemoteHost` does.
+ * actually lives: on a *pending* connection the Burrow answers the first control
+ * with an outcome and stops, exactly as `BurrowRuntime` does.
  */
 export async function establish(fixture) {
-  const invitation = await fixture.host.mintInvitation();
+  const invitation = await fixture.burrow.mintInvitation();
   const paired = await fixture.client.pair({
     invitation,
     authenticator: fixture.authenticator,
@@ -166,14 +166,14 @@ export async function establish(fixture) {
   return connected;
 }
 
-/** Record the Host's e2e outcomes so a test can await one. */
-export function watch(host) {
+/** Record the Burrow's e2e outcomes so a test can await one. */
+export function watch(burrow) {
   const receipts = [];
   const errors = [];
   const opens = [];
-  host.on('e2e-receive', (ev) => receipts.push(ev));
-  host.on('e2e-error', (ev) => errors.push(ev));
-  host.on('e2e-open', (ev) => opens.push(ev));
+  burrow.on('e2e-receive', (ev) => receipts.push(ev));
+  burrow.on('e2e-error', (ev) => errors.push(ev));
+  burrow.on('e2e-open', (ev) => opens.push(ev));
   return { receipts, errors, opens };
 }
 

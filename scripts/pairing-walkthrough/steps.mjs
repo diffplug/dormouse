@@ -48,14 +48,14 @@ const SCAN_LABEL = 'Scan a setup code';
 const PAIRING_CODE_REGION = '[role="status"][aria-label="Pairing code"]';
 
 /**
- * The Host's pairing modal, by the id its own title carries.
+ * The Burrow's pairing modal, by the id its own title carries.
  *
  * **Not by its copy, and not by "the dialog with a numeric field".** Every
  * string on it is normative and under review
  * (`docs/specs/remote-security-model.md` → Pairing), and the Settings dialog
  * standing behind it holds numeric inputs of its own — so the one anchor that is
  * neither is `ModalFrame`'s `aria-labelledby`
- * (`lib/src/remote/host/RemotePairingModal.tsx`).
+ * (`lib/src/remote/burrow/RemotePairingModal.tsx`).
  */
 const PAIRING_MODAL = '[role="dialog"][aria-labelledby="remote-pairing-title"]';
 
@@ -111,7 +111,7 @@ const FOREIGN_ORIGIN = 'https://someone-elses-dormouse.example';
  */
 const SETUP_QR = 'svg[aria-label="Setup code for this machine"]';
 
-/** The Settings dialog's Remote control section, which every Host step reads. */
+/** The Settings dialog's Remote control section, which every Burrow step reads. */
 const REMOTE_SECTION = `[...document.querySelectorAll('[role="dialog"] section')]
   .find((el) => el.innerText.startsWith('Remote control'))`;
 
@@ -130,9 +130,9 @@ const RECONNECT_PROOF = 'reconnect-proof.txt';
 /**
  * A terminal notification, as WezTerm's OSC 777 spells it
  * (`docs/specs/terminal-escapes.md`). Typed at the laptop's shell from the
- * phone, so what rings is the Host's own alert manager.
+ * phone, so what rings is the Burrow's own alert manager.
  */
-const NOTIFY_SEQUENCE = String.raw`printf '\033]777;notify;Walkthrough;the Host is ringing\033\\'`;
+const NOTIFY_SEQUENCE = String.raw`printf '\033]777;notify;Walkthrough;the Burrow is ringing\033\\'`;
 
 /**
  * The workspace's built `remote-lib-common`, or `null` when it is not built.
@@ -161,12 +161,12 @@ async function setupTokenTtlMs(repoRoot) {
 }
 
 /**
- * The Host's own live code, re-emitted with a field changed.
+ * The Burrow's own live code, re-emitted with a field changed.
  *
  * **Through the shipped emitter and parser, never by editing the fragment.**
  * It is positional and carries no field names, so a harness that spliced
  * "field four" would go on splicing field four after somebody reordered the
- * grammar — and would write a code the Host could never have minted, which is
+ * grammar — and would write a code the Burrow could never have minted, which is
  * the one thing this scenario must not do. Parsed at the epoch, so a code that
  * rotated out from under the run still re-issues.
  */
@@ -177,15 +177,15 @@ async function reissueInvitation(ctx, url, { expiry, origin } = {}) {
   }
   const liveOrigin = new URL(url).origin;
   const invitation = await security.parsePairingInvitationUrl(url, liveOrigin, 0);
-  if (!invitation) throw new Error(`the Host's own setup code did not parse: ${url}`);
+  if (!invitation) throw new Error(`the Burrow's own setup code did not parse: ${url}`);
   return security.formatPairingInvitationUrl(origin ?? liveOrigin, {
     ...invitation,
     expiry: expiry ?? invitation.expiry,
   });
 }
 
-/** The Host webview is ready when its first terminal has an input to type into. */
-function hostReadyExpr(vitePort) {
+/** The Burrow webview is ready when its first terminal has an input to type into. */
+function burrowReadyExpr(vitePort) {
   return `return !!document.querySelector('textarea.xterm-helper-textarea')
     && location.href.indexOf(':${vitePort}') > -1;`;
 }
@@ -194,8 +194,8 @@ function hostReadyExpr(vitePort) {
  * Boot the real Relay with a state directory of its own.
  *
  * `DORMOUSE_STATE_DIR` under the run directory is what makes a run repeatable:
- * the default `./data` accumulates accounts, hosts and a VAPID keypair across
- * runs, so a second run would find the Host already enrolled and never show the
+ * the default `./data` accumulates accounts, burrows and a VAPID keypair across
+ * runs, so a second run would find the Burrow already enrolled and never show the
  * enroll form this walkthrough is here to drive.
  */
 async function stepRelay(ctx) {
@@ -261,32 +261,32 @@ async function stepRelay(ctx) {
 }
 
 /**
- * Boot the real Host in the `dev:standalone:ab` harness and wait for the app.
+ * Boot the real Burrow in the `dev:standalone:ab` harness and wait for the app.
  *
  * `DORMOUSE_REMOTE_CONNECT_SRC` has to be set *here*, at launch, not later: the
  * harness re-runs `pnpm stage` on the way up, which is what bakes the allowed
- * relay origins into `sidecar/remote-host.cjs`. Without it the Host refuses a
+ * relay origins into `sidecar/burrow.cjs`. Without it the Burrow refuses a
  * plain-HTTP localhost server and enrollment fails with a policy error.
  */
-async function stepHost(ctx) {
+async function stepBurrow(ctx) {
   const { repoRoot, opts } = ctx;
   const handle = spawnLogged('pnpm', ['dev:standalone:ab'], {
     cwd: repoRoot,
-    logPath: ctx.path('host.log'),
-    prefix: 'host',
+    logPath: ctx.path('burrow.log'),
+    prefix: 'burrow',
     env: {
       DORMOUSE_REMOTE_CONNECT_SRC: `${ctx.relayOrigin} ${ctx.relayOrigin.replace(/^http/, 'ws')}`,
       DORMOUSE_BROWSER_DEV_AB_SESSION: opts.session,
       DORMOUSE_BROWSER_DEV_VITE_PORT: String(opts.vitePort),
-      DORMOUSE_BROWSER_DEV_HOST_PORT: String(opts.hostPort),
+      DORMOUSE_BROWSER_DEV_BURROW_PORT: String(opts.burrowPort),
     },
   });
 
-  // The harness prints where the sidecar keeps the Host's enrollment + ACL. It
+  // The harness prints where the sidecar keeps the Burrow's enrollment + ACL. It
   // picks that path itself (a per-pid temp directory), so this is a read rather
   // than a setting — but it is the fact that makes every run start unenrolled,
   // so the summary records it.
-  const stateLine = await waitForLine(handle, /remote host state dir: (.+)$/, {
+  const stateLine = await waitForLine(handle, /\[burrow\] state dir: (.+)$/, {
     timeoutMs: 600_000,
     what: 'the sidecar to report its state directory',
   });
@@ -294,16 +294,16 @@ async function stepHost(ctx) {
     timeoutMs: 300_000,
     what: 'the harness to finish opening the app',
   });
-  ctx.record({ hostStateDir: stateLine[1].trim(), viteOrigin: ctx.viteOrigin });
+  ctx.record({ burrowStateDir: stateLine[1].trim(), viteOrigin: ctx.viteOrigin });
 
-  ctx.state.hostBrowser = new AgentBrowser(opts.session, repoRoot);
-  await ctx.state.hostBrowser.openUntil(ctx.viteOrigin, hostReadyExpr(opts.vitePort));
-  await ctx.shot('01-host-booted.png');
+  ctx.state.burrowBrowser = new AgentBrowser(opts.session, repoRoot);
+  await ctx.state.burrowBrowser.openUntil(ctx.viteOrigin, burrowReadyExpr(opts.vitePort));
+  await ctx.shot('01-burrow-booted.png');
 }
 
 /** Open Settings from the baseboard and scroll to Remote control. */
 async function stepSettings(ctx) {
-  const ab = ctx.state.hostBrowser;
+  const ab = ctx.state.burrowBrowser;
   await ab.run(['click', 'button[aria-label="Settings"]']);
   // The section is below the fold in a short window, and a screenshot is
   // viewport-only — so the wait scrolls it into view as it finds it.
@@ -320,12 +320,12 @@ async function stepSettings(ctx) {
 /**
  * Enrol through the form a user actually types into.
  *
- * Not `window.dormouseRemoteHost.enroll(...)`: that is the scripting seam, and
+ * Not `window.dormouseBurrow.enroll(...)`: that is the scripting seam, and
  * driving it would skip every piece of this walkthrough's subject — the form's
  * validation, its busy state, and the enrolled view it swaps itself for.
  */
 async function stepEnroll(ctx) {
-  const ab = ctx.state.hostBrowser;
+  const ab = ctx.state.burrowBrowser;
   const { opts } = ctx;
 
   await fillField(ctx, 'input[type="url"]', ctx.relayOrigin);
@@ -352,13 +352,13 @@ async function stepEnroll(ctx) {
   );
   if (!status.enrolled) throw new Error(`enrollment was refused: ${status.text}`);
 
-  // `connected` is the Host's relay socket, which is a second round trip after
+  // `connected` is the Burrow's relay socket, which is a second round trip after
   // the enrollment POST; a walkthrough that stops at "enrolled" would mint a
-  // setup code the Relay has no socket to tell this Host about.
+  // setup code the Relay has no socket to tell this Burrow about.
   await ab.waitUntil(
     `const section = ${REMOTE_SECTION};
      return section && /Connected/.test(section.innerText) ? true : null;`,
-    { what: 'the Host relay socket to connect', timeoutMs: 60_000 },
+    { what: 'the Burrow relay socket to connect', timeoutMs: 60_000 },
   );
   await ctx.shot('04-enrolled.png');
 }
@@ -372,7 +372,7 @@ async function stepEnroll(ctx) {
  * later.
  */
 async function stepQr(ctx) {
-  const ab = ctx.state.hostBrowser;
+  const ab = ctx.state.burrowBrowser;
   await ab.run(['find', 'role', 'button', 'click', '--name', 'Set up a phone', '--exact']);
   ctx.record({ setupTokenTtlMs: await setupTokenTtlMs(ctx.repoRoot) });
   await captureQr(ctx);
@@ -388,7 +388,7 @@ async function stepQr(ctx) {
  * it is.
  */
 async function captureQr(ctx) {
-  const ab = ctx.state.hostBrowser;
+  const ab = ctx.state.burrowBrowser;
 
   // One round trip for "it is there" and "here is where": a second read could
   // land after a rotation and measure a different code than the one captured.
@@ -515,7 +515,7 @@ async function stepPocket(ctx) {
 
   const chrome = resolveChrome();
   ctx.log(`pocket browser: ${chrome.path} (${chrome.from})`);
-  const port = await findFreePort(opts.hostPort + 100);
+  const port = await findFreePort(opts.burrowPort + 100);
   const userDataDir = ctx.path('pocket-profile');
   mkdirSync(userDataDir, { recursive: true });
   const launched = await launchChrome({
@@ -593,7 +593,7 @@ async function openPocket(ctx, ab, port) {
 
 /**
  * The real in-app path: scan, register, sign in, and read the two digits — then
- * check that the Host was interrupted by the same ceremony.
+ * check that the Burrow was interrupted by the same ceremony.
  *
  * Nothing here drives the client directly. The scan is the fake camera being
  * decoded by Pocket's own `@zxing` reader, and both passkey operations are the
@@ -601,7 +601,7 @@ async function openPocket(ctx, ab, port) {
  */
 async function stepCode(ctx) {
   const pocket = ctx.state.pocketBrowser;
-  const host = ctx.state.hostBrowser;
+  const burrow = ctx.state.burrowBrowser;
   if (!pocket) throw new Error('the pocket step has to run first');
 
   await ensureCapturedCodeIsLive(ctx);
@@ -633,18 +633,18 @@ async function stepCode(ctx) {
   ctx.state.signCount = credentials[0].signCount;
   ctx.record({ pairing: { code, credentials } });
 
-  // The Host's own interruption, which is the half of this ceremony the phone
+  // The Burrow's own interruption, which is the half of this ceremony the phone
   // cannot see: the pairing request reaches the webview and opens the modal.
-  const modalText = await host.waitUntil(pairingModalExpr(), {
-    what: "the Host's pairing modal to open",
+  const modalText = await burrow.waitUntil(pairingModalExpr(), {
+    what: "the Burrow's pairing modal to open",
     timeoutMs: 120_000,
   });
-  ctx.record({ hostPairingModal: modalText });
-  await ctx.shot('08-host-pairing-modal.png', host);
+  ctx.record({ burrowPairingModal: modalText });
+  await ctx.shot('08-burrow-pairing-modal.png', burrow);
 }
 
 /**
- * Make sure the Y4M the camera is about to read still holds the code the Host
+ * Make sure the Y4M the camera is about to read still holds the code the Burrow
  * is showing, re-capturing when it does not.
  *
  * The panel replaces its own code ahead of the TTL, and a run that is slow
@@ -654,13 +654,13 @@ async function stepCode(ctx) {
  * Relay still honours, and the failure would read as a broken scanner.
  */
 async function ensureCapturedCodeIsLive(ctx) {
-  const ab = ctx.state.hostBrowser;
+  const ab = ctx.state.burrowBrowser;
   const showing = await readInvitationUrl(ab);
   if (showing === ctx.state.invitationUrl) return;
   ctx.log(
     showing === null
       ? 'the setup panel is no longer showing a code; asking for a new one'
-      : 'the Host rotated its setup code since the capture; re-capturing',
+      : 'the Burrow rotated its setup code since the capture; re-capturing',
   );
   if (showing === null) {
     await ab.run(['find', 'role', 'button', 'click', '--name', 'New code', '--exact']);
@@ -697,7 +697,7 @@ async function openScanner(pocket) {
 
 /**
  * The two digits off the waiting screen — the only place they exist, since the
- * Host holds the expected ones and never sends them. The digit test stays,
+ * Burrow holds the expected ones and never sends them. The digit test stays,
  * because {@link PAIRING_CODE_REGION} holds a placeholder until the sampled
  * code lands.
  */
@@ -708,7 +708,7 @@ function pairingCodeExpr() {
     return /^\\d\\d$/.test(digits) ? digits : null;`;
 }
 
-/** The Host's pairing modal, as text, or null while it is not up. */
+/** The Burrow's pairing modal, as text, or null while it is not up. */
 function pairingModalExpr() {
   return `const modal = document.querySelector(${JSON.stringify(PAIRING_MODAL)});
     return modal ? modal.innerText.trim() : null;`;
@@ -719,31 +719,31 @@ function pairingModalExpr() {
  *
  * The half of the ceremony every earlier step was setting up. Each claim is
  * checked on the side that cannot fake it: the file the laptop's own shell
- * wrote, the authenticator's `signCount`, and the Host's alert arriving in the
+ * wrote, the authenticator's `signCount`, and the Burrow's alert arriving in the
  * phone's session list.
  */
 async function stepTerminal(ctx) {
   if (!ctx.state.pairingCode) throw new Error('the code step has to run first');
-  await approveOnHost(ctx);
-  await ctx.shot('09-host-approved.png');
+  await approveOnBurrow(ctx);
+  await ctx.shot('09-burrow-approved.png');
   await connectPocket(ctx);
   await runFromPocket(ctx);
-  await ringFromHost(ctx);
+  await ringFromBurrow(ctx);
   await leaveAndReconnect(ctx);
 }
 
 /**
  * Type digits into the modal and authorize.
  *
- * **One attempt.** The Host holds the expected code, compares it itself, and
+ * **One attempt.** The Burrow holds the expected code, compares it itself, and
  * every terminal outcome spends the invitation
  * (`docs/specs/remote-security-model.md` → Pairing) — so on the happy path a
  * mistyped field is not a retry, it is a failed run. `code` is what to type, so
  * the `wrong-code` scenario exercises exactly the same control with the wrong
  * value rather than a path of its own.
  */
-async function approveOnHost(ctx, { code = ctx.state.pairingCode, reports = OUTCOME_PAIRED } = {}) {
-  const ab = ctx.state.hostBrowser;
+async function approveOnBurrow(ctx, { code = ctx.state.pairingCode, reports = OUTCOME_PAIRED } = {}) {
+  const ab = ctx.state.burrowBrowser;
   await fillField(ctx, `${PAIRING_MODAL} input`, code);
   // The last button in the modal, and disabled until the field holds two
   // digits — so clicking it exercises that gate rather than working around it.
@@ -757,9 +757,9 @@ async function approveOnHost(ctx, { code = ctx.state.pairingCode, reports = OUTC
 }
 
 /** Cancel the request instead, which is the modal's first (and focused) button. */
-async function denyOnHost(ctx) {
+async function denyOnBurrow(ctx) {
   const cancel = await clickElement(
-    ctx.state.hostBrowser,
+    ctx.state.burrowBrowser,
     `const modal = document.querySelector(${JSON.stringify(PAIRING_MODAL)});
      return modal ? modal.querySelector('button') : null;`,
     "the pairing modal's cancel button",
@@ -778,7 +778,7 @@ async function denyOnHost(ctx) {
  * from catching the panel one event early.
  */
 async function settleDecision(ctx, reports) {
-  const ab = ctx.state.hostBrowser;
+  const ab = ctx.state.burrowBrowser;
   // The clock the next step reads too: what a person waits through is the span
   // from authorizing to a terminal on the phone, and the phone is usually
   // already there by the time the laptop has finished settling.
@@ -792,11 +792,11 @@ async function settleDecision(ctx, reports) {
     what: `the panel to report the pairing as “${reports}…”`,
     timeoutMs: 60_000,
   });
-  // On a pairing, the ACL the Host wrote is the second witness, and the enrolled
+  // On a pairing, the ACL the Burrow wrote is the second witness, and the enrolled
   // view counts it a status poll later.
   if (reports === OUTCOME_PAIRED) {
     await ab.waitUntil(pairedCountExpr(), {
-      what: 'the Host to count a paired phone',
+      what: 'the Burrow to count a paired phone',
       timeoutMs: 60_000,
     });
   }
@@ -845,19 +845,19 @@ async function pairedCount(ab) {
  * vanished, the count did not move, and the panel said the same sentence it says
  * after a success.
  */
-async function pairedNothing(ctx, { decide, hostShot, pocketShot, as, complaint, facts = {} }) {
-  const host = ctx.state.hostBrowser;
-  const before = await pairedCount(host);
+async function pairedNothing(ctx, { decide, burrowShot, pocketShot, as, complaint, facts = {} }) {
+  const burrow = ctx.state.burrowBrowser;
+  const before = await pairedCount(burrow);
   // Records the decision itself under `decision`, as the happy path's does.
   await decide(ctx);
-  await ctx.shot(hostShot);
+  await ctx.shot(burrowShot);
 
   // "Nothing was paired" is an absence, and the count is re-read on a 2 s poll
   // (`docs/specs/relay.md`), so it is given a cycle to move before being
   // believed — a count read the instant the outcome lands would pass whether or
-  // not the Host wrote a record.
+  // not the Burrow wrote a record.
   await delay(2_500);
-  const after = await pairedCount(host);
+  const after = await pairedCount(burrow);
   if (after !== before) {
     throw new Error(`${complaint}: ${before} → ${after} paired phones`);
   }
@@ -867,14 +867,14 @@ async function pairedNothing(ctx, { decide, hostShot, pocketShot, as, complaint,
 
 /**
  * Type the wrong two digits, which is the one mistake this ceremony does not
- * forgive: the Host spends its single attempt on the compare, so there is no
+ * forgive: the Burrow spends its single attempt on the compare, so there is no
  * retry and nothing is paired.
  */
 function stepWrongCode(ctx) {
   const typed = nextCode(ctx.state.pairingCode);
   return pairedNothing(ctx, {
-    decide: (c) => approveOnHost(c, { code: typed, reports: OUTCOME_CODE_MISMATCH }),
-    hostShot: '09-host-mismatch.png',
+    decide: (c) => approveOnBurrow(c, { code: typed, reports: OUTCOME_CODE_MISMATCH }),
+    burrowShot: '09-burrow-mismatch.png',
     pocketShot: '10-pocket-mismatch.png',
     as: 'mismatch',
     complaint: 'a mistyped code paired something',
@@ -885,8 +885,8 @@ function stepWrongCode(ctx) {
 /** Cancel the request on the laptop, which is the other way to pair nothing. */
 function stepDenied(ctx) {
   return pairedNothing(ctx, {
-    decide: denyOnHost,
-    hostShot: '09-host-cancelled.png',
+    decide: denyOnBurrow,
+    burrowShot: '09-burrow-cancelled.png',
     pocketShot: '10-pocket-cancelled.png',
     as: 'denial',
     complaint: 'a cancelled request paired something',
@@ -915,7 +915,7 @@ async function stepDeadCode(ctx) {
   const live = ctx.state.invitationUrl;
   if (!live) throw new Error('the qr step has to run first');
 
-  // Before the scanner mounts, or the camera — still pointed at the Host's live
+  // Before the scanner mounts, or the camera — still pointed at the Burrow's live
   // QR — decodes it and starts a real pairing underneath this one.
   await blankY4m(ctx.path('qr.y4m'));
 
@@ -991,7 +991,7 @@ async function recordPocketRefusal(ctx, shot, { announces = null, as = 'pocketRe
 
 /**
  * The phone after a refusal: no digits, an announced sentence, and the screen it
- * is on (`lib/src/remote/pocket-app/App.tsx` → `HostsView` and the scanner both
+ * is on (`lib/src/remote/pocket-app/App.tsx` → `BurrowsView` and the scanner both
  * carry exactly one `h1`, in a header).
  */
 function pocketRefusedExpr(prefix = null) {
@@ -1030,7 +1030,7 @@ async function connectPocket(ctx) {
 async function runFromPocket(ctx) {
   const proof = await proveCommand(ctx, TERMINAL_PROOF);
   // A second, weaker witness on the phone's own side, and the only one there is:
-  // both terminals render through WebGL, so the pane title — which the Host
+  // both terminals render through WebGL, so the pane title — which the Burrow
   // derives from the command line and ships in the directory snapshot — is the
   // one place Pocket displays anything the laptop's shell produced.
   const echoedInPaneTitle = ((await ctx.state.pocketBrowser.visibleText()) ?? '').includes(
@@ -1044,13 +1044,13 @@ async function runFromPocket(ctx) {
  * A notification on the laptop, seen on the phone.
  *
  * The escape is typed from Pocket only because that is where the caret already
- * is; what turns it into a ring is the Host's own alert manager, and the phone
+ * is; what turns it into a ring is the Burrow's own alert manager, and the phone
  * learns of it the one way it can — `ringing`/`hasTODO` on the directory
  * snapshot (`docs/specs/alert.md`,
- * `lib/src/remote/host/directory-collect.ts`). Push is off on a loopback
+ * `lib/src/remote/burrow/directory-collect.ts`). Push is off on a loopback
  * origin, so this is the in-session path and the whole of it.
  */
-async function ringFromHost(ctx) {
+async function ringFromBurrow(ctx) {
   const pocket = ctx.state.pocketBrowser;
   // The notification rides in front of a file write, so its delivery is settled
   // before anything is asserted about the screen — a ring that never arrives is
@@ -1061,12 +1061,12 @@ async function ringFromHost(ctx) {
   // **The row has to be *this* notification's.** Waiting for any row with a
   // TODO would be satisfied instantly by one left over from an earlier command
   // — the assertion would pass having proved nothing — so the row must also be
-  // ringing and carry the escape in the title the Host derived from the command
+  // ringing and carry the escape in the title the Burrow derived from the command
   // line, which is the one thing only this command could have produced.
   const row = await pocket.waitUntil(
     `${sessionRowsExpr()}
      return rows && rows.find((r) => r.todo && r.ringing && r.text.includes('777;notify')) || null;`,
-    { what: "the Host's notification to reach the phone's session list", timeoutMs: 60_000 },
+    { what: "the Burrow's notification to reach the phone's session list", timeoutMs: 60_000 },
   );
   ctx.record({
     notification: {
@@ -1083,27 +1083,27 @@ async function ringFromHost(ctx) {
 
 /**
  * Leave the wall and come back the way a phone comes back from a dropped socket
- * (`docs/specs/relay.md` → "Running it"): the Hosts view, then Connect.
+ * (`docs/specs/relay.md` → "Running it"): the Burrows view, then Connect.
  *
- * Also the only screenshot of the Hosts view with a row on it — every earlier
+ * Also the only screenshot of the Burrows view with a row on it — every earlier
  * step passes straight through it.
  */
 async function leaveAndReconnect(ctx) {
   const pocket = ctx.state.pocketBrowser;
   await clickElement(pocket, `return document.querySelector('header button');`, "Pocket's back button");
-  const row = await pocket.waitUntil(hostRowExpr(), {
-    what: 'the Hosts view to list the paired computer',
+  const row = await pocket.waitUntil(burrowRowExpr(), {
+    what: 'the Burrows view to list the paired computer',
     timeoutMs: 60_000,
   });
-  await ctx.shot('13-pocket-hosts.png', pocket);
+  await ctx.shot('13-pocket-burrows.png', pocket);
 
-  await clickElement(pocket, hostRowActionExpr(), "the Hosts row's own action");
+  await clickElement(pocket, burrowRowActionExpr(), "the Burrows row's own action");
   await pocket.waitUntil(wallReadyExpr(), {
     what: 'Pocket to reconnect',
     timeoutMs: 120_000,
     intervalMs: 250,
   });
-  // A reconnect is a whole fresh ceremony — new handshake, new Host challenge,
+  // A reconnect is a whole fresh ceremony — new handshake, new Burrow challenge,
   // new assertion — so the count has to move again.
   const signCount = await assertAsserted(ctx, 'the reconnect');
   await ctx.shot('14-pocket-reconnected.png', pocket);
@@ -1224,7 +1224,7 @@ function wallReadyExpr() {
 /**
  * The session list as the reserve renders it, found by position rather than by
  * class: it is the block directly under the input-mode selector, and each row is
- * one button carrying the pane's title, its TODO pill, and — when the Host says
+ * one button carrying the pane's title, its TODO pill, and — when the Burrow says
  * the pane is ringing — a second icon, the bell
  * (`lib/src/components/MobileTerminalUi.tsx`).
  *
@@ -1242,17 +1242,17 @@ function sessionRowsExpr() {
 }
 
 /**
- * The one Hosts row, anchored on the Remove button's label — the only string on
+ * The one Burrows row, anchored on the Remove button's label — the only string on
  * that screen that is an accessibility contract rather than copy — and read
  * outwards from it: the row's action is Remove's previous sibling, and the row
- * is its grandparent (`lib/src/remote/pocket-app/App.tsx` → `HostsView`).
+ * is its grandparent (`lib/src/remote/pocket-app/App.tsx` → `BurrowsView`).
  */
-function hostRowActionExpr() {
+function burrowRowActionExpr() {
   return `const remove = document.querySelector('button[aria-label^="Remove "]');
     return remove ? remove.previousElementSibling : null;`;
 }
 
-function hostRowExpr() {
+function burrowRowExpr() {
   return `const remove = document.querySelector('button[aria-label^="Remove "]');
     if (!remove) return null;
     const action = remove.previousElementSibling;
@@ -1274,7 +1274,7 @@ function shellQuote(value) {
  * change, so a run in which it fires is a run where the honest path is broken:
  * it says so out loud rather than passing quietly.
  */
-async function fillField(ctx, selector, value, ab = ctx.state.hostBrowser) {
+async function fillField(ctx, selector, value, ab = ctx.state.burrowBrowser) {
   await ab.run(['fill', selector, value]);
   const seen = await ab.eval(`const el = document.querySelector(${JSON.stringify(selector)});
     return el ? el.value : null;`);
@@ -1291,7 +1291,7 @@ async function fillField(ctx, selector, value, ab = ctx.state.hostBrowser) {
 }
 
 /**
- * Everything before anything is scanned: a Relay, a Host, an enrollment, a QR,
+ * Everything before anything is scanned: a Relay, a Burrow, an enrollment, a QR,
  * and a phone. Named rather than counted from the end of {@link PRELUDE},
  * because `expired-code` is exactly "this and no scan" — and a step appended to
  * the prelude must not silently start a ceremony that scenario says it never
@@ -1299,7 +1299,7 @@ async function fillField(ctx, selector, value, ab = ctx.state.hostBrowser) {
  */
 const SETUP = [
   { name: 'server', title: 'Start the coordinating Relay', run: stepRelay },
-  { name: 'host', title: 'Start the Host in the agent-browser harness', run: stepHost },
+  { name: 'burrow', title: 'Start the Burrow in the agent-browser harness', run: stepBurrow },
   { name: 'settings', title: 'Open Settings → Remote control', run: stepSettings },
   { name: 'enroll', title: 'Enroll this machine through the form', run: stepEnroll },
   { name: 'qr', title: 'Open the phone-setup panel and capture its QR', run: stepQr },
@@ -1334,7 +1334,7 @@ export const SCENARIOS = {
       'a phone paired from a QR runs a command the laptop’s own shell answers, and hears it ring',
     steps: [
       ...PRELUDE,
-      { name: 'terminal', title: 'Approve on the Host and prove the terminal', run: stepTerminal },
+      { name: 'terminal', title: 'Approve on the Burrow and prove the terminal', run: stepTerminal },
     ],
   },
   'wrong-code': {

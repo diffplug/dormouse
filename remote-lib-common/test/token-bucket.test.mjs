@@ -1,6 +1,6 @@
 /**
- * The shared token bucket. Its two consumers — the Host's crypto budget
- * (`lib/src/remote/host/remote-host.ts`) and the Relay's Host-enrollment
+ * The shared token bucket. Its two consumers — the Burrow's crypto budget
+ * (`lib/src/remote/burrow/burrow-runtime.ts`) and the Relay's Burrow-enrollment
  * admission (`relay/src/app.ts`) — pin their own wiring; what this file pins
  * is the refill arithmetic both rely on.
  */

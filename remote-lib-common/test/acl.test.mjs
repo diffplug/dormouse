@@ -4,8 +4,8 @@ import assert from 'node:assert/strict';
 import {
   CLIENT_STATIC_PUBLIC_KEY_LENGTH,
   DELIVERY_ID_LENGTH,
-  HostAcl,
-  isHostAclRecord,
+  BurrowAcl,
+  isBurrowAclRecord,
 } from '../dist/index.js';
 import { FakeClock } from './harness/actors.mjs';
 
@@ -23,13 +23,13 @@ const CLIENT = {
   passkeyPublicKeyHash: 'hash-1',
   clientStaticPublicKey: CLIENT_1,
   deliveryId: delivery('del1'),
-  approvedBy: 'host-user',
+  approvedBy: 'burrow-user',
   label: 'iPhone Safari',
 };
 
 function makeAcl() {
   const clock = new FakeClock();
-  return { clock, acl: new HostAcl('host-1', { now: clock.now }) };
+  return { clock, acl: new BurrowAcl('burrow-1', { now: clock.now }) };
 }
 
 test('approve stores the full record', () => {
@@ -37,13 +37,13 @@ test('approve stores the full record', () => {
   const record = acl.approve(CLIENT);
   assert.deepEqual(record, {
     ...CLIENT,
-    hostId: 'host-1',
+    burrowId: 'burrow-1',
     approvedAt: clock.now(),
     revokedAt: null,
   });
   assert.deepEqual(acl.records(), [record]);
   // What approve writes must be what a store can read back.
-  assert.equal(isHostAclRecord(record), true);
+  assert.equal(isBurrowAclRecord(record), true);
 });
 
 test('findActive requires passkey AND Client static on the same record', () => {
@@ -180,16 +180,16 @@ test('records round-trip through fromRecords (persistence)', () => {
   clock.advance(1000);
   acl.approve({ ...CLIENT, clientStaticPublicKey: CLIENT_2 });
   acl.revokeClient(CLIENT_1);
-  const restored = HostAcl.fromRecords('host-1', acl.records(), { now: clock.now });
+  const restored = BurrowAcl.fromRecords('burrow-1', acl.records(), { now: clock.now });
   assert.deepEqual(restored.records(), acl.records());
   assert.equal(restored.hasActiveClient(CLIENT_1), false);
   assert.equal(restored.hasActiveClient(CLIENT_2), true);
 });
 
-test('fromRecords refuses records from another host', () => {
+test('fromRecords refuses records from another burrow', () => {
   const { acl } = makeAcl();
   acl.approve(CLIENT);
-  assert.throws(() => HostAcl.fromRecords('host-2', acl.records()), /cannot be loaded/);
+  assert.throws(() => BurrowAcl.fromRecords('burrow-2', acl.records()), /cannot be loaded/);
 });
 
 test('returned records are copies — mutating them cannot alter the ACL', () => {
@@ -200,27 +200,27 @@ test('returned records are copies — mutating them cannot alter the ACL', () =>
   assert.equal(acl.activeRecords().length, 1);
 });
 
-// --- isHostAclRecord: the whole of the Host-ACL version --------------------
+// --- isBurrowAclRecord: the whole of the Burrow-ACL version --------------------
 
 const STORED = {
-  hostId: 'host-1',
+  burrowId: 'burrow-1',
   accountId: 'account-1',
   passkeyCredentialId: 'cred-1',
   passkeyPublicKeyHash: 'hash-1',
   clientStaticPublicKey: CLIENT_1,
   deliveryId: delivery('del1'),
   approvedAt: 1,
-  approvedBy: 'host-user',
+  approvedBy: 'burrow-user',
   label: 'iPhone Safari',
   revokedAt: null,
 };
 
-test('isHostAclRecord accepts a stored v2 row, revoked or not', () => {
-  assert.equal(isHostAclRecord(STORED), true);
-  assert.equal(isHostAclRecord({ ...STORED, revokedAt: 2 }), true);
+test('isBurrowAclRecord accepts a stored v2 row, revoked or not', () => {
+  assert.equal(isBurrowAclRecord(STORED), true);
+  assert.equal(isBurrowAclRecord({ ...STORED, revokedAt: 2 }), true);
 });
 
-test('isHostAclRecord drops a record written before the E2E cutover', () => {
+test('isBurrowAclRecord drops a record written before the E2E cutover', () => {
   // The reset-and-re-pair the scope requires, with no migration reader
   // anywhere: a legacy row carries a `devicePublicKey` and neither E2E field,
   // so it fails here and is dropped on read rather than reaching the
@@ -228,16 +228,16 @@ test('isHostAclRecord drops a record written before the E2E cutover', () => {
   const legacy = { ...STORED, devicePublicKey: 'BLegacyDeviceKey' };
   delete legacy.clientStaticPublicKey;
   delete legacy.deliveryId;
-  assert.equal(isHostAclRecord(legacy), false);
+  assert.equal(isBurrowAclRecord(legacy), false);
   // A row that kept the device key *and* gained the new fields is still a
   // valid record — the extra key is inert, and refusing it would be a
   // migration reader by another name.
-  assert.equal(isHostAclRecord({ ...STORED, devicePublicKey: 'BLegacyDeviceKey' }), true);
+  assert.equal(isBurrowAclRecord({ ...STORED, devicePublicKey: 'BLegacyDeviceKey' }), true);
 });
 
-test('isHostAclRecord requires both E2E fields at their exact length', () => {
+test('isBurrowAclRecord requires both E2E fields at their exact length', () => {
   // Exact, not bounded: both are base64url of 32 bytes, and a record whose
-  // halves are the wrong size is not one this Host wrote.
+  // halves are the wrong size is not one this Burrow wrote.
   for (const field of ['clientStaticPublicKey', 'deliveryId']) {
     for (const value of [
       undefined,
@@ -251,7 +251,7 @@ test('isHostAclRecord requires both E2E fields at their exact length', () => {
       `${'A'.repeat(41)} A`,
     ]) {
       assert.equal(
-        isHostAclRecord({ ...STORED, [field]: value }),
+        isBurrowAclRecord({ ...STORED, [field]: value }),
         false,
         `${field}=${JSON.stringify(value)}`,
       );
@@ -259,14 +259,14 @@ test('isHostAclRecord requires both E2E fields at their exact length', () => {
   }
 });
 
-test('isHostAclRecord rejects a non-object and every missing or mistyped field', () => {
+test('isBurrowAclRecord rejects a non-object and every missing or mistyped field', () => {
   for (const record of [
     null,
     undefined,
     'nope',
     42,
     {},
-    { ...STORED, hostId: 42 },
+    { ...STORED, burrowId: 42 },
     { ...STORED, accountId: undefined },
     { ...STORED, passkeyCredentialId: null },
     { ...STORED, passkeyPublicKeyHash: {} },
@@ -275,6 +275,6 @@ test('isHostAclRecord rejects a non-object and every missing or mistyped field',
     { ...STORED, label: undefined },
     { ...STORED, revokedAt: 'never' },
   ]) {
-    assert.equal(isHostAclRecord(record), false, JSON.stringify(record));
+    assert.equal(isBurrowAclRecord(record), false, JSON.stringify(record));
   }
 });

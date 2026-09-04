@@ -38,25 +38,25 @@ import {
 
 /** A completed IK handshake, wrapped both ends in transport sessions. */
 async function established({ prologue = e2eConnectionPrologue('h', 'c') } = {}) {
-  const hostStatic = await generateNoiseKeyPair();
+  const burrowStatic = await generateNoiseKeyPair();
   const clientStatic = await generateNoiseKeyPair();
   const initiator = await createNoiseInitiator({
     prologue,
     staticKeyPair: clientStatic,
-    remoteStaticPublicKey: hostStatic.publicKey,
+    remoteStaticPublicKey: burrowStatic.publicKey,
   });
-  const responder = await createNoiseResponder({ prologue, staticKeyPair: hostStatic });
+  const responder = await createNoiseResponder({ prologue, staticKeyPair: burrowStatic });
   await responder.readMessage(await initiator.writeMessage());
   await initiator.readMessage(await responder.writeMessage());
   return {
     client: new NoiseTransportSession(initiator.session),
-    host: new NoiseTransportSession(responder.session),
+    burrow: new NoiseTransportSession(responder.session),
     // The raw `Split` states, so a test can put a plaintext on the wire that
     // authenticates and is still not framing. The wrapper holds these exact
     // objects, so the counters stay shared.
     clientNoise: initiator.session,
     clientStatic,
-    hostStatic,
+    burrowStatic,
   };
 }
 
@@ -329,20 +329,20 @@ test('a stream body larger than one Noise message is refused on both sides', () 
 
 // --- Prologues -------------------------------------------------------------
 
-test('the connection prologue is the domain, kind, hostId, and connection id', () => {
+test('the connection prologue is the domain, kind, burrowId, and connection id', () => {
   assert.deepEqual(
-    e2eConnectionPrologue('host-1', 'conn-1'),
+    e2eConnectionPrologue('burrow-1', 'conn-1'),
     lengthPrefixedConcat(
-      [E2E_PROLOGUE_DOMAIN, 'connection', 'host-1', 'conn-1'].map((f) => utf8Encode(f)),
+      [E2E_PROLOGUE_DOMAIN, 'connection', 'burrow-1', 'conn-1'].map((f) => utf8Encode(f)),
     ),
   );
 });
 
 test('the pairing prologue binds every invitation field, positionally', () => {
   assert.deepEqual(
-    e2ePairingPrologue('host-1', ['inv', 'exp']),
+    e2ePairingPrologue('burrow-1', ['inv', 'exp']),
     lengthPrefixedConcat(
-      [E2E_PROLOGUE_DOMAIN, 'pairing', 'host-1', 'inv', 'exp'].map((f) => utf8Encode(f)),
+      [E2E_PROLOGUE_DOMAIN, 'pairing', 'burrow-1', 'inv', 'exp'].map((f) => utf8Encode(f)),
     ),
   );
   // Length prefixes are what make the fields un-mergeable: two different
@@ -355,26 +355,26 @@ test('the pairing prologue binds every invitation field, positionally', () => {
 // --- The session -----------------------------------------------------------
 
 test('keepalive, control, and app messages round-trip through a real handshake', async () => {
-  const { client, host } = await established();
-  assert.deepEqual(client.handshakeHash, host.handshakeHash);
+  const { client, burrow } = await established();
+  assert.deepEqual(client.handshakeHash, burrow.handshakeHash);
 
-  assert.deepEqual(host.receive(client.sendKeepalive()), { kind: 'keepalive' });
-  assert.deepEqual(host.receive(client.sendControl({ hello: 'world' })), {
+  assert.deepEqual(burrow.receive(client.sendKeepalive()), { kind: 'keepalive' });
+  assert.deepEqual(burrow.receive(client.sendControl({ hello: 'world' })), {
     kind: 'control',
     value: { hello: 'world' },
   });
 
   const payload = utf8Encode('remote-api rides in here');
   const [ct] = client.sendApp(payload);
-  assert.deepEqual(host.receive(ct), { kind: 'app', messages: [payload] });
+  assert.deepEqual(burrow.receive(ct), { kind: 'app', messages: [payload] });
 
-  // And back the other way, on the Host's own send state.
+  // And back the other way, on the Burrow's own send state.
   const reply = utf8Encode('and back');
-  assert.deepEqual(client.receive(host.sendApp(reply)[0]), { kind: 'app', messages: [reply] });
+  assert.deepEqual(client.receive(burrow.sendApp(reply)[0]), { kind: 'app', messages: [reply] });
 });
 
 test('a 100 KiB application message reassembles byte-exact over the wire', async () => {
-  const { client, host } = await established();
+  const { client, burrow } = await established();
   const message = new Uint8Array(100 * 1024);
   for (let i = 0; i < message.length; i++) message[i] = (i * 31) & 0xff;
 
@@ -383,93 +383,93 @@ test('a 100 KiB application message reassembles byte-exact over the wire', async
   assert.ok(ciphertexts.every((ct) => ct.length <= NOISE_MAX_MESSAGE_LENGTH));
 
   const received = [];
-  for (const ct of ciphertexts) received.push(...host.receive(ct).messages);
+  for (const ct of ciphertexts) received.push(...burrow.receive(ct).messages);
   assert.equal(received.length, 1);
   assert.deepEqual(received[0], message);
 });
 
 test('the send and receive states are directional: a reflected frame is rejected', async () => {
-  const { client, host } = await established();
+  const { client, burrow } = await established();
   const ct = client.sendKeepalive();
   assert.throws(() => client.receive(ct), NoiseError, 'a sender cannot read its own frame');
   assert.equal(client.isPoisoned, true);
   // The peer is unaffected — but the frame is now at the wrong counter for it.
-  assert.deepEqual(host.receive(ct), { kind: 'keepalive' });
+  assert.deepEqual(burrow.receive(ct), { kind: 'keepalive' });
 });
 
 test('a replayed frame poisons the session permanently', async () => {
-  const { client, host } = await established();
+  const { client, burrow } = await established();
   const first = client.sendKeepalive();
   const second = client.sendKeepalive();
-  assert.deepEqual(host.receive(first), { kind: 'keepalive' });
+  assert.deepEqual(burrow.receive(first), { kind: 'keepalive' });
 
-  assert.throws(() => host.receive(first), NoiseError, 'replay must not decrypt');
-  assert.equal(host.isPoisoned, true);
+  assert.throws(() => burrow.receive(first), NoiseError, 'replay must not decrypt');
+  assert.equal(burrow.isPoisoned, true);
   // Every later call throws, including the frame that would have been valid.
-  assert.throws(() => host.receive(second), NoiseError);
-  assert.throws(() => host.sendKeepalive(), NoiseError);
+  assert.throws(() => burrow.receive(second), NoiseError);
+  assert.throws(() => burrow.sendKeepalive(), NoiseError);
 });
 
 test('a reordered frame poisons the session', async () => {
-  const { client, host } = await established();
+  const { client, burrow } = await established();
   const first = client.sendKeepalive();
   const second = client.sendKeepalive();
-  assert.throws(() => host.receive(second), NoiseError, 'a gap is a decrypt failure');
-  assert.throws(() => host.receive(first), NoiseError);
+  assert.throws(() => burrow.receive(second), NoiseError, 'a gap is a decrypt failure');
+  assert.throws(() => burrow.receive(first), NoiseError);
 });
 
 test('a failed decrypt does not advance the receive counter', async () => {
-  const { client, host } = await established();
+  const { client, burrow } = await established();
   const ct = client.sendKeepalive();
   const tampered = new Uint8Array(ct);
   tampered[0] ^= 0x01;
-  const before = host.receiveNonce;
-  assert.throws(() => host.receive(tampered), NoiseError);
-  assert.equal(host.receiveNonce, before, 'one injected frame must not lock out the real sender');
+  const before = burrow.receiveNonce;
+  assert.throws(() => burrow.receive(tampered), NoiseError);
+  assert.equal(burrow.receiveNonce, before, 'one injected frame must not lock out the real sender');
 });
 
 test('an over-size send is refused without destroying the session', async () => {
   // Nothing reached the wire and no counter moved, so the stream is exactly as
   // synchronized as it was; killing it would cost a re-handshake and fresh
   // user presence for what is a caller's size error.
-  const { client, host } = await established();
+  const { client, burrow } = await established();
   assert.throws(() => client.sendApp(new Uint8Array(MAX_APP_MESSAGE_LENGTH + 1)), NoiseError);
   assert.throws(() => client.sendControl({ big: 'x'.repeat(CONTROL_PAYLOAD_SIZE) }), NoiseError);
   assert.equal(client.isPoisoned, false);
-  assert.deepEqual(host.receive(client.sendKeepalive()), { kind: 'keepalive' });
+  assert.deepEqual(burrow.receive(client.sendKeepalive()), { kind: 'keepalive' });
 });
 
 test('a control message with an embedded NUL survives the padding strip', async () => {
   // The decoder strips trailing NULs to find the JSON inside the padding. That
   // can never truncate a legitimate message: `JSON.stringify` escapes a NUL as
   // the six characters `\u0000`, so its output never ends in a NUL byte.
-  const { client, host } = await established();
+  const { client, burrow } = await established();
   const value = { note: 'a\u0000b', trailing: 'c\u0000' };
   assert.ok(!utf8Encode(JSON.stringify(value)).includes(0), 'no NUL byte reaches the padding');
-  assert.deepEqual(host.receive(client.sendControl(value)), { kind: 'control', value });
+  assert.deepEqual(burrow.receive(client.sendControl(value)), { kind: 'control', value });
 });
 
 test('a framing violation poisons the session even though the ciphertext was valid', async () => {
-  const { client, host, clientNoise } = await established();
+  const { client, burrow, clientNoise } = await established();
   // A plaintext that authenticates perfectly and is still not framing: the
   // Noise layer is happy, so only the decoder can reject it.
   const ct = clientNoise.send.encryptWithAd(EMPTY, Uint8Array.of(0x7f, 1, 2));
-  assert.throws(() => host.receive(ct), NoiseError);
-  assert.equal(host.isPoisoned, true);
-  assert.throws(() => host.receive(client.sendKeepalive()), NoiseError, 'poison is permanent');
+  assert.throws(() => burrow.receive(ct), NoiseError);
+  assert.equal(burrow.isPoisoned, true);
+  assert.throws(() => burrow.receive(client.sendKeepalive()), NoiseError, 'poison is permanent');
 });
 
 test('the transcript binds the prologue: a mismatch fails message 1', async () => {
-  const hostStatic = await generateNoiseKeyPair();
+  const burrowStatic = await generateNoiseKeyPair();
   const clientStatic = await generateNoiseKeyPair();
   const initiator = await createNoiseInitiator({
-    prologue: e2eConnectionPrologue('host-1', 'conn-1'),
+    prologue: e2eConnectionPrologue('burrow-1', 'conn-1'),
     staticKeyPair: clientStatic,
-    remoteStaticPublicKey: hostStatic.publicKey,
+    remoteStaticPublicKey: burrowStatic.publicKey,
   });
   const responder = await createNoiseResponder({
-    prologue: e2eConnectionPrologue('host-1', 'conn-2'),
-    staticKeyPair: hostStatic,
+    prologue: e2eConnectionPrologue('burrow-1', 'conn-2'),
+    staticKeyPair: burrowStatic,
   });
   const message1 = await initiator.writeMessage();
   await assert.rejects(() => responder.readMessage(message1), NoiseError);

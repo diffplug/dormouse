@@ -4,20 +4,20 @@
  * "Push will be sent to …".
  *
  * Renderer-only derived state, deliberately not an app-global store relayed
- * host-ward: it is neither persisted nor edited, so it pays none of the
+ * burrow-ward: it is neither persisted nor edited, so it pays none of the
  * per-store relay cost `docs/specs/transport.md` warns about.
  *
- * It lives in `lib/src/lib/` rather than beside the remote Host because the
- * dialog is in every bundle while the Host is lazily loaded in standalone only.
- * The Host writes; the dialog reads; a build without a Host leaves it at
- * `no-host` forever, which is exactly what the UI should say.
+ * It lives in `lib/src/lib/` rather than beside the Burrow because the
+ * dialog is in every bundle while the Burrow is lazily loaded in standalone only.
+ * The Burrow writes; the dialog reads; a build without a Burrow leaves it at
+ * `no-burrow` forever, which is exactly what the UI should say.
  */
 
 export interface PushDevice {
   /**
-   * Human name from the Host's ACL record, e.g. `iPhone Safari` — and nothing
+   * Human name from the Burrow's ACL record, e.g. `iPhone Safari` — and nothing
    * else. The record's `deliveryId` is a bearer capability for that Client's
-   * push rows, so it stays on the Host side of the bridge; the dialog renders a
+   * push rows, so it stays on the Burrow side of the bridge; the dialog renders a
    * label and never addresses a device (`docs/specs/security-remote.md` → "What crosses the
    * boundary").
    */
@@ -25,8 +25,8 @@ export interface PushDevice {
 }
 
 export type PushDevicesStatus =
-  /** No remote Host is running, so push has nowhere to go. */
-  | 'no-host'
+  /** No Burrow is running, so push has nowhere to go. */
+  | 'no-burrow'
   /** Asking the server which devices are subscribed. */
   | 'loading'
   | 'ready'
@@ -38,7 +38,7 @@ export interface PushDevicesState {
   devices: PushDevice[];
 }
 
-const EMPTY: PushDevicesState = { status: 'no-host', devices: [] };
+const EMPTY: PushDevicesState = { status: 'no-burrow', devices: [] };
 
 let state: PushDevicesState = EMPTY;
 let refresh: (() => void) | null = null;
@@ -62,8 +62,8 @@ export function setPushDevices(next: PushDevicesState): void {
 }
 
 /**
- * Install the Host's re-read of the device list, so a consumer can ask for a
- * fresh one without importing the Host (which is lazily loaded and absent from
+ * Install the Burrow's re-read of the device list, so a consumer can ask for a
+ * fresh one without importing the Burrow (which is lazily loaded and absent from
  * most bundles). Cleared by {@link resetPushDevices}.
  */
 export function setPushDevicesRefresher(next: (() => void) | null): void {
@@ -71,9 +71,9 @@ export function setPushDevicesRefresher(next: (() => void) | null): void {
 }
 
 /**
- * Ask the Host to re-read the list, if one is running. Called when the Alarm
+ * Ask the Burrow to re-read the list, if one is running. Called when the Alarm
  * settings dialog opens: subscriptions come and go on the phone long after the
- * Host started, so a list only fetched at startup would name the wrong devices
+ * Burrow started, so a list only fetched at startup would name the wrong devices
  * — or none — for the rest of the session.
  */
 export function refreshPushDevicesNow(): void {
@@ -81,18 +81,18 @@ export function refreshPushDevicesNow(): void {
 }
 
 /**
- * Back to `no-host`, keeping the refresher: the enrolled gate's disarm when the
- * Host goes away, where the dialog must stop naming devices nothing can reach
- * but may still be opened and told `no-host` (`lib/src/remote/host/activation.ts`).
+ * Back to `no-burrow`, keeping the refresher: the enrolled gate's disarm when the
+ * Burrow goes away, where the dialog must stop naming devices nothing can reach
+ * but may still be opened and told `no-burrow` (`lib/src/remote/burrow/activation.ts`).
  */
 export function clearPushDevices(): void {
   setPushDevices(EMPTY);
 }
 
 /**
- * Full teardown: back to `no-host` *and* no refresher — a story or a test that
+ * Full teardown: back to `no-burrow` *and* no refresher — a story or a test that
  * finished, where the closure that would answer is going away too. Anything that
- * only means "the Host is gone" wants {@link clearPushDevices}.
+ * only means "the Burrow is gone" wants {@link clearPushDevices}.
  */
 export function resetPushDevices(): void {
   refresh = null;

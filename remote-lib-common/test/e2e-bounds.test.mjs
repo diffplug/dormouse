@@ -1,7 +1,7 @@
 /**
  * The shared end-to-end session bounds
- * (docs/specs/remote-security-model.md -> Host bounds). What the Host does with
- * them is `lib/src/remote/host/remote-host-bounds.test.ts`; what this file
+ * (docs/specs/remote-security-model.md -> Burrow bounds). What the Burrow does with
+ * them is `lib/src/remote/burrow/burrow-bounds.test.ts`; what this file
  * pins is the relationships between them, which is the part two endpoints
  * would otherwise disagree about.
  */
@@ -31,7 +31,7 @@ test('the established-session cap sits above the pending caps', () => {
 });
 
 // The three numbers the spec names in prose, so a bound cannot move without the
-// text that documents it (`docs/specs/remote-security-model.md` -> Host bounds).
+// text that documents it (`docs/specs/remote-security-model.md` -> Burrow bounds).
 test('the values the spec names are the values that ship', () => {
   assert.equal(MAX_ESTABLISHED_E2E_SESSIONS, 16);
   assert.equal(E2E_KEEPALIVE_INTERVAL_MS, 30_000);

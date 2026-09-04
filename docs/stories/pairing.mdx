@@ -5,7 +5,7 @@ import * as Pairing from '../../lib/src/stories/RemotePairingModal.stories';
 import * as SetupOrSignin from '../../lib/src/stories/SetupOrSignin.stories';
 import * as ScanInvitation from '../../lib/src/stories/ScanInvitation.stories';
 import * as PairingCode from '../../lib/src/stories/PairingCodeView.stories';
-import * as HostsView from '../../lib/src/stories/HostsView.stories';
+import * as BurrowsView from '../../lib/src/stories/BurrowsView.stories';
 import * as PocketWall from '../../lib/src/stories/PocketWall.stories';
 
 <Meta title="Pairing/Self-hosted walkthrough" />
@@ -13,7 +13,7 @@ import * as PocketWall from '../../lib/src/stories/PocketWall.stories';
 # Pairing a phone with your laptop
 
 Everything it takes to control a laptop's terminals from a phone, in the order
-you meet it: stand up a Relay, build a Host that is allowed to reach it, enroll
+you meet it: stand up a Relay, build a Burrow that is allowed to reach it, enroll
 the laptop, scan its code with the phone, approve the pairing, connect.
 
 The screens below are the real components, rendered from the same stories
@@ -34,9 +34,9 @@ by default, and its state — a painted terminal — only exists after it runs.
 
 | Term | Who that is here |
 | --- | --- |
-| **Client** (Dormouse Pocket) | the phone. Holds a passkey and one X25519 key per paired Host. |
-| **Host** (Dormouse Terminal) | the laptop being controlled. Holds the ACL. **Final authority for access decisions.** |
-| **Relay** | the coordinating service: accounts, passkey registration, challenges, and relay. *Not* the authority for Host access, and it reads none of what it relays. |
+| **Client** (Dormouse Pocket) | the phone. Holds a passkey and one X25519 key per paired Burrow. |
+| **Burrow** (Dormouse Terminal) | the laptop being controlled. Holds the ACL. **Final authority for access decisions.** |
+| **Relay** | the coordinating service: accounts, passkey registration, challenges, and relay. *Not* the authority for Burrow access, and it reads none of what it relays. |
 
 Access is deliberately split across five layers, and a connection needs all of
 them to agree:
@@ -45,9 +45,9 @@ them to agree:
 | --- | --- |
 | Noise channel | Confidentiality, and both endpoints' long-term keys |
 | Passkey | Fresh user presence, *inside* that channel |
-| Client static | Long-lived client identity, one X25519 key per Host |
-| Host ACL | Authorization |
-| Host | Final access decision |
+| Client static | Long-lived client identity, one X25519 key per Burrow |
+| Burrow ACL | Authorization |
+| Burrow | Final access decision |
 
 Two consequences shape every screen after this one. **Adding a passkey to your
 account does not grant a new phone access to any machine** — passkeys sync,
@@ -71,7 +71,7 @@ checkout into a self-contained release and installs it:
 ```
 
 The Linux one is the always-on shape: run it with `--linger` on a spare tailnet
-machine and the relay outlives your logout, which is what lets you reach a Host
+machine and the relay outlives your logout, which is what lets you reach a Burrow
 that is not the laptop you are sitting at.
 
 Each installs under your user profile, needs no administrator rights, and wires
@@ -103,7 +103,7 @@ Two things to carry forward:
 - **That origin is durable WebAuthn identity.** The passkey you are about to
   create is bound to `https://<laptop>.<tailnet>.ts.net` byte for byte.
   Renaming or re-enrolling the Tailscale node means redoing the passkey and
-  every Host enrollment — which is why the installer stops rather than rewrite
+  every Burrow enrollment — which is why the installer stops rather than rewrite
   a changed origin for you.
 - **HTTPS is not optional.** WebAuthn needs a secure context and only
   `localhost` is exempt, so a real phone needs the TLS origin. For a
@@ -111,16 +111,16 @@ Two things to carry forward:
   `pnpm dev:relay` on `localhost:3000`; the Relay writes its generated
   password to `setup-password.json` in its data directory.
 
-The Relay-generated setup password gates exactly one thing: enrolling a Host from somewhere
+The Relay-generated setup password gates exactly one thing: enrolling a Burrow from somewhere
 else. It never leaves your machine except to that endpoint — and on a happy path
-you never read it out at all: a Host on *this* laptop enrolls from the one-time
+you never read it out at all: a Burrow on *this* laptop enrolls from the one-time
 offer the installer leaves it (section 3), and the phone sets itself up from a
 scanned code (section 4), which is the *only* way any browser can register a
 passkey. `show-password` is the enrollment fallback.
 
 ---
 
-## 2. Build a Host that is allowed to reach it
+## 2. Build a Burrow that is allowed to reach it
 
 Shipped Dormouse builds bake in a relay allowlist of
 `https://*.dormouse.sh wss://*.dormouse.sh` and nothing else, enforced inside
@@ -148,13 +148,13 @@ section 1 is installed on this very laptop, there is nothing to type:
 
 The installer left a `run/enroll-offer.json` next to its state — this install's
 origin plus a one-time token the Relay redeems in place of the setup password
-— and the Host reads that same file from the well-known path for the platform.
-It lasts for 24 hours or until the first Host enrolls, whichever comes first.
+— and the Burrow reads that same file from the well-known path for the platform.
+It lasts for 24 hours or until the first Burrow enrolls, whichever comes first.
 Press **Enroll** and the machine is connected.
 
 The one thing the card is careful about: **the token never reaches the webview.**
 The status the card renders from carries the origin and nothing else; pressing
-Enroll sends the name and an echo of that origin, and the Host service re-reads
+Enroll sends the name and an echo of that origin, and the Burrow service re-reads
 the file itself. That re-read is also why a card left on screen for an hour is
 safe to press: redeeming an offer unlinks it, so a spent one fails with a
 message saying so rather than half-enrolling. The echo covers the other half of
@@ -173,7 +173,7 @@ enrolling against the first one’s Relay, or an offer already redeemed.
 This is UI rather than a console incantation because it is the one step a
 self-hoster cannot skip. Three rules it exists to honor:
 
-- **The password is passed through, never held.** It goes straight to the Host
+- **The password is passed through, never held.** It goes straight to the Burrow
   service — the party that actually talks to the Relay — and is cleared on
   success only. A failed enroll is usually a typo in one of the other fields,
   and wiping the password would make every retry a fresh trip to the password
@@ -186,7 +186,7 @@ self-hoster cannot skip. Three rules it exists to honor:
   in those words is what keeps it from reading as a wrong password.
 
 - **The bearer token never comes back.** Enrollment answers
-  `{ hostId, relayUrl }`; the `hostToken` stays in the Host service and on
+  `{ burrowId, relayUrl }`; the `burrowToken` stays in the Burrow service and on
   disk, and never enters the webview.
 
 On success the section flips to the enrolled view. Note the last line —
@@ -204,7 +204,7 @@ That code is the origin you would otherwise type into mobile Safari, carrying a
 **setup token** the Relay issues and will redeem in place of the setup
 password, plus an **invitation**: an id and a one-use public key that are the
 *laptop's own* and never go near the Relay. The invitation's private half stays
-in the laptop's Host process, so a phone that completes a handshake against it
+in the laptop's Burrow process, so a phone that completes a handshake against it
 has provably read this screen — which is what makes it worth something in §6.
 (`docs/specs/relay.md` → Setup tokens and the pairing QR owns the grammar.)
 
@@ -264,7 +264,7 @@ Either way, that one action creates the account's first passkey (or signs in
 with a synced one) and moves straight into pairing. Three things happen that you
 cannot see:
 
-- A **per-Host key** is minted — a non-extractable X25519 keypair, held in
+- A **per-Burrow key** is minted — a non-extractable X25519 keypair, held in
   memory until the laptop approves and only then written to IndexedDB. This
   browser can agree with it and can never export it. It is this browser's
   identity *for this laptop*; a different laptop gets a different key.
@@ -291,9 +291,9 @@ on every session *after* the first, and where an interrupted one falls back to.
 Read it now for what a paired phone looks like from the outside, then carry on
 to §6 for what happens on the first run instead.
 
-<Canvas of={HostsView.MixedList} />
+<Canvas of={BurrowsView.MixedList} />
 
-One row per machine **this phone holds a key for** — a Host enrolled on the
+One row per machine **this phone holds a key for** — a Burrow enrolled on the
 Relay but never paired with this browser is not a row at all. The label comes
 from the record, which learned it inside an encrypted pairing outcome; only the
 online dot comes from the Relay. The card above them is push, which §7 comes
@@ -302,7 +302,7 @@ back to.
 Each row offers exactly one action, and nothing is asked to decide which.
 **Connect** is offered where this browser holds an authorized record, and
 **Pair again** where an authenticated denial took that authorization away —
-which is the only thing that can move a row, and which keeps the pinned Host key
+which is the only thing that can move a row, and which keeps the pinned Burrow key
 while dropping the authorization. **Remove** forgets the machine locally, and
 queues the deletion of its push mapping first, because the id in the record is
 the only handle that can name that row again.
@@ -315,7 +315,7 @@ Pairing runs end to end between the phone and the laptop, through a Relay that
 routes ciphertext and reads none of it:
 
 ```text
-phone                        relay                        host (laptop)
+phone                        relay                        burrow (laptop)
   |-- e2e init (Noise msg 1) -->|-- e2e init {clientId} ------>|  against the key
   |<-- e2e response ------------|<-- e2e response ------------ |  the QR carried
   |-- reauth begin/finish ----->|  challenge bound to this     |
@@ -362,10 +362,10 @@ moved:
   stripped before it is drawn. Everything else about the Client — its key, its
   passkey — was already proved by the handshake and the assertion, so there is
   nothing left for a human to squint at.
-- **"Adds it to this machine only"** is doing real work. The ACL is per-Host
+- **"Adds it to this machine only"** is doing real work. The ACL is per-Burrow
   and local; your other laptops are unaffected and will each ask separately.
 
-Confirming writes one `HostAclRecord` binding *that passkey credential* to *that
+Confirming writes one `BurrowAclRecord` binding *that passkey credential* to *that
 Client key* — a pair, not either one alone — and is bound to the ceremony's
 immutable `pairingId`, so a request that changed underneath a displayed modal is
 rejected rather than silently authorizing a device nobody was shown.
@@ -384,7 +384,7 @@ enough to wrap.
 Pairing is once. Connecting is every session, and it re-proves everything:
 
 ```text
-phone                        relay                        host
+phone                        relay                        burrow
   |-- e2e init (Noise msg 1) -->|-- e2e init {clientId} ------>|  against the key
   |<-- e2e response ------------|<-- msg 2 = 32-byte challenge |  the phone pinned
   |   ONE biometric prompt,     |                              |
@@ -395,11 +395,11 @@ phone                        relay                        host
   |====== protocol-v1 inside the same Noise session ==========>|
 ```
 
-A connection succeeds only if the handshake completes against the Host key this
+A connection succeeds only if the handshake completes against the Burrow key this
 phone pinned at pairing, the passkey proves fresh presence over a challenge
 derived from *this* handshake, and one ACL record holds all four of the account,
 the passkey credential, that key's hash, and the Client key the handshake
-authenticated. The Host decides alone, and its denial says only
+authenticated. The Burrow decides alone, and its denial says only
 `pairing-required` — which half missed is its own business.
 
 One handshake feeds the whole thing, so it costs the user a single Face ID
@@ -407,7 +407,7 @@ prompt.
 
 A successful pairing continues straight into all of this, so the approval you
 just gave on the laptop lands the phone in a terminal rather than back on the
-Hosts list. Later sessions start here instead, at that row's **Connect** — and
+Burrows list. Later sessions start here instead, at that row's **Connect** — and
 if the laptop has forgotten this browser in the meantime (an ACL reset, a
 hand-edited record), the denial says so and the row goes back to offering
 **Pair again**.
@@ -417,14 +417,14 @@ sessions:
 
 <Canvas of={PocketWall.ConnectedShell} story={{ autoplay: true }} />
 
-Push is asked for back on the Hosts view rather than over the terminal you just
+Push is asked for back on the Burrows view rather than over the terminal you just
 tapped Connect to reach — the card you already saw in §5, above the list from the
 moment anything is paired. It is one card and not one per machine because the
 permission prompt and the subscription it mints belong to the whole browser: the
 tap grants once and registers every paired machine. Afterwards the card collapses
 to a line and each paired row says **Push on** for itself:
 
-<Canvas of={HostsView.PushSubscribed} />
+<Canvas of={BurrowsView.PushSubscribed} />
 
 The offer appears only where push can work — an installed app on a Relay with
 push configured (§1). A phone in a Safari tab is told to add Dormouse to the Home
@@ -448,7 +448,7 @@ Back on the laptop, the section now counts what is paired:
 
 The push alarm's settings, directly above that section, carry the proof of the
 whole chain you just built: **Send test push**. Nothing about it is simulated —
-the test goes through the same Host, the same ACL, and the same Relay a real
+the test goes through the same Burrow, the same ACL, and the same Relay a real
 alarm would, so a phone that buzzes is evidence of everything from §1 to §6 at
 once. Its answers are kept deliberately distinct, because they call for
 different responses: on a machine that has enrolled (§3) but has no phone with
@@ -461,7 +461,7 @@ alarm. (The spoken alarm has a sibling **Play test sound**; both live in
 `docs/specs/alert.md` → Alarm settings.)
 
 **Displaced** is the one connection state that needs a person. Another Dormouse
-instance enrolled with the same `hostId` took the relay slot, and this one stood
+instance enrolled with the same `burrowId` took the relay slot, and this one stood
 down — terminally, on purpose, because two instances fighting over a slot is
 worse than one stopping. Reconnect takes it back, and displaces the other in
 turn.
@@ -475,7 +475,7 @@ phone until each pairs again.
 
 Four limits worth knowing before they surprise you:
 
-- **Clearing site data destroys the per-Host keys.** That is a re-pair, by
+- **Clearing site data destroys the per-Burrow keys.** That is a re-pair, by
   design: the identity the laptop authorized is gone — and the storage partition
   those keys live in is per-browser, as §4 warns.
 - **A scanned code is good for one pairing.** The laptop reserves its invitation
@@ -486,7 +486,7 @@ Four limits worth knowing before they surprise you:
   The camera opens Safari, which is the other storage partition (§4), and the
   Home Screen app launches at its own start URL with no hash on it. The recovery
   is to open the installed app and scan the same code from inside it.
-- **A dropped WebSocket returns the phone to the Hosts view.** Tap Connect
+- **A dropped WebSocket returns the phone to the Burrows view.** Tap Connect
   again; there is no resume protocol.
 
 ---
@@ -501,13 +501,13 @@ So nothing above reads as a promise:
   withdrawing one *phone's* approval is the laptop's own list, and takes effect
   when that laptop restarts. **Remove** on the phone is not that list: it
   forgets the machine locally, and a phone that pairs again arrives with a new
-  per-Host key, which the laptop cannot match to the old record — so it appends
+  per-Burrow key, which the laptop cannot match to the old record — so it appends
   a second approval and goes on counting both. One phone, "2 paired phones",
   and the first record still live.
 - **Approval is Approve/Deny only.** Choosing a standing grant at pairing time
   — observe-only versus interactive — is designed but not built. Every paired
   session today gets full input.
-- **The Host does not show you who is connected.** A viewer list with
+- **The Burrow does not show you who is connected.** A viewer list with
   per-viewer disconnect is staged.
 - **Terminals only.** The shipped protocol carries terminal surfaces and
   nothing else — no browser surfaces, no thumbnails, no scrollback.

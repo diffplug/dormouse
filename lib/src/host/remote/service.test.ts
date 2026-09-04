@@ -1,6 +1,6 @@
 /**
- * The Node-resident Host, driven the way both of its neighbours drive it: the
- * webview through `handleCommand`, and the relay through a fake `/ws/host`
+ * The Node-resident Burrow, driven the way both of its neighbours drive it: the
+ * webview through `handleCommand`, and the relay through a fake `/ws/burrow`
  * socket. The point of most cases here is that nothing a webview says can widen
  * access — recipients, the ACL, and the allowlist are all read on this side.
  */
@@ -14,10 +14,10 @@ import {
   generateNoiseKeyPair,
   toBase64Url,
   type EnrollmentOffer,
-  type HostAclRecord,
+  type BurrowAclRecord,
 } from 'remote-lib-common';
-import type { HostEnrollment } from '../../remote/host/enrollment';
-import type { HostSurfaceProvider } from '../../remote/host/host-surface-provider';
+import type { BurrowEnrollment } from '../../remote/burrow/enrollment';
+import type { BurrowSurfaceProvider } from '../../remote/burrow/burrow-surface-provider';
 import { FakeSocket } from '../../remote/test-fake-socket';
 import {
   createTestAuthenticator,
@@ -28,18 +28,18 @@ import {
   testRoutingId,
   type TestAuthenticator,
 } from '../../remote/test-e2e-client';
-import { createEphemeralHostStateStore, type HostStateStore } from './host-state-store';
-import { RemoteHostService } from './service';
+import { createEphemeralBurrowStateStore, type BurrowStateStore } from './burrow-state-store';
+import { BurrowService } from './service';
 import type {
-  HostStatusEvent,
+  BurrowStatusEvent,
   InvitationEvent,
   PairingQueueEvent,
-  RemoteHostConsoleStatus,
+  BurrowConsoleStatus,
   SetupQrResult,
 } from './service-protocol';
 
 const CONNECT_SRC = 'https://*.dormouse.sh wss://*.dormouse.sh';
-const HOST_ID = testRoutingId();
+const BURROW_ID = testRoutingId();
 const ORIGIN = 'https://relay.dormouse.sh';
 
 /**
@@ -47,14 +47,14 @@ const ORIGIN = 'https://relay.dormouse.sh';
  * the service backfills and persists a fresh key on start, which is its own
  * case below rather than a hidden write under every other.
  */
-let ENROLLMENT: HostEnrollment;
+let ENROLLMENT: BurrowEnrollment;
 
 beforeAll(async () => {
   const material = await mintNoiseStaticKeyPair();
   ENROLLMENT = {
     relayUrl: ORIGIN,
-    hostId: HOST_ID,
-    hostToken: 'tok',
+    burrowId: BURROW_ID,
+    burrowToken: 'tok',
     origin: ORIGIN,
     rpId: 'relay.dormouse.sh',
     label: 'Laptop',
@@ -67,30 +67,30 @@ beforeAll(async () => {
  * A v2 ACL record. Both E2E fields are checked for exact length on read, so a
  * fixture that spelled them loosely would be dropped rather than asserted on.
  */
-function aclRecord(seed: string, label = 'iPhone Safari'): HostAclRecord {
+function aclRecord(seed: string, label = 'iPhone Safari'): BurrowAclRecord {
   const pad = (text: string): string => text.padEnd(43, 'A').slice(0, 43);
   return {
-    hostId: HOST_ID,
+    burrowId: BURROW_ID,
     accountId: 'owner',
     passkeyCredentialId: 'cred',
     passkeyPublicKeyHash: 'hash',
     clientStaticPublicKey: pad(`client-${seed}`),
     deliveryId: pad(`delivery-${seed}`),
     approvedAt: 1,
-    approvedBy: 'host-user',
+    approvedBy: 'burrow-user',
     label,
     revokedAt: null,
   };
 }
 
-interface MemoryStore extends HostStateStore {
-  enrollment: HostEnrollment | null;
-  acl: Record<string, HostAclRecord[]>;
+interface MemoryStore extends BurrowStateStore {
+  enrollment: BurrowEnrollment | null;
+  acl: Record<string, BurrowAclRecord[]>;
 }
 
 /**
  * A durable store whose contents a test can seed and read back — not
- * `createEphemeralHostStateStore`, whose whole point is `persistent: false`,
+ * `createEphemeralBurrowStateStore`, whose whole point is `persistent: false`,
  * which is what the adopt cases turn on.
  */
 function memoryStore(seed: Partial<Pick<MemoryStore, 'enrollment' | 'acl'>> = {}): MemoryStore {
@@ -105,15 +105,15 @@ function memoryStore(seed: Partial<Pick<MemoryStore, 'enrollment' | 'acl'>> = {}
     clearEnrollment: async () => {
       store.enrollment = null;
     },
-    loadAcl: async (hostId) => store.acl[hostId] ?? [],
-    saveAcl: async (hostId, records) => {
-      store.acl[hostId] = [...records];
+    loadAcl: async (burrowId) => store.acl[burrowId] ?? [],
+    saveAcl: async (burrowId, records) => {
+      store.acl[burrowId] = [...records];
     },
   };
   return store;
 }
 
-function fakeProvider(): HostSurfaceProvider {
+function fakeProvider(): BurrowSurfaceProvider {
   return {
     collectDirectory: async () => [],
     watchDirectory: () => () => {},
@@ -128,12 +128,12 @@ let sockets: FakeSocket[];
 let sent: Array<{ event: string; data: Record<string, unknown> }>;
 let requests: Array<{ url: string; init?: RequestInit }>;
 let store: MemoryStore;
-let service: RemoteHostService;
+let service: BurrowService;
 let commandSeq = 0;
 
 /** How many setup tokens the fake Relay has minted, so each one is distinct. */
 let setupTokensMinted: number;
-/** Make `POST /api/host/setup-token` answer a 200 that is not a setup token. */
+/** Make `POST /api/burrow/setup-token` answer a 200 that is not a setup token. */
 let setupTokenMalformed: boolean;
 /** What the fake Relay puts in `expiresAt`; a test moves it to expire one. */
 let setupTokenTtlMs: number;
@@ -143,7 +143,7 @@ function fakeFetch(): typeof globalThis.fetch {
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     requests.push({ url, init });
-    if (url.endsWith(API_ROUTES.hostSetupToken)) {
+    if (url.endsWith(API_ROUTES.burrowSetupToken)) {
       return {
         ok: true,
         json: async () =>
@@ -157,12 +157,12 @@ function fakeFetch(): typeof globalThis.fetch {
               },
       } as Response;
     }
-    if (url.endsWith('/api/host/enroll')) {
+    if (url.endsWith('/api/burrow/enroll')) {
       return {
         ok: true,
         json: async () => ({
-          hostId: HOST_ID,
-          hostToken: 'tok',
+          burrowId: BURROW_ID,
+          burrowToken: 'tok',
           origin: new URL(url).origin,
           rpId: new URL(url).hostname,
         }),
@@ -190,7 +190,7 @@ function fakeFetch(): typeof globalThis.fetch {
  * The offer reader is always injected, never the real one: whether these tests
  * pass must not depend on whether the machine running them has a Dormouse
  * Relay installed. `offerReads` counts the calls, which is how the "an enrolled
- * Host does not touch the disk" case is stated.
+ * Burrow does not touch the disk" case is stated.
  */
 let offer: EnrollmentOffer | null;
 let offerReads: number;
@@ -203,9 +203,9 @@ const OFFER: EnrollmentOffer = {
   mintedAt: '2026-08-31T00:00:00.000Z',
 };
 
-function createService(seed?: Partial<Pick<MemoryStore, 'enrollment' | 'acl'>>): RemoteHostService {
+function createService(seed?: Partial<Pick<MemoryStore, 'enrollment' | 'acl'>>): BurrowService {
   store = memoryStore(seed);
-  service = new RemoteHostService({
+  service = new BurrowService({
     store,
     provider: fakeProvider(),
     sendToUi: (event, data) => sent.push({ event, data: data as Record<string, unknown> }),
@@ -230,13 +230,13 @@ function requestBody(index: number): Record<string, unknown> {
   return JSON.parse(requests[index]!.init!.body as string) as Record<string, unknown>;
 }
 
-/** Run a command and return the `remoteHost:result` it produced. */
+/** Run a command and return the `burrow:result` it produced. */
 async function command(cmd: string, params?: unknown): Promise<Record<string, unknown>> {
-  const rhId = `c-${++commandSeq}`;
-  await service.handleCommand({ rhId, cmd, params });
+  const burrowRequestId = `c-${++commandSeq}`;
+  await service.handleCommand({ burrowRequestId, cmd, params });
   const result = sent
-    .filter((message) => message.event === 'remoteHost:result')
-    .find((message) => message.data.rhId === rhId);
+    .filter((message) => message.event === 'burrow:result')
+    .find((message) => message.data.burrowRequestId === burrowRequestId);
   if (!result) throw new Error(`no result for ${cmd}`);
   return result.data;
 }
@@ -245,12 +245,12 @@ function queueEvents(): PairingQueueEvent[] {
   return uiEvents().filter((event): event is PairingQueueEvent => event.name === 'pairing-queue');
 }
 
-function uiEvents(): Array<PairingQueueEvent | HostStatusEvent | InvitationEvent> {
+function uiEvents(): Array<PairingQueueEvent | BurrowStatusEvent | InvitationEvent> {
   return sent
-    .filter((message) => message.event === 'remoteHost:event')
+    .filter((message) => message.event === 'burrow:event')
     .map(
       (message) =>
-        message.data as unknown as PairingQueueEvent | HostStatusEvent | InvitationEvent,
+        message.data as unknown as PairingQueueEvent | BurrowStatusEvent | InvitationEvent,
     );
 }
 
@@ -258,10 +258,10 @@ function invitationEvents(): InvitationEvent[] {
   return uiEvents().filter((event): event is InvitationEvent => event.name === 'invitation');
 }
 
-/** What the webviews were told about whether there is a Host, in order. */
+/** What the webviews were told about whether there is a Burrow, in order. */
 function statusEvents(): boolean[] {
   return uiEvents()
-    .filter((event): event is HostStatusEvent => event.name === 'status')
+    .filter((event): event is BurrowStatusEvent => event.name === 'status')
     .map((event) => event.enrolled);
 }
 
@@ -284,18 +284,18 @@ afterEach(() => {
 });
 
 describe('status', () => {
-  it('reports a Host that has not been enrolled', async () => {
+  it('reports a Burrow that has not been enrolled', async () => {
     createService();
     await service.start();
     expect((await command('status')).result).toEqual({
       enrolled: false,
       relayUrl: null,
-      hostId: null,
+      burrowId: null,
       connection: 'stopped',
       pairedClients: 0,
       suggestedLabel: hostname(),
       offer: null,
-    } satisfies RemoteHostConsoleStatus);
+    } satisfies BurrowConsoleStatus);
   });
 
   it('offers the installer’s enrollment while un-enrolled, without its token', async () => {
@@ -306,12 +306,12 @@ describe('status', () => {
     expect((await command('status')).result).toEqual({
       enrolled: false,
       relayUrl: null,
-      hostId: null,
+      burrowId: null,
       connection: 'stopped',
       pairedClients: 0,
       suggestedLabel: hostname(),
       offer: { origin: OFFER.origin },
-    } satisfies RemoteHostConsoleStatus);
+    } satisfies BurrowConsoleStatus);
     // The one-time token is a bearer credential and this is a service→webview
     // shape (docs/specs/security-remote.md -> "Trust boundary"), so it must not appear anywhere in what was sent.
     expect(JSON.stringify(sent)).not.toContain(OFFER.token);
@@ -329,19 +329,19 @@ describe('status', () => {
   });
 
   it('reports the relay socket and the paired count once running', async () => {
-    createService({ enrollment: ENROLLMENT, acl: { [HOST_ID]: [aclRecord('device-1')] } });
+    createService({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [aclRecord('device-1')] } });
     await service.start();
     sockets[0]!.open();
 
     expect((await command('status')).result).toEqual({
       enrolled: true,
       relayUrl: ENROLLMENT.relayUrl,
-      hostId: HOST_ID,
+      burrowId: BURROW_ID,
       connection: 'connected',
       pairedClients: 1,
       suggestedLabel: hostname(),
       offer: null,
-    } satisfies RemoteHostConsoleStatus);
+    } satisfies BurrowConsoleStatus);
   });
 
   it('cannot answer un-enrolled from a read an enroll finished under', async () => {
@@ -405,12 +405,12 @@ describe('enroll', () => {
       label: 'Laptop',
     });
 
-    expect(result.result).toEqual({ hostId: HOST_ID, relayUrl: ORIGIN });
-    expect(store.enrollment?.hostToken).toBe('tok');
+    expect(result.result).toEqual({ burrowId: BURROW_ID, relayUrl: ORIGIN });
+    expect(store.enrollment?.burrowToken).toBe('tok');
     expect(sockets).toHaveLength(1);
   });
 
-  it('replaces a running Host rather than adding one', async () => {
+  it('replaces a running Burrow rather than adding one', async () => {
     createService({ enrollment: ENROLLMENT });
     await service.start();
     sockets[0]!.open();
@@ -424,10 +424,10 @@ describe('enroll', () => {
     expect(sockets[0]!.readyState).toBe(3);
   });
 
-  it('keeps the old Host when the new enrollment cannot be persisted', async () => {
-    // The `hostToken` this exchange just minted exists nowhere else and cannot
-    // be minted again, so stopping the old Host before the save is what turns
-    // one failed write into a machine with no Host and a status that lies.
+  it('keeps the old Burrow when the new enrollment cannot be persisted', async () => {
+    // The `burrowToken` this exchange just minted exists nowhere else and cannot
+    // be minted again, so stopping the old Burrow before the save is what turns
+    // one failed write into a machine with no Burrow and a status that lies.
     createService({ enrollment: ENROLLMENT });
     await service.start();
     sockets[0]!.open();
@@ -451,10 +451,10 @@ describe('enroll', () => {
     });
   });
 
-  it('cycles the enrolled gate when it swaps one running Host for another', async () => {
+  it('cycles the enrolled gate when it swaps one running Burrow for another', async () => {
     // The webviews' gate is edge-triggered (`enrolled-gate.ts`), and what it
     // holds — the mirrored pairing queue, the push device list — belongs to the
-    // Relay being left. With no `false` between the two Hosts the gate never
+    // Relay being left. With no `false` between the two Burrows the gate never
     // cycles and the Settings dialog keeps naming the old Relay's devices.
     createService({ enrollment: ENROLLMENT });
     await service.start();
@@ -478,13 +478,13 @@ describe('enrollOffer', () => {
 
     const result = await command('enrollOffer', { origin: OFFER.origin, label: 'Laptop' });
 
-    expect(result.result).toEqual({ hostId: HOST_ID, relayUrl: OFFER.origin });
+    expect(result.result).toEqual({ burrowId: BURROW_ID, relayUrl: OFFER.origin });
     expect(requests).toHaveLength(1);
     // The credential and nothing else: the label the operator typed stays local.
     expect(requestBody(0)).toEqual({ enrollToken: OFFER.token });
     expect(requestBody(0)).not.toHaveProperty('password');
-    // Same store-first persistence and same started Host as the typed form.
-    expect(store.enrollment?.hostToken).toBe('tok');
+    // Same store-first persistence and same started Burrow as the typed form.
+    expect(store.enrollment?.burrowToken).toBe('tok');
     expect(sockets).toHaveLength(1);
     expect(statusEvents()).toEqual([true]);
   });
@@ -553,16 +553,16 @@ describe('start', () => {
     warn.mockRestore();
   });
 
-  it('reconnect is the way back, and start()s a Host that never ran', async () => {
+  it('reconnect is the way back, and start()s a Burrow that never ran', async () => {
     createService({ enrollment: ENROLLMENT });
-    const status = (await command('reconnect')).result as RemoteHostConsoleStatus;
+    const status = (await command('reconnect')).result as BurrowConsoleStatus;
     expect(sockets).toHaveLength(1);
     expect(status).toMatchObject({ enrolled: true, connection: 'connecting' });
   });
 
-  it('builds one Host when a start and a reconnect race', async () => {
-    // Both read `#host`, both await the store, and both then act on what they
-    // read. Unserialized they each see no Host and each build one — and the
+  it('builds one Burrow when a start and a reconnect race', async () => {
+    // Both read `#burrow`, both await the store, and both then act on what they
+    // read. Unserialized they each see no Burrow and each build one — and the
     // second holds a relay socket nothing has a reference to, so it can never
     // be stopped and the two displace each other on the Relay forever.
     createService({ enrollment: ENROLLMENT });
@@ -577,7 +577,7 @@ describe('start', () => {
     };
 
     const started = service.start();
-    const reconnected = service.handleCommand({ rhId: 'race', cmd: 'reconnect' });
+    const reconnected = service.handleCommand({ burrowRequestId: 'race', cmd: 'reconnect' });
     release();
     await Promise.all([started, reconnected]);
 
@@ -587,7 +587,7 @@ describe('start', () => {
     expect(sockets[0]!.readyState).toBe(3);
   });
 
-  it('does not resurrect a Host when disposal lands during startup', async () => {
+  it('does not resurrect a Burrow when disposal lands during startup', async () => {
     createService({ enrollment: ENROLLMENT });
     let releaseAcl: () => void = () => {};
     let enteredAcl: () => void = () => {};
@@ -598,10 +598,10 @@ describe('start', () => {
       releaseAcl = resolve;
     });
     const seeded = store.loadAcl;
-    store.loadAcl = async (hostId) => {
+    store.loadAcl = async (burrowId) => {
       enteredAcl();
       await gate;
-      return seeded(hostId);
+      return seeded(burrowId);
     };
 
     const starting = service.start();
@@ -614,22 +614,22 @@ describe('start', () => {
     expect(sent).toEqual([]);
   });
 
-  it('clearEnrollment stops the Host and forgets it, keeping the records', async () => {
-    createService({ enrollment: ENROLLMENT, acl: { [HOST_ID]: [aclRecord('device-1')] } });
+  it('clearEnrollment stops the Burrow and forgets it, keeping the records', async () => {
+    createService({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [aclRecord('device-1')] } });
     await service.start();
 
     await command('clearEnrollment');
     expect(store.enrollment).toBeNull();
-    // The records stay filed under their hostId: re-enrolling onto the same
-    // host must not silently de-pair every device.
-    expect(store.acl[HOST_ID]).toHaveLength(1);
+    // The records stay filed under their burrowId: re-enrolling onto the same
+    // burrow must not silently de-pair every device.
+    expect(store.acl[BURROW_ID]).toHaveLength(1);
     expect((await command('status')).result).toMatchObject({ enrolled: false, connection: 'stopped' });
   });
 
   it('stays enrolled — and running — when the enrollment cannot be deleted', async () => {
     // Reporting un-enrolled over a delete that failed is the worst outcome
     // available: the credential is still on disk, so the next launch reads it
-    // back and every paired device is let in again by a Host the user believes
+    // back and every paired device is let in again by a Burrow the user believes
     // they removed.
     createService({ enrollment: ENROLLMENT });
     await service.start();
@@ -651,7 +651,7 @@ describe('start', () => {
 });
 
 describe('status events', () => {
-  it('announces a Host that started, and one that was cleared', async () => {
+  it('announces a Burrow that started, and one that was cleared', async () => {
     // What every webview arms its outbound work on: an installation that never
     // enrolls is told nothing and does nothing (`enrolled-gate.ts`).
     createService({ enrollment: ENROLLMENT });
@@ -662,14 +662,14 @@ describe('status events', () => {
     expect(statusEvents()).toEqual([true, false]);
   });
 
-  it('says nothing at all when there is no Host to run', async () => {
+  it('says nothing at all when there is no Burrow to run', async () => {
     createService();
     await service.start();
     await command('status');
     expect(statusEvents()).toEqual([]);
   });
 
-  it('announces the Host an enroll started', async () => {
+  it('announces the Burrow an enroll started', async () => {
     createService();
     await command('enroll', { relayUrl: ORIGIN, password: 'setup', label: 'Laptop' });
     expect(statusEvents()).toEqual([true]);
@@ -695,11 +695,11 @@ describe('pairing queue', () => {
   async function pair(socket: FakeSocket, clientId: string, over: { code?: string; label?: string } = {}) {
     const qr = (await command('setupQr')).result as SetupQrResult;
     const invitation = await parsePairingInvitationUrl(qr.url, ORIGIN);
-    if (!invitation) throw new Error(`the Host composed a URL Pocket cannot read: ${qr.url}`);
+    if (!invitation) throw new Error(`the Burrow composed a URL Pocket cannot read: ${qr.url}`);
     const before = queueEvents().length;
     const paired = await pairThroughSocket({
       socket,
-      hostId: ENROLLMENT.hostId,
+      burrowId: ENROLLMENT.burrowId,
       clientId,
       invitation,
       authenticator,
@@ -727,7 +727,7 @@ describe('pairing queue', () => {
     expect((await command('pairingQueue')).result).toEqual(event.queue);
   });
 
-  it('never mirrors the code the Host is going to compare against', async () => {
+  it('never mirrors the code the Burrow is going to compare against', async () => {
     const socket = await running();
     // A code no other value in the exchange could coincidentally equal.
     await pair(socket, 'c1', { code: '73' });
@@ -745,10 +745,10 @@ describe('pairing queue', () => {
 
     expect(await readOutcome(socket, session, 'pairing', invitation.inviteId)).toMatchObject({
       ok: true,
-      hostLabel: ENROLLMENT.label,
+      burrowLabel: ENROLLMENT.label,
     });
-    expect(store.acl[HOST_ID]).toHaveLength(1);
-    expect(store.acl[HOST_ID]![0]).toMatchObject({ label: 'iPhone Safari', revokedAt: null });
+    expect(store.acl[BURROW_ID]).toHaveLength(1);
+    expect(store.acl[BURROW_ID]![0]).toMatchObject({ label: 'iPhone Safari', revokedAt: null });
     expect(queueEvents().at(-1)!.queue).toEqual([]);
   });
 
@@ -762,7 +762,7 @@ describe('pairing queue', () => {
       ok: false,
       code: 'confirmation-mismatch',
     });
-    expect(store.acl[HOST_ID]).toBeUndefined();
+    expect(store.acl[BURROW_ID]).toBeUndefined();
     // The queue is empty, so the right code has nothing left to answer.
     expect((await command('approve', { clientId: 'c1', pairingId: item.pairingId, code })).error)
       .toContain('no longer pending');
@@ -779,7 +779,7 @@ describe('pairing queue', () => {
       ok: false,
       code: 'user-denied',
     });
-    expect(store.acl[HOST_ID]).toBeUndefined();
+    expect(store.acl[BURROW_ID]).toBeUndefined();
     expect(queueEvents().at(-1)!.queue).toEqual([]);
   });
 
@@ -805,7 +805,7 @@ describe('pairing queue', () => {
     expect(
       (await command('approve', { clientId: 'c1', pairingId: item.pairingId, code })).error,
     ).toContain('no longer pending');
-    expect(store.acl[HOST_ID]).toHaveLength(1);
+    expect(store.acl[BURROW_ID]).toHaveLength(1);
   });
 
   it('rejects stale modal actions after the client replaces its pairing', async () => {
@@ -823,7 +823,7 @@ describe('pairing queue', () => {
     expect(
       (await command('deny', { clientId: 'c1', pairingId: first.item.pairingId })).error,
     ).toContain('no longer pending');
-    expect(store.acl[HOST_ID]).toBeUndefined();
+    expect(store.acl[BURROW_ID]).toBeUndefined();
     expect(queueEvents().at(-1)!.queue).toEqual([replacement.item]);
 
     await command('approve', {
@@ -832,25 +832,25 @@ describe('pairing queue', () => {
       code: replacement.code,
     });
     await settle();
-    expect(store.acl[HOST_ID]![0]).toMatchObject({ label: 'Android Chrome' });
+    expect(store.acl[BURROW_ID]![0]).toMatchObject({ label: 'Android Chrome' });
   });
 });
 
 describe('setup QR', () => {
   /**
-   * An enrollment whose `hostToken` cannot be confused with anything else in an
+   * An enrollment whose `burrowToken` cannot be confused with anything else in an
    * assertion — the shared fixture's `tok` is a substring of common words, and
    * this suite has to prove the bearer stays out of the webview.
    */
-  let QR_ENROLLMENT: HostEnrollment;
+  let QR_ENROLLMENT: BurrowEnrollment;
   let authenticator: TestAuthenticator;
 
   beforeAll(async () => {
-    QR_ENROLLMENT = { ...ENROLLMENT, hostToken: 'host-bearer-secret' };
+    QR_ENROLLMENT = { ...ENROLLMENT, burrowToken: 'burrow-bearer-secret' };
     authenticator = await createTestAuthenticator({ rpId: ENROLLMENT.rpId, origin: ORIGIN });
   });
 
-  async function running(enrollment: HostEnrollment = QR_ENROLLMENT): Promise<FakeSocket> {
+  async function running(enrollment: BurrowEnrollment = QR_ENROLLMENT): Promise<FakeSocket> {
     createService({ enrollment });
     await service.start();
     const socket = sockets[0]!;
@@ -870,14 +870,14 @@ describe('setup QR', () => {
     return { qr, invitation };
   }
 
-  it('mints over the Host’s own authenticated channel and composes the URL here', async () => {
+  it('mints over the Burrow’s own authenticated channel and composes the URL here', async () => {
     await running();
     const { qr, invitation } = await mint();
 
     const posted = requests.at(-1)!;
-    expect(posted.url).toBe(`${QR_ENROLLMENT.relayUrl}${API_ROUTES.hostSetupToken}`);
+    expect(posted.url).toBe(`${QR_ENROLLMENT.relayUrl}${API_ROUTES.burrowSetupToken}`);
     expect((posted.init!.headers as Record<string, string>).authorization).toBe(
-      'Bearer host-bearer-secret',
+      'Bearer burrow-bearer-secret',
     );
     // An allowed origin's open redirect must not carry the bearer elsewhere.
     expect(posted.init!.redirect).toBe('error');
@@ -885,13 +885,13 @@ describe('setup QR', () => {
     // The origin is the enrollment's — the phone-facing WebAuthn origin — and
     // the whole invitation rides in the URL, which is the point of the command.
     expect(qr.url.startsWith(`${QR_ENROLLMENT.origin}/#pair?`)).toBe(true);
-    expect(invitation.hostId).toBe(QR_ENROLLMENT.hostId);
+    expect(invitation.burrowId).toBe(QR_ENROLLMENT.burrowId);
     expect(invitation.inviteId).toBe(qr.inviteId);
     expect(invitation.setupToken).toBe(toBase64Url(new Uint8Array(32).fill(1)));
 
-    // The invitation's private half never leaves the Host, and neither does the
+    // The invitation's private half never leaves the Burrow, and neither does the
     // bearer: only the code a human will scan crosses.
-    expect(JSON.stringify(sent)).not.toContain('host-bearer-secret');
+    expect(JSON.stringify(sent)).not.toContain('burrow-bearer-secret');
     expect(JSON.stringify(requests)).not.toContain(invitation.ephPubBase64Url);
   });
 
@@ -902,7 +902,7 @@ describe('setup QR', () => {
 
     await pairThroughSocket({
       socket,
-      hostId: QR_ENROLLMENT.hostId,
+      burrowId: QR_ENROLLMENT.burrowId,
       clientId: 'c1',
       invitation,
       authenticator,
@@ -929,7 +929,7 @@ describe('setup QR', () => {
       const before = queueEvents().length;
       const { code } = await pairThroughSocket({
         socket,
-        hostId: QR_ENROLLMENT.hostId,
+        burrowId: QR_ENROLLMENT.burrowId,
         clientId,
         invitation,
         authenticator,
@@ -962,7 +962,7 @@ describe('setup QR', () => {
     expect((await command('setupQr')).error).toContain('not a setup token');
   });
 
-  it('paints nothing for a mint that resolves onto a different Host', async () => {
+  it('paints nothing for a mint that resolves onto a different Burrow', async () => {
     // The round trip can straddle an enroll elsewhere. The code belongs to the
     // Relay we just left, so it must fail rather than mint an invitation onto
     // a replacement that could never complete it.
@@ -981,12 +981,12 @@ describe('setup QR', () => {
     const reconnected = sockets.at(-1)!;
     reconnected.open();
 
-    // The one-use key behind that code lived on the Host this service replaced,
+    // The one-use key behind that code lived on the Burrow this service replaced,
     // so nothing can complete a handshake against it any more.
     expect(
       await openPairingSession({
         socket: reconnected,
-        hostId: ENROLLMENT.hostId,
+        burrowId: ENROLLMENT.burrowId,
         clientId: 'c1',
         invitation,
         clientStatic: await generateNoiseKeyPair(),
@@ -1006,10 +1006,10 @@ describe('push', () => {
       : [];
   };
 
-  it('addresses the Host’s own ACL, not anything the webview sent', async () => {
+  it('addresses the Burrow’s own ACL, not anything the webview sent', async () => {
     createService({
       enrollment: ENROLLMENT,
-      acl: { [HOST_ID]: [aclRecord('device-1'), aclRecord('device-2', 'iPad')] },
+      acl: { [BURROW_ID]: [aclRecord('device-1'), aclRecord('device-2', 'iPad')] },
     });
     await service.start();
 
@@ -1025,9 +1025,9 @@ describe('push', () => {
   it('seals what the webview named rather than posting it', async () => {
     // The Relay forwards this body and can read none of it
     // (docs/specs/remote-security-model.md -> Push sealing). That the label is
-    // bounded *before* it is sealed is `lib/src/remote/host/alert-push.test.ts`,
+    // bounded *before* it is sealed is `lib/src/remote/burrow/alert-push.test.ts`,
     // which holds the key to open one.
-    createService({ enrollment: ENROLLMENT, acl: { [HOST_ID]: [aclRecord('device-1')] } });
+    createService({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [aclRecord('device-1')] } });
     await service.start();
 
     await command('push', { sessionId: 'pty-1', title: 'build\u0000finished\u001b' });
@@ -1036,7 +1036,7 @@ describe('push', () => {
     expect(body).not.toContain('pty-1');
   });
 
-  it('is a silent no-op with no Host running', async () => {
+  it('is a silent no-op with no Burrow running', async () => {
     createService();
     const result = await command('push', { sessionId: 'pty-1', title: 'x' });
     expect(result.error).toBeUndefined();
@@ -1045,8 +1045,8 @@ describe('push', () => {
 
   it('warns rather than failing the command when the Relay rejects it', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    store = memoryStore({ enrollment: ENROLLMENT, acl: { [HOST_ID]: [aclRecord('device-1')] } });
-    service = new RemoteHostService({
+    store = memoryStore({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [aclRecord('device-1')] } });
+    service = new BurrowService({
       store,
       provider: fakeProvider(),
       sendToUi: (event, data) => sent.push({ event, data: data as Record<string, unknown> }),
@@ -1064,7 +1064,7 @@ describe('push', () => {
 
 describe('pushDevices', () => {
   it('joins the Relay’s subscriptions to the ACL’s labels', async () => {
-    createService({ enrollment: ENROLLMENT, acl: { [HOST_ID]: [aclRecord('1')] } });
+    createService({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [aclRecord('1')] } });
     await service.start();
 
     // The second subscribed delivery id is no longer on any ACL record — and
@@ -1076,15 +1076,15 @@ describe('pushDevices', () => {
     });
   });
 
-  it('answers null when no Host is running', async () => {
+  it('answers null when no Burrow is running', async () => {
     createService();
     // "Nowhere to push" — not an empty list, and not a failed request.
     expect((await command('pushDevices')).result).toBeNull();
   });
 
   it('errors when the Relay cannot be asked', async () => {
-    store = memoryStore({ enrollment: ENROLLMENT, acl: { [HOST_ID]: [aclRecord('device-1')] } });
-    service = new RemoteHostService({
+    store = memoryStore({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [aclRecord('device-1')] } });
+    service = new BurrowService({
       store,
       provider: fakeProvider(),
       sendToUi: (event, data) => sent.push({ event, data: data as Record<string, unknown> }),
@@ -1108,17 +1108,17 @@ describe('pushTest', () => {
   });
 
   it('reports that nothing was targeted when no device is authorized', async () => {
-    createService({ enrollment: ENROLLMENT, acl: { [HOST_ID]: [] } });
+    createService({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [] } });
     await service.start();
 
     const { result } = await command('pushTest');
-    // Distinct from a refused send: the Host is fine, nothing has opted in.
+    // Distinct from a refused send: the Burrow is fine, nothing has opted in.
     expect(result).toEqual({ targeted: 0, delivered: 0, failed: 0 });
     expect(requests.some((request) => request.url.endsWith('/api/push/send'))).toBe(false);
   });
 
   it('sends through the real path and reports what was delivered', async () => {
-    createService({ enrollment: ENROLLMENT, acl: { [HOST_ID]: [aclRecord('device-1')] } });
+    createService({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [aclRecord('device-1')] } });
     await service.start();
 
     const { result } = await command('pushTest');
@@ -1137,8 +1137,8 @@ describe('pushTest', () => {
   });
 
   it('surfaces a refused send instead of swallowing it', async () => {
-    store = memoryStore({ enrollment: ENROLLMENT, acl: { [HOST_ID]: [aclRecord('device-1')] } });
-    service = new RemoteHostService({
+    store = memoryStore({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [aclRecord('device-1')] } });
+    service = new BurrowService({
       store,
       provider: fakeProvider(),
       sendToUi: (event, data) => sent.push({ event, data: data as Record<string, unknown> }),

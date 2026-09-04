@@ -1,10 +1,10 @@
 /**
  * QR-first phone setup, Relay half (docs/specs/relay.md, "HTTP API" and
- * "Setup tokens"): an enrolled Host mints a single-use setup token, a scanning
+ * "Setup tokens"): an enrolled Burrow mints a single-use setup token, a scanning
  * phone redeems it in place of the setup password, and a phone that already
  * holds a session retires it instead.
  *
- * Redemption announces nothing: the invitation the same QR carries is Host
+ * Redemption announces nothing: the invitation the same QR carries is Burrow
  * memory, and its state — not the token's — is what the QR panel renders
  * (docs/specs/remote-security-model.md -> Pairing).
  */
@@ -18,17 +18,17 @@ import { API_ROUTES, SETUP_TOKEN_INVALID_ERROR, UNAUTHORIZED_ERROR } from 'remot
 
 import { AccountStore } from '../dist/state.js';
 import {
-  MAX_TOKENS_PER_HOST,
+  MAX_TOKENS_PER_BURROW,
   SetupTokenIssuer,
   SETUP_TOKEN_TTL_MS,
 } from '../dist/setup-token.js';
-import { FakeHost } from './harness/fake-host.mjs';
+import { FakeBurrow } from './harness/fake-burrow.mjs';
 import {
   ORIGIN,
   PASSWORD,
   RP_ID,
-  connectHost,
-  enrollHost,
+  connectBurrow,
+  enrollBurrow,
   freshApp,
   makeClock,
   newAuthenticator,
@@ -45,22 +45,22 @@ import {
 /** The 401 body every rejected setup token answers with. */
 const REFUSED = { error: SETUP_TOKEN_INVALID_ERROR };
 
-/** `POST /api/host/setup-token` with a host bearer token (no body). */
-function mint(app, hostToken) {
-  return app.request(API_ROUTES.hostSetupToken, {
+/** `POST /api/burrow/setup-token` with a burrow bearer token (no body). */
+function mint(app, burrowToken) {
+  return app.request(API_ROUTES.burrowSetupToken, {
     method: 'POST',
-    headers: hostToken === undefined ? {} : { Authorization: `Bearer ${hostToken}` },
+    headers: burrowToken === undefined ? {} : { Authorization: `Bearer ${burrowToken}` },
   });
 }
 
-/** An app with one enrolled Host, plus a freshly minted token for it. */
+/** An app with one enrolled Burrow, plus a freshly minted token for it. */
 async function appWithToken(options = {}) {
   const created = await freshApp(options);
-  const { body: host } = await enrollHost(created.app);
-  const res = await mint(created.app, host.hostToken);
+  const { body: burrow } = await enrollBurrow(created.app);
+  const res = await mint(created.app, burrow.burrowToken);
   assert.equal(res.status, 200);
   const { token, expiresAt } = await res.json();
-  return { ...created, host, token, expiresAt };
+  return { ...created, burrow, token, expiresAt };
 }
 
 /** `POST /api/setup/begin` with whatever credential fields are given. */
@@ -84,43 +84,43 @@ async function registerWithToken(app, token) {
   return register(app, await newAuthenticator(), { credential: { setupToken: token } });
 }
 
-/** A FakeHost socket keeps the event loop alive, so teardown must close them. */
-const OPEN_FAKE_HOSTS = [];
+/** A FakeBurrow socket keeps the event loop alive, so teardown must close them. */
+const OPEN_FAKE_BURROWS = [];
 
 async function shutdown(server) {
-  for (const fake of OPEN_FAKE_HOSTS.splice(0)) fake.close();
+  for (const fake of OPEN_FAKE_BURROWS.splice(0)) fake.close();
   await server.close();
 }
 
 /**
- * Enroll a Host and connect it as a {@link FakeHost}, recording every frame the
- * relay delivered to it. The harness mirrors the real Host's frame handling, so
+ * Enroll a Burrow and connect it as a {@link FakeBurrow}, recording every frame the
+ * relay delivered to it. The harness mirrors the real Burrow's frame handling, so
  * a frame it would drop cannot pass for one it received.
  */
-async function connectFakeHost(app, server) {
-  const { body: host } = await enrollHost(app);
-  const fake = new FakeHost({
+async function connectFakeBurrow(app, server) {
+  const { body: burrow } = await enrollBurrow(app);
+  const fake = new FakeBurrow({
     relayUrl: server.wsUrl,
-    hostToken: host.hostToken,
-    hostId: host.hostId,
+    burrowToken: burrow.burrowToken,
+    burrowId: burrow.burrowId,
     origin: ORIGIN,
     rpId: RP_ID,
   });
-  OPEN_FAKE_HOSTS.push(fake);
+  OPEN_FAKE_BURROWS.push(fake);
   await fake.ready;
-  return { host, fake };
+  return { burrow, fake };
 }
 
-test('minting requires a host token', async () => {
+test('minting requires a burrow token', async () => {
   const { app } = await freshApp();
-  const { body: host } = await enrollHost(app);
+  const { body: burrow } = await enrollBurrow(app);
 
   assert.equal((await mint(app, undefined)).status, 401);
-  assert.equal((await mint(app, 'not-a-host-token')).status, 401);
-  // A signed-in session is the wrong credential: the QR is the Host's to show.
+  assert.equal((await mint(app, 'not-a-burrow-token')).status, 401);
+  // A signed-in session is the wrong credential: the QR is the Burrow's to show.
   const { sessionToken } = await ownerSession(app);
   assert.equal((await mint(app, sessionToken)).status, 401);
-  const ok = await mint(app, host.hostToken);
+  const ok = await mint(app, burrow.burrowToken);
   assert.equal(ok.status, 200);
   const body = await ok.json();
   assert.equal(typeof body.token, 'string');
@@ -223,12 +223,12 @@ test('a wrong token answers the one 401, distinct from the session gate', async 
   assert.equal((await begin(app, { setupToken: 42 })).status, 401);
 });
 
-test('revoking the minting Host kills its outstanding tokens at both gates', async () => {
+test('revoking the minting Burrow kills its outstanding tokens at both gates', async () => {
   const { app, stateDir, token } = await appWithToken();
 
-  // Revocation is editing `hosts.json` by hand (relay.md, Guardrails). A
+  // Revocation is editing `burrows.json` by hand (relay.md, Guardrails). A
   // token minted before that edit must not stay redeemable for its whole TTL.
-  await writeFile(join(stateDir, 'hosts.json'), '[]\n');
+  await writeFile(join(stateDir, 'burrows.json'), '[]\n');
 
   const began = await begin(app, { setupToken: token });
   assert.equal(began.status, 401);
@@ -256,19 +256,19 @@ test('the token is the only credential: a password or nothing is the same 401', 
   assert.equal((await registerWithToken(app, token)).status, 200);
 });
 
-test('a redemption tells the minting Host nothing: the invitation is its own state', async () => {
+test('a redemption tells the minting Burrow nothing: the invitation is its own state', async () => {
   const created = await freshApp();
   const server = await startRelay(created);
   try {
-    const minter = await connectFakeHost(created.app, server);
-    const { token } = await (await mint(created.app, minter.host.hostToken)).json();
+    const minter = await connectFakeBurrow(created.app, server);
+    const { token } = await (await mint(created.app, minter.burrow.burrowToken)).json();
     assert.equal((await registerWithToken(created.app, token)).status, 200);
 
-    // The QR panel renders the invitation the Host holds in memory, whose state
+    // The QR panel renders the invitation the Burrow holds in memory, whose state
     // the pairing ceremony moves. A redemption frame would be a second opinion
     // about the same code, over a wire that carries no credentials.
     await sleep(60);
-    assert.deepEqual(minter.fake.frames, [], 'the Host is told nothing about the redemption');
+    assert.deepEqual(minter.fake.frames, [], 'the Burrow is told nothing about the redemption');
   } finally {
     await shutdown(server);
   }
@@ -323,17 +323,17 @@ test('two finishes race one token: one registers, the other is refused', async (
   }
 });
 
-test('a scan whose Host went offline mid-ceremony still sets the phone up', async () => {
+test('a scan whose Burrow went offline mid-ceremony still sets the phone up', async () => {
   const created = await freshApp();
   const server = await startRelay(created);
   try {
-    const minter = await connectHost(created.app, server);
-    const { token } = await (await mint(created.app, minter.host.hostToken)).json();
+    const minter = await connectBurrow(created.app, server);
+    const { token } = await (await mint(created.app, minter.burrow.burrowToken)).json();
 
     // The laptop lid closes between the scan and the passkey prompt. Setting the
-    // account up is a Relay-only transaction, so it must not depend on the Host.
+    // account up is a Relay-only transaction, so it must not depend on the Burrow.
     minter.socket.close();
-    await until(() => !created.hub.isHostOnline(minter.host.hostId));
+    await until(() => !created.hub.isBurrowOnline(minter.burrow.burrowId));
 
     assert.equal((await registerWithToken(created.app, token)).status, 200);
   } finally {
@@ -391,10 +391,10 @@ test('retiring requires a session, and a revoked minter kills the token there to
   assert.equal(anonymous.status, 401);
   assert.deepEqual(await anonymous.json(), { error: UNAUTHORIZED_ERROR });
 
-  // Revocation is editing `hosts.json` by hand (relay.md, Guardrails): the
+  // Revocation is editing `burrows.json` by hand (relay.md, Guardrails): the
   // same re-read that guards `begin`/`finish` guards this route.
   const { sessionToken } = await ownerSession(app);
-  await writeFile(join(stateDir, 'hosts.json'), '[]\n');
+  await writeFile(join(stateDir, 'burrows.json'), '[]\n');
   const revoked = await retire(app, sessionToken, { setupToken: token });
   assert.equal(revoked.status, 401);
   assert.deepEqual(await revoked.json(), REFUSED);
@@ -402,19 +402,19 @@ test('retiring requires a session, and a revoked minter kills the token there to
 
 // --- SetupTokenIssuer directly: expiry, single use, and the cap -------------
 
-test('the issuer answers the minting host, once, and only while fresh', () => {
+test('the issuer answers the minting burrow, once, and only while fresh', () => {
   const clock = makeClock();
   const issuer = new SetupTokenIssuer({ now: clock.now });
 
-  const { token, expiresAt } = issuer.issue('host-1');
-  const entry = { hostId: 'host-1', expiresAt };
+  const { token, expiresAt } = issuer.issue('burrow-1');
+  const entry = { burrowId: 'burrow-1', expiresAt };
   assert.deepEqual(issuer.peek(token), entry);
   assert.deepEqual(issuer.peek(token), entry); // peek does not spend
   assert.deepEqual(issuer.consume(token), entry);
   assert.equal(issuer.consume(token), null);
   assert.equal(issuer.peek('never-minted'), null);
 
-  const later = issuer.issue('host-2');
+  const later = issuer.issue('burrow-2');
   clock.advance(SETUP_TOKEN_TTL_MS);
   assert.equal(issuer.peek(later.token), null);
   assert.equal(issuer.consume(later.token), null);
@@ -424,61 +424,61 @@ test('restore puts a consumed token back on its original expiry', () => {
   const clock = makeClock();
   const issuer = new SetupTokenIssuer({ now: clock.now });
 
-  const { token, expiresAt } = issuer.issue('host-1');
+  const { token, expiresAt } = issuer.issue('burrow-1');
   const entry = issuer.consume(token);
   clock.advance(SETUP_TOKEN_TTL_MS / 2);
   issuer.restore(token, entry);
   // Redeemable again, but not for a moment longer than it started with: a
   // failed attempt must not be a way to extend the shoulder-surf window.
-  assert.deepEqual(issuer.peek(token), { hostId: 'host-1', expiresAt });
+  assert.deepEqual(issuer.peek(token), { burrowId: 'burrow-1', expiresAt });
   clock.advance(SETUP_TOKEN_TTL_MS / 2);
   assert.equal(issuer.peek(token), null);
 
   // A token that died while the route was failing stays dead.
-  const late = issuer.issue('host-1');
+  const late = issuer.issue('burrow-1');
   const lateEntry = issuer.consume(late.token);
   clock.advance(SETUP_TOKEN_TTL_MS);
   issuer.restore(late.token, lateEntry);
   assert.equal(issuer.peek(late.token), null);
 });
 
-test('restore stays within the Host cap after a concurrent mint fills the slot', () => {
+test('restore stays within the Burrow cap after a concurrent mint fills the slot', () => {
   const clock = makeClock();
   const issuer = new SetupTokenIssuer({ now: clock.now });
-  const issued = Array.from({ length: MAX_TOKENS_PER_HOST }, () => issuer.issue('host-1'));
+  const issued = Array.from({ length: MAX_TOKENS_PER_BURROW }, () => issuer.issue('burrow-1'));
 
   const spent = issuer.consume(issued[0].token);
-  const replacement = issuer.issue('host-1');
-  assert.equal(issuer.pendingCount, MAX_TOKENS_PER_HOST);
+  const replacement = issuer.issue('burrow-1');
+  assert.equal(issuer.pendingCount, MAX_TOKENS_PER_BURROW);
 
   // Validation failed after the mint used the apparent vacancy. The failed
-  // finish gets its token back, but cannot grow this Host to nine entries.
+  // finish gets its token back, but cannot grow this Burrow to nine entries.
   issuer.restore(issued[0].token, spent);
-  assert.equal(issuer.pendingCount, MAX_TOKENS_PER_HOST);
+  assert.equal(issuer.pendingCount, MAX_TOKENS_PER_BURROW);
   assert.deepEqual(issuer.peek(issued[0].token), spent);
   assert.equal(issuer.peek(issued[1].token), null);
   assert.notEqual(issuer.peek(replacement.token), null);
 });
 
-test('outstanding tokens are pruned, and capped per minting Host', () => {
+test('outstanding tokens are pruned, and capped per minting Burrow', () => {
   const clock = makeClock();
   const issuer = new SetupTokenIssuer({ now: clock.now });
 
-  const expiring = issuer.issue('host-1');
+  const expiring = issuer.issue('burrow-1');
   clock.advance(SETUP_TOKEN_TTL_MS);
   // Minting reclaims it: nothing else ever removes an abandoned token.
-  issuer.issue('host-1');
+  issuer.issue('burrow-1');
   assert.equal(issuer.pendingCount, 1);
   assert.equal(issuer.peek(expiring.token), null);
 
-  // A Host re-rendering its QR in a loop cannot grow the map without bound —
-  // and evicts only its own oldest, never the token another Host is displaying.
-  const displayed = issuer.issue('host-2').token;
+  // A Burrow re-rendering its QR in a loop cannot grow the map without bound —
+  // and evicts only its own oldest, never the token another Burrow is displaying.
+  const displayed = issuer.issue('burrow-2').token;
   const minted = [];
-  for (let i = 0; i < 200; i++) minted.push(issuer.issue('host-1').token);
+  for (let i = 0; i < 200; i++) minted.push(issuer.issue('burrow-1').token);
   assert.equal(issuer.peek(minted[0]), null);
   assert.notEqual(issuer.peek(minted.at(-1)), null);
-  assert.notEqual(issuer.peek(displayed), null, "host-2's live token survives host-1's loop");
-  // host-1 at its cap, plus host-2's one: the map is bounded by hosts × cap.
-  assert.equal(issuer.pendingCount, MAX_TOKENS_PER_HOST + 1);
+  assert.notEqual(issuer.peek(displayed), null, "burrow-2's live token survives burrow-1's loop");
+  // burrow-1 at its cap, plus burrow-2's one: the map is bounded by burrows × cap.
+  assert.equal(issuer.pendingCount, MAX_TOKENS_PER_BURROW + 1);
 });
