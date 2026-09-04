@@ -38,11 +38,30 @@ import { INSTALLERS, RULES } from './deploy-lint.mjs';
 
 const selftest = makeSelftest('deploy-lint.mjs', '.selftest.bak');
 
-for (const { rule, patterns, skip = {}, exactMatches = {} } of RULES) {
+for (const { rule, patterns, skip = {}, exactMatches = {}, forbidden = false, violation } of RULES) {
   for (const { platform, file } of INSTALLERS) {
     if (platform in skip) continue;
     const pattern = patterns[platform];
     if (!pattern) continue;
+
+    // A forbidden rule is the inverse: deleting nothing proves nothing, so the
+    // mutation is to ADD the thing the spec bans and require the lint to fail.
+    // Without this the rule is a claim that something is checked — a pattern
+    // that matches nothing passes whether or not it could ever match.
+    if (forbidden) {
+      if (pattern.test(readRepoFile(file))) {
+        selftest.weak.push(
+          `${platform.padEnd(8)} ${rule}\n      pattern already matches the pristine file`,
+        );
+        continue;
+      }
+      selftest.withAppended(
+        file,
+        `\n${violation}\n`,
+        `${platform.padEnd(8)} ${rule}\n      the forbidden text stays green — the rule checks nothing`,
+      );
+      continue;
+    }
 
     // Matched and edited in the same normalized form the lint reads, so a
     // `core.autocrlf` checkout does not report every span rule as unmatched.

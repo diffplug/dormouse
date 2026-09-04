@@ -273,7 +273,7 @@ export const RULES = [
     security: 'the worker in `lib/src/remote/pocket-app/sw.ts` is the only thing that opens one',
     kind: 'require',
     file: 'package.json',
-    // Anchored inside the `build` script, not on the command: `dev:pocket-server`
+    // Anchored inside the `build` script, not on the command: `dev:server`
     // runs the same line, so a bare match stayed green after `build` stopped
     // building the worker at all.
     pattern: /"build":\s*"[^"]*pnpm --filter dormouse-lib build:pocket/,

@@ -57,7 +57,9 @@ test('without DORMOUSE_BIND_HOST the server still listens on every interface', a
     t.skip('no non-loopback IPv4 on this machine');
     return;
   }
-  const { port, stop } = await startServer({});
+  // Blank, not absent: the helper pins loopback, and `readConfig` reads an
+  // empty value as unset — which is the shipped default this case is about.
+  const { port, stop } = await startServer({ DORMOUSE_BIND_HOST: '' });
   t.after(stop);
 
   assert.equal(await reachable('127.0.0.1', port), true);

@@ -107,8 +107,9 @@ Two things to carry forward:
   a changed origin for you.
 - **HTTPS is not optional.** WebAuthn needs a secure context and only
   `localhost` is exempt, so a real phone needs the TLS origin. For a
-  desktop-only dev loop, `DORMOUSE_SETUP_PASSWORD=hunter2 pnpm dev:pocket-server`
-  on `localhost:3000` is the shortcut.
+  desktop-only dev loop, the shortcut is
+  `DORMOUSE_SETUP_PASSWORD="$(openssl rand -hex 32)" pnpm dev:server` on
+  `localhost:3000`.
 
 The setup password gates exactly one thing: enrolling a Host from somewhere
 else. It never leaves your machine except to that endpoint — and on a happy path

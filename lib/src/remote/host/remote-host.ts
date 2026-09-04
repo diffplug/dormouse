@@ -18,6 +18,7 @@ import {
   MAX_TOKENS_PER_HOST,
   NoiseError,
   NoiseTransportSession,
+  TokenBucket,
   WS_CLOSE_HOST_REPLACED,
   WS_ROUTES,
   WS_TOKEN_PARAM,
@@ -355,8 +356,12 @@ export class RemoteHost {
    * The crypto token bucket, Host-global and driven by the injected clock
    * (`docs/specs/remote-security-model.md` → Host bounds).
    */
-  #initTokens = E2E_INIT_BURST;
-  #initTokensAt: number;
+  readonly #initTokens: TokenBucket;
+
+  /** `take()` answers `null` on success; neither call site wants the wait. */
+  #spendInitToken(): boolean {
+    return this.#initTokens.take() === null;
+  }
 
   /** Cancels the armed reaper timer, or null when none is armed. */
   #cancelReaper: (() => void) | null = null;
@@ -383,7 +388,11 @@ export class RemoteHost {
       requireUserVerification: options.enrollment.requireUserVerification ?? false,
     };
     this.#now = options.now ?? (() => Date.now());
-    this.#initTokensAt = this.#now();
+    this.#initTokens = new TokenBucket({
+      capacity: E2E_INIT_BURST,
+      refillIntervalMs: E2E_INIT_REFILL_INTERVAL_MS,
+      now: this.#now,
+    });
     this.#acl = loadHostAcl(options.enrollment.hostId, options.loadAcl);
     this.#challenges = new HostChallengeIssuer({ now: this.#now });
 
@@ -631,25 +640,6 @@ export class RemoteHost {
     this.#cancelReaper?.();
     this.#cancelReaper = null;
     this.#reaperAt = null;
-  }
-
-  /**
-   * Spend one crypto token, or report that this frame buys no WebCrypto.
-   *
-   * Refills in whole intervals and carries the remainder, so a clock read
-   * every few hundred milliseconds cannot round its way to a faster sustained
-   * rate; a rewinding clock costs refill, never correctness.
-   */
-  #spendInitToken(): boolean {
-    const elapsed = Math.max(0, this.#now() - this.#initTokensAt);
-    const refill = Math.floor(elapsed / E2E_INIT_REFILL_INTERVAL_MS);
-    if (refill > 0) {
-      this.#initTokens = Math.min(E2E_INIT_BURST, this.#initTokens + refill);
-      this.#initTokensAt += refill * E2E_INIT_REFILL_INTERVAL_MS;
-    }
-    if (this.#initTokens <= 0) return false;
-    this.#initTokens -= 1;
-    return true;
   }
 
   /**

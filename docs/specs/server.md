@@ -48,7 +48,7 @@ The whole of what `server/src/` reads from the environment:
 
 | Env var                   | Meaning                                                    |
 | ------------------------- | ---------------------------------------------------------- |
-| `DORMOUSE_SETUP_PASSWORD` | Required. Gates host enrollment; registers no passkey — `/api/setup/*` takes a Host-minted setup token only. |
+| `DORMOUSE_SETUP_PASSWORD` | Required: 64 lowercase hex characters (32 CSPRNG bytes). Gates Host enrollment, not passkey registration; config boundaries enforce the shape. |
 | `DORMOUSE_ORIGIN`         | External origin, e.g. `https://dormouse.tailnet.ts.net`; source of the WebAuthn `rpId`/`origin` and the Host's `ConnectionPolicy`. Defaults to `http://localhost:<port>` for dev. |
 | `DORMOUSE_STATE_DIR`      | Where the JSON state files live. Default `./data`.         |
 | `DORMOUSE_POCKET_DIR`     | The built Pocket app served at `/*`. Defaults to `lib/dist-pocket` resolved from the compiled server's own location, never the cwd (rationale). Absent or lacking `index.html`, `GET /` is a plaintext stub naming the build command. |
@@ -69,7 +69,10 @@ context: `localhost` works for development, a real phone needs TLS in front
 reaches the app over loopback and a socket left on every interface also publishes
 the plaintext port to the LAN and to the tailnet itself; the selfhost install
 sets `DORMOUSE_BIND_HOST`, and the default stays unbound for containers, where
-the namespace is the boundary. Binding loopback is *containment, not admission* —
+the namespace is the boundary. **Every developer and test entrypoint opts back
+in**, each carrying a published credential: `server/scripts/dev.mjs`,
+`server/test/helpers.mjs`, `server/test/spawn-server.mjs`. An explicit value
+wins, as `server/test/bind-host.test.mjs` proves. Binding loopback is *containment, not admission* —
 every route is still gated by the setup password or a bearer token, exactly as
 `docs/specs/security-local.md` -> "Loopback Listeners" requires; `scripts/loopback-lint.mjs` does
 not cover this socket (rationale).
@@ -86,7 +89,7 @@ hostname.
 app** — the only disk half of an otherwise pure env→config mapping.
 
 Source of truth: `readConfig` in `server/src/config.ts`,
-`server/src/enroll-token.ts`; pinned by `server/test/config.test.mjs`,
+`server/src/enroll-token.ts`, `server/scripts/dev.mjs`; pinned by `server/test/config.test.mjs`,
 `server/test/runtime-file.test.mjs`, `server/test/bind-host.test.mjs`,
 `server/test/enroll-token.test.mjs`.
 
@@ -274,10 +277,10 @@ The whole route surface; paths and request/response shapes live in
 
 | Route                            | Auth           | Does                                              |
 | -------------------------------- | -------------- | ------------------------------------------------- |
-| `GET /api/hello`                 | —              | The shared greeting. **Carries no release identity** — unauthenticated, CORS-`*`, reachable through `tailscale serve`; the runtime file carries it ("Installing it") |
+| `GET /api/hello`                 | —              | The shared greeting. **Carries no release identity** — it is unauthenticated and reachable through the HTTPS proxy; the runtime file carries it ("Installing it") |
 | `POST /api/setup/begin`          | setup token    | Issues a registration challenge, gated exactly as `finish` is so neither is softer. Answers the account's credential ids for a retry's `excludeCredentials`, so no passkey that already signs in is duplicated — an orphan the Server never registered is absent, and is still replaced |
 | `POST /api/setup/finish`         | setup token    | Registers the passkey in `account.json`; the token is spent at the gate and put back if registration then fails. `label` is **reduced, not refused** — the same `boundedPushText` a pairing label goes through, to `MAX_PASSKEY_LABEL_LENGTH` code points with control and bidi characters stripped |
-| `POST /api/setup/retire`         | session token  | Spends a live setup token without registering anything (rationale). 204, or 401 `SETUP_TOKEN_INVALID_ERROR` after the same fixed delay |
+| `POST /api/setup/retire`         | session token  | Spends a live setup token without registering anything (rationale). 204, or 401 `SETUP_TOKEN_INVALID_ERROR` |
 | `POST /api/signin/begin`         | —              | Issues a sign-in challenge                          |
 | `POST /api/signin/finish`        | —              | Verifies the assertion and issues a 12-hour in-memory session token |
 | `POST /api/reauth/begin`         | session token  | Takes a required, kind-tagged `PresenceBinding`, mints a single-use 2-minute `serverNonce`, and answers `presenceChallenge(binding, nonce)` with the RP ID, the nonce, and the bound credential as the sole `allowCredentials` entry. 404 for a credential this account has not registered; 400 for a missing or malformed binding |
@@ -295,10 +298,9 @@ The whole route surface; paths and request/response shapes live in
 | `GET /ws/client`                 | session token  | A Client's relay socket                            |
 | `GET /*`                         | —              | The built Pocket app, registered last so every route above wins. Cache policy and SPA fallback: [pocket-app.md](./pocket-app.md) |
 
-`/api/*` is CORS-`*` — every endpoint is gated by a credential and no cookies
-exist for a foreign origin to ride on, and the Host and dev Pocket builds call
-from other origins. WS auth rides the `token` query param, since browsers cannot
-set WebSocket headers.
+The Server emits no cross-origin grant
+([security-remote.md](./security-remote.md#cross-origin-access)). **WS auth rides
+the `token` query param**, since browsers cannot set WebSocket headers.
 
 **Every request body is bounded before any route runs**, at
 `MAX_REQUEST_BODY_BYTES` (64 KiB), answering 413 — the routes carrying their
@@ -308,18 +310,26 @@ the body, never on the caller**: a correct credential inside an over-long body i
 still 413. **One route is exempt**, its legitimate body being larger:
 `/api/push/send`, whose `MAX_PUSH_SEND_BODY_BYTES` is *derived* from
 `MAX_PUSH_QUERY_DELIVERY_IDS` and `MAX_SEALED_PUSH_LENGTH` so it cannot drift
-from what a maximal fan-out costs. **The limit is staged after CORS**, so a 413
-carries the headers a browser needs to read it. Source of truth:
-`server/src/app.ts`, pinned by `server/test/body-limit.test.mjs`.
+from what a maximal fan-out costs. Source of truth: `server/src/app.ts`, pinned
+by `server/test/body-limit.test.mjs`.
 
-**The setup password is compared in constant time** (SHA-256 digests, so length
-never branches) with a small fixed delay on failure; host tokens resolve the same
-way, checking every row without an early break. **The same delay answers a
-rejected host token**, on `requireHost` and on the `/ws/host` upgrade; the
-session token gets neither it nor a shape check (rationale). **A `hostToken` is
-pinned to its minted shape**, 32 bytes base64url, refused before `hosts.json` is
-read at all, the way `isDeliveryId` guards the push routes. That is the extent of
-the hardening today.
+**Must admit Host enrollment through one process-global bucket before body
+parsing**, at `HOST_ENROLL_ATTEMPT_BURST` and `HOST_ENROLL_ATTEMPT_REFILL_MS`;
+empty answers 429 with `Retry-After`. Every POST counts; OPTIONS does not.
+Source of truth: `TokenBucket` in `server-lib-common/src/security/token-bucket.ts`
+and `HOST_ENROLL_ATTEMPT_*` in `server/src/app.ts`; test:
+`server/test/token-bucket.test.mjs`.
+
+**Must compare the setup password in constant time, and delay only that
+rejection.** `secretEquals` hashes both lengths first. Retaining rejected setup,
+Host, or session bearer requests would give public traffic a resource sink for
+tokens nobody can guess (rationale); the delayed route is the one the bucket
+already bounds. Host tokens still use a constant-time full-row scan.
+**Must reject a `hostToken` outside its minted 32-byte base64url shape before
+reading `hosts.json`**, as `isDeliveryId` guards push routes. **That read is
+cached against the file's stat**, so a well-shaped guess buys no `readFile` or
+`JSON.parse`; a hand edit still revokes, the stat being the gate rather than a
+TTL. Source of truth: `readCached` in `server/src/state.ts`.
 
 Every session-gated route — including the `/ws/client` upgrade, rejected before
 `injectWebSocket` sees it — answers an unknown or expired token 401 with the
@@ -329,7 +339,7 @@ and a bare 401 is ambiguous since a spent setup token answers 401 too
 ([pocket-app.md](./pocket-app.md) -> An expired session drops to sign-in). A
 rejected enroll token answers that same body and delay whatever the cause, safe
 because only a Host sends one; **a rejected setup token answers the distinct
-`SETUP_TOKEN_INVALID_ERROR`** — same 401, same delay — which Pocket keys its
+`SETUP_TOKEN_INVALID_ERROR`** — same 401, with no delay — which Pocket keys its
 "scan again, or type the password" recovery on.
 
 ### Setup tokens and the pairing QR
@@ -381,7 +391,7 @@ Token rules, unchanged by the grammar:
 
 * **`/api/host/enroll` counts exactly one credential by presence, not by type**
   (rationale); the setup routes have nothing to count — a request without a live
-  token is the same delayed 401 as one with a dead one.
+  token is the same 401 as one with a dead one.
 * **`begin` peeks; `finish` consumes before it reads the body** — that delete is
   the single-use gate, so of two overlapping finishes only one registers. Every
   failure past it restores the token on its original expiry without exceeding
@@ -893,7 +903,7 @@ The loop at the top of this spec is implemented end to end. To test:
 **1. Server + Pocket** (one terminal):
 
 ```sh
-DORMOUSE_SETUP_PASSWORD=hunter2 pnpm dev:pocket-server
+DORMOUSE_SETUP_PASSWORD="$(openssl rand -hex 32)" pnpm dev:server
 ```
 
 Builds the Pocket app (`lib/dist-pocket`) and the server, then serves both on
@@ -907,8 +917,8 @@ enables it with no further configuration; to exercise push on localhost, supply
 a contact:
 
 ```sh
-DORMOUSE_SETUP_PASSWORD=hunter2 DORMOUSE_VAPID_SUBJECT=mailto:you@example.com \
-  pnpm dev:pocket-server
+DORMOUSE_SETUP_PASSWORD="$(openssl rand -hex 32)" DORMOUSE_VAPID_SUBJECT=mailto:you@example.com \
+  pnpm dev:server
 ```
 
 **2. Host** (the laptop being controlled). A default build's baked allowlist
@@ -926,13 +936,13 @@ a name for this machine. The same from the webview's devtools console, the
 scripting seam:
 
 ```js
-await window.dormouseRemoteHost.enroll('http://localhost:3000', 'hunter2', 'My Laptop')
+await window.dormouseRemoteHost.enroll('http://localhost:3000', '<64 hex characters>', 'My Laptop')
 ```
 
 Enrollment persists in the service's own store, and later launches connect by
 themselves. (Every command rides on that object; the dev loop has no installer
 offer.) For a headless stand-in host instead:
-`DORMOUSE_SETUP_PASSWORD=hunter2 node server/scripts/fake-host.mjs http://localhost:3000`
+`DORMOUSE_SETUP_PASSWORD='<64 hex characters>' node server/scripts/fake-host.mjs http://localhost:3000`
 — it instantiates the test harness's `FakeHost`, prints a pairing URL to paste
 into Pocket, and differs from a real Host only in auto-approving and logging.
 

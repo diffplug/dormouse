@@ -26,7 +26,7 @@ const started = [];
  * Spawn a long-running child in its own process group, tee its output into
  * `logPath`, and hand back a handle whose `lines` the caller can poll.
  *
- * **Its own process group, always.** `pnpm dev:pocket-server` and
+ * **Its own process group, always.** `pnpm dev:server` and
  * `pnpm dev:standalone:ab` each fan out into a tree (pnpm → node → vite →
  * esbuild), and killing only the pnpm shim orphans everything under it.
  * `detached: true` plus a `process.kill(-pid)` at teardown takes the group.

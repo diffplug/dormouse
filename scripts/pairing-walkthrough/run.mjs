@@ -7,6 +7,7 @@
  * entry point. **Never wire it into `pnpm test` or a CI workflow.**
  */
 
+import { randomBytes } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
@@ -51,7 +52,6 @@ function defaults() {
     scenario: DEFAULT_SCENARIO,
     out: '$TMPDIR/pairing-walkthrough/<timestamp>',
     skipBuild: false,
-    password: 'walkthrough-hunter2',
     machineName: 'Walkthrough Mac',
     keep: false,
   };
@@ -71,7 +71,6 @@ function parseArgs(argv) {
       case '--until': opts.until = value(); break;
       case '--out': opts.out = value(); break;
       case '--skip-build': opts.skipBuild = true; break;
-      case '--password': opts.password = value(); break;
       case '--machine-name': opts.machineName = value(); break;
       case '--keep': opts.keep = true; break;
       case '--help': case '-h': opts.help = true; break;
@@ -104,7 +103,6 @@ function usage() {
     `                     ${DEFAULT_SCENARIO}: ${steps}`,
     `  --out <dir>        run directory (default: ${d.out})`,
     '  --skip-build       reuse lib/dist-pocket and server/dist instead of rebuilding',
-    `  --password <pw>    DORMOUSE_SETUP_PASSWORD for the run (default: ${d.password})`,
     `  --machine-name <n> the name the Host enrolls under (default: ${d.machineName})`,
     '  --keep             leave everything running when the run ends, pass or fail',
     '',
@@ -139,6 +137,11 @@ async function main(live) {
   opts.vitePort = await findFreePort(15540);
   opts.hostPort = await findFreePort(opts.vitePort + 1);
   opts.session = `pairing-walkthrough-${stamp}`;
+  // Never an option: the walkthrough spawns the only server that will ever see
+  // it and types it into the form itself, so nothing outside a run needs to
+  // choose it — and the Server takes 64 lowercase hex characters alone
+  // (`docs/specs/server.md` -> Configuration), which a hand-picked one is not.
+  opts.password = randomBytes(32).toString('hex');
 
   const scenario = SCENARIOS[opts.scenario];
 
