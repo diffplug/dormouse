@@ -154,21 +154,17 @@ by an unrelated occurrence, one of them the entropy guard's own explanatory comm
 whole credential posture is that account owning the files; an elevated run would write
 them owned by another principal and register the service for it.
 
-**Why the Funnel check is node-scoped.** Any Funnel on the node that fronts this server
-is a thing to look at, and parsing a mapping out of CLI prose would fail open the day
-the wording changes — so the blunter test is the deliberate choice.
-
-**Why a nonzero exit status is its own verdict.** A Tailscale CLI that is absent,
-unauthenticated, or too old for `funnel status` produces output that matches nothing,
-which is indistinguishable from a node with no Funnel until the exit status is
-consulted. Discarding it with `2>/dev/null || true` would report `off`.
+**Why Funnel is not a health verdict.** Tailnet privacy is useful defense in depth, but
+making it load-bearing left the setup endpoint safe only while a separate CLI reported
+the intended configuration. Auditing the credential, admission, browser, and Host-
+authorization boundaries directly makes accidental public exposure fail safe.
 
 **Why `grep -q` and `head -1` are banned on these decisions.** The installers and
 `manage` run under `set -o pipefail`; `grep -q` exits at the first match, and the
 writer's SIGPIPE makes the pipeline 141, which an `if` reads as "no match" and an
-assignment turns into an abort. Past the pipe buffer that reported a live Funnel as
-off, an off-loopback bind as loopback-only, and — the one that mutates rather than
-reports — a `serve status` carrying a foreign root mapping as no conflict at all, so
+assignment turns into an abort. Past the pipe buffer that reported an off-loopback bind
+as loopback-only and — the one that mutates rather than reports — a `serve status`
+carrying a foreign root mapping as no conflict at all, so
 the `confirm` guarding the operator's existing Serve config never ran.
 
 **Why the Serve checks are scoped to the root line with the port right-bounded.** `/api`
@@ -188,7 +184,7 @@ helper the moment the failing assignment is its last command or a caller invokes
 outside `$( )`.
 
 **Why enforcement splits between two scripts.** Only
-`scripts/installer-verify-test.mjs` runs installer code, so reverting `funnel_state`,
+`scripts/installer-verify-test.mjs` runs installer code, so reverting
 `has_off_loopback` or `serve_state` to a pipe goes red there; it cannot see
 `serve_proxies_root`'s `<<<`, which only `scripts/deploy-lint.mjs`'s pattern holds.
 That lint also counts the decisions consulting these helpers, since a helper whose

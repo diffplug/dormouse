@@ -147,21 +147,25 @@ follow, the same on all three:
 - **The server always speaks plain HTTP, so the listen interface *is* a security boundary when the TLS proxy is local.** An unbound socket publishes the plaintext port to the LAN and to the tailnet itself, so the install pins `DORMOUSE_BIND_HOST=127.0.0.1` and refuses to proceed without it.
 - **`DORMOUSE_ORIGIN` is durable WebAuthn identity.** Rewriting it silently invalidates the registered passkey and every enrolled Host, so the installer stops rather than rewriting a mismatch.
 
-**Tailscale is network-layer defense-in-depth *under* the passkey/ACL model, never a
-substitute for it** — but the analysis above leans on the origin being tailnet-only.
-`tailscale serve` and `tailscale funnel` share one configuration surface, and a Funnel
-on this node publishes the same origin to the public internet, where the setup password
-becomes an internet-facing guessing target with none of the mitigations above.
+**May publish the HTTPS origin publicly.** Tailnet-only Serve is the installer default and
+network-layer defense-in-depth, never an authentication premise. Enabling Tailscale
+Funnel publishes the same TLS origin and stays inside this analysis: public admission
+is owned by [The setup password](#the-setup-password), and a Client still reaches no
+Host without the Host-local authorization above.
+
+**Must not make Funnel state an install or health verdict.** The installers configure
+Serve but neither inspect, warn about, enable, nor disable Funnel; `manage verify`
+checks the local TLS-to-loopback path, while CI and this audit check application
+controls.
 
 - **FAIL IF** `deploy/local/install-macos.sh`, `deploy/local/install-windows.ps1`, or `deploy/local/install-linux.sh` stops requiring `DORMOUSE_BIND_HOST=127.0.0.1` in `config/server.env`, or if any `manage verify` stops asserting that the plaintext port is unreachable on the node's Tailscale IP.
 - **FAIL IF** the unset default of `DORMOUSE_BIND_HOST` in `server/src/config.ts` stops being `undefined` — listen on every interface, what a container wants, where the namespace is the boundary — or if `server/test/bind-host.test.mjs` stops spawning the real entrypoint to prove the plaintext port is unreachable off-loopback when it *is* set.
 - **FAIL IF** any installer stops refusing to rewrite a `DORMOUSE_ORIGIN` that no longer matches the node's DNS name.
 - **FAIL IF** any installer stops refusing to run with elevated privileges — `id -u` on macOS and Linux, the `Administrator` role check on Windows (rationale).
-- **FAIL IF** `manage verify` does not fail on Funnel being on for this node. It matches `funnel on` across `tailscale serve status` and `tailscale funnel status`; that is node-scoped, not scoped to the served origin, and is deliberately the blunter test (rationale).
-- **FAIL IF** that check reports `off` when it could not run. A nonzero exit status is its own verdict and fails verify, never discarded with `2>/dev/null || true`: a check that could not run has not passed (rationale).
+- **FAIL IF** an installer or `manage` invokes `tailscale funnel`, treats Funnel state as a warning or failure, or changes it; public reachability must exercise the application controls, not become a forbidden deployment state (rationale).
 - **FAIL IF** any decision taken on Tailscale CLI or listener output is reached by piping that output into `grep -q`, or into a `head -1` that exits first; every such search is over text captured first. The `head -1` half binds every site whose 141 can still reach an `if` or an assignment — an inline substitution always, and a helper the moment the failing assignment is its last command or a caller invokes it outside `$( )` (rationale).
 - **FAIL IF** any decision about whether Serve maps `/` to us — the install-time conflict gate, `manage verify`, and the uninstall that turns Serve off — is not additionally scoped to the root line with the port right-bounded: `/api` on this port is not `/` on it, and `127.0.0.1:31000` contains `127.0.0.1:3100`. The post-mutation `SERVE_AFTER` assertion is the one deliberate exception, since it asserts our own `serve --bg` landed rather than auditing a foreign config (rationale).
-- **FAIL IF** `scripts/installer-verify-test.mjs` stops extracting `funnel_state`, `has_off_loopback` and `serve_state` and driving them over inputs larger than the pipe buffer, or stops pinning `serve_proxies_root`'s root scoping and its port bound. Enforcement splits by control, not by helper: `scripts/deploy-lint.mjs` holds that helper's `<<<` pattern and counts the decisions that consult these helpers, since a helper whose answer is right survives a caller that stops asking, and `serve_root_target` is held by neither on purpose (rationale).
+- **FAIL IF** `scripts/installer-verify-test.mjs` stops driving `has_off_loopback` and `serve_state` over inputs larger than the pipe buffer, or stops pinning `serve_proxies_root`'s root scoping and port bound. `scripts/deploy-lint.mjs` holds that helper's `<<<` pattern and counts its consumers; `serve_root_target` is held by neither on purpose (rationale).
 
 ### What crosses the boundary
 

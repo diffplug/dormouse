@@ -48,7 +48,7 @@
 
 ## HTTP API
 
-**Why the body bound runs before the credential gate.** The routes carrying their credential in the body read it first, so an unbounded reader lets any page on the tailnet make the process buffer whatever it likes — no auth, no rate limit, no delay.
+**Why the body bound runs before the credential gate.** Those routes must read the body to find its credential, so an unbounded reader would let a public caller make the process buffer arbitrary input before proving anything.
 
 **What three route answers are protecting.** `POST /api/setup/retire` exists so a QR a phone scanned but will not register with cannot stay redeemable in a photograph. `/api/host/enroll` checks its `MAX_ENROLLED_HOSTS` cap after the credential so a caller that proved nothing cannot learn the server is full. `/api/push/subscribe` 404s an unknown `hostId` so no subscription row strands where no Host can read or prune it.
 

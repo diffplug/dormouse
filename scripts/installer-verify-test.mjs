@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 /**
  * Executable tests for the installer decisions whose answer cannot be read off
- * the file: the searches over CLI output nobody bounds — is Tailscale Funnel
- * on, is the loopback port bound anywhere but 127.0.0.1, does an existing
- * Serve config already claim the root path — and the install's own reading of
- * a `config/server.env` that may be half-written. Runs from the repo root via
- * `pnpm test`.
+ * the file: the searches over CLI output nobody bounds — whether the loopback
+ * port is bound anywhere but 127.0.0.1 and whether an existing Serve config
+ * already claims the root path — plus the install's reading of a possibly
+ * half-written `config/server.env`. Runs from the repo root via `pnpm test`.
  *
  * Why this exists: `deploy-lint.mjs` is textual, so it can say a control is
  * still present and nothing more. These are controls where "present" was not
@@ -25,10 +24,9 @@
  * copy — and driven under the same `set -euo pipefail` those scripts run
  * under. Extraction takes the LAST definition of a name, so it keeps working
  * if a helper ever exists twice — once in the installer body and once inside
- * the `MANAGE_EOF` heredoc. Today each is defined once: `funnel_state` and
- * `has_off_loopback` and `serve_proxies_root` in the heredoc (the `manage`
- * copy), `env_missing_keys`, `serve_state` and `serve_root_target` in the
- * installer body.
+ * the `MANAGE_EOF` heredoc. Today each is defined once: `has_off_loopback` and
+ * `serve_proxies_root` in the heredoc (the `manage` copy), `env_missing_keys`,
+ * `serve_state` and `serve_root_target` in the installer body.
  *
  * Windows is not covered: `Invoke-Verify` and the Serve ladder both match
  * against strings they have already captured, and nothing in CI can run
@@ -63,8 +61,6 @@ function extractFunction(text, name) {
 /** ~1 MiB of `line`, well past any pipe buffer, built inside the shell. */
 const pad = (line) =>
   `"$(awk 'BEGIN{for(i=0;i<20000;i++) print "${line}"}')"`;
-
-const FUNNEL_ON = 'Funnel on for laptop.tail.ts.net (tcp 443)';
 
 /** The `tailscale serve status` line shapes the conflict gate reads. */
 const SERVE_ROOT_FOREIGN = '|-- / proxy http://127.0.0.1:9999';
@@ -133,15 +129,6 @@ function cases(platform, env) {
   const { loopback, offLoopback } = listenerFixtures[platform];
   return [
     [
-      'funnel_state: ON in serve output, behind 1 MiB of funnel output',
-      `funnel_state 0 "${FUNNEL_ON}" ${pad('some tailscale prose')}`,
-      'on',
-    ],
-    ['funnel_state: 1 MiB of output, no Funnel', `funnel_state 0 "" ${pad('trailing prose')}`, 'off'],
-    ['funnel_state: no Tailscale CLI', 'funnel_state 127 "" ""', 'unknown'],
-    ['funnel_state: funnel status errored, serve output still names it', `funnel_state 1 "${FUNNEL_ON}" ""`, 'on'],
-    ['funnel_state: funnel status errored, nothing else says', 'funnel_state 2 "no serve config" ""', 'unknown'],
-    [
       'has_off_loopback: off-loopback first, 1 MiB of loopback after',
       `if has_off_loopback 3100 "$(printf '%s\\n' "${offLoopback}"; awk 'BEGIN{for(i=0;i<20000;i++) print "${loopback}"}')"; then echo detected; else echo clean; fi`,
       'detected',
@@ -154,7 +141,7 @@ function cases(platform, env) {
     // These three are the only pin that RUNS `serve_proxies_root`, and the only
     // one that catches a weakening which keeps the spelling: an
     // `|| grep -qE '127\.0\.0\.1:'"$1" <<<"$2"` fallback beside the scoped match
-    // leaves `deploy-lint` at 3x and green — 73 checks — while the two negative
+    // leaves `deploy-lint` at 3x and green while the two negative
     // cases below go red, which is the `/api`-on-our-port config this branch
     // opened on passing again. The lint counts the helper's text, so a straight
     // revert of the root scoping or the `([^0-9]|$)` reddens it too; the `<<<`
@@ -274,7 +261,6 @@ export function run() {
       let helpers;
       try {
         helpers = [
-          'funnel_state',
           'has_off_loopback',
           'env_missing_keys',
           'serve_state',
@@ -315,7 +301,7 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
     console.error('installer-verify-test: an installer decision came out wrong\n');
     for (const f of failures) console.error(`  ${f}\n`);
     console.error(
-      'The two verify verdicts must be taken over captured text, never a pipe into\n' +
+      'The listener verdict must be taken over captured text, never a pipe into\n' +
         '`grep -q`: under `set -o pipefail` the early exit SIGPIPEs the writer and 141\n' +
         'reads as "no match" (docs/specs/security-remote.md -> "Network posture (self-hosted)").\n' +
         '`env_missing_keys` must name every installer-owned key a half-written\n' +
