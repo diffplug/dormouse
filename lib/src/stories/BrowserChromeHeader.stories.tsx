@@ -51,10 +51,11 @@ const loggingActions: WallActions = {
 };
 
 interface StoryArgs {
-  /** Render backend — drives the far-left chip glyph: frame = embed, lock =
-   *  screencast (closed when synced, open when scaled). */
+  /** Render backend — drives the presentation half of the far-left icon pair. */
   renderMode: RenderMode;
-  /** Drives the SYNCED/SCALED chip + the modal it opens. */
+  /** Whether an in-pane agent browser follows pane size or keeps a fixed size. */
+  syncEngaged: boolean;
+  /** Live viewport match state, independent of the persisted resize intent. */
   state: ScreenState;
   /** Active tab URL — also the source of the host+path text and loopback port. */
   url: string;
@@ -84,8 +85,8 @@ function BrowserChromeStory(args: StoryArgs) {
     viewport: { w: 1280, h: 720, dpr: 1 },
     paneCss: args.state === 'SYNCED' ? { w: 1280, h: 720 } : { w: 980, h: 560 },
     displayDpr: 2,
-    syncEngaged: args.state === 'SYNCED',
-  }), [args.state, args.renderMode]);
+    syncEngaged: args.syncEngaged,
+  }), [args.state, args.renderMode, args.syncEngaged]);
 
   const chromeSnapshot: ChromeSnapshot = useMemo(() => ({
     url: args.url,
@@ -169,6 +170,7 @@ const meta: Meta<typeof BrowserChromeStory> = {
   component: BrowserChromeStory,
   argTypes: {
     renderMode: { control: 'inline-radio', options: ['ab-screencast', 'ab-popout', 'iframe'] },
+    syncEngaged: { control: 'boolean' },
     state: { control: 'radio', options: ['SYNCED', 'SCALED'] },
     url: { control: 'text' },
     htmlTitle: { control: 'text' },
@@ -180,6 +182,7 @@ const meta: Meta<typeof BrowserChromeStory> = {
   },
   args: {
     renderMode: 'ab-screencast',
+    syncEngaged: true,
     state: 'SYNCED',
     url: 'http://localhost:5173/app',
     htmlTitle: 'Vite + React',
@@ -211,9 +214,16 @@ export const Embed: Story = {
   args: { renderMode: 'iframe' },
 };
 
-/** Letterboxed viewport — the chip reads SCALED (click it for the modal). */
-export const Scaled: Story = {
-  args: { state: 'SCALED' },
+/** Fixed viewport — robot + picture-in-picture, even if its dimensions happen
+ *  to match the pane at this instant. */
+export const FixedSize: Story = {
+  args: { state: 'SYNCED', syncEngaged: false },
+};
+
+/** Resize is still engaged during a transient letterboxed frame, so the icon
+ *  continues to describe intent rather than flickering to fixed-size. */
+export const ResizeTransient: Story = {
+  args: { state: 'SCALED', syncEngaged: true },
 };
 
 /** No --key badge, no dev-server match — the bare host+path case. */

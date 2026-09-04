@@ -40,9 +40,9 @@ const CHROME: ChromeSnapshot = {
   key: 'storybook',
 };
 
-function register(id: string, chrome: ChromeSnapshot = CHROME) {
+function register(id: string, chrome: ChromeSnapshot = CHROME, snapshot: ScreenSnapshot = SCREEN) {
   return registerAgentBrowserScreen(id, {
-    snapshot: SCREEN,
+    snapshot,
     actions: { engageSync: vi.fn(), applyDevice: vi.fn(), applyViewport: vi.fn(), openModal: vi.fn() },
     chrome,
     chromeActions: { navigate: vi.fn(), back: vi.fn(), forward: vi.fn(), reload: vi.fn() },
@@ -93,6 +93,26 @@ function renderHeader(
 }
 
 describe('SurfacePaneHeader — browser chrome', () => {
+  it('uses the shared capability-first icon pair for every browser display mode', () => {
+    const cases = [
+      [{ ...SCREEN, renderMode: 'ab-screencast', syncEngaged: true }, 'ab-resize', 2],
+      [{ ...SCREEN, renderMode: 'ab-screencast', syncEngaged: false }, 'ab-fixed', 2],
+      [{ ...SCREEN, renderMode: 'ab-popout', syncEngaged: false }, 'ab-popout', 2],
+      [{ ...SCREEN, renderMode: 'iframe', syncEngaged: false }, 'iframe', 1],
+    ] as const;
+
+    for (const [snapshot, displayMode, iconCount] of cases) {
+      const id = `pane-${displayMode}`;
+      const registration = register(id, CHROME, snapshot);
+      renderHeader(headerProps(id, 'Browser'), stubActions());
+      const trigger = container.querySelector<HTMLButtonElement>('[data-browser-display-trigger]');
+      const display = trigger?.querySelector(`[data-browser-display-mode="${displayMode}"]`);
+      expect(display).not.toBeNull();
+      expect(display?.querySelectorAll('svg')).toHaveLength(iconCount);
+      registration.dispose();
+    }
+  });
+
   it('inverts only its own Unzoom control against the active header palette', () => {
     const props = headerProps('pane-zoom', 'Zoomed');
     renderHeader(props, stubActions(), { active: true, zoomedId: 'pane-zoom' });

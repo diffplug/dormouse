@@ -54,7 +54,13 @@ import type { PersistedDoor, PersistedSurfaceRefs } from '../lib/session-types';
 import type { DropTarget, RestoreToken } from '../lib/lath/ops';
 import type { Edge } from '../lib/lath/model';
 import { useDynamicPalette } from '../lib/themes/use-dynamic-palette';
-import { resolveRenderMode, agentBrowserSessionFromParams, browserUrlFromParams, surfaceKindFromParams } from './wall/browser-surface';
+import {
+  resolveRenderMode,
+  agentBrowserSessionFromParams,
+  browserDisplayModeFromParams,
+  browserUrlFromParams,
+  surfaceKindFromParams,
+} from './wall/browser-surface';
 import { hostPathDisplay } from './wall/browser-url';
 import { WorkspaceSelectionOverlay } from './wall/WorkspaceSelectionOverlay';
 import { LathHost } from './wall/LathHost';
@@ -377,20 +383,31 @@ export function Wall({
   selectedTypeRef.current = selectedType;
   const doorsRef = useRef(doors);
   doorsRef.current = doors;
-  // Door chip labels live in the store, so Wall has to re-render when one changes —
-  // but only then. Subscribing to the joined titles (rather than to `revision`) keeps
-  // a Doored Surface that keeps running — a parked iframe navigating — from leaving a
-  // stale label, without waking Wall on every unrelated commit.
-  const doorTitles = useSyncExternalStore(lath.store.subscribe, () => {
+  // Door chip labels and browser-display identities live in the store, so Wall
+  // has to re-render when either changes — but only then. Subscribing to this
+  // narrow joined projection (rather than `revision`) keeps a running parked
+  // browser current without waking Wall on every unrelated commit.
+  const doorDisplayMetadata = useSyncExternalStore(lath.store.subscribe, () => {
     const meta = lath.store.getSnapshot().leafMeta;
-    return doorsRef.current.map((door) => meta.get(door.id)?.title ?? '').join('\u0000');
+    return doorsRef.current.map((door) => {
+      const leaf = meta.get(door.id);
+      return `${leaf?.title ?? ''}\u0001${browserDisplayModeFromParams(leaf?.params) ?? ''}`;
+    }).join('\u0000');
   });
   // The Baseboard's chips: the runtime Doors plus the store's current fallback title
   // for each, projected per render rather than stored, so no copy can go stale.
   const doorChips = useMemo<DoorChip[]>(
-    () => doors.map((door) => ({ ...door, title: persistedPanelTitle(lath.getMeta(door.id)?.title) })),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `doorTitles` is the store read
-    [doors, lath, doorTitles],
+    () => doors.map((door) => {
+      const meta = lath.getMeta(door.id);
+      const browserDisplay = browserDisplayModeFromParams(meta?.params);
+      return {
+        ...door,
+        title: persistedPanelTitle(meta?.title),
+        ...(browserDisplay ? { browserDisplay } : {}),
+      };
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `doorDisplayMetadata` is the store read
+    [doors, lath, doorDisplayMetadata],
   );
   const confirmKillRef = useRef(confirmKill);
   confirmKillRef.current = confirmKill;

@@ -4,7 +4,11 @@
  * BrowserPanel shell, the Wall (dispatch + lifecycle + CLI type), and the
  * dev-server-port correlation, so the classification never drifts between them.
  */
-import type { RenderMode } from './agent-browser-screen';
+import {
+  browserDisplayMode,
+  type BrowserDisplayMode,
+  type RenderMode,
+} from './agent-browser-screen';
 import type { SurfaceKind } from 'dor/commands/types';
 
 type BrowserParamsLike = {
@@ -12,6 +16,7 @@ type BrowserParamsLike = {
   renderMode?: unknown;
   session?: unknown;
   url?: unknown;
+  syncEngaged?: unknown;
 };
 
 function asParams(params: unknown): BrowserParamsLike {
@@ -36,6 +41,18 @@ export function isAgentBrowserParams(params: unknown): boolean {
 export function isBrowserParams(params: unknown): boolean {
   const p = asParams(params);
   return p.surfaceType === 'browser' || typeof p.renderMode === 'string';
+}
+
+/** Browser display identity projected from canonical persisted params. An old
+ *  agent-browser row with no `syncEngaged` keeps the controller's default:
+ *  resize with pane. */
+export function browserDisplayModeFromParams(params: unknown): BrowserDisplayMode | null {
+  if (!isBrowserParams(params)) return null;
+  const p = asParams(params);
+  return browserDisplayMode({
+    renderMode: resolveRenderMode(p),
+    syncEngaged: p.syncEngaged !== false,
+  });
 }
 
 /** The Surface kind these params describe — the params → kind step beneath

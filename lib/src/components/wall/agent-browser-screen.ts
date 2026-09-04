@@ -7,10 +7,24 @@ export type ScreenState = 'SYNCED' | 'SCALED';
 /** Canonical renderer values; defaulting belongs to `resolveRenderMode`. */
 export type RenderMode = 'ab-screencast' | 'ab-popout' | 'iframe';
 
+/** Capability-first browser display identity shared by pane chrome, the Display
+ *  modal, and minimized Doors. The agent-browser modes always carry the robot;
+ *  the second glyph describes where/how the human view is presented. */
+export type BrowserDisplayMode = 'ab-resize' | 'ab-fixed' | 'ab-popout' | 'iframe';
+
+export function browserDisplayMode(
+  snapshot: Pick<ScreenSnapshot, 'renderMode' | 'syncEngaged'>,
+): BrowserDisplayMode {
+  const renderMode = snapshot.renderMode ?? 'ab-screencast';
+  if (renderMode === 'iframe') return 'iframe';
+  if (renderMode === 'ab-popout') return 'ab-popout';
+  return snapshot.syncEngaged ? 'ab-resize' : 'ab-fixed';
+}
+
 export interface ScreenSnapshot {
   state: ScreenState;
-  /** The surface's current render backend; absent ⇒ `ab-screencast`. Drives the
-   *  far-left chip glyph (frame-corners = iframe; lock = screencast). */
+  /** The surface's current render backend; absent ⇒ `ab-screencast`. Together
+   *  with `syncEngaged`, drives its shared browser display identity. */
   renderMode?: RenderMode;
   /** The browser's live CSS viewport + inferred device pixel ratio. */
   viewport: { w: number; h: number; dpr: number };

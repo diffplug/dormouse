@@ -70,7 +70,7 @@ function AgentBrowserScreenModalStory(args: StoryArgs) {
   const controller = useMockController(args);
   return (
     <div className="relative h-[560px] w-[760px] overflow-hidden rounded bg-app-bg font-mono text-terminal-fg">
-      <div className="p-4 text-sm text-muted">agent-browser surface — click the SYNCED/SCALED chip to open this.</div>
+      <div className="p-4 text-sm text-muted">agent-browser surface — click its display icons to open this.</div>
       <AgentBrowserScreenModal controller={controller} label="surface:3" onClose={() => console.log('[story] close')} />
     </div>
   );

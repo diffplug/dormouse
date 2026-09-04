@@ -18,12 +18,10 @@
  */
 import { useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  ArrowSquareOutIcon,
   CheckIcon,
   FrameCornersIcon,
-  type Icon,
-  LinkIcon,
-  LockSimpleIcon,
+  PictureInPictureIcon,
+  RobotIcon,
   XIcon,
 } from '@phosphor-icons/react';
 import {
@@ -36,6 +34,7 @@ import {
 } from '../design';
 import type { RenderMode, ScreenController, ScreenSnapshot } from './agent-browser-screen';
 import { useAgentBrowserScreenSnapshot } from './agent-browser-screen';
+import { BrowserDisplayIcon } from './BrowserDisplayIcon';
 
 // Fixed registry — the CLI's own device set. No custom descriptors; touch +
 // mobile UA come only bundled inside `set device` (verified against 0.27.0).
@@ -151,7 +150,7 @@ export function AgentBrowserScreenModal({
             checked={target === 'sync'}
             onChange={() => setTarget('sync')}
           />
-          <LinkIcon size={14} className="shrink-0 text-muted" />
+          <FrameCornersIcon size={14} className="shrink-0 text-muted" />
           <span className="text-foreground">Resize with pane</span>
         </label>
 
@@ -164,8 +163,8 @@ export function AgentBrowserScreenModal({
                 checked={isFixed}
                 onChange={() => setTarget('custom')}
               />
-              <LockSimpleIcon size={14} className="shrink-0 text-muted" />
-              <span className="text-foreground">Fixed</span>
+              <PictureInPictureIcon size={14} className="shrink-0 text-muted" />
+              <span className="text-foreground">Fixed size</span>
             </label>
             {/* Dimensions inline; or pick a device via Emulate below (emulating
                 disables the dims — they fill in from the next frames). */}
@@ -221,12 +220,13 @@ export function AgentBrowserScreenModal({
 
       {canSwapRender ? (
         <div className="mt-4 flex flex-col gap-3">
-          {/* Screencast has no mode icon of its own — its two resolution modes
-              (resize-with-pane / fixed) carry the link / lock glyphs, and the
-              resolution controls nest under it, greying out for the other modes. */}
+          {/* Screencast owns the robot capability glyph; its nested resolution
+              modes append the presentation glyph. The controls grey out for
+              the other render modes. */}
           <RenderOption
             checked={renderMode === 'ab-screencast'}
             onSelect={() => setRenderMode('ab-screencast')}
+            icon={<RobotIcon size={14} className="shrink-0 text-muted" />}
             label="agent-browser screencast"
             features={[[true, 'agents can read/write'], [true, 'any URL'], [false, 'laggy for humans']]}
           >
@@ -237,7 +237,7 @@ export function AgentBrowserScreenModal({
             <RenderOption
               checked={renderMode === 'ab-popout'}
               onSelect={() => setRenderMode('ab-popout')}
-              icon={ArrowSquareOutIcon}
+              icon={<BrowserDisplayIcon mode="ab-popout" size={14} className="text-muted" />}
               label="agent-browser popout"
               features={[[true, 'agents can read/write'], [true, 'any URL'], [true, 'native human experience']]}
             />
@@ -246,7 +246,7 @@ export function AgentBrowserScreenModal({
           <RenderOption
             checked={renderMode === 'iframe'}
             onSelect={() => setRenderMode('iframe')}
-            icon={FrameCornersIcon}
+            icon={<BrowserDisplayIcon mode="iframe" size={14} className="text-muted" />}
             label="iframe embed"
             features={[[false, 'agents cannot read/write'], [false, 'http only'], [true, 'native human experience']]}
           />
@@ -291,14 +291,14 @@ export function AgentBrowserScreenModal({
 function RenderOption({
   checked,
   onSelect,
-  icon: ModeIcon,
+  icon,
   label,
   features,
   children,
 }: {
   checked: boolean;
   onSelect: () => void;
-  icon?: Icon;
+  icon?: ReactNode;
   label: string;
   features: [boolean, string][];
   children?: ReactNode;
@@ -307,7 +307,7 @@ function RenderOption({
     <div className="flex flex-col gap-1.5 text-sm">
       <label className="flex cursor-pointer items-center gap-2">
         <input type="radio" name="render-mode" checked={checked} onChange={onSelect} />
-        {ModeIcon && <ModeIcon size={14} className="shrink-0 text-muted" />}
+        {icon}
         <span className="text-foreground">{label}</span>
       </label>
       <div className="ml-6 flex flex-col gap-0.5 text-xs">

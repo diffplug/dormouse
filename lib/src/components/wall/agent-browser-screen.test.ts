@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  browserDisplayMode,
   closeAgentBrowserScreenModal,
   getAgentBrowserScreenController,
   getOpenAgentBrowserScreenModalId,
@@ -47,6 +48,15 @@ function register(id: string, overrides?: { hostCapable?: boolean }) {
 }
 
 describe('agent-browser screen registry', () => {
+  it('derives display identity from agent visibility and presentation intent', () => {
+    expect(browserDisplayMode({ renderMode: 'ab-screencast', syncEngaged: true })).toBe('ab-resize');
+    // A fixed viewport can happen to match the pane dimensions; intent, not the
+    // transient dimension comparison, owns the icon.
+    expect(browserDisplayMode({ renderMode: 'ab-screencast', syncEngaged: false })).toBe('ab-fixed');
+    expect(browserDisplayMode({ renderMode: 'ab-popout', syncEngaged: false })).toBe('ab-popout');
+    expect(browserDisplayMode({ renderMode: 'iframe', syncEngaged: false })).toBe('iframe');
+  });
+
   it('registers a controller, notifies presence, and disposes', () => {
     let presence = 0;
     const unsubscribe = subscribeAgentBrowserScreenPresence(() => {

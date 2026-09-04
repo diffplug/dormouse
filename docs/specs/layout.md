@@ -91,13 +91,15 @@ A ResizeObserver picks one of three tiers by header width:
 
 ## Baseboard
 
-The baseboard (`h-7`, 28px) sits below the content area, visible by default, with no top divider. The content area ends 2px above it, leaving a theme-colored gap that keeps rounded pane corners distinct; its horizontal padding matches the content wrapper's 7px inset, so doors align with the panes above. With no doors and more than 350px of width it shows a platform-aware shortcut hint — `LCmd → RCmd to enter command mode` on macOS, `LShift → RShift to enter command mode` elsewhere.
+The baseboard (`h-7`, 28px) sits below content, visible by default, with no top divider. A 2px theme-colored gap preserves pane corners; 7px horizontal padding aligns doors with panes. With no doors above 350px wide, it shows `LCmd → RCmd to enter command mode` on macOS and `LShift → RShift to enter command mode` elsewhere.
 
 `Wall showBaseboard={false}` serves an embedder with no door/minimize workflow: no strip, the content wrapper's bottom inset grown from 2px to 7px, a baseboard drop a no-op. **It is a seam, not a shipped configuration** — no production host passes it (rationale), so the app shell always has a baseboard.
 
 The far right is one right-aligned flex cluster: the `N more →` overflow arrow, the host-supplied `notice` slot (standalone puts the update banner there), then three always-present 24px **Settings** controls — 16px speaker/slashed-speaker for spoken alarms, 16px ringing-bell/slashed-bell for push notifications, 16px sliders for the dialog itself. **Shape and accessible text both carry each state**, so status never relies on color. All three open the same app-global Settings dialog (`docs/specs/alert.md` → Alarm settings); **the status controls never toggle settings directly**. Every baseboard-level button shares one class constant in `Baseboard.tsx`.
 
 A minimized session becomes a **door**, showing the pane header's derived label plus the alert/TODO/speech badge cluster (`docs/specs/alert.md` → Door owns which badge shows when; both speech states also name themselves in the Door's `title` and accessible name). A Door uses the window's bottom edge as its bottom border, with left, top, and right borders taking the shared terminal top radius from `lib/src/components/design.tsx` — a mouse hole matching pane rounding. Dimensions: `min-w-[68px] max-w-[220px] h-6`.
+
+Browser Door content defers to `docs/specs/dor-browser.md` → "Browser Chrome".
 
 ### Door interaction
 

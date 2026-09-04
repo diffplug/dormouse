@@ -1,15 +1,11 @@
-import { useContext, useEffect, useState, type ReactNode } from 'react';
+import { useContext, useEffect, useState } from 'react';
 import {
   ArrowClockwiseIcon,
   ArrowLeftIcon,
   ArrowLineDownIcon,
   ArrowRightIcon,
-  ArrowSquareOutIcon,
   ArrowsInIcon,
   ArrowsOutIcon,
-  FrameCornersIcon,
-  LinkIcon,
-  LockSimpleIcon,
   SplitHorizontalIcon,
   SplitVerticalIcon,
   XIcon,
@@ -20,8 +16,10 @@ import {
   useAgentBrowserChromeSnapshot,
   useAgentBrowserScreenController,
   useAgentBrowserScreenSnapshot,
+  browserDisplayMode,
   type ScreenSnapshot,
 } from './agent-browser-screen';
+import { BROWSER_DISPLAY_LABEL, BrowserDisplayIcon } from './BrowserDisplayIcon';
 import { InlineEditInput } from './InlineEditInput';
 import type { PaneProps } from './pane-props';
 import { loopbackPort, normalizeNavUrl, pathDisplay } from './browser-url';
@@ -35,18 +33,12 @@ import {
   ZoomedIdContext,
 } from './wall-context';
 
-/** The far-left chip reflects the surface's render backend at a glance, and
- *  opens the Display modal. iframe embed → frame; agent-browser popout →
- *  open-window glyph; agent-browser screencast → a link when its resolution
- *  resizes with the pane, a lock when it's fixed. Returns the glyph and its
- *  label together so the two never drift apart. */
-function screenChip(s: ScreenSnapshot): { icon: ReactNode; label: string } {
-  const mode = s.renderMode ?? 'ab-screencast';
-  if (mode === 'iframe') return { icon: <FrameCornersIcon size={14} />, label: 'iframe embed — change render' };
-  if (mode === 'ab-popout') return { icon: <ArrowSquareOutIcon size={14} />, label: 'agent-browser popout — change render' };
-  return s.state === 'SYNCED'
-    ? { icon: <LinkIcon size={14} />, label: 'agent-browser screencast, resizes with pane — change render or resolution' }
-    : { icon: <LockSimpleIcon size={14} />, label: 'agent-browser screencast, fixed resolution — change render or resolution' };
+/** The far-left chip uses the same capability-first identity as the Display
+ *  modal and minimized Door. Returns mode + label together so its visible and
+ *  accessible meanings cannot drift. */
+function screenChip(s: ScreenSnapshot) {
+  const mode = browserDisplayMode(s);
+  return { mode, label: `${BROWSER_DISPLAY_LABEL[mode]} — change display` };
 }
 
 export function SurfacePaneHeader({ id, title }: PaneProps) {
@@ -106,15 +98,16 @@ export function SurfacePaneHeader({ id, title }: PaneProps) {
         <>
           {/* Render/screen chip → far left, out of the way of the nav controls.
               Opens the Display modal; the glyph reflects reality — frame =
-              embed, window = popout, link/lock = screencast resize/fixed. */}
+              embed, and robot + presentation = agent-visible browser. */}
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); screen.actions.openModal(); }}
             aria-label={chip?.label}
             title={chip?.label}
+            data-browser-display-trigger="true"
             className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded transition-colors hover:bg-current/10"
           >
-            {chip?.icon}
+            {chip && <BrowserDisplayIcon mode={chip.mode} size={14} />}
           </button>
 
           {/* Back / forward / refresh — native agent-browser commands; always

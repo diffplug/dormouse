@@ -26,6 +26,7 @@ import {
   subscribeToTerminalPaneState,
 } from '../lib/terminal-registry';
 import { createTerminalPaneState, deriveSurfaceLabel, type TerminalPaneState } from '../lib/terminal-state';
+import { BROWSER_DISPLAY_LABEL, BrowserDisplayIcon } from './wall/BrowserDisplayIcon';
 
 /** Shared look for every baseboard-level button (DESIGN.md -> Navigation). */
 const BASEBOARD_BUTTON_CLASS =
@@ -209,11 +210,15 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
       <div ref={measureEl} className="absolute -left-[9999px] flex gap-1.5" aria-hidden>
         {items.map(item => {
           const activity = activityStates.get(item.id) ?? DEFAULT_ACTIVITY_STATE;
-          const title = deriveDoorTitle(item.title, item.id, terminalStates, allPaneStates, appTitleForPane);
+          const title = item.browserDisplay
+            ? item.title
+            : deriveDoorTitle(item.title, item.id, terminalStates, allPaneStates, appTitleForPane);
           return (
             <Door
               key={item.id}
               title={title}
+              leading={item.browserDisplay ? <BrowserDisplayIcon mode={item.browserDisplay} size={12} /> : undefined}
+              detail={item.browserDisplay ? BROWSER_DISPLAY_LABEL[item.browserDisplay] : undefined}
               status={activity.status}
               todo={activity.todo}
               speechState={speechStates.get(item.id)}
@@ -243,12 +248,16 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
 
       {items.slice(startIndex, endIndex).map(item => {
         const activity = activityStates.get(item.id) ?? DEFAULT_ACTIVITY_STATE;
-        const title = deriveDoorTitle(item.title, item.id, terminalStates, allPaneStates, appTitleForPane);
+        const title = item.browserDisplay
+          ? item.title
+          : deriveDoorTitle(item.title, item.id, terminalStates, allPaneStates, appTitleForPane);
         return (
           <Door
             key={item.id}
             doorId={item.id}
             title={title}
+            leading={item.browserDisplay ? <BrowserDisplayIcon mode={item.browserDisplay} size={12} /> : undefined}
+            detail={item.browserDisplay ? BROWSER_DISPLAY_LABEL[item.browserDisplay] : undefined}
             status={activity.status}
             todo={activity.todo}
             speechState={speechStates.get(item.id)}
