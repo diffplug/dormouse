@@ -94,14 +94,13 @@ setup, pairing, or connection, and `false` renders a fixed upgrade requirement,
 performing no remote operation
 ([remote-security-model.md](./remote-security-model.md) → Host identity).
 
-**Pocket hides `MobileWall`'s local Kill affordance** (`showKillButton={false}`)
-— remote panes are Host-owned; v1 grants no phone-side kill/layout authority.
-(rationale)
+**Pocket hides `MobileWall`'s local Kill affordance** (`showKillButton={false}`):
+v1 grants no phone-side kill or layout authority (rationale).
 
-**Inline images cross the relay unbounded and unchunked**, since Pocket builds
-panes through the same `createXtermHost` and so loads ImageAddon. **Accepted
-rather than gated**: a slow frame beats a cap that truncates an image
-(rationale).
+**An inline image crosses the relay as the ordered `terminal.data` messages its
+PTY chunks produce**, reassembled by Pocket's own xterm — panes are built through
+the same `createXtermHost`, so ImageAddon is loaded. **Nothing coalesces them and
+no size gates them** (rationale).
 
 `RemotePtyAdapter` exposes the adapter-specific `setActivePane(id)`: v1 allows
 one attachment per session, so pane switching is detach → attach, whose repaint

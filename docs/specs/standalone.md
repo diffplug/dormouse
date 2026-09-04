@@ -150,7 +150,9 @@ rather than being dropped (`docs/specs/remote-api.md` → Directory).
 its own strip-only `TerminalProtocolParser` over each PTY it streams (rationale),
 supplying a constant colour provider for the OSC 10/11/12 case. Its rules —
 discard every event, consume rather than decline a colour query, one parser per
-PTY — are `docs/specs/terminal-escapes.md` → Parsing location.
+PTY, yield the projection pair — are `docs/specs/terminal-escapes.md` → Parsing
+location. Deleting this second parse site is the **wire-boundary** scope
+(`docs/specs/remote-api.md` → Future).
 
 **A remote listener must never break the local pipe.** The tap sits inside
 `pty-core`'s event callback in `main.js`, ahead of the send to the webview, and is
