@@ -15,7 +15,7 @@ import {
   pairingInvitationExpired,
   parsePairingInvitationUrl,
   type PairingInvitation,
-} from 'server-lib-common';
+} from 'remote-lib-common';
 
 import { SETUP_CODE_DEAD_MESSAGE } from '../client/pocket-client';
 import { ErrorRow, PK, pkButton } from './pocket-chrome';

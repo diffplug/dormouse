@@ -109,12 +109,12 @@ jobs:
           # rule is free to drift from the validator the redemption path
           # actually runs, and then agrees with itself while the server rejects
           # what the installer writes. No build step is needed for it: the
-          # `Test` step above builds server-lib-common, as does the
+          # `Test` step above builds remote-lib-common, as does the
           # `pnpm --filter server build` inside every install below.
           read_offer() {
             node --input-type=module -e '
               import { readFileSync, statSync } from "node:fs";
-              import { isEnrollmentOffer } from "./server-lib-common/dist/index.js";
+              import { isEnrollmentOffer } from "./remote-lib-common/dist/index.js";
               const [path, wantOrigin] = process.argv.slice(1);
               const mode = statSync(path).mode & 0o777;
               if (mode !== 0o600) throw new Error(`${path} is mode ${mode.toString(8)}, expected 600`);

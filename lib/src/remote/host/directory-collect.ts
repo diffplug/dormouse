@@ -6,7 +6,7 @@
  * exactly the terminal panes.
  */
 
-import type { DirectoryEntry } from 'server-lib-common';
+import type { DirectoryEntry } from 'remote-lib-common';
 import {
   buildAppTitleResolver,
   deriveHeader,

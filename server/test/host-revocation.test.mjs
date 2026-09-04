@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { WS_CLOSE_HOST_REVOKED } from 'server-lib-common';
+import { WS_CLOSE_HOST_REVOKED } from 'remote-lib-common';
 
 import { enrollHost, freshApp } from './helpers.mjs';
 import { e2eClientFrame } from './harness/e2e.mjs';

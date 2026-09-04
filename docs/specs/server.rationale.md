@@ -42,7 +42,7 @@
 
 ## WebAuthn without a WebAuthn library
 
-**Two facts made the dependency unnecessary.** The browser hands the new credential's public key back as SPKI DER, and `server-lib-common` already carried a full assertion verifier — written for the Host — that works against an SPKI key. Nothing was left for a library to do.
+**Two facts made the dependency unnecessary.** The browser hands the new credential's public key back as SPKI DER, and `remote-lib-common` already carried a full assertion verifier — written for the Host — that works against an SPKI key. Nothing was left for a library to do.
 
 **Why the challenge issuers are capped as well as swept.** The mint is unauthenticated (Guardrails), so expiry alone lets the map plateau at request-rate × TTL rather than at a bound the process chose. A flood evicts abandoned challenges of its own making, the ceremony that loses one retries, and single use is untouched.
 

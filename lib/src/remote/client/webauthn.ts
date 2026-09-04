@@ -9,7 +9,7 @@
  * verify with `verifyPasskeyAssertion`.
  */
 
-import { fromBase64Url, toBase64Url, utf8Encode, type PasskeyAssertion } from 'server-lib-common';
+import { fromBase64Url, toBase64Url, utf8Encode, type PasskeyAssertion } from 'remote-lib-common';
 
 /** Shown when this device already holds a passkey the Server has registered. */
 export const PASSKEY_ALREADY_REGISTERED_MESSAGE =
@@ -91,7 +91,7 @@ function toBufferSource(bytes: Uint8Array): ArrayBuffer {
  *
  * **ES256 alone in `pubKeyCredParams` is deliberate, and Chrome warns about
  * it**: the verifier accepts nothing else
- * (`server-lib-common/src/security/passkey.ts`), so offering RS256 would only
+ * (`remote-lib-common/src/security/passkey.ts`), so offering RS256 would only
  * mint keys that fail at the first assertion. Expected in every run's console
  * (`scripts/pairing-walkthrough/README.md`). `residentKey`
  * is `'required'`: sign-in discovers credentials with an empty

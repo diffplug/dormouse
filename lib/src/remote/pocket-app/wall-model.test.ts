@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import type { DirectoryEntry } from 'server-lib-common';
+import type { DirectoryEntry } from 'remote-lib-common';
 
 import {
   activatePane,

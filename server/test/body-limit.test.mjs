@@ -19,7 +19,7 @@ import {
   MAX_PUSH_QUERY_DELIVERY_IDS,
   MAX_SEALED_PUSH_LENGTH,
   randomBase64Url,
-} from 'server-lib-common';
+} from 'remote-lib-common';
 
 import { MAX_PUSH_SEND_BODY_BYTES, MAX_REQUEST_BODY_BYTES } from '../dist/app.js';
 import { PASSWORD, enrollHost, fakePushSender, freshApp, ownerSession } from './helpers.mjs';

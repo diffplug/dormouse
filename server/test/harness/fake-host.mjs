@@ -49,7 +49,7 @@ import {
   utf8Decode,
   utf8Encode,
   verifyPresenceProof,
-} from 'server-lib-common';
+} from 'remote-lib-common';
 
 import { attachFrameSocket, closeSocket, receiveFrame, sendFrame } from './frame-socket.mjs';
 

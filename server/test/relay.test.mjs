@@ -17,7 +17,7 @@ import {
   WS_CLOSE_HOST_REPLACED_REASON,
   WS_ROUTES,
   WS_TOKEN_PARAM,
-} from 'server-lib-common';
+} from 'remote-lib-common';
 
 import { connectClient, connectHost, freshApp, startServer, wsConnect } from './helpers.mjs';
 import { e2eClientFrame, newE2eId } from './harness/e2e.mjs';

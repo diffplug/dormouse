@@ -23,7 +23,7 @@ import {
   utf8Encode,
   type NoiseKeyPair,
   type SealedPushPayload,
-} from 'server-lib-common';
+} from 'remote-lib-common';
 
 import type { KnownHostStore, KnownHostV1 } from '../client/pocket-db';
 import { GENERIC_PUSH_NOTIFICATION, installPocketWorker, type WorkerScope } from './sw';

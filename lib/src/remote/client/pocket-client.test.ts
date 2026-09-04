@@ -40,7 +40,7 @@ import {
   type PresenceBinding,
   type TerminalDataEvent,
   utf8Encode,
-} from 'server-lib-common';
+} from 'remote-lib-common';
 
 import {
   CONNECTION_DENIAL_MESSAGES,

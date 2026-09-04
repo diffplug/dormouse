@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 
-import { HEX_ENCODED_32_BYTES_PATTERN } from 'server-lib-common';
+import { HEX_ENCODED_32_BYTES_PATTERN } from 'remote-lib-common';
 
 /** Mint the setup password the Server persists on first boot. */
 export function generateSetupPassword(): string {

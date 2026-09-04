@@ -15,7 +15,7 @@ import {
   type HostAclRecord,
   type NoiseKeyPair,
   type PushSendRequest,
-} from 'server-lib-common';
+} from 'remote-lib-common';
 import { commitPushDevices, invalidatePushDeviceRefreshes, watchPushRings } from './alert-push';
 // Delivery — the Server calls, the recipient rule, the title bounds — runs in
 // the Host's process, so it lives beside neither webview nor sidecar.

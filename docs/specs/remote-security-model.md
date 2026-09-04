@@ -18,7 +18,7 @@ Account compromise is therefore insufficient for host access
 is this model's audited face — the properties checked nightly and the gaps left
 open (revocation, the audit trail).
 
-**Every primitive here lives in `server-lib-common/src/security/`**, shared
+**Every primitive here lives in `remote-lib-common/src/security/`**, shared
 verbatim by Server, Host, and Pocket so the three cannot disagree on what a
 valid credential is. Message sequences are [server.md](./server.md) (Relay);
 this spec defines what they must establish. Evidence:
@@ -91,7 +91,7 @@ cannot substitute a passkey. **The Server likewise verifies against its own
 SHA-256) is accepted**, the mandatory-to-implement WebAuthn algorithm.
 
 Source of truth: `verifyPasskeyAssertion` / `hashPasskeyPublicKey` in
-`server-lib-common/src/security/passkey.ts`;
+`remote-lib-common/src/security/passkey.ts`;
 `HostEnrollment.requireUserVerification` in `lib/src/remote/host/enrollment.ts`.
 
 ## Client statics
@@ -110,7 +110,7 @@ but **active XSS can *use* it**, browser or OS compromise defeats the model, and
 clearing browser data destroys it ([Client static loss](#client-static-loss)).
 
 Source of truth: `generateNoiseKeyPair` in
-`server-lib-common/src/security/noise.ts`; what Pocket stores is
+`remote-lib-common/src/security/noise.ts`; what Pocket stores is
 [pocket-app.md](./pocket-app.md).
 
 ## Host Authorization
@@ -142,7 +142,7 @@ subscription, so the Server never lists one to a session
 ([server.md](./server.md) -> Web Push). They are not an anonymity mechanism
 (rationale).
 
-Source of truth: `server-lib-common/src/security/acl.ts` (the schema and
+Source of truth: `remote-lib-common/src/security/acl.ts` (the schema and
 `HostAcl.authorize`), `lib/src/remote/host/acl.ts` (the read filter).
 
 ## Presence proofs
@@ -182,8 +182,8 @@ One verifier serves both ceremonies.
   **has no app-session signing key beside it** (rationale).
 
 Source of truth: `presenceChallenge` / `isPresenceBinding` in
-`server-lib-common/src/security/presence.ts`, `verifyPresenceProof` in
-`server-lib-common/src/security/e2e-ceremony.ts`, `server/src/app.ts`.
+`remote-lib-common/src/security/presence.ts`, `verifyPresenceProof` in
+`remote-lib-common/src/security/e2e-ceremony.ts`, `server/src/app.ts`.
 
 ## Pairing
 
@@ -244,7 +244,7 @@ mismatch is a terminal security error that keeps the old pin**.
 Source of truth: `RemoteHost.mintInvitation` / `#onPairingInit` /
 `#onPairingTransport` / `#approvePairing` in
 `lib/src/remote/host/remote-host.ts`, `PairingRequestV1` / `PairingOutcomeV1` /
-`samplePairingCode` in `server-lib-common/src/security/e2e-ceremony.ts`,
+`samplePairingCode` in `remote-lib-common/src/security/e2e-ceremony.ts`,
 `#setupQr` in `lib/src/host/remote/service.ts`,
 `lib/src/remote/host/RemotePairingModal.tsx`. Pinned by
 `lib/src/remote/host/remote-host.test.ts`.
@@ -281,7 +281,7 @@ the record).
 
 Source of truth: `RemoteHost.#onConnectionInit` / `#onConnectionTransport` /
 `#promoteConnection` in `lib/src/remote/host/remote-host.ts`,
-`HostChallengeIssuer` in `server-lib-common/src/security/challenge.ts`.
+`HostChallengeIssuer` in `remote-lib-common/src/security/challenge.ts`.
 
 ## Push sealing
 
@@ -319,8 +319,8 @@ endpoints when one is sent (rationale).
   web app owns the branch list).
 
 Source of truth: `sealPush` / `openPush` / `isSealedPushV1` in
-`server-lib-common/src/security/push-seal.ts`, pinned by
-`server-lib-common/test/push-seal.test.mjs`; `RemoteHost.sealPushForClient` in
+`remote-lib-common/src/security/push-seal.ts`, pinned by
+`remote-lib-common/test/push-seal.test.mjs`; `RemoteHost.sealPushForClient` in
 `lib/src/remote/host/remote-host.ts`, `sendPush` in
 `lib/src/remote/host/push-delivery.ts`;
 `lib/src/remote/pocket-app/sw.ts`.
@@ -333,12 +333,12 @@ omits `client-gone`, invents client IDs, or reorders frames.
 
 | Bound | Value | Declared in |
 | --- | --- | --- |
-| `MAX_PENDING_PAIRINGS` | 8 | `server-lib-common/src/security/pairing.ts` |
-| `MAX_TOKENS_PER_HOST` | 8 | `server-lib-common/src/remote/wire.ts`, shared with the Server's setup-token cap (rationale) |
-| `MAX_CLIENT_ID_LENGTH` | 256 | `server-lib-common/src/remote/wire.ts` |
+| `MAX_PENDING_PAIRINGS` | 8 | `remote-lib-common/src/security/pairing.ts` |
+| `MAX_TOKENS_PER_HOST` | 8 | `remote-lib-common/src/remote/wire.ts`, shared with the Server's setup-token cap (rationale) |
+| `MAX_CLIENT_ID_LENGTH` | 256 | `remote-lib-common/src/remote/wire.ts` |
 | `MAX_SERVER_TO_HOST_FRAME_LENGTH` | one maximal `ct` + `MAX_CLIENT_ID_LENGTH` + 512 | same |
 | `MAX_PENDING_CONNECTION_HANDSHAKES` | 8 | `lib/src/remote/host/remote-host.ts` |
-| `MAX_ESTABLISHED_E2E_SESSIONS` | 16 | `server-lib-common/src/security/e2e-bounds.ts` |
+| `MAX_ESTABLISHED_E2E_SESSIONS` | 16 | `remote-lib-common/src/security/e2e-bounds.ts` |
 | `ESTABLISHED_E2E_IDLE_TIMEOUT_MS` | 120 000 | same |
 | `E2E_INIT_BURST` / `E2E_INIT_REFILL_INTERVAL_MS` | 8 / 1 000 | same |
 
@@ -392,11 +392,11 @@ omits `client-gone`, invents client IDs, or reorders frames.
   included** (rationale).
 
 Source of truth: `lib/src/remote/host/remote-host.ts`, and `TokenBucket` in
-`server-lib-common/src/security/token-bucket.ts` — the same primitive the Server
+`remote-lib-common/src/security/token-bucket.ts` — the same primitive the Server
 admits Host enrollment with ([server.md](./server.md#http-api)). Pinned by
 `lib/src/remote/host/remote-host-bounds.test.ts`,
 `server/test/malicious-relay.test.mjs` and
-`server-lib-common/test/token-bucket.test.mjs`.
+`remote-lib-common/test/token-bucket.test.mjs`.
 
 ## Noise suite
 
@@ -441,10 +441,10 @@ admits Host enrollment with ([server.md](./server.md#http-api)). Pinned by
 - **The only test hook is ephemeral-key injection**; production callers never
   pass it.
 
-Source of truth: `server-lib-common/src/security/noise.ts`,
-`server-lib-common/src/security/noise-transport.ts`, pinned by
-`server-lib-common/test/noise.test.mjs` against the attributed vector in
-`server-lib-common/test/vectors/`.
+Source of truth: `remote-lib-common/src/security/noise.ts`,
+`remote-lib-common/src/security/noise-transport.ts`, pinned by
+`remote-lib-common/test/noise.test.mjs` against the attributed vector in
+`remote-lib-common/test/vectors/`.
 
 ## Host identity
 
@@ -479,7 +479,7 @@ shows a fixed upgrade requirement on `false`, performing no remote operation
 
 Source of truth: `mintNoiseStaticKeyPair` / `importNoiseStaticPrivateKey` /
 `deriveNoiseStaticPublicKey` / `isNoiseStaticMaterial` / `probeNoiseSupport` in
-`server-lib-common/src/security/noise.ts`, `isEnrollment` / `performEnrollment`
+`remote-lib-common/src/security/noise.ts`, `isEnrollment` / `performEnrollment`
 in `lib/src/remote/host/enrollment.ts`,
 `RemoteHostService.#enrolledWithNoiseStatic` in `lib/src/host/remote/service.ts`.
 
@@ -498,7 +498,7 @@ nothing without its paired passkey.
 
 The checklist an auditor or a change reviewer verifies against, each property
 established above and pinned by
-`server-lib-common/test/security-guarantees.test.mjs`:
+`remote-lib-common/test/security-guarantees.test.mjs`:
 
 * Adding a new passkey does not grant Host access.
 * Compromising the Server does not let it create an authorized Client.

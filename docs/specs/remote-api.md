@@ -29,7 +29,7 @@ One protocol, two consumption depths: the **phone** (Dormouse Pocket) shipped, a
 
 Everything else, browser-surface remoting included, is staged in [Future](#future).
 
-Source of truth: `server-lib-common/src/remote/wire.ts` (the fixed wire contract — every wire type and shared constant named below), `RemoteApiSession` in `lib/src/remote/host/remote-api.ts` (the Host implementation, and the timing constants named below).
+Source of truth: `remote-lib-common/src/remote/wire.ts` (the fixed wire contract — every wire type and shared constant named below), `RemoteApiSession` in `lib/src/remote/host/remote-api.ts` (the Host implementation, and the timing constants named below).
 
 ### The provider seam
 
@@ -106,7 +106,7 @@ Replicated, not screencast: the client renders its own xterm from the same data 
 
 **One `terminal.data` never approaches the 1 MiB application-message cap**: the owner bounds what it feeds the parser, so **both** projections plus their framing stay inside `MAX_APP_MESSAGE_LENGTH` without a rechunker on this path ([terminal-escapes.md](./terminal-escapes.md) → "Parsing location"). **A message over the cap is dropped, not truncated**, so the bound is the only thing between an unusually large PTY read and a Client losing a chunk mid-stream.
 
-Source of truth: `TerminalDataEvent` in `server-lib-common/src/remote/wire.ts`, `ProcessedPtyChunk` in `lib/src/lib/processed-pty-stream.ts`, `PtyDataDetail` in `lib/src/lib/platform/types.ts`.
+Source of truth: `TerminalDataEvent` in `remote-lib-common/src/remote/wire.ts`, `ProcessedPtyChunk` in `lib/src/lib/processed-pty-stream.ts`, `PtyDataDetail` in `lib/src/lib/platform/types.ts`.
 
 #### Attach is the resize
 

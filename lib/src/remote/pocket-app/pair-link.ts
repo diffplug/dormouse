@@ -11,7 +11,7 @@
  * grammar this only ever looks at the prefix of.
  */
 
-import { PAIRING_HASH_PREFIX } from 'server-lib-common';
+import { PAIRING_HASH_PREFIX } from 'remote-lib-common';
 
 /**
  * Erase a pairing fragment from the address bar, answering whether one was

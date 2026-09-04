@@ -79,7 +79,7 @@ const SPECS_DIR = 'docs/specs';
 
 const TOP_LEVEL_DIRS = [
   'lib/', 'standalone/', 'vscode-ext/', 'website/', 'server/',
-  'server-lib-common/', 'dor/', 'dor-lib-common/', 'canopy/', 'docs/',
+  'remote-lib-common/', 'dor/', 'dor-lib-common/', 'canopy/', 'docs/',
   'scripts/', 'deploy/', '.github/', '.claude/', '.vscode/',
 ];
 // Path prefixes that are legitimate references to build/staged/generated

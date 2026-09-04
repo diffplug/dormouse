@@ -135,14 +135,14 @@ const RECONNECT_PROOF = 'reconnect-proof.txt';
 const NOTIFY_SEQUENCE = String.raw`printf '\033]777;notify;Walkthrough;the Host is ringing\033\\'`;
 
 /**
- * The workspace's built `server-lib-common`, or `null` when it is not built.
+ * The workspace's built `remote-lib-common`, or `null` when it is not built.
  *
  * The one place this harness reads product code rather than driving it, and it
  * reads the shipped module rather than a copy: the setup code's TTL, and the
  * emitter/parser pair {@link reissueInvitation} re-stamps a live code with.
  */
 function securityModule(repoRoot) {
-  const entry = join(repoRoot, 'server-lib-common', 'dist', 'index.js');
+  const entry = join(repoRoot, 'remote-lib-common', 'dist', 'index.js');
   return import(pathToFileURL(entry).href).catch(() => null);
 }
 
@@ -173,7 +173,7 @@ async function setupTokenTtlMs(repoRoot) {
 async function reissueInvitation(ctx, url, { expiry, origin } = {}) {
   const security = await securityModule(ctx.repoRoot);
   if (!security) {
-    throw new Error('server-lib-common is not built; run `pnpm --filter server-lib-common build`');
+    throw new Error('remote-lib-common is not built; run `pnpm --filter remote-lib-common build`');
   }
   const liveOrigin = new URL(url).origin;
   const invitation = await security.parsePairingInvitationUrl(url, liveOrigin, 0);

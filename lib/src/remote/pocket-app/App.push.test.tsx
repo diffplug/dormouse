@@ -15,7 +15,7 @@
 import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { toBase64Url } from 'server-lib-common';
+import { toBase64Url } from 'remote-lib-common';
 
 import App from './App';
 import type { KnownHostV1 } from '../client/pocket-db';
@@ -37,8 +37,8 @@ const fake = vi.hoisted(() => ({
   order: [] as string[],
 }));
 
-vi.mock('server-lib-common', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('server-lib-common')>()),
+vi.mock('remote-lib-common', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('remote-lib-common')>()),
   probeNoiseSupport: () => Promise.resolve(true),
 }));
 

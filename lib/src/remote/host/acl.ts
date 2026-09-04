@@ -4,7 +4,7 @@
  * no webview-resident copy to read: every caller supplies its own store.
  */
 
-import { HostAcl, isHostAclRecord, type HostAclRecord } from 'server-lib-common';
+import { HostAcl, isHostAclRecord, type HostAclRecord } from 'remote-lib-common';
 
 /**
  * Keep only the records that belong to `hostId`, dropping anything that is not

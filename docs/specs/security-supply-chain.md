@@ -24,7 +24,7 @@ The roots are `productDependencyFilters` in `website/scripts/generate-deps.js`. 
 | `server` | built and installed by a selfhoster ([SELF_HOST.md](../../SELF_HOST.md)) — notably `web-push`, signing with a private key and making outbound requests |
 | `dormouse-lib` | compiled into both hosts, yet the VS Code extension's dependency walk never arrives at it (rationale) |
 
-**`dormouse-lib` is a root in its own right, not a workspace edge**; `server-lib-common` and `dor-lib-common` are workspace edges from those roots. **Roots are package names, not directory names**, differing once: `vscode-ext/` declares itself `dormouse`.
+**`dormouse-lib` is a root in its own right, not a workspace edge**; `remote-lib-common` and `dor-lib-common` are workspace edges from those roots. **Roots are package names, not directory names**, differing once: `vscode-ext/` declares itself `dormouse`.
 
 **Two workspace packages are deliberately not roots:**
 

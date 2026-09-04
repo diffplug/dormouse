@@ -27,7 +27,7 @@ import {
   type PushSendResponse,
   type SealedPushRecipient,
   type SealedPushV1,
-} from 'server-lib-common';
+} from 'remote-lib-common';
 import type { PushSendSummary } from '../../host/remote/service-protocol';
 import type { PushDevice } from '../../lib/push-devices';
 import type { HostEnrollment } from './enrollment';
@@ -76,7 +76,7 @@ const PUSH_SEND_MARGIN_MS = 5_000;
 
 /**
  * Apply this sink's bounds to a Pane label. The rule itself is
- * `boundedPushText` in `server-lib-common`, shared with the worker that
+ * `boundedPushText` in `remote-lib-common`, shared with the worker that
  * re-bounds at the render sink; this wrapper only names the limit and fallback.
  */
 export function toPushText(label: string): string {

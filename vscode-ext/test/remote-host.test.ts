@@ -10,7 +10,7 @@ import { createServer, type Server, type Socket } from 'node:net';
 import { mkdir } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import { dirname } from 'node:path';
-import type { EnrollmentOffer } from 'server-lib-common';
+import type { EnrollmentOffer } from 'remote-lib-common';
 
 import { ENROLLMENT_KEY } from '../../lib/src/remote/host/store';
 import type { ExtensionMessage } from '../src/message-types';

@@ -14,7 +14,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { API_ROUTES, presenceChallenge, toBase64Url } from 'server-lib-common';
+import { API_ROUTES, presenceChallenge, toBase64Url } from 'remote-lib-common';
 
 import {
   ORIGIN,

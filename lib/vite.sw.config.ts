@@ -21,7 +21,7 @@ export default defineConfig({
       // Same unbuilt-`dist` problem the app config has: the worker imports the
       // shared security primitives, whose package `exports` point at a `dist`
       // this vite-only build never generates.
-      "server-lib-common": fileURLToPath(new URL("../server-lib-common/src", import.meta.url)),
+      "remote-lib-common": fileURLToPath(new URL("../remote-lib-common/src", import.meta.url)),
     },
   },
   build: {

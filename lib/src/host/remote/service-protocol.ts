@@ -203,7 +203,7 @@ export interface EnrollResult {
 export interface SetupQrResult {
   /**
    * The pairing URL, composed by the service from the origin this Host enrolled
-   * against — `server-lib-common`'s `formatPairingInvitationUrl` owns its
+   * against — `remote-lib-common`'s `formatPairingInvitationUrl` owns its
    * grammar (`docs/specs/server.md` → QR grammar).
    */
   url: string;

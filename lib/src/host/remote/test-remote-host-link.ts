@@ -15,7 +15,7 @@
  * records for `wall-test-utils.ts`). Callers that want spies wrap these.
  */
 
-import { DEFAULT_PAIRING_TTL_MS, formatPairingInvitationUrl } from 'server-lib-common';
+import { DEFAULT_PAIRING_TTL_MS, formatPairingInvitationUrl } from 'remote-lib-common';
 
 import type { InvitationEvent, RemoteHostConsoleStatus, SetupQrResult } from './service-protocol';
 import type { PairingOutcome, TerminalInvitationState } from '../../remote/host/remote-host';

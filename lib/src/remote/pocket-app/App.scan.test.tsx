@@ -13,7 +13,7 @@
 import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { generateNoiseKeyPair, toBase64Url, type PairingInvitation } from 'server-lib-common';
+import { generateNoiseKeyPair, toBase64Url, type PairingInvitation } from 'remote-lib-common';
 
 import App, {
   CAMERA_BOOTSTRAP_MESSAGE,
@@ -65,9 +65,9 @@ const fake = vi.hoisted(() => ({
 }));
 
 // The one shared module that is doubled, and only for its probe: the gate has
-// to be driven both ways, and nothing else in `server-lib-common` may change.
-vi.mock('server-lib-common', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('server-lib-common')>()),
+// to be driven both ways, and nothing else in `remote-lib-common` may change.
+vi.mock('remote-lib-common', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('remote-lib-common')>()),
   probeNoiseSupport: () => Promise.resolve(fake.noiseSupported),
 }));
 

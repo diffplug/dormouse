@@ -13,13 +13,13 @@ import {
   isE2eClientFrame,
   isE2eHostFrame,
   toBase64Url,
-} from 'server-lib-common';
+} from 'remote-lib-common';
 import type {
   ClientFrame,
   HostFrame,
   ServerToClientFrame,
   ServerToHostFrame,
-} from 'server-lib-common';
+} from 'remote-lib-common';
 
 /**
  * The slice of a WebSocket the hub actually uses. `WSContext` from

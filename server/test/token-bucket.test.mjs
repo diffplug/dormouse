@@ -1,13 +1,13 @@
 /**
  * Host-enrollment admission: the wiring of the shared `TokenBucket`
- * (`server-lib-common/test/token-bucket.test.mjs` pins its arithmetic) onto
+ * (`remote-lib-common/test/token-bucket.test.mjs` pins its arithmetic) onto
  * the one route that accepts a bootstrap credential.
  */
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { API_ROUTES } from 'server-lib-common';
+import { API_ROUTES } from 'remote-lib-common';
 
 import {
   HOST_ENROLL_ATTEMPT_BURST,

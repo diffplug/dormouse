@@ -14,7 +14,7 @@ import {
   mintNoiseStaticKeyPair,
   normalizeOrigin,
   type EnrollmentOffer,
-} from 'server-lib-common';
+} from 'remote-lib-common';
 import {
   performEnrollment,
   type HostEnrollCredential,

@@ -44,7 +44,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
     },
   };
 });
-import { toBase64Url, type HostAclRecord } from 'server-lib-common';
+import { toBase64Url, type HostAclRecord } from 'remote-lib-common';
 import type { HostEnrollment } from '../../remote/host/enrollment';
 import { createEphemeralHostStateStore, FileHostStateStore } from './host-state-store';
 

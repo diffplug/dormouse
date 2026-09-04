@@ -95,7 +95,7 @@ function bounded(value: unknown): value is string {
  * `SHA-256(lengthPrefixedConcat(domain, kind, …binding fields in declared
  * order, serverNonce))`, base64url. Which fields go in decoded and which as
  * UTF-8 is the spec's rule, listed there and pinned by an independently
- * computed vector in `server-lib-common/test/presence.test.mjs`;
+ * computed vector in `remote-lib-common/test/presence.test.mjs`;
  * {@link bindingFields} is where it is applied.
  *
  * **Throws on a field that is not base64url, and on an unbounded nonce.**

@@ -5,7 +5,7 @@ import {
   fromBase64Url,
   mintNoiseStaticKeyPair,
   toBase64Url,
-} from 'server-lib-common';
+} from 'remote-lib-common';
 import { TEST_SETUP_PASSWORD } from '../test-setup-password';
 import { isEnrollment, performEnrollment } from './enrollment';
 
@@ -15,8 +15,8 @@ const HOST_ID = 'S6kyjjqOS7mw3l8ye89U3g';
 
 // Only the minter is faked, and only where a test asks for it; everything else
 // in the package stays real so the guards under test are the shipped ones.
-vi.mock('server-lib-common', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('server-lib-common')>();
+vi.mock('remote-lib-common', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('remote-lib-common')>();
   return { ...actual, mintNoiseStaticKeyPair: vi.fn(actual.mintNoiseStaticKeyPair) };
 });
 

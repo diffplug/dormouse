@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { HostAcl } from 'server-lib-common';
+import { HostAcl } from 'remote-lib-common';
 import { filterAclRecords, loadHostAcl } from './acl';
 
 /**

@@ -14,7 +14,7 @@ import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { API_ROUTES, SETUP_TOKEN_INVALID_ERROR, UNAUTHORIZED_ERROR } from 'server-lib-common';
+import { API_ROUTES, SETUP_TOKEN_INVALID_ERROR, UNAUTHORIZED_ERROR } from 'remote-lib-common';
 
 import { AccountStore } from '../dist/state.js';
 import {

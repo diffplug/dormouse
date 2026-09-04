@@ -13,7 +13,7 @@ import {
   type DirectoryEntry,
   type TerminalAttachResult,
   type TerminalDataEvent,
-} from 'server-lib-common';
+} from 'remote-lib-common';
 import type { AwaitHandle, AwaitOutcome } from '../../lib/alert-manager';
 import type { PlatformAdapter, PtyDataDetail, PtyInfo, OpenPort } from '../../lib/platform/types';
 import { inputIsReplayTerminalReport } from '../../lib/terminal-report-filter';

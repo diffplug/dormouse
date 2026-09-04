@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { HELLO_ROUTE } from 'server-lib-common';
+import { HELLO_ROUTE } from 'remote-lib-common';
 
 import { createApp } from '../dist/app.js';
 import { PASSWORD, freshApp } from './helpers.mjs';

@@ -5,7 +5,7 @@
  * registry, xterm, or the DOM.
  */
 
-import type { DirectoryEntry } from 'server-lib-common';
+import type { DirectoryEntry } from 'remote-lib-common';
 import type { TerminalPaneState } from '../../lib/terminal-state';
 
 /** Everything one directory entry needs, already resolved from the live stores. */

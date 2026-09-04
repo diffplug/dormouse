@@ -10,8 +10,8 @@ import {
   ENROLL_TOKEN_PATTERN,
   isEnrollmentOfferFresh,
   parseEnrollmentOffer,
-} from 'server-lib-common';
-import type { EnrollmentOffer } from 'server-lib-common';
+} from 'remote-lib-common';
+import type { EnrollmentOffer } from 'remote-lib-common';
 
 import { secretEquals } from './secrets.js';
 
@@ -34,7 +34,7 @@ async function readEnrollmentOffer(path: string): Promise<EnrollmentOffer | null
     return null;
   }
   // The parse itself is shared with the Host-side reader of the same file
-  // (`server-lib-common/src/remote/enroll-offer.ts`); the warn is this side's.
+  // (`remote-lib-common/src/remote/enroll-offer.ts`); the warn is this side's.
   const offer = parseEnrollmentOffer(text);
   if (offer === null) warnUnusable(path);
   return offer;

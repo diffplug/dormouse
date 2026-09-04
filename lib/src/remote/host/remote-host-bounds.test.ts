@@ -33,7 +33,7 @@ import {
   type HostAclRecord,
   type NoiseKeyPair,
   type PresenceBinding,
-} from 'server-lib-common';
+} from 'remote-lib-common';
 import { RemoteHost, type RemoteApiSessionLike } from './remote-host';
 import type { HostEnrollment } from './enrollment';
 import type { PendingPairing } from './pairing-approval';

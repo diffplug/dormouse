@@ -11,7 +11,7 @@ import { chmod, mkdtemp, readFile, readdir, unlink, writeFile } from 'node:fs/pr
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-import { API_ROUTES, UNAUTHORIZED_ERROR } from 'server-lib-common';
+import { API_ROUTES, UNAUTHORIZED_ERROR } from 'remote-lib-common';
 
 import { redeemEnrollToken } from '../dist/enroll-token.js';
 import { ORIGIN, PASSWORD, RP_ID, freshApp, post, sleep } from './helpers.mjs';

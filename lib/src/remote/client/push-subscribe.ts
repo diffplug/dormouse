@@ -4,7 +4,7 @@ import {
   fromBase64Url,
   pushEndpointFingerprint,
   type PushSubscriptionPayload,
-} from 'server-lib-common';
+} from 'remote-lib-common';
 import { getPushServiceWorkerRegistration } from '../pocket-app/service-worker';
 
 /** Why the user cannot subscribe now, or `ready`; see pocket-app.md. */

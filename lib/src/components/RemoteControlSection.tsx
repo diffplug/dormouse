@@ -9,7 +9,7 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from 'react';
-import { DEFAULT_PAIRING_TTL_MS } from 'server-lib-common';
+import { DEFAULT_PAIRING_TTL_MS } from 'remote-lib-common';
 import { ModalReviewBlock, TextInput, modalActionButton } from './design';
 import { ExternalTextLink } from './ExternalTextLink';
 import type { RemoteHostConsoleStatus, SetupQrResult } from '../host/remote/service-protocol';

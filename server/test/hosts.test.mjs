@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { API_ROUTES, E2E_ID_LENGTH, WS_ROUTES, WS_TOKEN_PARAM, isE2eId } from 'server-lib-common';
+import { API_ROUTES, E2E_ID_LENGTH, WS_ROUTES, WS_TOKEN_PARAM, isE2eId } from 'remote-lib-common';
 
 import { HOST_ENROLL_ATTEMPT_REFILL_MS } from '../dist/app.js';
 import { HOST_TOKEN_LENGTH, HostStore, MAX_ENROLLED_HOSTS } from '../dist/state.js';

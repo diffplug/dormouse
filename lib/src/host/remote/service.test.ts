@@ -15,7 +15,7 @@ import {
   toBase64Url,
   type EnrollmentOffer,
   type HostAclRecord,
-} from 'server-lib-common';
+} from 'remote-lib-common';
 import type { HostEnrollment } from '../../remote/host/enrollment';
 import type { HostSurfaceProvider } from '../../remote/host/host-surface-provider';
 import { FakeSocket } from '../../remote/test-fake-socket';

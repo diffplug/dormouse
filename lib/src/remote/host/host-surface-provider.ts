@@ -3,13 +3,13 @@
  * `docs/specs/remote-api.md` → "The provider seam". Types only.
  */
 
-import type { DirectoryEntry } from 'server-lib-common';
+import type { DirectoryEntry } from 'remote-lib-common';
 // The chunk a sink receives is the one the PTY owner's parser produced, so the
 // projection pair is defined beside that parse rather than restated here.
 import type { ProcessedPtyChunk } from '../../lib/processed-pty-stream';
 
 // Re-exported so an implementor can name the entry type without depending on
-// `server-lib-common` itself; vscode-ext's project does not resolve it.
+// `remote-lib-common` itself; vscode-ext's project does not resolve it.
 export type { DirectoryEntry, ProcessedPtyChunk };
 
 export interface SurfaceHandle {

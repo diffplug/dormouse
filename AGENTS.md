@@ -22,8 +22,8 @@ pnpm build       # build lib, vscode extension, Pocket, and website
 - **`website/`** — Marketing site (Vite) bundling part of the lib as an interactive demo on `FakePtyAdapter`
 - **`server/`** — Selfhost coordinating server for remote control (Hono): accounts + passkey auth in local JSON files (no database), WebSocket relay between Pocket clients and Hosts, serves the built Pocket app
 - **`dor/`** — The `dor` CLI (stricli) staged onto the `PATH` of every Dormouse-launched terminal; talks to its host over a private control socket
-- **`server-lib-common/`** — Security primitives + remote wire contract shared by `server`, the Host module in `lib`, and the Pocket app (bare ES2022 — no DOM or Node types)
-- **`dor-lib-common/`** — Cross-platform external-process spawning (`spawnAndCapture`) shared by `dor` and the `lib` host. Despite the parallel names, the two `*-lib-common` packages are unrelated: `server-lib-common` is remote security/wire, `dor-lib-common` is spawn plumbing.
+- **`remote-lib-common/`** — Security primitives + remote wire contract shared by `server`, the Host module in `lib`, and the Pocket app (bare ES2022 — no DOM or Node types)
+- **`dor-lib-common/`** — Cross-platform external-process spawning (`spawnAndCapture`) shared by `dor` and the `lib` host. Despite the parallel names, the two `*-lib-common` packages are unrelated: `remote-lib-common` is remote security/wire, `dor-lib-common` is spawn plumbing.
 - **`canopy/`** — Experimental 3D/WebXR terminal-rendering lab (Storybook-only, not in the production build). Consumes `@diffplug/xterm-addon-webgl-sdf` — the webgl addon from our [xterm.js fork](https://github.com/diffplug/xterm.js) (`sdf` branch).
 
 ## Specs

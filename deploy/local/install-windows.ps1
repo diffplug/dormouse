@@ -717,7 +717,7 @@ try {
   }
   Write-Ok "pocket app built"
 
-  Write-Info "building server (and server-lib-common)"
+  Write-Info "building server (and remote-lib-common)"
   $r = Invoke-Pnpm @('--filter', 'server', 'build')
   if ($r.ExitCode -ne 0) { Die "server build failed. Run: pnpm --filter server build`n$(Get-FailureTail $r)" }
   if (-not (Test-Path -LiteralPath (Join-Path $REPO_ROOT 'server\dist\index.js'))) {
@@ -801,8 +801,8 @@ try {
   if (-not (Test-Path -LiteralPath (Join-Path $STAGE 'server\dist\index.js'))) {
     Die "the deployed server tree has no dist/index.js."
   }
-  if (-not (Test-Path -LiteralPath (Join-Path $STAGE 'server\node_modules\server-lib-common'))) {
-    Die "the deployed server tree is missing the injected server-lib-common workspace package."
+  if (-not (Test-Path -LiteralPath (Join-Path $STAGE 'server\node_modules\remote-lib-common'))) {
+    Die "the deployed server tree is missing the injected remote-lib-common workspace package."
   }
   Write-Ok "production server tree staged"
 

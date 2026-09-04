@@ -8,8 +8,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { Hono } from 'hono';
-import { API_ROUTES } from 'server-lib-common';
-import { SimAuthenticator } from '../../server-lib-common/test/harness/actors.mjs';
+import { API_ROUTES } from 'remote-lib-common';
+import { SimAuthenticator } from '../../remote-lib-common/test/harness/actors.mjs';
 
 import { MAX_PENDING_CHALLENGES } from '../dist/app.js';
 

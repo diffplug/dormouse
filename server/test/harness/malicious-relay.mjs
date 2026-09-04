@@ -18,7 +18,7 @@
 
 import { randomBytes } from 'node:crypto';
 
-import { toBase64Url } from 'server-lib-common';
+import { toBase64Url } from 'remote-lib-common';
 
 import { RelayHub } from '../../dist/relay.js';
 import { memorySocketPair } from './memory-socket.mjs';

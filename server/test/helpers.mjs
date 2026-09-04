@@ -2,7 +2,7 @@
  * Shared scaffolding for the slice-1 server tests. Each test gets a fresh temp
  * state dir and its own `createApp`, so cases never share account.json,
  * challenge stores, or sessions. Real WebAuthn is produced by `SimAuthenticator`
- * from the server-lib-common harness — no browser required.
+ * from the remote-lib-common harness — no browser required.
  */
 
 import { mkdtemp, readFile } from 'node:fs/promises';
@@ -10,14 +10,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { serve } from '@hono/node-server';
-import { API_ROUTES, WS_ROUTES, WS_TOKEN_PARAM, toBase64Url, utf8Encode } from 'server-lib-common';
+import { API_ROUTES, WS_ROUTES, WS_TOKEN_PARAM, toBase64Url, utf8Encode } from 'remote-lib-common';
 
 import { createApp } from '../dist/app.js';
-import { SimAuthenticator } from '../../server-lib-common/test/harness/actors.mjs';
+import { SimAuthenticator } from '../../remote-lib-common/test/harness/actors.mjs';
 import { ORIGIN, PASSWORD, RP_ID } from './fixtures.mjs';
 
 export * from './fixtures.mjs';
-export { makeClock } from '../../server-lib-common/test/harness/clock.mjs';
+export { makeClock } from '../../remote-lib-common/test/harness/clock.mjs';
 
 /**
  * No app here pays the real `CREDENTIAL_FAILURE_DELAY_MS`: a suite full of 401s

@@ -27,7 +27,7 @@ import {
   type PairingInvitation,
   type PresenceBinding,
   type PresenceProofV1,
-} from 'server-lib-common';
+} from 'remote-lib-common';
 import { RemoteHost, type RemoteApiSessionLike, type RemoteHostOptions } from './remote-host';
 import type { HostEnrollment } from './enrollment';
 import type { PendingPairing } from './pairing-approval';

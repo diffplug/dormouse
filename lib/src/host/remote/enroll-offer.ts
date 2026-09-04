@@ -6,7 +6,7 @@
  *
  * The file is the installer's `run/enroll-offer.json` — the same one the Server
  * redeems through `DORMOUSE_ENROLL_TOKEN_FILE`, shape and guard shared in
- * `server-lib-common/src/remote/enroll-offer.ts`. There is no handshake between
+ * `remote-lib-common/src/remote/enroll-offer.ts`. There is no handshake between
  * the two processes: both simply know where the installer puts it.
  *
  * Freshness is shared with the Server. This process reads the file from the
@@ -21,7 +21,7 @@ import {
   isEnrollmentOfferFresh,
   parseEnrollmentOffer,
   type EnrollmentOffer,
-} from 'server-lib-common';
+} from 'remote-lib-common';
 
 export type { EnrollmentOffer };
 

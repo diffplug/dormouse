@@ -370,7 +370,7 @@ Source of truth: `isInstalledWebApp` / `requiresInstallForPush` /
 `retirePendingDeletions` / `forgetHost` in
 `lib/src/remote/client/pocket-client.ts`;
 `lib/src/remote/pocket-app/service-worker.ts`; `pushEndpointFingerprint` in
-`server-lib-common/src/security/push.ts`; `PushSubscriptionStore.upsert` and
+`remote-lib-common/src/security/push.ts`; `PushSubscriptionStore.upsert` and
 `vapidPublicKey` in `server/src/state.ts`; `server/src/app.ts`.
 
 ## What Pocket stores
@@ -454,7 +454,7 @@ the Hosts list, pairing and push registration intact.
 Two details this depends on:
 
 - **The trigger is the session gate specifically**, matched on the shared
-  `UNAUTHORIZED_ERROR` from `server-lib-common/src/remote/wire.ts` — a 401 alone
+  `UNAUTHORIZED_ERROR` from `remote-lib-common/src/remote/wire.ts` — a 401 alone
   is ambiguous, since a refused setup token answers 401 too (as
   `SetupTokenInvalidError`). (rationale)
 - **A rejected relay upgrade carries no status.** The browser surfaces it as a

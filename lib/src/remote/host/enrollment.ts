@@ -12,7 +12,7 @@ import {
   mintNoiseStaticKeyPair,
   normalizeOrigin,
   type HostEnrollResponse,
-} from 'server-lib-common';
+} from 'remote-lib-common';
 import { HOST_REQUEST_TIMEOUT_MS } from './host-fetch';
 
 export interface HostEnrollment {

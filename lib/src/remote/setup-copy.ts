@@ -6,7 +6,7 @@
  * button. A literal on each side rots silently: renaming the button would leave
  * the laptop directing people to a control that no longer exists, and nothing
  * would fail. A React-free leaf both can import is the cheapest place for it;
- * `server-lib-common` is the wrong home, being the wire contract rather than UI
+ * `remote-lib-common` is the wrong home, being the wire contract rather than UI
  * copy.
  */
 

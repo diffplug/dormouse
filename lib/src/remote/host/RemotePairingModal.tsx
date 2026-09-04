@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { ModalFrame, ModalReviewBlock, modalActionButton } from '../../components/design';
-import { PAIRING_CODE_LENGTH } from 'server-lib-common';
+import { PAIRING_CODE_LENGTH } from 'remote-lib-common';
 
 /**
  * The Host's local pairing confirmation (server.md → "Pairing approval modal";

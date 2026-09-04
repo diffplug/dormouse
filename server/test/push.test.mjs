@@ -26,7 +26,7 @@ import {
   randomBase64Url,
   utf8Decode,
   utf8Encode,
-} from 'server-lib-common';
+} from 'remote-lib-common';
 import webpush from 'web-push';
 
 import {

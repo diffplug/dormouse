@@ -26,7 +26,7 @@ import {
   isE2eServerToHostFrame,
   toBase64Url,
   utf8Encode,
-} from 'server-lib-common';
+} from 'remote-lib-common';
 
 import { until } from './helpers.mjs';
 import { e2eFixture, establish, flip, newE2eId, watch } from './harness/e2e.mjs';

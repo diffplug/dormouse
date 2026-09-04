@@ -13,13 +13,13 @@
 import { randomUUID } from 'node:crypto';
 import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { HostAclRecord } from 'server-lib-common';
+import type { HostAclRecord } from 'remote-lib-common';
 import { filterAclRecords } from '../../remote/host/acl';
 import { isEnrollment, type HostEnrollment } from '../../remote/host/enrollment';
 import { createSerialQueue } from './serial-queue';
 
 // Re-exported so an implementor can name the record type without depending on
-// `server-lib-common` itself; vscode-ext's project does not resolve it.
+// `remote-lib-common` itself; vscode-ext's project does not resolve it.
 export type { HostAclRecord };
 
 export interface HostStateStore {

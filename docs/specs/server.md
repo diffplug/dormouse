@@ -14,7 +14,7 @@ down to the smallest thing that completes this loop:
 > laptop on the phone.
 
 One Node process (Hono). No database. **Terminal-only.** Every security
-primitive lives in `server-lib-common`, the terminal UI in `lib`/`standalone`.
+primitive lives in `remote-lib-common`, the terminal UI in `lib`/`standalone`.
 
 ## Guardrails
 
@@ -58,7 +58,7 @@ The whole of what `server/src/` reads from the environment:
 | `DORMOUSE_VAPID_SUBJECT`  | `mailto:`/`https:` contact for push-service operators (RFC 8292), defaulted from `DORMOUSE_ORIGIN` and validated at startup — Web Push below. |
 | `DORMOUSE_RUNTIME_FILE`   | Absolute path the server records `{pid, releaseId, port, origin, startedAt}` into once it has **bound**, mode `0600`. Unset — dev, containers, every test — writes nothing. A relative value is a `ConfigError`, and the path lives outside `DORMOUSE_STATE_DIR` (rationale). |
 | `DORMOUSE_RELEASE_ID`     | The release directory's name, supplied by the installer's `run-server` wrapper, recorded in the runtime file. `null` when the server was not started by an installer. |
-| `DORMOUSE_ENROLL_TOKEN_FILE` | Absolute installer offer path — `{origin, token, mintedAt}`, the token 64 hex characters, shape in `server-lib-common/src/remote/enroll-offer.ts` — which `POST /api/host/enroll` accepts in place of the setup password; unset, one-click enrollment is off. A relative value is a `ConfigError` (rationale). **The offer lasts until the first Host enrollment or 24 hours, whichever comes first**, `hosts.json` being the durable marker (rationale); the Host-store mutex serializes password/token requests. **Redemption atomically renames the file before minting**, so exactly one concurrent redemption wins, and a mismatched claim is restored by no-clobber hard link so a newer installer generation wins. The installer rotates offers only before `hosts.json` exists. |
+| `DORMOUSE_ENROLL_TOKEN_FILE` | Absolute installer offer path — `{origin, token, mintedAt}`, the token 64 hex characters, shape in `remote-lib-common/src/remote/enroll-offer.ts` — which `POST /api/host/enroll` accepts in place of the setup password; unset, one-click enrollment is off. A relative value is a `ConfigError` (rationale). **The offer lasts until the first Host enrollment or 24 hours, whichever comes first**, `hosts.json` being the durable marker (rationale); the Host-store mutex serializes password/token requests. **Redemption atomically renames the file before minting**, so exactly one concurrent redemption wins, and a mismatched claim is restored by no-clobber hard link so a newer installer generation wins. The installer rotates offers only before `hosts.json` exists. |
 
 **Must generate the setup password inside the Server on first boot, never accept
 it as configuration, and persist it as `setup-password.json`.** Use 32
@@ -84,7 +84,7 @@ every route is still gated by the setup password or a bearer token, exactly as
 not cover this socket (rationale).
 
 **`DORMOUSE_ORIGIN` is normalized to a bare origin exactly once**, in
-`readConfig` by the shared `normalizeOrigin` in `server-lib-common`; a value that
+`readConfig` by the shared `normalizeOrigin` in `remote-lib-common`; a value that
 is not a URL with a host is a `ConfigError` naming the variable (rationale).
 WebAuthn clientData checks, passkey assertion verification, the Host enrollment
 policy and the pairing URL a Host composes all compare against that string
@@ -255,7 +255,7 @@ Source of truth: `server/src/state.ts`.
 No WebAuthn library, and none is needed (rationale): registration reads
 `response.getPublicKey()` — SPKI DER straight from the browser,
 `attestation: 'none'` requested, so there is no CBOR and no attestation to
-parse. **Assertions go through `verifyPasskeyAssertion` in `server-lib-common`,
+parse. **Assertions go through `verifyPasskeyAssertion` in `remote-lib-common`,
 the same function the Host uses**, so Server and Host cannot disagree on what a
 valid assertion is.
 
@@ -272,7 +272,7 @@ assertion's own `clientDataJSON`, **consume it *before* verifying** so a capture
 assertion can never be replayed even when verification would succeed, then
 `verifyPasskeyAssertion` against the stored key under the server's UV policy.
 
-Challenges are `HostChallengeIssuer` from `server-lib-common` — a generic
+Challenges are `HostChallengeIssuer` from `remote-lib-common` — a generic
 single-use/TTL store despite the name — and **setup, sign-in/re-auth, and
 push-subscribe each get their own issuer**, so a challenge minted for one flow
 can never be redeemed in another. **Both server-side issuers are capped**
@@ -286,8 +286,8 @@ protection.
 
 The whole route surface; paths and request/response shapes live in
 `API_ROUTES` / `WS_ROUTES` with their types in
-`server-lib-common/src/remote/wire.ts`, and `HELLO_ROUTE` in
-`server-lib-common/src/index.ts`, so Server, Host and Pocket cannot drift.
+`remote-lib-common/src/remote/wire.ts`, and `HELLO_ROUTE` in
+`remote-lib-common/src/index.ts`, so Server, Host and Pocket cannot drift.
 
 | Route                            | Auth           | Does                                              |
 | -------------------------------- | -------------- | ------------------------------------------------- |
@@ -330,7 +330,7 @@ by `server/test/body-limit.test.mjs`.
 **Must admit Host enrollment through one process-global bucket before body
 parsing**, at `HOST_ENROLL_ATTEMPT_BURST` and `HOST_ENROLL_ATTEMPT_REFILL_MS`;
 empty answers 429 with `Retry-After`. Every POST counts; OPTIONS does not.
-Source of truth: `TokenBucket` in `server-lib-common/src/security/token-bucket.ts`
+Source of truth: `TokenBucket` in `remote-lib-common/src/security/token-bucket.ts`
 and `HOST_ENROLL_ATTEMPT_*` in `server/src/app.ts`; test:
 `server/test/token-bucket.test.mjs`.
 
@@ -347,7 +347,7 @@ TTL. Source of truth: `readCached` in `server/src/state.ts`.
 
 Every session-gated route — including the `/ws/client` upgrade, rejected before
 `injectWebSocket` sees it — answers an unknown or expired token 401 with the
-shared `UNAUTHORIZED_ERROR` from `server-lib-common/src/remote/wire.ts`. **That
+shared `UNAUTHORIZED_ERROR` from `remote-lib-common/src/remote/wire.ts`. **That
 exact string is load-bearing**: Pocket keys its "sign in again" recovery on it,
 and a bare 401 is ambiguous since a spent setup token answers 401 too
 ([pocket-app.md](./pocket-app.md) -> An expired session drops to sign-in). A
@@ -395,9 +395,9 @@ Pocket, a fragment being invisible to this server. Check order is the function's
 own: cheap before expensive, the X25519 import last, which is what makes it
 asynchronous.
 
-Source of truth: `server-lib-common/src/security/pairing-invitation.ts`, with
+Source of truth: `remote-lib-common/src/security/pairing-invitation.ts`, with
 `#setupQr` in `lib/src/host/remote/service.ts` as the emitter; pinned by exact
-encode/parse vectors in `server-lib-common/test/pairing-invitation.test.mjs`.
+encode/parse vectors in `remote-lib-common/test/pairing-invitation.test.mjs`.
 What the invitation half proves is
 [remote-security-model.md](./remote-security-model.md) -> Pairing.
 
@@ -416,7 +416,7 @@ Token rules, unchanged by the grammar:
 * **The store remembers which Host minted each token.** TTL is
   `DEFAULT_PAIRING_TTL_MS`, the window the Host's invitation lives for; it prunes
   on every mint and caps each Host's outstanding tokens at `MAX_TOKENS_PER_HOST`,
-  that Host's own oldest first (Guardrails). The cap lives in `server-lib-common`
+  that Host's own oldest first (Guardrails). The cap lives in `remote-lib-common`
   because the Host bounds its own invitation map at the same number.
 
 Source of truth: `server/src/setup-token.ts`, pinned by
@@ -502,7 +502,7 @@ host-bound frame so the Host can address replies, and never sent to the Client.
 **The `e2e` envelope is what a Host speaks.** Four `t: 'e2e'` frames
 (Client→Server, Server→Host with `clientId` stamped, Host→Server, Server→Client
 with `hostId` stamped from the socket), shapes in
-`server-lib-common/src/remote/wire.ts`. A Host handles exactly these and
+`remote-lib-common/src/remote/wire.ts`. A Host handles exactly these and
 `client-gone`; anything else it receives is ignored.
 
 - **An `init` binds** the Client socket to the named Host, replacing whatever
@@ -558,7 +558,7 @@ revocation sweep and far more often, touching no disk. Pinned by
 **Only one socket may own a `hostId`.** A second registration displaces the
 first: clients bound to it are told `host-gone`, their bindings are cleared, and
 the old socket closes with `WS_CLOSE_HOST_REPLACED` (4000) /
-`WS_CLOSE_HOST_REPLACED_REASON` — constants living in `server-lib-common` because
+`WS_CLOSE_HOST_REPLACED_REASON` — constants living in `remote-lib-common` because
 the evicted Host keys its stand-down on the code (see
 [Host side](#host-side-lib--the-two-node-hosts)). **Clearing the bindings at
 *replacement* time, not only on disconnect, is load-bearing** — the displaced
@@ -566,7 +566,7 @@ socket's own close event is a no-op here, and the new Host process has a fresh
 ACL and no memory of them.
 
 Source of truth: `server/src/relay.ts` (`registerHost`), and `isE2eClientFrame` /
-`isE2eHostFrame` in `server-lib-common/src/remote/wire.ts`, written for a Host to
+`isE2eHostFrame` in `remote-lib-common/src/remote/wire.ts`, written for a Host to
 reuse verbatim.
 
 ### Pairing (phone ↔ laptop, first time)
@@ -644,8 +644,8 @@ disagree what a transport plaintext is; the harness is its only speaker today.
   every field of its invitation in QR order ("Setup tokens and the pairing QR"
   above), so a transcript is useless against another Host, id, or ceremony.
 
-Source of truth: `server-lib-common/src/security/noise-transport.ts`, pinned by
-`server-lib-common/test/noise-transport.test.mjs` and driven through the real
+Source of truth: `remote-lib-common/src/security/noise-transport.ts`, pinned by
+`remote-lib-common/test/noise-transport.test.mjs` and driven through the real
 relay by `server/test/e2e-relay.test.mjs`.
 
 ## Host side (`lib` + the two Node hosts)
@@ -731,7 +731,7 @@ memo invalidation — live in that host's spec.
   `hostId`**, so an enrollment onto a fresh one starts with an empty ACL while a
   re-enrollment onto the same one keeps its paired devices),
   `HostChallengeIssuer`, `verifyPresenceProof`, and the Noise responder for both
-  ceremonies — all from `server-lib-common`, running in the service's process.
+  ceremonies — all from `remote-lib-common`, running in the service's process.
   **Nothing a webview says can widen access**; the expected two-digit
   confirmation code never leaves it
   ([remote-security-model.md](./remote-security-model.md) -> Pairing).
@@ -901,7 +901,7 @@ ceremony semantics over the same shared primitives; the `FakeClient` in
 `server/test/harness/fake-client.mjs` runs both ceremonies as a real Noise
 initiator, `SimAuthenticator` producing presence proofs through the real
 `/api/reauth/*` routes; process-level tests spawn the real entrypoint.
-`server-lib-common/test/security-guarantees.test.mjs` drives the model's
+`remote-lib-common/test/security-guarantees.test.mjs` drives the model's
 guarantee list end to end.
 
 `server/test/malicious-relay.test.mjs` runs the same two halves over a relay

@@ -24,7 +24,7 @@ import {
   generateNoiseKeyPair,
   hashPasskeyPublicKey,
   toBase64Url,
-} from 'server-lib-common';
+} from 'remote-lib-common';
 
 import {
   enrollHost,

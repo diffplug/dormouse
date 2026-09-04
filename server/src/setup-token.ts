@@ -9,7 +9,7 @@
 
 import { randomBytes } from 'node:crypto';
 
-import { DEFAULT_PAIRING_TTL_MS, MAX_TOKENS_PER_HOST, toBase64Url } from 'server-lib-common';
+import { DEFAULT_PAIRING_TTL_MS, MAX_TOKENS_PER_HOST, toBase64Url } from 'remote-lib-common';
 
 export { MAX_TOKENS_PER_HOST };
 
@@ -25,7 +25,7 @@ export const SETUP_TOKEN_TTL_MS = DEFAULT_PAIRING_TTL_MS;
 // can otherwise grow for the process's lifetime by re-rendering its QR in a
 // loop. Per-host rather than global: a global cap makes one Host's minting loop
 // evict another Host's live token mid-scan, and a Host's own oldest goes first.
-// It is defined in `server-lib-common` because the Host caps its own invitation
+// It is defined in `remote-lib-common` because the Host caps its own invitation
 // map at the same number.
 
 /** 256 bits, like every other unguessable handle in this system. */

@@ -7,7 +7,7 @@
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { normalizeOrigin } from 'server-lib-common';
+import { normalizeOrigin } from 'remote-lib-common';
 
 import { defaultVapidSubject, type VapidKeys } from './push.js';
 

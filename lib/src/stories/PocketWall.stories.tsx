@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { useEffect, useRef } from 'react';
-import { toBase64Url, utf8Encode, type DirectoryEntry } from 'server-lib-common';
+import { toBase64Url, utf8Encode, type DirectoryEntry } from 'remote-lib-common';
 import { ConnectedView } from '../remote/pocket-app/App';
 import { PocketWall } from '../remote/pocket-app/PocketWall';
 import { RemotePtyAdapter, type RemoteAdapterClient } from '../remote/client/remote-adapter';

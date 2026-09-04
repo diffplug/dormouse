@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { API_ROUTES } from 'server-lib-common';
+import { API_ROUTES } from 'remote-lib-common';
 import { ORIGIN, freshApp } from './helpers.mjs';
 
 // A preflight is how a browser asks for the grant, so its 404 is the assertion:

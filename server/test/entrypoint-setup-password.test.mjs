@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { API_ROUTES } from 'server-lib-common';
+import { API_ROUTES } from 'remote-lib-common';
 
 import { startServer, stopServer } from './spawn-server.mjs';
 

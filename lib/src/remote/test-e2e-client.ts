@@ -32,7 +32,7 @@ import {
   type PasskeyAssertion,
   type PresenceBinding,
   type PresenceProofV1,
-} from 'server-lib-common';
+} from 'remote-lib-common';
 import type { FakeSocket } from './test-fake-socket';
 
 const subtle = globalThis.crypto.subtle;

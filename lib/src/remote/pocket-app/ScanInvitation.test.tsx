@@ -13,7 +13,7 @@
 import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fromBase64Url, toBase64Url, type PairingInvitation } from 'server-lib-common';
+import { fromBase64Url, toBase64Url, type PairingInvitation } from 'remote-lib-common';
 
 import { SCAN_REJECTED_MESSAGE, ScanInvitation, type ScanControls } from './ScanInvitation';
 import { buttonNamed, invitationUrl as sharedInvitationUrl, settle } from './app-test-utils';

@@ -9,7 +9,7 @@
  * The server URL (default http://localhost:3000) is argv[2]. The setup password
  * comes from the Server package's `data` directory unless
  * `DORMOUSE_STATE_DIR` says otherwise. Build first (`pnpm --filter server
- * build`) so `server-lib-common` is compiled.
+ * build`) so `remote-lib-common` is compiled.
  *
  * It prints one pairing URL — the text a real Host would draw as a QR — and
  * mints a fresh one whenever the previous invitation is spent, so a phone can
@@ -19,7 +19,7 @@
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { API_ROUTES, formatPairingInvitationUrl, generateNoiseKeyPair } from 'server-lib-common';
+import { API_ROUTES, formatPairingInvitationUrl, generateNoiseKeyPair } from 'remote-lib-common';
 
 import { SetupPasswordStore } from '../dist/state.js';
 import { FakeHost } from '../test/harness/fake-host.mjs';

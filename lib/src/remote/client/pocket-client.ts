@@ -73,7 +73,7 @@ import {
   type TerminalAttachResult,
   type TerminalClosedEvent,
   type TerminalDataEvent,
-} from 'server-lib-common';
+} from 'remote-lib-common';
 import {
   PasskeyAlreadyRegisteredError,
   isPasskeyAlreadyRegistered,

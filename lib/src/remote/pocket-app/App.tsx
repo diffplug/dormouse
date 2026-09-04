@@ -25,7 +25,7 @@ import {
 } from '../client/pocket-client';
 import { PasskeyAlreadyRegisteredError, browserWebAuthn } from '../client/webauthn';
 import { SCAN_LABEL } from '../setup-copy';
-import { probeNoiseSupport, type PairingInvitation } from 'server-lib-common';
+import { probeNoiseSupport, type PairingInvitation } from 'remote-lib-common';
 import {
   indexedDbKnownHostStore,
   indexedDbPendingDeletionStore,

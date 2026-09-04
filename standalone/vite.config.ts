@@ -5,7 +5,7 @@ import path from "path";
 
 const libDir = path.resolve(import.meta.dirname, "../lib");
 const dorDir = path.resolve(import.meta.dirname, "../dor");
-const serverLibCommonDir = path.resolve(import.meta.dirname, "../server-lib-common");
+const serverLibCommonDir = path.resolve(import.meta.dirname, "../remote-lib-common");
 
 // https://v2.tauri.app/start/frontend/vite/
 const host = process.env.TAURI_DEV_HOST;
@@ -21,11 +21,11 @@ export default defineConfig({
       // path; Vite governs lib files by lib's (paths-less) tsconfig, and `dor`
       // has no package exports, so resolve it explicitly the same way as lib.
       dor: path.resolve(dorDir, "src"),
-      // lib source imports the remote modules, which import `server-lib-common`;
+      // lib source imports the remote modules, which import `remote-lib-common`;
       // its package exports point at dist, which a clean standalone checkout
       // build has not necessarily produced yet. Match the Pocket and website
       // builds by resolving it directly to source.
-      "server-lib-common": path.resolve(serverLibCommonDir, "src"),
+      "remote-lib-common": path.resolve(serverLibCommonDir, "src"),
     },
   },
   // Tauri expects a fixed port; fail if that port is not available

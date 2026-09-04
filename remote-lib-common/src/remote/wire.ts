@@ -622,7 +622,7 @@ export function isE2eCiphertext(value: unknown): value is string {
  * The shape guard both a relay and a Host run on a Client-originated `e2e`
  * frame — the both-sides rule the relay and the Host share (server.md ->
  * Relay). It cannot check the ciphertext, so all it enforces is that the
- * routing values are bounded. Pinned by `server-lib-common/test/wire.test.mjs`
+ * routing values are bounded. Pinned by `remote-lib-common/test/wire.test.mjs`
  * and, against real relay-minted ids, `server/test/e2e-relay.test.mjs`.
  */
 export function isE2eClientFrame(value: unknown): value is E2eClientFrame {

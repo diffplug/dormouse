@@ -11,7 +11,7 @@
  * `MAX_PENDING_CONNECTION_HANDSHAKES` in the Host itself.
  *
  * The relationships between these numbers are pinned by
- * `server-lib-common/test/e2e-bounds.test.mjs`; what the Host does with them is
+ * `remote-lib-common/test/e2e-bounds.test.mjs`; what the Host does with them is
  * `lib/src/remote/host/remote-host-bounds.test.ts`.
  */
 

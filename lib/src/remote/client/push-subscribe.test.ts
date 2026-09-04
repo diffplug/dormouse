@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { pushEndpointFingerprint } from 'server-lib-common';
+import { pushEndpointFingerprint } from 'remote-lib-common';
 
 const getRegistration = vi.fn();
 vi.mock('../pocket-app/service-worker', () => ({

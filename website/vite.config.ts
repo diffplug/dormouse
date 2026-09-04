@@ -53,9 +53,9 @@ export default defineConfig(({ mode }) => ({
       "dormouse-lib": path.resolve(import.meta.dirname, "../lib/src"),
       // The desktop playground bundles `Wall`, which pulls in the remote host
       // modules (`RemotePairingModalHost` → remote/host/*); those import
-      // `server-lib-common`, whose package `exports` resolve to a `dist` this
+      // `remote-lib-common`, whose package `exports` resolve to a `dist` this
       // build never compiles. Alias it to source, exactly like `dormouse-lib`.
-      "server-lib-common": path.resolve(import.meta.dirname, "../server-lib-common/src"),
+      "remote-lib-common": path.resolve(import.meta.dirname, "../remote-lib-common/src"),
       // Same story for `dor-lib-common`: `Wall` → `useDorControl` → `connect-port`
       // imports its `./agent-browser` subpath. The directory alias covers both
       // that subpath and the bare specifier.

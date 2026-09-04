@@ -17,7 +17,7 @@
  * session, so a pairing or connection that succeeds here succeeded end to end.
  */
 
-import { isE2eClientFrame, isE2eHostFrame, type E2eKind } from 'server-lib-common';
+import { isE2eClientFrame, isE2eHostFrame, type E2eKind } from 'remote-lib-common';
 import { FakeSocket } from './test-fake-socket';
 import { testRoutingId } from './test-e2e-client';
 

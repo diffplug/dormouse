@@ -546,7 +546,7 @@ pnpm --filter dormouse-lib build:pocket >/dev/null 2>&1 || die "pocket build fai
 [ -f "$REPO_ROOT/lib/dist-pocket/index.html" ] || die "lib/dist-pocket/index.html missing after the pocket build."
 ok "pocket app built"
 
-info "building server (and server-lib-common)"
+info "building server (and remote-lib-common)"
 pnpm --filter server build >/dev/null 2>&1 || die "server build failed. Run: pnpm --filter server build"
 [ -f "$REPO_ROOT/server/dist/index.js" ] || die "server/dist/index.js missing after the server build."
 ok "server built"
@@ -597,7 +597,7 @@ pnpm --filter server deploy --prod --legacy "$STAGE/server" >/dev/null 2>&1 \
   || die "pnpm deploy failed. Run: pnpm --filter server deploy --prod --legacy /tmp/dormouse-deploy-probe"
 restore_workspace_state
 [ -f "$STAGE/server/dist/index.js" ] || die "the deployed server tree has no dist/index.js."
-[ -d "$STAGE/server/node_modules/server-lib-common" ] || die "the deployed server tree is missing the injected server-lib-common workspace package."
+[ -d "$STAGE/server/node_modules/remote-lib-common" ] || die "the deployed server tree is missing the injected remote-lib-common workspace package."
 ok "production server tree staged"
 
 # server/src/config.ts resolves the pocket dir two levels up from

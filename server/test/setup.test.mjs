@@ -11,7 +11,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { API_ROUTES } from 'server-lib-common';
+import { API_ROUTES } from 'remote-lib-common';
 
 import {
   ORIGIN,

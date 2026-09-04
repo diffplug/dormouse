@@ -17,7 +17,7 @@ import {
   type DirectoryEntry,
   type RemoteEventMsg,
   type RemoteResponse,
-} from 'server-lib-common';
+} from 'remote-lib-common';
 import type { HostSurfaceProvider, PtySink, SurfaceHandle } from './host-surface-provider';
 import { RemoteApiSession } from './remote-api';
 

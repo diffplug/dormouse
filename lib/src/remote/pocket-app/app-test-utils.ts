@@ -13,7 +13,7 @@ import {
   randomBase64Url,
   toBase64Url,
   type PairingInvitation,
-} from 'server-lib-common';
+} from 'remote-lib-common';
 
 import { PAIRING_CODE_LABEL, type HostView } from './App';
 import { testRoutingId } from '../test-e2e-client';

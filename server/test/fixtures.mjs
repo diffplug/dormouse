@@ -9,7 +9,7 @@ export const RP_ID = 'localhost';
 
 /**
  * A setup password of the only shape `createApp` accepts, which
- * `HEX_ENCODED_32_BYTES_PATTERN` in `server-lib-common` defines. Tests inject
+ * `HEX_ENCODED_32_BYTES_PATTERN` in `remote-lib-common` defines. Tests inject
  * it below the production entrypoint; production mints its own. Deterministic,
  * not random: every suite in this package takes it from here.
  */

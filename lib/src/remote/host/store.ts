@@ -5,7 +5,7 @@
  * `SecretStorage`, and the tests on both sides.
  *
  * It lives here rather than in `enrollment.ts` so the extension host can import
- * it without pulling `server-lib-common` into its bundle. A key that drifted
+ * it without pulling `remote-lib-common` into its bundle. A key that drifted
  * between the two would strand an enrollment that is still on disk.
  */
 export const ENROLLMENT_KEY = 'dormouse.remote-host.enrollment';

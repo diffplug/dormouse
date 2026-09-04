@@ -46,7 +46,7 @@ import {
   isSealedPushV1,
   verifyPasskeyAssertion,
   TokenBucket,
-} from 'server-lib-common';
+} from 'remote-lib-common';
 import type {
   HostEnrollRequest,
   HostEnrollResponse,
@@ -77,7 +77,7 @@ import type {
   SigninBeginResponse,
   SigninFinishRequest,
   SigninFinishResponse,
-} from 'server-lib-common';
+} from 'remote-lib-common';
 
 import { invalidateEnrollOffer, redeemEnrollToken } from './enroll-token.js';
 import {
@@ -1064,7 +1064,7 @@ export function createApp(config: AppConfig): CreatedApp {
 
   // --- Web Push: subscriptions (client-facing) and delivery (host-facing) --
   // Two audiences, two credentials, and possession of the `deliveryId` is the
-  // whole Client-facing authorization: `server-lib-common/src/remote/wire.ts`
+  // whole Client-facing authorization: `remote-lib-common/src/remote/wire.ts`
   // -> "Web Push" states the contract, docs/specs/server.md -> Web Push the
   // rules these routes implement.
 

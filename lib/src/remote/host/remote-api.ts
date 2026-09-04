@@ -22,7 +22,7 @@ import {
   type TerminalDataEvent,
   type TerminalResizeParams,
   type TerminalWriteParams,
-} from 'server-lib-common';
+} from 'remote-lib-common';
 import { inputIsReplayTerminalReport } from '../../lib/terminal-report-filter';
 import type { HostSurfaceProvider, SurfaceHandle } from './host-surface-provider';
 

@@ -11,7 +11,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { WS_ROUTES, WS_TOKEN_PARAM } from 'server-lib-common';
+import { WS_ROUTES, WS_TOKEN_PARAM } from 'remote-lib-common';
 
 import { MAX_RELAY_FRAME_BYTES } from '../dist/app.js';
 import { MAX_RELAY_CLIENT_SOCKETS } from '../dist/relay.js';

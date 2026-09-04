@@ -22,7 +22,7 @@ import { createECDH, timingSafeEqual } from 'node:crypto';
 
 import webpush from 'web-push';
 
-import { normalizeOrigin } from 'server-lib-common';
+import { normalizeOrigin } from 'remote-lib-common';
 
 import type { StoredPushSubscription } from './state.js';
 import {
@@ -189,7 +189,7 @@ export const PUSH_TTL_SECONDS = 300;
 export const PUSH_REQUEST_TIMEOUT_MS = 10_000;
 
 // The third bound of the trio, `PUSH_SEND_DEADLINE_MS`, lives in
-// `server-lib-common` rather than here: it is deliberately above
+// `remote-lib-common` rather than here: it is deliberately above
 // PUSH_REQUEST_TIMEOUT_MS so it only fires where socket inactivity cannot, and
 // the Host has to size its own request timeout above it in turn.
 

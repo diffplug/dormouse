@@ -1,6 +1,6 @@
 /** Pure directory-snapshot → mobile-wall projection; see `docs/specs/pocket-app.md`. */
 
-import type { DirectoryEntry } from 'server-lib-common';
+import type { DirectoryEntry } from 'remote-lib-common';
 import type { MobileWallSession } from '../../components/MobileWall';
 import type { MobileTerminalSessionItem } from '../../components/MobileTerminalUi';
 import type { SessionStatus } from '../../lib/terminal-registry';

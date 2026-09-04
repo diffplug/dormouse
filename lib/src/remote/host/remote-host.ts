@@ -57,7 +57,7 @@ import {
   type PresenceBinding,
   type SealedPushV1,
   type ServerToHostFrame,
-} from 'server-lib-common';
+} from 'remote-lib-common';
 import type { HostEnrollment } from './enrollment';
 import { hostTimer, type RemoteTimer, type RemoteWebSocket } from '../ws';
 import { loadHostAcl } from './acl';
@@ -75,10 +75,10 @@ export type WebSocketLike = RemoteWebSocket;
 /**
  * Re-exported beside {@link WebSocketLike} on purpose: a host that constructs a
  * real socket must hand it this as `maxPayload`, and the hosts reach this file
- * by relative path without `server-lib-common` on their own resolution path.
+ * by relative path without `remote-lib-common` on their own resolution path.
  * Two numbers here would be two bounds that could drift.
  */
-export { MAX_SERVER_TO_HOST_FRAME_LENGTH } from 'server-lib-common';
+export { MAX_SERVER_TO_HOST_FRAME_LENGTH } from 'remote-lib-common';
 
 /**
  * How many connection handshakes may be mid-flight across every client.
@@ -150,7 +150,7 @@ const PAIRING_OUTCOME_FOR_DENIAL: Record<PairingDenialCode, PairingOutcome> = {
  * How many bytes name one thing this Host mints locally: the invitation id the
  * QR carries, and the pairing id the modal echoes back. 16, the length every
  * routing id on the `e2e` envelope is — the QR grammar pins the invitation id
- * at exactly that (`server-lib-common/src/security/pairing-invitation.ts`), and
+ * at exactly that (`remote-lib-common/src/security/pairing-invitation.ts`), and
  * a longer one would render a code no parser accepts.
  */
 const LOCAL_ID_BYTE_LENGTH = 16;

@@ -4,7 +4,7 @@
  * transport layers keep `op` opaque.
  */
 
-import { clampTerminalDimension, type DirectoryEntry } from 'server-lib-common';
+import { clampTerminalDimension, type DirectoryEntry } from 'remote-lib-common';
 import { getPlatform } from '../../lib/platform';
 import type { RemoteHostLink } from '../../lib/platform/types';
 import { subscribeToActivity } from '../../lib/session-activity-store';

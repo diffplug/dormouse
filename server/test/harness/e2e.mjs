@@ -16,7 +16,7 @@ import {
   fromBase64Url,
   generateNoiseKeyPair,
   toBase64Url,
-} from 'server-lib-common';
+} from 'remote-lib-common';
 
 import { enrollHost, freshApp, ownerSession, startServer } from '../helpers.mjs';
 import { FakeClient } from './fake-client.mjs';

@@ -8,7 +8,7 @@
  * e2e-client-host**, stage 3): prologue and transcript binding, directional
  * cipher states, counters, framing, teardown, relay opacity, tamper rejection,
  * and the relay's own bounds. The framing in isolation is
- * `server-lib-common/test/noise-transport.test.mjs`.
+ * `remote-lib-common/test/noise-transport.test.mjs`.
  */
 
 import { test } from 'node:test';
@@ -22,7 +22,7 @@ import {
   generateNoiseKeyPair,
   toBase64Url,
   utf8Encode,
-} from 'server-lib-common';
+} from 'remote-lib-common';
 
 import { until } from './helpers.mjs';
 import { e2eFixture, establish, flip, newE2eId, watch } from './harness/e2e.mjs';

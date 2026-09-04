@@ -162,7 +162,7 @@ export interface RemoteHostLink {
  * (`docs/specs/transport.md`). The same pair crosses every Host seam and the
  * remote wire — `ProcessedPtyChunk` in
  * `lib/src/remote/host/host-surface-provider.ts`, `TerminalDataEvent` in
- * `server-lib-common/src/remote/wire.ts` — under the same omitted/present rule.
+ * `remote-lib-common/src/remote/wire.ts` — under the same omitted/present rule.
  */
 export interface PtyDataDetail {
   id: string;

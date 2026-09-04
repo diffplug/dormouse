@@ -11,8 +11,8 @@ import {
   isE2eId,
   isExactBase64Url,
   toBase64Url,
-} from 'server-lib-common';
-import type { PushSubscriptionPayload } from 'server-lib-common';
+} from 'remote-lib-common';
+import type { PushSubscriptionPayload } from 'remote-lib-common';
 
 import { secretEquals } from './secrets.js';
 import { isSetupPassword } from './setup-password.js';

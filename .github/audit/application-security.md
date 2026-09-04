@@ -14,7 +14,7 @@ PAT — do not use one.
 Read, at minimum: `docs/specs/remote-security-model.md` **and its paired
 `docs/specs/remote-security-model.rationale.md`**, `docs/specs/server.md`,
 `docs/specs/remote-api.md`, `docs/specs/pocket-app.md`, `SELF_HOST.md`, and then
-the code they point at — `server-lib-common/src/security/`, `server/src/`,
+the code they point at — `remote-lib-common/src/security/`, `server/src/`,
 `lib/src/remote/`, `lib/src/host/remote/`, `vscode-ext/src/remote-host*.ts`,
 `scripts/csp-defaults.mjs`, and all three installers —
 `deploy/local/install-macos.sh`, `deploy/local/install-windows.ps1`, and
@@ -23,10 +23,10 @@ different native mechanisms, so read them against each other: a control present
 in one and quietly absent from another is a finding.
 
 The end-to-end boundary is where the depth goes. Its modules are
-`server-lib-common/src/security/noise.ts`, `noise-transport.ts`,
+`remote-lib-common/src/security/noise.ts`, `noise-transport.ts`,
 `e2e-ceremony.ts`, `e2e-bounds.ts`, `token-bucket.ts`, `push-seal.ts`,
 `pairing-invitation.ts`, `presence.ts` and `acl.ts`;
-`server-lib-common/src/remote/wire.ts` (the frame shapes and their guards);
+`remote-lib-common/src/remote/wire.ts` (the frame shapes and their guards);
 `lib/src/remote/host/remote-host.ts` (both ceremonies, every Host bound);
 `lib/src/remote/host/push-delivery.ts`; `lib/src/remote/client/pocket-client.ts`
 and `lib/src/remote/pocket-app/sw.ts` (the phone, and the render sink);
@@ -34,8 +34,8 @@ and `lib/src/remote/pocket-app/sw.ts` (the phone, and the render sink);
 harnesses that already exercise this are
 `lib/src/remote/host/remote-host-bounds.test.ts`,
 `server/test/malicious-relay.test.mjs`,
-`server-lib-common/test/security-guarantees.test.mjs`,
-`server-lib-common/test/noise.test.mjs`, and `server-lib-common/test/push-seal.test.mjs`
+`remote-lib-common/test/security-guarantees.test.mjs`,
+`remote-lib-common/test/noise.test.mjs`, and `remote-lib-common/test/push-seal.test.mjs`
 — read what they *do not* cover, and say so.
 
 For `## Loopback Listeners`, read `lib/src/host/loopback-guard.ts` first — it
@@ -155,7 +155,7 @@ example of this any more: `supply-chain` claims all of it except
 as a subtraction rather than as two named subdirectories, which is the shape
 to prefer when you find the next one.
 
-Today the remainder is `lib/`, `server/`, `server-lib-common/`, `standalone/`,
+Today the remainder is `lib/`, `server/`, `remote-lib-common/`, `standalone/`,
 `vscode-ext/`, `dor/`, `dor-lib-common/`, `canopy/`, `deploy/`, `docs/`,
 `.impeccable/`, and the root files — but treat that as a description of the
 current tree, not as your scope. Your scope is the remainder.

@@ -20,7 +20,7 @@ import {
   isSealedPushV1,
   openPush,
   utf8Decode,
-} from 'server-lib-common';
+} from 'remote-lib-common';
 
 import type { KnownHostStore } from '../client/pocket-db';
 
