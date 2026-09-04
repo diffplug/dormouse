@@ -318,21 +318,20 @@ hidden, so a returning reader never sees dismissed UI flash. Pinned by
 
 ## `/hosted` preview
 
-**Must present both services as unavailable:** Hosted operates Pocket's
-coordinator, while optional ElevenLabs speech replaces browser voice.
-**Must keep behavior explicit:** terminals stay on an awake, online
-computer; browser speech and free self-hosting remain. `NotifySignupForm`
-discloses its direct `nedshed.dev` personal-devlog handoff and preserves
-email for the tab session. `website/src/components/NotifySignupForm.test.tsx`
-pins both.
+**Must mark both services unavailable:** Hosted operates Pocket's coordinator;
+optional ElevenLabs replaces browser voice. Terminals stay on an awake, online
+computer; browser speech and self-hosting remain. `NotifySignupForm` exposes
+the `nedshed.dev` devlog handoff and keeps email per tab;
+`website/src/components/NotifySignupForm.test.tsx` pins both.
 
-**Must label paid-relay encryption and metadata behavior as design targets
-until independent review permits a hosted guarantee**, and link the self-hosted
-model. `website/src/lib/docs-rail.test.tsx` pins this.
+**Must open both hosting pages with the server boundary:** Dormouse needs none;
+push and phone control need coordination. `/docs/self-host` states
+shipped E2E, Host authorization, and residual metadata; `/hosted` marks these as
+pending-review targets and links the current model.
+`website/src/lib/docs-rail.test.tsx` pins this.
 
-**Must link the preview from each decision point:** homepage, Pocket marketing
-and tutorial, self-host docs, both public READMEs, and the speech and remote
-control settings.
+**Must link the preview from:** homepage, Pocket marketing/tutorial, self-host
+docs, both READMEs, speech settings, and remote-control settings.
 
 ## `/docs/dor` reference
 
@@ -616,8 +615,7 @@ spec.
 | `website/src/components/DorCommandReference.tsx` | One CLI command section |
 | `website/src/pages/DorDocs.tsx` | `/docs/dor` |
 | `website/src/pages/AgentSkillDocs.tsx` | `/docs/agent-skill` |
-| `website/src/pages/SelfHostDocs.tsx` | `/docs/self-host` |
-| `website/src/pages/Hosted.tsx` | `/hosted`, its two coming-soon offers and signup |
+| `website/src/pages/SelfHostDocs.tsx`, `website/src/pages/Hosted.tsx`; `website/src/components/HostingRequirementNotice.tsx` | The two hosting choices and their shared server boundary |
 | `website/src/pages/SecurityDocs.tsx` | `/docs/security` |
 | `scripts/public-docs-lint.mjs` | Public-doc validation |
 

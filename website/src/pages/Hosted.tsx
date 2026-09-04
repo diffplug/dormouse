@@ -6,6 +6,7 @@ import {
 import { type MetaArgs } from "react-router";
 import phoneMockupUrl from "../assets/phone-mockup.webp";
 import DocsLayout from "../components/DocsLayout";
+import { HostingRequirementNotice } from "../components/HostingRequirementNotice";
 import { AnchoredHeading } from "../components/MarkdownDocument";
 import { NotifySignupForm } from "../components/NotifySignupForm";
 import { LINK_CLASS, MUTED_TEXT_CLASS } from "../components/docs-tokens";
@@ -29,15 +30,13 @@ export const HOSTED_TOC: TocEntry[] = [
 
 const CARD_CLASS =
   "rounded-xl border border-[var(--color-text)]/15 bg-[var(--color-text)]/[0.035] p-5 sm:p-6";
-const SELF_HOSTED_SECURITY_MODEL_URL =
-  "https://github.com/diffplug/dormouse/blob/main/docs/specs/remote-security-model.md";
 
 export default function Hosted() {
   return (
     <DocsLayout
       activePath="/hosted"
       title="Pay us to host"
-      intro="Use Dormouse Pocket without deploying a coordinating server. Hosted remote control is planned as a paid convenience; your terminals stay on your computer, and free self-hosting stays available."
+      intro={<HostingRequirementNotice mode="planned-hosted" />}
       toc={HOSTED_TOC}
     >
       <section>
@@ -80,31 +79,6 @@ export default function Hosted() {
                 <dd className={`mt-1 ${MUTED_TEXT_CLASS}`}>Your computer awake and online</dd>
               </div>
             </dl>
-            <div className="mt-6 border-t border-[var(--color-text)]/15 pt-5">
-              <h3 className="font-display text-lg">Security before launch</h3>
-              <p className={`mt-2 leading-relaxed ${MUTED_TEXT_CLASS}`}>
-                Hosted is being designed around Dormouse’s existing end-to-end protocol. The
-                target is for the coordinator to route encrypted traffic without terminal keys,
-                while your computer—not the coordinator—authorizes each paired phone.
-              </p>
-              <p className={`mt-3 leading-relaxed ${MUTED_TEXT_CLASS}`}>
-                A managed relay would still see connection metadata such as IP addresses, online
-                state, timing, ciphertext sizes, and traffic volume. These are design targets,
-                not launched guarantees: Dormouse will not claim the self-hosted security model
-                for a paid service until the cryptography and its integration pass independent
-                review.
-              </p>
-              <p className="mt-3 text-sm">
-                <a
-                  href={SELF_HOSTED_SECURITY_MODEL_URL}
-                  className={LINK_CLASS}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  Read the current self-hosted trust model →
-                </a>
-              </p>
-            </div>
             <p className="mt-3 text-sm">
               Prefer to operate the server yourself?{" "}
               <a href="#self-hosting" className={LINK_CLASS}>

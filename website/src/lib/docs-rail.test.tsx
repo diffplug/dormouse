@@ -68,6 +68,27 @@ describe("every page in the rail", () => {
     expect(markup).toContain("remote-security-model.md");
   });
 
+  it("opens both hosting choices with the server boundary", () => {
+    const selfHostMarkup = renderToStaticMarkup(
+      <MemoryRouter><SelfHostDocs /></MemoryRouter>,
+    );
+    const hostedMarkup = renderToStaticMarkup(
+      <MemoryRouter><Hosted /></MemoryRouter>,
+    );
+
+    for (const markup of [selfHostMarkup, hostedMarkup]) {
+      expect(markup).toContain("Dormouse is just a terminal!");
+      expect(markup).toContain("does not need a server or hosting of any kind");
+      expect(markup).toContain("who is connected to whom");
+    }
+    expect(selfHostMarkup.indexOf("Dormouse is just a terminal!"))
+      .toBeLessThan(selfHostMarkup.indexOf('id="security-model"'));
+    expect(hostedMarkup.indexOf("Dormouse is just a terminal!"))
+      .toBeLessThan(hostedMarkup.indexOf('id="remote-control"'));
+    expect(selfHostMarkup).toContain("encrypted end to end");
+    expect(hostedMarkup).toContain("These are design targets, not launched guarantees");
+  });
+
   it("names the two hosting choices as actions", () => {
     expect(DOCS_PAGES.find((page) => page.path === "/docs/self-host")?.label)
       .toBe("How to self-host");

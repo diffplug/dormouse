@@ -16,6 +16,7 @@ import { siteMeta } from "../lib/site-meta";
 import selfhost from "../data/docs.selfhost.json";
 import security from "../data/docs.security.json";
 import DocsLayout from "../components/DocsLayout";
+import { HostingRequirementNotice } from "../components/HostingRequirementNotice";
 import { CODE_CLASS, LINK_CLASS } from "../components/docs-tokens";
 import MarkdownDocument, { AnchoredHeading, type BlockNode } from "../components/MarkdownDocument";
 import { type TocEntry } from "../lib/docs-pages";
@@ -52,16 +53,7 @@ export default function SelfHostDocs() {
     <DocsLayout
       activePath="/docs/self-host"
       title="How to self-host"
-      intro={
-        <>
-          Push notifications and phone remote control need a coordinating server. You can
-          run it yourself with Tailscale today, or{" "}
-          <a href="/hosted/#remote-control" className={LINK_CLASS}>
-            join the devlog for updates on the planned paid Hosted option
-          </a>{" "}
-          that will operate it for you.
-        </>
-      }
+      intro={<HostingRequirementNotice mode="self-hosted" />}
       toc={SELF_HOST_TOC}
     >
       <AnchoredHeading id="security-model">Security model</AnchoredHeading>
