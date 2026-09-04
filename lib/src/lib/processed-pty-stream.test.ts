@@ -264,6 +264,37 @@ describe('the input bound', () => {
   });
 });
 
+describe('a sink that throws', () => {
+  it('costs itself the chunk and no one else anything', () => {
+    const host = owner();
+    const after = sink();
+    host.stream.subscribe(() => {
+      throw new Error('sink blew up');
+    });
+    host.stream.subscribe(after.take);
+    const noise = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(() => host.stream.write('one')).not.toThrow();
+    expect(host.data).toEqual(['one']);
+    expect(after.data).toEqual(['one']);
+    noise.mockRestore();
+  });
+
+  it('does not cost the owner the rest of a split read', () => {
+    const host = owner();
+    host.stream.subscribe(() => {
+      throw new Error('sink blew up');
+    });
+    const noise = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    host.stream.write('z'.repeat(MAX_PARSER_INPUT_CHARS + 10));
+
+    expect(host.chunks).toHaveLength(2);
+    expect(host.data.join('')).toHaveLength(MAX_PARSER_INPUT_CHARS + 10);
+    noise.mockRestore();
+  });
+});
+
 describe('the colour provider', () => {
   it('is the owner’s, and declining leaves the query for the renderer', () => {
     const declining = vi.fn(() => null);

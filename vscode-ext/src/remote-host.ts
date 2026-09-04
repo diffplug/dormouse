@@ -63,7 +63,7 @@ export interface RemoteHostDeps {
   resizePty(ptyId: string, cols: number, rows: number): void;
   /**
    * Watch one PTY this window owns, through the window's shared keyed registry
-   * (`processed-pty-streams.ts`) rather than a listener pair per attachment.
+   * (`processed-pty-streams.ts`) rather than a registry of its own per attachment.
    */
   streamPty(ptyId: string, sink: PtySink): () => void;
 }

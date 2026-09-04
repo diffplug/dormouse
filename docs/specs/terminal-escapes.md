@@ -28,7 +28,7 @@ State-driving and security-sensitive OSCs — plus the `CSI > q` query — are p
 
 **A sink that subscribes inside a forwarded string control starts at the next ground byte**, a cancel releasing it as surely as a terminator (rationale). Only a late attachment is ever held; the owner's renderer is there from spawn.
 
-**The owner splits a PTY read above `MAX_PARSER_INPUT_CHARS` (128 Ki UTF-16 code units) before parsing it, and never through a surrogate pair**, so no processed chunk approaches the 1 MiB application-message cap after base64url and JSON framing (rationale; [remote-api.md](remote-api.md)).
+**The owner splits a PTY read above `MAX_PARSER_INPUT_CHARS` (64 Ki UTF-16 code units) before parsing it, and never through a surrogate pair**, so **both** projections of one chunk fit the 1 MiB application-message cap after base64url and JSON framing — they cross as one message (rationale; [remote-api.md](remote-api.md)).
 
 Source of truth: `oscDispositionAt` in `lib/src/lib/terminal-protocol.ts`, `boundedCwdValue` in `lib/src/lib/terminal-state.ts`, `createProcessedPtyStream` in `lib/src/lib/processed-pty-stream.ts`, `lib/src/host/remote/sidecar-entry.ts`.
 

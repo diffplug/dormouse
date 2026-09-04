@@ -405,6 +405,19 @@ describe('the webview’s half of the parse', () => {
     expect(emitted('pty:data')).toEqual([{ id: 'pty-1', data: 'plain' }]);
   });
 
+  it('closes the sinks a respawn strands, rather than leaving them waiting', () => {
+    // `pty-core` lets a spawn displace a live generation without killing it, and
+    // the exit it eventually reports belongs to the stream that replaced this
+    // one — so nothing else would ever tell this attachment its pane is gone.
+    const attached = sink();
+    bridge.provider.streamPty('pty-1', attached);
+    bridge.onPtySpawn('pty-1');
+
+    expect(attached.exits).toEqual([0]);
+    bridge.onPtyEvent('data', { id: 'pty-1', data: 'new generation' });
+    expect(attached.data).toEqual([]);
+  });
+
   it('starts a fresh parser after an exit', () => {
     bridge.onPtyEvent('data', { id: 'pty-1', data: '\x1b]133;' });
     bridge.onPtyEvent('exit', { id: 'pty-1', exitCode: 0 });

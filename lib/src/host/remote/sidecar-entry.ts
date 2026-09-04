@@ -270,7 +270,15 @@ export function createSidecarSurfaceBridge(
     onPtySpawn(id) {
       // A reused id is a new generation, and a parser holding the last one's
       // half-read sequence would splice it onto the new PTY's first bytes.
-      if (typeof id === 'string') streams.delete(id);
+      if (typeof id !== 'string') return;
+      exits.delete(id);
+      const stream = streams.get(id);
+      if (!stream) return;
+      streams.delete(id);
+      // `pty-core` lets a spawn displace a live generation without killing it,
+      // and the exit it eventually reports belongs to the new stream. Close the
+      // sinks here or they wait on a PTY nothing will ever report for them.
+      for (const sink of stream.sinks.keys()) sink.onExit(0);
     },
 
     setThemeColors(colors) {

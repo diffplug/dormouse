@@ -22,21 +22,23 @@ import {
  * present, empty included.
  */
 export interface ProcessedPtyChunk {
-  data: string;
-  textData?: string;
+  /** Shared with every sink of this chunk, so nobody may edit it in place. */
+  readonly data: string;
+  readonly textData?: string;
 }
 
 /**
  * The most UTF-16 code units one `process` call is given; a larger PTY read is
- * split first. A parsed chunk can exceed it by the incomplete-sequence buffer
- * the parser was holding (`OSC_INCOMPLETE_LIMIT`, 16 KiB), and each code unit
- * can encode to three UTF-8 bytes, so the worst case reaches roughly 576 KiB of
- * base64url — comfortably inside `MAX_APP_MESSAGE_LENGTH`
- * (`server-lib-common/src/security/noise-transport.ts`) with its JSON framing.
- * libuv reads 64 KiB, so this is a ceiling on the pathological read rather than
- * a routine split.
+ * split first. **Both projections ride one `terminal.data`**, so the budget is
+ * halved before anything else: a parsed chunk can exceed this by the
+ * incomplete-sequence buffer the parser was holding (`OSC_INCOMPLETE_LIMIT`,
+ * 16 KiB), each of those code units can encode to three UTF-8 bytes, and
+ * base64url adds a third again — 640 KiB for the pair, against the 1 MiB
+ * `MAX_APP_MESSAGE_LENGTH` (`server-lib-common/src/security/noise-transport.ts`)
+ * that message and its JSON framing must fit. libuv reads 64 KiB, so this is a
+ * ceiling on the pathological read rather than a routine split.
  */
-export const MAX_PARSER_INPUT_CHARS = 128 * 1024;
+export const MAX_PARSER_INPUT_CHARS = 64 * 1024;
 
 export interface ProcessedPtyStreamOptions {
   /**
@@ -67,6 +69,8 @@ export interface ProcessedPtyStream {
    * that subscribes inside a forwarded string control starts at the next ground
    * byte** — the tail of a sixel or inline-image payload, arriving without its
    * introducer, is painted as text by the renderer that receives it.
+   *
+   * A sink that throws costs itself the chunk and no one else anything.
    */
   subscribe(sink: (chunk: ProcessedPtyChunk) => void): () => void;
   /** Whether any {@link subscribe} sink is still attached. */
@@ -87,19 +91,33 @@ export function createProcessedPtyStream(options: ProcessedPtyStreamOptions): Pr
     const { visibleData, textData, events, resumedStringEnd } = parser.process(piece);
     if (events.length > 0) options.onEvents(events);
     const chunk = visibleData === '' ? null : chunkOf(visibleData, textData);
-    // The owner first: a sink that throws must not cost the renderer its output.
+    // The owner first, and unguarded: it is the local pipe, and a fault there is
+    // the owner's own to surface.
     if (chunk) options.onChunk(chunk);
     // Iterated live rather than copied: a sink can only unsubscribe itself from
     // here, which a Set tolerates mid-iteration.
     for (const subscription of subscriptions) {
       if (!subscription.held) {
-        if (chunk) subscription.sink(chunk);
+        if (chunk) emit(subscription, chunk);
         continue;
       }
       if (resumedStringEnd === null) continue;
       subscription.held = false;
       const ground = visibleData.slice(resumedStringEnd);
-      if (ground !== '') subscription.sink(chunkOf(ground, textData));
+      if (ground !== '') emit(subscription, chunkOf(ground, textData));
+    }
+  }
+
+  /**
+   * **A sink must never break the stream.** One throwing attachment would
+   * otherwise cost every sink after it this chunk, and the rest of a split read
+   * the owner's own renderer too.
+   */
+  function emit(subscription: Subscription, chunk: ProcessedPtyChunk): void {
+    try {
+      subscription.sink(chunk);
+    } catch (error) {
+      console.error('[processed-pty-stream] sink threw; dropping its chunk', error);
     }
   }
 

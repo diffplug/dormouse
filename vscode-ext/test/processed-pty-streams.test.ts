@@ -234,6 +234,21 @@ describe('processed pty streams', () => {
     expect(source.exitListeners).toBe(0);
   });
 
+  it('drops the subscription when it attaches to a PTY that already exited', () => {
+    // The registry stands a subscription up before it can know the PTY is dead;
+    // whatever the owner created to serve it must not outlive the attempt, since
+    // the exit that would have retired it has already been and gone.
+    const source = fakeSource();
+    const streams = source.streams();
+    source.emitExit('pty-1', 7);
+
+    const late = sink();
+    streams.streamPty('pty-1', late);
+
+    expect(late.exits).toEqual([7]);
+    expect(source.subscribed).toBe(0);
+  });
+
   it('gives a re-attach after an exit a stream of its own', () => {
     const source = fakeSource();
     const streams = source.streams();

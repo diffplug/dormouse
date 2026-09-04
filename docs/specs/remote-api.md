@@ -104,7 +104,7 @@ Replicated, not screencast: the client renders its own xterm from the same data 
 
 **The unit of processed output is a projection pair, never a bare string.** `terminal.data` carries `bytes` — the renderer projection — and `text`, the same chunk with string-control payloads removed for a consumer reading it as text; **`text` omitted means identical to `bytes`, present is authoritative, empty included** (rationale). Additive on protocol-v1. The same pair crosses every Host seam as `ProcessedPtyChunk` and arrives as `PtyDataDetail`, so a Client's prompt heuristic reads what the Host's own does rather than image base64.
 
-**One `terminal.data` never approaches the 1 MiB application-message cap**: the owner bounds what it feeds the parser, so the encoded message stays well inside `MAX_APP_MESSAGE_LENGTH` without a rechunker on this path ([terminal-escapes.md](./terminal-escapes.md) → "Parsing location").
+**One `terminal.data` never approaches the 1 MiB application-message cap**: the owner bounds what it feeds the parser, so **both** projections plus their framing stay inside `MAX_APP_MESSAGE_LENGTH` without a rechunker on this path ([terminal-escapes.md](./terminal-escapes.md) → "Parsing location"). **A message over the cap is dropped, not truncated**, so the bound is the only thing between an unusually large PTY read and a Client losing a chunk mid-stream.
 
 Source of truth: `TerminalDataEvent` in `server-lib-common/src/remote/wire.ts`, `ProcessedPtyChunk` in `lib/src/lib/processed-pty-stream.ts`, `PtyDataDetail` in `lib/src/lib/platform/types.ts`.
 

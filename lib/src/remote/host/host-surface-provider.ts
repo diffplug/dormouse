@@ -4,10 +4,13 @@
  */
 
 import type { DirectoryEntry } from 'server-lib-common';
+// The chunk a sink receives is the one the PTY owner's parser produced, so the
+// projection pair is defined beside that parse rather than restated here.
+import type { ProcessedPtyChunk } from '../../lib/processed-pty-stream';
 
 // Re-exported so an implementor can name the entry type without depending on
 // `server-lib-common` itself; vscode-ext's project does not resolve it.
-export type { DirectoryEntry };
+export type { DirectoryEntry, ProcessedPtyChunk };
 
 export interface SurfaceHandle {
   /**
@@ -23,11 +26,6 @@ export interface SurfaceHandle {
   /** Let go: stops a peer's stream, nothing to undo for a local pane. */
   release(): void;
 }
-
-// The chunk a sink receives is the one the PTY owner's parser produced, so the
-// projection pair is defined beside that parse rather than restated here.
-export type { ProcessedPtyChunk } from '../../lib/processed-pty-stream';
-import type { ProcessedPtyChunk } from '../../lib/processed-pty-stream';
 
 /**
  * One attachment's view of a PTY. Exit carries no id: a sink is subscribed to

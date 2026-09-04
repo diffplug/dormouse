@@ -299,10 +299,12 @@ function subscribeProcessedPty(
   const unsubscribe = stream.subscribe(onChunk);
   return () => {
     unsubscribe();
-    // A stream stood up only to serve an attachment to a PTY this window does
-    // not have has nothing left to parse; without this the window retains one
-    // parser per surface id that was ever attached to.
-    if (stream.hasSinks || ptyManager.hasPty(ptyId)) return;
+    // A stream stood up only to serve an attachment to a PTY that is no longer
+    // live has nothing left to parse, and the exit that would have retired it
+    // has been and gone; without this the window retains one parser per surface
+    // id that was ever attached to. Liveness, not `hasPty`, which stays true for
+    // a PTY that has already exited.
+    if (stream.hasSinks || ptyManager.getPtyStatus(ptyId)?.alive === true) return;
     if (ownerPtyStreams.get(ptyId) === stream) ownerPtyStreams.delete(ptyId);
   };
 }
