@@ -222,6 +222,23 @@ test('only Host-enrollment rejection invokes the retained-request delay', async 
   assert.equal(delayCalls, 1);
 });
 
+test('a hand-edited hosts.json revokes through the read cache', async () => {
+  // `findByToken` runs unauthenticated on every host-gated request, so its read
+  // is cached against the file's stat. Deleting a row by hand is the documented
+  // revocation mechanism (docs/specs/server.md -> Guardrails), so a cache that
+  // outlived an edit would keep a revoked Host working.
+  const { app, stateDir } = await freshApp();
+  const { body: host } = await enrollHost(app);
+  const authorized = { headers: { Authorization: `Bearer ${host.hostToken}` } };
+
+  assert.equal((await app.request(API_ROUTES.pushDevices, authorized)).status, 200);
+  // Warm the cache, so the edit below has something stale to defeat.
+  assert.equal((await app.request(API_ROUTES.pushDevices, authorized)).status, 200);
+
+  await writeFile(join(stateDir, 'hosts.json'), '[]');
+  assert.equal((await app.request(API_ROUTES.pushDevices, authorized)).status, 401);
+});
+
 test('a token of a shape no Host was ever minted never reaches hosts.json', async () => {
   const { app, stateDir } = await freshApp();
   const { body: host } = await enrollHost(app);

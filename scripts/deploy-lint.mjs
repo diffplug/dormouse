@@ -182,16 +182,22 @@ export const RULES = [
     // The inverse of a control: Funnel is a deployment choice the application
     // boundary is expected to survive, so an installer that inspects, warns
     // about, or flips it would re-introduce the tailnet-only premise the
-    // analysis no longer makes. Anchored on the invocation and the setting, not
-    // on the word — every way to judge Funnel state has to obtain it first, and
-    // banning the word would outlaw the prose that explains the absence.
+    // analysis no longer makes. Anchored on the CLI and the setting, not on the
+    // word: every way to judge Funnel state has to name one of them first.
+    //
+    // Both halves of the anchoring are load-bearing, and each was wrong once.
+    // `\b` on the verb, or `its funnel state` matches `ts` mid-word and the
+    // prose explaining the absence becomes the violation. The gap, or
+    // `ts --json funnel status` walks straight through a `\s+`; `violation`
+    // below carries a flag so the self-test spends that gap rather than
+    // proving only the form nobody would hide behind.
     rule: 'Network posture — no installer or `manage` makes Funnel state a verdict',
     forbidden: true,
-    violation: 'tailscale funnel status',
+    violation: 'tailscale --json funnel status',
     patterns: {
-      macOS: /(?:tailscale|ts)\s+funnel|AllowFunnel/i,
-      Linux: /(?:tailscale|ts)\s+funnel|AllowFunnel/i,
-      Windows: /(?:tailscale|Invoke-Tailscale).{0,20}funnel|AllowFunnel/i,
+      macOS: /(?:\btailscale|\bts)\b[^\n]{0,20}funnel|AllowFunnel/i,
+      Linux: /(?:\btailscale|\bts)\b[^\n]{0,20}funnel|AllowFunnel/i,
+      Windows: /(?:\btailscale|\bInvoke-Tailscale)\b[^\n]{0,20}funnel|AllowFunnel/i,
     },
   },
   {

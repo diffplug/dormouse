@@ -326,7 +326,10 @@ Host, or session bearer requests would give public traffic a resource sink for
 tokens nobody can guess (rationale); the delayed route is the one the bucket
 already bounds. Host tokens still use a constant-time full-row scan.
 **Must reject a `hostToken` outside its minted 32-byte base64url shape before
-reading `hosts.json`**, as `isDeliveryId` guards push routes.
+reading `hosts.json`**, as `isDeliveryId` guards push routes. **That read is
+cached against the file's stat**, so a well-shaped guess buys no `readFile` or
+`JSON.parse`; a hand edit still revokes, the stat being the gate rather than a
+TTL. Source of truth: `readCached` in `server/src/state.ts`.
 
 Every session-gated route — including the `/ws/client` upgrade, rejected before
 `injectWebSocket` sees it — answers an unknown or expired token 401 with the

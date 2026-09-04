@@ -53,6 +53,8 @@ abstract class JsonFileStore {
   protected readonly now: () => number;
   /** Serializes mutations so overlapping writes do not lose each other. */
   #tail: Promise<unknown> = Promise.resolve();
+  /** The last parse {@link readCached} served, keyed by the stat behind it. */
+  #cached: { key: string; value: unknown } | null = null;
 
   constructor(stateDir: string, fileName: string, now: () => number) {
     this.#stateDir = stateDir;
@@ -84,6 +86,40 @@ abstract class JsonFileStore {
   }
 
   /**
+   * {@link readIfPresent}, reusing the last parse while the file is unchanged.
+   *
+   * For the reads an unauthenticated caller provokes: `findByToken` runs on
+   * every host-gated request and every `/ws/host` upgrade, so without this a
+   * well-shaped guess buys a `readFile` and a `JSON.parse` for the price of one
+   * request — and the origin may be public
+   * (`docs/specs/security-remote.md` -> "Network posture (self-hosted)").
+   *
+   * **Hand-editing the file is the revocation mechanism**, so the gate is a
+   * stat rather than a TTL: an edit changes size or mtime, and `writeAtomic`
+   * renames a fresh temp file over the path, changing the inode as well as
+   * dropping this outright. A read that races a write caches content under the
+   * stat that preceded it and re-reads on the next call, which is the same
+   * resolution an uncached read has.
+   */
+  protected async readCached<T>(): Promise<T | null> {
+    let key: string;
+    try {
+      const meta = await stat(this.#path);
+      key = `${meta.ino}:${meta.size}:${meta.mtimeMs}`;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        this.#cached = null;
+        return null;
+      }
+      throw err;
+    }
+    if (this.#cached?.key === key) return this.#cached.value as T;
+    const value = await this.readIfPresent<T>();
+    this.#cached = value === null ? null : { key, value };
+    return value;
+  }
+
+  /**
    * Overwrite the whole file atomically (temp file + rename). `hosts.json`
    * holds `hostToken` in plaintext, so the directory is owner-only (`0o700`)
    * and every file owner-read/write (`0o600`) — without an explicit mode both
@@ -97,6 +133,7 @@ abstract class JsonFileStore {
     const tmp = `${this.#path}.${randomUUID()}.tmp`;
     await writeFile(tmp, `${JSON.stringify(value, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
     await rename(tmp, this.#path);
+    this.#cached = null;
   }
 
   /** Whether this store's durable file has ever been written. */
@@ -242,7 +279,7 @@ export class HostStore extends JsonFileStore {
    * still answers an enrolled set of zero and still closes everything.
    */
   async listIfPresent(): Promise<StoredHost[] | null> {
-    const rows = await this.readIfPresent<unknown[]>();
+    const rows = await this.readCached<unknown[]>();
     if (rows === null) return null;
     return Array.isArray(rows) ? rows.filter(isStoredHost) : [];
   }
