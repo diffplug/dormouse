@@ -41,7 +41,6 @@ export interface BaseboardProps {
    *  (constrained embedders without a Wall) leaves Doors click-only. */
   onDoorDragStart?: (item: DooredItem, press: { clientX: number; clientY: number }) => void;
 }
-
 export function Baseboard({ items, onReattach, notice, onDoorDragStart }: BaseboardProps) {
   const { elements: doorElements, bumpVersion } = useContext(DoorElementsContext);
   const activityStates = useSyncExternalStore(subscribeToActivity, getActivitySnapshot);
@@ -323,4 +322,3 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
     </div>
   );
 }
-
