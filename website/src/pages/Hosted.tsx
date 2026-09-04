@@ -8,7 +8,7 @@ import phoneMockupUrl from "../assets/phone-mockup.webp";
 import DocsLayout from "../components/DocsLayout";
 import { AnchoredHeading } from "../components/MarkdownDocument";
 import { NotifySignupForm } from "../components/NotifySignupForm";
-import { LINK_CLASS } from "../components/docs-tokens";
+import { LINK_CLASS, MUTED_TEXT_CLASS } from "../components/docs-tokens";
 import { type TocEntry } from "../lib/docs-pages";
 import { siteMeta } from "../lib/site-meta";
 
@@ -59,7 +59,7 @@ export default function Hosted() {
             </p>
             <a
               href="#updates"
-              className="inline-flex min-h-12 items-center rounded-md border border-[var(--docs-accent)] bg-[var(--docs-accent)]/10 px-5 py-3 font-display text-[var(--docs-accent)] transition-colors hover:bg-[var(--docs-accent)]/20 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--docs-accent)]"
+              className="inline-flex min-h-12 items-center rounded-md border border-[var(--docs-accent)] px-5 py-3 font-display text-[var(--docs-accent)] hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--docs-accent)]"
             >
               Follow the hosted launch →
             </a>
@@ -67,18 +67,18 @@ export default function Hosted() {
             <dl className="mt-8 grid gap-4 border-t border-[var(--color-text)]/15 pt-5 text-sm sm:grid-cols-3">
               <div>
                 <dt className="font-display">Hosted runs</dt>
-                <dd className="mt-1 opacity-70">The coordinating server</dd>
+                <dd className={`mt-1 ${MUTED_TEXT_CLASS}`}>The coordinating server</dd>
               </div>
               <div>
                 <dt className="font-display">You keep</dt>
-                <dd className="mt-1 opacity-70">Terminals on your computer</dd>
+                <dd className={`mt-1 ${MUTED_TEXT_CLASS}`}>Terminals on your computer</dd>
               </div>
               <div>
                 <dt className="font-display">Still required</dt>
-                <dd className="mt-1 opacity-70">Your computer awake and online</dd>
+                <dd className={`mt-1 ${MUTED_TEXT_CLASS}`}>Your computer awake and online</dd>
               </div>
             </dl>
-            <p className="mt-5 leading-relaxed opacity-70">
+            <p className={`mt-5 leading-relaxed ${MUTED_TEXT_CLASS}`}>
               Hosted removes deployment and maintenance work; it does not move your terminal
               into the cloud. Security details for the paid service will be published before
               launch.
@@ -109,12 +109,12 @@ export default function Hosted() {
         <p className="mb-3 font-display text-sm text-[var(--docs-accent)]">
           Planned after remote control · optional paid add-on
         </p>
-        <p className="mb-4 text-lg leading-relaxed opacity-80">
+        <p className={`mb-4 text-lg leading-relaxed ${MUTED_TEXT_CLASS}`}>
           Dormouse can speak an unattended terminal’s name using your browser or system
           voice today. A hosted ElevenLabs option will add a more natural voice without
           making you set up or manage an ElevenLabs account.
         </p>
-        <p className="leading-relaxed opacity-70">
+        <p className={`leading-relaxed ${MUTED_TEXT_CLASS}`}>
           Browser speech will stay available. ElevenLabs voice will be optional, and the
           app will explain what text leaves your computer before you turn it on.
         </p>
@@ -128,7 +128,7 @@ export default function Hosted() {
           aria-hidden="true"
         />
         <AnchoredHeading id="self-hosting" spacing="mt-0 mb-4">Self-hosting stays</AnchoredHeading>
-        <p className="text-lg leading-relaxed opacity-80">
+        <p className="text-lg leading-relaxed">
           The coordinating server remains available in the repository under
           FSL-1.1-MIT and free for internal use. Hosted will be a paid convenience option,
           not a replacement. If you would rather operate it, the{" "}
@@ -141,7 +141,7 @@ export default function Hosted() {
 
       <section id="updates" className="mt-10 scroll-mt-28 md:scroll-mt-32 lg:scroll-mt-24">
         <h2 className="mb-3 font-display text-2xl">Follow the launch</h2>
-        <p className="mb-5 max-w-2xl text-lg leading-relaxed opacity-75">
+        <p className={`mb-5 max-w-2xl text-lg leading-relaxed ${MUTED_TEXT_CLASS}`}>
           Pricing and dates are not set. Subscribe to my personal devlog on Substack and
           I’ll announce managed remote control and ElevenLabs voice there. This is not a
           product-only waitlist; you’ll also receive other devlog posts.

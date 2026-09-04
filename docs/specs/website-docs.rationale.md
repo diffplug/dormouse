@@ -60,6 +60,14 @@ clears the threshold. Direction is measured rather than taken from a luminance
 midpoint, which is not where the contrast crossover sits: `#808080` needs to
 darken, and a luminance test sends it toward white.
 
+Muted reference text originally used `opacity-50` through `opacity-80` over
+the picked foreground. On Solarized Light that reduced 5.03:1 base contrast to
+2.01:1–3.40:1, including the Hosted signup disclosure. Several dark themes
+failed too. The opaque derived token walks the foreground toward its background
+only while the rounded returned color stays at or above 4.5:1, so hierarchy is
+as quiet as each theme safely allows without depending on the surface beneath
+the element.
+
 Anchor offsets are tight by measurement, not by estimate. The mobile bar is
 45px and the site header 64px, 80px from `md` up with no `lg` step, so the two
 steps that clear both have 3px in hand and `lg` clears the header alone by

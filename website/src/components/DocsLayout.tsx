@@ -22,10 +22,15 @@ import SiteHeader from "./SiteHeader";
 // `<template>`. The chunk that saved was ~6KB gzip; a picker that never
 // appears is the worse trade.
 import DocsThemeControl from "./DocsThemeControl";
-import { ACCENT_TEXT_CLASS, MUTED_ACCENT_LINK_CLASS, TOC_INDENT_CLASS } from "./docs-tokens";
+import {
+  ACCENT_TEXT_CLASS,
+  MUTED_ACCENT_LINK_CLASS,
+  MUTED_TEXT_CLASS,
+  TOC_INDENT_CLASS,
+} from "./docs-tokens";
 import { DOCS_PAGES, docsRailPosition, type DocsPage, type TocEntry } from "../lib/docs-pages";
 import { DOCS_THEME_ID } from "../lib/docs-theme";
-import { docsAccentFor } from "../lib/docs-accent";
+import { docsAccentFor, docsMutedTextFor } from "../lib/docs-accent";
 
 const pageHref = (path: string): string => (path.endsWith("/") ? path : `${path}/`);
 
@@ -117,7 +122,7 @@ function NeighborLink({ page, rel }: { page: DocsPage | undefined; rel: "prev" |
       rel={rel}
       className={`group flex flex-col gap-1 ${rel === "next" ? "text-right" : ""}`}
     >
-      <span className="text-xs uppercase tracking-wide opacity-50">
+      <span className={`text-xs uppercase tracking-wide ${MUTED_TEXT_CLASS}`}>
         {rel === "prev" ? "Previous" : "Next"}
       </span>
       <span className={`font-display group-hover:underline ${ACCENT_TEXT_CLASS}`}>{page.label}</span>
@@ -156,12 +161,16 @@ export default function DocsLayout({
       // falls back to the first bundled theme, so a reader without storage
       // would get the page painted in one theme and its links derived from
       // another's accent the moment those two stop coinciding.
-      const theme = getAppliedThemeSnapshot()?.theme;
-      const background = theme?.vars?.["--vscode-editor-background"];
+      const snapshot = getAppliedThemeSnapshot();
+      const theme = snapshot?.theme;
+      const background = snapshot?.resolvedVars["--vscode-editor-background"];
+      const foreground = snapshot?.resolvedVars["--vscode-editor-foreground"];
       const accent = theme?.accent;
-      if (!theme || !accent || !background) return;
+      if (!theme || !accent || !background || !foreground) return;
       const link = docsAccentFor(accent, background);
       if (link) document.body.style.setProperty("--docs-accent", link);
+      const muted = docsMutedTextFor(foreground, background);
+      if (muted) document.body.style.setProperty("--docs-text-muted", muted);
     };
     paint();
     return subscribeToActiveTheme(paint);
@@ -203,7 +212,7 @@ export default function DocsLayout({
             className="flex min-w-0 flex-1 items-center gap-2 px-4 py-3 text-left text-sm md:px-6"
           >
             {navOpen ? <XIcon size={16} weight="bold" /> : <ListIcon size={16} weight="bold" />}
-            <span className="font-display opacity-70">Docs</span>
+            <span className={`font-display ${MUTED_TEXT_CLASS}`}>Docs</span>
             {current ? (
               <>
                 <span aria-hidden="true" className="opacity-30">/</span>
@@ -240,7 +249,7 @@ export default function DocsLayout({
 
             <div className="min-w-0">
               <h1 className="mb-2 font-display text-[clamp(1.75rem,3vw+0.5rem,2.5rem)]">{heading}</h1>
-              {intro && <div className="mb-8 text-lg opacity-70">{intro}</div>}
+              {intro && <div className={`mb-8 text-lg ${MUTED_TEXT_CLASS}`}>{intro}</div>}
 
               <main>{children}</main>
 
@@ -254,7 +263,7 @@ export default function DocsLayout({
                 </nav>
               ) : null}
 
-              <footer className="mt-10 text-sm opacity-60">
+              <footer className={`mt-10 text-sm ${MUTED_TEXT_CLASS}`}>
                 <a
                   href="https://github.com/diffplug/dormouse/issues"
                   className="hover:underline"

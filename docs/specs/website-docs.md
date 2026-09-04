@@ -260,14 +260,12 @@ canonical joins the fallback's and both are discarded; `siteMeta`'s
 
 ## Reference page chrome
 
-Every page in `DOCS_PAGES` shares `DocsLayout`: the site header, the left
-navigation rail, an `h1` and intro, and prev/next. The changelog and the supply
-chain are in that list too. `/hosted` shares the chrome as an authored
-marketing page and follows `/docs/self-host` in the rail.
+Every `DOCS_PAGES` entry shares `DocsLayout`: site header, left rail, `h1`,
+intro, and prev/next. `/hosted` is authored marketing after `/docs/self-host`;
+the others are references.
 
 **The rail is the only table of contents.** It lists every page and expands the
-current one's sections beneath it, so moving between pages and within one is
-the same control. A second "on this page" would restate half of it.
+current one's sections, so page and in-page navigation share one control.
 
 **The page list never shrinks; the expanded sections scroll.** The rail is a
 bounded flex column whose section list is the only part that gives up space, so
@@ -301,6 +299,10 @@ up the canvas and lets body's background propagate.
 brand caramel, never `--vscode-textLink-foreground`** (rationale). Caramel
 stays where the reader cannot retheme it — the wordmark, the header, the
 homepage — and is the fallback before a theme applies.
+
+**Muted reference text uses an opaque foreground-derived color that clears
+WCAG AA; never dim text with opacity** (rationale). `docsMutedTextFor` and
+`website/src/lib/docs-accent.test.ts` pin bundled themes.
 
 **A reader is prompted to pick a theme until they answer.** Picking one and
 closing the prompt both count — a reader who declined has seen the offer.

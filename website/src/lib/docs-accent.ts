@@ -94,3 +94,35 @@ export function docsAccentFor(
   }
   return toHex(toward);
 }
+
+/**
+ * The quietest version of `foreground` that still clears body-text AA on
+ * `background`.
+ *
+ * Element opacity made the same text land at a different effective contrast on
+ * every reader-picked theme. Returning an opaque colour makes the role stable
+ * across nested and tinted surfaces; typography carries any hierarchy a theme
+ * whose base foreground is already near 4.5:1 cannot safely express in colour.
+ */
+export function docsMutedTextFor(
+  foreground: string,
+  background: string,
+  minContrast = MIN_CONTRAST,
+): string | null {
+  const fg = parseHex(foreground);
+  const bg = parseHex(background);
+  if (!fg || !bg) return null;
+
+  const base = fg.alpha < 1 ? mix(bg.rgb, fg.rgb, fg.alpha) : fg.rgb;
+  if (contrastRatio(base, bg.rgb) < minContrast) {
+    return docsAccentFor(toHex(base), background, minContrast);
+  }
+
+  let quietest = base;
+  for (let step = 1; step <= 100; step += 1) {
+    const candidate = mix(base, bg.rgb, step / 100);
+    if (contrastRatio(candidate, bg.rgb) < minContrast) break;
+    quietest = candidate;
+  }
+  return toHex(quietest);
+}

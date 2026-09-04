@@ -21,6 +21,7 @@
    effect adds that class. */
 body {
   --docs-accent: var(--vscode-textLink-foreground, var(--color-caramel));
+  --docs-text-muted: var(--vscode-editor-foreground, var(--color-text));
 }
 
 html {

@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { CircleNotchIcon } from "@phosphor-icons/react";
-import { LINK_CLASS } from "./docs-tokens";
+import { LINK_CLASS, MUTED_TEXT_CLASS } from "./docs-tokens";
 import { SITE_LINK_CLASS } from "./site-tokens";
 
 const EMAIL_REGEX =
@@ -27,6 +27,7 @@ export function NotifySignupForm({
   const accentBackgroundClass = variant === "docs"
     ? "bg-[var(--docs-accent)]/10 hover:bg-[var(--docs-accent)]/20"
     : "bg-[var(--color-caramel)]/15 hover:bg-[var(--color-caramel)]/25";
+  const mutedClass = variant === "docs" ? MUTED_TEXT_CLASS : "opacity-50";
 
   function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -45,7 +46,7 @@ export function NotifySignupForm({
       <div className={`flex items-center gap-3 text-lg leading-relaxed ${accentClass}`}>
         <CircleNotchIcon className="shrink-0 animate-spin" size={28} weight="bold" />
         <p>
-          Opening nedshed.dev… Finish <span className="text-[var(--color-text)]/70">subscribing</span> after{" "}
+          Opening nedshed.dev… Finish <span className={mutedClass}>subscribing</span> after{" "}
           <a
             href={redirectUrl}
             className="underline underline-offset-2 hover:opacity-80"
@@ -61,7 +62,7 @@ export function NotifySignupForm({
   return (
     <>
       <form onSubmit={handleSubmit} className="flex flex-col gap-2">
-        <label htmlFor={emailId} className="font-display text-sm opacity-50">
+        <label htmlFor={emailId} className={`font-display text-sm ${mutedClass}`}>
           Email
         </label>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
@@ -77,7 +78,11 @@ export function NotifySignupForm({
             placeholder="you@example.com"
             required
             autoComplete="email"
-            className={`min-h-12 w-full rounded-md border border-[var(--color-text)]/50 bg-[var(--color-bg)] px-4 py-3 text-base text-[var(--color-text)]/70 placeholder:opacity-50 focus:outline-none sm:flex-1 ${variant === "docs" ? "focus:border-[var(--docs-accent)]" : "focus:border-[var(--color-caramel)]"}`}
+            className={`min-h-12 w-full rounded-md border border-[var(--color-text)]/50 bg-[var(--color-bg)] px-4 py-3 text-base focus:outline-none sm:flex-1 ${
+              variant === "docs"
+                ? "text-[var(--color-text)] placeholder:text-[var(--docs-text-muted)] focus:border-[var(--docs-accent)]"
+                : "text-[var(--color-text)]/70 placeholder:opacity-50 focus:border-[var(--color-caramel)]"
+            }`}
           />
           <button
             type="submit"
@@ -92,7 +97,7 @@ export function NotifySignupForm({
           </p>
         )}
       </form>
-      <p className="mt-3 text-base leading-snug opacity-50">
+      <p className={`mt-3 text-base leading-snug ${mutedClass}`}>
         This signs you up for my personal devlog{" "}
         <a
           href="https://nedshed.dev"

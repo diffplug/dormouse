@@ -1,17 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { getBundledThemes } from "dormouse-lib/lib/themes";
-import { contrastRatio, docsAccentFor } from "./docs-accent";
+import { completeThemeVars, getBundledThemes } from "dormouse-lib/lib/themes";
+import { contrastRatio, docsAccentFor, docsMutedTextFor } from "./docs-accent";
 
 const rgb = (hex: string): [number, number, number] => {
   const h = hex.replace("#", "");
   return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16)) as [number, number, number];
 };
 
-const themes = getBundledThemes().map((theme) => ({
-  id: theme.id,
-  accent: theme.accent,
-  background: (theme.vars ?? {})["--vscode-editor-background"],
-}));
+const themes = getBundledThemes().map((theme) => {
+  const vars = completeThemeVars(theme.vars ?? {}, theme.type);
+  return {
+    id: theme.id,
+    accent: theme.accent,
+    background: vars["--vscode-editor-background"],
+    foreground: vars["--vscode-editor-foreground"],
+  };
+});
 
 describe("docs link colour", () => {
   it("has a theme to derive from at all", () => {
@@ -62,5 +66,28 @@ describe("docs link colour", () => {
   it("returns null on a colour it cannot read, leaving the CSS fallback", () => {
     expect(docsAccentFor("var(--nope)", "#000000")).toBeNull();
     expect(docsAccentFor("#000000", "rgb(0 0 0)")).toBeNull();
+  });
+});
+
+describe("docs muted text colour", () => {
+  it("clears WCAG AA on every bundled theme", () => {
+    for (const t of themes) {
+      const muted = docsMutedTextFor(t.foreground, t.background);
+      expect(muted, t.id).not.toBeNull();
+      expect(
+        contrastRatio(rgb(muted!), rgb(t.background)),
+        `${t.id} (${muted})`,
+      ).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it("moves a high-contrast foreground toward its background", () => {
+    const muted = docsMutedTextFor("#ffffff", "#000000")!;
+    expect(muted).not.toBe("#ffffff");
+    expect(contrastRatio(rgb(muted), rgb("#000000"))).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("returns null on a colour it cannot read", () => {
+    expect(docsMutedTextFor("var(--nope)", "#000000")).toBeNull();
   });
 });
