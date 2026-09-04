@@ -12,6 +12,8 @@
 - **DCS** (`ESC P`, or the C1 `U+0090`) — device-control strings: SIXEL graphics input and the shape of Dormouse's `CSI > q` answer.
 - **APC** (`ESC _`, or the C1 `U+009F`) — application-program commands; Kitty graphics uses `APC G`.
 
+**The parser frames all five string controls — OSC, DCS, SOS, PM, APC — and models nothing outside OSC**, so DCS and APC are forwarded whole. **`BEL` terminates only OSC**; inside the others it is payload, never a bell (rationale).
+
 ## Parsing location
 
 State-driving and security-sensitive OSCs — plus the `CSI > q` query — are parsed at the PTY data boundary in the platform adapter: the VS Code extension host (`vscode-ext/src/message-router.ts`, one parser per PTY from `ptyManager.addCallbacks`, before `pty:data` reaches any webview), and the frontend adapter for standalone, browser-sidecar and fake, before xterm.js sees the bytes.
@@ -28,7 +30,7 @@ Source of truth: `oscDispositionAt` in `lib/src/lib/terminal-protocol.ts`, `boun
 
 **Supported semantic sequences are consumed and never re-emitted** — empty or unparseable payloads, unrecognized `OSC 1337` subcommands and `OSC 50` / `OSC 52` included. **`OSC 8` and the recognized ImageAddon `OSC 1337` forms are the exceptions**: they stay in `pty:data` so xterm.js owns hyperlink regions and inline graphics. Dormouse supplies only the hyperlink activation-confirmation handler. Every other OSC family passes through unchanged, so xterm.js handles standard behavior Dormouse does not model.
 
-Two streams then reach the webview: `pty:data` (the stripped output; feeds xterm.js) and `terminal:semanticEvents` (normalized CWD / prompt-command / title events; feeds `TerminalPaneState`, command boundaries also feeding the command-exit alert track in [alert.md](alert.md#command-exit-track)). **Notification-derived state travels as `AlertManager` calls / `alert:state` messages, never `pty:data`.**
+**`textData` is the same chunk with every string-control payload removed**, for consumers reading output as text; every other control is left for `stripTerminalControls`. Two streams then reach the webview: `pty:data` (the stripped output; feeds xterm.js) and `terminal:semanticEvents` (normalized CWD / prompt-command / title events; feeds `TerminalPaneState`, command boundaries also feeding the command-exit alert track in [alert.md](alert.md#command-exit-track)). **Notification-derived state travels as `AlertManager` calls / `alert:state` messages, never `pty:data`.**
 
 Each chunk is also classified for the quiesce detector: **the activity monitor's `onData()` fires only when `visibleData` is non-empty**, so a chunk of nothing but notification/progress OSCs is not meaningful output, while one carrying visible output alongside them is.
 

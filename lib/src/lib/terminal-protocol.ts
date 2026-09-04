@@ -38,6 +38,13 @@ export interface TerminalProtocolAlertSink {
 export interface TerminalProtocolParseResult {
   visibleData: string;
   events: TerminalProtocolEvent[];
+  /**
+   * `visibleData` with every OSC/DCS/SOS/PM/APC payload removed, for consumers
+   * reading output as text (prompt detection). Every other control is left for
+   * `stripTerminalControls` to interpret. Identical to `visibleData` whenever
+   * the chunk carries no string control, which is the common case.
+   */
+  textData: string;
 }
 
 interface Osc99PendingNotification {
@@ -90,29 +97,39 @@ export class TerminalProtocolParser {
   process(data: string): TerminalProtocolParseResult {
     if (this.forwardingOscPending !== null) return this.processForwardedOsc(data);
     if (this.pending === '' && !NEEDS_PARSE_RE.test(data)) {
-      return { visibleData: data, events: NO_EVENTS as TerminalProtocolEvent[] };
+      return { visibleData: data, events: NO_EVENTS as TerminalProtocolEvent[], textData: data };
     }
     const text = this.pending + data;
     this.pending = '';
     const events: TerminalProtocolEvent[] = [];
     let visibleData = '';
+    // Ground text only: no string control contributes to it, whether consumed,
+    // forwarded, or still streaming.
+    let textData = '';
     let index = 0;
 
     while (index < text.length) {
-      const osc = findNextOsc(text, index);
-      if (!osc) {
-        visibleData += stripStandaloneBells(text.slice(index), events);
+      const control = findNextStringControl(text, index);
+      if (!control) {
+        const tail = stripStandaloneBells(text.slice(index), events);
+        visibleData += tail;
+        textData += tail;
         break;
       }
 
-      visibleData += stripStandaloneBells(text.slice(index, osc.index), events);
-      const terminator = findOscTerminator(text, osc.contentStart);
+      const gap = stripStandaloneBells(text.slice(index, control.index), events);
+      visibleData += gap;
+      textData += gap;
+
+      const terminator = findStringTerminator(text, control.contentStart, control.kind);
       if (!terminator) {
-        const incomplete = text.slice(osc.index);
+        const incomplete = text.slice(control.index);
         // A sequence we will hand to xterm.js needs no terminator to be useful,
         // so stream it rather than spending `pending` on a payload that can be
         // megabytes (an inline image) and is bounded downstream anyway.
-        if (oscDispositionAt(text, osc.contentStart) === 'forward') {
+        const disposition =
+          control.kind === 'osc' ? oscDispositionAt(text, control.contentStart) : 'forward';
+        if (disposition === 'forward') {
           this.forwardingOscPending = '';
           visibleData += this.holdTrailingEsc(incomplete);
         } else if (incomplete.length <= OSC_INCOMPLETE_LIMIT) {
@@ -121,28 +138,44 @@ export class TerminalProtocolParser {
         break;
       }
 
-      const sequence = text.slice(osc.index, terminator.end);
-      const content = text.slice(osc.contentStart, terminator.index);
-      const parsed = this.parseOsc(content);
-      if (parsed === null) {
+      const sequence = text.slice(control.index, terminator.end);
+      if (control.kind !== 'osc') {
+        // DCS/SOS/PM/APC carry sixel and Kitty graphics; none of it is ours.
         visibleData += sequence;
       } else {
-        events.push(...parsed);
+        const parsed = this.parseOsc(text.slice(control.contentStart, terminator.index));
+        if (parsed === null) {
+          visibleData += sequence;
+        } else {
+          events.push(...parsed);
+        }
       }
       index = terminator.end;
     }
 
     const stripped = stripDeviceAttributeQueries(visibleData, events);
-    if (stripped.pending) this.pending = stripped.pending + this.pending;
-    return { visibleData: stripped.visibleData, events: filterTerminalBellEvents(events) };
+    if (stripped.pending) {
+      this.pending = stripped.pending + this.pending;
+      // Those bytes are re-read next chunk; don't let them land in textData twice.
+      if (textData.endsWith(stripped.pending)) textData = textData.slice(0, -stripped.pending.length);
+    }
+    return {
+      visibleData: stripped.visibleData,
+      events: filterTerminalBellEvents(events),
+      textData,
+    };
   }
 
   private processForwardedOsc(data: string): TerminalProtocolParseResult {
     const text = this.forwardingOscPending + data;
     this.forwardingOscPending = '';
-    const terminator = findOscTerminator(text, 0);
+    const terminator = findStringTerminator(text, 0, 'osc');
     if (!terminator) {
-      return { visibleData: this.holdTrailingEsc(text), events: NO_EVENTS as TerminalProtocolEvent[] };
+      return {
+        visibleData: this.holdTrailingEsc(text),
+        events: NO_EVENTS as TerminalProtocolEvent[],
+        textData: '',
+      };
     }
 
     this.forwardingOscPending = null;
@@ -150,6 +183,7 @@ export class TerminalProtocolParser {
     return {
       visibleData: text.slice(0, terminator.end) + parsedRest.visibleData,
       events: parsedRest.events,
+      textData: parsedRest.textData,
     };
   }
 
@@ -383,18 +417,36 @@ function filterTerminalBellEvents(events: TerminalProtocolEvent[]): TerminalProt
   });
 }
 
-function findNextOsc(text: string, from: number): { index: number; contentStart: number } | null {
-  const escIndex = text.indexOf('\x1b]', from);
-  const c1Index = text.indexOf('\x9d', from);
-  if (escIndex === -1 && c1Index === -1) return null;
-  if (escIndex !== -1 && (c1Index === -1 || escIndex < c1Index)) {
-    return { index: escIndex, contentStart: escIndex + 2 };
-  }
-  return { index: c1Index, contentStart: c1Index + 1 };
+// `ESC ] P X ^ _`, or the C1 forms: DCS (0x90), SOS (0x98), OSC (0x9d),
+// PM (0x9e), APC (0x9f).
+const STRING_CONTROL_INTRODUCER = /\x1b[\]PX^_]|[\x90\x98\x9d\x9e\x9f]/g;
+
+interface StringControl {
+  index: number;
+  contentStart: number;
+  /** Only OSC carries anything this parser models; the rest are xterm.js's. */
+  kind: 'osc' | 'other';
 }
 
-function findOscTerminator(text: string, from: number): { index: number; end: number } | null {
-  const bel = text.indexOf('\x07', from);
+function findNextStringControl(text: string, from: number): StringControl | null {
+  STRING_CONTROL_INTRODUCER.lastIndex = from;
+  const match = STRING_CONTROL_INTRODUCER.exec(text);
+  if (!match) return null;
+  const introducer = match[0];
+  const opener = introducer.length === 2 ? introducer[1] : introducer;
+  return {
+    index: match.index,
+    contentStart: match.index + introducer.length,
+    kind: opener === ']' || opener === '\x9d' ? 'osc' : 'other',
+  };
+}
+
+function findStringTerminator(
+  text: string,
+  from: number,
+  kind: 'osc' | 'other',
+): { index: number; end: number } | null {
+  const bel = kind === 'osc' ? text.indexOf('\x07', from) : -1;
   const st = text.indexOf('\x1b\\', from);
   const c1St = text.indexOf('\x9c', from);
   let bestIndex = -1;

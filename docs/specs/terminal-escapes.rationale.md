@@ -2,6 +2,10 @@
 
 > Informative companion to [terminal-escapes.md](terminal-escapes.md): the evidence behind its rules, keyed by that spec's headings (AGENTS.md → "What, not why"). Nothing here is normative.
 
+## Families
+
+**Why BEL terminates only OSC.** xterm's BEL-as-ST tolerance is an OSC-era convention; ECMA-48 ends DCS, SOS, PM, and APC with ST alone. Treating BEL as a terminator everywhere truncated sixel and Kitty payloads mid-image, and — because the parser reads a standalone BEL as a bell — turned a `0x07` byte inside binary graphics data into a spurious terminal-bell alert. Framing the four non-OSC families explicitly removed both.
+
 ## Parsing location
 
 **Why the incomplete-OSC buffer is capped.** The parser must hold bytes across PTY reads for a sequence split mid-flight, so an OSC that is never terminated would otherwise accumulate forever. No legitimate emitter sends a 16 KiB title, so dropping the held bytes past `OSC_INCOMPLETE_LIMIT` turns an unbounded-growth primitive into a discarded chunk.
