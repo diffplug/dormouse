@@ -7,7 +7,6 @@
  * entry point. **Never wire it into `pnpm test` or a CI workflow.**
  */
 
-import { randomBytes } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
@@ -137,12 +136,6 @@ async function main(live) {
   opts.vitePort = await findFreePort(15540);
   opts.hostPort = await findFreePort(opts.vitePort + 1);
   opts.session = `pairing-walkthrough-${stamp}`;
-  // Never an option: the walkthrough spawns the only server that will ever see
-  // it and types it into the form itself, so nothing outside a run needs to
-  // choose it — and the Server takes 64 lowercase hex characters alone
-  // (`docs/specs/server.md` -> Configuration), which a hand-picked one is not.
-  opts.password = randomBytes(32).toString('hex');
-
   const scenario = SCENARIOS[opts.scenario];
 
   /** Every file the run left behind, by name. A re-captured QR rewrites its own. */

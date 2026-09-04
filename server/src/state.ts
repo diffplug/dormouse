@@ -15,6 +15,7 @@ import {
 import type { PushSubscriptionPayload } from 'server-lib-common';
 
 import { secretEquals } from './secrets.js';
+import { isSetupPassword } from './setup-password.js';
 
 /** A registered passkey as stored on disk. `publicKey` is base64url SPKI. */
 export interface StoredPasskey {
@@ -157,6 +158,69 @@ abstract class JsonFileStore {
     this.#tail = result.catch(() => undefined);
     return result;
   }
+}
+
+/** The server-owned Host-enrollment credential stored in `setup-password.json`. */
+export interface StoredSetupPassword {
+  readonly password: string;
+  readonly createdAt: number;
+}
+
+/**
+ * Setup-password custody. The value is generated inside the Server on first
+ * boot, not accepted as configuration, so a public deployment cannot be
+ * weakened by a memorable or placeholder operator-supplied password.
+ */
+export class SetupPasswordStore extends JsonFileStore {
+  constructor(stateDir: string, now: () => number = () => Date.now()) {
+    super(stateDir, 'setup-password.json', now);
+  }
+
+  /** Load and validate the durable credential, or `null` before first boot. */
+  async load(): Promise<StoredSetupPassword | null> {
+    const stored = await this.readIfPresent<unknown>();
+    // `readIfPresent` uses null for absence, but JSON itself can contain null.
+    // A present `null` is corrupt state and must not be mistaken for first boot.
+    if (stored === null) {
+      if (await this.exists()) {
+        throw new Error('setup-password.json does not contain a valid server-generated credential');
+      }
+      return null;
+    }
+    if (!isStoredSetupPassword(stored)) {
+      throw new Error('setup-password.json does not contain a valid server-generated credential');
+    }
+    return stored;
+  }
+
+  /**
+   * Return the persisted credential, minting and saving it on first boot.
+   * Refuse a broken generator result instead of persisting a credential whose
+   * entropy or encoding no longer matches the enrollment boundary.
+   */
+  loadOrCreate(generate: () => string): Promise<string> {
+    return this.mutate(async () => {
+      const existing = await this.load();
+      if (existing !== null) return existing.password;
+      const password = generate();
+      if (!isSetupPassword(password)) {
+        throw new Error('setup-password generator did not return 32 bytes as lowercase hex');
+      }
+      const created: StoredSetupPassword = { password, createdAt: this.now() };
+      await this.writeAtomic(created);
+      return password;
+    });
+  }
+}
+
+function isStoredSetupPassword(value: unknown): value is StoredSetupPassword {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const stored = value as Record<string, unknown>;
+  return (
+    isSetupPassword(stored.password) &&
+    typeof stored.createdAt === 'number' &&
+    Number.isFinite(stored.createdAt)
+  );
 }
 
 export class AccountStore extends JsonFileStore {

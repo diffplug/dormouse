@@ -645,9 +645,9 @@ step "Runtime configuration"
 # One named CSPRNG, not a fallback chain: the release's own Node was staged a
 # few lines ago and is the binary this service will run under, so it is always
 # present and needs no probing. `crypto.randomBytes` is OpenSSL's RAND_bytes.
-# Never substitute $RANDOM, a timestamp, or any non-CSPRNG source. Both secrets
-# this installer mints — the setup password and the enrollment offer's token —
-# come from here, so there is one generator to audit rather than one per secret.
+# Never substitute $RANDOM, a timestamp, or any non-CSPRNG source. The
+# enrollment offer is the one secret this installer mints; the Server owns its
+# setup password and persists it under state/ on first boot.
 random_hex32() {
   "$STAGE/runtime/node" -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))'
 }
@@ -657,22 +657,16 @@ random_hex32() {
 # file is one a run of this installer finished writing.
 env_missing_keys() {
   local key missing=""
-  for key in DORMOUSE_SETUP_PASSWORD DORMOUSE_ORIGIN DORMOUSE_STATE_DIR DORMOUSE_BIND_HOST PORT; do
+  for key in DORMOUSE_ORIGIN DORMOUSE_STATE_DIR DORMOUSE_BIND_HOST PORT; do
     grep -q "^$key=." "$1" || missing="$missing $key"
   done
   printf '%s' "$missing"
 }
 
 if [ ! -f "$ENV_FILE" ]; then
-  SETUP_PASSWORD="$(random_hex32)"
-  # 32 random bytes is 64 hex characters. The guard counts characters, so it
-  # must be 64 — checking for 32 would pass a regression to 16 bytes, which is
-  # half the entropy docs/specs/security-remote.md claims.
-  [ ${#SETUP_PASSWORD} -ge 64 ] || die "generated setup password is implausibly short; refusing to install it."
-
-  # Create the file and lock it down BEFORE the secret is written, so the
-  # password never sits under the directory's default permissions, even briefly.
-  # `cat >` truncates without touching the mode, so no second chmod is needed.
+  # Create the file with its final permissions. It may carry an operator-owned
+  # VAPID private key later, so configuration remains owner-only even though the
+  # setup password is server state now.
   : > "$ENV_FILE"
   chmod 0600 "$ENV_FILE"
   cat > "$ENV_FILE" <<ENV_EOF
@@ -682,16 +676,13 @@ if [ ! -f "$ENV_FILE" ]; then
 # DORMOUSE_ORIGIN is durable WebAuthn identity (passkey rpId + Host
 # ConnectionPolicy). Changing it invalidates the registered passkey and every
 # enrolled Host. See docs/specs/server.md, "Configuration".
-DORMOUSE_SETUP_PASSWORD=$SETUP_PASSWORD
 DORMOUSE_ORIGIN=$ORIGIN
 DORMOUSE_STATE_DIR=$STATE_DIR
 DORMOUSE_BIND_HOST=127.0.0.1
 PORT=$LOOPBACK_PORT
 NODE_ENV=production
 ENV_EOF
-  unset SETUP_PASSWORD
-  ok "generated config/server.env (mode 0600) with a locally generated setup password"
-  detail "the password was not printed; retrieve it with: manage show-password"
+  ok "generated config/server.env (mode 0600)"
 else
   chmod 0600 "$ENV_FILE"
   ok "preserved the existing config/server.env"
@@ -703,7 +694,7 @@ fi
 # tells the operator to *fix* a file whose repair is `rm`, on every run, forever.
 # The two cases are indistinguishable from here and their repairs are opposite,
 # so this names what is missing and changes nothing: DORMOUSE_ORIGIN is durable
-# WebAuthn identity, and the password may already have enrolled a Host.
+# WebAuthn identity and may already have enrolled a Host.
 ENV_MISSING="$(env_missing_keys "$ENV_FILE")"
 [ -z "$ENV_MISSING" ] || die "config/server.env is missing installer-owned keys:$ENV_MISSING
 An install interrupted between creating that file and writing it leaves exactly this. Nothing has been changed. The repair depends on which one it is:
@@ -738,8 +729,8 @@ ENV_FILE="$ROOT/config/server.env"
 
 [ -r "$ENV_FILE" ] || { echo "run-server: cannot read $ENV_FILE" >&2; exit 78; }
 
-# Parse KEY=VALUE lines. Deliberately not `source`/`eval`: this file holds the
-# setup password, and a config file should not be able to execute code.
+# Parse KEY=VALUE lines. Deliberately not `source`/`eval`: a config file should
+# not be able to execute code.
 while IFS= read -r line || [ -n "$line" ]; do
   case "$line" in ''|'#'*) continue ;; esac
   case "$line" in *=*) ;; *) continue ;; esac
@@ -1033,11 +1024,6 @@ cmd_verify() {
     else
       fail "unit is missing Restart=always or WantedBy=default.target"
     fi
-    if grep -q "DORMOUSE_SETUP_PASSWORD" "$UNIT_FILE"; then
-      fail "the unit file contains the setup password — it must live only in config/server.env"
-    else
-      pass "unit file carries no credential"
-    fi
   else
     fail "unit file missing: $UNIT_FILE"
   fi
@@ -1229,7 +1215,17 @@ cmd_show_password() {
   local reply=""
   read -r reply || true
   case "$reply" in y|Y|yes|YES) ;; *) printf 'aborted\n'; return 1 ;; esac
-  printf '\n  %s\n\n' "$(env_value DORMOUSE_SETUP_PASSWORD)"
+  local password_file="$STATE_DIR/setup-password.json" password
+  if ! password="$("$NODE_FOR_HTTP" -e '
+const fs = require("fs");
+const stored = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+if (!stored || !/^[0-9a-f]{64}$/.test(stored.password)) process.exit(1);
+process.stdout.write(stored.password);
+' "$password_file")"; then
+    printf 'could not read a valid server-generated setup password from %s\n' "$password_file" >&2
+    return 1
+  fi
+  printf '\n  %s\n\n' "$password"
 }
 
 cmd_serve() {
@@ -1377,16 +1373,15 @@ ok "bin/manage"
 
 step "Health-checking the candidate release"
 
-# Disposable: a throwaway state dir, a throwaway password and an ephemeral port,
-# so nothing touches the live service or the real state while we prove the new
-# code boots and serves.
+# Disposable: a throwaway state dir and an ephemeral port, so nothing touches
+# the live service or the real state while we prove the new code boots, mints
+# its credential, and serves.
 PROBE_PORT="$("$STAGE/runtime/node" -e 'const n=require("net");const s=n.createServer();s.listen(0,"127.0.0.1",()=>{const p=s.address().port;s.close(()=>process.stdout.write(String(p)))});')"
 PROBE_STATE="$(mktemp -d "${TMPDIR:-/tmp}/dormouse-probe-state.XXXXXX")"
 PROBE_LOG="$(mktemp_file probe-log)"
 chmod 0700 "$PROBE_STATE"
 
 env -i HOME="$HOME" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
-  DORMOUSE_SETUP_PASSWORD="0000000000000000000000000000000000000000000000000000000000000000" \
   DORMOUSE_ORIGIN="$ORIGIN" \
   DORMOUSE_STATE_DIR="$PROBE_STATE" \
   DORMOUSE_BIND_HOST=127.0.0.1 \
@@ -1427,6 +1422,16 @@ ok "candidate answers /api/hello (scrubbed PATH, ephemeral port $PROBE_PORT)"
 
 http_ok "http://127.0.0.1:$PROBE_PORT/" 5 || die_candidate "the candidate release did not serve the Pocket index."
 ok "candidate serves the Pocket app"
+if ! "$STAGE/runtime/node" -e '
+const fs = require("fs");
+const file = process.argv[1];
+const stored = JSON.parse(fs.readFileSync(file, "utf8"));
+if (!stored || !/^[0-9a-f]{64}$/.test(stored.password)) process.exit(1);
+if ((fs.statSync(file).mode & 0o777) !== 0o600) process.exit(1);
+' "$PROBE_STATE/setup-password.json"; then
+  die_candidate "the candidate did not generate an owner-only setup password."
+fi
+ok "candidate generated its setup password in owner-only state"
 probe_cleanup
 
 # ----------------------------------------------------------- switch release --
@@ -1789,7 +1794,7 @@ printf '    manage:  "%s" <status|verify|logs|restart|show-password|serve|rollba
 printf '\n'
 
 if [ "$FIRST_INSTALL" = "1" ]; then
-  printf '    First install. Retrieve the generated setup password when you are ready\n'
+  printf '    First install. Retrieve the server-generated setup password when you are ready\n'
   printf '    to enroll a Host by hand (the one-time offer card in the Host'"'"'s\n'
   printf '    Remote control settings needs no password):\n\n'
   printf '        "%s" show-password\n\n' "$BIN_DIR/manage"

@@ -7,9 +7,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { ConfigError, readConfig } from '../dist/config.js';
-import { PASSWORD } from './fixtures.mjs';
 
-const MINIMAL = { DORMOUSE_SETUP_PASSWORD: PASSWORD };
+const MINIMAL = {};
 
 test('defaults: port 3000, every interface, localhost origin', () => {
   const config = readConfig({ ...MINIMAL });
@@ -88,22 +87,8 @@ test('a blank DORMOUSE_ORIGIN falls back to the localhost default', () => {
   assert.equal(readConfig({ ...MINIMAL, DORMOUSE_ORIGIN: '  ' }).origin, 'http://localhost:3000');
 });
 
-test('a missing or non-canonical setup password is a ConfigError, not a silent start', () => {
-  assert.throws(() => readConfig({}), ConfigError);
-  for (const password of [
-    '',
-    'not-a-generated-credential',
-    'a'.repeat(63),
-    'a'.repeat(65),
-    'A'.repeat(64),
-    'g'.repeat(64),
-  ]) {
-    assert.throws(
-      () => readConfig({ DORMOUSE_SETUP_PASSWORD: password }),
-      /64 lowercase hexadecimal characters/,
-      password,
-    );
-  }
+test('the setup password is server state, not environment configuration', () => {
+  assert.equal('setupPassword' in readConfig({}), false);
 });
 
 test('an unusable PORT is a ConfigError', () => {

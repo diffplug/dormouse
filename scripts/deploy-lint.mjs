@@ -89,7 +89,7 @@ export const RULES = [
     },
   },
   {
-    rule: 'Credentials at rest — the setup password is generated locally from a CSPRNG',
+    rule: 'Credentials at rest — the enrollment-offer generator is a platform CSPRNG',
     patterns: {
       macOS: /\/dev\/urandom/,
       Linux: /randomBytes\(32\)/,
@@ -97,55 +97,28 @@ export const RULES = [
     },
   },
   {
-    // The rule above matches the generator's *body*, which the enrollment
-    // token also keeps alive — so on its own it would stay green after
-    // `SETUP_PASSWORD="$RANDOM"`. This pins the assignment, the parallel of the
-    // enroll-token rule below.
-    rule: 'Credentials at rest — the setup password comes from that named generator',
+    // The setup password belongs to Server state. Supplying the former
+    // environment input from any installer path would restore the exact
+    // operator-chosen credential this audit is meant to exclude.
+    rule: 'Credentials at rest — no installer supplies a setup password as configuration',
+    forbidden: true,
+    violation: 'DORMOUSE_SETUP_PASSWORD=weak',
     patterns: {
-      macOS: /SETUP_PASSWORD="\$\(random_hex32\)"/,
-      Linux: /SETUP_PASSWORD="\$\(random_hex32\)"/,
-      Windows: /\$SETUP_PASSWORD = New-RandomHex32/,
+      macOS: /DORMOUSE_SETUP_PASSWORD/,
+      Linux: /DORMOUSE_SETUP_PASSWORD/,
+      Windows: /DORMOUSE_SETUP_PASSWORD/,
     },
   },
   {
-    // Anchored on each guard's own comparison, naming the secret it guards: the
-    // enrollment offer's token has a guard of the same shape, so a bare
-    // `-ge 64` would be satisfied by either and neither would be load-bearing.
-    // A bare /64/ on Windows was worse still — it also matched two `exit 64`
-    // argument-parse lines and the guard's *explanatory comment*, so the prose
-    // about the rule survived deleting the rule.
-    rule: 'Credentials at rest — the entropy guard counts 64 hex characters, not 32',
+    // The management path may reveal the credential, but must read the value
+    // the Server persisted rather than recreating an operator-controlled source.
+    rule: 'Credentials at rest — manage show-password reads the Server state file',
     patterns: {
-      macOS: /\$\{#SETUP_PASSWORD\} -ge 64/,
-      Linux: /\$\{#SETUP_PASSWORD\} -ge 64/,
-      Windows: /\$SETUP_PASSWORD\.Length -lt 64/,
+      macOS: /password_file="\$STATE_DIR\/setup-password\.json"/,
+      Linux: /password_file="\$STATE_DIR\/setup-password\.json"/,
+      Windows: /Join-Path \$StateDir 'setup-password\.json'/,
     },
-  },
-  {
-    // Anchored on the failure message, not the identifier: the latter also
-    // appears in the env heredoc, in `show-password`, and in the candidate
-    // probe's throwaway password, so deleting the whole check left it green.
-    // The character class covers the Windows copy, which says `config\\server.env`.
-    rule: 'Credentials at rest — manage verify fails when the service definition carries the password',
-    patterns: {
-      macOS: /it must live only in config[\\/]server\.env/,
-      Linux: /it must live only in config[\\/]server\.env/,
-      Windows: /it must live only in config[\\/]server\.env/,
-    },
-  },
-  {
-    // The same rule from the other side: a search of a definition that could
-    // not be read finds no password either. The unix pair read a file and fail
-    // when it is missing; Windows exports over CIM, which can hand back $null
-    // for reasons that have nothing to do with the task, and used to answer
-    // that with the reassuring line.
-    rule: 'Credentials at rest — manage verify fails when the service definition could not be read at all',
-    patterns: {
-      macOS: /fail "LaunchAgent plist missing or invalid/,
-      Linux: /fail "unit file missing/,
-      Windows: /the task definition could not be exported -- verify cannot say it carries no credential/,
-    },
+    exactMatches: { macOS: 1, Linux: 1, Windows: 1 },
   },
   {
     // Windows-only, and the only thing enforcing owner-only on `hosts.json`
@@ -219,11 +192,11 @@ export const RULES = [
     },
   },
   {
-    // The token is minted by the same named generator as the setup password —
-    // one per installer, which the CSPRNG rule above matches at its definition.
+    // The token is minted by the named generator the CSPRNG rule above matches
+    // at its definition.
     // Anchored on the mint itself: swapping in $RANDOM, a timestamp, or a
     // reused password would rewrite exactly this line.
-    rule: 'Credentials at rest — the enroll token comes from the same CSPRNG as the setup password',
+    rule: 'Credentials at rest — the enroll token comes from the named CSPRNG',
     patterns: {
       macOS: /ENROLL_TOKEN="\$\(random_hex32\)"/,
       Linux: /ENROLL_TOKEN="\$\(random_hex32\)"/,
@@ -295,12 +268,10 @@ export const RULES = [
     },
   },
   {
-    // The same ordering control on `config/server.env`, which docs/specs/security-remote.md's
-    // FAIL IF has always required and nothing checked. macOS reaches it with
-    // `umask 077` covering the heredoc rather than a chmod on an empty file, so
-    // that is what its pattern anchors; the other two bind both operands, for
-    // the reason the rule above states.
-    rule: 'Credentials at rest — config/server.env is restricted to the installing user before the password is written',
+    // `config/server.env` can still carry operator-supplied private VAPID keys.
+    // macOS reaches the owner-only property with `umask 077` covering the
+    // heredoc; the other two bind creation and restriction as one span.
+    rule: 'Credentials at rest — config/server.env is created owner-only',
     patterns: {
       macOS: /umask 077\n\s*cat > "\$ENV_FILE"/,
       Linux: /: > "\$ENV_FILE"\n\s*chmod 0600 "\$ENV_FILE"/,

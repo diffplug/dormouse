@@ -53,8 +53,8 @@ Before acting:
    syntax change.
 5. Explain the checkpoint, carry it out, verify it, then move on.
 6. **Never ask the user to paste the setup password or any other bearer
-   credential into chat.** It is generated on the laptop into a mode-`0600`
-   file; `manage show-password` prints it in their terminal.
+   credential into chat.** The Server generates it into owner-only state;
+   `manage show-password` prints it in their terminal.
 7. Never commit, push, merge, or delete installed state without first showing
    the exact change and obtaining approval.
 8. For a relay that outlives this laptop's sleep, read "Keeping the relay up
@@ -338,7 +338,7 @@ Serve mapping both return without rerunning the installer.
 
 The server has no account, no passkey, and no enrolled Host. Same sequence as
 `docs/specs/server.md` → "Running it", run against the tailnet origin, with the
-installer's password.
+Server's generated password.
 
 **The Host comes first**: a passkey is registered only off a code an enrolled
 Host displays (`docs/specs/server.md` → Setup tokens and the pairing QR).
@@ -612,16 +612,13 @@ reports which mode is live rather than asserting either.
   clients reconnect across a release switch; no zero-downtime swap to attempt.
 - **State outlives code.** `config/` and `state/` sit outside `releases/`, are
   readable only by the installing user, and survive every update, prune and
-  uninstall; purging is separate and explicitly confirmed. `config/server.env`
-  is generated once with a setup password from the platform's CSPRNG — 32 bytes,
-  i.e. **64 hex characters**, and a guard refuses anything shorter, counting
-  characters so half the entropy cannot pass — then preserved byte-for-byte.
+  uninstall; purging is separate and explicitly confirmed. The Server generates
+  `state/setup-password.json` once from 32 CSPRNG bytes, validates it on every
+  boot, and never accepts an operator-supplied setup credential.
+  `config/server.env` is generated once, then preserved byte-for-byte.
   **A preserved file missing installer-owned keys is half-written**: name them
   and stop, never rewrite values that cannot be proven stale. **`manage verify`
-  fails if the password appears in the service definition.** Windows applies the
-  `server.env` DACL *before* the password is written (Linux: `chmod 0600` on the
-  empty file first); and since Node's modes are a no-op on Windows,
-  `manage verify` walks each file in `state\` there.
+  walks every file in `state\` on Windows**, where Node's modes are a no-op.
 - **The enrollment offer rotates on every run before the first Host enrolls**,
   including updates that preserve `server.env`; `state/hosts.json` then disables
   it permanently until a state purge. **Minted last** — after release, Serve and

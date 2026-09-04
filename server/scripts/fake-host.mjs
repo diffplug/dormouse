@@ -4,31 +4,39 @@
  * stand-in for the standalone Host — handy for driving a real Pocket page
  * through pairing + connect without a laptop app.
  *
- *   DORMOUSE_SETUP_PASSWORD=... node scripts/fake-host.mjs http://localhost:3000
+ *   node scripts/fake-host.mjs http://localhost:3000
  *
  * The server URL (default http://localhost:3000) is argv[2]. The setup password
- * comes from DORMOUSE_SETUP_PASSWORD (same secret that gates enrollment). Build
- * first (`pnpm --filter server build`) so `server-lib-common` is compiled.
+ * comes from the Server package's `data` directory unless
+ * `DORMOUSE_STATE_DIR` says otherwise. Build first (`pnpm --filter server
+ * build`) so `server-lib-common` is compiled.
  *
  * It prints one pairing URL — the text a real Host would draw as a QR — and
  * mints a fresh one whenever the previous invitation is spent, so a phone can
  * pair repeatedly against it.
  */
 
+import { readFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { API_ROUTES, formatPairingInvitationUrl, generateNoiseKeyPair } from 'server-lib-common';
 
+import { isSetupPassword } from '../dist/setup-password.js';
 import { FakeHost } from '../test/harness/fake-host.mjs';
 
 const serverUrl = (process.argv[2] ?? 'http://localhost:3000').replace(/\/$/, '');
-const password = process.env.DORMOUSE_SETUP_PASSWORD;
-if (!password) {
-  console.error('DORMOUSE_SETUP_PASSWORD is required (it gates host enrollment).');
-  process.exit(1);
-}
+const stateDir =
+  process.env.DORMOUSE_STATE_DIR ?? join(dirname(fileURLToPath(import.meta.url)), '..', 'data');
 
 const label = process.env.FAKE_HOST_LABEL ?? 'Fake Host (script)';
 
 async function main() {
+  const stored = JSON.parse(await readFile(join(stateDir, 'setup-password.json'), 'utf8'));
+  if (!isSetupPassword(stored?.password)) {
+    throw new Error(`${join(stateDir, 'setup-password.json')} has no valid setup password`);
+  }
+  const password = stored.password;
   const res = await fetch(`${serverUrl}${API_ROUTES.hostEnroll}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },

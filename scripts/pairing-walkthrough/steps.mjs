@@ -220,7 +220,6 @@ async function stepServer(ctx) {
       logPath: ctx.path('server.log'),
       prefix: 'server',
       env: {
-        DORMOUSE_SETUP_PASSWORD: opts.password,
         DORMOUSE_STATE_DIR: stateDir,
         // Everything in a run is local to this machine, so the walkthrough's
         // server has no reason to answer the LAN or the tailnet for the length
@@ -242,6 +241,11 @@ async function stepServer(ctx) {
     async () => (await fetch(`${ctx.serverOrigin}/`).catch(() => null))?.ok,
     { what: `${ctx.serverOrigin} to answer`, timeoutMs: 60_000 },
   );
+
+  // The Server, not this harness, owns the credential. Read the state it
+  // generated only after the listening line, then type that exact value into
+  // the real enrollment form below.
+  opts.password = JSON.parse(readFileSync(join(stateDir, 'setup-password.json'), 'utf8')).password;
 
   // Held for the scenarios that take the Server away mid-story; nothing on the
   // happy path touches it.

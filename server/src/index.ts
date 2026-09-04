@@ -16,7 +16,8 @@ import {
   generateVapidKeys,
 } from './push.js';
 import { removeRuntimeFile, writeRuntimeFile } from './runtime-file.js';
-import { VapidStore } from './state.js';
+import { generateSetupPassword } from './setup-password.js';
+import { SetupPasswordStore, VapidStore } from './state.js';
 
 function loadConfig() {
   try {
@@ -33,6 +34,11 @@ function loadConfig() {
 const { port, bindHost, vapidKeys, vapidSubject, runtimeFile, releaseId, ...appConfig } =
   loadConfig();
 const { origin, stateDir } = appConfig;
+
+// Enrollment's bootstrap credential is server state, never configuration an
+// operator can weaken. Like the VAPID private key below, it is minted once and
+// persisted through the state store's owner-only atomic write.
+const setupPassword = await new SetupPasswordStore(stateDir).loadOrCreate(generateSetupPassword);
 
 // The one part of the VAPID story that is not a pure env read: with no keys
 // configured, mint a pair once and persist it (0o600).
@@ -53,6 +59,7 @@ if (vapidSubject === null) {
 
 const { app, injectWebSocket, sweepRevokedHosts, sweepRelaySockets } = createApp({
   ...appConfig,
+  setupPassword,
   // Both together or neither: advertising a key the server has no subject to
   // sign with would let a phone register against a push it can never receive.
   ...(vapidSubject === null
