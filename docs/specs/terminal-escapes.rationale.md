@@ -18,7 +18,11 @@
 
 **Why the color queries are answered rather than passed through.** A TUI that adapts to a light or dark background asks with `OSC 11 ; ?`; with no answer it assumes dark, and on a light theme its adaptive chrome — Codex's composer "pill", for one — renders unreadable. xterm.js does not answer the query itself, so the parse boundary is the only place holding the real theme.
 
-**Why IIP streams past the OSC buffer.** The semantic parser normally waits for an OSC terminator so it can decide whether to retain, strip, or forward the sequence. An inline image is routinely megabytes and split across PTY reads, so routing it through the 16 KiB incomplete-sequence buffer drops almost every real image. Once `File`, `MultipartFile`, or `FilePart` is known, no semantic rule needs its payload; forwarding chunks lets ImageAddon's streaming decoder enforce the larger purpose-built byte/pixel bounds without allocating a second whole-sequence copy.
+**Why a forwarded OSC streams past the buffer.** The limit exists to protect the parser's own `pending` string, which must hold bytes across PTY reads for a sequence split mid-flight. That reason applies only to a sequence the parser will consume: it has to see the whole payload to parse it. A sequence it will forward needs no terminator to be useful, and streaming retains at most one held `ESC`, so `pending` cannot grow — the guarantee is honored rather than waived. xterm.js caps its own OSC payload at 10 MB, and ImageAddon's registered handlers decode as bytes arrive, so nothing downstream accumulates without bound either.
+
+Keying this on the disposition rather than on an IIP command list also fixes the case that motivated it in reverse: before, *any* forwarded OSC over 16 KiB was silently discarded rather than reaching xterm.js — an `OSC 8` hyperlink with a long URI, or a palette sequence. Images were merely the first payload big enough to notice.
+
+**Why the id must settle before routing.** The disposition is read from the leading digits, but `133` (prompt boundary, consumed) is a prefix of `1337` (image, forwarded). Deciding on a partial id would route an image into the 16 KiB buffer. Returning "undecided" while the content is still all digits costs a few buffered bytes and removes the ambiguity.
 
 ## OSC color queries on Windows require the bundled ConPTY
 

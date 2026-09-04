@@ -64,11 +64,11 @@ const OSC99_PENDING_TITLE_LIMIT = 2048;
 const OSC99_PENDING_BODY_LIMIT = 16_384;
 const OSC99_SUPPORT_PAYLOAD = 'o=always:p=title,body';
 const OSC99_RESPONSE_ID_RE = /^[^\s:;\x00-\x1f\x7f-\x9f]+$/;
-const IIP_STREAMING_PREFIXES = [
-  '1337;File=',
-  '1337;MultipartFile=',
-  '1337;FilePart=',
-] as const;
+// Every OSC id `parseOsc` claims. Anything else is xterm.js's, which is what
+// lets an unterminated one stream instead of filling `pending`.
+const OSC_CONSUMED_IDS = new Set(['0', '2', '7', '9', '10', '11', '12', '50', '52', '99', '133', '633', '777']);
+// The OSC 1337 subcommands ImageAddon owns; every other 1337 is consumed.
+const OSC1337_FORWARDED = ['File=', 'MultipartFile=', 'FilePart=', 'FileEnd', 'ReportCellSize'] as const;
 const TERMINAL_BELL_NOTIFICATION: ActivityNotification = { source: 'BEL', title: 'Terminal bell', body: null };
 // Mirrors ITERM2_COMPAT_VERSION in standalone/sidecar/pty-core.js — pinned by
 // mirrored-constants.test.ts (terminal-escapes.md: one compatibility version
@@ -78,16 +78,17 @@ export const ITERM2_DEVICE_ATTRIBUTES_RESPONSE = `\x1bP>|iTerm2 ${ITERM2_COMPAT_
 
 export class TerminalProtocolParser {
   private pending = '';
-  // Non-null while a recognized IIP payload streams straight through: holds a
-  // lone trailing ESC so a split `ESC \` terminator is never emitted as text.
-  private streamingIipPending: string | null = null;
+  // Non-null while an OSC the parser does not consume streams straight through
+  // to xterm.js: holds a lone trailing ESC so a split `ESC \` terminator is
+  // never emitted as text. At most one character, so forwarding never grows.
+  private forwardingOscPending: string | null = null;
   private osc99Pending = new Map<string, Osc99PendingNotification>();
 
   /** Resolves OSC 10/11/12 queries; null lets xterm.js handle the sequence. */
   constructor(private readonly colorProvider?: TerminalColorProvider) {}
 
   process(data: string): TerminalProtocolParseResult {
-    if (this.streamingIipPending !== null) return this.processStreamingIip(data);
+    if (this.forwardingOscPending !== null) return this.processForwardedOsc(data);
     if (this.pending === '' && !NEEDS_PARSE_RE.test(data)) {
       return { visibleData: data, events: NO_EVENTS as TerminalProtocolEvent[] };
     }
@@ -108,8 +109,11 @@ export class TerminalProtocolParser {
       const terminator = findOscTerminator(text, osc.contentStart);
       if (!terminator) {
         const incomplete = text.slice(osc.index);
-        if (isStreamingIipAt(text, osc.contentStart)) {
-          this.streamingIipPending = '';
+        // A sequence we will hand to xterm.js needs no terminator to be useful,
+        // so stream it rather than spending `pending` on a payload that can be
+        // megabytes (an inline image) and is bounded downstream anyway.
+        if (oscDispositionAt(text, osc.contentStart) === 'forward') {
+          this.forwardingOscPending = '';
           visibleData += this.holdTrailingEsc(incomplete);
         } else if (incomplete.length <= OSC_INCOMPLETE_LIMIT) {
           this.pending = incomplete;
@@ -133,15 +137,15 @@ export class TerminalProtocolParser {
     return { visibleData: stripped.visibleData, events: filterTerminalBellEvents(events) };
   }
 
-  private processStreamingIip(data: string): TerminalProtocolParseResult {
-    const text = this.streamingIipPending + data;
-    this.streamingIipPending = '';
+  private processForwardedOsc(data: string): TerminalProtocolParseResult {
+    const text = this.forwardingOscPending + data;
+    this.forwardingOscPending = '';
     const terminator = findOscTerminator(text, 0);
     if (!terminator) {
       return { visibleData: this.holdTrailingEsc(text), events: NO_EVENTS as TerminalProtocolEvent[] };
     }
 
-    this.streamingIipPending = null;
+    this.forwardingOscPending = null;
     const parsedRest = this.process(text.slice(terminator.end));
     return {
       visibleData: text.slice(0, terminator.end) + parsedRest.visibleData,
@@ -153,7 +157,7 @@ export class TerminalProtocolParser {
    * emitted as text; the next chunk re-joins it. */
   private holdTrailingEsc(text: string): string {
     if (!text.endsWith('\x1b')) return text;
-    this.streamingIipPending = '\x1b';
+    this.forwardingOscPending = '\x1b';
     return text.slice(0, -1);
   }
 
@@ -467,20 +471,43 @@ function parseOsc633Property(rawProperties: string): TerminalProtocolEvent[] {
   return [];
 }
 
-/** True when the OSC content starting at `from` is an IIP command whose payload
- * ImageAddon owns, so the parser forwards it instead of buffering it. */
-function isStreamingIipAt(text: string, from: number): boolean {
-  return IIP_STREAMING_PREFIXES.some((prefix) => text.startsWith(prefix, from));
+/**
+ * Whether the parser will consume this OSC or hand it to xterm.js, answered from
+ * the id alone (plus the subcommand for 1337) so an unterminated sequence can be
+ * routed before its terminator arrives. `null` means the answer could still
+ * change as bytes arrive — buffer and ask again.
+ */
+function oscDispositionAt(text: string, from: number): 'consume' | 'forward' | null {
+  let i = from;
+  while (i < text.length && text[i] >= '0' && text[i] <= '9') i += 1;
+  // More digits may follow, and `133` becoming `1337` flips the answer.
+  if (i === text.length) return null;
+  if (i === from || text[i] !== ';') return 'forward';
+  const id = text.slice(from, i);
+  if (id === '1337') return osc1337DispositionAt(text, i + 1);
+  return OSC_CONSUMED_IDS.has(id) ? 'consume' : 'forward';
+}
+
+function osc1337DispositionAt(text: string, from: number): 'consume' | 'forward' | null {
+  let partial = false;
+  for (const command of OSC1337_FORWARDED) {
+    if (text.startsWith(command, from)) return 'forward';
+    if (text.length - from < command.length && matchesPrefix(text, from, command)) partial = true;
+  }
+  return partial ? null : 'consume';
+}
+
+/** True when `text` from `from` is a (possibly empty) leading slice of `command`. */
+function matchesPrefix(text: string, from: number, command: string): boolean {
+  for (let k = 0; from + k < text.length; k += 1) {
+    if (text[from + k] !== command[k]) return false;
+  }
+  return true;
 }
 
 function parseOsc1337(content: string): TerminalProtocolEvent[] | null {
-  if (
-    isStreamingIipAt(content, 0) ||
-    content === '1337;FileEnd' ||
-    content === '1337;ReportCellSize'
-  ) {
-    return null;
-  }
+  // Forwarded subcommands are ImageAddon's; `null` passes them through.
+  if (oscDispositionAt(content, 0) === 'forward') return null;
   const prefix = '1337;CurrentDir=';
   if (!content.startsWith(prefix)) return [];
   const cwd = cwdFromOsc1337(content.slice(prefix.length));

@@ -194,6 +194,37 @@ describe('TerminalProtocolParser', () => {
     ]);
   });
 
+  it('streams any OSC it does not consume past the incomplete-OSC limit', () => {
+    const parser = new TerminalProtocolParser();
+    // OSC 8 is xterm's, so an oversized hyperlink streams rather than vanishing.
+    const link = `\x1b]8;;https://example.com/${'p'.repeat(17_000)}`;
+
+    expect(parser.process(link)).toEqual({ visibleData: link, events: [] });
+    expect(parser.process('\x1b\\text').visibleData).toBe('\x1b\\text');
+  });
+
+  it('still drops an oversized OSC it would consume itself', () => {
+    const parser = new TerminalProtocolParser();
+    const title = `\x1b]0;${'t'.repeat(17_000)}`;
+
+    expect(parser.process(title)).toEqual({ visibleData: '', events: [] });
+    // The held bytes were dropped, so the tail is read as fresh ground text.
+    expect(parser.process('\x07after').visibleData).toBe('after');
+  });
+
+  it('waits for the id to settle before routing a split OSC introducer', () => {
+    const consuming = new TerminalProtocolParser();
+    expect(consuming.process('\x1b]133').visibleData).toBe('');
+    expect(consuming.process(';A\x07').events).toEqual([
+      { kind: 'semantic', event: expect.objectContaining({ type: 'promptStart' }) },
+    ]);
+
+    // The same three bytes are the start of a forwarded 1337 image.
+    const forwarding = new TerminalProtocolParser();
+    expect(forwarding.process('\x1b]133').visibleData).toBe('');
+    expect(forwarding.process('7;File=inline=1:AAAA').visibleData).toBe('\x1b]1337;File=inline=1:AAAA');
+  });
+
   it('strips known unsupported iTerm2 and clipboard OSC sequences', () => {
     const parser = new TerminalProtocolParser();
     const result = parser.process('a\x1b]52;c;SGVsbG8=\x07b\x1b]50;Monaco\x07c');

@@ -16,13 +16,13 @@
 
 State-driving and security-sensitive OSCs — plus the `CSI > q` query — are parsed at the PTY data boundary in the platform adapter: the VS Code extension host (`vscode-ext/src/message-router.ts`, one parser per PTY from `ptyManager.addCallbacks`, before `pty:data` reaches any webview), and the frontend adapter for standalone, browser-sidecar and fake, before xterm.js sees the bytes.
 
-**An unterminated OSC is buffered across chunks up to `OSC_INCOMPLETE_LIMIT` (16 KiB), then dropped — never buffered without bound** (rationale). It bounds only *unterminated* sequences; a complete one in a single read is parsed whole. **Recognized IIP `File` / `MultipartFile` / `FilePart` payloads are the exception: stream them to xterm.js after the command prefix is known**, preserving a split `ESC \` terminator, and let ImageAddon's byte and pixel limits bound them ([Inline graphics](#inline-graphics); rationale).
+**An unterminated OSC the parser will consume is buffered across chunks up to `OSC_INCOMPLETE_LIMIT` (16 KiB), then dropped — never buffered without bound** (rationale). It bounds only *unterminated* sequences; a complete one in a single read is parsed whole. **An unterminated OSC the parser will forward streams to xterm.js instead**, preserving a split `ESC \` terminator (rationale). **Route by the OSC id, and decide nothing while more digits could follow** — `133` becomes `1337` — for `1337` by the subcommand ([Inline graphics](#inline-graphics)).
 
 **Every semantic value `TerminalProtocolParser` *retains* is bounded and stripped of control characters before storage**, whatever the emitter: `TITLE_LIMIT` / `BODY_LIMIT` for titles and notification bodies, whose whitespace controls collapse to spaces before the trim; `COMMAND_LINE_LIMIT` for the OSC 633 `E` command line, bounded *before* the `\xNN` unescape and sanitized *after* it (rationale); `MAX_CWD_LENGTH` for every CWD source, interior whitespace preserved. **Every limit counts code points**, so a cut never splits a surrogate pair. **A value that reduces to nothing is dropped, never stored empty.**
 
 The remote Host in the Tauri sidecar is a second, **strip-only** parse site, **one parser per PTY it streams to a phone, never per attachment** (rationale). **Every event it produces must be discarded, responses included** — the webview that owns the terminal already answers, and a second answer writes duplicate bytes into the PTY's input. **OSC 10/11/12 queries must still be consumed there**, reply thrown away: a *declined* query stays in `visibleData` and the phone's xterm answers it. The VS Code Host needs no such parser ([vscode.md](vscode.md)).
 
-Source of truth: `lib/src/lib/terminal-protocol.ts`, `boundedCwdValue` in `lib/src/lib/terminal-state.ts`, `lib/src/host/remote/pty-strip.ts`, `lib/src/host/remote/sidecar-entry.ts`.
+Source of truth: `oscDispositionAt` in `lib/src/lib/terminal-protocol.ts`, `boundedCwdValue` in `lib/src/lib/terminal-state.ts`, `lib/src/host/remote/pty-strip.ts`, `lib/src/host/remote/sidecar-entry.ts`.
 
 ### `pty:data` strip semantics
 
@@ -107,7 +107,7 @@ Dormouse intervenes only in these cases.
 
 **Must remove string-control payloads statefully before the keystroke prompt heuristic's 1,024-character window**, including chunks that begin or end mid-sequence, so image base64 cannot be read as a returned prompt. Live PTY/replay bytes still reach xterm.js unchanged.
 
-Source of truth: `IMAGE_ADDON_OPTIONS` in `lib/src/lib/terminal-lifecycle.ts`; `IIP_STREAMING_PREFIXES` and `TerminalProtocolParser.processStreamingIip` in `lib/src/lib/terminal-protocol.ts`; `TerminalControlStreamFilter` in `lib/src/lib/terminal-controls.ts`.
+Source of truth: `IMAGE_ADDON_OPTIONS` in `lib/src/lib/terminal-lifecycle.ts`; `OSC1337_FORWARDED` and `TerminalProtocolParser.processForwardedOsc` in `lib/src/lib/terminal-protocol.ts`; `TerminalControlStreamFilter` in `lib/src/lib/terminal-controls.ts`.
 
 ### Report filtering on the input side
 
