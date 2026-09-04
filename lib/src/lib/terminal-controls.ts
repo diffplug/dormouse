@@ -120,14 +120,12 @@ export function stripTerminalControls(input: string, options: StripTerminalContr
     ? (match: string) => (match.endsWith('m') ? '' : '\n')
     : () => '';
   return (
-    input
-      // OSC/DCS/SOS/PM/APC strings. Try 7-bit ST before bare ESC so the
-      // terminator is consumed whole and any following sequence remains.
-      .replace(/\x1b\][\s\S]*?(?:\x07|[\x18\x1a\x9c]|\x1b\\|(?=\x1b))/g, '')
-      .replace(/\x1b[PX^_][\s\S]*?(?:[\x18\x1a\x9c]|\x1b\\|(?=\x1b))/g, '')
-      // An unterminated string swallows the tail; stripping only its introducer
-      // would promote the payload to visible text.
-      .replace(/\x1b[\]PX^_][\s\S]*$/, '')
+    // OSC/DCS/SOS/PM/APC strings, including an unterminated one, whose tail is
+    // swallowed rather than promoted to visible text. Shared with the streaming
+    // filter above so one grammar cannot drift into two — which is also why a
+    // bare C1 introducer counts here, as it does everywhere else.
+    new TerminalControlStreamFilter()
+      .process(input)
       // CSI.
       .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, csi)
       // An incomplete trailing CSI swallows its parameters rather than

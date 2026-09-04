@@ -101,7 +101,18 @@ describe('stripTerminalControls', () => {
 
   it('keeps LF, CR and TAB as text boundaries and drops other control bytes', () => {
     expect(stripTerminalControls('a\r\nb\tc')).toBe('a\r\nb\tc');
-    expect(stripTerminalControls('a\x00\x07\x7f\x9fb')).toBe('ab');
+    expect(stripTerminalControls('a\x00\x07\x7fb')).toBe('ab');
+  });
+
+  it('reads a bare C1 introducer as a string control, as the parser does', () => {
+    // 0x9f is APC, not an incidental byte: it opens a string whose unterminated
+    // tail is swallowed rather than promoted to text. Same grammar as
+    // TerminalControlStreamFilter and TerminalProtocolParser — an 8-bit emitter
+    // must not be able to pass a payload off as visible output.
+    expect(stripTerminalControls('a\x00\x07\x7f\x9fb')).toBe('a');
+    expect(stripTerminalControls('\x9d1337;File=inline=1:AAAA\x9cc1 done')).toBe('c1 done');
+    // The 7-bit forms are unchanged.
+    expect(stripTerminalControls('a\x1b]0;title\x07b')).toBe('ab');
   });
 
   describe('boundaries', () => {
