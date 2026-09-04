@@ -8,6 +8,8 @@ export const cfg = {
     dashFraction: 0.6,
     /** Seconds for one full dash-gap cycle. */
     cycleDuration: 0.4,
+    /** Cycles to run when command mode starts or the active selection changes. */
+    cyclesPerSelection: 4,
     /** Stroke width in px. */
     strokeWidth: 2,
     /** When true, animation is frozen at T=0 (for deterministic Chromatic snapshots). */
