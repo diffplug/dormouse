@@ -9,6 +9,7 @@ import {
   Shortcut,
   UNDER_SWITCH_INDENT,
 } from './design';
+import { ExternalTextLink } from './ExternalTextLink';
 import { ThemePicker } from './ThemePicker';
 import { ShellPicker } from './ShellPicker';
 import { WatchedCommandList } from './WatchedCommandList';
@@ -208,13 +209,9 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
         action={<SpeakTestButton />}
       >
         Uses your browser or system voice.{' '}
-        <button
-          type="button"
-          onClick={() => getPlatform().openExternal?.(HOSTED_VOICE_URL)}
-          className="text-foreground underline underline-offset-2 hover:text-muted"
-        >
+        <ExternalTextLink href={HOSTED_VOICE_URL}>
           Managed ElevenLabs voice is coming soon.
-        </button>
+        </ExternalTextLink>
       </AlarmSinkSection>
 
       <AlarmSinkSection

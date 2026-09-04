@@ -14,8 +14,7 @@ import { ThemeDebuggerDialog } from './ThemeDebugger';
 import { ThemeSwatch } from './theme-picker/ThemeSwatch';
 import { ThemeStoreDialog } from './theme-picker/ThemeStoreDialog';
 import { useAnchoredMenu, useCloseOnOutsideAndEscape } from './use-anchored-menu';
-import { themePickerStyles as styles } from './theme-picker/styles';
-import { chromeButton, modalIconButton, OVERLAY_MAX_HEIGHT } from './design';
+import { chromeButton, modalIconButton, OVERLAY_MAX_HEIGHT, POPUP_SURFACE_CLASS } from './design';
 
 /**
  * `compact` is the free-floating trigger used by the website's Pocket
@@ -54,8 +53,7 @@ export interface ThemePickerProps {
 
 const useBrowserLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
 
-/** Menu width. Mirrored by the `w-[280px]` literal on the non-dialog variant,
- *  which Tailwind must be able to scan statically. */
+/** Menu width, applied inline by `useAnchoredMenu` for both variants. */
 const MENU_WIDTH_PX = 280;
 
 export function ThemePicker({
@@ -68,13 +66,10 @@ export function ThemePicker({
   // The server and first client render must agree. Installed themes and the
   // active id come from browser storage, so reading either here leaves React
   // with an attribute mismatch it deliberately will not patch during hydration.
-  const initialState = useRef<{ themes: DormouseTheme[]; activeId: string }>(null);
-  if (initialState.current === null) {
-    const themes = getBundledThemes();
-    initialState.current = { themes, activeId: themes[0]?.id ?? '' };
-  }
-  const [themes, setThemes] = useState(initialState.current.themes);
-  const [activeId, setActiveId] = useState(initialState.current.activeId);
+  // `getBundledThemes` is the same module array every call, so both initializers
+  // are stable without a ref to latch them.
+  const [themes, setThemes] = useState(getBundledThemes);
+  const [activeId, setActiveId] = useState(() => themes[0]?.id ?? '');
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const [storeOpen, setStoreOpen] = useState(false);
   const [debuggerOpen, setDebuggerOpen] = useState(false);
@@ -92,19 +87,13 @@ export function ThemePicker({
   const inDialog = variant === 'settings-dialog';
   const activeTheme = themes.find((theme) => theme.id === activeId) ?? themes[0];
 
-  const { setTriggerEl, setMenuEl, menuStyle } = useAnchoredMenu(open, MENU_WIDTH_PX, {
-    side: inDialog ? 'below' : menuSide,
-    align: inDialog ? 'start' : 'end',
-  });
-
-  // Hosts restore the visible body theme at boot. The picker separately
-  // reconciles its stored rows and selected value after hydration so its first
-  // markup stays deterministic without leaving its label or swatch stale.
-  useBrowserLayoutEffect(() => {
-    const theme = restoreActiveTheme();
-    setThemes(getAllThemes());
-    if (theme) setActiveId(theme.id);
-  }, []);
+  // `compact` stays absolute to its trigger: a fixed descendant of the docs'
+  // sticky mobile bar is offset by that containing block in Chromium.
+  const { setTriggerEl, setMenuEl, menuStyle } = useAnchoredMenu(
+    open,
+    MENU_WIDTH_PX,
+    inDialog ? undefined : { side: menuSide, align: 'end', strategy: 'absolute' },
+  );
 
   const closeDropdown = useCallback(() => setOpen(false), [setOpen]);
   useCloseOnOutsideAndEscape(open, rootRef, closeDropdown);
@@ -114,6 +103,11 @@ export function ThemePicker({
     const theme = restoreActiveTheme();
     if (theme) setActiveId(theme.id);
   }, []);
+
+  // Hosts restore the visible body theme at boot. The picker separately
+  // reconciles its stored rows and selected value after hydration so its first
+  // markup stays deterministic without leaving its label or swatch stale.
+  useBrowserLayoutEffect(refreshThemes, [refreshThemes]);
 
   const selectTheme = (id: string) => {
     const theme = getTheme(id);
@@ -133,26 +127,6 @@ export function ThemePicker({
     refreshThemes();
   };
 
-  // Critical geometry is inline and owned by the component. The docs website
-  // consumes raw library JSX without the lib stylesheet, so utility classes
-  // alone cannot carry the viewport cap, stacking, or flex-shrink contract.
-  // Compact stays absolute to its trigger: a fixed descendant of the docs'
-  // sticky mobile bar is offset by that containing block in Chromium.
-  const compactMenuStyle = {
-    width: menuStyle.width,
-    zIndex: menuStyle.zIndex,
-    maxHeight: menuStyle.maxHeight,
-    position: 'absolute',
-    right: 0,
-    ...(menuSide === 'above'
-      ? { bottom: 'calc(100% + 4px)' }
-      : { top: 'calc(100% + 4px)' }),
-  } satisfies React.CSSProperties;
-  const panelStyle = {
-    ...styles.panel,
-    ...(inDialog ? menuStyle : compactMenuStyle),
-  };
-
   return (
     <div ref={rootRef} className="relative flex items-center">
       <button
@@ -162,8 +136,9 @@ export function ThemePicker({
         aria-expanded={open}
         aria-label={`Theme: ${activeTheme?.label ?? 'Select theme'}`}
         onClick={() => setOpen(!open)}
-        className={chromeButton({ kind: 'labeled' })}
-        style={inDialog ? undefined : styles.compactTrigger}
+        // The compact trigger stands alone on a touch surface, so it takes the
+        // 44px minimum the dialog row inherits from the dialog around it.
+        className={`${chromeButton({ kind: 'labeled' })} ${inDialog ? '' : 'min-h-11 min-w-11'}`}
       >
         {activeTheme ? <ThemeSwatch theme={activeTheme} /> : null}
         <span className="min-w-0 truncate">
@@ -172,27 +147,31 @@ export function ThemePicker({
         <CaretDownIcon size={10} weight="bold" className="shrink-0 opacity-65" aria-hidden="true" />
       </button>
 
-      {/* The class is a harmless fallback; inline geometry owns the panel in
-          hosts that do not compile the library's utilities. */}
+      {/* `OVERLAY_MAX_HEIGHT.popover` is the cap for the frame before the
+          trigger has been measured; `menuStyle` narrows it to the space
+          actually left beside the trigger from then on. */}
       {open ? (
         <div
           ref={setMenuEl}
           role="menu"
           aria-label="Select theme"
-          className={`z-50 flex flex-col overflow-hidden rounded border font-mono shadow-2xl ${OVERLAY_MAX_HEIGHT.popover}`}
-          style={panelStyle}
+          className={`${POPUP_SURFACE_CLASS} flex flex-col overflow-hidden ${OVERLAY_MAX_HEIGHT.popover}`}
+          style={menuStyle}
         >
-          {/* max-h-80 is a ceiling on a tall screen, never a floor: the
-              panel's own viewport cap shrinks this further on a short one. */}
-          <div className="max-h-80 min-h-0 flex-1 overflow-y-auto py-1" style={styles.list}>
+          {/* max-h-80 is a ceiling on a tall screen, never a floor: the panel's
+              own viewport cap shrinks this further on a short one. */}
+          <div className="max-h-80 min-h-0 flex-1 overflow-y-auto py-1">
             {themes.map((theme) => {
               const isActive = theme.id === activeId;
               const isInstalled = theme.origin.kind === 'installed';
               return (
                 <div
                   key={theme.id}
-                  className="flex items-center transition-colors"
-                  style={isActive ? styles.activeRow : styles.foreground}
+                  className={`flex items-center transition-colors ${
+                    isActive
+                      ? 'bg-header-active-bg text-header-active-fg'
+                      : 'text-foreground'
+                  }`}
                 >
                   <button
                     type="button"
@@ -231,15 +210,14 @@ export function ThemePicker({
             })}
           </div>
 
-          <div className="shrink-0 border-t p-1" style={{ ...styles.border, ...styles.footer }}>
+          <div className="shrink-0 border-t border-border p-1">
             <button
               type="button"
               onClick={() => {
                 setOpen(false);
                 setDebuggerOpen(true);
               }}
-              className="w-full rounded px-3 py-1.5 text-left text-sm font-medium transition-opacity hover:opacity-85"
-              style={styles.foreground}
+              className="w-full rounded px-3 py-1.5 text-left text-sm font-medium text-foreground transition-opacity hover:opacity-85"
             >
               Debug current theme
             </button>
@@ -249,8 +227,7 @@ export function ThemePicker({
                 setOpen(false);
                 setStoreOpen(true);
               }}
-              className="w-full rounded px-3 py-1.5 text-left text-sm font-medium transition-opacity hover:opacity-85"
-              style={styles.link}
+              className="w-full rounded px-3 py-1.5 text-left text-sm font-medium text-link transition-opacity hover:opacity-85"
             >
               Install theme from OpenVSX
             </button>

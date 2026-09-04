@@ -92,9 +92,11 @@ export const REPO_BLOB_BASE = 'https://github.com/diffplug/dormouse/blob/main';
  * `scripts/spec-lint.mjs` verifies down to the fragment, as it cannot for a
  * URL. `assertRouteFragments` then holds the fragment against the page.
  */
+/** Trailing slash: the form the host serves, as everywhere else in-site (see
+ *  `sitePath` in website/src/lib/site-meta.ts). */
 export const SITE_ROUTES = {
-  'SELF_HOST.md': '/docs/self-host',
-  'docs/specs/security.md': '/docs/security',
+  'SELF_HOST.md': '/docs/self-host/',
+  'docs/specs/security.md': '/docs/security/',
 };
 /** Where the unpublished half of SELF_HOST.md is still readable. */
 const SELF_HOST_CANONICAL_URL = `${REPO_BLOB_BASE}/SELF_HOST.md`;
@@ -442,7 +444,14 @@ function localizeSiteLinks(blocks) {
     const url = new URL(node.href);
     if (url.origin !== SITE_ORIGIN) return;
     const from = node.href;
-    node.href = `${url.pathname}${url.search}${url.hash}`;
+    // Trailing slash for the same reason `sitePath` in
+    // website/src/lib/site-meta.ts adds one: the host 308s the bare path, and a
+    // prose link should reach the page rather than a redirect. `/` is already
+    // the served form, and a path carrying an extension is a file, not a route.
+    const served = url.pathname.endsWith('/') || /\.[a-z0-9]+$/i.test(url.pathname)
+      ? url.pathname
+      : `${url.pathname}/`;
+    node.href = `${served}${url.search}${url.hash}`;
     localized.push({ from, to: node.href });
   });
   return localized;
@@ -765,13 +774,15 @@ function linkSkillHeadings(skill, cli) {
   const headings = skill.blocks.filter((b) => b.type === 'heading');
   const links = {};
 
+  // Trailing slash: the served form, as everywhere else in-site.
+  const CLI_PAGE = '/docs/dor/';
   for (const prefix of CLI_INTRO_SECTIONS) {
     const anchor = slugify(prefix);
     if (!anchors.has(anchor)) {
       throw new Error(`skill reference target "#${anchor}" does not exist in the CLI reference`);
     }
     const heading = findExactlyOneHeading(headings, (h) => h.text.startsWith(prefix), prefix);
-    links[heading.id] = { href: `/docs/dor#${anchor}`, label: prefix };
+    links[heading.id] = { href: `${CLI_PAGE}#${anchor}`, label: prefix };
   }
 
   for (const heading of headings) {
@@ -788,7 +799,7 @@ function linkSkillHeadings(skill, cli) {
         `skill heading "${heading.text}" names dor ${named.join('/')}, which has no section in the CLI reference`,
       );
     }
-    links[heading.id] = { href: `/docs/dor#${anchor}`, label: `dor ${named[0]}` };
+    links[heading.id] = { href: `${CLI_PAGE}#${anchor}`, label: `dor ${named[0]}` };
   }
 
   return links;

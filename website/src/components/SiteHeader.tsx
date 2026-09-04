@@ -1,5 +1,6 @@
 import { forwardRef } from "react";
 import { DOCS_PAGES } from "../lib/docs-pages";
+import { sitePath } from "../lib/site-meta";
 
 export const STATIC_PAGE_HEADER_STYLE: React.CSSProperties = {
   background: "rgba(10, 10, 10, 0.85)",
@@ -14,12 +15,14 @@ const NAV_LINKS: readonly {
   /** Paths this entry highlights for, when the href itself is never a page. */
   covers?: readonly string[];
 }[] = [
-  { href: "/playground", label: "Playground" },
+  { href: sitePath("/playground"), label: "Playground" },
   { href: "/#download", label: "Download", hideOnMobile: true },
   // Desktop only: on a phone the docs are reached from the homepage's own
   // links, and the four marketing destinations earn the narrow bar first.
   // `/docs` only ever redirects, so it can never equal the current path — it
-  // highlights for the pages it leads to instead.
+  // highlights for the pages it leads to instead. Left bare for that reason:
+  // it is an entrypoint `website/public/_redirects` owns, not a served page,
+  // so `sitePath` has nothing to point it at.
   {
     href: "/docs",
     label: "Docs",
@@ -65,7 +68,7 @@ const SiteHeader = forwardRef<HTMLElement, SiteHeaderProps>(
     style,
   }, ref) {
     const navLinks = activePath === "/playground"
-      ? NAV_LINKS.filter(({ href }) => href !== "/playground")
+      ? NAV_LINKS.filter(({ href }) => href !== sitePath("/playground"))
       : NAV_LINKS;
 
     const headerStyle: React.CSSProperties = themeAware

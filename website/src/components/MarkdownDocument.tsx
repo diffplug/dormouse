@@ -10,12 +10,16 @@
  */
 import { Fragment, type ReactNode } from "react";
 import {
+  BODY_TEXT_CLASS,
   CODE_CLASS,
   LINK_CLASS,
+  MUTED_TEXT_CLASS,
   PRE_CLASS,
   SCROLL_MT_CLASS,
   TABLE_CLASS,
+  TABLE_HEAD_ROW_CLASS,
   TABLE_ROW_CLASS,
+  TH_CLASS,
   TABLE_WRAP_CLASS,
 } from "./docs-tokens";
 
@@ -189,7 +193,7 @@ function Block({ node }: { node: BlockNode }): ReactNode {
       );
     case "paragraph":
       return (
-        <p className={node.tight ? "leading-relaxed" : "text-lg leading-relaxed opacity-80 mb-4"}>
+        <p className={node.tight ? "leading-relaxed" : `mb-4 ${BODY_TEXT_CLASS}`}>
           <Inline nodes={node.children} />
         </p>
       );
@@ -202,7 +206,7 @@ function Block({ node }: { node: BlockNode }): ReactNode {
     case "list": {
       const Tag = node.ordered ? "ol" : "ul";
       return (
-        <Tag className={`mb-4 space-y-2 pl-6 text-lg opacity-80 ${node.ordered ? "list-decimal" : "list-disc"}`}>
+        <Tag className={`mb-4 space-y-2 pl-6 text-lg ${MUTED_TEXT_CLASS} ${node.ordered ? "list-decimal" : "list-disc"}`}>
           {node.items.map((item, i) => (
             <li key={i} className="leading-relaxed">
               <Blocks nodes={item.children} />
@@ -216,9 +220,9 @@ function Block({ node }: { node: BlockNode }): ReactNode {
         <div className={`mb-6 ${TABLE_WRAP_CLASS}`}>
           <table className={TABLE_CLASS}>
             <thead>
-              <tr className="border-b border-[var(--color-text)]/25">
+              <tr className={TABLE_HEAD_ROW_CLASS}>
                 {node.header.map((cell, i) => (
-                  <th key={i} className="py-2 pr-4 font-display font-normal whitespace-nowrap">
+                  <th key={i} className={TH_CLASS}>
                     <Inline nodes={cell} />
                   </th>
                 ))}
@@ -228,7 +232,7 @@ function Block({ node }: { node: BlockNode }): ReactNode {
               {node.rows.map((row, r) => (
                 <tr key={r} className={TABLE_ROW_CLASS}>
                   {row.map((cell, c) => (
-                    <td key={c} className="py-2 pr-4 align-top opacity-80">
+                    <td key={c} className={`py-2 pr-4 align-top ${MUTED_TEXT_CLASS}`}>
                       <Inline nodes={cell} />
                     </td>
                   ))}
@@ -240,7 +244,7 @@ function Block({ node }: { node: BlockNode }): ReactNode {
       );
     case "blockquote":
       return (
-        <blockquote className="mb-4 border-l-2 border-[var(--docs-accent)]/50 pl-4 opacity-80">
+        <blockquote className={`mb-4 border-l-2 border-[var(--docs-accent)]/50 pl-4 ${MUTED_TEXT_CLASS}`}>
           <Blocks nodes={node.children} />
         </blockquote>
       );

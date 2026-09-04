@@ -40,6 +40,9 @@ export const MUTED_TEXT_CLASS = "text-[var(--docs-text-muted)]";
 /** Opaque secondary text corrected for `CARD_BASE`'s foreground tint. */
 export const CARD_MUTED_TEXT_CLASS = "text-[var(--docs-card-text-muted)]";
 
+/** Opaque secondary text corrected for `NOTE_CLASS`'s caramel tint. */
+export const NOTE_MUTED_TEXT_CLASS = "text-[var(--docs-note-text-muted)]";
+
 /**
  * How far a jumped-to anchor clears the chrome above it.
  *
@@ -77,6 +80,28 @@ export const CARD_ACCENT_CLASS = `${CARD_BASE} ${ACCENT_BORDER_CLASS}`;
  *  reader's accent: it flags an editorial note, not a link target. */
 export const NOTE_CLASS =
   "rounded-lg border border-[var(--color-caramel)]/30 bg-[var(--color-caramel)]/[0.06] p-4 leading-relaxed";
+
+/**
+ * Every tinted container muted text renders on, each pairing the tint the
+ * reader sees with the exact composite that derives its token.
+ *
+ * A tint shifts the surface out from under `--docs-text-muted`, which sits
+ * *at* 4.5:1 against the untinted page: `NOTE_CLASS` paired with
+ * `MUTED_TEXT_CLASS` measured 4.42:1 on the site's own palette. **Adding a
+ * tinted container adds an entry here** — `DocsLayout`'s paint effect and
+ * `website/src/lib/docs-accent.test.ts` both loop this list, so the CSS
+ * variable, the static fallback, and the per-theme AA check come with it.
+ *
+ * `tintVar` is resolved off the live `body`, so it follows the reader's theme
+ * where the token does (`--color-text`) and stays fixed where it does not
+ * (`--color-caramel`). The class strings above are still written out: Tailwind
+ * scans source statically and never sees an interpolated utility, so the alpha
+ * here is the one that must match the literal beside it.
+ */
+export const TINTED_DOCS_SURFACES = [
+  { token: "--docs-card-text-muted", tintVar: "--color-text", tintAlpha: 0.04 },
+  { token: "--docs-note-text-muted", tintVar: "--color-caramel", tintAlpha: 0.06 },
+] as const;
 
 /** Reference body prose: the shared size, leading, and muted colour. Callers
  *  add their own flow margin. */

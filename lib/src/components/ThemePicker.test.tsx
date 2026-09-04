@@ -51,21 +51,23 @@ describe('ThemePicker', () => {
     return container.querySelector<HTMLDivElement>('[role="menu"]')!;
   }
 
-  it('owns compact touch and menu geometry without a host stylesheet', () => {
-    act(() => root.render(<ThemePicker variant="compact" />));
-    const trigger = container.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!;
-    expect(trigger.style.minHeight).toBe('44px');
-    expect(trigger.style.minWidth).toBe('44px');
-
-    act(() => trigger.click());
-    const menu = container.querySelector<HTMLDivElement>('[role="menu"]')!;
+  // Only the geometry `useAnchoredMenu` computes — the rest of the panel is
+  // Tailwind, and asserting a class list would fail on any equivalent restyle
+  // while passing on real breakage (docs/specs/theme.rationale.md).
+  it('offsets the compact menu off its trigger, capped to the viewport', () => {
+    const menu = openCompact();
     expect(menu.style.position).toBe('absolute');
     expect(menu.style.right).toBe('0px');
     expect(menu.style.top).toBe('calc(100% + 4px)');
     expect(menu.style.width).toBe('280px');
-    expect(menu.style.maxHeight).toContain('100dvh - 24px');
     expect(menu.style.maxHeight).toContain('min(');
-    expect(menu.style.display).toBe('flex');
+    expect(menu.style.maxHeight).toContain('100dvh - 24px');
+  });
+
+  it('opens the compact menu upward when asked, off the same edge', () => {
+    const menu = openCompact({ menuSide: 'above' });
+    expect(menu.style.bottom).toBe('calc(100% + 4px)');
+    expect(menu.style.top).toBe('');
   });
 
   it('reports a pick even when it does not change the active theme', () => {

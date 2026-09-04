@@ -46,9 +46,11 @@ body {
      is the whole prerendered page and the no-JS reading of it.
      `docs-accent.test.ts` pins the value. */
   --docs-text-muted: #767676;
-  /* #787878 is the same foreground derived against the 4% card surface;
-     `docs-accent.test.ts` pins the composite and this fallback. */
+  /* #787878 is the same foreground derived against the 4% card surface, and
+     #7b7977 against the note's 6% caramel; `docs-accent.test.ts` pins every
+     composite in `TINTED_DOCS_SURFACES` and its fallback. */
   --docs-card-text-muted: #787878;
+  --docs-note-text-muted: #7b7977;
 }
 
 html {

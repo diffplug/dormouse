@@ -12,12 +12,12 @@
  * restated here — docs/specs/website-docs.md -> `/docs/security` spec.
  */
 import { type MetaArgs } from "react-router";
-import { siteMeta } from "../lib/site-meta";
+import { siteMeta, sitePath } from "../lib/site-meta";
 import selfhost from "../data/docs.selfhost.json";
 import security from "../data/docs.security.json";
 import DocsLayout from "../components/DocsLayout";
 import { HostingRequirementNotice } from "../components/HostingRequirementNotice";
-import { CODE_CLASS, LINK_CLASS } from "../components/docs-tokens";
+import { BODY_TEXT_CLASS, CODE_CLASS, LINK_CLASS, NOTE_CLASS, NOTE_MUTED_TEXT_CLASS } from "../components/docs-tokens";
 import MarkdownDocument, { AnchoredHeading, type BlockNode } from "../components/MarkdownDocument";
 import { type TocEntry } from "../lib/docs-pages";
 
@@ -57,14 +57,14 @@ export default function SelfHostDocs() {
       toc={SELF_HOST_TOC}
     >
       <AnchoredHeading id="security-model">Security model</AnchoredHeading>
-      <p className="mb-4 text-lg leading-relaxed opacity-80">
+      <p className={`mb-4 ${BODY_TEXT_CLASS}`}>
         What remote control and this deployment guarantee, rendered from the{" "}
-        <a href="/docs/security" className={LINK_CLASS}>
+        <a href={sitePath("/docs/security")} className={LINK_CLASS}>
           security spec
         </a>{" "}
         the nightly audit reads. Each row names the spec that states the rule and what
         pins it on every build; the audit that checks all of them is described under{" "}
-        <a href="/docs/security#how-the-guarantees-are-checked" className={LINK_CLASS}>
+        <a href={`${sitePath("/docs/security")}#how-the-guarantees-are-checked`} className={LINK_CLASS}>
           how the guarantees are checked
         </a>
         .
@@ -78,16 +78,16 @@ export default function SelfHostDocs() {
           <MarkdownDocument blocks={[block as BlockNode]} />
         </div>
       ))}
-      <p className="mb-8 text-lg leading-relaxed opacity-80">
+      <p className={`mb-8 ${BODY_TEXT_CLASS}`}>
         The exact runtime and server dependencies installed by this runbook are listed in
         the{" "}
-        <a href="/supply-chain" className={LINK_CLASS}>
+        <a href={sitePath("/supply-chain")} className={LINK_CLASS}>
           supply-chain disclosure
         </a>
         .
       </p>
 
-      <p className="mb-8 rounded-lg border border-[var(--color-caramel)]/30 bg-[var(--color-caramel)]/[0.06] p-4 leading-relaxed opacity-80">
+      <p className={`mb-8 ${NOTE_CLASS} ${NOTE_MUTED_TEXT_CLASS}`}>
         You do not have to follow this by hand. Clone{" "}
         <a href={REPO_URL} className={LINK_CLASS} target="_blank" rel="noopener noreferrer">
           the repository

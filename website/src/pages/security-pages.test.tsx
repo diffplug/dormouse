@@ -7,6 +7,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import security from "../data/docs.security.json";
+import { sitePath } from "../lib/site-meta";
 import SecurityDocs from "./SecurityDocs";
 import SelfHostDocs from "./SelfHostDocs";
 import SupplyChain from "./SupplyChain";
@@ -46,19 +47,25 @@ const PAGES = [
     route: "/docs/security",
     element: <SecurityDocs />,
     audience: "security",
-    links: ["/supply-chain", "/docs/self-host"],
+    links: [sitePath("/supply-chain"), sitePath("/docs/self-host")],
   },
   {
     route: "/supply-chain",
     element: <SupplyChain />,
     audience: "supply-chain",
-    links: ["/docs/security#how-the-guarantees-are-checked", "/docs/self-host#what-the-installer-does"],
+    links: [
+      `${sitePath("/docs/security")}#how-the-guarantees-are-checked`,
+      `${sitePath("/docs/self-host")}#what-the-installer-does`,
+    ],
   },
   {
     route: "/docs/self-host",
     element: <SelfHostDocs />,
     audience: "self-host",
-    links: ["/docs/security#how-the-guarantees-are-checked", "/supply-chain"],
+    links: [
+      `${sitePath("/docs/security")}#how-the-guarantees-are-checked`,
+      sitePath("/supply-chain"),
+    ],
   },
 ] as const;
 
@@ -75,7 +82,8 @@ describe("security-adjacent documentation", () => {
   // in a page component is invisible to it, and these pages write three. So
   // hold them against the anchors the page they name actually renders.
   it("a fragment into one of these pages names an anchor that page renders", () => {
-    const anchors = new Map(PAGES.map((page) => [page.route, anchorsOf(page.element)]));
+    // Keyed on the served form, which is what these pages link (`sitePath`).
+    const anchors = new Map(PAGES.map((page) => [sitePath(page.route), anchorsOf(page.element)]));
     const crossPage = PAGES.flatMap((page) =>
       [...renderMain(page.element).matchAll(/href="(\/[^"#]*)#([^"]+)"/g)]
         .filter(([, route]) => anchors.has(route))
@@ -127,7 +135,7 @@ describe("audience pages", () => {
       const securityLinks = [...renderMain(page.element).matchAll(/href="(\/docs\/security[^"]*)"/g)].map(
         ([, href]) => href,
       );
-      expect(securityLinks).toContain("/docs/security#how-the-guarantees-are-checked");
+      expect(securityLinks).toContain(`${sitePath("/docs/security")}#how-the-guarantees-are-checked`);
     });
   }
 });

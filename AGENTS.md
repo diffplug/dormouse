@@ -105,17 +105,16 @@ Five sibling lints run in `pnpm test`, each enforcing one invariant a spec state
 
 ## Design
 
-See [PRODUCT.md](PRODUCT.md) for users, brand personality, and aesthetic direction (including the anti-references), and [DESIGN.md](DESIGN.md) for the full design system — tokens, named rules, and component vocabulary. Key principles:
-
-1. **Native first** — Inside VSCode, feel indistinguishable from a built-in feature. Use the host's theme tokens.
-2. **Information density without intimidation** — Dense for power users, approachable for beginners. Progressive disclosure.
-3. **Status at a glance** — Scannable in under a second across many terminals.
-4. **No chrome, all content** — Minimize UI chrome. Terminals are the content.
-5. **Theme-adaptive** — Never hardcode colors. Support light and dark from day one.
+See [PRODUCT.md](PRODUCT.md) for the users, the positioning, and the brand
+commitments, and [DESIGN.md](DESIGN.md) for the full design system — tokens,
+named rules, and component vocabulary. PRODUCT.md's "Product Principles" and
+"Accessibility & Inclusion" are the design constraints, stated there once.
 
 The concrete type scale, color strategy (surfaces, foregrounds, header palette, dynamic door bg, selection ring), and shared chrome constants live in
 [`lib/src/components/design.tsx`](lib/src/components/design.tsx) — read it
 before adding or changing any `text-*`, `bg-*`, `text-color-*`, or border
-class anywhere in `lib/src/`. The actual `@theme` token definitions are in
-[`lib/src/theme.css`](lib/src/theme.css); when adding or removing a token,
-update both files together.
+class anywhere in `lib/src/`. The `@theme` token definitions are split: colors
+in [`lib/src/theme-colors.css`](lib/src/theme-colors.css), which a host can
+import on its own, and the type scale, fonts, and animation tokens in
+[`lib/src/theme.css`](lib/src/theme.css). When adding or removing a color
+token, update `theme-colors.css` and `design.tsx` together.

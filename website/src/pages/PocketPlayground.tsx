@@ -9,6 +9,8 @@ import { ShareUrlButton } from "../components/ShareUrlButton";
 import { ThemePicker } from "dormouse-lib/components/ThemePicker";
 import { useRestoredTheme } from "dormouse-lib/lib/themes";
 import { POCKET_PLAYGROUND_PATH, usePreferredPlayground } from "../lib/playground-routing";
+import { sitePath } from "../lib/site-meta";
+import { SITE_LINK_CLASS } from "../components/site-tokens";
 
 function MobilePocketPlaygroundPage() {
   useRestoredTheme(POCKET_THEME_ID);
@@ -49,7 +51,7 @@ function DesktopPocketPlaygroundPage() {
           </p>
           <p className="mb-4 text-lg leading-relaxed opacity-70">
             Run the coordinating server yourself, or{" "}
-            <a href="/hosted/#remote-control" className="text-[var(--color-caramel)] underline-offset-2 hover:underline">
+            <a href={`${sitePath("/hosted")}#remote-control`} className={SITE_LINK_CLASS}>
               join the list for Dormouse Hosted
             </a>, where I’ll operate it for you. Your terminal still runs on your awake,
             online computer; Hosted removes the server setup and maintenance.

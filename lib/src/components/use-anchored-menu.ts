@@ -1,38 +1,52 @@
 import { useEffect, useState, type CSSProperties, type RefObject } from 'react';
-import { MODAL_LAYERS, useMeasuredElementRect } from './design';
+import { MODAL_LAYERS, OVERLAY_MAX_HEIGHT_CSS, useMeasuredElementRect } from './design';
 import { clampOverlayPosition, OVERLAY_VIEWPORT_MARGIN_PX } from '../lib/ui-geometry';
 
-/** Gap between the trigger's bottom edge and the top of the menu. */
+/** Gap between the trigger's near edge and the menu. */
 const MENU_GAP_PX = 4;
 
 interface AnchoredMenuOptions {
+  /** Which side of the trigger the menu opens toward. */
   side?: 'above' | 'below';
+  /** Which of the menu's edges lines up with the trigger's matching edge. */
   align?: 'start' | 'end';
+  /**
+   * `fixed` measures the menu and positions it in viewport coordinates;
+   * `absolute` offsets it off the trigger in CSS alone.
+   *
+   * Fixed is the default because the Settings dialog surface is
+   * `overflow-y-auto` and would clip an absolutely-positioned menu; a fixed
+   * descendant escapes ancestor overflow because no modal ancestor sets
+   * `transform`. Absolute is for a trigger inside a `position: sticky`
+   * ancestor, which Chromium treats as the containing block for fixed
+   * descendants and so offsets them by it.
+   */
+  strategy?: 'fixed' | 'absolute';
 }
 
 /**
- * Position a dropdown menu off its trigger's measured rect, `position: fixed`.
+ * Position a dropdown menu off its trigger's measured rect.
  *
- * Fixed rather than absolute because the Settings dialog surface is
- * `overflow-y-auto` and would clip an absolutely-positioned menu; a fixed
- * descendant escapes ancestor overflow because no modal ancestor sets
- * `transform`. The menu's own rect feeds the viewport clamp, so a long list
- * can't run off the bottom of a short window — it is 0 on the first pass, which
- * is why the returned style keeps the menu hidden until it has been measured.
- * The returned height cap also reserves the real space between the trigger and
- * the viewport edge; a full-viewport cap alone is too tall once the panel starts
- * below the top edge.
+ * The returned style is the menu's whole geometry — width, stacking, height
+ * cap, and placement — so no caller re-implements placement beside it.
+ *
+ * The height cap reserves the real space between the trigger and the viewport
+ * edge; a full-viewport cap alone is too tall once the panel starts below the
+ * top edge. Under `fixed` the menu's own rect also feeds the viewport clamp, so
+ * a long list can't run off the bottom of a short window — it is unmeasured on
+ * the first pass, which is why the style keeps the menu hidden until then.
  *
  * The style also carries the stacking (`MODAL_LAYERS.app`): inside the Settings
  * dialog the alarm sections' `opacity-50` wrappers are stacking contexts too,
  * and being later in tree order they would otherwise paint through the menu.
  *
- * `open` gates the measurement so closed pickers do not keep observers alive.
+ * `open` gates the measurement so closed pickers do not keep observers alive,
+ * and `absolute` never measures the menu at all.
  */
 export function useAnchoredMenu(
   open: boolean,
   widthPx: number,
-  { side = 'below', align = 'start' }: AnchoredMenuOptions = {},
+  { side = 'below', align = 'start', strategy = 'fixed' }: AnchoredMenuOptions = {},
 ): {
   setTriggerEl: (element: HTMLElement | null) => void;
   setMenuEl: (element: HTMLElement | null) => void;
@@ -42,7 +56,7 @@ export function useAnchoredMenu(
   const [menuEl, setMenuEl] = useState<HTMLElement | null>(null);
 
   const triggerRect = useMeasuredElementRect(open ? triggerEl : null);
-  const menuRect = useMeasuredElementRect(open ? menuEl : null);
+  const menuRect = useMeasuredElementRect(open && strategy === 'fixed' ? menuEl : null);
 
   const availableHeight = triggerRect
     ? Math.max(
@@ -55,26 +69,35 @@ export function useAnchoredMenu(
       )
     : null;
 
+  const placement: CSSProperties =
+    strategy === 'absolute'
+      ? {
+          position: 'absolute',
+          ...(align === 'end' ? { right: 0 } : { left: 0 }),
+          ...(side === 'above'
+            ? { bottom: `calc(100% + ${MENU_GAP_PX}px)` }
+            : { top: `calc(100% + ${MENU_GAP_PX}px)` }),
+        }
+      : triggerRect && menuRect
+        ? clampOverlayPosition({
+            left: align === 'end'
+              ? triggerRect.left + triggerRect.width - widthPx
+              : triggerRect.left,
+            top: side === 'above'
+              ? triggerRect.top - menuRect.height - MENU_GAP_PX
+              : triggerRect.top + triggerRect.height + MENU_GAP_PX,
+            width: widthPx,
+            height: menuRect.height,
+          })
+        : { position: 'fixed', visibility: 'hidden' };
+
   const menuStyle: CSSProperties = {
     width: widthPx,
     zIndex: MODAL_LAYERS.app,
     ...(availableHeight === null
       ? null
-      : {
-          maxHeight: `min(var(--overlay-max-h-popover, calc(100dvh - 24px)), ${availableHeight}px)`,
-        }),
-    ...(triggerRect && menuRect
-      ? clampOverlayPosition({
-          left: align === 'end'
-            ? triggerRect.left + triggerRect.width - widthPx
-            : triggerRect.left,
-          top: side === 'above'
-            ? triggerRect.top - menuRect.height - MENU_GAP_PX
-            : triggerRect.top + triggerRect.height + MENU_GAP_PX,
-          width: widthPx,
-          height: menuRect.height,
-        })
-      : { position: 'fixed', visibility: 'hidden' }),
+      : { maxHeight: `min(${OVERLAY_MAX_HEIGHT_CSS.popover}, ${availableHeight}px)` }),
+    ...placement,
   };
 
   return { setTriggerEl, setMenuEl, menuStyle };

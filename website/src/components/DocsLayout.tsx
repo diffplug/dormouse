@@ -26,6 +26,7 @@ import {
   ACCENT_TEXT_CLASS,
   MUTED_ACCENT_LINK_CLASS,
   MUTED_TEXT_CLASS,
+  TINTED_DOCS_SURFACES,
   TOC_INDENT_CLASS,
 } from "./docs-tokens";
 import { DOCS_PAGES, docsRailPosition, type DocsPage, type TocEntry } from "../lib/docs-pages";
@@ -175,9 +176,17 @@ export default function DocsLayout({
       }
       const muted = docsMutedTextFor(foreground, background);
       if (muted) document.body.style.setProperty("--docs-text-muted", muted);
-      const cardSurface = compositeColor(foreground, background, 0.04);
-      const cardMuted = cardSurface && docsMutedTextFor(foreground, cardSurface);
-      if (cardMuted) document.body.style.setProperty("--docs-card-text-muted", cardMuted);
+
+      // One pass per tinted container, so a new one is an entry in the table
+      // rather than another pair of lines whose alpha has to match a class
+      // string somewhere else (website/src/components/docs-tokens.ts).
+      const styles = getComputedStyle(document.body);
+      for (const { token, tintVar, tintAlpha } of TINTED_DOCS_SURFACES) {
+        const tint = styles.getPropertyValue(tintVar).trim();
+        const surface = tint && compositeColor(tint, background, tintAlpha);
+        const surfaceMuted = surface && docsMutedTextFor(foreground, surface);
+        if (surfaceMuted) document.body.style.setProperty(token, surfaceMuted);
+      }
     };
     paint();
     return subscribeToActiveTheme(paint);

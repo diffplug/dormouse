@@ -11,7 +11,7 @@ import {
 } from 'react';
 import { DEFAULT_PAIRING_TTL_MS } from 'server-lib-common';
 import { ModalReviewBlock, TextInput, modalActionButton } from './design';
-import { getPlatform } from '../lib/platform';
+import { ExternalTextLink } from './ExternalTextLink';
 import type { RemoteHostConsoleStatus, SetupQrResult } from '../host/remote/service-protocol';
 import type {
   PairingOutcome,
@@ -1031,13 +1031,9 @@ function EnrollForm({
       <div className="text-sm leading-relaxed text-muted">
         Connect this machine to a Dormouse server to control it from your phone.
         {' '}
-        <button
-          type="button"
-          onClick={() => getPlatform().openExternal?.(HOSTED_REMOTE_URL)}
-          className="text-foreground underline underline-offset-2 hover:text-muted"
-        >
+        <ExternalTextLink href={HOSTED_REMOTE_URL}>
           Prefer not to run one? Hosted is coming soon.
-        </button>
+        </ExternalTextLink>
       </div>
 
       <label className="mt-2 block">

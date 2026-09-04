@@ -9,7 +9,7 @@
  */
 
 import { AnchoredHeading } from "./MarkdownDocument";
-import { ACCENT_TEXT_CLASS, PRE_CLASS, TABLE_CLASS, TABLE_ROW_CLASS, TABLE_WRAP_CLASS } from "./docs-tokens";
+import { ACCENT_TEXT_CLASS, BODY_TEXT_CLASS, MUTED_TEXT_CLASS, PRE_CLASS, TABLE_CLASS, TABLE_ROW_CLASS, TABLE_WRAP_CLASS } from "./docs-tokens";
 
 export type DefinitionGroup = { label: string; rows: { term: string; description: string }[] };
 export type LabelledBlock = { label: string; body: string };
@@ -47,7 +47,7 @@ export default function DorCommandReference({
   return (
     <section className="mb-14">
       <AnchoredHeading id={section.id} depth={depth} spacing="mb-1">{section.title}</AnchoredHeading>
-      <p className="mb-4 font-mono text-sm opacity-60">{section.invocation}</p>
+      <p className={`mb-4 font-mono text-sm ${MUTED_TEXT_CLASS}`}>{section.invocation}</p>
 
       {section.usage.length > 0 && (
         <pre className={`${PRE_CLASS} mb-4`}>
@@ -56,14 +56,14 @@ export default function DorCommandReference({
       )}
 
       {section.prose.map((paragraph, i) => (
-        <p key={i} className="mb-4 text-lg leading-relaxed opacity-80">
+        <p key={i} className={`mb-4 ${BODY_TEXT_CLASS}`}>
           {paragraph}
         </p>
       ))}
 
       {section.definitions.map((group, i) => (
         <div key={i} className="mb-6">
-          <LabelTag className="mb-2 font-display text-sm uppercase tracking-wide opacity-50">{group.label}</LabelTag>
+          <LabelTag className={`mb-2 font-display text-sm uppercase tracking-wide ${MUTED_TEXT_CLASS}`}>{group.label}</LabelTag>
           <div className={TABLE_WRAP_CLASS}>
             <table className={TABLE_CLASS}>
               <tbody>
@@ -72,7 +72,7 @@ export default function DorCommandReference({
                     <td className={`py-2 pr-4 align-top font-mono text-sm whitespace-nowrap ${ACCENT_TEXT_CLASS}`}>
                       {row.term}
                     </td>
-                    <td className="py-2 align-top opacity-80">{row.description}</td>
+                    <td className={`py-2 align-top ${MUTED_TEXT_CLASS}`}>{row.description}</td>
                   </tr>
                 ))}
               </tbody>
@@ -83,7 +83,7 @@ export default function DorCommandReference({
 
       {section.blocks.map((block, i) => (
         <div key={i} className="mb-4">
-          <LabelTag className="mb-2 font-display text-sm uppercase tracking-wide opacity-50">{block.label}</LabelTag>
+          <LabelTag className={`mb-2 font-display text-sm uppercase tracking-wide ${MUTED_TEXT_CLASS}`}>{block.label}</LabelTag>
           <pre className={PRE_CLASS}>
             <code>{block.body}</code>
           </pre>
@@ -91,7 +91,7 @@ export default function DorCommandReference({
       ))}
 
       <details className="mt-4 rounded-lg border border-[var(--color-text)]/15">
-        <summary className="cursor-pointer px-4 py-2 text-sm opacity-70 hover:opacity-100">
+        <summary className={`cursor-pointer px-4 py-2 text-sm ${MUTED_TEXT_CLASS}`}>
           Exact <code className="font-mono">{section.invocation}</code> output
         </summary>
         <pre className="overflow-x-auto border-t border-[var(--color-text)]/15 p-4 font-mono text-sm">

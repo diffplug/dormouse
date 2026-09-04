@@ -83,3 +83,7 @@ audit-status.txt
 *.e2e-selftest.bak
 *.loopback-selftest.bak
 *.spec-selftest.bak
+
+# Impeccable per-developer state and generated critiques (design.json is shared).
+.impeccable/config.local.json
+.impeccable/critique/

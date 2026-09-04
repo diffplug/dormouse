@@ -9,9 +9,16 @@ import DocsLayout from "../components/DocsLayout";
 import { HostingRequirementNotice } from "../components/HostingRequirementNotice";
 import { AnchoredHeading } from "../components/MarkdownDocument";
 import { NotifySignupForm } from "../components/NotifySignupForm";
-import { LINK_CLASS, MUTED_TEXT_CLASS } from "../components/docs-tokens";
+import {
+  ACCENT_BORDER_CLASS,
+  ACCENT_TEXT_CLASS,
+  BODY_TEXT_CLASS,
+  CARD_CLASS,
+  LINK_CLASS,
+  MUTED_TEXT_CLASS,
+} from "../components/docs-tokens";
 import { type TocEntry } from "../lib/docs-pages";
-import { siteMeta } from "../lib/site-meta";
+import { siteMeta, sitePath } from "../lib/site-meta";
 
 export function meta({ location }: MetaArgs) {
   return siteMeta(location.pathname, {
@@ -28,9 +35,6 @@ export const HOSTED_TOC: TocEntry[] = [
   { id: "updates", text: "Get updates", children: [] },
 ];
 
-const CARD_CLASS =
-  "rounded-xl border border-[var(--color-text)]/15 bg-[var(--color-text)]/[0.035] p-5 sm:p-6";
-
 export default function Hosted() {
   return (
     <DocsLayout
@@ -45,13 +49,13 @@ export default function Hosted() {
             <CloudArrowUpIcon
               size={28}
               weight="duotone"
-              className="mb-4 text-[var(--docs-accent)]"
+              className={`mb-4 ${ACCENT_TEXT_CLASS}`}
               aria-hidden="true"
             />
             <AnchoredHeading id="remote-control" spacing="mt-0 mb-3">
               Remote control, without running the server
             </AnchoredHeading>
-            <p className="mb-4 font-display text-sm text-[var(--docs-accent)]">
+            <p className={`mb-4 font-display text-sm ${ACCENT_TEXT_CLASS}`}>
               Coming soon · paid convenience
             </p>
             <p className="mb-5 text-xl leading-relaxed">
@@ -60,7 +64,7 @@ export default function Hosted() {
             </p>
             <a
               href="#updates"
-              className="inline-flex min-h-12 items-center rounded-md border border-[var(--docs-accent)] px-5 py-3 font-display text-[var(--docs-accent)] hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--docs-accent)]"
+              className={`inline-flex min-h-12 items-center rounded-md border px-5 py-3 font-display hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--docs-accent)] ${ACCENT_BORDER_CLASS} ${ACCENT_TEXT_CLASS}`}
             >
               Follow the hosted launch →
             </a>
@@ -98,14 +102,14 @@ export default function Hosted() {
         <SpeakerHighIcon
           size={28}
           weight="duotone"
-          className="mb-3 text-[var(--docs-accent)]"
+          className={`mb-3 ${ACCENT_TEXT_CLASS}`}
           aria-hidden="true"
         />
         <AnchoredHeading id="voice" spacing="mt-0 mb-3">A more natural voice, optionally</AnchoredHeading>
-        <p className="mb-3 font-display text-sm text-[var(--docs-accent)]">
+        <p className={`mb-3 font-display text-sm ${ACCENT_TEXT_CLASS}`}>
           Planned after remote control · optional paid add-on
         </p>
-        <p className={`mb-4 text-lg leading-relaxed ${MUTED_TEXT_CLASS}`}>
+        <p className={`mb-4 ${BODY_TEXT_CLASS}`}>
           Dormouse can speak an unattended terminal’s name using your browser or system
           voice today. A hosted ElevenLabs option will add a more natural voice without
           making you set up or manage an ElevenLabs account.
@@ -120,7 +124,7 @@ export default function Hosted() {
         <CodeIcon
           size={28}
           weight="duotone"
-          className="mb-3 text-[var(--docs-accent)]"
+          className={`mb-3 ${ACCENT_TEXT_CLASS}`}
           aria-hidden="true"
         />
         <AnchoredHeading id="self-hosting" spacing="mt-0 mb-4">Self-hosting stays</AnchoredHeading>
@@ -128,16 +132,16 @@ export default function Hosted() {
           The coordinating server remains available in the repository under
           FSL-1.1-MIT and free for internal use. Hosted will be a paid convenience option,
           not a replacement. If you would rather operate it, the{" "}
-          <a href="/docs/self-host" className={LINK_CLASS}>
+          <a href={sitePath("/docs/self-host")} className={LINK_CLASS}>
             self-hosting guide
           </a>{" "}
           is ready now.
         </p>
       </section>
 
-      <section id="updates" className="mt-10 scroll-mt-28 md:scroll-mt-32 lg:scroll-mt-24">
-        <h2 className="mb-3 font-display text-2xl">Follow the launch</h2>
-        <p className={`mb-5 max-w-2xl text-lg leading-relaxed ${MUTED_TEXT_CLASS}`}>
+      <section className="mt-10">
+        <AnchoredHeading id="updates" spacing="mt-0 mb-3">Follow the launch</AnchoredHeading>
+        <p className={`mb-5 max-w-2xl ${BODY_TEXT_CLASS}`}>
           Pricing and dates are not set. Subscribe to my personal devlog on Substack and
           I’ll announce managed remote control and ElevenLabs voice there. This is not a
           product-only waitlist; you’ll also receive other devlog posts.

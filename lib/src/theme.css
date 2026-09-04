@@ -1,4 +1,4 @@
-/* Dormouse Theme System
+/* Dormouse Theme System — the app layer.
  *
  * Two-layer CSS variable strategy:
  *   @theme --color-* tokens -> var(--vscode-*)
@@ -6,15 +6,18 @@
  * In VSCode: --vscode-* variables are auto-injected.
  * In standalone/website: applyTheme() sets --vscode-* on document.body.
  *
- * This file intentionally does not provide hardcoded color defaults. Runtime
- * hosts must provide real VSCode variables, either from VSCode itself or from
- * a bundled/installed Dormouse theme.
+ * The colour half lives in ./theme-colors.css, which a host can import on its
+ * own; this file adds what only the Dormouse app wants — the terminal type
+ * scale, the font bindings, and the animation tokens and component classes.
+ * Importing *this* file resizes the host's type, which is why the split exists.
  *
  * Two consumers read --vscode-* variables:
- *   1. @theme/body bindings below — for UI colors (surfaces, tabs, etc.)
+ *   1. @theme/body bindings — for UI colors (surfaces, tabs, etc.)
  *   2. getTerminalTheme() in terminal-theme.ts — reads ANSI colors,
  *      cursor, and selection directly as --vscode-* for xterm.js
  */
+
+@import "./theme-colors.css";
 
 /* --- Font tokens (not Tailwind colors) --- */
 :root {
@@ -22,7 +25,7 @@
   --mt-font-family: var(--vscode-editor-font-family);
 }
 
-/* --- Tailwind token declarations --- */
+/* --- Tailwind token declarations (app layer; colours are next door) --- */
 @theme {
   /* Fonts */
   --font-sans: var(--vscode-editor-font-family);
@@ -35,55 +38,6 @@
   --text-sm: 0.75rem;           /*  12px */
   --text-sm--line-height: 1rem;
 
-  /* Surfaces — bg-only chrome; surface-raised is for floating surfaces only
-   * (popovers, dialogs), never resting structure. See docs/specs/theme.md. */
-  --color-surface-raised: var(--vscode-editorWidget-background);
-  --color-app-bg: var(--vscode-sideBar-background);
-  --color-app-fg: var(--vscode-sideBar-foreground);
-
-  /* Text */
-  --color-foreground: var(--vscode-editor-foreground);
-  --color-muted: var(--vscode-descriptionForeground);
-
-  /* Borders */
-  --color-border: var(--vscode-panel-border);
-
-  /* Chrome palette — anchored on VSCode file-tree list.* tokens. Pane headers
-   * use these four; doors take the dynamic pair below. */
-  --color-header-active-bg: var(--vscode-list-activeSelectionBackground);
-  --color-header-active-fg: var(--vscode-list-activeSelectionForeground);
-  --color-header-inactive-bg: var(--vscode-list-inactiveSelectionBackground);
-  --color-header-inactive-fg: var(--vscode-list-inactiveSelectionForeground);
-
-  /* Dynamic palette — useDynamicPalette() overrides these on body at runtime
-   * from the shared dynamic-palette helper, picking by OKLab distance/chroma.
-   *
-   *   --color-door-*    pick: (header-inactive bg/fg) or (terminal bg/fg)
-   *   --color-focus-ring  pick: focusBorder or header-active-bg */
-  --color-door-bg: var(--color-header-inactive-bg);
-  --color-door-fg: var(--color-header-inactive-fg);
-  --color-focus-ring: var(--vscode-focusBorder);
-
-  /* Terminal — xterm.js content, orthogonal to chrome */
-  --color-terminal-bg: var(--vscode-terminal-background);
-  --color-terminal-fg: var(--vscode-terminal-foreground);
-
-  /* Semantic status — use the active terminal palette. */
-  --color-error: var(--vscode-terminal-ansiRed);
-  --color-success: var(--vscode-terminal-ansiGreen);
-
-  /* Alarm — per-surface black/white contrast pick, computed at runtime by
-   * dynamic-palette.ts from the OKLab lightness of the bg the bell sits on.
-   * The binding below is only the baseline before the dynamic pass runs. */
-  --color-alarm-vs-header-active: var(--vscode-terminal-ansiYellow);
-  --color-alarm-vs-header-inactive: var(--vscode-terminal-ansiYellow);
-  --color-alarm-vs-door: var(--vscode-terminal-ansiYellow);
-  --color-alarm-vs-terminal: var(--vscode-terminal-ansiYellow);
-
-  /* Inputs — theme picker chrome and the Pocket auth fields */
-  --color-input-bg: var(--vscode-input-background);
-  --color-input-border: var(--vscode-input-border);
-
   /* Animation */
   --animate-bell-ring: bell-ring 800ms ease-in-out 4;
   --animate-speech-alarm-pulse: speech-alarm-pulse 650ms ease-in-out infinite;
@@ -95,35 +49,13 @@
  * Runtime source of truth: only body-level declarations can see the --vscode-*
  * variables applyTheme() writes to body.style. Every var()-bound token above
  * must be mirrored here with the same value (consumed-keys.test.ts enforces
- * this; rationale in docs/specs/theme.md). */
+ * this per file; rationale in docs/specs/theme.md). The colour tokens carry
+ * their own mirror in ./theme-colors.css. */
 body {
   --mt-font-size: var(--vscode-font-size);
   --mt-font-family: var(--vscode-editor-font-family);
   --font-sans: var(--vscode-editor-font-family);
   --font-mono: var(--vscode-editor-font-family);
-  --color-surface-raised: var(--vscode-editorWidget-background);
-  --color-app-bg: var(--vscode-sideBar-background);
-  --color-app-fg: var(--vscode-sideBar-foreground);
-  --color-foreground: var(--vscode-editor-foreground);
-  --color-muted: var(--vscode-descriptionForeground);
-  --color-border: var(--vscode-panel-border);
-  --color-header-active-bg: var(--vscode-list-activeSelectionBackground);
-  --color-header-active-fg: var(--vscode-list-activeSelectionForeground);
-  --color-header-inactive-bg: var(--vscode-list-inactiveSelectionBackground);
-  --color-header-inactive-fg: var(--vscode-list-inactiveSelectionForeground);
-  --color-door-bg: var(--color-header-inactive-bg);
-  --color-door-fg: var(--color-header-inactive-fg);
-  --color-focus-ring: var(--vscode-focusBorder);
-  --color-terminal-bg: var(--vscode-terminal-background);
-  --color-terminal-fg: var(--vscode-terminal-foreground);
-  --color-error: var(--vscode-terminal-ansiRed);
-  --color-success: var(--vscode-terminal-ansiGreen);
-  --color-alarm-vs-header-active: var(--vscode-terminal-ansiYellow);
-  --color-alarm-vs-header-inactive: var(--vscode-terminal-ansiYellow);
-  --color-alarm-vs-door: var(--vscode-terminal-ansiYellow);
-  --color-alarm-vs-terminal: var(--vscode-terminal-ansiYellow);
-  --color-input-bg: var(--vscode-input-background);
-  --color-input-border: var(--vscode-input-border);
 }
 
 @keyframes bell-ring {

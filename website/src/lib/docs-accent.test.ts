@@ -2,6 +2,22 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { completeThemeVars, getBundledThemes } from "dormouse-lib/lib/themes";
 import { compositeColor, contrastRatio, docsAccentFor, docsMutedTextFor } from "./docs-accent";
+import { TINTED_DOCS_SURFACES } from "../components/docs-tokens";
+
+/** The site's own palette, which `website/src/index.css` declares as literals
+ *  because the marketing pages are locked to it and prerender without JS. */
+const SITE_BACKGROUND = "#000000";
+const SITE_FOREGROUND = "#dedede";
+const SITE_CARAMEL = "#b47624";
+
+/** `--color-text` follows the reader's theme on a docs page; `--color-caramel`
+ *  is the fixed brand colour. A new `tintVar` is unmapped until it is added
+ *  here, so the table cannot grow an entry these tests silently mis-cover. */
+const tintFor = (tintVar: string, foreground: string): string => {
+  if (tintVar === "--color-text") return foreground;
+  if (tintVar === "--color-caramel") return SITE_CARAMEL;
+  throw new Error(`docs-accent.test.ts has no colour for tintVar ${tintVar}`);
+};
 
 const rgb = (hex: string): [number, number, number] => {
   const h = hex.replace("#", "");
@@ -102,17 +118,21 @@ describe("docs muted text colour", () => {
     }
   });
 
-  it("clears WCAG AA on the foreground-tinted card in every bundled theme", () => {
-    for (const t of themes) {
-      const cardSurface = compositeColor(t.foreground, t.background, 0.04)!;
-      const muted = docsMutedTextFor(t.foreground, cardSurface);
-      expect(muted, t.id).not.toBeNull();
-      expect(
-        contrastRatio(rgb(muted!), rgb(cardSurface)),
-        `${t.id} (${muted} on ${cardSurface})`,
-      ).toBeGreaterThanOrEqual(4.5);
-    }
-  });
+  it.each(TINTED_DOCS_SURFACES)(
+    "clears WCAG AA on the $token surface in every bundled theme",
+    ({ tintVar, tintAlpha }) => {
+      for (const t of themes) {
+        const tint = tintFor(tintVar, t.foreground);
+        const surface = compositeColor(tint, t.background, tintAlpha)!;
+        const muted = docsMutedTextFor(t.foreground, surface);
+        expect(muted, t.id).not.toBeNull();
+        expect(
+          contrastRatio(rgb(muted!), rgb(surface)),
+          `${t.id} (${muted} on ${surface})`,
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+    },
+  );
 
   it("moves a high-contrast foreground toward its background", () => {
     const muted = docsMutedTextFor("#ffffff", "#000000")!;
@@ -133,10 +153,14 @@ describe("docs muted text colour", () => {
     expect(declared).toBe(docsMutedTextFor("#dedede", "#000000"));
   });
 
-  it("agrees with the static card fallback index.css declares", () => {
-    const css = readFileSync(new URL("../index.css", import.meta.url), "utf8");
-    const declared = css.match(/--docs-card-text-muted:\s*(#[0-9a-f]{6})/i)?.[1];
-    const cardSurface = compositeColor("#dedede", "#000000", 0.04)!;
-    expect(declared).toBe(docsMutedTextFor("#dedede", cardSurface));
-  });
+  it.each(TINTED_DOCS_SURFACES)(
+    "agrees with the static $token fallback index.css declares",
+    ({ token, tintVar, tintAlpha }) => {
+      const css = readFileSync(new URL("../index.css", import.meta.url), "utf8");
+      const declared = css.match(new RegExp(`${token}:\\s*(#[0-9a-f]{6})`, "i"))?.[1];
+      const tint = tintFor(tintVar, SITE_FOREGROUND);
+      const surface = compositeColor(tint, SITE_BACKGROUND, tintAlpha)!;
+      expect(declared).toBe(docsMutedTextFor(SITE_FOREGROUND, surface));
+    },
+  );
 });

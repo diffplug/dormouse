@@ -65,7 +65,7 @@
   --color-input-border: var(--vscode-input-border);
 
   /* Links and buttons inside library chrome. */
-  --color-link: var(--vscode-textLink-foreground, var(--vscode-focusBorder));
+  --color-link: var(--vscode-textLink-foreground);
   --color-button-bg: var(--vscode-button-background);
   --color-button-fg: var(--vscode-button-foreground);
 }
@@ -98,7 +98,7 @@ body {
   --color-alarm-vs-terminal: var(--vscode-terminal-ansiYellow);
   --color-input-bg: var(--vscode-input-background);
   --color-input-border: var(--vscode-input-border);
-  --color-link: var(--vscode-textLink-foreground, var(--vscode-focusBorder));
+  --color-link: var(--vscode-textLink-foreground);
   --color-button-bg: var(--vscode-button-background);
   --color-button-fg: var(--vscode-button-foreground);
 }
