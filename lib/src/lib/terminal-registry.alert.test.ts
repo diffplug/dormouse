@@ -118,6 +118,7 @@ import {
   isUntouched,
   markSessionAttention,
   markSessionTodo,
+  primeActivity,
   resumeTerminal,
   restoreTerminal,
   setPendingShellOpts,
@@ -308,6 +309,15 @@ describe('terminal-registry alert behavior', () => {
     createSession(id);
 
     expect(isUntouched(id)).toBe(true);
+  });
+
+  it('carries a primed ring counter into the terminal entry', () => {
+    const id = 'primed-ring-seq';
+    primeActivity(id, { status: 'ALERT_RINGING', ringSeq: 7 });
+
+    createSession(id);
+
+    expect(getActivity(id).ringSeq).toBe(7);
   });
 
   /**

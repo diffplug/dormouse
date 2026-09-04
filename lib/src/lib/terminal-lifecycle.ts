@@ -360,6 +360,7 @@ function setupTerminalEntry(id: string, options: { shell?: string; untouched?: b
   const primed = consumePrimedActivity(id);
   if (primed) {
     if (primed.status !== undefined) entry.alertStatus = primed.status;
+    if (primed.ringSeq !== undefined) entry.ringSeq = primed.ringSeq;
     if (primed.watchingEnabled !== undefined) entry.watchingEnabled = primed.watchingEnabled;
     if (primed.todo !== undefined) entry.todo = primed.todo;
     if (primed.notification !== undefined) entry.notification = primed.notification;
