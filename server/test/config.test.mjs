@@ -89,7 +89,7 @@ test('the setup password is server state, not environment configuration', () => 
   // Passing the retired variable is the case that matters: an env read added
   // back would surface here rather than in the empty-environment default.
   assert.equal('setupPassword' in readConfig({}), false);
-  assert.equal('setupPassword' in readConfig({ DORMOUSE_SETUP_PASSWORD: 'a'.repeat(64) }), false);
+  assert.deepEqual(readConfig({ DORMOUSE_SETUP_PASSWORD: 'a'.repeat(64) }), readConfig({}));
 });
 
 test('an unusable PORT is a ConfigError', () => {
@@ -123,7 +123,7 @@ test('no VAPID keys in the environment leaves them for the entrypoint to mint', 
 
 test('a VAPID keypair is taken from the environment as a pair', () => {
   const config = readConfig({
-        DORMOUSE_VAPID_PUBLIC_KEY: 'pub',
+    DORMOUSE_VAPID_PUBLIC_KEY: 'pub',
     DORMOUSE_VAPID_PRIVATE_KEY: 'priv',
   });
   assert.deepEqual(config.vapidKeys, { publicKey: 'pub', privateKey: 'priv' });
@@ -137,7 +137,7 @@ test('half a VAPID keypair is a ConfigError, not a guessed default', () => {
 
 test('DORMOUSE_VAPID_SUBJECT wins over the origin-derived default', () => {
   const config = readConfig({
-        DORMOUSE_ORIGIN: 'https://dor.example.ts.net',
+    DORMOUSE_ORIGIN: 'https://dor.example.ts.net',
     DORMOUSE_VAPID_SUBJECT: 'mailto:admin@example.com',
   });
   assert.equal(config.vapidSubject, 'mailto:admin@example.com');

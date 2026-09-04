@@ -38,7 +38,15 @@ import { INSTALLERS, RULES } from './deploy-lint.mjs';
 
 const selftest = makeSelftest('deploy-lint.mjs', '.selftest.bak');
 
-for (const { rule, patterns, skip = {}, exactMatches = {}, forbidden = false, violation } of RULES) {
+for (const {
+  rule,
+  patterns,
+  skip = {},
+  exactMatches = {},
+  forbidden = false,
+  violation,
+  violations,
+} of RULES) {
   for (const { platform, file } of INSTALLERS) {
     if (platform in skip) continue;
     const pattern = patterns[platform];
@@ -55,11 +63,20 @@ for (const { rule, patterns, skip = {}, exactMatches = {}, forbidden = false, vi
         );
         continue;
       }
-      selftest.withAppended(
-        file,
-        `\n${violation}\n`,
-        `${platform.padEnd(8)} ${rule}\n      the forbidden text stays green — the rule checks nothing`,
-      );
+      const platformViolations = violations?.[platform] ?? (violation ? [violation] : []);
+      if (platformViolations.length === 0) {
+        selftest.weak.push(
+          `${platform.padEnd(8)} ${rule}\n      no forbidden-text mutation is defined`,
+        );
+        continue;
+      }
+      for (const forbiddenText of platformViolations) {
+        selftest.withAppended(
+          file,
+          `\n${forbiddenText}\n`,
+          `${platform.padEnd(8)} ${rule}\n      forbidden shape ${JSON.stringify(forbiddenText)} stays green — the rule checks nothing`,
+        );
+      }
       continue;
     }
 

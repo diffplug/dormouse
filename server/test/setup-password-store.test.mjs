@@ -41,6 +41,7 @@ test('the production generator returns exactly 32 bytes as lowercase hex', () =>
 
 test('malformed persisted credentials are refused, never silently replaced', async () => {
   for (const contents of [
+    '{"password":"unterminated',
     'null\n',
     `${JSON.stringify({ password: 'password', createdAt: Date.now() })}\n`,
   ]) {
@@ -50,6 +51,7 @@ test('malformed persisted credentials are refused, never silently replaced', asy
       new SetupPasswordStore(stateDir).loadOrCreate(() => PASSWORD),
       /setup-password\.json does not contain a valid setup password/,
     );
+    assert.equal(await readFile(join(stateDir, 'setup-password.json'), 'utf8'), contents);
   }
 });
 

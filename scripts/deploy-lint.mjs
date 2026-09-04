@@ -64,9 +64,10 @@ export const INSTALLERS = [
  * `forbidden` inverts the rule: the pattern must match NOTHING, for a `FAIL IF`
  * that names a thing an installer must not do. Anchored on the act the spec
  * forbids rather than on the subject, so prose explaining why the thing is
- * absent is not itself the violation, and paired with `violation` — the text
- * `deploy-lint-selftest.mjs` appends to prove the absence is checked rather
- * than merely true. `exactMatches` is meaningless beside it and is refused.
+ * absent is not itself the violation, and paired with `violation` or
+ * platform-specific `violations` — the text `deploy-lint-selftest.mjs`
+ * appends to prove every forbidden shape is checked rather than merely absent.
+ * `exactMatches` is meaningless beside it and is refused.
  *
  * `exactMatches` is for a control the installer writes at several sites on
  * purpose — in its own body and into the generated `manage` — where matching
@@ -107,9 +108,20 @@ export const RULES = [
     // keeps exporting a dead one and naming it is how that gets explained.
     rule: 'Credentials at rest — no installer supplies a setup password as configuration',
     forbidden: true,
-    violation: 'DORMOUSE_SETUP_PASSWORD=weak',
+    violations: {
+      macOS: [
+        'DORMOUSE_SETUP_PASSWORD=weak',
+        '<key>DORMOUSE_SETUP_PASSWORD</key><string>weak</string>',
+      ],
+      Linux: ['DORMOUSE_SETUP_PASSWORD=weak'],
+      Windows: [
+        'DORMOUSE_SETUP_PASSWORD=weak',
+        "EnvironmentVariables['DORMOUSE_SETUP_PASSWORD'] = 'weak'",
+      ],
+    },
     patterns: {
-      macOS: /DORMOUSE_SETUP_PASSWORD\s*=/,
+      // A LaunchAgent supplies environment through plist keys, not `KEY=`.
+      macOS: /DORMOUSE_SETUP_PASSWORD\s*=|<key>\s*DORMOUSE_SETUP_PASSWORD\s*<\/key>/,
       Linux: /DORMOUSE_SETUP_PASSWORD\s*=/,
       // The PowerShell supply site is a hashtable index, not a `KEY=` line.
       Windows: /DORMOUSE_SETUP_PASSWORD\s*=|EnvironmentVariables\['DORMOUSE_SETUP_PASSWORD'\]/,
@@ -124,6 +136,7 @@ export const RULES = [
       Linux: /password_file="\$STATE_DIR\/setup-password\.json"/,
       Windows: /Join-Path \$StateDir 'setup-password\.json'/,
     },
+    exactMatches: { macOS: 1, Linux: 1, Windows: 1 },
   },
   {
     // Each installer reads the record twice — `manage show-password` and the

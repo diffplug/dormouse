@@ -43,7 +43,15 @@ test('a corrupt vapid.json stops the read rather than costing every push subscri
   // `null` is the whole point: it is what a truncated or half-finished write
   // leaves, and reading it as first boot silently mints a new keypair, which
   // invalidates every phone's subscription with no error anywhere.
-  for (const contents of ['null\n', '0\n', '""\n', '{}\n', '{"publicKey":"a"}\n', '[]\n']) {
+  for (const contents of [
+    '{"publicKey":"unterminated',
+    'null\n',
+    '0\n',
+    '""\n',
+    '{}\n',
+    '{"publicKey":"a"}\n',
+    '[]\n',
+  ]) {
     const dir = await stateDir();
     await writeFile(join(dir, 'vapid.json'), contents);
     await assert.rejects(
@@ -72,7 +80,13 @@ test('an absent account.json is first boot; a corrupt one is not', async () => {
 
   // The hazard this pins: read as first boot, `appendPasskey` would start a
   // fresh account and register into it, over whatever the file had held.
-  for (const contents of ['null\n', '{}\n', '{"accountId":"owner"}\n', '[]\n']) {
+  for (const contents of [
+    '{"accountId":"unterminated',
+    'null\n',
+    '{}\n',
+    '{"accountId":"owner"}\n',
+    '[]\n',
+  ]) {
     await writeFile(join(dir, 'account.json'), contents);
     await assert.rejects(
       new AccountStore(dir).load(),

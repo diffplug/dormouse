@@ -211,7 +211,15 @@ abstract class JsonFileStore {
    * too.
    */
   protected async loadRecord<T>(shape: RecordShape<T>): Promise<T | undefined> {
-    const stored = await this.readIfExists<unknown>();
+    let stored: unknown;
+    try {
+      stored = await this.readIfExists<unknown>();
+    } catch (err) {
+      // Hand-editing is the documented revocation mechanism, so malformed JSON
+      // is the same operator mistake as a parsed value with the wrong shape.
+      if (err instanceof SyntaxError) throw new CorruptStateError(this.#path, shape.what);
+      throw err;
+    }
     if (stored === undefined) return undefined;
     if (!shape.isValid(stored)) throw new CorruptStateError(this.#path, shape.what);
     return stored;
