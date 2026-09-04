@@ -1,10 +1,11 @@
-import { useState, type FormEvent } from "react";
-import { CircleNotchIcon } from "@phosphor-icons/react";
+import { useEffect, useState, type FormEvent } from "react";
 import { LINK_CLASS, MUTED_TEXT_CLASS } from "./docs-tokens";
 import { SITE_LINK_CLASS } from "./site-tokens";
 
 const EMAIL_REGEX =
   /^[a-zA-Z0-9.!#$%&'*+\/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+const EMAIL_STORAGE_PREFIX = "dormouse:notify-email:";
+const SUBSCRIBE_URL = "https://nedshed.dev/subscribe";
 
 export function NotifySignupForm({
   buttonLabel = "Notify me when Pocket ships",
@@ -19,9 +20,6 @@ export function NotifySignupForm({
 }) {
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState("");
-  const [redirecting, setRedirecting] = useState(false);
-
-  const redirectUrl = `https://nedshed.dev/subscribe?email=${encodeURIComponent(email)}`;
   const accentClass = variant === "docs" ? "text-[var(--docs-accent)]" : "text-[var(--color-caramel)]";
   const accentBorderClass = variant === "docs" ? "border-[var(--docs-accent)]" : "border-[var(--color-caramel)]";
   const accentBackgroundClass = variant === "docs"
@@ -29,39 +27,29 @@ export function NotifySignupForm({
     : "bg-[var(--color-caramel)]/15 hover:bg-[var(--color-caramel)]/25";
   const mutedClass = variant === "docs" ? MUTED_TEXT_CLASS : "opacity-50";
 
-  function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    if (!EMAIL_REGEX.test(email)) {
-      setMessage("Please enter a valid email");
-      return;
+  useEffect(() => {
+    try {
+      setEmail(sessionStorage.getItem(`${EMAIL_STORAGE_PREFIX}${emailId}`) ?? "");
+    } catch {
+      // Storage can be disabled; the ordinary form remains fully functional.
     }
-    setRedirecting(true);
-    window.setTimeout(() => {
-      window.location.href = redirectUrl;
-    }, 3000);
-  }
+  }, [emailId]);
 
-  if (redirecting) {
-    return (
-      <div className={`flex items-center gap-3 text-lg leading-relaxed ${accentClass}`}>
-        <CircleNotchIcon className="shrink-0 animate-spin" size={28} weight="bold" />
-        <p>
-          Opening nedshed.dev… Finish <span className={mutedClass}>subscribing</span> after{" "}
-          <a
-            href={redirectUrl}
-            className="underline underline-offset-2 hover:opacity-80"
-          >
-            the redirect
-          </a>
-          ...
-        </p>
-      </div>
-    );
+  function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    if (!EMAIL_REGEX.test(email)) {
+      e.preventDefault();
+      setMessage("Please enter a valid email");
+    }
   }
 
   return (
     <>
-      <form onSubmit={handleSubmit} className="flex flex-col gap-2">
+      <form
+        action={SUBSCRIBE_URL}
+        method="get"
+        onSubmit={handleSubmit}
+        className="flex flex-col gap-2"
+      >
         <label htmlFor={emailId} className={`font-display text-sm ${mutedClass}`}>
           Email
         </label>
@@ -72,7 +60,13 @@ export function NotifySignupForm({
             name="email"
             value={email}
             onChange={(e) => {
-              setEmail(e.target.value);
+              const next = e.target.value;
+              setEmail(next);
+              try {
+                sessionStorage.setItem(`${EMAIL_STORAGE_PREFIX}${emailId}`, next);
+              } catch {
+                // Storage can be disabled; React state still owns this visit.
+              }
               if (message) setMessage("");
             }}
             placeholder="you@example.com"
@@ -98,7 +92,7 @@ export function NotifySignupForm({
         )}
       </form>
       <p className={`mt-3 text-base leading-snug ${mutedClass}`}>
-        This signs you up for my personal devlog{" "}
+        One more step on Substack. This signs you up for my personal devlog{" "}
         <a
           href="https://nedshed.dev"
           className={variant === "docs" ? LINK_CLASS : SITE_LINK_CLASS}

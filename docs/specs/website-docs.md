@@ -316,12 +316,13 @@ hidden, so a returning reader never sees dismissed UI flash. Pinned by
 
 ## `/hosted` preview
 
-**Must present both paid services as unavailable:** Hosted operates Pocket's
+**Must present both services as unavailable:** Hosted operates Pocket's
 coordinator, while optional ElevenLabs speech replaces browser voice.
-**Must keep current behavior explicit:** terminals remain on an awake, online
-computer; browser speech and free self-hosting remain available. Signup goes
-through `NotifySignupForm`, which discloses that it redirects to the
-`nedshed.dev` personal devlog.
+**Must keep behavior explicit:** terminals stay on an awake, online
+computer; browser speech and free self-hosting remain. `NotifySignupForm`
+discloses its direct `nedshed.dev` personal-devlog handoff and preserves
+email for the tab session. `website/src/components/NotifySignupForm.test.tsx`
+pins both.
 
 **Must label paid-relay encryption and metadata behavior as design targets
 until independent review permits a hosted guarantee**, and link the self-hosted
