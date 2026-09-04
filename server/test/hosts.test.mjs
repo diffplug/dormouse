@@ -192,40 +192,34 @@ test('enrollment mirrors requireUserVerification to the Host, and omits it when 
   assert.equal('requireUserVerification' in uvOff, false);
 });
 
-// --- probing a host token costs the prober too -----------------------------
-// `requireHost` and the `/ws/host` gate both run unauthenticated over the most
-// expensive lookup on the server: a `readFile` + `JSON.parse` + two SHA-256 per
-// row. Answering instantly, and reading the file for a value no Host could have
-// been minted, made probing cheaper for the caller than for us.
-
-test('a rejected host token pays the credential-failure delay', async () => {
-  const delayMs = 60;
-  const { app } = await freshApp({ credentialFailureDelayMs: delayMs });
-  await enrollHost(app);
-
-  const started = Date.now();
-  const res = await app.request(API_ROUTES.pushDevices, {
-    headers: { Authorization: `Bearer ${'A'.repeat(HOST_TOKEN_LENGTH)}` },
+test('only Host-enrollment rejection invokes the retained-request delay', async () => {
+  let delayCalls = 0;
+  const { app } = await freshApp({
+    credentialFailureDelay: async () => {
+      delayCalls += 1;
+    },
   });
-  const elapsed = Date.now() - started;
-
-  assert.equal(res.status, 401);
-  assert.ok(elapsed >= delayMs, `answered in ${elapsed}ms, under the ${delayMs}ms delay`);
-});
-
-test('the /ws/host upgrade pays the same delay on a bad token', async () => {
-  const delayMs = 60;
-  const { app } = await freshApp({ credentialFailureDelayMs: delayMs });
   await enrollHost(app);
 
-  const started = Date.now();
-  const res = await app.request(
-    `${WS_ROUTES.host}?${WS_TOKEN_PARAM}=${'A'.repeat(HOST_TOKEN_LENGTH)}`,
+  assert.equal(
+    (
+      await app.request(API_ROUTES.pushDevices, {
+        headers: { Authorization: `Bearer ${'A'.repeat(HOST_TOKEN_LENGTH)}` },
+      })
+    ).status,
+    401,
   );
-  const elapsed = Date.now() - started;
+  assert.equal(
+    (
+      await app.request(`${WS_ROUTES.host}?${WS_TOKEN_PARAM}=${'A'.repeat(HOST_TOKEN_LENGTH)}`)
+    ).status,
+    401,
+  );
+  assert.equal((await post(app, API_ROUTES.setupBegin, { setupToken: 'unknown' })).status, 401);
+  assert.equal(delayCalls, 0);
 
-  assert.equal(res.status, 401);
-  assert.ok(elapsed >= delayMs, `answered in ${elapsed}ms, under the ${delayMs}ms delay`);
+  assert.equal((await post(app, API_ROUTES.hostEnroll, { password: 'wrong' })).status, 401);
+  assert.equal(delayCalls, 1);
 });
 
 test('a token of a shape no Host was ever minted never reaches hosts.json', async () => {

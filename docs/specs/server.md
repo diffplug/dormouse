@@ -277,7 +277,7 @@ The whole route surface; paths and request/response shapes live in
 | `GET /api/hello`                 | —              | The shared greeting. **Carries no release identity** — it is unauthenticated and reachable through the HTTPS proxy; the runtime file carries it ("Installing it") |
 | `POST /api/setup/begin`          | setup token    | Issues a registration challenge, gated exactly as `finish` is so neither is softer. Answers the account's credential ids for a retry's `excludeCredentials`, so no passkey that already signs in is duplicated — an orphan the Server never registered is absent, and is still replaced |
 | `POST /api/setup/finish`         | setup token    | Registers the passkey in `account.json`; the token is spent at the gate and put back if registration then fails. `label` is **reduced, not refused** — the same `boundedPushText` a pairing label goes through, to `MAX_PASSKEY_LABEL_LENGTH` code points with control and bidi characters stripped |
-| `POST /api/setup/retire`         | session token  | Spends a live setup token without registering anything (rationale). 204, or 401 `SETUP_TOKEN_INVALID_ERROR` after the same fixed delay |
+| `POST /api/setup/retire`         | session token  | Spends a live setup token without registering anything (rationale). 204, or 401 `SETUP_TOKEN_INVALID_ERROR` |
 | `POST /api/signin/begin`         | —              | Issues a sign-in challenge                          |
 | `POST /api/signin/finish`        | —              | Verifies the assertion and issues a 12-hour in-memory session token |
 | `POST /api/reauth/begin`         | session token  | Takes a required, kind-tagged `PresenceBinding`, mints a single-use 2-minute `serverNonce`, and answers `presenceChallenge(binding, nonce)` with the RP ID, the nonce, and the bound credential as the sole `allowCredentials` entry. 404 for a credential this account has not registered; 400 for a missing or malformed binding |
@@ -320,8 +320,10 @@ Source of truth: `TokenBucket` in `server/src/token-bucket.ts` and
 `server/test/token-bucket.test.mjs`.
 
 **Must compare the setup password in constant time and delay failure 250 ms.**
-`secretEquals` hashes both lengths first. Host tokens use the same full-row scan
-and delay; session tokens are in-memory lookups and use neither (rationale).
+`secretEquals` hashes both lengths first. Only the globally limited Host-
+enrollment route delays: retaining rejected setup, Host, or session bearer
+requests would grant public traffic a resource sink for unguessable tokens
+(rationale). Host tokens still use a constant-time full-row scan.
 **Must reject a `hostToken` outside its minted 32-byte base64url shape before
 reading `hosts.json`**, as `isDeliveryId` guards push routes.
 
@@ -333,7 +335,7 @@ and a bare 401 is ambiguous since a spent setup token answers 401 too
 ([pocket-app.md](./pocket-app.md) -> An expired session drops to sign-in). A
 rejected enroll token answers that same body and delay whatever the cause, safe
 because only a Host sends one; **a rejected setup token answers the distinct
-`SETUP_TOKEN_INVALID_ERROR`** — same 401, same delay — which Pocket keys its
+`SETUP_TOKEN_INVALID_ERROR`** — same 401, with no delay — which Pocket keys its
 "scan again, or type the password" recovery on.
 
 ### Setup tokens and the pairing QR
@@ -385,7 +387,7 @@ Token rules, unchanged by the grammar:
 
 * **`/api/host/enroll` counts exactly one credential by presence, not by type**
   (rationale); the setup routes have nothing to count — a request without a live
-  token is the same delayed 401 as one with a dead one.
+  token is the same 401 as one with a dead one.
 * **`begin` peeks; `finish` consumes before it reads the body** — that delete is
   the single-use gate, so of two overlapping finishes only one registers. Every
   failure past it restores the token on its original expiry without exceeding

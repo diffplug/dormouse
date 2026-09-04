@@ -49,6 +49,7 @@ export async function freshApp({
   pushSendDeadlineMs,
   enrollTokenFile,
   credentialFailureDelayMs = TEST_CREDENTIAL_FAILURE_DELAY_MS,
+  credentialFailureDelay,
 } = {}) {
   const stateDir = await mkdtemp(join(tmpdir(), 'dormouse-server-'));
   const created = createApp({
@@ -62,6 +63,7 @@ export async function freshApp({
     pushSendDeadlineMs,
     enrollTokenFile,
     credentialFailureDelayMs,
+    credentialFailureDelay,
   });
   return { ...created, stateDir, origin, rpId: new URL(origin).hostname };
 }

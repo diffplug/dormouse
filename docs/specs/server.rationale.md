@@ -52,7 +52,7 @@
 
 **What three route answers are protecting.** `POST /api/setup/retire` exists so a QR a phone scanned but will not register with cannot stay redeemable in a photograph. `/api/host/enroll` checks its `MAX_ENROLLED_HOSTS` cap after the credential so a caller that proved nothing cannot learn the server is full. `/api/push/subscribe` 404s an unknown `hostId` so no subscription row strands where no Host can read or prune it.
 
-**Why a rejected host token pays the failure delay and a session token does not.** `requireHost` and the `/ws/host` upgrade both run unauthenticated over the most expensive lookup here — a read, a parse, and two SHA-256 per row — so answering instantly made probing cheaper for the caller than for the server. A session token is an in-memory `Map` lookup costing nothing; a delay there would only buy an attacker held connections.
+**Why only Host enrollment pays the failure delay.** A delay retains a request. The setup password route is protected by the process-global admission bucket, so its retained work is bounded. Setup, Host, and session tokens are random bearer capabilities with no plausible online search; delaying their rejection buys public traffic held connections without protecting a human secret.
 
 ## Setup tokens and the pairing QR
 

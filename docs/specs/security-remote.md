@@ -125,7 +125,7 @@ is constant-time and a rejected credential pays a fixed delay (rationale).
 configured origin, while the Host calls from Node. The Server installs no CORS
 middleware and emits no cross-origin grant; authentication never uses cookies.
 
-- **FAIL IF** the setup password comparison stops being constant-time or loses its fixed failure delay. The halves live apart: `secretEquals` in `server/src/secrets.ts` compares SHA-256 digests with `timingSafeEqual`, and `CREDENTIAL_FAILURE_DELAY_MS` in `server/src/app.ts` is the fixed 250 ms every rejected credential costs.
+- **FAIL IF** the setup password comparison stops being constant-time, its rate-limited rejection loses the fixed 250 ms delay, or a random setup/Host bearer rejection gains that delay and lets public traffic retain requests. `secretEquals` owns the compare; `server/test/hosts.test.mjs` pins the delay's scope.
 - **FAIL IF** `POST /api/host/enroll` stops spending from one process-global `TokenBucket` before body parsing, admits more than `HOST_ENROLL_ATTEMPT_BURST` at once, refills faster than one per `HOST_ENROLL_ATTEMPT_REFILL_MS`, or allocates state per caller. Every POST counts; OPTIONS does not. `server/test/token-bucket.test.mjs` pins ordering, concurrency, refill, and 429 `Retry-After`.
 - **FAIL IF** the Server installs CORS middleware, emits `Access-Control-Allow-Origin`, or accepts authentication from a cookie; pinned by `server/test/cors.test.mjs`.
 
