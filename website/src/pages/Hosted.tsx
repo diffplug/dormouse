@@ -35,69 +35,79 @@ export default function Hosted() {
     <DocsLayout
       activePath="/hosted"
       title="Dormouse Hosted"
-      intro="Two paid managed services are planned, and neither is available yet: a coordinating server for Pocket remote control, and optional ElevenLabs speech. Dormouse itself remains local; self-hosting and browser speech will stay available."
+      intro="Use Dormouse Pocket without deploying a coordinating server. Hosted remote control is planned as a paid convenience; your terminals stay on your computer, and free self-hosting stays available."
       toc={HOSTED_TOC}
     >
-      <div className="mb-10 rounded-xl border border-[var(--docs-accent)]/35 bg-[var(--docs-accent)]/[0.07] p-5">
-        <p className="font-display text-lg text-[var(--docs-accent)]">Coming soon</p>
-        <p className="mt-1 leading-relaxed opacity-75">
-          There is nothing to buy yet. Join the mailing list below and I’ll tell you when
-          the first hosted service is ready.
-        </p>
-      </div>
-
-      <section className={CARD_CLASS}>
-        <div className="grid items-center gap-7 sm:grid-cols-[1fr_10rem]">
+      <section>
+        <div className="grid items-center gap-8 sm:grid-cols-[minmax(0,1fr)_12rem] lg:gap-12">
           <div>
             <CloudArrowUpIcon
               size={28}
               weight="duotone"
-              className="mb-3 text-[var(--docs-accent)]"
+              className="mb-4 text-[var(--docs-accent)]"
               aria-hidden="true"
             />
-            <AnchoredHeading id="remote-control">
+            <AnchoredHeading id="remote-control" spacing="mt-0 mb-3">
               Remote control, without running the server
             </AnchoredHeading>
-            <p className="mb-3 font-display text-xs uppercase tracking-wider text-[var(--docs-accent)]">
-              Planned paid service · not available yet
+            <p className="mb-4 font-display text-sm text-[var(--docs-accent)]">
+              Coming soon · paid convenience
             </p>
-            <p className="mb-4 text-lg leading-relaxed opacity-80">
+            <p className="mb-5 text-xl leading-relaxed">
               Use Dormouse Pocket without deploying or maintaining a coordinating server.
-              Dormouse Hosted will run the coordinator that connects your phone to your
-              computer and relays traffic between them.
+              Hosted will run the coordinator that connects your phone to your computer.
             </p>
-            <p className="mb-4 leading-relaxed opacity-70">
-              Your terminals still run on your computer, and it still needs to be awake
-              and online. Hosted removes the deployment and maintenance work; it does not
-              move your terminal into the cloud.
+            <a
+              href="#updates"
+              className="inline-flex min-h-12 items-center rounded-md border border-[var(--docs-accent)] bg-[var(--docs-accent)]/10 px-5 py-3 font-display text-[var(--docs-accent)] transition-colors hover:bg-[var(--docs-accent)]/20 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--docs-accent)]"
+            >
+              Follow the hosted launch →
+            </a>
+
+            <dl className="mt-8 grid gap-4 border-t border-[var(--color-text)]/15 pt-5 text-sm sm:grid-cols-3">
+              <div>
+                <dt className="font-display">Hosted runs</dt>
+                <dd className="mt-1 opacity-70">The coordinating server</dd>
+              </div>
+              <div>
+                <dt className="font-display">You keep</dt>
+                <dd className="mt-1 opacity-70">Terminals on your computer</dd>
+              </div>
+              <div>
+                <dt className="font-display">Still required</dt>
+                <dd className="mt-1 opacity-70">Your computer awake and online</dd>
+              </div>
+            </dl>
+            <p className="mt-5 leading-relaxed opacity-70">
+              Hosted removes deployment and maintenance work; it does not move your terminal
+              into the cloud. Security details for the paid service will be published before
+              launch.
             </p>
-            <p className="leading-relaxed opacity-70">
-              Security details for the paid service will be published before launch.
-            </p>
-            <p className="mt-4">
-              <a href="#updates" className={LINK_CLASS}>
-                Interested in managed remote control? Follow the launch →
+            <p className="mt-3 text-sm">
+              Prefer to operate the server yourself?{" "}
+              <a href="#self-hosting" className={LINK_CLASS}>
+                Self-hosting stays free
               </a>
             </p>
           </div>
           <img
             src={phoneMockupUrl}
             alt="Dormouse Pocket showing terminal sessions on a phone"
-            className="mx-auto w-32 drop-shadow-xl sm:w-40"
+            className="mx-auto w-44 drop-shadow-xl sm:w-48"
           />
         </div>
       </section>
 
-      <section className={`${CARD_CLASS} mt-6`}>
+      <section className="mt-14 border-t border-[var(--color-text)]/15 pt-10">
         <SpeakerHighIcon
           size={28}
           weight="duotone"
           className="mb-3 text-[var(--docs-accent)]"
           aria-hidden="true"
         />
-        <AnchoredHeading id="voice">A better voice for spoken alerts</AnchoredHeading>
-        <p className="mb-3 font-display text-xs uppercase tracking-wider text-[var(--docs-accent)]">
-          Planned paid service · not available yet
+        <AnchoredHeading id="voice" spacing="mt-0 mb-3">A more natural voice, optionally</AnchoredHeading>
+        <p className="mb-3 font-display text-sm text-[var(--docs-accent)]">
+          Planned after remote control · optional paid add-on
         </p>
         <p className="mb-4 text-lg leading-relaxed opacity-80">
           Dormouse can speak an unattended terminal’s name using your browser or system
@@ -110,14 +120,14 @@ export default function Hosted() {
         </p>
       </section>
 
-      <section className={`${CARD_CLASS} mt-6`}>
+      <section className={`${CARD_CLASS} mt-10`}>
         <CodeIcon
           size={28}
           weight="duotone"
           className="mb-3 text-[var(--docs-accent)]"
           aria-hidden="true"
         />
-        <AnchoredHeading id="self-hosting">Self-hosting stays</AnchoredHeading>
+        <AnchoredHeading id="self-hosting" spacing="mt-0 mb-4">Self-hosting stays</AnchoredHeading>
         <p className="text-lg leading-relaxed opacity-80">
           The coordinating server remains available in the repository under
           FSL-1.1-MIT and free for internal use. Hosted will be a paid convenience option,
