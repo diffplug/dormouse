@@ -24,7 +24,7 @@ const registry = vi.hoisted(() => ({
 
 vi.mock('../lib/terminal-registry', () => ({
   ...registry,
-  DEFAULT_ACTIVITY_STATE: { status: 'WATCHING_DISABLED', todo: false },
+  DEFAULT_ACTIVITY_STATE: { status: 'WATCHING_DISABLED', ringSeq: 0, todo: false },
 }));
 
 vi.mock('./TerminalPane', () => ({
@@ -57,7 +57,7 @@ function renderWall(showKillButton?: boolean) {
     root.render(
       <StrictMode>
         <MobileWall
-          sessions={[{ id: 'pane-a', title: 'remote shell' }]}
+          sessions={[{ id: 'pane-a', title: 'remote shell', ringSeq: 0 }]}
           activeSessionId="pane-a"
           showKillButton={showKillButton}
         />

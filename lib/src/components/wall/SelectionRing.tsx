@@ -3,11 +3,10 @@ import { cfg } from '../../cfg';
 import { RING_PIECES } from '../../lib/ring-geometry';
 import { FOCUS_MOTION_MS } from '../design';
 
-// SelectionRing is a STABLE structural shell — it renders the ring's DOM once per
-// variant/color/focus change and hands its nodes back through refs; the overlay
-// then drives geometry, the path `d`, and the motion smear imperatively from its
-// rAF loop (never per-frame React). This is the same split LathHost uses for the
-// Lath animator: React owns structure, the animation frame owns the DOM mutations.
+// SelectionRing owns a stable structural shell and hands its nodes back through
+// refs; the overlay drives geometry, path `d`, and the smear imperatively from its
+// rAF loop. This is the same split LathHost uses: React owns structure, the frame
+// owns DOM mutations.
 //
 //  - `variant='ants'`: 2px dashed stroke, marching animation (the dash geometry and
 //    `--march-offset` are written imperatively). Command-mode ring.
@@ -21,13 +20,14 @@ import { FOCUS_MOTION_MS } from '../design';
 // underneath, and the ring itself is never transformed or dashed differently —
 // it stays exactly what it was before any smear existed.
 //
-// Geometry (`top/left/width/height`, every `d`, the smear widths/opacities, and
-// the marching-ants dash) is NEVER in this JSX, so a React re-render of the shell
-// leaves the imperative writes untouched.
+// Geometry (`top/left/width/height`, every `d`, smear widths/opacities, and the
+// marching dash) is NEVER in this JSX. A selection change remounts only the keyed
+// outline; the overlay's layout effect reapplies its geometry pre-paint.
 export function SelectionRing({
-  variant, color, windowFocused, containerRef, pathRef, smearRef,
+  variant, animationKey, color, windowFocused, containerRef, pathRef, smearRef,
 }: {
   variant: 'ants' | 'solid';
+  animationKey: string;
   color: string;
   windowFocused: boolean;
   containerRef: Ref<HTMLDivElement>;
@@ -78,6 +78,9 @@ export function SelectionRing({
           ))}
         </g>
         <path
+          // Command entry adds the finite animation; identity changes use this
+          // key to restart it without remounting the shell or smear.
+          key={animationKey}
           ref={pathRef}
           // Stable hook: the smear group renders eight paths ahead of this one,
           // so positional selectors no longer find the ring.
@@ -86,7 +89,7 @@ export function SelectionRing({
           stroke={color}
           strokeWidth={isAnts ? ma.strokeWidth : 1}
           style={isAnts ? {
-            animation: `marching-ants ${ma.cycleDuration}s linear infinite`,
+            animation: `marching-ants ${ma.cycleDuration}s linear ${ma.cyclesPerSelection}`,
             animationPlayState: (ma.paused || !windowFocused) ? 'paused' : 'running',
           } : undefined}
         />

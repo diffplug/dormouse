@@ -75,6 +75,12 @@ function measureFrame(el: HTMLElement, isDoor: boolean): RingFrame {
   };
 }
 
+// The active selection's identity. One definition because two mechanisms key off
+// it: the travel tween restarts when it changes, and so does the marching burst.
+function ringIdentity(type: WallSelectionKind, id: string): string {
+  return `${type}:${id}`;
+}
+
 function framesEqual(a: RingFrame, b: RingFrame): boolean {
   return (
     a.rect.top === b.rect.top && a.rect.left === b.rect.left
@@ -344,7 +350,7 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
     }
 
     const isDoor = selectedType === 'door';
-    const identity = `${selectedType}:${selectedId}`;
+    const identity = ringIdentity(selectedType, selectedId);
     // Evaluated once per effect run, not per frame — the effect re-runs on every
     // Lath commit, which is plenty fresh for an OS-preference toggle.
     const instant = motionIsInstant();
@@ -428,6 +434,7 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
   return (
     <SelectionRing
       variant={mode === 'passthrough' ? 'solid' : 'ants'}
+      animationKey={ringIdentity(selectedType, selectedId)}
       color={selectionColor}
       windowFocused={windowFocused}
       containerRef={containerRef}

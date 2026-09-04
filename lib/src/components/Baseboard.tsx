@@ -209,6 +209,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
         : item.title,
       browserDisplay: item.browserDisplay,
       status: activity.status,
+      ringSeq: activity.ringSeq,
       todo: activity.todo,
       speechState: speechStates.get(item.id),
     };

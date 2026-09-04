@@ -159,6 +159,11 @@ export interface AlertState {
   attentionDismissedRing: boolean;
   /** At least one `dor await` is parked on this Session. Never persisted. */
   awaited: boolean;
+  /**
+   * How many alarm tracks have latched on this Session, monotonic. Read only for
+   * change, never as a magnitude (`docs/specs/alert.md` -> Pane Header).
+   */
+  ringSeq: number;
 }
 
 export const DEFAULT_ALERT_STATE: AlertState = {
@@ -168,6 +173,7 @@ export const DEFAULT_ALERT_STATE: AlertState = {
   notification: null,
   attentionDismissedRing: false,
   awaited: false,
+  ringSeq: 0,
 };
 
 /** Three independent alarm tracks plus an always-on, non-latching detector.
@@ -185,6 +191,8 @@ interface AlertEntry {
    * about the interval since the ring, which is only observable here.
    */
   outputSinceWatchingRing: boolean;
+  /** Source of `AlertState.ringSeq`; see the field's contract there. */
+  ringSeq: number;
   protocolStatus: ProtocolStatus;
   progress: ActiveProtocolProgress | null;
   commandExitStatus: CommandExitStatus;
@@ -404,6 +412,7 @@ export class AlertManager {
         // it right now. The originating command key latches here so the ring
         // outlives the command that raised it.
         if (!this.isWatching(entry) || this.hasAttention(id)) break;
+        this.latchRing(entry, entry.watchingRingingCommand !== null);
         entry.watchingRingingCommand = entry.commandExitWatch?.argv0 ?? null;
         entry.outputSinceWatchingRing = false;
         this.notify(id);
@@ -702,6 +711,7 @@ export class AlertManager {
   }
 
   private applyProtocolRinging(entry: AlertEntry, notification: ActivityNotification): void {
+    this.latchRing(entry, entry.protocolStatus === 'ALERT_RINGING');
     entry.notification = notification;
     entry.todo = true;
     entry.protocolStatus = 'ALERT_RINGING';
@@ -824,6 +834,7 @@ export class AlertManager {
     displayCommand: string,
     exitCode: number | undefined,
   ): void {
+    this.latchRing(entry, entry.commandExitStatus === 'ALERT_RINGING');
     entry.commandExitStatus = 'ALERT_RINGING';
     entry.todo = true;
     // A protocol ring carries richer text; never overwrite it with the generic one.
@@ -924,6 +935,15 @@ export class AlertManager {
     return entry.protocolStatus === 'ALERT_RINGING'
       || entry.commandExitStatus === 'ALERT_RINGING'
       || entry.watchingRingingCommand !== null;
+  }
+
+  /**
+   * Count one track latching. The mirror of `releaseRing`: a track that is
+   * already ringing is enrichment of the same summons, not a fresh one, so it
+   * does not advance the counter — see `deferOrDeliverNotification`.
+   */
+  private latchRing(entry: AlertEntry, wasRinging: boolean): void {
+    if (!wasRinging) entry.ringSeq++;
   }
 
   /** Release one track's latched ring. Returns whether it was ringing. */
@@ -1059,6 +1079,7 @@ export class AlertManager {
       notification: entry.notification,
       attentionDismissedRing: entry.attentionDismissedRing,
       awaited: (this.awaits.get(id)?.waiters.size ?? 0) > 0,
+      ringSeq: entry.ringSeq,
     };
   }
 
@@ -1173,6 +1194,7 @@ export class AlertManager {
         detector: this.createDetector(id),
         watchingRingingCommand: null,
         outputSinceWatchingRing: false,
+        ringSeq: 0,
         protocolStatus: 'IDLE',
         progress: null,
         commandExitStatus: 'IDLE',
@@ -1211,6 +1233,7 @@ function alertStatesEqual(a: AlertState, b: AlertState): boolean {
     || a.todo !== b.todo
     || a.attentionDismissedRing !== b.attentionDismissedRing
     || a.awaited !== b.awaited
+    || a.ringSeq !== b.ringSeq
   ) return false;
   const an = a.notification;
   const bn = b.notification;

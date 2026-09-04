@@ -1,11 +1,12 @@
 import { type PointerEvent as ReactPointerEvent } from 'react';
 import { clsx } from 'clsx';
-import { BellIcon, SpeakerHighIcon } from '@phosphor-icons/react';
+import { SpeakerHighIcon } from '@phosphor-icons/react';
 import type { AlertSpeechState, SessionStatus, TodoState } from '../lib/terminal-registry';
 import type { BrowserDisplayMode } from './wall/agent-browser-screen';
 import { BROWSER_DISPLAY_LABEL, BrowserDisplayIcon } from './wall/BrowserDisplayIcon';
 import { useTodoPillContent } from './TodoPillBody';
-import { alertSpeakingAnimationClass, bellIconClass } from './bell-icon-class';
+import { alertSpeakingAnimationClass } from './bell-icon-class';
+import { AlertBell } from './AlertBell';
 import {
   ALERT_SPEECH_TRACKING_CLASS,
   TERMINAL_TOP_RADIUS_CLASS,
@@ -20,6 +21,8 @@ export interface DoorProps {
    *  accessible meanings cannot drift apart. */
   browserDisplay?: BrowserDisplayMode;
   status?: SessionStatus;
+  /** `ActivityState.ringSeq`; a change replays the ringing burst. */
+  ringSeq: number;
   todo?: TodoState;
   speechState?: AlertSpeechState;
   onClick?: () => void;
@@ -35,6 +38,7 @@ export function Door({
   title,
   browserDisplay,
   status = 'WATCHING_DISABLED',
+  ringSeq,
   todo = false,
   speechState,
   onClick,
@@ -99,7 +103,7 @@ export function Door({
           )}
           {showBell && (
             <span className={alertRinging ? 'text-alarm-vs-door' : ''}>
-              <BellIcon size={11} weight="fill" className={bellIconClass(status)} />
+              <AlertBell status={status} ringSeq={ringSeq} size={11} />
             </span>
           )}
         </span>

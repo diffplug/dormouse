@@ -27,6 +27,7 @@ const meta: Meta<typeof DoorStory> = {
   args: {
     title: 'build-server',
     status: 'WATCHING_DISABLED',
+    ringSeq: 0,
     todo: false,
     width: 260,
     reducedMotion: false,

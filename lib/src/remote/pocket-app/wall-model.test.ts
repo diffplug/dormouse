@@ -72,8 +72,8 @@ describe('directorySessionItems', () => {
       's2',
     );
     expect(items).toEqual([
-      { id: 's1', title: 'zsh', secondary: '/home/me', active: false, status: undefined, todo: false },
-      { id: 's2', title: 'vim', secondary: null, active: true, status: undefined, todo: false },
+      { id: 's1', title: 'zsh', secondary: '/home/me', active: false, status: undefined, ringSeq: 0, todo: false },
+      { id: 's2', title: 'vim', secondary: null, active: true, status: undefined, ringSeq: 0, todo: false },
     ]);
   });
 
@@ -104,7 +104,7 @@ describe('directorySessionItems', () => {
       's1',
     );
     expect(items).toEqual([
-      { id: 's2', title: 'alive', secondary: null, active: false, status: undefined, todo: false },
+      { id: 's2', title: 'alive', secondary: null, active: false, status: undefined, ringSeq: 0, todo: false },
     ]);
   });
 });
