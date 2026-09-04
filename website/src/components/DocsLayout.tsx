@@ -175,6 +175,9 @@ export default function DocsLayout({
       }
       const muted = docsMutedTextFor(foreground, background);
       if (muted) document.body.style.setProperty("--docs-text-muted", muted);
+      const cardSurface = compositeColor(foreground, background, 0.04);
+      const cardMuted = cardSurface && docsMutedTextFor(foreground, cardSurface);
+      if (cardMuted) document.body.style.setProperty("--docs-card-text-muted", cardMuted);
     };
     paint();
     return subscribeToActiveTheme(paint);

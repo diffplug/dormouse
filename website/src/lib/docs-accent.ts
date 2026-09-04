@@ -127,9 +127,9 @@ export function docsAccentFor(
  * `background`.
  *
  * Element opacity made the same text land at a different effective contrast on
- * every reader-picked theme. Returning an opaque colour makes the role stable
- * across nested and tinted surfaces; typography carries any hierarchy a theme
- * whose base foreground is already near 4.5:1 cannot safely express in colour.
+ * every reader-picked theme. The caller supplies the actual rendered surface,
+ * so base-page and tinted-card tokens can each be quiet without dropping below
+ * AA; typography carries the hierarchy when colour cannot safely do so.
  */
 export function docsMutedTextFor(
   foreground: string,

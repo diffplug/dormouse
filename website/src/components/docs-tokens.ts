@@ -37,6 +37,9 @@ export const ACTION_TEXT_CLASS = "text-[var(--docs-button-text)]";
 /** Opaque secondary text, derived per active theme to retain body-text AA. */
 export const MUTED_TEXT_CLASS = "text-[var(--docs-text-muted)]";
 
+/** Opaque secondary text corrected for `CARD_BASE`'s foreground tint. */
+export const CARD_MUTED_TEXT_CLASS = "text-[var(--docs-card-text-muted)]";
+
 /**
  * How far a jumped-to anchor clears the chrome above it.
  *

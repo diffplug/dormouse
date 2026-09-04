@@ -102,6 +102,18 @@ describe("docs muted text colour", () => {
     }
   });
 
+  it("clears WCAG AA on the foreground-tinted card in every bundled theme", () => {
+    for (const t of themes) {
+      const cardSurface = compositeColor(t.foreground, t.background, 0.04)!;
+      const muted = docsMutedTextFor(t.foreground, cardSurface);
+      expect(muted, t.id).not.toBeNull();
+      expect(
+        contrastRatio(rgb(muted!), rgb(cardSurface)),
+        `${t.id} (${muted} on ${cardSurface})`,
+      ).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
   it("moves a high-contrast foreground toward its background", () => {
     const muted = docsMutedTextFor("#ffffff", "#000000")!;
     expect(muted).not.toBe("#ffffff");
@@ -119,5 +131,12 @@ describe("docs muted text colour", () => {
     const css = readFileSync(new URL("../index.css", import.meta.url), "utf8");
     const declared = css.match(/--docs-text-muted:\s*(#[0-9a-f]{6})/i)?.[1];
     expect(declared).toBe(docsMutedTextFor("#dedede", "#000000"));
+  });
+
+  it("agrees with the static card fallback index.css declares", () => {
+    const css = readFileSync(new URL("../index.css", import.meta.url), "utf8");
+    const declared = css.match(/--docs-card-text-muted:\s*(#[0-9a-f]{6})/i)?.[1];
+    const cardSurface = compositeColor("#dedede", "#000000", 0.04)!;
+    expect(declared).toBe(docsMutedTextFor("#dedede", cardSurface));
   });
 });

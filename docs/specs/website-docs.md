@@ -317,8 +317,9 @@ homepage — and is the fallback before a theme applies.
 state and clear WCAG AA both at rest and on hover** (rationale).
 
 **Muted reference text uses an opaque foreground-derived color that clears
-WCAG AA; never dim text with opacity** (rationale). `docsMutedTextFor` and
-`website/src/lib/docs-accent.test.ts` pin bundled themes;
+WCAG AA against the surface carrying it; never dim text with opacity**
+(rationale). `docsMutedTextFor` and `website/src/lib/docs-accent.test.ts` pin
+the base and tinted-card surfaces across bundled themes;
 `checkNoDimmedDocsText` pins the call sites, allowlisting what is not text.
 
 **A reader is prompted to pick a theme until they answer.** Picking one and
