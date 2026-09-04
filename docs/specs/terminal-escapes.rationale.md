@@ -6,6 +6,8 @@
 
 **Why BEL terminates only OSC.** xterm's BEL-as-ST tolerance is an OSC-era convention; ECMA-48 ends DCS, SOS, PM, and APC with ST alone. Treating BEL as a terminator everywhere truncated sixel and Kitty payloads mid-image, and — because the parser reads a standalone BEL as a bell — turned a `0x07` byte inside binary graphics data into a spurious terminal-bell alert. Framing the four non-OSC families explicitly removed both.
 
+**Why the forwarding state remembers the string's kind.** Resuming every forwarded string as an OSC read the first `BEL` in a later sixel or Kitty chunk as its terminator, cutting the image in half and promoting the rest of the payload to text — the same defect as reading BEL as a universal terminator, one chunk boundary later.
+
 ## Parsing location
 
 **Why the incomplete-OSC buffer is capped.** The parser must hold bytes across PTY reads for a sequence split mid-flight, so an OSC that is never terminated would otherwise accumulate forever. No legitimate emitter sends a 16 KiB title, so dropping the held bytes past `OSC_INCOMPLETE_LIMIT` turns an unbounded-growth primitive into a discarded chunk.

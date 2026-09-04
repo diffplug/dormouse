@@ -8,15 +8,46 @@ export interface StripTerminalControlsOptions {
 
 type TerminalControlStreamState = 'ground' | 'escape' | 'osc' | 'string' | 'stringEscape';
 
-// What opens a string control: a two-byte `ESC ] P X ^ _`, or a C1 introducer —
-// DCS (0x90), SOS (0x98), OSC (0x9d), PM (0x9e), APC (0x9f). Matching the ESC
-// form whole rather than bare ESC keeps SGR-dense output on one scan per chunk.
-const STREAM_INTRODUCER = /\x1b[\]PX^_]|[\x90\x98\x9d\x9e\x9f]/;
-const STREAM_INTRODUCER_SCAN = new RegExp(STREAM_INTRODUCER.source, 'g');
-// BEL ends an OSC but is payload inside DCS/SOS/PM/APC, so the two states scan
-// for different sets; CAN, SUB and the C1 ST abort either.
+// --- The one string-control grammar -----------------------------------------
+//
+// Two state machines run over PTY output: `TerminalProtocolParser`
+// (`terminal-protocol.ts`), which must locate a sequence to consume or forward
+// it, and the filter below, which only has to drop payload. They differ in what
+// they emit and agree on where a string control starts and stops, so the byte
+// sets and the kind mapping live here and nowhere else
+// (`docs/specs/terminal-escapes.md` → Families).
+
+/** Which of the five string controls an introducer opened. Only OSC carries
+ *  anything Dormouse models; the rest are xterm.js's. */
+export type StringControlKind = 'osc' | 'other';
+
+/**
+ * What opens a string control: a two-byte `ESC ] P X ^ _`, or a C1 introducer —
+ * DCS (0x90), SOS (0x98), OSC (0x9d), PM (0x9e), APC (0x9f). Matching the ESC
+ * form whole rather than bare ESC keeps SGR-dense output on one scan per chunk.
+ */
+export const STRING_CONTROL_INTRODUCER = /\x1b[\]PX^_]|[\x90\x98\x9d\x9e\x9f]/;
+/** {@link STRING_CONTROL_INTRODUCER} as a scanner; set `lastIndex` before use. */
+export const STRING_CONTROL_INTRODUCER_SCAN = new RegExp(
+  STRING_CONTROL_INTRODUCER.source,
+  'g',
+);
+// BEL ends an OSC but is payload inside DCS/SOS/PM/APC, so the two kinds scan
+// for different sets; CAN, SUB and the C1 ST end either, and so does a bare ESC
+// — whose next byte decides between an ST terminator and a cancel.
 const OSC_END_SCAN = /[\x07\x18\x1a\x1b\x9c]/g;
 const STRING_END_SCAN = /[\x18\x1a\x1b\x9c]/g;
+
+/** The kind a matched {@link STRING_CONTROL_INTRODUCER} opened. */
+export function stringControlKind(introducer: string): StringControlKind {
+  const opener = introducer.length === 2 ? introducer[1] : introducer;
+  return opener === ']' || opener === '\x9d' ? 'osc' : 'other';
+}
+
+/** Every byte that can end a string control of `kind`; set `lastIndex` before use. */
+export function stringControlEndScan(kind: StringControlKind): RegExp {
+  return kind === 'osc' ? OSC_END_SCAN : STRING_END_SCAN;
+}
 
 /**
  * Removes OSC/DCS/SOS/PM/APC strings without promoting payload bytes to text
@@ -32,7 +63,11 @@ export class TerminalControlStreamFilter {
   private state: TerminalControlStreamState = 'ground';
 
   process(input: string): string {
-    if (this.state === 'ground' && !input.endsWith('\x1b') && !STREAM_INTRODUCER.test(input)) {
+    if (
+      this.state === 'ground' &&
+      !input.endsWith('\x1b') &&
+      !STRING_CONTROL_INTRODUCER.test(input)
+    ) {
       return input;
     }
 
@@ -42,8 +77,8 @@ export class TerminalControlStreamFilter {
     while (i < input.length) {
       switch (this.state) {
         case 'ground': {
-          STREAM_INTRODUCER_SCAN.lastIndex = i;
-          const match = STREAM_INTRODUCER_SCAN.exec(input);
+          STRING_CONTROL_INTRODUCER_SCAN.lastIndex = i;
+          const match = STRING_CONTROL_INTRODUCER_SCAN.exec(input);
           if (!match) {
             // A chunk ending in bare ESC may be a string introducer split
             // across PTY reads, so hold the byte rather than emitting it.
@@ -55,8 +90,7 @@ export class TerminalControlStreamFilter {
           }
           output += input.slice(i, match.index);
           const introducer = match[0];
-          const opener = introducer.length === 2 ? introducer[1] : introducer;
-          this.state = opener === ']' || opener === '\x9d' ? 'osc' : 'string';
+          this.state = stringControlKind(introducer) === 'osc' ? 'osc' : 'string';
           i = match.index + introducer.length;
           break;
         }
@@ -81,7 +115,7 @@ export class TerminalControlStreamFilter {
 
         case 'osc':
         case 'string': {
-          const scan = this.state === 'osc' ? OSC_END_SCAN : STRING_END_SCAN;
+          const scan = stringControlEndScan(this.state === 'osc' ? 'osc' : 'other');
           scan.lastIndex = i;
           const match = scan.exec(input);
           if (!match) {

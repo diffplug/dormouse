@@ -251,6 +251,100 @@ describe('TerminalProtocolParser', () => {
     });
   });
 
+  it('frames a C1 introducer with nothing else in the chunk', () => {
+    // The fast path used to notice only C1 OSC, so a chunk whose sole
+    // introducer was C1 DCS/SOS/PM/APC was returned unchanged as `textData`.
+    const parser = new TerminalProtocolParser();
+    const sixel = '\x90q#0;2;0;0;0#0~~\x9c';
+    const kitty = '\x9fGf=100,a=T;iVBORw0\x9c';
+    const result = parser.process(`a${sixel}b${kitty}c`);
+
+    expect(result.visibleData).toBe(`a${sixel}b${kitty}c`);
+    expect(result.textData).toBe('abc');
+    expect(result.events).toEqual([]);
+  });
+
+  it('reads a BEL in a forwarded continuation chunk as payload, not a terminator', () => {
+    const parser = new TerminalProtocolParser();
+    // The forwarding state used to resume every string as an OSC, so the first
+    // BEL in a later sixel or Kitty chunk cut the sequence in half.
+    expect(parser.process('\x1bPq#0;2;0;0;0').visibleData).toBe('\x1bPq#0;2;0;0;0');
+    expect(parser.process('#0~~\x07~~')).toMatchObject({
+      visibleData: '#0~~\x07~~',
+      events: [],
+      textData: '',
+    });
+    expect(parser.process('\x1b\\tail')).toMatchObject({
+      visibleData: '\x1b\\tail',
+      textData: 'tail',
+    });
+  });
+
+  it('drops a consumed OSC that CAN or SUB aborted, and reads on as ground text', () => {
+    for (const abort of ['\x18', '\x1a']) {
+      const parser = new TerminalProtocolParser();
+      const result = parser.process(`before\x1b]133;A${abort}after`);
+
+      // Nothing the aborted sequence carried is trusted, so no prompt boundary
+      // — and the abort byte goes with it rather than reaching xterm.js.
+      expect(result.events).toEqual([]);
+      expect(result.visibleData).toBe('beforeafter');
+      expect(result.textData).toBe('beforeafter');
+    }
+  });
+
+  it('forwards an aborted sequence xterm.js owns, cancel byte included', () => {
+    const parser = new TerminalProtocolParser();
+    const result = parser.process('\x1bPq#0;2\x18rest');
+
+    expect(result.visibleData).toBe('\x1bPq#0;2\x18rest');
+    expect(result.textData).toBe('rest');
+  });
+
+  it('lets a bare ESC cancel a string and handles the sequence that follows', () => {
+    const parser = new TerminalProtocolParser();
+    const result = parser.process('\x1b]133;A\x1b[mtext');
+
+    // No prompt boundary from the cancelled OSC, and the SGR that cancelled it
+    // is the sequence it actually is.
+    expect(result.events).toEqual([]);
+    expect(result.visibleData).toBe('\x1b[mtext');
+
+    // A real OSC after the cancel is still parsed.
+    const second = new TerminalProtocolParser();
+    expect(second.process('\x1b]0;dropped\x1b]7;file:///tmp\x07').events).toEqual([
+      { kind: 'semantic', event: expect.objectContaining({ type: 'cwd' }) },
+    ]);
+  });
+
+  it('frames a string control split in every position', () => {
+    // Introducer split: `ESC` ends one chunk, `P` starts the next.
+    const introducer = new TerminalProtocolParser();
+    expect(introducer.process('a\x1b')).toMatchObject({ visibleData: 'a', textData: 'a' });
+    expect(introducer.process('P;payload\x1b\\b')).toMatchObject({
+      visibleData: '\x1bP;payload\x1b\\b',
+      textData: 'b',
+    });
+
+    // Terminator split: the held ESC must not be emitted as text on its own.
+    const terminator = new TerminalProtocolParser();
+    expect(terminator.process('\x1bPfoo').visibleData).toBe('\x1bPfoo');
+    expect(terminator.process('\x1b').visibleData).toBe('');
+    expect(terminator.process('\\rest')).toMatchObject({
+      visibleData: '\x1b\\rest',
+      textData: 'rest',
+    });
+
+    // Cancel split: the same held ESC turns out to open a new sequence.
+    const cancel = new TerminalProtocolParser();
+    expect(cancel.process('\x1bPfoo').visibleData).toBe('\x1bPfoo');
+    expect(cancel.process('\x1b').visibleData).toBe('');
+    expect(cancel.process('[mrest')).toMatchObject({
+      visibleData: '\x1b[mrest',
+      textData: '\x1b[mrest',
+    });
+  });
+
   it('keeps a real bell outside a string control', () => {
     const parser = new TerminalProtocolParser();
     const result = parser.process('done\x07');

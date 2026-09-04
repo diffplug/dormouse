@@ -8,11 +8,13 @@
 ## Families
 
 - **CSI** (`ESC [`, or the C1 `U+009B`) — screen control. xterm.js owns all of it except [Supported CSI](#supported-csi).
-- **OSC** (`ESC ]`, or the C1 `U+009D`) — out-of-band metadata for the emulator itself. **The parser accepts all three terminators for every sequence** — `BEL` (`\x07`), `ST` (`ESC \`), the C1 ST `U+009C` — and handles OSCs split across PTY reads. See [Supported OSCs](#supported-oscs).
+- **OSC** (`ESC ]`, or the C1 `U+009D`) — out-of-band metadata for the emulator itself. **All three OSC terminators are accepted**: `BEL` (`\x07`), `ST` (`ESC \`), the C1 ST `U+009C`. See [Supported OSCs](#supported-oscs).
 - **DCS** (`ESC P`, or the C1 `U+0090`) — device-control strings: SIXEL graphics input and the shape of Dormouse's `CSI > q` answer.
 - **APC** (`ESC _`, or the C1 `U+009F`) — application-program commands; Kitty graphics uses `APC G`.
 
-**The parser frames all five string controls — OSC, DCS, SOS, PM, APC — and models nothing outside OSC**, so DCS and APC are forwarded whole. **`BEL` terminates only OSC**; inside the others it is payload, never a bell (rationale).
+**The parser frames all five string controls — OSC, DCS, SOS, PM, APC — and models nothing outside OSC**, so DCS and APC are forwarded whole. **`BEL` terminates only OSC**; inside the others it is payload, never a bell (rationale). **CAN, SUB, or a bare `ESC` cancels any string control** — the cancelled sequence yields no semantic event, and a bare `ESC` is re-read as the start of the sequence it actually opens. **A forwarding parser must remember the kind it is resuming** (rationale). **A string control may split across PTY reads at any position** — introducer, terminator, and cancel alike.
+
+**The parser and the text filter frame through one tokenizer.** Source of truth: `STRING_CONTROL_INTRODUCER` and `stringControlEndScan` in `lib/src/lib/terminal-controls.ts`, consumed by `findStringControlEnd` in `lib/src/lib/terminal-protocol.ts`; the two are pinned against each other by `lib/src/lib/terminal-controls.test.ts`.
 
 ## Parsing location
 
@@ -22,7 +24,7 @@ State-driving and security-sensitive OSCs — plus the `CSI > q` query — are p
 
 **Every semantic value `TerminalProtocolParser` *retains* is bounded and stripped of control characters before storage**, whatever the emitter: `TITLE_LIMIT` / `BODY_LIMIT` for titles and notification bodies, whose whitespace controls collapse to spaces before the trim; `COMMAND_LINE_LIMIT` for the OSC 633 `E` command line, bounded *before* the `\xNN` unescape and sanitized *after* it (rationale); `MAX_CWD_LENGTH` for every CWD source, interior whitespace preserved. **Every limit counts code points**, so a cut never splits a surrogate pair. **A value that reduces to nothing is dropped, never stored empty.**
 
-The remote Host in the Tauri sidecar is a second, **strip-only** parse site, **one parser per PTY it streams to a phone, never per attachment** (rationale). **Every event it produces must be discarded, responses included** — the owner answers ([remote-api.md](remote-api.md#terminal-surfaces)). **OSC 10/11/12 queries must still be consumed there**, reply thrown away: a *declined* query stays in `visibleData` and the phone's xterm answers it. **It yields the projection pair, not `visibleData` alone** ([remote-api.md](remote-api.md#terminal-surfaces)). The VS Code Host needs no such parser ([vscode.md](vscode.md)); its one parser already produces the pair.
+The remote Host in the Tauri sidecar is a second, **strip-only** parse site, **one parser per PTY it streams to a phone, never per attachment** (rationale). **Every event it produces must be discarded, responses included** — the owner answers ([remote-api.md](remote-api.md#terminal-surfaces)). **OSC 10/11/12 queries must still be consumed there**, reply thrown away: a *declined* query stays in `visibleData` and the phone's xterm answers it. **It yields the projection pair, not `visibleData` alone.** The VS Code Host needs no such parser ([vscode.md](vscode.md)); its one parser already produces the pair.
 
 Source of truth: `oscDispositionAt` in `lib/src/lib/terminal-protocol.ts`, `boundedCwdValue` in `lib/src/lib/terminal-state.ts`, `lib/src/host/remote/pty-strip.ts`, `lib/src/host/remote/sidecar-entry.ts`.
 
@@ -111,7 +113,7 @@ Dormouse intervenes only in these cases.
 
 Every renderer over one PTY parses these queries; only the owner's answer reaches the program ([remote-api.md](remote-api.md#terminal-surfaces)).
 
-Source of truth: `IMAGE_ADDON_OPTIONS` in `lib/src/lib/terminal-lifecycle.ts`; `OSC1337_FORWARDED` and `TerminalProtocolParser.processForwardedOsc` in `lib/src/lib/terminal-protocol.ts`; `TerminalControlStreamFilter` in `lib/src/lib/terminal-controls.ts`.
+Source of truth: `IMAGE_ADDON_OPTIONS` in `lib/src/lib/terminal-lifecycle.ts`; `OSC1337_FORWARDED` and `processForwarded` in `lib/src/lib/terminal-protocol.ts`; `TerminalControlStreamFilter` in `lib/src/lib/terminal-controls.ts`.
 
 ### Report filtering on the input side
 

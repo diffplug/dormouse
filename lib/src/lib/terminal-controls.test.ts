@@ -1,5 +1,34 @@
 import { describe, expect, it } from 'vitest';
 import { stripTerminalControls, TerminalControlStreamFilter } from './terminal-controls';
+import { TerminalProtocolParser } from './terminal-protocol';
+
+describe('one string-control grammar', () => {
+  // The parser and this filter are separate state machines over the same bytes,
+  // and every place they disagreed was a bug: a C1 introducer one saw and the
+  // other did not, a BEL one read as a terminator inside a DCS, a cancel only
+  // one honoured. They share the tokenizer now, so the same chunks must project
+  // to the same text through either (docs/specs/terminal-escapes.md → Families).
+  const cases: Array<{ name: string; chunks: string[] }> = [
+    { name: 'a C1 DCS whose payload contains a BEL', chunks: ['\x90q#0;2', '~~\x07~~\x9c', 'tail'] },
+    { name: 'a consumed OSC aborted by CAN', chunks: ['\x1b]0;title\x18', 'after'] },
+    { name: 'a consumed OSC aborted by SUB', chunks: ['\x1b]0;title\x1a', 'after'] },
+    { name: 'a C1 APC cancelled by a split bare ESC', chunks: ['\x9fGf=100;xx', '\x1b', '[mrest'] },
+    {
+      name: 'a forwarded OSC whose ST terminator is split',
+      chunks: ['\x1b]1337;File=inline=1:AAAA', 'BBBB\x1b', '\\done'],
+    },
+  ];
+
+  for (const { name, chunks } of cases) {
+    it(`projects the same text for ${name}`, () => {
+      const parser = new TerminalProtocolParser();
+      const filter = new TerminalControlStreamFilter();
+      for (const chunk of chunks) {
+        expect(parser.process(chunk).textData).toBe(filter.process(chunk));
+      }
+    });
+  }
+});
 
 describe('TerminalControlStreamFilter', () => {
   it('removes image string payloads split across PTY reads', () => {
