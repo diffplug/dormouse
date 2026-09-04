@@ -104,7 +104,9 @@ Replicated, not screencast: the client renders its own xterm from the same data 
 
 **The unit of processed output is a projection pair, never a bare string.** `terminal.data` carries `bytes` — the renderer projection — and `text`, the same chunk with string-control payloads removed for a consumer reading it as text; **`text` omitted means identical to `bytes`, present is authoritative, empty included** (rationale). Additive on protocol-v1. The same pair crosses every Host seam as `ProcessedPtyChunk` and arrives as `PtyDataDetail`, so a Client's prompt heuristic reads what the Host's own does rather than image base64.
 
-Source of truth: `TerminalDataEvent` in `server-lib-common/src/remote/wire.ts`, `ProcessedPtyChunk` in `lib/src/remote/host/host-surface-provider.ts`, `PtyDataDetail` in `lib/src/lib/platform/types.ts`.
+**One `terminal.data` never approaches the 1 MiB application-message cap**: the owner bounds what it feeds the parser, so the encoded message stays well inside `MAX_APP_MESSAGE_LENGTH` without a rechunker on this path ([terminal-escapes.md](./terminal-escapes.md) → "Parsing location").
+
+Source of truth: `TerminalDataEvent` in `server-lib-common/src/remote/wire.ts`, `ProcessedPtyChunk` in `lib/src/lib/processed-pty-stream.ts`, `PtyDataDetail` in `lib/src/lib/platform/types.ts`.
 
 #### Attach is the resize
 
@@ -147,15 +149,6 @@ Graded grants, layout mutations, and connected-viewer display with per-viewer di
 Reserved: For [Future](#future) items 2–3, clients must tolerate additive optional `inflight` and `blocks` fields on `TerminalAttachResult`.
 
 ## Future
-
-**Scope: wire-boundary** — one parser per PTY generation, in the process that owns the PTY, fed from spawn. True in VS Code today; standalone still parses raw output twice, once in the webview adapter and once strip-only in the sidecar. Staged:
-
-1. The parser moves into the standalone sidecar, with the theme pushed up as VS Code's `pushThemeColors` does it. `lib/src/host/remote/pty-strip.ts` and its colour-provider workaround are deleted, and standalone's webview adapters stop parsing.
-2. A sink that subscribes inside a forwarded string control starts at the next ground byte, so a mid-sequence attach cannot ship a payload tail as though it were output.
-3. The owner bounds the parser's input chunk, so no `terminal.data` message can approach the 1 MiB application-message cap after base64url and JSON framing.
-4. [terminal-escapes.md](./terminal-escapes.md) → "Parsing location" collapses to one parse site, and [standalone.md](./standalone.md) → "Remote Host service" follows.
-
-Staged in likely order of arrival. **Each item is additive** — a new method, event, or optional field — so nothing in protocol-v1 changes shape when it lands.
 
 ### 1. Browser surfaces (`agent-browser`)
 

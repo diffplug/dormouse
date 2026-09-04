@@ -8,7 +8,7 @@ import type { ProcessedPtyChunk, PtySink } from '../../remote/host/host-surface-
 import { createSidecarSurfaceBridge, type SidecarSurfaceBridge } from './sidecar-entry';
 import { ASK_BUDGET_MS, type RemoteHostAsk } from './service-protocol';
 
-let sent: Array<{ event: string; data: RemoteHostAsk }>;
+let sent: Array<{ event: string; data: unknown }>;
 let written: Array<{ id: string; data: string }>;
 let resized: Array<{ id: string; cols: number; rows: number }>;
 let livePtys: Set<string>;
@@ -16,7 +16,14 @@ let bridge: SidecarSurfaceBridge;
 
 /** The ask the bridge is waiting on, most recent last. */
 function asks(): RemoteHostAsk[] {
-  return sent.filter((message) => message.event === 'remoteHost:ask').map((m) => m.data);
+  return sent
+    .filter((message) => message.event === 'remoteHost:ask')
+    .map((message) => message.data as RemoteHostAsk);
+}
+
+/** What the bridge told the webview under one event name, most recent last. */
+function emitted<T>(event: string): T[] {
+  return sent.filter((message) => message.event === event).map((message) => message.data as T);
 }
 
 function answer(ask: RemoteHostAsk, results: unknown[]): void {
@@ -43,7 +50,7 @@ beforeEach(() => {
   resized = [];
   livePtys = new Set(['pty-1', 'pty-2']);
   bridge = createSidecarSurfaceBridge({
-    send: (event, data) => sent.push({ event, data: data as RemoteHostAsk }),
+    send: (event, data) => sent.push({ event, data }),
     mgr: {
       write: (id, data) => void written.push({ id, data }),
       resize: (id, cols, rows) => void resized.push({ id, cols, rows }),
@@ -189,7 +196,7 @@ describe('PTYs', () => {
     expect(resized).toEqual([{ id: 'pty-1', cols: 80, rows: 24 }]);
   });
 
-  it('routes output by id, stripped', () => {
+  it('routes output by id, parsed', () => {
     const one = sink();
     const two = sink();
     bridge.provider.streamPty('pty-1', one);
@@ -235,6 +242,21 @@ describe('PTYs', () => {
     expect(two.data).toEqual(['hi']);
   });
 
+  it('holds a sink that attached inside a forwarded image to the next ground byte', () => {
+    const one = sink();
+    bridge.provider.streamPty('pty-1', one);
+    bridge.onPtyEvent('data', { id: 'pty-1', data: '\x1b]1337;File=inline=1:AAAA' });
+
+    const late = sink();
+    bridge.provider.streamPty('pty-1', late);
+    bridge.onPtyEvent('data', { id: 'pty-1', data: 'BBBB\x07after' });
+
+    // The attachment that was there for the introducer renders the whole image;
+    // the one that arrived mid-payload would have painted the base64 as text.
+    expect(one.data).toEqual(['\x1b]1337;File=inline=1:AAAA', 'BBBB\x07after']);
+    expect(late.data).toEqual(['after']);
+  });
+
   it('keeps one PTY’s half-read sequence out of another’s', () => {
     const one = sink();
     const two = sink();
@@ -253,6 +275,7 @@ describe('PTYs', () => {
     const one = sink();
     bridge.provider.streamPty('pty-1', one);
     bridge.onPtyEvent('exit', { id: 'pty-1', exitCode: 3 });
+    bridge.provider.streamPty('pty-1', one);
     bridge.onPtyEvent('exit', { id: 'pty-1', signal: 'SIGTERM' });
     expect(one.exits).toEqual([3, 0]);
   });
@@ -295,8 +318,6 @@ describe('PTYs', () => {
     const subscription = bridge.provider.streamPty('pty-1', first);
     subscription.stop();
 
-    // A new attachment to the same id gets a fresh stream, which the previous
-    // subscription's unsubscribe has no claim on.
     const second = sink();
     bridge.provider.streamPty('pty-1', second);
     subscription.stop();
@@ -309,5 +330,86 @@ describe('PTYs', () => {
   it('ignores events with no id', () => {
     expect(() => bridge.onPtyEvent('data', { data: 'x' })).not.toThrow();
     expect(() => bridge.onPtyEvent('data', null)).not.toThrow();
+  });
+});
+
+describe('the webview’s half of the parse', () => {
+  it('sends the projection pair as pty:data, and nothing for an empty chunk', () => {
+    bridge.onPtyEvent('data', { id: 'pty-1', data: 'plain' });
+    bridge.onPtyEvent('data', { id: 'pty-1', data: `\x1b]1337;File=inline=1:AAAA\x07x` });
+    bridge.onPtyEvent('data', { id: 'pty-1', data: '\x1b]7;file:///tmp\x07' });
+
+    expect(emitted('pty:data')).toEqual([
+      { id: 'pty-1', data: 'plain' },
+      { id: 'pty-1', data: `\x1b]1337;File=inline=1:AAAA\x07x`, textData: 'x' },
+    ]);
+  });
+
+  it('parses a PTY nothing is attached to, because the webview is a consumer too', () => {
+    bridge.onPtyEvent('data', { id: 'pty-9', data: `\x1b]0;title\x07hello` });
+    expect(emitted('pty:data')).toEqual([{ id: 'pty-9', data: 'hello' }]);
+    expect(emitted<{ id: string; events: unknown[] }>('terminal:semanticEvents')).toHaveLength(1);
+  });
+
+  it('forwards the alert half of a parse, and the semantic half, in that order', () => {
+    bridge.onPtyEvent('data', { id: 'pty-1', data: `\x1b]9;Build finished\x07` });
+
+    expect(sent.map((message) => message.event)).toEqual([
+      'terminal:protocolEvents',
+      'terminal:semanticEvents',
+    ]);
+    expect(emitted('terminal:protocolEvents')).toEqual([
+      {
+        id: 'pty-1',
+        events: [
+          { kind: 'notification', notification: { source: 'OSC 9', title: null, body: 'Build finished' } },
+        ],
+      },
+    ]);
+  });
+
+  it('never forwards a response — the owner writes it to the PTY itself', () => {
+    bridge.setThemeColors({ foreground: '#ffffff', background: '#102030', cursor: '#abcdef' });
+    bridge.onPtyEvent('data', { id: 'pty-1', data: `\x1b]11;?\x07` });
+
+    expect(written).toEqual([{ id: 'pty-1', data: `\x1b]11;rgb:1010/2020/3030\x1b\\` }]);
+    expect(sent).toEqual([]);
+  });
+
+  it('leaves a colour query for xterm.js until the webview has pushed a theme', () => {
+    // Null before the first push, exactly as the VS Code host documents.
+    bridge.onPtyEvent('data', { id: 'pty-1', data: `\x1b]11;?\x07` });
+    expect(written).toEqual([]);
+    expect(emitted('pty:data')).toEqual([
+      // Declined, so the query stays in the renderer projection — and out of
+      // the text one, like every other string control.
+      { id: 'pty-1', data: `\x1b]11;?\x07`, textData: '' },
+    ]);
+  });
+
+  it('ignores a malformed theme push rather than half-applying it', () => {
+    bridge.setThemeColors({ foreground: '#ffffff' });
+    bridge.setThemeColors(null);
+    bridge.onPtyEvent('data', { id: 'pty-1', data: `\x1b]11;?\x07` });
+    expect(written).toEqual([]);
+  });
+
+  it('gives a reused id a parser of its own at spawn', () => {
+    // Half of an OSC the previous generation never finished must not be spliced
+    // onto the new PTY's first bytes.
+    bridge.onPtyEvent('data', { id: 'pty-1', data: '\x1b]133;' });
+    bridge.onPtySpawn('pty-1');
+    // The stale `pending` would have swallowed this whole chunk instead.
+    bridge.onPtyEvent('data', { id: 'pty-1', data: 'plain' });
+
+    expect(emitted('pty:data')).toEqual([{ id: 'pty-1', data: 'plain' }]);
+  });
+
+  it('starts a fresh parser after an exit', () => {
+    bridge.onPtyEvent('data', { id: 'pty-1', data: '\x1b]133;' });
+    bridge.onPtyEvent('exit', { id: 'pty-1', exitCode: 0 });
+    bridge.onPtyEvent('data', { id: 'pty-1', data: 'plain' });
+
+    expect(emitted('pty:data')).toEqual([{ id: 'pty-1', data: 'plain' }]);
   });
 });

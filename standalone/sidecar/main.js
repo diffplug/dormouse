@@ -33,15 +33,17 @@ function send(event, data) {
 }
 
 const mgr = create((event, data) => {
-  // Tap output and exits for the remote Host before they go to the webview. A
-  // remote listener must never be able to break the local pipe, so its failure
-  // is logged and the send happens either way.
+  // Output goes through the Host's parser — one per PTY, feeding the webview
+  // and every attached Client from the same pass (docs/specs/terminal-escapes.md
+  // → "Parsing location") — so a `data` event reaches the webview as the
+  // `pty:data` the Host emits, never raw. A remote sink runs only after that
+  // send, and the whole tap is wrapped so a throw is logged rather than fatal.
   try {
     remoteHost.onPtyEvent(event, data);
   } catch (err) {
     console.error(`[sidecar] remote host ${event} tap failed:`, err && err.message || err);
   }
-  send(`pty:${event}`, data);
+  if (event !== 'data') send(`pty:${event}`, data);
 }, nodePty);
 
 const remoteHost = createSidecarRemoteHost({
@@ -115,7 +117,9 @@ function handleLine(line) {
   try {
     const { event, data } = JSON.parse(line);
     switch (event) {
-      case 'pty:spawn':   mgr.spawn(data.id, data.options); break;
+      // Told before the spawn: the id may be a live PTY's, and the parser for
+      // that generation must not carry a half-read sequence into the new one.
+      case 'pty:spawn':   remoteHost.onPtySpawn(data.id); mgr.spawn(data.id, data.options); break;
       case 'pty:input':   mgr.write(data.id, data.data); break;
       case 'pty:resize':  mgr.resize(data.id, data.cols, data.rows); break;
       case 'pty:kill':    mgr.kill(data.id); break;
@@ -130,6 +134,9 @@ function handleLine(line) {
       // recovery").
       case 'pty:interrupt': mgr.interrupt(data.ids, data.requestId); break;
       case 'pty:gracefulKillAll': mgr.gracefulKillAll(data.timeout, data.requestId); break;
+      // The webview's resolved terminal theme, so the parser here can answer
+      // OSC 10/11/12 (docs/specs/terminal-escapes.md → Supported OSCs).
+      case 'pty:themeColors': remoteHost.setThemeColors(data); break;
       case 'sidecar:shutdown': shutdown(); break;
       case 'dor:controlResponse': dorControl?.respond(data); break;
       case 'remoteHost:command': remoteHost.handleCommand(data); break;

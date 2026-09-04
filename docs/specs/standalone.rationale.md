@@ -20,7 +20,7 @@
 
 **Why the correlation field cannot be `requestId`.** A `remoteHost:*` payload reusing that field has its results consumed by the invoke table, vanishing at random.
 
-**Why the sidecar strips at all.** VS Code's extension host parses once and forwards `visibleData`; the sidecar leaves stripping to the webview's own parser, so with no strip pass in the service the phone would see a stream the laptop's xterm never renders.
+**Why the parse moved here rather than staying in the webview.** The webview is one consumer of a PTY the sidecar owns; an attached Client is another. Parsing in the webview meant the sidecar had to strip a second time for the phone, with the duplicate-answer hazards `docs/specs/terminal-escapes.rationale.md` records. Parsing where the PTY lives makes both consumers of one pass, at the price of two messages that used to be in-process calls and a theme this process cannot read for itself.
 
 **Why a failed read must not be memoized.** The read errors that are neither `ENOENT` nor a parse failure — EACCES, EIO, a handle held open on Windows — say nothing about what the file holds; answering them empty, or caching that emptiness, lets the next save overwrite unseen state with nothing, since every change is a read-modify-write of the whole file.
 

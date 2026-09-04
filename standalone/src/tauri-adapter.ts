@@ -41,11 +41,11 @@ import { withTimeout } from "./with-timeout";
 import {
   applyTerminalProtocolEvents,
   collectTerminalSemanticEvents,
-  collectTerminalProtocolResponses,
   TerminalProtocolParser,
-  textProjectionOf,
+  type TerminalProtocolEvent,
 } from "dormouse-lib/lib/terminal-protocol";
-import { themeColorProvider } from "dormouse-lib/lib/terminal-theme";
+import { getTerminalTheme, onTerminalThemeChange } from "dormouse-lib/lib/terminal-theme";
+import type { TerminalSemanticEvent } from "dormouse-lib/lib/terminal-state";
 import {
   applyTerminalSemanticEventsByPtyId,
 } from "dormouse-lib/lib/terminal-state-store";
@@ -84,7 +84,6 @@ export class TauriAdapter implements PlatformAdapter {
   private filesDroppedHandlers = new Set<(paths: string[]) => void>();
   private alertStateHandlers = new Set<(detail: AlertStateDetail) => void>();
   private unlistenFns: Array<() => void> = [];
-  private protocolParsers = new Map<string, TerminalProtocolParser>();
   private alertManager = new AlertManager();
   private sessionStore = new TauriSessionStore();
   // In-process session-flush handshake (mirrors the VS Code message-router flow
@@ -116,6 +115,11 @@ export class TauriAdapter implements PlatformAdapter {
         handler({ id, ...state });
       }
     });
+
+    // The sidecar parses, and it has no DOM to read the theme from, so push the
+    // resolved colors up whenever they change (the initial push is in
+    // requestInit) — mirroring VSCodeAdapter.pushThemeColors.
+    onTerminalThemeChange(() => this.pushThemeColors());
   }
 
   async init(): Promise<void> {
@@ -123,28 +127,30 @@ export class TauriAdapter implements PlatformAdapter {
     // is an independent round trip to Rust, and serializing them puts the whole
     // set in front of the first paint.
     this.unlistenFns.push(...(await Promise.all([
-      listen<{ id: string; data: string }>("pty:data", (event) => {
-        const { id, data } = event.payload;
-        const parsed = this.getProtocolParser(id).process(data);
-        applyTerminalProtocolEvents(this.alertManager, id, parsed.events);
-        const semanticEvents = collectTerminalSemanticEvents(parsed.events);
-        this.alertManager.applyTerminalSemanticEvents(id, semanticEvents);
-        applyTerminalSemanticEventsByPtyId(id, semanticEvents);
-        for (const response of collectTerminalProtocolResponses(parsed.events)) {
-          invoke("pty_write", { id, data: response });
-        }
-        if (parsed.visibleData.length === 0) return;
+      // Already parsed by the sidecar, which owns the PTY: the pair arrives as
+      // it is, and its events arrive as the two messages below
+      // (docs/specs/terminal-escapes.md → "Parsing location").
+      listen<PtyDataDetail>("pty:data", (event) => {
+        const { id, data, textData } = event.payload;
         // Feed visible data to alert manager for visual activity monitoring.
         this.alertManager.onData(id);
-        const textData = textProjectionOf(parsed);
         for (const handler of this.dataHandlers) {
-          handler({ id, data: parsed.visibleData, textData });
+          handler({ id, data, textData });
         }
+      }),
+
+      listen<{ id: string; events: TerminalProtocolEvent[] }>("terminal:protocolEvents", (event) => {
+        applyTerminalProtocolEvents(this.alertManager, event.payload.id, event.payload.events);
+      }),
+
+      listen<{ id: string; events: TerminalSemanticEvent[] }>("terminal:semanticEvents", (event) => {
+        const { id, events } = event.payload;
+        this.alertManager.applyTerminalSemanticEvents(id, events);
+        applyTerminalSemanticEventsByPtyId(id, events);
       }),
 
       listen<{ id: string; exitCode: number }>("pty:exit", (event) => {
         this.alertManager.onExit(event.payload.id, event.payload.exitCode);
-        this.protocolParsers.delete(event.payload.id);
         for (const handler of this.exitHandlers) {
           handler(event.payload);
         }
@@ -157,11 +163,12 @@ export class TauriAdapter implements PlatformAdapter {
       }),
 
       listen<{ id: string; data: string }>("pty:replay", (event) => {
-        // Replay arrives as raw buffered output. Run it through the protocol
-        // parser so semantic OSCs (CWD, prompt, title) repopulate pane state
-        // and are stripped before xterm sees them, mirroring live pty:data.
+        // Replay arrives as raw buffered output, the one stream the sidecar does
+        // not parse. A one-shot parser here repopulates semantic state and
+        // strips OSCs before xterm sees them; its responses are dropped, since
+        // the asker is long gone (docs/specs/terminal-escapes.md).
         const { id, data } = event.payload;
-        const parsed = this.getProtocolParser(id).process(data);
+        const parsed = new TerminalProtocolParser().process(data);
         applyTerminalSemanticEventsByPtyId(id, collectTerminalSemanticEvents(parsed.events));
         for (const handler of this.replayHandlers) {
           handler({ id, data: parsed.visibleData });
@@ -231,7 +238,6 @@ export class TauriAdapter implements PlatformAdapter {
 
   shutdown(): void {
     this.alertManager.dispose();
-    this.protocolParsers.clear();
     for (const unlisten of this.unlistenFns) {
       unlisten();
     }
@@ -248,7 +254,6 @@ export class TauriAdapter implements PlatformAdapter {
   }
 
   spawnPty(id: string, options?: { cols?: number; rows?: number; cwd?: string; shell?: string; args?: string[] }): void {
-    this.protocolParsers.set(id, new TerminalProtocolParser(themeColorProvider));
     invoke("pty_spawn", { id, options });
   }
 
@@ -261,7 +266,6 @@ export class TauriAdapter implements PlatformAdapter {
   }
 
   killPty(id: string): void {
-    this.protocolParsers.delete(id);
     invoke("pty_kill", { id });
   }
 
@@ -426,6 +430,20 @@ export class TauriAdapter implements PlatformAdapter {
 
   requestInit(): void {
     invoke("pty_request_init");
+    this.pushThemeColors();
+  }
+
+  /** Send the resolved terminal theme colors to the sidecar so its parser can
+   *  answer OSC 10/11/12 color queries (it has no DOM of its own). */
+  private pushThemeColors(): void {
+    const theme = getTerminalTheme();
+    invoke("pty_theme_colors", {
+      colors: {
+        foreground: theme.foreground,
+        background: theme.background,
+        cursor: theme.cursor,
+      },
+    });
   }
 
   onPtyList(handler: (detail: { ptys: PtyInfo[] }) => void): void {
@@ -618,14 +636,5 @@ export class TauriAdapter implements PlatformAdapter {
     } catch (err) {
       console.error('[tauri-adapter] Failed to clear legacy session state:', err);
     }
-  }
-
-  private getProtocolParser(id: string): TerminalProtocolParser {
-    let parser = this.protocolParsers.get(id);
-    if (!parser) {
-      parser = new TerminalProtocolParser(themeColorProvider);
-      this.protocolParsers.set(id, parser);
-    }
-    return parser;
   }
 }

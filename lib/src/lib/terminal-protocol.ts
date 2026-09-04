@@ -416,6 +416,18 @@ export function applyTerminalProtocolEvents(
   }
 }
 
+/**
+ * The notification and progress events {@link applyTerminalProtocolEvents} acts
+ * on. An owner whose `AlertManager` lives in another process — standalone's
+ * sidecar, whose webview holds it — forwards exactly these; every other kind is
+ * the owner's own to settle, a response above all.
+ */
+export function collectTerminalProtocolAlerts(
+  events: TerminalProtocolEvent[],
+): TerminalProtocolEvent[] {
+  return events.filter((event) => event.kind === 'notification' || event.kind === 'progress');
+}
+
 export function collectTerminalProtocolResponses(events: TerminalProtocolEvent[]): string[] {
   return events.flatMap((event) => (event.kind === 'response' ? [event.data] : []));
 }
