@@ -985,7 +985,9 @@ export function attachRouter(
       // is and a dead one cannot answer.
       const toKill = killOnDispose ? [...ownedPtyIds] : [];
       for (const id of ownedPtyIds) {
-        globalOwnedPtyIds.delete(id);
+        // Closing PTYs remain reserved while CWD/storage work is pending;
+        // another router must not resume a terminal this disposal will kill.
+        if (!killOnDispose) globalOwnedPtyIds.delete(id);
         if (killOnDispose) ownerPtyStreams.delete(id);
       }
       ownedPtyIds.clear();
@@ -1022,7 +1024,10 @@ export function attachRouter(
         // The kills this disposal owes, once the write that needed them alive
         // has settled. `toKill` is empty on the non-killing path.
         .finally(() => {
-          for (const id of toKill) ptyManager.kill(id);
+          for (const id of toKill) {
+            try { ptyManager.kill(id); }
+            finally { globalOwnedPtyIds.delete(id); }
+          }
         });
     },
   };

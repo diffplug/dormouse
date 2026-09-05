@@ -36,19 +36,24 @@ vi.mock('../src/peer-link', () => ({
 const ptys = vi.hoisted(() => ({
   cwd: null as string | null,
   cwdAsked: [] as string[],
+  cwdWait: null as Promise<void> | null,
+  buffered: new Map<string, { alive: boolean }>(),
   /** `'write'` and `'kill <id>'`, in the order they happened. */
   order: [] as string[],
 }));
 
 vi.mock('../src/pty-manager', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/pty-manager')>()),
-  spawn: () => {},
+  spawn: (id: string) => { ptys.buffered.set(id, { alive: true }); },
+  getBufferedPtys: () => new Map(ptys.buffered),
   getCwd: async (id: string) => {
     ptys.cwdAsked.push(id);
+    await ptys.cwdWait;
     return ptys.cwd;
   },
   kill: (id: string) => {
     ptys.order.push(`kill ${id}`);
+    ptys.buffered.delete(id);
   },
 }));
 
@@ -104,6 +109,8 @@ beforeEach(async () => {
   wiring.invalidations = 0;
   ptys.cwd = null;
   ptys.cwdAsked = [];
+  ptys.cwdWait = null;
+  ptys.buffered.clear();
   ptys.order = [];
   router = (await import('../src/message-router')) as RouterModule;
   // The same instance the router holds — `resetModules` gave this test its own
@@ -290,6 +297,37 @@ describe('notepad archive requests', () => {
     expect(ptys.cwdAsked).toEqual(['pty-1']);
     // The kill waits for the write: a dead PTY could not have answered.
     await vi.waitFor(() => expect(ptys.order).toEqual(['kill pty-1']));
+  });
+
+  it('reserves closing PTYs until the deferred kill finishes', async () => {
+    let release!: () => void;
+    ptys.cwdWait = new Promise<void>((resolve) => { release = resolve; });
+    const closing = fakeWebview();
+    const { context } = fakeContext();
+    const first = router.attachRouter(closing.channel, { context, killOnDispose: true });
+    closing.send({ type: 'pty:spawn', id: 'closing-pty', options: { cwd: '/tmp' } } as never);
+    closing.send({ type: 'notepad:volatile', snapshot: {
+      surfaces: [{ ...mirrored, terminalId: 'closing-pty' }], stagedDeletions: {},
+    } } as never);
+    first.dispose();
+    const reopening = fakeWebview();
+    const second = router.attachRouter(reopening.channel, { reconnect: true });
+    try {
+      reopening.send({ type: 'dormouse:init' } as never);
+      expect(reopening.posted.find((message) => message.type === 'pty:list')).toMatchObject({ ptys: [] });
+      expect(ptys.buffered.has('closing-pty')).toBe(true);
+      expect(ptys.order).toEqual([]);
+      release();
+      await vi.waitFor(() => expect(ptys.order).toEqual(['kill closing-pty']));
+      expect(readArchive(context)).toBeDefined();
+      reopening.send({ type: 'dormouse:init' } as never);
+      expect(reopening.posted.filter((message) => message.type === 'pty:list')).toEqual([
+        { type: 'pty:list', ptys: [] }, { type: 'pty:list', ptys: [] },
+      ]);
+    } finally {
+      release();
+      second.dispose();
+    }
   });
 
   it('kills the PTYs even when the archive write fails', async () => {
