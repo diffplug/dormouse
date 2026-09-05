@@ -147,7 +147,7 @@ Source of truth: `remote-lib-common/src/security/acl.ts` (the schema and
 
 ## Presence proofs
 
-**Share one verifier and native UTF-8** (rationale).
+**Use one verifier for pairing and connection.**
 
 - **The WebAuthn challenge is derived, not random.**
   `presenceChallenge(binding, relayNonce)` is base64url
