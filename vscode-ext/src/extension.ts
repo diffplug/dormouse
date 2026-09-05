@@ -14,7 +14,7 @@ import type { ExtensionMessage } from './message-types';
 import { initRemoteHost } from './remote-host';
 import { disposePeerLink, initPeerLink } from './peer-link';
 import { archiveVolatileMirror } from './notepad-archive-store';
-import { takeAllVolatile } from './notepad-volatile';
+import { refreshMirrorCwds, takeAllVolatile } from './notepad-volatile';
 
 type NewTerminalMessage = Extract<ExtensionMessage, { type: 'dormouse:newTerminal' }>;
 
@@ -266,12 +266,18 @@ export async function deactivate() {
   // session flush, which needs its own share of a budget we do not control;
   // bounded and best-effort for the same reason, since notes lost to a timeout
   // are a smaller failure than an unkilled pty host.
+  // The PTYs are still alive here, so a Surface whose shell reports no CWD can
+  // still be asked where it is. Its own, smaller bound, so the refresh and the
+  // write both fit inside the 800 ms below.
   step('archiving notepad');
+  const notepadContext = extensionContext;
   let notepadDeadline: ReturnType<typeof setTimeout> | undefined;
   await Promise.race([
-    archiveVolatileMirror(extensionContext, takeAllVolatile()).catch((err) => {
-      log.error('[deactivate] could not archive notepad notes:', String(err));
-    }),
+    refreshMirrorCwds(takeAllVolatile(), ptyManager.getCwd, 300)
+      .then((mirror) => archiveVolatileMirror(notepadContext, mirror))
+      .catch((err) => {
+        log.error('[deactivate] could not archive notepad notes:', String(err));
+      }),
     new Promise((resolve) => { notepadDeadline = setTimeout(resolve, 800); }),
   ]);
   clearTimeout(notepadDeadline);

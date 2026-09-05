@@ -56,6 +56,18 @@ describe('readInjectedVolatileNotepad', () => {
     }]);
   });
 
+  it('round-trips the PTY id, and drops one that is not a string', () => {
+    inject({ surfaces: [surface({ terminalId: 'pty-9' })] });
+    expect(readInjectedVolatileNotepad()!.surfaces[0].terminalId).toBe('pty-9');
+
+    // Same tolerance as the CWD: it is metadata for a teardown that has not
+    // happened, and a resuming webview derives its own anyway.
+    inject({ surfaces: [surface({ terminalId: 7 })] });
+    const [read] = readInjectedVolatileNotepad()!.surfaces;
+    expect(read.terminalId).toBeUndefined();
+    expect(read.notes).toHaveLength(1);
+  });
+
   it('drops a Surface whose kind is not one of the known kinds', () => {
     inject({ surfaces: [surface({ surfaceKind: 'spreadsheet' }), surface({ surfaceId: 'pane-2' })] });
     expect(readInjectedVolatileNotepad()!.surfaces.map((s) => s.surfaceId)).toEqual(['pane-2']);

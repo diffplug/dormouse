@@ -18,6 +18,7 @@ import type {
   VolatileNotepadSnapshot,
   VolatileSurfaceNotes,
 } from '../../lib/src/lib/notepad/types';
+import { cwdFromProcessPath } from '../../lib/src/lib/terminal-state';
 
 type StagedDeletions = VolatileNotepadSnapshot['stagedDeletions'];
 
@@ -67,6 +68,12 @@ function sanitizeSurface(value: unknown): VolatileSurfaceNotes | null {
     surfaceTitle: batch.surfaceTitle,
     surfaceKind: batch.surfaceKind,
     cwd: batch.cwd,
+    // Mirror-only, so it goes around the validator rather than through it: a
+    // batch carrying this field would be rejected on the next load. Anything
+    // but a string is simply absent — the refresh below then skips the Surface.
+    ...(typeof surface.terminalId === 'string' && surface.terminalId
+      ? { terminalId: surface.terminalId }
+      : {}),
     notes: batch.notes,
   };
 }
@@ -162,6 +169,59 @@ export function takeStagedForRouter(routerId: string): StagedDeletions {
 export function takeVolatileForRouter(routerId: string): VolatileNotepadSnapshot {
   const surfaces = takeVolatileForSurfaces(surfaceIdsForRouter(routerId));
   return { surfaces, stagedDeletions: takeStagedForRouter(routerId) };
+}
+
+/** One PTY's answer, or `null` if it does not arrive in time or at all. */
+async function boundedCwd(
+  getCwd: (terminalId: string) => Promise<string | null>,
+  terminalId: string,
+  boundMs: number,
+): Promise<string | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const bound = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), boundMs);
+  });
+  try {
+    return await Promise.race([
+      (async () => getCwd(terminalId))().catch(() => null),
+      bound,
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Fill in the process CWD of every mirrored terminal Surface, while its PTY is
+ * still alive.
+ *
+ * The mirror carries whatever CWD the webview last reported, which for a shell
+ * with no CWD escapes is nothing at all — and a teardown archives it verbatim.
+ * The PTY is still running at that moment, so the host asks it directly, exactly
+ * as the session-save path does per pane. Pure: the caller archives what comes
+ * back (`docs/specs/notepad.md` → "VS Code lifecycle").
+ *
+ * A Surface whose CWD came from shell integration keeps it — `'process'` and
+ * `'manual'` are the only sources a process inspection may replace, which is the
+ * rule `updateCwdIfAllowed` applies on the webview side. Bounded and best
+ * effort: on this path the kill is waiting behind it.
+ */
+export async function refreshMirrorCwds(
+  mirror: VolatileNotepadSnapshot,
+  getCwd: (terminalId: string) => Promise<string | null>,
+  boundMs: number,
+): Promise<VolatileNotepadSnapshot> {
+  const surfaces = await Promise.all(mirror.surfaces.map(async (surface) => {
+    const source = surface.cwd?.source;
+    const terminalId = surface.terminalId;
+    if (!terminalId
+      || surface.notes.length === 0
+      || (source && source !== 'process' && source !== 'manual')) return surface;
+    const path = await boundedCwd(getCwd, terminalId, boundMs);
+    const cwd = path ? cwdFromProcessPath(path) : null;
+    return cwd ? { ...surface, cwd } : surface;
+  }));
+  return { ...mirror, surfaces };
 }
 
 /** Drain everything — what `deactivate()` has to archive. */

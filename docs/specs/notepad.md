@@ -138,7 +138,8 @@ The archive is one `globalState` key, `dormouse.notepadArchive.v1`. **Never regi
 
 VS Code can destroy a webview without asking, so the close coordinator may never run. **Every webview therefore mirrors its live notes into extension-host memory**, and a teardown archives from that mirror instead.
 
-- **The mirror holds what a close would archive minus the markers** — notes, Surface title, kind and CWD, plus any archive deletions an open Archive view has staged.
+- **The mirror holds what a close would archive minus the markers** — notes, Surface title, kind and CWD, plus each terminal Surface's PTY id and any archive deletions an open Archive view has staged. **The id is mirror-only and never reaches a batch.**
+- **A teardown refreshes the mirror's process CWDs while the PTYs are alive** — bounded, and never overriding an integration-reported one — which on an editor-panel disposal is what makes the kill wait for the archive write, and in `deactivate()` puts it ahead of the session flush.
 - **The mirror is memory only, never written to disk, and cleared by an extension restart.** It is a bridge across one disposal, not a draft store.
 - **The mirror is sanitized on the way in**, round-tripped through the archive validator, because a teardown writes it verbatim with no webview left to ask.
 - **Editor-panel disposal (`killOnDispose: true`) and `deactivate()` archive their mirrored notes, best effort**, draining what they take so `deactivate()` cannot write a panel's notes again under a fresh batch id. In `deactivate()` the step sits between the recovery capture and the session flush, bounded (`docs/specs/vscode.md` → "Serialization and restore").

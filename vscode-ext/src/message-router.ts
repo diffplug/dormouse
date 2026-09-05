@@ -32,7 +32,7 @@ import {
   resetUnreadableNotepadArchive,
   saveNotepadArchive,
 } from './notepad-archive-store';
-import { setVolatileForRouter, takeStagedForRouter, takeVolatileForRouter } from './notepad-volatile';
+import { refreshMirrorCwds, setVolatileForRouter, takeStagedForRouter, takeVolatileForRouter } from './notepad-volatile';
 import { ASK_BUDGET_MS } from '../../lib/src/host/remote/service-protocol';
 import { configurePeerLink, remoteNotifyPeerChange } from './peer-link';
 import { createProcessedPtyStreams } from './processed-pty-streams';
@@ -57,6 +57,11 @@ const clipboardOps = require('../../lib/clipboard-ops.cjs') as {
 // Global set of PTY IDs claimed by any router instance.
 // Prevents reconnecting routers from stealing PTYs owned by other webviews.
 const globalOwnedPtyIds = new Set<string>();
+
+/** How long an editor panel's disposal waits for its PTYs to say where they
+ *  are before archiving and killing them. A closing tab is not urgent, but it
+ *  must not hang on a pty host that has stopped answering. */
+const TEARDOWN_CWD_REFRESH_MS = 1000;
 
 interface ActiveRouter {
   flushSessionSave(timeoutMs?: number): Promise<void>;
@@ -975,11 +980,15 @@ export function attachRouter(
       resolveAllFlushRequests();
       disconnectWebview?.();
       disconnectWebview = null;
+      // Every synchronous bookkeeping step stays here; only the kills wait,
+      // because the archive write below asks each live PTY where its process
+      // is and a dead one cannot answer.
+      const toKill: string[] = [];
       for (const id of ownedPtyIds) {
         globalOwnedPtyIds.delete(id);
         if (killOnDispose) {
           ownerPtyStreams.delete(id);
-          ptyManager.kill(id);
+          toKill.push(id);
         }
       }
       ownedPtyIds.clear();
@@ -996,16 +1005,27 @@ export function attachRouter(
       // say, so a failure is logged rather than allowed to reject out of
       // `dispose`.
       const notepadContext = options?.context;
-      if (notepadContext) {
-        // Draining is what keeps `deactivate()` from archiving these a second
-        // time under a fresh batch id; an empty mirror writes nothing.
-        const write = killOnDispose
-          ? archiveVolatileMirror(notepadContext, takeVolatileForRouter(notepadRouterId))
-          : mutateNotepadArchive(notepadContext, takeStagedForRouter(notepadRouterId));
-        void write.catch((err) => {
-          log.error('[notepad] could not commit a disposed webview\'s archive write:', String(err));
-        });
+      // Draining is what keeps `deactivate()` from archiving these a second
+      // time under a fresh batch id; an empty mirror writes nothing. Both
+      // drains are synchronous, so nothing this router reports later can slip
+      // into the write that is now in flight.
+      let write = Promise.resolve();
+      if (notepadContext && killOnDispose) {
+        const mirror = takeVolatileForRouter(notepadRouterId);
+        write = refreshMirrorCwds(mirror, ptyManager.getCwd, TEARDOWN_CWD_REFRESH_MS)
+          .then((refreshed) => archiveVolatileMirror(notepadContext, refreshed));
+      } else if (notepadContext) {
+        write = mutateNotepadArchive(notepadContext, takeStagedForRouter(notepadRouterId));
       }
+      void write
+        .catch((err) => {
+          log.error('[notepad] could not commit a disposed webview\'s archive write:', String(err));
+        })
+        // The kills this disposal owes, once the write that needed them alive
+        // has settled. `toKill` is empty on the non-killing path.
+        .finally(() => {
+          for (const id of toKill) ptyManager.kill(id);
+        });
     },
   };
 

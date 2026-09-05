@@ -4,9 +4,10 @@
 // `localStorage`, or webview state. The one mirror is `syncVolatile`, host
 // memory that exists so a VS Code webview re-resolved over live PTYs can get its
 // notes back (docs/specs/notepad.md).
-import type { SurfaceKind } from 'dor/commands/types';
+import { hasTerminal, type SurfaceKind } from 'dor/commands/types';
 import { getPlatformOrNull } from '../platform';
 import type { CwdState } from '../terminal-state';
+import { resolveTerminalSessionId } from '../terminal-store';
 import { toArchivedNote } from './archive-model';
 import type {
   LiveNote,
@@ -421,6 +422,12 @@ export function buildVolatileSnapshot(): VolatileNotepadSnapshot {
       surfaceTitle: meta?.surfaceTitle ?? '',
       surfaceKind: meta?.surfaceKind ?? 'terminal',
       cwd: meta?.cwd ?? null,
+      // Only a terminal Surface has a PTY to ask about, and the host answers
+      // for the Session id rather than the Surface id
+      // (docs/specs/notepad.md → "VS Code lifecycle").
+      ...(meta && hasTerminal(meta.surfaceKind)
+        ? { terminalId: resolveTerminalSessionId(surfaceId) }
+        : {}),
       notes: notes.map(toArchivedNote),
     });
   }

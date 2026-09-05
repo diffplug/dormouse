@@ -12,6 +12,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { VolatileSurfaceNotes } from '../../lib/src/lib/notepad/types';
+import type { CwdState } from '../../lib/src/lib/terminal-state';
 
 type MirrorModule = typeof import('../src/notepad-volatile');
 
@@ -162,6 +163,23 @@ describe('the volatile notepad mirror', () => {
     expect(mirror.takeAllVolatile().stagedDeletions).toEqual(noDeletions);
   });
 
+  it('carries a Surface\'s PTY id through, and only when it is a string', () => {
+    mirror.setVolatileForRouter('router-1', {
+      surfaces: [
+        { ...surface('a'), terminalId: 'pty-9' },
+        { ...surface('b'), terminalId: 7 },
+        surface('c'),
+      ],
+      stagedDeletions: noDeletions,
+    });
+
+    const taken = mirror.takeVolatileForSurfaces(['a', 'b', 'c']);
+    expect(taken.map((s) => s.terminalId)).toEqual(['pty-9', undefined, undefined]);
+    // Absent, not present-and-undefined: `batchFromVolatile` never copies it,
+    // and the validator would reject a batch that carried it.
+    expect(Object.keys(taken[2])).not.toContain('terminalId');
+  });
+
   it('drains every router at once, merging their staged deletions', () => {
     mirror.setVolatileForRouter('router-1', {
       surfaces: [surface('a')],
@@ -177,5 +195,90 @@ describe('the volatile notepad mirror', () => {
     expect(all.stagedDeletions.deleteBatchIds.sort()).toEqual(['batch-1', 'batch-2']);
     expect(all.stagedDeletions.deleteNotes).toEqual([{ batchId: 'batch-9', noteId: 'n1' }]);
     expect(mirror.takeAllVolatile().surfaces).toEqual([]);
+  });
+});
+
+describe('refreshMirrorCwds', () => {
+  const OSC7: CwdState = {
+    path: '/srv/app',
+    pathKind: 'posix',
+    isRemote: false,
+    source: 'osc7',
+    updatedAt: 5,
+  };
+
+  function snapshot(...surfaces: VolatileSurfaceNotes[]) {
+    return { surfaces, stagedDeletions: noDeletions };
+  }
+
+  it('fills a mirrored Surface that reported no CWD from its live PTY', async () => {
+    const getCwd = vi.fn(async () => '/Users/me/project');
+
+    const refreshed = await mirror.refreshMirrorCwds(
+      snapshot({ ...surface('a'), terminalId: 'pty-9' }),
+      getCwd,
+      50,
+    );
+
+    expect(getCwd).toHaveBeenCalledWith('pty-9');
+    expect(refreshed.surfaces[0].cwd).toMatchObject({ path: '/Users/me/project', source: 'process' });
+    // The rest of the mirror is untouched.
+    expect(refreshed.surfaces[0].notes).toEqual(surface('a').notes);
+    expect(refreshed.stagedDeletions).toEqual(noDeletions);
+  });
+
+  it('replaces a stale process CWD but never one the shell integration reported', async () => {
+    const stale: CwdState = { ...OSC7, path: '/old', source: 'process' };
+    const getCwd = vi.fn(async () => '/new');
+
+    const refreshed = await mirror.refreshMirrorCwds(
+      snapshot(
+        { ...surface('a'), cwd: stale, terminalId: 'pty-a' },
+        { ...surface('b'), cwd: OSC7, terminalId: 'pty-b' },
+      ),
+      getCwd,
+      50,
+    );
+
+    expect(refreshed.surfaces[0].cwd).toMatchObject({ path: '/new', source: 'process' });
+    expect(refreshed.surfaces[1].cwd).toEqual(OSC7);
+    expect(getCwd).toHaveBeenCalledTimes(1);
+  });
+
+  it('never asks about a Surface with no PTY id', async () => {
+    const getCwd = vi.fn(async () => '/Users/me/project');
+
+    const refreshed = await mirror.refreshMirrorCwds(snapshot(surface('a')), getCwd, 50);
+
+    expect(getCwd).not.toHaveBeenCalled();
+    expect(refreshed.surfaces[0].cwd).toBeNull();
+  });
+
+  it('keeps what it had when the host rejects', async () => {
+    const getCwd = vi.fn(async () => { throw new Error('the pty host is gone'); });
+
+    const refreshed = await mirror.refreshMirrorCwds(
+      snapshot({ ...surface('a'), cwd: OSC7, terminalId: 'pty-9' }),
+      getCwd,
+      50,
+    );
+
+    expect(refreshed.surfaces[0].cwd).toEqual(OSC7);
+  });
+
+  it('gives up at the bound rather than holding the teardown open', async () => {
+    // The kill waits behind this on an editor-panel disposal, so a pty host
+    // that has stopped answering must not keep the write from happening.
+    const never = new Promise<string | null>(() => {});
+    const started = Date.now();
+
+    const refreshed = await mirror.refreshMirrorCwds(
+      snapshot({ ...surface('a'), terminalId: 'pty-9' }),
+      () => never,
+      20,
+    );
+
+    expect(Date.now() - started).toBeLessThan(500);
+    expect(refreshed.surfaces[0].cwd).toBeNull();
   });
 });

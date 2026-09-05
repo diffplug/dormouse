@@ -42,8 +42,12 @@ function readSurface(value: unknown): VolatileSurfaceNotes | null {
     surfaceTitle: value.surfaceTitle,
     surfaceKind: value.surfaceKind as SurfaceKind,
     // A CWD that does not read back is dropped, not fatal — it is metadata for
-    // a batch this Surface has not written yet.
+    // a batch this Surface has not written yet. The PTY id beside it is the
+    // same: the resuming webview re-derives its own.
     cwd: readCwdState(value.cwd),
+    ...(typeof value.terminalId === 'string' && value.terminalId
+      ? { terminalId: value.terminalId }
+      : {}),
     notes,
   };
 }

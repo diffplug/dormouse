@@ -118,7 +118,8 @@ just teardown** — otherwise it does not survive an extension host killed befor
    external-process time overlaps the capture. **Its rejections are absorbed:** a
    throw out of the join would skip the flush, the refresh, and both kills.
 2. `captureAgentRecoveryCommands(context, 1200)`.
-3. Archive the volatile notepad mirror, bounded — the last chance for notes no
+3. Refresh the mirror's process CWDs against the still-live PTYs, then archive
+   the volatile notepad mirror, both bounded — the last chance for notes no
    close coordinator will ever reach (`docs/specs/notepad.md` → "VS Code
    lifecycle").
 4. `flushAllSessions(1000)` — ask every webview to save now, bounded.

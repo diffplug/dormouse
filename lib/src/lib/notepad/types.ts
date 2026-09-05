@@ -73,12 +73,17 @@ export interface NotepadArchiveMutation {
 }
 
 /** What the VS Code extension host mirrors in memory for one live Surface:
- *  everything a close would archive, minus the markers. */
+ *  everything a close would archive, minus the markers, plus the PTY id a
+ *  teardown needs to ask where the process is. */
 export interface VolatileSurfaceNotes {
   surfaceId: string;
   surfaceTitle: string;
   surfaceKind: SurfaceKind;
   cwd: CwdState | null;
+  /** The Session's PTY id, for a terminal Surface only. Mirror-only: it is what
+   *  a teardown passes to `ptyManager.getCwd` while the PTY is still alive, and
+   *  `batchFromVolatile` never writes it into a batch. */
+  terminalId?: string;
   notes: ArchivedNote[];
 }
 

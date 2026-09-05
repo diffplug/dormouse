@@ -243,6 +243,14 @@ meant the new view showed a batch the user had already deleted, still offering
 Undo, which `deactivate()` would then delete for real hours later. Committing at
 the disposal makes the promise true and leaves nothing pending to hand a resume.
 
+The mirror carries a PTY id purely so a teardown can ask where each process is: the
+extension host knows nothing of Surface ids, and `ptyManager.getCwd` answers for the
+Session id the webview spawned under. On an editor-panel disposal the kills moved
+*after* the archive write for that one reason — the loop used to run first, so by
+the time the refresh asked, the PTY it was asking about was already dead. Every
+other bookkeeping step in that disposal stayed synchronous and where it was; only
+the kills wait, and they run in a `finally`, so a failed write still kills them.
+
 `globalState` and not `workspaceState`: an archive is machine-local, and a Surface
 closed in one window belongs in the same list as every other. Settings Sync is the
 hazard that follows from that choice — it would carry excerpts, CWDs, and titles to

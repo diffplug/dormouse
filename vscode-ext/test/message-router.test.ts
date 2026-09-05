@@ -26,6 +26,27 @@ vi.mock('../src/peer-link', () => ({
   remoteNotifyPeerChange: () => {},
 }));
 
+/** The pty host, as far as a disposal is concerned: what it was asked, what it
+ *  answered, and the order the archive write and the kills happened in. */
+const ptys = vi.hoisted(() => ({
+  cwd: null as string | null,
+  cwdAsked: [] as string[],
+  /** `'write'` and `'kill <id>'`, in the order they happened. */
+  order: [] as string[],
+}));
+
+vi.mock('../src/pty-manager', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/pty-manager')>()),
+  spawn: () => {},
+  getCwd: async (id: string) => {
+    ptys.cwdAsked.push(id);
+    return ptys.cwd;
+  },
+  kill: (id: string) => {
+    ptys.order.push(`kill ${id}`);
+  },
+}));
+
 vi.mock('../src/remote-host', () => ({
   configureRemoteHost: () => {},
   deliverCommandResult: () => {},
@@ -76,6 +97,9 @@ beforeEach(async () => {
   vi.resetModules();
   wiring.peer = null;
   wiring.invalidations = 0;
+  ptys.cwd = null;
+  ptys.cwdAsked = [];
+  ptys.order = [];
   router = (await import('../src/message-router')) as RouterModule;
   // The same instance the router holds — `resetModules` gave this test its own
   // extension host, and both imports land in that one registry.
@@ -144,6 +168,7 @@ describe('notepad archive requests', () => {
       globalState: {
         get: (key: string) => store.get(key),
         update: async (key: string, value: unknown) => {
+          ptys.order.push('write');
           if (value === undefined) store.delete(key);
           else store.set(key, value);
         },
@@ -224,6 +249,49 @@ describe('notepad archive requests', () => {
     const archive = JSON.parse(store.get('dormouse.notepadArchive.v1') as string);
     expect(archive.batches).toHaveLength(1);
     expect(archive.batches[0]).toMatchObject({ surfaceTitle: 'zsh', notes: [{ id: 'n1' }] });
+  });
+
+  it('refreshes the mirrored cwd from the live PTY, then kills it', async () => {
+    // The mirror holds whatever the webview last reported, which for a shell
+    // with no CWD escapes is nothing — but the PTY is alive right up to here.
+    const webview = fakeWebview();
+    const { context, store } = fakeContext();
+    const disposable = router.attachRouter(webview.channel, { context, killOnDispose: true });
+    ptys.cwd = '/Users/me/project';
+
+    webview.send({ type: 'pty:spawn', id: 'pty-1', options: { cwd: '/tmp' } } as never);
+    webview.send({
+      type: 'notepad:volatile',
+      snapshot: { surfaces: [{ ...mirrored, terminalId: 'pty-1' }], stagedDeletions: {} },
+    } as never);
+    disposable.dispose();
+
+    await vi.waitFor(() => expect(store.get('dormouse.notepadArchive.v1')).toBeDefined());
+    const archive = JSON.parse(store.get('dormouse.notepadArchive.v1') as string);
+    expect(archive.batches[0].cwd).toMatchObject({ path: '/Users/me/project', source: 'process' });
+    expect(ptys.cwdAsked).toEqual(['pty-1']);
+    // The kill waits for the write: a dead PTY could not have answered.
+    await vi.waitFor(() => expect(ptys.order).toEqual(['write', 'kill pty-1']));
+  });
+
+  it('kills the PTYs even when the archive write fails', async () => {
+    const webview = fakeWebview();
+    const context = {
+      globalState: {
+        get: () => { throw new Error('globalState is gone'); },
+        update: async () => {},
+      },
+    } as never;
+    const disposable = router.attachRouter(webview.channel, { context, killOnDispose: true });
+
+    webview.send({ type: 'pty:spawn', id: 'pty-1', options: { cwd: '/tmp' } } as never);
+    webview.send({
+      type: 'notepad:volatile',
+      snapshot: { surfaces: [{ ...mirrored, terminalId: 'pty-1' }], stagedDeletions: {} },
+    } as never);
+    disposable.dispose();
+
+    await vi.waitFor(() => expect(ptys.order).toEqual(['kill pty-1']));
   });
 
   it('keeps the mirror when the bottom-panel view is disposed, so the next resolve hydrates it', async () => {
