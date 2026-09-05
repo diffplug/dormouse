@@ -19,7 +19,7 @@ import { check, INSTALLER } from './ps1-cmdlet-lint.mjs';
 /**
  * One mutation, named by what a reader would have done to cause it.
  *
- * `onlyIn` is what keeps the last two honest. A mutation of a name that also
+ * `onlyIn` is what keeps a position case honest. A mutation of a name that also
  * appears at statement start proves nothing about any other anchor — the lint
  * goes red on the statement-position copies alone, which is how the missing
  * `=` hid: `Write-Host` is everywhere, so mutating it stayed red while
