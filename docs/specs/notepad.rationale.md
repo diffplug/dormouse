@@ -190,6 +190,21 @@ while archived notes outlive the window that produced them and must survive that
 sweep. They share `write_file_atomically` because both carry user text and both
 must survive a crash mid-write; that is one implementation, not two.
 
+The revision was a process-local counter until it turned out two processes can hold
+this file: `app_data_dir()` is keyed by the Tauri identifier, which `pnpm
+dev:standalone` shares with the installed app, and a counter tracks only its own
+process's writes — so the loser of an overlapping load→save reported no conflict and
+dropped the winner's batches. A content hash is what two processes agree on without
+talking, where an mtime is coarse on some filesystems and moves for reasons that are
+not a content change; `DefaultHasher` is used because it is fixed-key rather than
+randomly seeded, so a second process and a second run derive the same token from the
+same bytes. The lock is a separate file rather than the archive's own inode because
+every save replaces the archive by rename, leaving a holder locking an inode nobody
+will open again. The exposure it closes is the load→save window rather than a torn
+write — `write_file_atomically` already ruled that out — since both processes re-read
+the file on every mutation, and without an exclusive holder the compare and the
+rename interleave.
+
 ## VS Code lifecycle
 
 VS Code destroys a webview whenever it likes — an editor tab closed, a window gone,
