@@ -137,7 +137,7 @@ export const PushNotEnrolled: Story = {
     primedBurrow: { status: UNENROLLED_STATUS },
   },
   play: async ({ canvasElement }) => {
-    await within(canvasElement).findByText(/server below to send push/);
+    await within(canvasElement).findByText(/Relay below to send push/);
   },
 };
 
