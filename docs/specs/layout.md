@@ -331,7 +331,7 @@ Source of truth: `lib/src/components/wall/use-session-persistence.ts` (save trig
 
 ### Activity state
 
-Renderer Activity storage is owned by `docs/specs/alert.md` → Public State. Terminal semantic state is owned by `docs/specs/terminal-state.md` → Core Model.
+Renderer Activity storage is owned by `docs/specs/alert.md` → Public State.
 
 ## Theme
 
