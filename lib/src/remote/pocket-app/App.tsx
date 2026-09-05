@@ -854,7 +854,7 @@ export function SetupOrSignin({
           <p className={PK.title}>{signinLeads ? 'Welcome back' : 'Set up this phone'}</p>
           <p className={clsx(PK.lead, 'mt-1')}>
             {signinLeads
-              ? 'Sign in with your passkey to reach the computers this phone is paired with, or scan a code to pair a new one.'
+              ? 'Sign in with your passkey to reach the Burrows this phone is paired with, or scan a code to pair a new one.'
               : 'On the computer: Settings → Remote control → Set up a phone. Scan the code it shows.'}
           </p>
         </div>
@@ -1180,8 +1180,9 @@ export function BurrowsView({
         ) : null}
         {burrows.length === 0 ? (
           <div className={PK.empty}>
-            No computers paired yet. On a computer, open Settings → Remote control → Set up a
-            phone, then scan the code.
+            No Burrows paired yet. A Burrow is one Dormouse app — Standalone, or a VS Code
+            window — so one computer can appear here twice. On the computer, open Settings →
+            Remote control → Set up a phone, then scan the code.
           </div>
         ) : (
           burrows.map((burrow) => {

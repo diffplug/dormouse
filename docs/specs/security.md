@@ -19,8 +19,9 @@ it does not look like one.
 **Only the self-hosted deployment ships.** The relay runs on hardware the user
 owns and is private to their tailnet by default, but its application boundary
 assumes the HTTPS origin is public ([SELF_HOST.md](../../SELF_HOST.md)).
-**Nothing about remote control applies to a Burrow that never enrolls with a
-Relay**: enrollment is where the relay, the phone, and push begin.
+**Nothing about remote control applies to a Burrow (a Standalone or VS Code
+Dormouse) that never enrolls with a Relay**: enrollment is where the relay, the
+phone, and push begin.
 Cloud-hosted operation is staged, and its boundary is re-analyzed before that
 code ships ([security-remote.md](./security-remote.md#future)).
 

@@ -35,7 +35,7 @@ by default, and its state — a painted terminal — only exists after it runs.
 | Term | Who that is here |
 | --- | --- |
 | **Client** (Dormouse Pocket) | the phone. Holds a passkey and one X25519 key per paired Burrow. |
-| **Burrow** (Dormouse Terminal) | the laptop being controlled. Holds the ACL. **Final authority for access decisions.** |
+| **Burrow** (Dormouse Terminal) | the Dormouse app being controlled — Standalone, or a VS Code window. Holds the ACL. **Final authority for access decisions.** |
 | **Relay** | the coordinating service: accounts, passkey registration, challenges, and relay. *Not* the authority for Burrow access, and it reads none of what it relays. |
 
 Access is deliberately split across five layers, and a connection needs all of

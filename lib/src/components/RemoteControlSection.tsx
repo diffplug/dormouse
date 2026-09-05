@@ -504,6 +504,10 @@ function BurrowNameField({
         autoComplete="off"
         placeholder="e.g. Work laptop"
       />
+      <span className={`${FIELD_LABEL} mt-1 block`}>
+        A Burrow is one Dormouse app — Standalone, or a VS Code window — and each pairs with
+        your phone on its own.
+      </span>
     </label>
   );
 }

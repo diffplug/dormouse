@@ -369,7 +369,7 @@ describe('BurrowRuntime bounds', () => {
       socket.receiveRaw(new ArrayBuffer(8));
       expect(parse).not.toHaveBeenCalled();
 
-      // At the cap it still parses: this bounds burrowility, not use.
+      // At the cap it still parses: this bounds hostility, not use.
       const atCap = pad(MAX_RELAY_TO_BURROW_FRAME_LENGTH - '{"t":"nonsense","pad":""}'.length);
       expect(atCap.length).toBe(MAX_RELAY_TO_BURROW_FRAME_LENGTH);
       socket.receiveRaw(atCap);

@@ -22,7 +22,7 @@ import { siteMeta, sitePath } from "../lib/site-meta";
 
 export function meta({ location }: MetaArgs) {
   return siteMeta(location.pathname, {
-    title: "Pay us to host — Dormouse",
+    title: "Dormouse Hosted",
     description:
       "Coming soon: a managed Dormouse Relay and optional ElevenLabs voice, without giving up free self-hosting.",
   });
@@ -39,7 +39,7 @@ export default function Hosted() {
   return (
     <DocsLayout
       activePath="/hosted"
-      title="Pay us to host"
+      title="Dormouse Hosted"
       intro={<HostingRequirementNotice mode="planned-hosted" />}
       toc={HOSTED_TOC}
     >
@@ -59,8 +59,8 @@ export default function Hosted() {
               Coming soon · paid convenience
             </p>
             <p className="mb-5 text-xl leading-relaxed">
-              Use Dormouse Pocket without deploying or maintaining a Relay. Hosted operates
-              the Relay that connects your phone to your computer.
+              Use Dormouse Pocket without deploying or maintaining a Relay. Dormouse Hosted
+              will run the Relay that connects your phone to your computer.
             </p>
             <a
               href="#updates"
@@ -71,7 +71,7 @@ export default function Hosted() {
 
             <dl className="mt-8 grid gap-4 border-t border-[var(--color-text)]/15 pt-5 text-sm sm:grid-cols-3">
               <div>
-                <dt className="font-display">Hosted runs</dt>
+                <dt className="font-display">Hosted will run</dt>
                 <dd className={`mt-1 ${MUTED_TEXT_CLASS}`}>The Relay</dd>
               </div>
               <div>

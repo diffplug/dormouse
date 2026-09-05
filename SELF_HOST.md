@@ -24,7 +24,8 @@ mixing them is the main way this runbook goes wrong. Each checkpoint that
 differs gives all three forms; the [Mechanism map](#mechanism-map) has the rest.
 
 This runbook covers running the installer and finishing what it cannot — the
-passkey, the Burrow build, the backup — with no code for anyone to write or edit.
+passkey, the Burrow build (the Standalone or VS Code Dormouse that will enroll),
+the backup — with no code for anyone to write or edit.
 
 ## Instructions to the assistant
 
@@ -682,7 +683,7 @@ reports which mode is live rather than asserting either.
   removes the file; a crash leaves it, which the liveness check reads correctly.
   **Linux still leads with `systemctl --user is-active`**, which catches a
   responder no port lookup can see: a foreign network namespace, or WSL with
-  `networkingMode=mirrored`, where loopback is shared with the Windows burrow.
+  `networkingMode=mirrored`, where loopback is shared with the Windows host.
   Two known exceptions: Windows `manage restart` still accepts a bare 200, and
   `manage status` on all three reports what the pointers say by design.
   Source of truth: `relay/src/runtime-file.ts`.

@@ -89,11 +89,11 @@ describe("every page in the rail", () => {
     expect(hostedMarkup).toContain("Paid hosting remains a design target pending independent review");
   });
 
-  it("names the two hosting choices as actions", () => {
+  it("names the two hosting choices", () => {
     expect(DOCS_PAGES.find((page) => page.path === "/docs/self-host")?.label)
       .toBe("How to self-host");
     expect(DOCS_PAGES.find((page) => page.path === "/hosted")?.label)
-      .toBe("Pay us to host");
+      .toBe("Dormouse Hosted");
 
     const selfHostMarkup = renderToStaticMarkup(
       <MemoryRouter><SelfHostDocs /></MemoryRouter>,
@@ -102,7 +102,7 @@ describe("every page in the rail", () => {
       <MemoryRouter><Hosted /></MemoryRouter>,
     );
     expect(selfHostMarkup).toMatch(/<h1[^>]*>How to self-host<\/h1>/);
-    expect(hostedMarkup).toMatch(/<h1[^>]*>Pay us to host<\/h1>/);
+    expect(hostedMarkup).toMatch(/<h1[^>]*>Dormouse Hosted<\/h1>/);
   });
 
   it("keeps the changelog rail honest on the filtered route the updater opens", () => {

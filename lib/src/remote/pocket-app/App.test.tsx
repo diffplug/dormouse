@@ -389,7 +389,7 @@ describe('BurrowsView actions', () => {
     const onScan = vi.fn();
     renderBurrows({ burrows: [], onScan });
 
-    expect(container.textContent).toContain('No computers paired yet');
+    expect(container.textContent).toContain('No Burrows paired yet');
     act(() => buttonNamed(SCAN_LABEL)!.click());
     expect(onScan).toHaveBeenCalledOnce();
   });

@@ -61,7 +61,7 @@ $LOG_DIR = Join-Path $INSTALL_ROOT 'logs'
 
 # ---------------------------------------------------------------- output ----
 
-# The analog of `[ -t 1 ]`: SupportsVirtualTerminal describes the burrow, not the
+# The analog of `[ -t 1 ]`: SupportsVirtualTerminal describes the host, not the
 # stream, so it stays true when stdout is redirected to a file or a pipe and the
 # escapes would land there as literal text.
 $script:UseColor = $false

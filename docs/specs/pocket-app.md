@@ -99,7 +99,7 @@ v1 grants no phone-side kill or layout authority (rationale).
 
 **An inline image crosses the relay as the ordered `terminal.data` messages its
 PTY chunks produce**, reassembled by Pocket's own xterm — panes are built through
-the same `createXtermBurrow`, so ImageAddon is loaded. **Nothing coalesces them and
+the same `createXtermHost`, so ImageAddon is loaded. **Nothing coalesces them and
 no size gates them** (rationale); each is bounded only by what the Burrow feeds
 its parser ([remote-api.md](./remote-api.md) → Terminal surfaces).
 

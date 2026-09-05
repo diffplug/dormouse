@@ -40,7 +40,7 @@ function hostileFixture({ guards = true } = {}) {
 test('a recording relay learns no decision, label, api message, or terminal byte', async () => {
   const fixture = await hostileFixture();
   const { burrow, client, relay, burrowStatic, clientStatic } = fixture;
-  const MARKER = 'DORMOUSE-BURROWILE-RELAY-ORACLE-4c1d';
+  const MARKER = 'DORMOUSE-HOSTILE-RELAY-ORACLE-4c1d';
   try {
     await establish(fixture);
     const seen = watch(burrow);

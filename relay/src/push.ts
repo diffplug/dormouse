@@ -53,7 +53,7 @@ export interface VapidKeys {
 }
 
 /**
- * Burrows a push service will not accept in a VAPID subject. Apple answers
+ * Hosts a push service will not accept in a VAPID subject. Apple answers
  * `403 {"reason":"BadJwtToken"}` for a loopback subject — verified against
  * `web.push.apple.com` for both `mailto:admin@localhost` and
  * `https://localhost:3000`, while `mailto:admin@example.com` and an ordinary
@@ -63,7 +63,7 @@ export interface VapidKeys {
 const LOOPBACK_SUBJECT_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 
 /** The host a subject names: the domain half for `mailto:`, the hostname otherwise. */
-function subjectBurrow(subject: URL): string {
+function subjectHost(subject: URL): string {
   if (subject.protocol === 'mailto:') {
     const at = subject.pathname.lastIndexOf('@');
     return at === -1 ? '' : subject.pathname.slice(at + 1).toLowerCase();
@@ -71,12 +71,12 @@ function subjectBurrow(subject: URL): string {
   return subject.hostname.toLowerCase();
 }
 
-function isLoopbackSubjectBurrow(burrow: string): boolean {
-  if (!burrow) return false;
-  if (LOOPBACK_SUBJECT_HOSTS.has(burrow)) return true;
+function isLoopbackSubjectHost(host: string): boolean {
+  if (!host) return false;
+  if (LOOPBACK_SUBJECT_HOSTS.has(host)) return true;
   // RFC 6761 reserves the whole `.localhost` TLD for loopback.
-  if (burrow.endsWith('.localhost')) return true;
-  return /^127\./.test(burrow);
+  if (host.endsWith('.localhost')) return true;
+  return /^127\./.test(host);
 }
 
 /**
@@ -102,7 +102,7 @@ export function defaultVapidSubject(origin: string): string | null {
     return null;
   }
   if (parsed.protocol !== 'https:') return null;
-  if (isLoopbackSubjectBurrow(parsed.hostname.toLowerCase())) return null;
+  if (isLoopbackSubjectHost(parsed.hostname.toLowerCase())) return null;
   return parsed.origin;
 }
 
@@ -158,7 +158,7 @@ export function assertVapidSubject(subject: string): void {
   if (parsed.protocol !== 'mailto:' && parsed.protocol !== 'https:') {
     throw new Error('VAPID subject must be a valid mailto: or https: URL.');
   }
-  if (isLoopbackSubjectBurrow(subjectBurrow(parsed))) {
+  if (isLoopbackSubjectHost(subjectHost(parsed))) {
     throw new Error(
       'VAPID subject must not name a loopback host — Apple rejects such a JWT with ' +
         'BadJwtToken, so every push to an iPhone would fail. Use a routable contact, ' +

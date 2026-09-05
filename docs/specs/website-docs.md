@@ -274,7 +274,7 @@ READMEs and the homepage — so the obligation is registry-driven, never inferre
 from the path. The changelog names none; the rail and the updater's deep link
 are its way in. `checkRoutesToReferences` reads it.
 
-**Must title `/docs/self-host` “How to self-host” and `/hosted` “Pay us to host”
+**Must title `/docs/self-host` “How to self-host” and `/hosted` “Dormouse Hosted”
 in chrome and metadata while keeping URLs stable.**
 
 **The rail is the only table of contents.** List all pages; expand only current

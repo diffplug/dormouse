@@ -232,20 +232,20 @@ export const ThemeMenuOpenWithInstalledThemes: Story = {
 };
 
 /**
- * The VS Code burrow: it owns the theme and has its own picker, so the Theme row
- * is absent (`burrowOwnsTheme`, docs/specs/theme.md). The rule list becomes the
+ * The VS Code host: it owns the theme and has its own picker, so the Theme row
+ * is absent (`hostOwnsTheme`, docs/specs/theme.md). The rule list becomes the
  * first section again and must drop its divider — a stray top border here is
  * the visible symptom of that conditional going wrong.
  */
-export const BurrowOwnsTheme: Story = {
+export const HostOwnsTheme: Story = {
   parameters: {
-    burrowOwnsTheme: true,
+    hostOwnsTheme: true,
     primedWatchedCommands: ['claude'],
     primedAlertSettings: {},
   },
 };
 
-/** The shells a standalone burrow detects, seeded into the shell store the way
+/** The shells a standalone host detects, seeded into the shell store the way
  *  `main.tsx` does at boot. */
 const DEFAULT_SHELLS = [
   { name: 'zsh', path: '/bin/zsh' },
@@ -281,12 +281,12 @@ export const ShellMenuOpen: Story = {
 };
 
 /**
- * The VS Code burrow again: its native `dormouse.selectShell` QuickPick owns the
- * shell, so the row is absent despite shells being seeded (`burrowOwnsShells`).
+ * The VS Code host again: its native `dormouse.selectShell` QuickPick owns the
+ * shell, so the row is absent despite shells being seeded (`hostOwnsShells`).
  */
-export const BurrowOwnsShells: Story = {
+export const HostOwnsShells: Story = {
   parameters: {
-    burrowOwnsShells: true,
+    hostOwnsShells: true,
     primedShells: DEFAULT_SHELLS,
     primedWatchedCommands: ['claude'],
     primedAlertSettings: {},
