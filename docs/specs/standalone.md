@@ -406,16 +406,18 @@ Tauri-only) responds:
    the orchestrator then dedupes the event out.
 2. **Archive the notepads**, bounded at 3 s, *before* the first `quit_progress` —
    the last point at which a failure may still ask a question, since teardown may
-   not (`docs/specs/notepad.md` -> "Standalone quit"). Failure or timeout calls
-   `quit_cancel`.
+   not (`docs/specs/notepad.md` -> "Standalone quit"). Failure or timeout leaves
+   the quit **pending**: its dialog is another human decision, which phase 2 is
+   unbounded for.
 3. **`quit_progress`** when teardown begins — immediately on an all-idle quit, or
    after the user confirms and the archive gate passes — setting `tearing_down`
    and bumping a `progress` counter. Sent again at the install phase boundary.
 4. The teardown (below), then **`quit_proceed`** — sets `approved` and calls
    `app.exit(0)`.
-5. A confirmation-dialog cancel (below), or a failed archive gate, calls
-   **`quit_cancel`** — bumps `seq`, invalidating the live watchdog, and leaves
-   the app running.
+5. A confirmation-dialog cancel (below), or a **Cancel** on the archive-failure
+   dialog, calls **`quit_cancel`** — bumps `seq`, invalidating the live watchdog,
+   and leaves the app running. **Nothing else cancels**: a Quit anyway must reach
+   teardown with the watchdog still armed.
 
 A cloned-`AppHandle` **watchdog** thread keeps quit bounded against a dead or
 wedged webview, in three phases:

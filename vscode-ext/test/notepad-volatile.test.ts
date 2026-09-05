@@ -102,8 +102,10 @@ describe('the volatile notepad mirror', () => {
 
     const resumed = mirror.snapshotForLiveResume(['pane-1', 'pane-missing']);
     expect(resumed!.surfaces.map((s) => s.surfaceId)).toEqual(['pane-1']);
-    // Deletions are archive-wide, so a resume inherits what was staged behind it.
-    expect(resumed!.stagedDeletions.deleteBatchIds).toEqual(['batch-1']);
+    // Never a pending deletion: the disposal that produced this resume already
+    // committed the staged set, so showing it as still-stageable would promise
+    // an Undo that no longer exists.
+    expect(resumed!.stagedDeletions).toEqual(noDeletions);
 
     // Still mirrored: a webview served this and then lost (a crash before its
     // first sync) must still have its notes archived at deactivate.
@@ -135,6 +137,24 @@ describe('the volatile notepad mirror', () => {
     // under a fresh batch id.
     expect(mirror.takeVolatileForRouter('router-1').surfaces).toEqual([]);
     expect(mirror.surfaceIdsForRouter('router-2')).toEqual(['b']);
+  });
+
+  it('takes a router\'s staged deletions without touching its notes', () => {
+    // What a non-killing disposal does: the deletions are committed there and
+    // then, the notes stay for the next resolve to hydrate.
+    mirror.setVolatileForRouter('router-1', {
+      surfaces: [surface('a')],
+      stagedDeletions: { deleteBatchIds: ['batch-1'], deleteNotes: [{ batchId: 'batch-9', noteId: 'n1' }] },
+    });
+
+    const staged = mirror.takeStagedForRouter('router-1');
+    expect(staged.deleteBatchIds).toEqual(['batch-1']);
+    expect(staged.deleteNotes).toEqual([{ batchId: 'batch-9', noteId: 'n1' }]);
+
+    expect(mirror.surfaceIdsForRouter('router-1')).toEqual(['a']);
+    // Taken means gone: `deactivate()` must not re-commit them hours later.
+    expect(mirror.takeStagedForRouter('router-1')).toEqual(noDeletions);
+    expect(mirror.takeAllVolatile().stagedDeletions).toEqual(noDeletions);
   });
 
   it('drains every router at once, merging their staged deletions', () => {

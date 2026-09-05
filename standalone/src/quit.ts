@@ -76,11 +76,21 @@ const ARCHIVE_GATE_MS = 3000;
 export async function archiveNotesBeforeQuit(): Promise<void> {
   const ids = [...getNotepadSnapshot().keys()];
   if (ids.length === 0) return;
-  await withDeadline(
-    archiveSurfaceNotes(ids),
-    ARCHIVE_GATE_MS,
-    `The notepad archive did not finish within ${ARCHIVE_GATE_MS / 1000}s.`,
-  );
+  // The deadline only stops us *waiting*; the archive itself keeps running and
+  // may still succeed. The signal is what stops it emptying every notepad
+  // afterwards, behind a user who has been told their notes were not stored and
+  // has chosen Cancel.
+  const gaveUp = new AbortController();
+  try {
+    await withDeadline(
+      archiveSurfaceNotes(ids, { signal: gaveUp.signal }),
+      ARCHIVE_GATE_MS,
+      `The notepad archive did not finish within ${ARCHIVE_GATE_MS / 1000}s.`,
+    );
+  } catch (err) {
+    gaveUp.abort();
+    throw err;
+  }
 }
 
 // The decision is made; archive the notes, then tear down. A refused archive is
@@ -92,20 +102,22 @@ async function archiveThenTeardown(): Promise<void> {
   try {
     await archiveNotesBeforeQuit();
   } catch (err) {
-    // Drop the pending quit in Rust, then hold the flow in `archive-failed` so a
-    // repeat trigger is deduped exactly like a pending confirmation.
-    cancelQuit();
+    // The quit stays pending in Rust. Its phase-2 wait is unbounded precisely
+    // because it waits on a human (docs/specs/standalone.md → "Quit flow"), and
+    // cancelling here would retire the watchdog that a later Quit anyway still
+    // needs. Hold the flow in `archive-failed` so a repeat trigger is deduped
+    // exactly like a pending confirmation.
     quitPhase = "archive-failed";
     openQuitArchiveFailure(err instanceof Error ? err.message : String(err), {
       confirm: () => {
         // Quit anyway: the user accepts losing these notes, so forget them and
-        // take the teardown that no longer has anything to archive.
+        // take the teardown that no longer has anything to archive — watchdog
+        // still armed, because nothing cancelled the pending quit.
         for (const id of [...getNotepadSnapshot().keys()]) removeSurface(id);
         void runQuitTeardown();
       },
-      cancel: () => {
-        quitPhase = "idle";
-      },
+      // Cancel is the one branch that drops the pending quit in Rust.
+      cancel: cancelQuit,
     });
     return;
   }

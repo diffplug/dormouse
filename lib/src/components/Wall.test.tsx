@@ -19,7 +19,6 @@ import type { PlatformAdapter } from '../lib/platform/types';
 import * as terminalRegistry from '../lib/terminal-registry';
 import { UNNAMED_PANEL_TITLE } from '../lib/terminal-registry';
 import { __resetArchiveServiceForTests } from '../lib/notepad/archive-service';
-import { __resetCloseCoordinatorForTests } from '../lib/notepad/close-coordinator';
 import { addPlainNote, clearAllNotepads, getNotes } from '../lib/notepad/notepad-store';
 import type { NotepadArchiveV1 } from '../lib/notepad/types';
 
@@ -47,7 +46,6 @@ function leafCount(): number {
 
 beforeEach(() => {
   __resetArchiveServiceForTests();
-  __resetCloseCoordinatorForTests();
   clearAllNotepads();
   fake = new FakePtyAdapter();
   setPlatform(fake);
@@ -84,7 +82,6 @@ afterEach(() => {
   container.remove();
   vi.clearAllMocks();
   __resetArchiveServiceForTests();
-  __resetCloseCoordinatorForTests();
   clearAllNotepads();
 });
 
@@ -1457,6 +1454,24 @@ describe('Wall on the Lath engine', () => {
     act(() => { button!.click(); });
   }
 
+  /** The pane header's Kill button — a user-visible closure, which does prompt.
+   *  `isUntouched` short-circuits the kill confirmation so this is one click. */
+  async function clickHeaderKill(paneId: string): Promise<void> {
+    const untouched = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(true);
+    try {
+      const button = container.querySelector<HTMLButtonElement>(
+        `[data-lath-leaf="${paneId}"] button[aria-label="Kill"]`,
+      );
+      expect(button, `no Kill button on ${paneId}`).not.toBeNull();
+      await act(async () => {
+        button!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      await flush();
+    } finally {
+      untouched.mockRestore();
+    }
+  }
+
   it('archives a closing Surface\'s notes before tearing it down', async () => {
     await act(async () => {
       root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
@@ -1484,16 +1499,32 @@ describe('Wall on the Lath engine', () => {
     await flush();
     act(() => { addPlainNote('pane-a', 'keep me'); });
 
+    await clickHeaderKill('pane-a');
+
+    expect(container.querySelector('[data-lath-leaf="pane-a"]')).not.toBeNull();
+    expect(getNotes('pane-a')).toHaveLength(1);
+    expect(archiveFailureModal()).not.toBeNull();
+  });
+
+  it('answers a refused `dor kill` with the error and raises no prompt', async () => {
+    // The caller is a command, not someone looking at the Wall: a modal here
+    // would block a Wall nobody is watching (docs/specs/notepad.md → "Closure").
+    vi.spyOn(fake.notepadArchive, 'save').mockRejectedValue(new Error('disk is full'));
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+    });
+    await flush();
+    act(() => { addPlainNote('pane-a', 'keep me'); });
+
     const response = await dispatchKill('surface:1');
     await flush();
 
-    // `dor kill` is told why, and the Surface is still running with its notes.
     expect(response?.ok).toBe(false);
     expect((response as { error?: string }).error).toContain('notepad archive failed');
     expect((response as { error?: string }).error).toContain('disk is full');
     expect(container.querySelector('[data-lath-leaf="pane-a"]')).not.toBeNull();
     expect(getNotes('pane-a')).toHaveLength(1);
-    expect(archiveFailureModal()).not.toBeNull();
+    expect(archiveFailureModal()).toBeNull();
   });
 
   it('Keep open dismisses the prompt and leaves everything alone', async () => {
@@ -1503,8 +1534,7 @@ describe('Wall on the Lath engine', () => {
     });
     await flush();
     act(() => { addPlainNote('pane-a', 'keep me'); });
-    await dispatchKill('surface:1');
-    await flush();
+    await clickHeaderKill('pane-a');
 
     clickButton('Keep open');
     await flush();
@@ -1521,8 +1551,7 @@ describe('Wall on the Lath engine', () => {
     });
     await flush();
     act(() => { addPlainNote('pane-a', 'expendable'); });
-    await dispatchKill('surface:1');
-    await flush();
+    await clickHeaderKill('pane-a');
 
     clickButton('Close anyway');
     await flush();
@@ -1531,6 +1560,40 @@ describe('Wall on the Lath engine', () => {
     expect(container.querySelector('[data-lath-leaf="pane-a"]')).toBeNull();
     expect(getNotes('pane-a')).toEqual([]);
     expect((await storedArchive()).batches).toEqual([]);
+  });
+
+  it('queues a second refused closure behind the first prompt', async () => {
+    // One slot would leave pane-a waiting forever: its prompt is replaced, and
+    // nothing is left to answer for it.
+    // Distinct messages are how the prompt on screen names its Surface.
+    vi.spyOn(fake.notepadArchive, 'save')
+      .mockRejectedValueOnce(new Error('a could not be written'))
+      .mockRejectedValueOnce(new Error('b could not be written'));
+    await act(async () => {
+      root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="command" showBaseboard />);
+    });
+    await flush();
+    act(() => {
+      addPlainNote('pane-a', 'from a');
+      addPlainNote('pane-b', 'from b');
+    });
+
+    await clickHeaderKill('pane-a');
+    await clickHeaderKill('pane-b');
+
+    // A's prompt is the one on screen; B's is behind it.
+    expect(archiveFailureModal()?.textContent).toContain('a could not be written');
+    clickButton('Keep open');
+    await flush();
+
+    expect(archiveFailureModal()?.textContent).toContain('b could not be written');
+    clickButton('Close anyway');
+    await flush();
+
+    expect(archiveFailureModal()).toBeNull();
+    expect(container.querySelector('[data-lath-leaf="pane-a"]')).not.toBeNull();
+    expect(getNotes('pane-a')).toHaveLength(1);
+    expect(container.querySelector('[data-lath-leaf="pane-b"]')).toBeNull();
   });
 
   it('migrates a notepad to the new id when a replacement mints one', async () => {

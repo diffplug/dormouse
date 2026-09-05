@@ -217,6 +217,9 @@ export function dropSourcesForTerminal(terminalId: string): void {
  */
 export function transferNotepad(oldId: string, newId: string): void {
   if (oldId === newId) return;
+  // Before the empty-notepad early return: the old id stops existing either way,
+  // so an open panel pointing at it would be stranded on a Surface that is gone.
+  if (openNotepadId === oldId) setOpenNotepadId(newId);
   const moving = notesBySurface.get(oldId);
   if (!moving || moving.length === 0) return;
   const carried = moving.map((note) => (
@@ -224,7 +227,6 @@ export function transferNotepad(oldId: string, newId: string): void {
   ));
   notesBySurface.delete(oldId);
   notesBySurface.set(newId, [...(notesBySurface.get(newId) ?? []), ...carried]);
-  if (openNotepadId === oldId) setOpenNotepadId(newId);
   notify();
 }
 
@@ -351,6 +353,11 @@ function scheduleVolatileSync(): void {
  * Surfaces that have no notes yet, so this can never overwrite a live notepad
  * or resurrect notes for a Surface that is gone. Sources are not restored: the
  * markers died with the previous webview's xterm instances.
+ *
+ * `snapshot.stagedDeletions` is ignored by design. The disposal that produced
+ * this resume committed them, so nothing there is still pending; re-staging them
+ * would offer an Undo for deletions the archive has already taken
+ * (`takeStagedForRouter` in `vscode-ext/src/notepad-volatile.ts`).
  */
 export function hydrateNotepadFromVolatile(
   snapshot: VolatileNotepadSnapshot,

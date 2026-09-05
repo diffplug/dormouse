@@ -359,9 +359,11 @@ export function Wall({
 
   // UI state
   const [confirmKill, setConfirmKill] = useState<ConfirmKill | null>(null);
-  // A closure the archive refused: the Surface is still here, still holding its
-  // notes, until the user answers (docs/specs/notepad.md → "Closure").
-  const [archiveFailure, setArchiveFailure] = useState<NotepadArchiveFailure | null>(null);
+  // Closures the archive refused, oldest first: each Surface is still here,
+  // still holding its notes, until the user answers for it
+  // (docs/specs/notepad.md → "Closure"). A queue rather than one slot — a second
+  // refusal while the first prompt is up must not orphan the first Surface.
+  const [archiveFailures, setArchiveFailures] = useState<NotepadArchiveFailure[]>([]);
   const [renamingPaneId, setRenamingPaneId] = useState<string | null>(null);
   // Runtime Doors carry id + token only; the restored rows' metadata goes into the
   // store via the seed effect below.
@@ -607,13 +609,24 @@ export function Wall({
    * — the Surface and its notes left exactly as they were, and the Keep open /
    * Close anyway prompt raised. Without that escape an unwritable archive would
    * make every Surface unclosable.
+   *
+   * `prompt: false` returns the error and raises nothing: `dor kill` is a
+   * command answering a caller, not a person looking at the pane.
    */
-  const closeSurface = useCallback(async (id: string): Promise<string | null> => {
+  const closeSurface = useCallback(async (id: string, opts?: { prompt?: boolean }): Promise<string | null> => {
     try {
       await archiveSurfaceNotes([id]);
     } catch (error) {
       const message = messageOf(error);
-      setArchiveFailure({ id, message });
+      if (opts?.prompt !== false) {
+        setArchiveFailures((queue) => (
+          // A Surface already waiting for an answer gets its message updated,
+          // never a second prompt behind the first.
+          queue.some((failure) => failure.id === id)
+            ? queue.map((failure) => (failure.id === id ? { id, message } : failure))
+            : [...queue, { id, message }]
+        ));
+      }
       return message;
     }
     killPaneImmediately(id);
@@ -621,6 +634,11 @@ export function Wall({
   }, [killPaneImmediately]);
   const closeSurfaceRef = useRef(closeSurface);
   closeSurfaceRef.current = closeSurface;
+
+  /** The head of the refused-closure queue is answered; show the next. */
+  const shiftArchiveFailure = useCallback(() => {
+    setArchiveFailures((queue) => queue.slice(1));
+  }, []);
 
   const acceptKill = useCallback(() => {
     const ck = confirmKillRef.current;
@@ -745,10 +763,13 @@ export function Wall({
 
   // A refused closure owns the keyboard while it is up, like the other modal
   // hosts: a command-mode shortcut behind it must not kill a different pane.
+  // Keyed on "is a prompt up", not on the queue: moving to the next failure must
+  // not drop and re-raise the flag under another dialog host.
+  const anyArchiveFailure = archiveFailures.length > 0;
   useEffect(() => {
-    setDialogKeyboardActive(archiveFailure !== null);
+    setDialogKeyboardActive(anyArchiveFailure);
     return () => setDialogKeyboardActive(false);
-  }, [archiveFailure, setDialogKeyboardActive]);
+  }, [anyArchiveFailure, setDialogKeyboardActive]);
 
   useEffect(() => {
     // An iframe surface taking focus blurs this window without backgrounding the
@@ -1668,18 +1689,20 @@ export function Wall({
               />
             )}
 
-            {/* The archive refused this Surface's notes — it is still open */}
-            {archiveFailure && (
+            {/* The archive refused this Surface's notes — it is still open.
+                One prompt at a time: answering the head reveals the next. */}
+            {archiveFailures[0] && (
               <NotepadArchiveFailureModal
-                failure={archiveFailure}
+                failure={archiveFailures[0]}
                 paneElements={paneElements}
-                onKeepOpen={() => setArchiveFailure(null)}
+                onKeepOpen={shiftArchiveFailure}
                 onCloseAnyway={() => {
                   // The user chose to lose these notes: drop them, then take the
                   // rollback path that skips the archive entirely.
-                  removeSurface(archiveFailure.id);
-                  setArchiveFailure(null);
-                  killPaneImmediately(archiveFailure.id);
+                  const { id } = archiveFailures[0];
+                  removeSurface(id);
+                  shiftArchiveFailure();
+                  killPaneImmediately(id);
                 }}
               />
             )}

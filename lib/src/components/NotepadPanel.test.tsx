@@ -357,6 +357,84 @@ describe('NotepadPanel — rich notes', () => {
     expect(noteElements()[0].querySelector('textarea')!.selectionStart).toBe(2);
   });
 
+  it('converts on a word deletion, removing the word the caret sits after', () => {
+    addTerminalNote(SURFACE, RUNS);
+    renderPanels();
+    open();
+
+    // Option/Ctrl+Backspace: the document selection is the bare caret, and no
+    // target range comes with it, so the extent is the input type's alone.
+    caretAt(richNote(), 7);
+    beforeInput(richNote(), 'deleteWordBackward');
+
+    expect(getNotes(SURFACE)[0].content).toEqual({ kind: 'plain', text: 'ok ' });
+    expect(noteElements()[0].querySelector('textarea')!.selectionStart).toBe(3);
+  });
+
+  it('deletes the range the event names, across two runs', () => {
+    addTerminalNote(SURFACE, RUNS);
+    renderPanels();
+    open();
+
+    const el = richNote();
+    // The selection stays collapsed at the end; the extent lives only in
+    // `getTargetRanges()`, and reading it is the whole point.
+    caretAt(el, 7);
+    const spans = el.querySelectorAll('span');
+    const event = new InputEvent('beforeinput', {
+      inputType: 'deleteWordBackward',
+      bubbles: true,
+      cancelable: true,
+    });
+    Object.defineProperty(event, 'getTargetRanges', {
+      value: () => [{
+        collapsed: false,
+        startContainer: spans[0].firstChild!,
+        startOffset: 2,
+        endContainer: spans[1].firstChild!,
+        endOffset: 4,
+      } as StaticRange],
+    });
+    act(() => { el.dispatchEvent(event); });
+
+    expect(getNotes(SURFACE)[0].content).toEqual({ kind: 'plain', text: 'ok' });
+    expect(noteElements()[0].querySelector('textarea')!.selectionStart).toBe(2);
+  });
+
+  it('converts a line deletion back to the start of its line', () => {
+    addTerminalNote(SURFACE, [{ text: 'one\ntwo' }]);
+    renderPanels();
+    open();
+
+    caretAt(richNote(), 6);
+    beforeInput(richNote(), 'deleteSoftLineBackward');
+
+    expect(getNotes(SURFACE)[0].content).toEqual({ kind: 'plain', text: 'one\no' });
+    expect(noteElements()[0].querySelector('textarea')!.selectionStart).toBe(4);
+  });
+
+  it('leaves a composition alone until it ends, then converts with its text', () => {
+    addTerminalNote(SURFACE, RUNS);
+    renderPanels();
+    open();
+
+    const el = richNote();
+    caretAt(el, 7);
+    // `insertCompositionText` is not cancelable, so the handler stands down and
+    // the browser writes the composed text into the rich DOM itself.
+    act(() => {
+      el.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertCompositionText', data: '日本', bubbles: true }));
+    });
+    expect(getNotes(SURFACE)[0].content.kind).toBe('terminal');
+
+    act(() => { (el.querySelectorAll('span')[1].firstChild as Text).appendData('日本'); });
+    caretAt(el, 9);
+    act(() => { el.dispatchEvent(new CompositionEvent('compositionend', { data: '日本', bubbles: true })); });
+
+    expect(getNotes(SURFACE)[0].content).toEqual({ kind: 'plain', text: 'ok done日本' });
+    expect(noteElements()[0].querySelector('textarea')!.selectionStart).toBe(9);
+  });
+
   it('pastes as plain text', () => {
     addTerminalNote(SURFACE, RUNS);
     renderPanels();
@@ -439,10 +517,58 @@ describe('applyPlainEdit', () => {
     expect(applyPlainEdit('abc', at(2), 'deleteContentForward', '')).toEqual({ text: 'ab', caret: 2 });
   });
 
+  it('deletes a word backward over the whitespace before it', () => {
+    expect(applyPlainEdit('foo bar', at(7), 'deleteWordBackward', '')).toEqual({ text: 'foo ', caret: 4 });
+    expect(applyPlainEdit('foo bar ', at(8), 'deleteWordBackward', '')).toEqual({ text: 'foo ', caret: 4 });
+    expect(applyPlainEdit('foo', at(0), 'deleteWordBackward', '')).toEqual({ text: 'foo', caret: 0 });
+  });
+
+  it('deletes a word forward over the whitespace after it', () => {
+    expect(applyPlainEdit('foo  bar baz', at(3), 'deleteWordForward', '')).toEqual({ text: 'foo baz', caret: 3 });
+    expect(applyPlainEdit('foo', at(3), 'deleteWordForward', '')).toEqual({ text: 'foo', caret: 3 });
+  });
+
+  it('deletes to the start or end of the caret line, keeping the newlines', () => {
+    const text = 'one\ntwo\nthree';
+    expect(applyPlainEdit(text, at(6), 'deleteSoftLineBackward', '')).toEqual({ text: 'one\no\nthree', caret: 4 });
+    expect(applyPlainEdit(text, at(6), 'deleteHardLineBackward', '')).toEqual({ text: 'one\no\nthree', caret: 4 });
+    expect(applyPlainEdit(text, at(6), 'deleteSoftLineForward', '')).toEqual({ text: 'one\ntw\nthree', caret: 6 });
+    expect(applyPlainEdit(text, at(6), 'deleteHardLineForward', '')).toEqual({ text: 'one\ntw\nthree', caret: 6 });
+    expect(applyPlainEdit(text, at(6), 'deleteEntireSoftLine', '')).toEqual({ text: 'one\n\nthree', caret: 4 });
+  });
+
+  it('stops a line deletion at the edges of the note', () => {
+    // The leading newline is the previous line's, and index 0 has no previous.
+    expect(applyPlainEdit('\nabc', at(0), 'deleteHardLineBackward', '')).toEqual({ text: '\nabc', caret: 0 });
+    expect(applyPlainEdit('abc', at(3), 'deleteSoftLineForward', '')).toEqual({ text: 'abc', caret: 3 });
+    expect(applyPlainEdit('abc', at(0), 'deleteSoftLineForward', '')).toEqual({ text: '', caret: 0 });
+  });
+
+  it('takes a non-collapsed range as given, whatever the delete type', () => {
+    // The browser already resolved the extent — into `getTargetRanges()` or the
+    // selection — so no type widens it.
+    for (const inputType of [
+      'deleteContentBackward', 'deleteContentForward',
+      'deleteWordBackward', 'deleteWordForward',
+      'deleteSoftLineBackward', 'deleteHardLineBackward',
+      'deleteSoftLineForward', 'deleteHardLineForward',
+      'deleteEntireSoftLine', 'deleteByCut', 'deleteByDrag',
+    ]) {
+      expect(applyPlainEdit('one\ntwo', { start: 5, end: 2 }, inputType, '')).toEqual({ text: 'onwo', caret: 2 });
+    }
+  });
+
+  it('converts but edits nothing for a collapsed delete it cannot size', () => {
+    expect(applyPlainEdit('abc', at(1), 'deleteByComposition', '')).toEqual({ text: 'abc', caret: 1 });
+  });
+
   it('never leaves half a surrogate pair behind', () => {
     const text = `a${'\u{1f600}'}b`;
     expect(applyPlainEdit(text, at(3), 'deleteContentBackward', '')).toEqual({ text: 'ab', caret: 1 });
     expect(applyPlainEdit(text, at(1), 'deleteContentForward', '')).toEqual({ text: 'ab', caret: 1 });
+    // A word deletion takes both halves with it: neither one is whitespace.
+    expect(applyPlainEdit(`hi ${'\u{1f600}'}`, at(5), 'deleteWordBackward', '')).toEqual({ text: 'hi ', caret: 3 });
+    expect(applyPlainEdit(`${'\u{1f600}'} hi`, at(0), 'deleteWordForward', '')).toEqual({ text: ' hi', caret: 0 });
   });
 
   it('leaves the text alone for an edit it cannot reproduce', () => {

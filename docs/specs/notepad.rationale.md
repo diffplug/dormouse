@@ -17,9 +17,18 @@ That choice forces the revision token: without one, two webviews (a VS Code wind
 with the panel and an editor tab both open) each read, apply, and write, and the
 later write silently drops the earlier one's batch. A token plus a retry costs one
 extra read on the rare collision and loses nothing. The retry is only safe because
-mutations are idempotent by batch and note id, which is also why a batch id is
-minted once per closure rather than per attempt — a retry after a `'conflict'` must
-re-apply the same batch, not add a second copy of it.
+mutations are idempotent: the `'conflict'` loop re-applies the same mutation object,
+so batch id alone covers it.
+
+Note-id idempotence is for the case batch id cannot cover. A closure attempt that
+reaches the host, lands, and *then* reports failure (the VS Code adapter's request
+timeout does exactly this) leaves the user looking at a Surface that is still open,
+so they keep typing into it. Remembering the batch id across that rejection made
+the next attempt a no-op append — `applyArchiveMutation` skipped the id it already
+had — and `removeSurface` then discarded everything added in between. A fresh id
+per attempt plus dedupe by note id gets both halves right: the notes already stored
+are dropped from the second batch, the new ones land, and nothing is duplicated. A
+note id is a UUID, so "already stored" is an exact test rather than a heuristic.
 
 `MAX_SAVE_ATTEMPTS` is 5. An unbounded retry against an archive somebody else is
 rewriting in a loop would spin instead of telling the user, and the closure paths
@@ -115,6 +124,17 @@ misclick must be cheap. Holding the set in view state costs nothing, makes Undo
 free, and means a failed write leaves the view exactly as it was — the retry is
 pressing Back again.
 
+## Closure
+
+Refused closures queue rather than sharing one slot because a Surface with an
+unanswered prompt is a Surface the user cannot close. With one slot, killing a
+second Surface while the first prompt was up replaced it, and the first Surface was
+left holding its notes with nothing on screen left to answer for it.
+
+`dor kill` takes the error and raises no prompt because its caller is an agent or a
+script, not someone looking at the Wall: a modal there blocks a window nobody is
+watching, and the command already answers with the reason.
+
 ## Standalone quit
 
 The gate sits before the first `quit_progress` rather than inside the teardown
@@ -122,8 +142,20 @@ because teardown has a standing rule that no failing step prevents exit — that
 is what keeps a wedged flush from stranding the app. Archiving needs the opposite:
 a failure has to be able to stop the quit and ask. Before `quit_progress` the flow
 is still in the phase Rust's watchdog does not bound (a human may be looking at the
-confirmation dialog), so `quit_cancel` is a legal answer there and the dialog can
-offer Cancel / Quit anyway. Once teardown starts, nothing may ask a question again.
+confirmation dialog), so the dialog can offer Cancel / Quit anyway. Once teardown
+starts, nothing may ask a question again.
+
+The failure path leaves the pending quit alone rather than cancelling it, because
+`quit_cancel` bumps `seq` and retires the live watchdog: cancelling before the
+dialog went up meant a later Quit anyway ran the whole teardown unwatched, with
+nothing left to force the exit if the webview wedged. Phase 2's wait is unbounded
+precisely so it can sit through a human's decision, so the quit stays pending and
+only Cancel — the branch that really does abandon the quit — invokes it.
+
+The deadline aborts the archive it stopped waiting for because `withDeadline` only
+stops the *waiting*. The write keeps going, and a success arriving minutes later
+called `removeSurface` on every Surface — emptying every notepad in front of a user
+who had just been told the notes were not stored and had chosen Cancel.
 
 3 s is the bound because the write is one small file and the user is waiting on a
 quit they already asked for; a slower answer is a failure worth surfacing.
@@ -153,6 +185,14 @@ the mirror needs: one disposal wide.
 The snapshot is round-tripped through `readNotepadArchive` on the way in because a
 teardown writes it verbatim into `globalState` with no webview left to validate it,
 and one malformed note would make the whole archive unreadable on the next load.
+
+Staged archive deletions leave on *every* disposal, not only a killing one, because
+the promise the Archive view makes when it stages them is "irreversible once this
+window closes" — and for the user the webview *is* the window. A `WebviewView`
+dragged between containers is disposed and re-resolved, and keeping the staged set
+meant the new view showed a batch the user had already deleted, still offering
+Undo, which `deactivate()` would then delete for real hours later. Committing at
+the disposal makes the promise true and leaves nothing pending to hand a resume.
 
 `globalState` and not `workspaceState`: an archive is machine-local, and a Surface
 closed in one window belongs in the same list as every other. Settings Sync is the

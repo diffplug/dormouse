@@ -392,7 +392,7 @@ export function useDorControl({
   /** The user-visible closure path: archive the Surface's notes, then tear it
    *  down. A string means the archive refused, and is why; the Surface is still
    *  here. */
-  closeSurface: (id: string) => Promise<string | null>;
+  closeSurface: (id: string, opts?: { prompt?: boolean }) => Promise<string | null>;
   /** Put the selection on a surface, reattaching it first when it is minimized.
    *  Used by the human-initiated `connectPort` (a menu click is a request to see
    *  that surface); the `dor ab` control path stays focus-neutral. */
@@ -931,9 +931,10 @@ export function useDorControl({
         }
         // `dor kill` is a user-visible permanent closure, so it archives the
         // Surface's notes first. A refused archive leaves the Surface running
-        // and answers with the error rather than silently dropping the notes
-        // (docs/specs/notepad.md → "Closure").
-        const refused = await closeSurface(target.id);
+        // and answers with the error rather than silently dropping the notes —
+        // and raises no pane prompt, because the caller is a command, not
+        // someone looking at the Wall (docs/specs/notepad.md → "Closure").
+        const refused = await closeSurface(target.id, { prompt: false });
         if (refused) {
           detail.respond({ ok: false, error: `notepad archive failed: ${refused}` });
           return;

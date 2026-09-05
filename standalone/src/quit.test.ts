@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
   countRunningSessions: vi.fn(() => 0),
   hasPendingUpdate: vi.fn(() => false),
   installPendingUpdate: vi.fn(async () => {}),
-  archiveSurfaceNotes: vi.fn(async (_ids: readonly string[]) => {}),
+  archiveSurfaceNotes: vi.fn(async (_ids: readonly string[], _opts?: { signal?: AbortSignal }) => {}),
   getNotepadSnapshot: vi.fn(() => new Map<string, unknown[]>()),
   removeSurface: vi.fn(),
 }));
@@ -266,7 +266,7 @@ describe("quit orchestrator", () => {
     // The gate is a step before teardown, not inside it: nothing has told Rust
     // teardown began when the archive runs.
     expect(order.slice(0, 3)).toEqual(["quit_ack", "archive", "quit_progress"]);
-    expect(mocks.archiveSurfaceNotes).toHaveBeenCalledWith(["pane-a"]);
+    expect(mocks.archiveSurfaceNotes).toHaveBeenCalledWith(["pane-a"], expect.anything());
     expect(mocks.invoke).toHaveBeenCalledWith("quit_proceed");
   });
 
@@ -289,14 +289,17 @@ describe("quit orchestrator", () => {
     expect(mocks.archiveSurfaceNotes).not.toHaveBeenCalled();
   });
 
-  it("cancels the quit and opens the archive-failed dialog when the write fails", async () => {
+  it("leaves the quit pending in Rust and opens the archive-failed dialog when the write fails", async () => {
+    // `quit_cancel` retires Rust's watchdog. Calling it here would leave a later
+    // "Quit anyway" tearing down unwatched, so the pending quit stays in its
+    // unbounded phase-2 wait — which is what waits on a human.
     mocks.getNotepadSnapshot.mockReturnValue(oneNotedSurface());
     mocks.archiveSurfaceNotes.mockRejectedValue(new Error("disk is full"));
     const adapter = fakeAdapter();
 
     await triggerQuit(adapter);
 
-    expect(mocks.invoke).toHaveBeenCalledWith("quit_cancel");
+    expect(mocks.invoke).not.toHaveBeenCalledWith("quit_cancel");
     expect(mocks.invoke).not.toHaveBeenCalledWith("quit_progress");
     expect(mocks.invoke).not.toHaveBeenCalledWith("quit_proceed");
     expect(adapter.requestSessionFlush).not.toHaveBeenCalled();
@@ -329,6 +332,9 @@ describe("quit orchestrator", () => {
 
     expect(mocks.removeSurface).toHaveBeenCalledWith("pane-a");
     expect(adapter.requestSessionFlush).toHaveBeenCalled();
+    // Never cancelled, so the teardown runs under the watchdog that was already
+    // armed for this quit.
+    expect(mocks.invoke).not.toHaveBeenCalledWith("quit_cancel");
     expect(mocks.invoke).toHaveBeenCalledWith("quit_proceed");
   });
 
@@ -339,6 +345,8 @@ describe("quit orchestrator", () => {
     await triggerQuit(adapter);
 
     dismissQuitDialog();
+    // Cancel is the one branch that drops the pending quit in Rust.
+    expect(mocks.invoke).toHaveBeenCalledWith("quit_cancel");
     expect(getQuitConfirmPhase()).toBeNull();
     expect(mocks.invoke).not.toHaveBeenCalledWith("quit_proceed");
 
@@ -364,6 +372,32 @@ describe("quit orchestrator", () => {
       expect(getQuitConfirmPhase()).toBe("archive-failed");
       expect(getQuitArchiveError()).toContain("3s");
       expect(adapter.requestSessionFlush).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("aborts the archive it stopped waiting for, so a late success cannot empty the notepads", async () => {
+    // `withDeadline` only stops the waiting. Without the signal the archive
+    // keeps running, succeeds minutes later, and calls `removeSurface` on every
+    // Surface — in front of a user who chose Cancel.
+    vi.useFakeTimers();
+    try {
+      mocks.getNotepadSnapshot.mockReturnValue(oneNotedSurface());
+      let signal: AbortSignal | undefined;
+      mocks.archiveSurfaceNotes.mockImplementation((_ids, opts) => {
+        signal = opts?.signal;
+        return new Promise<void>(() => {}); // never settles
+      });
+      initQuitFlow(fakeAdapter());
+      quitRequested!();
+      await Promise.resolve();
+      expect(signal?.aborted).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(3000);
+
+      expect(signal?.aborted).toBe(true);
+      expect(getQuitConfirmPhase()).toBe("archive-failed");
     } finally {
       vi.useRealTimers();
     }

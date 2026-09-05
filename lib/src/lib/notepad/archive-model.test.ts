@@ -162,6 +162,32 @@ describe('applyArchiveMutation', () => {
     expect(again.batches).toEqual(appended.batches);
   });
 
+  it('skips an appended batch whose notes are all already stored', () => {
+    // A write that landed but reported failure is retried under a *fresh* batch
+    // id, so batch-id idempotence alone would duplicate every note in it.
+    const start = archive(batch('b1', [{ id: 'n1', text: 'a' }]));
+    const next = applyArchiveMutation(start, { append: [batch('b2', [{ id: 'n1', text: 'a' }])] });
+    expect(next.batches.map((b) => b.id)).toEqual(['b1']);
+  });
+
+  it('keeps only the new notes when an appended batch partly overlaps', () => {
+    // The Surface stayed open after the reported failure and the user kept
+    // typing: the second attempt must land exactly what the first did not.
+    const start = archive(batch('b1', [{ id: 'n1', text: 'a' }]));
+    const next = applyArchiveMutation(start, {
+      append: [batch('b2', [{ id: 'n1', text: 'a' }, { id: 'n2', text: 'b' }])],
+    });
+    expect(next.batches.map((b) => b.id)).toEqual(['b1', 'b2']);
+    expect(next.batches[1].notes.map((n) => n.id)).toEqual(['n2']);
+  });
+
+  it('deduplicates note ids across two batches appended together', () => {
+    const next = applyArchiveMutation(archive(), {
+      append: [batch('b1', [{ id: 'n1', text: 'a' }]), batch('b2', [{ id: 'n1', text: 'a' }])],
+    });
+    expect(next.batches.map((b) => b.id)).toEqual(['b1']);
+  });
+
   it('deletes whole batches', () => {
     const start = archive(batch('b1', [{ id: 'n1', text: 'a' }]), batch('b2', [{ id: 'n2', text: 'b' }]));
     const next = applyArchiveMutation(start, { deleteBatchIds: ['b1', 'gone'] });

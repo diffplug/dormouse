@@ -11,8 +11,9 @@
  * notes simply never come back. Sharing the constant makes a mismatch a compile
  * error instead.
  */
+import { SURFACE_KINDS, type SurfaceKind } from 'dor/commands/types';
+import { readArchivedNote, readCwdState } from './notepad/archive-model';
 import type { ArchivedNote, VolatileNotepadSnapshot, VolatileSurfaceNotes } from './notepad/types';
-import type { CwdState } from './terminal-state';
 
 /** Global the host injects the mirror into; `null` on every other boot. */
 export const NOTEPAD_VOLATILE_GLOBAL = '__DORMOUSE_NOTEPAD_VOLATILE__';
@@ -24,14 +25,26 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function readSurface(value: unknown): VolatileSurfaceNotes | null {
   if (!isRecord(value)) return null;
   if (typeof value.surfaceId !== 'string' || !value.surfaceId) return null;
-  if (typeof value.surfaceTitle !== 'string' || typeof value.surfaceKind !== 'string') return null;
+  if (typeof value.surfaceTitle !== 'string') return null;
+  if (typeof value.surfaceKind !== 'string' || !SURFACE_KINDS.includes(value.surfaceKind as SurfaceKind)) return null;
   if (!Array.isArray(value.notes)) return null;
+  const notes: ArchivedNote[] = [];
+  for (const raw of value.notes) {
+    const note = readArchivedNote(raw);
+    // One bad note drops the whole Surface: these go into the live store and
+    // from there into the archive, so a half-read notepad would silently lose
+    // notes rather than fail to restore them.
+    if (!note) return null;
+    notes.push(note);
+  }
   return {
     surfaceId: value.surfaceId,
     surfaceTitle: value.surfaceTitle,
-    surfaceKind: value.surfaceKind as VolatileSurfaceNotes['surfaceKind'],
-    cwd: isRecord(value.cwd) ? (value.cwd as unknown as CwdState) : null,
-    notes: value.notes as ArchivedNote[],
+    surfaceKind: value.surfaceKind as SurfaceKind,
+    // A CWD that does not read back is dropped, not fatal — it is metadata for
+    // a batch this Surface has not written yet.
+    cwd: readCwdState(value.cwd),
+    notes,
   };
 }
 
@@ -54,13 +67,11 @@ function readNoteRefs(value: unknown): Array<{ batchId: string; noteId: string }
 /**
  * Read the injected mirror, or `null` when this boot is not a live resume.
  *
- * Shape-checked rather than trusted, like the recovery commands: the host wrote
- * it, but the notes reach the live notepad store and from there the archive, so
- * a payload that does not fit degrades to "no mirror" rather than to entries
- * nobody validated. The deep validation is the host's — it only mirrors a
- * Surface whose archive batch reads back through `readNotepadArchive`
- * (`vscode-ext/src/notepad-volatile.ts`) — so this is the boundary check, not a
- * second copy of the schema.
+ * Validated rather than trusted, like the recovery commands: the host wrote it,
+ * but the notes reach the live notepad store and from there the archive, so a
+ * payload that does not fit degrades to "no mirror" rather than to entries
+ * nobody checked. It runs the archive validator's own readers rather than a
+ * second copy of the schema — one bad note drops its Surface whole.
  */
 export function readInjectedVolatileNotepad(): VolatileNotepadSnapshot | null {
   const raw = (globalThis as unknown as Record<string, unknown>)[NOTEPAD_VOLATILE_GLOBAL];

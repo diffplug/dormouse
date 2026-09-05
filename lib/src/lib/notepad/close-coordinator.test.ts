@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakePtyAdapter, setPlatform } from '../platform';
 import type { CwdState } from '../terminal-state';
 import { __resetArchiveServiceForTests } from './archive-service';
-import { __resetCloseCoordinatorForTests, archiveSurfaceNotes } from './close-coordinator';
+import { archiveSurfaceNotes } from './close-coordinator';
 import {
   addPlainNote,
   addTerminalNote,
@@ -33,7 +33,6 @@ async function stored(): Promise<NotepadArchiveV1> {
 
 beforeEach(() => {
   __resetArchiveServiceForTests();
-  __resetCloseCoordinatorForTests();
   clearAllNotepads();
   adapter = new FakePtyAdapter();
   setPlatform(adapter);
@@ -41,7 +40,6 @@ beforeEach(() => {
 
 afterEach(() => {
   __resetArchiveServiceForTests();
-  __resetCloseCoordinatorForTests();
   clearAllNotepads();
 });
 
@@ -122,7 +120,7 @@ describe('archiveSurfaceNotes', () => {
     expect((await stored()).batches).toEqual([]);
   });
 
-  it('reuses the batch id across a retry, so a second attempt cannot duplicate it', async () => {
+  it('retries a genuinely failed write without duplicating anything', async () => {
     const save = vi.spyOn(adapter.notepadArchive, 'save').mockRejectedValueOnce(new Error('disk is full'));
     addPlainNote('s1', 'once');
 
@@ -133,6 +131,64 @@ describe('archiveSurfaceNotes', () => {
     const archive = await stored();
     expect(archive.batches).toHaveLength(1);
     expect(getNotes('s1')).toEqual([]);
+  });
+
+  it('keeps the notes added after a write that landed but reported failure', async () => {
+    // The VS Code adapter's request timeout produces exactly this: the host
+    // stored the batch, the webview was told it did not. A batch id remembered
+    // across the rejection would make the second attempt a no-op append, and
+    // `removeSurface` would then throw away everything typed in between.
+    const real = adapter.notepadArchive.save.bind(adapter.notepadArchive);
+    vi.spyOn(adapter.notepadArchive, 'save').mockImplementationOnce(async (archive, base) => {
+      await real(archive, base);
+      throw new Error('the request timed out');
+    });
+    addPlainNote('s1', 'first');
+
+    await expect(archiveSurfaceNotes(['s1'])).rejects.toThrow('the request timed out');
+    // The Surface stayed open, so the user kept typing into it.
+    addPlainNote('s1', 'second');
+    await archiveSurfaceNotes(['s1']);
+
+    const texts = (await stored()).batches.flatMap((b) => b.notes.map((n) => (
+      n.content.kind === 'plain' ? n.content.text : ''
+    )));
+    expect(texts).toEqual(['first', 'second']);
+    expect(getNotes('s1')).toEqual([]);
+  });
+
+  it('stamps each closure attempt with a fresh closedAt', async () => {
+    vi.spyOn(adapter.notepadArchive, 'save').mockRejectedValueOnce(new Error('disk is full'));
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_000);
+    try {
+      addPlainNote('s1', 'once');
+      await expect(archiveSurfaceNotes(['s1'])).rejects.toThrow('disk is full');
+      nowSpy.mockReturnValue(9_000);
+      await archiveSurfaceNotes(['s1']);
+    } finally {
+      nowSpy.mockRestore();
+    }
+
+    expect((await stored()).batches[0].closedAt).toBe(9_000);
+  });
+
+  it('leaves the live notes alone when the caller has already given up', async () => {
+    // The standalone quit gate's deadline fired and the user chose Cancel: the
+    // batch is stored, but emptying the notepads now would delete notes in front
+    // of someone who just said no.
+    const controller = new AbortController();
+    const realSave = adapter.notepadArchive.save.bind(adapter.notepadArchive);
+    vi.spyOn(adapter.notepadArchive, 'save').mockImplementation(async (archive, base) => {
+      controller.abort(); // the deadline fires while the write is in flight
+      return realSave(archive, base);
+    });
+    addPlainNote('s1', 'still mine');
+
+    await archiveSurfaceNotes(['s1'], { signal: controller.signal });
+
+    // Stored — and still on screen, so a later close re-archives it (once).
+    expect((await stored()).batches).toHaveLength(1);
+    expect(getNotes('s1')).toHaveLength(1);
   });
 
   it('mints a fresh batch id for the next closure of the same id', async () => {

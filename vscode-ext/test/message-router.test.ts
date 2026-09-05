@@ -240,6 +240,38 @@ describe('notepad archive requests', () => {
     expect(store.get('dormouse.notepadArchive.v1')).toBeUndefined();
     expect(mirror.snapshotForLiveResume(['pane-1'])?.surfaces).toEqual([mirrored]);
   });
+
+  it('commits staged archive deletions on a disposal that is not a closure', async () => {
+    // A `WebviewView` moved between containers is disposed and re-resolved. Left
+    // staged, the deletions would show as still pending in the new view — with
+    // an Undo — and then be committed hours later by `deactivate()`. The Archive
+    // view promised they were irreversible once this window closed.
+    const webview = fakeWebview();
+    const { context, store } = fakeContext();
+    store.set('dormouse.notepadArchive.v1', JSON.stringify({
+      version: 1,
+      batches: [
+        { id: 'b1', closedAt: 1, surfaceTitle: 'zsh', surfaceKind: 'terminal', cwd: null, notes: [{ id: 'n1', createdAt: 1, content: { kind: 'plain', text: 'gone' } }] },
+        { id: 'b2', closedAt: 2, surfaceTitle: 'zsh', surfaceKind: 'terminal', cwd: null, notes: [{ id: 'n2', createdAt: 2, content: { kind: 'plain', text: 'kept' } }] },
+      ],
+    }));
+    const disposable = router.attachRouter(webview.channel, { context });
+
+    webview.send({
+      type: 'notepad:volatile',
+      snapshot: { surfaces: [mirrored], stagedDeletions: { deleteBatchIds: ['b1'], deleteNotes: [] } },
+    } as never);
+    disposable.dispose();
+
+    await vi.waitFor(() => {
+      const archive = JSON.parse(store.get('dormouse.notepadArchive.v1') as string);
+      expect(archive.batches.map((b: { id: string }) => b.id)).toEqual(['b2']);
+    });
+    // The notes are not a closure, so they stay — and nothing is left pending.
+    const resumed = mirror.snapshotForLiveResume(['pane-1']);
+    expect(resumed?.surfaces).toEqual([mirrored]);
+    expect(resumed?.stagedDeletions).toEqual({ deleteBatchIds: [], deleteNotes: [] });
+  });
 });
 
 /**

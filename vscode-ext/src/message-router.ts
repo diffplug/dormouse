@@ -28,10 +28,11 @@ import { createIframeProxyUrl } from './iframe-proxy-host';
 import {
   archiveVolatileMirror,
   loadNotepadArchive,
+  mutateNotepadArchive,
   resetUnreadableNotepadArchive,
   saveNotepadArchive,
 } from './notepad-archive-store';
-import { setVolatileForRouter, takeVolatileForRouter } from './notepad-volatile';
+import { setVolatileForRouter, takeStagedForRouter, takeVolatileForRouter } from './notepad-volatile';
 import { ASK_BUDGET_MS } from '../../lib/src/host/remote/service-protocol';
 import { configurePeerLink, remoteNotifyPeerChange } from './peer-link';
 import { createProcessedPtyStreams } from './processed-pty-streams';
@@ -986,17 +987,23 @@ export function attachRouter(
       // An editor panel closing is a deliberate ending, so this router's mirrored
       // notes are archived here: the webview is already gone and cannot run its
       // own close coordinator. A `WebviewView` disposal is *not* an ending — its
-      // PTYs stay alive — so its mirror is left in place for the next resolve to
-      // hydrate (docs/specs/notepad.md → Archive and Lifecycle).
+      // PTYs stay alive — so its *notes* are left in place for the next resolve
+      // to hydrate. Its staged archive deletions are not: the Archive view
+      // promised they were irreversible once this window closed, and the webview
+      // is the window (docs/specs/notepad.md → "VS Code lifecycle").
       //
-      // Best-effort: VS Code destroys the tab whatever we say, so a failure is
-      // logged rather than allowed to reject out of `dispose`.
+      // Best-effort on both paths: VS Code destroys the container whatever we
+      // say, so a failure is logged rather than allowed to reject out of
+      // `dispose`.
       const notepadContext = options?.context;
-      if (killOnDispose && notepadContext) {
+      if (notepadContext) {
         // Draining is what keeps `deactivate()` from archiving these a second
         // time under a fresh batch id; an empty mirror writes nothing.
-        void archiveVolatileMirror(notepadContext, takeVolatileForRouter(notepadRouterId)).catch((err) => {
-          log.error('[notepad] could not archive a closing panel\'s notes:', String(err));
+        const write = killOnDispose
+          ? archiveVolatileMirror(notepadContext, takeVolatileForRouter(notepadRouterId))
+          : mutateNotepadArchive(notepadContext, takeStagedForRouter(notepadRouterId));
+        void write.catch((err) => {
+          log.error('[notepad] could not commit a disposed webview\'s archive write:', String(err));
         });
       }
     },

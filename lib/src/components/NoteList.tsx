@@ -152,15 +152,36 @@ const NoteItem = memo(function NoteItem({
     const before = rich.runs;
     const handle = (event: Event) => {
       const input = event as InputEvent;
+      // Composition is the one edit not intercepted up front. An IME's
+      // `insertCompositionText` is not cancelable, so `preventDefault()` is
+      // ignored and the browser writes the composed text into the rich DOM
+      // regardless; converting here would also swap the contentEditable for a
+      // textarea mid-composition and orphan the IME. Let it run and convert
+      // once at `compositionend`, with the composed text (`commitComposition`).
+      if (input.isComposing || input.inputType === 'insertCompositionText') return;
       event.preventDefault();
       const plainText = runsToText(before);
-      const edit = applyPlainEdit(plainText, selectionOffsets(el), input.inputType, inputData(input));
+      const edit = applyPlainEdit(plainText, targetOffsets(el, input), input.inputType, inputData(input));
       setPendingCaret(edit.caret);
       onEdit(note.id, edit.text);
     };
     el.addEventListener('beforeinput', handle);
     return () => el.removeEventListener('beforeinput', handle);
   }, [note.id, rich, onEdit]);
+
+  /**
+   * The end of a composition the `beforeinput` handler let through. The browser
+   * has already written the composed text into the rich container, so the
+   * container's own `textContent` *is* the note's new text — convert on that,
+   * with the caret the composition left behind. React owns that DOM, and the
+   * conversion re-render replaces it wholesale, which is the point.
+   */
+  const commitComposition = useCallback(() => {
+    const el = richRef.current;
+    if (!el || !onEdit) return;
+    setPendingCaret(selectionOffsets(el).end);
+    onEdit(note.id, el.textContent ?? '');
+  }, [note.id, onEdit]);
 
   const copy = useCallback(() => {
     setFlashed(true);
@@ -206,6 +227,7 @@ const NoteItem = memo(function NoteItem({
           spellCheck={false}
           className="whitespace-pre-wrap break-words font-mono text-sm leading-snug outline-none"
           onBlur={() => onNoteBlur?.(note.id)}
+          onCompositionEnd={editable ? commitComposition : undefined}
         >
           {rich?.runs.map((run, index) => (
             <span key={index} style={runStyle(run)}>{run.text}</span>
@@ -272,6 +294,22 @@ function inputData(event: InputEvent): string {
   return event.dataTransfer?.getData('text/plain') ?? '';
 }
 
+/** The range a `beforeinput` acts on, as offsets into the container's text.
+ *  `getTargetRanges()` is the only place a word or line deletion's extent
+ *  appears — the document selection is still the bare caret — so it wins
+ *  wherever the browser supplies one, and the live selection is the fallback
+ *  for the browsers and input types that supply none. */
+function targetOffsets(container: HTMLElement, event: InputEvent): { start: number; end: number } {
+  const range = event.getTargetRanges?.()[0];
+  if (!range || !container.contains(range.startContainer) || !container.contains(range.endContainer)) {
+    return selectionOffsets(container);
+  }
+  return {
+    start: textOffsetOf(container, range.startContainer, range.startOffset),
+    end: textOffsetOf(container, range.endContainer, range.endOffset),
+  };
+}
+
 /** The document selection as offsets into the container's text. Anything
  *  anchored outside the note (no selection at all, focus elsewhere) is treated
  *  as a caret at the end, so an edit still lands somewhere sane. */
@@ -325,21 +363,73 @@ export function applyPlainEdit(
     case 'insertParagraph':
     case 'insertLineBreak':
       return splice('\n');
-    case 'deleteContentBackward':
-      return from === to ? splice('', previousBoundary(text, from), to) : splice('');
-    case 'deleteContentForward':
-      return from === to ? splice('', from, nextBoundary(text, to)) : splice('');
-    case 'deleteByCut':
-    case 'deleteByDrag':
-    case 'deleteWordBackward':
-    case 'deleteWordForward':
-      return splice('');
     default:
-      // Something we cannot reproduce (a composition, a formatting command):
-      // convert with the text unchanged and let the plain editor take the next
-      // keystroke, rather than guess at an edit.
+      if (inputType.startsWith('delete')) {
+        const cut = deleteRange(text, from, to, inputType);
+        return splice('', cut.from, cut.to);
+      }
+      // Something we cannot reproduce (a formatting command): convert with the
+      // text unchanged and let the plain editor take the next keystroke, rather
+      // than guess at an edit.
       return { text, caret: to };
   }
+}
+
+/**
+ * What a deletion covers. A non-collapsed range *is* the deletion — the browser
+ * already resolved it, into `getTargetRanges()` or the selection. A collapsed
+ * one is a keystroke whose extent only the input type names, so widen it here;
+ * every delete type then goes through the one `splice('')` above. An extent we
+ * do not know stays collapsed, which converts the note and edits nothing.
+ */
+function deleteRange(text: string, from: number, to: number, inputType: string): { from: number; to: number } {
+  if (from !== to) return { from, to };
+  switch (inputType) {
+    case 'deleteContentBackward':
+      return { from: previousBoundary(text, from), to };
+    case 'deleteContentForward':
+      return { from, to: nextBoundary(text, to) };
+    case 'deleteWordBackward':
+      return { from: wordStart(text, from), to };
+    case 'deleteWordForward':
+      return { from, to: wordEnd(text, to) };
+    case 'deleteSoftLineBackward':
+    case 'deleteHardLineBackward':
+      return { from: lineStart(text, from), to };
+    case 'deleteSoftLineForward':
+    case 'deleteHardLineForward':
+      return { from, to: lineEnd(text, to) };
+    case 'deleteEntireSoftLine':
+      return { from: lineStart(text, from), to: lineEnd(text, to) };
+    default:
+      return { from, to };
+  }
+}
+
+/** Back over the whitespace before the caret, then over the word before that:
+ *  Option/Ctrl+Backspace's extent. A word is never split mid-surrogate-pair
+ *  because both halves are non-whitespace and go together. */
+function wordStart(text: string, index: number): number {
+  return text.slice(0, index).replace(/\s+$/, '').replace(/\S+$/, '').length;
+}
+
+/** The mirror after the caret: over the whitespace, then over the word. */
+function wordEnd(text: string, index: number): number {
+  const suffix = text.slice(index);
+  return text.length - suffix.replace(/^\s+/, '').replace(/^\S+/, '').length;
+}
+
+/** The start of the caret's line — just past the previous newline, which the
+ *  deletion keeps, or the start of the note. */
+function lineStart(text: string, index: number): number {
+  return index <= 0 ? 0 : text.lastIndexOf('\n', index - 1) + 1;
+}
+
+/** The end of the caret's line — the next newline, which the deletion keeps, or
+ *  the end of the note. */
+function lineEnd(text: string, index: number): number {
+  const next = text.indexOf('\n', index);
+  return next === -1 ? text.length : next;
 }
 
 function previousBoundary(text: string, index: number): number {

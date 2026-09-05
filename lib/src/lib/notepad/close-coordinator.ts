@@ -8,14 +8,12 @@ import { hasNotepadArchive, mutateArchive } from './archive-service';
 import { getNotepadSurfaceMeta, getNotes, newNotepadId, removeSurface } from './notepad-store';
 import type { ArchiveBatch } from './types';
 
-/**
- * The identity of a closure attempt, minted on the first try and reused by every
- * retry until one succeeds. That reuse is what makes a retried append
- * idempotent: `applyArchiveMutation` skips a batch id already present, so a
- * "Close anyway" after a save that actually landed cannot duplicate it, and a
- * second attempt after a genuine failure appends exactly one batch.
- */
-const attempts = new Map<string, { batchId: string; closedAt: number }>();
+export interface ArchiveSurfaceNotesOptions {
+  /** Aborted once the caller has stopped waiting for this archive (the
+   *  standalone quit gate's deadline). The mutation still finishes — it may
+   *  already be mid-flight — but the live notes are then left alone. */
+  signal?: AbortSignal;
+}
 
 /**
  * Archive the notes of every Surface in `surfaceIds` and forget them.
@@ -25,12 +23,17 @@ const attempts = new Map<string, { batchId: string; closedAt: number }>();
  * every note in place so the caller can offer Keep open / Close anyway rather
  * than dropping them.
  */
-export async function archiveSurfaceNotes(surfaceIds: readonly string[]): Promise<void> {
+export async function archiveSurfaceNotes(
+  surfaceIds: readonly string[],
+  options?: ArchiveSurfaceNotesOptions,
+): Promise<void> {
   // No archive port means no notepad on this host at all, so there is nothing
   // captured to lose and nowhere to write it — closure must not be blockable.
   const archivable = hasNotepadArchive();
   const batches: ArchiveBatch[] = [];
   const archiving: string[] = [];
+  // One closure, one instant: every batch this call appends closed together.
+  const closedAt = Date.now();
 
   for (const surfaceId of surfaceIds) {
     const notes = getNotes(surfaceId);
@@ -39,17 +42,18 @@ export async function archiveSurfaceNotes(surfaceIds: readonly string[]): Promis
       removeSurface(surfaceId);
       continue;
     }
-    let attempt = attempts.get(surfaceId);
-    if (!attempt) {
-      attempt = { batchId: newNotepadId('batch'), closedAt: Date.now() };
-      attempts.set(surfaceId, attempt);
-    }
     // The metadata is snapshotted here, before teardown: the CWD in particular
     // is only knowable while the Session is alive.
     const meta = getNotepadSurfaceMeta(surfaceId);
     batches.push(buildArchiveBatch({
-      id: attempt.batchId,
-      closedAt: attempt.closedAt,
+      // A fresh id per call, never one remembered across a rejection: a write
+      // that landed and *then* reported failure would otherwise make the next
+      // closure a no-op append, silently dropping the notes added in between.
+      // The compare-and-swap retry inside `mutateArchive` reuses this same
+      // object, and repeat attempts are deduplicated by note id instead
+      // (`applyArchiveMutation`).
+      id: newNotepadId('batch'),
+      closedAt,
       surfaceTitle: meta?.surfaceTitle ?? '',
       surfaceKind: meta?.surfaceKind ?? 'terminal',
       cwd: meta?.cwd ?? null,
@@ -63,13 +67,11 @@ export async function archiveSurfaceNotes(surfaceIds: readonly string[]): Promis
   // quit gate) is a single read-modify-write that either lands entirely or not
   // at all.
   await mutateArchive({ append: batches });
-  for (const surfaceId of archiving) {
-    removeSurface(surfaceId);
-    attempts.delete(surfaceId);
-  }
-}
-
-/** Test-only helper. Do not use in application code. */
-export function __resetCloseCoordinatorForTests(): void {
-  attempts.clear();
+  // Aborted means the caller gave up waiting and told the user their notes were
+  // not stored — the quit was cancelled, the Surfaces are still on screen, and
+  // emptying them now would delete notes in front of someone who just said no.
+  // The batch is stored; note-id idempotence lets the next close re-archive the
+  // same notes exactly once.
+  if (options?.signal?.aborted) return;
+  for (const surfaceId of archiving) removeSurface(surfaceId);
 }

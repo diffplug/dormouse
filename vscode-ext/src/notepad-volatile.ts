@@ -141,12 +141,25 @@ export function surfaceIdsForRouter(routerId: string): string[] {
   return ids;
 }
 
+/**
+ * Take one router's staged archive deletions.
+ *
+ * Drained on *every* disposal, not only a killing one: the Archive view's
+ * contract is that a deletion is irreversible once the window closes, and the
+ * webview is the window. Left here they would reappear as still-pending in the
+ * next resolve and then be committed hours later by `deactivate()`, with no
+ * Undo left anywhere.
+ */
+export function takeStagedForRouter(routerId: string): StagedDeletions {
+  const staged = stagedByRouter.get(routerId) ?? EMPTY_STAGED;
+  stagedByRouter.delete(routerId);
+  return staged;
+}
+
 /** Drain one router's mirror — what its disposal has to archive. */
 export function takeVolatileForRouter(routerId: string): VolatileNotepadSnapshot {
   const surfaces = takeVolatileForSurfaces(surfaceIdsForRouter(routerId));
-  const stagedDeletions = stagedByRouter.get(routerId) ?? EMPTY_STAGED;
-  stagedByRouter.delete(routerId);
-  return { surfaces, stagedDeletions };
+  return { surfaces, stagedDeletions: takeStagedForRouter(routerId) };
 }
 
 /** Drain everything — what `deactivate()` has to archive. */
@@ -168,19 +181,20 @@ export function takeAllVolatile(): VolatileNotepadSnapshot {
  * archived by `deactivate()`. The resumed webview re-reports them under its own
  * router, which is what re-establishes ownership. Returns `null` when there is
  * nothing to hand over, so the boot payload matches the panel case exactly.
+ *
+ * Only the notes survive a disposal: the staged archive deletions behind them
+ * were committed by it (`takeStagedForRouter`), so there is never anything
+ * pending left to hand a resume.
  */
 export function snapshotForLiveResume(liveSurfaceIds: Iterable<string>): VolatileNotepadSnapshot | null {
   const surfaces: VolatileSurfaceNotes[] = [];
-  const owners = new Set<string>();
   for (const id of liveSurfaceIds) {
     const surface = mirroredSurfaces.get(id);
     if (!surface) continue;
     surfaces.push(surface);
-    const owner = surfaceOwner.get(id);
-    if (owner) owners.add(owner);
   }
   if (surfaces.length === 0) return null;
-  return { surfaces, stagedDeletions: mergeStaged([...owners]) };
+  return { surfaces, stagedDeletions: EMPTY_STAGED };
 }
 
 /** Deletions are archive-wide, so a resume inherits every staged set behind it. */

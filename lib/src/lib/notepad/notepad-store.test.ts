@@ -229,6 +229,16 @@ describe('surface lifecycle', () => {
     expect(getOpenNotepadId()).toBe('new');
   });
 
+  it('transferNotepad moves the open panel even when there are no notes to carry', () => {
+    // The old id stops existing either way, so an open panel left pointing at it
+    // would be stranded on a Surface that is gone.
+    setOpenNotepadId('old');
+
+    transferNotepad('old', 'new');
+
+    expect(getOpenNotepadId()).toBe('new');
+  });
+
   it('transferNotepad is a no-op for an empty or self-referential move', () => {
     const listener = vi.fn();
     subscribeToNotepad(listener);
