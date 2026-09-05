@@ -183,15 +183,6 @@ describe('resolveSurface', () => {
     answer(asks()[1]!, []);
     expect(await pending).toEqual({ cols: 80, rows: 24 });
   });
-
-  it('releases without asking anyone — the stream owns itself', async () => {
-    const attach = bridge.provider.resolveSurface('s1', {});
-    answer(asks()[0]!, [{ ptyId: 'pty-1', cols: 80, rows: 24 }]);
-    const handle = (await attach)!;
-
-    handle.release();
-    expect(asks()).toHaveLength(1);
-  });
 });
 
 describe('PTYs', () => {

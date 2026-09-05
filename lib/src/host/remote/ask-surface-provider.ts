@@ -116,9 +116,6 @@ export function createAskSurfaceProvider(
           }
           return { cols, rows };
         },
-        // Nothing to unwind: the stream is owned by the `streamPty`
-        // subscription, not by holding the surface.
-        release: () => {},
       };
     },
 

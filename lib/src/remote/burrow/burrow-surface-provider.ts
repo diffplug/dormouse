@@ -23,8 +23,6 @@ export interface SurfaceHandle {
   readonly rows: number;
   /** Resize through the owner's live xterm, and report what it settled at. */
   resize(cols: number, rows: number): Promise<{ cols: number; rows: number }>;
-  /** Let go: stops a peer's stream, nothing to undo for a local pane. */
-  release(): void;
 }
 
 /**
@@ -64,7 +62,7 @@ export interface BurrowSurfaceProvider {
   watchDirectory(onChange: () => void): () => void;
 
   /**
-   * Take hold of `surfaceId` at the size the client asked for, or `null` if
+   * Resolve `surfaceId` at the size the client asked for, or `null` if
    * nobody owns it.
    *
    * The size is part of resolving because attach-is-the-resize
