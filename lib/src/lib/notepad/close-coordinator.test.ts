@@ -204,6 +204,41 @@ describe('archiveSurfaceNotes', () => {
     expect(getNotes('s1')).toEqual([]);
   });
 
+  it('deletes the landed batch when the retried closure has nothing left', async () => {
+    // Same land-then-reject as above, except the user answered Keep open by
+    // emptying the notepad. The stored batch holds exactly the notes they
+    // deleted after being told none were archived, so it goes too.
+    const real = adapter.notepadArchive.save.bind(adapter.notepadArchive);
+    vi.spyOn(adapter.notepadArchive, 'save').mockImplementationOnce(async (archive, base) => {
+      await real(archive, base);
+      throw new Error('the request timed out');
+    });
+    const only = addPlainNote('s1', 'delete me')!;
+
+    await expect(archiveSurfaceNotes(['s1'])).rejects.toThrow('the request timed out');
+    expect((await stored()).batches).toHaveLength(1);
+
+    deleteNote('s1', only);
+    await archiveSurfaceNotes(['s1']);
+
+    expect((await stored()).batches).toEqual([]);
+    // Forgotten with the closure, so a Surface id reused later starts clean.
+    addPlainNote('s1', 'a later Session');
+    await archiveSurfaceNotes(['s1']);
+    expect((await stored()).batches).toHaveLength(1);
+  });
+
+  it('writes nothing for an empty Surface that never landed a batch', async () => {
+    const save = vi.spyOn(adapter.notepadArchive, 'save');
+    // An untouched Add New is not a note, so there is no remembered id either.
+    addPlainNote('s1');
+
+    await archiveSurfaceNotes(['s1']);
+
+    expect(save).not.toHaveBeenCalled();
+    expect(getNotes('s1')).toEqual([]);
+  });
+
   it('stamps each closure attempt with a fresh closedAt', async () => {
     vi.spyOn(adapter.notepadArchive, 'save').mockRejectedValueOnce(new Error('disk is full'));
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_000);

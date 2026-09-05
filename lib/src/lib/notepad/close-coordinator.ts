@@ -9,6 +9,7 @@ import {
   beginClosing,
   getNotepadSurfaceMeta,
   getNotes,
+  peekPendingBatchId,
   pendingBatchId,
   removeSurface,
 } from './notepad-store';
@@ -49,12 +50,29 @@ export async function archiveSurfaceNotes(
   const release = beginClosing(surfaceIds);
   try {
     const batches: ArchiveBatch[] = [];
+    /** Ids of batches an earlier attempt landed whose Surface now has nothing
+     *  left to re-append. Kept apart from the batches' own ids so the mutation
+     *  below deletes both sets. */
+    const orphanedBatchIds: string[] = [];
     const archiving: string[] = [];
     // One closure, one instant: every batch this call appends closed together.
     const closedAt = Date.now();
 
     for (const surfaceId of surfaceIds) {
       const notes = getNotes(surfaceId).filter(isArchivable);
+      if (archivable && notes.length === 0) {
+        // Nothing to append. A remembered id means an earlier attempt landed a
+        // batch and *then* reported failure, and the user has since deleted
+        // every note it held — so the stored batch goes with them rather than
+        // outliving notes they were told were never archived
+        // (docs/specs/notepad.md → "Closure").
+        const landed = peekPendingBatchId(surfaceId);
+        if (landed) {
+          orphanedBatchIds.push(landed);
+          archiving.push(surfaceId);
+          continue;
+        }
+      }
       if (!archivable || notes.length === 0) {
         // A Surface that never held a note closes without touching the archive.
         removeSurface(surfaceId);
@@ -77,15 +95,19 @@ export async function archiveSurfaceNotes(
       archiving.push(surfaceId);
     }
 
-    if (batches.length === 0) return;
+    if (batches.length === 0 && orphanedBatchIds.length === 0) return;
     // One mutation for the whole closure, so a multi-Surface close (the
     // standalone quit gate) is a single read-modify-write that either lands
     // entirely or not at all. Deleting exactly the ids being appended is a
     // no-op on a first attempt and a wholesale replacement on a retry, so the
     // edits, additions, and deletions made since a write that landed and then
-    // reported failure are all in the batch that survives
+    // reported failure are all in the batch that survives — including the case
+    // where nothing is left to re-append and the delete stands alone
     // (docs/specs/notepad.md → "Model").
-    await mutateArchive({ deleteBatchIds: batches.map((batch) => batch.id), append: batches });
+    await mutateArchive({
+      deleteBatchIds: [...orphanedBatchIds, ...batches.map((batch) => batch.id)],
+      append: batches,
+    });
     // Aborted means the caller gave up waiting and told the user their notes
     // were not stored — the quit was cancelled, the Surfaces are still on
     // screen, and emptying them now would delete notes in front of someone who

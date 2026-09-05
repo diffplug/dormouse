@@ -97,6 +97,13 @@ export function pendingBatchId(surfaceId: string): string {
   return minted;
 }
 
+/** The id this Surface's closure is already holding, or `undefined` — the
+ *  non-minting read. A closure with nothing left to append asks through here:
+ *  minting one there would append a batch id nobody ever stored. */
+export function peekPendingBatchId(surfaceId: string): string | undefined {
+  return pendingBatchIdBySurface.get(surfaceId);
+}
+
 /**
  * Freeze these Surfaces' notes and hand back the release. The close coordinator
  * calls this before it reads a single note, so the batches it builds and the
