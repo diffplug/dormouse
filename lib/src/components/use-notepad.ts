@@ -6,6 +6,7 @@ import { useCallback, useSyncExternalStore } from 'react';
 import {
   getNotes,
   getOpenNotepadId,
+  isSurfaceClosing,
   noteCount,
   subscribeToNotepad,
   subscribeToOpenNotepad,
@@ -28,6 +29,15 @@ export function useNotes(surfaceId: string): readonly LiveNote[] {
   return useSyncExternalStore(
     subscribeToNotepad,
     useCallback(() => getNotes(surfaceId), [surfaceId]),
+  );
+}
+
+/** Whether a closure is holding this Surface's notes mid-write, so the panel
+ *  renders read-only (docs/specs/notepad.md → "Closure"). */
+export function useSurfaceClosing(surfaceId: string): boolean {
+  return useSyncExternalStore(
+    subscribeToNotepad,
+    useCallback(() => isSurfaceClosing(surfaceId), [surfaceId]),
   );
 }
 

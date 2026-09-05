@@ -7,10 +7,13 @@ import {
   addPlainNote,
   addTerminalNote,
   clearAllNotepads,
+  deleteNote,
   getNotes,
+  isSurfaceClosing,
   setNotepadSurfaceMetaResolver,
+  setNoteText,
 } from './notepad-store';
-import type { NotepadArchiveV1 } from './types';
+import type { NotepadArchiveV1, RuntimeTerminalSource } from './types';
 
 const CWD: CwdState = {
   path: '/srv/app',
@@ -29,6 +32,41 @@ let adapter: FakePtyAdapter;
 async function stored(): Promise<NotepadArchiveV1> {
   const loaded = await adapter.notepadArchive.load();
   return (loaded?.raw ?? { version: 1, batches: [] }) as NotepadArchiveV1;
+}
+
+function marker(): { dispose: ReturnType<typeof vi.fn> } {
+  return { id: 1, line: 3, isDisposed: false, dispose: vi.fn(), onDispose: vi.fn() } as never;
+}
+
+function source(terminalId = 's1'): RuntimeTerminalSource & {
+  startMarker: { dispose: ReturnType<typeof vi.fn> };
+  endMarker: { dispose: ReturnType<typeof vi.fn> };
+} {
+  return {
+    terminalId,
+    startMarker: marker(),
+    endMarker: marker(),
+    startColumn: 0,
+    endColumn: 4,
+    shape: 'linewise',
+    expectedRawText: 'boom',
+  } as never;
+}
+
+/** A `save` parked until `release`, so a test can act on the store while a
+ *  closure is mid-write. `entered` settles once the coordinator is inside it. */
+function heldSave(): { entered: Promise<void>; release: () => void } {
+  const real = adapter.notepadArchive.save.bind(adapter.notepadArchive);
+  let markEntered!: () => void;
+  const entered = new Promise<void>((resolve) => { markEntered = resolve; });
+  let open!: () => void;
+  const gate = new Promise<void>((resolve) => { open = resolve; });
+  vi.spyOn(adapter.notepadArchive, 'save').mockImplementation(async (archive, base) => {
+    markEntered();
+    await gate;
+    return real(archive, base);
+  });
+  return { entered, release: () => open() };
 }
 
 beforeEach(() => {
@@ -200,6 +238,86 @@ describe('archiveSurfaceNotes', () => {
     const archive = await stored();
     expect(archive.batches).toHaveLength(2);
     expect(new Set(archive.batches.map((b) => b.id)).size).toBe(2);
+  });
+
+  it('freezes the notepad from the snapshot until the write settles', async () => {
+    const held = heldSave();
+    const first = addPlainNote('s1', 'snapshotted')!;
+    const closing = archiveSurfaceNotes(['s1']);
+    await held.entered;
+
+    // Everything that would change what is being written is refused. An edit is
+    // the worst of them: the batch already holds the pre-edit text, and the
+    // forget step below would then take the edit with it.
+    expect(isSurfaceClosing('s1')).toBe(true);
+    setNoteText('s1', first, 'edited mid-write');
+    expect(addPlainNote('s1', 'added mid-write')).toBeNull();
+    const captured = source();
+    expect(addTerminalNote('s1', [{ text: 'boom' }], captured)).toBeNull();
+    // Nobody else can reach the markers of a note that was never added.
+    expect(captured.startMarker.dispose).toHaveBeenCalledTimes(1);
+    expect(captured.endMarker.dispose).toHaveBeenCalledTimes(1);
+    deleteNote('s1', first);
+    expect(getNotes('s1').map((n) => n.content)).toEqual([{ kind: 'plain', text: 'snapshotted' }]);
+
+    held.release();
+    await closing;
+
+    expect(isSurfaceClosing('s1')).toBe(false);
+    const archive = await stored();
+    expect(archive.batches).toHaveLength(1);
+    expect(archive.batches[0].notes.map((n) => n.content)).toEqual([
+      { kind: 'plain', text: 'snapshotted' },
+    ]);
+    expect(getNotes('s1')).toEqual([]);
+  });
+
+  it('archives one batch for two overlapping closures of one Surface', async () => {
+    const held = heldSave();
+    addPlainNote('s1', 'only once');
+
+    const first = archiveSurfaceNotes(['s1']);
+    const second = archiveSurfaceNotes(['s1']);
+    await held.entered;
+    held.release();
+    await expect(Promise.all([first, second])).resolves.toEqual([undefined, undefined]);
+
+    const archive = await stored();
+    expect(archive.batches).toHaveLength(1);
+    expect(archive.batches[0].notes).toHaveLength(1);
+    // Counted, not flagged: the freeze lifts only once *both* have settled.
+    expect(isSurfaceClosing('s1')).toBe(false);
+    expect(addPlainNote('s1', 'after')).not.toBeNull();
+  });
+
+  it('thaws the notepad when the write is refused', async () => {
+    vi.spyOn(adapter.notepadArchive, 'save').mockRejectedValue(new Error('disk is full'));
+    const id = addPlainNote('s1', 'still here')!;
+
+    await expect(archiveSurfaceNotes(['s1'])).rejects.toThrow('disk is full');
+
+    // The Surface stayed open behind Keep open, so its notepad is the user's
+    // again.
+    expect(isSurfaceClosing('s1')).toBe(false);
+    setNoteText('s1', id, 'edited after the failure');
+    expect(getNotes('s1')[0].content).toEqual({ kind: 'plain', text: 'edited after the failure' });
+  });
+
+  it('never archives an empty plain note', async () => {
+    const save = vi.spyOn(adapter.notepadArchive, 'save');
+    // An untouched Add New that was still focused when the kill landed.
+    addPlainNote('s1');
+    addPlainNote('s1', 'typed');
+    // Nothing but an untouched Add New: this Surface closes as if it had none.
+    addPlainNote('s2');
+
+    await archiveSurfaceNotes(['s1', 's2']);
+
+    expect(save).toHaveBeenCalledTimes(1);
+    const archive = await stored();
+    expect(archive.batches).toHaveLength(1);
+    expect(archive.batches[0].notes.map((n) => n.content)).toEqual([{ kind: 'plain', text: 'typed' }]);
+    expect(getNotes('s2')).toEqual([]);
   });
 
   it('closes without an archive at all on a host that has none', async () => {

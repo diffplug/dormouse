@@ -145,6 +145,16 @@ left holding its notes with nothing on screen left to answer for it.
 script, not someone looking at the Wall: a modal there blocks a window nobody is
 watching, and the command already answers with the reason.
 
+The freeze exists because the coordinator snapshots the notes, awaits the host, and
+*then* forgets them, and the panel stayed interactive across that await. A note
+added in between was deleted having never been archived. An edit was worse: the
+batch already held the pre-edit text, so the archive kept a stale copy and the
+forget step took the edit with it. Refusing the mutations is what makes the
+snapshot and the forget describe the same notes; a counted freeze rather than a
+flag is because two closures of one Surface can overlap (a kill retried while the
+quit gate is closing everything), and the first to finish must not thaw notes the
+second is still writing.
+
 ## Standalone quit
 
 The gate sits before the first `quit_progress` rather than inside the teardown

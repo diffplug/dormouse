@@ -4,7 +4,7 @@ import { clsx } from 'clsx';
 import { ModalCloseButton, POPUP_SURFACE_CLASS, popupButton } from './design';
 import { NoteList } from './NoteList';
 import { usePopoverFocusTrap } from './use-popover-focus-trap';
-import { copyNote, useNotes } from './use-notepad';
+import { copyNote, useNotes, useSurfaceClosing } from './use-notepad';
 import {
   addPlainNote,
   deleteNote,
@@ -48,6 +48,10 @@ export function NotepadBody({
   onRevealSource: (noteId: string) => void;
 }) {
   const notes = useNotes(surfaceId);
+  // The Surface's closure has snapshotted these notes and is writing them: the
+  // store refuses every content mutation until it settles, so the panel says so
+  // rather than accepting edits it would silently drop.
+  const closing = useSurfaceClosing(surfaceId);
   const [addedNoteId, setAddedNoteId] = useState<string | null>(null);
 
   // Escape, Tab cycling, and outside-click dismissal, the same contract every
@@ -67,6 +71,8 @@ export function NotepadBody({
   }, [surfaceId]);
 
   const addNote = useCallback(() => {
+    // `null` when the store refused it — there is then no note to put the caret
+    // in, and `autoFocusNoteId` matches none.
     setAddedNoteId(addPlainNote(surfaceId));
   }, [surfaceId]);
 
@@ -105,6 +111,7 @@ export function NotepadBody({
           type="button"
           className={clsx(popupButton(), 'flex items-center gap-1 rounded')}
           aria-label="Add new note"
+          disabled={closing}
           onClick={addNote}
         >
           <PlusIcon size={12} weight="bold" />
@@ -112,6 +119,11 @@ export function NotepadBody({
         </button>
         <ModalCloseButton aria-label="Close notepad" onClick={onClose} />
       </div>
+      {closing && (
+        <div className="shrink-0 border-b border-border px-2 py-1 text-xs text-muted" role="status">
+          Archiving notes…
+        </div>
+      )}
       <div className="min-h-0 flex-1 overflow-auto">
         {notes.length === 0 ? (
           <p className="px-2 py-2 text-muted">No notes yet.</p>
@@ -125,6 +137,7 @@ export function NotepadBody({
             sourceUnavailableNoteId={sourceUnavailableNoteId}
             autoFocusNoteId={addedNoteId}
             onNoteBlur={pruneNote}
+            disabled={closing}
           />
         )}
       </div>

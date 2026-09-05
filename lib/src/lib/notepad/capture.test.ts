@@ -16,7 +16,7 @@ import { __resetMouseSelectionForTests, setSelection, type Selection } from '../
 import { FakePtyAdapter, setPlatform } from '../platform';
 import { hasNotepadArchive } from './archive-service';
 import { addSelectionToNotepad, isNotepadChordBound } from './capture';
-import { clearAllNotepads, getNotes } from './notepad-store';
+import { beginClosing, clearAllNotepads, getNotes } from './notepad-store';
 
 class FakeMarker {
   isDisposed = false;
@@ -154,6 +154,29 @@ describe('addSelectionToNotepad', () => {
 
     expect(addSelectionToNotepad('term-1')).toBe(false);
     expect(getNotes('term-1')).toHaveLength(0);
+  });
+
+  it('refuses the capture while the Surface is closing, and releases its markers', () => {
+    const terminal = makeTerminal(LINES);
+    mocks.getTerminalInstance.mockReturnValue(terminal);
+    setSelection('term-1', sel());
+    const markers: FakeMarker[] = [];
+    terminal.registerMarker = ((offset = 0) => {
+      const created = new FakeMarker(offset);
+      markers.push(created);
+      return created as unknown as IMarker;
+    }) as Terminal['registerMarker'];
+
+    const release = beginClosing(['term-1']);
+    // `false`, so the popup does not flash "Added" for a note nobody took.
+    expect(addSelectionToNotepad('term-1')).toBe(false);
+    expect(getNotes('term-1')).toHaveLength(0);
+    // The pin was registered before the store refused it, and no note owns it.
+    expect(markers).toHaveLength(2);
+    expect(markers.every((m) => m.isDisposed)).toBe(true);
+
+    release();
+    expect(addSelectionToNotepad('term-1')).toBe(true);
   });
 
   it('does nothing when the terminal instance is gone', () => {

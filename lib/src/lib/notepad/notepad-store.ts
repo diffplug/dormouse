@@ -36,6 +36,14 @@ const notesBySurface = new Map<string, LiveNote[]>();
 const listeners = new Set<() => void>();
 let cachedSnapshot: Map<string, LiveNote[]> | null = null;
 
+/**
+ * Surfaces whose notes a closure has snapshotted and not yet finished writing
+ * (docs/specs/notepad.md → "Closure"). Counted, not flagged: two closures of one
+ * Surface can overlap, and the second finishing must not thaw the notes the
+ * first is still writing.
+ */
+const closingSurfaces = new Map<string, number>();
+
 function notify(): void {
   cachedSnapshot = null;
   listeners.forEach((listener) => listener());
@@ -64,6 +72,37 @@ export function noteCount(surfaceId: string): number {
   return notesBySurface.get(surfaceId)?.length ?? 0;
 }
 
+/** Whether a closure is holding this Surface's notes mid-write. Every content
+ *  mutation below refuses while it is true, and the panel goes read-only. */
+export function isSurfaceClosing(surfaceId: string): boolean {
+  return closingSurfaces.has(surfaceId);
+}
+
+/**
+ * Freeze these Surfaces' notes and hand back the release. The close coordinator
+ * calls this before it reads a single note, so the batches it builds and the
+ * notes nobody can touch are the same set; the release runs whether the write
+ * lands or rejects.
+ */
+export function beginClosing(surfaceIds: Iterable<string>): () => void {
+  const ids = [...surfaceIds];
+  for (const id of ids) closingSurfaces.set(id, (closingSurfaces.get(id) ?? 0) + 1);
+  if (ids.length > 0) notify();
+  let released = false;
+  return () => {
+    // Idempotent: a caller that releases twice must not thaw someone else's
+    // overlapping closure.
+    if (released) return;
+    released = true;
+    for (const id of ids) {
+      const remaining = (closingSurfaces.get(id) ?? 1) - 1;
+      if (remaining <= 0) closingSurfaces.delete(id);
+      else closingSurfaces.set(id, remaining);
+    }
+    if (ids.length > 0) notify();
+  };
+}
+
 let idCounter = 0;
 
 /** `crypto.randomUUID` everywhere it exists; the counter is for the odd
@@ -90,8 +129,11 @@ function appendNote(surfaceId: string, note: LiveNote): string {
 }
 
 /** Add an empty (or pre-filled) plain note at the bottom. The panel focuses it;
- *  an untouched one is removed again by `pruneEmptyNote`. */
-export function addPlainNote(surfaceId: string, text = ''): string {
+ *  an untouched one is removed again by `pruneEmptyNote`. `null` while the
+ *  Surface is closing — the note would be dropped unarchived, and the caller
+ *  must not go looking for it. */
+export function addPlainNote(surfaceId: string, text = ''): string | null {
+  if (isSurfaceClosing(surfaceId)) return null;
   return appendNote(surfaceId, {
     id: newNotepadId(),
     createdAt: Date.now(),
@@ -100,12 +142,18 @@ export function addPlainNote(surfaceId: string, text = ''): string {
 }
 
 /** Add a captured terminal selection. `source` is present only for
- *  normal-buffer captures — it is what a pin resolves against. */
+ *  normal-buffer captures — it is what a pin resolves against. `null` while the
+ *  Surface is closing, the markers released here because no note will own them. */
 export function addTerminalNote(
   surfaceId: string,
   runs: RichTextRun[],
   source?: RuntimeTerminalSource,
-): string {
+): string | null {
+  if (isSurfaceClosing(surfaceId)) {
+    source?.startMarker.dispose();
+    source?.endMarker.dispose();
+    return null;
+  }
   const note: LiveNote = {
     id: newNotepadId(),
     createdAt: Date.now(),
@@ -124,6 +172,9 @@ export function addTerminalNote(
  * from, which an edit does not move.
  */
 export function setNoteText(surfaceId: string, noteId: string, text: string): void {
+  // An edit landing mid-write would archive the pre-edit text and then be
+  // forgotten with the rest of the notepad.
+  if (isSurfaceClosing(surfaceId)) return;
   const current = notesBySurface.get(surfaceId);
   if (!current) return;
   const index = current.findIndex((note) => note.id === noteId);
@@ -151,6 +202,7 @@ function withoutSource(note: LiveNote): LiveNote {
 }
 
 export function deleteNote(surfaceId: string, noteId: string): void {
+  if (isSurfaceClosing(surfaceId)) return;
   const current = notesBySurface.get(surfaceId);
   if (!current) return;
   const note = current.find((candidate) => candidate.id === noteId);
@@ -170,6 +222,7 @@ export function deleteNote(surfaceId: string, noteId: string): void {
  * this is safe to call on every blur.
  */
 export function pruneEmptyNote(surfaceId: string, noteId: string): boolean {
+  if (isSurfaceClosing(surfaceId)) return false;
   const note = notesBySurface.get(surfaceId)?.find((candidate) => candidate.id === noteId);
   if (!note) return false;
   if (note.content.kind !== 'plain' || note.content.text !== '') return false;
@@ -180,6 +233,7 @@ export function pruneEmptyNote(surfaceId: string, noteId: string): boolean {
 /** Drop one note's source link: the pin disappears, the note stays. Called when
  *  a pin fails to resolve (disposed markers, trimmed scrollback, text mismatch). */
 export function dropSource(surfaceId: string, noteId: string): void {
+  if (isSurfaceClosing(surfaceId)) return;
   const current = notesBySurface.get(surfaceId);
   if (!current) return;
   const index = current.findIndex((note) => note.id === noteId);
@@ -217,6 +271,10 @@ export function dropSourcesForTerminal(terminalId: string): void {
  */
 export function transferNotepad(oldId: string, newId: string): void {
   if (oldId === newId) return;
+  // Either end frozen means a closure is holding one of these notepads: moving
+  // notes out from under it would archive a batch for a Surface id that no
+  // longer owns them.
+  if (isSurfaceClosing(oldId) || isSurfaceClosing(newId)) return;
   // Before the empty-notepad early return: the old id stops existing either way,
   // so an open panel pointing at it would be stranded on a Surface that is gone.
   if (openNotepadId === oldId) setOpenNotepadId(newId);
@@ -248,6 +306,7 @@ export function removeSurface(surfaceId: string): void {
 export function clearAllNotepads(): void {
   for (const notes of notesBySurface.values()) notes.forEach(disposeSource);
   notesBySurface.clear();
+  closingSurfaces.clear();
   metaResolver = null;
   stagedDeletions = {};
   setOpenNotepadId(null);

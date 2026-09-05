@@ -26,8 +26,10 @@ export interface NoteListProps {
   /** Fires when an editor loses focus, so the owner can prune an untouched
    *  empty note. */
   onNoteBlur?: (noteId: string) => void;
-  /** Hold Delete and the pin while a caller is mid-commit (the Archive view
-   *  committing staged deletions); Copy stays live since it changes nothing. */
+  /** Read-only: the editors refuse input and Delete and the pin are held, while
+   *  a caller is mid-commit — the Archive view committing staged deletions, or a
+   *  closure writing this Surface's notes (docs/specs/notepad.md → "Closure").
+   *  Copy stays live since it changes nothing. */
   disabled?: boolean;
 }
 
@@ -204,6 +206,7 @@ const NoteItem = memo(function NoteItem({
             rows={1}
             aria-label="Note"
             value={text}
+            readOnly={disabled}
             spellCheck={false}
             className="block w-full resize-none overflow-hidden border-0 bg-transparent p-0 font-mono text-sm leading-snug text-foreground outline-none"
             onChange={(e) => onEdit?.(note.id, e.target.value)}
@@ -218,11 +221,12 @@ const NoteItem = memo(function NoteItem({
           // Escaped React spans, never `dangerouslySetInnerHTML`: captured
           // terminal output is untrusted text. Every mutation is cancelled in
           // the handler above, so React's tree and the DOM never diverge.
-          contentEditable={editable}
+          contentEditable={editable && !disabled}
           suppressContentEditableWarning
           tabIndex={editable ? 0 : undefined}
           role={editable ? 'textbox' : undefined}
           aria-multiline={editable ? true : undefined}
+          aria-readonly={editable && disabled ? true : undefined}
           aria-label={editable ? 'Note' : undefined}
           spellCheck={false}
           className="whitespace-pre-wrap break-words font-mono text-sm leading-snug outline-none"

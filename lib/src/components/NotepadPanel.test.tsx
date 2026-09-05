@@ -10,6 +10,8 @@ import { DialogKeyboardContext } from './wall/wall-context';
 import { FakePtyAdapter } from '../lib/platform/fake-adapter';
 import { setPlatform } from '../lib/platform';
 import { setNativeFieldValue } from '../lib/dom';
+import { archiveSurfaceNotes } from '../lib/notepad/close-coordinator';
+import { __resetArchiveServiceForTests } from '../lib/notepad/archive-service';
 import {
   addPlainNote,
   addTerminalNote,
@@ -36,12 +38,14 @@ beforeEach(() => {
   platform = new FakePtyAdapter();
   setPlatform(platform);
   dialogKeyboard = vi.fn();
+  __resetArchiveServiceForTests();
 });
 
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
   clearAllNotepads();
+  __resetArchiveServiceForTests();
   platform.reset();
 });
 
@@ -265,6 +269,47 @@ describe('NotepadPanel — notes', () => {
     act(() => setOpenNotepadId(null));
 
     expect(getNotes(SURFACE).map((note) => note.content)).toEqual([{ kind: 'plain', text: 'kept' }]);
+  });
+});
+
+describe('NotepadPanel — closing', () => {
+  it('goes read-only while its Surface is being archived, then closes with it', async () => {
+    addPlainNote(SURFACE, 'first');
+    addTerminalNote(SURFACE, [{ text: 'boom' }]);
+    renderPanels();
+    open();
+
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const save = platform.notepadArchive.save.bind(platform.notepadArchive);
+    vi.spyOn(platform.notepadArchive, 'save').mockImplementation(async (archive, base) => {
+      await gate;
+      return save(archive, base);
+    });
+
+    let closing!: Promise<void>;
+    act(() => { closing = archiveSurfaceNotes([SURFACE]); });
+
+    // The panel says what is happening rather than taking edits the closure has
+    // already snapshotted past.
+    expect(panel()!.textContent).toContain('Archiving notes…');
+    expect(panel()!.querySelector('[role="status"]')).not.toBeNull();
+    expect(noteElements()[0].querySelector('textarea')!.readOnly).toBe(true);
+    const rich = noteElements()[1].querySelector<HTMLElement>('[role="textbox"]')!;
+    expect(rich.getAttribute('contenteditable')).toBe('false');
+    expect(rich.getAttribute('aria-readonly')).toBe('true');
+    expect(container.querySelector<HTMLButtonElement>('[aria-label="Add new note"]')!.disabled).toBe(true);
+    expect(buttonIn(noteElements()[0], 'Delete note').disabled).toBe(true);
+
+    await act(async () => {
+      release();
+      await closing;
+    });
+
+    // The notes are stored and forgotten, so the panel goes with the Surface.
+    expect(getNotes(SURFACE)).toEqual([]);
+    expect(getOpenNotepadId()).toBeNull();
+    expect(panel()).toBeNull();
   });
 });
 

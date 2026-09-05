@@ -100,6 +100,8 @@ Source of truth: `lib/src/components/NotepadArchiveView.tsx`; the Settings entry
 
 **Every user-visible permanent Surface closure routes through the close coordinator**, which builds stable-id batches from whatever notes exist and appends them in one mutation *before* teardown. Routed: the header kill button, keyboard kills both confirmed and on the untouched fast path, `dor kill`, the Door-restore kill path, and controlled application quit. **A multi-Surface closure appends every batch in one mutation**, and a closure with no notes writes nothing.
 
+**A Surface's notes are frozen from the moment its closure snapshots them until the write settles** — adds, edits, and deletes are refused, a refused capture releases its own markers, and the panel renders read-only behind an "Archiving notes…" line — so nothing taken during the write can be archived stale or dropped unarchived by the forget step (rationale). The freeze is counted, so overlapping closures of one Surface thaw it once. **Empty plain notes are never archived**: an untouched Add New still on screen when the kill lands is not a note, and a Surface holding only those closes as if it held none.
+
 **The immediate-teardown primitive is reachable only once the archive question is settled, or from a Surface that cannot have taken a note**: `closeSurface` after its append lands, its own Close anyway branch, and `dor ensure`'s integration-timeout teardown of the throwaway split it just created.
 
 On a failed archive:
@@ -113,7 +115,7 @@ On a failed archive:
 
 Reserved: Workspace and Window closure has no live code path today (`closeWorkspace` has only test callers and the workspaces flag is dormant), so nothing is wired to it; routing it through the coordinator belongs to the **workspaces-rollout** scope.
 
-Source of truth: `archiveSurfaceNotes` in `lib/src/lib/notepad/close-coordinator.ts`; `closeSurface` and `killPaneImmediately` in `lib/src/components/Wall.tsx`; `NotepadArchiveFailureModal` in `lib/src/components/NotepadArchiveFailure.tsx`; `transferNotepad` in `lib/src/lib/notepad/notepad-store.ts`.
+Source of truth: `archiveSurfaceNotes` in `lib/src/lib/notepad/close-coordinator.ts`; `closeSurface` and `killPaneImmediately` in `lib/src/components/Wall.tsx`; `NotepadArchiveFailureModal` in `lib/src/components/NotepadArchiveFailure.tsx`; `beginClosing` and `transferNotepad` in `lib/src/lib/notepad/notepad-store.ts`; `useSurfaceClosing` in `lib/src/components/use-notepad.ts`.
 
 ## Standalone quit
 

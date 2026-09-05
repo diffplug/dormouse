@@ -19,7 +19,8 @@ export function isNotepadChordBound(): boolean {
 
 /** Capture the terminal's finalized selection into its notepad as a rich note,
  *  with a source pin when the normal buffer is active. Returns `false` when
- *  there is no finalized selection or no live terminal to read. */
+ *  there is no finalized selection, no live terminal to read, or the Surface is
+ *  closing — the caller flashes "Added" only on a `true`. */
 export function addSelectionToNotepad(terminalId: string): boolean {
   const sel = getMouseSelectionState(terminalId).selection;
   // Mid-drag there is nothing settled to capture; the popup is not up either.
@@ -33,6 +34,7 @@ export function addSelectionToNotepad(terminalId: string): boolean {
   const source = registerTerminalSource(terminal, terminalId, sel, rawText);
   // A terminal Surface's Surface id *is* its terminal id (docs/specs/layout.md →
   // "Session lifecycle"), so the note lands on the Surface holding the selection.
-  addTerminalNote(terminalId, runs, source ?? undefined);
-  return true;
+  // A closing Surface refuses it (and releases the markers) rather than take a
+  // note its closure has already snapshotted past.
+  return addTerminalNote(terminalId, runs, source ?? undefined) !== null;
 }

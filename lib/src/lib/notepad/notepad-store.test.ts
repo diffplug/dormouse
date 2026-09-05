@@ -5,6 +5,7 @@ import type { CwdState } from '../terminal-state';
 import {
   addPlainNote,
   addTerminalNote,
+  beginClosing,
   buildVolatileSnapshot,
   clearAllNotepads,
   deleteNote,
@@ -14,6 +15,7 @@ import {
   getNotes,
   getOpenNotepadId,
   hydrateNotepadFromVolatile,
+  isSurfaceClosing,
   noteCount,
   pruneEmptyNote,
   removeSurface,
@@ -259,6 +261,88 @@ describe('surface lifecycle', () => {
     expect(getNotes('s1')).toEqual([]);
     expect(getNotepadSnapshot().has('s1')).toBe(false);
     expect(getOpenNotepadId()).toBeNull();
+  });
+});
+
+describe('the closure freeze', () => {
+  it('refuses every content mutation until the release runs', () => {
+    const src = source('s1');
+    const kept = addPlainNote('s1', 'snapshotted')!;
+    const blank = addPlainNote('s1')!;
+    const pinned = addTerminalNote('s1', [{ text: 'boom' }], src)!;
+
+    const release = beginClosing(['s1']);
+    expect(isSurfaceClosing('s1')).toBe(true);
+
+    expect(addPlainNote('s1', 'nope')).toBeNull();
+    const refused = source('s1');
+    expect(addTerminalNote('s1', [{ text: 'nope' }], refused)).toBeNull();
+    // Nothing else can reach the markers of a note that was never added.
+    expect(refused.startMarker.dispose).toHaveBeenCalledTimes(1);
+    expect(refused.endMarker.dispose).toHaveBeenCalledTimes(1);
+    setNoteText('s1', kept, 'edited');
+    deleteNote('s1', kept);
+    // Even the blur prune stands down: the batch already holds this note.
+    expect(pruneEmptyNote('s1', blank)).toBe(false);
+    dropSource('s1', pinned);
+    transferNotepad('s1', 'new');
+
+    expect(getNotes('s1').map((n) => n.content)).toEqual([
+      { kind: 'plain', text: 'snapshotted' },
+      { kind: 'plain', text: '' },
+      { kind: 'terminal', runs: [{ text: 'boom' }] },
+    ]);
+    expect(getNotes('s1')[2].source).toBe(src);
+    expect(getNotes('new')).toEqual([]);
+
+    release();
+    expect(isSurfaceClosing('s1')).toBe(false);
+    setNoteText('s1', kept, 'edited');
+    expect(getNotes('s1')[0].content).toEqual({ kind: 'plain', text: 'edited' });
+  });
+
+  it('counts overlapping closures, and a double release thaws nothing extra', () => {
+    const first = beginClosing(['s1']);
+    const second = beginClosing(['s1']);
+
+    first();
+    first();
+    expect(isSurfaceClosing('s1')).toBe(true);
+
+    second();
+    expect(isSurfaceClosing('s1')).toBe(false);
+  });
+
+  it('lets the teardown paths through, and wakes note subscribers', () => {
+    const src = source('term-1');
+    addTerminalNote('s1', [{ text: 'boom' }], src);
+    const listener = vi.fn();
+    subscribeToNotepad(listener);
+
+    // The freeze itself is a notification: the panel has to go read-only.
+    const release = beginClosing(['s1']);
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    // The coordinator's own forget step, and the teardown paths that run
+    // whatever a closure is doing.
+    dropSourcesForTerminal('term-1');
+    expect(getNotes('s1')[0].source).toBeUndefined();
+    hydrateNotepadFromVolatile(
+      {
+        surfaces: [{ surfaceId: 's2', surfaceTitle: '', surfaceKind: 'terminal', cwd: null, notes: [{ id: 'n1', createdAt: 1, content: { kind: 'plain', text: 'live resume' } }] }],
+        stagedDeletions: {},
+      },
+      ['s2'],
+    );
+    expect(getNotes('s2')).toHaveLength(1);
+    removeSurface('s1');
+    expect(getNotes('s1')).toEqual([]);
+
+    release();
+    // Still frozen for nobody: clearAllNotepads forgets the map outright.
+    beginClosing(['s3']);
+    clearAllNotepads();
+    expect(isSurfaceClosing('s3')).toBe(false);
   });
 });
 
