@@ -26,10 +26,8 @@ export function getBundledThemes(): DormouseTheme[] {
 let installedCache: { raw: string; themes: DormouseTheme[] } | null = null;
 
 export function getInstalledThemes(): DormouseTheme[] {
-  const storage = getStorage();
-  if (!storage) return [];
   try {
-    const raw = storage.getItem(INSTALLED_KEY);
+    const raw = getStorage()?.getItem(INSTALLED_KEY);
     if (!raw) return [];
     // A fresh array over cached elements: identity matters per theme, and no
     // caller should be able to reach in and mutate the cache.
@@ -77,24 +75,27 @@ export function removeInstalledTheme(id: string): void {
 }
 
 export function getActiveThemeId(): string {
-  const storage = getStorage();
-  if (!storage) return getBundledThemes()[0]?.id ?? '';
-  return storage.getItem(ACTIVE_KEY) ?? getBundledThemes()[0]?.id ?? '';
+  return getStoredActiveThemeId() ?? getBundledThemes()[0]?.id ?? '';
 }
 
 /** Returns the persisted active theme ID, or undefined if none is stored.
  *  Distinct from getActiveThemeId() which falls back to a bundled default. */
 export function getStoredActiveThemeId(): string | undefined {
-  const storage = getStorage();
-  if (!storage) return undefined;
-  return storage.getItem(ACTIVE_KEY) ?? undefined;
+  try {
+    return getStorage()?.getItem(ACTIVE_KEY) ?? undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function setActiveThemeId(id: string): void {
-  const storage = getStorage();
-  if (!storage) return;
-  // `restoreActiveTheme` re-persists the id it just read, which is the common
-  // case now that the picker remounts on every Settings-dialog open.
-  if (storage.getItem(ACTIVE_KEY) === id) return;
-  storage.setItem(ACTIVE_KEY, id);
+  try {
+    const storage = getStorage();
+    if (!storage) return;
+    // Restoring the active theme usually re-persists the id it just read.
+    if (storage.getItem(ACTIVE_KEY) === id) return;
+    storage.setItem(ACTIVE_KEY, id);
+  } catch {
+    // Persistence must not prevent applying the theme for this session.
+  }
 }

@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   applyTheme,
   restoreActiveTheme,
@@ -11,6 +11,7 @@ import {
 
 import {
   addInstalledTheme,
+  getActiveThemeId,
   getBundledThemes,
   getTheme,
   removeInstalledTheme,
@@ -43,6 +44,31 @@ describe('applyTheme', () => {
     document.body.removeAttribute('class');
     document.body.removeAttribute('style');
   });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it.each(['access', 'read', 'write'] as const)(
+    'restores the host default when theme storage fails on %s',
+    (failure) => {
+      const error = new DOMException('Storage unavailable',
+        failure === 'write' ? 'QuotaExceededError' : 'SecurityError');
+      const fail = () => { throw error; };
+      if (failure === 'access') {
+        Object.defineProperty(globalThis, 'localStorage', { configurable: true, get: fail });
+      } else {
+        vi.spyOn(localStorage, failure === 'read' ? 'getItem' : 'setItem').mockImplementation(fail);
+      }
+      setDefaultThemeId(KIMBIE_DARK);
+
+      expect(restoreActiveTheme()?.id).toBe(KIMBIE_DARK);
+      expect(document.body.style.getPropertyValue('--vscode-editor-background')).toBe('#221a0f');
+      expect(document.body.classList.contains('vscode-dark')).toBe(true);
+      expect(getActiveThemeId()).toBe(getBundledThemes()[0]?.id);
+    },
+  );
 
   it('reapplies the same theme when document hydration removes body styles', () => {
     const theme = getTheme(KIMBIE_DARK);
