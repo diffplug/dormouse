@@ -7,10 +7,12 @@
  * landing between someone else's read and write.
  */
 
-import { readFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { ARCHIVE_FILE } from '../src/notepad-archive-file';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import type { ArchiveBatch, NotepadArchiveV1 } from '../../lib/src/lib/notepad/types';
 import {
@@ -22,12 +24,13 @@ import {
   saveNotepadArchive,
 } from '../src/notepad-archive-store';
 
-/**
- * A `globalState` whose writes land a microtask late, like the real one's do.
- * That delay is the whole reason the store has a queue: a second reader that
- * gets in before an `update` settles would build its mutation on the value from
- * before it.
- */
+/** Legacy storage is a per-context cache; the archive itself uses a shared directory. */
+const dirs = new Map<Map<string, unknown>, string>();
+afterEach(() => {
+  for (const dir of dirs.values()) rmSync(dir, { recursive: true, force: true });
+  dirs.clear();
+});
+
 function fakeContext() {
   const store = new Map<string, unknown>();
   const globalState = {
@@ -39,7 +42,9 @@ function fakeContext() {
     },
     keys: () => [...store.keys()],
   };
-  return { context: { globalState } as never, store };
+  const dir = mkdtempSync(join(tmpdir(), 'notepad-store-'));
+  dirs.set(store, dir);
+  return { context: { globalState, globalStorageUri: { fsPath: dir } } as never, store };
 }
 
 function batch(id: string, noteIds: string[]): ArchiveBatch {
@@ -58,12 +63,12 @@ function batch(id: string, noteIds: string[]): ArchiveBatch {
 }
 
 function stored(store: Map<string, unknown>): NotepadArchiveV1 {
-  return JSON.parse(store.get(NOTEPAD_ARCHIVE_KEY) as string) as NotepadArchiveV1;
+  return JSON.parse(JSON.parse(readFileSync(join(dirs.get(store)!, ARCHIVE_FILE), 'utf8')).raw) as NotepadArchiveV1;
 }
 
 const archiveOf = (...batches: ArchiveBatch[]): NotepadArchiveV1 => ({ version: 1, batches });
 
-describe('the notepad archive in globalState', () => {
+describe('the shared notepad archive', () => {
   it('reports nothing archived, then round-trips what a webview saved', async () => {
     const { context, store } = fakeContext();
     expect(await loadNotepadArchive(context)).toBeNull();
@@ -104,13 +109,14 @@ describe('the notepad archive in globalState', () => {
 
     await resetUnreadableNotepadArchive(context);
 
-    // The main key is empty, so appends work again...
+    // The main archive is empty, so appends work again...
     expect(await loadNotepadArchive(context)).toBeNull();
-    // ...and the user's data is still on disk under a sibling key, because only
+    // ...and the user's data is still on disk in a sibling file, because only
     // a human can tell whether it is recoverable.
-    const rescued = [...store.keys()].filter((key) => key.startsWith(`${NOTEPAD_ARCHIVE_KEY}.unreadable-`));
+    const dir = dirs.get(store)!;
+    const rescued = readdirSync(dir).filter((name) => name.startsWith(`${ARCHIVE_FILE}.unreadable-`));
     expect(rescued).toHaveLength(1);
-    expect(store.get(rescued[0])).toBe('{ this is not json');
+    expect(JSON.parse(readFileSync(join(dir, rescued[0]), 'utf8')).raw).toBe('{ this is not json');
   });
 
   it('preserves notes written after another webview recovered the archive', async () => {

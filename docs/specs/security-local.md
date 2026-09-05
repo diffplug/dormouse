@@ -156,15 +156,13 @@ excerpts the user explicitly captured, their colors, the Surface title and kind,
 and the CWD at closure, appended only by a Surface closing
 (`docs/specs/notepad.md` -> "Archive"). Standalone keeps it as
 `<app_data_dir>/notepad-archive-v1.json`, owner-only; VS Code keeps it in
-extension `globalState`, **never registered for Settings Sync**, which would carry
-those excerpts to every machine the user signs into. Its live half never reaches
-disk at all.
+`<globalStorageUri>/notepad-archive.json`, mode `0600` on Unix and inheriting VS Code's directory ACL on Windows. Migration and Settings Sync follow `docs/specs/notepad.md` -> "VS Code lifecycle". Its live half never reaches disk.
 
 **VS Code persists pane structure in VS Code's own storage** — `workspaceState`
 under `dormouse.session`, and `vscode.setState()`, a WebviewPanel's only store —
 so the modes there are VS Code's, not ours, and no transcript reaches either
-(`docs/specs/vscode.md` -> "Serialization and restore"). Dormouse writes one file
-of its own there, `recovery.json`, at the umask: one rebuilt agent-resume
+(`docs/specs/vscode.md` -> "Serialization and restore"). Dormouse also writes
+`recovery.json` there, at the umask: one rebuilt agent-resume
 invocation per Surface, no buffer, unlinked as it is read
 (`docs/specs/vscode.md` -> "Capturing agent recovery").
 

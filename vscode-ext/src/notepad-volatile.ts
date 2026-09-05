@@ -37,7 +37,7 @@ const EMPTY_STAGED: StagedDeletions = Object.freeze({ deleteBatchIds: [], delete
  * Keep only what the archive validator will read back.
  *
  * The webview is our own code, but what it mirrors here is written verbatim into
- * `globalState` by a teardown that has no webview left to ask, and one malformed
+ * the archive by a teardown that has no webview left to ask, and one malformed
  * note would make the *whole* archive unreadable on the next load. Round-tripping
  * the batch this Surface would produce through the shared validator is the
  * cheapest way to be sure. The validator *rejects* unknown fields rather than

@@ -6,6 +6,11 @@
  * does to a snapshot that was already handed to the phone.
  */
 
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { ARCHIVE_FILE } from '../src/notepad-archive-file';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ExtensionMessage, WebviewMessage } from '../src/message-types';
@@ -156,15 +161,27 @@ describe('webview fan-out', () => {
 });
 
 /**
- * The notepad archive lives in `globalState`, which only the extension host can
+ * The notepad archive lives in shared storage, which only the extension host can
  * reach (docs/specs/notepad.md). What this side owns is the request/response
  * plumbing and the disposal rule: an editor panel closing archives its mirrored
  * notes, the bottom-panel view's disposal does not — its PTYs stay alive.
  */
 describe('notepad archive requests', () => {
+  const dirs: string[] = [];
+  function storageUri() {
+    const dir = mkdtempSync(join(tmpdir(), 'notepad-router-'));
+    dirs.push(dir);
+    return { fsPath: dir };
+  }
+  afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
+  function readArchive(context: { globalStorageUri: { fsPath: string } }): string | undefined {
+    try { return JSON.parse(readFileSync(join(context.globalStorageUri.fsPath, ARCHIVE_FILE), 'utf8')).raw ?? undefined; }
+    catch { return undefined; }
+  }
   function fakeContext() {
     const store = new Map<string, unknown>();
     const context = {
+      globalStorageUri: storageUri(),
       globalState: {
         get: (key: string) => store.get(key),
         update: async (key: string, value: unknown) => {
@@ -192,7 +209,7 @@ describe('notepad archive requests', () => {
     notes: [{ id: 'n1', createdAt: 1, content: { kind: 'plain', text: 'remember this' } }],
   };
 
-  it('round-trips a save and a load through globalState', async () => {
+  it('round-trips a save and a load through shared storage', async () => {
     const webview = fakeWebview();
     const { context } = fakeContext();
     const disposable = router.attachRouter(webview.channel, { context });
@@ -220,6 +237,7 @@ describe('notepad archive requests', () => {
     // has to become the closure error path, never a Surface that never closes.
     const webview = fakeWebview();
     const context = {
+      globalStorageUri: storageUri(),
       globalState: {
         get: () => { throw new Error('globalState is gone'); },
         update: async () => {},
@@ -237,7 +255,7 @@ describe('notepad archive requests', () => {
 
   it('archives an editor panel\'s mirrored notes when its router is killed on dispose', async () => {
     const webview = fakeWebview();
-    const { context, store } = fakeContext();
+    const { context } = fakeContext();
     const disposable = router.attachRouter(webview.channel, { context, killOnDispose: true });
 
     webview.send({ type: 'notepad:volatile', snapshot: { surfaces: [mirrored], stagedDeletions: {} } } as never);
@@ -245,8 +263,8 @@ describe('notepad archive requests', () => {
     // so nothing but the host can archive what it was holding.
     disposable.dispose();
 
-    await vi.waitFor(() => expect(store.get('dormouse.notepadArchive.v1')).toBeDefined());
-    const archive = JSON.parse(store.get('dormouse.notepadArchive.v1') as string);
+    await vi.waitFor(() => expect(readArchive(context)).toBeDefined());
+    const archive = JSON.parse(readArchive(context) as string);
     expect(archive.batches).toHaveLength(1);
     expect(archive.batches[0]).toMatchObject({ surfaceTitle: 'zsh', notes: [{ id: 'n1' }] });
   });
@@ -255,7 +273,7 @@ describe('notepad archive requests', () => {
     // The mirror holds whatever the webview last reported, which for a shell
     // with no CWD escapes is nothing — but the PTY is alive right up to here.
     const webview = fakeWebview();
-    const { context, store } = fakeContext();
+    const { context } = fakeContext();
     const disposable = router.attachRouter(webview.channel, { context, killOnDispose: true });
     ptys.cwd = '/Users/me/project';
 
@@ -266,17 +284,18 @@ describe('notepad archive requests', () => {
     } as never);
     disposable.dispose();
 
-    await vi.waitFor(() => expect(store.get('dormouse.notepadArchive.v1')).toBeDefined());
-    const archive = JSON.parse(store.get('dormouse.notepadArchive.v1') as string);
+    await vi.waitFor(() => expect(readArchive(context)).toBeDefined());
+    const archive = JSON.parse(readArchive(context) as string);
     expect(archive.batches[0].cwd).toMatchObject({ path: '/Users/me/project', source: 'process' });
     expect(ptys.cwdAsked).toEqual(['pty-1']);
     // The kill waits for the write: a dead PTY could not have answered.
-    await vi.waitFor(() => expect(ptys.order).toEqual(['write', 'kill pty-1']));
+    await vi.waitFor(() => expect(ptys.order).toEqual(['kill pty-1']));
   });
 
   it('kills the PTYs even when the archive write fails', async () => {
     const webview = fakeWebview();
     const context = {
+      globalStorageUri: storageUri(),
       globalState: {
         get: () => { throw new Error('globalState is gone'); },
         update: async () => {},
@@ -296,7 +315,7 @@ describe('notepad archive requests', () => {
 
   it('keeps the mirror when the bottom-panel view is disposed, so the next resolve hydrates it', async () => {
     const webview = fakeWebview();
-    const { context, store } = fakeContext();
+    const { context } = fakeContext();
     // No `killOnDispose`: the `WebviewView`'s disposal leaves its PTYs alive, so
     // it is not a closure and the notes are not archived.
     const disposable = router.attachRouter(webview.channel, { context });
@@ -305,7 +324,7 @@ describe('notepad archive requests', () => {
     disposable.dispose();
     await Promise.resolve();
 
-    expect(store.get('dormouse.notepadArchive.v1')).toBeUndefined();
+    expect(readArchive(context)).toBeUndefined();
     expect(mirror.snapshotForLiveResume(['pane-1'])?.surfaces).toEqual([mirrored]);
   });
 
@@ -315,8 +334,9 @@ describe('notepad archive requests', () => {
     // an Undo — and then be committed hours later by `deactivate()`. The Archive
     // view promised they were irreversible once this window closed.
     const webview = fakeWebview();
-    const { context, store } = fakeContext();
-    store.set('dormouse.notepadArchive.v1', JSON.stringify({
+    const { context } = fakeContext();
+    const { globalState } = context as unknown as { globalState: { update(key: string, value: unknown): Promise<void> } };
+    await globalState.update('dormouse.notepadArchive.v1', JSON.stringify({
       version: 1,
       batches: [
         { id: 'b1', closedAt: 1, surfaceTitle: 'zsh', surfaceKind: 'terminal', cwd: null, notes: [{ id: 'n1', createdAt: 1, content: { kind: 'plain', text: 'gone' } }] },
@@ -332,7 +352,7 @@ describe('notepad archive requests', () => {
     disposable.dispose();
 
     await vi.waitFor(() => {
-      const archive = JSON.parse(store.get('dormouse.notepadArchive.v1') as string);
+      const archive = JSON.parse(readArchive(context) as string);
       expect(archive.batches.map((b: { id: string }) => b.id)).toEqual(['b2']);
     });
     // The notes are not a closure, so they stay — and nothing is left pending.

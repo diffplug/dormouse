@@ -240,7 +240,7 @@ ever wrote. Module state cleared by an extension restart is exactly the lifetime
 the mirror needs: one disposal wide.
 
 The snapshot is round-tripped through `readNotepadArchive` on the way in because a
-teardown writes it verbatim into `globalState` with no webview left to validate it,
+teardown writes it verbatim into the archive with no webview left to validate it,
 and one malformed note would make the whole archive unreadable on the next load.
 
 Staged archive deletions leave on *every* disposal, not only a killing one, because
@@ -259,12 +259,21 @@ the time the refresh asked, the PTY it was asking about was already dead. Every
 other bookkeeping step in that disposal stayed synchronous and where it was; only
 the kills wait, and they run in a `finally`, so a failed write still kills them.
 
-`globalState` and not `workspaceState`: an archive is machine-local, and a Surface
-closed in one window belongs in the same list as every other. Settings Sync is the
-hazard that follows from that choice — it would carry excerpts, CWDs, and titles to
-every machine the user signs into — and VS Code syncs only keys an extension
-registers, so the rule is kept by there being no `setKeysForSync` call anywhere in
-the extension.
+The original `globalState` store was workspace-independent but cached separately
+in every extension host. A process-local queue and revision counter therefore
+accepted a stale save from another window, dropping the first window's batch
+(reproduced 2026-09). The shared file supplies authoritative bytes and revision;
+the filesystem lock covers migration, comparison, and replacement. Its envelope
+keeps an explicit absent value after recovery so another host's legacy cache
+cannot re-import the quarantined data. A unique revision on every write also
+recognizes writes that restore identical content.
+
+The lock publishes a nonempty directory atomically. Its unique owner filename
+lets a reaper remove only a dead owner's entry; a delayed reaper cannot remove a
+new owner's nonempty directory. A live process is never evicted by age, since a
+paused extension host could finish its write after another owner acquired the
+lock. Contention fails after two seconds. PID reuse may delay reaping until that
+process exits, preserving exclusion.
 
 ## Live resume
 

@@ -11,7 +11,7 @@
 import type * as vscode from 'vscode';
 import { randomUUID } from 'crypto';
 
-import { createSerialQueue } from '../../lib/src/host/remote/serial-queue';
+import { withArchiveFile, type ArchiveStorage } from './notepad-archive-file';
 import {
   applyArchiveMutation,
   batchFromVolatile,
@@ -26,38 +26,12 @@ import type {
   VolatileNotepadSnapshot,
 } from '../../lib/src/lib/notepad/types';
 
-/**
- * The one `globalState` key the archive lives under.
- *
- * `globalState` is workspace-independent, which is what the archive wants: a
- * Surface closed in one window belongs to the same machine-local archive as
- * every other. **This key is never handed to `context.globalState.setKeysForSync`**
- * — Settings Sync would carry captured terminal excerpts, their CWDs, and their
- * Surface titles to every machine the user signs into, and the archive is
- * deliberately machine-local (`docs/specs/notepad.md`). VS Code syncs only what
- * an extension registers, so the rule is kept by there being no such call
- * anywhere in this extension; adding one for anything else must not add this key.
- */
+/** Legacy machine-local key, imported once and never registered for Settings Sync. */
 export const NOTEPAD_ARCHIVE_KEY = 'dormouse.notepadArchive.v1';
 
-/**
- * Names the stored version for the compare-and-swap in `NotepadArchivePort`.
- *
- * A counter rather than a hash of the bytes: the only question a saver asks is
- * "has anyone written since I read?", and this extension host is the only writer
- * of the key. It is per extension-host lifetime, which is enough because a
- * revision is only ever compared against one this same process handed out — a
- * webview that boots into a new host loads before it saves.
- */
-let revision = 0;
-
-/**
- * One queue for every read-modify-write, so two webviews — or a webview and a
- * teardown — cannot interleave a read with someone else's write. `globalState`
- * reads are synchronous but its writes are not, and the next reader must not see
- * the value from before an `update` that has not landed.
- */
-const serialized = createSerialQueue();
+function transaction<T>(context: vscode.ExtensionContext, operation: (storage: ArchiveStorage) => Promise<T>): Promise<T> {
+  return withArchiveFile(context.globalStorageUri.fsPath, () => readStored(context), operation);
+}
 
 /**
  * What is stored, as the JSON text the shared validator reads.
@@ -77,23 +51,12 @@ function readStored(context: vscode.ExtensionContext): string | undefined {
   return typeof text === 'string' ? text : 'null';
 }
 
-/** `null` when nothing is stored — the `baseRevision` a first save must pass. */
-function currentRevision(context: vscode.ExtensionContext): string | null {
-  return readStored(context) === undefined ? null : `r${revision}`;
-}
-
-async function writeArchive(context: vscode.ExtensionContext, json: string): Promise<void> {
-  await context.globalState.update(NOTEPAD_ARCHIVE_KEY, json);
-  revision += 1;
-}
-
 /** The stored archive and the token naming it, or `null` if nothing was ever archived. */
 export function loadNotepadArchive(
   context: vscode.ExtensionContext,
 ): Promise<NotepadArchiveLoadResult | null> {
-  return serialized(async () => {
-    const raw = readStored(context);
-    return raw === undefined ? null : { raw, revision: `r${revision}` };
+  return transaction(context, async ({ raw, revision }) => {
+    return raw === undefined ? null : { raw, revision: revision! };
   });
 }
 
@@ -103,16 +66,16 @@ export function saveNotepadArchive(
   json: string,
   baseRevision: string | null,
 ): Promise<'ok' | 'conflict'> {
-  return serialized(async () => {
-    if (baseRevision !== currentRevision(context)) return 'conflict';
-    await writeArchive(context, json);
+  return transaction(context, async (storage) => {
+    if (baseRevision !== storage.revision) return 'conflict';
+    await storage.write(json);
     return 'ok';
   });
 }
 
 /**
  * User-initiated recovery from an unreadable archive: copy the value to a
- * sibling key and clear the main one, so the next `load` returns `null` and
+ * quarantine file and clear the main one, so the next `load` returns `null` and
  * appends work again.
  *
  * Moved aside, **never deleted**: the user asked for a working archive, not for
@@ -120,17 +83,10 @@ export function saveNotepadArchive(
  * there is recoverable (`docs/specs/notepad.md` → Archive).
  */
 export function resetUnreadableNotepadArchive(context: vscode.ExtensionContext): Promise<void> {
-  return serialized(async () => {
+  return transaction(context, async (storage) => {
     // A recovery button can outlive another webview's successful recovery.
-    // Revalidate under the mutation lock before moving any bytes aside.
-    const raw = readStored(context);
-    if (raw === undefined || readNotepadArchive(raw)) return;
-    const stored = context.globalState.get(NOTEPAD_ARCHIVE_KEY);
-    if (stored !== undefined) {
-      await context.globalState.update(`${NOTEPAD_ARCHIVE_KEY}.unreadable-${Date.now()}`, stored);
-    }
-    await context.globalState.update(NOTEPAD_ARCHIVE_KEY, undefined);
-    revision += 1;
+    if (storage.raw === undefined || readNotepadArchive(storage.raw)) return;
+    await storage.reset();
   });
 }
 
@@ -157,15 +113,15 @@ export function archiveVolatileMirror(
   return mutateNotepadArchive(context, { append, ...mirror.stagedDeletions });
 }
 
-/** Read-modify-write under the same queue the webview's saves go through.
+/** Read-modify-write under the same transaction lock the webview's saves go through.
  *  Idempotent by batch and note id; nothing to write touches nothing. */
 export function mutateNotepadArchive(
   context: vscode.ExtensionContext,
   mutation: NotepadArchiveMutation,
 ): Promise<void> {
   if (isEmptyMutation(mutation)) return Promise.resolve();
-  return serialized(async () => {
-    const raw = readStored(context);
+  return transaction(context, async (storage) => {
+    const raw = storage.raw;
     const archive = raw === undefined ? EMPTY_ARCHIVE : readNotepadArchive(raw);
     if (!archive) {
       // Every append fails until the user recovers it. Replacing it here would
@@ -173,6 +129,6 @@ export function mutateNotepadArchive(
       // (`docs/specs/notepad.md` → Archive).
       throw new Error('the notepad archive is unreadable; recovery is user-initiated');
     }
-    await writeArchive(context, JSON.stringify(applyArchiveMutation(archive, mutation)));
+    await storage.write(JSON.stringify(applyArchiveMutation(archive, mutation)));
   });
 }

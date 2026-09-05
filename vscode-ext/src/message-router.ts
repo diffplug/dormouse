@@ -345,7 +345,7 @@ export function attachRouter(
     // (owned-PTY alert state, or a PTY claimed/released). The host reflects it
     // onto native chrome (tab title / view badge). See docs/specs/vscode.md.
     onUnion?: (union: WorkspaceUnion) => void;
-    // Only the notepad archive needs it: `globalState` is reachable nowhere else
+    // Only the notepad archive needs it: shared storage is reachable nowhere else
     // (docs/specs/notepad.md). Absent, the archive requests answer `ok: false`
     // rather than hang.
     context?: vscode.ExtensionContext;

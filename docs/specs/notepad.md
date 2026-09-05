@@ -31,7 +31,7 @@ Source of truth: `lib/src/lib/notepad/types.ts`; `applyArchiveMutation`, `buildA
 - **One store per host, never shared.** The standalone and VS Code archives must never discover, import, or synchronize each other's data.
 - **A failed archive rejects; it never resolves as if the write landed.** Closure paths turn that rejection into their failure UI rather than dropping notes.
 
-Standalone stores a file ([Standalone quit](#standalone-quit)), VS Code a `globalState` entry ([VS Code lifecycle](#vs-code-lifecycle)), the demo hosts plain memory cleared by a page reload.
+Standalone stores a file ([Standalone quit](#standalone-quit)), VS Code a shared file ([VS Code lifecycle](#vs-code-lifecycle)), the demo hosts plain memory cleared by a page reload.
 
 Source of truth: `NotepadArchivePort` in `lib/src/lib/notepad/types.ts`; `mutateArchive` and `resetUnreadableArchive` in `lib/src/lib/notepad/archive-service.ts`; `createMemoryNotepadArchivePort` in `lib/src/lib/notepad/memory-archive-port.ts`.
 
@@ -137,7 +137,7 @@ Source of truth: `archiveNotesBeforeQuit` in `standalone/src/quit.ts`, the `'arc
 
 ## VS Code lifecycle
 
-The archive is one `globalState` key, `dormouse.notepadArchive.v1`. **Never register it for Settings Sync** — it would carry captured terminal excerpts, their CWDs, and their Surface titles to every machine the user signs into, and the archive is machine-local. **Every read-modify-write goes through one extension-host queue**, so two webviews, or a webview and a teardown, cannot interleave.
+**Must store the archive in `<globalStorageUri>/notepad-archive.json`**, atomically replaced with mode `0600` (Windows inherits VS Code's directory ACL). **Must serialize reads, saves, recovery, and teardown mutations across extension hosts**, checking the shared revision under the filesystem lock; pinned by `vscode-ext/test/notepad-archive-file.test.ts`. **Must migrate `globalState` key `dormouse.notepadArchive.v1` only when the file is absent**, retaining a tombstone after recovery so stale caches cannot resurrect it. **Never register the legacy key for Settings Sync.** Recovery preserves the file in a unique sibling quarantine. (rationale)
 
 VS Code can destroy a webview without asking, so the close coordinator may never run. **Every webview therefore mirrors its live notes into extension-host memory**, and a teardown archives from that mirror instead.
 
@@ -150,7 +150,7 @@ VS Code can destroy a webview without asking, so the close coordinator may never
 - **A `WebviewView` disposal is not a closure.** Its PTYs stay alive, so only its *notes* stay in the mirror for the next resolve.
 - **External tab or window destruction cannot reliably be blocked**, so a storage failure or a forced termination may lose those notes. **Never add a persistent draft mirror to address it.**
 
-Source of truth: `vscode-ext/src/notepad-archive-store.ts` and `vscode-ext/src/notepad-volatile.ts`; the `notepad:*` handlers and the `killOnDispose` archive in `vscode-ext/src/message-router.ts`; the archive step in `deactivate` in `vscode-ext/src/extension.ts`.
+Source of truth: `withArchiveFile` in `vscode-ext/src/notepad-archive-file.ts`; `vscode-ext/src/notepad-archive-store.ts` and `vscode-ext/src/notepad-volatile.ts`; the `notepad:*` handlers and the `killOnDispose` archive in `vscode-ext/src/message-router.ts`; the archive step in `deactivate` in `vscode-ext/src/extension.ts`.
 
 ## Live resume
 
