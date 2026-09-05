@@ -84,6 +84,8 @@
 
 **Why `WS_CLOSE_BURROW_REPLACED` is terminal rather than retried.** Reconnecting on it would evict the newer Burrow, which would reconnect and evict this one, forever; an explicit `reconnect()` breaks the loop.
 
+**Why all socket events check ownership.** In a loopback `ws` experiment (2026-09), closing the client in its open callback still delivered a queued message while CLOSING. The runtime assigns a frame's epoch when it arrives, so the in-flight handshake guard alone cannot reject a retired socket's later delivery: it adopts the new epoch. Such an init recreated pending state after stop; a late `client-gone` disposed a replacement connection. Guarding message and open delivery alongside close preserves the stopped or replacement lifetime.
+
 **Where a bad enrollment record would surface.** A record minted with an `undefined` in its `ConnectionPolicy` fails at no point during enrollment; it fails at the *next* read, where the store rejects it, so the machine silently un-enrolls at the next launch — an app-restart away from the response that caused it. Failing the exchange on the spot names the missing fields instead.
 
 **Why the enrollment request's 10 s timeout is the shorter one.** It runs on the service's lifecycle chain, where every later start/stop command queues behind it, so an enrollment hanging past the webview's own 15 s command budget would replace the real error with a timeout and stall every command queued after it.
