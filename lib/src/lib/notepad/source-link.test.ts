@@ -5,11 +5,17 @@ import type { RuntimeTerminalSource } from './types';
 
 const mocks = vi.hoisted(() => ({
   getTerminalInstance: vi.fn<(id: string) => unknown>(),
+  setTerminalSelectionBaseline: vi.fn<(id: string, baseline: string | null) => void>(),
 }));
 
 // The registry barrel drags in the whole terminal lifecycle; only
 // `revealResolvedSource` needs it, so stub it rather than boot xterm here.
 vi.mock('../terminal-registry', () => ({ getTerminalInstance: mocks.getTerminalInstance }));
+// The baseline lands on the live registry entry; stub the store so the reveal
+// tests can see the call without one.
+vi.mock('../terminal-store', () => ({
+  setTerminalSelectionBaseline: mocks.setTerminalSelectionBaseline,
+}));
 
 import { getMouseSelectionState, setSelection } from '../mouse-selection';
 import { extractSelectionText } from '../selection-text';
@@ -289,10 +295,23 @@ describe('disposeTerminalSource', () => {
 describe('revealResolvedSource', () => {
   const scrollToLine = vi.fn<(line: number) => void>();
 
-  function liveTerminal(opts: { viewportY: number; baseY: number; rows: number }) {
+  /** The reveal reads the rows back for the baseline, so the fake needs lines
+   *  as well as a viewport. */
+  function liveTerminal(opts: { viewportY: number; baseY: number; rows: number; lines?: string[] }) {
+    const lines = opts.lines ?? LINES;
+    const cols = Math.max(1, ...lines.map((line) => line.length));
     return {
+      cols,
       rows: opts.rows,
-      buffer: { active: { viewportY: opts.viewportY, baseY: opts.baseY } },
+      buffer: {
+        active: {
+          viewportY: opts.viewportY,
+          baseY: opts.baseY,
+          getLine: (y: number) => (lines[y] === undefined ? undefined : {
+            translateToString: (_trim?: boolean, start = 0, end = cols) => lines[y].slice(start, end),
+          }),
+        },
+      },
       scrollToLine,
     };
   }
@@ -300,6 +319,7 @@ describe('revealResolvedSource', () => {
   beforeEach(() => {
     scrollToLine.mockClear();
     mocks.getTerminalInstance.mockReset();
+    mocks.setTerminalSelectionBaseline.mockReset();
     setSelection('reveal', null);
   });
 
@@ -311,6 +331,24 @@ describe('revealResolvedSource', () => {
 
     expect(scrollToLine).toHaveBeenCalledWith(8);
     expect(getMouseSelectionState('reveal').selection).toBe(selection);
+  });
+
+  it('arms render-tick invalidation with the text it just restored', () => {
+    mocks.getTerminalInstance.mockReturnValue(liveTerminal({ viewportY: 0, baseY: 0, rows: 24 }));
+    const selection = sel({ startRow: 0, startCol: 0, endRow: 1, endCol: 5 });
+
+    revealResolvedSource('reveal', selection);
+
+    // The same text the resolve step proved equal to the pin's raw text; without
+    // it the render handler never watches a restored selection.
+    expect(mocks.setTerminalSelectionBaseline).toHaveBeenCalledWith('reveal', 'alpha one\nbravo');
+  });
+
+  it('leaves the baseline alone when the terminal instance is gone', () => {
+    mocks.getTerminalInstance.mockReturnValue(null);
+    revealResolvedSource('reveal', sel({ startRow: 0, startCol: 0, endRow: 0, endCol: 4 }));
+
+    expect(mocks.setTerminalSelectionBaseline).not.toHaveBeenCalled();
   });
 
   it('leaves the viewport alone when the range is already on screen', () => {

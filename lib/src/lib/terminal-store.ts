@@ -24,6 +24,9 @@ export interface TerminalEntry {
   fit: FitAddon;
   element: HTMLDivElement;
   cleanup: () => void;
+  /** Replace the text snapshot the render handler compares a finalized Dormouse
+   *  selection against; `null` stops it watching. */
+  setSelectionBaseline: (baseline: string | null) => void;
   alertStatus: SessionStatus;
   watchingEnabled: boolean;
   todo: TodoState;
@@ -99,4 +102,10 @@ export function getSessionIdByPtyId(ptyId: string): string | null {
 
 export function resolveTerminalSessionId(id: string): string {
   return registry.get(id)?.ptyId ?? id;
+}
+
+/** Arm render-tick invalidation for a selection some other module just set, so
+ *  it is dropped when the text under it changes (a pin's restored range). */
+export function setTerminalSelectionBaseline(id: string, baseline: string | null): void {
+  registry.get(id)?.setSelectionBaseline(baseline);
 }

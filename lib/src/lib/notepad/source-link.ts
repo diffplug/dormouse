@@ -7,6 +7,7 @@ import type { IMarker, Terminal } from '@xterm/xterm';
 import { setSelection, type Selection } from '../mouse-selection';
 import { extractSelectionText, normalizeSelection } from '../selection-text';
 import { getTerminalInstance } from '../terminal-registry';
+import { setTerminalSelectionBaseline } from '../terminal-store';
 import type { RuntimeTerminalSource } from './types';
 
 /** Minimal slice of an xterm.js `IBufferLine`. */
@@ -127,7 +128,8 @@ export function disposeTerminalSource(source: RuntimeTerminalSource): void {
 /**
  * Show a resolved range: scroll it into view if it is off screen, then set the
  * Dormouse selection, which is what draws the outline and raises the finalized
- * selection popup.
+ * selection popup, and give it the baseline that has it dropped once the rows
+ * change under it.
  */
 export function revealResolvedSource(terminalId: string, selection: Selection): void {
   const terminal = getTerminalInstance(terminalId);
@@ -140,4 +142,8 @@ export function revealResolvedSource(terminalId: string, selection: Selection): 
     terminal.scrollToLine(Math.max(0, Math.min(top, buf.baseY)));
   }
   setSelection(terminalId, selection);
+  // Render-tick invalidation applies to a restored selection as to a dragged
+  // one, and it only watches a selection with a baseline. The resolve step just
+  // proved this text equals the pin's, so read it back rather than thread it in.
+  setTerminalSelectionBaseline(terminalId, extractSelectionText(terminal, selection));
 }

@@ -345,6 +345,11 @@ function wireXtermHandlers(
 function setupTerminalEntry(id: string, options: { shell?: string; untouched?: boolean } = {}): TerminalEntry {
   const { terminal, fit, element } = createXtermHost();
   const selectionBaselineRef = { current: null as string | null };
+  // Every module that finalizes a selection arms the render handler through
+  // this one setter: the mouse router at drag end, a note's pin on reveal.
+  const setSelectionBaseline = (baseline: string | null) => {
+    selectionBaselineRef.current = baseline;
+  };
 
   const disposePty = wirePtyEvents(id, terminal);
   const disposeXterm = wireXtermHandlers(id, terminal, selectionBaselineRef);
@@ -357,9 +362,7 @@ function setupTerminalEntry(id: string, options: { shell?: string; untouched?: b
     terminal,
     element,
     getOverlayDims: getTerminalOverlayDims,
-    setSelectionBaseline: (baseline) => {
-      selectionBaselineRef.current = baseline;
-    },
+    setSelectionBaseline,
   });
 
   const cleanup = () => {
@@ -377,6 +380,7 @@ function setupTerminalEntry(id: string, options: { shell?: string; untouched?: b
     fit,
     element,
     cleanup,
+    setSelectionBaseline,
     alertStatus: 'WATCHING_DISABLED',
     ringSeq: 0,
     watchingEnabled: false,
