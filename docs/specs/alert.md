@@ -304,8 +304,9 @@ Source of truth: `watchPushRings` / `invalidatePushDeviceRefreshes` in `lib/src/
 
 ### Settings dialog
 
-Reached from the controls at the far right of the baseboard; placement and that cluster belong to `docs/specs/layout.md`. The alarm sections sit under the theme and shell rows; when both are hidden (VS Code owns the theme and the shells), the rule list is first and drops its section divider.
+Reached from the baseboard sliders; `docs/specs/layout.md` owns placement. The alarm sections sit under the theme and shell rows; when both are hidden (VS Code owns the theme and the shells), the rule list is first and drops its section divider.
 
+- **Must toggle only the clicked baseboard alarm setting**, through the same persisted, host-relayed store as the dialog. **Must show its shared settings section for 2 seconds, then fade for 250ms**, anchored to the button and bounded by the viewport. The preview is inert, announces the resulting state, preserves keyboard focus and command dispatch, and omits test actions. Each click replaces the preview and restarts its lifetime; opening Settings or unmounting clears it. Reduced motion skips the fade. Pinned by `Baseboard.test.tsx`.
 - Lists every watched command with a remove control, and **cannot add one** — WATCHING is keyed on a running command's name, so creating a rule stays a bell click / `a` press in the tab running it, and the empty state says so. With the bell dialog it is one of the two places a rule set on a since-closed Pane can be removed; both render the same `WatchedCommandList`.
 - The watcher group carries the **Defer alerts until animation stops** switch and explains that only a fully armed watcher delays terminal notifications.
 - **Delays are committed on blur or `Enter`, never per keystroke** — typing `3` on the way to `30` must not briefly install a 3-second timer. They are shown in seconds; an out-of-range or empty entry snaps back to whatever the store clamped it to.
@@ -317,7 +318,7 @@ Reached from the controls at the far right of the baseboard; placement and that 
   | **Play test sound** | Fixed phrase through the real sanitizer, but not `speak()` because no Session rang; unlike alarm delivery, reports a missing backend. |
   | **Send test push** | Real Host→ACL→Server path; does not swallow failures and distinguishes no targets, zero delivery, partial delivery, and success. Hidden without a Host service. |
 
-Source of truth: `lib/src/components/SettingsDialog.tsx`; `lib/src/components/WatchedCommandList.tsx`; `lib/src/components/AlarmTestButtons.tsx`.
+Source of truth: `lib/src/components/SettingsDialog.tsx`; `SettingsPreview` in `lib/src/components/SettingsPreview.tsx`; `Baseboard` in `lib/src/components/Baseboard.tsx`; `lib/src/components/WatchedCommandList.tsx`; `lib/src/components/AlarmTestButtons.tsx`.
 
 ## Workspace union
 

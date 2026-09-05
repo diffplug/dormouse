@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useMemo, useLayoutEffect, useContext, useSyncExternalStore, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, useMemo, useLayoutEffect, useContext, useSyncExternalStore, type ReactNode } from 'react';
 import {
   DeviceMobileSlashIcon,
   CaretLeftIcon,
@@ -9,7 +9,8 @@ import {
   VibrateIcon,
 } from '@phosphor-icons/react';
 import { chromeButton } from './design';
-import { SettingsDialog } from './SettingsDialog';
+import { SettingsDialog, type AlarmSink } from './SettingsDialog';
+import { SettingsPreview } from './SettingsPreview';
 import { Door } from './Door';
 import { DialogKeyboardContext, DoorElementsContext } from './wall/wall-context';
 import type { DoorChip, DooredItem } from './wall/wall-types';
@@ -26,6 +27,7 @@ import {
   subscribeToAlertSettings,
   subscribeToAlertSpeech,
   subscribeToTerminalPaneState,
+  updateAlertSettings,
 } from '../lib/terminal-registry';
 import { createTerminalPaneState, deriveSurfaceLabel } from '../lib/terminal-state';
 
@@ -36,7 +38,7 @@ const BASEBOARD_BUTTON_CLASS = chromeButton({
 });
 const SETTINGS_BUTTON_CLASS = chromeButton({
   kind: 'icon',
-  className: 'h-6 w-6 shrink-0 pb-px text-muted hover:text-foreground focus-visible:outline focus-visible:outline-1 focus-visible:outline-focus-ring',
+  className: 'h-6 w-6 shrink-0 pb-px hover:text-foreground focus-visible:outline focus-visible:outline-1 focus-visible:outline-focus-ring',
 });
 
 export interface BaseboardProps {
@@ -74,6 +76,16 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   const [rightClusterWidth, setRightClusterWidth] = useState(0);
   const layoutMetrics = useRef({ doorGap: 0, arrowWidth: 0 });
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsPreview, setSettingsPreview] = useState<{ sink: AlarmSink; anchor: HTMLElement; sequence: number } | null>(null);
+  const previewSequence = useRef(0);
+  const closeSettingsPreview = useCallback(() => setSettingsPreview(null), []);
+  const toggleAlarm = (sink: AlarmSink, anchor: HTMLElement) => {
+    const current = getAlertSettings();
+    updateAlertSettings(sink === 'speech'
+      ? { speakEnabled: !current.speakEnabled }
+      : { pushEnabled: !current.pushEnabled });
+    setSettingsPreview({ sink, anchor, sequence: ++previewSequence.current });
+  };
   const setDialogKeyboardActive = useContext(DialogKeyboardContext);
 
   // Suppress command-mode key dispatch while the Settings dialog owns the
@@ -285,12 +297,13 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
 
           <div className="flex items-center gap-0.5">
             <button
-              className={`${SETTINGS_BUTTON_CLASS} ${settings.speakEnabled ? 'text-app-fg' : ''}`}
-              aria-label={`Spoken alarms ${settings.speakEnabled ? 'enabled' : 'disabled'}; open Settings`}
-              title={`Spoken alarms ${settings.speakEnabled ? 'enabled' : 'disabled'}`}
-              aria-haspopup="dialog"
+              className={`${SETTINGS_BUTTON_CLASS} ${settings.speakEnabled ? 'text-app-fg' : 'text-muted'}`}
+              aria-label="Spoken alarms"
+              aria-pressed={settings.speakEnabled}
+              title={`${settings.speakEnabled ? 'Disable' : 'Enable'} spoken alarms`}
               data-alarm-setting="speech"
-              onClick={() => setSettingsOpen(true)}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={(event) => toggleAlarm('speech', event.currentTarget)}
             >
               {settings.speakEnabled
                 ? <SpeakerHighIcon size={16} weight="fill" />
@@ -298,12 +311,13 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
             </button>
 
             <button
-              className={`${SETTINGS_BUTTON_CLASS} ${settings.pushEnabled ? 'text-app-fg' : ''}`}
-              aria-label={`Push notifications ${settings.pushEnabled ? 'enabled' : 'disabled'}; open Settings`}
-              title={`Push notifications ${settings.pushEnabled ? 'enabled' : 'disabled'}`}
-              aria-haspopup="dialog"
+              className={`${SETTINGS_BUTTON_CLASS} ${settings.pushEnabled ? 'text-app-fg' : 'text-muted'}`}
+              aria-label="Push notifications"
+              aria-pressed={settings.pushEnabled}
+              title={`${settings.pushEnabled ? 'Disable' : 'Enable'} push notifications`}
               data-alarm-setting="push"
-              onClick={() => setSettingsOpen(true)}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={(event) => toggleAlarm('push', event.currentTarget)}
             >
               {settings.pushEnabled
                 ? <VibrateIcon size={16} weight="fill" />
@@ -311,18 +325,30 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
             </button>
 
             <button
-              className={SETTINGS_BUTTON_CLASS}
+              className={`${SETTINGS_BUTTON_CLASS} text-muted`}
               aria-label="Settings"
               title="Settings"
               aria-haspopup="dialog"
               data-open-settings="true"
-              onClick={() => setSettingsOpen(true)}
+              onClick={() => {
+                closeSettingsPreview();
+                setSettingsOpen(true);
+              }}
             >
               <SlidersHorizontalIcon size={16} weight="bold" />
             </button>
           </div>
         </div>
       </div>
+
+      {settingsPreview && (
+        <SettingsPreview
+          key={settingsPreview.sequence}
+          sink={settingsPreview.sink}
+          anchor={settingsPreview.anchor}
+          onClose={closeSettingsPreview}
+        />
+      )}
 
       {settingsOpen && (
         <SettingsDialog
