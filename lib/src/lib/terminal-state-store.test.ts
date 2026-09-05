@@ -15,9 +15,6 @@ import {
   seedTerminalManualCwd,
   setTerminalUserTitle,
 } from './terminal-state-store';
-import { createLathWallStore } from '../components/wall/lath-wall-store';
-import { leaves } from './lath/model';
-import { leafMeta } from './lath/test-fixtures';
 import { DEFAULT_IDLE_TITLE, surfaceRunsCommand, UNNAMED_PANEL_TITLE } from './terminal-state';
 
 const PROMPT = 'user@host repo % ';
@@ -198,15 +195,10 @@ describe('terminal semantic state store command input fallback', () => {
     expect(getTerminalPaneState('pane').titleCandidates.user?.title).toBe(UNNAMED_PANEL_TITLE);
   });
 
-  it('keeps Session state across a Lath swap', () => {
-    const store = createLathWallStore();
-    store.addLeaf('pane-a', leafMeta(), null);
-    store.addLeaf('pane-b', leafMeta(), { refId: 'pane-a', edge: 'right' });
+  it('keys prompt and command state by Session id', () => {
     recordTerminalOutput('pane-a', PROMPT);
     submit('pane-b', 'npm run build');
 
-    expect(store.swapLeaves('pane-a', 'pane-b').ok).toBe(true);
-    expect(leaves(store.getSnapshot().tree)).toEqual(['pane-b', 'pane-a']);
     recordTerminalUserInput('pane-a', '\r', lineReader(`${PROMPT}lazygit`));
 
     expect(getTerminalPaneState('pane-a').currentCommand).toMatchObject({
@@ -223,14 +215,10 @@ describe('terminal semantic state store command input fallback', () => {
     expect(getTerminalPaneState('pane-b').activity).toEqual({ kind: 'running' });
   });
 
-  it('keeps CWD with its Session across a Lath swap', () => {
-    const store = createLathWallStore();
-    store.addLeaf('pane-a', leafMeta(), null);
-    store.addLeaf('pane-b', leafMeta(), { refId: 'pane-a', edge: 'right' });
+  it('applies process CWD only to the originating Session', () => {
     resetTerminalPaneState('pane-a');
     resetTerminalPaneState('pane-b');
 
-    expect(store.swapLeaves('pane-a', 'pane-b').ok).toBe(true);
     fillTerminalProcessCwd('pane-a', '/Users/me/project');
 
     expect(getTerminalPaneState('pane-a').cwd).toMatchObject({
