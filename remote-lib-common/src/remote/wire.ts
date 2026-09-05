@@ -2,7 +2,7 @@
  * The wire contract for the selfhost POC (docs/specs/relay.md): HTTP routes
  * and payloads, relay frames, and the terminal-only remote-api v1 messages.
  * Shared by `relay`, the Burrow module in `lib`, and the Pocket UI so the
- * three sides cannot drift — the same pattern as HELLO_ROUTE.
+ * three sides cannot drift.
  */
 
 import {
