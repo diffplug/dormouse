@@ -71,6 +71,8 @@ Pocket reuses `cp-select` / `cp-raw` / `cp-rewrap` but drops `cp-override`: Sele
 
 `TutorialState` persists to `localStorage`. **Unknown ids in a stored payload are filtered on load**, so renaming an id is a one-way reset. **Both profiles share the completion key**; totals count only the active profile's items, so an id completed under one is kept but uncounted under the other.
 
+**Must keep progress and reset working in memory when storage is unavailable.** Use the shared JSON storage helpers; `website/src/lib/tutorial-state.test.ts` pins denied reads, writes, and removals plus existing saved formats.
+
 - `dormouse-tut-v3` — JSON array of completed item ids.
 - `dormouse-tut-star-v1` — `"true"` after `Starred on GitHub`.
 - `dormouse-flappy-high-v1` — high score.
