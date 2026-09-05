@@ -88,6 +88,7 @@ The popup's third action and the `⌘N` / `Ctrl+N` chord belong to `docs/specs/m
 
 A **Notepad archive** entry in Settings replaces that dialog's content with a roomier Archive view carrying a Back to Settings action. **The entry is hidden where the host has no archive port.**
 
+- **Must re-read storage on every Archive opening**, ordering reads with mutations; tested in `lib/src/lib/notepad/archive-service.test.ts`.
 - **Batches show newest first, notes in their original order within each batch.** A batch header carries its Surface title, kind, closure time, and CWD when present.
 - **An archived note offers Copy and Delete only** — no editing and no pin, through the same clipboard exporter live notes use.
 - **Deletions are staged while the view is open.** A delete hides its target with no confirmation, a batch left with nothing visible goes with it, and the first deletion raises "Deletion is irreversible once this window closes." with an **Undo** restoring everything staged since the view opened.

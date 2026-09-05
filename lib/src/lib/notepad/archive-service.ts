@@ -112,7 +112,7 @@ export function refreshArchive(): Promise<void> {
     setState({ status: 'absent', archive: EMPTY_ARCHIVE });
     return Promise.resolve();
   }
-  const load = runLoad(port);
+  const load = enqueue(() => runLoad(port));
   inFlightLoad = load;
   void load.then(() => {
     if (inFlightLoad === load) inFlightLoad = null;
@@ -120,16 +120,9 @@ export function refreshArchive(): Promise<void> {
   return load;
 }
 
-/**
- * Load once, for the Archive view opening. Idempotent: a second caller during a
- * load joins the first rather than issuing a second read. A previous failure is
- * retried; a successful load (including an unreadable verdict, which only
- * recovery changes) is not. A mutation does not go through here — it reads the
- * host itself, because its compare-and-swap needs the revision.
- */
+/** Re-read on each Archive opening; simultaneous callers share the load. */
 export function ensureArchiveLoaded(): Promise<void> {
   if (inFlightLoad) return inFlightLoad;
-  if (state.status === 'ready' || state.status === 'unreadable') return Promise.resolve();
   return refreshArchive();
 }
 

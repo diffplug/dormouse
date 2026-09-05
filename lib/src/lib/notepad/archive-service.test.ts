@@ -62,13 +62,17 @@ describe('loading', () => {
     expect(listener).toHaveBeenCalled();
   });
 
-  it('is idempotent: a second call joins the first load rather than re-reading', async () => {
+  it('shares simultaneous loads and refreshes on each reopening', async () => {
     const load = vi.spyOn(port, 'load');
     await Promise.all([ensureArchiveLoaded(), ensureArchiveLoaded()]);
-    await ensureArchiveLoaded();
     expect(load).toHaveBeenCalledTimes(1);
-    await refreshArchive();
-    expect(load).toHaveBeenCalledTimes(2);
+    port.seed({ version: 1, batches: [batch('other-window')] });
+    await ensureArchiveLoaded();
+    expect(getArchiveSnapshot().archive.batches.map((b) => b.id)).toEqual(['other-window']);
+    port.seed({ version: 1, batches: [] });
+    await ensureArchiveLoaded();
+    expect(getArchiveSnapshot().archive.batches).toEqual([]);
+    expect(load).toHaveBeenCalledTimes(3);
   });
 
   it('is absent when the host has no archive port', async () => {
