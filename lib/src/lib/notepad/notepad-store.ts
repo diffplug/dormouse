@@ -44,6 +44,14 @@ let cachedSnapshot: Map<string, LiveNote[]> | null = null;
  */
 const closingSurfaces = new Map<string, number>();
 
+/**
+ * The archive batch id each Surface's closure is using, remembered across that
+ * Surface's attempts and forgotten once one lands (docs/specs/notepad.md →
+ * "Model"). An attempt that reached the host and *then* reported failure has to
+ * be replaceable by the next one, which is only addressable by id.
+ */
+const pendingBatchIdBySurface = new Map<string, string>();
+
 function notify(): void {
   cachedSnapshot = null;
   listeners.forEach((listener) => listener());
@@ -76,6 +84,17 @@ export function noteCount(surfaceId: string): number {
  *  mutation below refuses while it is true, and the panel goes read-only. */
 export function isSurfaceClosing(surfaceId: string): boolean {
   return closingSurfaces.has(surfaceId);
+}
+
+/** The batch id this Surface's closure appends under, minted on the first
+ *  attempt and handed back unchanged to every retry, so a retry deletes and
+ *  re-appends the batch an earlier attempt may already have landed. */
+export function pendingBatchId(surfaceId: string): string {
+  const remembered = pendingBatchIdBySurface.get(surfaceId);
+  if (remembered) return remembered;
+  const minted = newNotepadId('batch');
+  pendingBatchIdBySurface.set(surfaceId, minted);
+  return minted;
 }
 
 /**
@@ -275,9 +294,15 @@ export function transferNotepad(oldId: string, newId: string): void {
   // notes out from under it would archive a batch for a Surface id that no
   // longer owns them.
   if (isSurfaceClosing(oldId) || isSurfaceClosing(newId)) return;
-  // Before the empty-notepad early return: the old id stops existing either way,
-  // so an open panel pointing at it would be stranded on a Surface that is gone.
+  // Both before the empty-notepad early return: the old id stops existing either
+  // way, so an open panel pointing at it would be stranded on a Surface that is
+  // gone, and a pending batch id left behind could never be replaced.
   if (openNotepadId === oldId) setOpenNotepadId(newId);
+  const pending = pendingBatchIdBySurface.get(oldId);
+  if (pending !== undefined) {
+    pendingBatchIdBySurface.set(newId, pending);
+    pendingBatchIdBySurface.delete(oldId);
+  }
   const moving = notesBySurface.get(oldId);
   if (!moving || moving.length === 0) return;
   const carried = moving.map((note) => (
@@ -291,6 +316,9 @@ export function transferNotepad(oldId: string, newId: string): void {
 /** Forget a Surface's notes (it closed; anything worth keeping was archived
  *  before teardown). */
 export function removeSurface(surfaceId: string): void {
+  // The closure is over: whatever batch id it was holding has landed, and the
+  // next closure of this id is a new batch rather than a replacement.
+  pendingBatchIdBySurface.delete(surfaceId);
   const current = notesBySurface.get(surfaceId);
   if (!current) {
     if (openNotepadId === surfaceId) setOpenNotepadId(null);
@@ -307,6 +335,7 @@ export function clearAllNotepads(): void {
   for (const notes of notesBySurface.values()) notes.forEach(disposeSource);
   notesBySurface.clear();
   closingSurfaces.clear();
+  pendingBatchIdBySurface.clear();
   metaResolver = null;
   stagedDeletions = {};
   setOpenNotepadId(null);

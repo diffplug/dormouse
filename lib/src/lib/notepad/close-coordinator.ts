@@ -9,7 +9,7 @@ import {
   beginClosing,
   getNotepadSurfaceMeta,
   getNotes,
-  newNotepadId,
+  pendingBatchId,
   removeSurface,
 } from './notepad-store';
 import type { ArchiveBatch, LiveNote } from './types';
@@ -64,13 +64,10 @@ export async function archiveSurfaceNotes(
       // is only knowable while the Session is alive.
       const meta = getNotepadSurfaceMeta(surfaceId);
       batches.push(buildArchiveBatch({
-        // A fresh id per call, never one remembered across a rejection: a write
-        // that landed and *then* reported failure would otherwise make the next
-        // closure a no-op append, silently dropping the notes added in between.
-        // The compare-and-swap retry inside `mutateArchive` reuses this same
-        // object, and repeat attempts are deduplicated by note id instead
-        // (`applyArchiveMutation`).
-        id: newNotepadId('batch'),
+        // This Surface's remembered id, so a retry addresses the batch an
+        // earlier attempt may already have landed. `closedAt` is this attempt's
+        // own: the batch below is what closes, whenever that turns out to be.
+        id: pendingBatchId(surfaceId),
         closedAt,
         surfaceTitle: meta?.surfaceTitle ?? '',
         surfaceKind: meta?.surfaceKind ?? 'terminal',
@@ -83,13 +80,17 @@ export async function archiveSurfaceNotes(
     if (batches.length === 0) return;
     // One mutation for the whole closure, so a multi-Surface close (the
     // standalone quit gate) is a single read-modify-write that either lands
-    // entirely or not at all.
-    await mutateArchive({ append: batches });
+    // entirely or not at all. Deleting exactly the ids being appended is a
+    // no-op on a first attempt and a wholesale replacement on a retry, so the
+    // edits, additions, and deletions made since a write that landed and then
+    // reported failure are all in the batch that survives
+    // (docs/specs/notepad.md → "Model").
+    await mutateArchive({ deleteBatchIds: batches.map((batch) => batch.id), append: batches });
     // Aborted means the caller gave up waiting and told the user their notes
     // were not stored — the quit was cancelled, the Surfaces are still on
     // screen, and emptying them now would delete notes in front of someone who
-    // just said no. The batch is stored; note-id idempotence lets the next close
-    // re-archive the same notes exactly once.
+    // just said no. The batch is stored and its id stays remembered, so the next
+    // close replaces it rather than adding a second copy.
     if (options?.signal?.aborted) return;
     for (const surfaceId of archiving) removeSurface(surfaceId);
   } finally {

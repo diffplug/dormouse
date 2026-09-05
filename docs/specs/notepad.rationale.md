@@ -20,15 +20,19 @@ extra read on the rare collision and loses nothing. The retry is only safe becau
 mutations are idempotent: the `'conflict'` loop re-applies the same mutation object,
 so batch id alone covers it.
 
-Note-id idempotence is for the case batch id cannot cover. A closure attempt that
-reaches the host, lands, and *then* reports failure (the VS Code adapter's request
-timeout does exactly this) leaves the user looking at a Surface that is still open,
-so they keep typing into it. Remembering the batch id across that rejection made
-the next attempt a no-op append — `applyArchiveMutation` skipped the id it already
-had — and `removeSurface` then discarded everything added in between. A fresh id
-per attempt plus dedupe by note id gets both halves right: the notes already stored
-are dropped from the second batch, the new ones land, and nothing is duplicated. A
-note id is a UUID, so "already stored" is an exact test rather than a heuristic.
+A closure attempt that reaches the host, lands, and *then* reports failure (the VS
+Code adapter's request timeout does exactly this) leaves the user looking at a
+Surface that is still open, so they keep working in it. A fresh batch id per
+attempt with dedupe by note id kept the notes added since, but not an edit to one
+already stored: the second batch's copy was recognized by id and dropped, so the
+archive kept the pre-edit text and `removeSurface` then discarded the edit.
+Remembering the id and deleting it in the very mutation that re-appends it replaces
+the batch wholesale instead, so edits, additions, and the user's own deletions all
+survive. That is why deletes apply before appends, and why the note-id dedupe is
+computed after them — otherwise the batch being replaced would still count as
+storing its own notes. The dedupe stays because the VS Code mirror path mints a
+fresh id per teardown and has nothing to address an earlier write by; a note id is
+a UUID, so "already stored" is an exact test there rather than a heuristic.
 
 `MAX_SAVE_ATTEMPTS` is 5. An unbounded retry against an archive somebody else is
 rewriting in a loop would spin instead of telling the user, and the closure paths

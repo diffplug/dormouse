@@ -171,27 +171,36 @@ describe('archiveSurfaceNotes', () => {
     expect(getNotes('s1')).toEqual([]);
   });
 
-  it('keeps the notes added after a write that landed but reported failure', async () => {
+  it('replaces the batch a write that landed but reported failure already stored', async () => {
     // The VS Code adapter's request timeout produces exactly this: the host
-    // stored the batch, the webview was told it did not. A batch id remembered
-    // across the rejection would make the second attempt a no-op append, and
-    // `removeSurface` would then throw away everything typed in between.
+    // stored the batch, the webview was told it did not, and the Surface stayed
+    // open for the user to keep working in.
     const real = adapter.notepadArchive.save.bind(adapter.notepadArchive);
     vi.spyOn(adapter.notepadArchive, 'save').mockImplementationOnce(async (archive, base) => {
       await real(archive, base);
       throw new Error('the request timed out');
     });
-    addPlainNote('s1', 'first');
+    const x = addPlainNote('s1', 'X')!;
+    const y = addPlainNote('s1', 'Y')!;
 
     await expect(archiveSurfaceNotes(['s1'])).rejects.toThrow('the request timed out');
-    // The Surface stayed open, so the user kept typing into it.
-    addPlainNote('s1', 'second');
+    const landed = (await stored()).batches[0].id;
+
+    setNoteText('s1', x, 'X edited');
+    addPlainNote('s1', 'Z');
+    deleteNote('s1', y);
     await archiveSurfaceNotes(['s1']);
 
-    const texts = (await stored()).batches.flatMap((b) => b.notes.map((n) => (
-      n.content.kind === 'plain' ? n.content.text : ''
-    )));
-    expect(texts).toEqual(['first', 'second']);
+    const archive = await stored();
+    // One batch under the same id, replaced wholesale: a fresh id per attempt
+    // would have kept the stale X (its note id was already stored) and dropped
+    // the edit with `removeSurface`.
+    expect(archive.batches).toHaveLength(1);
+    expect(archive.batches[0].id).toBe(landed);
+    expect(archive.batches[0].notes.map((n) => n.content)).toEqual([
+      { kind: 'plain', text: 'X edited' },
+      { kind: 'plain', text: 'Z' },
+    ]);
     expect(getNotes('s1')).toEqual([]);
   });
 
@@ -230,6 +239,9 @@ describe('archiveSurfaceNotes', () => {
   });
 
   it('mints a fresh batch id for the next closure of the same id', async () => {
+    // The remembered id is forgotten the moment a closure lands, so a Surface
+    // id reused by a later Session archives beside the first rather than over
+    // it.
     addPlainNote('s1', 'first');
     await archiveSurfaceNotes(['s1']);
     addPlainNote('s1', 'second');

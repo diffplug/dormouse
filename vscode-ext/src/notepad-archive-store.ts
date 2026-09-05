@@ -133,8 +133,8 @@ export function resetUnreadableNotepadArchive(context: vscode.ExtensionContext):
 /**
  * Archive one drained volatile mirror: the batches its Surfaces would have
  * written had they closed normally, and the deletions its Archive view had
- * staged, as **one** mutation — `applyArchiveMutation` appends before it
- * deletes, so a teardown lands whole or not at all, exactly like a closure.
+ * staged, as **one** mutation, so a teardown lands whole or not at all, exactly
+ * like a closure.
  * Reports failure; whether that is fatal is the caller's call, and for both
  * callers it is not — VS Code destroys the container whatever we say.
  */

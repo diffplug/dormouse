@@ -186,29 +186,11 @@ export function readNotepadArchive(raw: unknown): NotepadArchiveV1 | null {
   return { version: 1, batches };
 }
 
-/** Apply a mutation immutably. Appends first (idempotent by batch **and** note
- *  id), then batch deletes, then note deletes; batches emptied by note deletes
- *  are dropped. Applying the same mutation twice yields the same archive. */
+/** Apply a mutation immutably: batch deletes, then note deletes, then appends
+ *  (idempotent by batch **and** note id); batches emptied by note deletes are
+ *  dropped. Applying the same mutation twice yields the same archive. */
 export function applyArchiveMutation(archive: NotepadArchiveV1, mutation: NotepadArchiveMutation): NotepadArchiveV1 {
-  const present = new Set(archive.batches.map((b) => b.id));
-  // Every note id already stored. A note id is a UUID, so "already archived" is
-  // exact — which is what makes a write that landed but was reported failed
-  // safe to retry under a fresh batch id: the notes it stored are dropped from
-  // the second batch instead of being duplicated, and notes added in between
-  // still land.
-  const stored = new Set<string>();
-  for (const batch of archive.batches) for (const note of batch.notes) stored.add(note.id);
   let batches = archive.batches.slice();
-  for (const batch of mutation.append ?? []) {
-    if (present.has(batch.id)) continue;
-    const notes = batch.notes.filter((note) => !stored.has(note.id));
-    // Nothing new in it: the whole batch is a repeat, so it is not appended at
-    // all rather than appended empty.
-    if (notes.length === 0) continue;
-    present.add(batch.id);
-    for (const note of notes) stored.add(note.id);
-    batches.push(notes.length === batch.notes.length ? batch : { ...batch, notes });
-  }
   if (mutation.deleteBatchIds?.length) {
     const gone = new Set(mutation.deleteBatchIds);
     batches = batches.filter((b) => !gone.has(b.id));
@@ -230,6 +212,27 @@ export function applyArchiveMutation(archive: NotepadArchiveV1, mutation: Notepa
       return notes.length === 0 ? [] : [{ ...b, notes }];
     });
   }
+  // Both sets are read *after* the deletes, which is what makes deleting and
+  // re-appending one id a wholesale replacement: the batch a retried closure is
+  // replacing is neither present nor holding stored notes by the time its
+  // replacement is appended.
+  const present = new Set(batches.map((b) => b.id));
+  // Every note id already stored. A note id is a UUID, so "already archived" is
+  // exact, which is what keeps the VS Code mirror path — the one appender that
+  // still mints a fresh batch id per teardown — from duplicating notes an
+  // earlier write stored.
+  const stored = new Set<string>();
+  for (const batch of batches) for (const note of batch.notes) stored.add(note.id);
+  for (const batch of mutation.append ?? []) {
+    if (present.has(batch.id)) continue;
+    const notes = batch.notes.filter((note) => !stored.has(note.id));
+    // Nothing new in it: the whole batch is a repeat, so it is not appended at
+    // all rather than appended empty.
+    if (notes.length === 0) continue;
+    present.add(batch.id);
+    for (const note of notes) stored.add(note.id);
+    batches.push(notes.length === batch.notes.length ? batch : { ...batch, notes });
+  }
   return { version: 1, batches };
 }
 
@@ -242,9 +245,9 @@ export function toArchivedNote(note: LiveNote): ArchivedNote {
   return { id: note.id, createdAt: note.createdAt, content: note.content };
 }
 
-/** The batch a closing Surface appends. `id` is minted fresh per closure
- *  attempt; `applyArchiveMutation`'s note-id idempotence is what keeps a repeat
- *  attempt from duplicating notes an earlier one already stored. */
+/** The batch a closing Surface appends. `id` is that Surface's remembered
+ *  batch id (`pendingBatchId`), which every attempt deletes and re-appends, so
+ *  a retry replaces whatever an earlier one landed. */
 export function buildArchiveBatch(input: {
   id: string;
   closedAt: number;

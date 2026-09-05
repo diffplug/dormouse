@@ -240,14 +240,46 @@ describe('applyArchiveMutation', () => {
     expect(twice).toEqual(once);
   });
 
-  it('applies appends before deletes within one mutation', () => {
+  it('applies deletes before appends within one mutation', () => {
     const start = archive(batch('b1', [{ id: 'n1', text: 'a' }]));
     const next = applyArchiveMutation(start, {
       append: [batch('b2', [{ id: 'n2', text: 'b' }, { id: 'n3', text: 'c' }])],
       deleteNotes: [{ batchId: 'b2', noteId: 'n2' }],
     });
+    // The delete names a batch that is not stored yet, so it is a no-op and the
+    // appended batch lands whole.
     expect(next.batches.map((b) => b.id)).toEqual(['b1', 'b2']);
-    expect(next.batches[1].notes.map((n) => n.id)).toEqual(['n3']);
+    expect(next.batches[1].notes.map((n) => n.id)).toEqual(['n2', 'n3']);
+  });
+
+  it('replaces a batch deleted and re-appended under one id', () => {
+    // A closure retried after a write that landed and then reported failure: the
+    // user edited n1, added n3, and deleted n2 while the Surface stayed open.
+    const start = archive(batch('b1', [{ id: 'n1', text: 'a' }, { id: 'n2', text: 'b' }]));
+    const next = applyArchiveMutation(start, {
+      deleteBatchIds: ['b1'],
+      append: [batch('b1', [{ id: 'n1', text: 'edited' }, { id: 'n3', text: 'c' }])],
+    });
+
+    expect(next.batches.map((b) => b.id)).toEqual(['b1']);
+    // The dedupe runs after the deletes, so the replaced batch's copy of n1 is
+    // not "already stored" and the edited one is what survives.
+    expect(next.batches[0].notes.map((n) => [n.id, n.content])).toEqual([
+      ['n1', { kind: 'plain', text: 'edited' }],
+      ['n3', { kind: 'plain', text: 'c' }],
+    ]);
+  });
+
+  it('still dedupes a note against a batch the mutation is not replacing', () => {
+    // The VS Code mirror path mints a fresh batch id per teardown and relies on
+    // this: nothing addresses the batch its notes may already be sitting in.
+    const start = archive(batch('b1', [{ id: 'n1', text: 'a' }]));
+    const next = applyArchiveMutation(start, {
+      deleteBatchIds: ['b2'],
+      append: [batch('b3', [{ id: 'n1', text: 'a' }, { id: 'n2', text: 'b' }])],
+    });
+    expect(next.batches.map((b) => b.id)).toEqual(['b1', 'b3']);
+    expect(next.batches[1].notes.map((n) => n.id)).toEqual(['n2']);
   });
 
   it('does not mutate the archive it was given', () => {

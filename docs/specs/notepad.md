@@ -15,9 +15,10 @@ A notepad is one ordered list of notes per Surface, held in renderer memory for 
 - **A note's source pin is runtime-only.** `RuntimeTerminalSource` holds live xterm markers, so `ArchivedNote` is `LiveNote` minus that field and no marker ever reaches a store.
 - **A closure appends one `ArchiveBatch` per Surface** — `id`, `closedAt`, `surfaceTitle`, `surfaceKind`, `cwd`, and the notes in creation order.
 - **`ArchiveBatch.cwd` is required and nullable.** It is the whole canonical `CwdState` snapshotted before teardown — path, URI, host, path kind, source, observation time — or `null` for a browser Surface and a terminal that never reported one. **Never persist a preformatted CWD label beside it**; the Archive renders path and remote host through `cwdDisplay`.
-- **A batch id and its `closedAt` are minted fresh per closure attempt, never remembered across one; appends are idempotent by batch and note id.** An already-stored note is dropped from an appended batch and a batch left empty is skipped, so an attempt that landed and *then* reported failure neither duplicates its notes nor swallows the ones taken since. Deleting something already gone is a no-op.
+- **A batch id is remembered per Surface across its closure attempts and forgotten once one lands**, and **every attempt deletes and re-appends that id in one mutation**, so an attempt that landed and *then* reported failure is replaced by the next, carrying the edits, additions, and deletions made in between. **`closedAt` is minted per attempt.**
+- **A mutation applies its deletes before its appends**, which is what makes that pair a replacement. Appends stay idempotent by batch and note id — an already-stored note is dropped from an appended batch and a batch left empty is skipped — and deleting something already gone is a no-op.
 
-Source of truth: `lib/src/lib/notepad/types.ts`; `applyArchiveMutation`, `buildArchiveBatch`, `readNotepadArchive` and `toArchivedNote` in `lib/src/lib/notepad/archive-model.ts`.
+Source of truth: `lib/src/lib/notepad/types.ts`; `applyArchiveMutation`, `buildArchiveBatch`, `readNotepadArchive` and `toArchivedNote` in `lib/src/lib/notepad/archive-model.ts`; `pendingBatchId` in `lib/src/lib/notepad/notepad-store.ts`.
 
 ## The archive port
 

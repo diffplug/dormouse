@@ -63,8 +63,9 @@ export interface NotepadArchiveV1 {
 }
 
 /** Idempotent by batch and note id: appending a batch already present is a
- *  no-op, deleting something already gone is a no-op. Appends apply before
- *  deletes; a batch left with no notes is dropped. */
+ *  no-op, deleting something already gone is a no-op. Deletes apply before
+ *  appends, so deleting and re-appending one id replaces that batch; a batch
+ *  left with no notes is dropped. */
 export interface NotepadArchiveMutation {
   append?: ArchiveBatch[];
   deleteBatchIds?: string[];

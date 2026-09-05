@@ -17,6 +17,7 @@ import {
   hydrateNotepadFromVolatile,
   isSurfaceClosing,
   noteCount,
+  pendingBatchId,
   pruneEmptyNote,
   removeSurface,
   setNotepadSurfaceMetaResolver,
@@ -261,6 +262,37 @@ describe('surface lifecycle', () => {
     expect(getNotes('s1')).toEqual([]);
     expect(getNotepadSnapshot().has('s1')).toBe(false);
     expect(getOpenNotepadId()).toBeNull();
+  });
+});
+
+describe('pendingBatchId', () => {
+  it('is remembered per Surface until that Surface is removed', () => {
+    const id = pendingBatchId('s1');
+    expect(pendingBatchId('s1')).toBe(id);
+    expect(pendingBatchId('s2')).not.toBe(id);
+
+    // The closure landed, so the next one is a new batch rather than a
+    // replacement.
+    removeSurface('s1');
+    expect(pendingBatchId('s1')).not.toBe(id);
+  });
+
+  it('follows an in-place replacement to the new Surface id', () => {
+    const id = pendingBatchId('old');
+    addPlainNote('old', 'a');
+
+    transferNotepad('old', 'new');
+
+    // Whatever an earlier attempt landed is still addressable under the id the
+    // notes now live on.
+    expect(pendingBatchId('new')).toBe(id);
+    expect(pendingBatchId('old')).not.toBe(id);
+  });
+
+  it('follows a replacement that carries no notes at all', () => {
+    const id = pendingBatchId('old');
+    transferNotepad('old', 'new');
+    expect(pendingBatchId('new')).toBe(id);
   });
 });
 
