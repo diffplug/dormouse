@@ -1,20 +1,20 @@
 /**
- * Where a Host is allowed to reach a relay server, enforced in the process that
- * holds the socket (docs/specs/server.md → "Where a Host may reach a relay server").
+ * Where a Burrow is allowed to reach a Relay, enforced in the process that
+ * holds the socket (docs/specs/relay.md → "Where a Burrow may reach a Relay").
  *
  * The allowlist is written as a CSP source list because that is what it used to
- * be: while the Host lived in a webview, `connect-src` was the enforcement. A
- * Node-resident Host has no CSP, so the same source list is baked into its
+ * be: while the Burrow lived in a webview, `connect-src` was the enforcement. A
+ * Node-resident Burrow has no CSP, so the same source list is baked into its
  * bundle and checked here instead — one syntax, one build-time variable
  * (`DORMOUSE_REMOTE_CONNECT_SRC`), whichever process ends up holding the socket.
  *
- * Matching is deliberately narrower than a browser's: only the sources a Host
+ * Matching is deliberately narrower than a browser's: only the sources a Burrow
  * can meaningfully be pointed at (scheme + host + port) are understood, and
  * anything else fails closed.
  */
 
 /**
- * The remote-server sources baked into published builds. Kept equal to
+ * The Relay origins baked into published builds. Kept equal to
  * `scripts/csp-defaults.mjs` by `connect-src.test.ts` — the build scripts read
  * the `.mjs`, the service reads this, and a drift between them would ship a
  * binary that refuses the origin its own CSP allows.
@@ -41,7 +41,7 @@ export function bakedConnectSrc(): string {
     : DEFAULT_REMOTE_CONNECT_SRC;
 }
 
-/** https and wss are one scheme to a Host: the relay is reached over both. */
+/** https and wss are one scheme to a Burrow: the relay is reached over both. */
 function schemeClass(scheme: string): 'secure' | 'insecure' | null {
   if (scheme === 'https:' || scheme === 'wss:') return 'secure';
   if (scheme === 'http:' || scheme === 'ws:') return 'insecure';
@@ -111,7 +111,7 @@ function hostMatches(sourceHost: string, host: string): boolean {
 }
 
 /**
- * Whether `origin` is one this build's Host may connect to. `sources` is a
+ * Whether `origin` is one this build's Burrow may connect to. `sources` is a
  * whitespace-separated CSP source list; an unparseable origin or source is
  * never a match.
  */

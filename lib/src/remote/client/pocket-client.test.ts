@@ -1,10 +1,10 @@
 /**
  * The Pocket client's two end-to-end ceremonies, driven against the **real**
- * `RemoteHost` through an in-memory relay (`../test-relay.ts`).
+ * `BurrowRuntime` through an in-memory relay (`../test-relay.ts`).
  *
  * **No ceremony step is stubbed.** The Noise handshakes are the shipped suite,
  * the presence proofs are real ES256 assertions over the shared challenge
- * builder — verified by the same `verifyPresenceProof` a Host runs — and the
+ * builder — verified by the same `verifyPresenceProof` a Burrow runs — and the
  * outcomes are decrypted on the session that produced them. Only the browser
  * and network edges are faked: `fetch`, `WebSocket`, WebAuthn's two calls, and
  * the two IndexedDB stores.
@@ -33,19 +33,19 @@ import {
   pushEndpointFingerprint,
   randomBase64Url,
   toBase64Url,
-  type HostAclRecord,
+  type BurrowAclRecord,
   type NoiseStaticKeyMaterial,
   type PairingInvitation,
   type PasskeyAssertion,
   type PresenceBinding,
   type TerminalDataEvent,
   utf8Encode,
-} from 'server-lib-common';
+} from 'remote-lib-common';
 
 import {
   CONNECTION_DENIAL_MESSAGES,
-  HOST_UNAVAILABLE_MESSAGE,
-  HostIdentityMismatchError,
+  BURROW_UNAVAILABLE_MESSAGE,
+  BurrowIdentityMismatchError,
   PAIRING_DENIAL_MESSAGES,
   PASSKEY_UNAVAILABLE_MESSAGE,
   PocketClient,
@@ -57,26 +57,26 @@ import {
   type PocketStorage,
 } from './pocket-client';
 import type {
-  KnownHostStore,
-  KnownHostV1,
+  KnownBurrowStore,
+  KnownBurrowV1,
   PendingDeletionStore,
   PendingDeliveryDeletionV1,
 } from './pocket-db';
 import { FakeSocket } from '../test-fake-socket';
 import { createTestRelay, type TestRelay } from '../test-relay';
 import { createTestAuthenticator, type TestAuthenticator } from '../test-e2e-client';
-import { RemoteHost } from '../host/remote-host';
-import type { HostEnrollment } from '../host/enrollment';
-import type { PendingPairing } from '../host/pairing-approval';
+import { BurrowRuntime } from '../burrow/burrow-runtime';
+import type { BurrowEnrollment } from '../burrow/enrollment';
+import type { PendingPairing } from '../burrow/pairing-approval';
 import { PasskeyAlreadyRegisteredError, type WebAuthnClient } from './webauthn';
 
 // --- Fakes -----------------------------------------------------------------
 
 const ORIGIN = 'https://pocket.example';
 const RP_ID = 'pocket.example';
-const HOST_LABEL = 'Ned’s laptop';
+const BURROW_LABEL = 'Ned’s laptop';
 const SESSION_TOKEN = 'tok-abc';
-/** What the stub Host streams on attach: a chunk whose two projections differ. */
+/** What the stub Burrow streams on attach: a chunk whose two projections differ. */
 const STREAMED_CHUNK: TerminalDataEvent = {
   bytes: toBase64Url(utf8Encode('pre\x1b]1337;File=inline=1:AAAA\x07post')),
   text: toBase64Url(utf8Encode('prepost')),
@@ -137,25 +137,25 @@ function memoryStorage(): PocketStorage {
   };
 }
 
-interface MemoryKnownHosts extends KnownHostStore {
-  readonly records: Map<string, KnownHostV1>;
+interface MemoryKnownBurrows extends KnownBurrowStore {
+  readonly records: Map<string, KnownBurrowV1>;
 }
 
-function memoryKnownHosts(): MemoryKnownHosts {
-  const records = new Map<string, KnownHostV1>();
+function memoryKnownBurrows(): MemoryKnownBurrows {
+  const records = new Map<string, KnownBurrowV1>();
   return {
     records,
-    get: async (hostId) => records.get(hostId) ?? null,
-    put: async (record) => void records.set(record.hostId, record),
-    delete: async (hostId) => void records.delete(hostId),
+    get: async (burrowId) => records.get(burrowId) ?? null,
+    put: async (record) => void records.set(record.burrowId, record),
+    delete: async (burrowId) => void records.delete(burrowId),
     list: async () => [...records.values()],
   };
 }
 
 /** The delivery id a paired record holds; throws if the record is not paired. */
-function deliveryIdOf(store: MemoryKnownHosts, hostId: string): string {
-  const authorization = store.records.get(hostId)?.authorization;
-  if (authorization?.state !== 'paired') throw new Error(`${hostId} is not paired`);
+function deliveryIdOf(store: MemoryKnownBurrows, burrowId: string): string {
+  const authorization = store.records.get(burrowId)?.authorization;
+  if (authorization?.state !== 'paired') throw new Error(`${burrowId} is not paired`);
   return authorization.deliveryId;
 }
 
@@ -167,8 +167,8 @@ function memoryPendingDeletions(): MemoryPendingDeletions {
   const records = new Map<string, PendingDeliveryDeletionV1>();
   return {
     records,
-    put: async (record) => void records.set(`${record.hostId}:${record.deliveryId}`, record),
-    delete: async (hostId, deliveryId) => void records.delete(`${hostId}:${deliveryId}`),
+    put: async (record) => void records.set(`${record.burrowId}:${record.deliveryId}`, record),
+    delete: async (burrowId, deliveryId) => void records.delete(`${burrowId}:${deliveryId}`),
     list: async () => [...records.values()],
   };
 }
@@ -194,7 +194,7 @@ function expiringClock(): { now: () => number; expire: () => void } {
   };
 }
 
-/** Poll until `predicate` holds, so a Host awaiting WebCrypto can catch up. */
+/** Poll until `predicate` holds, so a Burrow awaiting WebCrypto can catch up. */
 async function waitFor(predicate: () => boolean, what = 'a condition'): Promise<void> {
   for (let i = 0; i < 400; i++) {
     if (predicate()) return;
@@ -209,7 +209,7 @@ interface Harness {
   client: PocketClient;
   socket: FakeSocket;
   calls: FetchCall[];
-  knownHosts: MemoryKnownHosts;
+  knownBurrows: MemoryKnownBurrows;
   pendingDeletions: MemoryPendingDeletions;
 }
 
@@ -258,7 +258,7 @@ const AUTH_ROUTES: Record<string, RouteHandler> = {
       passkeyPublicKey: PASSKEY_PUBLIC_KEY,
     },
   }),
-  '/api/hosts': () => ({ json: { hosts: [{ hostId: 'h1', label: 'Laptop', online: true }] } }),
+  '/api/burrows': () => ({ json: { burrows: [{ burrowId: 'h1', label: 'Laptop', online: true }] } }),
 };
 
 function makeClient(
@@ -267,19 +267,19 @@ function makeClient(
 ): Harness {
   const socket = new FakeSocket();
   const { fetch, calls } = makeFetch(routes);
-  const knownHosts = memoryKnownHosts();
+  const knownBurrows = memoryKnownBurrows();
   const pendingDeletions = memoryPendingDeletions();
   const client = new PocketClient({
     wsBase: 'ws://test',
     fetch,
     webauthn: fakeWebAuthn,
     createWebSocket: () => socket,
-    knownHosts,
+    knownBurrows,
     pendingDeletions,
     storage: memoryStorage(),
     ...overrides,
   });
-  return { client, socket, calls, knownHosts, pendingDeletions };
+  return { client, socket, calls, knownBurrows, pendingDeletions };
 }
 
 /** A signed-in client on the account plane; no relay, no ceremony. */
@@ -292,28 +292,28 @@ async function signedIn(
   return harness;
 }
 
-/** A `KnownHostV1` for the tests that need one without running a pairing. */
+/** A `KnownBurrowV1` for the tests that need one without running a pairing. */
 async function seedRecord(
-  knownHosts: MemoryKnownHosts,
-  hostId: string,
-  overrides: Partial<KnownHostV1> = {},
-): Promise<KnownHostV1> {
+  knownBurrows: MemoryKnownBurrows,
+  burrowId: string,
+  overrides: Partial<KnownBurrowV1> = {},
+): Promise<KnownBurrowV1> {
   const clientStatic = await generateNoiseKeyPair();
-  const record: KnownHostV1 = {
-    hostId,
+  const record: KnownBurrowV1 = {
+    burrowId,
     accountId: SELFHOST_ACCOUNT_ID,
     label: 'Laptop',
-    hostStaticPublicKey: toBase64Url((await generateNoiseKeyPair()).publicKey),
+    burrowStaticPublicKey: toBase64Url((await generateNoiseKeyPair()).publicKey),
     clientStaticKeyPair: {
       privateKey: clientStatic.privateKey as CryptoKey,
       publicKeyRaw: toBase64Url(clientStatic.publicKey),
     },
     passkeyCredentialId: CREDENTIAL_ID,
     passkeyPublicKeyHash: 'hash',
-    authorization: { state: 'paired', deliveryId: `delivery-${hostId}`, approvedAt: 1 },
+    authorization: { state: 'paired', deliveryId: `delivery-${burrowId}`, approvedAt: 1 },
     ...overrides,
   };
-  await knownHosts.put(record);
+  await knownBurrows.put(record);
   return record;
 }
 
@@ -321,23 +321,23 @@ async function seedRecord(
 
 interface E2eHarness {
   client: PocketClient;
-  host: RemoteHost;
+  burrow: BurrowRuntime;
   relay: TestRelay;
-  hostId: string;
+  burrowId: string;
   authenticator: TestAuthenticator;
   noiseStatic: NoiseStaticKeyMaterial;
-  knownHosts: MemoryKnownHosts;
+  knownBurrows: MemoryKnownBurrows;
   pendingDeletions: MemoryPendingDeletions;
   approvals: PendingPairing[];
-  savedAcl: HostAclRecord[];
+  savedAcl: BurrowAclRecord[];
   calls: FetchCall[];
-  /** The harness's own `fetch`, for a second client on the same fake Server. */
+  /** The harness's own `fetch`, for a second client on the same fake Relay. */
   fetch: typeof fetch;
   /** The Client's relay socket, once one is open — what a keepalive lands on. */
   clientSocket(): FakeSocket;
   /** One live invitation, as `setupQr` would mint it. */
   mintInvitation(): Promise<PairingInvitation>;
-  /** Run a pairing and confirm it on the Host with the digits the phone showed. */
+  /** Run a pairing and confirm it on the Burrow with the digits the phone showed. */
   pairAndApprove(
     invitation: PairingInvitation,
     options?: { code?: (shown: string) => string },
@@ -345,27 +345,27 @@ interface E2eHarness {
 }
 
 /**
- * A real Host, a real relay, and a real client — the whole loop in memory.
+ * A real Burrow, a real relay, and a real client — the whole loop in memory.
  *
  * `/api/reauth/*` is faked, but faithfully: `begin` derives the challenge from
- * the presented binding with the shared builder, exactly as the Server does, so
+ * the presented binding with the shared builder, exactly as the Relay does, so
  * the assertion the authenticator produces is one `verifyPresenceProof`
  * accepts. Nothing else about the proof is simulated.
  */
 async function makeE2eHarness(
   options: {
-    hostId?: string;
-    knownHosts?: MemoryKnownHosts;
+    burrowId?: string;
+    knownBurrows?: MemoryKnownBurrows;
     pendingDeletions?: MemoryPendingDeletions;
     authenticator?: TestAuthenticator;
     noiseStatic?: NoiseStaticKeyMaterial;
     /**
-     * What the Host *announces* as its static, when that has to differ from the
-     * key it actually handshakes with. Nothing on the Host validates this
+     * What the Burrow *announces* as its static, when that has to differ from the
+     * key it actually handshakes with. Nothing on the Burrow validates this
      * string, so it is how a malformed pin reaches the Client at all.
      */
     announcedStatic?: string;
-    loadAcl?: () => HostAclRecord[];
+    loadAcl?: () => BurrowAclRecord[];
     now?: () => number;
     /** Make every delivery-row deletion fail, as an offline phone's would. */
     pushDeleteFails?: boolean;
@@ -373,32 +373,32 @@ async function makeE2eHarness(
     deps?: Partial<PocketClientDeps>;
   } = {},
 ): Promise<E2eHarness> {
-  const hostId = options.hostId ?? randomBase64Url(16);
+  const burrowId = options.burrowId ?? randomBase64Url(16);
   const authenticator =
     options.authenticator ?? (await createTestAuthenticator({ rpId: RP_ID, origin: ORIGIN }));
   const noiseStatic = options.noiseStatic ?? (await mintNoiseStaticKeyPair());
-  const knownHosts = options.knownHosts ?? memoryKnownHosts();
+  const knownBurrows = options.knownBurrows ?? memoryKnownBurrows();
   const pendingDeletions = options.pendingDeletions ?? memoryPendingDeletions();
   const approvals: PendingPairing[] = [];
-  let savedAcl: HostAclRecord[] = [];
+  let savedAcl: BurrowAclRecord[] = [];
 
-  const enrollment: HostEnrollment = {
-    serverUrl: ORIGIN,
-    hostId,
-    hostToken: 'host-tok',
+  const enrollment: BurrowEnrollment = {
+    relayUrl: ORIGIN,
+    burrowId,
+    burrowToken: 'burrow-tok',
     origin: ORIGIN,
     rpId: RP_ID,
-    label: HOST_LABEL,
+    label: BURROW_LABEL,
     noiseStaticPrivateKey: noiseStatic.privateKeyPkcs8,
     noiseStaticPublicKey: options.announcedStatic ?? noiseStatic.publicKey,
   };
-  const hostSocket = new FakeSocket();
-  const host = new RemoteHost({
+  const burrowSocket = new FakeSocket();
+  const burrow = new BurrowRuntime({
     enrollment,
     reconnect: false,
-    createWebSocket: () => hostSocket,
+    createWebSocket: () => burrowSocket,
     loadAcl: options.loadAcl ?? (() => []),
-    saveAcl: (_hostId, records) => {
+    saveAcl: (_burrowId, records) => {
       savedAcl = [...records];
     },
     requestApproval: (pending) => approvals.push(pending),
@@ -412,7 +412,7 @@ async function makeE2eHarness(
         send({
           requestId: request.requestId,
           ok: true,
-          result: { protocolVersion: 1, hostId, grants: { input: true, layout: false } },
+          result: { protocolVersion: 1, burrowId, grants: { input: true, layout: false } },
         });
         // An attach opens its stream under the request's own id, so one canned
         // event proves the subscription path as well as the request one.
@@ -427,11 +427,11 @@ async function makeE2eHarness(
       dispose: () => {},
     }),
   });
-  host.start();
-  hostSocket.open();
-  const relay = createTestRelay({ hostId, hostSocket });
+  burrow.start();
+  burrowSocket.open();
+  const relay = createTestRelay({ burrowId, burrowSocket });
 
-  // The presence routes, derived exactly as the Server derives them.
+  // The presence routes, derived exactly as the Relay derives them.
   const nonces = new Map<string, PresenceBinding>();
   const routes: Record<string, RouteHandler> = {
     ...AUTH_ROUTES,
@@ -447,24 +447,24 @@ async function makeE2eHarness(
     }),
     '/api/reauth/begin': async (body) => {
       const binding = (body as { binding: PresenceBinding }).binding;
-      const serverNonce = secret();
-      nonces.set(serverNonce, binding);
+      const relayNonce = secret();
+      nonces.set(relayNonce, binding);
       return {
         json: {
-          challenge: await presenceChallenge(binding, serverNonce),
+          challenge: await presenceChallenge(binding, relayNonce),
           rpId: RP_ID,
-          serverNonce,
+          relayNonce,
           allowCredentials: [binding.passkeyCredentialId],
         },
       };
     },
     '/api/reauth/finish': (body) => {
-      const { serverNonce } = body as { serverNonce: string };
-      if (!nonces.delete(serverNonce)) return { status: 400, json: { error: 'unknown nonce' } };
+      const { relayNonce } = body as { relayNonce: string };
+      if (!nonces.delete(relayNonce)) return { status: 400, json: { error: 'unknown nonce' } };
       return { json: { verifiedAt: 1 } };
     },
   };
-  // The delivery ids a Host mints are random, so the deletion route is matched
+  // The delivery ids a Burrow mints are random, so the deletion route is matched
   // by shape rather than by an exact path.
   const { fetch, calls } = makeFetch(routes, (path, method) => {
     if (method !== 'DELETE' || !path.startsWith('/api/push/subscriptions/')) return undefined;
@@ -480,7 +480,7 @@ async function makeE2eHarness(
         clientDataJSON: 'create-client-data',
       };
     },
-    // The real thing: a signature this Host's own verifier accepts.
+    // The real thing: a signature this Burrow's own verifier accepts.
     getAssertion: (challenge) => authenticator.assert(challenge, ORIGIN),
   };
   let clientSocket: FakeSocket | null = null;
@@ -489,7 +489,7 @@ async function makeE2eHarness(
     fetch,
     webauthn,
     createWebSocket: () => (clientSocket = relay.openClientSocket()),
-    knownHosts,
+    knownBurrows,
     pendingDeletions,
     storage,
     ...(options.now ? { now: options.now } : {}),
@@ -501,12 +501,12 @@ async function makeE2eHarness(
 
   return {
     client,
-    host,
+    burrow,
     relay,
-    hostId,
+    burrowId,
     authenticator,
     noiseStatic,
-    knownHosts,
+    knownBurrows,
     pendingDeletions,
     approvals,
     get savedAcl() {
@@ -518,7 +518,7 @@ async function makeE2eHarness(
       if (!clientSocket) throw new Error('the Client has not opened a relay socket');
       return clientSocket;
     },
-    mintInvitation: () => host.mintInvitation(secret(), Date.now() + DEFAULT_PAIRING_TTL_MS),
+    mintInvitation: () => burrow.mintInvitation(secret(), Date.now() + DEFAULT_PAIRING_TTL_MS),
     async pairAndApprove(invitation, { code } = {}) {
       // Counted from here: a harness that pairs twice must confirm the *new*
       // request rather than re-answering the one still in the log.
@@ -527,7 +527,7 @@ async function makeE2eHarness(
       const pairing = client.pair(invitation, 'iPhone Safari', (value) => {
         shown = value;
       });
-      await waitFor(() => approvals.length > before, 'the Host to surface an approval');
+      await waitFor(() => approvals.length > before, 'the Burrow to surface an approval');
       const pending = approvals[approvals.length - 1]!;
       pending.approve(code ? code(shown!) : shown!);
       return await pairing;
@@ -538,7 +538,7 @@ async function makeE2eHarness(
 // --- Pairing ----------------------------------------------------------------
 
 describe('pairing, end to end', () => {
-  it('scans, handshakes, proves presence, and pins the Host the laptop approved', async () => {
+  it('scans, handshakes, proves presence, and pins the Burrow the laptop approved', async () => {
     const harness = await makeE2eHarness();
     const invitation = await harness.mintInvitation();
 
@@ -558,11 +558,11 @@ describe('pairing, end to end', () => {
     const result = await pairing;
 
     expect(result.ok).toBe(true);
-    const record = harness.knownHosts.records.get(harness.hostId)!;
-    expect(record.hostStaticPublicKey).toBe(harness.noiseStatic.publicKey);
-    // The Host's own label reached the phone inside the encrypted outcome; the
-    // Server never had it.
-    expect(record.label).toBe(HOST_LABEL);
+    const record = harness.knownBurrows.records.get(harness.burrowId)!;
+    expect(record.burrowStaticPublicKey).toBe(harness.noiseStatic.publicKey);
+    // The Burrow's own label reached the phone inside the encrypted outcome; the
+    // Relay never had it.
+    expect(record.label).toBe(BURROW_LABEL);
     expect(record.passkeyCredentialId).toBe(harness.authenticator.credentialId);
     expect(record.passkeyPublicKeyHash).toBe(
       await hashPasskeyPublicKey(harness.authenticator.publicKey),
@@ -572,13 +572,13 @@ describe('pairing, end to end', () => {
       deliveryId: harness.savedAcl[0]!.deliveryId,
       approvedAt: expect.any(Number),
     });
-    // The Host authorized the static this handshake authenticated, not one the
+    // The Burrow authorized the static this handshake authenticated, not one the
     // payload claimed.
     expect(harness.savedAcl[0]!.clientStaticPublicKey).toBe(record.clientStaticKeyPair.publicKeyRaw);
   });
 
-  it('takes the invitation straight off the URL the Host renders', async () => {
-    // The whole path a scan travels: the Host composes, the parser answers, and
+  it('takes the invitation straight off the URL the Burrow renders', async () => {
+    // The whole path a scan travels: the Burrow composes, the parser answers, and
     // the invitation it produced completes a real handshake.
     const harness = await makeE2eHarness();
     const minted = await harness.mintInvitation();
@@ -606,7 +606,7 @@ describe('pairing, end to end', () => {
       ok: false,
       message: PAIRING_DENIAL_MESSAGES['confirmation-mismatch'],
     });
-    expect(harness.knownHosts.records.size).toBe(0);
+    expect(harness.knownBurrows.records.size).toBe(0);
     expect(harness.savedAcl).toEqual([]);
   });
 
@@ -619,46 +619,46 @@ describe('pairing, end to end', () => {
     harness.approvals[0]!.deny();
 
     expect(await pairing).toEqual({ ok: false, message: PAIRING_DENIAL_MESSAGES['user-denied'] });
-    expect(harness.knownHosts.records.size).toBe(0);
+    expect(harness.knownBurrows.records.size).toBe(0);
   });
 
   /**
-   * The pin is what a connection authenticates against, so a Host presenting a
+   * The pin is what a connection authenticates against, so a Burrow presenting a
    * different static is a security error rather than a fresh start — and the
    * record it disagrees with survives untouched.
    */
-  it('refuses a Host whose static is not the one already pinned, keeping the old record', async () => {
+  it('refuses a Burrow whose static is not the one already pinned, keeping the old record', async () => {
     const first = await makeE2eHarness();
     await first.pairAndApprove(await first.mintInvitation());
-    const pinned = first.knownHosts.records.get(first.hostId)!;
+    const pinned = first.knownBurrows.records.get(first.burrowId)!;
 
-    // The same `hostId`, a different identity behind it.
+    // The same `burrowId`, a different identity behind it.
     const impostor = await makeE2eHarness({
-      hostId: first.hostId,
-      knownHosts: first.knownHosts,
+      burrowId: first.burrowId,
+      knownBurrows: first.knownBurrows,
       authenticator: first.authenticator,
     });
     expect(impostor.noiseStatic.publicKey).not.toBe(first.noiseStatic.publicKey);
 
     await expect(impostor.pairAndApprove(await impostor.mintInvitation())).rejects.toBeInstanceOf(
-      HostIdentityMismatchError,
+      BurrowIdentityMismatchError,
     );
-    expect(first.knownHosts.records.get(first.hostId)).toBe(pinned);
+    expect(first.knownBurrows.records.get(first.burrowId)).toBe(pinned);
   });
 
   /**
-   * The pin has to be an importable X25519 point. A Host announcing anything
+   * The pin has to be an importable X25519 point. A Burrow announcing anything
    * else — the outcome's field is only bounded as a string on the wire — would
    * otherwise be stored, and every later `connect` would throw building a
    * handshake from it, long after the screen that could explain it is gone.
    */
-  it('refuses a Host static that is not a 32-byte key, rather than pinning it', async () => {
+  it('refuses a Burrow static that is not a 32-byte key, rather than pinning it', async () => {
     const harness = await makeE2eHarness({ announcedStatic: 'not-a-key' });
 
     const result = await harness.pairAndApprove(await harness.mintInvitation());
 
-    expect(result).toEqual({ ok: false, message: PAIRING_DENIAL_MESSAGES['host-error'] });
-    expect(harness.knownHosts.records.size).toBe(0);
+    expect(result).toEqual({ ok: false, message: PAIRING_DENIAL_MESSAGES['burrow-error'] });
+    expect(harness.knownBurrows.records.size).toBe(0);
   });
 
   /**
@@ -675,28 +675,28 @@ describe('pairing, end to end', () => {
       shown = code;
     });
     await waitFor(() => harness.approvals.length > 0, 'the approval modal');
-    harness.relay.tamperNextHostFrame();
+    harness.relay.tamperNextBurrowFrame();
     harness.approvals[0]!.approve(shown!);
 
-    expect(await pairing).toEqual({ ok: false, message: HOST_UNAVAILABLE_MESSAGE });
-    expect(harness.knownHosts.records.size).toBe(0);
+    expect(await pairing).toEqual({ ok: false, message: BURROW_UNAVAILABLE_MESSAGE });
+    expect(harness.knownBurrows.records.size).toBe(0);
   });
 
   it('queues the old delivery id when a re-pair mints a new one', async () => {
-    // The Host has forgotten this Client and pairs it again, so the row the
+    // The Burrow has forgotten this Client and pairs it again, so the row the
     // previous id names is unreachable the moment the record is rewritten.
     const first = await makeE2eHarness();
     await first.pairAndApprove(await first.mintInvitation());
-    const before = deliveryIdOf(first.knownHosts, first.hostId);
+    const before = deliveryIdOf(first.knownBurrows, first.burrowId);
 
     await first.pairAndApprove(await first.mintInvitation());
 
-    const after = deliveryIdOf(first.knownHosts, first.hostId);
+    const after = deliveryIdOf(first.knownBurrows, first.burrowId);
     expect(after).not.toBe(before);
     expect([...first.pendingDeletions.records.values()].map((t) => t.deliveryId)).toContain(before);
   });
 
-  it('reports a Host that never answers as unavailable, not as a refusal', async () => {
+  it('reports a Burrow that never answers as unavailable, not as a refusal', async () => {
     const clock = expiringClock();
     const harness = await makeE2eHarness({ now: clock.now });
     const invitation = await harness.mintInvitation();
@@ -705,7 +705,7 @@ describe('pairing, end to end', () => {
 
     expect(await harness.client.pair(invitation, 'iPhone Safari')).toEqual({
       ok: false,
-      message: HOST_UNAVAILABLE_MESSAGE,
+      message: BURROW_UNAVAILABLE_MESSAGE,
     });
   });
 });
@@ -717,10 +717,10 @@ describe('connecting, end to end', () => {
     const harness = await makeE2eHarness();
     await harness.pairAndApprove(await harness.mintInvitation());
 
-    const result = await harness.client.connect(harness.hostId);
+    const result = await harness.client.connect(harness.burrowId);
 
-    expect(result).toEqual({ ok: true, hostLabel: HOST_LABEL });
-    expect(harness.client.connectedHostId).toBe(harness.hostId);
+    expect(result).toEqual({ ok: true, burrowLabel: BURROW_LABEL });
+    expect(harness.client.connectedBurrowId).toBe(harness.burrowId);
     // The same Noise session carries the terminal protocol.
     expect(await harness.client.hello()).toMatchObject({ protocolVersion: 1 });
   });
@@ -728,7 +728,7 @@ describe('connecting, end to end', () => {
   it('hands an attached surface the whole terminal.data payload, both projections', async () => {
     const harness = await makeE2eHarness();
     await harness.pairAndApprove(await harness.mintInvitation());
-    await harness.client.connect(harness.hostId);
+    await harness.client.connect(harness.burrowId);
 
     const chunks: TerminalDataEvent[] = [];
     await harness.client.attach('surface-1', 80, 24, { onData: (event) => chunks.push(event) });
@@ -738,10 +738,10 @@ describe('connecting, end to end', () => {
     expect(chunks).toEqual([STREAMED_CHUNK]);
   });
 
-  it('needs a record: an unpinned Host is a pairing, not a connection', async () => {
+  it('needs a record: an unpinned Burrow is a pairing, not a connection', async () => {
     const harness = await makeE2eHarness();
 
-    expect(await harness.client.connect(harness.hostId)).toEqual({
+    expect(await harness.client.connect(harness.burrowId)).toEqual({
       ok: false,
       message: CONNECTION_DENIAL_MESSAGES['pairing-required'],
       pairingRequired: true,
@@ -749,41 +749,41 @@ describe('connecting, end to end', () => {
   });
 
   /**
-   * The ACL is the Host's, and it can lose this Client without the pin
+   * The ACL is the Burrow's, and it can lose this Client without the pin
    * changing. The tombstone is written before the record forgets the delivery
-   * id — that id is the only handle that can ever delete the Server's row.
+   * id — that id is the only handle that can ever delete the Relay's row.
    */
   it('drops authorization on pairing-required, tombstoning the delivery id first', async () => {
     const paired = await makeE2eHarness();
     await paired.pairAndApprove(await paired.mintInvitation());
-    const deliveryId = deliveryIdOf(paired.knownHosts, paired.hostId);
+    const deliveryId = deliveryIdOf(paired.knownBurrows, paired.burrowId);
 
-    // The same Host identity, an ACL that has forgotten this Client.
+    // The same Burrow identity, an ACL that has forgotten this Client.
     const reset = await makeE2eHarness({
-      hostId: paired.hostId,
-      knownHosts: paired.knownHosts,
+      burrowId: paired.burrowId,
+      knownBurrows: paired.knownBurrows,
       pendingDeletions: paired.pendingDeletions,
       authenticator: paired.authenticator,
       noiseStatic: paired.noiseStatic,
       loadAcl: () => [],
     });
 
-    const result = await reset.client.connect(reset.hostId);
+    const result = await reset.client.connect(reset.burrowId);
 
     expect(result).toEqual({
       ok: false,
       message: CONNECTION_DENIAL_MESSAGES['pairing-required'],
       pairingRequired: true,
     });
-    expect(paired.knownHosts.records.get(paired.hostId)!.authorization).toEqual({
+    expect(paired.knownBurrows.records.get(paired.burrowId)!.authorization).toEqual({
       state: 'pairing-required',
     });
     // The pin survives losing authorization — re-pairing against a changed
     // static has to stay a security error.
-    expect(paired.knownHosts.records.get(paired.hostId)!.hostStaticPublicKey).toBe(
+    expect(paired.knownBurrows.records.get(paired.burrowId)!.burrowStaticPublicKey).toBe(
       paired.noiseStatic.publicKey,
     );
-    // Deleted at the Server, so the tombstone cleared; the id was queued first.
+    // Deleted at the Relay, so the tombstone cleared; the id was queued first.
     expect(reset.calls.some((c) => c.url.endsWith(deliveryId) && c.method === 'DELETE')).toBe(true);
     expect([...paired.pendingDeletions.records.values()]).toEqual([]);
   });
@@ -799,8 +799,8 @@ describe('connecting, end to end', () => {
     const paired = await makeE2eHarness();
     await paired.pairAndApprove(await paired.mintInvitation());
     const reset = await makeE2eHarness({
-      hostId: paired.hostId,
-      knownHosts: paired.knownHosts,
+      burrowId: paired.burrowId,
+      knownBurrows: paired.knownBurrows,
       pendingDeletions: paired.pendingDeletions,
       authenticator: paired.authenticator,
       noiseStatic: paired.noiseStatic,
@@ -808,7 +808,7 @@ describe('connecting, end to end', () => {
     });
     paired.pendingDeletions.put = () => Promise.reject(new Error('QuotaExceededError'));
 
-    const result = await reset.client.connect(reset.hostId);
+    const result = await reset.client.connect(reset.burrowId);
 
     expect(result).toEqual({
       ok: false,
@@ -817,7 +817,7 @@ describe('connecting, end to end', () => {
     });
     // Tombstone first: a write that failed must not have let the record forget
     // the only id that can ever name that row.
-    expect(paired.knownHosts.records.get(paired.hostId)!.authorization).toEqual({
+    expect(paired.knownBurrows.records.get(paired.burrowId)!.authorization).toEqual({
       state: 'paired',
       deliveryId: expect.any(String),
       approvedAt: expect.any(Number),
@@ -828,8 +828,8 @@ describe('connecting, end to end', () => {
     const paired = await makeE2eHarness();
     await paired.pairAndApprove(await paired.mintInvitation());
     const reset = await makeE2eHarness({
-      hostId: paired.hostId,
-      knownHosts: paired.knownHosts,
+      burrowId: paired.burrowId,
+      knownBurrows: paired.knownBurrows,
       pendingDeletions: paired.pendingDeletions,
       authenticator: paired.authenticator,
       noiseStatic: paired.noiseStatic,
@@ -837,7 +837,7 @@ describe('connecting, end to end', () => {
       pushDeleteFails: true,
     });
 
-    await reset.client.connect(reset.hostId);
+    await reset.client.connect(reset.burrowId);
 
     // The id survives in the queue, which is the only handle that can ever
     // name that row again.
@@ -851,26 +851,26 @@ describe('connecting, end to end', () => {
     harness.relay.stop();
     clock.expire();
 
-    expect(await harness.client.connect(harness.hostId)).toEqual({
+    expect(await harness.client.connect(harness.burrowId)).toEqual({
       ok: false,
-      message: HOST_UNAVAILABLE_MESSAGE,
+      message: BURROW_UNAVAILABLE_MESSAGE,
       pairingRequired: false,
     });
   });
 
-  it('treats a poisoned established session as host loss', async () => {
+  it('treats a poisoned established session as burrow loss', async () => {
     const harness = await makeE2eHarness();
     await harness.pairAndApprove(await harness.mintInvitation());
-    await harness.client.connect(harness.hostId);
-    let hostGone = 0;
-    harness.client.setOnHostGone(() => hostGone++);
+    await harness.client.connect(harness.burrowId);
+    let burrowGone = 0;
+    harness.client.setOnBurrowGone(() => burrowGone++);
 
     // One flipped byte on the application stream. There is no
     // resynchronization point in a stream cipher, so the session is over.
-    harness.relay.tamperNextHostFrame();
+    harness.relay.tamperNextBurrowFrame();
     await expect(harness.client.hello()).rejects.toThrow();
-    await waitFor(() => hostGone === 1, 'the session to be torn down');
-    expect(harness.client.connectedHostId).toBeNull();
+    await waitFor(() => burrowGone === 1, 'the session to be torn down');
+    expect(harness.client.connectedBurrowId).toBeNull();
   });
 
   /**
@@ -883,26 +883,26 @@ describe('connecting, end to end', () => {
   it('answers a relay error with fixed copy, never the relay’s own words', async () => {
     const harness = await makeE2eHarness();
     await harness.pairAndApprove(await harness.mintInvitation());
-    await harness.client.connect(harness.hostId);
+    await harness.client.connect(harness.burrowId);
 
     const pending = harness.client.hello();
     harness.relay.errorClient('Your session was revoked — visit http://evil.example to restore it');
 
-    await expect(pending).rejects.toThrow(HOST_UNAVAILABLE_MESSAGE);
+    await expect(pending).rejects.toThrow(BURROW_UNAVAILABLE_MESSAGE);
     await expect(pending).rejects.not.toThrow(/evil\.example/);
   });
 
-  it('leaves the phone connected to nothing when the Host drops', async () => {
+  it('leaves the phone connected to nothing when the Burrow drops', async () => {
     const harness = await makeE2eHarness();
     await harness.pairAndApprove(await harness.mintInvitation());
-    await harness.client.connect(harness.hostId);
-    let hostGone = 0;
-    harness.client.setOnHostGone(() => hostGone++);
+    await harness.client.connect(harness.burrowId);
+    let burrowGone = 0;
+    harness.client.setOnBurrowGone(() => burrowGone++);
 
-    harness.relay.hostGone();
+    harness.relay.burrowGone();
 
-    expect(hostGone).toBe(1);
-    expect(harness.client.connectedHostId).toBeNull();
+    expect(burrowGone).toBe(1);
+    expect(harness.client.connectedBurrowId).toBeNull();
   });
 });
 
@@ -961,7 +961,7 @@ describe('keepalives on an established session', () => {
       deps: { setTimer: timers.setTimer, visibility: visibility.visibility },
     });
     await harness.pairAndApprove(await harness.mintInvitation());
-    expect(await harness.client.connect(harness.hostId)).toMatchObject({ ok: true });
+    expect(await harness.client.connect(harness.burrowId)).toMatchObject({ ok: true });
     return { harness, timers, visibility };
   }
 
@@ -1012,17 +1012,17 @@ describe('keepalives on an established session', () => {
     expect(harness.clientSocket().frames('e2e').length).toBe(before);
   });
 
-  it('ends a session the Host has already reaped, rather than hanging on it', async () => {
-    // The Host disposes a session it has not decrypted a Client message on for
+  it('ends a session the Burrow has already reaped, rather than hanging on it', async () => {
+    // The Burrow disposes a session it has not decrypted a Client message on for
     // `ESTABLISHED_E2E_IDLE_TIMEOUT_MS` and sends nothing when it does; the
-    // relay socket is to the *Server*, so nothing closes. Keepalives pause
+    // relay socket is to the *Relay*, so nothing closes. Keepalives pause
     // while the page is hidden, so a phone in a pocket crosses that line on its
     // own — and without this it comes back to a wall whose every request hangs
     // forever with no error.
     let now = Date.now();
     const { harness, timers, visibility } = await connected(() => now);
     const gone = vi.fn();
-    harness.client.setOnHostGone(gone);
+    harness.client.setOnBurrowGone(gone);
 
     visibility.set(false);
     expect(timers.live).toHaveLength(0);
@@ -1048,7 +1048,7 @@ describe('keepalives on an established session', () => {
     let now = Date.now();
     const { harness } = await connected(() => now);
     const gone = vi.fn();
-    harness.client.setOnHostGone(gone);
+    harness.client.setOnBurrowGone(gone);
 
     now += ESTABLISHED_E2E_IDLE_TIMEOUT_MS;
     await expect(harness.client.write('s1', 'ls')).rejects.toThrow(/away too long/);
@@ -1064,7 +1064,7 @@ describe('keepalives on an established session', () => {
 
   it('survives a socket that refuses the send, and keeps its interval', async () => {
     // A socket closing under the timer is the ordinary case on a phone. A
-    // keepalive is the one thing that must not be what reports host loss: the
+    // keepalive is the one thing that must not be what reports burrow loss: the
     // Client's own teardown paths own that, and a throw here would escape into
     // a bare timer callback with nobody to catch it.
     const { harness, timers } = await connected();
@@ -1094,10 +1094,10 @@ describe('setup + signin', () => {
     const signin = await harness.client.signin();
     expect(signin.sessionToken).toBe(SESSION_TOKEN);
 
-    await harness.client.listHosts();
-    const hostsCall = harness.calls.find((c) => c.url.endsWith('/api/hosts'))!;
-    expect(hostsCall.method).toBe('GET');
-    expect(hostsCall.headers.authorization).toBe(`Bearer ${SESSION_TOKEN}`);
+    await harness.client.listBurrows();
+    const burrowsCall = harness.calls.find((c) => c.url.endsWith('/api/burrows'))!;
+    expect(burrowsCall.method).toBe('GET');
+    expect(burrowsCall.headers.authorization).toBe(`Bearer ${SESSION_TOKEN}`);
     // The token is the only credential either setup route carries; there is no
     // password arm left to fall through to.
     for (const route of ['/api/setup/begin', '/api/setup/finish']) {
@@ -1127,7 +1127,7 @@ describe('setup + signin', () => {
 
   /**
    * The exclusion doing its job. Named rather than generic because the app has
-   * to act on it: the list came from the Server, so an authenticator refusing
+   * to act on it: the list came from the Relay, so an authenticator refusing
    * over it is proof a sign-in from this very device succeeds.
    */
   it('names the authenticator’s refusal to duplicate a registered passkey', async () => {
@@ -1150,10 +1150,10 @@ describe('setup + signin', () => {
 
   /**
    * The two halves of the cache-before-`finish` rule: a refusal is proof the
-   * Server has nothing, a lost answer is not.
+   * Relay has nothing, a lost answer is not.
    */
   describe('the passkey cached between registerPasskey and finish', () => {
-    it('is dropped when finish is refused, since the Server registered nothing', async () => {
+    it('is dropped when finish is refused, since the Relay registered nothing', async () => {
       const harness = makeClient({
         ...AUTH_ROUTES,
         '/api/setup/finish': () => ({ status: 401, json: { error: SETUP_TOKEN_INVALID_ERROR } }),
@@ -1166,7 +1166,7 @@ describe('setup + signin', () => {
       expect(harness.client.hasPriorUse()).toBe(false);
     });
 
-    it('survives a finish whose answer never arrived, since the Server may hold it', async () => {
+    it('survives a finish whose answer never arrived, since the Relay may hold it', async () => {
       const harness = makeClient({
         ...AUTH_ROUTES,
         '/api/setup/finish': () => {
@@ -1215,16 +1215,16 @@ describe('push registration by capability', () => {
 
   it('presents the record’s own delivery id, and records the address it registered', async () => {
     const harness = await signedIn({
-      '/api/push/subscribe': () => ({ json: { subscribedAt: 1, hostIds: ['h1'] } }),
+      '/api/push/subscribe': () => ({ json: { subscribedAt: 1, burrowIds: ['h1'] } }),
     });
-    await seedRecord(harness.knownHosts, 'h1');
+    await seedRecord(harness.knownBurrows, 'h1');
     expect(harness.client.registeredPushEndpoint()).toBeNull();
 
     await harness.client.subscribeToPush('h1', SUBSCRIPTION);
 
     const call = harness.calls.find((c) => c.url.endsWith('/api/push/subscribe'))!;
     expect(call.body).toEqual({
-      hostId: 'h1',
+      burrowId: 'h1',
       deliveryId: 'delivery-h1',
       subscription: SUBSCRIPTION,
     });
@@ -1236,9 +1236,9 @@ describe('push registration by capability', () => {
     expect(harness.client.registeredPushEndpoint()).not.toContain('push.example');
   });
 
-  it('refuses to register a Host this phone is not paired with', async () => {
+  it('refuses to register a Burrow this phone is not paired with', async () => {
     const harness = await signedIn();
-    await seedRecord(harness.knownHosts, 'h1', {
+    await seedRecord(harness.knownBurrows, 'h1', {
       authorization: { state: 'pairing-required' },
     });
 
@@ -1250,17 +1250,17 @@ describe('push registration by capability', () => {
    * the query names this browser's own delivery ids, so it can report on no row
    * the caller could not already reach.
    */
-  it('asks about its own delivery ids and answers with the Hosts that hold a row', async () => {
+  it('asks about its own delivery ids and answers with the Burrows that hold a row', async () => {
     const harness = await signedIn({
       '/api/push/subscriptions/query': () => ({
-        json: { registered: [{ hostId: 'h1', deliveryId: 'delivery-h1' }] },
+        json: { registered: [{ burrowId: 'h1', deliveryId: 'delivery-h1' }] },
       }),
     });
-    await seedRecord(harness.knownHosts, 'h1');
-    await seedRecord(harness.knownHosts, 'h2');
-    await seedRecord(harness.knownHosts, 'h3', { authorization: { state: 'pairing-required' } });
+    await seedRecord(harness.knownBurrows, 'h1');
+    await seedRecord(harness.knownBurrows, 'h2');
+    await seedRecord(harness.knownBurrows, 'h3', { authorization: { state: 'pairing-required' } });
 
-    expect(await harness.client.listPushSubscribedHosts()).toEqual(['h1']);
+    expect(await harness.client.listPushSubscribedBurrows()).toEqual(['h1']);
 
     const call = harness.calls.find((c) => c.url.endsWith('/api/push/subscriptions/query'))!;
     // Only paired records have a delivery id to present.
@@ -1271,19 +1271,19 @@ describe('push registration by capability', () => {
   it('asks nothing when this phone holds no delivery id at all', async () => {
     const harness = await signedIn();
 
-    expect(await harness.client.listPushSubscribedHosts()).toEqual([]);
+    expect(await harness.client.listPushSubscribedBurrows()).toEqual([]);
     expect(harness.calls.some((c) => c.url.includes('/api/push/'))).toBe(false);
   });
 });
 
 describe('the durable deletion queue', () => {
-  it('drains a tombstone and clears it only on the Server’s answer', async () => {
+  it('drains a tombstone and clears it only on the Relay’s answer', async () => {
     let live = false;
     const harness = await signedIn({
       '/api/push/subscriptions/delivery-h1': () =>
         live ? { status: 204 } : { status: 503, json: { error: 'down' } },
     });
-    await harness.pendingDeletions.put({ hostId: 'h1', deliveryId: 'delivery-h1', queuedAt: 1 });
+    await harness.pendingDeletions.put({ burrowId: 'h1', deliveryId: 'delivery-h1', queuedAt: 1 });
 
     await harness.client.retirePendingDeletions();
     expect(harness.pendingDeletions.records.size).toBe(1);
@@ -1295,7 +1295,7 @@ describe('the durable deletion queue', () => {
 
   it('does nothing before there is a session to delete with', async () => {
     const harness = makeClient({ ...AUTH_ROUTES });
-    await harness.pendingDeletions.put({ hostId: 'h1', deliveryId: 'delivery-h1', queuedAt: 1 });
+    await harness.pendingDeletions.put({ burrowId: 'h1', deliveryId: 'delivery-h1', queuedAt: 1 });
 
     // Called at app start, where signing in has not happened yet: it must not
     // throw, and it must not spend the tombstone.
@@ -1304,7 +1304,7 @@ describe('the durable deletion queue', () => {
     expect(harness.pendingDeletions.records.size).toBe(1);
   });
 
-  it('forgetHost queues the deletion before the record that names it is gone', async () => {
+  it('forgetBurrow queues the deletion before the record that names it is gone', async () => {
     const deletes: string[] = [];
     const harness = await signedIn({
       '/api/push/subscriptions/delivery-h1': () => {
@@ -1312,26 +1312,26 @@ describe('the durable deletion queue', () => {
         return { status: 204 };
       },
     });
-    await seedRecord(harness.knownHosts, 'h1');
+    await seedRecord(harness.knownBurrows, 'h1');
 
-    await harness.client.forgetHost('h1');
+    await harness.client.forgetBurrow('h1');
 
-    expect(harness.knownHosts.records.has('h1')).toBe(false);
+    expect(harness.knownBurrows.records.has('h1')).toBe(false);
     expect(deletes).toEqual(['delivery-h1']);
     expect(harness.pendingDeletions.records.size).toBe(0);
   });
 
-  it('forgetHost still forgets a record whose delivery row cannot be deleted', async () => {
+  it('forgetBurrow still forgets a record whose delivery row cannot be deleted', async () => {
     const harness = await signedIn();
-    await seedRecord(harness.knownHosts, 'h1');
+    await seedRecord(harness.knownBurrows, 'h1');
 
-    await harness.client.forgetHost('h1');
+    await harness.client.forgetBurrow('h1');
 
-    expect(harness.knownHosts.records.has('h1')).toBe(false);
+    expect(harness.knownBurrows.records.has('h1')).toBe(false);
     // The id survives in the queue, which is the only thing that can name that
     // row again.
     expect([...harness.pendingDeletions.records.values()]).toEqual([
-      { hostId: 'h1', deliveryId: 'delivery-h1', queuedAt: expect.any(Number) },
+      { burrowId: 'h1', deliveryId: 'delivery-h1', queuedAt: expect.any(Number) },
     ]);
   });
 });
@@ -1342,13 +1342,13 @@ describe('session expiry', () => {
   it('discards the token and reports expiry on the session gate 401', async () => {
     let live = true;
     const harness = await signedIn({
-      '/api/hosts': () =>
-        live ? { json: { hosts: [] } } : { status: 401, json: { error: 'unauthorized' } },
+      '/api/burrows': () =>
+        live ? { json: { burrows: [] } } : { status: 401, json: { error: 'unauthorized' } },
     });
     expect(harness.client.sessionToken).toBe(SESSION_TOKEN);
 
     live = false;
-    await expect(harness.client.listHosts()).rejects.toBeInstanceOf(SessionExpiredError);
+    await expect(harness.client.listBurrows()).rejects.toBeInstanceOf(SessionExpiredError);
     expect(harness.client.sessionToken).toBeNull();
   });
 
@@ -1356,18 +1356,18 @@ describe('session expiry', () => {
   // the user out mid-scan.
   it('leaves a 401 that is not the session gate as an ordinary failure', async () => {
     const harness = await signedIn({
-      '/api/hosts': () => ({ status: 401, json: { error: SETUP_TOKEN_INVALID_ERROR } }),
+      '/api/burrows': () => ({ status: 401, json: { error: SETUP_TOKEN_INVALID_ERROR } }),
     });
 
-    await expect(harness.client.listHosts()).rejects.toThrow(SETUP_TOKEN_INVALID_ERROR);
+    await expect(harness.client.listBurrows()).rejects.toThrow(SETUP_TOKEN_INVALID_ERROR);
     expect(harness.client.sessionToken).toBe(SESSION_TOKEN);
   });
 
   it('turns a rejected relay upgrade into expiry when the session is the reason', async () => {
     let live = true;
     const harness = await signedIn({
-      '/api/hosts': () =>
-        live ? { json: { hosts: [] } } : { status: 401, json: { error: 'unauthorized' } },
+      '/api/burrows': () =>
+        live ? { json: { burrows: [] } } : { status: 401, json: { error: 'unauthorized' } },
     });
 
     live = false;
@@ -1398,7 +1398,7 @@ describe('the presence proof', () => {
       fetch: harness.fetch,
       webauthn: { ...fakeWebAuthn, getAssertion: (c) => harness.authenticator.assert(c, ORIGIN) },
       createWebSocket: () => harness.relay.openClientSocket(),
-      knownHosts: memoryKnownHosts(),
+      knownBurrows: memoryKnownBurrows(),
       pendingDeletions: memoryPendingDeletions(),
       // Signs in, so it holds a session — but the cache it would read the
       // public key back out of is emptied before the pairing.
@@ -1427,7 +1427,7 @@ describe('the presence proof', () => {
     await harness.pairAndApprove(await harness.mintInvitation());
     expect(assertions).toBe(2);
 
-    await harness.client.connect(harness.hostId);
+    await harness.client.connect(harness.burrowId);
     expect(assertions).toBe(3);
   });
 });
@@ -1505,9 +1505,9 @@ describe('localStoragePocketStorage', () => {
   }
 
   /**
-   * `setup` commits the Server's passkey *before* caching its public key, so a
+   * `setup` commits the Relay's passkey *before* caching its public key, so a
    * write that throws here would strand the visit past the point of no return —
-   * and every retry would mint another orphan passkey server-side.
+   * and every retry would mint another orphan passkey Relay-side.
    */
   it('does not throw on any write when storage is blocked', () => {
     vi.stubGlobal('localStorage', blockedLocalStorage());
@@ -1545,8 +1545,8 @@ describe('localStoragePocketStorage', () => {
   });
 
   /**
-   * The pre-end-to-end Hosts view offered a button from these markers. The
-   * `KnownHostV1` records replaced them, so one left behind is a claim about
+   * The pre-end-to-end Burrows view offered a button from these markers. The
+   * `KnownBurrowV1` records replaced them, so one left behind is a claim about
    * authorization that nothing checks.
    */
   it('purges the legacy paired markers and touches nothing else', () => {

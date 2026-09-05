@@ -98,13 +98,13 @@ export const RULES = [
     },
   },
   {
-    // The setup password belongs to Server state. Supplying the former
+    // The setup password belongs to Relay state. Supplying the former
     // environment input from any installer path would restore the exact
     // operator-chosen credential this audit is meant to exclude.
     //
     // Anchored on the assignment, not the bare identifier: the name alone would
     // make a comment telling an operator the key is now inert a lint failure —
-    // `config/server.env` is preserved byte-for-byte, so an upgraded install
+    // `config/relay.env` is preserved byte-for-byte, so an upgraded install
     // keeps exporting a dead one and naming it is how that gets explained.
     rule: 'Credentials at rest — no installer supplies a setup password as configuration',
     forbidden: true,
@@ -129,8 +129,8 @@ export const RULES = [
   },
   {
     // The management path may reveal the credential, but must read the value
-    // the Server persisted rather than recreating an operator-controlled source.
-    rule: 'Credentials at rest — manage show-password reads the Server state file',
+    // the Relay persisted rather than recreating an operator-controlled source.
+    rule: 'Credentials at rest — manage show-password reads the Relay state file',
     patterns: {
       macOS: /password_file="\$STATE_DIR\/setup-password\.json"/,
       Linux: /password_file="\$STATE_DIR\/setup-password\.json"/,
@@ -141,7 +141,7 @@ export const RULES = [
   {
     // Each installer reads the record twice — `manage show-password` and the
     // candidate probe — in scopes that cannot share a helper, and each spells
-    // the shape out. `isSetupPassword` in `server/src/setup-password.ts` is the
+    // the shape out. `isSetupPassword` in `relay/src/setup-password.ts` is the
     // real definition; nothing links these copies to it, so a drift to `{32}`
     // would halve the entropy the audit claims with every other rule green.
     // Counted, because matching one copy would let the other be relaxed alone.
@@ -154,14 +154,14 @@ export const RULES = [
     exactMatches: { macOS: 2, Linux: 2, Windows: 2 },
   },
   {
-    // Windows-only, and the only thing enforcing owner-only on `hosts.json`
+    // Windows-only, and the only thing enforcing owner-only on `burrows.json`
     // there, so an enumeration that failed must not print the same Note as an
     // account that was never created.
     rule: 'Credentials at rest — manage verify fails when state\\ cannot be enumerated',
     patterns: { Windows: /state\\ could not be enumerated/ },
     skip: {
       macOS:
-        'the per-file walk is Windows-only — `server/src/state.ts` writes 0o600 and it holds on unix, so the mode check on `state/` is the whole control (docs/specs/security-remote.md -> "Credentials at rest")',
+        'the per-file walk is Windows-only — `relay/src/state.ts` writes 0o600 and it holds on unix, so the mode check on `state/` is the whole control (docs/specs/security-remote.md -> "Credentials at rest")',
       Linux:
         'the per-file walk is Windows-only, for the reason stated in the macOS skip; Linux checks mode and owner on `state/` itself',
     },
@@ -208,7 +208,7 @@ export const RULES = [
   },
   {
     // Anchored on the three paths that matter. A bare `chmod 0700` also matches
-    // `run-server`, `manage` and the probe state dir, and `Protect-Path` has
+    // `run-relay`, `manage` and the probe state dir, and `Protect-Path` has
     // six hits, so relaxing config/+state/ to 0755 passed.
     //
     // Every path is named, because a pattern that stops short of the last one
@@ -245,14 +245,14 @@ export const RULES = [
     },
   },
   {
-    rule: 'Credentials at rest — hosts.json permanently closes installer offer bootstrap',
+    rule: 'Credentials at rest — burrows.json permanently closes installer offer bootstrap',
     patterns: {
       macOS:
-        /if \[ -e "\$STATE_DIR\/hosts\.json" \]; then\n\s*rm -f "\$ENROLL_OFFER_FILE"/,
+        /if \[ -e "\$STATE_DIR\/burrows\.json" \]; then\n\s*rm -f "\$ENROLL_OFFER_FILE"/,
       Linux:
-        /if \[ -e "\$STATE_DIR\/hosts\.json" \]; then\n\s*rm -f "\$ENROLL_OFFER_FILE"/,
+        /if \[ -e "\$STATE_DIR\/burrows\.json" \]; then\n\s*rm -f "\$ENROLL_OFFER_FILE"/,
       Windows:
-        /if \(Test-Path -LiteralPath \(Join-Path \$STATE_DIR 'hosts\.json'\)\) \{\n\s*Remove-Item -LiteralPath \$ENROLL_OFFER_FILE/,
+        /if \(Test-Path -LiteralPath \(Join-Path \$STATE_DIR 'burrows\.json'\)\) \{\n\s*Remove-Item -LiteralPath \$ENROLL_OFFER_FILE/,
     },
   },
   {
@@ -301,10 +301,10 @@ export const RULES = [
     },
   },
   {
-    // `config/server.env` can still carry operator-supplied private VAPID keys.
+    // `config/relay.env` can still carry operator-supplied private VAPID keys.
     // macOS reaches the owner-only property with `umask 077` covering the
     // heredoc; the other two bind creation and restriction as one span.
-    rule: 'Credentials at rest — config/server.env is created owner-only',
+    rule: 'Credentials at rest — config/relay.env is created owner-only',
     patterns: {
       macOS: /umask 077\n\s*cat > "\$ENV_FILE"/,
       Linux: /: > "\$ENV_FILE"\n\s*chmod 0600 "\$ENV_FILE"/,
@@ -380,11 +380,11 @@ export const RULES = [
     // it names the missing keys and sends the operator to `rm`, where the
     // bind-host guard below it says "fix it" about a file with nothing in it.
     // `scripts/installer-verify-test.mjs` drives the unix `env_missing_keys`.
-    rule: 'Credentials at rest — a half-written config/server.env is named, not preserved',
+    rule: 'Credentials at rest — a half-written config/relay.env is named, not preserved',
     patterns: {
-      macOS: /config\/server\.env is missing installer-owned keys/,
-      Linux: /config\/server\.env is missing installer-owned keys/,
-      Windows: /config\\server\.env is missing installer-owned keys/,
+      macOS: /config\/relay\.env is missing installer-owned keys/,
+      Linux: /config\/relay\.env is missing installer-owned keys/,
+      Windows: /config\\relay\.env is missing installer-owned keys/,
     },
   },
   {
@@ -396,7 +396,7 @@ export const RULES = [
     //
     // Placement is textual; lifecycle is executable. CI's Linux test-mode
     // install requires rotation across two pre-enrollment runs, then creates
-    // hosts.json and requires a third run to leave no offer.
+    // burrows.json and requires a third run to leave no offer.
     rule: 'Credentials at rest — the enrollment offer is written under run/, never config/ or state/',
     patterns: {
       macOS: /RUN_DIR="\$INSTALL_ROOT\/run"\n\s*ENROLL_OFFER_FILE="\$RUN_DIR\//,

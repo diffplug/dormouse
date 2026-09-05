@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 
 /**
- * Phone-sized frame for the Pocket auth stories (SetupOrSignin, HostsView),
+ * Phone-sized frame for the Pocket auth stories (SetupOrSignin, BurrowsView),
  * sitting on the app-bg surface — matches the real app shell. Uses a faint
  * app-fg outline for definition since panel-border is transparent in many
  * themes (see docs/specs/theme.md).

@@ -29,7 +29,7 @@ const CFT_SUFFIXES = [
 /**
  * Where a Chrome might be, in the order this harness prefers one.
  *
- * **`agent-browser`'s own download leads**, because it is the browser the Host
+ * **`agent-browser`'s own download leads**, because it is the browser the Burrow
  * side is already being driven with — one Chrome for both sides means one set
  * of behaviours to explain. The Playwright cache is second because
  * `@playwright/test` may have put a build there, but only as a fallback: a
@@ -122,7 +122,7 @@ export function resolveChrome() {
  * Launch an isolated Chrome for the Pocket side and wait for its DevTools port.
  *
  * **A profile of its own, under the run directory.** The Pocket side is a
- * different device from the Host's browser in every way that matters here — its
+ * different device from the Burrow's browser in every way that matters here — its
  * own passkeys, its own IndexedDB, its own service worker — so sharing a
  * profile with anything would make a second run start half-paired.
  *

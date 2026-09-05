@@ -39,7 +39,7 @@ let trackedCache = null;
 
 /**
  * Every tracked file, as repo-relative POSIX paths. Tracked rather than walked,
- * so build output — `server-lib-common/dist/` holds a compiled copy of every
+ * so build output — `remote-lib-common/dist/` holds a compiled copy of every
  * security module — cannot make a lint's answer depend on whether someone ran a
  * build.
  *

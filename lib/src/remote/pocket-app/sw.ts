@@ -2,8 +2,8 @@
  * Pocket's service worker: a push transport, and deliberately nothing more
  * (`docs/specs/pocket-app.md` -> Installable web app).
  *
- * **This is where a push is finally readable** — the Host seals to this
- * Client's own static and the Server forwards ciphertext
+ * **This is where a push is finally readable** — the Burrow seals to this
+ * Client's own static and the Relay forwards ciphertext
  * (`docs/specs/remote-security-model.md` -> Push sealing) — which is why the
  * worker is bundled rather than hand-copied, and imports the same `openPush`
  * and `boundedPushText` the rest of the system runs.
@@ -20,15 +20,15 @@ import {
   isSealedPushV1,
   openPush,
   utf8Decode,
-} from 'server-lib-common';
+} from 'remote-lib-common';
 
-import type { KnownHostStore } from '../client/pocket-db';
+import type { KnownBurrowStore } from '../client/pocket-db';
 
 /**
- * Longest title/body this sink will render. The Host caps the same fields
+ * Longest title/body this sink will render. The Burrow caps the same fields
  * before sealing them; this is the belt to that suspenders, applied where the
  * untrusted string is finally displayed and where — unlike before the seal —
- * it is the *only* remaining boundary, since the Server cannot read what it
+ * it is the *only* remaining boundary, since the Relay cannot read what it
  * forwards (`docs/specs/alert.md` -> Push notifications).
  */
 const PUSH_TEXT_LIMIT = 200;
@@ -60,7 +60,7 @@ export interface PocketNotification {
  */
 export async function notificationForPush(
   payload: unknown,
-  store: KnownHostStore,
+  store: KnownBurrowStore,
 ): Promise<PocketNotification> {
   try {
     return (await openNotification(payload, store)) ?? GENERIC_PUSH_NOTIFICATION;
@@ -72,23 +72,23 @@ export async function notificationForPush(
 /** The readable case, or `null` for every way it can fail to be one. */
 async function openNotification(
   payload: unknown,
-  store: KnownHostStore,
+  store: KnownBurrowStore,
 ): Promise<PocketNotification | null> {
   if (!payload || typeof payload !== 'object') return null;
-  const envelope = payload as { hostId?: unknown };
+  const envelope = payload as { burrowId?: unknown };
   // Bounded before it becomes a database key.
-  if (!isE2eId(envelope.hostId) || !isSealedPushV1(payload)) return null;
+  if (!isE2eId(envelope.burrowId) || !isSealedPushV1(payload)) return null;
 
-  const record = await store.get(envelope.hostId);
+  const record = await store.get(envelope.burrowId);
   // A `pairing-required` record kept its pin but lost its authorization, so it
-  // is not a live Client and its Host's pushes are not ours to render — the
-  // same "cannot decrypt" as an unknown Host
+  // is not a live Client and its Burrow's pushes are not ours to render — the
+  // same "cannot decrypt" as an unknown Burrow
   // (`docs/specs/remote-security-model.md` -> Connection).
   if (!record || record.authorization.state !== 'paired') return null;
 
   const plaintext = await openPush({
     clientStaticPrivateKey: record.clientStaticKeyPair.privateKey,
-    hostStaticPublicKey: fromBase64Url(record.hostStaticPublicKey),
+    burrowStaticPublicKey: fromBase64Url(record.burrowStaticPublicKey),
     sealed: payload,
   });
   if (!plaintext) return null;
@@ -96,8 +96,8 @@ async function openNotification(
   const fields: unknown = JSON.parse(utf8Decode(plaintext));
   if (!fields || typeof fields !== 'object') return null;
   const { title, body, tag } = fields as { title?: unknown; body?: unknown; tag?: unknown };
-  // Re-validated and re-bounded at the sink even though the Host bounded it:
-  // this text is terminal-supplied, and the Server can no longer be the second
+  // Re-validated and re-bounded at the sink even though the Burrow bounded it:
+  // this text is terminal-supplied, and the Relay can no longer be the second
   // pair of eyes it used to be.
   const bounded = (value: unknown, fallback: string) =>
     boundedPushText(value, { limit: PUSH_TEXT_LIMIT, fallback });
@@ -123,7 +123,7 @@ function notificationOptions(notification: PocketNotification): NotificationOpti
 }
 
 /** Wire this worker's four handlers onto `scope`. */
-export function installPocketWorker(scope: WorkerScope, store: KnownHostStore): void {
+export function installPocketWorker(scope: WorkerScope, store: KnownBurrowStore): void {
   scope.addEventListener('install', () => {
     // Nothing to precache, so there is no reason to wait for the old worker.
     scope.skipWaiting();

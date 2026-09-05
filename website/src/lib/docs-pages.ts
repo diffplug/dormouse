@@ -33,7 +33,7 @@ export type DocsPage = {
    *
    * The generated references are published where a reader may never reach the
    * site — the guide is a Marketplace listing — so each names the documents
-   * that must offer a way in. Running a relay server is not part of installing
+   * that must offer a way in. Running a Relay is not part of installing
    * an editor extension, so the guide carries no self-host obligation.
    *
    * `homepage` is the on-site obligation: the marketing page is the one most
@@ -56,7 +56,7 @@ export const DOCS_PAGES: readonly DocsPage[] = [
   { path: "/docs/security", module: "./pages/SecurityDocs.tsx", label: "Security", linkedFrom: ROOT_README_AND_HOME },
   { path: "/supply-chain", module: "./pages/SupplyChain.tsx", label: "Supply chain", linkedFrom: ["homepage"] },
   { path: "/docs/self-host", module: "./pages/SelfHostDocs.tsx", label: "How to self-host", linkedFrom: ROOT_README_AND_HOME },
-  { path: "/hosted", module: "./pages/Hosted.tsx", label: "Pay us to host", linkedFrom: EVERYWHERE },
+  { path: "/hosted", module: "./pages/Hosted.tsx", label: "Dormouse Hosted", linkedFrom: EVERYWHERE },
   { path: "/docs/agent-skill", module: "./pages/AgentSkillDocs.tsx", label: "dor agent skill", linkedFrom: EVERYWHERE },
   { path: "/docs/dor", module: "./pages/DorDocs.tsx", label: "dor CLI reference", linkedFrom: EVERYWHERE },
 ];

@@ -45,7 +45,7 @@ const controlToken = randomBytes(24).toString('hex');
 // Overloading one token would hand the bridge to every spawned shell for free.
 const bridgeToken = randomBytes(24).toString('hex');
 const viteOrigin = `http://localhost:${vitePort}`;
-// The remote Host persists its enrollment + ACL here, under the harness's own
+// The Burrow persists its enrollment + ACL here, under the harness's own
 // temp dir so a dev run never touches the installed app's state.
 const stateDir = path.join(os.tmpdir(), `dormouse-${process.pid}-browser-state`);
 
@@ -105,9 +105,9 @@ const fireAndForget = {
   pty_kill: ({ id }) => writeSidecar('pty:kill', { id }),
   pty_request_init: () => writeSidecar('pty:requestInit'),
   dor_control_response: ({ response }) => writeSidecar('dor:controlResponse', response),
-  // The remote Host's whole bridge rides one passthrough, exactly as it does
-  // through Rust (`remote_host_command` in src-tauri/src/lib.rs).
-  remote_host_command: ({ payload }) => writeSidecar('remoteHost:command', payload),
+  // The Burrow's whole bridge rides one passthrough, exactly as it does
+  // through Rust (`burrow_command` in src-tauri/src/lib.rs).
+  burrow_command: ({ payload }) => writeSidecar('burrow:command', payload),
   kill_sidecar_now: () => shutdown(),
 };
 
@@ -234,7 +234,7 @@ function startSidecar() {
     },
   });
   log(`sidecar pid=${sidecar.pid}`);
-  log(`remote host state dir: ${stateDir}`);
+  log(`burrow state dir: ${stateDir}`);
 
   createInterface({ input: sidecar.stdout }).on('line', (line) => {
     let msg;

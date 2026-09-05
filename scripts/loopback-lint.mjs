@@ -18,17 +18,18 @@
  * harness — or sit on ALLOWED below with a stated reason.
  *
  * `scripts/loopback-lint-selftest.mjs` proves each bind form is load-bearing by
- * adding one and requiring this lint to go red.
+ * adding one and requiring this lint to go red, and goes red itself on a form in
+ * BIND_FORMS it has no fixture for.
  *
  * What it deliberately does NOT do, so nobody mistakes it for the whole rule:
  *   - It cannot tell whether the guard is actually *called* on every request,
  *     only that the file knows the guard exists. The audit still owns that.
- *   - It knows the bind forms listed at LISTEN_RE and no others. A library
+ *   - It knows the bind forms listed at BIND_FORMS and no others. A library
  *     nobody has added yet spells its bind some way this file has never seen,
  *     so adding a server dependency means adding its spelling here.
  *   - Outside `ws`, it matches only an explicit loopback host. A listener that
  *     binds every interface (`.listen(port)` with no host) is a different and
- *     larger problem, and `server/` does it deliberately from config, so
+ *     larger problem, and `relay/` does it deliberately from config, so
  *     flagging it here would be noise. A host built at runtime
  *     (`.listen(port, hostVar)`, `serve({ hostname: bindHost })`) is invisible
  *     to a regex and always will be — that is the ceiling of a textual check,
@@ -54,9 +55,9 @@
  *      shape moved and this lint has quietly stopped checking anything.
  */
 import { readFileSync, existsSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { trackedFiles } from './lint-kit.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -81,12 +82,6 @@ const GUARD_REFERENCES = ['loopback-guard', 'dev-host-guard'];
 // `@hono/node-server` binds were invisible here while `docs/specs/security-local.md` claimed a
 // new loopback bind fails the build.
 //
-//   .listen(<port>, '127.0.0.1', …)             node, positional
-//   .listen({ host: '127.0.0.1', … })           node, options object
-//   serve({ hostname: '127.0.0.1', … })         @hono/node-server
-//   new WebSocketServer({ host: '127.0.0.1' })  ws, explicit loopback
-//   new WebSocketServer({ port: … })            ws, any port at all
-//
 // For `.listen` the host argument is what separates a TCP bind from a
 // UDS/named-pipe listen, which passes a single path and must not match. `ws` is
 // the exception: a `WebSocketServer` given a `port` binds every interface,
@@ -96,18 +91,27 @@ const GUARD_REFERENCES = ['loopback-guard', 'dev-host-guard'];
 // line by line: a bind is routinely wrapped across lines, and the `\s*` /
 // `[^}]*?` spans already cross newlines.
 const LOOPBACK = "['\"](?:127\\.0\\.0\\.1|localhost)['\"]";
-const LISTEN_RE = new RegExp(
-  '(?:'
-  + `\\.listen\\(\\s*(?:`
-  + `[^,)]+,\\s*${LOOPBACK}`                          // node, positional
-  + `|\\{[^}]*?host\\s*:\\s*${LOOPBACK}`               // node, options object
-  + `)`
-  + `|\\bserve\\(\\s*\\{[^}]*?hostname\\s*:\\s*${LOOPBACK}` // @hono/node-server
-  + '|\\bnew\\s+(?:WebSocket\\.Server|WebSocketServer)\\(\\s*\\{[^}]*?'
-  + `(?:host\\s*:\\s*${LOOPBACK}|port\\s*:)`           // ws
-  + ')',
-  's',
-);
+// One branch for both `ws` spellings, not one each: a per-spelling branch is a
+// branch that can rot alone, which is how `WebSocket\.Relay` sat here matching
+// nothing while the `WebSocketServer` branch beside it kept the lint green.
+const WS_NEW = '\\bnew\\s+WebSocket\\.?Server\\(\\s*\\{[^}]*?';
+
+/**
+ * Every bind form `LISTEN_RE` looks for, one entry per alternative — the
+ * inventory `docs/specs/security-local.md` -> "Loopback Listeners" points at
+ * rather than repeats. `scripts/loopback-lint-selftest.mjs` reads these labels
+ * and goes red on any form it has no fixture for: an alternative that nothing
+ * exercises is a claim, not a check.
+ */
+const BIND_FORMS = [
+  { label: 'node, positional', re: `\\.listen\\(\\s*[^,)]+,\\s*${LOOPBACK}` },
+  { label: 'node, options object', re: `\\.listen\\(\\s*\\{[^}]*?host\\s*:\\s*${LOOPBACK}` },
+  { label: '@hono/node-server', re: `\\bserve\\(\\s*\\{[^}]*?hostname\\s*:\\s*${LOOPBACK}` },
+  { label: 'ws, explicit loopback host', re: `${WS_NEW}host\\s*:\\s*${LOOPBACK}` },
+  { label: 'ws, port only', re: `${WS_NEW}port\\s*:` },
+];
+
+const LISTEN_RE = new RegExp(BIND_FORMS.map((form) => form.re).join('|'), 's');
 
 const SOURCE_EXT = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/;
 const IS_TEST = /(?:\.test\.|\.spec\.|[\\/]tests?[\\/])/;
@@ -123,14 +127,8 @@ const SELF = new Set([
 
 /** Every tracked, non-test source file, as repo-relative POSIX paths. */
 function sourceFiles() {
-  // -z because a path may contain anything; git would otherwise quote it.
-  const out = execFileSync('git', ['ls-files', '-z'], {
-    cwd: ROOT,
-    encoding: 'utf-8',
-    maxBuffer: 64 * 1024 * 1024,
-  });
-  return out.split('\0').filter((rel) => (
-    rel && !SELF.has(rel) && SOURCE_EXT.test(rel) && !IS_TEST.test(rel)
+  return trackedFiles().filter((rel) => (
+    !SELF.has(rel) && SOURCE_EXT.test(rel) && !IS_TEST.test(rel)
   ));
 }
 

@@ -6,19 +6,20 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  BURROWS_EMPTY,
   CAMERA_BOOTSTRAP_MESSAGE,
-  HostsView,
-  PUSH_SERVER_DISABLED,
+  BurrowsView,
+  PUSH_RELAY_DISABLED,
   SCAN_LABEL,
   PairingCodeView,
   SetupOrSignin,
   pushNoticeState,
-  type HostView,
+  type BurrowView,
   type PushConfigStatus,
 } from './App';
 import type { PushAvailability } from '../client/push-subscribe';
 import {
-  HOSTS,
+  BURROWS,
   buttonNamed as buttonNamedIn,
   pairingCode as pairingCodeIn,
   rowFor as rowForIn,
@@ -40,16 +41,16 @@ afterEach(() => {
   container.remove();
 });
 
-function renderHosts(
+function renderBurrows(
   overrides: {
-    hosts?: HostView[];
+    burrows?: BurrowView[];
     busy?: string | null;
-    isPushSubscribed?: (hostId: string) => boolean;
+    isPushSubscribed?: (burrowId: string) => boolean;
     pushState?: PushAvailability | null;
     pushConfigStatus?: PushConfigStatus;
     onScan?: () => void;
-    onConnect?: (host: HostView) => void;
-    onForget?: (host: HostView) => void;
+    onConnect?: (burrow: BurrowView) => void;
+    onForget?: (burrow: BurrowView) => void;
     onEnablePush?: () => void;
     onRetryPushConfig?: () => void;
   } = {},
@@ -57,8 +58,8 @@ function renderHosts(
   act(() => {
     root.render(
       <StrictMode>
-        <HostsView
-          hosts={overrides.hosts ?? HOSTS}
+        <BurrowsView
+          burrows={overrides.burrows ?? BURROWS}
           busy={overrides.busy ?? null}
           error={null}
           isPushSubscribed={overrides.isPushSubscribed ?? (() => false)}
@@ -78,15 +79,15 @@ function renderHosts(
   });
 }
 
-/** Two Hosts, the second of which the laptop has forgotten. */
-const NEEDS_PAIRING: HostView[] = [
-  HOSTS[0]!,
-  { ...HOSTS[1]!, needsPairing: true },
+/** Two Burrows, the second of which the laptop has forgotten. */
+const NEEDS_PAIRING: BurrowView[] = [
+  BURROWS[0]!,
+  { ...BURROWS[1]!, needsPairing: true },
 ];
 
 /**
- * One Host's row, found through that Host's label rather than by document
- * order — the assertions are about which Host owns which state, so they must
+ * One Burrow's row, found through that Burrow's label rather than by document
+ * order — the assertions are about which Burrow owns which state, so they must
  * not silently pass if the rows are reordered.
  */
 function rowFor(label: string): HTMLElement {
@@ -197,7 +198,7 @@ describe('SetupOrSignin: scanning versus signing in', () => {
   });
 
   /**
-   * `excludeCredentials` carries what the *Server* holds, so an authenticator
+   * `excludeCredentials` carries what the *Relay* holds, so an authenticator
    * refusing over it is proof a sign-in from this device works — where an empty
    * store is merely unproven.
    */
@@ -332,9 +333,9 @@ describe('the two-digit waiting screen', () => {
   });
 });
 
-describe('HostsView actions', () => {
+describe('BurrowsView actions', () => {
   it('offers Connect on a paired row and Pair again where authorization is gone', () => {
-    renderHosts({ hosts: NEEDS_PAIRING });
+    renderBurrows({ burrows: NEEDS_PAIRING });
 
     expect(actionsIn(rowFor('First laptop'))).toEqual(['Connect', 'Remove']);
     expect(actionsIn(rowFor('Second laptop'))).toEqual(['Pair again', 'Remove']);
@@ -343,7 +344,7 @@ describe('HostsView actions', () => {
   it('sends Pair again to the scanner, which is where pairing starts', () => {
     const onScan = vi.fn();
     const onConnect = vi.fn();
-    renderHosts({ hosts: NEEDS_PAIRING, onScan, onConnect });
+    renderBurrows({ burrows: NEEDS_PAIRING, onScan, onConnect });
 
     act(() => rowFor('Second laptop').querySelector('button')!.click());
 
@@ -351,19 +352,19 @@ describe('HostsView actions', () => {
     expect(onConnect).not.toHaveBeenCalled();
   });
 
-  it('routes Connect to the Host whose row it belongs to', () => {
+  it('routes Connect to the Burrow whose row it belongs to', () => {
     const onConnect = vi.fn();
-    renderHosts({ onConnect });
+    renderBurrows({ onConnect });
 
     act(() => rowFor('Second laptop').querySelector('button')!.click());
 
-    expect(onConnect).toHaveBeenCalledWith(HOSTS[1]);
+    expect(onConnect).toHaveBeenCalledWith(BURROWS[1]);
   });
 
-  it('removes a record locally, whatever the Host is doing', () => {
+  it('removes a record locally, whatever the Burrow is doing', () => {
     const onForget = vi.fn();
-    const offline: HostView[] = [{ ...HOSTS[0]!, online: false }];
-    renderHosts({ hosts: offline, onForget });
+    const offline: BurrowView[] = [{ ...BURROWS[0]!, online: false }];
+    renderBurrows({ burrows: offline, onForget });
 
     const remove = [...rowFor('First laptop').querySelectorAll('button')].at(-1)!;
     expect(remove.disabled).toBe(false);
@@ -372,34 +373,34 @@ describe('HostsView actions', () => {
     expect(onForget).toHaveBeenCalledWith(offline[0]);
   });
 
-  it('disables Connect on an offline Host but not Pair again', () => {
+  it('disables Connect on an offline Burrow but not Pair again', () => {
     // Pairing starts at the scanner and needs no relay socket: the code on the
     // computer's screen is what says whether it is there.
-    const offline: HostView[] = [
-      { ...HOSTS[0]!, online: false },
-      { ...HOSTS[1]!, online: false, needsPairing: true },
+    const offline: BurrowView[] = [
+      { ...BURROWS[0]!, online: false },
+      { ...BURROWS[1]!, online: false, needsPairing: true },
     ];
-    renderHosts({ hosts: offline });
+    renderBurrows({ burrows: offline });
 
     expect(rowFor('First laptop').querySelector('button')!.disabled).toBe(true);
     expect(rowFor('Second laptop').querySelector('button')!.disabled).toBe(false);
   });
 
-  it('offers the scanner from the list, paired Hosts or none', () => {
+  it('offers the scanner from the list, paired Burrows or none', () => {
     const onScan = vi.fn();
-    renderHosts({ hosts: [], onScan });
+    renderBurrows({ burrows: [], onScan });
 
-    expect(container.textContent).toContain('No computers paired yet');
+    expect(container.textContent).toContain(BURROWS_EMPTY);
     act(() => buttonNamed(SCAN_LABEL)!.click());
     expect(onScan).toHaveBeenCalledOnce();
   });
 });
 
-describe('the one push card on the Hosts view', () => {
-  it('offers once for the whole device, not once per Host', () => {
+describe('the one push card on the Burrows view', () => {
+  it('offers once for the whole device, not once per Burrow', () => {
     // The permission prompt and the PushSubscription belong to the whole
-    // service-worker scope, so asking per Host asks for the same thing twice.
-    renderHosts();
+    // service-worker scope, so asking per Burrow asks for the same thing twice.
+    renderBurrows();
 
     expect(
       [...container.querySelectorAll('button')].filter(
@@ -408,40 +409,40 @@ describe('the one push card on the Hosts view', () => {
     ).toHaveLength(1);
   });
 
-  it('registers every paired Host from the one tap', () => {
+  it('registers every paired Burrow from the one tap', () => {
     const onEnablePush = vi.fn();
-    renderHosts({ onEnablePush });
+    renderBurrows({ onEnablePush });
 
     act(() => buttonNamed('Enable push notifications')!.click());
 
-    // No Host argument to get wrong: the handler reads the paired set itself.
+    // No Burrow argument to get wrong: the handler reads the paired set itself.
     expect(onEnablePush).toHaveBeenCalledOnce();
     expect(onEnablePush).toHaveBeenCalledWith();
   });
 
-  it('keeps offering while any paired Host still lacks a Server row', () => {
+  it('keeps offering while any paired Burrow still lacks a Relay row', () => {
     // A PushSubscription is scope-wide, so a browser that can receive push says
-    // nothing about which Hosts hold a row. The row marker is what names the
-    // Host the card is still offering to register.
-    renderHosts({ isPushSubscribed: (hostId) => hostId === 'host-1' });
+    // nothing about which Burrows hold a row. The row marker is what names the
+    // Burrow the card is still offering to register.
+    renderBurrows({ isPushSubscribed: (burrowId) => burrowId === 'burrow-1' });
 
     expect(buttonNamed('Enable push notifications')).not.toBeNull();
     expect(rowFor('First laptop').textContent).toContain('Push on');
     expect(rowFor('Second laptop').textContent).not.toContain('Push on');
   });
 
-  it('settles to one line once every paired Host holds a row', () => {
-    renderHosts({ isPushSubscribed: () => true });
+  it('settles to one line once every paired Burrow holds a row', () => {
+    renderBurrows({ isPushSubscribed: () => true });
 
     expect(container.textContent).toContain('Push notifications on.');
     expect(pushCard()).toBeNull();
     expect(buttonNamed('Enable push notifications')).toBeNull();
   });
 
-  it('counts only paired Hosts, which are the only ones with a row to hold', () => {
-    renderHosts({
-      hosts: NEEDS_PAIRING,
-      isPushSubscribed: (hostId) => hostId === 'host-1',
+  it('counts only paired Burrows, which are the only ones with a row to hold', () => {
+    renderBurrows({
+      burrows: NEEDS_PAIRING,
+      isPushSubscribed: (burrowId) => burrowId === 'burrow-1',
     });
 
     expect(container.textContent).toContain('Push notifications on.');
@@ -449,53 +450,53 @@ describe('the one push card on the Hosts view', () => {
   });
 
   it('says nothing at all until something is paired', () => {
-    renderHosts({ hosts: NEEDS_PAIRING.map((h) => ({ ...h, needsPairing: true })) });
+    renderBurrows({ burrows: NEEDS_PAIRING.map((h) => ({ ...h, needsPairing: true })) });
 
     expect(pushCard()).toBeNull();
     expect(container.textContent).not.toContain('Push notifications on.');
   });
 
   it('explains an unavailable reason instead of offering a tap that cannot work', () => {
-    renderHosts({ pushState: 'denied' });
+    renderBurrows({ pushState: 'denied' });
 
     expect(pushCard()!.textContent).toContain('blocked');
     expect(buttonNamed('Enable push notifications')).toBeNull();
   });
 
-  it('reports a server with push disabled rather than the browser state', () => {
-    renderHosts({ pushConfigStatus: 'disabled' });
+  it('reports a Relay with push disabled rather than the browser state', () => {
+    renderBurrows({ pushConfigStatus: 'disabled' });
 
-    expect(pushCard()!.textContent).toContain(PUSH_SERVER_DISABLED);
+    expect(pushCard()!.textContent).toContain(PUSH_RELAY_DISABLED);
     expect(buttonNamed('Enable push notifications')).toBeNull();
   });
 
   it('leaves needs-install to the install notice rather than doubling it', () => {
     // The card for that state would have said "see above" and nothing else.
-    renderHosts({ pushState: 'needs-install' });
+    renderBurrows({ pushState: 'needs-install' });
 
     expect(container.textContent).toContain('Add Dormouse to your Home Screen');
     expect(pushCard()).toBeNull();
   });
 
-  it('does not advise installing when the server cannot push at all', () => {
+  it('does not advise installing when the Relay cannot push at all', () => {
     // The install ritual the notice describes would end at the same "push is
     // disabled" copy — advice and card must not contradict each other.
-    renderHosts({ pushState: 'needs-install', pushConfigStatus: 'disabled' });
+    renderBurrows({ pushState: 'needs-install', pushConfigStatus: 'disabled' });
 
     expect(container.textContent).not.toContain('Add Dormouse to your Home Screen');
-    expect(pushCard()!.textContent).toContain(PUSH_SERVER_DISABLED);
+    expect(pushCard()!.textContent).toContain(PUSH_RELAY_DISABLED);
   });
 
   it('does not offer Enable until the VAPID key is cached', () => {
-    renderHosts({ pushConfigStatus: 'loading' });
+    renderBurrows({ pushConfigStatus: 'loading' });
 
-    expect(pushCard()!.textContent).toContain('Checking whether this server can send push');
+    expect(pushCard()!.textContent).toContain('Checking whether this Relay can send push');
     expect(buttonNamed('Enable push notifications')).toBeNull();
   });
 
   it('retries config separately from the permission-triggering Enable tap', () => {
     const onRetryPushConfig = vi.fn();
-    renderHosts({ pushConfigStatus: 'error', onRetryPushConfig });
+    renderBurrows({ pushConfigStatus: 'error', onRetryPushConfig });
 
     expect(pushCard()!.textContent).toContain('Could not check');
     expect(buttonNamed('Enable push notifications')).toBeNull();
@@ -504,7 +505,7 @@ describe('the one push card on the Hosts view', () => {
   });
 
   it('locks the tap while a subscribe is in flight', () => {
-    renderHosts({ busy: 'push' });
+    renderBurrows({ busy: 'push' });
 
     expect(buttonNamed('Enable push notifications')).toBeNull();
     expect(buttonNamed('…')!.disabled).toBe(true);
@@ -516,7 +517,7 @@ function noticeState(
   overrides: Partial<Parameters<typeof pushNoticeState>[0]> = {},
 ): ReturnType<typeof pushNoticeState> {
   return pushNoticeState({
-    pairedHostIds: ['host-1'],
+    pairedBurrowIds: ['burrow-1'],
     isPushSubscribed: () => false,
     availability: 'ready',
     configStatus: 'ready',
@@ -526,7 +527,7 @@ function noticeState(
 
 describe('pushNoticeState', () => {
   /**
-   * The wall banner and the Host row used to restate the same availability and
+   * The wall banner and the Burrow row used to restate the same availability and
    * config gate side by side, staying equal only by parallel edits — while the
    * spec claimed they matched exactly. One card reads one predicate; this is
    * the matrix that pins every cell of it.
@@ -546,7 +547,7 @@ describe('pushNoticeState', () => {
         expect(offers).toBe(availability === 'ready' && configStatus === 'ready');
 
         // And the card renders exactly what the predicate decided.
-        renderHosts({ pushState: availability, pushConfigStatus: configStatus });
+        renderBurrows({ pushState: availability, pushConfigStatus: configStatus });
         expect(buttonNamed('Enable push notifications') !== null).toBe(offers);
       }
     }
@@ -558,19 +559,19 @@ describe('pushNoticeState', () => {
     expect(noticeState({ availability: null, isPushSubscribed: () => true })).toBeNull();
   });
 
-  it('lets a push-disabled server outrank a Server row this device still holds', () => {
-    // The rows survive a server restarted without VAPID keys; the delivery does
+  it('lets a push-disabled Relay outrank a Relay row this device still holds', () => {
+    // The rows survive a Relay restarted without VAPID keys; the delivery does
     // not, so "Push notifications on." would be a lie.
     expect(noticeState({ configStatus: 'disabled', isPushSubscribed: () => true })).toEqual({
       kind: 'blocked',
-      reason: PUSH_SERVER_DISABLED,
+      reason: PUSH_RELAY_DISABLED,
     });
   });
 
-  it('settles only when every paired Host holds a row', () => {
-    const isPushSubscribed = (hostId: string) => hostId === 'host-1';
+  it('settles only when every paired Burrow holds a row', () => {
+    const isPushSubscribed = (burrowId: string) => burrowId === 'burrow-1';
     expect(noticeState({ isPushSubscribed })?.kind).toBe('on');
-    expect(noticeState({ pairedHostIds: ['host-1', 'host-2'], isPushSubscribed })?.kind).toBe(
+    expect(noticeState({ pairedBurrowIds: ['burrow-1', 'burrow-2'], isPushSubscribed })?.kind).toBe(
       'offer',
     );
   });

@@ -239,7 +239,7 @@ Clearing behavior:
 
 ## Alarm settings
 
-The alarm settings are a second app-global store beside the WATCHING rule set, edited in the app-global **Settings** dialog (below), which also carries the theme picker ([theme.md](./theme.md)), the shell picker ([standalone.md](./standalone.md)), and the remote-control section ([server.md](./server.md)). **Each of those keeps its own store — never fold one into `AlertSettings`**, which is relayed wholesale to the VS Code extension host.
+The alarm settings are a second app-global store beside the WATCHING rule set, edited in the app-global **Settings** dialog (below), which also carries the theme picker ([theme.md](./theme.md)), the shell picker ([standalone.md](./standalone.md)), and the remote-control section ([relay.md](./relay.md)). **Each of those keeps its own store — never fold one into `AlertSettings`**, which is relayed wholesale to the VS Code extension host.
 
 | Field | Meaning |
 |---|---|
@@ -267,13 +267,13 @@ Rules:
 
 | Contract | Speech | Push |
 |---|---|---|
-| Gate | Desktop shell, after `speakDelayMs`; a missing backend is a silent no-op. | Desktop shell with an enrolled Host, after `pushDelayMs`. |
+| Gate | Desktop shell, after `speakDelayMs`; a missing backend is a silent no-op. | Desktop shell with an enrolled Burrow, after `pushDelayMs`. |
 | Payload | Pane label via `toSpokenText`; fallback `terminal`. | Same label via `toPushText`, plus a fixed body; fallback `terminal`. |
 | Never payload | The ringing `ActivityNotification`. | The ringing `ActivityNotification`. |
 | Delivery identity | Renderer-local generation token; `speaking` / `spoken` while the ring is live. | HTTP push tagged by Session id, so a newer ring replaces the prior notification. |
 | After delivery | Attending cuts off speech. | **Never recall** — another push would only replace one stale notice with another. |
 | Failure | A refused or unavailable engine produces no marker. | Warn on non-2xx, partial, or zero delivery; **never retry** stale alarms. |
-| Authority | The renderer invokes `window.speechSynthesis`. | The webview names Session/title; the Host selects active ACL devices, the Server intersects subscriptions. |
+| Authority | The renderer invokes `window.speechSynthesis`. | The webview names Session/title; the Burrow selects active ACL devices, the Relay intersects subscriptions. |
 
 Source of truth: `AlertSettings` in `lib/src/lib/alert-settings.ts` (renderer mirror, persisted at `dormouse:alert-settings`); `lib/src/lib/alert-settings-host.ts`; `watchUnattendedRings` in `lib/src/lib/alert-ring-watch.ts`.
 
@@ -292,15 +292,15 @@ Source of truth: `toSpokenText` in `lib/src/lib/alert-speech.ts`, armed by `lib/
 
 ### Push notifications
 
-**The two halves run in different processes.** Ring *detection* is webview state, so `watchPushRings` stays in the webview and fires one `push { sessionId, title }` command at the Host service. *Delivery* needs the enrollment and the ACL, which only the Host holds, so `sendPush` runs in the service's process and touches no DOM or store. **A webview cannot choose recipients:** it names the Session and what to call it; the service reads its own active ACL at send time. **Arm watching only while the service reports an enrollment** (`enrolled-gate.ts`), so an un-enrolled machine pays no activity-store subscription; a `push` arriving with no Host running is not sent. **Keep both halves under `remote/host/`**, inside the lazily-imported `RemotePairingModalHost` chunk, so a host without `enableRemoteHost` never fetches it (rationale).
+**The two halves run in different processes.** Ring *detection* is webview state, so `watchPushRings` stays in the webview and fires one `push { sessionId, title }` command at the Burrow service. *Delivery* needs the enrollment and the ACL, which only the Burrow holds, so `sendPush` runs in the service's process and touches no DOM or store. **A webview cannot choose recipients:** it names the Session and what to call it; the service reads its own active ACL at send time. **Arm watching only while the service reports an enrollment** (`enrolled-gate.ts`), so an un-enrolled machine pays no activity-store subscription; a `push` arriving with no Burrow running is not sent. **Keep both halves under `remote/burrow/`**, inside the lazily-imported `RemotePairingModalHost` chunk, so a host without `enableBurrow` never fetches it (rationale).
 
-- **The label is sanitized by `toPushText` at send time, in the delivery half, and not by `toSpokenText`'s rule** (rationale). It keeps angle brackets and instead strips control characters and the Unicode bidi and zero-width format characters (including the Arabic letter mark), which can visually reorder or hide text in an OS notification; the cap counts code points, so a cut never ships half a surrogate pair. `toPushText` is only this sink's limit and fallback over `boundedPushText` in `server-lib-common/src/security/push.ts`.
-- **The Host bounds, then seals; the worker re-bounds at the render sink.** Title, body, and tag are sealed to each recipient's own Client static and the Server forwards ciphertext, so the second pass runs in `lib/src/remote/pocket-app/sw.ts`, which imports the *same* `boundedPushText` rather than mirroring it (`docs/specs/remote-security-model.md` -> Push sealing).
-- **The Host names its targets; the Server rejects a send that does not.** Targets are the Host's *active* ACL records, read at send time so a revocation during the delay takes effect, and the Server intersects them with its own subscriptions. **One sealed envelope per recipient** — a Client static is not a group key — so a send names each `deliveryId` beside the ciphertext only that phone can open, **clamped to `MAX_PUSH_QUERY_DELIVERY_IDS`** because the route refuses the whole POST past it. Nothing propagates a revocation today (`docs/specs/remote-security-model.md` -> Future), so a Server that chose recipients itself would keep pushing to a de-authorized phone (rationale). The Host does **not** ask which devices are subscribed first (rationale).
-- **The settings dialog re-reads the device list when it opens** (`refreshPushDevicesNow`) — a phone can enable alerts long after this machine booted. The list is the Host's join of the Server's subscriptions against its own ACL labels, arriving over the same bridge as a `pushDevices` command and answering `null` — rendered `no-host` — when no Host is running.
-- **Writes are fenced on request order** (latest-request-wins), and the enrolled gate's disarm both invalidates in-flight refreshes and clears the list, so nothing already on the wire can repopulate the dialog with phones there is no longer anything to push to. `clearPushDevices` keeps the refresher installed — an un-enrolled machine may still ask and be told `no-host` — while `resetPushDevices` drops it too and is full teardown.
+- **The label is sanitized by `toPushText` at send time, in the delivery half, and not by `toSpokenText`'s rule** (rationale). It keeps angle brackets and instead strips control characters and the Unicode bidi and zero-width format characters (including the Arabic letter mark), which can visually reorder or hide text in an OS notification; the cap counts code points, so a cut never ships half a surrogate pair. `toPushText` is only this sink's limit and fallback over `boundedPushText` in `remote-lib-common/src/security/push.ts`.
+- **The Burrow bounds, then seals; the worker re-bounds at the render sink.** Title, body, and tag are sealed to each recipient's own Client static and the Relay forwards ciphertext, so the second pass runs in `lib/src/remote/pocket-app/sw.ts`, which imports the *same* `boundedPushText` rather than mirroring it (`docs/specs/remote-security-model.md` -> Push sealing).
+- **The Burrow names its targets; the Relay rejects a send that does not.** Targets are the Burrow's *active* ACL records, read at send time so a revocation during the delay takes effect, and the Relay intersects them with its own subscriptions. **One sealed envelope per recipient** — a Client static is not a group key — so a send names each `deliveryId` beside the ciphertext only that phone can open, **clamped to `MAX_PUSH_QUERY_DELIVERY_IDS`** because the route refuses the whole POST past it. Nothing propagates a revocation today (`docs/specs/remote-security-model.md` -> Future), so a Relay that chose recipients itself would keep pushing to a de-authorized phone (rationale). The Burrow does **not** ask which devices are subscribed first (rationale).
+- **The settings dialog re-reads the device list when it opens** (`refreshPushDevicesNow`) — a phone can enable alerts long after this machine booted. The list is the Burrow's join of the Relay's subscriptions against its own ACL labels, arriving over the same bridge as a `pushDevices` command and answering `null` — rendered `no-burrow` — when no Burrow is running.
+- **Writes are fenced on request order** (latest-request-wins), and the enrolled gate's disarm both invalidates in-flight refreshes and clears the list, so nothing already on the wire can repopulate the dialog with phones there is no longer anything to push to. `clearPushDevices` keeps the refresher installed — an un-enrolled machine may still ask and be told `no-burrow` — while `resetPushDevices` drops it too and is full teardown.
 
-Source of truth: `watchPushRings` / `invalidatePushDeviceRefreshes` in `lib/src/remote/host/alert-push.ts`; `sendPush` / `toPushText` in `lib/src/remote/host/push-delivery.ts`; `refreshPushDevicesNow` / `clearPushDevices` / `resetPushDevices` in `lib/src/lib/push-devices.ts`.
+Source of truth: `watchPushRings` / `invalidatePushDeviceRefreshes` in `lib/src/remote/burrow/alert-push.ts`; `sendPush` / `toPushText` in `lib/src/remote/burrow/push-delivery.ts`; `refreshPushDevicesNow` / `clearPushDevices` / `resetPushDevices` in `lib/src/lib/push-devices.ts`.
 
 ### Settings dialog
 
@@ -309,13 +309,13 @@ Reached from the controls at the far right of the baseboard; placement and that 
 - Lists every watched command with a remove control, and **cannot add one** — WATCHING is keyed on a running command's name, so creating a rule stays a bell click / `a` press in the tab running it, and the empty state says so. With the bell dialog it is one of the two places a rule set on a since-closed Pane can be removed; both render the same `WatchedCommandList`.
 - The watcher group carries the **Defer alerts until animation stops** switch and explains that only a fully armed watcher delays terminal notifications.
 - **Delays are committed on blur or `Enter`, never per keystroke** — typing `3` on the way to `30` must not briefly install a 3-second timer. They are shown in seconds; an out-of-range or empty entry snaps back to whatever the store clamped it to.
-- **The push group's device line names every device a push would reach**, and otherwise says why there is none — no Host enrolled, nothing subscribed yet, or the server could not be asked (rationale).
+- **The push group's device line names every device a push would reach**, and otherwise says why there is none — no Burrow enrolled, nothing subscribed yet, or the server could not be asked (rationale).
 - Each alarm sink carries a **try it now** control outside the switch's dimming; both report inline and clear after a few seconds.
 
   | Control | Path and result |
   |---|---|
   | **Play test sound** | Fixed phrase through the real sanitizer, but not `speak()` because no Session rang; unlike alarm delivery, reports a missing backend. |
-  | **Send test push** | Real Host→ACL→Server path; does not swallow failures and distinguishes no targets, zero delivery, partial delivery, and success. Hidden without a Host service. |
+  | **Send test push** | Real Burrow→ACL→Relay path; does not swallow failures and distinguishes no targets, zero delivery, partial delivery, and success. Hidden without a Burrow service. |
 
 Source of truth: `lib/src/components/SettingsDialog.tsx`; `lib/src/components/WatchedCommandList.tsx`; `lib/src/components/AlarmTestButtons.tsx`.
 

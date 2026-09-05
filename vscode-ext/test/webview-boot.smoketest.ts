@@ -122,7 +122,7 @@ beforeAll(async () => {
       );
     });
     // Without this the bundle takes its non-VS Code path: `FakePtyAdapter`, and
-    // `enableRemoteHost` false, so the lazy `RemotePairingModalHost` chunk is
+    // `enableBurrow` false, so the lazy `RemotePairingModalHost` chunk is
     // never imported — and a lazy `import()` is half of what broke here.
     (globalThis as unknown as { acquireVsCodeApi: unknown }).acquireVsCodeApi = () => ({
       postMessage: () => {},

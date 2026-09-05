@@ -13,13 +13,13 @@ import {
   randomBase64Url,
   toBase64Url,
   type PairingInvitation,
-} from 'server-lib-common';
+} from 'remote-lib-common';
 
-import { PAIRING_CODE_LABEL, type HostView } from './App';
+import { PAIRING_CODE_LABEL, type BurrowView } from './App';
 import { testRoutingId } from '../test-e2e-client';
 
 /**
- * A live invitation URL, composed by the emitter a Host actually uses.
+ * A live invitation URL, composed by the emitter a Burrow actually uses.
  * `expiry` (epoch **seconds**) is for the suites that need a dead one.
  */
 export async function invitationUrl(
@@ -28,7 +28,7 @@ export async function invitationUrl(
 ): Promise<{ url: string; invitation: PairingInvitation }> {
   const keyPair = await generateNoiseKeyPair();
   const invitation: PairingInvitation = {
-    hostId: testRoutingId(),
+    burrowId: testRoutingId(),
     inviteId: testRoutingId(),
     expiry,
     setupToken: randomBase64Url(32),
@@ -38,10 +38,10 @@ export async function invitationUrl(
   return { url: formatPairingInvitationUrl(origin, invitation), invitation };
 }
 
-/** The two Hosts every suite lists, named so an assertion says which one. */
-export const HOSTS: HostView[] = [
-  { hostId: 'host-1', label: 'First laptop', online: true, needsPairing: false },
-  { hostId: 'host-2', label: 'Second laptop', online: true, needsPairing: false },
+/** The two Burrows every suite lists, named so an assertion says which one. */
+export const BURROWS: BurrowView[] = [
+  { burrowId: 'burrow-1', label: 'First laptop', online: true, needsPairing: false },
+  { burrowId: 'burrow-2', label: 'Second laptop', online: true, needsPairing: false },
 ];
 
 /** Let every pending promise chain land and React commit what they produced. */
@@ -87,10 +87,10 @@ export function pairingCode(container: HTMLElement): string | null {
   );
 }
 
-/** One Host's row, found through its label so the assertions name a Host. */
+/** One Burrow's row, found through its label so the assertions name a Burrow. */
 export function rowFor(container: HTMLElement, label: string): HTMLElement {
   const title = [...container.querySelectorAll('div')].find((el) => el.textContent === label);
   const row = title?.closest('div.rounded-lg');
-  if (!(row instanceof HTMLElement)) throw new Error(`no host row for ${label}`);
+  if (!(row instanceof HTMLElement)) throw new Error(`no burrow row for ${label}`);
   return row;
 }

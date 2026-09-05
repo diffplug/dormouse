@@ -14,11 +14,11 @@
 
 **Why the peer-surface responder must follow `init()`.** Installed first, its seeding `status` command sits unanswered with no retry — nothing carries the answer back until the adapter has registered its listeners.
 
-## Remote Host service
+## Burrow service
 
-**Why one file rather than one per value.** Per-value files leave a window between two writes in which the enrollment can end up describing a different Host than the ACL records approved under it.
+**Why one file rather than one per value.** Per-value files leave a window between two writes in which the enrollment can end up describing a different Burrow than the ACL records approved under it.
 
-**Why the correlation field cannot be `requestId`.** A `remoteHost:*` payload reusing that field has its results consumed by the invoke table, vanishing at random.
+**Why the correlation field cannot be `requestId`.** A `burrow:*` payload reusing that field has its results consumed by the invoke table, vanishing at random.
 
 **Why the parse moved here rather than staying in the webview.** The webview is one consumer of a PTY the sidecar owns; an attached Client is another. Parsing in the webview meant the sidecar had to strip a second time for the phone, with the duplicate-answer hazards `docs/specs/terminal-escapes.rationale.md` records. Parsing where the PTY lives makes both consumers of one pass, at the price of two messages that used to be in-process calls and a theme this process cannot read for itself.
 
@@ -32,7 +32,7 @@
 
 **Why the mode is set before the bytes.** Under the bare umask the transcript-bearing blob lands `0644` in a `0755` directory any other local account can read, and tightening after the write would leave a window in which it was readable. Failing the save over a filesystem that has no such permission model would cost more than the exposure the mode prevents.
 
-**Why the ACE test asserts an already-existing file.** On an upgrade the Host enrollment file is already there, so what tightens it is propagation onto an existing entry rather than create-time inheritance. `FileHostStateStore`'s own `0700`/`0600` cannot help on Windows: Node has no ACL API.
+**Why the ACE test asserts an already-existing file.** On an upgrade the Burrow enrollment file is already there, so what tightens it is propagation onto an existing entry rather than create-time inheritance. `FileBurrowStateStore`'s own `0700`/`0600` cannot help on Windows: Node has no ACL API.
 
 **What the teardown flush lost.** The pre-Rust path flushed the session on teardown into WebKit `localStorage` and lost the final debounce/heartbeat window; awaiting the write pipeline to disk (`drainSessionSaves`) recovers it, which a last fire-and-forget save would not.
 

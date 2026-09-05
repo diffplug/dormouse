@@ -72,7 +72,7 @@ function sameSocketFile(left: SocketFileIdentity, right: SocketFileIdentity): bo
 
 /** The token the whole installation shares, as it sits on disk. */
 const readToken = async (): Promise<string> =>
-  (await readFile(join(dir, 'remote-host.peer-token'), 'utf8')).trim();
+  (await readFile(join(dir, 'burrow.peer-token'), 'utf8')).trim();
 
 const proof = (token: string, domain: string, nonce: string): string =>
   createHmac('sha256', token).update(domain + nonce).digest('base64url');
@@ -241,7 +241,7 @@ describe('bind-as-lease', () => {
     // `stillOurs` spends 250 ms watching for a window that cleared the same
     // corpse and bound after us. An enroll landing inside that window used to
     // see a bound socket, start a service, and the stand-down path
-    // (`closeServer(false)`) never tears one down — two Hosts under one hostId.
+    // (`closeServer(false)`) never tears one down — two Burrows under one burrowId.
     const path = derivedSocketPath();
     await mkdir(dirname(path), { recursive: true, mode: 0o700 });
     const corpse = spawn(process.execPath, [
@@ -287,7 +287,7 @@ describe('bind-as-lease', () => {
     // An unwritable `globalStorageUri` is not transient. Retrying at 1 Hz
     // forever leaves every command waiting out its whole queue budget on every
     // attempt instead of being told there is nothing to reach.
-    await mkdir(join(dir, 'remote-host.peer-token'), { recursive: true });
+    await mkdir(join(dir, 'burrow.peer-token'), { recursive: true });
 
     const mod = await openWindow(fakeWindow());
     const roles: boolean[] = [];
@@ -311,7 +311,7 @@ describe('bind-as-lease', () => {
     // bytes. A window reading in that gap used to take `''` as the token, and
     // an empty `serverToken` rejects every hello for the life of that broker —
     // which never re-reads it, so the installation does not recover.
-    const path = join(dir, 'remote-host.peer-token');
+    const path = join(dir, 'burrow.peer-token');
     await writeFile(path, '', { mode: 0o600 });
 
     const mod = await openWindow(fakeWindow());
@@ -333,7 +333,7 @@ describe('bind-as-lease', () => {
     // A zero-length token left by a crash never fills in. Binding anyway makes
     // this window the broker every other one dials, and it then refuses all of
     // them silently; the stand-down at least names the reason in the log.
-    await writeFile(join(dir, 'remote-host.peer-token'), '', { mode: 0o600 });
+    await writeFile(join(dir, 'burrow.peer-token'), '', { mode: 0o600 });
 
     const mod = await openWindow(fakeWindow());
     const roles: boolean[] = [];
@@ -453,7 +453,7 @@ describe('bind-as-lease', () => {
     expect(brokers).toHaveLength(1);
     // And the loser reached the broker rather than giving up: it can forward.
     const loser = [first, second].find((mod) => !mod.isPeerBroker())!;
-    await waitFor(() => loser.forwardCommand({ rhId: 'rh-1', cmd: 'status' }), 15_000);
+    await waitFor(() => loser.forwardCommand({ burrowRequestId: 'rh-1', cmd: 'status' }), 15_000);
     expect(firstRoles.concat(secondRoles)).toEqual([true]);
   }, 30_000);
 
@@ -732,7 +732,7 @@ describe('bind-as-lease', () => {
     expect(broker.remoteWrite(handle.ptyId, 'x')).toBe(false);
   });
 
-  it('hands the Host to a surviving window when the broker dies', async () => {
+  it('hands the Burrow to a surviving window when the broker dies', async () => {
     const { broker, peer, peerRoles } = await linkedPair();
 
     // The broker window closed. Its socket closes with it, and every client
@@ -747,7 +747,7 @@ describe('bind-as-lease', () => {
   it('is unsettled the instant its broker socket dies, before the close lands', async () => {
     // `close` is a later tick. In between, this window has a socket it cannot
     // write to and no contention running — so reporting a role would make
-    // `remote-host.ts` refuse a command it should have held for the re-bind.
+    // `burrow.ts` refuse a command it should have held for the re-bind.
     const connected: Socket[] = [];
     const connect = Socket.prototype.connect;
     const spy = vi
@@ -766,13 +766,13 @@ describe('bind-as-lease', () => {
     expect(peer.isPeerLinkSettled()).toBe(true);
     connected.at(-1)!.destroy();
 
-    expect(peer.forwardCommand({ rhId: 'rh-1', cmd: 'status' })).toBe(false);
+    expect(peer.forwardCommand({ burrowRequestId: 'rh-1', cmd: 'status' })).toBe(false);
     expect(peer.isPeerLinkSettled()).toBe(false);
   });
 
   it('does not send an old broker’s delayed answer to its replacement', async () => {
     const token = 'test-peer-token';
-    await writeFile(join(dir, 'remote-host.peer-token'), token, { mode: 0o600 });
+    await writeFile(join(dir, 'burrow.peer-token'), token, { mode: 0o600 });
 
     async function rawBroker(challenge: string) {
       let activeSocket: import('node:net').Socket | null = null;
@@ -887,18 +887,18 @@ describe('bind-as-lease', () => {
   it('runs a losing window\'s webview command in the broker and answers it there', async () => {
     const { broker, brokerSide, peer, peerSide } = await linkedPair();
 
-    expect(peer.forwardCommand({ rhId: 'rh-1', cmd: 'status' })).toBe(true);
+    expect(peer.forwardCommand({ burrowRequestId: 'rh-1', cmd: 'status' })).toBe(true);
 
     await waitFor(() => brokerSide.forwarded.length > 0);
-    expect(brokerSide.forwarded[0].payload).toEqual({ rhId: 'rh-1', cmd: 'status' });
+    expect(brokerSide.forwarded[0].payload).toEqual({ burrowRequestId: 'rh-1', cmd: 'status' });
 
     broker.sendCommandResult(brokerSide.forwarded[0].from, {
-      rhId: 'rh-1',
+      burrowRequestId: 'rh-1',
       result: { enrolled: true },
     });
 
     await waitFor(() => peerSide.results.length > 0);
-    expect(peerSide.results).toEqual([{ rhId: 'rh-1', result: { enrolled: true } }]);
+    expect(peerSide.results).toEqual([{ burrowRequestId: 'rh-1', result: { enrolled: true } }]);
   });
 
   it('answers only the window that asked', async () => {
@@ -907,13 +907,13 @@ describe('bind-as-lease', () => {
     const third = await openWindow(thirdSide);
     await third.ensurePeerNet(() => {});
 
-    peer.forwardCommand({ rhId: 'rh-1', cmd: 'status' });
+    peer.forwardCommand({ burrowRequestId: 'rh-1', cmd: 'status' });
     await waitFor(() => brokerSide.forwarded.length > 0);
-    broker.sendCommandResult(brokerSide.forwarded[0].from, { rhId: 'rh-1', result: {} });
+    broker.sendCommandResult(brokerSide.forwarded[0].from, { burrowRequestId: 'rh-1', result: {} });
 
     await waitFor(() => peerSide.results.length > 0);
-    // An `rhId` is unique across every window, so a result sent to the wrong one
-    // would settle nothing there and leak this one's Host state.
+    // A `burrowRequestId` is unique across every window, so a result sent to the wrong one
+    // would settle nothing there and leak this one's Burrow state.
     await tick(100);
     expect(thirdSide.results).toEqual([]);
   });
@@ -921,10 +921,10 @@ describe('bind-as-lease', () => {
   it('has nothing to forward to when this window is the broker', async () => {
     const { broker } = await linkedPair();
     // False is the caller's cue to run it locally, or to refuse it.
-    expect(broker.forwardCommand({ rhId: 'rh-1', cmd: 'status' })).toBe(false);
+    expect(broker.forwardCommand({ burrowRequestId: 'rh-1', cmd: 'status' })).toBe(false);
   });
 
-  it('fans a Host UI event out to every window', async () => {
+  it('fans a Burrow UI event out to every window', async () => {
     const { broker, peerSide } = await linkedPair();
     const secondSide = fakeWindow();
     const second = await openWindow(secondSide);
@@ -943,7 +943,7 @@ describe('bind-as-lease', () => {
 
   it('drops a window\'s outstanding commands when its socket closes', async () => {
     const { brokerSide, peer } = await linkedPair();
-    peer.forwardCommand({ rhId: 'rh-1', cmd: 'status' });
+    peer.forwardCommand({ burrowRequestId: 'rh-1', cmd: 'status' });
     await waitFor(() => brokerSide.forwarded.length > 0);
 
     await peer.disposePeerLink();
@@ -954,8 +954,8 @@ describe('bind-as-lease', () => {
     expect(brokerSide.dropped[0]).toBe(brokerSide.forwarded[0].from);
   });
 
-  it('reports a joining window so the broker can hand it the Host state', async () => {
-    // Nothing about the Host changes because a window connected, so the events
+  it('reports a joining window so the broker can hand it the Burrow state', async () => {
+    // Nothing about the Burrow changes because a window connected, so the events
     // its webviews arm on are never coming on their own — the broker has to
     // volunteer them, and this is the only signal it gets.
     const brokerSide = fakeWindow();
@@ -1152,7 +1152,7 @@ describe('peer handshake', () => {
       // No directory, no surfaces, no PTY: it never became this window's broker.
       expect(closed).toBe(true);
       expect(window.isPeerBroker()).toBe(false);
-      expect(window.forwardCommand({ rhId: 'rh-1', cmd: 'status' })).toBe(false);
+      expect(window.forwardCommand({ burrowRequestId: 'rh-1', cmd: 'status' })).toBe(false);
       expect(roles).toEqual([]);
       expect(side.writes).toEqual([]);
     } finally {
@@ -1184,7 +1184,7 @@ describe('peer handshake', () => {
 
       await waitFor(() => closed);
       expect(window.isPeerBroker()).toBe(false);
-      expect(window.forwardCommand({ rhId: 'rh-1', cmd: 'status' })).toBe(false);
+      expect(window.forwardCommand({ burrowRequestId: 'rh-1', cmd: 'status' })).toBe(false);
       expect(roles).toEqual([]);
       expect(side.writes).toEqual([]);
     } finally {

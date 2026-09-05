@@ -1,16 +1,16 @@
 /**
- * The bridge between the Node-resident Host service and the webview that shows
+ * The bridge between the Node-resident Burrow service and the webview that shows
  * its UI. Shared by both ends so the contract cannot drift: the service imports
  * it to dispatch, the webview imports it to speak.
  *
  * Three message kinds, all JSON:
  *
- *   webview → service   `remoteHost:command`  { rhId, cmd, params? }
- *   service → webview   `remoteHost:result`   { rhId, result } | { rhId, error }
- *   service → webview   `remoteHost:ask`      { rhId, op, params }
- *   service → webview   `remoteHost:event`    { name, ... }
+ *   webview → service   `burrow:command`  { burrowRequestId, cmd, params? }
+ *   service → webview   `burrow:result`   { burrowRequestId, result } | { burrowRequestId, error }
+ *   service → webview   `burrow:ask`      { burrowRequestId, op, params }
+ *   service → webview   `burrow:event`    { name, ... }
  *
- * ⚠ The correlation field is `rhId`, never `requestId`. The standalone Rust
+ * ⚠ The correlation field is `burrowRequestId`, never `requestId`. The standalone Rust
  * bridge swallows any sidecar line whose `data.requestId` matches a pending
  * invoke (`standalone/src-tauri/src/lib.rs`), so a `requestId` here would make
  * results vanish at random.
@@ -24,13 +24,13 @@
 import type {
   InvitationState,
   PairingOutcome,
-  RemoteHostStatus,
-} from '../../remote/host/remote-host';
+  BurrowStatus,
+} from '../../remote/burrow/burrow-runtime';
 
 /** Transport event names for what the service sends back. */
-export const REMOTE_HOST_RESULT_EVENT = 'remoteHost:result';
-export const REMOTE_HOST_ASK_EVENT = 'remoteHost:ask';
-export const REMOTE_HOST_EVENT_EVENT = 'remoteHost:event';
+export const BURROW_RESULT_EVENT = 'burrow:result';
+export const BURROW_ASK_EVENT = 'burrow:ask';
+export const BURROW_EVENT_EVENT = 'burrow:event';
 
 /**
  * How long the service waits for the webview to answer an ask before it
@@ -41,29 +41,29 @@ export const REMOTE_HOST_EVENT_EVENT = 'remoteHost:event';
 export const ASK_BUDGET_MS = 1_000;
 
 /** webview → service. `params` is the command's own shape, below. */
-export interface RemoteHostCommand {
-  rhId: string;
+export interface BurrowCommand {
+  burrowRequestId: string;
   cmd: string;
   params?: unknown;
 }
 
-/** Validate the untrusted edge of either Host bridge before routing a command. */
-export function isRemoteHostCommand(value: unknown): value is RemoteHostCommand {
+/** Validate the untrusted edge of either Burrow bridge before routing a command. */
+export function isBurrowCommand(value: unknown): value is BurrowCommand {
   if (!value || typeof value !== 'object') return false;
-  const command = value as Partial<RemoteHostCommand>;
-  return typeof command.rhId === 'string' && typeof command.cmd === 'string';
+  const command = value as Partial<BurrowCommand>;
+  return typeof command.burrowRequestId === 'string' && typeof command.cmd === 'string';
 }
 
 /** service → webview, in reply to a command that has a result. */
-export interface RemoteHostResult {
-  rhId: string;
+export interface BurrowResult {
+  burrowRequestId: string;
   result?: unknown;
   error?: string;
 }
 
-/** service → webview: answer with `answer` naming this `rhId`. */
-export interface RemoteHostAsk {
-  rhId: string;
+/** service → webview: answer with `answer` naming this `burrowRequestId`. */
+export interface BurrowAsk {
+  burrowRequestId: string;
   op: string;
   params: unknown;
 }
@@ -72,7 +72,7 @@ export interface RemoteHostAsk {
  * One pairing awaiting local confirmation, as the webview mirrors it.
  *
  * **The expected two-digit code is deliberately absent.** The webview echoes
- * what a person typed and the Host compares it; a mirrored code would make the
+ * what a person typed and the Burrow compares it; a mirrored code would make the
  * confirmation something anything in this realm could satisfy
  * (`docs/specs/remote-security-model.md` → Pairing). Nothing else about the
  * Client crosses either: the presence proof already verified, so the only thing
@@ -83,7 +83,7 @@ export interface PairingQueueItem {
   clientId: string;
   /** Immutable ceremony id, echoed by approve/deny. */
   pairingId: string;
-  /** The Client's own name for itself, already bounded and stripped by the Host. */
+  /** The Client's own name for itself, already bounded and stripped by the Burrow. */
   label: string;
   requestedAt: number;
 }
@@ -98,20 +98,20 @@ export interface PairingQueueEvent {
 }
 
 /**
- * service → webview, whenever the Host's lifecycle changes whether there is one
- * at all. What a webview does for the Host costs a crossing per pane-state,
+ * service → webview, whenever the Burrow's lifecycle changes whether there is one
+ * at all. What a webview does for the Burrow costs a crossing per pane-state,
  * activity, and focus change, so an installation that never enrolled must pay
- * none of it (`lib/src/remote/host/enrolled-gate.ts`).
+ * none of it (`lib/src/remote/burrow/enrolled-gate.ts`).
  */
-export interface HostStatusEvent {
+export interface BurrowStatusEvent {
   name: 'status';
   enrolled: boolean;
 }
 
 /**
- * service → webview, unsolicited: one of this Host's invitations changed state,
+ * service → webview, unsolicited: one of this Burrow's invitations changed state,
  * so the panel displaying its QR can stop offering a code that can no longer be
- * used. The Host's own map is the authority — this is display truth.
+ * used. The Burrow's own map is the authority — this is display truth.
  *
  * Named by `inviteId` ({@link SetupQrResult.inviteId}), so a panel acts only on
  * its own and two open windows do not both go stale over one scan. Never the
@@ -136,14 +136,14 @@ export interface InvitationEvent {
 // --- Command parameter shapes ---
 
 export interface EnrollParams {
-  serverUrl: string;
+  relayUrl: string;
   password: string;
   label: string;
 }
 
 /**
  * One-click enrollment against the offer an installer left on this machine
- * (`docs/specs/server.md` → "Remote control, in the Settings dialog").
+ * (`docs/specs/relay.md` → "Remote control, in the Settings dialog").
  */
 export interface EnrollOfferParams {
   /**
@@ -159,7 +159,7 @@ export interface EnrollOfferParams {
 export interface ApproveParams {
   clientId: string;
   pairingId: string;
-  /** The two digits the person read off the phone; the Host compares them. */
+  /** The two digits the person read off the phone; the Burrow compares them. */
   code: string;
 }
 
@@ -174,17 +174,17 @@ export interface PushParams {
   title: string;
 }
 
-/** Answers an outstanding {@link RemoteHostAsk}; `rhId` is the ask's, not a new one. */
+/** Answers an outstanding {@link BurrowAsk}; `burrowRequestId` is the ask's, not a new one. */
 export interface AnswerParams {
-  rhId: string;
+  burrowRequestId: string;
   results: unknown[];
 }
 
 // --- Command results ---
 
 export interface EnrollResult {
-  hostId: string;
-  serverUrl: string;
+  burrowId: string;
+  relayUrl: string;
 }
 
 /**
@@ -195,16 +195,16 @@ export interface EnrollResult {
  * the whole point of the command — the code is displayed to a person standing
  * at this machine, and displaying it *is* the local-presence act
  * (`docs/specs/remote-security-model.md` → Pairing). They are the only
- * credentials in this contract that cross that seam: `hostToken` still never
- * does (`docs/specs/security-remote.md` → "Trust boundary", the no-`hostToken`-in-a-webview FAIL IF), and neither
- * does the installer offer's token ({@link RemoteHostConsoleStatus.offer}), nor
- * the invitation's *private* key, which never leaves the Host.
+ * credentials in this contract that cross that seam: `burrowToken` still never
+ * does (`docs/specs/security-remote.md` → "Trust boundary", the no-`burrowToken`-in-a-webview FAIL IF), and neither
+ * does the installer offer's token ({@link BurrowConsoleStatus.offer}), nor
+ * the invitation's *private* key, which never leaves the Burrow.
  */
 export interface SetupQrResult {
   /**
-   * The pairing URL, composed by the service from the origin this Host enrolled
-   * against — `server-lib-common`'s `formatPairingInvitationUrl` owns its
-   * grammar (`docs/specs/server.md` → QR grammar).
+   * The pairing URL, composed by the service from the origin this Burrow enrolled
+   * against — `remote-lib-common`'s `formatPairingInvitationUrl` owns its
+   * grammar (`docs/specs/relay.md` → QR grammar).
    */
   url: string;
   /**
@@ -217,39 +217,39 @@ export interface SetupQrResult {
 }
 
 /**
- * What `window.dormouseRemoteHost.status()` prints. `docs/specs/server.md`
+ * What `window.dormouseBurrow.status()` prints. `docs/specs/relay.md`
  * documents the console hook, so these field names are user-facing surface.
  */
-export interface RemoteHostConsoleStatus {
+export interface BurrowConsoleStatus {
   enrolled: boolean;
-  serverUrl: string | null;
-  hostId: string | null;
+  relayUrl: string | null;
+  burrowId: string | null;
   /**
    * The relay socket's state. `displaced` is the one that needs acting on:
-   * another Dormouse instance enrolled with the same `hostId` took the relay
+   * another Dormouse instance enrolled with the same `burrowId` took the relay
    * slot, so this one stood down and no timer will bring it back — `reconnect()`
    * takes the slot back (and displaces the other one in turn).
    */
-  connection: RemoteHostStatus;
+  connection: BurrowStatus;
   pairedClients: number;
   /** What to prefill a "name for this machine" field with: the hostname. */
   suggestedLabel: string;
   /**
    * The installer's enrollment offer on this machine, when there is one and this
-   * Host has not enrolled — the Settings dialog's one-click path
-   * (`docs/specs/server.md` → "Remote control, in the Settings dialog", which
+   * Burrow has not enrolled — the Settings dialog's one-click path
+   * (`docs/specs/relay.md` → "Remote control, in the Settings dialog", which
    * owns the re-read-at-click rule and what makes the card safe to press).
    *
    * **The offer's `token` is never here.** This is a service→webview shape, and
-   * the token is a bearer credential exactly like `hostToken` (`docs/specs/security-remote.md` → "Trust boundary",
-   * the no-`hostToken`-in-a-webview FAIL IF).
+   * the token is a bearer credential exactly like `burrowToken` (`docs/specs/security-remote.md` → "Trust boundary",
+   * the no-`burrowToken`-in-a-webview FAIL IF).
    */
   offer: { origin: string } | null;
 }
 
 /**
- * The devices a push would reach, or `null` when no Host is running — which is
- * "nowhere to push", not "the server could not be asked" (`push-devices.ts`).
+ * The devices a push would reach, or `null` when no Burrow is running — which is
+ * "nowhere to push", not "the Relay could not be asked" (`push-devices.ts`).
  *
  * Labels only. The ACL record's `deliveryId` is a bearer capability for that
  * Client's push rows and never crosses into the webview realm, which has no

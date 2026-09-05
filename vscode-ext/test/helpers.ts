@@ -11,8 +11,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type {
-  RemoteHostCommand,
-  RemoteHostResult,
+  BurrowCommand,
+  BurrowResult,
 } from '../../lib/src/host/remote/service-protocol';
 import type { PeerLinkClient, PeerLinkDeps } from '../src/peer-link';
 import {
@@ -27,7 +27,7 @@ export async function tempStorageDir(): Promise<string> {
 /**
  * The one path every window of an installation contends for, mirroring
  * `socketPath()` and `peerDirPath()`. Duplicated on purpose: a derivation that
- * drifted would silently give each window its own lease and its own Host, and
+ * drifted would silently give each window its own lease and its own Burrow, and
  * the per-user directory is the layer that keeps another OS user from creating
  * the path first.
  */
@@ -124,11 +124,11 @@ export function fakeWindow(
     resizes: [] as Array<{ ptyId: string; cols: number; rows: number }>,
     invalidations: 0,
     /** Commands this window was asked to run for another one, and who asked. */
-    forwarded: [] as Array<{ payload: RemoteHostCommand; from: PeerLinkClient }>,
+    forwarded: [] as Array<{ payload: BurrowCommand; from: PeerLinkClient }>,
     /** Windows whose sockets closed with commands still outstanding. */
     dropped: [] as PeerLinkClient[],
     /** What came back for commands this window forwarded to its broker. */
-    results: [] as RemoteHostResult[],
+    results: [] as BurrowResult[],
     uiEvents: [] as unknown[],
     /** Windows that finished the handshake with this one as the broker. */
     joined: [] as PeerLinkClient[],

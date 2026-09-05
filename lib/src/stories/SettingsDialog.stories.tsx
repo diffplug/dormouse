@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react';
 import { userEvent, within } from 'storybook/test';
 import type { DormouseTheme } from '../lib/themes';
 import { SettingsDialog } from '../components/SettingsDialog';
-import { enrolledStatus, UNENROLLED_STATUS } from '../host/remote/test-remote-host-link';
+import { enrolledStatus, UNENROLLED_STATUS } from '../host/remote/test-burrow-link';
 
 /**
  * The app-global Settings dialog, normally opened from the far right of the
@@ -72,7 +72,7 @@ export const SpeechEnabled: Story = {
 /**
  * Push on, with one subscribed phone — the mockup's "Push will be sent to …"
  * case. The device line is the join of the server's subscriptions and the
- * Host's ACL labels, so a story has to prime it directly.
+ * Burrow's ACL labels, so a story has to prime it directly.
  */
 export const PushEnabled: Story = {
   parameters: {
@@ -113,19 +113,19 @@ export const PushNoDevices: Story = {
   },
 };
 
-/** No Host service in this build at all — the website. Nothing renders below,
+/** No Burrow service in this build at all — the website. Nothing renders below,
  *  so the copy must not point there. Paired with `PushNotEnrolled`. */
-export const PushNoHost: Story = {
+export const PushNoBurrow: Story = {
   parameters: {
     primedWatchedCommands: ['claude'],
     primedAlertSettings: { pushEnabled: true },
-    primedPushDevices: { status: 'no-host', devices: [] },
+    primedPushDevices: { status: 'no-burrow', devices: [] },
   },
 };
 
 /**
- * The other `no-host`: a build that *does* have a Host service, which simply has
- * not enrolled. Same push status as `PushNoHost`, but here the Remote control
+ * The other `no-burrow`: a build that *does* have a Burrow service, which simply has
+ * not enrolled. Same push status as `PushNoBurrow`, but here the Remote control
  * section renders beneath — so this is the one whose copy may say "below", and
  * the pair is what keeps that word honest.
  */
@@ -133,11 +133,11 @@ export const PushNotEnrolled: Story = {
   parameters: {
     primedWatchedCommands: ['claude'],
     primedAlertSettings: { pushEnabled: true },
-    primedPushDevices: { status: 'no-host', devices: [] },
-    primedRemoteHost: { status: UNENROLLED_STATUS },
+    primedPushDevices: { status: 'no-burrow', devices: [] },
+    primedBurrow: { status: UNENROLLED_STATUS },
   },
   play: async ({ canvasElement }) => {
-    await within(canvasElement).findByText(/server below to send push/);
+    await within(canvasElement).findByText(/Relay below to send push/);
   },
 };
 
@@ -295,15 +295,15 @@ export const HostOwnsShells: Story = {
 
 /**
  * The Remote control section in place — last, and directly under the push
- * settings whose `no-host` copy points at it. Every other story here leaves
- * `primedRemoteHost` unset, which is a build with no Host service behind the
+ * settings whose `no-burrow` copy points at it. Every other story here leaves
+ * `primedBurrow` unset, which is a build with no Burrow service behind the
  * webview: the section renders nothing at all rather than offering a form the
- * build cannot honor (`docs/specs/server.md`). `RemoteControlSection.stories`
+ * build cannot honor (`docs/specs/relay.md`). `RemoteControlSection.stories`
  * covers its own states.
  */
 export const WithRemoteControl: Story = {
   parameters: {
-    primedRemoteHost: { status: enrolledStatus({ pairedClients: 1 }) },
+    primedBurrow: { status: enrolledStatus({ pairedClients: 1 }) },
     primedWatchedCommands: ['claude'],
     primedAlertSettings: { pushEnabled: true },
   },

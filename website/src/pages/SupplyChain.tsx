@@ -129,7 +129,7 @@ const SECTIONS: readonly SupplyChainSection[] = [
     title: "npm Dependencies",
     count: npmDeps.length,
     description:
-      "Runtime npm packages used by the Standalone app, the VS Code extension, and the coordinating server you run yourself to pair a phone with your laptop.",
+      "Runtime npm packages used by the Standalone app, the VS Code extension, and the Relay you run yourself to pair a phone with your laptop.",
     table: <DependencyTable nameLabel="Package" deps={npmDeps} />,
   },
   {
@@ -221,7 +221,7 @@ export default function SupplyChain() {
         </div>
       ))}
       <p className={`text-base mb-2 ${MUTED_TEXT_CLASS}`}>
-        The optional coordinating server — needed only for phone push notifications,
+        The optional Relay — needed only for phone push notifications,
         installed by the{" "}
         <a href={`${sitePath("/docs/self-host")}#what-the-installer-does`} className={link()}>
           self-host runbook

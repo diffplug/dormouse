@@ -101,8 +101,8 @@ describe("TauriAdapter legacy session cleanup", () => {
   });
 });
 
-// The remote Host lives in the sidecar; this is the webview's end of the bridge
-// (lib/src/host/remote/service-protocol.ts). Correlation is `rhId`, never
+// The Burrow lives in the sidecar; this is the webview's end of the bridge
+// (lib/src/host/remote/service-protocol.ts). Correlation is `burrowRequestId`, never
 // `requestId` — Rust swallows any sidecar line carrying the latter to resolve
 // its own pending invokes.
 //
@@ -111,7 +111,7 @@ describe("TauriAdapter legacy session cleanup", () => {
 // timeout, always-answer, and dispose rules are the shared client's
 // (lib/src/host/remote/link-client.test.ts).
 describe("TauriAdapter remote host link", () => {
-  type Payload = { rhId: string; cmd: string; params?: unknown };
+  type Payload = { burrowRequestId: string; cmd: string; params?: unknown };
 
   async function bridged() {
     const handlers = new Map<string, (event: { payload: unknown }) => void>();
@@ -132,7 +132,7 @@ describe("TauriAdapter remote host link", () => {
 
     const sent = (): Payload[] =>
       invoke.mock.calls
-        .filter(([cmd]) => cmd === "remote_host_command")
+        .filter(([cmd]) => cmd === "burrow_command")
         .map(([, args]) => (args as { payload: Payload }).payload);
     const deliver = (event: string, payload: unknown): void => {
       handlers.get(event)?.({ payload });
@@ -140,54 +140,54 @@ describe("TauriAdapter remote host link", () => {
     return { adapter, sent, deliver };
   }
 
-  it("resolves a command by its rhId", async () => {
+  it("resolves a command by its burrowRequestId", async () => {
     const { adapter, sent, deliver } = await bridged();
-    const pending = adapter.remoteHost.command("status");
+    const pending = adapter.burrow.command("status");
 
     const payload = sent()[0]!;
     expect(payload.cmd).toBe("status");
-    // A result for someone else's rhId must not resolve this one.
-    deliver("remoteHost:result", { rhId: "other", result: { enrolled: false } });
-    deliver("remoteHost:result", { rhId: payload.rhId, result: { enrolled: true } });
+    // A result for someone else's burrowRequestId must not resolve this one.
+    deliver("burrow:result", { burrowRequestId: "other", result: { enrolled: false } });
+    deliver("burrow:result", { burrowRequestId: payload.burrowRequestId, result: { enrolled: true } });
 
     expect(await pending).toEqual({ enrolled: true });
   });
 
   it("answers an ask from the registered responder", async () => {
     const { adapter, sent, deliver } = await bridged();
-    adapter.remoteHost.respond("surfaceOp", (params) => [
+    adapter.burrow.respond("surfaceOp", (params) => [
       { ptyId: "pty-1", ...(params as Record<string, unknown>) },
     ]);
 
-    deliver("remoteHost:ask", { rhId: "ask-1", op: "surfaceOp", params: { surfaceId: "s1" } });
+    deliver("burrow:ask", { burrowRequestId: "ask-1", op: "surfaceOp", params: { surfaceId: "s1" } });
 
     expect(sent()[0]).toMatchObject({
       cmd: "answer",
-      params: { rhId: "ask-1", results: [{ ptyId: "pty-1", surfaceId: "s1" }] },
+      params: { burrowRequestId: "ask-1", results: [{ ptyId: "pty-1", surfaceId: "s1" }] },
     });
   });
 
   it("fans a sidecar event out by name", async () => {
     const { adapter, deliver } = await bridged();
     const seen: unknown[] = [];
-    adapter.remoteHost.on("pairing-queue", (data) => void seen.push(data));
+    adapter.burrow.on("pairing-queue", (data) => void seen.push(data));
 
-    deliver("remoteHost:event", { name: "pairing-queue", queue: [{ clientId: "c1" }] });
+    deliver("burrow:event", { name: "pairing-queue", queue: [{ clientId: "c1" }] });
     expect(seen).toEqual([{ name: "pairing-queue", queue: [{ clientId: "c1" }] }]);
   });
 
   it("notifies without waiting for anything", async () => {
     const { adapter, sent } = await bridged();
-    adapter.remoteHost.notify();
+    adapter.burrow.notify();
     expect(sent()[0]).toMatchObject({ cmd: "notify" });
     expect(sent()[0]!.params).toBeUndefined();
   });
 
   it("rejects what is still in flight when the sidecar is killed", async () => {
     const { adapter } = await bridged();
-    const pending = adapter.remoteHost.command("status");
+    const pending = adapter.burrow.command("status");
     adapter.shutdown();
-    await expect(pending).rejects.toThrow("remote host bridge closed");
+    await expect(pending).rejects.toThrow("burrow bridge closed");
   });
 });
 

@@ -69,11 +69,11 @@ export default defineConfig({
     dedupe: ["react", "react-dom"],
     alias: {
       // The Pocket app imports the remote modules, which import
-      // `server-lib-common`; its package `exports` resolve to a `dist` that a
+      // `remote-lib-common`; its package `exports` resolve to a `dist` that a
       // clean checkout has not built yet (this vite-only build has no `tsc -b`
       // step to generate it). Alias to source, same as the website and
       // Storybook configs.
-      "server-lib-common": fileURLToPath(new URL("../server-lib-common/src", import.meta.url)),
+      "remote-lib-common": fileURLToPath(new URL("../remote-lib-common/src", import.meta.url)),
       // `dor-lib-common` has the same unbuilt-`dist` exports problem, reached via
       // `Wall` → `useDorControl` → `connect-port`.
       "dor-lib-common": fileURLToPath(new URL("../dor-lib-common/src", import.meta.url)),

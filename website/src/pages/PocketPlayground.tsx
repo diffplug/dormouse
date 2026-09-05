@@ -50,7 +50,7 @@ function DesktopPocketPlaygroundPage() {
             your phone when something needs attention, then lets you answer from Pocket.
           </p>
           <p className="mb-4 text-lg leading-relaxed opacity-70">
-            Run the coordinating server yourself, or{" "}
+            Run your own Relay, or{" "}
             <a href={`${sitePath("/hosted")}#remote-control`} className={SITE_LINK_CLASS}>
               join the list for Dormouse Hosted
             </a>, where I’ll operate it for you. Your terminal still runs on your awake,

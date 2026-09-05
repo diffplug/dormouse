@@ -96,19 +96,19 @@ describe('FrameDecoder', () => {
   });
 
   it('carries a forwarded command and its answer', () => {
-    // The Host command bridge rides the same framing, so a window with no
+    // The Burrow command bridge rides the same framing, so a window with no
     // service of its own reaches the one that has it.
     const decoder = new FrameDecoder();
     expect(
       decoder.push(
-        encodeFrame({ kind: 'command', payload: { rhId: 'rh-1', cmd: 'status' } }) +
-          encodeFrame({ kind: 'commandResult', payload: { rhId: 'rh-1', result: { enrolled: true } } }) +
-          encodeFrame({ kind: 'commandResult', payload: { rhId: 'rh-2', error: 'nope' } }),
+        encodeFrame({ kind: 'command', payload: { burrowRequestId: 'rh-1', cmd: 'status' } }) +
+          encodeFrame({ kind: 'commandResult', payload: { burrowRequestId: 'rh-1', result: { enrolled: true } } }) +
+          encodeFrame({ kind: 'commandResult', payload: { burrowRequestId: 'rh-2', error: 'nope' } }),
       ),
     ).toEqual([
-      { kind: 'command', payload: { rhId: 'rh-1', cmd: 'status' } },
-      { kind: 'commandResult', payload: { rhId: 'rh-1', result: { enrolled: true } } },
-      { kind: 'commandResult', payload: { rhId: 'rh-2', error: 'nope' } },
+      { kind: 'command', payload: { burrowRequestId: 'rh-1', cmd: 'status' } },
+      { kind: 'commandResult', payload: { burrowRequestId: 'rh-1', result: { enrolled: true } } },
+      { kind: 'commandResult', payload: { burrowRequestId: 'rh-2', error: 'nope' } },
     ]);
   });
 

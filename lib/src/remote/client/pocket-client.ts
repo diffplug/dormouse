@@ -1,12 +1,12 @@
 /**
  * UI-free Pocket protocol client. It speaks exactly one wire: the `e2e`
- * envelope of `docs/specs/server.md` → Relay, carrying the two end-to-end
+ * envelope of `docs/specs/relay.md` → "Routing", carrying the two end-to-end
  * ceremonies of `docs/specs/remote-security-model.md` (Pairing, Connection) and
  * — once a connection is established — protocol-v1 as application messages on
  * the same Noise session (`docs/specs/remote-api.md` owns their correlation).
  *
- * There is no plaintext path, no fallback, and no runtime selector: a Host that
- * cannot complete a ceremony is a Host this Client cannot reach.
+ * There is no plaintext path, no fallback, and no runtime selector: a Burrow that
+ * cannot complete a ceremony is a Burrow this Client cannot reach.
  */
 
 import {
@@ -31,7 +31,7 @@ import {
   generateNoiseKeyPair,
   hashPasskeyPublicKey,
   isConnectionOutcomeV1,
-  isE2eServerToClientFrame,
+  isE2eRelayToClientFrame,
   isNoisePublicKey,
   isPairingOutcomeV1,
   pairingInvitationPrologue,
@@ -49,9 +49,9 @@ import {
   type E2eClientFrame,
   type E2eClientStep,
   type E2eKind,
-  type E2eServerToClientFrame,
+  type E2eRelayToClientFrame,
   type HelloResult,
-  type HostsResponse,
+  type BurrowsResponse,
   type PairingDenialCode,
   type PairingInvitation,
   type PairingRequestV1,
@@ -65,7 +65,7 @@ import {
   type ReauthFinishResponse,
   type RemoteEventMsg,
   type RemoteResponse,
-  type ServerToClientFrame,
+  type RelayToClientFrame,
   type SetupBeginResponse,
   type SetupFinishResponse,
   type SigninBeginResponse,
@@ -73,7 +73,7 @@ import {
   type TerminalAttachResult,
   type TerminalClosedEvent,
   type TerminalDataEvent,
-} from 'server-lib-common';
+} from 'remote-lib-common';
 import {
   PasskeyAlreadyRegisteredError,
   isPasskeyAlreadyRegistered,
@@ -81,19 +81,19 @@ import {
   type WebAuthnClient,
 } from './webauthn';
 import {
-  type KnownHostStore,
-  type KnownHostV1,
+  type KnownBurrowStore,
+  type KnownBurrowV1,
   type PendingDeletionStore,
 } from './pocket-db';
-import { hostTimer, type RemoteTimer, type RemoteWebSocket } from '../ws';
+import { realTimer, type RemoteTimer, type RemoteWebSocket } from '../ws';
 
 /** The slice of a WebSocket the client uses; a browser `WebSocket` satisfies it. */
 export type PocketSocket = RemoteWebSocket;
 
 /**
  * Persistent per-device state that is *not* an end-to-end identity — those live
- * in IndexedDB ({@link KnownHostStore}). Passkey public keys are cached by
- * credential id at registration *and* at sign-in — the Server returns the
+ * in IndexedDB ({@link KnownBurrowStore}). Passkey public keys are cached by
+ * credential id at registration *and* at sign-in — the Relay returns the
  * asserted key — so any browser profile holding a synced passkey can build a
  * presence proof, not only the one that performed the registration.
  */
@@ -102,16 +102,16 @@ export interface PocketStorage {
   setPasskeyPublicKey(credentialId: string, publicKey: string): void;
   /**
    * Drop a cached key again. Only {@link PocketClient.setup} calls it, for a
-   * credential it cached moments earlier and the Server then refused, so it
+   * credential it cached moments earlier and the Relay then refused, so it
    * never has an older visit's key to lose.
    */
   forgetPasskeyPublicKey(credentialId: string): void;
   /** Credential ids this device has stored a public key for (may be empty). */
   knownCredentialIds(): string[];
   /**
-   * Digest of the delivery address last registered with the Server, or null if
-   * this device has never registered one. Per device, not per Host: one
-   * service-worker scope holds one subscription, so if it rotates, every Host
+   * Digest of the delivery address last registered with the Relay, or null if
+   * this device has never registered one. Per device, not per Burrow: one
+   * service-worker scope holds one subscription, so if it rotates, every Burrow
    * row for this device is stale at once.
    */
   getRegisteredPushEndpoint(): string | null;
@@ -137,8 +137,8 @@ export interface PocketClientDeps {
   readonly fetch: typeof fetch;
   readonly webauthn: WebAuthnClient;
   readonly createWebSocket: (url: string) => PocketSocket;
-  /** The pinned per-Host records: this Client's whole authorization state. */
-  readonly knownHosts: KnownHostStore;
+  /** The pinned per-Burrow records: this Client's whole authorization state. */
+  readonly knownBurrows: KnownBurrowStore;
   /** Delivery ids owed a deletion; see {@link PocketClient.retirePendingDeletions}. */
   readonly pendingDeletions: PendingDeletionStore;
   readonly storage?: PocketStorage;
@@ -158,53 +158,53 @@ export interface TerminalHandlers {
 }
 
 /**
- * A failure the Server *answered* with — any response it rejected — as opposed
+ * A failure the Relay *answered* with — any response it rejected — as opposed
  * to a request that never got an answer at all (DNS, TLS, the radio), which
  * leaves `fetch`'s own `TypeError` to propagate untouched. The distinction is
  * load-bearing exactly once, in {@link PocketClient.setup}: it decides whether
- * the Server can be assumed to hold nothing.
+ * the Relay can be assumed to hold nothing.
  */
-export class ServerRefusalError extends Error {
+export class RelayRefusalError extends Error {
   /**
    * The HTTP status behind the refusal, `0` where none was read.
    *
-   * Carried because "the Server answered" and "the Server answered *this*" are
+   * Carried because "the Relay answered" and "the Relay answered *this*" are
    * different facts, and a caller that acts on a refusal usually means one
-   * status: a 404 is proof the Server holds nothing, while a 400, a 401, or a
+   * status: a 404 is proof the Relay holds nothing, while a 400, a 401, or a
    * 502 is a refusal of this attempt and proof of nothing at all.
    */
   readonly status: number;
 
   constructor(message: string, status = 0) {
     super(message);
-    this.name = 'ServerRefusalError';
+    this.name = 'RelayRefusalError';
     this.status = status;
   }
 }
 
 /**
- * Shown when the Host reaped this session while the page was backgrounded.
- * Not a failure — the price of the Host being able to reclaim state a hostile
+ * Shown when the Burrow reaped this session while the page was backgrounded.
+ * Not a failure — the price of the Burrow being able to reclaim state a hostile
  * relay would otherwise never let it reclaim (`docs/specs/pocket-app.md`).
  */
-export const HOST_SESSION_REAPED_MESSAGE =
+export const BURROW_SESSION_REAPED_MESSAGE =
   'This phone was away too long, so the computer let the session go. Connect again to resume.';
 
-/** Shown when the Server no longer accepts our session token. */
+/** Shown when the Relay no longer accepts our session token. */
 export const SESSION_EXPIRED_MESSAGE = 'Your session expired. Sign in again to continue.';
 
 /**
- * The Server rejected our session token, so nothing works until the user signs
+ * The Relay rejected our session token, so nothing works until the user signs
  * in again. Distinct from an ordinary failure because the UI must react rather
- * than report: sessions live only in the Server's memory (docs/specs/server.md),
- * so they die on a 12h expiry *and* on every Server restart, and an installed
+ * than report: sessions live only in the Relay's memory (docs/specs/relay.md),
+ * so they die on a 12h expiry *and* on every Relay restart, and an installed
  * Pocket has no address bar to reload from. Left as a message, the user is
  * stuck holding a dead token with force-quitting the app as the only way out.
  *
  * {@link PocketClient} clears the token before throwing this, so recovery is
- * exactly "sign in again" with the passkey cache and the pinned Hosts intact.
+ * exactly "sign in again" with the passkey cache and the pinned Burrows intact.
  */
-export class SessionExpiredError extends ServerRefusalError {
+export class SessionExpiredError extends RelayRefusalError {
   constructor() {
     super(SESSION_EXPIRED_MESSAGE, 401);
     this.name = 'SessionExpiredError';
@@ -216,36 +216,36 @@ export const SETUP_CODE_DEAD_MESSAGE =
   'That setup code has expired. Show a new one on the computer and scan it again.';
 
 /**
- * The Server refused the `setupToken` off a scanned code
+ * The Relay refused the `setupToken` off a scanned code
  * ({@link SETUP_TOKEN_INVALID_ERROR}). Its own class for the reason
  * {@link SessionExpiredError} is: the UI must react rather than report — drop
  * the dead code and send the user back to the computer for a fresh one — and
- * the Server answers 401 for an unknown session too, so only the body
+ * the Relay answers 401 for an unknown session too, so only the body
  * separates them ({@link SETUP_CODE_DEAD_MESSAGE} is what the user reads).
  */
-export class SetupTokenInvalidError extends ServerRefusalError {
+export class SetupTokenInvalidError extends RelayRefusalError {
   constructor() {
     super(SETUP_CODE_DEAD_MESSAGE, 401);
     this.name = 'SetupTokenInvalidError';
   }
 }
 
-/** Shown when a Host presents a static this Client has already pinned differently. */
-export const HOST_IDENTITY_MISMATCH_MESSAGE =
+/** Shown when a Burrow presents a static this Client has already pinned differently. */
+export const BURROW_IDENTITY_MISMATCH_MESSAGE =
   'This computer is presenting a different identity than the one this phone paired with. ' +
   'Pairing was stopped. Remove it from this phone only if you know why it changed.';
 
 /**
- * The Host answered a pairing with a static that is not the one already pinned
- * for that `hostId`. Terminal, and the old record is left exactly as it was:
+ * The Burrow answered a pairing with a static that is not the one already pinned
+ * for that `burrowId`. Terminal, and the old record is left exactly as it was:
  * the pin is what a connection authenticates against, so replacing it on the
  * word of the party that failed the compare would be the whole attack
  * (`docs/specs/remote-security-model.md` → Pairing).
  */
-export class HostIdentityMismatchError extends Error {
+export class BurrowIdentityMismatchError extends Error {
   constructor() {
-    super(HOST_IDENTITY_MISMATCH_MESSAGE);
-    this.name = 'HostIdentityMismatchError';
+    super(BURROW_IDENTITY_MISMATCH_MESSAGE);
+    this.name = 'BurrowIdentityMismatchError';
   }
 }
 
@@ -254,9 +254,9 @@ export const PASSKEY_UNAVAILABLE_MESSAGE =
   'Sign in again to restore it.';
 
 /**
- * What the user reads for each Host-sent denial.
+ * What the user reads for each Burrow-sent denial.
  *
- * **Fixed copy, never Host- or relay-supplied text.** The outcome is
+ * **Fixed copy, never Burrow- or relay-supplied text.** The outcome is
  * authenticated but its contents are still a remote party's, and a denial is
  * one of a closed set — so the code selects a sentence written here rather than
  * rendering one that arrived on the wire.
@@ -268,36 +268,36 @@ export const PAIRING_DENIAL_MESSAGES: Record<PairingDenialCode, string> = {
   'presence-rejected': 'The computer could not verify your passkey. Sign in again, then scan a new code.',
   'invitation-expired': SETUP_CODE_DEAD_MESSAGE,
   superseded: 'Another pairing request replaced this one. Show a new code and scan it again.',
-  'host-error': 'The computer could not finish pairing. Show a new code and scan it again.',
+  'burrow-error': 'The computer could not finish pairing. Show a new code and scan it again.',
 };
 
 export const CONNECTION_DENIAL_MESSAGES: Record<ConnectionDenialCode, string> = {
   'pairing-required': 'This computer no longer recognizes this phone. Scan a new code to pair again.',
   'presence-rejected': 'The computer could not verify your passkey. Sign in again and try Connect.',
   'protocol-rejected': 'The computer refused this connection.',
-  'host-busy': 'The computer is already handling as many phones as it can. Try again shortly.',
-  'host-error': 'The computer could not finish the connection.',
+  'burrow-busy': 'The computer is already handling as many phones as it can. Try again shortly.',
+  'burrow-error': 'The computer could not finish the connection.',
 };
 
 /**
  * What a ceremony that simply never answered reports.
  *
- * **A timer expiring is unavailability, not a denial.** A Host that is asleep,
+ * **A timer expiring is unavailability, not a denial.** A Burrow that is asleep,
  * a relay that dropped the frame, and a person who never looked at the laptop
  * are indistinguishable from here, and calling any of them a refusal would send
  * the user to fix the wrong thing.
  */
-export const HOST_UNAVAILABLE_MESSAGE =
+export const BURROW_UNAVAILABLE_MESSAGE =
   'The computer did not answer. Check that it is awake and connected, then try again.';
 
 /** Where a pairing ended, as the UI reports it. */
 export type PairingResult =
-  | { readonly ok: true; readonly record: KnownHostV1 }
+  | { readonly ok: true; readonly record: KnownBurrowV1 }
   | { readonly ok: false; readonly message: string };
 
 /** Where a connection attempt ended, as the UI reports it. */
 export type ConnectResult =
-  | { readonly ok: true; readonly hostLabel: string }
+  | { readonly ok: true; readonly burrowLabel: string }
   | { readonly ok: false; readonly message: string; readonly pairingRequired: boolean };
 
 interface CiphertextWaiter {
@@ -316,8 +316,8 @@ interface EstablishedSession {
   readonly session: NoiseTransportSession;
   /**
    * When this Client last put a byte on this session — the mirror of the
-   * Host's `lastClientActivityAt`, because that is the clock the Host reaps on
-   * (`docs/specs/remote-security-model.md` → Host bounds).
+   * Burrow's `lastClientActivityAt`, because that is the clock the Burrow reaps on
+   * (`docs/specs/remote-security-model.md` → Burrow bounds).
    */
   lastSentAt: number;
 }
@@ -328,7 +328,7 @@ export class PocketClient {
   readonly #fetch: typeof fetch;
   readonly #webauthn: WebAuthnClient;
   readonly #createWebSocket: (url: string) => PocketSocket;
-  readonly #knownHosts: KnownHostStore;
+  readonly #knownBurrows: KnownBurrowStore;
   readonly #pendingDeletions: PendingDeletionStore;
   readonly #storage: PocketStorage;
   readonly #now: () => number;
@@ -340,8 +340,8 @@ export class PocketClient {
   /** The credential id from the most recent sign-in (or registration). */
   #credentialId: string | null = null;
   #established: EstablishedSession | null = null;
-  #connectedHostId: string | null = null;
-  #onHostGone: (() => void) | null = null;
+  #connectedBurrowId: string | null = null;
+  #onBurrowGone: (() => void) | null = null;
   /** Cancels the armed keepalive, and the visibility subscription behind it. */
   #cancelKeepalive: (() => void) | null = null;
   #cancelVisibility: (() => void) | null = null;
@@ -365,11 +365,11 @@ export class PocketClient {
     this.#fetch = deps.fetch;
     this.#webauthn = deps.webauthn;
     this.#createWebSocket = deps.createWebSocket;
-    this.#knownHosts = deps.knownHosts;
+    this.#knownBurrows = deps.knownBurrows;
     this.#pendingDeletions = deps.pendingDeletions;
     this.#storage = deps.storage ?? localStoragePocketStorage();
     this.#now = deps.now ?? (() => Date.now());
-    this.#setTimer = deps.setTimer ?? hostTimer;
+    this.#setTimer = deps.setTimer ?? realTimer;
     this.#visibility = deps.visibility ?? documentVisibility();
   }
 
@@ -377,8 +377,8 @@ export class PocketClient {
     return this.#sessionToken;
   }
 
-  get connectedHostId(): string | null {
-    return this.#connectedHostId;
+  get connectedBurrowId(): string | null {
+    return this.#connectedBurrowId;
   }
 
   /**
@@ -409,11 +409,11 @@ export class PocketClient {
   }
 
   /**
-   * Notified when the Host drops: a `host-gone` frame, a closed socket, or a
-   * session the Host's idle reaper took while this page was hidden.
+   * Notified when the Burrow drops: a `burrow-gone` frame, a closed socket, or a
+   * session the Burrow's idle reaper took while this page was hidden.
    */
-  setOnHostGone(callback: (() => void) | null): void {
-    this.#onHostGone = callback;
+  setOnBurrowGone(callback: (() => void) | null): void {
+    this.#onBurrowGone = callback;
   }
 
   // --- Account: first-time setup + sign-in ---------------------------------
@@ -424,10 +424,10 @@ export class PocketClient {
    */
   async setup({ setupToken }: { setupToken: string }, label: string): Promise<SetupFinishResponse> {
     const begin = await this.#setupApi<SetupBeginResponse>(API_ROUTES.setupBegin, { setupToken });
-    // Excluded from the Server's list, not this browser's: a retry — after a
+    // Excluded from the Relay's list, not this browser's: a retry — after a
     // refusal, or on a device that stored nothing — must not silently mint a
     // duplicate of a credential the account already holds, while an orphan the
-    // Server never registered is absent from it and is replaced as it should be.
+    // Relay never registered is absent from it and is replaced as it should be.
     let registration: PasskeyRegistration;
     try {
       registration = await this.#webauthn.registerPasskey(
@@ -439,7 +439,7 @@ export class PocketClient {
     } catch (err) {
       // Translated at this seam, not inside the browser wrapper, so every
       // `WebAuthnClient` — the real one and the fakes — reports the refusal the
-      // same way. It is actionable: the list came from the Server, so the
+      // same way. It is actionable: the list came from the Relay, so the
       // credential blocking us is one that can sign in from this device.
       if (isPasskeyAlreadyRegistered(err)) throw new PasskeyAlreadyRegisteredError();
       throw err;
@@ -460,16 +460,16 @@ export class PocketClient {
         label,
       });
     } catch (err) {
-      // A refusal is proof the Server has nothing; a lost answer is not. So a
+      // A refusal is proof the Relay has nothing; a lost answer is not. So a
       // rejected `finish` (a dead `setupToken`, any answered error) takes the
       // cache back down — kept, it would make `hasPriorUse` promise a sign-in
       // that cannot succeed — while an unanswered one leaves it standing.
-      if (err instanceof ServerRefusalError) {
+      if (err instanceof RelayRefusalError) {
         this.#storage.forgetPasskeyPublicKey(registration.credentialId);
       }
       throw err;
     }
-    // Only once the Server has acknowledged it: this names the credential a
+    // Only once the Relay has acknowledged it: this names the credential a
     // pairing's presence proof is built from. Sign-in refreshes it.
     this.#credentialId = registration.credentialId;
     return finish;
@@ -480,7 +480,7 @@ export class PocketClient {
    *
    * A phone that is already signed in has no passkey to create, and a code left
    * redeemable is one a photograph of the laptop's screen could still register
-   * with (`docs/specs/server.md` → Setup tokens).
+   * with (`docs/specs/relay.md` → Setup tokens).
    */
   async retireSetupToken(setupToken: string): Promise<void> {
     await this.#setupApi<unknown>(API_ROUTES.setupRetire, { setupToken }, this.#auth());
@@ -510,7 +510,7 @@ export class PocketClient {
     const finish = await this.#api<SigninFinishResponse>(API_ROUTES.signinFinish, { assertion });
     this.#sessionToken = finish.sessionToken;
     this.#credentialId = assertion.credentialId;
-    // Signing in is enough to pair from here. The Server returns the asserted
+    // Signing in is enough to pair from here. The Relay returns the asserted
     // passkey's public key, so a browser profile that never performed the
     // registration — an iOS Home Screen install, a second browser — can still
     // build presence proofs instead of being pushed into creating a redundant
@@ -519,32 +519,32 @@ export class PocketClient {
     return finish;
   }
 
-  async listHosts(): Promise<HostsResponse['hosts']> {
-    const response = await this.#api<HostsResponse>(API_ROUTES.hosts, undefined, {
+  async listBurrows(): Promise<BurrowsResponse['burrows']> {
+    const response = await this.#api<BurrowsResponse>(API_ROUTES.burrows, undefined, {
       method: 'GET',
       ...this.#auth(),
     });
-    return response.hosts;
+    return response.burrows;
   }
 
-  // --- The pinned Hosts ----------------------------------------------------
+  // --- The pinned Burrows ----------------------------------------------------
 
-  /** Every Host this browser holds a record for, paired or not. */
-  listKnownHosts(): Promise<KnownHostV1[]> {
-    return this.#knownHosts.list();
+  /** Every Burrow this browser holds a record for, paired or not. */
+  listKnownBurrows(): Promise<KnownBurrowV1[]> {
+    return this.#knownBurrows.list();
   }
 
   /**
-   * Forget one Host locally: the tombstone is written *before* the record that
-   * holds the delivery id is deleted, so an unreachable Server cannot strand a
+   * Forget one Burrow locally: the tombstone is written *before* the record that
+   * holds the delivery id is deleted, so an unreachable Relay cannot strand a
    * push row nothing can name again.
    */
-  async forgetHost(hostId: string): Promise<void> {
-    const record = await this.#knownHosts.get(hostId);
+  async forgetBurrow(burrowId: string): Promise<void> {
+    const record = await this.#knownBurrows.get(burrowId);
     if (record?.authorization.state === 'paired') {
-      await this.#tombstone(hostId, record.authorization.deliveryId);
+      await this.#tombstone(burrowId, record.authorization.deliveryId);
     }
-    await this.#knownHosts.delete(hostId);
+    await this.#knownBurrows.delete(burrowId);
     await this.retirePendingDeletions();
   }
 
@@ -552,7 +552,7 @@ export class PocketClient {
 
   /**
    * The VAPID public key a browser needs before it can subscribe, or `null`
-   * when the server has push disabled. Unauthenticated — the key is public by
+   * when the Relay has push disabled. Unauthenticated — the key is public by
    * construction.
    */
   async getPushConfig(): Promise<string | null> {
@@ -563,20 +563,20 @@ export class PocketClient {
   }
 
   /**
-   * The Hosts **this device** is already registered to receive push from.
+   * The Burrows **this device** is already registered to receive push from.
    *
    * Asked by capability rather than by identity: the query names this browser's
-   * own delivery ids and the Server reports only on those, so there is no
+   * own delivery ids and the Relay reports only on those, so there is no
    * endpoint that reports on a row the caller does not already hold the
-   * capability for (`docs/specs/server.md` → Web Push).
+   * capability for (`docs/specs/relay.md` → Web Push).
    */
-  async listPushSubscribedHosts(): Promise<string[]> {
-    const deliveryIds = (await this.#knownHosts.list())
+  async listPushSubscribedBurrows(): Promise<string[]> {
+    const deliveryIds = (await this.#knownBurrows.list())
       .flatMap((record) =>
         record.authorization.state === 'paired' ? [record.authorization.deliveryId] : [],
       )
       // The route refuses more than this, and a browser holding that many
-      // paired Hosts has bigger problems than a truncated readback.
+      // paired Burrows has bigger problems than a truncated readback.
       .slice(0, MAX_PUSH_QUERY_DELIVERY_IDS);
     if (deliveryIds.length === 0) return [];
     const response = await this.#api<PushSubscriptionsQueryResponse>(
@@ -584,34 +584,34 @@ export class PocketClient {
       { deliveryIds },
       this.#auth(),
     );
-    return response.registered.map((row) => row.hostId);
+    return response.registered.map((row) => row.burrowId);
   }
 
   /**
-   * Register a browser push subscription against `hostId`, presenting the
-   * delivery id that Host minted for this Client at pairing. Possession of the
+   * Register a browser push subscription against `burrowId`, presenting the
+   * delivery id that Burrow minted for this Client at pairing. Possession of the
    * id is the whole authorization — there is no challenge and no signature.
    */
   async subscribeToPush(
-    hostId: string,
+    burrowId: string,
     subscription: PushSubscriptionPayload,
   ): Promise<PushSubscribeResponse> {
-    const record = await this.#knownHosts.get(hostId);
+    const record = await this.#knownBurrows.get(burrowId);
     if (record?.authorization.state !== 'paired') {
       throw new Error('this phone is not paired with that computer');
     }
     const result = await this.#api<PushSubscribeResponse>(
       API_ROUTES.pushSubscribe,
-      { hostId, deliveryId: record.authorization.deliveryId, subscription },
+      { burrowId, deliveryId: record.authorization.deliveryId, subscription },
       this.#auth(),
     );
-    // Recorded only once the Server has the row: this is a note about what the
-    // Server holds, not about what the browser minted.
+    // Recorded only once the Relay has the row: this is a note about what the
+    // Relay holds, not about what the browser minted.
     this.#storage.setRegisteredPushEndpoint(await pushEndpointFingerprint(subscription.endpoint));
     return result;
   }
 
-  /** Idempotent, and the Server always answers 204. */
+  /** Idempotent, and the Relay always answers 204. */
   async deletePushSubscription(deliveryId: string): Promise<void> {
     await this.#api<unknown>(pushSubscriptionDeletePath(deliveryId), undefined, {
       method: 'DELETE',
@@ -620,7 +620,7 @@ export class PocketClient {
   }
 
   /**
-   * Drain the tombstone queue, clearing each entry only on a Server answer.
+   * Drain the tombstone queue, clearing each entry only on a Relay answer.
    *
    * Best-effort and never throws: its callers are boot, sign-in, and the step
    * before registering a replacement, none of which may fail over a deletion
@@ -637,7 +637,7 @@ export class PocketClient {
     for (const tombstone of queued) {
       try {
         await this.deletePushSubscription(tombstone.deliveryId);
-        await this.#pendingDeletions.delete(tombstone.hostId, tombstone.deliveryId);
+        await this.#pendingDeletions.delete(tombstone.burrowId, tombstone.deliveryId);
       } catch {
         // Kept for the next drain: the id in the tombstone is the only handle
         // that can ever delete this row.
@@ -693,7 +693,7 @@ export class PocketClient {
    * The whole pairing ceremony against one scanned invitation
    * (`docs/specs/remote-security-model.md` → Pairing).
    *
-   * The per-Host static is minted here and held only in memory until the Host
+   * The per-Burrow static is minted here and held only in memory until the Burrow
    * approves: a key persisted for a pairing that was denied would be a Client
    * identity nothing authorized. `onCode` fires the moment the two digits
    * exist, because the screen has to show them while the outcome is pending.
@@ -705,8 +705,8 @@ export class PocketClient {
   ): Promise<PairingResult> {
     await this.#ensureSocket();
     const deadline = this.#now() + DEFAULT_PAIRING_TTL_MS;
-    const { hostId, inviteId } = invitation;
-    const route = { kind: 'pairing', id: inviteId, hostId } as const;
+    const { burrowId, inviteId } = invitation;
+    const route = { kind: 'pairing', id: inviteId, burrowId } as const;
     const clientStatic = await generateNoiseKeyPair();
     const handshake = await createNoiseInitiator({
       prologue: pairingInvitationPrologue(invitation),
@@ -735,7 +735,7 @@ export class PocketClient {
     const passkeyCredentialId = this.#requireCredentialId();
     const presence = await this.#provePresence({
       kind: 'pairing',
-      hostId,
+      burrowId,
       handshakeHash,
       passkeyCredentialId,
     });
@@ -747,7 +747,7 @@ export class PocketClient {
       return this.#unavailable(err);
     }
     if (!isPairingOutcomeV1(outcome)) {
-      return { ok: false, message: PAIRING_DENIAL_MESSAGES['host-error'] };
+      return { ok: false, message: PAIRING_DENIAL_MESSAGES['burrow-error'] };
     }
     if (!outcome.ok) return { ok: false, message: PAIRING_DENIAL_MESSAGES[outcome.code] };
 
@@ -766,14 +766,14 @@ export class PocketClient {
       outcome.accountId !== SELFHOST_ACCOUNT_ID ||
       outcome.passkeyCredentialId !== passkeyCredentialId ||
       outcome.passkeyPublicKeyHash !== passkeyPublicKeyHash ||
-      !isNoisePublicKey(outcome.hostStaticPublicKey)
+      !isNoisePublicKey(outcome.burrowStaticPublicKey)
     ) {
-      return { ok: false, message: PAIRING_DENIAL_MESSAGES['host-error'] };
+      return { ok: false, message: PAIRING_DENIAL_MESSAGES['burrow-error'] };
     }
-    const existing = await this.#knownHosts.get(hostId);
-    if (existing && existing.hostStaticPublicKey !== outcome.hostStaticPublicKey) {
-      // Terminal, and the old record is untouched — see HostIdentityMismatchError.
-      throw new HostIdentityMismatchError();
+    const existing = await this.#knownBurrows.get(burrowId);
+    if (existing && existing.burrowStaticPublicKey !== outcome.burrowStaticPublicKey) {
+      // Terminal, and the old record is untouched — see BurrowIdentityMismatchError.
+      throw new BurrowIdentityMismatchError();
     }
     // A re-pair mints a fresh delivery id, so the one this record is about to
     // forget has to be queued before the write that forgets it.
@@ -781,13 +781,13 @@ export class PocketClient {
       existing?.authorization.state === 'paired' &&
       existing.authorization.deliveryId !== outcome.deliveryId
     ) {
-      await this.#tombstone(hostId, existing.authorization.deliveryId);
+      await this.#tombstone(burrowId, existing.authorization.deliveryId);
     }
-    const record: KnownHostV1 = {
-      hostId,
+    const record: KnownBurrowV1 = {
+      burrowId,
       accountId: outcome.accountId,
-      label: outcome.hostLabel,
-      hostStaticPublicKey: outcome.hostStaticPublicKey,
+      label: outcome.burrowLabel,
+      burrowStaticPublicKey: outcome.burrowStaticPublicKey,
       clientStaticKeyPair: {
         privateKey: clientStatic.privateKey as CryptoKey,
         publicKeyRaw: toBase64Url(clientStatic.publicKey),
@@ -800,20 +800,20 @@ export class PocketClient {
         approvedAt: this.#now(),
       },
     };
-    await this.#knownHosts.put(record);
+    await this.#knownBurrows.put(record);
     return { ok: true, record };
   }
 
   // --- Connection ----------------------------------------------------------
 
   /**
-   * Connect to a paired Host: IK against the pinned static, one presence proof
-   * over this handshake's own transcript, and the Host's single outcome
+   * Connect to a paired Burrow: IK against the pinned static, one presence proof
+   * over this handshake's own transcript, and the Burrow's single outcome
    * (`docs/specs/remote-security-model.md` → Connection).
    */
-  async connect(hostId: string): Promise<ConnectResult> {
+  async connect(burrowId: string): Promise<ConnectResult> {
     await this.#ensureSocket();
-    const record = await this.#knownHosts.get(hostId);
+    const record = await this.#knownBurrows.get(burrowId);
     if (!record) {
       return { ok: false, message: CONNECTION_DENIAL_MESSAGES['pairing-required'], pairingRequired: true };
     }
@@ -822,31 +822,31 @@ export class PocketClient {
     }
     const deadline = this.#now() + DEFAULT_CHALLENGE_TTL_MS;
     const connectionId = randomBase64Url(E2E_ID_BYTE_LENGTH);
-    const route = { kind: 'connection', id: connectionId, hostId } as const;
+    const route = { kind: 'connection', id: connectionId, burrowId } as const;
     const handshake = await createNoiseInitiator({
-      prologue: e2eConnectionPrologue(hostId, connectionId),
+      prologue: e2eConnectionPrologue(burrowId, connectionId),
       staticKeyPair: {
         privateKey: record.clientStaticKeyPair.privateKey,
         publicKey: fromBase64Url(record.clientStaticKeyPair.publicKeyRaw),
       },
-      remoteStaticPublicKey: fromBase64Url(record.hostStaticPublicKey),
+      remoteStaticPublicKey: fromBase64Url(record.burrowStaticPublicKey),
     });
     let session: NoiseTransportSession;
-    let hostChallenge: string;
+    let burrowChallenge: string;
     try {
       const response = await this.#exchange(route, await handshake.writeMessage(), deadline);
-      // Message 2's payload is the Host's fresh single-use challenge, which the
+      // Message 2's payload is the Burrow's fresh single-use challenge, which the
       // presence binding must name.
-      hostChallenge = toBase64Url(await handshake.readMessage(fromBase64Url(response)));
+      burrowChallenge = toBase64Url(await handshake.readMessage(fromBase64Url(response)));
       session = new NoiseTransportSession(handshake.session);
     } catch (err) {
       return this.#connectionUnavailable(err);
     }
     const presence = await this.#provePresence({
       kind: 'connection',
-      hostId,
+      burrowId,
       connectionId,
-      hostChallenge,
+      burrowChallenge,
       handshakeHash: toBase64Url(session.handshakeHash),
       passkeyCredentialId: record.passkeyCredentialId,
     });
@@ -858,13 +858,13 @@ export class PocketClient {
       return this.#connectionUnavailable(err);
     }
     if (!isConnectionOutcomeV1(outcome)) {
-      return { ok: false, message: CONNECTION_DENIAL_MESSAGES['host-error'], pairingRequired: false };
+      return { ok: false, message: CONNECTION_DENIAL_MESSAGES['burrow-error'], pairingRequired: false };
     }
     if (outcome.ok) {
       this.#established = { connectionId, session, lastSentAt: this.#now() };
-      this.#connectedHostId = hostId;
+      this.#connectedBurrowId = burrowId;
       this.#startKeepalives();
-      return { ok: true, hostLabel: outcome.hostLabel };
+      return { ok: true, burrowLabel: outcome.burrowLabel };
     }
     if (outcome.code === 'pairing-required') {
       // Best-effort: the outcome is authenticated and the row has to move to
@@ -890,24 +890,24 @@ export class PocketClient {
    * because the record about to be rewritten holds the only id that can name
    * that row again.
    */
-  async #dropAuthorization(record: KnownHostV1): Promise<void> {
+  async #dropAuthorization(record: KnownBurrowV1): Promise<void> {
     if (record.authorization.state !== 'paired') return;
     const { deliveryId } = record.authorization;
-    await this.#tombstone(record.hostId, deliveryId);
-    await this.#knownHosts.put({ ...record, authorization: { state: 'pairing-required' } });
+    await this.#tombstone(record.burrowId, deliveryId);
+    await this.#knownBurrows.put({ ...record, authorization: { state: 'pairing-required' } });
     // Best-effort: the tombstone is what makes this retryable, so a failure
     // here costs a later drain rather than the row.
     try {
       await this.deletePushSubscription(deliveryId);
-      await this.#pendingDeletions.delete(record.hostId, deliveryId);
+      await this.#pendingDeletions.delete(record.burrowId, deliveryId);
     } catch {
       // Left queued.
     }
     this.#disposeCeremony();
   }
 
-  async #tombstone(hostId: string, deliveryId: string): Promise<void> {
-    await this.#pendingDeletions.put({ hostId, deliveryId, queuedAt: this.#now() });
+  async #tombstone(burrowId: string, deliveryId: string): Promise<void> {
+    await this.#pendingDeletions.put({ burrowId, deliveryId, queuedAt: this.#now() });
   }
 
   // --- Remote-api v1 -------------------------------------------------------
@@ -978,7 +978,7 @@ export class PocketClient {
     return promise;
   }
 
-  /** Request that also opens an event subscription (Host reuses `requestId` as `subId`). */
+  /** Request that also opens an event subscription (Burrow reuses `requestId` as `subId`). */
   async subscribe<T = unknown>(
     method: string,
     params: unknown,
@@ -1003,7 +1003,7 @@ export class PocketClient {
     const ws = this.#ws;
     // Tear down BEFORE closing the socket: nulling #ws is what makes #onClose's
     // generation guard reject the close that follows, which is the only thing
-    // keeping an intentional close from firing `host-gone`. Real sockets emit
+    // keeping an intentional close from firing `burrow-gone`. Real sockets emit
     // that event asynchronously, but test fakes may emit it synchronously from
     // close(), so the ordering has to hold rather than merely usually hold.
     this.#teardown('relay socket closed', { notifyGone: false });
@@ -1030,8 +1030,8 @@ export class PocketClient {
    *
    * **One authenticator prompt per proof, never cached and never reused.** The
    * challenge is derived from the binding, so an assertion produced here
-   * authenticates no other pairing or connection; the Server's `finish` proves
-   * nothing to the Host, which recomputes the challenge and verifies the same
+   * authenticates no other pairing or connection; the Relay's `finish` proves
+   * nothing to the Burrow, which recomputes the challenge and verifies the same
    * assertion itself.
    */
   async #provePresence(binding: PresenceBinding): Promise<PresenceProofV1> {
@@ -1048,12 +1048,12 @@ export class PocketClient {
     );
     await this.#api<ReauthFinishResponse>(
       API_ROUTES.reauthFinish,
-      { serverNonce: begin.serverNonce, assertion },
+      { relayNonce: begin.relayNonce, assertion },
       auth,
     );
     return {
       binding,
-      serverNonce: begin.serverNonce,
+      relayNonce: begin.relayNonce,
       accountId: SELFHOST_ACCOUNT_ID,
       passkeyCredentialId: binding.passkeyCredentialId,
       passkeyPublicKey: this.#requirePasskeyPublicKey(binding.passkeyCredentialId),
@@ -1061,7 +1061,7 @@ export class PocketClient {
     };
   }
 
-  /** Send message 1 and await the Host's message 2 for the same ceremony. */
+  /** Send message 1 and await the Burrow's message 2 for the same ceremony. */
   async #exchange(route: E2eRoute, message1: Uint8Array, deadline: number): Promise<string> {
     const key = waiterKey(route.kind, route.id, 'response');
     const awaited = this.#expect(key, deadline);
@@ -1075,7 +1075,7 @@ export class PocketClient {
   }
 
   /**
-   * A ceremony's one control message, and the Host's single answer to it. Both
+   * A ceremony's one control message, and the Burrow's single answer to it. Both
    * ceremonies are this shape, so the send and the await share a `try`.
    *
    * **The waiter is registered before the send**, as {@link #exchange} does it:
@@ -1112,50 +1112,50 @@ export class PocketClient {
 
   /**
    * One fixed-size keepalive on the established session, or nothing if there
-   * is none. **The only thing that refreshes the Host's idle deadline** other
-   * than real traffic (`docs/specs/remote-security-model.md` → Host bounds).
+   * is none. **The only thing that refreshes the Burrow's idle deadline** other
+   * than real traffic (`docs/specs/remote-security-model.md` → Burrow bounds).
    */
   sendKeepalive(): void {
     const established = this.#established;
-    const hostId = this.#connectedHostId;
-    if (!established || hostId === null) return;
-    if (this.#reapedByHost(established)) return;
+    const burrowId = this.#connectedBurrowId;
+    if (!established || burrowId === null) return;
+    if (this.#reapedByBurrow(established)) return;
     try {
       this.#sendE2e(
-        { kind: 'connection', id: established.connectionId, hostId },
+        { kind: 'connection', id: established.connectionId, burrowId },
         'transport',
         established.session.sendKeepalive(),
       );
       established.lastSentAt = this.#now();
     } catch {
       // A closed socket or a poisoned session; both have their own teardown,
-      // and a keepalive must not be what reports host loss.
+      // and a keepalive must not be what reports burrow loss.
     }
   }
 
   /**
-   * **A session the Host has already reaped, ended here too.**
+   * **A session the Burrow has already reaped, ended here too.**
    *
-   * The Host disposes an established session it has not decrypted a Client
+   * The Burrow disposes an established session it has not decrypted a Client
    * message on for `ESTABLISHED_E2E_IDLE_TIMEOUT_MS` and sends nothing when it
    * does — there is no frame to send, and the relay socket this Client holds is
-   * to the *Server*, so nothing closes. Keepalives pause while the page is
+   * to the *Relay*, so nothing closes. Keepalives pause while the page is
    * hidden, so a phone in a pocket crosses that line on its own, and without
    * this check it comes back to a wall whose every request hangs forever with
    * no error and no way out but a reload
    * ([pocket-app.md](../../../docs/specs/pocket-app.md)).
    *
-   * The Host's deadline runs from the message it last decrypted, which is the
+   * The Burrow's deadline runs from the message it last decrypted, which is the
    * one this Client last sent, so the same constant answers the question on
-   * both sides. Reports host loss and leaves the relay socket alone: what died
+   * both sides. Reports burrow loss and leaves the relay socket alone: what died
    * is the end-to-end session, and reconnecting is a fresh handshake over the
    * socket already open.
    */
-  #reapedByHost(established: EstablishedSession): boolean {
+  #reapedByBurrow(established: EstablishedSession): boolean {
     if (this.#now() - established.lastSentAt < ESTABLISHED_E2E_IDLE_TIMEOUT_MS) return false;
     this.#disposeCeremony();
-    this.#rejectAll(new Error(HOST_SESSION_REAPED_MESSAGE));
-    this.#onHostGone?.();
+    this.#rejectAll(new Error(BURROW_SESSION_REAPED_MESSAGE));
+    this.#onBurrowGone?.();
     return true;
   }
 
@@ -1196,11 +1196,11 @@ export class PocketClient {
     this.#cancelVisibility = null;
   }
 
-  /** One `e2e` envelope. Every Client→Host byte in this file goes through here. */
+  /** One `e2e` envelope. Every Client→Burrow byte in this file goes through here. */
   #sendE2e(route: E2eRoute, step: E2eClientStep, ciphertext: Uint8Array): void {
     this.#send({
       t: 'e2e',
-      hostId: route.hostId,
+      burrowId: route.burrowId,
       kind: route.kind,
       id: route.id,
       step,
@@ -1211,11 +1211,11 @@ export class PocketClient {
   /** One protocol-v1 message on the established session, chunked as it needs. */
   #sendApp(payload: unknown): void {
     const established = this.#established;
-    if (!established) throw new Error('not connected to a host');
-    const hostId = this.#connectedHostId;
-    if (hostId === null) throw new Error('not connected to a host');
-    if (this.#reapedByHost(established)) throw new Error(HOST_SESSION_REAPED_MESSAGE);
-    const route = { kind: 'connection', id: established.connectionId, hostId } as const;
+    if (!established) throw new Error('not connected to a burrow');
+    const burrowId = this.#connectedBurrowId;
+    if (burrowId === null) throw new Error('not connected to a burrow');
+    if (this.#reapedByBurrow(established)) throw new Error(BURROW_SESSION_REAPED_MESSAGE);
+    const route = { kind: 'connection', id: established.connectionId, burrowId } as const;
     for (const ciphertext of established.session.sendApp(utf8Encode(JSON.stringify(payload)))) {
       this.#sendE2e(route, 'transport', ciphertext);
     }
@@ -1230,9 +1230,9 @@ export class PocketClient {
   /**
    * Await one ciphertext for `key`, bounded by the ceremony's own deadline.
    *
-   * A Host that never answers must not strand the key — and throw on the next
+   * A Burrow that never answers must not strand the key — and throw on the next
    * ask — until the socket dies. The expiry reports
-   * {@link HOST_UNAVAILABLE_MESSAGE}, never a denial.
+   * {@link BURROW_UNAVAILABLE_MESSAGE}, never a denial.
    */
   #expect(key: string, deadline: number): Promise<string> {
     if (this.#waiters.has(key)) throw new Error(`already awaiting '${key}'`);
@@ -1240,7 +1240,7 @@ export class PocketClient {
       const timer = setTimeout(
         () => {
           this.#waiters.delete(key);
-          reject(new HostUnavailableError());
+          reject(new BurrowUnavailableError());
         },
         Math.max(0, deadline - this.#now()),
       );
@@ -1265,9 +1265,9 @@ export class PocketClient {
   }
 
   #onFrame(raw: unknown): void {
-    let frame: ServerToClientFrame;
+    let frame: RelayToClientFrame;
     try {
-      frame = JSON.parse(typeof raw === 'string' ? raw : '') as ServerToClientFrame;
+      frame = JSON.parse(typeof raw === 'string' ? raw : '') as RelayToClientFrame;
     } catch {
       return;
     }
@@ -1276,13 +1276,13 @@ export class PocketClient {
       case 'e2e':
         // The shared guard bounds every routing value before any of them is
         // used as a map key or decoded; this Client runs it rather than
-        // trusting the relay to have (`docs/specs/server.md` → Relay).
-        if (isE2eServerToClientFrame(frame)) this.#onE2e(frame);
+        // trusting the relay to have (`docs/specs/relay.md` → "Routing").
+        if (isE2eRelayToClientFrame(frame)) this.#onE2e(frame);
         return;
-      case 'host-gone':
+      case 'burrow-gone':
         this.#disposeCeremony();
-        this.#rejectAll(new Error('host disconnected'));
-        this.#onHostGone?.();
+        this.#rejectAll(new Error('burrow disconnected'));
+        this.#onBurrowGone?.();
         return;
       case 'error':
         // Fixed copy, for the reason the denial tables are: the text is the
@@ -1291,7 +1291,7 @@ export class PocketClient {
         // hostile relay would be choosing the sentence the user reads. The
         // relay's own words go to the console instead.
         console.warn('[pocket] relay error frame', frame.error);
-        this.#rejectAll(new Error(HOST_UNAVAILABLE_MESSAGE));
+        this.#rejectAll(new Error(BURROW_UNAVAILABLE_MESSAGE));
         return;
       default:
         // Every legacy frame is ignored: this Client speaks one protocol.
@@ -1299,7 +1299,7 @@ export class PocketClient {
     }
   }
 
-  #onE2e(frame: E2eServerToClientFrame): void {
+  #onE2e(frame: E2eRelayToClientFrame): void {
     const established = this.#established;
     if (
       established &&
@@ -1320,7 +1320,7 @@ export class PocketClient {
   /**
    * One transport frame on an authorized session. **Any decrypt or framing
    * failure ends it**: there is no resynchronization point in a stream cipher,
-   * so a poisoned session is host loss and the app must leave the wall.
+   * so a poisoned session is burrow loss and the app must leave the wall.
    */
   #onEstablishedFrame(established: EstablishedSession, ct: string): void {
     let receipt;
@@ -1367,28 +1367,28 @@ export class PocketClient {
     // close nor a superseded socket's late close gets past this line. Anything
     // that does is the socket dying on us (server restart, network drop).
     if (this.#ws !== ws) return;
-    // An unexpected drop of an established session is still host loss — the app
+    // An unexpected drop of an established session is still burrow loss — the app
     // must leave the wall instead of idling on a dead stream — even without a
-    // `host-gone` frame.
-    this.#teardown('relay socket closed', { notifyGone: this.#connectedHostId !== null });
+    // `burrow-gone` frame.
+    this.#teardown('relay socket closed', { notifyGone: this.#connectedBurrowId !== null });
   }
 
   /**
    * Reset all socket-bound state and fail pending work. The one real difference
    * between an intentional {@link close} and an unexpected drop is whether to
-   * fire `onHostGone`, made explicit here via `notifyGone`.
+   * fire `onBurrowGone`, made explicit here via `notifyGone`.
    */
   #teardown(reason: string, { notifyGone }: { notifyGone: boolean }): void {
     this.#ws = null; // never reuse a closed socket; openSocket() makes a fresh one
     this.#disposeCeremony();
     this.#rejectAll(new Error(reason));
-    if (notifyGone) this.#onHostGone?.();
+    if (notifyGone) this.#onBurrowGone?.();
   }
 
   /** Erase every session's cipher state; a new ceremony starts from a handshake. */
   #disposeCeremony(): void {
     this.#stopKeepalives();
-    this.#connectedHostId = null;
+    this.#connectedBurrowId = null;
     this.#established = null;
   }
 
@@ -1402,12 +1402,12 @@ export class PocketClient {
 
   /**
    * A ceremony that failed before an outcome: relay error, dropped socket, or
-   * expired timer, all of them {@link HOST_UNAVAILABLE_MESSAGE}.
+   * expired timer, all of them {@link BURROW_UNAVAILABLE_MESSAGE}.
    */
   #unavailable(error: unknown): { readonly ok: false; readonly message: string } {
     this.#disposeCeremony();
     if (error instanceof SessionExpiredError) throw error;
-    return { ok: false, message: HOST_UNAVAILABLE_MESSAGE };
+    return { ok: false, message: BURROW_UNAVAILABLE_MESSAGE };
   }
 
   #connectionUnavailable(error: unknown): ConnectResult {
@@ -1433,9 +1433,9 @@ export class PocketClient {
       throw new SessionExpiredError();
     }
     // A refusal, not a bare Error: an answer arrived, which is what `setup`
-    // reads to decide whether the Server can be assumed to hold nothing.
+    // reads to decide whether the Relay can be assumed to hold nothing.
     if (!response.ok) {
-      throw new ServerRefusalError(
+      throw new RelayRefusalError(
         parsed.error ?? `request failed (${response.status})`,
         response.status,
       );
@@ -1453,7 +1453,7 @@ export class PocketClient {
   async #diagnoseSocketFailure(original: Error): Promise<never> {
     if (this.#sessionToken === null) throw original;
     try {
-      await this.#api<HostsResponse>(API_ROUTES.hosts, undefined, {
+      await this.#api<BurrowsResponse>(API_ROUTES.burrows, undefined, {
         method: 'GET',
         headers: { authorization: `Bearer ${this.#sessionToken}` },
       });
@@ -1487,7 +1487,7 @@ export class PocketClient {
 interface E2eRoute {
   readonly kind: E2eKind;
   readonly id: string;
-  readonly hostId: string;
+  readonly burrowId: string;
 }
 
 /** A ceremony frame is awaited by its kind, its id, **and** its step. */
@@ -1496,10 +1496,10 @@ function waiterKey(kind: string, id: string, step: string): string {
 }
 
 /** Internal: a deadline expired with no answer. Never reaches the UI as itself. */
-class HostUnavailableError extends Error {
+class BurrowUnavailableError extends Error {
   constructor() {
-    super(HOST_UNAVAILABLE_MESSAGE);
-    this.name = 'HostUnavailableError';
+    super(BURROW_UNAVAILABLE_MESSAGE);
+    this.name = 'BurrowUnavailableError';
   }
 }
 
@@ -1604,10 +1604,10 @@ export function localStoragePocketStorage(): PocketStorage {
 }
 
 /**
- * The legacy per-Host markers, removed once per page life.
+ * The legacy per-Burrow markers, removed once per page life.
  *
- * `dormouse-pocket:paired:*` was the local guess the pre-end-to-end Hosts view
- * offered a button from; the `KnownHostV1` records replaced it, and a marker
+ * `dormouse-pocket:paired:*` was the local guess the pre-end-to-end Burrows view
+ * offered a button from; the `KnownBurrowV1` records replaced it, and a marker
  * left behind is a claim about authorization that nothing checks. Best-effort,
  * like every other touch of this storage.
  */

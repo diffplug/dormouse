@@ -3,7 +3,7 @@ import { encode } from 'uqr';
 
 /**
  * A QR code as inline SVG, for the Settings dialog's phone-setup panel
- * (`docs/specs/server.md` → "Remote control, in the Settings dialog").
+ * (`docs/specs/relay.md` → "Remote control, in the Settings dialog").
  *
  * `uqr` is a pure, dependency-free encoder: it answers a boolean matrix and
  * this module does the drawing, so nothing here reaches for a canvas, an image

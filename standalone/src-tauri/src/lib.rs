@@ -429,14 +429,14 @@ fn pty_request_init(state: tauri::State<'_, SidecarState>) {
     send_to_sidecar(&state, msg.to_string());
 }
 
-// One passthrough for the whole remote-host bridge: the webview and the sidecar
+// One passthrough for the whole burrow bridge: the webview and the sidecar
 // service share a contract (lib/src/host/remote/service-protocol.ts) that Rust
 // has no reason to know, so the payload rides through opaquely. Replies come
 // back on the sidecar's own stdout events, not from this invoke.
 #[tauri::command]
-fn remote_host_command(state: tauri::State<'_, SidecarState>, payload: JsonValue) {
+fn burrow_command(state: tauri::State<'_, SidecarState>, payload: JsonValue) {
     let msg = serde_json::json!({
-        "event": "remoteHost:command",
+        "event": "burrow:command",
         "data": payload,
     });
     send_to_sidecar(&state, msg.to_string());
@@ -801,14 +801,14 @@ fn read_session_from(dir: &Path, label: &str) -> Result<Option<String>, String> 
 /// tokens echoed by a failing curl, a pasted connection string, the contents
 /// of a `.env` someone `cat`ed. Written under the umask they land `0644` in a
 /// `0755` directory, readable by every other account on the machine. The
-/// Host's own state file is already `0600` in a `0700` directory for a
-/// strictly *smaller* secret (`lib/src/host/remote/host-state-store.ts`), so
+/// Burrow's own state file is already `0600` in a `0700` directory for a
+/// strictly *smaller* secret (`lib/src/host/remote/burrow-state-store.ts`), so
 /// this is closing an inconsistency, not inventing a rule.
 ///
 /// Failures are reported rather than swallowed, and whether one is tolerable
 /// is the caller's decision: `write_session_to` ignores it — a filesystem
 /// without the permission model it wants must not fail a session save — while
-/// `remote_host_state_dir` logs it.
+/// `burrow_state_dir` logs it.
 ///
 /// The `mode` is a unix mode and is ignored on Windows, which has no such
 /// concept — there the equivalent is a DACL protected from inheritance carrying
@@ -836,9 +836,9 @@ fn restrict_to_owner(path: &Path, mode: u32) -> Result<(), String> {
 /// Reports rather than swallowing. Whether a failure is tolerable depends on
 /// the caller, not on this function: `write_session_to` runs on the quit path
 /// and would rather keep a snapshot under the ACL Windows gave it than lose it,
-/// while `remote_host_state_dir` runs at sidecar start and is — per
+/// while `burrow_state_dir` runs at sidecar start and is — per
 /// `docs/specs/security-remote.md` -> "Credentials at rest" — the *only* thing restricting
-/// `hostToken` on Windows, so a failure there is a silent downgrade of the one
+/// `burrowToken` on Windows, so a failure there is a silent downgrade of the one
 /// control and must reach the log.
 #[cfg(windows)]
 fn restrict_to_owner(path: &Path, _mode: u32) -> Result<(), String> {
@@ -1318,12 +1318,12 @@ fn resolve_dor_cli_paths(sidecar_path: &Path, manifest_dir: &Path) -> DorCliPath
     dor_cli_paths_from_root(manifest_dir.join("..").join("..").join("dor"))
 }
 
-// Where the sidecar's remote Host persists its enrollment (a bearer credential)
+// Where the sidecar's Burrow persists its enrollment (a bearer credential)
 // and its ACL, as one 0600 file it writes itself
-// (lib/src/host/remote/host-state-store.ts). Created here so a first launch
+// (lib/src/host/remote/burrow-state-store.ts). Created here so a first launch
 // hands the sidecar a directory that exists; if it can't be made, the sidecar is
 // told nothing and runs without persistence rather than not at all.
-fn remote_host_state_dir(app: &AppHandle) -> Option<String> {
+fn burrow_state_dir(app: &AppHandle) -> Option<String> {
     let dir = match app.path().app_data_dir() {
         Ok(dir) => dir,
         Err(e) => {
@@ -1335,8 +1335,8 @@ fn remote_host_state_dir(app: &AppHandle) -> Option<String> {
         append_log(format!("[sidecar] create state dir: {e}"));
         return None;
     }
-    // The Node sidecar writes the Host enrollment here, and that record carries
-    // `hostToken` — a bearer credential for `/ws/host`. `FileHostStateStore`
+    // The Node sidecar writes the Burrow enrollment here, and that record carries
+    // `burrowToken` — a bearer credential for `/ws/burrow`. `FileBurrowStateStore`
     // asks for `0700`/`0600`, which Windows ignores entirely, so on Windows this
     // is the only thing that restricts it: lock the directory here, before the
     // sidecar is spawned, and everything it writes inside inherits the single
@@ -1346,9 +1346,9 @@ fn remote_host_state_dir(app: &AppHandle) -> Option<String> {
     // On unix the store's own modes already do the job and this is a harmless
     // re-assert of the same intent.
     if let Err(e) = restrict_to_owner(&dir, 0o700) {
-        // Not fatal — a Host that cannot start is worse than one whose state
+        // Not fatal — a Burrow that cannot start is worse than one whose state
         // directory kept the OS default — but never silent: on Windows this
-        // call is the only thing restricting `hostToken`, so its failure is a
+        // call is the only thing restricting `burrowToken`, so its failure is a
         // downgrade of the sole control and has to be visible.
         append_log(format!(
             "[sidecar] WARNING could not restrict state dir {}: {e}",
@@ -1365,7 +1365,7 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
     let dor_cli_paths = resolve_dor_cli_paths(&sidecar_path, manifest_dir);
     let dor_node_path = resolve_dor_node_path(&node_path, app);
     let dor_control_token = dor_control_token();
-    let state_dir = remote_host_state_dir(app);
+    let state_dir = burrow_state_dir(app);
     append_log(format!(
         "[sidecar] resolved script: {}",
         sidecar_path.display()
@@ -1381,7 +1381,7 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
         dor_cli_paths.entrypoint.display()
     ));
     append_log(format!(
-        "[remote-host] state dir: {}",
+        "[burrow] state dir: {}",
         state_dir.as_deref().unwrap_or("(none)")
     ));
 
@@ -1640,7 +1640,7 @@ pub fn run() {
             iframe_create_proxy_url,
             pty_request_init,
             dor_control_response,
-            remote_host_command,
+            burrow_command,
             kill_sidecar_now,
             quit_ack,
             quit_progress,
@@ -1836,8 +1836,8 @@ mod tests {
             );
 
             // And it reached what was already inside. This is not decoration:
-            // on an upgrade remote-host.json already exists under the inherited
-            // ACL holding a live hostToken, so propagation to existing children
+            // on an upgrade burrow.json already exists under the inherited
+            // ACL holding a live burrowToken, so propagation to existing children
             // is the only thing that tightens that file.
             let child: Vec<u16> = target
                 .join("before.json")

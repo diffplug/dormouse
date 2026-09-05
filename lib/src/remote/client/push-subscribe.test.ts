@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { pushEndpointFingerprint } from 'server-lib-common';
+import { pushEndpointFingerprint } from 'remote-lib-common';
 
 const getRegistration = vi.fn();
 vi.mock('../pocket-app/service-worker', () => ({
@@ -199,7 +199,7 @@ describe('hasCurrentPushSubscription', () => {
     await expect(hasCurrentPushSubscription('AQID', null)).resolves.toBe(false);
   });
 
-  it('rejects a missing browser subscription even if the Server may still hold a row', async () => {
+  it('rejects a missing browser subscription even if the Relay may still hold a row', async () => {
     stubBrowser({ permission: 'granted' });
     getRegistration.mockResolvedValue(registration(null));
 
@@ -208,7 +208,7 @@ describe('hasCurrentPushSubscription', () => {
 
   it('rejects an endpoint the push service rotated behind our back', async () => {
     // The VAPID key still matches and the subscription is perfectly valid — it
-    // just points somewhere new, so every row the Server holds is unreachable.
+    // just points somewhere new, so every row the Relay holds is unreachable.
     stubBrowser({ permission: 'granted' });
     getRegistration.mockResolvedValue(
       registration({
@@ -286,7 +286,7 @@ describe('subscribeToPushInBrowser', () => {
     });
     expect(unsubscribe).not.toHaveBeenCalled();
     expect(subscribe).not.toHaveBeenCalled();
-    // The address other Hosts registered is still live, so nothing was replaced.
+    // The address other Burrows registered is still live, so nothing was replaced.
     expect(onReplaced).not.toHaveBeenCalled();
   });
 
@@ -329,7 +329,7 @@ describe('subscribeToPushInBrowser', () => {
 
   it('reports the replaced delivery address even when subscribe throws', async () => {
     // The old endpoint is dead as soon as `unsubscribe` resolves. If the
-    // failure swallowed that fact, every other Host would keep claiming push
+    // failure swallowed that fact, every other Burrow would keep claiming push
     // notifications through an address nothing can reach.
     stubBrowser({});
     (globalThis.Notification as unknown as { requestPermission: unknown }).requestPermission =

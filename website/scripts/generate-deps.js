@@ -24,7 +24,7 @@ const productDependencyFilters = [
   "dormouse-standalone",
   "dormouse-lib",
   "dormouse-sidecar",
-  "server",
+  "relay",
 ];
 
 function readJson(path) {

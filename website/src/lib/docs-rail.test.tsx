@@ -68,7 +68,7 @@ describe("every page in the rail", () => {
     expect(markup).toContain("remote-security-model.md");
   });
 
-  it("opens both hosting choices with the server boundary", () => {
+  it("opens both hosting choices with the Relay boundary", () => {
     const selfHostMarkup = renderToStaticMarkup(
       <MemoryRouter><SelfHostDocs /></MemoryRouter>,
     );
@@ -78,7 +78,7 @@ describe("every page in the rail", () => {
 
     for (const markup of [selfHostMarkup, hostedMarkup]) {
       expect(markup).toContain("Dormouse is just a terminal — it needs no server or hosting.");
-      expect(markup).toContain("They require a signalling server");
+      expect(markup).toContain("They require a Relay to");
       expect(markup).toContain("Dormouse’s remote features make no network requests");
     }
     expect(selfHostMarkup.indexOf("Dormouse is just a terminal —"))
@@ -89,11 +89,11 @@ describe("every page in the rail", () => {
     expect(hostedMarkup).toContain("Paid hosting remains a design target pending independent review");
   });
 
-  it("names the two hosting choices as actions", () => {
+  it("names the two hosting choices", () => {
     expect(DOCS_PAGES.find((page) => page.path === "/docs/self-host")?.label)
       .toBe("How to self-host");
     expect(DOCS_PAGES.find((page) => page.path === "/hosted")?.label)
-      .toBe("Pay us to host");
+      .toBe("Dormouse Hosted");
 
     const selfHostMarkup = renderToStaticMarkup(
       <MemoryRouter><SelfHostDocs /></MemoryRouter>,
@@ -102,7 +102,7 @@ describe("every page in the rail", () => {
       <MemoryRouter><Hosted /></MemoryRouter>,
     );
     expect(selfHostMarkup).toMatch(/<h1[^>]*>How to self-host<\/h1>/);
-    expect(hostedMarkup).toMatch(/<h1[^>]*>Pay us to host<\/h1>/);
+    expect(hostedMarkup).toMatch(/<h1[^>]*>Dormouse Hosted<\/h1>/);
   });
 
   it("keeps the changelog rail honest on the filtered route the updater opens", () => {
