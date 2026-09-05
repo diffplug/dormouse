@@ -213,7 +213,7 @@ describe('through FakePtyAdapter', () => {
   it('uses the adapter own in-memory port, including its seed and corrupt seams', async () => {
     const adapter = new FakePtyAdapter();
     setPlatform(adapter);
-    adapter.seedNotepadArchive({ version: 1, batches: [batch('seeded')] });
+    adapter.notepadArchive.seed({ version: 1, batches: [batch('seeded')] });
     await ensureArchiveLoaded();
     expect(getArchiveSnapshot().archive.batches.map((b) => b.id)).toEqual(['seeded']);
 
@@ -221,7 +221,7 @@ describe('through FakePtyAdapter', () => {
     expect(adapter.notepadArchive.lastVolatileSnapshot()).toBeNull();
     expect(getArchiveSnapshot().archive.batches.map((b) => b.id)).toEqual(['seeded', 'closed']);
 
-    adapter.corruptNotepadArchive();
+    adapter.notepadArchive.corrupt();
     await refreshArchive();
     expect(getArchiveSnapshot().status).toBe('unreadable');
   });

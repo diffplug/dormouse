@@ -52,6 +52,13 @@ export function getPlatform(): PlatformAdapter {
   return adapter;
 }
 
+/** The adapter, or `null` when none is installed. For the readers that treat
+ *  "no platform yet" as an ordinary answer — unit tests and the boot frames
+ *  before `initPlatform()` — rather than as an error worth surfacing. */
+export function getPlatformOrNull(): PlatformAdapter | null {
+  return adapter;
+}
+
 export function initPlatform(override: 'fake'): FakePtyAdapter;
 export function initPlatform(): PlatformAdapter;
 export function initPlatform(override?: 'fake'): PlatformAdapter {

@@ -263,30 +263,18 @@ export class VSCodeAdapter implements PlatformAdapter {
    * nobody managed to read. The shared service turns a rejection into the
    * unavailable/closure-failure paths (docs/specs/notepad.md → Archive).
    */
-  private notepadRequest<T>(
+  private async notepadRequest<T>(
     type: 'notepad:load' | 'notepad:save' | 'notepad:reset',
     data: Record<string, unknown>,
-    timeoutMs = 5000,
   ): Promise<T> {
-    const requestId = `req-${++this.nextRequestId}`;
-    const reply = this.awaitHostReply(
-      'notepad:result', requestId,
-      (msg) => msg as { ok: boolean; result?: unknown; error?: string },
+    // The reply object is never `null` on its own, so `requestResponse`'s `null`
+    // here can only be its timeout.
+    const reply = await this.requestResponse<{ ok: boolean; result?: unknown; error?: string }>(
+      type, 'notepad:result', data, (msg) => msg, 5000,
     );
-    return new Promise<T>((resolve, reject) => {
-      const timeout = setTimeout(() => reply.detach(), timeoutMs);
-      void reply.promise.then((value) => {
-        clearTimeout(timeout);
-        if (value === DETACHED) {
-          reject(new Error(`${type} timed out`));
-        } else if (!value.ok) {
-          reject(new Error(value.error || `${type} failed`));
-        } else {
-          resolve(value.result as T);
-        }
-      });
-      this.vscode.postMessage({ type, ...data, requestId });
-    });
+    if (!reply) throw new Error(`${type} timed out`);
+    if (!reply.ok) throw new Error(reply.error || `${type} failed`);
+    return reply.result as T;
   }
 
   /**

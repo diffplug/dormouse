@@ -1024,8 +1024,11 @@ async fn save_session(window: tauri::Window, state: String) -> Result<(), String
 }
 
 fn remove_session_from(dir: &Path, label: &str) -> Result<(), String> {
-    let file_name = session_file_name(label);
-    let paths = [dir.join(&file_name), dir.join(format!("{file_name}.tmp"))];
+    let snapshot = dir.join(session_file_name(label));
+    // The temp name comes from the writer, so changing the convention can never
+    // leave this sweep looking for a file `write_file_atomically` stopped making.
+    let tmp = temp_write_path(&snapshot);
+    let paths = [snapshot, tmp];
     let mut first_error = None;
     for path in paths {
         match std::fs::remove_file(&path) {
@@ -1145,13 +1148,15 @@ fn reset_notepad_archive_at(path: &Path, revision: &Mutex<Option<u64>>) -> Resul
     let millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_millis());
+    // Derived from the archive's own name so the two can never drift apart.
+    let stem = path.file_stem().unwrap_or_default().to_string_lossy().into_owned();
     // The name is per-millisecond; on the vanishing chance two recoveries land
     // inside one, disambiguate rather than let the rename overwrite the earlier
     // quarantine — surviving is the entire point of this file.
-    let mut target = dir.join(format!("notepad-archive-v1.unreadable-{millis}.json"));
+    let mut target = dir.join(format!("{stem}.unreadable-{millis}.json"));
     let mut nth = 2;
     while target.exists() {
-        target = dir.join(format!("notepad-archive-v1.unreadable-{millis}-{nth}.json"));
+        target = dir.join(format!("{stem}.unreadable-{millis}-{nth}.json"));
         nth += 1;
     }
     match std::fs::rename(path, &target) {

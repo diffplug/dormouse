@@ -8,7 +8,8 @@
 // and on `'conflict'` do it again over whoever won. Mutations are idempotent by
 // batch and note id, which is what makes that retry safe — a closure that
 // already landed is re-applied as a no-op rather than a duplicate batch.
-import { getPlatform } from '../platform';
+import { createSerialQueue } from '../../host/remote/serial-queue';
+import { getPlatformOrNull } from '../platform';
 import {
   applyArchiveMutation,
   EMPTY_ARCHIVE,
@@ -61,25 +62,22 @@ export function getArchiveSnapshot(): NotepadArchiveState {
   return state;
 }
 
-/**
- * The host's port, or `undefined` when there is none. `getPlatform()` throws
- * before a platform is installed, which is a normal state for unit tests and
- * for the boot frames before `initPlatform()` — neither is an error worth
- * surfacing, both are simply "no archive".
- */
+/** The host's port, or `undefined` when there is none — no platform installed
+ *  yet reads the same as a host without a notepad. */
 function archivePort(): NotepadArchivePort | undefined {
-  try {
-    return getPlatform().notepadArchive;
-  } catch {
-    return undefined;
-  }
+  return getPlatformOrNull()?.notepadArchive;
 }
 
+/** Whether this host has a notepad at all. Absent on Pocket, which hides the
+ *  header icon, the Door button, the popup action, and the Settings entry with
+ *  it. The one availability gate — every caller reads it. */
 export function hasNotepadArchive(): boolean {
   return archivePort() !== undefined;
 }
 
-function messageOf(error: unknown): string {
+/** A rejection as something a user can read. Shared with the Archive view,
+ *  which reports the same failures this module publishes. */
+export function messageOf(error: unknown): string {
   return error instanceof Error && error.message ? error.message : String(error);
 }
 
@@ -123,10 +121,11 @@ export function refreshArchive(): Promise<void> {
 }
 
 /**
- * Load once. Idempotent: the Archive view calls it on open and every mutation
- * calls it first, and a second caller during a load joins the first rather than
- * issuing a second read. A previous failure is retried; a successful load
- * (including an unreadable verdict, which only recovery changes) is not.
+ * Load once, for the Archive view opening. Idempotent: a second caller during a
+ * load joins the first rather than issuing a second read. A previous failure is
+ * retried; a successful load (including an unreadable verdict, which only
+ * recovery changes) is not. A mutation does not go through here — it reads the
+ * host itself, because its compare-and-swap needs the revision.
  */
 export function ensureArchiveLoaded(): Promise<void> {
   if (inFlightLoad) return inFlightLoad;
@@ -137,17 +136,7 @@ export function ensureArchiveLoaded(): Promise<void> {
 // One queue for every mutation. Two closing Surfaces would otherwise read the
 // same revision and one would lose its batch to the other's conflict; serialized,
 // the second reads what the first wrote.
-let tail: Promise<unknown> = Promise.resolve();
-
-function enqueue<T>(task: () => Promise<T>): Promise<T> {
-  // Both arms run `task`: one caller's rejection must not cancel the next.
-  const next = tail.then(task, task);
-  tail = next.then(
-    () => undefined,
-    () => undefined,
-  );
-  return next;
-}
+let enqueue = createSerialQueue();
 
 async function runMutation(port: NotepadArchivePort, mutation: NotepadArchiveMutation): Promise<void> {
   for (let attempt = 0; attempt < MAX_SAVE_ATTEMPTS; attempt++) {
@@ -228,5 +217,5 @@ export function __resetArchiveServiceForTests(): void {
   state = INITIAL_STATE;
   listeners.clear();
   inFlightLoad = null;
-  tail = Promise.resolve();
+  enqueue = createSerialQueue();
 }

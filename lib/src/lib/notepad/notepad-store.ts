@@ -5,7 +5,7 @@
 // memory that exists so a VS Code webview re-resolved over live PTYs can get its
 // notes back (docs/specs/notepad.md).
 import type { SurfaceKind } from 'dor/commands/types';
-import { getPlatform } from '../platform';
+import { getPlatformOrNull } from '../platform';
 import type { CwdState } from '../terminal-state';
 import { toArchivedNote } from './archive-model';
 import type {
@@ -141,6 +141,15 @@ function disposeSource(note: LiveNote): void {
   note.source.endMarker.dispose();
 }
 
+/** The note without its pin, markers released. The one shape of "this link can
+ *  never resolve again": a failed reveal, the terminal going away, and an
+ *  in-place replacement all end here. */
+function withoutSource(note: LiveNote): LiveNote {
+  disposeSource(note);
+  const { source: _dropped, ...rest } = note;
+  return rest;
+}
+
 export function deleteNote(surfaceId: string, noteId: string): void {
   const current = notesBySurface.get(surfaceId);
   if (!current) return;
@@ -177,10 +186,8 @@ export function dropSource(surfaceId: string, noteId: string): void {
   if (index === -1) return;
   const note = current[index];
   if (!note.source) return;
-  disposeSource(note);
   const next = current.slice();
-  const { source: _dropped, ...rest } = note;
-  next[index] = rest;
+  next[index] = withoutSource(note);
   replaceNotes(surfaceId, next);
 }
 
@@ -193,12 +200,9 @@ export function dropSourcesForTerminal(terminalId: string): void {
   let changed = false;
   for (const [surfaceId, current] of notesBySurface) {
     if (!current.some((note) => note.source?.terminalId === terminalId)) continue;
-    const next = current.map((note) => {
-      if (note.source?.terminalId !== terminalId) return note;
-      disposeSource(note);
-      const { source: _dropped, ...rest } = note;
-      return rest;
-    });
+    const next = current.map((note) => (
+      note.source?.terminalId === terminalId ? withoutSource(note) : note
+    ));
     notesBySurface.set(surfaceId, next);
     changed = true;
   }
@@ -215,12 +219,9 @@ export function transferNotepad(oldId: string, newId: string): void {
   if (oldId === newId) return;
   const moving = notesBySurface.get(oldId);
   if (!moving || moving.length === 0) return;
-  const carried = moving.map((note) => {
-    if (note.source?.terminalId !== oldId) return note;
-    disposeSource(note);
-    const { source: _dropped, ...rest } = note;
-    return rest;
-  });
+  const carried = moving.map((note) => (
+    note.source?.terminalId === oldId ? withoutSource(note) : note
+  ));
   notesBySurface.delete(oldId);
   notesBySurface.set(newId, [...(notesBySurface.get(newId) ?? []), ...carried]);
   if (openNotepadId === oldId) setOpenNotepadId(newId);
@@ -306,14 +307,9 @@ export function setStagedArchiveDeletions(
   scheduleVolatileSync();
 }
 
+/** No platform installed yet simply means no mirror. */
 function archivePort(): NotepadArchivePort | undefined {
-  // `getPlatform()` throws before a platform is installed — normal in unit
-  // tests and during boot. No platform simply means no mirror.
-  try {
-    return getPlatform().notepadArchive;
-  } catch {
-    return undefined;
-  }
+  return getPlatformOrNull()?.notepadArchive;
 }
 
 /** Everything a close would archive for every Surface holding notes, minus the

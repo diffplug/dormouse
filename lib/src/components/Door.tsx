@@ -8,7 +8,6 @@ import { useTodoPillContent } from './TodoPillBody';
 import { alertSpeakingAnimationClass } from './bell-icon-class';
 import { AlertBell } from './AlertBell';
 import { notepadLabel } from './use-notepad';
-import { hasNotepadArchive } from '../lib/notepad/archive-service';
 import {
   ALERT_SPEECH_TRACKING_CLASS,
   TERMINAL_TOP_RADIUS_CLASS,
@@ -27,9 +26,9 @@ export interface DoorProps {
   ringSeq: number;
   todo?: TodoState;
   speechState?: AlertSpeechState;
-  /** Live notes on the minimized Surface. Above zero (on a host that has a
-   *  notepad) the Door grows its second button; a Door with no notes needs
-   *  none (`docs/specs/notepad.md`). */
+  /** Live notes on the minimized Surface. Above zero the Door grows its second
+   *  button; a Door with no notes needs none (`docs/specs/notepad.md`). The
+   *  Baseboard reports zero on a host that has no notepad at all. */
   noteCount?: number;
   onClick?: () => void;
   /** When provided, a primary-button press reports its start point and the Wall begins
@@ -70,7 +69,7 @@ export function Door({
   const detail = browserDisplay ? BROWSER_DISPLAY_LABEL[browserDisplay] : undefined;
   const nameParts = [title, detail, speechState].filter(Boolean);
   const doorRef = useRef<HTMLDivElement>(null);
-  const showNotepad = noteCount > 0 && hasNotepadArchive();
+  const showNotepad = noteCount > 0;
 
   const onPointerDown = onDragPress
     ? (e: ReactPointerEvent<HTMLDivElement>): void => {

@@ -62,6 +62,25 @@ export function QuitConfirmModal({
   const runningCount = useSyncExternalStore(subscribeToTerminalPaneState, countRunningSessions);
   const hasRunning = runningCount > 0;
 
+  // Two dialogs in one frame. An archive error means the running-command
+  // decision is already made and the only question left is whether to lose the
+  // notes — so the copy changes and the default swaps to Cancel, stated once
+  // here rather than as five ternaries through the markup.
+  const title = archiveError ? 'Notes could not be archived' : 'Quit Dormouse?';
+  const body = archiveError
+    ? `${archiveError} Quitting anyway discards them.`
+    : confirming
+      ? 'Quitting…'
+      : hasRunning
+        ? `${runningCount} running command${runningCount === 1 ? '' : 's'} will be stopped.`
+        : 'No commands are still running.';
+  const confirmLabel = archiveError
+    ? 'Quit anyway'
+    : hasRunning ? `Quit and stop ${runningCount}` : 'Quit';
+  const [cancelTone, confirmTone] = archiveError
+    ? (['primary', 'secondary'] as const)
+    : (['secondary', 'primary'] as const);
+
   return (
     <ModalFrame
       titleId="quit-confirm-modal-title"
@@ -73,18 +92,8 @@ export function QuitConfirmModal({
       initialFocusRef={cancelButtonRef}
       onEscape={confirming ? undefined : cancelQuit}
     >
-      <h2 id="quit-confirm-modal-title" className="text-sm leading-5 text-foreground">
-        {archiveError ? 'Notes could not be archived' : 'Quit Dormouse?'}
-      </h2>
-      <p className="mt-2 text-sm text-muted">
-        {archiveError
-          ? `${archiveError} Quitting anyway discards them.`
-          : confirming
-            ? 'Quitting…'
-            : hasRunning
-              ? `${runningCount} running command${runningCount === 1 ? '' : 's'} will be stopped.`
-              : 'No commands are still running.'}
-      </p>
+      <h2 id="quit-confirm-modal-title" className="text-sm leading-5 text-foreground">{title}</h2>
+      <p className="mt-2 text-sm text-muted">{body}</p>
 
       <div className="mt-4 flex justify-end gap-2">
         <button
@@ -92,7 +101,7 @@ export function QuitConfirmModal({
           type="button"
           onClick={cancelQuit}
           disabled={confirming}
-          className={`${modalActionButton({ tone: archiveError ? 'primary' : 'secondary' })} min-w-[5rem]`}
+          className={`${modalActionButton({ tone: cancelTone })} min-w-[5rem]`}
         >
           Cancel
         </button>
@@ -100,9 +109,9 @@ export function QuitConfirmModal({
           type="button"
           onClick={confirmQuit}
           disabled={confirming}
-          className={`${modalActionButton({ tone: archiveError ? 'secondary' : 'primary' })} min-w-[5rem]`}
+          className={`${modalActionButton({ tone: confirmTone })} min-w-[5rem]`}
         >
-          {archiveError ? 'Quit anyway' : hasRunning ? `Quit and stop ${runningCount}` : 'Quit'}
+          {confirmLabel}
         </button>
       </div>
     </ModalFrame>

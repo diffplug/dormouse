@@ -6,16 +6,13 @@ import {
   ArrowRightIcon,
   ArrowsInIcon,
   ArrowsOutIcon,
-  NotepadIcon,
   SplitHorizontalIcon,
   SplitVerticalIcon,
   XIcon,
 } from '@phosphor-icons/react';
 import { HeaderActionButton } from '../HeaderActionButton';
 import { HEADER_PALETTE_TRANSITION_CLASS, paneZoomButtonClass, TERMINAL_TOP_RADIUS_CLASS } from '../design';
-import { notepadLabel, useNoteCount, useOpenNotepadId } from '../use-notepad';
-import { hasNotepadArchive } from '../../lib/notepad/archive-service';
-import { setOpenNotepadId } from '../../lib/notepad/notepad-store';
+import { NotepadHeaderButton } from './NotepadHeaderButton';
 import {
   useAgentBrowserChromeSnapshot,
   useAgentBrowserScreenController,
@@ -43,8 +40,6 @@ export function SurfacePaneHeader({ id, title }: PaneProps) {
   const zoomed = useContext(ZoomedIdContext) === id;
   const actions = useContext(WallActionsContext);
   const isActiveHeader = mode === 'passthrough' && selectedId === id && windowFocused;
-  const notes = useNoteCount(id);
-  const notepadOpen = useOpenNotepadId() === id;
 
   // Presence of a screen controller for this pane is exactly what marks it a
   // browser surface — both renderers register one, terminals never do, so the
@@ -197,22 +192,7 @@ export function SurfacePaneHeader({ id, title }: PaneProps) {
         <span className="min-w-0 flex-1 truncate font-medium">{title ?? id}</span>
       )}
 
-      {hasNotepadArchive() && (
-        <div className="ml-1 shrink-0">
-          <HeaderActionButton
-            className="flex h-5 min-w-5 items-center justify-center rounded transition-colors shrink-0 hover:bg-current/10"
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={(e) => {
-              e.stopPropagation();
-              setOpenNotepadId(notepadOpen ? null : id);
-            }}
-            ariaLabel={notepadLabel(notes)}
-            tooltip={notepadLabel(notes)}
-          >
-            <NotepadIcon size={14} weight={notes > 0 ? 'fill' : 'regular'} />
-          </HeaderActionButton>
-        </div>
-      )}
+      <NotepadHeaderButton surfaceId={id} />
       <div className="ml-1 hidden shrink-0 items-center gap-0.5 min-[420px]:flex">
         <HeaderActionButton
           className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"

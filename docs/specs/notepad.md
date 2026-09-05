@@ -77,7 +77,7 @@ Editing and copying:
 - **Rich runs render as escaped spans in a whitespace-preserving container**, never as injected HTML.
 - **Copy always writes `text/plain`.** A terminal note adds a `text/html` flavor built only from escaped text and the four supported attributes — never by serializing rendered DOM. **Anything the rich clipboard refuses falls back to the plain-text write**, best effort by contract.
 
-Source of truth: `lib/src/components/NotepadPanel.tsx`, `lib/src/components/DoorNotepadPopover.tsx`, `applyPlainEdit` in `lib/src/components/NoteList.tsx`, `lib/src/components/Door.tsx`, `noteToHtml` and `copyNoteToClipboard` in `lib/src/lib/notepad/rich-clipboard.ts`.
+Source of truth: `NotepadBody` in `lib/src/components/NotepadBody.tsx`, placed by `lib/src/components/NotepadPanel.tsx` and `lib/src/components/DoorNotepadPopover.tsx`; `applyPlainEdit` in `lib/src/components/NoteList.tsx`; `lib/src/components/Door.tsx`; `noteToHtml` and `copyNoteToClipboard` in `lib/src/lib/notepad/rich-clipboard.ts`.
 
 The popup's third action and the `⌘N` / `Ctrl+N` chord belong to `docs/specs/mouse-and-clipboard.md` §4.1 and §4.2. Two rules are the notepad's own: **intercept the chord only while that terminal has a finalized Dormouse selection**, so with none it reaches the program unchanged; and **a host whose browser reserves the chord shows no shortcut and binds none**, gated by `browserReservesNotepadChord`, which the website demo and the standalone browser-dev harness set (rationale). Source of truth: `isNotepadChordBound` in `lib/src/lib/notepad/capture.ts`, `lib/src/components/SelectionPopup.tsx`.
 

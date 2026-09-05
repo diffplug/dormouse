@@ -18,6 +18,7 @@ import { isAllowedAgentBrowserBinary } from '../lib/agent-browser-binary';
 import { disposeAgentBrowserSurfaceController } from './wall/agent-browser-surface-controller';
 import { KILL_CONFIRM_MS, KILL_SHAKE_MS, KillConfirmOverlay, randomKillChar, type ConfirmKill } from './KillConfirm';
 import { NotepadArchiveFailureModal, type NotepadArchiveFailure } from './NotepadArchiveFailure';
+import { messageOf } from '../lib/notepad/archive-service';
 import { archiveSurfaceNotes } from '../lib/notepad/close-coordinator';
 import { removeSurface, setNotepadSurfaceMetaResolver, transferNotepad } from '../lib/notepad/notepad-store';
 import {
@@ -601,21 +602,22 @@ export function Wall({
 
   /**
    * A permanent, user-visible Surface closure: archive its notes, then tear it
-   * down (docs/specs/notepad.md → "Closure"). Resolves true when the Surface is
-   * gone. A refused archive resolves false with the Surface — and its notes —
-   * left exactly as they were, and raises the Keep open / Close anyway prompt;
-   * without that escape an unwritable archive would make every Surface
-   * unclosable.
+   * down (docs/specs/notepad.md → "Closure"). Resolves `null` when the Surface
+   * is gone, or with this attempt's own error message when the archive refused
+   * — the Surface and its notes left exactly as they were, and the Keep open /
+   * Close anyway prompt raised. Without that escape an unwritable archive would
+   * make every Surface unclosable.
    */
-  const closeSurface = useCallback(async (id: string): Promise<boolean> => {
+  const closeSurface = useCallback(async (id: string): Promise<string | null> => {
     try {
       await archiveSurfaceNotes([id]);
     } catch (error) {
-      setArchiveFailure({ id, message: error instanceof Error ? error.message : String(error) });
-      return false;
+      const message = messageOf(error);
+      setArchiveFailure({ id, message });
+      return message;
     }
     killPaneImmediately(id);
-    return true;
+    return null;
   }, [killPaneImmediately]);
   const closeSurfaceRef = useRef(closeSurface);
   closeSurfaceRef.current = closeSurface;
@@ -735,7 +737,7 @@ export function Wall({
         // The whole canonical CwdState, not a formatted label: the Archive view
         // renders remote hosts and path kinds through the same utilities a live
         // header does.
-        cwd: getTerminalPaneStateSnapshot().get(surfaceId)?.cwd ?? null,
+        cwd: getTerminalPaneState(surfaceId).cwd,
       };
     });
     return () => setNotepadSurfaceMetaResolver(null);

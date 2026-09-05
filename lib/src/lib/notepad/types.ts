@@ -116,7 +116,3 @@ export interface NotepadArchivePort {
    *  only — never by a cold restore. */
   loadVolatile?(): VolatileNotepadSnapshot | null;
 }
-
-export function isPlainNote(content: NoteContent): content is { kind: 'plain'; text: string } {
-  return content.kind === 'plain';
-}

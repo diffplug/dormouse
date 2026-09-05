@@ -6,7 +6,7 @@ import { getNotepadSnapshot, removeSurface } from "dormouse-lib/lib/notepad/note
 import type { TauriAdapter } from "./tauri-adapter";
 import { openQuitArchiveFailure } from "./quit-confirm-store";
 import { hasPendingUpdate, installPendingUpdate } from "./updater";
-import { withTimeout } from "./with-timeout";
+import { withDeadline, withTimeout } from "./with-timeout";
 
 /**
  * Quit orchestrator. Rust intercepts every quit trigger and emits
@@ -76,19 +76,11 @@ const ARCHIVE_GATE_MS = 3000;
 export async function archiveNotesBeforeQuit(): Promise<void> {
   const ids = [...getNotepadSnapshot().keys()];
   if (ids.length === 0) return;
-  // `withTimeout` resolves rather than rejecting when it wins the race, so the
-  // outcome is recorded here: still set means the archive never finished.
-  let failure: string | null = `The notepad archive did not finish within ${ARCHIVE_GATE_MS / 1000}s.`;
-  const work = archiveSurfaceNotes(ids).then(
-    () => {
-      failure = null;
-    },
-    (error: unknown) => {
-      failure = error instanceof Error && error.message ? error.message : String(error);
-    },
+  await withDeadline(
+    archiveSurfaceNotes(ids),
+    ARCHIVE_GATE_MS,
+    `The notepad archive did not finish within ${ARCHIVE_GATE_MS / 1000}s.`,
   );
-  await withTimeout(work, ARCHIVE_GATE_MS, `[quit] notepad archive exceeded ${ARCHIVE_GATE_MS}ms`);
-  if (failure !== null) throw new Error(failure);
 }
 
 // The decision is made; archive the notes, then tear down. A refused archive is

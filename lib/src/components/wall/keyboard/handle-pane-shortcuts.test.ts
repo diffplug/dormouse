@@ -57,7 +57,7 @@ function makeCtx(overrides: Partial<WallKeyboardCtx> = {}): WallKeyboardCtx {
     handleReattachRef: { current: vi.fn() },
     selectPane: vi.fn(),
     enterTerminalMode: vi.fn(),
-    closeSurface: vi.fn(async () => true),
+    closeSurface: vi.fn(async () => null),
     setConfirmKill: vi.fn(),
     setRenamingPaneId: vi.fn(),
     fireEvent: vi.fn(),

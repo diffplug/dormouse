@@ -133,8 +133,8 @@ function ArchiveStory({ seed, corrupt }: { seed?: NotepadArchiveV1; corrupt?: bo
   useLayoutEffect(() => {
     const platform = getPlatform() as FakePtyAdapter;
     platform.notepadArchive.clear();
-    if (corrupt) platform.corruptNotepadArchive();
-    else if (seed) platform.seedNotepadArchive(seed);
+    if (corrupt) platform.notepadArchive.corrupt();
+    else if (seed) platform.notepadArchive.seed(seed);
     void refreshArchive();
   }, [seed, corrupt]);
 

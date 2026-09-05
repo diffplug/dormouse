@@ -12,11 +12,14 @@ vi.mock('../lib/terminal-registry', () => ({ getTerminalOverlayDims: vi.fn() }))
 // Capture is exercised on its own; here it is only the button's effect.
 vi.mock('../lib/notepad/capture', () => ({
   addSelectionToNotepad: vi.fn(() => true),
-  isNotepadAvailable: vi.fn(() => true),
   isNotepadChordBound: vi.fn(() => true),
 }));
+// Whether the host has a notepad at all — one gate, shared with the headers and
+// the Door (`hasNotepadArchive` in `lib/src/lib/notepad/archive-service.ts`).
+vi.mock('../lib/notepad/archive-service', () => ({ hasNotepadArchive: vi.fn(() => true) }));
 
-import { addSelectionToNotepad, isNotepadAvailable, isNotepadChordBound } from '../lib/notepad/capture';
+import { addSelectionToNotepad, isNotepadChordBound } from '../lib/notepad/capture';
+import { hasNotepadArchive } from '../lib/notepad/archive-service';
 import {
   __resetMouseSelectionForTests,
   getMouseSelectionState,
@@ -86,7 +89,7 @@ beforeEach(() => {
   __resetMouseSelectionForTests();
   vi.mocked(getTerminalOverlayDims).mockReturnValue({ ...DIMS });
   vi.mocked(addSelectionToNotepad).mockClear().mockReturnValue(true);
-  vi.mocked(isNotepadAvailable).mockReturnValue(true);
+  vi.mocked(hasNotepadArchive).mockReturnValue(true);
   vi.mocked(isNotepadChordBound).mockReturnValue(true);
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -106,7 +109,7 @@ describe('SelectionPopup: Add to notepad', () => {
   });
 
   it('hides the button entirely on a host with no notepad', () => {
-    vi.mocked(isNotepadAvailable).mockReturnValue(false);
+    vi.mocked(hasNotepadArchive).mockReturnValue(false);
     renderWithSelection();
 
     expect(notepadButton()).toBeUndefined();
@@ -169,7 +172,7 @@ describe('SelectionPopup: Add to notepad', () => {
 
     act(() => root.unmount());
     root = createRoot(container);
-    vi.mocked(isNotepadAvailable).mockReturnValue(false);
+    vi.mocked(hasNotepadArchive).mockReturnValue(false);
     const leftWithout = renderAndReadLeft({ startRow: 1, startCol: 0, endRow: 2, endCol: 60 });
 
     expect(leftWith).toBeGreaterThan(0);

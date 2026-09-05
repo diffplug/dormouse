@@ -11,6 +11,7 @@
 import type * as vscode from 'vscode';
 import { randomUUID } from 'crypto';
 
+import { createSerialQueue } from '../../lib/src/host/remote/serial-queue';
 import {
   applyArchiveMutation,
   batchFromVolatile,
@@ -20,6 +21,7 @@ import {
 } from '../../lib/src/lib/notepad/archive-model';
 import type {
   ArchiveBatch,
+  NotepadArchiveLoadResult,
   NotepadArchiveMutation,
   VolatileNotepadSnapshot,
 } from '../../lib/src/lib/notepad/types';
@@ -38,14 +40,6 @@ import type {
  */
 export const NOTEPAD_ARCHIVE_KEY = 'dormouse.notepadArchive.v1';
 
-/** What one `load` hands the webview: the stored text and the token that names it. */
-export interface StoredNotepadArchive {
-  raw: string;
-  revision: string;
-}
-
-type StagedDeletions = VolatileNotepadSnapshot['stagedDeletions'];
-
 /**
  * Names the stored version for the compare-and-swap in `NotepadArchivePort`.
  *
@@ -63,18 +57,7 @@ let revision = 0;
  * reads are synchronous but its writes are not, and the next reader must not see
  * the value from before an `update` that has not landed.
  */
-let queue: Promise<unknown> = Promise.resolve();
-
-function serialized<T>(work: () => Promise<T>): Promise<T> {
-  const run = queue.then(work, work);
-  // The queue tracks completion, never outcome: one failed write must not poison
-  // every archive operation queued behind it.
-  queue = run.then(
-    () => undefined,
-    () => undefined,
-  );
-  return run;
-}
+const serialized = createSerialQueue();
 
 /**
  * What is stored, as the JSON text the shared validator reads.
@@ -105,7 +88,9 @@ async function writeArchive(context: vscode.ExtensionContext, json: string): Pro
 }
 
 /** The stored archive and the token naming it, or `null` if nothing was ever archived. */
-export function loadNotepadArchive(context: vscode.ExtensionContext): Promise<StoredNotepadArchive | null> {
+export function loadNotepadArchive(
+  context: vscode.ExtensionContext,
+): Promise<NotepadArchiveLoadResult | null> {
   return serialized(async () => {
     const raw = readStored(context);
     return raw === undefined ? null : { raw, revision: `r${revision}` };
@@ -145,52 +130,36 @@ export function resetUnreadableNotepadArchive(context: vscode.ExtensionContext):
   });
 }
 
-/** Append batches host-side, idempotent by batch id. No-op for an empty list. */
-export function appendNotepadBatches(
-  context: vscode.ExtensionContext,
-  batches: readonly ArchiveBatch[],
-): Promise<void> {
-  if (batches.length === 0) return Promise.resolve();
-  return mutate(context, { append: [...batches] });
-}
-
-/** Commit the deletions an Archive view had staged when its webview went away. */
-export function commitStagedDeletions(
-  context: vscode.ExtensionContext,
-  deletions: StagedDeletions,
-): Promise<void> {
-  const mutation: NotepadArchiveMutation = {
-    deleteBatchIds: deletions.deleteBatchIds,
-    deleteNotes: deletions.deleteNotes,
-  };
-  if (isEmptyMutation(mutation)) return Promise.resolve();
-  return mutate(context, mutation);
-}
-
 /**
  * Archive one drained volatile mirror: the batches its Surfaces would have
- * written had they closed normally, then the deletions its Archive view had
- * staged. Reports failure; whether that is fatal is the caller's call, and for
- * both callers it is not — VS Code destroys the container whatever we say.
+ * written had they closed normally, and the deletions its Archive view had
+ * staged, as **one** mutation — `applyArchiveMutation` appends before it
+ * deletes, so a teardown lands whole or not at all, exactly like a closure.
+ * Reports failure; whether that is fatal is the caller's call, and for both
+ * callers it is not — VS Code destroys the container whatever we say.
  */
-export async function archiveVolatileMirror(
+export function archiveVolatileMirror(
   context: vscode.ExtensionContext,
   mirror: VolatileNotepadSnapshot,
 ): Promise<void> {
   const closedAt = Date.now();
-  const batches: ArchiveBatch[] = [];
+  const append: ArchiveBatch[] = [];
   for (const surface of mirror.surfaces) {
     // A fresh id per teardown. Idempotence is by batch id, so this is the one
     // place a repeat would duplicate — and a mirror is drained, not retried.
     const batch = batchFromVolatile(surface, randomUUID(), closedAt);
-    if (batch) batches.push(batch);
+    if (batch) append.push(batch);
   }
-  await appendNotepadBatches(context, batches);
-  await commitStagedDeletions(context, mirror.stagedDeletions);
+  return mutateNotepadArchive(context, { append, ...mirror.stagedDeletions });
 }
 
-/** Read-modify-write under the same queue the webview's saves go through. */
-function mutate(context: vscode.ExtensionContext, mutation: NotepadArchiveMutation): Promise<void> {
+/** Read-modify-write under the same queue the webview's saves go through.
+ *  Idempotent by batch and note id; nothing to write touches nothing. */
+export function mutateNotepadArchive(
+  context: vscode.ExtensionContext,
+  mutation: NotepadArchiveMutation,
+): Promise<void> {
+  if (isEmptyMutation(mutation)) return Promise.resolve();
   return serialized(async () => {
     const raw = readStored(context);
     const archive = raw === undefined ? EMPTY_ARCHIVE : readNotepadArchive(raw);

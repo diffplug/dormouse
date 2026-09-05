@@ -10,13 +10,14 @@ import {
 import {
   ensureArchiveLoaded,
   getArchiveSnapshot,
+  messageOf,
   mutateArchive,
   refreshArchive,
   resetUnreadableArchive,
   subscribeToArchive,
 } from '../lib/notepad/archive-service';
 import { setStagedArchiveDeletions } from '../lib/notepad/notepad-store';
-import { copyNoteToClipboard } from '../lib/notepad/rich-clipboard';
+import { copyNote } from './use-notepad';
 import { NoteList } from './NoteList';
 import type { ArchiveBatch, ArchivedNote } from '../lib/notepad/types';
 import { cwdDisplay } from '../lib/terminal-state';
@@ -56,10 +57,6 @@ function stagedMutation(staged: StagedDeletions) {
     deleteBatchIds: [...staged.batchIds],
     deleteNotes: [...staged.notes].map(splitNoteKey),
   };
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error && error.message ? error.message : String(error);
 }
 
 /** Built once: constructing an `Intl.DateTimeFormat` per batch per render is the
@@ -401,7 +398,7 @@ function ArchiveBatchCard({
             markers a pin needs died with the terminal this came from. */}
         <NoteList
           notes={notes}
-          onCopy={(note) => void copyNoteToClipboard(note.content)}
+          onCopy={copyNote}
           onDelete={(note) => onDeleteNote(batch.id, note.id)}
           disabled={busy}
         />

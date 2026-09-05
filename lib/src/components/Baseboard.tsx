@@ -15,6 +15,7 @@ import { DialogKeyboardContext, DoorElementsContext } from './wall/wall-context'
 import type { DoorChip, DooredItem } from './wall/wall-types';
 import { hasTerminal } from 'dor/commands/types';
 import { IS_MAC } from '../lib/platform';
+import { hasNotepadArchive } from '../lib/notepad/archive-service';
 import {
   getNotepadSnapshot,
   setOpenNotepadId,
@@ -55,9 +56,10 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   const settings = useSyncExternalStore(subscribeToAlertSettings, getAlertSettings);
   const terminalStates = useSyncExternalStore(subscribeToTerminalPaneState, getTerminalPaneStateSnapshot);
   // One subscription for every Door's note count, like the activity one above.
-  // Whether a count earns a button is the Door's own call (a host with no
-  // notepad never draws one).
+  // A host with no notepad reports zero everywhere, so the Door stays a pure
+  // props component and never asks the platform anything.
   const notepadNotes = useSyncExternalStore(subscribeToNotepad, getNotepadSnapshot);
+  const notepadAvailable = hasNotepadArchive();
   const appTitleForPane = useMemo(
     () => buildAppTitleResolver(terminalStates, activityStates),
     [terminalStates, activityStates],
@@ -229,7 +231,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
       ringSeq: activity.ringSeq,
       todo: activity.todo,
       speechState: speechStates.get(item.id),
-      noteCount: notepadNotes.get(item.id)?.length ?? 0,
+      noteCount: notepadAvailable ? (notepadNotes.get(item.id)?.length ?? 0) : 0,
     };
   };
 

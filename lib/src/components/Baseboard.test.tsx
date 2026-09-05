@@ -10,6 +10,7 @@ vi.mock('../lib/platform', () => ({
   // An archive port present ⇒ this host has a notepad, which is what puts the
   // button on a Door that has notes.
   getPlatform: () => ({ alertPublishSettings: vi.fn(), notepadArchive: {} }),
+  getPlatformOrNull: () => ({ alertPublishSettings: vi.fn(), notepadArchive: {} }),
 }));
 
 import { Baseboard } from './Baseboard';

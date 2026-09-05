@@ -14,7 +14,8 @@ vi.mock('../terminal-registry', () => ({ getTerminalInstance: mocks.getTerminalI
 
 import { __resetMouseSelectionForTests, setSelection, type Selection } from '../mouse-selection';
 import { FakePtyAdapter, setPlatform } from '../platform';
-import { addSelectionToNotepad, isNotepadAvailable, isNotepadChordBound } from './capture';
+import { hasNotepadArchive } from './archive-service';
+import { addSelectionToNotepad, isNotepadChordBound } from './capture';
 import { clearAllNotepads, getNotes } from './notepad-store';
 
 class FakeMarker {
@@ -164,25 +165,25 @@ describe('addSelectionToNotepad', () => {
   });
 });
 
-describe('notepad availability', () => {
-  it('reads the host archive port and the reserved-chord flag', () => {
+describe('isNotepadChordBound', () => {
+  it('binds the chord on a host that has a notepad and has not ceded it', () => {
     const adapter = new FakePtyAdapter();
     setPlatform(adapter);
-    expect(isNotepadAvailable()).toBe(true);
+    expect(hasNotepadArchive()).toBe(true);
     expect(isNotepadChordBound()).toBe(true);
 
     // The website demo keeps the button and binds no chord.
     (adapter as { browserReservesNotepadChord?: boolean }).browserReservesNotepadChord = true;
-    expect(isNotepadAvailable()).toBe(true);
+    expect(hasNotepadArchive()).toBe(true);
     expect(isNotepadChordBound()).toBe(false);
   });
 
-  it('reads a host with no notepad as neither available nor bound', () => {
+  it('binds nothing on a host with no notepad', () => {
     const adapter = new FakePtyAdapter();
     (adapter as { notepadArchive?: unknown }).notepadArchive = undefined;
     setPlatform(adapter);
 
-    expect(isNotepadAvailable()).toBe(false);
+    expect(hasNotepadArchive()).toBe(false);
     expect(isNotepadChordBound()).toBe(false);
   });
 });

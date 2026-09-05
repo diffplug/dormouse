@@ -120,7 +120,7 @@ afterEach(async () => {
 
 describe('NotepadArchiveView', () => {
   it('shows the newest batch first, notes in their captured order', async () => {
-    platform.seedNotepadArchive(
+    platform.notepadArchive.seed(
       archive(
         batch({ id: 'middle', surfaceTitle: 'middle', closedAt: FEB }),
         batch({ id: 'oldest', surfaceTitle: 'oldest', closedAt: JAN }),
@@ -140,7 +140,7 @@ describe('NotepadArchiveView', () => {
   });
 
   it('renders a local CWD whole, a remote one with its host, and none at all', async () => {
-    platform.seedNotepadArchive(
+    platform.notepadArchive.seed(
       archive(
         batch({ id: 'local', closedAt: MAR, cwd: LOCAL_CWD }),
         batch({ id: 'remote', closedAt: FEB, cwd: REMOTE_CWD }),
@@ -157,7 +157,7 @@ describe('NotepadArchiveView', () => {
   });
 
   it('hides a deleted note at once, and the batch once its last note is gone', async () => {
-    platform.seedNotepadArchive(
+    platform.notepadArchive.seed(
       archive(
         batch({
           id: 'pair',
@@ -183,7 +183,7 @@ describe('NotepadArchiveView', () => {
   });
 
   it('restores everything staged when Undo is pressed', async () => {
-    platform.seedNotepadArchive(
+    platform.notepadArchive.seed(
       archive(
         batch({ id: 'one', surfaceTitle: 'one', closedAt: FEB }),
         batch({ id: 'two', surfaceTitle: 'two', closedAt: JAN }),
@@ -202,7 +202,7 @@ describe('NotepadArchiveView', () => {
   });
 
   it('commits the whole staged set as one mutation on Back', async () => {
-    platform.seedNotepadArchive(
+    platform.notepadArchive.seed(
       archive(
         batch({ id: 'gone', surfaceTitle: 'gone', closedAt: FEB }),
         batch({
@@ -234,7 +234,7 @@ describe('NotepadArchiveView', () => {
   });
 
   it('mirrors the staged set while the view is open', async () => {
-    platform.seedNotepadArchive(archive(batch({ id: 'one' })));
+    platform.notepadArchive.seed(archive(batch({ id: 'one' })));
 
     await render();
     await act(async () => byLabel('Delete note').click());
@@ -246,7 +246,7 @@ describe('NotepadArchiveView', () => {
   });
 
   it('stays open with its staged state when the commit fails', async () => {
-    platform.seedNotepadArchive(
+    platform.notepadArchive.seed(
       archive(
         batch({
           id: 'pair',
@@ -273,7 +273,7 @@ describe('NotepadArchiveView', () => {
   });
 
   it('offers one recovery for an unreadable archive and never replaces it silently', async () => {
-    platform.corruptNotepadArchive();
+    platform.notepadArchive.corrupt();
 
     await render();
     expect(text()).toContain('could not be read');
@@ -296,7 +296,7 @@ describe('NotepadArchiveView', () => {
     expect(text()).toContain('storage unavailable');
 
     load.mockRestore();
-    platform.seedNotepadArchive(archive(batch({ id: 'back', surfaceTitle: 'back' })));
+    platform.notepadArchive.seed(archive(batch({ id: 'back', surfaceTitle: 'back' })));
     await act(async () => byText('Retry').click());
     await act(async () => {});
 
@@ -306,7 +306,7 @@ describe('NotepadArchiveView', () => {
   it('flashes a confirmation on the note it copied', async () => {
     const writeText = vi.fn(async () => {});
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
-    platform.seedNotepadArchive(archive(batch({ id: 'one' })));
+    platform.notepadArchive.seed(archive(batch({ id: 'one' })));
 
     await render();
     await act(async () => byLabel('Copy note').click());

@@ -5,8 +5,6 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Door } from './Door';
-import { FakePtyAdapter } from '../lib/platform/fake-adapter';
-import { setPlatform } from '../lib/platform';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -68,10 +66,6 @@ describe('Door spoken-alarm state', () => {
 });
 
 describe('Door notepad button', () => {
-  beforeEach(() => {
-    setPlatform(new FakePtyAdapter());
-  });
-
   function renderDoor(props: Partial<Parameters<typeof Door>[0]> = {}) {
     const onClick = vi.fn();
     const onOpenNotepad = vi.fn();

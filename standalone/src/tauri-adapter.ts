@@ -643,9 +643,7 @@ export class TauriAdapter implements PlatformAdapter {
         state: JSON.stringify(archive),
         baseRevision,
       }),
-    resetUnreadable: async (): Promise<void> => {
-      await rawInvoke<void>("reset_notepad_archive");
-    },
+    resetUnreadable: () => rawInvoke<void>("reset_notepad_archive"),
   };
 
   /**

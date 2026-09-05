@@ -11,7 +11,8 @@ import {
 } from '../lib/mouse-selection';
 import { copyRaw, copyRewrapped } from '../lib/clipboard';
 import { CheckIcon } from '@phosphor-icons/react';
-import { addSelectionToNotepad, isNotepadAvailable, isNotepadChordBound } from '../lib/notepad/capture';
+import { hasNotepadArchive } from '../lib/notepad/archive-service';
+import { addSelectionToNotepad, isNotepadChordBound } from '../lib/notepad/capture';
 import { IS_MAC } from '../lib/platform';
 import { getTerminalOverlayDims } from '../lib/terminal-registry';
 import { PopupButtonRow, popupButton, Shortcut } from './design';
@@ -29,7 +30,7 @@ const CHAR_PX = 7.2;
 const BUTTON_PADDING_PX = 12;
 const ROW_BORDER_PX = 2;
 
-function estimatePopupWidth(labels: string[]): number {
+function estimatePopupWidth(labels: readonly string[]): number {
   return labels.reduce((sum, label) => sum + label.length * CHAR_PX + BUTTON_PADDING_PX, ROW_BORDER_PX);
 }
 
@@ -49,7 +50,7 @@ export function SelectionPopup({ terminalId }: Props) {
 
   const [anchor, setAnchor] = useState<{ left: number; top?: number; bottom?: number } | null>(null);
 
-  const showNotepad = isNotepadAvailable();
+  const showNotepad = hasNotepadArchive();
   // The touch UI has no keyboard, and the website demo's browser has already
   // claimed the chord, so both keep the button and drop the label.
   const showShortcuts = !touchUi;
@@ -59,11 +60,6 @@ export function SelectionPopup({ terminalId }: Props) {
 
   const label = (text: string, shortcut: string | null) =>
     showShortcuts && shortcut ? `[${shortcut}] ${text}` : text;
-  const popupWidth = estimatePopupWidth([
-    label('Copy Raw', copyShortcut),
-    label('Copy Rewrapped', rewrapShortcut),
-    ...(showNotepad ? [label('Add to notepad', notepadShortcut)] : []),
-  ]);
 
   useLayoutEffect(() => {
     if (!shouldRender || !selection) {
@@ -72,6 +68,13 @@ export function SelectionPopup({ terminalId }: Props) {
     }
     const dims = getTerminalOverlayDims(terminalId);
     if (!dims || dims.cols === 0 || dims.rows === 0) return;
+    // Estimated here rather than per render: this clamp is its only consumer,
+    // and the popup re-renders on every xterm frame of every pane.
+    const popupWidth = estimatePopupWidth([
+      label('Copy Raw', copyShortcut),
+      label('Copy Rewrapped', rewrapShortcut),
+      ...(showNotepad ? [label('Add to notepad', notepadShortcut)] : []),
+    ]);
     // Use the measured cell grid so the anchor aligns with the border
     // outline (the overlay pulls from the same dims).
     const { cellWidth, cellHeight, gridLeft, gridTop } = dims;
@@ -108,7 +111,10 @@ export function SelectionPopup({ terminalId }: Props) {
       const y = Math.max(gridTop + (endRow - 1) * cellHeight - 4, 28);
       setAnchor({ left, bottom: dims.elementHeight - y });
     }
-  }, [terminalId, shouldRender, selection, touchUi, popupWidth]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `label` is rebuilt
+    // every render; the shortcut strings and `showNotepad` it closes over are
+    // the real inputs and are listed.
+  }, [terminalId, shouldRender, selection, touchUi, showNotepad, showShortcuts, copyShortcut, rewrapShortcut, notepadShortcut]);
 
   useEffect(() => {
     if (!shouldRender) return;

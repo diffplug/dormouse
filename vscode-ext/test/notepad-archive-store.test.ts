@@ -14,10 +14,9 @@ import { describe, expect, it } from 'vitest';
 
 import type { ArchiveBatch, NotepadArchiveV1 } from '../../lib/src/lib/notepad/types';
 import {
-  appendNotepadBatches,
   archiveVolatileMirror,
-  commitStagedDeletions,
   loadNotepadArchive,
+  mutateNotepadArchive,
   NOTEPAD_ARCHIVE_KEY,
   resetUnreadableNotepadArchive,
   saveNotepadArchive,
@@ -119,8 +118,8 @@ describe('the notepad archive in globalState', () => {
     // A teardown that retries — or two paths that both archive the same closure
     // — must not double the batch. The id is minted once, which is what makes
     // the repeat a no-op.
-    await appendNotepadBatches(context, [batch('b1', ['n1'])]);
-    await appendNotepadBatches(context, [batch('b1', ['n1']), batch('b2', ['n2'])]);
+    await mutateNotepadArchive(context, { append: [batch('b1', ['n1'])] });
+    await mutateNotepadArchive(context, { append: [batch('b1', ['n1']), batch('b2', ['n2'])] });
 
     expect(stored(store).batches.map((b) => b.id)).toEqual(['b1', 'b2']);
   });
@@ -130,8 +129,8 @@ describe('the notepad archive in globalState', () => {
     // Both start before either has written. Without the queue the second would
     // read the pre-write archive and save a copy of it with only its own batch.
     await Promise.all([
-      appendNotepadBatches(context, [batch('b1', ['n1'])]),
-      appendNotepadBatches(context, [batch('b2', ['n2'])]),
+      mutateNotepadArchive(context, { append: [batch('b1', ['n1'])] }),
+      mutateNotepadArchive(context, { append: [batch('b2', ['n2'])] }),
     ]);
 
     expect(stored(store).batches.map((b) => b.id).sort()).toEqual(['b1', 'b2']);
@@ -141,16 +140,16 @@ describe('the notepad archive in globalState', () => {
     const { context, store } = fakeContext();
     await context.globalState.update(NOTEPAD_ARCHIVE_KEY, JSON.stringify({ version: 99 }));
 
-    await expect(appendNotepadBatches(context, [batch('b1', ['n1'])])).rejects.toThrow(/unreadable/);
+    await expect(mutateNotepadArchive(context, { append: [batch('b1', ['n1'])] })).rejects.toThrow(/unreadable/);
     // Whatever is in there is still in there: replacing it is the user's call.
     expect(store.get(NOTEPAD_ARCHIVE_KEY)).toBe(JSON.stringify({ version: 99 }));
   });
 
   it('commits staged deletions and drops a batch they empty', async () => {
     const { context, store } = fakeContext();
-    await appendNotepadBatches(context, [batch('b1', ['n1', 'n2']), batch('b2', ['n3'])]);
+    await mutateNotepadArchive(context, { append: [batch('b1', ['n1', 'n2']), batch('b2', ['n3'])] });
 
-    await commitStagedDeletions(context, {
+    await mutateNotepadArchive(context, {
       deleteBatchIds: [],
       deleteNotes: [{ batchId: 'b1', noteId: 'n1' }, { batchId: 'b2', noteId: 'n3' }],
     });
@@ -162,7 +161,7 @@ describe('the notepad archive in globalState', () => {
 
   it('archives a drained mirror as one batch per Surface that had notes', async () => {
     const { context, store } = fakeContext();
-    await appendNotepadBatches(context, [batch('old', ['n0'])]);
+    await mutateNotepadArchive(context, { append: [batch('old', ['n0'])] });
 
     await archiveVolatileMirror(context, {
       surfaces: [

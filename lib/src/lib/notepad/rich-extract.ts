@@ -80,7 +80,7 @@ export interface RichCapture {
 }
 
 /** Project the live terminal theme onto the palette this module consumes. */
-export function currentTerminalPalette(): TerminalPalette {
+function currentTerminalPalette(): TerminalPalette {
   const theme = getTerminalTheme();
   const palette: Record<string, string> = {};
   for (const key of PALETTE_KEYS) palette[key] = theme[key] ?? '';

@@ -46,8 +46,8 @@ export function createMemoryNotepadArchivePort(): MemoryNotepadArchivePort {
 
   return {
     async load(): Promise<NotepadArchiveLoadResult | null> {
-      if (stored === undefined) return null;
-      return { raw: stored, revision: String(revision) };
+      const token = revisionToken();
+      return token === null ? null : { raw: stored, revision: token };
     },
     async save(archive: NotepadArchiveV1, baseRevision: string | null): Promise<'ok' | 'conflict'> {
       if (baseRevision !== revisionToken()) return 'conflict';

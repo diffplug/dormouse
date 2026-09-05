@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { clsx } from 'clsx';
 import { CheckIcon, CopyIcon, PushPinIcon, TrashIcon } from '@phosphor-icons/react';
 import { popupButton } from './design';
@@ -62,7 +62,10 @@ export function NoteList({
   );
 }
 
-function NoteItem({
+// Memoized: a note is edited one keystroke at a time, and the store keeps every
+// other note's identity across that edit, so the list re-renders only the row
+// that changed rather than re-diffing a span per run of every rich note.
+const NoteItem = memo(function NoteItem({
   note,
   onCopy,
   onDelete,
@@ -245,7 +248,7 @@ function NoteItem({
       </div>
     </li>
   );
-}
+});
 
 /** The four attributes a run may carry, and nothing else — the colors are the
  *  note's own, the one place the app renders a color it did not pick. */

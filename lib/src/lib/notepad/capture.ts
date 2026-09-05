@@ -3,34 +3,18 @@
 // Cmd/Ctrl+N chord, both of which flash and dismiss the selection themselves —
 // a capture never opens the notepad.
 import { getMouseSelectionState } from '../mouse-selection';
-import { getPlatform } from '../platform';
+import { getPlatformOrNull } from '../platform';
 import { getTerminalInstance } from '../terminal-registry';
+import { hasNotepadArchive } from './archive-service';
 import { addTerminalNote } from './notepad-store';
 import { captureRichSelection } from './rich-extract';
 import { registerTerminalSource } from './source-link';
-
-/** `getPlatform()` throws before a platform is installed — normal in unit tests
- *  and during boot — and no platform means no notepad. */
-function platformOrNull() {
-  try {
-    return getPlatform();
-  } catch {
-    return null;
-  }
-}
-
-/** Whether this host has a notepad at all. Absent on Pocket, which hides the
- *  popup button along with the header icon and the Settings entry. */
-export function isNotepadAvailable(): boolean {
-  return platformOrNull()?.notepadArchive !== undefined;
-}
 
 /** Whether Cmd/Ctrl+N is ours to bind. The website demo runs in a browser that
  *  reserves the chord for a new window, so it keeps the button and shows no
  *  shortcut. */
 export function isNotepadChordBound(): boolean {
-  const platform = platformOrNull();
-  return platform?.notepadArchive !== undefined && platform.browserReservesNotepadChord !== true;
+  return hasNotepadArchive() && getPlatformOrNull()?.browserReservesNotepadChord !== true;
 }
 
 /** Capture the terminal's finalized selection into its notepad as a rich note,
