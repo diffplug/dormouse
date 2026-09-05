@@ -234,7 +234,7 @@ function startSidecar() {
     },
   });
   log(`sidecar pid=${sidecar.pid}`);
-  log(`remote host state dir: ${stateDir}`);
+  log(`burrow state dir: ${stateDir}`);
 
   createInterface({ input: sidecar.stdout }).on('line', (line) => {
     let msg;

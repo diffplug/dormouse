@@ -138,6 +138,30 @@ describe('the pairing walkthrough mirrors the copy it clicks', () => {
     expect(selector).toBe(`[role="status"][aria-label="${PAIRING_OUTCOME_LABEL}"]`);
   });
 
+  // Not copy but a log line: the harness prints where the Burrow keeps its
+  // state and the walkthrough parses it back out. Rendered with a stand-in path
+  // rather than compared as text, so the two only have to agree on what the
+  // line looks like — the `[dev:standalone:ab]` prefix `log()` adds is free to
+  // change, and the capture group has to survive.
+  it('parses the state directory the harness actually logs', () => {
+    const harness = 'standalone/scripts/dev-agent-browser.mjs';
+    const template = extract(
+      readRepoFile(harness),
+      harness,
+      /^\s*log\(`([^`]*\$\{stateDir\})`\);$/m,
+    );
+    const prefix = extract(
+      readRepoFile(harness),
+      harness,
+      /^\s*console\.error\(`(.*)\$\{message\}`\);$/m,
+    );
+    const pattern = extract(source, file, /^const BURROW_STATE_DIR_LINE = \/(.+)\/;$/m);
+
+    const dir = '/tmp/dormouse-123-browser-state';
+    const logged = prefix + template.replace('${stateDir}', dir);
+    expect(logged.match(new RegExp(pattern))?.[1]).toBe(dir);
+  });
+
   // The screens' structure says only that a ceremony ended or a code was
   // refused; the scenarios turn on *which* one, so these prefixes are the
   // harness's one match on copy. What has to hold is not the wording but that

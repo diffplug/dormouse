@@ -37,6 +37,18 @@ const POCKET_VIEWPORT = { width: 390, height: 844 };
 const SCAN_LABEL = 'Scan a setup code';
 
 /**
+ * The harness line that says where the Burrow keeps its enrollment + ACL. The
+ * `[dev:standalone:ab]` prefix `log()` adds is deliberately not matched: it is
+ * there for a human reading interleaved output, so pinning it would make a
+ * cosmetic log change break this run.
+ *
+ * Mirrors the `log()` call in `standalone/scripts/dev-agent-browser.mjs`; pinned
+ * by `lib/src/lib/mirrored-constants.test.ts`, since a drift here is not a
+ * failed build but a ten-minute stall against a live Chrome and a real Relay.
+ */
+const BURROW_STATE_DIR_LINE = /burrow state dir: (.+)$/;
+
+/**
  * The phone's two-digit screen, by the accessible name of the live region that
  * holds the digits — the same reason {@link PAIRING_MODAL} and {@link SETUP_QR}
  * anchor where they do: the copy around it is under review and the name is a
@@ -286,9 +298,9 @@ async function stepBurrow(ctx) {
   // picks that path itself (a per-pid temp directory), so this is a read rather
   // than a setting — but it is the fact that makes every run start unenrolled,
   // so the summary records it.
-  const stateLine = await waitForLine(handle, /\[burrow\] state dir: (.+)$/, {
+  const stateLine = await waitForLine(handle, BURROW_STATE_DIR_LINE, {
     timeoutMs: 600_000,
-    what: 'the sidecar to report its state directory',
+    what: 'the harness to report the Burrow state directory',
   });
   await waitForLine(handle, /running; Ctrl-C to stop/, {
     timeoutMs: 300_000,
