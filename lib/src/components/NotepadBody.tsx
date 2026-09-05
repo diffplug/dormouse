@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type CSSProperties, type RefObject } 
 import { PlusIcon } from '@phosphor-icons/react';
 import { clsx } from 'clsx';
 import { ModalCloseButton, POPUP_SURFACE_CLASS, popupButton } from './design';
-import { NoteList } from './NoteList';
+import { NoteList, type SourceNotice } from './NoteList';
 import { usePopoverFocusTrap } from './use-popover-focus-trap';
 import { copyNote, useNotes, useSurfaceClosing } from './use-notepad';
 import {
@@ -31,7 +31,7 @@ export function NotepadBody({
   className,
   style,
   dataAttributes,
-  sourceUnavailableNoteId,
+  sourceNotice,
   onClose,
   onRevealSource,
 }: {
@@ -43,7 +43,7 @@ export function NotepadBody({
   style?: CSSProperties;
   /** Which notepad this is, for tests and stories. */
   dataAttributes?: Record<string, string>;
-  sourceUnavailableNoteId: string | null;
+  sourceNotice: SourceNotice | null;
   onClose: () => void;
   onRevealSource: (noteId: string) => void;
 }) {
@@ -134,7 +134,7 @@ export function NotepadBody({
             onDelete={removeNote}
             onEdit={editNote}
             onRevealSource={onRevealSource}
-            sourceUnavailableNoteId={sourceUnavailableNoteId}
+            sourceNotice={sourceNotice}
             autoFocusNoteId={addedNoteId}
             onNoteBlur={pruneNote}
             disabled={closing}

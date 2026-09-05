@@ -11,6 +11,7 @@ import {
 import { SettingsDialog } from './SettingsDialog';
 import { Door } from './Door';
 import { DoorNotepadPopover } from './DoorNotepadPopover';
+import type { SourceNotice } from './NoteList';
 import { DoorElementsContext, useDialogKeyboardOwner } from './wall/wall-context';
 import type { DoorChip, DooredItem } from './wall/wall-types';
 import { hasTerminal } from 'dor/commands/types';
@@ -84,7 +85,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   // rect is kept rather than re-read: a pin reattaches the Surface, so the Door
   // may be gone by the time the popover reopens to report a dead source.
   const [doorNotepad, setDoorNotepad] = useState<
-    { id: string; rect: DOMRect; unavailableNoteId: string | null } | null
+    { id: string; rect: DOMRect; sourceNotice: SourceNotice | null } | null
   >(null);
 
   // Suppress command-mode key dispatch while the Settings dialog owns the
@@ -237,7 +238,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
     setOpenNotepadId(null);
     setDoorNotepad((current) => current?.id === item.id
       ? null
-      : { id: item.id, rect: anchor.getBoundingClientRect(), unavailableNoteId: null });
+      : { id: item.id, rect: anchor.getBoundingClientRect(), sourceNotice: null });
   }, []);
 
   const closeDoorNotepad = useCallback(() => setDoorNotepad(null), []);
@@ -245,7 +246,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   /**
    * A pin in a Door's popover: close it, reattach the Surface, then follow the
    * source. The reveal waits a frame because it resolves against the live
-   * terminal the reattach is only now mounting; a source that no longer exists
+   * terminal the reattach is only now mounting; a source that cannot be shown
    * brings the popover back to say so.
    */
   const revealDoorSource = useCallback((noteId: string) => {
@@ -255,8 +256,12 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
     setDoorNotepad(null);
     if (item) onReattach(item);
     requestAnimationFrame(() => {
-      if (revealNoteSource(open.id, noteId).ok) return;
-      setDoorNotepad({ ...open, unavailableNoteId: noteId });
+      const outcome = revealNoteSource(open.id, noteId);
+      if (outcome.ok) return;
+      setDoorNotepad({
+        ...open,
+        sourceNotice: { noteId, kind: outcome.reason === 'alternate-buffer' ? 'alternate-buffer' : 'unavailable' },
+      });
     });
   }, [doorNotepad, items, onReattach]);
 
@@ -365,7 +370,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
         <DoorNotepadPopover
           surfaceId={doorNotepad.id}
           anchorRect={doorNotepad.rect}
-          sourceUnavailableNoteId={doorNotepad.unavailableNoteId}
+          sourceNotice={doorNotepad.sourceNotice}
           onClose={closeDoorNotepad}
           onRevealSource={revealDoorSource}
         />

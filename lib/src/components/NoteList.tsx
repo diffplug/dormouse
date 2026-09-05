@@ -9,6 +9,19 @@ import type { LiveNote, RichTextRun } from '../lib/notepad/types';
  *  popup's copy confirmation (`flashCopy`). */
 const COPY_FLASH_MS = 700;
 
+/** What a note's row says about a pin that just refused to resolve
+ *  (docs/specs/notepad.md → Source links). `alternate-buffer` is the one
+ *  failure that keeps the pin, so its row invites a retry. */
+export interface SourceNotice {
+  noteId: string;
+  kind: 'unavailable' | 'alternate-buffer';
+}
+
+const SOURCE_NOTICE_TEXT: Record<SourceNotice['kind'], string> = {
+  unavailable: 'Source no longer available',
+  'alternate-buffer': 'Exit the full-screen program to show this source',
+};
+
 export interface NoteListProps {
   /** Creation order, top to bottom — the store's own order, never re-sorted. */
   notes: readonly LiveNote[];
@@ -19,8 +32,8 @@ export interface NoteListProps {
   /** Absent ⇒ no pins anywhere; present ⇒ one on every note still carrying a
    *  source (docs/specs/notepad.md → Source links). */
   onRevealSource?: (noteId: string) => void;
-  /** The note whose pin just failed to resolve; its row says so. */
-  sourceUnavailableNoteId?: string | null;
+  /** The note whose pin just failed to resolve, and why; its row says so. */
+  sourceNotice?: SourceNotice | null;
   /** A freshly added note to put the caret in (Add New). */
   autoFocusNoteId?: string | null;
   /** Fires when an editor loses focus, so the owner can prune an untouched
@@ -39,7 +52,7 @@ export function NoteList({
   onDelete,
   onEdit,
   onRevealSource,
-  sourceUnavailableNoteId,
+  sourceNotice,
   autoFocusNoteId,
   onNoteBlur,
   disabled = false,
@@ -54,7 +67,7 @@ export function NoteList({
           onDelete={onDelete}
           onEdit={onEdit}
           onRevealSource={onRevealSource}
-          sourceUnavailable={sourceUnavailableNoteId === note.id}
+          sourceNoticeKind={sourceNotice?.noteId === note.id ? sourceNotice.kind : null}
           autoFocus={autoFocusNoteId === note.id}
           onNoteBlur={onNoteBlur}
           disabled={disabled}
@@ -73,7 +86,7 @@ const NoteItem = memo(function NoteItem({
   onDelete,
   onEdit,
   onRevealSource,
-  sourceUnavailable,
+  sourceNoticeKind,
   autoFocus,
   onNoteBlur,
   disabled,
@@ -83,7 +96,7 @@ const NoteItem = memo(function NoteItem({
   onDelete: (note: LiveNote) => void;
   onEdit?: (noteId: string, text: string) => void;
   onRevealSource?: (noteId: string) => void;
-  sourceUnavailable: boolean;
+  sourceNoticeKind: SourceNotice['kind'] | null;
   autoFocus: boolean;
   onNoteBlur?: (noteId: string) => void;
   disabled: boolean;
@@ -238,8 +251,10 @@ const NoteItem = memo(function NoteItem({
           ))}
         </div>
       )}
-      {sourceUnavailable && (
-        <div className="mt-0.5 text-xs text-muted" role="status">Source no longer available</div>
+      {sourceNoticeKind && (
+        <div className="mt-0.5 text-xs text-muted" role="status">
+          {SOURCE_NOTICE_TEXT[sourceNoticeKind]}
+        </div>
       )}
       <div className="mt-0.5 flex items-center gap-0.5 text-xs text-muted">
         <button

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { NotepadBody } from './NotepadBody';
+import type { SourceNotice } from './NoteList';
 import { useOpenNotepadId } from './use-notepad';
 import { hasNotepadArchive } from '../lib/notepad/archive-service';
 import { useDialogKeyboardOwner } from './wall/wall-context';
@@ -16,7 +17,7 @@ import { revealNoteSource } from '../lib/notepad/pin';
  */
 export function NotepadPanel({ surfaceId }: { surfaceId: string }) {
   const openId = useOpenNotepadId();
-  const [sourceUnavailableNoteId, setSourceUnavailableNoteId] = useState<string | null>(null);
+  const [sourceNotice, setSourceNotice] = useState<SourceNotice | null>(null);
   const open = openId === surfaceId;
 
   // A pin closes the panel, follows the source, and on failure reopens it
@@ -26,23 +27,23 @@ export function NotepadPanel({ surfaceId }: { surfaceId: string }) {
     setOpenNotepadId(null);
     const outcome = revealNoteSource(surfaceId, noteId);
     if (outcome.ok) {
-      setSourceUnavailableNoteId(null);
+      setSourceNotice(null);
       return;
     }
-    setSourceUnavailableNoteId(noteId);
+    setSourceNotice({ noteId, kind: outcome.reason === 'alternate-buffer' ? 'alternate-buffer' : 'unavailable' });
     setOpenNotepadId(surfaceId);
   }, [surfaceId]);
 
   // A message belongs to the panel that reported it; the next open starts clean.
   useEffect(() => {
-    if (!open) setSourceUnavailableNoteId(null);
+    if (!open) setSourceNotice(null);
   }, [open]);
 
   if (!hasNotepadArchive() || !open) return null;
   return (
     <OpenNotepadPanel
       surfaceId={surfaceId}
-      sourceUnavailableNoteId={sourceUnavailableNoteId}
+      sourceNotice={sourceNotice}
       onRevealSource={revealSource}
     />
   );
@@ -50,11 +51,11 @@ export function NotepadPanel({ surfaceId }: { surfaceId: string }) {
 
 function OpenNotepadPanel({
   surfaceId,
-  sourceUnavailableNoteId,
+  sourceNotice,
   onRevealSource,
 }: {
   surfaceId: string;
-  sourceUnavailableNoteId: string | null;
+  sourceNotice: SourceNotice | null;
   onRevealSource: (noteId: string) => void;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
@@ -72,7 +73,7 @@ function OpenNotepadPanel({
       containerRef={panelRef}
       className="absolute right-1 top-1 h-3/4 w-3/4"
       dataAttributes={{ 'data-notepad-panel-for': surfaceId }}
-      sourceUnavailableNoteId={sourceUnavailableNoteId}
+      sourceNotice={sourceNotice}
       onClose={close}
       onRevealSource={onRevealSource}
     />

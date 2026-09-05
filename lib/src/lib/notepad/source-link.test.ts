@@ -258,12 +258,18 @@ describe('resolveTerminalSource', () => {
     });
   });
 
-  it('refuses while the alternate buffer is active', () => {
+  it('reports the alternate buffer as a failure of its own and keeps the markers', () => {
     const fake = makeTerminal(LINES);
     const source = capture(fake, sel({ startRow: 0, startCol: 0, endRow: 2, endCol: 4 }));
     const alt = makeTerminal(['full screen app'], { type: 'alternate' });
 
-    expect(resolveTerminalSource(alt.terminal, source).ok).toBe(false);
+    expect(resolveTerminalSource(alt.terminal, source)).toEqual({
+      ok: false,
+      reason: 'alternate-buffer',
+    });
+    // The markers ride the normal buffer, which the program only covered.
+    expect(source.startMarker.isDisposed).toBe(false);
+    expect(source.endMarker.isDisposed).toBe(false);
   });
 });
 

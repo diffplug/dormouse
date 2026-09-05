@@ -32,7 +32,7 @@ export interface SourceTerminalLike {
 
 export type ResolvedSource =
   | { ok: true; selection: Selection }
-  | { ok: false; reason: 'disposed' | 'missing-rows' | 'mismatch' };
+  | { ok: false; reason: 'alternate-buffer' | 'disposed' | 'missing-rows' | 'mismatch' };
 
 /**
  * Pin a capture to its place in the normal buffer. Returns `null` for an
@@ -84,14 +84,19 @@ export function resolveTerminalSource(
   terminal: SourceTerminalLike,
   source: RuntimeTerminalSource,
 ): ResolvedSource {
+  const buf = terminal.buffer.active;
+  // The markers belong to the normal buffer, which a full-screen program hides
+  // rather than rewrites: reading the alternate grid would compare against
+  // foreign content, so report the range as covered and leave the pin alone.
+  if (buf.type === 'alternate') return { ok: false, reason: 'alternate-buffer' };
+
   const { startMarker, endMarker } = source;
   if (startMarker.isDisposed || endMarker.isDisposed) return { ok: false, reason: 'disposed' };
 
   const startRow = startMarker.line;
   const endRow = endMarker.line;
-  const buf = terminal.buffer.active;
-  // A disposed marker reports -1, and the alternate buffer being active leaves
-  // the rows out of range — both land here rather than reading foreign content.
+  // A disposed marker reports -1, and trimmed scrollback leaves the rows out of
+  // range — both land here rather than reading foreign content.
   if (startRow < 0 || endRow < startRow || endRow >= buf.length) {
     return { ok: false, reason: 'missing-rows' };
   }

@@ -26,6 +26,7 @@ import {
   setOpenNotepadId,
 } from '../lib/notepad/notepad-store';
 import type { RuntimeTerminalSource } from '../lib/notepad/types';
+import { registry, type TerminalEntry } from '../lib/terminal-store';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -571,6 +572,16 @@ describe('NotepadPanel — source pins', () => {
     expect(noteElements()[1].querySelector('[aria-label="Show source"]')).not.toBeNull();
   });
 
+  /** Registers a terminal instance for `SURFACE` whose alternate buffer is
+   *  active, the way a full-screen program leaves it. */
+  function fullScreenTerminal(): void {
+    registry.set(SURFACE, {
+      terminal: { buffer: { active: { type: 'alternate' } } },
+    } as unknown as TerminalEntry);
+  }
+
+  afterEach(() => registry.delete(SURFACE));
+
   it('reopens with a message when the source is gone', () => {
     addTerminalNote(SURFACE, [{ text: 'gone' }], deadSource());
     renderPanels();
@@ -587,6 +598,21 @@ describe('NotepadPanel — source pins', () => {
     act(() => setOpenNotepadId(null));
     open();
     expect(panel()!.textContent).not.toContain('Source no longer available');
+  });
+
+  it('keeps the pin and says to exit the full-screen program', () => {
+    addTerminalNote(SURFACE, [{ text: 'gone' }], deadSource());
+    fullScreenTerminal();
+    renderPanels();
+    open();
+
+    click(container.querySelector('[aria-label="Show source"]'));
+
+    expect(getOpenNotepadId()).toBe(SURFACE);
+    expect(panel()!.textContent).toContain('Exit the full-screen program to show this source');
+    expect(panel()!.textContent).not.toContain('Source no longer available');
+    // The markers outlive the program, so the pin is still there to retry.
+    expect(container.querySelector('[aria-label="Show source"]')).not.toBeNull();
   });
 });
 

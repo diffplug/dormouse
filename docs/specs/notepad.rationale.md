@@ -76,13 +76,21 @@ Markers alone are not enough, though: they track lines, not columns, and a resiz
 reflows the buffer under them. Rather than reimplement reflow tracking, the pin
 carries the raw text it captured and refuses to navigate unless the rebuilt range
 reads back byte for byte. That turns every failure mode — reflow, trimmed
-scrollback, a program that overwrote the rows, an alternate buffer now active —
-into one honest outcome instead of scrolling the user to plausible-looking wrong
-output. It is why column restoration is allowed to be best effort at all.
+scrollback, a program that overwrote the rows — into one honest outcome instead of
+scrolling the user to plausible-looking wrong output. It is why column restoration
+is allowed to be best effort at all.
 
 Failure removes the pin rather than leaving it to fail again. A pin the user can
 see is one that resolved the last time it was asked, which is a more useful promise
 than a button that sometimes apologizes.
+
+The alternate buffer is the one failure that is not about the capture. A
+full-screen program covers the normal buffer rather than rewriting it, so the
+markers stay live and the range is still there underneath; the earlier code let
+the out-of-range rows fall through to the same removal as a dead pin, which meant
+opening a note while `less` was up destroyed the link for good. Checking the
+buffer type first separates "hidden right now" from "gone", and only the second
+is worth spending the pin on.
 
 ## Notepad UI
 

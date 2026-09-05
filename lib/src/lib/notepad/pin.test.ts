@@ -28,7 +28,10 @@ const LINES = ['alpha one', 'bravo two', 'charlie three'];
 
 /** Satisfies both `resolveTerminalSource` (buffer reads) and
  *  `revealResolvedSource` (viewport + scroll). */
-function makeTerminal(lines: string[] = LINES, opts: { viewportY?: number; baseY?: number } = {}) {
+function makeTerminal(
+  lines: string[] = LINES,
+  opts: { viewportY?: number; baseY?: number; type?: 'normal' | 'alternate' } = {},
+) {
   const cols = Math.max(1, ...lines.map((line) => line.length));
   const scrollToLine = vi.fn<(line: number) => void>();
   const terminal = {
@@ -36,7 +39,7 @@ function makeTerminal(lines: string[] = LINES, opts: { viewportY?: number; baseY
     rows: 24,
     buffer: {
       active: {
-        type: 'normal' as const,
+        type: opts.type ?? ('normal' as const),
         baseY: opts.baseY ?? 0,
         viewportY: opts.viewportY ?? 0,
         cursorY: 0,
@@ -127,6 +130,17 @@ describe('revealNoteSource', () => {
 
     expect(revealNoteSource('term-1', noteId)).toEqual({ ok: false, reason: 'disposed' });
     expect(getNotes('term-1')[0].source).toBeUndefined();
+  });
+
+  it('keeps the pin while a full-screen program owns the buffer', () => {
+    // The markers still name live normal-buffer rows; only the view is covered.
+    mocks.getTerminalInstance.mockReturnValue(makeTerminal(LINES, { type: 'alternate' }).terminal);
+    const { noteId, source: src } = pinnedNote();
+
+    expect(revealNoteSource('term-1', noteId)).toEqual({ ok: false, reason: 'alternate-buffer' });
+    expect(getNotes('term-1')[0].source).toBe(src);
+    expect(markersOf(src).every((marker) => !marker.isDisposed)).toBe(true);
+    expect(getMouseSelectionState('term-1').selection).toBeNull();
   });
 
   it('drops the pin when the rows are gone', () => {

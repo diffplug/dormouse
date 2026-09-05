@@ -1,18 +1,23 @@
 // Following a note's source pin back to its scrollback (docs/specs/notepad.md
-// → Source links). Every failure is terminal for the pin: the markers are
-// released and the link removed, so a pin the user can see is one that resolved
-// the last time it was asked. The note itself is never touched.
+// → Source links). Every failure but an active alternate buffer is terminal for
+// the pin: the markers are released and the link removed, so a pin the user can
+// see is one that resolved the last time it was asked — or one waiting for a
+// full-screen program to exit. The note itself is never touched.
 import { getTerminalInstance } from '../terminal-registry';
 import { dropSource, getNotes } from './notepad-store';
 import { resolveTerminalSource, revealResolvedSource } from './source-link';
 
 export type PinOutcome =
   | { ok: true }
-  | { ok: false; reason: 'no-source' | 'no-terminal' | 'disposed' | 'missing-rows' | 'mismatch' };
+  | {
+      ok: false;
+      reason: 'no-source' | 'no-terminal' | 'alternate-buffer' | 'disposed' | 'missing-rows' | 'mismatch';
+    };
 
 /** Resolve the note's pin against the live buffer; on success scroll the range
  *  into view and restore the Dormouse selection (outline + finalized popup).
- *  On any failure the pin is removed from the note and the reason returned. */
+ *  On failure the reason is returned, and the pin removed from the note unless
+ *  it can still resolve later. */
 export function revealNoteSource(surfaceId: string, noteId: string): PinOutcome {
   // A missing note reads the same as a note without a pin: there is nothing to
   // follow and nothing to clean up.
@@ -29,7 +34,10 @@ export function revealNoteSource(surfaceId: string, noteId: string): PinOutcome 
 
   const resolved = resolveTerminalSource(terminal, source);
   if (!resolved.ok) {
-    dropSource(surfaceId, noteId);
+    // A full-screen program only covers the normal buffer the markers ride, so
+    // the pin is temporarily unavailable rather than dead: keep it and let the
+    // user try again once the program exits.
+    if (resolved.reason !== 'alternate-buffer') dropSource(surfaceId, noteId);
     return { ok: false, reason: resolved.reason };
   }
 

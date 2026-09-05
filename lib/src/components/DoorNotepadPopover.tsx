@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { NotepadBody } from './NotepadBody';
+import type { SourceNotice } from './NoteList';
 import { useNotes } from './use-notepad';
 import { useDialogKeyboardOwner } from './wall/wall-context';
 import { clampOverlayPosition } from '../lib/ui-geometry';
@@ -18,7 +19,7 @@ const DOOR_POPOVER_GAP_PX = 4;
 export function DoorNotepadPopover({
   surfaceId,
   anchorRect,
-  sourceUnavailableNoteId,
+  sourceNotice,
   onClose,
   onRevealSource,
 }: {
@@ -26,7 +27,7 @@ export function DoorNotepadPopover({
   /** The Door's rect. Measured at open; the popover keeps its place if the
    *  Door goes away under it (a pin reattaches the Surface). */
   anchorRect: DOMRect;
-  sourceUnavailableNoteId: string | null;
+  sourceNotice: SourceNotice | null;
   onClose: () => void;
   onRevealSource: (noteId: string) => void;
 }) {
@@ -50,7 +51,7 @@ export function DoorNotepadPopover({
       width: rect.width,
       height: rect.height,
     }));
-  }, [anchorRect, notes, sourceUnavailableNoteId]);
+  }, [anchorRect, notes, sourceNotice]);
 
   // Mounted only while open, so the lease is unconditional: it lives exactly as
   // long as the popover, independently of any other dialog's.
@@ -63,7 +64,7 @@ export function DoorNotepadPopover({
       className="max-h-[75dvh] w-fit max-w-[30rem]"
       style={style}
       dataAttributes={{ 'data-notepad-popover-for': surfaceId }}
-      sourceUnavailableNoteId={sourceUnavailableNoteId}
+      sourceNotice={sourceNotice}
       onClose={onClose}
       onRevealSource={onRevealSource}
     />,
