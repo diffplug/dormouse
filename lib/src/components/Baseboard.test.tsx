@@ -22,6 +22,7 @@ import {
   type DormouseTheme,
 } from '../lib/themes';
 import { resetShellStore, seedShellStore } from '../lib/shell-store';
+import { resetPushDevices, setPushDevices, setPushDevicesRefresher } from '../lib/push-devices';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -61,6 +62,7 @@ afterEach(() => {
   setDefaultThemeId(null);
   resetShellStore();
   act(() => root.unmount());
+  resetPushDevices();
   container.remove();
   applyAlertSettingsFromHost(DEFAULT_ALERT_SETTINGS);
   vi.restoreAllMocks();
@@ -112,12 +114,18 @@ describe('Baseboard settings controls', () => {
       </DialogKeyboardContext.Provider>,
     ));
     const button = container.querySelector<HTMLButtonElement>(`[data-alarm-setting="${sink}"]`)!;
-    button.focus();
+    const terminalInput = document.createElement('textarea');
+    container.appendChild(terminalInput);
+    terminalInput.focus();
+    const mouseDown = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+    button.dispatchEvent(mouseDown);
+    // jsdom does not perform the native focus change; assert its prevention too.
+    expect(mouseDown.defaultPrevented).toBe(true);
     act(() => button.click());
 
     expect(getAlertSettings()).toEqual({ ...DEFAULT_ALERT_SETTINGS, [field]: true });
     expect(button.getAttribute('aria-pressed')).toBe('true');
-    expect(document.activeElement).toBe(button);
+    expect(document.activeElement).toBe(terminalInput);
     expect(setDialogKeyboardActive).not.toHaveBeenCalledWith(true);
     expect(document.querySelector('[role="dialog"]')).toBeNull();
     const preview = document.querySelector('[role="status"]');
@@ -137,6 +145,24 @@ describe('Baseboard settings controls', () => {
     act(() => button.click());
     expect(getAlertSettings()).toEqual(DEFAULT_ALERT_SETTINGS);
     expect(document.querySelector('[role="status"] [role="switch"]')?.getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('keeps cached push targets in the preview and refreshes them when Settings opens', () => {
+    setPushDevices({ status: 'ready', devices: [{ label: 'iPhone' }] });
+    const refresh = vi.fn(() => setPushDevices({ status: 'loading', devices: [] }));
+    setPushDevicesRefresher(refresh);
+    act(() => root.render(<Baseboard items={[]} onReattach={() => {}} />));
+    act(() => container.querySelector<HTMLButtonElement>('[data-alarm-setting="push"]')?.click());
+
+    expect(refresh).not.toHaveBeenCalled();
+    expect(document.querySelector('[role="status"]')?.textContent).toContain('Push will be sent to iPhone');
+    expect(document.querySelector('[role="status"]')?.textContent).not.toContain('Looking for phones');
+
+    act(() => container.querySelector<HTMLButtonElement>('[data-open-settings]')?.click());
+    expect(refresh).toHaveBeenCalledOnce();
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Looking for phones');
+    act(() => setPushDevices({ status: 'ready', devices: [{ label: 'Pixel' }] }));
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Push will be sent to Pixel');
   });
 
   it('restarts feedback on repeat toggles and replaces it when another setting changes', () => {

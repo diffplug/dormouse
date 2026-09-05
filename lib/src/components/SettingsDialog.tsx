@@ -211,10 +211,11 @@ export function AlarmSettingsSection({ sink, preview = false }: { sink: AlarmSin
   const push = useSyncExternalStore(subscribeToPushDevices, getPushDevices);
   const hasHostService = getPlatform().remoteHost !== undefined;
 
-  // Refresh on either presentation opening; a phone may have subscribed since boot.
+  // The brief preview uses the cached list: refreshing immediately publishes
+  // loading, and the bridge reply may arrive after the preview has faded away.
   useEffect(() => {
-    if (sink === 'push') refreshPushDevicesNow();
-  }, [sink]);
+    if (sink === 'push' && !preview) refreshPushDevicesNow();
+  }, [sink, preview]);
 
   return sink === 'speech' ? (
     <AlarmSinkSection
