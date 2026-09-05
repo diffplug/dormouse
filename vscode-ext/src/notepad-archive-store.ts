@@ -121,6 +121,10 @@ export function saveNotepadArchive(
  */
 export function resetUnreadableNotepadArchive(context: vscode.ExtensionContext): Promise<void> {
   return serialized(async () => {
+    // A recovery button can outlive another webview's successful recovery.
+    // Revalidate under the mutation lock before moving any bytes aside.
+    const raw = readStored(context);
+    if (raw === undefined || readNotepadArchive(raw)) return;
     const stored = context.globalState.get(NOTEPAD_ARCHIVE_KEY);
     if (stored !== undefined) {
       await context.globalState.update(`${NOTEPAD_ARCHIVE_KEY}.unreadable-${Date.now()}`, stored);

@@ -113,6 +113,18 @@ describe('the notepad archive in globalState', () => {
     expect(store.get(rescued[0])).toBe('{ this is not json');
   });
 
+  it('preserves notes written after another webview recovered the archive', async () => {
+    const { context, store } = fakeContext();
+    store.set(NOTEPAD_ARCHIVE_KEY, '{ invalid');
+    await loadNotepadArchive(context); // stale recovery UI in a second view
+    await resetUnreadableNotepadArchive(context);
+    await mutateNotepadArchive(context, { append: [batch('recovered', ['new-note'])] });
+    const before = await loadNotepadArchive(context);
+    await resetUnreadableNotepadArchive(context);
+    expect(await loadNotepadArchive(context)).toEqual(before);
+    expect(stored(store).batches).toEqual([batch('recovered', ['new-note'])]);
+  });
+
   it('appends idempotently by batch id', async () => {
     const { context, store } = fakeContext();
     // A teardown that retries — or two paths that both archive the same closure
