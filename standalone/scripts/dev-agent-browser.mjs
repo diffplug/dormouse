@@ -115,7 +115,6 @@ const invokeMap = {
   get_available_shells: (_args) => requestSidecar('pty:getShells', {}, 'pty:shells', (data) => data.shells ?? []),
   pty_get_cwd: ({ id }) => requestSidecar('pty:getCwd', { id }, 'pty:cwd', (data) => data.cwd ?? null),
   pty_get_open_ports: ({ id }) => requestSidecar('pty:getOpenPorts', { id }, 'pty:openPorts', (data) => data.ports ?? []),
-  pty_get_scrollback: ({ id }) => requestSidecar('pty:getScrollback', { id }, 'pty:scrollback', (data) => data.data ?? null),
   read_clipboard_file_paths: () => requestSidecar('clipboard:readFiles', {}, 'clipboard:files', (data) => data.paths ?? null),
   read_clipboard_image_as_file_path: () => requestSidecar('clipboard:readImage', {}, 'clipboard:image', (data) => data.path ?? null),
   read_clipboard_text: () => requestSidecar('clipboard:readText', {}, 'clipboard:text', (data) => data.text ?? null),

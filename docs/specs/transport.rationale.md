@@ -74,7 +74,7 @@
 
 ## Universal invariants
 
-**Recovery capture no longer depends on scrollback surviving PTY exit.** It runs *before* any kill now (`docs/specs/vscode.md` → "Capturing agent recovery"); the invariant outlived that change because the final flush — reading a pane whose shell has just exited — still needs it.
+**VS Code scrollback outlives the process for repeat resumes.** Recovery capture runs before any kill (`docs/specs/vscode.md` → "Capturing agent recovery"), but a webview reopened over an exited pane still needs its transcript. The shared PTY core formerly kept a second buffer: VS Code never read it, and standalone's reader became unreachable when the adapter stopped persisting transcripts. Removing that duplicate leaves buffering with its actual consumer.
 
 **Where a flat `scrollbackChars` bites.** The cap is reached first on exactly the long-running agent pane recovery exists for, so a caller treating buffer length as a stream position sees no growth on the pane it most needs to watch.
 

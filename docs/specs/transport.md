@@ -65,12 +65,12 @@ Platform host (always running while the adapter is active)
 
 - **Hiding a webview does not kill its PTYs**, and becoming visible again resumes over the still-owned ones ("Reconnection protocol").
 - **A naturally exited PTY may stay mounted as an exited pane**; frontend semantic state — CWD, title candidates, last command — is retained until the Session is disposed.
-- **Explicitly killed PTYs are tombstoned** (`Process: Tombstoned`) so a late child-process `exit` cannot recreate their buffer and make them resumable: an explicit killed-id set in `pty-manager.ts`, and in `pty-core.js` a consequence of `bufferScrollback` never creating an entry `spawn` did not.
+- **Must keep explicitly killed PTYs non-resumable.** VS Code tombstones their ids (`Process: Tombstoned`) in `pty-manager.ts` so late child-process output cannot recreate a buffer; the shared `pty-core.js` drops its live record and retains no output.
 - **Each host instance gets its own pty-host child process** (e.g. one per VS Code window).
 
 ### PTY buffering
 
-`pty-manager` keeps two buffers plus one counter per PTY. Both buffers are capped at 1M chars, trimming the oldest chunks at the cap.
+VS Code's `pty-manager` keeps two buffers plus one counter per PTY. Both buffers are capped at 1M chars, trimming the oldest chunks at the cap.
 
 - **replayChunks** — cleared on first consume; used for resume (webview hidden then shown).
 - **scrollbackChunks** — never cleared short of `kill`/`killAll`; used for repeat resumes (a re-serving router's replay buffer is already spent) and for recovery capture at teardown. Host-side only — no adapter exposes it to the renderer.
@@ -230,7 +230,7 @@ prompt** (rationale).
 
 ## Universal invariants
 
-- **Scrollback buffers survive PTY exit.** In the shared `pty-core.js` only a hard `kill`/`killAll` (or host-process exit) clears one; natural exit, signal-driven exit, and `gracefulKillAll` leave it readable via `getScrollback` (rationale).
+- **Must preserve VS Code scrollback across PTY exit.** In `pty-manager.ts` only `kill`/`killAll` (or host-process exit) clears it; natural exit, signal-driven exit, and `gracefulKillAll` leave it readable via `getScrollback` (rationale).
 - **A position in a pane's output is a received count, not a buffer length.** The capped host-side buffer evicts from the front, so `scrollbackChars` goes flat while output keeps flowing (rationale). Anything marking a point in the stream, or watching a pane for growth, reads the monotonic `getScrollbackReceived` and slices with `getScrollbackSince`, which joins only the chunks spanning the mark and clamps to what the buffer still holds.
 - **A spawn that fails still reports an exit.** `pty-core.spawn` answers a node-pty failure with `error` *and* `exit`; `error` reaches no webview (rationale).
 - **Whole-host acks are correlated by request id, never by message type alone.** For `interrupt` and `gracefulKillAll` the pty-host echoes `requestId` on `interruptDone` / `gracefulKillDone` and the caller compares it — a timed-out teardown call's ack still arrives afterwards (rationale).
