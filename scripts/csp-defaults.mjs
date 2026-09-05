@@ -1,7 +1,7 @@
 // The one definition of where a Burrow may reach a Relay, shared by both
-// Hosts' build scripts.
+// Burrows' build scripts.
 //
-// Both Hosts now run outside any webview — standalone's in the sidecar, VS
+// Both Burrows now run outside any webview — standalone's in the sidecar, VS
 // Code's in the extension host — so neither is fenced by a CSP and both bake
 // this list into their bundle instead (`standalone/scripts/build-sidecar-proxy.mjs`,
 // `vscode-ext/scripts/esbuild.mjs`), where the service refuses any origin

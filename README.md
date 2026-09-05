@@ -40,7 +40,7 @@ The terminal is currently hosted by `node-pty`, but we plan on switching to a Ru
 pnpm install
 pnpm dev:website    # vite hotreload at http://localhost:5173
 pnpm dev:standalone # tauri hotreload
-pnpm dev:relay     # selfhost Relay + Pocket, for remote control
+pnpm dev:relay      # selfhost Relay + Pocket, for remote control
 
 pnpm dogfood:vscode # builds the VSCode extension and installs it into your local VSCode
 pnpm dogfood:standalone              # installs your local build overtop of your existing system installation

@@ -6,6 +6,7 @@
 //   - lib/src/host/remote/sidecar-entry.ts → sidecar/burrow.cjs
 // See docs/specs/dor-browser.md and docs/specs/remote-api.md.
 import { build } from 'esbuild';
+import { rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import {
@@ -32,6 +33,11 @@ const bundles = [
     assertBaked: true,
   },
 ];
+
+// `tauri.conf.json`'s `bundle.resources` globs this whole directory, so a
+// pre-rename `remote-host.cjs` left in an older checkout would ship inside the
+// app — a dead Burrow with its own baked connect-src allowlist.
+await rm(path.resolve(sidecar, 'remote-host.cjs'), { force: true });
 
 for (const { entry, out, define, assertBaked } of bundles) {
   const outfile = path.resolve(sidecar, out);

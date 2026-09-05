@@ -32,6 +32,8 @@ set -euo pipefail
 
 LABEL="dormouse-relay"
 UNIT="$LABEL.service"
+# What UNIT was before the Relay rename; stopped once, never migrated.
+RETIRED_UNIT="dormouse-server.service"
 INSTALL_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/dormouse-relay"
 LOG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/dormouse-relay/logs"
 UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
@@ -702,7 +704,7 @@ An install interrupted between creating that file and writing it leaves exactly 
       rm '$ENV_FILE'
   - otherwise: restore the missing key(s) by hand, and leave DORMOUSE_ORIGIN exactly as it is — it is durable WebAuthn identity, and rewriting it invalidates the registered passkey and every enrolled Burrow."
 
-# The bind burrow is a security boundary whenever the TLS proxy is local: Serve
+# The bind host is a security boundary whenever the TLS proxy is local: Serve
 # reaches the app over loopback, so an unbound socket would also publish the
 # plaintext port to the LAN and to the tailnet.
 grep -q '^DORMOUSE_BIND_HOST=127\.0\.0\.1$' "$ENV_FILE" \
@@ -1545,6 +1547,15 @@ ok "wrote $UNIT_FILE"
 if [ "$TEST_MODE" = "1" ]; then
   warn "test mode: skipping systemctl daemon-reload/enable/restart"
 else
+  # The pre-rename unit, if this machine ever ran one. It still holds $PORT and
+  # would race ours for it, so it is stopped before we start. Best-effort:
+  # absent is the ordinary case.
+  if systemctl --user cat "$RETIRED_UNIT" >/dev/null 2>&1; then
+    systemctl --user disable --now "$RETIRED_UNIT" >/dev/null 2>&1 || true
+    rm -f "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/$RETIRED_UNIT"
+    detail "stopped the retired $RETIRED_UNIT"
+  fi
+
   systemctl --user daemon-reload || die "systemctl --user daemon-reload failed."
   systemctl --user enable "$UNIT" >/dev/null 2>&1 || die "systemctl --user enable $UNIT failed."
   systemctl --user restart "$UNIT" || die "systemctl --user restart $UNIT failed. Inspect: journalctl --user -u $UNIT -n 50"

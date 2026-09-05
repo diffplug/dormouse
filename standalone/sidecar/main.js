@@ -41,7 +41,7 @@ const mgr = create((event, data) => {
   try {
     burrow.onPtyEvent(event, data);
   } catch (err) {
-    console.error(`[sidecar] burrow  tap failed:`, err && err.message || err);
+    console.error(`[sidecar] burrow ${event} tap failed:`, err && err.message || err);
   }
   if (event !== 'data') send(`pty:${event}`, data);
 }, nodePty);

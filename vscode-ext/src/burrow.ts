@@ -282,7 +282,6 @@ const commandRoutes = new Map<string, PeerLinkClient>();
 
 const NO_BURROW = 'no Burrow is reachable';
 
-
 /**
  * Deliver one result to whoever is owed it — the one window that forwarded the
  * command, or this window's webviews when nothing forwarded it.

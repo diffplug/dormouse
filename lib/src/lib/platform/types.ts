@@ -178,7 +178,7 @@ export interface PlatformAdapter {
   /**
    * Reach the Burrow service behind this host. Present exactly when a
    * process behind the webview owns the PTYs and can run the Burrow (standalone's
-   * sidecar, VS Code's extension host). Adapters that omit it have no Host
+   * sidecar, VS Code's extension host). Adapters that omit it have no Burrow
    * anywhere — the website — so the remote modules stay inert.
    */
   burrow?: BurrowLink;

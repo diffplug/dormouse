@@ -334,7 +334,7 @@ const preview: Preview = {
           // by the Burrow, which no story runs — so a story that wants the
           // Alarm dialog's device line names one, and every other story resets
           // to `no-host`.
-          setPushDevices(primedPushDevices ?? { status: 'no-host', devices: [] });
+          setPushDevices(primedPushDevices ?? { status: 'no-burrow', devices: [] });
           clearAllAlertSpeechStates();
           for (const [id, state] of Object.entries(primedAlertSpeech ?? {})) {
             setAlertSpeechState(id, state);

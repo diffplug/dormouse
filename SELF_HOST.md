@@ -266,6 +266,12 @@ With the user's approval:
 ./deploy/local/install-linux.sh
 ```
 
+**A machine that ran a pre-rename install needs nothing extra**: the installer
+stops and removes the retired `sh.dormouse.server` LaunchAgent /
+`dormouse-server.service` unit before registering its own, since both bind the
+same port. The old install root and logs are left where they are — say so, and
+let the user delete them.
+
 It prints each step; read that with the user rather than summarizing. Its
 confirmations — a dirty worktree, a mismatched pnpm, repointing an
 already-claimed Serve root path — are decisions, and it refuses to assume an

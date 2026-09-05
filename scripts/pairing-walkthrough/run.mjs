@@ -31,7 +31,7 @@ const DEFAULT_SCENARIO = 'happy';
 /**
  * Every artifact a scenario other than the default writes is named after it, so
  * several scenarios can share one `--out` and none overwrites another's
- * evidence — including the ones with the same name on every path (`server.log`,
+ * evidence — including the ones with the same name on every path (`relay.log`,
  * `qr.png`, the proof files).
  *
  * A function of `opts` rather than a closure, because `cleanup` writes one
@@ -199,7 +199,7 @@ async function main(live) {
     },
   };
   // Written by the children rather than by a step, so registered here.
-  for (const log of ['server.log', 'burrow.log', 'pocket-chrome.log', 'pocket-console.log']) {
+  for (const log of ['relay.log', 'burrow.log', 'pocket-chrome.log', 'pocket-console.log']) {
     ctx.keep(log);
   }
 

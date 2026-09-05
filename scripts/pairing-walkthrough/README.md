@@ -124,7 +124,7 @@ Everything lands in the run directory, whose path is printed at the start and
 at the end. **Nothing is written into the repo.**
 
 ```
-server.log            the Relay's whole stdout/stderr
+relay.log            the Relay's whole stdout/stderr
 burrow.log              the dev:standalone:ab harness, sidecar and Vite
 01-burrow-booted.png … one screenshot per UI step
 qr-full.png           the Burrow webview at the moment the QR was measured
@@ -156,7 +156,7 @@ not healthier than one that has them.
 | --- | --- | --- |
 | `pocket-console.log` | `publicKey.pubKeyCredParams is missing at least one of the default algorithm identifiers: ES256 and RS256` | Deliberate: the verifier is ES256-only, so offering RS256 would mint keys that fail at the first assertion (`lib/src/remote/client/webauthn.ts`). |
 | `pocket-console.log`, twice | `Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute` | `@zxing/browser` reading camera frames; not ours to set, and one decode per run is not a performance question. |
-| `server.log`, `burrow.log` | `[ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL] … Command failed with signal "SIGTERM"` | The last line of a clean teardown. `pnpm` reports a SIGTERMed child as a failed script; the harness sent that signal on purpose. |
+| `relay.log`, `burrow.log` | `[ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL] … Command failed with signal "SIGTERM"` | The last line of a clean teardown. `pnpm` reports a SIGTERMed child as a failed script; the harness sent that signal on purpose. |
 
 `summary.json` also carries what only a run can know: the decoded pairing URL
 and how much of its TTL was left, the round trip from Enter to the file the

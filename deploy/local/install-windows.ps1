@@ -66,7 +66,7 @@ $LOG_DIR = Join-Path $INSTALL_ROOT 'logs'
 # escapes would land there as literal text.
 $script:UseColor = $false
 try {
-  $script:UseColor = [bool]$Burrow.UI.SupportsVirtualTerminal -and -not [Console]::IsOutputRedirected
+  $script:UseColor = [bool]$Host.UI.SupportsVirtualTerminal -and -not [Console]::IsOutputRedirected
 } catch { $script:UseColor = $false }
 if ($script:UseColor) {
   $E = [char]27
@@ -76,15 +76,15 @@ if ($script:UseColor) {
   $C_DIM = ''; $C_RED = ''; $C_GRN = ''; $C_YEL = ''; $C_BLD = ''; $C_OFF = ''
 }
 
-function Write-Step { param([string]$Text) Write-Burrow ""; Write-Burrow "$C_BLD==>$C_OFF $C_BLD$Text$C_OFF" }
-function Write-Info { param([string]$Text) Write-Burrow "    $Text" }
-function Write-Detail { param([string]$Text) Write-Burrow "    $C_DIM$Text$C_OFF" }
-function Write-Ok { param([string]$Text) Write-Burrow "    $C_GRN$([char]0x2713)$C_OFF $Text" }
-function Write-Warn2 { param([string]$Text) Write-Burrow "    $C_YEL!$C_OFF $Text" }
+function Write-Step { param([string]$Text) Write-Host ""; Write-Host "$C_BLD==>$C_OFF $C_BLD$Text$C_OFF" }
+function Write-Info { param([string]$Text) Write-Host "    $Text" }
+function Write-Detail { param([string]$Text) Write-Host "    $C_DIM$Text$C_OFF" }
+function Write-Ok { param([string]$Text) Write-Host "    $C_GRN$([char]0x2713)$C_OFF $Text" }
+function Write-Warn2 { param([string]$Text) Write-Host "    $C_YEL!$C_OFF $Text" }
 function Die {
   param([string]$Text)
-  Write-Burrow ""
-  Write-Burrow "${C_RED}error:$C_OFF $Text"
+  Write-Host ""
+  Write-Host "${C_RED}error:$C_OFF $Text"
   exit 1
 }
 
@@ -94,7 +94,7 @@ function Confirm-Step {
   if ([Console]::IsInputRedirected) {
     Die "$Prompt -- refusing to assume an answer with no terminal. Re-run with -Yes if that is what you want."
   }
-  $reply = Read-Burrow "    $Prompt [y/N]"
+  $reply = Read-Host "    $Prompt [y/N]"
   return @('y', 'Y', 'yes', 'YES') -contains $reply
 }
 
@@ -518,7 +518,7 @@ function Invoke-Tailscale {
 
 # ------------------------------------------------------------------ start ----
 
-Write-Burrow "$C_BLD Dormouse selfhost Relay -- Windows installer$C_OFF"
+Write-Host "$C_BLD Dormouse selfhost Relay -- Windows installer$C_OFF"
 if ($TEST_MODE) { Write-Warn2 "DORMOUSE_INSTALL_TEST=1 -- the Scheduled Task and Serve will not be touched." }
 
 Write-Step "Checking Tailscale"
@@ -596,7 +596,7 @@ if (Test-Path -LiteralPath $ENV_FILE) {
   $FIRST_INSTALL = $false
   $existingOrigin = Get-EnvFileValue -Path $ENV_FILE -Key 'DORMOUSE_ORIGIN'
   if ($existingOrigin -and $existingOrigin -ne $ORIGIN) {
-    Write-Burrow ""
+    Write-Host ""
     Write-Warn2 "This machine already has an installation bound to a DIFFERENT origin."
     Write-Warn2 "  installed: $existingOrigin"
     Write-Warn2 "  derived:   $ORIGIN"
@@ -636,7 +636,7 @@ Write-Info "commit:   $GIT_SHA"
 Write-Info "arch:     $ARCH"
 if ($GIT_DIRTY -eq 'true') {
   Write-Warn2 "the worktree is DIRTY -- the installed release will not be identified by its SHA alone."
-  foreach ($line in $GIT_STATUS.Split("`n")) { if ($line.Trim()) { Write-Burrow "      $($line.TrimEnd())" } }
+  foreach ($line in $GIT_STATUS.Split("`n")) { if ($line.Trim()) { Write-Host "      $($line.TrimEnd())" } }
   if (-not (Confirm-Step "Install this dirty worktree?")) { Die "aborted at the user's request." }
 } else {
   Write-Ok "worktree clean"
@@ -898,7 +898,7 @@ An install interrupted between creating that file and writing it leaves exactly 
 "@
   }
 
-  # The bind burrow is a security boundary whenever the TLS proxy is local: Serve
+  # The bind host is a security boundary whenever the TLS proxy is local: Serve
   # reaches the app over loopback, so an unbound socket would also publish the
   # plaintext port to the LAN and to the tailnet.
   if ((Get-EnvFileValue -Path $ENV_FILE -Key 'DORMOUSE_BIND_HOST') -ne '127.0.0.1') {
@@ -1070,7 +1070,7 @@ $PreviousPointer = Join-Path $Root 'previous.txt'
 
 $UseColor = $false
 try {
-  $UseColor = [bool]$Burrow.UI.SupportsVirtualTerminal -and -not [Console]::IsOutputRedirected
+  $UseColor = [bool]$Host.UI.SupportsVirtualTerminal -and -not [Console]::IsOutputRedirected
 } catch { $UseColor = $false }
 if ($UseColor) {
   $E = [char]27
@@ -1080,10 +1080,10 @@ if ($UseColor) {
 }
 
 $script:Failures = 0
-function Pass { param([string]$T) Write-Burrow "  $C_GRN$([char]0x2713)$C_OFF $T" }
-function Fail { param([string]$T) Write-Burrow "  $C_RED$([char]0x2717)$C_OFF $T"; $script:Failures++ }
-function Note { param([string]$T) Write-Burrow "  $C_DIM$T$C_OFF" }
-function Warn { param([string]$T) Write-Burrow "  $C_YEL!$C_OFF $T" }
+function Pass { param([string]$T) Write-Host "  $C_GRN$([char]0x2713)$C_OFF $T" }
+function Fail { param([string]$T) Write-Host "  $C_RED$([char]0x2717)$C_OFF $T"; $script:Failures++ }
+function Note { param([string]$T) Write-Host "  $C_DIM$T$C_OFF" }
+function Warn { param([string]$T) Write-Host "  $C_YEL!$C_OFF $T" }
 
 # One quote semantics, shared with the installer and run-relay.ps1: strip a
 # single matched pair, never `.Trim('"')`. They disagreed before -- a hand-typed
@@ -1377,71 +1377,71 @@ function Test-OwnerOnly {
 }
 
 function Invoke-Status {
-  Write-Burrow ""
-  Write-Burrow "Dormouse selfhost Relay"
-  Write-Burrow "  install root : $Root"
-  Write-Burrow "  origin       : $(if ($ORIGIN) { $ORIGIN } else { '<unset>' })"
-  Write-Burrow "  loopback     : http://127.0.0.1:$PORT"
+  Write-Host ""
+  Write-Host "Dormouse selfhost Relay"
+  Write-Host "  install root : $Root"
+  Write-Host "  origin       : $(if ($ORIGIN) { $ORIGIN } else { '<unset>' })"
+  Write-Host "  loopback     : http://127.0.0.1:$PORT"
   $cur = Get-CurrentRelease
   if ($cur) {
-    Write-Burrow "  release      : $cur"
-    Write-Burrow "  commit       : $(Get-ReleaseField 'git_sha') (dirty=$(Get-ReleaseField 'git_dirty'))"
-    Write-Burrow "  built at     : $(Get-ReleaseField 'built_at')"
-    Write-Burrow "  node         : $(Get-ReleaseField 'node_version') $(Get-ReleaseField 'node_arch')"
+    Write-Host "  release      : $cur"
+    Write-Host "  commit       : $(Get-ReleaseField 'git_sha') (dirty=$(Get-ReleaseField 'git_dirty'))"
+    Write-Host "  built at     : $(Get-ReleaseField 'built_at')"
+    Write-Host "  node         : $(Get-ReleaseField 'node_version') $(Get-ReleaseField 'node_arch')"
   } else {
-    Write-Burrow "  release      : $C_RED(none -- current.txt missing)$C_OFF"
+    Write-Host "  release      : $C_RED(none -- current.txt missing)$C_OFF"
   }
   $prev = Get-PreviousRelease
-  if ($prev) { Write-Burrow "  previous     : $prev" }
-  else { Write-Burrow "  previous     : (none -- rollback unavailable)" }
+  if ($prev) { Write-Host "  previous     : $prev" }
+  else { Write-Host "  previous     : (none -- rollback unavailable)" }
 
-  Write-Burrow ""
-  Write-Burrow "Scheduled Task"
+  Write-Host ""
+  Write-Host "Scheduled Task"
   $task = Get-Task
   if ($task) {
     $info = Get-ScheduledTaskInfo -TaskName $LABEL -TaskPath $TASK_PATH -ErrorAction SilentlyContinue
-    Write-Burrow "  name         = $TASK_PATH$LABEL"
-    Write-Burrow "  state        = $($task.State)"
+    Write-Host "  name         = $TASK_PATH$LABEL"
+    Write-Host "  state        = $($task.State)"
     if ($info) {
-      Write-Burrow "  last run     = $($info.LastRunTime)"
-      Write-Burrow "  last result  = $($info.LastTaskResult)"
+      Write-Host "  last run     = $($info.LastRunTime)"
+      Write-Host "  last result  = $($info.LastTaskResult)"
     }
   } else {
-    Write-Burrow "  $C_RED not registered$C_OFF"
+    Write-Host "  $C_RED not registered$C_OFF"
   }
 
-  Write-Burrow ""
-  Write-Burrow "Health"
+  Write-Host ""
+  Write-Host "Health"
   if (Test-Health -Url "http://127.0.0.1:$PORT/api/hello") {
-    Write-Burrow "  loopback /api/hello : ${C_GRN}ok$C_OFF"
+    Write-Host "  loopback /api/hello : ${C_GRN}ok$C_OFF"
   } else {
-    Write-Burrow "  loopback /api/hello : ${C_RED}unreachable$C_OFF"
+    Write-Host "  loopback /api/hello : ${C_RED}unreachable$C_OFF"
   }
 
-  Write-Burrow ""
-  Write-Burrow "Tailscale Serve"
+  Write-Host ""
+  Write-Host "Tailscale Serve"
   $serve = Invoke-Tailscale @('serve', 'status')
   $serveText = ($serve.StdOut + $serve.StdErr).TrimEnd()
-  if ($serveText) { foreach ($l in $serveText.Split("`n")) { Write-Burrow "  $($l.TrimEnd())" } }
-  else { Write-Burrow "  ${C_RED}no Serve configuration$C_OFF" }
+  if ($serveText) { foreach ($l in $serveText.Split("`n")) { Write-Host "  $($l.TrimEnd())" } }
+  else { Write-Host "  ${C_RED}no Serve configuration$C_OFF" }
 
-  Write-Burrow ""
-  Write-Burrow "State files ($StateDir)"
+  Write-Host ""
+  Write-Host "State files ($StateDir)"
   if (Test-Path -LiteralPath $StateDir) {
     Get-ChildItem -LiteralPath $StateDir -Force | ForEach-Object {
-      Write-Burrow ("  {0,10}  {1}  {2}" -f $_.Length, $_.LastWriteTimeUtc.ToString("yyyy-MM-dd HH:mm:ss'Z'"), $_.Name)
+      Write-Host ("  {0,10}  {1}  {2}" -f $_.Length, $_.LastWriteTimeUtc.ToString("yyyy-MM-dd HH:mm:ss'Z'"), $_.Name)
     }
   } else {
-    Write-Burrow "  ${C_RED}missing$C_OFF"
+    Write-Host "  ${C_RED}missing$C_OFF"
   }
-  Write-Burrow ""
+  Write-Host ""
 }
 
 function Invoke-Verify {
   $script:Failures = 0
-  Write-Burrow ""
-  Write-Burrow "Verifying the installed service"
-  Write-Burrow ""
+  Write-Host ""
+  Write-Host "Verifying the installed service"
+  Write-Host ""
 
   # Both are consulted by two separate checks below. Export-ScheduledTask is a
   # CIM round trip into the Task Scheduler service -- the priciest call in this
@@ -1536,7 +1536,7 @@ function Invoke-Verify {
     Pass "exactly one Relay process for this installation"
   } else {
     Fail "$($extra.Count) Relay processes are running for this installation; orphans from an earlier release are the usual cause"
-    foreach ($e in $extra) { Write-Burrow "      pid $($e.ProcessId) $($e.ExecutablePath)" }
+    foreach ($e in $extra) { Write-Host "      pid $($e.ProcessId) $($e.ExecutablePath)" }
   }
 
   $listeners = @(Get-NetTCPConnection -State Listen -LocalPort ([int]$PORT) -ErrorAction SilentlyContinue)
@@ -1546,7 +1546,7 @@ function Invoke-Verify {
     $offLoopback = @($listeners | Where-Object { $_.LocalAddress -ne '127.0.0.1' })
     if ($offLoopback.Count -gt 0) {
       Fail "port $PORT is bound off-loopback -- fix DORMOUSE_BIND_HOST=127.0.0.1"
-      foreach ($l in $offLoopback) { Write-Burrow "      $($l.LocalAddress):$($l.LocalPort)" }
+      foreach ($l in $offLoopback) { Write-Host "      $($l.LocalAddress):$($l.LocalPort)" }
     } else {
       Pass "port $PORT is bound only to 127.0.0.1"
     }
@@ -1577,7 +1577,7 @@ function Invoke-Verify {
       Pass "Serve proxies / to 127.0.0.1:$PORT"
     } else {
       Fail "Serve does not proxy / to 127.0.0.1:$PORT"
-      foreach ($l in $serveText.Split("`n")) { if ($l.Trim()) { Write-Burrow "      $($l.TrimEnd())" } }
+      foreach ($l in $serveText.Split("`n")) { if ($l.Trim()) { Write-Host "      $($l.TrimEnd())" } }
     }
     if ($ORIGIN -and ($serveText -match [regex]::Escape($ORIGIN.Replace('https://', '')))) {
       Pass "Serve origin matches DORMOUSE_ORIGIN ($ORIGIN)"
@@ -1625,7 +1625,7 @@ function Invoke-Verify {
       Pass "all $($stateFiles.Count) state file(s) grant only this user"
     } else {
       Fail "state files readable by another principal:"
-      foreach ($l in $leaky) { Write-Burrow "      $l" }
+      foreach ($l in $leaky) { Write-Host "      $l" }
     }
   }
 
@@ -1673,14 +1673,14 @@ function Invoke-Verify {
     elseif ($taskXml) { Pass "the installed service does not reference the source checkout" }
   }
 
-  Write-Burrow ""
+  Write-Host ""
   if ($script:Failures -eq 0) {
-    Write-Burrow "${C_GRN}All checks passed.$C_OFF"
-    Write-Burrow ""
+    Write-Host "${C_GRN}All checks passed.$C_OFF"
+    Write-Host ""
     return 0
   }
-  Write-Burrow "$C_RED$($script:Failures) check(s) failed.$C_OFF"
-  Write-Burrow ""
+  Write-Host "$C_RED$($script:Failures) check(s) failed.$C_OFF"
+  Write-Host ""
   return 1
 }
 
@@ -1689,8 +1689,8 @@ function Invoke-Logs {
   $out = Join-Path $LogDir 'relay.out.log'
   $err = Join-Path $LogDir 'relay.err.log'
   foreach ($f in @($out, $err)) { if (-not (Test-Path -LiteralPath $f)) { [IO.File]::WriteAllText($f, '') } }
-  Write-Burrow "tailing $LogDir\{relay.out.log,relay.err.log} -- ctrl-c to stop"
-  Write-Burrow ""
+  Write-Host "tailing $LogDir\{relay.out.log,relay.err.log} -- ctrl-c to stop"
+  Write-Host ""
   # NOT `Get-Content -LiteralPath $out, $err -Wait`: that walks the paths in
   # order and -Wait blocks forever on the first, so the second file is never
   # read at all. Losing relay.err.log is the worst half -- run-relay.ps1's
@@ -1699,7 +1699,7 @@ function Invoke-Logs {
   foreach ($f in @($out, $err)) {
     $label = Split-Path -Leaf $f
     foreach ($line in @(Get-Content -LiteralPath $f -Tail 50 -ErrorAction SilentlyContinue)) {
-      Write-Burrow "[$label] $line"
+      Write-Host "[$label] $line"
     }
   }
   $jobs = @()
@@ -1713,7 +1713,7 @@ function Invoke-Logs {
       }
     }
     while ($true) {
-      foreach ($j in $jobs) { Receive-Job -Job $j | ForEach-Object { Write-Burrow $_ } }
+      foreach ($j in $jobs) { Receive-Job -Job $j | ForEach-Object { Write-Host $_ } }
       Start-Sleep -Milliseconds 300
     }
   } finally {
@@ -1726,29 +1726,29 @@ function Invoke-Logs {
 
 function Invoke-Restart {
   $task = Get-Task
-  if (-not $task) { Write-Burrow "Scheduled Task $TASK_PATH$LABEL is not registered"; return 1 }
+  if (-not $task) { Write-Host "Scheduled Task $TASK_PATH$LABEL is not registered"; return 1 }
   Restart-DormouseTask
-  Write-Burrow "restarted; waiting for health..."
+  Write-Host "restarted; waiting for health..."
   if (Wait-Health -Url "http://127.0.0.1:$PORT/api/hello" -Seconds 40) {
-    Write-Burrow "${C_GRN}healthy$C_OFF"
+    Write-Host "${C_GRN}healthy$C_OFF"
     return 0
   }
-  Write-Burrow "${C_RED}did not become healthy within 40s -- check: manage logs$C_OFF"
+  Write-Host "${C_RED}did not become healthy within 40s -- check: manage logs$C_OFF"
   return 1
 }
 
 function Invoke-ShowPassword {
-  Write-Burrow ""
-  Write-Burrow "${C_YEL}WARNING$C_OFF the setup password gates Burrow enrollment."
-  Write-Burrow "It is about to be printed to this terminal. Make sure nobody is looking"
-  Write-Burrow "over your shoulder and that this session is not being recorded or shared."
-  Write-Burrow ""
+  Write-Host ""
+  Write-Host "${C_YEL}WARNING$C_OFF the setup password gates Burrow enrollment."
+  Write-Host "It is about to be printed to this terminal. Make sure nobody is looking"
+  Write-Host "over your shoulder and that this session is not being recorded or shared."
+  Write-Host ""
   if ([Console]::IsInputRedirected) {
     [Console]::Error.WriteLine('refusing to print the setup password with no terminal to confirm at')
     return 1
   }
-  $reply = Read-Burrow 'Print it? [y/N]'
-  if (@('y', 'Y', 'yes', 'YES') -notcontains $reply) { Write-Burrow 'aborted'; return 1 }
+  $reply = Read-Host 'Print it? [y/N]'
+  if (@('y', 'Y', 'yes', 'YES') -notcontains $reply) { Write-Host 'aborted'; return 1 }
   $passwordFile = Join-Path $StateDir 'setup-password.json'
   try {
     $stored = [IO.File]::ReadAllText($passwordFile) | ConvertFrom-Json
@@ -1761,9 +1761,9 @@ function Invoke-ShowPassword {
     [Console]::Error.WriteLine("$passwordFile has no valid Relay-generated setup password")
     return 1
   }
-  Write-Burrow ""
-  Write-Burrow "  $password"
-  Write-Burrow ""
+  Write-Host ""
+  Write-Host "  $password"
+  Write-Host ""
   return 0
 }
 
@@ -1771,10 +1771,10 @@ function Invoke-Serve {
   # Re-apply the Serve mapping -- e.g. after a dev session repointed / at :3000.
   if (-not $TS_BIN) { [Console]::Error.WriteLine('tailscale CLI not found'); return 1 }
   $r = Invoke-Tailscale @('serve', '--bg', $PORT)
-  Write-Burrow ($r.StdOut + $r.StdErr).TrimEnd()
+  Write-Host ($r.StdOut + $r.StdErr).TrimEnd()
   if ($r.ExitCode -ne 0) { return $r.ExitCode }
   $s = Invoke-Tailscale @('serve', 'status')
-  Write-Burrow ($s.StdOut + $s.StdErr).TrimEnd()
+  Write-Host ($s.StdOut + $s.StdErr).TrimEnd()
   return 0
 }
 
@@ -1793,7 +1793,7 @@ function Invoke-Rollback {
     [Console]::Error.WriteLine("previous and current name the same release ($prev) -- nothing to roll back to")
     return 1
   }
-  Write-Burrow "rolling back: $cur -> $prev"
+  Write-Host "rolling back: $cur -> $prev"
   $nodeBin = $null
   foreach ($candidate in @((Join-Path $Root "releases\$prev\runtime\node.exe"), (Join-Path $Root "releases\$cur\runtime\node.exe"))) {
     if (Test-Path -LiteralPath $candidate -PathType Leaf) { $nodeBin = $candidate; break }
@@ -1816,44 +1816,44 @@ function Invoke-Rollback {
     # and answering -- reported as "rolled back and healthy" without this check.
     $serving = Get-ListeningRelease
     if ($serving -ne $prev) {
-      Write-Burrow "${C_RED}port $PORT answers, but from '$(if ($serving) { $serving } else { 'an unidentifiable process' })' rather than the restored $prev -- check: manage verify$C_OFF"
+      Write-Host "${C_RED}port $PORT answers, but from '$(if ($serving) { $serving } else { 'an unidentifiable process' })' rather than the restored $prev -- check: manage verify$C_OFF"
       return 1
     }
-    Write-Burrow "${C_GRN}rolled back and healthy$C_OFF"
+    Write-Host "${C_GRN}rolled back and healthy$C_OFF"
     return 0
   }
-  Write-Burrow "${C_RED}rolled back but not healthy -- check: manage logs$C_OFF"
+  Write-Host "${C_RED}rolled back but not healthy -- check: manage logs$C_OFF"
   return 1
 }
 
 function Invoke-Uninstall {
-  Write-Burrow ""
-  Write-Burrow "This removes the Scheduled Task and the installed code."
-  Write-Burrow "It PRESERVES your configuration and state:"
-  Write-Burrow "  config : $Root\config"
-  Write-Burrow "  state  : $StateDir"
-  Write-Burrow ""
-  Write-Burrow 'This script is left in place so "purge" can still delete them'
-  Write-Burrow 'irreversibly afterwards:'
-  Write-Burrow ""
-  Write-Burrow ('  "{0}\bin\manage.cmd" purge' -f $Root)
-  Write-Burrow ""
+  Write-Host ""
+  Write-Host "This removes the Scheduled Task and the installed code."
+  Write-Host "It PRESERVES your configuration and state:"
+  Write-Host "  config : $Root\config"
+  Write-Host "  state  : $StateDir"
+  Write-Host ""
+  Write-Host 'This script is left in place so "purge" can still delete them'
+  Write-Host 'irreversibly afterwards:'
+  Write-Host ""
+  Write-Host ('  "{0}\bin\manage.cmd" purge' -f $Root)
+  Write-Host ""
   if ([Console]::IsInputRedirected) {
     [Console]::Error.WriteLine('refusing to uninstall with no terminal to confirm at')
     return 1
   }
-  $reply = Read-Burrow 'Uninstall? [y/N]'
-  if (@('y', 'Y', 'yes', 'YES') -notcontains $reply) { Write-Burrow 'aborted'; return 1 }
+  $reply = Read-Host 'Uninstall? [y/N]'
+  if (@('y', 'Y', 'yes', 'YES') -notcontains $reply) { Write-Host 'aborted'; return 1 }
 
   if (Get-Task) {
     Stop-ScheduledTask -TaskName $LABEL -TaskPath $TASK_PATH -ErrorAction SilentlyContinue
     Unregister-ScheduledTask -TaskName $LABEL -TaskPath $TASK_PATH -Confirm:$false
-    Write-Burrow "unregistered the Scheduled Task"
+    Write-Host "unregistered the Scheduled Task"
   }
   # Otherwise a surviving node.exe keeps the port and locks the release files
   # that are about to be deleted.
   $reaped = Stop-DormouseProcess
-  if ($reaped -gt 0) { Write-Burrow "terminated $reaped leftover process(es)" }
+  if ($reaped -gt 0) { Write-Host "terminated $reaped leftover process(es)" }
 
   # Turn off only the mapping this installer owns.
   $serve = Invoke-Tailscale @('serve', 'status')
@@ -1862,10 +1862,10 @@ function Invoke-Uninstall {
   # mapping this install never owned whenever our port sat on another path.
   if (($serve.StdOut + $serve.StdErr) -match ('(?m)^\|--\s+/\s+proxy.*' + [regex]::Escape("127.0.0.1:$PORT") + '([^0-9]|$)')) {
     $off = Invoke-Tailscale @('serve', '--bg', 'off')
-    if ($off.ExitCode -eq 0) { Write-Burrow "turned off the Serve mapping to 127.0.0.1:$PORT" }
+    if ($off.ExitCode -eq 0) { Write-Host "turned off the Serve mapping to 127.0.0.1:$PORT" }
     else { [Console]::Error.WriteLine('could not turn off the Serve mapping; check "tailscale serve status" and remove it by hand') }
   } else {
-    Write-Burrow "left the Serve config alone (it does not map / to 127.0.0.1:$PORT)"
+    Write-Host "left the Serve config alone (it does not map / to 127.0.0.1:$PORT)"
   }
 
   foreach ($p in @((Join-Path $Root 'releases'), (Join-Path $Root 'run'))) {
@@ -1878,47 +1878,47 @@ function Invoke-Uninstall {
   foreach ($p in @($CurrentPointer, $PreviousPointer)) {
     if (Test-Path -LiteralPath $p) { [IO.File]::Delete($p) }
   }
-  Write-Burrow ""
-  Write-Burrow "uninstalled. config and state remain at:"
-  Write-Burrow "  $Root\config"
-  Write-Burrow "  $StateDir"
-  Write-Burrow ""
-  Write-Burrow "delete them irreversibly with:"
-  Write-Burrow ""
-  Write-Burrow ('  "{0}\bin\manage.cmd" purge' -f $Root)
-  Write-Burrow ""
+  Write-Host ""
+  Write-Host "uninstalled. config and state remain at:"
+  Write-Host "  $Root\config"
+  Write-Host "  $StateDir"
+  Write-Host ""
+  Write-Host "delete them irreversibly with:"
+  Write-Host ""
+  Write-Host ('  "{0}\bin\manage.cmd" purge' -f $Root)
+  Write-Host ""
   return 0
 }
 
 function Invoke-Purge {
-  Write-Burrow ""
-  Write-Burrow "${C_RED}IRREVERSIBLE$C_OFF This deletes the account, enrolled Burrows, push"
-  Write-Burrow "subscriptions, the VAPID key, and any unspent enrollment offer:"
-  Write-Burrow "  $StateDir"
-  Write-Burrow "  $Root\config"
-  Write-Burrow "  $Root\run"
-  Write-Burrow ""
-  Write-Burrow "Registered passkeys and enrolled Burrows will have to be set up again."
-  Write-Burrow ""
-  $reply = Read-Burrow 'Type exactly: DELETE DORMOUSE STATE'
-  if ($reply -cne 'DELETE DORMOUSE STATE') { Write-Burrow 'aborted'; return 1 }
+  Write-Host ""
+  Write-Host "${C_RED}IRREVERSIBLE$C_OFF This deletes the account, enrolled Burrows, push"
+  Write-Host "subscriptions, the VAPID key, and any unspent enrollment offer:"
+  Write-Host "  $StateDir"
+  Write-Host "  $Root\config"
+  Write-Host "  $Root\run"
+  Write-Host ""
+  Write-Host "Registered passkeys and enrolled Burrows will have to be set up again."
+  Write-Host ""
+  $reply = Read-Host 'Type exactly: DELETE DORMOUSE STATE'
+  if ($reply -cne 'DELETE DORMOUSE STATE') { Write-Host 'aborted'; return 1 }
   # run\ too: an unspent enroll-offer.json redeems for a Burrow enrollment without
   # any existing account, and redemption recreates the state this command just
   # deleted. Leaving it behind would make "IRREVERSIBLE" false for a day.
   foreach ($p in @($StateDir, (Join-Path $Root 'config'), (Join-Path $Root 'run'))) {
     Remove-Tree $p
   }
-  Write-Burrow 'purged.'
+  Write-Host 'purged.'
   # bin\run-relay.ps1 is what "uninstall" removes, so its absence means the
   # Scheduled Task and the code are already gone and this script is the last
   # thing standing. It cannot delete itself out from under the shell running it.
   if (-not (Test-Path -LiteralPath (Join-Path $Root 'bin\run-relay.ps1'))) {
-    Write-Burrow ""
-    Write-Burrow "the Scheduled Task and code were already uninstalled; this script"
-    Write-Burrow "is all that remains:"
-    Write-Burrow ""
-    Write-Burrow ('  Remove-Item -Recurse -Force "{0}"' -f $Root)
-    Write-Burrow ""
+    Write-Host ""
+    Write-Host "the Scheduled Task and code were already uninstalled; this script"
+    Write-Host "is all that remains:"
+    Write-Host ""
+    Write-Host ('  Remove-Item -Recurse -Force "{0}"' -f $Root)
+    Write-Host ""
   }
   return 0
 }
@@ -1935,7 +1935,7 @@ switch ($command) {
   'uninstall' { exit (Invoke-Uninstall) }
   'purge' { exit (Invoke-Purge) }
   default {
-    Write-Burrow @"
+    Write-Host @"
 usage: manage <command>
 
   status          Scheduled Task, process, health, Serve origin, and release
@@ -2036,9 +2036,9 @@ rem directly.
   function Stop-ProbeAndDie {
     param([Parameter(Mandatory)][string]$Text)
     Stop-Probe
-    Write-Burrow "--- candidate output ---"
-    try { Write-Burrow $probeOutTask.Result } catch { }
-    try { Write-Burrow $probeErrTask.Result } catch { }
+    Write-Host "--- candidate output ---"
+    try { Write-Host $probeOutTask.Result } catch { }
+    try { Write-Host $probeErrTask.Result } catch { }
     Remove-Tree $STAGE
     Die $Text
   }
@@ -2199,7 +2199,7 @@ rem directly.
       Write-Warn2 "the new release never answered http://127.0.0.1:$LOOPBACK_PORT/api/hello"
       $errLog = Join-Path $LOG_DIR 'relay.err.log'
       if (Test-Path -LiteralPath $errLog) {
-        Get-Content -LiteralPath $errLog -Tail 30 | ForEach-Object { Write-Burrow "      $_" }
+        Get-Content -LiteralPath $errLog -Tail 30 | ForEach-Object { Write-Host "      $_" }
       }
       [void](Restore-PreviousRelease)
       Die "update FAILED. Rollback was attempted -- this is not a success, whatever the previous release now reports."
@@ -2234,7 +2234,7 @@ rem directly.
   $SERVE_BEFORE = ($before.StdOut + $before.StdErr).TrimEnd()
   if ($SERVE_BEFORE) {
     Write-Detail "existing Serve configuration:"
-    foreach ($l in $SERVE_BEFORE.Split("`n")) { Write-Burrow "      $($l.TrimEnd())" }
+    foreach ($l in $SERVE_BEFORE.Split("`n")) { Write-Host "      $($l.TrimEnd())" }
   }
 
   $NEEDS_SERVE = $true
@@ -2272,11 +2272,11 @@ rem directly.
     $after = Invoke-Tailscale @('serve', 'status')
     $SERVE_AFTER = ($after.StdOut + $after.StdErr).TrimEnd()
     if ($SERVE_AFTER -notmatch ([regex]::Escape("127.0.0.1:$LOOPBACK_PORT") + '([^0-9]|$)')) {
-      Write-Burrow $SERVE_AFTER
+      Write-Host $SERVE_AFTER
       Die "Serve does not report a proxy to 127.0.0.1:$LOOPBACK_PORT."
     }
     if ($SERVE_AFTER -notmatch [regex]::Escape($TS_DNS)) {
-      Write-Burrow $SERVE_AFTER
+      Write-Host $SERVE_AFTER
       Die "Serve does not report the expected HTTPS origin $ORIGIN."
     }
     Write-Ok "Serve reports $ORIGIN -> 127.0.0.1:$LOOPBACK_PORT"
@@ -2364,24 +2364,24 @@ fs.renameSync(process.argv[2], process.argv[3]);
 
   Write-Step "Installed"
 
-  Write-Burrow "    origin        $ORIGIN"
-  Write-Burrow "    release       $RELEASE_ID"
-  Write-Burrow "    commit        $GIT_SHA (dirty=$GIT_DIRTY)"
-  Write-Burrow "    install root  $INSTALL_ROOT"
-  Write-Burrow "    config        $ENV_FILE"
-  Write-Burrow "    state         $STATE_DIR"
-  Write-Burrow "    logs          $LOG_DIR"
-  Write-Burrow ""
-  Write-Burrow "    manage:  `"$BIN_DIR\manage.cmd`" <status|verify|logs|restart|show-password|serve|rollback|uninstall>"
-  Write-Burrow ""
+  Write-Host "    origin        $ORIGIN"
+  Write-Host "    release       $RELEASE_ID"
+  Write-Host "    commit        $GIT_SHA (dirty=$GIT_DIRTY)"
+  Write-Host "    install root  $INSTALL_ROOT"
+  Write-Host "    config        $ENV_FILE"
+  Write-Host "    state         $STATE_DIR"
+  Write-Host "    logs          $LOG_DIR"
+  Write-Host ""
+  Write-Host "    manage:  `"$BIN_DIR\manage.cmd`" <status|verify|logs|restart|show-password|serve|rollback|uninstall>"
+  Write-Host ""
 
   if ($FIRST_INSTALL) {
-    Write-Burrow "    First install. Retrieve the Relay-generated setup password when you are ready"
-    Write-Burrow "    to enroll a Burrow by hand (the one-time offer card in the Burrow's"
-    Write-Burrow "    Remote control settings needs no password):"
-    Write-Burrow ""
-    Write-Burrow "        `"$BIN_DIR\manage.cmd`" show-password"
-    Write-Burrow ""
+    Write-Host "    First install. Retrieve the Relay-generated setup password when you are ready"
+    Write-Host "    to enroll a Burrow by hand (the one-time offer card in the Burrow's"
+    Write-Host "    Remote control settings needs no password):"
+    Write-Host ""
+    Write-Host "        `"$BIN_DIR\manage.cmd`" show-password"
+    Write-Host ""
   }
 
 } finally {

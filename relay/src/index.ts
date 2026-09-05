@@ -17,7 +17,12 @@ import {
 } from './push.js';
 import { removeRuntimeFile, writeRuntimeFile } from './runtime-file.js';
 import { generateSetupPassword } from './setup-password.js';
-import { CorruptStateError, SetupPasswordStore, VapidStore } from './state.js';
+import {
+  CorruptStateError,
+  forgetRetiredState,
+  SetupPasswordStore,
+  VapidStore,
+} from './state.js';
 
 function loadConfig() {
   try {
@@ -64,6 +69,10 @@ async function loadMintedState() {
     throw err;
   }
 }
+
+// Whatever the Host→Burrow rename stranded in the state dir, deleted unread.
+// Nothing waits on it: it removes a file no code reads (`state.ts`).
+void forgetRetiredState(stateDir);
 
 const [setupPassword, vapid] = await loadMintedState();
 try {

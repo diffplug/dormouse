@@ -15,7 +15,12 @@ import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { AccountStore, CorruptStateError, VapidStore } from '../dist/state.js';
+import {
+  AccountStore,
+  CorruptStateError,
+  forgetRetiredState,
+  VapidStore,
+} from '../dist/state.js';
 
 const KEYS = { publicKey: 'BPublicKey', privateKey: 'APrivateKey' };
 
@@ -124,4 +129,27 @@ test('passkey rows are left as they are found — the envelope is what is checke
   assert.deepEqual(appended.passkeys, [
     { credentialId: 'cred', publicKey: 'spki', label: 'laptop', createdAt: 1_700_000_000_000 },
   ]);
+});
+
+/**
+ * The pre-rename enrollment file. Every row held a plaintext `burrowToken`, so
+ * it is removed rather than left behind (`docs/specs/security-remote.md` ->
+ * "Credentials at rest"). Deleted unread: nothing here parses it.
+ */
+test('the retired hosts.json is deleted, and burrows.json is left alone', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dormouse-retired-'));
+  const retired = join(dir, 'hosts.json');
+  const live = join(dir, 'burrows.json');
+  await writeFile(retired, JSON.stringify([{ hostId: 'h', hostToken: 'secret' }]));
+  await writeFile(live, '[]');
+
+  await forgetRetiredState(dir);
+
+  await assert.rejects(() => readFile(retired, 'utf8'), /ENOENT/);
+  assert.equal(await readFile(live, 'utf8'), '[]');
+});
+
+test('forgetting the retired state is quiet where there was none', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dormouse-retired-'));
+  await assert.doesNotReject(() => forgetRetiredState(dir));
 });

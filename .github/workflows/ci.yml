@@ -138,13 +138,13 @@ jobs:
           second_token="$(read_offer)"
           [ "$before" = "$after" ] || { echo "::error::relay.env was not preserved across an update"; exit 1; }
           [ "$first_token" != "$second_token" ] || { echo "::error::the enrollment offer was not re-minted on the update"; exit 1; }
-          # hosts.json existence, not its current row count, is the durable
-          # "first Host happened" marker. Even an empty hand-edited file keeps
+          # burrows.json existence, not its current row count, is the durable
+          # "first Burrow happened" marker. Even an empty hand-edited file keeps
           # a later installer run from reopening bootstrap.
-          printf '[]\n' > "$root/state/hosts.json"
-          chmod 0600 "$root/state/hosts.json"
+          printf '[]\n' > "$root/state/burrows.json"
+          chmod 0600 "$root/state/burrows.json"
           DORMOUSE_INSTALL_ROOT="$root" ./deploy/local/install-linux.sh --yes
-          [ ! -e "$offer" ] || { echo "::error::the enrollment offer survived after hosts.json existed"; exit 1; }
+          [ ! -e "$offer" ] || { echo "::error::the enrollment offer survived after burrows.json existed"; exit 1; }
           [ -L "$root/previous" ] || { echo "::error::no previous release retained after an update"; exit 1; }
           bash -n "$root/bin/manage"
           bash -n "$root/bin/run-relay"

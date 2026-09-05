@@ -24,6 +24,8 @@ set -euo pipefail
 # macOS ships bash 3.2; nothing here may use bash 4+ syntax.
 
 LABEL="sh.dormouse.relay"
+# What LABEL was before the Relay rename; unloaded once, never migrated.
+RETIRED_LABEL="sh.dormouse.server"
 INSTALL_ROOT="$HOME/Library/Application Support/Dormouse Relay"
 LOG_DIR="$HOME/Library/Logs/Dormouse Relay"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
@@ -525,7 +527,7 @@ An install interrupted between creating that file and writing it leaves exactly 
       rm '$ENV_FILE'
   - otherwise: restore the missing key(s) by hand, and leave DORMOUSE_ORIGIN exactly as it is — it is durable WebAuthn identity, and rewriting it invalidates the registered passkey and every enrolled Burrow."
 
-# The bind burrow is a security boundary whenever the TLS proxy is local: Serve
+# The bind host is a security boundary whenever the TLS proxy is local: Serve
 # reaches the app over loopback, so an unbound socket would also publish the
 # plaintext port to the LAN and to the tailnet.
 grep -q '^DORMOUSE_BIND_HOST=127\.0\.0\.1$' "$ENV_FILE" \
@@ -1303,6 +1305,14 @@ ok "wrote and linted $PLIST"
 if [ "$TEST_MODE" = "1" ]; then
   warn "test mode: skipping launchctl bootout/bootstrap/kickstart"
 else
+  # The pre-rename agent, if this machine ever ran one. It still holds $PORT and
+  # would race the new label for it, so it is unloaded before we bootstrap ours.
+  # Best-effort: absent is the ordinary case.
+  if launchctl bootout "gui/$UID/$RETIRED_LABEL" 2>/dev/null; then
+    detail "unloaded the retired $RETIRED_LABEL agent"
+  fi
+  rm -f "$HOME/Library/LaunchAgents/$RETIRED_LABEL.plist"
+
   BOOTOUT_OUT="$(launchctl bootout "gui/$UID/$LABEL" 2>&1)" && BOOTOUT_RC=0 || BOOTOUT_RC=$?
   if [ "$BOOTOUT_RC" != "0" ]; then
     case "$BOOTOUT_OUT" in

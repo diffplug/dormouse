@@ -35,6 +35,9 @@ standalone/sidecar/dor-cli/
 standalone/sidecar/iframe-proxy.cjs
 standalone/sidecar/agent-browser-host.cjs
 standalone/sidecar/burrow.cjs
+# Kept beside it: a checkout that built before the Burrow rename still holds
+# the old bundle, and `bundle.resources` would ship it.
+standalone/sidecar/remote-host.cjs
 standalone/sidecar/node_modules/
 standalone/node_modules/
 

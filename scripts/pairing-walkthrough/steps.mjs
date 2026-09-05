@@ -217,7 +217,7 @@ async function stepRelay(ctx) {
     skipBuild ? ['--filter', 'relay', 'start'] : ['dev:relay'],
     {
       cwd: repoRoot,
-      logPath: ctx.path('server.log'),
+      logPath: ctx.path('relay.log'),
       prefix: 'relay',
       env: {
         DORMOUSE_STATE_DIR: stateDir,
