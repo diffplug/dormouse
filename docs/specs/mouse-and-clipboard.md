@@ -195,11 +195,13 @@ Source of truth: `terminalOwnsEvent` in `lib/src/lib/terminal-mouse-router.ts`, 
 
 ## 7. Rendering Notes
 
-- Outline, hints, and popup render in a compositor layer above the cell grid, so nothing the inside program draws disturbs them and nothing they draw reaches its output. The header icon and banner are persistent terminal chrome, likewise unaffected by inside-program redraws.
+**Must keep selection and hint updates from rerendering pane headers or override banners** (rationale).
+
+- **Must render outlines, hints, and popups above the cell grid**, isolated from inside-program output and redraws; header icons and banners remain persistent chrome.
 - **Geometry comes from the *measured* xterm cell grid** (`cellWidth`/`cellHeight`/`gridLeft`/`gridTop`), never element-width ÷ cols, so the outline stays aligned across xterm's internal padding.
 - Overlay and popup share one render-tick signal, bumped on every xterm render (scroll, resize, output), so they re-measure and re-anchor together; the popup dismisses if the selection is canceled.
 
-Source of truth: `lib/src/lib/selection-text.ts` (text extraction and normalization), `lib/src/lib/selection-geometry.ts` (perimeter construction).
+Source of truth: `lib/src/lib/selection-text.ts` (extraction and normalization), `lib/src/lib/selection-geometry.ts` (perimeter construction), `TerminalPaneHeader` in `lib/src/components/wall/TerminalPaneHeader.tsx` and `MouseOverrideBanner` in `lib/src/components/wall/MouseOverrideBanner.tsx` — tested in `lib/src/components/wall/mouse-chrome.test.tsx`.
 
 ---
 

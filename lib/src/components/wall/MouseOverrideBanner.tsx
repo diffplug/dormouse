@@ -1,16 +1,15 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { PopupButtonRow, popupButton } from '../design';
 import {
-  DEFAULT_MOUSE_SELECTION_STATE,
-  getMouseSelectionSnapshot,
+  getMouseSelectionState,
   setOverride as setMouseOverride,
   subscribeToMouseSelection,
 } from '../../lib/mouse-selection';
 
 export function MouseOverrideBanner({ terminalId }: { terminalId: string }) {
-  const states = useSyncExternalStore(subscribeToMouseSelection, getMouseSelectionSnapshot);
-  const state = states.get(terminalId) ?? DEFAULT_MOUSE_SELECTION_STATE;
-  const visible = state.override === 'temporary';
+  const visible = useSyncExternalStore(
+    subscribeToMouseSelection, () => getMouseSelectionState(terminalId).override === 'temporary',
+  );
   const [flashed, setFlashed] = useState<'sticky' | 'cancel' | null>(null);
 
   useEffect(() => {

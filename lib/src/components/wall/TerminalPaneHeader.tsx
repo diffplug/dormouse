@@ -21,8 +21,7 @@ import { IllegalRenameWarning, type RenameRejection } from './IllegalRenameWarni
 import { InlineEditInput } from './InlineEditInput';
 import { PaneHeaderContextMenu } from './PaneHeaderContextMenu';
 import {
-  DEFAULT_MOUSE_SELECTION_STATE,
-  getMouseSelectionSnapshot,
+  getMouseSelectionState,
   setOverride as setMouseOverride,
   subscribeToMouseSelection,
 } from '../../lib/mouse-selection';
@@ -91,7 +90,12 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
   const setDialogKeyboardActive = useContext(DialogKeyboardContext);
   const activityStates = useSyncExternalStore(subscribeToActivity, getActivitySnapshot);
   const terminalStates = useSyncExternalStore(subscribeToTerminalPaneState, getTerminalPaneStateSnapshot);
-  const mouseStates = useSyncExternalStore(subscribeToMouseSelection, getMouseSelectionSnapshot);
+  const showMouseIcon = useSyncExternalStore(
+    subscribeToMouseSelection, () => getMouseSelectionState(id).mouseReporting !== 'none',
+  );
+  const mouseOverride = useSyncExternalStore(
+    subscribeToMouseSelection, () => getMouseSelectionState(id).override,
+  );
   const actions = useContext(WallActionsContext);
   const activity = activityStates.get(id) ?? DEFAULT_ACTIVITY_STATE;
   const paneState = terminalStates.get(id) ?? createTerminalPaneState();
@@ -111,12 +115,10 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
   const displayTitleBase = showsFailGlyph
     ? displayTitle.slice(0, -` ${COMMAND_FAIL_GLYPH}`.length)
     : displayTitle;
-  const mouseState = mouseStates.get(id) ?? DEFAULT_MOUSE_SELECTION_STATE;
-  const showMouseIcon = mouseState.mouseReporting !== 'none';
-  const inOverride = mouseState.override !== 'off';
-  const mouseIconTooltip: string | null = mouseState.override === 'permanent'
+  const inOverride = mouseOverride !== 'off';
+  const mouseIconTooltip: string | null = mouseOverride === 'permanent'
     ? "You're overriding the TUI's mouse capture. Click to restore."
-    : mouseState.override === 'temporary'
+    : mouseOverride === 'temporary'
       ? null
       : 'TUI is intercepting mouse commands. Click to override.';
   const mouseIconAriaLabel = inOverride ? 'Restore mouse capture' : 'Override mouse capture';
