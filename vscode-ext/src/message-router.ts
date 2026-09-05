@@ -739,16 +739,13 @@ export function attachRouter(
           post({ type: 'pty:list', ptys: [] } satisfies ExtensionMessage);
           break;
         }
-        // Snapshot IDs owned before claiming so we can choose the right data source below
-        const previouslyOwned = new Set(ownedPtyIds);
-
         const ptys = ptyManager.getBufferedPtys();
         const reconnectable = new Map<string, { alive: boolean; exitCode?: number; shell?: string }>();
 
         // Re-serve PTYs this router already owns (webview content was recreated,
         // e.g. WebviewView collapsed then re-expanded — resolveWebviewView is NOT
         // called again, so the same router persists with its owned IDs still set)
-        for (const id of previouslyOwned) {
+        for (const id of ownedPtyIds) {
           const info = ptys.get(id);
           if (info) {
             reconnectable.set(id, info);
@@ -788,12 +785,10 @@ export function attachRouter(
         };
         post(list);
         for (const [id] of reconnectable) {
-          // For already-owned PTYs the replay buffer was consumed on first connect,
-          // so use scrollback (full history, never cleared).
-          // For newly-claimed PTYs use replay (all data since spawn, clears buffer).
-          const data = previouslyOwned.has(id)
-            ? ptyManager.getScrollback(id)
-            : ptyManager.getReplayData(id);
+          // Every init reconstructs terminal contents, including a replacement
+          // router reclaiming a disposed view's PTYs. Reading must not consume
+          // the transcript: the next reconstruction needs the same history.
+          const data = ptyManager.getScrollback(id);
           if (data) {
             const replay: ExtensionMessage = { type: 'pty:replay', id, data };
             post(replay);

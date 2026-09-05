@@ -70,11 +70,20 @@ Platform host (always running while the adapter is active)
 
 ### PTY buffering
 
-VS Code's `pty-manager` keeps two buffers plus one counter per PTY. Both buffers are capped at 1M chars, trimming the oldest chunks at the cap.
+**Must keep one capped scrollback buffer per PTY in VS Code's `pty-manager`.**
+It retains 1M chars, trimming oldest whole chunks at the cap while preserving
+at least the newest chunk. `receivedChars` counts every char received and never
+decreases when trimming ("A position in a pane's output is a received count",
+below). The buffer serves both resume and teardown recovery; no adapter exposes
+it to the renderer.
 
-- **replayChunks** — cleared on first consume; used for resume (webview hidden then shown).
-- **scrollbackChunks** — never cleared short of `kill`/`killAll`; used for repeat resumes (a re-serving router's replay buffer is already spent) and for recovery capture at teardown. Host-side only — no adapter exposes it to the renderer.
-- **receivedChars** — every char ever buffered, never decremented by a trim ("A position in a pane's output is a received count", below).
+**Must replay the retained transcript on every resume without consuming it** —
+for an existing router and for a replacement reclaiming a disposed view's PTYs
+alike (rationale). `message-router-replay.test.ts` pins reconstruction, ownership,
+and live delivery.
+
+Source of truth: `getScrollback` / `bufferData` in `vscode-ext/src/pty-manager.ts`;
+the `dormouse:init` handler in `vscode-ext/src/message-router.ts`.
 
 ### Reconnection protocol
 
