@@ -18,3 +18,13 @@
  * which is a Node harness that cannot import this file.
  */
 export const SCAN_LABEL = 'Scan a setup code';
+
+/**
+ * What a Burrow *is*, for the two screens that have to introduce the noun: the
+ * laptop naming one, and the phone listing them. Defined in
+ * `docs/specs/glossary.md` → Roles; this is its one user-facing wording, shared
+ * for the same reason as {@link SCAN_LABEL} — two bundles, one fact, and a
+ * paraphrase on either side rots without failing.
+ */
+export const BURROW_IS_AN_APP =
+  'A Burrow is one Dormouse app — Standalone, or a VS Code window.';

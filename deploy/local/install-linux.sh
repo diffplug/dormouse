@@ -181,7 +181,7 @@ fs.renameSync(tmp, link);
 ' "$1" "$2"
 }
 
-# HTTP health check without assuming curl is installed. Ubuntu Relay images
+# HTTP health check without assuming curl is installed. Ubuntu Server images
 # ship it, but a minimal container or Debian netinst does not, and the release
 # already carries a Node binary that can do this.
 #

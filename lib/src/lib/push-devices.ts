@@ -4,7 +4,7 @@
  * "Push will be sent to …".
  *
  * Renderer-only derived state, deliberately not an app-global store relayed
- * burrow-ward: it is neither persisted nor edited, so it pays none of the
+ * host-ward: it is neither persisted nor edited, so it pays none of the
  * per-store relay cost `docs/specs/transport.md` warns about.
  *
  * It lives in `lib/src/lib/` rather than beside the Burrow because the

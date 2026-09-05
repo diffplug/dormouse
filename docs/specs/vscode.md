@@ -224,7 +224,7 @@ frame-src   http://127.0.0.1:* http://localhost:*
 
 **`frame-src` is loopback-only** — `dor iframe` frames its target through the transparent proxy the extension host stands up, so the only origin ever embedded is loopback on an OS-assigned port; without the override `default-src 'none'` blocks the frame and leaves a blank white pane (`docs/specs/dor-browser.md`).
 
-**The webview CSP carries no relay sources.** Its `connect-src` loopback `ws:` entries are for the agent-browser stream relay only — the Burrow holds its `/ws/burrow` socket from the *extension host*, which no CSP fences, so the origin allowlist is enforced there instead (see "Remote Host: a service in the extension host").
+**The webview CSP carries no relay sources.** Its `connect-src` loopback `ws:` entries are for the agent-browser stream relay only — the Burrow holds its `/ws/burrow` socket from the *extension host*, which no CSP fences, so the origin allowlist is enforced there instead (see "Burrow: a service in the extension host").
 
 **That allowlist is a build-time constant, never a runtime value**: `vscode-ext/scripts/esbuild.mjs` substitutes `__DORMOUSE_REMOTE_CONNECT_SRC__` into `dist/extension.js`. The default, the replace-not-add override rule, and the two build-time guards are `docs/specs/relay.md` → "Where a Burrow may reach a Relay".
 
@@ -272,7 +272,7 @@ The service reads both **in-process**, through the async `BurrowStateStore`. **T
 
 Source of truth: `VsCodeBurrowStateStore` in `vscode-ext/src/burrow-store.ts`, `BurrowStateStore` in `lib/src/host/remote/burrow-state-store.ts`.
 
-**Which window: bind-as-lease.** One extension host runs per window, so unarbitrated they would all start a Host against the same enrollment and fight endlessly over the one `/ws/burrow` socket (rationale). Arbitration is the socket itself: **the bind is the lease**. Every contending window tries to bind one fixed path — `<hash>.sock` inside a per-user `dormouse-peer-<uid>` directory in the temp dir, or `\\.\pipe\dormouse-peer-<hash>` on Windows — the hash derived from `context.globalStorageUri.fsPath`: **derived rather than random** because it must be *the same* in every window, **hashed rather than joined** because of the platform path cap (rationale). The winner is the broker and runs the service; everyone else connects to it as a client.
+**Which window: bind-as-lease.** One extension host runs per window, so unarbitrated they would all start a Burrow against the same enrollment and fight endlessly over the one `/ws/burrow` socket (rationale). Arbitration is the socket itself: **the bind is the lease**. Every contending window tries to bind one fixed path — `<hash>.sock` inside a per-user `dormouse-peer-<uid>` directory in the temp dir, or `\\.\pipe\dormouse-peer-<hash>` on Windows — the hash derived from `context.globalStorageUri.fsPath`: **derived rather than random** because it must be *the same* in every window, **hashed rather than joined** because of the platform path cap (rationale). The winner is the broker and runs the service; everyone else connects to it as a client.
 
 The invariants:
 

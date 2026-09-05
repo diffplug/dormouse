@@ -17,6 +17,7 @@ import { generateNoiseKeyPair, toBase64Url, type PairingInvitation } from 'remot
 
 import App, {
   CAMERA_BOOTSTRAP_MESSAGE,
+  BURROWS_EMPTY,
   BURROWS_TITLE,
   SCAN_LABEL,
   UNSUPPORTED_BROWSER_TITLE,
@@ -511,7 +512,7 @@ describe('the Burrows list', () => {
     await click(container, 'Remove');
 
     expect(fake.forgetBurrow).toHaveBeenCalledWith('burrow-1');
-    expect(container.textContent).toContain('No Burrows paired yet');
+    expect(container.textContent).toContain(BURROWS_EMPTY);
   });
 
   it('retries owed deletions on every visit to the list', async () => {
@@ -577,7 +578,7 @@ describe('leaving the scanner', () => {
   it('reads the list on the way back, since the scan may have signed in', async () => {
     // `onScanned` signs in and only reads the Burrows list on a path that reaches
     // pairing, so a scan that failed after sign-in has a session and no list.
-    // Cancelling into an empty "No Burrows paired yet" would be a lie.
+    // Cancelling into an empty list would be a lie.
     const { url } = await invitationUrl();
     fake.setup.mockRejectedValue(new Error(SETUP_CODE_DEAD_MESSAGE));
     fake.listKnownBurrows.mockResolvedValue([await knownBurrow('burrow-1')]);
@@ -599,7 +600,7 @@ describe('leaving the scanner', () => {
     await click(container, 'Cancel');
 
     expect(container.textContent).toContain('First laptop');
-    expect(container.textContent).not.toContain('No Burrows paired yet');
+    expect(container.textContent).not.toContain(BURROWS_EMPTY);
   });
 
   it('leaves no error behind when the waiting screen is cancelled', async () => {

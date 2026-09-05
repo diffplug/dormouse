@@ -6,7 +6,7 @@
 
 **Why a signed-in browser still leads with the scan beside sign-in.** A signed-in phone still scans to pair a *new* computer, so the scanner is not a first-run-only affordance. Re-deriving prior use every render lets a run abandoned half way retry into whichever half still works, rather than staying pinned to the branch it started in.
 
-**Why the resume path is in the PTY core at all.** `requestInit`/`onPtyList` was built for VS Code webview reloads, where the burrow outlives the webview; a phone that backgrounds and returns is the same shape, so the remote adapter reuses it unchanged.
+**Why the resume path is in the PTY core at all.** `requestInit`/`onPtyList` was built for VS Code webview reloads, where the host outlives the webview; a phone that backgrounds and returns is the same shape, so the remote adapter reuses it unchanged.
 
 **Why the cached public key is written between `registerPasskey` and `finish`.** Registration is irreversible the moment the authenticator mints the credential, but the browser only learns the ceremony succeeded from `finish`. Caching between the two means a lost answer leaves a browser that can sign in, not one that believes it never registered and mints a second passkey on every retry. A rejection is the opposite: that answer is proof there is nothing to sign in against.
 
@@ -34,7 +34,7 @@
 
 ## Design system and theming
 
-**Why the theme is restored in `main.tsx` rather than by the Wall.** Pocket has no VS Code burrow handing it tokens, and boots into auth screens long before any Wall exists, so without a boot-time restore the first paint would be unthemed. The same call syncs what no in-app burrow needs: root `color-scheme` drives native form controls and scrollbars, `<meta name="theme-color">` tints the browser's own address bar.
+**Why the theme is restored in `main.tsx` rather than by the Wall.** Pocket has no VS Code host handing it tokens, and boots into auth screens long before any Wall exists, so without a boot-time restore the first paint would be unthemed. The same call syncs what no in-app host needs: root `color-scheme` drives native form controls and scrollbars, `<meta name="theme-color">` tints the browser's own address bar.
 
 **Why the phone type exceptions exist.** Form inputs below 16px trigger iOS zoom-on-focus, which reflows the whole screen mid-tap. Desktop's 10–12px secondary steps are illegible at thumb distance, and a fingertip needs a bigger target than a cursor.
 

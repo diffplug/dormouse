@@ -24,8 +24,8 @@ mixing them is the main way this runbook goes wrong. Each checkpoint that
 differs gives all three forms; the [Mechanism map](#mechanism-map) has the rest.
 
 This runbook covers running the installer and finishing what it cannot — the
-passkey, the Burrow build (the Standalone or VS Code Dormouse that will enroll),
-the backup — with no code for anyone to write or edit.
+passkey, the Burrow build (Standalone or VS Code), the backup — with no code for
+anyone to write or edit.
 
 ## Instructions to the assistant
 

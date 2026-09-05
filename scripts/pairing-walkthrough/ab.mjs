@@ -166,7 +166,7 @@ export class AgentBrowser {
    * that nothing will ever read again.
    *
    * The shipped app carries the same workaround for the same reason
-   * (`lib/src/host/agent-browser-burrow.ts`); a CLI that grows a `session stop`
+   * (`lib/src/host/agent-browser-host.ts`); a CLI that grows a `session stop`
    * retires both.
    */
   async killDaemon() {

@@ -71,7 +71,7 @@ export default function Hosted() {
 
             <dl className="mt-8 grid gap-4 border-t border-[var(--color-text)]/15 pt-5 text-sm sm:grid-cols-3">
               <div>
-                <dt className="font-display">Hosted will run</dt>
+                <dt className="font-display">Hosted runs</dt>
                 <dd className={`mt-1 ${MUTED_TEXT_CLASS}`}>The Relay</dd>
               </div>
               <div>

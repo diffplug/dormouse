@@ -18,7 +18,7 @@ import type {
   BurrowStatus,
   TerminalInvitationState,
 } from '../remote/burrow/burrow-runtime';
-import { SCAN_LABEL } from '../remote/setup-copy';
+import { BURROW_IS_AN_APP, SCAN_LABEL } from '../remote/setup-copy';
 import {
   clearBurrowEnrollment,
   enrollOfferBurrow,
@@ -77,6 +77,7 @@ const TONE_CLASS = {
 } as const;
 
 const FIELD_LABEL = 'text-xs text-muted';
+const FIELD_HINT = `${FIELD_LABEL} mt-1 block`;
 const HOSTED_REMOTE_URL = 'https://dormouse.sh/hosted/#remote-control';
 
 /**
@@ -495,20 +496,22 @@ function BurrowNameField({
   value: string;
   onChange: (value: string) => void;
 }) {
+  // The hint is a sibling of the label, not a child: inside it, it would join
+  // the input's accessible name and leave the field called "Name for this
+  // Burrow A Burrow is one Dormouse app …".
   return (
-    <label className="mt-2 block">
-      <span className={FIELD_LABEL}>Name for this Burrow</span>
-      <TextInput
-        value={value}
-        onChange={onChange}
-        autoComplete="off"
-        placeholder="e.g. Work laptop"
-      />
-      <span className={`${FIELD_LABEL} mt-1 block`}>
-        A Burrow is one Dormouse app — Standalone, or a VS Code window — and each pairs with
-        your phone on its own.
-      </span>
-    </label>
+    <div className="mt-2">
+      <label className="block">
+        <span className={FIELD_LABEL}>Name for this Burrow</span>
+        <TextInput
+          value={value}
+          onChange={onChange}
+          autoComplete="off"
+          placeholder="e.g. Work laptop"
+        />
+      </label>
+      <p className={FIELD_HINT}>{BURROW_IS_AN_APP} Each pairs with your phone on its own.</p>
+    </div>
   );
 }
 

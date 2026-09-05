@@ -24,7 +24,7 @@ import {
   type PocketSocket,
 } from '../client/pocket-client';
 import { PasskeyAlreadyRegisteredError, browserWebAuthn } from '../client/webauthn';
-import { SCAN_LABEL } from '../setup-copy';
+import { BURROW_IS_AN_APP, SCAN_LABEL } from '../setup-copy';
 import { probeNoiseSupport, type PairingInvitation } from 'remote-lib-common';
 import {
   indexedDbKnownBurrowStore,
@@ -744,6 +744,16 @@ export function PairingCodeView({
  */
 export const BURROWS_TITLE = 'Burrows';
 
+/**
+ * The empty list, which is also where the noun gets introduced — this is the
+ * first screen a signed-in phone with nothing paired lands on. Exported so the
+ * tests that assert "the list is empty" match the shipped sentence rather than
+ * a copy of it.
+ */
+export const BURROWS_EMPTY =
+  `No Burrows paired yet. ${BURROW_IS_AN_APP} On the computer, open Settings → `
+  + 'Remote control → Set up a phone, then scan the code.';
+
 /** The connected Pocket shell: Burrow navigation chrome over the remote wall. */
 export function ConnectedView({
   burrow,
@@ -1179,11 +1189,7 @@ export function BurrowsView({
           />
         ) : null}
         {burrows.length === 0 ? (
-          <div className={PK.empty}>
-            No Burrows paired yet. A Burrow is one Dormouse app — Standalone, or a VS Code
-            window — so one computer can appear here twice. On the computer, open Settings →
-            Remote control → Set up a phone, then scan the code.
-          </div>
+          <div className={PK.empty}>{BURROWS_EMPTY}</div>
         ) : (
           burrows.map((burrow) => {
             // Push is device-wide to turn on but per-Burrow to hold, so the row

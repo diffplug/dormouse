@@ -11,7 +11,7 @@ import "./index.css";
 const platform = initPlatform();
 
 // This entry serves the VS Code webview and the lib dev server. Only the
-// former has a Burrow behind it: the Host runs in the extension host,
+// former has a Burrow behind it: it runs in the extension host,
 // next to the PTYs, and the dev server has neither.
 const isVscode = typeof acquireVsCodeApi === "function";
 

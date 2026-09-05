@@ -6,6 +6,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  BURROWS_EMPTY,
   CAMERA_BOOTSTRAP_MESSAGE,
   BurrowsView,
   PUSH_RELAY_DISABLED,
@@ -389,7 +390,7 @@ describe('BurrowsView actions', () => {
     const onScan = vi.fn();
     renderBurrows({ burrows: [], onScan });
 
-    expect(container.textContent).toContain('No Burrows paired yet');
+    expect(container.textContent).toContain(BURROWS_EMPTY);
     act(() => buttonNamed(SCAN_LABEL)!.click());
     expect(onScan).toHaveBeenCalledOnce();
   });
