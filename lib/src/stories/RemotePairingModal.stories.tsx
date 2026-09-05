@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import { RemotePairingModal } from '../remote/host/RemotePairingModal';
+import { RemotePairingModal } from '../remote/burrow/RemotePairingModal';
 
 function RemotePairingModalStory({ label }: { label: string }) {
   return (

@@ -34,7 +34,7 @@ export interface ProcessedPtyChunk {
  * incomplete-sequence buffer the parser was holding (`OSC_INCOMPLETE_LIMIT`,
  * 16 KiB), each of those code units can encode to three UTF-8 bytes, and
  * base64url adds a third again — 640 KiB for the pair, against the 1 MiB
- * `MAX_APP_MESSAGE_LENGTH` (`server-lib-common/src/security/noise-transport.ts`)
+ * `MAX_APP_MESSAGE_LENGTH` (`remote-lib-common/src/security/noise-transport.ts`)
  * that message and its JSON framing must fit. libuv reads 64 KiB, so this is a
  * ceiling on the pathological read rather than a routine split.
  */

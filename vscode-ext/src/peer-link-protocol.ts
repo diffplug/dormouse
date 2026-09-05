@@ -4,8 +4,8 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypt
 
 import {
   ASK_BUDGET_MS,
-  type RemoteHostCommand,
-  type RemoteHostResult,
+  type BurrowCommand,
+  type BurrowResult,
 } from '../../lib/src/host/remote/service-protocol';
 
 /** Must exceed the nested webview fan-out budget plus its two socket hops. */
@@ -18,7 +18,7 @@ export type PeerLinkRequest =
   | { kind: 'unsubscribe'; ptyId: string }
   | { kind: 'write'; ptyId: string; data: string }
   | { kind: 'resizePty'; ptyId: string; cols: number; rows: number }
-  | { kind: 'commandResult'; payload: RemoteHostResult }
+  | { kind: 'commandResult'; payload: BurrowResult }
   | { kind: 'uiEvent'; payload: unknown };
 
 /** Peer window → broker. */
@@ -26,11 +26,11 @@ export type PeerLinkResponse =
   | { kind: 'result'; id: string; results: unknown[] }
   | { kind: 'subscribed'; id: string; ptyId: string }
   // `textData` rides the frame under the `ProcessedPtyChunk` rule: omitted when
-  // it equals `data` (`lib/src/remote/host/host-surface-provider.ts`).
+  // it equals `data` (`lib/src/remote/burrow/burrow-surface-provider.ts`).
   | { kind: 'data'; ptyId: string; data: string; textData?: string }
   | { kind: 'exit'; ptyId: string; exitCode: number }
   | { kind: 'notify' }
-  | { kind: 'command'; payload: RemoteHostCommand };
+  | { kind: 'command'; payload: BurrowCommand };
 
 export type PeerLinkFrame = PeerLinkRequest | PeerLinkResponse;
 

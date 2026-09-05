@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { modalActionButton } from './design';
 import { speakTestUtterance } from '../lib/alert-speech';
 import { getPlatform } from '../lib/platform';
-import { sendTestPush } from '../remote/host/host-status-store';
+import { sendTestPush } from '../remote/burrow/burrow-status-store';
 
 /**
  * "Try it now" controls for the two alarm sinks
@@ -52,7 +52,7 @@ function ResultLine({ result }: { result: { text: string; tone: 'ok' | 'bad' } |
 }
 
 /**
- * Speak a fixed phrase now. Synchronous and local — there is no server in this
+ * Speak a fixed phrase now. Synchronous and local — there is no Relay in this
  * path — so the only failure worth reporting is a webview with no speech
  * backend at all, which would otherwise be indistinguishable from a working one
  * with the volume down.
@@ -78,10 +78,10 @@ export function SpeakTestButton() {
 }
 
 /**
- * Send a real push through the real path — same Host, same ACL, same server —
+ * Send a real push through the real path — same Burrow, same ACL, same Relay —
  * so what it proves is what the alarm will do.
  *
- * Hidden entirely where no Host service exists, matching the Remote control
+ * Hidden entirely where no Burrow service exists, matching the Remote control
  * section: there is nothing to test and nothing the user could do about it.
  */
 export function PushTestButton() {
@@ -90,7 +90,7 @@ export function PushTestButton() {
 
   let hasService = false;
   try {
-    hasService = !!getPlatform().remoteHost;
+    hasService = !!getPlatform().burrow;
   } catch {
     hasService = false;
   }
@@ -107,7 +107,7 @@ export function PushTestButton() {
           void sendTestPush()
             .then((outcome) => {
               if (outcome.targeted === 0) {
-                // Not a failure: the Host is fine, nothing has opted in yet.
+                // Not a failure: the Burrow is fine, nothing has opted in yet.
                 show(
                   'No paired phone has push notifications turned on, so there was nowhere to send it.',
                   'ok',

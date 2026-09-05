@@ -13,22 +13,22 @@ export function HostingRequirementNotice({
 
   return (
     <aside
-      aria-label="When Dormouse needs a server"
+      aria-label="When Dormouse needs a Relay"
       className={`${CARD_ACCENT_CLASS} text-[var(--color-text)]`}
     >
       <p className="text-balance font-display text-xl leading-snug sm:text-2xl">
         Dormouse is just a terminal — it needs no server or hosting.
       </p>
       <p className={`mt-4 leading-relaxed ${CARD_MUTED_TEXT_CLASS}`}>
-        Push notifications and phone control are optional. They require a signalling
-        server to connect your computer and phone and relay encrypted traffic. Until you
+        Push notifications and phone control are optional. They require a Relay to
+        connect your computer and phone and pass encrypted traffic between them. Until you
         configure one, Dormouse’s remote features make no network requests.
       </p>
       {planned ? (
         <>
           <p className={`mt-4 leading-relaxed ${CARD_MUTED_TEXT_CLASS}`}>
             Paid hosting remains a design target pending independent review. A managed
-            server would still see connection metadata.
+            Relay would still see connection metadata.
           </p>
           <p className="mt-4 text-sm">
             <a

@@ -1,0 +1,202 @@
+/**
+ * Slice-1 sign-in coverage (docs/specs/relay.md): passkey assertions minted by
+ * the harness `SimAuthenticator`, single-use sign-in challenges, session minting
+ * and expiry, and the `requireSession` gate slice 2 will hang `/api/burrows` off.
+ */
+
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+
+import { Hono } from 'hono';
+import { API_ROUTES } from 'remote-lib-common';
+import { SimAuthenticator } from '../../remote-lib-common/test/harness/actors.mjs';
+
+import { MAX_PENDING_CHALLENGES } from '../dist/app.js';
+
+import {
+  ORIGIN,
+  RP_ID,
+  freshApp,
+  makeClock,
+  newAuthenticator,
+  padBase64Url,
+  post,
+  register,
+  signin,
+} from './helpers.mjs';
+
+test('sign-in happy path mints a session the store accepts', async () => {
+  const { app, sessions } = await freshApp();
+  const authenticator = await newAuthenticator();
+  assert.equal((await register(app, authenticator)).status, 200);
+
+  const { res } = await signin(app, authenticator);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.accountId, 'owner');
+  assert.equal(typeof body.sessionToken, 'string');
+  assert.equal(typeof body.expiresAt, 'number');
+
+  const session = sessions.validate(body.sessionToken);
+  assert.ok(session);
+  assert.equal(session.accountId, 'owner');
+  assert.equal(sessions.validate('not-a-real-token'), null);
+});
+
+test('sign-in rejects an unknown credential', async () => {
+  const { app } = await freshApp();
+  assert.equal((await register(app, await newAuthenticator())).status, 200);
+
+  // A different, never-registered authenticator.
+  const stranger = await newAuthenticator();
+  const { res } = await signin(app, stranger);
+  assert.equal(res.status, 404);
+});
+
+test('sign-in rejects a replayed challenge/assertion', async () => {
+  const { app } = await freshApp();
+  const authenticator = await newAuthenticator();
+  assert.equal((await register(app, authenticator)).status, 200);
+
+  const { res, assertion } = await signin(app, authenticator);
+  assert.equal(res.status, 200);
+
+  // Same assertion again — its challenge was consumed on the first finish.
+  const replay = await post(app, API_ROUTES.signinFinish, { assertion });
+  assert.equal(replay.status, 400);
+  assert.match((await replay.json()).error, /challenge/);
+});
+
+test('sign-in accepts a padded base64url clientData challenge', async () => {
+  const { app } = await freshApp();
+  const authenticator = await newAuthenticator();
+  assert.equal((await register(app, authenticator)).status, 200);
+
+  const begin = await post(app, API_ROUTES.signinBegin, {});
+  const { challenge } = await begin.json();
+  const assertion = await authenticator.assert({
+    challenge,
+    origin: ORIGIN,
+    rpId: RP_ID,
+    tamper: { challenge: padBase64Url(challenge) },
+  });
+  const res = await post(app, API_ROUTES.signinFinish, { assertion });
+  assert.equal(res.status, 200);
+});
+
+test('sign-in rejects a tampered signature', async () => {
+  const { app } = await freshApp();
+  const authenticator = await newAuthenticator();
+  assert.equal((await register(app, authenticator)).status, 200);
+
+  // Sign the assertion with a foreign key: valid shape, invalid signature.
+  const signWith = await SimAuthenticator.foreignSigningKey();
+  const { res } = await signin(app, authenticator, { tamper: { signWith } });
+  assert.equal(res.status, 401);
+  assert.match((await res.json()).error, /signature/);
+});
+
+test('sign-in rejects an assertion for a foreign origin', async () => {
+  const { app } = await freshApp();
+  const authenticator = await newAuthenticator();
+  assert.equal((await register(app, authenticator)).status, 200);
+
+  const { res } = await signin(app, authenticator, { tamper: { origin: 'http://evil.example' } });
+  assert.equal(res.status, 401);
+  assert.match((await res.json()).error, /origin/);
+});
+
+test('sign-in checks clientData against the configured origin', async () => {
+  const { app } = await freshApp({ origin: 'https://example.com' });
+  const authenticator = await SimAuthenticator.create({ rpId: 'example.com' });
+  assert.equal(
+    (await register(app, authenticator, { origin: 'https://example.com' })).status,
+    200,
+  );
+
+  const { res } = await signin(app, authenticator, {
+    origin: 'https://example.com',
+    rpId: 'example.com',
+  });
+  assert.equal(res.status, 200);
+});
+
+test('an expired session token no longer validates', async () => {
+  const clock = makeClock();
+  const { app, sessions } = await freshApp({ now: clock.now });
+  const authenticator = await newAuthenticator();
+  assert.equal((await register(app, authenticator)).status, 200);
+
+  const { res } = await signin(app, authenticator);
+  const { sessionToken } = await res.json();
+  assert.ok(sessions.validate(sessionToken));
+
+  clock.advance(12 * 60 * 60 * 1000 + 1); // past the 12h TTL
+  assert.equal(sessions.validate(sessionToken), null);
+});
+
+test('requireSession gates a route on the Bearer token', async () => {
+  const { app, sessions, requireSession } = await freshApp();
+  const authenticator = await newAuthenticator();
+  assert.equal((await register(app, authenticator)).status, 200);
+  const { res } = await signin(app, authenticator);
+  const { sessionToken } = await res.json();
+
+  // Mount the exported middleware on a throwaway route to exercise it directly.
+  const probe = new Hono();
+  probe.get('/probe', requireSession, (c) => c.json({ accountId: c.get('session').accountId }));
+
+  const withToken = await probe.request('/probe', {
+    headers: { Authorization: `Bearer ${sessionToken}` },
+  });
+  assert.equal(withToken.status, 200);
+  assert.deepEqual(await withToken.json(), { accountId: 'owner' });
+
+  assert.equal((await probe.request('/probe')).status, 401);
+  assert.equal(
+    (await probe.request('/probe', { headers: { Authorization: 'Bearer nope' } })).status,
+    401,
+  );
+  // Sanity: the store still recognizes the live token.
+  assert.ok(sessions.validate(sessionToken));
+});
+
+test('sign-in returns the asserted passkey public key', async () => {
+  // A Client needs it to build pair/connect requests; without it only the
+  // browser that registered could pair, which forced a second passkey on every
+  // new profile (docs/specs/pocket-app.md -> Installable web app).
+  const { app } = await freshApp();
+  const authenticator = await newAuthenticator();
+  await register(app, authenticator);
+  const { res } = await signin(app, authenticator);
+  const body = await res.json();
+  assert.equal(body.passkeyPublicKey, authenticator.publicKey);
+});
+
+test('the sign-in challenge store is capped, not merely swept', async () => {
+  // `POST /api/signin/begin` needs no auth and no body, so the expiry sweep
+  // alone lets the map plateau at request-rate x TTL rather than at a bound the
+  // process chose. Under the cap the oldest go first, and single use is
+  // untouched: the surviving challenge still redeems exactly once.
+  const { app } = await freshApp();
+  const authenticator = await newAuthenticator();
+  assert.equal((await register(app, authenticator)).status, 200);
+
+  const first = await (await post(app, API_ROUTES.signinBegin, {})).json();
+  for (let i = 0; i < MAX_PENDING_CHALLENGES; i += 1) {
+    assert.equal((await post(app, API_ROUTES.signinBegin, {})).status, 200);
+  }
+
+  // Evicted by the flood: a challenge the store no longer holds cannot redeem.
+  const stale = await authenticator.assert({
+    challenge: first.challenge,
+    origin: ORIGIN,
+    rpId: RP_ID,
+  });
+  const res = await post(app, API_ROUTES.signinFinish, { assertion: stale });
+  assert.equal(res.status, 400);
+  assert.match((await res.json()).error, /unrecognized or expired challenge/);
+
+  // And an ordinary sign-in still works right after.
+  assert.equal((await signin(app, authenticator)).res.status, 200);
+});

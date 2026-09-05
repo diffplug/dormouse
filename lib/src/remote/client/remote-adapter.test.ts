@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { toBase64Url, utf8Encode, type DirectoryEntry } from 'server-lib-common';
+import { toBase64Url, utf8Encode, type DirectoryEntry } from 'remote-lib-common';
 
 import { RemotePtyAdapter, type RemoteAdapterClient } from './remote-adapter';
 import type { TerminalHandlers } from './pocket-client';
@@ -250,7 +250,7 @@ describe('RemotePtyAdapter attach / active pane', () => {
     await adapter.setActivePane('s1', 80, 24);
 
     // What this xterm and its ImageAddon answer on `onData`; the owner's xterm
-    // has already answered, and the Host discards these anyway.
+    // has already answered, and the Burrow discards these anyway.
     adapter.writePty('s1', '\x1b[?1;2c');
     adapter.writePty('s1', '\x1b[24;80R');
     adapter.writePty('s1', '\x1b_Gi=1;OK\x1b\\');
@@ -262,7 +262,7 @@ describe('RemotePtyAdapter attach / active pane', () => {
     expect(client.writes).toEqual([{ surfaceId: 's1', bytes: toBase64Url(utf8Encode('ls\r')) }]);
   });
 
-  it('spawnPty / killPty are no-ops (panes are Host-owned)', async () => {
+  it('spawnPty / killPty are no-ops (panes are Burrow-owned)', async () => {
     const client = new FakeClient();
     const adapter = new RemotePtyAdapter(client);
     adapter.spawnPty();

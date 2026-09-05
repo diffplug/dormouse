@@ -1,0 +1,117 @@
+/**
+ * Manual smoke tool: enroll a Burrow against a running selfhost Relay and run one
+ * auto-approving `FakeBurrow`, logging every ceremony event. This is the headless
+ * stand-in for the standalone Burrow — handy for driving a real Pocket page
+ * through pairing + connect without a laptop app.
+ *
+ *   node scripts/fake-burrow.mjs http://localhost:3000
+ *
+ * The Relay URL (default http://localhost:3000) is argv[2]. The setup password
+ * comes from the Relay package's `data` directory unless
+ * `DORMOUSE_STATE_DIR` says otherwise. Build first (`pnpm --filter relay
+ * build`) so `remote-lib-common` is compiled.
+ *
+ * It prints one pairing URL — the text a real Burrow would draw as a QR — and
+ * mints a fresh one whenever the previous invitation is spent, so a phone can
+ * pair repeatedly against it.
+ */
+
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { API_ROUTES, formatPairingInvitationUrl, generateNoiseKeyPair } from 'remote-lib-common';
+
+import { SetupPasswordStore } from '../dist/state.js';
+import { FakeBurrow } from '../test/harness/fake-burrow.mjs';
+
+const relayUrl = (process.argv[2] ?? 'http://localhost:3000').replace(/\/$/, '');
+const stateDir =
+  process.env.DORMOUSE_STATE_DIR ?? join(dirname(fileURLToPath(import.meta.url)), '..', 'data');
+
+const label = process.env.FAKE_BURROW_LABEL ?? 'Fake Burrow (script)';
+
+async function main() {
+  // The store the Relay writes through, so the record's shape and its
+  // validity rule are read from the product rather than mirrored here.
+  const stored = await new SetupPasswordStore(stateDir).load();
+  if (stored === null) {
+    throw new Error(`no setup password in ${stateDir} — start the Relay against it first`);
+  }
+  const { password } = stored;
+  const res = await fetch(`${relayUrl}${API_ROUTES.burrowEnroll}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ password }),
+  });
+  if (!res.ok) {
+    console.error(`enroll failed: ${res.status} ${await res.text()}`);
+    process.exit(1);
+  }
+  const burrow = await res.json();
+  console.log(`enrolled burrow ${burrow.burrowId} (origin ${burrow.origin}, rpId ${burrow.rpId})`);
+
+  const fakeBurrow = new FakeBurrow({
+    relayUrl,
+    burrowToken: burrow.burrowToken,
+    burrowId: burrow.burrowId,
+    origin: burrow.origin,
+    rpId: burrow.rpId,
+    label,
+    autoApprove: true,
+    requireUserVerification: burrow.requireUserVerification,
+    // Minted locally and never sent to the Relay, exactly as a real Burrow does.
+    noiseStaticKeyPair: await generateNoiseKeyPair(),
+  });
+
+  /** Mint a Relay setup token + a local invitation and print the code's URL. */
+  const showCode = async () => {
+    const minted = await fetch(`${relayUrl}${API_ROUTES.burrowSetupToken}`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${burrow.burrowToken}` },
+    });
+    if (!minted.ok) {
+      console.error(`setup-token mint failed: ${minted.status} ${await minted.text()}`);
+      return;
+    }
+    const { token, expiresAt } = await minted.json();
+    const invitation = await fakeBurrow.mintInvitation({ setupToken: token, expiresAt });
+    console.log(`\nsetup code (paste into Pocket):\n  ${formatPairingInvitationUrl(burrow.origin, invitation)}\n`);
+  };
+
+  fakeBurrow.on('open', () => console.log('burrow socket open — waiting for clients'));
+  fakeBurrow.on('pairing-request', ({ clientId, label: asked }) =>
+    console.log(`pairing ← ${clientId} label=${asked} (auto-approving)`),
+  );
+  fakeBurrow.on('paired', ({ clientId }) => console.log(`paired ✓ ${clientId}`));
+  fakeBurrow.on('denied', ({ clientId, code }) => console.log(`denied → ${clientId} ${code}`));
+  fakeBurrow.on('decision', ({ clientId, allowed, code }) =>
+    console.log(`decision → ${clientId} allowed=${allowed}${allowed ? '' : ` ${code}`}`),
+  );
+  fakeBurrow.on('msg', ({ clientId, request, response }) =>
+    console.log(`api ${clientId} ${request.method} → ok=${response.ok}`),
+  );
+  fakeBurrow.on('client-gone', ({ clientId }) => console.log(`client-gone ${clientId}`));
+  fakeBurrow.on('invitation', ({ inviteId, state }) => {
+    console.log(`invitation ${inviteId} → ${state}`);
+    // A spent code is no use to the next phone; show another.
+    if (state === 'consumed' || state === 'expired') void showCode();
+  });
+  fakeBurrow.on('close', (ev) => {
+    console.log(`burrow socket closed (${ev?.code ?? '?'}) — exiting`);
+    process.exit(0);
+  });
+
+  await fakeBurrow.ready;
+  await showCode();
+
+  process.on('SIGINT', () => {
+    console.log('\nshutting down');
+    fakeBurrow.close();
+    process.exit(0);
+  });
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

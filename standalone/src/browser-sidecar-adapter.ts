@@ -12,20 +12,20 @@ import type {
   PlatformAdapter,
   PtyDataDetail,
   PtyInfo,
-  RemoteHostLink,
+  BurrowLink,
 } from "dormouse-lib/lib/platform/types";
 import {
   answerAskCommand,
-  createRemoteHostLinkClient,
+  createBurrowLinkClient,
   notifyCommand,
 } from "dormouse-lib/host/remote/link-client";
 import {
-  REMOTE_HOST_ASK_EVENT,
-  REMOTE_HOST_EVENT_EVENT,
-  REMOTE_HOST_RESULT_EVENT,
-  type RemoteHostAsk,
-  type RemoteHostCommand,
-  type RemoteHostResult,
+  BURROW_ASK_EVENT,
+  BURROW_EVENT_EVENT,
+  BURROW_RESULT_EVENT,
+  type BurrowAsk,
+  type BurrowCommand,
+  type BurrowResult,
 } from "dormouse-lib/host/remote/service-protocol";
 import { embedderOrigins } from "dormouse-lib/lib/embedder-origins";
 import { AlertManager } from "dormouse-lib/lib/alert-manager";
@@ -67,14 +67,14 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   private alertManager = new AlertManager();
   private unlistenHost: (() => void) | null = null;
   // Remote-host bridge, identical in shape to TauriAdapter's — the dev harness
-  // forwards the same `remoteHost:*` messages over its own transport.
-  private readonly remoteHostClient = createRemoteHostLinkClient({
-    sendCommand: (command) => this.sendRemoteHostCommand(command),
-    answerAsk: (askId, results) => this.sendRemoteHostCommand(answerAskCommand(askId, results)),
-    notify: () => this.sendRemoteHostCommand(notifyCommand()),
+  // forwards the same `burrow:*` messages over its own transport.
+  private readonly burrowClient = createBurrowLinkClient({
+    sendCommand: (command) => this.sendBurrowCommand(command),
+    answerAsk: (askId, results) => this.sendBurrowCommand(answerAskCommand(askId, results)),
+    notify: () => this.sendBurrowCommand(notifyCommand()),
   });
 
-  readonly remoteHost: RemoteHostLink = this.remoteHostClient.link;
+  readonly burrow: BurrowLink = this.burrowClient.link;
 
   constructor(private readonly host: BrowserSidecarHost) {
     this.alertManager.onStateChange((id, state) => {
@@ -110,13 +110,13 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     this.alertManager.dispose();
     this.unlistenHost?.();
     this.unlistenHost = null;
-    this.remoteHostClient.dispose();
+    this.burrowClient.dispose();
     this.host.send("kill_sidecar_now");
     this.host.close();
   }
 
-  private sendRemoteHostCommand(command: RemoteHostCommand): void {
-    this.host.send("remote_host_command", { payload: command });
+  private sendBurrowCommand(command: BurrowCommand): void {
+    this.host.send("burrow_command", { payload: command });
   }
 
   async getAvailableShells(): Promise<{ name: string; path: string; args?: string[] }[]> {
@@ -322,13 +322,13 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
       const parsed = new TerminalProtocolParser(themeColorProvider).process(text);
       applyTerminalSemanticEventsByPtyId(id, collectTerminalSemanticEvents(parsed.events));
       for (const handler of this.replayHandlers) handler({ id, data: parsed.visibleData });
-    } else if (event === REMOTE_HOST_RESULT_EVENT) {
-      this.remoteHostClient.onResult(data as RemoteHostResult);
-    } else if (event === REMOTE_HOST_ASK_EVENT) {
-      const ask = data as RemoteHostAsk;
-      this.remoteHostClient.onAsk(ask.rhId, ask.op, ask.params);
-    } else if (event === REMOTE_HOST_EVENT_EVENT) {
-      this.remoteHostClient.onEvent(data);
+    } else if (event === BURROW_RESULT_EVENT) {
+      this.burrowClient.onResult(data as BurrowResult);
+    } else if (event === BURROW_ASK_EVENT) {
+      const ask = data as BurrowAsk;
+      this.burrowClient.onAsk(ask.burrowRequestId, ask.op, ask.params);
+    } else if (event === BURROW_EVENT_EVENT) {
+      this.burrowClient.onEvent(data);
     } else if (event === "dor:controlRequest") {
       const payload = data as DorControlRequestPayload;
       dispatchDorControlRequest(payload, (response) => {

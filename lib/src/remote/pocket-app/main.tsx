@@ -18,7 +18,7 @@ restorePocketTheme();
 // there — see `pair-link.ts`.
 const arrivedByCamera = takePairingHash();
 
-// One sweep of the markers the pre-end-to-end Hosts view kept. Boot, because it
+// One sweep of the markers the pre-end-to-end Burrows view kept. Boot, because it
 // is a one-time cleanup rather than anything a screen depends on.
 purgeLegacyPairedMarkers();
 

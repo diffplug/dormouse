@@ -58,7 +58,7 @@ describe('dor control-socket proof-domain mirrors', () => {
   }
 });
 
-// docs/specs/server.md -> "Remote control, in the Settings dialog". The Host
+// docs/specs/relay.md -> "Remote control, in the Settings dialog". The Burrow
 // reads the installer's enrollment offer from the path each installer writes it
 // to, and nothing links the two sides at build time — a drift is a one-click
 // enrollment that silently never appears. The whole path is followed, root and
@@ -119,7 +119,7 @@ describe('enrollment-offer path mirrors the installers', () => {
 // scripts/pairing-walkthrough/README.md -> Steps. The walkthrough drives the
 // built Pocket app from plain Node, so it cannot import either constant; a
 // drift is not a failed build but a run that stalls against a live Chrome and a
-// real Server, saying only that it never found the button.
+// real Relay, saying only that it never found the button.
 describe('the pairing walkthrough mirrors the copy it clicks', () => {
   const file = 'scripts/pairing-walkthrough/steps.mjs';
   const source = readRepoFile(file);
@@ -136,6 +136,30 @@ describe('the pairing walkthrough mirrors the copy it clicks', () => {
   it('finds the pairing report by the live region’s shipped accessible name', () => {
     const selector = extract(source, file, /^const PAIRING_OUTCOME_REGION = '([^']+)';$/m);
     expect(selector).toBe(`[role="status"][aria-label="${PAIRING_OUTCOME_LABEL}"]`);
+  });
+
+  // Not copy but a log line: the harness prints where the Burrow keeps its
+  // state and the walkthrough parses it back out. Rendered with a stand-in path
+  // rather than compared as text, so the two only have to agree on what the
+  // line looks like — the `[dev:standalone:ab]` prefix `log()` adds is free to
+  // change, and the capture group has to survive.
+  it('parses the state directory the harness actually logs', () => {
+    const harness = 'standalone/scripts/dev-agent-browser.mjs';
+    const template = extract(
+      readRepoFile(harness),
+      harness,
+      /^\s*log\(`([^`]*\$\{stateDir\})`\);$/m,
+    );
+    const prefix = extract(
+      readRepoFile(harness),
+      harness,
+      /^\s*console\.error\(`(.*)\$\{message\}`\);$/m,
+    );
+    const pattern = extract(source, file, /^const BURROW_STATE_DIR_LINE = \/(.+)\/;$/m);
+
+    const dir = '/tmp/dormouse-123-browser-state';
+    const logged = prefix + template.replace('${stateDir}', dir);
+    expect(logged.match(new RegExp(pattern))?.[1]).toBe(dir);
   });
 
   // The screens' structure says only that a ceremony ended or a code was

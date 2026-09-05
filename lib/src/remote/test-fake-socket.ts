@@ -1,9 +1,9 @@
 /**
  * The fake `WebSocket` both ends of the remote stack are tested against.
  *
- * Test-only, and shared on purpose: the Host controller, the Host service, and
+ * Test-only, and shared on purpose: the Burrow controller, the Burrow service, and
  * the Pocket client all speak {@link RemoteWebSocket} and all need the same four
- * things — record what was sent, deliver a server frame, open, and close with a
+ * things — record what was sent, deliver a Relay frame, open, and close with a
  * code. Three private copies drifted into three different ideas of what a close
  * does, which is exactly the behavior the close-code policy turns on.
  */
@@ -56,7 +56,7 @@ export class FakeSocket implements RemoteWebSocket {
     this.#emit('close', { code });
   }
 
-  /** The server or the network dropped the connection — no `close()` from us. */
+  /** The Relay or the network dropped the connection — no `close()` from us. */
   drop(): void {
     this.closeWith(1006);
   }

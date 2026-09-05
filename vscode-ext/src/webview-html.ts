@@ -65,8 +65,8 @@ export function getWebviewHtml(
     `img-src ${webview.cspSource} data: blob:`,
     // ws: entries cover the agent-browser stream relay (frames + input for
     // browser surfaces; see docs/specs/dor-browser.md). No relay origin here:
-    // the remote Host holds its `/ws/host` socket from the extension host, so
-    // the origin allowlist is enforced there instead (remote-host.ts).
+    // the Burrow holds its `/ws/burrow` socket from the extension host, so
+    // the origin allowlist is enforced there instead (burrow.ts).
     `connect-src ${webview.cspSource} ws://127.0.0.1:* ws://localhost:*`,
     // `dor iframe` frames its target through a loopback transparent proxy that
     // the extension host stands up (iframe-proxy-host.ts), so the only origin we

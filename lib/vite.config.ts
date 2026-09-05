@@ -20,7 +20,7 @@ export default defineConfig({
       // `boundedPushText` as its oracle, so a watch-mode run must compare
       // against the source, not whatever dist was last built (`pretest`
       // rebuilds it; a bare `vitest` does not).
-      "server-lib-common": path.resolve(import.meta.dirname, "../server-lib-common/src"),
+      "remote-lib-common": path.resolve(import.meta.dirname, "../remote-lib-common/src"),
     },
   },
 });

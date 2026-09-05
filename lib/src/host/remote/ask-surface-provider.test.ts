@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import type { DirectoryEntry } from '../../remote/host/host-surface-provider';
+import type { DirectoryEntry } from '../../remote/burrow/burrow-surface-provider';
 import { createAskSurfaceProvider } from './ask-surface-provider';
 
 const entry = (surfaceId: string, title: string): DirectoryEntry => ({

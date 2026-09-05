@@ -1,4 +1,4 @@
-import type { AlertStateDetail, OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, RemoteHostLink } from './types';
+import type { AlertStateDetail, OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, BurrowLink } from './types';
 import { AlertManager } from '../alert-manager';
 import type { AwaitHandle, AwaitOptions } from '../alert-manager';
 import type { AlertSettings } from '../alert-settings';
@@ -58,11 +58,11 @@ export class FakePtyAdapter implements PlatformAdapter {
   hostOwnsTheme?: boolean;
   hostOwnsShells?: boolean;
 
-  // Same reason, one layer up: a fake platform has no Host service behind it, so
+  // Same reason, one layer up: a fake platform has no Burrow service behind it, so
   // this stays undefined and the Settings dialog's Remote control section renders
-  // nothing (`docs/specs/server.md`). The preview decorator installs a stub link
+  // nothing (`docs/specs/relay.md`). The preview decorator installs a stub link
   // for the stories that are *about* that section.
-  remoteHost?: RemoteHostLink;
+  burrow?: BurrowLink;
 
   constructor() {
     this.alertManager.onStateChange((id, state) => {

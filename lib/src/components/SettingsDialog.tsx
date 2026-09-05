@@ -39,28 +39,28 @@ const SECTION = 'mt-4 border-t border-border pt-3';
 /**
  * The "Push will be sent to …" line. Every state names a cause, because a push
  * that silently goes nowhere is indistinguishable from one that is broken.
- * `no-host` covers two of those causes, which is why `remoteControlBelow` is a
+ * `no-burrow` covers two of those causes, which is why `remoteControlBelow` is a
  * separate argument — see the comment on that branch below.
  *
  * The list is deliberately scoped to *this* machine, not the account: the ACL
- * that authorizes these devices lives on the Host and never on the Server
+ * that authorizes these devices lives on the Burrow and never on the Relay
  * (`docs/specs/remote-security-model.md`), so there is no account-wide device
  * list to show and the copy must not imply one.
  */
 function describePushTargets(push: PushDevicesState, remoteControlBelow: boolean): string {
   if (push.status === 'loading') return 'Looking for phones…';
-  if (push.status === 'error') return 'Could not reach the server to list phones.';
+  if (push.status === 'error') return 'Could not reach the Relay to list phones.';
   // The preview never shows Remote control, so it also omits "below".
-  // `no-host` covers two builds: one whose Host service simply has not enrolled,
-  // and one with no Host service at all (`push-devices.ts` — the website leaves
+  // `no-burrow` covers two builds: one whose Burrow service simply has not enrolled,
+  // and one with no Burrow service at all (`push-devices.ts` — the website leaves
   // it here forever). Only the first has a Remote control section beneath this
   // line, because the second is exactly where that section renders nothing, so
   // "below" has to key on the same seam the section gates on rather than on
-  // `no-host`.
-  if (push.status === 'no-host') {
+  // `no-burrow`.
+  if (push.status === 'no-burrow') {
     return remoteControlBelow
-      ? 'Connect this machine to a Dormouse server below to send push.'
-      : 'Connect this machine to a Dormouse server to send push.';
+      ? 'Connect this machine to a Dormouse Relay below to send push.'
+      : 'Connect this machine to a Dormouse Relay to send push.';
   }
   // Reached both before anything is paired and right after a pairing, so it
   // must read as true in each: not "nothing is paired" (the phone may well be
@@ -99,12 +99,12 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const onShellOpenChange = useCallback((open: boolean) => setOpenMenu(open ? 'shell' : null), []);
 
   // VS Code owns the theme and has its own picker, so Dormouse offers none
-  // there. Every other host sets its theme here rather than in host chrome.
+  // there. Every other burrow sets its theme here rather than in burrow chrome.
   const showTheme = !getPlatform().hostOwnsTheme;
 
   // Same for the shell, plus: with nothing to switch between there is nothing
   // to offer. That also covers every host whose adapter detects no shells and
-  // every host that never seeds the store (fake = 1, remote = 0).
+  // every burrow that never seeds the store (fake = 1, remote = 0).
   const showShell = !getPlatform().hostOwnsShells && shellState.shells.length >= 2;
 
   return (
@@ -196,8 +196,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
       <AlarmSettingsSection sink="push" />
 
       {/* Last, and directly under the push section that points at it: push is
-          the feature that makes a reader care, and "no Host" is the reason it
-          has nowhere to go. Renders nothing on a build with no Host service. */}
+          the feature that makes a reader care, and "no Burrow" is the reason it
+          has nowhere to go. Renders nothing on a build with no Burrow service. */}
       <RemoteControlSection />
     </ModalFrame>
   );
@@ -209,7 +209,7 @@ export type AlarmSink = 'speech' | 'push';
 export function AlarmSettingsSection({ sink, preview = false }: { sink: AlarmSink; preview?: boolean }) {
   const settings = useSyncExternalStore(subscribeToAlertSettings, getAlertSettings);
   const push = useSyncExternalStore(subscribeToPushDevices, getPushDevices);
-  const hasHostService = getPlatform().remoteHost !== undefined;
+  const hasBurrowService = getPlatform().burrow !== undefined;
 
   // The brief preview uses the cached list: refreshing immediately publishes
   // loading, and the bridge reply may arrive after the preview has faded away.
@@ -244,7 +244,7 @@ export function AlarmSettingsSection({ sink, preview = false }: { sink: AlarmSin
       onCommitDelay={(pushDelayMs) => updateAlertSettings({ pushDelayMs })}
       action={preview ? null : <PushTestButton />}
     >
-      {describePushTargets(push, hasHostService && !preview)}
+      {describePushTargets(push, hasBurrowService && !preview)}
     </AlarmSinkSection>
   );
 }

@@ -128,9 +128,9 @@ importers:
       react-dom:
         specifier: ^19.2.6
         version: 19.2.8(react@19.2.8)
-      server-lib-common:
+      remote-lib-common:
         specifier: workspace:*
-        version: link:../server-lib-common
+        version: link:../remote-lib-common
       tailwind-merge:
         specifier: ^3.6.0
         version: 3.6.0
@@ -187,7 +187,7 @@ importers:
         specifier: ^4.1.6
         version: 4.1.11(@types/node@24.13.3)(jsdom@29.1.1)(vite@8.2.2(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0))
 
-  server:
+  relay:
     dependencies:
       '@hono/node-server':
         specifier: ^2.0.0
@@ -198,9 +198,9 @@ importers:
       hono:
         specifier: ^4.6.0
         version: 4.13.5
-      server-lib-common:
+      remote-lib-common:
         specifier: workspace:*
-        version: link:../server-lib-common
+        version: link:../remote-lib-common
       web-push:
         specifier: ^3.6.7
         version: 3.6.7(supports-color@7.2.0)
@@ -215,7 +215,7 @@ importers:
         specifier: ^6.0.3
         version: 6.0.3
 
-  server-lib-common:
+  remote-lib-common:
     dependencies:
       '@noble/ciphers':
         specifier: 2.4.0

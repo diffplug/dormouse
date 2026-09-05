@@ -1,13 +1,13 @@
-// The one definition of where a Host may reach a relay server, shared by both
-// Hosts' build scripts.
+// The one definition of where a Burrow may reach a Relay, shared by both
+// Burrows' build scripts.
 //
-// Both Hosts now run outside any webview — standalone's in the sidecar, VS
+// Both Burrows now run outside any webview — standalone's in the sidecar, VS
 // Code's in the extension host — so neither is fenced by a CSP and both bake
 // this list into their bundle instead (`standalone/scripts/build-sidecar-proxy.mjs`,
 // `vscode-ext/scripts/esbuild.mjs`), where the service refuses any origin
 // outside it. The *fact* is one fact — duplicating it meant a change to the
-// SaaS origin could ship one Host pointed at the old one. See
-// docs/specs/server.md → "Where a Host may reach a relay server".
+// SaaS origin could ship one Burrow pointed at the old one. See
+// docs/specs/relay.md → "Where a Burrow may reach a Relay".
 
 import { readFileSync } from 'node:fs';
 
@@ -51,7 +51,7 @@ export function resolveRemoteConnectSrc(env = process.env, label = 'build') {
   for (const source of override.split(/\s+/)) {
     if (!source || isSupportedSource(source)) continue;
     throw new Error(
-      `[${label}] DORMOUSE_REMOTE_CONNECT_SRC: "${source}" is not a source the remote Host can ` +
+      `[${label}] DORMOUSE_REMOTE_CONNECT_SRC: "${source}" is not a source the Burrow can ` +
         'match. Each entry must use http, https, ws, or wss with a host and an optional ' +
         ':port (1–65535) or :* — no trailing slash or path ' +
         `(e.g. "${DEFAULT_REMOTE_CONNECT_SRC}").`,
@@ -65,10 +65,10 @@ export function resolveRemoteConnectSrc(env = process.env, label = 'build') {
  * Fail the build if the `define` did not reach `bundlePath`.
  *
  * The source reads the placeholder as a `declare const`, so a lost define
- * compiles fine and only shows up at runtime — as a Host that silently uses the
+ * compiles fine and only shows up at runtime — as a Burrow that silently uses the
  * shipped default allowlist instead of the selfhoster's origins. Both bundles
  * bake the same variable, so both fail on the same class of drift: someone
- * re-inlines the esbuild call, or adds an entry point that pulls in the Host
+ * re-inlines the esbuild call, or adds an entry point that pulls in the Burrow
  * without the define.
  */
 export function assertConnectSrcBaked(bundlePath, remoteSrc) {
@@ -76,7 +76,7 @@ export function assertConnectSrcBaked(bundlePath, remoteSrc) {
   if (bundle.includes(CONNECT_SRC_PLACEHOLDER)) {
     throw new Error(
       `connect-src: ${CONNECT_SRC_PLACEHOLDER} survived into ${bundlePath} — the esbuild define ` +
-        'did not apply, and the remote Host would use the built-in default sources.',
+        'did not apply, and the Burrow would use the built-in default sources.',
     );
   }
   if (!bundle.includes(remoteSrc)) {

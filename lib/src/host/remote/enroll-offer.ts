@@ -1,17 +1,17 @@
 /**
- * The enrollment offer a Dormouse Server installer left on *this* machine, read
- * from the Node side of a Host so the Settings dialog can offer one-click
- * enrollment (`docs/specs/server.md` → "Remote control, in the Settings
+ * The enrollment offer a Dormouse Relay installer left on *this* machine, read
+ * from the Node side of a Burrow so the Settings dialog can offer one-click
+ * enrollment (`docs/specs/relay.md` → "Remote control, in the Settings
  * dialog").
  *
- * The file is the installer's `run/enroll-offer.json` — the same one the Server
+ * The file is the installer's `run/enroll-offer.json` — the same one the Relay
  * redeems through `DORMOUSE_ENROLL_TOKEN_FILE`, shape and guard shared in
- * `server-lib-common/src/remote/enroll-offer.ts`. There is no handshake between
+ * `remote-lib-common/src/remote/enroll-offer.ts`. There is no handshake between
  * the two processes: both simply know where the installer puts it.
  *
- * Freshness is shared with the Server. This process reads the file from the
+ * Freshness is shared with the Relay. This process reads the file from the
  * same machine that stamped it, so an expired offer disappears from Settings
- * instead of leading with a button the Server can only reject.
+ * instead of leading with a button the Relay can only reject.
  */
 
 import { readFile } from 'node:fs/promises';
@@ -21,7 +21,7 @@ import {
   isEnrollmentOfferFresh,
   parseEnrollmentOffer,
   type EnrollmentOffer,
-} from 'server-lib-common';
+} from 'remote-lib-common';
 
 export type { EnrollmentOffer };
 
@@ -46,22 +46,22 @@ export function enrollmentOfferPath(
 ): string | null {
   switch (platform) {
     case 'darwin':
-      return join(home, 'Library', 'Application Support', 'Dormouse Server', OFFER_FILE);
+      return join(home, 'Library', 'Application Support', 'Dormouse Relay', OFFER_FILE);
     case 'win32':
       // No `%LOCALAPPDATA%` is not a path to guess at: the installer joins onto
       // that variable, so without it this machine's install root is unknown.
-      return env.LOCALAPPDATA ? join(env.LOCALAPPDATA, 'Dormouse Server', OFFER_FILE) : null;
+      return env.LOCALAPPDATA ? join(env.LOCALAPPDATA, 'Dormouse Relay', OFFER_FILE) : null;
     default:
       // `||` and not `??`, matching the installers' `${XDG_DATA_HOME:-…}`: an
       // empty value is unset, not a root at the filesystem's top.
-      return join(env.XDG_DATA_HOME || join(home, '.local', 'share'), 'dormouse-server', OFFER_FILE);
+      return join(env.XDG_DATA_HOME || join(home, '.local', 'share'), 'dormouse-relay', OFFER_FILE);
   }
 }
 
 /**
  * The offer on this machine, or `null` — silently, for every failure including
- * the ENOENT that is the *normal* answer: most machines run no server, and a
- * Host that logged about a missing file would log it on every status read.
+ * the ENOENT that is the *normal* answer: most machines run no Relay, and a
+ * Burrow that logged about a missing file would log it on every status read.
  *
  * **Never rejects.** Both call sites are status paths that have no better
  * answer than "no offer" for a failed read, so callers may await it bare rather
@@ -69,7 +69,7 @@ export function enrollmentOfferPath(
  * null for every failure" in `enroll-offer.test.ts`.
  *
  * Resolves the path per call rather than caching it, because the answer changes
- * under a running Host: the installer mints an offer, and redeeming one unlinks
+ * under a running Burrow: the installer mints an offer, and redeeming one unlinks
  * the file.
  */
 export async function readEnrollmentOffer(

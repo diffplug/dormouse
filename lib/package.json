@@ -7,11 +7,11 @@
   "scripts": {
     "dev": "vite",
     "dev:pocket": "vite --config vite.pocket.config.ts",
-    "prebuild": "pnpm --filter dor-lib-common build && pnpm --filter server-lib-common build",
+    "prebuild": "pnpm --filter dor-lib-common build && pnpm --filter remote-lib-common build",
     "build": "tsc -b && vite build",
     "build:pocket": "vite build --config vite.pocket.config.ts && vite build --config vite.sw.config.ts && node scripts/assert-pocket-worker.mjs",
     "preview": "vite preview",
-    "pretest": "pnpm --filter dor-lib-common build && pnpm --filter server-lib-common build",
+    "pretest": "pnpm --filter dor-lib-common build && pnpm --filter remote-lib-common build",
     "test": "pnpm typecheck && vitest run",
     "test:watch": "vitest",
     "storybook": "storybook dev -p 6006 --no-open --ci",
@@ -33,7 +33,7 @@
     "jsonc-parser": "3.3.1",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
-    "server-lib-common": "workspace:*",
+    "remote-lib-common": "workspace:*",
     "tailwind-merge": "^3.6.0",
     "tailwind-variants": "^3.2.2",
     "uqr": "^0.1.3"

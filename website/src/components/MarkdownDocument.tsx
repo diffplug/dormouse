@@ -58,7 +58,7 @@ function isExternal(href: string): boolean {
 /**
  * An inline code span, wrappable at the separators inside it.
  *
- * A path like `~/Library/LaunchAgents/sh.dormouse.server.plist` is one
+ * A path like `~/Library/LaunchAgents/sh.dormouse.relay.plist` is one
  * unbreakable word to the line breaker, so on a phone it pushed the whole page
  * wider than the viewport — the article scrolled sideways, not just the token.
  *

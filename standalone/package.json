@@ -7,11 +7,11 @@
   "scripts": {
     "dev": "vite",
     "dev:agent-browser": "pnpm run stage && node scripts/dev-agent-browser.mjs",
-    "prebuild": "pnpm --filter server-lib-common build",
+    "prebuild": "pnpm --filter remote-lib-common build",
     "build": "pnpm run stage && tsc -b && vite build",
     "stage": "pnpm run stage:dor-cli && pnpm run stage:sidecar-proxy",
     "stage:dor-cli": "pnpm --filter dor build && node scripts/stage-dor-cli.mjs",
-    "stage:sidecar-proxy": "pnpm --filter server-lib-common build && node scripts/build-sidecar-proxy.mjs",
+    "stage:sidecar-proxy": "pnpm --filter remote-lib-common build && node scripts/build-sidecar-proxy.mjs",
     "tauri": "pnpm run stage && node scripts/tauri.mjs",
     "test": "vitest run && node --test scripts/*.test.mjs"
   },

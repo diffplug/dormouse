@@ -1,7 +1,7 @@
 /**
  * The in-window fan-out: one question to every webview of this window, settled
  * as soon as they have all answered. The cross-window tier is `peer-link`'s; the
- * Host service that asks is `remote-host`'s. Both are stubbed here so what is
+ * Burrow service that asks is `burrow`'s. Both are stubbed here so what is
  * left is the accounting — who has answered, and what a late or duplicate answer
  * does to a snapshot that was already handed to the phone.
  */
@@ -26,14 +26,14 @@ vi.mock('../src/peer-link', () => ({
   remoteNotifyPeerChange: () => {},
 }));
 
-vi.mock('../src/remote-host', () => ({
-  configureRemoteHost: () => {},
+vi.mock('../src/burrow', () => ({
+  configureBurrow: () => {},
   deliverCommandResult: () => {},
   deliverUiEvent: () => {},
   dropForwardedCommands: () => {},
   greetPeerWindow: () => {},
   handleForwardedCommand: () => {},
-  handleRemoteHostCommand: () => {},
+  handleBurrowCommand: () => {},
   notifyDirectoryChanged: () => {
     wiring.invalidations += 1;
   },
@@ -106,7 +106,7 @@ describe('webview fan-out', () => {
   });
 
   it('marks the directory stale when an answer arrives after its request settled', async () => {
-    // The budget expired and the Host already rendered a snapshot without this
+    // The budget expired and the Burrow already rendered a snapshot without this
     // webview's panes. Nothing re-opens a settled request, so the repair has to
     // be the next collect — and an idle machine has no other reason to run one.
     const webview = fakeWebview();

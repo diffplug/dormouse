@@ -26,11 +26,11 @@ Three optional members are plain booleans, not methods:
 
 ### Standalone browser-dev harness
 
-Source of truth: `standalone/scripts/dev-agent-browser.mjs`, `standalone/scripts/dev-host-guard.mjs`, `standalone/src/browser-sidecar-host.ts`, `standalone/src/browser-sidecar-adapter.ts`.
-
 `pnpm dev:standalone:ab` starts the standalone sidecar directly, a localhost-only HTTP bridge, and Vite with `VITE_DORMOUSE_BROWSER_DEV_HOST`, then opens the app URL in an `agent-browser` session. The browser build uses `BrowserSidecarAdapter` instead of `TauriAdapter` whenever that env var is present.
 
-The bridge is a transport shim over the same sidecar protocol, not a second PTY implementation: fire-and-forget commands `POST /__dormouse_dev_host/send`, request/response commands `POST /__dormouse_dev_host/invoke`, host→webview events as SSE on `GET /__dormouse_dev_host/events`, and browser console output mirrored to `POST /__dormouse_dev_host/console` so one terminal shows sidecar, Vite, and in-browser logs together. The remote Host rides it too, on the message names below ("Message protocol"), so the harness runs a real Host against a per-run temp state directory (`docs/specs/standalone.md` → "Remote Host service").
+The bridge is a transport shim over the same sidecar protocol, not a second PTY implementation: fire-and-forget commands `POST /__dormouse_dev_host/send`, request/response commands `POST /__dormouse_dev_host/invoke`, host→webview events as SSE on `GET /__dormouse_dev_host/events`, and browser console output mirrored to `POST /__dormouse_dev_host/console` so one terminal shows sidecar, Vite, and in-browser logs together. The Burrow rides it too, on the message names below ("Message protocol"), so the harness runs a real Burrow against a per-run temp state directory (`docs/specs/standalone.md` → "Burrow service").
+
+**The harness must keep logging the Burrow state directory in a form the pairing walkthrough parses**, which is how the walkthrough records that path before enrollment; pinned by `lib/src/lib/mirrored-constants.test.ts`.
 
 **The bridge is authenticated, and loopback is not what makes it safe** — it dispatches `pty_spawn` with caller-supplied `shell`, `args`, `cwd` and `env`, so reaching it is arbitrary command execution as the developer (rationale). Four rules, enforced in `dev-host-guard.mjs` **before routing and before any body read**:
 
@@ -41,7 +41,9 @@ The bridge is a transport shim over the same sidecar protocol, not a second PTY 
 
 **An unauthorized caller gets the same `404 not found` as an unknown path**, so the port does not identify itself. The harness prints the token and a ready-made `curl` on startup.
 
-The harness **may omit** native-only desktop chrome (window controls, update checks) but **must preserve** every `PlatformAdapter` contract the app uses — PTY, control-request, clipboard, iframe-proxy, remote-Host, agent-browser. It **must mirror** standalone's Session-persistence answer ("The governing rule"): the same `PERSIST_SESSION = false` gate as `TauriAdapter`, `persistsSession: false`, and any pre-gate `localStorage` blob deleted on `init()` (rationale). **Tauri APIs must not be required at static module-evaluation time** when `VITE_DORMOUSE_BROWSER_DEV_HOST` is set — a normal browser loads the page, not the Tauri WebView.
+The harness **may omit** native-only desktop chrome (window controls, update checks) but **must preserve** every `PlatformAdapter` contract the app uses — PTY, control-request, clipboard, iframe-proxy, Burrow, agent-browser. It **must mirror** standalone's Session-persistence answer ("The governing rule"): the same `PERSIST_SESSION = false` gate as `TauriAdapter`, `persistsSession: false`, and any pre-gate `localStorage` blob deleted on `init()` (rationale). **Tauri APIs must not be required at static module-evaluation time** when `VITE_DORMOUSE_BROWSER_DEV_HOST` is set — a normal browser loads the page, not the Tauri WebView.
+
+Source of truth: `standalone/scripts/dev-agent-browser.mjs`, `standalone/scripts/dev-host-guard.mjs`, `standalone/src/browser-sidecar-host.ts`, `standalone/src/browser-sidecar-adapter.ts`; `stepBurrow` in `scripts/pairing-walkthrough/steps.mjs`.
 
 ## PTY lifecycle
 
@@ -99,19 +101,19 @@ Source of truth: the message schema in `vscode-ext/src/message-types.ts` (`Webvi
 
 **`dormouse:runWorkbenchCommand` (webview → host) is allowlisted** against `lib/src/lib/vscode-keybindings.ts` before `vscode.commands.executeCommand`; generic command execution over the webview boundary is not allowed.
 
-**Reaching the remote Host is one optional adapter member.** `remoteHost?: RemoteHostLink` is present exactly when a PTY-owning process sits behind the webview — standalone's sidecar, VS Code's extension host — and absent on the website. Its four calls are `command`, `respond`, `notify` (argless — the directory is the only thing a peer answers), and `on`. The webview half is `lib/src/host/remote/link-client.ts`, shared by all three adapters so no host settles a command differently: command correlation, a 15 s timeout, and the rule that **an ask is always answered even when nothing matches**. Both ends compile against `lib/src/host/remote/service-protocol.ts`. **Nothing crossing this seam carries authority** (`docs/specs/remote-security-model.md`).
+**Reaching the Burrow is one optional adapter member.** `burrow?: BurrowLink` is present exactly when a PTY-owning process sits behind the webview — standalone's sidecar, VS Code's extension host — and absent on the website. Its four calls are `command`, `respond`, `notify` (argless — the directory is the only thing a peer answers), and `on`. The webview half is `lib/src/host/remote/link-client.ts`, shared by all three adapters so no host settles a command differently: command correlation, a 15 s timeout, and the rule that **an ask is always answered even when nothing matches**. Both ends compile against `lib/src/host/remote/service-protocol.ts`. **Nothing crossing this seam carries authority** (`docs/specs/remote-security-model.md`).
 
 Each host maps those calls onto its own transport:
 
 | Host | command out | result / event in | ask in | answer / notify out |
 | --- | --- | --- | --- | --- |
-| VS Code | `remoteHost:command { payload }` | `remoteHost:result { payload }`, `remoteHost:event { payload }` (both broadcast to every webview in the window) | `peer:ask { requestId, op, params }` | `peer:answer { requestId, results }`, `peer:notify` |
-| Standalone (Tauri + browser-dev harness) | `remote_host_command(payload)` → sidecar stdin `remoteHost:command` | sidecar stdout `remoteHost:result` / `remoteHost:event` | sidecar stdout `remoteHost:ask { rhId, op, params }` | the same command channel, as `cmd: 'answer' \| 'notify'` |
+| VS Code | `burrow:command { payload }` | `burrow:result { payload }`, `burrow:event { payload }` (both broadcast to every webview in the window) | `peer:ask { requestId, op, params }` | `peer:answer { requestId, results }`, `peer:notify` |
+| Standalone (Tauri + browser-dev harness) | `burrow_command(payload)` → sidecar stdin `burrow:command` | sidecar stdout `burrow:result` / `burrow:event` | sidecar stdout `burrow:ask { burrowRequestId, op, params }` | the same command channel, as `cmd: 'answer' \| 'notify'` |
 
 Two rules the table encodes:
 
-- **VS Code broadcasts results**, safe because an `rhId` carries a per-adapter random tag and is globally unique, so only the adapter that asked can settle one (rationale; `docs/specs/vscode.md` → "Peer surfaces across windows").
-- **Standalone's correlation field is `rhId`, never `requestId`** — Rust swallows any sidecar line whose `data.requestId` matches a pending invoke (`docs/specs/standalone.md` → "Remote Host service").
+- **VS Code broadcasts results**, safe because a `burrowRequestId` carries a per-adapter random tag and is globally unique, so only the adapter that asked can settle one (rationale; `docs/specs/vscode.md` → "Peer surfaces across windows").
+- **Standalone's correlation field is `burrowRequestId`, never `requestId`** — Rust swallows any sidecar line whose `data.requestId` matches a pending invoke (`docs/specs/standalone.md` → "Burrow service").
 
 **Workspace union status adds no message** (`docs/specs/alert.md`): standalone computes it in-webview, VS Code from the module-level `AlertManager` filtered to each router's `ownedPtyIds` — so the host sees every PTY's alert state but no browser-surface TODO (that webview→host Surface-state message is staged, `docs/specs/vscode.md` `## Future`).
 
