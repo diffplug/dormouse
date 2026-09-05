@@ -3,14 +3,15 @@ import { useNavigate } from "react-router";
 import {
   DESKTOP_PLAYGROUND_PATH,
   POCKET_PLAYGROUND_PATH,
-  usePreferredPlayground,
+  getPreferredPlayground,
 } from "../lib/playground-routing";
 
 export default function PlaygroundRedirect() {
   const navigate = useNavigate();
-  const preferred = usePreferredPlayground();
 
   useEffect(() => {
+    // Routing reads the browser directly, never the hydration fallback.
+    const preferred = getPreferredPlayground();
     navigate(
       {
         pathname: preferred === "pocket"
@@ -21,7 +22,7 @@ export default function PlaygroundRedirect() {
       },
       { replace: true },
     );
-  }, [navigate, preferred]);
+  }, [navigate]);
 
   return (
     <main className="fixed inset-0 bg-[var(--color-bg)] text-[var(--color-text)]" />

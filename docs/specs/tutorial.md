@@ -9,6 +9,8 @@ Canonical device-specific routes (`website/src/routes.ts`):
 - **`/playground/pocket`** — mobile Pocket playground; on desktop, the temporary Pocket marketing/share page (phone preview + notify form).
 - **`/pocket`** — temporary redirect to `/playground/pocket`. **Keep the real tethering surface off the playground URL.**
 
+**Must hydrate device-dependent pages with their desktop prerender, then reconcile browser media.** **Must dispatch using actual browser media, never the hydration fallback.** Pinned by `Pocket playground hydration` and `playground dispatcher` in `website/src/pages/Playground.test.tsx`.
+
 ## Profiles
 
 Two `tut` profiles in `website/src/lib/tut-items.ts`, each opening directly inside its `initialSectionId`:
