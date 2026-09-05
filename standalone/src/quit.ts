@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { countRunningSessions } from "dormouse-lib/lib/terminal-registry";
 import { archiveSurfaceNotes } from "dormouse-lib/lib/notepad/close-coordinator";
-import { getNotepadSnapshot, removeSurface } from "dormouse-lib/lib/notepad/notepad-store";
+import { notepadSurfaceIds, removeSurface } from "dormouse-lib/lib/notepad/notepad-store";
 import type { TauriAdapter } from "./tauri-adapter";
 import { openQuitArchiveFailure } from "./quit-confirm-store";
 import { hasPendingUpdate, installPendingUpdate } from "./updater";
@@ -74,7 +74,7 @@ const ARCHIVE_GATE_MS = 3000;
  * bound — the caller turns that into Cancel / Quit anyway.
  */
 export async function archiveNotesBeforeQuit(): Promise<void> {
-  const ids = [...getNotepadSnapshot().keys()];
+  const ids = notepadSurfaceIds();
   if (ids.length === 0) return;
   // The deadline only stops us *waiting*; the archive itself keeps running and
   // may still succeed. The signal is what stops it emptying every notepad
@@ -113,7 +113,7 @@ async function archiveThenTeardown(): Promise<void> {
         // Quit anyway: the user accepts losing these notes, so forget them and
         // take the teardown that no longer has anything to archive — watchdog
         // still armed, because nothing cancelled the pending quit.
-        for (const id of [...getNotepadSnapshot().keys()]) removeSurface(id);
+        for (const id of notepadSurfaceIds()) removeSurface(id);
         void runQuitTeardown();
       },
       // Cancel is the one branch that drops the pending quit in Rust.

@@ -407,6 +407,15 @@ describe('archiveSurfaceNotes', () => {
       });
     });
 
+    it('archives notes when a fallback CWD lookup throws synchronously', async () => {
+      installMetaResolver();
+      addPlainNote('s1', 'keep this');
+      vi.spyOn(adapter, 'getCwd').mockImplementation(() => { throw new Error('PTY unavailable'); });
+      await archiveSurfaceNotes(['s1']);
+      expect((await stored()).batches[0].notes[0].content).toEqual({ kind: 'plain', text: 'keep this' });
+      expect(getNotes('s1')).toEqual([]);
+    });
+
     it('never overrides a CWD the shell integration reported, and does not ask', async () => {
       installMetaResolver();
       ensureTerminalPaneState('s1', { cwd: CWD });

@@ -436,12 +436,16 @@ function archivePort(): NotepadArchivePort | undefined {
   return getPlatformOrNull()?.notepadArchive;
 }
 
+/** Surfaces whose next closure must append notes or replace a possibly landed batch. */
+export function notepadSurfaceIds(): string[] {
+  return [...new Set([...notesBySurface.keys(), ...pendingBatchIdBySurface.keys()])];
+}
+
 /** Everything a close would archive for every Surface holding notes, minus the
  *  markers (`toArchivedNote` strips them). */
 export function buildVolatileSnapshot(): VolatileNotepadSnapshot {
   const surfaces: VolatileSurfaceNotes[] = [];
-  const ids = new Set([...notesBySurface.keys(), ...pendingBatchIdBySurface.keys()]);
-  for (const surfaceId of ids) {
+  for (const surfaceId of notepadSurfaceIds()) {
     const notes = getNotes(surfaceId);
     const pendingBatchId = pendingBatchIdBySurface.get(surfaceId);
     const meta = getNotepadSurfaceMeta(surfaceId);
@@ -450,8 +454,8 @@ export function buildVolatileSnapshot(): VolatileNotepadSnapshot {
       surfaceTitle: meta?.surfaceTitle ?? '',
       surfaceKind: meta?.surfaceKind ?? 'terminal',
       cwd: meta?.cwd ?? null,
-      // Only a terminal Surface has a PTY to ask about, and the host answers
-      // for the Session id rather than the Surface id
+      // Only a terminal Surface has a PTY to ask about; its Surface id is
+      // also its PTY id, so the mirror carries it straight through
       // (docs/specs/notepad.md → "VS Code lifecycle").
       ...(meta && hasTerminal(meta.surfaceKind)
         ? { terminalId: surfaceId }

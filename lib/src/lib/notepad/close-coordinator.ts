@@ -46,7 +46,7 @@ async function refreshProcessCwds(surfaceIds: readonly string[]): Promise<void> 
     return !!meta && hasTerminal(meta.surfaceKind) && processCwdMayReplace(meta.cwd?.source);
   });
   const paths = await settleAllWithin(
-    asking.map((surfaceId) => platform.getCwd(surfaceId)),
+    asking.map(async (surfaceId) => platform.getCwd(surfaceId)),
     PROCESS_CWD_REFRESH_MS,
     null,
   );

@@ -249,7 +249,7 @@ export function snapshotForLiveResume(liveSurfaceIds: Iterable<string>): Volatil
   return { surfaces, stagedDeletions: EMPTY_STAGED };
 }
 
-/** Deletions are archive-wide, so a resume inherits every staged set behind it. */
+/** Deletions are archive-wide, so deactivate commits every router's staged set as one. */
 function mergeStaged(routerIds: readonly string[]): StagedDeletions {
   const deleteBatchIds = new Set<string>();
   const deleteNotes = new Map<string, { batchId: string; noteId: string }>();

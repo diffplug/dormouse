@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
   hasPendingUpdate: vi.fn(() => false),
   installPendingUpdate: vi.fn(async () => {}),
   archiveSurfaceNotes: vi.fn(async (_ids: readonly string[], _opts?: { signal?: AbortSignal }) => {}),
-  getNotepadSnapshot: vi.fn(() => new Map<string, unknown[]>()),
+  notepadSurfaceIds: vi.fn(() => [] as string[]),
   removeSurface: vi.fn(),
 }));
 
@@ -30,7 +30,7 @@ vi.mock("dormouse-lib/lib/notepad/close-coordinator", () => ({
   archiveSurfaceNotes: mocks.archiveSurfaceNotes,
 }));
 vi.mock("dormouse-lib/lib/notepad/notepad-store", () => ({
-  getNotepadSnapshot: mocks.getNotepadSnapshot,
+  notepadSurfaceIds: mocks.notepadSurfaceIds,
   removeSurface: mocks.removeSurface,
 }));
 vi.mock("./updater", () => ({
@@ -49,8 +49,8 @@ import {
   _resetQuitConfirmForTesting,
 } from "./quit-confirm-store";
 
-/** One Surface holding notes, as `getNotepadSnapshot` reports it. */
-const oneNotedSurface = () => new Map<string, unknown[]>([["pane-a", [{ id: "n1" }]]]);
+/** One Surface holding notes, as `notepadSurfaceIds` reports it. */
+const oneNotedSurface = () => ["pane-a"];
 
 // The captured `dormouse://quit-requested` listener; call it to simulate Rust
 // emitting a quit request.
@@ -97,7 +97,7 @@ describe("quit orchestrator", () => {
     mocks.installPendingUpdate.mockResolvedValue(undefined);
     mocks.invoke.mockResolvedValue(undefined);
     mocks.archiveSurfaceNotes.mockResolvedValue(undefined);
-    mocks.getNotepadSnapshot.mockReturnValue(new Map());
+    mocks.notepadSurfaceIds.mockReturnValue([]);
   });
 
   afterEach(() => setQuitConfirmGate(null));
@@ -251,7 +251,7 @@ describe("quit orchestrator", () => {
   // --- The notepad archive gate (docs/specs/notepad.md → "Standalone quit") ---
 
   it("archives every Surface holding notes before the first quit_progress", async () => {
-    mocks.getNotepadSnapshot.mockReturnValue(oneNotedSurface());
+    mocks.notepadSurfaceIds.mockReturnValue(oneNotedSurface());
     const order: string[] = [];
     mocks.invoke.mockImplementation(async (cmd: string) => {
       order.push(cmd);
@@ -279,7 +279,7 @@ describe("quit orchestrator", () => {
 
   it("runs the gate after the running-work confirmation, not before it", async () => {
     mocks.countRunningSessions.mockReturnValue(2);
-    mocks.getNotepadSnapshot.mockReturnValue(oneNotedSurface());
+    mocks.notepadSurfaceIds.mockReturnValue(oneNotedSurface());
     const gate = vi.fn(); // never decides
     setQuitConfirmGate(gate);
 
@@ -293,7 +293,7 @@ describe("quit orchestrator", () => {
     // `quit_cancel` retires Rust's watchdog. Calling it here would leave a later
     // "Quit anyway" tearing down unwatched, so the pending quit stays in its
     // unbounded phase-2 wait — which is what waits on a human.
-    mocks.getNotepadSnapshot.mockReturnValue(oneNotedSurface());
+    mocks.notepadSurfaceIds.mockReturnValue(oneNotedSurface());
     mocks.archiveSurfaceNotes.mockRejectedValue(new Error("disk is full"));
     const adapter = fakeAdapter();
 
@@ -308,7 +308,7 @@ describe("quit orchestrator", () => {
   });
 
   it("deduplicates a repeat quit trigger while the archive-failed dialog is up", async () => {
-    mocks.getNotepadSnapshot.mockReturnValue(oneNotedSurface());
+    mocks.notepadSurfaceIds.mockReturnValue(oneNotedSurface());
     mocks.archiveSurfaceNotes.mockRejectedValue(new Error("disk is full"));
     await triggerQuit(fakeAdapter());
     mocks.archiveSurfaceNotes.mockClear();
@@ -322,7 +322,7 @@ describe("quit orchestrator", () => {
   });
 
   it("Quit anyway discards the notes and runs the teardown", async () => {
-    mocks.getNotepadSnapshot.mockReturnValue(oneNotedSurface());
+    mocks.notepadSurfaceIds.mockReturnValue(oneNotedSurface());
     mocks.archiveSurfaceNotes.mockRejectedValue(new Error("disk is full"));
     const adapter = fakeAdapter();
     await triggerQuit(adapter);
@@ -339,7 +339,7 @@ describe("quit orchestrator", () => {
   });
 
   it("Cancel leaves the app running and lets a later quit start fresh", async () => {
-    mocks.getNotepadSnapshot.mockReturnValue(oneNotedSurface());
+    mocks.notepadSurfaceIds.mockReturnValue(oneNotedSurface());
     mocks.archiveSurfaceNotes.mockRejectedValue(new Error("disk is full"));
     const adapter = fakeAdapter();
     await triggerQuit(adapter);
@@ -361,7 +361,7 @@ describe("quit orchestrator", () => {
   it("treats an archive that outruns its 3s bound as a failure", async () => {
     vi.useFakeTimers();
     try {
-      mocks.getNotepadSnapshot.mockReturnValue(oneNotedSurface());
+      mocks.notepadSurfaceIds.mockReturnValue(oneNotedSurface());
       mocks.archiveSurfaceNotes.mockReturnValue(new Promise<void>(() => {})); // never settles
       const adapter = fakeAdapter();
       initQuitFlow(adapter);
@@ -383,7 +383,7 @@ describe("quit orchestrator", () => {
     // Surface — in front of a user who chose Cancel.
     vi.useFakeTimers();
     try {
-      mocks.getNotepadSnapshot.mockReturnValue(oneNotedSurface());
+      mocks.notepadSurfaceIds.mockReturnValue(oneNotedSurface());
       let signal: AbortSignal | undefined;
       mocks.archiveSurfaceNotes.mockImplementation((_ids, opts) => {
         signal = opts?.signal;
