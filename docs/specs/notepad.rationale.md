@@ -278,7 +278,7 @@ process exits, preserving exclusion.
 ## Live resume
 
 The mirror hydrates a live resume and nothing else because a live resume is the one
-case where the notes and the Surfaces they belong to are both still real: the PTYs
+case where the notes and the Surfaces they belong to are both still real: any PTYs
 never died, the pane ids are the same, and the webview that vanished was a
 rendering detail. A cold restore is the opposite — the PTYs are gone, the Surfaces
 are rebuilt from a saved snapshot, and any notes still in memory belong to a
@@ -291,3 +291,9 @@ be a later, colder boot's.
 The mirror is served non-destructively (the resuming webview re-reports the notes
 under its own router, re-establishing ownership) so that a webview which boots and
 then crashes before its first sync still has its notes archived by `deactivate()`.
+
+A browser-only view has no PTY to mark its resume as live. Its volatile mirror is
+still evidence of the same extension-host lifetime: a restart clears that module
+state and supplies no mirror. Rebuilding the browser layout before hydration
+preserves both visible and minimized browser notes, while terminal cold restores
+still never consume the mirror.

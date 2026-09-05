@@ -155,7 +155,7 @@ Source of truth: `withArchiveFile` in `vscode-ext/src/notepad-archive-file.ts`; 
 
 ## Live resume
 
-**The mirror hydrates exactly one path, a live resume** — a webview re-resolved over PTYs the extension host still owns, which is what a move between panel containers produces. It rides the boot payload beside the recovery commands, claimed by the same pane ids, and **is consumed exactly once**: a second read would be a cold restore's, and **a cold restore must never hydrate live notes** (rationale). An editor panel is always handed `null`.
+**The mirror hydrates exactly one path, a live resume** — a webview re-resolved in the same extension host, including browser-only views with no PTYs. It rides the boot payload beside the recovery commands, claimed by the same pane ids, and **is consumed exactly once**: a second read would be a cold restore's, and **a cold restore must never hydrate live notes** (rationale). An editor panel and an extension restart supply `null`. **Must hydrate browser-only layouts from a present same-host mirror even when the PTY list is empty**, pinned by `lib/src/lib/reconnect.test.ts`.
 
 **Hydration fills only live Surfaces holding no notes yet**, and restores no pins — the markers died with the previous webview's xterm instances.
 

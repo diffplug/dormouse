@@ -17,7 +17,7 @@ vi.mock('./terminal-registry', () => ({
 }));
 
 import { resumeOrRestore } from './reconnect';
-import { clearAllNotepads, getNotes } from './notepad/notepad-store';
+import { addPlainNote, buildVolatileSnapshot, clearAllNotepads, getNotes } from './notepad/notepad-store';
 import type { VolatileNotepadSnapshot } from './notepad/types';
 import type { LathNode } from './lath/model';
 
@@ -519,5 +519,41 @@ describe('notepad hydration', () => {
     expect(result.paneIds).toEqual(['pane-a']);
     expect(loadVolatile).not.toHaveBeenCalled();
     expect(getNotes('pane-a')).toEqual([]);
+  });
+});
+
+describe('browser-only notepad resume', () => {
+  beforeEach(() => { clearAllNotepads(); });
+  it.each([true, false])('hydrates browser notes only with a same-host mirror (present: %s)', async (sameHost) => {
+    const saved: PersistedSession = {
+      version: 3,
+      lathLayout: lathLayoutFor('web'),
+      doors: [{ id: 'door-web', title: 'Browser door', component: 'browser' }],
+      panes: [
+        { id: 'web', title: 'Browser', cwd: null, surfaceType: 'browser' },
+        { id: 'door-web', title: 'Browser door', cwd: null, surfaceType: 'browser' },
+      ],
+    };
+    const snapshot: VolatileNotepadSnapshot = {
+      surfaces: ['web', 'door-web'].map((id) => ({
+        surfaceId: id, surfaceTitle: id, surfaceKind: 'browser', cwd: null,
+        notes: [{ id: `${id}-note`, createdAt: 1, content: { kind: 'plain', text: `keep ${id}` } }],
+      })),
+      stagedDeletions: {},
+    };
+    const platform = createPlatform([], saved);
+    const loadVolatile = vi.fn(() => sameHost ? snapshot : null);
+    (platform as { notepadArchive?: unknown }).notepadArchive = { loadVolatile };
+    const result = await resumeOrRestore(platform);
+    expect(result.paneIds).toEqual(['web']);
+    expect(result.doors?.map((door) => door.id)).toEqual(['door-web']);
+    expect(loadVolatile).toHaveBeenCalledTimes(1);
+    for (const surface of snapshot.surfaces) {
+      expect(getNotes(surface.surfaceId)).toEqual(sameHost ? surface.notes : []);
+    }
+    addPlainNote('web', 'new note');
+    expect(buildVolatileSnapshot().surfaces.find((surface) => surface.surfaceId === 'web')?.notes)
+      .toHaveLength(sameHost ? 2 : 1);
+    expect(platform.spawnPty).not.toHaveBeenCalled();
   });
 });

@@ -32,7 +32,16 @@ export async function resumeOrRestore(platform: PlatformAdapter): Promise<Reconn
   if (liveResult) return liveResult;
 
   const restored = await restoreSession(platform);
-  if (restored) return restored;
+  if (restored) {
+    const saved = readPersistedSession(platform.getState());
+    // Browser-only views have no PTY with which to prove a live resume. Their
+    // host-memory mirror is that proof; an extension restart supplies null.
+    // Rebuild their layout first, then hydrate only those surviving Surfaces.
+    if (saved?.panes.length && saved.panes.every((pane) => pane.surfaceType === 'browser')) {
+      return hydrateNotepad(platform, restored);
+    }
+    return restored;
+  }
 
   return { paneIds: [] };
 }
@@ -112,7 +121,8 @@ function resumeLiveSessions(platform: PlatformAdapter): Promise<ReconnectResult 
 /**
  * Give a resumed webview back the notes the host mirrored for it
  * (docs/specs/notepad.md → "Live resume"). Only reachable from the live-PTY
- * branch: a cold restore is a different Session over a different set of PTYs,
+ * branch or a browser-only view with a same-host mirror: a cold restore is
+ * a different Session over a different set of PTYs,
  * and mirrored notes must never surface there. Live Surfaces are the resume
  * plan's panes plus its doors — a minimized Surface keeps its notes.
  */
