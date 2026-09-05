@@ -1,18 +1,6 @@
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import type { ShellCommandKind } from 'dor/commands/shell-quote';
-import type { ActivityNotification, SessionStatus, TodoState } from './alert-manager';
-
-export interface ActivityState {
-  status: SessionStatus;
-  watchingEnabled: boolean;
-  todo: TodoState;
-  notification: ActivityNotification | null;
-  /** A `dor await` is parked on this Session (`docs/specs/alert.md` -> Await). */
-  awaited: boolean;
-  /** Mirrored from the host (`AlertState.ringSeq`). */
-  ringSeq: number;
-}
 
 export interface TerminalEntry {
   /** Parser family of the shell this Session launched. Unlike the app-global
@@ -23,13 +11,6 @@ export interface TerminalEntry {
   fit: FitAddon;
   element: HTMLDivElement;
   cleanup: () => void;
-  alertStatus: SessionStatus;
-  watchingEnabled: boolean;
-  todo: TodoState;
-  notification: ActivityNotification | null;
-  attentionDismissedRing: boolean;
-  awaited: boolean;
-  ringSeq: number;
   isReplaying: boolean;
   untouched: boolean;
   /**
