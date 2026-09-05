@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, useMemo, useLayoutEffect, useContext, useSyncExternalStore, type ReactNode } from 'react';
+import { useCallback, useRef, useState, useMemo, useLayoutEffect, useContext, useSyncExternalStore, type ReactNode } from 'react';
 import {
   BellRingingIcon,
   BellSlashIcon,
@@ -11,7 +11,7 @@ import {
 import { SettingsDialog } from './SettingsDialog';
 import { Door } from './Door';
 import { DoorNotepadPopover } from './DoorNotepadPopover';
-import { DialogKeyboardContext, DoorElementsContext } from './wall/wall-context';
+import { DoorElementsContext, useDialogKeyboardOwner } from './wall/wall-context';
 import type { DoorChip, DooredItem } from './wall/wall-types';
 import { hasTerminal } from 'dor/commands/types';
 import { IS_MAC } from '../lib/platform';
@@ -86,14 +86,10 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   const [doorNotepad, setDoorNotepad] = useState<
     { id: string; rect: DOMRect; unavailableNoteId: string | null } | null
   >(null);
-  const setDialogKeyboardActive = useContext(DialogKeyboardContext);
 
   // Suppress command-mode key dispatch while the Settings dialog owns the
   // keyboard, so typing a timeout doesn't trigger pane shortcuts.
-  useEffect(() => {
-    setDialogKeyboardActive(settingsOpen);
-    return () => setDialogKeyboardActive(false);
-  }, [settingsOpen, setDialogKeyboardActive]);
+  useDialogKeyboardOwner(settingsOpen);
 
   useLayoutEffect(() => {
     const el = containerRef.current;
@@ -372,7 +368,6 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
           sourceUnavailableNoteId={doorNotepad.unavailableNoteId}
           onClose={closeDoorNotepad}
           onRevealSource={revealDoorSource}
-          onKeyboardActiveChange={setDialogKeyboardActive}
         />
       )}
 

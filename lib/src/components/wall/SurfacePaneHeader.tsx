@@ -25,12 +25,12 @@ import type { PaneProps } from './pane-props';
 import { loopbackPort, normalizeNavUrl, pathDisplay } from './browser-url';
 import { triggerDevServerRescan, useDevServerMatch } from './agent-browser-ports';
 import {
-  DialogKeyboardContext,
   ModeContext,
   SelectedIdContext,
   WallActionsContext,
   WindowFocusedContext,
   ZoomedIdContext,
+  useDialogKeyboardOwner,
 } from './wall-context';
 
 export function SurfacePaneHeader({ id, title }: PaneProps) {
@@ -67,13 +67,8 @@ export function SurfacePaneHeader({ id, title }: PaneProps) {
   // navigate elsewhere. While it's open we flag dialog-keyboard so the Wall's
   // keyboard handler stands down (the panel's own key-forwarder skips editable
   // targets); the editor closes itself when the surface stops being a browser.
-  const setDialogKeyboardActive = useContext(DialogKeyboardContext);
   const [editingUrl, setEditingUrl] = useState(false);
-  useEffect(() => {
-    if (!editingUrl) return;
-    setDialogKeyboardActive(true);
-    return () => setDialogKeyboardActive(false);
-  }, [editingUrl, setDialogKeyboardActive]);
+  useDialogKeyboardOwner(editingUrl);
   useEffect(() => {
     if (!screen && editingUrl) setEditingUrl(false);
   }, [screen, editingUrl]);

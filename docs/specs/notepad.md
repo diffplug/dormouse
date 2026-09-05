@@ -67,7 +67,7 @@ Source of truth: `registerTerminalSource`, `resolveTerminalSource` and `revealRe
 
 - **The attached notepad is a panel in the top-right of the Surface body, three quarters of it wide and tall.** It closes on its close control, Escape, or an outside click.
 - **Only one Surface notepad is open per Wall.** The store holds a single open id, and opening a Door's popover closes the attached panel.
-- **An open notepad owns the keyboard.** It is a `role="dialog"` with a focus trap, marks the Wall's dialog-keyboard context active so command-mode dispatch stands down, and stops key and mouse events from reaching the Surface under it — a live browser pane's key forwarder included.
+- **An open notepad owns the keyboard.** It is a `role="dialog"` with a focus trap, takes a lease on the Wall's dialog keyboard so command-mode dispatch stands down, and stops key and mouse events from reaching the Surface under it — a live browser pane's key forwarder included.
 - **A Door is a wrapper carrying `data-door-id` with one or two buttons.** The wrapper is what the selection ring and the baseboard fitting measure; the title button keeps click-to-reattach and the drag press, the notepad button does neither. **A minimized Surface with no notes gets no notepad button.**
 - **The Door popover opens above its Door, edge-clamped, capped at 30rem wide and 75% of the Wall height. Opening it never reattaches the Surface** — only following a pin from it does.
 

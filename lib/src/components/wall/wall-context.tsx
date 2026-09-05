@@ -1,4 +1,4 @@
-import { createContext } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef } from 'react';
 import type { AlertButtonActionResult, SessionStatus, SetTerminalUserTitleResult } from '../../lib/terminal-registry';
 import type { WallMode } from './wall-types';
 import type { RenderMode } from './agent-browser-screen';
@@ -100,4 +100,55 @@ export const RenamingIdContext = createContext<string | null>(null);
 export const ZoomedIdContext = createContext<string | null>(null);
 export const WindowFocusedContext = createContext(true);
 
-export const DialogKeyboardContext = createContext<(active: boolean) => void>(() => {});
+/** Take one keyboard-suppression lease; the returned release drops it (idempotent). */
+export type AcquireDialogKeyboard = () => () => void;
+
+export const DialogKeyboardContext = createContext<AcquireDialogKeyboard>(() => () => {});
+
+/** Reference-count the leases over one Wall's dialog-keyboard flag, so a dialog
+ *  closing over another one leaves the survivor's suppression standing
+ *  (docs/specs/layout.md → "Keyboard shortcuts (command mode)"). */
+export function createDialogKeyboardCoordinator(
+  activeRef: { current: boolean },
+): AcquireDialogKeyboard {
+  let ownerCount = 0;
+  return () => {
+    ownerCount += 1;
+    activeRef.current = true;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      ownerCount = Math.max(0, ownerCount - 1);
+      activeRef.current = ownerCount > 0;
+    };
+  };
+}
+
+/** Hold one independently reference-counted lease while `active`. */
+export function useDialogKeyboardOwner(active: boolean): void {
+  const acquire = useContext(DialogKeyboardContext);
+  useEffect(() => (active ? acquire() : undefined), [acquire, active]);
+}
+
+/** Adapt the lease to the boolean seam of a modal whose prop reports activeness.
+ *  Each call owns its own lease, and unmounting releases it. */
+export function useDialogKeyboardCallback(
+  acquireOverride?: AcquireDialogKeyboard,
+): (active: boolean) => void {
+  const contextAcquire = useContext(DialogKeyboardContext);
+  const acquire = acquireOverride ?? contextAcquire;
+  const releaseRef = useRef<(() => void) | null>(null);
+  const setActive = useCallback((active: boolean) => {
+    if (active && !releaseRef.current) releaseRef.current = acquire();
+    if (!active && releaseRef.current) {
+      releaseRef.current();
+      releaseRef.current = null;
+    }
+  }, [acquire]);
+  useEffect(() => () => {
+    releaseRef.current?.();
+    releaseRef.current = null;
+  }, [acquire]);
+  return setActive;
+}

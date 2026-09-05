@@ -6,7 +6,12 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NotepadPanel } from './NotepadPanel';
 import { applyPlainEdit } from './NoteList';
-import { DialogKeyboardContext } from './wall/wall-context';
+import {
+  DialogKeyboardContext,
+  createDialogKeyboardCoordinator,
+  useDialogKeyboardOwner,
+  type AcquireDialogKeyboard,
+} from './wall/wall-context';
 import { FakePtyAdapter } from '../lib/platform/fake-adapter';
 import { setPlatform } from '../lib/platform';
 import { setNativeFieldValue } from '../lib/dom';
@@ -29,7 +34,9 @@ const SURFACE = 'term-1';
 let container: HTMLDivElement;
 let root: Root;
 let platform: FakePtyAdapter;
-let dialogKeyboard: ReturnType<typeof vi.fn>;
+/** The real coordinator, so overlapping owners are reference-counted as in a Wall. */
+let dialogKeyboardActive: { current: boolean };
+let dialogKeyboard: AcquireDialogKeyboard;
 
 beforeEach(() => {
   container = document.createElement('div');
@@ -37,7 +44,8 @@ beforeEach(() => {
   root = createRoot(container);
   platform = new FakePtyAdapter();
   setPlatform(platform);
-  dialogKeyboard = vi.fn();
+  dialogKeyboardActive = { current: false };
+  dialogKeyboard = createDialogKeyboardCoordinator(dialogKeyboardActive);
   __resetArchiveServiceForTests();
 });
 
@@ -48,6 +56,12 @@ afterEach(() => {
   __resetArchiveServiceForTests();
   platform.reset();
 });
+
+/** Stands in for a dialog already up when the notepad opens (Settings, a quit modal). */
+function FirstDialogOwner() {
+  useDialogKeyboardOwner(true);
+  return null;
+}
 
 /** Both panels a Wall would mount, so "one notepad per Wall" is observable. */
 function renderPanels(ids: string[] = [SURFACE]): void {
@@ -153,11 +167,41 @@ describe('NotepadPanel — open and close', () => {
   it('owns the keyboard while open, and hands it back on close', () => {
     renderPanels();
     open();
-    expect(dialogKeyboard).toHaveBeenCalledWith(true);
+    expect(dialogKeyboardActive.current).toBe(true);
 
-    dialogKeyboard.mockClear();
     act(() => setOpenNotepadId(null));
-    expect(dialogKeyboard).toHaveBeenCalledWith(false);
+    expect(dialogKeyboardActive.current).toBe(false);
+  });
+
+  it('leaves an overlapping dialog\'s keyboard suppression standing when it closes', () => {
+    // Settings (or any first owner) is up; opening and closing the notepad over
+    // it must not release the lease that is not the notepad's.
+    act(() => {
+      root.render(
+        <StrictMode>
+          <DialogKeyboardContext.Provider value={dialogKeyboard}>
+            <FirstDialogOwner />
+            <NotepadPanel surfaceId={SURFACE} />
+          </DialogKeyboardContext.Provider>
+        </StrictMode>,
+      );
+    });
+    expect(dialogKeyboardActive.current).toBe(true);
+
+    open();
+    act(() => setOpenNotepadId(null));
+    expect(dialogKeyboardActive.current).toBe(true);
+
+    act(() => {
+      root.render(
+        <StrictMode>
+          <DialogKeyboardContext.Provider value={dialogKeyboard}>
+            <NotepadPanel surfaceId={SURFACE} />
+          </DialogKeyboardContext.Provider>
+        </StrictMode>,
+      );
+    });
+    expect(dialogKeyboardActive.current).toBe(false);
   });
 
   it('keeps its keystrokes out of the surface underneath', () => {

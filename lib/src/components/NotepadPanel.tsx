@@ -1,8 +1,8 @@
-import { useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { NotepadBody } from './NotepadBody';
 import { useOpenNotepadId } from './use-notepad';
 import { hasNotepadArchive } from '../lib/notepad/archive-service';
-import { DialogKeyboardContext } from './wall/wall-context';
+import { useDialogKeyboardOwner } from './wall/wall-context';
 import { setOpenNotepadId } from '../lib/notepad/notepad-store';
 import { revealNoteSource } from '../lib/notepad/pin';
 
@@ -57,17 +57,14 @@ function OpenNotepadPanel({
   sourceUnavailableNoteId: string | null;
   onRevealSource: (noteId: string) => void;
 }) {
-  const setDialogKeyboardActive = useContext(DialogKeyboardContext);
   const panelRef = useRef<HTMLDivElement>(null);
 
   const close = useCallback(() => setOpenNotepadId(null), []);
 
   // The panel owns the keyboard while open, so command-mode keys stay dormant
-  // under a note being typed into.
-  useEffect(() => {
-    setDialogKeyboardActive(true);
-    return () => setDialogKeyboardActive(false);
-  }, [setDialogKeyboardActive]);
+  // under a note being typed into. Mounted only while open, so the lease is
+  // unconditional and independent of any other dialog's.
+  useDialogKeyboardOwner(true);
 
   return (
     <NotepadBody

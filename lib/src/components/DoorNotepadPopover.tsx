@@ -1,7 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { NotepadBody } from './NotepadBody';
 import { useNotes } from './use-notepad';
+import { useDialogKeyboardOwner } from './wall/wall-context';
 import { clampOverlayPosition } from '../lib/ui-geometry';
 
 /** Gap between the Door's top edge and the popover above it. */
@@ -20,7 +21,6 @@ export function DoorNotepadPopover({
   sourceUnavailableNoteId,
   onClose,
   onRevealSource,
-  onKeyboardActiveChange,
 }: {
   surfaceId: string;
   /** The Door's rect. Measured at open; the popover keeps its place if the
@@ -29,7 +29,6 @@ export function DoorNotepadPopover({
   sourceUnavailableNoteId: string | null;
   onClose: () => void;
   onRevealSource: (noteId: string) => void;
-  onKeyboardActiveChange: (active: boolean) => void;
 }) {
   const notes = useNotes(surfaceId);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -53,10 +52,9 @@ export function DoorNotepadPopover({
     }));
   }, [anchorRect, notes, sourceUnavailableNoteId]);
 
-  useEffect(() => {
-    onKeyboardActiveChange(true);
-    return () => onKeyboardActiveChange(false);
-  }, [onKeyboardActiveChange]);
+  // Mounted only while open, so the lease is unconditional: it lives exactly as
+  // long as the popover, independently of any other dialog's.
+  useDialogKeyboardOwner(true);
 
   return createPortal(
     <NotepadBody

@@ -96,6 +96,8 @@ import {
   SelectedIdContext,
   WindowFocusedContext,
   ZoomedIdContext,
+  createDialogKeyboardCoordinator,
+  useDialogKeyboardCallback,
   type PaneWriteActions,
   type WallActions,
 } from './wall/wall-context';
@@ -316,10 +318,17 @@ export function Wall({
     };
   }, []);
 
+  // One reference-counted lease per open dialog: overlapping dialogs each hold
+  // their own, so the one closing cannot release the other's suppression.
   const dialogKeyboardActiveRef = useRef(false);
-  const setDialogKeyboardActive = useCallback((active: boolean) => {
-    dialogKeyboardActiveRef.current = active;
-  }, []);
+  const acquireDialogKeyboardRef = useRef<ReturnType<typeof createDialogKeyboardCoordinator> | null>(null);
+  if (!acquireDialogKeyboardRef.current) {
+    acquireDialogKeyboardRef.current = createDialogKeyboardCoordinator(dialogKeyboardActiveRef);
+  }
+  const acquireDialogKeyboard = acquireDialogKeyboardRef.current;
+  const setExternalLinkKeyboardActive = useDialogKeyboardCallback(acquireDialogKeyboard);
+  const setAgentBrowserKeyboardActive = useDialogKeyboardCallback(acquireDialogKeyboard);
+  const setRemotePairingKeyboardActive = useDialogKeyboardCallback(acquireDialogKeyboard);
 
   // Consumed once by the Lath seed effect to restore existing sessions
   const initialPaneIdsRef = useRef(initialPaneIds);
@@ -766,10 +775,10 @@ export function Wall({
   // Keyed on "is a prompt up", not on the queue: moving to the next failure must
   // not drop and re-raise the flag under another dialog host.
   const anyArchiveFailure = archiveFailures.length > 0;
-  useEffect(() => {
-    setDialogKeyboardActive(anyArchiveFailure);
-    return () => setDialogKeyboardActive(false);
-  }, [anyArchiveFailure, setDialogKeyboardActive]);
+  useEffect(
+    () => (anyArchiveFailure ? acquireDialogKeyboard() : undefined),
+    [anyArchiveFailure, acquireDialogKeyboard],
+  );
 
   useEffect(() => {
     // An iframe surface taking focus blurs this window without backgrounding the
@@ -1650,7 +1659,7 @@ export function Wall({
           <RenamingIdContext.Provider value={renamingPaneId}>
           <ZoomedIdContext.Provider value={zoomedId}>
           <WindowFocusedContext.Provider value={windowFocused}>
-          <DialogKeyboardContext.Provider value={setDialogKeyboardActive}>
+          <DialogKeyboardContext.Provider value={acquireDialogKeyboard}>
           <div className="flex-1 min-h-0 flex flex-col bg-app-bg text-app-fg font-sans overflow-hidden">
             {/* The tiling area — 2px bottom inset keeps rounded panes distinct from the baseboard when present. */}
             {/* 1.75 = PANE_GUTTER_PX (7px) in design.tsx — keep in sync. */}
@@ -1713,14 +1722,14 @@ export function Wall({
               version={paneElementsVersion}
             />
 
-            <ExternalLinkModalHost onKeyboardActiveChange={setDialogKeyboardActive} />
+            <ExternalLinkModalHost onKeyboardActiveChange={setExternalLinkKeyboardActive} />
             <AgentBrowserScreenModalHost
-              onKeyboardActiveChange={setDialogKeyboardActive}
+              onKeyboardActiveChange={setAgentBrowserKeyboardActive}
               resolveLabel={surfaceRefForId}
             />
             {enableRemoteHost ? (
               <Suspense fallback={null}>
-                <RemotePairingModalHost onKeyboardActiveChange={setDialogKeyboardActive} />
+                <RemotePairingModalHost onKeyboardActiveChange={setRemotePairingKeyboardActive} />
               </Suspense>
             ) : null}
             {dialogHost}

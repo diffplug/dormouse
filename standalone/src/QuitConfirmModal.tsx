@@ -1,9 +1,9 @@
-import { useContext, useEffect, useRef, useSyncExternalStore } from 'react';
+import { useRef, useSyncExternalStore } from 'react';
 // Standalone reaches into the lib source directly (same relative form as the
 // sibling UpdateDebugModal.tsx). The terminal registry comes in via the
 // `dormouse-lib` alias, matching quit.ts.
 import { ModalFrame, modalActionButton } from '../../lib/src/components/design';
-import { DialogKeyboardContext } from '../../lib/src/components/wall/wall-context';
+import { useDialogKeyboardOwner } from '../../lib/src/components/wall/wall-context';
 import {
   countRunningSessions,
   subscribeToTerminalPaneState,
@@ -27,14 +27,10 @@ import {
 export function QuitConfirmModalHost() {
   const phase = useSyncExternalStore(subscribeQuitConfirm, getQuitConfirmPhase);
   const storedArchiveError = useSyncExternalStore(subscribeQuitConfirm, getQuitArchiveError);
-  const setDialogKeyboardActive = useContext(DialogKeyboardContext);
   const open = phase !== null;
 
   // Suppress the Wall's command-mode key dispatch while the dialog is up.
-  useEffect(() => {
-    setDialogKeyboardActive(open);
-    return () => setDialogKeyboardActive(false);
-  }, [open, setDialogKeyboardActive]);
+  useDialogKeyboardOwner(open);
 
   if (!phase) return null;
   return (
