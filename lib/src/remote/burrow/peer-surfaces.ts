@@ -84,7 +84,7 @@ function driveOwnSurface({
   if (op !== 'resolve' && (term.cols !== nextCols || term.rows !== nextRows)) {
     term.resize(nextCols, nextRows);
   }
-  return [{ ptyId: entry.ptyId, cols: term.cols, rows: term.rows }];
+  return [{ ptyId: surfaceId, cols: term.cols, rows: term.rows }];
 }
 
 /**

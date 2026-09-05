@@ -4,13 +4,10 @@ import {
   applyTerminalSemanticEvents,
   countRunningSessions,
   fillTerminalProcessCwd,
-  fillTerminalProcessCwdByPtyId,
   getTerminalPaneState,
   getTerminalPaneStateSnapshot,
   recordTerminalOutput,
-  recordTerminalOutputByPtyId,
   recordTerminalUserInput,
-  recordTerminalUserInputByPtyId,
   removeTerminalPaneState,
   resetTerminalPaneState,
   seedLaunchedCommand,
@@ -18,7 +15,9 @@ import {
   seedTerminalManualCwd,
   setTerminalUserTitle,
 } from './terminal-state-store';
-import { registry, type TerminalEntry } from './terminal-store';
+import { createLathWallStore } from '../components/wall/lath-wall-store';
+import { leaves } from './lath/model';
+import { leafMeta } from './lath/test-fixtures';
 import { DEFAULT_IDLE_TITLE, surfaceRunsCommand, UNNAMED_PANEL_TITLE } from './terminal-state';
 
 const PROMPT = 'user@host repo % ';
@@ -41,7 +40,6 @@ describe('terminal semantic state store command input fallback', () => {
     removeTerminalPaneState('pane');
     removeTerminalPaneState('pane-a');
     removeTerminalPaneState('pane-b');
-    registry.delete('pane-b');
   });
 
   it('promotes a submitted prompt line into the current command immediately', () => {
@@ -200,36 +198,46 @@ describe('terminal semantic state store command input fallback', () => {
     expect(getTerminalPaneState('pane').titleCandidates.user?.title).toBe(UNNAMED_PANEL_TITLE);
   });
 
-  it('records PTY fallback state under the current pane after a swap', () => {
-    registry.set('pane-b', { ptyId: 'pane-a' } as unknown as TerminalEntry);
+  it('keeps Session state across a Lath swap', () => {
+    const store = createLathWallStore();
+    store.addLeaf('pane-a', leafMeta(), null);
+    store.addLeaf('pane-b', leafMeta(), { refId: 'pane-a', edge: 'right' });
+    recordTerminalOutput('pane-a', PROMPT);
+    submit('pane-b', 'npm run build');
 
-    recordTerminalOutputByPtyId('pane-a', PROMPT);
-    recordTerminalUserInputByPtyId('pane-a', '\r', lineReader(`${PROMPT}lazygit`));
+    expect(store.swapLeaves('pane-a', 'pane-b').ok).toBe(true);
+    expect(leaves(store.getSnapshot().tree)).toEqual(['pane-b', 'pane-a']);
+    recordTerminalUserInput('pane-a', '\r', lineReader(`${PROMPT}lazygit`));
 
-    expect(getTerminalPaneState('pane-a').currentCommand).toBeNull();
-    expect(getTerminalPaneState('pane-b').currentCommand).toMatchObject({
+    expect(getTerminalPaneState('pane-a').currentCommand).toMatchObject({
       rawCommandLine: 'lazygit',
       displayCommand: 'lazygit',
       source: 'user_input',
     });
+    expect(getTerminalPaneState('pane-b').currentCommand?.rawCommandLine).toBe('npm run build');
 
-    recordTerminalOutputByPtyId('pane-a', '\r\nuser@host repo % ');
+    recordTerminalOutput('pane-a', '\r\nuser@host repo % ');
 
-    expect(getTerminalPaneState('pane-b').currentCommand).toBeNull();
-    expect(getTerminalPaneState('pane-b').activity).toEqual({ kind: 'editing' });
+    expect(getTerminalPaneState('pane-a').currentCommand).toBeNull();
+    expect(getTerminalPaneState('pane-a').activity).toEqual({ kind: 'editing' });
+    expect(getTerminalPaneState('pane-b').activity).toEqual({ kind: 'running' });
   });
 
-  it('records process CWD under the current pane after a swap', () => {
-    registry.set('pane-b', { ptyId: 'pane-a' } as unknown as TerminalEntry);
-    applyTerminalSemanticEvents('pane-b', [{ type: 'promptStart' }]);
+  it('keeps CWD with its Session across a Lath swap', () => {
+    const store = createLathWallStore();
+    store.addLeaf('pane-a', leafMeta(), null);
+    store.addLeaf('pane-b', leafMeta(), { refId: 'pane-a', edge: 'right' });
+    resetTerminalPaneState('pane-a');
+    resetTerminalPaneState('pane-b');
 
-    fillTerminalProcessCwdByPtyId('pane-a', '/Users/me/project');
+    expect(store.swapLeaves('pane-a', 'pane-b').ok).toBe(true);
+    fillTerminalProcessCwd('pane-a', '/Users/me/project');
 
-    expect(getTerminalPaneState('pane-a').cwd).toBeNull();
-    expect(getTerminalPaneState('pane-b').cwd).toMatchObject({
+    expect(getTerminalPaneState('pane-a').cwd).toMatchObject({
       path: '/Users/me/project',
       source: 'process',
     });
+    expect(getTerminalPaneState('pane-b').cwd).toBeNull();
   });
 });
 

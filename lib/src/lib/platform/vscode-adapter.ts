@@ -11,7 +11,7 @@ import {
   TerminalProtocolParser,
 } from '../terminal-protocol';
 import {
-  applyTerminalSemanticEventsByPtyId,
+  applyTerminalSemanticEvents,
 } from '../terminal-state-store';
 import { getTerminalTheme, onTerminalThemeChange, themeColorProvider } from '../terminal-theme';
 import { isHostMessage, readHostMessageToken } from '../vscode-message-token';
@@ -131,12 +131,12 @@ export class VSCodeAdapter implements PlatformAdapter {
         // backstop, not the contract.
         const parser = new TerminalProtocolParser(themeColorProvider);
         const parsed = parser.process(msg.data);
-        applyTerminalSemanticEventsByPtyId(msg.id, collectTerminalSemanticEvents(parsed.events));
+        applyTerminalSemanticEvents(msg.id, collectTerminalSemanticEvents(parsed.events));
         for (const handler of this.replayHandlers) {
           handler({ id: msg.id, data: parsed.visibleData });
         }
       } else if (msg.type === 'terminal:semanticEvents') {
-        applyTerminalSemanticEventsByPtyId(msg.id, msg.events ?? []);
+        applyTerminalSemanticEvents(msg.id, msg.events ?? []);
       } else if (msg.type === 'dormouse:flushSessionSave') {
         for (const handler of this.flushRequestHandlers) {
           handler({ requestId: msg.requestId });

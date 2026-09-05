@@ -15,7 +15,6 @@ export interface ActivityState {
 }
 
 export interface TerminalEntry {
-  ptyId: string;
   /** Parser family of the shell this Session launched. Unlike the app-global
    *  default, this remains stable when the user selects a different shell for
    *  future Sessions. */
@@ -80,23 +79,3 @@ export interface PendingShellOpts {
 
 export const registry = new Map<string, TerminalEntry>();
 export const pendingShellOpts = new Map<string, PendingShellOpts>();
-
-export function getEntryByPtyId(ptyId: string): TerminalEntry | null {
-  for (const entry of registry.values()) {
-    if (entry.ptyId === ptyId) {
-      return entry;
-    }
-  }
-  return null;
-}
-
-export function getSessionIdByPtyId(ptyId: string): string | null {
-  for (const [id, entry] of registry) {
-    if (entry.ptyId === ptyId) return id;
-  }
-  return null;
-}
-
-export function resolveTerminalSessionId(id: string): string {
-  return registry.get(id)?.ptyId ?? id;
-}

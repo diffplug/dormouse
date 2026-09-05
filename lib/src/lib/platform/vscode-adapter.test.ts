@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const terminalStateStoreMocks = vi.hoisted(() => ({
-  applyTerminalSemanticEventsByPtyId: vi.fn(),
+  applyTerminalSemanticEvents: vi.fn(),
   removeTerminalPaneState: vi.fn(),
 }));
 
 vi.mock('../terminal-state-store', () => ({
-  applyTerminalSemanticEventsByPtyId: terminalStateStoreMocks.applyTerminalSemanticEventsByPtyId,
+  applyTerminalSemanticEvents: terminalStateStoreMocks.applyTerminalSemanticEvents,
   removeTerminalPaneState: terminalStateStoreMocks.removeTerminalPaneState,
 }));
 
@@ -236,8 +236,8 @@ describe('VSCodeAdapter PTY exit handling', () => {
     expect(replays).toEqual([{ id: 'pane-1', data: 'helloworld' }]);
 
     // Semantic CWD event was forwarded under the PTY id.
-    expect(terminalStateStoreMocks.applyTerminalSemanticEventsByPtyId).toHaveBeenCalledTimes(1);
-    const [forwardedId, forwardedEvents] = terminalStateStoreMocks.applyTerminalSemanticEventsByPtyId.mock.calls[0];
+    expect(terminalStateStoreMocks.applyTerminalSemanticEvents).toHaveBeenCalledTimes(1);
+    const [forwardedId, forwardedEvents] = terminalStateStoreMocks.applyTerminalSemanticEvents.mock.calls[0];
     expect(forwardedId).toBe('pane-1');
     expect(forwardedEvents).toHaveLength(1);
     expect(forwardedEvents[0]).toMatchObject({
@@ -273,8 +273,8 @@ describe('VSCodeAdapter PTY exit handling', () => {
     windowTarget.dispatchEvent(hostMessage({ type: 'terminal:semanticEvents', id: 'pane-1', events }));
     void adapter;
 
-    expect(terminalStateStoreMocks.applyTerminalSemanticEventsByPtyId).toHaveBeenCalledTimes(1);
-    expect(terminalStateStoreMocks.applyTerminalSemanticEventsByPtyId).toHaveBeenCalledWith('pane-1', events);
+    expect(terminalStateStoreMocks.applyTerminalSemanticEvents).toHaveBeenCalledTimes(1);
+    expect(terminalStateStoreMocks.applyTerminalSemanticEvents).toHaveBeenCalledWith('pane-1', events);
   });
 
   it('round-trips host-parsed semantic events through JSON to the webview adapter', () => {
@@ -301,8 +301,8 @@ describe('VSCodeAdapter PTY exit handling', () => {
     new VSCodeAdapter();
     windowTarget.dispatchEvent(hostMessage(wirePayload));
 
-    expect(terminalStateStoreMocks.applyTerminalSemanticEventsByPtyId).toHaveBeenCalledTimes(1);
-    expect(terminalStateStoreMocks.applyTerminalSemanticEventsByPtyId).toHaveBeenCalledWith('pane-1', hostEvents);
+    expect(terminalStateStoreMocks.applyTerminalSemanticEvents).toHaveBeenCalledTimes(1);
+    expect(terminalStateStoreMocks.applyTerminalSemanticEvents).toHaveBeenCalledWith('pane-1', hostEvents);
   });
 
   it('forwards shell replacement requests from the extension host', () => {
@@ -400,7 +400,7 @@ describe('VSCodeAdapter PTY exit handling', () => {
       expect(replays).toEqual([]);
       expect(exits).toEqual([]);
       expect(lists).toEqual([]);
-      expect(terminalStateStoreMocks.applyTerminalSemanticEventsByPtyId).not.toHaveBeenCalled();
+      expect(terminalStateStoreMocks.applyTerminalSemanticEvents).not.toHaveBeenCalled();
     });
 
     it('rejects a wrong token as firmly as a missing one', () => {

@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { FakePtyAdapter, type FakeScenario } from './fake-adapter';
 import { ITERM2_DEVICE_ATTRIBUTES_RESPONSE } from '../terminal-protocol';
 import { applyTerminalSemanticEvents, getTerminalPaneState, removeTerminalPaneState } from '../terminal-state-store';
-import { registry, type TerminalEntry } from '../terminal-store';
 
 describe('FakePtyAdapter', () => {
   beforeEach(() => {
@@ -12,7 +11,6 @@ describe('FakePtyAdapter', () => {
   afterEach(() => {
     removeTerminalPaneState('pane-a');
     removeTerminalPaneState('pane-b');
-    registry.delete('pane-b');
     vi.useRealTimers();
   });
 
@@ -115,10 +113,9 @@ describe('FakePtyAdapter', () => {
     expect(exitEvents).toEqual([{ id: 'nope', exitCode: 0 }]);
   });
 
-  it('does not remove semantic state for the pane currently owning a killed PTY', () => {
+  it('retains semantic state when its PTY exits', () => {
     const { adapter } = createAdapter();
-    registry.set('pane-b', { ptyId: 'pane-a' } as unknown as TerminalEntry);
-    applyTerminalSemanticEvents('pane-b', [
+    applyTerminalSemanticEvents('pane-a', [
       { type: 'cwd', cwd: {
         path: '/Users/me/project',
         pathKind: 'posix',
@@ -131,7 +128,7 @@ describe('FakePtyAdapter', () => {
 
     adapter.killPty('pane-a');
 
-    expect(getTerminalPaneState('pane-b').cwd).toMatchObject({
+    expect(getTerminalPaneState('pane-a').cwd).toMatchObject({
       path: '/Users/me/project',
       source: 'manual',
     });
