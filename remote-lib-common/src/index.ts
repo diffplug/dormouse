@@ -31,19 +31,3 @@ export * from './security/e2e-bounds.js';
 export * from './security/token-bucket.js';
 export * from './security/pairing-invitation.js';
 export * from './security/e2e-ceremony.js';
-
-/** Path of the greeting endpoint that `relay` serves and `lib` can call. */
-export const HELLO_ROUTE = '/api/hello';
-
-/** Response body returned by {@link HELLO_ROUTE}. */
-export interface HelloResponse {
-  readonly message: string;
-}
-
-/**
- * Build the {@link HelloResponse} for a caller. Living here — rather than in
- * `relay` — keeps the frontend and backend agreeing on the exact shape.
- */
-export function helloResponse(name = 'world'): HelloResponse {
-  return { message: `Hello, ${name}!` };
-}

@@ -19,7 +19,6 @@ import {
   CEREMONY_FIELD_LIMIT,
   DELIVERY_ID_LENGTH,
   E2E_ID_LENGTH,
-  HELLO_ROUTE,
   ChallengeIssuer,
   MAX_CLIENT_ID_LENGTH,
   MAX_E2E_CIPHERTEXT_LENGTH,
@@ -35,7 +34,6 @@ import {
   fromBase64Url,
   getWebCrypto,
   boundedPushText,
-  helloResponse,
   isBoundedBase64Url,
   isExactBase64Url,
   isOrigin,
@@ -689,8 +687,8 @@ export function createApp(config: AppConfig): CreatedApp {
     (c.req.path === API_ROUTES.pushSend ? sendBodies : smallBodies)(c, next),
   );
 
-  // Shared greeting, kept from the skeleton so `lib` and `relay` stay agreed.
-  app.get(HELLO_ROUTE, (c) => c.json(helloResponse()));
+  // Fixed health probe used by the installers.
+  app.get('/api/hello', (c) => c.json({ message: 'Hello, world!' }));
 
   // --- Setup: token-gated passkey registration -----------------------------
   // The credential is a Burrow's single-use setup token and nothing else: the

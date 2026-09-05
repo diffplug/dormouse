@@ -284,14 +284,15 @@ protection.
 
 ## HTTP API
 
-The whole route surface; paths and request/response shapes live in
+The whole route surface; shared paths and request/response shapes live in
 `API_ROUTES` / `WS_ROUTES` with their types in
-`remote-lib-common/src/remote/wire.ts`, and `HELLO_ROUTE` in
-`remote-lib-common/src/index.ts`, so Relay, Burrow and Pocket cannot drift.
+`remote-lib-common/src/remote/wire.ts`, so Relay, Burrow and Pocket cannot drift.
+The Relay owns the fixed `/api/hello` health response, pinned by
+`relay/test/app.test.mjs`.
 
 | Route                            | Auth           | Does                                              |
 | -------------------------------- | -------------- | ------------------------------------------------- |
-| `GET /api/hello`                 | —              | The shared greeting. **Carries no release identity** — it is unauthenticated and reachable through the HTTPS proxy; the runtime file carries it ("Installing it") |
+| `GET /api/hello`                 | —              | Fixed `{ message: "Hello, world!" }` health response. **Carries no release identity** — it is unauthenticated and reachable through the HTTPS proxy; the runtime file carries it ("Installing it") |
 | `POST /api/setup/begin`          | setup token    | Issues a registration challenge, gated exactly as `finish` is so neither is softer. Answers the account's credential ids for a retry's `excludeCredentials`, so no passkey that already signs in is duplicated — an orphan the Relay never registered is absent, and is still replaced |
 | `POST /api/setup/finish`         | setup token    | Registers the passkey in `account.json`; the token is spent at the gate and put back if registration then fails. `label` is **reduced, not refused** — the same `boundedPushText` a pairing label goes through, to `MAX_PASSKEY_LABEL_LENGTH` code points with control and bidi characters stripped |
 | `POST /api/setup/retire`         | session token  | Spends a live setup token without registering anything (rationale). 204, or 401 `SETUP_TOKEN_INVALID_ERROR` |

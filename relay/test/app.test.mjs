@@ -1,8 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { HELLO_ROUTE } from 'remote-lib-common';
-
 import { createApp } from '../dist/app.js';
 import { PASSWORD, freshApp } from './helpers.mjs';
 
@@ -56,9 +54,9 @@ test('GET / serves the stub landing page when the Pocket app is not built', asyn
   assert.match(body, /build:pocket/);
 });
 
-test(`GET ${HELLO_ROUTE} returns the shared greeting`, async () => {
+test('GET /api/hello returns the fixed health response', async () => {
   const { app } = await freshApp();
-  const res = await app.request(HELLO_ROUTE);
+  const res = await app.request('/api/hello');
   assert.equal(res.status, 200);
   assert.deepEqual(await res.json(), { message: 'Hello, world!' });
 });
