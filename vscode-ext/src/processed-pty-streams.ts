@@ -8,7 +8,7 @@
 import type {
   ProcessedPtyChunk,
   PtySink,
-} from '../../lib/src/remote/host/host-surface-provider';
+} from '../../lib/src/remote/burrow/burrow-surface-provider';
 
 export type { ProcessedPtyChunk, PtySink };
 

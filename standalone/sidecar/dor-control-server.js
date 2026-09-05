@@ -25,7 +25,7 @@ function proveToken(token, domain, nonce) {
 // so hash both sides to fixed-length digests (side-stepping timingSafeEqual's
 // length-mismatch throw, which would itself leak the length) and compare those.
 // Mirrors the SHA-256 + timingSafeEqual pattern the selfhost server uses in
-// server/src/state.ts.
+// relay/src/state.ts.
 function proofMatches(provided, expected) {
   if (typeof provided !== 'string') return false;
   const a = crypto.createHash('sha256').update(provided).digest();

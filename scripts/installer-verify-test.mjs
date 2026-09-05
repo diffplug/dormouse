@@ -4,7 +4,7 @@
  * the file: the searches over CLI output nobody bounds — whether the loopback
  * port is bound anywhere but 127.0.0.1 and whether an existing Serve config
  * already claims the root path — plus the install's reading of a possibly
- * half-written `config/server.env`. Runs from the repo root via `pnpm test`.
+ * half-written `config/relay.env`. Runs from the repo root via `pnpm test`.
  *
  * Why this exists: `deploy-lint.mjs` is textual, so it can say a control is
  * still present and nothing more. These are controls where "present" was not
@@ -91,10 +91,10 @@ const listenerFixtures = {
  * one.
  */
 const ENV_COMPLETE = [
-  '# Dormouse selfhost server — installer-owned runtime configuration.',
+  '# Dormouse selfhost Relay — installer-owned runtime configuration.',
   '# Generated 2026-01-01T00:00:00Z. Preserved byte-for-byte across updates.',
   'DORMOUSE_ORIGIN=https://laptop.tail.ts.net',
-  'DORMOUSE_STATE_DIR=/home/me/.local/share/dormouse-server/state',
+  'DORMOUSE_STATE_DIR=/home/me/.local/share/dormouse-relay/state',
   'DORMOUSE_BIND_HOST=127.0.0.1',
   'PORT=3100',
   'NODE_ENV=production',
@@ -304,7 +304,7 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
         '`grep -q`: under `set -o pipefail` the early exit SIGPIPEs the writer and 141\n' +
         'reads as "no match" (docs/specs/security-remote.md -> "Network posture (self-hosted)").\n' +
         '`env_missing_keys` must name every installer-owned key a half-written\n' +
-        'config/server.env lacks, so the install says `rm` rather than "fix it"\n' +
+        'config/relay.env lacks, so the install says `rm` rather than "fix it"\n' +
         '(docs/specs/security-remote.md -> "Credentials at rest").',
     );
     process.exit(1);

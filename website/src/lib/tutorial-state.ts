@@ -1,3 +1,4 @@
+import { loadJson, removeJson, saveJson } from "dormouse-lib/lib/local-json-store";
 import { ITEM_IDS, SECTIONS, type ItemId, type Section } from "./tut-items";
 
 const STORAGE_KEY = "dormouse-tut-v3";
@@ -10,31 +11,20 @@ export class TutorialState {
   private starPromptResolved = false;
   private flappyHighScore = 0;
   private listeners = new Set<() => void>();
-  private storage = typeof localStorage !== "undefined" ? localStorage : null;
   private sections: readonly Section[];
 
   constructor(sections: readonly Section[] = SECTIONS) {
     this.sections = sections;
-    this.starPromptResolved = this.storage?.getItem(STAR_STORAGE_KEY) === "true";
-
-    const high = this.storage?.getItem(FLAPPY_HIGH_SCORE_KEY);
-    if (high) {
-      const parsed = Number.parseInt(high, 10);
-      if (Number.isFinite(parsed) && parsed >= 0) this.flappyHighScore = parsed;
+    this.starPromptResolved = loadJson<unknown>(STAR_STORAGE_KEY, false) === true;
+    const high = loadJson<unknown>(FLAPPY_HIGH_SCORE_KEY, 0);
+    if (typeof high === "number" && Number.isFinite(high) && high >= 0) {
+      this.flappyHighScore = Math.floor(high);
     }
 
-    const raw = this.storage?.getItem(STORAGE_KEY);
-    if (!raw) return;
-    try {
-      const parsed: unknown = JSON.parse(raw);
-      if (!Array.isArray(parsed)) return;
-      for (const entry of parsed) {
-        if (typeof entry === "string" && KNOWN_IDS.has(entry as ItemId)) {
-          this.completed.add(entry as ItemId);
-        }
+    for (const entry of loadJson<unknown[]>(STORAGE_KEY, [], Array.isArray)) {
+      if (typeof entry === "string" && KNOWN_IDS.has(entry as ItemId)) {
+        this.completed.add(entry as ItemId);
       }
-    } catch {
-      // Corrupt payload — start fresh.
     }
   }
 
@@ -57,7 +47,7 @@ export class TutorialState {
     if (this.starPromptResolved) return false;
     this.starPromptResolved = true;
     this.notify();
-    this.persistStarPrompt();
+    saveJson(STAR_STORAGE_KEY, true);
     return true;
   }
 
@@ -65,7 +55,7 @@ export class TutorialState {
     if (this.completed.has(id)) return false;
     this.completed.add(id);
     this.notify();
-    this.persist();
+    saveJson(STORAGE_KEY, [...this.completed]);
     return true;
   }
 
@@ -78,9 +68,9 @@ export class TutorialState {
     this.completed.clear();
     this.starPromptResolved = false;
     this.flappyHighScore = 0;
-    this.storage?.removeItem(STORAGE_KEY);
-    this.storage?.removeItem(STAR_STORAGE_KEY);
-    this.storage?.removeItem(FLAPPY_HIGH_SCORE_KEY);
+    removeJson(STORAGE_KEY);
+    removeJson(STAR_STORAGE_KEY);
+    removeJson(FLAPPY_HIGH_SCORE_KEY);
     this.notify();
   }
 
@@ -91,7 +81,7 @@ export class TutorialState {
   recordFlappyScore(score: number): boolean {
     if (!Number.isFinite(score) || score <= this.flappyHighScore) return false;
     this.flappyHighScore = Math.floor(score);
-    this.persistFlappyHighScore();
+    saveJson(FLAPPY_HIGH_SCORE_KEY, this.flappyHighScore);
     this.notify();
     return true;
   }
@@ -120,31 +110,5 @@ export class TutorialState {
 
   private notify(): void {
     for (const fn of this.listeners) fn();
-  }
-
-  private persist(): void {
-    if (!this.storage) return;
-    try {
-      this.storage.setItem(STORAGE_KEY, JSON.stringify([...this.completed]));
-    } catch {
-      // Quota or access errors shouldn't break in-memory progress —
-      // listeners already fired against the new state.
-    }
-  }
-
-  private persistStarPrompt(): void {
-    try {
-      this.storage?.setItem(STAR_STORAGE_KEY, "true");
-    } catch {
-      // Quota or access errors shouldn't break in-memory progress.
-    }
-  }
-
-  private persistFlappyHighScore(): void {
-    try {
-      this.storage?.setItem(FLAPPY_HIGH_SCORE_KEY, String(this.flappyHighScore));
-    } catch {
-      // Quota or access errors shouldn't break in-memory progress.
-    }
   }
 }

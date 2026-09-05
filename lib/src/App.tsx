@@ -30,7 +30,7 @@ export default function App({
   initialSurfaceRefsNext,
   baseboardNotice,
   dialogHost,
-  enableRemoteHost,
+  enableBurrow,
 }: {
   initialPaneIds?: string[];
   restoredLathLayout?: unknown;
@@ -39,11 +39,11 @@ export default function App({
   initialSurfaceRefsNext?: number;
   baseboardNotice?: ReactNode;
   dialogHost?: ReactNode;
-  enableRemoteHost?: boolean;
+  enableBurrow?: boolean;
 }) {
   return (
     <ErrorBoundary>
-      <Wall initialPaneIds={initialPaneIds} restoredLathLayout={restoredLathLayout} initialDoors={initialDoors} initialSurfaceRefs={initialSurfaceRefs} initialSurfaceRefsNext={initialSurfaceRefsNext} baseboardNotice={baseboardNotice} dialogHost={dialogHost} enableRemoteHost={enableRemoteHost} />
+      <Wall initialPaneIds={initialPaneIds} restoredLathLayout={restoredLathLayout} initialDoors={initialDoors} initialSurfaceRefs={initialSurfaceRefs} initialSurfaceRefsNext={initialSurfaceRefsNext} baseboardNotice={baseboardNotice} dialogHost={dialogHost} enableBurrow={enableBurrow} />
 
       <ThemeDebuggerGlobal />
     </ErrorBoundary>

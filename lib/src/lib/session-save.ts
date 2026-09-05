@@ -1,6 +1,6 @@
 import type { PlatformAdapter } from './platform/types';
 import { browserPersistedPane, readPersistedSession, toPersistedAlertState, type PersistedDoor, type PersistedPane, type PersistedSession, type PersistedSurfaceRefs, type PersistedSurfaceType } from './session-types';
-import { getActivity, getLivePersistedAlertState, getTerminalPaneState, isUntouched, resolveTerminalSessionId } from './terminal-registry';
+import { getActivity, getLivePersistedAlertState, getTerminalPaneState, isUntouched } from './terminal-registry';
 import { UNNAMED_PANEL_TITLE } from './terminal-state';
 
 function getPreviousPaneMap(platform: PlatformAdapter): Map<string, PersistedPane> {
@@ -55,8 +55,7 @@ export async function saveSession(
       }
 
       const liveAlert = getLivePersistedAlertState(pane.id);
-      const sessionId = resolveTerminalSessionId(pane.id);
-      const cwd = await platform.getCwd(sessionId);
+      const cwd = await platform.getCwd(pane.id);
       return {
         id: pane.id,
         title: pane.title,

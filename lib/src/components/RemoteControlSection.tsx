@@ -9,27 +9,27 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from 'react';
-import { DEFAULT_PAIRING_TTL_MS } from 'server-lib-common';
+import { DEFAULT_PAIRING_TTL_MS } from 'remote-lib-common';
 import { ModalReviewBlock, TextInput, modalActionButton } from './design';
 import { ExternalTextLink } from './ExternalTextLink';
-import type { RemoteHostConsoleStatus, SetupQrResult } from '../host/remote/service-protocol';
+import type { BurrowConsoleStatus, SetupQrResult } from '../host/remote/service-protocol';
 import type {
   PairingOutcome,
-  RemoteHostStatus,
+  BurrowStatus,
   TerminalInvitationState,
-} from '../remote/host/remote-host';
-import { SCAN_LABEL } from '../remote/setup-copy';
+} from '../remote/burrow/burrow-runtime';
+import { BURROW_IS_AN_APP, SCAN_LABEL } from '../remote/setup-copy';
 import {
-  clearRemoteHostEnrollment,
-  enrollOfferRemoteHost,
-  enrollRemoteHost,
-  getRemoteHostStatusSnapshot,
+  clearBurrowEnrollment,
+  enrollOfferBurrow,
+  enrollBurrow,
+  getBurrowStatusSnapshot,
   mintSetupQr,
-  reconnectRemoteHost,
-  refreshRemoteHostStatus,
-  subscribeToRemoteHostStatus,
+  reconnectBurrow,
+  refreshBurrowStatus,
+  subscribeToBurrowStatus,
   subscribeToInvitation,
-} from '../remote/host/host-status-store';
+} from '../remote/burrow/burrow-status-store';
 
 /**
  * The QR encoder (`uqr`) is only ever reached by one panel inside one dialog on
@@ -48,9 +48,9 @@ function makeQrCode() {
 /**
  * How each relay-socket state reads to someone who is not holding the spec.
  * `displaced` is the only one that needs the user to act, so it is the only one
- * that gets a button (`docs/specs/server.md`, "Relay socket policy").
+ * that gets a button (`docs/specs/relay.md`, "Relay socket policy").
  */
-function describeConnection(connection: RemoteHostStatus): { text: string; tone: 'ok' | 'warn' | 'muted' } {
+function describeConnection(connection: BurrowStatus): { text: string; tone: 'ok' | 'warn' | 'muted' } {
   switch (connection) {
     case 'connected':
       return { text: 'Connected', tone: 'ok' };
@@ -60,7 +60,7 @@ function describeConnection(connection: RemoteHostStatus): { text: string; tone:
       return { text: 'Reconnecting…', tone: 'muted' };
     case 'displaced':
       return {
-        text: 'Another Dormouse instance took this server’s slot. This machine stood down and will not retry on its own.',
+        text: 'Another Dormouse instance took this Relay’s slot. This machine stood down and will not retry on its own.',
         tone: 'warn',
       };
     case 'stopped':
@@ -77,30 +77,31 @@ const TONE_CLASS = {
 } as const;
 
 const FIELD_LABEL = 'text-xs text-muted';
+const FIELD_HINT = `${FIELD_LABEL} mt-1 block`;
 const HOSTED_REMOTE_URL = 'https://dormouse.sh/hosted/#remote-control';
 
 /**
  * How far ahead of `expiresAt` the phone-setup panel mints a replacement code.
  *
  * The panel can sit open while someone goes to find their phone, and a code is
- * short-lived by design (`docs/specs/server.md` → Setup tokens) — so it replaces
+ * short-lived by design (`docs/specs/relay.md` → Setup tokens) — so it replaces
  * its own rather than going quietly unscannable. The lead is what keeps a camera
  * opening on the old code from redeeming one that has already died.
  */
 const SETUP_QR_REFRESH_LEAD_MS = 20_000;
 
 /**
- * Floor on that delay, because `expiresAt` is the *Server's* clock and the
+ * Floor on that delay, because `expiresAt` is the *Relay's* clock and the
  * subtraction is against the webview's. A laptop a few minutes fast computes a
  * delay at or below zero and re-mints in a tight loop — several POSTs a second,
- * each spending a real single-use token on the Server. The floor turns clock
+ * each spending a real single-use token on the Relay. The floor turns clock
  * skew into a slightly early refresh instead.
  */
 const SETUP_QR_MIN_REFRESH_MS = 30_000;
 
 /**
- * Ceiling for a webview clock behind the Server. Its computed lifetime can be
- * arbitrarily long, but the token has at most the shared TTL on the Server;
+ * Ceiling for a webview clock behind the Relay. Its computed lifetime can be
+ * arbitrarily long, but the token has at most the shared TTL on the Relay;
  * keep the same lead so its replacement lands before real expiry.
  */
 const SETUP_QR_MAX_REFRESH_MS = DEFAULT_PAIRING_TTL_MS - SETUP_QR_REFRESH_LEAD_MS;
@@ -162,7 +163,7 @@ type SetupQrState =
  * **Four different facts, and they read differently.** `scanned` means a phone
  * completed the handshake and the next step is the pairing request about to
  * interrupt this machine; `finished` means that request has been answered,
- * either way; `dropped` means this Host discarded the code un-scanned — the
+ * either way; `dropped` means this Burrow discarded the code un-scanned — the
  * relay socket went, or a newer mint evicted it; `expired` means its TTL ran
  * out before anyone scanned it. **Only `scanned` sends the user to a phone**
  * (`docs/specs/remote-security-model.md` → Pairing).
@@ -171,7 +172,7 @@ type TerminalPhase = 'scanned' | 'finished' | 'dropped' | 'expired';
 
 /**
  * How each terminal invitation state reads in the panel. Exhaustive over the
- * states the Host publishes, so a fifth one cannot quietly fall through to
+ * states the Burrow publishes, so a fifth one cannot quietly fall through to
  * "scanned" — the one sentence that must never be shown for a code nobody
  * touched.
  */
@@ -202,7 +203,7 @@ const TERMINAL_COPY: Record<TerminalPhase, { headline: string; detail: string }>
   },
   dropped: {
     headline: 'This code is no longer valid — nobody scanned it.',
-    detail: 'This machine lost its connection to the server, or replaced the code. Get a new one.',
+    detail: 'This machine lost its connection to the Relay, or replaced the code. Get a new one.',
   },
   expired: {
     headline: 'This code expired — nobody scanned it.',
@@ -215,11 +216,11 @@ const TERMINAL_COPY: Record<TerminalPhase, { headline: string; detail: string }>
  * table actually holds.
  *
  * **Never the `in` operator.** Every one of these tables is keyed by a string
- * the Host chose and a bridge relayed, and `in` walks the prototype chain — so
+ * the Burrow chose and a bridge relayed, and `in` walks the prototype chain — so
  * `'toString'` would answer "yes, there is copy for that" and hand back
  * `Object.prototype.toString` to render. The store checks that those fields are
  * strings and deliberately *not* that they are members of the closed set
- * (`host-status-store.ts`), so this is where a stranger stops.
+ * (`burrow-status-store.ts`), so this is where a stranger stops.
  * `hasOwnProperty.call` rather than `Object.hasOwn`, which is ES2022 and this
  * build's lib is ES2020.
  */
@@ -256,7 +257,7 @@ const SPENT_GET_ANOTHER = 'This setup code is spent — get a new one and try ag
  * What each pairing outcome says to the person at this machine.
  *
  * **Fixed copy chosen by code.** The outcome is a closed member this machine's
- * own Host decided, and the sentence for it is written here — nothing on this
+ * own Burrow decided, and the sentence for it is written here — nothing on this
  * screen is ever rendered from something that arrived on a wire
  * (`docs/specs/remote-security-model.md` → Pairing). Exhaustive over
  * {@link PairingOutcome} for the same reason {@link TERMINAL_COPY} is over the
@@ -271,7 +272,7 @@ const SPENT_GET_ANOTHER = 'This setup code is spent — get a new one and try ag
  * `expired` covers **both** ways a deadline ends a ceremony — the reaper firing
  * with the modal unanswered, and a confirmation typed after it — so it says the
  * request ran out of time rather than that nobody answered it
- * (`RemoteHost.#approvePairing` checks the deadline after spending its one
+ * (`BurrowRuntime.#approvePairing` checks the deadline after spending its one
  * attempt).
  */
 export const PAIRING_OUTCOME_COPY: Record<PairingOutcome, string> = {
@@ -280,7 +281,7 @@ export const PAIRING_OUTCOME_COPY: Record<PairingOutcome, string> = {
   cancelled: 'You cancelled this request, so nothing was paired.',
   expired: 'The request ran out of time, so nothing was paired.',
   superseded: 'Another pairing request replaced this one, so nothing was paired.',
-  'host-error': 'This machine could not finish pairing, so nothing was paired.',
+  'burrow-error': 'This machine could not finish pairing, so nothing was paired.',
 };
 
 /**
@@ -320,7 +321,7 @@ function outcomeSentence(
 
 /**
  * The phone-setup panel's whole lifecycle: mint on open, replace the code before
- * it dies, and flip to spent when the Server says the phone used it.
+ * it dies, and flip to spent when the Relay says the phone used it.
  *
  * **Its own busy and error, not the section's {@link useBusyAction}.** A mint
  * here fires on a timer rather than on a click: running it through the shared
@@ -335,7 +336,7 @@ function useSetupQr() {
   const [outcome, setOutcome] = useState<PairingOutcome | undefined>(undefined);
   /**
    * Bumped synchronously by every mint and by closing. Two jobs, both about a
-   * code that exists on the Server whether or not anyone can see it: it disarms
+   * code that exists on the Relay whether or not anyone can see it: it disarms
    * the pending auto-refresh the instant a mint starts, so the fetch window
    * cannot produce a second one, and it gates the writes below, so a mint
    * resolving after the panel closed leaves no live-but-undisplayed token.
@@ -406,7 +407,7 @@ function useSetupQr() {
     return () => clearTimeout(timer);
   }, [state, mint]);
 
-  // The Host reports its own invitation states, which is the only way this
+  // The Burrow reports its own invitation states, which is the only way this
   // panel can know its code was used: the scan happens on the phone. The
   // *phase* is only for the invitation this panel is following — a second
   // window offering a different code stays live — and bumping the sequence
@@ -450,7 +451,7 @@ function displayedQr(state: SetupQrState): SetupQrResult | undefined {
  * The invitation this panel is following: the one it is drawing, or — once a
  * phone has completed a handshake against it — the one whose outcome it is
  * still waiting on. The second half is why the subscription outlives the QR
- * (`docs/specs/server.md` → Remote control, in the Settings dialog).
+ * (`docs/specs/relay.md` → Remote control, in the Settings dialog).
  */
 function trackedInviteId(state: SetupQrState): string | undefined {
   if (state?.phase === 'scanned') return state.inviteId;
@@ -459,7 +460,7 @@ function trackedInviteId(state: SetupQrState): string | undefined {
 
 type EnrollmentAction = 'offer' | 'form';
 
-/** One synchronous gate shared by both ways an un-enrolled Host can enroll. */
+/** One synchronous gate shared by both ways an un-enrolled Burrow can enroll. */
 function useEnrollmentActions() {
   const running = useRef(false);
   const [busy, setBusy] = useState<EnrollmentAction | null>(null);
@@ -488,46 +489,52 @@ function useEnrollmentActions() {
 }
 
 /** The one field the offer card and the typed form both ask for. */
-function MachineNameField({
+function BurrowNameField({
   value,
   onChange,
 }: {
   value: string;
   onChange: (value: string) => void;
 }) {
+  // The hint is a sibling of the label, not a child: inside it, it would join
+  // the input's accessible name and leave the field called "Name for this
+  // Burrow A Burrow is one Dormouse app …".
   return (
-    <label className="mt-2 block">
-      <span className={FIELD_LABEL}>Name for this machine</span>
-      <TextInput
-        value={value}
-        onChange={onChange}
-        autoComplete="off"
-        placeholder="e.g. Work laptop"
-      />
-    </label>
+    <div className="mt-2">
+      <label className="block">
+        <span className={FIELD_LABEL}>Name for this Burrow</span>
+        <TextInput
+          value={value}
+          onChange={onChange}
+          autoComplete="off"
+          placeholder="e.g. Work laptop"
+        />
+      </label>
+      <p className={FIELD_HINT}>{BURROW_IS_AN_APP} Each pairs with your phone on its own.</p>
+    </div>
   );
 }
 
 /**
- * Connect this machine to a coordinating server, so a phone running Dormouse
+ * Connect this machine to a coordinating Relay, so a phone running Dormouse
  * Pocket can pair with it.
  *
- * Renders nothing at all on a build with no Host service behind it (the
- * website, the lib dev server): there is no Host to enroll, and offering the
+ * Renders nothing at all on a build with no Burrow service behind it (the
+ * website, the lib dev server): there is no Burrow to enroll, and offering the
  * form would promise something the build cannot do.
  *
  * This is the same `enroll` / `enrollOffer` / `status` / `reconnect` /
- * `clearEnrollment` surface as the `window.dormouseRemoteHost` console hook,
- * which stays as the scripting seam (`docs/specs/server.md`, "Host side").
+ * `clearEnrollment` surface as the `window.dormouseBurrow` console hook,
+ * which stays as the scripting seam (`docs/specs/relay.md`, "Burrow side").
  * Pairing approval is *not* here — it is a modal, because it must interrupt
  * (`docs/specs/remote-security-model.md`, Pairing Ceremony).
  */
 export function RemoteControlSection() {
-  const state = useSyncExternalStore(subscribeToRemoteHostStatus, getRemoteHostStatusSnapshot);
+  const state = useSyncExternalStore(subscribeToBurrowStatus, getBurrowStatusSnapshot);
 
   // Another window may have enrolled since this dialog last opened, and the
   // service pushes `status` only when it changes.
-  useEffect(() => void refreshRemoteHostStatus(), []);
+  useEffect(() => void refreshBurrowStatus(), []);
 
   if (state.kind === 'unsupported') return null;
 
@@ -541,12 +548,12 @@ export function RemoteControlSection() {
           Could not reach this machine’s remote-control service: {state.message}
         </div>
       ) : state.status.enrolled ? (
-        // Keyed by which enrollment this is: a swap to another server — the
+        // Keyed by which enrollment this is: a swap to another Relay — the
         // console hook can do one under an open dialog — must not leave a setup
         // code, or an error, belonging to the machine we just left.
         <EnrolledView
-          key={state.status.hostId ?? state.status.serverUrl ?? 'enrolled'}
-          serverUrl={state.status.serverUrl}
+          key={state.status.burrowId ?? state.status.relayUrl ?? 'enrolled'}
+          relayUrl={state.status.relayUrl}
           connection={state.status.connection}
           pairedClients={state.status.pairedClients}
         />
@@ -561,7 +568,7 @@ export function RemoteControlSection() {
  * Un-enrolled, with or without an installer's offer on this machine.
  *
  * With one, the offer leads and the typed form folds away behind a disclosure:
- * a user who ran the installer here has nothing to type, and a server somewhere
+ * a user who ran the installer here has nothing to type, and a Relay somewhere
  * else is the rarer case. Without one, nothing about the form changes.
  *
  * **One tree, whichever of those it is.** `offer` flips underneath this
@@ -569,14 +576,14 @@ export function RemoteControlSection() {
  * unlinked the moment an enroll redeems it — and a shape that changed with it
  * would unmount whatever the user was in the middle of: a failure landing after
  * the flip would have nowhere to render, leaving silence over a spent
- * single-use token, and a half-typed server URL would vanish because a file
- * appeared on disk (`docs/specs/server.md`).
+ * single-use token, and a half-typed Relay URL would vanish because a file
+ * appeared on disk (`docs/specs/relay.md`).
  */
 function EnrollView({
   offer,
   suggestedLabel,
 }: {
-  offer: RemoteHostConsoleStatus['offer'];
+  offer: BurrowConsoleStatus['offer'];
   suggestedLabel: string;
 }) {
   const [showForm, setShowForm] = useState(false);
@@ -608,7 +615,7 @@ function EnrollView({
             busy={busy === 'offer'}
             disabled={busy !== null}
             error={offerError}
-            onEnroll={(label) => void run('offer', () => enrollOfferRemoteHost(origin, label))}
+            onEnroll={(label) => void run('offer', () => enrollOfferBurrow(origin, label))}
           />
           <div className="mt-2">
             <button
@@ -619,7 +626,7 @@ function EnrollView({
             >
               {/* The same `+`/`−` affordance as Pocket's "First-time setup"
                   disclosure, so a fold reads as one before it is clicked. */}
-              {showForm ? '− ' : '+ '}Enroll with a different server…
+              {showForm ? '− ' : '+ '}Enroll with a different Relay…
             </button>
           </div>
         </>
@@ -631,8 +638,8 @@ function EnrollView({
         busy={busy === 'form'}
         disabled={busy !== null}
         error={formError}
-        onEnroll={(serverUrl, password, label) =>
-          run('form', () => enrollRemoteHost(serverUrl, password, label))
+        onEnroll={(relayUrl, password, label) =>
+          run('form', () => enrollBurrow(relayUrl, password, label))
         }
       />
     </div>
@@ -640,11 +647,11 @@ function EnrollView({
 }
 
 /**
- * One-click enrollment against the server installed on this machine.
+ * One-click enrollment against the Relay installed on this machine.
  *
  * The origin is shown but not editable, and the label is all the user chooses
- * (`service-protocol.ts` → `RemoteHostConsoleStatus.offer`). Every refusal the
- * typed form can hit applies here too — an installed server can still sit on an
+ * (`service-protocol.ts` → `BurrowConsoleStatus.offer`). Every refusal the
+ * typed form can hit applies here too — an installed Relay can still sit on an
  * origin this build was not compiled to reach — so the error renders in the same
  * place, in the same words. The busy/error pair belongs to {@link EnrollView},
  * because this card is unmounted by a successful enroll and must not be by an
@@ -678,7 +685,7 @@ function OfferCard({
       }}
     >
       <div className="text-sm leading-relaxed text-muted">
-        A Dormouse server is installed on this machine.
+        A Dormouse Relay is installed on this machine.
       </div>
       {/* The origin is the value the user is about to act on, so it gets the
           same framed review block as the other two places that show one
@@ -687,7 +694,7 @@ function OfferCard({
         {origin}
       </ModalReviewBlock>
 
-      <MachineNameField value={label} onChange={setLabel} />
+      <BurrowNameField value={label} onChange={setLabel} />
 
       {error ? <div className="mt-2 text-sm leading-relaxed text-error">{error}</div> : null}
 
@@ -705,12 +712,12 @@ function OfferCard({
 }
 
 function EnrolledView({
-  serverUrl,
+  relayUrl,
   connection,
   pairedClients,
 }: {
-  serverUrl: string | null;
-  connection: RemoteHostStatus;
+  relayUrl: string | null;
+  connection: BurrowStatus;
   pairedClients: number;
 }) {
   const { busy, error, run } = useBusyAction();
@@ -733,7 +740,7 @@ function EnrolledView({
 
   return (
     <div className="mt-1.5 text-sm leading-relaxed">
-      <div className="font-mono break-all text-foreground">{serverUrl ?? 'Unknown server'}</div>
+      <div className="font-mono break-all text-foreground">{relayUrl ?? 'Unknown Relay'}</div>
       <div className={`mt-0.5 ${TONE_CLASS[described.tone]}`}>{described.text}</div>
       <div className="mt-0.5 text-muted">
         {pairedClients === 0
@@ -751,7 +758,7 @@ function EnrolledView({
             type="button"
             disabled={busy}
             className={modalActionButton({ tone: 'primary' })}
-            onClick={() => void run(reconnectRemoteHost)}
+            onClick={() => void run(reconnectBurrow)}
           >
             Reconnect
           </button>
@@ -765,7 +772,7 @@ function EnrolledView({
               className={modalActionButton({ tone: 'primary' })}
               onClick={() =>
                 void run(async () => {
-                  await clearRemoteHostEnrollment();
+                  await clearBurrowEnrollment();
                   setConfirmingDisconnect(false);
                 })
               }
@@ -817,8 +824,8 @@ function EnrolledView({
 }
 
 /**
- * The QR a phone scans to set itself up against this machine's server, inline
- * in the Settings dialog (`docs/specs/server.md` → "Remote control, in the
+ * The QR a phone scans to set itself up against this machine's Relay, inline
+ * in the Settings dialog (`docs/specs/relay.md` → "Remote control, in the
  * Settings dialog").
  *
  * Purely what to draw for a {@link SetupQrState}; {@link useSetupQr} owns every
@@ -999,24 +1006,24 @@ function EnrollForm({
   busy: boolean;
   disabled: boolean;
   error: string | null;
-  onEnroll: (serverUrl: string, password: string, label: string) => Promise<boolean>;
+  onEnroll: (relayUrl: string, password: string, label: string) => Promise<boolean>;
 }) {
-  const [serverUrl, setServerUrl] = useState('');
+  const [relayUrl, setRelayUrl] = useState('');
   const [password, setPassword] = useState('');
   const [label, setLabel] = useState(suggestedLabel);
 
-  const ready = serverUrl.trim() !== '' && password !== '' && label.trim() !== '';
+  const ready = relayUrl.trim() !== '' && password !== '' && label.trim() !== '';
 
   const submit = useCallback(
     () =>
-      onEnroll(serverUrl.trim(), password, label.trim()).then((succeeded) => {
+      onEnroll(relayUrl.trim(), password, label.trim()).then((succeeded) => {
         if (!succeeded) return;
         // Only on success: a failed enroll is usually a typo in one of the other
         // fields, and clearing the password would make every retry a re-fetch
         // from the password manager.
         setPassword('');
       }),
-    [onEnroll, serverUrl, password, label],
+    [onEnroll, relayUrl, password, label],
   );
 
   return (
@@ -1029,7 +1036,7 @@ function EnrollForm({
       }}
     >
       <div className="text-sm leading-relaxed text-muted">
-        Connect this machine to a Dormouse server to control it from your phone.
+        Connect this machine to a Dormouse Relay to control it from your phone.
         {' '}
         <ExternalTextLink href={HOSTED_REMOTE_URL}>
           Prefer not to run one? Hosted is coming soon.
@@ -1037,14 +1044,14 @@ function EnrollForm({
       </div>
 
       <label className="mt-2 block">
-        <span className={FIELD_LABEL}>Server</span>
+        <span className={FIELD_LABEL}>Relay</span>
         <TextInput
-          value={serverUrl}
-          onChange={setServerUrl}
+          value={relayUrl}
+          onChange={setRelayUrl}
           type="url"
           autoComplete="off"
           spellCheck={false}
-          placeholder="https://your-server"
+          placeholder="https://your-relay"
         />
       </label>
 
@@ -1055,11 +1062,11 @@ function EnrollForm({
           onChange={setPassword}
           type="password"
           autoComplete="off"
-          placeholder="From the server operator"
+          placeholder="From the Relay operator"
         />
       </label>
 
-      <MachineNameField value={label} onChange={setLabel} />
+      <BurrowNameField value={label} onChange={setLabel} />
 
       {error ? <div className="mt-2 text-sm leading-relaxed text-error">{error}</div> : null}
 

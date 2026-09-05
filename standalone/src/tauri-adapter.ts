@@ -15,7 +15,7 @@ import type {
   PlatformAdapter,
   PtyDataDetail,
   PtyInfo,
-  RemoteHostLink,
+  BurrowLink,
 } from "dormouse-lib/lib/platform/types";
 import type {
   NotepadArchiveLoadResult,
@@ -24,16 +24,16 @@ import type {
 } from "dormouse-lib/lib/notepad/types";
 import {
   answerAskCommand,
-  createRemoteHostLinkClient,
+  createBurrowLinkClient,
   notifyCommand,
 } from "dormouse-lib/host/remote/link-client";
 import {
-  REMOTE_HOST_ASK_EVENT,
-  REMOTE_HOST_EVENT_EVENT,
-  REMOTE_HOST_RESULT_EVENT,
-  type RemoteHostAsk,
-  type RemoteHostCommand,
-  type RemoteHostResult,
+  BURROW_ASK_EVENT,
+  BURROW_EVENT_EVENT,
+  BURROW_RESULT_EVENT,
+  type BurrowAsk,
+  type BurrowCommand,
+  type BurrowResult,
 } from "dormouse-lib/host/remote/service-protocol";
 import { embedderOrigins } from "dormouse-lib/lib/embedder-origins";
 import { AlertManager } from "dormouse-lib/lib/alert-manager";
@@ -52,7 +52,7 @@ import {
 import { getTerminalTheme, onTerminalThemeChange, themeColorProvider } from "dormouse-lib/lib/terminal-theme";
 import type { TerminalSemanticEvent } from "dormouse-lib/lib/terminal-state";
 import {
-  applyTerminalSemanticEventsByPtyId,
+  applyTerminalSemanticEvents,
 } from "dormouse-lib/lib/terminal-state-store";
 import type { DorControlCancelPayload, DorControlRequestPayload } from "dor/protocol";
 import {
@@ -100,19 +100,19 @@ export class TauriAdapter implements PlatformAdapter {
   private nextFlushRequestId = 0;
   // --- Remote host bridge (docs/specs/remote-api.md) ---
   //
-  // The Host lives in the sidecar, next to the PTYs. This webview forwards its
+  // The Burrow lives in the sidecar, next to the PTYs. This webview forwards its
   // console commands, answers what only it knows (pane names, xterm sizes), and
   // mirrors the pairing queue. Only the transport is this adapter's: one Rust
   // invoke carries everything, so an answer and a notify ride it as ordinary
-  // commands, and correlation is `rhId` — never `requestId`, which Rust
+  // commands, and correlation is `burrowRequestId` — never `requestId`, which Rust
   // swallows on any sidecar line that carries it.
-  private readonly remoteHostClient = createRemoteHostLinkClient({
-    sendCommand: (command) => this.sendRemoteHostCommand(command),
-    answerAsk: (askId, results) => this.sendRemoteHostCommand(answerAskCommand(askId, results)),
-    notify: () => this.sendRemoteHostCommand(notifyCommand()),
+  private readonly burrowClient = createBurrowLinkClient({
+    sendCommand: (command) => this.sendBurrowCommand(command),
+    answerAsk: (askId, results) => this.sendBurrowCommand(answerAskCommand(askId, results)),
+    notify: () => this.sendBurrowCommand(notifyCommand()),
   });
 
-  readonly remoteHost: RemoteHostLink = this.remoteHostClient.link;
+  readonly burrow: BurrowLink = this.burrowClient.link;
 
   constructor() {
     this.alertManager.onStateChange((id, state) => {
@@ -151,7 +151,7 @@ export class TauriAdapter implements PlatformAdapter {
       listen<{ id: string; events: TerminalSemanticEvent[] }>("terminal:semanticEvents", (event) => {
         const { id, events } = event.payload;
         this.alertManager.applyTerminalSemanticEvents(id, events);
-        applyTerminalSemanticEventsByPtyId(id, events);
+        applyTerminalSemanticEvents(id, events);
       }),
 
       listen<{ id: string; exitCode: number }>("pty:exit", (event) => {
@@ -176,7 +176,7 @@ export class TauriAdapter implements PlatformAdapter {
         // reaches xterm.js instead, and answering is the owner's alone.
         const { id, data } = event.payload;
         const parsed = new TerminalProtocolParser(themeColorProvider).process(data);
-        applyTerminalSemanticEventsByPtyId(id, collectTerminalSemanticEvents(parsed.events));
+        applyTerminalSemanticEvents(id, collectTerminalSemanticEvents(parsed.events));
         for (const handler of this.replayHandlers) {
           handler({ id, data: parsed.visibleData });
         }
@@ -189,17 +189,17 @@ export class TauriAdapter implements PlatformAdapter {
         for (const handler of this.filesDroppedHandlers) handler(paths);
       }),
 
-      listen<RemoteHostResult>(REMOTE_HOST_RESULT_EVENT, (event) => {
-        this.remoteHostClient.onResult(event.payload);
+      listen<BurrowResult>(BURROW_RESULT_EVENT, (event) => {
+        this.burrowClient.onResult(event.payload);
       }),
 
-      listen<RemoteHostAsk>(REMOTE_HOST_ASK_EVENT, (event) => {
+      listen<BurrowAsk>(BURROW_ASK_EVENT, (event) => {
         const ask = event.payload;
-        this.remoteHostClient.onAsk(ask.rhId, ask.op, ask.params);
+        this.burrowClient.onAsk(ask.burrowRequestId, ask.op, ask.params);
       }),
 
-      listen<{ name?: string }>(REMOTE_HOST_EVENT_EVENT, (event) => {
-        this.remoteHostClient.onEvent(event.payload);
+      listen<{ name?: string }>(BURROW_EVENT_EVENT, (event) => {
+        this.burrowClient.onEvent(event.payload);
       }),
 
       listen<DorControlRequestPayload>("dor:controlRequest", (event) => {
@@ -250,7 +250,7 @@ export class TauriAdapter implements PlatformAdapter {
     }
     this.unlistenFns = [];
     // Nothing will answer what is outstanding once the sidecar is gone.
-    this.remoteHostClient.dispose();
+    this.burrowClient.dispose();
     invoke("kill_sidecar_now");
   }
 
@@ -514,9 +514,9 @@ export class TauriAdapter implements PlatformAdapter {
     );
   }
 
-  private sendRemoteHostCommand(command: RemoteHostCommand): void {
-    rawInvoke("remote_host_command", { payload: command }).catch((err) =>
-      console.error("[tauri-adapter] remote_host_command failed:", err),
+  private sendBurrowCommand(command: BurrowCommand): void {
+    rawInvoke("burrow_command", { payload: command }).catch((err) =>
+      console.error("[tauri-adapter] burrow_command failed:", err),
     );
   }
 

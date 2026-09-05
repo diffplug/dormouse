@@ -143,7 +143,7 @@ async function runQuitTeardown(): Promise<void> {
           // the ordering is the load-bearing part and the workspaces-rollout
           // scope turns persistence back on (docs/specs/layout.md -> `## Future`).
           await adapter.requestSessionFlush(1500); // save while PTYs are alive
-          await adapter.gracefulKillAllPtys(2000); // SIGTERM; scrollback survives
+          await adapter.gracefulKillAllPtys(2000); // SIGTERM; wait for exits and final output
           await adapter.requestSessionFlush(1500); // final post-exit save
           await adapter.drainSessionSaves(2000); // last write reaches disk
         })(),

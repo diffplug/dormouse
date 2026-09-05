@@ -3,12 +3,12 @@ import { clsx } from 'clsx';
 import { Baseboard } from './Baseboard';
 import { ExternalLinkModalHost } from './ExternalLinkModalHost';
 import { AgentBrowserScreenModalHost } from './AgentBrowserScreenModalHost';
-// Remote-host code (relay/WebSocket/enrollment + the window.dormouseRemoteHost
+// Remote-host code (relay/WebSocket/enrollment + the window.dormouseBurrow
 // console hook) is loaded and mounted only when the embedding runtime opts in
-// via `enableRemoteHost` — see the mount below. Lazy so it stays out of the
+// via `enableBurrow` — see the mount below. Lazy so it stays out of the
 // website playground and vscode webview bundles, which never enable it.
 const RemotePairingModalHost = lazy(() =>
-  import('../remote/host/RemotePairingModalHost').then((m) => ({
+  import('../remote/burrow/RemotePairingModalHost').then((m) => ({
     default: m.RemotePairingModalHost,
   })),
 );
@@ -240,7 +240,7 @@ export function Wall({
   baseboardNotice,
   dialogHost,
   showBaseboard = true,
-  enableRemoteHost = false,
+  enableBurrow = false,
 }: {
   initialPaneIds?: string[];
   initialMode?: WallMode;
@@ -262,12 +262,12 @@ export function Wall({
   dialogHost?: ReactNode;
   showBaseboard?: boolean;
   /**
-   * Opt in to the remote-control Host (the "Pocket" pairing seam). Only the
+   * Opt in to the Burrow (the "Pocket" pairing seam). Only the
    * standalone desktop/sidecar runtime sets this; the website playground and
-   * vscode webview leave it off so the remote-host stack and its
-   * `window.dormouseRemoteHost` console hook never load there.
+   * vscode webview leave it off so the Burrow stack and its
+   * `window.dormouseBurrow` console hook never load there.
    */
-  enableRemoteHost?: boolean;
+  enableBurrow?: boolean;
 } = {}) {
   // The Lath engine handle — Dormouse's tiling engine. Constructed lazily exactly
   // once per Wall mount, so `createLathWallEngine` is not re-invoked each render
@@ -948,7 +948,7 @@ export function Wall({
   // includes minimized (doored) Surfaces for `dor list` and direct operations.
   // `surface:N` refs come from the Workspace-scoped registry above, not from
   // layout/list position. This is a parallel projection to the phone's
-  // `DirectoryEntry` (`lib/src/remote/host/directory-collect.ts`) over the same
+  // `DirectoryEntry` (`lib/src/remote/burrow/directory-collect.ts`) over the same
   // stores — keep the shared field derivations (activity / cwd / ringing / todo)
   // in sync.
   const buildDorSurfacesInternal = useCallback((includeMinimized: boolean): DorSurface[] => {
@@ -1715,7 +1715,7 @@ export function Wall({
 
             <ExternalLinkModalHost />
             <AgentBrowserScreenModalHost resolveLabel={surfaceRefForId} />
-            {enableRemoteHost ? (
+            {enableBurrow ? (
               <Suspense fallback={null}>
                 <RemotePairingModalHost />
               </Suspense>

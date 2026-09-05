@@ -42,27 +42,28 @@ const SECTION = 'mt-4 border-t border-border pt-3';
 /**
  * The "Push will be sent to …" line. Every state names a cause, because a push
  * that silently goes nowhere is indistinguishable from one that is broken.
- * `no-host` covers two of those causes, which is why `hasHostService` is a
+ * `no-burrow` covers two of those causes, which is why `remoteControlBelow` is a
  * separate argument — see the comment on that branch below.
  *
  * The list is deliberately scoped to *this* machine, not the account: the ACL
- * that authorizes these devices lives on the Host and never on the Server
+ * that authorizes these devices lives on the Burrow and never on the Relay
  * (`docs/specs/remote-security-model.md`), so there is no account-wide device
  * list to show and the copy must not imply one.
  */
-function describePushTargets(push: PushDevicesState, hasHostService: boolean): string {
+function describePushTargets(push: PushDevicesState, remoteControlBelow: boolean): string {
   if (push.status === 'loading') return 'Looking for phones…';
-  if (push.status === 'error') return 'Could not reach the server to list phones.';
-  // `no-host` covers two builds: one whose Host service simply has not enrolled,
-  // and one with no Host service at all (`push-devices.ts` — the website leaves
+  if (push.status === 'error') return 'Could not reach the Relay to list phones.';
+  // The preview never shows Remote control, so it also omits "below".
+  // `no-burrow` covers two builds: one whose Burrow service simply has not enrolled,
+  // and one with no Burrow service at all (`push-devices.ts` — the website leaves
   // it here forever). Only the first has a Remote control section beneath this
   // line, because the second is exactly where that section renders nothing, so
   // "below" has to key on the same seam the section gates on rather than on
-  // `no-host`.
-  if (push.status === 'no-host') {
-    return hasHostService
-      ? 'Connect this machine to a Dormouse server below to send push.'
-      : 'Connect this machine to a Dormouse server to send push.';
+  // `no-burrow`.
+  if (push.status === 'no-burrow') {
+    return remoteControlBelow
+      ? 'Connect this machine to a Dormouse Relay below to send push.'
+      : 'Connect this machine to a Dormouse Relay to send push.';
   }
   // Reached both before anything is paired and right after a pairing, so it
   // must read as true in each: not "nothing is paired" (the phone may well be
@@ -89,7 +90,6 @@ function describePushTargets(push: PushDevicesState, hasHostService: boolean): s
 export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const watched = useSyncExternalStore(subscribeToWatchedCommands, getWatchedCommandsSnapshot);
   const settings = useSyncExternalStore(subscribeToAlertSettings, getAlertSettings);
-  const push = useSyncExternalStore(subscribeToPushDevices, getPushDevices);
   const shellState = useSyncExternalStore(subscribeToShells, getShellsSnapshot);
   const closeRef = useRef<HTMLButtonElement>(null);
   // One union rather than a boolean per picker, so two menus can never be open
@@ -106,25 +106,14 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const onShellOpenChange = useCallback((open: boolean) => setOpenMenu(open ? 'shell' : null), []);
 
   // VS Code owns the theme and has its own picker, so Dormouse offers none
-  // there. Every other host sets its theme here rather than in host chrome.
+  // there. Every other burrow sets its theme here rather than in burrow chrome.
   const showTheme = !getPlatform().hostOwnsTheme;
 
   // Same for the shell, plus: with nothing to switch between there is nothing
   // to offer. That also covers every host whose adapter detects no shells and
-  // every host that never seeds the store (fake = 1, remote = 0).
+  // every burrow that never seeds the store (fake = 1, remote = 0).
   const showShell = !getPlatform().hostOwnsShells && shellState.shells.length >= 2;
-  // The same seam `RemoteControlSection` gates on, read here so the push line
-  // above it cannot promise a section this build does not render.
-  const hasHostService = getPlatform().remoteHost !== undefined;
-
-  // Pocket has no archive port at all, and neither does a build before its
-  // platform is installed. An entry to a view that can only say "no archive
-  // here" is worse than no entry.
   const showArchive = hasNotepadArchive();
-
-  // A phone can enable alerts long after this machine booted, so re-read the
-  // list on open rather than showing whatever was true at Host start.
-  useEffect(() => refreshPushDevicesNow(), []);
 
   if (view === 'archive') {
     return <NotepadArchiveView onBack={() => setView('settings')} onClose={onClose} />;
@@ -215,36 +204,12 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
         </div>
       </section>
 
-      <AlarmSinkSection
-        switchLabel="Speak out loud if not attended"
-        delayLabel="Delay before speaking:"
-        enabled={settings.speakEnabled}
-        delayMs={settings.speakDelayMs}
-        onToggle={(speakEnabled) => updateAlertSettings({ speakEnabled })}
-        onCommitDelay={(speakDelayMs) => updateAlertSettings({ speakDelayMs })}
-        action={<SpeakTestButton />}
-      >
-        Uses your browser or system voice.{' '}
-        <ExternalTextLink href={HOSTED_VOICE_URL}>
-          Managed ElevenLabs voice is coming soon.
-        </ExternalTextLink>
-      </AlarmSinkSection>
+      <AlarmSettingsSection sink="speech" />
+      <AlarmSettingsSection sink="push" />
 
-      <AlarmSinkSection
-        switchLabel="Send push notification if not attended"
-        delayLabel="Delay before push:"
-        enabled={settings.pushEnabled}
-        delayMs={settings.pushDelayMs}
-        onToggle={(pushEnabled) => updateAlertSettings({ pushEnabled })}
-        onCommitDelay={(pushDelayMs) => updateAlertSettings({ pushDelayMs })}
-        action={<PushTestButton />}
-      >
-        {describePushTargets(push, hasHostService)}
-      </AlarmSinkSection>
-
-      {/* Directly under the push section that points at it: push is the feature
-          that makes a reader care, and "no Host" is the reason it has nowhere to
-          go. Renders nothing on a build with no Host service. */}
+      {/* Directly under the push section that points at it: push is
+          the feature that makes a reader care, and "no Burrow" is the reason it
+          has nowhere to go. Renders nothing on a build with no Burrow service. */}
       <RemoteControlSection />
 
       {/* Last: the only row here that leads somewhere instead of setting
@@ -269,12 +234,59 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
+export type AlarmSink = 'speech' | 'push';
+
+/** Shared by the full dialog and the brief, inert baseboard confirmation. */
+export function AlarmSettingsSection({ sink, preview = false }: { sink: AlarmSink; preview?: boolean }) {
+  const settings = useSyncExternalStore(subscribeToAlertSettings, getAlertSettings);
+  const push = useSyncExternalStore(subscribeToPushDevices, getPushDevices);
+  const hasBurrowService = getPlatform().burrow !== undefined;
+
+  // The brief preview uses the cached list: refreshing immediately publishes
+  // loading, and the bridge reply may arrive after the preview has faded away.
+  useEffect(() => {
+    if (sink === 'push' && !preview) refreshPushDevicesNow();
+  }, [sink, preview]);
+
+  return sink === 'speech' ? (
+    <AlarmSinkSection
+      className={preview ? '' : SECTION}
+      switchLabel="Speak out loud if not attended"
+      delayLabel="Delay before speaking:"
+      enabled={settings.speakEnabled}
+      delayMs={settings.speakDelayMs}
+      onToggle={(speakEnabled) => updateAlertSettings({ speakEnabled })}
+      onCommitDelay={(speakDelayMs) => updateAlertSettings({ speakDelayMs })}
+      action={preview ? null : <SpeakTestButton />}
+    >
+      Uses your browser or system voice.{' '}
+      <ExternalTextLink href={HOSTED_VOICE_URL}>
+        Managed ElevenLabs voice is coming soon.
+      </ExternalTextLink>
+    </AlarmSinkSection>
+  ) : (
+    <AlarmSinkSection
+      className={preview ? '' : SECTION}
+      switchLabel="Send push notification if not attended"
+      delayLabel="Delay before push:"
+      enabled={settings.pushEnabled}
+      delayMs={settings.pushDelayMs}
+      onToggle={(pushEnabled) => updateAlertSettings({ pushEnabled })}
+      onCommitDelay={(pushDelayMs) => updateAlertSettings({ pushDelayMs })}
+      action={preview ? null : <PushTestButton />}
+    >
+      {describePushTargets(push, hasBurrowService && !preview)}
+    </AlarmSinkSection>
+  );
+}
+
 /**
  * One alarm sink: a switch that gates an indented delay field, with optional
  * explanatory text under it. Speech and push are the same shape, so the layout
  * and the dimming rule have one implementation rather than two that drift.
  */
 function AlarmSinkSection({
+  className,
   switchLabel,
   delayLabel,
   enabled,
@@ -284,6 +296,7 @@ function AlarmSinkSection({
   children,
   action,
 }: {
+  className: string;
   switchLabel: string;
   delayLabel: string;
   enabled: boolean;
@@ -300,7 +313,7 @@ function AlarmSinkSection({
   action?: React.ReactNode;
 }) {
   return (
-    <section className={SECTION}>
+    <section className={className}>
       <SwitchRow label={switchLabel} on={enabled} onChange={onToggle} />
       <div className={UNDER_SWITCH_INDENT}>
         <div className={`mt-2 ${enabled ? '' : 'opacity-50'}`}>

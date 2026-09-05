@@ -68,7 +68,7 @@ way.
 Why "a process running as the user is the user" is stated rather than assumed. A
 `0700` directory and a `0600` file stop another local *account*; neither stops a
 process already running under the user's own uid, which can read the socket path
-out of its own environment. The same limit is already stated for the Host ACL
+out of its own environment. The same limit is already stated for the Burrow ACL
 store in `docs/specs/security-remote.md`, and stating it here keeps an agent
 holding `dor` from being read as a lesser principal than the person at the
 keyboard. Note that `docs/specs/dor-cli.rationale.md` names "any process running

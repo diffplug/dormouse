@@ -1,13 +1,13 @@
 #Requires -Version 5.1
 #
-# Install the Dormouse coordinating server on this PC as a per-user Scheduled
+# Install the Dormouse coordinating Relay on this PC as a per-user Scheduled
 # Task, fronted by `tailscale serve` on the node's own HTTPS name.
 #
 # Running this a second time updates the installed release from the current
 # checkout. It never pulls, fetches, switches branches, or installs an updater:
 # the checkout you are standing in is the release source.
 #
-# See SELF_HOST.md for the runbook and docs/specs/server.md for the runtime
+# See SELF_HOST.md for the runbook and docs/specs/relay.md for the runtime
 # contract this installs. This is the Windows sibling of install-macos.sh; the
 # two hold the same invariants through different native mechanisms.
 #
@@ -35,9 +35,9 @@ if ($Help) {
   exit 0
 }
 
-$LABEL = 'Dormouse Server'
+$LABEL = 'Dormouse Relay'
 $TASK_PATH = '\'
-$INSTALL_ROOT = Join-Path $env:LOCALAPPDATA 'Dormouse Server'
+$INSTALL_ROOT = Join-Path $env:LOCALAPPDATA 'Dormouse Relay'
 $LOOPBACK_PORT = 3100
 
 $ASSUME_YES = $Yes.IsPresent
@@ -104,7 +104,7 @@ function Confirm-Step {
 #
 # Passing -ArgumentList an ARRAY lets PowerShell apply its own weak quoting,
 # which a `.CMD` shim's cmd.exe then strips a second time: an argument holding a
-# space arrives at the target as two arguments. `%LOCALAPPDATA%\Dormouse Server`
+# space arrives at the target as two arguments. `%LOCALAPPDATA%\Dormouse Relay`
 # holds a space, so this is not hypothetical -- it is why `pnpm deploy` failed
 # with ERR_PNPM_INVALID_DEPLOY_TARGET. One pre-quoted string survives both hops.
 # Windows filenames cannot contain `"`, so the escape here only has to be sane,
@@ -274,7 +274,7 @@ function Protect-Path {
 # is a verbatim here-string and cannot be called from here.
 #
 # Deliberately NOT a check that the DACL is protected from inheritance: a file
-# the server creates inside an already-locked directory inherits that single
+# the Relay creates inside an already-locked directory inherits that single
 # owner-only ACE, which is the property wanted.
 $script:CurrentUserSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 function Test-OwnerOnly {
@@ -294,7 +294,7 @@ function Test-OwnerOnly {
 }
 
 # 32 bytes of the platform CSPRNG as 64 lowercase hex characters. The enrollment
-# offer is the one secret this installer mints; the Server owns its setup
+# offer is the one secret this installer mints; the Relay owns its setup
 # password and persists it under state/ on first boot. Never substitute
 # Get-Random, which is not a CSPRNG.
 function New-RandomHex32 {
@@ -316,14 +316,14 @@ function Get-FailureTail {
 
 # Read one KEY=VALUE out of an env file, with ONE quote semantics.
 #
-# This file is read by the installer, by bin\run-server.ps1 and by
+# This file is read by the installer, by bin\run-relay.ps1 and by
 # bin\manage.ps1, and they must agree on what a value is. They previously did
 # not: whole-line `-eq` comparisons here, a matched-quote-pair strip in
-# run-server, and `.Trim('"')` in manage. Writing DORMOUSE_BIND_HOST="127.0.0.1"
+# run-relay, and `.Trim('"')` in manage. Writing DORMOUSE_BIND_HOST="127.0.0.1"
 # by hand then produced a green `manage verify` and an installer that refused
 # the same file for not setting the key -- the worst possible split, because
 # `verify` exists to diagnose exactly that. Strip one matched pair, like
-# run-server does, everywhere.
+# run-relay does, everywhere.
 function Get-EnvFileValue {
   param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Key)
   if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
@@ -345,12 +345,12 @@ function Get-EnvFileValue {
 # Every process belonging to an installation at $Root.
 #
 # Stopping the Scheduled Task is NOT enough. The task's process is
-# powershell.exe running run-server.ps1, which starts cmd.exe, which starts
+# powershell.exe running run-relay.ps1, which starts cmd.exe, which starts
 # node.exe; Task Scheduler terminates the process it launched and the
 # grandchildren survive. The orphan keeps port 3100, so the next start cannot
 # bind, and -- because the orphan still answers /api/hello -- every health check
 # passes while the OLD release serves. That is the "stale process on 3100 lets
-# the health check pass against the wrong server" trap SELF_HOST.md warns about
+# the health check pass against the wrong Relay" trap SELF_HOST.md warns about
 # in its preflight, reached from the inside.
 #
 # Matched by image path under this root and by command line naming this root's
@@ -360,7 +360,7 @@ function Get-EnvFileValue {
 function Get-DormouseProcess {
   param([Parameter(Mandatory)][string]$Root)
   $releasesDir = Join-Path $Root 'releases'
-  $wrapperPath = Join-Path $Root 'bin\run-server.ps1'
+  $wrapperPath = Join-Path $Root 'bin\run-relay.ps1'
   $matched = @()
   foreach ($proc in @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)) {
     if ($proc.ProcessId -eq $PID) { continue }
@@ -391,16 +391,16 @@ function Stop-DormouseProcess {
 # A 200 from /api/hello proves only that SOMETHING is listening. This is what
 # distinguishes the release just installed from an orphan of an older one.
 #
-# The server writes {pid, releaseId, port} at successful bind
-# (server/src/runtime-file.ts), so this is a file read and a liveness check
+# The Relay writes {pid, releaseId, port} at successful bind
+# (relay/src/runtime-file.ts), so this is a file read and a liveness check
 # rather than a walk of the process table. $null means "unknown", never
-# "nobody": a stale file whose pid is dead, a server started outside the
+# "nobody": a stale file whose pid is dead, a Relay started outside the
 # installer, and a foreign process that got the port first are all
 # indistinguishable from here, and all must fail the comparison rather than
 # pass it.
 function Get-ListeningRelease {
   param([Parameter(Mandatory)][int]$Port)
-  $file = Join-Path $INSTALL_ROOT 'run\server.json'
+  $file = Join-Path $INSTALL_ROOT 'run\relay.json'
   if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { return $null }
   try {
     $info = Get-Content -LiteralPath $file -Raw -ErrorAction Stop | ConvertFrom-Json
@@ -518,7 +518,7 @@ function Invoke-Tailscale {
 
 # ------------------------------------------------------------------ start ----
 
-Write-Host "$C_BLD Dormouse selfhost server -- Windows installer$C_OFF"
+Write-Host "$C_BLD Dormouse selfhost Relay -- Windows installer$C_OFF"
 if ($TEST_MODE) { Write-Warn2 "DORMOUSE_INSTALL_TEST=1 -- the Scheduled Task and Serve will not be touched." }
 
 Write-Step "Checking Tailscale"
@@ -582,7 +582,7 @@ if ($CERT_DOMAINS -and (",$CERT_DOMAINS," -like "*,$TS_DNS,*")) {
 # --------------------------------------------------------- origin identity ---
 
 $CONFIG_DIR = Join-Path $INSTALL_ROOT 'config'
-$ENV_FILE = Join-Path $CONFIG_DIR 'server.env'
+$ENV_FILE = Join-Path $CONFIG_DIR 'relay.env'
 $RUN_DIR = Join-Path $INSTALL_ROOT 'run'
 $ENROLL_OFFER_FILE = Join-Path $RUN_DIR 'enroll-offer.json'
 $STATE_DIR = Join-Path $INSTALL_ROOT 'state'
@@ -602,11 +602,11 @@ if (Test-Path -LiteralPath $ENV_FILE) {
     Write-Warn2 "  derived:   $ORIGIN"
     Write-Warn2 ""
     Write-Warn2 "DORMOUSE_ORIGIN is durable WebAuthn identity: it is the source of the"
-    Write-Warn2 "passkey rpId and of the Host's ConnectionPolicy. Rewriting it invalidates"
-    Write-Warn2 "the registered passkey and every enrolled Host -- they must be re-enrolled."
+    Write-Warn2 "passkey rpId and of the Burrow's ConnectionPolicy. Rewriting it invalidates"
+    Write-Warn2 "the registered passkey and every enrolled Burrow -- they must be re-enrolled."
     Write-Warn2 ""
     Write-Warn2 "This usually means the Tailscale node was renamed or re-enrolled."
-    Die "refusing to silently rewrite the origin. Decide deliberately: restore the old node name, or plan the passkey + Host re-enrollment and remove $ENV_FILE by hand."
+    Die "refusing to silently rewrite the origin. Decide deliberately: restore the old node name, or plan the passkey + Burrow re-enrollment and remove $ENV_FILE by hand."
   }
 }
 
@@ -717,13 +717,13 @@ try {
   }
   Write-Ok "pocket app built"
 
-  Write-Info "building server (and server-lib-common)"
-  $r = Invoke-Pnpm @('--filter', 'server', 'build')
-  if ($r.ExitCode -ne 0) { Die "server build failed. Run: pnpm --filter server build`n$(Get-FailureTail $r)" }
-  if (-not (Test-Path -LiteralPath (Join-Path $REPO_ROOT 'server\dist\index.js'))) {
-    Die "server/dist/index.js missing after the server build."
+  Write-Info "building Relay (and remote-lib-common)"
+  $r = Invoke-Pnpm @('--filter', 'relay', 'build')
+  if ($r.ExitCode -ne 0) { Die "Relay build failed. Run: pnpm --filter relay build`n$(Get-FailureTail $r)" }
+  if (-not (Test-Path -LiteralPath (Join-Path $REPO_ROOT 'relay\dist\index.js'))) {
+    Die "relay/dist/index.js missing after the Relay build."
   }
-  Write-Ok "server built"
+  Write-Ok "Relay built"
 
   # Resolve the exact Node the build ran under. pnpm honors devEngines
   # (onFail: download), so this is the pinned runtime, not whatever is on PATH.
@@ -770,7 +770,7 @@ try {
   # single span). run\ belongs in it: it holds the enrollment offer, so it was
   # the last credential-bearing directory still on %LOCALAPPDATA%'s inherited
   # SYSTEM and Administrators entries, and the directory governs replace and
-  # delete of that file. The same-user Node process still writes run\server.json
+  # delete of that file. The same-user Node process still writes run\relay.json
   # under the single-ACE owner DACL -- that ACE is FullControl for the account
   # the task runs as.
   Protect-Path -Path $CONFIG_DIR -Directory
@@ -793,21 +793,21 @@ try {
     $script:WS_STATE_BACKUP = [IO.Path]::GetTempFileName()
     [IO.File]::Copy($WS_STATE, $script:WS_STATE_BACKUP, $true)
   }
-  $r = Invoke-Pnpm @('--filter', 'server', 'deploy', '--prod', '--legacy', (Join-Path $STAGE 'server'))
+  $r = Invoke-Pnpm @('--filter', 'relay', 'deploy', '--prod', '--legacy', (Join-Path $STAGE 'relay'))
   Restore-WorkspaceState
   if ($r.ExitCode -ne 0) {
-    Die "pnpm deploy failed. Run: pnpm --filter server deploy --prod --legacy `$env:TEMP\dormouse-deploy-probe`n$(Get-FailureTail $r)"
+    Die "pnpm deploy failed. Run: pnpm --filter relay deploy --prod --legacy `$env:TEMP\dormouse-deploy-probe`n$(Get-FailureTail $r)"
   }
-  if (-not (Test-Path -LiteralPath (Join-Path $STAGE 'server\dist\index.js'))) {
-    Die "the deployed server tree has no dist/index.js."
+  if (-not (Test-Path -LiteralPath (Join-Path $STAGE 'relay\dist\index.js'))) {
+    Die "the deployed Relay tree has no dist/index.js."
   }
-  if (-not (Test-Path -LiteralPath (Join-Path $STAGE 'server\node_modules\server-lib-common'))) {
-    Die "the deployed server tree is missing the injected server-lib-common workspace package."
+  if (-not (Test-Path -LiteralPath (Join-Path $STAGE 'relay\node_modules\remote-lib-common'))) {
+    Die "the deployed Relay tree is missing the injected remote-lib-common workspace package."
   }
-  Write-Ok "production server tree staged"
+  Write-Ok "production Relay tree staged"
 
-  # server/src/config.ts resolves the pocket dir two levels up from
-  # server/dist/config.js, i.e. <release>/lib/dist-pocket. Match that layout so
+  # relay/src/config.ts resolves the pocket dir two levels up from
+  # relay/dist/config.js, i.e. <release>/lib/dist-pocket. Match that layout so
   # no DORMOUSE_POCKET_DIR override is needed.
   Copy-Item -Recurse -LiteralPath (Join-Path $REPO_ROOT 'lib\dist-pocket') -Destination (Join-Path $STAGE 'lib\dist-pocket')
   if (-not (Test-Path -LiteralPath (Join-Path $STAGE 'lib\dist-pocket\index.html'))) {
@@ -855,12 +855,12 @@ try {
 
   if (-not (Test-Path -LiteralPath $ENV_FILE)) {
     $envLines = @(
-      '# Dormouse selfhost server -- installer-owned runtime configuration.'
+      '# Dormouse selfhost Relay -- installer-owned runtime configuration.'
       "# Generated $BUILT_AT. Preserved byte-for-byte across updates."
       '#'
-      '# DORMOUSE_ORIGIN is durable WebAuthn identity (passkey rpId + Host'
+      '# DORMOUSE_ORIGIN is durable WebAuthn identity (passkey rpId + Burrow'
       '# ConnectionPolicy). Changing it invalidates the registered passkey and every'
-      '# enrolled Host. See docs/specs/server.md, "Configuration".'
+      '# enrolled Burrow. See docs/specs/relay.md, "Configuration".'
       "DORMOUSE_ORIGIN=$ORIGIN"
       "DORMOUSE_STATE_DIR=$STATE_DIR"
       'DORMOUSE_BIND_HOST=127.0.0.1'
@@ -871,30 +871,30 @@ try {
     [IO.File]::WriteAllText($ENV_FILE, '')
     Protect-Path -Path $ENV_FILE
     [IO.File]::WriteAllText($ENV_FILE, $envLines + "`r`n")
-    Write-Ok "generated config/server.env (owner-only ACL)"
+    Write-Ok "generated config/relay.env (owner-only ACL)"
   } else {
     Protect-Path -Path $ENV_FILE
-    Write-Ok "preserved the existing config/server.env"
+    Write-Ok "preserved the existing config/relay.env"
   }
 
   # A file that exists is not necessarily one an install finished writing. Killed
-  # between creating config\server.env and filling it, it leaves a truncated file
+  # between creating config\relay.env and filling it, it leaves a truncated file
   # that the branch above happily "preserves" -- and then the bind-host guard
   # below tells the operator to *fix* a file whose repair is `del`, on every run,
   # forever. The two cases are indistinguishable from here and their repairs are
   # opposite, so this names what is missing and changes nothing: DORMOUSE_ORIGIN
-  # is durable WebAuthn identity and may already have enrolled a Host.
+  # is durable WebAuthn identity and may already have enrolled a Burrow.
   $envMissing = @()
   foreach ($key in @('DORMOUSE_ORIGIN', 'DORMOUSE_STATE_DIR', 'DORMOUSE_BIND_HOST', 'PORT')) {
     if (-not (Get-EnvFileValue -Path $ENV_FILE -Key $key)) { $envMissing += $key }
   }
   if ($envMissing.Count -gt 0) {
     Die @"
-config\server.env is missing installer-owned keys: $($envMissing -join ' ')
+config\relay.env is missing installer-owned keys: $($envMissing -join ' ')
 An install interrupted between creating that file and writing it leaves exactly this. Nothing has been changed. The repair depends on which one it is:
-  - nothing enrolled yet (no $STATE_DIR\hosts.json): remove the file and re-run this installer
+  - nothing enrolled yet (no $STATE_DIR\burrows.json): remove the file and re-run this installer
       del "$ENV_FILE"
-  - otherwise: restore the missing key(s) by hand, and leave DORMOUSE_ORIGIN exactly as it is -- it is durable WebAuthn identity, and rewriting it invalidates the registered passkey and every enrolled Host.
+  - otherwise: restore the missing key(s) by hand, and leave DORMOUSE_ORIGIN exactly as it is -- it is durable WebAuthn identity, and rewriting it invalidates the registered passkey and every enrolled Burrow.
 "@
   }
 
@@ -902,10 +902,10 @@ An install interrupted between creating that file and writing it leaves exactly 
   # reaches the app over loopback, so an unbound socket would also publish the
   # plaintext port to the LAN and to the tailnet.
   if ((Get-EnvFileValue -Path $ENV_FILE -Key 'DORMOUSE_BIND_HOST') -ne '127.0.0.1') {
-    Die "config/server.env must set DORMOUSE_BIND_HOST=127.0.0.1. Fix it before continuing -- Tailscale access control is not a reason to expose the plaintext backend."
+    Die "config/relay.env must set DORMOUSE_BIND_HOST=127.0.0.1. Fix it before continuing -- Tailscale access control is not a reason to expose the plaintext backend."
   }
   if ((Get-EnvFileValue -Path $ENV_FILE -Key 'PORT') -ne "$LOOPBACK_PORT") {
-    Die "config/server.env must set PORT=$LOOPBACK_PORT to match the Serve mapping."
+    Die "config/relay.env must set PORT=$LOOPBACK_PORT to match the Serve mapping."
   }
 
   # ------------------------------------------------------------- bin scripts ---
@@ -932,14 +932,14 @@ An install interrupted between creating that file and writing it leaves exactly 
 $ErrorActionPreference = 'Stop'
 
 $Root = Split-Path -Parent $PSScriptRoot
-$EnvFile = Join-Path $Root 'config\server.env'
+$EnvFile = Join-Path $Root 'config\relay.env'
 $LogDir = Join-Path $Root 'logs'
-$OutLog = Join-Path $LogDir 'server.out.log'
-$ErrLog = Join-Path $LogDir 'server.err.log'
+$OutLog = Join-Path $LogDir 'relay.out.log'
+$ErrLog = Join-Path $LogDir 'relay.err.log'
 $ThrottleSeconds = 10
 
 if (-not (Test-Path -LiteralPath $EnvFile)) {
-  [Console]::Error.WriteLine("run-server: cannot read $EnvFile")
+  [Console]::Error.WriteLine("run-relay: cannot read $EnvFile")
   exit 78
 }
 [void][IO.Directory]::CreateDirectory($LogDir)
@@ -967,12 +967,12 @@ $CmdExe = Join-Path $env:SystemRoot 'System32\cmd.exe'
 function Write-ServiceLog {
   param([string]$Text)
   $stamp = [DateTime]::UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'")
-  try { [IO.File]::AppendAllText($ErrLog, "[run-server $stamp] $Text`r`n") } catch { }
+  try { [IO.File]::AppendAllText($ErrLog, "[run-relay $stamp] $Text`r`n") } catch { }
 }
 
 # A degraded state -- no release pointer, no runtime, no entrypoint -- persists
 # until someone fixes it, and this loop wakes every 10s. Logging it each time
-# would put ~8,600 identical lines a day into server.err.log and bury the
+# would put ~8,600 identical lines a day into relay.err.log and bury the
 # original failure. Log a reason only when it CHANGES.
 $LastReason = $null
 function Write-DegradedLog {
@@ -993,7 +993,7 @@ while ($true) {
   $releaseId = ([IO.File]::ReadAllText($pointer)).Trim()
   $release = Join-Path $Root "releases\$releaseId"
   $nodeBin = Join-Path $release 'runtime\node.exe'
-  $entry = Join-Path $release 'server\dist\index.js'
+  $entry = Join-Path $release 'relay\dist\index.js'
 
   if (-not (Test-Path -LiteralPath $nodeBin -PathType Leaf)) {
     Write-DegradedLog "missing runtime $nodeBin; retrying every ${ThrottleSeconds}s until it appears"
@@ -1018,12 +1018,12 @@ while ($true) {
   $psi.UseShellExecute = $false
   $psi.CreateNoWindow = $true
   foreach ($key in $EnvVars.Keys) { $psi.EnvironmentVariables[$key] = $EnvVars[$key] }
-  # Tell the server who it is. It records {pid, releaseId, port} there once it
+  # Tell the Relay who it is. It records {pid, releaseId, port} there once it
   # has actually bound, which is how `manage` and the installer answer "which
   # release is answering?" without walking the process table. Set here rather
-  # than in server.env because it is derived from current.txt, which moves.
-  $psi.EnvironmentVariables['DORMOUSE_RUNTIME_FILE'] = (Join-Path $Root 'run\server.json')
-  # The installer mints this only until hosts.json records the first enrollment.
+  # than in relay.env because it is derived from current.txt, which moves.
+  $psi.EnvironmentVariables['DORMOUSE_RUNTIME_FILE'] = (Join-Path $Root 'run\relay.json')
+  # The installer mints this only until burrows.json records the first enrollment.
   $psi.EnvironmentVariables['DORMOUSE_ENROLL_TOKEN_FILE'] = (Join-Path $Root 'run\enroll-offer.json')
   $psi.EnvironmentVariables['DORMOUSE_RELEASE_ID'] = $releaseId
 
@@ -1043,8 +1043,8 @@ while ($true) {
   Start-Sleep -Seconds $ThrottleSeconds
 }
 '@
-  [IO.File]::WriteAllText((Join-Path $BIN_DIR 'run-server.ps1'), $runServer)
-  Write-Ok "bin\run-server.ps1"
+  [IO.File]::WriteAllText((Join-Path $BIN_DIR 'run-relay.ps1'), $runServer)
+  Write-Ok "bin\run-relay.ps1"
 
   $manageHeader = @"
 #Requires -Version 5.1
@@ -1054,14 +1054,14 @@ while ($true) {
 `$LABEL = '$LABEL'
 `$TASK_PATH = '$TASK_PATH'
 # The port the installer configured Serve against. Only a fallback: the value in
-# config\server.env wins whenever it is readable.
+# config\relay.env wins whenever it is readable.
 `$FALLBACK_PORT = '$LOOPBACK_PORT'
 "@
 
   $manageBody = @'
 
 $Root = Split-Path -Parent $PSScriptRoot
-$EnvFile = Join-Path $Root 'config\server.env'
+$EnvFile = Join-Path $Root 'config\relay.env'
 $OfferFile = Join-Path $Root 'run\enroll-offer.json'
 $StateDir = Join-Path $Root 'state'
 $LogDir = Join-Path $Root 'logs'
@@ -1085,7 +1085,7 @@ function Fail { param([string]$T) Write-Host "  $C_RED$([char]0x2717)$C_OFF $T";
 function Note { param([string]$T) Write-Host "  $C_DIM$T$C_OFF" }
 function Warn { param([string]$T) Write-Host "  $C_YEL!$C_OFF $T" }
 
-# One quote semantics, shared with the installer and run-server.ps1: strip a
+# One quote semantics, shared with the installer and run-relay.ps1: strip a
 # single matched pair, never `.Trim('"')`. They disagreed before -- a hand-typed
 # DORMOUSE_BIND_HOST="127.0.0.1" made `verify` pass green while the installer
 # refused the same file.
@@ -1126,7 +1126,7 @@ if ($tsCmd) {
 
 # One pre-quoted string, not an array: PowerShell's own quoting of an array is
 # stripped again by a .CMD shim's cmd.exe, so an argument holding a space (the
-# install root is under "Dormouse Server") would arrive split in two.
+# install root is under "Dormouse Relay") would arrive split in two.
 function ConvertTo-NativeArgLine {
   param([string[]]$Arguments)
   $parts = @()
@@ -1236,7 +1236,7 @@ function Get-Task {
 # Matched by this install root, never by image name.
 function Get-DormouseProcess {
   $releasesDir = Join-Path $Root 'releases'
-  $wrapperPath = Join-Path $Root 'bin\run-server.ps1'
+  $wrapperPath = Join-Path $Root 'bin\run-relay.ps1'
   $matched = @()
   foreach ($proc in @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)) {
     if ($proc.ProcessId -eq $PID) { continue }
@@ -1263,7 +1263,7 @@ function Stop-DormouseProcess {
 # A 200 proves only that something is listening; this says which release it is.
 # See the installer's copy for the full rationale.
 function Get-ListeningRelease {
-  $file = Join-Path $Root 'run\server.json'
+  $file = Join-Path $Root 'run\relay.json'
   if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { return $null }
   try {
     $info = Get-Content -LiteralPath $file -Raw -ErrorAction Stop | ConvertFrom-Json
@@ -1344,7 +1344,7 @@ function Set-ReleasePointer {
 # user may appear in the DACL.
 #
 # Deliberately NOT a check that the DACL is protected from inheritance. A file
-# the server creates inside an already-locked state\ inherits that directory's
+# the Relay creates inside an already-locked state\ inherits that directory's
 # single owner-only ACE, which is exactly the property wanted -- demanding
 # protection on every path would fail those while they are in fact locked. An
 # unprotected path that inherited %LOCALAPPDATA%'s SYSTEM and Administrators
@@ -1378,7 +1378,7 @@ function Test-OwnerOnly {
 
 function Invoke-Status {
   Write-Host ""
-  Write-Host "Dormouse selfhost server"
+  Write-Host "Dormouse selfhost Relay"
   Write-Host "  install root : $Root"
   Write-Host "  origin       : $(if ($ORIGIN) { $ORIGIN } else { '<unset>' })"
   Write-Host "  loopback     : http://127.0.0.1:$PORT"
@@ -1452,7 +1452,7 @@ function Invoke-Verify {
   # and here. Treat that as its own outcome and fail rather than verifying a
   # definition we could not inspect.
   $taskXml = Export-ScheduledTask -TaskName $LABEL -TaskPath $TASK_PATH -ErrorAction SilentlyContinue
-  $wrapper = Join-Path $Root 'bin\run-server.ps1'
+  $wrapper = Join-Path $Root 'bin\run-relay.ps1'
   $wrapperText = ''
   if (Test-Path -LiteralPath $wrapper -PathType Leaf) { $wrapperText = [IO.File]::ReadAllText($wrapper) }
 
@@ -1488,12 +1488,12 @@ function Invoke-Verify {
     if ($task.Principal.RunLevel -eq 'Limited') { Pass "the task runs unelevated" }
     else { Fail "the task runs elevated ($($task.Principal.RunLevel)) -- it needs no administrator rights" }
 
-    # The KeepAlive proper lives in bin\run-server.ps1's supervision loop;
+    # The KeepAlive proper lives in bin\run-relay.ps1's supervision loop;
     # Task Scheduler only restarts a task that *fails*.
     if ($wrapperText -match 'while \(\$true\)') {
-      Pass "bin\run-server.ps1 supervises the server (KeepAlive)"
+      Pass "bin\run-relay.ps1 supervises the Relay (KeepAlive)"
     } else {
-      Fail "bin\run-server.ps1 is missing or has no supervision loop"
+      Fail "bin\run-relay.ps1 is missing or has no supervision loop"
     }
 
     # The only consumer left is the source-checkout search near the end, so an
@@ -1533,9 +1533,9 @@ function Invoke-Verify {
 
   $extra = @(Get-DormouseProcess | Where-Object { $_.Name -eq 'node.exe' })
   if ($extra.Count -le 1) {
-    Pass "exactly one server process for this installation"
+    Pass "exactly one Relay process for this installation"
   } else {
-    Fail "$($extra.Count) server processes are running for this installation; orphans from an earlier release are the usual cause"
+    Fail "$($extra.Count) Relay processes are running for this installation; orphans from an earlier release are the usual cause"
     foreach ($e in $extra) { Write-Host "      pid $($e.ProcessId) $($e.ExecutablePath)" }
   }
 
@@ -1588,19 +1588,19 @@ function Invoke-Verify {
 
   # run\ is checked as a directory in its own right, not merely as the offer's
   # parent: the directory governs who may replace or delete the one credential
-  # the server honors from disk.
+  # the Relay honors from disk.
   foreach ($pair in @(
       @{ Path = (Join-Path $Root 'config'); Label = 'config\' },
       @{ Path = $StateDir; Label = 'state\' },
       @{ Path = (Join-Path $Root 'run'); Label = 'run\' },
-      @{ Path = $EnvFile; Label = 'config\server.env' })) {
+      @{ Path = $EnvFile; Label = 'config\relay.env' })) {
     $r = Test-OwnerOnly -Path $pair.Path
     if ($r.Ok) { Pass "$($pair.Label) grants only this user" }
     else { Fail "$($pair.Label) $($r.Reason)" }
   }
 
-  # server/src/state.ts writes every state file at mode 0o600, but Node's file
-  # modes are a no-op on Windows: the only thing keeping the Host bearer
+  # relay/src/state.ts writes every state file at mode 0o600, but Node's file
+  # modes are a no-op on Windows: the only thing keeping the Burrow bearer
   # credentials and the VAPID private key off a second account on this PC is
   # the ACE those files inherit from state\. So the files are checked here
   # rather than assumed from the directory -- this is the Windows half of the
@@ -1614,7 +1614,7 @@ function Invoke-Verify {
   if ($stateErr -and $stateErr.Count -gt 0) {
     Fail "state\ could not be enumerated, so its files were not checked: $($stateErr[0].Exception.Message)"
   } elseif ($stateFiles.Count -eq 0) {
-    Note "no state files yet (the Server has not completed first boot)"
+    Note "no state files yet (the Relay has not completed first boot)"
   } else {
     $leaky = @()
     foreach ($f in $stateFiles) {
@@ -1686,14 +1686,14 @@ function Invoke-Verify {
 
 function Invoke-Logs {
   [void][IO.Directory]::CreateDirectory($LogDir)
-  $out = Join-Path $LogDir 'server.out.log'
-  $err = Join-Path $LogDir 'server.err.log'
+  $out = Join-Path $LogDir 'relay.out.log'
+  $err = Join-Path $LogDir 'relay.err.log'
   foreach ($f in @($out, $err)) { if (-not (Test-Path -LiteralPath $f)) { [IO.File]::WriteAllText($f, '') } }
-  Write-Host "tailing $LogDir\{server.out.log,server.err.log} -- ctrl-c to stop"
+  Write-Host "tailing $LogDir\{relay.out.log,relay.err.log} -- ctrl-c to stop"
   Write-Host ""
   # NOT `Get-Content -LiteralPath $out, $err -Wait`: that walks the paths in
   # order and -Wait blocks forever on the first, so the second file is never
-  # read at all. Losing server.err.log is the worst half -- run-server.ps1's
+  # read at all. Losing relay.err.log is the worst half -- run-relay.ps1's
   # supervision messages and node's stderr both land there. macOS gets the
   # interleaving free from `tail -f a b`; here each file needs its own reader.
   foreach ($f in @($out, $err)) {
@@ -1739,7 +1739,7 @@ function Invoke-Restart {
 
 function Invoke-ShowPassword {
   Write-Host ""
-  Write-Host "${C_YEL}WARNING$C_OFF the setup password gates Host enrollment."
+  Write-Host "${C_YEL}WARNING$C_OFF the setup password gates Burrow enrollment."
   Write-Host "It is about to be printed to this terminal. Make sure nobody is looking"
   Write-Host "over your shoulder and that this session is not being recorded or shared."
   Write-Host ""
@@ -1754,11 +1754,11 @@ function Invoke-ShowPassword {
     $stored = [IO.File]::ReadAllText($passwordFile) | ConvertFrom-Json
     $password = [string]$stored.password
   } catch {
-    [Console]::Error.WriteLine("could not read the server-generated setup password from $passwordFile")
+    [Console]::Error.WriteLine("could not read the Relay-generated setup password from $passwordFile")
     return 1
   }
   if ($password -notmatch '^[0-9a-f]{64}$') {
-    [Console]::Error.WriteLine("$passwordFile has no valid server-generated setup password")
+    [Console]::Error.WriteLine("$passwordFile has no valid Relay-generated setup password")
     return 1
   }
   Write-Host ""
@@ -1871,9 +1871,9 @@ function Invoke-Uninstall {
   foreach ($p in @((Join-Path $Root 'releases'), (Join-Path $Root 'run'))) {
     Remove-Tree $p
   }
-  # bin\run-server.ps1, not bin: this script lives there too, and "purge" -- the
+  # bin\run-relay.ps1, not bin: this script lives there too, and "purge" -- the
   # command the message above points at -- is unreachable once it is deleted.
-  $runServer = Join-Path $Root 'bin\run-server.ps1'
+  $runServer = Join-Path $Root 'bin\run-relay.ps1'
   if (Test-Path -LiteralPath $runServer) { [IO.File]::Delete($runServer) }
   foreach ($p in @($CurrentPointer, $PreviousPointer)) {
     if (Test-Path -LiteralPath $p) { [IO.File]::Delete($p) }
@@ -1892,27 +1892,27 @@ function Invoke-Uninstall {
 
 function Invoke-Purge {
   Write-Host ""
-  Write-Host "${C_RED}IRREVERSIBLE$C_OFF This deletes the account, enrolled Hosts, push"
+  Write-Host "${C_RED}IRREVERSIBLE$C_OFF This deletes the account, enrolled Burrows, push"
   Write-Host "subscriptions, the VAPID key, and any unspent enrollment offer:"
   Write-Host "  $StateDir"
   Write-Host "  $Root\config"
   Write-Host "  $Root\run"
   Write-Host ""
-  Write-Host "Registered passkeys and enrolled Hosts will have to be set up again."
+  Write-Host "Registered passkeys and enrolled Burrows will have to be set up again."
   Write-Host ""
   $reply = Read-Host 'Type exactly: DELETE DORMOUSE STATE'
   if ($reply -cne 'DELETE DORMOUSE STATE') { Write-Host 'aborted'; return 1 }
-  # run\ too: an unspent enroll-offer.json redeems for a Host enrollment without
+  # run\ too: an unspent enroll-offer.json redeems for a Burrow enrollment without
   # any existing account, and redemption recreates the state this command just
   # deleted. Leaving it behind would make "IRREVERSIBLE" false for a day.
   foreach ($p in @($StateDir, (Join-Path $Root 'config'), (Join-Path $Root 'run'))) {
     Remove-Tree $p
   }
   Write-Host 'purged.'
-  # bin\run-server.ps1 is what "uninstall" removes, so its absence means the
+  # bin\run-relay.ps1 is what "uninstall" removes, so its absence means the
   # Scheduled Task and the code are already gone and this script is the last
   # thing standing. It cannot delete itself out from under the shell running it.
-  if (-not (Test-Path -LiteralPath (Join-Path $Root 'bin\run-server.ps1'))) {
+  if (-not (Test-Path -LiteralPath (Join-Path $Root 'bin\run-relay.ps1'))) {
     Write-Host ""
     Write-Host "the Scheduled Task and code were already uninstalled; this script"
     Write-Host "is all that remains:"
@@ -1940,10 +1940,10 @@ usage: manage <command>
 
   status          Scheduled Task, process, health, Serve origin, and release
   verify          run every acceptance check; exits nonzero on any failure
-  logs            tail the local server logs
+  logs            tail the local Relay logs
   restart         stop and start the Scheduled Task, then wait for health
   show-password   warn, then display the setup password locally
-  serve           re-apply the Tailscale Serve mapping for this server
+  serve           re-apply the Tailscale Serve mapping for this Relay
   rollback        switch to the retained previous release, preserving state
   uninstall       remove the Scheduled Task + code (keeps config, state, this script)
   purge           irreversibly delete config and state
@@ -1964,7 +1964,7 @@ rem every command, so a manage command that removes the file it is being read
 rem from makes that read fail with "The system cannot find the path specified."
 rem and return 1, making a clean run look broken. "uninstall" used to do exactly
 rem that -- it deleted bin, this very file included. It now deletes only
-rem bin\run-server.ps1, so nothing manage does removes this file; the guard is
+rem bin\run-relay.ps1, so nothing manage does removes this file; the guard is
 rem kept so the exit code does not depend on that staying true. "exit" ends
 rem cmd.exe outright so it never seeks back, and with no argument it exits with
 rem the current ERRORLEVEL. "exit /b" does NOT work here: it only returns from
@@ -1998,7 +1998,7 @@ rem directly.
   # them.
   $psi = New-Object System.Diagnostics.ProcessStartInfo
   $psi.FileName = $STAGED_NODE
-  $psi.Arguments = '"' + (Join-Path $STAGE 'server\dist\index.js') + '"'
+  $psi.Arguments = '"' + (Join-Path $STAGE 'relay\dist\index.js') + '"'
   $psi.UseShellExecute = $false
   $psi.CreateNoWindow = $true
   $psi.RedirectStandardOutput = $true
@@ -2096,7 +2096,7 @@ rem directly.
   # ---------------------------------------------------------- scheduled task --
 
   function Register-DormouseTask {
-    $argline = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}"' -f (Join-Path $BIN_DIR 'run-server.ps1')
+    $argline = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}"' -f (Join-Path $BIN_DIR 'run-relay.ps1')
     $action = New-ScheduledTaskAction -Execute $POWERSHELL_EXE -Argument $argline -WorkingDirectory $INSTALL_ROOT
     $trigger = New-ScheduledTaskTrigger -AtLogOn -User $USER_ID
     $principal = New-ScheduledTaskPrincipal -UserId $USER_ID -LogonType Interactive -RunLevel Limited
@@ -2120,7 +2120,7 @@ rem directly.
       -Trigger $trigger `
       -Principal $principal `
       -Settings $settings `
-      -Description "Dormouse selfhost coordinating server, fronted by tailscale serve on $ORIGIN. Installed by deploy/local/install-windows.ps1; see SELF_HOST.md." `
+      -Description "Dormouse selfhost coordinating Relay, fronted by tailscale serve on $ORIGIN. Installed by deploy/local/install-windows.ps1; see SELF_HOST.md." `
       -Force | Out-Null
   }
 
@@ -2197,7 +2197,7 @@ rem directly.
   } else {
     if (-not (Wait-Health -Url "http://127.0.0.1:$LOOPBACK_PORT/api/hello" -Seconds 60)) {
       Write-Warn2 "the new release never answered http://127.0.0.1:$LOOPBACK_PORT/api/hello"
-      $errLog = Join-Path $LOG_DIR 'server.err.log'
+      $errLog = Join-Path $LOG_DIR 'relay.err.log'
       if (Test-Path -LiteralPath $errLog) {
         Get-Content -LiteralPath $errLog -Tail 30 | ForEach-Object { Write-Host "      $_" }
       }
@@ -2305,18 +2305,18 @@ rem directly.
 
   # ------------------------------------------------------------ enroll offer ---
 
-  # run\enroll-offer.json, the one-time offer redeemed at POST /api/host/enroll
+  # run\enroll-offer.json, the one-time offer redeemed at POST /api/burrow/enroll
   # in place of the setup password (docs/specs/security-remote.md -> "Credentials at rest").
   #
   # Last state mutation: minting burns the previous unspent offer, so the
   # release, HTTPS Serve mapping, and pruning must all have succeeded first. The
-  # server reads this file fresh; nothing needs it when the task starts.
+  # Relay reads this file fresh; nothing needs it when the task starts.
   #
-  # hosts.json is the durable "first Host happened" marker. Emptying its rows
-  # revokes Hosts but does not silently reopen this bootstrap credential.
-  if (Test-Path -LiteralPath (Join-Path $STATE_DIR 'hosts.json')) {
+  # burrows.json is the durable "first Burrow happened" marker. Emptying its rows
+  # revokes Burrows but does not silently reopen this bootstrap credential.
+  if (Test-Path -LiteralPath (Join-Path $STATE_DIR 'burrows.json')) {
     Remove-Item -LiteralPath $ENROLL_OFFER_FILE -Force -ErrorAction SilentlyContinue
-    Write-Ok "a Host has already enrolled -- no one-click enrollment offer minted"
+    Write-Ok "a Burrow has already enrolled -- no one-click enrollment offer minted"
   } else {
     $enrollToken = New-RandomHex32
     if ($enrollToken.Length -lt 64) {
@@ -2331,7 +2331,7 @@ rem directly.
     # mintedAt is read here, at write time, and never from $BUILT_AT: the 24-hour
     # expiry runs from the mint, and the build that precedes it is not free.
     #
-    # InvariantCulture is load-bearing, not decoration: the server hard-rejects an
+    # InvariantCulture is load-bearing, not decoration: the Relay hard-rejects an
     # offer it cannot parse as fresh, and the current culture rewrites this stamp.
     # Under fi-FI the ':' separator becomes '.', and under th-TH the Buddhist
     # calendar mints year 2569 -- both silently unredeemable.
@@ -2357,7 +2357,7 @@ fs.renameSync(process.argv[2], process.argv[3]);
       Remove-Item -LiteralPath $offerTemp -Force -ErrorAction SilentlyContinue
     }
     Remove-Variable enrollToken, offerTemp
-    Write-Ok "minted run\enroll-offer.json (owner-only ACL) -- a one-time enrollment offer for a Host on this machine"
+    Write-Ok "minted run\enroll-offer.json (owner-only ACL) -- a one-time enrollment offer for a Burrow on this machine"
   }
 
   # ---------------------------------------------------------------- summary ---
@@ -2376,8 +2376,8 @@ fs.renameSync(process.argv[2], process.argv[3]);
   Write-Host ""
 
   if ($FIRST_INSTALL) {
-    Write-Host "    First install. Retrieve the server-generated setup password when you are ready"
-    Write-Host "    to enroll a Host by hand (the one-time offer card in the Host's"
+    Write-Host "    First install. Retrieve the Relay-generated setup password when you are ready"
+    Write-Host "    to enroll a Burrow by hand (the one-time offer card in the Burrow's"
     Write-Host "    Remote control settings needs no password):"
     Write-Host ""
     Write-Host "        `"$BIN_DIR\manage.cmd`" show-password"

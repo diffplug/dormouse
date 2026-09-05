@@ -6,11 +6,11 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
- * The store reads `getPlatform().remoteHost`, so the link is the only seam the
- * whole section hangs off. Mutable so a test can present a build with no Host
+ * The store reads `getPlatform().burrow`, so the link is the only seam the
+ * whole section hangs off. Mutable so a test can present a build with no Burrow
  * service behind it, which is a rendering decision rather than an error.
  */
-let platform: { remoteHost?: unknown } = {};
+let platform: { burrow?: unknown } = {};
 
 vi.mock('../lib/platform', () => ({
   IS_MAC: false,
@@ -18,14 +18,14 @@ vi.mock('../lib/platform', () => ({
 }));
 
 import { PAIRING_OUTCOME_LABEL, RemoteControlSection } from './RemoteControlSection';
-import type { RemoteHostConsoleStatus, SetupQrResult } from '../host/remote/service-protocol';
+import type { BurrowConsoleStatus, SetupQrResult } from '../host/remote/service-protocol';
 import {
   enrolledStatus,
-  makeStubRemoteHostLink,
+  makeStubBurrowLink,
   OFFER_STATUS,
   setupQrResult,
   UNENROLLED_STATUS as NOT_ENROLLED,
-} from '../host/remote/test-remote-host-link';
+} from '../host/remote/test-burrow-link';
 import { TEST_SETUP_PASSWORD } from '../remote/test-setup-password';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -63,11 +63,11 @@ function qr(over: Partial<SetupQrResult> = {}): SetupQrResult {
   };
 }
 
-/** The shared fixture, keeping this file's own server/host values. */
-const enrolled = (over: Partial<RemoteHostConsoleStatus> = {}) =>
+/** The shared fixture, keeping this file's own Relay/burrow values. */
+const enrolled = (over: Partial<BurrowConsoleStatus> = {}) =>
   enrolledStatus({
-    serverUrl: 'https://laptop.tailnet.ts.net',
-    hostId: 'host-1',
+    relayUrl: 'https://laptop.tailnet.ts.net',
+    burrowId: 'burrow-1',
     pairedClients: 1,
     ...over,
   });
@@ -100,7 +100,7 @@ async function settleQrChunk() {
  */
 async function openSetupPanel(): Promise<ReturnType<typeof makeLink>> {
   const link = makeLink(async (cmd) => (cmd === 'setupQr' ? qr() : enrolled()));
-  platform = { remoteHost: link };
+  platform = { burrow: link };
   await render();
   await act(async () => buttonLabelled('Set up a phone')!.click());
   await settleQrChunk();
@@ -130,7 +130,7 @@ function buttonLabelled(label: string): HTMLButtonElement | undefined {
 /** The disclosure carries a `+`/`−` prefix, so match on its words rather than all of it. */
 function disclosure(): HTMLButtonElement | undefined {
   return [...container.querySelectorAll('button')].find((button) =>
-    button.textContent?.includes('Enroll with a different server'),
+    button.textContent?.includes('Enroll with a different Relay'),
   ) as HTMLButtonElement | undefined;
 }
 
@@ -141,7 +141,7 @@ function disclosure(): HTMLButtonElement | undefined {
  */
 function typedForm(): HTMLFormElement {
   const form = [...container.querySelectorAll('form')].find((candidate) =>
-    candidate.textContent?.includes('Connect this machine to a Dormouse server'),
+    candidate.textContent?.includes('Connect this machine to a Dormouse Relay'),
   );
   if (!form) throw new Error('the typed enroll form is not mounted');
   return form;
@@ -183,22 +183,22 @@ afterEach(async () => {
 });
 
 describe('RemoteControlSection', () => {
-  it('renders nothing on a build with no Host service', async () => {
+  it('renders nothing on a build with no Burrow service', async () => {
     platform = {};
     await render();
     expect(container.innerHTML).toBe('');
   });
 
   it('offers the enroll form when the machine is not enrolled', async () => {
-    platform = { remoteHost: makeLink(async () => NOT_ENROLLED) };
+    platform = { burrow: makeLink(async () => NOT_ENROLLED) };
     await render();
-    expect(text()).toContain('Connect this machine to a Dormouse server');
+    expect(text()).toContain('Connect this machine to a Dormouse Relay');
     expect(text()).toContain('Prefer not to run one? Hosted is coming soon.');
     expect(buttonLabelled('Connect')).toBeTruthy();
   });
 
   it('keeps Connect disabled until every field is filled', async () => {
-    platform = { remoteHost: makeLink(async () => NOT_ENROLLED) };
+    platform = { burrow: makeLink(async () => NOT_ENROLLED) };
     await render();
 
     // The name arrives prefilled from the service's suggestion — the same one
@@ -220,11 +220,11 @@ describe('RemoteControlSection', () => {
     const link = makeLink(async (cmd) => {
       if (cmd === 'enroll') {
         status = enrolled();
-        return { hostId: 'host-1', serverUrl: 'https://laptop.tailnet.ts.net' };
+        return { burrowId: 'burrow-1', relayUrl: 'https://laptop.tailnet.ts.net' };
       }
       return status;
     });
-    platform = { remoteHost: link };
+    platform = { burrow: link };
     await render();
 
     await type('input[type="url"]', '  https://laptop.tailnet.ts.net  ');
@@ -233,7 +233,7 @@ describe('RemoteControlSection', () => {
     await act(async () => buttonLabelled('Connect')!.click());
 
     expect(link.command).toHaveBeenCalledWith('enroll', {
-      serverUrl: 'https://laptop.tailnet.ts.net',
+      relayUrl: 'https://laptop.tailnet.ts.net',
       password: TEST_SETUP_PASSWORD,
       label: 'Work laptop',
     });
@@ -244,10 +244,10 @@ describe('RemoteControlSection', () => {
 
   it('surfaces an enrollment refusal instead of silently failing', async () => {
     const link = makeLink(async (cmd) => {
-      if (cmd === 'enroll') throw new Error('server origin is not allowed by this build');
+      if (cmd === 'enroll') throw new Error('relay origin is not allowed by this build');
       return NOT_ENROLLED;
     });
-    platform = { remoteHost: link };
+    platform = { burrow: link };
     await render();
 
     await type('input[type="url"]', 'https://evil.example.com');
@@ -255,16 +255,16 @@ describe('RemoteControlSection', () => {
     await type('input:not([type="url"]):not([type="password"])', 'Work laptop');
     await act(async () => buttonLabelled('Connect')!.click());
 
-    expect(text()).toContain('server origin is not allowed by this build');
+    expect(text()).toContain('relay origin is not allowed by this build');
     // Still on the form, so the user can correct the origin and retry.
     expect(buttonLabelled('Connect')).toBeTruthy();
   });
 
   it('leads with the installer’s offer and folds the typed form away', async () => {
-    platform = { remoteHost: makeLink(async () => OFFER_STATUS) };
+    platform = { burrow: makeLink(async () => OFFER_STATUS) };
     await render();
 
-    expect(text()).toContain('A Dormouse server is installed on this machine.');
+    expect(text()).toContain('A Dormouse Relay is installed on this machine.');
     expect(text()).toContain('https://ned-mac.tail9c2f1.ts.net');
     expect(buttonLabelled('Enroll')).toBeTruthy();
     // The three-field form is behind the disclosure, not beside the card —
@@ -280,11 +280,11 @@ describe('RemoteControlSection', () => {
     const link = makeLink(async (cmd) => {
       if (cmd === 'enrollOffer') {
         status = enrolled();
-        return { hostId: 'host-1', serverUrl: 'https://laptop.tailnet.ts.net' };
+        return { burrowId: 'burrow-1', relayUrl: 'https://laptop.tailnet.ts.net' };
       }
       return status;
     });
-    platform = { remoteHost: link };
+    platform = { burrow: link };
     await render();
 
     // Prefilled from the service's suggestion, and the user overrode it.
@@ -310,7 +310,7 @@ describe('RemoteControlSection', () => {
     vi.useFakeTimers();
     try {
       let status: unknown = NOT_ENROLLED;
-      platform = { remoteHost: makeLink(async () => status) };
+      platform = { burrow: makeLink(async () => status) };
       await render();
 
       await type('input[type="url"]', 'https://elsewhere.example');
@@ -319,7 +319,7 @@ describe('RemoteControlSection', () => {
         await vi.advanceTimersByTimeAsync(2000);
       });
 
-      expect(text()).toContain('A Dormouse server is installed on this machine.');
+      expect(text()).toContain('A Dormouse Relay is installed on this machine.');
       expect(typedForm().hidden).toBe(true);
       expect(container.querySelector<HTMLInputElement>('input[type="url"]')!.value).toBe(
         'https://elsewhere.example',
@@ -347,7 +347,7 @@ describe('RemoteControlSection', () => {
         }
         return status;
       });
-      platform = { remoteHost: link };
+      platform = { burrow: link };
       await render();
 
       await act(async () => buttonLabelled('Enroll')!.click());
@@ -358,10 +358,10 @@ describe('RemoteControlSection', () => {
       expect(text()).toContain('https://ned-mac.tail9c2f1.ts.net');
 
       await act(async () => {
-        failEnroll(new Error('The server did not accept that setup password.'));
+        failEnroll(new Error('The Relay did not accept that setup password.'));
         await Promise.resolve();
       });
-      expect(text()).toContain('The server did not accept that setup password.');
+      expect(text()).toContain('The Relay did not accept that setup password.');
     } finally {
       vi.useRealTimers();
     }
@@ -369,21 +369,21 @@ describe('RemoteControlSection', () => {
 
   it('renders a one-click refusal where the typed form renders its own', async () => {
     const link = makeLink(async (cmd) => {
-      if (cmd === 'enrollOffer') throw new Error('server origin is not allowed by this build');
+      if (cmd === 'enrollOffer') throw new Error('relay origin is not allowed by this build');
       return OFFER_STATUS;
     });
-    platform = { remoteHost: link };
+    platform = { burrow: link };
     await render();
 
     await act(async () => buttonLabelled('Enroll')!.click());
-    expect(text()).toContain('server origin is not allowed by this build');
+    expect(text()).toContain('relay origin is not allowed by this build');
     // Still on the card, and the typed form is still one click away.
     expect(buttonLabelled('Enroll')).toBeTruthy();
     expect(disclosure()).toBeTruthy();
   });
 
-  it('unfolds the typed form for a server that is somewhere else', async () => {
-    platform = { remoteHost: makeLink(async () => OFFER_STATUS) };
+  it('unfolds the typed form for a Relay that is somewhere else', async () => {
+    platform = { burrow: makeLink(async () => OFFER_STATUS) };
     await render();
 
     await act(async () => disclosure()!.click());
@@ -411,10 +411,10 @@ describe('RemoteControlSection', () => {
           finishOffer = resolve;
         });
       }
-      if (cmd === 'enroll') return { hostId: 'wrong-racer', serverUrl: 'https://elsewhere' };
+      if (cmd === 'enroll') return { burrowId: 'wrong-racer', relayUrl: 'https://elsewhere' };
       return OFFER_STATUS;
     });
-    platform = { remoteHost: link };
+    platform = { burrow: link };
     await render();
 
     await act(async () => disclosure()!.click());
@@ -436,32 +436,32 @@ describe('RemoteControlSection', () => {
     expect(buttonLabelled('Connect')!.disabled).toBe(true);
 
     await act(async () => {
-      finishOffer({ hostId: 'host-1', serverUrl: OFFER_STATUS.offer!.origin });
+      finishOffer({ burrowId: 'burrow-1', relayUrl: OFFER_STATUS.offer!.origin });
       await Promise.resolve();
     });
   });
 
-  it('shows the server and paired-device count when enrolled', async () => {
-    platform = { remoteHost: makeLink(async () => enrolled({ pairedClients: 2 })) };
+  it('shows the Relay and paired-device count when enrolled', async () => {
+    platform = { burrow: makeLink(async () => enrolled({ pairedClients: 2 })) };
     await render();
     expect(text()).toContain('https://laptop.tailnet.ts.net');
     expect(text()).toContain('2 paired phones');
     expect(buttonLabelled('Reconnect')).toBeUndefined();
   });
 
-  it('offers Reconnect only when the Host was displaced', async () => {
+  it('offers Reconnect only when the Burrow was displaced', async () => {
     const link = makeLink(async () => enrolled({ connection: 'displaced' }));
-    platform = { remoteHost: link };
+    platform = { burrow: link };
     await render();
 
-    expect(text()).toContain('took this server’s slot');
+    expect(text()).toContain('took this Relay’s slot');
     await act(async () => buttonLabelled('Reconnect')!.click());
     expect(link.command).toHaveBeenCalledWith('reconnect');
   });
 
   it('confirms before disconnecting, because paired phones must re-pair', async () => {
     const link = makeLink(async () => enrolled());
-    platform = { remoteHost: link };
+    platform = { burrow: link };
     await render();
 
     await act(async () => buttonLabelled('Disconnect')!.click());
@@ -477,7 +477,7 @@ describe('RemoteControlSection', () => {
     try {
       let status: unknown = enrolled({ connection: 'connecting' });
       const link = makeLink(async () => status);
-      platform = { remoteHost: link };
+      platform = { burrow: link };
       await render();
       expect(text()).toContain('Connecting…');
 
@@ -498,7 +498,7 @@ describe('RemoteControlSection', () => {
     vi.useFakeTimers();
     try {
       const link = makeLink(async () => enrolled());
-      platform = { remoteHost: link };
+      platform = { burrow: link };
       await render();
       await act(async () => root.unmount());
 
@@ -516,7 +516,7 @@ describe('RemoteControlSection', () => {
 
   it('renders a scannable setup code once the panel is opened', async () => {
     const link = makeLink(async (cmd) => (cmd === 'setupQr' ? qr() : enrolled()));
-    platform = { remoteHost: link };
+    platform = { burrow: link };
     await render();
 
     // Nothing is minted until someone asks: a code is a credential with a clock
@@ -540,7 +540,7 @@ describe('RemoteControlSection', () => {
       if (cmd === 'reconnect') throw new Error('the relay refused this machine');
       return enrolled({ connection: 'displaced' });
     });
-    platform = { remoteHost: link };
+    platform = { burrow: link };
     await render();
 
     await act(async () => buttonLabelled('Reconnect')!.click());
@@ -568,7 +568,7 @@ describe('RemoteControlSection', () => {
     });
     expect(container.querySelector('svg[role="img"]')).toBeTruthy();
 
-    // The scan happens on the phone, so the Host's own invitation state is the
+    // The scan happens on the phone, so the Burrow's own invitation state is the
     // only way this panel can learn of it. `reserved` is the flip that matters:
     // a phone has completed the handshake against this code, so it is spent
     // whatever the person at the laptop decides next.
@@ -580,7 +580,7 @@ describe('RemoteControlSection', () => {
   });
 
   it('does not call a dropped invitation a scan', async () => {
-    // The Host discards every held invitation when its relay socket goes, so a
+    // The Burrow discards every held invitation when its relay socket goes, so a
     // wifi blip must not tell the user to finish on a phone that never asked
     // (`docs/specs/remote-security-model.md` → Pairing).
     const link = await openSetupPanel();
@@ -599,7 +599,7 @@ describe('RemoteControlSection', () => {
   it('stops sending the user to a phone once the request is answered', async () => {
     // The panel sits behind the pairing modal, so this is the frame the user is
     // left looking at after approving — and `reserved`'s sentence ("it will ask
-    // to pair") is a lie by then. The Host publishes `consumed` for every
+    // to pair") is a lie by then. The Burrow publishes `consumed` for every
     // terminal outcome, which is why the subscription outlives the QR.
     const link = await openSetupPanel();
 
@@ -647,7 +647,7 @@ describe('RemoteControlSection', () => {
     ['cancelled', 'You cancelled this request, so nothing was paired.'],
     ['expired', 'The request ran out of time, so nothing was paired.'],
     ['superseded', 'Another pairing request replaced this one, so nothing was paired.'],
-    ['host-error', 'This machine could not finish pairing, so nothing was paired.'],
+    ['burrow-error', 'This machine could not finish pairing, so nothing was paired.'],
   ])('says a %s ceremony ended that way, in an announced region', async (outcome, expected) => {
     const link = await openSetupPanel();
 
@@ -665,7 +665,7 @@ describe('RemoteControlSection', () => {
     // ends by saying so. A pairing spent nothing the user has to replace.
     const spent = 'This setup code is spent';
     expect(outcomeRegion()?.textContent?.includes(spent)).toBe(outcome !== 'paired');
-    // The sentence the Host used to leave behind for every one of these.
+    // The sentence the Burrow used to leave behind for every one of these.
     expect(text()).not.toContain('This setup code is finished.');
     expect(buttonLabelled('New code')).toBeTruthy();
   });
@@ -713,14 +713,14 @@ describe('RemoteControlSection', () => {
     },
   );
 
-  // The nine outcome stories drive the panel through `makeStubRemoteHostLink`'s
+  // The nine outcome stories drive the panel through `makeStubBurrowLink`'s
   // `setupOutcome`, and no test in this suite touches that path — Storybook's
   // play functions do not run in `pnpm test`, so a change to the stub would
   // break every one of them silently. These two are that path's unit test: one
   // per placement, mirroring `PairingOutcomeWithPanelClosed` and its siblings.
   it('drives the section report from the primed stub, panel shut', async () => {
     platform = {
-      remoteHost: makeStubRemoteHostLink({
+      burrow: makeStubBurrowLink({
         status: enrolledStatus(),
         setupOutcome: 'code-mismatch',
       }),
@@ -734,7 +734,7 @@ describe('RemoteControlSection', () => {
 
   it('drives the panel report from the primed stub, panel open', async () => {
     platform = {
-      remoteHost: makeStubRemoteHostLink({ status: enrolledStatus(), setupOutcome: 'paired' }),
+      burrow: makeStubBurrowLink({ status: enrolledStatus(), setupOutcome: 'paired' }),
     };
     await render();
     await act(async () => buttonLabelled('Set up a phone')!.click());
@@ -749,7 +749,7 @@ describe('RemoteControlSection', () => {
     // The modal interrupts whatever is on screen, so the request can be
     // answered from a Settings dialog that never opened this panel.
     const link = makeLink(async () => enrolled({ pairedClients: 0 }));
-    platform = { remoteHost: link };
+    platform = { burrow: link };
     await render();
 
     await act(async () => {
@@ -792,7 +792,7 @@ describe('RemoteControlSection', () => {
     vi.useFakeTimers();
     try {
       const link = mintingLink();
-      platform = { remoteHost: link };
+      platform = { burrow: link };
       await render();
       await act(async () => buttonLabelled('Set up a phone')!.click());
       expect(mintCount(link)).toBe(1);
@@ -870,21 +870,21 @@ describe('RemoteControlSection', () => {
   });
 
   it('drops the panel when the machine enrolls somewhere else under it', async () => {
-    // A code belongs to the server that minted it. The console hook can swap
+    // A code belongs to the Relay that minted it. The console hook can swap
     // enrollments with this dialog open, and a QR left on screen would point a
     // camera at a machine this one no longer talks to.
     vi.useFakeTimers();
     try {
       let status: unknown = enrolled();
       const link = makeLink(async (cmd) => (cmd === 'setupQr' ? qr() : status));
-      platform = { remoteHost: link };
+      platform = { burrow: link };
       await render();
 
       await act(async () => buttonLabelled('Set up a phone')!.click());
       await settleQrChunk();
       expect(container.querySelector('svg[role="img"]')).toBeTruthy();
 
-      status = enrolled({ hostId: 'host-2', serverUrl: 'https://other.tailnet.ts.net' });
+      status = enrolled({ burrowId: 'burrow-2', relayUrl: 'https://other.tailnet.ts.net' });
       await act(async () => {
         await vi.advanceTimersByTimeAsync(2000);
       });
@@ -918,7 +918,7 @@ describe('RemoteControlSection', () => {
     vi.useFakeTimers();
     try {
       const link = mintingLink();
-      platform = { remoteHost: link };
+      platform = { burrow: link };
       await render();
       await act(async () => buttonLabelled('Set up a phone')!.click());
       expect(mintCount(link)).toBe(1);
@@ -942,7 +942,7 @@ describe('RemoteControlSection', () => {
   it('counts down on the minute, since minutes are all it names', async () => {
     vi.useFakeTimers();
     try {
-      platform = { remoteHost: mintingLink() };
+      platform = { burrow: mintingLink() };
       await render();
       await act(async () => buttonLabelled('Set up a phone')!.click());
       expect(text()).toContain('Expires in 5 min');
@@ -963,12 +963,12 @@ describe('RemoteControlSection', () => {
   });
 
   it('lets New code disarm the refresh the old code armed', async () => {
-    // Every mint spends a code on the Server, so the timer armed against the
+    // Every mint spends a code on the Relay, so the timer armed against the
     // code being replaced must not fire on top of the replacement.
     vi.useFakeTimers();
     try {
       const link = mintingLink();
-      platform = { remoteHost: link };
+      platform = { burrow: link };
       await render();
       await act(async () => buttonLabelled('Set up a phone')!.click());
 
@@ -995,14 +995,14 @@ describe('RemoteControlSection', () => {
   });
 
   it('never re-mints in a loop when the two clocks disagree', async () => {
-    // `expiresAt` is the Server's clock and the subtraction is against this
+    // `expiresAt` is the Relay's clock and the subtraction is against this
     // one's. A laptop minutes fast computes a delay at or below zero, and the
     // unclamped version re-minted several times a second — each one spending a
     // real single-use token.
     vi.useFakeTimers();
     try {
       const link = mintingLink(-600_000);
-      platform = { remoteHost: link };
+      platform = { burrow: link };
       await render();
       await act(async () => buttonLabelled('Set up a phone')!.click());
       expect(mintCount(link)).toBe(1);
@@ -1025,14 +1025,14 @@ describe('RemoteControlSection', () => {
     }
   });
 
-  it('refreshes by the real TTL when the Server clock is far ahead', async () => {
-    // Ten minutes of negative webview skew makes a five-minute Server token
+  it('refreshes by the real TTL when the Relay clock is far ahead', async () => {
+    // Ten minutes of negative webview skew makes a five-minute Relay token
     // look fifteen minutes long. It still needs replacement before its real
     // five-minute expiry, with the ordinary 20-second lead.
     vi.useFakeTimers();
     try {
       const link = mintingLink(900_000);
-      platform = { remoteHost: link };
+      platform = { burrow: link };
       await render();
       await act(async () => buttonLabelled('Set up a phone')!.click());
 
@@ -1064,7 +1064,7 @@ describe('RemoteControlSection', () => {
           release = resolve;
         });
       });
-      platform = { remoteHost: link };
+      platform = { burrow: link };
       await render();
 
       await act(async () => buttonLabelled('Set up a phone')!.click());
@@ -1106,13 +1106,13 @@ describe('RemoteControlSection', () => {
       }
       return enrolled();
     });
-    platform = { remoteHost: link };
+    platform = { burrow: link };
     await render();
 
     await act(async () => buttonLabelled('Set up a phone')!.click());
     expect(text()).toContain('Getting a code…');
 
-    // And the token exists on the Server either way; what must not happen is a
+    // And the token exists on the Relay either way; what must not happen is a
     // live code rendering into a panel the user already dismissed.
     await act(async () => buttonLabelled('Done')!.click());
     await act(async () => {
@@ -1137,7 +1137,7 @@ describe('RemoteControlSection', () => {
     // React logs a caught render error; catching it is the point of the test.
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
-      platform = { remoteHost: link };
+      platform = { burrow: link };
       await render();
       await act(async () => buttonLabelled('Set up a phone')!.click());
       await settleQrChunk();
@@ -1165,11 +1165,11 @@ describe('RemoteControlSection', () => {
 
   it('pins the story stub both panel states are driven from', async () => {
     // The `SetupPhoneQr` / `SetupPhoneRedeemed` stories drive the section
-    // through `makeStubRemoteHostLink` and nothing else, so a fixture that
+    // through `makeStubBurrowLink` and nothing else, so a fixture that
     // stopped answering `setupQr` — or stopped firing the invitation event —
     // would fail only in Chromatic. The states themselves are covered above, so
     // this pins the fixture rather than re-rendering them.
-    const link = makeStubRemoteHostLink({
+    const link = makeStubBurrowLink({
       status: enrolledStatus(),
       setupQr: setupQrResult({ expiresAt: NOW + 300_000 }),
     });
@@ -1180,7 +1180,7 @@ describe('RemoteControlSection', () => {
     // stranger's id and a code that is still good.
     const used = setupQrResult();
     const events: unknown[] = [];
-    makeStubRemoteHostLink({
+    makeStubBurrowLink({
       status: enrolledStatus(),
       setupQr: used,
       setupInvitation: 'reserved',
@@ -1194,9 +1194,9 @@ describe('RemoteControlSection', () => {
   it('re-reads the status when the service announces a change', async () => {
     let status: unknown = NOT_ENROLLED;
     const link = makeLink(async () => status);
-    platform = { remoteHost: link };
+    platform = { burrow: link };
     await render();
-    expect(text()).toContain('Connect this machine to a Dormouse server');
+    expect(text()).toContain('Connect this machine to a Dormouse Relay');
 
     // Another window enrolled: the event carries only `{ enrolled }`, so the
     // section must re-read rather than patch a field.

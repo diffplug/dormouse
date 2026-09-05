@@ -7,7 +7,6 @@ import {
   getTerminalPaneState,
   removeTerminalPaneState,
 } from '../terminal-state-store';
-import { registry, type TerminalEntry } from '../terminal-store';
 import { __resetArchiveServiceForTests } from './archive-service';
 import { archiveSurfaceNotes, PROCESS_CWD_REFRESH_MS } from './close-coordinator';
 import {
@@ -101,7 +100,6 @@ afterEach(() => {
   __resetArchiveServiceForTests();
   clearAllNotepads();
   PANE_IDS.forEach(removeTerminalPaneState);
-  PANE_IDS.forEach((id) => registry.delete(id));
 });
 
 describe('archiveSurfaceNotes', () => {
@@ -397,15 +395,12 @@ describe('archiveSurfaceNotes', () => {
       // one, but its PTY is alive right up to the kill.
       installMetaResolver();
       ensureTerminalPaneState('s1');
-      // A Surface whose PTY id is not its own id — a resumed pane, say. The
-      // host is asked about the PTY; the pane state is filled under the Surface.
-      registry.set('s1', { ptyId: 'pty-9' } as unknown as TerminalEntry);
       const getCwd = vi.spyOn(adapter, 'getCwd').mockResolvedValue('/Users/me/project');
       addPlainNote('s1', 'where was I');
 
       await archiveSurfaceNotes(['s1']);
 
-      expect(getCwd).toHaveBeenCalledWith('pty-9');
+      expect(getCwd).toHaveBeenCalledWith('s1');
       expect((await stored()).batches[0].cwd).toMatchObject({
         path: '/Users/me/project',
         source: 'process',

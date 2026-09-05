@@ -119,21 +119,21 @@ export interface AgentBrowserPopResult {
 }
 
 /**
- * The webview end of a Node-resident remote Host
+ * The webview end of a Node-resident Burrow
  * (`lib/src/host/remote/service-protocol.ts`).
  *
- * The Host runs in the process that owns the PTYs — the Tauri sidecar, the VS
+ * The Burrow runs in the process that owns the PTYs — the Tauri sidecar, the VS
  * Code extension host — so the webview is its UI plus its surface responder: it
  * forwards console commands, answers what its own panes are called and how big
  * they are, and mirrors the pairing queue. Nothing a webview answers can widen
  * access (docs/specs/remote-security-model.md).
  *
  * `cmd` and `op` are deliberately opaque here. *What* the service can be asked
- * belongs to the remote Host, not to the platform, so the operation map and its
- * real types live in `lib/src/remote/host/peer-surfaces.ts`; this layer and the
+ * belongs to the Burrow, not to the platform, so the operation map and its
+ * real types live in `lib/src/remote/burrow/peer-surfaces.ts`; this layer and the
  * transports under it only carry the bytes.
  */
-export interface RemoteHostLink {
+export interface BurrowLink {
   /** Run a service command and resolve its result, or reject with its error. */
   command(cmd: string, params?: unknown): Promise<unknown>;
 
@@ -160,10 +160,10 @@ export interface RemoteHostLink {
  * renders; `textData` is the same chunk with string-control payloads removed,
  * for consumers reading it as text. **Omitted when identical to `data`**, which
  * is the common case, so the two never cost twice the bytes over a transport
- * (`docs/specs/transport.md`). The same pair crosses every Host seam and the
+ * (`docs/specs/transport.md`). The same pair crosses every host seam and the
  * remote wire — `ProcessedPtyChunk` in
- * `lib/src/remote/host/host-surface-provider.ts`, `TerminalDataEvent` in
- * `server-lib-common/src/remote/wire.ts` — under the same omitted/present rule.
+ * `lib/src/remote/burrow/burrow-surface-provider.ts`, `TerminalDataEvent` in
+ * `remote-lib-common/src/remote/wire.ts` — under the same omitted/present rule.
  */
 export interface PtyDataDetail {
   id: string;
@@ -177,12 +177,12 @@ export interface PlatformAdapter {
   shutdown(): void;
 
   /**
-   * Reach the remote Host service behind this host. Present exactly when a
-   * process behind the webview owns the PTYs and can run the Host (standalone's
-   * sidecar, VS Code's extension host). Adapters that omit it have no Host
+   * Reach the Burrow service behind this host. Present exactly when a
+   * process behind the webview owns the PTYs and can run the Burrow (standalone's
+   * sidecar, VS Code's extension host). Adapters that omit it have no Burrow
    * anywhere — the website — so the remote modules stay inert.
    */
-  remoteHost?: RemoteHostLink;
+  burrow?: BurrowLink;
 
   // Shell detection
   getAvailableShells(): Promise<ShellEntry[]>;

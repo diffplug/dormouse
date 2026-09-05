@@ -8,7 +8,6 @@ import { getPlatformOrNull } from '../platform';
 import { settleAllWithin } from '../settle-within';
 import { processCwdMayReplace } from '../terminal-state';
 import { fillTerminalProcessCwd } from '../terminal-state-store';
-import { resolveTerminalSessionId } from '../terminal-store';
 import { buildArchiveBatch } from './archive-model';
 import { hasNotepadArchive, mutateArchive } from './archive-service';
 import {
@@ -47,7 +46,7 @@ async function refreshProcessCwds(surfaceIds: readonly string[]): Promise<void> 
     return !!meta && hasTerminal(meta.surfaceKind) && processCwdMayReplace(meta.cwd?.source);
   });
   const paths = await settleAllWithin(
-    asking.map((surfaceId) => platform.getCwd(resolveTerminalSessionId(surfaceId))),
+    asking.map((surfaceId) => platform.getCwd(surfaceId)),
     PROCESS_CWD_REFRESH_MS,
     null,
   );

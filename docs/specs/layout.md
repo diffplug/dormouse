@@ -95,7 +95,7 @@ The baseboard (`h-7`, 28px) sits below content, visible by default, with no top 
 
 `Wall showBaseboard={false}` serves an embedder with no door/minimize workflow: no strip, the content wrapper's bottom inset grown from 2px to 7px, a baseboard drop a no-op. **It is a seam, not a shipped configuration** — no production host passes it (rationale), so the app shell always has a baseboard.
 
-The far right is one right-aligned flex cluster: the `N more →` overflow arrow, the host-supplied `notice` slot (standalone puts the update banner there), then three always-present 24px **Settings** controls — 16px speaker/slashed-speaker for spoken alarms, 16px ringing-bell/slashed-bell for push notifications, 16px sliders for the dialog itself. **Shape and accessible text both carry each state**, so status never relies on color. All three open the same app-global Settings dialog (`docs/specs/alert.md` → Alarm settings); **the status controls never toggle settings directly**. Every baseboard-level button shares one class constant in `Baseboard.tsx`.
+**Must group the right-hand controls**: the `N more →` overflow arrow, the host-supplied `notice` slot, then three always-present 24px square Settings buttons with 2px gaps. Their 16px icons are speaker/slashed-speaker for spoken alarms, filled `VibrateIcon`/`DeviceMobileSlashIcon` for push, and sliders for Settings. **Must expose each state through shape and `aria-pressed`.** The status buttons toggle their respective alarm settings; sliders opens Settings (`docs/specs/alert.md` → Settings dialog). **Must use the shared `chromeButton` hover treatment** for Settings and overflow buttons.
 
 A minimized session becomes a **door**, showing its label plus the alert/TODO/speech badge cluster (`docs/specs/alert.md` → Door owns which badge shows when; both speech states also name themselves in the Door's `title` and accessible name). **A Door's label is header-derived only for a terminal-backed Surface** (`hasTerminal`); any other keeps its stored title, and a browser Door adds the display glyphs from `docs/specs/dor-browser.md` → "Browser Chrome". A Door uses the window's bottom edge as its bottom border, with left, top, and right borders taking the shared terminal top radius from `lib/src/components/design.tsx` — a mouse hole matching pane rounding. Dimensions: `min-w-[68px] max-w-[220px] h-6`.
 
@@ -274,7 +274,7 @@ Source of truth: `lib/src/components/wall/IllegalRenameWarning.tsx`, `lib/src/co
 
 ## Session lifecycle and terminal registry
 
-For a terminal Surface the pane ID is its session ID. `TerminalPane` calls `getOrCreateTerminal(id)` on React mount and `unmountElement(id)` on React unmount; **the session (xterm.js instance, PTY, DOM element) persists in the registry across mount/unmount cycles**, and an unmounted element leaves the entry `Orphaned`. A browser surface's pane ID is a Surface id with no registry entry or PTY (`docs/specs/glossary.md`); its DOM is hosted by LathHost's leaf div and rebuilt from persisted params, never from the registry.
+**Must use one stable Session id for a terminal Surface, its registry key, and its platform PTY.** Layout moves and swaps change position only. `TerminalPane` calls `getOrCreateTerminal(id)` on React mount and `unmountElement(id)` on React unmount; **the session (xterm.js instance, PTY, DOM element) persists in the registry across mount/unmount cycles**, and an unmounted element leaves the entry `Orphaned`. A browser surface's pane ID is a Surface id with no registry entry or PTY (`docs/specs/glossary.md`); its DOM is hosted by LathHost's leaf div and rebuilt from persisted params, never from the registry.
 
 | Op | Behavior |
 |---|---|
@@ -289,7 +289,7 @@ For a terminal Surface the pane ID is its session ID. `TerminalPane` calls `getO
 - **Shell selection replacement**: the standalone Settings dialog's Shell row and the VS Code shell picker send `dormouse:new-terminal` with `replaceUntouched` when the selected shell type changes. **A shell is identified by executable path plus ordered arguments**, so WSL distributions and Windows Developer shells sharing an executable stay distinct. **`Wall` always mints a new session id and a fresh `surface:N` ref.** An untouched selected pane or door has the new terminal take over its leaf via a Lath `replace` op (an atomic identity swap; doors reattach through the normal restore path first), the old session disposed and its ref retired; a touched selection, or none, spawns a new pane beside it. Announced spawns show a transient pane-anchored notice (`Switched to zsh`, `Opened bash`). **A replacement migrates the Surface's notepad to the new id rather than archiving it** (`docs/specs/notepad.md` → "Closure").
 - **Replay-time terminal reports must be dropped; user input must not be** — during **resume** replay the registry drops the replies xterm.js emits to queries embedded in buffered output, before they reach the new shell (`docs/specs/terminal-escapes.md` → "Report filtering on the input side").
 
-Source of truth: `lib/src/lib/terminal-store.ts` (registry maps and pending shell opts, imported directly, including by `lib/src/remote/host/`), `lib/src/lib/terminal-lifecycle.ts` (the ops), `lib/src/lib/terminal-registry.ts` (the facade).
+Source of truth: `lib/src/lib/terminal-store.ts` (registry maps and pending shell opts, imported directly, including by `lib/src/remote/burrow/`), `lib/src/lib/terminal-lifecycle.ts` (the ops), `lib/src/lib/terminal-registry.ts` (the facade).
 
 ### Agent resume on cold restore
 
@@ -336,11 +336,7 @@ Source of truth: `lib/src/components/wall/use-session-persistence.ts` (save trig
 
 ### Activity state
 
-Each Surface carries an `ActivityState` (`status`, `watchingEnabled`, `todo`, `notification`), synced to React via `useSyncExternalStore`. **State arriving from the platform *before* a registry entry exists** (the resume path) is staged as **primed state** and merged in when the entry is minted; a browser surface, which never gets a registry entry, keeps its activity in a parallel local map.
-
-Each terminal Session also carries `TerminalPaneState` (`docs/specs/terminal-state.md`), keyed by pane/session id, with PTY-originated semantic events resolved through `ptyId` — so a swapped session keeps its CWD and command state with the terminal content.
-
-Source of truth: `lib/src/lib/session-activity-store.ts` (the React snapshot store and the primed-state merge).
+Renderer Activity storage is owned by `docs/specs/alert.md` → Public State.
 
 ## Theme
 

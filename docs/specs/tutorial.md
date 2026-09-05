@@ -9,6 +9,8 @@ Canonical device-specific routes (`website/src/routes.ts`):
 - **`/playground/pocket`** — mobile Pocket playground; on desktop, the temporary Pocket marketing/share page (phone preview + notify form).
 - **`/pocket`** — temporary redirect to `/playground/pocket`. **Keep the real tethering surface off the playground URL.**
 
+**Must hydrate the desktop prerender, then reconcile browser media.** **Must dispatch using browser media, never the hydration fallback.** **Must skip desktop runtime loading when browser media selects Pocket.** Pinned by `website/src/pages/Playground.test.tsx`.
+
 ## Profiles
 
 Two `tut` profiles in `website/src/lib/tut-items.ts`, each opening directly inside its `initialSectionId`:
@@ -70,6 +72,8 @@ Pocket reuses `cp-select` / `cp-raw` / `cp-rewrap` but drops `cp-override`: Sele
 ## Storage
 
 `TutorialState` persists to `localStorage`. **Unknown ids in a stored payload are filtered on load**, so renaming an id is a one-way reset. **Both profiles share the completion key**; totals count only the active profile's items, so an id completed under one is kept but uncounted under the other.
+
+**Must keep progress and reset working without storage**, pinned by `website/src/lib/tutorial-state.test.ts`.
 
 - `dormouse-tut-v3` — JSON array of completed item ids.
 - `dormouse-tut-star-v1` — `"true"` after `Starred on GitHub`.

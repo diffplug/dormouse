@@ -27,7 +27,7 @@ import {
   type TerminalEntry,
   type TerminalOverlayDims,
 } from './terminal-store';
-import { consumePrimedActivity, notifyActivityListeners } from './session-activity-store';
+import { clearTerminalActivity, getActivity, notifyActivityListeners } from './session-activity-store';
 import { attachTerminalMouseRouter } from './terminal-mouse-router';
 import {
   inputContainsEnter,
@@ -40,12 +40,12 @@ import {
 import { getTerminalTheme, paintTerminalHost, startThemeObserver } from './terminal-theme';
 import {
   ensureTerminalPaneState,
-  fillTerminalProcessCwdByPtyId,
-  finishLaunchedCommandByPtyId,
+  fillTerminalProcessCwd,
+  applyTerminalSemanticEvents,
   getTerminalPaneState,
   isPaneOscDriven,
-  recordTerminalOutputByPtyId,
-  recordTerminalUserInputByPtyId,
+  recordTerminalOutput,
+  recordTerminalUserInput,
   removeTerminalPaneState,
   resetTerminalPaneState,
   seedLaunchedCommand,
@@ -106,7 +106,7 @@ function makePromptLineReader(terminal: Terminal): PromptLineReader {
 }
 
 function seedProcessCwdAfterSpawn(id: string): void {
-  void getPlatform().getCwd(id).then((cwd) => fillTerminalProcessCwdByPtyId(id, cwd));
+  void getPlatform().getCwd(id).then((cwd) => fillTerminalProcessCwd(id, cwd));
 }
 
 // Reconstructs the visible text from an OSC 8 hyperlink's buffer range. xterm
@@ -251,7 +251,7 @@ function wirePtyEvents(id: string, terminal: Terminal): () => void {
     if (detail.id === id) {
       // The parser already told us which bytes are text; `textData` is omitted
       // when it would equal `data`.
-      recordTerminalOutputByPtyId(id, detail.textData ?? detail.data);
+      recordTerminalOutput(id, detail.textData ?? detail.data);
       terminal.write(detail.data);
     }
   };
@@ -264,7 +264,7 @@ function wirePtyEvents(id: string, terminal: Terminal): () => void {
     if (entry) entry.exited = true;
     // The process is gone, so any command we seeded for this pane is no longer
     // live; clear it so `dor ensure` stops matching a dead surface.
-    finishLaunchedCommandByPtyId(id, detail.exitCode);
+    applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: detail.exitCode }]);
   };
   platform.onPtyData(handleData);
   platform.onPtyExit(handleExit);
@@ -300,9 +300,8 @@ function wireXtermHandlers(
     const isSyntheticTerminalReport = inputIsSyntheticTerminalReport(input);
 
     if (!isSyntheticTerminalReport) {
-      recordTerminalUserInputByPtyId(id, input, makePromptLineReader(terminal));
-      const entry = registry.get(id);
-      const hadTodo = entry?.todo === true;
+      recordTerminalUserInput(id, input, makePromptLineReader(terminal));
+      const hadTodo = getActivity(id).todo;
       getPlatform().alertAttend(id);
       if (hadTodo && inputContainsEnter(input)) {
         getPlatform().alertClearTodo(id);
@@ -374,33 +373,15 @@ function setupTerminalEntry(id: string, options: { shell?: string; untouched?: b
   };
 
   const entry: TerminalEntry = {
-    ptyId: id,
     shellKind: shellCommandKind(options.shell, PLATFORM_STRING),
     terminal,
     fit,
     element,
     cleanup,
     setSelectionBaseline,
-    alertStatus: 'WATCHING_DISABLED',
-    ringSeq: 0,
-    watchingEnabled: false,
-    todo: false,
-    notification: null,
-    attentionDismissedRing: false,
-    awaited: false,
     isReplaying: false,
     untouched: options.untouched ?? false,
   };
-
-  const primed = consumePrimedActivity(id);
-  if (primed) {
-    if (primed.status !== undefined) entry.alertStatus = primed.status;
-    if (primed.ringSeq !== undefined) entry.ringSeq = primed.ringSeq;
-    if (primed.watchingEnabled !== undefined) entry.watchingEnabled = primed.watchingEnabled;
-    if (primed.todo !== undefined) entry.todo = primed.todo;
-    if (primed.notification !== undefined) entry.notification = primed.notification;
-    if (primed.awaited !== undefined) entry.awaited = primed.awaited;
-  }
 
   registry.set(id, entry);
   ensureTerminalPaneState(id);
@@ -615,18 +596,18 @@ export function disposeAllSessions(): void {
 export function disposeSession(id: string): void {
   const entry = registry.get(id);
   if (!entry) return;
-  getPlatform().alertRemove(entry.ptyId);
+  getPlatform().alertRemove(id);
   // Before the xterm instance goes: its markers are what notepad pins hold, and
   // a disposed marker cannot be dropped cleanly afterwards. The notes stay.
   dropSourcesForTerminal(id);
   entry.cleanup();
-  getPlatform().killPty(entry.ptyId);
+  getPlatform().killPty(id);
   entry.element.remove();
   entry.terminal.dispose();
   registry.delete(id);
   removeTerminalPaneState(id);
   removeMouseSelectionState(id);
-  notifyActivityListeners();
+  clearTerminalActivity(id);
 }
 
 export function refitSession(id: string): void {
@@ -721,6 +702,6 @@ export function focusSession(id: string, focused: boolean): void {
     entry.terminal.focus();
   } else {
     entry.terminal.blur();
-    getPlatform().alertClearAttention(entry.ptyId);
+    getPlatform().alertClearAttention(id);
   }
 }

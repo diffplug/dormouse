@@ -1,4 +1,4 @@
-import type { AlertStateDetail, OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, RemoteHostLink } from './types';
+import type { AlertStateDetail, OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, BurrowLink } from './types';
 import { AlertManager } from '../alert-manager';
 import type { AwaitHandle, AwaitOptions } from '../alert-manager';
 import type { AlertSettings } from '../alert-settings';
@@ -15,7 +15,7 @@ import {
   textProjectionOf,
 } from '../terminal-protocol';
 import {
-  applyTerminalSemanticEventsByPtyId,
+  applyTerminalSemanticEvents,
 } from '../terminal-state-store';
 import { themeColorProvider } from '../terminal-theme';
 
@@ -62,11 +62,11 @@ export class FakePtyAdapter implements PlatformAdapter {
   hostOwnsTheme?: boolean;
   hostOwnsShells?: boolean;
 
-  // Same reason, one layer up: a fake platform has no Host service behind it, so
+  // Same reason, one layer up: a fake platform has no Burrow service behind it, so
   // this stays undefined and the Settings dialog's Remote control section renders
-  // nothing (`docs/specs/server.md`). The preview decorator installs a stub link
+  // nothing (`docs/specs/relay.md`). The preview decorator installs a stub link
   // for the stories that are *about* that section.
-  remoteHost?: RemoteHostLink;
+  burrow?: BurrowLink;
 
   /**
    * The notepad archive as memory — the website demo's real implementation and
@@ -405,7 +405,7 @@ export class FakePtyAdapter implements PlatformAdapter {
     applyTerminalProtocolEvents(this.alertManager, id, parsed.events);
     const semanticEvents = collectTerminalSemanticEvents(parsed.events);
     this.alertManager.applyTerminalSemanticEvents(id, semanticEvents);
-    applyTerminalSemanticEventsByPtyId(id, semanticEvents);
+    applyTerminalSemanticEvents(id, semanticEvents);
     const inputHandler = this.inputHandlers.get(id);
     for (const response of collectTerminalProtocolResponses(parsed.events)) {
       inputHandler?.(response);

@@ -18,7 +18,6 @@ import {
   getTerminalInstance,
   getTerminalPaneState,
   isPaneOscDriven,
-  resolveTerminalSessionId,
 } from '../../lib/terminal-registry';
 import { surfaceRunsCommand, type TerminalPaneState } from '../../lib/terminal-state';
 import { isAllowedAgentBrowserBinary } from '../../lib/agent-browser-binary';
@@ -881,7 +880,7 @@ export function useDorControl({
           return;
         }
 
-        const handle = getPlatform().alertAwait(resolveTerminalSessionId(target.id), { until, timeoutMs });
+        const handle = getPlatform().alertAwait(target.id, { until, timeoutMs });
         // The client hung up (Ctrl-C) or the control server's deadline passed:
         // release the wait so it stops absorbing completions nobody can receive.
         // Guarded because in-process callers may dispatch a request without one.

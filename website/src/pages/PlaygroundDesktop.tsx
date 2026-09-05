@@ -14,7 +14,7 @@ import {
   WATCH_DEMO_COMMAND_MS,
 } from "../lib/tut-runner";
 import { ChangelogRunner } from "../lib/changelog-runner";
-import { POCKET_PLAYGROUND_PATH, usePreferredPlayground } from "../lib/playground-routing";
+import { getPreferredPlayground, POCKET_PLAYGROUND_PATH, usePreferredPlayground } from "../lib/playground-routing";
 import {
   DESKTOP_PANES,
   DESKTOP_PLAYGROUND_LAYOUT,
@@ -38,7 +38,7 @@ function sendToPane(
   paneId: string,
   data: string,
 ): void {
-  adapter.sendOutput(registry.resolveTerminalSessionId(paneId), data);
+  adapter.sendOutput(paneId, data);
 }
 
 /**
@@ -133,6 +133,8 @@ function PlaygroundDesktopExperience() {
   useEffect(() => {
     let cancelled = false;
     async function loadWall() {
+      // Phone hydration briefly mounts this desktop prerender before reconciling media.
+      if (getPreferredPlayground() === "pocket") return;
       const platform = await import("dormouse-lib/lib/platform");
       const registry = await import("dormouse-lib/lib/terminal-registry");
       const mouseSelection = await import("dormouse-lib/lib/mouse-selection");
@@ -197,7 +199,7 @@ function PlaygroundDesktopExperience() {
                 // it stays BUSY — which is a fine demo of the rule applying, but
                 // it could never reach ALERT_RINGING.
                 busyDemoDisposeRef.current = adapter.pumpActivity(
-                  registry.resolveTerminalSessionId(PANE_BOXED),
+                  PANE_BOXED,
                   BUSY_DEMO_DURATION_MS,
                   BUSY_DEMO_INTERVAL_MS,
                 );

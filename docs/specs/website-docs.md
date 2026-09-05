@@ -28,7 +28,7 @@ that once rendered it at `/docs` is retained and still runs (see
 | Marketplace and Open VSX | Extension discovery, evaluation, and basic onboarding | `vscode-ext/README.md` plus public metadata in `vscode-ext/package.json` |
 | `/docs/dor` | Complete CLI reference | Help snapshots in `dor/test/snapshots/help/`, verified against the built CLI |
 | `/docs/agent-skill` | Agent-facing operating guide | Exact `dor/skill.md` |
-| `/docs/self-host` | Running the coordinating server yourself | The runbook half of `SELF_HOST.md` |
+| `/docs/self-host` | Running your own Relay | The runbook half of `SELF_HOST.md` |
 | `/hosted` | Prelaunch overview of optional paid managed services | `website/src/pages/Hosted.tsx` |
 | `/docs/security` | What Dormouse guarantees and how it is checked | Every section of `docs/specs/security.md`, minus title and front matter; its rows split across three pages |
 | GitHub root | Repository overview and contributor entry point | Root `README.md` |
@@ -274,7 +274,7 @@ READMEs and the homepage — so the obligation is registry-driven, never inferre
 from the path. The changelog names none; the rail and the updater's deep link
 are its way in. `checkRoutesToReferences` reads it.
 
-**Must title `/docs/self-host` “How to self-host” and `/hosted` “Pay us to host”
+**Must title `/docs/self-host` “How to self-host” and `/hosted` “Dormouse Hosted”
 in chrome and metadata while keeping URLs stable.**
 
 **The rail is the only table of contents.** List all pages; expand only current
@@ -334,14 +334,15 @@ hidden, so a returning reader never sees dismissed UI flash. Pinned by
 
 ## `/hosted` preview
 
-**Must mark both services unavailable:** Hosted operates Pocket's coordinator;
+**Must mark both services unavailable:** Hosted operates Pocket's Relay;
 optional ElevenLabs replaces browser voice. Terminals stay on an awake, online
 computer; browser speech and self-hosting remain. `NotifySignupForm` exposes
-the `nedshed.dev` devlog handoff and keeps email per tab;
-`website/src/components/NotifySignupForm.test.tsx` pins both.
+the `nedshed.dev` devlog handoff and keeps email per tab.
+**Must use native required-email validation.**
+`website/src/components/NotifySignupForm.test.tsx` pins all three.
 
-**Must open both hosting pages with the server boundary:** Dormouse needs none;
-remote features require a configured signalling server and otherwise make no network
+**Must open both hosting pages with the Relay boundary:** Dormouse needs none;
+remote features require a configured Relay and otherwise make no network
 requests. `/docs/self-host` links `/hosted`; `/hosted` labels hosting pending review,
 discloses metadata, and links the model.
 `website/src/lib/docs-rail.test.tsx` pins this.
@@ -524,7 +525,7 @@ a browser Surface preview, and links to `/docs/dor#agent-browser` and
 `/docs/agent-skill`.
 
 The transcript is **authored literals in `Home.tsx`, not generated or tested.**
-Proving it end to end would need a live Host and a real `agent-browser` in CI,
+Proving it end to end would need a live Burrow and a real `agent-browser` in CI,
 and a captured dev-server port is not stable enough to commit — a busy 5173
 silently becomes 5174. The accepted cost is that the transcript can drift from
 real output with no test to catch it.
@@ -580,7 +581,7 @@ verifies:
   the root README alone owns `/docs/self-host` and `/docs/security` — checked
   as exact URLs, so the `/docs` entrypoint cannot stand in for a page under a
   prefix test. The guide carries neither obligation: it is a Marketplace
-  listing for the editor extension, and neither running a relay server nor
+  listing for the editor extension, and neither running a Relay nor
   auditing the repository is part of installing one;
 - the homepage links every `/docs` page root-relatively, and every `/docs` href
   on it resolves to one — both directions, because a rewritten section can

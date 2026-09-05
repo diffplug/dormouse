@@ -1,5 +1,5 @@
 /**
- * The minimal WebSocket surface the remote client and host actually use — just
+ * The minimal WebSocket surface the remote client and burrow actually use — just
  * enough to send, close, and listen, so tests can inject a fake in place of a
  * real browser `WebSocket`. Shared by both sides so the contract cannot drift,
  * along with the timer seam each of them arms its deadlines on.
@@ -21,8 +21,8 @@ export interface RemoteWebSocket {
  */
 export type RemoteTimer = (run: () => void, delayMs: number) => () => void;
 
-/** {@link RemoteTimer} over the host environment's own `setTimeout`. */
-export const hostTimer: RemoteTimer = (run, delayMs) => {
+/** {@link RemoteTimer} over the burrow environment's own `setTimeout`. */
+export const realTimer: RemoteTimer = (run, delayMs) => {
   const timer = setTimeout(run, delayMs);
   return () => clearTimeout(timer);
 };

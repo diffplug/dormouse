@@ -15,7 +15,8 @@ vi.mock('../lib/platform', () => ({
 
 import { Baseboard } from './Baseboard';
 import { installLocalStorageStub } from '../lib/test-local-storage';
-import { applyAlertSettingsFromHost, DEFAULT_ALERT_SETTINGS } from '../lib/alert-settings';
+import { applyAlertSettingsFromHost, DEFAULT_ALERT_SETTINGS, getAlertSettings } from '../lib/alert-settings';
+import { DialogKeyboardContext } from './wall/wall-context';
 import {
   addInstalledTheme,
   getActiveThemeId,
@@ -25,6 +26,7 @@ import {
 } from '../lib/themes';
 import { resetShellStore, seedShellStore } from '../lib/shell-store';
 import { addPlainNote, clearAllNotepads } from '../lib/notepad/notepad-store';
+import { resetPushDevices, setPushDevices, setPushDevicesRefresher } from '../lib/push-devices';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -64,10 +66,12 @@ afterEach(() => {
   setDefaultThemeId(null);
   resetShellStore();
   act(() => root.unmount());
+  resetPushDevices();
   container.remove();
   applyAlertSettingsFromHost(DEFAULT_ALERT_SETTINGS);
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe('Baseboard settings controls', () => {
@@ -75,14 +79,14 @@ describe('Baseboard settings controls', () => {
     act(() => root.render(<Baseboard items={[]} onReattach={() => {}} />));
 
     expect(container.querySelectorAll('[data-alarm-setting]')).toHaveLength(2);
-    expect(container.querySelector('[data-alarm-setting="speech"]')?.getAttribute('aria-label'))
-      .toContain('disabled');
-    expect(container.querySelector('[data-alarm-setting="push"]')?.getAttribute('aria-label'))
-      .toContain('disabled');
+    expect(container.querySelector('[data-alarm-setting="speech"]')?.getAttribute('aria-pressed'))
+      .toBe('false');
+    expect(container.querySelector('[data-alarm-setting="push"]')?.getAttribute('aria-pressed'))
+      .toBe('false');
     expect(container.querySelector('[data-open-settings]')).not.toBeNull();
   });
 
-  it('reflects enabled states and opens the shared dialog from a status button', () => {
+  it('reflects enabled states and opens the shared dialog from Settings', () => {
     applyAlertSettingsFromHost({
       ...DEFAULT_ALERT_SETTINGS,
       speakEnabled: true,
@@ -92,14 +96,101 @@ describe('Baseboard settings controls', () => {
 
     const speech = container.querySelector<HTMLButtonElement>('[data-alarm-setting="speech"]');
     const push = container.querySelector<HTMLButtonElement>('[data-alarm-setting="push"]');
-    expect(speech?.getAttribute('aria-label')).toContain('enabled');
-    expect(push?.getAttribute('aria-label')).toContain('enabled');
+    expect(speech?.getAttribute('aria-pressed')).toBe('true');
+    expect(push?.getAttribute('aria-pressed')).toBe('true');
 
-    act(() => speech?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    act(() => container.querySelector<HTMLButtonElement>('[data-open-settings]')?.click());
     const dialog = document.querySelector('[role="dialog"]');
     expect(dialog?.textContent).toContain('Settings');
     // Not a VS Code host, so the Theme row is offered (`hostOwnsTheme` absent).
     expect(dialog?.textContent).toContain('Theme:');
+  });
+
+  it.each([
+    ['speech', 'speakEnabled', 'Speak out loud if not attended', 'Delay before speaking:'],
+    ['push', 'pushEnabled', 'Send push notification if not attended', 'Delay before push:'],
+  ] as const)('toggles only %s and previews its stored setting without taking the keyboard', (sink, field, label, delay) => {
+    vi.useFakeTimers();
+    const setDialogKeyboardActive = vi.fn();
+    act(() => root.render(
+      <DialogKeyboardContext.Provider value={setDialogKeyboardActive}>
+        <Baseboard items={[]} onReattach={() => {}} />
+      </DialogKeyboardContext.Provider>,
+    ));
+    const button = container.querySelector<HTMLButtonElement>(`[data-alarm-setting="${sink}"]`)!;
+    const terminalInput = document.createElement('textarea');
+    container.appendChild(terminalInput);
+    terminalInput.focus();
+    const mouseDown = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+    button.dispatchEvent(mouseDown);
+    // jsdom does not perform the native focus change; assert its prevention too.
+    expect(mouseDown.defaultPrevented).toBe(true);
+    act(() => button.click());
+
+    expect(getAlertSettings()).toEqual({ ...DEFAULT_ALERT_SETTINGS, [field]: true });
+    expect(button.getAttribute('aria-pressed')).toBe('true');
+    expect(document.activeElement).toBe(terminalInput);
+    expect(setDialogKeyboardActive).not.toHaveBeenCalledWith(true);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    const preview = document.querySelector('[role="status"]');
+    expect(preview?.textContent).toContain(label);
+    expect(preview?.textContent).toContain(delay);
+    expect(preview?.querySelector('[role="switch"]')?.getAttribute('aria-checked')).toBe('true');
+    expect(preview?.querySelector('input')?.value).toBe(sink === 'speech' ? '10' : '20');
+    expect(preview?.querySelector('[inert]')).not.toBeNull();
+    expect(preview?.textContent).not.toContain('Theme:');
+
+    act(() => vi.advanceTimersByTime(2000));
+    expect(preview?.classList.contains('opacity-0')).toBe(true);
+    act(() => vi.advanceTimersByTime(250));
+    expect(document.querySelector('[role="status"]')).toBeNull();
+    expect(getAlertSettings()[field]).toBe(true);
+
+    act(() => button.click());
+    expect(getAlertSettings()).toEqual(DEFAULT_ALERT_SETTINGS);
+    expect(document.querySelector('[role="status"] [role="switch"]')?.getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('keeps cached push targets in the preview and refreshes them when Settings opens', () => {
+    setPushDevices({ status: 'ready', devices: [{ label: 'iPhone' }] });
+    const refresh = vi.fn(() => setPushDevices({ status: 'loading', devices: [] }));
+    setPushDevicesRefresher(refresh);
+    act(() => root.render(<Baseboard items={[]} onReattach={() => {}} />));
+    act(() => container.querySelector<HTMLButtonElement>('[data-alarm-setting="push"]')?.click());
+
+    expect(refresh).not.toHaveBeenCalled();
+    expect(document.querySelector('[role="status"]')?.textContent).toContain('Push will be sent to iPhone');
+    expect(document.querySelector('[role="status"]')?.textContent).not.toContain('Looking for phones');
+
+    act(() => container.querySelector<HTMLButtonElement>('[data-open-settings]')?.click());
+    expect(refresh).toHaveBeenCalledOnce();
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Looking for phones');
+    act(() => setPushDevices({ status: 'ready', devices: [{ label: 'Pixel' }] }));
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Push will be sent to Pixel');
+  });
+
+  it('restarts feedback on repeat toggles and replaces it when another setting changes', () => {
+    vi.useFakeTimers();
+    act(() => root.render(<Baseboard items={[]} onReattach={() => {}} />));
+    const speech = container.querySelector<HTMLButtonElement>('[data-alarm-setting="speech"]')!;
+    const push = container.querySelector<HTMLButtonElement>('[data-alarm-setting="push"]')!;
+    act(() => speech.click());
+    act(() => vi.advanceTimersByTime(2100));
+    act(() => speech.click());
+    expect(document.querySelector('[role="status"]')?.classList.contains('opacity-100')).toBe(true);
+    act(() => vi.advanceTimersByTime(150));
+    expect(document.querySelector('[role="status"]')).not.toBeNull();
+    act(() => push.click());
+    expect(document.querySelectorAll('[role="status"]')).toHaveLength(1);
+    expect(document.querySelector('[role="status"]')?.textContent).toContain('Push notifications enabled');
+    act(() => vi.advanceTimersByTime(1850));
+    expect(document.querySelector('[role="status"]')?.classList.contains('opacity-100')).toBe(true);
+
+    act(() => container.querySelector<HTMLButtonElement>('[data-open-settings]')?.click());
+    expect(document.querySelector('[role="status"]')).toBeNull();
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    act(() => vi.advanceTimersByTime(2250));
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
   });
 
   it('hides the Theme row when the host owns the theme', async () => {

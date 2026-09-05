@@ -7,7 +7,6 @@
 import { hasTerminal, type SurfaceKind } from 'dor/commands/types';
 import { getPlatformOrNull } from '../platform';
 import type { CwdState } from '../terminal-state';
-import { resolveTerminalSessionId } from '../terminal-store';
 import { toArchivedNote } from './archive-model';
 import type {
   LiveNote,
@@ -455,7 +454,7 @@ export function buildVolatileSnapshot(): VolatileNotepadSnapshot {
       // for the Session id rather than the Surface id
       // (docs/specs/notepad.md → "VS Code lifecycle").
       ...(meta && hasTerminal(meta.surfaceKind)
-        ? { terminalId: resolveTerminalSessionId(surfaceId) }
+        ? { terminalId: surfaceId }
         : {}),
       ...(pendingBatchId ? { pendingBatchId } : {}),
       notes: notes.map(toArchivedNote),

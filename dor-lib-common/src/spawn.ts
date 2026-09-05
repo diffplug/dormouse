@@ -49,10 +49,18 @@ export function spawnAndCapture(binary: string, args: readonly string[]): Promis
       if (settled) return;
       settled = true;
       if (graceTimer !== undefined) clearTimeout(graceTimer);
+      // Capture is over. In the grace fallback a daemon still owns the write
+      // ends: leaving our readers open retains both the caller's event loop and
+      // the data listeners that keep accumulating ignored output.
+      child.stdout?.destroy();
+      child.stderr?.destroy();
       apply();
     };
-    child.stdout?.on('data', (chunk: unknown) => { stdout += String(chunk); });
-    child.stderr?.on('data', (chunk: unknown) => { stderr += String(chunk); });
+    // Decode across pipe chunks so a split UTF-8 sequence stays one character.
+    child.stdout?.setEncoding('utf8');
+    child.stderr?.setEncoding('utf8');
+    child.stdout?.on('data', (chunk: string) => { stdout += chunk; });
+    child.stderr?.on('data', (chunk: string) => { stderr += chunk; });
     child.on('error', (error: NodeJS.ErrnoException) =>
       settle(() => resolve({ ok: false, error: { code: error.code, message: error.message } })));
     const finish = (code: number | null, out: string, err: string): void =>

@@ -25,7 +25,7 @@ export function meta({ location }: MetaArgs) {
   return siteMeta(location.pathname, {
     title: "How to self-host — Dormouse",
     description:
-      "Run the Dormouse coordinating server on your own machine, reachable only from your tailnet. One installer, no database, no account.",
+      "Run your own Dormouse Relay, reachable only from your tailnet. One installer, no database, no account.",
   });
 }
 

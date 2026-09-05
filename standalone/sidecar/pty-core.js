@@ -1044,34 +1044,9 @@ module.exports.create = function create(send, ptyModule) {
     throw new TypeError('create() requires a node-pty compatible module');
   }
 
-  const MAX_SCROLLBACK_CHARS = 1_000_000;
   const pty = ptyModule;
   const ptys = new Map(); // id -> pty.IPty
   const ptyShells = new Map(); // id -> resolved shell executable
-  const scrollback = new Map(); // id -> { chunks: string[], totalChars: number }
-
-  // Only ever appends to a buffer `spawn` already created — never creates one.
-  // `spawn` installs the entry before it wires `onData`, so a live PTY always
-  // has one, and the only way to arrive here without one is after `kill` deleted
-  // it. That happens: `kill` never disposes the `onData` subscription, and a
-  // just-killed PTY can still deliver a final flush (notably under ConPTY, the
-  // same lag `gracefulKillAll` waits out). Creating the entry there would
-  // resurrect a dead pane's buffer under a key nothing deletes again — `kill`
-  // has already run and `killAll` only fires at shutdown — so the sidecar
-  // retains one buffer per killed pane for the life of the process, and
-  // `getScrollback` answers with post-kill bytes where the contract says a
-  // killed pane has no scrollback.
-  function bufferScrollback(id, data) {
-    const entry = scrollback.get(id);
-    if (!entry) return;
-
-    entry.chunks.push(data);
-    entry.totalChars += data.length;
-    while (entry.totalChars > MAX_SCROLLBACK_CHARS && entry.chunks.length > 1) {
-      const removed = entry.chunks.shift();
-      entry.totalChars -= removed ? removed.length : 0;
-    }
-  }
 
   function spawn(id, options) {
     const config = resolveSpawnConfig({ ...options, id, surfaceId: id });
@@ -1109,10 +1084,8 @@ module.exports.create = function create(send, ptyModule) {
 
     ptys.set(id, p);
     ptyShells.set(id, config.shell);
-    scrollback.set(id, { chunks: [], totalChars: 0 });
 
     p.onData((data) => {
-      bufferScrollback(id, data);
       send('data', { id, data });
     });
 
@@ -1141,7 +1114,7 @@ module.exports.create = function create(send, ptyModule) {
     if (p) p.resize(cols, rows);
   }
 
-  // Synchronous lifetime observation for the remote Host's atomic
+  // Synchronous lifetime observation for the Burrow's atomic
   // subscribe-then-check. Natural exits delete the generation from `ptys`, and
   // a spawn under the same id installs the new generation before it can emit.
   function hasPty(id) {
@@ -1155,7 +1128,6 @@ module.exports.create = function create(send, ptyModule) {
       ptys.delete(id);
       ptyShells.delete(id);
     }
-    scrollback.delete(id);
   }
 
   function killAll() {
@@ -1164,7 +1136,6 @@ module.exports.create = function create(send, ptyModule) {
     }
     ptys.clear();
     ptyShells.clear();
-    scrollback.clear();
   }
 
   function list() {
@@ -1185,22 +1156,6 @@ module.exports.create = function create(send, ptyModule) {
     const p = ptys.get(id);
     // getOpenPortsForPid is fail-soft (returns [] on any platform error).
     send('openPorts', { id, ports: p ? getOpenPortsForPid(p.pid) : [], requestId });
-  }
-
-  // The standalone counterpart of vscode-ext's `ptyManager.getScrollback`. No
-  // renderer reads it today — `PlatformAdapter` dropped its `getScrollback` once
-  // scrollback stopped being persisted — but this buffer is what a standalone-side
-  // recovery capture would read, and it is why `gracefulKillAll` deliberately
-  // preserves scrollback where `kill`/`killAll` clear it (docs/specs/vscode.md
-  // -> "Capturing agent recovery"; docs/specs/transport.md -> "Universal
-  // invariants").
-  function getScrollback(id, requestId) {
-    const entry = scrollback.get(id);
-    send('scrollback', {
-      id,
-      data: entry && entry.chunks.length > 0 ? entry.chunks.join('') : null,
-      requestId,
-    });
   }
 
   // Send ONE ^C to the given PTYs (all live ones when `ids` is omitted), so an
@@ -1243,12 +1198,10 @@ module.exports.create = function create(send, ptyModule) {
     for (const [, p] of ptys) {
       try { p.kill('SIGTERM'); } catch { /* already dead */ }
     }
-    // Deliberately does NOT clear scrollback (unlike kill/killAll): a SIGTERM'd
-    // process's final output stays readable via getScrollback afterward.
     // Resolve early once every PTY has exited (onExit empties the map) instead
     // of always sitting out the full timeout — but one grace tick after the map
     // empties, since ConPTY can fire onExit before the final data flush and that
-    // last output must land in scrollback first.
+    // last output must reach the host first.
     const deadline = Date.now() + timeout;
     const tick = () => {
       if (ptys.size === 0) setTimeout(done, 50);
@@ -1262,5 +1215,5 @@ module.exports.create = function create(send, ptyModule) {
     send('shells', { shells: detectAvailableShells(), requestId });
   }
 
-  return { spawn, write, resize, hasPty, kill, killAll, list, getCwd, getOpenPorts, getScrollback, interrupt, gracefulKillAll, getShells };
+  return { spawn, write, resize, hasPty, kill, killAll, list, getCwd, getOpenPorts, interrupt, gracefulKillAll, getShells };
 };

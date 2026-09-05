@@ -2,12 +2,12 @@
  * The Client half of the two end-to-end ceremonies, as a test drives it.
  *
  * Test-only, and shared on purpose — the same reasoning as
- * `lib/src/remote/test-fake-socket.ts`. Both suites that exercise a real Host
- * (`remote/host/remote-host.test.ts`, `host/remote/service.test.ts`) need the
+ * `lib/src/remote/test-fake-socket.ts`. Both suites that exercise a real Burrow
+ * (`remote/burrow/burrow-runtime.test.ts`, `host/remote/service.test.ts`) need the
  * same three things: a faithful WebAuthn authenticator, a presence proof built
  * over the shared challenge builder, and a real Noise IK initiator speaking the
  * `e2e` envelope. Two copies would be two opinions about what a valid ceremony
- * is, and the Host would be tested against whichever one was written last.
+ * is, and the Burrow would be tested against whichever one was written last.
  *
  * Nothing here is stubbed: the assertion is a real ES256 signature and the
  * handshake is the shipped suite, so a case that passes here would pass against
@@ -32,7 +32,7 @@ import {
   type PasskeyAssertion,
   type PresenceBinding,
   type PresenceProofV1,
-} from 'server-lib-common';
+} from 'remote-lib-common';
 import type { FakeSocket } from './test-fake-socket';
 
 const subtle = globalThis.crypto.subtle;
@@ -123,7 +123,7 @@ export async function createTestAuthenticator(options: {
 /**
  * The proof a Client puts in its first transport payload.
  *
- * The Server's nonce is unguessable to the Host, which recomputes the challenge
+ * The Relay's nonce is unguessable to the Burrow, which recomputes the challenge
  * rather than trusting one, so a test supplies its own. `assertionBinding`
  * signs over a *different* binding than the one sent — which is how a
  * substituted or replayed proof is spelled.
@@ -133,11 +133,11 @@ export async function presenceProofFor(
   binding: PresenceBinding,
   over: { accountId?: string; assertionBinding?: PresenceBinding; origin?: string } = {},
 ): Promise<PresenceProofV1> {
-  const serverNonce = randomBase64Url(32);
-  const challenge = await presenceChallenge(over.assertionBinding ?? binding, serverNonce);
+  const relayNonce = randomBase64Url(32);
+  const challenge = await presenceChallenge(over.assertionBinding ?? binding, relayNonce);
   return {
     binding,
-    serverNonce,
+    relayNonce,
     accountId: over.accountId ?? 'owner',
     passkeyCredentialId: authenticator.credentialId,
     passkeyPublicKey: authenticator.publicKey,
@@ -145,7 +145,7 @@ export async function presenceProofFor(
   };
 }
 
-/** Poll until `get` answers, so a Host that awaits WebCrypto can catch up. */
+/** Poll until `get` answers, so a Burrow that awaits WebCrypto can catch up. */
 export async function flushUntil<T>(get: () => T | undefined, timeoutMs = 2000): Promise<T> {
   const value = await pollFor(get, timeoutMs);
   if (value === undefined) throw new Error('timed out waiting for a frame');
@@ -169,7 +169,7 @@ async function pollFor<T>(get: () => T | undefined, timeoutMs: number): Promise<
  * **Several event-loop turns, not one.** A ceremony step is a dozen awaited
  * WebCrypto calls, and each resolves off the threadpool — under a full suite's
  * parallel load they do not all land inside a single timer, which made an
- * assertion about what the Host did *not* do pass vacuously and one about what
+ * assertion about what the Burrow did *not* do pass vacuously and one about what
  * it did do fail. A caller with an observable should still name it through
  * {@link settleUntil}; this is the floor for the ones asserting absence.
  */
@@ -181,7 +181,7 @@ export async function settle(): Promise<void> {
 }
 
 /**
- * Wait for the Host to have *reacted* to a frame, then settle.
+ * Wait for the Burrow to have *reacted* to a frame, then settle.
  *
  * A fixed settle is not enough: every ceremony step awaits several WebCrypto
  * calls, so on a loaded machine the reaction lands after any constant number of
@@ -200,7 +200,7 @@ export async function settleUntil(until?: () => boolean): Promise<void> {
  * For the caller whose observable is the work itself: a refused frame answers
  * nothing on the wire, so {@link settleUntil} has no predicate to name and the
  * only evidence a flood has finished is that its count stopped rising. A fixed
- * settle cannot supply that — the Host runs every frame on one chain, so N
+ * settle cannot supply that — the Burrow runs every frame on one chain, so N
  * refused inits are a serial run of several times N awaited WebCrypto calls,
  * and a loaded runner lands them across more turns than any constant covers
  * (CI counted a burst of eight mid-handshake, 29 operations of 32). Waiting on
@@ -225,7 +225,7 @@ export async function settleUntilQuiet(read: () => number, stableRounds = 3): Pr
   throw new Error(`settleUntilQuiet: reading never went quiet after 40 settles (last ${last})`);
 }
 
-/** The Host's outgoing `e2e` frames for one ceremony, in order. */
+/** The Burrow's outgoing `e2e` frames for one ceremony, in order. */
 export function e2eFramesFor(
   socket: FakeSocket,
   kind: string,
@@ -234,12 +234,12 @@ export function e2eFramesFor(
   return socket.frames('e2e').filter((frame) => frame.kind === kind && frame.id === id);
 }
 
-/** Deliver one relay-stamped `e2e` frame to the Host. */
+/** Deliver one relay-stamped `e2e` frame to the Burrow. */
 export function sendE2eFrame(
   socket: FakeSocket,
   frame: {
     clientId: string;
-    hostId: string;
+    burrowId: string;
     kind: 'pairing' | 'connection';
     id: string;
     step: 'init' | 'transport';
@@ -250,7 +250,7 @@ export function sendE2eFrame(
 }
 
 /**
- * Decrypt the Host's most recent control message on one ceremony, waiting for
+ * Decrypt the Burrow's most recent control message on one ceremony, waiting for
  * one to arrive.
  *
  * The wait is the point: every step of a ceremony awaits several WebCrypto
@@ -268,7 +268,7 @@ export async function readOutcome(
     const frames = e2eFramesFor(socket, kind, id).filter((frame) => frame.step === 'transport');
     return frames[frames.length - 1];
   }, 2000);
-  if (!last) throw new Error('the Host sent no outcome');
+  if (!last) throw new Error('the Burrow sent no outcome');
   const receipt = session.receive(fromBase64Url(last.ct as string));
   if (receipt.kind !== 'control') {
     throw new Error(`expected a control message, got ${receipt.kind}`);
@@ -278,17 +278,17 @@ export async function readOutcome(
 
 /**
  * Run the pairing IK handshake against an invitation. Answers `null` when the
- * Host refused to respond at all, which is what an unknown, reserved, or
+ * Burrow refused to respond at all, which is what an unknown, reserved, or
  * expired invitation looks like from here.
  */
 export async function openPairingSession(options: {
   socket: FakeSocket;
-  hostId: string;
+  burrowId: string;
   clientId: string;
   invitation: PairingInvitation;
   clientStatic: NoiseKeyPair;
 }): Promise<NoiseTransportSession | null> {
-  const { socket, hostId, clientId, invitation, clientStatic } = options;
+  const { socket, burrowId, clientId, invitation, clientStatic } = options;
   const handshake = await createNoiseInitiator({
     prologue: pairingInvitationPrologue(invitation),
     staticKeyPair: clientStatic,
@@ -297,13 +297,13 @@ export async function openPairingSession(options: {
   const before = e2eFramesFor(socket, 'pairing', invitation.inviteId).length;
   sendE2eFrame(socket, {
     clientId,
-    hostId,
+    burrowId,
     kind: 'pairing',
     id: invitation.inviteId,
     step: 'init',
     ct: toBase64Url(await handshake.writeMessage()),
   });
-  // Polled rather than settled: the Host's responder awaits several WebCrypto
+  // Polled rather than settled: the Burrow's responder awaits several WebCrypto
   // calls, and a cold first run can outlast a couple of microtask turns. A
   // refusal is a real answer here, so the wait is short and its absence is the
   // result rather than a failure.
@@ -318,11 +318,11 @@ export async function openPairingSession(options: {
 
 /**
  * The whole Client side of a pairing up to the modal: handshake, presence
- * proof, and the two digits the Host will ask a person to type.
+ * proof, and the two digits the Burrow will ask a person to type.
  */
 export async function pairThroughSocket(options: {
   socket: FakeSocket;
-  hostId: string;
+  burrowId: string;
   clientId: string;
   invitation: PairingInvitation;
   authenticator: TestAuthenticator;
@@ -334,17 +334,17 @@ export async function pairThroughSocket(options: {
 }): Promise<{ session: NoiseTransportSession; clientStatic: NoiseKeyPair; code: string }> {
   const clientStatic = options.clientStatic ?? (await generateNoiseKeyPair());
   const session = await openPairingSession({ ...options, clientStatic });
-  if (!session) throw new Error('the Host refused the pairing handshake');
+  if (!session) throw new Error('the Burrow refused the pairing handshake');
   const code = options.code ?? '42';
   const presence = await presenceProofFor(options.authenticator, {
     kind: 'pairing',
-    hostId: options.hostId,
+    burrowId: options.burrowId,
     handshakeHash: toBase64Url(session.handshakeHash),
     passkeyCredentialId: options.authenticator.credentialId,
   });
   sendE2eFrame(options.socket, {
     clientId: options.clientId,
-    hostId: options.hostId,
+    burrowId: options.burrowId,
     kind: 'pairing',
     id: options.invitation.inviteId,
     step: 'transport',
@@ -356,23 +356,23 @@ export async function pairThroughSocket(options: {
   return { session, clientStatic, code };
 }
 
-/** Run the connection IK handshake against a pinned Host static. */
+/** Run the connection IK handshake against a pinned Burrow static. */
 export async function openConnectionSession(options: {
   socket: FakeSocket;
-  hostId: string;
+  burrowId: string;
   clientId: string;
   connectionId: string;
   clientStatic: NoiseKeyPair;
-  hostStaticPublicKey: string;
-}): Promise<{ session: NoiseTransportSession; hostChallenge: string }> {
+  burrowStaticPublicKey: string;
+}): Promise<{ session: NoiseTransportSession; burrowChallenge: string }> {
   const handshake = await createNoiseInitiator({
-    prologue: e2eConnectionPrologue(options.hostId, options.connectionId),
+    prologue: e2eConnectionPrologue(options.burrowId, options.connectionId),
     staticKeyPair: options.clientStatic,
-    remoteStaticPublicKey: fromBase64Url(options.hostStaticPublicKey),
+    remoteStaticPublicKey: fromBase64Url(options.burrowStaticPublicKey),
   });
   sendE2eFrame(options.socket, {
     clientId: options.clientId,
-    hostId: options.hostId,
+    burrowId: options.burrowId,
     kind: 'connection',
     id: options.connectionId,
     step: 'init',
@@ -383,11 +383,11 @@ export async function openConnectionSession(options: {
       (frame) => frame.step === 'response',
     ),
   );
-  // Message 2's payload is the Host's fresh single-use challenge, which the
+  // Message 2's payload is the Burrow's fresh single-use challenge, which the
   // presence binding must name.
   const payload = await handshake.readMessage(fromBase64Url(response.ct as string));
   return {
     session: new NoiseTransportSession(handshake.session),
-    hostChallenge: toBase64Url(payload),
+    burrowChallenge: toBase64Url(payload),
   };
 }

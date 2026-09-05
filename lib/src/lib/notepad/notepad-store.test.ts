@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IMarker } from '@xterm/xterm';
 import { FakePtyAdapter, setPlatform } from '../platform';
 import type { CwdState } from '../terminal-state';
-import { registry, type TerminalEntry } from '../terminal-store';
 import {
   addPlainNote,
   addTerminalNote,
@@ -464,9 +463,6 @@ describe('volatile mirror', () => {
   });
 
   it('carries the PTY id for terminal Surfaces only, resolved to the Session', async () => {
-    // The id the host answers `getCwd` for is the Session's, which a resumed or
-    // replaced pane no longer shares with its Surface id.
-    registry.set('s1', { ptyId: 'pty-9' } as unknown as TerminalEntry);
     setNotepadSurfaceMetaResolver((surfaceId) => ({
       surfaceTitle: surfaceId,
       surfaceKind: surfaceId === 's1' ? 'terminal' : 'browser',
@@ -477,11 +473,10 @@ describe('volatile mirror', () => {
     await flush();
 
     const surfaces = adapter.notepadArchive.lastVolatileSnapshot()!.surfaces;
-    expect(surfaces.map((surface) => surface.terminalId)).toEqual(['pty-9', undefined]);
+    expect(surfaces.map((surface) => surface.terminalId)).toEqual(['s1', undefined]);
     // Absent, not `undefined`: the mirror is round-tripped through the archive
     // validator on the host, which rejects a field it does not know.
     expect(Object.keys(surfaces[1])).not.toContain('terminalId');
-    registry.delete('s1');
   });
 
   it('carries staged archive deletions', async () => {

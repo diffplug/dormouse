@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Wraps the Tauri CLI so `pnpm tauri …` always stages the sidecar bundles first.
 //
-// The remote-server allowlist is no longer a webview concern: the Host runs in
+// The remote-server allowlist is no longer a webview concern: the Burrow runs in
 // the sidecar, and `DORMOUSE_REMOTE_CONNECT_SRC` is baked into that bundle by
 // `build-sidecar-proxy.mjs` (which `pnpm run stage` runs ahead of this). The
 // webview's CSP in tauri.conf.json has no remote sources at all.

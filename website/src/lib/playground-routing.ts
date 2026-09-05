@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 
 export const DESKTOP_PLAYGROUND_PATH = "/playground/desktop";
 export const POCKET_PLAYGROUND_PATH = "/playground/pocket";
@@ -7,21 +7,22 @@ export type PreferredPlayground = "desktop" | "pocket";
 
 const POCKET_PLAYGROUND_QUERY = "(max-width: 700px), (pointer: coarse)";
 
-function getPreferredPlayground(): PreferredPlayground {
+export function getPreferredPlayground(): PreferredPlayground {
   if (typeof window === "undefined") return "desktop";
   return window.matchMedia(POCKET_PLAYGROUND_QUERY).matches ? "pocket" : "desktop";
 }
 
-export function usePreferredPlayground() {
-  const [preferred, setPreferred] = useState<PreferredPlayground>(getPreferredPlayground);
+function subscribeToPreferredPlayground(onChange: () => void): () => void {
+  const media = window.matchMedia(POCKET_PLAYGROUND_QUERY);
+  media.addEventListener("change", onChange);
+  return () => media.removeEventListener("change", onChange);
+}
 
-  useEffect(() => {
-    const media = window.matchMedia(POCKET_PLAYGROUND_QUERY);
-    const update = () => setPreferred(getPreferredPlayground());
-    update();
-    media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
-  }, []);
-
-  return preferred;
+export function usePreferredPlayground(): PreferredPlayground {
+  return useSyncExternalStore(
+    subscribeToPreferredPlayground,
+    getPreferredPlayground,
+    // Hydrate the desktop prerender before reconciling the browser's media.
+    () => "desktop",
+  );
 }

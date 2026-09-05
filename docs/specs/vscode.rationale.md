@@ -62,13 +62,13 @@ Rows 1–2 are why a blanket second press is wrong; `Press Ctrl-C again` was abs
 
 **Why not reuse the CSP nonce.** The two answer different questions — the nonce authorizes script execution, the token authenticates a message sender — and conflating them makes both harder to reason about, though both are minted the same way, live in the same injected markup, and are equally unreachable from a cross-origin frame.
 
-## Remote Host: a service in the extension host
+## Burrow: a service in the extension host
 
-**Why every enrolled window cannot just start a Host.** They would all connect `/ws/host` against the same enrollment; the server closes the displaced socket (`server/src/relay.ts`), whose `close` handler reconnects and displaces the next one — and each window arms its own alarm push meanwhile.
+**Why every enrolled window cannot just start a Burrow.** They would all connect `/ws/burrow` against the same enrollment; the Relay closes the displaced socket (`relay/src/relay.ts`), whose `close` handler reconnects and displaces the next one — and each window arms its own alarm push meanwhile.
 
 **Why the socket path is hashed.** macOS caps a unix socket path near 104 bytes, and `context.globalStorageUri.fsPath` is most of that on its own — joining a name onto it overflows.
 
-**Why the store's interface is async.** The service reads enrollment and ACL in-process, but the places that state lives — `SecretStorage`, `globalState` — are async, so `HostStateStore` is too. The enrollment memo exists because `SecretStorage` is a keychain round trip and both the activation probe and the service want the same answer.
+**Why the store's interface is async.** The service reads enrollment and ACL in-process, but the places that state lives — `SecretStorage`, `globalState` — are async, so `BurrowStateStore` is too. The enrollment memo exists because `SecretStorage` is a keychain round trip and both the activation probe and the service want the same answer.
 
 **Why the memo must be dropped on any window's change.** Without it a window promoted to broker could resurrect an enrollment another window had cleared, or never see one another window had just created — `SecretStorage` is shared across all of an extension's windows.
 
@@ -78,17 +78,17 @@ Rows 1–2 are why a blanket second press is wrong; `Press Ctrl-C again` was abs
 
 **Why `stillOurs` compares full filesystem identity.** Two windows can find the same corpse, both unlink, and the second bind silently displaces the first, leaving the loser serving a socket no client can reach; nothing on the bind path detects that. Inode alone is reused too readily to distinguish "still ours" from "replaced".
 
-**What an unverified bind would cost.** During `RECLAIM_VERIFY_MS` the socket is bound but may still be given up. A command landing inside that window and told "broker" would start a service the stand-down path never tears down — two Hosts under one hostId, and the endless relay displacement above.
+**What an unverified bind would cost.** During `RECLAIM_VERIFY_MS` the socket is bound but may still be given up. A command landing inside that window and told "broker" would start a service the stand-down path never tears down — two Burrows under one burrowId, and the endless relay displacement above.
 
 **Why `listen`-time errors are logged rather than thrown.** The sockets already accepted are unaffected by an accept-time failure, and a listener that has genuinely died is noticed by the windows that can no longer reach it.
 
-**Why an empty token read must be waited out.** An empty `serverToken` fails the hello check for every peer, and a broker never re-reads the token, so a window that adopted `''` would refuse the whole installation for its lifetime while every other window retried at `RETRY_MS` forever.
+**Why an empty token read must be waited out.** An empty `relayToken` fails the hello check for every peer, and a broker never re-reads the token, so a window that adopted `''` would refuse the whole installation for its lifetime while every other window retried at `RETRY_MS` forever.
 
 **Why exhausting that wait latches a permanent stand-down.** The exclusive create answers `EEXIST` for a token path that is a *directory* or unreadable as readily as for one another window owns, so the remaining cases are a crash-left zero-length file or a `globalStorageUri` this process cannot read — and retrying either would make every command wait out its queue budget on every attempt.
 
 **What squatting the socket path buys.** One HMAC over a nonce the squatter chose — which is not the token — and nothing else.
 
-**Why a mid-contention command waits rather than being refused.** While the contention runs the window is neither broker nor client, and a bind plus a handshake is not instant. Refusing there would tell an enrolled machine's webview it has no Host seconds before it gets one, and the gates that arm on that answer (`enrolled-gate.ts`) would stay down.
+**Why a mid-contention command waits rather than being refused.** While the contention runs the window is neither broker nor client, and a bind plus a handshake is not instant. Refusing there would tell an enrolled machine's webview it has no Burrow seconds before it gets one, and the gates that arm on that answer (`enrolled-gate.ts`) would stay down.
 
 **Where the `WebSocket` boundary falls.** `globalThis.WebSocket` arrived in Node 22, and VS Code 1.85 — the floor `engines.vscode` declares — shipped Node 18, so an older extension host has no global to use.
 
@@ -96,7 +96,7 @@ Rows 1–2 are why a blanket second press is wrong; `Press Ctrl-C again` was abs
 
 **Why installing the responder is keyed by the link.** Each install adds a `status` subscription, and each arming under it adds pane-state, activity, and focus listeners with no handle left to remove them. A flag would be wrong because the platform adapter, not the module, is what owns a link.
 
-**Why a late answer invalidates instead of being dropped** (the rule is `docs/specs/remote-api.md` → Directory; every ask bridge shares it). It arrives after the Host has already rendered a directory missing whatever that answerer owns — an empty picker on a machine that does have terminals — and nothing can re-open a settled request. Without the invalidation an idle machine has no other reason to re-collect, so the phone's picker stays wrong indefinitely.
+**Why a late answer invalidates instead of being dropped** (the rule is `docs/specs/remote-api.md` → Directory; every ask bridge shares it). It arrives after the Burrow has already rendered a directory missing whatever that answerer owns — an empty picker on a machine that does have terminals — and nothing can re-open a settled request. Without the invalidation an idle machine has no other reason to re-collect, so the phone's picker stays wrong indefinitely.
 
 ## Peer surfaces across windows
 
@@ -104,7 +104,7 @@ Rows 1–2 are why a blanket second press is wrong; `Press Ctrl-C again` was abs
 
 **Why the route outlives the last unsubscribe.** Re-attaching an already-attached surface resolves the new route first and only then tears the old attachment down, so dropping the route on unsubscribe would delete the fresh one and strand every later write.
 
-**Why a result is never broadcast when a route exists.** Ids are globally unique, so broadcasting another window's answer settles nothing anywhere — and it puts that window's Host state in front of webviews that never asked for it.
+**Why a result is never broadcast when a route exists.** Ids are globally unique, so broadcasting another window's answer settles nothing anywhere — and it puts that window's Burrow state in front of webviews that never asked for it.
 
 **Why `pushDevices` answers `null` instead of refusing.** When an un-enrolled window refused the read-only commands, the Settings dialog reported an unreachable server on machines that had simply never enrolled.
 

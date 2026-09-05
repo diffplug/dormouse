@@ -166,14 +166,17 @@ supply-chain page publishes ([security-supply-chain.md](./security-supply-chain.
 `extensionId` joining them to the `<extensionId>.<slug>` theme ids;
 `lib/src/lib/themes/bundled-extensions.test.ts` pins both directions.
 
+**Must tolerate unreadable storage and failed active-id writes during theme restoration.**
+Pinned by `lib/src/lib/themes/apply.test.ts`.
+
 **`subscribeToActiveTheme()` notifies only on a *different* theme, compared by
-id, not object identity** (rationale) — so a same-theme re-apply, re-selecting
-the active theme, and the boot-time `restoreActiveTheme()` never read as a user
-picking one. It exists for the website tutorial's theme step
+id, not object identity** (rationale). It serves the website tutorial's theme step
 ([tutorial.md](./tutorial.md)); **never** reach for `onTerminalThemeChange()`
 instead (rationale).
 
-Source of truth: `subscribeToActiveTheme()` in `lib/src/lib/themes/apply.ts`;
+Source of truth: `getInstalledThemes()` / `getStoredActiveThemeId()` /
+`setActiveThemeId()` in `lib/src/lib/themes/store.ts`;
+`subscribeToActiveTheme()` in `lib/src/lib/themes/apply.ts`;
 `onTerminalThemeChange()` in `lib/src/lib/terminal-theme.ts`.
 
 ## Where the user picks a theme

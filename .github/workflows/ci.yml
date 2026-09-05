@@ -99,7 +99,7 @@ jobs:
           DORMOUSE_INSTALL_ORIGIN: https://ci.example.ts.net
         run: |
           set -euo pipefail
-          root="$(mktemp -d)/dormouse-server"
+          root="$(mktemp -d)/dormouse-relay"
           offer="$root/run/enroll-offer.json"
           # Prints the token, because it must rotate on every run before the
           # first Host enrollment — and this job is the only executable check.
@@ -109,12 +109,12 @@ jobs:
           # rule is free to drift from the validator the redemption path
           # actually runs, and then agrees with itself while the server rejects
           # what the installer writes. No build step is needed for it: the
-          # `Test` step above builds server-lib-common, as does the
-          # `pnpm --filter server build` inside every install below.
+          # `Test` step above builds remote-lib-common, as does the
+          # `pnpm --filter relay build` inside every install below.
           read_offer() {
             node --input-type=module -e '
               import { readFileSync, statSync } from "node:fs";
-              import { isEnrollmentOffer } from "./server-lib-common/dist/index.js";
+              import { isEnrollmentOffer } from "./remote-lib-common/dist/index.js";
               const [path, wantOrigin] = process.argv.slice(1);
               const mode = statSync(path).mode & 0o777;
               if (mode !== 0o600) throw new Error(`${path} is mode ${mode.toString(8)}, expected 600`);
@@ -129,25 +129,25 @@ jobs:
             ' "$offer" "$DORMOUSE_INSTALL_ORIGIN"
           }
           # Twice: the first is a first install, the second exercises the update
-          # path — previous pointer, prune, and preserving config/server.env.
+          # path — previous pointer, prune, and preserving config/relay.env.
           DORMOUSE_INSTALL_ROOT="$root" ./deploy/local/install-linux.sh --yes
-          before="$(sha256sum "$root/config/server.env" | cut -d' ' -f1)"
+          before="$(sha256sum "$root/config/relay.env" | cut -d' ' -f1)"
           first_token="$(read_offer)"
           DORMOUSE_INSTALL_ROOT="$root" ./deploy/local/install-linux.sh --yes
-          after="$(sha256sum "$root/config/server.env" | cut -d' ' -f1)"
+          after="$(sha256sum "$root/config/relay.env" | cut -d' ' -f1)"
           second_token="$(read_offer)"
-          [ "$before" = "$after" ] || { echo "::error::server.env was not preserved across an update"; exit 1; }
+          [ "$before" = "$after" ] || { echo "::error::relay.env was not preserved across an update"; exit 1; }
           [ "$first_token" != "$second_token" ] || { echo "::error::the enrollment offer was not re-minted on the update"; exit 1; }
-          # hosts.json existence, not its current row count, is the durable
-          # "first Host happened" marker. Even an empty hand-edited file keeps
+          # burrows.json existence, not its current row count, is the durable
+          # "first Burrow happened" marker. Even an empty hand-edited file keeps
           # a later installer run from reopening bootstrap.
-          printf '[]\n' > "$root/state/hosts.json"
-          chmod 0600 "$root/state/hosts.json"
+          printf '[]\n' > "$root/state/burrows.json"
+          chmod 0600 "$root/state/burrows.json"
           DORMOUSE_INSTALL_ROOT="$root" ./deploy/local/install-linux.sh --yes
-          [ ! -e "$offer" ] || { echo "::error::the enrollment offer survived after hosts.json existed"; exit 1; }
+          [ ! -e "$offer" ] || { echo "::error::the enrollment offer survived after burrows.json existed"; exit 1; }
           [ -L "$root/previous" ] || { echo "::error::no previous release retained after an update"; exit 1; }
           bash -n "$root/bin/manage"
-          bash -n "$root/bin/run-server"
+          bash -n "$root/bin/run-relay"
   webview-smoketest:
     name: Webview Boot Smoketest
     runs-on: ubuntu-latest

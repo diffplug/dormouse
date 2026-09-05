@@ -45,7 +45,7 @@ const controlToken = randomBytes(24).toString('hex');
 // Overloading one token would hand the bridge to every spawned shell for free.
 const bridgeToken = randomBytes(24).toString('hex');
 const viteOrigin = `http://localhost:${vitePort}`;
-// The remote Host persists its enrollment + ACL here, under the harness's own
+// The Burrow persists its enrollment + ACL here, under the harness's own
 // temp dir so a dev run never touches the installed app's state.
 const stateDir = path.join(os.tmpdir(), `dormouse-${process.pid}-browser-state`);
 
@@ -105,9 +105,9 @@ const fireAndForget = {
   pty_kill: ({ id }) => writeSidecar('pty:kill', { id }),
   pty_request_init: () => writeSidecar('pty:requestInit'),
   dor_control_response: ({ response }) => writeSidecar('dor:controlResponse', response),
-  // The remote Host's whole bridge rides one passthrough, exactly as it does
-  // through Rust (`remote_host_command` in src-tauri/src/lib.rs).
-  remote_host_command: ({ payload }) => writeSidecar('remoteHost:command', payload),
+  // The Burrow's whole bridge rides one passthrough, exactly as it does
+  // through Rust (`burrow_command` in src-tauri/src/lib.rs).
+  burrow_command: ({ payload }) => writeSidecar('burrow:command', payload),
   kill_sidecar_now: () => shutdown(),
 };
 
@@ -115,7 +115,6 @@ const invokeMap = {
   get_available_shells: (_args) => requestSidecar('pty:getShells', {}, 'pty:shells', (data) => data.shells ?? []),
   pty_get_cwd: ({ id }) => requestSidecar('pty:getCwd', { id }, 'pty:cwd', (data) => data.cwd ?? null),
   pty_get_open_ports: ({ id }) => requestSidecar('pty:getOpenPorts', { id }, 'pty:openPorts', (data) => data.ports ?? []),
-  pty_get_scrollback: ({ id }) => requestSidecar('pty:getScrollback', { id }, 'pty:scrollback', (data) => data.data ?? null),
   read_clipboard_file_paths: () => requestSidecar('clipboard:readFiles', {}, 'clipboard:files', (data) => data.paths ?? null),
   read_clipboard_image_as_file_path: () => requestSidecar('clipboard:readImage', {}, 'clipboard:image', (data) => data.path ?? null),
   read_clipboard_text: () => requestSidecar('clipboard:readText', {}, 'clipboard:text', (data) => data.text ?? null),
@@ -234,7 +233,7 @@ function startSidecar() {
     },
   });
   log(`sidecar pid=${sidecar.pid}`);
-  log(`remote host state dir: ${stateDir}`);
+  log(`burrow state dir: ${stateDir}`);
 
   createInterface({ input: sidecar.stdout }).on('line', (line) => {
     let msg;

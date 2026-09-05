@@ -1,7 +1,7 @@
 /**
- * Environment-free remote Host service shared by both Node hosts; see
- * `docs/specs/server.md` → "Host side". Surface ownership is injected through
- * {@link HostSurfaceProvider}.
+ * Environment-free Burrow service shared by both Node burrows; see
+ * `docs/specs/relay.md` → "Burrow side". Surface ownership is injected through
+ * {@link BurrowSurfaceProvider}.
  */
 
 import { hostname } from 'node:os';
@@ -14,57 +14,63 @@ import {
   mintNoiseStaticKeyPair,
   normalizeOrigin,
   type EnrollmentOffer,
-} from 'server-lib-common';
+} from 'remote-lib-common';
 import {
   performEnrollment,
-  type HostEnrollCredential,
-  type HostEnrollment,
-} from '../../remote/host/enrollment';
-import type { HostSurfaceProvider } from '../../remote/host/host-surface-provider';
-import { hostFetch } from '../../remote/host/host-fetch';
-import type { PendingPairing } from '../../remote/host/pairing-approval';
+  type BurrowEnrollCredential,
+  type BurrowEnrollment,
+} from '../../remote/burrow/enrollment';
+import type { BurrowSurfaceProvider } from '../../remote/burrow/burrow-surface-provider';
+import { burrowFetch } from '../../remote/burrow/burrow-fetch';
+import type { PendingPairing } from '../../remote/burrow/pairing-approval';
 import {
   loadPushDevices,
   sendPush,
   PUSH_TEST_TAG,
   PUSH_TEST_TITLE,
   type AlertPushDeps,
-} from '../../remote/host/push-delivery';
-import { RemoteApiSession } from '../../remote/host/remote-api';
+} from '../../remote/burrow/push-delivery';
+import { RemoteApiSession } from '../../remote/burrow/remote-api';
 import {
-  RemoteHost,
+  BurrowRuntime,
   type InvitationState,
   type PairingOutcome,
   type WebSocketLike,
-} from '../../remote/host/remote-host';
+} from '../../remote/burrow/burrow-runtime';
 import { originAllowedByConnectSrc } from './connect-src';
 import { readEnrollmentOffer } from './enroll-offer';
-import type { HostStateStore } from './host-state-store';
+import type { BurrowStateStore } from './burrow-state-store';
 import { createSerialQueue } from './serial-queue';
 import {
-  REMOTE_HOST_EVENT_EVENT,
-  REMOTE_HOST_RESULT_EVENT,
-  isRemoteHostCommand,
+  BURROW_EVENT_EVENT,
+  BURROW_RESULT_EVENT,
+  isBurrowCommand,
   type ApproveParams,
   type DenyParams,
   type EnrollOfferParams,
   type EnrollParams,
   type EnrollResult,
-  type HostStatusEvent,
+  type BurrowStatusEvent,
   type InvitationEvent,
   type PairingQueueEvent,
   type PairingQueueItem,
   type PushDevicesResult,
   type PushParams,
   type PushSendSummary,
-  type RemoteHostConsoleStatus,
+  type BurrowConsoleStatus,
   type SetupQrResult,
 } from './service-protocol';
 
-export interface RemoteHostServiceOptions {
-  store: HostStateStore;
-  provider: HostSurfaceProvider;
-  /** Emit one of the `remoteHost:*` events to the webview. */
+export interface BurrowServiceOptions {
+  store: BurrowStateStore;
+  provider: BurrowSurfaceProvider;
+  /**
+   * Which app this Burrow is. A closed set rather than a display string, so
+   * nothing can pass a name that names neither; read only by
+   * {@link suggestedBurrowLabel} today.
+   */
+  kind: BurrowKind;
+  /** Emit one of the `burrow:*` events to the webview. */
   sendToUi: (event: string, data: unknown) => void;
   /** The CSP-shaped allowlist this build was compiled with (`connect-src.ts`). */
   connectSrc: string;
@@ -74,7 +80,7 @@ export interface RemoteHostServiceOptions {
   /**
    * The installer's enrollment offer on this machine, if any. Defaults to the
    * real well-known path (`enroll-offer.ts`); injected by the tests, which must
-   * not depend on whether the machine running them has a server installed.
+   * not depend on whether the machine running them has a Relay installed.
    *
    * **Must never reject** — a failed read is `null`, like a file that is not
    * there. That contract is what lets the status path await it bare, so the
@@ -98,63 +104,91 @@ function safeHostname(): string {
 }
 
 /**
- * What a Host with no enrollment reports. One builder, because two processes
+ * What a Burrow with no enrollment reports. One builder, because two processes
  * answer this: the service's own `status`, and the VS Code glue for a window
- * that has no service at all (`vscode-ext/src/remote-host.ts` → `idleStatus`).
+ * that has no service at all (`vscode-ext/src/burrow.ts` → `idleStatus`).
  * The origin-only projection of the offer is the security-relevant half — the
  * one-time token is a bearer credential and never enters a webview
- * (`service-protocol.ts` → `RemoteHostConsoleStatus.offer`) — so the two must
+ * (`service-protocol.ts` → `BurrowConsoleStatus.offer`) — so the two must
  * not drift.
  */
-export function unenrolledStatus(offer: EnrollmentOffer | null): RemoteHostConsoleStatus {
+export function unenrolledStatus(
+  offer: EnrollmentOffer | null,
+  kind: BurrowKind,
+): BurrowConsoleStatus {
   return {
     enrolled: false,
-    serverUrl: null,
-    hostId: null,
+    relayUrl: null,
+    burrowId: null,
     connection: 'stopped',
     pairedClients: 0,
-    suggestedLabel: safeHostname(),
+    suggestedLabel: suggestedBurrowLabel(kind),
     offer: offer ? { origin: offer.origin } : null,
   };
 }
 
-export class RemoteHostService {
-  readonly #store: HostStateStore;
-  readonly #provider: HostSurfaceProvider;
+/** Which app a Burrow is. Standalone and VS Code enroll separately. */
+export type BurrowKind = 'standalone' | 'vscode';
+
+/** The one place a {@link BurrowKind} becomes words a person reads. */
+const KIND_NAMES: Record<BurrowKind, string> = {
+  standalone: 'Dormouse',
+  vscode: 'VS Code',
+};
+
+/**
+ * The label the enrollment form starts with. Names the app as well as the
+ * machine, because standalone and VS Code on one laptop are two Burrows and
+ * Pocket lists them as two rows — a hostname alone would label both the same.
+ *
+ * It is only a *suggestion*: the field is editable, so this makes the two rows
+ * distinguishable by default rather than guaranteeing they stay that way.
+ */
+export function suggestedBurrowLabel(kind: BurrowKind): string {
+  const machine = safeHostname();
+  return machine ? `${machine} (${KIND_NAMES[kind]})` : KIND_NAMES[kind];
+}
+
+export class BurrowService {
+  readonly #store: BurrowStateStore;
+  readonly #provider: BurrowSurfaceProvider;
   readonly #sendToUi: (event: string, data: unknown) => void;
   readonly #connectSrc: string;
+  readonly #kind: BurrowKind;
   readonly #createWebSocket?: (url: string) => WebSocketLike;
   readonly #fetch?: typeof globalThis.fetch;
   readonly #now: () => number;
   readonly #readOffer: () => Promise<EnrollmentOffer | null>;
 
-  #host: RemoteHost | null = null;
-  #enrollment: HostEnrollment | null = null;
+  #burrow: BurrowRuntime | null = null;
+  #enrollment: BurrowEnrollment | null = null;
   /**
-   * Everything that starts or stops the Host runs one at a time on this chain.
+   * Everything that starts or stops the Burrow runs one at a time on this chain.
    *
-   * Each of those reads `#host`, awaits a store round trip, and then acts on
+   * Each of those reads `#burrow`, awaits a store round trip, and then acts on
    * what it read — so overlapping them (an activation `start` and a reconnect
-   * during an enroll) lets two of them both see no Host and both build one. The second `RemoteHost` would hold a relay socket nothing
-   * has a reference to and could not be stopped, and the two would displace each
-   * other on the server forever.
+   * during an enroll) lets two of them both see no Burrow and both build one.
+   * The second `BurrowRuntime` would hold a relay socket nothing has a
+   * reference to and could not be stopped, and the two would displace each
+   * other on the Relay forever.
    */
   readonly #serialize = createSerialQueue();
-  /** Disposal is terminal: no in-flight store read may resurrect the Host. */
+  /** Disposal is terminal: no in-flight store read may resurrect the Burrow. */
   #disposed = false;
   /**
    * Pairings awaiting local approval, service-side. The webview mirrors a
    * serializable projection of this and answers with its immutable pairing id;
-   * the approve/deny closures the `RemoteHost` handed us never leave this
+   * the approve/deny closures the `BurrowRuntime` handed us never leave this
    * process.
    */
   readonly #pairings = new Map<string, PendingPairing>();
 
-  constructor(options: RemoteHostServiceOptions) {
+  constructor(options: BurrowServiceOptions) {
     this.#store = options.store;
     this.#provider = options.provider;
     this.#sendToUi = options.sendToUi;
     this.#connectSrc = options.connectSrc;
+    this.#kind = options.kind;
     this.#createWebSocket = options.createWebSocket;
     this.#fetch = options.fetch;
     this.#now = options.now ?? (() => Date.now());
@@ -170,36 +204,36 @@ export class RemoteHostService {
   async #start(): Promise<void> {
     const enrollment = await this.#store.loadEnrollment();
     if (!enrollment) return;
-    if (!this.#allowed(enrollment.serverUrl)) {
+    if (!this.#allowed(enrollment.relayUrl)) {
       // Enrolled against an origin this build cannot connect to — a binary
-      // downgraded from a custom build, or a moved server. Idle rather than
-      // connect: the allowlist is the whole boundary (docs/specs/server.md).
+      // downgraded from a custom build, or a moved Relay. Idle rather than
+      // connect: the allowlist is the whole boundary (docs/specs/relay.md).
       console.warn(
-        `[remote-host] enrolled server ${enrollment.serverUrl} is outside this build's allowed sources (${this.#connectSrc}); staying idle`,
+        `[burrow] enrolled Relay ${enrollment.relayUrl} is outside this build's allowed sources (${this.#connectSrc}); staying idle`,
       );
       return;
     }
-    await this.#startHost(enrollment);
+    await this.#startBurrow(enrollment);
   }
 
-  /** Stop the Host and forget the connection-scoped state. */
+  /** Stop the Burrow and forget the connection-scoped state. */
   dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
-    this.#stopHost();
+    this.#stopBurrow();
   }
 
   async handleCommand(raw: unknown): Promise<void> {
-    if (this.#disposed || !isRemoteHostCommand(raw)) return;
+    if (this.#disposed || !isBurrowCommand(raw)) return;
     const command = raw;
     try {
       const result = await this.#run(command.cmd, command.params);
       if (this.#disposed) return;
-      this.#sendToUi(REMOTE_HOST_RESULT_EVENT, { rhId: command.rhId, result });
+      this.#sendToUi(BURROW_RESULT_EVENT, { burrowRequestId: command.burrowRequestId, result });
     } catch (error) {
       if (this.#disposed) return;
-      this.#sendToUi(REMOTE_HOST_RESULT_EVENT, {
-        rhId: command.rhId,
+      this.#sendToUi(BURROW_RESULT_EVENT, {
+        burrowRequestId: command.burrowRequestId,
         error: error instanceof Error ? error.message : String(error),
       });
     }
@@ -207,7 +241,7 @@ export class RemoteHostService {
 
   async #run(cmd: string, params: unknown): Promise<unknown> {
     switch (cmd) {
-      // The ones that start or stop the Host share the lifecycle chain with
+      // The ones that start or stop the Burrow share the lifecycle chain with
       // `start()`; everything below only reads what they left. `reconnect` takes
       // the lease itself, for just the restart half (see `#reconnect`).
       case 'enroll':
@@ -235,19 +269,19 @@ export class RemoteHostService {
       case 'pairingQueue':
         return this.#queueSnapshot();
       default:
-        throw new Error(`unknown remote-host command: ${cmd}`);
+        throw new Error(`unknown burrow command: ${cmd}`);
     }
   }
 
   // --- Commands ---
 
   #enroll(params: EnrollParams): Promise<EnrollResult> {
-    return this.#enrollWith(params.serverUrl, { password: params.password }, params.label);
+    return this.#enrollWith(params.relayUrl, { password: params.password }, params.label);
   }
 
   /**
    * One-click enrollment from the offer an installer left on this machine
-   * (`docs/specs/server.md` → "Remote control, in the Settings dialog").
+   * (`docs/specs/relay.md` → "Remote control, in the Settings dialog").
    */
   async #enrollOffer(params: EnrollOfferParams): Promise<EnrollResult> {
     const offer = await this.#readOffer();
@@ -261,7 +295,7 @@ export class RemoteHostService {
       // The webview echoes the origin its card displayed, and this is where that
       // echo is spent: an installer re-run between the render and the click
       // rewrites the file, and enrolling against the new origin would spend a
-      // one-time token on a server the user never reviewed.
+      // one-time token on a Relay the user never reviewed.
       throw new Error(
         `The enrollment offer changed — it now names ${offer.origin}, not ${params.origin}. ` +
           'Reopen this dialog to review the new one.',
@@ -276,41 +310,41 @@ export class RemoteHostService {
    * status edge the webview gate needs.
    */
   async #enrollWith(
-    serverUrl: string,
-    credential: HostEnrollCredential,
+    relayUrl: string,
+    credential: BurrowEnrollCredential,
     label: string,
   ): Promise<EnrollResult> {
-    if (!this.#allowed(serverUrl)) {
+    if (!this.#allowed(relayUrl)) {
       // Refused before the credential leaves the machine — including an offer's
       // token, which is a bearer credential like the password. Self-hosters widen
-      // the list in their own build (docs/specs/server.md → "Where a Host may reach a relay server").
+      // the list in their own build (docs/specs/relay.md → "Where a Burrow may reach a Relay").
       throw new Error(
-        `${serverUrl} is outside this build's allowed remote sources (${this.#connectSrc}). ` +
+        `${relayUrl} is outside this build's allowed remote sources (${this.#connectSrc}). ` +
           'A self-host build bakes its own via DORMOUSE_REMOTE_CONNECT_SRC.',
       );
     }
-    const enrollment = await performEnrollment(serverUrl, credential, label);
-    // Persist before touching the running Host. The credential we just minted
+    const enrollment = await performEnrollment(relayUrl, credential, label);
+    // Persist before touching the running Burrow. The credential we just minted
     // exists nowhere else and cannot be minted again from the same exchange — a
-    // spent offer's token least of all — so a save that fails after the old Host
-    // had been stopped would strand the machine with no Host, a status that says
-    // otherwise, and a brand-new `hostToken` lost to the failure. Failing here
-    // instead leaves the old Host running and everything it reports still true.
+    // spent offer's token least of all — so a save that fails after the old Burrow
+    // had been stopped would strand the machine with no Burrow, a status that says
+    // otherwise, and a brand-new `burrowToken` lost to the failure. Failing here
+    // instead leaves the old Burrow running and everything it reports still true.
     await this.#store.saveEnrollment(enrollment);
-    if (this.#host) {
-      // Swapping one running Host for another. The gate the webviews arm their
+    if (this.#burrow) {
+      // Swapping one running Burrow for another. The gate the webviews arm their
       // outbound work on is edge-triggered (`enrolled-gate.ts`), and everything
       // it holds — the mirrored pairing queue, the push device list — belongs
-      // to the server we are leaving. Without a `false` between the two Hosts
+      // to the Relay we are leaving. Without a `false` between the two Burrows
       // the gate never cycles: the Settings dialog keeps naming the old
-      // server's devices, and a device fetch already on the wire can land after
+      // Relay's devices, and a device fetch already on the wire can land after
       // the swap and put them back.
-      this.#stopHost();
+      this.#stopBurrow();
       this.#enrollment = null;
       this.#emitStatus();
     }
-    await this.#startHost(enrollment);
-    return { hostId: enrollment.hostId, serverUrl: enrollment.serverUrl };
+    await this.#startBurrow(enrollment);
+    return { burrowId: enrollment.burrowId, relayUrl: enrollment.relayUrl };
   }
 
   /**
@@ -319,40 +353,40 @@ export class RemoteHostService {
    * the offer-file read when an enroll completes, and the webview's gate is
    * last-writer-wins over the `{ enrolled: true }` event — so a snapshot
    * assembled from an `#enrollment` sampled *before* the read would disarm that
-   * gate for a poll interval (`lib/src/remote/host/enrolled-gate.ts`). Reading
+   * gate for a poll interval (`lib/src/remote/burrow/enrolled-gate.ts`). Reading
    * `#enrollment` only below the read makes the answer name whichever
    * enrollment exists when the answer is made.
    *
-   * The read itself is still skipped while enrolled — an enrolled Host has
+   * The read itself is still skipped while enrolled — an enrolled Burrow has
    * nothing to offer, so the 2 s poll must not stat a file every tick.
    */
-  async #status(): Promise<RemoteHostConsoleStatus> {
+  async #status(): Promise<BurrowConsoleStatus> {
     const offer = this.#enrollment ? null : await this.#readOffer();
     const enrollment = this.#enrollment;
-    if (!enrollment) return unenrolledStatus(offer);
+    if (!enrollment) return unenrolledStatus(offer, this.#kind);
     return {
       enrolled: true,
-      serverUrl: enrollment.serverUrl,
-      hostId: enrollment.hostId,
-      connection: this.#host?.status ?? 'stopped',
-      pairedClients: this.#host?.activeRecords.length ?? 0,
-      suggestedLabel: safeHostname(),
+      relayUrl: enrollment.relayUrl,
+      burrowId: enrollment.burrowId,
+      connection: this.#burrow?.status ?? 'stopped',
+      pairedClients: this.#burrow?.activeRecords.length ?? 0,
+      suggestedLabel: suggestedBurrowLabel(this.#kind),
       offer: null,
     };
   }
 
   /**
    * Re-open the relay socket now. The only way back from `displaced`: an evicted
-   * Host stands down for good rather than fighting the Host that replaced it, so
+   * Burrow stands down for good rather than fighting the Burrow that replaced it, so
    * returning has to be asked for.
    *
    * Only the restart takes the lifecycle lease. The status snapshot after it is
    * a plain read — one that may touch the disk for the offer file — and holding
    * the lease across it would queue every enroll/clear behind that read.
    */
-  async #reconnect(): Promise<RemoteHostConsoleStatus> {
+  async #reconnect(): Promise<BurrowConsoleStatus> {
     await this.#serialize(async () => {
-      if (this.#host) this.#host.start();
+      if (this.#burrow) this.#burrow.start();
       else await this.#start();
     });
     return this.#status();
@@ -360,67 +394,67 @@ export class RemoteHostService {
 
   async #clearEnrollment(): Promise<Record<string, never>> {
     // The delete first, and nothing else unless it succeeded. Stopping and
-    // forgetting the Host ahead of it would report un-enrolled while the
+    // forgetting the Burrow ahead of it would report un-enrolled while the
     // credential was still on disk, and the next launch would read it back and
     // let every paired device in again — an un-enrollment the user believes
     // happened is the one thing this command must not get wrong.
     //
-    // ACL records stay keyed by their hostId. They are unreachable without an
-    // enrollment naming that host, and keeping them means a re-enrollment onto
-    // the same hostId does not silently de-pair every device.
+    // ACL records stay keyed by their burrowId. They are unreachable without an
+    // enrollment naming that burrow, and keeping them means a re-enrollment onto
+    // the same burrowId does not silently de-pair every device.
     await this.#store.clearEnrollment();
-    this.#stopHost();
+    this.#stopBurrow();
     this.#enrollment = null;
     this.#emitStatus();
     return {};
   }
 
   /**
-   * Compose this machine's pairing QR: the Server's single-use setup token,
-   * minted over the Host's own authenticated channel because this service is
-   * the half that holds the bearer, plus an invitation the `RemoteHost` mints
-   * locally — an id and a one-use X25519 responder key the Server never sees.
+   * Compose this machine's pairing QR: the Relay's single-use setup token,
+   * minted over the Burrow's own authenticated channel because this service is
+   * the half that holds the bearer, plus an invitation the `BurrowRuntime` mints
+   * locally — an id and a one-use X25519 responder key the Relay never sees.
    *
-   * The URL is composed here, from the origin this Host enrolled against, for
+   * The URL is composed here, from the origin this Burrow enrolled against, for
    * the reason `SetupTokenResponse` carries the token alone: a URL minted
    * server-side would be one more place the deployment's own address is decided.
    */
   async #setupQr(): Promise<SetupQrResult> {
     const enrollment = this.#enrollment;
-    const host = this.#host;
-    if (!enrollment || !host) {
-      throw new Error('This machine is not connected to a Dormouse server.');
+    const burrow = this.#burrow;
+    if (!enrollment || !burrow) {
+      throw new Error('This machine is not connected to a Dormouse Relay.');
     }
-    const response = await hostFetch(
+    const response = await burrowFetch(
       { enrollment, fetch: this.#fetch, errorPrefix: 'could not mint a setup code' },
-      API_ROUTES.hostSetupToken,
+      API_ROUTES.burrowSetupToken,
       // The empty POST body: this endpoint's only input is the bearer, which is
-      // what says which Host is asking.
+      // what says which Burrow is asking.
       {},
     );
     const body: unknown = await response.json().catch(() => null);
     // Guarded like every other 200 off this wire: an `undefined` token would go
     // into the QR, and an unbounded one throws inside the encoder.
     if (!isSetupTokenResponse(body)) {
-      throw new Error('could not mint a setup code: the server’s answer was not a setup token.');
+      throw new Error('could not mint a setup code: the Relay’s answer was not a setup token.');
     }
-    // The Host captured above, not whatever `#host` holds now: a swap during the
-    // round trip means this code belongs to the server we just left, so it is
+    // The Burrow captured above, not whatever `#burrow` holds now: a swap during the
+    // round trip means this code belongs to the Relay we just left, so it is
     // dropped rather than minted onto the replacement — which could not verify
-    // it anyway, and whose panel must not paint a code for the old server.
-    if (this.#host !== host) {
+    // it anyway, and whose panel must not paint a code for the old Relay.
+    if (this.#burrow !== burrow) {
       throw new Error(
-        'could not mint a setup code: this machine reconnected to a different server.',
+        'could not mint a setup code: this machine reconnected to a different Relay.',
       );
     }
     // The invitation, and the half that makes the ceremony unforgeable by the
-    // Server: its private key exists only in this Host's memory, and a phone
+    // Relay: its private key exists only in this Burrow's memory, and a phone
     // completing IK against the public half has proved it is talking to the
     // machine whose screen it photographed.
-    const invitation = await host.mintInvitation(body.token, body.expiresAt);
+    const invitation = await burrow.mintInvitation(body.token, body.expiresAt);
     // `enrollment.origin` is the phone-facing WebAuthn origin — where Pocket is
     // served and where the passkey will be registered — not necessarily the
-    // `serverUrl` this Host posts to. The formatter refuses a URL too long to
+    // `relayUrl` this Burrow posts to. The formatter refuses a URL too long to
     // scan before any encoder sees it.
     return {
       url: formatPairingInvitationUrl(enrollment.origin, invitation),
@@ -432,7 +466,7 @@ export class RemoteHostService {
 
   #approve(params: ApproveParams): Record<string, never> {
     // The code the person typed, straight through. The service never held the
-    // expected one — the Host compares, once (`service-protocol.ts` →
+    // expected one — the Burrow compares, once (`service-protocol.ts` →
     // `PairingQueueItem`).
     this.#pendingPairing(params.clientId, params.pairingId).approve(
       typeof params.code === 'string' ? params.code : '',
@@ -456,12 +490,12 @@ export class RemoteHostService {
 
   async #push(params: PushParams): Promise<Record<string, never>> {
     const deps = this.#pushDeps();
-    // No Host means no ACL and no server to post to; the ring is simply not
+    // No Burrow means no ACL and no Relay to post to; the ring is simply not
     // pushed. Nothing to report to the webview, which cannot act on it either.
     if (deps) {
       // A push that fails must never break the alert path.
       await sendPush(deps, params.sessionId, params.title).catch((error: unknown) => {
-        console.warn('[remote-host] push notification failed', error);
+        console.warn('[burrow] push notification failed', error);
       });
     }
     return {};
@@ -472,13 +506,13 @@ export class RemoteHostService {
    *
    * The inverse of {@link #push} in the one way that matters: nothing is
    * swallowed. A test whose whole purpose is to report an outcome must let the
-   * failure through, so an unenrolled machine, an unreachable server, and a
+   * failure through, so an unenrolled machine, an unreachable Relay, and a
    * fan-out that reached nobody all read differently at the button.
    */
   async #pushTest(): Promise<PushSendSummary> {
     const deps = this.#pushDeps();
     if (!deps) {
-      throw new Error('This machine is not connected to a Dormouse server.');
+      throw new Error('This machine is not connected to a Dormouse Relay.');
     }
     // A fixed tag, so pressing the button repeatedly replaces the notification
     // on the phone rather than stacking copies — the same per-Session collapse
@@ -492,31 +526,31 @@ export class RemoteHostService {
     return { devices: await loadPushDevices(deps) };
   }
 
-  // --- Host lifecycle ---
+  // --- Burrow lifecycle ---
 
-  #allowed(serverUrl: string): boolean {
-    const origin = normalizeOrigin(serverUrl);
+  #allowed(relayUrl: string): boolean {
+    const origin = normalizeOrigin(relayUrl);
     return origin !== null && originAllowedByConnectSrc(origin, this.#connectSrc);
   }
 
   /**
-   * The Noise static gate. **A Host without a usable one does not start**, and
+   * The Noise static gate. **A Burrow without a usable one does not start**, and
    * so reads as un-enrolled with the Settings dialog offering enrollment again —
-   * that is the entire Host-state version
-   * (`docs/specs/remote-security-model.md` → Host identity).
+   * that is the entire Burrow-state version
+   * (`docs/specs/remote-security-model.md` → Burrow identity).
    *
    * Two cases, and they end differently on purpose:
    *
    * - **Absent** is an enrollment from before the field existed. Minting is
    *   never retried once it has failed, so a gate without this backfill would
    *   un-enroll a machine over one transient failure. The mint is persisted
-   *   before the Host starts, so it survives the next launch.
+   *   before the Burrow starts, so it survives the next launch.
    * - **Present but not corresponding** is a corrupt or hand-edited state file.
-   *   Starting anyway would present a Host identity every paired Client reads as
+   *   Starting anyway would present a Burrow identity every paired Client reads as
    *   *changed*, which looks like a different machine rather than the local
    *   damage it is — so it stays down, loudly, naming the store.
    */
-  async #enrolledWithNoiseStatic(enrollment: HostEnrollment): Promise<HostEnrollment | null> {
+  async #enrolledWithNoiseStatic(enrollment: BurrowEnrollment): Promise<BurrowEnrollment | null> {
     const { noiseStaticPrivateKey, noiseStaticPublicKey } = enrollment;
     if (noiseStaticPrivateKey !== undefined && noiseStaticPublicKey !== undefined) {
       try {
@@ -528,7 +562,7 @@ export class RemoteHostService {
         // is as unusable as one that names a different public point.
       }
       console.warn(
-        `[remote-host] the stored Noise static for ${enrollment.hostId} does not match its public half; ` +
+        `[burrow] the stored Noise static for ${enrollment.burrowId} does not match its public half; ` +
           'this machine\'s remote-control state is corrupt. Enroll again to replace it.',
       );
       return null;
@@ -537,52 +571,52 @@ export class RemoteHostService {
     try {
       material = await mintNoiseStaticKeyPair();
     } catch (error) {
-      console.warn('[remote-host] could not mint this machine\'s Noise static key', error);
+      console.warn('[burrow] could not mint this machine\'s Noise static key', error);
       return null;
     }
-    const backfilled: HostEnrollment = {
+    const backfilled: BurrowEnrollment = {
       ...enrollment,
       noiseStaticPrivateKey: material.privateKeyPkcs8,
       noiseStaticPublicKey: material.publicKey,
     };
-    // Persisted first, for the reason enrollment persists first: a Host running
+    // Persisted first, for the reason enrollment persists first: a Burrow running
     // on an identity no restart can recover is one every paired Client would
     // have to pair with again after a reboot.
     await this.#store.saveEnrollment(backfilled);
     return backfilled;
   }
 
-  async #startHost(incoming: HostEnrollment): Promise<void> {
+  async #startBurrow(incoming: BurrowEnrollment): Promise<void> {
     if (this.#disposed) return;
     const enrollment = await this.#enrolledWithNoiseStatic(incoming);
     if (!enrollment || this.#disposed) return;
-    // Never two. Callers are serialized (see `#serialize`), but a Host left in
-    // `#host` here would be dropped without its socket being closed, so the
+    // Never two. Callers are serialized (see `#serialize`), but a Burrow left in
+    // `#burrow` here would be dropped without its socket being closed, so the
     // replacement is explicit rather than implied by the assignment below.
-    this.#stopHost();
+    this.#stopBurrow();
     // The controller wants the ACL synchronously; the store is async because
     // the places it lives are. Read it before constructing, and let saves run
     // in the background — a failed write must not fail the pairing that is
     // already approved and already on the wire.
-    const records = await this.#store.loadAcl(enrollment.hostId);
+    const records = await this.#store.loadAcl(enrollment.burrowId);
     // Deactivation can land during that store round trip. Disposal is terminal:
     // constructing here would leave a relay socket alive after its owner had
     // dropped the service and could no longer stop it.
     if (this.#disposed) return;
     this.#enrollment = enrollment;
-    this.#host = new RemoteHost({
+    this.#burrow = new BurrowRuntime({
       enrollment,
       createWebSocket: this.#createWebSocket,
       createSession: (opts) =>
         new RemoteApiSession({
-          hostId: opts.hostId,
+          burrowId: opts.burrowId,
           send: opts.send,
           provider: this.#provider,
         }),
       loadAcl: () => records,
-      saveAcl: (hostId, next) => {
-        void this.#store.saveAcl(hostId, next).catch((error: unknown) => {
-          console.warn('[remote-host] could not persist the ACL', error);
+      saveAcl: (burrowId, next) => {
+        void this.#store.saveAcl(burrowId, next).catch((error: unknown) => {
+          console.warn('[burrow] could not persist the ACL', error);
         });
       },
       requestApproval: (pending) => this.#enqueuePairing(pending),
@@ -591,42 +625,42 @@ export class RemoteHostService {
         this.#emitInvitation(inviteId, state, outcome),
       now: this.#now,
     });
-    this.#host.start();
+    this.#burrow.start();
     this.#emitStatus();
   }
 
   /**
-   * Tell the webviews whether there is a Host at all. Everything they do *for*
+   * Tell the webviews whether there is a Burrow at all. Everything they do *for*
    * one — announcing that the directory may have changed on every pane-state,
    * activity, and focus change, watching for unattended rings — costs a
    * crossing per event on a machine that may never enroll, so they arm on this
-   * and idle without it (`lib/src/remote/host/enrolled-gate.ts`).
+   * and idle without it (`lib/src/remote/burrow/enrolled-gate.ts`).
    *
    * `enrolled` means the same thing as the `status` command's field of that
    * name, which is how a webview seeds before any event arrives.
    */
   #emitStatus(): void {
     if (this.#disposed) return;
-    this.#sendToUi(REMOTE_HOST_EVENT_EVENT, this.statusEvent());
+    this.#sendToUi(BURROW_EVENT_EVENT, this.statusEvent());
   }
 
   /**
    * The status event as it stands, for a UI that arrived after the last change
-   * and so has no event coming (`vscode-ext/src/remote-host.ts` greets a window
+   * and so has no event coming (`vscode-ext/src/burrow.ts` greets a window
    * that joins the broker with it).
    */
-  statusEvent(): HostStatusEvent {
+  statusEvent(): BurrowStatusEvent {
     return { name: 'status', enrolled: !!this.#enrollment };
   }
 
-  #stopHost(): void {
-    this.#host?.stop();
-    // Invitations go with it: their one-use keys live on the `RemoteHost`
-    // precisely so a code the old server's QR carried cannot complete a
+  #stopBurrow(): void {
+    this.#burrow?.stop();
+    // Invitations go with it: their one-use keys live on the `BurrowRuntime`
+    // precisely so a code the old Relay's QR carried cannot complete a
     // handshake against the new one.
-    this.#host = null;
+    this.#burrow = null;
     // `stop()` dismisses every in-flight pairing, which empties the queue and
-    // pushes the empty snapshot; clear defensively in case there was no Host.
+    // pushes the empty snapshot; clear defensively in case there was no Burrow.
     if (this.#pairings.size > 0) {
       this.#pairings.clear();
       this.#emitQueue();
@@ -638,7 +672,7 @@ export class RemoteHostService {
   #enqueuePairing(pending: PendingPairing): void {
     // Bounded, like the controller's own map: this one is mirrored to the
     // webview in full on every change, so an unbounded queue costs quadratic
-    // bridge traffic on top of the memory. `RemoteHost` evicts on its side too;
+    // bridge traffic on top of the memory. `BurrowRuntime` evicts on its side too;
     // both are capped because either can be fed independently, and a cap that
     // only one of them honors is not a cap.
     while (this.#pairings.size >= MAX_PENDING_PAIRINGS) {
@@ -657,7 +691,7 @@ export class RemoteHostService {
   }
 
   #queueSnapshot(): PairingQueueItem[] {
-    // Field by field, never a spread: the pending pairing the Host handed us
+    // Field by field, never a spread: the pending pairing the Burrow handed us
     // carries the approve/deny closures, and a spread would try to serialize
     // them across the bridge. Naming the four is what keeps this projection the
     // whole of what a webview learns.
@@ -675,7 +709,7 @@ export class RemoteHostService {
    */
   #emitInvitation(inviteId: string, state: InvitationState, outcome?: PairingOutcome): void {
     if (this.#disposed) return;
-    this.#sendToUi(REMOTE_HOST_EVENT_EVENT, {
+    this.#sendToUi(BURROW_EVENT_EVENT, {
       name: 'invitation',
       inviteId,
       state,
@@ -689,22 +723,22 @@ export class RemoteHostService {
 
   #emitQueue(): void {
     if (this.#disposed) return;
-    this.#sendToUi(REMOTE_HOST_EVENT_EVENT, {
+    this.#sendToUi(BURROW_EVENT_EVENT, {
       name: 'pairing-queue',
       queue: this.#queueSnapshot(),
     } satisfies PairingQueueEvent);
   }
 
-  /** Push delivery needs a live Host: the ACL it reads is the running one's. */
+  /** Push delivery needs a live Burrow: the ACL it reads is the running one's. */
   #pushDeps(): AlertPushDeps | null {
-    const host = this.#host;
+    const burrow = this.#burrow;
     const enrollment = this.#enrollment;
-    if (!host || !enrollment) return null;
+    if (!burrow || !enrollment) return null;
     return {
       enrollment,
-      activeRecords: () => host.activeRecords,
+      activeRecords: () => burrow.activeRecords,
       seal: (clientStaticPublicKey, plaintext) =>
-        host.sealPushForClient(clientStaticPublicKey, plaintext),
+        burrow.sealPushForClient(clientStaticPublicKey, plaintext),
       fetch: this.#fetch,
     };
   }

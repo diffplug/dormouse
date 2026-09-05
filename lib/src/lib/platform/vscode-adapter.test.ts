@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const terminalStateStoreMocks = vi.hoisted(() => ({
-  applyTerminalSemanticEventsByPtyId: vi.fn(),
+  applyTerminalSemanticEvents: vi.fn(),
   removeTerminalPaneState: vi.fn(),
 }));
 
 vi.mock('../terminal-state-store', () => ({
-  applyTerminalSemanticEventsByPtyId: terminalStateStoreMocks.applyTerminalSemanticEventsByPtyId,
+  applyTerminalSemanticEvents: terminalStateStoreMocks.applyTerminalSemanticEvents,
   removeTerminalPaneState: terminalStateStoreMocks.removeTerminalPaneState,
 }));
 
@@ -37,14 +37,14 @@ import type { NotepadArchiveV1, VolatileNotepadSnapshot } from '../notepad/types
 import { VSCodeAdapter } from './vscode-adapter';
 
 /** Stand-in for the per-boot token the extension host injects at webview boot. */
-const HOST_TOKEN = 'test-host-message-token';
+const BURROW_TOKEN = 'test-host-message-token';
 
 /**
  * Build the `message` event the extension host would post: the payload plus the
  * token stamp `serveWebview`'s channel adds. Framed content can't read the
  * token, so a forged message is just this without the stamp.
  */
-function hostMessage(data: Record<string, unknown>, token: unknown = HOST_TOKEN): MessageEvent {
+function hostMessage(data: Record<string, unknown>, token: unknown = BURROW_TOKEN): MessageEvent {
   return new MessageEvent('message', {
     data: { ...data, [HOST_MESSAGE_TOKEN_FIELD]: token },
   });
@@ -73,7 +73,7 @@ function stubWebviewEnv(): void {
   vi.stubGlobal('CustomEvent', TestCustomEvent);
   // The adapter captures this at construction, so it must be stubbed before
   // any `new VSCodeAdapter()`.
-  vi.stubGlobal(HOST_MESSAGE_TOKEN_GLOBAL, HOST_TOKEN);
+  vi.stubGlobal(HOST_MESSAGE_TOKEN_GLOBAL, BURROW_TOKEN);
   vi.stubGlobal('acquireVsCodeApi', () => ({
     postMessage,
     getState: vi.fn(),
@@ -238,8 +238,8 @@ describe('VSCodeAdapter PTY exit handling', () => {
     expect(replays).toEqual([{ id: 'pane-1', data: 'helloworld' }]);
 
     // Semantic CWD event was forwarded under the PTY id.
-    expect(terminalStateStoreMocks.applyTerminalSemanticEventsByPtyId).toHaveBeenCalledTimes(1);
-    const [forwardedId, forwardedEvents] = terminalStateStoreMocks.applyTerminalSemanticEventsByPtyId.mock.calls[0];
+    expect(terminalStateStoreMocks.applyTerminalSemanticEvents).toHaveBeenCalledTimes(1);
+    const [forwardedId, forwardedEvents] = terminalStateStoreMocks.applyTerminalSemanticEvents.mock.calls[0];
     expect(forwardedId).toBe('pane-1');
     expect(forwardedEvents).toHaveLength(1);
     expect(forwardedEvents[0]).toMatchObject({
@@ -275,8 +275,8 @@ describe('VSCodeAdapter PTY exit handling', () => {
     windowTarget.dispatchEvent(hostMessage({ type: 'terminal:semanticEvents', id: 'pane-1', events }));
     void adapter;
 
-    expect(terminalStateStoreMocks.applyTerminalSemanticEventsByPtyId).toHaveBeenCalledTimes(1);
-    expect(terminalStateStoreMocks.applyTerminalSemanticEventsByPtyId).toHaveBeenCalledWith('pane-1', events);
+    expect(terminalStateStoreMocks.applyTerminalSemanticEvents).toHaveBeenCalledTimes(1);
+    expect(terminalStateStoreMocks.applyTerminalSemanticEvents).toHaveBeenCalledWith('pane-1', events);
   });
 
   it('round-trips host-parsed semantic events through JSON to the webview adapter', () => {
@@ -303,8 +303,8 @@ describe('VSCodeAdapter PTY exit handling', () => {
     new VSCodeAdapter();
     windowTarget.dispatchEvent(hostMessage(wirePayload));
 
-    expect(terminalStateStoreMocks.applyTerminalSemanticEventsByPtyId).toHaveBeenCalledTimes(1);
-    expect(terminalStateStoreMocks.applyTerminalSemanticEventsByPtyId).toHaveBeenCalledWith('pane-1', hostEvents);
+    expect(terminalStateStoreMocks.applyTerminalSemanticEvents).toHaveBeenCalledTimes(1);
+    expect(terminalStateStoreMocks.applyTerminalSemanticEvents).toHaveBeenCalledWith('pane-1', hostEvents);
   });
 
   it('forwards shell replacement requests from the extension host', () => {
@@ -402,7 +402,7 @@ describe('VSCodeAdapter PTY exit handling', () => {
       expect(replays).toEqual([]);
       expect(exits).toEqual([]);
       expect(lists).toEqual([]);
-      expect(terminalStateStoreMocks.applyTerminalSemanticEventsByPtyId).not.toHaveBeenCalled();
+      expect(terminalStateStoreMocks.applyTerminalSemanticEvents).not.toHaveBeenCalled();
     });
 
     it('rejects a wrong token as firmly as a missing one', () => {
@@ -571,8 +571,8 @@ describe('VSCodeAdapter notepad archive', () => {
   });
 });
 
-// The remote Host lives in the extension host, in whichever VS Code window won
-// the bind (vscode-ext/src/remote-host.ts). This is the webview's end of that
+// The Burrow lives in the extension host, in whichever VS Code window won
+// the bind (vscode-ext/src/burrow.ts). This is the webview's end of that
 // bridge; the contract is lib/src/host/remote/service-protocol.ts.
 //
 // Only what this transport adds is covered here: which message carries what,
@@ -587,11 +587,11 @@ describe('VSCodeAdapter remote host link', () => {
     vi.clearAllMocks();
   });
 
-  /** Every `remoteHost:command` this adapter has posted, in order. */
-  function sent(): Array<{ rhId: string; cmd: string; params?: unknown }> {
+  /** Every `burrow:command` this adapter has posted, in order. */
+  function sent(): Array<{ burrowRequestId: string; cmd: string; params?: unknown }> {
     return postMessage.mock.calls
       .map((call) => call[0])
-      .filter((message) => message.type === 'remoteHost:command')
+      .filter((message) => message.type === 'burrow:command')
       .map((message) => message.payload);
   }
 
@@ -601,18 +601,18 @@ describe('VSCodeAdapter remote host link', () => {
 
   it('posts a command and settles it from the result message', async () => {
     const adapter = new VSCodeAdapter();
-    const pending = adapter.remoteHost.command('status');
+    const pending = adapter.burrow.command('status');
 
     const payload = sent()[0]!;
     expect(payload.cmd).toBe('status');
-    deliver({ type: 'remoteHost:result', payload: { rhId: payload.rhId, result: { enrolled: true } } });
+    deliver({ type: 'burrow:result', payload: { burrowRequestId: payload.burrowRequestId, result: { enrolled: true } } });
 
     expect(await pending).toEqual({ enrolled: true });
   });
 
   it('answers an ask from the registered responder', () => {
     const adapter = new VSCodeAdapter();
-    adapter.remoteHost.respond('surfaceOp', (params) => [
+    adapter.burrow.respond('surfaceOp', (params) => [
       { ptyId: 'pty-1', ...(params as Record<string, unknown>) },
     ]);
 
@@ -628,15 +628,15 @@ describe('VSCodeAdapter remote host link', () => {
   it('fans an extension-host event out by name', () => {
     const adapter = new VSCodeAdapter();
     const seen: unknown[] = [];
-    adapter.remoteHost.on('pairing-queue', (data) => void seen.push(data));
+    adapter.burrow.on('pairing-queue', (data) => void seen.push(data));
 
-    deliver({ type: 'remoteHost:event', payload: { name: 'pairing-queue', queue: [{ clientId: 'c1' }] } });
+    deliver({ type: 'burrow:event', payload: { name: 'pairing-queue', queue: [{ clientId: 'c1' }] } });
     expect(seen).toEqual([{ name: 'pairing-queue', queue: [{ clientId: 'c1' }] }]);
   });
 
   it('notifies without waiting for anything', () => {
     const adapter = new VSCodeAdapter();
-    adapter.remoteHost.notify();
+    adapter.burrow.notify();
     expect(postMessage).toHaveBeenCalledWith({ type: 'peer:notify' });
   });
 
@@ -644,20 +644,20 @@ describe('VSCodeAdapter remote host link', () => {
     // The extension host cleans up the PTYs, but nothing there will ever answer
     // a command this webview is still holding.
     const adapter = new VSCodeAdapter();
-    const pending = adapter.remoteHost.command('status');
+    const pending = adapter.burrow.command('status');
     adapter.shutdown();
-    await expect(pending).rejects.toThrow('remote host bridge closed');
+    await expect(pending).rejects.toThrow('burrow bridge closed');
   });
 
   it('ignores an unauthenticated result, so framed content cannot settle a command', async () => {
     const adapter = new VSCodeAdapter();
     vi.useFakeTimers();
     try {
-      const pending = adapter.remoteHost.command('status');
+      const pending = adapter.burrow.command('status');
       const rejected = expect(pending).rejects.toThrow(/timed out/);
       windowTarget.dispatchEvent(
         new MessageEvent('message', {
-          data: { type: 'remoteHost:result', payload: { rhId: sent()[0]!.rhId, result: 'forged' } },
+          data: { type: 'burrow:result', payload: { burrowRequestId: sent()[0]!.burrowRequestId, result: 'forged' } },
         }),
       );
       await vi.advanceTimersByTimeAsync(20_000);

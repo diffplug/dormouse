@@ -7,7 +7,7 @@ vi.mock('./platform', () => ({
 import { startAlertSpeech, toSpokenText } from './alert-speech';
 import { getAlertSpeechState } from './alert-speech-state';
 import { applyAlertSettingsFromHost, DEFAULT_ALERT_SETTINGS } from './alert-settings';
-import { clearPrimedActivity, primeActivity } from './session-activity-store';
+import { clearTerminalActivity, setTerminalActivity } from './session-activity-store';
 import type { SessionStatus } from './alert-manager';
 import { removeTerminalPaneState, resetTerminalPaneState } from './terminal-state-store';
 import type { TerminalTitleSource } from './terminal-state';
@@ -54,7 +54,7 @@ function stubSpeechSynthesis(): void {
 
 /** Drive one Session's projected status through the activity store. */
 function setStatus(id: string, status: SessionStatus): void {
-  primeActivity(id, { status });
+  setTerminalActivity(id, { status });
 }
 
 /**
@@ -83,7 +83,7 @@ function ringTwoWithFirstSpeaking(): void {
 beforeEach(() => {
   vi.useFakeTimers();
   stubSpeechSynthesis();
-  clearPrimedActivity();
+  clearTerminalActivity();
   applyAlertSettingsFromHost({ ...DEFAULT_ALERT_SETTINGS, speakEnabled: true, speakDelayMs: SPEAK_DELAY_MS });
 });
 
@@ -91,7 +91,7 @@ afterEach(() => {
   stopSpeech?.();
   stopSpeech = null;
   for (const id of ['osc0-title', 'osc2-title', 'osc9-title']) removeTerminalPaneState(id);
-  clearPrimedActivity();
+  clearTerminalActivity();
   applyAlertSettingsFromHost(DEFAULT_ALERT_SETTINGS);
   vi.useRealTimers();
   vi.unstubAllGlobals();
@@ -194,7 +194,7 @@ describe('spoken alarms', () => {
       const id = `${source}-title`;
       setStatus(id, 'NOTHING_TO_SHOW');
       if (source === 'osc9') {
-        primeActivity(id, {
+        setTerminalActivity(id, {
           status: 'ALERT_RINGING',
           notification: { source: 'OSC 9', title: null, body: 'program title osc9' },
         });
@@ -253,7 +253,7 @@ describe('spoken alarms', () => {
     utterances[0].onstart?.();
     utterances[0].onend?.();
 
-    primeActivity('pty-1', { status: 'ALERT_RINGING', todo: true });
+    setTerminalActivity('pty-1', { status: 'ALERT_RINGING', todo: true });
     setStatus('another-pane', 'BUSY');
     expect(getAlertSpeechState('pty-1')).toBe('spoken');
   });

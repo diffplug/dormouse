@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Drive the self-host setup → pairing story against the real Server and the
- * real Host, with real browsers, and leave every artifact behind.
+ * Drive the self-host setup → pairing story against the real Relay and the
+ * real Burrow, with real browsers, and leave every artifact behind.
  * `scripts/pairing-walkthrough/README.md` is the operator's guide — what it
  * needs, what it leaves behind, and what it does not cover; this file is the
  * entry point. **Never wire it into `pnpm test` or a CI workflow.**
@@ -18,12 +18,12 @@ import { delay, exec, findFreePort, isPortFree, killTree, spawnedHandles } from 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 /**
- * Not an option, and `--server-port` is deliberately not one: the Host's allowed
+ * Not an option, and `--relay-port` is deliberately not one: the Burrow's allowed
  * relay origins are baked into its sidecar bundle from
  * `DORMOUSE_REMOTE_CONNECT_SRC` at stage time, and Pocket must be same-origin
  * with its own API, so both sides of a run are pinned to one origin.
  */
-const SERVER_PORT = 3000;
+const RELAY_PORT = 3000;
 
 /** The scenario a bare run drives, and the one `--until` is checked against. */
 const DEFAULT_SCENARIO = 'happy';
@@ -31,7 +31,7 @@ const DEFAULT_SCENARIO = 'happy';
 /**
  * Every artifact a scenario other than the default writes is named after it, so
  * several scenarios can share one `--out` and none overwrites another's
- * evidence — including the ones with the same name on every path (`server.log`,
+ * evidence — including the ones with the same name on every path (`relay.log`,
  * `qr.png`, the proof files).
  *
  * A function of `opts` rather than a closure, because `cleanup` writes one
@@ -101,8 +101,8 @@ function usage() {
     '  --until <step>     stop after this step (default: the scenario\'s last)',
     `                     ${DEFAULT_SCENARIO}: ${steps}`,
     `  --out <dir>        run directory (default: ${d.out})`,
-    '  --skip-build       reuse lib/dist-pocket and server/dist instead of rebuilding',
-    `  --machine-name <n> the name the Host enrolls under (default: ${d.machineName})`,
+    '  --skip-build       reuse lib/dist-pocket and relay/dist instead of rebuilding',
+    `  --machine-name <n> the name the Burrow enrolls under (default: ${d.machineName})`,
     '  --keep             leave everything running when the run ends, pass or fail',
     '',
   ].join('\n');
@@ -127,10 +127,10 @@ async function main(live) {
     : join(tmpdir(), 'pairing-walkthrough', stamp);
   mkdirSync(runDir, { recursive: true });
 
-  if (!(await isPortFree(SERVER_PORT))) {
+  if (!(await isPortFree(RELAY_PORT))) {
     throw new Error(
-      `something is already listening on :${SERVER_PORT}; stop it first ` +
-        '(the Server origin is baked into the Host bundle, so this port is not negotiable)',
+      `something is already listening on :${RELAY_PORT}; stop it first ` +
+        '(the Relay origin is baked into the Burrow bundle, so this port is not negotiable)',
     );
   }
   opts.vitePort = await findFreePort(15540);
@@ -161,8 +161,8 @@ async function main(live) {
     runDir,
     opts,
     state,
-    serverPort: SERVER_PORT,
-    serverOrigin: `http://localhost:${SERVER_PORT}`,
+    relayPort: RELAY_PORT,
+    relayOrigin: `http://localhost:${RELAY_PORT}`,
     viteOrigin: `http://localhost:${opts.vitePort}`,
     log: (message) => console.log(`[walkthrough] ${message}`),
     record: (facts) => Object.assign(summary.facts, facts),
@@ -180,7 +180,7 @@ async function main(live) {
       ctx.keep(name);
     },
     /**
-     * Screenshot a browser into the run directory — the Host's by default, the
+     * Screenshot a browser into the run directory — the Burrow's by default, the
      * Pocket one when it is passed.
      *
      * **Every screenshot also writes `<name>.txt`.** A later pass critiques
@@ -188,7 +188,7 @@ async function main(live) {
      * can read; the text dump is its raw material, so it is taken here rather
      * than left to each step to remember.
      */
-    shot: async (name, browser = state.hostBrowser) => {
+    shot: async (name, browser = state.burrowBrowser) => {
       if (!browser) throw new Error('no browser to screenshot yet');
       await browser.screenshot(ctx.path(name));
       ctx.keep(name);
@@ -199,14 +199,14 @@ async function main(live) {
     },
   };
   // Written by the children rather than by a step, so registered here.
-  for (const log of ['server.log', 'host.log', 'pocket-chrome.log', 'pocket-console.log']) {
+  for (const log of ['relay.log', 'burrow.log', 'pocket-chrome.log', 'pocket-console.log']) {
     ctx.keep(log);
   }
 
-  ctx.record({ serverOrigin: ctx.serverOrigin });
+  ctx.record({ relayOrigin: ctx.relayOrigin });
   console.log(`[walkthrough] run directory: ${runDir}`);
   console.log(`[walkthrough] scenario ${opts.scenario}: ${scenario.expect}`);
-  console.log(`[walkthrough] server ${ctx.serverOrigin} · vite ${ctx.viteOrigin} · bridge :${opts.hostPort}`);
+  console.log(`[walkthrough] relay ${ctx.relayOrigin} · vite ${ctx.viteOrigin} · bridge :${opts.hostPort}`);
   console.log(`[walkthrough] agent-browser session: ${opts.session}`);
 
   const lastIndex = scenario.steps.findIndex((step) => step.name === opts.until);
@@ -257,8 +257,8 @@ async function main(live) {
  * it, which `close` leaves running (`ab.mjs` → `killDaemon`).
  */
 async function cleanup(state, opts) {
-  // Written before anything is closed, and on the failure path too: the Host
-  // mirrors its webview's console into `host.log`, and this is the Pocket
+  // Written before anything is closed, and on the failure path too: the Burrow
+  // mirrors its webview's console into `burrow.log`, and this is the Pocket
   // side's only equivalent — the one place a client-side throw shows up at all.
   if (state.pocketAuth && state.runDir) {
     const { messages } = state.pocketAuth.session;
@@ -270,7 +270,7 @@ async function cleanup(state, opts) {
   // The CDP socket next: it is the only thing holding the Pocket page's virtual
   // authenticator, and closing it after Chrome is gone throws.
   state.pocketAuth?.session.close();
-  for (const browser of [state.pocketBrowser, state.hostBrowser]) {
+  for (const browser of [state.pocketBrowser, state.burrowBrowser]) {
     if (!browser) continue;
     await browser.close();
     await browser.killDaemon().catch(() => {});
@@ -330,7 +330,7 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => { void shutdown(130, live, { exit: true }); });
 }
 // The two ways out that skip `main`'s own `catch`, and the two that would
-// otherwise leave a Server, a Host and two Chromes running with nobody left to
+// otherwise leave a Relay, a Burrow and two Chromes running with nobody left to
 // stop them: a stream that errors (`spawnLogged`'s log file) and a promise
 // nothing awaited (a CDP `send` outstanding when its socket closes).
 for (const fault of ['uncaughtException', 'unhandledRejection']) {

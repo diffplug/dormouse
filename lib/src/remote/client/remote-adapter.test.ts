@@ -6,8 +6,8 @@
  * `terminal.closed` fires `onPtyExit`, and `dispose` cleans up.
  */
 
-import { describe, expect, it } from 'vitest';
-import { toBase64Url, utf8Encode, type DirectoryEntry } from 'server-lib-common';
+import { describe, expect, it, vi } from 'vitest';
+import { toBase64Url, utf8Encode, type DirectoryEntry } from 'remote-lib-common';
 
 import { RemotePtyAdapter, type RemoteAdapterClient } from './remote-adapter';
 import type { TerminalHandlers } from './pocket-client';
@@ -230,6 +230,28 @@ describe('RemotePtyAdapter attach / active pane', () => {
     ]);
   });
 
+  it('drops a malformed projection pair and still delivers later valid data', async () => {
+    const client = new FakeClient();
+    const adapter = new RemotePtyAdapter(client);
+    const data: PtyDataDetail[] = [];
+    adapter.onPtyData((d) => data.push(d));
+    await adapter.setActivePane('s1', 80, 24);
+    const onData = client.lastAttach().handlers.onData;
+    const valid = toBase64Url(utf8Encode('valid'));
+    const overlong = toBase64Url(Uint8Array.of(0xc0, 0x80));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      expect(() => onData({ bytes: overlong, text: valid })).not.toThrow();
+      expect(() => onData({ bytes: valid, text: overlong })).not.toThrow();
+      expect(() => onData({ bytes: '!' })).not.toThrow();
+      expect(data).toEqual([]);
+      onData({ bytes: valid });
+      expect(data).toEqual([{ id: 's1', data: 'valid', textData: undefined }]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('routes write and resize only to the attached pane', async () => {
     const client = new FakeClient();
     const adapter = new RemotePtyAdapter(client);
@@ -250,7 +272,7 @@ describe('RemotePtyAdapter attach / active pane', () => {
     await adapter.setActivePane('s1', 80, 24);
 
     // What this xterm and its ImageAddon answer on `onData`; the owner's xterm
-    // has already answered, and the Host discards these anyway.
+    // has already answered, and the Burrow discards these anyway.
     adapter.writePty('s1', '\x1b[?1;2c');
     adapter.writePty('s1', '\x1b[24;80R');
     adapter.writePty('s1', '\x1b_Gi=1;OK\x1b\\');
@@ -262,7 +284,7 @@ describe('RemotePtyAdapter attach / active pane', () => {
     expect(client.writes).toEqual([{ surfaceId: 's1', bytes: toBase64Url(utf8Encode('ls\r')) }]);
   });
 
-  it('spawnPty / killPty are no-ops (panes are Host-owned)', async () => {
+  it('spawnPty / killPty are no-ops (panes are Burrow-owned)', async () => {
     const client = new FakeClient();
     const adapter = new RemotePtyAdapter(client);
     adapter.spawnPty();

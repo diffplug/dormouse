@@ -4,9 +4,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ProcessedPtyChunk, PtySink } from '../../remote/host/host-surface-provider';
+import type { ProcessedPtyChunk, PtySink } from '../../remote/burrow/burrow-surface-provider';
 import { createSidecarSurfaceBridge, type SidecarSurfaceBridge } from './sidecar-entry';
-import { ASK_BUDGET_MS, type RemoteHostAsk } from './service-protocol';
+import { ASK_BUDGET_MS, type BurrowAsk } from './service-protocol';
 
 let sent: Array<{ event: string; data: unknown }>;
 let written: Array<{ id: string; data: string }>;
@@ -17,10 +17,10 @@ let writeThrows: boolean;
 let bridge: SidecarSurfaceBridge;
 
 /** The ask the bridge is waiting on, most recent last. */
-function asks(): RemoteHostAsk[] {
+function asks(): BurrowAsk[] {
   return sent
-    .filter((message) => message.event === 'remoteHost:ask')
-    .map((message) => message.data as RemoteHostAsk);
+    .filter((message) => message.event === 'burrow:ask')
+    .map((message) => message.data as BurrowAsk);
 }
 
 /** What the bridge told the webview under one event name, most recent last. */
@@ -28,8 +28,8 @@ function emitted<T>(event: string): T[] {
   return sent.filter((message) => message.event === event).map((message) => message.data as T);
 }
 
-function answer(ask: RemoteHostAsk, results: unknown[]): void {
-  bridge.onAnswer({ rhId: ask.rhId, results });
+function answer(ask: BurrowAsk, results: unknown[]): void {
+  bridge.onAnswer({ burrowRequestId: ask.burrowRequestId, results });
 }
 
 function sink(): PtySink & { chunks: ProcessedPtyChunk[]; data: string[]; exits: number[] } {
@@ -75,7 +75,7 @@ describe('asking the webview', () => {
     const pending = bridge.provider.collectDirectory();
     const ask = asks()[0]!;
     expect(ask.op).toBe('directory');
-    expect(typeof ask.rhId).toBe('string');
+    expect(typeof ask.burrowRequestId).toBe('string');
 
     answer(ask, [{ surfaceId: 's1' }]);
     expect(await pending).toEqual([{ surfaceId: 's1' }]);
@@ -98,12 +98,12 @@ describe('asking the webview', () => {
   });
 
   it('ignores an answer for an ask that is not outstanding', async () => {
-    expect(() => bridge.onAnswer({ rhId: 'nope', results: [] })).not.toThrow();
+    expect(() => bridge.onAnswer({ burrowRequestId: 'nope', results: [] })).not.toThrow();
     expect(() => bridge.onAnswer(undefined)).not.toThrow();
   });
 
   it('marks the directory stale when an answer lands after the budget', async () => {
-    // The snapshot the Host already rendered is missing whatever this answer
+    // The snapshot the Burrow already rendered is missing whatever this answer
     // names — an empty picker on a machine that does have terminals. Nothing
     // re-opens a settled ask, so the next collect is the only repair, and an
     // idle machine has no other reason to run one.
@@ -182,15 +182,6 @@ describe('resolveSurface', () => {
     const pending = handle.resize(100, 30);
     answer(asks()[1]!, []);
     expect(await pending).toEqual({ cols: 80, rows: 24 });
-  });
-
-  it('releases without asking anyone — the stream owns itself', async () => {
-    const attach = bridge.provider.resolveSurface('s1', {});
-    answer(asks()[0]!, [{ ptyId: 'pty-1', cols: 80, rows: 24 }]);
-    const handle = (await attach)!;
-
-    handle.release();
-    expect(asks()).toHaveLength(1);
   });
 });
 
@@ -397,7 +388,7 @@ describe('the webview’s half of the parse', () => {
   });
 
   it('leaves a colour query for xterm.js until the webview has pushed a theme', () => {
-    // Null before the first push, exactly as the VS Code host documents.
+    // Null before the first push, exactly as the VS Code burrow documents.
     bridge.onPtyEvent('data', { id: 'pty-1', data: `\x1b]11;?\x07` });
     expect(written).toEqual([]);
     expect(emitted('pty:data')).toEqual([

@@ -16,7 +16,7 @@ export type {
 
 export {
   clearLocalSurfaceActivity,
-  clearPrimedActivity,
+  clearTerminalActivity,
   clearSessionAttention,
   clearSessionTodo,
   DEFAULT_ACTIVITY_STATE,
@@ -29,15 +29,12 @@ export {
   initAlertStateReceiver,
   markSessionAttention,
   markSessionTodo,
-  primeActivity,
+  setTerminalActivity,
   restoreBrowserSurfaceTodo,
   subscribeToActivity,
   toggleSessionAlert,
   toggleSessionTodo,
 } from './session-activity-store';
-
-export { resolveTerminalSessionId } from './terminal-store';
-
 
 export {
   disposeAllSessions,
@@ -98,11 +95,9 @@ export {
 
 export {
   applyTerminalSemanticEvents,
-  applyTerminalSemanticEventsByPtyId,
   countRunningSessions,
   ensureTerminalPaneState,
   fillTerminalProcessCwd,
-  fillTerminalProcessCwdByPtyId,
   getRunningCommandArgv0,
   getTerminalPaneState,
   getTerminalPaneStateSnapshot,

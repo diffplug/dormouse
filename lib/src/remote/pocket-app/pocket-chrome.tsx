@@ -62,7 +62,7 @@ export const PK = {
   // reintroduce the unreachable overflow on exactly the devices that lack it.
   bodyCenter: 'justify-center-safe',
   wallHost: 'flex min-h-0 flex-1 flex-col',
-  // Host row = the INACTIVE header pair (a list item lifted off the page).
+  // Burrow row = the INACTIVE header pair (a list item lifted off the page).
   row: 'flex w-full items-center gap-3 rounded-lg bg-header-inactive-bg px-3.5 py-3 text-left text-header-inactive-fg',
   rowOffline: 'opacity-55', // presence = intensity, no extra color
   rowMain: 'min-w-0 flex-1',
@@ -70,7 +70,7 @@ export const PK = {
   rowSecondary: 'mt-0.5 truncate text-[11px] text-header-inactive-fg/70',
   rowActions: 'flex shrink-0 items-center gap-2',
   // An actionable notice: the inactive-header pair, so it reads as a raised
-  // block like a host row rather than as an error (which owns `text-error`).
+  // block like a burrow row rather than as an error (which owns `text-error`).
   notice: 'flex flex-col gap-2 rounded-lg bg-header-inactive-bg px-3.5 py-3 text-header-inactive-fg',
   noticeTitle: 'text-[13px] font-semibold',
   noticeBody: 'm-0 text-[12px] leading-relaxed text-header-inactive-fg/70',
@@ -85,7 +85,7 @@ export const PK = {
   error: 'rounded-lg px-3.5 py-2.5 text-[13px] text-error shadow-[inset_0_0_0_1px_var(--color-error)]',
   empty: 'px-4 py-10 text-center text-[13px] text-app-fg/70',
   // A settled fact about this browser, captioned rather than carded: push, once
-  // every paired Host can reach it.
+  // every paired Burrow can reach it.
   deviceLine: 'px-4 pt-1 text-[11px] text-app-fg/60',
   // A group of form controls; `divided` sets one off from the action above it.
   setup: 'flex flex-col gap-3',

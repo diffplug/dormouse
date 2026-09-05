@@ -7,12 +7,14 @@ import '../src/index.css';
 import { initPlatform, type FakeScenario } from '../src/lib/platform';
 import {
   applyAlertSettingsFromHost,
-  clearPrimedActivity,
+  clearTerminalActivity,
   disposeAllSessions,
+  getActivity,
   getActivitySnapshot,
+  getTerminalInstance,
   getTerminalPaneStateSnapshot,
   getWatchedCommands,
-  primeActivity,
+  setTerminalActivity,
   removeTerminalPaneState,
   resetPushDevices,
   resetTerminalPaneState,
@@ -31,9 +33,9 @@ import {
 } from '../src/lib/alert-speech-state';
 import { VSCODE_THEMES, VSCODE_THEME_TYPES } from './themes';
 import {
-  makeStubRemoteHostLink,
-  type PrimedRemoteHost,
-} from '../src/host/remote/test-remote-host-link';
+  makeStubBurrowLink,
+  type PrimedBurrow,
+} from '../src/host/remote/test-burrow-link';
 import { cfg } from '../src/cfg';
 import type { DormouseTheme } from '../src/lib/themes';
 import { clearPersistedShellSelection, seedShellStore } from '../src/lib/shell-store';
@@ -274,16 +276,16 @@ const preview: Preview = {
 
       // And the same seam again for the Settings dialog's Remote control
       // section, which renders nothing without a Host service behind the
-      // webview (`docs/specs/server.md`). Absent is the honest default for a
+      // webview (`docs/specs/relay.md`). Absent is the honest default for a
       // fake platform, so only the stories about that section prime a stub.
-      // Read during render like the two above: the store reads `remoteHost`
+      // Read during render like the two above: the store reads `burrow`
       // when the section first subscribes, which is after this decorator's
       // render body and before any effect.
-      const primedRemoteHost = context.parameters?.primedRemoteHost as
-        | PrimedRemoteHost
+      const primedBurrow = context.parameters?.primedBurrow as
+        | PrimedBurrow
         | undefined;
-      platform.remoteHost = primedRemoteHost
-        ? makeStubRemoteHostLink(primedRemoteHost)
+      platform.burrow = primedBurrow
+        ? makeStubBurrowLink(primedBurrow)
         : undefined;
 
       // Installed themes normally arrive from OpenVSX and live in localStorage,
@@ -331,15 +333,19 @@ const preview: Preview = {
           // resets every field it does not name.
           applyAlertSettingsFromHost(primedAlertSettings);
           // The push-device list is renderer-only derived state normally written
-          // by the remote Host, which no story runs — so a story that wants the
+          // by the Burrow, which no story runs — so a story that wants the
           // Alarm dialog's device line names one, and every other story resets
           // to `no-host`.
-          setPushDevices(primedPushDevices ?? { status: 'no-host', devices: [] });
+          setPushDevices(primedPushDevices ?? { status: 'no-burrow', devices: [] });
           clearAllAlertSpeechStates();
           for (const [id, state] of Object.entries(primedAlertSpeech ?? {})) {
             setAlertSpeechState(id, state);
           }
-          clearPrimedActivity();
+          // Preserve host activity from terminals just spawned for this story;
+          // clear only component fixtures that have no terminal behind them.
+          for (const id of getActivitySnapshot().keys()) {
+            if (!getTerminalInstance(id)) clearTerminalActivity(id);
+          }
           for (const id of getTerminalPaneStateSnapshot().keys()) {
             removeTerminalPaneState(id);
           }
@@ -349,14 +355,14 @@ const preview: Preview = {
           }
 
           for (const [id, state] of Object.entries(primedSessionState?.byId ?? {})) {
-            primeActivity(id, state);
+            setTerminalActivity(id, { ...getActivity(id), ...state });
           }
 
           const sessionIds = [...getActivitySnapshot().keys()];
           primedSessionState?.byIndex?.forEach((state, index) => {
             const id = sessionIds[index];
             if (id) {
-              primeActivity(id, state);
+              setTerminalActivity(id, { ...getActivity(id), ...state });
             }
           });
 
@@ -393,7 +399,7 @@ const preview: Preview = {
           applyAlertSettingsFromHost(undefined);
           resetPushDevices();
           clearAllAlertSpeechStates();
-          clearPrimedActivity();
+          clearTerminalActivity();
           for (const id of getTerminalPaneStateSnapshot().keys()) {
             removeTerminalPaneState(id);
           }

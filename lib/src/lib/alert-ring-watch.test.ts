@@ -5,7 +5,7 @@ vi.mock('./platform', () => ({
 }));
 
 import { watchUnattendedRings } from './alert-ring-watch';
-import { clearPrimedActivity, primeActivity } from './session-activity-store';
+import { clearTerminalActivity, setTerminalActivity } from './session-activity-store';
 import type { SessionStatus } from './alert-manager';
 
 const DELAY_MS = 10_000;
@@ -18,7 +18,7 @@ let delayMs = DELAY_MS;
 
 /** Drive one Session's projected status through the activity store. */
 function setStatus(id: string, status: SessionStatus): void {
-  primeActivity(id, { status });
+  setTerminalActivity(id, { status });
 }
 
 /**
@@ -46,13 +46,13 @@ beforeEach(() => {
   fired = [];
   enabled = true;
   delayMs = DELAY_MS;
-  clearPrimedActivity();
+  clearTerminalActivity();
 });
 
 afterEach(() => {
   stop?.();
   stop = null;
-  clearPrimedActivity();
+  clearTerminalActivity();
   vi.useRealTimers();
 });
 
@@ -90,7 +90,7 @@ describe('watchUnattendedRings', () => {
     ring('pty-1');
 
     vi.advanceTimersByTime(DELAY_MS - 1);
-    clearPrimedActivity('pty-1');
+    clearTerminalActivity('pty-1');
 
     vi.advanceTimersByTime(60_000);
     expect(fired).toEqual([]);
@@ -120,7 +120,7 @@ describe('watchUnattendedRings', () => {
     start();
     ring('pty-1');
     // Unrelated churn in the store — a rerender, a TODO toggle, another pane.
-    primeActivity('pty-1', { status: 'ALERT_RINGING', todo: true });
+    setTerminalActivity('pty-1', { status: 'ALERT_RINGING', todo: true });
     setStatus('pty-2', 'BUSY');
 
     vi.advanceTimersByTime(60_000);
