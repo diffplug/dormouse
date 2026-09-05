@@ -17,6 +17,7 @@ import {
   removeMouseSelectionState,
   setSelection as setMouseSelection,
 } from './mouse-selection';
+import { dropSourcesForTerminal } from './notepad/notepad-store';
 import { extractSelectionText } from './selection-text';
 import { normalizeResumeCommand } from './resume-patterns';
 import {
@@ -343,6 +344,11 @@ function wireXtermHandlers(
 function setupTerminalEntry(id: string, options: { shell?: string; untouched?: boolean } = {}): TerminalEntry {
   const { terminal, fit, element } = createXtermHost();
   const selectionBaselineRef = { current: null as string | null };
+  // Every module that finalizes a selection arms the render handler through
+  // this one setter: the mouse router at drag end, a note's pin on reveal.
+  const setSelectionBaseline = (baseline: string | null) => {
+    selectionBaselineRef.current = baseline;
+  };
 
   const disposePty = wirePtyEvents(id, terminal);
   const disposeXterm = wireXtermHandlers(id, terminal, selectionBaselineRef);
@@ -355,9 +361,7 @@ function setupTerminalEntry(id: string, options: { shell?: string; untouched?: b
     terminal,
     element,
     getOverlayDims: getTerminalOverlayDims,
-    setSelectionBaseline: (baseline) => {
-      selectionBaselineRef.current = baseline;
-    },
+    setSelectionBaseline,
   });
 
   const cleanup = () => {
@@ -374,6 +378,7 @@ function setupTerminalEntry(id: string, options: { shell?: string; untouched?: b
     fit,
     element,
     cleanup,
+    setSelectionBaseline,
     isReplaying: false,
     untouched: options.untouched ?? false,
   };
@@ -592,6 +597,9 @@ export function disposeSession(id: string): void {
   const entry = registry.get(id);
   if (!entry) return;
   getPlatform().alertRemove(id);
+  // Before the xterm instance goes: its markers are what notepad pins hold, and
+  // a disposed marker cannot be dropped cleanly afterwards. The notes stay.
+  dropSourcesForTerminal(id);
   entry.cleanup();
   getPlatform().killPty(id);
   entry.element.remove();

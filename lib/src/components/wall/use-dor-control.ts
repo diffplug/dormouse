@@ -352,6 +352,7 @@ export function useDorControl({
   createSplitSurface,
   createContentSurface,
   killPaneImmediately,
+  closeSurface,
   revealSurface,
   lastAgentBrowserBinaryPathRef,
 }: {
@@ -384,7 +385,13 @@ export function useDorControl({
     title: string;
     focusNeutral?: boolean;
   }) => ParseResult<{ id: string; ref: string; status: 'created' | 'replaced' }>;
+  /** Immediate teardown with no archive step — `dor ensure`'s throwaway split
+   *  only (docs/specs/notepad.md → "Closure"). */
   killPaneImmediately: (id: string) => void;
+  /** The user-visible closure path: archive the Surface's notes, then tear it
+   *  down. A string means the archive refused, and is why; the Surface is still
+   *  here. */
+  closeSurface: (id: string, opts?: { prompt?: boolean }) => Promise<string | null>;
   /** Put the selection on a surface, reattaching it first when it is minimized.
    *  Used by the human-initiated `connectPort` (a menu click is a request to see
    *  that surface); the `dor ab` control path stays focus-neutral. */
@@ -921,7 +928,16 @@ export function useDorControl({
             return;
           }
         }
-        killPaneImmediately(target.id);
+        // `dor kill` is a user-visible permanent closure, so it archives the
+        // Surface's notes first. A refused archive leaves the Surface running
+        // and answers with the error rather than silently dropping the notes —
+        // and raises no pane prompt, because the caller is a command, not
+        // someone looking at the Wall (docs/specs/notepad.md → "Closure").
+        const refused = await closeSurface(target.id, { prompt: false });
+        if (refused) {
+          detail.respond({ ok: false, error: `notepad archive failed: ${refused}` });
+          return;
+        }
         detail.respond({
           ok: true,
           result: {
@@ -1099,7 +1115,7 @@ export function useDorControl({
 
     window.addEventListener('dormouse:control-request', handler);
     return () => window.removeEventListener('dormouse:control-request', handler);
-  }, [buildDorSurfaces, buildDorSurfaceList, createContentSurface, createSplitSurface, ensureAgentBrowserSurface, findSurfaceIdRunningCommand, killPaneImmediately, requireBrowserSurface, requireListedSurface, requireTerminalSurface, resolveListedSurface, resolveVisibleSurface, surfaceRefForId, lath, nav]);
+  }, [buildDorSurfaces, buildDorSurfaceList, closeSurface, createContentSurface, createSplitSurface, ensureAgentBrowserSurface, findSurfaceIdRunningCommand, killPaneImmediately, requireBrowserSurface, requireListedSurface, requireTerminalSurface, resolveListedSurface, resolveVisibleSurface, surfaceRefForId, lath, nav]);
 
   return { connectPort, updateSurfaceParams };
 }

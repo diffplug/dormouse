@@ -19,7 +19,6 @@ function DialogStory() {
         triggerRect={new DOMRect(24, 16, 20, 20)}
         sessionId={SESSION_ID}
         onClose={() => {}}
-        onKeyboardActiveChange={() => {}}
       />
     </div>
   );

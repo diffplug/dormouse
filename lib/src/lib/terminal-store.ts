@@ -11,6 +11,9 @@ export interface TerminalEntry {
   fit: FitAddon;
   element: HTMLDivElement;
   cleanup: () => void;
+  /** Replace the text snapshot the render handler compares a finalized Dormouse
+   *  selection against; `null` stops it watching. */
+  setSelectionBaseline: (baseline: string | null) => void;
   isReplaying: boolean;
   untouched: boolean;
   /**
@@ -60,3 +63,8 @@ export interface PendingShellOpts {
 
 export const registry = new Map<string, TerminalEntry>();
 export const pendingShellOpts = new Map<string, PendingShellOpts>();
+/** Arm render-tick invalidation for a selection some other module just set, so
+ *  it is dropped when the text under it changes (a pin's restored range). */
+export function setTerminalSelectionBaseline(id: string, baseline: string | null): void {
+  registry.get(id)?.setSelectionBaseline(baseline);
+}

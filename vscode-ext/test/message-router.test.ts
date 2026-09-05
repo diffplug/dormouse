@@ -6,6 +6,11 @@
  * does to a snapshot that was already handed to the phone.
  */
 
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { ARCHIVE_FILE } from '../src/notepad-archive-file';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ExtensionMessage, WebviewMessage } from '../src/message-types';
@@ -26,6 +31,32 @@ vi.mock('../src/peer-link', () => ({
   remoteNotifyPeerChange: () => {},
 }));
 
+/** The pty host, as far as a disposal is concerned: what it was asked, what it
+ *  answered, and the order the archive write and the kills happened in. */
+const ptys = vi.hoisted(() => ({
+  cwd: null as string | null,
+  cwdAsked: [] as string[],
+  cwdWait: null as Promise<void> | null,
+  buffered: new Map<string, { alive: boolean }>(),
+  /** `'write'` and `'kill <id>'`, in the order they happened. */
+  order: [] as string[],
+}));
+
+vi.mock('../src/pty-manager', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/pty-manager')>()),
+  spawn: (id: string) => { ptys.buffered.set(id, { alive: true }); },
+  getBufferedPtys: () => new Map(ptys.buffered),
+  getCwd: async (id: string) => {
+    ptys.cwdAsked.push(id);
+    await ptys.cwdWait;
+    return ptys.cwd;
+  },
+  kill: (id: string) => {
+    ptys.order.push(`kill ${id}`);
+    ptys.buffered.delete(id);
+  },
+}));
+
 vi.mock('../src/burrow', () => ({
   configureBurrow: () => {},
   deliverCommandResult: () => {},
@@ -40,6 +71,7 @@ vi.mock('../src/burrow', () => ({
 }));
 
 type RouterModule = typeof import('../src/message-router');
+type MirrorModule = typeof import('../src/notepad-volatile');
 
 /** One webview: what it was sent, and a way to make it say something back. */
 function fakeWebview() {
@@ -69,12 +101,21 @@ function fakeWebview() {
 }
 
 let router: RouterModule;
+let mirror: MirrorModule;
 
 beforeEach(async () => {
   vi.resetModules();
   wiring.peer = null;
   wiring.invalidations = 0;
+  ptys.cwd = null;
+  ptys.cwdAsked = [];
+  ptys.cwdWait = null;
+  ptys.buffered.clear();
+  ptys.order = [];
   router = (await import('../src/message-router')) as RouterModule;
+  // The same instance the router holds — `resetModules` gave this test its own
+  // extension host, and both imports land in that one registry.
+  mirror = (await import('../src/notepad-volatile')) as MirrorModule;
 });
 
 afterEach(() => {
@@ -123,6 +164,239 @@ describe('webview fan-out', () => {
     } finally {
       disposable.dispose();
     }
+  });
+});
+
+/**
+ * The notepad archive lives in shared storage, which only the extension host can
+ * reach (docs/specs/notepad.md). What this side owns is the request/response
+ * plumbing and the disposal rule: an editor panel closing archives its mirrored
+ * notes, the bottom-panel view's disposal does not — its PTYs stay alive.
+ */
+describe('notepad archive requests', () => {
+  const dirs: string[] = [];
+  function storageUri() {
+    const dir = mkdtempSync(join(tmpdir(), 'notepad-router-'));
+    dirs.push(dir);
+    return { fsPath: dir };
+  }
+  afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
+  function readArchive(context: { globalStorageUri: { fsPath: string } }): string | undefined {
+    try { return JSON.parse(readFileSync(join(context.globalStorageUri.fsPath, ARCHIVE_FILE), 'utf8')).raw ?? undefined; }
+    catch { return undefined; }
+  }
+  function fakeContext() {
+    const store = new Map<string, unknown>();
+    const context = {
+      globalStorageUri: storageUri(),
+      globalState: {
+        get: (key: string) => store.get(key),
+        update: async (key: string, value: unknown) => {
+          ptys.order.push('write');
+          if (value === undefined) store.delete(key);
+          else store.set(key, value);
+        },
+      },
+    };
+    return { context: context as never, store };
+  }
+
+  /** Every archive reply this webview was sent, in order. */
+  function results(webview: ReturnType<typeof fakeWebview>) {
+    return webview.posted
+      .filter((message) => message.type === 'notepad:result')
+      .map((message) => message as { requestId: string; ok: boolean; result?: unknown; error?: string });
+  }
+
+  const mirrored = {
+    surfaceId: 'pane-1',
+    surfaceTitle: 'zsh',
+    surfaceKind: 'terminal',
+    cwd: null,
+    notes: [{ id: 'n1', createdAt: 1, content: { kind: 'plain', text: 'remember this' } }],
+  };
+
+  it('round-trips a save and a load through shared storage', async () => {
+    const webview = fakeWebview();
+    const { context } = fakeContext();
+    const disposable = router.attachRouter(webview.channel, { context });
+    try {
+      webview.send({ type: 'notepad:load', requestId: 'np-1' } as never);
+      await vi.waitFor(() => expect(results(webview)).toHaveLength(1));
+      // Nothing archived yet, and `null` is the base revision that says so.
+      expect(results(webview)[0]).toEqual({ type: 'notepad:result', requestId: 'np-1', ok: true, result: null });
+
+      const state = JSON.stringify({ version: 1, batches: [] });
+      webview.send({ type: 'notepad:save', requestId: 'np-2', state, baseRevision: null } as never);
+      await vi.waitFor(() => expect(results(webview)).toHaveLength(2));
+      expect(results(webview)[1]).toMatchObject({ requestId: 'np-2', ok: true, result: 'ok' });
+
+      webview.send({ type: 'notepad:load', requestId: 'np-3' } as never);
+      await vi.waitFor(() => expect(results(webview)).toHaveLength(3));
+      expect(results(webview)[2].result).toMatchObject({ raw: state });
+    } finally {
+      disposable.dispose();
+    }
+  });
+
+  it('answers a failed archive write rather than leaving the webview waiting', async () => {
+    // The port has no deadline of its own, and an archive that cannot be written
+    // has to become the closure error path, never a Surface that never closes.
+    const webview = fakeWebview();
+    const context = {
+      globalStorageUri: storageUri(),
+      globalState: {
+        get: () => { throw new Error('globalState is gone'); },
+        update: async () => {},
+      },
+    } as never;
+    const disposable = router.attachRouter(webview.channel, { context });
+    try {
+      webview.send({ type: 'notepad:load', requestId: 'np-1' } as never);
+      await vi.waitFor(() => expect(results(webview)).toHaveLength(1));
+      expect(results(webview)[0]).toMatchObject({ ok: false, error: 'globalState is gone' });
+    } finally {
+      disposable.dispose();
+    }
+  });
+
+  it('archives an editor panel\'s mirrored notes when its router is killed on dispose', async () => {
+    const webview = fakeWebview();
+    const { context } = fakeContext();
+    const disposable = router.attachRouter(webview.channel, { context, killOnDispose: true });
+
+    webview.send({ type: 'notepad:volatile', snapshot: { surfaces: [mirrored], stagedDeletions: {} } } as never);
+    // Closing the tab is a deliberate ending, and the webview is already gone —
+    // so nothing but the host can archive what it was holding.
+    disposable.dispose();
+
+    await vi.waitFor(() => expect(readArchive(context)).toBeDefined());
+    const archive = JSON.parse(readArchive(context) as string);
+    expect(archive.batches).toHaveLength(1);
+    expect(archive.batches[0]).toMatchObject({ surfaceTitle: 'zsh', notes: [{ id: 'n1' }] });
+  });
+
+  it('refreshes the mirrored cwd from the live PTY, then kills it', async () => {
+    // The mirror holds whatever the webview last reported, which for a shell
+    // with no CWD escapes is nothing — but the PTY is alive right up to here.
+    const webview = fakeWebview();
+    const { context } = fakeContext();
+    const disposable = router.attachRouter(webview.channel, { context, killOnDispose: true });
+    ptys.cwd = '/Users/me/project';
+
+    webview.send({ type: 'pty:spawn', id: 'pty-1', options: { cwd: '/tmp' } } as never);
+    webview.send({
+      type: 'notepad:volatile',
+      snapshot: { surfaces: [{ ...mirrored, terminalId: 'pty-1' }], stagedDeletions: {} },
+    } as never);
+    disposable.dispose();
+
+    await vi.waitFor(() => expect(readArchive(context)).toBeDefined());
+    const archive = JSON.parse(readArchive(context) as string);
+    expect(archive.batches[0].cwd).toMatchObject({ path: '/Users/me/project', source: 'process' });
+    expect(ptys.cwdAsked).toEqual(['pty-1']);
+    // The kill waits for the write: a dead PTY could not have answered.
+    await vi.waitFor(() => expect(ptys.order).toEqual(['kill pty-1']));
+  });
+
+  it('reserves closing PTYs until the deferred kill finishes', async () => {
+    let release!: () => void;
+    ptys.cwdWait = new Promise<void>((resolve) => { release = resolve; });
+    const closing = fakeWebview();
+    const { context } = fakeContext();
+    const first = router.attachRouter(closing.channel, { context, killOnDispose: true });
+    closing.send({ type: 'pty:spawn', id: 'closing-pty', options: { cwd: '/tmp' } } as never);
+    closing.send({ type: 'notepad:volatile', snapshot: {
+      surfaces: [{ ...mirrored, terminalId: 'closing-pty' }], stagedDeletions: {},
+    } } as never);
+    first.dispose();
+    const reopening = fakeWebview();
+    const second = router.attachRouter(reopening.channel, { reconnect: true });
+    try {
+      reopening.send({ type: 'dormouse:init' } as never);
+      expect(reopening.posted.find((message) => message.type === 'pty:list')).toMatchObject({ ptys: [] });
+      expect(ptys.buffered.has('closing-pty')).toBe(true);
+      expect(ptys.order).toEqual([]);
+      release();
+      await vi.waitFor(() => expect(ptys.order).toEqual(['kill closing-pty']));
+      expect(readArchive(context)).toBeDefined();
+      reopening.send({ type: 'dormouse:init' } as never);
+      expect(reopening.posted.filter((message) => message.type === 'pty:list')).toEqual([
+        { type: 'pty:list', ptys: [] }, { type: 'pty:list', ptys: [] },
+      ]);
+    } finally {
+      release();
+      second.dispose();
+    }
+  });
+
+  it('kills the PTYs even when the archive write fails', async () => {
+    const webview = fakeWebview();
+    const context = {
+      globalStorageUri: storageUri(),
+      globalState: {
+        get: () => { throw new Error('globalState is gone'); },
+        update: async () => {},
+      },
+    } as never;
+    const disposable = router.attachRouter(webview.channel, { context, killOnDispose: true });
+
+    webview.send({ type: 'pty:spawn', id: 'pty-1', options: { cwd: '/tmp' } } as never);
+    webview.send({
+      type: 'notepad:volatile',
+      snapshot: { surfaces: [{ ...mirrored, terminalId: 'pty-1' }], stagedDeletions: {} },
+    } as never);
+    disposable.dispose();
+
+    await vi.waitFor(() => expect(ptys.order).toEqual(['kill pty-1']));
+  });
+
+  it('keeps the mirror when the bottom-panel view is disposed, so the next resolve hydrates it', async () => {
+    const webview = fakeWebview();
+    const { context } = fakeContext();
+    // No `killOnDispose`: the `WebviewView`'s disposal leaves its PTYs alive, so
+    // it is not a closure and the notes are not archived.
+    const disposable = router.attachRouter(webview.channel, { context });
+
+    webview.send({ type: 'notepad:volatile', snapshot: { surfaces: [mirrored], stagedDeletions: {} } } as never);
+    disposable.dispose();
+    await Promise.resolve();
+
+    expect(readArchive(context)).toBeUndefined();
+    expect(mirror.snapshotForLiveResume(['pane-1'])?.surfaces).toEqual([mirrored]);
+  });
+
+  it('commits staged archive deletions on a disposal that is not a closure', async () => {
+    // A `WebviewView` moved between containers is disposed and re-resolved. Left
+    // staged, the deletions would show as still pending in the new view — with
+    // an Undo — and then be committed hours later by `deactivate()`. The Archive
+    // view promised they were irreversible once this window closed.
+    const webview = fakeWebview();
+    const { context } = fakeContext();
+    const { globalState } = context as unknown as { globalState: { update(key: string, value: unknown): Promise<void> } };
+    await globalState.update('dormouse.notepadArchive.v1', JSON.stringify({
+      version: 1,
+      batches: [
+        { id: 'b1', closedAt: 1, surfaceTitle: 'zsh', surfaceKind: 'terminal', cwd: null, notes: [{ id: 'n1', createdAt: 1, content: { kind: 'plain', text: 'gone' } }] },
+        { id: 'b2', closedAt: 2, surfaceTitle: 'zsh', surfaceKind: 'terminal', cwd: null, notes: [{ id: 'n2', createdAt: 2, content: { kind: 'plain', text: 'kept' } }] },
+      ],
+    }));
+    const disposable = router.attachRouter(webview.channel, { context });
+
+    webview.send({
+      type: 'notepad:volatile',
+      snapshot: { surfaces: [mirrored], stagedDeletions: { deleteBatchIds: ['b1'], deleteNotes: [] } },
+    } as never);
+    disposable.dispose();
+
+    await vi.waitFor(() => {
+      const archive = JSON.parse(readArchive(context) as string);
+      expect(archive.batches.map((b: { id: string }) => b.id)).toEqual(['b2']);
+    });
+    // The notes are not a closure, so they stay — and nothing is left pending.
+    const resumed = mirror.snapshotForLiveResume(['pane-1']);
+    expect(resumed?.surfaces).toEqual([mirrored]);
+    expect(resumed?.stagedDeletions).toEqual({ deleteBatchIds: [], deleteNotes: [] });
   });
 });
 

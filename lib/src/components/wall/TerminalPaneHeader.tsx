@@ -16,6 +16,7 @@ import { TodoAlertDialog } from '../TodoAlertDialog';
 import { HEADER_PALETTE_TRANSITION_CLASS, paneZoomButtonClass, POPUP_SURFACE_CLASS, TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from '../design';
 import { AlertBell } from '../AlertBell';
 import { useTodoPillContent } from '../TodoPillBody';
+import { NotepadHeaderButton } from './NotepadHeaderButton';
 import type { PaneProps } from './pane-props';
 import { IllegalRenameWarning, type RenameRejection } from './IllegalRenameWarning';
 import { InlineEditInput } from './InlineEditInput';
@@ -44,7 +45,6 @@ import {
   titleCandidatesForDisplay,
 } from '../../lib/terminal-state';
 import {
-  DialogKeyboardContext,
   ModeContext,
   WallActionsContext,
   RenamingIdContext,
@@ -87,7 +87,6 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
   const renamingId = useContext(RenamingIdContext);
   const zoomed = useContext(ZoomedIdContext) === id;
   const windowFocused = useContext(WindowFocusedContext);
-  const setDialogKeyboardActive = useContext(DialogKeyboardContext);
   const activityStates = useSyncExternalStore(subscribeToActivity, getActivitySnapshot);
   const terminalStates = useSyncExternalStore(subscribeToTerminalPaneState, getTerminalPaneStateSnapshot);
   const showMouseIcon = useSyncExternalStore(
@@ -316,6 +315,7 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
               </HeaderActionButton>
             </div>
           )}
+          <NotepadHeaderButton surfaceId={id} hideWhenEmpty={tier === 'minimal'} />
           {tier === 'full' && (
             <div className="ml-1 flex shrink-0 items-center gap-0.5">
               <HeaderActionButton
@@ -367,7 +367,6 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
           triggerRect={dialogTriggerRect}
           sessionId={id}
           onClose={closeDialog}
-          onKeyboardActiveChange={setDialogKeyboardActive}
         />
       )}
       {todoPreviewRect && activity.notification && !dialogTriggerRect && (
@@ -382,7 +381,6 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
           id={id}
           anchor={contextMenu}
           onClose={closeContextMenu}
-          onKeyboardActiveChange={setDialogKeyboardActive}
           candidates={titleCandidates}
           currentTitle={displayTitleBase}
         />

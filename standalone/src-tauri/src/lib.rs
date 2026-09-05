@@ -10,7 +10,7 @@ use std::{
     process::Stdio,
     sync::atomic::{AtomicBool, AtomicU64, Ordering},
     sync::mpsc,
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Arc, Mutex, MutexGuard, OnceLock},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tauri::{
@@ -748,12 +748,14 @@ fn read_update_log() -> Result<String, String> {
 // so the frontend stays window-agnostic and a second window (`win-2`, …) persists
 // to its own file without ever rewriting the first window's blob.
 
-fn sessions_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(app
-        .path()
+fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    app.path()
         .app_data_dir()
-        .map_err(|e| format!("app_data_dir unavailable: {e}"))?
-        .join("sessions"))
+        .map_err(|e| format!("app_data_dir unavailable: {e}"))
+}
+
+fn sessions_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app_data_dir(app)?.join("sessions"))
 }
 
 // Window labels are app-controlled (e.g. "main"), but sanitize defensively so a
@@ -793,9 +795,9 @@ fn read_session_from(dir: &Path, label: &str) -> Result<Option<String>, String> 
 /// this is closing an inconsistency, not inventing a rule.
 ///
 /// Failures are reported rather than swallowed, and whether one is tolerable
-/// is the caller's decision: `write_session_to` ignores it — a filesystem
-/// without the permission model it wants must not fail a session save — while
-/// `burrow_state_dir` logs it.
+/// is the caller's decision: `write_file_atomically` (the session snapshot and
+/// the notepad archive) ignores it — a filesystem without the permission model
+/// it wants must not fail the save — while `burrow_state_dir` logs it.
 ///
 /// The `mode` is a unix mode and is ignored on Windows, which has no such
 /// concept — there the equivalent is a DACL protected from inheritance carrying
@@ -821,8 +823,8 @@ fn restrict_to_owner(path: &Path, mode: u32) -> Result<(), String> {
 /// user, and mark it protected so nothing is inherited from the parent.
 ///
 /// Reports rather than swallowing. Whether a failure is tolerable depends on
-/// the caller, not on this function: `write_session_to` runs on the quit path
-/// and would rather keep a snapshot under the ACL Windows gave it than lose it,
+/// the caller, not on this function: `write_file_atomically` runs on the quit
+/// path and would rather keep its file under the ACL Windows gave it than lose it,
 /// while `burrow_state_dir` runs at sidecar start and is — per
 /// `docs/specs/security-remote.md` -> "Credentials at rest" — the *only* thing restricting
 /// `burrowToken` on Windows, so a failure there is a silent downgrade of the one
@@ -937,26 +939,50 @@ fn restrict_to_owner(_path: &Path, _mode: u32) -> Result<(), String> {
     Ok(())
 }
 
-fn write_session_to(dir: &Path, label: &str, state: &str) -> Result<(), String> {
-    create_dir_all(dir).map_err(|e| format!("create sessions dir: {e}"))?;
-    // Deliberately ignored here: this is the quit path, and losing the snapshot
-    // is worse than keeping one under the ACL the OS gave it.
+/// The sibling this file is written through before being renamed into place.
+/// Also what a crash before that rename leaves behind, which is why the clearing
+/// paths look for it by the same name.
+fn temp_write_path(path: &Path) -> PathBuf {
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(".tmp");
+    path.with_file_name(name)
+}
+
+/// The directory `path` is written into, created and tightened to owner-only.
+///
+/// The `restrict_to_owner` failure is deliberately ignored: a filesystem without
+/// the permission model it wants must not fail the write itself — losing the
+/// data is worse than keeping it under the ACL the OS gave it.
+fn ensure_owner_only_parent(path: &Path) -> Result<&Path, String> {
+    let dir = path
+        .parent()
+        .ok_or_else(|| format!("no parent directory for {}", path.display()))?;
+    create_dir_all(dir).map_err(|e| format!("create dir {}: {e}", dir.display()))?;
     let _ = restrict_to_owner(dir, 0o700);
-    let file_name = session_file_name(label);
-    let path = dir.join(&file_name);
-    let tmp = dir.join(format!("{file_name}.tmp"));
+    Ok(dir)
+}
+
+/// Write `contents` to `path` atomically and owner-only.
+///
+/// The one implementation behind both machine-local stores this app owns — the
+/// per-window session snapshot and the notepad archive — because both carry user
+/// text and both must survive a crash mid-write
+/// (docs/specs/security-local.md -> "Persisted state").
+fn write_file_atomically(path: &Path, contents: &str) -> Result<(), String> {
+    let dir = ensure_owner_only_parent(path)?;
+    let tmp = temp_write_path(path);
     // Atomic replace: write a sibling temp file, fsync it, then rename over the
-    // target so a crash mid-write can never truncate the previous good snapshot.
+    // target so a crash mid-write can never truncate the previous good copy.
     {
         let mut f = File::create(&tmp).map_err(|e| format!("open temp: {e}"))?;
         // Before any bytes land: the rename below preserves the temp file's
-        // mode, so tightening here is what makes the final snapshot 0600.
+        // mode, so tightening here is what makes the final file 0600.
         let _ = restrict_to_owner(&tmp, 0o600);
-        f.write_all(state.as_bytes())
+        f.write_all(contents.as_bytes())
             .map_err(|e| format!("write temp: {e}"))?;
         f.sync_all().map_err(|e| format!("fsync temp: {e}"))?;
     }
-    std::fs::rename(&tmp, &path).map_err(|e| format!("rename session {label}: {e}"))?;
+    std::fs::rename(&tmp, path).map_err(|e| format!("rename {}: {e}", path.display()))?;
     // The temp file's own fsync doesn't make the rename durable — on unix the
     // directory entry that now points at the new inode must be fsynced too, or a
     // crash right after quit could leave the rename unrecorded. Best-effort: a
@@ -969,6 +995,13 @@ fn write_session_to(dir: &Path, label: &str, state: &str) -> Result<(), String> 
         }
     }
     Ok(())
+}
+
+// Owner-only before any bytes are written, and atomic-replace: both live in
+// `write_file_atomically` above (docs/specs/security-local.md -> "Persisted
+// state", docs/specs/standalone.md -> "Persistence").
+fn write_session_to(dir: &Path, label: &str, state: &str) -> Result<(), String> {
+    write_file_atomically(&dir.join(session_file_name(label)), state)
 }
 
 // Async so the file IO (and save's two fsyncs — temp file + dir, both
@@ -985,8 +1018,11 @@ async fn save_session(window: tauri::Window, state: String) -> Result<(), String
 }
 
 fn remove_session_from(dir: &Path, label: &str) -> Result<(), String> {
-    let file_name = session_file_name(label);
-    let paths = [dir.join(&file_name), dir.join(format!("{file_name}.tmp"))];
+    let snapshot = dir.join(session_file_name(label));
+    // The temp name comes from the writer, so changing the convention can never
+    // leave this sweep looking for a file `write_file_atomically` stopped making.
+    let tmp = temp_write_path(&snapshot);
+    let paths = [snapshot, tmp];
     let mut first_error = None;
     for path in paths {
         match std::fs::remove_file(&path) {
@@ -1012,6 +1048,241 @@ fn remove_session_from(dir: &Path, label: &str) -> Result<(), String> {
 #[tauri::command]
 async fn clear_session(window: tauri::Window) -> Result<(), String> {
     remove_session_from(&sessions_dir(window.app_handle())?, window.label())
+}
+
+// --- Notepad archive (docs/specs/notepad.md) ---------------------------------
+//
+// One machine-local archive per host, kept as `<app_data_dir>/notepad-archive-v1.json`
+// — a *sibling* of `sessions/`, never inside it. A Surface's notes outlive the
+// window whose closure archived them, so they must not ride the per-window
+// session blob or be swept by `clear_session`.
+//
+// The port is compare-and-swap (`NotepadArchivePort` in
+// lib/src/lib/notepad/types.ts): the webview reads the bytes plus an opaque
+// revision, applies its mutation, and writes back naming the revision it read.
+// A stale revision answers "conflict" and the webview retries against a fresh
+// read, so two overlapping mutations cannot drop one another's batches.
+//
+// The revision is a hash of the stored bytes, and every load, save and reset
+// runs under an exclusive lock on a sidecar lock file. Both are needed because
+// `app_data_dir()` is keyed by the Tauri identifier, which `pnpm dev:standalone`
+// shares with the installed app — the same sharing the sessions comment above
+// describes — so a second Dormouse process writing this file is an ordinary
+// state, not an impossible one. A hash is the only revision two processes agree
+// on without talking to each other: a counter only ever tracked this process's
+// own writes, so the loser of an overlapping load→save silently overwrote the
+// winner's batches. The lock is what makes the read-compare-rename one step, so
+// the loser is told "conflict" and retries instead. `None` means nothing is
+// stored — what a first save names as its base, and what a reset leaves behind.
+
+const NOTEPAD_ARCHIVE_FILE: &str = "notepad-archive-v1.json";
+
+#[derive(Default)]
+struct NotepadArchiveState {
+    /// Serializes this process's own load / save / reset, ahead of the
+    /// interprocess file lock those take: the intra-process path is then
+    /// ordered regardless of how a platform scopes an advisory lock, and two
+    /// threads here can never queue on each other through the filesystem.
+    gate: Mutex<()>,
+}
+
+fn notepad_archive_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app_data_dir(app)?.join(NOTEPAD_ARCHIVE_FILE))
+}
+
+/// The lock guarding every access to `path`, derived from its name so the two
+/// can never drift apart.
+///
+/// A *separate* file, never renamed: the archive itself is replaced by rename on
+/// every save, so its inode is a new one each time and cannot carry a lock.
+fn notepad_archive_lock_path(path: &Path) -> PathBuf {
+    path.with_extension("lock")
+}
+
+/// Exclusive access to the archive, released when it drops.
+///
+/// Taken gate first, then the interprocess file lock. The fields are declared
+/// in the reverse of that on purpose — Rust drops them in declaration order, and
+/// a gate released ahead of the file lock would let the next thread through only
+/// to block on the filesystem, which is the one thing the gate exists to prevent
+/// (`NotepadArchiveState::gate`).
+struct ArchiveLock<'a> {
+    _file: File,
+    _gate: MutexGuard<'a, ()>,
+}
+
+/// The one way in: no caller may take either half on its own.
+fn lock_archive<'a>(gate: &'a Mutex<()>, path: &Path) -> Result<ArchiveLock<'a>, String> {
+    let gate = gate
+        .lock()
+        .map_err(|_| "failed to lock the notepad archive".to_string())?;
+    let file = lock_notepad_archive(path)?;
+    Ok(ArchiveLock {
+        _file: file,
+        _gate: gate,
+    })
+}
+
+/// Take the interprocess lock, blocking until it is ours; released when the
+/// returned handle drops.
+///
+/// Reported rather than swallowed, unlike the `restrict_to_owner` call beside
+/// it: this lock is what makes the compare-and-swap correct across processes, so
+/// carrying on without it would silently reinstate the overwrite it exists to
+/// close. Blocking is safe because every caller is a `#[tauri::command(async)]`
+/// off the event loop, and each holder does one small read or write.
+fn lock_notepad_archive(path: &Path) -> Result<File, String> {
+    ensure_owner_only_parent(path)?;
+    let lock_path = notepad_archive_lock_path(path);
+    let file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        // Never truncated: the file is a lock, and its bytes (none) are not
+        // state anyone reads.
+        .truncate(false)
+        .open(&lock_path)
+        .map_err(|e| format!("open notepad archive lock: {e}"))?;
+    // Carries no bytes, but it names the archive and sits beside it, so it gets
+    // the same owner-only mode the archive does.
+    let _ = restrict_to_owner(&lock_path, 0o600);
+    file.lock()
+        .map_err(|e| format!("lock notepad archive: {e}"))?;
+    Ok(file)
+}
+
+/// The compare-and-swap token: a hash of exactly the bytes on disk.
+///
+/// `DefaultHasher::new()` is fixed-key rather than randomly seeded, which is the
+/// property that matters — two processes, and two runs of one process, must
+/// derive the same token from the same file or every save after a restart would
+/// read as a conflict.
+fn archive_revision(contents: &str) -> String {
+    use std::hash::{DefaultHasher, Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    contents.hash(&mut hasher);
+    format!("{}-{:016x}", contents.len(), hasher.finish())
+}
+
+/// The stored bytes and their revision, with the lock already held.
+fn read_notepad_archive_locked(path: &Path) -> Result<Option<(String, String)>, String> {
+    match std::fs::read_to_string(path) {
+        Ok(contents) => {
+            let revision = archive_revision(&contents);
+            Ok(Some((contents, revision)))
+        }
+        // Nothing stored — including after a reset moved it aside — so the next
+        // save must name a null base revision.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!("read notepad archive: {e}")),
+    }
+}
+
+fn read_notepad_archive_from(
+    path: &Path,
+    gate: &Mutex<()>,
+) -> Result<Option<(String, String)>, String> {
+    let _lock = lock_archive(gate, path)?;
+    read_notepad_archive_locked(path)
+}
+
+fn write_notepad_archive_to(
+    path: &Path,
+    gate: &Mutex<()>,
+    state: &str,
+    base_revision: Option<&str>,
+) -> Result<String, String> {
+    // Held across the whole compare-and-write: the comparison is worth nothing
+    // if another save — this process's or another Dormouse's — can land between
+    // it and the rename.
+    let _lock = lock_archive(gate, path)?;
+    // Re-read under the lock rather than trusting anything cached: a revision
+    // nobody minted (a garbled one, or one whose bytes another process has since
+    // replaced) then reads as a conflict rather than as an error the caller
+    // would have to handle separately.
+    let current = read_notepad_archive_locked(path)?.map(|(_, revision)| revision);
+    if current.as_deref() != base_revision {
+        return Ok("conflict".to_string());
+    }
+    write_file_atomically(path, state)?;
+    Ok("ok".to_string())
+}
+
+/// Move an unreadable archive aside, never delete it.
+///
+/// The recovery that calls this knows only that the stored bytes do not parse;
+/// they are still the user's notes, so they are renamed to
+/// `notepad-archive-v1.unreadable-<unix-millis>.json` beside the original and
+/// left for whoever wants to salvage them (docs/specs/notepad.md).
+fn reset_notepad_archive_at(path: &Path, gate: &Mutex<()>) -> Result<(), String> {
+    let _lock = lock_archive(gate, path)?;
+    let dir = path
+        .parent()
+        .ok_or_else(|| format!("no parent directory for {}", path.display()))?;
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis());
+    // Derived from the archive's own name so the two can never drift apart.
+    let stem = path.file_stem().unwrap_or_default().to_string_lossy().into_owned();
+    // The name is per-millisecond; on the vanishing chance two recoveries land
+    // inside one, disambiguate rather than let the rename overwrite the earlier
+    // quarantine — surviving is the entire point of this file.
+    let mut target = dir.join(format!("{stem}.unreadable-{millis}.json"));
+    let mut nth = 2;
+    while target.exists() {
+        target = dir.join(format!("{stem}.unreadable-{millis}-{nth}.json"));
+        nth += 1;
+    }
+    match std::fs::rename(path, &target) {
+        Ok(()) => {}
+        // Nothing stored is the desired end state, not a failure.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(format!("quarantine notepad archive: {e}")),
+    }
+    // A temp file left by a crash before its rename was never a readable
+    // archive, so unlike the file above it is dropped rather than kept.
+    let tmp = temp_write_path(path);
+    match std::fs::remove_file(&tmp) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(format!("remove notepad archive temp: {e}")),
+    }
+    Ok(())
+}
+
+// Async like the session commands: the read, and the save's two fsyncs, run off
+// the main/event-loop thread.
+#[tauri::command(async)]
+fn load_notepad_archive(
+    app: AppHandle,
+    archive: tauri::State<'_, NotepadArchiveState>,
+) -> Result<Option<(String, String)>, String> {
+    read_notepad_archive_from(&notepad_archive_path(&app)?, &archive.gate)
+}
+
+/// `"ok"` or `"conflict"` — the stored archive moved since `base_revision` was
+/// read, and the caller owes it a retry.
+#[tauri::command(async)]
+fn save_notepad_archive(
+    app: AppHandle,
+    archive: tauri::State<'_, NotepadArchiveState>,
+    state: String,
+    base_revision: Option<String>,
+) -> Result<String, String> {
+    write_notepad_archive_to(
+        &notepad_archive_path(&app)?,
+        &archive.gate,
+        &state,
+        base_revision.as_deref(),
+    )
+}
+
+#[tauri::command(async)]
+fn reset_notepad_archive(
+    app: AppHandle,
+    archive: tauri::State<'_, NotepadArchiveState>,
+) -> Result<(), String> {
+    reset_notepad_archive_at(&notepad_archive_path(&app)?, &archive.gate)
 }
 
 #[tauri::command]
@@ -1602,6 +1873,12 @@ pub fn run() {
             // Quit-interception state (docs/specs/standalone.md §Quit flow).
             app.manage(QuitState::default());
 
+            // Serializes this process's notepad-archive access (§Notepad
+            // archive); the revision itself is read off the stored bytes and
+            // the cross-process exclusion is a lock file, so there is no
+            // starting state to seed here.
+            app.manage(NotepadArchiveState::default());
+
             // On non-macOS, remove native decorations for a fully custom title bar.
             // macOS uses titleBarStyle "Overlay" from config instead, which preserves
             // rounded corners and native traffic-light buttons.
@@ -1640,6 +1917,9 @@ pub fn run() {
             load_session,
             save_session,
             clear_session,
+            load_notepad_archive,
+            save_notepad_archive,
+            reset_notepad_archive,
             agent_browser_command,
             agent_browser_edit,
             agent_browser_screenshot,
@@ -1677,11 +1957,14 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        find_node_binary, read_session_from, remove_session_from, resolve_dor_cli_paths,
-        resolve_sidecar_path, session_file_name, strip_windows_verbatim_prefix, write_session_to,
+        find_node_binary, notepad_archive_lock_path, read_notepad_archive_from, read_session_from,
+        remove_session_from, reset_notepad_archive_at, resolve_dor_cli_paths, resolve_sidecar_path,
+        session_file_name, strip_windows_verbatim_prefix, write_notepad_archive_to,
+        write_session_to, NOTEPAD_ARCHIVE_FILE,
     };
     use std::fs;
     use std::path::{Path, PathBuf};
+    use std::sync::Mutex;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     // RAII guard so a failing assert doesn't leak the temp dir.
@@ -2133,6 +2416,275 @@ mod tests {
         assert_eq!(session_file_name("../../evil"), "______evil.json");
         assert_eq!(session_file_name("main"), "main.json");
         assert_eq!(session_file_name("a/b"), "a_b.json");
+    }
+
+    // ── Notepad archive (docs/specs/notepad.md) ─────────────────────────────
+    //
+    // A compare-and-swap store, so what is worth pinning is the pair the webview
+    // leans on: a save lands only on the revision it read, and no failure path —
+    // a stale save, a crash mid-write, a recovery from an unreadable file — may
+    // cost the user notes.
+
+    struct Archive {
+        dir: PathBuf,
+        // `None` for a second process over a directory the first one owns: only
+        // the owner's drop may remove it.
+        _owned: Option<TempDir>,
+        // The process-local gate — so two of these over one directory are two
+        // Dormouse processes, sharing only what is on disk.
+        gate: Mutex<()>,
+    }
+
+    impl Archive {
+        fn new(name: &str) -> Self {
+            let dir = TempDir::new(name);
+            Archive {
+                dir: dir.path().to_path_buf(),
+                _owned: Some(dir),
+                gate: Mutex::new(()),
+            }
+        }
+        /// A second Dormouse over the same `app_data_dir()` — a dev build beside
+        /// the installed app, which share a Tauri identifier and so a data
+        /// directory.
+        fn second_process(&self) -> Self {
+            Archive {
+                dir: self.dir.clone(),
+                _owned: None,
+                gate: Mutex::new(()),
+            }
+        }
+        fn dir(&self) -> &Path {
+            &self.dir
+        }
+        fn path(&self) -> PathBuf {
+            self.dir.join(NOTEPAD_ARCHIVE_FILE)
+        }
+        fn load(&self) -> Option<(String, String)> {
+            read_notepad_archive_from(&self.path(), &self.gate).unwrap()
+        }
+        /// The bytes alone, for a test asserting only what is stored.
+        fn bytes(&self) -> Option<String> {
+            self.load().map(|(bytes, _)| bytes)
+        }
+        /// The token a save must quote. Opaque: the tests assert only that it
+        /// moves with the bytes, never its shape.
+        fn revision(&self) -> Option<String> {
+            self.load().map(|(_, revision)| revision)
+        }
+        fn save(&self, state: &str, base: Option<&str>) -> String {
+            write_notepad_archive_to(&self.path(), &self.gate, state, base).unwrap()
+        }
+        fn reset(&self) {
+            reset_notepad_archive_at(&self.path(), &self.gate).unwrap()
+        }
+        /// Every file in the archive directory bar the lock, sorted — so a test
+        /// can assert what was left behind as well as what was written. The lock
+        /// exists from the first operation onward and is nothing these
+        /// assertions are about; `notepad_archive_is_owner_only_on_disk` is what
+        /// pins it.
+        fn entries(&self) -> Vec<String> {
+            let lock = notepad_archive_lock_path(&self.path());
+            let lock = lock.file_name().unwrap().to_string_lossy().into_owned();
+            let mut names: Vec<String> = fs::read_dir(self.dir())
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+                .filter(|name| *name != lock)
+                .collect();
+            names.sort();
+            names
+        }
+    }
+
+    #[test]
+    fn notepad_archive_round_trips_and_moves_its_revision() {
+        let archive = Archive::new("notepad-roundtrip");
+
+        // Nothing archived yet: the load reports absence, and the first save
+        // names a null base revision.
+        assert_eq!(archive.load(), None);
+        assert_eq!(archive.save(r#"{"version":1,"batches":[]}"#, None), "ok");
+
+        let (bytes, first) = archive.load().expect("archived");
+        assert_eq!(bytes, r#"{"version":1,"batches":[]}"#);
+        // Re-reading unchanged bytes reproduces the token — the property a
+        // retry-after-conflict leans on.
+        assert_eq!(archive.revision().as_deref(), Some(first.as_str()));
+
+        // Each accepted save moves it, so the next one must quote what it read.
+        assert_eq!(
+            archive.save(r#"{"version":1,"batches":["b1"]}"#, Some(&first)),
+            "ok",
+        );
+        let (bytes, second) = archive.load().expect("archived");
+        assert_eq!(bytes, r#"{"version":1,"batches":["b1"]}"#);
+        assert_ne!(second, first);
+
+        // Atomic replace, not append — and the temp file it went through is gone.
+        assert_eq!(archive.entries(), vec![NOTEPAD_ARCHIVE_FILE.to_string()]);
+    }
+
+    #[test]
+    fn notepad_archive_refuses_a_save_against_a_stale_revision() {
+        let archive = Archive::new("notepad-conflict");
+        assert_eq!(archive.save(r#"{"version":1,"batches":["a"]}"#, None), "ok");
+        let stale = archive.revision().expect("archived");
+        assert_eq!(
+            archive.save(r#"{"version":1,"batches":["b"]}"#, Some(&stale)),
+            "ok",
+        );
+
+        // A second writer still holding the earlier token is refused rather than
+        // silently overwriting the batches it never saw.
+        assert_eq!(
+            archive.save(r#"{"version":1,"batches":["c"]}"#, Some(&stale)),
+            "conflict",
+        );
+        // So does a token nothing ever minted, and so does a first-save null
+        // base once something is stored.
+        assert_eq!(archive.save("{}", Some("not-a-revision")), "conflict");
+        assert_eq!(archive.save("{}", None), "conflict");
+        // …and no refusal touched the file.
+        assert_eq!(
+            archive.bytes().as_deref(),
+            Some(r#"{"version":1,"batches":["b"]}"#),
+        );
+        assert_eq!(archive.entries(), vec![NOTEPAD_ARCHIVE_FILE.to_string()]);
+    }
+
+    /// The revision is a hash of the stored bytes, not a count of this process's
+    /// own writes, so a write it never made is still seen.
+    #[test]
+    fn notepad_archive_conflicts_with_a_write_it_did_not_make() {
+        let archive = Archive::new("notepad-foreign");
+        assert_eq!(archive.save(r#"{"version":1,"batches":["a"]}"#, None), "ok");
+        let base = archive.revision().expect("archived");
+
+        // Straight at the file, as another process's rename leaves it.
+        fs::write(archive.path(), r#"{"version":1,"batches":["a","yours"]}"#).unwrap();
+
+        assert_eq!(
+            archive.save(r#"{"version":1,"batches":["a","mine"]}"#, Some(&base)),
+            "conflict",
+        );
+        // The refusal kept the bytes it found instead of overwriting them.
+        assert_eq!(
+            archive.bytes().as_deref(),
+            Some(r#"{"version":1,"batches":["a","yours"]}"#),
+        );
+    }
+
+    /// Two Dormouse processes share `app_data_dir()` — a dev build beside the
+    /// installed app — so the loser of an overlapping load→save must be told to
+    /// retry rather than drop the winner's batches.
+    #[test]
+    fn notepad_archive_conflicts_across_two_processes() {
+        let first = Archive::new("notepad-two-processes");
+        let second = first.second_process();
+
+        assert_eq!(first.save(r#"{"version":1,"batches":["a"]}"#, None), "ok");
+        // Both load; the token is the file's, so both read the same one.
+        let base_first = first.revision().expect("archived");
+        let base_second = second.revision().expect("archived");
+        assert_eq!(base_first, base_second);
+
+        assert_eq!(
+            first.save(
+                r#"{"version":1,"batches":["a","first"]}"#,
+                Some(&base_first)
+            ),
+            "ok",
+        );
+        // A process-local counter never observed that save; the hash does.
+        assert_eq!(
+            second.save(
+                r#"{"version":1,"batches":["a","second"]}"#,
+                Some(&base_second)
+            ),
+            "conflict",
+        );
+
+        // And the retry the conflict asks for lands, carrying both batches.
+        let fresh = second.revision().expect("archived");
+        assert_eq!(
+            second.save(
+                r#"{"version":1,"batches":["a","first","second"]}"#,
+                Some(&fresh)
+            ),
+            "ok",
+        );
+        assert_eq!(
+            first.bytes().as_deref(),
+            Some(r#"{"version":1,"batches":["a","first","second"]}"#),
+        );
+    }
+
+    #[test]
+    fn notepad_archive_reset_renames_the_unreadable_file_rather_than_deleting_it() {
+        let archive = Archive::new("notepad-reset");
+        assert_eq!(archive.save("{ not json", None), "ok");
+        // A crash before a rename could have left this; it was never a readable
+        // archive, so it is the one thing reset may drop.
+        let tmp = archive.dir().join("notepad-archive-v1.json.tmp");
+        fs::write(&tmp, b"partial").unwrap();
+
+        archive.reset();
+
+        // The partial write is gone and the archive is not where it was — what
+        // is left is one quarantined copy.
+        assert!(!tmp.exists());
+        let entries = archive.entries();
+        assert_eq!(entries.len(), 1, "expected one quarantined copy: {entries:?}");
+        let quarantined = &entries[0];
+        assert!(
+            quarantined.starts_with("notepad-archive-v1.unreadable-")
+                && quarantined.ends_with(".json"),
+            "unexpected quarantine name: {quarantined}",
+        );
+        // The user's bytes survive the recovery — that is the whole point.
+        assert_eq!(
+            fs::read_to_string(archive.dir().join(quarantined)).unwrap(),
+            "{ not json",
+        );
+
+        // And the archive starts empty again: the next save is a first save,
+        // naming a null base.
+        assert_eq!(archive.load(), None);
+        assert_eq!(archive.save(r#"{"version":1,"batches":[]}"#, None), "ok");
+        assert_eq!(
+            archive.bytes().as_deref(),
+            Some(r#"{"version":1,"batches":[]}"#)
+        );
+    }
+
+    #[test]
+    fn notepad_archive_reset_without_a_file_succeeds() {
+        // Nothing to move aside is the desired end state, not a failure.
+        let archive = Archive::new("notepad-reset-missing");
+        archive.reset();
+        assert_eq!(archive.load(), None);
+        assert!(archive.entries().is_empty());
+    }
+
+    /// The unix half of the guarantee `restrict_to_owner_leaves_one_owner_only_ace`
+    /// pins on Windows: the archive carries captured terminal excerpts, so it and
+    /// its directory are the owner's alone
+    /// (docs/specs/security-local.md -> "Persisted state").
+    #[test]
+    #[cfg(unix)]
+    fn notepad_archive_is_owner_only_on_disk() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let archive = Archive::new("notepad-modes");
+        assert_eq!(archive.save(r#"{"version":1,"batches":[]}"#, None), "ok");
+
+        let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(archive.dir()), 0o700);
+        // 0600 survives because the temp file was tightened *before* the rename.
+        assert_eq!(mode(&archive.path()), 0o600);
+        // The lock carries no bytes, but it names the archive and sits beside it
+        // in the same directory, so it is owner-only on the same terms.
+        assert_eq!(mode(&notepad_archive_lock_path(&archive.path())), 0o600);
     }
 
     // Enforces the INVARIANT documented above `request_from_sidecar_timeout`:

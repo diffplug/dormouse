@@ -15,6 +15,11 @@ export default defineConfig({
   resolve: {
     alias: {
       vscode: fileURLToPath(new URL('test/vscode-stub.ts', import.meta.url)),
+      // Shared `lib/` modules the extension host bundles reach the `dor` CLI's
+      // types through the `dor/*` tsconfig path. Vite reads no tsconfig paths and
+      // `dor` has no package exports, so resolve it to source — the same alias
+      // `lib/vite.config.ts` and standalone use.
+      dor: fileURLToPath(new URL('../dor/src', import.meta.url)),
     },
   },
   test: {

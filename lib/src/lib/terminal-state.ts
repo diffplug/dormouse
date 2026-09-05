@@ -314,6 +314,14 @@ export function cwdFromManualPath(rawPath: string, now = Date.now()): CwdState |
   return cwdFromDecodedPath(rawPath, 'manual', now);
 }
 
+/** Whether inspecting the live process may replace a CWD from this source. A
+ *  shell integration escape is the shell's own answer and always wins; nothing
+ *  reported, an earlier inspection, and a launch-time seed are all fillable.
+ *  The one rule for it, so a caller can also decline to *ask*. */
+export function processCwdMayReplace(source: CwdSource | undefined): boolean {
+  return source === undefined || source === 'process' || source === 'manual';
+}
+
 export function cwdIdentity(cwd: CwdState): string {
   const scheme = cwd.scheme ?? 'path';
   const host = cwd.host ?? '';

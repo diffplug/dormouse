@@ -298,6 +298,12 @@ window, `<app_data_dir>/sessions/<label>.json`:
 - No WAL to grow, and rewriting the same path bounds the on-disk size to one
   blob (rationale).
 
+**The notepad archive is a sibling of `sessions/`, not a member of it** —
+`<app_data_dir>/notepad-archive-v1.json`, its own compare-and-swap commands and
+its own lifetime, so `clear_session` never sweeps it
+(`docs/specs/notepad.md` -> "Standalone quit"). Both stores write through the one
+`write_file_atomically`.
+
 **Owner-only on disk, before any bytes are written** — the blob carries terminal
 transcripts (`docs/specs/security-local.md` -> "Persisted state").
 `restrict_to_owner` sets `0700` on the directory and `0600` on the temp file
@@ -398,13 +404,20 @@ Tauri-only) responds:
 
 1. **Always `quit_ack`** first (fire-and-catch), so phase 1 stands down even if
    the orchestrator then dedupes the event out.
-2. **`quit_progress`** when teardown begins — immediately on an all-idle quit, or
-   after the user confirms — setting `tearing_down` and bumping a `progress`
-   counter. Sent again at the install phase boundary.
-3. The teardown (below), then **`quit_proceed`** — sets `approved` and calls
+2. **Archive the notepads**, bounded at 3 s, *before* the first `quit_progress` —
+   the last point at which a failure may still ask a question, since teardown may
+   not (`docs/specs/notepad.md` -> "Standalone quit"). Failure or timeout leaves
+   the quit **pending**: its dialog is another human decision, which phase 2 is
+   unbounded for.
+3. **`quit_progress`** when teardown begins — immediately on an all-idle quit, or
+   after the user confirms and the archive gate passes — setting `tearing_down`
+   and bumping a `progress` counter. Sent again at the install phase boundary.
+4. The teardown (below), then **`quit_proceed`** — sets `approved` and calls
    `app.exit(0)`.
-4. A confirmation-dialog cancel (below) calls **`quit_cancel`** — bumps `seq`,
-   invalidating the live watchdog, and leaves the app running.
+5. A confirmation-dialog cancel (below), or a **Cancel** on the archive-failure
+   dialog, calls **`quit_cancel`** — bumps `seq`, invalidating the live watchdog,
+   and leaves the app running. **Nothing else cancels**: a Quit anyway must reach
+   teardown with the watchdog still armed.
 
 A cloned-`AppHandle` **watchdog** thread keeps quit bounded against a dead or
 wedged webview, in three phases:
@@ -452,7 +465,10 @@ Source of truth: `standalone/src/quit-confirm-store.ts` (the module store + gate
 `standalone/src/QuitConfirmModal.tsx` (the modal).
 
 **Teardown ordering (`runQuitTeardown`), and why.** Wrapped in an 8 s ceiling, with
-**every step individually bounded** so a stall cannot wedge quit:
+**every step individually bounded** so a stall cannot wedge quit. The notepad
+archive is **not** a step here: it runs ahead of `quit_progress` precisely because
+teardown's rule below holds — no failing step prevents exit — and archiving must be
+able to stop the quit (`docs/specs/notepad.md` -> "Standalone quit"):
 
 1. `requestSessionFlush` — save while PTYs are alive, so CWDs are fresh.
 2. `gracefulKillAllPtys` — SIGTERM every PTY, resolving early once all exit and

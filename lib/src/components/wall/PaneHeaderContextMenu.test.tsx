@@ -6,7 +6,13 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PaneProps } from './pane-props';
 import { TerminalPaneHeader } from './TerminalPaneHeader';
-import { DialogKeyboardContext, WallActionsContext, type WallActions } from './wall-context';
+import {
+  DialogKeyboardContext,
+  WallActionsContext,
+  createDialogKeyboardCoordinator,
+  type AcquireDialogKeyboard,
+  type WallActions,
+} from './wall-context';
 import { ensureResizeObserver, stubWallActions as stubActions } from './wall-test-utils';
 import { FakePtyAdapter } from '../../lib/platform/fake-adapter';
 import { setPlatform } from '../../lib/platform';
@@ -36,7 +42,9 @@ function enableConnect(platform: FakePtyAdapter): void {
 let container: HTMLDivElement;
 let root: Root;
 let platform: FakePtyAdapter;
-let keyboardActiveSpy: ReturnType<typeof vi.fn>;
+/** The real coordinator, so the menu's lease is reference-counted as in a Wall. */
+let keyboardActive: { current: boolean };
+let acquireKeyboard: AcquireDialogKeyboard;
 
 beforeEach(() => {
   container = document.createElement('div');
@@ -45,7 +53,8 @@ beforeEach(() => {
   platform = new FakePtyAdapter();
   setPlatform(platform);
   ensureResizeObserver();
-  keyboardActiveSpy = vi.fn();
+  keyboardActive = { current: false };
+  acquireKeyboard = createDialogKeyboardCoordinator(keyboardActive);
 });
 
 afterEach(() => {
@@ -59,7 +68,7 @@ function renderHeader(props: PaneProps, actions: WallActions) {
   act(() => {
     root.render(
       <StrictMode>
-        <DialogKeyboardContext.Provider value={keyboardActiveSpy}>
+        <DialogKeyboardContext.Provider value={acquireKeyboard}>
           <WallActionsContext.Provider value={actions}>
             <TerminalPaneHeader {...props} />
           </WallActionsContext.Provider>
@@ -242,13 +251,13 @@ describe('PaneHeaderContextMenu — keyboard access', () => {
     expect(document.activeElement).toBe(menuFor('term-1'));
   });
 
-  it('reports dialog-keyboard-active while open and inactive once closed', async () => {
+  it('holds a dialog-keyboard lease while open and releases it once closed', async () => {
     await openConnectableMenu();
-    expect(keyboardActiveSpy).toHaveBeenLastCalledWith(true);
+    expect(keyboardActive.current).toBe(true);
 
     act(() => { window.dispatchEvent(keydown('Escape')); });
     expect(menuFor('term-1')).toBeNull();
-    expect(keyboardActiveSpy).toHaveBeenLastCalledWith(false);
+    expect(keyboardActive.current).toBe(false);
   });
 
   it('renders digit chips and connects the nth port row when its digit is pressed, then closes', async () => {

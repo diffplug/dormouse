@@ -5,6 +5,7 @@ import {
   useAgentBrowserScreenController,
   useOpenAgentBrowserScreenModalId,
 } from './wall/agent-browser-screen';
+import { useDialogKeyboardOwner } from './wall/wall-context';
 
 /**
  * Mounts the agent-browser screen modal when a surface requests it, mirroring
@@ -12,20 +13,15 @@ import {
  * (e.g. `surface:3`) for the title.
  */
 export function AgentBrowserScreenModalHost({
-  onKeyboardActiveChange,
   resolveLabel,
 }: {
-  onKeyboardActiveChange: (active: boolean) => void;
   resolveLabel: (surfaceId: string) => string;
 }) {
   const id = useOpenAgentBrowserScreenModalId();
   const controller = useAgentBrowserScreenController(id ?? '');
   const open = id !== null && controller !== null;
 
-  useEffect(() => {
-    onKeyboardActiveChange(open);
-    return () => onKeyboardActiveChange(false);
-  }, [onKeyboardActiveChange, open]);
+  useDialogKeyboardOwner(open);
 
   // The surface was killed (or detached) while its modal was open — drop it.
   useEffect(() => {

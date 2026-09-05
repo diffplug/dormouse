@@ -19,6 +19,12 @@ vi.mock('../../../lib/mouse-selection', () => ({
   flashCopy: vi.fn(),
   setSelection: vi.fn(),
 }));
+// The notepad chord is gated on the host having a notepad and not having ceded
+// the chord to the browser; both are platform reads, so drive them directly.
+vi.mock('../../../lib/notepad/capture', () => ({
+  addSelectionToNotepad: vi.fn(() => true),
+  isNotepadChordBound: vi.fn(() => true),
+}));
 
 function makeCtx(overrides: { surfaceType?: string } = {}): WallKeyboardCtx {
   return {
@@ -45,6 +51,9 @@ describe('handleMouseSelectionKeys', () => {
     const { getMouseSelectionState } = await import('../../../lib/mouse-selection');
     // Reset to the no-selection default; individual tests override as needed.
     vi.mocked(getMouseSelectionState).mockReturnValue({ selection: null } as never);
+    const { addSelectionToNotepad, isNotepadChordBound } = await import('../../../lib/notepad/capture');
+    vi.mocked(addSelectionToNotepad).mockClear().mockReturnValue(true);
+    vi.mocked(isNotepadChordBound).mockClear().mockReturnValue(true);
   });
 
   it('does not intercept Cmd+V on a non-xterm textarea', async () => {
@@ -150,5 +159,82 @@ describe('handleMouseSelectionKeys', () => {
     await Promise.resolve();
     expect(flashCopy).toHaveBeenCalledWith('pane-a', 'raw');
     expect(flashCopy).toHaveBeenCalledWith('pane-a', 'rewrapped');
+  });
+});
+
+describe('handleMouseSelectionKeys: notepad chord', () => {
+  const withSelection = async () => {
+    const { getMouseSelectionState } = await import('../../../lib/mouse-selection');
+    vi.mocked(getMouseSelectionState).mockReturnValue({ selection: { dragging: false } } as never);
+  };
+
+  beforeEach(async () => {
+    const { getMouseSelectionState, flashCopy } = await import('../../../lib/mouse-selection');
+    vi.mocked(getMouseSelectionState).mockReturnValue({ selection: null } as never);
+    vi.mocked(flashCopy).mockClear();
+    const { addSelectionToNotepad, isNotepadChordBound } = await import('../../../lib/notepad/capture');
+    vi.mocked(addSelectionToNotepad).mockClear().mockReturnValue(true);
+    vi.mocked(isNotepadChordBound).mockClear().mockReturnValue(true);
+  });
+
+  it('captures and flashes on Cmd+N with a finalized selection', async () => {
+    const { flashCopy } = await import('../../../lib/mouse-selection');
+    const { addSelectionToNotepad } = await import('../../../lib/notepad/capture');
+    await withSelection();
+    const e = fakeEvent(document.createElement('div'), { key: 'n', metaKey: true });
+
+    expect(handleMouseSelectionKeys(e, makeCtx())).toBe(true);
+    expect(e.defaultPrevented).toBe(true);
+    expect(addSelectionToNotepad).toHaveBeenCalledWith('pane-a');
+    expect(flashCopy).toHaveBeenCalledWith('pane-a', 'notepad');
+  });
+
+  it('does not flash when there was nothing to capture', async () => {
+    const { flashCopy } = await import('../../../lib/mouse-selection');
+    const { addSelectionToNotepad } = await import('../../../lib/notepad/capture');
+    vi.mocked(addSelectionToNotepad).mockReturnValue(false);
+    await withSelection();
+
+    expect(handleMouseSelectionKeys(fakeEvent(document.createElement('div'), { key: 'n', metaKey: true }), makeCtx())).toBe(true);
+    expect(flashCopy).not.toHaveBeenCalled();
+  });
+
+  it('falls through without a selection, so Ctrl+N stays readline next-history', async () => {
+    const { addSelectionToNotepad } = await import('../../../lib/notepad/capture');
+    const e = fakeEvent(document.createElement('div'), { key: 'n', metaKey: true });
+
+    expect(handleMouseSelectionKeys(e, makeCtx())).toBe(false);
+    expect(e.defaultPrevented).toBe(false);
+    expect(addSelectionToNotepad).not.toHaveBeenCalled();
+  });
+
+  it('falls through when the host has no notepad or the browser reserves the chord', async () => {
+    const { addSelectionToNotepad, isNotepadChordBound } = await import('../../../lib/notepad/capture');
+    vi.mocked(isNotepadChordBound).mockReturnValue(false);
+    await withSelection();
+    const e = fakeEvent(document.createElement('div'), { key: 'n', metaKey: true });
+
+    expect(handleMouseSelectionKeys(e, makeCtx())).toBe(false);
+    expect(e.defaultPrevented).toBe(false);
+    expect(addSelectionToNotepad).not.toHaveBeenCalled();
+  });
+
+  it('leaves Cmd+Shift+N alone', async () => {
+    const { addSelectionToNotepad } = await import('../../../lib/notepad/capture');
+    await withSelection();
+    const e = fakeEvent(document.createElement('div'), { key: 'N', metaKey: true, shiftKey: true });
+
+    expect(handleMouseSelectionKeys(e, makeCtx())).toBe(false);
+    expect(e.defaultPrevented).toBe(false);
+    expect(addSelectionToNotepad).not.toHaveBeenCalled();
+  });
+
+  it('leaves a bare "n" alone', async () => {
+    const { addSelectionToNotepad } = await import('../../../lib/notepad/capture');
+    await withSelection();
+    const e = fakeEvent(document.createElement('div'), { key: 'n' });
+
+    expect(handleMouseSelectionKeys(e, makeCtx())).toBe(false);
+    expect(addSelectionToNotepad).not.toHaveBeenCalled();
   });
 });

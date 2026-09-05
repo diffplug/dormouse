@@ -17,6 +17,11 @@ import type {
   PtyInfo,
   BurrowLink,
 } from "dormouse-lib/lib/platform/types";
+import type {
+  NotepadArchiveLoadResult,
+  NotepadArchivePort,
+  NotepadArchiveV1,
+} from "dormouse-lib/lib/notepad/types";
 import {
   answerAskCommand,
   createBurrowLinkClient,
@@ -613,6 +618,33 @@ export class TauriAdapter implements PlatformAdapter {
       return null;
     }
   }
+
+  // --- Notepad archive (docs/specs/notepad.md) ---
+  //
+  // Compare-and-swap over the Rust file store (§Notepad archive in
+  // standalone/src-tauri/src/lib.rs): the shared archive service does the
+  // read-modify-write and retries on `'conflict'`. Nothing is parsed or repaired
+  // here — the stored string rides through as `raw`, because validating it is
+  // the shared layer's job and an unreadable archive must reach the user as
+  // unreadable rather than be quietly replaced.
+  //
+  // Failures reject rather than resolving: a closure that cannot archive its
+  // notes has to take the failure path, not silently drop them.
+  readonly notepadArchive: NotepadArchivePort = {
+    load: async (): Promise<NotepadArchiveLoadResult | null> => {
+      // `None` — nothing has ever been archived — arrives as null.
+      const stored = await rawInvoke<[string, string] | null>("load_notepad_archive");
+      if (!stored) return null;
+      const [raw, revision] = stored;
+      return { raw, revision };
+    },
+    save: (archive: NotepadArchiveV1, baseRevision: string | null) =>
+      rawInvoke<"ok" | "conflict">("save_notepad_archive", {
+        state: JSON.stringify(archive),
+        baseRevision,
+      }),
+    resetUnreadable: () => rawInvoke<void>("reset_notepad_archive"),
+  };
 
   /**
    * Delete any pre-upgrade snapshot or orphaned temp write. Those carry

@@ -91,7 +91,9 @@ VS Code's `pty-manager` keeps two buffers plus one counter per PTY. Both buffers
 
 **Seeded titles reject the sentinels.** Saved pane and door titles come back through `setTerminalUserTitle()`, which rejects the reserved `<idle>` prefix (`docs/specs/terminal-state.md` → Supported OSC Inputs), and the seed callers in `terminal-lifecycle.ts` additionally skip `<unnamed>`, the default panel placeholder (rationale).
 
-**Cold restore** (no live PTYs) falls back to saved session state: new PTYs in the saved CWDs under the currently selected Dormouse shell, plus the saved Lath layout. No transcript is replayed ("What is persisted"), and any pane carrying a recovery command auto-runs it. `reconnect.ts` waits 500 ms for the PTY list.
+**Must follow `docs/specs/notepad.md` → "Live resume" for browser-only resumes.**
+
+**Cold restore** (neither live PTYs nor a browser-only resume) falls back to saved session state: new PTYs in the saved CWDs under the currently selected Dormouse shell, plus the saved Lath layout. No transcript is replayed ("What is persisted"), and any pane carrying a recovery command auto-runs it. `reconnect.ts` waits 500 ms for the PTY list.
 
 ## Message protocol
 
@@ -170,7 +172,7 @@ Source of truth: `PersistedSession` in `lib/src/lib/session-types.ts`; `surfaceR
 
 ### What is persisted
 
-Structure only: panes (id, cwd, title, `untouched`, `surfaceType`, TODO/alert blob), doors and their Lath restore tokens, the Lath layout, and the Workspace's `dor` surface refs. **Scrollback is never persisted by any writer**, and neither is the recovery command (above).
+Structure only: panes (id, cwd, title, `untouched`, `surfaceType`, TODO/alert blob), doors and their Lath restore tokens, the Lath layout, and the Workspace's `dor` surface refs. **Scrollback is never persisted by any writer**, and neither is the recovery command (above). **Live notepad notes are never persisted here either** — the notepad archive is a separate per-host store written only by a closure (`docs/specs/notepad.md` → "Live resume").
 
 ### Retiring the transcripts already on disk
 
@@ -194,6 +196,8 @@ something ends it:
 | VS Code window close / application quit | No — window state is the host's contract | Restore structure + auto-resume agents |
 | VS Code editor-tab close (`killOnDispose: true`) | Yes | Fresh for that panel |
 | VS Code extension-host crash | No, but `deactivate()` never ran | Fresh |
+
+Ending something deliberately is also what *keeps* its notes: **a deliberate closure archives the Surface's notepad before teardown** (`docs/specs/notepad.md` → "Closure"), so the one thing a user asked to hold on to survives the boundary that discards everything else.
 
 **Standalone therefore persists no Session state at all**, and the write path itself
 is removed rather than written-then-ignored (rationale). Sessions still survive a

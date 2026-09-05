@@ -4,6 +4,10 @@ import type { AwaitHandle, AwaitOptions } from '../alert-manager';
 import type { AlertSettings } from '../alert-settings';
 import { normalizeExternalUri } from '../external-links';
 import {
+  createMemoryNotepadArchivePort,
+  type MemoryNotepadArchivePort,
+} from '../notepad/memory-archive-port';
+import {
   applyTerminalProtocolEvents,
   collectTerminalSemanticEvents,
   collectTerminalProtocolResponses,
@@ -63,6 +67,18 @@ export class FakePtyAdapter implements PlatformAdapter {
   // nothing (`docs/specs/relay.md`). The preview decorator installs a stub link
   // for the stories that are *about* that section.
   burrow?: BurrowLink;
+
+  /**
+   * The notepad archive as memory — the website demo's real implementation and
+   * what tests and stories archive into. Public and concrete (not the narrower
+   * port type) so a caller can `seed`, `corrupt`, or `clear` it directly.
+   */
+  notepadArchive: MemoryNotepadArchivePort = createMemoryNotepadArchivePort();
+
+  /** Mutable and public for the same reason as the capability flags above: the
+   *  website playground sets it because a browser tab cannot take Cmd/Ctrl+N,
+   *  and the selection-popup stories toggle it per story. */
+  browserReservesNotepadChord?: boolean;
 
   constructor() {
     this.alertManager.onStateChange((id, state) => {

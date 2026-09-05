@@ -4,6 +4,7 @@ import {
   cwdFromManualPath,
   cwdFromProcessPath,
   DEFAULT_IDLE_TITLE,
+  processCwdMayReplace,
   reduceTerminalState,
   type CwdState,
   type TerminalPaneState,
@@ -296,8 +297,7 @@ export function fillTerminalProcessCwd(id: string, path: string | null | undefin
 function updateCwdIfAllowed(id: string, cwd: CwdState): void {
   const current = paneStates.get(id);
   if (!current) return;
-  const currentSource = current.cwd?.source;
-  if (currentSource && currentSource !== 'manual' && currentSource !== 'process') return;
+  if (!processCwdMayReplace(current.cwd?.source)) return;
   paneStates.set(id, { ...current, cwd });
   notifyTerminalPaneStateListeners();
 }

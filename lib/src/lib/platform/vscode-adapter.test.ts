@@ -32,6 +32,8 @@ import {
   TerminalProtocolParser,
 } from '../terminal-protocol';
 import { HOST_MESSAGE_TOKEN_FIELD, HOST_MESSAGE_TOKEN_GLOBAL } from '../vscode-message-token';
+import { NOTEPAD_VOLATILE_GLOBAL } from '../vscode-notepad-global';
+import type { NotepadArchiveV1, VolatileNotepadSnapshot } from '../notepad/types';
 import { VSCodeAdapter } from './vscode-adapter';
 
 /** Stand-in for the per-boot token the extension host injects at webview boot. */
@@ -444,6 +446,130 @@ describe('VSCodeAdapter PTY exit handling', () => {
   });
 });
 
+
+// The archive lives in the extension host's `globalState` — nothing in the
+// webview can reach it — so the port is a request/response bridge
+// (docs/specs/notepad.md). What is covered here is what this transport adds: the
+// compare-and-swap shape on the wire, failures that reject rather than resolve,
+// and the boot mirror being consumable exactly once.
+describe('VSCodeAdapter notepad archive', () => {
+  beforeEach(stubWebviewEnv);
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  const EMPTY: NotepadArchiveV1 = { version: 1, batches: [] };
+
+  /** The last archive request posted, whatever its type. */
+  function lastRequest(): { type: string; requestId: string; [key: string]: unknown } {
+    const posted = postMessage.mock.calls.map((call) => call[0]);
+    const request = [...posted].reverse().find((message) => String(message.type).startsWith('notepad:'));
+    if (!request) throw new Error('no notepad request was posted');
+    return request;
+  }
+
+  function answer(ok: boolean, extra: Record<string, unknown> = {}): void {
+    windowTarget.dispatchEvent(hostMessage({
+      type: 'notepad:result', requestId: lastRequest().requestId, ok, ...extra,
+    }));
+  }
+
+  it('loads the stored archive with the revision that names it', async () => {
+    const adapter = new VSCodeAdapter();
+    const pending = adapter.notepadArchive!.load();
+
+    expect(lastRequest()).toMatchObject({ type: 'notepad:load' });
+    answer(true, { result: { raw: JSON.stringify(EMPTY), revision: 'r3' } });
+
+    expect(await pending).toEqual({ raw: JSON.stringify(EMPTY), revision: 'r3' });
+  });
+
+  it('sends the whole archive and the revision it was built on', async () => {
+    const adapter = new VSCodeAdapter();
+    const pending = adapter.notepadArchive!.save(EMPTY, 'r3');
+
+    // The host stores bytes and compares revisions; it never parses or merges.
+    expect(lastRequest()).toMatchObject({
+      type: 'notepad:save', state: JSON.stringify(EMPTY), baseRevision: 'r3',
+    });
+    answer(true, { result: 'conflict' });
+
+    // A conflict is an outcome, not a failure — the shared service re-reads and retries.
+    expect(await pending).toBe('conflict');
+  });
+
+  it('rejects a failed request rather than resolving it as an empty archive', async () => {
+    // `null` legitimately means "nothing archived yet", so a failure that
+    // resolved like one would let the next save overwrite an archive nobody read.
+    const adapter = new VSCodeAdapter();
+    const pending = adapter.notepadArchive!.load();
+    answer(false, { error: 'globalState is gone' });
+    await expect(pending).rejects.toThrow('globalState is gone');
+  });
+
+  it('rejects rather than hanging when the host never answers', async () => {
+    const adapter = new VSCodeAdapter();
+    vi.useFakeTimers();
+    try {
+      const pending = adapter.notepadArchive!.load();
+      const rejected = expect(pending).rejects.toThrow(/timed out/);
+      await vi.advanceTimersByTimeAsync(10_000);
+      await rejected;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('asks the host to move an unreadable archive aside', async () => {
+    const adapter = new VSCodeAdapter();
+    const pending = adapter.notepadArchive!.resetUnreadable();
+    expect(lastRequest()).toMatchObject({ type: 'notepad:reset' });
+    answer(true, {});
+    await expect(pending).resolves.toBeUndefined();
+  });
+
+  it('mirrors live notes to the extension host without waiting on it', () => {
+    // Fire and forget: the mirror is what lets a teardown archive from a webview
+    // VS Code has already destroyed.
+    const adapter = new VSCodeAdapter();
+    const snapshot: VolatileNotepadSnapshot = {
+      surfaces: [{
+        surfaceId: 'pane-1', surfaceTitle: 'zsh', surfaceKind: 'terminal', cwd: null,
+        notes: [{ id: 'n1', createdAt: 1, content: { kind: 'plain', text: 'hi' } }],
+      }],
+      stagedDeletions: { deleteBatchIds: [], deleteNotes: [] },
+    };
+
+    adapter.notepadArchive!.syncVolatile!(snapshot);
+
+    expect(postMessage).toHaveBeenCalledWith({ type: 'notepad:volatile', snapshot });
+  });
+
+  it('hands the boot mirror over exactly once', () => {
+    const snapshot: VolatileNotepadSnapshot = {
+      surfaces: [{
+        surfaceId: 'pane-1', surfaceTitle: 'zsh', surfaceKind: 'terminal', cwd: null,
+        notes: [{ id: 'n1', createdAt: 1, content: { kind: 'plain', text: 'hi' } }],
+      }],
+      stagedDeletions: { deleteBatchIds: [], deleteNotes: [] },
+    };
+    vi.stubGlobal(NOTEPAD_VOLATILE_GLOBAL, snapshot);
+
+    const adapter = new VSCodeAdapter();
+    expect(adapter.notepadArchive!.loadVolatile!()).toEqual(snapshot);
+    // A second read would be a later restore's, and a restore must never
+    // hydrate live notes.
+    expect(adapter.notepadArchive!.loadVolatile!()).toBeNull();
+  });
+
+  it('gives a cold restore no mirror at all', () => {
+    // The global is absent on every boot but a live resume.
+    const adapter = new VSCodeAdapter();
+    expect(adapter.notepadArchive!.loadVolatile!()).toBeNull();
+  });
+});
 
 // The Burrow lives in the extension host, in whichever VS Code window won
 // the bind (vscode-ext/src/burrow.ts). This is the webview's end of that

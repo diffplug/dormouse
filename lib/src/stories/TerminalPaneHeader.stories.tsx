@@ -12,6 +12,7 @@ import {
 import type { ActivityNotification } from '../lib/alert-manager';
 import { summarizeCommandLine, type SetTerminalUserTitleResult } from '../lib/terminal-registry';
 import { removeMouseSelectionState, setMouseReporting, setOverride } from '../lib/mouse-selection';
+import { addPlainNote, clearAllNotepads } from '../lib/notepad/notepad-store';
 import { requireElement, waitForCondition, waitForPrimedState } from './settle-terminals';
 
 const SESSION_ID = 'tab-story';
@@ -97,6 +98,7 @@ function TabStory({
   width = 360,
   reducedMotion = false,
   mouseCaptured = false,
+  noteCount = 0,
   actions = noopActions,
 }: {
   title?: string;
@@ -107,6 +109,8 @@ function TabStory({
   reducedMotion?: boolean;
   /** Simulate a TUI capturing the mouse, which surfaces the mouse-override icon. */
   mouseCaptured?: boolean;
+  /** Notes on this Surface — the notepad icon fills, and survives the minimal tier. */
+  noteCount?: number;
   actions?: WallActions;
 }) {
   useEffect(() => {
@@ -115,6 +119,11 @@ function TabStory({
     setOverride(SESSION_ID, 'temporary');
     return () => removeMouseSelectionState(SESSION_ID);
   }, [mouseCaptured]);
+
+  useEffect(() => {
+    for (let i = 0; i < noteCount; i++) addPlainNote(SESSION_ID, `note ${i + 1}`);
+    return () => clearAllNotepads();
+  }, [noteCount]);
 
   return (
     <ModeContext.Provider value={mode}>
@@ -340,6 +349,7 @@ const meta: Meta<typeof TabStory> = {
     width: { control: 'number' },
     reducedMotion: { control: 'boolean' },
     mouseCaptured: { control: 'boolean' },
+    noteCount: { control: 'number' },
   },
   args: {
     title: 'build-server',
@@ -349,6 +359,7 @@ const meta: Meta<typeof TabStory> = {
     width: 360,
     reducedMotion: false,
     mouseCaptured: false,
+    noteCount: 0,
   },
 };
 
@@ -612,6 +623,35 @@ export const NarrowWithMouseCaptureControlsVisible: Story = {
     todo: false,
   }),
   play: assertControlsVisible,
+};
+
+// --- Notepad icon across the tiers -----------------------------------------
+//
+// Present at `full` and `compact`; at `minimal` an empty notepad yields its
+// 20px to the title, and one with notes keeps it (`docs/specs/notepad.md`).
+
+export const NotepadEmpty: Story = {
+  parameters: primedState({ status: 'NOTHING_TO_SHOW', todo: false }),
+};
+
+export const NotepadWithNotes: Story = {
+  args: { noteCount: 3 },
+  parameters: primedState({ status: 'NOTHING_TO_SHOW', todo: false }),
+};
+
+export const NotepadCompactWidth: Story = {
+  args: { width: 220, noteCount: 3 },
+  parameters: primedState({ status: 'NOTHING_TO_SHOW', todo: false }),
+};
+
+export const NotepadMinimalWidthEmpty: Story = {
+  args: { width: 150 },
+  parameters: primedState({ status: 'NOTHING_TO_SHOW', todo: false }),
+};
+
+export const NotepadMinimalWidthWithNotes: Story = {
+  args: { width: 150, noteCount: 2 },
+  parameters: primedState({ status: 'NOTHING_TO_SHOW', todo: false }),
 };
 
 export const NarrowLongTitleControlsVisible: Story = {

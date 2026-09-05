@@ -1,5 +1,6 @@
 import { useContext, useRef } from 'react';
 import { TerminalPane } from '../TerminalPane';
+import { NotepadPanel } from '../NotepadPanel';
 import { TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
 import type { PaneProps } from './pane-props';
 import { usePaneChrome } from './use-pane-chrome';
@@ -18,8 +19,11 @@ export function TerminalPanel(props: PaneProps) {
   usePaneChrome(props.id, elRef);
 
   return (
-    <div ref={elRef} className={`h-full w-full overflow-hidden bg-terminal-bg ${TERMINAL_BOTTOM_RADIUS_CLASS}`} onMouseDown={() => actions.onClickPanel(props.id)}>
+    // `relative` is the notepad panel's containing block — it corners itself in
+    // the body, three quarters of it wide and tall.
+    <div ref={elRef} className={`relative h-full w-full overflow-hidden bg-terminal-bg ${TERMINAL_BOTTOM_RADIUS_CLASS}`} onMouseDown={() => actions.onClickPanel(props.id)}>
       <TerminalPane id={props.id} isFocused={isFocused} />
+      <NotepadPanel surfaceId={props.id} />
     </div>
   );
 }

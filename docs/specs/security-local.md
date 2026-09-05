@@ -151,11 +151,18 @@ persisted"): `normalizeSessionV3` strips it on read, and the standalone store is
 switched off today, clearing any legacy snapshot at boot. Snapshots older
 versions left behind do carry transcripts (rationale).
 
+**The notepad archive is the one store holding terminal text on purpose** —
+excerpts the user explicitly captured, their colors, the Surface title and kind,
+and the CWD at closure, appended only by a Surface closing
+(`docs/specs/notepad.md` -> "Archive"). Standalone keeps it as
+`<app_data_dir>/notepad-archive-v1.json`, owner-only; VS Code keeps it in
+`<globalStorageUri>/notepad-archive.json`, mode `0600` on Unix and inheriting VS Code's directory ACL on Windows. Migration and Settings Sync follow `docs/specs/notepad.md` -> "VS Code lifecycle". Its live half never reaches disk.
+
 **VS Code persists pane structure in VS Code's own storage** — `workspaceState`
 under `dormouse.session`, and `vscode.setState()`, a WebviewPanel's only store —
 so the modes there are VS Code's, not ours, and no transcript reaches either
-(`docs/specs/vscode.md` -> "Serialization and restore"). Dormouse writes one file
-of its own there, `recovery.json`, at the umask: one rebuilt agent-resume
+(`docs/specs/vscode.md` -> "Serialization and restore"). Dormouse also writes
+`recovery.json` there, at the umask: one rebuilt agent-resume
 invocation per Surface, no buffer, unlinked as it is read
 (`docs/specs/vscode.md` -> "Capturing agent recovery").
 
@@ -171,7 +178,8 @@ lands at the umask — readable by another local account wherever `<tmpdir>` is
 shared (rationale). No log call carries PTY bytes; the `dor` control socket path
 does. A gap, not an accepted risk.
 
-- **FAIL IF** `write_session_to` in `standalone/src-tauri/src/lib.rs` stops restricting the `sessions/` directory and the snapshot to the owning user on **every** platform `restrict_to_owner` has an arm for — `0700`/`0600` on unix, and on Windows a DACL protected from inheritance carrying exactly one ACE for the current user, asserted by `restrict_to_owner_leaves_one_owner_only_ace`. That test covers the Windows arm alone; the unix modes and both call sites are pinned by nothing. The mode reaches the temp file *before* any bytes are written (rationale).
+- **FAIL IF** `write_file_atomically` in `standalone/src-tauri/src/lib.rs` stops restricting the directory and the file it writes to the owning user on **every** platform `restrict_to_owner` has an arm for — `0700`/`0600` on unix, and on Windows a DACL protected from inheritance carrying exactly one ACE for the current user, asserted by `restrict_to_owner_leaves_one_owner_only_ace` — or if either of its two callers, `write_session_to` (the session snapshot) and `write_notepad_archive_to` (the notepad archive), stops going through it. That test covers the Windows arm alone; the unix modes and all three sites are pinned by nothing. The mode reaches the temp file *before* any bytes are written (rationale).
+- **FAIL IF** the VS Code notepad archive key — `NOTEPAD_ARCHIVE_KEY` in `vscode-ext/src/notepad-archive-store.ts` — is passed to `context.globalState.setKeysForSync`, directly or as part of any list. It holds captured terminal excerpts, their CWDs, and their Surface titles, and Settings Sync would copy them to every machine the account signs into. Nothing in the extension calls that API today, so the rule is kept by that call not existing; a call added for anything else must exclude this key.
 
 Source of truth: `SESSION_STATE_KEY` in `vscode-ext/src/session-state.ts`,
 `ensureToken` in `vscode-ext/src/peer-link.ts`, `default_log_path` in

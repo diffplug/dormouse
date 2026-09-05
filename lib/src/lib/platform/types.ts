@@ -5,6 +5,7 @@ import type { ShellEntry } from '../shell-defaults';
 // Defined in its own dependency-free file so the Node proxy in lib/src/host can
 // share it without pulling this browser-typed module into a Node tsconfig.
 import type { IframeProxyResult } from './iframe-proxy-types';
+import type { NotepadArchivePort } from '../notepad/types';
 
 export interface PtyInfo {
   id: string;
@@ -373,4 +374,21 @@ export interface PlatformAdapter {
   // State persistence
   saveState(state: unknown): void;
   getState(): unknown;
+
+  /**
+   * The Surface notepad's archive store (docs/specs/notepad.md). Present on
+   * every host that has a notepad — standalone (owner-only JSON under app
+   * data), VS Code (`globalState`), the website demo (memory). Absent means no
+   * notepad at all: Pocket omits it and the header icon, popup action, and
+   * Settings entry all stay hidden.
+   */
+  notepadArchive?: NotepadArchivePort;
+
+  /**
+   * Whether the browser hosting this webview reserves the notepad chord
+   * (Cmd/Ctrl+N opens a new window, unpreventable), so Dormouse shows no
+   * shortcut and binds none. Absent reads as `false`; the website's demo
+   * adapter sets it `true`.
+   */
+  browserReservesNotepadChord?: boolean;
 }

@@ -1,4 +1,4 @@
-import { createContext } from 'react';
+import { createContext, useContext, useEffect } from 'react';
 import type { AlertButtonActionResult, SessionStatus, SetTerminalUserTitleResult } from '../../lib/terminal-registry';
 import type { WallMode } from './wall-types';
 import type { RenderMode } from './agent-browser-screen';
@@ -100,4 +100,36 @@ export const RenamingIdContext = createContext<string | null>(null);
 export const ZoomedIdContext = createContext<string | null>(null);
 export const WindowFocusedContext = createContext(true);
 
-export const DialogKeyboardContext = createContext<(active: boolean) => void>(() => {});
+/** Take one keyboard-suppression lease; the returned release drops it (idempotent). */
+export type AcquireDialogKeyboard = () => () => void;
+
+export const DialogKeyboardContext = createContext<AcquireDialogKeyboard>(() => () => {});
+
+/** Reference-count the leases over one Wall's dialog-keyboard flag, so a dialog
+ *  closing over another one leaves the survivor's suppression standing
+ *  (docs/specs/layout.md → "Keyboard shortcuts (command mode)"). */
+export function createDialogKeyboardCoordinator(
+  activeRef: { current: boolean },
+): AcquireDialogKeyboard {
+  let ownerCount = 0;
+  return () => {
+    ownerCount += 1;
+    activeRef.current = true;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      ownerCount = Math.max(0, ownerCount - 1);
+      activeRef.current = ownerCount > 0;
+    };
+  };
+}
+
+/** Hold one independently reference-counted lease while `active`; unmounting
+ *  releases it. `acquireOverride` is for a caller that sits above its own
+ *  `DialogKeyboardContext.Provider` (Wall itself) and so cannot read the context. */
+export function useDialogKeyboardOwner(active: boolean, acquireOverride?: AcquireDialogKeyboard): void {
+  const contextAcquire = useContext(DialogKeyboardContext);
+  const acquire = acquireOverride ?? contextAcquire;
+  useEffect(() => (active ? acquire() : undefined), [acquire, active]);
+}

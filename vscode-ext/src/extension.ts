@@ -14,6 +14,8 @@ import { resolveSelectedShell, setSelectedShellPath, getSelectedShellPath } from
 import type { ExtensionMessage } from './message-types';
 import { initBurrow } from './burrow';
 import { disposePeerLink, initPeerLink } from './peer-link';
+import { archiveVolatileMirror } from './notepad-archive-store';
+import { refreshMirrorCwds, takeAllVolatile } from './notepad-volatile';
 
 type NewTerminalMessage = Extract<ExtensionMessage, { type: 'dormouse:newTerminal' }>;
 
@@ -58,13 +60,17 @@ function setupPanel(
     context,
     (savedSession?.panes ?? []).map((pane) => pane.id),
   );
-  const channel = serveWebview(panel.webview, mediaPath, initialState, getSelectedShell?.(), recoveryCommands);
+  // No notepad mirror: a panel is never a live resume of mirrored notes. Its
+  // router carries `killOnDispose`, so the disposal that ended the last panel
+  // already archived whatever it had (docs/specs/notepad.md).
+  const channel = serveWebview(panel.webview, mediaPath, initialState, getSelectedShell?.(), recoveryCommands, null);
 
   const router = attachRouter(channel, {
     reconnect: !!savedState,
     killOnDispose: true,
     savedSession,
     getSelectedShell,
+    context,
     // Reflect this panel's Workspace union onto the editor-tab title
     // (`<title> 🔔 [TODO]`). Icon stays the Dormouse mascot.
     onUnion: (union) => { panel.title = workspaceTitle(union); },
@@ -258,6 +264,27 @@ export async function deactivate() {
   step('capturing agent recovery commands');
   await captureAgentRecoveryCommands(extensionContext, 1200);
   await poppedOutClosed;
+  // Every webview that is still up mirrors its live notes here, and none of them
+  // will get to run a close coordinator — so this is their last chance to be
+  // archived (docs/specs/notepad.md -> Archive and Lifecycle). Ahead of the
+  // session flush, which needs its own share of a budget we do not control;
+  // bounded and best-effort for the same reason, since notes lost to a timeout
+  // are a smaller failure than an unkilled pty host.
+  // The PTYs are still alive here, so a Surface whose shell reports no CWD can
+  // still be asked where it is. Its own, smaller bound, so the refresh and the
+  // write both fit inside the 800 ms below.
+  step('archiving notepad');
+  const notepadContext = extensionContext;
+  let notepadDeadline: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    refreshMirrorCwds(takeAllVolatile(), ptyManager.getCwd, 300)
+      .then((mirror) => archiveVolatileMirror(notepadContext, mirror))
+      .catch((err) => {
+        log.error('[deactivate] could not archive notepad notes:', String(err));
+      }),
+    new Promise((resolve) => { notepadDeadline = setTimeout(resolve, 800); }),
+  ]);
+  clearTimeout(notepadDeadline);
   // Save session state while PTYs are still alive — CWD queries need live
   // processes. Must happen before gracefulKillAll.
   step('flushing sessions from webview');

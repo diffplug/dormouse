@@ -10,7 +10,7 @@ import { stepFocus } from '../focus-step';
 import { POPOVER_FOCUSABLE_SELECTOR } from '../use-popover-focus-trap';
 import { listenerUrlsByPort, type PortUrlEntry } from './port-url';
 import { useDismissOverlay } from './use-dismiss-overlay';
-import { WallActionsContext } from './wall-context';
+import { useDialogKeyboardOwner, WallActionsContext } from './wall-context';
 
 type ScanState =
   | { status: 'scanning' }
@@ -44,14 +44,12 @@ export function PaneHeaderContextMenu({
   id,
   anchor,
   onClose,
-  onKeyboardActiveChange,
   candidates,
   currentTitle,
 }: {
   id: string;
   anchor: { x: number; y: number };
   onClose: () => void;
-  onKeyboardActiveChange: (active: boolean) => void;
   candidates: TerminalTitle[];
   currentTitle: string;
 }) {
@@ -86,12 +84,9 @@ export function PaneHeaderContextMenu({
 
   useDismissOverlay(onClose, ref);
 
-  // Report dialog-keyboard-active so command-mode shortcuts stay dormant while
-  // the menu is open (matches TodoAlertDialog).
-  useEffect(() => {
-    onKeyboardActiveChange(true);
-    return () => onKeyboardActiveChange(false);
-  }, [onKeyboardActiveChange]);
+  // Own the keyboard so command-mode shortcuts stay dormant while the menu is
+  // open (matches TodoAlertDialog).
+  useDialogKeyboardOwner(true);
 
   // Take DOM focus on the menu container (tabIndex=-1) so our keyboard handlers
   // fire via `el.contains(document.activeElement)`; restore the prior focus on

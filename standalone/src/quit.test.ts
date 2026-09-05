@@ -13,6 +13,9 @@ const mocks = vi.hoisted(() => ({
   countRunningSessions: vi.fn(() => 0),
   hasPendingUpdate: vi.fn(() => false),
   installPendingUpdate: vi.fn(async () => {}),
+  archiveSurfaceNotes: vi.fn(async (_ids: readonly string[], _opts?: { signal?: AbortSignal }) => {}),
+  notepadSurfaceIds: vi.fn(() => [] as string[]),
+  removeSurface: vi.fn(),
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
@@ -20,12 +23,34 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: mocks.listen }));
 vi.mock("dormouse-lib/lib/terminal-registry", () => ({
   countRunningSessions: mocks.countRunningSessions,
 }));
+// The archive gate's two collaborators. Mocked for the same reason as the
+// registry: the real modules pull the whole lib platform in behind them, and
+// what this file tests is the ordering around them.
+vi.mock("dormouse-lib/lib/notepad/close-coordinator", () => ({
+  archiveSurfaceNotes: mocks.archiveSurfaceNotes,
+}));
+vi.mock("dormouse-lib/lib/notepad/notepad-store", () => ({
+  notepadSurfaceIds: mocks.notepadSurfaceIds,
+  removeSurface: mocks.removeSurface,
+}));
 vi.mock("./updater", () => ({
   hasPendingUpdate: mocks.hasPendingUpdate,
   installPendingUpdate: mocks.installPendingUpdate,
 }));
 
 import { initQuitFlow, setQuitConfirmGate, _resetForTesting } from "./quit";
+// The quit-confirm store is the real one: the archive-failed phase is the
+// observable half of the gate's failure path.
+import {
+  cancelQuit as dismissQuitDialog,
+  confirmQuit,
+  getQuitArchiveError,
+  getQuitConfirmPhase,
+  _resetQuitConfirmForTesting,
+} from "./quit-confirm-store";
+
+/** One Surface holding notes, as `notepadSurfaceIds` reports it. */
+const oneNotedSurface = () => ["pane-a"];
 
 // The captured `dormouse://quit-requested` listener; call it to simulate Rust
 // emitting a quit request.
@@ -61,6 +86,7 @@ describe("quit orchestrator", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     _resetForTesting();
+    _resetQuitConfirmForTesting();
     quitRequested = null;
     mocks.listen.mockImplementation((event: string, cb: () => void) => {
       if (event === "dormouse://quit-requested") quitRequested = cb;
@@ -70,6 +96,8 @@ describe("quit orchestrator", () => {
     mocks.hasPendingUpdate.mockReturnValue(false);
     mocks.installPendingUpdate.mockResolvedValue(undefined);
     mocks.invoke.mockResolvedValue(undefined);
+    mocks.archiveSurfaceNotes.mockResolvedValue(undefined);
+    mocks.notepadSurfaceIds.mockReturnValue([]);
   });
 
   afterEach(() => setQuitConfirmGate(null));
@@ -218,6 +246,161 @@ describe("quit orchestrator", () => {
     expect(mocks.invoke).toHaveBeenCalledWith("quit_cancel");
     expect(adapter.requestSessionFlush).not.toHaveBeenCalled();
     expect(mocks.invoke).not.toHaveBeenCalledWith("quit_proceed");
+  });
+
+  // --- The notepad archive gate (docs/specs/notepad.md → "Standalone quit") ---
+
+  it("archives every Surface holding notes before the first quit_progress", async () => {
+    mocks.notepadSurfaceIds.mockReturnValue(oneNotedSurface());
+    const order: string[] = [];
+    mocks.invoke.mockImplementation(async (cmd: string) => {
+      order.push(cmd);
+      return undefined;
+    });
+    mocks.archiveSurfaceNotes.mockImplementation(async () => {
+      order.push("archive");
+    });
+
+    await triggerQuit(fakeAdapter(order));
+
+    // The gate is a step before teardown, not inside it: nothing has told Rust
+    // teardown began when the archive runs.
+    expect(order.slice(0, 3)).toEqual(["quit_ack", "archive", "quit_progress"]);
+    expect(mocks.archiveSurfaceNotes).toHaveBeenCalledWith(["pane-a"], expect.anything());
+    expect(mocks.invoke).toHaveBeenCalledWith("quit_proceed");
+  });
+
+  it("skips the archive entirely when no Surface holds notes", async () => {
+    await triggerQuit(fakeAdapter());
+
+    expect(mocks.archiveSurfaceNotes).not.toHaveBeenCalled();
+    expect(mocks.invoke).toHaveBeenCalledWith("quit_proceed");
+  });
+
+  it("runs the gate after the running-work confirmation, not before it", async () => {
+    mocks.countRunningSessions.mockReturnValue(2);
+    mocks.notepadSurfaceIds.mockReturnValue(oneNotedSurface());
+    const gate = vi.fn(); // never decides
+    setQuitConfirmGate(gate);
+
+    await triggerQuit(fakeAdapter());
+
+    expect(gate).toHaveBeenCalledTimes(1);
+    expect(mocks.archiveSurfaceNotes).not.toHaveBeenCalled();
+  });
+
+  it("leaves the quit pending in Rust and opens the archive-failed dialog when the write fails", async () => {
+    // `quit_cancel` retires Rust's watchdog. Calling it here would leave a later
+    // "Quit anyway" tearing down unwatched, so the pending quit stays in its
+    // unbounded phase-2 wait — which is what waits on a human.
+    mocks.notepadSurfaceIds.mockReturnValue(oneNotedSurface());
+    mocks.archiveSurfaceNotes.mockRejectedValue(new Error("disk is full"));
+    const adapter = fakeAdapter();
+
+    await triggerQuit(adapter);
+
+    expect(mocks.invoke).not.toHaveBeenCalledWith("quit_cancel");
+    expect(mocks.invoke).not.toHaveBeenCalledWith("quit_progress");
+    expect(mocks.invoke).not.toHaveBeenCalledWith("quit_proceed");
+    expect(adapter.requestSessionFlush).not.toHaveBeenCalled();
+    expect(getQuitConfirmPhase()).toBe("archive-failed");
+    expect(getQuitArchiveError()).toBe("disk is full");
+  });
+
+  it("deduplicates a repeat quit trigger while the archive-failed dialog is up", async () => {
+    mocks.notepadSurfaceIds.mockReturnValue(oneNotedSurface());
+    mocks.archiveSurfaceNotes.mockRejectedValue(new Error("disk is full"));
+    await triggerQuit(fakeAdapter());
+    mocks.archiveSurfaceNotes.mockClear();
+
+    quitRequested!();
+    await settle();
+
+    // Acked (Rust's watchdog stands down) but the flow does not restart.
+    expect(mocks.archiveSurfaceNotes).not.toHaveBeenCalled();
+    expect(getQuitConfirmPhase()).toBe("archive-failed");
+  });
+
+  it("Quit anyway discards the notes and runs the teardown", async () => {
+    mocks.notepadSurfaceIds.mockReturnValue(oneNotedSurface());
+    mocks.archiveSurfaceNotes.mockRejectedValue(new Error("disk is full"));
+    const adapter = fakeAdapter();
+    await triggerQuit(adapter);
+
+    confirmQuit();
+    await settle();
+
+    expect(mocks.removeSurface).toHaveBeenCalledWith("pane-a");
+    expect(adapter.requestSessionFlush).toHaveBeenCalled();
+    // Never cancelled, so the teardown runs under the watchdog that was already
+    // armed for this quit.
+    expect(mocks.invoke).not.toHaveBeenCalledWith("quit_cancel");
+    expect(mocks.invoke).toHaveBeenCalledWith("quit_proceed");
+  });
+
+  it("Cancel leaves the app running and lets a later quit start fresh", async () => {
+    mocks.notepadSurfaceIds.mockReturnValue(oneNotedSurface());
+    mocks.archiveSurfaceNotes.mockRejectedValue(new Error("disk is full"));
+    const adapter = fakeAdapter();
+    await triggerQuit(adapter);
+
+    dismissQuitDialog();
+    // Cancel is the one branch that drops the pending quit in Rust.
+    expect(mocks.invoke).toHaveBeenCalledWith("quit_cancel");
+    expect(getQuitConfirmPhase()).toBeNull();
+    expect(mocks.invoke).not.toHaveBeenCalledWith("quit_proceed");
+
+    // The flow returned to idle, so the next trigger runs the gate again.
+    mocks.archiveSurfaceNotes.mockResolvedValue(undefined);
+    quitRequested!();
+    await settle();
+    expect(adapter.requestSessionFlush).toHaveBeenCalled();
+    expect(mocks.invoke).toHaveBeenCalledWith("quit_proceed");
+  });
+
+  it("treats an archive that outruns its 3s bound as a failure", async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.notepadSurfaceIds.mockReturnValue(oneNotedSurface());
+      mocks.archiveSurfaceNotes.mockReturnValue(new Promise<void>(() => {})); // never settles
+      const adapter = fakeAdapter();
+      initQuitFlow(adapter);
+      quitRequested!();
+
+      await vi.advanceTimersByTimeAsync(3000);
+
+      expect(getQuitConfirmPhase()).toBe("archive-failed");
+      expect(getQuitArchiveError()).toContain("3s");
+      expect(adapter.requestSessionFlush).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("aborts the archive it stopped waiting for, so a late success cannot empty the notepads", async () => {
+    // `withDeadline` only stops the waiting. Without the signal the archive
+    // keeps running, succeeds minutes later, and calls `removeSurface` on every
+    // Surface — in front of a user who chose Cancel.
+    vi.useFakeTimers();
+    try {
+      mocks.notepadSurfaceIds.mockReturnValue(oneNotedSurface());
+      let signal: AbortSignal | undefined;
+      mocks.archiveSurfaceNotes.mockImplementation((_ids, opts) => {
+        signal = opts?.signal;
+        return new Promise<void>(() => {}); // never settles
+      });
+      initQuitFlow(fakeAdapter());
+      quitRequested!();
+      await Promise.resolve();
+      expect(signal?.aborted).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(3000);
+
+      expect(signal?.aborted).toBe(true);
+      expect(getQuitConfirmPhase()).toBe("archive-failed");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("falls through to teardown when no gate is installed even with running sessions", async () => {

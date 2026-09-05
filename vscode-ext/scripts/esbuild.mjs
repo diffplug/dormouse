@@ -13,6 +13,8 @@
 // `scripts/csp-defaults.mjs` is the one definition of the default for both. See
 // docs/specs/relay.md → "Where a Burrow may reach a Relay".
 
+import { fileURLToPath } from 'node:url';
+
 import * as esbuild from 'esbuild';
 
 import {
@@ -34,6 +36,14 @@ const common = {
   // and would have to be shipped per platform — so they stay as runtime
   // `require`s that `ws` already catches and falls back from.
   external: ['vscode', 'node-pty', 'bufferutil', 'utf-8-validate'],
+  alias: {
+    // Shared `lib/` modules the extension host bundles reach the `dor` CLI's
+    // types through the `dor/*` tsconfig path. esbuild picks the tsconfig
+    // nearest each *input file*, so `vscode-ext/tsconfig.json`'s mapping does
+    // not follow an import out into `lib/`, and `dor` has no package exports to
+    // fall back on. Same alias `lib/vite.config.ts` and standalone carry.
+    dor: fileURLToPath(new URL('../../dor/src', import.meta.url)),
+  },
 };
 
 const builds = [

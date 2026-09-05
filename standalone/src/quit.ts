@@ -1,9 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { countRunningSessions } from "dormouse-lib/lib/terminal-registry";
+import { archiveSurfaceNotes } from "dormouse-lib/lib/notepad/close-coordinator";
+import { notepadSurfaceIds, removeSurface } from "dormouse-lib/lib/notepad/notepad-store";
 import type { TauriAdapter } from "./tauri-adapter";
+import { openQuitArchiveFailure } from "./quit-confirm-store";
 import { hasPendingUpdate, installPendingUpdate } from "./updater";
-import { withTimeout } from "./with-timeout";
+import { withDeadline, withTimeout } from "./with-timeout";
 
 /**
  * Quit orchestrator. Rust intercepts every quit trigger and emits
@@ -13,8 +16,9 @@ import { withTimeout } from "./with-timeout";
  */
 
 // One quit flow at a time: repeated quit-requested events are ignored while a
-// confirmation decision is outstanding or a teardown is running.
-let quitPhase: "idle" | "confirming" | "tearing-down" = "idle";
+// confirmation decision is outstanding, the archive gate is asking about notes
+// it could not store, or a teardown is running.
+let quitPhase: "idle" | "confirming" | "archive-failed" | "tearing-down" = "idle";
 // The adapter to tear down, captured at init.
 let quitAdapter: TauriAdapter | null = null;
 
@@ -50,12 +54,74 @@ function handleQuitRequested(): void {
   if (countRunningSessions() > 0 && quitConfirmGate) {
     quitPhase = "confirming";
     quitConfirmGate({
-      confirm: () => void runQuitTeardown(),
+      confirm: () => void archiveThenTeardown(),
       cancel: cancelQuit,
     });
     return;
   }
-  void runQuitTeardown();
+  void archiveThenTeardown();
+}
+
+// The archive write is a host round trip; a wedged one must not hold the quit
+// open, so it gets its own bound ahead of the teardown's.
+const ARCHIVE_GATE_MS = 3000;
+
+/**
+ * The notepad's quit gate (docs/specs/notepad.md → "Standalone quit"): every
+ * Surface still holding notes is archived in one mutation, after the running-work
+ * decision and before teardown begins, so a controlled quit never drops notes.
+ * Rejects with a user-presentable message when the write fails or outruns its
+ * bound — the caller turns that into Cancel / Quit anyway.
+ */
+export async function archiveNotesBeforeQuit(): Promise<void> {
+  const ids = notepadSurfaceIds();
+  if (ids.length === 0) return;
+  // The deadline only stops us *waiting*; the archive itself keeps running and
+  // may still succeed. The signal is what stops it emptying every notepad
+  // afterwards, behind a user who has been told their notes were not stored and
+  // has chosen Cancel.
+  const gaveUp = new AbortController();
+  try {
+    await withDeadline(
+      archiveSurfaceNotes(ids, { signal: gaveUp.signal }),
+      ARCHIVE_GATE_MS,
+      `The notepad archive did not finish within ${ARCHIVE_GATE_MS / 1000}s.`,
+    );
+  } catch (err) {
+    gaveUp.abort();
+    throw err;
+  }
+}
+
+// The decision is made; archive the notes, then tear down. A refused archive is
+// the one thing that stops a confirmed quit, and only until the user answers.
+async function archiveThenTeardown(): Promise<void> {
+  // Committed from here: the gate is an await, so without this a second trigger
+  // arriving mid-archive would start a parallel flow.
+  quitPhase = "tearing-down";
+  try {
+    await archiveNotesBeforeQuit();
+  } catch (err) {
+    // The quit stays pending in Rust. Its phase-2 wait is unbounded precisely
+    // because it waits on a human (docs/specs/standalone.md → "Quit flow"), and
+    // cancelling here would retire the watchdog that a later Quit anyway still
+    // needs. Hold the flow in `archive-failed` so a repeat trigger is deduped
+    // exactly like a pending confirmation.
+    quitPhase = "archive-failed";
+    openQuitArchiveFailure(err instanceof Error ? err.message : String(err), {
+      confirm: () => {
+        // Quit anyway: the user accepts losing these notes, so forget them and
+        // take the teardown that no longer has anything to archive — watchdog
+        // still armed, because nothing cancelled the pending quit.
+        for (const id of notepadSurfaceIds()) removeSurface(id);
+        void runQuitTeardown();
+      },
+      // Cancel is the one branch that drops the pending quit in Rust.
+      cancel: cancelQuit,
+    });
+    return;
+  }
+  await runQuitTeardown();
 }
 
 // Ordering and rationale: docs/specs/standalone.md §Quit flow (Teardown

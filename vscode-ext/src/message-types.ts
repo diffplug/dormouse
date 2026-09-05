@@ -9,6 +9,7 @@ import type { DorControlCancelPayload, DorControlRequestPayload, DorControlRespo
 import type { AgentBrowserStreamStatusResult, AlertStateDetail, IframeProxyResult, OpenPort } from '../../lib/src/lib/platform/types';
 import type { VSCodeWorkbenchCommand } from '../../lib/src/lib/vscode-keybindings';
 import type { BurrowCommand, BurrowResult } from '../../lib/src/host/remote/service-protocol';
+import type { VolatileNotepadSnapshot } from '../../lib/src/lib/notepad/types';
 
 // Messages from webview → extension host
 export type WebviewMessage =
@@ -41,6 +42,15 @@ export type WebviewMessage =
   | { type: 'peer:notify' }
   // One command for the Burrow service (`lib/src/host/remote/service-protocol.ts`).
   | { type: 'burrow:command'; payload: BurrowCommand }
+  // The notepad archive lives in shared storage, which only the extension host can
+  // reach, so the webview drives it as compare-and-swap: `state` is the whole
+  // serialized archive and `baseRevision` the token `notepad:load` handed back
+  // (docs/specs/notepad.md). `notepad:volatile` is the live mirror — fire and
+  // forget, since nothing waits on it and the next snapshot supersedes it.
+  | { type: 'notepad:load'; requestId: string }
+  | { type: 'notepad:save'; requestId: string; state: string; baseRevision: string | null }
+  | { type: 'notepad:reset'; requestId: string }
+  | { type: 'notepad:volatile'; snapshot: VolatileNotepadSnapshot }
   | { type: 'dormouse:init' }
   | ({ type: 'dormouse:themeColors' } & TerminalColors)
   | { type: 'dormouse:saveState'; state: unknown }
@@ -99,6 +109,10 @@ export type ExtensionMessage =
   // one that asked finds a pending command to settle.
   | { type: 'burrow:result'; payload: BurrowResult }
   | { type: 'burrow:event'; payload: unknown }
+  // One reply shape for all three archive requests: `result` carries whatever
+  // that request returns, and a failure crosses as `ok: false` rather than
+  // silence, because the webview's port turns it into the closure error path.
+  | { type: 'notepad:result'; requestId: string; ok: boolean; result?: unknown; error?: string }
   | {
       type: 'dormouse:newTerminal';
       shell?: string;

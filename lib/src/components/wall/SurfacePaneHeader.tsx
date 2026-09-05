@@ -12,6 +12,7 @@ import {
 } from '@phosphor-icons/react';
 import { HeaderActionButton } from '../HeaderActionButton';
 import { HEADER_PALETTE_TRANSITION_CLASS, paneZoomButtonClass, TERMINAL_TOP_RADIUS_CLASS } from '../design';
+import { NotepadHeaderButton } from './NotepadHeaderButton';
 import {
   useAgentBrowserChromeSnapshot,
   useAgentBrowserScreenController,
@@ -24,12 +25,12 @@ import type { PaneProps } from './pane-props';
 import { loopbackPort, normalizeNavUrl, pathDisplay } from './browser-url';
 import { triggerDevServerRescan, useDevServerMatch } from './agent-browser-ports';
 import {
-  DialogKeyboardContext,
   ModeContext,
   SelectedIdContext,
   WallActionsContext,
   WindowFocusedContext,
   ZoomedIdContext,
+  useDialogKeyboardOwner,
 } from './wall-context';
 
 export function SurfacePaneHeader({ id, title }: PaneProps) {
@@ -66,13 +67,8 @@ export function SurfacePaneHeader({ id, title }: PaneProps) {
   // navigate elsewhere. While it's open we flag dialog-keyboard so the Wall's
   // keyboard handler stands down (the panel's own key-forwarder skips editable
   // targets); the editor closes itself when the surface stops being a browser.
-  const setDialogKeyboardActive = useContext(DialogKeyboardContext);
   const [editingUrl, setEditingUrl] = useState(false);
-  useEffect(() => {
-    if (!editingUrl) return;
-    setDialogKeyboardActive(true);
-    return () => setDialogKeyboardActive(false);
-  }, [editingUrl, setDialogKeyboardActive]);
+  useDialogKeyboardOwner(editingUrl);
   useEffect(() => {
     if (!screen && editingUrl) setEditingUrl(false);
   }, [screen, editingUrl]);
@@ -191,6 +187,7 @@ export function SurfacePaneHeader({ id, title }: PaneProps) {
         <span className="min-w-0 flex-1 truncate font-medium">{title ?? id}</span>
       )}
 
+      <NotepadHeaderButton surfaceId={id} />
       <div className="ml-1 hidden shrink-0 items-center gap-0.5 min-[420px]:flex">
         <HeaderActionButton
           className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"

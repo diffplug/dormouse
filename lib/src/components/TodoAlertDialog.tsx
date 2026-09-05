@@ -4,6 +4,7 @@ import { XIcon } from '@phosphor-icons/react';
 import { OnOffSwitch, Shortcut } from './design';
 import { WatchedCommandList } from './WatchedCommandList';
 import { usePopoverFocusTrap } from './use-popover-focus-trap';
+import { useDialogKeyboardOwner } from './wall/wall-context';
 import { clampOverlayPosition, pointInConvexPolygon } from '../lib/ui-geometry';
 import {
   clearSessionTodo,
@@ -26,12 +27,10 @@ export function TodoAlertDialog({
   triggerRect,
   sessionId,
   onClose,
-  onKeyboardActiveChange,
 }: {
   triggerRect: DOMRect;
   sessionId: string;
   onClose: () => void;
-  onKeyboardActiveChange: (active: boolean) => void;
 }) {
   const activityStates = useSyncExternalStore(subscribeToActivity, getActivitySnapshot);
   const activity = activityStates.get(sessionId) ?? DEFAULT_ACTIVITY_STATE;
@@ -69,11 +68,13 @@ export function TodoAlertDialog({
     dialogRef.current?.focus();
   }, []);
 
+  // Own the keyboard while the dialog is up, so command-mode shortcuts stay dormant.
+  useDialogKeyboardOwner(true);
+
   // Keyboard shortcuts within dialog
   useEffect(() => {
     const el = dialogRef.current;
     if (!el) return;
-    onKeyboardActiveChange(true);
     const handler = (e: KeyboardEvent) => {
       if (!el.contains(document.activeElement)) return;
       if (e.key === 'a') {
@@ -88,11 +89,8 @@ export function TodoAlertDialog({
       }
     };
     window.addEventListener('keydown', handler, true);
-    return () => {
-      onKeyboardActiveChange(false);
-      window.removeEventListener('keydown', handler, true);
-    };
-  }, [sessionId, onKeyboardActiveChange]);
+    return () => window.removeEventListener('keydown', handler, true);
+  }, [sessionId]);
 
   // Hot area: close when mouse leaves (dialog ∪ funnel from trigger button to dialog top).
   // Only arms after the cursor has entered the hot area, so a keyboard-triggered

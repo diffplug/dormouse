@@ -17,9 +17,14 @@ import { markAgentBrowserSessionClosed } from './wall/agent-browser-sessions';
 import { isAllowedAgentBrowserBinary } from '../lib/agent-browser-binary';
 import { disposeAgentBrowserSurfaceController } from './wall/agent-browser-surface-controller';
 import { KILL_CONFIRM_MS, KILL_SHAKE_MS, KillConfirmOverlay, randomKillChar, type ConfirmKill } from './KillConfirm';
+import { NotepadArchiveFailureModal, type NotepadArchiveFailure } from './NotepadArchiveFailure';
+import { messageOf } from '../lib/notepad/archive-service';
+import { archiveSurfaceNotes } from '../lib/notepad/close-coordinator';
+import { removeSurface, setNotepadSurfaceMetaResolver, transferNotepad } from '../lib/notepad/notepad-store';
 import {
   clearSessionAttention,
   clearLocalSurfaceActivity,
+  deriveSessionLabel,
   disposeSession,
   dismissOrToggleAlert,
   focusSession,
@@ -91,6 +96,8 @@ import {
   SelectedIdContext,
   WindowFocusedContext,
   ZoomedIdContext,
+  createDialogKeyboardCoordinator,
+  useDialogKeyboardOwner,
   type PaneWriteActions,
   type WallActions,
 } from './wall/wall-context';
@@ -311,10 +318,10 @@ export function Wall({
     };
   }, []);
 
+  // One reference-counted lease per open dialog: overlapping dialogs each hold
+  // their own, so the one closing cannot release the other's suppression.
   const dialogKeyboardActiveRef = useRef(false);
-  const setDialogKeyboardActive = useCallback((active: boolean) => {
-    dialogKeyboardActiveRef.current = active;
-  }, []);
+  const [acquireDialogKeyboard] = useState(() => createDialogKeyboardCoordinator(dialogKeyboardActiveRef));
 
   // Consumed once by the Lath seed effect to restore existing sessions
   const initialPaneIdsRef = useRef(initialPaneIds);
@@ -354,6 +361,11 @@ export function Wall({
 
   // UI state
   const [confirmKill, setConfirmKill] = useState<ConfirmKill | null>(null);
+  // Closures the archive refused, oldest first: each Surface is still here,
+  // still holding its notes, until the user answers for it
+  // (docs/specs/notepad.md → "Closure"). A queue rather than one slot — a second
+  // refusal while the first prompt is up must not orphan the first Surface.
+  const [archiveFailures, setArchiveFailures] = useState<NotepadArchiveFailure[]>([]);
   const [renamingPaneId, setRenamingPaneId] = useState<string | null>(null);
   // Runtime Doors carry id + token only; the restored rows' metadata goes into the
   // store via the seed effect below.
@@ -515,6 +527,13 @@ export function Wall({
     }, 1500);
   }, []);
 
+  /**
+   * Tear a Surface down with no archive step. Reserved for the two cases that
+   * cannot hold user notes: `dor ensure`'s throwaway split, torn down when its
+   * shell never reports integration, and the rollback of a closure the user
+   * chose to finish anyway. Every closure a user can see goes through
+   * `closeSurface` instead (docs/specs/notepad.md → "Closure").
+   */
   const killPaneImmediately = useCallback((id: string) => {
     // A second kill for a pane already mid-fade is a no-op (idempotent) — it must
     // not re-fire the event, re-dispose, or schedule a second removal.
@@ -585,6 +604,44 @@ export function Wall({
     fireEvent({ type: 'kill', id });
   }, [fireEvent, forgetSurfaceRef, selectPane, lath, nav]);
 
+  /**
+   * A permanent, user-visible Surface closure: archive its notes, then tear it
+   * down (docs/specs/notepad.md → "Closure"). Resolves `null` when the Surface
+   * is gone, or with this attempt's own error message when the archive refused
+   * — the Surface and its notes left exactly as they were, and the Keep open /
+   * Close anyway prompt raised. Without that escape an unwritable archive would
+   * make every Surface unclosable.
+   *
+   * `prompt: false` returns the error and raises nothing: `dor kill` is a
+   * command answering a caller, not a person looking at the pane.
+   */
+  const closeSurface = useCallback(async (id: string, opts?: { prompt?: boolean }): Promise<string | null> => {
+    try {
+      await archiveSurfaceNotes([id]);
+    } catch (error) {
+      const message = messageOf(error);
+      if (opts?.prompt !== false) {
+        setArchiveFailures((queue) => (
+          // A Surface already waiting for an answer gets its message updated,
+          // never a second prompt behind the first.
+          queue.some((failure) => failure.id === id)
+            ? queue.map((failure) => (failure.id === id ? { id, message } : failure))
+            : [...queue, { id, message }]
+        ));
+      }
+      return message;
+    }
+    killPaneImmediately(id);
+    return null;
+  }, [killPaneImmediately]);
+  const closeSurfaceRef = useRef(closeSurface);
+  closeSurfaceRef.current = closeSurface;
+
+  /** The head of the refused-closure queue is answered; show the next. */
+  const shiftArchiveFailure = useCallback(() => {
+    setArchiveFailures((queue) => queue.slice(1));
+  }, []);
+
   const acceptKill = useCallback(() => {
     const ck = confirmKillRef.current;
     if (!ck || ck.exit) return;
@@ -595,9 +652,9 @@ export function Wall({
     // `isDying` guard in killPaneImmediately is the second line of defense.)
     confirmKillRef.current = staged;
     setConfirmKill(staged);
-    killPaneImmediately(ck.id);
+    void closeSurface(ck.id);
     confirmTimerRef.current = setTimeout(() => setConfirmKill(null), KILL_CONFIRM_MS);
-  }, [killPaneImmediately]);
+  }, [closeSurface]);
 
   /** Select a door in the baseboard */
   const selectDoor = useCallback((id: string) => {
@@ -682,6 +739,37 @@ export function Wall({
     const id = selectedIdRef.current;
     if (id) focusSession(id, false);
   }, [releaseZoomExcept]);
+
+  // The notepad store knows note text and nothing else, so the Wall tells it who
+  // each Surface is: the label the Door and the pane header already show, the
+  // Surface kind, and the Session's live CWD. An archive batch and the volatile
+  // mirror both read through this, so they describe a Surface identically
+  // (docs/specs/notepad.md → "Closure").
+  useEffect(() => {
+    setNotepadSurfaceMetaResolver((surfaceId) => {
+      const meta = lath.getMeta(surfaceId);
+      if (!meta) return null;
+      const kind = surfaceKindFromParams(meta.params);
+      const title = persistedPanelTitle(meta.title);
+      return {
+        surfaceTitle: hasTerminal(kind) ? deriveSessionLabel(surfaceId, title) : title,
+        surfaceKind: kind,
+        // The whole canonical CwdState, not a formatted label: the Archive view
+        // renders remote hosts and path kinds through the same utilities a live
+        // header does.
+        cwd: getTerminalPaneState(surfaceId).cwd,
+      };
+    });
+    return () => setNotepadSurfaceMetaResolver(null);
+  }, [lath]);
+
+  // A refused closure owns the keyboard while it is up, like the other modal
+  // hosts: a command-mode shortcut behind it must not kill a different pane.
+  // Keyed on "is a prompt up", not on the queue: moving to the next failure must
+  // not drop and re-raise the flag under another dialog host.
+  // Wall renders above its own Provider, so it hands the coordinator in directly.
+  const anyArchiveFailure = archiveFailures.length > 0;
+  useDialogKeyboardOwner(anyArchiveFailure, acquireDialogKeyboard);
 
   useEffect(() => {
     // An iframe surface taking focus blurs this window without backgrounding the
@@ -819,13 +907,16 @@ export function Wall({
         if (!nav.hasPane(item.id)) return;
         focusSession(item.id, false);
         if (afterRestore === 'kill-immediately') {
-          killPaneImmediately(item.id);
+          void closeSurfaceRef.current(item.id);
         } else if (afterRestore === 'confirm-kill') {
           setConfirmKill({ id: item.id, char: randomKillChar() });
         } else if (typeof afterRestore === 'object' && afterRestore.type === 'replace-terminal') {
           // Atomic identity swap in place — no transient add/remove.
           lath.store.replaceLeaf(item.id, afterRestore.newId, terminalLeafMeta());
           disposeSession(item.id);
+          // An in-place shell replacement is not a closure: the notes follow the
+          // new id rather than being archived (docs/specs/notepad.md → "Closure").
+          transferNotepad(item.id, afterRestore.newId);
           forgetSurfaceRef(item.id);
           selectPane(afterRestore.newId);
           if (afterRestore.announce) {
@@ -834,7 +925,7 @@ export function Wall({
         }
       });
     }
-  }, [selectPane, removeDoorAndSelect, enterTerminalMode, killPaneImmediately, forgetSurfaceRef, showShellSpawnNotice, lath, nav]);
+  }, [selectPane, removeDoorAndSelect, enterTerminalMode, forgetSurfaceRef, showShellSpawnNotice, lath, nav]);
   const handleReattachRef = useRef(handleReattach);
   handleReattachRef.current = handleReattach;
 
@@ -1078,6 +1169,9 @@ export function Wall({
       const ref = transferSurfaceRef(reference.id, newId);
       lath.store.replaceLeaf(reference.id, newId, browserMeta);
       disposeSession(reference.id);
+      // A replacement in place is not a closure — the notepad rides along to the
+      // new id instead of being archived (docs/specs/notepad.md → "Closure").
+      transferNotepad(reference.id, newId);
       // Replacing the pane the user is selected on forces selection onto the
       // replacement; replacing any other pane leaves the user's selection —
       // including a door selection — untouched.
@@ -1128,6 +1222,9 @@ export function Wall({
     disposeAgentBrowserSurfaceController(oldId);
     const newId = generatePaneId();
     transferSurfaceRef(oldId, newId);
+    // A renderer swap is not a closure — the notepad follows the new id
+    // (docs/specs/notepad.md → "Closure").
+    transferNotepad(oldId, newId);
     lath.store.replaceLeaf(oldId, newId, browserLeafMeta(next.title, next.params));
     clearLocalSurfaceActivity(oldId);
     selectPane(newId);
@@ -1160,6 +1257,9 @@ export function Wall({
       if (shouldReplaceUntouched) {
         lath.store.replaceLeaf(selectedPaneId!, newId, terminalLeafMeta());
         disposeSession(selectedPaneId!);
+        // Swapping the shell in place keeps the notepad; only a closure archives
+        // it (docs/specs/notepad.md → "Closure").
+        transferNotepad(selectedPaneId!, newId);
         forgetSurfaceRef(selectedPaneId!);
         selectPane(newId);
         if (detail.announce) {
@@ -1208,6 +1308,7 @@ export function Wall({
     createSplitSurface,
     createContentSurface,
     killPaneImmediately,
+    closeSurface,
     revealSurface,
     lastAgentBrowserBinaryPathRef,
   });
@@ -1246,7 +1347,7 @@ export function Wall({
     onKill: (id: string) => {
       exitTerminalMode();
       if (isUntouched(id)) {
-        killPaneImmediately(id);
+        void closeSurface(id);
         return;
       }
       const char = randomKillChar();
@@ -1431,7 +1532,7 @@ export function Wall({
     resolveSurfaceRef: surfaceRefForId,
     // The pane context menu's "connect a port" action: act like `dor ab open`.
     onConnectPort: connectPort,
-  }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, killPaneImmediately, replaceSurface, buildDorSurfaces, createContentSurface, surfaceRefForId, connectPort, updateSurfaceParams, lath, nav]);
+  }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, closeSurface, replaceSurface, buildDorSurfaces, createContentSurface, surfaceRefForId, connectPort, updateSurfaceParams, lath, nav]);
   const wallActionsRef = useRef(wallActions);
   wallActionsRef.current = wallActions;
 
@@ -1462,7 +1563,7 @@ export function Wall({
     enterTerminalMode,
     exitTerminalMode,
     minimizePane,
-    killPaneImmediately,
+    closeSurface,
     acceptKill,
     rejectKill,
     setConfirmKill,
@@ -1549,7 +1650,7 @@ export function Wall({
           <RenamingIdContext.Provider value={renamingPaneId}>
           <ZoomedIdContext.Provider value={zoomedId}>
           <WindowFocusedContext.Provider value={windowFocused}>
-          <DialogKeyboardContext.Provider value={setDialogKeyboardActive}>
+          <DialogKeyboardContext.Provider value={acquireDialogKeyboard}>
           <div className="flex-1 min-h-0 flex flex-col bg-app-bg text-app-fg font-sans overflow-hidden">
             {/* The tiling area — 2px bottom inset keeps rounded panes distinct from the baseboard when present. */}
             {/* 1.75 = PANE_GUTTER_PX (7px) in design.tsx — keep in sync. */}
@@ -1588,20 +1689,35 @@ export function Wall({
               />
             )}
 
+            {/* The archive refused this Surface's notes — it is still open.
+                One prompt at a time: answering the head reveals the next. */}
+            {archiveFailures[0] && (
+              <NotepadArchiveFailureModal
+                failure={archiveFailures[0]}
+                paneElements={paneElements}
+                onKeepOpen={shiftArchiveFailure}
+                onCloseAnyway={() => {
+                  // The user chose to lose these notes: drop them, then take the
+                  // rollback path that skips the archive entirely.
+                  const { id } = archiveFailures[0];
+                  removeSurface(id);
+                  shiftArchiveFailure();
+                  killPaneImmediately(id);
+                }}
+              />
+            )}
+
             <ShellSpawnNotice
               notice={shellSpawnNotice}
               paneElements={paneElements}
               version={paneElementsVersion}
             />
 
-            <ExternalLinkModalHost onKeyboardActiveChange={setDialogKeyboardActive} />
-            <AgentBrowserScreenModalHost
-              onKeyboardActiveChange={setDialogKeyboardActive}
-              resolveLabel={surfaceRefForId}
-            />
+            <ExternalLinkModalHost />
+            <AgentBrowserScreenModalHost resolveLabel={surfaceRefForId} />
             {enableBurrow ? (
               <Suspense fallback={null}>
-                <RemotePairingModalHost onKeyboardActiveChange={setDialogKeyboardActive} />
+                <RemotePairingModalHost />
               </Suspense>
             ) : null}
             {dialogHost}

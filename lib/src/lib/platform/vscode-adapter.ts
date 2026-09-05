@@ -3,7 +3,14 @@ import { OPEN_PORT_TIMEOUT_MS } from './types';
 import { createBurrowLinkClient } from '../../host/remote/link-client';
 import type { AwaitHandle, AwaitOptions, AwaitOutcome } from '../alert-manager';
 import type { AlertSettings } from '../alert-settings';
+import type {
+  NotepadArchiveLoadResult,
+  NotepadArchivePort,
+  NotepadArchiveV1,
+  VolatileNotepadSnapshot,
+} from '../notepad/types';
 import { readInjectedRecoveryCommands } from '../vscode-recovery-global';
+import { readInjectedVolatileNotepad } from '../vscode-notepad-global';
 import { setDefaultShellOpts } from '../shell-defaults';
 import { embedderOrigins } from '../embedder-origins';
 import {
@@ -67,6 +74,45 @@ export class VSCodeAdapter implements PlatformAdapter {
   });
 
   readonly burrow: BurrowLink = this.burrowClient.link;
+
+  /**
+   * The mirror this webview booted with, consumed once by `loadVolatile()`.
+   * Captured at construction like every other boot global, so a later
+   * same-document write cannot move the goalposts.
+   */
+  private bootNotepadVolatile: VolatileNotepadSnapshot | null = readInjectedVolatileNotepad();
+
+  /**
+   * The archive lives in the extension host's `globalState` — nothing in the
+   * webview can reach it — so every call is a request/response round trip
+   * (docs/specs/notepad.md). The port is compare-and-swap: this side only ships
+   * bytes and the revision it read them at, and the shared service retries a
+   * `'conflict'`, so a second webview's concurrent append is never lost.
+   */
+  readonly notepadArchive: NotepadArchivePort = {
+    load: () => this.notepadRequest<NotepadArchiveLoadResult | null>('notepad:load', {}),
+    save: (archive: NotepadArchiveV1, baseRevision: string | null) =>
+      this.notepadRequest<'ok' | 'conflict'>('notepad:save', {
+        state: JSON.stringify(archive),
+        baseRevision,
+      }),
+    resetUnreadable: async () => {
+      await this.notepadRequest<void>('notepad:reset', {});
+    },
+    // Fire and forget: nothing waits on the mirror, and the next snapshot
+    // supersedes this one. It is what lets a teardown archive notes from a
+    // webview VS Code has already destroyed.
+    syncVolatile: (snapshot: VolatileNotepadSnapshot) => {
+      this.vscode.postMessage({ type: 'notepad:volatile', snapshot });
+    },
+    // Exactly once: a second read is a cold restore's read, and a cold restore
+    // must never hydrate live notes (docs/specs/notepad.md).
+    loadVolatile: () => {
+      const snapshot = this.bootNotepadVolatile;
+      this.bootNotepadVolatile = null;
+      return snapshot;
+    },
+  };
 
   constructor() {
     this.vscode = acquireVsCodeApi();
@@ -208,6 +254,27 @@ export class VSCodeAdapter implements PlatformAdapter {
       });
       this.vscode.postMessage({ type: requestType, ...data, requestId });
     });
+  }
+
+  /**
+   * One archive round trip. Unlike `requestResponse` this *rejects* rather than
+   * resolving `null`: a `null` load legitimately means "nothing archived yet", so
+   * a timeout that looked like one would let the next save overwrite an archive
+   * nobody managed to read. The shared service turns a rejection into the
+   * unavailable/closure-failure paths (docs/specs/notepad.md → Archive).
+   */
+  private async notepadRequest<T>(
+    type: 'notepad:load' | 'notepad:save' | 'notepad:reset',
+    data: Record<string, unknown>,
+  ): Promise<T> {
+    // The reply object is never `null` on its own, so `requestResponse`'s `null`
+    // here can only be its timeout.
+    const reply = await this.requestResponse<{ ok: boolean; result?: unknown; error?: string }>(
+      type, 'notepad:result', data, (msg) => msg, 5000,
+    );
+    if (!reply) throw new Error(`${type} timed out`);
+    if (!reply.ok) throw new Error(reply.error || `${type} failed`);
+    return reply.result as T;
   }
 
   /**

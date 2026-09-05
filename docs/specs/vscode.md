@@ -19,6 +19,7 @@ The webview is the shared `lib/` frontend, unmodified for this host (`docs/specs
 - **WATCHING rules are host-authoritative.** The first webview after extension-host startup seeds the shared host rule set and **no later webview may replace it**.
 - **Never let a resuming router steal another webview's PTYs.** Each router tracks its PTYs in `ownedPtyIds`; a module-level `globalOwnedPtyIds` set enforces it.
 - **Every save path must merge current alert states through the shared persistence projection.** The frontend periodic save (`onSaveState`) and the backend deactivate refresh (`refreshSavedSessionStateFromPtys`) both narrow alerts with `toPersistedAlertState`; missing the merge reverts alert state on restore, while passing live state through persists transient fields.
+- **Must reserve a closing router's PTYs until its deferred kills finish**, so another router cannot claim them during archive/CWD work; pinned by `vscode-ext/test/message-router.test.ts`.
 - **retainContextWhenHidden.** Set on both `WebviewPanel` and `WebviewView` so xterm.js DOM, scrollback, and PTY subscriptions survive panel hide/show without a resume.
 - **Two save sources must produce consistent state**: the frontend's periodic `dormouse:saveState` and the backend's deactivate flush-then-refresh.
 - **Every host → webview send carries the message token**, and **never add a `message` listener that skips `isHostMessage`**.
@@ -53,9 +54,11 @@ Consequences:
 - Hiding or toggling the Dormouse panel neither kills its PTYs nor destroys sessions.
 - **Closing an editor-tab `WebviewPanel` is not hiding it.** `setupPanel` attaches
   its router with `killOnDispose: true`, so disposal kills that panel's owned PTYs
-  and VS Code discards the tab's per-panel state. **The `WebviewView` router is
-  attached without that flag**: its `onDidDispose` releases the router and leaves
-  the PTYs alive.
+  and VS Code discards the tab's per-panel state — and archives that router's
+  mirrored notepad notes, since no close coordinator will run
+  (`docs/specs/notepad.md` → "VS Code lifecycle"). **The `WebviewView` router is
+  attached without that flag**: its `onDidDispose` releases the router, leaves the
+  PTYs alive, and **leaves its mirrored notes in place for the next resolve**.
 - Each VS Code window gets its own extension host, and therefore its own pty-host child process.
 
 ### Workspaces
@@ -116,9 +119,13 @@ just teardown** — otherwise it does not survive an extension host killed befor
    external-process time overlaps the capture. **Its rejections are absorbed:** a
    throw out of the join would skip the flush, the refresh, and both kills.
 2. `captureAgentRecoveryCommands(context, 1200)`.
-3. `flushAllSessions(1000)` — ask every webview to save now, bounded.
-4. `refreshSavedSessionStateFromPtys()` — re-read CWD while the processes are alive.
-5. `gracefulKillAll(2000)` (SIGTERM, wait), then `killAll()` (force).
+3. Refresh the mirror's process CWDs against the still-live PTYs, then archive
+   the volatile notepad mirror, both bounded — the last chance for notes no
+   close coordinator will ever reach (`docs/specs/notepad.md` → "VS Code
+   lifecycle").
+4. `flushAllSessions(1000)` — ask every webview to save now, bounded.
+5. `refreshSavedSessionStateFromPtys()` — re-read CWD while the processes are alive.
+6. `gracefulKillAll(2000)` (SIGTERM, wait), then `killAll()` (force).
 
 **Recovery must go first** — the resume hint exists only between the interrupt and
 the kill, and the shutdown budget is not ours (rationale), so the one step whose
@@ -128,10 +135,16 @@ live PTY, waits bounded, scans those buffers, and records the invocation to
 `recovery.json` under `context.storageUri`, **written synchronously and replaced
 temp-then-rename**. **Never `workspaceState`**, whose SQLite flush is already
 tearing down (rationale), and **never `PersistedPane.resumeCommand`**, which the
-step-3 flush would overwrite with the webview's stale copy. **The record is
+step-4 flush would overwrite with the webview's stale copy. **The record is
 rewritten the moment each command is found and every wait is bounded**, so being
 killed mid-poll costs at most a late agent's command and a timeout loses a
 recovery command rather than delaying shutdown.
+
+**Live notepad notes are never in any of this.** They ride a volatile in-memory
+mirror the extension host keeps per webview, archived by the disposals above and
+handed back on a live resume through its own boot global beside the recovery
+commands — **a `WebviewView` re-resolve only, never a deserialized panel and never
+a cold restore** (`docs/specs/notepad.md` → "Live resume").
 
 **On activate**, saved state loads through `readPersistedSession()`
 (`docs/specs/transport.md` → "Persisted session types") and is passed to routers
@@ -382,7 +395,7 @@ Source of truth: `vscode-ext/src/peer-link.ts` (sockets, arbitration); `vscode-e
 
 `pnpm --filter dormouse test` typechecks and runs the suites under `vscode-ext/test/`; the socket tests use real local sockets, and `vitest.config.mts` supplies only the minimal `vscode` stub required outside an editor. **Never widen that stub to make an editor-dependent test pass** — command registration, webview hosting, and the theme observer require a real Extension Development Host.
 
-`webview-boot.smoketest.ts` is separate: `pnpm --filter dormouse test:smoke` runs the shipped webview under Chromium against a prebuilt `media/`, in its own CI job. **It must stub `acquireVsCodeApi`** so the VS Code-only lazy import executes.
+`webview-boot.smoketest.ts` is separate: `pnpm --filter dormouse test:smoke` runs the shipped webview under Chromium against a prebuilt `media/`, in its own CI job. **It must stub `acquireVsCodeApi`** so the VS Code-only lazy import executes. **Must share the unit config's resolver aliases**, including the shared notepad schema's CLI imports.
 
 ### Build and development
 
