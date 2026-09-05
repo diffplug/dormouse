@@ -16,14 +16,14 @@ function runningPanes(count: number) {
   };
 }
 
-function QuitConfirmModalStory({ confirming }: { confirming: boolean }) {
+function QuitConfirmModalStory({ confirming, archiveError }: { confirming: boolean; archiveError?: string | null }) {
   // Cancel/Quit call the quit-confirm store's actions, which no-op without an
   // active quit context — the buttons are safely inert here.
   return (
     <div className="relative h-[420px] w-[720px] overflow-hidden rounded bg-app-bg p-4 font-mono text-sm text-terminal-fg">
       <div>dev@dormouse:~/repo$ pnpm test --watch</div>
       <div className="text-muted">RUN v4.1.9 …</div>
-      <QuitConfirmModal confirming={confirming} />
+      <QuitConfirmModal confirming={confirming} archiveError={archiveError} />
     </div>
   );
 }
@@ -60,5 +60,16 @@ export const NoRunningCommands: Story = {
 // until the process exits.
 export const Quitting: Story = {
   args: { confirming: true },
+  parameters: { primedTerminalState: runningPanes(2) },
+};
+
+// The archive gate refused the quit (docs/specs/notepad.md → "Standalone
+// quit"): the running-command decision is already made, so the dialog now asks
+// only whether to lose the notes. Cancel is the default action.
+export const ArchiveFailed: Story = {
+  args: {
+    confirming: false,
+    archiveError: 'The notepad archive could not be written: no space left on device.',
+  },
   parameters: { primedTerminalState: runningPanes(2) },
 };

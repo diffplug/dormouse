@@ -6,15 +6,19 @@ const terminalRegistryMocks = vi.hoisted(() => ({
   restoreBrowserSurfaceTodo: vi.fn(),
   resumeTerminal: vi.fn(),
   restoreTerminal: vi.fn(),
+  getDefaultShellOpts: vi.fn(() => null),
 }));
 
 vi.mock('./terminal-registry', () => ({
   restoreBrowserSurfaceTodo: terminalRegistryMocks.restoreBrowserSurfaceTodo,
   resumeTerminal: terminalRegistryMocks.resumeTerminal,
   restoreTerminal: terminalRegistryMocks.restoreTerminal,
+  getDefaultShellOpts: terminalRegistryMocks.getDefaultShellOpts,
 }));
 
 import { resumeOrRestore } from './reconnect';
+import { clearAllNotepads, getNotes } from './notepad/notepad-store';
+import type { VolatileNotepadSnapshot } from './notepad/types';
 import type { LathNode } from './lath/model';
 
 /** A native Lath persisted layout over `ids` (row split; empty tree for none) —
@@ -426,5 +430,94 @@ describe('resumeOrRestore', () => {
       doors,
       lathLayout,
     });
+  });
+});
+
+/**
+ * The mirror the VS Code extension host boots a re-resolved webview with. It
+ * hydrates a live resume and nothing else (docs/specs/notepad.md → "Live
+ * resume"): a cold restore is a different Session over PTYs that no longer
+ * exist, so notes must not reappear there.
+ */
+describe('notepad hydration', () => {
+  const snapshot: VolatileNotepadSnapshot = {
+    surfaces: [
+      {
+        surfaceId: 'pane-a',
+        surfaceTitle: 'pnpm dev',
+        surfaceKind: 'terminal',
+        cwd: null,
+        notes: [{ id: 'n1', createdAt: 1, content: { kind: 'plain', text: 'mirrored' } }],
+      },
+      {
+        surfaceId: 'door-b',
+        surfaceTitle: 'zsh',
+        surfaceKind: 'terminal',
+        cwd: null,
+        notes: [{ id: 'n2', createdAt: 2, content: { kind: 'plain', text: 'minimized too' } }],
+      },
+    ],
+    stagedDeletions: {},
+  };
+
+  /** Attach an archive port that only ever answers `loadVolatile` — the one
+   *  member this path touches. */
+  function withMirror(platform: PlatformAdapter): ReturnType<typeof vi.fn> {
+    const loadVolatile = vi.fn(() => snapshot);
+    (platform as { notepadArchive?: unknown }).notepadArchive = { loadVolatile };
+    return loadVolatile;
+  }
+
+  beforeEach(() => {
+    clearAllNotepads();
+  });
+
+  it('restores mirrored notes for every live Surface on a resume, doors included', async () => {
+    const saved: PersistedSession = {
+      version: 3,
+      lathLayout: lathLayoutFor('pane-a'),
+      doors: [{ id: 'door-b', title: 'zsh' }],
+      panes: [
+        { id: 'pane-a', title: 'Pane A', cwd: null },
+        { id: 'door-b', title: 'zsh', cwd: null },
+      ],
+    };
+    const platform = createPlatform([
+      { id: 'pane-a', alive: true },
+      { id: 'door-b', alive: true },
+    ], saved);
+    const loadVolatile = withMirror(platform);
+
+    await resumeOrRestore(platform);
+
+    expect(loadVolatile).toHaveBeenCalledTimes(1);
+    expect(getNotes('pane-a').map((note) => note.content)).toEqual([{ kind: 'plain', text: 'mirrored' }]);
+    expect(getNotes('door-b').map((note) => note.content)).toEqual([{ kind: 'plain', text: 'minimized too' }]);
+  });
+
+  it('restores mirrored notes on a resume with no saved plan to match', async () => {
+    const platform = createPlatform([{ id: 'pane-a', alive: true }], null);
+    withMirror(platform);
+
+    await resumeOrRestore(platform);
+
+    expect(getNotes('pane-a')).toHaveLength(1);
+  });
+
+  it('never reads the mirror on a cold restore', async () => {
+    const saved: PersistedSession = {
+      version: 3,
+      lathLayout: lathLayoutFor('pane-a'),
+      panes: [{ id: 'pane-a', title: 'Pane A', cwd: null }],
+    };
+    // No live PTYs: `resumeOrRestore` falls through to the saved session.
+    const platform = createPlatform([], saved);
+    const loadVolatile = withMirror(platform);
+
+    const result = await resumeOrRestore(platform);
+
+    expect(result.paneIds).toEqual(['pane-a']);
+    expect(loadVolatile).not.toHaveBeenCalled();
+    expect(getNotes('pane-a')).toEqual([]);
   });
 });

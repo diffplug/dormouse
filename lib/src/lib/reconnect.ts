@@ -1,5 +1,6 @@
 import type { LathPersistedLayout } from './lath/persistence';
 import type { PlatformAdapter, PtyInfo } from './platform/types';
+import { hydrateNotepadFromVolatile } from './notepad/notepad-store';
 import { restoreBrowserSurfaceTodo, resumeTerminal } from './terminal-registry';
 import { carrySurfaceRefs, readPersistedSession, type PersistedDoor, type PersistedSurfaceRefs } from './session-types';
 import { persistedLathLayout, restoreSession } from './session-restore';
@@ -90,22 +91,37 @@ function resumeLiveSessions(platform: PlatformAdapter): Promise<ReconnectResult 
       // PTY into one tab group.
       const savedPlan = getSavedResumePlan(savedState, ids);
       if (savedPlan) {
-        resolve(savedPlan);
+        resolve(hydrateNotepad(platform, savedPlan));
         return;
       }
 
       const saved = readPersistedSession(savedState);
-      resolve({
+      resolve(hydrateNotepad(platform, {
         paneIds: ids,
         doors: [],
         ...carrySurfaceRefs(saved),
-      });
+      }));
     }
 
     platform.onPtyList(handleList);
     platform.onPtyReplay(handleReplay);
     platform.requestInit();
   });
+}
+
+/**
+ * Give a resumed webview back the notes the host mirrored for it
+ * (docs/specs/notepad.md → "Live resume"). Only reachable from the live-PTY
+ * branch: a cold restore is a different Session over a different set of PTYs,
+ * and mirrored notes must never surface there. Live Surfaces are the resume
+ * plan's panes plus its doors — a minimized Surface keeps its notes.
+ */
+function hydrateNotepad(platform: PlatformAdapter, result: ReconnectResult): ReconnectResult {
+  const snapshot = platform.notepadArchive?.loadVolatile?.();
+  if (snapshot) {
+    hydrateNotepadFromVolatile(snapshot, [...result.paneIds, ...(result.doors ?? []).map((door) => door.id)]);
+  }
+  return result;
 }
 
 function getSavedPaneResumeInfo(savedState: unknown, liveIds: string[]): Map<string, { title: string; untouched: boolean }> {

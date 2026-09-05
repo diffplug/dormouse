@@ -47,6 +47,7 @@ Both modes, ahead of the passthrough gate, and only on a terminal **selected** S
 | *(any other key)* | — | Swallowed during a terminal-handled drag, never reaching the inside program (`docs/specs/mouse-and-clipboard.md` §3.6). |
 | `⌘C` (macOS) / `Ctrl+C` (others) | Copy raw | Copy the selection as-is; requires a finalized selection. |
 | `⌘⇧C` (macOS) / `Ctrl+Shift+C` (others) | Copy rewrapped | Copy the selection rewrapped for single-line display. |
+| `⌘N` (macOS) / `Ctrl+N` (others) | Add to notepad | Capture the finalized selection as a note on that Surface; unbound where the browser reserves the chord (`docs/specs/notepad.md`). |
 | `⌘V` / `⌘⇧V` / `Ctrl+V` / `Ctrl+Shift+V` | Paste | Paste into the terminal; the `Ctrl` variants are intercepted on every platform, macOS included. |
 
 On macOS `Ctrl+C` still reaches the running program; a literal `0x16` needs the shell's `quoted-insert` (`Ctrl+Q`) (`docs/specs/mouse-and-clipboard.md` §8.3).

@@ -11,6 +11,7 @@ import {
 import {
   cancelQuit,
   confirmQuit,
+  getQuitArchiveError,
   getQuitConfirmPhase,
   subscribeQuitConfirm,
 } from './quit-confirm-store';
@@ -25,6 +26,7 @@ import {
  */
 export function QuitConfirmModalHost() {
   const phase = useSyncExternalStore(subscribeQuitConfirm, getQuitConfirmPhase);
+  const storedArchiveError = useSyncExternalStore(subscribeQuitConfirm, getQuitArchiveError);
   const setDialogKeyboardActive = useContext(DialogKeyboardContext);
   const open = phase !== null;
 
@@ -35,12 +37,26 @@ export function QuitConfirmModalHost() {
   }, [open, setDialogKeyboardActive]);
 
   if (!phase) return null;
-  return <QuitConfirmModal confirming={phase === 'quitting'} />;
+  return (
+    <QuitConfirmModal
+      confirming={phase === 'quitting'}
+      archiveError={phase === 'archive-failed' ? storedArchiveError : null}
+    />
+  );
 }
 
 // Exported for Storybook (QuitConfirmModal.stories.tsx), which renders the
 // presentational modal directly — same split as ExternalLinkModal's stories.
-export function QuitConfirmModal({ confirming }: { confirming: boolean }) {
+export function QuitConfirmModal({
+  confirming,
+  archiveError = null,
+}: {
+  confirming: boolean;
+  /** The quit the notepad archive refused (docs/specs/notepad.md → "Standalone
+   *  quit"). Set means the running-command decision is already made and this
+   *  dialog now asks only whether to lose the notes. */
+  archiveError?: string | null;
+}) {
   const cancelButtonRef = useRef<HTMLButtonElement>(null);
   // Live count — the dialog stays open even if it drops to 0 (see spec).
   const runningCount = useSyncExternalStore(subscribeToTerminalPaneState, countRunningSessions);
@@ -58,14 +74,16 @@ export function QuitConfirmModal({ confirming }: { confirming: boolean }) {
       onEscape={confirming ? undefined : cancelQuit}
     >
       <h2 id="quit-confirm-modal-title" className="text-sm leading-5 text-foreground">
-        Quit Dormouse?
+        {archiveError ? 'Notes could not be archived' : 'Quit Dormouse?'}
       </h2>
       <p className="mt-2 text-sm text-muted">
-        {confirming
-          ? 'Quitting…'
-          : hasRunning
-            ? `${runningCount} running command${runningCount === 1 ? '' : 's'} will be stopped.`
-            : 'No commands are still running.'}
+        {archiveError
+          ? `${archiveError} Quitting anyway discards them.`
+          : confirming
+            ? 'Quitting…'
+            : hasRunning
+              ? `${runningCount} running command${runningCount === 1 ? '' : 's'} will be stopped.`
+              : 'No commands are still running.'}
       </p>
 
       <div className="mt-4 flex justify-end gap-2">
@@ -74,7 +92,7 @@ export function QuitConfirmModal({ confirming }: { confirming: boolean }) {
           type="button"
           onClick={cancelQuit}
           disabled={confirming}
-          className={`${modalActionButton({ tone: 'secondary' })} min-w-[5rem]`}
+          className={`${modalActionButton({ tone: archiveError ? 'primary' : 'secondary' })} min-w-[5rem]`}
         >
           Cancel
         </button>
@@ -82,9 +100,9 @@ export function QuitConfirmModal({ confirming }: { confirming: boolean }) {
           type="button"
           onClick={confirmQuit}
           disabled={confirming}
-          className={`${modalActionButton({ tone: 'primary' })} min-w-[5rem]`}
+          className={`${modalActionButton({ tone: archiveError ? 'secondary' : 'primary' })} min-w-[5rem]`}
         >
-          {hasRunning ? `Quit and stop ${runningCount}` : 'Quit'}
+          {archiveError ? 'Quit anyway' : hasRunning ? `Quit and stop ${runningCount}` : 'Quit'}
         </button>
       </div>
     </ModalFrame>

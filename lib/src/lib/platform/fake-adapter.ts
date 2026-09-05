@@ -77,6 +77,11 @@ export class FakePtyAdapter implements PlatformAdapter {
    */
   notepadArchive: MemoryNotepadArchivePort = createMemoryNotepadArchivePort();
 
+  /** Mutable and public for the same reason as the capability flags above: the
+   *  website playground sets it because a browser tab cannot take Cmd/Ctrl+N,
+   *  and the selection-popup stories toggle it per story. */
+  browserReservesNotepadChord?: boolean;
+
   constructor() {
     this.alertManager.onStateChange((id, state) => {
       for (const handler of this.alertStateHandlers) {

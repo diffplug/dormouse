@@ -144,6 +144,10 @@ function PlaygroundDesktopExperience() {
       if (cancelled) return;
 
       const adapter = platform.initPlatform("fake");
+      // The demo gets the notepad — its archive is the fake adapter's in-memory
+      // one — but no keyboard shortcut for it: a browser tab cannot take
+      // Cmd/Ctrl+N (docs/specs/notepad.md).
+      adapter.browserReservesNotepadChord = true;
       registry.initAlertStateReceiver();
       adapterRef.current = adapter;
 

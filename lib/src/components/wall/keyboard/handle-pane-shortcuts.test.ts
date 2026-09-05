@@ -57,7 +57,7 @@ function makeCtx(overrides: Partial<WallKeyboardCtx> = {}): WallKeyboardCtx {
     handleReattachRef: { current: vi.fn() },
     selectPane: vi.fn(),
     enterTerminalMode: vi.fn(),
-    killPaneImmediately: vi.fn(),
+    closeSurface: vi.fn(async () => true),
     setConfirmKill: vi.fn(),
     setRenamingPaneId: vi.fn(),
     fireEvent: vi.fn(),
@@ -79,14 +79,14 @@ describe('handlePaneShortcuts kill behavior', () => {
     terminalRegistryMocks.isUntouched.mockReturnValue(false);
   });
 
-  it('kills untouched panes immediately without staging confirmation', () => {
+  it('closes untouched panes without staging confirmation', () => {
     terminalRegistryMocks.isUntouched.mockReturnValue(true);
     const ctx = makeCtx();
     const event = keydown('x');
 
     expect(handlePaneShortcuts(event, ctx, { current: null })).toBe(true);
 
-    expect(ctx.killPaneImmediately).toHaveBeenCalledWith('pane-a');
+    expect(ctx.closeSurface).toHaveBeenCalledWith('pane-a');
     expect(ctx.setConfirmKill).not.toHaveBeenCalled();
     expect(event.defaultPrevented).toBe(true);
   });
@@ -96,7 +96,7 @@ describe('handlePaneShortcuts kill behavior', () => {
 
     expect(handlePaneShortcuts(keydown('x'), ctx, { current: null })).toBe(true);
 
-    expect(ctx.killPaneImmediately).not.toHaveBeenCalled();
+    expect(ctx.closeSurface).not.toHaveBeenCalled();
     expect(ctx.setConfirmKill).toHaveBeenCalledWith({ id: 'pane-a', char: 'Q' });
   });
 

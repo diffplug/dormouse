@@ -68,12 +68,14 @@ let idCounter = 0;
 
 /** `crypto.randomUUID` everywhere it exists; the counter is for the odd
  *  environment (an insecure origin, an older runtime) where it does not, since
- *  a note with no id cannot be addressed for edit, delete, or archive. */
-function newNoteId(): string {
+ *  a note or batch with no id cannot be addressed for edit, delete, or archive.
+ *  Shared with the close coordinator so notes and archive batches mint ids the
+ *  same way; `prefix` only labels the fallback form. */
+export function newNotepadId(prefix = 'note'): string {
   const webCrypto = globalThis.crypto as Crypto | undefined;
   if (webCrypto && typeof webCrypto.randomUUID === 'function') return webCrypto.randomUUID();
   idCounter += 1;
-  return `note-${Date.now().toString(36)}-${idCounter.toString(36)}`;
+  return `${prefix}-${Date.now().toString(36)}-${idCounter.toString(36)}`;
 }
 
 function replaceNotes(surfaceId: string, next: LiveNote[]): void {
@@ -91,7 +93,7 @@ function appendNote(surfaceId: string, note: LiveNote): string {
  *  an untouched one is removed again by `pruneEmptyNote`. */
 export function addPlainNote(surfaceId: string, text = ''): string {
   return appendNote(surfaceId, {
-    id: newNoteId(),
+    id: newNotepadId(),
     createdAt: Date.now(),
     content: { kind: 'plain', text },
   });
@@ -105,7 +107,7 @@ export function addTerminalNote(
   source?: RuntimeTerminalSource,
 ): string {
   const note: LiveNote = {
-    id: newNoteId(),
+    id: newNotepadId(),
     createdAt: Date.now(),
     content: { kind: 'terminal', runs },
   };
@@ -287,6 +289,14 @@ export function setNotepadSurfaceMetaResolver(resolver: NotepadSurfaceMetaResolv
   scheduleVolatileSync();
 }
 
+/** One Surface's metadata as the Wall sees it right now, or `null` when no
+ *  resolver is installed. The volatile mirror and the close coordinator both
+ *  read through here, so a mirrored batch and an archived one describe the
+ *  Surface identically (docs/specs/notepad.md → "Closure"). */
+export function getNotepadSurfaceMeta(surfaceId: string): NotepadSurfaceMeta | null {
+  return metaResolver?.(surfaceId) ?? null;
+}
+
 /** Archive deletions staged in an open Archive view, mirrored so a host that
  *  loses the webview can still commit them. */
 export function setStagedArchiveDeletions(
@@ -312,7 +322,7 @@ export function buildVolatileSnapshot(): VolatileNotepadSnapshot {
   const surfaces: VolatileSurfaceNotes[] = [];
   for (const [surfaceId, notes] of notesBySurface) {
     if (notes.length === 0) continue;
-    const meta = metaResolver?.(surfaceId) ?? null;
+    const meta = getNotepadSurfaceMeta(surfaceId);
     surfaces.push({
       surfaceId,
       surfaceTitle: meta?.surfaceTitle ?? '',

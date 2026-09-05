@@ -92,7 +92,7 @@ export function handlePaneShortcuts(
       return true;
     }
     if (isUntouched(sid)) {
-      ctx.killPaneImmediately(sid);
+      void ctx.closeSurface(sid);
       return true;
     }
     const char = randomKillChar();

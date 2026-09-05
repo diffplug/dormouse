@@ -1,7 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { countRunningSessions } from "dormouse-lib/lib/terminal-registry";
+import { archiveSurfaceNotes } from "dormouse-lib/lib/notepad/close-coordinator";
+import { getNotepadSnapshot, removeSurface } from "dormouse-lib/lib/notepad/notepad-store";
 import type { TauriAdapter } from "./tauri-adapter";
+import { openQuitArchiveFailure } from "./quit-confirm-store";
 import { hasPendingUpdate, installPendingUpdate } from "./updater";
 import { withTimeout } from "./with-timeout";
 
@@ -13,8 +16,9 @@ import { withTimeout } from "./with-timeout";
  */
 
 // One quit flow at a time: repeated quit-requested events are ignored while a
-// confirmation decision is outstanding or a teardown is running.
-let quitPhase: "idle" | "confirming" | "tearing-down" = "idle";
+// confirmation decision is outstanding, the archive gate is asking about notes
+// it could not store, or a teardown is running.
+let quitPhase: "idle" | "confirming" | "archive-failed" | "tearing-down" = "idle";
 // The adapter to tear down, captured at init.
 let quitAdapter: TauriAdapter | null = null;
 
@@ -50,12 +54,70 @@ function handleQuitRequested(): void {
   if (countRunningSessions() > 0 && quitConfirmGate) {
     quitPhase = "confirming";
     quitConfirmGate({
-      confirm: () => void runQuitTeardown(),
+      confirm: () => void archiveThenTeardown(),
       cancel: cancelQuit,
     });
     return;
   }
-  void runQuitTeardown();
+  void archiveThenTeardown();
+}
+
+// The archive write is a host round trip; a wedged one must not hold the quit
+// open, so it gets its own bound ahead of the teardown's.
+const ARCHIVE_GATE_MS = 3000;
+
+/**
+ * The notepad's quit gate (docs/specs/notepad.md → "Standalone quit"): every
+ * Surface still holding notes is archived in one mutation, after the running-work
+ * decision and before teardown begins, so a controlled quit never drops notes.
+ * Rejects with a user-presentable message when the write fails or outruns its
+ * bound — the caller turns that into Cancel / Quit anyway.
+ */
+export async function archiveNotesBeforeQuit(): Promise<void> {
+  const ids = [...getNotepadSnapshot().keys()];
+  if (ids.length === 0) return;
+  // `withTimeout` resolves rather than rejecting when it wins the race, so the
+  // outcome is recorded here: still set means the archive never finished.
+  let failure: string | null = `The notepad archive did not finish within ${ARCHIVE_GATE_MS / 1000}s.`;
+  const work = archiveSurfaceNotes(ids).then(
+    () => {
+      failure = null;
+    },
+    (error: unknown) => {
+      failure = error instanceof Error && error.message ? error.message : String(error);
+    },
+  );
+  await withTimeout(work, ARCHIVE_GATE_MS, `[quit] notepad archive exceeded ${ARCHIVE_GATE_MS}ms`);
+  if (failure !== null) throw new Error(failure);
+}
+
+// The decision is made; archive the notes, then tear down. A refused archive is
+// the one thing that stops a confirmed quit, and only until the user answers.
+async function archiveThenTeardown(): Promise<void> {
+  // Committed from here: the gate is an await, so without this a second trigger
+  // arriving mid-archive would start a parallel flow.
+  quitPhase = "tearing-down";
+  try {
+    await archiveNotesBeforeQuit();
+  } catch (err) {
+    // Drop the pending quit in Rust, then hold the flow in `archive-failed` so a
+    // repeat trigger is deduped exactly like a pending confirmation.
+    cancelQuit();
+    quitPhase = "archive-failed";
+    openQuitArchiveFailure(err instanceof Error ? err.message : String(err), {
+      confirm: () => {
+        // Quit anyway: the user accepts losing these notes, so forget them and
+        // take the teardown that no longer has anything to archive.
+        for (const id of [...getNotepadSnapshot().keys()]) removeSurface(id);
+        void runQuitTeardown();
+      },
+      cancel: () => {
+        quitPhase = "idle";
+      },
+    });
+    return;
+  }
+  await runQuitTeardown();
 }
 
 // Ordering and rationale: docs/specs/standalone.md §Quit flow (Teardown
