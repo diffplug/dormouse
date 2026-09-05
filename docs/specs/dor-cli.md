@@ -106,6 +106,9 @@ tab/eval/screenshot commands, and anything added later. It is the only code
 **`spawnAndCapture` never throws:** a spawn-level failure resolves as
 `{ ok: false, error }`.
 
+**Must decode stdout/stderr as continuous UTF-8 streams**, retaining partial
+characters across pipe chunks (rationale).
+
 **Must release captured stdout/stderr pipes when the result settles**, including
 the exit-grace fallback, without terminating descendants (rationale).
 `dor-lib-common/test/spawn.test.mjs` pins caller exit with an inherited-pipe daemon

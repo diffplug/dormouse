@@ -20,6 +20,18 @@ test('captures stderr and a non-zero exit code', async () => {
   assert.equal(result.stderr, 'boom');
 });
 
+test('decodes UTF-8 characters split across stdout and stderr chunks', async () => {
+  const result = await spawnAndCapture(node, ['-e', `
+    process.stdout.write(Buffer.from([0xf0, 0x9f]));
+    process.stderr.write(Buffer.from([0xe2]));
+    setTimeout(() => {
+      process.stdout.write(Buffer.from([0x90, 0xad]));
+      process.stderr.write(Buffer.from([0x82, 0xac]));
+    }, 50);
+  `]);
+  assert.deepEqual(result, { ok: true, exitCode: 0, stdout: '🐭', stderr: '€' });
+});
+
 test('reports a missing binary as a spawn failure, never throwing', async () => {
   const result = await spawnAndCapture('dormouse-no-such-binary-xyz', []);
   assert.equal(result.ok, false);
