@@ -37,6 +37,18 @@ vi.mock("../components/ShareUrlButton", () => ({ ShareUrlButton: () => null }));
 vi.mock("dormouse-lib/components/ThemePicker", () => ({ ThemePicker: () => null }));
 vi.mock("dormouse-lib/lib/themes", () => ({ useRestoredTheme: () => {} }));
 
+const desktopRuntime = vi.hoisted(() => ({ imported: vi.fn(), initPlatform: vi.fn() }));
+vi.mock("dormouse-lib/lib/platform", () => {
+  desktopRuntime.imported();
+  return { initPlatform: desktopRuntime.initPlatform };
+});
+vi.mock("dormouse-lib/lib/terminal-registry", () => ({}));
+vi.mock("dormouse-lib/lib/mouse-selection", () => ({}));
+vi.mock("dormouse-lib/components/Wall", () => ({}));
+vi.mock("dormouse-lib/lib/platform/fake-scenarios", () => ({}));
+vi.mock("../lib/ascii-splash-runner", () => ({}));
+
+import PlaygroundDesktop from "./PlaygroundDesktop";
 import PocketPlayground from "./PocketPlayground";
 import PlaygroundRedirect from "./Playground";
 
@@ -156,5 +168,28 @@ describe("playground dispatcher", () => {
     expect(visited).toEqual([path]);
     expect(requestedPaths).toEqual([path]);
     expect(recoverable).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("desktop playground hydration", () => {
+  it("hydrates the phone fallback without loading or initializing the desktop runtime", async () => {
+    const tree = <MemoryRouter><PlaygroundDesktop /></MemoryRouter>;
+    const markup = prerender(tree);
+    expect(markup).not.toContain("This screen is too small");
+    installMedia(true);
+    const element = createContainer(markup);
+    const recoverable = vi.fn();
+
+    await act(async () => {
+      root = hydrateRoot(element, tree, { onRecoverableError: recoverable });
+      await vi.dynamicImportSettled();
+    });
+
+    expect(element.textContent).toContain("This screen is too small");
+    expect(element.querySelector('a')?.getAttribute("href")).toBe("/playground/pocket");
+    expect(recoverable).not.toHaveBeenCalled();
+    expect(desktopRuntime.imported).not.toHaveBeenCalled();
+    expect(desktopRuntime.initPlatform).not.toHaveBeenCalled();
   });
 });

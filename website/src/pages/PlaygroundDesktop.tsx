@@ -14,7 +14,7 @@ import {
   WATCH_DEMO_COMMAND_MS,
 } from "../lib/tut-runner";
 import { ChangelogRunner } from "../lib/changelog-runner";
-import { POCKET_PLAYGROUND_PATH, usePreferredPlayground } from "../lib/playground-routing";
+import { getPreferredPlayground, POCKET_PLAYGROUND_PATH, usePreferredPlayground } from "../lib/playground-routing";
 import {
   DESKTOP_PANES,
   DESKTOP_PLAYGROUND_LAYOUT,
@@ -133,6 +133,8 @@ function PlaygroundDesktopExperience() {
   useEffect(() => {
     let cancelled = false;
     async function loadWall() {
+      // Phone hydration briefly mounts this desktop prerender before reconciling media.
+      if (getPreferredPlayground() === "pocket") return;
       const platform = await import("dormouse-lib/lib/platform");
       const registry = await import("dormouse-lib/lib/terminal-registry");
       const mouseSelection = await import("dormouse-lib/lib/mouse-selection");
