@@ -10,6 +10,10 @@
 
 **Why trailing punctuation is stripped before the patterns run.** Terminal output puts tokens inside sentences: `Error at src/foo.ts:42.` ends in a period no path pattern matches, so matching first leaves nothing to trim afterward. Stripped first it becomes `src/foo.ts:42`, which the error-location pattern recognizes — the `:line[:col]` digits are not trailing punctuation and survive. Matched bracket pairs are exempt for the mirror case: `https://en.wikipedia.org/wiki/Foo_(bar)` really does end in `)`, and trimming truncates the URL.
 
+## 7. Rendering Notes
+
+The mouse store mutates each pane's state object in place, but replaces its map snapshot on every notification. Whole-map subscriptions therefore rerendered all headers and banners on each drag/hover update; selecting the mutable pane object instead would miss relevant changes. Primitive snapshots select reporting presence and override mode for the header, temporary-override visibility for the banner. In React Profiler + jsdom (2026-09), a two-pane regression with a drag start, ten moves, and one URL hint dropped from 50 chrome commits to zero. Reporting/override transitions still update their owning pane.
+
 ## 8.2 Paste Keybindings
 
 **Why paste breaks the clean macOS separation that copy keeps.** On macOS `⌘C` is copy and `Ctrl+C` is SIGINT, and honoring that split costs nothing — a Mac user reaching for copy reaches for `⌘`. Paste is not symmetric: `Ctrl+V` is the universal expectation on every platform, so a macOS build that ignored it would read as broken rather than principled. Intercepting all four combinations everywhere buys that, at the known cost of `0x16` — §8.3's `Ctrl+Q` covers the shells, and nothing covers a program implementing neither.
