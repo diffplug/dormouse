@@ -726,10 +726,11 @@ memo invalidation — live in that burrow's spec.
   disposes its sessions, reports `displaced`, and arms no timer. Coming back is
   an explicit act — `reconnect()` — which takes the slot back and displaces the
   other Burrow in turn, so `displaced` is the one connection state the user has to
-  act on. **A close event from a socket the controller no longer owns is
-  ignored**, so a dead socket's late eviction cannot stand down the live one, and
-  **disposing the service is terminal**: an enrollment or ACL read already in
-  flight cannot construct a socket afterwards.
+  act on. **Ignore open, message, and close events from sockets the controller
+  no longer owns** (rationale).
+  `lib/src/remote/burrow/burrow-runtime.test.ts` pins late delivery after stop and
+  restart. **Never construct a socket after service disposal**, including
+  from an enrollment or ACL read already in flight.
 * **Security**: `BurrowAcl` (persisted through the `BurrowStateStore`, **keyed per
   `burrowId`**, so an enrollment onto a fresh one starts with an empty ACL while a
   re-enrollment onto the same one keeps its paired devices),

@@ -904,6 +904,40 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
     expect(invitationEvents.filter((e) => e.state === 'dropped')).toHaveLength(1);
   });
 
+  it('ignores late opens from a stopped or superseded socket', () => {
+    makeBurrow();
+    const retiredSocket = socket;
+    burrow.stop();
+    retiredSocket.open();
+    expect(burrow.status).toBe('stopped');
+
+    burrow.start();
+    retiredSocket.open();
+    expect(burrow.status).toBe('connecting');
+    socket.open();
+    expect(burrow.status).toBe('connected');
+  });
+
+  it('ignores a retired socket client-gone after restarting', async () => {
+    makeBurrow();
+    const { authenticator, clientStatic } = await pairedClient();
+    const retiredSocket = socket;
+    burrow.stop();
+    burrow.start();
+    socket.open();
+    expect(await attemptConnection('c1', clientStatic, authenticator)).toMatchObject({ ok: true });
+    expect(sessions).toHaveLength(1);
+
+    retiredSocket.receive({ t: 'client-gone', clientId: 'c1' });
+    await settle();
+    expect(sessions[0]!.disposed).toBe(false);
+    expect(burrow.trackedClientCount).toBe(1);
+
+    socket.receive({ t: 'client-gone', clientId: 'c1' });
+    await settleUntil(() => sessions[0]!.disposed);
+    expect(burrow.trackedClientCount).toBe(0);
+  });
+
   it('client-gone during a handshake disposes what the handshake then creates', async () => {
     // `client-gone` is queued on the same chain as every `e2e` step. Run inline
     // it would land *between* the responder's awaits, find nothing to dispose,
@@ -997,6 +1031,24 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
     await settle();
 
     expect(burrow.trackedClientCount).toBe(0);
+  });
+
+  it('ignores a connection init delivered after stop()', async () => {
+    makeBurrow();
+    const { clientStatic } = await pairedClient();
+    const connectionId = testRoutingId();
+    const handshake = await createNoiseInitiator({
+      prologue: e2eConnectionPrologue(enrollment.burrowId, connectionId),
+      staticKeyPair: clientStatic,
+      remoteStaticPublicKey: fromBase64Url(enrollment.noiseStaticPublicKey!),
+    });
+    const init = toBase64Url(await handshake.writeMessage());
+    burrow.stop();
+    sendE2e('c2', 'connection', connectionId, 'init', init);
+    await settle();
+
+    expect(burrow.trackedClientCount).toBe(0);
+    expect(burrow.status).toBe('stopped');
   });
 
   it('expiring a scanned invitation reports consumed, and says the request timed out', async () => {

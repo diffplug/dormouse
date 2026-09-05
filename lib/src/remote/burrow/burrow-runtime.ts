@@ -739,11 +739,13 @@ export class BurrowRuntime {
     const ws = this.#createWebSocket(url);
     this.#ws = ws;
     ws.addEventListener('open', () => {
+      if (this.#ws !== ws) return;
       this.#status = 'connected';
       this.#backoffMs = INITIAL_BACKOFF_MS;
       this.#reap();
     });
     ws.addEventListener('message', (ev) => {
+      if (this.#ws !== ws) return;
       this.#onFrame((ev as { data?: unknown }).data);
     });
     ws.addEventListener('error', () => {
