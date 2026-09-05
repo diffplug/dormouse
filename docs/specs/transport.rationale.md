@@ -72,6 +72,16 @@
 
 **The cold-activation cost, measured.** Claude ≈ 5 s to resume, codex ≈ 25 s with MCP servers (date not recorded). Multiplied by every agent pane in a Workspace and by how often Reload Window happens, that is what a future setting would trade against.
 
+## PTY buffering
+
+The former consume-on-read replay buffer duplicated scrollback during live
+output. Its only reader chose it when a router first claimed a PTY, assuming
+that ownership implied a first-ever reconstruction. Disposing a WebviewView
+releases its PTYs without killing them; a replacement router therefore got only
+output since the previous replay read, and a second replacement with no new
+output got nothing. Every reconstructed xterm needs the same retained history,
+so a separate replay buffer and ownership-based read choice serve no purpose.
+
 ## Universal invariants
 
 **VS Code scrollback outlives the process for repeat resumes.** Recovery capture runs before any kill (`docs/specs/vscode.md` → "Capturing agent recovery"), but a webview reopened over an exited pane still needs its transcript. The shared PTY core formerly kept a second buffer: VS Code never read it, and standalone's reader became unreachable when the adapter stopped persisting transcripts. Removing that duplicate leaves buffering with its actual consumer.

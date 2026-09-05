@@ -26,8 +26,6 @@ export type DorControlResponse = DorControlResponsePayload;
 export type DorControlCancel = DorControlCancelPayload;
 
 interface PtyBufferEntry {
-  replayChunks: string[];
-  replayChars: number;
   scrollbackChunks: string[];
   scrollbackChars: number;
   /** Every char ever buffered for this pane, never decremented by a trim — so it
@@ -55,8 +53,6 @@ function trimChunks(chunks: string[], totalChars: number): number {
 
 function createBufferEntry(alive: boolean, exitCode?: number, shell?: string): PtyBufferEntry {
   return {
-    replayChunks: [],
-    replayChars: 0,
     scrollbackChunks: [],
     scrollbackChars: 0,
     receivedChars: 0,
@@ -73,10 +69,6 @@ function bufferData(id: string, data: string): void {
     entry = createBufferEntry(true);
     ptyBuffers.set(id, entry);
   }
-  entry.replayChunks.push(data);
-  entry.replayChars += data.length;
-  entry.replayChars = trimChunks(entry.replayChunks, entry.replayChars);
-
   entry.scrollbackChunks.push(data);
   entry.scrollbackChars += data.length;
   entry.receivedChars += data.length;
@@ -122,15 +114,6 @@ export function getPtyStatus(id: string): { alive: boolean; exitCode?: number } 
  */
 export function hasPty(id: string): boolean {
   return ptyBuffers.has(id);
-}
-
-export function getReplayData(id: string): string | null {
-  const entry = ptyBuffers.get(id);
-  if (!entry || entry.replayChunks.length === 0) return null;
-  const data = entry.replayChunks.join('');
-  entry.replayChunks = [];
-  entry.replayChars = 0;
-  return data;
 }
 
 export function getScrollback(id: string): string | null {
