@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useSyncExternalStore } from 'react';
+import { useCallback, useSyncExternalStore } from 'react';
 import { ExternalLinkModal } from './ExternalLinkModal';
 import {
   clearExternalLinkConfirmation,
@@ -6,21 +6,15 @@ import {
   subscribeExternalLinkConfirmation,
 } from '../lib/external-link-confirmation';
 import { getPlatform } from '../lib/platform';
+import { useDialogKeyboardOwner } from './wall/wall-context';
 
-export function ExternalLinkModalHost({
-  onKeyboardActiveChange,
-}: {
-  onKeyboardActiveChange: (active: boolean) => void;
-}) {
+export function ExternalLinkModalHost() {
   const pending = useSyncExternalStore(
     subscribeExternalLinkConfirmation,
     getExternalLinkConfirmationSnapshot,
   );
 
-  useEffect(() => {
-    onKeyboardActiveChange(pending !== null);
-    return () => onKeyboardActiveChange(false);
-  }, [onKeyboardActiveChange, pending]);
+  useDialogKeyboardOwner(pending !== null);
 
   const close = useCallback(() => {
     clearExternalLinkConfirmation();

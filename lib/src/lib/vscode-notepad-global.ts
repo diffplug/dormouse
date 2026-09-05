@@ -12,7 +12,7 @@
  * error instead.
  */
 import { SURFACE_KINDS, type SurfaceKind } from 'dor/commands/types';
-import { readArchivedNote, readCwdState } from './notepad/archive-model';
+import { readArchivedNote, readCwdState, readMirrorTerminalId } from './notepad/archive-model';
 import type { ArchivedNote, VolatileNotepadSnapshot, VolatileSurfaceNotes } from './notepad/types';
 
 /** Global the host injects the mirror into; `null` on every other boot. */
@@ -37,6 +37,7 @@ function readSurface(value: unknown): VolatileSurfaceNotes | null {
     if (!note) return null;
     notes.push(note);
   }
+  const terminalId = readMirrorTerminalId(value.terminalId);
   return {
     surfaceId: value.surfaceId,
     surfaceTitle: value.surfaceTitle,
@@ -45,9 +46,7 @@ function readSurface(value: unknown): VolatileSurfaceNotes | null {
     // a batch this Surface has not written yet. The PTY id beside it is the
     // same: the resuming webview re-derives its own.
     cwd: readCwdState(value.cwd),
-    ...(typeof value.terminalId === 'string' && value.terminalId
-      ? { terminalId: value.terminalId }
-      : {}),
+    ...(terminalId ? { terminalId } : {}),
     notes,
   };
 }

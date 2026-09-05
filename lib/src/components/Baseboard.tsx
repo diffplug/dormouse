@@ -11,7 +11,7 @@ import {
 import { SettingsDialog } from './SettingsDialog';
 import { Door } from './Door';
 import { DoorNotepadPopover } from './DoorNotepadPopover';
-import type { SourceNotice } from './NoteList';
+import { sourceNoticeFor, type SourceNotice } from './NoteList';
 import { DoorElementsContext, useDialogKeyboardOwner } from './wall/wall-context';
 import type { DoorChip, DooredItem } from './wall/wall-types';
 import { hasTerminal } from 'dor/commands/types';
@@ -256,12 +256,9 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
     setDoorNotepad(null);
     if (item) onReattach(item);
     requestAnimationFrame(() => {
-      const outcome = revealNoteSource(open.id, noteId);
-      if (outcome.ok) return;
-      setDoorNotepad({
-        ...open,
-        sourceNotice: { noteId, kind: outcome.reason === 'alternate-buffer' ? 'alternate-buffer' : 'unavailable' },
-      });
+      const sourceNotice = sourceNoticeFor(noteId, revealNoteSource(open.id, noteId));
+      if (!sourceNotice) return;
+      setDoorNotepad({ ...open, sourceNotice });
     });
   }, [doorNotepad, items, onReattach]);
 

@@ -412,14 +412,17 @@ describe('archiveSurfaceNotes', () => {
       });
     });
 
-    it('never overrides a CWD the shell integration reported', async () => {
+    it('never overrides a CWD the shell integration reported, and does not ask', async () => {
       installMetaResolver();
       ensureTerminalPaneState('s1', { cwd: CWD });
-      vi.spyOn(adapter, 'getCwd').mockResolvedValue('/somewhere/else');
+      const getCwd = vi.spyOn(adapter, 'getCwd').mockResolvedValue('/somewhere/else');
       addPlainNote('s1', 'osc7 wins');
 
       await archiveSurfaceNotes(['s1']);
 
+      // The answer would be discarded, and asking is an `lsof` on the PTY
+      // host's event loop.
+      expect(getCwd).not.toHaveBeenCalled();
       expect((await stored()).batches[0].cwd).toEqual(CWD);
     });
 

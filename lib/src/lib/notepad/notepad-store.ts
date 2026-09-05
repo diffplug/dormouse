@@ -53,16 +53,34 @@ const closingSurfaces = new Map<string, number>();
  */
 const pendingBatchIdBySurface = new Map<string, string>();
 
+/** The freeze's own listeners. It changes neither a note nor which panel is
+ *  open, so waking `listeners` for it would drop the snapshot, re-render every
+ *  Door, and post a volatile mirror that has not moved. */
+const closingListeners = new Set<() => void>();
+
 function notify(): void {
   cachedSnapshot = null;
   listeners.forEach((listener) => listener());
   scheduleVolatileSync();
 }
 
+function notifyClosing(): void {
+  closingListeners.forEach((listener) => listener());
+}
+
 export function subscribeToNotepad(listener: () => void): () => void {
   listeners.add(listener);
   return () => {
     listeners.delete(listener);
+  };
+}
+
+/** Subscribe to the freeze alone (`isSurfaceClosing`), which is what the panel's
+ *  read-only state reads. */
+export function subscribeToClosing(listener: () => void): () => void {
+  closingListeners.add(listener);
+  return () => {
+    closingListeners.delete(listener);
   };
 }
 
@@ -114,7 +132,7 @@ export function peekPendingBatchId(surfaceId: string): string | undefined {
 export function beginClosing(surfaceIds: Iterable<string>): () => void {
   const ids = [...surfaceIds];
   for (const id of ids) closingSurfaces.set(id, (closingSurfaces.get(id) ?? 0) + 1);
-  if (ids.length > 0) notify();
+  if (ids.length > 0) notifyClosing();
   let released = false;
   return () => {
     // Idempotent: a caller that releases twice must not thaw someone else's
@@ -126,7 +144,7 @@ export function beginClosing(surfaceIds: Iterable<string>): () => void {
       if (remaining <= 0) closingSurfaces.delete(id);
       else closingSurfaces.set(id, remaining);
     }
-    if (ids.length > 0) notify();
+    if (ids.length > 0) notifyClosing();
   };
 }
 
@@ -243,6 +261,13 @@ export function deleteNote(surfaceId: string, noteId: string): void {
   );
 }
 
+/** An untouched Add New. Not a note the user wrote: it is pruned on blur, and a
+ *  closure never archives it — it would be a row nobody typed, and a Surface
+ *  holding only these closes as if it held none. */
+export function isEmptyPlainNote(note: LiveNote): boolean {
+  return note.content.kind === 'plain' && note.content.text === '';
+}
+
 /**
  * Remove a note only if it is plain and empty — the blur/close rule for an
  * Add New that was never typed into. A rich note or one with text is kept, so
@@ -252,7 +277,7 @@ export function pruneEmptyNote(surfaceId: string, noteId: string): boolean {
   if (isSurfaceClosing(surfaceId)) return false;
   const note = notesBySurface.get(surfaceId)?.find((candidate) => candidate.id === noteId);
   if (!note) return false;
-  if (note.content.kind !== 'plain' || note.content.text !== '') return false;
+  if (!isEmptyPlainNote(note)) return false;
   deleteNote(surfaceId, noteId);
   return true;
 }
@@ -348,6 +373,7 @@ export function clearAllNotepads(): void {
   stagedDeletions = {};
   setOpenNotepadId(null);
   notify();
+  notifyClosing();
 }
 
 // --- Open panel ---

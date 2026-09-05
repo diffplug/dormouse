@@ -8,6 +8,7 @@ import {
   getOpenNotepadId,
   isSurfaceClosing,
   noteCount,
+  subscribeToClosing,
   subscribeToNotepad,
   subscribeToOpenNotepad,
 } from '../lib/notepad/notepad-store';
@@ -36,7 +37,7 @@ export function useNotes(surfaceId: string): readonly LiveNote[] {
  *  renders read-only (docs/specs/notepad.md → "Closure"). */
 export function useSurfaceClosing(surfaceId: string): boolean {
   return useSyncExternalStore(
-    subscribeToNotepad,
+    subscribeToClosing,
     useCallback(() => isSurfaceClosing(surfaceId), [surfaceId]),
   );
 }

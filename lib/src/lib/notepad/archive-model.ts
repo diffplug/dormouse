@@ -20,31 +20,49 @@ const HEX_COLOR = /^#[0-9a-f]{6}$/;
 const CWD_SOURCES: readonly CwdSource[] = ['osc7', 'osc9_9', 'osc633', 'osc1337', 'process', 'manual'];
 const PATH_KINDS: readonly PathKind[] = ['posix', 'windows', 'unknown'];
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
-}
-
 /** Every reader gates on this: a key it does not know is a validation failure,
  *  because `runMutation` rewrites the whole archive from what was read back
  *  (`lib/src/lib/notepad/archive-service.ts`), so a field only a newer build
  *  understands would be erased by this build's next save. */
 function hasOnlyKeys(record: Record<string, unknown>, allowed: readonly string[]): boolean {
-  for (const key of Object.keys(record)) {
-    if (!allowed.includes(key)) return false;
-  }
-  return true;
+  return Object.keys(record).every((key) => allowed.includes(key));
 }
 
-const RUN_KEYS = ['text', 'bold', 'italic', 'foreground', 'background'] as const;
-const PLAIN_CONTENT_KEYS = ['kind', 'text'] as const;
-const TERMINAL_CONTENT_KEYS = ['kind', 'runs'] as const;
-const NOTE_KEYS = ['id', 'createdAt', 'content'] as const;
-const CWD_KEYS = ['uri', 'path', 'host', 'scheme', 'pathKind', 'isRemote', 'source', 'updatedAt'] as const;
-const BATCH_KEYS = ['id', 'closedAt', 'surfaceTitle', 'surfaceKind', 'cwd', 'notes'] as const;
-const ARCHIVE_KEYS = ['version', 'batches'] as const;
+function isRecord(value: unknown, allowed?: readonly string[]): value is Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  return !allowed || hasOnlyKeys(value as Record<string, unknown>, allowed);
+}
+
+/**
+ * Pin an allowlist to the type it guards: an entry the type does not have is
+ * rejected by `keyof T`, and a key the type *has* that the list forgot leaves
+ * `Exclude` non-empty and fails the call.
+ *
+ * That second direction is the point. Adding a field to `CwdState` in
+ * `terminal-state.ts` and not to `CWD_KEYS` would make every stored archive
+ * unreadable the moment one carried it, since an unknown key fails validation
+ * wholesale — so it is a compile error here instead.
+ */
+function allKeysOf<T>() {
+  return <K extends readonly (keyof T)[]>(
+    keys: K & (Exclude<keyof T, K[number]> extends never ? unknown : never),
+  ): K => keys;
+}
+
+const RUN_KEYS = allKeysOf<RichTextRun>()(['text', 'bold', 'italic', 'foreground', 'background'] as const);
+const PLAIN_CONTENT_KEYS = allKeysOf<Extract<NoteContent, { kind: 'plain' }>>()(['kind', 'text'] as const);
+const TERMINAL_CONTENT_KEYS = allKeysOf<Extract<NoteContent, { kind: 'terminal' }>>()(['kind', 'runs'] as const);
+const NOTE_KEYS = allKeysOf<ArchivedNote>()(['id', 'createdAt', 'content'] as const);
+const CWD_KEYS = allKeysOf<CwdState>()(
+  ['uri', 'path', 'host', 'scheme', 'pathKind', 'isRemote', 'source', 'updatedAt'] as const,
+);
+const BATCH_KEYS = allKeysOf<ArchiveBatch>()(
+  ['id', 'closedAt', 'surfaceTitle', 'surfaceKind', 'cwd', 'notes'] as const,
+);
+const ARCHIVE_KEYS = allKeysOf<NotepadArchiveV1>()(['version', 'batches'] as const);
 
 function readRun(value: unknown): RichTextRun | null {
-  if (!isRecord(value) || !hasOnlyKeys(value, RUN_KEYS)) return null;
+  if (!isRecord(value, RUN_KEYS)) return null;
   if (typeof value.text !== 'string') return null;
   const run: RichTextRun = { text: value.text };
   if (value.bold !== undefined) {
@@ -67,11 +85,11 @@ function readRun(value: unknown): RichTextRun | null {
 function readContent(value: unknown): NoteContent | null {
   if (!isRecord(value)) return null;
   if (value.kind === 'plain') {
-    if (!hasOnlyKeys(value, PLAIN_CONTENT_KEYS) || typeof value.text !== 'string') return null;
+    if (!isRecord(value, PLAIN_CONTENT_KEYS) || typeof value.text !== 'string') return null;
     return { kind: 'plain', text: value.text };
   }
   if (value.kind === 'terminal') {
-    if (!hasOnlyKeys(value, TERMINAL_CONTENT_KEYS) || !Array.isArray(value.runs)) return null;
+    if (!isRecord(value, TERMINAL_CONTENT_KEYS) || !Array.isArray(value.runs)) return null;
     const runs: RichTextRun[] = [];
     for (const raw of value.runs) {
       const run = readRun(raw);
@@ -87,7 +105,7 @@ function readContent(value: unknown): NoteContent | null {
  *  because the boot global carrying the VS Code mirror validates the same shape
  *  (`readInjectedVolatileNotepad` in `lib/src/lib/vscode-notepad-global.ts`). */
 export function readArchivedNote(value: unknown): ArchivedNote | null {
-  if (!isRecord(value) || !hasOnlyKeys(value, NOTE_KEYS)) return null;
+  if (!isRecord(value, NOTE_KEYS)) return null;
   if (typeof value.id !== 'string' || !value.id) return null;
   if (typeof value.createdAt !== 'number' || !Number.isFinite(value.createdAt)) return null;
   const content = readContent(value.content);
@@ -99,7 +117,7 @@ export function readArchivedNote(value: unknown): ArchivedNote | null {
  *  required `path`, `pathKind`, `isRemote`, `source`, `updatedAt`; optional
  *  `uri`, `host`, `scheme: 'file'`; nothing else. */
 export function readCwdState(value: unknown): CwdState | null {
-  if (!isRecord(value) || !hasOnlyKeys(value, CWD_KEYS)) return null;
+  if (!isRecord(value, CWD_KEYS)) return null;
   if (typeof value.path !== 'string') return null;
   if (typeof value.pathKind !== 'string' || !PATH_KINDS.includes(value.pathKind as PathKind)) return null;
   if (typeof value.isRemote !== 'boolean') return null;
@@ -127,8 +145,18 @@ export function readCwdState(value: unknown): CwdState | null {
   return cwd;
 }
 
+/** The mirror's PTY id: a non-empty string, or nothing. Mirror-only, so it never
+ *  goes through a batch reader — a batch carrying it would be rejected on the
+ *  next load — and the answer is `undefined` rather than `null` because the
+ *  field is spread in, never assigned (`VolatileSurfaceNotes` in
+ *  `lib/src/lib/notepad/types.ts`). A Surface without one is simply not asked
+ *  where its process is. */
+export function readMirrorTerminalId(value: unknown): string | undefined {
+  return typeof value === 'string' && value ? value : undefined;
+}
+
 function readBatch(value: unknown): ArchiveBatch | null {
-  if (!isRecord(value) || !hasOnlyKeys(value, BATCH_KEYS)) return null;
+  if (!isRecord(value, BATCH_KEYS)) return null;
   if (typeof value.id !== 'string' || !value.id) return null;
   if (typeof value.closedAt !== 'number' || !Number.isFinite(value.closedAt)) return null;
   if (typeof value.surfaceTitle !== 'string') return null;
@@ -173,7 +201,7 @@ export function readNotepadArchive(raw: unknown): NotepadArchiveV1 | null {
       return null;
     }
   }
-  if (!isRecord(value) || !hasOnlyKeys(value, ARCHIVE_KEYS)) return null;
+  if (!isRecord(value, ARCHIVE_KEYS)) return null;
   if (value.version !== 1 || !Array.isArray(value.batches)) return null;
   const batches: ArchiveBatch[] = [];
   const seen = new Set<string>();

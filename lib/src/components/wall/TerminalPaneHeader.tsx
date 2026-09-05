@@ -52,7 +52,6 @@ import {
   SelectedIdContext,
   WindowFocusedContext,
   ZoomedIdContext,
-  useDialogKeyboardCallback,
 } from './wall-context';
 
 const tabVariant = tv({
@@ -89,10 +88,6 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
   const renamingId = useContext(RenamingIdContext);
   const zoomed = useContext(ZoomedIdContext) === id;
   const windowFocused = useContext(WindowFocusedContext);
-  // One lease each: the TODO dialog and the context menu can be up together, so
-  // neither may release the other's suppression when it closes.
-  const setTodoDialogKeyboardActive = useDialogKeyboardCallback();
-  const setContextMenuKeyboardActive = useDialogKeyboardCallback();
   const activityStates = useSyncExternalStore(subscribeToActivity, getActivitySnapshot);
   const terminalStates = useSyncExternalStore(subscribeToTerminalPaneState, getTerminalPaneStateSnapshot);
   const mouseStates = useSyncExternalStore(subscribeToMouseSelection, getMouseSelectionSnapshot);
@@ -370,7 +365,6 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
           triggerRect={dialogTriggerRect}
           sessionId={id}
           onClose={closeDialog}
-          onKeyboardActiveChange={setTodoDialogKeyboardActive}
         />
       )}
       {todoPreviewRect && activity.notification && !dialogTriggerRect && (
@@ -385,7 +379,6 @@ export function TerminalPaneHeader({ id, title }: PaneProps) {
           id={id}
           anchor={contextMenu}
           onClose={closeContextMenu}
-          onKeyboardActiveChange={setContextMenuKeyboardActive}
           candidates={titleCandidates}
           currentTitle={displayTitleBase}
         />

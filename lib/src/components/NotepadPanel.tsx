@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { NotepadBody } from './NotepadBody';
-import type { SourceNotice } from './NoteList';
+import { sourceNoticeFor, type SourceNotice } from './NoteList';
 import { useOpenNotepadId } from './use-notepad';
 import { hasNotepadArchive } from '../lib/notepad/archive-service';
 import { useDialogKeyboardOwner } from './wall/wall-context';
@@ -25,13 +25,9 @@ export function NotepadPanel({ surfaceId }: { surfaceId: string }) {
   // never unmounts in between and the message survives.
   const revealSource = useCallback((noteId: string) => {
     setOpenNotepadId(null);
-    const outcome = revealNoteSource(surfaceId, noteId);
-    if (outcome.ok) {
-      setSourceNotice(null);
-      return;
-    }
-    setSourceNotice({ noteId, kind: outcome.reason === 'alternate-buffer' ? 'alternate-buffer' : 'unavailable' });
-    setOpenNotepadId(surfaceId);
+    const notice = sourceNoticeFor(noteId, revealNoteSource(surfaceId, noteId));
+    setSourceNotice(notice);
+    if (notice) setOpenNotepadId(surfaceId);
   }, [surfaceId]);
 
   // A message belongs to the panel that reported it; the next open starts clean.

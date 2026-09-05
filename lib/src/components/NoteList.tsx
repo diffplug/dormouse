@@ -3,6 +3,7 @@ import { clsx } from 'clsx';
 import { CheckIcon, CopyIcon, PushPinIcon, TrashIcon } from '@phosphor-icons/react';
 import { popupButton } from './design';
 import { noteToPlainText } from '../lib/notepad/rich-clipboard';
+import type { PinOutcome } from '../lib/notepad/pin';
 import type { LiveNote, RichTextRun } from '../lib/notepad/types';
 
 /** How long the Copy button shows its check, matching the terminal selection
@@ -21,6 +22,14 @@ const SOURCE_NOTICE_TEXT: Record<SourceNotice['kind'], string> = {
   unavailable: 'Source no longer available',
   'alternate-buffer': 'Exit the full-screen program to show this source',
 };
+
+/** The notice a pin's outcome earns, or `null` when it resolved and there is
+ *  nothing to say. A kept pin is the retryable one, so the kind follows
+ *  `outcome.kept` rather than the reason. */
+export function sourceNoticeFor(noteId: string, outcome: PinOutcome): SourceNotice | null {
+  if (outcome.ok) return null;
+  return { noteId, kind: outcome.kept ? 'alternate-buffer' : 'unavailable' };
+}
 
 export interface NoteListProps {
   /** Creation order, top to bottom — the store's own order, never re-sorted. */

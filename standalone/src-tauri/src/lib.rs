@@ -10,7 +10,7 @@ use std::{
     process::Stdio,
     sync::atomic::{AtomicBool, AtomicU64, Ordering},
     sync::mpsc,
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Arc, Mutex, MutexGuard, OnceLock},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tauri::{
@@ -961,6 +961,20 @@ fn temp_write_path(path: &Path) -> PathBuf {
     path.with_file_name(name)
 }
 
+/// The directory `path` is written into, created and tightened to owner-only.
+///
+/// The `restrict_to_owner` failure is deliberately ignored: a filesystem without
+/// the permission model it wants must not fail the write itself — losing the
+/// data is worse than keeping it under the ACL the OS gave it.
+fn ensure_owner_only_parent(path: &Path) -> Result<&Path, String> {
+    let dir = path
+        .parent()
+        .ok_or_else(|| format!("no parent directory for {}", path.display()))?;
+    create_dir_all(dir).map_err(|e| format!("create dir {}: {e}", dir.display()))?;
+    let _ = restrict_to_owner(dir, 0o700);
+    Ok(dir)
+}
+
 /// Write `contents` to `path` atomically and owner-only.
 ///
 /// The one implementation behind both machine-local stores this app owns — the
@@ -968,14 +982,7 @@ fn temp_write_path(path: &Path) -> PathBuf {
 /// text and both must survive a crash mid-write
 /// (docs/specs/security-local.md -> "Persisted state").
 fn write_file_atomically(path: &Path, contents: &str) -> Result<(), String> {
-    let dir = path
-        .parent()
-        .ok_or_else(|| format!("no parent directory for {}", path.display()))?;
-    create_dir_all(dir).map_err(|e| format!("create dir {}: {e}", dir.display()))?;
-    // Deliberately ignored here: a filesystem without the permission model
-    // `restrict_to_owner` wants must not fail the write itself — losing the data
-    // is worse than keeping it under the ACL the OS gave it.
-    let _ = restrict_to_owner(dir, 0o700);
+    let dir = ensure_owner_only_parent(path)?;
     let tmp = temp_write_path(path);
     // Atomic replace: write a sibling temp file, fsync it, then rename over the
     // target so a crash mid-write can never truncate the previous good copy.
@@ -1102,17 +1109,31 @@ fn notepad_archive_path(app: &AppHandle) -> Result<PathBuf, String> {
 /// A *separate* file, never renamed: the archive itself is replaced by rename on
 /// every save, so its inode is a new one each time and cannot carry a lock.
 fn notepad_archive_lock_path(path: &Path) -> PathBuf {
-    let stem = path
-        .file_stem()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .into_owned();
-    path.with_file_name(format!("{stem}.lock"))
+    path.with_extension("lock")
 }
 
-fn lock_gate(gate: &Mutex<()>) -> Result<std::sync::MutexGuard<'_, ()>, String> {
-    gate.lock()
-        .map_err(|_| "failed to lock the notepad archive".to_string())
+/// Exclusive access to the archive, released when it drops.
+///
+/// Taken gate first, then the interprocess file lock. The fields are declared
+/// in the reverse of that on purpose — Rust drops them in declaration order, and
+/// a gate released ahead of the file lock would let the next thread through only
+/// to block on the filesystem, which is the one thing the gate exists to prevent
+/// (`NotepadArchiveState::gate`).
+struct ArchiveLock<'a> {
+    _file: File,
+    _gate: MutexGuard<'a, ()>,
+}
+
+/// The one way in: no caller may take either half on its own.
+fn lock_archive<'a>(gate: &'a Mutex<()>, path: &Path) -> Result<ArchiveLock<'a>, String> {
+    let gate = gate
+        .lock()
+        .map_err(|_| "failed to lock the notepad archive".to_string())?;
+    let file = lock_notepad_archive(path)?;
+    Ok(ArchiveLock {
+        _file: file,
+        _gate: gate,
+    })
 }
 
 /// Take the interprocess lock, blocking until it is ours; released when the
@@ -1124,11 +1145,7 @@ fn lock_gate(gate: &Mutex<()>) -> Result<std::sync::MutexGuard<'_, ()>, String> 
 /// close. Blocking is safe because every caller is a `#[tauri::command(async)]`
 /// off the event loop, and each holder does one small read or write.
 fn lock_notepad_archive(path: &Path) -> Result<File, String> {
-    let dir = path
-        .parent()
-        .ok_or_else(|| format!("no parent directory for {}", path.display()))?;
-    create_dir_all(dir).map_err(|e| format!("create dir {}: {e}", dir.display()))?;
-    let _ = restrict_to_owner(dir, 0o700);
+    ensure_owner_only_parent(path)?;
     let lock_path = notepad_archive_lock_path(path);
     let file = OpenOptions::new()
         .create(true)
@@ -1178,8 +1195,7 @@ fn read_notepad_archive_from(
     path: &Path,
     gate: &Mutex<()>,
 ) -> Result<Option<(String, String)>, String> {
-    let _gate = lock_gate(gate)?;
-    let _lock = lock_notepad_archive(path)?;
+    let _lock = lock_archive(gate, path)?;
     read_notepad_archive_locked(path)
 }
 
@@ -1189,11 +1205,10 @@ fn write_notepad_archive_to(
     state: &str,
     base_revision: Option<&str>,
 ) -> Result<String, String> {
-    let _gate = lock_gate(gate)?;
     // Held across the whole compare-and-write: the comparison is worth nothing
     // if another save — this process's or another Dormouse's — can land between
     // it and the rename.
-    let _lock = lock_notepad_archive(path)?;
+    let _lock = lock_archive(gate, path)?;
     // Re-read under the lock rather than trusting anything cached: a revision
     // nobody minted (a garbled one, or one whose bytes another process has since
     // replaced) then reads as a conflict rather than as an error the caller
@@ -1213,8 +1228,7 @@ fn write_notepad_archive_to(
 /// `notepad-archive-v1.unreadable-<unix-millis>.json` beside the original and
 /// left for whoever wants to salvage them (docs/specs/notepad.md).
 fn reset_notepad_archive_at(path: &Path, gate: &Mutex<()>) -> Result<(), String> {
-    let _gate = lock_gate(gate)?;
-    let _lock = lock_notepad_archive(path)?;
+    let _lock = lock_archive(gate, path)?;
     let dir = path
         .parent()
         .ok_or_else(|| format!("no parent directory for {}", path.display()))?;

@@ -983,13 +983,10 @@ export function attachRouter(
       // Every synchronous bookkeeping step stays here; only the kills wait,
       // because the archive write below asks each live PTY where its process
       // is and a dead one cannot answer.
-      const toKill: string[] = [];
+      const toKill = killOnDispose ? [...ownedPtyIds] : [];
       for (const id of ownedPtyIds) {
         globalOwnedPtyIds.delete(id);
-        if (killOnDispose) {
-          ownerPtyStreams.delete(id);
-          toKill.push(id);
-        }
+        if (killOnDispose) ownerPtyStreams.delete(id);
       }
       ownedPtyIds.clear();
       messageDisposable.dispose();
@@ -1009,14 +1006,15 @@ export function attachRouter(
       // time under a fresh batch id; an empty mirror writes nothing. Both
       // drains are synchronous, so nothing this router reports later can slip
       // into the write that is now in flight.
-      let write = Promise.resolve();
-      if (notepadContext && killOnDispose) {
-        const mirror = takeVolatileForRouter(notepadRouterId);
-        write = refreshMirrorCwds(mirror, ptyManager.getCwd, TEARDOWN_CWD_REFRESH_MS)
-          .then((refreshed) => archiveVolatileMirror(notepadContext, refreshed));
-      } else if (notepadContext) {
-        write = mutateNotepadArchive(notepadContext, takeStagedForRouter(notepadRouterId));
-      }
+      const write: Promise<unknown> = !notepadContext
+        ? Promise.resolve()
+        : killOnDispose
+          ? refreshMirrorCwds(
+            takeVolatileForRouter(notepadRouterId),
+            ptyManager.getCwd,
+            TEARDOWN_CWD_REFRESH_MS,
+          ).then((refreshed) => archiveVolatileMirror(notepadContext, refreshed))
+          : mutateNotepadArchive(notepadContext, takeStagedForRouter(notepadRouterId));
       void write
         .catch((err) => {
           log.error('[notepad] could not commit a disposed webview\'s archive write:', String(err));

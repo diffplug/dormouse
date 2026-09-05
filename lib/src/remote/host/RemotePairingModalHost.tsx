@@ -5,6 +5,7 @@ import {
   subscribePairingApproval,
 } from './pairing-approval';
 import { installRemoteHostConsoleHook } from './activation';
+import { useDialogKeyboardOwner } from '../../components/wall/wall-context';
 
 /**
  * Renders the head of the pairing-approval queue and, on mount, wires this
@@ -12,21 +13,14 @@ import { installRemoteHostConsoleHook } from './activation';
  * other modal hosts in the wall — additive, and inert unless the user has
  * enrolled a Host.
  */
-export function RemotePairingModalHost({
-  onKeyboardActiveChange,
-}: {
-  onKeyboardActiveChange?: (active: boolean) => void;
-}) {
+export function RemotePairingModalHost() {
   const pending = useSyncExternalStore(subscribePairingApproval, getPairingApprovalSnapshot);
   const head = pending[0] ?? null;
 
   // Idempotent, because StrictMode mounts this twice.
   useEffect(() => installRemoteHostConsoleHook(), []);
 
-  useEffect(() => {
-    onKeyboardActiveChange?.(head !== null);
-    return () => onKeyboardActiveChange?.(false);
-  }, [onKeyboardActiveChange, head]);
+  useDialogKeyboardOwner(head !== null);
 
   if (!head) return null;
 

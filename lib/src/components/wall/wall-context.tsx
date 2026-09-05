@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useRef } from 'react';
+import { createContext, useContext, useEffect } from 'react';
 import type { AlertButtonActionResult, SessionStatus, SetTerminalUserTitleResult } from '../../lib/terminal-registry';
 import type { WallMode } from './wall-types';
 import type { RenderMode } from './agent-browser-screen';
@@ -125,30 +125,11 @@ export function createDialogKeyboardCoordinator(
   };
 }
 
-/** Hold one independently reference-counted lease while `active`. */
-export function useDialogKeyboardOwner(active: boolean): void {
-  const acquire = useContext(DialogKeyboardContext);
-  useEffect(() => (active ? acquire() : undefined), [acquire, active]);
-}
-
-/** Adapt the lease to the boolean seam of a modal whose prop reports activeness.
- *  Each call owns its own lease, and unmounting releases it. */
-export function useDialogKeyboardCallback(
-  acquireOverride?: AcquireDialogKeyboard,
-): (active: boolean) => void {
+/** Hold one independently reference-counted lease while `active`; unmounting
+ *  releases it. `acquireOverride` is for a caller that sits above its own
+ *  `DialogKeyboardContext.Provider` (Wall itself) and so cannot read the context. */
+export function useDialogKeyboardOwner(active: boolean, acquireOverride?: AcquireDialogKeyboard): void {
   const contextAcquire = useContext(DialogKeyboardContext);
   const acquire = acquireOverride ?? contextAcquire;
-  const releaseRef = useRef<(() => void) | null>(null);
-  const setActive = useCallback((active: boolean) => {
-    if (active && !releaseRef.current) releaseRef.current = acquire();
-    if (!active && releaseRef.current) {
-      releaseRef.current();
-      releaseRef.current = null;
-    }
-  }, [acquire]);
-  useEffect(() => () => {
-    releaseRef.current?.();
-    releaseRef.current = null;
-  }, [acquire]);
-  return setActive;
+  useEffect(() => (active ? acquire() : undefined), [acquire, active]);
 }

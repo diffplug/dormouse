@@ -97,7 +97,7 @@ import {
   WindowFocusedContext,
   ZoomedIdContext,
   createDialogKeyboardCoordinator,
-  useDialogKeyboardCallback,
+  useDialogKeyboardOwner,
   type PaneWriteActions,
   type WallActions,
 } from './wall/wall-context';
@@ -321,14 +321,7 @@ export function Wall({
   // One reference-counted lease per open dialog: overlapping dialogs each hold
   // their own, so the one closing cannot release the other's suppression.
   const dialogKeyboardActiveRef = useRef(false);
-  const acquireDialogKeyboardRef = useRef<ReturnType<typeof createDialogKeyboardCoordinator> | null>(null);
-  if (!acquireDialogKeyboardRef.current) {
-    acquireDialogKeyboardRef.current = createDialogKeyboardCoordinator(dialogKeyboardActiveRef);
-  }
-  const acquireDialogKeyboard = acquireDialogKeyboardRef.current;
-  const setExternalLinkKeyboardActive = useDialogKeyboardCallback(acquireDialogKeyboard);
-  const setAgentBrowserKeyboardActive = useDialogKeyboardCallback(acquireDialogKeyboard);
-  const setRemotePairingKeyboardActive = useDialogKeyboardCallback(acquireDialogKeyboard);
+  const [acquireDialogKeyboard] = useState(() => createDialogKeyboardCoordinator(dialogKeyboardActiveRef));
 
   // Consumed once by the Lath seed effect to restore existing sessions
   const initialPaneIdsRef = useRef(initialPaneIds);
@@ -774,11 +767,9 @@ export function Wall({
   // hosts: a command-mode shortcut behind it must not kill a different pane.
   // Keyed on "is a prompt up", not on the queue: moving to the next failure must
   // not drop and re-raise the flag under another dialog host.
+  // Wall renders above its own Provider, so it hands the coordinator in directly.
   const anyArchiveFailure = archiveFailures.length > 0;
-  useEffect(
-    () => (anyArchiveFailure ? acquireDialogKeyboard() : undefined),
-    [anyArchiveFailure, acquireDialogKeyboard],
-  );
+  useDialogKeyboardOwner(anyArchiveFailure, acquireDialogKeyboard);
 
   useEffect(() => {
     // An iframe surface taking focus blurs this window without backgrounding the
@@ -1722,14 +1713,11 @@ export function Wall({
               version={paneElementsVersion}
             />
 
-            <ExternalLinkModalHost onKeyboardActiveChange={setExternalLinkKeyboardActive} />
-            <AgentBrowserScreenModalHost
-              onKeyboardActiveChange={setAgentBrowserKeyboardActive}
-              resolveLabel={surfaceRefForId}
-            />
+            <ExternalLinkModalHost />
+            <AgentBrowserScreenModalHost resolveLabel={surfaceRefForId} />
             {enableRemoteHost ? (
               <Suspense fallback={null}>
-                <RemotePairingModalHost onKeyboardActiveChange={setRemotePairingKeyboardActive} />
+                <RemotePairingModalHost />
               </Suspense>
             ) : null}
             {dialogHost}

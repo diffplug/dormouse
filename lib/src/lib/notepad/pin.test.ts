@@ -105,18 +105,18 @@ describe('revealNoteSource', () => {
 
   it('reports a note that has no pin', () => {
     const noteId = addPlainNote('term-1', 'typed by hand');
-    expect(revealNoteSource('term-1', noteId)).toEqual({ ok: false, reason: 'no-source' });
+    expect(revealNoteSource('term-1', noteId)).toEqual({ ok: false, reason: 'no-source', kept: false });
   });
 
   it('reports a note that is gone', () => {
-    expect(revealNoteSource('term-1', 'missing')).toEqual({ ok: false, reason: 'no-source' });
+    expect(revealNoteSource('term-1', 'missing')).toEqual({ ok: false, reason: 'no-source', kept: false });
   });
 
   it('drops the pin when the terminal instance is gone', () => {
     mocks.getTerminalInstance.mockReturnValue(null);
     const { noteId, source: src } = pinnedNote();
 
-    expect(revealNoteSource('term-1', noteId)).toEqual({ ok: false, reason: 'no-terminal' });
+    expect(revealNoteSource('term-1', noteId)).toEqual({ ok: false, reason: 'no-terminal', kept: false });
     expect(getNotes('term-1')[0].source).toBeUndefined();
     // The markers belonged to that instance; dropping the pin releases them.
     expect(markersOf(src).every((marker) => marker.isDisposed)).toBe(true);
@@ -128,7 +128,7 @@ describe('revealNoteSource', () => {
     markersOf(src)[0].dispose();
     const { noteId } = pinnedNote(src);
 
-    expect(revealNoteSource('term-1', noteId)).toEqual({ ok: false, reason: 'disposed' });
+    expect(revealNoteSource('term-1', noteId)).toEqual({ ok: false, reason: 'disposed', kept: false });
     expect(getNotes('term-1')[0].source).toBeUndefined();
   });
 
@@ -137,7 +137,7 @@ describe('revealNoteSource', () => {
     mocks.getTerminalInstance.mockReturnValue(makeTerminal(LINES, { type: 'alternate' }).terminal);
     const { noteId, source: src } = pinnedNote();
 
-    expect(revealNoteSource('term-1', noteId)).toEqual({ ok: false, reason: 'alternate-buffer' });
+    expect(revealNoteSource('term-1', noteId)).toEqual({ ok: false, reason: 'alternate-buffer', kept: true });
     expect(getNotes('term-1')[0].source).toBe(src);
     expect(markersOf(src).every((marker) => !marker.isDisposed)).toBe(true);
     expect(getMouseSelectionState('term-1').selection).toBeNull();
@@ -147,7 +147,7 @@ describe('revealNoteSource', () => {
     mocks.getTerminalInstance.mockReturnValue(makeTerminal(['alpha one']).terminal);
     const { noteId } = pinnedNote();
 
-    expect(revealNoteSource('term-1', noteId)).toEqual({ ok: false, reason: 'missing-rows' });
+    expect(revealNoteSource('term-1', noteId)).toEqual({ ok: false, reason: 'missing-rows', kept: false });
     expect(getNotes('term-1')[0].source).toBeUndefined();
   });
 
@@ -157,7 +157,7 @@ describe('revealNoteSource', () => {
     );
     const { noteId, source: src } = pinnedNote();
 
-    expect(revealNoteSource('term-1', noteId)).toEqual({ ok: false, reason: 'mismatch' });
+    expect(revealNoteSource('term-1', noteId)).toEqual({ ok: false, reason: 'mismatch', kept: false });
     expect(getNotes('term-1')[0].source).toBeUndefined();
     expect(markersOf(src).every((marker) => marker.isDisposed)).toBe(true);
     // The note itself survives every failure — only the link goes.

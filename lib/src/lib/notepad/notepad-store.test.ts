@@ -25,6 +25,7 @@ import {
   setNoteText,
   setOpenNotepadId,
   setStagedArchiveDeletions,
+  subscribeToClosing,
   subscribeToNotepad,
   subscribeToOpenNotepad,
   transferNotepad,
@@ -346,15 +347,20 @@ describe('the closure freeze', () => {
     expect(isSurfaceClosing('s1')).toBe(false);
   });
 
-  it('lets the teardown paths through, and wakes note subscribers', () => {
+  it('lets the teardown paths through, and wakes the closing subscribers only', () => {
     const src = source('term-1');
     addTerminalNote('s1', [{ text: 'boom' }], src);
     const listener = vi.fn();
+    const closingListener = vi.fn();
     subscribeToNotepad(listener);
+    subscribeToClosing(closingListener);
 
-    // The freeze itself is a notification: the panel has to go read-only.
+    // The freeze itself is a notification: the panel has to go read-only. Its
+    // own, though — no note moved, so no Door re-renders and no mirror is
+    // re-posted.
     const release = beginClosing(['s1']);
-    expect(listener).toHaveBeenCalledTimes(1);
+    expect(closingListener).toHaveBeenCalledTimes(1);
+    expect(listener).not.toHaveBeenCalled();
 
     // The coordinator's own forget step, and the teardown paths that run
     // whatever a closure is doing.
