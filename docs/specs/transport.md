@@ -79,7 +79,7 @@ it to the renderer.
 
 **Must replay the retained transcript on every resume without consuming it** —
 for an existing router and for a replacement reclaiming a disposed view's PTYs
-alike (rationale). `message-router-replay.test.ts` pins reconstruction, ownership,
+alike (rationale). `vscode-ext/test/message-router-replay.test.ts` pins reconstruction, ownership,
 and live delivery.
 
 Source of truth: `getScrollback` / `bufferData` in `vscode-ext/src/pty-manager.ts`;
