@@ -190,9 +190,7 @@ describe('the pocket database', () => {
       // The blocker leaves; the abandoned open completes behind it.
       stale.close();
       closes.mockClear();
-      await new Promise((resolve) => setTimeout(resolve, 5));
-
-      expect(closes).toHaveBeenCalledTimes(1);
+      await vi.waitFor(() => expect(closes).toHaveBeenCalledTimes(1));
     } finally {
       closes.mockRestore();
     }

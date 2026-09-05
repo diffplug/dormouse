@@ -84,6 +84,8 @@
 
 **Why the `device-key` store is dropped on upgrade.** It belonged to the protocol that has been replaced, and a key nothing can use is only a credential left lying about.
 
+The v4 rename also drops `known-hosts` and empties `pending-deletions`: their old records name `hostId`, which the current Client no longer reads. Every earlier version converges on the same Burrow-keyed stores.
+
 **Why only the private half is stored as a `CryptoKey`.** A second stored `CryptoKey` would be a structured clone nothing ever reads — dead weight a future reader could mistake for the authoritative copy.
 
 ## Serving the built bundle
