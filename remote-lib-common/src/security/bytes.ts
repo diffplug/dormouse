@@ -1,9 +1,9 @@
 /**
  * Byte-level helpers shared by the security primitives.
  *
- * Implemented from scratch (no `TextEncoder`, `atob`, or `Buffer`) because
- * this package compiles against the bare ES2022 lib — see `webcrypto.ts` for
- * why. All wire-format values in the security model are base64url strings.
+ * UTF-8 uses the platform Encoding API; `globals.d.ts` declares its narrow
+ * surface without importing DOM or Node types. Base64url stays strict about
+ * alphabet and trailing bits across every runtime.
  */
 
 const B64U_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
@@ -96,63 +96,19 @@ export function fromBase64Url(text: string): Uint8Array {
   return out;
 }
 
-/** Encode a string as UTF-8 bytes. */
+const utf8Encoder = new TextEncoder();
+// Fatal decoding never silently changes authenticated text. `ignoreBOM` keeps
+// U+FEFF as content, including at the start of each independent terminal chunk.
+const utf8Decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+
+/** Encode UTF-8, replacing unpaired UTF-16 surrogates with U+FFFD. */
 export function utf8Encode(text: string): Uint8Array {
-  const out: number[] = [];
-  for (const ch of text) {
-    const cp = ch.codePointAt(0)!;
-    if (cp <= 0x7f) {
-      out.push(cp);
-    } else if (cp <= 0x7ff) {
-      out.push(0xc0 | (cp >> 6), 0x80 | (cp & 0x3f));
-    } else if (cp <= 0xffff) {
-      out.push(0xe0 | (cp >> 12), 0x80 | ((cp >> 6) & 0x3f), 0x80 | (cp & 0x3f));
-    } else {
-      out.push(
-        0xf0 | (cp >> 18),
-        0x80 | ((cp >> 12) & 0x3f),
-        0x80 | ((cp >> 6) & 0x3f),
-        0x80 | (cp & 0x3f),
-      );
-    }
-  }
-  return Uint8Array.from(out);
+  return utf8Encoder.encode(text);
 }
 
-/** Decode UTF-8 bytes to a string; throws on structurally invalid sequences. */
+/** Decode one complete UTF-8 value; reject malformed sequences. */
 export function utf8Decode(bytes: Uint8Array): string {
-  let out = '';
-  let i = 0;
-  while (i < bytes.length) {
-    const b0 = bytes[i]!;
-    let cp: number;
-    let extra: number;
-    if (b0 < 0x80) {
-      cp = b0;
-      extra = 0;
-    } else if ((b0 & 0xe0) === 0xc0) {
-      cp = b0 & 0x1f;
-      extra = 1;
-    } else if ((b0 & 0xf0) === 0xe0) {
-      cp = b0 & 0x0f;
-      extra = 2;
-    } else if ((b0 & 0xf8) === 0xf0) {
-      cp = b0 & 0x07;
-      extra = 3;
-    } else {
-      throw new Error(`invalid UTF-8 lead byte at index ${i}`);
-    }
-    if (i + extra >= bytes.length) throw new Error('truncated UTF-8 sequence');
-    for (let j = 1; j <= extra; j++) {
-      const b = bytes[i + j]!;
-      if ((b & 0xc0) !== 0x80) throw new Error(`invalid UTF-8 continuation byte at index ${i + j}`);
-      cp = (cp << 6) | (b & 0x3f);
-    }
-    if (cp > 0x10ffff) throw new Error(`invalid UTF-8 code point at index ${i}`);
-    out += String.fromCodePoint(cp);
-    i += extra + 1;
-  }
-  return out;
+  return utf8Decoder.decode(bytes);
 }
 
 /** Concatenate byte arrays. */

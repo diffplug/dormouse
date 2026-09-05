@@ -6,7 +6,7 @@
  * `terminal.closed` fires `onPtyExit`, and `dispose` cleans up.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { toBase64Url, utf8Encode, type DirectoryEntry } from 'remote-lib-common';
 
 import { RemotePtyAdapter, type RemoteAdapterClient } from './remote-adapter';
@@ -228,6 +228,28 @@ describe('RemotePtyAdapter attach / active pane', () => {
       { id: 's1', data: image, textData: 'prepost' },
       { id: 's1', data: '\x1b]1337;File=inline=1:AAAA\x07', textData: '' },
     ]);
+  });
+
+  it('drops a malformed projection pair and still delivers later valid data', async () => {
+    const client = new FakeClient();
+    const adapter = new RemotePtyAdapter(client);
+    const data: PtyDataDetail[] = [];
+    adapter.onPtyData((d) => data.push(d));
+    await adapter.setActivePane('s1', 80, 24);
+    const onData = client.lastAttach().handlers.onData;
+    const valid = toBase64Url(utf8Encode('valid'));
+    const overlong = toBase64Url(Uint8Array.of(0xc0, 0x80));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      expect(() => onData({ bytes: overlong, text: valid })).not.toThrow();
+      expect(() => onData({ bytes: valid, text: overlong })).not.toThrow();
+      expect(() => onData({ bytes: '!' })).not.toThrow();
+      expect(data).toEqual([]);
+      onData({ bytes: valid });
+      expect(data).toEqual([{ id: 's1', data: 'valid', textData: undefined }]);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('routes write and resize only to the attached pane', async () => {

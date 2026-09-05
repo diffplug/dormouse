@@ -40,7 +40,7 @@ test('base64url rejects malformed input', () => {
 });
 
 test('utf8 round-trips ascii, multibyte, and astral text', () => {
-  for (const text of ['', 'hello', 'héllo wörld', '€100', '日本語', '🐭 dormouse 🛡️']) {
+  for (const text of ['', 'hello', 'héllo wörld', '€100', '日本語', '🐭 dormouse 🛡️', '\ufeffleading BOM', 'interior\ufeffBOM']) {
     assert.equal(utf8Decode(utf8Encode(text)), text, JSON.stringify(text));
   }
 });
@@ -50,10 +50,25 @@ test('utf8Encode matches known multibyte vector', () => {
   assert.deepEqual(utf8Encode('€'), Uint8Array.of(0xe2, 0x82, 0xac));
 });
 
-test('utf8Decode rejects structurally invalid sequences', () => {
-  assert.throws(() => utf8Decode(Uint8Array.of(0x80)), /lead byte/);
-  assert.throws(() => utf8Decode(Uint8Array.of(0xe2, 0x82)), /truncated/);
-  assert.throws(() => utf8Decode(Uint8Array.of(0xe2, 0x41, 0x41)), /continuation/);
+test('utf8Encode replaces each unpaired surrogate with U+FFFD', () => {
+  assert.deepEqual(utf8Encode('\ud800x\udfff'), Uint8Array.of(
+    0xef, 0xbf, 0xbd, 0x78, 0xef, 0xbf, 0xbd,
+  ));
+});
+
+test('utf8Decode rejects malformed encodings without poisoning the next value', () => {
+  for (const bytes of [
+    [0x80],                         // lone continuation
+    [0xe2, 0x82],                   // truncated sequence
+    [0xe2, 0x41, 0x41],             // bad continuation
+    [0xc0, 0x80],                   // overlong NUL
+    [0xe0, 0x80, 0x80],             // overlong NUL, three bytes
+    [0xed, 0xa0, 0x80],             // UTF-16 surrogate U+D800
+    [0xf4, 0x90, 0x80, 0x80],       // above U+10FFFF
+  ]) {
+    assert.throws(() => utf8Decode(Uint8Array.from(bytes)), TypeError);
+    assert.equal(utf8Decode(Uint8Array.of(0xef, 0xbb, 0xbf, 0x61)), '\ufeffa');
+  }
 });
 
 test('concatBytes joins parts in order', () => {

@@ -258,11 +258,17 @@ export class RemotePtyAdapter implements PlatformAdapter {
   }
 
   #emitData(id: string, event: TerminalDataEvent): void {
-    const data = utf8Decode(fromBase64Url(event.bytes));
-    // Omitted `text` means the two projections are identical, which is what an
-    // omitted `textData` means downstream — so it is passed through as omitted
-    // rather than filled in, and an explicit empty one survives as empty.
-    const textData = event.text === undefined ? undefined : utf8Decode(fromBase64Url(event.text));
+    let data: string;
+    let textData: string | undefined;
+    try {
+      data = utf8Decode(fromBase64Url(event.bytes));
+      // Omitted means identical; an explicitly empty text projection stays empty.
+      textData = event.text === undefined ? undefined : utf8Decode(fromBase64Url(event.text));
+    } catch {
+      // Both projections describe one chunk: never deliver only its valid half.
+      console.warn('[pocket] discarding malformed terminal data');
+      return;
+    }
     for (const handler of this.#dataHandlers) handler({ id, data, textData });
   }
 

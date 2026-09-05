@@ -103,6 +103,10 @@ the same `createXtermHost`, so ImageAddon is loaded. **Nothing coalesces them an
 no size gates them** (rationale); each is bounded only by what the Burrow feeds
 its parser ([remote-api.md](./remote-api.md) → Terminal surfaces).
 
+**Must drop an entire `terminal.data` projection pair if either projection has
+invalid base64url or UTF-8**, then continue accepting later data. Pinned by
+`lib/src/remote/client/remote-adapter.test.ts`.
+
 `RemotePtyAdapter` exposes the adapter-specific `setActivePane(id)`: v1 allows
 one attachment per session, so pane switching is detach → attach, whose repaint
 (resize) redraws the screen. **Writes and resizes for a non-attached pane are

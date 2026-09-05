@@ -147,7 +147,7 @@ Source of truth: `remote-lib-common/src/security/acl.ts` (the schema and
 
 ## Presence proofs
 
-One verifier serves both ceremonies.
+**Use one verifier for pairing and connection.**
 
 - **The WebAuthn challenge is derived, not random.**
   `presenceChallenge(binding, relayNonce)` is base64url
@@ -181,7 +181,8 @@ One verifier serves both ceremonies.
   ([relay.md](./relay.md)) is never reusable proof of presence for a Burrow, and
   **has no app-session signing key beside it** (rationale).
 
-Source of truth: `presenceChallenge` / `isPresenceBinding` in
+Source of truth: `utf8Encode` in `remote-lib-common/src/security/bytes.ts`
+(`remote-lib-common/test/bytes.test.mjs`); `presenceChallenge` / `isPresenceBinding` in
 `remote-lib-common/src/security/presence.ts`, `verifyPresenceProof` in
 `remote-lib-common/src/security/e2e-ceremony.ts`, `relay/src/app.ts`.
 

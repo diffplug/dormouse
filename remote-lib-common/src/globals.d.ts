@@ -14,3 +14,12 @@ declare const URL: {
     readonly hash: string;
   };
 };
+
+declare const TextEncoder: {
+  new (): { encode(input: string): Uint8Array };
+};
+declare const TextDecoder: {
+  new (label: 'utf-8', options: { fatal: true; ignoreBOM: true }): {
+    decode(input: Uint8Array): string;
+  };
+};
