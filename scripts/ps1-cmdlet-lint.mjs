@@ -57,11 +57,19 @@ const APPROVED_VERBS = new Set(
 const PROJECT_NOUNS = new Set(['Burrow', 'Burrows', 'Relay', 'Relays', 'Dormouse', 'Pocket']);
 
 /**
- * A `Verb-Noun` token in call position: at a statement start, after a pipe, or
- * inside `$( )` / `& `. Anchoring this way keeps ordinary hyphenated prose and
- * `-Parameter` names out of scope — only what PowerShell would try to resolve.
+ * A `Verb-Noun` token in call position: at a statement start, after a pipe,
+ * `;`, `=`, `,`, `return`, or inside `$( )` / `& `. Anchoring this way keeps
+ * ordinary hyphenated prose and `-Parameter` names out of scope — only what
+ * PowerShell would try to resolve.
+ *
+ * The assignment and `return` positions are not decoration: without `=` this
+ * saw 72 of the installer's 98 distinct names, and every `Read-Host` call is
+ * `$reply = Read-Host '…'` — so the mangling this lint exists to catch was
+ * invisible in exactly the cmdlet the rename ate. `return` is the only other
+ * position a real call hides in (`return Invoke-Native …`). What is left
+ * unmatched is prose inside comments, which is the point.
  */
-const CALL = /(?:^|[|(&{;]|\$\()\s*([A-Z][A-Za-z]+)-([A-Z][A-Za-z0-9]*)\b/gm;
+const CALL = /(?:^|[|(&{;=,]|\$\(|\breturn\b)\s*([A-Z][A-Za-z]+)-([A-Z][A-Za-z0-9]*)\b/gm;
 
 export function check() {
   const failures = [];

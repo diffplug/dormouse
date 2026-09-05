@@ -215,7 +215,7 @@ async function stepRelay(ctx) {
   // Prefixed like every other run-directory name: two scenarios sharing one
   // `--out` and one state dir would leave the second already enrolled, which is
   // exactly what an isolated `DORMOUSE_STATE_DIR` is here to prevent.
-  const stateDir = ctx.path('server-state');
+  const stateDir = ctx.path('relay-state');
   const built =
     existsSync(join(repoRoot, 'lib', 'dist-pocket', 'index.html')) &&
     existsSync(join(repoRoot, 'relay', 'dist', 'index.js'));
@@ -234,7 +234,7 @@ async function stepRelay(ctx) {
       env: {
         DORMOUSE_STATE_DIR: stateDir,
         // Everything in a run is local to this machine, so the walkthrough's
-        // server has no reason to answer the LAN or the tailnet for the length
+        // Relay has no reason to answer the LAN or the tailnet for the length
         // of it (`docs/specs/security-remote.md` -> "Network posture
         // (self-hosted)"): unset, the Relay binds every interface.
         DORMOUSE_BIND_HOST: '127.0.0.1',
@@ -278,7 +278,7 @@ async function stepRelay(ctx) {
  * `DORMOUSE_REMOTE_CONNECT_SRC` has to be set *here*, at launch, not later: the
  * harness re-runs `pnpm stage` on the way up, which is what bakes the allowed
  * relay origins into `sidecar/burrow.cjs`. Without it the Burrow refuses a
- * plain-HTTP localhost server and enrollment fails with a policy error.
+ * plain-HTTP localhost Relay and enrollment fails with a policy error.
  */
 async function stepBurrow(ctx) {
   const { repoRoot, opts } = ctx;

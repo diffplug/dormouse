@@ -16,7 +16,18 @@ import { pathToFileURL } from 'node:url';
 import { repoRoot } from './lint-kit.mjs';
 import { check, INSTALLER } from './ps1-cmdlet-lint.mjs';
 
-/** One mutation, named by what a reader would have done to cause it. */
+/**
+ * One mutation, named by what a reader would have done to cause it.
+ *
+ * `onlyIn` is what keeps the last two honest. A mutation of a name that also
+ * appears at statement start proves nothing about any other anchor — the lint
+ * goes red on the statement-position copies alone, which is how the missing
+ * `=` hid: `Write-Host` is everywhere, so mutating it stayed red while
+ * `Read-Host`, which is only ever `$reply = Read-Host '…'`, was invisible.
+ * Where `onlyIn` is set, every occurrence of the name in the installer must
+ * match it, so a new call in some other position re-points the case instead of
+ * silently retiring it.
+ */
 const DEFECTS = [
   {
     name: 'a rename rewrites the noun half (`Write-Host` → `Write-Burrow`)',
@@ -25,6 +36,21 @@ const DEFECTS = [
   {
     name: 'a rename rewrites the verb half (`Test-Path` → `Check-Path`)',
     mutate: (text) => text.replace(/\bTest-Path\b/g, 'Check-Path'),
+  },
+  {
+    name: 'a rename eats a cmdlet only ever called in assignment position (`Read-Host` → `Read-Burrow`)',
+    mutate: (text) => text.replace(/\bRead-Host\b/g, 'Read-Burrow'),
+    token: /\bRead-Host\b/g,
+    onlyIn: /=\s*Read-Host\b/g,
+  },
+  {
+    // The two `function Invoke-Native {` lines are definitions, not calls, and
+    // a lowercase keyword is not a call anchor — so `return` is the only
+    // position this name is reachable from.
+    name: 'a rename eats a cmdlet only ever called after `return` (`Invoke-Native` → `Invoke-Burrow`)',
+    mutate: (text) => text.replace(/\bInvoke-Native\b/g, 'Invoke-Burrow'),
+    token: /\bInvoke-Native\b/g,
+    onlyIn: /(?:return|function)\s+Invoke-Native\b/g,
   },
 ];
 
@@ -46,6 +72,17 @@ export function run() {
       if (mutated === original) {
         failures.push(`${defect.name}: the mutation changed nothing — it no longer plants a defect`);
         continue;
+      }
+      if (defect.onlyIn) {
+        const all = original.match(defect.token)?.length ?? 0;
+        const anchored = original.match(defect.onlyIn)?.length ?? 0;
+        if (all !== anchored) {
+          failures.push(
+            `${defect.name}: ${all - anchored} of ${all} occurrences sit somewhere else now, ` +
+              'so this case no longer proves the position it names — re-point it',
+          );
+          continue;
+        }
       }
       writeFileSync(path, mutated);
       if (check().failures.length === 0) {

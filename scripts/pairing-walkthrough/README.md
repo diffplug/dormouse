@@ -74,7 +74,7 @@ it.
 
 | # | Step | What happens |
 | --- | --- | --- |
-| 1 | `server` | `pnpm dev:relay` with an isolated `DORMOUSE_STATE_DIR`, then waits for `:3000` to answer. |
+| 1 | `relay` | `pnpm dev:relay` with an isolated `DORMOUSE_STATE_DIR`, then waits for `:3000` to answer. |
 | 2 | `burrow` | `pnpm dev:standalone:ab` with `DORMOUSE_REMOTE_CONNECT_SRC` pointed at that Relay, then waits for the app's first terminal. → `01-burrow-booted.png` |
 | 3 | `settings` | Clicks the baseboard's Settings button and scrolls to Remote control. → `02-settings-open.png` |
 | 4 | `enroll` | Types the Relay URL, the setup password and the machine name into the real form, submits, and waits for **Connected**. → `03-enroll-form.png`, `04-enrolled.png` |
@@ -164,14 +164,14 @@ laptop's shell wrote (`terminal.roundTripMs`, ~220 ms here), the Enter-to-bell
 time, and the authenticator's `signCount` after each ceremony. `options` holds
 what the run chose for itself. The setup password is not among them — the
 Relay mints its own, and a `--keep` run is signed into by hand with the
-`password` in `<run>/server-state/setup-password.json`.
+`password` in `<run>/relay-state/setup-password.json`.
 
 ## State isolation
 
 A walkthrough that starts half-enrolled is not a walkthrough, so both sides get
 a store of their own. The *why* of each is at the code; what it means for you:
 
-- **Relay** — `DORMOUSE_STATE_DIR` is set to `<run>/server-state`, so the
+- **Relay** — `DORMOUSE_STATE_DIR` is set to `<run>/relay-state`, so the
   default `./data` in the repo is neither read nor written.
 - **Burrow** — nothing to set; `standalone/scripts/dev-agent-browser.mjs` already
   uses a per-pid temp directory. The path it picked is in `summary.json` as

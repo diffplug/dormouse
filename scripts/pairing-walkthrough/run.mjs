@@ -18,7 +18,7 @@ import { delay, exec, findFreePort, isPortFree, killTree, spawnedHandles } from 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 /**
- * Not an option, and `--server-port` is deliberately not one: the Burrow's allowed
+ * Not an option, and `--relay-port` is deliberately not one: the Burrow's allowed
  * relay origins are baked into its sidecar bundle from
  * `DORMOUSE_REMOTE_CONNECT_SRC` at stage time, and Pocket must be same-origin
  * with its own API, so both sides of a run are pinned to one origin.
