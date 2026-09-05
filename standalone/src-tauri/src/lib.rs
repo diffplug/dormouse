@@ -483,22 +483,9 @@ fn pty_get_open_ports(
         .unwrap_or_else(|| JsonValue::Array(Vec::new())))
 }
 
-#[tauri::command(async)]
-fn pty_get_scrollback(
-    state: tauri::State<'_, SidecarState>,
-    id: String,
-) -> Result<Option<String>, String> {
-    let response =
-        request_from_sidecar(&state, "pty:getScrollback", serde_json::json!({ "id": id }))?;
-    Ok(response
-        .get("data")
-        .and_then(|data| data.as_str().map(String::from)))
-}
-
-// Unlike pty_kill / kill_sidecar_now this preserves scrollback so the caller can
-// capture final output afterward. Async: waits up to `timeout + 1500ms` (margin
-// for the round trip beyond the sidecar's own kill timer) and must not block the
-// main thread for that long.
+// Wait for PTY exits and their final output before shutdown. Async: waits up to
+// `timeout + 1500ms` (margin for the round trip beyond the sidecar's own kill
+// timer) and must not block the main thread for that long.
 #[tauri::command]
 async fn pty_graceful_kill_all(
     state: tauri::State<'_, SidecarState>,
@@ -1635,7 +1622,6 @@ pub fn run() {
             pty_kill,
             pty_get_cwd,
             pty_get_open_ports,
-            pty_get_scrollback,
             pty_graceful_kill_all,
             iframe_create_proxy_url,
             pty_request_init,

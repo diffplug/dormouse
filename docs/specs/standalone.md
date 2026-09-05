@@ -81,9 +81,9 @@ helpers without it.
 PTY and awaits the sidecar's `gracefulKillDone` (echoing the request's
 `requestId`; bounded at `timeout + 1.5s`). It resolves one 50 ms grace tick after
 the last PTY exits — so ConPTY's late final flush still lands — or at the timeout
-for SIGTERM-ignoring programs. Unlike the hard `pty_kill` path it **preserves
-scrollback**, readable afterwards via `pty_get_scrollback`; the quit flow's
-graceful teardown calls it (§Quit flow).
+for SIGTERM-ignoring programs. **Must forward final output during that grace
+period**; the sidecar retains no scrollback. The quit flow's graceful teardown
+calls it (§Quit flow), pinned by `standalone/sidecar/pty-core.test.js`.
 
 Sidecar events (`pty:*`, dor control requests, async results) are emitted to the
 webview, where `TauriAdapter` converts dor control requests into the
@@ -455,12 +455,11 @@ Source of truth: `standalone/src/quit-confirm-store.ts` (the module store + gate
 **every step individually bounded** so a stall cannot wedge quit:
 
 1. `requestSessionFlush` — save while PTYs are alive, so CWDs are fresh.
-2. `gracefulKillAllPtys` — SIGTERM every PTY, resolving early once all exit. It
-   **precedes** capture on purpose: only the hard `pty_kill` / sidecar `killAll`
-   clears the scrollback buffer (§Rust ↔ sidecar bridge).
-3. `requestSessionFlush` — capture that now-final scrollback of the dead PTYs.
-   `getCwd` returns null for a dead PTY, and session-save falls back to the
-   previously persisted CWD.
+2. `gracefulKillAllPtys` — SIGTERM every PTY, resolving early once all exit and
+   their final output has had a grace tick to reach the webview (§Rust ↔ sidecar
+   bridge).
+3. `requestSessionFlush` — flush the post-exit Session state. Both flushes are
+   no-ops while `persistsSession: false` (§Persistence).
 4. `drainSessionSaves` — await the last `save_session` reaching disk; the process
    does not exit until it lands (§Persistence, "Durability on quit").
 5. If an update is pending, a fresh `quit_progress` then `installPendingUpdate()`
@@ -469,8 +468,7 @@ Source of truth: `standalone/src/quit-confirm-store.ts` (the module store + gate
 6. **Always** `quit_proceed` (in `finally`, even on throw/timeout).
 
 **Windows note.** node-pty's `kill('SIGTERM')` is an immediate kill under ConPTY,
-so step 2 terminates promptly there; the scrollback buffer still survives the
-exit, so step 3 captures the final output as elsewhere.
+so step 2 terminates promptly there, retaining the same final-output grace tick.
 
 **Dev-mode note.** The browser-dev harness has no Rust quit interception, and the
 flow never initializes there (§Boot sequence, step 5).

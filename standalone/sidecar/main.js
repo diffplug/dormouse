@@ -126,7 +126,6 @@ function handleLine(line) {
       case 'pty:requestInit': mgr.list(); break;
       case 'pty:getCwd':  mgr.getCwd(data.id, data.requestId); break;
       case 'pty:getOpenPorts': mgr.getOpenPorts(data.id, data.requestId); break;
-      case 'pty:getScrollback': mgr.getScrollback(data.id, data.requestId); break;
       case 'pty:getShells':  mgr.getShells(data.requestId); break;
       // Reserved: no standalone caller yet — recovery capture ships for VS Code
       // only, which reaches the same `pty-core` through its own `pty-host.js`

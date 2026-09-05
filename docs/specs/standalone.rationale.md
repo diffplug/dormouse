@@ -46,4 +46,4 @@
 
 ## Quit flow
 
-**Why the teardown ordering outlived its original purpose.** Flush → graceful kill → flush → drain was built to capture the final scrollback of dying terminals into the persisted session. Standalone now persists nothing, so both flushes return immediately on `persistsSession: false`; the shape is kept because the ordering is the load-bearing part and the workspaces-rollout scope turns persistence back on.
+**Why the teardown ordering outlived its original purpose.** Flush → graceful kill → flush → drain was built to capture the final scrollback of dying terminals into the persisted session. Standalone now persists nothing, so both flushes return immediately on `persistsSession: false`; the shape is kept for the workspaces-rollout scope's Session persistence. The flushes no longer read transcripts; final PTY output is forwarded to the webview during the grace tick without a sidecar scrollback buffer.
