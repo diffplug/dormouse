@@ -110,6 +110,7 @@ import {
   isPaneOscDriven,
   mountElement,
   clearLocalSurfaceActivity,
+  clearTerminalActivity,
   clearSessionAttention,
   restoreBrowserSurfaceTodo,
   disposeAllSessions,
@@ -121,6 +122,8 @@ import {
   focusSession,
   getOrCreateTerminal,
   getActivity,
+  getLivePersistedAlertState,
+  getActivitySnapshot,
   getTerminalShellKind,
   getTerminalPaneState,
   getWatchedCommands,
@@ -129,7 +132,7 @@ import {
   isUntouched,
   markSessionAttention,
   markSessionTodo,
-  primeActivity,
+  setTerminalActivity,
   resumeTerminal,
   restoreTerminal,
   setPendingShellOpts,
@@ -348,13 +351,69 @@ describe('terminal-registry alert behavior', () => {
     }
   });
 
-  it('carries a primed ring counter into the terminal entry', () => {
-    const id = 'primed-ring-seq';
-    primeActivity(id, { status: 'ALERT_RINGING', ringSeq: 7 });
+  it('preserves pre-registration activity through terminal creation and orphaning', () => {
+    const id = 'early-host-state';
+    setTerminalActivity(id, { status: 'ALERT_RINGING', ringSeq: 7, todo: true, awaited: true });
+    const activity = getActivity(id);
+    expect(getLivePersistedAlertState(id)).toBeNull();
 
     createSession(id);
+    expect(getActivity(id)).toEqual(activity);
+    expect(getLivePersistedAlertState(id)).toMatchObject({ status: 'ALERT_RINGING', todo: true });
 
-    expect(getActivity(id).ringSeq).toBe(7);
+    unmountElement(id);
+    mountElement(id, createContainer() as unknown as HTMLElement);
+    expect(getActivity(id)).toEqual(activity);
+
+    disposeSession(id);
+    expect(getActivitySnapshot().has(id)).toBe(false);
+    expect(getLivePersistedAlertState(id)).toBeNull();
+    createSession(id);
+    expect(getActivity(id)).toEqual(DEFAULT_ACTIVITY_STATE);
+  });
+
+  it('cache reset preserves registry membership and browser TODO', () => {
+    const id = 'cache-reset-terminal';
+    const browserId = 'cache-reset-browser';
+    createSession(id);
+    setTerminalActivity(id, { todo: true });
+    restoreBrowserSurfaceTodo({ id: browserId, surfaceType: 'browser', alert: { status: 'WATCHING_DISABLED', todo: true } });
+
+    clearTerminalActivity();
+
+    expect(getActivitySnapshot().get(id)).toEqual(DEFAULT_ACTIVITY_STATE);
+    expect(getActivity(browserId).todo).toBe(true);
+    clearLocalSurfaceActivity(browserId);
+    disposeSession(id);
+    expect(getActivitySnapshot().has(id)).toBe(false);
+  });
+
+  it('preserves early attention dismissal', () => {
+    const id = 'early-attention-dismissal';
+    fakePlatform.spawnPty(id);
+    fakePlatform.sendOutput(id, '\x07');
+    expect(getActivity(id).status).toBe('ALERT_RINGING');
+    fakePlatform.alertAttend(id);
+    expect(getActivity(id).status).toBe('WATCHING_DISABLED');
+
+    resumeTerminal(id, null, { alive: true });
+
+    expect(dismissOrToggleAlert(id, 'WATCHING_DISABLED')).toBe('dismissed');
+    // The explicit dismissal consumes the flag; a second click is at a prompt.
+    expect(dismissOrToggleAlert(id, 'WATCHING_DISABLED')).toBe('no-command');
+  });
+
+  it('retains a resumed exited Session TODO until disposal', () => {
+    const id = 'exited-host-state';
+    setTerminalActivity(id, { todo: true, ringSeq: 3 });
+    resumeTerminal(id, null, { alive: false, exitCode: 1 });
+
+    expect(registry.get(id)?.exited).toBe(true);
+    expect(getActivity(id)).toMatchObject({ todo: true, ringSeq: 3 });
+    expect(getLivePersistedAlertState(id)).toMatchObject({ todo: true });
+
+    disposeSession(id);
+    expect(getActivitySnapshot().has(id)).toBe(false);
   });
 
   /**

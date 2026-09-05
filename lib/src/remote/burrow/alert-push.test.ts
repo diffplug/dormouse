@@ -22,7 +22,7 @@ import { commitPushDevices, invalidatePushDeviceRefreshes, watchPushRings } from
 import { loadPushDevices, sendPush, toPushText, type AlertPushDeps } from './push-delivery';
 import { applyAlertSettingsFromHost, DEFAULT_ALERT_SETTINGS } from '../../lib/alert-settings';
 import { getPushDevices, resetPushDevices } from '../../lib/push-devices';
-import { clearPrimedActivity, primeActivity } from '../../lib/session-activity-store';
+import { clearTerminalActivity, setTerminalActivity } from '../../lib/session-activity-store';
 
 const PUSH_DELAY_MS = 20_000;
 
@@ -151,8 +151,8 @@ function refreshPushDevices(pushDeps: AlertPushDeps): Promise<void> {
 }
 
 function ring(id: string): void {
-  primeActivity(id, { status: 'NOTHING_TO_SHOW' });
-  primeActivity(id, { status: 'ALERT_RINGING' });
+  setTerminalActivity(id, { status: 'NOTHING_TO_SHOW' });
+  setTerminalActivity(id, { status: 'ALERT_RINGING' });
 }
 
 /** The body of the last `push/send` request, parsed. */
@@ -171,7 +171,7 @@ beforeEach(() => {
   requests = [];
   subscribed = [PHONE];
   records = [aclRecord(PHONE, 'iPhone Safari')];
-  clearPrimedActivity();
+  clearTerminalActivity();
   resetPushDevices();
   applyAlertSettingsFromHost({
     ...DEFAULT_ALERT_SETTINGS,
@@ -183,7 +183,7 @@ beforeEach(() => {
 afterEach(() => {
   stop?.();
   stop = null;
-  clearPrimedActivity();
+  clearTerminalActivity();
   resetPushDevices();
   applyAlertSettingsFromHost(DEFAULT_ALERT_SETTINGS);
   vi.useRealTimers();

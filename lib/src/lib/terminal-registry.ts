@@ -16,7 +16,7 @@ export type {
 
 export {
   clearLocalSurfaceActivity,
-  clearPrimedActivity,
+  clearTerminalActivity,
   clearSessionAttention,
   clearSessionTodo,
   DEFAULT_ACTIVITY_STATE,
@@ -29,7 +29,7 @@ export {
   initAlertStateReceiver,
   markSessionAttention,
   markSessionTodo,
-  primeActivity,
+  setTerminalActivity,
   restoreBrowserSurfaceTodo,
   subscribeToActivity,
   toggleSessionAlert,

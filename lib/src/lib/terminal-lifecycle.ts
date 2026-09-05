@@ -26,7 +26,7 @@ import {
   type TerminalEntry,
   type TerminalOverlayDims,
 } from './terminal-store';
-import { consumePrimedActivity, notifyActivityListeners } from './session-activity-store';
+import { clearTerminalActivity, getActivity, notifyActivityListeners } from './session-activity-store';
 import { attachTerminalMouseRouter } from './terminal-mouse-router';
 import {
   inputContainsEnter,
@@ -300,8 +300,7 @@ function wireXtermHandlers(
 
     if (!isSyntheticTerminalReport) {
       recordTerminalUserInput(id, input, makePromptLineReader(terminal));
-      const entry = registry.get(id);
-      const hadTodo = entry?.todo === true;
+      const hadTodo = getActivity(id).todo;
       getPlatform().alertAttend(id);
       if (hadTodo && inputContainsEnter(input)) {
         getPlatform().alertClearTodo(id);
@@ -375,26 +374,9 @@ function setupTerminalEntry(id: string, options: { shell?: string; untouched?: b
     fit,
     element,
     cleanup,
-    alertStatus: 'WATCHING_DISABLED',
-    ringSeq: 0,
-    watchingEnabled: false,
-    todo: false,
-    notification: null,
-    attentionDismissedRing: false,
-    awaited: false,
     isReplaying: false,
     untouched: options.untouched ?? false,
   };
-
-  const primed = consumePrimedActivity(id);
-  if (primed) {
-    if (primed.status !== undefined) entry.alertStatus = primed.status;
-    if (primed.ringSeq !== undefined) entry.ringSeq = primed.ringSeq;
-    if (primed.watchingEnabled !== undefined) entry.watchingEnabled = primed.watchingEnabled;
-    if (primed.todo !== undefined) entry.todo = primed.todo;
-    if (primed.notification !== undefined) entry.notification = primed.notification;
-    if (primed.awaited !== undefined) entry.awaited = primed.awaited;
-  }
 
   registry.set(id, entry);
   ensureTerminalPaneState(id);
@@ -617,7 +599,7 @@ export function disposeSession(id: string): void {
   registry.delete(id);
   removeTerminalPaneState(id);
   removeMouseSelectionState(id);
-  notifyActivityListeners();
+  clearTerminalActivity(id);
 }
 
 export function refitSession(id: string): void {

@@ -331,11 +331,7 @@ Source of truth: `lib/src/components/wall/use-session-persistence.ts` (save trig
 
 ### Activity state
 
-Each Surface carries an `ActivityState` (`status`, `watchingEnabled`, `todo`, `notification`), synced to React via `useSyncExternalStore`. **State arriving from the platform *before* a registry entry exists** (the resume path) is staged as **primed state** and merged in when the entry is minted; a browser surface, which never gets a registry entry, keeps its activity in a parallel local map.
-
-Terminal semantic state is owned by `docs/specs/terminal-state.md` → Core Model.
-
-Source of truth: `lib/src/lib/session-activity-store.ts` (the React snapshot store and the primed-state merge).
+Renderer Activity storage is owned by `docs/specs/alert.md` → Public State. Terminal semantic state is owned by `docs/specs/terminal-state.md` → Core Model.
 
 ## Theme
 

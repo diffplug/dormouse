@@ -1,4 +1,4 @@
-import type { SessionStatus } from './alert-manager';
+import type { AlertState, SessionStatus } from './alert-manager';
 import type { AlertStateDetail } from './platform/types';
 import { applyAlertSettingsFromHost, publishAlertSettings } from './alert-settings';
 import { toPersistedAlertState, type PersistedAlertState, type PersistedPane } from './session-types';
@@ -10,10 +10,7 @@ import {
   publishWatchedCommands,
   setCommandWatched,
 } from './watched-commands';
-import {
-  registry,
-  type ActivityState,
-} from './terminal-store';
+import { registry } from './terminal-store';
 
 /**
  * What the bell click resolved to, so the caller knows whether to open the
@@ -22,7 +19,7 @@ import {
  */
 export type AlertButtonActionResult = 'enabled' | 'disabled' | 'dismissed' | 'menu' | 'no-command' | 'noop';
 
-export type { ActivityState } from './terminal-store';
+export type ActivityState = Omit<AlertState, 'attentionDismissedRing'>;
 
 export const DEFAULT_ACTIVITY_STATE: ActivityState = {
   status: 'WATCHING_DISABLED',
@@ -36,16 +33,13 @@ export const DEFAULT_ACTIVITY_STATE: ActivityState = {
 const activityListeners = new Set<() => void>();
 let cachedSnapshot: Map<string, ActivityState> | null = null;
 
-// Transient staging for activity that arrives *before* a terminal registry entry
-// exists. Consumed and deleted when the entry is minted (consumePrimedActivity).
-const primedActivityStates = new Map<string, Partial<ActivityState>>();
+// Terminal activity keeps the same home before and after xterm initialization.
+// The dismissal flag belongs to the bell action, not the public UI snapshot.
+const terminalActivity = new Map<string, { state: ActivityState; attentionDismissedRing: boolean }>();
 
-// Persistent activity for non-PTY surfaces (browser iframes / agent-browser).
-// A browser surface never gets a registry entry, so — unlike primedActivityStates
-// — this is its permanent home: keyed by pane id, written when its TODO toggles
-// or is restored, and cleared only when the pane is killed or replaced
-// (clearLocalSurfaceActivity). Kept separate so terminal creation never consumes
-// it and a no-arg primed reset never wipes it.
+// Browser surfaces have no host alert stream. Keep their TODO separate so a
+// terminal taking the same id starts from its own activity, and clearing
+// terminal activity never removes a browser TODO.
 const localSurfaceActivity = new Map<string, ActivityState>();
 
 export function notifyActivityListeners(): void {
@@ -62,7 +56,7 @@ export function getActivitySnapshot(): Map<string, ActivityState> {
   if (cachedSnapshot) return cachedSnapshot;
 
   const snapshot = new Map<string, ActivityState>();
-  const ids = new Set<string>([...registry.keys(), ...primedActivityStates.keys(), ...localSurfaceActivity.keys()]);
+  const ids = new Set([...registry.keys(), ...terminalActivity.keys(), ...localSurfaceActivity.keys()]);
   for (const id of ids) {
     const state = readActivity(id);
     if (state) {
@@ -77,53 +71,33 @@ export function getActivity(id: string): ActivityState {
   return readActivity(id) ?? DEFAULT_ACTIVITY_STATE;
 }
 
-function readLiveActivity(id: string): ActivityState | null {
-  const entry = registry.get(id);
-  if (!entry) return null;
-
-  return {
-    status: entry.alertStatus,
-    watchingEnabled: entry.watchingEnabled,
-    todo: entry.todo,
-    notification: entry.notification,
-    awaited: entry.awaited,
-    ringSeq: entry.ringSeq,
-  };
-}
-
 function readActivity(id: string): ActivityState | null {
-  const primedState = primedActivityStates.get(id);
-  const liveState = readLiveActivity(id);
-  const localState = localSurfaceActivity.get(id);
-
-  if (!liveState && !primedState && !localState) return null;
-  // A live PTY is authoritative, so it outranks a stale local-surface entry left
-  // behind if an id is reused; primed staging overrides on top.
-  return {
-    ...(liveState ?? localState ?? DEFAULT_ACTIVITY_STATE),
-    ...primedState,
-  };
+  return terminalActivity.get(id)?.state
+    ?? (registry.has(id) ? DEFAULT_ACTIVITY_STATE : localSurfaceActivity.get(id) ?? null);
 }
 
 export function getLivePersistedAlertState(id: string): PersistedAlertState | null {
-  const state = readLiveActivity(id);
-  return state && toPersistedAlertState(state);
+  return registry.has(id) ? toPersistedAlertState(getActivity(id)) : null;
 }
 
-export function primeActivity(id: string, state: Partial<ActivityState>): void {
-  primedActivityStates.set(id, state);
+/** Install a host snapshot, including one received before xterm initialization. */
+export function setTerminalActivity(id: string, state: Partial<AlertState>): void {
+  const { attentionDismissedRing = false, ...activity } = state;
+  terminalActivity.set(id, {
+    state: { ...DEFAULT_ACTIVITY_STATE, ...activity },
+    attentionDismissedRing,
+  });
   notifyActivityListeners();
 }
 
-export function clearPrimedActivity(id?: string): void {
+/** Called after registry removal, or without an id to reset the terminal cache. */
+export function clearTerminalActivity(id?: string): void {
   if (id === undefined) {
-    if (primedActivityStates.size === 0) return;
-    primedActivityStates.clear();
-    notifyActivityListeners();
-    return;
+    if (terminalActivity.size === 0) return;
+    terminalActivity.clear();
+  } else {
+    terminalActivity.delete(id);
   }
-
-  if (!primedActivityStates.delete(id)) return;
   notifyActivityListeners();
 }
 
@@ -159,40 +133,8 @@ export function restoreBrowserSurfaceTodo(pane: Pick<PersistedPane, 'id' | 'surf
   }
 }
 
-export function consumePrimedActivity(id: string): Partial<ActivityState> | undefined {
-  const primed = primedActivityStates.get(id);
-  if (primed) {
-    primedActivityStates.delete(id);
-  }
-  return primed;
-}
-
-/**
- * Fold one host alert-state update into the registry, or stage it if the PTY's
- * entry does not exist yet (the host can report before the terminal is minted).
- */
-function handleAlertState(detail: AlertStateDetail): void {
-  const entry = registry.get(detail.id);
-  if (entry) {
-    entry.alertStatus = detail.status;
-    entry.ringSeq = detail.ringSeq;
-    entry.watchingEnabled = detail.watchingEnabled;
-    entry.todo = detail.todo;
-    entry.notification = detail.notification;
-    entry.attentionDismissedRing = detail.attentionDismissedRing;
-    entry.awaited = detail.awaited;
-    primedActivityStates.delete(detail.id);
-    notifyActivityListeners();
-  } else {
-    primeActivity(detail.id, {
-      status: detail.status,
-      ringSeq: detail.ringSeq,
-      watchingEnabled: detail.watchingEnabled,
-      todo: detail.todo,
-      notification: detail.notification,
-      awaited: detail.awaited,
-    });
-  }
+function handleAlertState({ id, ...state }: AlertStateDetail): void {
+  setTerminalActivity(id, state);
 }
 
 /**
@@ -223,8 +165,6 @@ export function initAlertStateReceiver(): void {
  * learns about it through a command-level mutation like any other rule change.
  */
 export function dismissOrToggleAlert(id: string, displayedStatus: SessionStatus): AlertButtonActionResult {
-  const entry = registry.get(id);
-
   if (displayedStatus === 'ALERT_RINGING') {
     dismissSessionAlert(id);
     return 'dismissed';
@@ -232,7 +172,7 @@ export function dismissOrToggleAlert(id: string, displayedStatus: SessionStatus)
 
   // An attention-based dismissal leaves a flag behind so this next click opens
   // the dialog rather than silently editing a rule.
-  if (entry?.attentionDismissedRing) {
+  if (terminalActivity.get(id)?.attentionDismissedRing) {
     dismissSessionAlert(id);
     return 'dismissed';
   }

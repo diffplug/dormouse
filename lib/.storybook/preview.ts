@@ -7,12 +7,14 @@ import '../src/index.css';
 import { initPlatform, type FakeScenario } from '../src/lib/platform';
 import {
   applyAlertSettingsFromHost,
-  clearPrimedActivity,
+  clearTerminalActivity,
   disposeAllSessions,
+  getActivity,
   getActivitySnapshot,
+  getTerminalInstance,
   getTerminalPaneStateSnapshot,
   getWatchedCommands,
-  primeActivity,
+  setTerminalActivity,
   removeTerminalPaneState,
   resetPushDevices,
   resetTerminalPaneState,
@@ -339,7 +341,11 @@ const preview: Preview = {
           for (const [id, state] of Object.entries(primedAlertSpeech ?? {})) {
             setAlertSpeechState(id, state);
           }
-          clearPrimedActivity();
+          // Preserve host activity from terminals just spawned for this story;
+          // clear only component fixtures that have no terminal behind them.
+          for (const id of getActivitySnapshot().keys()) {
+            if (!getTerminalInstance(id)) clearTerminalActivity(id);
+          }
           for (const id of getTerminalPaneStateSnapshot().keys()) {
             removeTerminalPaneState(id);
           }
@@ -349,14 +355,14 @@ const preview: Preview = {
           }
 
           for (const [id, state] of Object.entries(primedSessionState?.byId ?? {})) {
-            primeActivity(id, state);
+            setTerminalActivity(id, { ...getActivity(id), ...state });
           }
 
           const sessionIds = [...getActivitySnapshot().keys()];
           primedSessionState?.byIndex?.forEach((state, index) => {
             const id = sessionIds[index];
             if (id) {
-              primeActivity(id, state);
+              setTerminalActivity(id, { ...getActivity(id), ...state });
             }
           });
 
@@ -393,7 +399,7 @@ const preview: Preview = {
           applyAlertSettingsFromHost(undefined);
           resetPushDevices();
           clearAllAlertSpeechStates();
-          clearPrimedActivity();
+          clearTerminalActivity();
           for (const id of getTerminalPaneStateSnapshot().keys()) {
             removeTerminalPaneState(id);
           }
