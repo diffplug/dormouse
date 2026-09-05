@@ -1,6 +1,5 @@
-import { fileURLToPath } from 'node:url';
-
 import { defineConfig } from 'vitest/config';
+import unitConfig from './vitest.config.mts';
 
 /**
  * The webview boot smoketest, kept out of `pnpm test` on purpose: it needs a
@@ -11,11 +10,8 @@ import { defineConfig } from 'vitest/config';
  * `getWebviewHtml`, so it needs `Uri.file` for exactly the same reason.
  */
 export default defineConfig({
-  resolve: {
-    alias: {
-      vscode: fileURLToPath(new URL('test/vscode-stub.ts', import.meta.url)),
-    },
-  },
+  // Both run getWebviewHtml and its shared notepad schema imports.
+  resolve: unitConfig.resolve,
   test: {
     environment: 'node',
     include: ['test/**/*.smoketest.ts'],

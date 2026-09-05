@@ -395,7 +395,7 @@ Source of truth: `vscode-ext/src/peer-link.ts` (sockets, arbitration); `vscode-e
 
 `pnpm --filter dormouse test` typechecks and runs the suites under `vscode-ext/test/`; the socket tests use real local sockets, and `vitest.config.mts` supplies only the minimal `vscode` stub required outside an editor. **Never widen that stub to make an editor-dependent test pass** — command registration, webview hosting, and the theme observer require a real Extension Development Host.
 
-`webview-boot.smoketest.ts` is separate: `pnpm --filter dormouse test:smoke` runs the shipped webview under Chromium against a prebuilt `media/`, in its own CI job. **It must stub `acquireVsCodeApi`** so the VS Code-only lazy import executes.
+`webview-boot.smoketest.ts` is separate: `pnpm --filter dormouse test:smoke` runs the shipped webview under Chromium against a prebuilt `media/`, in its own CI job. **It must stub `acquireVsCodeApi`** so the VS Code-only lazy import executes. **Must share the unit config's resolver aliases**, including the shared notepad schema's CLI imports.
 
 ### Build and development
 
