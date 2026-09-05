@@ -10,7 +10,6 @@ describe('FakePtyAdapter', () => {
 
   afterEach(() => {
     removeTerminalPaneState('pane-a');
-    removeTerminalPaneState('pane-b');
     vi.useRealTimers();
   });
 
