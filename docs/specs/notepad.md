@@ -141,7 +141,8 @@ Source of truth: `archiveNotesBeforeQuit` in `standalone/src/quit.ts`, the `'arc
 
 VS Code can destroy a webview without asking, so the close coordinator may never run. **Every webview therefore mirrors its live notes into extension-host memory**, and a teardown archives from that mirror instead.
 
-- **The mirror holds what a close would archive minus the markers** — notes, Surface title, kind and CWD, plus each terminal Surface's PTY id and any archive deletions an open Archive view has staged. **The id is mirror-only and never reaches a batch.**
+- **The mirror holds what a close would archive minus the markers** — notes, Surface title, kind and CWD, plus its pending batch id, each terminal Surface's PTY id, and any archive deletions an open Archive view has staged. **The PTY id is mirror-only and never reaches a batch.**
+- **Must mirror pending batch identity before saving and retain it after the last note is deleted.** Teardown deletes and re-appends that batch; live resume restores its identity. Pinned by `vscode-ext/test/notepad-archive-store.test.ts` and `lib/src/lib/notepad/notepad-store.test.ts`.
 - **A teardown refreshes the mirror's process CWDs while the PTYs are alive** — bounded, and never overriding an integration-reported one — which on an editor-panel disposal is what makes the kill wait for the archive write, and in `deactivate()` puts it ahead of the session flush.
 - **The mirror is memory only, never written to disk, and cleared by an extension restart.** It is a bridge across one disposal, not a draft store.
 - **The mirror is sanitized on the way in**, round-tripped through the archive validator, because a teardown writes it verbatim with no webview left to ask.

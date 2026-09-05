@@ -73,6 +73,8 @@ function sanitizeSurface(value: unknown): VolatileSurfaceNotes | null {
     surfaceKind: batch.surfaceKind,
     cwd: batch.cwd,
     ...(terminalId ? { terminalId } : {}),
+    ...(typeof surface.pendingBatchId === 'string' && surface.pendingBatchId
+      ? { pendingBatchId: surface.pendingBatchId } : {}),
     notes: batch.notes,
   };
 }

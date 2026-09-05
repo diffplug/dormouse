@@ -567,3 +567,22 @@ describe('hydrateNotepadFromVolatile', () => {
     expect(listener).not.toHaveBeenCalled();
   });
 });
+
+it('mirrors and resumes a pending batch even after its last note is deleted', async () => {
+  const sync = vi.spyOn(adapter.notepadArchive, 'syncVolatile');
+  const noteId = addPlainNote('s1', 'original');
+  await flush();
+  sync.mockClear();
+  const batchId = pendingBatchId('s1');
+  await flush();
+  expect(sync).toHaveBeenCalledWith(expect.objectContaining({
+    surfaces: [expect.objectContaining({ pendingBatchId: batchId })],
+  }));
+  deleteNote('s1', noteId!);
+  const snapshot = buildVolatileSnapshot();
+  expect(snapshot.surfaces).toEqual([expect.objectContaining({ pendingBatchId: batchId, notes: [] })]);
+  clearAllNotepads();
+  hydrateNotepadFromVolatile(snapshot, ['s1']);
+  expect(pendingBatchId('s1')).toBe(batchId);
+  expect(buildVolatileSnapshot().surfaces[0].notes).toEqual([]);
+});

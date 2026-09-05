@@ -282,3 +282,10 @@ describe('refreshMirrorCwds', () => {
     expect(refreshed.surfaces[0].cwd).toBeNull();
   });
 });
+
+it('retains a pending batch identity with an empty mirrored notepad', () => {
+  const empty = { ...surface('s1'), notes: [], pendingBatchId: 'pending' };
+  mirror.setVolatileForRouter('r1', { surfaces: [empty], stagedDeletions: {} });
+  expect(mirror.snapshotForLiveResume(['s1'])?.surfaces).toEqual([empty]);
+  expect(mirror.takeVolatileForRouter('r1').surfaces).toEqual([empty]);
+});

@@ -113,6 +113,7 @@ export function pendingBatchId(surfaceId: string): string {
   if (remembered) return remembered;
   const minted = newNotepadId('batch');
   pendingBatchIdBySurface.set(surfaceId, minted);
+  scheduleVolatileSync();
   return minted;
 }
 
@@ -440,8 +441,10 @@ function archivePort(): NotepadArchivePort | undefined {
  *  markers (`toArchivedNote` strips them). */
 export function buildVolatileSnapshot(): VolatileNotepadSnapshot {
   const surfaces: VolatileSurfaceNotes[] = [];
-  for (const [surfaceId, notes] of notesBySurface) {
-    if (notes.length === 0) continue;
+  const ids = new Set([...notesBySurface.keys(), ...pendingBatchIdBySurface.keys()]);
+  for (const surfaceId of ids) {
+    const notes = getNotes(surfaceId);
+    const pendingBatchId = pendingBatchIdBySurface.get(surfaceId);
     const meta = getNotepadSurfaceMeta(surfaceId);
     surfaces.push({
       surfaceId,
@@ -454,6 +457,7 @@ export function buildVolatileSnapshot(): VolatileNotepadSnapshot {
       ...(meta && hasTerminal(meta.surfaceKind)
         ? { terminalId: resolveTerminalSessionId(surfaceId) }
         : {}),
+      ...(pendingBatchId ? { pendingBatchId } : {}),
       notes: notes.map(toArchivedNote),
     });
   }
@@ -495,8 +499,13 @@ export function hydrateNotepadFromVolatile(
   let changed = false;
   for (const surface of snapshot.surfaces) {
     if (!live.has(surface.surfaceId)) continue;
-    if (surface.notes.length === 0) continue;
     if ((notesBySurface.get(surface.surfaceId)?.length ?? 0) > 0) continue;
+    if (pendingBatchIdBySurface.has(surface.surfaceId)) continue;
+    if (surface.pendingBatchId) {
+      pendingBatchIdBySurface.set(surface.surfaceId, surface.pendingBatchId);
+      changed = true;
+    }
+    if (surface.notes.length === 0) continue;
     notesBySurface.set(
       surface.surfaceId,
       surface.notes.map((note) => ({ id: note.id, createdAt: note.createdAt, content: note.content })),

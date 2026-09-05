@@ -104,13 +104,16 @@ export function archiveVolatileMirror(
 ): Promise<void> {
   const closedAt = Date.now();
   const append: ArchiveBatch[] = [];
+  const deleteBatchIds = [...(mirror.stagedDeletions.deleteBatchIds ?? [])];
   for (const surface of mirror.surfaces) {
-    // A fresh id per teardown. Idempotence is by batch id, so this is the one
-    // place a repeat would duplicate — and a mirror is drained, not retried.
-    const batch = batchFromVolatile(surface, randomUUID(), closedAt);
+    // A timed-out close may already have saved the pre-edit notes. Replace
+    // that batch, including deleting it when the live notepad is now empty.
+    const id = surface.pendingBatchId ?? randomUUID();
+    if (surface.pendingBatchId) deleteBatchIds.push(id);
+    const batch = batchFromVolatile(surface, id, closedAt);
     if (batch) append.push(batch);
   }
-  return mutateNotepadArchive(context, { append, ...mirror.stagedDeletions });
+  return mutateNotepadArchive(context, { append, ...mirror.stagedDeletions, deleteBatchIds });
 }
 
 /** Read-modify-write under the same transaction lock the webview's saves go through.

@@ -84,6 +84,8 @@ export interface VolatileSurfaceNotes {
    *  a teardown passes to `ptyManager.getCwd` while the PTY is still alive, and
    *  `batchFromVolatile` never writes it into a batch. */
   terminalId?: string;
+  /** Batch an earlier close may have stored; teardown replaces it, even when notes are empty. */
+  pendingBatchId?: string;
   notes: ArchivedNote[];
 }
 

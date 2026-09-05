@@ -47,6 +47,8 @@ function readSurface(value: unknown): VolatileSurfaceNotes | null {
     // same: the resuming webview re-derives its own.
     cwd: readCwdState(value.cwd),
     ...(terminalId ? { terminalId } : {}),
+    ...(typeof value.pendingBatchId === 'string' && value.pendingBatchId
+      ? { pendingBatchId: value.pendingBatchId } : {}),
     notes,
   };
 }

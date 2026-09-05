@@ -227,3 +227,22 @@ it('never opts any key into Settings Sync', () => {
     .filter((name) => /setKeysForSync\s*\(/.test(readFileSync(join(dir, name), 'utf8')));
   expect(offenders).toEqual([]);
 });
+
+it.each([false, true])('replaces a pending close during teardown (all notes deleted: %s)', async (deleted) => {
+  const { context, store } = fakeContext();
+  const original = batch('pending', ['n1', 'n2']);
+  await mutateNotepadArchive(context, { append: [original, batch('unrelated', ['n3'])] });
+  await archiveVolatileMirror(context, {
+    surfaces: [{
+      surfaceId: 's1', surfaceTitle: 'edited', surfaceKind: 'terminal', cwd: null,
+      pendingBatchId: original.id,
+      notes: deleted ? [] : [{ ...original.notes[0], content: { kind: 'plain', text: 'edited after timeout' } }],
+    }],
+    stagedDeletions: {},
+  });
+  const batches = stored(store).batches;
+  expect(batches.find((b) => b.id === 'unrelated')).toEqual(batch('unrelated', ['n3']));
+  expect(batches.find((b) => b.id === 'pending')?.notes ?? []).toEqual(deleted ? [] : [
+    { ...original.notes[0], content: { kind: 'plain', text: 'edited after timeout' } },
+  ]);
+});

@@ -123,3 +123,8 @@ describe('readInjectedVolatileNotepad', () => {
     expect(readInjectedVolatileNotepad()!.surfaces.map((s) => s.surfaceId)).toEqual(['pane-2']);
   });
 });
+
+it('retains a pending batch identity even when all its notes were deleted', () => {
+  inject({ surfaces: [surface({ notes: [], pendingBatchId: 'pending' })], stagedDeletions: {} });
+  expect(readInjectedVolatileNotepad()?.surfaces[0]).toMatchObject({ notes: [], pendingBatchId: 'pending' });
+});
