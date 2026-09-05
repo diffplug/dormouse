@@ -47,7 +47,7 @@ import {
 import { getTerminalTheme, onTerminalThemeChange, themeColorProvider } from "dormouse-lib/lib/terminal-theme";
 import type { TerminalSemanticEvent } from "dormouse-lib/lib/terminal-state";
 import {
-  applyTerminalSemanticEventsByPtyId,
+  applyTerminalSemanticEvents,
 } from "dormouse-lib/lib/terminal-state-store";
 import type { DorControlCancelPayload, DorControlRequestPayload } from "dor/protocol";
 import {
@@ -146,7 +146,7 @@ export class TauriAdapter implements PlatformAdapter {
       listen<{ id: string; events: TerminalSemanticEvent[] }>("terminal:semanticEvents", (event) => {
         const { id, events } = event.payload;
         this.alertManager.applyTerminalSemanticEvents(id, events);
-        applyTerminalSemanticEventsByPtyId(id, events);
+        applyTerminalSemanticEvents(id, events);
       }),
 
       listen<{ id: string; exitCode: number }>("pty:exit", (event) => {
@@ -171,7 +171,7 @@ export class TauriAdapter implements PlatformAdapter {
         // reaches xterm.js instead, and answering is the owner's alone.
         const { id, data } = event.payload;
         const parsed = new TerminalProtocolParser(themeColorProvider).process(data);
-        applyTerminalSemanticEventsByPtyId(id, collectTerminalSemanticEvents(parsed.events));
+        applyTerminalSemanticEvents(id, collectTerminalSemanticEvents(parsed.events));
         for (const handler of this.replayHandlers) {
           handler({ id, data: parsed.visibleData });
         }

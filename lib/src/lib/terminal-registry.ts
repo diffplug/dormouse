@@ -36,9 +36,6 @@ export {
   toggleSessionTodo,
 } from './session-activity-store';
 
-export { resolveTerminalSessionId } from './terminal-store';
-
-
 export {
   disposeAllSessions,
   disposeSession,
@@ -98,11 +95,9 @@ export {
 
 export {
   applyTerminalSemanticEvents,
-  applyTerminalSemanticEventsByPtyId,
   countRunningSessions,
   ensureTerminalPaneState,
   fillTerminalProcessCwd,
-  fillTerminalProcessCwdByPtyId,
   getRunningCommandArgv0,
   getTerminalPaneState,
   getTerminalPaneStateSnapshot,

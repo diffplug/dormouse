@@ -38,7 +38,7 @@ function sendToPane(
   paneId: string,
   data: string,
 ): void {
-  adapter.sendOutput(registry.resolveTerminalSessionId(paneId), data);
+  adapter.sendOutput(paneId, data);
 }
 
 /**
@@ -193,7 +193,7 @@ function PlaygroundDesktopExperience() {
                 // it stays BUSY — which is a fine demo of the rule applying, but
                 // it could never reach ALERT_RINGING.
                 busyDemoDisposeRef.current = adapter.pumpActivity(
-                  registry.resolveTerminalSessionId(PANE_BOXED),
+                  PANE_BOXED,
                   BUSY_DEMO_DURATION_MS,
                   BUSY_DEMO_INTERVAL_MS,
                 );

@@ -11,9 +11,7 @@ import {
   setCommandWatched,
 } from './watched-commands';
 import {
-  getEntryByPtyId,
   registry,
-  resolveTerminalSessionId,
   type ActivityState,
 } from './terminal-store';
 
@@ -174,7 +172,7 @@ export function consumePrimedActivity(id: string): Partial<ActivityState> | unde
  * entry does not exist yet (the host can report before the terminal is minted).
  */
 function handleAlertState(detail: AlertStateDetail): void {
-  const entry = getEntryByPtyId(detail.id);
+  const entry = registry.get(detail.id);
   if (entry) {
     entry.alertStatus = detail.status;
     entry.ringSeq = detail.ringSeq;
@@ -268,15 +266,15 @@ export function disableSessionAlert(id: string): void {
 }
 
 export function dismissSessionAlert(id: string): void {
-  getPlatform().alertDismiss(resolveTerminalSessionId(id));
+  getPlatform().alertDismiss(id);
 }
 
 export function markSessionAttention(id: string): void {
-  getPlatform().alertAttend(resolveTerminalSessionId(id));
+  getPlatform().alertAttend(id);
 }
 
 export function clearSessionAttention(id?: string): void {
-  getPlatform().alertClearAttention(id === undefined ? undefined : resolveTerminalSessionId(id));
+  getPlatform().alertClearAttention(id);
 }
 
 export function toggleSessionTodo(id: string): void {
@@ -284,7 +282,7 @@ export function toggleSessionTodo(id: string): void {
     setLocalSurfaceTodo(id, !getActivity(id).todo);
     return;
   }
-  getPlatform().alertToggleTodo(resolveTerminalSessionId(id));
+  getPlatform().alertToggleTodo(id);
 }
 
 export function markSessionTodo(id: string): void {
@@ -292,7 +290,7 @@ export function markSessionTodo(id: string): void {
     setLocalSurfaceTodo(id, true);
     return;
   }
-  getPlatform().alertMarkTodo(resolveTerminalSessionId(id));
+  getPlatform().alertMarkTodo(id);
 }
 
 export function clearSessionTodo(id: string): void {
@@ -300,5 +298,5 @@ export function clearSessionTodo(id: string): void {
     setLocalSurfaceTodo(id, false);
     return;
   }
-  getPlatform().alertClearTodo(resolveTerminalSessionId(id));
+  getPlatform().alertClearTodo(id);
 }

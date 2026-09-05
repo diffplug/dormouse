@@ -50,7 +50,7 @@ class ServicePlatform {
 }
 
 /** A pane in this webview's registry, with a terminal that records resizes. */
-function registerSurface(surfaceId: string, ptyId: string, cols = 80, rows = 24) {
+function registerSurface(surfaceId: string, cols = 80, rows = 24) {
   const terminal = {
     cols,
     rows,
@@ -59,7 +59,7 @@ function registerSurface(surfaceId: string, ptyId: string, cols = 80, rows = 24)
       terminal.rows = nextRows;
     }),
   };
-  registry.set(surfaceId, { ptyId, terminal } as unknown as TerminalEntry);
+  registry.set(surfaceId, { terminal } as unknown as TerminalEntry);
   return terminal;
 }
 
@@ -91,16 +91,16 @@ describe('surface responder', () => {
   });
 
   it('resolves ownership without resizing the live xterm', () => {
-    const terminal = registerSurface('surface-1', 'pty-1');
+    const terminal = registerSurface('surface-1');
 
     expect(platform.answer('surfaceOp', {
       surfaceId: 'surface-1', op: 'resolve', cols: 100, rows: 30,
-    })).toEqual([{ ptyId: 'pty-1', cols: 80, rows: 24 }]);
+    })).toEqual([{ ptyId: 'surface-1', cols: 80, rows: 24 }]);
     expect(terminal.resize).not.toHaveBeenCalled();
   });
 
   it('resizes the live xterm on attach and reports what it settled at', () => {
-    const terminal = registerSurface('surface-1', 'pty-1');
+    const terminal = registerSurface('surface-1');
 
     const results = platform.answer('surfaceOp', {
       surfaceId: 'surface-1', op: 'attach', cols: 100, rows: 30,
@@ -109,11 +109,11 @@ describe('surface responder', () => {
     // Through the xterm, not the PTY: otherwise the owning pane's own view
     // drifts from the size the phone set.
     expect(terminal.resize).toHaveBeenCalledWith(100, 30);
-    expect(results).toEqual([{ ptyId: 'pty-1', cols: 100, rows: 30 }]);
+    expect(results).toEqual([{ ptyId: 'surface-1', cols: 100, rows: 30 }]);
   });
 
   it('treats a later resize exactly like the attach', () => {
-    const terminal = registerSurface('surface-1', 'pty-1');
+    const terminal = registerSurface('surface-1');
     platform.answer('surfaceOp', { surfaceId: 'surface-1', op: 'attach', cols: 100, rows: 30 });
 
     const results = platform.answer('surfaceOp', {
@@ -121,14 +121,14 @@ describe('surface responder', () => {
     });
 
     expect(terminal.resize).toHaveBeenLastCalledWith(120, 40);
-    expect(results).toEqual([{ ptyId: 'pty-1', cols: 120, rows: 40 }]);
+    expect(results).toEqual([{ ptyId: 'surface-1', cols: 120, rows: 40 }]);
   });
 
   it('clamps a size the client asked for, and keeps the current one when it asks for none', () => {
-    const terminal = registerSurface('surface-1', 'pty-1', 80, 24);
+    const terminal = registerSurface('surface-1', 80, 24);
 
     expect(platform.answer('surfaceOp', { surfaceId: 'surface-1', op: 'attach' })).toEqual([
-      { ptyId: 'pty-1', cols: 80, rows: 24 },
+      { ptyId: 'surface-1', cols: 80, rows: 24 },
     ]);
     expect(terminal.resize).not.toHaveBeenCalled();
 
@@ -140,7 +140,7 @@ describe('surface responder', () => {
   });
 
   it('answers the directory with this webview snapshot', () => {
-    registerSurface('surface-1', 'pty-1');
+    registerSurface('surface-1');
     const entries = platform.answer('directory', {}) as Array<{ surfaceId: string }>;
     expect(entries.map((entry) => entry.surfaceId)).toEqual(['surface-1']);
   });
@@ -185,7 +185,7 @@ describe('surface responder', () => {
     await Promise.resolve();
     expect(platform.notified).toBe(1);
     // And answering still works after the extra calls.
-    registerSurface('surface-1', 'pty-1');
+    registerSurface('surface-1');
     expect(platform.answer('directory', {})).toHaveLength(1);
   });
 

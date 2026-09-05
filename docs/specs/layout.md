@@ -269,7 +269,7 @@ Source of truth: `lib/src/components/wall/IllegalRenameWarning.tsx`, `lib/src/co
 
 ## Session lifecycle and terminal registry
 
-For a terminal Surface the pane ID is its session ID. `TerminalPane` calls `getOrCreateTerminal(id)` on React mount and `unmountElement(id)` on React unmount; **the session (xterm.js instance, PTY, DOM element) persists in the registry across mount/unmount cycles**, and an unmounted element leaves the entry `Orphaned`. A browser surface's pane ID is a Surface id with no registry entry or PTY (`docs/specs/glossary.md`); its DOM is hosted by LathHost's leaf div and rebuilt from persisted params, never from the registry.
+**Must use one stable Session id for a terminal Surface, its registry key, and its platform PTY.** Layout moves and swaps change position only. `TerminalPane` calls `getOrCreateTerminal(id)` on React mount and `unmountElement(id)` on React unmount; **the session (xterm.js instance, PTY, DOM element) persists in the registry across mount/unmount cycles**, and an unmounted element leaves the entry `Orphaned`. A browser surface's pane ID is a Surface id with no registry entry or PTY (`docs/specs/glossary.md`); its DOM is hosted by LathHost's leaf div and rebuilt from persisted params, never from the registry.
 
 | Op | Behavior |
 |---|---|
@@ -332,8 +332,6 @@ Source of truth: `lib/src/components/wall/use-session-persistence.ts` (save trig
 ### Activity state
 
 Each Surface carries an `ActivityState` (`status`, `watchingEnabled`, `todo`, `notification`), synced to React via `useSyncExternalStore`. **State arriving from the platform *before* a registry entry exists** (the resume path) is staged as **primed state** and merged in when the entry is minted; a browser surface, which never gets a registry entry, keeps its activity in a parallel local map.
-
-Each terminal Session also carries `TerminalPaneState` (`docs/specs/terminal-state.md`), keyed by pane/session id, with PTY-originated semantic events resolved through `ptyId` — so a swapped session keeps its CWD and command state with the terminal content.
 
 Source of truth: `lib/src/lib/session-activity-store.ts` (the React snapshot store and the primed-state merge).
 

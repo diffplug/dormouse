@@ -11,7 +11,7 @@ import {
   textProjectionOf,
 } from '../terminal-protocol';
 import {
-  applyTerminalSemanticEventsByPtyId,
+  applyTerminalSemanticEvents,
 } from '../terminal-state-store';
 import { themeColorProvider } from '../terminal-theme';
 
@@ -389,7 +389,7 @@ export class FakePtyAdapter implements PlatformAdapter {
     applyTerminalProtocolEvents(this.alertManager, id, parsed.events);
     const semanticEvents = collectTerminalSemanticEvents(parsed.events);
     this.alertManager.applyTerminalSemanticEvents(id, semanticEvents);
-    applyTerminalSemanticEventsByPtyId(id, semanticEvents);
+    applyTerminalSemanticEvents(id, semanticEvents);
     const inputHandler = this.inputHandlers.get(id);
     for (const response of collectTerminalProtocolResponses(parsed.events)) {
       inputHandler?.(response);

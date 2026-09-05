@@ -17,7 +17,6 @@ import {
 } from './terminal-command-input';
 import { derivePromptShape, extractCommand, type PromptShape } from './terminal-prompt-shape';
 import { stripTerminalControls, TerminalControlStreamFilter } from './terminal-controls';
-import { getSessionIdByPtyId } from './terminal-store';
 
 const paneStates = new Map<string, TerminalPaneState>();
 const promptSubmitStates = new Map<string, PromptSubmitState>();
@@ -118,11 +117,6 @@ export function removeTerminalPaneState(id: string): void {
   notifyTerminalPaneStateListeners();
 }
 
-export function applyTerminalSemanticEventsByPtyId(ptyId: string, events: TerminalSemanticEvent[]): void {
-  const id = resolvePaneStateIdByPtyId(ptyId);
-  applyTerminalSemanticEvents(id, events);
-}
-
 export function applyTerminalSemanticEvents(
   id: string,
   events: TerminalSemanticEvent[],
@@ -185,10 +179,6 @@ export function recordTerminalUserInput(id: string, input: string, reader?: Prom
   }
 }
 
-export function recordTerminalUserInputByPtyId(ptyId: string, input: string, reader?: PromptLineReader): void {
-  recordTerminalUserInput(resolvePaneStateIdByPtyId(ptyId), input, reader);
-}
-
 // Programmatic launches bypass onData, so seed before the PTY write. For split /
 // ensure this run is also the readiness sentinel: the first prompt clears it,
 // then typing bridges the gap until authentic OSC re-reports the command.
@@ -200,10 +190,6 @@ export function seedLaunchedCommand(id: string, command: string, cwdPath?: strin
   events.push({ type: 'commandLine', commandLine: command });
   events.push({ type: 'commandStart', source: 'user_input' });
   applyTerminalSemanticEvents(id, events);
-}
-
-export function finishLaunchedCommandByPtyId(ptyId: string, exitCode: number): void {
-  applyTerminalSemanticEventsByPtyId(ptyId, [{ type: 'commandFinish', exitCode }]);
 }
 
 /**
@@ -236,10 +222,6 @@ export function recordTerminalOutput(id: string, output: string): void {
     // OSC-driven (which would then silence the very path emitting this).
     applyTerminalSemanticEvents(id, [{ type: 'promptStart' }, { type: 'promptEnd' }], { keystrokeHeuristic: true });
   }
-}
-
-export function recordTerminalOutputByPtyId(ptyId: string, output: string): void {
-  recordTerminalOutput(resolvePaneStateIdByPtyId(ptyId), output);
 }
 
 // Pre-seed the prompt shape from restored scrollback. On reconnect to a live
@@ -311,10 +293,6 @@ export function fillTerminalProcessCwd(id: string, path: string | null | undefin
   updateCwdIfAllowed(id, cwd);
 }
 
-export function fillTerminalProcessCwdByPtyId(ptyId: string, path: string | null | undefined): void {
-  fillTerminalProcessCwd(resolvePaneStateIdByPtyId(ptyId), path);
-}
-
 function updateCwdIfAllowed(id: string, cwd: CwdState): void {
   const current = paneStates.get(id);
   if (!current) return;
@@ -322,10 +300,6 @@ function updateCwdIfAllowed(id: string, cwd: CwdState): void {
   if (currentSource && currentSource !== 'manual' && currentSource !== 'process') return;
   paneStates.set(id, { ...current, cwd });
   notifyTerminalPaneStateListeners();
-}
-
-function resolvePaneStateIdByPtyId(ptyId: string): string {
-  return getSessionIdByPtyId(ptyId) ?? ptyId;
 }
 
 // Detect a returned/idle shell prompt for shells without OSC 133/633

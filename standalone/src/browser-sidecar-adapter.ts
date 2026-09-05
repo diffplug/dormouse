@@ -41,7 +41,7 @@ import {
 } from "dormouse-lib/lib/terminal-protocol";
 import { getTerminalTheme, onTerminalThemeChange, themeColorProvider } from "dormouse-lib/lib/terminal-theme";
 import type { TerminalSemanticEvent } from "dormouse-lib/lib/terminal-state";
-import { applyTerminalSemanticEventsByPtyId } from "dormouse-lib/lib/terminal-state-store";
+import { applyTerminalSemanticEvents } from "dormouse-lib/lib/terminal-state-store";
 import type { DorControlCancelPayload, DorControlRequestPayload } from "dor/protocol";
 import {
   cancelDorControlRequest,
@@ -308,7 +308,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     } else if (event === "terminal:semanticEvents") {
       const { id, events } = data as { id: string; events: TerminalSemanticEvent[] };
       this.alertManager.applyTerminalSemanticEvents(id, events);
-      applyTerminalSemanticEventsByPtyId(id, events);
+      applyTerminalSemanticEvents(id, events);
     } else if (event === "pty:exit") {
       const payload = data as { id: string; exitCode: number };
       this.alertManager.onExit(payload.id, payload.exitCode);
@@ -320,7 +320,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
       // why the one-shot parser still needs the theme.
       const { id, data: text } = data as { id: string; data: string };
       const parsed = new TerminalProtocolParser(themeColorProvider).process(text);
-      applyTerminalSemanticEventsByPtyId(id, collectTerminalSemanticEvents(parsed.events));
+      applyTerminalSemanticEvents(id, collectTerminalSemanticEvents(parsed.events));
       for (const handler of this.replayHandlers) handler({ id, data: parsed.visibleData });
     } else if (event === BURROW_RESULT_EVENT) {
       this.burrowClient.onResult(data as BurrowResult);
