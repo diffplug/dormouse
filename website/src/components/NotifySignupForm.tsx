@@ -1,9 +1,7 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState } from "react";
 import { ACCENT_BORDER_CLASS, ACTION_TEXT_CLASS, LINK_CLASS, MUTED_TEXT_CLASS } from "./docs-tokens";
 import { SITE_LINK_CLASS } from "./site-tokens";
 
-const EMAIL_REGEX =
-  /^[a-zA-Z0-9.!#$%&'*+\/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
 const EMAIL_STORAGE_PREFIX = "dormouse:notify-email:";
 const SUBSCRIBE_URL = "https://nedshed.dev/subscribe";
 
@@ -44,7 +42,6 @@ export function NotifySignupForm({
   variant?: keyof typeof PALETTE;
 }) {
   const [email, setEmail] = useState("");
-  const [message, setMessage] = useState("");
   const palette = PALETTE[variant];
   const storageKey = `${EMAIL_STORAGE_PREFIX}${emailId}`;
 
@@ -56,19 +53,11 @@ export function NotifySignupForm({
     }
   }, [storageKey]);
 
-  function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    if (!EMAIL_REGEX.test(email)) {
-      e.preventDefault();
-      setMessage("Please enter a valid email");
-    }
-  }
-
   return (
     <>
       <form
         action={SUBSCRIBE_URL}
         method="get"
-        onSubmit={handleSubmit}
         className="flex flex-col gap-2"
       >
         <label htmlFor={emailId} className={`font-display text-sm ${palette.muted}`}>
@@ -88,7 +77,6 @@ export function NotifySignupForm({
               } catch {
                 // Storage can be disabled; React state still owns this visit.
               }
-              if (message) setMessage("");
             }}
             placeholder="you@example.com"
             required
@@ -102,11 +90,6 @@ export function NotifySignupForm({
             {buttonLabel}
           </button>
         </div>
-        {message && (
-          <p className="text-sm text-red-400" role="alert">
-            {message}
-          </p>
-        )}
       </form>
       <p className={`mt-3 text-base leading-snug ${palette.muted}`}>
         One more step on Substack. This signs you up for my personal devlog{" "}

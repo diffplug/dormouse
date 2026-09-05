@@ -337,8 +337,9 @@ hidden, so a returning reader never sees dismissed UI flash. Pinned by
 **Must mark both services unavailable:** Hosted operates Pocket's Relay;
 optional ElevenLabs replaces browser voice. Terminals stay on an awake, online
 computer; browser speech and self-hosting remain. `NotifySignupForm` exposes
-the `nedshed.dev` devlog handoff and keeps email per tab;
-`website/src/components/NotifySignupForm.test.tsx` pins both.
+the `nedshed.dev` devlog handoff and keeps email per tab.
+**Must use native required-email validation.**
+`website/src/components/NotifySignupForm.test.tsx` pins all three.
 
 **Must open both hosting pages with the Relay boundary:** Dormouse needs none;
 remote features require a configured Relay and otherwise make no network

@@ -31,6 +31,16 @@ describe("NotifySignupForm", () => {
     expect(markup.match(/on Substack/g)).toHaveLength(1);
     expect(markup).toContain("text-[var(--docs-button-text)]");
     expect(markup).not.toContain("Opening nedshed.dev");
+
+    const template = document.createElement("template");
+    template.innerHTML = markup;
+    const form = template.content.querySelector("form")!;
+    const input = form.querySelector("input")!;
+    expect(form.checkValidity()).toBe(false);
+    input.value = "invalid-address";
+    expect(form.checkValidity()).toBe(false);
+    input.value = "dev@example.com";
+    expect(form.checkValidity()).toBe(true);
   });
 
   it("restores a tab-scoped email draft after hydration", async () => {
