@@ -171,7 +171,6 @@ describe("playground dispatcher", () => {
   });
 });
 
-
 describe("desktop playground hydration", () => {
   it("hydrates the phone fallback without loading or initializing the desktop runtime", async () => {
     const tree = <MemoryRouter><PlaygroundDesktop /></MemoryRouter>;
