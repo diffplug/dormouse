@@ -3,10 +3,10 @@
  * Proves `scripts/ps1-cmdlet-lint.mjs` load-bearing, the way the other sibling
  * lints do (AGENTS.md: "a rule added without its self-test is not enforced").
  *
- * One planted defect per check, each the real shape: a rename eating the noun
- * half of a cmdlet name, and a rename eating the verb half. The installer is
- * copied, mutated, and restored; the lint must go red on each and green again
- * after.
+ * Each planted defect is a real shape: a rename eating the noun half of a
+ * cmdlet name, one eating the verb half, and ones eating a name the anchor can
+ * only reach from a single call position. The installer is copied, mutated, and
+ * restored; the lint must go red on each and green again after.
  */
 
 import { copyFileSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
