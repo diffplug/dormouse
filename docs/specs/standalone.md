@@ -458,8 +458,9 @@ Source of truth: `standalone/src/quit-confirm-store.ts` (the module store + gate
 2. `gracefulKillAllPtys` — SIGTERM every PTY, resolving early once all exit and
    their final output has had a grace tick to reach the webview (§Rust ↔ sidecar
    bridge).
-3. `requestSessionFlush` — flush the post-exit Session state. Both flushes are
-   no-ops while `persistsSession: false` (§Persistence).
+3. `requestSessionFlush` — flush the post-exit Session state. **Must retain the
+   previously persisted CWD when `getCwd` returns null for a dead PTY.** Both
+   flushes are no-ops while `persistsSession: false` (§Persistence).
 4. `drainSessionSaves` — await the last `save_session` reaching disk; the process
    does not exit until it lands (§Persistence, "Durability on quit").
 5. If an update is pending, a fresh `quit_progress` then `installPendingUpdate()`
