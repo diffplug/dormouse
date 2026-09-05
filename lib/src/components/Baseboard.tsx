@@ -1,14 +1,16 @@
-import { useEffect, useRef, useState, useMemo, useLayoutEffect, useContext, useSyncExternalStore, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, useMemo, useLayoutEffect, useContext, useSyncExternalStore, type ReactNode } from 'react';
 import {
-  BellRingingIcon,
-  BellSlashIcon,
+  DeviceMobileSlashIcon,
   CaretLeftIcon,
   CaretRightIcon,
   SlidersHorizontalIcon,
   SpeakerHighIcon,
   SpeakerSlashIcon,
+  VibrateIcon,
 } from '@phosphor-icons/react';
-import { SettingsDialog } from './SettingsDialog';
+import { chromeButton } from './design';
+import { SettingsDialog, type AlarmSink } from './SettingsDialog';
+import { SettingsPreview } from './SettingsPreview';
 import { Door } from './Door';
 import { DialogKeyboardContext, DoorElementsContext } from './wall/wall-context';
 import type { DoorChip, DooredItem } from './wall/wall-types';
@@ -25,12 +27,19 @@ import {
   subscribeToAlertSettings,
   subscribeToAlertSpeech,
   subscribeToTerminalPaneState,
+  updateAlertSettings,
 } from '../lib/terminal-registry';
 import { createTerminalPaneState, deriveSurfaceLabel } from '../lib/terminal-state';
 
 /** Shared look for every baseboard-level button (DESIGN.md -> Navigation). */
-const BASEBOARD_BUTTON_CLASS =
-  'flex h-6 min-w-6 shrink-0 items-center justify-center gap-1 rounded px-1.5 pb-px text-sm font-medium font-mono text-muted transition-colors hover:bg-surface-raised hover:text-foreground';
+const BASEBOARD_BUTTON_CLASS = chromeButton({
+  kind: 'labeled',
+  className: 'h-6 shrink-0 justify-center pb-px text-sm font-medium font-mono text-muted hover:text-foreground',
+});
+const SETTINGS_BUTTON_CLASS = chromeButton({
+  kind: 'icon',
+  className: 'h-6 w-6 shrink-0 pb-px hover:text-foreground focus-visible:outline focus-visible:outline-1 focus-visible:outline-focus-ring',
+});
 
 export interface BaseboardProps {
   items: DoorChip[];
@@ -67,6 +76,16 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   const [rightClusterWidth, setRightClusterWidth] = useState(0);
   const layoutMetrics = useRef({ doorGap: 0, arrowWidth: 0 });
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsPreview, setSettingsPreview] = useState<{ sink: AlarmSink; anchor: HTMLElement; sequence: number } | null>(null);
+  const previewSequence = useRef(0);
+  const closeSettingsPreview = useCallback(() => setSettingsPreview(null), []);
+  const toggleAlarm = (sink: AlarmSink, anchor: HTMLElement) => {
+    const current = getAlertSettings();
+    updateAlertSettings(sink === 'speech'
+      ? { speakEnabled: !current.speakEnabled }
+      : { pushEnabled: !current.pushEnabled });
+    setSettingsPreview({ sink, anchor, sequence: ++previewSequence.current });
+  };
   const setDialogKeyboardActive = useContext(DialogKeyboardContext);
 
   // Suppress command-mode key dispatch while the Settings dialog owns the
@@ -276,44 +295,60 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
         <div ref={rightClusterEl} className="flex shrink-0 items-end gap-1.5">
           {notice}
 
-          <button
-            className={`${BASEBOARD_BUTTON_CLASS} ${settings.speakEnabled ? 'text-app-fg' : ''}`}
-            aria-label={`Spoken alarms ${settings.speakEnabled ? 'enabled' : 'disabled'}; open Settings`}
-            title={`Spoken alarms ${settings.speakEnabled ? 'enabled' : 'disabled'}`}
-            aria-haspopup="dialog"
-            data-alarm-setting="speech"
-            onClick={() => setSettingsOpen(true)}
-          >
-            {settings.speakEnabled
-              ? <SpeakerHighIcon size={16} weight="fill" />
-              : <SpeakerSlashIcon size={16} weight="bold" />}
-          </button>
+          <div className="flex items-center gap-0.5">
+            <button
+              className={`${SETTINGS_BUTTON_CLASS} ${settings.speakEnabled ? 'text-app-fg' : 'text-muted'}`}
+              aria-label="Spoken alarms"
+              aria-pressed={settings.speakEnabled}
+              title={`${settings.speakEnabled ? 'Disable' : 'Enable'} spoken alarms`}
+              data-alarm-setting="speech"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={(event) => toggleAlarm('speech', event.currentTarget)}
+            >
+              {settings.speakEnabled
+                ? <SpeakerHighIcon size={16} weight="fill" />
+                : <SpeakerSlashIcon size={16} weight="bold" />}
+            </button>
 
-          <button
-            className={`${BASEBOARD_BUTTON_CLASS} ${settings.pushEnabled ? 'text-app-fg' : ''}`}
-            aria-label={`Push notifications ${settings.pushEnabled ? 'enabled' : 'disabled'}; open Settings`}
-            title={`Push notifications ${settings.pushEnabled ? 'enabled' : 'disabled'}`}
-            aria-haspopup="dialog"
-            data-alarm-setting="push"
-            onClick={() => setSettingsOpen(true)}
-          >
-            {settings.pushEnabled
-              ? <BellRingingIcon size={16} weight="fill" />
-              : <BellSlashIcon size={16} weight="bold" />}
-          </button>
+            <button
+              className={`${SETTINGS_BUTTON_CLASS} ${settings.pushEnabled ? 'text-app-fg' : 'text-muted'}`}
+              aria-label="Push notifications"
+              aria-pressed={settings.pushEnabled}
+              title={`${settings.pushEnabled ? 'Disable' : 'Enable'} push notifications`}
+              data-alarm-setting="push"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={(event) => toggleAlarm('push', event.currentTarget)}
+            >
+              {settings.pushEnabled
+                ? <VibrateIcon size={16} weight="fill" />
+                : <DeviceMobileSlashIcon size={16} />}
+            </button>
 
-          <button
-            className={BASEBOARD_BUTTON_CLASS}
-            aria-label="Settings"
-            title="Settings"
-            aria-haspopup="dialog"
-            data-open-settings="true"
-            onClick={() => setSettingsOpen(true)}
-          >
-            <SlidersHorizontalIcon size={16} weight="bold" />
-          </button>
+            <button
+              className={`${SETTINGS_BUTTON_CLASS} text-muted`}
+              aria-label="Settings"
+              title="Settings"
+              aria-haspopup="dialog"
+              data-open-settings="true"
+              onClick={() => {
+                closeSettingsPreview();
+                setSettingsOpen(true);
+              }}
+            >
+              <SlidersHorizontalIcon size={16} weight="bold" />
+            </button>
+          </div>
         </div>
       </div>
+
+      {settingsPreview && (
+        <SettingsPreview
+          key={settingsPreview.sequence}
+          sink={settingsPreview.sink}
+          anchor={settingsPreview.anchor}
+          onClose={closeSettingsPreview}
+        />
+      )}
 
       {settingsOpen && (
         <SettingsDialog
