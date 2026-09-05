@@ -106,6 +106,11 @@ tab/eval/screenshot commands, and anything added later. It is the only code
 **`spawnAndCapture` never throws:** a spawn-level failure resolves as
 `{ ok: false, error }`.
 
+**Must release captured stdout/stderr pipes when the result settles**, including
+the exit-grace fallback, without terminating descendants (rationale).
+`dor-lib-common/test/spawn.test.mjs` pins caller exit with an inherited-pipe daemon
+still alive.
+
 **Resolution.** `dor-lib-common`'s `exports` point at its built `dist`
 (Node-type-free `.d.ts`, since `dor`'s `tsc` avoids `@types/node`); every
 esbuild/Vite consumer inlines it. **The `dor` and `dormouse-lib` prebuilds must

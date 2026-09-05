@@ -24,6 +24,21 @@
 
 **Why none of the `exit`-vs-`close` trouble surfaced on macOS.** The `agent-browser` daemon double-forks and detaches from the inherited fds, so `close` fires normally; only on Windows, where the daemon holds the parent's stdout/stderr pipes for its whole life, does a `close`-only wait hang forever.
 
+**Why settling the promise does not finish the CLI.** A subprocess reproduction
+on macOS in 2026-09 resolved capture at 279 ms but kept its caller alive until a
+pipe-inheriting descendant exited at 3054 ms. The `dor` entry point sets
+`process.exitCode` rather than forcing exit, so open read handles defeat the
+exit-grace fallback. In the long-lived host, their data listeners also keep
+appending daemon output after the result is immutable. Neither caller reads
+those bytes; capture owns the read ends and releases them at settlement.
+
+**The daemon owns its remaining output lifetime.** Agent-browser 0.31.1 already
+expects its spawning CLI to drop the read end after startup: its
+[daemon setup](https://github.com/vercel-labs/agent-browser/blob/v0.31.1/cli/src/native/daemon.rs)
+redirects Unix stderr to a log or `/dev/null`, and daemon diagnostics discard
+write errors. Closing capture's read ends does not signal or kill descendants;
+a descendant that continues writing must tolerate a closed output sink.
+
 ## Control-channel security
 
 **Who the threat is.** Not the network — the channel is a local socket or named pipe. The attacker is a second account on the same box, or any process running as the user; interposing inherits the whole verb set at once — keystrokes in, screen and scrollback out, pane destroyed.

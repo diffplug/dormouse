@@ -49,6 +49,11 @@ export function spawnAndCapture(binary: string, args: readonly string[]): Promis
       if (settled) return;
       settled = true;
       if (graceTimer !== undefined) clearTimeout(graceTimer);
+      // Capture is over. In the grace fallback a daemon still owns the write
+      // ends: leaving our readers open retains both the caller's event loop and
+      // the data listeners that keep accumulating ignored output.
+      child.stdout?.destroy();
+      child.stderr?.destroy();
       apply();
     };
     child.stdout?.on('data', (chunk: unknown) => { stdout += String(chunk); });
