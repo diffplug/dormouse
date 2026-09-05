@@ -159,6 +159,16 @@ flag is because two closures of one Surface can overlap (a kill retried while th
 quit gate is closing everything), and the first to finish must not thaw notes the
 second is still writing.
 
+The process CWD is asked for at closure rather than tracked continuously because
+it is only knowable while the PTY is alive and only *needed* when a batch is about
+to be written. Without it a shell that emits no CWD escape — `cmd.exe`, a bare
+`sh`, anything without shell integration — archived `cwd: null` while the host
+could have inspected the live process, which is the same fallback the VS Code
+session-save path already uses per pane. It is bounded because the refresh sits
+between a kill keystroke and the teardown it triggers: a host that never answers
+must not hold a Surface open, and what it returns is metadata, so a timeout just
+keeps whatever the Session last reported.
+
 ## Standalone quit
 
 The gate sits before the first `quit_progress` rather than inside the teardown

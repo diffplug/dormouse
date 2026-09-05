@@ -3,6 +3,10 @@
 // mutation, and only then does the caller tear the Surface down
 // (docs/specs/notepad.md → "Closure"). Separate from the store because the store
 // is synchronous state and this is the one place that awaits the host.
+import { hasTerminal } from 'dor/commands/types';
+import { getPlatformOrNull } from '../platform';
+import { fillTerminalProcessCwd } from '../terminal-state-store';
+import { resolveTerminalSessionId } from '../terminal-store';
 import { buildArchiveBatch } from './archive-model';
 import { hasNotepadArchive, mutateArchive } from './archive-service';
 import {
@@ -19,6 +23,51 @@ import type { ArchiveBatch, LiveNote } from './types';
  *  and a Surface holding only those closes as if it held none. */
 function isArchivable(note: LiveNote): boolean {
   return note.content.kind !== 'plain' || note.content.text !== '';
+}
+
+/** How long a closure waits for the host to inspect a live PTY's working
+ *  directory. The answer is a fallback, so it must never hold a kill up: past
+ *  this the batch archives whatever the Session last reported. */
+export const PROCESS_CWD_REFRESH_MS = 1000;
+
+/** The host's answer for one Session's live process CWD, or `null` if it does
+ *  not arrive in time or at all. A host without a platform, a PTY that has
+ *  already exited, and a host that cannot answer all read the same. */
+function boundedProcessCwd(surfaceId: string): Promise<string | null> {
+  const platform = getPlatformOrNull();
+  if (!platform) return Promise.resolve(null);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const bound = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), PROCESS_CWD_REFRESH_MS);
+  });
+  return Promise.race([
+    platform.getCwd(resolveTerminalSessionId(surfaceId)).catch(() => null),
+    bound,
+  ]).finally(() => clearTimeout(timer));
+}
+
+/**
+ * Ask the host where each closing terminal Session's process actually is,
+ * before its batch reads the metadata.
+ *
+ * A shell with no CWD escapes (no OSC 7, 9;9, 633 or 1337) never reports one,
+ * so its batch would archive `cwd: null` even though the PTY is alive right now
+ * and the host can inspect it — the same fallback the session-save path uses.
+ * `fillTerminalProcessCwd` refuses to override an integration-reported CWD, so
+ * this can only fill a gap. Concurrent and bounded: a closure is a keystroke
+ * away from a kill, and this is metadata.
+ */
+async function refreshProcessCwds(surfaceIds: readonly string[]): Promise<void> {
+  const pending: Array<Promise<void>> = [];
+  for (const surfaceId of surfaceIds) {
+    if (!getNotes(surfaceId).some(isArchivable)) continue;
+    const meta = getNotepadSurfaceMeta(surfaceId);
+    if (!meta || !hasTerminal(meta.surfaceKind)) continue;
+    pending.push(boundedProcessCwd(surfaceId).then((path) => {
+      fillTerminalProcessCwd(surfaceId, path);
+    }));
+  }
+  if (pending.length > 0) await Promise.all(pending);
 }
 
 export interface ArchiveSurfaceNotesOptions {
@@ -49,6 +98,9 @@ export async function archiveSurfaceNotes(
   // (docs/specs/notepad.md → "Closure").
   const release = beginClosing(surfaceIds);
   try {
+    // Under the freeze and before a single batch is built, so a Surface whose
+    // shell reports no CWD still archives where it was.
+    if (archivable) await refreshProcessCwds(surfaceIds);
     const batches: ArchiveBatch[] = [];
     /** Ids of batches an earlier attempt landed whose Surface now has nothing
      *  left to re-append. Kept apart from the batches' own ids so the mutation

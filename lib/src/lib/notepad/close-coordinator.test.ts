@@ -1,8 +1,15 @@
+import type { SurfaceKind } from 'dor/commands/types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakePtyAdapter, setPlatform } from '../platform';
 import type { CwdState } from '../terminal-state';
+import {
+  ensureTerminalPaneState,
+  getTerminalPaneState,
+  removeTerminalPaneState,
+} from '../terminal-state-store';
+import { registry, type TerminalEntry } from '../terminal-store';
 import { __resetArchiveServiceForTests } from './archive-service';
-import { archiveSurfaceNotes } from './close-coordinator';
+import { archiveSurfaceNotes, PROCESS_CWD_REFRESH_MS } from './close-coordinator';
 import {
   addPlainNote,
   addTerminalNote,
@@ -25,6 +32,20 @@ const CWD: CwdState = {
   source: 'osc7',
   updatedAt: 5,
 };
+
+const PANE_IDS = ['s1', 's2', 's3'];
+
+/**
+ * The Wall's resolver in miniature: the CWD is read live out of the pane state,
+ * not fixed, so a refresh the closure performs shows up in the batch it builds.
+ */
+function installMetaResolver(surfaceKind: SurfaceKind = 'terminal', surfaceTitle = 'pnpm dev'): void {
+  setNotepadSurfaceMetaResolver((id) => ({
+    surfaceTitle,
+    surfaceKind,
+    cwd: getTerminalPaneState(id).cwd,
+  }));
+}
 
 let adapter: FakePtyAdapter;
 
@@ -79,6 +100,8 @@ beforeEach(() => {
 afterEach(() => {
   __resetArchiveServiceForTests();
   clearAllNotepads();
+  PANE_IDS.forEach(removeTerminalPaneState);
+  PANE_IDS.forEach((id) => registry.delete(id));
 });
 
 describe('archiveSurfaceNotes', () => {
@@ -90,7 +113,8 @@ describe('archiveSurfaceNotes', () => {
   });
 
   it('archives one batch per Surface and forgets the notes', async () => {
-    setNotepadSurfaceMetaResolver(() => ({ surfaceTitle: 'pnpm dev', surfaceKind: 'terminal', cwd: CWD }));
+    installMetaResolver();
+    ensureTerminalPaneState('s1', { cwd: CWD });
     addPlainNote('s1', 'remember this');
 
     await archiveSurfaceNotes(['s1']);
@@ -365,6 +389,80 @@ describe('archiveSurfaceNotes', () => {
     expect(archive.batches).toHaveLength(1);
     expect(archive.batches[0].notes.map((n) => n.content)).toEqual([{ kind: 'plain', text: 'typed' }]);
     expect(getNotes('s2')).toEqual([]);
+  });
+
+  describe('process CWD refresh', () => {
+    it('fills a batch from the live PTY when the shell reported no CWD', async () => {
+      // A shell with no CWD escapes (no OSC 7 / 9;9 / 633 / 1337) never reports
+      // one, but its PTY is alive right up to the kill.
+      installMetaResolver();
+      ensureTerminalPaneState('s1');
+      // A Surface whose PTY id is not its own id — a resumed pane, say. The
+      // host is asked about the PTY; the pane state is filled under the Surface.
+      registry.set('s1', { ptyId: 'pty-9' } as unknown as TerminalEntry);
+      const getCwd = vi.spyOn(adapter, 'getCwd').mockResolvedValue('/Users/me/project');
+      addPlainNote('s1', 'where was I');
+
+      await archiveSurfaceNotes(['s1']);
+
+      expect(getCwd).toHaveBeenCalledWith('pty-9');
+      expect((await stored()).batches[0].cwd).toMatchObject({
+        path: '/Users/me/project',
+        source: 'process',
+      });
+    });
+
+    it('never overrides a CWD the shell integration reported', async () => {
+      installMetaResolver();
+      ensureTerminalPaneState('s1', { cwd: CWD });
+      vi.spyOn(adapter, 'getCwd').mockResolvedValue('/somewhere/else');
+      addPlainNote('s1', 'osc7 wins');
+
+      await archiveSurfaceNotes(['s1']);
+
+      expect((await stored()).batches[0].cwd).toEqual(CWD);
+    });
+
+    it('never asks about a Surface that has no terminal', async () => {
+      installMetaResolver('browser', 'example.com');
+      const getCwd = vi.spyOn(adapter, 'getCwd');
+      addPlainNote('s1', 'a browser note');
+
+      await archiveSurfaceNotes(['s1']);
+
+      expect(getCwd).not.toHaveBeenCalled();
+      expect((await stored()).batches[0]).toMatchObject({ surfaceKind: 'browser', cwd: null });
+    });
+
+    it('closes within the bound when the host never answers', async () => {
+      vi.useFakeTimers();
+      try {
+        installMetaResolver();
+        ensureTerminalPaneState('s1');
+        vi.spyOn(adapter, 'getCwd').mockReturnValue(new Promise<string | null>(() => {}));
+        addPlainNote('s1', 'closing anyway');
+
+        const closing = archiveSurfaceNotes(['s1']);
+        await vi.advanceTimersByTimeAsync(PROCESS_CWD_REFRESH_MS);
+        await closing;
+      } finally {
+        vi.useRealTimers();
+      }
+
+      expect((await stored()).batches[0].cwd).toBeNull();
+      expect(getNotes('s1')).toEqual([]);
+    });
+
+    it('keeps the last reported CWD when the host rejects', async () => {
+      installMetaResolver();
+      ensureTerminalPaneState('s1', { cwd: CWD });
+      vi.spyOn(adapter, 'getCwd').mockRejectedValue(new Error('the PTY is gone'));
+      addPlainNote('s1', 'still archived');
+
+      await expect(archiveSurfaceNotes(['s1'])).resolves.toBeUndefined();
+
+      expect((await stored()).batches[0].cwd).toEqual(CWD);
+    });
   });
 
   it('closes without an archive at all on a host that has none', async () => {
