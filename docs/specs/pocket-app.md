@@ -380,11 +380,10 @@ Source of truth: `isInstalledWebApp` / `requiresInstallForPush` /
 ## What Pocket stores
 
 **One module owns the IndexedDB name, its version, its upgrade, and every open**
-(rationale). `dormouse-pocket` is at **v3**: `known-burrows` (`KnownBurrowV1`, keyed
+(rationale). `dormouse-pocket` is at **v4**: `known-burrows` (`KnownBurrowV1`, keyed
 by `burrowId`) and `pending-deletions` (`PendingDeliveryDeletionV1`, keyed
-`burrowId:deliveryId`). **The upgrade is "create what is absent, drop what is
-gone"**, so a phone arriving from v1 or v2 lands in the same shape and its
-`device-key` store goes with the protocol that used it (rationale).
+`burrowId:deliveryId`). **Must upgrade v1–v3 by creating missing stores, dropping
+`device-key` and `known-hosts`, and emptying `pending-deletions`** (rationale).
 **`navigator.storage.persist()` is requested once before the first write, and
 never throws**: a browser with no storage manager, or one that refuses, gets
 ordinary eviction-prone storage, which re-pairing survives
