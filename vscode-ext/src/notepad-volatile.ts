@@ -38,8 +38,10 @@ const EMPTY_STAGED: StagedDeletions = Object.freeze({ deleteBatchIds: [], delete
  * `globalState` by a teardown that has no webview left to ask, and one malformed
  * note would make the *whole* archive unreadable on the next load. Round-tripping
  * the batch this Surface would produce through the shared validator is the
- * cheapest way to be sure, and it drops unknown fields on the way
- * (`readNotepadArchive` in `lib/src/lib/notepad/archive-model.ts`).
+ * cheapest way to be sure. The validator *rejects* unknown fields rather than
+ * dropping them, which is what the webview sends anyway — `buildVolatileSnapshot`
+ * maps every note through `toArchivedNote` and the CWD is the canonical
+ * `CwdState` (`readNotepadArchive` in `lib/src/lib/notepad/archive-model.ts`).
  */
 function sanitizeSurface(value: unknown): VolatileSurfaceNotes | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;

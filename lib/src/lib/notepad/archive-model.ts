@@ -24,8 +24,28 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
+/** Every reader gates on this: a key it does not know is a validation failure,
+ *  because `runMutation` rewrites the whole archive from what was read back
+ *  (`lib/src/lib/notepad/archive-service.ts`), so a field only a newer build
+ *  understands would be erased by this build's next save. */
+function hasOnlyKeys(record: Record<string, unknown>, allowed: readonly string[]): boolean {
+  for (const key of Object.keys(record)) {
+    if (!allowed.includes(key)) return false;
+  }
+  return true;
+}
+
+const RUN_KEYS = ['text', 'bold', 'italic', 'foreground', 'background'] as const;
+const PLAIN_CONTENT_KEYS = ['kind', 'text'] as const;
+const TERMINAL_CONTENT_KEYS = ['kind', 'runs'] as const;
+const NOTE_KEYS = ['id', 'createdAt', 'content'] as const;
+const CWD_KEYS = ['uri', 'path', 'host', 'scheme', 'pathKind', 'isRemote', 'source', 'updatedAt'] as const;
+const BATCH_KEYS = ['id', 'closedAt', 'surfaceTitle', 'surfaceKind', 'cwd', 'notes'] as const;
+const ARCHIVE_KEYS = ['version', 'batches'] as const;
+
 function readRun(value: unknown): RichTextRun | null {
-  if (!isRecord(value) || typeof value.text !== 'string') return null;
+  if (!isRecord(value) || !hasOnlyKeys(value, RUN_KEYS)) return null;
+  if (typeof value.text !== 'string') return null;
   const run: RichTextRun = { text: value.text };
   if (value.bold !== undefined) {
     if (value.bold !== true) return null;
@@ -47,10 +67,11 @@ function readRun(value: unknown): RichTextRun | null {
 function readContent(value: unknown): NoteContent | null {
   if (!isRecord(value)) return null;
   if (value.kind === 'plain') {
-    return typeof value.text === 'string' ? { kind: 'plain', text: value.text } : null;
+    if (!hasOnlyKeys(value, PLAIN_CONTENT_KEYS) || typeof value.text !== 'string') return null;
+    return { kind: 'plain', text: value.text };
   }
   if (value.kind === 'terminal') {
-    if (!Array.isArray(value.runs)) return null;
+    if (!hasOnlyKeys(value, TERMINAL_CONTENT_KEYS) || !Array.isArray(value.runs)) return null;
     const runs: RichTextRun[] = [];
     for (const raw of value.runs) {
       const run = readRun(raw);
@@ -66,7 +87,7 @@ function readContent(value: unknown): NoteContent | null {
  *  because the boot global carrying the VS Code mirror validates the same shape
  *  (`readInjectedVolatileNotepad` in `lib/src/lib/vscode-notepad-global.ts`). */
 export function readArchivedNote(value: unknown): ArchivedNote | null {
-  if (!isRecord(value)) return null;
+  if (!isRecord(value) || !hasOnlyKeys(value, NOTE_KEYS)) return null;
   if (typeof value.id !== 'string' || !value.id) return null;
   if (typeof value.createdAt !== 'number' || !Number.isFinite(value.createdAt)) return null;
   const content = readContent(value.content);
@@ -76,9 +97,9 @@ export function readArchivedNote(value: unknown): ArchivedNote | null {
 
 /** Accepts exactly the `CwdState` shape (`lib/src/lib/terminal-state.ts`):
  *  required `path`, `pathKind`, `isRemote`, `source`, `updatedAt`; optional
- *  `uri`, `host`, `scheme: 'file'`. */
+ *  `uri`, `host`, `scheme: 'file'`; nothing else. */
 export function readCwdState(value: unknown): CwdState | null {
-  if (!isRecord(value)) return null;
+  if (!isRecord(value) || !hasOnlyKeys(value, CWD_KEYS)) return null;
   if (typeof value.path !== 'string') return null;
   if (typeof value.pathKind !== 'string' || !PATH_KINDS.includes(value.pathKind as PathKind)) return null;
   if (typeof value.isRemote !== 'boolean') return null;
@@ -107,7 +128,7 @@ export function readCwdState(value: unknown): CwdState | null {
 }
 
 function readBatch(value: unknown): ArchiveBatch | null {
-  if (!isRecord(value)) return null;
+  if (!isRecord(value) || !hasOnlyKeys(value, BATCH_KEYS)) return null;
   if (typeof value.id !== 'string' || !value.id) return null;
   if (typeof value.closedAt !== 'number' || !Number.isFinite(value.closedAt)) return null;
   if (typeof value.surfaceTitle !== 'string') return null;
@@ -139,7 +160,9 @@ function readBatch(value: unknown): ArchiveBatch | null {
  * (host state APIs may hand back the serialized form). Returns `null` for
  * anything that is not exactly a v1 archive — the caller reports it as
  * unreadable rather than replacing it (docs/specs/notepad.md → Archive).
- * Unknown fields are dropped by projection, so nothing foreign persists forward.
+ * A key outside the known shape, at any level, fails validation too: every
+ * mutation rewrites the whole archive, so a field this build does not know would
+ * be erased on the next save rather than carried forward.
  */
 export function readNotepadArchive(raw: unknown): NotepadArchiveV1 | null {
   let value = raw;
@@ -150,7 +173,8 @@ export function readNotepadArchive(raw: unknown): NotepadArchiveV1 | null {
       return null;
     }
   }
-  if (!isRecord(value) || value.version !== 1 || !Array.isArray(value.batches)) return null;
+  if (!isRecord(value) || !hasOnlyKeys(value, ARCHIVE_KEYS)) return null;
+  if (value.version !== 1 || !Array.isArray(value.batches)) return null;
   const batches: ArchiveBatch[] = [];
   const seen = new Set<string>();
   for (const rawBatch of value.batches) {

@@ -105,23 +105,37 @@ describe('readNotepadArchive', () => {
     expect(readNotepadArchive(value)).toBeNull();
   });
 
-  it('drops unknown fields by projection', () => {
-    const value = {
-      version: 1,
-      extra: 'ignored',
-      batches: [
-        {
-          ...batch('b1', [{ id: 'n1', text: 'a' }]),
-          surfaceLabel: 'ignored',
-          notes: [{ id: 'n1', createdAt: 1, content: { kind: 'plain', text: 'a' }, source: { terminalId: 't1' } }],
-        },
-      ],
-    };
-    const read = readNotepadArchive(value);
-    expect(read).not.toBeNull();
-    expect(read).not.toHaveProperty('extra');
-    expect(read!.batches[0]).not.toHaveProperty('surfaceLabel');
-    expect(read!.batches[0].notes[0]).not.toHaveProperty('source');
+  it('rejects an unknown field at every level', () => {
+    // Not dropped: every mutation rewrites the whole archive from what was read
+    // back, so a field only a newer build understands would be erased on the
+    // next save. Refusing makes it a reported failure instead of silent loss.
+    const one = batch('b1', [{ id: 'n1', text: 'a' }]);
+    const wrap = (b: unknown) => ({ version: 1, batches: [b] });
+    expect(readNotepadArchive(wrap(one))).not.toBeNull();
+
+    expect(readNotepadArchive({ version: 1, batches: [one], extra: 'x' }), 'archive').toBeNull();
+    expect(readNotepadArchive(wrap({ ...one, surfaceLabel: 'x' })), 'batch').toBeNull();
+    expect(readNotepadArchive(wrap({ ...one, cwd: { ...LOCAL_CWD, drive: 'C:' } })), 'cwd').toBeNull();
+    expect(readCwdState({ ...LOCAL_CWD, drive: 'C:' }), 'cwd on its own').toBeNull();
+    expect(
+      readNotepadArchive(wrap({ ...one, notes: [{ ...one.notes[0], source: { terminalId: 't1' } }] })),
+      'note',
+    ).toBeNull();
+    expect(
+      readNotepadArchive(
+        wrap({ ...one, notes: [{ ...one.notes[0], content: { kind: 'plain', text: 'a', html: '<b>a</b>' } }] }),
+      ),
+      'content',
+    ).toBeNull();
+    expect(
+      readNotepadArchive(
+        wrap({
+          ...one,
+          notes: [{ ...one.notes[0], content: { kind: 'terminal', runs: [{ text: 'a', underline: true }] } }],
+        }),
+      ),
+      'run',
+    ).toBeNull();
   });
 });
 
@@ -285,7 +299,9 @@ describe('buildArchiveBatch', () => {
       { id: 'n2', createdAt: 2, content: { kind: 'plain', text: 'typed' } },
     ]);
     expect(built.notes[0]).not.toHaveProperty('source');
-    // The projection survives validation, which is what the host will store.
+    // What the builder emits reads back, which is what the host will store —
+    // and under strict keys that also pins that it emits no field the reader
+    // would refuse.
     expect(readNotepadArchive({ version: 1, batches: [built] })).not.toBeNull();
   });
 

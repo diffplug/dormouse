@@ -94,5 +94,20 @@ describe('readInjectedVolatileNotepad', () => {
     const [read] = readInjectedVolatileNotepad()!.surfaces;
     expect(read.cwd).toBeNull();
     expect(read.notes).toHaveLength(1);
+
+    // A field outside `CwdState` is malformed too, for the same reason the
+    // archive refuses one: the batch this Surface writes would drop it.
+    inject({ surfaces: [surface({ cwd: { ...CWD, drive: 'C:' } })] });
+    expect(readInjectedVolatileNotepad()!.surfaces[0].cwd).toBeNull();
+  });
+
+  it('drops a Surface whose note carries a field the archive does not know', () => {
+    inject({
+      surfaces: [
+        surface({ notes: [{ id: 'n1', createdAt: 1, source: { terminalId: 't1' }, content: { kind: 'plain', text: 'x' } }] }),
+        surface({ surfaceId: 'pane-2' }),
+      ],
+    });
+    expect(readInjectedVolatileNotepad()!.surfaces.map((s) => s.surfaceId)).toEqual(['pane-2']);
   });
 });

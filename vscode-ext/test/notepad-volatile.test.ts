@@ -49,6 +49,12 @@ describe('the volatile notepad mirror', () => {
         { ...surface('bad-colour'), notes: [{
           id: 'n', createdAt: 1, content: { kind: 'terminal', runs: [{ text: 'x', foreground: 'red' }] },
         }] },
+        // A field the validator does not know. The webview strips the runtime
+        // marker link before mirroring, so one arriving here is not our snapshot
+        // — and storing it would erase it again on the next mutation anyway.
+        { ...surface('foreign-field'), notes: [{
+          id: 'n', createdAt: 1, source: { terminalId: 't' }, content: { kind: 'plain', text: 'x' },
+        }] },
         { surfaceId: '', surfaceTitle: 't', surfaceKind: 'terminal', cwd: null, notes: [] },
       ],
       stagedDeletions: noDeletions,
@@ -57,13 +63,12 @@ describe('the volatile notepad mirror', () => {
     expect(mirror.surfaceIdsForRouter('router-1')).toEqual(['good']);
   });
 
-  it('keeps a rich note whole, and drops the fields the archive does not carry', () => {
+  it('keeps a rich note whole', () => {
     mirror.setVolatileForRouter('router-1', {
       surfaces: [{
         ...surface('pane-1'),
-        // `source` is the runtime marker link, which is never archived.
         notes: [{
-          id: 'n1', createdAt: 1, source: { terminalId: 't' },
+          id: 'n1', createdAt: 1,
           content: { kind: 'terminal', runs: [{ text: 'ok', bold: true, foreground: '#00ff00' }] },
         }],
       }],

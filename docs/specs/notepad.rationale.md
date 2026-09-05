@@ -118,6 +118,16 @@ plainly that nothing was replaced. Recovery is a single explicit button, and it
 moves the data aside rather than deleting it, because only a human can judge
 whether what is in there is worth salvaging.
 
+Rejecting unknown fields rather than projecting them away is the same instinct
+once more. A reader that keeps the fields it knows and drops the rest looks
+forgiving, but every mutation loads, applies, and writes the *whole* archive
+back, so the first save after a downgrade would quietly delete whatever a newer
+build had stored — notes included, if the newer shape carried them in a field
+this one does not have. `version` cannot cover it: it guards breaking changes,
+and additive fields are exactly the ones a newer build ships without bumping it.
+Refusing turns that into the unreadable state above — visible, and with the data
+still on disk — instead of silent loss.
+
 Staged deletion, rather than immediate, follows from the same instinct in the
 opposite direction: the archive is where things go to be found weeks later, so a
 misclick must be cheap. Holding the set in view state costs nothing, makes Undo

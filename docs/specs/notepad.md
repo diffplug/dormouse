@@ -91,6 +91,7 @@ A **Notepad archive** entry in Settings replaces that dialog's content with a ro
 - **Deletions are staged while the view is open.** A delete hides its target with no confirmation, a batch left with nothing visible goes with it, and the first deletion raises "Deletion is irreversible once this window closes." with an **Undo** restoring everything staged since the view opened.
 - **Back, Escape, and the close control commit the staged set as one mutation before leaving. A failed commit keeps the view open with its staged set intact and shows the error**; pressing the same control again is the retry.
 - **Stored data that fails validation is reported as unreadable and never silently replaced.** Every append fails meanwhile, and closures take the failure path in [Closure](#closure). **Exactly one user-initiated recovery moves the stored data aside — never deletes it — and starts an empty archive** (rationale).
+- **An unknown field anywhere in stored data fails validation**, because every mutation rewrites the whole archive, so a field this build does not know would be erased on the next save (rationale).
 - **Archived entries stay until explicitly deleted.** No age limit and no count limit.
 
 Source of truth: `lib/src/components/NotepadArchiveView.tsx`; the Settings entry in `lib/src/components/SettingsDialog.tsx`.
