@@ -24,6 +24,12 @@
 
 **Why none of the `exit`-vs-`close` trouble surfaced on macOS.** The `agent-browser` daemon double-forks and detaches from the inherited fds, so `close` fires normally; only on Windows, where the daemon holds the parent's stdout/stderr pipes for its whole life, does a `close`-only wait hang forever.
 
+**Why byte chunks are not text boundaries.** In a subprocess regression on
+macOS in 2026-09, writing the bytes of `🐭` and `€` across separate pipe chunks
+produced `���` on both streams when each chunk was converted with `String`.
+Node's stream decoder holds incomplete UTF-8 sequences until the next chunk;
+the caller receives the command's text regardless of pipe chunking.
+
 **Why settling the promise does not finish the CLI.** A subprocess reproduction
 on macOS in 2026-09 resolved capture at 279 ms but kept its caller alive until a
 pipe-inheriting descendant exited at 3054 ms. The `dor` entry point sets
