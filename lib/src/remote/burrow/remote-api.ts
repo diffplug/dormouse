@@ -260,10 +260,6 @@ export class RemoteApiSession {
     void this.#provider.resolveSurface(params.surfaceId, params).then(
       (handle) => {
         if (this.#disposed || this.#attachGeneration !== generation) {
-          // A foreign resolve starts its stream before returning the handle. If
-          // the session died or a newer attach superseded this one during that
-          // round trip, unwind it immediately.
-          handle?.release();
           this.#failAttach(request, params.surfaceId, generation);
           return;
         }
@@ -277,7 +273,6 @@ export class RemoteApiSession {
           // `streamPty` / the repaint bounce are provider calls too, and may
           // throw before an attachment is fully installed.
           if (this.#attachment?.handle === handle) this.#teardownAttachment();
-          else handle.release();
           this.#failAttach(
             request,
             params.surfaceId,
@@ -354,7 +349,6 @@ export class RemoteApiSession {
     });
     if (closedWhileSubscribing) {
       stream.stop();
-      handle.release();
       this.#failAttach(
         request,
         params.surfaceId,
@@ -525,9 +519,6 @@ export class RemoteApiSession {
       this.#attachment.bounceTimer = null;
     }
     this.#attachment.stopStream();
-    // Unwinds whatever holding the surface cost — a forwarded stream for an
-    // owner elsewhere, nothing at all for one the provider drives directly.
-    this.#attachment.handle.release();
     this.#attachment = null;
   }
 }

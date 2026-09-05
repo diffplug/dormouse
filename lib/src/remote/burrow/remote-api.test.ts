@@ -43,7 +43,6 @@ class FakeProvider implements BurrowSurfaceProvider {
   /** `handle.resize` — the through-the-owner path an attach/resize takes. */
   readonly handleResizes: Array<[string, number, number]> = [];
   readonly writes: Array<[string, string]> = [];
-  readonly released: string[] = [];
   readonly streamed: string[] = [];
   readonly unstreamed: string[] = [];
   readonly resolved: string[] = [];
@@ -172,7 +171,6 @@ class FakeProvider implements BurrowSurfaceProvider {
         }
         return { cols: surface.cols, rows: surface.rows };
       },
-      release: () => void this.released.push(surface.ptyId),
     };
   }
 }
@@ -617,7 +615,7 @@ describe('RemoteApiSession surface.attach', () => {
     ]);
   });
 
-  it('replaces the previous attachment, unsubscribing its stream and releasing it', async () => {
+  it('replaces the previous attachment, unsubscribing its stream', async () => {
     const provider = new FakeProvider();
     provider.addSurface('surface-1', 'pty-1', 80, 24);
     provider.addSurface('surface-2', 'pty-2', 80, 24);
@@ -630,7 +628,6 @@ describe('RemoteApiSession surface.attach', () => {
 
     expect(provider.streamed).toEqual(['pty-1', 'pty-2']);
     expect(provider.unstreamed).toEqual(['pty-1']);
-    expect(provider.released).toEqual(['pty-1']);
     expect(terminalData(sent)).toEqual([]);
   });
 
@@ -662,7 +659,6 @@ describe('RemoteApiSession surface.attach', () => {
       error: 'surface attach failed: owner unavailable',
     });
     expect(provider.streamed).toEqual([]);
-    expect(provider.released).toEqual([]);
   });
 
   it('fails and unwinds an attach whose resize is rejected', async () => {
@@ -680,7 +676,6 @@ describe('RemoteApiSession surface.attach', () => {
     });
     expect(provider.streamed).toEqual(['pty-1']);
     expect(provider.unstreamed).toEqual(['pty-1']);
-    expect(provider.released).toEqual(['pty-1']);
   });
 
   it('fails an attach with no surfaceId without asking the provider', async () => {
@@ -696,7 +691,7 @@ describe('RemoteApiSession surface.attach', () => {
     expect(provider.resolved).toEqual([]);
   });
 
-  it('fails a superseded attach and releases the handle it resolved late', async () => {
+  it('fails a superseded attach without subscribing the handle it resolved late', async () => {
     const provider = new FakeProvider();
     provider.addSurface('surface-slow', 'pty-slow', 80, 24);
     provider.addSurface('surface-fast', 'pty-fast', 80, 24);
@@ -716,9 +711,7 @@ describe('RemoteApiSession surface.attach', () => {
     slow.release();
     await settle();
 
-    // The superseded attach unwinds the handle it resolved instead of tearing
-    // down the newer attachment...
-    expect(provider.released).toEqual(['pty-slow']);
+    // The superseded attach never subscribes or tears down the newer attachment...
     expect(provider.streamed).toEqual(['pty-fast']);
     // ...and is answered, because the client holds a request pending until it is.
     expect(reply(sent, 'attach-fast').ok).toBe(true);
@@ -734,7 +727,7 @@ describe('RemoteApiSession surface.attach', () => {
     expect(provider.writes).toEqual([['pty-fast', 'ls']]);
   });
 
-  it('releases a handle that resolves after dispose, and answers nothing', async () => {
+  it('ignores a handle that resolves after dispose, and answers nothing', async () => {
     const provider = new FakeProvider();
     provider.addSurface('surface-1', 'pty-1', 80, 24);
     const slow = gate();
@@ -750,7 +743,6 @@ describe('RemoteApiSession surface.attach', () => {
     slow.release();
     await settle();
 
-    expect(provider.released).toEqual(['pty-1']);
     expect(provider.streamed).toEqual([]);
     // A disposed session has no transport left to answer on.
     expect(sent).toEqual([]);
@@ -1079,7 +1071,6 @@ describe('RemoteApiSession teardown', () => {
     );
     expect(provider.streamed).toEqual(['pty-1']);
     expect(provider.unstreamed).toEqual(['pty-1']);
-    expect(provider.released).toEqual(['pty-1']);
     // A dead PTY is never bounced or otherwise resized after the replay.
     expect(provider.ptyResizes).toEqual([]);
     expect(provider.handleResizes).toEqual([]);
@@ -1105,7 +1096,6 @@ describe('RemoteApiSession teardown', () => {
       },
     ]);
     expect(provider.unstreamed).toEqual(['pty-1']);
-    expect(provider.released).toEqual(['pty-1']);
     sent.length = 0;
 
     // ...and the attachment is gone, so a later write/resize for that surface
@@ -1170,7 +1160,6 @@ describe('RemoteApiSession teardown', () => {
       false,
     );
     expect(provider.unstreamed).toEqual(['pty-1']);
-    expect(provider.released).toEqual(['pty-1']);
   });
 
   it('cancels a pending bounce when the attached PTY exits inside the window', async () => {
@@ -1187,7 +1176,7 @@ describe('RemoteApiSession teardown', () => {
     expect(provider.ptyResizes).toEqual([['pty-1', 80, 23]]);
   });
 
-  it('dispose stops the stream, releases the handle, and ignores later requests', async () => {
+  it('dispose stops the stream and ignores later requests', async () => {
     const provider = new FakeProvider();
     provider.addSurface('surface-1', 'pty-1', 80, 24);
     const { session, sent } = makeSession(provider);
@@ -1200,7 +1189,6 @@ describe('RemoteApiSession teardown', () => {
     session.dispose(); // idempotent
 
     expect(provider.unstreamed).toEqual(['pty-1']);
-    expect(provider.released).toEqual(['pty-1']);
     expect(provider.watchers).toBe(0);
 
     provider.emitData('pty-1', 'after dispose');
