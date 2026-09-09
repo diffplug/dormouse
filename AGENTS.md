@@ -73,6 +73,7 @@ A spec is the accurate reference for the current code: it states the invariants 
 - **`docs/specs/remote-api.md`** — What an authorized Client speaks: the shipped terminal-only **protocol-v1** and the staged remainder.
 - **`docs/specs/relay.md`** — The selfhost coordinating Relay and shared Burrow-service runtime: env config, JSON-file state, WebAuthn without a library, HTTP API, relay flow, enrollment, running it end to end.
 - **`SELF_HOST.md`** (repo root) — Self-host deployment: the assistant-run install runbook plus the Installer contract that `docs/specs/security-remote.md`'s `FAIL IF` lines and `scripts/deploy-lint.mjs` audit.
+- **`docs/specs/pricing.md`** — Pricing (design-stage): the tiers and founding ladder, what the Individual plan grants, the licence the clients verify, the managed-voice boundary, and the `/hosted` page contract; team and enterprise tiers belong to relay.md's saas-multitenant scope.
 - **`docs/specs/pocket-app.md`** — Pocket: the remote session is a `PlatformAdapter` (`RemotePtyAdapter`), so Pocket is auth screens plus the mobile composition; owns the same-origin deployment rule.
 - **`docs/specs/deploy.md`** — Release process: artifact matrix, release checklist, two-stage sign-and-release pipeline, updater manifest, changelog flow.
 - **`docs/specs/security.md`** — The guarantees Dormouse makes, what it does not defend, the known gaps, and how it is all checked; published at `/docs/security`, rows split by audience. Read first for anything security. Root `SECURITY.md` is the GitHub policy pointer at it.
