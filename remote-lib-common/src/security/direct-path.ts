@@ -72,9 +72,6 @@ export type DirectSignalV1 =
   | { readonly v: 1; readonly t: 'direct-decline' }
   | { readonly v: 1; readonly t: 'direct-switch' };
 
-/** The `t` of every signal, so a dispatcher cannot invent a fifth. */
-export type DirectSignalType = DirectSignalV1['t'];
-
 /**
  * The characters an SDP may be made of: printable US-ASCII plus CR and LF.
  *

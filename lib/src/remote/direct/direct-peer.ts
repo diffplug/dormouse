@@ -38,7 +38,6 @@ export interface DirectSessionDescription {
 /** The subset of `RTCDataChannel` a Noise transport rides on. */
 export interface DirectChannelLike {
   binaryType: string;
-  readonly readyState: string;
   send(data: ArrayBuffer | ArrayBufferView): void;
   close(): void;
   addEventListener(type: string, handler: (ev: unknown) => void): void;
@@ -80,6 +79,14 @@ export interface DirectPeerHandlers {
   onViolation(reason: string): void;
 }
 
+/** What a closed peer reports to: nothing, so it retains nothing either. */
+const SILENT_HANDLERS: DirectPeerHandlers = {
+  onOpen: () => {},
+  onFrame: () => {},
+  onClosed: () => {},
+  onViolation: () => {},
+};
+
 export interface DirectPeerDeps {
   readonly peer: DirectPeerLike;
   readonly handlers: DirectPeerHandlers;
@@ -98,7 +105,7 @@ export interface DirectPeerDeps {
  */
 export class DirectPeer {
   readonly #peer: DirectPeerLike;
-  readonly #handlers: DirectPeerHandlers;
+  #handlers: DirectPeerHandlers;
   readonly #setTimer: RemoteTimer;
   #channel: DirectChannelLike | null = null;
   #cancelSetup: (() => void) | null = null;
@@ -203,6 +210,11 @@ export class DirectPeer {
     } catch {
       // Already closed.
     }
+    // Dropped rather than merely flagged: the channel's own listeners still
+    // point here, and a closed peer must retain neither the endpoint that owned
+    // these handlers nor whatever the channel is still holding.
+    this.#channel = null;
+    this.#handlers = SILENT_HANDLERS;
   }
 
   // --- Internals -------------------------------------------------------------
@@ -301,7 +313,9 @@ export class DirectPeer {
   /** Report the channel gone, once, and take the connection down with it. */
   #fail(reason: string): void {
     if (this.#closed) return;
+    // Read before the close silences them: this is the one report a close owes.
+    const handlers = this.#handlers;
     this.close();
-    this.#handlers.onClosed(reason);
+    handlers.onClosed(reason);
   }
 }
