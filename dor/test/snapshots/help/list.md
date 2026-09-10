@@ -45,7 +45,7 @@ FLAGS
      [--port]        Show terminal Surfaces listening on this TCP port.
      [--ports]       Include each terminal's listening ports.
      [--view]        Surface view to show.
-     [--workspace]   Workspace to list instead of the caller's.
+     [--workspace]   Workspace to act in, instead of the caller's.
      [--workspaces]  Print the Workspace overview instead of Surfaces.
   -h  --help         Print help information and exit
       --             All subsequent inputs should be interpreted as arguments

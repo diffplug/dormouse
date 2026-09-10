@@ -6,6 +6,7 @@ import type {
   DorCommandContext,
   EnsureSurfaceResponse,
   ParseResult,
+  WorkspaceScopedFlags,
 } from './types.js';
 import {
   callerWorkingDirectory,
@@ -18,8 +19,7 @@ import {
   writeStdout,
 } from './shared.js';
 
-interface EnsureFlags {
-  readonly workspace?: string;
+interface EnsureFlags extends WorkspaceScopedFlags {
   readonly json?: boolean;
   readonly minimize?: boolean;
   readonly restart?: boolean;

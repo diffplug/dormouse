@@ -7,6 +7,7 @@ import type {
   KillSurfaceConfirmation,
   KillSurfaceResponse,
   ParseResult,
+  WorkspaceScopedFlags,
 } from './types.js';
 import {
   errorMessage,
@@ -18,8 +19,7 @@ import {
   writeStdout,
 } from './shared.js';
 
-interface KillFlags {
-  readonly workspace?: string;
+interface KillFlags extends WorkspaceScopedFlags {
   readonly confirmDangerously?: boolean;
   readonly confirmIfRead?: string;
   readonly json?: boolean;

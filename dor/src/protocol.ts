@@ -48,6 +48,46 @@ export type WorkspaceControlMethod = (typeof WORKSPACE_CONTROL_METHODS)[keyof ty
 /** Every method the control channel carries. */
 export type DorControlMethod = SurfaceControlMethod | WorkspaceControlMethod;
 
+const WORKSPACE_METHOD_SET: ReadonlySet<string> = new Set(Object.values(WORKSPACE_CONTROL_METHODS));
+
+/** Whether this method is a container verb — answered by the Window rather than
+ *  by one Workspace's Wall. */
+export function isWorkspaceControlMethod(method: string): method is WorkspaceControlMethod {
+  return WORKSPACE_METHOD_SET.has(method);
+}
+
+/**
+ * Whether this request reaches beyond a single Workspace: a container verb, or
+ * the `scope: 'all'` listing. A host that cannot answer for more than one
+ * Workspace refuses exactly these (`docs/specs/vscode.md` → "Workspaces").
+ */
+export function spansWorkspaces(method: string, params?: Record<string, unknown>): boolean {
+  return isWorkspaceControlMethod(method)
+    || (method === SURFACE_CONTROL_METHODS.list && params?.scope === 'all');
+}
+
+/** The two readings of a `workspace:<n|name>` target (`docs/specs/dor-cli.md` →
+ *  "Handle Model"). Both spellings are accepted bare. */
+export interface ParsedWorkspaceRef {
+  /** The target as written, trimmed — what an error message quotes back. */
+  target: string;
+  /** 1-based strip position when the ref reads as a number, else null. */
+  position: number | null;
+  /** The Workspace name it reads as otherwise; empty when it is positional. */
+  name: string;
+}
+
+const POSITIONAL_WORKSPACE_REF = /^[1-9]\d*$/;
+
+/** Split a `workspace:<n|name>` target into its readings. A ref that reads as a
+ *  number is positional, never a name. */
+export function parseWorkspaceRef(ref: string): ParsedWorkspaceRef {
+  const target = ref.trim();
+  const bare = (target.startsWith('workspace:') ? target.slice('workspace:'.length) : target).trim();
+  const positional = POSITIONAL_WORKSPACE_REF.test(bare);
+  return { target, position: positional ? Number(bare) : null, name: positional ? '' : bare };
+}
+
 /** A control request as it travels over a transport, correlated by `requestId`. */
 export interface DorControlRequestPayload {
   requestId: string;

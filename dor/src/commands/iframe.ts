@@ -5,6 +5,7 @@ import type {
   Command,
   DorCommandContext,
   IframeSurfaceResponse,
+  WorkspaceScopedFlags,
 } from './types.js';
 import {
   errorMessage,
@@ -21,8 +22,7 @@ import {
   resolveSurfaceOpenTarget,
 } from './open-target.js';
 
-interface IframeFlags {
-  readonly workspace?: string;
+interface IframeFlags extends WorkspaceScopedFlags {
   readonly json?: boolean;
   readonly minimize?: boolean;
   readonly surface?: string;

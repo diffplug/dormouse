@@ -13,6 +13,7 @@ import type {
   AwaitUntil,
   Command,
   DorCommandContext,
+  WorkspaceScopedFlags,
 } from './types.js';
 import {
   errorLine,
@@ -27,8 +28,7 @@ import {
   writeStdout,
 } from './shared.js';
 
-interface AwaitFlags {
-  readonly workspace?: string;
+interface AwaitFlags extends WorkspaceScopedFlags {
   readonly json?: boolean;
   readonly timeout?: number;
   readonly until: AwaitUntil;

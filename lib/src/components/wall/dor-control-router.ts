@@ -1,9 +1,10 @@
-import { SURFACE_CONTROL_METHODS } from 'dor/protocol';
+import { isWorkspaceControlMethod, SURFACE_CONTROL_METHODS } from 'dor/protocol';
 import { createRefCount } from '../../lib/ref-count';
 import { getActiveWorkspaceId, isWindowRef, resolveWorkspaceRef } from '../../lib/workspace-store';
+import { errorText } from './dor-control-shared';
 import { getWallHandle, wallHandleOwning, type WallHandle } from './wall-handles';
-import { handleWorkspaceControl, isWorkspaceControlMethod, listAllWorkspaceSurfaces } from './workspace-control';
-import type { DorControlRequest } from './use-dor-control';
+import { handleWorkspaceControl, listAllWorkspaceSurfaces, type WindowControlParams } from './workspace-control';
+import { classifySurfaceTarget, type DorControlRequest } from './use-dor-control';
 
 /**
  * The one window listener for `dormouse:control-request`, deciding which Wall
@@ -16,23 +17,23 @@ import type { DorControlRequest } from './use-dor-control';
 /** Where one control request lands. */
 export type DorControlRoute =
   | { kind: 'handle'; handle: WallHandle }
-  /** Answered by the Window itself: a `workspace.*` verb, or `--all`. */
-  | { kind: 'window' }
+  /** Answered by the Window itself: a `workspace.*` container verb
+   *  (`container: true`), or the `--all` listing that spans them. */
+  | { kind: 'window'; container: boolean }
   | { kind: 'error'; message: string }
   /** Nothing is mounted that could answer; the request is left to time out. */
   | { kind: 'none' };
 
 /**
- * Whether a target names a Surface by its stable id — the one handle that is
- * unique across the whole Window, so it can be routed to the Workspace holding
- * it. `surface:N` is Workspace-scoped and deliberately excluded: every Workspace
- * has a `surface:1`.
+ * The Workspace holding the Surface this target names, when the target names
+ * one Window-wide: only a stable id does (`classifySurfaceTarget`). `surface:N`
+ * is Workspace-scoped — every Workspace has a `surface:1` — so it stays with
+ * the Wall that answers.
  */
-function stableSurfaceTarget(target: unknown): string | null {
+function wallHandleOwningTarget(target: unknown): WallHandle | null {
   if (typeof target !== 'string') return null;
-  const id = target.startsWith('surface:') ? target.slice('surface:'.length) : target;
-  if (!id || /^\d+$/.test(id) || id === 'self' || id === 'focused' || target.startsWith('title:')) return null;
-  return id;
+  const classified = classifySurfaceTarget(target);
+  return classified.kind === 'stable' ? wallHandleOwning(classified.id) : null;
 }
 
 /**
@@ -42,7 +43,7 @@ function stableSurfaceTarget(target: unknown): string | null {
  * its own Workspace.
  */
 export function resolveDorControlRoute(detail: DorControlRequest): DorControlRoute {
-  const params = detail.params ?? {};
+  const params: WindowControlParams = detail.params ?? {};
   // Typed before use: `params` is whatever crossed the control socket, and a
   // non-string ref reaching `.trim()` would throw out of the window listener,
   // leaving the caller to block until its own deadline.
@@ -50,8 +51,10 @@ export function resolveDorControlRoute(detail: DorControlRequest): DorControlRou
     return { kind: 'error', message: `unknown window target '${String(params.window)}'` };
   }
   // Container verbs belong to no Workspace, and `--all` spans them all.
-  if (isWorkspaceControlMethod(detail.method)) return { kind: 'window' };
-  if (detail.method === SURFACE_CONTROL_METHODS.list && params.scope === 'all') return { kind: 'window' };
+  if (isWorkspaceControlMethod(detail.method)) return { kind: 'window', container: true };
+  if (detail.method === SURFACE_CONTROL_METHODS.list && params.scope === 'all') {
+    return { kind: 'window', container: false };
+  }
   if (params.workspace !== undefined) {
     // A ref of the wrong type, one outside the strip, and one whose Wall is not
     // mounted are the same answer: this Window has no such Workspace to route to.
@@ -66,8 +69,7 @@ export function resolveDorControlRoute(detail: DorControlRequest): DorControlRou
   }
   // A stable id names one Surface in the whole Window, so a command targeting
   // one is answered by whichever Workspace holds it, caller or not.
-  const stable = stableSurfaceTarget(params.surface);
-  const owningTarget = stable ? wallHandleOwning(stable) : null;
+  const owningTarget = wallHandleOwningTarget(params.surface);
   if (owningTarget) return { kind: 'handle', handle: owningTarget };
   // The caller's own Workspace: `dor split` from a background Workspace lands
   // beside its caller, not in whichever Workspace the user is looking at.
@@ -102,24 +104,27 @@ function dispatchDorControl(detail: DorControlRequest, attempt: number): void {
   // Every failure the handler can raise is answered: an unanswered request
   // blocks its caller until the CLI's own deadline
   // (`docs/specs/dor-cli.md` → "Handle Model").
-  const fail = (error: unknown) => detail.respond({
-    ok: false,
-    error: error instanceof Error ? error.message : String(error),
-  });
+  const fail = (error: unknown) => detail.respond({ ok: false, error: errorText(error) });
   try {
     const running = route.kind === 'window'
-      ? runWindowControl(detail)
-      : (route.handle.handleDorControl(detail) as unknown);
+      ? (route.container ? handleWorkspaceControl(detail) : listAllWorkspaceSurfaces(detail))
+      : (route.handle.handleDorControl(callerFor(route.handle, detail)) as unknown);
     if (running instanceof Promise) void running.catch(fail);
   } catch (error) {
     fail(error);
   }
 }
 
-function runWindowControl(detail: DorControlRequest): Promise<void> {
-  return isWorkspaceControlMethod(detail.method)
-    ? handleWorkspaceControl(detail)
-    : listAllWorkspaceSurfaces(detail);
+/**
+ * The request as the answering Wall sees it: a caller that Wall does not hold
+ * is dropped here, so `surface:self` and an omitted target fall back to that
+ * Workspace's own focused Surface rather than naming a Surface no consumer down
+ * there can find. Rewritten once, at the seam, instead of re-checked by every
+ * consumer of the caller id.
+ */
+function callerFor(handle: WallHandle, detail: DorControlRequest): DorControlRequest {
+  if (!detail.surfaceId || handle.ownsSurface(detail.surfaceId)) return detail;
+  return { ...detail, surfaceId: undefined };
 }
 
 /**

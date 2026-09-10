@@ -213,8 +213,9 @@ describe('surface.list --all', () => {
       ['workspace:2', 'surface:2'],
     ]);
     expect(result.workspaces).toHaveLength(2);
-    // Each Wall is asked for its own Workspace, with the caller's scope removed.
-    expect(second.mock.calls[0][0].params).toMatchObject({ scope: 'workspace', includePorts: true });
+    // Each Wall is asked for its own Workspace: the caller's container target
+    // is cleared, and a Wall has no scope of its own to read.
+    expect(second.mock.calls[0][0].params).toEqual({ scope: 'all', includePorts: true, workspace: undefined });
   });
 
   it('fails the whole listing when one Workspace cannot answer', async () => {

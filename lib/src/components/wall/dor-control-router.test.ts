@@ -114,10 +114,11 @@ describe('dor control routing', () => {
   it('answers the container verbs and --all at the Window, with no Wall involved', () => {
     handleFor(getWorkspacesSnapshot().workspaces[0].id, ['pane-a']);
     for (const method of ['workspace.list', 'workspace.new', 'workspace.close']) {
-      expect(resolveDorControlRoute(request({ method, surfaceId: 'pane-a' }))).toEqual({ kind: 'window' });
+      expect(resolveDorControlRoute(request({ method, surfaceId: 'pane-a' })))
+        .toEqual({ kind: 'window', container: true });
     }
     expect(resolveDorControlRoute(request({ method: 'surface.list', params: { scope: 'all' } })))
-      .toEqual({ kind: 'window' });
+      .toEqual({ kind: 'window', container: false });
     expect(resolveDorControlRoute(request({ method: 'surface.list', params: { scope: 'workspace' } })).kind)
       .toBe('handle');
   });
@@ -242,6 +243,27 @@ describe('dor control routing', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('drops a caller the answering Wall does not hold', () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    createWorkspace({ id: 'ws-2', name: 'build' });
+    handleFor(first, ['pane-a']);
+    const target = handleFor('ws-2', ['pane-b']);
+    const release = installDorControlRouter();
+
+    // `dor split --workspace build` from pane-a: the caller belongs to another
+    // Workspace, so the answering Wall is handed no caller and falls back to
+    // its own focused Surface.
+    const foreign = request({ surfaceId: 'pane-a', params: { workspace: 'build' } });
+    window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: foreign }));
+    expect(target.handleDorControl).toHaveBeenCalledWith({ ...foreign, surfaceId: undefined });
+
+    // A caller its own Wall holds arrives untouched.
+    const own = request({ surfaceId: 'pane-b' });
+    window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: own }));
+    expect(target.handleDorControl).toHaveBeenLastCalledWith(own);
+    release();
   });
 
   it('answers a bad container target instead of handing it to a Wall', () => {

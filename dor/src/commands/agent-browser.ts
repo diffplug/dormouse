@@ -200,8 +200,7 @@ export function extractSessionFlags(args: string[]): ParseResult<ResolvedSession
     return { ok: false, message: `--key must match ${KEY_PATTERN} (it becomes part of an agent-browser session name)` };
   }
 
-  const container = values.get('--workspace');
-  const workspace = container === undefined ? {} : { workspace: container };
+  const workspace = workspaceParam(values.get('--workspace'));
 
   const surface = values.get('--surface');
   if (surface !== undefined) return { ok: true, value: { surface, rest, ...workspace } };

@@ -7,6 +7,7 @@ import type {
   ParseResult,
   SplitDirection,
   SplitSurfaceResponse,
+  WorkspaceScopedFlags,
 } from './types.js';
 import {
   errorMessage,
@@ -18,8 +19,7 @@ import {
   writeStdout,
 } from './shared.js';
 
-interface SplitFlags {
-  readonly workspace?: string;
+interface SplitFlags extends WorkspaceScopedFlags {
   readonly auto?: boolean;
   readonly down?: boolean;
   readonly json?: boolean;

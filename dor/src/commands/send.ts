@@ -6,6 +6,7 @@ import type {
   DorCommandContext,
   ParseResult,
   SendSurfaceResponse,
+  WorkspaceScopedFlags,
 } from './types.js';
 import {
   errorMessage,
@@ -17,8 +18,7 @@ import {
   writeStdout,
 } from './shared.js';
 
-interface SendFlags {
-  readonly workspace?: string;
+interface SendFlags extends WorkspaceScopedFlags {
   readonly json?: boolean;
   readonly key?: string;
   readonly raw?: boolean;

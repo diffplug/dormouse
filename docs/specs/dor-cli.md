@@ -312,15 +312,18 @@ Invariants:
   (`docs/specs/layout.md` → "Workspaces"). **Surface targets resolve within the
   answering Workspace** — refs are Workspace-scoped — so a `dor split` from a
   background Workspace lands beside its caller rather than wherever the user is
-  looking, and **a caller that Workspace does not hold falls back to its focused
-  Surface** rather than failing, which is what gives `--workspace` a reference
-  to place against. Cross-window duplicate ids follow
+  looking, and **a caller the answering Workspace does not hold is dropped by
+  the router**, leaving that Workspace's focused Surface as the fallback rather
+  than a failure, which is what gives `--workspace` a reference to place
+  against. Cross-window duplicate ids follow
   `docs/specs/vscode.md` → "Peer surfaces across windows".
 
 Source of truth: `dor/src/commands/shared.ts`, `dor/src/commands/types.ts`,
-`surfaceRefForId` / `transferSurfaceRef` in `lib/src/components/Wall.tsx`,
-`resolveWorkspaceRef` in `lib/src/lib/workspace-store.ts`, and
-`resolveDorControlRoute` in `lib/src/components/wall/dor-control-router.ts`.
+`parseWorkspaceRef` in `dor/src/protocol.ts`, `surfaceRefForId` /
+`transferSurfaceRef` in `lib/src/components/Wall.tsx`, `classifySurfaceTarget`
+in `lib/src/components/wall/use-dor-control.ts`, `resolveWorkspaceRef` in
+`lib/src/lib/workspace-store.ts`, and `resolveDorControlRoute` in
+`lib/src/components/wall/dor-control-router.ts`.
 
 ## Current Implemented Commands
 
@@ -446,8 +449,9 @@ separate webview (`docs/specs/vscode.md` → "Workspaces"), so a listing would
 report one webview's Workspace as the whole Window. Aggregating them at the
 extension host stays in [Future](#future).
 
-Source of truth: `dor/src/commands/workspace.ts`, `WORKSPACE_CONTROL_METHODS` in
-`dor/src/protocol.ts`, `handleWorkspaceControl` / `listAllWorkspaceSurfaces` in
+Source of truth: `dor/src/commands/workspace.ts`, `WORKSPACE_CONTROL_METHODS` /
+`spansWorkspaces` in `dor/src/protocol.ts`, `handleWorkspaceControl` /
+`listAllWorkspaceSurfaces` in
 `lib/src/components/wall/workspace-control.ts`, `closeWorkspaceWithSurfaces` in
 `lib/src/components/wall/workspace-lifecycle.ts`, and `dorWorkspaceRefusal` in
 `vscode-ext/src/dor-workspace-guard.ts`.

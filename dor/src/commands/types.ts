@@ -84,17 +84,34 @@ export interface Surface {
    *  request set `includePorts` (`dor list --ports`); never on browser Surfaces. */
   ports?: SurfacePort[];
   /** The Workspace this Surface belongs to. Present only for a `scope: 'all'`
-   *  listing, where rows from several Workspaces share one list. */
+   *  listing, where rows from several Workspaces share one list — every row of
+   *  one carries it ({@link GroupedSurface}). */
   workspaceRef?: string;
 }
+
+/** A row of a cross-Workspace listing (`dor list --all`): every row says which
+ *  Workspace it came from, so the caller can group them. */
+export type GroupedSurface = Surface & { workspaceRef: string };
 
 /** How wide a listing reaches: one Workspace (the default) or every Workspace
  *  in this Window. */
 export type ListScope = 'workspace' | 'all';
 
-export interface ListSurfacesRequest {
-  pane?: string;
+/** Every request that may name a container: `dor --workspace <ref>` acts in
+ *  that Workspace instead of the caller's, resolved by the router before caller
+ *  ownership (`docs/specs/dor-cli.md` → "Handle Model"). */
+export interface WorkspaceScopedRequest {
   workspace?: string;
+}
+
+/** The parsed `--workspace <ref>` flag behind it (`workspaceFlag` in
+ *  `dor/src/commands/shared.ts`), which every action command declares. */
+export interface WorkspaceScopedFlags {
+  readonly workspace?: string;
+}
+
+export interface ListSurfacesRequest extends WorkspaceScopedRequest {
+  pane?: string;
   window?: string;
   /** Omitted means `workspace`. */
   scope?: ListScope;
@@ -105,8 +122,8 @@ export interface ListSurfacesRequest {
 
 export interface ListSurfacesResponse {
   surfaces: Surface[];
-  /** The Workspace that answered; for `scope: 'all'`, the one the request
-   *  landed in. */
+  /** The Workspace that answered; for `scope: 'all'`, which every Workspace
+   *  answers, the active one. */
   workspaceRef: string;
   windowRef: string;
   /** Present only for `scope: 'all'`: this Window's Workspaces in strip order,
@@ -171,10 +188,7 @@ export interface WorkspaceMutationResponse {
   name: string;
 }
 
-export interface SplitSurfaceRequest {
-  /** Act in this Workspace instead of the caller's (`dor --workspace <ref>`).
-   *  Resolved by the router before caller ownership. */
-  workspace?: string;
+export interface SplitSurfaceRequest extends WorkspaceScopedRequest {
   /** Raw argv for the initial command; the host quotes it for the target shell. */
   command?: string[];
   direction: SplitDirection;
@@ -196,10 +210,7 @@ export interface SplitSurfaceResponse {
   command?: string;
 }
 
-export interface EnsureSurfaceRequest {
-  /** Act in this Workspace instead of the caller's (`dor --workspace <ref>`).
-   *  Resolved by the router before caller ownership. */
-  workspace?: string;
+export interface EnsureSurfaceRequest extends WorkspaceScopedRequest {
   /** Raw argv for the command; the host quotes it for the target shell. */
   command: string[];
   minimized: boolean;
@@ -219,10 +230,7 @@ export interface EnsureSurfaceResponse {
   minimized: boolean;
 }
 
-export interface SendSurfaceRequest {
-  /** Act in this Workspace instead of the caller's (`dor --workspace <ref>`).
-   *  Resolved by the router before caller ownership. */
-  workspace?: string;
+export interface SendSurfaceRequest extends WorkspaceScopedRequest {
   surface: string;
   input: string;
   inputCount: number;
@@ -235,10 +243,7 @@ export interface SendSurfaceResponse {
   inputCount: number;
 }
 
-export interface ReadSurfaceRequest {
-  /** Act in this Workspace instead of the caller's (`dor --workspace <ref>`).
-   *  Resolved by the router before caller ownership. */
-  workspace?: string;
+export interface ReadSurfaceRequest extends WorkspaceScopedRequest {
   lines?: number;
   scrollback: boolean;
   surface: string;
@@ -262,10 +267,7 @@ export type AwaitCause = 'quiet' | 'exit' | 'bell' | 'idle';
  *  the client is already gone, and nothing it responds with could be delivered. */
 export type AwaitSurfaceOutcome = 'resolved' | 'timeout' | 'died';
 
-export interface AwaitSurfaceRequest {
-  /** Act in this Workspace instead of the caller's (`dor --workspace <ref>`).
-   *  Resolved by the router before caller ownership. */
-  workspace?: string;
+export interface AwaitSurfaceRequest extends WorkspaceScopedRequest {
   surface: string;
   until: AwaitUntil;
   /** The caller's ceiling, enforced host-side so no hop can reap the wait early. */
@@ -287,10 +289,7 @@ export type KillSurfaceConfirmation =
   | { mode: 'if-read'; text: string }
   | { mode: 'dangerously' };
 
-export interface KillSurfaceRequest {
-  /** Act in this Workspace instead of the caller's (`dor --workspace <ref>`).
-   *  Resolved by the router before caller ownership. */
-  workspace?: string;
+export interface KillSurfaceRequest extends WorkspaceScopedRequest {
   confirmation: KillSurfaceConfirmation;
   surface: string;
 }
@@ -301,10 +300,7 @@ export interface KillSurfaceResponse {
   surfaceRef: string;
 }
 
-export interface IframeSurfaceRequest {
-  /** Act in this Workspace instead of the caller's (`dor --workspace <ref>`).
-   *  Resolved by the router before caller ownership. */
-  workspace?: string;
+export interface IframeSurfaceRequest extends WorkspaceScopedRequest {
   minimized: boolean;
   surface?: string;
   url: string;
@@ -318,10 +314,7 @@ export interface IframeSurfaceResponse {
   minimized: boolean;
 }
 
-export interface ResolveOpenTargetRequest {
-  /** Act in this Workspace instead of the caller's (`dor --workspace <ref>`).
-   *  Resolved by the router before caller ownership. */
-  workspace?: string;
+export interface ResolveOpenTargetRequest extends WorkspaceScopedRequest {
   /** A terminal Surface handle (surface:N, surface:<stable-id>, surface:self,
    *  surface:focused) whose dev-server URL should be resolved. */
   surface: string;
@@ -336,10 +329,7 @@ export interface ResolveOpenTargetResponse {
   port: number;
 }
 
-export interface ResolveAgentBrowserSessionRequest {
-  /** Act in this Workspace instead of the caller's (`dor --workspace <ref>`).
-   *  Resolved by the router before caller ownership. */
-  workspace?: string;
+export interface ResolveAgentBrowserSessionRequest extends WorkspaceScopedRequest {
   /** A Surface handle (surface:N, surface:<stable-id>, surface:self,
    *  surface:focused, title:<title>) naming the browser Surface to drive. */
   surface: string;
@@ -354,10 +344,7 @@ export interface ResolveAgentBrowserSessionResponse {
   session: string;
 }
 
-export interface AgentBrowserSurfaceRequest {
-  /** Act in this Workspace instead of the caller's (`dor --workspace <ref>`).
-   *  Resolved by the router before caller ownership. */
-  workspace?: string;
+export interface AgentBrowserSurfaceRequest extends WorkspaceScopedRequest {
   /** Managed workspace-scoped key; absent when attaching via raw --session. */
   key?: string;
   /** Resolved agent-browser session name — the join key for the surface. */

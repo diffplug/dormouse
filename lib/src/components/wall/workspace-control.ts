@@ -1,6 +1,11 @@
-import { WORKSPACE_CONTROL_METHODS } from 'dor/protocol';
+import { isWorkspaceControlMethod, WORKSPACE_CONTROL_METHODS } from 'dor/protocol';
 import type { DorControlResult } from 'dor/protocol';
-import type { Surface as DorSurface, ListSurfacesResponse, WorkspaceRow } from 'dor/commands/types';
+import type {
+  GroupedSurface,
+  ListSurfacesResponse,
+  WorkspaceMutationResponse,
+  WorkspaceRow,
+} from 'dor/commands/types';
 import { getActivitySnapshot } from '../../lib/session-activity-store';
 import type { WorkspaceId } from '../../lib/session-types';
 import {
@@ -11,9 +16,11 @@ import {
   resolveWorkspaceRef,
   setActiveWorkspace,
   workspaceRefFor,
+  type ResolvedWorkspace,
 } from '../../lib/workspace-store';
 import { getWorkspaceSurfacesSnapshot } from '../../lib/workspace-surfaces';
 import { computeWorkspaceUnion } from '../../lib/workspace-union';
+import { errorText, stringParam } from './dor-control-shared';
 import { getWallHandle, type WallHandle } from './wall-handles';
 import { closeWorkspaceWithSurfaces, workspaceNeedsCloseConfirmation } from './workspace-lifecycle';
 import type { DorControlParams, DorControlRequest } from './use-dor-control';
@@ -26,17 +33,13 @@ import type { DorControlParams, DorControlRequest } from './use-dor-control';
  * here instead of handing it to a Wall.
  */
 
-export function isWorkspaceControlMethod(method: string): boolean {
-  return (Object.values(WORKSPACE_CONTROL_METHODS) as string[]).includes(method);
-}
-
-function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function stringParam(value: unknown): string | undefined {
-  return typeof value === 'string' ? value : undefined;
-}
+/** What the Window reads on top of a Wall's params: the listing's reach and the
+ *  container verbs' own arguments. */
+export type WindowControlParams = DorControlParams & {
+  scope?: unknown;
+  name?: unknown;
+  force?: unknown;
+};
 
 /** This Window's Workspaces in strip order, each with its union status. */
 export function workspaceRows(): WorkspaceRow[] {
@@ -91,16 +94,19 @@ function askWall(
  * out of the answer, which would read as a Workspace holding nothing.
  */
 export async function listAllWorkspaceSurfaces(detail: DorControlRequest): Promise<void> {
-  const params = detail.params ?? {};
+  const params: WindowControlParams = detail.params ?? {};
   const rows = workspaceRows();
-  const surfaces: DorSurface[] = [];
-  for (const row of rows) {
+  // Asked in parallel, assembled in strip order: a Workspace whose Wall is not
+  // mounted contributes nothing, which is the tick between `createWorkspace`
+  // and the Wall registering.
+  const answers = await Promise.all(rows.map(async (row) => {
     const handle = getWallHandle(row.id as WorkspaceId);
-    // A Workspace whose Wall is not mounted contributes nothing; every
-    // Workspace of a multi-Workspace Window keeps its Wall mounted, so this is
-    // the tick between `createWorkspace` and the Wall registering.
-    if (!handle) continue;
-    const answer = await askWall(handle, detail, { ...params, scope: 'workspace', workspace: undefined });
+    return { row, answer: handle ? await askWall(handle, detail, { ...params, workspace: undefined }) : null };
+  }));
+
+  const surfaces: GroupedSurface[] = [];
+  for (const { row, answer } of answers) {
+    if (!answer) continue;
     if (!answer.ok) {
       detail.respond({ ok: false, error: `${row.ref}: ${answer.error ?? 'listing failed'}` });
       return;
@@ -108,21 +114,20 @@ export async function listAllWorkspaceSurfaces(detail: DorControlRequest): Promi
     const listed = answer.result as ListSurfacesResponse;
     for (const surface of listed.surfaces) surfaces.push({ ...surface, workspaceRef: row.ref });
   }
+
   detail.respond({
     ok: true,
     result: {
       surfaces,
       workspaces: rows,
-      workspaceRef: workspaceRefFor(getWorkspacesSnapshot().activeId),
+      workspaceRef: (rows.find((row) => row.active) ?? rows[0]).ref,
       windowRef: currentWindowRef(),
     } satisfies ListSurfacesResponse,
   });
 }
 
 /** The Workspace a mutating verb names, or null once the failure is answered. */
-function requireWorkspace(
-  detail: DorControlRequest,
-): { id: WorkspaceId; ref: string; name: string } | null {
+function requireWorkspace(detail: DorControlRequest): ResolvedWorkspace | null {
   const target = stringParam(detail.params?.workspace);
   if (!target) {
     detail.respond({ ok: false, error: 'workspace is required' });
@@ -133,93 +138,91 @@ function requireWorkspace(
     detail.respond({ ok: false, error: resolved.message });
     return null;
   }
-  const meta = getWorkspacesSnapshot().workspaces.find((workspace) => workspace.id === resolved.id);
-  if (!meta) {
-    detail.respond({ ok: false, error: `unknown workspace target '${target}'` });
-    return null;
-  }
-  return { id: meta.id, ref: workspaceRefFor(meta.id), name: meta.name };
+  return resolved;
 }
 
 /** Answer one `workspace.*` request. Every path responds, including a throw. */
 export async function handleWorkspaceControl(detail: DorControlRequest): Promise<void> {
-  const params = detail.params ?? {};
+  const params: WindowControlParams = detail.params ?? {};
+  const name = stringParam(params.name)?.trim();
 
-  if (detail.method === WORKSPACE_CONTROL_METHODS.list) {
-    detail.respond({ ok: true, result: { workspaces: workspaceRows(), windowRef: currentWindowRef() } });
+  /** The one shape every mutating verb answers with. */
+  const respondMutation = (
+    status: WorkspaceMutationResponse['status'],
+    workspace: ResolvedWorkspace,
+    renamedTo?: string,
+  ) => detail.respond({
+    ok: true,
+    result: {
+      status,
+      workspaceId: workspace.id,
+      workspaceRef: workspace.ref,
+      name: renamedTo ?? workspace.name,
+    } satisfies WorkspaceMutationResponse,
+  });
+
+  // Narrowed before the switch, whose exhaustiveness is then what makes a new
+  // container verb a compile error here rather than a silent no-op.
+  if (!isWorkspaceControlMethod(detail.method)) {
+    detail.respond({ ok: false, error: `unsupported Dormouse control method '${detail.method}'` });
     return;
   }
-
-  if (detail.method === WORKSPACE_CONTROL_METHODS.new) {
-    const name = stringParam(params.name)?.trim();
-    // Created in the background: a command that moved the user to another
-    // Workspace would be a bigger theft than the focus one `dor split` avoids
-    // (`docs/specs/dor-cli.md` → "dor workspace"). `dor workspace switch` is
-    // the verb that activates.
-    const meta = createWorkspace({ ...(name ? { name } : {}), activate: false });
-    detail.respond({
-      ok: true,
-      result: {
-        status: 'created',
-        workspaceId: meta.id,
-        workspaceRef: workspaceRefFor(meta.id),
-        name: meta.name,
-      },
-    });
-    return;
-  }
-
-  if (detail.method === WORKSPACE_CONTROL_METHODS.rename) {
-    const target = requireWorkspace(detail);
-    if (!target) return;
-    const name = stringParam(params.name)?.trim();
-    if (!name) {
-      detail.respond({ ok: false, error: 'name is required' });
+  switch (detail.method) {
+    case WORKSPACE_CONTROL_METHODS.list: {
+      detail.respond({ ok: true, result: { workspaces: workspaceRows(), windowRef: currentWindowRef() } });
       return;
     }
-    renameWorkspace(target.id, name);
-    detail.respond({
-      ok: true,
-      result: { status: 'renamed', workspaceId: target.id, workspaceRef: target.ref, name },
-    });
-    return;
-  }
 
-  if (detail.method === WORKSPACE_CONTROL_METHODS.switch) {
-    const target = requireWorkspace(detail);
-    if (!target) return;
-    setActiveWorkspace(target.id);
-    detail.respond({
-      ok: true,
-      result: { status: 'active', workspaceId: target.id, workspaceRef: target.ref, name: target.name },
-    });
-    return;
-  }
-
-  if (detail.method === WORKSPACE_CONTROL_METHODS.close) {
-    const target = requireWorkspace(detail);
-    if (!target) return;
-    // Like `dor kill`, a command close raises no prompt: it refuses instead,
-    // and `--force` is the caller's answer to the confirmation the strip would
-    // have shown (`docs/specs/dor-cli.md` → "dor workspace").
-    if (params.force !== true && workspaceNeedsCloseConfirmation(target.id)) {
-      detail.respond({
-        ok: false,
-        error: `workspace '${target.ref}' holds running or touched Surfaces; pass --force to close it`,
-      });
+    case WORKSPACE_CONTROL_METHODS.new: {
+      // Created in the background: a command that moved the user to another
+      // Workspace would be a bigger theft than the focus one `dor split` avoids
+      // (`docs/specs/dor-cli.md` → "dor workspace"). `dor workspace switch` is
+      // the verb that activates.
+      const meta = createWorkspace({ ...(name ? { name } : {}), activate: false });
+      respondMutation('created', { ...meta, ref: workspaceRefFor(meta.id) });
       return;
     }
-    const refusal = await closeWorkspaceWithSurfaces(target.id, 'silent');
-    if (refusal) {
-      detail.respond({ ok: false, error: `workspace '${target.ref}' was not closed: ${refusal}` });
+
+    case WORKSPACE_CONTROL_METHODS.rename: {
+      const target = requireWorkspace(detail);
+      if (!target) return;
+      if (!name) {
+        detail.respond({ ok: false, error: 'name is required' });
+        return;
+      }
+      renameWorkspace(target.id, name);
+      respondMutation('renamed', target, name);
       return;
     }
-    detail.respond({
-      ok: true,
-      result: { status: 'closed', workspaceId: target.id, workspaceRef: target.ref, name: target.name },
-    });
-    return;
-  }
 
-  detail.respond({ ok: false, error: `unsupported Dormouse control method '${detail.method}'` });
+    case WORKSPACE_CONTROL_METHODS.switch: {
+      const target = requireWorkspace(detail);
+      if (!target) return;
+      setActiveWorkspace(target.id);
+      respondMutation('active', target);
+      return;
+    }
+
+    case WORKSPACE_CONTROL_METHODS.close: {
+      const target = requireWorkspace(detail);
+      if (!target) return;
+      // Like `dor kill`, a command close raises no prompt: it refuses instead,
+      // and `--force` is the caller's answer to the confirmation the strip would
+      // have shown (`docs/specs/dor-cli.md` → "dor workspace").
+      if (params.force !== true && workspaceNeedsCloseConfirmation(target.id)) {
+        detail.respond({
+          ok: false,
+          error: `workspace '${target.ref}' holds running or touched Surfaces; pass --force to close it`,
+        });
+        return;
+      }
+      const refusal = await closeWorkspaceWithSurfaces(target.id, 'silent');
+      if (refusal) {
+        detail.respond({ ok: false, error: `workspace '${target.ref}' was not closed: ${refusal}` });
+        return;
+      }
+      respondMutation('closed', target);
+      return;
+    }
+  }
 }

@@ -22,6 +22,7 @@ import {
 } from '../../lib/terminal-registry';
 import { surfaceRunsCommand, type TerminalPaneState } from '../../lib/terminal-state';
 import { isAllowedAgentBrowserBinary } from '../../lib/agent-browser-binary';
+import { stringParam } from './dor-control-shared';
 import { browserSurfaceUrl, hostPathDisplay } from './browser-url';
 import { agentBrowserSessionFromParams } from './browser-surface';
 import { listenerUrlsByPort } from './port-url';
@@ -29,6 +30,9 @@ import { dorDirectionForEdge, type LathWallEngine } from './lath-wall-engine';
 import type { WallNav } from './keyboard/types';
 import type { CloseSurfaceMode, DooredItem } from './wall-types';
 
+/** The params a Wall reads. The Window-level params (`scope`, and the container
+ *  verbs' own) are the router's, not a Wall's: `WindowControlParams` in
+ *  `workspace-control.ts`. */
 export type DorControlParams = {
   command?: unknown;
   confirmation?: unknown;
@@ -45,9 +49,6 @@ export type DorControlParams = {
   restart?: unknown;
   binaryPath?: unknown;
   includePorts?: unknown;
-  name?: unknown;
-  force?: unknown;
-  scope?: unknown;
   pane?: string;
   session?: unknown;
   surface?: unknown;
@@ -103,22 +104,65 @@ type EnsureAgentBrowserSurface = (args: {
   minimized?: boolean;
 }) => EnsureAgentBrowserSurfaceResult;
 
+/**
+ * What a `dor` Surface target names, in the one grammar
+ * `docs/specs/dor-cli.md` → "Handle Model" defines. `stable` is the only kind
+ * that identifies a Surface Window-wide, which is what lets the router send a
+ * request to whichever Workspace holds it; `ref` is Workspace-scoped (every
+ * Workspace has a `surface:1`), and `nothing` is a target that names no
+ * Surface at all (a bare `surface:`).
+ */
+export type SurfaceTargetKind =
+  | { kind: 'title'; title: string }
+  | { kind: 'self' }
+  | { kind: 'focused' }
+  | { kind: 'ref'; ref: string }
+  | { kind: 'stable'; id: string }
+  | { kind: 'nothing' };
+
+const POSITIONAL_SURFACE_REF = /^\d+$/;
+
+/** Classify a target once, for the matcher below and for the router's routing
+ *  decision (`dor-control-router.ts`). */
+export function classifySurfaceTarget(target: string): SurfaceTargetKind {
+  if (target.startsWith('title:')) return { kind: 'title', title: target.slice('title:'.length) };
+  if (target === 'surface:focused') return { kind: 'focused' };
+  if (target === 'surface:self') return { kind: 'self' };
+  if (!target.startsWith('surface:')) return { kind: 'stable', id: target };
+  const rest = target.slice('surface:'.length);
+  if (!rest) return { kind: 'nothing' };
+  return POSITIONAL_SURFACE_REF.test(rest) ? { kind: 'ref', ref: target } : { kind: 'stable', id: rest };
+}
+
+function matchesTarget(
+  classified: SurfaceTargetKind,
+  surface: DorSurface,
+  callerSurfaceId: string | undefined,
+): boolean {
+  switch (classified.kind) {
+    case 'focused':
+      return surface.focused;
+    case 'self':
+      return callerSurfaceId !== undefined && surface.id === callerSurfaceId;
+    case 'ref':
+      return classified.ref === surface.ref;
+    case 'stable':
+      return classified.id === surface.id;
+    case 'title':
+      return surface.title === classified.title;
+    // What a bare `surface:` names.
+    case 'nothing':
+      return false;
+  }
+}
+
+/** Whether one Surface answers a target; an absent target matches every one. */
 function matchesDorSurfaceTarget(
   target: string | undefined,
   surface: DorSurface,
   callerSurfaceId: string | undefined,
 ): boolean {
-  if (!target) return true;
-  if (target === 'surface:focused') return surface.focused;
-  if (target === 'surface:self') return callerSurfaceId !== undefined && surface.id === callerSurfaceId;
-  if (target === surface.id || target === surface.ref) return true;
-  if (!target.startsWith('surface:')) return false;
-  const stableId = target.slice('surface:'.length);
-  return stableId.length > 0 && stableId === surface.id;
-}
-
-function surfaceTitleTarget(target: string): string | null {
-  return target.startsWith('title:') ? target.slice('title:'.length) : null;
+  return !target || matchesTarget(classifySurfaceTarget(target), surface, callerSurfaceId);
 }
 
 function renderSurfaceForError(surface: DorSurface): string {
@@ -143,23 +187,20 @@ function resolveSurfaceTarget(
   target: string | undefined,
   callerSurfaceId: string | undefined,
 ): ParseResult<DorSurface> {
-  // A caller this Wall does not hold cannot be the implicit target: a
-  // `--workspace` command names another Workspace, and its reference defaults
-  // to that Workspace's own focused Surface rather than failing on a caller
-  // that was never in this list.
-  const callerListed = callerSurfaceId !== undefined && surfaces.some((surface) => surface.id === callerSurfaceId);
-  const resolvedTarget = target ?? (callerListed ? callerSurfaceId : 'surface:focused');
-  const titleTarget = surfaceTitleTarget(resolvedTarget);
-  if (titleTarget !== null) {
-    const matches = surfaces.filter((surface) => surface.title === titleTarget);
-    return pickSingleMatch(matches, resolvedTarget)
-      ?? { ok: false, message: `surface target '${resolvedTarget}' was not found` };
-  }
-
-  const matches = surfaces.filter((surface) => matchesDorSurfaceTarget(resolvedTarget, surface, callerSurfaceId));
+  // A caller this Wall does not hold never reaches here as one: the router
+  // drops it before dispatching (`dor-control-router.ts`), so an omitted target
+  // falls back to this Workspace's focused Surface.
+  const resolvedTarget = target ?? callerSurfaceId ?? 'surface:focused';
+  const classified = classifySurfaceTarget(resolvedTarget);
+  const matches = surfaces.filter((surface) => matchesTarget(classified, surface, callerSurfaceId));
   const single = pickSingleMatch(matches, resolvedTarget);
   if (single) return single;
-  const fallback = !target && !callerListed ? (surfaces[0] ?? null) : null;
+  // A title names a Surface the user can see; there is no falling back to
+  // another one when it names none.
+  if (classified.kind === 'title') {
+    return { ok: false, message: `surface target '${resolvedTarget}' was not found` };
+  }
+  const fallback = !target && !callerSurfaceId ? (surfaces[0] ?? null) : null;
   if (fallback) return { ok: true, value: fallback };
   return { ok: false, message: `surface '${resolvedTarget}' was not found` };
 }
@@ -188,10 +229,6 @@ async function attachSurfacePorts(surfaces: DorSurface[]): Promise<DorSurface[]>
       return { ...surface, ports: [] };
     }
   }));
-}
-
-function stringParam(value: unknown): string | undefined {
-  return typeof value === 'string' ? value : undefined;
 }
 
 function booleanParam(value: unknown): boolean {

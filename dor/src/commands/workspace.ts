@@ -30,15 +30,48 @@ interface WorkspaceFlags {
   readonly json?: boolean;
 }
 
-const ACTIONS = ['new', 'rename', 'close', 'switch'] as const;
-type WorkspaceAction = (typeof ACTIONS)[number];
+/** One action of `dor workspace`: how it is spelled in help, what argument
+ *  count it takes and what to say when the count is wrong, and the verb it
+ *  calls. Enumerated once so help, parsing, and dispatch cannot drift. */
+interface WorkspaceActionSpec {
+  /** The arguments and flags after the action name, as help prints them. */
+  usage: string;
+  accepts: (args: string[]) => boolean;
+  arityError: string;
+  run: (client: ControlClient, args: string[], flags: WorkspaceFlags) => Promise<WorkspaceMutationResponse>;
+}
 
-const USAGE = [
-  'new [name] [--json]',
-  'rename <workspace> <name> [--json]',
-  'close <workspace> [--force] [--json]',
-  'switch <workspace> [--json]',
-];
+const ACTIONS = {
+  new: {
+    usage: '[name] [--json]',
+    accepts: (args) => args.length <= 1,
+    arityError: 'dor workspace new takes an optional name',
+    run: (client, args) => client.newWorkspace(args[0] === undefined ? {} : { name: args[0] }),
+  },
+  rename: {
+    usage: '<workspace> <name> [--json]',
+    accepts: (args) => args.length === 2,
+    arityError: 'dor workspace rename takes a workspace and a name',
+    run: (client, args) => client.renameWorkspace({ workspace: args[0], name: args[1] }),
+  },
+  close: {
+    usage: '<workspace> [--force] [--json]',
+    accepts: (args) => args.length === 1,
+    arityError: 'dor workspace close takes one workspace',
+    run: (client, args, flags) => client.closeWorkspace({ workspace: args[0], force: flags.force === true }),
+  },
+  switch: {
+    usage: '<workspace> [--json]',
+    accepts: (args) => args.length === 1,
+    arityError: 'dor workspace switch takes one workspace',
+    run: (client, args) => client.switchWorkspace({ workspace: args[0] }),
+  },
+} as const satisfies Record<string, WorkspaceActionSpec>;
+
+type WorkspaceAction = keyof typeof ACTIONS;
+
+const ACTION_NAMES = Object.keys(ACTIONS) as WorkspaceAction[];
+const USAGE = ACTION_NAMES.map((name) => `${name} ${ACTIONS[name].usage}`);
 
 export const workspaceCommand: Command = {
   name: 'workspace',
@@ -49,7 +82,7 @@ export const workspaceCommand: Command = {
       scope: 'root',
       findReplace: [
         '  dor workspace [--force] [--json]<TO-EOL>',
-        '  dor workspace new|rename|close|switch [args...] [--force] [--json]\n',
+        `  dor workspace ${ACTION_NAMES.join('|')} [args...] [--force] [--json]\n`,
       ],
     },
   ],
@@ -97,12 +130,12 @@ async function runWorkspaceCommand(
   flags: WorkspaceFlags,
   ...args: string[]
 ): Promise<void | Error> {
-  const action = parseAction(args[0]);
-  if (!action.ok) return new Error(action.message);
+  const parsed = parseAction(args[0]);
+  if (!parsed.ok) return new Error(parsed.message);
+  const action = ACTIONS[parsed.value];
   const rest = args.slice(1);
-  const arity = checkArity(action.value, rest);
-  if (!arity.ok) return new Error(arity.message);
-  if (flags.force === true && action.value !== 'close') {
+  if (!action.accepts(rest)) return new Error(action.arityError);
+  if (flags.force === true && parsed.value !== 'close') {
     return new Error('--force applies only to dor workspace close');
   }
 
@@ -110,7 +143,7 @@ async function runWorkspaceCommand(
   if (client instanceof Error) return client;
 
   try {
-    const response = await runAction(client, action.value, rest, flags);
+    const response = await action.run(client, rest, flags);
     writeStdout(this, renderWorkspaceResponse(response, flags.json === true));
     return undefined;
   } catch (error) {
@@ -119,7 +152,7 @@ async function runWorkspaceCommand(
 }
 
 function parseAction(value: string | undefined): ParseResult<WorkspaceAction> {
-  const action = ACTIONS.find((candidate) => candidate === value);
+  const action = ACTION_NAMES.find((candidate) => candidate === value);
   if (action) return { ok: true, value: action };
   // The one wrong guess worth answering by name: enumeration lives in dor list.
   if (value === 'list') {
@@ -128,42 +161,9 @@ function parseAction(value: string | undefined): ParseResult<WorkspaceAction> {
   return {
     ok: false,
     message: value === undefined
-      ? `dor workspace requires an action: ${ACTIONS.join(', ')}`
-      : `unknown dor workspace action '${value}' (expected ${ACTIONS.join(', ')})`,
+      ? `dor workspace requires an action: ${ACTION_NAMES.join(', ')}`
+      : `unknown dor workspace action '${value}' (expected ${ACTION_NAMES.join(', ')})`,
   };
-}
-
-function checkArity(action: WorkspaceAction, rest: string[]): ParseResult<void> {
-  const expected: Record<WorkspaceAction, string> = {
-    new: 'dor workspace new takes an optional name',
-    rename: 'dor workspace rename takes a workspace and a name',
-    close: 'dor workspace close takes one workspace',
-    switch: 'dor workspace switch takes one workspace',
-  };
-  const ok = action === 'new'
-    ? rest.length <= 1
-    : action === 'rename'
-      ? rest.length === 2
-      : rest.length === 1;
-  return ok ? { ok: true, value: undefined } : { ok: false, message: expected[action] };
-}
-
-function runAction(
-  client: ControlClient,
-  action: WorkspaceAction,
-  rest: string[],
-  flags: WorkspaceFlags,
-): Promise<WorkspaceMutationResponse> {
-  switch (action) {
-    case 'new':
-      return client.newWorkspace(rest[0] === undefined ? {} : { name: rest[0] });
-    case 'rename':
-      return client.renameWorkspace({ workspace: rest[0], name: rest[1] });
-    case 'close':
-      return client.closeWorkspace({ workspace: rest[0], force: flags.force === true });
-    case 'switch':
-      return client.switchWorkspace({ workspace: rest[0] });
-  }
 }
 
 function renderWorkspaceResponse(response: WorkspaceMutationResponse, json: boolean): string {

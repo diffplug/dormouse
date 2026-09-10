@@ -3,14 +3,12 @@
  * Workspaces), so this host has no Window-wide Workspace model to answer with:
  * a Workspace-spanning `dor` request would report one webview's Workspace as if
  * it were all of them, and a mutation would move a strip that does not exist.
- * Every such request is refused here, at the extension host, before it reaches a
- * webview.
+ * This host serves exactly the one Workspace each webview is — positional 1 —
+ * and refuses everything that spans, at the extension host, before the request
+ * reaches a webview.
  */
 
-import { SURFACE_CONTROL_METHODS, WORKSPACE_CONTROL_METHODS } from 'dor/protocol';
-
-/** The one Workspace a VS Code webview has, in both accepted spellings. */
-const THIS_WORKSPACE = new Set(['workspace:1', '1']);
+import { parseWorkspaceRef, spansWorkspaces } from 'dor/protocol';
 
 const REFUSAL = 'Dormouse in VS Code puts each Workspace in its own webview, so';
 
@@ -21,14 +19,12 @@ const REFUSAL = 'Dormouse in VS Code puts each Workspace in its own webview, so'
  */
 export function dorWorkspaceRefusal(method: string, params: Record<string, unknown> | undefined): string | null {
   const workspace = params?.workspace;
-  if (workspace !== undefined && !(typeof workspace === 'string' && THIS_WORKSPACE.has(workspace.trim()))) {
-    return `${REFUSAL} it has no workspace '${String(workspace)}' to act on`;
+  if (workspace !== undefined) {
+    const named = typeof workspace === 'string' ? parseWorkspaceRef(workspace).position : null;
+    if (named !== 1) return `${REFUSAL} it has no workspace '${String(workspace)}' to act on`;
   }
-  if (method === SURFACE_CONTROL_METHODS.list && params?.scope === 'all') {
-    return `${REFUSAL} dor list --all would list only this one`;
-  }
-  if ((Object.values(WORKSPACE_CONTROL_METHODS) as string[]).includes(method)) {
-    return `${REFUSAL} dor workspace and dor list --workspaces are not available here`;
+  if (spansWorkspaces(method, params)) {
+    return `${REFUSAL} dor workspace, dor list --workspaces and dor list --all are not available here`;
   }
   return null;
 }

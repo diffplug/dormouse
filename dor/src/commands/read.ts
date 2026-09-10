@@ -5,6 +5,7 @@ import type {
   Command,
   DorCommandContext,
   ReadSurfaceResponse,
+  WorkspaceScopedFlags,
 } from './types.js';
 import {
   errorMessage,
@@ -17,8 +18,7 @@ import {
   writeStdout,
 } from './shared.js';
 
-interface ReadFlags {
-  readonly workspace?: string;
+interface ReadFlags extends WorkspaceScopedFlags {
   readonly json?: boolean;
   readonly lines?: number;
   readonly scrollback?: boolean;

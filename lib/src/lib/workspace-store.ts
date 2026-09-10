@@ -1,3 +1,4 @@
+import { parseWorkspaceRef } from 'dor/protocol';
 import { DEFAULT_WORKSPACE_ID, DEFAULT_WORKSPACE_NAME, type WorkspaceId } from './session-types';
 
 /**
@@ -195,12 +196,16 @@ export function workspaceRefFor(id: WorkspaceId): string {
   return `workspace:${index === -1 ? 1 : index + 1}`;
 }
 
+/** A Workspace a target named: its identity, plus the positional ref it had
+ *  when it was resolved (a later reorder renumbers it). */
+export interface ResolvedWorkspace extends WorkspaceMeta {
+  ref: string;
+}
+
 /** What a `workspace:<n|name>` target named, or why it named nothing. */
 export type WorkspaceRefResolution =
-  | { ok: true; id: WorkspaceId }
+  | ({ ok: true } & ResolvedWorkspace)
   | { ok: false; message: string };
-
-const POSITIONAL_REF = /^[1-9]\d*$/;
 
 /**
  * Resolve `workspace:<n>` / `workspace:<name>` — or either bare — to a
@@ -210,14 +215,15 @@ const POSITIONAL_REF = /^[1-9]\d*$/;
  * rather than picking.
  */
 export function resolveWorkspaceRef(ref: string): WorkspaceRefResolution {
-  const target = ref.trim();
-  const bare = (target.startsWith('workspace:') ? target.slice('workspace:'.length) : target).trim();
-  if (POSITIONAL_REF.test(bare)) {
-    const positional = state.workspaces[Number(bare) - 1];
-    if (positional) return { ok: true, id: positional.id };
-  } else if (bare) {
-    const matches = state.workspaces.filter((workspace) => workspace.name === bare);
-    if (matches.length === 1) return { ok: true, id: matches[0].id };
+  const { target, position, name } = parseWorkspaceRef(ref);
+  const found = (meta: WorkspaceMeta): WorkspaceRefResolution =>
+    ({ ok: true, ...meta, ref: workspaceRefFor(meta.id) });
+  if (position !== null) {
+    const positional = state.workspaces[position - 1];
+    if (positional) return found(positional);
+  } else if (name) {
+    const matches = state.workspaces.filter((workspace) => workspace.name === name);
+    if (matches.length === 1) return found(matches[0]);
     if (matches.length > 1) {
       const candidates = matches
         .map((workspace) => `${workspaceRefFor(workspace.id)} ${JSON.stringify(workspace.name)}`)

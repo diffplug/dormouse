@@ -23,6 +23,7 @@ import type {
   SurfacePort,
   SurfaceView,
   WorkspaceRow,
+  WorkspaceScopedFlags,
 } from './types.js';
 import { hasBrowser, hasTerminal, SURFACE_KINDS } from './types.js';
 import {
@@ -34,10 +35,12 @@ import {
   renderJson,
   requireControlClient,
   stringParser,
+  workspaceFlag,
+  workspaceParam,
   writeStdout,
 } from './shared.js';
 
-interface ListFlags {
+interface ListFlags extends WorkspaceScopedFlags {
   readonly all?: boolean;
   readonly command?: string;
   readonly cwd?: string;
@@ -47,7 +50,6 @@ interface ListFlags {
   readonly port?: number;
   readonly ports?: boolean;
   readonly view?: SurfaceView;
-  readonly workspace?: string;
   readonly workspaces?: boolean;
 }
 
@@ -140,13 +142,7 @@ function buildListCommand(): Command['command'] {
       optional: true,
       placeholder: 'paned|zoomed|minimized',
     },
-    workspace: {
-      kind: 'parsed',
-      parse: stringParser,
-      brief: 'Workspace to list instead of the caller\'s.',
-      optional: true,
-      placeholder: 'ref',
-    },
+    workspace: workspaceFlag,
     workspaces: {
       kind: 'boolean',
       brief: 'Print the Workspace overview instead of Surfaces.',
@@ -193,7 +189,7 @@ async function runListCommand(
     const response = await client.listSurfaces({
       includePorts,
       ...(flags.all === true ? { scope: 'all' as const } : {}),
-      ...(flags.workspace === undefined ? {} : { workspace: flags.workspace }),
+      ...workspaceParam(flags.workspace),
     });
     const env = context.options.env ?? {};
     const filtered = applyListFilters(response, flags, env);
@@ -208,6 +204,20 @@ async function runListCommand(
   }
 }
 
+/** Every flag the Workspace overview does not take, spelled as the user typed
+ *  it and listed in help order. `--json` and `--workspaces` are the two it does. */
+const SURFACE_ONLY_FLAGS: ReadonlyArray<[keyof ListFlags, string]> = [
+  ['all', '--all'],
+  ['command', '--command'],
+  ['cwd', '--cwd'],
+  ['idFormat', '--id-format'],
+  ['kind', '--kind'],
+  ['port', '--port'],
+  ['ports', '--ports'],
+  ['view', '--view'],
+  ['workspace', '--workspace'],
+];
+
 /** The three container flags name one scope between them, and the overview is a
  *  different listing rather than a filter on this one. */
 function checkScopeFlags(flags: ListFlags): { ok: true } | { ok: false; message: string } {
@@ -215,9 +225,9 @@ function checkScopeFlags(flags: ListFlags): { ok: true } | { ok: false; message:
     return { ok: false, message: '--all and --workspace are mutually exclusive' };
   }
   if (flags.workspaces === true) {
-    const others = Object.entries(flags)
-      .filter(([name, value]) => name !== 'workspaces' && name !== 'json' && value !== undefined)
-      .map(([name]) => `--${name.replace(/[A-Z]/g, (upper) => `-${upper.toLowerCase()}`)}`);
+    const others = SURFACE_ONLY_FLAGS
+      .filter(([name]) => flags[name] !== undefined)
+      .map(([, spelling]) => spelling);
     if (others.length > 0) {
       return { ok: false, message: `dor list --workspaces takes only --json, not ${others.join(', ')}` };
     }
@@ -266,23 +276,30 @@ function renderListText(
   const rows = surfaceRows(response, env, idFormat, includePorts);
   if (!response.workspaces) return rows.length === 0 ? '' : `${rows.join('\n')}\n`;
 
-  const byWorkspace = new Map<string, string[]>();
-  response.surfaces.forEach((surface, index) => {
-    const ref = surface.workspaceRef ?? response.workspaceRef;
-    const group = byWorkspace.get(ref) ?? [];
-    group.push(`  ${rows[index]}`);
-    byWorkspace.set(ref, group);
-  });
-
+  // Every row of a `--all` answer carries the Workspace it came from
+  // (`GroupedSurface`), so a group is its own rows in response order.
   const groups = response.workspaces
+    .map((workspace) => ({
+      header: `${workspace.ref}  ${workspace.name}${workspace.active ? '  [active]' : ''}`,
+      lines: response.surfaces.flatMap((surface, index) => (
+        surface.workspaceRef === workspace.ref ? [`  ${rows[index]}`] : []
+      )),
+    }))
     // A Workspace every filter emptied prints no header: the group is not there
     // to be listed.
-    .filter((workspace) => (byWorkspace.get(workspace.ref) ?? []).length > 0)
-    .map((workspace) => [
-      `${workspace.ref}  ${workspace.name}${workspace.active ? '  [active]' : ''}`,
-      ...(byWorkspace.get(workspace.ref) ?? []),
-    ].join('\n'));
+    .filter((group) => group.lines.length > 0)
+    .map((group) => [group.header, ...group.lines].join('\n'));
   return groups.length === 0 ? '' : `${groups.join('\n\n')}\n`;
+}
+
+/** The trailing tag block both listings share: two spaces before each tag. */
+function tagTrailer(tags: string[]): string {
+  return tags.length > 0 ? `  ${tags.join('  ')}` : '';
+}
+
+/** The attention tags a Surface row and a Workspace row spell the same way. */
+function attentionTags(row: { ringing: boolean; todo: boolean }): string[] {
+  return [...(row.ringing ? ['[ringing]'] : []), ...(row.todo ? ['[todo]'] : [])];
 }
 
 /** One text row per Surface, in response order, sharing one set of columns. */
@@ -313,17 +330,16 @@ function surfaceRows(
     const view = surface.view.padEnd(viewWidth);
     const location = locations[index].padEnd(locationWidth);
 
-    const tags: string[] = [];
-    if (callerId !== undefined && surface.id === callerId) tags.push('(you)');
-    if (surface.ringing) tags.push('[ringing]');
-    if (surface.todo) tags.push('[todo]');
-    if (surface.awaited) tags.push('[awaited]');
-    if (includePorts && surface.ports && surface.ports.length > 0) {
-      tags.push(surface.ports.map((port) => `:${port.port}`).join(' '));
-    }
-    const trailer = tags.length > 0 ? `  ${tags.join('  ')}` : '';
+    const tags = [
+      ...(callerId !== undefined && surface.id === callerId ? ['(you)'] : []),
+      ...attentionTags(surface),
+      ...(surface.awaited ? ['[awaited]'] : []),
+      ...(includePorts && surface.ports && surface.ports.length > 0
+        ? [surface.ports.map((port) => `:${port.port}`).join(' ')]
+        : []),
+    ];
 
-    return `${marker} ${handle}  ${kind}  ${renderMode}  ${view}  ${location}  ${surface.title}${trailer}`.trimEnd();
+    return `${marker} ${handle}  ${kind}  ${renderMode}  ${view}  ${location}  ${surface.title}${tagTrailer(tags)}`.trimEnd();
   });
 
   return lines;
@@ -337,12 +353,10 @@ function renderWorkspacesText(response: ListWorkspacesResponse): string {
   const nameWidth = Math.max(...rows.map((row) => row.name.length));
   const lines = rows.map((row) => {
     const tags = [
-      ...(row.ringing ? ['[ringing]'] : []),
-      ...(row.todo ? ['[todo]'] : []),
+      ...attentionTags(row),
       ...(row.count > 0 ? [`[attention ${row.count}]`] : []),
     ];
-    const trailer = tags.length > 0 ? `  ${tags.join('  ')}` : '';
-    return `${row.active ? '*' : ' '} ${row.ref.padEnd(refWidth)}  ${row.name.padEnd(nameWidth)}${trailer}`.trimEnd();
+    return `${row.active ? '*' : ' '} ${row.ref.padEnd(refWidth)}  ${row.name.padEnd(nameWidth)}${tagTrailer(tags)}`.trimEnd();
   });
   return `${lines.join('\n')}\n`;
 }
