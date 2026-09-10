@@ -77,8 +77,17 @@ export function getRunningCommandArgv0(id: string): string | null {
 // shell at a prompt). The standalone quit orchestrator uses this to decide
 // whether a quit needs a confirmation (docs/specs/standalone.md §Quit flow).
 export function countRunningSessions(): number {
+  return countRunningSessionsIn(null);
+}
+
+/** The same count restricted to `ids` — the Workspace close confirmation asks it
+ *  of one Workspace's member Surfaces (`docs/specs/layout.md` → "Workspaces").
+ *  `null` means every Session in the Window. */
+export function countRunningSessionsIn(ids: Iterable<string> | null): number {
+  const scope = ids === null ? null : new Set(ids);
   let count = 0;
   for (const [id, state] of paneStates) {
+    if (scope && !scope.has(id)) continue;
     const entry = registry.get(id);
     if (state.activity.kind === 'running' || (entry?.helper && !entry.exited && entry.helperBusy !== false)) count++;
   }

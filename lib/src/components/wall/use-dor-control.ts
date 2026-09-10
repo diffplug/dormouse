@@ -28,7 +28,7 @@ import { dorDirectionForEdge, type LathWallEngine } from './lath-wall-engine';
 import type { WallNav } from './keyboard/types';
 import type { CloseSurfaceMode, DooredItem } from './wall-types';
 
-type DorControlParams = {
+export type DorControlParams = {
   command?: unknown;
   confirmation?: unknown;
   cwd?: unknown;
@@ -61,7 +61,7 @@ type DorControlParams = {
 // A handler that parks (a long `dor await`) must listen to it and release
 // whatever it armed; nothing it responds with afterwards can reach the client.
 // Both are supplied by `lib/src/lib/platform/dor-control-dispatch.ts`.
-type DorControlRequest = Omit<DorControlRequestPayload, 'params'> & {
+export type DorControlRequest = Omit<DorControlRequestPayload, 'params'> & {
   params?: DorControlParams;
   respond: (response: DorControlResult) => void;
   /** Absent on the in-process dispatch path (and in tests), which has no

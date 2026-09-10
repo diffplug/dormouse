@@ -1,11 +1,10 @@
 import { DEFAULT_WORKSPACE_ID, DEFAULT_WORKSPACE_NAME, type WorkspaceId } from './session-types';
 
 /**
- * In-memory model of the Window's Workspaces (stage 2b). Holds the ordered list
- * and which one is active, plus the container verbs (`docs/specs/glossary.md`).
- * Stage 3 binds the standalone strip to this via `useSyncExternalStore`; stage 4
- * wires the verbs to actual Wall mount/unmount. Until then the model defaults to
- * a single Workspace and the verbs only mutate the model.
+ * In-memory model of the Window's Workspaces: the ordered list, which one is
+ * active, and the container verbs (`docs/specs/glossary.md`). `WorkspaceWindow`
+ * mounts one Wall per entry and the standalone strip renders it; both subscribe
+ * through `useSyncExternalStore`.
  */
 
 export interface WorkspaceMeta {
@@ -123,6 +122,40 @@ export function closeWorkspace(id: WorkspaceId): boolean {
   const activeId = state.activeId === id ? workspaces[Math.max(0, index - 1)].id : state.activeId;
   emit({ workspaces, activeId });
   return true;
+}
+
+/**
+ * Move a Workspace to `toIndex` (clamped into range), keeping every other
+ * Workspace's relative order. Returns whether the list changed. Reordering
+ * renumbers `workspace:<n>` refs, which are positional by design
+ * (`docs/specs/dor-cli.md` → "Handle Model").
+ */
+export function moveWorkspace(id: WorkspaceId, toIndex: number): boolean {
+  const from = state.workspaces.findIndex((ws) => ws.id === id);
+  if (from === -1) return false;
+  const to = Math.max(0, Math.min(state.workspaces.length - 1, Math.trunc(toIndex)));
+  if (from === to) return false;
+  const workspaces = [...state.workspaces];
+  const [moved] = workspaces.splice(from, 1);
+  workspaces.splice(to, 0, moved);
+  emit({ ...state, workspaces });
+  return true;
+}
+
+/** The only Window this build addresses; `window:<n>` beyond it is an error. */
+export const WINDOW_REF = 'window:1';
+
+/** A Workspace's positional `dor` ref, or null when it is not in this Window. */
+export function workspaceRefFor(id: WorkspaceId): string | null {
+  const index = state.workspaces.findIndex((ws) => ws.id === id);
+  return index === -1 ? null : `workspace:${index + 1}`;
+}
+
+/** Resolve `workspace:<n>` or a bare `<n>` (1-based) to a Workspace id. */
+export function workspaceIdForRef(ref: string): WorkspaceId | null {
+  const match = /^(?:workspace:)?([1-9]\d*)$/.exec(ref.trim());
+  if (!match) return null;
+  return state.workspaces[Number(match[1]) - 1]?.id ?? null;
 }
 
 /** Reset to the single default Workspace (fresh start / tests). */
