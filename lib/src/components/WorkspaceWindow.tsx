@@ -2,6 +2,7 @@ import { useEffect, useRef, useSyncExternalStore, type ReactNode } from 'react';
 import { clsx } from 'clsx';
 import { Wall } from './Wall';
 import { listWallHandles } from './wall/wall-handles';
+import { getWorkspaceBootPlan } from './wall/workspace-boot-plans';
 import { getPlatform } from '../lib/platform';
 import { getWorkspacesSnapshot, subscribeToWorkspaces } from '../lib/workspace-store';
 import type { SessionFlushRequest } from '../lib/platform/types';
@@ -35,6 +36,10 @@ export function WorkspaceWindow({
   // exactly one default-shell pane.
   const plansRef = useRef<WallBootPlans | null>(null);
   const plans = (plansRef.current ??= initialPlans ?? { [activeId]: boot });
+  // A Workspace created after first render — one arriving from another Window —
+  // reads its plan from the parking store instead. Latched here so its Wall
+  // sees the same record on every later render, and never a fresh one.
+  const planFor = (id: string) => (plans[id] ??= getWorkspaceBootPlan(id) ?? {});
 
   // The Window, not each Wall, answers the host's flush request: the adapter
   // completes on the FIRST notification, so a per-Wall answer would let a quit
@@ -59,7 +64,7 @@ export function WorkspaceWindow({
     >
       {workspaces.map((workspace) => {
         const isActive = workspace.id === activeId;
-        const plan = plans[workspace.id] ?? {};
+        const plan = planFor(workspace.id);
         return (
           <div
             key={workspace.id}

@@ -2014,6 +2014,12 @@ fn transfer_workspace(
         return Err("a Workspace cannot be transferred to its own window".to_string());
     }
     windows.reassign(&payload_terminal_ids(&payload), &to);
+    // Forward before the content lands: the user dropped here, so this is the
+    // window they are now looking at, and a background webview may be throttled
+    // out of answering `adopt_ready` promptly.
+    if let Some(target) = app.get_webview_window(&to) {
+        let _ = target.set_focus();
+    }
     let _ = app.emit_to(to.as_str(), "dormouse://workspace-arriving", payload.clone());
     announce_departure(
         &app,

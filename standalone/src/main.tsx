@@ -139,7 +139,16 @@ async function bootstrap() {
   // omits `shell` and the sidecar resolves the OS default itself.
   seedShellStore(await shellsPromise);
 
-  const initialPlans = await restoreWindowOrFresh(platform);
+  // A window Rust just built for a torn-out Workspace boots from the payload it
+  // parked, not from disk: it has no snapshot yet (§Tear-out). Everything else
+  // restores what the last run left.
+  let initialPlans: Awaited<ReturnType<typeof restoreWindowOrFresh>> | null = null;
+  if (!BROWSER_DEV_HOST) {
+    const { bootFromTearOut, initWorkspaceMoves } = await import("./workspace-move");
+    initialPlans = await bootFromTearOut(platform);
+    initWorkspaceMoves(platform);
+  }
+  initialPlans ??= await restoreWindowOrFresh(platform);
 
   // `main` is the only window holding `updater:*` and it is the last one the
   // quit walk tears down, so it is the only one that may check or install

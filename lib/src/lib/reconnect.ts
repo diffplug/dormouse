@@ -58,6 +58,19 @@ export async function resumeOrRestore(platform: PlatformAdapter): Promise<Reconn
   return resumeOrRestoreFrom(platform, await collectLivePtys(platform));
 }
 
+/** How one collection differs from the ordinary boot one. */
+export interface CollectPtysOptions {
+  /** What makes the host answer. Defaults to `platform.requestInit()` — the
+   *  whole Window. A Workspace arriving from another Window instead asks the
+   *  host for exactly the PTYs whose ownership just moved to it. */
+  trigger?: () => void;
+  /** Which ids this collection is about; everything else in the answer is
+   *  another Workspace's and must not be taken for it. */
+  accept?: (id: string) => boolean;
+  /** The ceiling on waiting for replays. */
+  timeoutMs?: number;
+}
+
 /**
  * Ask the host for its PTYs and gather the replay each one sends back.
  *
@@ -65,21 +78,26 @@ export async function resumeOrRestore(platform: PlatformAdapter): Promise<Reconn
  * replays one of them must not hold up boot, so 500 ms is the ceiling and a
  * short list resolves as soon as every replay has arrived.
  */
-export function collectLivePtys(platform: PlatformAdapter): Promise<LivePtys> {
+export function collectLivePtys(
+  platform: PlatformAdapter,
+  options: CollectPtysOptions = {},
+): Promise<LivePtys> {
+  const accept = options.accept ?? (() => true);
   return new Promise<LivePtys>((resolve) => {
     const replay = new Map<string, string>();
     let ptyList: PtyInfo[] | null = null;
 
-    const timeout = setTimeout(() => finish(), 500);
+    const timeout = setTimeout(() => finish(), options.timeoutMs ?? 500);
 
     const handleList = (detail: { ptys: PtyInfo[] }) => {
-      ptyList = detail.ptys;
+      ptyList = detail.ptys.filter((pty) => accept(pty.id));
       if (ptyList.length === 0) {
         finish();
       }
     };
 
     const handleReplay = (detail: { id: string; data: string }) => {
+      if (!accept(detail.id)) return;
       replay.set(detail.id, detail.data);
       if (ptyList && replay.size >= ptyList.length) {
         finish();
@@ -98,7 +116,8 @@ export function collectLivePtys(platform: PlatformAdapter): Promise<LivePtys> {
 
     platform.onPtyList(handleList);
     platform.onPtyReplay(handleReplay);
-    platform.requestInit();
+    // Last: the handlers must be armed before anything can answer.
+    (options.trigger ?? (() => platform.requestInit()))();
   });
 }
 

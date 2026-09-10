@@ -100,13 +100,17 @@ export async function restoreWindowOrFresh(platform: PlatformAdapter): Promise<W
   }
 }
 
-async function restoreWindow(
+/**
+ * Seed the Window's records and install its Workspaces and writer, before any
+ * Wall mounts. Shared with the tear-out boot, whose one Workspace arrives from
+ * another Window rather than from disk (`standalone/src/workspace-move.ts`).
+ */
+export function installWindowPersistence(
   platform: PlatformAdapter,
   saved: PersistedWindow | null,
-): Promise<WallBootPlans> {
-  // Before any Wall mounts: a Workspace's first save compares against its own
-  // record, and a snapshot taken mid-boot must not replace a restored Workspace
-  // with a blank one.
+): void {
+  // A Workspace's first save compares against its own record, and a snapshot
+  // taken mid-boot must not replace a restored Workspace with a blank one.
   seedWindowSession(saved);
   if (saved) {
     setWorkspaces({
@@ -117,6 +121,13 @@ async function restoreWindow(
   // After `setWorkspaces`, so installing does not immediately write back what was
   // just read.
   installWindowSessionWriter((snapshot) => platform.saveWindowState?.(snapshot));
+}
+
+async function restoreWindow(
+  platform: PlatformAdapter,
+  saved: PersistedWindow | null,
+): Promise<WallBootPlans> {
+  installWindowPersistence(platform, saved);
 
   const live: LivePtys = await collectLivePtys(platform);
   const restoring: Array<{ id: WorkspaceId; session: PersistedSession | null }> =
