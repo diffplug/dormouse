@@ -81,9 +81,9 @@ struct QuitState {
 const QUIT_ACK_TIMEOUT_MS: u64 = 2_000;
 // Phase 3: per-phase budget once teardown is running. Each reported phase
 // (teardown, install) refreshes it, so it bounds a single stalled phase, not the
-// sum of all teardown work. Comfortably exceeds the webview's own 8 s teardown
+// sum of all teardown work. Comfortably exceeds the webview's own 10 s teardown
 // ceiling (docs/specs/standalone.md §Quit flow).
-const QUIT_PHASE_TIMEOUT_MS: u64 = 12_000;
+const QUIT_PHASE_TIMEOUT_MS: u64 = 14_000;
 const QUIT_POLL_STEP_MS: u64 = 500;
 
 fn quit_approved(app: &AppHandle) -> bool {
@@ -499,6 +499,52 @@ async fn pty_graceful_kill_all(
     Ok(())
 }
 
+// --- Agent recovery (docs/specs/standalone.md -> "Agent recovery") ------------
+//
+// Both commands are thin: the sidecar owns the capture machine and the record,
+// because the replay buffers the detection reads live there and its lifetime is
+// exactly one activation. Both are `(async)` because they reach the blocking
+// sidecar helper (see the INVARIANT above `request_from_sidecar_timeout`;
+// `sidecar_commands_are_async` enforces it).
+
+/// Interrupt the live PTYs and let the sidecar detect and record each agent's
+/// resume invocation. First step of the quit teardown: the hint exists only
+/// between the interrupt and the kill.
+#[tauri::command(async)]
+fn capture_agent_recovery(
+    state: tauri::State<'_, SidecarState>,
+    ids: Option<Vec<String>>,
+    timeout: u64,
+) -> Result<(), String> {
+    request_from_sidecar_timeout(
+        &state,
+        "pty:captureRecovery",
+        serde_json::json!({ "ids": ids, "timeout": timeout }),
+        // Margin for the round trip beyond the sidecar's own ceiling.
+        Duration::from_millis(timeout + 1500),
+    )?;
+    Ok(())
+}
+
+/// Claim the resume invocations belonging to `pane_ids`. Destructive on the
+/// sidecar's first call, so nothing can replay them.
+#[tauri::command(async)]
+fn take_recovery_commands(
+    state: tauri::State<'_, SidecarState>,
+    pane_ids: Vec<String>,
+) -> Result<JsonValue, String> {
+    let response = request_from_sidecar_timeout(
+        &state,
+        "recovery:take",
+        serde_json::json!({ "paneIds": pane_ids }),
+        Duration::from_secs(5),
+    )?;
+    Ok(response
+        .get("commands")
+        .cloned()
+        .unwrap_or_else(|| JsonValue::Object(JsonMap::new())))
+}
+
 // Stands up the loopback iframe proxy in the sidecar and returns the
 // IframeProxyResult JSON the webview's IframePanel expects. The proxy server is
 // the shared lib/src/host/iframe-proxy.ts; this only bridges the request.
@@ -753,8 +799,28 @@ fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
         .map_err(|e| format!("app_data_dir unavailable: {e}"))
 }
 
+/// Everything this build's own state lives under.
+///
+/// `app_data_dir()` is keyed by the Tauri identifier, so a `pnpm dev:standalone`
+/// run and the installed app resolve to the same directory: without this split a
+/// dev launch would restore the installed app's Workspaces and the two would
+/// clobber one another's snapshot. The notepad archive and the Burrow state
+/// directory stay shared — they are machine-local stores, not this build's copy
+/// of the user's window.
+fn state_root_from(app_data: PathBuf) -> PathBuf {
+    if cfg!(debug_assertions) {
+        app_data.join("dev")
+    } else {
+        app_data
+    }
+}
+
+fn state_root(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(state_root_from(app_data_dir(app)?))
+}
+
 fn sessions_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(app_data_dir(app)?.join("sessions"))
+    Ok(state_root(app)?.join("sessions"))
 }
 
 // Window labels are app-controlled (e.g. "main"), but sanitize defensively so a
@@ -1009,37 +1075,55 @@ async fn save_session(window: tauri::Window, state: String) -> Result<(), String
     write_session_to(&sessions_dir(window.app_handle())?, window.label(), &state)
 }
 
-fn remove_session_from(dir: &Path, label: &str) -> Result<(), String> {
-    let snapshot = dir.join(session_file_name(label));
-    // The temp name comes from the writer, so changing the convention can never
-    // leave this sweep looking for a file `write_file_atomically` stopped making.
-    let tmp = temp_write_path(&snapshot);
-    let paths = [snapshot, tmp];
+/// The suffix `write_file_atomically` leaves on a session snapshot's temp
+/// sibling, derived through the real writer so changing the convention can never
+/// leave the sweep below looking for a name nothing makes any more.
+fn session_temp_suffix() -> String {
+    let name = session_file_name("probe");
+    temp_write_path(Path::new(&name))
+        .file_name()
+        .and_then(|n| n.to_str())
+        .and_then(|n| n.strip_prefix("probe"))
+        .map(str::to_owned)
+        .unwrap_or_else(|| ".json.tmp".to_string())
+}
+
+/// Delete every orphaned temp write in the sessions directory, at boot.
+///
+/// A crash between the temp write and the rename leaves a file `load_session`
+/// cannot see and nothing else will ever overwrite — and a snapshot written
+/// before Dormouse stopped storing transcripts carries one. Deleting is the
+/// point: those bytes have to leave the disk
+/// (docs/specs/transport.md -> "Retiring the transcripts already on disk").
+/// Never touches a live snapshot; the window that owns one rewrites it itself.
+fn sweep_orphan_session_temps(dir: &Path) -> Result<(), String> {
+    let suffix = session_temp_suffix();
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        // No sessions directory yet (a first launch) is the desired end state.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(format!("read sessions dir {}: {e}", dir.display())),
+    };
     let mut first_error = None;
-    for path in paths {
-        match std::fs::remove_file(&path) {
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        if !name.ends_with(&suffix) {
+            continue;
+        }
+        match std::fs::remove_file(entry.path()) {
             Ok(()) => {}
-            // Already gone is the desired end state, not a failure.
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) if first_error.is_none() => {
-                first_error = Some(format!("remove session artifact {}: {e}", path.display()));
+                first_error = Some(format!(
+                    "remove orphaned session temp {}: {e}",
+                    entry.path().display()
+                ));
             }
             Err(_) => {}
         }
     }
     first_error.map_or(Ok(()), Err)
-}
-
-/// Delete this window's snapshot and any orphaned temp write outright.
-///
-/// Deleting rather than blanking matters: a pre-upgrade snapshot carries a
-/// transcript, and the point of clearing it is that those bytes stop being on
-/// disk (docs/specs/transport.md -> "Retiring the transcripts already on disk").
-/// Overwriting with an empty string would also leave every reader of the store
-/// obliged to treat `""` as a distinct third state alongside present and absent.
-#[tauri::command]
-async fn clear_session(window: tauri::Window) -> Result<(), String> {
-    remove_session_from(&sessions_dir(window.app_handle())?, window.label())
 }
 
 // --- Notepad archive (docs/specs/notepad.md) ---------------------------------
@@ -1608,6 +1692,32 @@ fn burrow_state_dir(app: &AppHandle) -> Option<String> {
     Some(dir.to_string_lossy().into_owned())
 }
 
+/// Where the sidecar writes the single-use agent-recovery record. Under the
+/// state root, so a dev run never consumes the installed app's. Created here so
+/// a first launch hands the sidecar a directory that exists; owner-only for the
+/// same reason the Burrow's is — the record holds command lines the user typed,
+/// and a unix mode is a silent no-op on Windows.
+fn recovery_state_dir(app: &AppHandle) -> Option<String> {
+    let dir = match state_root(app) {
+        Ok(dir) => dir,
+        Err(e) => {
+            append_log(format!("[recovery] state root unavailable: {e}"));
+            return None;
+        }
+    };
+    if let Err(e) = create_dir_all(&dir) {
+        append_log(format!("[recovery] create state dir: {e}"));
+        return None;
+    }
+    if let Err(e) = restrict_to_owner(&dir, 0o700) {
+        append_log(format!(
+            "[recovery] WARNING could not restrict state dir {}: {e}",
+            dir.display()
+        ));
+    }
+    Some(dir.to_string_lossy().into_owned())
+}
+
 fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let sidecar_path = resolve_sidecar_path(app.path().resource_dir().ok(), manifest_dir);
@@ -1616,6 +1726,7 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
     let dor_node_path = resolve_dor_node_path(&node_path, app);
     let dor_control_token = dor_control_token();
     let state_dir = burrow_state_dir(app);
+    let recovery_dir = recovery_state_dir(app);
     append_log(format!(
         "[sidecar] resolved script: {}",
         sidecar_path.display()
@@ -1634,6 +1745,10 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
         "[burrow] state dir: {}",
         state_dir.as_deref().unwrap_or("(none)")
     ));
+    append_log(format!(
+        "[recovery] state dir: {}",
+        recovery_dir.as_deref().unwrap_or("(none)")
+    ));
 
     let mut wrap = CommandWrap::with_new(&node_path, |c| {
         c.arg(&sidecar_path)
@@ -1643,6 +1758,10 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
             .env("DORMOUSE_CLI_JS", &dor_cli_paths.entrypoint)
             .env("DORMOUSE_CONTROL_TOKEN", &dor_control_token)
             .env("DORMOUSE_STATE_DIR", state_dir.as_deref().unwrap_or(""))
+            .env(
+                "DORMOUSE_RECOVERY_DIR",
+                recovery_dir.as_deref().unwrap_or(""),
+            )
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -1865,6 +1984,19 @@ pub fn run() {
             // Quit-interception state (docs/specs/standalone.md §Quit flow).
             app.manage(QuitState::default());
 
+            // A crash between a snapshot's temp write and its rename leaves a
+            // file nothing will ever read or overwrite; one written before
+            // Dormouse stopped storing transcripts carries one
+            // (docs/specs/standalone.md §Persistence). Never fatal.
+            match sessions_dir(app.handle()) {
+                Ok(dir) => {
+                    if let Err(e) = sweep_orphan_session_temps(&dir) {
+                        append_log(format!("[session] {e}"));
+                    }
+                }
+                Err(e) => append_log(format!("[session] {e}")),
+            }
+
             // Serializes this process's notepad-archive access (§Notepad
             // archive); the revision itself is read off the stored bytes and
             // the cross-process exclusion is a lock file, so there is no
@@ -1893,6 +2025,8 @@ pub fn run() {
             pty_context,
             pty_get_open_ports,
             pty_graceful_kill_all,
+            capture_agent_recovery,
+            take_recovery_commands,
             iframe_create_proxy_url,
             pty_request_init,
             dor_control_response,
@@ -1909,7 +2043,6 @@ pub fn run() {
             read_update_log,
             load_session,
             save_session,
-            clear_session,
             load_notepad_archive,
             save_notepad_archive,
             reset_notepad_archive,
@@ -1951,9 +2084,10 @@ pub fn run() {
 mod tests {
     use super::{
         find_node_binary, notepad_archive_lock_path, read_notepad_archive_from, read_session_from,
-        remove_session_from, reset_notepad_archive_at, resolve_dor_cli_paths, resolve_sidecar_path,
-        session_file_name, strip_windows_verbatim_prefix, write_notepad_archive_to,
-        write_session_to, NOTEPAD_ARCHIVE_FILE,
+        reset_notepad_archive_at, resolve_dor_cli_paths, resolve_sidecar_path, session_file_name,
+        session_temp_suffix, state_root_from, strip_windows_verbatim_prefix,
+        sweep_orphan_session_temps, temp_write_path, write_notepad_archive_to, write_session_to,
+        NOTEPAD_ARCHIVE_FILE,
     };
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -2416,43 +2550,72 @@ mod tests {
     }
 
     #[test]
-    fn clearing_a_session_removes_the_file_and_leaves_other_windows_alone() {
-        let dir = TempDir::new("sessions-clear");
+    fn sweep_orphan_session_temps_removes_only_temps() {
+        let dir = TempDir::new("sessions-sweep");
         write_session_to(dir.path(), "main", r#"{"v":1,"who":"main"}"#).unwrap();
         write_session_to(dir.path(), "win-2", r#"{"v":1,"who":"win-2"}"#).unwrap();
-        fs::write(dir.path().join("main.json.tmp"), b"main transcript").unwrap();
-        fs::write(dir.path().join("win-2.json.tmp"), b"win-2 transcript").unwrap();
+        // What a crash between the temp write and the rename leaves behind. A
+        // pre-persistence one carries a transcript, and the point of the sweep is
+        // that those bytes leave the disk.
+        fs::write(dir.path().join("main.json.tmp"), b"legacy transcript").unwrap();
+        fs::write(dir.path().join("win-2.json.tmp"), b"legacy transcript").unwrap();
+        // Not ours: a sibling store's file must survive untouched.
+        fs::write(dir.path().join("notes.txt"), b"keep me").unwrap();
 
-        remove_session_from(dir.path(), "main").unwrap();
+        sweep_orphan_session_temps(dir.path()).unwrap();
 
-        // Absent, not blank: a pre-upgrade snapshot carries a transcript, and the
-        // point of clearing is that those bytes leave the disk.
-        assert_eq!(read_session_from(dir.path(), "main").unwrap(), None);
-        assert!(!dir.path().join("main.json").exists());
         assert!(!dir.path().join("main.json.tmp").exists());
+        assert!(!dir.path().join("win-2.json.tmp").exists());
+        // Every live snapshot is left exactly as it was — the window that owns
+        // one rewrites it itself.
+        assert_eq!(
+            read_session_from(dir.path(), "main").unwrap().as_deref(),
+            Some(r#"{"v":1,"who":"main"}"#),
+        );
         assert_eq!(
             read_session_from(dir.path(), "win-2").unwrap().as_deref(),
             Some(r#"{"v":1,"who":"win-2"}"#),
         );
-        assert!(dir.path().join("win-2.json.tmp").exists());
+        assert!(dir.path().join("notes.txt").exists());
     }
 
     #[test]
-    fn clearing_an_orphaned_temp_session_removes_it() {
-        let dir = TempDir::new("sessions-clear-orphaned-temp");
-        let tmp = dir.path().join("main.json.tmp");
-        fs::write(&tmp, b"legacy transcript").unwrap();
-
-        remove_session_from(dir.path(), "main").unwrap();
-
-        assert!(!tmp.exists());
+    fn sweeping_an_absent_sessions_directory_succeeds() {
+        // A first launch has no sessions directory yet; that is the desired end
+        // state, not an error.
+        let dir = TempDir::new("sessions-sweep-missing");
+        assert!(sweep_orphan_session_temps(&dir.path().join("nope")).is_ok());
     }
 
+    /// The sweep's suffix comes from the writer, so the two can never drift.
     #[test]
-    fn clearing_an_absent_session_succeeds() {
-        // Already gone is the desired end state; a first launch must not error.
-        let dir = TempDir::new("sessions-clear-missing");
-        assert!(remove_session_from(dir.path(), "main").is_ok());
+    fn session_temp_suffix_matches_what_the_writer_leaves() {
+        assert_eq!(session_temp_suffix(), ".json.tmp");
+        assert_eq!(
+            temp_write_path(Path::new(&session_file_name("main")))
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            format!("main{}", session_temp_suffix()),
+        );
+    }
+
+    /// A dev build and the installed app share one `app_data_dir()`, so this
+    /// split is what keeps a `pnpm dev:standalone` run from restoring the
+    /// installed app's Workspaces and clobbering its snapshot.
+    #[test]
+    fn dev_and_installed_state_roots_are_separate() {
+        let app_data = PathBuf::from("/app-data");
+        let root = state_root_from(app_data.clone());
+        if cfg!(debug_assertions) {
+            assert_eq!(root, app_data.join("dev"));
+        } else {
+            assert_eq!(root, app_data);
+        }
+        // The notepad archive is a sibling of app_data, never under the root, so
+        // dev and the installed app keep sharing it.
+        assert_ne!(root.join("sessions"), app_data.join(NOTEPAD_ARCHIVE_FILE));
     }
 
     #[test]
