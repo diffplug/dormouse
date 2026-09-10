@@ -228,7 +228,10 @@ export class DirectPeer {
     if (data instanceof ArrayBuffer) {
       frame = new Uint8Array(data);
     } else if (ArrayBuffer.isView(data)) {
-      frame = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+      // Copied, not viewed: the cutover may hold this frame until the peer's
+      // switch decrypts, and a view over a pooled or reused buffer (the Node
+      // polyfill hands over a `Buffer`) would read whatever landed there next.
+      frame = new Uint8Array(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength));
     } else {
       this.#handlers.onViolation('a direct channel message was not binary');
       return;
