@@ -9,9 +9,10 @@ import type { WallBootPlans, WallBootProps } from './wall/wall-types';
 
 /**
  * One Window's Workspaces: a mounted `<Wall>` each, all in the same grid cell so
- * a switch never changes a Wall's box and no xterm refits
+ * a switch never changes a Wall's box and the reattach fit finds the same grid
  * (docs/specs/layout.md → "Workspaces"). Switching flips which Wall is `active`;
- * nothing re-seeds, re-parents, or unmounts.
+ * nothing re-seeds, re-parents, or unmounts a leaf — only a hidden Wall's
+ * terminal elements detach, as minimize does, so they hold no GL context.
  */
 export function WorkspaceWindow({
   baseboardNotice,
@@ -66,7 +67,7 @@ export function WorkspaceWindow({
             data-workspace-wall={workspace.id}
             data-workspace-active={isActive ? 'true' : 'false'}
             // `visibility: hidden` (not `display: none`) keeps the box laid out,
-            // so a hidden Workspace's xterms never refit. `inert` is
+            // so a hidden Workspace's reattached xterms find an unchanged grid. `inert` is
             // defense-in-depth: `visibility: hidden` already removes focusability.
             inert={!isActive}
             className={clsx(

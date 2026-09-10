@@ -1,30 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { copyFile, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { copyFile, mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
+import { sessionForKey } from 'dor-lib-common/agent-browser';
+import { cleanEnv, devWorkspace, runner, writeShims } from './dev-fixture.mjs';
 
 const scripts = path.dirname(fileURLToPath(import.meta.url));
 
 // Exercise the shipped harness with real Vite and HTTP listeners. Only the PTY
 // runtime and browser CLI are substitutes; tests never launch a user's browser.
 async function fixture(t) {
-  const root = await realpath(await mkdtemp(path.join(tmpdir(), 'innerdogfood-test-')));
-  const standalone = path.join(root, 'standalone');
-  const bin = path.join(root, 'bin');
-  await mkdir(path.join(standalone, 'scripts'), { recursive: true });
+  const { root, standalone, bin } = await devWorkspace('innerdogfood-test');
   await mkdir(path.join(standalone, 'sidecar'));
-  await mkdir(bin);
-  await symlink(path.resolve(scripts, '../node_modules'), path.join(standalone, 'node_modules'), 'junction');
-  for (const name of ['dev-agent-browser.mjs', 'dev-host-guard.mjs']) {
-    await copyFile(path.join(scripts, name), path.join(standalone, 'scripts', name));
-  }
-  await copyFile(path.resolve(scripts, '../vite.config.ts'), path.join(standalone, 'vite.config.ts'));
-  await writeFile(path.join(standalone, 'index.html'), '<script type="module" src="/app.js"></script>');
-  await writeFile(path.join(standalone, 'app.js'), 'console.log(import.meta.env.VITE_DORMOUSE_BROWSER_DEV_HOST);');
+  await Promise.all(['dev-agent-browser.mjs', 'dev-host-guard.mjs', 'dev-run.mjs'].map(name =>
+    copyFile(path.join(scripts, name), path.join(standalone, 'scripts', name))));
   await writeFile(path.join(standalone, 'sidecar/main.js'), `
     const { createInterface } = require('node:readline');
     createInterface({ input: process.stdin }).on('line', line => {
@@ -35,15 +27,17 @@ async function fixture(t) {
     });
   `);
   const cli = path.join(bin, 'cli.cjs');
-  await writeFile(cli, `console.log('BROWSER_ARGS ' + JSON.stringify(process.argv.slice(2))); process.exit(Number(process.env.TEST_BROWSER_EXIT || 0));`);
-  for (const name of ['agent-browser', 'dor']) {
-    if (process.platform === 'win32') {
-      await writeFile(path.join(bin, `${name}.cmd`), `@"${process.execPath}" "${cli}" %*\r\n`);
+  await writeFile(cli, `
+    console.log('BROWSER_ARGS ' + JSON.stringify(process.argv.slice(2)));
+    if (process.env.TEST_BROWSER_HANG) {
+      process.on('SIGTERM', () => {});
+      setInterval(() => {}, 1000);
+      console.log('BROWSER_PID ' + process.pid);
     } else {
-      const quote = value => "'" + value.replaceAll("'", "'\\''") + "'";
-      await writeFile(path.join(bin, name), `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(cli)} "$@"\n`, { mode: 0o755 });
+      process.exit(Number(process.env.TEST_BROWSER_EXIT || 0));
     }
-  }
+  `);
+  await writeShims(bin, cli, ['agent-browser', 'dor']);
   const runs = [];
   t.after(async () => {
     await Promise.all(runs.map(run => run.stop()));
@@ -52,31 +46,13 @@ async function fixture(t) {
   return {
     root,
     start(overrides = {}) {
-      const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(DORMOUSE_|VITE_|TAURI_)/.test(key)));
-      env.PATH = `${bin}${path.delimiter}${process.env.PATH}`;
       const child = spawn(process.execPath, [path.join(standalone, 'scripts/dev-agent-browser.mjs')], {
-        cwd: root, env: { ...env, ...overrides }, stdio: ['ignore', 'pipe', 'pipe'],
+        cwd: root, env: { ...cleanEnv(bin), ...overrides }, stdio: ['ignore', 'pipe', 'pipe'],
       });
-      let output = '';
-      child.stdout.on('data', chunk => { output += chunk; });
-      child.stderr.on('data', chunk => { output += chunk; });
-      const exited = new Promise((resolve, reject) => {
-        child.once('error', reject);
-        child.once('exit', (code, signal) => resolve({ code, signal }));
-      });
-      const run = {
-        child, exited,
-        get output() { return output; },
-        async wait(pattern) {
-          const deadline = Date.now() + 20000;
-          while (Date.now() < deadline) {
-            const match = output.match(pattern);
-            if (match) return match;
-            if (child.exitCode !== null || child.signalCode !== null) break;
-            await delay(25);
-          }
-          throw new Error(`Harness did not log ${pattern}:\n${output}`);
-        },
+      // Object.assign, not a spread: `runner`'s `output`/`closed` are getters
+      // over live state, and spreading would snapshot them once.
+      const run = Object.assign(runner(child, 'Harness'), {
+        child,
         async ready() {
           await this.wait(/running; Ctrl-C to stop/);
           this.app = (await this.wait(/app URL: (http:\/\/localhost:\d+)/))[1];
@@ -89,9 +65,9 @@ async function fixture(t) {
         async stop() {
           if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
           const timer = setTimeout(() => child.kill('SIGKILL'), 5000);
-          try { return await exited; } finally { clearTimeout(timer); }
+          try { return await this.exited; } finally { clearTimeout(timer); }
         },
-      };
+      });
       runs.push(run);
       return run;
     },
@@ -120,7 +96,10 @@ test('parallel worktrees own ports, browser identities and bridges; stopping one
   assert.equal(new Set([one.app.split(':').at(-1), two.app.split(':').at(-1), one.bridge.split(':').at(-1), two.bridge.split(':').at(-1)]).size, 4);
   assert.notEqual(one.session, two.session);
   assert.notEqual(one.token, two.token);
-  assert.deepEqual(one.args, ['ab', '--key', one.session.replace('dormouse.1.', ''), 'open', one.app]);
+  const key = one.args[2];
+  assert.match(key, /^innerdogfood-[a-f0-9]{16}$/);
+  assert.deepEqual(one.args, ['ab', '--key', key, 'open', one.app]);
+  assert.equal(one.session, sessionForKey(key));
   assert.deepEqual(two.args, ['--session', two.session, 'open', two.app]);
   for (const [run, dir, other] of [[one, a.root, two], [two, b.root, one]]) {
     const js = await (await fetch(`${run.app}/app.js`)).text();
@@ -183,4 +162,25 @@ test('browser startup failure closes the harness listeners and sidecar', { timeo
   await assertClosed(run);
   const pid = Number((await run.wait(/sidecar pid=(\d+)/))[1]);
   assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
+});
+
+test('shutdown kills an owned browser launcher that ignores SIGTERM', {
+  timeout: 30000, skip: process.platform === 'win32',
+}, async t => {
+  const a = await fixture(t);
+  const run = a.start({ TEST_BROWSER_HANG: '1' });
+  const pid = Number((await run.wait(/BROWSER_PID (\d+)/))[1]);
+  t.after(() => {
+    try { process.kill(pid, 'SIGKILL'); } catch (err) {
+      if (err.code !== 'ESRCH') throw err;
+    }
+  });
+  assert.equal((await run.stop()).code, 0);
+  // SIGKILL delivery and orphan reaping can finish just after the harness exits.
+  await assert.rejects(async () => {
+    for (let attempt = 0; attempt < 40; attempt++) {
+      process.kill(pid, 0);
+      await delay(25);
+    }
+  }, { code: 'ESRCH' });
 });
