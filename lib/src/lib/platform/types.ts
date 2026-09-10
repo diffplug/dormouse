@@ -7,6 +7,7 @@ import type { ShellEntry } from '../shell-defaults';
 // share it without pulling this browser-typed module into a Node tsconfig.
 import type { IframeProxyResult } from './iframe-proxy-types';
 import type { NotepadArchivePort } from '../notepad/types';
+import type { PersistedAlertState } from '../session-types';
 
 export interface PtyInfo {
   helper?: HelperIdentity;
@@ -239,6 +240,18 @@ export interface PlatformAdapter {
    * nothing (docs/specs/transport.md -> "Consuming it").
    */
   getRecoveryCommands?(): Record<string, string>;
+
+  /**
+   * Seed a cold-restored Surface's persisted TODO/alert into the host's
+   * `AlertManager`, so the freshly spawned PTY inherits the state its saved pane
+   * carried (`docs/specs/alert.md` -> "Persist only").
+   *
+   * Present only where the adapter owns the manager: standalone runs it in the
+   * webview, so the restore path is the only thing that can seed it. VS Code
+   * omits it — its extension host seeds its own manager while answering the
+   * webview's boot (`vscode-ext/src/message-router.ts`).
+   */
+  alertSeed?(id: string, state: PersistedAlertState): void;
 
   // PTY queries
   getCwd(id: string): Promise<string | null>;

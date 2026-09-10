@@ -3,7 +3,7 @@ import type { LathPersistedLayout } from './lath/persistence';
 import type { PlatformAdapter, PtyInfo } from './platform/types';
 import { hydrateNotepadFromVolatile } from './notepad/notepad-store';
 import { restoreBrowserSurfaceTodo, resumeTerminal } from './terminal-registry';
-import { carrySurfaceRefs, readPersistedSession, type PersistedDoor, type PersistedSurfaceRefs } from './session-types';
+import { carrySurfaceRefs, readPersistedSession, type PersistedDoor, type PersistedSession, type PersistedSurfaceRefs } from './session-types';
 import { persistedLathLayout, restoreSession } from './session-restore';
 
 export interface ReconnectResult {
@@ -19,6 +19,34 @@ export interface ReconnectResult {
   surfaceRefsNext?: number;
 }
 
+/** Every PTY the host still holds, with whatever replay each one sent. Collected
+ *  ONCE per Window: the wait below is a single `requestInit` round trip, and the
+ *  host answers it for the whole webview, not per Workspace. */
+export interface LivePtys {
+  ptys: PtyInfo[];
+  replay: Map<string, string>;
+}
+
+/**
+ * What one plan may claim out of `LivePtys`, and what it plans against. Every
+ * field defaults to the whole-window answer, so the single-Wall hosts reach the
+ * same behavior through `resumeOrRestore`.
+ */
+export interface ResumePlanOptions {
+  /** The record to plan from; `undefined` reads the platform slot, `null` is "none". */
+  savedSession?: PersistedSession | null;
+  /** Live ids this plan owns by name. Omitted claims every live PTY. */
+  ptyIds?: ReadonlySet<string>;
+  /** Live ids no saved Workspace named, adopted by this plan — the active
+   *  Workspace's, mirroring the unowned claim in
+   *  `vscode-ext/src/message-router.ts`. An adopted id has no saved layout
+   *  position, so a plan that takes one falls back to the flat live list, exactly
+   *  as a single Wall does when a live PTY outruns its last save. */
+  claimUnowned?: ReadonlySet<string>;
+  /** Single-use resume invocations already claimed for this plan's panes. */
+  recoveryCommands?: Record<string, string>;
+}
+
 /**
  * Resume over live PTYs, or cold-restore from saved session.
  *
@@ -29,27 +57,19 @@ export interface ReconnectResult {
  * 3. Neither → return empty (Wall creates a fresh terminal)
  */
 export async function resumeOrRestore(platform: PlatformAdapter): Promise<ReconnectResult> {
-  const liveResult = await resumeLiveSessions(platform);
-  if (liveResult) return liveResult;
-
-  const restored = await restoreSession(platform);
-  if (restored) {
-    const saved = readPersistedSession(platform.getState());
-    // Browser-only views have no PTY with which to prove a live resume. Their
-    // host-memory mirror is that proof; an extension restart supplies null.
-    // Rebuild their layout first, then hydrate only those surviving Surfaces.
-    if (saved?.panes.length && saved.panes.every((pane) => pane.surfaceType === 'browser')) {
-      return hydrateNotepad(platform, restored);
-    }
-    return restored;
-  }
-
-  return { paneIds: [] };
+  return resumeOrRestoreFrom(platform, await collectLivePtys(platform));
 }
 
-function resumeLiveSessions(platform: PlatformAdapter): Promise<ReconnectResult | null> {
-  return new Promise<ReconnectResult | null>((resolve) => {
-    const replayBuffer = new Map<string, string>();
+/**
+ * Ask the host for its PTYs and gather the replay each one sends back.
+ *
+ * Bounded rather than counted-to-completion: a host that lists PTYs but never
+ * replays one of them must not hold up boot, so 500 ms is the ceiling and a
+ * short list resolves as soon as every replay has arrived.
+ */
+export function collectLivePtys(platform: PlatformAdapter): Promise<LivePtys> {
+  return new Promise<LivePtys>((resolve) => {
+    const replay = new Map<string, string>();
     let ptyList: PtyInfo[] | null = null;
 
     const timeout = setTimeout(() => finish(), 500);
@@ -62,8 +82,8 @@ function resumeLiveSessions(platform: PlatformAdapter): Promise<ReconnectResult 
     };
 
     const handleReplay = (detail: { id: string; data: string }) => {
-      replayBuffer.set(detail.id, detail.data);
-      if (ptyList && replayBuffer.size >= ptyList.length) {
+      replay.set(detail.id, detail.data);
+      if (ptyList && replay.size >= ptyList.length) {
         finish();
       }
     };
@@ -75,56 +95,85 @@ function resumeLiveSessions(platform: PlatformAdapter): Promise<ReconnectResult 
       clearTimeout(timeout);
       platform.offPtyList(handleList);
       platform.offPtyReplay(handleReplay);
-
-      if (!ptyList || ptyList.length === 0) {
-        resolve(null);
-        return;
-      }
-
-      const savedState = platform.getState();
-      const savedResumeInfo = getSavedPaneResumeInfo(savedState, ptyList.map((pty) => pty.id));
-      const ids: string[] = [];
-      const ptyById = new Map(ptyList.map((pty) => [pty.id, pty]));
-      for (const pty of ptyList) {
-        const resumeInfo: { alive: boolean; exitCode?: number; shell?: string; title?: string; untouched?: boolean; helper?: PtyInfo['helper'] } = {
-          alive: pty.alive,
-          exitCode: pty.exitCode,
-        };
-        if (pty.shell !== undefined) resumeInfo.shell = pty.shell;
-        const savedInfo = savedResumeInfo.get(pty.id);
-        if (savedInfo?.title !== undefined) resumeInfo.title = savedInfo.title;
-        if (savedInfo?.untouched) resumeInfo.untouched = true;
-        // A helper stays one only while its source is also live; helpers cannot
-        // have helpers.
-        const parent = pty.helper && ptyById.get(pty.helper.parentId);
-        const helper = parent && !parent.helper ? pty.helper : undefined;
-        if (helper) resumeInfo.helper = helper;
-        resumeTerminal(pty.id, replayBuffer.get(pty.id) ?? null, resumeInfo);
-        if (helper) { restoreHelper(pty.id, helper); continue; }
-        ids.push(pty.id);
-        if (pty.helper) adoptOrphanedHelper(pty.id);
-      }
-      // Pull saved visible/doors state so a resume (e.g. after panel
-      // close/reopen) restores splits and doors instead of stacking every live
-      // PTY into one tab group.
-      const savedPlan = getSavedResumePlan(savedState, ids);
-      if (savedPlan) {
-        resolve(hydrateNotepad(platform, savedPlan));
-        return;
-      }
-
-      const saved = readPersistedSession(savedState);
-      resolve(hydrateNotepad(platform, {
-        paneIds: ids,
-        doors: [],
-        ...carrySurfaceRefs(saved),
-      }));
+      resolve({ ptys: ptyList ?? [], replay });
     }
 
     platform.onPtyList(handleList);
     platform.onPtyReplay(handleReplay);
     platform.requestInit();
   });
+}
+
+/** The planning half of a resume/restore, over PTYs someone else collected. One
+ *  call per Workspace, each taking its own slice of the one live list. */
+export function resumeOrRestoreFrom(
+  platform: PlatformAdapter,
+  live: LivePtys,
+  opts: ResumePlanOptions = {},
+): ReconnectResult {
+  const saved = opts.savedSession !== undefined
+    ? opts.savedSession
+    : readPersistedSession(platform.getState());
+
+  const mine = live.ptys.filter((pty) =>
+    opts.ptyIds === undefined || opts.ptyIds.has(pty.id) || opts.claimUnowned?.has(pty.id));
+  const resumed = mine.length > 0 ? resumeLivePtys(mine, live.replay, saved) : null;
+  if (resumed) return hydrateNotepad(platform, resumed);
+
+  const restored = restoreSession(platform, {
+    savedSession: saved,
+    ...(opts.recoveryCommands !== undefined ? { recoveryCommands: opts.recoveryCommands } : {}),
+  });
+  if (restored) {
+    // Browser-only views have no PTY with which to prove a live resume. Their
+    // host-memory mirror is that proof; an extension restart supplies null.
+    // Rebuild their layout first, then hydrate only those surviving Surfaces.
+    if (saved?.panes.length && saved.panes.every((pane) => pane.surfaceType === 'browser')) {
+      return hydrateNotepad(platform, restored);
+    }
+    return restored;
+  }
+
+  return { paneIds: [] };
+}
+
+function resumeLivePtys(
+  ptyList: PtyInfo[],
+  replayBuffer: Map<string, string>,
+  saved: PersistedSession | null,
+): ReconnectResult {
+  const savedResumeInfo = getSavedPaneResumeInfo(saved, ptyList.map((pty) => pty.id));
+  const ids: string[] = [];
+  const ptyById = new Map(ptyList.map((pty) => [pty.id, pty]));
+  for (const pty of ptyList) {
+    const resumeInfo: { alive: boolean; exitCode?: number; shell?: string; title?: string; untouched?: boolean; helper?: PtyInfo['helper'] } = {
+      alive: pty.alive,
+      exitCode: pty.exitCode,
+    };
+    if (pty.shell !== undefined) resumeInfo.shell = pty.shell;
+    const savedInfo = savedResumeInfo.get(pty.id);
+    if (savedInfo?.title !== undefined) resumeInfo.title = savedInfo.title;
+    if (savedInfo?.untouched) resumeInfo.untouched = true;
+    // A helper stays one only while its source is also live; helpers cannot
+    // have helpers. `ptyById` is this plan's slice, so a helper whose parent
+    // went to another Workspace is resumed as an ordinary pane rather than
+    // restored into a Wall that does not hold its source.
+    const parent = pty.helper && ptyById.get(pty.helper.parentId);
+    const helper = parent && !parent.helper ? pty.helper : undefined;
+    if (helper) resumeInfo.helper = helper;
+    resumeTerminal(pty.id, replayBuffer.get(pty.id) ?? null, resumeInfo);
+    if (helper) { restoreHelper(pty.id, helper); continue; }
+    ids.push(pty.id);
+    if (pty.helper) adoptOrphanedHelper(pty.id);
+  }
+  // Pull saved visible/doors state so a resume (e.g. after panel
+  // close/reopen) restores splits and doors instead of stacking every live
+  // PTY into one tab group.
+  return getSavedResumePlan(saved, ids) ?? {
+    paneIds: ids,
+    doors: [],
+    ...carrySurfaceRefs(saved),
+  };
 }
 
 /**
@@ -143,8 +192,7 @@ function hydrateNotepad(platform: PlatformAdapter, result: ReconnectResult): Rec
   return result;
 }
 
-function getSavedPaneResumeInfo(savedState: unknown, liveIds: string[]): Map<string, { title: string; untouched: boolean }> {
-  const saved = readPersistedSession(savedState);
+function getSavedPaneResumeInfo(saved: PersistedSession | null, liveIds: string[]): Map<string, { title: string; untouched: boolean }> {
   if (!saved || !Array.isArray(saved.panes)) return new Map();
 
   const liveSet = new Set(liveIds);
@@ -157,8 +205,7 @@ function getSavedPaneResumeInfo(savedState: unknown, liveIds: string[]): Map<str
   return result;
 }
 
-function getSavedResumePlan(savedState: unknown, liveIds: string[]): ReconnectResult | null {
-  const saved = readPersistedSession(savedState);
+function getSavedResumePlan(saved: PersistedSession | null, liveIds: string[]): ReconnectResult | null {
   if (!saved || !Array.isArray(saved.panes)) return null;
 
   // Reuse persisted visible/doors state only when every live PTY is covered

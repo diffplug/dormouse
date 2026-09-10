@@ -16,10 +16,11 @@ vi.mock('./terminal-registry', () => ({
   getDefaultShellOpts: terminalRegistryMocks.getDefaultShellOpts,
 }));
 
-import { resumeOrRestore } from './reconnect';
+import { collectLivePtys, resumeOrRestore, resumeOrRestoreFrom } from './reconnect';
 import { addPlainNote, buildVolatileSnapshot, clearAllNotepads, getNotes } from './notepad/notepad-store';
 import type { VolatileNotepadSnapshot } from './notepad/types';
 import { getHelper, forgetHelper } from './helper-terminal';
+import { setPlatform } from './platform';
 import type { LathNode } from './lath/model';
 
 /** A native Lath persisted layout over `ids` (row split; empty tree for none) —
@@ -567,5 +568,122 @@ describe('browser-only notepad resume', () => {
     expect(buildVolatileSnapshot().surfaces.find((surface) => surface.surfaceId === 'web')?.notes)
       .toHaveLength(sameHost ? 2 : 1);
     expect(platform.spawnPty).not.toHaveBeenCalled();
+  });
+});
+
+describe('resumeOrRestoreFrom', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const savedFor = (...ids: string[]): PersistedSession => ({
+    version: 3,
+    lathLayout: lathLayoutFor(...ids),
+    panes: ids.map((id) => ({ id, title: id, cwd: null, untouched: false })),
+  });
+
+  /** One `collectLivePtys` for the whole Window, exactly as `main.tsx` boots. */
+  async function live(ptys: PtyInfo[], savedState: PersistedSession | null = null) {
+    const platform = createPlatform(ptys, savedState);
+    return { platform, live: await collectLivePtys(platform) };
+  }
+
+  it('gives each Workspace only the live PTYs its own saved record names', async () => {
+    const { platform, live: collected } = await live([
+      { id: 'a1', alive: true },
+      { id: 'b1', alive: true },
+    ]);
+
+    const a = resumeOrRestoreFrom(platform, collected, {
+      savedSession: savedFor('a1'),
+      ptyIds: new Set(['a1']),
+    });
+    const b = resumeOrRestoreFrom(platform, collected, {
+      savedSession: savedFor('b1'),
+      ptyIds: new Set(['b1']),
+    });
+
+    expect(a.paneIds).toEqual(['a1']);
+    expect(b.paneIds).toEqual(['b1']);
+    expect(terminalRegistryMocks.resumeTerminal).toHaveBeenCalledWith('a1', 'a1-replay', expect.anything());
+    expect(terminalRegistryMocks.resumeTerminal).toHaveBeenCalledWith('b1', 'b1-replay', expect.anything());
+  });
+
+  it('keeps a helper with the Workspace that holds its source', async () => {
+    const helper = { parentId: 'a1', command: 'git status' };
+    const { platform, live: collected } = await live([
+      { id: 'a1', alive: true },
+      { id: 'a-helper', alive: true, helper },
+      { id: 'b1', alive: true },
+    ]);
+
+    const a = resumeOrRestoreFrom(platform, collected, {
+      savedSession: savedFor('a1'),
+      ptyIds: new Set(['a1', 'a-helper']),
+    });
+    expect(a.paneIds).toEqual(['a1']);
+    expect(getHelper('a1')?.status).toBe('preserved');
+    forgetHelper('a1');
+
+    // The same helper handed to a Workspace WITHOUT its source is an ordinary
+    // pane there: `ptyById` is the slice, so the parent lookup misses and the
+    // orphan is adopted rather than restored as a helper.
+    vi.clearAllMocks();
+    setPlatform(platform);
+    const b = resumeOrRestoreFrom(platform, collected, {
+      savedSession: null,
+      ptyIds: new Set(['b1', 'a-helper']),
+    });
+    expect(b.paneIds).toEqual(['a-helper', 'b1']);
+    expect(getHelper('a1')).toBeUndefined();
+  });
+
+  it('claims a live PTY no saved Workspace names for the plan that asks', async () => {
+    const { platform, live: collected } = await live([
+      { id: 'a1', alive: true },
+      { id: 'stray', alive: true },
+    ]);
+
+    const inactive = resumeOrRestoreFrom(platform, collected, {
+      savedSession: savedFor('b1'),
+      ptyIds: new Set(['b1']),
+    });
+    // No live PTY of its own: a cold restore of its saved panes.
+    expect(inactive.paneIds).toEqual(['b1']);
+
+    const active = resumeOrRestoreFrom(platform, collected, {
+      savedSession: savedFor('a1'),
+      ptyIds: new Set(['a1']),
+      claimUnowned: new Set(['stray']),
+    });
+    // An adopted id has no saved layout slot, so the plan degrades to the flat
+    // live list rather than restoring a layout that cannot hold it.
+    expect(active.paneIds).toEqual(['a1', 'stray']);
+    expect(active.lathLayout).toBeUndefined();
+  });
+
+  it('plans against the record it is handed, not the platform slot', async () => {
+    const { platform, live: collected } = await live([], savedFor('slot-pane'));
+
+    expect(resumeOrRestoreFrom(platform, collected, { savedSession: savedFor('given') }).paneIds)
+      .toEqual(['given']);
+    // `null` is "this Workspace has no record", never "read the slot".
+    expect(resumeOrRestoreFrom(platform, collected, { savedSession: null }).paneIds).toEqual([]);
+    // Omitted still reads the slot, which is what the single-Wall hosts take.
+    expect(resumeOrRestoreFrom(platform, collected, {}).paneIds).toEqual(['slot-pane']);
+  });
+
+  it('hands each plan its own recovery commands', async () => {
+    const { platform, live: collected } = await live([]);
+    platform.getRecoveryCommands = vi.fn(() => ({ 'a1': 'whole-window' }));
+
+    resumeOrRestoreFrom(platform, collected, {
+      savedSession: savedFor('a1'),
+      recoveryCommands: { 'a1': 'claude --resume abc' },
+    });
+    expect(terminalRegistryMocks.restoreTerminal).toHaveBeenCalledWith(
+      'a1', expect.objectContaining({ resumeCommand: 'claude --resume abc' }),
+    );
+    expect(platform.getRecoveryCommands).not.toHaveBeenCalled();
   });
 });
