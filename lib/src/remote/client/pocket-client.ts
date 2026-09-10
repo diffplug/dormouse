@@ -873,6 +873,9 @@ export class PocketClient {
     if (record.authorization.state !== 'paired') {
       return { ok: false, message: CONNECTION_DENIAL_MESSAGES['pairing-required'], pairingRequired: true };
     }
+    // Retire the old channel before registering any replacement waiters: the
+    // Burrow closes it at promotion, which can beat the outcome over the relay.
+    if (this.#established) this.#endSession('connection replaced', { notifyGone: false });
     const deadline = this.#now() + DEFAULT_CHALLENGE_TTL_MS;
     const connectionId = randomBase64Url(E2E_ID_BYTE_LENGTH);
     const route = { kind: 'connection', id: connectionId, burrowId } as const;
@@ -914,10 +917,6 @@ export class PocketClient {
       return { ok: false, message: CONNECTION_DENIAL_MESSAGES['burrow-error'], pairingRequired: false };
     }
     if (outcome.ok) {
-      // A second Connect on one Client replaces the first: its predecessor's
-      // endpoint, peer and channel go before the replacement is promoted, the
-      // mirror of `BurrowRuntime.#promoteConnection`. Left alive, the orphan's
-      // channel would still be reporting violations against *this* session.
       this.#disposeCeremony();
       this.#established = { connectionId, session, lastSentAt: this.#now() };
       this.#connectedBurrowId = burrowId;

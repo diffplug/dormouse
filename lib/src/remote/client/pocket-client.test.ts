@@ -1070,6 +1070,39 @@ describe('the direct path, end to end', () => {
     expect(run.harness.client.connectedBurrowId).toBe(run.harness.burrowId);
   });
 
+  it('preserves a replacement connection when the old channel closes before its outcome arrives', async () => {
+    const run = await connectedDirect();
+    await run.cutover();
+    const firstPeer = run.clientPeers[0]!;
+    const firstChannel = run.network.offererChannel!;
+    const gone = vi.fn();
+    run.harness.client.setOnBurrowGone(gone);
+
+    // Deliver the handshake normally, but hold the replacement's outcome so
+    // the previous channel's close reaches the Client first.
+    const socket = run.harness.relay.burrowSocket;
+    const forward = socket.onSend!;
+    let outcomeHeld = false;
+    socket.onSend = (frame) => {
+      if (frame.kind === 'connection' && frame.id !== run.connectionId && frame.step === 'transport') {
+        run.harness.relay.holdToClient();
+        outcomeHeld = true;
+        socket.onSend = forward;
+      }
+      forward(frame);
+    };
+    const replacement = run.harness.client.connect(run.harness.burrowId);
+    await waitFor(() => outcomeHeld && firstChannel.readyState === 'closed', 'the old channel to close before the outcome');
+    run.harness.relay.releaseToClient();
+
+    expect(await replacement).toEqual({ ok: true, burrowLabel: BURROW_LABEL });
+    expect(firstPeer.closed).toBe(true);
+    expect(gone).not.toHaveBeenCalled();
+    expect(run.harness.client.connectedBurrowId).toBe(run.harness.burrowId);
+    await run.cutover();
+    expect((await run.harness.client.hello()).burrowId).toBe(run.harness.burrowId);
+  });
+
   it('closes the Burrow’s peer with the client the Relay says is gone', async () => {
     const run = await connectedDirect();
     await run.cutover();

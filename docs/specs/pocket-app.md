@@ -461,6 +461,12 @@ browser's own `RTCPeerConnection` with no ICE servers, and keeps the session on
 the relay when the browser has none or the Burrow declines
 ([remote-api.md](./remote-api.md) → Direct path owns the whole protocol).
 
+**Must retire an existing session and reject its pending requests before starting
+a replacement connection handshake, without reporting burrow loss.** Closure of
+the old channel must not cancel the replacement ceremony. Pinned by
+`pocket-client.test.ts`'s “preserves a replacement connection when the old channel
+closes before its outcome arrives”.
+
 **The connected header names the live path** — `relay` or `direct`, captioned,
 never coloured — so a relayed fallback is visible rather than silent, **with the
 reason behind it in the hover text and never in the label**: an attempt that
@@ -474,7 +480,7 @@ leaves the wall exactly as it does for a `burrow-gone`, and returning costs a
 fresh handshake and one WebAuthn prompt. Before the switch a failed channel
 costs nothing.
 
-Source of truth: `PocketClient.transportPath` / `transportRelayCause` in
+Source of truth: `PocketClient.connect` / `transportPath` / `transportRelayCause` in
 `lib/src/remote/client/pocket-client.ts`, `TRANSPORT_PATH_LABELS` /
 `TRANSPORT_RELAY_CAUSES` / `transportTitle` in
 `lib/src/remote/pocket-app/App.tsx`.
