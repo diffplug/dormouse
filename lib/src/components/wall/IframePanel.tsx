@@ -103,7 +103,8 @@ export function IframePanel({ id, title, params }: PaneProps) {
   // `.origin` is the string "null", so an in-frame navigation would map to
   // `null/<path>` and Back would persist that into `params.url`. A non-http(s)
   // URL has no normalized form, so it survives raw and the refusal below fires.
-  const sourceUrl = browserSurfaceUrl(rawUrl) ?? rawUrl;
+  const framedUrl = browserSurfaceUrl(rawUrl);
+  const sourceUrl = framedUrl ?? rawUrl;
   const [liveUrl, setLiveUrl] = useState(sourceUrl);
   // A new-tab/window request from the proxy shim, pending the user's choice to
   // open it as a new pane (docs/specs/dor-browser.md → "Iframe Shim").
@@ -186,9 +187,9 @@ export function IframePanel({ id, title, params }: PaneProps) {
     // Shim"). The header's URL editor is the third: `normalizeNavUrl` keeps a
     // typed `javascript:` or `data:` scheme on purpose. React blanks a
     // `javascript:` src and nothing else, which is not a boundary to rely on.
-    // `sourceUrl` is already normalized where a normalized form exists, so what
-    // is checked here is exactly what is framed below.
-    if (!browserSurfaceUrl(sourceUrl)) {
+    // `framedUrl` is the string this guard checks and `sourceUrl` is the string
+    // that gets framed, so they are the same value wherever one exists at all.
+    if (!framedUrl) {
       setResolution({ kind: 'error', reason: 'non-http' });
       return;
     }
