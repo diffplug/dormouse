@@ -64,9 +64,9 @@ import type {
   SurfaceView as DorSurfaceView,
 } from 'dor/commands/types';
 import { hasBrowser, hasTerminal } from 'dor/commands/types';
-import { DEFAULT_WORKSPACE_ID, type PersistedDoor, type PersistedSurfaceRefs, type WorkspaceId } from '../lib/session-types';
+import { DEFAULT_WORKSPACE_ID, type PersistedSurfaceRefs, type WorkspaceId } from '../lib/session-types';
 import { clearWorkspaceSurfaces, setWorkspaceSurfaces } from '../lib/workspace-surfaces';
-import { WINDOW_REF, workspaceRefFor } from '../lib/workspace-store';
+import { workspaceRefFor } from '../lib/workspace-store';
 import { registerWallHandle, type WallHandle } from './wall/wall-handles';
 import { installDorControlRouter } from './wall/dor-control-router';
 import type { DropTarget, RestoreToken } from '../lib/lath/ops';
@@ -115,7 +115,7 @@ import {
   type PaneWriteActions,
   type WallActions,
 } from './wall/wall-context';
-import type { CloseSurfaceMode, DoorAfterRestoreAction, DoorChip, DooredItem, WallEvent, WallMode, WallSelectionKind, WorkspaceCommands } from './wall/wall-types';
+import type { CloseSurfaceMode, DoorAfterRestoreAction, DoorChip, DooredItem, WallBootProps, WallEvent, WallMode, WallSelectionKind } from './wall/wall-types';
 
 type ShellSpawnRequest = {
   shell?: string;
@@ -131,7 +131,7 @@ type ShellSpawnNoticeState = {
   nonce: number;
 };
 
-export type { DoorAfterRestoreAction, DoorChip, DooredItem, WallEvent, WallMode, WallSelectionKind, WorkspaceCommands } from './wall/wall-types';
+export type { DoorAfterRestoreAction, DoorChip, DooredItem, WallBootProps, WallEvent, WallMode, WallSelectionKind } from './wall/wall-types';
 export {
   DialogKeyboardContext,
   DoorElementsContext,
@@ -262,16 +262,8 @@ export function Wall({
   enableBurrow = false,
   workspaceId,
   active = true,
-  workspaceCommands,
-}: {
-  initialPaneIds?: string[];
+}: WallBootProps & {
   initialMode?: WallMode;
-  /** The restored Lath persisted layout (docs/specs/tiling-engine.md →
-   *  "Persistence"). */
-  restoredLathLayout?: unknown;
-  initialDoors?: PersistedDoor[];
-  initialSurfaceRefs?: PersistedSurfaceRefs;
-  initialSurfaceRefsNext?: number;
   onEvent?: (event: WallEvent) => void;
   baseboardNotice?: ReactNode;
   /**
@@ -302,15 +294,10 @@ export function Wall({
    * (docs/specs/layout.md → "Workspaces").
    */
   active?: boolean;
-  /** The Window's Workspace verbs, for the command-mode Workspace shortcuts.
-   *  Absent (a bare Wall) leaves those keys unbound. */
-  workspaceCommands?: WorkspaceCommands;
 } = {}) {
   const effectiveWorkspaceId = workspaceId ?? DEFAULT_WORKSPACE_ID;
   const activeRef = useRef(active);
   activeRef.current = active;
-  const workspaceCommandsRef = useRef(workspaceCommands);
-  workspaceCommandsRef.current = workspaceCommands;
   const [terminalContext, setTerminalContext] = useState<TerminalContextState | null>(null);
   // Remove a closing context once its exit has played. A reopen or replacement
   // changes the state object, so the cleanup cancels the stale removal; the
@@ -945,6 +932,20 @@ export function Wall({
    *  destroyed the moment its last pane goes. */
   const closingWorkspaceRef = useRef(false);
 
+  /** This Wall's member Surfaces: visible panes then Doors. The one expression
+   *  behind membership, `ownsSurface`, and `closeAll`. */
+  const memberSurfaceIds = useCallback(
+    (): string[] => [...lath.store.leafIds(), ...doorsRef.current.map((door) => door.id)],
+    [lath],
+  );
+
+  /** Publish membership for the union projection: the Activity store is
+   *  window-wide, so this map is what scopes it to one Workspace. */
+  const publishMembership = useCallback(
+    () => setWorkspaceSurfaces(effectiveWorkspaceId, memberSurfaceIds()),
+    [effectiveWorkspaceId, memberSurfaceIds],
+  );
+
   /** Restore the Wall's "always one pane" rule after a commit empties the tree
    *  (last pane killed or minimized). A no-op while the tree is non-empty. */
   const refillEmptyTree = useCallback(() => {
@@ -981,19 +982,15 @@ export function Wall({
       // The size check also catches pure removals, purging dead ids so a later
       // re-add of the same id fires again.
       if (leavesChanged) prevLeafIdsRef.current = new Set(currentIds);
-      // Publish membership for the union projection: the Activity store is
-      // window-wide, so this map is what scopes it to one Workspace.
-      setWorkspaceSurfaces(effectiveWorkspaceId, [...currentIds, ...doorsRef.current.map((door) => door.id)]);
+      publishMembership();
       if (closingWorkspaceRef.current) return;
       refillEmptyTree();
     });
-  }, [lath, fireEvent, refillEmptyTree, effectiveWorkspaceId]);
+  }, [lath, fireEvent, refillEmptyTree, publishMembership]);
 
   // Doors change without a leaf-id change (minimize keeps the leaf parked, a kill
   // of a doored Surface removes only the chip), so publish on that edge too.
-  useEffect(() => {
-    setWorkspaceSurfaces(effectiveWorkspaceId, [...lath.store.leafIds(), ...doors.map((door) => door.id)]);
-  }, [doors, lath, effectiveWorkspaceId]);
+  useEffect(publishMembership, [doors, publishMembership]);
 
   // --- Session persistence ---
   const persistence = useSessionPersistence({
@@ -1004,17 +1001,7 @@ export function Wall({
     selectedTypeRef,
     surfaceRefsForSave,
     workspaceId,
-    // A Wall inside a Window leaves the host flush to `WorkspaceWindow`: the
-    // adapter's first `notifySessionFlushComplete` wins, so N Walls answering
-    // would let a quit proceed after only the first had written.
-    ownsHostFlush: workspaceId === undefined,
   });
-
-  /** This Wall's member Surfaces: visible panes then Doors. */
-  const memberSurfaceIds = useCallback(
-    (): string[] => [...lath.store.leafIds(), ...doorsRef.current.map((door) => door.id)],
-    [lath],
-  );
 
   /**
    * Close every Surface in this Workspace, each through the same coordinator a
@@ -1038,11 +1025,24 @@ export function Wall({
     }
     // `killPaneImmediately` defers the tree removal by the exit animation;
     // unmounting the Wall before that lands would leave Orphaned Sessions
-    // (docs/specs/glossary.md → "Invariants" I4). Bounded so a stuck fade cannot hang a quit.
-    const deadline = Date.now() + lath.exitMs + 50;
-    while (lath.store.leafIds().length > 0 || doorsRef.current.length > 0) {
-      if (Date.now() >= deadline) break;
-      await new Promise((resolve) => setTimeout(resolve, 10));
+    // (docs/specs/glossary.md → "Invariants" I4). The commit that empties the
+    // tree is what resolves this; the deadline only bounds a stuck fade so it
+    // cannot hang a quit.
+    const emptied = () => memberSurfaceIds().length === 0;
+    if (!emptied()) {
+      await new Promise<void>((resolve) => {
+        let done = false;
+        const settle = () => {
+          if (done) return;
+          done = true;
+          clearTimeout(timer);
+          unsubscribe();
+          resolve();
+        };
+        const timer = setTimeout(settle, lath.exitMs + 50);
+        const unsubscribe = lath.store.subscribe(() => { if (emptied()) settle(); });
+        if (emptied()) settle();
+      });
     }
     return null;
   }, [lath, memberSurfaceIds, refillEmptyTree]);
@@ -1499,28 +1499,23 @@ export function Wall({
     isClosingSurface,
     closeSurface,
     lastAgentBrowserBinaryPathRef,
-    workspaceRef: useCallback(
-      () => workspaceRefFor(effectiveWorkspaceId) ?? 'workspace:1',
-      [effectiveWorkspaceId],
-    ),
-    windowRef: useCallback(() => WINDOW_REF, []),
+    workspaceRef: useCallback(() => workspaceRefFor(effectiveWorkspaceId), [effectiveWorkspaceId]),
   });
 
   // --- Workspace handle ---
 
-  /** Put DOM focus back on this Wall's selection, honoring its own mode: each
-   *  Workspace keeps the mode it was left in across a switch. */
-  const focusSelected = useCallback(() => {
+  /** Put DOM focus on — or off — this Wall's selection, honoring its own mode:
+   *  each Workspace keeps the mode it was left in across a switch. */
+  const focusSelected = useCallback((focused: boolean) => {
     const id = selectedIdRef.current;
     if (!id || selectedTypeRef.current !== 'pane' || !nav.hasPane(id)) return;
-    focusSession(id, modeRef.current === 'passthrough');
+    focusSession(id, focused && modeRef.current === 'passthrough');
   }, [nav]);
 
-  // The methods are rebuilt each render so they close over current state; the
-  // handle the registry holds is one stable object delegating to them, so a
+  // The methods close over current state, so they are rebuilt each render and
+  // assigned INTO one stable object: the registry holds that object, so a
   // re-render never replaces a registered entry.
-  const handleMethodsRef = useRef<Omit<WallHandle, 'workspaceId'> | null>(null);
-  handleMethodsRef.current = {
+  const methods: Omit<WallHandle, 'workspaceId'> = {
     surfaceIds: memberSurfaceIds,
     ownsSurface: (id) => lath.store.has(id) || doorsRef.current.some((door) => door.id === id),
     hasTouchedSurfaces: () => memberSurfaceIds().some((id) => {
@@ -1530,27 +1525,13 @@ export function Wall({
       return getTerminalInstance(id) !== null && !isReplaceableShell(id);
     }),
     runningCount: () => countRunningSessionsIn(memberSurfaceIds()),
-    serialize: () => persistence.buildSession(),
     flushPersistence: () => persistence.flush(),
-    focusSelected,
     closeAll,
     handleDorControl,
   };
   const handleRef = useRef<WallHandle | null>(null);
-  if (handleRef.current === null) {
-    handleRef.current = {
-      workspaceId: effectiveWorkspaceId,
-      surfaceIds: () => handleMethodsRef.current!.surfaceIds(),
-      ownsSurface: (id) => handleMethodsRef.current!.ownsSurface(id),
-      hasTouchedSurfaces: () => handleMethodsRef.current!.hasTouchedSurfaces(),
-      runningCount: () => handleMethodsRef.current!.runningCount(),
-      serialize: () => handleMethodsRef.current!.serialize(),
-      flushPersistence: () => handleMethodsRef.current!.flushPersistence(),
-      focusSelected: () => handleMethodsRef.current!.focusSelected(),
-      closeAll: (mode) => handleMethodsRef.current!.closeAll(mode),
-      handleDorControl: (detail) => handleMethodsRef.current!.handleDorControl(detail),
-    };
-  }
+  if (handleRef.current === null) handleRef.current = { workspaceId: effectiveWorkspaceId, ...methods };
+  else Object.assign(handleRef.current, methods);
 
   useEffect(() => {
     const handle = handleRef.current!;
@@ -1573,13 +1554,12 @@ export function Wall({
     if (prevActiveRef.current === active) return;
     prevActiveRef.current = active;
     if (!active) {
-      const id = selectedIdRef.current;
-      if (id && selectedTypeRef.current === 'pane' && nav.hasPane(id)) focusSession(id, false);
+      focusSelected(false);
       return;
     }
-    const frame = requestAnimationFrame(focusSelected);
+    const frame = requestAnimationFrame(() => focusSelected(true));
     return () => cancelAnimationFrame(frame);
-  }, [active, focusSelected, nav]);
+  }, [active, focusSelected]);
 
   const addSplitPanel = useCallback((
     id: string | null,
@@ -1879,7 +1859,7 @@ export function Wall({
   useWallKeyboard({
     nav,
     activeRef,
-    workspaces: workspaceCommands,
+    workspaceId,
     swapWithNeighbor,
     modeRef,
     selectedIdRef,

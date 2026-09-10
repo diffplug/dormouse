@@ -1,69 +1,85 @@
 /**
  * @vitest-environment jsdom
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { handleWorkspaceShortcuts } from './handle-workspace-shortcuts';
+import { resetWallHandles } from '../wall-handles';
+import { getWorkspaceUiSnapshot, resetWorkspaceUi } from '../../../lib/workspace-ui-store';
+import {
+  createWorkspace,
+  getActiveWorkspaceId,
+  getWorkspacesSnapshot,
+  resetWorkspaces,
+} from '../../../lib/workspace-store';
 import type { WallKeyboardCtx } from './types';
-import type { WorkspaceCommands } from '../wall-types';
 
 const KEYS = ['c', 'n', 'p', '&', '$', '1', '5', '9'];
 
-function commands(): WorkspaceCommands & Record<keyof WorkspaceCommands, ReturnType<typeof vi.fn>> {
-  return {
-    create: vi.fn(),
-    cycle: vi.fn(),
-    selectIndex: vi.fn(),
-    requestClose: vi.fn(),
-    requestRename: vi.fn(),
-  } as unknown as WorkspaceCommands & Record<keyof WorkspaceCommands, ReturnType<typeof vi.fn>>;
-}
-
-function ctxWith(workspaces?: WorkspaceCommands): WallKeyboardCtx {
-  return { activeRef: { current: true }, workspaces } as unknown as WallKeyboardCtx;
+function ctxWith(workspaceId?: string): WallKeyboardCtx {
+  return { activeRef: { current: true }, workspaceId } as unknown as WallKeyboardCtx;
 }
 
 function keydown(key: string, init: KeyboardEventInit = {}): KeyboardEvent {
   return new KeyboardEvent('keydown', { key, cancelable: true, ...init });
 }
 
-let verbs: ReturnType<typeof commands>;
+function ids(): string[] {
+  return getWorkspacesSnapshot().workspaces.map((workspace) => workspace.id);
+}
+
+let ctx: WallKeyboardCtx;
 
 beforeEach(() => {
-  verbs = commands();
+  resetWorkspaces();
+  resetWorkspaceUi();
+  resetWallHandles();
+  ctx = ctxWith(getActiveWorkspaceId());
 });
 
 describe('handleWorkspaceShortcuts', () => {
-  it('leaves every key unbound without the Workspace verbs — the bare-Wall guard', () => {
-    const ctx = ctxWith();
+  it('leaves every key unbound on a Wall with no Workspace — the bare-Wall guard', () => {
+    const bare = ctxWith();
     for (const key of KEYS) {
       const event = keydown(key);
-      expect(handleWorkspaceShortcuts(event, ctx)).toBe(false);
+      expect(handleWorkspaceShortcuts(event, bare)).toBe(false);
       expect(event.defaultPrevented).toBe(false);
     }
+    expect(ids()).toHaveLength(1);
   });
 
-  it('binds create, cycle, select, close, and rename', () => {
-    const ctx = ctxWith(verbs);
+  it('creates, cycles, and selects by position through the store', () => {
+    const first = getActiveWorkspaceId();
     expect(handleWorkspaceShortcuts(keydown('c'), ctx)).toBe(true);
-    expect(verbs.create).toHaveBeenCalledTimes(1);
+    expect(ids()).toHaveLength(2);
+    const second = ids()[1];
+    expect(getActiveWorkspaceId()).toBe(second);
 
-    handleWorkspaceShortcuts(keydown('n'), ctx);
-    handleWorkspaceShortcuts(keydown('p'), ctx);
-    expect(verbs.cycle.mock.calls).toEqual([[1], [-1]]);
+    handleWorkspaceShortcuts(keydown('n'), ctx); // wraps at the end
+    expect(getActiveWorkspaceId()).toBe(first);
+    handleWorkspaceShortcuts(keydown('p'), ctx); // and at the start
+    expect(getActiveWorkspaceId()).toBe(second);
 
     handleWorkspaceShortcuts(keydown('1'), ctx);
-    handleWorkspaceShortcuts(keydown('9'), ctx);
-    // The digit is 1-based on screen and 0-based in the verb.
-    expect(verbs.selectIndex.mock.calls).toEqual([[0], [8]]);
+    expect(getActiveWorkspaceId()).toBe(first);
+    // Out of range is a consumed no-op rather than a wrap.
+    expect(handleWorkspaceShortcuts(keydown('9'), ctx)).toBe(true);
+    expect(getActiveWorkspaceId()).toBe(first);
+  });
 
-    handleWorkspaceShortcuts(keydown('&'), ctx);
-    expect(verbs.requestClose).toHaveBeenCalledTimes(1);
+  it('opens the strip rename editor and close flow on the ACTIVE Workspace', () => {
+    createWorkspace({ id: 'ws-2' });
     handleWorkspaceShortcuts(keydown('$'), ctx);
-    expect(verbs.requestRename).toHaveBeenCalledTimes(1);
+    expect(getWorkspaceUiSnapshot().renamingId).toBe('ws-2');
+
+    // No Wall is mounted, so nothing is touched and the close goes straight
+    // through — but the last Workspace still cannot be closed.
+    handleWorkspaceShortcuts(keydown('&'), ctx);
+    expect(ids()).toEqual([getWorkspacesSnapshot().workspaces[0].id]);
+    handleWorkspaceShortcuts(keydown('&'), ctx);
+    expect(ids()).toHaveLength(1);
   });
 
   it('claims the key it handles and leaves every other one alone', () => {
-    const ctx = ctxWith(verbs);
     const handled = keydown('c');
     handleWorkspaceShortcuts(handled, ctx);
     expect(handled.defaultPrevented).toBe(true);
@@ -74,10 +90,9 @@ describe('handleWorkspaceShortcuts', () => {
   });
 
   it('ignores a modified key, so Cmd+C stays a clipboard chord', () => {
-    const ctx = ctxWith(verbs);
     for (const init of [{ metaKey: true }, { ctrlKey: true }, { altKey: true }]) {
       expect(handleWorkspaceShortcuts(keydown('c', init), ctx)).toBe(false);
     }
-    expect(verbs.create).not.toHaveBeenCalled();
+    expect(ids()).toHaveLength(1);
   });
 });

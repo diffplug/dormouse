@@ -7,13 +7,14 @@ import { UNNAMED_PANEL_TITLE } from './terminal-state';
  * Where a save reads its previous record from and where it writes the new one.
  * A Workspace supplies both, so its record is compared against and published
  * beside its own Workspace's rather than the Window's active one
- * (`docs/specs/transport.md` → "Persisted session").
+ * (`docs/specs/transport.md` → "Persisted session"). No sink at all is the
+ * platform slot; a half-supplied one would silently mix the two.
  */
 export interface SaveSink {
-  /** This Workspace's last persisted record; `getPreviousPaneMap` reads a dead
+  /** This Workspace's last persisted record; the previous-pane map reads a dead
    *  PTY's retained cwd out of it. */
-  previous?: () => PersistedSession | null;
-  publish?: (session: PersistedSession) => void;
+  previous: () => PersistedSession | null;
+  publish: (session: PersistedSession) => void;
 }
 
 function previousPaneMap(previous: PersistedSession | null): Map<string, PersistedPane> {
@@ -27,12 +28,8 @@ export interface SavePaneInput {
   surfaceType?: PersistedSurfaceType;
 }
 
-/**
- * Build one Workspace's `PersistedSession` from its live panes and Doors. Split
- * out of `saveSession` because a Wall's handle serializes on demand (a Window
- * snapshot, a quit) without writing anything.
- */
-export async function buildPersistedSession(
+/** Build one Workspace's `PersistedSession` from its live panes and Doors. */
+async function buildPersistedSession(
   platform: PlatformAdapter,
   panes: SavePaneInput[],
   doors: PersistedDoor[] = [],
@@ -107,9 +104,9 @@ export async function saveSession(
   // it on every debounced save, every 30s heartbeat, and twice more per quit,
   // only for `saveState` to drop the result.
   if (platform.persistsSession === false) return;
-  const previous = sink?.previous ? sink.previous() : readPersistedSession(platform.getState());
+  const previous = sink ? sink.previous() : readPersistedSession(platform.getState());
   const session = await buildPersistedSession(platform, panes, doors, lathLayout, surfaceRefs, surfaceRefsNext, previous);
-  if (sink?.publish) sink.publish(session);
+  if (sink) sink.publish(session);
   else platform.saveState(session);
 }
 

@@ -2,7 +2,7 @@ import { Component, type ReactNode } from "react";
 import { Wall } from "./components/Wall";
 import { WorkspaceWindow } from "./components/WorkspaceWindow";
 import { ThemeDebuggerGlobal } from "./components/ThemeDebugger";
-import type { PersistedDoor, PersistedSurfaceRefs } from "./lib/session-types";
+import type { WallBootProps } from "./components/wall/wall-types";
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -24,21 +24,12 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
 }
 
 export default function App({
-  initialPaneIds,
-  restoredLathLayout,
-  initialDoors,
-  initialSurfaceRefs,
-  initialSurfaceRefsNext,
   baseboardNotice,
   dialogHost,
   enableBurrow,
   multiWorkspace = false,
-}: {
-  initialPaneIds?: string[];
-  restoredLathLayout?: unknown;
-  initialDoors?: PersistedDoor[];
-  initialSurfaceRefs?: PersistedSurfaceRefs;
-  initialSurfaceRefsNext?: number;
+  ...boot
+}: WallBootProps & {
   baseboardNotice?: ReactNode;
   dialogHost?: ReactNode;
   enableBurrow?: boolean;
@@ -50,7 +41,7 @@ export default function App({
   const Shell = multiWorkspace ? WorkspaceWindow : Wall;
   return (
     <ErrorBoundary>
-      <Shell initialPaneIds={initialPaneIds} restoredLathLayout={restoredLathLayout} initialDoors={initialDoors} initialSurfaceRefs={initialSurfaceRefs} initialSurfaceRefsNext={initialSurfaceRefsNext} baseboardNotice={baseboardNotice} dialogHost={dialogHost} enableBurrow={enableBurrow} />
+      <Shell {...boot} baseboardNotice={baseboardNotice} dialogHost={dialogHost} enableBurrow={enableBurrow} />
 
       <ThemeDebuggerGlobal />
     </ErrorBoundary>

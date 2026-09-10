@@ -5,7 +5,6 @@ import {
   resetWorkspaceSurfaces,
   setWorkspaceSurfaces,
   subscribeToWorkspaceSurfaces,
-  workspaceIdForSurface,
 } from './workspace-surfaces';
 
 beforeEach(() => {
@@ -35,16 +34,6 @@ describe('workspace membership store', () => {
     unsubscribe();
     setWorkspaceSurfaces('ws-1', ['b']);
     expect(listener).toHaveBeenCalledTimes(2);
-  });
-
-  it('resolves a Surface to the Workspace that published it', () => {
-    setWorkspaceSurfaces('ws-1', ['a', 'b']);
-    setWorkspaceSurfaces('ws-2', ['c']);
-    expect(workspaceIdForSurface('b')).toBe('ws-1');
-    expect(workspaceIdForSurface('c')).toBe('ws-2');
-    expect(workspaceIdForSurface('missing')).toBeNull();
-    clearWorkspaceSurfaces('ws-2');
-    expect(workspaceIdForSurface('c')).toBeNull();
   });
 
   it('copies the published array so a later mutation by the caller cannot leak in', () => {

@@ -1,5 +1,6 @@
 import { useCallback, type MutableRefObject } from 'react';
 import { getPlatform, PLATFORM_STRING } from '../../lib/platform';
+import { WINDOW_REF } from '../../lib/workspace-store';
 import type { DorControlRequestPayload, DorControlResult } from 'dor/protocol';
 import { SURFACE_CONTROL_METHODS } from 'dor/protocol';
 import type {
@@ -366,7 +367,6 @@ export function useDorControl({
   closeSurface,
   lastAgentBrowserBinaryPathRef,
   workspaceRef,
-  windowRef,
 }: {
   /** The Lath engine — visible-pane projection (`lath.listPanes()`), aspect-ratio
    *  split resolution (`autoEdgeFor`), and per-leaf param writes. */
@@ -405,10 +405,10 @@ export function useDorControl({
   closeSurface: (id: string, mode?: CloseSurfaceMode) => Promise<string | null>;
   /** The last binary path a `dor ab` surface resolved on a terminal's PATH. */
   lastAgentBrowserBinaryPathRef: MutableRefObject<string | undefined>;
-  /** This Wall's own container refs, reported by `dor list` so a caller learns
-   *  which Workspace answered (docs/specs/dor-cli.md → "Handle Model"). */
+  /** This Wall's own positional Workspace ref, reported by `dor list` so a caller
+   *  learns which Workspace answered (docs/specs/dor-cli.md → "Handle Model").
+   *  The Window is `WINDOW_REF` until there is more than one. */
   workspaceRef: () => string;
-  windowRef: () => string;
 }): {
   /** The live surface (visible pane or minimized door) whose params match, or
    *  null. Shared with the context's port launches in Wall.tsx. */
@@ -618,7 +618,7 @@ export function useDorControl({
         result: {
           surfaces,
           workspaceRef: workspaceRef(),
-          windowRef: windowRef(),
+          windowRef: WINDOW_REF,
         },
       });
       return;
@@ -1072,7 +1072,7 @@ export function useDorControl({
     }
 
     detail.respond({ ok: false, error: `unsupported Dormouse control method '${detail.method}'` });
-  }, [buildDorSurfaces, buildDorSurfaceList, closeSurface, createContentSurface, createSplitSurface, ensureAgentBrowserSurface, findSurfaceIdRunningCommand, requireBrowserSurface, requireListedSurface, requireTerminalSurface, resolveListedSurface, resolveVisibleSurface, surfaceRefForId, lath, nav, workspaceRef, windowRef]);
+  }, [buildDorSurfaces, buildDorSurfaceList, closeSurface, createContentSurface, createSplitSurface, ensureAgentBrowserSurface, findSurfaceIdRunningCommand, requireBrowserSurface, requireListedSurface, requireTerminalSurface, resolveListedSurface, resolveVisibleSurface, surfaceRefForId, lath, nav, workspaceRef]);
 
   return { findSurfaceByParams, updateSurfaceParams, handleDorControl };
 }

@@ -6,7 +6,10 @@ import type { PersistedSession, PersistedWindow, PersistedWorkspace, WorkspaceId
  * (`docs/specs/transport.md` → "Persisted session"). The Wall's persistence hook
  * publishes here instead of writing the platform slot when it runs under a
  * Workspace; the writer that turns snapshots into a host write is installed
- * separately, and standalone installs none yet.
+ * separately, and standalone installs none yet. The push path is deliberately
+ * complete ahead of its consumer: standalone persistence installs the writer and
+ * retires `window-persistence.ts`'s flag-gated merge (`docs/specs/layout.md` →
+ * "Future").
  */
 
 const sessions = new Map<WorkspaceId, PersistedSession>();

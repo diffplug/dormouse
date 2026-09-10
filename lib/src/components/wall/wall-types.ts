@@ -1,5 +1,6 @@
 import type { SurfaceKind } from 'dor/commands/types';
 import type { BrowserDisplayMode } from './agent-browser-screen';
+import type { PersistedDoor, PersistedSurfaceRefs } from '../../lib/session-types';
 
 /** A minimized Surface's baseboard chip, at RUNTIME: an identity plus the Lath
  *  restore `token` that says where it goes back. Deliberately carries no
@@ -46,22 +47,17 @@ export type DoorAfterRestoreAction =
     };
 
 /**
- * The Window's Workspace verbs as a Wall's keyboard sees them. `WorkspaceWindow`
- * builds the single instance; targets resolve through the active Workspace, so a
- * hidden Wall's stale keystroke could not act on the wrong one. Absent on a bare
- * Wall, which leaves the Workspace keys unbound (docs/specs/shortcuts.md →
- * "Workspaces (command mode)").
+ * The restored record a Wall boots from, passed through unchanged by every
+ * composition above it. Only the Workspace whose id was captured at first render
+ * receives one; every other Wall takes Lath's fresh branch
+ * (docs/specs/layout.md → "Workspaces").
  */
-export interface WorkspaceCommands {
-  create(): void;
-  /** `+1` next, `-1` previous; wraps at both ends. */
-  cycle(delta: 1 | -1): void;
-  /** Activate the nth Workspace (0-based); out of range does nothing. */
-  selectIndex(index: number): void;
-  /** Ask the strip to run its close flow for the active Workspace. */
-  requestClose(): void;
-  /** Ask the strip to open its rename editor on the active Workspace. */
-  requestRename(): void;
+export interface WallBootProps {
+  initialPaneIds?: string[];
+  restoredLathLayout?: unknown;
+  initialDoors?: PersistedDoor[];
+  initialSurfaceRefs?: PersistedSurfaceRefs;
+  initialSurfaceRefsNext?: number;
 }
 
 export type WallEvent =

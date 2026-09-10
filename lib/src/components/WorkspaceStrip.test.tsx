@@ -5,11 +5,13 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WorkspaceStrip } from './WorkspaceStrip';
-import { chromeKeyboardHeld, resetChromeKeyboardLeases } from '../lib/chrome-keyboard-lease';
-import { registerWallHandle, resetWallHandles, type WallHandle } from './wall/wall-handles';
+import { chromeKeyboardHeld, resetChromeKeyboardLeases } from './wall/chrome-keyboard-lease';
+import { registerWallHandle, resetWallHandles, stubWallHandle, type WallHandle } from './wall/wall-handles';
+import { ensureResizeObserver } from './wall/wall-test-utils';
+import { requestWorkspaceClose, requestWorkspaceRename } from './wall/workspace-lifecycle';
 import { resetWorkspaceSurfaces, setWorkspaceSurfaces } from '../lib/workspace-surfaces';
 import { clearTerminalActivity, setTerminalActivity } from '../lib/terminal-registry';
-import { requestWorkspaceStripIntent } from '../lib/workspace-strip-intent';
+import { resetWorkspaceUi } from '../lib/workspace-ui-store';
 import {
   createWorkspace,
   getActiveWorkspaceId,
@@ -23,19 +25,7 @@ let container: HTMLDivElement;
 let root: Root;
 
 function stubHandle(workspaceId: string, overrides: Partial<WallHandle> = {}): WallHandle {
-  const handle: WallHandle = {
-    workspaceId,
-    surfaceIds: () => [],
-    ownsSurface: () => false,
-    hasTouchedSurfaces: () => false,
-    runningCount: () => 0,
-    serialize: async () => ({ version: 3, panes: [], doors: [] }),
-    flushPersistence: async () => {},
-    focusSelected: () => {},
-    closeAll: async () => null,
-    handleDorControl: () => {},
-    ...overrides,
-  };
+  const handle = stubWallHandle(workspaceId, overrides);
   registerWallHandle(handle);
   return handle;
 }
@@ -72,12 +62,9 @@ function typeInto(input: HTMLInputElement, value: string): void {
 }
 
 beforeEach(() => {
-  globalThis.ResizeObserver ??= class {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  } as unknown as typeof ResizeObserver;
+  ensureResizeObserver();
   resetWorkspaces();
+  resetWorkspaceUi();
   resetWorkspaceSurfaces();
   resetWallHandles();
   resetChromeKeyboardLeases();
@@ -245,12 +232,12 @@ describe('WorkspaceStrip', () => {
     await act(async () => { window.dispatchEvent(pointer('pointerup', { clientX: 90, clientY: 12 })); });
   });
 
-  it('answers the keyboard intents that come from inside a Wall', async () => {
+  it('renders the rename editor and close flow the command-mode keys open', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     await act(async () => { createWorkspace({ id: 'ws-2' }); });
     await render();
 
-    await act(async () => { requestWorkspaceStripIntent({ kind: 'rename', workspaceId: first }); });
+    await act(async () => { requestWorkspaceRename(first); });
     expect(container.querySelector(`[data-workspace-rename-for="${first}"]`)).not.toBeNull();
     await act(async () => {
       container.querySelector<HTMLInputElement>(`[data-workspace-rename-for="${first}"]`)!
@@ -259,7 +246,7 @@ describe('WorkspaceStrip', () => {
 
     const closed = vi.fn(async () => null);
     stubHandle('ws-2', { closeAll: closed });
-    await act(async () => { requestWorkspaceStripIntent({ kind: 'close', workspaceId: 'ws-2' }); });
+    await act(async () => { requestWorkspaceClose('ws-2'); });
     expect(closed).toHaveBeenCalled();
   });
 });

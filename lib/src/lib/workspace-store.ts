@@ -87,6 +87,20 @@ export function setActiveWorkspace(id: WorkspaceId): void {
   emit({ ...state, activeId: id });
 }
 
+/** Activate the Workspace `delta` places from the active one, wrapping at both ends. */
+export function activateAdjacentWorkspace(delta: 1 | -1): void {
+  const index = state.workspaces.findIndex((ws) => ws.id === state.activeId);
+  if (index === -1) return;
+  const { workspaces } = state;
+  setActiveWorkspace(workspaces[(index + delta + workspaces.length) % workspaces.length].id);
+}
+
+/** Activate the nth Workspace in strip order (0-based); out of range does nothing. */
+export function activateWorkspaceAt(index: number): void {
+  const target = state.workspaces[index];
+  if (target) setActiveWorkspace(target.id);
+}
+
 export function createWorkspace(opts?: { id?: WorkspaceId; name?: string; activate?: boolean }): WorkspaceMeta {
   let id = opts?.id ?? generateWorkspaceId();
   while (state.workspaces.some((workspace) => workspace.id === id)) {
@@ -145,10 +159,16 @@ export function moveWorkspace(id: WorkspaceId, toIndex: number): boolean {
 /** The only Window this build addresses; `window:<n>` beyond it is an error. */
 export const WINDOW_REF = 'window:1';
 
-/** A Workspace's positional `dor` ref, or null when it is not in this Window. */
-export function workspaceRefFor(id: WorkspaceId): string | null {
+/** Whether `ref` names this Window — `window:1`, or the bare `1`. */
+export function isWindowRef(ref: string): boolean {
+  return ref.trim() === WINDOW_REF || ref.trim() === '1';
+}
+
+/** A Workspace's positional `dor` ref. One no longer in this Window — its Wall is
+ *  mid-unmount — reports the first ref, which is what a lone Workspace answers. */
+export function workspaceRefFor(id: WorkspaceId): string {
   const index = state.workspaces.findIndex((ws) => ws.id === id);
-  return index === -1 ? null : `workspace:${index + 1}`;
+  return `workspace:${index === -1 ? 1 : index + 1}`;
 }
 
 /** Resolve `workspace:<n>` or a bare `<n>` (1-based) to a Workspace id. */

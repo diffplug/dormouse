@@ -53,14 +53,6 @@ export function subscribeToWorkspaceSurfaces(listener: () => void): () => void {
   };
 }
 
-/** The Workspace a Surface belongs to, or null when no Wall claims it. */
-export function workspaceIdForSurface(surfaceId: string): WorkspaceId | null {
-  for (const [workspaceId, ids] of membership) {
-    if (ids.includes(surfaceId)) return workspaceId;
-  }
-  return null;
-}
-
 /** Forget every Workspace's membership (tests). */
 export function resetWorkspaceSurfaces(): void {
   if (membership.size === 0) return;

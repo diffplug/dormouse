@@ -1,3 +1,10 @@
+import {
+  activateAdjacentWorkspace,
+  activateWorkspaceAt,
+  createWorkspace,
+  getActiveWorkspaceId,
+} from '../../../lib/workspace-store';
+import { requestWorkspaceClose, requestWorkspaceRename } from '../workspace-lifecycle';
 import type { WallKeyboardCtx } from './types';
 
 /**
@@ -6,12 +13,11 @@ import type { WallKeyboardCtx } from './types';
  * `docs/specs/shortcuts.md`; the behavior is `docs/specs/layout.md` →
  * "Workspaces".
  *
- * Every key is inert without `ctx.workspaces`, which is what keeps a bare Wall —
- * VS Code, the website playground — unbound.
+ * Every key is inert on a Wall with no `workspaceId`, which is what keeps a bare
+ * Wall — VS Code, the website playground — unbound.
  */
 export function handleWorkspaceShortcuts(e: KeyboardEvent, ctx: WallKeyboardCtx): boolean {
-  const workspaces = ctx.workspaces;
-  if (!workspaces) return false;
+  if (ctx.workspaceId === undefined) return false;
   // Bare keys only: a modified `c` is a clipboard or host chord, never create.
   if (e.metaKey || e.ctrlKey || e.altKey) return false;
 
@@ -22,11 +28,13 @@ export function handleWorkspaceShortcuts(e: KeyboardEvent, ctx: WallKeyboardCtx)
     return true;
   };
 
-  if (e.key === 'c') return run(() => workspaces.create());
-  if (e.key === 'n') return run(() => workspaces.cycle(1));
-  if (e.key === 'p') return run(() => workspaces.cycle(-1));
-  if (e.key === '&') return run(() => workspaces.requestClose());
-  if (e.key === '$') return run(() => workspaces.requestRename());
-  if (e.key >= '1' && e.key <= '9') return run(() => workspaces.selectIndex(Number(e.key) - 1));
+  // Targets resolve through the ACTIVE Workspace, never the Wall that heard the
+  // key, so a stale keystroke from a hidden one could not act on the wrong one.
+  if (e.key === 'c') return run(() => { createWorkspace(); });
+  if (e.key === 'n') return run(() => activateAdjacentWorkspace(1));
+  if (e.key === 'p') return run(() => activateAdjacentWorkspace(-1));
+  if (e.key === '&') return run(() => requestWorkspaceClose(getActiveWorkspaceId()));
+  if (e.key === '$') return run(() => requestWorkspaceRename(getActiveWorkspaceId()));
+  if (e.key >= '1' && e.key <= '9') return run(() => activateWorkspaceAt(Number(e.key) - 1));
   return false;
 }

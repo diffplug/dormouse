@@ -1,4 +1,4 @@
-import { getActiveWorkspaceId, WINDOW_REF, workspaceIdForRef } from '../../lib/workspace-store';
+import { getActiveWorkspaceId, isWindowRef, workspaceIdForRef } from '../../lib/workspace-store';
 import { getWallHandle, wallHandleOwning, type WallHandle } from './wall-handles';
 import type { DorControlRequest } from './use-dor-control';
 
@@ -22,13 +22,14 @@ export type DorControlRoute =
  */
 export function resolveDorControlRoute(detail: DorControlRequest): DorControlRoute {
   const params = detail.params ?? {};
-  if (params.window !== undefined && params.window !== WINDOW_REF && params.window !== '1') {
+  if (params.window !== undefined && !isWindowRef(params.window)) {
     return { kind: 'error', message: `unknown window target '${params.window}'` };
   }
   if (params.workspace !== undefined) {
+    // A ref outside the strip and one whose Wall is not mounted are the same
+    // answer: this Window has no such Workspace to route to.
     const workspaceId = workspaceIdForRef(params.workspace);
-    if (!workspaceId) return { kind: 'error', message: `unknown workspace target '${params.workspace}'` };
-    const handle = getWallHandle(workspaceId);
+    const handle = workspaceId ? getWallHandle(workspaceId) : null;
     return handle ? { kind: 'handle', handle } : { kind: 'error', message: `unknown workspace target '${params.workspace}'` };
   }
   // The caller's own Workspace: `dor split` from a background Workspace lands

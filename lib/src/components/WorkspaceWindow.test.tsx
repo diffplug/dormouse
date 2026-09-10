@@ -6,7 +6,7 @@
  * "Workspaces").
  */
 import { StrictMode, act } from 'react';
-import { createRoot, type Root } from 'react-dom/client';
+import { type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WorkspaceWindow } from './WorkspaceWindow';
 import { setPlatform } from '../lib/platform';
@@ -15,8 +15,10 @@ import { clearAllNotepads, addPlainNote } from '../lib/notepad/notepad-store';
 import { __resetArchiveServiceForTests } from '../lib/notepad/archive-service';
 import { getActivitySnapshot, setTerminalActivity } from '../lib/terminal-registry';
 import { getWallHandle, listWallHandles, resetWallHandles } from './wall/wall-handles';
+import { mountWallHarness, type WallHarness } from './wall/wall-test-utils';
 import { getWorkspaceSurfacesSnapshot, resetWorkspaceSurfaces } from '../lib/workspace-surfaces';
 import { resetWindowSessionAggregator } from '../lib/window-session-aggregator';
+import { resetWorkspaceUi } from '../lib/workspace-ui-store';
 import {
   closeWorkspace,
   createWorkspace,
@@ -34,6 +36,7 @@ vi.mock('./TerminalPane', () => ({
   ),
 }));
 
+let harness: WallHarness;
 let container: HTMLDivElement;
 let root: Root;
 let fake: FakePtyAdapter;
@@ -44,45 +47,23 @@ beforeEach(() => {
   resetWallHandles();
   resetWorkspaces();
   resetWorkspaceSurfaces();
+  resetWorkspaceUi();
   resetWindowSessionAggregator();
   fake = new FakePtyAdapter();
   setPlatform(fake);
-  globalThis.ResizeObserver ??= class {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  } as unknown as typeof ResizeObserver;
-  globalThis.matchMedia = ((query: string) => ({
-    matches: query.includes('prefers-reduced-motion'),
-    media: query,
-    onchange: null,
-    addEventListener() {},
-    removeEventListener() {},
-    addListener() {},
-    removeListener() {},
-    dispatchEvent() { return false; },
-  })) as unknown as typeof matchMedia;
-  Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
-    configurable: true,
-    value: vi.fn(() => null),
-  });
-  container = document.createElement('div');
-  document.body.appendChild(container);
-  root = createRoot(container);
+  harness = mountWallHarness();
+  ({ container, root } = harness);
 });
 
 afterEach(() => {
-  act(() => root.unmount());
-  container.remove();
+  harness.dispose();
   vi.clearAllMocks();
   vi.restoreAllMocks();
   __resetArchiveServiceForTests();
   clearAllNotepads();
 });
 
-async function flush(): Promise<void> {
-  await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
-}
+const flush = (): Promise<void> => harness.flush();
 
 function walls(): HTMLElement[] {
   return [...container.querySelectorAll<HTMLElement>('[data-workspace-wall]')];

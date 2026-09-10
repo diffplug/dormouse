@@ -1,18 +1,10 @@
-import { useEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from 'react';
+import { useEffect, useRef, useSyncExternalStore, type ReactNode } from 'react';
 import { clsx } from 'clsx';
 import { Wall } from './Wall';
 import { listWallHandles } from './wall/wall-handles';
 import { getPlatform } from '../lib/platform';
-import {
-  createWorkspace,
-  getActiveWorkspaceId,
-  getWorkspacesSnapshot,
-  setActiveWorkspace,
-  subscribeToWorkspaces,
-} from '../lib/workspace-store';
-import { requestWorkspaceStripIntent } from '../lib/workspace-strip-intent';
-import type { WorkspaceCommands } from './wall/wall-types';
-import type { PersistedDoor, PersistedSurfaceRefs } from '../lib/session-types';
+import { getWorkspacesSnapshot, subscribeToWorkspaces } from '../lib/workspace-store';
+import type { WallBootProps } from './wall/wall-types';
 
 /**
  * One Window's Workspaces: a mounted `<Wall>` each, all in the same grid cell so
@@ -21,20 +13,11 @@ import type { PersistedDoor, PersistedSurfaceRefs } from '../lib/session-types';
  * nothing re-seeds, re-parents, or unmounts.
  */
 export function WorkspaceWindow({
-  initialPaneIds,
-  restoredLathLayout,
-  initialDoors,
-  initialSurfaceRefs,
-  initialSurfaceRefsNext,
   baseboardNotice,
   dialogHost,
   enableBurrow,
-}: {
-  initialPaneIds?: string[];
-  restoredLathLayout?: unknown;
-  initialDoors?: PersistedDoor[];
-  initialSurfaceRefs?: PersistedSurfaceRefs;
-  initialSurfaceRefsNext?: number;
+  ...boot
+}: WallBootProps & {
   baseboardNotice?: ReactNode;
   dialogHost?: ReactNode;
   enableBurrow?: boolean;
@@ -44,22 +27,6 @@ export function WorkspaceWindow({
   // Every Workspace created later gets no boot props, so its Wall takes Lath's
   // fresh branch and spawns exactly one default-shell pane.
   const bootWorkspaceIdRef = useRef(activeId);
-
-  const commands = useMemo<WorkspaceCommands>(() => ({
-    create: () => { createWorkspace(); },
-    cycle: (delta) => {
-      const { workspaces: list, activeId: current } = getWorkspacesSnapshot();
-      const index = list.findIndex((workspace) => workspace.id === current);
-      if (index === -1) return;
-      setActiveWorkspace(list[(index + delta + list.length) % list.length].id);
-    },
-    selectIndex: (index) => {
-      const target = getWorkspacesSnapshot().workspaces[index];
-      if (target) setActiveWorkspace(target.id);
-    },
-    requestClose: () => requestWorkspaceStripIntent({ kind: 'close', workspaceId: getActiveWorkspaceId() }),
-    requestRename: () => requestWorkspaceStripIntent({ kind: 'rename', workspaceId: getActiveWorkspaceId() }),
-  }), []);
 
   // The Window, not each Wall, answers the host's flush request: the adapter
   // completes on the FIRST notification, so a per-Wall answer would let a quit
@@ -76,8 +43,11 @@ export function WorkspaceWindow({
 
   return (
     // One grid cell holds every Wall, so each keeps the same box whether or not
-    // it is the visible one.
-    <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-1 overflow-hidden">
+    // it is the visible one. The strip anchors its close confirmation here.
+    <div
+      data-workspace-content
+      className="grid min-h-0 flex-1 grid-cols-1 grid-rows-1 overflow-hidden"
+    >
       {workspaces.map((workspace) => {
         const isActive = workspace.id === activeId;
         const isBoot = workspace.id === bootWorkspaceIdRef.current;
@@ -96,14 +66,9 @@ export function WorkspaceWindow({
             )}
           >
             <Wall
+              {...(isBoot ? boot : {})}
               workspaceId={workspace.id}
               active={isActive}
-              workspaceCommands={commands}
-              initialPaneIds={isBoot ? initialPaneIds : undefined}
-              restoredLathLayout={isBoot ? restoredLathLayout : undefined}
-              initialDoors={isBoot ? initialDoors : undefined}
-              initialSurfaceRefs={isBoot ? initialSurfaceRefs : undefined}
-              initialSurfaceRefsNext={isBoot ? initialSurfaceRefsNext : undefined}
               baseboardNotice={isActive ? baseboardNotice : undefined}
               dialogHost={isActive ? dialogHost : undefined}
               enableBurrow={enableBurrow}

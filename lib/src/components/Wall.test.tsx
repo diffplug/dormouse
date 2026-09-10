@@ -7,7 +7,7 @@
  * geometry — the acceptance matrix in tiling-engine.md is the live gate.
  */
 import { act } from 'react';
-import { createRoot, type Root } from 'react-dom/client';
+import { type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SURFACE_CONTROL_METHODS } from 'dor/protocol';
 import { sessionForKey } from 'dor-lib-common/agent-browser';
@@ -24,6 +24,7 @@ import { addPlainNote, beginClosing, clearAllNotepads, getNotes } from '../lib/n
 import type { NotepadArchiveV1 } from '../lib/notepad/types';
 import { createTerminalPaneState, type TerminalPaneState } from '../lib/terminal-state';
 import { getWallHandle, listWallHandles } from './wall/wall-handles';
+import { mountWallHarness, type WallHarness } from './wall/wall-test-utils';
 import { DEFAULT_WORKSPACE_ID } from '../lib/session-types';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -40,6 +41,7 @@ vi.mock('./TerminalPane', () => ({
   ),
 }));
 
+let harness: WallHarness;
 let container: HTMLDivElement;
 let root: Root;
 let fake: FakePtyAdapter;
@@ -53,46 +55,19 @@ beforeEach(() => {
   clearAllNotepads();
   fake = new FakePtyAdapter();
   setPlatform(fake);
-  // jsdom lacks these; Baseboard / dynamic-palette / reduced-motion need them.
-  globalThis.ResizeObserver ??= class {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  } as unknown as typeof ResizeObserver;
-  // Reduced motion so the Lath engine runs a 0 duration: the two-phase kill's
-  // deferred removal fires on a setTimeout(0) and completes within `flush()` — the
-  // instant path is also stage 3's "reduced motion" acceptance requirement.
-  globalThis.matchMedia = ((query: string) => ({
-    matches: query.includes('prefers-reduced-motion'),
-    media: query,
-    onchange: null,
-    addEventListener() {},
-    removeEventListener() {},
-    addListener() {},
-    removeListener() {},
-    dispatchEvent() { return false; },
-  })) as unknown as typeof matchMedia;
-  Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
-    configurable: true,
-    value: vi.fn(() => null),
-  });
-  container = document.createElement('div');
-  document.body.appendChild(container);
-  root = createRoot(container);
+  harness = mountWallHarness();
+  ({ container, root } = harness);
 });
 
 afterEach(() => {
-  act(() => root.unmount());
-  container.remove();
+  harness.dispose();
   vi.clearAllMocks();
   vi.restoreAllMocks();
   __resetArchiveServiceForTests();
   clearAllNotepads();
 });
 
-async function flush(): Promise<void> {
-  await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
-}
+const flush = (): Promise<void> => harness.flush();
 
 async function flushFrame(): Promise<void> {
   await act(async () => { await new Promise((r) => requestAnimationFrame(() => r(undefined))); });

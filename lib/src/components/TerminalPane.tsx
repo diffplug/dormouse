@@ -37,17 +37,13 @@ const REFIT_THROTTLE_MS = 150;
 export function TerminalPane({ id, isFocused = true }: TerminalPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const workspaceActive = useContext(WorkspaceActiveContext);
-  // Read through a ref so the mount effect keeps its `[id]` deps: a Workspace
-  // activation must not remount the terminal, only claim its GL context.
-  const workspaceActiveRef = useRef(workspaceActive);
-  workspaceActiveRef.current = workspaceActive;
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
     getOrCreateTerminal(id);
-    mountElement(id, container, { claimWebgl: workspaceActiveRef.current });
+    mountElement(id, container);
 
     // Throttled (see REFIT_THROTTLE_MS) so animated/dragged geometry doesn't
     // reflow the buffer on every frame.
@@ -64,8 +60,9 @@ export function TerminalPane({ id, isFocused = true }: TerminalPaneProps) {
     };
   }, [id]);
 
-  // A Workspace's first activation claims the GL context its hidden mount
-  // deferred (docs/specs/layout.md → "Workspaces"); already-claimed is a no-op.
+  // The only GL claim site: a visible Workspace claims on mount, a hidden one on
+  // its first activation (docs/specs/layout.md → "Workspaces"). Kept out of the
+  // mount effect so an activation never remounts the terminal.
   useEffect(() => {
     if (workspaceActive) claimWebglRenderer(id);
   }, [id, workspaceActive]);

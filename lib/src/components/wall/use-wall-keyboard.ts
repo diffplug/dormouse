@@ -7,7 +7,7 @@ import { handlePaneShortcuts } from './keyboard/handle-pane-shortcuts';
 import { handlePaneNavigation } from './keyboard/handle-pane-navigation';
 import { handleWorkspaceShortcuts } from './keyboard/handle-workspace-shortcuts';
 import { isProxyOrigin } from '../../lib/iframe-proxy-registry';
-import { chromeKeyboardHeld } from '../../lib/chrome-keyboard-lease';
+import { chromeKeyboardHeld } from './chrome-keyboard-lease';
 import type { NavHistoryRef, WallKeyboardCtx } from './keyboard/types';
 
 export function useWallKeyboard(ctx: WallKeyboardCtx): void {

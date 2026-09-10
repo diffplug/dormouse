@@ -158,7 +158,8 @@ describe('workspace-store', () => {
     createWorkspace({ id: 'ws-2' });
     expect(workspaceRefFor(DEFAULT_WORKSPACE_ID)).toBe('workspace:1');
     expect(workspaceRefFor('ws-2')).toBe('workspace:2');
-    expect(workspaceRefFor('missing')).toBeNull();
+    // A Workspace already gone (its Wall is mid-unmount) answers the first ref.
+    expect(workspaceRefFor('missing')).toBe('workspace:1');
     expect(workspaceIdForRef('workspace:2')).toBe('ws-2');
     expect(workspaceIdForRef('2')).toBe('ws-2');
     expect(workspaceIdForRef('workspace:9')).toBeNull();

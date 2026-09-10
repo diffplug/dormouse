@@ -3,25 +3,18 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { installDorControlRouter, resolveDorControlRoute } from './dor-control-router';
-import { registerWallHandle, resetWallHandles, type WallHandle } from './wall-handles';
+import { registerWallHandle, resetWallHandles, stubWallHandle, type WallHandle } from './wall-handles';
 import type { DorControlRequest } from './use-dor-control';
 import { createWorkspace, getWorkspacesSnapshot, resetWorkspaces, setActiveWorkspace } from '../../lib/workspace-store';
 
 const disposers: Array<() => void> = [];
 
 function handleFor(workspaceId: string, ownedSurfaceIds: string[] = []): WallHandle & { handleDorControl: ReturnType<typeof vi.fn> } {
-  const handle = {
-    workspaceId,
+  const handle = stubWallHandle(workspaceId, {
     surfaceIds: () => [...ownedSurfaceIds],
     ownsSurface: (id: string) => ownedSurfaceIds.includes(id),
-    hasTouchedSurfaces: () => false,
-    runningCount: () => 0,
-    serialize: async () => ({ version: 3 as const, panes: [], doors: [] }),
-    flushPersistence: async () => {},
-    focusSelected: () => {},
-    closeAll: async () => null,
     handleDorControl: vi.fn(),
-  };
+  }) as WallHandle & { handleDorControl: ReturnType<typeof vi.fn> };
   disposers.push(registerWallHandle(handle));
   return handle;
 }

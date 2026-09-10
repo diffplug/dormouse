@@ -573,20 +573,19 @@ export function restoreTerminal(
   return entry;
 }
 
-export function mountElement(id: string, container: HTMLElement, opts?: { claimWebgl?: boolean }): void {
+export function mountElement(id: string, container: HTMLElement): void {
   const entry = registry.get(id);
   if (!entry) return;
   container.appendChild(entry.element);
-  // A Session mounted inside a hidden Workspace defers its claim to the
-  // Workspace's first activation, so the GL context budget scales with visited
-  // Workspaces rather than with every mounted one.
-  if (opts?.claimWebgl !== false) claimWebglRenderer(id);
   requestAnimationFrame(() => entry.fit.fit());
 }
 
 /** Claim a GL context for a mounted Session, once. First paint is the earliest
  *  point worth claiming one — see `tryEnableWebglRenderer` on why create is too
- *  early — so a deferred claim runs when the Session first becomes visible. */
+ *  early — so a Session mounted inside a hidden Workspace claims on that
+ *  Workspace's first activation, and the budget scales with visited Workspaces
+ *  rather than with every mounted one. Idempotent: the mount path and the
+ *  activation path both call it. */
 export function claimWebglRenderer(id: string): void {
   const entry = registry.get(id);
   if (!entry || entry.webglAttempted) return;

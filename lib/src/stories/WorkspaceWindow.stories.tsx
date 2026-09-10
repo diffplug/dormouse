@@ -1,9 +1,7 @@
-import { useEffect, useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { WorkspaceStrip } from '../components/WorkspaceStrip';
 import { WorkspaceWindow } from '../components/WorkspaceWindow';
 import { flattenScenario, SCENARIO_LS_OUTPUT } from '../lib/platform';
-import { resetWorkspaces, setWorkspaces } from '../lib/workspace-store';
 import { requireElement, settleTerminals, waitForCondition } from './settle-terminals';
 
 const WORKSPACES = [
@@ -12,16 +10,9 @@ const WORKSPACES = [
 ];
 
 /** The Window as the standalone host composes it: the strip in the bar, one
- *  mounted Wall per Workspace below it. */
+ *  mounted Wall per Workspace below it. The Workspace model comes from
+ *  `parameters.primedWorkspaces`, written before first render. */
 function WorkspaceWindowStory() {
-  const [ready, setReady] = useState(false);
-  useEffect(() => {
-    setWorkspaces({ workspaces: WORKSPACES, activeId: WORKSPACES[0].id });
-    setReady(true);
-    return () => resetWorkspaces();
-  }, []);
-
-  if (!ready) return null;
   return (
     <div className="flex h-[520px] flex-col">
       <div className="bg-header-active-bg text-header-active-fg flex h-[30px] shrink-0 items-center">
@@ -35,7 +26,10 @@ function WorkspaceWindowStory() {
 const meta: Meta<typeof WorkspaceWindowStory> = {
   title: 'App/WorkspaceWindow',
   component: WorkspaceWindowStory,
-  parameters: { fakePty: { scenario: flattenScenario(SCENARIO_LS_OUTPUT) } },
+  parameters: {
+    fakePty: { scenario: flattenScenario(SCENARIO_LS_OUTPUT) },
+    primedWorkspaces: { workspaces: WORKSPACES, activeId: WORKSPACES[0].id },
+  },
 };
 
 export default meta;

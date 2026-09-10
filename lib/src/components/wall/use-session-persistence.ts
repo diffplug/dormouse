@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, type RefObject } from 'react';
 import { pasteFilePaths } from '../../lib/clipboard';
 import { getPlatform } from '../../lib/platform';
-import { buildPersistedSession, saveSession, type SaveSink } from '../../lib/session-save';
+import { saveSession, type SaveSink } from '../../lib/session-save';
 import { createSessionDirtyTracker } from '../../lib/session-dirty';
 import { publishWorkspaceSession } from '../../lib/window-session-aggregator';
 import {
@@ -15,8 +15,6 @@ import type { DooredItem, WallSelectionKind } from './wall-types';
 import type { PersistedDoor, PersistedSession, PersistedSurfaceRefs, WorkspaceId } from '../../lib/session-types';
 
 export interface SessionPersistenceHandle {
-  /** This Workspace's record right now, built but not written. */
-  buildSession: () => Promise<PersistedSession>;
   /** Persist immediately, awaiting the whole queued pipeline. */
   flush: () => Promise<void>;
 }
@@ -29,7 +27,6 @@ export function useSessionPersistence({
   selectedTypeRef,
   surfaceRefsForSave,
   workspaceId,
-  ownsHostFlush = true,
 }: {
   /** The Lath engine — the layout authority written on every commit, and the source
    *  of the visible-pane projection (`lath.listPanes()`). Stable identity, so the
@@ -46,14 +43,13 @@ export function useSessionPersistence({
   surfaceRefsForSave?: () => { refs: PersistedSurfaceRefs; next: number };
   /** Present when this Wall belongs to a Workspace: its record then goes to the
    *  Window collector instead of the platform slot, and is compared against its
-   *  own Workspace's previous record. */
+   *  own Workspace's previous record. It also hands the host's flush request to
+   *  `WorkspaceWindow`, which owns the one subscription for the whole Window —
+   *  the adapter's first `notifySessionFlushComplete` wins, so N Walls answering
+   *  would let a quit proceed after the first had written. */
   workspaceId?: WorkspaceId;
-  /** Whether this Wall answers the host's flush request itself. `WorkspaceWindow`
-   *  sets this false and owns the one subscription for the whole Window — the
-   *  adapter's first `notifySessionFlushComplete` wins, so N Walls answering
-   *  would let a quit proceed after the first. */
-  ownsHostFlush?: boolean;
 }): SessionPersistenceHandle {
+  const ownsHostFlush = workspaceId === undefined;
   const sessionSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sessionSavePromiseRef = useRef<Promise<void> | null>(null);
   const pendingSaveNeededRef = useRef(false);
@@ -105,19 +101,6 @@ export function useSessionPersistence({
     const { panes, doors, lathLayout, surfaceRefs } = collect();
     return saveSession(getPlatform(), panes, doors, lathLayout, surfaceRefs?.refs, surfaceRefs?.next, sink);
   }, [collect, sink]);
-
-  const buildSession = useCallback((): Promise<PersistedSession> => {
-    const { panes, doors, lathLayout, surfaceRefs } = collect();
-    return buildPersistedSession(
-      getPlatform(),
-      panes,
-      doors,
-      lathLayout,
-      surfaceRefs?.refs,
-      surfaceRefs?.next,
-      publishedRef.current,
-    );
-  }, [collect]);
 
   const persistSessionNow = useCallback(async (): Promise<void> => {
     const runSave = (): Promise<void> => {
@@ -182,9 +165,15 @@ export function useSessionPersistence({
     const platform = getPlatform();
     const { markDirty, isDirty } = trackerRef.current;
 
+    // Both PTY triggers are ownership-filtered: the adapter fans every Session's
+    // traffic to every mounted Wall, so an unfiltered one would have each
+    // Workspace persisting on every other Workspace's keystroke.
+    const ownsPane = (id: string) => lath.listPanes().some((p) => p.id === id);
+    const handlePtyData = (detail: { id: string }) => {
+      if (ownsPane(detail.id)) markDirty();
+    };
     const handlePtyExit = (detail: { id: string }) => {
-      const ownsPane = lath.listPanes().some((p) => p.id === detail.id);
-      if (!ownsPane) return;
+      if (!ownsPane(detail.id)) return;
       void flushSessionSave().catch(() => undefined);
     };
     const handleSessionFlushRequest = (detail: { requestId: string }) => {
@@ -206,7 +195,7 @@ export function useSessionPersistence({
     // (docs/specs/layout.md → "Session persistence"). Untouched flips ride
     // the pty echo of the keystroke, not the pane-state store (the registry mutates
     // silently).
-    platform.onPtyData(markDirty);
+    platform.onPtyData(handlePtyData);
     const unsubActivity = subscribeToActivity(markDirty);
     const unsubPaneState = subscribeToTerminalPaneState(markDirty);
 
@@ -236,7 +225,7 @@ export function useSessionPersistence({
       unsubFilesDropped?.();
       if (ownsHostFlush) platform.offRequestSessionFlush(handleSessionFlushRequest);
       platform.offPtyExit(handlePtyExit);
-      platform.offPtyData(markDirty);
+      platform.offPtyData(handlePtyData);
       unsubActivity();
       unsubPaneState();
       unsubscribeStore();
@@ -253,5 +242,5 @@ export function useSessionPersistence({
     selectedTypeRef,
   ]);
 
-  return { buildSession, flush: flushSessionSave };
+  return { flush: flushSessionSave };
 }

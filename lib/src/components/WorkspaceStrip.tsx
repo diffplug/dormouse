@@ -1,4 +1,5 @@
 import {
+  memo,
   useCallback,
   useEffect,
   useMemo,
@@ -11,19 +12,24 @@ import { clsx } from 'clsx';
 import { PlusIcon, XIcon } from '@phosphor-icons/react';
 import { AlertBell } from './AlertBell';
 import { InlineEditInput } from './wall/InlineEditInput';
-import { KillConfirmModal, randomKillChar } from './KillConfirm';
+import { KillConfirmModal } from './KillConfirm';
 import { useTodoPillContent } from './TodoPillBody';
 import { chromeButton, TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from './design';
 import { createWorkspaceStripDrag } from './workspace-strip-drag';
-import { getWallHandle } from './wall/wall-handles';
-import { acquireChromeKeyboardLease } from '../lib/chrome-keyboard-lease';
-import { forgetWorkspaceSession } from '../lib/window-session-aggregator';
+import { acquireChromeKeyboardLease } from './wall/chrome-keyboard-lease';
+import { acceptsKillChar } from './wall/keyboard/handle-kill-confirm';
+import { useDialogKeyboardOwner } from './wall/wall-context';
+import { closeWorkspaceWithSurfaces, requestWorkspaceClose, requestWorkspaceRename } from './wall/workspace-lifecycle';
 import { getActivitySnapshot, subscribeToActivity } from '../lib/terminal-registry';
-import { clearWorkspaceSurfaces, getWorkspaceSurfacesSnapshot, subscribeToWorkspaceSurfaces } from '../lib/workspace-surfaces';
+import { getWorkspaceSurfacesSnapshot, subscribeToWorkspaceSurfaces } from '../lib/workspace-surfaces';
 import { computeWorkspaceUnion, EMPTY_WORKSPACE_UNION, type WorkspaceUnion } from '../lib/workspace-union';
-import { subscribeToWorkspaceStripIntent } from '../lib/workspace-strip-intent';
 import {
-  closeWorkspace,
+  getWorkspaceUiSnapshot,
+  setPendingWorkspaceClose,
+  setRenamingWorkspace,
+  subscribeToWorkspaceUi,
+} from '../lib/workspace-ui-store';
+import {
   createWorkspace,
   getWorkspacesSnapshot,
   moveWorkspace,
@@ -35,8 +41,11 @@ import type { WorkspaceId } from '../lib/session-types';
 
 /**
  * The Window's Workspace tabs. Store-driven end to end (Workspaces, membership,
- * Activity), so it renders in the AppBar — outside every Wall's React tree
+ * Activity, and the strip's own UI state), so it renders in the AppBar — outside
+ * every Wall's React tree — and shows the same rename editor and confirmation
+ * whether the gesture came from a tab or from a command-mode key
  * (`docs/specs/layout.md` → "Workspaces"; `docs/specs/standalone.md` → AppBar).
+ * The close verb itself lives in `wall/workspace-lifecycle.ts`; this renders it.
  */
 export function WorkspaceStrip({
   className,
@@ -52,62 +61,40 @@ export function WorkspaceStrip({
   const { workspaces, activeId } = useSyncExternalStore(subscribeToWorkspaces, getWorkspacesSnapshot);
   const membership = useSyncExternalStore(subscribeToWorkspaceSurfaces, getWorkspaceSurfacesSnapshot);
   const activity = useSyncExternalStore(subscribeToActivity, getActivitySnapshot);
-  const [renamingId, setRenamingId] = useState<WorkspaceId | null>(null);
+  const { renamingId, pendingClose } = useSyncExternalStore(subscribeToWorkspaceUi, getWorkspaceUiSnapshot);
   const [draggingId, setDraggingId] = useState<WorkspaceId | null>(null);
-  const [confirmClose, setConfirmClose] = useState<{ id: WorkspaceId; char: string } | null>(null);
 
   const stripRef = useRef<HTMLDivElement>(null);
   const tabElementsRef = useRef(new Map<WorkspaceId, HTMLElement>());
 
-  const unions = useMemo(() => {
-    const byId = new Map<WorkspaceId, WorkspaceUnion>();
-    for (const workspace of workspaces) {
-      const ids = membership.get(workspace.id);
-      byId.set(workspace.id, ids ? computeWorkspaceUnion(ids, activity) : EMPTY_WORKSPACE_UNION);
-    }
-    return byId;
-  }, [workspaces, membership, activity]);
-
   // The editor and the confirmation both sit outside every Wall, so a
   // capture-phase command-mode shortcut would still fire behind them.
-  const keyboardHeld = renamingId !== null || confirmClose !== null;
-  useEffect(() => (keyboardHeld ? acquireChromeKeyboardLease() : undefined), [keyboardHeld]);
+  useDialogKeyboardOwner(renamingId !== null || pendingClose !== null, acquireChromeKeyboardLease);
 
   const activate = useCallback((id: WorkspaceId) => {
     setActiveWorkspace(id);
     tabElementsRef.current.get(id)?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
   }, []);
 
-  /**
-   * Close a Workspace: confirm first when it holds work, then close every member
-   * Surface through the closure coordinator, then drop the Workspace itself. A
-   * refusal reveals the Workspace so its prompt is visible.
-   */
-  const closeNow = useCallback(async (id: WorkspaceId) => {
-    const handle = getWallHandle(id);
-    if (handle) {
-      const refusal = await handle.closeAll('prompt');
-      if (refusal) {
-        setActiveWorkspace(id);
-        return;
-      }
-    }
-    clearWorkspaceSurfaces(id);
-    forgetWorkspaceSession(id);
-    closeWorkspace(id);
+  // Stable across renders: the tab's own `data-workspace-tab` says which entry
+  // it is, and the returned cleanup is what React 19 calls on detach.
+  const registerElement = useCallback((element: HTMLElement | null) => {
+    if (!element) return;
+    const id = element.dataset.workspaceTab!;
+    tabElementsRef.current.set(id, element);
+    return () => { tabElementsRef.current.delete(id); };
   }, []);
 
-  const requestClose = useCallback((id: WorkspaceId) => {
-    // The last Workspace never closes — there is always one active
-    // (docs/specs/glossary.md → Workspace lifecycle).
-    if (getWorkspacesSnapshot().workspaces.length <= 1) return;
-    const handle = getWallHandle(id);
-    if (handle && (handle.hasTouchedSurfaces() || handle.runningCount() > 0)) {
-      setConfirmClose({ id, char: randomKillChar() });
-      return;
-    }
-    void closeNow(id);
-  }, [closeNow]);
+  const finishRename = useCallback((id: WorkspaceId, value: string) => {
+    renameWorkspace(id, value);
+    setRenamingWorkspace(null);
+  }, []);
+  const cancelRename = useCallback(() => setRenamingWorkspace(null), []);
+
+  // The PR C hooks are read through a ref refreshed each render, so a host that
+  // supplies them after first paint is not captured stale by the controller.
+  const windowHooksRef = useRef({ onDragOutsideWindow, onDropOnOtherWindow });
+  windowHooksRef.current = { onDragOutsideWindow, onDropOnOtherWindow };
 
   const dragRef = useRef<ReturnType<typeof createWorkspaceStripDrag> | null>(null);
   if (dragRef.current === null) {
@@ -117,76 +104,80 @@ export function WorkspaceStrip({
       stripRect: () => stripRef.current?.getBoundingClientRect() ?? null,
       move: (id, toIndex) => { moveWorkspace(id, toIndex); },
       setDragging: setDraggingId,
-      onDragOutsideWindow,
-      onDropOnOtherWindow,
+      onDragOutsideWindow: (id, point) => windowHooksRef.current.onDragOutsideWindow?.(id, point),
+      onDropOnOtherWindow: (id, point) => windowHooksRef.current.onDropOnOtherWindow?.(id, point) ?? false,
     });
   }
   const drag = dragRef.current;
   useEffect(() => () => drag.dispose(), [drag]);
+  const press = useCallback(
+    (id: WorkspaceId, event: ReactPointerEvent<HTMLElement>) => drag.press(id, event.nativeEvent),
+    [drag],
+  );
 
-  // `&` and `$` in command mode reach the strip's own affordances, which live
-  // out here rather than in the Wall that heard the key.
-  useEffect(() => subscribeToWorkspaceStripIntent((intent) => {
-    if (intent.kind === 'close') requestClose(intent.workspaceId);
-    else setRenamingId(intent.workspaceId);
-  }), [requestClose]);
-
-  // The confirmation is a typed letter, exactly as a pane kill is. The Wall's
-  // own handler is behind the chrome lease this dialog holds, so the strip
-  // listens for its own char.
+  // The confirmation is a typed letter, exactly as a pane kill is, down to the
+  // key rule: a case-insensitive match accepts and any other key dismisses. The
+  // Wall's own handler is behind the chrome lease this dialog holds, so the
+  // strip listens for itself.
   useEffect(() => {
-    if (!confirmClose) return;
-    const { id, char } = confirmClose;
+    if (!pendingClose) return;
+    const { id, char } = pendingClose;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== char) return;
       event.preventDefault();
       event.stopPropagation();
-      setConfirmClose(null);
-      void closeNow(id);
+      setPendingWorkspaceClose(null);
+      if (acceptsKillChar(event.key, char)) void closeWorkspaceWithSurfaces(id);
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [confirmClose, closeNow]);
+  }, [pendingClose]);
 
-  // Anchored to the Workspace's own Wall, not its tab: a 24px tab is too small a
-  // box to center a dialog over, and every Wall shares one grid cell, so the
-  // confirmation lands in the same place whether or not that Workspace is
-  // visible. No Wall (Storybook) leaves it viewport-centered.
-  const confirmTarget = confirmClose
-    ? [...document.querySelectorAll<HTMLElement>('[data-workspace-wall]')]
-      .find((wall) => wall.dataset.workspaceWall === confirmClose.id) ?? null
-    : null;
+  // Anchored to the Window's content area, not the tab: a 24px tab is too small
+  // a box to center a dialog over, and every Wall shares one grid cell, so the
+  // confirmation lands in the same place whichever Workspace it is about. No
+  // Window (Storybook) leaves it viewport-centered.
+  const confirmTarget = useMemo(
+    () => (pendingClose ? document.querySelector<HTMLElement>('[data-workspace-content]') : null),
+    [pendingClose],
+  );
+
+  // One union per tab, computed in the loop it is rendered in. The visible
+  // Workspace never shows indicators, so it skips the projection entirely.
+  const unionsRef = useRef(new Map<WorkspaceId, WorkspaceUnion>());
+  const unionFor = (id: WorkspaceId, active: boolean): WorkspaceUnion => {
+    if (active) return EMPTY_WORKSPACE_UNION;
+    const next = computeWorkspaceUnion(membership.get(id) ?? [], activity);
+    // Hand back the previous object when nothing in it changed, so a memoized
+    // tab re-renders only when its own indicators do.
+    const previous = unionsRef.current.get(id);
+    if (previous && previous.ringing === next.ringing && previous.todo === next.todo
+      && previous.count === next.count && previous.ringSeq === next.ringSeq) return previous;
+    unionsRef.current.set(id, next);
+    return next;
+  };
 
   return (
     <div ref={stripRef} className={clsx('flex min-w-0 items-center gap-0.5 overflow-x-auto', className)}>
       {workspaces.map((workspace) => {
         const isActive = workspace.id === activeId;
-        const union = unions.get(workspace.id) ?? EMPTY_WORKSPACE_UNION;
         return (
           <WorkspaceTab
             key={workspace.id}
             id={workspace.id}
             name={workspace.name}
             active={isActive}
-            union={union}
+            union={unionFor(workspace.id, isActive)}
             renaming={renamingId === workspace.id}
             dragging={draggingId === workspace.id}
             closable={workspaces.length > 1}
-            registerElement={(element) => {
-              if (element) tabElementsRef.current.set(workspace.id, element);
-              else tabElementsRef.current.delete(workspace.id);
-              return undefined;
-            }}
-            onActivate={() => activate(workspace.id)}
-            onStartRename={() => setRenamingId(workspace.id)}
-            onFinishRename={(value) => {
-              renameWorkspace(workspace.id, value);
-              setRenamingId(null);
-            }}
-            onCancelRename={() => setRenamingId(null)}
-            onRequestClose={() => requestClose(workspace.id)}
-            onPress={(event) => drag.press(workspace.id, event.nativeEvent)}
-            wasDragged={() => drag.dragged()}
+            registerElement={registerElement}
+            onActivate={activate}
+            onStartRename={requestWorkspaceRename}
+            onFinishRename={finishRename}
+            onCancelRename={cancelRename}
+            onRequestClose={requestWorkspaceClose}
+            onPress={press}
+            wasDragged={drag.dragged}
           />
         );
       })}
@@ -200,18 +191,20 @@ export function WorkspaceStrip({
       >
         <PlusIcon size={12} weight="bold" aria-hidden="true" />
       </button>
-      {confirmClose && (
+      {pendingClose && (
         <KillConfirmModal
-          char={confirmClose.char}
+          char={pendingClose.char}
           targetElement={confirmTarget}
-          onCancel={() => setConfirmClose(null)}
+          onCancel={() => setPendingWorkspaceClose(null)}
         />
       )}
     </div>
   );
 }
 
-function WorkspaceTab({
+/** Memoized: every callback below is stable and takes the Workspace id, so a tab
+ *  re-renders only when its own name, state, or union changes. */
+const WorkspaceTab = memo(function WorkspaceTab({
   id,
   name,
   active,
@@ -235,13 +228,13 @@ function WorkspaceTab({
   renaming: boolean;
   dragging: boolean;
   closable: boolean;
-  registerElement: (element: HTMLElement | null) => void;
-  onActivate: () => void;
-  onStartRename: () => void;
-  onFinishRename: (value: string) => void;
+  registerElement: (element: HTMLElement | null) => (() => void) | undefined;
+  onActivate: (id: WorkspaceId) => void;
+  onStartRename: (id: WorkspaceId) => void;
+  onFinishRename: (id: WorkspaceId, value: string) => void;
   onCancelRename: () => void;
-  onRequestClose: () => void;
-  onPress: (event: ReactPointerEvent<HTMLElement>) => void;
+  onRequestClose: (id: WorkspaceId) => void;
+  onPress: (id: WorkspaceId, event: ReactPointerEvent<HTMLElement>) => void;
   wasDragged: () => boolean;
 }) {
   const todoPill = useTodoPillContent(union.todo);
@@ -269,12 +262,12 @@ function WorkspaceTab({
       style={dragging ? { opacity: 0.6 } : undefined}
       onPointerDown={(event) => {
         if (event.target instanceof Element && event.target.closest('[data-workspace-tab-close]')) return;
-        onPress(event);
+        onPress(id, event);
       }}
       onAuxClick={(event) => {
         if (event.button !== 1 || !closable) return;
         event.preventDefault();
-        onRequestClose();
+        onRequestClose(id);
       }}
     >
       {renaming ? (
@@ -283,7 +276,7 @@ function WorkspaceTab({
           initialValue={name}
           className="h-full min-w-0 flex-1 bg-transparent px-2 text-xs outline-none"
           blurAction="submit"
-          onSubmit={(value) => onFinishRename(value)}
+          onSubmit={(value) => onFinishRename(id, value)}
           onCancel={onCancelRename}
         />
       ) : (
@@ -293,8 +286,8 @@ function WorkspaceTab({
           aria-label={label}
           title={label}
           aria-current={active ? 'true' : undefined}
-          onClick={() => { if (!wasDragged()) onActivate(); }}
-          onDoubleClick={onStartRename}
+          onClick={() => { if (!wasDragged()) onActivate(id); }}
+          onDoubleClick={() => onStartRename(id)}
         >
           <span className="min-w-0 flex-1 truncate">{name}</span>
           {showIndicators && (
@@ -332,7 +325,7 @@ function WorkspaceTab({
           title={`Close ${name}`}
           onClick={(event) => {
             event.stopPropagation();
-            onRequestClose();
+            onRequestClose(id);
           }}
         >
           <XIcon size={11} weight="bold" aria-hidden="true" />
@@ -340,4 +333,4 @@ function WorkspaceTab({
       )}
     </div>
   );
-}
+});

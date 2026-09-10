@@ -657,20 +657,26 @@ describe('AgentBrowserPanel canvas input forwarding', () => {
   // is), so the FIRST click on the browser surface must still reach the page —
   // it is the click that selects the pane. Mouse-down/up therefore gate on
   // passthrough mode alone, not full `interactive` (mode && selected).
-  async function renderWithMode(mode: 'passthrough' | 'command', selectedId: string | null): Promise<HTMLCanvasElement> {
+  async function renderWithMode(
+    mode: 'passthrough' | 'command',
+    selectedId: string | null,
+    workspaceActive = true,
+  ): Promise<HTMLCanvasElement> {
     const props = paneProps('ab-panel', { surfaceType: 'agent-browser', session: 'browser-session', wsPort: 4321 });
     await act(async () => {
       root.render(
         <StrictMode>
-          <PaneWriteContext.Provider value={paneWriteFor(() => {})}>
-            <WallActionsContext.Provider value={stubActions()}>
-              <ModeContext.Provider value={mode}>
-                <SelectedIdContext.Provider value={selectedId}>
-                  <AgentBrowserPanel {...props} />
-                </SelectedIdContext.Provider>
-              </ModeContext.Provider>
-            </WallActionsContext.Provider>
-          </PaneWriteContext.Provider>
+          <WorkspaceActiveContext.Provider value={workspaceActive}>
+            <PaneWriteContext.Provider value={paneWriteFor(() => {})}>
+              <WallActionsContext.Provider value={stubActions()}>
+                <ModeContext.Provider value={mode}>
+                  <SelectedIdContext.Provider value={selectedId}>
+                    <AgentBrowserPanel {...props} />
+                  </SelectedIdContext.Provider>
+                </ModeContext.Provider>
+              </WallActionsContext.Provider>
+            </PaneWriteContext.Provider>
+          </WorkspaceActiveContext.Provider>
         </StrictMode>,
       );
     });
@@ -704,6 +710,36 @@ describe('AgentBrowserPanel canvas input forwarding', () => {
       canvas.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: 100, clientY: 50, button: 0 }));
     });
     expect(sentMouseEvents()).toHaveLength(0);
+  });
+
+  const sentKeyEvents = () => WebSocketMock.instances
+    .flatMap((ws) => ws.sent)
+    .filter((m) => m.includes('"type":"input_keyboard"'));
+
+  // The window key forwarder is a capture-phase listener that preventDefaults
+  // what it takes, so a Workspace left in passthrough on a browser pane would go
+  // on eating every keystroke while hidden (docs/specs/layout.md → "Workspaces").
+  it('stops forwarding window keys once its Workspace is hidden, and resumes on return', async () => {
+    await renderWithMode('passthrough', 'ab-panel');
+    const press = async () => {
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true, cancelable: true }));
+      });
+    };
+
+    await press();
+    expect(sentKeyEvents().length).toBeGreaterThan(0);
+
+    await renderWithMode('passthrough', 'ab-panel', false);
+    const whileHidden = sentKeyEvents().length;
+    const swallowed = new KeyboardEvent('keydown', { key: 'a', bubbles: true, cancelable: true });
+    await act(async () => { window.dispatchEvent(swallowed); });
+    expect(sentKeyEvents().length).toBe(whileHidden);
+    expect(swallowed.defaultPrevented).toBe(false);
+
+    await renderWithMode('passthrough', 'ab-panel', true);
+    await press();
+    expect(sentKeyEvents().length).toBeGreaterThan(whileHidden);
   });
 });
 

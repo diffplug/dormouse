@@ -1,4 +1,4 @@
-import type { PersistedSession, WorkspaceId } from '../../lib/session-types';
+import type { WorkspaceId } from '../../lib/session-types';
 import type { CloseSurfaceMode } from './wall-types';
 import type { DorControlRequest } from './use-dor-control';
 
@@ -18,10 +18,7 @@ export interface WallHandle {
    *  gate, alongside `runningCount`). */
   hasTouchedSurfaces(): boolean;
   runningCount(): number;
-  serialize(): Promise<PersistedSession>;
   flushPersistence(): Promise<void>;
-  /** Put DOM focus back on this Wall's selected Surface, honoring its own mode. */
-  focusSelected(): void;
   /** Close every member Surface through the closure coordinator. Resolves null
    *  once the Wall is empty, else the first refusal's message with the Workspace
    *  left as it was. */
@@ -64,4 +61,22 @@ export function wallHandleOwning(surfaceId: string): WallHandle | null {
 /** Forget every handle (tests). */
 export function resetWallHandles(): void {
   handles.clear();
+}
+
+/** An inert handle for a Wall that is not mounted (tests and Storybook), so a new
+ *  `WallHandle` member is one edit here rather than one per fixture. Lives beside
+ *  the interface, and not in a test util, because a story needs it too and must
+ *  not pull vitest into the Storybook bundle. */
+export function stubWallHandle(workspaceId: WorkspaceId, overrides: Partial<WallHandle> = {}): WallHandle {
+  return {
+    workspaceId,
+    surfaceIds: () => [],
+    ownsSurface: () => false,
+    hasTouchedSurfaces: () => false,
+    runningCount: () => 0,
+    flushPersistence: async () => {},
+    closeAll: async () => null,
+    handleDorControl: () => {},
+    ...overrides,
+  };
 }
