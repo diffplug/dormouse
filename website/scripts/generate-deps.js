@@ -30,6 +30,12 @@ const productDependencyFilters = [
 // Neither package installs an artifact on a user's disk. Any new workspace
 // requires classification here or a runtime edge from a product root.
 const excludedWorkspacePackages = ["canopy", "dormouse-website"];
+// A native addon publishes one prebuilt package per platform and pnpm installs
+// only the host's, so a walk of real directories can never see the rest —
+// while each of them is exactly what reaches a user on that platform. These
+// scopes mark that family. See docs/specs/security-supply-chain.md ->
+// "Disclosure".
+const platformPackageScopes = ["@node-datachannel/"];
 
 function readJson(path) {
   return JSON.parse(readFileSync(path, "utf-8"));
@@ -110,6 +116,26 @@ const externalPackages = new Map();
 const visitedExternalPackagePaths = new Set();
 const visitedWorkspacePackageNames = new Set();
 
+const platformScopeOf = (packageName) =>
+  platformPackageScopes.find((scope) => packageName.startsWith(scope)) ?? null;
+
+/**
+ * The prebuilt packages that actually ship. The Tauri bundle copies
+ * `standalone/sidecar/node_modules`, and pnpm puts a package there only if that
+ * manifest declares it — so a root's own optional list is the shipped set. The
+ * addon's list also names builds this project never releases (android, musl),
+ * and those reach no bundle.
+ */
+const shippedPlatformPackages = new Set(
+  productDependencyFilters.flatMap((name) =>
+    Object.keys(workspacePackagesByName.get(name).pkg.optionalDependencies ?? {}).filter(
+      platformScopeOf,
+    ),
+  ),
+);
+/** Shipped platform packages this machine cannot install; described from a sibling. */
+const absentPlatformPackages = new Set();
+
 function addExternalPackage(pkg) {
   const key = [
     pkg.name,
@@ -151,6 +177,13 @@ function scanDependency(fromDir, packageName) {
 
   const packageJsonPath = getPackageJsonPath(fromDir, packageName);
   if (!packageJsonPath) {
+    // A prebuilt package for a platform that is not this one: absent by design
+    // rather than under-reported, so it is described from its installed sibling
+    // below. Anything else missing is still a hard error.
+    if (platformScopeOf(packageName)) {
+      if (shippedPlatformPackages.has(packageName)) absentPlatformPackages.add(packageName);
+      return;
+    }
     throw new Error(`Could not resolve package.json for "${packageName}" from ${fromDir}`);
   }
 
@@ -171,6 +204,21 @@ function scanDependencies(pkg, fromDir) {
 
 for (const packageName of productDependencyFilters) {
   scanWorkspacePackage(packageName);
+}
+
+// The family is published in lockstep from one repository, so the host's
+// package describes its siblings exactly — which is also what keeps this
+// disclosure identical on every machine that generates it.
+for (const packageName of absentPlatformPackages) {
+  const scope = platformScopeOf(packageName);
+  const sibling = [...externalPackages.values()].find((pkg) => pkg.name.startsWith(scope));
+  if (!sibling) {
+    throw new Error(`No ${scope}* package is installed, so "${packageName}" cannot be described`);
+  }
+  const key = [packageName, sibling.license ?? "", sibling.author ?? "", sibling.homepage ?? ""].join(
+    "\0",
+  );
+  externalPackages.set(key, { ...sibling, name: packageName, versions: new Set(sibling.versions) });
 }
 
 // Within a single "A OR B OR ..." choice, move MIT to the front so the
@@ -247,6 +295,15 @@ const missingLicense = {
 };
 const missingAuthor = {
   "@hono/node-ws": "Hono middleware contributors",
+  // The addon ships a `contributors` array rather than npm's singular `author`
+  // field, and its prebuilt platform packages carry neither.
+  "@node-datachannel/darwin-arm64": "Murat Doğan, Paul-Louis Ageneau",
+  "@node-datachannel/darwin-x64": "Murat Doğan, Paul-Louis Ageneau",
+  "@node-datachannel/linux-arm64-gnu": "Murat Doğan, Paul-Louis Ageneau",
+  "@node-datachannel/linux-x64-gnu": "Murat Doğan, Paul-Louis Ageneau",
+  "@node-datachannel/win32-arm64-msvc": "Murat Doğan, Paul-Louis Ageneau",
+  "@node-datachannel/win32-x64-msvc": "Murat Doğan, Paul-Louis Ageneau",
+  "node-datachannel": "Murat Doğan, Paul-Louis Ageneau",
   "@tauri-apps/api": "Tauri Apps Contributors",
   "@tauri-apps/plugin-shell": "Tauri Apps Contributors",
   "@tauri-apps/plugin-updater": "Tauri Apps Contributors",
