@@ -79,6 +79,7 @@ const E2E_MODULES = [
   // it is inside the boundary for the same reasons the transport is: one key
   // agreement, one AEAD, and no second construction reachable from either.
   'remote-lib-common/src/security/direct-path.ts',
+  'lib/src/remote/direct/direct-endpoint.ts',
   'lib/src/remote/direct/direct-peer.ts',
   'remote-lib-common/src/remote/wire.ts',
   'lib/src/remote/burrow/burrow-runtime.ts',

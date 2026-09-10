@@ -135,9 +135,13 @@ injected factory** — `PocketClientDeps.createDirectPeer`,
 Source of truth: `remote-lib-common/src/security/direct-path.ts` (the signals,
 their guard, the constants, and the `DirectCutover` both ends run),
 `lib/src/remote/direct/direct-peer.ts` (`DirectPeerLike` and the negotiation),
-`PocketClient.#offerDirect` in `lib/src/remote/client/pocket-client.ts`,
-`BurrowRuntime.#answerDirect` in `lib/src/remote/burrow/burrow-runtime.ts`;
-pinned by `remote-lib-common/test/direct-path.test.mjs`,
+`DirectEndpoint` in `lib/src/remote/direct/direct-endpoint.ts` (the whole
+cutover policy, one per authorized session, constructed at promotion by
+`PocketClient.#directEndpoint` in `lib/src/remote/client/pocket-client.ts` and
+`BurrowRuntime.#promoteConnection` in
+`lib/src/remote/burrow/burrow-runtime.ts`); pinned by
+`remote-lib-common/test/direct-path.test.mjs`,
+`lib/src/remote/direct/direct-endpoint.test.ts`,
 `lib/src/remote/direct/direct-peer.test.ts`, and the end-to-end cases in
 `lib/src/remote/client/pocket-client.test.ts` and
 `lib/src/remote/burrow/burrow-bounds.test.ts`.

@@ -456,9 +456,11 @@ sees the traffic ([Residual metadata](#residual-metadata)).
 
 Source of truth: `remote-lib-common/src/security/direct-path.ts` (the signals,
 their guard, and `DirectCutover`), `lib/src/remote/direct/direct-peer.ts`
-(`DirectPeer`), `BurrowRuntime.#answerDirect` in
-`lib/src/remote/burrow/burrow-runtime.ts`, `PocketClient.#offerDirect` in
-`lib/src/remote/client/pocket-client.ts`. The audited rows are
+(`DirectPeer`), `DirectEndpoint` in
+`lib/src/remote/direct/direct-endpoint.ts` (the attempt, the peer, and the
+cutover, created at promotion by `BurrowRuntime.#promoteConnection` in
+`lib/src/remote/burrow/burrow-runtime.ts` and `PocketClient.#directEndpoint` in
+`lib/src/remote/client/pocket-client.ts`). The audited rows are
 `docs/specs/security-remote.md` -> "Direct path".
 
 ## Noise suite

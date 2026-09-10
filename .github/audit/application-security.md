@@ -27,8 +27,9 @@ The end-to-end boundary is where the depth goes. Its modules are
 `e2e-ceremony.ts`, `e2e-bounds.ts`, `token-bucket.ts`, `push-seal.ts`,
 `pairing-invitation.ts`, `presence.ts`, `acl.ts` and `direct-path.ts`;
 `remote-lib-common/src/remote/wire.ts` (the frame shapes and their guards);
-`lib/src/remote/direct/direct-peer.ts` (the data channel the same session may
-move onto — `docs/specs/security-remote.md` -> "Direct path");
+`lib/src/remote/direct/direct-endpoint.ts` and `direct-peer.ts` (the data
+channel the same session may move onto, and the one cutover policy both ends
+run — `docs/specs/security-remote.md` -> "Direct path");
 `lib/src/remote/burrow/burrow-runtime.ts` (both ceremonies, every Burrow bound);
 `lib/src/remote/burrow/push-delivery.ts`; `lib/src/remote/client/pocket-client.ts`
 and `lib/src/remote/pocket-app/sw.ts` (the phone, and the render sink);
