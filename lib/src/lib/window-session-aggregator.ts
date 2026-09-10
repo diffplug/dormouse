@@ -71,7 +71,9 @@ export function forgetWorkspaceSession(workspaceId: WorkspaceId): void {
  * mounted here, and its Sessions are still attached, because the target may
  * refuse it — but its shells already belong to the target, so a quit or a crash
  * in the gap must not leave the same Workspace persisted by two Windows and
- * restored twice. Cleared by `clearWorkspaceTransferring` (the target refused
+ * restored twice. The host already moved it into the target's snapshot on disk
+ * at the invoke (`docs/specs/standalone.md` → "Arrival queue"), so the gap
+ * restores it there. Cleared by `clearWorkspaceTransferring` (the target refused
  * it) or by `forgetWorkspaceSession` (it landed).
  */
 export function markWorkspaceTransferring(workspaceId: WorkspaceId): void {

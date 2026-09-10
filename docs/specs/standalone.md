@@ -593,6 +593,14 @@ below reads that record rather than inferring itself from the suppression map.
 - **A boot's `pty_request_init` excludes every id an arrival claims.** Ownership
   moves at the invoke, so those shells would otherwise be listed as top-level
   panes beside the Workspace about to mount them.
+- **`begin_arrival` moves the Workspace between the two snapshots on disk** —
+  out of the source's file, then into the target's (a tear-out target gets a
+  file holding just it) — so a crash before the target's first flush restores
+  it once, in the target, with fresh shells. The webviews' own debounced saves
+  would otherwise leave a gap in which no file held it. Every hand-back path
+  takes it out of the target's file again, since the source persists it as soon
+  as it clears the transferring mark; a file emptied that way is removed
+  (`a_staged_arrival_is_in_the_target_snapshot_until_it_is_handed_back`).
 - **An arrival unadopted after `ARRIVAL_MAX` is handed back** by a watchdog armed
   at `begin_arrival`, retiring only the record it was armed for (`queued_at`):
   a target alive but wedged never reaches `adopt_failed` or `Destroyed`, and the
@@ -601,7 +609,7 @@ below reads that record rather than inferring itself from the suppression map.
 
 Source of truth: `Arrival` / `sweep_awaiting` / `expire_arrival` / `boot_list_ids` in
 `standalone/src-tauri/src/routing.rs`; `begin_arrival` / `adopt_ready` /
-`adopt_done` / `adopt_failed` / `hand_back_arrival` in
+`adopt_done` / `adopt_failed` / `hand_back_arrival` / `stage_arrival_on_disk` in
 `standalone/src-tauri/src/lib.rs`; `standalone/src/workspace-move.ts`;
 `markWorkspaceTransferring` in `lib/src/lib/window-session-aggregator.ts`.
 Pinned by `standalone/src/workspace-move.test.ts` and the arrival tests in

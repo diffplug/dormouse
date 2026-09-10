@@ -2403,6 +2403,55 @@ fn payload_terminal_ids(payload: &JsonValue) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Put an arriving Workspace into the target's snapshot on disk **before** the
+/// target adopts it. The source omits a transferring Workspace from its own
+/// snapshot the moment the invoke returns (so a crash restores it once, not
+/// twice), and the target writes only after adoption — so until this landed, a
+/// crash in the gap restored it nowhere. Idempotent on the id; a target with no
+/// snapshot yet (a tear-out) gets one holding just this Workspace. Never
+/// fatal: a failed write is logged and the transfer proceeds.
+fn stage_arrival_on_disk(dir: &Path, to: &str, workspace: &JsonValue) -> Result<(), String> {
+    let Some(id) = workspace.get("id").and_then(JsonValue::as_str) else {
+        return Err("arrival payload names no workspace.id".to_string());
+    };
+    let mut snapshot = match read_session_from(dir, to)? {
+        Some(contents) => serde_json::from_str::<JsonValue>(&contents)
+            .map_err(|e| format!("unreadable snapshot for {to}: {e}"))?,
+        None => serde_json::json!({ "version": 1, "workspaces": [], "activeWorkspaceId": id }),
+    };
+    let workspaces = snapshot
+        .get_mut("workspaces")
+        .and_then(JsonValue::as_array_mut)
+        .ok_or_else(|| format!("snapshot for {to} has no workspaces list"))?;
+    workspaces.retain(|entry| entry.get("id").and_then(JsonValue::as_str) != Some(id));
+    workspaces.push(workspace.clone());
+    write_session_to(dir, to, &snapshot.to_string())
+}
+
+/// The inverse, for an arrival that will never be adopted: the source persists
+/// the Workspace again the moment it clears its transferring mark, so leaving
+/// it in the target's file would restore it twice. A snapshot holding nothing
+/// else is removed outright — it is a torn-out window that never opened.
+fn unstage_arrival_on_disk(dir: &Path, to: &str, workspace_id: &str) -> Result<(), String> {
+    let Some(contents) = read_session_from(dir, to)? else {
+        return Ok(());
+    };
+    let mut snapshot = serde_json::from_str::<JsonValue>(&contents)
+        .map_err(|e| format!("unreadable snapshot for {to}: {e}"))?;
+    let Some(workspaces) = snapshot.get_mut("workspaces").and_then(JsonValue::as_array_mut) else {
+        return Ok(());
+    };
+    let before = workspaces.len();
+    workspaces.retain(|entry| entry.get("id").and_then(JsonValue::as_str) != Some(workspace_id));
+    if workspaces.len() == before {
+        return Ok(());
+    }
+    if workspaces.is_empty() {
+        return remove_session_from(dir, to);
+    }
+    write_session_to(dir, to, &snapshot.to_string())
+}
+
 /// The record one drop becomes.
 fn arrival_from(from: &str, to: &str, payload: JsonValue) -> Result<routing::Arrival, String> {
     let workspace_id = payload
@@ -2442,6 +2491,23 @@ fn begin_arrival(
         }
         windows.reassign(&arrival.terminal_ids, &arrival.to, true);
         routing::queue_arrival(&mut arrivals, arrival.clone());
+    }
+    // Moved on disk here, not left to the two webviews' debounced saves: out of
+    // the source's snapshot first, then into the target's, so a crash in the
+    // gap restores the Workspace once — in the target, with fresh shells — and
+    // never twice (§Arrival queue). Never fatal.
+    if let Some(workspace) = arrival.payload.get("workspace") {
+        match sessions_dir(app) {
+            Ok(dir) => {
+                if let Err(e) = unstage_arrival_on_disk(&dir, &arrival.from, &arrival.workspace_id) {
+                    append_log(format!("[window] could not unstage {} from disk: {e}", arrival.workspace_id));
+                }
+                if let Err(e) = stage_arrival_on_disk(&dir, &arrival.to, workspace) {
+                    append_log(format!("[window] could not stage {} on disk: {e}", arrival.workspace_id));
+                }
+            }
+            Err(e) => append_log(format!("[window] {e}")),
+        }
     }
     spawn_arrival_watchdog(app.clone(), &arrival);
     Ok(())
@@ -2488,6 +2554,13 @@ fn hand_back_arrival(
         "[window] {} never arrived in {} ({reason}); handing it back to {}",
         arrival.workspace_id, arrival.to, arrival.from
     ));
+    // Out of the target's file first: the source persists it again as soon as
+    // it clears the transferring mark below.
+    if let Ok(dir) = sessions_dir(app) {
+        if let Err(e) = unstage_arrival_on_disk(&dir, &arrival.to, &arrival.workspace_id) {
+            append_log(format!("[window] could not unstage {} on disk: {e}", arrival.workspace_id));
+        }
+    }
     if app.get_webview_window(&arrival.from).is_some() {
         windows.reassign(&arrival.terminal_ids, &arrival.from, false);
         let _ = app.emit_to(
@@ -2556,6 +2629,9 @@ fn open_workspace_window(
             routing::take_arrival(&mut guard(&windows.arrivals), &workspace_id, &label)
         {
             windows.reassign(&arrival.terminal_ids, &arrival.from, false);
+            if let Ok(dir) = sessions_dir(&app) {
+                let _ = unstage_arrival_on_disk(&dir, &label, &arrival.workspace_id);
+            }
         }
         return Err(err);
     }
@@ -3761,8 +3837,8 @@ mod tests {
         find_node_binary, notepad_archive_lock_path, read_notepad_archive_from, read_session_from,
         reset_notepad_archive_at, resolve_dor_cli_paths, resolve_sidecar_path, session_file_name,
         state_root_from, strip_windows_verbatim_prefix, sweep_orphan_session_temps,
-        temp_write_path, write_notepad_archive_to, write_session_to, SESSION_TEMP_SUFFIX,
-        NOTEPAD_ARCHIVE_FILE,
+        stage_arrival_on_disk, temp_write_path, unstage_arrival_on_disk, write_notepad_archive_to,
+        write_session_to, JsonValue, SESSION_TEMP_SUFFIX, NOTEPAD_ARCHIVE_FILE,
     };
     use super::guard;
     use std::collections::HashSet;
@@ -3792,6 +3868,47 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn a_staged_arrival_is_in_the_target_snapshot_until_it_is_handed_back() {
+        let dir = TempDir::new("arrival-stage");
+        let workspace = serde_json::json!({ "id": "workspace-7", "name": "Docs", "session": { "version": 3 } });
+
+        // A tear-out target has no snapshot yet: it gets one holding the arrival.
+        stage_arrival_on_disk(dir.path(), "ws-2", &workspace).unwrap();
+        let read = || -> JsonValue {
+            serde_json::from_str(&read_session_from(dir.path(), "ws-2").unwrap().unwrap()).unwrap()
+        };
+        assert_eq!(read()["activeWorkspaceId"], "workspace-7");
+        assert_eq!(read()["workspaces"].as_array().unwrap().len(), 1);
+
+        // Staging the same id again replaces rather than duplicates.
+        stage_arrival_on_disk(dir.path(), "ws-2", &workspace).unwrap();
+        assert_eq!(read()["workspaces"].as_array().unwrap().len(), 1);
+
+        // An existing target keeps what it had and its own active Workspace.
+        write_session_to(
+            dir.path(),
+            "main",
+            &serde_json::json!({ "version": 1, "workspaces": [{ "id": "workspace-2", "name": "A" }], "activeWorkspaceId": "workspace-2" }).to_string(),
+        )
+        .unwrap();
+        stage_arrival_on_disk(dir.path(), "main", &workspace).unwrap();
+        let main: JsonValue =
+            serde_json::from_str(&read_session_from(dir.path(), "main").unwrap().unwrap()).unwrap();
+        assert_eq!(main["activeWorkspaceId"], "workspace-2");
+        assert_eq!(main["workspaces"].as_array().unwrap().len(), 2);
+
+        // Handing back removes it, and an emptied snapshot goes entirely.
+        unstage_arrival_on_disk(dir.path(), "main", "workspace-7").unwrap();
+        let main: JsonValue =
+            serde_json::from_str(&read_session_from(dir.path(), "main").unwrap().unwrap()).unwrap();
+        assert_eq!(main["workspaces"].as_array().unwrap().len(), 1);
+        unstage_arrival_on_disk(dir.path(), "ws-2", "workspace-7").unwrap();
+        assert!(read_session_from(dir.path(), "ws-2").unwrap().is_none());
+        // Unstaging what was never staged is a no-op, not an error.
+        unstage_arrival_on_disk(dir.path(), "ws-9", "workspace-7").unwrap();
     }
 
     /// The Windows half of `restrict_to_owner`: after it runs, the DACL must be
