@@ -2,10 +2,9 @@ import { useEffect, useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { WorkspaceStrip } from '../components/WorkspaceStrip';
 import { registerWallHandle, resetWallHandles, type WallHandle } from '../components/wall/wall-handles';
-import { setTerminalActivity } from '../lib/terminal-registry';
 import { resetWorkspaceSurfaces, setWorkspaceSurfaces } from '../lib/workspace-surfaces';
 import { resetWorkspaces, setWorkspaces } from '../lib/workspace-store';
-import { requireElement } from './settle-terminals';
+import { requireElement, waitForPrimedState } from './settle-terminals';
 
 /** A stand-in for a mounted Wall, so the strip's close flow has something to
  *  ask about running work without a live Workspace behind it. */
@@ -25,19 +24,19 @@ function stubHandle(workspaceId: string): WallHandle {
   };
 }
 
-/** Activity primed onto a Workspace's member Surfaces, keyed by tab index. */
-type IndicatorSpec = Record<number, { ringing?: boolean; todo?: boolean; extraTodos?: number }>;
-
 function StripStory({
   names,
   activeIndex = 0,
-  indicators,
+  membership,
   busyIndex,
   width = 640,
 }: {
   names: string[];
   activeIndex?: number;
-  indicators?: IndicatorSpec;
+  /** Member Surface ids per tab index. Their Activity is primed through
+   *  `parameters.primedSessionState`, which the preview decorator applies two
+   *  frames after mount — anything written here would be cleared by it. */
+  membership?: Record<number, string[]>;
   busyIndex?: number;
   width?: number;
 }) {
@@ -52,18 +51,8 @@ function StripStory({
     });
     resetWorkspaceSurfaces();
     resetWallHandles();
-    for (const [index, spec] of Object.entries(indicators ?? {})) {
-      const id = ids[Number(index)];
-      const surfaces = [
-        `${id}-a`,
-        ...Array.from({ length: spec.extraTodos ?? 0 }, (_, n) => `${id}-todo-${n}`),
-      ];
-      setWorkspaceSurfaces(id, surfaces);
-      setTerminalActivity(surfaces[0], {
-        status: spec.ringing ? 'ALERT_RINGING' : 'WATCHING_DISABLED',
-        todo: spec.todo === true,
-      });
-      for (const extra of surfaces.slice(1)) setTerminalActivity(extra, { todo: true });
+    for (const [index, surfaces] of Object.entries(membership ?? {})) {
+      setWorkspaceSurfaces(ids[Number(index)], surfaces);
     }
     if (busyIndex !== undefined) registerWallHandle(stubHandle(ids[busyIndex]));
     setReady(true);
@@ -72,7 +61,7 @@ function StripStory({
       resetWorkspaceSurfaces();
       resetWallHandles();
     };
-  }, [names, activeIndex, indicators, busyIndex]);
+  }, [names, activeIndex, membership, busyIndex]);
 
   return (
     <div className="bg-header-active-bg text-header-active-fg flex h-[30px] items-center" style={{ width }}>
@@ -101,8 +90,20 @@ export const Indicators: Story = {
   args: {
     names: ['Builds', 'Agents', 'Workspace 3'],
     activeIndex: 2,
-    indicators: { 0: { ringing: true, extraTodos: 1 }, 1: { todo: true } },
+    membership: { 0: ['builds-a', 'builds-b'], 1: ['agents-a'], 2: ['visible-a'] },
   },
+  parameters: {
+    primedSessionState: {
+      byId: {
+        'builds-a': { status: 'ALERT_RINGING' },
+        'builds-b': { todo: true },
+        'agents-a': { todo: true },
+        // The visible Workspace owes attention too, and still shows nothing.
+        'visible-a': { status: 'ALERT_RINGING', todo: true },
+      },
+    },
+  },
+  play: () => waitForPrimedState(),
 };
 
 export const Renaming: Story = {

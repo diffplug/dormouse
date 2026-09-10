@@ -42,15 +42,18 @@ export function createWorkspaceStripDrag(host: StripDragHost): WorkspaceStripDra
   let startX = 0;
   let startY = 0;
   let active = false;
+  /** The tab the press landed on; capture goes here once the drag activates. */
+  let pressedOn: HTMLElement | null = null;
   let capturedBy: HTMLElement | null = null;
 
   function end(restore: boolean): void {
     if (dragId === null) return;
     if (restore) host.move(dragId, startIndex);
-    // jsdom (and a pointer that never captured) throws here; the gesture is
-    // over either way.
+    // jsdom (and a gesture that never reached the threshold) throws here; the
+    // gesture is over either way.
     try { capturedBy?.releasePointerCapture?.(pointerId); } catch { /* not captured */ }
     capturedBy = null;
+    pressedOn = null;
     dragId = null;
     host.setDragging(null);
     window.removeEventListener('pointermove', onPointerMove);
@@ -67,6 +70,10 @@ export function createWorkspaceStripDrag(host: StripDragHost): WorkspaceStripDra
       if (Math.hypot(event.clientX - startX, event.clientY - startY) < DRAG_THRESHOLD_PX) return;
       active = true;
       host.setDragging(dragId);
+      // Captured only NOW, never on the press: a captured pointer retargets the
+      // following `click` to the capture element, which would swallow the
+      // activate button's own click on every plain tab press.
+      try { pressedOn?.setPointerCapture?.(pointerId); capturedBy = pressedOn; } catch { capturedBy = null; }
     }
     const order = host.order();
     const from = order.indexOf(dragId);
@@ -120,9 +127,7 @@ export function createWorkspaceStripDrag(host: StripDragHost): WorkspaceStripDra
       startX = event.clientX;
       startY = event.clientY;
       active = false;
-      const target = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
-      // Capture so a fast drag off the tab keeps delivering moves to it.
-      try { target?.setPointerCapture?.(event.pointerId); capturedBy = target; } catch { capturedBy = null; }
+      pressedOn = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
       window.addEventListener('pointermove', onPointerMove);
       window.addEventListener('pointerup', onPointerUp);
       window.addEventListener('pointercancel', onPointerCancel);

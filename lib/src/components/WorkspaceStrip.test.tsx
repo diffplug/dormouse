@@ -223,6 +223,28 @@ describe('WorkspaceStrip', () => {
     expect(order()).toEqual([first, 'ws-2', 'ws-3']);
   });
 
+  it('never captures the pointer before the drag activates, so a plain press still activates', async () => {
+    createWorkspace({ id: 'ws-2' });
+    await render();
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    // A captured pointer retargets the following `click` to the capture element,
+    // which would swallow the activate button's own click on every tab press.
+    const capture = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, 'setPointerCapture', { configurable: true, value: capture });
+    Object.defineProperty(HTMLElement.prototype, 'releasePointerCapture', { configurable: true, value: () => {} });
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(
+      { left: 0, right: 100, width: 100, top: 0, bottom: 24, height: 24, x: 0, y: 0, toJSON: () => ({}) } as DOMRect,
+    );
+
+    await act(async () => { tabFor(first).dispatchEvent(pointer('pointerdown', { button: 0, clientX: 50, clientY: 12 })); });
+    await act(async () => { window.dispatchEvent(pointer('pointermove', { clientX: 52, clientY: 12 })); });
+    expect(capture).not.toHaveBeenCalled();
+
+    await act(async () => { window.dispatchEvent(pointer('pointermove', { clientX: 90, clientY: 12 })); });
+    expect(capture).toHaveBeenCalled();
+    await act(async () => { window.dispatchEvent(pointer('pointerup', { clientX: 90, clientY: 12 })); });
+  });
+
   it('answers the keyboard intents that come from inside a Wall', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     await act(async () => { createWorkspace({ id: 'ws-2' }); });

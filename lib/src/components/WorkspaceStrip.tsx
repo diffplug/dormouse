@@ -148,7 +148,14 @@ export function WorkspaceStrip({
     return () => window.removeEventListener('keydown', onKeyDown, true);
   }, [confirmClose, closeNow]);
 
-  const confirmTarget = confirmClose ? tabElementsRef.current.get(confirmClose.id) ?? null : null;
+  // Anchored to the Workspace's own Wall, not its tab: a 24px tab is too small a
+  // box to center a dialog over, and every Wall shares one grid cell, so the
+  // confirmation lands in the same place whether or not that Workspace is
+  // visible. No Wall (Storybook) leaves it viewport-centered.
+  const confirmTarget = confirmClose
+    ? [...document.querySelectorAll<HTMLElement>('[data-workspace-wall]')]
+      .find((wall) => wall.dataset.workspaceWall === confirmClose.id) ?? null
+    : null;
 
   return (
     <div ref={stripRef} className={clsx('flex min-w-0 items-center gap-0.5 overflow-x-auto', className)}>
@@ -241,7 +248,7 @@ function WorkspaceTab({
   // The visible Workspace shows its Surfaces, so its indicators would say what
   // the panes already say; only a hidden one needs them.
   const showIndicators = !active && (union.ringing || todoPill.visible);
-  const label = union.count > 0 ? `${name}, ${union.count} needing attention` : name;
+  const label = showIndicators && union.count > 0 ? `${name}, ${union.count} needing attention` : name;
 
   return (
     <div
@@ -254,9 +261,10 @@ function WorkspaceTab({
         // 72px, then the strip scrolls. No overflow arrows.
         'group relative flex h-6 w-[180px] min-w-[72px] shrink items-center overflow-hidden text-xs font-medium',
         // The tab is the top of its Workspace exactly as a Door is the bottom of
-        // its Surface, so it takes the terminal's top radius and the wall's own
-        // background when active.
-        active ? clsx('bg-app-bg', TERMINAL_TOP_RADIUS_CLASS) : 'hover:bg-current/10',
+        // its Surface, so the active one takes the terminal's top radius and the
+        // wall's own palette — background AND foreground, or the bar's white
+        // header text would sit on a light app background.
+        active ? clsx('bg-app-bg text-app-fg', TERMINAL_TOP_RADIUS_CLASS) : 'hover:bg-current/10',
       )}
       style={dragging ? { opacity: 0.6 } : undefined}
       onPointerDown={(event) => {
@@ -299,8 +307,10 @@ function WorkspaceTab({
                   {todoPill.body}
                 </span>
               )}
+              {/* An inactive tab sits on the app bar's header palette, not on a
+                  Door, so the bell takes the header's alarm color. */}
               {union.ringing && (
-                <span className="text-alarm-vs-door">
+                <span className="text-alarm-vs-header-active">
                   <AlertBell status="ALERT_RINGING" ringSeq={union.ringSeq} size={11} />
                 </span>
               )}
