@@ -1441,15 +1441,16 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
   }
 
   /**
-   * SIGTERM `ids` (omitted: every live PTY) and resolve once they have exited.
+   * SIGTERM `ids` and resolve once they have exited.
    *
-   * Scoped rather than blanket because one window of several tears down alone,
-   * and killing a sibling's terminals is unrecoverable. `ids` follows the same
-   * "omitted is not empty" rule as `interrupt` and `list`.
+   * Always an explicit set, never a blanket kill: one window of several tears
+   * down alone, and killing a sibling's terminals is unrecoverable. The host
+   * names the window's own PTYs (`pty_graceful_kill` in
+   * standalone/src-tauri/src/lib.rs).
    */
   function gracefulKill(ids, timeout = 2000, requestId) {
     const done = () => send('gracefulKillDone', { requestId });
-    const targets = (Array.isArray(ids) ? ids : [...ptys.keys()]).filter((id) => ptys.has(id));
+    const targets = (Array.isArray(ids) ? ids : []).filter((id) => ptys.has(id));
     // Nothing live to SIGTERM, but a just-exited PTY can still deliver final
     // output shortly after onExit (notably under ConPTY). Keep the same single
     // grace tick used after the live map empties before the quit flush runs.
@@ -1470,16 +1471,11 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
     setTimeout(tick, 50);
   }
 
-  /** @deprecated Kept for one release so a stale bundle still tears down. */
-  function gracefulKillAll(timeout = 2000, requestId) {
-    gracefulKill(undefined, timeout, requestId);
-  }
-
   function getShells(requestId) {
     send('shells', { shells: detectAvailableShells(), requestId });
   }
 
   return { spawn, write, resize, hasPty, kill, killAll, list, context,
-    getCwd, getCwds, getOpenPorts, interrupt, gracefulKill, gracefulKillAll, getShells,
+    getCwd, getCwds, getOpenPorts, interrupt, gracefulKill, getShells,
     liveIds, receivedChars, outputSince };
 };

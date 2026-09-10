@@ -511,7 +511,7 @@ test('interrupt with no live PTYs still reports done', async () => {
   assert.deepEqual(events.at(-1), { event: 'interruptDone', data: { requestId: 'req-empty' } });
 });
 
-test('gracefulKillAll SIGTERMs live PTYs, echoes requestId, forwards final output', async () => {
+test('gracefulKill SIGTERMs the named PTYs, echoes requestId, forwards final output', async () => {
   const events = [];
   const killSignals = [];
   const listeners = {};
@@ -532,7 +532,7 @@ test('gracefulKillAll SIGTERMs live PTYs, echoes requestId, forwards final outpu
   }, { spawn() { return fakePty; } });
 
   mgr.spawn('pane-1');
-  mgr.gracefulKillAll(1, 'req-42');
+  mgr.gracefulKill(['pane-1'], 1, 'req-42');
   listeners.data?.('final output');
   await done;
 
@@ -549,7 +549,7 @@ test('gracefulKillAll SIGTERMs live PTYs, echoes requestId, forwards final outpu
   });
 });
 
-test('gracefulKillAll resolves early after exits and a final output grace tick', async () => {
+test('gracefulKill resolves early after exits and a final output grace tick', async () => {
   const listeners = {};
   const events = [];
   const fakePty = {
@@ -570,7 +570,7 @@ test('gracefulKillAll resolves early after exits and a final output grace tick',
 
   mgr.spawn('pane-1');
   const started = Date.now();
-  mgr.gracefulKillAll(60_000, 'req-1');
+  mgr.gracefulKill(['pane-1'], 60_000, 'req-1');
   listeners.exit({ exitCode: 0, signal: 15 }); // empties the live-PTY map
   // ConPTY can flush after exit. Deliver on a later tick to exercise the grace.
   setTimeout(() => listeners.data('final output'), 10);
@@ -583,7 +583,7 @@ test('gracefulKillAll resolves early after exits and a final output grace tick',
   assert.ok(Date.now() - started < 5_000);
 });
 
-test('gracefulKillAll with no live PTYs waits one grace tick', async () => {
+test('gracefulKill with nothing live waits one grace tick', async () => {
   const events = [];
   let resolveDone;
   const done = new Promise((resolve) => { resolveDone = resolve; });
@@ -594,7 +594,7 @@ test('gracefulKillAll with no live PTYs waits one grace tick', async () => {
     spawn() { throw new Error('nothing should spawn'); },
   });
 
-  mgr.gracefulKillAll(60_000, 'req-1');
+  mgr.gracefulKill(['pane-1'], 60_000, 'req-1');
   assert.deepEqual(events, []);
 
   await done;

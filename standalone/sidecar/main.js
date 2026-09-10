@@ -187,9 +187,9 @@ function handleLine(line) {
       case 'pty:gracefulKill': mgr.gracefulKill(data.ids, data.timeout, data.requestId); break;
       // The webview's resolved terminal theme, so the parser here can answer
       // OSC 10/11/12 (docs/specs/terminal-escapes.md → Supported OSCs).
-      // How many webviews will answer a Burrow ask (docs/specs/standalone.md
+      // Which webviews will answer a Burrow ask (docs/specs/standalone.md
       // -> "Burrow service").
-      case 'burrow:windows': burrow.setWindowCount(data?.count); break;
+      case 'burrow:windows': burrow.setWindows(data?.labels); break;
       case 'alert:command': alertStore.handle(data); break;
       case 'pty:themeColors': burrow.setThemeColors(data); break;
       case 'sidecar:shutdown': shutdown(); break;

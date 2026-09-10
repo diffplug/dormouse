@@ -7,13 +7,13 @@ mod routing;
 use quit_state::{CloseMachine, QuitAction, QuitMachine};
 use routing::{Route, RouteView};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     env,
     fs::{create_dir_all, File, OpenOptions},
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
     process::Stdio,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::atomic::{AtomicU64, AtomicUsize, Ordering},
     sync::mpsc,
     sync::{Arc, Mutex, MutexGuard, OnceLock},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -63,14 +63,31 @@ fn guard<T>(lock: &Mutex<T>) -> MutexGuard<'_, T> {
 //
 // The sidecar has no window concept, so Rust keeps the map from PTY to window
 // and routes every stdout line through `routing::route`.
+
+/// The three maps a sidecar line is routed against, behind **one** lock: they
+/// are always read together, so a PTY chunk costs one acquisition rather than
+/// three, and every label the routing table hands back stays borrowed out of
+/// this guard instead of being cloned per line.
 #[derive(Default)]
-struct WindowState {
+struct RoutingState {
     /// ptyId -> window label. Minted only in `pty_spawn`, dropped by
     /// `pty_kill`, an exit, or a window going away; reassigned by a transfer.
-    owners: Mutex<HashMap<String, String>>,
+    owners: HashMap<String, String>,
     /// Ids whose output is suppressed until the replay their new owner is about
     /// to be sent has been emitted, each with the instant it began.
-    awaiting_replay: Mutex<HashMap<String, Instant>>,
+    awaiting_replay: HashMap<String, Instant>,
+    /// dor requestId -> the window handling it, so a cancel reaches the window
+    /// holding the subscription, watch or completion claim it releases.
+    dor_targets: HashMap<String, String>,
+}
+
+#[derive(Default)]
+struct WindowState {
+    routing: Mutex<RoutingState>,
+    /// `awaiting_replay.len()`, readable without the lock. Nothing is
+    /// transferring in the steady state, and this is what lets a chunk skip the
+    /// sweep and the `Instant::now()` it needs.
+    suppressed: AtomicUsize,
     /// Window labels, most recently focused first.
     focus_order: Mutex<Vec<String>>,
     /// A torn-out window's boot payload, pulled by `take_boot_payload`. Pulled,
@@ -80,46 +97,75 @@ struct WindowState {
     /// one can be told to clear it.
     hover_target: Mutex<Option<String>>,
     /// Labels whose snapshot has been deliberately removed. A save arriving
-    /// from a webview that is going away must not put the file back.
-    closing: Mutex<std::collections::HashSet<String>>,
+    /// from a webview that is going away must not put the file back; the entry
+    /// is dropped once that webview is destroyed and can no longer save.
+    closing: Mutex<HashSet<String>>,
     /// The next `ws-<n>`, seeded above every live and saved label at setup.
     next_ws: AtomicU64,
 }
 
-impl WindowState {
+impl RoutingState {
+    /// Every id `label` owns.
     fn owned_by(&self, label: &str) -> Vec<String> {
-        guard(&self.owners)
+        self.owners
             .iter()
             .filter(|(_, owner)| owner.as_str() == label)
             .map(|(id, _)| id.clone())
             .collect()
     }
+}
+
+impl WindowState {
+    fn owned_by(&self, label: &str) -> Vec<String> {
+        guard(&self.routing).owned_by(label)
+    }
 
     fn mint(&self, id: &str, label: &str) {
-        guard(&self.owners).insert(id.to_string(), label.to_string());
+        guard(&self.routing).owners.insert(id.to_string(), label.to_string());
     }
 
-    /// Hand `ids` to `label` and suppress their output until each one's replay
-    /// has been emitted to it (docs/specs/standalone.md §Transfer).
-    fn reassign(&self, ids: &[String], label: &str) {
-        let mut owners = guard(&self.owners);
-        let mut awaiting = guard(&self.awaiting_replay);
+    /// Hand `ids` to `label`. `suppress` holds their output until each one's
+    /// replay has been emitted to it (docs/specs/standalone.md §Transfer);
+    /// without it the ids go straight back into service, which is how a failed
+    /// tear-out returns them to the window that still has them.
+    fn reassign(&self, ids: &[String], label: &str, suppress: bool) {
+        let mut routing = guard(&self.routing);
         let now = Instant::now();
         for id in ids {
-            owners.insert(id.clone(), label.to_string());
-            awaiting.insert(id.clone(), now);
+            routing.owners.insert(id.clone(), label.to_string());
+            if suppress {
+                routing.awaiting_replay.insert(id.clone(), now);
+            } else {
+                routing.awaiting_replay.remove(id);
+            }
         }
+        self.suppressed
+            .store(routing.awaiting_replay.len(), Ordering::Relaxed);
     }
 
-    /// Forget a window: its ownership, its focus entry, and any boot payload it
-    /// never pulled. Returns the ids it owned.
+    /// Forget one PTY entirely (a kill, or its exit).
+    fn forget_pty(&self, id: &str) {
+        let mut routing = guard(&self.routing);
+        routing.owners.remove(id);
+        routing.awaiting_replay.remove(id);
+        self.suppressed
+            .store(routing.awaiting_replay.len(), Ordering::Relaxed);
+    }
+
+    /// Forget a window: its ownership, its outstanding `dor` requests, its focus
+    /// entry, and any boot payload it never pulled. Returns the ids it owned.
     fn drop_window(&self, label: &str) -> Vec<String> {
-        let owned = self.owned_by(label);
-        let mut owners = guard(&self.owners);
-        for id in &owned {
-            owners.remove(id);
-        }
-        drop(owners);
+        let owned = {
+            let mut routing = guard(&self.routing);
+            let owned = routing.owned_by(label);
+            for id in &owned {
+                routing.owners.remove(id);
+            }
+            // Its answers can never arrive, so neither can the cancels that
+            // would have retired them.
+            routing.dor_targets.retain(|_, target| target != label);
+            owned
+        };
         guard(&self.focus_order).retain(|entry| entry != label);
         guard(&self.pending_boot).remove(label);
         owned
@@ -133,95 +179,152 @@ impl WindowState {
 }
 
 /// Route one sidecar stdout line to the window it belongs to.
+///
+/// The hot path — once per PTY chunk — so it takes one lock, allocates nothing,
+/// and reads no clock unless something is actually mid-transfer.
 fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
     let Some(state) = app.try_state::<WindowState>() else {
         let _ = app.emit(event, data);
         return;
     };
-    // Read once, ahead of the emit that moves `data`.
-    let id = data
-        .get("id")
-        .and_then(JsonValue::as_str)
-        .map(str::to_string);
 
-    let decision = {
-        let owners = guard(&state.owners);
-        let mut awaiting = guard(&state.awaiting_replay);
-        for stale in routing::sweep_awaiting(
-            &mut awaiting,
-            Instant::now(),
-            routing::AWAITING_REPLAY_MAX,
-        ) {
-            append_log(format!(
-                "[window] transfer suppression for {stale} expired; releasing"
-            ));
+    let mut released: Vec<String> = Vec::new();
+    {
+        let mut routing = guard(&state.routing);
+        if state.suppressed.load(Ordering::Relaxed) > 0 {
+            released = routing::sweep_awaiting(
+                &mut routing.awaiting_replay,
+                Instant::now(),
+                routing::AWAITING_REPLAY_MAX,
+            );
+            if !released.is_empty() {
+                state
+                    .suppressed
+                    .store(routing.awaiting_replay.len(), Ordering::Relaxed);
+            }
         }
-        let focus = guard(&state.focus_order);
-        routing::route(
+
+        let decision = routing::route(
             event,
             &data,
             &RouteView {
-                owners: &owners,
-                awaiting_replay: &awaiting,
-                focused: focus.first().map(String::as_str),
+                owners: &routing.owners,
+                awaiting_replay: &routing.awaiting_replay,
+                dor_targets: &routing.dor_targets,
             },
-        )
-    };
+        );
 
-    match decision {
-        Route::Drop => {}
-        Route::Broadcast => {
-            let _ = app.emit(event, data);
-        }
-        Route::EmitTo(label) => {
-            let _ = app.emit_to(label.as_str(), event, data);
-        }
-        Route::UnownedSurface {
-            request_id,
-            surface_id,
-        } => {
-            // Never a sibling window: acting on the wrong terminal is worse
-            // than failing (docs/specs/dor-cli.md → "Standalone").
-            if let Some(sidecar) = app.try_state::<SidecarState>() {
-                let response = serde_json::json!({
-                    "event": "dor:controlResponse",
-                    "data": {
-                        "requestId": request_id,
-                        "ok": false,
-                        "error": format!("No Dormouse window owns surface '{surface_id}'"),
-                    },
-                });
-                send_to_sidecar(&sidecar, response.to_string());
+        // The lock is still held, because every label the table handed back is
+        // borrowed out of it. Safe because an emit only *queues* the payload:
+        // this is the sidecar reader thread, so `send_user_message` takes the
+        // event-loop-proxy branch and returns without waiting on the main
+        // thread. INVARIANT: never enable Tauri's `tracing` feature — it swaps
+        // `eval_script` for one that blocks on a main-thread reply, and the main
+        // thread can be sitting in `pty_spawn` waiting for this very lock.
+        let is_dor_request = event == "dor:controlRequest";
+        let mut delivered: Option<String> = None;
+        match decision {
+            Route::Drop => {}
+            Route::Broadcast => {
+                let _ = app.emit(event, &data);
+            }
+            Route::EmitTo(label) => {
+                if is_dor_request {
+                    delivered = Some(label.to_string());
+                }
+                let _ = app.emit_to(label, event, &data);
+            }
+            Route::Focused => {
+                let order = guard(&state.focus_order);
+                match order.first() {
+                    Some(label) => {
+                        if is_dor_request {
+                            delivered = Some(label.clone());
+                        }
+                        let _ = app.emit_to(label.as_str(), event, &data);
+                    }
+                    None => {
+                        let _ = app.emit(event, &data);
+                    }
+                }
+            }
+            Route::UnownedSurface {
+                request_id,
+                surface_id,
+            } => {
+                // Never a sibling window: acting on the wrong terminal is worse
+                // than failing (docs/specs/dor-cli.md → "Standalone").
+                if let Some(sidecar) = app.try_state::<SidecarState>() {
+                    let response = serde_json::json!({
+                        "event": "dor:controlResponse",
+                        "data": {
+                            "requestId": request_id,
+                            "ok": false,
+                            "error": format!("No Dormouse window owns surface '{surface_id}'"),
+                        },
+                    });
+                    send_to_sidecar(&sidecar, response.to_string());
+                }
             }
         }
-    }
 
-    // Bookkeeping strictly after the emit, so a replay lifts its own
-    // suppression only once the new owner has actually been sent it.
-    if let Some(id) = id {
+        // Bookkeeping strictly after the emit, so a replay lifts its own
+        // suppression only once the new owner has actually been sent it.
+        let id = || data.get("id").and_then(JsonValue::as_str);
+        let request_id = || data.get("requestId").and_then(JsonValue::as_str);
         match event {
             "pty:exit" => {
-                guard(&state.owners).remove(&id);
-                guard(&state.awaiting_replay).remove(&id);
+                if let Some(id) = id() {
+                    routing.owners.remove(id);
+                    routing.awaiting_replay.remove(id);
+                    state
+                        .suppressed
+                        .store(routing.awaiting_replay.len(), Ordering::Relaxed);
+                }
             }
             "pty:replay" => {
-                guard(&state.awaiting_replay).remove(&id);
+                if let Some(id) = id() {
+                    routing.awaiting_replay.remove(id);
+                    state
+                        .suppressed
+                        .store(routing.awaiting_replay.len(), Ordering::Relaxed);
+                }
+            }
+            "dor:controlRequest" => {
+                if let (Some(label), Some(request_id)) = (delivered, request_id()) {
+                    routing.dor_targets.insert(request_id.to_string(), label);
+                }
+            }
+            "dor:controlCancel" => {
+                if let Some(request_id) = request_id() {
+                    routing.dor_targets.remove(request_id);
+                }
             }
             _ => {}
         }
     }
+
+    // Logged outside the lock: a chatty log write must never sit in front of the
+    // next PTY chunk's routing decision.
+    for id in released {
+        append_log(format!(
+            "[window] transfer suppression for {id} expired; releasing"
+        ));
+    }
 }
 
-/// Tell the sidecar's Burrow how many webviews will answer an ask
-/// (docs/specs/standalone.md §Burrow service).
-fn send_window_count(app: &AppHandle) {
+/// Tell the sidecar's Burrow which webviews will answer an ask
+/// (docs/specs/standalone.md §Burrow service). Labels, not a count: the
+/// collector settles on having heard from each named window, so it can tell a
+/// window that closed mid-fan-out from one that answered twice.
+fn send_window_labels(app: &AppHandle) {
     let Some(state) = app.try_state::<SidecarState>() else {
         return;
     };
-    let count = app.webview_windows().len();
+    let labels = window_labels(app);
     send_to_sidecar(
         &state,
-        serde_json::json!({ "event": "burrow:windows", "data": { "count": count } }).to_string(),
+        serde_json::json!({ "event": "burrow:windows", "data": { "labels": labels } }).to_string(),
     );
 }
 
@@ -418,7 +521,7 @@ fn request_window_close(app: &AppHandle, label: &str) {
 }
 
 /// The last step of a per-window close: forget the window's PTYs and its
-/// snapshot, then destroy it. Called from `window_close_proceed`, and from the
+/// snapshot, then destroy it. Called from `close_window`, and from the
 /// ack watchdog when the webview never answered.
 fn finish_window_close(app: &AppHandle, label: &str) {
     append_log(format!("[window] closing {label} and removing its snapshot"));
@@ -440,7 +543,7 @@ fn finish_window_close(app: &AppHandle, label: &str) {
     if let Some(window) = app.get_webview_window(label) {
         let _ = window.destroy();
     }
-    send_window_count(app);
+    send_window_labels(app);
 }
 
 const LOG_FILE_ENV: &str = "DORMOUSE_LOG_FILE";
@@ -697,7 +800,7 @@ fn pty_theme_colors(state: tauri::State<'_, SidecarState>, colors: JsonValue) {
 
 #[tauri::command]
 fn pty_kill(state: tauri::State<'_, SidecarState>, windows: tauri::State<'_, WindowState>, id: String) {
-    guard(&windows.owners).remove(&id);
+    windows.forget_pty(&id);
     let msg = serde_json::json!({
         "event": "pty:kill",
         "data": { "id": id }
@@ -726,7 +829,20 @@ fn pty_request_init(
 // has no reason to know, so the payload rides through opaquely. Replies come
 // back on the sidecar's own stdout events, not from this invoke.
 #[tauri::command]
-fn burrow_command(state: tauri::State<'_, SidecarState>, payload: JsonValue) {
+fn burrow_command(
+    window: tauri::Window,
+    state: tauri::State<'_, SidecarState>,
+    mut payload: JsonValue,
+) {
+    // The one field Rust adds: which webview this came from. An ask fans out to
+    // every window and settles on having heard from each, and a webview cannot
+    // name itself to the Burrow (§Burrow service).
+    if let Some(command) = payload.as_object_mut() {
+        command.insert(
+            "window".to_string(),
+            JsonValue::String(window.label().to_string()),
+        );
+    }
     let msg = serde_json::json!({
         "event": "burrow:command",
         "data": payload,
@@ -735,24 +851,27 @@ fn burrow_command(state: tauri::State<'_, SidecarState>, payload: JsonValue) {
 }
 
 // The two app-global alert stores live in the sidecar so N windows share one
-// answer (docs/specs/alert.md -> "Alarm settings"). Opaque passthroughs, like
-// `burrow_command`: the shape belongs to `lib/src/host/alert-store-host.ts` at
-// the other end, and the canonical snapshot comes back as a broadcast
-// `alert:settings` / `alert:watchedCommands`.
+// answer (docs/specs/alert.md -> "Alarm settings"). One opaque passthrough, like
+// `burrow_command`: the payload names its own op, and the shape belongs to
+// `lib/src/host/alert-store-host.ts` at the other end. The canonical snapshot
+// comes back as a broadcast `alert:settings` / `alert:watchedCommands`.
 #[tauri::command]
-fn alert_set_watched(state: tauri::State<'_, SidecarState>, payload: JsonValue) {
+fn alert_command(state: tauri::State<'_, SidecarState>, payload: JsonValue) {
     let msg = serde_json::json!({ "event": "alert:command", "data": payload });
     send_to_sidecar(&state, msg.to_string());
 }
 
 #[tauri::command]
-fn alert_publish_settings(state: tauri::State<'_, SidecarState>, payload: JsonValue) {
-    let msg = serde_json::json!({ "event": "alert:command", "data": payload });
-    send_to_sidecar(&state, msg.to_string());
-}
-
-#[tauri::command]
-fn dor_control_response(state: tauri::State<'_, SidecarState>, response: DorControlResponse) {
+fn dor_control_response(
+    state: tauri::State<'_, SidecarState>,
+    windows: tauri::State<'_, WindowState>,
+    response: DorControlResponse,
+) {
+    // The request is answered, so nothing is left for a cancel to reach
+    // (§Routing).
+    guard(&windows.routing)
+        .dor_targets
+        .remove(&response.request_id);
     let msg = serde_json::json!({
         "event": "dor:controlResponse",
         "data": response,
@@ -822,25 +941,19 @@ fn pty_get_open_ports(
 // Async: waits up to `timeout + 1500ms` (margin for the round trip beyond the
 // sidecar's own kill timer) and must not block the main thread for that long.
 //
-// **Scoped to the caller's own PTYs**, whether it names ids or not: a window
-// tearing down must never kill a sibling's terminals.
+// **The target set is the caller's own PTYs**, and only those: a window tearing
+// down must never kill a sibling's terminals.
 #[tauri::command]
 async fn pty_graceful_kill(
     window: tauri::Window,
     state: tauri::State<'_, SidecarState>,
     windows: tauri::State<'_, WindowState>,
-    ids: Option<Vec<String>>,
     timeout: u64,
 ) -> Result<(), String> {
-    let owned = windows.owned_by(window.label());
-    let targets: Vec<String> = match ids {
-        Some(ids) => ids.into_iter().filter(|id| owned.contains(id)).collect(),
-        None => owned,
-    };
     request_from_sidecar_timeout(
         &state,
         "pty:gracefulKill",
-        serde_json::json!({ "ids": targets, "timeout": timeout }),
+        serde_json::json!({ "ids": windows.owned_by(window.label()), "timeout": timeout }),
         Duration::from_millis(timeout + 1500),
     )?;
     Ok(())
@@ -862,17 +975,15 @@ fn capture_agent_recovery(
     window: tauri::Window,
     state: tauri::State<'_, SidecarState>,
     windows: tauri::State<'_, WindowState>,
-    ids: Option<Vec<String>>,
     timeout: u64,
 ) -> Result<(), String> {
-    // Defaults to this window's own PTYs: a quit walks the windows one at a
+    // This window's own PTYs, and only those: a quit walks the windows one at a
     // time, and interrupting a sibling's agents would destroy the very hint the
     // sibling is about to capture.
-    let ids = ids.unwrap_or_else(|| windows.owned_by(window.label()));
     request_from_sidecar_timeout(
         &state,
         "pty:captureRecovery",
-        serde_json::json!({ "ids": ids, "timeout": timeout }),
+        serde_json::json!({ "ids": windows.owned_by(window.label()), "timeout": timeout }),
         // Margin for the round trip beyond the sidecar's own ceiling.
         Duration::from_millis(timeout + 1500),
     )?;
@@ -1530,10 +1641,56 @@ struct WindowGeometry {
 /// one file per window per this interval.
 const GEOMETRY_DEBOUNCE_MS: u64 = 400;
 
+/// One window's outer box in **physical** pixels, plus the scale that turns it
+/// logical. Kept live from the `Moved` / `Resized` payloads, so neither the
+/// debounced write nor the drag hit test has to ask the platform per event.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct CachedRect {
+    origin: (i32, i32),
+    size: (u32, u32),
+    scale: f64,
+}
+
+impl CachedRect {
+    /// Fold in a window event, which carries only the half that changed.
+    fn apply(&mut self, origin: Option<(i32, i32)>, size: Option<(u32, u32)>) {
+        if let Some(origin) = origin {
+            self.origin = origin;
+        }
+        if let Some(size) = size {
+            self.size = size;
+        }
+    }
+
+    /// The box a snapshot stores. Logical, not physical: one taken on one
+    /// display must reopen sensibly on another with a different scale factor.
+    fn to_logical(self) -> WindowGeometry {
+        WindowGeometry {
+            x: f64::from(self.origin.0) / self.scale,
+            y: f64::from(self.origin.1) / self.scale,
+            width: f64::from(self.size.0) / self.scale,
+            height: f64::from(self.size.1) / self.scale,
+        }
+    }
+
+    /// How the cross-window drag hit test sees this window.
+    fn hit_rect(self, label: &str, hittable: bool) -> routing::WindowRect {
+        routing::WindowRect {
+            label: label.to_string(),
+            origin: self.origin,
+            size: self.size,
+            scale: self.scale,
+            hittable,
+        }
+    }
+}
+
 #[derive(Default)]
 struct GeometryState {
-    pending: Mutex<HashMap<String, WindowGeometry>>,
-    /// Whether a debounce thread is already going to drain `pending`.
+    rects: Mutex<HashMap<String, CachedRect>>,
+    /// Labels whose cached rect has not reached disk yet.
+    dirty: Mutex<HashSet<String>>,
+    /// Whether a debounce thread is already going to drain `dirty`.
     flushing: std::sync::atomic::AtomicBool,
 }
 
@@ -1548,38 +1705,47 @@ fn read_geometry(dir: &Path, label: &str) -> Option<WindowGeometry> {
     serde_json::from_str(&raw).ok()
 }
 
-/// Record this window's box and schedule the debounced write.
-fn note_geometry(app: &AppHandle, label: &str) {
-    let Some(window) = app.get_webview_window(label) else {
+/// Seed the cache from the platform. Once per window, at creation: from there
+/// the `Moved` / `Resized` payloads carry the new box themselves.
+fn seed_geometry(app: &AppHandle, label: &str) {
+    let (Some(state), Some(window)) = (
+        app.try_state::<GeometryState>(),
+        app.get_webview_window(label),
+    ) else {
         return;
     };
-    // A minimized window reports a nonsense box on some platforms; keep the
-    // last real one instead.
-    if window.is_minimized().unwrap_or(false) {
-        return;
-    }
-    let scale = window.scale_factor().unwrap_or(1.0);
     let (Ok(position), Ok(size)) = (window.outer_position(), window.outer_size()) else {
         return;
     };
-    let position = position.to_logical::<f64>(scale);
-    let size = size.to_logical::<f64>(scale);
+    guard(&state.rects).insert(
+        label.to_string(),
+        CachedRect {
+            origin: (position.x, position.y),
+            size: (size.width, size.height),
+            scale: window.scale_factor().unwrap_or(1.0),
+        },
+    );
+}
+
+/// Update the cached box from a window event and schedule the debounced write.
+/// The event carries the new value, so this costs no platform round trip; the
+/// minimized and scale checks belong to the flush, which runs once per window
+/// per debounce window rather than once per frame of a drag.
+fn note_geometry(app: &AppHandle, label: &str, origin: Option<(i32, i32)>, size: Option<(u32, u32)>) {
     let Some(state) = app.try_state::<GeometryState>() else {
         return;
     };
-    guard(&state.pending).insert(
-        label.to_string(),
-        WindowGeometry {
-            x: position.x,
-            y: position.y,
-            width: size.width,
-            height: size.height,
-        },
-    );
-    if state
-        .flushing
-        .swap(true, Ordering::SeqCst)
     {
+        let mut rects = guard(&state.rects);
+        let Some(rect) = rects.get_mut(label) else {
+            // No seed means no window we know of; a `Destroyed` racing the last
+            // `Moved` is the ordinary way here.
+            return;
+        };
+        rect.apply(origin, size);
+    }
+    guard(&state.dirty).insert(label.to_string());
+    if state.flushing.swap(true, Ordering::SeqCst) {
         return;
     }
     let app = app.clone();
@@ -1588,16 +1754,33 @@ fn note_geometry(app: &AppHandle, label: &str) {
         let Some(state) = app.try_state::<GeometryState>() else {
             return;
         };
-        let pending: HashMap<String, WindowGeometry> = std::mem::take(&mut guard(&state.pending));
+        let dirty: HashSet<String> = std::mem::take(&mut guard(&state.dirty));
         state.flushing.store(false, Ordering::SeqCst);
         let Ok(dir) = sessions_dir(&app) else { return };
-        for (label, geometry) in pending {
+        for label in dirty {
             // A window that closed inside the debounce took its geometry file
             // with it; do not resurrect one for it.
-            if app.get_webview_window(&label).is_none() {
+            let Some(window) = app.get_webview_window(&label) else {
+                continue;
+            };
+            // A minimized window reports a nonsense box on some platforms; keep
+            // the last real one instead.
+            if window.is_minimized().unwrap_or(false) {
                 continue;
             }
-            let Ok(json) = serde_json::to_string(&geometry) else {
+            let Some(rect) = ({
+                let mut rects = guard(&state.rects);
+                // Refreshed here, and only here: the drag hit test reads it
+                // between flushes, and a `Moved` is what follows a window
+                // crossing onto a display with a different scale factor.
+                rects.get_mut(&label).map(|rect| {
+                    rect.scale = window.scale_factor().unwrap_or(rect.scale);
+                    *rect
+                })
+            }) else {
+                continue;
+            };
+            let Ok(json) = serde_json::to_string(&rect.to_logical()) else {
                 continue;
             };
             if let Err(err) = write_file_atomically(&geometry_path(&dir, &label), &json) {
@@ -1926,6 +2109,9 @@ fn build_window(
     }
     #[cfg(target_os = "macos")]
     let _ = &window;
+    // The only platform read of this window's box: from here the `Moved` /
+    // `Resized` payloads keep the cache current (§Boot and geometry).
+    seed_geometry(app, label);
     Ok(())
 }
 
@@ -1972,9 +2158,10 @@ fn open_workspace_window(
     payload: JsonValue,
 ) -> Result<String, String> {
     let label = next_window_label(&windows);
+    let terminal_ids = payload_terminal_ids(&payload);
     // Ownership moves before the window exists, so every byte from this instant
     // is suppressed rather than painted in the window losing the Workspace.
-    windows.reassign(&payload_terminal_ids(&payload), &label);
+    windows.reassign(&terminal_ids, &label, true);
     // Positioned so the dragged tab lands under the cursor, at the source
     // window's size. Only Rust knows where the cursor is on screen, so the
     // webview sends the offset the tab should keep inside the new window.
@@ -2002,15 +2189,12 @@ fn open_workspace_window(
     guard(&windows.pending_boot).insert(label.clone(), payload.clone());
     if let Err(err) = build_window(&app, &label, geometry) {
         // Nothing will ever pull the payload, and the PTYs would stay
-        // suppressed and ownerless: hand them straight back.
+        // suppressed and ownerless: hand them straight back, unsuppressed.
         guard(&windows.pending_boot).remove(&label);
-        windows.reassign(&payload_terminal_ids(&payload), window.label());
-        for id in payload_terminal_ids(&payload) {
-            guard(&windows.awaiting_replay).remove(&id);
-        }
+        windows.reassign(&terminal_ids, window.label(), false);
         return Err(err);
     }
-    send_window_count(&app);
+    send_window_labels(&app);
     announce_departure(
         &app,
         window.label(),
@@ -2044,7 +2228,7 @@ fn transfer_workspace(
         "[window] transferring a Workspace from {} to {to}",
         window.label()
     ));
-    windows.reassign(&payload_terminal_ids(&payload), &to);
+    windows.reassign(&payload_terminal_ids(&payload), &to, true);
     // Forward before the content lands: the user dropped here, so this is the
     // window they are now looking at, and a background webview may be throttled
     // out of answering `adopt_ready` promptly.
@@ -2072,10 +2256,11 @@ fn adopt_ready(
     let label = window.label();
     // Exactly the arriving set: owned by this window and still suppressed.
     let ids: Vec<String> = {
-        let owners = guard(&windows.owners);
-        guard(&windows.awaiting_replay)
+        let routing = guard(&windows.routing);
+        routing
+            .awaiting_replay
             .keys()
-            .filter(|id| owners.get(*id).map(String::as_str) == Some(label))
+            .filter(|id| routing.owners.get(*id).map(String::as_str) == Some(label))
             .cloned()
             .collect()
     };
@@ -2110,6 +2295,11 @@ async fn remove_window_session(window: tauri::Window) -> Result<(), String> {
 
 /// Which window is under the cursor, in that window's own logical client space.
 ///
+/// Runs off the geometry cache (§Boot and geometry) rather than re-asking the
+/// platform for four numbers per window: a drag probes this ~16 times a second.
+/// Visibility is not cached, being the one part no window event carries
+/// reliably.
+///
 /// Tauri exposes no z-order, so among the windows containing the point the most
 /// recently focused wins — right for a drag, and the hover caret makes a wrong
 /// guess visible before release.
@@ -2117,26 +2307,16 @@ async fn remove_window_session(window: tauri::Window) -> Result<(), String> {
 fn window_at_cursor(
     app: AppHandle,
     windows: tauri::State<'_, WindowState>,
+    geometry: tauri::State<'_, GeometryState>,
 ) -> Option<routing::CursorHit> {
     let point = app.cursor_position().ok()?;
-    let rects: Vec<routing::WindowRect> = app
-        .webview_windows()
-        .into_iter()
-        .filter_map(|(label, window)| {
-            Some(routing::WindowRect {
-                label,
-                origin: {
-                    let position = window.outer_position().ok()?;
-                    (position.x, position.y)
-                },
-                size: {
-                    let size = window.outer_size().ok()?;
-                    (size.width, size.height)
-                },
-                scale: window.scale_factor().unwrap_or(1.0),
-                hittable: window.is_visible().unwrap_or(true)
-                    && !window.is_minimized().unwrap_or(false),
-            })
+    let rects: Vec<routing::WindowRect> = guard(&geometry.rects)
+        .iter()
+        .filter_map(|(label, rect)| {
+            let window = app.get_webview_window(label)?;
+            let hittable =
+                window.is_visible().unwrap_or(true) && !window.is_minimized().unwrap_or(false);
+            Some(rect.hit_rect(label, hittable))
         })
         .collect();
     let focus_order = guard(&windows.focus_order).clone();
@@ -2244,17 +2424,13 @@ fn window_close_cancel(window: tauri::Window, state: tauri::State<'_, QuitState>
     guard(&state.close).clear(window.label());
 }
 
-// The window archived its notes, removed its snapshot and killed its PTYs.
+// This window is done with itself: its close orchestrator archived, removed the
+// snapshot and killed its PTYs, or its last Workspace moved away and there was
+// nothing to end at all. Rust's half is the same either way; what separates the
+// two is what the webview did first, so the intent lives at the call sites
+// (standalone/src/window-close.ts, standalone/src/workspace-move.ts).
 #[tauri::command]
-fn window_close_proceed(app: AppHandle, window: tauri::Window) {
-    finish_window_close(&app, window.label());
-}
-
-// A window whose last Workspace moved away closes with no confirmation, no
-// archive and no kill: its Surfaces are alive in another window
-// (docs/specs/standalone.md §Transfer).
-#[tauri::command]
-fn close_window_self(app: AppHandle, window: tauri::Window) {
+fn close_window(app: AppHandle, window: tauri::Window) {
     finish_window_close(&app, window.label());
 }
 
@@ -2826,8 +3002,13 @@ pub fn run() {
                         state.touch_focus(window.label());
                     }
                 }
-                WindowEvent::Moved(_) | WindowEvent::Resized(_) => {
-                    note_geometry(app, window.label());
+                // The payload is the new box, so nothing is asked of the
+                // platform here (§Boot and geometry).
+                WindowEvent::Moved(position) => {
+                    note_geometry(app, window.label(), Some((position.x, position.y)), None);
+                }
+                WindowEvent::Resized(size) => {
+                    note_geometry(app, window.label(), None, Some((size.width, size.height)));
                 }
                 // The close button: this window alone unless it is the last one,
                 // which is the whole-app quit (§Per-window close). Gated on the
@@ -2847,6 +3028,13 @@ pub fn run() {
                 WindowEvent::Destroyed => {
                     if let Some(state) = app.try_state::<WindowState>() {
                         state.drop_window(window.label());
+                        // The webview is gone, so no save can arrive under this
+                        // label again and the refusal can go with it.
+                        guard(&state.closing).remove(window.label());
+                    }
+                    if let Some(state) = app.try_state::<GeometryState>() {
+                        guard(&state.rects).remove(window.label());
+                        guard(&state.dirty).remove(window.label());
                     }
                 }
                 _ => {}
@@ -2917,8 +3105,11 @@ pub fn run() {
             if let Some(state) = app.try_state::<WindowState>() {
                 state.touch_focus(routing::MAIN_LABEL);
             }
+            // `main` came up from the config, so nothing has seeded its cached
+            // box; the drag hit test reads that cache (§Boot and geometry).
+            seed_geometry(app.handle(), routing::MAIN_LABEL);
             // The Burrow fans an ask out to every window and collects N answers.
-            send_window_count(app.handle());
+            send_window_labels(app.handle());
 
             Ok(())
         })
@@ -2939,8 +3130,7 @@ pub fn run() {
             pty_request_init,
             dor_control_response,
             burrow_command,
-            alert_set_watched,
-            alert_publish_settings,
+            alert_command,
             kill_sidecar_now,
             quit_ack,
             quit_vote,
@@ -2950,8 +3140,7 @@ pub fn run() {
             quit_proceed,
             window_close_ack,
             window_close_cancel,
-            window_close_proceed,
-            close_window_self,
+            close_window,
             open_workspace_window,
             transfer_workspace,
             adopt_ready,
@@ -3521,6 +3710,44 @@ mod tests {
         assert_eq!(
             super::routing::restorable_labels(&names),
             vec!["main".to_string(), "ws-2".to_string()]
+        );
+    }
+
+    /// The cached box is fed by the window events alone, and it is what both the
+    /// debounced write and the cross-window drag read (§Boot and geometry).
+    #[test]
+    fn the_geometry_cache_folds_window_events_and_drives_the_hit_test() {
+        let mut rect = super::CachedRect {
+            origin: (0, 0),
+            size: (800, 600),
+            scale: 2.0,
+        };
+        // A `Moved` carries only the origin, a `Resized` only the size.
+        rect.apply(Some((100, 40)), None);
+        rect.apply(None, Some((1000, 700)));
+        assert_eq!(rect.origin, (100, 40));
+        assert_eq!(rect.size, (1000, 700));
+
+        // Stored logical, so the box reopens sensibly on another display.
+        let geometry = rect.to_logical();
+        assert_eq!(
+            (geometry.x, geometry.y, geometry.width, geometry.height),
+            (50.0, 20.0, 500.0, 350.0)
+        );
+
+        // The same cached rect is the hit test's input: a point inside the box
+        // it moved to hits, and the client-space answer is relative to it.
+        let hit = super::routing::window_at(
+            &[rect.hit_rect("ws-2", true)],
+            &["ws-2".to_string()],
+            (300.0, 240.0),
+        )
+        .expect("the moved window is under the cursor");
+        assert_eq!((hit.label.as_str(), hit.x, hit.y), ("ws-2", 100.0, 100.0));
+        // Outside the box it moved to, and inside the one it left.
+        assert_eq!(
+            super::routing::window_at(&[rect.hit_rect("ws-2", true)], &[], (10.0, 10.0)),
+            None
         );
     }
 

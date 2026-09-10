@@ -45,8 +45,6 @@ pub struct WindowQuit {
     pub acked: bool,
     /// It has decided to quit (its confirmation and archive gates are done).
     pub voted: bool,
-    /// Teardown has actually begun in this window, so the deadline may run.
-    pub tearing_down: bool,
     /// Bumped at each teardown phase boundary; the watchdog treats a bump as
     /// progress and refreshes its budget.
     pub progress: u64,
@@ -67,9 +65,9 @@ pub struct QuitMachine {
 impl QuitMachine {
     /// A quit trigger over the live windows.
     ///
-    /// Never clears a window's `tearing_down`: a repeat trigger fired
-    /// mid-teardown must keep it set, or the fresh watchdog drops into the
-    /// unbounded voting wait and stops bounding the teardown in flight.
+    /// Never clears `voted` once the walk has started: a repeat trigger fired
+    /// mid-teardown must leave the walk in flight, or the fresh watchdog drops
+    /// into the unbounded voting wait and stops bounding it.
     pub fn request(&mut self, labels: &[String]) -> (u64, Vec<QuitAction>) {
         self.seq += 1;
         let walking = matches!(self.phase, QuitPhase::Walking { .. });
@@ -94,9 +92,7 @@ impl QuitMachine {
     }
 
     pub fn progress(&mut self, label: &str) {
-        let entry = self.windows.entry(label.to_string()).or_default();
-        entry.tearing_down = true;
-        entry.progress += 1;
+        self.windows.entry(label.to_string()).or_default().progress += 1;
     }
 
     /// This window is ready to be torn down. The last vote starts the walk.
@@ -343,7 +339,7 @@ mod tests {
     }
 
     #[test]
-    fn a_repeat_trigger_re_emits_without_clearing_tearing_down() {
+    fn a_repeat_trigger_re_emits_without_interrupting_the_walk() {
         let mut quit = QuitMachine::default();
         quit.request(&labels(&["main", "ws-2"]));
         quit.vote("main");
@@ -354,9 +350,11 @@ mod tests {
         let (seq, actions) = quit.request(&labels(&["main", "ws-2"]));
         assert_eq!(seq, 2);
         assert_eq!(actions, vec![QuitAction::RequestAll]);
-        // The walk survives, and so does the in-flight teardown's own flag.
+        // The walk survives, and so does the in-flight teardown's progress —
+        // which is what keeps the fresh watchdog bounding it rather than
+        // dropping into the unbounded voting wait.
         assert!(matches!(quit.phase, QuitPhase::Walking { .. }));
-        assert!(quit.windows["ws-2"].tearing_down);
+        assert_eq!(quit.walking_progress(), Some(("ws-2".into(), 1)));
         // The stale watchdog stands down; the fresh one bounds the same teardown.
         assert!(quit.stale(1));
         assert!(!quit.stale(2));
