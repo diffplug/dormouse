@@ -1,5 +1,6 @@
 import { Component, type ReactNode } from "react";
 import { Wall } from "./components/Wall";
+import { WorkspaceWindow } from "./components/WorkspaceWindow";
 import { ThemeDebuggerGlobal } from "./components/ThemeDebugger";
 import type { PersistedDoor, PersistedSurfaceRefs } from "./lib/session-types";
 
@@ -31,6 +32,7 @@ export default function App({
   baseboardNotice,
   dialogHost,
   enableBurrow,
+  multiWorkspace = false,
 }: {
   initialPaneIds?: string[];
   restoredLathLayout?: unknown;
@@ -40,10 +42,15 @@ export default function App({
   baseboardNotice?: ReactNode;
   dialogHost?: ReactNode;
   enableBurrow?: boolean;
+  /** Render one Wall per Workspace instead of one for the whole page. Only the
+   *  standalone host sets it; VS Code and the website playground mount a bare
+   *  Wall (docs/specs/layout.md → "Workspaces"). */
+  multiWorkspace?: boolean;
 }) {
+  const Shell = multiWorkspace ? WorkspaceWindow : Wall;
   return (
     <ErrorBoundary>
-      <Wall initialPaneIds={initialPaneIds} restoredLathLayout={restoredLathLayout} initialDoors={initialDoors} initialSurfaceRefs={initialSurfaceRefs} initialSurfaceRefsNext={initialSurfaceRefsNext} baseboardNotice={baseboardNotice} dialogHost={dialogHost} enableBurrow={enableBurrow} />
+      <Shell initialPaneIds={initialPaneIds} restoredLathLayout={restoredLathLayout} initialDoors={initialDoors} initialSurfaceRefs={initialSurfaceRefs} initialSurfaceRefsNext={initialSurfaceRefsNext} baseboardNotice={baseboardNotice} dialogHost={dialogHost} enableBurrow={enableBurrow} />
 
       <ThemeDebuggerGlobal />
     </ErrorBoundary>
