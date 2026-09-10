@@ -30,6 +30,19 @@
 
 **The `<unnamed>` seed skip is lossy, deliberately.** Persistence cannot tell a deliberate `<unnamed>` pin from the default panel placeholder, so a user who pinned it gets the derived header back on reload — cheaper than seeding every default placeholder as a real user title.
 
+## Transferring a Workspace
+
+The suppression is bounded and fails open because the two failures are not
+symmetric: duplicated bytes are a cosmetic repeat the user can scroll past, and
+a permanently silenced pane is a terminal they have to kill. The host's own
+measurements and the ordering the guarantee rests on are
+`docs/specs/standalone.rationale.md` → Transfer.
+
+Release-without-kill is a separate verb rather than a flag on the closure path
+because the closure path is reachable from an unmount and this must not be. The
+two differ in exactly one line, and that line is the whole difference between
+moving a Workspace and losing it.
+
 ## Message protocol
 
 **What the broadcast buys.** Unambiguous settling is only half of it: the same fan-out lets a losing window forward a command to the broker window and receive the answer back (`docs/specs/vscode.md` → "Peer surfaces across windows").

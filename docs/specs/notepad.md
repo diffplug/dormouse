@@ -140,6 +140,8 @@ Source of truth: `archiveSurfaceNotes` in `lib/src/lib/notepad/close-coordinator
 
 **Archiving is a gate step before teardown**: after the running-work confirmation, or immediately on an all-idle quit, and **before the first `quit_progress`** (`docs/specs/standalone.md` → "Quit flow"; rationale). **It is bounded at 3 s.**
 
+**Both deliberate endings run the same gate**, over their own window's Surfaces: a quit, and closing one window of several (`docs/specs/standalone.md` → "Per-window close"). **Moving a Workspace to another window runs neither** — nothing ended, so the notes ride the move and the target hydrates them, minus their pins, which are markers in the xterm instances the source disposed. **Several windows archiving at once contend through the archive's own file lock and compare-and-swap retry** ([The archive port](#the-archive-port)), so a window whose write lost the race retries against fresh bytes rather than dropping the other window's batches.
+
 **Standalone still archives at quit even though it now restores its windows** (`docs/specs/transport.md` → "The governing rule"): VS Code's live notes survive a Reload only through the extension host's in-memory mirror ([Live resume](#live-resume)), and quitting standalone leaves no such survivor.
 
 - **A failure or timeout leaves the quit pending in Rust**, whose phase-2 wait is unbounded for exactly this (`docs/specs/standalone.md` → "Quit flow"), and the dialog shows the error with **Cancel** (default) and **Quit anyway**, which discards the notes. **Only Cancel calls `quit_cancel`**: Quit anyway must reach teardown with the watchdog still armed.
@@ -149,7 +151,7 @@ Source of truth: `archiveSurfaceNotes` in `lib/src/lib/notepad/close-coordinator
 
 The store is `<app_data_dir>/notepad-archive-v1.json`, **outside `sessions/` and outside the state root**, so every build shares one — a Surface's notes outlive the window whose closure archived them, so they must not ride the per-window session blob or the sweep over its directory. **It is written owner-only and atomically through the same `write_file_atomically` the session snapshot uses** (`docs/specs/security-local.md` → "Persisted state"). **The revision is a hash of the stored bytes, and every load, save and reset holds an exclusive lock on the sidecar `notepad-archive-v1.lock`** — a second Dormouse sharing `app_data_dir()`, a dev build beside the installed app, then conflicts instead of overwriting batches it never read. **Recovery renames it to `notepad-archive-v1.unreadable-<unix-millis>.json` beside the original**, disambiguating rather than overwriting an earlier quarantine; only a temp file a crash left behind is dropped.
 
-Source of truth: `archiveNotesBeforeQuit` in `standalone/src/quit.ts`, the `'archive-failed'` phase in `standalone/src/quit-confirm-store.ts`; `write_notepad_archive_to`, `lock_notepad_archive` and `reset_notepad_archive_at` in `standalone/src-tauri/src/lib.rs`; the port in `standalone/src/tauri-adapter.ts`.
+Source of truth: `archiveNotesBeforeTeardown` in `standalone/src/teardown-archive.ts`, the `'archive-failed'` phase in `standalone/src/quit-confirm-store.ts`; `write_notepad_archive_to`, `lock_notepad_archive` and `reset_notepad_archive_at` in `standalone/src-tauri/src/lib.rs`; the port in `standalone/src/tauri-adapter.ts`.
 
 ## VS Code lifecycle
 

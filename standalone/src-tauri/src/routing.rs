@@ -36,7 +36,7 @@ pub enum Route {
     Drop,
     /// A `dor` control request naming a Surface no window owns. Answered with
     /// an error rather than handed to a sibling, which would act on the wrong
-    /// terminal (docs/specs/dor-cli.md -> "Control socket").
+    /// terminal (docs/specs/dor-cli.md -> "Standalone").
     UnownedSurface {
         request_id: String,
         surface_id: String,

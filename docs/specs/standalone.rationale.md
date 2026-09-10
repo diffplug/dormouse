@@ -24,6 +24,64 @@
 
 **Why a failed read must not be memoized.** The read errors that are neither `ENOENT` nor a parse failure — EACCES, EIO, a handle held open on Windows — say nothing about what the file holds; answering them empty, or caching that emptiness, lets the next save overwrite unseen state with nothing, since every change is a read-modify-write of the whole file.
 
+## Routing
+
+Rust routes rather than the webview filtering, because a webview cannot be
+trusted to drop another window's bytes: it would still have received them, and
+`pty:data` is the hot path.
+
+Tauri delivers an `emit_to` event to **any** listener registered with the default
+`Any` target — `match_any_or_filter` in its event listener short-circuits before
+the target filter runs — and the JS `listen()` registers exactly that. The first
+two-window build therefore had each window taking the other's `pty:list` at boot
+and adopting its PTYs as unowned, which corrupted both snapshots; nothing
+errored. Measured against tauri 2.11.5, 2026-09.
+
+## Boot and geometry
+
+`tauri-plugin-window-state` would have been a second store answering "which
+windows exist", a new Cargo *and* npm dependency riding the disclosure
+regeneration and the cooldown, and it still would not have done the boot
+enumeration — which is already Rust's job, beside the snapshots it reads.
+
+The cap is a ceiling on one launch, not a limit on how many windows may exist:
+the excess snapshots stay on disk untouched, so raising the cap restores them.
+
+## Transfer
+
+The `adopt_ready` hop exists because the alternative is a race with no safe
+side. If Rust listed and replayed as part of the transfer, the target's
+collector might not be armed yet and the replay would be lost; if the target
+armed first and asked for the whole Window, it would take every sibling's PTY.
+Asking for exactly the suppressed set, only once the collector exists, has
+neither failure.
+
+The suppression window is what makes "no duplicate, no loss" true. `pty-core`
+appends to its replay buffer synchronously before it emits, and Rust's single
+reader thread processes sidecar lines in order — so a chunk emitted between the
+ownership move and the replay is dropped once and present in the replay exactly
+once (`pty-core.test.js`, "a chunk emitted just before list([id]) appears in the
+replay exactly once").
+
+It fails open after 5 s rather than closed: a transfer whose `adopt_ready` never
+arrived would otherwise silence its panes for the rest of the session, and
+duplicated bytes are recoverable where a dead pane is not.
+
+## Dragging a Workspace between windows
+
+Spiked before the drag was built, because it was the one unverified platform
+assumption and the fallback (a Rust `cursor_position()` polling loop driven by
+the source's own pointer events) was a different design.
+
+A WKWebView pointer captured on an element keeps receiving `pointermove` and
+`pointerup` far outside the window, with client coordinates that run past the
+edges and negative rather than clamping — measured against macOS 26.6 / WKWebView,
+2026-09, by synthesizing an AppKit drag whose later points fall outside a
+400×300 window and reading the page's own event log: `down` inside the element,
+then moves at client x 600 and (900, −152), then the release. So the gesture
+stays the webview's throughout and no polling loop is needed; the drag
+controller must simply not assume in-range coordinates.
+
 ## Persistence
 
 **The WKWebView WAL measurement.** WKWebView stores `localStorage` as SQLite in WAL mode, and WebKit pins that WAL with a long-lived reader that never advances during a running session — so it is never checkpointed, and an external checkpoint is blocked by the same reader. Rewriting the multi-MB scrollback-bearing session blob on every save grew the WAL to ~1 GB within a few hours (recorded 2026-07); a days-long session made it pathological. The Rust file store that replaced it has no WAL and rewrites the same file each time.

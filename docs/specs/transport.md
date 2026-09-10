@@ -61,12 +61,16 @@ Platform host (always running while the adapter is active)
 │   ├── pty-2 (Process: Live)
 │   └── pty-3 (Process: Exited)
 │
-├── Webview (e.g. VS Code WebviewView, standalone window)
+├── Webview (e.g. VS Code WebviewView, a standalone window)
 │   └── message-router: owns pty-1, pty-2
 │
-└── Optional secondary webview (e.g. VS Code editor-tab WebviewPanel)
+└── Secondary webview (a VS Code editor-tab WebviewPanel, another standalone window)
     └── message-router: owns pty-3
 ```
+
+**Every host is multi-webview.** Ownership is what keeps one webview's traffic
+out of another's, and each host owns the map: `docs/specs/vscode.md` → "Peer
+surfaces across windows", `docs/specs/standalone.md` → Routing.
 
 - **Hiding a webview does not kill its PTYs**, and becoming visible again resumes over the still-owned ones ("Reconnection protocol").
 - **A naturally exited PTY may stay mounted as an exited pane**; frontend semantic state — CWD, title candidates, last command — is retained until the Session is disposed.
@@ -98,6 +102,27 @@ VS Code's `pty-manager` keeps two buffers plus one counter per PTY. **Must cap e
 **Seeded titles reject the sentinels.** Saved pane and door titles come back through `setTerminalUserTitle()`, which rejects the reserved `<idle>` prefix (`docs/specs/terminal-state.md` → Supported OSC Inputs), and the seed callers in `terminal-lifecycle.ts` additionally skip `<unnamed>`, the default panel placeholder (rationale).
 
 **Must follow `docs/specs/notepad.md` → "Live resume" for browser-only resumes.**
+
+#### Transferring a Workspace
+
+A Workspace can move from one webview to another with its Sessions still
+running (`docs/specs/standalone.md` → Transfer). It is a resume, not a restore,
+and it turns on three rules:
+
+- **Release, never dispose.** The source detaches its half of each Session —
+  the alert, the pins, the listeners, the element, the xterm instance — and
+  **does not kill the PTY** (`releaseSession` in
+  `lib/src/lib/terminal-lifecycle.ts`). **Never reachable from a webview
+  unmount**: a Wall unmounts on a reload and on a StrictMode double-mount, and
+  releasing there would strand every PTY the window still owns.
+- **Suppress until the replay.** The host moves ownership synchronously and
+  drops the moving PTYs' output until each one's replay has reached the new
+  owner, so no byte is painted twice and none is lost. It fails open after a
+  bound rather than silencing a pane forever (rationale).
+- **Ask for exactly the moving ids.** `pty:requestInit` names them, and
+  `list(ids)` follows the same **omitted is not empty** rule `interrupt` carries
+  — a caller forwarding a computed set that came out empty gets a no-op, not
+  every PTY in the process.
 
 **Cold restore** (neither live PTYs nor a browser-only resume) falls back to saved session state: new PTYs in the saved CWDs under the currently selected Dormouse shell, plus the saved Lath layout. No transcript is replayed ("What is persisted"), and any pane carrying a recovery command auto-runs it. `reconnect.ts` waits 500 ms for the PTY list.
 
@@ -202,6 +227,8 @@ something ends it:
 | --- | --- | --- |
 | Standalone quit — idle, confirmed, or update-install | No — window state is the app's contract | Restore structure + auto-resume agents |
 | Standalone window reload | No | Live resume over sidecar PTYs, per Workspace |
+| Standalone per-window close, one of several | Yes | Fresh: that window's notes archived, its PTYs killed, its snapshot removed |
+| Standalone Workspace transfer between windows | Neither — nothing ended | The same Sessions, resumed in the other window |
 | Standalone crash / force-kill | No, and the last save stands | Restore structure, no agent resume |
 | VS Code panel hide/show | No | Live resume over host PTYs, unchanged |
 | VS Code Reload Window | No — an editor operation, not an ending | Restore structure + auto-resume agents |

@@ -64,12 +64,12 @@ Workspace and Window are containers, not Session layers — they group Surfaces 
 
 | Container | Holds | Owner |
 |---|---|---|
-| **Window** | One or more Workspaces; the OS frame (the standalone Tauri window) or the host frame (a VS Code window). | host (Tauri / VS Code) |
+| **Window** | One or more Workspaces; the OS frame (a standalone Tauri window) or the host frame (a VS Code window). A host may hold several, and a Workspace may move between them. Its **Tauri label is its persistence identity** — one snapshot per label (`docs/specs/standalone.md` → Windows). | host (Tauri / VS Code) |
 | **Workspace** | "A window's worth of panes": a `WorkspaceId`, a user-facing `name`, its Panes and Surfaces, and the layout arranging them (Lath snapshot + doors). Exactly one **Wall** renders one Workspace. | `lib/src/lib/workspace-store.ts` (the model), `lib/src/components/Wall.tsx` at render time; persisted per `docs/specs/transport.md` |
 
 How many Workspaces a Window shows at once is host-specific:
 
-- **Standalone** mounts every Workspace's Wall at once and shows one, switching between them (`docs/specs/layout.md` → Workspaces).
+- **Standalone** mounts every Workspace's Wall at once and shows one, switching between them (`docs/specs/layout.md` → Workspaces); a Window may be one of several.
 - **VS Code** maps one Workspace to one webview, several visible at once: the sidebar/panel `WebviewView` is the default Workspace, each `dormouse.open` editor-tab `WebviewPanel` an independent one owning its Sessions' PTYs and browser Surfaces (`docs/specs/vscode.md`).
 
 ### Wall chrome
@@ -202,8 +202,10 @@ A user verb is an intentional action that produces a single observable change.
 | `closeWorkspace` | `kill` each member Surface, then remove the Workspace; the last remaining Workspace cannot be closed. |
 | `renameWorkspace` | Update a Workspace's `name`; touches no Session |
 | `moveWorkspace` | Reorder a Workspace within its Window; renumbers the positional `workspace:<n>` refs and touches no Session |
+| `transferWorkspace` | Move a Workspace to another Window, Surfaces and Sessions intact: `release` each member Session (detached, Process still Live) and resume it there. Kills nothing and archives nothing — not a `closeWorkspace`. |
+| `tearOut` | `transferWorkspace` into a Window created for it. A Window whose last Workspace leaves closes itself. |
 
-Source of truth: `setActiveWorkspace` / `createWorkspace` / `closeWorkspace` / `renameWorkspace` / `moveWorkspace` in `lib/src/lib/workspace-store.ts`; `closeAll` in `lib/src/components/Wall.tsx`.
+Source of truth: `setActiveWorkspace` / `createWorkspace` / `closeWorkspace` / `renameWorkspace` / `moveWorkspace` in `lib/src/lib/workspace-store.ts`; `closeAll` in `lib/src/components/Wall.tsx`; `releaseWorkspaceForTransfer` in `lib/src/components/wall/workspace-transfer.ts`.
 
 ### System verbs
 
@@ -212,6 +214,7 @@ A system verb is a lifecycle transition driven by the runtime.
 | Verb | Effect |
 |---|---|
 | `register` / `dispose` | Create / destroy a Registry entry |
+| `release` | Destroy a Registry entry **without** killing its Process (Registry: Mounted → Disposed, Process: Live → Live). The one verb a `transferWorkspace` runs, and never reachable from an unmount. |
 | `mount` / `unmount` | Attach / detach the persistent DOM element (low-level op; the Registry entry survives `unmount`). A **parked** leaf stays mounted while `Doored` or `Hidden` (`docs/specs/tiling-engine.md` → "Parked leaves") |
 | `exit` | Host observes process death (Process: Live → Exited) |
 | `resume` | Webview reopens over retained PTYs (Link: Severed → Resuming → Live; Registry rebuilt from replay data; Process stays Live/Exited) |

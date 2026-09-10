@@ -181,7 +181,7 @@ fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
             surface_id,
         } => {
             // Never a sibling window: acting on the wrong terminal is worse
-            // than failing (docs/specs/dor-cli.md → "Control socket").
+            // than failing (docs/specs/dor-cli.md → "Standalone").
             if let Some(sidecar) = app.try_state::<SidecarState>() {
                 let response = serde_json::json!({
                     "event": "dor:controlResponse",

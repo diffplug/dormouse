@@ -138,9 +138,11 @@ behind is `docs/specs/security-remote.md` -> "Credentials at rest".
 **Session snapshots are owner-only before any bytes are written.** Standalone
 persists one window's structure per file as `<state root>/sessions/<label>.json`
 — panes, cwds, titles, doors, layout, TODO flags, never terminal text
-(`docs/specs/standalone.md` -> "Persistence"). `restrict_to_owner` locks the
-directory and, *first*, the temp file renamed into it, applying a protected
-single-ACE DACL on Windows where a unix mode is a silent no-op. The same helper
+(`docs/specs/standalone.md` -> "Persistence"), plus a
+`<label>.geometry.json` sibling holding that window's box and nothing else.
+`restrict_to_owner` locks the directory and, *first*, the temp file renamed into
+it, applying a protected single-ACE DACL on Windows where a unix mode is a
+silent no-op. The same helper
 locks the whole standalone app-data directory before the sidecar spawns.
 
 **No writer persists scrollback** (`docs/specs/transport.md` -> "What is
@@ -181,7 +183,7 @@ lands at the umask — readable by another local account wherever `<tmpdir>` is
 shared (rationale). No log call carries PTY bytes; the `dor` control socket path
 does. A gap, not an accepted risk.
 
-- **FAIL IF** `write_file_atomically` in `standalone/src-tauri/src/lib.rs` stops restricting the directory and the file it writes to the owning user on **every** platform `restrict_to_owner` has an arm for — `0700`/`0600` on unix, and on Windows a DACL protected from inheritance carrying exactly one ACE for the current user, asserted by `restrict_to_owner_leaves_one_owner_only_ace` — or if either of its two callers, `write_session_to` (the session snapshot) and `write_notepad_archive_to` (the notepad archive), stops going through it. `session_write_tightens_directory_and_existing_temp_file` pins unix modes; `session_permission_failures_preserve_previous_snapshot_without_writing_bytes` pins both failure gates. The mode reaches the temp file *before* any bytes are written (rationale).
+- **FAIL IF** `write_file_atomically` in `standalone/src-tauri/src/lib.rs` stops restricting the directory and the file it writes to the owning user on **every** platform `restrict_to_owner` has an arm for — `0700`/`0600` on unix, and on Windows a DACL protected from inheritance carrying exactly one ACE for the current user, asserted by `restrict_to_owner_leaves_one_owner_only_ace` — or if any of its three callers — `write_session_to` (the session snapshot), the window-geometry sibling beside it, and `write_notepad_archive_to` (the notepad archive) — stops going through it. `session_write_tightens_directory_and_existing_temp_file` pins unix modes; `session_permission_failures_preserve_previous_snapshot_without_writing_bytes` pins both failure gates. The mode reaches the temp file *before* any bytes are written (rationale).
 - **FAIL IF** the VS Code notepad archive key — `NOTEPAD_ARCHIVE_KEY` in `vscode-ext/src/notepad-archive-store.ts` — is passed to `context.globalState.setKeysForSync`, directly or as part of any list. It holds captured terminal excerpts, their CWDs, and their Surface titles, and Settings Sync would copy them to every machine the account signs into. Nothing in the extension calls that API today, so the rule is kept by that call not existing; a call added for anything else must exclude this key.
 
 Source of truth: `SESSION_STATE_KEY` in `vscode-ext/src/session-state.ts`,

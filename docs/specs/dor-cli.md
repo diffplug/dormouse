@@ -143,6 +143,12 @@ Control direction: `dor` → sidecar JSON-lines net socket → Rust command/even
 bridge → `TauriAdapter` `CustomEvent("dormouse:control-request")` → Wall
 handler, and back along the same hops.
 
+**A request is routed to the window that owns its `DORMOUSE_SURFACE_ID`**, and
+one naming no Surface goes to the focused window. **A Surface no window owns
+fails** — `No Dormouse window owns surface '<id>'` — rather than being handed to
+a sibling, which would act on the wrong terminal
+(`docs/specs/standalone.md` → Routing).
+
 ### VS Code
 
 `vscode-ext/package.json` runs `pnpm stage:dor-cli` before bundling the
@@ -246,8 +252,10 @@ and each host's hop in `standalone/src/tauri-adapter.ts`,
 
 `Window ⊃ Workspace ⊃ Pane ⊃ Surface` (`docs/specs/glossary.md`). **User-facing
 `dor` commands expose Surface handles only**, and because a Window can hold
-several Workspaces the handle model reserves `workspace:<n|name>` and
-`window:<n>` refs.
+several Workspaces — and standalone can hold several Windows — the handle model
+reserves `workspace:<n|name>` and `window:<n>` refs. `Reserved:` no command
+takes a `window:<n>` yet; a request reaches the window that owns its Surface
+instead (§Standalone), which is what `## Future` → `dor workspace` builds on.
 
 Invariants:
 
@@ -313,7 +321,8 @@ and the dispatching webview cannot drift. `surface.list` joins the current
 Workspace's Surfaces — visible panes **plus minimized (doored)** ones, each
 tagged `view` (`paned` / `zoomed` / `minimized`) — with terminal state and
 activity snapshots, and reports the answering Workspace's own `workspace:<n>`
-alongside `window:1`. Per the
+alongside `window:1` — every Window still answers `window:1`, since no command
+takes a Window ref yet (Handle Model). Per the
 visible-vs-listed split [Handle Model](#handle-model) states, **a visible split
 reference adds a pane in Lath, a minimized one a sibling Door in the
 baseboard.** **`dor list` rows sort by the Workspace-stable `surface:N` ref**, a
