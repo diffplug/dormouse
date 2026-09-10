@@ -17,7 +17,7 @@ import { AgentBrowser } from './ab.mjs';
 import { addVirtualAuthenticator, attachPage, pageUrl, virtualCredentials } from './cdp.mjs';
 import { launchChrome, resolveChrome } from './chrome.mjs';
 import { blankY4m, crop, decodeQr, imageSize, toY4m, upscale } from './qr.mjs';
-import { delay, findFreePort, spawnLogged, waitFor, waitForLine } from './proc.mjs';
+import { delay, spawnLogged, waitFor, waitForLine } from './proc.mjs';
 
 /**
  * The Pocket browser's viewport: a phone, because every Pocket screen is laid
@@ -47,6 +47,15 @@ const SCAN_LABEL = 'Scan a setup code';
  * failed build but a ten-minute stall against a live Chrome and a real Relay.
  */
 const BURROW_STATE_DIR_LINE = /burrow state dir: (.+)$/;
+
+/**
+ * The Vite origin the harness serves the app on, and the Relay's own bound
+ * origin. Both are OS-assigned, so these lines are the only way the run learns
+ * them — and both are pinned by `lib/src/lib/mirrored-constants.test.ts` for
+ * the same reason {@link BURROW_STATE_DIR_LINE} is.
+ */
+const APP_URL_LINE = /app URL: (http:\/\/localhost:\d+)/;
+const RELAY_LISTENING_LINE = /relay listening on .* \(origin (http:\/\/localhost:\d+)\)/;
 
 /**
  * The phone's two-digit screen, by the accessible name of the live region that
@@ -218,7 +227,7 @@ async function stepRelay(ctx) {
   const stateDir = ctx.path('relay-state');
   const built =
     existsSync(join(repoRoot, 'lib', 'dist-pocket', 'index.html')) &&
-    existsSync(join(repoRoot, 'relay', 'dist', 'index.js'));
+    existsSync(join(repoRoot, 'relay', 'dist', 'start.js'));
   const skipBuild = opts.skipBuild && built;
   if (opts.skipBuild && !built) {
     ctx.log('--skip-build ignored: lib/dist-pocket or relay/dist is missing');
@@ -226,11 +235,19 @@ async function stepRelay(ctx) {
 
   const handle = spawnLogged(
     'pnpm',
-    skipBuild ? ['--filter', 'relay', 'start'] : ['dev:relay'],
+    // `dev:built` is `dev:relay` without the build, so both paths run the same
+    // dev runner and derive the origin the same way.
+    skipBuild ? ['--filter', 'relay', 'run', 'dev:built'] : ['dev:relay'],
     {
       cwd: repoRoot,
       logPath: ctx.path('relay.log'),
       prefix: 'relay',
+      // **Every inherited `DORMOUSE_` setting is dropped, not blanked.** A
+      // developer with an installed deployment's variables exported would
+      // otherwise have the run reuse its enrollment offer, publish this dev pid
+      // into its runtime record, or turn push on — and blanking cannot express
+      // "unset" for the ones `readConfig` reads with `??` rather than `||`.
+      dropEnv: /^(DORMOUSE_|PORT$)/,
       env: {
         DORMOUSE_STATE_DIR: stateDir,
         // Everything in a run is local to this machine, so the walkthrough's
@@ -238,15 +255,18 @@ async function stepRelay(ctx) {
         // of it (`docs/specs/security-remote.md` -> "Network posture
         // (self-hosted)"): unset, the Relay binds every interface.
         DORMOUSE_BIND_HOST: '127.0.0.1',
-        PORT: String(ctx.relayPort),
+        PORT: '0',
       },
     },
   );
 
-  await waitForLine(handle, /relay listening on/, {
+  const listening = await waitForLine(handle, RELAY_LISTENING_LINE, {
     timeoutMs: skipBuild ? 60_000 : 600_000,
     what: 'the Relay to bind',
   });
+  ctx.relayOrigin = listening[1];
+  ctx.record({ relayOrigin: ctx.relayOrigin });
+  ctx.log(`relay ${ctx.relayOrigin}`);
   // The log line lands from inside the `listen` callback; a request is what
   // proves the socket actually answers.
   await waitFor(
@@ -289,8 +309,8 @@ async function stepBurrow(ctx) {
     env: {
       DORMOUSE_REMOTE_CONNECT_SRC: `${ctx.relayOrigin} ${ctx.relayOrigin.replace(/^http/, 'ws')}`,
       DORMOUSE_BROWSER_DEV_AB_SESSION: opts.session,
-      DORMOUSE_BROWSER_DEV_VITE_PORT: String(opts.vitePort),
-      DORMOUSE_BROWSER_DEV_HOST_PORT: String(opts.hostPort),
+      DORMOUSE_BROWSER_DEV_VITE_PORT: '0',
+      DORMOUSE_BROWSER_DEV_HOST_PORT: '0',
     },
   });
 
@@ -306,10 +326,16 @@ async function stepBurrow(ctx) {
     timeoutMs: 300_000,
     what: 'the harness to finish opening the app',
   });
-  ctx.record({ burrowStateDir: stateLine[1].trim(), viteOrigin: ctx.viteOrigin });
+  const appLine = await waitForLine(handle, APP_URL_LINE, {
+    timeoutMs: 300_000,
+    what: 'the harness to report the app URL',
+  });
+  const viteOrigin = appLine[1];
+  ctx.log(`vite ${viteOrigin}`);
+  ctx.record({ burrowStateDir: stateLine[1].trim(), viteOrigin });
 
   ctx.state.burrowBrowser = new AgentBrowser(opts.session, repoRoot);
-  await ctx.state.burrowBrowser.openUntil(ctx.viteOrigin, burrowReadyExpr(opts.vitePort));
+  await ctx.state.burrowBrowser.openUntil(viteOrigin, burrowReadyExpr(new URL(viteOrigin).port));
   await ctx.shot('01-burrow-booted.png');
 }
 
@@ -527,12 +553,10 @@ async function stepPocket(ctx) {
 
   const chrome = resolveChrome();
   ctx.log(`pocket browser: ${chrome.path} (${chrome.from})`);
-  const port = await findFreePort(opts.hostPort + 100);
   const userDataDir = ctx.path('pocket-profile');
   mkdirSync(userDataDir, { recursive: true });
   const launched = await launchChrome({
     binary: chrome.path,
-    port,
     userDataDir,
     // Opened at `getUserMedia` time rather than at launch (probed), so this
     // may be — and on a rotated code is — rewritten after Chrome is up.
@@ -542,6 +566,7 @@ async function stepPocket(ctx) {
     logPath: ctx.path('pocket-chrome.log'),
   });
 
+  const { port } = launched;
   const ab = new AgentBrowser(`${opts.session}-pocket`, repoRoot);
   ctx.state.pocketBrowser = ab;
   await ab.run(['connect', String(port)]);

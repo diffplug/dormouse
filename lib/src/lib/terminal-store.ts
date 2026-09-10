@@ -1,3 +1,4 @@
+import type { TerminalWebglRenderer } from './terminal-webgl';
 import type { HelperIdentity } from './terminal-context-types';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
@@ -20,12 +21,8 @@ export interface TerminalEntry {
   setSelectionBaseline: (baseline: string | null) => void;
   isReplaying: boolean;
   untouched: boolean;
-  /**
-   * Whether the WebGL renderer has been offered to this terminal yet. Set on
-   * first mount, never cleared — a terminal that fell back to xterm's DOM
-   * renderer stays there for its lifetime (`docs/specs/layout.md` → Renderer).
-   */
-  webglAttempted?: boolean;
+  /** Renderer ownership follows mount/unmount rather than terminal lifetime. */
+  webglRenderer?: TerminalWebglRenderer;
   /**
    * The PTY process has exited (onPtyExit fired or resume restored it as
    * exited) but the pane lingers in the registry showing "[Process exited…]".

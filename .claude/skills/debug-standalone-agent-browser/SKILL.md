@@ -12,9 +12,6 @@ Use this skill when you need to run Dormouse standalone in a normal browser so y
 Run from the repo root:
 
 ```sh
-DORMOUSE_BROWSER_DEV_AB_SESSION=dormouse-debug-$(date +%s) \
-DORMOUSE_BROWSER_DEV_VITE_PORT=1550 \
-DORMOUSE_BROWSER_DEV_HOST_PORT=1552 \
 pnpm innerdogfood
 ```
 
@@ -27,35 +24,29 @@ The harness:
 - opens the app in `agent-browser`
 - mirrors browser console logs as `[browser log] ...` in the harness terminal
 
-Use unique `DORMOUSE_BROWSER_DEV_AB_SESSION`, Vite port, and host port for repeat runs to avoid stale outer-browser state and port collisions.
+Port and session overrides are documented in `docs/specs/transport.md` → "Standalone browser-dev harness".
 
 ## Freshness
 
-Before a measurement, clear any stale nested agent-browser session used by Dormouse surfaces:
+Close only the browser session your test owns when you need a fresh page:
 
 ```sh
-agent-browser --session dormouse.1.default close --all
-```
-
-This matters because `dor ab open ...` uses a nested agent-browser session such as `dormouse.1.default`. If it has old tabs, the first stream snapshot can be polluted with stale URLs.
-
-**`close --all` is global, not per-session.** Despite the `--session` flag, it closes *every* agent-browser session — including the outer harness session the app runs in. That is actually the cleanest way to get a fresh blank Dormouse, but you must then re-open the outer session yourself:
-
-```sh
-agent-browser --session dormouse.1.default close --all      # clears nested AND outer
+agent-browser --session <outer-session> close
 agent-browser --session <outer-session> open "http://localhost:<vite-port>/"
 ```
 
-The first `open` after a `close --all` frequently lands on `about:blank` instead of navigating (the stray-about:blank race). **Issue `open` a second time** and poll until the URL sticks and the xterm input exists:
+Never use `close --all` or a global process-name kill: other worktrees may have live harnesses. If testing nested browser surfaces, give their `dor ab --key` a test-specific name and close only that session afterward.
+
+If the first `open` lands on `about:blank`, issue it again and poll until the URL sticks and the xterm input exists:
 
 ```sh
-agent-browser --session <outer-session> open "http://localhost:<vite-port>/"   # often needed twice
+agent-browser --session <outer-session> open "http://localhost:<vite-port>/"
 agent-browser --session <outer-session> eval '(()=>(!!document.querySelector("textarea.xterm-helper-textarea")&&location.href.indexOf("<vite-port>")>-1)?"ready":"no")()'
 ```
 
 Browser console mirroring (`[browser log] ...`) keeps working after a manual re-open, so you don't lose log visibility.
 
-Stop any running harness with Ctrl-C (or `pkill -f dev-agent-browser.mjs`) before starting another one. Do not leave background dev servers running after a timing run.
+Parallel worktrees are isolated automatically (`docs/specs/transport.md` → "Standalone browser-dev harness"). Inside Dormouse, use `dor ensure -- pnpm innerdogfood`; the harness opens its browser pane. Stop only your own harness with Ctrl-C after a timing run.
 
 ## Driving Dormouse
 
@@ -190,6 +181,7 @@ After changing the harness, run:
 
 ```sh
 node --check standalone/scripts/dev-agent-browser.mjs
+pnpm --filter dormouse-standalone test
 pnpm --filter dormouse-standalone build
 ```
 

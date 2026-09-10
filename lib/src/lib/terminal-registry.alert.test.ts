@@ -109,6 +109,7 @@ import {
   countRunningSessions,
   isPaneOscDriven,
   mountElement,
+  refitSession,
   clearLocalSurfaceActivity,
   clearTerminalActivity,
   clearSessionAttention,
@@ -144,6 +145,8 @@ import { pasteFilePaths } from './clipboard';
 import { registry } from './terminal-store';
 import { REPLAY_MODE_RESET } from './terminal-report-filter';
 import { cfg } from '../cfg';
+import { TerminalWebglRenderer } from './terminal-webgl';
+import { parkElement } from './terminal-lifecycle';
 
 interface MockTerminalInstance {
   writes: string[];
@@ -159,7 +162,7 @@ class MockElement {
   attributes: Record<string, string> = {};
 
   // `mountElement` stamps `data-renderer` here to record which renderer the
-  // terminal ended up on (see `tryEnableWebglRenderer`).
+  // terminal ended up on (see `TerminalWebglRenderer`).
   setAttribute(name: string, value: string): void {
     this.attributes[name] = value;
   }
@@ -1370,5 +1373,64 @@ describe('resume replay mode-reset tail', () => {
   it('restore with no scrollback writes no reset tail', () => {
     const entry = restoreTerminal('restore-empty', {}) as TestTerminalEntry;
     expect(entry.terminal.writes).not.toContain(REPLAY_MODE_RESET);
+  });
+});
+
+
+describe('registry renderer ownership', () => {
+  beforeEach(installRegistryTestGlobals);
+  afterEach(() => {
+    uninstallRegistryTestGlobals();
+    vi.restoreAllMocks();
+  });
+  it('releases on minimize and remounts without replacing the terminal', () => {
+    const entry = createSession('renderer-minimize');
+    const terminal = entry.terminal;
+    const container = createContainer() as unknown as HTMLElement;
+    const mount = vi.spyOn(TerminalWebglRenderer.prototype, 'mount');
+    const unmount = vi.spyOn(TerminalWebglRenderer.prototype, 'unmount');
+    mountElement('renderer-minimize', container);
+    expect(mount).toHaveBeenCalledOnce();
+    unmountElement('renderer-minimize', container);
+    expect(unmount).toHaveBeenCalledOnce();
+    mountElement('renderer-minimize', container);
+    expect(mount).toHaveBeenCalledTimes(2);
+    expect(getOrCreateTerminal('renderer-minimize').terminal).toBe(terminal);
+  });
+
+  it('ignores cleanup from an older container and releases on disposal', () => {
+    createSession('renderer-stale');
+    const old = createContainer() as unknown as HTMLElement;
+    const current = createContainer() as unknown as HTMLElement;
+    const unmount = vi.spyOn(TerminalWebglRenderer.prototype, 'unmount');
+    mountElement('renderer-stale', old);
+    mountElement('renderer-stale', current);
+    unmountElement('renderer-stale', old);
+    expect(unmount).not.toHaveBeenCalled();
+    disposeSession('renderer-stale');
+    expect(unmount).toHaveBeenCalledOnce();
+  });
+
+  it('never fits on mount, leaving settled geometry to the caller', () => {
+    const entry = createSession('renderer-fit');
+    const fit = vi.spyOn(entry.fit, 'fit');
+    const frame = vi.spyOn(globalThis, 'requestAnimationFrame');
+    mountElement('renderer-fit', createContainer() as unknown as HTMLElement);
+    // Neither now nor on a later frame: only the mount knows whether the container
+    // holds committed geometry or an entrance still animating.
+    expect(fit).not.toHaveBeenCalled();
+    expect(frame).not.toHaveBeenCalled();
+    refitSession('renderer-fit');
+    expect(fit).toHaveBeenCalledOnce();
+  });
+
+  it('releases the renderer when a helper is parked', () => {
+    const entry = createSession('renderer-helper');
+    Object.assign(document, { body: new MockElement() });
+    const unmount = vi.spyOn(TerminalWebglRenderer.prototype, 'unmount');
+    mountElement('renderer-helper', createContainer() as unknown as HTMLElement);
+    parkElement('renderer-helper');
+    expect(unmount).toHaveBeenCalledOnce();
+    expect(getOrCreateTerminal('renderer-helper')).toBe(entry);
   });
 });

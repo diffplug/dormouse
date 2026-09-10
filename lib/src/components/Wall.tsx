@@ -73,7 +73,7 @@ import {
   browserUrlFromParams,
   surfaceKindFromParams,
 } from './wall/browser-surface';
-import { hostPathDisplay } from './wall/browser-url';
+import { browserSurfaceUrl, hostPathDisplay } from './wall/browser-url';
 import { WorkspaceSelectionOverlay } from './wall/WorkspaceSelectionOverlay';
 import { LathHost } from './wall/LathHost';
 import {
@@ -769,13 +769,13 @@ export function Wall({
    *  destroy — reattaching would then be a reload. Parking keeps the leaf mounted and
    *  invisible so the document survives intact (docs/specs/tiling-engine.md →
    *  "Parked leaves"). Terminals do not park: their state lives in the PTY and the
-   *  registry replays it, so the existing remove/restore path already loses nothing. */
+   *  registry retains it across remove/restore. */
   const minimizePane = useCallback((id: string, opts?: { select?: boolean }) => {
     setTerminalContext(current => current?.id === id ? null : current);
     const meta = lath.getMeta(id);
     if (!meta) return;
     // May auto-spawn if this was the last leaf. `doorLeaf` retains the leaf's meta in
-    // the store (it keeps changing while minimized) and caps the parked set itself.
+    // the store (it keeps changing while minimized).
     const { token } = lath.store.doorLeaf(id, { park: shouldParkOnMinimize(meta) });
     if (!token) return;
     clearSessionAttention(id);
@@ -1545,10 +1545,24 @@ export function Wall({
       // connect (docs/specs/dor-browser.md → "Pane Context Menu Connect").
       if (currentRenderMode === 'iframe' && (mode === 'ab-screencast' || mode === 'ab-popout')) {
         const chromeUrl = getAgentBrowserScreenController(id)?.chrome().url;
-        const url = (typeof chromeUrl === 'string' && chromeUrl)
-          || (typeof params?.url === 'string' ? params.url : undefined);
+        const rawUrl = (typeof chromeUrl === 'string' && chromeUrl)
+          || (typeof params?.url === 'string' ? params.url : '');
+        // The swap is the second sink params.url reaches: IframePanel refuses a
+        // non-http(s) source but still holds it, and this path would hand it to
+        // a real Chromium tab — which `dor ab open` refuses at the CLI
+        // (`normalizeConcreteOpenUrl`). Same guard, so both sinks agree.
         const platform = getPlatform();
-        if (!url || !platform.agentBrowserOpen) return;
+        // `browserSurfaceUrl('')` is already null (normalizeNavUrl returns ''
+        // for empty input), so one branch covers both dead ends — and warning
+        // matches the ab-* -> iframe branch above, whose own no-URL refusal is
+        // the only other silent outcome of this action.
+        const url = browserSurfaceUrl(rawUrl);
+        if (!url) {
+          const why = rawUrl ? `'${rawUrl}' is not an http(s) URL` : 'no URL observed yet';
+          console.warn(`[dormouse] cannot swap surface '${id}' to agent-browser: ${why}`);
+          return;
+        }
+        if (!platform.agentBrowserOpen) return;
         const headed = mode === 'ab-popout';
         const title = hostPathDisplay(url, true);
         const eagerId = replaceSurface(id, {

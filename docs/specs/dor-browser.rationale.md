@@ -90,6 +90,8 @@ A post-open blank-tab sweep can become such a query when a later relaunch, expli
 
 **Why the CLI's own check is not enough.** `open-window` carries a string the framed page chose, and the new-tab prompt in front of it is user consent, not a boundary — the user is agreeing to open a pane, not vetting a scheme. The same check gates `surface.iframe`, a wire protocol on the control socket rather than the CLI, so nothing upstream of it has already filtered.
 
+**Why the panel checks again.** Every writer of `params.url` ends at the panel, and on a host with no proxy the raw fallback hands that string straight to `<iframe src>` under a sandbox that keeps `allow-same-origin`. Enumerating the writers is the fragile half: the header's URL editor was one the guarded callers did not cover, because `normalizeNavUrl` deliberately keeps a typed `javascript:` or `data:` scheme so the address bar can carry one. React blanks a `javascript:` `src` prop and nothing else, so `data:text/html,…` framed verbatim (reproduced in `IframePanel.test.tsx`, 2026-09) — a framework mitigation the code never claimed, for one scheme out of the set.
+
 **Why each shim hop has two explicit targets.** An injected document cannot tell whether its parent is the app or another document on the grant's proxy origin. It posts to both known origins; the browser delivers only the matching one. A same-origin parent reconstructs and relays only the three pane-level shapes upward; location is document-level, so only the outer document reports it. No wildcard or foreign origin enters the path.
 
 ## Iframe Focus And Rendering Notes

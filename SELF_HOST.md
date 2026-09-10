@@ -232,7 +232,7 @@ Establish with the user what the script cannot:
 - **Their phone runs Tailscale** and is signed in to the same tailnet.
 - **Port 3100 is free.** Unchecked before installation; a stale listener blocks
   the new Relay from binding and fails the post-install identity check
-  (`pnpm dev:relay` uses 3000):
+  (`PORT=3000 pnpm dev:relay` pins the dev Relay to 3000):
 
   ```sh
   # macOS
@@ -639,8 +639,8 @@ reports which mode is live rather than asserting either.
   protection: `docs/specs/security-remote.md` → "Credentials at rest".
 - **Loopback backend, publicly safe HTTPS origin.** The install pins
   `DORMOUSE_BIND_HOST=127.0.0.1` and refuses to proceed without it
-  (`docs/specs/relay.md` → Configuration). Port 3100, not 3000, so the service
-  coexists with `pnpm dev:relay`. Serve is the private default; Funnel is safe
+  (`docs/specs/relay.md` → Configuration). Port 3100 lets the service
+  coexist with `PORT=3000 pnpm dev:relay`. Serve is the private default; Funnel is safe
   to enable because the application controls, not network privacy, govern
   admission (`docs/specs/security-remote.md` → "Network posture").
 - **`DORMOUSE_ORIGIN` is durable WebAuthn identity**, derived from the node's
