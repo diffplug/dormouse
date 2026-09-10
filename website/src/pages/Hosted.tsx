@@ -23,19 +23,14 @@ import { NotifySignupForm } from "../components/NotifySignupForm";
 import {
   ACCENT_BORDER_CLASS,
   ACCENT_TEXT_CLASS,
-  ACTION_TEXT_CLASS,
   BODY_TEXT_CLASS,
+  CARD_ACCENT_CLASS,
   CARD_CLASS,
   CARD_MUTED_TEXT_CLASS,
   LINK_CLASS,
   MUTED_TEXT_CLASS,
   NOTE_CLASS,
   NOTE_MUTED_TEXT_CLASS,
-  TABLE_CLASS,
-  TABLE_HEAD_ROW_CLASS,
-  TABLE_ROW_CLASS,
-  TABLE_WRAP_CLASS,
-  TH_CLASS,
 } from "../components/docs-tokens";
 import { type TocEntry } from "../lib/docs-pages";
 import { fetchCohortSeats, type CohortSeats } from "../lib/hosted-cohorts";
@@ -71,16 +66,87 @@ export const HOSTED_TOC: TocEntry[] = [
  * Seats remaining in this tier's open cohort.
  *
  * The line is reserved at prerender and filled after hydration, so the count
- * landing does not shove the table — and an endpoint with nothing to say
- * leaves it empty rather than printing an error a buyer cannot act on.
+ * landing does not resize the card it sits in — and an endpoint with nothing
+ * to say leaves it empty rather than printing an error a buyer cannot act on.
  */
 function SeatsLeft({ cohort, seats }: { cohort: CohortId | undefined; seats: CohortSeats | null }) {
-  if (!cohort) return null;
-  const left = seats?.[cohort];
+  const left = cohort === undefined ? undefined : seats?.[cohort];
   return (
-    <p className={`mt-2 min-h-5 text-sm ${MUTED_TEXT_CLASS}`}>
-      {left === undefined ? null : `${left} of ${cohortSize(cohort)} left at this price`}
+    <p className={`mt-3 min-h-5 text-sm ${CARD_MUTED_TEXT_CLASS}`}>
+      {cohort !== undefined && left !== undefined
+        ? `${left} of ${cohortSize(cohort)} left at this price`
+        : null}
     </p>
+  );
+}
+
+/**
+ * One tier, as a card in the row.
+ *
+ * The cards read left to right from the cheapest commitment to the largest, so
+ * the middle one is both the recommendation and the shape of the ladder. It is
+ * marked out by the accent border and the badge rather than by a surface of
+ * its own, which would be a tint no token is derived against
+ * (website/src/components/docs-tokens.ts).
+ */
+function TierCard({
+  tier,
+  seats,
+  onBuy,
+}: {
+  tier: Tier;
+  seats: CohortSeats | null;
+  onBuy: () => void;
+}) {
+  return (
+    <div className={`flex flex-col ${tier.recommended ? CARD_ACCENT_CLASS : CARD_CLASS}`}>
+      {/* Reserved on every card so the three names sit on one line — but only
+          while they are a row; stacked, the reserve is a blank gap. */}
+      <div className="flex items-center md:min-h-6">
+        {tier.recommended ? (
+          <span
+            className={`rounded-full border px-2 py-0.5 font-display text-xs ${ACCENT_BORDER_CLASS} ${ACCENT_TEXT_CLASS}`}
+          >
+            Recommended
+          </span>
+        ) : null}
+      </div>
+
+      <h3 className="mt-3 font-display text-lg">{tier.name}</h3>
+
+      <p className="mt-3 flex items-baseline gap-2">
+        <span className="font-display text-3xl">${tier.price}</span>
+        <span className={`text-sm ${CARD_MUTED_TEXT_CLASS}`}>{tier.cadence}</span>
+      </p>
+      {/* Reserved likewise: side by side, without it the blurbs step out of line. */}
+      <p className={`text-sm md:min-h-5 ${CARD_MUTED_TEXT_CLASS}`}>
+        {tier.listPrice ? (
+          <>
+            <s>${tier.listPrice}</s> list
+          </>
+        ) : null}
+      </p>
+
+      <p className={`mt-4 text-sm leading-relaxed ${CARD_MUTED_TEXT_CLASS}`}>{tier.blurb}</p>
+      <SeatsLeft cohort={tier.cohort} seats={seats} />
+
+      {/* `mt-auto` lines the three buttons up however tall the cards run. */}
+      <div className="mt-auto pt-6">
+        {/* "Buy" alone, because the card around it already names the tier and
+            the longest name wrapped to two lines, breaking the row's shared
+            baseline. The full name stays on the label a screen reader reads,
+            which hears the three buttons out of their cards. */}
+        <button
+          type="button"
+          onClick={onBuy}
+          aria-label={`Buy ${tier.name}`}
+          className={`inline-flex min-h-12 w-full items-center justify-center rounded-md border px-4 py-3 font-display hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--docs-accent)] ${ACCENT_BORDER_CLASS} ${ACCENT_TEXT_CLASS}`}
+        >
+          Buy
+        </button>
+        <p className={`mt-2 text-center text-sm ${CARD_MUTED_TEXT_CLASS}`}>30-day refund</p>
+      </div>
+    </div>
   );
 }
 
@@ -208,57 +274,18 @@ export default function Hosted() {
           </p>
         </aside>
 
-        <div className={TABLE_WRAP_CLASS}>
-          <table className={TABLE_CLASS}>
-            <thead>
-              <tr className={TABLE_HEAD_ROW_CLASS}>
-                <th className={TH_CLASS}>Plan</th>
-                <th className={TH_CLASS}>Price</th>
-                <th className={TH_CLASS}>
-                  <span className="sr-only">Buy</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {tiers.map((tier) => (
-                <tr key={tier.id} className={TABLE_ROW_CLASS}>
-                  <td className="py-5 pr-4 align-top">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-display text-lg">{tier.name}</span>
-                      {tier.recommended ? (
-                        <span
-                          className={`rounded-full border px-2 py-0.5 text-xs font-display ${ACCENT_BORDER_CLASS} ${ACCENT_TEXT_CLASS}`}
-                        >
-                          Recommended
-                        </span>
-                      ) : null}
-                    </div>
-                    <p className={`mt-1 max-w-sm text-sm ${MUTED_TEXT_CLASS}`}>{tier.blurb}</p>
-                    <SeatsLeft cohort={tier.cohort} seats={seats} />
-                  </td>
-                  <td className="py-5 pr-4 align-top whitespace-nowrap">
-                    <div className="font-display text-2xl">${tier.price}</div>
-                    <div className={`text-sm ${MUTED_TEXT_CLASS}`}>{tier.cadence}</div>
-                    {tier.listPrice ? (
-                      <div className={`mt-1 text-sm ${MUTED_TEXT_CLASS}`}>
-                        <s>${tier.listPrice}</s> list
-                      </div>
-                    ) : null}
-                  </td>
-                  <td className="py-5 align-top">
-                    <button
-                      type="button"
-                      onClick={() => setCheckoutTodo(tier)}
-                      className={`inline-flex min-h-12 items-center rounded-md border bg-[var(--docs-accent)]/10 px-5 py-3 font-display hover:bg-[var(--docs-accent)]/20 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--docs-accent)] ${ACCENT_BORDER_CLASS} ${ACTION_TEXT_CLASS}`}
-                    >
-                      Buy {tier.name}
-                    </button>
-                    <p className={`mt-2 text-sm ${MUTED_TEXT_CLASS}`}>30-day refund</p>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        {/* Cheapest commitment on the left, largest on the right, so the
+            ladder reads in one pass at desktop and stacks in the same order on
+            a phone. */}
+        <div className="grid gap-4 md:grid-cols-3">
+          {tiers.map((tier) => (
+            <TierCard
+              key={tier.id}
+              tier={tier}
+              seats={seats}
+              onBuy={() => setCheckoutTodo(tier)}
+            />
+          ))}
         </div>
 
         <p className={`mt-5 text-sm ${MUTED_TEXT_CLASS}`}>

@@ -23,12 +23,12 @@ open source, and Hosted is the optional service with a price, so pricing is a
 section of the Hosted page, never a page of its own.
 
 **Settings is the front door.** The spoken-alarm row's managed-voice link and
-the playground tutorial land on `/hosted#voice`, and the tier table sits within
+the playground tutorial land on `/hosted#voice`, and the tier cards sit within
 one screen of that anchor. `#remote-control` and `#voice` keep resolving as
 section ids.
 
-**Content, in order:** the Relay boundary notice; the tier table, with the
-30-day refund beside every buy button; what a member gets today and what ships
+**Content, in order:** the Relay boundary notice; the tier cards, each with a
+30-day refund beside its buy button; what a member gets today and what ships
 later, as prose rather than checkmarks; "Self-hosting stays free"; and a short
 FAQ — what forever means, refunds and cancellation, the founding lock, what
 happens if Hosted shuts down, and that team pricing is not yet offered.
@@ -37,14 +37,19 @@ happens if Hosted shuts down, and that team pricing is not yet offered.
 `Product` / `Offer` JSON-LD carrying one `Offer` per on-sale tier at its
 current price, so an assistant fetching the page can quote it. Only the
 counters load after hydration. **Offers stay `PreOrder` while checkout is
-unbuilt** — it is the one claim the page must not make.
+unbuilt.**
 
 **Every price on the site has one owner**: the page, the structured data, and
-the tests read the tier table rather than restating a number.
+the tests read `tiersOnSale` rather than restating a number.
+
+**The tiers render as one card each, cheapest commitment on the left** — side
+by side from `md` up, stacked in that order below. **Mark the recommended tier
+with the accent border and the badge, never a surface of its own**, which would
+be a tint no docs token is derived against.
 
 **A buy button opens the unbuilt-checkout notice** — the tier's name, that
 nothing was charged and no seat taken, and the devlog — and the page repeats
-above the table that checkout is not open. **Never render a buy button that
+above the cards that checkout is not open. **Never render a buy button that
 silently does nothing.** The notice is where the devlog signup form lives; it
 is no longer a page section of its own.
 
@@ -55,7 +60,7 @@ cohort or a tier not yet on sale.**
 
 **The page prerenders without the billing provider**: the counter line is
 reserved and filled after hydration, and an unreachable endpoint, a non-2xx, or
-a body that is not a whole seat count renders the table without counts rather
+a body that is not a whole seat count renders the cards without counts rather
 than an error. Only the counter is live — **a cohort closing raises the price
 at the next deploy**.
 

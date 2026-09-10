@@ -36,7 +36,7 @@ async function mount(respond: (url: string) => Promise<Response>) {
 }
 
 const buyButtons = (el: HTMLElement) =>
-  [...el.querySelectorAll("button")].filter((b) => b.textContent?.startsWith("Buy "));
+  [...el.querySelectorAll('button[aria-label^="Buy "]')] as HTMLButtonElement[];
 
 afterEach(() => {
   if (root) act(() => root?.unmount());
@@ -69,7 +69,9 @@ describe("what the Hosted page prerenders", () => {
   });
 
   it("states the refund beside every buy button", () => {
-    const buys = markup.match(/Buy [A-Z]/g) ?? [];
+    // Matched on the label rather than the visible text: the button reads
+    // "Buy", and the tier it buys is on its aria-label.
+    const buys = markup.match(/aria-label="Buy [^"]+"/g) ?? [];
     expect(buys).toHaveLength(tiersOnSale().length);
     expect(markup.match(/30-day refund/g)).toHaveLength(buys.length);
   });
