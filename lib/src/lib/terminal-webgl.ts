@@ -28,13 +28,9 @@ export class TerminalWebglRenderer {
       try {
         this.terminal.loadAddon(addon);
       } finally {
-        try {
-          this.captureContext(existingCanvases);
-        } catch {
-          // Capture is best-effort across host capabilities and addon updates.
-          // Keep a healthy renderer; disposal still frees its GPU objects, with
-          // GC reclaiming the context slot if explicit loss is unavailable.
-        }
+        // A throwing activation can still leave a live context behind, and only a
+        // captured handle can lose it explicitly.
+        this.captureContext(existingCanvases);
       }
       this.host.setAttribute('data-renderer', 'webgl');
     } catch {
@@ -59,15 +55,21 @@ export class TerminalWebglRenderer {
     // This avoids depending on the addon's private _renderer/_gl fields.
     for (const canvas of this.host.querySelectorAll('canvas')) {
       if (existingCanvases.has(canvas)) continue;
-      const gl = canvas.getContext('webgl2');
-      if (!gl) continue;
-      const extension = gl.getExtension('WEBGL_lose_context');
-      if (extension) {
-        this.loseContext = () => {
-          if (!gl.isContextLost()) extension.loseContext();
-        };
+      try {
+        const gl = canvas.getContext('webgl2');
+        if (!gl) continue;
+        const extension = gl.getExtension('WEBGL_lose_context');
+        if (extension) {
+          this.loseContext = () => {
+            if (!gl.isContextLost()) extension.loseContext();
+          };
+        }
+        return;
+      } catch {
+        // One canvas refusing a probe is not the renderer's canvas being absent:
+        // keep scanning. A capture that finds nothing keeps a healthy renderer,
+        // leaving only context-slot reclamation to GC.
       }
-      return;
     }
   }
 
@@ -76,14 +78,16 @@ export class TerminalWebglRenderer {
     const loseContext = this.loseContext;
     this.addon = undefined;
     this.loseContext = undefined;
+    this.markDom();
+    // Dispose first: it drops the addon's context-loss listeners and its atlas-cache
+    // ownership, and restores xterm's DOM renderer at the SAME grid (other compatible
+    // terminals keep the shared atlas alive). Both steps are contained so a throwing
+    // addon or extension cannot abort the caller's teardown.
     try {
-      // Dispose first: this drops the addon's context-loss listeners and its
-      // atlas-cache ownership, and restores xterm's DOM renderer at the SAME grid.
-      // Other compatible terminals keep the shared atlas alive.
       addon?.dispose();
-    } finally {
+    } catch { /* teardown continues */ }
+    try {
       loseContext?.();
-      this.markDom();
-    }
+    } catch { /* teardown continues */ }
   }
 }

@@ -4,10 +4,9 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TerminalPane } from './TerminalPane';
 import { LathHost } from './wall/LathHost';
-import { createLathWallEngine, type LathWallEngine } from './wall/lath-wall-engine';
+import { createLathWallEngine, terminalLeafMeta, type LathWallEngine } from './wall/lath-wall-engine';
 import { createLathWallStore, type LathWallStore } from './wall/lath-wall-store';
 import { leaf, split, tree } from '../lib/lath/test-util';
-import { terminalLeafMeta } from './wall/lath-wall-engine';
 import { PANE_HEADER_HEIGHT_PX } from './design';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -22,9 +21,7 @@ vi.mock('../lib/terminal-registry', () => ({
   getOrCreateTerminal: (id: string) => {
     if (!registry.entries.has(id)) registry.entries.set(id, { cols: 80, rows: 30 });
   },
-  mountElement: (id: string, container: HTMLElement, options?: { fit?: boolean }) => {
-    // The mount must opt out of the registry's unconditional initial fit.
-    expect(options?.fit).toBe(false);
+  mountElement: (id: string, container: HTMLElement) => {
     registry.entries.get(id)!.container = container;
   },
   unmountElement: (id: string) => { registry.entries.get(id)!.container = undefined; },

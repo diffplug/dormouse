@@ -37,20 +37,19 @@ export function TerminalPane({ id, isFocused = true }: TerminalPaneProps) {
     if (!container) return;
 
     getOrCreateTerminal(id);
-    // This mount owns fitting; the registry's default rAF would bypass the
-    // layout gate and resize a reattached terminal to its collapsed entrance.
-    mountElement(id, container, { fit: false });
+    mountElement(id, container);
+    // The one fit path, whatever wakes it: the layout coordinator when it has painted
+    // committed geometry, a debounced container resize otherwise. Both drop a pending
+    // fit, so a settled layout never also fits on the timer behind it.
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const cancelFit = () => { clearTimeout(timer); timer = undefined; };
     const fit = () => {
-      cancelFit();
+      clearTimeout(timer);
       if (!container.isConnected || (resize && !resize.canFit(id))) return;
-      const rect = container.getBoundingClientRect();
-      if (rect.width > 0 && rect.height > 0) refitSession(id);
+      const { width, height } = container.getBoundingClientRect();
+      if (width > 0 && height > 0) refitSession(id);
     };
     const observer = new ResizeObserver(() => {
-      cancelFit();
-      if (resize && !resize.canFit(id)) return;
+      clearTimeout(timer);
       timer = setTimeout(fit, REFIT_DEBOUNCE_MS);
     });
     observer.observe(container);
@@ -61,7 +60,7 @@ export function TerminalPane({ id, isFocused = true }: TerminalPaneProps) {
       observer.disconnect();
       unsubscribe?.();
       cancelAnimationFrame(frame);
-      cancelFit();
+      clearTimeout(timer);
       unmountElement(id, container);
     };
   }, [id, resize]);

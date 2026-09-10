@@ -518,17 +518,14 @@ export function restoreTerminal(
   return entry;
 }
 
-export function mountElement(id: string, container: HTMLElement, options: { fit?: boolean } = {}): void {
+/** Reveal a Session's element in `container`. The caller owns fitting: only it knows
+ *  whether the container's geometry has settled (`docs/specs/layout.md` -> Animations). */
+export function mountElement(id: string, container: HTMLElement): void {
   const entry = registry.get(id);
   if (!entry) return;
   container.appendChild(entry.element);
   // The renderer owns only this mount's GPU resources; xterm state survives it.
   (entry.webglRenderer ??= new TerminalWebglRenderer(entry.terminal, entry.element)).mount();
-  if (options.fit !== false) {
-    requestAnimationFrame(() => {
-      if (entry.element.parentElement === container && container.isConnected) entry.fit.fit();
-    });
-  }
 }
 
 /** Where a hidden helper's xterm element waits between reveals: still in the
@@ -580,7 +577,8 @@ export function disposeSession(id: string): void {
   dropSourcesForTerminal(id);
   entry.cleanup();
   getPlatform().killPty(id);
-  // Addon disposal constructs the fallback renderer; keep that work detached.
+  // Detach before releasing: unlike a minimize, nothing here has to survive, so the
+  // fallback renderer the addon's disposal constructs never touches the document.
   entry.element.remove();
   entry.webglRenderer?.unmount();
   entry.terminal.dispose();

@@ -11,7 +11,11 @@ const state = vi.hoisted(() => ({
   extension: true,
   exposeCanvas: true,
   probeFails: false,
-  contexts: new Map<HTMLCanvasElement, object | null>(),
+  /** The addon's 2D link canvas refuses the probe instead of answering null. */
+  linkProbeThrows: false,
+  disposeThrows: false,
+  loseThrows: false,
+  contexts: new Map<HTMLCanvasElement, object | null | 'throws'>(),
 }));
 vi.mock('@xterm/addon-webgl', () => ({
   WebglAddon: class {
@@ -25,12 +29,17 @@ vi.mock('@xterm/addon-webgl', () => ({
       // Match the pinned addon: a new 2D link canvas and a WebGL canvas, both
       // initialized synchronously. Existing image canvases belong to other addons.
       const link = document.createElement('canvas');
-      state.contexts.set(link, null);
+      state.contexts.set(link, state.linkProbeThrows ? 'throws' : null);
       const gl = {
         isContextLost: () => this.lost,
         getExtension: (name: string) => {
           expect(name).toBe('WEBGL_lose_context');
-          return state.extension ? { loseContext: () => { state.order.push('lose'); this.lost = true; } } : null;
+          if (!state.extension) return null;
+          return { loseContext: () => {
+            state.order.push('lose');
+            if (state.loseThrows) throw new Error('lose failed');
+            this.lost = true;
+          } };
         },
       };
       state.contexts.set(this.canvas, gl);
@@ -41,6 +50,7 @@ vi.mock('@xterm/addon-webgl', () => ({
     dispose = vi.fn(() => {
       state.order.push('dispose');
       this.canvas.remove();
+      if (state.disposeThrows) throw new Error('dispose failed');
       // Keep fireLoss callable to simulate an already queued stale event.
     });
   },
@@ -59,13 +69,18 @@ beforeEach(() => {
   state.extension = true;
   state.exposeCanvas = true;
   state.probeFails = false;
+  state.linkProbeThrows = false;
+  state.disposeThrows = false;
+  state.loseThrows = false;
   previousEnabled = cfg.terminal.webglRenderer;
   cfg.terminal.webglRenderer = true;
   vi.stubGlobal('WebGL2RenderingContext', class {});
   getContext = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(function (this: HTMLCanvasElement) {
     if (state.probeFails) throw new Error('Context probe failed');
-    if (!state.contexts.has(this)) throw new Error('Probed a canvas not initialized by the WebGL addon');
-    return state.contexts.get(this) as WebGL2RenderingContext | null;
+    const context = state.contexts.get(this);
+    if (context === undefined) throw new Error('Probed a canvas not initialized by the WebGL addon');
+    if (context === 'throws') throw new Error('Context probe failed');
+    return context as WebGL2RenderingContext | null;
   });
   host = document.createElement('div');
   document.body.append(host);
@@ -142,12 +157,14 @@ describe('mount-scoped terminal WebGL resources', () => {
 
   it('releases a context created before activation fails and does not retry in place', () => {
     state.failLoad = true;
-    renderer.mount();
+    state.disposeThrows = true;
+    expect(() => renderer.mount()).not.toThrow();
     expect(state.order).toEqual(['dispose', 'lose']);
     expect(host.dataset.renderer).toBe('dom');
     renderer.mount();
     expect(state.addons).toHaveLength(1);
     state.failLoad = false;
+    state.disposeThrows = false;
     renderer.unmount();
     renderer.mount();
     expect(host.dataset.renderer).toBe('webgl');
@@ -166,6 +183,31 @@ describe('mount-scoped terminal WebGL resources', () => {
     expect(state.addons[0].dispose).toHaveBeenCalledOnce();
     expect(state.order).toEqual(['dispose']);
     expect(host.dataset.renderer).toBe('dom');
+  });
+
+  it('keeps scanning past a canvas that refuses the probe', () => {
+    state.linkProbeThrows = true;
+    renderer.mount();
+    expect(host.dataset.renderer).toBe('webgl');
+    renderer.unmount();
+    // The addon's own canvas is found behind the refusing one, so loss stays explicit.
+    expect(state.order).toEqual(['dispose', 'lose']);
+    expect(state.addons[0].lost).toBe(true);
+  });
+
+  it.each(['disposal', 'explicit loss'])('completes teardown when %s throws', which => {
+    state.disposeThrows = which === 'disposal';
+    state.loseThrows = which === 'explicit loss';
+    renderer.mount();
+    // A throwing release must not abort the caller's unmount/park/dispose teardown.
+    expect(() => renderer.unmount()).not.toThrow();
+    expect(state.order).toEqual(['dispose', 'lose']);
+    expect(host.dataset.renderer).toBe('dom');
+    state.disposeThrows = false;
+    state.loseThrows = false;
+    renderer.mount();
+    expect(state.addons).toHaveLength(2);
+    expect(host.dataset.renderer).toBe('webgl');
   });
 
   it('never probes or disposes a pre-existing image canvas', () => {

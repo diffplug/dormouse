@@ -109,6 +109,7 @@ import {
   countRunningSessions,
   isPaneOscDriven,
   mountElement,
+  refitSession,
   clearLocalSurfaceActivity,
   clearTerminalActivity,
   clearSessionAttention,
@@ -1388,11 +1389,11 @@ describe('registry renderer ownership', () => {
     const container = createContainer() as unknown as HTMLElement;
     const mount = vi.spyOn(TerminalWebglRenderer.prototype, 'mount');
     const unmount = vi.spyOn(TerminalWebglRenderer.prototype, 'unmount');
-    mountElement('renderer-minimize', container, { fit: false });
+    mountElement('renderer-minimize', container);
     expect(mount).toHaveBeenCalledOnce();
     unmountElement('renderer-minimize', container);
     expect(unmount).toHaveBeenCalledOnce();
-    mountElement('renderer-minimize', container, { fit: false });
+    mountElement('renderer-minimize', container);
     expect(mount).toHaveBeenCalledTimes(2);
     expect(getOrCreateTerminal('renderer-minimize').terminal).toBe(terminal);
   });
@@ -1402,19 +1403,32 @@ describe('registry renderer ownership', () => {
     const old = createContainer() as unknown as HTMLElement;
     const current = createContainer() as unknown as HTMLElement;
     const unmount = vi.spyOn(TerminalWebglRenderer.prototype, 'unmount');
-    mountElement('renderer-stale', old, { fit: false });
-    mountElement('renderer-stale', current, { fit: false });
+    mountElement('renderer-stale', old);
+    mountElement('renderer-stale', current);
     unmountElement('renderer-stale', old);
     expect(unmount).not.toHaveBeenCalled();
     disposeSession('renderer-stale');
     expect(unmount).toHaveBeenCalledOnce();
   });
 
+  it('never fits on mount, leaving settled geometry to the caller', () => {
+    const entry = createSession('renderer-fit');
+    const fit = vi.spyOn(entry.fit, 'fit');
+    const frame = vi.spyOn(globalThis, 'requestAnimationFrame');
+    mountElement('renderer-fit', createContainer() as unknown as HTMLElement);
+    // Neither now nor on a later frame: only the mount knows whether the container
+    // holds committed geometry or an entrance still animating.
+    expect(fit).not.toHaveBeenCalled();
+    expect(frame).not.toHaveBeenCalled();
+    refitSession('renderer-fit');
+    expect(fit).toHaveBeenCalledOnce();
+  });
+
   it('releases the renderer when a helper is parked', () => {
     const entry = createSession('renderer-helper');
     Object.assign(document, { body: new MockElement() });
     const unmount = vi.spyOn(TerminalWebglRenderer.prototype, 'unmount');
-    mountElement('renderer-helper', createContainer() as unknown as HTMLElement, { fit: false });
+    mountElement('renderer-helper', createContainer() as unknown as HTMLElement);
     parkElement('renderer-helper');
     expect(unmount).toHaveBeenCalledOnce();
     expect(getOrCreateTerminal('renderer-helper')).toBe(entry);
