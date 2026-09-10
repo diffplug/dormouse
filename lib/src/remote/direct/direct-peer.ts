@@ -245,13 +245,15 @@ export class DirectPeer {
     if (this.#closed) return;
     const data = (ev as { data?: unknown } | null)?.data;
     let frame: Uint8Array;
+    // A view either way, never a copy: everything downstream reads the frame
+    // inside this call, except the one the cutover holds until the peer's
+    // switch decrypts — and `DirectCutover.onChannelFrame` copies that one,
+    // which is the only place that knows a frame is about to outlive its
+    // buffer.
     if (data instanceof ArrayBuffer) {
       frame = new Uint8Array(data);
     } else if (ArrayBuffer.isView(data)) {
-      // Copied, not viewed: the cutover may hold this frame until the peer's
-      // switch decrypts, and a view over a pooled or reused buffer (the Node
-      // polyfill hands over a `Buffer`) would read whatever landed there next.
-      frame = new Uint8Array(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength));
+      frame = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
     } else {
       this.#handlers.onViolation('a direct channel message was not binary');
       return;

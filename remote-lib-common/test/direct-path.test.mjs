@@ -248,6 +248,21 @@ test('overflows on the byte cap, whatever the frame count', () => {
   assert.ok(cutover.pendingFrames < MAX_DIRECT_PENDING_FRAMES);
 });
 
+/**
+ * A held frame is the one thing here that outlives the call that delivered it,
+ * so it is the one the caller's buffer cannot be trusted for: both ends hand
+ * over a view, and a runtime that pools or reuses that buffer would otherwise
+ * drain whatever landed in it next.
+ */
+test('a held frame is copied, so the caller’s buffer may be reused', () => {
+  const cutover = new DirectCutover();
+  const buffer = frame(1);
+  assert.equal(cutover.onChannelFrame(buffer), 'held');
+  buffer.fill(9);
+
+  assert.deepEqual(cutover.onSwitchDecrypted(), { kind: 'drain', frames: [frame(1)] });
+});
+
 test('clear releases what a disposed session will never drain', () => {
   const cutover = new DirectCutover();
   cutover.onChannelFrame(frame(1));

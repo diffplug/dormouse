@@ -282,6 +282,12 @@ export class DirectCutover {
   /**
    * One inbound channel frame: processed once the peer's switch has been read,
    * held until then, and `overflow` when holding it would break the bound.
+   *
+   * **A held frame is copied, and only a held frame.** Holding is the one thing
+   * here that outlives the call, so it is the one place the caller's buffer —
+   * a view over whatever the runtime handed it — cannot be trusted to still say
+   * the same thing when the queue drains. A frame answered `process` is
+   * decrypted before this returns.
    */
   onChannelFrame(frame: Uint8Array): DirectChannelOutcome {
     if (this.#inbound === 'direct') return 'process';
@@ -291,7 +297,7 @@ export class DirectCutover {
     ) {
       return 'overflow';
     }
-    this.#held.push(frame);
+    this.#held.push(frame.slice());
     this.#heldBytes += frame.length;
     return 'held';
   }
