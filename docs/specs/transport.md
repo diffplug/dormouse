@@ -20,7 +20,7 @@ Optional booleans:
 
 | Member | Absent reads | Set by | Effect when set |
 |---|---|---|---|
-| `persistsSession?` | `true` | Every shipped adapter | `saveSession` skips the whole record build, not just the write, on a host that answers `false` (rationale) |
+| `persistsSession?` | `true` | The two standalone adapters → `true` | `saveSession` skips the whole record build, not just the write, on a host that answers `false` (rationale) |
 | `hostOwnsTheme?` | `false` | `VSCodeAdapter` → `true` | Settings hides its theme picker (`docs/specs/theme.md` → "Where the user picks a theme") |
 | `hostOwnsShells?` | `false` | `VSCodeAdapter` → `true` | Settings hides its Shell row for the native QuickPick (`docs/specs/vscode.md` → "Shell selection") |
 
@@ -159,7 +159,7 @@ OSC parsing/stripping rules for those rows, and the rule that **only the process
 
 **A save probes every terminal pane's cwd in one host round trip where the adapter offers `getCwds`**, falling back to one `getCwd` per id: standalone resolves them with a synchronous process scan on the sidecar's only event loop, so N panes must cost one scan rather than N. **A flush may say `probeCwd: false`** and keep each pane's previously persisted cwd — the post-kill quit flush, where every probe answers null and is discarded for that value anyway (`docs/specs/standalone.md` → "Quit flow"). Pinned by `lib/src/lib/session-save.test.ts`.
 
-Source of truth: `getWindowSnapshot` / `seedWindowSession` / `installWindowSessionWriter` / `flushWindowSession` in `lib/src/lib/window-session-aggregator.ts`; `SaveSink` / `SaveOptions` in `lib/src/lib/session-save.ts`; `loadWindowState` / `saveWindowState` in `lib/src/lib/window-persistence.ts`; `restoreWindow` in `standalone/src/main.tsx`.
+Source of truth: `getWindowSnapshot` / `seedWindowSession` / `installWindowSessionWriter` / `flushWindowSession` in `lib/src/lib/window-session-aggregator.ts`; `SaveSink` / `SaveOptions` in `lib/src/lib/session-save.ts`; `loadWindowState` / `saveWindowState` in `lib/src/lib/window-persistence.ts`; `restoreWindowOrFresh` in `standalone/src/window-restore.ts`.
 
 **A corrupt save must never block startup.** Every read goes through `readPersistedSession()` / `readPersistedWindow()`, which accept the canonical parsed object *or* a JSON-stringified blob (host state APIs may hand back the inner serialized string) and log-and-discard anything present but unreadable. `readPersistedWindow` additionally drops Workspaces whose inner session is unreadable and repairs a dangling `activeWorkspaceId` to the first Workspace.
 

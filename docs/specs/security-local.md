@@ -165,9 +165,9 @@ so notes are not stranded in a dev subtree; VS Code keeps it in
 under `dormouse.session`, and `vscode.setState()`, a WebviewPanel's only store —
 so the modes there are VS Code's, not ours, and no transcript reaches either
 (`docs/specs/vscode.md` -> "Serialization and restore"). Dormouse also writes
-`recovery.json` there, at the umask: one rebuilt agent-resume
-invocation per Surface, no buffer, unlinked as it is read
-(`docs/specs/vscode.md` -> "Capturing agent recovery").
+`recovery.json` under the extension's storage directory, owner-only and
+temp-then-rename: one rebuilt agent-resume invocation per Surface, no buffer,
+unlinked as it is read (`docs/specs/vscode.md` -> "Capturing agent recovery").
 
 **The VS Code peer-link token is a local credential at rest** —
 `burrow.peer-token` in the extension's global storage, written mode `0600`

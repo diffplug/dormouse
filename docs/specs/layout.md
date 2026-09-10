@@ -372,7 +372,7 @@ Startup recovery is priority-based:
 
 Every PTY spawned by (2)–(4) uses the current default shell selection.
 
-Source of truth: `lib/src/components/wall/use-session-persistence.ts` (save triggers and flushes), `lib/src/lib/session-save.ts` (serialization), `collectLivePtys` / `resumeOrRestoreFrom` in `lib/src/lib/reconnect.ts` (recovery priority), `restoreWindow` in `standalone/src/main.tsx` (the per-Workspace boot).
+Source of truth: `lib/src/components/wall/use-session-persistence.ts` (save triggers and flushes), `lib/src/lib/session-save.ts` (serialization), `collectLivePtys` / `resumeOrRestoreFrom` in `lib/src/lib/reconnect.ts` (recovery priority), `restoreWindowOrFresh` in `standalone/src/window-restore.ts` (the per-Workspace boot).
 
 ### Activity state
 

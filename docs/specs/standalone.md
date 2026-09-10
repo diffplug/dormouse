@@ -15,6 +15,7 @@ Start at the runtime boundary involved, then follow its imports and dispatch:
 | `standalone/src/tauri-adapter.ts` | Shared frontend's Tauri command/event bridge. |
 | `standalone/src-tauri/src/lib.rs` | Native app entry, sidecar supervision, and command registration. |
 | `standalone/sidecar/main.js` | JSON-lines command dispatch into PTY and shared host modules. |
+| `standalone/src/window-restore.ts` | Per-Workspace boot planning over one live-PTY list. |
 | `standalone/src/quit.ts` | Webview quit orchestration and updater handoff. |
 
 ## Architecture
@@ -31,9 +32,9 @@ Source of truth: `standalone/src/main.tsx` (`bootstrap()`).
 
 1. Pick the platform: `BrowserSidecarAdapter` when `VITE_DORMOUSE_BROWSER_DEV_HOST`
    is set (the browser-dev harness, `docs/specs/transport.md`), else `TauriAdapter`.
-2. `setPlatform(platform)`, then `await platform.init()` **before**
-   `resumeOrRestore` — init registers the listeners resume replay arrives on and
-   hydrates the session cache (§Persistence).
+2. `setPlatform(platform)`, then `await platform.init()` **before** the restore —
+   init registers the listeners resume replay arrives on and hydrates the session
+   cache (§Persistence).
 3. `installPeerSurfaceResponder()` **after `init()`, never before** (§Burrow
    service) — the responder seeds itself with a `status` command that the adapter
    must already have listeners for (rationale).
@@ -47,8 +48,8 @@ Source of truth: `standalone/src/main.tsx` (`bootstrap()`).
    default-shell slot for split/spawn/restore (`docs/specs/layout.md`).
    **Awaited**: seeding must finish before the Wall mounts, so the first restored
    pane already spawns with that shell.
-8. `resumeOrRestore(platform)` — the priority-based recovery from
-   `docs/specs/transport.md`.
+8. `restoreWindowOrFresh(platform)` — the per-Workspace boot (§Persistence) over
+   the priority-based recovery from `docs/specs/transport.md`.
 9. `startUpdateCheck()` (`docs/specs/auto-update.md`), then render `AppBar` +
    `App` with `multiWorkspace` — one Wall per Workspace (`docs/specs/layout.md`
    → Workspaces) — and `enableBurrow`, the mount gate for the lazily-imported
@@ -308,14 +309,32 @@ on either standalone adapter, because the stored blob is a Window and every
 shared reader of `getState` wants a Session. Source of truth: `windowStateSlot` in
 `standalone/src/window-recovery.ts`.
 
-**Boot restores per Workspace off one live-PTY list.** `restoreWindow`
-(`standalone/src/main.tsx`) seeds the aggregator, installs the Workspaces and the
+**Boot restores per Workspace off one live-PTY list.** `restoreWindowOrFresh`
+seeds the aggregator, installs the Workspaces and the
 writer, then runs one `collectLivePtys` and plans each Workspace from its own saved
 record. Reload and relaunch are the same path with a different list: nothing wires
 `shutdown()` to `beforeunload`, so a reload's PTYs are still there and partition by
 saved pane id, while a relaunch's list is empty and every Workspace cold-restores
-into fresh shells at its saved cwds. **A live PTY no saved Workspace names goes to
-the active Workspace**, which is the only one that can hold it.
+into fresh shells at its saved cwds.
+
+- **A live PTY no saved Workspace names goes to the active Workspace**, which is
+  the only one that can hold it — **except a helper**, which is never a persisted
+  pane and so is always unnamed. **A helper is routed to the Workspace holding its
+  source**, resolving parents across the whole live list before any slicing; one
+  landing anywhere else is resumed as an ordinary pane and its stray id voids that
+  Workspace's whole saved layout.
+- **A restore that throws degrades to a fresh Window and overwrites the blob.**
+  Installing the Workspaces is the step that can reject a stored blob outright, and
+  a throw at boot would leave nothing rendered, on this launch and every later one.
+
+Source of truth: `restoreWindowOrFresh` / `routeUnownedPtys` in
+`standalone/src/window-restore.ts`.
+
+**Every Workspace saving at the same moment costs one `pty_get_cwds`.** A flush
+fans out to every Wall at once, so both adapters put their cwd probe behind
+`coalesceCwds` (`standalone/src/coalesce-cwds.ts`), which folds the calls arriving
+in one microtask into a single invoke — the same batching `getCwdsForPids` already
+does one layer down, extended across the callers.
 
 **Nothing is deleted at boot but orphaned session temp files**
 (`docs/specs/transport.md` → "Retiring the transcripts already on disk"). **The
@@ -357,6 +376,14 @@ without the split a dev launch would restore the installed app's Workspaces and 
 two would clobber one snapshot. **The notepad archive and the Burrow state directory
 stay under `app_data_dir` itself** — machine-local stores, not this build's copy of
 the user's window. `state_root_from` in `standalone/src-tauri/src/lib.rs`.
+
+**Rust passes the sidecar its two directories by environment**, each created
+owner-only first and each an empty string when it could not be:
+`DORMOUSE_STATE_DIR` (the Burrow store, `app_data_dir`) and
+`DORMOUSE_RECOVERY_DIR` (the recovery record, the state root — so a dev run's
+record cannot reach the installed app). The browser-dev harness sets both to its
+own per-run temp directory. Source of truth: `recovery_state_dir` in
+`standalone/src-tauri/src/lib.rs`.
 
 ### Agent recovery
 
@@ -479,7 +506,7 @@ wedged webview, in three phases:
 | 2 — awaiting teardown | acked, `tearing_down` unset | **none** — the webview may be parked on the confirmation dialog waiting on a human, who must never be force-quit out from under it. Only `quit_proceed` (`approved`) or `quit_cancel`/repeat-trigger (`seq` bump) ends the wait |
 | 3 — teardown running | `tearing_down` set | **per phase**, ~14 s, refreshed by every `quit_progress` bump, so teardown and update install get separate budgets rather than one total; a phase making no progress for the budget ⇒ log and exit |
 
-Phase 3's budget comfortably exceeds the webview's own 10 s teardown ceiling. Each
+Phase 3's budget comfortably exceeds the webview's own teardown ceiling. Each
 watchdog captures the `seq` it was spawned for, so a **repeated quit trigger** —
 which bumps `seq`, spawns a fresh watchdog and re-emits — leaves the stale one to
 exit without acting: the user's escape hatch if the webview acked then wedged.
@@ -515,8 +542,12 @@ irrelevant — the gate is read only at quit time.
 Source of truth: `standalone/src/quit-confirm-store.ts` (the module store + gate),
 `standalone/src/QuitConfirmModal.tsx` (the modal).
 
-**Teardown ordering (`runQuitTeardown`), and why.** Wrapped in a 10 s ceiling, with
-**every step individually bounded** so a stall cannot wedge quit. The notepad
+**Teardown ordering (`runQuitTeardown`), and why.** **Every step is individually
+bounded** so a stall cannot wedge quit, and the whole is wrapped in a ceiling
+**derived from the sum of those bounds, never a literal** — one below the sum
+aborts the final save of a slow teardown instead of guarding a wedged one. The two
+steps that reach the sidecar cost their own budget *plus* Rust's round-trip margin,
+so both terms count (`QUIT_TEARDOWN_CEILING_MS` in `standalone/src/quit.ts`). The notepad
 archive is **not** a step here: it runs ahead of `quit_progress` precisely because
 teardown's rule below holds — no failing step prevents exit — and archiving must be
 able to stop the quit (`docs/specs/notepad.md` -> "Standalone quit"):
