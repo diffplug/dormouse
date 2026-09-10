@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   notepadSurfaceIds: vi.fn(() => [] as string[]),
   removeSurface: vi.fn(),
   getWorkspacesSnapshot: vi.fn(() => ({ workspaces: [{ id: "w1", name: "Deploys" }], activeId: "w1" })),
+  hasPendingUpdate: vi.fn(() => false),
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
@@ -34,6 +35,9 @@ vi.mock("dormouse-lib/lib/notepad/notepad-store", () => ({
 vi.mock("dormouse-lib/lib/workspace-store", () => ({
   getWorkspacesSnapshot: mocks.getWorkspacesSnapshot,
 }));
+// Closing a window throws away the download it is holding, so the close asks
+// about that too (`docs/specs/auto-update.md` → "Quit-time install").
+vi.mock("./updater", () => ({ hasPendingUpdate: mocks.hasPendingUpdate }));
 
 import { initWindowClose, _resetWindowCloseForTesting } from "./window-close";
 import {
@@ -71,6 +75,7 @@ describe("per-window close", () => {
     mocks.invoke.mockResolvedValue(undefined);
     mocks.archiveSurfaceNotes.mockResolvedValue(undefined);
     mocks.notepadSurfaceIds.mockReturnValue([]);
+    mocks.hasPendingUpdate.mockReturnValue(false);
   });
 
   afterEach(() => _resetWindowCloseForTesting());
@@ -157,6 +162,30 @@ describe("per-window close", () => {
     await settle();
     expect(mocks.removeSurface).toHaveBeenCalledWith("pane-a");
     expect(commands()).toContain("close_window");
+  });
+
+  it("asks about an approved download even with nothing running", async () => {
+    // The download lives in this webview's memory, so closing the window is the
+    // one ending that silently discards it.
+    mocks.countRunningSessions.mockReturnValue(0);
+    mocks.hasPendingUpdate.mockReturnValue(true);
+    const adapter = fakeAdapter();
+    initWindowClose(adapter);
+    closeRequested();
+    await settle();
+
+    expect(getQuitConfirmPhase()).toBe("open");
+    expect(getQuitConfirmIntent()).toMatchObject({ kind: "close-window", discardsUpdate: true });
+    expect(adapter.gracefulKillPtys).not.toHaveBeenCalled();
+  });
+
+  it("says nothing about an update when none is downloaded", async () => {
+    mocks.countRunningSessions.mockReturnValue(1);
+    initWindowClose(fakeAdapter());
+    closeRequested();
+    await settle();
+
+    expect(getQuitConfirmIntent().discardsUpdate).toBeUndefined();
   });
 
   it("deduplicates a repeat close trigger while a decision is outstanding", async () => {
