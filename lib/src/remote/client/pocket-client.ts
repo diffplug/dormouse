@@ -13,6 +13,7 @@ import {
   API_ROUTES,
   DEFAULT_CHALLENGE_TTL_MS,
   DEFAULT_PAIRING_TTL_MS,
+  DirectCutover,
   E2E_ID_BYTE_LENGTH,
   E2E_KEEPALIVE_INTERVAL_MS,
   ESTABLISHED_E2E_IDLE_TIMEOUT_MS,
@@ -31,6 +32,7 @@ import {
   generateNoiseKeyPair,
   hashPasskeyPublicKey,
   isConnectionOutcomeV1,
+  isDirectSignalV1,
   isE2eRelayToClientFrame,
   isNoisePublicKey,
   isPairingOutcomeV1,
@@ -44,6 +46,8 @@ import {
   utf8Encode,
   type ConnectionDenialCode,
   type ConnectionRequestV1,
+  type DirectPath,
+  type DirectSignalV1,
   type DirectoryEntry,
   type DirectorySnapshot,
   type E2eClientFrame,
@@ -85,6 +89,7 @@ import {
   type KnownBurrowV1,
   type PendingDeletionStore,
 } from './pocket-db';
+import { DirectPeer, type DirectPeerFactory } from '../direct/direct-peer';
 import { realTimer, type RemoteTimer, type RemoteWebSocket } from '../ws';
 
 /** The slice of a WebSocket the client uses; a browser `WebSocket` satisfies it. */
@@ -146,6 +151,13 @@ export interface PocketClientDeps {
   /** The keepalive timer; see {@link RemoteTimer}. */
   readonly setTimer?: RemoteTimer;
   readonly visibility?: PocketVisibility;
+  /**
+   * How this runtime builds a peer connection for the direct path
+   * (`docs/specs/remote-api.md` → Transport → "Direct path"), or `null` where it
+   * has none. Absent, this Client never offers one and every session stays
+   * relayed.
+   */
+  readonly createDirectPeer?: DirectPeerFactory;
 }
 
 /** Terminal stream callbacks for {@link PocketClient.attach}. */
@@ -330,6 +342,16 @@ interface EstablishedSession {
   lastSentAt: number;
 }
 
+/**
+ * One session's direct-path attempt: the peer connection and where each
+ * direction currently sends (`docs/specs/remote-api.md` → Transport → "Direct
+ * path"). At most one per session, created at the offer and closed with it.
+ */
+interface DirectAttempt {
+  readonly peer: DirectPeer;
+  readonly cutover: DirectCutover;
+}
+
 export class PocketClient {
   readonly #baseUrl: string;
   readonly #wsBase: string;
@@ -342,6 +364,7 @@ export class PocketClient {
   readonly #now: () => number;
   readonly #setTimer: RemoteTimer;
   readonly #visibility: PocketVisibility;
+  readonly #createDirectPeer: DirectPeerFactory | null;
 
   #ws: PocketSocket | null = null;
   #sessionToken: string | null = null;
@@ -350,6 +373,11 @@ export class PocketClient {
   #established: EstablishedSession | null = null;
   #connectedBurrowId: string | null = null;
   #onBurrowGone: (() => void) | null = null;
+  /** This session's direct-path attempt, or null while it is purely relayed. */
+  #direct: DirectAttempt | null = null;
+  #onTransportPath: ((path: DirectPath) => void) | null = null;
+  /** The last path announced, so an unchanged one is not announced twice. */
+  #announcedPath: DirectPath = 'relay';
   /** Cancels the armed keepalive, and the visibility subscription behind it. */
   #cancelKeepalive: (() => void) | null = null;
   #cancelVisibility: (() => void) | null = null;
@@ -379,6 +407,7 @@ export class PocketClient {
     this.#now = deps.now ?? (() => Date.now());
     this.#setTimer = deps.setTimer ?? realTimer;
     this.#visibility = deps.visibility ?? documentVisibility();
+    this.#createDirectPeer = deps.createDirectPeer ?? null;
   }
 
   get sessionToken(): string | null {
@@ -387,6 +416,20 @@ export class PocketClient {
 
   get connectedBurrowId(): string | null {
     return this.#connectedBurrowId;
+  }
+
+  /**
+   * Which path carries this session, for the indicator the connected chrome
+   * shows (`docs/specs/pocket-app.md`). `direct` only once **both** directions
+   * have left the relay — before that the relay is still carrying half of it.
+   */
+  get transportPath(): DirectPath {
+    return this.#direct?.cutover.path ?? 'relay';
+  }
+
+  /** Notified whenever {@link transportPath} changes. */
+  setOnTransportPathChanged(callback: ((path: DirectPath) => void) | null): void {
+    this.#onTransportPath = callback;
   }
 
   /**
@@ -872,6 +915,9 @@ export class PocketClient {
       this.#established = { connectionId, session, lastSentAt: this.#now() };
       this.#connectedBurrowId = burrowId;
       this.#startKeepalives();
+      // After the outcome and never before: a peer connection that existed
+      // ahead of authorization would be one an unauthorized party had steered.
+      void this.#offerDirect(this.#established, burrowId);
       return { ok: true, burrowLabel: outcome.burrowLabel };
     }
     if (outcome.code === 'pairing-required') {
@@ -1116,6 +1162,190 @@ export class PocketClient {
     }
   }
 
+  // --- The direct path -----------------------------------------------------
+
+  /**
+   * Offer a direct path on a session that has just been authorized: **once per
+   * session, never retried** (`docs/specs/remote-api.md` → Transport → "Direct
+   * path"). The Client is always the offerer, and the whole description travels
+   * inside the session — the Relay never sees an SDP, a candidate, or that a
+   * direct path exists.
+   *
+   * Every failure here is silent and terminal for the attempt alone: a runtime
+   * with no factory, a description too large to fit one control message, a
+   * negotiation that threw. The session keeps running on the relay.
+   */
+  async #offerDirect(established: EstablishedSession, burrowId: string): Promise<void> {
+    const factory = this.#createDirectPeer;
+    if (!factory) return;
+    let connection;
+    try {
+      connection = factory();
+    } catch {
+      return;
+    }
+    if (!connection) return;
+    const peer = new DirectPeer({
+      peer: connection,
+      setTimer: this.#setTimer,
+      handlers: {
+        onOpen: () => this.#onDirectOpen(established, burrowId),
+        onFrame: (frame) => this.#onDirectFrame(established, frame),
+        onClosed: (reason) => this.#onDirectClosed(established, reason),
+        // A peer speaking something else on the channel is not one this
+        // session's counters can stay synchronized with, switched or not.
+        onViolation: (reason) => this.#loseBurrow(reason),
+      },
+    });
+    this.#direct = { peer, cutover: new DirectCutover() };
+    const sdp = await peer.offer();
+    // The session may have been replaced or disposed while the description was
+    // being built; a peer left over from one is not this one's.
+    if (this.#established !== established || this.#direct?.peer !== peer) {
+      peer.close();
+      return;
+    }
+    if (sdp === null) {
+      this.#abandonDirect(peer);
+      return;
+    }
+    const signal: DirectSignalV1 = { v: 1, t: 'direct-offer', sdp };
+    try {
+      this.#sendE2e(
+        this.#route(established, burrowId),
+        'transport',
+        established.session.sendControl({ ...signal }),
+      );
+    } catch {
+      this.#abandonDirect(peer);
+    }
+  }
+
+  /**
+   * The channel is open. **The `direct-switch` is this end's last message on
+   * the relay** — everything after it goes on the channel, which is what keeps
+   * order per direction.
+   */
+  #onDirectOpen(established: EstablishedSession, burrowId: string): void {
+    const direct = this.#directFor(established);
+    if (!direct) return;
+    const signal: DirectSignalV1 = { v: 1, t: 'direct-switch' };
+    try {
+      this.#sendE2e(
+        this.#route(established, burrowId),
+        'transport',
+        established.session.sendControl({ ...signal }),
+      );
+    } catch {
+      this.#abandonDirect(direct.peer);
+      return;
+    }
+    direct.cutover.switchOutbound();
+    this.#announcePath();
+  }
+
+  /** One frame off the channel: processed, held until the peer's switch, or fatal. */
+  #onDirectFrame(established: EstablishedSession, frame: Uint8Array): void {
+    const direct = this.#directFor(established);
+    if (!direct) return;
+    switch (direct.cutover.onChannelFrame(frame)) {
+      case 'process':
+        this.#receiveOnSession(established, frame);
+        return;
+      case 'held':
+        return;
+      case 'overflow':
+        this.#loseBurrow('the direct path outran what this phone can hold in order');
+        return;
+    }
+  }
+
+  /**
+   * The channel went away. **Before either direction has switched that is
+   * merely an abandoned attempt**; afterwards it is burrow loss, reported
+   * exactly as a `burrow-gone` frame is, because the messages that were riding
+   * it are gone and a stream cipher has no resynchronization point.
+   */
+  #onDirectClosed(established: EstablishedSession, reason: string): void {
+    const direct = this.#directFor(established);
+    if (!direct) return;
+    if (!direct.cutover.switched) {
+      this.#abandonDirect(direct.peer);
+      return;
+    }
+    this.#loseBurrow(reason);
+  }
+
+  /** One decrypted signal; anything else on the control channel is ignored. */
+  #onDirectSignal(established: EstablishedSession, value: Record<string, unknown>): void {
+    // An unknown control shape on an established session says nothing this can
+    // act on and is never a session failure — which is what lets a Burrow
+    // without this stack simply stay relayed.
+    if (!isDirectSignalV1(value)) return;
+    const direct = this.#directFor(established);
+    if (!direct) return;
+    switch (value.t) {
+      case 'direct-answer':
+        void direct.peer.acceptAnswer(value.sdp);
+        return;
+      case 'direct-decline':
+        this.#abandonDirect(direct.peer);
+        return;
+      case 'direct-switch': {
+        const held = direct.cutover.onSwitchDecrypted();
+        this.#announcePath();
+        // In arrival order, through the same decrypt path the relay's frames
+        // take: what was held is exactly what was sent after the switch.
+        for (const frame of held) {
+          if (this.#established !== established) return;
+          this.#receiveOnSession(established, frame);
+        }
+        return;
+      }
+      default:
+        // `direct-offer` is the Client's own to send; a Burrow offering one is
+        // ignored rather than answered.
+        return;
+    }
+  }
+
+  /** This session's attempt, or null once it has been replaced or disposed. */
+  #directFor(established: EstablishedSession): DirectAttempt | null {
+    return this.#established === established ? this.#direct : null;
+  }
+
+  /** Give up on the channel, leaving the session exactly as relayed as it was. */
+  #abandonDirect(peer: DirectPeer): void {
+    peer.close();
+    if (this.#direct?.peer !== peer) return;
+    this.#direct.cutover.clear();
+    this.#direct = null;
+    this.#announcePath();
+  }
+
+  #announcePath(): void {
+    const path = this.transportPath;
+    if (path === this.#announcedPath) return;
+    this.#announcedPath = path;
+    this.#onTransportPath?.(path);
+  }
+
+  /**
+   * The end-to-end session is over while the relay socket is not: dispose it,
+   * fail everything in flight, and tell the app — the same three steps a
+   * `burrow-gone` frame takes, because from here they are the same event.
+   */
+  #loseBurrow(reason: string): void {
+    this.#disposeCeremony();
+    this.#rejectAll(new Error(reason));
+    this.#onBurrowGone?.();
+  }
+
+  /** Where this session's frames are addressed on the relay. */
+  #route(established: EstablishedSession, burrowId: string): E2eRoute {
+    return { kind: 'connection', id: established.connectionId, burrowId };
+  }
+
   // --- Keepalives ----------------------------------------------------------
 
   /**
@@ -1129,11 +1359,9 @@ export class PocketClient {
     if (!established || burrowId === null) return;
     if (this.#reapedByBurrow(established)) return;
     try {
-      this.#sendE2e(
-        { kind: 'connection', id: established.connectionId, burrowId },
-        'transport',
-        established.session.sendKeepalive(),
-      );
+      // Path-agnostic: a keepalive off the channel refreshes the Burrow's idle
+      // deadline exactly as one off the relay does.
+      this.#deliver(this.#route(established, burrowId), established.session.sendKeepalive());
       established.lastSentAt = this.#now();
     } catch {
       // A closed socket or a poisoned session; both have their own teardown,
@@ -1223,11 +1451,25 @@ export class PocketClient {
     const burrowId = this.#connectedBurrowId;
     if (burrowId === null) throw new Error('not connected to a burrow');
     if (this.#reapedByBurrow(established)) throw new Error(BURROW_SESSION_REAPED_MESSAGE);
-    const route = { kind: 'connection', id: established.connectionId, burrowId } as const;
+    const route = this.#route(established, burrowId);
     for (const ciphertext of established.session.sendApp(utf8Encode(JSON.stringify(payload)))) {
-      this.#sendE2e(route, 'transport', ciphertext);
+      this.#deliver(route, ciphertext);
     }
     established.lastSentAt = this.#now();
+  }
+
+  /**
+   * One transport ciphertext on whichever path this end has switched to. Every
+   * byte of an established session goes through here, so "after the switch,
+   * nothing on the relay" is one line rather than a rule each caller keeps.
+   */
+  #deliver(route: E2eRoute, ciphertext: Uint8Array): void {
+    const direct = this.#direct;
+    if (direct && direct.cutover.outbound === 'direct') {
+      direct.peer.send(ciphertext);
+      return;
+    }
+    this.#sendE2e(route, 'transport', ciphertext);
   }
 
   #send(frame: E2eClientFrame): void {
@@ -1326,20 +1568,42 @@ export class PocketClient {
   }
 
   /**
-   * One transport frame on an authorized session. **Any decrypt or framing
-   * failure ends it**: there is no resynchronization point in a stream cipher,
-   * so a poisoned session is burrow loss and the app must leave the wall.
+   * One transport frame on an authorized session, arriving on the relay.
+   *
+   * **After the Burrow has switched there is nothing left for it to send here**,
+   * so a frame that arrives anyway is a peer whose two paths this Client can no
+   * longer keep in order (`docs/specs/remote-api.md` → Transport → "Direct
+   * path").
    */
   #onEstablishedFrame(established: EstablishedSession, ct: string): void {
+    const direct = this.#directFor(established);
+    if (direct && direct.cutover.onRelayTransport() === 'violation') {
+      this.#loseBurrow('a relay frame arrived after the direct switch');
+      return;
+    }
+    this.#receiveOnSession(established, fromBase64Url(ct));
+  }
+
+  /**
+   * Decrypt one transport ciphertext, whichever path carried it. **Any decrypt
+   * or framing failure ends the session**: there is no resynchronization point
+   * in a stream cipher, so a poisoned session is burrow loss and the app must
+   * leave the wall.
+   */
+  #receiveOnSession(established: EstablishedSession, ciphertext: Uint8Array): void {
     let receipt;
     try {
-      receipt = established.session.receive(fromBase64Url(ct));
+      receipt = established.session.receive(ciphertext);
     } catch {
       this.#teardown('the end-to-end session failed', { notifyGone: true });
       return;
     }
-    // A keepalive is accepted and ignored; a control message on an established
-    // session is not part of protocol-v1 and says nothing this can act on.
+    // A keepalive is accepted and ignored; the only control messages on an
+    // established session are the direct path's signals.
+    if (receipt.kind === 'control') {
+      this.#onDirectSignal(established, receipt.value);
+      return;
+    }
     if (receipt.kind !== 'app') return;
     for (const message of receipt.messages) {
       let payload: unknown;
@@ -1396,8 +1660,14 @@ export class PocketClient {
   /** Erase every session's cipher state; a new ceremony starts from a handshake. */
   #disposeCeremony(): void {
     this.#stopKeepalives();
+    // The peer connection is this session's: every disposal path closes it, so
+    // none can outlive the session that authorized it.
+    this.#direct?.peer.close();
+    this.#direct?.cutover.clear();
+    this.#direct = null;
     this.#connectedBurrowId = null;
     this.#established = null;
+    this.#announcePath();
   }
 
   /** Fail every awaited ceremony frame and in-flight request (avoids hangs). */

@@ -26,7 +26,7 @@ import {
 } from '../client/pocket-client';
 import { PasskeyAlreadyRegisteredError, browserWebAuthn } from '../client/webauthn';
 import { BURROW_IS_AN_APP, SCAN_LABEL } from '../setup-copy';
-import { probeNoiseSupport, type PairingInvitation } from 'remote-lib-common';
+import { probeNoiseSupport, type DirectPath, type PairingInvitation } from 'remote-lib-common';
 import {
   indexedDbKnownBurrowStore,
   indexedDbPendingDeletionStore,
@@ -120,6 +120,14 @@ export default function App({
         fetch: window.fetch.bind(window),
         webauthn: browserWebAuthn,
         createWebSocket: (url) => new WebSocket(url) as unknown as PocketSocket,
+        // **No ICE servers**: a public STUN or TURN default would hand a third
+        // party this phone's address, and the shipped deployment is a tailnet
+        // where host candidates reach (`docs/specs/remote-api.md` → Transport →
+        // "Direct path"). A browser without WebRTC keeps its session relayed.
+        createDirectPeer: () =>
+          typeof RTCPeerConnection === 'undefined'
+            ? null
+            : new RTCPeerConnection({ iceServers: [] }),
         knownBurrows: indexedDbKnownBurrowStore(),
         pendingDeletions: indexedDbPendingDeletionStore(),
       }),
@@ -339,6 +347,16 @@ export default function App({
     });
     return () => client.setOnBurrowGone(null);
   }, [client, teardownAdapter]);
+
+  /**
+   * Which path carries the live session. Subscribed rather than read on render:
+   * the cutover happens seconds into a session, long after the wall is up.
+   */
+  const [transportPath, setTransportPath] = useState<DirectPath>('relay');
+  useEffect(() => {
+    client.setOnTransportPathChanged(setTransportPath);
+    return () => client.setOnTransportPathChanged(null);
+  }, [client]);
 
   /** The connect half, shared so a fresh pairing can continue straight into it. */
   const connectTo = useCallback(
@@ -610,7 +628,13 @@ export default function App({
       // The adapter is stood up before the phase moves, so the ref is set
       // whenever this branch is reachable.
       return adapterRef.current ? (
-        <ConnectedView burrow={phase.burrow} adapter={adapterRef.current} onLeave={leaveWall} onError={onWallError} />
+        <ConnectedView
+          burrow={phase.burrow}
+          adapter={adapterRef.current}
+          transportPath={transportPath}
+          onLeave={leaveWall}
+          onError={onWallError}
+        />
       ) : (
         <Waiting />
       );
@@ -761,18 +785,32 @@ export const BURROWS_EMPTY =
   `No Burrows paired yet. ${BURROW_IS_AN_APP} On the computer, open Settings → `
   + 'Remote control → Set up a phone, then scan the code.';
 
+/**
+ * What the path indicator says, and the sentence behind each. **Which path
+ * carries the session is shown, never inferred**, so a relayed fallback is
+ * visible rather than silent (`docs/specs/pocket-app.md`).
+ */
+export const TRANSPORT_PATH_LABELS: Record<DirectPath, { label: string; title: string }> = {
+  relay: { label: 'relay', title: 'This session goes through the relay.' },
+  direct: { label: 'direct', title: 'This session goes straight to the computer.' },
+};
+
 /** The connected Pocket shell: Burrow navigation chrome over the remote wall. */
 export function ConnectedView({
   burrow,
   adapter,
+  transportPath = 'relay',
   onLeave,
   onError,
 }: {
   burrow: BurrowView;
   adapter: RemotePtyAdapter;
+  /** Which path carries the session; see {@link TRANSPORT_PATH_LABELS}. */
+  transportPath?: DirectPath;
   onLeave: () => void;
   onError?: (error: unknown) => void;
 }): React.ReactElement {
+  const path = TRANSPORT_PATH_LABELS[transportPath];
   return (
     <div className={PK.app}>
       <header className={PK.header}>
@@ -780,6 +818,9 @@ export function ConnectedView({
           ‹ {BURROWS_TITLE}
         </button>
         <h1 className={PK.headerTitle}>{burrow.label || burrow.burrowId}</h1>
+        <span className={PK.headerNote} title={path.title}>
+          {path.label}
+        </span>
       </header>
       <div className={PK.wallHost}>
         <PocketWall adapter={adapter} onError={onError} />

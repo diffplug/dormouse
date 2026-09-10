@@ -61,6 +61,7 @@ vi.mock('../client/pocket-client', async (importOriginal) => ({
     hasPriorUse = () => true;
     registeredPushEndpoint = () => null;
     setOnBurrowGone = () => undefined;
+    setOnTransportPathChanged = () => undefined;
     close = () => undefined;
     openSocket = async () => undefined;
     signin = async () => ({});

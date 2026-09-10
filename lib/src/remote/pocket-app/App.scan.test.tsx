@@ -95,6 +95,7 @@ vi.mock('../client/pocket-client', async (importOriginal) => ({
     hasPriorUse = () => fake.hasPriorUse;
     registeredPushEndpoint = () => null;
     setOnBurrowGone = () => undefined;
+    setOnTransportPathChanged = () => undefined;
     close = () => fake.clientClose();
     openSocket = async () => undefined;
     setup = (credential: { setupToken: string }, label: string) => fake.setup(credential, label);
