@@ -159,11 +159,13 @@ describe("the source half", () => {
     expect(args).toMatchObject({ to: "ws-2", payload: { at: { x: 10, y: 4 }, terminalIds: ["pane-a"] } });
   });
 
-  it("tears out into a new window with the drop point", async () => {
+  it("tears out into a new window carrying the tab's grab offset", async () => {
     registerWallHandle(stubWallHandle(WORKSPACE_ID, { releaseWorkspaceForTransfer: async () => payload() }));
-    await tearOutWorkspace(WORKSPACE_ID, { x: 900, y: 300 });
+    // Only Rust knows where the cursor is on screen, so the payload carries
+    // where the tab should sit inside the new window rather than a position.
+    await tearOutWorkspace(WORKSPACE_ID, { x: 90, y: 12 });
     expect(mocks.invoke).toHaveBeenCalledWith("open_workspace_window", {
-      payload: expect.objectContaining({ at: { x: 900, y: 300 } }),
+      payload: expect.objectContaining({ grab: { x: 90, y: 12 } }),
     });
   });
 

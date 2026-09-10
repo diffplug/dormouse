@@ -144,9 +144,13 @@ async function bootstrap() {
   // restores what the last run left.
   let initialPlans: Awaited<ReturnType<typeof restoreWindowOrFresh>> | null = null;
   if (!BROWSER_DEV_HOST) {
-    const { bootFromTearOut, initWorkspaceMoves } = await import("./workspace-move");
+    const [{ bootFromTearOut, initWorkspaceMoves }, { initDropCaret }] = await Promise.all([
+      import("./workspace-move"),
+      import("./workspace-drop-caret"),
+    ]);
     initialPlans = await bootFromTearOut(platform);
     initWorkspaceMoves(platform);
+    initDropCaret();
   }
   initialPlans ??= await restoreWindowOrFresh(platform);
 

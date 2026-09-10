@@ -40,6 +40,10 @@ interface MovePayload extends WorkspaceTransferPayload {
   /** Where the pointer released, in the target window's logical client space.
    *  The target turns it into a strip index; it alone knows its own tabs. */
   at?: { x: number; y: number };
+  /** Where the dragged tab should sit inside the new window, so it lands under
+   *  the cursor. Rust turns it into the window's position, because only Rust
+   *  knows where the cursor is on the screen. */
+  grab?: { x: number; y: number };
 }
 
 /**
@@ -74,12 +78,12 @@ export async function transferWorkspaceTo(
 /** Tear this Workspace out into a new window under the cursor. */
 export async function tearOutWorkspace(
   workspaceId: WorkspaceId,
-  at: { x: number; y: number },
+  grab: { x: number; y: number },
 ): Promise<void> {
   const payload = await release(workspaceId);
   if (!payload) return;
   try {
-    await invoke("open_workspace_window", { payload: { ...payload, at } satisfies MovePayload });
+    await invoke("open_workspace_window", { payload: { ...payload, grab } satisfies MovePayload });
   } catch (err) {
     console.error("[workspace-move] tear-out failed", err);
   }

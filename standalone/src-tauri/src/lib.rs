@@ -1955,17 +1955,23 @@ fn open_workspace_window(
     // Ownership moves before the window exists, so every byte from this instant
     // is suppressed rather than painted in the window losing the Workspace.
     windows.reassign(&payload_terminal_ids(&payload), &label);
+    // Positioned so the dragged tab lands under the cursor, at the source
+    // window's size. Only Rust knows where the cursor is on screen, so the
+    // webview sends the offset the tab should keep inside the new window.
     let geometry = {
         let scale = window.scale_factor().unwrap_or(1.0);
         let size = window
             .outer_size()
             .map(|size| size.to_logical::<f64>(scale))
             .ok();
-        let at = payload.get("at");
-        match (at.and_then(|at| at.get("x")), at.and_then(|at| at.get("y")), size) {
-            (Some(x), Some(y), Some(size)) => x.as_f64().zip(y.as_f64()).map(|(x, y)| WindowGeometry {
-                x,
-                y,
+        let grab = payload.get("grab");
+        let offset = grab
+            .and_then(|grab| grab.get("x")?.as_f64().zip(grab.get("y")?.as_f64()))
+            .unwrap_or((0.0, 0.0));
+        match (app.cursor_position().ok(), size) {
+            (Some(cursor), Some(size)) => Some(WindowGeometry {
+                x: cursor.x / scale - offset.0,
+                y: cursor.y / scale - offset.1,
                 width: size.width,
                 height: size.height,
             }),

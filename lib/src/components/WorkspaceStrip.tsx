@@ -162,7 +162,11 @@ export function WorkspaceStrip({
   };
 
   return (
-    <div ref={stripRef} className={clsx('flex min-w-0 items-center gap-0.5 overflow-x-auto', className)}>
+    <div
+      ref={stripRef}
+      data-workspace-strip
+      className={clsx('flex min-w-0 items-center gap-0.5 overflow-x-auto', className)}
+    >
       {workspaces.map((workspace) => {
         const isActive = workspace.id === activeId;
         return (
