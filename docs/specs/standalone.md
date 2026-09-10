@@ -143,12 +143,13 @@ realm**. Against the shared store contract (`docs/specs/relay.md` → "Burrow si
 do not ship** — the Tauri bundle copies `standalone/sidecar/node_modules` and
 nothing else — so the addon's platform package and `detect-libc` are declared in
 `standalone/sidecar/package.json` directly. **Both specifiers stay `external` to
-`burrow.cjs`**, which the build asserts: the addon resolves its `.node` relative
-to its own `__dirname`, and inlining would move that out of the installed
-package.
+`burrow.cjs`**, which the build asserts from esbuild's metafile — each has to
+leave the bundle as an external `require-call` edge: the addon resolves its
+`.node` relative to its own `__dirname`, and inlining would move that out of the
+installed package.
 
 Source of truth: `standalone/sidecar/package.json`,
-`lib/src/host/remote/native-direct-peer.ts`, `assertExternalRequire` in
+`lib/src/host/remote/native-direct-peer.ts`, `assertExternalImports` in
 `standalone/scripts/build-sidecar-proxy.mjs`.
 
 **The bridge.** Webview → sidecar is one generic passthrough invoke,

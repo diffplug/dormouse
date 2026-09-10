@@ -6,7 +6,6 @@
 //   - lib/src/host/remote/sidecar-entry.ts → sidecar/burrow.cjs
 // See docs/specs/dor-browser.md and docs/specs/remote-api.md.
 import { build } from 'esbuild';
-import { readFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -39,26 +38,36 @@ const bundles = [
     define: { [CONNECT_SRC_PLACEHOLDER]: JSON.stringify(remoteSrc) },
     assertBaked: true,
     external: NATIVE_DIRECT,
-    assertExternal: NATIVE_DIRECT,
   },
 ];
 
 /**
- * Fail the build if esbuild bundled a module that has to stay external.
+ * Fail the build if esbuild bundled a module the `external` list has to keep out.
  *
  * `native-direct-peer.ts` calls `require('<specifier>')` by literal, so an
- * external specifier survives verbatim and a bundled one is rewritten into the
- * inlined module's own accessor. That difference is the whole check: a lost
- * `external` entry produces a `burrow.cjs` that loads and then cannot find the
- * addon's `.node` file, which nothing before the first `direct-offer` on a real
- * machine would notice.
+ * external specifier stays a `require-call` edge out of the bundle and a bundled
+ * one becomes an inlined module with no edge at all. That difference is the
+ * whole check: a lost `external` entry produces a `burrow.cjs` that loads and
+ * then cannot find the addon's `.node` file, which nothing before the first
+ * `direct-offer` on a real machine would notice.
  */
-function assertExternalRequire(bundlePath, specifiers) {
-  const bundle = readFileSync(bundlePath, 'utf8');
-  for (const specifier of specifiers) {
-    if (bundle.includes(`require("${specifier}")`)) continue;
+function assertExternalImports(metafile, outfile, specifiers) {
+  // esbuild keys `metafile.outputs` by path relative to the process cwd, with
+  // `/` separators on every platform.
+  const outputKey = path.relative(process.cwd(), outfile).split(path.sep).join('/');
+  const imports = metafile.outputs[outputKey]?.imports;
+  if (!imports) {
     throw new Error(
-      `sidecar: ${bundlePath} has no bare require("${specifier}") — esbuild bundled it, and ` +
+      `sidecar: esbuild metafile has no output for "${outputKey}" — cannot check external imports.`,
+    );
+  }
+  for (const specifier of specifiers) {
+    const kept = imports.some(
+      (edge) => edge.path === specifier && edge.kind === 'require-call' && edge.external === true,
+    );
+    if (kept) continue;
+    throw new Error(
+      `sidecar: ${outputKey} has no external require("${specifier}") — esbuild bundled it, and ` +
         'the addon would look for its platform package beside the bundle instead of inside ' +
         'sidecar/node_modules.',
     );
@@ -70,9 +79,9 @@ function assertExternalRequire(bundlePath, specifiers) {
 // app — a dead Burrow with its own baked connect-src allowlist.
 await rm(path.resolve(sidecar, 'remote-host.cjs'), { force: true });
 
-for (const { entry, out, define, assertBaked, external, assertExternal } of bundles) {
+for (const { entry, out, define, assertBaked, external } of bundles) {
   const outfile = path.resolve(sidecar, out);
-  await build({
+  const result = await build({
     entryPoints: [path.resolve(libHost, entry)],
     outfile,
     bundle: true,
@@ -80,10 +89,11 @@ for (const { entry, out, define, assertBaked, external, assertExternal } of bund
     format: 'cjs',
     target: 'node24',
     logLevel: 'warning',
+    metafile: true,
     ...(define ? { define } : {}),
     ...(external ? { external } : {}),
   });
   if (assertBaked) assertConnectSrcBaked(outfile, remoteSrc);
-  if (assertExternal) assertExternalRequire(outfile, assertExternal);
+  if (external) assertExternalImports(result.metafile, outfile, external);
   console.log(`[sidecar] built ${path.relative(process.cwd(), outfile)}`);
 }
