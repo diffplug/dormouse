@@ -84,3 +84,52 @@ test('a viewer listener failure releases its browser connection', async () => {
   expect(result.error).toBe('Listener unavailable');
   expect(browser.close).toHaveBeenCalledTimes(1);
 });
+
+test('captures reuse recent tab state but refresh it when it expires', async () => {
+  const now = vi.spyOn(Date, 'now').mockReturnValue(10000);
+  expect((await host.request({ ...binding, op: 'streamStatus' })).ok).toBe(true);
+  mocks.cli.mockClear();
+  for (let i = 0; i < 10; i++) expect((await host.request({ ...binding, op: 'screenshot' })).ok).toBe(true);
+  expect(mocks.cli).not.toHaveBeenCalled();
+  now.mockReturnValue(10750);
+  expect((await host.request({ ...binding, op: 'screenshot' })).ok).toBe(true);
+  expect(mocks.cli).toHaveBeenCalledExactlyOnceWith('/tools/playwright-cli', ['--session=test', 'tab-list', '--json'], { cwd: binding.cwd });
+});
+
+test('GUI tab selection refreshes immediately even with a recent capture', async () => {
+  vi.spyOn(Date, 'now').mockReturnValue(10000);
+  const second = Object.assign(new EventEmitter(), page, { url: () => 'http://localhost/second' });
+  browser.contexts = () => [{ pages: () => [page, second] }];
+  const originalCli = mocks.cli.getMockImplementation()!;
+  let active = 0;
+  mocks.cli.mockImplementation(async (binary, args, options) => {
+    if (args.includes('tab-select')) active = Number(args.at(-1));
+    if (args.includes('tab-list')) return { ok: true, exitCode: 0, stdout: JSON.stringify({ result: `- ${active}: (current) Test` }), stderr: '' };
+    return originalCli(binary, args, options);
+  });
+  expect((await host.request({ ...binding, op: 'screenshot' })).ok).toBe(true);
+  expect((await host.request({ ...binding, op: 'command', args: ['tab', '1'] })).ok).toBe(true);
+  expect((await host.request({ ...binding, op: 'screenshot' })).ok).toBe(true);
+  expect(attach).toHaveBeenLastCalledWith(second);
+});
+
+test('a native reopen in headless mode clears headed shutdown ownership', async () => {
+  const originalCli = mocks.cli.getMockImplementation()!;
+  let headless = false;
+  mocks.cli.mockImplementation(async (binary, args, options) => {
+    const result = await originalCli(binary, args, options);
+    if (args.includes('list')) {
+      const registry = JSON.parse(result.stdout);
+      registry.servers[0].browser.launchOptions = { headless };
+      result.stdout = JSON.stringify(registry);
+    }
+    return result;
+  });
+  expect((await host.request({ ...binding, op: 'streamStatus' })).headed).toBe(true);
+  browser.emit('disconnected');
+  headless = true;
+  expect((await host.request({ ...binding, op: 'streamStatus' })).headed).toBe(false);
+  mocks.cli.mockClear();
+  await host.close();
+  expect(mocks.cli).not.toHaveBeenCalled();
+});

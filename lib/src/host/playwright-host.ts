@@ -13,6 +13,7 @@ import { resolvePlaywrightInstall, playwrightWorkspace, type PlaywrightInstall }
 import { isLoopbackHost } from './loopback-guard';
 import { BrowserStreamGrants } from './browser-stream-guard';
 
+const TAB_REFRESH_INTERVAL_MS = 750;
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const validSession = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9._-]+$/.test(value) && value.length <= 200;
@@ -31,6 +32,7 @@ type Viewer = Binding & {
   timer?: ReturnType<typeof setTimeout>;
   disposed: boolean;
   refreshing?: Promise<void>;
+  refreshedAt?: number;
   queue: Promise<void>;
   queued: number;
   headed: boolean;
@@ -94,16 +96,18 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
     const match = /(?:^|\\n|\n)\s*-?\s*(\d+):?\s*\(current\)/.exec(text);
     return match ? Number(match[1]) : 0;
   }
-  async function refresh(v: Viewer) {
+  async function refresh(v: Viewer, force = true) {
     if (v.disposed) return;
     if (v.refreshing) return v.refreshing;
+    // Captures share the viewer polling cadence; explicit controls refresh immediately.
+    if (!force && v.page && !v.page.isClosed() && v.refreshedAt !== undefined && Date.now() - v.refreshedAt < TAB_REFRESH_INTERVAL_MS) return;
     v.refreshing = refreshNow(v);
     try { await v.refreshing; } finally { v.refreshing = undefined; }
   }
   async function refreshNow(v: Viewer) {
     try {
-      const pages = pagesOf(v);
       const index = await activeIndex(v);
+      const pages = pagesOf(v);
       if (v.disposed) return;
       const page = pages[index] ?? pages[0];
       if (page !== v.page) {
@@ -120,6 +124,7 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
         broadcast(v, { type: 'url', url: page.url() });
         broadcast(v, { type: 'status', connected: true, screencasting: !v.headed, viewportWidth: size?.width, viewportHeight: size?.height });
       }
+      v.refreshedAt = Date.now();
     } catch (e) { log(e); }
   }
   async function startFrames(v: Viewer) {
@@ -140,7 +145,7 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
     v.timer = setTimeout(() => {
       v.timer = undefined;
       void refresh(v).finally(() => schedule(v));
-    }, 750);
+    }, TAB_REFRESH_INTERVAL_MS);
     v.timer.unref();
   }
   function control(v: Viewer, page: Page): Promise<CDPSession> {
@@ -186,7 +191,7 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
   async function connect(b: Binding): Promise<Viewer> {
     const key = keyOf(b);
     const cached = viewers.get(key);
-    if (cached && cached.browser.isConnected()) { void refresh(cached); return cached; }
+    if (cached && cached.browser.isConnected()) return cached;
     const pending = connecting.get(key);
     if (pending) return pending;
     const gen = generations.get(key) ?? 0;
@@ -245,7 +250,7 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
       browser.on('disconnected', () => { if (viewers.get(key) === v) viewers.delete(key); void dispose(v); });
       if (closed || gen !== (generations.get(key) ?? 0)) { await dispose(v); throw new Error('Browser launch superseded'); }
       viewers.set(key, v);
-      if (v.headed) headed.set(key, b);
+      if (v.headed) headed.set(key, b); else headed.delete(key);
       return v;
     })();
     connecting.set(key, operation);
@@ -311,7 +316,7 @@ export function createPlaywrightHost(deps: { writeClipboardText(text: string): v
     }
     const v = await connect(b);
     if (request.op === 'streamStatus') { await refresh(v); return { ok: true, wsPort: v.port, headed: v.headed, nativeIdentity: keyOf(b) }; }
-    await refresh(v);
+    await refresh(v, request.op !== 'screenshot');
     const page = v.page;
     if (!page) throw new Error('No Playwright page is open');
     if (request.op === 'screenshot') {
