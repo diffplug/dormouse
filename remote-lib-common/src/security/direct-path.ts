@@ -128,6 +128,19 @@ export type DirectRelayOutcome = 'process' | 'violation';
 export type DirectChannelOutcome = 'process' | 'held' | 'overflow';
 
 /**
+ * How far this end's one attempt has got: `idle` before it starts, `attempting`
+ * from {@link DirectCutover.begin} until {@link DirectCutover.abandon}, and
+ * `abandoned` forever after. There is no way back to `idle`, which is what makes
+ * the attempt once-per-session.
+ */
+export type DirectAttemptState = 'idle' | 'attempting' | 'abandoned';
+
+/** What the peer's `direct-switch` turned out to mean; see {@link DirectCutover.onSwitchDecrypted}. */
+export type DirectSwitchOutcome =
+  | { readonly kind: 'drain'; readonly frames: Uint8Array[] }
+  | { readonly kind: 'fatal' };
+
+/**
  * One end's view of the cutover, which is per direction and never negotiated:
  * each side switches its own sends and learns about the peer's when the peer's
  * `direct-switch` decrypts.
@@ -138,12 +151,21 @@ export type DirectChannelOutcome = 'process' | 'held' | 'overflow';
  * before it. The holding queue is bounded in both frames and bytes; a peer that
  * overruns it is one this end cannot keep in order, which is a dead session
  * rather than a dropped frame.
+ *
+ * The attempt's lifecycle lives here too, so the two ends cannot disagree about
+ * when one may start or what a switch means after one has been given up.
  */
 export class DirectCutover {
+  #state: DirectAttemptState = 'idle';
   #outbound: DirectPath = 'relay';
   #inbound: DirectPath = 'relay';
   readonly #held: Uint8Array[] = [];
   #heldBytes = 0;
+
+  /** How far this end's one attempt has got. */
+  get state(): DirectAttemptState {
+    return this.#state;
+  }
 
   /** Where this end's own messages go. */
   get outbound(): DirectPath {
@@ -174,6 +196,31 @@ export class DirectCutover {
   }
 
   /**
+   * Claim this session's one attempt. **The one-attempt-per-session gate**: a
+   * second call answers `false` and allocates nothing, whatever the first
+   * attempt did or is still doing.
+   */
+  begin(): boolean {
+    if (this.#state !== 'idle') return false;
+    this.#state = 'attempting';
+    return true;
+  }
+
+  /**
+   * Give the attempt up, leaving the session exactly as relayed as it was, and
+   * release what it was holding.
+   *
+   * **Only legal before either direction has switched** — after that there is no
+   * relay left to fall back to, so a caller reaching here has confused an
+   * abandoned attempt with burrow loss.
+   */
+  abandon(): void {
+    if (this.switched) throw new Error('a switched direct path cannot be abandoned');
+    this.#state = 'abandoned';
+    this.clear();
+  }
+
+  /**
    * Move this end's sends onto the channel. The caller sends its
    * `direct-switch` on the relay *first*: this is the line after which nothing
    * else may.
@@ -198,14 +245,19 @@ export class DirectCutover {
 
   /**
    * The peer's `direct-switch` decrypted: everything held is now known to come
-   * after it. Returns the held frames in arrival order, and empties the queue.
+   * after it, so `drain` carries the held frames in arrival order and empties
+   * the queue.
+   *
+   * **A switch onto a channel this end has abandoned is `fatal`**: nothing that
+   * peer sends can arrive any more, and the alternative is a session whose every
+   * request hangs unanswered.
    */
-  onSwitchDecrypted(): Uint8Array[] {
+  onSwitchDecrypted(): DirectSwitchOutcome {
+    if (this.#state === 'abandoned') return { kind: 'fatal' };
     this.#inbound = 'direct';
-    const drained = [...this.#held];
-    this.#held.length = 0;
-    this.#heldBytes = 0;
-    return drained;
+    const frames = [...this.#held];
+    this.clear();
+    return { kind: 'drain', frames };
   }
 
   /**

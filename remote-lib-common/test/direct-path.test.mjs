@@ -116,8 +116,57 @@ test('starts relayed in both directions', () => {
   assert.equal(cutover.onRelayTransport(), 'process');
 });
 
+test('claims the session’s one attempt, and never a second', () => {
+  const cutover = new DirectCutover();
+  assert.equal(cutover.state, 'idle');
+  assert.equal(cutover.begin(), true);
+  assert.equal(cutover.state, 'attempting');
+  // The one-attempt-per-session gate: a second offer allocates nothing.
+  assert.equal(cutover.begin(), false);
+  cutover.abandon();
+  assert.equal(cutover.state, 'abandoned');
+  // And an attempt that was given up cannot be restarted either.
+  assert.equal(cutover.begin(), false);
+});
+
+test('abandoning releases what it held, and is refused once switched', () => {
+  const cutover = new DirectCutover();
+  cutover.begin();
+  cutover.onChannelFrame(frame(1));
+  cutover.abandon();
+  assert.equal(cutover.pendingFrames, 0);
+  assert.equal(cutover.pendingBytes, 0);
+
+  // After a switch there is no relay to fall back to, so a caller reaching here
+  // has confused an abandoned attempt with burrow loss.
+  const switched = new DirectCutover();
+  switched.begin();
+  switched.switchOutbound();
+  assert.throws(() => switched.abandon(), /cannot be abandoned/);
+});
+
+test('a switch onto an abandoned channel is fatal, and a switch while attempting drains', () => {
+  const abandoned = new DirectCutover();
+  abandoned.begin();
+  abandoned.abandon();
+  assert.deepEqual(abandoned.onSwitchDecrypted(), { kind: 'fatal' });
+  // Refused before anything moved: the session is over, not half switched.
+  assert.equal(abandoned.inbound, 'relay');
+
+  const attempting = new DirectCutover();
+  attempting.begin();
+  attempting.onChannelFrame(frame(1));
+  attempting.onChannelFrame(frame(2));
+  assert.deepEqual(attempting.onSwitchDecrypted(), {
+    kind: 'drain',
+    frames: [frame(1), frame(2)],
+  });
+  assert.equal(attempting.inbound, 'direct');
+});
+
 test('switches each direction on its own, and only both make it direct', () => {
   const cutover = new DirectCutover();
+  cutover.begin();
   assert.equal(cutover.switchOutbound(), true);
   // A second open must not put a second switch on the relay.
   assert.equal(cutover.switchOutbound(), false);
@@ -139,7 +188,7 @@ test('holds channel frames until the peer’s switch, then drains them in order'
   assert.equal(cutover.pendingBytes, 8);
 
   const drained = cutover.onSwitchDecrypted();
-  assert.deepEqual(drained, [frame(1), frame(2)]);
+  assert.deepEqual(drained.frames, [frame(1), frame(2)]);
   assert.equal(cutover.pendingFrames, 0);
   assert.equal(cutover.pendingBytes, 0);
   // Everything after the switch is read straight through.
