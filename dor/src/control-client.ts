@@ -19,6 +19,7 @@ import type {
   NewWorkspaceRequest,
   CloseWorkspaceRequest,
   RenameWorkspaceRequest,
+  MoveWorkspaceRequest,
   SwitchWorkspaceRequest,
   WorkspaceMutationResponse,
   ReadSurfaceRequest,
@@ -174,6 +175,16 @@ export class SocketControlClient implements ControlClient {
 
   switchWorkspace(request: SwitchWorkspaceRequest): Promise<WorkspaceMutationResponse> {
     return this.request<WorkspaceMutationResponse>(WORKSPACE_CONTROL_METHODS.switch, request);
+  }
+
+  // A move between windows serializes every terminal and waits for the target
+  // to adopt the Workspace, so it too can outlast the ordinary deadline.
+  moveWorkspace(request: MoveWorkspaceRequest): Promise<WorkspaceMutationResponse> {
+    return this.request<WorkspaceMutationResponse>(
+      WORKSPACE_CONTROL_METHODS.move,
+      request,
+      { timeoutMs: CLOSE_WORKSPACE_TIMEOUT_MS },
+    );
   }
 
   /**

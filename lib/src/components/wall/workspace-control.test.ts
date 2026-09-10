@@ -130,6 +130,52 @@ describe('workspace mutation verbs', () => {
   });
 });
 
+describe('workspace.move', () => {
+  it('reorders within the Window without a host, and refuses a move between Windows there', async () => {
+    const second = createWorkspace({ id: 'workspace-7', name: 'build', activate: false }).id;
+    handleFor(getWorkspacesSnapshot().workspaces[0].id);
+    handleFor(second);
+    const reorder = request('workspace.move', { workspace: 'workspace:7', index: 0 });
+    await handleWorkspaceControl(reorder);
+    expect(answer(reorder)).toMatchObject({ status: 'moved', workspaceId: second, workspaceRef: 'workspace:7' });
+    expect(getWorkspacesSnapshot().workspaces[0].id).toBe(second);
+
+    setPlatform({} as unknown as PlatformAdapter);
+    const across = request('workspace.move', { workspace: 'workspace:7', toWindow: 'ws-2' });
+    await handleWorkspaceControl(across);
+    expect(answer(across)).toMatch(/one window/);
+
+    const neither = request('workspace.move', { workspace: 'workspace:7' });
+    await handleWorkspaceControl(neither);
+    expect(answer(neither)).toMatch(/needs a window, an index, or both/);
+  });
+
+  it('refuses to move a Workspace holding iframes unless told to destroy their page state', async () => {
+    const second = createWorkspace({ id: 'workspace-7', name: 'build', activate: false }).id;
+    handleFor(getWorkspacesSnapshot().workspaces[0].id);
+    handleFor(second, { iframeSurfaceIds: () => ['browser-1'] });
+    const transferWorkspace = vi.fn(async () => {});
+    setPlatform({ transferWorkspace } as unknown as PlatformAdapter);
+
+    const refused = request('workspace.move', { workspace: 'workspace:7', toWindow: 'window:ws-2' });
+    await handleWorkspaceControl(refused);
+    expect(answer(refused)).toMatch(/1 iframe Surface\(s\).*surface:browser-1.*--dangerously-destroy-iframe-page-state/);
+    expect(transferWorkspace).not.toHaveBeenCalled();
+
+    const forced = request('workspace.move', {
+      workspace: 'workspace:7', toWindow: 'window:ws-2', dangerouslyDestroyIframePageState: true,
+    });
+    await handleWorkspaceControl(forced);
+    expect(transferWorkspace).toHaveBeenCalledWith(second, 'ws-2');
+    expect(answer(forced)).toMatchObject({ status: 'moved', workspaceRef: 'workspace:7' });
+
+    transferWorkspace.mockRejectedValueOnce(new Error('the host refused'));
+    const failed = request('workspace.move', { workspace: 'workspace:7', toWindow: 'new', dangerouslyDestroyIframePageState: true });
+    await handleWorkspaceControl(failed);
+    expect(answer(failed)).toMatch(/was not moved: the host refused/);
+  });
+});
+
 describe('workspace.close', () => {
   it('refuses a Workspace holding work, and closes it with force', async () => {
     const second = createWorkspace({ id: 'ws-2', name: 'build', activate: false }).id;

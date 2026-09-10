@@ -79,6 +79,7 @@ import {
   agentBrowserSessionFromParams,
   browserDisplayModeFromParams,
   browserUrlFromParams,
+  isBrowserParams,
   surfaceKindFromParams,
 } from './wall/browser-surface';
 import { hostPathDisplay } from './wall/browser-url';
@@ -941,6 +942,15 @@ export function Wall({
     [lath],
   );
 
+  /** The members whose live document a move between Windows cannot carry. */
+  const iframeSurfaceIds = useCallback(
+    (): string[] => memberSurfaceIds().filter((id) => {
+      const params = lath.getMeta(id)?.params;
+      return isBrowserParams(params) && resolveRenderMode(params) === 'iframe';
+    }),
+    [lath, memberSurfaceIds],
+  );
+
   /** Whether a member Surface has a PTY behind it, as against a browser view. */
   const surfaceHasTerminal = useCallback(
     (id: string): boolean => hasTerminal(surfaceKindFromParams(lath.getMeta(id)?.params)),
@@ -1554,6 +1564,7 @@ export function Wall({
   const methods: Omit<WallHandle, 'workspaceId'> = {
     surfaceIds: memberSurfaceIds,
     ownsSurface,
+    iframeSurfaceIds,
     hasTouchedSurfaces: () => memberSurfaceIds().some((id) => {
       // A browser Surface has no "untouched" notion and always holds a page, so
       // it counts; a terminal counts once its Session exists and has input.

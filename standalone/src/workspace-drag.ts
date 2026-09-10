@@ -4,6 +4,9 @@ import type { WorkspaceId } from "dormouse-lib/lib/session-types";
 import type { StripDragPoint } from "dormouse-lib/components/workspace-strip-drag";
 import { currentWindowLabel } from "./window-label";
 import { tearOutWorkspace, transferWorkspaceTo } from "./workspace-move";
+import { getWallHandle } from "dormouse-lib/components/wall/wall-handles";
+import { randomKillChar } from "dormouse-lib/components/KillConfirm";
+import { setPendingWorkspaceMove } from "dormouse-lib/lib/workspace-ui-store";
 import { workspaceTabRect } from "./workspace-tabs";
 
 /**
@@ -162,11 +165,18 @@ export function onDropOnOtherWindow(
     // Probed fresh rather than reusing the throttled answer: up to
     // HIT_TEST_THROTTLE_MS of pointer travel could otherwise choose the window.
     const hit = await probe();
-    if (hit && hit.label !== currentWindowLabel()) {
-      await transferWorkspaceTo(id, hit.label, { x: hit.x, y: hit.y });
+    const move = hit && hit.label !== currentWindowLabel()
+      ? () => void transferWorkspaceTo(id, hit.label, { x: hit.x, y: hit.y })
+      : () => void tearOutWorkspace(id, grab);
+    // The one thing a move cannot carry is a plain iframe's document, Doored
+    // ones included; it reopens at its saved URL. The user says so first, with
+    // the same typed letter a kill takes (docs/specs/layout.md → Workspaces).
+    const iframes = getWallHandle(id)?.iframeSurfaceIds() ?? [];
+    if (iframes.length > 0) {
+      setPendingWorkspaceMove({ id, char: randomKillChar(), iframeCount: iframes.length, proceed: move });
       return;
     }
-    await tearOutWorkspace(id, grab);
+    move();
   })();
 }
 

@@ -102,12 +102,12 @@ async function handOff(
   prepared: PreparedWorkspaceTransfer,
   command: string,
   args: Record<string, unknown>,
-): Promise<void> {
+): Promise<boolean> {
   try {
     await invoke(command, args);
   } catch (err) {
     console.warn(`[workspace-move] ${command} refused; the Workspace stays here`, err);
-    return;
+    return false;
   }
   const { workspaceId, terminalIds } = prepared.payload;
   inFlight.set(workspaceId, prepared);
@@ -116,7 +116,7 @@ async function handOff(
   // holds is exactly the bytes before the mark. Serialized here, attached to the
   // arrival by Rust, and only then drained by the target.
   const marks = await marksFor(terminalIds, `mark-${workspaceId}`);
-  if (!inFlight.has(workspaceId)) return; // handed back while we waited
+  if (!inFlight.has(workspaceId)) return true; // handed back while we waited; the host had accepted
   const content = await captureTransferContent(terminalIds, marks);
   try {
     await invoke("transfer_workspace_content", { workspaceId, content });
@@ -125,6 +125,7 @@ async function handOff(
     // `workspace-arrival-failed` has put, or will put, this Window back.
     console.warn("[workspace-move] transfer_workspace_content refused", err);
   }
+  return true;
 }
 
 /** The host stamps marks well inside this; past it, an unmarked id is
@@ -158,28 +159,31 @@ function marksFor(ids: readonly string[], requestId: string): Promise<Map<string
   });
 }
 
-/** Hand this Workspace to a window that already exists. */
+/** Hand this Workspace to a window that already exists. `at` is where the
+ *  pointer released in the target's strip; a move with no pointer (`dor
+ *  workspace move`) appends. Resolves to whether the host accepted it. */
 export async function transferWorkspaceTo(
   workspaceId: WorkspaceId,
   to: string,
-  at: { x: number; y: number },
-): Promise<void> {
+  at?: { x: number; y: number },
+): Promise<boolean> {
   const prepared = await prepare(workspaceId);
-  if (!prepared) return;
-  await handOff(prepared, "transfer_workspace", {
+  if (!prepared) return false;
+  return handOff(prepared, "transfer_workspace", {
     to,
-    payload: { ...prepared.payload, at } satisfies MovePayload,
+    payload: { ...prepared.payload, ...(at ? { at } : {}) } satisfies MovePayload,
   });
 }
 
-/** Tear this Workspace out into a new window under the cursor. */
+/** Tear this Workspace out into a new window under the cursor. Resolves to
+ *  whether the host accepted it. */
 export async function tearOutWorkspace(
   workspaceId: WorkspaceId,
   grab: { x: number; y: number },
-): Promise<void> {
+): Promise<boolean> {
   const prepared = await prepare(workspaceId);
-  if (!prepared) return;
-  await handOff(prepared, "open_workspace_window", {
+  if (!prepared) return false;
+  return handOff(prepared, "open_workspace_window", {
     payload: { ...prepared.payload, grab } satisfies MovePayload,
   });
 }

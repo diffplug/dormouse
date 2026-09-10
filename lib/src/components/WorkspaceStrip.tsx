@@ -26,6 +26,7 @@ import { computeWorkspaceUnion, EMPTY_WORKSPACE_UNION, type WorkspaceUnion } fro
 import {
   getWorkspaceUiSnapshot,
   setPendingWorkspaceClose,
+  setPendingWorkspaceMove,
   setRenamingWorkspace,
   subscribeToWorkspaceUi,
 } from '../lib/workspace-ui-store';
@@ -65,7 +66,7 @@ export function WorkspaceStrip({
   const { workspaces, activeId } = useSyncExternalStore(subscribeToWorkspaces, getWorkspacesSnapshot);
   const membership = useSyncExternalStore(subscribeToWorkspaceSurfaces, getWorkspaceSurfacesSnapshot);
   const activity = useSyncExternalStore(subscribeToActivity, getActivitySnapshot);
-  const { renamingId, pendingClose } = useSyncExternalStore(subscribeToWorkspaceUi, getWorkspaceUiSnapshot);
+  const { renamingId, pendingClose, pendingMove } = useSyncExternalStore(subscribeToWorkspaceUi, getWorkspaceUiSnapshot);
   const [draggingId, setDraggingId] = useState<WorkspaceId | null>(null);
 
   const stripRef = useRef<HTMLDivElement>(null);
@@ -73,7 +74,7 @@ export function WorkspaceStrip({
 
   // The editor and the confirmation both sit outside every Wall, so a
   // capture-phase command-mode shortcut would still fire behind them.
-  useDialogKeyboardOwner(renamingId !== null || pendingClose !== null, acquireChromeKeyboardLease);
+  useDialogKeyboardOwner(renamingId !== null || pendingClose !== null || pendingMove !== null, acquireChromeKeyboardLease);
 
   const activate = useCallback((id: WorkspaceId) => {
     setActiveWorkspace(id);
@@ -140,13 +141,28 @@ export function WorkspaceStrip({
     return () => window.removeEventListener('keydown', onKeyDown, true);
   }, [pendingClose]);
 
+  // The move gate is the same typed letter: the page state it destroys is as
+  // gone as a killed pane's process.
+  useEffect(() => {
+    if (!pendingMove) return;
+    const { char, proceed } = pendingMove;
+    const onKeyDown = (event: KeyboardEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setPendingWorkspaceMove(null);
+      if (acceptsKillChar(event.key, char)) proceed();
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [pendingMove]);
+
   // Anchored to the Window's content area, not the tab: a 24px tab is too small
   // a box to center a dialog over, and every Wall shares one grid cell, so the
   // confirmation lands in the same place whichever Workspace it is about. No
   // Window (Storybook) leaves it viewport-centered.
   const confirmTarget = useMemo(
-    () => (pendingClose ? document.querySelector<HTMLElement>('[data-workspace-content]') : null),
-    [pendingClose],
+    () => (pendingClose || pendingMove ? document.querySelector<HTMLElement>('[data-workspace-content]') : null),
+    [pendingClose, pendingMove],
   );
 
   // One union per tab, computed in the loop it is rendered in. The visible
@@ -213,6 +229,15 @@ export function WorkspaceStrip({
           char={pendingClose.char}
           targetElement={confirmTarget}
           onCancel={() => setPendingWorkspaceClose(null)}
+        />
+      )}
+      {pendingMove && !pendingClose && (
+        <KillConfirmModal
+          char={pendingMove.char}
+          targetElement={confirmTarget}
+          title="Move and lose page state?"
+          detail={`${pendingMove.iframeCount === 1 ? 'An iframe Surface' : `${pendingMove.iframeCount} iframe Surfaces`} in this Workspace will reload at ${pendingMove.iframeCount === 1 ? 'its' : 'their'} saved URL; a page cannot leave its window.`}
+          onCancel={() => setPendingWorkspaceMove(null)}
         />
       )}
     </div>

@@ -411,6 +411,11 @@ export interface PlatformAdapter {
   /** Hosts that hand Workspaces between windows stamp marks; returns the
    *  unsubscribe. Absent on hosts with one window. */
   onPtyMarked?(handler: (detail: PtyMarkedDetail) => void): () => void;
+  /** Hand a Workspace to another window — a label, or `'new'` for one torn out
+   *  — through the host's transfer (`docs/specs/standalone.md` → Transfer).
+   *  Resolves once the host has accepted the hand-off. Absent on hosts with
+   *  one window. */
+  transferWorkspace?(workspaceId: string, toWindow: string): Promise<void>;
 
   // Host-initiated session persistence
   onRequestSessionFlush(handler: (detail: SessionFlushRequest) => void): void;

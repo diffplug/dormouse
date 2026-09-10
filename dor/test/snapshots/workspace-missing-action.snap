@@ -2,4 +2,4 @@ exitCode: 1
 stdout:
 
 stderr:
-Error: dor workspace requires an action: new, rename, close, switch
+Error: dor workspace requires an action: new, rename, close, switch, move
