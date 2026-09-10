@@ -10,7 +10,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { SCENARIOS } from './steps.mjs';
@@ -115,16 +115,21 @@ async function main(live) {
   }
 
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const runDir = opts.out
-    ? (isAbsolute(opts.out) ? opts.out : resolve(process.cwd(), opts.out))
-    : (() => {
-        const parent = join(tmpdir(), 'pairing-walkthrough');
-        mkdirSync(parent, { recursive: true });
-        return mkdtempSync(join(parent, `${stamp}-`));
-      })();
-  mkdirSync(runDir, { recursive: true });
+  let runDir;
+  if (opts.out) {
+    runDir = resolve(process.cwd(), opts.out);
+    mkdirSync(runDir, { recursive: true });
+  } else {
+    // `mkdtemp`, so two runs starting in the same second cannot share a
+    // directory — and it creates the directory itself.
+    const parent = join(tmpdir(), 'pairing-walkthrough');
+    mkdirSync(parent, { recursive: true });
+    runDir = mkdtempSync(join(parent, `${stamp}-`));
+  }
 
-  opts.session = `pairing-walkthrough-${randomUUID()}`;
+  // Unique per run, and still legible: the stamp is what tells you how old a
+  // stray agent-browser session is.
+  opts.session = `pairing-walkthrough-${stamp}-${randomUUID().slice(0, 8)}`;
   const scenario = SCENARIOS[opts.scenario];
 
   /** Every file the run left behind, by name. A re-captured QR rewrites its own. */
@@ -150,6 +155,8 @@ async function main(live) {
     runDir,
     opts,
     state,
+    /** The Relay's own bound origin, learned and set by the `relay` step. */
+    relayOrigin: null,
     log: (message) => console.log(`[walkthrough] ${message}`),
     record: (facts) => Object.assign(summary.facts, facts),
     /**
@@ -216,7 +223,6 @@ async function main(live) {
     }
   }
 
-  summary.options = { ...opts };
   summary.finishedAt = new Date().toISOString();
   summary.artifacts = [...artifacts];
   summary.reached = reached;
@@ -276,17 +282,15 @@ async function cleanup(state, opts) {
     .filter(Boolean)
     .map((mark) => mark.replaceAll(/[.[\]{}()*+?^$|\\]/g, String.raw`\$&`))
     .join('|');
+  // Nothing owned by this run has a name yet — `--help` and a bad flag both end
+  // here — and every mark below is what makes the report about *this* run.
+  if (!marks) return;
   // pgrep exits 1 when nothing matches, which `exec` reports as a failure.
-  const survivors = marks
-    ? await exec('pgrep', ['-fl', marks]).catch(() => ({ stdout: '' }))
-    : { stdout: '' };
+  const survivors = await exec('pgrep', ['-fl', marks]).catch(() => ({ stdout: '' }));
   // **This process and the shell that started it match the marks themselves.**
-  // `pairing-walkthrough` is a substring of this script's own path, and `--out`
-  // puts the run directory in its own argv — so a diagnostic whose whole job is
-  // to say "something leaked" would cry wolf on every path that ends before
-  // `opts.session` exists: `--help` or a bad flag. (Whether the parent is listed at all
-  // is a `pgrep` difference — GNU lists it, BSD does not — which is not
-  // something to leave the answer resting on.)
+  // `--out` puts the run directory in this script's own argv. (Whether the
+  // parent is listed at all is a `pgrep` difference — GNU lists it, BSD does
+  // not — which is not something to leave the answer resting on.)
   const mine = new Set([process.pid, process.ppid]);
   const left = survivors.stdout
     .split('\n')

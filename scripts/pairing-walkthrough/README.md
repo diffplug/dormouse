@@ -13,8 +13,8 @@ authenticator's own `signCount`, the Burrow's alert arriving in the phone's sess
 list.
 
 It is a development tool, not a test. **It is deliberately not wired into
-`pnpm test` or any CI workflow**: it wants Chrome, `ffmpeg`,
-and several minutes.
+`pnpm test` or any CI workflow**: it wants Chrome, `ffmpeg`, and several
+minutes.
 
 ```sh
 node scripts/pairing-walkthrough/run.mjs
@@ -106,7 +106,7 @@ to tap something there would have found a bug.
 | `--scenario <name>` | `happy` | Which ending to drive — see *Scenarios*. |
 | `--until <step>` | the scenario's last | Stop after this step. |
 | `--out <dir>` | `$TMPDIR/pairing-walkthrough/<timestamp>-<random>` | Run directory. |
-| `--skip-build` | off | Reuse `lib/dist-pocket` and `relay/dist` instead of rebuilding them. Ignored (with a warning) when either is missing. |
+| `--skip-build` | off | Reuse `lib/dist-pocket` and `relay/dist` instead of rebuilding them — same dev runner either way. Ignored (with a warning) when either is missing. |
 | `--machine-name <n>` | `Walkthrough Mac` | The name the Burrow enrolls under. |
 | `--keep` | off | Leave everything running when the run ends — including a failed one, which is when poking by hand is most useful. Ctrl-C stops it. |
 
@@ -189,7 +189,7 @@ The Relay, Burrow harness, and Pocket Chrome bind OS-assigned ports. The run
 reads the Relay's origin before staging the Burrow's allowed origins, and opens
 Pocket at that same origin. Vite reports its app URL; Chrome reports its debugging
 port through `DevToolsActivePort` in the run's own profile. No port is probed and
-released before its owner binds it. `--skip-build` uses the same dev runner.
+released before its owner binds it.
 
 `localhost`, never `127.0.0.1` — WebAuthn's secure-context rule and the `rpId`
 the Relay derives from its own origin

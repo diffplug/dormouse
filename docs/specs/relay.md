@@ -556,7 +556,7 @@ Its four resource bounds, enforced under `sweepRelaySockets` or at the socket:
   kinds before starting the idle close handshake**, releasing routing and Client
   capacity immediately, pinned by `relay/test/relay-limits.test.mjs`.
 
-`index.ts` runs the sweep every `RELAY_SWEEP_MS` (30 s), `unref`'d like the
+`start.ts` runs the sweep every `RELAY_SWEEP_MS` (30 s), `unref`'d like the
 revocation sweep and far more often, touching no disk. Pinned by
 `relay/test/relay-limits.test.mjs`.
 
@@ -932,26 +932,28 @@ pnpm dev:relay
 
 Builds Pocket and the Relay, then prints the bound URL.
 
+Only the dev runner treats an unset, blank or `0` `PORT` as automatic;
+Configuration governs production unchanged.
+
 - **Must bind an OS-assigned port for dev**, keeping the listener bound while
   deriving the default `http://localhost:<port>` origin and initializing the app.
-  **May pin `PORT`; an occupied port fails without stopping its owner.** Unset,
-  blank, and `0` select automatic allocation only in the dev runner.
-- **Must default dev state to `<worktree>/relay/data` regardless of cwd.**
-  `DORMOUSE_STATE_DIR` overrides it; enrollment and passkeys survive restarts.
+  **May pin `PORT`; an occupied port fails without stopping its owner.**
+- **Must default dev state to `<worktree>/relay/data` regardless of cwd**, so
+  enrollment and passkeys survive a restart from anywhere.
+  `DORMOUSE_STATE_DIR` overrides it — point it at a fresh directory to repeat
+  first boot.
 - **Must preserve explicit dev origin and bind-host overrides**, with blank bind
-  hosts defaulting to loopback. **Must keep production port validation, bind
-  defaults, state paths, and installer runtime records governed by Configuration.**
+  hosts defaulting to loopback.
 - **Must use the printed origin for Burrow staging, enrollment, and Pocket.**
   Pin `PORT` when keeping a browser origin or enrollment URL across restarts;
   use `PORT=3000 pnpm dev:relay` for the examples below.
 
-Source of truth: `relay/scripts/dev.mjs`, `startRelay` in `relay/src/start.ts`,
-`relay/src/index.ts`; pinned by `relay/test/dev.test.mjs`,
-`relay/test/config.test.mjs`, `relay/test/bind-host.test.mjs`,
-`relay/test/runtime-file.test.mjs`.
+Source of truth: `relay/scripts/dev.mjs`, `startRelay` in `relay/src/start.ts`;
+pinned by `relay/test/dev.test.mjs`, `relay/test/config.test.mjs`,
+`relay/test/bind-host.test.mjs`, `relay/test/runtime-file.test.mjs`.
 
-Set `DORMOUSE_STATE_DIR` to a fresh directory to repeat first boot. For a real phone set `DORMOUSE_ORIGIN` to your TLS origin
-(e.g. via `tailscale serve`); the loopback exceptions are in "Setup tokens and the
+For a real phone set `DORMOUSE_ORIGIN` to your TLS origin (e.g. via
+`tailscale serve`); the loopback exceptions are in "Setup tokens and the
 pairing QR". On localhost **push is off**, and the Relay says so at
 startup: no routable VAPID subject (Web Push above). An https `DORMOUSE_ORIGIN`
 enables it with no further configuration; to exercise push on localhost, supply
@@ -1010,15 +1012,10 @@ by tapping Connect again.
 `scripts/pairing-walkthrough/` drives all three in real browsers, ending at a
 command typed from Pocket. Not in CI.
 
-**Must derive the walkthrough's Relay origin from its owned dev runner, including
-with `--skip-build`, before staging the Burrow's allowlist.** **Must use actual
-listener addresses for Vite and Chrome, separate run state and browser sessions,
-and restrict cleanup to owned processes.** Parallel worktrees keep their staged
-bundles separate; concurrent runs in one worktree still share build output.
-Explicit `--out` directories must be distinct for concurrent runs of one scenario.
-
-Source of truth: `scripts/pairing-walkthrough/run.mjs`,
-`scripts/pairing-walkthrough/steps.mjs`, `scripts/pairing-walkthrough/chrome.mjs`.
+**Must stage the Burrow's allowed relay origins from the walkthrough's own dev
+runner**, whose port it does not choose — a bundle baked against any other
+origin pairs against a Relay the run is not driving. Its isolation and port
+mechanics are `scripts/pairing-walkthrough/README.md` -> "Ports".
 
 ## Installing it
 

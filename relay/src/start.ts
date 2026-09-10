@@ -4,6 +4,7 @@ import { getRequestListener, serve } from '@hono/node-server';
 
 import { createApp, BURROW_REVOCATION_SWEEP_MS, RELAY_SWEEP_MS } from './app.js';
 import type { RelayConfig } from './config.js';
+import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import {
   assertVapidKeyPair,
@@ -87,11 +88,13 @@ export async function startRelay(config: RelayConfig, existingServer?: Server) {
         }),
   });
 
-  // `hostname` is omitted rather than passed as undefined so @hono/node-server
-  // keeps its listen-on-every-interface default (what a container wants).
-  const onListening = (info: { port: number }) => {
+  // The socket's own port, never the configured one: with a caller-supplied
+  // server `port` was only ever a request, and this line and the runtime file
+  // are what a reader and an installer believe.
+  const announce = (listening: Server) => {
+    const boundPort = (listening.address() as AddressInfo).port;
     console.log(
-      `relay listening on http://${bindHost ?? 'localhost'}:${info.port} (origin ${origin})`,
+      `relay listening on http://${bindHost ?? 'localhost'}:${boundPort} (origin ${origin})`,
     );
     // Only now, with the port actually taken: this file is what tells an
     // installer which release is answering, and claiming it before the bind
@@ -102,7 +105,7 @@ export async function startRelay(config: RelayConfig, existingServer?: Server) {
       void writeRuntimeFile(runtimeFile, {
         pid: process.pid,
         releaseId,
-        port: info.port,
+        port: boundPort,
         origin,
         startedAt: new Date().toISOString(),
       }).catch((err: unknown) => {
@@ -112,13 +115,21 @@ export async function startRelay(config: RelayConfig, existingServer?: Server) {
       });
     }
   };
-  const server = existingServer ?? serve(
-    { fetch: app.fetch, port, ...(bindHost ? { hostname: bindHost } : {}) },
-    onListening,
-  );
+  // `hostname` is omitted rather than passed as undefined so @hono/node-server
+  // keeps its listen-on-every-interface default (what a container wants). The
+  // caller-supplied branch mirrors what `serve` does internally — including
+  // handing `hostname` to `getRequestListener`, which is the Host fallback for a
+  // request that carries no Host header — so the two paths cannot drift.
+  let server: Server;
   if (existingServer) {
-    existingServer.on('request', getRequestListener(app.fetch));
-    onListening({ port });
+    existingServer.on('request', getRequestListener(app.fetch, { hostname: bindHost }));
+    server = existingServer;
+    announce(server);
+  } else {
+    server = serve(
+      { fetch: app.fetch, port, ...(bindHost ? { hostname: bindHost } : {}) },
+      () => announce(server),
+    ) as Server;
   }
 
   // A clean exit takes the file with it. A crash deliberately leaves it: readers
@@ -153,5 +164,4 @@ export async function startRelay(config: RelayConfig, existingServer?: Server) {
   setInterval(() => {
     sweepRelaySockets();
   }, RELAY_SWEEP_MS).unref();
-  return server;
 }

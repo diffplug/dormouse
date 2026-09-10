@@ -49,6 +49,15 @@ const SCAN_LABEL = 'Scan a setup code';
 const BURROW_STATE_DIR_LINE = /burrow state dir: (.+)$/;
 
 /**
+ * The Vite origin the harness serves the app on, and the Relay's own bound
+ * origin. Both are OS-assigned, so these lines are the only way the run learns
+ * them — and both are pinned by `lib/src/lib/mirrored-constants.test.ts` for
+ * the same reason {@link BURROW_STATE_DIR_LINE} is.
+ */
+const APP_URL_LINE = /app URL: (http:\/\/localhost:\d+)/;
+const RELAY_LISTENING_LINE = /relay listening on .* \(origin (http:\/\/localhost:\d+)\)/;
+
+/**
  * The phone's two-digit screen, by the accessible name of the live region that
  * holds the digits — the same reason {@link PAIRING_MODAL} and {@link SETUP_QR}
  * anchor where they do: the copy around it is under review and the name is a
@@ -218,7 +227,7 @@ async function stepRelay(ctx) {
   const stateDir = ctx.path('relay-state');
   const built =
     existsSync(join(repoRoot, 'lib', 'dist-pocket', 'index.html')) &&
-    existsSync(join(repoRoot, 'relay', 'dist', 'index.js'));
+    existsSync(join(repoRoot, 'relay', 'dist', 'start.js'));
   const skipBuild = opts.skipBuild && built;
   if (opts.skipBuild && !built) {
     ctx.log('--skip-build ignored: lib/dist-pocket or relay/dist is missing');
@@ -226,11 +235,19 @@ async function stepRelay(ctx) {
 
   const handle = spawnLogged(
     'pnpm',
-    skipBuild ? ['--filter', 'relay', 'exec', 'node', 'scripts/dev.mjs'] : ['dev:relay'],
+    // `dev:built` is `dev:relay` without the build, so both paths run the same
+    // dev runner and derive the origin the same way.
+    skipBuild ? ['--filter', 'relay', 'run', 'dev:built'] : ['dev:relay'],
     {
       cwd: repoRoot,
       logPath: ctx.path('relay.log'),
       prefix: 'relay',
+      // **Every inherited `DORMOUSE_` setting is dropped, not blanked.** A
+      // developer with an installed deployment's variables exported would
+      // otherwise have the run reuse its enrollment offer, publish this dev pid
+      // into its runtime record, or turn push on — and blanking cannot express
+      // "unset" for the ones `readConfig` reads with `??` rather than `||`.
+      dropEnv: /^(DORMOUSE_|PORT$)/,
       env: {
         DORMOUSE_STATE_DIR: stateDir,
         // Everything in a run is local to this machine, so the walkthrough's
@@ -239,23 +256,15 @@ async function stepRelay(ctx) {
         // (self-hosted)"): unset, the Relay binds every interface.
         DORMOUSE_BIND_HOST: '127.0.0.1',
         PORT: '0',
-        DORMOUSE_ORIGIN: '',
-        // A walkthrough must never reuse an inherited installer's offer or
-        // publish its dev pid into the installed Relay's runtime record.
-        DORMOUSE_RUNTIME_FILE: '',
-        DORMOUSE_RELEASE_ID: '',
-        DORMOUSE_ENROLL_TOKEN_FILE: '',
-        DORMOUSE_POCKET_DIR: join(repoRoot, 'lib', 'dist-pocket'),
       },
     },
   );
 
-  const listening = await waitForLine(handle, /relay listening on .* \(origin (http:\/\/localhost:\d+)\)/, {
+  const listening = await waitForLine(handle, RELAY_LISTENING_LINE, {
     timeoutMs: skipBuild ? 60_000 : 600_000,
     what: 'the Relay to bind',
   });
   ctx.relayOrigin = listening[1];
-  ctx.relayPort = Number(new URL(ctx.relayOrigin).port);
   ctx.record({ relayOrigin: ctx.relayOrigin });
   ctx.log(`relay ${ctx.relayOrigin}`);
   // The log line lands from inside the `listen` callback; a request is what
@@ -317,14 +326,16 @@ async function stepBurrow(ctx) {
     timeoutMs: 300_000,
     what: 'the harness to finish opening the app',
   });
-  const appLine = await waitForLine(handle, /app URL: (http:\/\/localhost:\d+)/);
-  ctx.viteOrigin = appLine[1];
-  opts.vitePort = Number(new URL(ctx.viteOrigin).port);
-  ctx.log(`vite ${ctx.viteOrigin}`);
-  ctx.record({ burrowStateDir: stateLine[1].trim(), viteOrigin: ctx.viteOrigin });
+  const appLine = await waitForLine(handle, APP_URL_LINE, {
+    timeoutMs: 300_000,
+    what: 'the harness to report the app URL',
+  });
+  const viteOrigin = appLine[1];
+  ctx.log(`vite ${viteOrigin}`);
+  ctx.record({ burrowStateDir: stateLine[1].trim(), viteOrigin });
 
   ctx.state.burrowBrowser = new AgentBrowser(opts.session, repoRoot);
-  await ctx.state.burrowBrowser.openUntil(ctx.viteOrigin, burrowReadyExpr(opts.vitePort));
+  await ctx.state.burrowBrowser.openUntil(viteOrigin, burrowReadyExpr(new URL(viteOrigin).port));
   await ctx.shot('01-burrow-booted.png');
 }
 

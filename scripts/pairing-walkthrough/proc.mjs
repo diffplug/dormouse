@@ -25,8 +25,16 @@ const started = [];
  * `pnpm innerdogfood` each fan out into a tree (pnpm → node → vite →
  * esbuild), and killing only the pnpm shim orphans everything under it.
  * `detached: true` plus a `process.kill(-pid)` at teardown takes the group.
+ *
+ * **`dropEnv` removes inherited variables before `env` is applied.** The child
+ * otherwise inherits the whole shell, and a developer who has an installed
+ * deployment's settings exported gets a run configured by them. Opt-in per
+ * child, because `pnpm innerdogfood` reads `DORMOUSE_` variables on purpose.
  */
-export function spawnLogged(command, args, { cwd, env, logPath, prefix }) {
+export function spawnLogged(command, args, { cwd, env, dropEnv, logPath, prefix }) {
+  const inherited = dropEnv
+    ? Object.fromEntries(Object.entries(process.env).filter(([key]) => !dropEnv.test(key)))
+    : process.env;
   const log = createWriteStream(logPath, { flags: 'a' });
   // A write stream with no `error` listener throws an uncaught exception on a
   // full or vanished run directory — losing the log is survivable, so it is
@@ -34,7 +42,7 @@ export function spawnLogged(command, args, { cwd, env, logPath, prefix }) {
   log.on('error', (err) => console.error(`[${prefix}] ${logPath}: ${err.message}`));
   const child = spawn(command, args, {
     cwd,
-    env: { ...process.env, ...env },
+    env: { ...inherited, ...env },
     detached: true,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
