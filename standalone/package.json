@@ -13,6 +13,7 @@
     "stage:dor-cli": "pnpm --filter dor build && node scripts/stage-dor-cli.mjs",
     "stage:sidecar-proxy": "pnpm --filter remote-lib-common build && node scripts/build-sidecar-proxy.mjs",
     "tauri": "pnpm run stage && node scripts/tauri.mjs",
+    "pretest": "pnpm --filter dor-lib-common build",
     "test": "vitest run && node --test scripts/*.test.mjs"
   },
   "dependencies": {
@@ -37,6 +38,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.2",
     "cross-spawn": "^7.0.6",
+    "dor-lib-common": "workspace:*",
     "esbuild": "^0.28.0",
     "jsdom": "^29.1.1",
     "tailwindcss": "^4.3.0",

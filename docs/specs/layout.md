@@ -151,7 +151,6 @@ Each Wall renders one Workspace's Content (Lath layout) and Baseboard (doors). S
 - **A closing Workspace takes no new Surfaces**: while `closeAll` walks, this Wall answers every Surface-creating `dor` verb with an error (`docs/specs/dor-cli.md` → "Handle Model").
 - **Must reject duplicate Workspace IDs before mutating the model**, preserving the last-Workspace close guard (`workspace-store.test.ts`).
 - Each Wall keeps its own mode and selection across switches: deactivating blurs its selected pane, activating focuses it a frame later, since focus into a hidden subtree is a no-op.
-- A Workspace's first activation claims the GL context its hidden mount deferred ([Renderer](#renderer); rationale).
 
 **Create** adds a Workspace named `Workspace N`, makes it active, and gives its Wall no restored record, so Lath's fresh branch spawns one default-shell pane. **Close** confirms first when the Workspace holds touched Surfaces or running work, reusing the kill-confirm letter and key rule over the Window's content area, then routes every member Surface through the closure coordinator; **the last remaining Workspace cannot be closed** — there is always one active Workspace, as there is always one visible pane (corner case #5). **One close runs at a time for the whole Window**, with the count re-checked after the confirmation, so two of them cannot empty two Walls between them; **a close the store then refuses hands the Wall back its auto-spawn** rather than leaving it mounted and empty. **Rename** edits the Workspace `name` only — no Surface title, and not the per-pane inline rename. **Reorder** moves a tab in the strip and renumbers the positional `workspace:<n>` refs with it. **Every Workspace verb runs outside the strip**, which renders the rename editor and confirmation from a store, so a tab gesture and a command-mode key take one path.
 
@@ -284,7 +283,7 @@ Source of truth: `lib/src/components/wall/WorkspaceSelectionOverlay.tsx`, `lib/s
 
 **A runtime Door is `{ id, token }` and carries no metadata.** Title, params and parked-ness stay in the Lath store, which keeps changing while the Surface is Doored, so no copy can go stale: **every reader — reattach, `dor` param matching, kill/session teardown, `dor list`, the baseboard chip's label, the session save — goes through `lath.getMeta(id)`**, and the persisted `PersistedDoor` row is materialized from the store at save time.
 
-**A minimized browser Surface parks rather than unmounting** (`shouldParkOnMinimize`); terminals do not. `docs/specs/tiling-engine.md` → "Parked leaves" owns the mechanism, who parks, the `MAX_PARKED_SURFACES` cap, and the visibility contract.
+**A minimized browser Surface parks rather than unmounting** (`shouldParkOnMinimize`); terminals do not. `docs/specs/tiling-engine.md` → "Parked leaves" owns the mechanism, who parks, and the visibility contract.
 
 ### Reattach (click door, `Enter`/`m`/`d` on door, or drag out)
 
@@ -319,7 +318,7 @@ Source of truth: `lib/src/components/wall/IllegalRenameWarning.tsx`, `lib/src/co
 | **Create** `getOrCreateTerminal` | Creates xterm.js with UnicodeGraphemes, Fit, and Image addons plus a PTY; reuses an existing entry. `allowProposedApi: true` enables UnicodeGraphemesAddon. **The WebGL addon is not loaded here** ([Renderer](#renderer)). |
 | **Resume** `resumeTerminal` | Creates the xterm entry and writes replay data, spawning no PTY. Webview recreated over retained Live or Exited PTYs (Link: Severed → Resuming → Live). |
 | **Restore** `restoreTerminal` | Creates the xterm entry and spawns a new PTY with the saved cwd; **replays no transcript** (`docs/specs/transport.md` → "What is persisted"). Cold start from a saved Snapshot (Link: Cold → Live). |
-| **mount / unmount** | `mountElement` reparents the persistent DOM element into a container, `unmountElement` removes it. **The Registry entry survives.** |
+| **mount / unmount** | `mountElement` reparents the persistent DOM element into a container, `unmountElement` removes it. **The Registry entry survives**, and **neither fits the terminal** — the caller owns fitting ([Animations](#animations)). |
 | **Dispose** `disposeSession` | Kills the PTY, disposes xterm, removes the registry entry on kill or Surface replacement. **Never on minimize.** |
 | **Swap** | `Cmd/Ctrl+Arrow` trades two leaf identities via a Lath `swap`; registry entries follow the ids ([Spatial navigation](#spatial-navigation)). |
 
@@ -335,16 +334,17 @@ On cold restore, a terminal pane with a host-captured recovery invocation runs i
 
 ### Renderer
 
-Text uses `@xterm/addon-webgl`; ImageAddon uses canvas layers (rationale). **Claim the GL context on a Session's first mount inside a *visible* Workspace, never at creation** — one mounted in a hidden Workspace claims on that Workspace's first activation (rationale). **One claim per Session**, guarded by `TerminalEntry.webglAttempted`, since the mount path and the activation path both ask. **xterm's built-in DOM renderer is the fallback, never the default** — its per-cell span rebuild makes a truecolor-dense TUI an order of magnitude slower (rationale). Image rules: `docs/specs/terminal-escapes.md` → "Inline graphics".
+**Must use `@xterm/addon-webgl` for mounted terminals when available**, falling back to xterm's DOM renderer on unsupported WebGL, activation failure, or context-budget eviction. `cfg.terminal.webglRenderer` disables WebGL and is off under Chromatic. ImageAddon owns its separate canvas layers (`docs/specs/terminal-escapes.md` → "Inline graphics"). (rationale)
 
-**Fallback to the DOM renderer must stay automatic** — two expected failure modes:
+- **Must acquire GPU resources at mount, never at Session creation**, and keep a successfully activated renderer when context capture or explicit loss is unavailable. (rationale)
+- **Must dispose the addon on unmount/minimize, helper parking, and Session disposal**, then explicitly lose its context when captured and supported. Report addon or extension failures without aborting teardown. Minimize preserves the xterm, grid, buffers, PTY, and other addons.
+- **Must load a fresh addon on reattachment without resizing the terminal for the renderer swap.** Terminal fitting follows "Animations". A stale mount's cleanup must not release a newer mount's renderer.
+- **Must attempt WebGL at most once per mount.** Failure or context loss stays on DOM until the next unmount/remount; focus and metadata changes never retry. Focus-based recovery remains under `## Future`.
+- **Must preserve the addon's shared atlas cache.** Compatible mounted terminals share rasterized atlas canvases; GPU texture copies remain per context. Releasing one renderer releases only its atlas ownership; the last owner releases the cache. (rationale)
 
-- **No WebGL at all** (headless/jsdom, blocklisted GPU, a host webview with GPU disabled): construction throws and `tryEnableWebglRenderer` swallows it, behind a `typeof WebGL2RenderingContext === 'undefined'` pre-check that skips the doomed request entirely (rationale).
-- **Context-budget eviction**: browsers cap live WebGL contexts per page — on the order of **16**, evicted oldest-first (rationale) — so one context per terminal means a Window past the cap silently drops its *oldest* panes back to the DOM renderer. The `onContextLoss` handler disposes the addon, xterm's documented signal to resume DOM rendering.
+**Must report the active renderer as `data-renderer="webgl"|"dom"`** on the persistent terminal host.
 
-**Degradation is one-way**: a demoted pane stays on the DOM renderer even after other panes close. Re-arming is unbuilt — see `## Future`. The outcome is recorded as `data-renderer="webgl"|"dom"` on the host element, including after a context loss demotes a pane. `cfg.terminal.webglRenderer` disables the whole path, and it is off under Chromatic (pinned in `lib/.storybook/preview.ts`).
-
-Source of truth: `tryEnableWebglRenderer` and `createXtermHost` in `lib/src/lib/terminal-lifecycle.ts`; the claim itself in `claimWebglRenderer` there, called from `TerminalPane` in `lib/src/components/TerminalPane.tsx` behind `WorkspaceActiveContext`. Not the SDF fork of `docs/specs/webgl-text.md`, a different addon consumed only by `canopy/`.
+Source of truth: `TerminalWebglRenderer` in `lib/src/lib/terminal-webgl.ts`; `mountElement` / `unmountElement` / `parkElement` / `disposeSession` in `lib/src/lib/terminal-lifecycle.ts`. Tests: `lib/src/lib/terminal-webgl.test.ts`, `lib/src/lib/terminal-registry.alert.test.ts`.
 
 ### Session persistence
 
@@ -382,7 +382,9 @@ Renderer Activity storage is owned by `docs/specs/alert.md` → Public State.
 
 ## Animations
 
-All pane motion is owned by the Lath **animator**, applied imperatively to the leaf divs by LathHost (`docs/specs/tiling-engine.md` → "Animation"): 440ms `cubic-bezier(0.22, 1, 0.36, 1)`, a 0 duration under reduced motion. **There are no CSS entrance/exit classes.** Those leaf divs carry the interpolated inline geometry, which is what lets the selection overlay measure the tween ([Position tracking](#position-tracking)). **Terminal panes must not refit every frame**: `TerminalPane`'s resize observer throttles `refitSession` — leading edge, at most one per ~150ms while resizes keep arriving, plus a trailing call at rest, so the resting geometry still gets an exact fit (rationale).
+All pane motion is owned by the Lath **animator**, applied imperatively to the leaf divs by LathHost (`docs/specs/tiling-engine.md` → "Animation"): 440ms `cubic-bezier(0.22, 1, 0.36, 1)`, a 0 duration under reduced motion. **There are no CSS entrance/exit classes.** Those leaf divs carry the interpolated inline geometry, which is what lets the selection overlay measure the tween ([Position tracking](#position-tracking)). **Never resize terminals to intermediate animation or sash-preview dimensions.** Fit after the final geometry is painted, including a sash commit at its last preview size; canceled sash drags preserve the original grid, and same-size reattachment sends no PTY resize. Outside layout motion, debounce container resizes by 150ms; unmount cancels pending fitting (rationale).
+
+Source of truth: `TerminalPane` in `lib/src/components/TerminalPane.tsx`; `TerminalResizeContext` in `lib/src/components/wall/wall-context.tsx`, supplied by `LathHost` in `lib/src/components/wall/LathHost.tsx`. Tests: `lib/src/components/TerminalPane.test.tsx`.
 
 ### Zoom (elevated expansion)
 
@@ -433,6 +435,6 @@ A store commit that empties the tree (last pane killed or minimized) triggers th
 
 ### Re-arming the WebGL renderer after context loss
 
-A pane that loses its WebGL context ([Renderer](#renderer)) stays on the DOM renderer for the rest of its life, even once other panes close and free budget. The eviction order is also backwards for a tiling terminal: browsers evict *oldest-first*, but the pane that most deserves the GPU is the focused one.
+A mounted pane that loses its WebGL context ([Renderer](#renderer)) stays on the DOM renderer until it is unmounted and mounted again, even once other panes close and free budget. The eviction order is also backwards for a tiling terminal: browsers evict *oldest-first*, but the pane that most deserves the GPU is the focused one.
 
-The fix is to retry `tryEnableWebglRenderer` when a DOM-fallback pane gains focus. Unbuilt because the naive version thrashes: past the context cap, focusing panes in turn would evict and rebuild glyph atlases on every focus change, plausibly worse than sitting still on the DOM renderer. Any implementation needs a re-arm budget (at most once per pane, or a cooldown) and a measurement showing focus-cycling does not regress. Not worth building until someone runs a Window past the cap — 16 concurrent terminals is well beyond observed usage.
+The future policy permits another WebGL attempt when a DOM-fallback pane gains focus. Unbuilt because the naive version thrashes: past the context cap, focusing panes in turn would evict and rebuild glyph atlases on every focus change, plausibly worse than sitting still on the DOM renderer. Any implementation needs a re-arm budget (at most once per pane, or a cooldown) and a measurement showing focus-cycling does not regress.

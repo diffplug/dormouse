@@ -1057,15 +1057,16 @@ async fn clear_session(window: tauri::Window) -> Result<(), String> {
 //
 // The revision is a hash of the stored bytes, and every load, save and reset
 // runs under an exclusive lock on a sidecar lock file. Both are needed because
-// `app_data_dir()` is keyed by the Tauri identifier, which `pnpm dev:standalone`
-// shares with the installed app — the same sharing the sessions comment above
-// describes — so a second Dormouse process writing this file is an ordinary
-// state, not an impossible one. A hash is the only revision two processes agree
-// on without talking to each other: a counter only ever tracked this process's
-// own writes, so the loser of an overlapping load→save silently overwrote the
-// winner's batches. The lock is what makes the read-compare-rename one step, so
-// the loser is told "conflict" and retries instead. `None` means nothing is
-// stored — what a first save names as its base, and what a reset leaves behind.
+// `app_data_dir()` is keyed by the Tauri identifier and nothing enforces one
+// launch per identifier: two launches of the installed app share a data
+// directory, as do two `pnpm dev:standalone` runs in one worktree, whose
+// identifier is per-worktree and stable. A hash is the only revision two
+// processes agree on without talking to each other: a counter only ever
+// tracked this process's own writes, so the loser of an overlapping load→save
+// silently overwrote the winner's batches. The lock makes read-compare-rename
+// one step, so the loser is told "conflict" and retries instead. `None` means
+// nothing is stored — what a first save names as its base, and what a reset
+// leaves behind.
 
 const NOTEPAD_ARCHIVE_FILE: &str = "notepad-archive-v1.json";
 
@@ -2489,9 +2490,8 @@ mod tests {
                 gate: Mutex::new(()),
             }
         }
-        /// A second Dormouse over the same `app_data_dir()` — a dev build beside
-        /// the installed app, which share a Tauri identifier and so a data
-        /// directory.
+        /// A second Dormouse over the same `app_data_dir()` — two launches of the
+        /// installed app, or two `pnpm dev:standalone` runs in one worktree.
         fn second_process(&self) -> Self {
             Archive {
                 dir: self.dir.clone(),
@@ -2619,9 +2619,9 @@ mod tests {
         );
     }
 
-    /// Two Dormouse processes share `app_data_dir()` — a dev build beside the
-    /// installed app — so the loser of an overlapping load→save must be told to
-    /// retry rather than drop the winner's batches.
+    /// Two Dormouse processes share `app_data_dir()` — two launches of the
+    /// installed app, or two dev runs in one worktree — so the loser of an
+    /// overlapping load→save must retry rather than drop the winner's batches.
     #[test]
     fn notepad_archive_conflicts_across_two_processes() {
         let first = Archive::new("notepad-two-processes");

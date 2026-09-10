@@ -531,25 +531,42 @@ Source of truth: `init_log` / `read_update_log` in `standalone/src-tauri/src/lib
 
 Source of truth: `standalone/package.json` (package scripts),
 `standalone/src-tauri/tauri.conf.json` (`build`, `bundle.resources`), and the root
-`package.json` for the `dev:standalone` and `innerdogfood` orchestration.
+`package.json` for the `dev:standalone` and `innerdogfood` orchestration;
+`runDev` in `standalone/scripts/dev-standalone.mjs`;
+`standalone/scripts/clean-dev-sidecar.mjs`.
 
 - `stage` = `stage:dor-cli` (build + stage the dor CLI, `docs/specs/dor-cli.md`)
   plus `stage:sidecar-proxy` (`build-sidecar-proxy.mjs` bundles the
   `lib/src/host/` sources into the sidecar `.cjs` files).
 - The `tauri` script stages, then runs `standalone/scripts/tauri.mjs`, which
-  delegates to the Tauri CLI. The `DORMOUSE_REMOTE_CONNECT_SRC` build-time override
-  for self-host relay origins is baked into the sidecar's burrow bundle by
-  `build-sidecar-proxy.mjs` — the Burrow runs in the sidecar, so the webview CSP has
-  no relay sources at all, which `standalone/scripts/tauri-conf.test.mjs` asserts
-  against `tauri.conf.json` (`docs/specs/relay.md`, "Where a Burrow may reach a
-  Relay").
+  delegates to the Tauri CLI — except `dev`, which it routes through `runDev`
+  below. `build-sidecar-proxy.mjs` bakes `DORMOUSE_REMOTE_CONNECT_SRC` into the
+  sidecar's Burrow bundle. The webview CSP contains no relay sources, pinned by
+  `standalone/scripts/tauri-conf.test.mjs` (`docs/specs/relay.md`, "Where a Burrow
+  may reach a Relay").
 - The Tauri bundle ships the whole sidecar via the `../sidecar/**/*` resources
   glob — including node-pty's prebuilds + bundled ConPTY and the
   shell-integration scripts (`docs/specs/terminal-escapes.md`).
-- **Dev caveat:** `tauri.conf.json`'s `beforeDevCommand` is `pnpm dev` (Vite only).
-  Frontend edits hot-reload, but changes to the sidecar, the staged dor CLI, or the
-  bundled `lib/src/host/` sources need a manual re-stage and app restart — the dev
-  loop does not watch them.
+- **Must start native dev with Vite on an OS-assigned loopback port and pass its
+  bound URL to Tauri**, with `beforeDevCommand` disabled in a per-run overlay.
+  Direct `pnpm exec tauri dev` keeps
+  `tauri.conf.json`'s defaults. HMR shares Vite's listener, including when
+  `TAURI_DEV_HOST` is inherited; inherited browser-dev settings never enable
+  browser mode.
+- **May pin Vite with `DORMOUSE_BROWSER_DEV_VITE_PORT`; an occupied port must fail
+  without stopping its owner.**
+- **Must close Vite and the owned Tauri process tree on startup failure, exit,
+  SIGINT, SIGTERM or SIGHUP.**
+  POSIX shutdown escalates to SIGKILL after three seconds; Windows terminates
+  the owned tree with `taskkill /T /F`.
+- **Must key the native dev Tauri identifier to the canonical worktree path**, so
+  parallel worktrees and the installed app never share app data. The default log is
+  `<worktree>/standalone/src-tauri/target/dormouse-dev.log`, overridden by
+  `DORMOUSE_LOG_FILE`. Pinned by `standalone/scripts/dev-standalone.test.mjs`.
+- **Must limit Windows pre-dev cleanup to sidecars executing from this worktree's
+  default debug directory; never kill a listener by port.**
+- **Must re-stage and restart after changing sidecar, staged CLI, or bundled host
+  sources.** Frontend edits hot-reload; Tauri watches Rust.
 - `pnpm innerdogfood` runs the sidecar + webview in a normal browser via the
   browser-dev harness instead of the Tauri WebView (`docs/specs/transport.md`,
   Standalone browser-dev harness).

@@ -181,6 +181,7 @@ After changing the harness, run:
 
 ```sh
 node --check standalone/scripts/dev-agent-browser.mjs
+pnpm --filter dormouse-standalone test
 pnpm --filter dormouse-standalone build
 ```
 

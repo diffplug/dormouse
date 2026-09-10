@@ -152,7 +152,7 @@ A **Session** is the tuple of its `SessionId` plus one state per layer (I1).
 |---|---|
 | `Paned` | Rendered in the content area: a primary Lath leaf or its shown auxiliary helper |
 | `Zoomed` | Subset of `Paned` — the passthrough-focused pane is maximized; acquiring zoom gives focus, losing focus returns it to `Paned` |
-| `Doored` | Rendered as a door on the baseboard. DOM survival is a rendering decision, not part of this state: browser DOM retention follows **parking** and eviction (`docs/specs/tiling-engine.md` → "Parked leaves"); a terminal Surface unmounts its element (Registry: `Orphaned`) and remounts the same xterm on reattach — nothing replays |
+| `Doored` | Rendered as a door on the baseboard. DOM survival is a rendering decision, not part of this state: browser DOM retention follows **parking** (`docs/specs/tiling-engine.md` → "Parked leaves"); a terminal Surface unmounts its element (Registry: `Orphaned`) and remounts the same xterm on reattach — nothing replays |
 | `Hidden` | In neither pane nor door — webview closed or mid-transition. A Surface in a hidden Workspace is **not** `Hidden`: it stays `Paned` or `Doored`, mounted and live. Process and Activity unaffected. |
 
 ### Link

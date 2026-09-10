@@ -162,6 +162,39 @@ describe('the pairing walkthrough mirrors the copy it clicks', () => {
     expect(logged.match(new RegExp(pattern))?.[1]).toBe(dir);
   });
 
+  // The same contract for the two OS-assigned origins a run has to learn, and
+  // cannot learn any other way: Vite's, which the harness logs, and the Relay's,
+  // which the Relay itself logs from inside its listen callback.
+  it('parses the app URL the harness actually logs', () => {
+    const harness = 'standalone/scripts/dev-agent-browser.mjs';
+    const template = extract(
+      readRepoFile(harness),
+      harness,
+      /^\s*log\(`([^`]*\$\{viteOrigin\})`\);$/m,
+    );
+    const pattern = extract(source, file, /^const APP_URL_LINE = \/(.+)\/;$/m);
+
+    const origin = 'http://localhost:15540';
+    expect(template.replace('${viteOrigin}', origin).match(new RegExp(pattern))?.[1]).toBe(origin);
+  });
+
+  it('parses the listening line the Relay actually logs', () => {
+    const relay = 'relay/src/start.ts';
+    const template = extract(
+      readRepoFile(relay),
+      relay,
+      /^\s*`(relay listening on [^`]*)`,$/m,
+    );
+    const pattern = extract(source, file, /^const RELAY_LISTENING_LINE = \/(.+)\/;$/m);
+
+    const origin = 'http://localhost:51310';
+    const logged = template
+      .replace("${bindHost ?? 'localhost'}", '127.0.0.1')
+      .replace('${boundPort}', '51310')
+      .replace('${origin}', origin);
+    expect(logged.match(new RegExp(pattern))?.[1]).toBe(origin);
+  });
+
   // The screens' structure says only that a ceremony ended or a code was
   // refused; the scenarios turn on *which* one, so these prefixes are the
   // harness's one match on copy. What has to hold is not the wording but that

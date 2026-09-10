@@ -42,16 +42,13 @@ export type LathWallSnapshot = {
   tree: LathTree;
   /** Meta for tree leaves and Doors alike; no runtime Door metadata copy. */
   leafMeta: ReadonlyMap<string, LeafMeta>;
-  /** Mounted detached leaves in eviction order; null means never laid out. */
+  /** Mounted detached leaves in insertion order; null means never laid out. */
   parked: ReadonlyMap<string, Rect | null>;
   zoomedId: string | null;
   /** Monotonic; bumps on every commit (meta writes and zoom included) so effects
    *  can key off "something committed" without diffing the tree. */
   revision: number;
 };
-
-/** Cap live parked documents; oldest DOM is evicted while metadata survives. */
-export const MAX_PARKED_SURFACES = 8;
 
 /** Where a new leaf lands: beside `refId` on `edge`. `null` (or a `refId` that is
  *  gone) means "beside the last leaf via `autoEdge`", or "become the root" when the
@@ -80,8 +77,7 @@ export type LathWallStore = {
   /** Detach a leaf into a Door: out of the tree, but its meta STAYS — the store
    *  remains the single authority for a Doored Surface's title/params, which keep
    *  changing while it is minimized. `opts.park` additionally keeps the leaf mounted
-   *  at the rect it held, for Surfaces whose state lives in the DOM, and trims the
-   *  oldest park past `MAX_PARKED_SURFACES` in the same commit — one commit, so the
+   *  at the rect it held, for Surfaces whose state lives in the DOM — one commit, so the
    *  adapter never sees a frame where a parked id would unmount
    *  (docs/specs/tiling-engine.md → "Parked leaves"). Pair with `forgetLeaf` when
    *  the Door is destroyed. */
@@ -131,11 +127,11 @@ export type LathWallStore = {
   resizeBoundary(splitPath: number[], boundary: number, deltaPx: number): { ok: boolean };
 
   /** Meta write: set a leaf's fallback title. No-op if unchanged or absent.
-   *  Reaches parked and cap-evicted leaves too — async browser metadata can arrive
-   *  after either transition. */
+   *  Reaches Doored leaves too — async browser metadata can arrive
+   *  after minimization. */
   setTitle(id: LeafId, title: string): void;
   /** Meta write: merge `patch` into a leaf's params. No-op if the leaf is absent.
-   *  Reaches parked and cap-evicted leaves too. */
+   *  Reaches Doored leaves too. */
   updateParams(id: LeafId, patch: Record<string, unknown>): void;
 
   /** Presentation-only zoom target (the tree is untouched). No-op if unchanged. */
@@ -254,18 +250,6 @@ export function createLathWallStore(): LathWallStore {
     return parked === snapshot.parked ? {} : { parked };
   }
 
-  /** Park order, oldest first, trimmed to the cap: past `MAX_PARKED_SURFACES` the
-   *  oldest DOM is dropped. Only the DOM is capped — an evicted leaf is still a Door
-   *  with live meta in `leafMeta`, so it simply reattaches by reloading. */
-  function parkedWith(id: LeafId, rect: Rect | null): ReadonlyMap<string, Rect | null> {
-    const p = new Map(snapshot.parked).set(id, rect);
-    for (const oldest of p.keys()) {
-      if (p.size <= MAX_PARKED_SURFACES) break;
-      p.delete(oldest);
-    }
-    return p;
-  }
-
   /** Where `id` sits under the last reported geometry, or null if it has none yet.
    *  Walks the root→leaf path only, rather than laying out the whole tree to keep
    *  one rect. Peer of `neighborOf` / `autoEdgeFor`. */
@@ -292,7 +276,7 @@ export function createLathWallStore(): LathWallStore {
     commit({
       tree: r.tree,
       leafMeta,
-      ...(park && leafMeta.has(id) ? { parked: parkedWith(id, leafRect(id)) } : {}),
+      ...(park && leafMeta.has(id) ? { parked: new Map(snapshot.parked).set(id, leafRect(id)) } : {}),
       ...(snapshot.zoomedId === id ? { zoomedId: null } : {}),
     });
     return { ok: true, token: r.token };

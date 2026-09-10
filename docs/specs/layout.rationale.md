@@ -20,8 +20,6 @@ xterm.js paints only its own rendered surface, and integer row fitting leaves a 
 
 **Why `inert` is only defense in depth.** `visibility: hidden` already removes focusability, so the attribute exists for a future presentation that keeps the subtree visible.
 
-**Why the GL claim is deferred to first activation.** Browsers cap live WebGL contexts, and a Wall mounted hidden would spend one on a Session nobody has looked at; deferring makes the budget scale with *visited* Workspaces. It costs one extra claim check per activation, which is a no-op once claimed.
-
 **Why the strip's reorder drag does not capture the pointer on press.** A captured pointer retargets the following `click` to the capture element, so capturing on `pointerdown` swallowed the activate button's click and no tab could be activated by mouse (found in the browser-dev harness, 2026-09). Capture is only useful once the gesture is a drag, which is where it now happens.
 
 **Why the close confirmation anchors to the Wall, not the tab.** `ModalOverlay` centers inside the target's box and does not clamp to the viewport, so a 24px tab at the top of the window left the dialog clipped. Every Wall shares one grid cell, so the anchor lands in the same place whether or not that Workspace is visible.
@@ -74,7 +72,9 @@ Pane headers re-render on every activity, terminal-state, and palette change. An
 
 ## Renderer
 
-**Why the GL context is claimed lazily.** A GL context is a scarce per-page resource, and claiming at create would spend the budget on surfaces that never paint — cold restore builds a session for every persisted pane, minimized doors included. Because eviction is oldest-first and one-way, the panes it demoted would be the earliest-restored ones, permanently.
+**Why the GL context follows the mount.** Creating a renderer for minimized terminals spends scarce context slots on content that never paints. The pinned addon deletes GPU objects and removes its canvas on disposal but does not call `WEBGL_lose_context`; explicit loss avoids waiting for garbage collection to reclaim a slot. Disposing before loss removes the old renderer’s loss listeners so they cannot affect a replacement.
+
+**Why capture failure keeps WebGL.** Canvas capture depends on the pinned addon’s synchronous activation, and explicit loss depends on a browser extension. A missing canvas, failed probe, or unavailable extension is not a rendering failure. Keeping the addon avoids turning dependency drift into the sustained DOM-renderer cost below; disposal still frees GPU objects on unmount, with only context-slot reclamation reverting to GC. The scan continues past a canvas that refuses the probe, so the addon's 2D link canvas cannot hide its WebGL one. Containing exceptions from both release steps prevents a renderer failure from leaving a pane half-unmounted or a Session undisposed.
 
 **DOM-renderer cost.** The DOM renderer emits one `<span>` per style run per row, so a TUI that paints every cell its own truecolor collapses to one span-with-inline-style *per cell*, rebuilt every frame. On a 99×25 pane that is ~1150 elements of style recalc plus layout per frame: measured in Safari 26.5 (2026-08), a single such pane held the whole page at ~110ms/frame (~9fps) while the rest of the app was idle. The same pane on the WebGL renderer holds a locked 60fps (16.6ms, zero frames over 25ms).
 
@@ -82,13 +82,15 @@ Pane headers re-render on every activity, terminal-state, and palette change. An
 
 **Context budget.** The per-page live-context cap was measured at 16 in Safari 26.5, evicted oldest-first. The `onContextLoss` → dispose-the-addon → DOM-fallback path was verified live by exhausting the budget and watching the demoted panes keep painting.
 
+**Atlas sharing.** Stock addon-webgl already caches rasterized atlas canvases by font metrics/options, DPR, texture limits, glyph mode, and foreground/background/ANSI colors; terminal columns and rows are absent from the key. Each renderer uploads its own texture copy into its own WebGL context. A reattached terminal reuses the atlas while another compatible renderer owns it; no extra Dormouse cache is needed. Sharing GPU textures would require a different rendering architecture using one context across terminals.
+
 **Why image support loads before the renderer.** An ImageAddon registers protocol handlers and draws into canvas layers separate from the text renderer; its renderer hook removes those layers during a WebGL/DOM swap and the next image render recreates them. Loading it only at mount would lose graphics emitted while a Session was minimized — unlike the GL context, which no minimized pane needs. The limits themselves are `docs/specs/terminal-escapes.rationale.md` -> "Inline graphics".
 
-**Verification status.** The numbers above are Safari 26.5; Chrome was checked structurally. Not yet verified inside Tauri's WKWebView (as of 2026-08) — same engine as Safari, and Tauri does not disable the GPU; read `data-renderer` on a pane's host element to confirm.
+**Verification status.** In the standalone browser-dev harness (Chromium 150, 2026-09), 24 unmount/remount cycles explicitly lost every old context, retained the same terminal buffer, selection, and grid, emitted zero terminal resize events, and reused a second mounted terminal’s atlas canvas. Inline-image storage survived the swap and its layer repainted. The lifecycle change has not been verified inside Tauri’s WKWebView; the performance measurements above are Safari 26.5.
 
 ## Animations
 
-**Why `refitSession` is throttled.** An unthrottled ResizeObserver refits once per animated cell-boundary crossing, so one 440ms motion or a single sash drag costs dozens of xterm reflows and PTY resizes; the throttle collapses that to a handful.
+Terminal entrance motion starts at a collapsed edge. Throttling still exposes several intermediate sizes to xterm and the PTY, even when reattachment ends at the original grid. Waiting for painted settlement avoids unnecessary buffer reflows, selection loss, and TUI redraws. A timer alone cannot distinguish a paused sash preview or delayed animation frame from final geometry.
 
 ## Kill (two-phase fade + tween reclaim)
 
