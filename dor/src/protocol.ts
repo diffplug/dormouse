@@ -29,6 +29,25 @@ export const SURFACE_CONTROL_METHODS = {
 
 export type SurfaceControlMethod = (typeof SURFACE_CONTROL_METHODS)[keyof typeof SURFACE_CONTROL_METHODS];
 
+/**
+ * The wire identifier for each Workspace control operation, enumerated here
+ * beside the Surface methods for the same reason. These are container verbs, so
+ * the window-level router answers them itself rather than handing them to a Wall
+ * (`docs/specs/dor-cli.md` → "dor workspace").
+ */
+export const WORKSPACE_CONTROL_METHODS = {
+  list: 'workspace.list',
+  new: 'workspace.new',
+  rename: 'workspace.rename',
+  close: 'workspace.close',
+  switch: 'workspace.switch',
+} as const;
+
+export type WorkspaceControlMethod = (typeof WORKSPACE_CONTROL_METHODS)[keyof typeof WORKSPACE_CONTROL_METHODS];
+
+/** Every method the control channel carries. */
+export type DorControlMethod = SurfaceControlMethod | WorkspaceControlMethod;
+
 /** A control request as it travels over a transport, correlated by `requestId`. */
 export interface DorControlRequestPayload {
   requestId: string;

@@ -45,6 +45,9 @@ export type DorControlParams = {
   restart?: unknown;
   binaryPath?: unknown;
   includePorts?: unknown;
+  name?: unknown;
+  force?: unknown;
+  scope?: unknown;
   pane?: string;
   session?: unknown;
   surface?: unknown;
@@ -140,7 +143,12 @@ function resolveSurfaceTarget(
   target: string | undefined,
   callerSurfaceId: string | undefined,
 ): ParseResult<DorSurface> {
-  const resolvedTarget = target ?? callerSurfaceId ?? 'surface:focused';
+  // A caller this Wall does not hold cannot be the implicit target: a
+  // `--workspace` command names another Workspace, and its reference defaults
+  // to that Workspace's own focused Surface rather than failing on a caller
+  // that was never in this list.
+  const callerListed = callerSurfaceId !== undefined && surfaces.some((surface) => surface.id === callerSurfaceId);
+  const resolvedTarget = target ?? (callerListed ? callerSurfaceId : 'surface:focused');
   const titleTarget = surfaceTitleTarget(resolvedTarget);
   if (titleTarget !== null) {
     const matches = surfaces.filter((surface) => surface.title === titleTarget);
@@ -151,7 +159,7 @@ function resolveSurfaceTarget(
   const matches = surfaces.filter((surface) => matchesDorSurfaceTarget(resolvedTarget, surface, callerSurfaceId));
   const single = pickSingleMatch(matches, resolvedTarget);
   if (single) return single;
-  const fallback = !target && !callerSurfaceId ? (surfaces[0] ?? null) : null;
+  const fallback = !target && !callerListed ? (surfaces[0] ?? null) : null;
   if (fallback) return { ok: true, value: fallback };
   return { ok: false, message: `surface '${resolvedTarget}' was not found` };
 }

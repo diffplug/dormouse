@@ -10,7 +10,7 @@ import {
   setActiveWorkspace,
   setWorkspaces,
   subscribeToWorkspaces,
-  workspaceIdForRef,
+  resolveWorkspaceRef,
   workspaceRefFor,
 } from './workspace-store';
 import { DEFAULT_WORKSPACE_ID, DEFAULT_WORKSPACE_NAME } from './session-types';
@@ -160,14 +160,31 @@ describe('workspace-store', () => {
     expect(workspaceRefFor('ws-2')).toBe('workspace:2');
     // A Workspace already gone (its Wall is mid-unmount) answers the first ref.
     expect(workspaceRefFor('missing')).toBe('workspace:1');
-    expect(workspaceIdForRef('workspace:2')).toBe('ws-2');
-    expect(workspaceIdForRef('2')).toBe('ws-2');
-    expect(workspaceIdForRef('workspace:9')).toBeNull();
-    expect(workspaceIdForRef('workspace:0')).toBeNull();
-    expect(workspaceIdForRef('nonsense')).toBeNull();
+    expect(resolveWorkspaceRef('workspace:2')).toEqual({ ok: true, id: 'ws-2' });
+    expect(resolveWorkspaceRef('2')).toEqual({ ok: true, id: 'ws-2' });
+    for (const ref of ['workspace:9', 'workspace:0', 'nonsense']) {
+      expect(resolveWorkspaceRef(ref)).toEqual({ ok: false, message: `unknown workspace target '${ref}'` });
+    }
 
     moveWorkspace('ws-2', 0);
     expect(workspaceRefFor('ws-2')).toBe('workspace:1');
-    expect(workspaceIdForRef('workspace:1')).toBe('ws-2');
+    expect(resolveWorkspaceRef('workspace:1')).toEqual({ ok: true, id: 'ws-2' });
+  });
+
+  it('resolves a Workspace by name, and refuses an ambiguous one', () => {
+    renameWorkspace(DEFAULT_WORKSPACE_ID, 'build');
+    createWorkspace({ id: 'ws-2', name: 'agents' });
+    expect(resolveWorkspaceRef('workspace:agents')).toEqual({ ok: true, id: 'ws-2' });
+    expect(resolveWorkspaceRef('agents')).toEqual({ ok: true, id: 'ws-2' });
+
+    createWorkspace({ id: 'ws-3', name: 'agents' });
+    expect(resolveWorkspaceRef('agents')).toEqual({
+      ok: false,
+      message: 'workspace target \'agents\' matched multiple Workspaces: workspace:2 "agents", workspace:3 "agents"',
+    });
+    // A positional ref is never read as a name, even when a Workspace is named
+    // for a number.
+    renameWorkspace('ws-3', '1');
+    expect(resolveWorkspaceRef('1')).toEqual({ ok: true, id: DEFAULT_WORKSPACE_ID });
   });
 });

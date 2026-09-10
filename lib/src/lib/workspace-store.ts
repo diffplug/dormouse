@@ -195,11 +195,37 @@ export function workspaceRefFor(id: WorkspaceId): string {
   return `workspace:${index === -1 ? 1 : index + 1}`;
 }
 
-/** Resolve `workspace:<n>` or a bare `<n>` (1-based) to a Workspace id. */
-export function workspaceIdForRef(ref: string): WorkspaceId | null {
-  const match = /^(?:workspace:)?([1-9]\d*)$/.exec(ref.trim());
-  if (!match) return null;
-  return state.workspaces[Number(match[1]) - 1]?.id ?? null;
+/** What a `workspace:<n|name>` target named, or why it named nothing. */
+export type WorkspaceRefResolution =
+  | { ok: true; id: WorkspaceId }
+  | { ok: false; message: string };
+
+const POSITIONAL_REF = /^[1-9]\d*$/;
+
+/**
+ * Resolve `workspace:<n>` / `workspace:<name>` — or either bare — to a
+ * Workspace of this Window (`docs/specs/dor-cli.md` → "Handle Model"). A
+ * positional ref wins over a name that reads as one; a name resolves only when
+ * exactly one Workspace carries it, and an ambiguous one lists the candidates
+ * rather than picking.
+ */
+export function resolveWorkspaceRef(ref: string): WorkspaceRefResolution {
+  const target = ref.trim();
+  const bare = (target.startsWith('workspace:') ? target.slice('workspace:'.length) : target).trim();
+  if (POSITIONAL_REF.test(bare)) {
+    const positional = state.workspaces[Number(bare) - 1];
+    if (positional) return { ok: true, id: positional.id };
+  } else if (bare) {
+    const matches = state.workspaces.filter((workspace) => workspace.name === bare);
+    if (matches.length === 1) return { ok: true, id: matches[0].id };
+    if (matches.length > 1) {
+      const candidates = matches
+        .map((workspace) => `${workspaceRefFor(workspace.id)} ${JSON.stringify(workspace.name)}`)
+        .join(', ');
+      return { ok: false, message: `workspace target '${target}' matched multiple Workspaces: ${candidates}` };
+    }
+  }
+  return { ok: false, message: `unknown workspace target '${target}'` };
 }
 
 /** Reset to the single default Workspace (fresh start / tests). */

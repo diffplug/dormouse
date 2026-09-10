@@ -83,12 +83,21 @@ export interface Surface {
   /** Listening ports opened by this terminal Surface. Present only when the
    *  request set `includePorts` (`dor list --ports`); never on browser Surfaces. */
   ports?: SurfacePort[];
+  /** The Workspace this Surface belongs to. Present only for a `scope: 'all'`
+   *  listing, where rows from several Workspaces share one list. */
+  workspaceRef?: string;
 }
+
+/** How wide a listing reaches: one Workspace (the default) or every Workspace
+ *  in this Window. */
+export type ListScope = 'workspace' | 'all';
 
 export interface ListSurfacesRequest {
   pane?: string;
   workspace?: string;
   window?: string;
+  /** Omitted means `workspace`. */
+  scope?: ListScope;
   /** Enumerate each terminal Surface's listening ports. The host shells out per
    *  pane (lsof / PowerShell), so callers opt in; remote sessions report none. */
   includePorts?: boolean;
@@ -96,11 +105,76 @@ export interface ListSurfacesRequest {
 
 export interface ListSurfacesResponse {
   surfaces: Surface[];
+  /** The Workspace that answered; for `scope: 'all'`, the one the request
+   *  landed in. */
   workspaceRef: string;
+  windowRef: string;
+  /** Present only for `scope: 'all'`: this Window's Workspaces in strip order,
+   *  so the caller can render a header for each group of `surfaces`. */
+  workspaces?: WorkspaceRow[];
+}
+
+/** One Workspace of this Window, as `dor list --workspaces` prints it: its
+ *  positional ref and name, whether it is the active one, and the union status
+ *  over its member Surfaces (`docs/specs/alert.md` → Workspace union). */
+export interface WorkspaceRow {
+  ref: string;
+  id: string;
+  name: string;
+  active: boolean;
+  ringing: boolean;
+  todo: boolean;
+  /** Member Surfaces owing attention (ringing or TODO); each counts once. */
+  count: number;
+}
+
+export interface ListWorkspacesRequest {
+  window?: string;
+}
+
+export interface ListWorkspacesResponse {
+  workspaces: WorkspaceRow[];
   windowRef: string;
 }
 
+export interface NewWorkspaceRequest {
+  /** Defaults host-side to the next `Workspace N`. */
+  name?: string;
+  window?: string;
+}
+
+export interface RenameWorkspaceRequest {
+  workspace: string;
+  name: string;
+  window?: string;
+}
+
+export interface CloseWorkspaceRequest {
+  workspace: string;
+  /** Close even though the Workspace holds touched or running Surfaces. */
+  force: boolean;
+  window?: string;
+}
+
+export interface SwitchWorkspaceRequest {
+  workspace: string;
+  window?: string;
+}
+
+/** The answer every mutating Workspace verb gives: what it did, and the
+ *  Workspace it did it to. `workspaceRef` is positional, so for `close` it is
+ *  the ref the Workspace had. */
+export interface WorkspaceMutationResponse {
+  status: 'created' | 'renamed' | 'closed' | 'active';
+  workspaceId: string;
+  workspaceRef: string;
+  name: string;
+}
+
 export interface SplitSurfaceRequest {
+  /** Act in this Workspace instead of the caller's (`dor --workspace <ref>`).
+   *  Resolved by the router before caller ownership. */
+  workspace?: string;
   /** Raw argv for the initial command; the host quotes it for the target shell. */
   command?: string[];
   direction: SplitDirection;
@@ -123,6 +197,9 @@ export interface SplitSurfaceResponse {
 }
 
 export interface EnsureSurfaceRequest {
+  /** Act in this Workspace instead of the caller's (`dor --workspace <ref>`).
+   *  Resolved by the router before caller ownership. */
+  workspace?: string;
   /** Raw argv for the command; the host quotes it for the target shell. */
   command: string[];
   minimized: boolean;
@@ -143,6 +220,9 @@ export interface EnsureSurfaceResponse {
 }
 
 export interface SendSurfaceRequest {
+  /** Act in this Workspace instead of the caller's (`dor --workspace <ref>`).
+   *  Resolved by the router before caller ownership. */
+  workspace?: string;
   surface: string;
   input: string;
   inputCount: number;
@@ -156,6 +236,9 @@ export interface SendSurfaceResponse {
 }
 
 export interface ReadSurfaceRequest {
+  /** Act in this Workspace instead of the caller's (`dor --workspace <ref>`).
+   *  Resolved by the router before caller ownership. */
+  workspace?: string;
   lines?: number;
   scrollback: boolean;
   surface: string;
@@ -180,6 +263,9 @@ export type AwaitCause = 'quiet' | 'exit' | 'bell' | 'idle';
 export type AwaitSurfaceOutcome = 'resolved' | 'timeout' | 'died';
 
 export interface AwaitSurfaceRequest {
+  /** Act in this Workspace instead of the caller's (`dor --workspace <ref>`).
+   *  Resolved by the router before caller ownership. */
+  workspace?: string;
   surface: string;
   until: AwaitUntil;
   /** The caller's ceiling, enforced host-side so no hop can reap the wait early. */
@@ -202,6 +288,9 @@ export type KillSurfaceConfirmation =
   | { mode: 'dangerously' };
 
 export interface KillSurfaceRequest {
+  /** Act in this Workspace instead of the caller's (`dor --workspace <ref>`).
+   *  Resolved by the router before caller ownership. */
+  workspace?: string;
   confirmation: KillSurfaceConfirmation;
   surface: string;
 }
@@ -213,6 +302,9 @@ export interface KillSurfaceResponse {
 }
 
 export interface IframeSurfaceRequest {
+  /** Act in this Workspace instead of the caller's (`dor --workspace <ref>`).
+   *  Resolved by the router before caller ownership. */
+  workspace?: string;
   minimized: boolean;
   surface?: string;
   url: string;
@@ -227,6 +319,9 @@ export interface IframeSurfaceResponse {
 }
 
 export interface ResolveOpenTargetRequest {
+  /** Act in this Workspace instead of the caller's (`dor --workspace <ref>`).
+   *  Resolved by the router before caller ownership. */
+  workspace?: string;
   /** A terminal Surface handle (surface:N, surface:<stable-id>, surface:self,
    *  surface:focused) whose dev-server URL should be resolved. */
   surface: string;
@@ -242,6 +337,9 @@ export interface ResolveOpenTargetResponse {
 }
 
 export interface ResolveAgentBrowserSessionRequest {
+  /** Act in this Workspace instead of the caller's (`dor --workspace <ref>`).
+   *  Resolved by the router before caller ownership. */
+  workspace?: string;
   /** A Surface handle (surface:N, surface:<stable-id>, surface:self,
    *  surface:focused, title:<title>) naming the browser Surface to drive. */
   surface: string;
@@ -257,6 +355,9 @@ export interface ResolveAgentBrowserSessionResponse {
 }
 
 export interface AgentBrowserSurfaceRequest {
+  /** Act in this Workspace instead of the caller's (`dor --workspace <ref>`).
+   *  Resolved by the router before caller ownership. */
+  workspace?: string;
   /** Managed workspace-scoped key; absent when attaching via raw --session. */
   key?: string;
   /** Resolved agent-browser session name — the join key for the surface. */
@@ -290,6 +391,11 @@ export interface ControlClient {
   resolveAgentBrowserSession(
     request: ResolveAgentBrowserSessionRequest,
   ): Promise<ResolveAgentBrowserSessionResponse>;
+  listWorkspaces(request: ListWorkspacesRequest): Promise<ListWorkspacesResponse>;
+  newWorkspace(request: NewWorkspaceRequest): Promise<WorkspaceMutationResponse>;
+  renameWorkspace(request: RenameWorkspaceRequest): Promise<WorkspaceMutationResponse>;
+  closeWorkspace(request: CloseWorkspaceRequest): Promise<WorkspaceMutationResponse>;
+  switchWorkspace(request: SwitchWorkspaceRequest): Promise<WorkspaceMutationResponse>;
 }
 
 export interface AgentBrowserExecResult {

@@ -4,12 +4,13 @@ import { forgetWorkspaceSession } from '../../lib/window-session-aggregator';
 import { setPendingWorkspaceClose, setRenamingWorkspace } from '../../lib/workspace-ui-store';
 import { closeWorkspace, getWorkspacesSnapshot, setActiveWorkspace } from '../../lib/workspace-store';
 import type { WorkspaceId } from '../../lib/session-types';
+import type { CloseSurfaceMode } from './wall-types';
 
 /**
  * The Workspace close and rename verbs, outside any component: the strip's
- * buttons, the command-mode keys, and (later) `dor workspace` all take the same
- * route (`docs/specs/layout.md` → "Workspaces"). The strip renders the
- * confirmation these open; it decides nothing.
+ * buttons, the command-mode keys, and `dor workspace` all take the same route
+ * (`docs/specs/layout.md` → "Workspaces"). The strip renders the confirmation
+ * these open; it decides nothing.
  */
 
 /** Whether closing this Workspace asks first: it holds a Surface the user has
@@ -34,8 +35,15 @@ let closeInFlight = false;
  * Workspace itself. Resolves the first refusal's message with the Workspace left
  * as it was — revealed, so the prompt behind the refusal is on screen — or null
  * once it is gone. Membership is cleared by the Wall's own unmount.
+ *
+ * `mode` is the closure mode each member Surface is closed with: `prompt` for a
+ * user gesture, `silent` for `dor workspace close`, whose caller is a command
+ * rather than someone looking at the Wall (`docs/specs/notepad.md` → "Closure").
  */
-export async function closeWorkspaceWithSurfaces(id: WorkspaceId): Promise<string | null> {
+export async function closeWorkspaceWithSurfaces(
+  id: WorkspaceId,
+  mode: CloseSurfaceMode = 'prompt',
+): Promise<string | null> {
   if (closeInFlight) return CLOSE_IN_FLIGHT_REFUSAL;
   // Re-checked here, not only in `requestWorkspaceClose`: the count can drop
   // while the typed confirmation is on screen, and emptying the Wall for a
@@ -46,7 +54,7 @@ export async function closeWorkspaceWithSurfaces(id: WorkspaceId): Promise<strin
   const handle = getWallHandle(id);
   try {
     if (handle) {
-      const refusal = await handle.closeAll('prompt');
+      const refusal = await handle.closeAll(mode);
       if (refusal) {
         setActiveWorkspace(id);
         return refusal;

@@ -76,6 +76,52 @@ describe('dor control routing', () => {
     }
   });
 
+  it('routes an explicit workspace target by name', () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    createWorkspace({ id: 'ws-2', name: 'build' });
+    const target = handleFor('ws-2');
+    handleFor(first, ['pane-a']);
+    for (const value of ['workspace:build', 'build']) {
+      expect(resolveDorControlRoute(request({ surfaceId: 'pane-a', params: { workspace: value } })))
+        .toEqual({ kind: 'handle', handle: target });
+    }
+    createWorkspace({ id: 'ws-3', name: 'build' });
+    handleFor('ws-3');
+    expect(resolveDorControlRoute(request({ params: { workspace: 'build' } })))
+      .toEqual({
+        kind: 'error',
+        message: 'workspace target \'build\' matched multiple Workspaces: workspace:2 "build", workspace:3 "build"',
+      });
+  });
+
+  it('routes a stable-id target to the Workspace holding it, over the caller', () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    createWorkspace({ id: 'ws-2' });
+    const caller = handleFor(first, ['pane-a']);
+    const owner = handleFor('ws-2', ['pane-b']);
+    for (const surface of ['pane-b', 'surface:pane-b']) {
+      expect(resolveDorControlRoute(request({ surfaceId: 'pane-a', params: { surface } })))
+        .toEqual({ kind: 'handle', handle: owner });
+    }
+    // A Workspace-scoped `surface:N`, `surface:self` and a title stay with the
+    // caller: every Workspace has a `surface:1`.
+    for (const surface of ['surface:1', 'surface:self', 'title:pane-b']) {
+      expect(resolveDorControlRoute(request({ surfaceId: 'pane-a', params: { surface } })))
+        .toEqual({ kind: 'handle', handle: caller });
+    }
+  });
+
+  it('answers the container verbs and --all at the Window, with no Wall involved', () => {
+    handleFor(getWorkspacesSnapshot().workspaces[0].id, ['pane-a']);
+    for (const method of ['workspace.list', 'workspace.new', 'workspace.close']) {
+      expect(resolveDorControlRoute(request({ method, surfaceId: 'pane-a' }))).toEqual({ kind: 'window' });
+    }
+    expect(resolveDorControlRoute(request({ method: 'surface.list', params: { scope: 'all' } })))
+      .toEqual({ kind: 'window' });
+    expect(resolveDorControlRoute(request({ method: 'surface.list', params: { scope: 'workspace' } })).kind)
+      .toBe('handle');
+  });
+
   it('errors on a workspace or window target this Window does not have', () => {
     handleFor(getWorkspacesSnapshot().workspaces[0].id);
     expect(resolveDorControlRoute(request({ params: { workspace: 'workspace:9' } })))
