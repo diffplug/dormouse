@@ -26,6 +26,11 @@ const { createSidecarBurrow } = require('./burrow.cjs');
 // machine (shared with the VS Code extension host) plus the single-use record
 // store. See docs/specs/standalone.md -> "Agent recovery".
 const { captureAgentRecovery, createRecoveryStore, sliceSince } = require('./recovery.cjs');
+// Same pattern again: lib/src/host/alert-store-host.ts holds the two
+// app-global alert stores — one WATCHING rule set and one alarm-settings blob
+// for every window — running the same classes the VS Code extension host runs.
+// See docs/specs/alert.md.
+const { createAlertStoreHost } = require('./alert-store.cjs');
 
 const agentBrowser = createAgentBrowserHost({
   writeClipboardText: (text) => clipboard.writeClipboardText(text),
@@ -76,6 +81,10 @@ const burrow = createSidecarBurrow({
 const dorControlToken = process.env.DORMOUSE_CONTROL_TOKEN;
 delete process.env.DORMOUSE_CONTROL_TOKEN;
 delete process.env.DORMOUSE_CONTROL_SOCKET;
+
+// Broadcast, never addressed: both stores are one per machine, so every window
+// gets the same canonical snapshot (docs/specs/standalone.md -> "Windows").
+const alertStore = createAlertStoreHost({ send });
 
 const dorControl = createDorControlServer({
   token: dorControlToken,
@@ -181,6 +190,7 @@ function handleLine(line) {
       // How many webviews will answer a Burrow ask (docs/specs/standalone.md
       // -> "Burrow service").
       case 'burrow:windows': burrow.setWindowCount(data?.count); break;
+      case 'alert:command': alertStore.handle(data); break;
       case 'pty:themeColors': burrow.setThemeColors(data); break;
       case 'sidecar:shutdown': shutdown(); break;
       case 'dor:controlResponse': dorControl?.respond(data); break;
@@ -275,6 +285,7 @@ async function shutdown() {
     ]);
   } catch {}
   dorControl?.close();
+  alertStore.dispose();
   burrow.dispose();
   mgr.killAll();
   process.exit(0);

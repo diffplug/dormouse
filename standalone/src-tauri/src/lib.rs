@@ -731,6 +731,23 @@ fn burrow_command(state: tauri::State<'_, SidecarState>, payload: JsonValue) {
     send_to_sidecar(&state, msg.to_string());
 }
 
+// The two app-global alert stores live in the sidecar so N windows share one
+// answer (docs/specs/alert.md -> "Alarm settings"). Opaque passthroughs, like
+// `burrow_command`: the shape belongs to `lib/src/host/alert-store-host.ts` at
+// the other end, and the canonical snapshot comes back as a broadcast
+// `alert:settings` / `alert:watchedCommands`.
+#[tauri::command]
+fn alert_set_watched(state: tauri::State<'_, SidecarState>, payload: JsonValue) {
+    let msg = serde_json::json!({ "event": "alert:command", "data": payload });
+    send_to_sidecar(&state, msg.to_string());
+}
+
+#[tauri::command]
+fn alert_publish_settings(state: tauri::State<'_, SidecarState>, payload: JsonValue) {
+    let msg = serde_json::json!({ "event": "alert:command", "data": payload });
+    send_to_sidecar(&state, msg.to_string());
+}
+
 #[tauri::command]
 fn dor_control_response(state: tauri::State<'_, SidecarState>, response: DorControlResponse) {
     let msg = serde_json::json!({
@@ -2914,6 +2931,8 @@ pub fn run() {
             pty_request_init,
             dor_control_response,
             burrow_command,
+            alert_set_watched,
+            alert_publish_settings,
             kill_sidecar_now,
             quit_ack,
             quit_vote,

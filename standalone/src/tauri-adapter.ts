@@ -92,6 +92,10 @@ export class TauriAdapter implements PlatformAdapter {
   private replayHandlers = new Set<(detail: { id: string; data: string }) => void>();
   private filesDroppedHandlers = new Set<(paths: string[]) => void>();
   private alertStateHandlers = new Set<(detail: AlertStateDetail) => void>();
+  // The two app-global stores are the sidecar's, so this window applies what
+  // comes back rather than what it sent (docs/specs/alert.md → "Alarm settings").
+  private watchedCommandHandlers = new Set<(names: string[]) => void>();
+  private alertSettingsHandlers = new Set<(settings: AlertSettings) => void>();
   private unlistenFns: Array<() => void> = [];
   private alertManager = new AlertManager();
   private static STATE_KEY = 'dormouse.session';
@@ -229,6 +233,21 @@ export class TauriAdapter implements PlatformAdapter {
       // pending-invoke lookup misses and the event reaches us.
       listen<DorControlCancelPayload>("dor:controlCancel", (event) => {
         cancelDorControlRequest(event.payload.requestId);
+      }),
+
+      // The sidecar's canonical snapshots, broadcast to every window. This
+      // window's own `AlertManager` is one more consumer of them.
+      listen<{ names?: string[] }>("alert:watchedCommands", (event) => {
+        const names = event.payload?.names ?? [];
+        this.alertManager.setWatchedCommands(names);
+        for (const handler of this.watchedCommandHandlers) handler(names);
+      }),
+
+      listen<{ settings?: AlertSettings }>("alert:settings", (event) => {
+        const settings = event.payload?.settings;
+        if (!settings) return;
+        this.alertManager.applySettings(settings);
+        for (const handler of this.alertSettingsHandlers) handler(settings);
       }),
     ])));
 
@@ -601,15 +620,23 @@ export class TauriAdapter implements PlatformAdapter {
     this.alertManager.remove(id);
   }
 
+  /** Offer this window's persisted rule set as the host's startup seed; only
+   *  the first window's offer is taken. */
   alertSetWatchedCommands(names: string[]): void {
-    this.alertManager.setWatchedCommands(names);
+    invoke("alert_set_watched", { payload: { op: "initializeWatchedCommands", names } });
   }
 
+  /** A delta, never a replacement, so a window that has not heard about a rule
+   *  cannot drop it. */
   alertSetCommandWatched(name: string, watched: boolean): void {
-    this.alertManager.setCommandWatched(name, watched);
+    invoke("alert_set_watched", { payload: { op: "setCommandWatched", name, watched } });
   }
 
-  alertPublishSettings(settings: AlertSettings): void { this.alertManager.applySettings(settings); }
+  alertPublishSettings(settings: AlertSettings, opts: { seed: boolean }): void {
+    invoke("alert_publish_settings", {
+      payload: { op: opts.seed ? "initializeSettings" : "updateSettings", settings },
+    });
+  }
 
   alertDismiss(id: string): void {
     this.alertManager.dismissAlert(id);
@@ -647,11 +674,13 @@ export class TauriAdapter implements PlatformAdapter {
     this.alertStateHandlers.add(handler);
   }
 
-  // Single webview owning the AlertManager, so localStorage is the only store
-  // and there is no canonical snapshot to broadcast back.
-  onWatchedCommands(_handler: (names: string[]) => void): void {}
+  onWatchedCommands(handler: (names: string[]) => void): void {
+    this.watchedCommandHandlers.add(handler);
+  }
 
-  onAlertSettings(_handler: (settings: AlertSettings) => void): void {}
+  onAlertSettings(handler: (settings: AlertSettings) => void): void {
+    this.alertSettingsHandlers.add(handler);
+  }
 
   // --- State persistence ---
 

@@ -3,7 +3,7 @@ import {
   DEFAULT_ALERT_SETTINGS,
   normalizeAlertSettings,
   type AlertSettings,
-} from './alert-settings';
+} from './alert-settings-model';
 
 type AlertSettingsTarget = Pick<AlertManager, 'applySettings'>;
 
