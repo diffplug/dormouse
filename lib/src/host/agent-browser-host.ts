@@ -461,8 +461,7 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     // which is truthy and walks straight past the rejection below into the `eval`
     // argument. `hasOwnProperty.call` keeps the table's own three names the only
     // ones that select a script, which is what the comment on `EDIT_SCRIPTS`
-    // claims. Same guard, same reason as `own()` in `RemoteControlSection.tsx`;
-    // `Object.hasOwn` is ES2022 and this build's lib is ES2020.
+    // claims. Same guard, same reason as `own()` in `RemoteControlSection.tsx`.
     const script = Object.prototype.hasOwnProperty.call(EDIT_SCRIPTS, op) ? EDIT_SCRIPTS[op] : undefined;
     if (!script) {
       return { ok: false, error: `unknown edit op '${op}'` };
