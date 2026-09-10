@@ -573,7 +573,7 @@ export function restoreTerminal(
   return entry;
 }
 
-export function mountElement(id: string, container: HTMLElement): void {
+export function mountElement(id: string, container: HTMLElement, options: { fit?: boolean } = {}): void {
   const entry = registry.get(id);
   if (!entry) return;
   container.appendChild(entry.element);
@@ -583,7 +583,11 @@ export function mountElement(id: string, container: HTMLElement): void {
     entry.webglAttempted = true;
     tryEnableWebglRenderer(entry.terminal, entry.element);
   }
-  requestAnimationFrame(() => entry.fit.fit());
+  if (options.fit !== false) {
+    requestAnimationFrame(() => {
+      if (entry.element.parentElement === container && container.isConnected) entry.fit.fit();
+    });
+  }
 }
 
 /** Where a hidden helper's xterm element waits between reveals: still in the
