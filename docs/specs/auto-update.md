@@ -14,7 +14,7 @@ The standalone app checks for updates on launch and prompts in the Baseboard. **
 
 ### Quit-time install
 
-**The updater owns no quit interception** — install runs only when `hasPendingUpdate()` is true, after the quit orchestrator's teardown and save/drain steps (`docs/specs/standalone.md` §Quit flow) (rationale). **It runs in `main`, the window the quit walk tears down last and the only one holding `updater:*`** (`capabilities/main-only.json`); every other window has handed on by then, so nothing it could still be writing outlives the install.
+**The updater owns no quit interception** — install runs only when `hasPendingUpdate()` is true, after the quit orchestrator's teardown and save/drain steps (`docs/specs/standalone.md` §Quit flow) (rationale). **It runs in `main`, the window the quit walk tears down last and the only one holding `updater:default`** (`capabilities/main-only.json`); every other window has handed on by then, so nothing it could still be writing outlives the install.
 
 **Only `main` ever checks**, so it is the only window that can hold a download at all — and **closing `main` throws away an approved one**, which lives in that webview's memory. Its close confirmation says so, and is shown for that reason alone even with nothing running (`docs/specs/standalone.md` → "Per-window close"); a session that has closed `main` simply has no update to install until it relaunches (rationale). `installPendingUpdate()` writes the success marker *before* `install()` (§localStorage), and on Windows first awaits bounded sidecar teardown (§Sidecar teardown on Windows). **It never closes the window itself** — exiting the process is `quit_proceed`'s job, after this returns.
 

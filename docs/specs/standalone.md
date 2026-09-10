@@ -326,7 +326,7 @@ so `titleBarStyle`, `hiddenTitle`, `dragDropEnabled` and the CSP carry across
 with no second copy of any of them.
 
 **Capabilities are split**: `default.json` covers `main` and the `ws-*` glob,
-and `main-only.json` scopes `updater:*` and `core:app:allow-version` to `main`,
+and `main-only.json` scopes `updater:default` and `core:app:allow-version` to `main`,
 which structurally enforces that the install runs in the window the walk tears
 down last (`docs/specs/auto-update.md`). Custom commands need no capability
 entry. `standalone/scripts/tauri-conf.test.mjs` pins both.
