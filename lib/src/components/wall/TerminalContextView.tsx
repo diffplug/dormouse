@@ -9,7 +9,7 @@ import { WindowFocusedContext } from './wall-context';
 import { motionIsInstant } from '../../lib/ui-geometry';
 import { messageOf } from '../../lib/errors';
 
-export type PortMode = 'system' | 'iframe' | 'ab-screencast' | 'ab-popout';
+export type PortMode = 'system' | 'iframe' | 'ab-screencast' | 'ab-popout' | 'pw-screencast' | 'pw-popout';
 export type ContextScan = { status: 'scanning' | 'failed' } | { status: 'loaded'; entries: PortUrlEntry[] };
 /** Every action may fail asynchronously; the view reports the failure. */
 type Action = () => void | Promise<void>;
@@ -29,11 +29,13 @@ const HELPER_STATUS: Record<HelperStatus, { icon: ReactNode; label: (command: st
 };
 
 /** The port row's launch targets; `needs` names the host capability that enables one. */
-const PORT_ACTIONS: readonly ({ mode: PortMode; label: string; icon: ReactNode; text: string } & ({ needs?: undefined } | { needs: 'canIframe' | 'canAgent'; unavailable: string }))[] = [
+const PORT_ACTIONS: readonly ({ mode: PortMode; label: string; icon: ReactNode; text: string } & ({ needs?: undefined } | { needs: 'canIframe' | 'canAgent' | 'canPlaywright'; unavailable: string }))[] = [
   { mode: 'system', label: 'Open in system browser', icon: <ArrowSquareOutIcon size={15} />, text: 'System browser' },
   { mode: 'iframe', label: 'Open in iframe embed', needs: 'canIframe', unavailable: 'Iframe unavailable on this host', icon: <FrameCornersIcon size={15} />, text: 'Iframe' },
   { mode: 'ab-screencast', label: 'Open in agent-browser screencast', needs: 'canAgent', unavailable: 'Agent browser unavailable on this host', icon: <AgentRobotIcon size={17} />, text: 'Agent browser' },
   { mode: 'ab-popout', label: 'Open in agent-browser popout', needs: 'canAgent', unavailable: 'Popout unavailable on this host', icon: <><AgentRobotIcon size={17} /><ArrowSquareOutIcon size={13} /></>, text: 'Popout' },
+  { mode: 'pw-screencast', label: 'Open in Playwright screencast', needs: 'canPlaywright', unavailable: 'Playwright unavailable on this host', icon: <AgentRobotIcon size={17} />, text: 'Playwright' },
+  { mode: 'pw-popout', label: 'Open in Playwright popout', needs: 'canPlaywright', unavailable: 'Playwright unavailable on this host', icon: <><AgentRobotIcon size={17} /><ArrowSquareOutIcon size={13} /></>, text: 'Playwright popout' },
 ];
 
 const DETAILS = {
@@ -52,6 +54,7 @@ export interface TerminalContextViewProps {
   scan: ContextScan; argv0?: string | null; watching: boolean; todo: boolean;
   notification?: { title: string | null; body: string | null } | null;
   status: HelperStatus; command: string; warning?: string;
+  canPlaywright?: boolean;
   explorerLabel: string; canExplore: boolean; canAgent: boolean; canIframe: boolean;
   children: ReactNode; notepadAction?: ReactNode; notepadPanel?: ReactNode;
   onClose(): void; onCopyRef: Action; onCopyPath: Action; onExplore: Action;

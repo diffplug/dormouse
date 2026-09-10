@@ -18,11 +18,13 @@ import { NotepadPanel } from '../NotepadPanel';
 
 /** Canonical persisted state for a browser surface. `renderMode` + `url` are the
  *  single source of truth across swaps; the agent-browser fields ride flat and are
- *  present only for `ab-*` modes. */
+ *  present only for automation modes. */
 export type BrowserPanelParams = {
   surfaceType?: string;
   renderMode?: RenderMode;
   url?: string;
+  cwd?: string;
+  nativeIdentity?: string;
   session?: string;
   key?: string;
   wsPort?: number;

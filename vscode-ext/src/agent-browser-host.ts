@@ -1,3 +1,4 @@
+import { createPlaywrightHost } from '../../lib/src/host/playwright-host';
 /**
  * Extension-host wiring for the agent-browser surface
  * (docs/specs/dor-browser.md → "Agent-Browser Host Capabilities").
@@ -35,7 +36,12 @@ export const runAgentBrowserStreamStatus = host.streamStatus;
 export const runAgentBrowserOpen = host.open;
 export const runAgentBrowserPopOut = host.popOut;
 export const runAgentBrowserPopIn = host.popIn;
-export const closePoppedOutSessions = host.closePoppedOut;
+const playwright = createPlaywrightHost({
+  writeClipboardText: async text => { await vscode.env.clipboard.writeText(text); },
+  log: message => log.info(message),
+});
+export const runPlaywrightRequest = playwright.request;
+export const closePoppedOutSessions = async () => { await Promise.all([host.closePoppedOut(), playwright.close()]); };
 
 const STREAM_RELAY_TOKEN_BYTES = 32;
 const STREAM_RELAY_GRANT_TTL_MS = 60_000;

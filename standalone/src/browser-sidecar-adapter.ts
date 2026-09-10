@@ -1,3 +1,4 @@
+import type { PlaywrightRequest, PlaywrightResult } from '../../lib/src/lib/platform/browser-automation';
 import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../../lib/src/lib/terminal-context-types';
 import type {
   AgentBrowserCommandResult,
@@ -181,6 +182,14 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     } catch (err) {
       return { ok: false, reason: "unreachable", detail: errMessage(err) };
     }
+  }
+
+  async playwright(request: PlaywrightRequest): Promise<PlaywrightResult> {
+    try {
+      const result = await this.host.invoke<PlaywrightResult & { bytesBase64?: string }>('playwright_request', { request });
+      if (result.bytesBase64) result.bytes = Uint8Array.from(atob(result.bytesBase64), c => c.charCodeAt(0));
+      return result;
+    } catch (error) { return { ok: false, error: String(error) }; }
   }
 
   async agentBrowserCommand(session: string, args: string[], binaryPath?: string): Promise<AgentBrowserCommandResult> {

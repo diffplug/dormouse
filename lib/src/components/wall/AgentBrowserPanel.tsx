@@ -1,9 +1,9 @@
+import { automationProvider, browserPlatform } from './browser-automation';
 /** React view for the surface-scoped lifecycle in
  * `agent-browser-surface-controller.ts`; see docs/specs/dor-browser.md. */
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { clsx } from 'clsx';
 import { TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
-import { getPlatform } from '../../lib/platform';
 import { isEditableTarget } from '../../lib/dom';
 import type { RenderMode } from './agent-browser-screen';
 import { tabDisplayTitle } from './browser-url';
@@ -51,6 +51,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   const syncEngaged = params?.syncEngaged;
   // poppedOut is derived from the canonical renderMode the shell passes; fall
   // back to resolving it from params for a direct mount (tests) / legacy blob.
+  const cli = automationProvider(renderModeProp ?? params?.renderMode) === 'playwright' ? 'dor pw' : 'dor ab';
   const seededMode = renderModeProp ?? resolveRenderMode(params);
 
   // The surface-scoped controller: get-or-create, keyed by surface id. Survives
@@ -100,11 +101,11 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
       viewport,
       updateParameters: (next) => paneWrite.updateParams(id, next),
       setTitle: (nextTitle) => paneWrite.setTitle(id, nextTitle),
-      requestIframeSwap: () => {
+      requestRenderSwap: (mode = 'iframe') => {
         // The iframe renderer is single-frame: only the active tab survives.
         // Warn + require a typed confirm when other tabs would be closed.
-        if (controller.snapshot().tabs.length >= 2) setPendingIframeSwap(true);
-        else actionsRef.current.onSwapRenderMode(id, 'iframe');
+        if (controller.snapshot().tabs.length >= 2) setPendingRenderSwap(mode);
+        else actionsRef.current.onSwapRenderMode(id, mode);
       },
     });
     return () => handle.detach();
@@ -124,7 +125,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
 
   // Crossing to the single-frame iframe renderer closes all but the active tab;
   // when others are open the swap is gated behind a typed confirm (overlay below).
-  const [pendingIframeSwap, setPendingIframeSwap] = useState(false);
+  const [pendingRenderSwap, setPendingRenderSwap] = useState<RenderMode | null>(null);
   const swapConfirmRef = useRef<HTMLDivElement>(null);
 
   // --- input forwarding (stream-native input_* messages) ---
@@ -302,8 +303,8 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   // Focus the swap-confirm overlay when it appears so it captures the typed
   // confirm/cancel keys (the pane's key-forwarder skips in-pane targets).
   useEffect(() => {
-    if (pendingIframeSwap) swapConfirmRef.current?.focus();
-  }, [pendingIframeSwap]);
+    if (pendingRenderSwap) swapConfirmRef.current?.focus();
+  }, [pendingRenderSwap]);
 
   // --- placeholder state (derived from the snapshot) ---
 
@@ -316,13 +317,13 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
     // Mid pop-in: the headed browser is closed by design and the headless one
     // is booting — not a session that ended.
     if (relaunching) return 'Relaunching browser…';
-    if (!streamPort) return `Waiting for browser session ${session} — run dor ab open <url>`;
+    if (!streamPort) return `Waiting for browser session ${session} — run ${cli} open <url>`;
     if (connectionLost || status?.connected === false) {
-      return `Browser session ${session ?? ''} ended — run dor ab open <url> to restart it, or close this surface.`;
+      return `Browser session ${session ?? ''} ended — run ${cli} open <url> to restart it, or close this surface.`;
     }
     if (!hasFrame) {
       return status && !status.screencasting
-        ? 'No page is open — run dor ab open <url>'
+        ? `No page is open — run ${cli} open <url>`
         : `Connecting to ${session ?? 'browser session'}…`;
     }
     return null;
@@ -391,7 +392,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
           <div className="flex flex-col items-center gap-3 px-4 text-center text-sm text-muted">
             <div>{!session || relaunching ? 'Opening the browser window…' : 'This browser is running in a separate window.'}</div>
             {session && !relaunching && <div className="flex gap-2 text-xs">
-              {getPlatform().agentBrowserBringToFront && (
+              {browserPlatform(seededMode, params?.cwd).agentBrowserBringToFront && (
                 <button
                   type="button"
                   onMouseDown={(e) => e.stopPropagation()}
@@ -420,7 +421,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
         ) : placeholder ? (
           <div className="px-4 text-center text-sm text-muted">{placeholder}</div>
         ) : null}
-        {pendingIframeSwap && (
+        {pendingRenderSwap && (
           <div
             ref={swapConfirmRef}
             tabIndex={-1}
@@ -429,15 +430,15 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
             onKeyDown={(e) => {
               e.stopPropagation();
               if (e.key === 'c' || e.key === 'C') {
-                setPendingIframeSwap(false);
-                actions.onSwapRenderMode(id, 'iframe');
+                setPendingRenderSwap(null);
+                actions.onSwapRenderMode(id, pendingRenderSwap!);
               } else if (e.key === 'Escape') {
-                setPendingIframeSwap(false);
+                setPendingRenderSwap(null);
               }
             }}
           >
             <div className="max-w-sm text-sm text-foreground">
-              Switching to the iframe renderer keeps only the active tab.{' '}
+              Switching browser providers keeps only the active tab.{' '}
               <span className="font-semibold">{Math.max(0, tabs.length - 1)} other tab{tabs.length - 1 === 1 ? '' : 's'}</span> will be closed.
             </div>
             <div className="text-xs text-muted">

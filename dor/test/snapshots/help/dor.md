@@ -14,6 +14,7 @@ USAGE
   dor kill <surface> [--confirm-if-read text|--confirm-dangerously] [--json]
   dor iframe [--json] [--minimize] [--surface id|ref] <target>
   dor agent-browser [--key name|--session name|--surface handle] [args...]
+  dor playwright [--key name] [--session name] [--surface handle] <args>...
   dor list [--command text] [--cwd path] [--id-format refs|ids|both] [--json] [--kind terminal|browser] [--port number] [--ports] [--view paned|zoomed|minimized]
   dor --help
 
@@ -34,6 +35,7 @@ COMMANDS
   kill           Kill a surface.
   iframe         Open a target in an iframe surface.
   agent-browser  Drive a browser surface via your agent-browser install (alias: dor ab).
+  playwright     Drive a browser surface via your Playwright CLI install (alias: dor pw).
   list           List Dormouse Surfaces.
 
 ```

@@ -61,14 +61,14 @@ class ResizeObserverMock {
 function makeSink(): AgentBrowserViewSink & {
   updateParameters: ReturnType<typeof vi.fn>;
   setTitle: ReturnType<typeof vi.fn>;
-  requestIframeSwap: ReturnType<typeof vi.fn>;
+  requestRenderSwap: ReturnType<typeof vi.fn>;
 } {
   return {
     canvas: document.createElement('canvas'),
     viewport: document.createElement('div'),
     updateParameters: vi.fn(),
     setTitle: vi.fn(),
-    requestIframeSwap: vi.fn(),
+    requestRenderSwap: vi.fn(),
   };
 }
 
@@ -685,5 +685,29 @@ describe('relaunch (pop-out / pop-in)', () => {
     await flushMicrotasks();
     expect(streamSockets(4321).length).toBe(1);
     expect(platform.agentBrowserStreamStatus).not.toHaveBeenCalled();
+  });
+});
+
+describe('Playwright provider', () => {
+  it('uses the shared controller with provider-scoped host calls and cwd', async () => {
+    const platform: PlatformAdapter = new FakePtyAdapter();
+    platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
+    platform.playwright = vi.fn(async request => request.op === 'streamUrl'
+      ? { ok: true, url: `ws://127.0.0.1:${request.port}` }
+      : { ok: true, exitCode: 0, stdout: '', stderr: '', wsPort: 4321 });
+    setPlatform(platform);
+    const controller = acquireAgentBrowserSurfaceController('pw', { renderMode: 'pw-screencast', session: 'shared-name', cwd: '/first-project', wsPort: 4321 });
+    const sink = makeSink();
+    controller.attachView(sink);
+    await flushMicrotasks();
+    getAgentBrowserScreenController('pw')!.chromeActions.navigate('https://example.com/next');
+    await flushMicrotasks();
+    expect(platform.playwright).toHaveBeenCalledWith(expect.objectContaining({ op: 'command', session: 'shared-name', cwd: '/first-project', args: ['open', 'https://example.com/next'] }));
+    expect(platform.agentBrowserCommand).not.toHaveBeenCalled();
+    expect(getAgentBrowserScreenController('pw')!.snapshot().renderMode).toBe('pw-screencast');
+    getAgentBrowserScreenController('pw')!.actions.setRenderMode?.('ab-screencast');
+    expect(sink.requestRenderSwap).toHaveBeenCalledWith('ab-screencast');
+    controller.updateParams({ renderMode: 'pw-popout', session: 'shared-name', cwd: '/first-project', wsPort: 4322 });
+    expect(getAgentBrowserScreenController('pw')!.snapshot().renderMode).toBe('pw-popout');
   });
 });

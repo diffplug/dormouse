@@ -1,3 +1,5 @@
+import { automationMode, isScreencast } from './browser-automation';
+import { getPlatformOrNull } from '../../lib/platform';
 /**
  * Display modal for a web surface (docs/specs/dor-browser.md → "Display Modal
  * And Render Swaps"). Opened from the header's far-left chip, it is the
@@ -49,6 +51,8 @@ const DEVICES = [
   'Galaxy S25',
 ] as const;
 
+const PLAYWRIGHT_DEVICES = ['iPhone 15', 'iPhone 16', 'iPhone 16 Pro', 'iPhone 17', 'iPad (gen 11)', 'iPad Pro 11', 'Pixel 9', 'Galaxy S24'];
+
 type Target = 'sync' | 'device' | 'custom';
 
 export function AgentBrowserScreenModal({
@@ -90,7 +94,7 @@ export function AgentBrowserScreenModal({
   const canPopOut = controller.canPopOut ?? false;
   // Only the screencast backend has a Dormouse-settable viewport; pop-out is a
   // native OS window and embed renders at the pane size, so both grey it out.
-  const viewportDisabled = renderMode !== 'ab-screencast';
+  const viewportDisabled = !isScreencast(renderMode);
   // Whether Apply changes the render backend (vs only tweaking the current
   // screencast's viewport). A swap is gated on whether its option is shown, not
   // on the viewport-drive capability below.
@@ -127,7 +131,7 @@ export function AgentBrowserScreenModal({
       // A mode swap; the viewport sub-controls don't apply to the outgoing
       // surface (and are inert on embed/popout controllers anyway).
       controller.actions.setRenderMode?.(renderMode);
-    } else if (renderMode === 'ab-screencast') {
+    } else if (isScreencast(renderMode)) {
       if (target === 'sync') controller.actions.engageSync();
       else if (target === 'device') controller.actions.applyDevice(device);
       else controller.actions.applyViewport(Number(customW), Number(customH), Number(customDpi));
@@ -187,7 +191,7 @@ export function AgentBrowserScreenModal({
               className="rounded border border-border bg-app-bg px-1.5 py-1 font-mono text-foreground outline-none focus:border-focus-ring"
             >
               <option value="">none</option>
-              {DEVICES.map((name) => (
+              {(renderMode.startsWith('pw-') ? PLAYWRIGHT_DEVICES : DEVICES).map((name) => (
                 <option key={name} value={name}>{name}</option>
               ))}
             </select>
@@ -220,29 +224,24 @@ export function AgentBrowserScreenModal({
 
       {canSwapRender ? (
         <div className="mt-4 flex flex-col gap-3">
-          {/* Screencast owns the robot capability glyph; its nested resolution
-              modes append the presentation glyph. The controls grey out for
-              the other render modes. */}
-          <RenderOption
-            checked={renderMode === 'ab-screencast'}
-            onSelect={() => setRenderMode('ab-screencast')}
-            icon={<AgentRobotIcon size={14} className="shrink-0 text-muted" />}
-            label="agent-browser screencast"
-            features={[[true, 'agents can read/write'], [true, 'any URL'], [false, 'laggy for humans']]}
-          >
-            <div className="ml-6 mt-2">{viewportControls}</div>
-          </RenderOption>
-
-          {canPopOut && (
-            <RenderOption
-              checked={renderMode === 'ab-popout'}
-              onSelect={() => setRenderMode('ab-popout')}
-              icon={<BrowserDisplayIcon mode="ab-popout" size={14} className="text-muted" />}
-              label={BROWSER_DISPLAY_LABEL['ab-popout']}
-              features={[[true, 'agents can read/write'], [true, 'any URL'], [true, 'native human experience']]}
-            />
-          )}
-
+          {(['agent-browser', 'playwright'] as const).map(provider => {
+            const available = provider === 'agent-browser' ? !!getPlatformOrNull()?.agentBrowserOpen : !!getPlatformOrNull()?.playwright;
+            if (!available && provider === 'playwright') return null;
+            const screencast = automationMode(provider, false);
+            const popout = automationMode(provider, true);
+            const label = provider === 'playwright' ? 'Playwright' : 'agent-browser';
+            return <div key={provider} className="flex flex-col gap-3">
+              <RenderOption checked={renderMode === screencast} onSelect={() => setRenderMode(screencast)}
+                icon={<AgentRobotIcon size={14} className="shrink-0 text-muted" />} label={`${label} screencast`}
+                features={[[true, 'agents can read/write'], [true, 'any URL'], [false, 'laggy for humans']]}>
+                {renderMode === screencast && <div className="ml-6 mt-2">{viewportControls}</div>}
+              </RenderOption>
+              {(provider === 'playwright' ? available : canPopOut) && <RenderOption
+                checked={renderMode === popout} onSelect={() => setRenderMode(popout)}
+                icon={<BrowserDisplayIcon mode={popout as 'ab-popout' | 'pw-popout'} size={14} className="text-muted" />}
+                label={`${label} popout`} features={[[true, 'agents can read/write'], [true, 'any URL'], [true, 'native human experience']]} />}
+            </div>;
+          })}
           <RenderOption
             checked={renderMode === 'iframe'}
             onSelect={() => setRenderMode('iframe')}
@@ -258,7 +257,7 @@ export function AgentBrowserScreenModal({
 
       {!hostCapable && !viewportDisabled && !switchingMode && (
         <p className="mt-3 text-xs text-muted">
-          This host can't drive the browser viewport; run <span className="font-mono">dor ab set …</span> from a
+          This host can't drive the browser viewport; run <span className="font-mono">{currentMode.startsWith('pw-') ? 'dor pw resize …' : 'dor ab set …'}</span> from a
           terminal instead.
         </p>
       )}

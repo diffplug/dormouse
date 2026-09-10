@@ -1,3 +1,4 @@
+import type { PlaywrightRequest, PlaywrightResult } from '../../lib/src/lib/platform/browser-automation';
 import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../../lib/src/lib/terminal-context-types';
 import { invoke as rawInvoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -349,6 +350,16 @@ export class TauriAdapter implements PlatformAdapter {
   // getAgentBrowserStreamUrl here: the agent-browser stream server accepts the
   // tauri://localhost origin, so the panel connects directly to
   // ws://127.0.0.1:<port> via its built-in fallback when the method is absent. ---
+
+  async playwright(request: PlaywrightRequest): Promise<PlaywrightResult> {
+    try {
+      if (request.op === 'screenshot') {
+        const buffer = await rawInvoke<ArrayBuffer>('playwright_screenshot', { request });
+        return { ok: true, bytes: new Uint8Array(buffer), mime: request.format === 'png' ? 'image/png' : 'image/jpeg' };
+      }
+      return await rawInvoke<PlaywrightResult>('playwright_request', { request });
+    } catch (error) { return { ok: false, error: String(error) }; }
+  }
 
   async agentBrowserCommand(session: string, args: string[], binaryPath?: string): Promise<AgentBrowserCommandResult> {
     try {

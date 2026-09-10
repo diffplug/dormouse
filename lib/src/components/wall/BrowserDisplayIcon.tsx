@@ -8,6 +8,9 @@ import {
 import type { BrowserDisplayMode } from './agent-browser-screen';
 
 export const BROWSER_DISPLAY_LABEL: Record<BrowserDisplayMode, string> = {
+  'pw-resize': 'Playwright resizes with pane',
+  'pw-fixed': 'Playwright fixed size',
+  'pw-popout': 'Playwright popout',
   'ab-resize': 'agent-browser resizes with pane',
   'ab-fixed': 'agent-browser fixed size',
   'ab-popout': 'agent-browser popout',
@@ -17,6 +20,9 @@ export const BROWSER_DISPLAY_LABEL: Record<BrowserDisplayMode, string> = {
 /** How the human view is presented, keyed like `BROWSER_DISPLAY_LABEL` so a new
  *  mode is a compile error in both rather than a silent fall-through. */
 const PRESENTATION_ICON: Record<BrowserDisplayMode, Icon> = {
+  'pw-resize': FrameCornersIcon,
+  'pw-fixed': PictureInPictureIcon,
+  'pw-popout': ArrowSquareOutIcon,
   'ab-resize': FrameCornersIcon,
   'ab-fixed': PictureInPictureIcon,
   'ab-popout': ArrowSquareOutIcon,

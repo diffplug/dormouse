@@ -1,3 +1,4 @@
+import { playwrightCommand, runPlaywrightCli } from './commands/playwright.js';
 import {
   buildApplication,
   buildRouteMap,
@@ -84,6 +85,7 @@ const COMMANDS = [
   killCommand,
   iframeCommand,
   agentBrowserCommand,
+  playwrightCommand,
   listCommand,
 ] as const satisfies readonly Command[];
 
@@ -98,6 +100,7 @@ const ROUTES = {
   kill: killCommand.command,
   iframe: iframeCommand.command,
   'agent-browser': agentBrowserCommand.command,
+  playwright: playwrightCommand.command,
   list: listCommand.command,
 };
 
@@ -171,6 +174,7 @@ export async function runCli(rawArgv: string[], options: CliOptions = {}): Promi
   // `dor ab <args...>` forwards args verbatim to agent-browser, so they must
   // never reach stricli's flag parser. Only a bare `--help`/`-h` (or
   // `dor help agent-browser`, normalized above) falls through to stricli.
+  if (argv[0] === 'playwright' && !isAgentBrowserHelpInvocation(argv)) return runPlaywrightCli(argv.slice(1), options);
   if (argv[0] === 'agent-browser' && !isAgentBrowserHelpInvocation(argv)) {
     return runAgentBrowserCli(argv.slice(1), options);
   }
@@ -223,6 +227,8 @@ function normalizeVersionAlias(argv: string[]): string[] {
 
 /** `ab` is the documented short alias for `agent-browser`, in any help form. */
 function normalizeAgentBrowserAlias(argv: string[]): string[] {
+  if (argv[0] === 'pw') return ['playwright', ...argv.slice(1)];
+  if (argv[0] === 'help' && argv[1] === 'pw') return ['help', 'playwright', ...argv.slice(2)];
   if (argv[0] === 'ab') return ['agent-browser', ...argv.slice(1)];
   if (argv[0] === 'help' && argv[1] === 'ab') return ['help', 'agent-browser', ...argv.slice(2)];
   return argv;

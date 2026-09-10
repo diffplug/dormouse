@@ -8,7 +8,7 @@ export type IdFormat = 'refs' | 'ids' | 'both';
 export type SplitDirection = 'left' | 'right' | 'up' | 'down' | 'auto';
 export type ResolvedSplitDirection = 'left' | 'right' | 'up' | 'down';
 export type SurfaceKind = 'terminal' | 'browser';
-export type SurfaceRenderMode = 'iframe' | 'ab-screencast' | 'ab-popout';
+export type SurfaceRenderMode = 'iframe' | 'ab-screencast' | 'ab-popout' | 'pw-screencast' | 'pw-popout';
 
 /** What each kind is backed by (`docs/specs/glossary.md` → Panes and Surfaces).
  *  The single source of capability gating; kind switches elsewhere go through
@@ -256,7 +256,14 @@ export interface ResolveAgentBrowserSessionResponse {
   session: string;
 }
 
+export type BrowserAutomationProvider = 'agent-browser' | 'playwright';
+export interface BrowserBinding { session: string; cwd?: string; binaryPath?: string }
+export interface ResolveBrowserRequest { provider: BrowserAutomationProvider; key?: string; surface?: string; proposed?: BrowserBinding }
+export interface ResolveBrowserResponse { binding: BrowserBinding | null }
+
 export interface AgentBrowserSurfaceRequest {
+  provider?: BrowserAutomationProvider;
+  cwd?: string;
   /** Managed workspace-scoped key; absent when attaching via raw --session. */
   key?: string;
   /** Resolved agent-browser session name — the join key for the surface. */
@@ -277,6 +284,8 @@ export interface AgentBrowserSurfaceResponse {
 }
 
 export interface ControlClient {
+  browserSurface?(request: AgentBrowserSurfaceRequest): Promise<AgentBrowserSurfaceResponse>;
+  resolveBrowser?(request: ResolveBrowserRequest): Promise<ResolveBrowserResponse>;
   listSurfaces(request: ListSurfacesRequest): Promise<ListSurfacesResponse>;
   splitSurface(request: SplitSurfaceRequest): Promise<SplitSurfaceResponse>;
   ensureSurface(request: EnsureSurfaceRequest): Promise<EnsureSurfaceResponse>;
@@ -311,6 +320,7 @@ export interface CliOptions {
   readStdin?: () => Promise<string>;
   versionMetadata?: VersionMetadata;
   execAgentBrowser?: AgentBrowserExec;
+  execPlaywright?: (binary: string, args: string[], cwd?: string) => Promise<AgentBrowserExecResult>;
 }
 
 export interface CliResult {

@@ -36,11 +36,11 @@ const CLOSE_GRACE_MS = 250;
  *
  * Never throws: a spawn-level failure resolves as `{ ok: false, error }`.
  */
-export function spawnAndCapture(binary: string, args: readonly string[]): Promise<SpawnCaptureResult> {
+export function spawnAndCapture(binary: string, args: readonly string[], options: { cwd?: string } = {}): Promise<SpawnCaptureResult> {
   return new Promise((resolve) => {
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(binary, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+      child = spawn(binary, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, cwd: options.cwd });
     } catch (error) {
       // Invalid argv (for example a NUL in an eval string) throws before a child
       // exists; preserve the same result contract as an asynchronous ENOENT.

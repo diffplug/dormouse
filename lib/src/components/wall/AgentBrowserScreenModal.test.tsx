@@ -4,6 +4,8 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { FakePtyAdapter, setPlatform } from '../../lib/platform';
+import type { PlatformAdapter } from '../../lib/platform/types';
 import { AgentBrowserScreenModal } from './AgentBrowserScreenModal';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
 import { registerStubScreen, STUB_SCREEN } from './wall-test-utils';
@@ -14,6 +16,7 @@ let container: HTMLDivElement;
 let root: Root;
 
 beforeEach(() => {
+  setPlatform(new FakePtyAdapter());
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -22,6 +25,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  setPlatform(new FakePtyAdapter());
 });
 
 describe('AgentBrowserScreenModal', () => {
@@ -61,6 +65,23 @@ describe('AgentBrowserScreenModal', () => {
       expect(icon.getAttribute('height')).toBe('14');
     }
 
+    registration.dispose();
+  });
+
+  it('offers Playwright with its own device registry and dispatches the selected provider', () => {
+    const platform: PlatformAdapter = new FakePtyAdapter();
+    platform.playwright = async () => ({ ok: true });
+    setPlatform(platform);
+    const registration = registerStubScreen('playwright', { snapshot: { ...STUB_SCREEN, renderMode: 'pw-screencast' } });
+    const controller = getAgentBrowserScreenController('playwright')!;
+    act(() => root.render(<AgentBrowserScreenModal controller={controller} label="surface:4" onClose={() => {}} />));
+    expect(container.textContent).toContain('Playwright screencast');
+    expect(container.textContent).toContain('iPad Pro 11');
+    expect(container.textContent).not.toContain('Galaxy S25');
+    const popout = [...container.querySelectorAll('label')].find(label => label.textContent === 'Playwright popout')!;
+    act(() => popout.querySelector<HTMLInputElement>('input')!.click());
+    act(() => [...container.querySelectorAll('button')].find(button => button.textContent === 'Apply')!.click());
+    expect(controller.actions.setRenderMode).toHaveBeenCalledWith('pw-popout');
     registration.dispose();
   });
 

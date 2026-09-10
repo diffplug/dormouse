@@ -1,3 +1,4 @@
+import { runPlaywrightRequest } from './agent-browser-host';
 import * as vscode from 'vscode';
 import * as ptyManager from './pty-manager';
 import { AlertManager, type AwaitHandle, type AwaitOutcome } from '../../lib/src/lib/alert-manager';
@@ -648,6 +649,9 @@ export function attachRouter(
         if (ALLOWED_WORKBENCH_COMMANDS.has(msg.command)) {
           void vscode.commands.executeCommand(msg.command);
         }
+        break;
+      case 'playwright:request':
+        runPlaywrightRequest(msg.request).then(result => post({ type: 'playwright:result', requestId: msg.requestId, result } satisfies ExtensionMessage));
         break;
       case 'agentBrowser:command':
         runAgentBrowserCommand(

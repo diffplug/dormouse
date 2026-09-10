@@ -1,11 +1,12 @@
+import { automationProvider, automationMode, isPopout, browserPlatform, browserSessionKey } from './browser-automation';
 /**
  * Surface-scoped browser lifecycle; see docs/specs/dor-browser.md →
  * "Agent-Browser Connection". The registry survives panel unmount and is
  * disposed by Wall on kill/render swap. Disposal releases client resources
  * only; Wall owns daemon teardown.
  */
-import { getPlatform } from '../../lib/platform';
-import { isAllowedAgentBrowserBinary } from '../../lib/agent-browser-binary';
+import type { PlatformAdapter } from '../../lib/platform/types';
+import { isAllowedAgentBrowserBinary, isAllowedPlaywrightBinary } from '../../lib/agent-browser-binary';
 import { readTextFromClipboard } from '../../lib/clipboard';
 import { isAbDebugLogsEnabled } from '../../lib/feature-flags';
 import {
@@ -119,6 +120,7 @@ export type KeyLike = {
 export interface AgentBrowserSurfaceParams {
   surfaceType?: string;
   renderMode?: RenderMode;
+  cwd?: string;
   session?: string;
   key?: string;
   wsPort?: number;
@@ -136,8 +138,8 @@ export interface AgentBrowserSurfaceParams {
  * (`lib/src/host/agent-browser-host.ts`). A refused path simply falls back to
  * the host's own resolution.
  */
-function allowedBinaryPath(candidate: unknown): string | undefined {
-  return isAllowedAgentBrowserBinary(candidate) ? candidate : undefined;
+function allowedBinaryPath(candidate: unknown, provider = 'agent-browser'): string | undefined {
+  return (provider === 'playwright' ? isAllowedPlaywrightBinary(candidate) : isAllowedAgentBrowserBinary(candidate)) ? candidate as string : undefined;
 }
 
 /** The live DOM bindings a mounted view lends the controller. `attachView`
@@ -152,10 +154,10 @@ export interface AgentBrowserViewSink {
   updateParameters(params: Record<string, unknown>): void;
   /** Set the persisted panel title (door labels / session save). */
   setTitle(title: string): void;
-  /** Ask the view to swap this surface to the iframe renderer. The ≥2-tab
+  /** Ask the view to swap to iframe or the other automation provider. The ≥2-tab
    *  typed-confirm gate and the Wall's `onSwapRenderMode` are view concerns; the
    *  view reads tabs from the snapshot and decides. */
-  requestIframeSwap(): void;
+  requestRenderSwap(mode?: RenderMode): void;
 }
 
 /** The single view-facing snapshot, consumed via `useSyncExternalStore`. Only
@@ -179,6 +181,10 @@ const EMPTY_TABS: StreamTab[] = [];
 
 export class AgentBrowserSurfaceController {
   readonly id: string;
+  private readonly provider: 'agent-browser' | 'playwright';
+  private cwd?: string;
+  private get platform() { return browserPlatform(automationMode(this.provider, this.poppedOut), this.cwd); }
+  private sessionKey(session: string) { return browserSessionKey(session, automationMode(this.provider, false), this.cwd); }
 
   // --- params (mirrors of the persisted blob) ---
   private session: string | undefined;
@@ -310,8 +316,10 @@ export class AgentBrowserSurfaceController {
 
   constructor(id: string, params: AgentBrowserSurfaceParams) {
     this.id = id;
+    this.provider = automationProvider(params.renderMode);
+    this.cwd = params.cwd;
     this.session = params.session;
-    this.binaryPath = allowedBinaryPath(params.binaryPath);
+    this.binaryPath = allowedBinaryPath(params.binaryPath, this.provider);
     this.wsPort = params.wsPort;
     this.streamPort = params.wsPort;
     this.paramsUrl = params.url;
@@ -320,7 +328,7 @@ export class AgentBrowserSurfaceController {
     this.latestRestorableUrl = isRestorableUrl(params.url) ? params.url : undefined;
     // poppedOut is derived from the canonical renderMode; an unset mode (a direct
     // mount in tests) is not popped out.
-    this.poppedOut = params.renderMode === 'ab-popout';
+    this.poppedOut = isPopout(params.renderMode);
     // A fresh surface auto-engages sync (no persisted flag); a re-attached one
     // restores whatever was persisted into the layout blob.
     this.syncEngaged = params.syncEngaged ?? true;
@@ -352,8 +360,8 @@ export class AgentBrowserSurfaceController {
         // agent-browser → iframe is a render swap handled by the Wall (the view
         // owns the ≥2-tab confirm gate + onSwapRenderMode);
         // ab-screencast ↔ ab-popout relaunches this same session, in-controller.
-        if (mode === 'iframe') this.sink?.requestIframeSwap();
-        else if (mode === 'ab-popout') this.popOut();
+        if (mode === 'iframe' || automationProvider(mode) !== this.provider) this.sink?.requestRenderSwap(mode);
+        else if (isPopout(mode)) this.popOut();
         else if (this.poppedOut) this.popIn(); // ab-popout → ab-screencast
       },
     };
@@ -419,7 +427,7 @@ export class AgentBrowserSurfaceController {
     this.started = true;
     // This surface owns its session again — clear any teardown mark a prior
     // surface (re-using the same managed name) left behind, so auto-revert works.
-    if (this.session) clearAgentBrowserSessionClosed(this.session);
+    if (this.session) clearAgentBrowserSessionClosed(this.sessionKey(this.session));
     // Display-scale (DPR) changes don't resize the pane, so ResizeObserver misses
     // them; a window resize is the available signal.
     window.addEventListener('resize', this.onWindowResize);
@@ -428,8 +436,8 @@ export class AgentBrowserSurfaceController {
       actions: this.screenActions,
       chrome: this.chrome,
       chromeActions: this.chromeActions,
-      hostCapable: !!getPlatform().agentBrowserCommand,
-      canPopOut: !!getPlatform().agentBrowserPopOut,
+      hostCapable: !!this.platform.agentBrowserCommand,
+      canPopOut: !!this.platform.agentBrowserPopOut,
     });
     this.lastPublishedScreen = null;
     this.publishScreen();
@@ -558,12 +566,13 @@ export class AgentBrowserSurfaceController {
     let sessionChanged = false;
     let binaryPathChanged = false;
     let portChanged = false;
+    this.cwd = params.cwd ?? this.cwd;
     if (params.session !== this.session) {
       this.session = params.session;
-      if (params.session) clearAgentBrowserSessionClosed(params.session);
+      if (params.session) clearAgentBrowserSessionClosed(this.sessionKey(params.session));
       sessionChanged = true;
     }
-    const nextBinaryPath = allowedBinaryPath(params.binaryPath);
+    const nextBinaryPath = allowedBinaryPath(params.binaryPath, this.provider);
     if (nextBinaryPath !== this.binaryPath) {
       this.binaryPath = nextBinaryPath;
       binaryPathChanged = true;
@@ -596,9 +605,12 @@ export class AgentBrowserSurfaceController {
       this.recomputeChrome();
     }
     if (params.syncEngaged !== undefined) this.paramsSyncEngaged = params.syncEngaged;
-    // renderMode is deliberately NOT reacted to: the controller owns poppedOut
-    // (seeded once at construction, then driven only by popOut/popIn). The
-    // param is a persistence echo of the controller's own writes.
+    // Native Playwright open can change headed mode outside the Display modal.
+    if (this.provider === 'playwright' && !this.relaunching && params.renderMode) {
+      if (isPopout(params.renderMode) !== this.poppedOut) this.headedConnected = false;
+      this.setPoppedOut(isPopout(params.renderMode));
+    }
+    // For agent-browser, renderMode only echoes the controller-owned popOut/popIn state.
   }
 
   setVisible(visible: boolean): void {
@@ -683,9 +695,10 @@ export class AgentBrowserSurfaceController {
     // reconnect always re-creates it — a disposed loop would silently drop every
     // frame pulse.
     const screenshotLoop = createScreenshotLoop({
+      getPlatform: () => this.platform,
       getSession: () => this.session,
       getBinaryPath: () => this.binaryPath,
-      isCapable: () => !!getPlatform().agentBrowserScreenshot && !!this.session,
+      isCapable: () => !!this.platform.agentBrowserScreenshot && !!this.session,
       draw: this.drawBitmap,
       // A re-attach bumps drawGeneration so a fresh (blank) canvas repaints even
       // when the capture bytes are identical to the last displayed frame.
@@ -698,8 +711,8 @@ export class AgentBrowserSurfaceController {
       session,
       streamPort,
       binaryPath: this.binaryPath,
-      getStreamUrl: async (port) => (await getPlatform().getAgentBrowserStreamUrl?.(port)) ?? undefined,
-      runCommand: (targetSession, args, targetBinaryPath) => getPlatform().agentBrowserCommand?.(targetSession, args, targetBinaryPath)
+      getStreamUrl: async (port) => (await this.platform.getAgentBrowserStreamUrl?.(port)) ?? undefined,
+      runCommand: (targetSession, args, targetBinaryPath) => this.platform.agentBrowserCommand?.(targetSession, args, targetBinaryPath)
         ?? Promise.resolve({ exitCode: 1, stdout: '', stderr: 'agent-browser commands unavailable' }),
       canSelectTabs: () => !this.poppedOut && !this.relaunching,
       wantFrameData: () => this.wantsProvisionalFrame(),
@@ -817,7 +830,7 @@ export class AgentBrowserSurfaceController {
   }
 
   private wantsProvisionalFrame(): boolean {
-    return !this.hasFrame || !getPlatform().agentBrowserScreenshot || performance.now() <= this.provisionalUntil;
+    return !this.hasFrame || !this.platform.agentBrowserScreenshot || performance.now() <= this.provisionalUntil;
   }
 
   // agent-browser's stream publishes the initial headed tab list but not every
@@ -825,7 +838,8 @@ export class AgentBrowserSurfaceController {
   // DevTools Protocol target/page events so the Dormouse URL/header tracks the
   // headed window without polling.
   private reconcileCdp(): void {
-    const platform = getPlatform();
+    if (this.provider === 'playwright') return; // The host stream also observes headed navigation.
+    const platform = this.platform;
     // `get cdp-url` is a daemon command: issued mid-relaunch it lands on the
     // daemon being killed, or spawns a competing one in the gap before the
     // headed relaunch — which then reattaches headless ("--headed ignored").
@@ -841,7 +855,7 @@ export class AgentBrowserSurfaceController {
 
   private startCdpObserver(
     session: string,
-    runCommand: NonNullable<ReturnType<typeof getPlatform>['agentBrowserCommand']>,
+    runCommand: NonNullable<PlatformAdapter['agentBrowserCommand']>,
   ): () => void {
     let disposed = false;
     let ws: WebSocket | null = null;
@@ -948,7 +962,7 @@ export class AgentBrowserSurfaceController {
       return;
     }
     if (this.streamPort && !this.connectionLost && this.status?.connected !== false) return;
-    const platform = getPlatform();
+    const platform = this.platform;
     if (!platform.agentBrowserStreamStatus) return;
     platform.agentBrowserStreamStatus(session, this.binaryPath).then((res) => {
       if (gen !== this.recoveryGen || this.disposed) return;
@@ -983,7 +997,7 @@ export class AgentBrowserSurfaceController {
     }
 
     const currentSession = this.session;
-    const platform = getPlatform();
+    const platform = this.platform;
     if (!currentSession || !platform.agentBrowserStreamStatus) {
       this.bumpRecovery();
       return Promise.resolve(false);
@@ -1192,7 +1206,7 @@ export class AgentBrowserSurfaceController {
     // DPR can't be read back from frames, so report the density we'd sync to.
     const viewport = { w: device.width, h: device.height, dpr: displayDpr };
     const state: ScreenState = dimsMatch(viewport, paneCss) ? 'SYNCED' : 'SCALED';
-    const renderMode: RenderMode = this.poppedOut ? 'ab-popout' : 'ab-screencast';
+    const renderMode = automationMode(this.provider, this.poppedOut);
     return { state, viewport, paneCss, displayDpr, syncEngaged: this.syncEngaged, renderMode };
   }
 
@@ -1230,7 +1244,7 @@ export class AgentBrowserSurfaceController {
     // Hosts without agentBrowserCommand (e.g. the web demo) can't drive the
     // viewport; stay silent rather than warn on every resize — the surface just
     // reads SCALED.
-    if (!getPlatform().agentBrowserCommand) return;
+    if (!this.platform.agentBrowserCommand) return;
     const el = this.sink?.viewport;
     if (!el) return;
     const rect = el.getBoundingClientRect();
@@ -1272,8 +1286,8 @@ export class AgentBrowserSurfaceController {
   // --- relaunch: pop-out / pop-in / bring-to-front + auto-revert ---
 
   private closeIfSessionMarkedClosed(targetSession: string | null | undefined = this.session): boolean {
-    if (!targetSession || !isAgentBrowserSessionClosed(targetSession)) return false;
-    getPlatform().agentBrowserCommand?.(targetSession, ['close'], this.binaryPath).catch(() => {});
+    if (!targetSession || !isAgentBrowserSessionClosed(this.sessionKey(targetSession))) return false;
+    this.platform.agentBrowserCommand?.(targetSession, ['close'], this.binaryPath).catch(() => {});
     return true;
   }
 
@@ -1292,7 +1306,7 @@ export class AgentBrowserSurfaceController {
   }
 
   private popOut(): void {
-    const platform = getPlatform();
+    const platform = this.platform;
     const session = this.session;
     if (!session || !platform.agentBrowserPopOut) return;
     // One relaunch at a time: a second pop-out/pop-in while the host is mid
@@ -1302,12 +1316,12 @@ export class AgentBrowserSurfaceController {
     this.headedConnected = false;
     this.setRelaunching(true);
     this.setPoppedOut(true);
-    this.writeParams({ renderMode: 'ab-popout' });
+    this.writeParams({ renderMode: automationMode(this.provider, true) });
     // Pop-out failed: revert to in-pane unless the stream came back live anyway.
     const revertUnlessLive = () => this.reconcileStreamPort().then((live) => {
       if (!live) {
         this.setPoppedOut(false);
-        this.writeParams({ renderMode: 'ab-screencast' });
+        this.writeParams({ renderMode: automationMode(this.provider, false) });
       }
       this.setRelaunching(false);
     });
@@ -1339,8 +1353,8 @@ export class AgentBrowserSurfaceController {
     if (this.closeIfSessionMarkedClosed(session)) return;
     this.setRelaunching(true);
     this.setPoppedOut(false);
-    this.writeParams({ renderMode: 'ab-screencast' });
-    const platform = getPlatform();
+    this.writeParams({ renderMode: automationMode(this.provider, false) });
+    const platform = this.platform;
     if (!platform.agentBrowserPopIn) { this.setRelaunching(false); return; }
     // Connect to the fresh port the host returns; the current (headed) port is
     // about to die with its daemon.
@@ -1360,7 +1374,7 @@ export class AgentBrowserSurfaceController {
   bringToFront(): void {
     const session = this.session;
     if (!session) return;
-    getPlatform().agentBrowserBringToFront?.(session, this.binaryPath)?.catch(() => {});
+    this.platform.agentBrowserBringToFront?.(session, this.binaryPath)?.catch(() => {});
   }
 
   // Auto-revert: once the headed stream has connected, a later disconnect means
@@ -1374,7 +1388,7 @@ export class AgentBrowserSurfaceController {
     if (this.relaunching) return;
     if (this.status?.connected === true) this.headedConnected = true;
     else if (this.headedConnected && (this.status?.connected === false || this.connectionLost)) {
-      if (this.session && isAgentBrowserSessionClosed(this.session)) return;
+      if (this.session && isAgentBrowserSessionClosed(this.sessionKey(this.session))) return;
       this.popIn();
     }
   }
@@ -1386,7 +1400,7 @@ export class AgentBrowserSurfaceController {
     if (!session) return;
     // Call through the adapter instance — pulling the method into a bare variable
     // would detach `this` and break its internal `requestResponse`.
-    const platform = getPlatform();
+    const platform = this.platform;
     if (!platform.agentBrowserCommand) {
       console.warn('[agent-browser] this host cannot run agent-browser commands; tab actions are unavailable');
       return;
@@ -1470,7 +1484,7 @@ export class AgentBrowserSurfaceController {
     if (mod && !e.altKey && !e.shiftKey) {
       const op = EDIT_OPS[e.key.toLowerCase() as keyof typeof EDIT_OPS];
       // Call through the adapter instance — detaching the method drops `this`.
-      const platform = getPlatform();
+      const platform = this.platform;
       const session = this.session;
       if (op && platform.agentBrowserEdit && session) {
         platform.agentBrowserEdit(session, op, this.binaryPath).then((r) => {

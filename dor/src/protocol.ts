@@ -23,6 +23,8 @@ export const SURFACE_CONTROL_METHODS = {
   kill: 'surface.kill',
   iframe: 'surface.iframe',
   agentBrowser: 'surface.agentBrowser',
+  browser: 'surface.browser',
+  resolveBrowser: 'surface.resolveBrowser',
   resolveOpen: 'surface.resolveOpen',
   resolveAgentBrowser: 'surface.resolveAgentBrowser',
 } as const;

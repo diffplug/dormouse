@@ -1,3 +1,4 @@
+const { createPlaywrightHost } = require('./playwright-host.cjs');
 /**
  * Tauri sidecar entry point — stdio JSON-lines transport over pty-core.
  *
@@ -24,6 +25,10 @@ const { createAgentBrowserHost } = require('./agent-browser-host.cjs');
 const { createSidecarBurrow } = require('./burrow.cjs');
 
 const agentBrowser = createAgentBrowserHost({
+  writeClipboardText: (text) => clipboard.writeClipboardText(text),
+  log: (m) => console.error(m),
+});
+const playwright = createPlaywrightHost({
   writeClipboardText: (text) => clipboard.writeClipboardText(text),
   log: (m) => console.error(m),
 });
@@ -151,6 +156,9 @@ function handleLine(line) {
           }),
         }));
         break;
+      case 'playwright:request':
+        respondAsync('agentBrowser:result', data.requestId, async () => ({ result: await playwright.requestFile(data.request) }));
+        break;
       case 'agentBrowser:command':
         respondAsync('agentBrowser:result', data.requestId, async () => ({
           result: await agentBrowser.command(data.session, data.args, data.binaryPath),
@@ -225,7 +233,7 @@ async function shutdown() {
   // can't wedge the exit; mirrors the VS Code host's deactivate().
   try {
     await Promise.race([
-      agentBrowser.closePoppedOut(),
+      Promise.allSettled([agentBrowser.closePoppedOut(), playwright.close()]),
       new Promise((resolve) => setTimeout(resolve, 1500).unref?.()),
     ]);
   } catch {}

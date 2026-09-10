@@ -1,3 +1,4 @@
+import type { ResolveBrowserRequest, ResolveBrowserResponse } from './commands/types.js';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createConnection } from 'node:net';
 import type {
@@ -120,6 +121,13 @@ export class SocketControlClient implements ControlClient {
 
   iframeSurface(request: IframeSurfaceRequest): Promise<IframeSurfaceResponse> {
     return this.request<IframeSurfaceResponse>(SURFACE_CONTROL_METHODS.iframe, request);
+  }
+
+  browserSurface(request: AgentBrowserSurfaceRequest): Promise<AgentBrowserSurfaceResponse> {
+    return this.request<AgentBrowserSurfaceResponse>(SURFACE_CONTROL_METHODS.browser, request);
+  }
+  resolveBrowser(request: ResolveBrowserRequest): Promise<ResolveBrowserResponse> {
+    return this.request<ResolveBrowserResponse>(SURFACE_CONTROL_METHODS.resolveBrowser, request);
   }
 
   agentBrowserSurface(request: AgentBrowserSurfaceRequest): Promise<AgentBrowserSurfaceResponse> {

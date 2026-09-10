@@ -1,3 +1,4 @@
+import { automationProvider, browserPlatform, browserSessionKey, isPopout } from './wall/browser-automation';
 import { TerminalContextContext, type TerminalContextOpenOptions, type TerminalContextState } from './wall/wall-context';
 import { TERMINAL_CONTEXT_EXIT_MS } from './design';
 import { motionIsInstant } from '../lib/ui-geometry';
@@ -21,7 +22,7 @@ const RemotePairingModalHost = lazy(() =>
 );
 import { getAgentBrowserScreenController } from './wall/agent-browser-screen';
 import { markAgentBrowserSessionClosed } from './wall/agent-browser-sessions';
-import { isAllowedAgentBrowserBinary } from '../lib/agent-browser-binary';
+import { isAllowedAgentBrowserBinary, isAllowedPlaywrightBinary } from '../lib/agent-browser-binary';
 import { disposeAgentBrowserSurfaceController } from './wall/agent-browser-surface-controller';
 import { KILL_CONFIRM_MS, KILL_SHAKE_MS, KillConfirmOverlay, randomKillChar, type ConfirmKill } from './KillConfirm';
 import { NotepadArchiveFailureModal, type NotepadArchiveFailure } from './NotepadArchiveFailure';
@@ -197,11 +198,12 @@ function closeAgentBrowserSession(params: unknown): void {
   const binaryPath = (params as { binaryPath?: unknown }).binaryPath;
   // Mark before issuing the close so a popped-out surface's auto-revert sees
   // the impending teardown and doesn't relaunch the session we're killing.
-  markAgentBrowserSessionClosed(session);
-  getPlatform().agentBrowserCommand?.(
+  const p = params as { renderMode?: string; cwd?: string };
+  markAgentBrowserSessionClosed(browserSessionKey(session, p.renderMode, p.cwd));
+  browserPlatform(p.renderMode, p.cwd).agentBrowserCommand?.(
     session,
     ['close'],
-    isAllowedAgentBrowserBinary(binaryPath) ? binaryPath : undefined,
+    (automationProvider(p.renderMode) === 'playwright' ? isAllowedPlaywrightBinary(binaryPath) : isAllowedAgentBrowserBinary(binaryPath)) ? binaryPath as string : undefined,
   ).catch(() => {});
 }
 
@@ -1518,7 +1520,7 @@ export function Wall({
 
       // agent-browser → iframe: frame the active tab's URL, then the replace
       // closes the now-unneeded headless browser. Webview-only.
-      if ((currentRenderMode === 'ab-screencast' || currentRenderMode === 'ab-popout') && mode === 'iframe') {
+      if (currentRenderMode !== 'iframe' && mode === 'iframe') {
         // Canonical params.url (mirrored from the chrome snapshot) first; fall
         // back to the live snapshot for a surface that hasn't reported a tab yet.
         const url = (typeof params?.url === 'string' && params.url) || getAgentBrowserScreenController(id)?.chrome().url;
@@ -1543,7 +1545,7 @@ export function Wall({
       // what it is waiting for, and the daemon hands it `{session, wsPort,
       // binaryPath}` as one params refresh. Same shape as the pane context menu's
       // connect (docs/specs/dor-browser.md → "Pane Context Menu Connect").
-      if (currentRenderMode === 'iframe' && (mode === 'ab-screencast' || mode === 'ab-popout')) {
+      if (mode !== 'iframe' && (currentRenderMode === 'iframe' || automationProvider(currentRenderMode) !== automationProvider(mode))) {
         const chromeUrl = getAgentBrowserScreenController(id)?.chrome().url;
         const rawUrl = (typeof chromeUrl === 'string' && chromeUrl)
           || (typeof params?.url === 'string' ? params.url : '');
@@ -1551,7 +1553,8 @@ export function Wall({
         // non-http(s) source but still holds it, and this path would hand it to
         // a real Chromium tab — which `dor ab open` refuses at the CLI
         // (`normalizeConcreteOpenUrl`). Same guard, so both sinks agree.
-        const platform = getPlatform();
+        const cwd = typeof params?.cwd === 'string' ? params.cwd : undefined;
+        const platform = browserPlatform(mode, cwd);
         // `browserSurfaceUrl('')` is already null (normalizeNavUrl returns ''
         // for empty input), so one branch covers both dead ends — and warning
         // matches the ab-* -> iframe branch above, whose own no-URL refusal is
@@ -1563,10 +1566,10 @@ export function Wall({
           return;
         }
         if (!platform.agentBrowserOpen) return;
-        const headed = mode === 'ab-popout';
+        const headed = isPopout(mode);
         const title = hostPathDisplay(url, true);
         const eagerId = replaceSurface(id, {
-          params: { surfaceType: 'browser', renderMode: mode, url, syncEngaged: true },
+          params: { surfaceType: 'browser', renderMode: mode, url, cwd, syncEngaged: true },
           title,
         });
         if (!eagerId) return;
@@ -1574,31 +1577,40 @@ export function Wall({
         const eagerSurfaceExists = () => (
           !!lath.getMeta(eagerId) && (lath.store.has(eagerId) || eagerDoorExists())
         );
-        const restoreIframe = () => {
+        const restorePrevious = () => {
           if (lath.isDying(eagerId)) return;
+          const previousParams = { ...params, surfaceType: 'browser', renderMode: currentRenderMode, url, session: undefined, wsPort: undefined };
+          let restored: string | undefined;
           if (lath.store.has(eagerId)) {
-            replaceSurface(eagerId, { params: { surfaceType: 'browser', renderMode: 'iframe', url }, title });
-            return;
+            restored = replaceSurface(eagerId, { params: previousParams, title }) ?? undefined;
+          } else if (eagerDoorExists() && lath.getMeta(eagerId)) {
+            disposeAgentBrowserSurfaceController(eagerId);
+            lath.store.updateParams(eagerId, previousParams);
+            lath.store.setTitle(eagerId, title);
+            restored = eagerId;
           }
-          // A minimized Surface is outside the visible tree but its Door + meta
-          // are still authoritative. Swap the parked body back in place so the
-          // Door does not remain a session-less "Connecting..." pane.
-          if (!eagerDoorExists() || !lath.getMeta(eagerId)) return;
-          disposeAgentBrowserSurfaceController(eagerId);
-          lath.store.updateParams(eagerId, { surfaceType: 'browser', renderMode: 'iframe', url, syncEngaged: false });
-          lath.store.setTitle(eagerId, title);
+          if (!restored || currentRenderMode === 'iframe') return;
+          const restoredId = restored;
+          const previous = browserPlatform(currentRenderMode, cwd);
+          void previous.agentBrowserOpen?.(url, { headed: isPopout(currentRenderMode) }, typeof params?.binaryPath === 'string' ? params.binaryPath : undefined).then(r => {
+            if (r.ok && r.session && lath.getMeta(restoredId) && !lath.isDying(restoredId)) {
+              updateSurfaceParams(restoredId, { session: r.session, wsPort: r.wsPort, binaryPath: r.binaryPath, cwd: r.cwd ?? cwd, nativeIdentity: r.nativeIdentity });
+            } else if (r.session) closeAgentBrowserSession({ renderMode: currentRenderMode, ...r });
+          }).catch(error => console.warn('[dormouse] could not restore browser provider:', error));
         };
-        platform.agentBrowserOpen(url, { headed }, lastAgentBrowserBinaryPathRef.current).then((res) => {
+        platform.agentBrowserOpen(url, { headed }, automationProvider(mode) === 'agent-browser' ? lastAgentBrowserBinaryPathRef.current : undefined).then((res) => {
           if (!res.ok || !res.session) {
             console.warn(`[dormouse] failed to swap iframe surface '${id}' to agent-browser:`, res.error ?? '(no session)');
             // Nothing came up to bind: give the iframe back if the eager Surface
             // still exists, whether it is visible or minimized meanwhile.
-            restoreIframe();
+            restorePrevious();
             return;
           }
-          if (res.binaryPath) lastAgentBrowserBinaryPathRef.current = res.binaryPath;
+          if (res.binaryPath && automationProvider(mode) === 'agent-browser') lastAgentBrowserBinaryPathRef.current = res.binaryPath;
           const bound = {
             session: res.session,
+            cwd: res.cwd ?? cwd,
+            nativeIdentity: res.nativeIdentity,
             ...(res.wsPort !== undefined ? { wsPort: res.wsPort } : {}),
             ...(res.binaryPath !== undefined ? { binaryPath: res.binaryPath } : {}),
           };
@@ -1612,7 +1624,7 @@ export function Wall({
           updateSurfaceParams(eagerId, bound);
         }).catch((err) => {
           console.warn('[dormouse] failed to swap iframe surface to agent-browser:', err);
-          restoreIframe();
+          restorePrevious();
         });
       }
     },
@@ -1633,9 +1645,11 @@ export function Wall({
   }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, requestKill, replaceSurface, buildDorSurfaces, createContentSurface, surfaceRefForId, updateSurfaceParams, lath, nav]);
   const contextPortLaunches = useRef(new Map<string, Promise<void>>());
   const openContextPort = useCallback(async (id: string, entry: PortUrlEntry, mode: PortMode): Promise<void> => {
-    const platform = getPlatform();
-    if (mode === 'system') { platform.openExternal?.(entry.url); return; }
-    const key = `${id}:${entry.port}:${mode === 'iframe' ? 'iframe' : 'agent'}`;
+    const native = getPlatform();
+    const cwd = getTerminalPaneState(id)?.cwd?.path;
+    const platform = browserPlatform(mode, cwd);
+    if (mode === 'system') { native.openExternal?.(entry.url); return; }
+    const key = `${id}:${entry.port}:${mode === 'iframe' ? 'iframe' : automationProvider(mode)}`;
     const pending = contextPortLaunches.current.get(key);
     if (pending) { await pending; return openContextPort(id, entry, mode); }
     const operation = (async () => {
@@ -1653,17 +1667,17 @@ export function Wall({
       }
       if (mode !== 'iframe' && !platform.agentBrowserOpen) throw new Error('Agent browser is unavailable');
       const created = createContentSurface({ minimized: false, reference, preserveSource: true,
-        params: { surfaceType: 'browser', renderMode: mode, url: entry.url, syncEngaged: true, contextPortKey: key }, title: hostPathDisplay(entry.url, true) });
+        params: { surfaceType: 'browser', renderMode: mode, url: entry.url, cwd, syncEngaged: true, contextPortKey: key }, title: hostPathDisplay(entry.url, true) });
       if (!created.ok) throw new Error(created.message);
       enterTerminalMode(created.value.id);
       if (mode === 'iframe') return;
-      const result = await platform.agentBrowserOpen!(entry.url, { headed: mode === 'ab-popout' }, lastAgentBrowserBinaryPathRef.current);
+      const result = await platform.agentBrowserOpen!(entry.url, { headed: isPopout(mode) }, automationProvider(mode) === 'agent-browser' ? lastAgentBrowserBinaryPathRef.current : undefined);
       if (!result.ok || !result.session) {
         await closeSurface(created.value.id);
         throw new Error(result.error ?? 'Could not open agent browser');
       }
-      if (result.binaryPath) lastAgentBrowserBinaryPathRef.current = result.binaryPath;
-      const binding = { session: result.session, wsPort: result.wsPort, binaryPath: result.binaryPath };
+      if (result.binaryPath && automationProvider(mode) === 'agent-browser') lastAgentBrowserBinaryPathRef.current = result.binaryPath;
+      const binding = { nativeIdentity: result.nativeIdentity, cwd: result.cwd ?? cwd, session: result.session, wsPort: result.wsPort, binaryPath: result.binaryPath };
       if (!lath.getMeta(created.value.id) || lath.isDying(created.value.id)) { closeAgentBrowserSession({ renderMode: mode, ...binding }); return; }
       updateSurfaceParams(created.value.id, binding);
     })();

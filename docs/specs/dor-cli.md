@@ -325,7 +325,7 @@ It picks the style (`cmd` / `posix` / `powershell`) with the same classifier
 clipboard/drop path escaping uses
 ([mouse-and-clipboard.md](mouse-and-clipboard.md) §8.6).
 
-**Every first-party command except the `dor agent-browser` / `dor ab`
+**Every first-party command except the `dor agent-browser` / `dor ab` and `dor playwright` / `dor pw`
 passthrough accepts `--json`**, emitting a stable object with the same handles
 as its text output; single-Surface responses always carry both `surface_id`
 (stable) and `surface_ref` (Workspace-stable short ref). Text output carries the
@@ -348,7 +348,7 @@ renderer. **stricli's default `--help-all`/`-H` integration must stay
 unregistered**: it bypasses those patches and prints raw usage lines
 contradicting what the commands accept, leaving `--help`/`-h` the single
 documented help surface. `dor --version`/`-v` (sole argument only) is rewritten
-to `dor version`, and `ab` to `agent-browser`, before parsing.
+to `dor version`, `ab` to `agent-browser`, and `pw` to `playwright`, before parsing.
 
 The spec keeps the behavior help cannot express:
 
@@ -360,7 +360,7 @@ The spec keeps the behavior help cannot express:
 | `read` | Clean, ANSI-free rendered lines; line limits count rendered lines. |
 | `await` | **Must name `--until quiet\|exit`; never infer it.** Timeout 1–86400 whole seconds, default 600; `alert.md` owns wake semantics. |
 | `kill` | **Must select exactly one confirmation mode.** Conditional text needs four non-whitespace characters and must match `read`; browser Surfaces are killable. |
-| `iframe`, `agent-browser` / `ab` | `dor-browser.md` owns the renderers; see [target resolution](#browser-open-target-resolution) and [addressing](#agent-browser-surface-addressing). The passthrough is intercepted before stricli parses it. |
+| `iframe`, `agent-browser` / `ab`, `playwright` / `pw` | `dor-browser.md` owns the renderers; see [target resolution](#browser-open-target-resolution) and [addressing](#agent-browser-surface-addressing). The passthrough is intercepted before stricli parses it. |
 | `list` | Filters are ANDed client-side; `--port` filters terminals (browser Surfaces never match) and implies the opt-in detail scan, `--ports` only requests it. |
 | `skill` | Prints the bundled skill or installs its bootstrap stub; [Agent Skill](#agent-skill) owns the contract. |
 
@@ -427,6 +427,16 @@ Source of truth: `dor/src/commands/open-target.ts`,
 in `dor/src/protocol.ts`, the `surface.resolveOpen` handler in
 `lib/src/components/wall/use-dor-control.ts`, `listenerUrlsByPort` in
 `lib/src/components/wall/port-url.ts`.
+
+## Playwright Surface Addressing
+
+**Must intercept `dor playwright` / `dor pw` before stricli parses native arguments.** Identity flags are the same mutually exclusive `--key`, `--session`, `--surface` set as agent-browser, with native `-s` accepted for `--session`. `open` and `goto` share Browser Open Target Resolution. All other native arguments, stdout, stderr and exit status pass through; a failed viewer attachment adds a stderr warning without changing command success. Help, install, listing, and close commands never create a Surface.
+
+**Must resolve a managed key or Surface before invoking the CLI**, so commands run in the bound native project cwd and executable. The `surface.resolveBrowser` request and subsequent `surface.browser` binding carry an explicit provider; legacy agent-browser methods retain their contract. Identity scope and lifetime belong to `docs/specs/dor-browser.md` → Playwright Renderer.
+
+**Must pass the bound cwd through `spawnAndCapture`'s optional cwd argument.** Omission preserves inherited cwd for existing callers.
+
+Source of truth: `runPlaywrightCli` in `dor/src/commands/playwright.ts`; `BrowserBinding` in `dor/src/commands/types.ts`; `spawnAndCapture` in `dor-lib-common/src/spawn.ts`. Pinned by `dor/test/playwright.test.mjs`.
 
 ## Agent-Browser Surface Addressing
 

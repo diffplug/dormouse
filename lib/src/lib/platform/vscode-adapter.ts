@@ -1,3 +1,4 @@
+import type { PlaywrightRequest, PlaywrightResult } from './browser-automation';
 import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../terminal-context-types';
 import type { AgentBrowserCommandResult, AgentBrowserEditOp, AgentBrowserEditResult, AgentBrowserOpenResult, AgentBrowserPopResult, AgentBrowserScreenshotResult, AgentBrowserStreamStatusResult, AlertStateDetail, IframeProxyResult, OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, BurrowLink } from './types';
 import { OPEN_PORT_TIMEOUT_MS } from './types';
@@ -390,6 +391,12 @@ export class VSCodeAdapter implements PlatformAdapter {
 
   runWorkbenchCommand(command: VSCodeWorkbenchCommand): void {
     this.vscode.postMessage({ type: 'dormouse:runWorkbenchCommand', command });
+  }
+
+  async playwright(request: PlaywrightRequest): Promise<PlaywrightResult> {
+    return await this.requestResponse<PlaywrightResult>(
+      'playwright:request', 'playwright:result', { request }, msg => msg.result, 40000,
+    ) ?? { ok: false, error: 'Playwright host timed out' };
   }
 
   async agentBrowserCommand(session: string, args: string[], binaryPath?: string): Promise<AgentBrowserCommandResult> {

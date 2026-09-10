@@ -543,6 +543,46 @@ fn agent_browser_forward(
 }
 
 #[tauri::command(async)]
+fn playwright_request(
+    state: tauri::State<'_, SidecarState>,
+    request: JsonValue,
+) -> Result<JsonValue, String> {
+    let response = request_from_sidecar_timeout(
+        &state,
+        "playwright:request",
+        serde_json::json!({ "request": request }),
+        Duration::from_secs(40),
+    )?;
+    Ok(response.get("result").cloned().unwrap_or(JsonValue::Null))
+}
+
+#[tauri::command(async)]
+fn playwright_screenshot(
+    state: tauri::State<'_, SidecarState>,
+    request: JsonValue,
+) -> Result<tauri::ipc::Response, String> {
+    if request.get("op").and_then(JsonValue::as_str) != Some("screenshot") {
+        return Err("Expected screenshot operation".to_string());
+    }
+    let result = playwright_request(state, request)?;
+    let path = result
+        .get("path")
+        .and_then(JsonValue::as_str)
+        .ok_or_else(|| {
+            result
+                .get("error")
+                .and_then(JsonValue::as_str)
+                .unwrap_or("Screenshot failed")
+                .to_string()
+        })?;
+    let bytes = std::fs::read(path);
+    let _ = std::fs::remove_file(path);
+    Ok(tauri::ipc::Response::new(
+        bytes.map_err(|err| err.to_string())?,
+    ))
+}
+
+#[tauri::command(async)]
 fn agent_browser_command(
     state: tauri::State<'_, SidecarState>,
     session: String,
@@ -1915,6 +1955,8 @@ pub fn run() {
             save_notepad_archive,
             reset_notepad_archive,
             agent_browser_command,
+            playwright_request,
+            playwright_screenshot,
             agent_browser_edit,
             agent_browser_screenshot,
             agent_browser_stream_status,

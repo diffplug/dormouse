@@ -26,14 +26,13 @@ function asParams(params: unknown): BrowserParamsLike {
 /** Resolve the canonical render mode; defaults to `iframe` when unset. */
 export function resolveRenderMode(params: unknown): RenderMode {
   const p = asParams(params);
-  return p.renderMode === 'ab-screencast' || p.renderMode === 'ab-popout' ? p.renderMode : 'iframe';
+  return p.renderMode === 'ab-screencast' || p.renderMode === 'ab-popout' || p.renderMode === 'pw-screencast' || p.renderMode === 'pw-popout' ? p.renderMode : 'iframe';
 }
 
-/** Whether params describe an agent-browser-rendered surface (ab-screencast /
- *  ab-popout). */
+/** Whether params describe either automated browser provider. */
 export function isAgentBrowserParams(params: unknown): boolean {
   const p = asParams(params);
-  return p.renderMode === 'ab-screencast' || p.renderMode === 'ab-popout';
+  return p.renderMode === 'ab-screencast' || p.renderMode === 'ab-popout' || p.renderMode === 'pw-screencast' || p.renderMode === 'pw-popout';
 }
 
 /** Whether params describe any browser surface (vs a terminal): the unified
@@ -66,9 +65,9 @@ export function surfaceKindFromParams(params: unknown): SurfaceKind {
   return isBrowserParams(params) ? 'browser' : 'terminal';
 }
 
-/** The agent-browser session an ab-rendered surface is bound to — the join key
+/** The automation session a browser surface is bound to — the join key
  *  of the session↔surface registry — or null when the surface is not
- *  ab-rendered, or is one the context-menu connect created eagerly and the
+ *  automated, or is one the context-menu connect created eagerly and the
  *  daemon has not yet named (`docs/specs/dor-browser.md` → Pane Context Menu
  *  Connect). */
 export function agentBrowserSessionFromParams(params: unknown): string | null {

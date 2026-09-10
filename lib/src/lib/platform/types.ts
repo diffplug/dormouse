@@ -1,3 +1,4 @@
+import type { PlaywrightRequest, PlaywrightResult } from './browser-automation';
 import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../terminal-context-types';
 import type { AlertState, AwaitHandle, AwaitOptions } from '../alert-manager';
 import type { AlertSettings } from '../alert-settings';
@@ -91,6 +92,8 @@ export type { IframeProxyResult };
  *  across VS Code/webview reloads without exposing a generic `stream` exec
  *  channel to the webview. */
 export interface AgentBrowserStreamStatusResult {
+  headed?: boolean;
+  nativeIdentity?: string;
   ok: boolean;
   wsPort?: number;
   error?: string;
@@ -99,6 +102,8 @@ export interface AgentBrowserStreamStatusResult {
 /** Result of spawning a managed agent-browser session for a render swap
  *  (docs/specs/dor-browser.md → "Display Modal And Render Swaps"). */
 export interface AgentBrowserOpenResult {
+  nativeIdentity?: string;
+  cwd?: string;
   ok: boolean;
   /** The resolved/namespaced session name the new surface should bind to. */
   session?: string;
@@ -174,6 +179,7 @@ export interface PtyDataDetail {
 }
 
 export interface PlatformAdapter {
+  playwright?(request: PlaywrightRequest): Promise<PlaywrightResult>;
   // Lifecycle
   init(): Promise<void>;
   shutdown(): void;

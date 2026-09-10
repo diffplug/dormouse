@@ -207,14 +207,14 @@ the comments at `force_windows_gui_subsystem` and `resolve_dor_node_path`.
 
 ## Sidecar lifecycle
 
-Source of truth: `standalone/sidecar/main.js`.
+Source of truth: `standalone/sidecar/main.js`. Browser cleanup is pinned by `standalone/sidecar/shutdown.test.js`.
 
 Shutdown (`sidecar:shutdown` message, stdin EOF, or SIGTERM) is **idempotent and
 ordered**:
 
-1. `agentBrowser.closePoppedOut()` under a 1.5s race — quitting must not orphan a
-   headed Chrome window, and a hung agent-browser must not wedge the exit (as in
-   the VS Code host's `deactivate()`; `docs/specs/dor-browser.md`).
+1. **Must await both browser providers’ cleanup under one 1.5s deadline**
+   (`agentBrowser.closePoppedOut()` and `playwright.close()`);
+   `docs/specs/dor-browser.md` owns their teardown contracts.
 2. Close the dor control socket.
 3. Dispose the Burrow service, dropping the relay socket and settling every
    outstanding ask so nothing waits on a webview that is going away.

@@ -5,16 +5,18 @@ import { useSyncExternalStore } from 'react';
 export type ScreenState = 'SYNCED' | 'SCALED';
 
 /** Canonical renderer values; defaulting belongs to `resolveRenderMode`. */
-export type RenderMode = 'ab-screencast' | 'ab-popout' | 'iframe';
+export type RenderMode = 'ab-screencast' | 'ab-popout' | 'pw-screencast' | 'pw-popout' | 'iframe';
 
 /** Capability-first browser display identity shared by pane chrome, the Display
  *  modal, and minimized Doors. The agent-browser modes always carry the robot;
  *  the second glyph describes where/how the human view is presented. */
-export type BrowserDisplayMode = 'ab-resize' | 'ab-fixed' | 'ab-popout' | 'iframe';
+export type BrowserDisplayMode = 'ab-resize' | 'ab-fixed' | 'ab-popout' | 'pw-resize' | 'pw-fixed' | 'pw-popout' | 'iframe';
 
 export function browserDisplayMode(
   snapshot: Pick<ScreenSnapshot, 'renderMode' | 'syncEngaged'>,
 ): BrowserDisplayMode {
+  if (snapshot.renderMode === 'pw-popout') return 'pw-popout';
+  if (snapshot.renderMode === 'pw-screencast') return snapshot.syncEngaged ? 'pw-resize' : 'pw-fixed';
   if (snapshot.renderMode === 'iframe') return 'iframe';
   if (snapshot.renderMode === 'ab-popout') return 'ab-popout';
   return snapshot.syncEngaged ? 'ab-resize' : 'ab-fixed';

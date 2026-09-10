@@ -115,6 +115,15 @@ const fireAndForget = {
 };
 
 const invokeMap = {
+  playwright_request: async ({ request }) => {
+    const result = await requestSidecar('playwright:request', { request }, 'agentBrowser:result', data => data.result, 40000);
+    if (result?.ok && result.path) {
+      const fs = await import('node:fs/promises');
+      try { return { ok: true, mime: result.mime, bytesBase64: (await fs.readFile(result.path)).toString('base64') }; }
+      finally { await fs.unlink(result.path).catch(() => {}); }
+    }
+    return result;
+  },
   get_available_shells: (_args) => requestSidecar('pty:getShells', {}, 'pty:shells', (data) => data.shells ?? []),
   pty_get_cwd: ({ id }) => requestSidecar('pty:getCwd', { id }, 'pty:cwd', (data) => data.cwd ?? null),
   pty_context: ({ request }) => requestSidecar('pty:context', request, 'pty:context', data => data),

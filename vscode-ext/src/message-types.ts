@@ -1,3 +1,4 @@
+import type { PlaywrightRequest, PlaywrightResult } from '../../lib/src/lib/platform/browser-automation';
 import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../../lib/src/lib/terminal-context-types';
 import type {
   AwaitOutcome,
@@ -26,6 +27,7 @@ export type WebviewMessage =
   | { type: 'clipboard:readImage'; requestId: string }
   | { type: 'dormouse:openExternal'; uri: string }
   | { type: 'dormouse:runWorkbenchCommand'; command: VSCodeWorkbenchCommand }
+  | { type: 'playwright:request'; request: PlaywrightRequest; requestId: string }
   | { type: 'agentBrowser:command'; session: string; args: string[]; binaryPath?: string; requestId: string }
   | { type: 'agentBrowser:edit'; session: string; op: 'selectAll' | 'copy' | 'cut'; binaryPath?: string; requestId: string }
   | { type: 'agentBrowser:screenshot'; session: string; format?: 'jpeg' | 'png'; quality?: number; binaryPath?: string; requestId: string }
@@ -100,6 +102,7 @@ export type ExtensionMessage =
   | { type: 'pty:shells'; shells: Array<{ name: string; path: string; args: string[] }>; requestId?: string }
   | { type: 'clipboard:files'; paths: string[] | null; requestId: string }
   | { type: 'clipboard:image'; path: string | null; requestId: string }
+  | { type: 'playwright:result'; result: PlaywrightResult; requestId: string }
   | { type: 'agentBrowser:commandResult'; requestId: string; exitCode: number; stdout: string; stderr: string }
   | { type: 'agentBrowser:editResult'; requestId: string; ok: boolean; text?: string; error?: string }
   | { type: 'agentBrowser:screenshotResult'; requestId: string; ok: boolean; bytes?: Uint8Array; mime?: string; error?: string }

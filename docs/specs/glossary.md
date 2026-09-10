@@ -22,7 +22,7 @@ A Pane holds exactly one Surface today, but the model reserves several (a future
 | Kind | Sub-kinds | Backed by |
 |---|---|---|
 | `terminal` | — | a PTY + xterm.js instance — a **Session** |
-| `browser` | `iframe`, `ab-screencast`, `ab-popout` | an iframe proxy grant, or an agent-browser daemon session (`docs/specs/dor-browser.md`) |
+| `browser` | `iframe`, `ab-screencast`, `ab-popout`, `pw-screencast`, `pw-popout` | an iframe proxy grant, or an automation-provider session (`docs/specs/dor-browser.md`) |
 
 **For a browser Surface `renderMode` is canonical**; the CLI `render_mode` is derived from it and never stored.
 
@@ -32,6 +32,8 @@ A Pane holds exactly one Surface today, but the model reserves several (a future
 | browser · iframe | `'browser'` | `iframe` | `browser` | `iframe` |
 | browser · screencast | `'browser'` | `ab-screencast` | `browser` | `ab-screencast` |
 | browser · popped out | `'browser'` | `ab-popout` | `browser` | `ab-popout` |
+| browser · Playwright screencast | `'browser'` | `pw-screencast` | `browser` | `pw-screencast` |
+| browser · Playwright popout | `'browser'` | `pw-popout` | `browser` | `pw-popout` |
 
 **Kinds are capability sets, not exclusive categories** — the two above carry one capability each, the staged `tool` (`docs/specs/dor-tool.md`) both. **Operations gate on the capability they need, never on the kind enum** ([Liskov contract](#liskov-contract)): `read` / `send` / `await` / port scans need the terminal, nav / render-mode / agent-browser verbs the browser. **`dor list --json` rows always emit `has_terminal` and `has_browser`** (rationale). **Must declare each kind's capabilities in the `hasTerminal` / `hasBrowser` table.** Persistence keeps its own `PersistedSurfaceType` discriminant (`docs/specs/transport.md`).
 

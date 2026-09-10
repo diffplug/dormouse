@@ -192,6 +192,26 @@ open it with `dor ab` instead). The three identity flags are mutually exclusive.
 
 `dor ab` has no `--json` of its own; any JSON flags belong to `agent-browser`.
 
+### `dor pw` / `dor playwright` — Playwright browser pane
+
+Use your installed `@playwright/cli` (`npm i -g @playwright/cli`). Override its
+path with `DORMOUSE_PLAYWRIGHT_BIN`. Chromium panes share the Display, viewport,
+input and popout controls of `dor ab`.
+
+```sh
+dor pw --key app open :5173
+dor pw --key app snapshot
+dor pw --key app click e15
+dor pw --surface surface:4 goto :8080
+```
+
+`--key` defaults to `default` and is separate from agent-browser keys. The first
+command fixes the native project cwd; later commands and relative paths use it.
+`--session` (or `-s`) uses a raw native session in the caller's project instead.
+These identities and `--surface` are mutually exclusive. Native Playwright
+`open` restarts the browser; `goto` navigates its current tab. Other arguments
+belong to `playwright-cli`; `dor pw --help` describes the wrapper.
+
 ## Recipes
 
 **Run a dev server and show it to the user.** Keep the surface handle from

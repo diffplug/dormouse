@@ -11,6 +11,7 @@ function djb2Bytes(bytes: Uint8Array): number {
 }
 
 export interface ScreenshotLoopDeps {
+  getPlatform?: () => Pick<ReturnType<typeof getPlatform>, 'agentBrowserScreenshot'>;
   getSession: () => string | undefined;
   getBinaryPath: () => string | undefined;
   isCapable: () => boolean;
@@ -103,7 +104,7 @@ export function createScreenshotLoop(deps: ScreenshotLoopDeps): ScreenshotLoop {
   };
 
   const take = () => {
-    const platform = getPlatform();
+    const platform = (deps.getPlatform ?? getPlatform)();
     const session = deps.getSession();
     if (!platform.agentBrowserScreenshot || !session) return;
     inFlight = true;

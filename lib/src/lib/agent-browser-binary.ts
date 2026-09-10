@@ -22,10 +22,12 @@
 
 /** The bare name resolved on `PATH`; mirrors `DEFAULT_AGENT_BROWSER_BIN`. */
 const AGENT_BROWSER_NAME = 'agent-browser';
+const PLAYWRIGHT_NAME = 'playwright-cli';
 
 // The Windows PATH shims npm/vfox install alongside the POSIX executable.
 // `spawnAndCapture` routes `.cmd`/`.bat` through cmd.exe (docs/specs/dor-cli.md
 // → "Spawning External Binaries"), so those spellings are legitimate targets.
+const PLAYWRIGHT_FILENAME_RE = /^playwright-cli(?:\.(?:cmd|bat|exe|com|ps1))?$/i;
 const AGENT_BROWSER_FILENAME_RE = /^agent-browser(?:\.(?:cmd|bat|exe|com|ps1))?$/i;
 
 // POSIX absolute, Windows drive-absolute, or a UNC share. A relative path is
@@ -44,14 +46,23 @@ export function isAllowedAgentBrowserBinary(
   candidate: unknown,
   configuredPath?: string,
 ): candidate is string {
+  return isAllowedBrowserBinary(candidate, configuredPath, AGENT_BROWSER_NAME, AGENT_BROWSER_FILENAME_RE);
+}
+
+/** The same executable gate for the parallel Playwright provider. */
+export function isAllowedPlaywrightBinary(candidate: unknown, configuredPath?: string): candidate is string {
+  return isAllowedBrowserBinary(candidate, configuredPath, PLAYWRIGHT_NAME, PLAYWRIGHT_FILENAME_RE);
+}
+
+function isAllowedBrowserBinary(candidate: unknown, configuredPath: string | undefined, name: string, filename: RegExp): candidate is string {
   if (typeof candidate !== 'string' || candidate.length === 0 || candidate.length > 4096) return false;
   // Control characters have no place in a path and are how one argument
   // becomes two on the platforms that take a command string.
   if (/[\u0000-\u001f\u007f]/.test(candidate)) return false;
   if (configuredPath && candidate === configuredPath) return true;
-  if (candidate === AGENT_BROWSER_NAME) return true;
+  if (candidate === name) return true;
   if (!ABSOLUTE_RE.test(candidate)) return false;
   const segments = candidate.split(/[\\/]/);
   if (segments.includes('..')) return false;
-  return AGENT_BROWSER_FILENAME_RE.test(segments[segments.length - 1] ?? '');
+  return filename.test(segments[segments.length - 1] ?? '');
 }

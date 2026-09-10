@@ -26,6 +26,7 @@ const remoteSrc = resolveRemoteConnectSrc(process.env, 'sidecar');
 const bundles = [
   { entry: 'iframe-proxy.ts', out: 'iframe-proxy.cjs' },
   { entry: 'agent-browser-host.ts', out: 'agent-browser-host.cjs' },
+  { entry: 'playwright-host.ts', out: 'playwright-host.cjs' },
   {
     entry: 'remote/sidecar-entry.ts',
     out: 'burrow.cjs',
@@ -48,6 +49,7 @@ for (const { entry, out, define, assertBaked } of bundles) {
     platform: 'node', // node builtins (http/net/fs/child_process) stay external
     format: 'cjs',
     target: 'node24',
+    external: ['bufferutil', 'utf-8-validate'],
     logLevel: 'warning',
     ...(define ? { define } : {}),
   });

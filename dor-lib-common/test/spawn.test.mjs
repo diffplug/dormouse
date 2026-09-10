@@ -2,6 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { mkdtemp, rm, realpath } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { spawnAndCapture } from '../dist/index.js';
 
 const node = process.execPath;
@@ -112,4 +115,15 @@ test('releases inherited pipes so the capture caller can exit while the daemon l
       }
     }
   }
+});
+
+test('runs relative paths in the requested cwd without changing the caller cwd', async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'dor-spawn-cwd-'));
+  const before = process.cwd();
+  try {
+    const result = await spawnAndCapture(node, ['-e', 'process.stdout.write(process.cwd())'], { cwd });
+    assert.equal(result.ok, true);
+    assert.equal(result.stdout, await realpath(cwd));
+    assert.equal(process.cwd(), before);
+  } finally { await rm(cwd, { recursive: true, force: true }); }
 });
