@@ -111,6 +111,13 @@ export class DirectPeer {
   readonly #setTimer: RemoteTimer;
   #channel: DirectChannelLike | null = null;
   #cancelSetup: (() => void) | null = null;
+  /**
+   * Settles the gathering wait — cancelling its deadline with it — or null when
+   * none is outstanding. Held on the instance because {@link close} has to
+   * reach it: `RTCPeerConnection.close()` fires no `icegatheringstatechange`,
+   * so nothing else would.
+   */
+  #endGathering: (() => void) | null = null;
   #open = false;
   #closed = false;
 
@@ -204,6 +211,10 @@ export class DirectPeer {
   close(): void {
     this.#closed = true;
     this.#clearSetupTimeout();
+    // The suspended `offer()`/`answer()` finishes here rather than in three
+    // seconds' time: it sees `#closed`, answers `null`, and releases the
+    // endpoint and the session it was still holding open.
+    this.#endGathering?.();
     try {
       this.#channel?.close();
     } catch {
@@ -287,14 +298,14 @@ export class DirectPeer {
   #awaitGathering(): Promise<void> {
     if (this.#peer.iceGatheringState === 'complete') return Promise.resolve();
     return new Promise<void>((resolve) => {
-      let settled = false;
       let cancel: (() => void) | null = null;
       const finish = (): void => {
-        if (settled) return;
-        settled = true;
+        if (this.#endGathering !== finish) return;
+        this.#endGathering = null;
         cancel?.();
         resolve();
       };
+      this.#endGathering = finish;
       cancel = this.#setTimer(finish, DIRECT_GATHER_TIMEOUT_MS);
       this.#peer.addEventListener('icegatheringstatechange', () => {
         if (this.#peer.iceGatheringState === 'complete') finish();

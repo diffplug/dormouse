@@ -178,6 +178,28 @@ describe('DirectPeer', () => {
     expect(peer.closed).toBe(true);
   });
 
+  /**
+   * `RTCPeerConnection.close()` fires no `icegatheringstatechange`, so nothing
+   * but `close()` can ever settle this wait — and until it does, the suspended
+   * negotiation holds the endpoint and its session alive behind a timer that is
+   * not `unref`ed.
+   */
+  it('cancels the gathering deadline when it is closed mid-negotiation', async () => {
+    const { clientPeer, timers } = pair({ gathering: 'pending' });
+
+    const offering = clientPeer.offer();
+    await flushMicrotasks();
+    expect(timers.live.map((timer) => timer.delayMs)).toEqual([
+      DIRECT_SETUP_TIMEOUT_MS,
+      DIRECT_GATHER_TIMEOUT_MS,
+    ]);
+
+    clientPeer.close();
+
+    expect(await offering).toBeNull();
+    expect(timers.live).toEqual([]);
+  });
+
   it('closes idempotently, reporting nothing', () => {
     const { clientPeer, client } = pair();
     clientPeer.close();
