@@ -62,9 +62,9 @@ Source of truth: `BurrowRuntime.#promoteConnection` in `lib/src/remote/burrow/bu
 ### Direct path
 
 After authorization the same Noise session moves off the Relay onto a WebRTC
-data channel between phone and laptop. **The presence protocol is inherited
-unchanged and the Relay is never trusted with authorization.** Which Burrows can
-answer is staged ([Future](#future)).
+data channel. **The presence protocol is inherited unchanged and the Relay is
+never trusted with authorization.** Which Burrows answer is staged
+([Future](#future)).
 
 **Every signal rides inside the session**, as one of four control messages
 ([relay.md](./relay.md) → E2E framing) on the established session over the relay
@@ -73,18 +73,17 @@ path: `direct-offer` (Client→Burrow, SDP), `direct-answer` (Burrow→Client, S
 `{ v: 1, t }` with exact keys and no other field. **The Relay never sees an SDP,
 a candidate, or that a direct path exists.** **An unknown control shape on an
 established session is ignored, never a session failure**, so a peer without
-this stack stays relayed with no negotiation at all.
+this stack simply stays relayed.
 
 **The Client offers once, after `ConnectionOutcomeV1 { ok: true }`, and never
 retries**; it is always the offerer and creates the one ordered, reliable data
 channel (`dormouse`, `arraybuffer`). **The Burrow answers at most one offer per
 session**, and declines where it has no peer to build. **Each side sends its
 whole description only after ICE gathering completes** — no trickle — bounded by
-`DIRECT_GATHER_TIMEOUT_MS`, after which the local description as it stands is
-what travels. **An SDP over `MAX_DIRECT_SDP_LENGTH` is never sent**: the Client
-skips the offer, the Burrow declines. That bound is derived from
-`CONTROL_PAYLOAD_SIZE` and the characters an SDP is made of, so a maximal signal
-always fits one control body.
+`DIRECT_GATHER_TIMEOUT_MS`, past which what it has is what travels. **An SDP
+over `MAX_DIRECT_SDP_LENGTH` is never sent**: the Client skips the offer, the
+Burrow declines. That bound derives from `CONTROL_PAYLOAD_SIZE`, so a maximal
+signal always fits one control body.
 
 **No ICE servers.** `iceServers: []` at both ends, host candidates only.
 **Never a public STUN or TURN default** — it would hand a third party the user's
@@ -111,20 +110,23 @@ non-binary channel message — disposes the session. (rationale)
   `burrow-gone`, the Burrow disposes the established entry. **Before any switch
   a channel failure only abandons the attempt** — including a channel not open
   by `DIRECT_SETUP_TIMEOUT_MS` — and the session stays relayed.
+* **A `direct-switch` arriving at an end that has abandoned its channel ends the
+  session** too: nothing that peer sends can arrive, and the alternative is a
+  session whose every request hangs unanswered.
 
 **The Relay stays the lifecycle authority.** `client-gone`, `burrow-gone`, and
 either relay socket closing dispose the session, channel included, exactly as
 they do relayed; the idle deadline, keepalives, and every Burrow bound are
-path-agnostic, so a keepalive decrypted off the channel refreshes the deadline
-the same way ([remote-security-model.md](./remote-security-model.md) → Burrow
+path-agnostic — a keepalive decrypted off the channel refreshes the deadline
+like any other ([remote-security-model.md](./remote-security-model.md) → Burrow
 bounds).
 
 **One peer connection per session**, created at the offer, closed on every
 disposal path, never existing before promotion. **Both ends build it through an
 injected factory** — `PocketClientDeps.createDirectPeer`,
 `BurrowOptions.createDirectPeer`, threaded through `BurrowServiceOptions` —
-answering `null` where a runtime has none, so neither end reaches a WebRTC
-global itself. **Pocket shows which path carries the session**
+`null` where a runtime has none, so neither end reaches a WebRTC global.
+**Pocket shows which path carries the session**
 ([pocket-app.md](./pocket-app.md)).
 
 Source of truth: `remote-lib-common/src/security/direct-path.ts` (the signals,

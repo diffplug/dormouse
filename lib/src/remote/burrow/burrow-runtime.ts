@@ -1697,7 +1697,14 @@ export class BurrowRuntime {
         return;
       case 'direct-switch': {
         const direct = established.direct;
-        if (!direct) return;
+        if (!direct) {
+          // **A switch onto a channel this Burrow has abandoned is the end of
+          // the session.** Nothing the Client sends can arrive any more, and a
+          // session held to its idle deadline on that is one the phone is
+          // waiting out for two minutes.
+          if (established.directAttempted) this.#disposeEstablished(clientId);
+          return;
+        }
         const held = direct.cutover.onSwitchDecrypted();
         // In arrival order, through the same decrypt path the relay's frames
         // take: what was held is exactly what was sent after the switch.

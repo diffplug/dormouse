@@ -375,6 +375,8 @@ export class PocketClient {
   #onBurrowGone: (() => void) | null = null;
   /** This session's direct-path attempt, or null while it is purely relayed. */
   #direct: DirectAttempt | null = null;
+  /** Whether this session has offered one, however that attempt ended. */
+  #directAttempted = false;
   #onTransportPath: ((path: DirectPath) => void) | null = null;
   /** The last path announced, so an unchanged one is not announced twice. */
   #announcedPath: DirectPath = 'relay';
@@ -1197,6 +1199,9 @@ export class PocketClient {
         onViolation: (reason) => this.#loseBurrow(reason),
       },
     });
+    // Never two: a promotion that replaced a session leaves this holding the
+    // old one's peer, which nothing else would close.
+    this.#direct?.peer.close();
     this.#direct = { peer, cutover: new DirectCutover() };
     const sdp = await peer.offer();
     // The session may have been replaced or disposed while the description was
@@ -1216,6 +1221,7 @@ export class PocketClient {
         'transport',
         established.session.sendControl({ ...signal }),
       );
+      this.#directAttempted = true;
     } catch {
       this.#abandonDirect(peer);
     }
@@ -1283,7 +1289,16 @@ export class PocketClient {
     // without this stack simply stay relayed.
     if (!isDirectSignalV1(value)) return;
     const direct = this.#directFor(established);
-    if (!direct) return;
+    if (!direct) {
+      // **A switch onto a channel this phone has abandoned is burrow loss.**
+      // Nothing the Burrow sends can arrive any more, and a silent session
+      // whose every request hangs forever is the one failure the app cannot
+      // recover from on its own.
+      if (value.t === 'direct-switch' && this.#directAttempted) {
+        this.#loseBurrow('the computer moved to a direct path this phone had closed');
+      }
+      return;
+    }
     switch (value.t) {
       case 'direct-answer':
         void direct.peer.acceptAnswer(value.sdp);
@@ -1665,6 +1680,7 @@ export class PocketClient {
     this.#direct?.peer.close();
     this.#direct?.cutover.clear();
     this.#direct = null;
+    this.#directAttempted = false;
     this.#connectedBurrowId = null;
     this.#established = null;
     this.#announcePath();

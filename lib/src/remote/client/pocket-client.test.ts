@@ -1401,6 +1401,49 @@ describe('the direct path, end to end', () => {
     expect(run.harness.client.connectedBurrowId).toBeNull();
   });
 
+
+  /**
+   * The one failure a phone cannot recover from on its own: the peer that
+   * abandoned is deaf, and the other end has already stopped using the relay.
+   */
+  it('ends the session when the Burrow switches onto a channel the phone abandoned', async () => {
+    const run = await connectedDirect({ network: { opening: 'manual' } });
+    await waitFor(
+      () => run.burrowFrames().filter((frame) => frame.step === 'transport').length === 2,
+      'the Burrow to answer',
+    );
+    await settleTicks();
+    const gone = vi.fn();
+    run.harness.client.setOnBurrowGone(gone);
+
+    run.timers.fireAt(DIRECT_SETUP_TIMEOUT_MS);
+    expect(run.clientPeers[0]!.closed).toBe(true);
+    // And only now does the Burrow's channel come up, so its switch lands on a
+    // phone that has already closed its end.
+    run.network.openChannels();
+
+    expect(gone).toHaveBeenCalledOnce();
+    expect(run.harness.client.connectedBurrowId).toBeNull();
+  });
+
+  it('ends the session when the phone switches onto a channel the Burrow abandoned', async () => {
+    const run = await connectedDirect({ network: { opening: 'manual' } });
+    await waitFor(
+      () => run.burrowFrames().filter((frame) => frame.step === 'transport').length === 2,
+      'the Burrow to answer',
+    );
+    await settleTicks();
+
+    run.burrowTimers.fireAt(DIRECT_SETUP_TIMEOUT_MS);
+    expect(run.burrowPeers[0]!.closed).toBe(true);
+    run.network.openChannels();
+
+    await waitFor(
+      () => run.harness.burrow.establishedSessionCount === 0,
+      'the Burrow to drop the session',
+    );
+  });
+
   it('closes the Burrow’s peer with the client the Relay says is gone', async () => {
     const run = await connectedDirect();
     await run.cutover();
