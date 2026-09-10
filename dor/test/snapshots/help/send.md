@@ -4,7 +4,7 @@ Invocation: `dor send --help`
 
 ```text
 USAGE
-  dor send <surface> ([--text value] [--key value] | --stdin | --sequence json) [--json] [--raw]
+  dor send <surface> ([--text value] [--key value] | --stdin | --sequence json) [--json] [--raw] [--workspace ref]
   dor send --help
 
 Sends text or key input to a target terminal surface. Special keys must be sent with --key so values like "enter" are never confused with literal text.
@@ -33,14 +33,15 @@ Examples:
   dor send surface:3 --sequence '[{"text":"npm test"},{"key":"enter"}]'
 
 FLAGS
-     [--json]      Print JSON output.
-     [--key]       Send a named key or chord.
-     [--raw]       Do not interpret backslash escapes in text input.
-     [--sequence]  Send an ordered JSON sequence of text and key events.
-     [--stdin]     Read text from standard input and send it as text.
-     [--text]      Send literal text.
-  -h  --help       Print help information and exit
-      --           All subsequent inputs should be interpreted as arguments
+     [--json]       Print JSON output.
+     [--key]        Send a named key or chord.
+     [--raw]        Do not interpret backslash escapes in text input.
+     [--sequence]   Send an ordered JSON sequence of text and key events.
+     [--stdin]      Read text from standard input and send it as text.
+     [--text]       Send literal text.
+     [--workspace]  Workspace to act in, instead of the caller's.
+  -h  --help        Print help information and exit
+      --            All subsequent inputs should be interpreted as arguments
 
 ARGUMENTS
   surface  Target surface.

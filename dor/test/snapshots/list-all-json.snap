@@ -1,0 +1,97 @@
+exitCode: 0
+stdout:
+{
+  "surfaces": [
+    {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "ref": "surface:1",
+      "kind": "terminal",
+      "has_terminal": true,
+      "has_browser": false,
+      "render_mode": null,
+      "view": "paned",
+      "title": "pnpm dev",
+      "focused": true,
+      "cwd": "/Users/me/projects/site",
+      "activity": "running",
+      "command": "pnpm dev",
+      "url": null,
+      "ringing": false,
+      "todo": false,
+      "awaited": false,
+      "workspace_ref": "workspace:1"
+    },
+    {
+      "id": "33333333-3333-4333-8333-333333333333",
+      "ref": "surface:1",
+      "kind": "browser",
+      "has_terminal": false,
+      "has_browser": true,
+      "render_mode": "ab-screencast",
+      "view": "paned",
+      "title": "Dormouse",
+      "focused": false,
+      "cwd": null,
+      "activity": null,
+      "command": null,
+      "url": "http://localhost:5173/",
+      "ringing": false,
+      "todo": false,
+      "awaited": false,
+      "workspace_ref": "workspace:2"
+    },
+    {
+      "id": "44444444-4444-4444-8444-444444444444",
+      "ref": "surface:2",
+      "kind": "terminal",
+      "has_terminal": true,
+      "has_browser": false,
+      "render_mode": null,
+      "view": "minimized",
+      "title": "<idle> server.js",
+      "focused": false,
+      "cwd": "/Users/me/api",
+      "activity": "finished",
+      "command": null,
+      "url": null,
+      "ringing": true,
+      "todo": false,
+      "awaited": false,
+      "workspace_ref": "workspace:2"
+    }
+  ],
+  "caller_surface_ref": null,
+  "caller_surface_id": null,
+  "focused_surface_ref": "surface:1",
+  "focused_surface_id": "11111111-1111-4111-8111-111111111111",
+  "window_ref": "window:1",
+  "workspace_ref": "workspace:1",
+  "workspaces": [
+    {
+      "ref": "workspace:1",
+      "id": "workspace-1",
+      "name": "Workspace 1",
+      "active": true,
+      "ringing": false,
+      "todo": false,
+      "count": 0
+    },
+    {
+      "ref": "workspace:2",
+      "id": "workspace-2b1c",
+      "name": "build",
+      "active": false,
+      "ringing": true,
+      "todo": true,
+      "count": 2
+    }
+  ],
+  "host": {
+    "app": "vscode",
+    "workspace": "/Users/me/projects/site",
+    "cli_js_path": "/opt/dormouse/dor-cli/dist/dor.js",
+    "node_path": "/opt/dormouse/node"
+  }
+}
+
+stderr:

@@ -77,6 +77,21 @@ export function requireControlClient(options: CliOptions, timeoutMs?: number): C
   return result.ok ? result.value : new Error(result.message);
 }
 
+/** The `--workspace <ref>` flag every action command carries, defined once so
+ *  its wording cannot drift (`docs/specs/dor-cli.md` → "Handle Model"). */
+export const workspaceFlag = {
+  kind: 'parsed',
+  parse: stringParser,
+  brief: "Workspace to act in, instead of the caller's.",
+  optional: true,
+  placeholder: 'ref',
+} as const;
+
+/** The `workspace` field of a request, present only when the flag was given. */
+export function workspaceParam(workspace: string | undefined): { workspace?: string } {
+  return workspace === undefined ? {} : { workspace };
+}
+
 export function renderHandle(handle: { ref: string; id: string }, idFormat: IdFormat): string {
   switch (idFormat) {
     case 'refs':

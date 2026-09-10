@@ -1,0 +1,27 @@
+exitCode: 0
+stdout:
+{
+  "workspaces": [
+    {
+      "ref": "workspace:1",
+      "id": "workspace-1",
+      "name": "Workspace 1",
+      "active": true,
+      "ringing": false,
+      "todo": false,
+      "count": 0
+    },
+    {
+      "ref": "workspace:2",
+      "id": "workspace-2b1c",
+      "name": "build",
+      "active": false,
+      "ringing": true,
+      "todo": true,
+      "count": 2
+    }
+  ],
+  "window_ref": "window:1"
+}
+
+stderr:

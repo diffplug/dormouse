@@ -88,9 +88,13 @@ export function normalizeConcreteOpenUrl(target: string): string {
 export async function resolveSurfaceOpenTarget(
   target: string,
   client: ControlClient,
+  workspace?: string,
 ): Promise<ParseResult<string>> {
   try {
-    const { url } = await client.resolveOpenTarget({ surface: target });
+    const { url } = await client.resolveOpenTarget({
+      surface: target,
+      ...(workspace === undefined ? {} : { workspace }),
+    });
     return { ok: true, value: url };
   } catch (error) {
     return { ok: false, message: errorMessage(error) };

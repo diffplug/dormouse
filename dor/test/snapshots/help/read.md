@@ -4,7 +4,7 @@ Invocation: `dor read --help`
 
 ```text
 USAGE
-  dor read <surface> [--json] [--lines count] [--scrollback]
+  dor read <surface> [--json] [--lines count] [--scrollback] [--workspace ref]
   dor read --help
 
 Reads the visible screen text from the target terminal surface. Use --scrollback to include terminal history, and --lines to limit how much text is returned.
@@ -23,6 +23,7 @@ FLAGS
      [--json]        Print JSON output.
      [--lines]       Maximum number of lines to return.
      [--scrollback]  Include terminal scrollback/history instead of only the visible screen.
+     [--workspace]   Workspace to act in, instead of the caller's.
   -h  --help         Print help information and exit
       --             All subsequent inputs should be interpreted as arguments
 

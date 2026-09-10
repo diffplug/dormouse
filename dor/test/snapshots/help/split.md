@@ -4,7 +4,7 @@ Invocation: `dor split --help`
 
 ```text
 USAGE
-  dor split [--left|--right|--up|--down|--auto] [--json] [--minimize] [--surface id|ref] [-- <command>...]
+  dor split [--left|--right|--up|--down|--auto] [--json] [--minimize] [--surface id|ref] [--workspace ref] [-- <command>...]
   dor split --help
 
 If no direction is provided, --auto is used. --auto chooses right when the target surface is wide, down when it is narrow, and right when the target is minimized.
@@ -39,10 +39,11 @@ JSON output:
 FLAGS
      [--left|--right|--up|--down|--auto]
                   Split direction. Mutually exclusive; default is --auto.
-     [--json]      Print JSON output.
-     [--minimize]  Create the surface minimized.
-     [--surface]   Surface to split.
-  -h  --help       Print help information and exit
-      --           All subsequent inputs should be interpreted as arguments
+     [--json]       Print JSON output.
+     [--minimize]   Create the surface minimized.
+     [--surface]    Surface to split.
+     [--workspace]  Workspace to act in, instead of the caller's.
+  -h  --help        Print help information and exit
+      --            All subsequent inputs should be interpreted as arguments
 
 ```

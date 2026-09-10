@@ -13,10 +13,13 @@ import {
   renderJson,
   requireControlClient,
   stringParser,
+  workspaceFlag,
+  workspaceParam,
   writeStdout,
 } from './shared.js';
 
 interface SplitFlags {
+  readonly workspace?: string;
   readonly auto?: boolean;
   readonly down?: boolean;
   readonly json?: boolean;
@@ -43,8 +46,8 @@ export const splitCommand: Command = {
     {
       scope: 'root',
       findReplace: [
-        `  dor split ${groupedSplitDirectionUsage} [--json] [--minimize] [--surface id|ref]<TO-EOL>`,
-        `  dor split ${groupedSplitDirectionUsage} [--json] [--minimize] [--surface id|ref] [-- <command>...]\n`,
+        `  dor split ${groupedSplitDirectionUsage} [--json] [--minimize] [--surface id|ref] [--workspace ref]<TO-EOL>`,
+        `  dor split ${groupedSplitDirectionUsage} [--json] [--minimize] [--surface id|ref] [--workspace ref] [-- <command>...]\n`,
       ],
     },
     {
@@ -52,8 +55,10 @@ export const splitCommand: Command = {
       findReplace: [
         '[--auto]',
         `${groupedSplitDirectionUsage}`,
+        // <TO-EOL> swallows the flags this patch is about to remove, so the
+        // tail is rewritten whole rather than matched around them.
         '[--surface id|ref]<TO-EOL>',
-        '[--surface id|ref] [-- <command>...]\n',
+        '[--surface id|ref] [--workspace ref] [-- <command>...]\n',
       ],
       remove: ['<WS>[--down]', '<WS>[--left]', '<WS>[--right]', '<WS>[--up]'],
     },
@@ -114,6 +119,7 @@ JSON output:
         right: { kind: 'boolean', brief: 'Split right of the target surface.', optional: true, withNegated: false },
         surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to split.', optional: true, placeholder: 'id|ref' },
         up: { kind: 'boolean', brief: 'Split above the target surface.', optional: true, withNegated: false },
+        workspace: workspaceFlag,
       },
       positional: {
         kind: 'array',
@@ -143,6 +149,7 @@ async function runSplitCommand(this: DorCommandContext, flags: SplitFlags, ...co
       // and an initial command alike leave it on the caller. The CLI owns the
       // whole decision so the host can honor the field as sent.
       focusNeutral: this.hasArgumentEscape || command !== undefined,
+      ...workspaceParam(flags.workspace),
     });
     writeStdout(this, renderSplitResponse(response, flags.json === true));
     return undefined;

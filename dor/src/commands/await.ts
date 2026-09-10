@@ -21,11 +21,14 @@ import {
   renderJson,
   requireControlClient,
   stringParser,
+  workspaceFlag,
+  workspaceParam,
   writeStderr,
   writeStdout,
 } from './shared.js';
 
 interface AwaitFlags {
+  readonly workspace?: string;
   readonly json?: boolean;
   readonly timeout?: number;
   readonly until: AwaitUntil;
@@ -91,14 +94,14 @@ export const awaitCommand: Command = {
       scope: 'root',
       findReplace: [
         '  dor await [--json] [--timeout seconds] (--until condition)<TO-EOL>',
-        '  dor await <surface> --until condition [--json] [--timeout seconds]\n',
+        '  dor await <surface> --until condition [--json] [--timeout seconds] [--workspace ref]\n',
       ],
     },
   ],
   command: buildCommand<AwaitFlags, [string], DorCommandContext>({
     docs: {
       brief: 'Wait until a terminal surface finishes.',
-      customUsage: ['<surface> --until condition [--json] [--timeout seconds]'],
+      customUsage: ['<surface> --until condition [--json] [--timeout seconds] [--workspace ref]'],
       fullDescription: FULL_DESCRIPTION,
     },
     parameters: {
@@ -106,6 +109,7 @@ export const awaitCommand: Command = {
         json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
         timeout: { kind: 'parsed', parse: parseTimeoutSeconds, brief: 'Seconds to wait before giving up. Default 600; max 86400.', optional: true, placeholder: 'seconds' },
         until: { kind: 'parsed', parse: parseUntil, brief: 'What to wait for: quiet or exit.', optional: false, placeholder: 'condition' },
+        workspace: workspaceFlag,
       },
       positional: {
         kind: 'tuple',
@@ -127,7 +131,12 @@ async function runAwaitCommand(this: DorCommandContext, flags: AwaitFlags, surfa
 
   let response: AwaitSurfaceResponse;
   try {
-    response = await client.awaitSurface({ surface, until: flags.until, timeoutMs: timeoutSeconds * 1000 });
+    response = await client.awaitSurface({
+      surface,
+      until: flags.until,
+      timeoutMs: timeoutSeconds * 1000,
+      ...workspaceParam(flags.workspace),
+    });
   } catch (error) {
     return new Error(errorMessage(error));
   }

@@ -12,10 +12,13 @@ import {
   renderJson,
   requireControlClient,
   stringParser,
+  workspaceFlag,
+  workspaceParam,
   writeStdout,
 } from './shared.js';
 
 interface SendFlags {
+  readonly workspace?: string;
   readonly json?: boolean;
   readonly key?: string;
   readonly raw?: boolean;
@@ -82,14 +85,14 @@ export const sendCommand: Command = {
       scope: 'root',
       findReplace: [
         '  dor send [--json] [--key value] [--raw] [--sequence json] [--stdin] [--text value]<TO-EOL>',
-        '  dor send <surface> ([--text value] [--key value] | --stdin | --sequence json) [--json] [--raw]\n',
+        '  dor send <surface> ([--text value] [--key value] | --stdin | --sequence json) [--json] [--raw] [--workspace ref]\n',
       ],
     },
   ],
   command: buildCommand<SendFlags, [string], DorCommandContext>({
     docs: {
       brief: 'Send text or key input to a terminal surface.',
-      customUsage: ['<surface> ([--text value] [--key value] | --stdin | --sequence json) [--json] [--raw]'],
+      customUsage: ['<surface> ([--text value] [--key value] | --stdin | --sequence json) [--json] [--raw] [--workspace ref]'],
       fullDescription: `Sends text or key input to a target terminal surface. Special keys must be sent with --key so values like "enter" are never confused with literal text.
 
 Exactly one input mode is required: --text/--key, --stdin, or --sequence. --text and --key may be combined only in that order; text is sent first, then the key. Duplicate input flags are rejected. Use --sequence for arbitrary ordering or multiple text/key events.
@@ -123,6 +126,7 @@ Examples:
         sequence: { kind: 'parsed', parse: stringParser, brief: 'Send an ordered JSON sequence of text and key events.', optional: true, placeholder: 'json' },
         stdin: { kind: 'boolean', brief: 'Read text from standard input and send it as text.', optional: true, withNegated: false },
         text: { kind: 'parsed', parse: stringParser, brief: 'Send literal text.', optional: true },
+        workspace: workspaceFlag,
       },
       positional: {
         kind: 'tuple',
@@ -151,6 +155,7 @@ async function runSendCommand(this: DorCommandContext, flags: SendFlags, surface
       surface,
       input: encoded.value.input,
       inputCount: encoded.value.inputCount,
+      ...workspaceParam(flags.workspace),
     });
     writeStdout(this, renderSendResponse(response, flags.json === true));
     return undefined;

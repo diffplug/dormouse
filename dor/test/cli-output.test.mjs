@@ -96,6 +96,13 @@ const fixtureSurfaces = [
   },
 ];
 
+// The Window's Workspaces, as the host projects them for `--workspaces` and for
+// the `--all` group headers.
+const fixtureWorkspaces = [
+  { ref: 'workspace:1', id: 'workspace-1', name: 'Workspace 1', active: true, ringing: false, todo: false, count: 0 },
+  { ref: 'workspace:2', id: 'workspace-2b1c', name: 'build', active: false, ringing: true, todo: true, count: 2 },
+];
+
 // Listening ports the host would attach to a terminal Surface for `--ports`.
 const fixturePortsByRef = {
   'surface:1': [{ family: 'IPv4', address: '0.0.0.0', port: 5173, pid: 4242, processName: 'node' }],
@@ -107,6 +114,21 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
     requests: [],
     async listSurfaces(request) {
       this.requests.push(request);
+      // Mirror the host's cross-Workspace listing: every Workspace's rows in
+      // one list, each tagged with the Workspace it came from, plus the
+      // directory the CLI renders headers from.
+      if (request.scope === 'all') {
+        return {
+          surfaces: [
+            { ...fixtureSurfaces[0], workspaceRef: 'workspace:1' },
+            { ...fixtureSurfaces[2], ref: 'surface:1', workspaceRef: 'workspace:2' },
+            { ...fixtureSurfaces[3], ref: 'surface:2', workspaceRef: 'workspace:2' },
+          ],
+          workspaces: fixtureWorkspaces,
+          windowRef: 'window:1',
+          workspaceRef: 'workspace:1',
+        };
+      }
       const paneTarget = request.pane;
       const matched = paneTarget
         ? surfacesFixture.filter((surface) => (
@@ -226,6 +248,35 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
         surfaceRef: 'surface:3',
         session: 'dormouse.1.gui-a1b2c3',
       };
+    },
+    async listWorkspaces(request) {
+      this.requests.push({ method: 'listWorkspaces', request });
+      return { workspaces: fixtureWorkspaces, windowRef: 'window:1' };
+    },
+    async newWorkspace(request) {
+      this.requests.push({ method: 'newWorkspace', request });
+      return {
+        status: 'created',
+        workspaceId: 'workspace-9f3a',
+        workspaceRef: 'workspace:3',
+        name: request.name ?? 'Workspace 3',
+      };
+    },
+    async renameWorkspace(request) {
+      this.requests.push({ method: 'renameWorkspace', request });
+      return { status: 'renamed', workspaceId: 'workspace-2b1c', workspaceRef: 'workspace:2', name: request.name };
+    },
+    async closeWorkspace(request) {
+      this.requests.push({ method: 'closeWorkspace', request });
+      // Mirror the host: a Workspace holding work refuses without --force.
+      if (!request.force) {
+        throw new Error("workspace 'workspace:2' holds running or touched Surfaces; pass --force to close it");
+      }
+      return { status: 'closed', workspaceId: 'workspace-2b1c', workspaceRef: 'workspace:2', name: 'build' };
+    },
+    async switchWorkspace(request) {
+      this.requests.push({ method: 'switchWorkspace', request });
+      return { status: 'active', workspaceId: 'workspace-2b1c', workspaceRef: 'workspace:2', name: 'build' };
     },
     async resolveOpenTarget(request) {
       this.requests.push({ method: 'resolveOpenTarget', request });
@@ -1266,6 +1317,112 @@ test('list tags an awaited surface after its todo', async () => {
     surfaces.map((surface) => [surface.ref, surface.awaited]),
     [['surface:1', false], ['surface:2', true], ['surface:3', false], ['surface:4', false]],
   );
+});
+
+test('list --all groups every Workspace under a header', async () => {
+  const client = fixtureClient();
+  const result = await runCli(['list', '--all'], { client, env: listEnv });
+  assert.deepEqual(client.requests, [{ includePorts: false, scope: 'all' }]);
+  await snapshot('list-all-text', result);
+});
+
+test('list --all json tags each row with its Workspace and carries the directory', async () => {
+  const result = await runCli(['list', '--all', '--json'], { client: fixtureClient(), env: listEnv });
+  const payload = JSON.parse(result.stdout);
+  assert.deepEqual(
+    payload.surfaces.map((surface) => [surface.workspace_ref, surface.ref]),
+    [['workspace:1', 'surface:1'], ['workspace:2', 'surface:1'], ['workspace:2', 'surface:2']],
+  );
+  assert.deepEqual(payload.workspaces.map((row) => row.ref), ['workspace:1', 'workspace:2']);
+  await snapshot('list-all-json', result);
+});
+
+test('list --all applies row filters and drops the Workspaces they empty', async () => {
+  const result = await runCli(['list', '--all', '--kind', 'browser'], { client: fixtureClient(), env: listEnv });
+  assert.equal(result.stdout.includes('workspace:1'), false);
+  assert.match(result.stdout, /^workspace:2 {2}build\n/);
+});
+
+test('list --workspace asks the host for another Workspace', async () => {
+  const client = fixtureClient();
+  await runCli(['list', '--workspace', 'build'], { client, env: listEnv });
+  assert.deepEqual(client.requests, [{ includePorts: false, workspace: 'build' }]);
+});
+
+test('list --workspaces prints the overview', async () => {
+  const client = fixtureClient();
+  const result = await runCli(['list', '--workspaces'], { client, env: listEnv });
+  assert.deepEqual(client.requests, [{ method: 'listWorkspaces', request: {} }]);
+  await snapshot('list-workspaces-text', result);
+  await snapshot(
+    'list-workspaces-json',
+    await runCli(['list', '--workspaces', '--json'], { client: fixtureClient(), env: listEnv }),
+  );
+});
+
+test('list container flags that name two scopes are refused', async () => {
+  await snapshot(
+    'list-all-and-workspace',
+    await runCli(['list', '--all', '--workspace', '2'], { client: fixtureClient(), env: listEnv }),
+  );
+  await snapshot(
+    'list-workspaces-with-filter',
+    await runCli(['list', '--workspaces', '--kind', 'terminal'], { client: fixtureClient(), env: listEnv }),
+  );
+});
+
+test('workspace mutation verbs', async () => {
+  const client = fixtureClient();
+  await snapshot('workspace-new', await runCli(['workspace', 'new', 'build'], { client, env: listEnv }));
+  await snapshot(
+    'workspace-new-json',
+    await runCli(['workspace', 'new', '--json'], { client: fixtureClient(), env: listEnv }),
+  );
+  await snapshot(
+    'workspace-rename',
+    await runCli(['workspace', 'rename', 'workspace:2', 'agents'], { client: fixtureClient(), env: listEnv }),
+  );
+  await snapshot(
+    'workspace-switch',
+    await runCli(['workspace', 'switch', 'build'], { client: fixtureClient(), env: listEnv }),
+  );
+  assert.deepEqual(client.requests, [{ method: 'newWorkspace', request: { name: 'build' } }]);
+});
+
+test('workspace close refuses running work until forced', async () => {
+  await snapshot(
+    'workspace-close-refused',
+    await runCli(['workspace', 'close', 'workspace:2'], { client: fixtureClient(), env: listEnv }),
+  );
+  const client = fixtureClient();
+  await snapshot('workspace-close-force', await runCli(['workspace', 'close', 'workspace:2', '--force'], { client, env: listEnv }));
+  assert.deepEqual(client.requests, [{ method: 'closeWorkspace', request: { workspace: 'workspace:2', force: true } }]);
+});
+
+test('workspace usage errors name the action', async () => {
+  await snapshot('workspace-missing-action', await runCli(['workspace'], { client: fixtureClient(), env: listEnv }));
+  await snapshot('workspace-unknown-action', await runCli(['workspace', 'destroy', 'x'], { client: fixtureClient(), env: listEnv }));
+  await snapshot('workspace-list-action', await runCli(['workspace', 'list'], { client: fixtureClient(), env: listEnv }));
+  await snapshot('workspace-rename-arity', await runCli(['workspace', 'rename', 'workspace:2'], { client: fixtureClient(), env: listEnv }));
+  await snapshot('workspace-force-misuse', await runCli(['workspace', 'switch', '2', '--force'], { client: fixtureClient(), env: listEnv }));
+});
+
+test('every action command forwards --workspace to the host', async () => {
+  const calls = [
+    [['split', '--workspace', 'build', '--', 'pnpm', 'dev'], 'splitSurface'],
+    [['ensure', '--workspace', 'build', '--', 'pnpm', 'dev'], 'ensureSurface'],
+    [['send', 'surface:1', '--text', 'hi', '--workspace', 'build'], 'sendSurface'],
+    [['read', 'surface:1', '--workspace', 'build'], 'readSurface'],
+    [['kill', 'surface:1', '--confirm-dangerously', '--workspace', 'build'], 'killSurface'],
+    [['iframe', 'http://localhost:5173', '--workspace', 'build'], 'iframeSurface'],
+  ];
+  for (const [argv, method] of calls) {
+    const client = fixtureClient();
+    const result = await runCli(argv, { client, env: listEnv });
+    assert.equal(result.exitCode, 0, `${argv[0]} should succeed: ${result.stderr}`);
+    const call = client.requests.find((entry) => entry.method === method);
+    assert.equal(call.request.workspace, 'build', `${argv[0]} should forward --workspace`);
+  }
 });
 
 test('list json output', async () => {

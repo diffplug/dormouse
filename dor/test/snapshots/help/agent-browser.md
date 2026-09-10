@@ -4,7 +4,7 @@ Invocation: `dor agent-browser --help`
 
 ```text
 USAGE
-  dor agent-browser [--key name|--session name|--surface handle] [args...]
+  dor agent-browser [--key name|--session name|--surface handle] [--workspace ref] [args...]
   dor agent-browser --help
 
 Forwards all arguments verbatim to your own agent-browser binary and binds the session to a Dormouse browser surface.
@@ -17,6 +17,10 @@ dor intercepts exactly three mutually exclusive identity flags:
                      surface:focused, a stable id, title:<title>). dor asks the
                      host which agent-browser session that Surface is bound to,
                      which is the only way to address a GUI-spawned session.
+
+It also intercepts --workspace <ref>, which is not an identity: it says which
+Workspace of this Window the browser Surface is opened in and which one a
+handle resolves against (workspace:<n> or workspace:<name>).
 
 Everything else — subcommands, flags, selectors — is agent-browser's own
 command surface. The binary is resolved from PATH (override with
@@ -43,11 +47,12 @@ Examples:
   dor ab --surface surface:4 click @e3      # drives whatever surface:4 is bound to
 
 FLAGS
-     [--key]      Workspace-scoped browser key (default "default").
-     [--session]  Raw agent-browser session name (mutually exclusive with --key/--surface).
-     [--surface]  Surface handle whose bound session to drive (mutually exclusive with --key/--session).
-  -h  --help      Print help information and exit
-      --          All subsequent inputs should be interpreted as arguments
+     [--key]        Workspace-scoped browser key (default "default").
+     [--session]    Raw agent-browser session name (mutually exclusive with --key/--surface).
+     [--surface]    Surface handle whose bound session to drive (mutually exclusive with --key/--session).
+     [--workspace]  Workspace to act in, instead of the caller's.
+  -h  --help        Print help information and exit
+      --            All subsequent inputs should be interpreted as arguments
 
 ARGUMENTS
   args...  Arguments forwarded verbatim to agent-browser.

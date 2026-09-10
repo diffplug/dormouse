@@ -12,10 +12,13 @@ import {
   renderJson,
   requireControlClient,
   stringParser,
+  workspaceFlag,
+  workspaceParam,
   writeStdout,
 } from './shared.js';
 
 interface ReadFlags {
+  readonly workspace?: string;
   readonly json?: boolean;
   readonly lines?: number;
   readonly scrollback?: boolean;
@@ -28,14 +31,14 @@ export const readCommand: Command = {
       scope: 'root',
       findReplace: [
         '  dor read [--json] [--lines count] [--scrollback]<TO-EOL>',
-        '  dor read <surface> [--json] [--lines count] [--scrollback]\n',
+        '  dor read <surface> [--json] [--lines count] [--scrollback] [--workspace ref]\n',
       ],
     },
   ],
   command: buildCommand<ReadFlags, [string], DorCommandContext>({
     docs: {
       brief: 'Read terminal text from a surface.',
-      customUsage: ['<surface> [--json] [--lines count] [--scrollback]'],
+      customUsage: ['<surface> [--json] [--lines count] [--scrollback] [--workspace ref]'],
       fullDescription: `Reads the visible screen text from the target terminal surface. Use --scrollback to include terminal history, and --lines to limit how much text is returned.
 
 Text mode prints terminal text directly.
@@ -53,6 +56,7 @@ JSON output:
         json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
         lines: { kind: 'parsed', parse: parseLineCount, brief: 'Maximum number of lines to return.', optional: true, placeholder: 'count' },
         scrollback: { kind: 'boolean', brief: 'Include terminal scrollback/history instead of only the visible screen.', optional: true, withNegated: false },
+        workspace: workspaceFlag,
       },
       positional: {
         kind: 'tuple',
@@ -74,6 +78,7 @@ async function runReadCommand(this: DorCommandContext, flags: ReadFlags, surface
       ...(flags.lines !== undefined ? { lines: flags.lines } : {}),
       scrollback: flags.scrollback === true,
       surface,
+      ...workspaceParam(flags.workspace),
     });
     writeStdout(this, renderReadResponse(response, flags.json === true));
     return undefined;

@@ -1,0 +1,5 @@
+exitCode: 1
+stdout:
+
+stderr:
+Error: --force applies only to dor workspace close
