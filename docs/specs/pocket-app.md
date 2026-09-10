@@ -454,6 +454,23 @@ nothing** — there is no frame to send — and this Client's relay socket is to
 Source of truth: `PocketClient.sendKeepalive` / `#reapedByBurrow` and the injected
 timer, clock, and visibility seams in `lib/src/remote/client/pocket-client.ts`.
 
+## The path the session takes
+
+**Pocket offers a direct path once the connection outcome says `ok`**, over the
+browser's own `RTCPeerConnection` with no ICE servers, and keeps the session on
+the relay when the browser has none or the Burrow declines
+([remote-api.md](./remote-api.md) → Direct path owns the whole protocol).
+
+**The connected header names the live path** — `relay` or `direct`, captioned,
+never coloured — so a relayed fallback is visible rather than silent. **A
+channel that dies after the cutover is burrow loss**: the phone leaves the wall
+exactly as it does for a `burrow-gone`, and returning costs a fresh handshake
+and one WebAuthn prompt. Before the cutover a failed channel costs nothing.
+
+Source of truth: `PocketClient.transportPath` in
+`lib/src/remote/client/pocket-client.ts`, `TRANSPORT_PATH_LABELS` in
+`lib/src/remote/pocket-app/App.tsx`.
+
 ## An expired session drops to sign-in
 
 Sessions live only in the Relay's memory ([relay.md](./relay.md)), so they end

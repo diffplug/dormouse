@@ -12,6 +12,12 @@
 
 In September 2026, both production installations use `createAskSurfaceProvider`: resolution selects a routing key and applies the requested size, while `streamPty` separately owns the subscription. The former `SurfaceHandle.release` was a no-op in that shared constructor; a test-only release counter suggested a second resource lifetime that neither host had.
 
+## Direct path
+
+**Why host candidates alone reach.** The shipped deployment is a tailnet: the Burrow's tailnet address is a host candidate the phone can route to, and the phone's own mDNS-obfuscated candidate is learned peer-reflexively from the first packet. A STUN server would buy a public reflexive candidate the deployment does not need, at the price of telling a third party both addresses.
+
+**Why DTLS is not part of the trust model.** The channel is encrypted twice — DTLS underneath, Noise inside — and only the inner one is load-bearing. The DTLS fingerprints are authentic because the SDP carrying them was decrypted inside an authorized session, so DTLS adds transport hygiene rather than a second authority; a peer that broke it would still face the promoted session's ciphers.
+
 ## Envelope
 
 **Why the clamp's upper bound is the security-relevant half.** A local resize is derived from element geometry and cannot be large, but `terminal.resize` carries a peer-supplied number straight into `term.resize` in the webview that owns the pane, and xterm bounds only the minimum before allocating `rows × cols` cells. Unbounded, one frame asking for a million by a million wedges every terminal in that window, reachable by any authorized Client (`docs/specs/security-remote.md` → "Trust boundary"). `MAX_TERMINAL_DIMENSION` is 2000 — far past any real display, since a 4K screen at an unreadably small font is on the order of 800 columns — while capping the worst a peer can request at a few million cells.

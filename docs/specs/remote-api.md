@@ -59,6 +59,84 @@ Source of truth: the surface model the wire shapes reuse — `dor/src/protocol.t
 
 Source of truth: `BurrowRuntime.#promoteConnection` in `lib/src/remote/burrow/burrow-runtime.ts`.
 
+### Direct path
+
+After authorization the same Noise session moves off the Relay onto a WebRTC
+data channel between phone and laptop. **The presence protocol is inherited
+unchanged and the Relay is never trusted with authorization.** Which Burrows can
+answer is staged ([Future](#future)).
+
+**Every signal rides inside the session**, as one of four control messages
+([relay.md](./relay.md) → E2E framing) on the established session over the relay
+path: `direct-offer` (Client→Burrow, SDP), `direct-answer` (Burrow→Client, SDP),
+`direct-decline` (Burrow→Client), `direct-switch` (either direction) — each
+`{ v: 1, t }` with exact keys and no other field. **The Relay never sees an SDP,
+a candidate, or that a direct path exists.** **An unknown control shape on an
+established session is ignored, never a session failure**, so a peer without
+this stack stays relayed with no negotiation at all.
+
+**The Client offers once, after `ConnectionOutcomeV1 { ok: true }`, and never
+retries**; it is always the offerer and creates the one ordered, reliable data
+channel (`dormouse`, `arraybuffer`). **The Burrow answers at most one offer per
+session**, and declines where it has no peer to build. **Each side sends its
+whole description only after ICE gathering completes** — no trickle — bounded by
+`DIRECT_GATHER_TIMEOUT_MS`, after which the local description as it stands is
+what travels. **An SDP over `MAX_DIRECT_SDP_LENGTH` is never sent**: the Client
+skips the offer, the Burrow declines. That bound is derived from
+`CONTROL_PAYLOAD_SIZE` and the characters an SDP is made of, so a maximal signal
+always fits one control body.
+
+**No ICE servers.** `iceServers: []` at both ends, host candidates only.
+**Never a public STUN or TURN default** — it would hand a third party the user's
+address. (rationale)
+
+**Every byte on the channel is a Noise transport message of the promoted
+session**: one message per channel frame, raw bytes, the same two `CipherState`s
+and counters. **Every inbound channel frame is bounded at
+`NOISE_MAX_MESSAGE_LENGTH` before decryption**, and a frame over it — or a
+non-binary channel message — disposes the session. (rationale)
+
+**Cutover preserves order per direction:**
+
+* A sender's `direct-switch` is its **last** message on the relay path; every
+  later message, keepalives included, goes on the channel.
+* A receiver processes relay frames until it decrypts `direct-switch`, holding
+  channel frames meanwhile — at most `MAX_DIRECT_PENDING_FRAMES` /
+  `MAX_DIRECT_PENDING_BYTES`, **overflow disposing the session** — then drains
+  them in arrival order through the same decrypt path.
+* **After inbound has switched, a relay `transport` frame disposes the
+  session**, refused before any decrypt.
+* **After either direction has switched, the channel closing or erroring
+  disposes the session**: the Client reports burrow loss exactly as a
+  `burrow-gone`, the Burrow disposes the established entry. **Before any switch
+  a channel failure only abandons the attempt** — including a channel not open
+  by `DIRECT_SETUP_TIMEOUT_MS` — and the session stays relayed.
+
+**The Relay stays the lifecycle authority.** `client-gone`, `burrow-gone`, and
+either relay socket closing dispose the session, channel included, exactly as
+they do relayed; the idle deadline, keepalives, and every Burrow bound are
+path-agnostic, so a keepalive decrypted off the channel refreshes the deadline
+the same way ([remote-security-model.md](./remote-security-model.md) → Burrow
+bounds).
+
+**One peer connection per session**, created at the offer, closed on every
+disposal path, never existing before promotion. **Both ends build it through an
+injected factory** — `PocketClientDeps.createDirectPeer`,
+`BurrowOptions.createDirectPeer`, threaded through `BurrowServiceOptions` —
+answering `null` where a runtime has none, so neither end reaches a WebRTC
+global itself. **Pocket shows which path carries the session**
+([pocket-app.md](./pocket-app.md)).
+
+Source of truth: `remote-lib-common/src/security/direct-path.ts` (the signals,
+their guard, the constants, and the `DirectCutover` both ends run),
+`lib/src/remote/direct/direct-peer.ts` (`DirectPeerLike` and the negotiation),
+`PocketClient.#offerDirect` in `lib/src/remote/client/pocket-client.ts`,
+`BurrowRuntime.#answerDirect` in `lib/src/remote/burrow/burrow-runtime.ts`;
+pinned by `remote-lib-common/test/direct-path.test.mjs`,
+`lib/src/remote/direct/direct-peer.test.ts`, and the end-to-end cases in
+`lib/src/remote/client/pocket-client.test.ts` and
+`lib/src/remote/burrow/burrow-bounds.test.ts`.
+
 ### Envelope
 
 Requests are correlated by `requestId`, events by `subId` (`RemoteRequest`, `RemoteResponse`, `RemoteEventMsg`).
@@ -279,24 +357,14 @@ These are the methods the dor CLI speaks today; the remote API reuses their requ
 
 ### 8. Direct path (WebRTC)
 
-**Scope: direct-path** — latency. After authorization the same Noise session moves off the Relay onto a WebRTC data channel between phone and laptop; the presence protocol is inherited unchanged and the Relay is never trusted with authorization. Staged order:
+**Scope: direct-path** — latency. The shipped half is [Transport → Direct path](#direct-path), which Pocket offers and answers today. What remains, in staged order:
 
-1. **Shared plumbing** — `remote-lib-common`: the signaling controls, their guards, the cutover state machine and its bounds; a `direct` module under `lib/src/remote/`: one `RTCPeerConnection`-shaped peer wrapper both ends share, its peer factory injected (`PocketClientDeps.createDirectPeer`, `BurrowOptions.createDirectPeer`), null where a runtime has none.
-2. **Pocket offers; the standalone Burrow answers** — Pocket over the browser's `RTCPeerConnection`; the sidecar over `node-datachannel`'s W3C polyfill, a native addon declared in `standalone/sidecar/package.json` beside `node-pty`, loaded lazily at the first offer, a load failure answering `direct-decline`. The VS Code Burrow declines.
-3. **Security** — `docs/specs/security-remote.md` rows, `scripts/e2e-lint.mjs` rules with self-tests, the supply-chain disclosure regenerated, and a section of `docs/specs/remote-security-model.md` stating the path adds no layer to the trust model.
-4. **VS Code Burrow** — platform-targeted VSIX builds carrying the addon per target (`docs/specs/deploy.md`).
-5. **Dogfood** across a tailnet, keystroke round-trip measured relayed and direct into the rationale.
+1. **The standalone Burrow answers** — the sidecar over `node-datachannel`'s W3C polyfill, a native addon declared in `standalone/sidecar/package.json` beside `node-pty`, loaded lazily at the first offer, a load failure answering `direct-decline`.
+2. **Security** — `docs/specs/security-remote.md` rows, `scripts/e2e-lint.mjs` rules with self-tests, the supply-chain disclosure regenerated, and a section of `docs/specs/remote-security-model.md` stating the path adds no layer to the trust model.
+3. **VS Code Burrow** — platform-targeted VSIX builds carrying the addon per target (`docs/specs/deploy.md`).
+4. **Dogfood** across a tailnet, keystroke round-trip measured relayed and direct into the rationale.
 
-The design stages 1–3 build:
-
-* **Signaling rides inside the session**, as control messages (`docs/specs/relay.md` -> E2E framing) on the established session over the relay path: `direct-offer` (Client→Burrow, SDP), `direct-answer` (Burrow→Client, SDP), `direct-decline` (Burrow→Client), `direct-switch` (either direction). **The Relay never sees an SDP, a candidate, or that a direct path exists**; a peer without the stack ignores or declines, and the session stays relayed — an old Pocket or Burrow needs nothing.
-* **Offered only after `ConnectionOutcomeV1 { ok: true }`**, once per session, never retried. The Client is the offerer and creates one ordered, reliable data channel; each side sends its SDP after ICE gathering completes (no trickle), bounded by `CONTROL_PAYLOAD_SIZE` — a Burrow whose answer would exceed it declines.
-* **No ICE servers.** `iceServers: []` at both ends, host candidates only: the shipped deployment is a tailnet, so the Burrow's tailnet address is a host candidate and the phone's mDNS-obfuscated one is learned peer-reflexively. **Never a public STUN or TURN default** — it would hand a third party the user's address. Relay-supplied ICE servers are unstaged (SaaS).
-* **Every byte on the channel is a Noise transport message of the promoted session** — one message per channel frame, raw bytes, the same two `CipherState`s and counters, every frame bounded at `NOISE_MAX_MESSAGE_LENGTH` before decryption. DTLS beneath is transport hygiene the model does not rely on; its fingerprints are authentic because the SDP arrived inside the session.
-* **Cutover preserves order per direction.** A sender's `direct-switch` is its last message on the relay path; every later message goes on the channel. A receiver processes relay frames until it decrypts `direct-switch`, holding channel frames meanwhile — at most `MAX_DIRECT_PENDING_FRAMES` / `MAX_DIRECT_PENDING_BYTES`, overflow disposing the session — then drains them in arrival order. After the switch, a relay transport frame on that connection, or the channel closing, disposes the session: burrow loss, a fresh handshake to return. A channel not open by `DIRECT_SETUP_TIMEOUT_MS` is closed and the session stays relayed.
-* **The Relay stays the lifecycle authority.** `client-gone`, `burrow-gone`, and either relay socket closing dispose the session, channel included, exactly as today; the idle deadline, keepalives, and every Burrow bound are path-agnostic. A session surviving relay loss is unstaged.
-* **One peer connection per session**: created at the offer, closed on every disposal path, never existing before promotion.
-* **Pocket shows which path carries the session**, so a relayed fallback is visible rather than silent.
+Relay-supplied ICE servers are unstaged (SaaS), as is a session surviving relay loss.
 
 ### 9. Audio
 
