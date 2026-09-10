@@ -85,9 +85,13 @@ export class TerminalWebglRenderer {
     // addon or extension cannot abort the caller's teardown.
     try {
       addon?.dispose();
-    } catch { /* teardown continues */ }
+    } catch (error) {
+      console.error('[terminal-webgl] addon dispose threw; teardown continues', error);
+    }
     try {
       loseContext?.();
-    } catch { /* teardown continues */ }
+    } catch (error) {
+      console.error('[terminal-webgl] explicit context loss threw; teardown continues', error);
+    }
   }
 }

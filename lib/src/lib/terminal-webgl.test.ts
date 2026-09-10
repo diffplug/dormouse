@@ -61,6 +61,7 @@ let terminal: Terminal;
 let renderer: TerminalWebglRenderer;
 let previousEnabled: boolean;
 let getContext: ReturnType<typeof vi.spyOn>;
+let reportError: ReturnType<typeof vi.spyOn>;
 beforeEach(() => {
   state.addons.length = 0;
   state.order.length = 0;
@@ -72,6 +73,7 @@ beforeEach(() => {
   state.linkProbeThrows = false;
   state.disposeThrows = false;
   state.loseThrows = false;
+  reportError = vi.spyOn(console, 'error').mockImplementation(() => {});
   previousEnabled = cfg.terminal.webglRenderer;
   cfg.terminal.webglRenderer = true;
   vi.stubGlobal('WebGL2RenderingContext', class {});
@@ -191,16 +193,21 @@ describe('mount-scoped terminal WebGL resources', () => {
     expect(host.dataset.renderer).toBe('webgl');
     renderer.unmount();
     // The addon's own canvas is found behind the refusing one, so loss stays explicit.
+    expect(reportError).not.toHaveBeenCalled();
     expect(state.order).toEqual(['dispose', 'lose']);
     expect(state.addons[0].lost).toBe(true);
   });
 
-  it.each(['disposal', 'explicit loss'])('completes teardown when %s throws', which => {
+  it.each(['disposal', 'explicit loss'])('reports %s failures without aborting teardown', which => {
     state.disposeThrows = which === 'disposal';
     state.loseThrows = which === 'explicit loss';
     renderer.mount();
     // A throwing release must not abort the caller's unmount/park/dispose teardown.
     expect(() => renderer.unmount()).not.toThrow();
+    expect(reportError).toHaveBeenCalledExactlyOnceWith(
+      `[terminal-webgl] ${which === 'disposal' ? 'addon dispose' : 'explicit context loss'} threw; teardown continues`,
+      expect.any(Error),
+    );
     expect(state.order).toEqual(['dispose', 'lose']);
     expect(host.dataset.renderer).toBe('dom');
     state.disposeThrows = false;
