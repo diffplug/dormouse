@@ -21,6 +21,7 @@ import App, {
   BURROWS_TITLE,
   SCAN_LABEL,
   TRANSPORT_PATH_LABELS,
+  transportTitle,
   UNSUPPORTED_BROWSER_TITLE,
 } from './App';
 import type { ConnectResult, PairingResult } from '../client/pocket-client';
@@ -46,7 +47,7 @@ import { setNativeFieldValue } from '../../lib/dom';
 const fake = vi.hoisted(() => ({
   noiseSupported: true as boolean,
   /** The path callback `App` registered, so a case can report a cutover. */
-  onTransportPath: null as ((path: 'relay' | 'direct') => void) | null,
+  onTransportPath: null as ((path: 'relay' | 'direct', detail: string | null) => void) | null,
   hasPriorUse: false,
   sessionToken: null as string | null,
   setup: vi.fn<(credential: { setupToken: string }, label: string) => Promise<unknown>>(),
@@ -98,7 +99,9 @@ vi.mock('../client/pocket-client', async (importOriginal) => ({
     hasPriorUse = () => fake.hasPriorUse;
     registeredPushEndpoint = () => null;
     setOnBurrowGone = () => undefined;
-    setOnTransportPathChanged = (callback: ((path: 'relay' | 'direct') => void) | null) => {
+    setOnTransportChanged = (
+      callback: ((path: 'relay' | 'direct', detail: string | null) => void) | null,
+    ) => {
       fake.onTransportPath = callback;
     };
     close = () => fake.clientClose();
@@ -504,11 +507,42 @@ describe('the Burrows list', () => {
     // Every session starts on the relay and says so.
     expect(container.textContent).toContain(TRANSPORT_PATH_LABELS.relay.label);
 
-    act(() => fake.onTransportPath?.('direct'));
+    act(() => fake.onTransportPath?.('direct', null));
     await settle();
 
     expect(container.textContent).toContain(TRANSPORT_PATH_LABELS.direct.label);
     expect(container.textContent).not.toContain(TRANSPORT_PATH_LABELS.relay.label);
+  });
+
+  /**
+   * An attempt that quietly stayed relayed changes only the reason, so the
+   * label alone would say nothing had happened. **The reason rides the hover
+   * text, never the label**: inventing a third state for the common case would
+   * make it look like a fault.
+   */
+  it('carries the reason a session stayed relayed in the indicator’s hover text', async () => {
+    fake.hasPriorUse = true;
+    fake.listKnownBurrows.mockResolvedValue([await knownBurrow('burrow-1', 'First laptop')]);
+    fake.listBurrows.mockResolvedValue([{ burrowId: 'burrow-1', label: '', online: true }]);
+    await boot();
+    await click(container, 'Sign in with passkey');
+    await click(container, 'Connect');
+
+    act(() => fake.onTransportPath?.('relay', 'the peer declined a direct path'));
+    await settle();
+
+    const note = container.querySelector('[title]:not([title=""])');
+    expect(note?.textContent).toBe(TRANSPORT_PATH_LABELS.relay.label);
+    expect(note?.getAttribute('title')).toBe(
+      transportTitle('relay', 'the peer declined a direct path'),
+    );
+  });
+
+  it('leads the reason with a capital, and says nothing where there is none', () => {
+    expect(transportTitle('direct')).toBe(TRANSPORT_PATH_LABELS.direct.title);
+    expect(transportTitle('relay', 'the peer declined a direct path')).toBe(
+      `${TRANSPORT_PATH_LABELS.relay.title} The peer declined a direct path.`,
+    );
   });
 
   /**

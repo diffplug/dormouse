@@ -144,6 +144,13 @@ describe('the direct path over the native addon', () => {
       expect(run.clientPeers).toHaveLength(1);
       expect(run.burrowPeers).toHaveLength(1);
       expect(harness.client.transportPath).toBe('direct');
+      // The two facts `DirectPeer` reads off a real connection before it lets a
+      // session ride one: the association's own per-message limit, and that the
+      // seam's `sctp` really is where the polyfill reports it. A cutover
+      // happened, so both were already good enough — this says which numbers.
+      const sctp = run.clientPeers[0]!.sctp;
+      expect(sctp).not.toBeNull();
+      expect(sctp!.maxMessageSize).toBeGreaterThanOrEqual(NOISE_MAX_MESSAGE_LENGTH);
       // Three Client→Burrow transport frames on this connection: the connection
       // request the ceremony ended with, the offer, and the switch. Three back:
       // the outcome, the answer, and the Burrow's own switch. The SDPs crossed

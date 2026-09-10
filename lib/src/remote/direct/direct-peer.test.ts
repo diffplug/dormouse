@@ -6,7 +6,14 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { DIRECT_GATHER_TIMEOUT_MS, DIRECT_SETUP_TIMEOUT_MS, NOISE_MAX_MESSAGE_LENGTH } from 'remote-lib-common';
+import {
+  DIRECT_BUFFER_HIGH,
+  DIRECT_DISCONNECTED_GRACE_MS,
+  DIRECT_GATHER_TIMEOUT_MS,
+  DIRECT_SETUP_TIMEOUT_MS,
+  MAX_DIRECT_OUTBOUND_BYTES,
+  NOISE_MAX_MESSAGE_LENGTH,
+} from 'remote-lib-common';
 
 import { DIRECT_CHANNEL_LABEL, DirectPeer, type DirectPeerHandlers } from './direct-peer';
 import { FakeDirectNetwork, type FakeDirectNetworkOptions } from './test-fake-peer';
@@ -37,26 +44,32 @@ function pair(options: FakeDirectNetworkOptions = {}) {
   const timers = fakeTimers();
   const client = handlers();
   const burrow = handlers();
+  const offerer = network.createOfferer();
+  const answerer = network.createAnswerer();
   return {
     network,
     timers,
     client,
     burrow,
-    clientPeer: new DirectPeer({
-      peer: network.createOfferer(),
-      handlers: client,
-      setTimer: timers.setTimer,
-    }),
-    burrowPeer: new DirectPeer({
-      peer: network.createAnswerer(),
-      handlers: burrow,
-      setTimer: timers.setTimer,
-    }),
+    /** The connections themselves, for the cases that move their state. */
+    offerer,
+    answerer,
+    clientPeer: new DirectPeer({ peer: offerer, handlers: client, setTimer: timers.setTimer }),
+    burrowPeer: new DirectPeer({ peer: answerer, handlers: burrow, setTimer: timers.setTimer }),
   };
 }
 
 /** Let the fake network's queued microtasks run. */
 const flushMicrotasks = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+/** One negotiated pair with both channels open, as most cases start. */
+async function connected(options: FakeDirectNetworkOptions = {}) {
+  const run = pair(options);
+  const offer = await run.clientPeer.offer();
+  await run.clientPeer.acceptAnswer((await run.burrowPeer.answer(offer!))!);
+  await flushMicrotasks();
+  return run;
+}
 
 describe('DirectPeer', () => {
   it('negotiates one ordered channel and carries raw bytes both ways', async () => {
@@ -205,5 +218,131 @@ describe('DirectPeer', () => {
     clientPeer.close();
     clientPeer.close();
     expect(client.closes).toEqual([]);
+  });
+
+  describe('what a sender may hold', () => {
+    it('queues past the high-water mark and drains when the channel catches up', async () => {
+      const { network, clientPeer, burrow } = await connected();
+      const channel = network.offererChannel!;
+      channel.bufferedAmount = DIRECT_BUFFER_HIGH;
+
+      expect(clientPeer.send(Uint8Array.of(1))).toBe(true);
+      expect(clientPeer.send(Uint8Array.of(2))).toBe(true);
+      await flushMicrotasks();
+      // Held here rather than handed to a buffer that would refuse them.
+      expect(channel.sent).toEqual([]);
+      expect(burrow.frames).toEqual([]);
+
+      channel.drained();
+      await flushMicrotasks();
+
+      expect(burrow.frames).toEqual([Uint8Array.of(1), Uint8Array.of(2)]);
+    });
+
+    it('holds a later frame behind an earlier one, whatever the buffer says', async () => {
+      const { network, clientPeer } = await connected();
+      const channel = network.offererChannel!;
+      channel.bufferedAmount = DIRECT_BUFFER_HIGH;
+      clientPeer.send(Uint8Array.of(1));
+
+      // The buffer drains without the event that says so: a frame that jumped
+      // the queue here would reach the peer ahead of the one before it.
+      channel.bufferedAmount = 0;
+      clientPeer.send(Uint8Array.of(2));
+      await flushMicrotasks();
+
+      expect(channel.sent).toEqual([]);
+    });
+
+    it('refuses a send that would outrun the queue, in bytes', async () => {
+      const { network, clientPeer } = await connected();
+      network.offererChannel!.bufferedAmount = DIRECT_BUFFER_HIGH;
+      const frame = new Uint8Array(NOISE_MAX_MESSAGE_LENGTH);
+
+      let held = 0;
+      while (clientPeer.send(frame)) held += 1;
+
+      // Bytes bind first: the frame cap is far above what this many reaches.
+      expect(held * frame.length).toBeLessThanOrEqual(MAX_DIRECT_OUTBOUND_BYTES);
+      expect((held + 1) * frame.length).toBeGreaterThan(MAX_DIRECT_OUTBOUND_BYTES);
+    });
+
+    it('reports the channel gone when a queued frame will not go out', async () => {
+      const { network, clientPeer, client } = await connected();
+      const channel = network.offererChannel!;
+      channel.bufferedAmount = DIRECT_BUFFER_HIGH;
+      clientPeer.send(Uint8Array.of(1));
+
+      // Closed under the queue: the drain finds a channel that will not take it.
+      channel.readyState = 'closed';
+      channel.drained();
+
+      expect(client.closes).toEqual(['the direct channel refused a message']);
+    });
+  });
+
+  describe('what the channel has to be', () => {
+    it.each(['unordered', 'lossy', 'mislabeled'] as const)(
+      'refuses a %s channel, before anything rides it',
+      async (defect) => {
+        const { clientPeer, client } = pair({ channel: defect });
+
+        expect(await clientPeer.offer()).toBeNull();
+
+        expect(client.opens).toBe(0);
+        expect(client.closes).toEqual([
+          'the direct channel is not the reliable ordered one this session opens',
+        ]);
+      },
+    );
+
+    it('abandons a channel that cannot carry one Noise message', async () => {
+      const { clientPeer, client } = await connected({ maxMessageSize: 16_384 });
+
+      expect(client.opens).toBe(0);
+      expect(client.closes).toEqual(['the direct channel carries only 16384 bytes per message']);
+      expect(clientPeer.isOpen).toBe(false);
+    });
+
+    it('opens where the association reports no limit to check', async () => {
+      const { clientPeer, client } = await connected({ maxMessageSize: null });
+
+      expect(client.opens).toBe(1);
+      expect(clientPeer.isOpen).toBe(true);
+    });
+  });
+
+  describe('the connection under the channel', () => {
+    it('ends the attempt at once when the connection fails', async () => {
+      const { offerer, clientPeer, client } = await connected();
+
+      offerer.setConnectionState('failed');
+
+      expect(client.closes).toEqual(['the direct connection failed']);
+      expect(clientPeer.isOpen).toBe(false);
+    });
+
+    it('waits a disconnected connection out, then gives up on one that stays down', async () => {
+      const { offerer, client, timers } = await connected();
+
+      offerer.setConnectionState('disconnected');
+      // A gap ICE often recovers from: nothing is reported while it may.
+      expect(client.closes).toEqual([]);
+
+      timers.fireAt(DIRECT_DISCONNECTED_GRACE_MS);
+
+      expect(client.closes).toEqual(['the direct connection stayed disconnected']);
+    });
+
+    it('keeps a connection that comes back inside the grace', async () => {
+      const { offerer, clientPeer, client, timers } = await connected();
+
+      offerer.setConnectionState('disconnected');
+      offerer.setConnectionState('connected');
+
+      expect(timers.live).toEqual([]);
+      expect(client.closes).toEqual([]);
+      expect(clientPeer.isOpen).toBe(true);
+    });
   });
 });

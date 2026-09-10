@@ -341,8 +341,11 @@ omits `client-gone`, invents client IDs, or reorders frames.
 | `ESTABLISHED_E2E_IDLE_TIMEOUT_MS` | 120 000 | same |
 | `E2E_INIT_BURST` / `E2E_INIT_REFILL_INTERVAL_MS` | 8 / 1 000 | same |
 | `DIRECT_SETUP_TIMEOUT_MS` / `DIRECT_ANSWER_TIMEOUT_MS` / `DIRECT_GATHER_TIMEOUT_MS` | 15 000 / 10 000 / 3 000 | `remote-lib-common/src/security/direct-path.ts` |
+| `DIRECT_HANDOFF_TIMEOUT_MS` / `DIRECT_DISCONNECTED_GRACE_MS` | 5 000 / 5 000 | same |
 | `MAX_DIRECT_SDP_LENGTH` | 2 000 characters | same |
 | `MAX_DIRECT_PENDING_FRAMES` / `MAX_DIRECT_PENDING_BYTES` | 8 192 frames / 4 MiB, bytes binding first (rationale) | same |
+| `MAX_DIRECT_OUTBOUND_FRAMES` / `MAX_DIRECT_OUTBOUND_BYTES` | the same pair, for what a sender holds | same |
+| `DIRECT_BUFFER_HIGH` / `DIRECT_BUFFER_LOW` | 256 KiB / 64 KiB | same |
 
 - **Must bound waiting relay frames before enqueueing**, by count and cumulative
   received-string length; both `e2e` and `client-gone` share one FIFO and one
@@ -423,6 +426,10 @@ that ends one, are its rules. What this model adds is what is *underneath* them.
   an SDP are authentic for exactly one reason — that SDP arrived inside the
   session**. A DTLS peer is never an authenticated one.
 - **Never an ICE server.** Both ends pass an empty list. (rationale)
+- **What the channel may buffer is this side's bound, not the
+  implementation's**, in both directions ([remote-api.md](./remote-api.md) ->
+  "Direct path"): the same pair of numbers holds a sender's queue and a
+  receiver's, and overrunning either disposes the session.
 
 **The listener is UDP on every interface a candidate names, for the life of an
 attempt.** The standalone Burrow's addon binds one socket on the unspecified

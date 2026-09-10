@@ -100,6 +100,21 @@ and counters. **Every inbound channel frame is bounded at
 `NOISE_MAX_MESSAGE_LENGTH` before decryption**, and a frame over it — or a
 non-binary channel message — disposes the session. (rationale)
 
+**The channel a session rides is reliable, ordered, and named
+`DIRECT_CHANNEL_LABEL`**, and one whose association reports a per-message limit
+under `NOISE_MAX_MESSAGE_LENGTH` is refused: both are checked before the open is
+reported, so either abandons the attempt while the relay is still carrying the
+session. A limit the implementation does not report is not treated as small.
+
+**A sender bounds its own queue rather than the implementation's.** Past
+`DIRECT_BUFFER_HIGH` of buffered channel data the ciphertext queues, draining at
+`DIRECT_BUFFER_LOW`; once anything is queued everything queues, so nothing
+overtakes a frame encrypted before it. **A frame is written once or not at all** —
+the implementation's send either consumes a message or throws, and a retry would
+put counted ciphertext on the wire twice. Overflowing
+`MAX_DIRECT_OUTBOUND_FRAMES` / `MAX_DIRECT_OUTBOUND_BYTES` disposes the session,
+as the receiver's hold does.
+
 **Cutover preserves order per direction:**
 
 * A sender's `direct-switch` is its **last** message on the relay path; every
@@ -118,6 +133,14 @@ non-binary channel message — disposes the session. (rationale)
 * **A `direct-switch` arriving at an end that has abandoned its channel ends the
   session** too: nothing that peer sends can arrive, and the alternative is a
   session whose every request hangs unanswered.
+* **A peer that does not switch back within `DIRECT_HANDOFF_TIMEOUT_MS` ends the
+  session.** From its own switch this end sends only on the channel, so the wait
+  is its own deadline rather than however long the hold takes to fill; an end
+  whose peer had already switched waits on nothing.
+* **A connection reporting `failed` or `closed` ends the attempt at once, and
+  `disconnected` is waited out** for `DIRECT_DISCONNECTED_GRACE_MS` — ICE reports
+  it on gaps that recover, and after the switch ending one costs a fresh
+  handshake and a WebAuthn prompt.
 
 **The Relay stays the lifecycle authority.** `client-gone`, `burrow-gone`, and
 either relay socket closing dispose the session, channel included, exactly as
@@ -135,7 +158,8 @@ injected factory** — `PocketClientDeps.createDirectPeer`,
 ([pocket-app.md](./pocket-app.md)).
 
 Source of truth: `remote-lib-common/src/security/direct-path.ts` (the signals,
-their guard, the constants, and the `DirectCutover` both ends run),
+their guard, the constants, the `DirectFrameQueue` both queues are, and the
+`DirectCutover` both ends run),
 `lib/src/remote/direct/direct-peer.ts` (`DirectPeerLike` and the negotiation),
 `DirectEndpoint` in `lib/src/remote/direct/direct-endpoint.ts` (the whole
 cutover policy, one per authorized session; `onRelayFrame` is both ends' only

@@ -17,6 +17,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DIRECT_ANSWER_TIMEOUT_MS,
+  DIRECT_HANDOFF_TIMEOUT_MS,
   DIRECT_SETUP_TIMEOUT_MS,
   MAX_DIRECT_PENDING_FRAMES,
   toBase64Url,
@@ -38,6 +39,8 @@ interface Side {
   readonly fatals: string[];
   /** Every path change announced. */
   readonly paths: DirectPath[];
+  /** Every detail announced beside a path; see `DirectEndpoint.detail`. */
+  readonly details: Array<string | null>;
   /** Every signal this side put on the relay. */
   readonly sent: DirectSignalV1[];
   /** What `isCurrent()` answers; a promotion or teardown flips it. */
@@ -72,6 +75,7 @@ function pair(options: Options = {}) {
       received: [],
       fatals: [],
       paths: [],
+      details: [],
       sent: [],
       live: true,
       sendable: true,
@@ -109,7 +113,10 @@ function pair(options: Options = {}) {
       },
       fatal: (reason) => void side.fatals.push(reason),
       isCurrent: () => side.live,
-      onPathChanged: (path) => void side.paths.push(path),
+      onTransportChanged: (path, detail) => {
+        side.paths.push(path);
+        side.details.push(detail);
+      },
       setTimer: timers.setTimer,
     });
     sides.set(role, side);
@@ -350,6 +357,73 @@ describe('DirectEndpoint', () => {
     // And the offerer's own budget is gone with its peer, so nothing is left
     // armed to fire on a session that has moved on.
     expect(run.timers.live).toEqual([]);
+  });
+
+  /**
+   * From its own switch this end sends only on the channel, so a peer that
+   * never switches back leaves it talking into one nothing reads. Without a
+   * deadline of its own the wait would end only when the held frames overran
+   * their bound — a function of how chatty the session happens to be.
+   */
+  it('ends the session when the peer never follows onto the channel', async () => {
+    const run = pair({ opening: 'manual' });
+    await cutover(run);
+
+    // The answerer's own `direct-switch` never leaves it, so this end is
+    // outbound-direct with the relay still carrying the other half.
+    run.answerer.hold();
+    run.fake.openChannels();
+    expect(run.offerer.endpoint.path).toBe('relay');
+    expect(run.offerer.fatals).toEqual([]);
+
+    run.timers.fireAt(DIRECT_HANDOFF_TIMEOUT_MS);
+
+    expect(run.offerer.fatals).toEqual(['the peer did not follow onto the direct path']);
+  });
+
+  it('leaves nothing armed once the peer has followed', async () => {
+    const run = pair();
+
+    await cutover(run);
+
+    // Both setup budgets are gone with the opens, and both handoff deadlines
+    // with the switches that answered them.
+    expect(run.timers.live).toEqual([]);
+  });
+
+  describe('the reason behind the path', () => {
+    it('says why an attempt was given up, beside the unchanged path', async () => {
+      const run = pair({ offererHasPeer: false });
+
+      await run.offerer.endpoint.offer();
+
+      const reason = 'this device has no direct connection to offer';
+      expect(run.offerer.endpoint.detail).toBe(reason);
+      expect(run.offerer.details).toEqual([reason]);
+      // The path never changed; the announcement is the reason alone.
+      expect(run.offerer.paths).toEqual(['relay']);
+    });
+
+    it('says a decline is what ended the offerer’s attempt', async () => {
+      const run = pair({ answererHasPeer: false });
+
+      await run.offerer.endpoint.offer();
+      await flushMicrotasks();
+
+      expect(run.offerer.endpoint.detail).toBe('the peer declined a direct path');
+      expect(run.answerer.endpoint.detail).toBe(
+        'this device has no direct connection to answer with',
+      );
+    });
+
+    it('has nothing to say once the session is on the channel', async () => {
+      const run = pair();
+
+      await cutover(run);
+
+      expect(run.offerer.endpoint.detail).toBeNull();
+      expect(run.answerer.endpoint.detail).toBeNull();
+    });
   });
 
   it('ends the session when the peer switches onto a channel this end abandoned', async () => {

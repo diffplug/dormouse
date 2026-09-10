@@ -365,7 +365,12 @@ export class PocketClient {
   #onBurrowGone: (() => void) | null = null;
   /** This session's direct path, or null while there is no authorized session. */
   #direct: DirectEndpoint | null = null;
-  #onTransportPath: ((path: DirectPath) => void) | null = null;
+  #onTransportChanged: ((path: DirectPath, detail: string | null) => void) | null = null;
+  /**
+   * Why the live session is on the path it is on. Held here rather than read
+   * off the endpoint, which is dropped with the session that owned it.
+   */
+  #transportDetail: string | null = null;
   /** Cancels the armed keepalive, and the visibility subscription behind it. */
   #cancelKeepalive: (() => void) | null = null;
   #cancelVisibility: (() => void) | null = null;
@@ -415,9 +420,20 @@ export class PocketClient {
     return this.#direct?.path ?? 'relay';
   }
 
-  /** Notified whenever {@link transportPath} changes. */
-  setOnTransportPathChanged(callback: ((path: DirectPath) => void) | null): void {
-    this.#onTransportPath = callback;
+  /**
+   * Why this session is on the path it is on, or `null` where there is nothing
+   * to say — the sentence behind the indicator, so a session that stayed
+   * relayed can say which of the silent reasons it was.
+   */
+  get transportDetail(): string | null {
+    return this.#transportDetail;
+  }
+
+  /** Notified whenever {@link transportPath} or {@link transportDetail} changes. */
+  setOnTransportChanged(
+    callback: ((path: DirectPath, detail: string | null) => void) | null,
+  ): void {
+    this.#onTransportChanged = callback;
   }
 
   /**
@@ -1174,7 +1190,10 @@ export class PocketClient {
       // same event, and the app must leave the wall either way.
       fatal: (reason) => this.#loseBurrow(reason),
       isCurrent: () => this.#established === established,
-      onPathChanged: (path) => this.#onTransportPath?.(path),
+      onTransportChanged: (path, detail) => {
+        this.#transportDetail = detail;
+        this.#onTransportChanged?.(path, detail);
+      },
       setTimer: this.#setTimer,
     });
   }
@@ -1526,6 +1545,9 @@ export class PocketClient {
     // none can outlive the session that authorized it.
     this.#direct?.dispose();
     this.#direct = null;
+    // After the dispose, whose own announcement is still this session's: the
+    // previous session's reason says nothing about the next one.
+    this.#transportDetail = null;
     this.#connectedBurrowId = null;
     this.#established = null;
   }

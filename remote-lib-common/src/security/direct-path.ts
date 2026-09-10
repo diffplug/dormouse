@@ -72,6 +72,113 @@ export const MAX_DIRECT_PENDING_BYTES = 4 * 1024 * 1024;
 export const MAX_DIRECT_PENDING_FRAMES = 8192;
 
 /**
+ * How long this end waits, after putting its own `direct-switch` on the relay,
+ * for the peer's to come back the other way.
+ *
+ * Its own bound rather than the holding queue's: a peer that has stopped
+ * switching leaves this end sending into a channel nothing reads, and waiting
+ * for {@link MAX_DIRECT_PENDING_BYTES} to fill makes the wait a function of how
+ * chatty the session happens to be. Generous next to the relay round trip the
+ * peer's switch actually takes.
+ */
+export const DIRECT_HANDOFF_TIMEOUT_MS = 5_000;
+
+/**
+ * How long a connection may sit `disconnected` before the attempt is written
+ * off. ICE reports that state on a gap the connection may well recover from — a
+ * phone changing networks, a radio blip — and ending a switched session there
+ * costs a fresh handshake and a WebAuthn prompt, so the transient case is
+ * waited out. `failed` and `closed` are terminal and are never waited on.
+ */
+export const DIRECT_DISCONNECTED_GRACE_MS = 5_000;
+
+/**
+ * How much a sender holds while the channel drains, in bytes and in frames.
+ *
+ * The same pair of numbers as the receiver's hold, for the same reasons: what a
+ * queue has to cover is a burst of a terminal stream, bytes are what the machine
+ * actually holds, and the frame count sits above where the ~1 KiB frames a PTY
+ * produces can reach it. A sender that overruns them is one whose peer is not
+ * draining fast enough to stay in order, which is a dead session rather than a
+ * dropped frame — the same answer the receiver gives.
+ */
+export const MAX_DIRECT_OUTBOUND_BYTES = MAX_DIRECT_PENDING_BYTES;
+export const MAX_DIRECT_OUTBOUND_FRAMES = MAX_DIRECT_PENDING_FRAMES;
+
+/**
+ * How much the channel implementation may have buffered before a sender stops
+ * handing it more and queues instead, and the level it must drain back to
+ * before sending resumes.
+ *
+ * Two levels rather than one, so a busy stream is not woken on every frame.
+ * {@link MAX_DIRECT_OUTBOUND_BYTES} is what bounds the wait; these only decide
+ * where the ciphertext sits while the association catches up.
+ */
+export const DIRECT_BUFFER_HIGH = 256 * 1024;
+export const DIRECT_BUFFER_LOW = 64 * 1024;
+
+/**
+ * A run of channel frames bounded in both frames and bytes, **bytes binding
+ * first**.
+ *
+ * Both of the direct path's queues are one of these — what a receiver holds
+ * until the peer's switch decrypts, and what a sender holds while the channel
+ * drains — so "over the bound" means one thing in both directions.
+ *
+ * **A queued frame is copied.** Queueing is what makes a frame outlive the call
+ * that produced it, and on the receive side that call's buffer is a view over
+ * whatever the runtime handed it.
+ */
+export class DirectFrameQueue {
+  readonly #frames: Uint8Array[] = [];
+  readonly #maxFrames: number;
+  readonly #maxBytes: number;
+  #bytes = 0;
+
+  constructor(maxFrames: number, maxBytes: number) {
+    this.#maxFrames = maxFrames;
+    this.#maxBytes = maxBytes;
+  }
+
+  get length(): number {
+    return this.#frames.length;
+  }
+
+  get bytes(): number {
+    return this.#bytes;
+  }
+
+  /** Whether one more frame of `length` bytes would break either bound. */
+  wouldOverflow(length: number): boolean {
+    return this.#frames.length >= this.#maxFrames || this.#bytes + length > this.#maxBytes;
+  }
+
+  push(frame: Uint8Array): void {
+    this.#frames.push(frame.slice());
+    this.#bytes += frame.length;
+  }
+
+  /** The oldest frame, or `undefined` where there is none. */
+  shift(): Uint8Array | undefined {
+    const frame = this.#frames.shift();
+    if (frame) this.#bytes -= frame.length;
+    return frame;
+  }
+
+  /** Everything held, in arrival order, leaving the queue empty. */
+  take(): Uint8Array[] {
+    const frames = [...this.#frames];
+    this.clear();
+    return frames;
+  }
+
+  clear(): void {
+    this.#frames.length = 0;
+    this.#bytes = 0;
+  }
+}
+
+/**
  * Which path carries a session's traffic. `direct` only once **both**
  * directions have switched — until then the relay is still carrying half of it,
  * and telling the user otherwise would be a claim about a path that is not yet
@@ -178,8 +285,7 @@ export class DirectCutover {
   #state: DirectAttemptState = 'idle';
   #outbound: DirectPath = 'relay';
   #inbound: DirectPath = 'relay';
-  readonly #held: Uint8Array[] = [];
-  #heldBytes = 0;
+  readonly #held = new DirectFrameQueue(MAX_DIRECT_PENDING_FRAMES, MAX_DIRECT_PENDING_BYTES);
 
   /** How far this end's one attempt has got. */
   get state(): DirectAttemptState {
@@ -211,7 +317,7 @@ export class DirectCutover {
   }
 
   get pendingBytes(): number {
-    return this.#heldBytes;
+    return this.#held.bytes;
   }
 
   /**
@@ -274,37 +380,28 @@ export class DirectCutover {
   onSwitchDecrypted(): DirectSwitchOutcome {
     if (this.#state === 'abandoned') return { kind: 'fatal' };
     this.#inbound = 'direct';
-    const frames = [...this.#held];
-    this.clear();
-    return { kind: 'drain', frames };
+    return { kind: 'drain', frames: this.#held.take() };
   }
 
   /**
    * One inbound channel frame: processed once the peer's switch has been read,
    * held until then, and `overflow` when holding it would break the bound.
    *
-   * **A held frame is copied, and only a held frame.** Holding is the one thing
-   * here that outlives the call, so it is the one place the caller's buffer —
-   * a view over whatever the runtime handed it — cannot be trusted to still say
-   * the same thing when the queue drains. A frame answered `process` is
+   * **A held frame is copied, and only a held frame.** Holding is what makes a
+   * frame outlive this call, and the caller's buffer — a view over whatever the
+   * runtime handed it — cannot be trusted to still say the same thing when the
+   * queue drains ({@link DirectFrameQueue}). A frame answered `process` is
    * decrypted before this returns.
    */
   onChannelFrame(frame: Uint8Array): DirectChannelOutcome {
     if (this.#inbound === 'direct') return 'process';
-    if (
-      this.#held.length >= MAX_DIRECT_PENDING_FRAMES ||
-      this.#heldBytes + frame.length > MAX_DIRECT_PENDING_BYTES
-    ) {
-      return 'overflow';
-    }
-    this.#held.push(frame.slice());
-    this.#heldBytes += frame.length;
+    if (this.#held.wouldOverflow(frame.length)) return 'overflow';
+    this.#held.push(frame);
     return 'held';
   }
 
   /** Release held frames; a disposed session has nothing left to drain them. */
   clear(): void {
-    this.#held.length = 0;
-    this.#heldBytes = 0;
+    this.#held.clear();
   }
 }

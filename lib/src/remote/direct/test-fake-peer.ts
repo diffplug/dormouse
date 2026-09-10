@@ -16,10 +16,12 @@
  * `TestRelay.holdToClient()`, on the side that is actually slow.
  */
 
+import { NOISE_MAX_MESSAGE_LENGTH } from 'remote-lib-common';
 import {
   DIRECT_CHANNEL_LABEL,
   type DirectChannelLike,
   type DirectPeerLike,
+  type DirectSctpLike,
   type DirectSessionDescription,
 } from './direct-peer';
 import { FakeEventTarget } from '../test-fake-socket';
@@ -42,6 +44,14 @@ export interface FakeDirectNetworkOptions {
   readonly gathering?: 'complete' | 'pending';
   /** Which side describes itself with an SDP over the signal's bound. */
   readonly oversize?: 'offer' | 'answer';
+  /**
+   * What the association reports as its per-message limit, for the case where
+   * it is too small to carry one Noise transport message. `null` models an
+   * implementation that reports no association at all.
+   */
+  readonly maxMessageSize?: number | null;
+  /** A channel a Noise stream cannot ride; see {@link FakeChannel}. */
+  readonly channel?: 'unordered' | 'lossy' | 'mislabeled';
 }
 
 /** One end of the linked pair; the offerer creates the channel. */
@@ -128,6 +138,7 @@ export class FakePeer implements DirectPeerLike {
   readonly #events = new FakeEventTarget();
   #local: DirectSessionDescription | null = null;
   #gathering: string;
+  #connectionState = 'connecting';
   closed = false;
 
   constructor(
@@ -149,8 +160,24 @@ export class FakePeer implements DirectPeerLike {
     return this.#local;
   }
 
+  get sctp(): DirectSctpLike | null {
+    const limit = this.#options.maxMessageSize;
+    if (limit === null) return null;
+    return { maxMessageSize: limit ?? NOISE_MAX_MESSAGE_LENGTH };
+  }
+
+  get connectionState(): string {
+    return this.#connectionState;
+  }
+
+  /** Move the connection, firing the event a real one does. */
+  setConnectionState(state: string): void {
+    this.#connectionState = state;
+    this.#emit('connectionstatechange', {});
+  }
+
   createDataChannel(label: string): DirectChannelLike {
-    const channel = new FakeChannel(label);
+    const channel = new FakeChannel(label, this.#options.channel);
     this.#network.registerChannel(this.#role, channel);
     return channel;
   }
@@ -170,7 +197,7 @@ export class FakePeer implements DirectPeerLike {
   async setRemoteDescription(description: DirectSessionDescription): Promise<void> {
     if (description.type === 'offer') {
       // The answerer learns of the channel here, exactly as a real one does.
-      const channel = new FakeChannel(DIRECT_CHANNEL_LABEL);
+      const channel = new FakeChannel(DIRECT_CHANNEL_LABEL, this.#options.channel);
       this.#network.registerChannel(this.#role, channel);
       this.#emit('datachannel', { channel });
       return;
@@ -213,6 +240,17 @@ export class FakeChannel implements DirectChannelLike {
   readonly label: string;
   binaryType = 'blob';
   readyState = 'connecting';
+  /** The three reliability facts `DirectPeer` checks before it adopts one. */
+  readonly ordered: boolean;
+  readonly maxRetransmits: number | null;
+  readonly maxPacketLifeTime: number | null;
+  /**
+   * What the implementation is still holding. Sends do not move it — a case
+   * that wants a busy channel sets it, then calls {@link drained} to model the
+   * association catching up.
+   */
+  bufferedAmount = 0;
+  bufferedAmountLowThreshold = 0;
   /** Every frame this end was asked to send, in order. */
   readonly sent: Uint8Array[] = [];
   #peer: FakeChannel | null = null;
@@ -220,8 +258,17 @@ export class FakeChannel implements DirectChannelLike {
   readonly #inbox: Uint8Array[] = [];
   readonly #events = new FakeEventTarget();
 
-  constructor(label: string) {
-    this.label = label;
+  constructor(label: string, defect?: 'unordered' | 'lossy' | 'mislabeled') {
+    this.label = defect === 'mislabeled' ? `${label}-other` : label;
+    this.ordered = defect !== 'unordered';
+    this.maxRetransmits = defect === 'lossy' ? 3 : null;
+    this.maxPacketLifeTime = null;
+  }
+
+  /** The association caught up: drop to the low-water mark and wake the sender. */
+  drained(): void {
+    this.bufferedAmount = 0;
+    this.#events.emit('bufferedamountlow', {});
   }
 
   link(peer: FakeChannel): void {

@@ -349,13 +349,17 @@ export default function App({
   }, [client, teardownAdapter]);
 
   /**
-   * Which path carries the live session. Subscribed rather than read on render:
-   * the cutover happens seconds into a session, long after the wall is up.
+   * Which path carries the live session, and why. Subscribed rather than read on
+   * render: the cutover happens seconds into a session, long after the wall is
+   * up, and an attempt that quietly stays relayed changes only the detail.
    */
-  const [transportPath, setTransportPath] = useState<DirectPath>('relay');
+  const [transport, setTransport] = useState<{ path: DirectPath; detail: string | null }>({
+    path: 'relay',
+    detail: null,
+  });
   useEffect(() => {
-    client.setOnTransportPathChanged(setTransportPath);
-    return () => client.setOnTransportPathChanged(null);
+    client.setOnTransportChanged((path, detail) => setTransport({ path, detail }));
+    return () => client.setOnTransportChanged(null);
   }, [client]);
 
   /** The connect half, shared so a fresh pairing can continue straight into it. */
@@ -631,7 +635,8 @@ export default function App({
         <ConnectedView
           burrow={phase.burrow}
           adapter={adapterRef.current}
-          transportPath={transportPath}
+          transportPath={transport.path}
+          transportDetail={transport.detail}
           onLeave={leaveWall}
           onError={onWallError}
         />
@@ -795,11 +800,23 @@ export const TRANSPORT_PATH_LABELS: Record<DirectPath, { label: string; title: s
   direct: { label: 'direct', title: 'This session goes straight to the computer.' },
 };
 
+/**
+ * The indicator's hover text: which path, and the reason behind it where there
+ * is one. **The reason is shown, never the label** — an attempt that quietly
+ * stayed relayed is still `relay`, and inventing a third state for it would
+ * make the common case look like a fault.
+ */
+export function transportTitle(path: DirectPath, detail?: string | null): string {
+  const { title } = TRANSPORT_PATH_LABELS[path];
+  return detail ? `${title} ${detail.charAt(0).toUpperCase()}${detail.slice(1)}.` : title;
+}
+
 /** The connected Pocket shell: Burrow navigation chrome over the remote wall. */
 export function ConnectedView({
   burrow,
   adapter,
   transportPath = 'relay',
+  transportDetail = null,
   onLeave,
   onError,
 }: {
@@ -807,10 +824,12 @@ export function ConnectedView({
   adapter: RemotePtyAdapter;
   /** Which path carries the session; see {@link TRANSPORT_PATH_LABELS}. */
   transportPath?: DirectPath;
+  /** Why it is on that path; see {@link transportTitle}. */
+  transportDetail?: string | null;
   onLeave: () => void;
   onError?: (error: unknown) => void;
 }): React.ReactElement {
-  const path = TRANSPORT_PATH_LABELS[transportPath];
+  const label = TRANSPORT_PATH_LABELS[transportPath].label;
   return (
     <div className={PK.app}>
       <header className={PK.header}>
@@ -818,8 +837,8 @@ export function ConnectedView({
           ‹ {BURROWS_TITLE}
         </button>
         <h1 className={PK.headerTitle}>{burrow.label || burrow.burrowId}</h1>
-        <span className={PK.headerNote} title={path.title}>
-          {path.label}
+        <span className={PK.headerNote} title={transportTitle(transportPath, transportDetail)}>
+          {label}
         </span>
       </header>
       <div className={PK.wallHost}>

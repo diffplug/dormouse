@@ -14,6 +14,7 @@
  */
 
 import {
+  DIRECT_HANDOFF_TIMEOUT_MS,
   DirectCutover,
   fromBase64Url,
   isDirectSignalV1,
@@ -23,7 +24,7 @@ import {
 } from 'remote-lib-common';
 
 import { DirectPeer, type DirectPeerFactory } from './direct-peer';
-import type { RemoteTimer } from '../ws';
+import { realTimer, type RemoteTimer } from '../ws';
 
 /**
  * Which half of the negotiation this end plays. The Client offers and the
@@ -59,8 +60,12 @@ export interface DirectEndpointDeps {
    * session while a description is being built.
    */
   isCurrent(): boolean;
-  /** Notified whenever {@link DirectEndpoint.path} changes; the Client's indicator. */
-  onPathChanged?(path: DirectPath): void;
+  /**
+   * Notified whenever {@link DirectEndpoint.path} or {@link
+   * DirectEndpoint.detail} changes; the Client's indicator. The detail is why
+   * the session is on the path it is on — `null` once nothing is worth saying.
+   */
+  onTransportChanged?(path: DirectPath, detail: string | null): void;
   /** Every deadline the peer arms; see {@link RemoteTimer}. */
   readonly setTimer?: RemoteTimer;
 }
@@ -69,19 +74,33 @@ export class DirectEndpoint {
   readonly #role: DirectRole;
   readonly #deps: DirectEndpointDeps;
   readonly #cutover = new DirectCutover();
+  readonly #setTimer: RemoteTimer;
   #peer: DirectPeer | null = null;
   #disposed = false;
-  /** The last path announced, so an unchanged one is not announced twice. */
-  #announced: DirectPath = 'relay';
+  #detail: string | null = null;
+  /** Cancels the wait for the peer's switch; see {@link #armHandoffTimeout}. */
+  #cancelHandoff: (() => void) | null = null;
+  /** The last pair announced, so an unchanged one is not announced twice. */
+  #announced: { path: DirectPath; detail: string | null } = { path: 'relay', detail: null };
 
   constructor(role: DirectRole, deps: DirectEndpointDeps) {
     this.#role = role;
     this.#deps = deps;
+    this.#setTimer = deps.setTimer ?? realTimer;
   }
 
   /** What carries this session; `direct` only once **both** directions have switched. */
   get path(): DirectPath {
     return this.#disposed ? 'relay' : this.#cutover.path;
+  }
+
+  /**
+   * Why the session is on the path it is on, or `null` where there is nothing
+   * to say. Set by every route that gives an attempt up, so a session that
+   * stayed relayed can say which of the many silent reasons it was.
+   */
+  get detail(): string | null {
+    return this.#detail;
   }
 
   /**
@@ -97,7 +116,7 @@ export class DirectEndpoint {
     if (this.#role !== 'offerer' || !this.#cutover.begin()) return;
     const peer = this.#build();
     if (!peer) {
-      this.#giveUp();
+      this.#giveUp('this device has no direct connection to offer');
       return;
     }
     const sdp = await peer.offer();
@@ -128,6 +147,7 @@ export class DirectEndpoint {
           this.#deps.fatal('the peer moved to a direct path this end had abandoned');
           return;
         }
+        this.#clearHandoffTimeout();
         this.#announce();
         // In arrival order, through the same decrypt path the relay's frames
         // take: what was held is exactly what was sent after the switch.
@@ -197,6 +217,7 @@ export class DirectEndpoint {
   dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
+    this.#clearHandoffTimeout();
     this.#peer?.close();
     this.#peer = null;
     this.#cutover.clear();
@@ -214,13 +235,13 @@ export class DirectEndpoint {
     if (!this.#cutover.begin()) return;
     const peer = this.#build();
     if (!peer) {
-      this.#decline();
+      this.#decline('this device has no direct connection to answer with');
       return;
     }
     const sdp = await peer.answer(offerSdp);
     if (!this.#stillOurs(peer)) return;
     if (sdp === null) {
-      this.#decline();
+      this.#decline('this device could not describe a direct connection');
       return;
     }
     if (!this.#deps.sendSignal({ v: 1, t: 'direct-answer', sdp })) this.#giveUp();
@@ -241,8 +262,8 @@ export class DirectEndpoint {
    * Give the attempt up and say so, rather than leaving the offerer to wait out
    * its setup deadline for a channel that is never coming.
    */
-  #decline(): void {
-    this.#giveUp();
+  #decline(reason: string): void {
+    this.#giveUp(reason);
     this.#deps.sendSignal({ v: 1, t: 'direct-decline' });
   }
 
@@ -282,8 +303,35 @@ export class DirectEndpoint {
       this.#giveUp();
       return;
     }
-    this.#cutover.switchOutbound();
+    if (this.#cutover.switchOutbound()) this.#armHandoffTimeout();
+    this.#detail = null;
     this.#announce();
+  }
+
+  /**
+   * **The cutover gets a deadline of its own.** From here this end sends only on
+   * the channel, so a peer that never switches back leaves it talking into a
+   * channel nothing reads; without this the wait would end only when the held
+   * frames overran their bound, which is a function of how chatty the session
+   * happens to be rather than of anything going wrong.
+   *
+   * There is no relay left to fall back to, so expiry is burrow loss.
+   */
+  #armHandoffTimeout(): void {
+    // Nothing to wait for where the peer switched first — the ordinary order
+    // for whichever end's channel opens second.
+    if (this.#cutover.inbound === 'direct') return;
+    this.#clearHandoffTimeout();
+    this.#cancelHandoff = this.#setTimer(() => {
+      this.#cancelHandoff = null;
+      if (!this.#alive() || this.#cutover.inbound === 'direct') return;
+      this.#deps.fatal('the peer did not follow onto the direct path');
+    }, DIRECT_HANDOFF_TIMEOUT_MS);
+  }
+
+  #clearHandoffTimeout(): void {
+    this.#cancelHandoff?.();
+    this.#cancelHandoff = null;
   }
 
   /** One frame off the channel: processed, held until the peer's switch, or fatal. */
@@ -338,9 +386,12 @@ export class DirectEndpoint {
       this.#deps.fatal(reason);
       return;
     }
+    this.#clearHandoffTimeout();
     this.#peer?.close();
     this.#peer = null;
     this.#cutover.abandon();
+    this.#detail = reason;
+    this.#announce();
   }
 
   /** Whether this endpoint still belongs to the session the caller is serving. */
@@ -350,8 +401,9 @@ export class DirectEndpoint {
 
   #announce(): void {
     const path = this.path;
-    if (path === this.#announced) return;
-    this.#announced = path;
-    this.#deps.onPathChanged?.(path);
+    const detail = this.#detail;
+    if (path === this.#announced.path && detail === this.#announced.detail) return;
+    this.#announced = { path, detail };
+    this.#deps.onTransportChanged?.(path, detail);
   }
 }

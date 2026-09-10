@@ -462,14 +462,17 @@ the relay when the browser has none or the Burrow declines
 ([remote-api.md](./remote-api.md) → Direct path owns the whole protocol).
 
 **The connected header names the live path** — `relay` or `direct`, captioned,
-never coloured — so a relayed fallback is visible rather than silent. **A
+never coloured — so a relayed fallback is visible rather than silent, **with the
+reason behind it in the hover text and never in the label**: an attempt that
+quietly stayed relayed is still `relay`, and a third state for the common case
+would read as a fault. **A
 channel that dies after the cutover is burrow loss**: the phone leaves the wall
 exactly as it does for a `burrow-gone`, and returning costs a fresh handshake
 and one WebAuthn prompt. Before the cutover a failed channel costs nothing.
 
-Source of truth: `PocketClient.transportPath` in
-`lib/src/remote/client/pocket-client.ts`, `TRANSPORT_PATH_LABELS` in
-`lib/src/remote/pocket-app/App.tsx`.
+Source of truth: `PocketClient.transportPath` / `transportDetail` in
+`lib/src/remote/client/pocket-client.ts`, `TRANSPORT_PATH_LABELS` and
+`transportTitle` in `lib/src/remote/pocket-app/App.tsx`.
 
 ## An expired session drops to sign-in
 

@@ -14,9 +14,16 @@ import assert from 'node:assert/strict';
 import {
   CONTROL_PAYLOAD_SIZE,
   DIRECT_ANSWER_TIMEOUT_MS,
+  DIRECT_BUFFER_HIGH,
+  DIRECT_BUFFER_LOW,
+  DIRECT_DISCONNECTED_GRACE_MS,
   DIRECT_GATHER_TIMEOUT_MS,
+  DIRECT_HANDOFF_TIMEOUT_MS,
   DIRECT_SETUP_TIMEOUT_MS,
   DirectCutover,
+  DirectFrameQueue,
+  MAX_DIRECT_OUTBOUND_BYTES,
+  MAX_DIRECT_OUTBOUND_FRAMES,
   MAX_DIRECT_PENDING_BYTES,
   MAX_DIRECT_PENDING_FRAMES,
   MAX_DIRECT_SDP_LENGTH,
@@ -110,6 +117,81 @@ test('the timings the spec names are the values that ship', () => {
   // answerer opens, switches, and its `direct-switch` decrypts at an offerer
   // that has just abandoned, which is fatal at both ends.
   assert.ok(DIRECT_ANSWER_TIMEOUT_MS < DIRECT_SETUP_TIMEOUT_MS);
+  // The wait for the peer's own switch begins where the setup budget ends, and
+  // is a relay round trip rather than a whole negotiation.
+  assert.equal(DIRECT_HANDOFF_TIMEOUT_MS, 5_000);
+  assert.ok(DIRECT_HANDOFF_TIMEOUT_MS < DIRECT_ANSWER_TIMEOUT_MS);
+  // Long enough that a gap ICE recovers from is waited out rather than charged
+  // a fresh handshake and a WebAuthn prompt.
+  assert.equal(DIRECT_DISCONNECTED_GRACE_MS, 5_000);
+});
+
+/**
+ * The two water marks bracket where ciphertext sits while the association
+ * catches up. They only matter relative to each other and to the queue: a low
+ * mark at or above the high one would wake the sender on every frame, and a
+ * high mark above what may be held would let the implementation buffer more
+ * than this side is willing to.
+ */
+test('the send water marks bracket the queue they feed', () => {
+  assert.equal(DIRECT_BUFFER_HIGH, 256 * 1024);
+  assert.equal(DIRECT_BUFFER_LOW, 64 * 1024);
+  assert.ok(DIRECT_BUFFER_LOW < DIRECT_BUFFER_HIGH);
+  assert.ok(DIRECT_BUFFER_HIGH < MAX_DIRECT_OUTBOUND_BYTES);
+});
+
+/**
+ * A sender holds what a receiver holds. The window each covers is a burst of
+ * the same terminal stream, so sizing them apart would mean one of the two
+ * numbers had a reason the other did not.
+ */
+test('both directions are bounded the same way', () => {
+  assert.equal(MAX_DIRECT_OUTBOUND_BYTES, MAX_DIRECT_PENDING_BYTES);
+  assert.equal(MAX_DIRECT_OUTBOUND_FRAMES, MAX_DIRECT_PENDING_FRAMES);
+});
+
+// --- The cutover ------------------------------------------------------------
+
+const frame = (n, size = 4) => new Uint8Array(size).fill(n);
+
+// --- The queue both directions use ------------------------------------------
+
+test('a queue admits frames until either bound, bytes first at PTY sizes', () => {
+  const queue = new DirectFrameQueue(4, 10);
+  assert.equal(queue.wouldOverflow(10), false);
+  queue.push(frame(1, 6));
+  assert.equal(queue.length, 1);
+  assert.equal(queue.bytes, 6);
+  // 6 + 5 is over the byte cap while the frame cap has room to spare.
+  assert.equal(queue.wouldOverflow(5), true);
+  assert.equal(queue.wouldOverflow(4), false);
+});
+
+test('a queue admits no more frames than its frame cap, whatever their size', () => {
+  const queue = new DirectFrameQueue(2, 1_000);
+  queue.push(frame(1, 1));
+  queue.push(frame(2, 1));
+  assert.equal(queue.wouldOverflow(1), true);
+});
+
+test('a queued frame is copied, so the caller may reuse its buffer', () => {
+  const queue = new DirectFrameQueue(4, 100);
+  const buffer = frame(1);
+  queue.push(buffer);
+  buffer.fill(9);
+  assert.deepEqual(queue.take(), [frame(1)]);
+});
+
+test('a queue gives frames back in arrival order, and empties on take', () => {
+  const queue = new DirectFrameQueue(4, 100);
+  queue.push(frame(1));
+  queue.push(frame(2));
+  assert.deepEqual(queue.shift(), frame(1));
+  assert.equal(queue.bytes, 4);
+  assert.deepEqual(queue.take(), [frame(2)]);
+  assert.equal(queue.length, 0);
+  assert.equal(queue.bytes, 0);
+  assert.equal(queue.shift(), undefined);
 });
 
 /**
@@ -129,10 +211,6 @@ test('the holding queue is bounded in bytes first', () => {
   // milliseconds to a phone on cellular: half a second of a fast stream fits.
   assert.ok(MAX_DIRECT_PENDING_BYTES >= 0.5 * 5_000_000);
 });
-
-// --- The cutover ------------------------------------------------------------
-
-const frame = (n, size = 4) => new Uint8Array(size).fill(n);
 
 test('starts relayed in both directions', () => {
   const cutover = new DirectCutover();
