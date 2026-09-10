@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 import http from 'node:http';
-import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { readFile } from 'node:fs/promises';
-import { randomBytes } from 'node:crypto';
+import { readFile, realpath } from 'node:fs/promises';
+import { createHash, randomBytes } from 'node:crypto';
+import { createServer } from 'vite';
+import { sessionForKey } from 'dor-lib-common/agent-browser';
 import { fileURLToPath } from 'node:url';
-// cross-spawn, not node:child_process: this script spawns `pnpm` and
+// cross-spawn, not node:child_process: this script spawns `dor` and
 // `agent-browser`, which are `.cmd` shims on Windows that a bare-name spawn
 // can't resolve (ENOENT) and Node >=22 won't run directly (EINVAL). cross-spawn
 // handles both and is a no-op on POSIX. See docs/specs/dor-cli.md.
@@ -23,9 +24,12 @@ const sidecarDir = path.join(standaloneDir, 'sidecar');
 const sidecarScript = path.join(sidecarDir, 'main.js');
 const dorBinDir = path.join(sidecarDir, 'dor-cli', 'bin');
 const dorEntrypoint = path.join(sidecarDir, 'dor-cli', 'dist', 'dor.js');
-const hostPort = Number(process.env.DORMOUSE_BROWSER_DEV_HOST_PORT || 1422);
-const vitePort = Number(process.env.DORMOUSE_BROWSER_DEV_VITE_PORT || 1420);
-const browserSession = process.env.DORMOUSE_BROWSER_DEV_AB_SESSION || 'dormouse-dev-standalone';
+// Bind port 0 directly: probing and then releasing a free port races other runs.
+let hostPort = Number(process.env.DORMOUSE_BROWSER_DEV_HOST_PORT || 0);
+const requestedVitePort = Number(process.env.DORMOUSE_BROWSER_DEV_VITE_PORT || 0);
+const worktreeKey = `innerdogfood-${createHash('sha256').update(await realpath(repoRoot)).digest('hex').slice(0, 16)}`;
+const browserSession = process.env.DORMOUSE_BROWSER_DEV_AB_SESSION || sessionForKey(worktreeKey);
+const insideDormouse = Boolean(process.env.DORMOUSE_SURFACE_ID);
 // Only the token: the sidecar picks the control socket path itself (hardened
 // per-user directory on POSIX, unguessable pipe name on Windows) and reports it
 // on its own stderr as `[dor-control] listening on …`, which this harness
@@ -44,7 +48,7 @@ const controlToken = randomBytes(24).toString('hex');
 // dev page gets it, via the URL baked into `VITE_DORMOUSE_BROWSER_DEV_HOST`.
 // Overloading one token would hand the bridge to every spawned shell for free.
 const bridgeToken = randomBytes(24).toString('hex');
-const viteOrigin = `http://localhost:${vitePort}`;
+let viteOrigin;
 // The Burrow persists its enrollment + ACL here, under the harness's own
 // temp dir so a dev run never touches the installed app's state.
 const stateDir = path.join(os.tmpdir(), `dormouse-${process.pid}-browser-state`);
@@ -53,6 +57,8 @@ const pending = new Map();
 const sseClients = new Set();
 let sidecar;
 let vite;
+let hostServer;
+let browser;
 let shuttingDown = false;
 let requestSeq = 0;
 
@@ -157,6 +163,10 @@ function cors(req, res) {
 
 function startHostServer() {
   const server = http.createServer(async (req, res) => {
+    if (!viteOrigin) {
+      res.writeHead(404).end('not found');
+      return;
+    }
     cors(req, res);
     if (req.method === 'OPTIONS') {
       res.writeHead(204).end();
@@ -215,6 +225,7 @@ function startHostServer() {
     server.once('error', reject);
     server.listen(hostPort, '127.0.0.1', () => {
       server.off('error', reject);
+      hostPort = server.address().port;
       resolve(server);
     });
   });
@@ -259,84 +270,101 @@ function startSidecar() {
     broadcast('sidecar', { event, data });
   });
   createInterface({ input: sidecar.stderr }).on('line', (line) => console.error(`[sidecar] ${line}`));
+  sidecar.on('error', (err) => {
+    console.error(err);
+    shutdown(1);
+  });
   sidecar.on('exit', (code, signal) => {
     log(`sidecar exited code=${code} signal=${signal}`);
     for (const request of pending.values()) request.reject(new Error('sidecar exited'));
     pending.clear();
-    shutdown();
+    shutdown(1);
   });
 }
 
-function startVite() {
-  vite = spawn('pnpm', ['--filter', 'dormouse-standalone', 'dev'], {
-    cwd: repoRoot,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: {
-      ...process.env,
-      // The token rides in the URL, so the page needs nothing else plumbed to
-      // it and `BrowserSidecarHost` stays the single place that knows about it.
-      VITE_DORMOUSE_BROWSER_DEV_HOST: `http://127.0.0.1:${hostPort}/?t=${bridgeToken}`,
-      DORMOUSE_BROWSER_DEV_VITE_PORT: String(vitePort),
+async function startVite() {
+  // Own Vite in this process: listen() reports the actual bound port and close()
+  // tears down its watchers too. A TCP readiness probe could find another run.
+  vite = await createServer({
+    root: standaloneDir,
+    // Inject only into the page, never process.env: the sidecar's PTYs must not
+    // inherit the HTTP bridge credential.
+    define: {
+      'import.meta.env.VITE_DORMOUSE_BROWSER_DEV_HOST': JSON.stringify(`http://127.0.0.1:${hostPort}/?t=${bridgeToken}`),
+    },
+    server: {
+      host: '127.0.0.1', port: requestedVitePort, strictPort: true,
+      // Share Vite's listener, including when TAURI_DEV_HOST is inherited.
+      hmr: { host: 'localhost', port: 0, protocol: 'ws' },
     },
   });
-  createInterface({ input: vite.stdout }).on('line', (line) => console.error(`[vite] ${line}`));
-  createInterface({ input: vite.stderr }).on('line', (line) => console.error(`[vite] ${line}`));
-  vite.on('exit', (code, signal) => {
-    log(`vite exited code=${code} signal=${signal}`);
-    shutdown();
-  });
-}
-
-async function waitForVite() {
-  const deadline = Date.now() + 30000;
-  while (Date.now() < deadline) {
-    try {
-      await new Promise((resolve, reject) => {
-        const socket = net.connect(vitePort, 'localhost', resolve);
-        socket.once('error', reject);
-        socket.once('connect', () => socket.end());
-      });
-      return;
-    } catch {
-      await new Promise((resolve) => setTimeout(resolve, 250));
-    }
-  }
-  throw new Error(`vite did not open port ${vitePort}`);
+  await vite.listen();
+  viteOrigin = `http://localhost:${vite.httpServer.address().port}`;
+  log(`app URL: ${viteOrigin}`);
 }
 
 async function openAgentBrowser() {
-  const args = ['--session', browserSession];
+  const binary = insideDormouse ? 'dor' : 'agent-browser';
+  const identity = insideDormouse && !process.env.DORMOUSE_BROWSER_DEV_AB_SESSION
+    ? ['--key', worktreeKey]
+    : ['--session', browserSession];
+  const args = insideDormouse ? ['ab', ...identity] : identity;
+  const command = `${binary} ${args.join(' ')}`;
   if (process.env.DORMOUSE_BROWSER_DEV_HEADED === '1') args.push('--headed');
-  args.push('open', `http://localhost:${vitePort}`);
-  const child = spawn('agent-browser', args, { cwd: repoRoot, stdio: ['ignore', 'pipe', 'pipe'] });
-  createInterface({ input: child.stdout }).on('line', (line) => console.error(`[agent-browser] ${line}`));
-  createInterface({ input: child.stderr }).on('line', (line) => console.error(`[agent-browser] ${line}`));
-  await new Promise((resolve) => child.on('exit', resolve));
+  args.push('open', viteOrigin);
+  browser = spawn(binary, args, { cwd: repoRoot, stdio: ['ignore', 'pipe', 'pipe'] });
+  createInterface({ input: browser.stdout }).on('line', (line) => console.error(`[${binary}] ${line}`));
+  createInterface({ input: browser.stderr }).on('line', (line) => console.error(`[${binary}] ${line}`));
+  await new Promise((resolve, reject) => {
+    browser.once('error', reject);
+    browser.once('exit', (code, signal) => code === 0
+      ? resolve()
+      : reject(new Error(`${binary} exited code=${code} signal=${signal}`)));
+  });
   log(`agent-browser session: ${browserSession}`);
-  log(`try: agent-browser --session ${browserSession} snapshot -i`);
+  log(`try: ${command} snapshot -i`);
 }
 
-async function shutdown() {
+async function shutdown(code = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
   for (const client of sseClients) client.end();
   sseClients.clear();
-  if (vite && !vite.killed) vite.kill('SIGTERM');
-  if (sidecar && !sidecar.killed) sidecar.kill('SIGTERM');
-  setTimeout(() => process.exit(0), 250).unref();
+  hostServer?.close();
+  hostServer?.closeAllConnections();
+  const children = new Set([browser, sidecar].filter(child =>
+    child?.pid && child.exitCode === null && child.signalCode === null));
+  const childrenClosed = [...children].map(child => new Promise(resolve => {
+    child.once('exit', () => {
+      children.delete(child);
+      resolve();
+    });
+    child.kill('SIGTERM');
+  }));
+  // Bound cleanup even when a child or open request stops responding.
+  const timeout = setTimeout(() => {
+    for (const child of children) child.kill('SIGKILL');
+    process.exit(code);
+  }, 3000);
+  await Promise.all([vite?.close(), ...childrenClosed]);
+  clearTimeout(timeout);
+  process.exit(code);
 }
 
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
+process.on('SIGINT', () => shutdown());
+process.on('SIGTERM', () => shutdown());
 
-log(`starting browser dev host on http://127.0.0.1:${hostPort}`);
-// Printed so poking the bridge by hand stays possible. Local stderr only: this
-// harness never runs in CI, and the token dies with the process.
-log(`bridge token: ${bridgeToken}`);
-log(`try: curl -H 'content-type: application/json' -d '{"cmd":"pty_request_init"}' 'http://127.0.0.1:${hostPort}/__dormouse_dev_host/send?t=${bridgeToken}'`);
-await startHostServer();
-startSidecar();
-startVite();
-await waitForVite();
-await openAgentBrowser();
-log('running; Ctrl-C to stop');
+try {
+  hostServer = await startHostServer();
+  log(`starting browser dev host on http://127.0.0.1:${hostPort}`);
+  // Local stderr only; this credential dies with the process.
+  log(`bridge token: ${bridgeToken}`);
+  log(`try: curl -H 'content-type: application/json' -d '{"cmd":"pty_request_init"}' 'http://127.0.0.1:${hostPort}/__dormouse_dev_host/send?t=${bridgeToken}'`);
+  await startVite();
+  startSidecar();
+  await openAgentBrowser();
+  log('running; Ctrl-C to stop');
+} catch (err) {
+  console.error(err);
+  await shutdown(1);
+}
