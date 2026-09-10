@@ -389,8 +389,10 @@ describe('DirectEndpoint', () => {
     expect(run.offerer.peers[0]!.closed).toBe(true);
     expect(run.offerer.endpoint.path).toBe('relay');
     expect(run.offerer.paths).toEqual(['direct', 'relay']);
-    // Inert afterwards: nothing it is told does anything to a dead session.
-    expect(run.offerer.endpoint.send(frame(1))).toBe(false);
+    // Inert afterwards: nothing it is told does anything to a dead session, and
+    // a send is consumed rather than handed back for the relay to carry.
+    expect(run.offerer.endpoint.send(frame(1))).toBe(true);
+    expect(run.fake.offererChannel!.sent).toEqual([]);
     run.offerer.endpoint.onSignal({ v: 1, t: 'direct-switch' });
     expect(run.offerer.fatals).toEqual([]);
   });

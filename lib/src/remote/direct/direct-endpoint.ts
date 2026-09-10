@@ -174,12 +174,19 @@ export class DirectEndpoint {
   }
 
   /**
-   * One transport ciphertext, `true` once it is on the channel. The caller puts
-   * it on the relay when this answers `false`, so "after the switch, nothing on
-   * the relay" is one line rather than a rule each caller keeps.
+   * One transport ciphertext, `true` once it is consumed. The caller puts it on
+   * the relay when this answers `false`, so "after the switch, nothing on the
+   * relay" is one line rather than a rule each caller keeps.
+   *
+   * **A disposed endpoint consumes it too.** A refused send disposes the session
+   * synchronously, and the caller's loop is mid-message: the remaining chunks
+   * belong nowhere, least of all on the relay of a session that is over. The
+   * callers stop on their own next check; this only keeps the interval between
+   * the two from reaching the wire.
    */
   send(ciphertext: Uint8Array): boolean {
-    if (this.#disposed || this.#cutover.outbound !== 'direct') return false;
+    if (this.#disposed) return true;
+    if (this.#cutover.outbound !== 'direct') return false;
     if (this.#peer?.send(ciphertext)) return true;
     // Switched, and the channel will not take it: there is no relay to fall
     // back to, so this is burrow loss rather than a message to re-route.

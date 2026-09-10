@@ -1318,6 +1318,10 @@ export class PocketClient {
     if (this.#reapedByBurrow(established)) throw new Error(BURROW_SESSION_REAPED_MESSAGE);
     for (const ciphertext of established.session.sendApp(utf8Encode(JSON.stringify(payload)))) {
       this.#deliver(established, burrowId, ciphertext);
+      // A channel that refuses a chunk is burrow loss, taken synchronously: the
+      // rest of this message has no session left to belong to, and must not
+      // fall back onto the relay of one that has just been torn down.
+      if (this.#established !== established) return;
     }
     established.lastSentAt = this.#now();
   }

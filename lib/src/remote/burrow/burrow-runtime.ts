@@ -1630,7 +1630,13 @@ export class BurrowRuntime {
     const direct = this.#directFor(clientId, connectionId);
     try {
       for (const ciphertext of session.sendApp(utf8Encode(JSON.stringify(payload)))) {
-        if (direct?.send(ciphertext)) continue;
+        if (direct?.send(ciphertext)) {
+          // A channel that refuses a chunk disposes this session synchronously:
+          // the rest of the message has no session left to belong to, and must
+          // not fall back onto the relay of one that is over.
+          if (this.#directFor(clientId, connectionId) !== direct) return;
+          continue;
+        }
         this.#sendE2e(clientId, 'connection', connectionId, 'transport', ciphertext);
       }
     } catch {

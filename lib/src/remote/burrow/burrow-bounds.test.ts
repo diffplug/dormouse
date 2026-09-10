@@ -1002,6 +1002,36 @@ describe('BurrowRuntime bounds', () => {
     expect(sessions[0]!.disposed).toBe(true);
   });
 
+  /**
+   * The Burrow's half of the same rule the Client keeps: a refused chunk
+   * disposes the session synchronously, from inside the loop still chunking the
+   * message, and the rest of it must not fall back onto the relay.
+   */
+  it('stops a multi-chunk reply when the channel refuses its first chunk', async () => {
+    const network = directBurrow();
+    const live = await establish('c1');
+    await openDirectPath({
+      socket,
+      burrowId: enrollment.burrowId,
+      clientId: 'c1',
+      connectionId: live.connectionId,
+      session: live.session,
+      network,
+      setTimer: clock.setTimer,
+    });
+    const before = e2eFramesFor(socket, 'connection', live.connectionId).length;
+    // Closed under the session, which a radio gap does between two sends.
+    network.answererChannel!.close();
+
+    // Over one Noise message, so the transport chunks it into two ciphertexts.
+    sessions[0]!.send({ requestId: 'r1', ok: true, result: 'x'.repeat(70_000) });
+    await settle();
+
+    expect(sessions[0]!.disposed).toBe(true);
+    expect(burrow.establishedSessionCount).toBe(0);
+    expect(e2eFramesFor(socket, 'connection', live.connectionId)).toHaveLength(before);
+  });
+
   it('disposes a session whose held channel frames outrun the queue', async () => {
     const network = directBurrow();
     const live = await establish('c1');

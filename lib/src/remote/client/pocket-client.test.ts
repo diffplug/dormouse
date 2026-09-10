@@ -920,6 +920,30 @@ describe('the direct path, end to end', () => {
    * not decode. Both ends must end the session on it, rather than throw out of
    * the socket handler or warn and drop it.
    */
+  /**
+   * A refused chunk disposes the session synchronously, from inside the loop
+   * that is still chunking the message. The rest of it belongs nowhere: routing
+   * it onto the relay would put post-switch ciphertext there and kill the peer
+   * with a misleading reason.
+   */
+  it('stops a multi-chunk message when the channel refuses its first chunk', async () => {
+    const run = await connectedDirect();
+    await run.cutover();
+    const clientBefore = run.clientFrames().length;
+    const gone = vi.fn();
+    run.harness.client.setOnBurrowGone(gone);
+    // Closed under the session, which a radio gap does between two sends.
+    run.network.offererChannel!.close();
+
+    // Over one Noise message, so the transport chunks it into two ciphertexts.
+    await expect(run.harness.client.write('surface-1', 'x'.repeat(70_000))).rejects.toThrow();
+
+    expect(gone).toHaveBeenCalledOnce();
+    expect(run.harness.client.connectedBurrowId).toBeNull();
+    // Neither chunk reached the relay of a session that had just been torn down.
+    expect(run.clientFrames()).toHaveLength(clientBefore);
+  });
+
   it('disposes the Client’s session on a relay frame that will not decode', async () => {
     // Nothing switches, so the relay is still the path this frame belongs on
     // and the decode is the only thing that can refuse it.
