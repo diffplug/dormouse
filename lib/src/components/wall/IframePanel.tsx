@@ -42,7 +42,9 @@ type Resolution =
   // The host can't run a proxy (e.g. the web host) — keep the blind raw-iframe
   // fallback rather than hiding the surface.
   | { kind: 'raw'; src: string }
-  | { kind: 'error'; reason: 'unreachable' | 'scheme'; detail?: string };
+  // 'non-http' is the panel's own refusal of a non-http(s) `params.url`;
+  // 'scheme'/'unreachable' come back from the proxy.
+  | { kind: 'error'; reason: 'unreachable' | 'scheme' | 'non-http'; detail?: string };
 
 type IframeHistory = {
   entries: string[];
@@ -176,18 +178,22 @@ export function IframePanel({ id, title, params }: PaneProps) {
     // Shim"). The header's URL editor is the third: `normalizeNavUrl` keeps a
     // typed `javascript:` or `data:` scheme on purpose. React blanks a
     // `javascript:` src and nothing else, which is not a boundary to rely on.
-    if (!browserSurfaceUrl(sourceUrl)) {
-      setResolution({ kind: 'error', reason: 'scheme' });
+    // Frame the checked string, not the one handed in — the sibling call sites
+    // keep the return too, so a schemeless `host:port` frames as
+    // `http://host:port` instead of resolving against the app's own origin.
+    const framedUrl = browserSurfaceUrl(sourceUrl);
+    if (!framedUrl) {
+      setResolution({ kind: 'error', reason: 'non-http' });
       return;
     }
     const createProxy = getPlatform().createIframeProxyUrl;
     if (!createProxy) {
-      setResolution({ kind: 'raw', src: sourceUrl });
+      setResolution({ kind: 'raw', src: framedUrl });
       return;
     }
     let cancelled = false;
     setResolution({ kind: 'resolving' });
-    createProxy(sourceUrl).then(
+    createProxy(framedUrl).then(
       (result: IframeProxyResult) => {
         if (cancelled) return;
         if (result.ok) setResolution({ kind: 'proxied', src: result.url, origin: originOf(result.url) });
@@ -420,11 +426,16 @@ function PanelMessage({ resolution, url }: { resolution: Resolution; url: string
   // 'error' — the proxy turned a dead end into something actionable. (Unreachable
   // cases are served as a page inside the frame; this covers the synchronous
   // ones, chiefly an unproxyable scheme such as https://.)
+  // `dor ab open` is the remedy only where the URL itself is fine and the proxy
+  // can't front it. It refuses a non-http(s) target too (`normalizeConcreteOpenUrl`),
+  // so pointing a refused scheme at it would be a dead end.
   return (
     <div className={`${base} flex-col gap-2`}>
       <div>{messageFor(resolution)}</div>
       <div className="text-xs text-muted/80">
-        For arbitrary web pages, use <code className="rounded bg-app-bg px-1 py-0.5">dor ab open {url}</code>
+        {resolution.reason === 'non-http'
+          ? 'Enter an http:// or https:// address in the URL bar above.'
+          : <>For arbitrary web pages, use <code className="rounded bg-app-bg px-1 py-0.5">dor ab open {url}</code></>}
       </div>
     </div>
   );
@@ -432,6 +443,8 @@ function PanelMessage({ resolution, url }: { resolution: Resolution; url: string
 
 function messageFor(resolution: Extract<Resolution, { kind: 'error' }>): string {
   switch (resolution.reason) {
+    case 'non-http':
+      return 'The iframe surface only frames http:// and https:// URLs.';
     case 'scheme':
       return resolution.detail
         ? `Can’t frame this URL — ${resolution.detail}.`

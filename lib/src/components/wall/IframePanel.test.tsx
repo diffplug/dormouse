@@ -123,6 +123,27 @@ describe('IframePanel', () => {
 
     expect(container.querySelector('iframe')).toBeNull();
     expect(container.textContent).toContain('only frames');
+    // `dor ab open` refuses a non-http(s) target too, so it is not the remedy here.
+    expect(container.textContent).not.toContain('dor ab open');
+  });
+
+  // The panel frames the string it checked, not the one it was handed: a
+  // schemeless `host:port` in `<iframe src>` would resolve against the app's
+  // own origin instead of the dev server.
+  it('frames the normalized url for a schemeless source', async () => {
+    const iframe = await renderPanel(stubActions(), { id: 'iframe-bare', title: 'Raw iframe', params: { url: 'localhost:5173' } });
+
+    expect(iframe.getAttribute('src')).toBe('http://localhost:5173');
+  });
+
+  it('proxies the normalized url for a schemeless source', async () => {
+    const createIframeProxyUrl = vi.fn(async () => ({ ok: true as const, url: 'http://127.0.0.1:61234/app' }));
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'createIframeProxyUrl'>;
+    platform.createIframeProxyUrl = createIframeProxyUrl;
+    setPlatform(platform);
+    await renderPanel(stubActions(), { id: 'iframe-bare-proxy', title: 'Raw iframe', params: { url: 'localhost:5173' } });
+
+    expect(createIframeProxyUrl).toHaveBeenCalledWith('http://localhost:5173');
   });
 
   it('adopts clicks into the raw iframe fallback via window blur focus', async () => {
