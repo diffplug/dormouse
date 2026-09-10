@@ -564,8 +564,13 @@ below reads that record rather than inferring itself from the suppression map.
 - **A boot's `pty_request_init` excludes every id an arrival claims.** Ownership
   moves at the invoke, so those shells would otherwise be listed as top-level
   panes beside the Workspace about to mount them.
+- **An arrival unadopted after `ARRIVAL_MAX` is handed back** by a watchdog armed
+  at `begin_arrival`, retiring only the record it was armed for (`queued_at`):
+  a target alive but wedged never reaches `adopt_failed` or `Destroyed`, and the
+  source would otherwise stay transferring with its shells silent for good
+  (`an_expiry_retires_only_the_record_it_was_armed_for`).
 
-Source of truth: `Arrival` / `sweep_awaiting` / `boot_list_ids` in
+Source of truth: `Arrival` / `sweep_awaiting` / `expire_arrival` / `boot_list_ids` in
 `standalone/src-tauri/src/routing.rs`; `begin_arrival` / `adopt_ready` /
 `adopt_done` / `adopt_failed` / `hand_back_arrival` in
 `standalone/src-tauri/src/lib.rs`; `standalone/src/workspace-move.ts`;

@@ -2342,6 +2342,7 @@ fn arrival_from(from: &str, to: &str, payload: JsonValue) -> Result<routing::Arr
         to: to.to_string(),
         terminal_ids,
         payload,
+        queued_at: Instant::now(),
     })
 }
 
@@ -2351,17 +2352,49 @@ fn arrival_from(from: &str, to: &str, payload: JsonValue) -> Result<routing::Arr
 /// lines in order, so every byte after this point is either dropped (and present
 /// in the replay the target is about to get) or delivered to the target
 /// (docs/specs/standalone.md §Transfer).
-fn begin_arrival(windows: &WindowState, arrival: routing::Arrival) -> Result<(), String> {
-    let mut arrivals = guard(&windows.arrivals);
-    if routing::has_arrival(&arrivals, &arrival.workspace_id) {
-        return Err(format!(
-            "Workspace '{}' is already in flight",
-            arrival.workspace_id
-        ));
+fn begin_arrival(
+    app: &AppHandle,
+    windows: &WindowState,
+    arrival: routing::Arrival,
+) -> Result<(), String> {
+    {
+        let mut arrivals = guard(&windows.arrivals);
+        if routing::has_arrival(&arrivals, &arrival.workspace_id) {
+            return Err(format!(
+                "Workspace '{}' is already in flight",
+                arrival.workspace_id
+            ));
+        }
+        windows.reassign(&arrival.terminal_ids, &arrival.to, true);
+        routing::queue_arrival(&mut arrivals, arrival.clone());
     }
-    windows.reassign(&arrival.terminal_ids, &arrival.to, true);
-    routing::queue_arrival(&mut arrivals, arrival);
+    spawn_arrival_watchdog(app.clone(), &arrival);
     Ok(())
+}
+
+/// Bound an arrival: a target that never settles it — alive but wedged, so
+/// `Destroyed` never hands it back either — would leave the Workspace marked
+/// transferring in the source and its shells silent for good. Past
+/// `ARRIVAL_MAX` the record is retired and handed back like any refusal.
+fn spawn_arrival_watchdog(app: AppHandle, arrival: &routing::Arrival) {
+    let workspace_id = arrival.workspace_id.clone();
+    let to = arrival.to.clone();
+    let queued_at = arrival.queued_at;
+    std::thread::spawn(move || {
+        std::thread::sleep(routing::ARRIVAL_MAX);
+        let Some(windows) = app.try_state::<WindowState>() else {
+            return;
+        };
+        let expired = routing::expire_arrival(
+            &mut guard(&windows.arrivals),
+            &workspace_id,
+            &to,
+            queued_at,
+        );
+        if let Some(arrival) = expired {
+            hand_back_arrival(&app, &windows, &arrival, "the target never adopted it");
+        }
+    });
 }
 
 /// One arrival will never be adopted: give its shells back to the source,
@@ -2438,7 +2471,7 @@ fn open_workspace_window(
     // moved rather than cloned.
     let workspace_id = arrival.workspace_id.clone();
     append_log(format!("[window] tearing {workspace_id} out into {label}"));
-    begin_arrival(&windows, arrival)?;
+    begin_arrival(&app, &windows, arrival)?;
     if let Err(err) = build_window(&app, &label, geometry) {
         // Nothing will ever drain the queue, and the PTYs would stay suppressed
         // and ownerless. The source is waiting on this `Err` and has released
@@ -2479,7 +2512,7 @@ fn transfer_workspace(
     // Queued, not emitted: the target may be booting, or torn out moments ago,
     // and have no listener yet — and it is a legal drop target either way
     // (docs/specs/standalone.md §Arrival queue).
-    begin_arrival(&windows, arrival)?;
+    begin_arrival(&app, &windows, arrival)?;
     // Forward before the content lands: the user dropped here, so this is the
     // window they are now looking at, and a background webview may be throttled
     // out of answering `adopt_ready` promptly.

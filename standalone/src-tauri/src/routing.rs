@@ -21,6 +21,12 @@ pub const MAX_RESTORED_WINDOWS: usize = 8;
 /// assumed lost and released (fail open: duplicated bytes beat a dead pane).
 pub const AWAITING_REPLAY_MAX: Duration = Duration::from_secs(5);
 
+/// How long an arrival may sit unadopted before Rust hands it back. The
+/// target's own collection times out at 3 s and a torn-out window boots in
+/// well under this; past it the target webview is wedged, and its shells
+/// would otherwise stay silent in the source forever.
+pub const ARRIVAL_MAX: Duration = Duration::from_secs(20);
+
 /// Where one sidecar event goes. Every label is borrowed from the state it was
 /// read out of: this runs once per PTY chunk, so it allocates nothing.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -171,6 +177,10 @@ pub struct Arrival {
     pub terminal_ids: Vec<String>,
     /// What the target mounts the Workspace from.
     pub payload: JsonValue,
+    /// When it was queued: the deadline's origin, and what makes the expiry
+    /// watchdog's record *this* one rather than a later re-drop of the same
+    /// Workspace into the same window.
+    pub queued_at: Instant,
 }
 
 /// Every arrival in flight, oldest first. A Vec, not a map: there are a handful
@@ -203,6 +213,21 @@ pub fn take_arrival(arrivals: &mut Arrivals, workspace_id: &str, to: &str) -> Op
     let position = arrivals
         .iter()
         .position(|arrival| arrival.workspace_id == workspace_id && arrival.to == to)?;
+    Some(arrivals.remove(position))
+}
+
+/// Retire an arrival that outlived `ARRIVAL_MAX`, but **only the exact record
+/// the watchdog was armed for**: one adopted and re-dropped since would carry a
+/// later `queued_at`, and belongs to its own watchdog.
+pub fn expire_arrival(
+    arrivals: &mut Arrivals,
+    workspace_id: &str,
+    to: &str,
+    queued_at: Instant,
+) -> Option<Arrival> {
+    let position = arrivals.iter().position(|arrival| {
+        arrival.workspace_id == workspace_id && arrival.to == to && arrival.queued_at == queued_at
+    })?;
     Some(arrivals.remove(position))
 }
 
@@ -634,7 +659,31 @@ mod tests {
             to: to.to_string(),
             terminal_ids: ids.iter().map(|id| (*id).to_string()).collect(),
             payload: json!({ "workspaceId": workspace_id }),
+            queued_at: Instant::now(),
         }
+    }
+
+    #[test]
+    fn an_expiry_retires_only_the_record_it_was_armed_for() {
+        let mut arrivals = Arrivals::new();
+        let first = arrival("ws-a", "main", "ws-2", &["t1"]);
+        let armed_for = first.queued_at;
+        queue_arrival(&mut arrivals, first);
+
+        // Adopted and dropped on the same window again before the watchdog
+        // fired: the record now in the queue is the second drop's.
+        take_arrival(&mut arrivals, "ws-a", "ws-2");
+        let second = arrival("ws-a", "main", "ws-2", &["t1"]);
+        assert_ne!(second.queued_at, armed_for);
+        queue_arrival(&mut arrivals, second.clone());
+
+        assert_eq!(expire_arrival(&mut arrivals, "ws-a", "ws-2", armed_for), None);
+        assert_eq!(arrivals, vec![second.clone()]);
+        assert_eq!(
+            expire_arrival(&mut arrivals, "ws-a", "ws-2", second.queued_at),
+            Some(second)
+        );
+        assert!(arrivals.is_empty());
     }
 
     /// A window that has not installed its arrival listener yet is a legal drop
