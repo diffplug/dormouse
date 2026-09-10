@@ -1,4 +1,4 @@
-import type { QuitConfirmContext } from "./quit";
+import type { TeardownConfirmContext } from "./teardown-flow";
 
 /**
  * Module store backing the quit-confirmation dialog. The quit orchestrator's
@@ -28,7 +28,7 @@ let intent: QuitConfirmIntent = QUIT_INTENT;
 let archiveError: string | null = null;
 // The orchestrator context for the open request. Nulled the instant a decision
 // is made, so a repeated confirm / a late cancel is a no-op.
-let activeCtx: QuitConfirmContext | null = null;
+let activeCtx: TeardownConfirmContext | null = null;
 const listeners = new Set<() => void>();
 
 export function subscribeQuitConfirm(listener: () => void): () => void {
@@ -60,7 +60,7 @@ function emit(): void {
 // bootstrap (order relative to `initQuitFlow` is irrelevant — the gate is read
 // only at quit time). The orchestrator never re-invokes it while a dialog is
 // up; the phase guard is belt-and-suspenders against stacking.
-export function openQuitConfirm(ctx: QuitConfirmContext, next: QuitConfirmIntent = QUIT_INTENT): void {
+export function openQuitConfirm(ctx: TeardownConfirmContext, next: QuitConfirmIntent = QUIT_INTENT): void {
   if (phase !== null) return;
   activeCtx = ctx;
   intent = next;
@@ -78,7 +78,7 @@ export function openQuitConfirm(ctx: QuitConfirmContext, next: QuitConfirmIntent
  */
 export function openQuitArchiveFailure(
   message: string,
-  ctx: QuitConfirmContext,
+  ctx: TeardownConfirmContext,
   next: QuitConfirmIntent = QUIT_INTENT,
 ): void {
   activeCtx = ctx;

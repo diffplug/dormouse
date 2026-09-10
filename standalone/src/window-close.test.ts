@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   archiveSurfaceNotes: vi.fn(async (_ids: readonly string[], _opts?: { signal?: AbortSignal }) => {}),
   notepadSurfaceIds: vi.fn(() => [] as string[]),
   removeSurface: vi.fn(),
+  getWorkspacesSnapshot: vi.fn(() => ({ workspaces: [{ id: "w1", name: "Deploys" }], activeId: "w1" })),
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
@@ -28,6 +29,10 @@ vi.mock("dormouse-lib/lib/notepad/close-coordinator", () => ({
 vi.mock("dormouse-lib/lib/notepad/notepad-store", () => ({
   notepadSurfaceIds: mocks.notepadSurfaceIds,
   removeSurface: mocks.removeSurface,
+}));
+// How a window names itself in its dialog: the Workspace it is showing.
+vi.mock("dormouse-lib/lib/workspace-store", () => ({
+  getWorkspacesSnapshot: mocks.getWorkspacesSnapshot,
 }));
 
 import { initWindowClose, _resetWindowCloseForTesting } from "./window-close";
@@ -84,7 +89,7 @@ describe("per-window close", () => {
       // must not come back after being removed.
       "remove_window_session",
       "gracefulKill",
-      "window_close_proceed",
+      "close_window",
     ]);
     // A close is an ending, not a relaunch: there is nothing to resume into.
     expect(adapter.captureAgentRecovery).not.toHaveBeenCalled();
@@ -104,7 +109,7 @@ describe("per-window close", () => {
   it("asks first when the window holds running work, and Cancel leaves it alone", async () => {
     mocks.countRunningSessions.mockReturnValue(2);
     const adapter = fakeAdapter();
-    initWindowClose(adapter, { windowName: () => "Deploys" });
+    initWindowClose(adapter);
     closeRequested();
     await settle();
 
@@ -116,7 +121,7 @@ describe("per-window close", () => {
     dismissDialog();
     await settle();
     expect(commands()).toContain("window_close_cancel");
-    expect(commands()).not.toContain("window_close_proceed");
+    expect(commands()).not.toContain("close_window");
     expect(adapter.gracefulKillPtys).not.toHaveBeenCalled();
   });
 
@@ -151,7 +156,7 @@ describe("per-window close", () => {
     confirmQuit();
     await settle();
     expect(mocks.removeSurface).toHaveBeenCalledWith("pane-a");
-    expect(commands()).toContain("window_close_proceed");
+    expect(commands()).toContain("close_window");
   });
 
   it("deduplicates a repeat close trigger while a decision is outstanding", async () => {
@@ -175,6 +180,6 @@ describe("per-window close", () => {
     closeRequested();
     await settle();
 
-    expect(commands()).toContain("window_close_proceed");
+    expect(commands()).toContain("close_window");
   });
 });

@@ -1,7 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { WorkspaceId } from "dormouse-lib/lib/session-types";
+import type { StripDragPoint } from "dormouse-lib/components/workspace-strip-drag";
 import { currentWindowLabel } from "./window-label";
 import { tearOutWorkspace, transferWorkspaceTo } from "./workspace-move";
+import { workspaceTabRect } from "./workspace-tabs";
 
 /**
  * The host side of the Workspace strip's drag, past the edge of its own strip
@@ -16,6 +18,9 @@ import { tearOutWorkspace, transferWorkspaceTo } from "./workspace-move";
 
 /** The cursor probe is an IPC round trip; a pointermove is per frame. */
 const HIT_TEST_THROTTLE_MS = 60;
+/** How far the pointer must travel inside the target before its caret is worth
+ *  redrawing. A tab is 180px at most, so this cannot skip a whole slot. */
+const HOVER_BUCKET_PX = 12;
 
 /** Where the cursor is, in the hit window's own logical client space. */
 interface CursorHit {
@@ -26,7 +31,9 @@ interface CursorHit {
 
 let lastProbeAt = 0;
 let probing = false;
+let lastPoint: StripDragPoint | null = null;
 let hoverLabel: string | null = null;
+let hoverBucket = -1;
 
 async function probe(): Promise<CursorHit | null> {
   try {
@@ -37,33 +44,26 @@ async function probe(): Promise<CursorHit | null> {
   }
 }
 
-/** Show (or clear) the drop caret in another window. Rust clears the previous
- *  one, so a caret can never be left behind in a window the pointer has left. */
+/**
+ * Show (or clear, with null) the drop caret in another window. Rust clears the
+ * previous one, so a caret can never be left behind in a window the pointer has
+ * left.
+ *
+ * Deduped on the window **and** where in it: keyed on the label alone the target
+ * would draw its caret once and then hold it while the pointer crossed every
+ * remaining tab.
+ */
 function hover(hit: CursorHit | null): void {
   const label = hit && hit.label !== currentWindowLabel() ? hit.label : null;
-  if (label === hoverLabel) return;
+  const bucket = label ? Math.round(hit!.x / HOVER_BUCKET_PX) : -1;
+  if (label === hoverLabel && bucket === hoverBucket) return;
   hoverLabel = label;
+  hoverBucket = bucket;
   void invoke("hover_workspace_target", {
     label,
     x: hit?.x ?? 0,
     y: hit?.y ?? 0,
   }).catch((err) => console.error("[workspace-drag] hover_workspace_target failed", err));
-}
-
-function clearHover(): void {
-  if (hoverLabel === null) return;
-  hoverLabel = null;
-  void invoke("hover_workspace_target", { label: null, x: 0, y: 0 }).catch(() => {});
-}
-
-/** Whether the release landed back inside this window's own strip, where the
- *  live reorder has already committed and there is nothing left to do. */
-function insideOwnStrip(point: { clientX: number; clientY: number }): boolean {
-  const strip = document.querySelector<HTMLElement>("[data-workspace-strip]");
-  if (!strip) return false;
-  const rect = strip.getBoundingClientRect();
-  return point.clientX >= rect.left && point.clientX <= rect.right
-    && point.clientY >= rect.top && point.clientY <= rect.bottom;
 }
 
 /**
@@ -73,18 +73,18 @@ function insideOwnStrip(point: { clientX: number; clientY: number }): boolean {
  * offset within it is no longer a position the user is aiming with.
  */
 function grabOffset(workspaceId: WorkspaceId): { x: number; y: number } {
-  // Scanned rather than selected: a Workspace id is generated, not escaped, and
-  // an attribute selector over one is a needless way to throw.
-  const tab = [...document.querySelectorAll<HTMLElement>("[data-workspace-tab]")]
-    .find((element) => element.dataset.workspaceTab === workspaceId);
-  const rect = tab?.getBoundingClientRect();
+  const rect = workspaceTabRect(workspaceId);
   return { x: (rect?.width ?? 180) / 2, y: (rect?.height ?? 24) / 2 };
 }
 
 /** The pointer left this window's strip mid-drag. */
-export function onDragOutsideWindow(_id: WorkspaceId, _point: { clientX: number; clientY: number }): void {
+export function onDragOutsideWindow(point: StripDragPoint): void {
+  // A pointer that has not actually moved must not cost a round trip per
+  // throttle window; a coalesced or repeated move reports the same point.
+  if (lastPoint?.clientX === point.clientX && lastPoint?.clientY === point.clientY) return;
   const now = Date.now();
   if (probing || now - lastProbeAt < HIT_TEST_THROTTLE_MS) return;
+  lastPoint = point;
   lastProbeAt = now;
   probing = true;
   void probe()
@@ -93,12 +93,20 @@ export function onDragOutsideWindow(_id: WorkspaceId, _point: { clientX: number;
 }
 
 /**
- * The drag was released. Over another window it transfers; over nothing — or
- * over this window but outside its strip — it tears out into a new one.
+ * The drag was released. `insideStrip` is the strip controller's own answer —
+ * it owns the strip box — and means the live reorder has already committed the
+ * move, so there is nothing left to do but drop the caret. Over another window
+ * it transfers; over nothing — or over this window but outside its strip — it
+ * tears out into a new one.
  */
-export function onDropOnOtherWindow(id: WorkspaceId, point: { clientX: number; clientY: number }): boolean {
-  clearHover();
-  if (insideOwnStrip(point)) return false;
+export function onDropOnOtherWindow(
+  id: WorkspaceId,
+  _point: StripDragPoint,
+  insideStrip: boolean,
+): void {
+  hover(null);
+  lastPoint = null;
+  if (insideStrip) return;
   const grab = grabOffset(id);
   void (async () => {
     // Probed fresh rather than reusing the throttled answer: up to
@@ -110,12 +118,20 @@ export function onDropOnOtherWindow(id: WorkspaceId, point: { clientX: number; c
     }
     await tearOutWorkspace(id, grab);
   })();
-  return true;
+}
+
+/** The drag was abandoned — `pointercancel`, or Escape. Nothing moves, but a
+ *  caret lit in another window would otherwise be stranded there. */
+export function onDragCancelled(): void {
+  hover(null);
+  lastPoint = null;
 }
 
 /** @internal Reset module state for testing. */
 export function _resetWorkspaceDragForTesting(): void {
   lastProbeAt = 0;
   probing = false;
+  lastPoint = null;
   hoverLabel = null;
+  hoverBucket = -1;
 }

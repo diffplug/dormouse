@@ -9,6 +9,12 @@ import type { WorkspaceId } from '../lib/session-types';
  * It reorders live — the model moves as tab centers are crossed, and the strip
  * re-renders from the store — rather than drawing a floating copy.
  */
+/** A pointer position in viewport coordinates. */
+export interface StripDragPoint {
+  clientX: number;
+  clientY: number;
+}
+
 export interface StripDragHost {
   /** Workspace ids in strip order, read fresh each frame. */
   order(): WorkspaceId[];
@@ -20,10 +26,17 @@ export interface StripDragHost {
   move(id: WorkspaceId, toIndex: number): void;
   /** Which Workspace is being dragged, for the dimmed tab. Null ends the drag. */
   setDragging(id: WorkspaceId | null): void;
-  /** PR C: the pointer left the window's strip entirely. */
-  onDragOutsideWindow?(id: WorkspaceId, point: { clientX: number; clientY: number }): void;
-  /** PR C: released over another Window; true means that Window took it. */
-  onDropOnOtherWindow?(id: WorkspaceId, point: { clientX: number; clientY: number }): boolean;
+  /** The pointer left the window's strip entirely. */
+  onDragOutsideWindow?(point: StripDragPoint): void;
+  /**
+   * Released. `insideStrip` is this controller's own answer — it owns the strip
+   * box — so the host never re-derives it from the DOM; true means the live
+   * reorder already committed the move. Called on every release, including that
+   * one, because only the host can drop a caret it lit in another window.
+   */
+  onDropOnOtherWindow?(id: WorkspaceId, point: StripDragPoint, insideStrip: boolean): void;
+  /** Abandoned — `pointercancel`, or Escape. Nothing moved. */
+  onDragCancelled?(): void;
 }
 
 export interface WorkspaceStripDrag {
@@ -100,31 +113,50 @@ export function createWorkspaceStripDrag(host: StripDragHost): WorkspaceStripDra
         return;
       }
     }
-    const strip = host.stripRect();
-    if (host.onDragOutsideWindow && strip
-      && (event.clientX < strip.left || event.clientX > strip.right
-        || event.clientY < strip.top || event.clientY > strip.bottom)) {
-      host.onDragOutsideWindow(dragId, { clientX: event.clientX, clientY: event.clientY });
+    if (host.onDragOutsideWindow && insideStrip(event) === false) {
+      host.onDragOutsideWindow({ clientX: event.clientX, clientY: event.clientY });
     }
+  }
+
+  /** Whether the pointer is over the strip. Null when there is no strip box to
+   *  compare against, which is neither in nor out. */
+  function insideStrip(event: PointerEvent): boolean | null {
+    const strip = host.stripRect();
+    if (!strip) return null;
+    return event.clientX >= strip.left && event.clientX <= strip.right
+      && event.clientY >= strip.top && event.clientY <= strip.bottom;
   }
 
   function onPointerUp(event: PointerEvent): void {
     if (dragId === null || event.pointerId !== pointerId) return;
     // The order is already committed live, so a release inside this strip has
-    // nothing left to do; PR C's hook is what a release over another Window uses.
-    if (active) host.onDropOnOtherWindow?.(dragId, { clientX: event.clientX, clientY: event.clientY });
+    // nothing left to move — but the host is told either way, because a caret it
+    // lit in another window is its to drop.
+    if (active) {
+      host.onDropOnOtherWindow?.(
+        dragId,
+        { clientX: event.clientX, clientY: event.clientY },
+        insideStrip(event) !== false,
+      );
+    }
     end(false);
   }
 
   function onPointerCancel(event: PointerEvent): void {
     if (event.pointerId !== pointerId) return;
-    end(active);
+    abandon();
   }
 
   function onKeyDown(event: KeyboardEvent): void {
     if (event.key !== 'Escape' || dragId === null) return;
     event.preventDefault();
     event.stopPropagation();
+    abandon();
+  }
+
+  /** Put the order back and tell the host, so no drop caret is stranded. */
+  function abandon(): void {
+    if (active) host.onDragCancelled?.();
     end(active);
   }
 

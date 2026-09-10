@@ -54,11 +54,14 @@ export interface SidecarSurfaceBridgeOptions {
 
 export interface SidecarSurfaceBridge {
   provider: BurrowSurfaceProvider;
-  /** An `answer` command: contributes to the ask it names. */
-  onAnswer(params: AnswerParams | undefined): void;
-  /** How many webviews will answer an ask. Pushed by the host on every window
-   *  create and destroy (`docs/specs/standalone.md` -> "Burrow service"). */
-  setWindowCount(count: unknown): void;
+  /** An `answer` command: contributes to the ask it names, on behalf of the
+   *  window `from`. The host stamps that label onto every command it forwards;
+   *  a host with one unnamed webview omits it. */
+  onAnswer(params: AnswerParams | undefined, from?: string): void;
+  /** Which webviews will answer an ask, by host label. Pushed by the host on
+   *  every window create and destroy (`docs/specs/standalone.md` -> "Burrow
+   *  service"). */
+  setWindows(labels: unknown): void;
   /** A `notify` command: something the directory depends on changed. */
   onNotify(): void;
   /**
@@ -88,29 +91,30 @@ export function createSidecarSurfaceBridge(
   interface PendingAsk {
     /** Every answering window's results, concatenated. */
     results: unknown[];
-    /** How many windows have answered. A window answering nothing still counts:
-     *  what settles the ask is having heard from everyone, not having found
-     *  anything. */
-    answered: number;
-    /** How many answers this ask still expects. Set from the window count when
-     *  the ask was sent, and only ever LOWERED: a window that closed mid-fan-out
-     *  will never answer, while one that opened never received the ask. */
-    expected: number;
+    /** The windows this ask went to that have not answered yet. A window
+     *  answering nothing still empties its entry: what settles the ask is having
+     *  heard from everyone, not having found anything. Only ever SHRINKS — a
+     *  window that closed mid-fan-out will never answer, and one that opened
+     *  never received the ask. */
+    awaiting: Set<string>;
     settle(): void;
   }
   const asks = new Map<string, PendingAsk>();
   let askSeq = 0;
-  /** How many webviews the host says will answer. One until it says otherwise,
-   *  which is also what the browser-dev harness and the tests get. */
-  let windowCount = 1;
+  /**
+   * Which webviews will answer an ask, by host label. The empty label is the
+   * sole unnamed window — a host that never pushes labels (the browser-dev
+   * harness, the tests) has exactly one webview, and its answers carry none.
+   */
+  const SOLE_WINDOW = '';
+  let windows = new Set<string>([SOLE_WINDOW]);
 
   function ask(op: string, params: unknown): Promise<unknown[]> {
     const burrowRequestId = `ask-${++askSeq}`;
     return new Promise((resolve) => {
       const pending: PendingAsk = {
         results: [],
-        answered: 0,
-        expected: windowCount,
+        awaiting: new Set(windows),
         settle: () => {
           clearTimeout(timer);
           asks.delete(burrowRequestId);
@@ -251,8 +255,12 @@ export function createSidecarSurfaceBridge(
      * Collect until every window has answered, or the budget runs out. Each
      * window sees only its own Workspaces, so a directory built from the first
      * answer would list one window's panes and silently omit the rest.
+     *
+     * Keyed by *who* answered, not by how many have: two answers from one window
+     * — a reload racing its own reply — must never settle an ask the other
+     * windows have not spoken to.
      */
-    onAnswer(params) {
+    onAnswer(params, from = SOLE_WINDOW) {
       if (!params || typeof params.burrowRequestId !== 'string') return;
       const pending = asks.get(params.burrowRequestId);
       if (!pending) {
@@ -265,19 +273,25 @@ export function createSidecarSurfaceBridge(
         notifyDirectoryChanged();
         return;
       }
-      pending.answered += 1;
+      // Not awaited: either this window already answered, or it opened after the
+      // ask went out and never received it. Its results are not this snapshot's.
+      if (!pending.awaiting.delete(from)) return;
       if (Array.isArray(params.results)) pending.results.push(...params.results);
-      if (pending.answered >= pending.expected) pending.settle();
+      if (pending.awaiting.size === 0) pending.settle();
     },
 
-    setWindowCount(count) {
-      if (typeof count !== 'number' || !Number.isFinite(count) || count < 1) return;
-      windowCount = Math.floor(count);
+    setWindows(labels) {
+      if (!Array.isArray(labels)) return;
+      const live = labels.filter((label): label is string => typeof label === 'string');
+      if (live.length === 0) return;
+      windows = new Set(live);
       // Re-evaluate what is already out: a window that closed mid-fan-out can
       // never answer, and must not hold an ask open to its whole budget.
       for (const pending of [...asks.values()]) {
-        pending.expected = Math.min(pending.expected, windowCount);
-        if (pending.answered >= pending.expected) pending.settle();
+        for (const label of pending.awaiting) {
+          if (!windows.has(label)) pending.awaiting.delete(label);
+        }
+        if (pending.awaiting.size === 0) pending.settle();
       }
     },
 
@@ -360,7 +374,7 @@ export interface SidecarBurrow {
   handleCommand(data: unknown): void;
   onPtyEvent(event: string, data: unknown): void;
   onPtySpawn(id: unknown): void;
-  setWindowCount(count: unknown): void;
+  setWindows(labels: unknown): void;
   setThemeColors(colors: unknown): void;
   dispose(): void;
 }
@@ -392,13 +406,15 @@ export function createSidecarBurrow(options: SidecarBurrowOptions): SidecarBurro
       const command = data;
       // Both of these feed something already waiting on this side, so they
       // answer nothing and never reach the service's dispatch.
-      if (command.cmd === 'answer') return bridge.onAnswer(command.params as AnswerParams);
+      if (command.cmd === 'answer') {
+        return bridge.onAnswer(command.params as AnswerParams, command.window);
+      }
       if (command.cmd === 'notify') return bridge.onNotify();
       void service.handleCommand(command);
     },
     onPtyEvent: bridge.onPtyEvent,
     onPtySpawn: bridge.onPtySpawn,
-    setWindowCount: bridge.setWindowCount,
+    setWindows: bridge.setWindows,
     setThemeColors: bridge.setThemeColors,
     dispose() {
       service.dispose();

@@ -1,5 +1,5 @@
-import { workspaceDropIndex } from "./workspace-move";
 import { listenToWindow } from "./window-label";
+import { workspaceDropTarget } from "./workspace-tabs";
 
 /**
  * The caret another window's drag draws in this window's strip
@@ -33,12 +33,11 @@ function set(next: number | null): void {
 
 /** Where the tab would be inserted, as a viewport x. */
 function caretFor(point: { x: number; y: number }): number | null {
-  const tabs = [...document.querySelectorAll<HTMLElement>("[data-workspace-tab]")];
-  if (tabs.length === 0) {
+  const { index, rect } = workspaceDropTarget(point.x);
+  // An empty strip has no tab to draw against, so the caret sits at its start.
+  if (!rect) {
     return document.querySelector<HTMLElement>("[data-workspace-strip]")?.getBoundingClientRect().left ?? null;
   }
-  const index = workspaceDropIndex(point);
-  const rect = (index === undefined ? tabs[tabs.length - 1]! : tabs[index]!).getBoundingClientRect();
   return index === undefined ? rect.right : rect.left;
 }
 

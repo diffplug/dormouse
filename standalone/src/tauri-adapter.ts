@@ -338,13 +338,9 @@ export class TauriAdapter implements PlatformAdapter {
    * the sidecar record what it detects. Warn-and-proceed: a quit must never wedge
    * on this (docs/specs/standalone.md -> "Agent recovery").
    */
-  async captureAgentRecovery(timeoutMs: number, ids?: string[]): Promise<void> {
-    // `ids` has no caller yet — a whole-Window quit interrupts everything — and
-    // is plumbed to the sidecar anyway, because closing one Window of several has
-    // to capture only that Window's panes (docs/specs/layout.md -> "Future",
-    // Scope: workspaces-rollout).
+  async captureAgentRecovery(timeoutMs: number): Promise<void> {
     try {
-      await rawInvoke("capture_agent_recovery", { ids: ids ?? null, timeout: timeoutMs });
+      await rawInvoke("capture_agent_recovery", { timeout: timeoutMs });
     } catch (err) {
       console.warn("[tauri-adapter] captureAgentRecovery failed; proceeding", err);
     }
@@ -372,15 +368,15 @@ export class TauriAdapter implements PlatformAdapter {
   /**
    * SIGTERM this window's PTYs and wait for their exits and final output.
    *
-   * Scoped to the calling window either way: Rust intersects `ids` with what
-   * this window owns, and omitting them takes exactly that set
-   * (`docs/specs/standalone.md` -> "Windows"). Warn-and-proceed, because a
-   * stalled kill must not wedge a teardown; callers own the timeout, so the
-   * bounds live in one place (`quit.ts`).
+   * The target set is what this window owns, and Rust alone decides it
+   * (`docs/specs/standalone.md` -> "Windows"), so a sibling's terminals are not
+   * nameable from here. Warn-and-proceed, because a stalled kill must not wedge
+   * a teardown; callers own the timeout, so the bounds live in one place
+   * (`quit.ts`).
    */
-  async gracefulKillPtys(timeoutMs: number, ids?: string[]): Promise<void> {
+  async gracefulKillPtys(timeoutMs: number): Promise<void> {
     try {
-      await rawInvoke("pty_graceful_kill", { ids: ids ?? null, timeout: timeoutMs });
+      await rawInvoke("pty_graceful_kill", { timeout: timeoutMs });
     } catch (err) {
       console.warn("[tauri-adapter] gracefulKillPtys failed; proceeding", err);
     }
@@ -623,17 +619,17 @@ export class TauriAdapter implements PlatformAdapter {
   /** Offer this window's persisted rule set as the host's startup seed; only
    *  the first window's offer is taken. */
   alertSetWatchedCommands(names: string[]): void {
-    invoke("alert_set_watched", { payload: { op: "initializeWatchedCommands", names } });
+    invoke("alert_command", { payload: { op: "initializeWatchedCommands", names } });
   }
 
   /** A delta, never a replacement, so a window that has not heard about a rule
    *  cannot drop it. */
   alertSetCommandWatched(name: string, watched: boolean): void {
-    invoke("alert_set_watched", { payload: { op: "setCommandWatched", name, watched } });
+    invoke("alert_command", { payload: { op: "setCommandWatched", name, watched } });
   }
 
   alertPublishSettings(settings: AlertSettings, opts: { seed: boolean }): void {
-    invoke("alert_publish_settings", {
+    invoke("alert_command", {
       payload: { op: opts.seed ? "initializeSettings" : "updateSettings", settings },
     });
   }

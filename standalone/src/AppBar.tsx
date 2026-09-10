@@ -3,7 +3,7 @@ import { MinusIcon, CornersOutIcon, CornersInIcon, XIcon } from '@phosphor-icons
 import { PopupButtonRow, chromeButton } from '../../lib/src/components/design';
 import { WorkspaceStrip } from '../../lib/src/components/WorkspaceStrip';
 import { IS_MAC } from '../../lib/src/lib/platform';
-import { onDragOutsideWindow, onDropOnOtherWindow } from './workspace-drag';
+import { onDragCancelled, onDragOutsideWindow, onDropOnOtherWindow } from './workspace-drag';
 import { getDropCaretX, subscribeDropCaret } from './workspace-drop-caret';
 
 type AppWindow = {
@@ -171,6 +171,7 @@ export function AppBar() {
           className="min-w-0"
           onDragOutsideWindow={BROWSER_DEV ? undefined : onDragOutsideWindow}
           onDropOnOtherWindow={BROWSER_DEV ? undefined : onDropOnOtherWindow}
+          onDragCancelled={BROWSER_DEV ? undefined : onDragCancelled}
         />
       </div>
       <DropCaret />

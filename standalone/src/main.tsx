@@ -5,7 +5,7 @@ import { installPeerSurfaceResponder } from "dormouse-lib/remote/burrow/peer-sur
 import type { PlatformAdapter } from "dormouse-lib/lib/platform/types";
 import { restoreWindowOrFresh } from "./window-restore";
 import { isMainWindow, resolveWindowLabel } from "./window-label";
-import { getWorkspacesSnapshot } from "dormouse-lib/lib/workspace-store";
+import { setWindowLabel } from "dormouse-lib/lib/workspace-store";
 import { seedShellStore } from "dormouse-lib/lib/shell-store";
 import { restoreActiveTheme } from "dormouse-lib/lib/themes";
 import App from "dormouse-lib/App";
@@ -85,8 +85,10 @@ async function createPlatform(): Promise<PlatformAdapter> {
 // Await init() first to register event listeners before reconnecting
 async function bootstrap() {
   // First: several modules below key off which window this is, and the Rust
-  // commands are all keyed by the invoking window's label.
-  await resolveWindowLabel();
+  // commands are all keyed by the invoking window's label. The lib gets the
+  // label too, so `dor list` names the Window that answered
+  // (`docs/specs/dor-cli.md` → "Handle Model").
+  setWindowLabel(await resolveWindowLabel());
   const platform = await createPlatform();
   setPlatform(platform);
   await platform.init();
@@ -116,14 +118,8 @@ async function bootstrap() {
         import("./window-close"),
       ]);
     const adapter = platform as import("./tauri-adapter").TauriAdapter;
-    // The dialogs name a window by its visible Workspace, which is the only
-    // name a user has for one (§Quit flow, "Confirmation dialog").
-    const windowName = () => {
-      const { workspaces, activeId } = getWorkspacesSnapshot();
-      return workspaces.find((workspace) => workspace.id === activeId)?.name;
-    };
-    initQuitFlow(adapter, { windowName });
-    initWindowClose(adapter, { windowName });
+    initQuitFlow(adapter);
+    initWindowClose(adapter);
     // A quit or a close with ≥1 running command opens <QuitConfirmModalHost>.
     setQuitConfirmGate(openQuitConfirm);
   }

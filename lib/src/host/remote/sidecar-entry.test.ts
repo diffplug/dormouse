@@ -28,8 +28,9 @@ function emitted<T>(event: string): T[] {
   return sent.filter((message) => message.event === event).map((message) => message.data as T);
 }
 
-function answer(ask: BurrowAsk, results: unknown[]): void {
-  bridge.onAnswer({ burrowRequestId: ask.burrowRequestId, results });
+/** One window's reply. `from` is the label the host stamps on it. */
+function answer(ask: BurrowAsk, results: unknown[], from?: string): void {
+  bridge.onAnswer({ burrowRequestId: ask.burrowRequestId, results }, from);
 }
 
 function sink(): PtySink & { chunks: ProcessedPtyChunk[]; data: string[]; exits: number[] } {
@@ -95,45 +96,66 @@ describe('asking the webview', () => {
   it('collects one answer per window and concatenates them', async () => {
     // Each window sees only its own Workspaces, so a directory built from the
     // first answer would list one window's panes and omit the rest.
-    bridge.setWindowCount(2);
+    bridge.setWindows(['main', 'ws-2']);
     const pending = bridge.provider.collectDirectory();
     const ask = asks()[0]!;
-    answer(ask, [{ surfaceId: 'in-main' }]);
-    answer(ask, [{ surfaceId: 'in-ws-2' }]);
+    answer(ask, [{ surfaceId: 'in-main' }], 'main');
+    answer(ask, [{ surfaceId: 'in-ws-2' }], 'ws-2');
+    expect(await pending).toEqual([{ surfaceId: 'in-main' }, { surfaceId: 'in-ws-2' }]);
+  });
+
+  it('a second answer from one window cannot settle the ask', async () => {
+    vi.useFakeTimers();
+    bridge.setWindows(['main', 'ws-2']);
+    const pending = bridge.provider.collectDirectory();
+    const ask = asks()[0]!;
+    answer(ask, [{ surfaceId: 'in-main' }], 'main');
+    // A reload racing its own reply. Counting answers would settle here, on a
+    // directory that has never heard from ws-2 — and duplicate main's panes.
+    answer(ask, [{ surfaceId: 'in-main-again' }], 'main');
+    let settled = false;
+    void pending.then(() => { settled = true; });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settled).toBe(false);
+
+    answer(ask, [{ surfaceId: 'in-ws-2' }], 'ws-2');
     expect(await pending).toEqual([{ surfaceId: 'in-main' }, { surfaceId: 'in-ws-2' }]);
   });
 
   it('answers with what it has when a window never replies', async () => {
     vi.useFakeTimers();
-    bridge.setWindowCount(3);
+    bridge.setWindows(['main', 'ws-2', 'ws-3']);
     const pending = bridge.provider.collectDirectory();
     const ask = asks()[0]!;
-    answer(ask, [{ surfaceId: 'in-main' }]);
+    answer(ask, [{ surfaceId: 'in-main' }], 'main');
     await vi.advanceTimersByTimeAsync(ASK_BUDGET_MS);
     // A partial directory beats an empty one; the next change re-collects.
     expect(await pending).toEqual([{ surfaceId: 'in-main' }]);
   });
 
   it('a window closing mid-fan-out settles the ask instead of holding it open', async () => {
-    bridge.setWindowCount(2);
+    bridge.setWindows(['main', 'ws-2']);
     const pending = bridge.provider.collectDirectory();
     const ask = asks()[0]!;
-    answer(ask, [{ surfaceId: 'in-main' }]);
+    answer(ask, [{ surfaceId: 'in-main' }], 'main');
     // The second window went away without answering.
-    bridge.setWindowCount(1);
+    bridge.setWindows(['main']);
     expect(await pending).toEqual([{ surfaceId: 'in-main' }]);
   });
 
   it('a window opening mid-fan-out never received the ask, so it is not waited on', async () => {
+    bridge.setWindows(['main']);
     const pending = bridge.provider.collectDirectory();
     const ask = asks()[0]!;
-    bridge.setWindowCount(2);
-    answer(ask, [{ surfaceId: 'in-main' }]);
+    bridge.setWindows(['main', 'ws-2']);
+    // ws-2's own answer is not part of a snapshot it was never asked for.
+    answer(ask, [{ surfaceId: 'in-ws-2' }], 'ws-2');
+    answer(ask, [{ surfaceId: 'in-main' }], 'main');
     expect(await pending).toEqual([{ surfaceId: 'in-main' }]);
   });
 
-  it('ignores a window count that is not a usable number', async () => {
-    for (const bad of [0, -1, Number.NaN, '2', undefined, null]) bridge.setWindowCount(bad);
+  it('ignores a window list that is not a usable one', async () => {
+    for (const bad of [[], 2, 'main', undefined, null]) bridge.setWindows(bad);
     const pending = bridge.provider.collectDirectory();
     answer(asks()[0]!, [{ surfaceId: 's1' }]);
     expect(await pending).toEqual([{ surfaceId: 's1' }]);

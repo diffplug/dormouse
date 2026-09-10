@@ -20,6 +20,7 @@ import type { PlatformAdapter } from "dormouse-lib/lib/platform/types";
 import type { WorkspaceId } from "dormouse-lib/lib/session-types";
 import { installWindowPersistence } from "./window-restore";
 import { listenToWindow } from "./window-label";
+import { workspaceDropTarget } from "./workspace-tabs";
 
 /**
  * Moving a Workspace between Windows (`docs/specs/standalone.md` → "Transfer"
@@ -123,20 +124,6 @@ async function planArrival(
   return wallBootFromResult(result);
 }
 
-/**
- * Where a drop lands in this window's strip: the index its tab takes. Undefined
- * appends, which is also what a drop past the last tab means.
- */
-export function workspaceDropIndex(at: { x: number; y: number } | undefined): number | undefined {
-  if (!at) return undefined;
-  const tabs = [...document.querySelectorAll<HTMLElement>("[data-workspace-tab]")];
-  for (const [index, tab] of tabs.entries()) {
-    const rect = tab.getBoundingClientRect();
-    if (at.x < rect.left + rect.width / 2) return index;
-  }
-  return undefined;
-}
-
 /** Mount an arriving Workspace and bring this window forward. */
 async function adoptWorkspace(platform: PlatformAdapter, payload: MovePayload): Promise<void> {
   const { id, name, session } = payload.workspace;
@@ -146,7 +133,9 @@ async function adoptWorkspace(platform: PlatformAdapter, payload: MovePayload): 
   // Before the store change too, so the Window blob it triggers already carries
   // the arriving Workspace's record rather than an empty one.
   publishWorkspaceSession(id, session);
-  const index = workspaceDropIndex(payload.at);
+  // Where in this window's strip the pointer released. This window alone knows
+  // its own tabs, which is why the source sends a point rather than an index.
+  const index = payload.at ? workspaceDropTarget(payload.at.x).index : undefined;
   createWorkspace({ id, name });
   if (index !== undefined) moveWorkspace(id, index);
   setActiveWorkspace(id);
@@ -162,8 +151,8 @@ function handleDeparted(workspaceId: WorkspaceId): void {
   // somewhere else (`docs/specs/standalone.md` → "Transfer").
   if (getWorkspacesSnapshot().workspaces.length <= 1) {
     forgetWorkspaceSession(workspaceId);
-    void invoke("close_window_self").catch((err) =>
-      console.error("[workspace-move] close_window_self failed", err));
+    void invoke("close_window").catch((err) =>
+      console.error("[workspace-move] close_window failed", err));
     return;
   }
   closeWorkspace(workspaceId);

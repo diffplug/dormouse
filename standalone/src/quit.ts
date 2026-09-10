@@ -1,11 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
-import { countRunningSessions } from "dormouse-lib/lib/terminal-registry";
-import { notepadSurfaceIds, removeSurface } from "dormouse-lib/lib/notepad/notepad-store";
 import { flushWindowSession } from "dormouse-lib/lib/window-session-aggregator";
 import { DEFAULT_RECOVERY_WAIT_MS } from "dormouse-lib/host/recovery-capture";
 import type { TauriAdapter } from "./tauri-adapter";
-import { dismissQuitConfirm, openQuitArchiveFailure, type QuitConfirmIntent } from "./quit-confirm-store";
-import { archiveNotesBeforeTeardown } from "./teardown-archive";
+import { dismissQuitConfirm } from "./quit-confirm-store";
+import { createTeardownFlow, describeWindow, type TeardownConfirmGate } from "./teardown-flow";
 import { hasPendingUpdate, installPendingUpdate } from "./updater";
 import { withTimeout } from "./with-timeout";
 import { listenToWindow } from "./window-label";
@@ -18,104 +16,54 @@ import { listenToWindow } from "./window-label";
  * last. A cancel in any window therefore costs nothing, because nothing has
  * been destroyed yet. Protocol, teardown ordering, and rationale:
  * docs/specs/standalone.md §Quit flow.
+ *
+ * The ack / confirm / archive half is `createTeardownFlow`, shared with the
+ * per-window close; what is quit-specific is voting, and the teardown below.
  */
 
-// One quit flow at a time in this window: repeated quit-requested events are
-// ignored while a confirmation decision is outstanding, the archive gate is
-// asking about notes it could not store, this window has already voted, or its
-// teardown is running.
-let quitPhase: "idle" | "confirming" | "archive-failed" | "voted" | "tearing-down" = "idle";
 // The adapter to tear down, captured at init.
 let quitAdapter: TauriAdapter | null = null;
-/** Names this window in the dialog while more than one is open. */
-let describeWindow: () => string | undefined = () => undefined;
 
 // The quit-confirmation gate (docs/specs/standalone.md §Quit flow,
 // "Confirmation dialog"). When quit fires with ≥1 running session and a gate is
 // installed, the gate owns the decision and must eventually call
 // `ctx.confirm()` (vote to quit) or `ctx.cancel()` (abort the whole quit). With
-// no gate installed the handler falls through to an immediate unconfirmed vote.
-export interface QuitConfirmContext {
-  confirm: () => void;
-  cancel: () => void;
-}
-type QuitConfirmGate = (ctx: QuitConfirmContext, intent?: QuitConfirmIntent) => void;
-let quitConfirmGate: QuitConfirmGate | null = null;
+// no gate installed the handler falls through to an immediate unconfirmed vote —
+// which is what a composition with no dialog host gets.
+let quitConfirmGate: TeardownConfirmGate | null = null;
 
 /** Register (or clear with null) the running-work confirmation gate. */
-export function setQuitConfirmGate(gate: QuitConfirmGate | null): void {
+export function setQuitConfirmGate(gate: TeardownConfirmGate | null): void {
   quitConfirmGate = gate;
 }
 
-export function initQuitFlow(
-  adapter: TauriAdapter,
-  options: { windowName?: () => string | undefined } = {},
-): void {
+const flow = createTeardownFlow({
+  ack: "quit_ack",
+  cancelCommand: "quit_cancel",
+  gate: () => quitConfirmGate,
+  // This window is ready to be torn down. The last vote starts the walk; the
+  // teardown itself arrives later, when the walk reaches this window.
+  proceed: () => void invoke("quit_vote").catch(() => {}),
+});
+
+export function initQuitFlow(adapter: TauriAdapter): void {
   quitAdapter = adapter;
-  if (options.windowName) describeWindow = options.windowName;
-  void listenToWindow<{ windows?: number }>("dormouse://quit-requested", (event) =>
-    handleQuitRequested(event.payload?.windows ?? 1));
+  void listenToWindow<{ windows?: number }>("dormouse://quit-requested", (event) => {
+    const windows = event.payload?.windows ?? 1;
+    // Named only when there is more than one window to tell apart.
+    flow.request({ kind: "quit", ...(windows > 1 ? { windowName: describeWindow() } : {}) });
+  });
   // Another window said no. Nothing was destroyed; drop this window's dialog
-  // and go back to idle so a later quit asks again.
-  void listenToWindow("dormouse://quit-cancelled", handleQuitCancelled);
+  // and go back to idle so a later quit asks again. No call back into Rust —
+  // the cancel already happened, somewhere else.
+  void listenToWindow("dormouse://quit-cancelled", () => {
+    flow.reset();
+    dismissQuitConfirm();
+  });
   // Every window voted yes, and it is now this window's turn.
   void listenToWindow<{ last?: boolean }>("dormouse://quit-teardown", (event) => {
     void runQuitTeardown(event.payload?.last === true);
   });
-}
-
-function handleQuitRequested(windows: number): void {
-  // Ack first — stands Rust's ack watchdog down even when the trigger is
-  // deduped below (a repeated trigger re-emits, so re-acking is expected).
-  void invoke("quit_ack").catch(() => {});
-
-  if (quitPhase !== "idle") return;
-
-  if (countRunningSessions() > 0 && quitConfirmGate) {
-    quitPhase = "confirming";
-    quitConfirmGate(
-      { confirm: () => void archiveThenVote(), cancel: cancelQuit },
-      // Named only when there is more than one window to tell apart.
-      { kind: "quit", ...(windows > 1 ? { windowName: describeWindow() } : {}) },
-    );
-    return;
-  }
-  void archiveThenVote();
-}
-
-// The decision is made in this window; archive its notes, then vote. A refused
-// archive is the one thing that stops it, and only until the user answers.
-async function archiveThenVote(): Promise<void> {
-  // Committed from here: the gate is an await, so without this a second trigger
-  // arriving mid-archive would start a parallel flow.
-  quitPhase = "voted";
-  try {
-    await archiveNotesBeforeTeardown();
-  } catch (err) {
-    // The quit stays pending in Rust. Its wait past the ack is unbounded
-    // precisely because it waits on a human (docs/specs/standalone.md → "Quit
-    // flow"), and cancelling here would retire the watchdog that a later Quit
-    // anyway still needs. Hold the flow in `archive-failed` so a repeat trigger
-    // is deduped exactly like a pending confirmation.
-    quitPhase = "archive-failed";
-    openQuitArchiveFailure(err instanceof Error ? err.message : String(err), {
-      confirm: () => {
-        // Quit anyway: the user accepts losing these notes, so forget them and
-        // vote — watchdog still armed, because nothing cancelled the quit.
-        for (const id of notepadSurfaceIds()) removeSurface(id);
-        castVote();
-      },
-      // Cancel is the one branch that drops the pending quit in Rust.
-      cancel: cancelQuit,
-    });
-    return;
-  }
-  castVote();
-}
-
-function castVote(): void {
-  quitPhase = "voted";
-  void invoke("quit_vote").catch(() => {});
 }
 
 // Each teardown step's own bound, and the ceiling derived from them. The two
@@ -148,7 +96,6 @@ export const QUIT_TEARDOWN_CEILING_MS = STEP_BUDGET_TOTAL_MS + 1000;
 // and the snapshot are all keyed by the invoking window's label — so a window
 // tearing down can neither interrupt nor kill a sibling's terminals.
 async function runQuitTeardown(last: boolean): Promise<void> {
-  quitPhase = "tearing-down";
   const adapter = quitAdapter;
   try {
     void invoke("quit_progress").catch(() => {}); // teardown phase begins
@@ -191,24 +138,9 @@ async function runQuitTeardown(last: boolean): Promise<void> {
   }
 }
 
-// Abort the whole quit from this window (confirmation cancel). Rust tells every
-// window, and nothing anywhere has been destroyed.
-function cancelQuit(): void {
-  quitPhase = "idle";
-  void invoke("quit_cancel").catch(() => {});
-}
-
-// Rust says some window declined. Drop this window's dialog without calling
-// back into Rust — the cancel already happened, somewhere else.
-function handleQuitCancelled(): void {
-  quitPhase = "idle";
-  dismissQuitConfirm();
-}
-
 /** @internal Reset module state for testing. */
 export function _resetForTesting(): void {
-  quitPhase = "idle";
+  flow.reset();
   quitAdapter = null;
   quitConfirmGate = null;
-  describeWindow = () => undefined;
 }

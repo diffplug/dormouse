@@ -5,7 +5,7 @@ import {
   type AlertSettings,
 } from './alert-settings-model';
 
-type AlertSettingsTarget = Pick<AlertManager, 'applySettings'>;
+export type AlertSettingsTarget = Pick<AlertManager, 'applySettings'>;
 
 /**
  * Coordinates one host-authoritative alarm-settings blob across multiple

@@ -28,6 +28,7 @@ import { mountWallHarness, type WallHarness } from './wall/wall-test-utils';
 import { DEFAULT_WORKSPACE_ID } from '../lib/session-types';
 import { clearTerminalActivity, setTerminalActivity } from '../lib/session-activity-store';
 import { resetTerminalPaneState } from '../lib/terminal-state-store';
+import { setWindowLabel } from '../lib/workspace-store';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -2067,6 +2068,34 @@ describe('Wall on the Lath engine', () => {
     // The handle deregisters, so nothing addresses the gone Wall — but the
     // Sessions it held are untouched.
     expect(getWallHandle(DEFAULT_WORKSPACE_ID)).toBeNull();
+  });
+
+  it('names the Window that answered `dor list`, once the host has named it', async () => {
+    // A caller needs a ref it can hand back, and with several Windows open
+    // `window:1` names none of them (docs/specs/dor-cli.md -> "Handle Model").
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
+    await flush();
+
+    const list = async (): Promise<{ workspaceRef: string; windowRef: string }> => {
+      let listed: { result?: { workspaceRef: string; windowRef: string } } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.list,
+            params: {},
+            respond: (r: typeof listed) => { listed = r; },
+          },
+        }));
+      });
+      await flush();
+      return listed!.result!;
+    };
+
+    // A Window that never names itself, which is every host but standalone.
+    expect(await list()).toMatchObject({ workspaceRef: 'workspace:1', windowRef: 'window:1' });
+
+    setWindowLabel('ws-3');
+    expect(await list()).toMatchObject({ workspaceRef: 'workspace:1', windowRef: 'window:ws-3' });
   });
 });
 

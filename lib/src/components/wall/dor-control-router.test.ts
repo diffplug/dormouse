@@ -5,7 +5,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { installDorControlRouter, resolveDorControlRoute } from './dor-control-router';
 import { registerWallHandle, resetWallHandles, stubWallHandle, type WallHandle } from './wall-handles';
 import type { DorControlRequest } from './use-dor-control';
-import { createWorkspace, getWorkspacesSnapshot, resetWorkspaces, setActiveWorkspace } from '../../lib/workspace-store';
+import {
+  createWorkspace,
+  currentWindowRef,
+  getWorkspacesSnapshot,
+  resetWorkspaces,
+  setActiveWorkspace,
+  setWindowLabel,
+} from '../../lib/workspace-store';
 
 const disposers: Array<() => void> = [];
 
@@ -75,9 +82,24 @@ describe('dor control routing', () => {
       .toEqual({ kind: 'error', message: "unknown workspace target 'workspace:9'" });
     expect(resolveDorControlRoute(request({ params: { window: 'window:2' } })))
       .toEqual({ kind: 'error', message: "unknown window target 'window:2'" });
-    // The only Window this build addresses still resolves, in both spellings.
+    // A Window that never names itself is `window:1`, in both spellings.
     expect(resolveDorControlRoute(request({ params: { window: 'window:1' } })).kind).toBe('handle');
     expect(resolveDorControlRoute(request({ params: { window: '1' } })).kind).toBe('handle');
+  });
+
+  it('answers to the label the host gave it, and to no other Window', () => {
+    // A host with several Windows names each one, so `dor list` reports a ref a
+    // caller can hand straight back (docs/specs/dor-cli.md -> "Handle Model").
+    handleFor(getWorkspacesSnapshot().workspaces[0].id);
+    setWindowLabel('ws-3');
+    expect(currentWindowRef()).toBe('window:ws-3');
+    expect(resolveDorControlRoute(request({ params: { window: 'window:ws-3' } })).kind).toBe('handle');
+    expect(resolveDorControlRoute(request({ params: { window: 'ws-3' } })).kind).toBe('handle');
+    // Another Window's ref is not this Window's to act on — including the one
+    // this Window answered to before it was named.
+    expect(resolveDorControlRoute(request({ params: { window: 'window:main' } })))
+      .toEqual({ kind: 'error', message: "unknown window target 'window:main'" });
+    expect(resolveDorControlRoute(request({ params: { window: 'window:1' } })).kind).toBe('error');
   });
 
   it('does nothing when no Wall is mounted', () => {

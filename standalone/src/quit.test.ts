@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   notepadSurfaceIds: vi.fn(() => [] as string[]),
   removeSurface: vi.fn(),
   flushWindowSession: vi.fn(async () => {}),
+  getWorkspacesSnapshot: vi.fn(() => ({ workspaces: [{ id: "w1", name: "Deploys" }], activeId: "w1" })),
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
@@ -40,6 +41,10 @@ vi.mock("dormouse-lib/lib/notepad/notepad-store", () => ({
 // this file tests is where it sits in the order.
 vi.mock("dormouse-lib/lib/window-session-aggregator", () => ({
   flushWindowSession: mocks.flushWindowSession,
+}));
+// How a window names itself in its dialog: the Workspace it is showing.
+vi.mock("dormouse-lib/lib/workspace-store", () => ({
+  getWorkspacesSnapshot: mocks.getWorkspacesSnapshot,
 }));
 vi.mock("./updater", () => ({
   hasPendingUpdate: mocks.hasPendingUpdate,
@@ -546,7 +551,7 @@ describe("quit orchestrator", () => {
     const gate = vi.fn();
     setQuitConfirmGate(gate);
 
-    initQuitFlow(fakeAdapter(), { windowName: () => "Deploys" });
+    initQuitFlow(fakeAdapter());
     quitRequested(1);
     await settle();
     expect(gate.mock.calls[0]![1]).toEqual({ kind: "quit" });
@@ -554,7 +559,7 @@ describe("quit orchestrator", () => {
     _resetForTesting();
     gate.mockClear();
     setQuitConfirmGate(gate);
-    initQuitFlow(fakeAdapter(), { windowName: () => "Deploys" });
+    initQuitFlow(fakeAdapter());
     quitRequested(2);
     await settle();
     expect(gate.mock.calls[0]![1]).toEqual({ kind: "quit", windowName: "Deploys" });

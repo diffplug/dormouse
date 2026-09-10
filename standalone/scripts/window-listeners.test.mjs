@@ -20,9 +20,23 @@ const src = join(dirname(fileURLToPath(import.meta.url)), '..', 'src');
 /** The one module allowed to reach the bare API: it is the wrapper. */
 const WRAPPER = 'window-label.ts';
 
-const sources = readdirSync(src)
-  .filter((name) => /\.tsx?$/.test(name) && !name.includes('.test.') && name !== WRAPPER)
-  .map((name) => ({ name, text: readFileSync(join(src, name), 'utf8') }));
+// Recursive: a listener in a subdirectory is exactly as unscoped as one beside
+// the wrapper, and a scan that skipped it would report a clean bill of health.
+const sources = readdirSync(src, { recursive: true, withFileTypes: true })
+  .filter((entry) => entry.isFile()
+    && /\.tsx?$/.test(entry.name)
+    && !entry.name.includes('.test.')
+    && entry.name !== WRAPPER)
+  .map((entry) => ({
+    name: entry.name,
+    text: readFileSync(join(entry.parentPath, entry.name), 'utf8'),
+  }));
+
+test('the scan found the sources it is meant to be reading', () => {
+  // A walk that found nothing passes both checks below without reading a line.
+  assert.ok(sources.length > 10, `only ${sources.length} sources under ${src}`);
+  assert.ok(sources.some((file) => file.name === 'tauri-adapter.ts'));
+});
 
 test('every window listener is scoped through listenToWindow', () => {
   // `listen(` preceded by a word character or a dot is something else

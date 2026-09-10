@@ -1,8 +1,8 @@
-import { useEffect, useRef, useSyncExternalStore, type ReactNode } from 'react';
+import { useEffect, useSyncExternalStore, type ReactNode } from 'react';
 import { clsx } from 'clsx';
 import { Wall } from './Wall';
 import { listWallHandles } from './wall/wall-handles';
-import { getWorkspaceBootPlan } from './wall/workspace-boot-plans';
+import { getWorkspaceBootPlan, seedWorkspaceBootPlans } from './wall/workspace-boot-plans';
 import { getPlatform } from '../lib/platform';
 import { getWorkspacesSnapshot, subscribeToWorkspaces } from '../lib/workspace-store';
 import type { SessionFlushRequest } from '../lib/platform/types';
@@ -32,22 +32,12 @@ export function WorkspaceWindow({
   const { workspaces, activeId } = useSyncExternalStore(subscribeToWorkspaces, getWorkspacesSnapshot);
   // One shape for both callers, fixed at first render: without per-Workspace
   // plans the single boot record belongs to the Workspace that was active then.
-  // Either way a Workspace with no entry takes Lath's fresh branch and spawns
-  // exactly one default-shell pane.
-  const plansRef = useRef<WallBootPlans | null>(null);
-  const plans = (plansRef.current ??= initialPlans ?? { [activeId]: boot });
-  // A Workspace created after first render — one arriving from another Window —
-  // reads its plan from the parking store instead. Latched here so its Wall
-  // sees the same record on every later render, and never a fresh one.
-  //
-  // A Workspace that LEFT takes its latched plan with it. The same Workspace can
-  // come back — dragged out and dragged in again — and it must then mount from
-  // the record it brought rather than the one it first booted with, which would
-  // put a fresh default pane over the Sessions that just arrived.
-  for (const id of Object.keys(plans)) {
-    if (!workspaces.some((workspace) => workspace.id === id)) delete plans[id];
-  }
-  const planFor = (id: string) => (plans[id] ??= getWorkspaceBootPlan(id) ?? {});
+  // Every later read — including a Workspace arriving from another Window, which
+  // parks its own plan before it is created — goes to the same store, so a
+  // Workspace that leaves and comes back mounts from the record it brought.
+  // A Workspace with no entry takes Lath's fresh branch and spawns exactly one
+  // default-shell pane.
+  seedWorkspaceBootPlans(initialPlans ?? { [activeId]: boot });
 
   // The Window, not each Wall, answers the host's flush request: the adapter
   // completes on the FIRST notification, so a per-Wall answer would let a quit
@@ -72,7 +62,7 @@ export function WorkspaceWindow({
     >
       {workspaces.map((workspace) => {
         const isActive = workspace.id === activeId;
-        const plan = planFor(workspace.id);
+        const plan = getWorkspaceBootPlan(workspace.id);
         return (
           <div
             key={workspace.id}

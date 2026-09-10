@@ -49,8 +49,8 @@ import {
   initWorkspaceMoves,
   tearOutWorkspace,
   transferWorkspaceTo,
-  workspaceDropIndex,
 } from "./workspace-move";
+import { workspaceDropTarget, workspaceTabRect } from "./workspace-tabs";
 import { registerWallHandle, resetWallHandles, stubWallHandle } from "dormouse-lib/components/wall/wall-handles";
 import {
   getWorkspaceBootPlan,
@@ -223,7 +223,7 @@ describe("the target half", () => {
 
     // Nothing ended — the Surfaces are alive in another window — so this is a
     // close with no confirmation, no archive and no kill.
-    expect(mocks.invoke).toHaveBeenCalledWith("close_window_self");
+    expect(mocks.invoke).toHaveBeenCalledWith("close_window");
     expect(getWorkspacesSnapshot().workspaces).toHaveLength(1);
   });
 });
@@ -249,20 +249,42 @@ describe("a torn-out window's boot", () => {
   });
 });
 
-describe("workspaceDropIndex", () => {
-  it("inserts before the first tab whose center the drop is left of", () => {
+/** One scan of the strip, shared by the drop index, the caret, and the tear-out
+ *  grab offset (`standalone/src/workspace-tabs.ts`). */
+describe("workspaceDropTarget", () => {
+  function strip(count: number): void {
     document.body.innerHTML = "";
-    for (const [index, left] of [0, 100, 200].entries()) {
+    for (let index = 0; index < count; index += 1) {
       const tab = document.createElement("div");
       tab.dataset.workspaceTab = `w${index}`;
-      tab.getBoundingClientRect = () => ({ left, width: 100 }) as DOMRect;
+      tab.getBoundingClientRect = () =>
+        ({ left: index * 100, right: index * 100 + 100, width: 100, height: 24 }) as DOMRect;
       document.body.append(tab);
     }
-    expect(workspaceDropIndex({ x: 10, y: 0 })).toBe(0);
+  }
+
+  it("inserts before the first tab whose center the drop is left of", () => {
+    strip(3);
+    expect(workspaceDropTarget(10).index).toBe(0);
     // Between tab 1's center (150) and tab 2's (250): it takes index 2.
-    expect(workspaceDropIndex({ x: 160, y: 0 })).toBe(2);
+    expect(workspaceDropTarget(160).index).toBe(2);
     // Past the last tab's center: appended, which is what undefined means.
-    expect(workspaceDropIndex({ x: 900, y: 0 })).toBeUndefined();
-    expect(workspaceDropIndex(undefined)).toBeUndefined();
+    expect(workspaceDropTarget(900).index).toBeUndefined();
+  });
+
+  it("hands back the box the caret draws against, and null with no tabs", () => {
+    strip(3);
+    // The tab the caret goes to the left of...
+    expect(workspaceDropTarget(160).rect?.left).toBe(200);
+    // ...and, when appending, the last tab, whose right edge it goes after.
+    expect(workspaceDropTarget(900).rect?.right).toBe(300);
+    strip(0);
+    expect(workspaceDropTarget(10)).toEqual({ index: undefined, rect: null });
+  });
+
+  it("finds one Workspace's own tab, and answers null for one not rendered", () => {
+    strip(3);
+    expect(workspaceTabRect("w1")?.left).toBe(100);
+    expect(workspaceTabRect("gone")).toBeNull();
   });
 });
