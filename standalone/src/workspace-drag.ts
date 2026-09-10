@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { throttleTrailing } from "dormouse-lib/lib/throttle";
 import type { WorkspaceId } from "dormouse-lib/lib/session-types";
 import type { StripDragPoint } from "dormouse-lib/components/workspace-strip-drag";
 import { currentWindowLabel } from "./window-label";
@@ -29,10 +30,10 @@ interface CursorHit {
   y: number;
 }
 
-let lastProbeAt = 0;
 let probing = false;
+/** A probe was wanted while one was in flight; ask again when it lands. */
+let missed = false;
 let lastPoint: StripDragPoint | null = null;
-let trailingTimer: ReturnType<typeof setTimeout> | null = null;
 let hoverLabel: string | null = null;
 let hoverBucket = -1;
 /**
@@ -73,44 +74,40 @@ function hover(hit: CursorHit | null): void {
   }).catch((err) => console.error("[workspace-drag] hover_workspace_target failed", err));
 }
 
-function clearTrailing(): void {
-  if (trailingTimer === null) return;
-  clearTimeout(trailingTimer);
-  trailingTimer = null;
-}
-
 function probeNow(): void {
   const mine = generation;
-  lastProbeAt = Date.now();
   probing = true;
   void probe()
     .then((hit) => {
       if (mine === generation) hover(hit);
     })
-    .finally(() => { probing = false; });
+    .finally(() => {
+      probing = false;
+      // The window closed on an in-flight probe: the pointer has moved since,
+      // and the caret would otherwise hold wherever that answer put it.
+      if (missed && mine === generation) {
+        missed = false;
+        askToProbe();
+      }
+    });
 }
 
 /**
- * Ask again once the throttle window is over.
+ * Probe on the leading edge and again on the trailing one
+ * (`throttleTrailing`).
  *
  * The leading edge alone never sees where the pointer came to **rest**, and the
  * resting position is the one the caret must show — a pointer that stops moving
  * inside the last throttle window would otherwise leave the caret a tab behind
  * the drop it is about to make.
  */
-function scheduleTrailing(delay: number): void {
-  if (trailingTimer !== null) return;
-  const mine = generation;
-  trailingTimer = setTimeout(() => {
-    trailingTimer = null;
-    if (mine !== generation) return;
-    if (probing) {
-      scheduleTrailing(HIT_TEST_THROTTLE_MS);
-      return;
-    }
-    probeNow();
-  }, delay);
-}
+const askToProbe = throttleTrailing(() => {
+  if (probing) {
+    missed = true;
+    return;
+  }
+  probeNow();
+}, HIT_TEST_THROTTLE_MS);
 
 /** The pointer left this window's strip mid-drag. */
 export function onDragOutsideWindow(point: StripDragPoint): void {
@@ -118,12 +115,21 @@ export function onDragOutsideWindow(point: StripDragPoint): void {
   // throttle window; a coalesced or repeated move reports the same point.
   if (lastPoint?.clientX === point.clientX && lastPoint?.clientY === point.clientY) return;
   lastPoint = point;
-  const wait = HIT_TEST_THROTTLE_MS - (Date.now() - lastProbeAt);
-  if (probing || wait > 0) {
-    scheduleTrailing(Math.max(wait, 0));
-    return;
-  }
-  probeNow();
+  askToProbe();
+}
+
+/**
+ * The gesture is over, whichever way it ended. Bumping the generation is what
+ * makes an in-flight probe's answer inert: it lands after the caret has been
+ * cleared, and re-lighting one in a window the drag has left would burn there
+ * until the next drag.
+ */
+function endGesture(): void {
+  askToProbe.cancel();
+  missed = false;
+  generation += 1;
+  lastPoint = null;
+  hover(null);
 }
 
 /**
@@ -132,10 +138,7 @@ export function onDragOutsideWindow(point: StripDragPoint): void {
  * claiming a drop that is no longer going to happen.
  */
 export function onDragBackInsideStrip(): void {
-  clearTrailing();
-  generation += 1;
-  lastPoint = null;
-  hover(null);
+  endGesture();
 }
 
 /**
@@ -150,12 +153,9 @@ export function onDropOnOtherWindow(
   _point: StripDragPoint,
   insideStrip: boolean,
 ): void {
-  // Before the hover, so an in-flight probe's answer cannot re-light the caret
-  // this is about to clear.
-  clearTrailing();
-  generation += 1;
-  hover(null);
-  lastPoint = null;
+  // Before the fresh probe below, so an in-flight one's answer cannot re-light
+  // the caret this is about to clear.
+  endGesture();
   if (insideStrip) return;
   const grab = grabOffset(id);
   void (async () => {
@@ -184,16 +184,13 @@ function grabOffset(workspaceId: WorkspaceId): { x: number; y: number } {
 /** The drag was abandoned — `pointercancel`, or Escape. Nothing moves, but a
  *  caret lit in another window would otherwise be stranded there. */
 export function onDragCancelled(): void {
-  clearTrailing();
-  generation += 1;
-  hover(null);
-  lastPoint = null;
+  endGesture();
 }
 
 /** @internal Reset module state for testing. */
 export function _resetWorkspaceDragForTesting(): void {
-  clearTrailing();
-  lastProbeAt = 0;
+  askToProbe.cancel();
+  missed = false;
   probing = false;
   lastPoint = null;
   hoverLabel = null;
