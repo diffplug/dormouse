@@ -1551,7 +1551,7 @@ export function Wall({
       return getTerminalInstance(id) !== null && !isReplaceableShell(id);
     }),
     runningCount: () => countRunningSessionsIn(memberSurfaceIds()),
-    flushPersistence: () => persistence.flush(),
+    flushPersistence: (options) => persistence.flush(options),
     closeAll,
     cancelClose,
     handleDorControl,

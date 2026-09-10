@@ -4,6 +4,7 @@ import { countRunningSessions } from "dormouse-lib/lib/terminal-registry";
 import { archiveSurfaceNotes } from "dormouse-lib/lib/notepad/close-coordinator";
 import { notepadSurfaceIds, removeSurface } from "dormouse-lib/lib/notepad/notepad-store";
 import { flushWindowSession } from "dormouse-lib/lib/window-session-aggregator";
+import { DEFAULT_RECOVERY_WAIT_MS } from "dormouse-lib/host/recovery-capture";
 import type { TauriAdapter } from "./tauri-adapter";
 import { openQuitArchiveFailure } from "./quit-confirm-store";
 import { hasPendingUpdate, installPendingUpdate } from "./updater";
@@ -142,11 +143,15 @@ async function runQuitTeardown(): Promise<void> {
           // interrupt and the kill, and it is the one thing here that cannot be
           // reconstructed afterwards. Losing it must never cost the save behind
           // it, so this step alone cannot abort the rest.
-          await adapter.captureAgentRecovery(1300).catch((err) =>
+          // No `ids`: a quit tears down the whole Window, so the capture takes
+          // every live PTY.
+          await adapter.captureAgentRecovery(DEFAULT_RECOVERY_WAIT_MS).catch((err) =>
             console.warn("[quit] agent recovery capture failed; proceeding", err));
           await adapter.requestSessionFlush(1500); // save while PTYs are alive
           await adapter.gracefulKillAllPtys(2000); // SIGTERM; wait for exits and final output
-          await adapter.requestSessionFlush(1500); // final post-exit save
+          // Final post-exit save. Nothing left to probe a cwd from, and each pane
+          // keeps the one the save above recorded.
+          await adapter.requestSessionFlush(1500, { probeCwd: false });
           await flushWindowSession(); // the Walls' records become one Window blob
           await adapter.drainSessionSaves(2000); // last write reaches disk
         })(),

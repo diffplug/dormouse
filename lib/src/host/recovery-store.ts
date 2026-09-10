@@ -12,7 +12,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { noCommands, type RecoveryLog } from './recovery-capture';
+import { noCommands, silent, type RecoveryLog } from './recovery-capture';
 
 const FILE_NAME = 'recovery.json';
 
@@ -40,8 +40,6 @@ export interface RecoveryStore {
   /** Whether a write survives this process. `false` is the no-directory store. */
   readonly persistent: boolean;
 }
-
-const silent: RecoveryLog = { info: () => {}, error: () => {} };
 
 /**
  * The record under `dir`, or a memory-only store when no directory was given.

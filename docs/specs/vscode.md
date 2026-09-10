@@ -139,8 +139,8 @@ the kill, and the shutdown budget is not ours (rationale), so the one step whose
 data cannot be reconstructed afterwards runs before the ones that can (cwd
 re-reads, alert merges). `captureAgentRecoveryCommands` writes `^C` into every
 live PTY, waits bounded, scans those buffers, and records the invocation to
-`recovery.json` under `context.storageUri`, **written synchronously and replaced
-temp-then-rename**. **Never `workspaceState`**, whose SQLite flush is already
+`recovery.json` under `context.storageUri`, **written synchronously, owner-only,
+and replaced temp-then-rename**. **Never `workspaceState`**, whose SQLite flush is already
 tearing down (rationale), and **never `PersistedPane.resumeCommand`**, which the
 step-4 flush would overwrite with the webview's stale copy. **The record is
 rewritten the moment each command is found and every wait is bounded**, so being
@@ -205,17 +205,21 @@ never opened would otherwise auto-run a week-old invocation on some much later
 restore. A missing hint is ordinary: `CLAUDE_CODE_CHILD_SESSION` in a pane's env
 disables transcript saving in claude, which then prints none (rationale).
 
-**The machine is shared, the record is not.** Every rule above lives in
-`captureAgentRecovery` (`lib/src/host/recovery-capture.ts`), over four primitives
-each host supplies — the live id set, interrupt, a monotonic received count, and the
-output since a mark — so the Tauri sidecar runs the same detection
-(`docs/specs/standalone.md` → "Agent recovery"). What stays here is where the record
-lives and how it is written; VS Code's is a plain file, written synchronously,
-because `workspaceState` batches its flush and `deactivate()` outruns it (rationale).
+**Both halves are shared with the Tauri sidecar.** Every detection rule above
+lives in `captureAgentRecovery` (`lib/src/host/recovery-capture.ts`), over four
+primitives each host supplies — the live id set, interrupt, a monotonic received
+count, and the output since a mark — and the record itself is
+`createRecoveryStore` (`docs/specs/standalone.md` → "Agent recovery"), so one
+format, one destructive read, and one set of file modes serve both. What stays
+here is which PTYs the extension host offers them and which directory the store
+writes into: `storageUri`, falling back to `globalStorageUri`. It is a plain file
+written synchronously because `workspaceState` batches its flush and
+`deactivate()` outruns it (rationale).
 
 Source of truth: `captureAgentRecoveryCommands` and `takeRecoveryCommands` in
 `vscode-ext/src/session-state.ts`, `captureAgentRecovery` in
-`lib/src/host/recovery-capture.ts`, `interrupt` in `vscode-ext/src/pty-manager.ts`.
+`lib/src/host/recovery-capture.ts`, `createRecoveryStore` in
+`lib/src/host/recovery-store.ts`, `interrupt` in `vscode-ext/src/pty-manager.ts`.
 
 ### Theme integration
 

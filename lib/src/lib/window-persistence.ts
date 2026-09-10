@@ -52,9 +52,9 @@ export function loadWindowState(storage: SessionKeyValueStore, key: string): Per
   return readPersistedWindow(parsed);
 }
 
-/** Persist `window` under `key`. */
-export function saveWindowState(storage: SessionKeyValueStore, key: string, window: PersistedWindow): void {
-  storage.setItem(key, JSON.stringify(window));
+/** Persist `snapshot` under `key`. */
+export function saveWindowState(storage: SessionKeyValueStore, key: string, snapshot: PersistedWindow): void {
+  storage.setItem(key, JSON.stringify(snapshot));
 }
 
 /** Parse a stored JSON blob, or null when it is corrupt — a bad blob degrades to a

@@ -673,17 +673,13 @@ describe('resumeOrRestoreFrom', () => {
     expect(resumeOrRestoreFrom(platform, collected, {}).paneIds).toEqual(['slot-pane']);
   });
 
-  it('hands each plan its own recovery commands', async () => {
+  it('takes the host record on the cold-restore branch', async () => {
     const { platform, live: collected } = await live([]);
-    platform.getRecoveryCommands = vi.fn(() => ({ 'a1': 'whole-window' }));
+    platform.getRecoveryCommands = vi.fn(() => ({ 'a1': 'claude --resume abc' }));
 
-    resumeOrRestoreFrom(platform, collected, {
-      savedSession: savedFor('a1'),
-      recoveryCommands: { 'a1': 'claude --resume abc' },
-    });
+    resumeOrRestoreFrom(platform, collected, { savedSession: savedFor('a1') });
     expect(terminalRegistryMocks.restoreTerminal).toHaveBeenCalledWith(
       'a1', expect.objectContaining({ resumeCommand: 'claude --resume abc' }),
     );
-    expect(platform.getRecoveryCommands).not.toHaveBeenCalled();
   });
 });

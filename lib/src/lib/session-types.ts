@@ -288,17 +288,8 @@ export function readPersistedWindow(raw: unknown): PersistedWindow | null {
   return { version: 1, workspaces, activeWorkspaceId };
 }
 
-/** The active Workspace's session, or the first Workspace's as a fallback. */
-export function activeWorkspaceSession(window: PersistedWindow): PersistedSession {
-  const active = window.workspaces.find((ws) => ws.id === window.activeWorkspaceId);
-  return (active ?? window.workspaces[0]).session;
-}
-
-/** Return a copy of the Window with the active Workspace's session replaced,
- *  preserving every other Workspace. */
-export function replaceActiveSession(window: PersistedWindow, session: PersistedSession): PersistedWindow {
-  return {
-    ...window,
-    workspaces: window.workspaces.map((ws) => (ws.id === window.activeWorkspaceId ? { ...ws, session } : ws)),
-  };
+/** Every pane id the Window's Workspaces name, across all of them — what a boot
+ *  claims its recovery record against. */
+export function windowPaneIds(window: PersistedWindow | null): string[] {
+  return window?.workspaces.flatMap((workspace) => workspace.session.panes.map((pane) => pane.id)) ?? [];
 }

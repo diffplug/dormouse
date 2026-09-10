@@ -503,19 +503,22 @@ function detectAvailableShells(runtime = {}) {
 
 module.exports.detectAvailableShells = detectAvailableShells;
 
-function parseCwdFromLsof(output, pid) {
-  const lines = output.split(/\r?\n/);
-  let inTargetProcess = false;
+/** Every `pid -> cwd` in `lsof -Fn` field output. Records are `p<pid>` blocks;
+ *  within one, the `n` line after `fcwd` is that process's cwd. */
+function parseCwdsFromLsof(output) {
+  const cwds = new Map();
+  let pid = null;
   let sawCwdFd = false;
 
-  for (const line of lines) {
+  for (const line of output.split(/\r?\n/)) {
     if (line.startsWith('p')) {
-      inTargetProcess = line === `p${pid}`;
+      const parsed = Number(line.slice(1));
+      pid = Number.isInteger(parsed) ? parsed : null;
       sawCwdFd = false;
       continue;
     }
 
-    if (!inTargetProcess) continue;
+    if (pid === null) continue;
 
     if (line === 'fcwd') {
       sawCwdFd = true;
@@ -523,39 +526,68 @@ function parseCwdFromLsof(output, pid) {
     }
 
     if (sawCwdFd && line.startsWith('n')) {
-      return line.slice(1) || null;
+      if (!cwds.has(pid)) cwds.set(pid, line.slice(1) || null);
+      sawCwdFd = false;
     }
   }
 
-  return null;
+  return cwds;
+}
+
+module.exports.parseCwdsFromLsof = parseCwdsFromLsof;
+
+function parseCwdFromLsof(output, pid) {
+  return parseCwdsFromLsof(output).get(Number(pid)) ?? null;
 }
 
 module.exports.parseCwdFromLsof = parseCwdFromLsof;
 
 function getCwdForPid(pid, runtime = {}) {
+  return getCwdsForPids([pid], runtime).get(pid) ?? null;
+}
+
+module.exports.getCwdForPid = getCwdForPid;
+
+/**
+ * `pid -> cwd` for every pid that could be resolved, in ONE pass.
+ *
+ * Batched at this layer because a save probes every terminal pane at once and
+ * the macOS branch is a synchronous subprocess on the sidecar's only event loop:
+ * one `lsof` for N pids instead of N spawns is the whole point
+ * (docs/specs/transport.md -> "Persisted session"). Linux is a readlink per pid
+ * with no subprocess to batch, and Windows resolves nothing either way.
+ */
+function getCwdsForPids(pids, runtime = {}) {
   const fsModule = runtime.fsModule || fs;
   const execFileSyncFn = runtime.execFileSync || execFileSync;
+  const found = new Map();
+  const unresolved = [];
 
-  // Linux: /proc/<pid>/cwd symlink
-  try {
-    return fsModule.readlinkSync(`/proc/${pid}/cwd`);
-  } catch { /* not Linux or proc unavailable */ }
+  // Linux: /proc/<pid>/cwd symlink.
+  for (const pid of pids) {
+    try {
+      found.set(pid, fsModule.readlinkSync(`/proc/${pid}/cwd`));
+    } catch { unresolved.push(pid); /* not Linux or proc unavailable */ }
+  }
+  if (unresolved.length === 0) return found;
 
   // macOS: lsof. `-a` is required so `-p` and `-d cwd` are combined instead
   // of OR'ed, which otherwise returns unrelated processes and often `/`.
   try {
-    const out = execFileSyncFn('lsof', ['-a', '-d', 'cwd', '-p', String(pid), '-Fn'], {
+    const out = execFileSyncFn('lsof', ['-a', '-d', 'cwd', '-p', unresolved.join(','), '-Fn'], {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
       windowsHide: true, // see runPowerShell: avoid the console-allocation deadlock
     });
-    return parseCwdFromLsof(out, pid);
-  } catch { /* fallback */ }
+    for (const [pid, cwd] of parseCwdsFromLsof(out)) {
+      if (cwd) found.set(pid, cwd);
+    }
+  } catch { /* fallback: every unresolved pid stays absent */ }
 
-  return null;
+  return found;
 }
 
-module.exports.getCwdForPid = getCwdForPid;
+module.exports.getCwdsForPids = getCwdsForPids;
 
 // ── Open-port discovery ──────────────────────────────────────────────────────
 //
@@ -1061,7 +1093,12 @@ module.exports.openNativeDirectory = openNativeDirectory;
  *   send('openPorts', { id, ports: [{ protocol, family, address, port, pid, processName }], requestId })
  */
 
-module.exports.create = function create(send, ptyModule, { replay = false } = {}) {
+// `sliceSince` is injected rather than imported: its implementation is shared
+// with the VS Code extension host and lives in `lib/src/host/replay-buffer.ts`,
+// which reaches this process only as the generated `recovery.cjs` bundle. Taking
+// it as an option keeps this file — and its `node --test` suite — free of any
+// build artifact. `main.js` supplies the real one.
+module.exports.create = function create(send, ptyModule, { replay = false, sliceSince = null } = {}) {
   if (!ptyModule || typeof ptyModule.spawn !== 'function') {
     throw new TypeError('create() requires a node-pty compatible module');
   }
@@ -1212,25 +1249,13 @@ module.exports.create = function create(send, ptyModule, { replay = false } = {}
     return session ? session.received : 0;
   }
 
-  /** The output received after a `receivedChars` mark, clamped to what the bounded
-   *  buffer still holds. Joins only the chunks that span the mark, so repeatedly
-   *  reading a pane's recent tail costs the tail, not the buffer. Eviction can have
-   *  carried the mark off the front; the oldest char still held is the furthest
-   *  back this can honestly answer. */
+  /** The output received after a `receivedChars` mark. This is the buffer lookup;
+   *  the clamping arithmetic is the injected `sliceSince` (see `create`). Without
+   *  one there is no recovery capture in this process either, so nothing to read. */
   function outputSince(id, mark) {
     const session = sessions.get(id);
-    if (!session) return '';
-    const oldestHeld = session.received - session.chars;
-    const wanted = session.received - Math.max(mark, oldestHeld);
-    if (wanted <= 0) return '';
-    const tail = [];
-    let held = 0;
-    for (let i = session.chunks.length - 1; i >= 0 && held < wanted; i--) {
-      tail.push(session.chunks[i]);
-      held += session.chunks[i].length;
-    }
-    const joined = tail.reverse().join('');
-    return held > wanted ? joined.slice(held - wanted) : joined;
+    if (!session || !sliceSince) return '';
+    return sliceSince(session.chunks, session.chars, session.received, mark);
   }
 
   // Synchronous lifetime observation for the Burrow's atomic
@@ -1327,6 +1352,29 @@ module.exports.create = function create(send, ptyModule, { replay = false } = {}
     send('cwd', { id, cwd: getCwdForPid(p.pid), requestId });
   }
 
+  /** One answer for every id a save asks about, so N panes cost one process
+   *  scan rather than N (docs/specs/transport.md -> "Persisted session"). An id
+   *  with no live PTY answers null, exactly as `getCwd` does. */
+  function getCwds(ids, requestId) {
+    const targets = Array.isArray(ids) ? ids : [];
+    const cwds = {};
+    const idsByPid = new Map();
+    for (const id of targets) {
+      cwds[id] = null;
+      const p = ptys.get(id);
+      if (!p) continue;
+      const sharing = idsByPid.get(p.pid);
+      if (sharing) sharing.push(id);
+      else idsByPid.set(p.pid, [id]);
+    }
+    const resolved = getCwdsForPids([...idsByPid.keys()]);
+    for (const [pid, sharing] of idsByPid) {
+      const cwd = resolved.get(pid) ?? null;
+      for (const id of sharing) cwds[id] = cwd;
+    }
+    send('cwds', { cwds, requestId });
+  }
+
   function getOpenPorts(id, requestId) {
     const p = ptys.get(id);
     // getOpenPortsForPid is fail-soft (returns [] on any platform error).
@@ -1361,7 +1409,11 @@ module.exports.create = function create(send, ptyModule, { replay = false } = {}
       // Guarded per id: one already-dead pty must not abort the rest.
       try { write(id, '\x03'); } catch { /* already dead */ }
     }
-    send('interruptDone', { requestId });
+    // Only an actual request is acked. The recovery capture presses in-process
+    // and has nothing to correlate, so a blanket ack would put a stray
+    // `interruptDone {requestId: undefined}` on the protocol channel for every
+    // press it makes.
+    if (requestId !== undefined) send('interruptDone', { requestId });
   }
 
   function gracefulKillAll(timeout = 2000, requestId) {
@@ -1391,6 +1443,6 @@ module.exports.create = function create(send, ptyModule, { replay = false } = {}
   }
 
   return { spawn, write, resize, hasPty, kill, killAll, list, context,
-    getCwd, getOpenPorts, interrupt, gracefulKillAll, getShells,
+    getCwd, getCwds, getOpenPorts, interrupt, gracefulKillAll, getShells,
     liveIds, receivedChars, outputSince };
 };

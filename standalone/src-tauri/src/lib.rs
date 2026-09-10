@@ -461,6 +461,27 @@ fn pty_get_cwd(
         .and_then(|cwd| cwd.as_str().map(String::from)))
 }
 
+/// Every id's cwd in one sidecar round trip. A save probes each terminal pane,
+/// and the sidecar resolves them with a synchronous process scan on its only
+/// event loop, so N panes must cost one scan rather than N
+/// (docs/specs/transport.md -> "Persisted session").
+#[tauri::command(async)]
+fn pty_get_cwds(
+    state: tauri::State<'_, SidecarState>,
+    ids: Vec<String>,
+) -> Result<JsonValue, String> {
+    let response = request_from_sidecar_timeout(
+        &state,
+        "pty:getCwds",
+        serde_json::json!({ "ids": ids }),
+        Duration::from_secs(2),
+    )?;
+    Ok(response
+        .get("cwds")
+        .cloned()
+        .unwrap_or_else(|| JsonValue::Object(JsonMap::new())))
+}
+
 // Mirrors `OPEN_PORT_TIMEOUT_MS` in `lib/src/lib/platform/types.ts` — pinned by
 // `lib/src/lib/mirrored-constants.test.ts`.
 const OPEN_PORT_TIMEOUT_MS: u64 = 3000;
@@ -1034,16 +1055,25 @@ fn write_file_with_permissions(
     let tmp = temp_write_path(path);
     // Atomic replace: write a sibling temp file, fsync it, then rename over the
     // target so a crash mid-write can never truncate the previous good copy.
-    {
+    // Every failure below takes the temp file with it, so only a crash — never a
+    // returned error — can leave one behind for the boot sweep to find.
+    let written = (|| -> Result<(), String> {
         let mut f = File::create(&tmp).map_err(|e| format!("open temp: {e}"))?;
         // Before any bytes land: the rename below preserves the temp file's
         // mode, so tightening here is what makes the final snapshot 0600.
         restrict(&tmp, 0o600)?;
         f.write_all(contents.as_bytes())
             .map_err(|e| format!("write temp: {e}"))?;
-        f.sync_all().map_err(|e| format!("fsync temp: {e}"))?;
+        f.sync_all().map_err(|e| format!("fsync temp: {e}"))
+    })();
+    if let Err(e) = written {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
     }
-    std::fs::rename(&tmp, path).map_err(|e| format!("rename {}: {e}", path.display()))?;
+    if let Err(e) = std::fs::rename(&tmp, path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("rename {}: {e}", path.display()));
+    }
     // The temp file's own fsync doesn't make the rename durable — on unix the
     // directory entry that now points at the new inode must be fsynced too, or a
     // crash right after quit could leave the rename unrecorded. Best-effort: a
@@ -1076,28 +1106,22 @@ async fn save_session(window: tauri::Window, state: String) -> Result<(), String
 }
 
 /// The suffix `write_file_atomically` leaves on a session snapshot's temp
-/// sibling, derived through the real writer so changing the convention can never
-/// leave the sweep below looking for a name nothing makes any more.
-fn session_temp_suffix() -> String {
-    let name = session_file_name("probe");
-    temp_write_path(Path::new(&name))
-        .file_name()
-        .and_then(|n| n.to_str())
-        .and_then(|n| n.strip_prefix("probe"))
-        .map(str::to_owned)
-        .unwrap_or_else(|| ".json.tmp".to_string())
-}
+/// sibling. Pinned against the real writer by
+/// `session_temp_suffix_matches_what_the_writer_leaves`, so changing the
+/// convention cannot leave the sweep below looking for a name nothing makes.
+const SESSION_TEMP_SUFFIX: &str = ".json.tmp";
 
 /// Delete every orphaned temp write in the sessions directory, at boot.
 ///
-/// A crash between the temp write and the rename leaves a file `load_session`
-/// cannot see and nothing else will ever overwrite — and a snapshot written
-/// before Dormouse stopped storing transcripts carries one. Deleting is the
-/// point: those bytes have to leave the disk
-/// (docs/specs/transport.md -> "Retiring the transcripts already on disk").
+/// The writer removes its own temp on every error path, so what remains here is
+/// the legacy and hard-crash migration: a kill between the temp write and the
+/// rename leaves a file `load_session` cannot see and nothing else will ever
+/// overwrite — and a snapshot written before Dormouse stopped storing
+/// transcripts carries one. Deleting is the point: those bytes have to leave the
+/// disk (docs/specs/transport.md -> "Retiring the transcripts already on disk").
 /// Never touches a live snapshot; the window that owns one rewrites it itself.
 fn sweep_orphan_session_temps(dir: &Path) -> Result<(), String> {
-    let suffix = session_temp_suffix();
+    let suffix = SESSION_TEMP_SUFFIX;
     let entries = match std::fs::read_dir(dir) {
         Ok(entries) => entries,
         // No sessions directory yet (a first launch) is the desired end state.
@@ -1108,7 +1132,7 @@ fn sweep_orphan_session_temps(dir: &Path) -> Result<(), String> {
     for entry in entries.flatten() {
         let name = entry.file_name();
         let Some(name) = name.to_str() else { continue };
-        if !name.ends_with(&suffix) {
+        if !name.ends_with(suffix) {
             continue;
         }
         match std::fs::remove_file(entry.path()) {
@@ -2022,6 +2046,7 @@ pub fn run() {
             pty_theme_colors,
             pty_kill,
             pty_get_cwd,
+            pty_get_cwds,
             pty_context,
             pty_get_open_ports,
             pty_graceful_kill_all,
@@ -2085,8 +2110,8 @@ mod tests {
     use super::{
         find_node_binary, notepad_archive_lock_path, read_notepad_archive_from, read_session_from,
         reset_notepad_archive_at, resolve_dor_cli_paths, resolve_sidecar_path, session_file_name,
-        session_temp_suffix, state_root_from, strip_windows_verbatim_prefix,
-        sweep_orphan_session_temps, temp_write_path, write_notepad_archive_to, write_session_to,
+        state_root_from, strip_windows_verbatim_prefix, sweep_orphan_session_temps,
+        temp_write_path, write_notepad_archive_to, write_session_to, SESSION_TEMP_SUFFIX,
         NOTEPAD_ARCHIVE_FILE,
     };
     use std::fs;
@@ -2518,10 +2543,9 @@ mod tests {
                 read_session_from(dir.path(), "main").unwrap().as_deref(),
                 Some("previous")
             );
-            let tmp = dir.path().join("main.json.tmp");
-            if tmp.exists() {
-                assert_eq!(fs::metadata(tmp).unwrap().len(), 0);
-            }
+            // The writer cleans up after itself, so a returned error never
+            // leaves the boot sweep anything to find.
+            assert!(!dir.path().join("main.json.tmp").exists());
         }
     }
 
@@ -2587,17 +2611,17 @@ mod tests {
         assert!(sweep_orphan_session_temps(&dir.path().join("nope")).is_ok());
     }
 
-    /// The sweep's suffix comes from the writer, so the two can never drift.
+    /// The sweep's constant against the name the writer actually leaves, so the
+    /// two can never drift.
     #[test]
     fn session_temp_suffix_matches_what_the_writer_leaves() {
-        assert_eq!(session_temp_suffix(), ".json.tmp");
         assert_eq!(
             temp_write_path(Path::new(&session_file_name("main")))
                 .file_name()
                 .unwrap()
                 .to_str()
                 .unwrap(),
-            format!("main{}", session_temp_suffix()),
+            format!("main{SESSION_TEMP_SUFFIX}"),
         );
     }
 

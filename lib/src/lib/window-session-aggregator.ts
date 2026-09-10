@@ -7,57 +7,49 @@ import type { PersistedSession, PersistedWindow, PersistedWorkspace, WorkspaceId
  * The Wall's persistence hook publishes here instead of writing the platform
  * slot when it runs under a Workspace; the standalone boot installs the writer.
  *
- * Two maps, because a Workspace's record has two possible ages. `published` is
- * what its Wall has saved this run. `seeded` is what the last run left on disk,
- * which is the answer until that Wall has saved anything — it is what keeps a
- * Window snapshot taken mid-boot from replacing a restored Workspace with a
- * blank one, and it is what a save reads its retained `cwd` out of
- * (`previousWorkspaceSession`).
+ * One record per Workspace, whatever its age: boot seeds it from what the last
+ * run left on disk, and that Workspace's Wall replaces it on its first save. The
+ * seed is what keeps a Window snapshot taken mid-boot from replacing a restored
+ * Workspace with a blank one, and it is what that first save reads its retained
+ * `cwd` out of (`previousWorkspaceSession`).
  */
 
-const published = new Map<WorkspaceId, PersistedSession>();
-const seeded = new Map<WorkspaceId, PersistedSession>();
+const records = new Map<WorkspaceId, PersistedSession>();
 let writer: ((snapshot: PersistedWindow) => void | Promise<void>) | null = null;
 let unsubscribeWorkspaces: (() => void) | null = null;
 let timer: ReturnType<typeof setTimeout> | null = null;
 let inFlight: Promise<void> | null = null;
 
-/** How long the Window blob waits for its Workspaces to settle. Each Wall
- *  already debounces its own record, so this is what collapses N Workspaces
- *  reacting to one event into a single host write. */
-const WRITE_DEBOUNCE_MS = 500;
+/**
+ * How long a debounced save waits. One value for both levels: a Wall's own
+ * record and the Window blob its publish schedules. The Window's wait is what
+ * collapses N Workspaces reacting to one event into a single host write.
+ *
+ * Source of truth for the Wall's timer: `useSessionPersistence` in
+ * `lib/src/components/wall/use-session-persistence.ts`.
+ */
+export const SESSION_SAVE_DEBOUNCE_MS = 500;
 
 /**
  * The record on disk for every Workspace this Window is restoring, installed at
  * boot before any Wall mounts. Replaces whatever was seeded before; `null`
  * clears it (a fresh Window).
  */
-export function seedWindowSession(window: PersistedWindow | null): void {
-  seeded.clear();
-  for (const workspace of window?.workspaces ?? []) seeded.set(workspace.id, workspace.session);
+export function seedWindowSession(snapshot: PersistedWindow | null): void {
+  records.clear();
+  for (const workspace of snapshot?.workspaces ?? []) records.set(workspace.id, workspace.session);
 }
 
-/** Record a Workspace's latest session and schedule the Window write. */
+/** Record a Workspace's latest session and schedule the Window write. Also how a
+ *  Workspace arriving from another Window installs the record it brought. */
 export function publishWorkspaceSession(workspaceId: WorkspaceId, session: PersistedSession): void {
-  published.set(workspaceId, session);
-  scheduleWrite();
-}
-
-/**
- * Install a record for a Workspace whose Wall is not the one that built it — a
- * Workspace moving in from another Window. It stands as that Workspace's
- * previous record until its new Wall publishes, exactly as a seed does.
- */
-export function adoptWorkspaceSession(workspaceId: WorkspaceId, session: PersistedSession): void {
-  seeded.set(workspaceId, session);
-  published.delete(workspaceId);
+  records.set(workspaceId, session);
   scheduleWrite();
 }
 
 /** Drop a Workspace's session (its Workspace was closed or moved away). */
 export function forgetWorkspaceSession(workspaceId: WorkspaceId): void {
-  const had = published.delete(workspaceId);
-  if (!seeded.delete(workspaceId) && !had) return;
+  if (!records.delete(workspaceId)) return;
   scheduleWrite();
 }
 
@@ -68,13 +60,13 @@ export function forgetWorkspaceSession(workspaceId: WorkspaceId): void {
  * (or with nothing) would drop them on the first save after a restore.
  */
 export function previousWorkspaceSession(workspaceId: WorkspaceId): PersistedSession | null {
-  return published.get(workspaceId) ?? seeded.get(workspaceId) ?? null;
+  return records.get(workspaceId) ?? null;
 }
 
 /**
  * The Window as it stands: Workspaces in strip order carrying the id, name, and
- * latest session of each. A Workspace with neither a published nor a seeded
- * session is omitted rather than written empty.
+ * latest session of each. A Workspace with no record at all is omitted rather
+ * than written empty.
  */
 export function getWindowSnapshot(): PersistedWindow {
   const { workspaces, activeId } = getWorkspacesSnapshot();
@@ -126,7 +118,7 @@ function scheduleWrite(): void {
   timer = setTimeout(() => {
     timer = null;
     writeNow();
-  }, WRITE_DEBOUNCE_MS);
+  }, SESSION_SAVE_DEBOUNCE_MS);
 }
 
 function writeNow(): void {
@@ -143,8 +135,7 @@ function cancelPending(): void {
 
 /** Forget every session, seed, and installed writer (tests). */
 export function resetWindowSessionAggregator(): void {
-  published.clear();
-  seeded.clear();
+  records.clear();
   writer = null;
   unsubscribeWorkspaces?.();
   unsubscribeWorkspaces = null;

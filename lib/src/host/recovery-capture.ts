@@ -41,6 +41,13 @@ export const QUIET_BEFORE_RETRY_MS = 200;
 // same thread that has to deliver the hints being polled for.
 const ASK_TAIL_CHARS = 8192;
 
+// How far back of already-scanned output each tick re-reads, so a scan window is
+// bounded by what arrived since the last tick rather than by everything since the
+// interrupt. It has to cover both things a scan looks for across a tick boundary:
+// the longest recognizable invocation, and the ask phrase's tail window. The ask
+// window is by far the larger of the two, so it sets the overlap.
+const SCAN_OVERLAP_CHARS = ASK_TAIL_CHARS;
+
 /** How long the whole capture may take by default. */
 export const DEFAULT_RECOVERY_WAIT_MS = 1300;
 
@@ -82,7 +89,9 @@ export interface RecoveryCaptureOptions {
  *  `__proto__` refuses to be stored at all. */
 export const noCommands = (): Record<string, string> => Object.create(null);
 
-const silent: RecoveryLog = { info: () => {}, error: () => {} };
+/** The default log for every module in this scope: recovery must never require
+ *  one to run. */
+export const silent: RecoveryLog = { info: () => {}, error: () => {} };
 
 /**
  * Press, wait, press again where it helps, and report what each pane printed.
@@ -125,6 +134,10 @@ export async function captureAgentRecovery(
   // for.
   const startMark = new Map(liveIds.map((id) => [id, host.receivedChars(id)]));
   const lastMark = new Map(startMark);
+  // How far each pane has already been scanned. A tick re-reads only
+  // `SCAN_OVERLAP_CHARS` behind it, so scanning costs what arrived since the last
+  // tick instead of re-joining and re-stripping everything since the interrupt.
+  const scannedTo = new Map(startMark);
   // Seeded once the interrupt is acked, not here — see `interruptedAt`.
   const lastGrewAt = new Map<string, number>();
 
@@ -138,14 +151,18 @@ export async function captureAgentRecovery(
     asked.clear();
     for (const id of pending()) {
       // Recovery commands are executable state, so only trust bytes that arrived
-      // after this teardown started interrupting the pane. Scanning the existing
-      // buffer would let an old launch echo or a previous agent hint run on the
-      // next restore. If bounded scrollback evicted bytes past the mark in the
-      // meantime, this can only return less than the pane printed; it cannot
-      // expose stale output as fresh.
-      const outputSinceInterrupt = host.outputSince(id, startMark.get(id) ?? Infinity);
-      if (!outputSinceInterrupt) continue;
-      const detected = detectResumeCommand(outputSinceInterrupt);
+      // after this teardown started interrupting the pane: the window never
+      // reaches back past `startMark`. Scanning the existing buffer would let an
+      // old launch echo or a previous agent hint run on the next restore. If
+      // bounded scrollback evicted bytes past the mark in the meantime, this can
+      // only return less than the pane printed; it cannot expose stale output as
+      // fresh.
+      const start = startMark.get(id) ?? Infinity;
+      const from = Math.max(start, (scannedTo.get(id) ?? start) - SCAN_OVERLAP_CHARS);
+      const scanned = host.outputSince(id, from);
+      scannedTo.set(id, host.receivedChars(id));
+      if (!scanned) continue;
+      const detected = detectResumeCommand(scanned);
       if (detected) {
         commands[id] = detected;
         log.info(`[recovery]   ${id} -> ${detected} (+${now() - started}ms)`);
@@ -154,7 +171,7 @@ export async function captureAgentRecovery(
       }
       // Strip presentation controls first — claude renders that prompt inside its
       // TUI, so the raw buffer can carry escapes through the phrase.
-      if (ASKS_FOR_SECOND_PRESS.test(stripTerminalControls(outputSinceInterrupt.slice(-ASK_TAIL_CHARS)))) {
+      if (ASKS_FOR_SECOND_PRESS.test(stripTerminalControls(scanned.slice(-ASK_TAIL_CHARS)))) {
         asked.add(id);
       }
     }

@@ -1,5 +1,6 @@
 import type { SurfaceKind } from 'dor/commands/types';
 import type { BrowserDisplayMode } from './agent-browser-screen';
+import type { ReconnectResult } from '../../lib/reconnect';
 import type { PersistedDoor, PersistedSurfaceRefs, WorkspaceId } from '../../lib/session-types';
 
 /** A minimized Surface's baseboard chip, at RUNTIME: an identity plus the Lath
@@ -64,6 +65,18 @@ export interface WallBootProps {
  *  (docs/specs/layout.md → "Session persistence"). A Workspace with no entry
  *  boots fresh. */
 export type WallBootPlans = Record<WorkspaceId, WallBootProps>;
+
+/** A resume/restore plan as the boot props that carry it, so every host builds
+ *  the same record from `resumeOrRestoreFrom` (`lib/src/lib/reconnect.ts`). */
+export function wallBootFromResult(result: ReconnectResult): WallBootProps {
+  return {
+    initialPaneIds: result.paneIds,
+    restoredLathLayout: result.lathLayout,
+    initialDoors: result.doors,
+    initialSurfaceRefs: result.surfaceRefs,
+    initialSurfaceRefsNext: result.surfaceRefsNext,
+  };
+}
 
 export type WallEvent =
   | { type: 'modeChange'; mode: WallMode }

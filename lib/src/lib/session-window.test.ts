@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  activeWorkspaceSession,
   readPersistedWindow,
+  windowPaneIds,
   wrapSessionInWindow,
   type PersistedSession,
   type PersistedWindow,
@@ -65,25 +65,17 @@ describe('readPersistedWindow', () => {
   });
 });
 
-describe('activeWorkspaceSession', () => {
-  it('returns the active Workspace session', () => {
+describe('windowPaneIds', () => {
+  it('names every pane across every Workspace, and nothing without a Window', () => {
     const win: PersistedWindow = {
       version: 1,
-      activeWorkspaceId: 'ws-b',
+      activeWorkspaceId: 'ws-a',
       workspaces: [
         { id: 'ws-a', name: 'A', session: sessionA },
         { id: 'ws-b', name: 'B', session: sessionB },
       ],
     };
-    expect(activeWorkspaceSession(win)).toBe(sessionB);
-  });
-
-  it('falls back to the first Workspace when the active id is missing', () => {
-    const win: PersistedWindow = {
-      version: 1,
-      activeWorkspaceId: 'gone',
-      workspaces: [{ id: 'ws-a', name: 'A', session: sessionA }],
-    };
-    expect(activeWorkspaceSession(win)).toBe(sessionA);
+    expect(windowPaneIds(win)).toEqual(['pane-a', 'pane-b']);
+    expect(windowPaneIds(null)).toEqual([]);
   });
 });

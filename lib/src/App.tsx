@@ -41,11 +41,13 @@ export default function App({
   /** One boot record per Workspace; `multiWorkspace` only. */
   initialPlans?: WallBootPlans;
 }) {
+  // The chrome both branches take; only the boot record differs between them.
+  const shell = { baseboardNotice, dialogHost, enableBurrow };
   return (
     <ErrorBoundary>
       {multiWorkspace
-        ? <WorkspaceWindow {...boot} initialPlans={initialPlans} baseboardNotice={baseboardNotice} dialogHost={dialogHost} enableBurrow={enableBurrow} />
-        : <Wall {...boot} baseboardNotice={baseboardNotice} dialogHost={dialogHost} enableBurrow={enableBurrow} />}
+        ? <WorkspaceWindow {...boot} {...shell} initialPlans={initialPlans} />
+        : <Wall {...boot} {...shell} />}
 
       <ThemeDebuggerGlobal />
     </ErrorBoundary>

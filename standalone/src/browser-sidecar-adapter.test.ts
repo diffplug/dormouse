@@ -61,7 +61,7 @@ describe("BrowserSidecarAdapter session persistence", () => {
   it("round-trips a Window through localStorage", () => {
     localStorage.removeItem(KEY);
     const adapter = new BrowserSidecarAdapter(new BrowserSidecarHost("http://localhost:1234"));
-    adapter.saveState(windowBlob);
+    adapter.saveWindowState(windowBlob);
     expect(adapter.getWindowState()).toEqual(windowBlob);
     // The shared `getState` readers want a bare Session and the blob is a Window,
     // so it answers nothing; the boot reads `getWindowState`.
@@ -81,7 +81,7 @@ describe("BrowserSidecarAdapter session persistence", () => {
     const host = new BrowserSidecarHost("http://localhost:1234");
     vi.spyOn(host, "init").mockResolvedValue(undefined);
     vi.spyOn(host, "onEvent").mockReturnValue(() => {});
-    const invoke = vi.spyOn(host, "invoke").mockResolvedValue({ commands: { "pane-a": "claude --continue" } });
+    const invoke = vi.spyOn(host, "invoke").mockResolvedValue({ "pane-a": "claude --continue" });
     // Claim the console-forwarder flag so init() doesn't patch console.* on the
     // shared jsdom window for every later test in this file.
     (window as typeof window & { __DORMOUSE_BROWSER_CONSOLE_PATCHED__?: boolean })
@@ -89,8 +89,9 @@ describe("BrowserSidecarAdapter session persistence", () => {
 
     const adapter = new BrowserSidecarAdapter(host);
     await adapter.init();
+    await adapter.recoveryReady;
 
-    expect(invoke).toHaveBeenCalledWith("recovery_take", { paneIds: ["pane-a"] });
+    expect(invoke).toHaveBeenCalledWith("take_recovery_commands", { paneIds: ["pane-a"] });
     expect(adapter.getRecoveryCommands()).toEqual({ "pane-a": "claude --continue" });
     localStorage.removeItem(KEY);
   });

@@ -7,6 +7,7 @@ import { log } from './log';
 import type { DorControlCancelPayload, DorControlRequestPayload, DorControlResponsePayload } from '../../dor/src/protocol';
 import type { OpenPort } from '../../lib/src/lib/platform/types';
 import { OPEN_PORT_TIMEOUT_MS } from '../../lib/src/lib/platform/types';
+import { sliceSince } from '../../lib/src/host/replay-buffer';
 
 export interface PtyCallbacks {
   onData(id: string, data: string): void;
@@ -167,20 +168,7 @@ export function getScrollbackReceived(id: string): number {
 export function getScrollbackSince(id: string, mark: number): string {
   const entry = ptyBuffers.get(id);
   if (!entry) return '';
-  // Chunk eviction can have carried the mark off the front; the oldest char the
-  // buffer still holds is the furthest back this can honestly answer.
-  const oldestHeld = entry.receivedChars - entry.scrollbackChars;
-  const wanted = entry.receivedChars - Math.max(mark, oldestHeld);
-  if (wanted <= 0) return '';
-  const tail: string[] = [];
-  let held = 0;
-  for (let i = entry.scrollbackChunks.length - 1; i >= 0 && held < wanted; i--) {
-    const chunk = entry.scrollbackChunks[i];
-    tail.push(chunk);
-    held += chunk.length;
-  }
-  const joined = tail.reverse().join('');
-  return held > wanted ? joined.slice(held - wanted) : joined;
+  return sliceSince(entry.scrollbackChunks, entry.scrollbackChars, entry.receivedChars, mark);
 }
 
 let child: ChildProcess | null = null;

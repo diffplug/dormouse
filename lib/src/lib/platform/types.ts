@@ -7,7 +7,7 @@ import type { ShellEntry } from '../shell-defaults';
 // share it without pulling this browser-typed module into a Node tsconfig.
 import type { IframeProxyResult } from './iframe-proxy-types';
 import type { NotepadArchivePort } from '../notepad/types';
-import type { PersistedAlertState } from '../session-types';
+import type { PersistedAlertState, PersistedWindow } from '../session-types';
 
 export interface PtyInfo {
   helper?: HelperIdentity;
@@ -174,6 +174,17 @@ export interface PtyDataDetail {
   textData?: string;
 }
 
+/**
+ * One host request for an immediate session save. `probeCwd: false` says the
+ * answer must not re-read any cwd: after the PTYs are killed every probe answers
+ * null and the record keeps its previous value anyway, so the round trips are
+ * pure teardown budget (`docs/specs/standalone.md` → "Quit flow"). Absent probes.
+ */
+export interface SessionFlushRequest {
+  requestId: string;
+  probeCwd?: boolean;
+}
+
 export interface PlatformAdapter {
   // Lifecycle
   init(): Promise<void>;
@@ -242,6 +253,14 @@ export interface PlatformAdapter {
   getRecoveryCommands?(): Record<string, string>;
 
   /**
+   * Resolves once `getRecoveryCommands` can be read. The claim is a host round
+   * trip, so an adapter starts it during `init()` and the boot awaits it only on
+   * the branch that cold-restores (`standalone/src/main.tsx`). Absent means
+   * `getRecoveryCommands` is already answerable.
+   */
+  recoveryReady?: Promise<void>;
+
+  /**
    * Seed a cold-restored Surface's persisted TODO/alert into the host's
    * `AlertManager`, so the freshly spawned PTY inherits the state its saved pane
    * carried (`docs/specs/alert.md` -> "Persist only").
@@ -255,6 +274,14 @@ export interface PlatformAdapter {
 
   // PTY queries
   getCwd(id: string): Promise<string | null>;
+  /**
+   * One answer per id, for the whole set a save is about to persist. Present
+   * where a host can resolve many at once: standalone probes cwds with a
+   * synchronous process scan on the sidecar's only event loop, so N panes must
+   * cost one scan rather than N (`docs/specs/transport.md` -> "Persisted
+   * session"). Absent falls back to `getCwd` per id.
+   */
+  getCwds?(ids: string[]): Promise<Record<string, string | null>>;
   /** TCP listening ports opened by this terminal's process tree (shell + descendants). */
   getOpenPorts(id: string): Promise<OpenPort[]>;
 
@@ -346,8 +373,8 @@ export interface PlatformAdapter {
   offPtyReplay(handler: (detail: { id: string; data: string }) => void): void;
 
   // Host-initiated session persistence
-  onRequestSessionFlush(handler: (detail: { requestId: string }) => void): void;
-  offRequestSessionFlush(handler: (detail: { requestId: string }) => void): void;
+  onRequestSessionFlush(handler: (detail: SessionFlushRequest) => void): void;
+  offRequestSessionFlush(handler: (detail: SessionFlushRequest) => void): void;
   notifySessionFlushComplete(requestId: string): void;
 
   // Alert management
@@ -391,6 +418,16 @@ export interface PlatformAdapter {
   // State persistence
   saveState(state: unknown): void;
   getState(): unknown;
+
+  /**
+   * The Window slot, for the hosts that persist one (`docs/specs/transport.md` ->
+   * "Persisted session"). Separate from `saveState`/`getState` because the blob
+   * is a `PersistedWindow` and every shared reader of `getState` wants a bare
+   * `PersistedSession`. Both standalone adapters answer these; VS Code, which
+   * persists one Session per webview, omits them.
+   */
+  getWindowState?(): PersistedWindow | null;
+  saveWindowState?(snapshot: PersistedWindow): void;
 
   /**
    * The Surface notepad's archive store (docs/specs/notepad.md). Present on

@@ -5,6 +5,7 @@ import { resumeOrRestore } from "./lib/reconnect";
 import { initAlertStateReceiver } from "./lib/terminal-registry";
 import { installVscodeThemeVarResolver } from "./lib/themes/vscode-color-observer";
 import { installPeerSurfaceResponder } from "./remote/burrow/peer-surfaces";
+import { wallBootFromResult } from "./components/wall/wall-types";
 import App from "./App";
 import "./index.css";
 
@@ -30,7 +31,7 @@ initAlertStateReceiver();
 resumeOrRestore(platform).then((result) => {
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
-      <App initialPaneIds={result.paneIds} restoredLathLayout={result.lathLayout} initialDoors={result.doors} initialSurfaceRefs={result.surfaceRefs} initialSurfaceRefsNext={result.surfaceRefsNext} enableBurrow={isVscode} />
+      <App {...wallBootFromResult(result)} enableBurrow={isVscode} />
     </StrictMode>,
   );
 });

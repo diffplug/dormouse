@@ -34,8 +34,8 @@ import type { AwaitHandle, AwaitOptions } from "dormouse-lib/lib/alert-manager";
 import type { AlertSettings } from "dormouse-lib/lib/alert-settings";
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
 import { createMemoryNotepadArchivePort } from "dormouse-lib/lib/notepad/memory-archive-port";
-import { loadWindowState, saveWindowState } from "dormouse-lib/lib/window-persistence";
 import type { PersistedAlertState, PersistedWindow } from "dormouse-lib/lib/session-types";
+import { claimRecoveryCommands, windowStateSlot } from "./window-recovery";
 import {
   applyTerminalProtocolEvents,
   collectTerminalSemanticEvents,
@@ -69,6 +69,8 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   private alertStateHandlers = new Set<(detail: AlertStateDetail) => void>();
   private alertManager = new AlertManager();
   private unlistenHost: (() => void) | null = null;
+  private static STATE_KEY = 'dormouse.browser-sidecar.session';
+  private windowSlot = windowStateSlot(localStorage, BrowserSidecarAdapter.STATE_KEY, 'browser-sidecar');
   // Remote-host bridge, identical in shape to TauriAdapter's — the dev harness
   // forwards the same `burrow:*` messages over its own transport.
   private readonly burrowClient = createBurrowLinkClient({
@@ -106,9 +108,12 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     await this.host.init();
     this.unlistenHost = this.host.onEvent(({ event, data }) => this.handleHostEvent(event, data));
     this.installConsoleForwarder();
-    // Before `resumeOrRestore` runs, so the cold restore's synchronous read has
-    // an answer (see TauriAdapter.takeRecoveryCommands).
-    await this.takeRecoveryCommands();
+    // Started, not awaited — see TauriAdapter.
+    this.recoveryReady = claimRecoveryCommands(
+      (paneIds) => this.host.invoke<Record<string, string>>("take_recovery_commands", { paneIds }),
+      this.windowSlot.read(),
+      'browser-sidecar',
+    ).then((commands) => { this.recoveryCommands = commands; });
   }
 
   shutdown(): void {
@@ -159,36 +164,28 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     try { return await this.host.invoke("pty_get_cwd", { id }); } catch { return null; }
   }
 
+  /** See TauriAdapter: one round trip, one process scan, for the whole save. */
+  async getCwds(ids: string[]): Promise<Record<string, string | null>> {
+    try { return await this.host.invoke("pty_get_cwds", { ids }); } catch { return {}; }
+  }
+
   /** See TauriAdapter: claimed once during `init()`, read synchronously by the
    *  cold restore. */
   private recoveryCommands: Record<string, string> = {};
+  recoveryReady: Promise<void> = Promise.resolve();
 
   getRecoveryCommands(): Record<string, string> {
     return this.recoveryCommands;
   }
 
-  private async takeRecoveryCommands(): Promise<void> {
-    const saved = this.getWindowState();
-    const paneIds = saved?.workspaces.flatMap((workspace) => workspace.session.panes.map((pane) => pane.id)) ?? [];
-    if (paneIds.length === 0) return;
-    try {
-      const result = await this.host.invoke<{ commands?: Record<string, string> }>("recovery_take", { paneIds });
-      this.recoveryCommands = result?.commands ?? {};
-    } catch (err) {
-      console.error("[browser-sidecar] recovery take failed:", err);
-    }
-  }
+  // No `captureAgentRecovery` here. Capture is a quit-only step, and this
+  // harness has no quit: a reload is a live resume over PTYs that survive it, so
+  // sending `^C` to every agent would interrupt work that is still running. What
+  // a reload does exercise is the claim above, against whatever the app's own
+  // quit last wrote (docs/specs/standalone.md -> "Agent recovery").
 
   alertSeed(id: string, state: PersistedAlertState): void {
     this.alertManager.seed(id, state);
-  }
-
-  async captureAgentRecovery(timeoutMs: number, ids?: string[]): Promise<void> {
-    try {
-      await this.host.invoke("capture_agent_recovery", { ids: ids ?? null, timeout: timeoutMs });
-    } catch (err) {
-      console.warn("[browser-sidecar] captureAgentRecovery failed; proceeding", err);
-    }
   }
 
   async getOpenPorts(id: string): Promise<OpenPort[]> {
@@ -305,31 +302,22 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   onWatchedCommands(_handler: (names: string[]) => void): void {}
   onAlertSettings(_handler: (settings: AlertSettings) => void): void {}
 
-  private static STATE_KEY = 'dormouse.browser-sidecar.session';
-
   // The harness mirrors the shipped persistence answer, so a reload here
   // exercises what the app does (docs/specs/transport.md -> "The governing rule").
   readonly persistsSession = true;
 
+  // See TauriAdapter: no bare-Session slot on this host.
+  saveState(_state: unknown): void {}
+  getState(): unknown { return null; }
+
   // See TauriAdapter: one `PersistedWindow` per window, in `localStorage` rather
   // than the Rust file store (docs/specs/transport.md).
-  saveState(state: unknown): void {
-    try { saveWindowState(localStorage, BrowserSidecarAdapter.STATE_KEY, state as PersistedWindow); }
-    catch { console.error('[browser-sidecar] Failed to save session state'); }
-  }
-
-  /** See TauriAdapter.getState: the blob here is a Window, and the boot reads it
-   *  through `getWindowState`. */
-  getState(): unknown {
-    return null;
+  saveWindowState(snapshot: PersistedWindow): void {
+    this.windowSlot.write(snapshot);
   }
 
   getWindowState(): PersistedWindow | null {
-    try {
-      return loadWindowState(localStorage, BrowserSidecarAdapter.STATE_KEY);
-    } catch {
-      return null;
-    }
+    return this.windowSlot.read();
   }
 
   // The notepad archive as memory, not the Tauri file: this harness is a browser

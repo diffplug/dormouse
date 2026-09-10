@@ -43,8 +43,6 @@ export interface ResumePlanOptions {
    *  position, so a plan that takes one falls back to the flat live list, exactly
    *  as a single Wall does when a live PTY outruns its last save. */
   claimUnowned?: ReadonlySet<string>;
-  /** Single-use resume invocations already claimed for this plan's panes. */
-  recoveryCommands?: Record<string, string>;
 }
 
 /**
@@ -120,10 +118,7 @@ export function resumeOrRestoreFrom(
   const resumed = mine.length > 0 ? resumeLivePtys(mine, live.replay, saved) : null;
   if (resumed) return hydrateNotepad(platform, resumed);
 
-  const restored = restoreSession(platform, {
-    savedSession: saved,
-    ...(opts.recoveryCommands !== undefined ? { recoveryCommands: opts.recoveryCommands } : {}),
-  });
+  const restored = restoreSession(platform, { savedSession: saved });
   if (restored) {
     // Browser-only views have no PTY with which to prove a live resume. Their
     // host-memory mirror is that proof; an extension restart supplies null.

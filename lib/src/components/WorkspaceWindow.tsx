@@ -4,6 +4,7 @@ import { Wall } from './Wall';
 import { listWallHandles } from './wall/wall-handles';
 import { getPlatform } from '../lib/platform';
 import { getWorkspacesSnapshot, subscribeToWorkspaces } from '../lib/workspace-store';
+import type { SessionFlushRequest } from '../lib/platform/types';
 import type { WallBootPlans, WallBootProps } from './wall/wall-types';
 
 /**
@@ -28,19 +29,21 @@ export function WorkspaceWindow({
   initialPlans?: WallBootPlans;
 }) {
   const { workspaces, activeId } = useSyncExternalStore(subscribeToWorkspaces, getWorkspacesSnapshot);
-  // Without per-Workspace plans the single boot record belongs to the Workspace
-  // that was active at first render. Either way a Workspace with no record takes
-  // Lath's fresh branch and spawns exactly one default-shell pane.
-  const bootWorkspaceIdRef = useRef(activeId);
-  const plansRef = useRef(initialPlans);
+  // One shape for both callers, fixed at first render: without per-Workspace
+  // plans the single boot record belongs to the Workspace that was active then.
+  // Either way a Workspace with no entry takes Lath's fresh branch and spawns
+  // exactly one default-shell pane.
+  const plansRef = useRef<WallBootPlans | null>(null);
+  const plans = (plansRef.current ??= initialPlans ?? { [activeId]: boot });
 
   // The Window, not each Wall, answers the host's flush request: the adapter
   // completes on the FIRST notification, so a per-Wall answer would let a quit
   // proceed once one Workspace had written.
   useEffect(() => {
     const platform = getPlatform();
-    const handleFlushRequest = (detail: { requestId: string }) => {
-      void Promise.all(listWallHandles().map((handle) => handle.flushPersistence().catch(() => undefined)))
+    const handleFlushRequest = (detail: SessionFlushRequest) => {
+      const options = { probeCwd: detail.probeCwd };
+      void Promise.all(listWallHandles().map((handle) => handle.flushPersistence(options).catch(() => undefined)))
         .finally(() => platform.notifySessionFlushComplete(detail.requestId));
     };
     platform.onRequestSessionFlush(handleFlushRequest);
@@ -56,9 +59,7 @@ export function WorkspaceWindow({
     >
       {workspaces.map((workspace) => {
         const isActive = workspace.id === activeId;
-        const plan = plansRef.current
-          ? plansRef.current[workspace.id] ?? {}
-          : workspace.id === bootWorkspaceIdRef.current ? boot : {};
+        const plan = plans[workspace.id] ?? {};
         return (
           <div
             key={workspace.id}

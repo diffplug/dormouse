@@ -357,19 +357,15 @@ describe('restoreSession alert seeding', () => {
     };
     const platform = createPlatform(
       { version: 3, panes: [{ id: 'slot', title: 'Slot', cwd: null, untouched: false }] },
-      { given: 'from-the-window' },
+      { given: 'claude --resume xyz' },
     );
 
-    const result = restoreSession(platform, {
-      savedSession: given,
-      recoveryCommands: { given: 'claude --resume xyz' },
-    });
+    const result = restoreSession(platform, { savedSession: given });
 
     expect(result?.paneIds).toEqual(['given']);
     expect(terminalRegistryMocks.restoreTerminal).toHaveBeenCalledWith(
       'given', expect.objectContaining({ cwd: '/w', resumeCommand: 'claude --resume xyz' }),
     );
-    expect(platform.getRecoveryCommands).not.toHaveBeenCalled();
     // An explicit `null` is "no record", never a fallback to the slot.
     expect(restoreSession(platform, { savedSession: null })).toBeNull();
   });

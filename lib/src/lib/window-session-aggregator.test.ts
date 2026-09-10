@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  adoptWorkspaceSession,
   flushWindowSession,
   forgetWorkspaceSession,
   getWindowSnapshot,
@@ -58,14 +57,14 @@ describe('window session aggregator', () => {
     expect(getWindowSnapshot().activeWorkspaceId).toBe(first);
   });
 
-  it('drops a Workspace with neither a published nor a seeded session', () => {
+  it('drops a Workspace with no record at all', () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     createWorkspace({ name: 'Second' });
     publishWorkspaceSession(first, session('a'));
     expect(getWindowSnapshot().workspaces.map((ws) => ws.id)).toEqual([first]);
   });
 
-  it('forgets a Workspace session and its seed', () => {
+  it('forgets a Workspace session, seeded or published', () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     seedWindowSession({ version: 1, workspaces: [{ id: first, name: 'One', session: session('seed') }], activeWorkspaceId: first });
     publishWorkspaceSession(first, session('a'));
@@ -108,10 +107,10 @@ describe('window session aggregator', () => {
       expect(getWindowSnapshot().workspaces).toEqual([]);
     });
 
-    it('adopts a record from elsewhere as that Workspace\'s previous', () => {
+    it('takes the record a Workspace arriving from elsewhere brings', () => {
       const second = createWorkspace({ id: 'ws-2', name: 'Second' }).id;
       publishWorkspaceSession(second, session('stale'));
-      adoptWorkspaceSession(second, session('moved-in'));
+      publishWorkspaceSession(second, session('moved-in'));
       expect(previousWorkspaceSession(second)?.panes[0].id).toBe('moved-in');
     });
   });

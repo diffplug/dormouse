@@ -17,6 +17,7 @@ import type {
   PtyDataDetail,
   PtyInfo,
   BurrowLink,
+  SessionFlushRequest,
 } from "dormouse-lib/lib/platform/types";
 import type {
   NotepadArchiveLoadResult,
@@ -41,9 +42,9 @@ import { AlertManager } from "dormouse-lib/lib/alert-manager";
 import type { AwaitHandle, AwaitOptions } from "dormouse-lib/lib/alert-manager";
 import type { AlertSettings } from "dormouse-lib/lib/alert-settings";
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
-import { loadWindowState, saveWindowState } from "dormouse-lib/lib/window-persistence";
 import type { PersistedAlertState, PersistedWindow } from "dormouse-lib/lib/session-types";
 import { TauriSessionStore } from "./tauri-session-store";
+import { claimRecoveryCommands, windowStateSlot } from "./window-recovery";
 import { withTimeout } from "./with-timeout";
 import {
   applyTerminalProtocolEvents,
@@ -92,12 +93,14 @@ export class TauriAdapter implements PlatformAdapter {
   private alertStateHandlers = new Set<(detail: AlertStateDetail) => void>();
   private unlistenFns: Array<() => void> = [];
   private alertManager = new AlertManager();
+  private static STATE_KEY = 'dormouse.session';
   private sessionStore = new TauriSessionStore();
+  private windowSlot = windowStateSlot(this.sessionStore, TauriAdapter.STATE_KEY, 'tauri-adapter');
   // In-process session-flush handshake (mirrors the VS Code message-router flow
   // in vscode-ext/src/message-router.ts, but without postMessage — the Wall runs
   // in the same webview). Handlers are the frontend flush listeners; a request
   // fans out one requestId and resolves when a handler reports completion.
-  private flushHandlers = new Set<(detail: { requestId: string }) => void>();
+  private flushHandlers = new Set<(detail: SessionFlushRequest) => void>();
   private pendingFlushRequests = new Map<string, () => void>();
   private nextFlushRequestId = 0;
   // --- Remote host bridge (docs/specs/remote-api.md) ---
@@ -243,29 +246,15 @@ export class TauriAdapter implements PlatformAdapter {
       console.error("[tauri-adapter] load_session failed:", err);
     }
     this.sessionStore.hydrate(seed);
-    // The agent-recovery record is read here, at the same boot boundary and for
-    // the same reason as the session blob: `getRecoveryCommands` is synchronous
-    // because the cold restore reads it before React mounts.
-    await this.takeRecoveryCommands();
-  }
-
-  /**
-   * Claim the resume invocations the last teardown captured for the panes this
-   * Window is about to restore. Destructive in the sidecar on the first call, so
-   * a relaunch that gets this far can never replay them
-   * (docs/specs/transport.md -> "Consuming it").
-   */
-  private async takeRecoveryCommands(): Promise<void> {
-    const saved = this.getWindowState();
-    const paneIds = saved?.workspaces.flatMap((workspace) => workspace.session.panes.map((pane) => pane.id)) ?? [];
-    if (paneIds.length === 0) return;
-    try {
-      this.recoveryCommands = await rawInvoke<Record<string, string>>("take_recovery_commands", { paneIds }) ?? {};
-    } catch (err) {
-      // A record we could not read is one restore without auto-resume, never a
-      // failed boot.
-      console.error("[tauri-adapter] take_recovery_commands failed:", err);
-    }
+    // Started here, at the same boot boundary as the session blob, but NOT
+    // awaited: the claim is another sidecar round trip and `restoreWindow` is
+    // the only reader (`standalone/src/main.tsx`). `getRecoveryCommands` stays
+    // synchronous because the cold restore reads it before React mounts.
+    this.recoveryReady = claimRecoveryCommands(
+      (paneIds) => rawInvoke<Record<string, string>>("take_recovery_commands", { paneIds }),
+      this.windowSlot.read(),
+      'tauri-adapter',
+    ).then((commands) => { this.recoveryCommands = commands; });
   }
 
   shutdown(): void {
@@ -312,6 +301,7 @@ export class TauriAdapter implements PlatformAdapter {
   /** Agent resume invocations captured at the last teardown, claimed once during
    *  `init()` and read synchronously by the cold restore. */
   private recoveryCommands: Record<string, string> = {};
+  recoveryReady: Promise<void> = Promise.resolve();
 
   getRecoveryCommands(): Record<string, string> {
     return this.recoveryCommands;
@@ -329,6 +319,10 @@ export class TauriAdapter implements PlatformAdapter {
    * on this (docs/specs/standalone.md -> "Agent recovery").
    */
   async captureAgentRecovery(timeoutMs: number, ids?: string[]): Promise<void> {
+    // `ids` has no caller yet — a whole-Window quit interrupts everything — and
+    // is plumbed to the sidecar anyway, because closing one Window of several has
+    // to capture only that Window's panes (docs/specs/layout.md -> "Future",
+    // Scope: workspaces-rollout).
     try {
       await rawInvoke("capture_agent_recovery", { ids: ids ?? null, timeout: timeoutMs });
     } catch (err) {
@@ -340,6 +334,14 @@ export class TauriAdapter implements PlatformAdapter {
     try {
       return await rawInvoke<string | null>("pty_get_cwd", { id });
     } catch { return null; }
+  }
+
+  /** One sidecar round trip, and one process scan inside it, for every pane a
+   *  save is about to persist. */
+  async getCwds(ids: string[]): Promise<Record<string, string | null>> {
+    try {
+      return await rawInvoke<Record<string, string | null>>("pty_get_cwds", { ids });
+    } catch { return {}; }
   }
 
   // Warn-and-proceed: a stalled graceful kill must not wedge a quit teardown.
@@ -529,11 +531,11 @@ export class TauriAdapter implements PlatformAdapter {
     this.replayHandlers.delete(handler);
   }
 
-  onRequestSessionFlush(handler: (detail: { requestId: string }) => void): void {
+  onRequestSessionFlush(handler: (detail: SessionFlushRequest) => void): void {
     this.flushHandlers.add(handler);
   }
 
-  offRequestSessionFlush(handler: (detail: { requestId: string }) => void): void {
+  offRequestSessionFlush(handler: (detail: SessionFlushRequest) => void): void {
     this.flushHandlers.delete(handler);
   }
 
@@ -550,7 +552,7 @@ export class TauriAdapter implements PlatformAdapter {
   // handler is registered (quit during boot, before the Wall mounts), resolve
   // immediately: there is nothing queued to flush. Called by the quit
   // orchestrator; pairs with drainSessionSaves to await the resulting Rust write.
-  requestSessionFlush(timeoutMs: number): Promise<void> {
+  requestSessionFlush(timeoutMs: number, options: { probeCwd?: boolean } = {}): Promise<void> {
     if (this.flushHandlers.size === 0) return Promise.resolve();
     const requestId = `flush-${++this.nextFlushRequestId}`;
     return new Promise<void>((resolve) => {
@@ -559,7 +561,7 @@ export class TauriAdapter implements PlatformAdapter {
       // hits notify's map-miss guard. Fan out after registering so a synchronous
       // completion still finds the entry (first notify wins — one Wall ships).
       setTimeout(() => this.notifySessionFlushComplete(requestId), timeoutMs);
-      for (const handler of this.flushHandlers) handler({ requestId });
+      for (const handler of this.flushHandlers) handler({ requestId, ...options });
     });
   }
 
@@ -640,8 +642,6 @@ export class TauriAdapter implements PlatformAdapter {
 
   // --- State persistence ---
 
-  private static STATE_KEY = 'dormouse.session';
-
   /**
    * Read by `saveSession`, which skips the whole record build — not just the
    * write — when a host persists nothing (`PlatformAdapter.persistsSession`).
@@ -650,31 +650,20 @@ export class TauriAdapter implements PlatformAdapter {
    */
   readonly persistsSession = true;
 
+  // No bare-Session slot on this host: the stored blob is a Window, and
+  // standalone boots per Workspace so nothing shared ever reaches these
+  // (`standalone/src/main.tsx`). The pair below is the real one.
+  saveState(_state: unknown): void {}
+  getState(): unknown { return null; }
+
   /** The aggregator's writer: one `PersistedWindow` per window
    *  (`docs/specs/transport.md` -> "Persisted session"). */
-  saveState(state: unknown): void {
-    try {
-      saveWindowState(this.sessionStore, TauriAdapter.STATE_KEY, state as PersistedWindow);
-    } catch {
-      console.error('[tauri-adapter] Failed to save session state');
-    }
+  saveWindowState(snapshot: PersistedWindow): void {
+    this.windowSlot.write(snapshot);
   }
 
-  /** The stored blob here is a Window, and the shared readers of `getState` want a
-   *  bare Session — so this answers nothing and `getWindowState` is the reader.
-   *  Standalone boots per Workspace, handing each plan its own record, so no
-   *  shared caller reaches this (`standalone/src/main.tsx`). */
-  getState(): unknown {
-    return null;
-  }
-
-  /** The persisted Window, read from the boot-seeded cache. */
   getWindowState(): PersistedWindow | null {
-    try {
-      return loadWindowState(this.sessionStore, TauriAdapter.STATE_KEY);
-    } catch {
-      return null;
-    }
+    return this.windowSlot.read();
   }
 
   // --- Notepad archive (docs/specs/notepad.md) ---

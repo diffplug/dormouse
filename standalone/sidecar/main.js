@@ -25,7 +25,7 @@ const { createSidecarBurrow } = require('./burrow.cjs');
 // Same pattern again: lib/src/host/recovery.ts is the agent-recovery capture
 // machine (shared with the VS Code extension host) plus the single-use record
 // store. See docs/specs/standalone.md -> "Agent recovery".
-const { captureAgentRecovery, createRecoveryStore } = require('./recovery.cjs');
+const { captureAgentRecovery, createRecoveryStore, sliceSince } = require('./recovery.cjs');
 
 const agentBrowser = createAgentBrowserHost({
   writeClipboardText: (text) => clipboard.writeClipboardText(text),
@@ -56,7 +56,10 @@ const mgr = create((event, data) => {
     console.error(`[sidecar] burrow ${event} tap failed:`, err && err.message || err);
   }
   if (event !== 'data') send(`pty:${event}`, data);
-}, nodePty, { replay: true });
+  // `sliceSince` comes from the shared bundle above rather than living in
+  // pty-core, so this host and the VS Code extension host read their replay
+  // buffers through one implementation.
+}, nodePty, { replay: true, sliceSince });
 
 const burrow = createSidecarBurrow({
   send,
@@ -138,6 +141,7 @@ function handleLine(line) {
       case 'pty:requestInit': mgr.list(); break;
       case 'pty:context': mgr.context(data, data.requestId); break;
       case 'pty:getCwd':  mgr.getCwd(data.id, data.requestId); break;
+      case 'pty:getCwds': mgr.getCwds(data.ids, data.requestId); break;
       case 'pty:getOpenPorts': mgr.getOpenPorts(data.id, data.requestId); break;
       case 'pty:getShells':  mgr.getShells(data.requestId); break;
       case 'pty:interrupt': mgr.interrupt(data.ids, data.requestId); break;
@@ -165,10 +169,9 @@ function handleLine(line) {
       // Cold start: claim the invocations belonging to these panes. Destructive
       // on the first call, so nothing can replay them.
       case 'recovery:take':
-        send('recovery:commands', {
-          requestId: data.requestId,
+        respondAsync('recovery:commands', data.requestId, async () => ({
           commands: recovery.take(Array.isArray(data.paneIds) ? data.paneIds : []),
-        });
+        }));
         break;
       case 'pty:gracefulKillAll': mgr.gracefulKillAll(data.timeout, data.requestId); break;
       // The webview's resolved terminal theme, so the parser here can answer

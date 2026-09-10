@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, type RefObject } from 'react';
 import { pasteFilePaths } from '../../lib/clipboard';
 import { getPlatform } from '../../lib/platform';
-import { saveSession, type SaveSink } from '../../lib/session-save';
+import { saveSession, type SaveOptions, type SaveSink } from '../../lib/session-save';
 import { createSessionDirtyTracker } from '../../lib/session-dirty';
-import { previousWorkspaceSession, publishWorkspaceSession } from '../../lib/window-session-aggregator';
+import { previousWorkspaceSession, publishWorkspaceSession, SESSION_SAVE_DEBOUNCE_MS } from '../../lib/window-session-aggregator';
 import {
   subscribeToActivity,
   subscribeToTerminalPaneState,
@@ -13,10 +13,11 @@ import { surfaceKindFromParams } from './browser-surface';
 import type { LathWallEngine } from './lath-wall-engine';
 import type { DooredItem, WallSelectionKind } from './wall-types';
 import type { PersistedDoor, PersistedSurfaceRefs, WorkspaceId } from '../../lib/session-types';
+import type { SessionFlushRequest } from '../../lib/platform/types';
 
 export interface SessionPersistenceHandle {
   /** Persist immediately, awaiting the whole queued pipeline. */
-  flush: () => Promise<void>;
+  flush: (options?: SaveOptions) => Promise<void>;
 }
 
 export function useSessionPersistence({
@@ -99,17 +100,17 @@ export function useSessionPersistence({
     return { panes, doors, lathLayout: lath.serializeLayout(), surfaceRefs };
   }, [lath, doorsRef, surfaceRefsForSave]);
 
-  const doSave = useCallback((): Promise<void> => {
+  const doSave = useCallback((options?: SaveOptions): Promise<void> => {
     const { panes, doors, lathLayout, surfaceRefs } = collect();
-    return saveSession(getPlatform(), panes, doors, lathLayout, surfaceRefs?.refs, surfaceRefs?.next, sink);
+    return saveSession(getPlatform(), panes, doors, lathLayout, surfaceRefs?.refs, surfaceRefs?.next, sink, options);
   }, [collect, sink]);
 
-  const persistSessionNow = useCallback(async (): Promise<void> => {
+  const persistSessionNow = useCallback(async (options?: SaveOptions): Promise<void> => {
     const runSave = (): Promise<void> => {
       pendingSaveNeededRef.current = false;
       // Clear dirty only on a fulfilled write (.then, not .finally).
       const token = trackerRef.current.beginSave();
-      const savePromise = doSave()
+      const savePromise = doSave(options)
         .then(() => {
           trackerRef.current.completeSave(token);
         })
@@ -146,12 +147,12 @@ export function useSessionPersistence({
 
   // Never gated on the dirty tracker — the correctness net for dirty-trigger
   // gaps (e.g. a program calling chdir() silently produces no event).
-  const flushSessionSave = useCallback((): Promise<void> => {
+  const flushSessionSave = useCallback((options?: SaveOptions): Promise<void> => {
     if (sessionSaveTimerRef.current) {
       clearTimeout(sessionSaveTimerRef.current);
       sessionSaveTimerRef.current = null;
     }
-    return persistSessionNow();
+    return persistSessionNow(options);
   }, [persistSessionNow]);
 
   const scheduleSessionSave = useCallback(() => {
@@ -160,7 +161,7 @@ export function useSessionPersistence({
     sessionSaveTimerRef.current = setTimeout(() => {
       sessionSaveTimerRef.current = null;
       void persistSessionNow().catch(() => undefined);
-    }, 500);
+    }, SESSION_SAVE_DEBOUNCE_MS);
   }, [persistSessionNow]);
 
   useEffect(() => {
@@ -180,8 +181,8 @@ export function useSessionPersistence({
     // Only a bare Wall answers the host directly; a Workspace Wall's answer is
     // `WorkspaceWindow`'s, which flushes every Workspace before notifying (the
     // adapter completes on the first notification).
-    const handleSessionFlushRequest = (detail: { requestId: string }) => {
-      void flushSessionSave()
+    const handleSessionFlushRequest = (detail: SessionFlushRequest) => {
+      void flushSessionSave({ probeCwd: detail.probeCwd })
         .catch(() => undefined)
         .finally(() => {
           platform.notifySessionFlushComplete(detail.requestId);
@@ -204,8 +205,7 @@ export function useSessionPersistence({
     // unfiltered listener would rebuild every idle Workspace's record — a
     // `getCwd` per pane — whenever any Workspace changed. A notification with no
     // id is a store-wide reset, which every Wall must take.
-    const ownsChange = (id?: string) => id === undefined || ownsSurface(id);
-    const markDirtyFor = (id?: string) => { if (ownsChange(id)) markDirty(); };
+    const markDirtyFor = (id?: string) => { if (id === undefined || ownsSurface(id)) markDirty(); };
     const unsubActivity = subscribeToActivity(markDirtyFor);
     const unsubPaneState = subscribeToTerminalPaneState(markDirtyFor);
 

@@ -13,3 +13,6 @@ export { captureAgentRecovery, DEFAULT_RECOVERY_WAIT_MS, noCommands } from './re
 export type { RecoveryCaptureOptions, RecoveryHost, RecoveryLog } from './recovery-capture';
 export { createRecoveryStore, RECOVERY_MAX_AGE_MS } from './recovery-store';
 export type { RecoveryStore } from './recovery-store';
+// Not recovery's own, but the sidecar's only route to a lib module: `pty-core.js`
+// takes it as an injected option so its `node --test` suite needs no bundle.
+export { sliceSince } from './replay-buffer';

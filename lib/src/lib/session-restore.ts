@@ -22,13 +22,11 @@ export function persistedLathLayout(saved: PersistedSession): LathPersistedLayou
 }
 
 /** What a restore reads instead of the platform slot, so one Window can plan a
- *  cold restore per Workspace off one boot payload. Both default to the
- *  platform's own answer, which is what the single-Wall hosts still take. */
+ *  cold restore per Workspace off one boot payload. Defaults to the platform's
+ *  own answer, which is what the single-Wall hosts still take. */
 export interface RestoreSources {
   /** The record to restore; `undefined` reads the platform slot, `null` is "none". */
   savedSession?: PersistedSession | null;
-  /** Host-captured single-use resume invocations, already claimed for this plan. */
-  recoveryCommands?: Record<string, string>;
 }
 
 export function restoreSession(platform: PlatformAdapter, sources: RestoreSources = {}): RestoredSession | null {
@@ -50,7 +48,7 @@ export function restoreSession(platform: PlatformAdapter, sources: RestoreSource
   // would replay it (docs/specs/transport.md -> "Consuming it"). Restore-only —
   // the live-resume path in reconnect.ts never reaches here, because there the
   // agent is still Live and has nothing to resume.
-  const recoveryCommands = sources.recoveryCommands ?? platform.getRecoveryCommands?.() ?? {};
+  const recoveryCommands = platform.getRecoveryCommands?.() ?? {};
 
   for (const pane of saved.panes) {
     // Browser surfaces have no PTY or xterm; the persisted layout recreates them

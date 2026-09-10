@@ -300,9 +300,13 @@ chord the webview already handles.**
 Workspace in it on the next launch (`docs/specs/transport.md` → "The governing
 rule"). The webview owns the composition: each Workspace's Wall publishes its
 `PersistedSession` to the Window aggregator, whose one debounced writer is
-`TauriAdapter.saveState` (`docs/specs/transport.md` → "Persisted session types").
-`getWindowState` is the boot reader; `getState` answers nothing, because the
-stored blob is a Window and every shared reader of `getState` wants a Session.
+`TauriAdapter.saveWindowState` (`docs/specs/transport.md` → "Persisted session
+types"). `getWindowState` is the boot reader, and it **parses the blob once** —
+the store behind it is a boot-seeded cache and every later write comes through
+`saveWindowState`. The bare-Session `saveState` / `getState` pair answers nothing
+on either standalone adapter, because the stored blob is a Window and every
+shared reader of `getState` wants a Session. Source of truth: `windowStateSlot` in
+`standalone/src/window-recovery.ts`.
 
 **Boot restores per Workspace off one live-PTY list.** `restoreWindow`
 (`standalone/src/main.tsx`) seeds the aggregator, installs the Workspaces and the
@@ -338,9 +342,13 @@ written.
   window's. The store is multi-window even though the app ships one window today.
 - No WAL to grow, and rewriting the same path bounds the on-disk size to one
   blob (rationale).
+- **The writer removes its own temp file on every error path**, so only a crash
+  can leave one behind.
 - **`sweep_orphan_session_temps` runs once in `setup()`** and deletes every
-  `<label>.json.tmp`, deriving the suffix through the writer so the two cannot
-  drift. It **never touches a live snapshot**.
+  `<label>.json.tmp` — the legacy and hard-crash migration, given the rule above.
+  `SESSION_TEMP_SUFFIX` is pinned against the writer by
+  `session_temp_suffix_matches_what_the_writer_leaves`, so the two cannot drift.
+  It **never touches a live snapshot**.
 
 **The state root is `<app_data_dir>`, or `<app_data_dir>/dev` under
 `cfg(debug_assertions)`.** `app_data_dir()` is keyed by the Tauri identifier, so a
@@ -357,6 +365,8 @@ the user's window. `state_root_from` in `standalone/src-tauri/src/lib.rs`.
 exactly one activation, so read-and-unlink has one home. Rust only bridges —
 `capture_agent_recovery` and `take_recovery_commands`, both
 `#[tauri::command(async)]` like every command reaching the blocking sidecar helper.
+**Every sidecar answer rides `respondAsync`**, so a throw comes back as `{ error }`
+rather than stranding the Rust invoke to its timeout.
 
 - **The record is `<state root>/recovery.json`**, owner-only, temp-then-rename,
   written on every detection rather than once at the end, because the quit budget
@@ -364,16 +374,20 @@ exactly one activation, so read-and-unlink has one home. Rust only bridges —
 - **`beginCapture` clears the previous record once per sidecar process and merges
   after**, so a teardown that captures nothing cannot carry a stale record forward
   and a second window's capture cannot wipe the first's.
-- **`take` is claimed once**, during `TauriAdapter.init()` and before the restore
-  reads it, for every pane id across the saved Window's Workspaces.
+- **`take` is claimed once**, started by `TauriAdapter.init()` for every pane id
+  across the saved Window's Workspaces. `init()` does not await it: the boot
+  awaits `recoveryReady` before planning, and only on the branch that can
+  cold-restore, so the round trip overlaps the rest of boot.
 - **Without a state directory the store is memory-only**, warning once.
 
-The detection is `lib/src/host/recovery-capture.ts`, shared with the VS Code
-extension host (`docs/specs/vscode.md` → "Capturing agent recovery"); the primitives
-it runs on — `liveIds`, `receivedChars`, `outputSince` — are
-`standalone/sidecar/pty-core.js`'s. Source of truth: `createRecoveryStore` in
-`lib/src/host/recovery-store.ts`; `pty:captureRecovery` / `recovery:take` in
-`standalone/sidecar/main.js`.
+Both the detection (`lib/src/host/recovery-capture.ts`) and the record store
+(`lib/src/host/recovery-store.ts`) are shared with the VS Code extension host
+(`docs/specs/vscode.md` → "Capturing agent recovery"); the primitives the detection
+runs on — `liveIds`, `receivedChars`, `outputSince` — are
+`standalone/sidecar/pty-core.js`'s. **The browser-dev harness claims but never
+captures**: a reload there is a live resume over PTYs that survive it, so pressing
+`^C` would interrupt work that is still running. Source of truth:
+`pty:captureRecovery` / `recovery:take` in `standalone/sidecar/main.js`.
 
 **The notepad archive is outside `sessions/`, and outside the state root** —
 `<app_data_dir>/notepad-archive-v1.json`, its own compare-and-swap commands and
@@ -515,8 +529,10 @@ able to stop the quit (`docs/specs/notepad.md` -> "Standalone quit"):
 3. `gracefulKillAllPtys` — SIGTERM every PTY, resolving early once all exit and
    their final output has had a grace tick to reach the webview (§Rust ↔ sidecar
    bridge).
-4. `requestSessionFlush` — flush the post-exit Session state. **Must retain the
-   previously persisted CWD when `getCwd` returns null for a dead PTY.**
+4. `requestSessionFlush({ probeCwd: false })` — flush the post-exit Session state.
+   **Must skip the cwd probe and retain the previously persisted CWD**: every
+   probe against a dead PTY answers null and is discarded for that value anyway
+   (`docs/specs/transport.md` → "Persisted session types").
 5. `flushWindowSession` — the Workspaces' records become one Window blob
    (`docs/specs/transport.md` → "Persisted session types"); a debounce timer still
    pending at exit would otherwise lose the final save.

@@ -105,6 +105,9 @@ describe("TauriAdapter window persistence", () => {
       impl(cmd, args)) as unknown as typeof rawInvoke);
     const adapter = new TauriAdapter();
     await adapter.init();
+    // `init()` starts the recovery claim without awaiting it; the boot awaits it
+    // before planning (`standalone/src/main.tsx`), so do the same here.
+    await adapter.recoveryReady;
     return { adapter, invoke };
   }
 
@@ -131,8 +134,8 @@ describe("TauriAdapter window persistence", () => {
     });
 
     expect(invoke).toHaveBeenCalledWith("take_recovery_commands", { paneIds: ["pane-a"] });
-    // Synchronous by the time the cold restore asks, which is what `init()`
-    // completing before `resumeOrRestore` buys.
+    // Synchronous by the time the cold restore asks, which is what awaiting
+    // `recoveryReady` before planning buys.
     expect(adapter.getRecoveryCommands()).toEqual({ "pane-a": "claude --continue" });
     adapter.shutdown();
   });
