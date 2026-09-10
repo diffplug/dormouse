@@ -42,6 +42,10 @@ pub enum Route<'a> {
     /// the replay the new owner is about to receive, or no window owns it at all
     /// and every window would otherwise ring for a pane none of them shows.
     Drop,
+    /// Kept for the id's next owner: the id is mid-transfer and, unlike its
+    /// bytes, this event is in no replay. The caller queues it and delivers
+    /// the queue, in order, right after the replay that lifts the suppression.
+    Hold,
     /// A `dor` request naming no Surface belongs to whichever window the user
     /// is looking at. Resolved by the caller, which alone holds the focus order.
     Focused,
@@ -93,12 +97,23 @@ fn owner<'a>(map: &'a HashMap<String, String>, id: &str) -> Route<'a> {
 pub fn route<'a>(event: &str, data: &'a JsonValue, view: &RouteView<'a>) -> Route<'a> {
     match event {
         // Terminal traffic, keyed by the PTY it came from.
-        "pty:data" | "terminal:semanticEvents" | "terminal:protocolEvents" => {
+        "pty:data" => {
             let Some(id) = str_field(data, "id") else {
                 return Route::Broadcast;
             };
             if view.awaiting_replay.contains_key(id) {
                 return Route::Drop;
+            }
+            owner(view.owners, id)
+        }
+        // Derived once at the sidecar's parse site and carried by no replay, so
+        // a chunk's events outlive the chunk's drop.
+        "terminal:semanticEvents" | "terminal:protocolEvents" => {
+            let Some(id) = str_field(data, "id") else {
+                return Route::Broadcast;
+            };
+            if view.awaiting_replay.contains_key(id) {
+                return Route::Hold;
             }
             owner(view.owners, id)
         }
@@ -305,6 +320,33 @@ pub fn sweep_awaiting(
         map.remove(id);
     }
     stale
+}
+
+/// One event held for an id mid-transfer, in arrival order.
+pub type HeldEvent = (String, JsonValue);
+
+/// Queue an event for an id whose suppression is up. Bounded per id: a
+/// transfer lasts seconds, and an id that outruns the bound is one whose
+/// arrival is wedged, which the arrival watchdog hands back anyway.
+pub fn hold_event(
+    held: &mut HashMap<String, Vec<HeldEvent>>,
+    id: &str,
+    event: &str,
+    data: JsonValue,
+) {
+    let queue = held.entry(id.to_string()).or_default();
+    if queue.len() >= HELD_EVENTS_MAX {
+        queue.remove(0);
+    }
+    queue.push((event.to_string(), data));
+}
+
+/// Cap on events held per id.
+pub const HELD_EVENTS_MAX: usize = 256;
+
+/// Everything held for `id`, in order, and nothing left behind.
+pub fn take_held(held: &mut HashMap<String, Vec<HeldEvent>>, id: &str) -> Vec<HeldEvent> {
+    held.remove(id).unwrap_or_default()
 }
 
 /// The next `ws-<n>`, above every label given — live windows and saved
@@ -553,6 +595,30 @@ mod tests {
     }
 
     #[test]
+    fn held_events_come_back_in_order_and_bounded() {
+        let mut held = HashMap::new();
+        hold_event(&mut held, "a", "terminal:semanticEvents", json!({"n":1}));
+        hold_event(&mut held, "a", "terminal:protocolEvents", json!({"n":2}));
+        hold_event(&mut held, "b", "terminal:semanticEvents", json!({"n":3}));
+        assert_eq!(
+            take_held(&mut held, "a"),
+            vec![
+                ("terminal:semanticEvents".to_string(), json!({"n":1})),
+                ("terminal:protocolEvents".to_string(), json!({"n":2})),
+            ]
+        );
+        assert!(take_held(&mut held, "a").is_empty());
+        assert_eq!(held.len(), 1);
+
+        for n in 0..(HELD_EVENTS_MAX + 5) {
+            hold_event(&mut held, "c", "terminal:semanticEvents", json!({"n":n}));
+        }
+        let queue = take_held(&mut held, "c");
+        assert_eq!(queue.len(), HELD_EVENTS_MAX);
+        assert_eq!(queue[0].1, json!({"n":5}));
+    }
+
+    #[test]
     fn a_transferring_pty_is_suppressed_until_its_replay() {
         let owned = labels(&[("a", "ws-2")]);
         let held = awaiting(&["a"]);
@@ -564,6 +630,15 @@ mod tests {
             dor_targets: &no_dor,
         };
         assert_eq!(route("pty:data", &json!({"id":"a"}), &suppressed), Route::Drop);
+        // A chunk's derived events are in no replay: held, not dropped.
+        assert_eq!(
+            route("terminal:semanticEvents", &json!({"id":"a"}), &suppressed),
+            Route::Hold
+        );
+        assert_eq!(
+            route("terminal:protocolEvents", &json!({"id":"a"}), &suppressed),
+            Route::Hold
+        );
         // The replay itself is never suppressed — it is what is being waited for.
         assert_eq!(
             route("pty:replay", &json!({"id":"a"}), &suppressed),

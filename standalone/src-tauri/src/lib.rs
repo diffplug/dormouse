@@ -86,6 +86,9 @@ struct RoutingState {
     /// dor requestId -> the window handling it, so a cancel reaches the window
     /// holding the subscription, watch or completion claim it releases.
     dor_targets: HashMap<String, String>,
+    /// Derived terminal events that arrived while their id was suppressed,
+    /// delivered to the new owner behind its replay (`routing::Route::Hold`).
+    held: HashMap<String, Vec<routing::HeldEvent>>,
 }
 
 #[derive(Default)]
@@ -168,6 +171,9 @@ impl WindowState {
                 routing.awaiting_replay.insert(id.clone(), now);
             } else {
                 routing.awaiting_replay.remove(id);
+                // A hand-back: what was held for the target belongs to the
+                // source again, which saw the bytes live and needs no events.
+                routing.held.remove(id);
             }
         }
         self.suppressed
@@ -179,6 +185,7 @@ impl WindowState {
         let mut routing = guard(&self.routing);
         routing.owners.remove(id);
         routing.awaiting_replay.remove(id);
+        routing.held.remove(id);
         self.suppressed
             .store(routing.awaiting_replay.len(), Ordering::Relaxed);
     }
@@ -264,6 +271,8 @@ fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
     };
 
     let mut released: Vec<String> = Vec::new();
+    // Held events an expired suppression releases, flushed to the owner below.
+    let mut flushed: Vec<(String, Vec<routing::HeldEvent>)> = Vec::new();
     let delivery = {
         // Before the routing lock, never inside it (§`arrivals`). Nothing is
         // transferring in the steady state, so this second acquisition is paid
@@ -285,6 +294,12 @@ fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
                 state
                     .suppressed
                     .store(routing.awaiting_replay.len(), Ordering::Relaxed);
+                for id in &released {
+                    let queue = routing::take_held(&mut routing.held, id);
+                    if let (false, Some(label)) = (queue.is_empty(), routing.owners.get(id)) {
+                        flushed.push((label.clone(), queue));
+                    }
+                }
             }
         }
 
@@ -298,6 +313,12 @@ fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
             },
         ) {
             Route::Drop => Delivery::Nowhere,
+            Route::Hold => {
+                if let Some(id) = data.get("id").and_then(JsonValue::as_str) {
+                    routing::hold_event(&mut routing.held, id, event, data.clone());
+                }
+                Delivery::Nowhere
+            }
             Route::Broadcast => Delivery::Broadcast,
             Route::EmitTo(label) => Delivery::To(label.to_string()),
             // Resolved here, where the focus order is a sibling of the map the
@@ -315,6 +336,12 @@ fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
             },
         }
     };
+
+    for (label, queue) in flushed {
+        for (held_event, held_data) in queue {
+            let _ = app.emit_to(label.as_str(), held_event.as_str(), &held_data);
+        }
+    }
 
     let mut delivered: Option<&str> = None;
     match &delivery {
@@ -359,11 +386,21 @@ fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
         }
         "pty:replay" => {
             if let Some(id) = id() {
-                let mut routing = guard(&state.routing);
-                routing.awaiting_replay.remove(id);
-                state
-                    .suppressed
-                    .store(routing.awaiting_replay.len(), Ordering::Relaxed);
+                let queue = {
+                    let mut routing = guard(&state.routing);
+                    routing.awaiting_replay.remove(id);
+                    state
+                        .suppressed
+                        .store(routing.awaiting_replay.len(), Ordering::Relaxed);
+                    routing::take_held(&mut routing.held, id)
+                };
+                // Behind the replay, to the window that just received it: the
+                // events describe bytes the replay carried.
+                if let Some(label) = delivered {
+                    for (held_event, held_data) in queue {
+                        let _ = app.emit_to(label, held_event.as_str(), &held_data);
+                    }
+                }
             }
         }
         "dor:controlRequest" => {

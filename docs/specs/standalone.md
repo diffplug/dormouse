@@ -338,7 +338,8 @@ Source of truth: `route` in `standalone/src-tauri/src/routing.rs`,
 
 | Sidecar event | Key | Goes to |
 |---|---|---|
-| `pty:data`, `terminal:semanticEvents`, `terminal:protocolEvents` | `data.id` | its owner; dropped while the id is mid-transfer |
+| `pty:data` | `data.id` | its owner; dropped while the id is mid-transfer, its bytes being in the replay |
+| `terminal:semanticEvents`, `terminal:protocolEvents` | `data.id` | its owner; **held** while the id is mid-transfer and delivered, in order, behind the replay (`held_events_come_back_in_order_and_bounded`) — no replay carries them |
 | `pty:exit`, `pty:replay` | `data.id` | its owner, never suppressed |
 | `pty:list` | `data.forWindow` | the window that asked |
 | `alert:*` carrying `data.id` | `data.id` | its owner |
