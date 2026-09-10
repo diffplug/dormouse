@@ -31,7 +31,7 @@ Optional booleans:
 - **Must bind OS-assigned ports for Vite and the HTTP bridge by default.**
 - **Must derive the default browser key from the canonical worktree path**, stable across restarts. **Must open through `dor ab` when `DORMOUSE_SURFACE_ID` is set**, otherwise through `agent-browser`; print the actual app URL, session, and command to drive it. Inside Dormouse, `dor ensure -- pnpm innerdogfood` starts and opens the harness.
 - **May pin ports with `DORMOUSE_BROWSER_DEV_VITE_PORT` / `DORMOUSE_BROWSER_DEV_HOST_PORT` and the session with `DORMOUSE_BROWSER_DEV_AB_SESSION`.** An occupied pinned port fails startup; `0` requests an OS-assigned port. Explicit overrides are the caller's isolation responsibility.
-- **Must await Vite's own listener before opening the browser and use the actual ports for bridge authentication and CORS.** **Must close the bridge, Vite, and sidecar on startup failure or shutdown.** Pinned by `standalone/scripts/dev-agent-browser.test.mjs`.
+- **Must await Vite's own listener before opening the browser and use the actual ports for bridge authentication and CORS.** **Must close the bridge and Vite and terminate owned sidecar and browser-launch children on startup failure or shutdown**, escalating to SIGKILL after three seconds. Pinned by `standalone/scripts/dev-agent-browser.test.mjs`.
 
 The bridge is a transport shim over the same sidecar protocol, not a second PTY implementation: fire-and-forget commands `POST /__dormouse_dev_host/send`, request/response commands `POST /__dormouse_dev_host/invoke`, host→webview events as SSE on `GET /__dormouse_dev_host/events`, and browser console output mirrored to `POST /__dormouse_dev_host/console` so one terminal shows sidecar, Vite, and in-browser logs together. The Burrow rides it too, on the message names below ("Message protocol"), so the harness runs a real Burrow against a per-run temp state directory (`docs/specs/standalone.md` → "Burrow service").
 
@@ -48,7 +48,7 @@ The bridge is a transport shim over the same sidecar protocol, not a second PTY 
 
 The harness **may omit** native-only desktop chrome (window controls, update checks) but **must preserve** every `PlatformAdapter` contract the app uses — PTY, control-request, clipboard, iframe-proxy, Burrow, agent-browser. It **must mirror** standalone's Session-persistence answer ("The governing rule"): the same `persistsSession`, one `PersistedWindow` per window (in `localStorage` rather than the Rust file store), and the same agent-recovery *claim* against a per-run temp state directory. **The harness must never capture**: a reload there is a live resume over PTYs that survive it, and capture is a quit-only step (`docs/specs/standalone.md` → "Agent recovery"). **Tauri APIs must not be required at static module-evaluation time** when `VITE_DORMOUSE_BROWSER_DEV_HOST` is set — a normal browser loads the page, not the Tauri WebView.
 
-Source of truth: `standalone/scripts/dev-agent-browser.mjs`, `standalone/scripts/dev-host-guard.mjs`, `standalone/src/browser-sidecar-host.ts`, `standalone/src/browser-sidecar-adapter.ts`; `stepBurrow` in `scripts/pairing-walkthrough/steps.mjs`.
+Source of truth: `standalone/scripts/dev-agent-browser.mjs`, `standalone/scripts/dev-run.mjs`, `standalone/scripts/dev-host-guard.mjs`, `standalone/src/browser-sidecar-host.ts`, `standalone/src/browser-sidecar-adapter.ts`; `stepBurrow` in `scripts/pairing-walkthrough/steps.mjs`; `sessionForKey` in `dor-lib-common/src/agent-browser.ts`.
 
 ## PTY lifecycle
 

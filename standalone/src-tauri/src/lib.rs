@@ -2017,15 +2017,16 @@ fn note_geometry(app: &AppHandle, label: &str, origin: Option<(i32, i32)>, size:
 //
 // The revision is a hash of the stored bytes, and every load, save and reset
 // runs under an exclusive lock on a sidecar lock file. Both are needed because
-// `app_data_dir()` is keyed by the Tauri identifier, which `pnpm dev:standalone`
-// shares with the installed app — the same sharing the sessions comment above
-// describes — so a second Dormouse process writing this file is an ordinary
-// state, not an impossible one. A hash is the only revision two processes agree
-// on without talking to each other: a counter only ever tracked this process's
-// own writes, so the loser of an overlapping load→save silently overwrote the
-// winner's batches. The lock is what makes the read-compare-rename one step, so
-// the loser is told "conflict" and retries instead. `None` means nothing is
-// stored — what a first save names as its base, and what a reset leaves behind.
+// `app_data_dir()` is keyed by the Tauri identifier and nothing enforces one
+// launch per identifier: two launches of the installed app share a data
+// directory, as do two `pnpm dev:standalone` runs in one worktree, whose
+// identifier is per-worktree and stable. A hash is the only revision two
+// processes agree on without talking to each other: a counter only ever
+// tracked this process's own writes, so the loser of an overlapping load→save
+// silently overwrote the winner's batches. The lock makes read-compare-rename
+// one step, so the loser is told "conflict" and retries instead. `None` means
+// nothing is stored — what a first save names as its base, and what a reset
+// leaves behind.
 
 const NOTEPAD_ARCHIVE_FILE: &str = "notepad-archive-v1.json";
 
@@ -2362,6 +2363,7 @@ fn arrival_from(from: &str, to: &str, payload: JsonValue) -> Result<routing::Arr
         to: to.to_string(),
         terminal_ids,
         payload,
+        queued_at: Instant::now(),
     })
 }
 
@@ -2371,17 +2373,49 @@ fn arrival_from(from: &str, to: &str, payload: JsonValue) -> Result<routing::Arr
 /// lines in order, so every byte after this point is either dropped (and present
 /// in the replay the target is about to get) or delivered to the target
 /// (docs/specs/standalone.md §Transfer).
-fn begin_arrival(windows: &WindowState, arrival: routing::Arrival) -> Result<(), String> {
-    let mut arrivals = guard(&windows.arrivals);
-    if routing::has_arrival(&arrivals, &arrival.workspace_id) {
-        return Err(format!(
-            "Workspace '{}' is already in flight",
-            arrival.workspace_id
-        ));
+fn begin_arrival(
+    app: &AppHandle,
+    windows: &WindowState,
+    arrival: routing::Arrival,
+) -> Result<(), String> {
+    {
+        let mut arrivals = guard(&windows.arrivals);
+        if routing::has_arrival(&arrivals, &arrival.workspace_id) {
+            return Err(format!(
+                "Workspace '{}' is already in flight",
+                arrival.workspace_id
+            ));
+        }
+        windows.reassign(&arrival.terminal_ids, &arrival.to, true);
+        routing::queue_arrival(&mut arrivals, arrival.clone());
     }
-    windows.reassign(&arrival.terminal_ids, &arrival.to, true);
-    routing::queue_arrival(&mut arrivals, arrival);
+    spawn_arrival_watchdog(app.clone(), &arrival);
     Ok(())
+}
+
+/// Bound an arrival: a target that never settles it — alive but wedged, so
+/// `Destroyed` never hands it back either — would leave the Workspace marked
+/// transferring in the source and its shells silent for good. Past
+/// `ARRIVAL_MAX` the record is retired and handed back like any refusal.
+fn spawn_arrival_watchdog(app: AppHandle, arrival: &routing::Arrival) {
+    let workspace_id = arrival.workspace_id.clone();
+    let to = arrival.to.clone();
+    let queued_at = arrival.queued_at;
+    std::thread::spawn(move || {
+        std::thread::sleep(routing::ARRIVAL_MAX);
+        let Some(windows) = app.try_state::<WindowState>() else {
+            return;
+        };
+        let expired = routing::expire_arrival(
+            &mut guard(&windows.arrivals),
+            &workspace_id,
+            &to,
+            queued_at,
+        );
+        if let Some(arrival) = expired {
+            hand_back_arrival(&app, &windows, &arrival, "the target never adopted it");
+        }
+    });
 }
 
 /// One arrival will never be adopted: give its shells back to the source,
@@ -2458,7 +2492,7 @@ fn open_workspace_window(
     // moved rather than cloned.
     let workspace_id = arrival.workspace_id.clone();
     append_log(format!("[window] tearing {workspace_id} out into {label}"));
-    begin_arrival(&windows, arrival)?;
+    begin_arrival(&app, &windows, arrival)?;
     if let Err(err) = build_window(&app, &label, geometry) {
         // Nothing will ever drain the queue, and the PTYs would stay suppressed
         // and ownerless. The source is waiting on this `Err` and has released
@@ -2499,7 +2533,7 @@ fn transfer_workspace(
     // Queued, not emitted: the target may be booting, or torn out moments ago,
     // and have no listener yet — and it is a legal drop target either way
     // (docs/specs/standalone.md §Arrival queue).
-    begin_arrival(&windows, arrival)?;
+    begin_arrival(&app, &windows, arrival)?;
     // Forward before the content lands: the user dropped here, so this is the
     // window they are now looking at, and a background webview may be throttled
     // out of answering `adopt_ready` promptly.
@@ -4352,9 +4386,8 @@ mod tests {
                 gate: Mutex::new(()),
             }
         }
-        /// A second Dormouse over the same `app_data_dir()` — a dev build beside
-        /// the installed app, which share a Tauri identifier and so a data
-        /// directory.
+        /// A second Dormouse over the same `app_data_dir()` — two launches of the
+        /// installed app, or two `pnpm dev:standalone` runs in one worktree.
         fn second_process(&self) -> Self {
             Archive {
                 dir: self.dir.clone(),
@@ -4482,9 +4515,9 @@ mod tests {
         );
     }
 
-    /// Two Dormouse processes share `app_data_dir()` — a dev build beside the
-    /// installed app — so the loser of an overlapping load→save must be told to
-    /// retry rather than drop the winner's batches.
+    /// Two Dormouse processes share `app_data_dir()` — two launches of the
+    /// installed app, or two dev runs in one worktree — so the loser of an
+    /// overlapping load→save must retry rather than drop the winner's batches.
     #[test]
     fn notepad_archive_conflicts_across_two_processes() {
         let first = Archive::new("notepad-two-processes");

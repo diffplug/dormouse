@@ -2,10 +2,9 @@
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { readFile, realpath } from 'node:fs/promises';
-import { createHash, randomBytes } from 'node:crypto';
-import { createServer } from 'vite';
-import { fileURLToPath } from 'node:url';
+import { readFile } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
+import { sessionForKey } from 'dor-lib-common/agent-browser';
 // cross-spawn, not node:child_process: this script spawns `dor` and
 // `agent-browser`, which are `.cmd` shims on Windows that a bare-name spawn
 // can't resolve (ENOENT) and Node >=22 won't run directly (EINVAL). cross-spawn
@@ -15,19 +14,18 @@ import { createInterface } from 'node:readline';
 // The bridge's security boundary, in its own module so it is testable —
 // see standalone/scripts/dev-host-guard.test.mjs.
 import { corsHeaders, isAuthorized } from './dev-host-guard.mjs';
+// Worktree identity and the Vite server this harness shares with the native
+// dev runner (`dev-standalone.mjs`).
+import { repoRoot, standaloneDir, startDevVite, worktreeId } from './dev-run.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const standaloneDir = path.resolve(__dirname, '..');
-const repoRoot = path.resolve(standaloneDir, '..');
 const sidecarDir = path.join(standaloneDir, 'sidecar');
 const sidecarScript = path.join(sidecarDir, 'main.js');
 const dorBinDir = path.join(sidecarDir, 'dor-cli', 'bin');
 const dorEntrypoint = path.join(sidecarDir, 'dor-cli', 'dist', 'dor.js');
 // Bind port 0 directly: probing and then releasing a free port races other runs.
 let hostPort = Number(process.env.DORMOUSE_BROWSER_DEV_HOST_PORT || 0);
-const vitePort = Number(process.env.DORMOUSE_BROWSER_DEV_VITE_PORT || 0);
-const worktreeKey = `innerdogfood-${createHash('sha256').update(await realpath(repoRoot)).digest('hex').slice(0, 16)}`;
-const browserSession = process.env.DORMOUSE_BROWSER_DEV_AB_SESSION || `dormouse.1.${worktreeKey}`;
+const worktreeKey = `innerdogfood-${await worktreeId()}`;
+const browserSession = process.env.DORMOUSE_BROWSER_DEV_AB_SESSION || sessionForKey(worktreeKey);
 const insideDormouse = Boolean(process.env.DORMOUSE_SURFACE_ID);
 // Only the token: the sidecar picks the control socket path itself (hardened
 // per-user directory on POSIX, unguessable pipe name on Windows) and reports it
@@ -295,32 +293,21 @@ function startSidecar() {
 }
 
 async function startVite() {
-  // Own Vite in this process: listen() reports the actual bound port and close()
-  // tears down its watchers too. A TCP readiness probe could find another run.
-  vite = await createServer({
-    root: standaloneDir,
-    // Inject only into the page, never process.env: the sidecar's PTYs must not
-    // inherit the HTTP bridge credential.
-    define: {
-      'import.meta.env.VITE_DORMOUSE_BROWSER_DEV_HOST': JSON.stringify(`http://127.0.0.1:${hostPort}/?t=${bridgeToken}`),
-    },
-    server: {
-      host: '127.0.0.1', port: vitePort, strictPort: true,
-      // Share Vite's listener, including when TAURI_DEV_HOST is inherited.
-      hmr: { host: 'localhost', port: 0, protocol: 'ws' },
-    },
-  });
-  await vite.listen();
-  viteOrigin = `http://localhost:${vite.httpServer.address().port}`;
+  // The bridge credential reaches the page only, never process.env: the
+  // sidecar's PTYs must not inherit it.
+  ({ vite, origin: viteOrigin } = await startDevVite({
+    'import.meta.env.VITE_DORMOUSE_BROWSER_DEV_HOST': JSON.stringify(`http://127.0.0.1:${hostPort}/?t=${bridgeToken}`),
+  }));
   log(`app URL: ${viteOrigin}`);
 }
 
 async function openAgentBrowser() {
   const binary = insideDormouse ? 'dor' : 'agent-browser';
-  const identity = process.env.DORMOUSE_BROWSER_DEV_AB_SESSION
-    ? ['--session', browserSession]
-    : ['--key', worktreeKey];
-  const args = insideDormouse ? ['ab', ...identity] : ['--session', browserSession];
+  const identity = insideDormouse && !process.env.DORMOUSE_BROWSER_DEV_AB_SESSION
+    ? ['--key', worktreeKey]
+    : ['--session', browserSession];
+  const args = insideDormouse ? ['ab', ...identity] : identity;
+  const command = `${binary} ${args.join(' ')}`;
   if (process.env.DORMOUSE_BROWSER_DEV_HEADED === '1') args.push('--headed');
   args.push('open', viteOrigin);
   browser = spawn(binary, args, { cwd: repoRoot, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -333,9 +320,7 @@ async function openAgentBrowser() {
       : reject(new Error(`${binary} exited code=${code} signal=${signal}`)));
   });
   log(`agent-browser session: ${browserSession}`);
-  log(insideDormouse
-    ? `try: dor ab ${identity.join(' ')} snapshot -i`
-    : `try: agent-browser --session ${browserSession} snapshot -i`);
+  log(`try: ${command} snapshot -i`);
 }
 
 async function shutdown(code = 0) {
@@ -345,18 +330,21 @@ async function shutdown(code = 0) {
   sseClients.clear();
   hostServer?.close();
   hostServer?.closeAllConnections();
-  if (browser?.pid && browser.exitCode === null && browser.signalCode === null) browser.kill('SIGTERM');
-  const sidecarClosed = sidecar?.pid && sidecar.exitCode === null && sidecar.signalCode === null
-    ? new Promise((resolve) => {
-      sidecar.once('exit', resolve);
-      sidecar.kill('SIGTERM');
-    }) : Promise.resolve();
+  const children = new Set([browser, sidecar].filter(child =>
+    child?.pid && child.exitCode === null && child.signalCode === null));
+  const childrenClosed = [...children].map(child => new Promise(resolve => {
+    child.once('exit', () => {
+      children.delete(child);
+      resolve();
+    });
+    child.kill('SIGTERM');
+  }));
   // Bound cleanup even when a child or open request stops responding.
   const timeout = setTimeout(() => {
-    if (sidecar?.pid && sidecar.exitCode === null && sidecar.signalCode === null) sidecar.kill('SIGKILL');
+    for (const child of children) child.kill('SIGKILL');
     process.exit(code);
   }, 3000);
-  await Promise.all([vite?.close(), sidecarClosed]);
+  await Promise.all([vite?.close(), ...childrenClosed]);
   clearTimeout(timeout);
   process.exit(code);
 }

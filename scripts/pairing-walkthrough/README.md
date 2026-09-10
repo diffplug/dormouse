@@ -13,8 +13,8 @@ authenticator's own `signCount`, the Burrow's alert arriving in the phone's sess
 list.
 
 It is a development tool, not a test. **It is deliberately not wired into
-`pnpm test` or any CI workflow**: it wants Chrome, `ffmpeg`, an exclusive
-`:3000`, and several minutes.
+`pnpm test` or any CI workflow**: it wants Chrome, `ffmpeg`, and several
+minutes.
 
 ```sh
 node scripts/pairing-walkthrough/run.mjs
@@ -35,8 +35,6 @@ selectors), `ab.mjs` (`agent-browser`), `chrome.mjs` (the Pocket browser),
 | Chrome / Chromium | `agent-browser install` puts one where it wants it. |
 | `ffmpeg` on `PATH` | Every pixel operation: crop, upscale, Y4M. Override with `FFMPEG_BIN`. |
 | `pnpm install` already run | The Relay, the Burrow and the QR decoder all come from the workspace. |
-| A free `:3000` | Not negotiable — see *Ports* below. The run refuses to start otherwise. |
-| Two free ports from `:15540` | The Burrow harness's Vite server and its dev bridge; picked at startup. |
 
 Every line about `agent-browser` and Chrome here was probed against
 `agent-browser` 0.31.1 and Chrome for Testing 150, not assumed.
@@ -74,7 +72,7 @@ it.
 
 | # | Step | What happens |
 | --- | --- | --- |
-| 1 | `relay` | `pnpm dev:relay` with an isolated `DORMOUSE_STATE_DIR`, then waits for `:3000` to answer. |
+| 1 | `relay` | `pnpm dev:relay` with an isolated `DORMOUSE_STATE_DIR`, then reads its bound origin and waits for it to answer. |
 | 2 | `burrow` | `pnpm innerdogfood` with `DORMOUSE_REMOTE_CONNECT_SRC` pointed at that Relay, then waits for the app's first terminal. → `01-burrow-booted.png` |
 | 3 | `settings` | Clicks the baseboard's Settings button and scrolls to Remote control. → `02-settings-open.png` |
 | 4 | `enroll` | Types the Relay URL, the setup password and the machine name into the real form, submits, and waits for **Connected**. → `03-enroll-form.png`, `04-enrolled.png` |
@@ -107,8 +105,8 @@ to tap something there would have found a bug.
 | --- | --- | --- |
 | `--scenario <name>` | `happy` | Which ending to drive — see *Scenarios*. |
 | `--until <step>` | the scenario's last | Stop after this step. |
-| `--out <dir>` | `$TMPDIR/pairing-walkthrough/<timestamp>` | Run directory. |
-| `--skip-build` | off | Reuse `lib/dist-pocket` and `relay/dist` instead of rebuilding them. Ignored (with a warning) when either is missing. |
+| `--out <dir>` | `$TMPDIR/pairing-walkthrough/<timestamp>-<random>` | Run directory. |
+| `--skip-build` | off | Reuse `lib/dist-pocket` and `relay/dist` instead of rebuilding them — same dev runner either way. Ignored (with a warning) when either is missing. |
 | `--machine-name <n>` | `Walkthrough Mac` | The name the Burrow enrolls under. |
 | `--keep` | off | Leave everything running when the run ends — including a failed one, which is when poking by hand is most useful. Ctrl-C stops it. |
 
@@ -187,12 +185,11 @@ a store of their own. The *why* of each is at the code; what it means for you:
 
 ## Ports
 
-`:3000` is fixed, and the run refuses to start when something else holds it:
-the Burrow's allowed relay origins are baked into `sidecar/burrow.cjs` at
-stage time, and Pocket must be same-origin with its own API
-([`docs/specs/pocket-app.md`](../../docs/specs/pocket-app.md) → Deployment). The
-Burrow harness's two ports are searched for from `:15540` and passed in, and the
-Pocket browser's debugging port from 100 above the second of them.
+The Relay, Burrow harness, and Pocket Chrome bind OS-assigned ports. The run
+reads the Relay's origin before staging the Burrow's allowed origins, and opens
+Pocket at that same origin. Vite reports its app URL; Chrome reports its debugging
+port through `DevToolsActivePort` in the run's own profile. No port is probed and
+released before its owner binds it.
 
 `localhost`, never `127.0.0.1` — WebAuthn's secure-context rule and the `rpId`
 the Relay derives from its own origin
@@ -239,4 +236,7 @@ already are, and a step that adds one holds to the same rule
 - **The Pocket browser is launched by the harness, not by `agent-browser`.**
   `agent-browser --args` can carry launch flags, so it could be — see the head
   of `chrome.mjs` for what the harness gets by owning the process instead.
-- **One run at a time.** `:3000` and the agent-browser daemon are both global.
+- **Concurrent runs need separate worktrees for build output.** Each run has its
+  own Relay state, ports, browser sessions, and default artifact directory, but
+  Burrow staging still writes into the worktree. Explicit `--out` directories
+  must be distinct for concurrent runs of the same scenario.

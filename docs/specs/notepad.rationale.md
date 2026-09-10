@@ -209,10 +209,10 @@ sweep. They share `write_file_atomically` because both carry user text and both
 must survive a crash mid-write; that is one implementation, not two.
 
 The revision was a process-local counter until it turned out two processes can hold
-this file: `app_data_dir()` is keyed by the Tauri identifier, which `pnpm
-dev:standalone` shares with the installed app, and a counter tracks only its own
-process's writes — so the loser of an overlapping load→save reported no conflict and
-dropped the winner's batches. A content hash is what two processes agree on without
+this file: `app_data_dir()` is keyed by the Tauri identifier and nothing enforces
+one launch per identifier, and a counter tracks only its own process's writes — so
+the loser of an overlapping load→save reported no conflict and dropped the winner's
+batches. A content hash is what two processes agree on without
 talking, where an mtime is coarse on some filesystems and moves for reasons that are
 not a content change; `DefaultHasher` is used because it is fixed-key rather than
 randomly seeded, so a second process and a second run derive the same token from the
