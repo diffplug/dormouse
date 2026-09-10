@@ -33,6 +33,15 @@ export interface PtyReplayDetail {
   requestId?: string;
 }
 
+/** A PTY's output position, stamped in the stream by the host for a transfer
+ *  (`docs/specs/transport.md` → "Transferring a Workspace"): every `pty:data`
+ *  delivered before it is at or before `mark`. */
+export interface PtyMarkedDetail {
+  id: string;
+  mark: number;
+  requestId?: string;
+}
+
 /**
  * A TCP socket in the LISTEN state opened by a terminal's shell process or any
  * of its descendant subprocesses. `address` is the bind interface — `0.0.0.0`
@@ -399,6 +408,9 @@ export interface PlatformAdapter {
   offPtyList(handler: (detail: PtyListDetail) => void): void;
   onPtyReplay(handler: (detail: PtyReplayDetail) => void): void;
   offPtyReplay(handler: (detail: PtyReplayDetail) => void): void;
+  /** Hosts that hand Workspaces between windows stamp marks; returns the
+   *  unsubscribe. Absent on hosts with one window. */
+  onPtyMarked?(handler: (detail: PtyMarkedDetail) => void): () => void;
 
   // Host-initiated session persistence
   onRequestSessionFlush(handler: (detail: SessionFlushRequest) => void): void;

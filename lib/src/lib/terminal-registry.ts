@@ -52,6 +52,8 @@ export {
   releaseSession,
   restoreTerminal,
   resumeTerminal,
+  serializeTerminal,
+  flushTerminal,
   setPendingShellOpts,
   unmountElement,
 } from './terminal-lifecycle';

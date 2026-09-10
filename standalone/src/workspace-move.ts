@@ -1,10 +1,16 @@
 import { invoke } from "@tauri-apps/api/core";
 import { collectLivePtys, resumeOrRestoreFrom } from "dormouse-lib/lib/reconnect";
-import { hydrateNotepadFromVolatile } from "dormouse-lib/lib/notepad/notepad-store";
+import { flushTerminal } from "dormouse-lib/lib/terminal-registry";
+import { hydrateNotepadFromVolatile, restoreTerminalPins } from "dormouse-lib/lib/notepad/notepad-store";
 import { getWallHandle } from "dormouse-lib/components/wall/wall-handles";
 import { setWorkspaceBootPlan } from "dormouse-lib/components/wall/workspace-boot-plans";
 import { wallBootFromResult, type WallBootPlans } from "dormouse-lib/components/wall/wall-types";
-import type { PreparedWorkspaceTransfer, WorkspaceTransferPayload } from "dormouse-lib/components/wall/workspace-transfer";
+import {
+  captureTransferContent,
+  type PreparedWorkspaceTransfer,
+  type WorkspaceTransferContent,
+  type WorkspaceTransferPayload,
+} from "dormouse-lib/components/wall/workspace-transfer";
 import {
   clearWorkspaceTransferring,
   forgetWorkspaceSession,
@@ -40,13 +46,17 @@ import { workspaceDropTarget } from "./workspace-tabs";
  *   arrival's* PTYs, mount the Workspace, and call `adopt_done` — which is what
  *   releases the source.
  *
- * Rust reassigns ownership *synchronously* when the source invokes, and
- * suppresses those PTYs' output until each one's replay has been emitted to the
- * target — so between the two halves no byte is painted twice and none is lost.
+ * Rust reassigns ownership *synchronously* when the source invokes, but the
+ * source keeps consuming each PTY until the sidecar's `marked` line for it
+ * passes; it then serializes what it holds and hands that over as the
+ * arrival's *content*, and Rust suppresses the PTY until the target's replay of
+ * everything after the mark has been emitted — so between the two halves no
+ * byte is painted twice and none is lost, and the target rebuilds the whole
+ * buffer rather than the sidecar's bounded tail.
  */
 
 /** Wire the payload up as one drop point, so both invokes carry the same shape. */
-interface MovePayload extends WorkspaceTransferPayload {
+interface MovePayload extends WorkspaceTransferPayload, Partial<WorkspaceTransferContent> {
   /** Where the pointer released, in the target window's logical client space.
    *  The target turns it into a strip index; it alone knows its own tabs. */
   at?: { x: number; y: number };
@@ -99,9 +109,53 @@ async function handOff(
     console.warn(`[workspace-move] ${command} refused; the Workspace stays here`, err);
     return;
   }
-  const { workspaceId } = prepared.payload;
+  const { workspaceId, terminalIds } = prepared.payload;
   inFlight.set(workspaceId, prepared);
   markWorkspaceTransferring(workspaceId);
+  // The second half: once every terminal's mark has passed this window, what it
+  // holds is exactly the bytes before the mark. Serialized here, attached to the
+  // arrival by Rust, and only then drained by the target.
+  const marks = await marksFor(terminalIds, `mark-${workspaceId}`);
+  if (!inFlight.has(workspaceId)) return; // handed back while we waited
+  const content = await captureTransferContent(terminalIds, marks);
+  try {
+    await invoke("transfer_workspace_content", { workspaceId, content });
+  } catch (err) {
+    // The arrival is gone (the target closed, or the watchdog handed it back);
+    // `workspace-arrival-failed` has put, or will put, this Window back.
+    console.warn("[workspace-move] transfer_workspace_content refused", err);
+  }
+}
+
+/** The host stamps marks well inside this; past it, an unmarked id is
+ *  serialized anyway and replayed whole, which at worst repeats its tail. */
+const MARK_TIMEOUT_MS = 2000;
+
+/** The platform this window moves through; set by `initWorkspaceMoves`. */
+let movePlatform: PlatformAdapter | null = null;
+
+/** Wait for the sidecar's `marked` line for each id, in stream order behind
+ *  every byte this window was sent before it. */
+function marksFor(ids: readonly string[], requestId: string): Promise<Map<string, number>> {
+  const marks = new Map<string, number>();
+  const wanted = new Set(ids);
+  if (wanted.size === 0 || !movePlatform?.onPtyMarked) return Promise.resolve(marks);
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      unsubscribe();
+      resolve(marks);
+    };
+    const unsubscribe = movePlatform!.onPtyMarked!((detail) => {
+      if (detail.requestId !== requestId || !wanted.has(detail.id)) return;
+      marks.set(detail.id, detail.mark);
+      if (marks.size === wanted.size) finish();
+    });
+    const timer = setTimeout(finish, MARK_TIMEOUT_MS);
+  });
 }
 
 /** Hand this Workspace to a window that already exists. */
@@ -209,6 +263,13 @@ async function planArrival(
       + "refusing rather than restarting shells that are still running",
     );
   }
+  // The source's buffers come first, then the host's replay of everything
+  // after each mark: together they are the whole transcript, not the sidecar's
+  // bounded tail (`docs/specs/transport.md` → "Transferring a Workspace").
+  for (const [id, terminal] of Object.entries(payload.terminals ?? {})) {
+    if (!ptyIds.has(id) || !terminal.serialized) continue;
+    live.replay.set(id, terminal.serialized + (live.replay.get(id) ?? ""));
+  }
   const result = resumeOrRestoreFrom(platform, live, {
     savedSession: payload.workspace.session,
     ptyIds,
@@ -216,6 +277,12 @@ async function planArrival(
   // The notes travelled in the payload rather than through the archive: a move
   // is not a closure (`docs/specs/notepad.md` → "Closure").
   hydrateNotepadFromVolatile(payload.notepad, payload.allIds);
+  // Their pins point into the buffers just rebuilt at the same lines — once
+  // xterm has parsed the rebuild, which it does asynchronously.
+  if (payload.pins?.length) {
+    await Promise.all([...ptyIds].map((id) => flushTerminal(id)));
+    restoreTerminalPins(payload.pins);
+  }
   // The AlertManager is per webview, so a persisted TODO has to be seeded into
   // this one — the source's went with its window.
   for (const pane of payload.workspace.session.panes) {
@@ -278,6 +345,7 @@ async function drainArrivals(): Promise<MovePayload[]> {
 
 /** Listen for Workspaces arriving in, and leaving, this window. */
 export function initWorkspaceMoves(platform: PlatformAdapter): void {
+  movePlatform = platform;
   const adoptQueued = async () => {
     for (const payload of await drainArrivals()) await adoptWorkspace(platform, payload);
   };

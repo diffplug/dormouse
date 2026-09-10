@@ -132,15 +132,37 @@ and it turns on three rules:
   from a webview unmount**: a Wall unmounts on a reload and on a StrictMode
   double-mount, and releasing there would strand every PTY the window still owns.
   A move the target never took leaves the Workspace exactly as it was.
-- **Suppress until the replay.** The host moves ownership synchronously and
-  drops the moving PTYs' output until each one's replay has reached the new
-  owner, so no byte is painted twice and none is lost. It fails open after a
-  bound rather than silencing a pane forever (rationale).
-- **Ask for exactly the moving ids.** `pty:requestInit` names them, and
-  `list(ids)` follows the same **omitted is not empty** rule `interrupt` carries
-  — a caller forwarding a computed set that came out empty gets a no-op, not
-  every PTY in the process. The moving ids include each pane's helper Session,
-  which no other field names.
+- **Split at a mark stamped in the stream, then suppress until the replay.**
+  The host moves ownership synchronously but keeps every byte flowing to the
+  source until the sidecar's `pty:marked` line for the id — written behind every
+  `pty:data` it had sent and ahead of every one after — so the source, on
+  seeing it, drains xterm's write queue and holds exactly the bytes before the
+  mark. It serializes the buffer there (`serializeTerminal`,
+  `@xterm/addon-serialize`) and hands it over as the arrival's *content*; from
+  the mark the host drops the id's output until the target's replay has reached
+  it. The target writes the serialized buffer, then the replay of everything
+  after the mark, so the whole transcript crosses, not the sidecar's bounded
+  tail, and no byte is painted twice or lost. An id the host never marked is
+  serialized anyway and replayed whole. Suppression fails open after a bound
+  rather than silencing a pane forever (rationale).
+- **Ask for exactly the moving ids, at their marks.** `pty:requestInit` names
+  them with their marks, and `list(ids, …, marks)` replays `outputSince(mark)`
+  for a marked id and the whole buffer otherwise; ids follow the same **omitted
+  is not empty** rule `interrupt` carries — a caller forwarding a computed set
+  that came out empty gets a no-op, not every PTY in the process. The moving
+  ids include each pane's helper Session, which no other field names.
+- **Pins travel with the buffers.** The source takes each note's marker lines at
+  the instant it serializes (`snapshotTerminalPins`); the target re-registers
+  them at those lines once the rebuilt buffer has been parsed
+  (`restoreTerminalPins`), and the pin's byte-for-byte proof still decides
+  whether it is trusted (`docs/specs/notepad.md` → Source pins).
+
+Source of truth: `captureTransferContent` in
+`lib/src/components/wall/workspace-transfer.ts`; `mark` / `list` in
+`standalone/sidecar/pty-core.js`; `standalone/src/workspace-move.ts`. Pinned by
+`a mark is ordered in the stream and a since-mark replay is exactly the
+remainder` in `standalone/sidecar/pty-core.test.js` and
+`standalone/src/workspace-move.test.ts`.
 
 **Cold restore** (neither live PTYs nor a browser-only resume) falls back to saved session state: new PTYs in the saved CWDs under the currently selected Dormouse shell, plus the saved Lath layout. No transcript is replayed ("What is persisted"), and any pane carrying a recovery command auto-runs it. `reconnect.ts` waits 500 ms for the PTY list, and 3 s more where a retry is asked for.
 

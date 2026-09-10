@@ -14,6 +14,7 @@ vi.mock('@xterm/addon-fit', () => ({
   },
 }));
 vi.mock('@xterm/addon-image', () => ({ ImageAddon: class {} }));
+vi.mock('@xterm/addon-serialize', () => ({ SerializeAddon: class { serialize(): string { return ''; } } }));
 vi.mock('@xterm/addon-unicode-graphemes', () => ({ UnicodeGraphemesAddon: class {} }));
 vi.mock('@xterm/xterm', () => ({
   Terminal: class {

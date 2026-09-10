@@ -69,6 +69,9 @@ pub struct RouteView<'a> {
     pub dor_targets: &'a HashMap<String, String>,
     /// Every window's Workspaces, for a request naming one explicitly.
     pub registry: &'a crate::workspaces::Registry,
+    /// Ids whose transfer is between the invoke and the sidecar's `marked`
+    /// line, each with the source still consuming its output.
+    pub marking: &'a HashMap<String, String>,
 }
 
 fn str_field<'a>(data: &'a JsonValue, key: &str) -> Option<&'a str> {
@@ -98,11 +101,16 @@ fn owner<'a>(map: &'a HashMap<String, String>, id: &str) -> Route<'a> {
 /// The one decision every sidecar stdout line passes through.
 pub fn route<'a>(event: &str, data: &'a JsonValue, view: &RouteView<'a>) -> Route<'a> {
     match event {
-        // Terminal traffic, keyed by the PTY it came from.
+        // Terminal traffic, keyed by the PTY it came from. Until the sidecar's
+        // `marked` line passes, the source keeps consuming: it serializes what
+        // it holds at that line, and the target replays only what follows.
         "pty:data" => {
             let Some(id) = str_field(data, "id") else {
                 return Route::Broadcast;
             };
+            if let Some(source) = view.marking.get(id) {
+                return Route::EmitTo(source.as_str());
+            }
             if view.awaiting_replay.contains_key(id) {
                 return Route::Drop;
             }
@@ -114,11 +122,23 @@ pub fn route<'a>(event: &str, data: &'a JsonValue, view: &RouteView<'a>) -> Rout
             let Some(id) = str_field(data, "id") else {
                 return Route::Broadcast;
             };
+            if let Some(source) = view.marking.get(id) {
+                return Route::EmitTo(source.as_str());
+            }
             if view.awaiting_replay.contains_key(id) {
                 return Route::Hold;
             }
             owner(view.owners, id)
         }
+        // The split point itself goes to the window still consuming; the
+        // caller then turns the id's suppression on behind it.
+        "pty:marked" => match str_field(data, "id") {
+            Some(id) => match view.marking.get(id) {
+                Some(source) => Route::EmitTo(source.as_str()),
+                None => owner(view.owners, id),
+            },
+            None => Route::Broadcast,
+        },
         // Never suppressed: a replay is exactly what the suppression is waiting
         // for, and the caller lifts the suppression after this emit.
         "pty:exit" | "pty:replay" => match str_field(data, "id") {
@@ -222,6 +242,13 @@ pub struct Arrival {
     /// watchdog's record *this* one rather than a later re-drop of the same
     /// Workspace into the same window.
     pub queued_at: Instant,
+    /// What the source serialized once every mark had passed — each terminal's
+    /// buffer and mark, and the notepad pins — merged into the payload the
+    /// target drains. **An arrival without it is not yet drainable.**
+    pub content: Option<JsonValue>,
+    /// A tear-out's window geometry, held until the content lands: the window
+    /// is built then, so its boot drains a payload that is complete.
+    pub pending_window: Option<JsonValue>,
 }
 
 /// Every arrival in flight, oldest first. A Vec, not a map: there are a handful
@@ -294,8 +321,36 @@ pub fn arrival_payloads(arrivals: &Arrivals, label: &str) -> Vec<JsonValue> {
     arrivals
         .iter()
         .filter(|arrival| arrival.to == label)
-        .map(|arrival| arrival.payload.clone())
+        .filter_map(|arrival| {
+            let content = arrival.content.as_ref()?;
+            let mut payload = arrival.payload.clone();
+            if let (Some(object), Some(extra)) = (payload.as_object_mut(), content.as_object()) {
+                for (key, value) in extra {
+                    object.insert(key.clone(), value.clone());
+                }
+            }
+            Some(payload)
+        })
         .collect()
+}
+
+/// The per-id replay marks an arrival's content carries, for the target's
+/// `pty:requestInit`. Absent content, or an id without a mark, replays whole.
+pub fn arrival_marks(arrival: &Arrival) -> JsonValue {
+    let mut marks = serde_json::Map::new();
+    if let Some(terminals) = arrival
+        .content
+        .as_ref()
+        .and_then(|content| content.get("terminals"))
+        .and_then(JsonValue::as_object)
+    {
+        for (id, entry) in terminals {
+            if let Some(mark) = entry.get("mark").and_then(JsonValue::as_u64) {
+                marks.insert(id.clone(), JsonValue::from(mark));
+            }
+        }
+    }
+    JsonValue::Object(marks)
 }
 
 /// Every id an in-flight arrival claims: the ids the sweep may not release and
@@ -515,6 +570,7 @@ mod tests {
         let owned = labels(&[("a", "main"), ("b", "ws-2")]);
         let none = awaiting(&[]);
         let no_dor = HashMap::new();
+        let no_marking: HashMap<String, String> = HashMap::new();
         let mut registry = crate::workspaces::Registry::default();
         crate::workspaces::report(
             &mut registry,
@@ -531,6 +587,7 @@ mod tests {
             awaiting_replay: &none,
             dor_targets: &no_dor,
             registry: &registry,
+            marking: &no_marking,
         };
         let from_main = |params: JsonValue| json!({ "surfaceId": "a", "params": params });
         assert_eq!(
@@ -568,11 +625,13 @@ mod tests {
         let none = awaiting(&[]);
         let dor = labels(&[("dor-7", "ws-2")]);
         let no_registry = crate::workspaces::Registry::default();
+        let no_marking: HashMap<String, String> = HashMap::new();
         let view = RouteView {
             owners: &owned,
             awaiting_replay: &none,
             dor_targets: &dor,
             registry: &no_registry,
+            marking: &no_marking,
         };
         let cases: &[(&str, JsonValue, Route)] = &[
             ("pty:data", json!({"id":"a"}), Route::EmitTo("main")),
@@ -658,11 +717,13 @@ mod tests {
         let none = awaiting(&[]);
         let no_dor = HashMap::new();
         let no_registry = crate::workspaces::Registry::default();
+        let no_marking: HashMap<String, String> = HashMap::new();
         let view = RouteView {
             owners: &owned,
             awaiting_replay: &none,
             dor_targets: &no_dor,
             registry: &no_registry,
+            marking: &no_marking,
         };
         assert_eq!(
             route(
@@ -708,13 +769,31 @@ mod tests {
         let none = awaiting(&[]);
         let no_dor = HashMap::new();
         let no_registry = crate::workspaces::Registry::default();
+        let no_marking: HashMap<String, String> = HashMap::new();
         let suppressed = RouteView {
             owners: &owned,
             awaiting_replay: &held,
             dor_targets: &no_dor,
             registry: &no_registry,
+            marking: &no_marking,
         };
         assert_eq!(route("pty:data", &json!({"id":"a"}), &suppressed), Route::Drop);
+        // Before the mark passes, the source still consumes — and the mark
+        // itself goes to it, so it knows where it stands.
+        let marking = labels(&[("a", "main")]);
+        let marking_view = RouteView {
+            owners: &owned,
+            awaiting_replay: &none,
+            dor_targets: &no_dor,
+            registry: &no_registry,
+            marking: &marking,
+        };
+        assert_eq!(route("pty:data", &json!({"id":"a"}), &marking_view), Route::EmitTo("main"));
+        assert_eq!(
+            route("terminal:semanticEvents", &json!({"id":"a"}), &marking_view),
+            Route::EmitTo("main")
+        );
+        assert_eq!(route("pty:marked", &json!({"id":"a"}), &marking_view), Route::EmitTo("main"));
         // A chunk's derived events are in no replay: held, not dropped.
         assert_eq!(
             route("terminal:semanticEvents", &json!({"id":"a"}), &suppressed),
@@ -736,6 +815,7 @@ mod tests {
             awaiting_replay: &none,
             dor_targets: &no_dor,
             registry: &no_registry,
+            marking: &no_marking,
         };
         assert_eq!(
             route("pty:data", &json!({"id":"a"}), &released),
@@ -821,7 +901,30 @@ mod tests {
             terminal_ids: ids.iter().map(|id| (*id).to_string()).collect(),
             payload: json!({ "workspaceId": workspace_id }),
             queued_at: Instant::now(),
+            content: Some(json!({})),
+            pending_window: None,
         }
+    }
+
+    #[test]
+    fn an_arrival_is_drainable_only_once_its_content_landed() {
+        let mut arrivals = Arrivals::new();
+        let mut pending = arrival("ws-a", "main", "ws-2", &["t1", "t2"]);
+        pending.content = None;
+        queue_arrival(&mut arrivals, pending);
+        assert!(arrival_payloads(&arrivals, "ws-2").is_empty());
+        assert_eq!(arrival_marks(&arrivals[0]), json!({}));
+
+        arrivals[0].content = Some(json!({
+            "terminals": { "t1": { "serialized": "\x1b[1mhi", "mark": 42 }, "t2": { "serialized": "" } },
+            "pins": [],
+        }));
+        let payloads = arrival_payloads(&arrivals, "ws-2");
+        assert_eq!(payloads.len(), 1);
+        assert_eq!(payloads[0]["workspaceId"], "ws-a");
+        assert_eq!(payloads[0]["terminals"]["t1"]["mark"], 42);
+        assert_eq!(payloads[0]["pins"], json!([]));
+        assert_eq!(arrival_marks(&arrivals[0]), json!({ "t1": 42 }));
     }
 
     #[test]

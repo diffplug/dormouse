@@ -75,6 +75,71 @@ export function registerTerminalSource(
 }
 
 /**
+ * A pin as it travels with a Workspace to another Window
+ * (`docs/specs/transport.md` → "Transferring a Workspace"): the markers'
+ * absolute buffer lines at the moment the source serialized, plus everything
+ * `registerTerminalSource` kept beside them. The target rebuilds the buffer
+ * from that serialization first, so the same lines hold the same text — which
+ * `resolveTerminalSource` then proves before the pin is trusted.
+ */
+export interface TransferredPin {
+  surfaceId: string;
+  noteId: string;
+  startLine: number;
+  endLine: number;
+  startColumn: number;
+  endColumn: number;
+  shape: 'linewise' | 'block';
+  expectedRawText: string;
+}
+
+/** What a live source looks like on the wire; `null` for one whose markers
+ *  are already gone. */
+export function transferredPinOf(surfaceId: string, noteId: string, source: RuntimeTerminalSource): TransferredPin | null {
+  if (source.startMarker.isDisposed || source.endMarker.isDisposed) return null;
+  return {
+    surfaceId,
+    noteId,
+    startLine: source.startMarker.line,
+    endLine: source.endMarker.line,
+    startColumn: source.startColumn,
+    endColumn: source.endColumn,
+    shape: source.shape,
+    expectedRawText: source.expectedRawText,
+  };
+}
+
+/** Re-pin at absolute buffer lines: the inverse of `transferredPinOf`, on a
+ *  buffer rebuilt to the same shape. Null when either line is out of the
+ *  buffer, or the terminal is on its alternate buffer. */
+export function registerTerminalSourceAtLines(
+  terminal: SourceTerminalLike,
+  pin: TransferredPin,
+): RuntimeTerminalSource | null {
+  const buf = terminal.buffer.active;
+  if (buf.type === 'alternate') return null;
+  if (pin.startLine < 0 || pin.endLine >= buf.length || pin.endLine < pin.startLine) return null;
+  const cursorRow = buf.baseY + buf.cursorY;
+  const startMarker = terminal.registerMarker(pin.startLine - cursorRow);
+  if (!startMarker || startMarker.isDisposed) return null;
+  const endMarker = terminal.registerMarker(pin.endLine - cursorRow);
+  if (!endMarker || endMarker.isDisposed) {
+    startMarker.dispose();
+    endMarker?.dispose();
+    return null;
+  }
+  return {
+    terminalId: pin.surfaceId,
+    startMarker,
+    endMarker,
+    startColumn: pin.startColumn,
+    endColumn: pin.endColumn,
+    shape: pin.shape,
+    expectedRawText: pin.expectedRawText,
+  };
+}
+
+/**
  * Rebuild the captured range from the markers' current lines and the stored
  * columns, then prove it: the candidate range must read back exactly the text
  * captured with it. A resize that reflowed the output, scrollback that trimmed

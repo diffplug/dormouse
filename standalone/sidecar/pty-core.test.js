@@ -1802,6 +1802,37 @@ test('a chunk emitted just before list([id]) appears in the replay exactly once'
   assert.equal(replay.data.data.split('mid-transfer').length - 1, 1);
 });
 
+// A transfer's split point: everything a reader consumed before it saw the
+// `marked` line is at or before the mark, and a replay since that mark is
+// exactly the rest — so the two halves tile the stream with nothing lost and
+// nothing twice, however the chunks fell around the request.
+test('a mark is ordered in the stream and a since-mark replay is exactly the remainder', () => {
+  const events = [];
+  const pty = fakePtyModule();
+  const sliceSince = (chunks, held, received, mark) => {
+    const skip = Math.max(0, held - (received - mark));
+    return chunks.join('').slice(skip);
+  };
+  const mgr = create((event, data) => { events.push({ event, data }); }, pty.module, { replay: true, sliceSince });
+  mgr.spawn('a');
+  pty.listeners.get('a').data('one');
+  pty.listeners.get('a').data('two');
+  mgr.mark(['a', 'gone'], 'req-1');
+  pty.listeners.get('a').data('three');
+
+  const order = events.map((entry) => entry.event === 'data' ? entry.data.data : entry.event);
+  assert.deepEqual(order.slice(0, 5), ['one', 'two', 'marked', 'marked', 'three']);
+  const marked = events.filter((entry) => entry.event === 'marked').map((entry) => entry.data);
+  assert.deepEqual(marked, [{ id: 'a', mark: 6, requestId: 'req-1' }, { id: 'gone', mark: 0, requestId: 'req-1' }]);
+
+  mgr.list(['a'], 'ws-2', 'init-1', { a: 6 });
+  const replay = events.filter((entry) => entry.event === 'replay').at(-1);
+  assert.deepEqual(replay.data, { id: 'a', data: 'three', forWindow: 'ws-2', requestId: 'init-1' });
+  // An unmarked id in the same request still gets its whole buffer.
+  mgr.list(['a'], 'ws-2', 'init-2', {});
+  assert.equal(events.filter((entry) => entry.event === 'replay').at(-1).data.data, 'onetwothree');
+});
+
 test('gracefulKill targets only the named PTYs', async () => {
   const events = [];
   const pty = fakePtyModule();

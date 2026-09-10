@@ -149,7 +149,8 @@ function handleLine(line) {
       case 'pty:kill':    mgr.kill(data.id); break;
       // One window's own PTYs, and the answer names it so the host can route
       // the list and every replay behind it back (docs/specs/standalone.md).
-      case 'pty:requestInit': mgr.list(data?.ids, data?.forWindow, data?.requestId); break;
+      case 'pty:requestInit': mgr.list(data?.ids, data?.forWindow, data?.requestId, data?.marks); break;
+      case 'pty:mark': mgr.mark(data?.ids, data?.requestId); break;
       case 'pty:context': mgr.context(data, data.requestId); break;
       case 'pty:getCwd':  mgr.getCwd(data.id, data.requestId); break;
       case 'pty:getCwds': mgr.getCwds(data.ids, data.requestId); break;

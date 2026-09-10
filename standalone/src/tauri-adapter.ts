@@ -17,6 +17,7 @@ import type {
   PtyDataDetail,
   PtyInfo,
   PtyListDetail,
+  PtyMarkedDetail,
   PtyReplayDetail,
   BurrowLink,
   SessionFlushRequest,
@@ -93,6 +94,7 @@ export class TauriAdapter implements PlatformAdapter {
   private exitHandlers = new Set<(detail: { id: string; exitCode: number }) => void>();
   private listHandlers = new Set<(detail: PtyListDetail) => void>();
   private replayHandlers = new Set<(detail: PtyReplayDetail) => void>();
+  private markedHandlers = new Set<(detail: PtyMarkedDetail) => void>();
   private filesDroppedHandlers = new Set<(paths: string[]) => void>();
   private alertStateHandlers = new Set<(detail: AlertStateDetail) => void>();
   // The two app-global stores are the sidecar's, so this window applies what
@@ -194,6 +196,10 @@ export class TauriAdapter implements PlatformAdapter {
         for (const handler of this.replayHandlers) {
           handler({ id, data: parsed.visibleData, requestId });
         }
+      }),
+
+      listenToWindow<PtyMarkedDetail>("pty:marked", (event) => {
+        for (const handler of this.markedHandlers) handler(event.payload);
       }),
 
       // Inert while dragDropEnabled=false in tauri.conf.json. See diffplug/dormouse#38 and tauri-apps/tauri#14373.
@@ -575,6 +581,11 @@ export class TauriAdapter implements PlatformAdapter {
 
   onPtyReplay(handler: (detail: PtyReplayDetail) => void): void {
     this.replayHandlers.add(handler);
+  }
+
+  onPtyMarked(handler: (detail: PtyMarkedDetail) => void): () => void {
+    this.markedHandlers.add(handler);
+    return () => { this.markedHandlers.delete(handler); };
   }
 
   offPtyReplay(handler: (detail: PtyReplayDetail) => void): void {

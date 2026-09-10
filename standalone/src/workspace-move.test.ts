@@ -15,6 +15,7 @@ import type {
  */
 
 const mocks = vi.hoisted(() => ({
+  writes: [] as string[],
   invoke: vi.fn(async (_cmd: string, _args?: unknown) => undefined as unknown),
   listen: vi.fn(async () => () => {}),
 }));
@@ -30,6 +31,7 @@ vi.mock("@xterm/addon-fit", () => ({
   },
 }));
 vi.mock("@xterm/addon-image", () => ({ ImageAddon: class {} }));
+vi.mock("@xterm/addon-serialize", () => ({ SerializeAddon: class { serialize(): string { return ""; } } }));
 vi.mock("@xterm/addon-unicode-graphemes", () => ({ UnicodeGraphemesAddon: class {} }));
 vi.mock("@xterm/xterm", () => ({
   Terminal: class {
@@ -37,7 +39,7 @@ vi.mock("@xterm/xterm", () => ({
     modes = { mouseTrackingMode: "none" as const, bracketedPasteMode: false };
     loadAddon(): void {}
     open(): void {}
-    write(): void {}
+    write(data: string, callback?: () => void): void { mocks.writes.push(data); callback?.(); }
     focus(): void {}
     blur(): void {}
     onData(): { dispose: () => void } { return { dispose: () => {} }; }
@@ -68,6 +70,7 @@ import {
   resetWindowSessionAggregator,
 } from "dormouse-lib/lib/window-session-aggregator";
 import { setPlatform } from "dormouse-lib/lib/platform";
+import { disposeAllSessions } from "dormouse-lib/lib/terminal-registry";
 import { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
 
 const WORKSPACE_ID = "ws-moving";
@@ -122,7 +125,7 @@ function prepared(
  * The adapter's `pty:list` / `pty:replay` answer only once something asks —
  * which is the property the `adopt_ready` hop exists to guarantee.
  */
-function fakePlatform(order: string[] = [], opts: { answer?: boolean } = {}): PlatformAdapter {
+function fakePlatform(order: string[] = [], opts: { answer?: boolean; marks?: Record<string, number> } = {}): PlatformAdapter {
   const platform = new FakePtyAdapter();
   let listHandler: ((detail: { ptys: PtyInfo[]; requestId?: string }) => void) | null = null;
   let replayHandler: ((detail: { id: string; data: string; requestId?: string }) => void) | null = null;
@@ -130,6 +133,11 @@ function fakePlatform(order: string[] = [], opts: { answer?: boolean } = {}): Pl
   vi.spyOn(platform, "offPtyList").mockImplementation(() => { listHandler = null; });
   vi.spyOn(platform, "onPtyReplay").mockImplementation((handler) => { replayHandler = handler; });
   vi.spyOn(platform, "offPtyReplay").mockImplementation(() => { replayHandler = null; });
+  let markedHandler: ((detail: { id: string; mark: number; requestId?: string }) => void) | null = null;
+  (platform as unknown as { onPtyMarked: unknown }).onPtyMarked = (handler: typeof markedHandler) => {
+    markedHandler = handler;
+    return () => { markedHandler = null; };
+  };
   vi.spyOn(platform, "requestInit").mockImplementation(() => {
     throw new Error("an arrival must never ask for the whole Window");
   });
@@ -138,13 +146,22 @@ function fakePlatform(order: string[] = [], opts: { answer?: boolean } = {}): Pl
   (platform as unknown as { alertSeed: unknown }).alertSeed = vi.fn();
   mocks.invoke.mockImplementation(async (cmd: string, args?: unknown) => {
     order.push(cmd);
-    const workspaceId = (args as { workspaceId?: string } | undefined)?.workspaceId;
+    const workspaceId = (args as { workspaceId?: string; payload?: { workspaceId?: string } } | undefined)?.workspaceId
+      ?? (args as { payload?: { workspaceId?: string } } | undefined)?.payload?.workspaceId;
     const settle = () => {
       const at = arrivals.findIndex((arrival) => arrival.workspaceId === workspaceId);
       if (at < 0) throw new Error(`no arrival of '${workspaceId}'`);
       arrivals.splice(at, 1);
     };
     if (cmd === "take_arrivals") return arrivals.map((arrival) => ({ ...arrival }));
+    if (cmd === "transfer_workspace" || cmd === "open_workspace_window") {
+      // The host stamps each id's mark in the stream, behind every byte the
+      // source was sent; the source serializes at that line.
+      const ids = (args as { payload: { terminalIds: string[] } }).payload.terminalIds;
+      setTimeout(() => {
+        for (const id of ids) markedHandler?.({ id, mark: opts.marks?.[id] ?? 0, requestId: `mark-${workspaceId}` });
+      }, 0);
+    }
     if (cmd === "adopt_done" || cmd === "adopt_failed") { settle(); return undefined; }
     if (cmd === "adopt_ready") {
       const arrival = arrivals.find((entry) => entry.workspaceId === workspaceId);
@@ -170,7 +187,9 @@ function fakePlatform(order: string[] = [], opts: { answer?: boolean } = {}): Pl
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.writes.length = 0;
   arrivals = [];
+  disposeAllSessions();
   mocks.invoke.mockResolvedValue(undefined);
   mocks.listen.mockResolvedValue(() => {});
   resetWallHandles();
@@ -206,7 +225,9 @@ describe("the source half", () => {
     // The record is built while the Sessions are live. Nothing is released at
     // the invoke: the target can still refuse, and a Workspace released here
     // would have no Sessions and no window that owned them.
-    expect(order).toEqual(["prepare", "transfer_workspace"]);
+    // The content follows once the marks pass: the fake host stamps none,
+    // so it is serialized at once and replayed whole.
+    expect(order).toEqual(["prepare", "transfer_workspace", "transfer_workspace_content"]);
     const [, args] = mocks.invoke.mock.calls.find(([cmd]) => cmd === "transfer_workspace")!;
     expect(args).toMatchObject({ to: "ws-2", payload: { at: { x: 10, y: 4 }, terminalIds: ["pane-a"] } });
 
@@ -445,6 +466,36 @@ describe("the target half", () => {
     // close with no confirmation, no archive and no kill.
     expect(mocks.invoke).toHaveBeenCalledWith("close_window");
     expect(getWorkspacesSnapshot().workspaces).toHaveLength(1);
+  });
+});
+
+describe("a transfer's content", () => {
+  it("serializes each terminal at the host's mark and hands the content over behind the invoke", async () => {
+    const order: string[] = [];
+    initWorkspaceMoves(fakePlatform(order, { marks: { "pane-a": 42 } }));
+    registerWallHandle(stubWallHandle(WORKSPACE_ID, {
+      prepareWorkspaceTransfer: async () => prepared(),
+    }));
+
+    await transferWorkspaceTo(WORKSPACE_ID, "ws-2", { x: 1, y: 1 });
+
+    expect(order.filter((cmd) => cmd !== "take_arrivals")).toEqual(["transfer_workspace", "transfer_workspace_content"]);
+    const [, args] = mocks.invoke.mock.calls.find(([cmd]) => cmd === "transfer_workspace_content")!;
+    expect(args).toEqual({
+      workspaceId: WORKSPACE_ID,
+      content: { terminals: { "pane-a": { serialized: "", mark: 42 } }, pins: [] },
+    });
+  });
+
+  it("writes the source's buffer ahead of the since-mark replay when it mounts the arrival", async () => {
+    arrivals = [payload({
+      terminals: { "pane-a": { serialized: "\u001b[1mfrom-source\u001b[0m", mark: 42 } },
+      pins: [],
+    } as Partial<WorkspaceTransferPayload>)];
+    await bootFromTearOut(fakePlatform());
+    // One write: the rebuilt buffer, then everything after the mark, in order.
+    expect(mocks.writes).toContain("\u001b[1mfrom-source\u001b[0mscrollback:pane-a");
+    expect(mocks.writes.filter((w) => w.includes("scrollback:pane-a"))).toHaveLength(1);
   });
 });
 

@@ -90,6 +90,9 @@ struct RoutingState {
     /// Derived terminal events that arrived while their id was suppressed,
     /// delivered to the new owner behind its replay (`routing::Route::Hold`).
     held: HashMap<String, Vec<routing::HeldEvent>>,
+    /// Ids between a transfer's invoke and the sidecar's `marked` line, each
+    /// with the source still consuming (`routing::RouteView::marking`).
+    marking: HashMap<String, String>,
 }
 
 #[derive(Default)]
@@ -180,10 +183,21 @@ impl WindowState {
                 // A hand-back: what was held for the target belongs to the
                 // source again, which saw the bytes live and needs no events.
                 routing.held.remove(id);
+                routing.marking.remove(id);
             }
         }
         self.suppressed
             .store(routing.awaiting_replay.len(), Ordering::Relaxed);
+    }
+
+    /// Open a transfer's marking phase: ownership is the target's, but every
+    /// byte keeps reaching `source` until the sidecar's `marked` line passes
+    /// (§Transfer). Suppression begins at that line, not here.
+    fn begin_marking(&self, ids: &[String], source: &str) {
+        let mut routing = guard(&self.routing);
+        for id in ids {
+            routing.marking.insert(id.clone(), source.to_string());
+        }
     }
 
     /// Forget one PTY entirely (a kill, or its exit).
@@ -192,6 +206,7 @@ impl WindowState {
         routing.owners.remove(id);
         routing.awaiting_replay.remove(id);
         routing.held.remove(id);
+        routing.marking.remove(id);
         self.suppressed
             .store(routing.awaiting_replay.len(), Ordering::Relaxed);
     }
@@ -327,6 +342,7 @@ fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
                 awaiting_replay: &routing.awaiting_replay,
                 dor_targets: &routing.dor_targets,
                 registry: &registry,
+                marking: &routing.marking,
             },
         ) {
             Route::Drop => Delivery::Nowhere,
@@ -399,6 +415,19 @@ fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
         "pty:exit" => {
             if let Some(id) = id() {
                 state.forget_pty(id);
+            }
+        }
+        // The source has been sent everything before the mark; from here the
+        // id is silent until the target's replay of everything after it.
+        "pty:marked" => {
+            if let Some(id) = id() {
+                let mut routing = guard(&state.routing);
+                if routing.marking.remove(id).is_some() {
+                    routing.awaiting_replay.insert(id.to_string(), Instant::now());
+                    state
+                        .suppressed
+                        .store(routing.awaiting_replay.len(), Ordering::Relaxed);
+                }
             }
         }
         "pty:replay" => {
@@ -2467,6 +2496,8 @@ fn arrival_from(from: &str, to: &str, payload: JsonValue) -> Result<routing::Arr
         terminal_ids,
         payload,
         queued_at: Instant::now(),
+        content: None,
+        pending_window: None,
     })
 }
 
@@ -2489,8 +2520,21 @@ fn begin_arrival(
                 arrival.workspace_id
             ));
         }
-        windows.reassign(&arrival.terminal_ids, &arrival.to, true);
+        // Ownership moves now; suppression waits for each id's `marked` line.
+        windows.reassign(&arrival.terminal_ids, &arrival.to, false);
+        windows.begin_marking(&arrival.terminal_ids, &arrival.from);
         routing::queue_arrival(&mut arrivals, arrival.clone());
+    }
+    // The split point, stamped in the stream by the sidecar and routed to the
+    // source, which serializes what it holds when it sees it (§Transfer). A
+    // Workspace of browser panes alone has no ids to mark; its source sends
+    // content at once.
+    if let Some(sidecar) = app.try_state::<SidecarState>() {
+        let msg = serde_json::json!({
+            "event": "pty:mark",
+            "data": { "ids": arrival.terminal_ids, "requestId": format!("mark-{}", arrival.workspace_id) },
+        });
+        send_to_sidecar(&sidecar, msg.to_string());
     }
     // Moved on disk here, not left to the two webviews' debounced saves: out of
     // the source's snapshot first, then into the target's, so a crash in the
@@ -2614,29 +2658,70 @@ fn open_workspace_window(
             _ => None,
         }
     };
-    let arrival = arrival_from(window.label(), &label, payload)?;
-    // The one thing needed after the record is queued, so the payload itself is
-    // moved rather than cloned.
-    let workspace_id = arrival.workspace_id.clone();
-    append_log(format!("[window] tearing {workspace_id} out into {label}"));
+    let mut arrival = arrival_from(window.label(), &label, payload)?;
+    // Built once the content lands (`transfer_workspace_content`), so the new
+    // window's boot drains a payload that is complete; held as JSON so the
+    // record stays free of window types.
+    arrival.pending_window = Some(match geometry {
+        Some(g) => serde_json::json!({ "x": g.x, "y": g.y, "width": g.width, "height": g.height }),
+        None => JsonValue::Null,
+    });
+    append_log(format!("[window] tearing {} out into {label}", arrival.workspace_id));
     begin_arrival(&app, &windows, arrival)?;
-    if let Err(err) = build_window(&app, &label, geometry) {
-        // Nothing will ever drain the queue, and the PTYs would stay suppressed
-        // and ownerless. The source is waiting on this `Err` and has released
-        // nothing, so the ids go back in silence — no `arrival-failed`, which
-        // would clear a transferring mark that was never set.
-        if let Some(arrival) =
-            routing::take_arrival(&mut guard(&windows.arrivals), &workspace_id, &label)
-        {
-            windows.reassign(&arrival.terminal_ids, &arrival.from, false);
-            if let Ok(dir) = sessions_dir(&app) {
-                let _ = unstage_arrival_on_disk(&dir, &label, &arrival.workspace_id);
-            }
-        }
-        return Err(err);
-    }
-    send_window_labels(&app);
     Ok(label)
+}
+
+/// The source has serialized every terminal at its mark: attach the content,
+/// then either build the torn-out window or nudge the existing target.
+#[tauri::command]
+fn transfer_workspace_content(
+    app: AppHandle,
+    window: tauri::Window,
+    windows: tauri::State<'_, WindowState>,
+    workspace_id: String,
+    content: JsonValue,
+) -> Result<(), String> {
+    let (to, pending_window) = {
+        let mut arrivals = guard(&windows.arrivals);
+        let arrival = arrivals
+            .iter_mut()
+            .find(|arrival| arrival.workspace_id == workspace_id && arrival.from == window.label())
+            .ok_or_else(|| format!("no arrival of '{workspace_id}' from {}", window.label()))?;
+        arrival.content = Some(content);
+        (arrival.to.clone(), arrival.pending_window.take())
+    };
+    match pending_window {
+        Some(geometry) => {
+            let geometry = geometry.as_object().map(|g| WindowGeometry {
+                x: g.get("x").and_then(JsonValue::as_f64).unwrap_or(0.0),
+                y: g.get("y").and_then(JsonValue::as_f64).unwrap_or(0.0),
+                width: g.get("width").and_then(JsonValue::as_f64).unwrap_or(0.0),
+                height: g.get("height").and_then(JsonValue::as_f64).unwrap_or(0.0),
+            });
+            if let Err(err) = build_window(&app, &to, geometry) {
+                // Nothing will ever drain the queue, and the PTYs would stay
+                // ownerless. The source has released nothing, so the ids go
+                // back in silence — no `arrival-failed`, which would clear a
+                // transferring mark the source still holds and expects.
+                if let Some(arrival) =
+                    routing::take_arrival(&mut guard(&windows.arrivals), &workspace_id, &to)
+                {
+                    windows.reassign(&arrival.terminal_ids, &arrival.from, false);
+                    if let Ok(dir) = sessions_dir(&app) {
+                        let _ = unstage_arrival_on_disk(&dir, &to, &arrival.workspace_id);
+                    }
+                }
+                return Err(err);
+            }
+            send_window_labels(&app);
+        }
+        None => {
+            // A nudge, carrying nothing: the payload is in the queue, and a
+            // window with no listener yet finds it there.
+            let _ = app.emit_to(to.as_str(), "dormouse://workspace-arriving", ());
+        }
+    }
+    Ok(())
 }
 
 /// Move a Workspace into a window that already exists.
@@ -2670,9 +2755,7 @@ fn transfer_workspace(
     if let Some(target) = app.get_webview_window(&to) {
         let _ = target.set_focus();
     }
-    // A nudge, carrying nothing: the payload is in the queue, and a window with
-    // no listener yet finds it there.
-    let _ = app.emit_to(to.as_str(), "dormouse://workspace-arriving", ());
+    // Nudged from `transfer_workspace_content`, once there is content to drain.
     Ok(())
 }
 
@@ -2699,16 +2782,16 @@ fn adopt_ready(
     request_id: Option<String>,
 ) -> Result<(), String> {
     let label = window.label();
-    let ids = {
+    let (ids, marks) = {
         let arrivals = guard(&windows.arrivals);
         let arrival = routing::find_arrival(&arrivals, &workspace_id)
             .filter(|arrival| arrival.to == label)
             .ok_or_else(|| format!("no arrival of '{workspace_id}' into {label}"))?;
-        arrival.terminal_ids.clone()
+        (arrival.terminal_ids.clone(), routing::arrival_marks(arrival))
     };
     let msg = serde_json::json!({
         "event": "pty:requestInit",
-        "data": { "forWindow": label, "ids": ids, "requestId": request_id },
+        "data": { "forWindow": label, "ids": ids, "requestId": request_id, "marks": marks },
     });
     send_to_sidecar(&state, msg.to_string());
     Ok(())
@@ -3777,6 +3860,7 @@ pub fn run() {
             adopt_done,
             adopt_failed,
             take_arrivals,
+            transfer_workspace_content,
             workspace_reserve_ids,
             workspace_report,
             workspace_registry,

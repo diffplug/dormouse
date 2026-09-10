@@ -98,6 +98,20 @@ ends at `adopt_failed` or at the target's `Destroyed`, not at a timer.
 
 ## Arrival queue
 
+**Why the mark is stamped in the stream rather than asked for.** A mark fetched
+by request answers at some instant the sidecar chose, while the source's xterm
+stands at whatever `pty:data` had reached it — two clocks nothing aligns, so a
+serialization taken against a fetched mark either repeats or loses the bytes
+between them. A `marked` line written into the same stdout as the data is
+ordered with it by construction: the sidecar's reader is one thread, Rust's
+reader is one thread, and the webview's event queue is one queue. The one gap
+left is the parser's incomplete-sequence buffer, which can hold bytes older
+than the mark past it; that tail is the same class of cut the bounded replay
+always made, and the target's parser resynchronizes on the next ground byte
+(2026-09).
+
+
+
 The first build emitted `workspace-arriving` straight at the target. A window
 torn out seconds earlier, or one restoring at launch, has no listener yet and is
 a perfectly ordinary drop target — the payload went nowhere, and because the

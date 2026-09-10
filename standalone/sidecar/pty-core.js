@@ -1346,7 +1346,7 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
    * collector can tell its own answer from a concurrent one's
    * (docs/specs/transport.md -> "Reconnection").
    */
-  function list(ids, forWindow, requestId) {
+  function list(ids, forWindow, requestId, marks) {
     const targets = Array.isArray(ids) ? ids.filter((id) => ptys.has(id)) : [...ptys.keys()];
     const result = targets.map((id) => ({
       id, alive: true, shell: ptyShells.get(id), ...(helpers.has(id) ? { helper: helpers.get(id) } : {}),
@@ -1356,7 +1356,29 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
       ...(requestId === undefined || requestId === null ? {} : { requestId }),
     };
     send('list', { ptys: result, ...addressed });
-    if (replay) for (const { id } of result) send('replay', { id, data: sessions.get(id).chunks.join(''), ...addressed });
+    if (!replay) return;
+    for (const { id } of result) {
+      // A marked id replays only what came after its mark: the window that
+      // asked already holds everything before it, serialized by the window
+      // that handed the PTY over (docs/specs/transport.md -> "Transferring a
+      // Workspace"). Without a shared `sliceSince` there is no mark arithmetic,
+      // and the whole buffer is the safe answer.
+      const mark = marks && typeof marks[id] === 'number' ? marks[id] : null;
+      const data = mark !== null && sliceSince ? outputSince(id, mark) : sessions.get(id).chunks.join('');
+      send('replay', { id, data, ...addressed });
+    }
+  }
+
+  /** Stamp each PTY's output position, **in the stream**: the `marked` line is
+   *  written behind every `data` line already sent for the id and ahead of every
+   *  one after it, so a reader that consumes in order holds exactly the bytes
+   *  before the mark when it sees it. Unknown ids answer 0, so a caller waiting
+   *  on a set never hangs on a PTY that exited meanwhile. */
+  function mark(ids, requestId) {
+    const addressed = requestId === undefined || requestId === null ? {} : { requestId };
+    for (const id of Array.isArray(ids) ? ids : []) {
+      send('marked', { id, mark: receivedChars(id), ...addressed });
+    }
   }
 
   // Only explicit settings edits write this installation-global preference. No
@@ -1539,5 +1561,5 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
 
   return { spawn, write, resize, hasPty, kill, killAll, list, context,
     getCwd, getCwds, getOpenPorts, getOpenPortsMany, interrupt, gracefulKill, getShells,
-    liveIds, receivedChars, outputSince };
+    liveIds, receivedChars, outputSince, mark };
 };

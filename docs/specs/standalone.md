@@ -366,9 +366,10 @@ Source of truth: `route` in `standalone/src-tauri/src/routing.rs`,
 
 | Sidecar event | Key | Goes to |
 |---|---|---|
-| `pty:data` | `data.id` | its owner; dropped while the id is mid-transfer, its bytes being in the replay |
+| `pty:data` | `data.id` | its owner; the source until the id's mark passes, then dropped until its replay, its bytes being in it |
 | `terminal:semanticEvents`, `terminal:protocolEvents` | `data.id` | its owner; **held** while the id is mid-transfer and delivered, in order, behind the replay (`held_events_come_back_in_order_and_bounded`) — no replay carries them |
 | `pty:exit`, `pty:replay` | `data.id` | its owner, never suppressed |
+| `pty:marked` | `data.id` | the source still consuming the id, which then falls silent until its replay; otherwise its owner |
 | `pty:list` | `data.forWindow` | the window that asked |
 | `alert:*` carrying `data.id` | `data.id` | its owner |
 | `dor:controlRequest` | `params.workspace`, `params.window`, `data.surfaceId` | in that precedence: the window holding the named Workspace (§Workspace registry), the named window, the caller's Surface's owner; none → the focused window |
@@ -547,12 +548,16 @@ below reads that record rather than inferring itself from the suppression map.
    `transfer_workspace` / `open_workspace_window`. On `Ok` it marks the Workspace
    **transferring**: the Wall stays mounted and the notes stay put, nothing is
    released, and `getWindowSnapshot` omits it.
-2. **Rust** reassigns `terminalIds` to the target and suppresses their output
-   until each one's replay has been emitted there; the sidecar buffers a chunk
-   before it emits and Rust's reader is one ordered thread, so a chunk in the gap
-   is dropped once and replayed once (rationale). It queues the record and nudges
-   the target with `workspace-arriving` carrying nothing — a new window has no
-   listener, so its payload is pulled at boot instead.
+2. **Rust** reassigns `terminalIds` to the target, keeps routing their output to
+   the source, and asks the sidecar to stamp a `pty:marked` line per id; at that
+   line the id's suppression begins, until its replay has been emitted to the
+   target. The source serializes each buffer at its mark and invokes
+   `transfer_workspace_content`, which attaches the content to the record and
+   only then nudges the target with `workspace-arriving` carrying nothing — or,
+   for a tear-out, builds the new window, whose boot pulls a payload that is
+   complete (`docs/specs/transport.md` → "Transferring a Workspace";
+   rationale). **An arrival without content is not drainable**
+   (`an_arrival_is_drainable_only_once_its_content_landed`).
 3. **Target** drains with `take_arrivals` and, per arrival, arms its collector
    *before* calling `adopt_ready(workspaceId)` — the hop that removes the whole
    "arrived before armed" class of bug (rationale). Rust answers

@@ -1,6 +1,7 @@
-import { snapshotNotepadForTransfer, removeSurface } from '../../lib/notepad/notepad-store';
+import { snapshotNotepadForTransfer, snapshotTerminalPins, removeSurface } from '../../lib/notepad/notepad-store';
+import type { TransferredPin } from '../../lib/notepad/source-link';
 import { forgetHelper, getHelper } from '../../lib/helper-terminal';
-import { releaseSession } from '../../lib/terminal-registry';
+import { releaseSession, serializeTerminal } from '../../lib/terminal-registry';
 import type { VolatileNotepadSnapshot } from '../../lib/notepad/types';
 import type { PersistedSession, PersistedWorkspace, WorkspaceId } from '../../lib/session-types';
 import type { SaveOptions } from '../../lib/session-save';
@@ -18,8 +19,9 @@ export interface WorkspaceTransferPayload {
   workspaceId: WorkspaceId;
   /** What the target restores the Workspace from. */
   workspace: PersistedWorkspace;
-  /** The notes riding along; the target hydrates them. Pins do not travel —
-   *  they are markers in xterm instances this release disposes. */
+  /** The notes riding along; the target hydrates them. Their pins follow in
+   *  the content (`captureTransferContent`), once the buffers they point
+   *  into have been serialized. */
   notepad: VolatileNotepadSnapshot;
   /** Member Surfaces holding a PTY, **plus each one's helper Session**: exactly
    *  what changes ownership. A helper is not a member Surface — it has no pane
@@ -115,4 +117,47 @@ export async function prepareWorkspaceTransfer(
       for (const id of terminalIds) releaseSession(id);
     },
   };
+}
+
+/** One terminal's half of a transfer's content: what the target writes before
+ *  it attaches, and where the host's replay picks up. */
+export interface TransferredTerminal {
+  /** The buffer as the escape stream that rebuilds it; `''` for a Session this
+   *  Window no longer held. */
+  serialized: string;
+  /** The sidecar's output position the serialization stands at; absent when
+   *  the host never stamped one, and the target then replays the whole buffer
+   *  behind the serialized one. */
+  mark?: number;
+}
+
+/** The second half of a transfer's payload (`docs/specs/transport.md` →
+ *  "Transferring a Workspace"): captured once every terminal's mark has
+ *  passed, and attached to the arrival the host queued at the invoke. */
+export interface WorkspaceTransferContent {
+  terminals: Record<string, TransferredTerminal>;
+  pins: TransferredPin[];
+}
+
+/**
+ * Serialize every terminal at its mark, and take its pins at the same instant.
+ *
+ * **Only after the host's `marked` line for each id**: everything this Window
+ * was sent before that line is in the buffer once the write queue drains, and
+ * everything after it is what the target's since-mark replay carries — the two
+ * tile the stream with nothing lost and nothing twice. An id with no mark (the
+ * host never answered for it) is serialized anyway and replayed whole, which
+ * at worst repeats its tail.
+ */
+export async function captureTransferContent(
+  terminalIds: readonly string[],
+  marks: ReadonlyMap<string, number>,
+): Promise<WorkspaceTransferContent> {
+  const terminals: Record<string, TransferredTerminal> = {};
+  for (const id of terminalIds) {
+    const serialized = (await serializeTerminal(id)) ?? '';
+    const mark = marks.get(id);
+    terminals[id] = mark === undefined ? { serialized } : { serialized, mark };
+  }
+  return { terminals, pins: snapshotTerminalPins(terminalIds) };
 }

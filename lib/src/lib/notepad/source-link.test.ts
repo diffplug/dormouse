@@ -22,8 +22,10 @@ import { extractSelectionText } from '../selection-text';
 import {
   disposeTerminalSource,
   registerTerminalSource,
+  registerTerminalSourceAtLines,
   resolveTerminalSource,
   revealResolvedSource,
+  transferredPinOf,
   type SourceTerminalLike,
 } from './source-link';
 
@@ -372,5 +374,50 @@ describe('revealResolvedSource', () => {
 
     expect(scrollToLine).not.toHaveBeenCalled();
     expect(getMouseSelectionState('reveal').selection).toBeNull();
+  });
+});
+
+describe('a pin travelling with a Workspace', () => {
+  const LINES = ['zero', 'one', 'two', 'three', 'four'];
+
+  it('round-trips through absolute lines onto a buffer rebuilt to the same shape', () => {
+    const source = makeTerminal(LINES, { baseY: 2, cursorY: 2 });
+    const pinned = capture(source, sel({ startRow: 1, startCol: 1, endRow: 3, endCol: 2 }));
+    const pin = transferredPinOf('t1', 'note-1', pinned);
+    expect(pin).toEqual({
+      surfaceId: 't1',
+      noteId: 'note-1',
+      startLine: 1,
+      endLine: 3,
+      startColumn: pinned.startColumn,
+      endColumn: pinned.endColumn,
+      shape: 'linewise',
+      expectedRawText: pinned.expectedRawText,
+    });
+
+    // The target's rebuilt buffer stands at a different cursor: absolute lines
+    // are what carry over, and the proof still reads back byte for byte.
+    const target = makeTerminal(LINES, { baseY: 1, cursorY: 3 });
+    const restored = registerTerminalSourceAtLines(target.terminal, pin!);
+    expect(restored?.startMarker.line).toBe(1);
+    expect(restored?.endMarker.line).toBe(3);
+    expect(resolveTerminalSource(target.terminal, restored!)).toMatchObject({ ok: true });
+  });
+
+  it('carries nothing for a pin whose markers are already gone, and refuses lines off the buffer', () => {
+    const source = makeTerminal(LINES);
+    const pinned = capture(source, sel({ startRow: 0, endRow: 1 }));
+    pinned.startMarker.dispose();
+    expect(transferredPinOf('t1', 'note-1', pinned)).toBeNull();
+
+    const short = makeTerminal(['only']);
+    expect(registerTerminalSourceAtLines(short.terminal, {
+      surfaceId: 't1', noteId: 'n', startLine: 0, endLine: 3, startColumn: 0, endColumn: 0, shape: 'linewise', expectedRawText: '',
+    })).toBeNull();
+    expect(short.markers.every((marker) => marker.isDisposed)).toBe(true);
+    const alternate = makeTerminal(LINES, { type: 'alternate' });
+    expect(registerTerminalSourceAtLines(alternate.terminal, {
+      surfaceId: 't1', noteId: 'n', startLine: 0, endLine: 1, startColumn: 0, endColumn: 0, shape: 'linewise', expectedRawText: '',
+    })).toBeNull();
   });
 });
