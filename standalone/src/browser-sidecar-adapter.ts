@@ -72,6 +72,8 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   private replayHandlers = new Set<(detail: PtyReplayDetail) => void>();
   private markedHandlers = new Set<(detail: PtyMarkedDetail) => void>();
   private alertStateHandlers = new Set<(detail: AlertStateDetail) => void>();
+  private watchedCommandHandlers = new Set<(names: string[]) => void>();
+  private alertSettingsHandlers = new Set<(settings: AlertSettings) => void>();
   private alertManager = new AlertManager();
   private unlistenHost: (() => void) | null = null;
   private unlistenRegistry: (() => void) | null = null;
@@ -319,9 +321,20 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   notifySessionFlushComplete(_requestId: string): void {}
 
   alertRemove(id: string): void { this.alertManager.remove(id); }
-  alertSetWatchedCommands(names: string[]): void { this.alertManager.setWatchedCommands(names); }
-  alertSetCommandWatched(name: string, watched: boolean): void { this.alertManager.setCommandWatched(name, watched); }
-  alertPublishSettings(settings: AlertSettings): void { this.alertManager.applySettings(settings); }
+  // Through the sidecar's app-global stores and back as their broadcasts, the
+  // path the shipped app takes (see TauriAdapter), so the harness exercises
+  // the seed-once and delta rules rather than a private copy of the state.
+  alertSetWatchedCommands(names: string[]): void {
+    this.host.send("alert_command", { payload: { op: "initializeWatchedCommands", names } });
+  }
+  alertSetCommandWatched(name: string, watched: boolean): void {
+    this.host.send("alert_command", { payload: { op: "setCommandWatched", name, watched } });
+  }
+  alertPublishSettings(settings: AlertSettings, opts: { seed: boolean }): void {
+    this.host.send("alert_command", {
+      payload: { op: opts.seed ? "initializeSettings" : "updateSettings", settings },
+    });
+  }
   alertDismiss(id: string): void { this.alertManager.dismissAlert(id); }
   alertAttend(id: string): void { this.alertManager.attend(id); }
   alertResize(id: string): void { this.alertManager.onResize(id); }
@@ -331,9 +344,8 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   alertClearTodo(id: string): void { this.alertManager.clearTodo(id); }
   alertAwait(id: string, options: AwaitOptions): AwaitHandle { return this.alertManager.awaitCompletion(id, options); }
   onAlertState(handler: (detail: AlertStateDetail) => void): void { this.alertStateHandlers.add(handler); }
-  // See TauriAdapter: single webview, so nothing is broadcast back.
-  onWatchedCommands(_handler: (names: string[]) => void): void {}
-  onAlertSettings(_handler: (settings: AlertSettings) => void): void {}
+  onWatchedCommands(handler: (names: string[]) => void): void { this.watchedCommandHandlers.add(handler); }
+  onAlertSettings(handler: (settings: AlertSettings) => void): void { this.alertSettingsHandlers.add(handler); }
 
   // The harness mirrors the shipped persistence answer, so a reload here
   // exercises what the app does (docs/specs/transport.md -> "The governing rule").
@@ -367,6 +379,19 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   private handleHostEvent(event: string, data: unknown): void {
     if (event === "dormouse://workspaces") {
       this.onRegistrySnapshot?.(data as WorkspaceRegistrySnapshot);
+      return;
+    }
+    if (event === "alert:watchedCommands") {
+      const names = (data as { names?: string[] } | undefined)?.names ?? [];
+      this.alertManager.setWatchedCommands(names);
+      for (const handler of this.watchedCommandHandlers) handler(names);
+      return;
+    }
+    if (event === "alert:settings") {
+      const settings = (data as { settings?: AlertSettings } | undefined)?.settings;
+      if (!settings) return;
+      this.alertManager.applySettings(settings);
+      for (const handler of this.alertSettingsHandlers) handler(settings);
       return;
     }
     if (event === "pty:data") {

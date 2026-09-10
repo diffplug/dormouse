@@ -129,6 +129,20 @@ describe("BrowserSidecarAdapter terminal stream", () => {
     expect(send.mock.calls.filter(([cmd]) => cmd === "pty_write")).toEqual([]);
   });
 
+  it("routes the alert stores through the sidecar and applies their broadcasts", async () => {
+    const { adapter, send, deliver } = await listening();
+    adapter.alertSetCommandWatched("cargo", true);
+    adapter.alertPublishSettings({ ringEnabled: false } as never, { seed: true });
+    expect(send.mock.calls.filter(([cmd]) => cmd === "alert_command").map(([, args]) => args)).toEqual([
+      { payload: { op: "setCommandWatched", name: "cargo", watched: true } },
+      { payload: { op: "initializeSettings", settings: { ringEnabled: false } } },
+    ]);
+    const names: string[][] = [];
+    adapter.onWatchedCommands((next) => void names.push(next));
+    deliver("alert:watchedCommands", { names: ["cargo", "make"] });
+    expect(names).toEqual([["cargo", "make"]]);
+  });
+
   it("pushes the resolved theme so the sidecar can answer a colour query", async () => {
     const { adapter, send } = await listening();
     adapter.requestInit();

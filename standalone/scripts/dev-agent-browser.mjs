@@ -111,6 +111,10 @@ const fireAndForget = {
   // The Burrow's whole bridge rides one passthrough, exactly as it does
   // through Rust (`burrow_command` in src-tauri/src/lib.rs).
   burrow_command: ({ payload }) => writeSidecar('burrow:command', payload),
+  // The app-global alert stores live in the sidecar; their broadcasts come back
+  // over the event stream like every other sidecar line (`alert_command` in
+  // src-tauri/src/lib.rs).
+  alert_command: ({ payload }) => writeSidecar('alert:command', payload),
   kill_sidecar_now: () => shutdown(),
 };
 
