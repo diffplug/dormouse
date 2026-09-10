@@ -239,6 +239,56 @@ it arrives on a *new* socket, against a Burrow that no longer holds the private
 half, so no path completes. Keeping the entry leaves the same dead code on
 screen as the mint-straddle case under [Pairing](#pairing).
 
+## Direct path
+
+*(2026-09; the path shipped on the Pocket side and the standalone Burrow.)*
+
+**Why the path needed no new trust layer, and how that was checked.** The
+question asked of the design was which of the five layers a WebRTC channel
+touches. The answer is none: the channel is a byte pipe under an already
+promoted Noise session, so peer authenticity still comes from IK, presence from
+the assertion the promotion consumed, authorization from the ACL conjunction,
+and the final decision from the Burrow. Three things had to hold for that to be
+true rather than merely plausible, and each is a rule above — the SDP travels
+as a `control` message inside the session (so nothing about the channel is
+Relay-supplied), the offer happens strictly after the outcome (so nothing is
+built for an unauthorized party), and the bytes on the channel are the same
+transport messages on the same counters (so no second cipher exists to get
+wrong). A design that trickled candidates, or that negotiated on a side
+channel, would have broken all three at once.
+
+**Why no ICE servers, stated as a hard rule rather than a default.** A STUN
+server learns the client's public address and the fact of a session, from a
+party neither endpoint chose; a TURN server learns the traffic pattern and
+carries the ciphertext, which is exactly the position the Relay already holds
+and the whole model treats as untrusted. The shipped deployment is a tailnet,
+where host candidates reach on both ends, so the servers buy connectivity that
+is already there. Relay-supplied ICE servers stay in `remote-api.md`'s
+`## Future` for a SaaS deployment, where the trade is real and would need its
+own analysis.
+
+**Why the UDP listener is named in the spec at all.** Everything else the
+product opens to a network is TCP behind loopback or behind the Relay's HTTPS
+origin, and the audit's listener sweep is written for that shape
+(`docs/specs/security-local.md` -> "Loopback Listeners" and
+`scripts/loopback-lint.mjs` both read bind spellings on loopback TCP). An ICE
+socket matches neither, is bound on every interface, and appears in no source
+file of ours — the addon and the browser bind it. Left unnamed it would be the
+one network-facing thing no page of this suite mentions. What is behind it is
+small but not nothing: an unauthenticated STUN parser gated only by a
+per-attempt credential, and a DTLS stack. It exists between the offer and the
+session's disposal, which is minutes, not the process's lifetime.
+
+**Why a lost channel after cutover ends the session instead of falling back.**
+Falling back would mean resuming a `CipherState` at the counter the peer
+believes it is on, across a gap of unknown length in an ordered stream — a
+resynchronization the Noise transport deliberately has no construction for
+([Noise suite](#noise-suite): any gap ends the session). Holding the relay path
+warm as a standby would also mean the sender deciding per message which path a
+frame took, which is the ordering bug the single `direct-switch` boundary
+exists to make impossible. The cost of ending instead is one reconnect on the
+phone, which the app already does for every other burrow loss.
+
 ## Noise suite
 
 **Why X25519 is WebCrypto and ChaChaPoly is bundled.** Measured 2026-06 across

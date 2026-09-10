@@ -30,7 +30,7 @@ no plaintext relay route, and no reader for any of the pre-cutover frames.
 
 | Compromise | Buys | What still stands |
 | --- | --- | --- |
-| Relay | account state, routing metadata | **no new authorization and no plaintext**. On an established session, availability only — drop, delay, reorder, or refuse, never read and never inject — and the first invalid ciphertext destroys the session. Web Push holds **confidentiality**, not **freshness**: a kept envelope re-delivers as current, accepted residual (rationale) |
+| Relay | account state, routing metadata | **no new authorization and no plaintext**. On an established session, availability only — drop, delay, reorder, or refuse, never read and never inject — and the first invalid ciphertext destroys the session. Web Push holds **confidentiality**, not **freshness**: a kept envelope re-delivers as current, accepted residual (rationale). A session switched to the [direct path](#direct-path) leaves it the lifecycle levers alone — it can still end that session by dropping a socket, but sees, delays, and reorders none of its traffic |
 | Setup password | one endpoint, `/api/burrow/enroll`, and thence a `burrowToken` | it registers **no** passkey — `/api/setup/*` takes a Burrow-minted setup token and nothing else — so it reaches an owner passkey only via the next row. `/api/burrow/enroll` accepts one other credential, the installer's enrollment offer: owner-only *at rest*, the whole of what the file mode protects, checked by possession over HTTPS rather than local identity, so a leaked token redeems remotely — bounded single-use, 24-hour expiry, permanently disabled by the first Burrow enrollment. Still **no Burrow access** |
 | `burrowToken` | the Burrow's own relay traffic and, transitively, **account takeover**: it mints setup tokens at `/api/burrow/setup-token`, the only thing that registers an owner passkey | bounded three ways — single-use and dead 5 minutes after minting; revoking the Burrow (deleting its row from `burrows.json`) stops minting immediately *and* kills already-minted tokens, re-checked at both setup gates; a signed-in phone retires an unused token at `/api/setup/retire`. Still **no Burrow access**: pairing runs Noise IK against an invitation keypair the Burrow never sent anywhere (rationale) |
 | Synced or stolen passkey | sign-in, and the ability to *ask* | the paired Client static is missing, so `BurrowAcl` answers `client-not-paired` |
@@ -161,6 +161,15 @@ Funnel publishes the same TLS origin and stays inside this analysis: public admi
 is owned by [The setup password](#the-setup-password), and a Client still reaches no
 Burrow without the Burrow-local authorization above.
 
+**A direct path opens the one listener no loopback rule covers.** ICE gathering
+binds a UDP socket per local address, so while an attempt is live the machine
+answers UDP from anyone routing to it on any of those networks.
+`docs/specs/security-local.md` -> "Loopback Listeners" is about loopback TCP and
+`scripts/loopback-lint.mjs` reads bind spellings in our own source, so neither
+reaches a socket the browser or the addon binds. It exists only between an
+offer and that session's disposal, and what answers on it is
+`docs/specs/remote-security-model.md` -> "Direct path".
+
 **Must not make Funnel state an install or health verdict.** The installers configure
 Serve but neither inspect, warn about, enable, nor disable Funnel; `manage verify`
 checks the local TLS-to-loopback path, while CI and this audit check application
@@ -200,6 +209,23 @@ a second unchecked resolution.
 - **FAIL IF** a push stops being sealed per recipient, to that ACL record's own Client static, under a fresh salt — the construction is `docs/specs/remote-security-model.md` -> "Push sealing", `sealPush` / `openPush` in `remote-lib-common/src/security/push-seal.ts`, proven by `remote-lib-common/test/push-seal.test.mjs`. A Noise `CipherState`, a shared group key, or a reused salt each break it. `BurrowRuntime.sealPushForClient` hands `lib/src/remote/burrow/push-delivery.ts` a seal *capability* and never the Burrow's private key, and the worker in `lib/src/remote/pocket-app/sw.ts` is the only thing that opens one.
 - **FAIL IF** push text stops being bounded with the shared `boundedPushText` on the Burrow before sealing, or re-bounded with it in `lib/src/remote/pocket-app/sw.ts` before `showNotification`. The worker is the sanitization sink: a worker that renders what it decrypted without re-bounding it leaves the property with one enforcer instead of two (rationale).
 - **FAIL IF** the relay routes a Burrow-originated frame from a socket that is not the Client's current Burrow binding, or begins decoding, remembering, or acting on an `e2e` ciphertext. `relay/src/relay.ts` must route the `e2e` envelope and nothing else: it holds no gate, no challenge memory, and no notion of an authorized session (rationale). A Relay-side type import from the protocol-v1 half of `remote-lib-common/src/remote/wire.ts` is the leading indicator and fails the same way.
+
+### Direct path
+
+**An authorized session may leave the Relay for a WebRTC data channel, carrying
+what it already carried**: the same Noise session, the same counters, the same
+bounds. `docs/specs/remote-api.md` -> "Direct path" owns the design and
+`docs/specs/remote-security-model.md` -> "Direct path" owns why it adds no trust
+layer; neither is restated below.
+
+- **FAIL IF** a `direct-offer` is accepted or sent before promotion, or a session runs a second attempt. `BurrowRuntime.#answerDirect` in `lib/src/remote/burrow/burrow-runtime.ts` must return on the session's `directAttempted` flag and set it before its first `await`; `PocketClient.#offerDirect` in `lib/src/remote/client/pocket-client.ts` must be reachable only from the `ok: true` branch of a connection outcome, since a peer connection built earlier is one an unauthorized party steered.
+- **FAIL IF** a byte crosses the channel that is not a Noise transport message of the promoted session: one message per frame, raw bytes, no second handshake, no plaintext, and no framing of ours beside it. **Every inbound frame is bounded at `NOISE_MAX_MESSAGE_LENGTH` before it reaches a cipher** — `DirectPeer` in `lib/src/remote/direct/direct-peer.ts` must refuse an over-cap frame and a non-binary message as violations rather than parse either.
+- **FAIL IF** any signaling leaves the ciphertext. The four signals are `control` messages on the established session, so no relay route, frame type, or Relay-side guard may carry, name, or validate an SDP or a candidate: a negative search over `relay/src/` for `sdp`, the four signal names, and `RTCPeerConnection` must find nothing. `scripts/e2e-lint.mjs` holds it textually.
+- **FAIL IF** any ICE server reaches shipped source — a `stun:`, `stuns:`, `turn:`, or `turns:` URL, or a non-empty `iceServers` array, anywhere under `remote-lib-common/src/`, `lib/src/`, or `relay/src/`. Both factories pass `iceServers: []`; a public default hands a third party the user's address. `scripts/e2e-lint.mjs` holds it textually.
+- **FAIL IF** a peer connection can outlive its session or precede promotion. `#disposeDirect` must run on every path that ends an established session in `lib/src/remote/burrow/burrow-runtime.ts` — `#disposeEstablished`, and through `#disposeClient` the `client-gone`, socket-loss and `stop()` paths — and `#disposeCeremony` in `lib/src/remote/client/pocket-client.ts` must close the peer on every teardown, an intentional `close()` and a dropped relay socket included.
+- **FAIL IF** the cutover stops bounding what it holds, or stops disposing on a violation. Held frames are capped by `MAX_DIRECT_PENDING_FRAMES` **and** `MAX_DIRECT_PENDING_BYTES`, overflow disposing the session rather than dropping a frame; a relay `transport` frame arriving after inbound has switched disposes it before any decrypt; the channel closing or erroring after either direction has switched disposes it at both ends. `DirectCutover` in `remote-lib-common/src/security/direct-path.ts` decides all three and both endpoints must act on every outcome it returns. Pinned by `remote-lib-common/test/direct-path.test.mjs` and the direct cases in `lib/src/remote/burrow/burrow-bounds.test.ts` and `lib/src/remote/client/pocket-client.test.ts`.
+- **FAIL IF** the standalone Burrow's native peer addon is loaded at sidecar boot rather than at the first offer, or its absence changes anything but a decline. `createNativeDirectPeerFactory` in `lib/src/host/remote/` must reach `node-datachannel` — declared in `standalone/sidecar/package.json` — only through an import performed inside an authorized session's first offer, and a load failure must answer `direct-decline` and leave that session relayed rather than fail the Burrow's start.
+- **FAIL IF** a direct path survives `client-gone`, `burrow-gone`, or a lost relay socket: the Relay stays the lifecycle authority on both paths. Every Burrow bound is path-agnostic, and the idle deadline still moves only on a decrypted Client→Burrow transport message, whichever path carried it (`docs/specs/remote-security-model.md` -> "Burrow bounds").
 
 ### Revocation and the audit trail
 
