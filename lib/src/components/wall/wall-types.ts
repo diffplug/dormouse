@@ -1,6 +1,6 @@
 import type { SurfaceKind } from 'dor/commands/types';
 import type { BrowserDisplayMode } from './agent-browser-screen';
-import type { PersistedDoor, PersistedSurfaceRefs } from '../../lib/session-types';
+import type { PersistedDoor, PersistedSurfaceRefs, WorkspaceId } from '../../lib/session-types';
 
 /** A minimized Surface's baseboard chip, at RUNTIME: an identity plus the Lath
  *  restore `token` that says where it goes back. Deliberately carries no
@@ -48,9 +48,8 @@ export type DoorAfterRestoreAction =
 
 /**
  * The restored record a Wall boots from, passed through unchanged by every
- * composition above it. Only the Workspace whose id was captured at first render
- * receives one; every other Wall takes Lath's fresh branch
- * (docs/specs/layout.md → "Workspaces").
+ * composition above it. A Wall with none takes Lath's fresh branch and spawns
+ * one default-shell pane (docs/specs/layout.md → "Workspaces").
  */
 export interface WallBootProps {
   initialPaneIds?: string[];
@@ -59,6 +58,12 @@ export interface WallBootProps {
   initialSurfaceRefs?: PersistedSurfaceRefs;
   initialSurfaceRefsNext?: number;
 }
+
+/** One boot record per Workspace, keyed by Workspace id — what a Window restores
+ *  from, since every Workspace comes back over its own Session
+ *  (docs/specs/layout.md → "Session persistence"). A Workspace with no entry
+ *  boots fresh. */
+export type WallBootPlans = Record<WorkspaceId, WallBootProps>;
 
 export type WallEvent =
   | { type: 'modeChange'; mode: WallMode }

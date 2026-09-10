@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { countRunningSessions } from "dormouse-lib/lib/terminal-registry";
 import { archiveSurfaceNotes } from "dormouse-lib/lib/notepad/close-coordinator";
 import { notepadSurfaceIds, removeSurface } from "dormouse-lib/lib/notepad/notepad-store";
+import { flushWindowSession } from "dormouse-lib/lib/window-session-aggregator";
 import type { TauriAdapter } from "./tauri-adapter";
 import { openQuitArchiveFailure } from "./quit-confirm-store";
 import { hasPendingUpdate, installPendingUpdate } from "./updater";
@@ -125,7 +126,7 @@ async function archiveThenTeardown(): Promise<void> {
 }
 
 // Ordering and rationale: docs/specs/standalone.md §Quit flow (Teardown
-// ordering). The 8s ceiling is belt-and-suspenders over the per-step bounds.
+// ordering). The 10s ceiling is belt-and-suspenders over the per-step bounds.
 // `quit_progress` tells Rust teardown has begun (ending the confirmation-wait
 // suspension) and marks each phase boundary so its watchdog gives teardown and
 // install separate budgets rather than one shared clock.
@@ -137,18 +138,20 @@ async function runQuitTeardown(): Promise<void> {
     if (adapter) {
       await withTimeout(
         (async () => {
-          // The two flushes are near-free while standalone persists nothing —
-          // `saveSession` returns immediately on `persistsSession: false`, so
-          // neither one runs a `getCwd` round trip. The shape is kept because
-          // the ordering is the load-bearing part and the workspaces-rollout
-          // scope turns persistence back on (docs/specs/layout.md -> `## Future`).
+          // Capture FIRST: an agent's resume invocation exists only between the
+          // interrupt and the kill, and it is the one thing here that cannot be
+          // reconstructed afterwards. Losing it must never cost the save behind
+          // it, so this step alone cannot abort the rest.
+          await adapter.captureAgentRecovery(1300).catch((err) =>
+            console.warn("[quit] agent recovery capture failed; proceeding", err));
           await adapter.requestSessionFlush(1500); // save while PTYs are alive
           await adapter.gracefulKillAllPtys(2000); // SIGTERM; wait for exits and final output
           await adapter.requestSessionFlush(1500); // final post-exit save
+          await flushWindowSession(); // the Walls' records become one Window blob
           await adapter.drainSessionSaves(2000); // last write reaches disk
         })(),
-        8000,
-        "[quit] teardown exceeded 8000ms; proceeding to exit",
+        10000,
+        "[quit] teardown exceeded 10000ms; proceeding to exit",
       );
     }
     // Install strictly after the completed final save. A fresh `quit_progress`

@@ -3,7 +3,15 @@ import { createRoot } from "react-dom/client";
 import { setPlatform } from "dormouse-lib/lib/platform";
 import { installPeerSurfaceResponder } from "dormouse-lib/remote/burrow/peer-surfaces";
 import type { PlatformAdapter } from "dormouse-lib/lib/platform/types";
-import { resumeOrRestore } from "dormouse-lib/lib/reconnect";
+import { collectLivePtys, resumeOrRestoreFrom } from "dormouse-lib/lib/reconnect";
+import {
+  installWindowSessionWriter,
+  seedWindowSession,
+} from "dormouse-lib/lib/window-session-aggregator";
+import { setWorkspaces } from "dormouse-lib/lib/workspace-store";
+import { DEFAULT_WORKSPACE_ID } from "dormouse-lib/lib/session-types";
+import type { PersistedSession, PersistedWindow, WorkspaceId } from "dormouse-lib/lib/session-types";
+import type { WallBootPlans } from "dormouse-lib/components/wall/wall-types";
 import { seedShellStore } from "dormouse-lib/lib/shell-store";
 import { restoreActiveTheme } from "dormouse-lib/lib/themes";
 import App from "dormouse-lib/App";
@@ -124,7 +132,7 @@ async function bootstrap() {
   // omits `shell` and the sidecar resolves the OS default itself.
   seedShellStore(await shellsPromise);
 
-  const result = await resumeOrRestore(platform);
+  const initialPlans = await restoreWindow(platform);
 
   startUpdateCheck();
 
@@ -132,11 +140,7 @@ async function bootstrap() {
     <StrictMode>
       <AppBar />
       <App
-        initialPaneIds={result.paneIds}
-        restoredLathLayout={result.lathLayout}
-        initialDoors={result.doors}
-        initialSurfaceRefs={result.surfaceRefs}
-        initialSurfaceRefsNext={result.surfaceRefsNext}
+        initialPlans={initialPlans}
         baseboardNotice={<ConnectedUpdateBanner />}
         dialogHost={<QuitConfirmModalHost />}
         enableBurrow
@@ -144,5 +148,67 @@ async function bootstrap() {
       />
     </StrictMode>,
   );
+}
+
+/** The adapters that persist a Window. Both standalone adapters answer this; the
+ *  shared `PlatformAdapter.getState` cannot, because the blob it stores is a
+ *  Window and every shared reader of `getState` wants a bare Session. */
+type WindowPersistingAdapter = PlatformAdapter & { getWindowState?(): PersistedWindow | null };
+
+/**
+ * Rebuild the Window: install its Workspaces, then plan each one's Session off a
+ * single view of the host's live PTYs (docs/specs/layout.md → "Session
+ * persistence").
+ *
+ * Reload and relaunch are the same code path with a different live list. On a
+ * reload the PTYs are still there and partition by saved pane id, so every
+ * Workspace resumes over its own; on a relaunch the list is empty and every
+ * Workspace cold-restores into fresh shells at its saved cwds, with nothing
+ * replayed because scrollback is never persisted.
+ */
+async function restoreWindow(platform: WindowPersistingAdapter): Promise<WallBootPlans> {
+  const saved = platform.getWindowState?.() ?? null;
+  // Before any Wall mounts: a Workspace's first save compares against its own
+  // record, and a snapshot taken mid-boot must not replace a restored Workspace
+  // with a blank one.
+  seedWindowSession(saved);
+  if (saved) {
+    setWorkspaces({
+      workspaces: saved.workspaces.map(({ id, name }) => ({ id, name })),
+      activeId: saved.activeWorkspaceId,
+    });
+  }
+  // After `setWorkspaces`, so installing does not immediately write back what was
+  // just read.
+  installWindowSessionWriter((window) => platform.saveState(window));
+
+  const live = await collectLivePtys(platform);
+  const restoring: Array<{ id: WorkspaceId; session: PersistedSession | null }> = saved
+    ? saved.workspaces.map((workspace) => ({ id: workspace.id, session: workspace.session }))
+    : [{ id: DEFAULT_WORKSPACE_ID, session: null }];
+  const activeId = saved?.activeWorkspaceId ?? DEFAULT_WORKSPACE_ID;
+
+  // A live PTY no saved Workspace names — a pane created inside the last save's
+  // debounce, or one left by a Workspace that is gone — goes to the active
+  // Workspace rather than being stranded with no Wall.
+  const named = new Set(restoring.flatMap(({ session }) => session?.panes.map((pane) => pane.id) ?? []));
+  const unowned = new Set(live.ptys.map((pty) => pty.id).filter((id) => !named.has(id)));
+
+  const plans: WallBootPlans = {};
+  for (const { id, session } of restoring) {
+    const result = resumeOrRestoreFrom(platform, live, {
+      savedSession: session,
+      ptyIds: new Set(session?.panes.map((pane) => pane.id) ?? []),
+      ...(id === activeId ? { claimUnowned: unowned } : {}),
+    });
+    plans[id] = {
+      initialPaneIds: result.paneIds,
+      restoredLathLayout: result.lathLayout,
+      initialDoors: result.doors,
+      initialSurfaceRefs: result.surfaceRefs,
+      initialSurfaceRefsNext: result.surfaceRefsNext,
+    };
+  }
+  return plans;
 }
 bootstrap();

@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   archiveSurfaceNotes: vi.fn(async (_ids: readonly string[], _opts?: { signal?: AbortSignal }) => {}),
   notepadSurfaceIds: vi.fn(() => [] as string[]),
   removeSurface: vi.fn(),
+  flushWindowSession: vi.fn(async () => {}),
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
@@ -32,6 +33,11 @@ vi.mock("dormouse-lib/lib/notepad/close-coordinator", () => ({
 vi.mock("dormouse-lib/lib/notepad/notepad-store", () => ({
   notepadSurfaceIds: mocks.notepadSurfaceIds,
   removeSurface: mocks.removeSurface,
+}));
+// The aggregator's write step. Mocked for the same reason as the registry: what
+// this file tests is where it sits in the order.
+vi.mock("dormouse-lib/lib/window-session-aggregator", () => ({
+  flushWindowSession: mocks.flushWindowSession,
 }));
 vi.mock("./updater", () => ({
   hasPendingUpdate: mocks.hasPendingUpdate,
@@ -57,7 +63,7 @@ const oneNotedSurface = () => ["pane-a"];
 let quitRequested: (() => void) | null = null;
 
 // Drain the microtask-driven teardown chain (no real timers on the happy path —
-// withTimeout's 8s guard is cleared when the work wins).
+// withTimeout's 10s guard is cleared when the work wins).
 const settle = () => new Promise((r) => setTimeout(r, 0));
 
 // A fake adapter whose teardown steps append their name to `order` so the call
@@ -69,6 +75,7 @@ function fakeAdapter(order: string[] = [], overrides: Partial<Record<string, () 
       order.push(name);
     });
   return {
+    captureAgentRecovery: step("captureRecovery"),
     requestSessionFlush: step("flush"),
     gracefulKillAllPtys: step("gracefulKill"),
     drainSessionSaves: step("drain"),
@@ -116,11 +123,14 @@ describe("quit orchestrator", () => {
     expect(mocks.invoke).toHaveBeenCalledWith("quit_proceed");
   });
 
-  it("runs teardown steps flush → kill → flush → drain → install → proceed in order", async () => {
+  it("runs teardown steps capture → flush → kill → flush → window → drain → install → proceed in order", async () => {
     const order: string[] = [];
     mocks.invoke.mockImplementation(async (cmd: string) => {
       order.push(cmd);
       return undefined;
+    });
+    mocks.flushWindowSession.mockImplementation(async () => {
+      order.push("flushWindow");
     });
     mocks.hasPendingUpdate.mockReturnValue(true);
     mocks.installPendingUpdate.mockImplementation(async () => {
@@ -129,19 +139,36 @@ describe("quit orchestrator", () => {
 
     await triggerQuit(fakeAdapter(order));
 
-    // `quit_progress` marks each phase boundary (teardown start, install start)
-    // so Rust's watchdog budgets teardown and install separately.
+    // The capture is first: an agent's resume invocation exists only between the
+    // interrupt and the kill. `quit_progress` marks each phase boundary (teardown
+    // start, install start) so Rust's watchdog budgets them separately.
     expect(order).toEqual([
       "quit_ack",
       "quit_progress",
+      "captureRecovery",
       "flush",
       "gracefulKill",
       "flush",
+      "flushWindow",
       "drain",
       "quit_progress",
       "install",
       "quit_proceed",
     ]);
+  });
+
+  it("still saves and exits when the recovery capture rejects", async () => {
+    // Recovery is the one step whose data cannot be reconstructed, but losing it
+    // must never cost the save behind it.
+    const order: string[] = [];
+    const adapter = fakeAdapter(order, {
+      captureRecovery: () => Promise.reject(new Error("sidecar gone")),
+    });
+    await triggerQuit(adapter);
+
+    expect(order).toEqual(["flush", "gracefulKill", "flush", "drain"]);
+    expect(mocks.flushWindowSession).toHaveBeenCalled();
+    expect(mocks.invoke).toHaveBeenCalledWith("quit_proceed");
   });
 
   it("skips install and its phase signal when no update is pending", async () => {

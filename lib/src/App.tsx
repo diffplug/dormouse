@@ -2,7 +2,7 @@ import { Component, type ReactNode } from "react";
 import { Wall } from "./components/Wall";
 import { WorkspaceWindow } from "./components/WorkspaceWindow";
 import { ThemeDebuggerGlobal } from "./components/ThemeDebugger";
-import type { WallBootProps } from "./components/wall/wall-types";
+import type { WallBootPlans, WallBootProps } from "./components/wall/wall-types";
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -28,6 +28,7 @@ export default function App({
   dialogHost,
   enableBurrow,
   multiWorkspace = false,
+  initialPlans,
   ...boot
 }: WallBootProps & {
   baseboardNotice?: ReactNode;
@@ -37,11 +38,14 @@ export default function App({
    *  standalone host sets it; VS Code and the website playground mount a bare
    *  Wall (docs/specs/layout.md → "Workspaces"). */
   multiWorkspace?: boolean;
+  /** One boot record per Workspace; `multiWorkspace` only. */
+  initialPlans?: WallBootPlans;
 }) {
-  const Shell = multiWorkspace ? WorkspaceWindow : Wall;
   return (
     <ErrorBoundary>
-      <Shell {...boot} baseboardNotice={baseboardNotice} dialogHost={dialogHost} enableBurrow={enableBurrow} />
+      {multiWorkspace
+        ? <WorkspaceWindow {...boot} initialPlans={initialPlans} baseboardNotice={baseboardNotice} dialogHost={dialogHost} enableBurrow={enableBurrow} />
+        : <Wall {...boot} baseboardNotice={baseboardNotice} dialogHost={dialogHost} enableBurrow={enableBurrow} />}
 
       <ThemeDebuggerGlobal />
     </ErrorBoundary>

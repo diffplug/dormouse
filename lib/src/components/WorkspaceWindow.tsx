@@ -4,7 +4,7 @@ import { Wall } from './Wall';
 import { listWallHandles } from './wall/wall-handles';
 import { getPlatform } from '../lib/platform';
 import { getWorkspacesSnapshot, subscribeToWorkspaces } from '../lib/workspace-store';
-import type { WallBootProps } from './wall/wall-types';
+import type { WallBootPlans, WallBootProps } from './wall/wall-types';
 
 /**
  * One Window's Workspaces: a mounted `<Wall>` each, all in the same grid cell so
@@ -16,17 +16,23 @@ export function WorkspaceWindow({
   baseboardNotice,
   dialogHost,
   enableBurrow,
+  initialPlans,
   ...boot
 }: WallBootProps & {
   baseboardNotice?: ReactNode;
   dialogHost?: ReactNode;
   enableBurrow?: boolean;
+  /** One record per Workspace, from the restored Window. Takes precedence over
+   *  the single-record props, which stay for the compositions that restore one
+   *  Session (stories, the website playground). */
+  initialPlans?: WallBootPlans;
 }) {
   const { workspaces, activeId } = useSyncExternalStore(subscribeToWorkspaces, getWorkspacesSnapshot);
-  // The boot record belongs to the Workspace that was active at first render.
-  // Every Workspace created later gets no boot props, so its Wall takes Lath's
-  // fresh branch and spawns exactly one default-shell pane.
+  // Without per-Workspace plans the single boot record belongs to the Workspace
+  // that was active at first render. Either way a Workspace with no record takes
+  // Lath's fresh branch and spawns exactly one default-shell pane.
   const bootWorkspaceIdRef = useRef(activeId);
+  const plansRef = useRef(initialPlans);
 
   // The Window, not each Wall, answers the host's flush request: the adapter
   // completes on the FIRST notification, so a per-Wall answer would let a quit
@@ -50,7 +56,9 @@ export function WorkspaceWindow({
     >
       {workspaces.map((workspace) => {
         const isActive = workspace.id === activeId;
-        const isBoot = workspace.id === bootWorkspaceIdRef.current;
+        const plan = plansRef.current
+          ? plansRef.current[workspace.id] ?? {}
+          : workspace.id === bootWorkspaceIdRef.current ? boot : {};
         return (
           <div
             key={workspace.id}
@@ -66,7 +74,7 @@ export function WorkspaceWindow({
             )}
           >
             <Wall
-              {...(isBoot ? boot : {})}
+              {...plan}
               workspaceId={workspace.id}
               active={isActive}
               baseboardNotice={isActive ? baseboardNotice : undefined}

@@ -42,7 +42,7 @@ import type { AwaitHandle, AwaitOptions } from "dormouse-lib/lib/alert-manager";
 import type { AlertSettings } from "dormouse-lib/lib/alert-settings";
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
 import { loadWindowState, saveWindowState } from "dormouse-lib/lib/window-persistence";
-import type { PersistedWindow } from "dormouse-lib/lib/session-types";
+import type { PersistedAlertState, PersistedWindow } from "dormouse-lib/lib/session-types";
 import { TauriSessionStore } from "./tauri-session-store";
 import { withTimeout } from "./with-timeout";
 import {
@@ -243,7 +243,29 @@ export class TauriAdapter implements PlatformAdapter {
       console.error("[tauri-adapter] load_session failed:", err);
     }
     this.sessionStore.hydrate(seed);
-    await this.clearLegacySessionState();
+    // The agent-recovery record is read here, at the same boot boundary and for
+    // the same reason as the session blob: `getRecoveryCommands` is synchronous
+    // because the cold restore reads it before React mounts.
+    await this.takeRecoveryCommands();
+  }
+
+  /**
+   * Claim the resume invocations the last teardown captured for the panes this
+   * Window is about to restore. Destructive in the sidecar on the first call, so
+   * a relaunch that gets this far can never replay them
+   * (docs/specs/transport.md -> "Consuming it").
+   */
+  private async takeRecoveryCommands(): Promise<void> {
+    const saved = this.getWindowState();
+    const paneIds = saved?.workspaces.flatMap((workspace) => workspace.session.panes.map((pane) => pane.id)) ?? [];
+    if (paneIds.length === 0) return;
+    try {
+      this.recoveryCommands = await rawInvoke<Record<string, string>>("take_recovery_commands", { paneIds }) ?? {};
+    } catch (err) {
+      // A record we could not read is one restore without auto-resume, never a
+      // failed boot.
+      console.error("[tauri-adapter] take_recovery_commands failed:", err);
+    }
   }
 
   shutdown(): void {
@@ -285,6 +307,33 @@ export class TauriAdapter implements PlatformAdapter {
 
   killPty(id: string): void {
     invoke("pty_kill", { id });
+  }
+
+  /** Agent resume invocations captured at the last teardown, claimed once during
+   *  `init()` and read synchronously by the cold restore. */
+  private recoveryCommands: Record<string, string> = {};
+
+  getRecoveryCommands(): Record<string, string> {
+    return this.recoveryCommands;
+  }
+
+  /** Seed a cold-restored Surface's persisted TODO/alert; the manager lives here,
+   *  so the restore path is the only thing that can. */
+  alertSeed(id: string, state: PersistedAlertState): void {
+    this.alertManager.seed(id, state);
+  }
+
+  /**
+   * Interrupt the live PTYs so each agent prints its resume invocation, and let
+   * the sidecar record what it detects. Warn-and-proceed: a quit must never wedge
+   * on this (docs/specs/standalone.md -> "Agent recovery").
+   */
+  async captureAgentRecovery(timeoutMs: number, ids?: string[]): Promise<void> {
+    try {
+      await rawInvoke("capture_agent_recovery", { ids: ids ?? null, timeout: timeoutMs });
+    } catch (err) {
+      console.warn("[tauri-adapter] captureAgentRecovery failed; proceeding", err);
+    }
   }
 
   async getCwd(id: string): Promise<string | null> {
@@ -593,29 +642,17 @@ export class TauriAdapter implements PlatformAdapter {
 
   private static STATE_KEY = 'dormouse.session';
 
-  // Standalone persists no Session state: quitting the app is a deliberate
-  // ending, and a crash captured nothing, so every launch starts fresh
-  // (docs/specs/transport.md -> "The governing rule").
-  //
-  // This is a gate at the adapter boundary, not a removal of the store. The
-  // plumbing below it — TauriSessionStore, the Rust temp-then-rename file store,
-  // the quit flush/drain ordering — is intact and still needed by the
-  // workspaces-rollout scope (docs/specs/layout.md -> `## Future`). Bringing
-  // VS Code-style restoration to standalone later also needs to reconcile
-  // the unconditional boot deletion in clearLegacySessionState and add capture
-  // to the existing quit teardown (flush -> kill -> flush -> drain).
-  private static PERSIST_SESSION = false;
-
   /**
    * Read by `saveSession`, which skips the whole record build — not just the
    * write — when a host persists nothing (`PlatformAdapter.persistsSession`).
+   * Standalone persists window state (`docs/specs/transport.md` ->
+   * "The governing rule").
    */
-  readonly persistsSession = TauriAdapter.PERSIST_SESSION;
+  readonly persistsSession = true;
 
   /** The aggregator's writer: one `PersistedWindow` per window
    *  (`docs/specs/transport.md` -> "Persisted session"). */
   saveState(state: unknown): void {
-    if (!TauriAdapter.PERSIST_SESSION) return;
     try {
       saveWindowState(this.sessionStore, TauriAdapter.STATE_KEY, state as PersistedWindow);
     } catch {
@@ -633,7 +670,6 @@ export class TauriAdapter implements PlatformAdapter {
 
   /** The persisted Window, read from the boot-seeded cache. */
   getWindowState(): PersistedWindow | null {
-    if (!TauriAdapter.PERSIST_SESSION) return null;
     try {
       return loadWindowState(this.sessionStore, TauriAdapter.STATE_KEY);
     } catch {
@@ -668,29 +704,4 @@ export class TauriAdapter implements PlatformAdapter {
     resetUnreadable: () => rawInvoke<void>("reset_notepad_archive"),
   };
 
-  /**
-   * Delete any pre-upgrade snapshot or orphaned temp write. Those carry
-   * transcripts, so ignoring the slot is not enough — the bytes have to leave the
-   * disk (docs/specs/transport.md -> "Retiring the transcripts already on disk").
-   * Called from init() after the store hydrates.
-   *
-   * Deletes the file through the Rust store that owns it rather than blanking the
-   * slot: a sentinel would leave the bytes in place until some later write, and
-   * would oblige every reader to treat `''` as a third state alongside present
-   * and absent.
-   */
-  private async clearLegacySessionState(): Promise<void> {
-    const hadReadableSnapshot = this.sessionStore.getItem(TauriAdapter.STATE_KEY) !== null;
-    try {
-      // Always ask Rust to clear: load_session cannot see a .json.tmp left by a
-      // crash before rename, but that file still contains the legacy transcript.
-      await rawInvoke<void>("clear_session");
-      this.sessionStore.hydrate(null);
-      if (hadReadableSnapshot) {
-        console.info('[tauri-adapter] Cleared legacy persisted session (transcripts are no longer stored)');
-      }
-    } catch (err) {
-      console.error('[tauri-adapter] Failed to clear legacy session state:', err);
-    }
-  }
 }

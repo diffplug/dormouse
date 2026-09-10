@@ -143,6 +143,12 @@ const invokeMap = {
   agent_browser_open: ({ url, headed, binaryPath }) => requestSidecar('agentBrowser:open', { url, headed, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
   agent_browser_pop_out: ({ session, url, rect, binaryPath }) => requestSidecar('agentBrowser:popOut', { session, url, rect, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
   agent_browser_pop_in: ({ session, url, binaryPath }) => requestSidecar('agentBrowser:popIn', { session, url, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
+  // Agent recovery (docs/specs/standalone.md -> "Agent recovery"). The harness
+  // mirrors the persistence answer, so it captures and claims exactly as Rust
+  // does; the sidecar half is identical.
+  capture_agent_recovery: ({ ids, timeout }) =>
+    requestSidecar('pty:captureRecovery', { ids, timeout }, 'recoveryDone', (data) => data, (timeout ?? 1300) + 1500),
+  recovery_take: ({ paneIds }) => requestSidecar('recovery:take', { paneIds }, 'recovery:commands', (data) => data),
 };
 
 async function readJson(req) {
@@ -248,7 +254,8 @@ function startSidecar() {
     },
   });
   log(`sidecar pid=${sidecar.pid}`);
-  log(`burrow + recovery state dir: ${stateDir}`);
+  log(`burrow state dir: ${stateDir}`);
+  log(`recovery state dir: ${stateDir}`);
 
   createInterface({ input: sidecar.stdout }).on('line', (line) => {
     let msg;

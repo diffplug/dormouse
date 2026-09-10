@@ -87,17 +87,80 @@ describe("TauriAdapter session-flush handshake", () => {
   });
 });
 
-describe("TauriAdapter legacy session cleanup", () => {
-  it("asks Rust to clear orphaned temp state when no main snapshot exists", async () => {
+// docs/specs/transport.md -> "The governing rule": standalone restores window
+// state, so nothing is deleted at boot and the record is claimed once.
+describe("TauriAdapter window persistence", () => {
+  const session = { version: 3 as const, panes: [{ id: "pane-a", title: "A", cwd: "/a", untouched: false }] };
+  const windowBlob = {
+    version: 1 as const,
+    workspaces: [{ id: "ws-1", name: "One", session }],
+    activeWorkspaceId: "ws-1",
+  };
+
+  /** Stub Rust with a per-command implementation and boot the adapter. */
+  async function booted(impl: (cmd: string, args?: Record<string, unknown>) => unknown) {
     const invoke = vi.mocked(rawInvoke);
     invoke.mockClear();
-    invoke.mockResolvedValue(undefined);
+    invoke.mockImplementation((async (cmd: string, args?: Record<string, unknown>) =>
+      impl(cmd, args)) as unknown as typeof rawInvoke);
     const adapter = new TauriAdapter();
-
     await adapter.init();
+    return { adapter, invoke };
+  }
 
-    expect(invoke).toHaveBeenNthCalledWith(1, "load_session");
-    expect(invoke).toHaveBeenNthCalledWith(2, "clear_session");
+  it("persists, and never clears the snapshot at boot", async () => {
+    const { adapter, invoke } = await booted((cmd) => (cmd === "load_session" ? JSON.stringify(windowBlob) : undefined));
+
+    expect(adapter.persistsSession).toBe(true);
+    expect(adapter.getWindowState()).toEqual(windowBlob);
+    expect(invoke.mock.calls.map(([cmd]) => cmd)).not.toContain("clear_session");
+    adapter.shutdown();
+  });
+
+  it("wraps a pre-Window blob as the one Workspace", async () => {
+    const { adapter } = await booted((cmd) => (cmd === "load_session" ? JSON.stringify(session) : undefined));
+    expect(adapter.getWindowState()?.workspaces.map((ws) => ws.session)).toEqual([session]);
+    adapter.shutdown();
+  });
+
+  it("claims the recovery commands for every saved pane, before restore reads them", async () => {
+    const { adapter, invoke } = await booted((cmd) => {
+      if (cmd === "load_session") return JSON.stringify(windowBlob);
+      if (cmd === "take_recovery_commands") return { "pane-a": "claude --continue" };
+      return undefined;
+    });
+
+    expect(invoke).toHaveBeenCalledWith("take_recovery_commands", { paneIds: ["pane-a"] });
+    // Synchronous by the time the cold restore asks, which is what `init()`
+    // completing before `resumeOrRestore` buys.
+    expect(adapter.getRecoveryCommands()).toEqual({ "pane-a": "claude --continue" });
+    adapter.shutdown();
+  });
+
+  it("restores without recovery when the record cannot be read", async () => {
+    const { adapter } = await booted((cmd) => {
+      if (cmd === "load_session") return JSON.stringify(windowBlob);
+      if (cmd === "take_recovery_commands") throw new Error("sidecar gone");
+      return undefined;
+    });
+    expect(adapter.getRecoveryCommands()).toEqual({});
+    adapter.shutdown();
+  });
+
+  it("asks for nothing when there are no saved panes", async () => {
+    const { adapter, invoke } = await booted(() => undefined);
+    expect(invoke.mock.calls.map(([cmd]) => cmd)).not.toContain("take_recovery_commands");
+    expect(adapter.getRecoveryCommands()).toEqual({});
+    adapter.shutdown();
+  });
+
+  it("captures agent recovery and proceeds when the capture fails", async () => {
+    const { adapter, invoke } = await booted((cmd) => {
+      if (cmd === "capture_agent_recovery") throw new Error("sidecar gone");
+      return undefined;
+    });
+    await expect(adapter.captureAgentRecovery(1300)).resolves.toBeUndefined();
+    expect(invoke).toHaveBeenCalledWith("capture_agent_recovery", { ids: null, timeout: 1300 });
     adapter.shutdown();
   });
 });
