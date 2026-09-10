@@ -2,10 +2,6 @@
  * Process, port and log plumbing for the pairing walkthrough
  * (`scripts/pairing-walkthrough/README.md`).
  *
- * Nothing here is product code and nothing here listens: the harness only
- * *probes* ports with an outbound connect, so `scripts/loopback-lint.mjs` has
- * no listener to guard.
- *
  * `docs/specs/dor-cli.md` -> "Spawning External Binaries" requires product code
  * to spawn through `spawnAndCapture`; this file spawns raw on purpose. It is a
  * dependency-free script outside the pnpm workspace (nothing to import from),
@@ -14,7 +10,6 @@
  */
 
 import { createWriteStream } from 'node:fs';
-import net from 'node:net';
 import { spawn } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -30,8 +25,16 @@ const started = [];
  * `pnpm innerdogfood` each fan out into a tree (pnpm → node → vite →
  * esbuild), and killing only the pnpm shim orphans everything under it.
  * `detached: true` plus a `process.kill(-pid)` at teardown takes the group.
+ *
+ * **`dropEnv` removes inherited variables before `env` is applied.** The child
+ * otherwise inherits the whole shell, and a developer who has an installed
+ * deployment's settings exported gets a run configured by them. Opt-in per
+ * child, because `pnpm innerdogfood` reads `DORMOUSE_` variables on purpose.
  */
-export function spawnLogged(command, args, { cwd, env, logPath, prefix }) {
+export function spawnLogged(command, args, { cwd, env, dropEnv, logPath, prefix }) {
+  const inherited = dropEnv
+    ? Object.fromEntries(Object.entries(process.env).filter(([key]) => !dropEnv.test(key)))
+    : process.env;
   const log = createWriteStream(logPath, { flags: 'a' });
   // A write stream with no `error` listener throws an uncaught exception on a
   // full or vanished run directory — losing the log is survivable, so it is
@@ -39,7 +42,7 @@ export function spawnLogged(command, args, { cwd, env, logPath, prefix }) {
   log.on('error', (err) => console.error(`[${prefix}] ${logPath}: ${err.message}`));
   const child = spawn(command, args, {
     cwd,
-    env: { ...process.env, ...env },
+    env: { ...inherited, ...env },
     detached: true,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -122,35 +125,6 @@ export async function waitFor(probe, { timeoutMs = 60_000, intervalMs = 400, wha
     }
     await delay(intervalMs);
   }
-}
-
-/**
- * Whether nothing is listening on `port`.
- *
- * An outbound connect rather than a trial bind: a bind-and-close would put a
- * loopback listener in this file, which `scripts/loopback-lint.mjs` reads as a
- * product listener needing a guard, and the answer would be no more accurate.
- */
-export function isPortFree(port) {
-  return new Promise((resolve) => {
-    const socket = net.connect({ port, host: '127.0.0.1' });
-    const settle = (free) => {
-      socket.destroy();
-      resolve(free);
-    };
-    socket.setTimeout(1000);
-    socket.once('connect', () => settle(false));
-    socket.once('timeout', () => settle(true));
-    socket.once('error', () => settle(true));
-  });
-}
-
-/** The first free port at or above `start`. */
-export async function findFreePort(start) {
-  for (let port = start; port < start + 200; port++) {
-    if (await isPortFree(port)) return port;
-  }
-  throw new Error(`no free port in [${start}, ${start + 200})`);
 }
 
 /**

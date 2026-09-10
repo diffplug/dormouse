@@ -1,7 +1,9 @@
-// Shared scaffolding for the two dev-runner integration tests beside this file.
-// Both stand up a throwaway worktree, put fake CLIs on PATH, and read a runner's
-// interleaved stdout/stderr; only the runner and its stubs differ. Not a
-// `*.test.mjs`, so `node --test scripts/*.test.mjs` does not run it directly.
+// Shared scaffolding for the dev-runner integration tests. The two beside this
+// file stand up a throwaway worktree, put fake CLIs on PATH, and read a runner's
+// interleaved stdout/stderr; only the runner and its stubs differ. `runner` is
+// the harness-agnostic half and `relay/test/dev.test.mjs` imports just that, so
+// keep it free of anything standalone-specific. Not a `*.test.mjs`, so
+// `node --test scripts/*.test.mjs` does not run it directly.
 import { copyFile, mkdir, mkdtemp, readdir, realpath, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
