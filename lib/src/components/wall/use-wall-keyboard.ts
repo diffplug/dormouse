@@ -6,6 +6,7 @@ import { handleKillConfirm } from './keyboard/handle-kill-confirm';
 import { handlePaneShortcuts } from './keyboard/handle-pane-shortcuts';
 import { handlePaneNavigation } from './keyboard/handle-pane-navigation';
 import { isProxyOrigin } from '../../lib/iframe-proxy-registry';
+import { chromeKeyboardHeld } from '../../lib/chrome-keyboard-lease';
 import type { NavHistoryRef, WallKeyboardCtx } from './keyboard/types';
 
 export function useWallKeyboard(ctx: WallKeyboardCtx): void {
@@ -44,7 +45,9 @@ export function useWallKeyboard(ctx: WallKeyboardCtx): void {
       if (handleEditableClipboard(e)) return;
       if (handleMouseSelectionKeys(e, c)) return;
       if (c.modeRef.current === 'passthrough') return;
-      if (c.renamingRef.current) return;
+      // A pane rename, or chrome outside every Wall holding the lease (the
+      // Workspace strip's rename editor / close confirmation).
+      if (c.renamingRef.current || chromeKeyboardHeld()) return;
       if (handleKillConfirm(e, c)) return;
       if (c.dialogKeyboardActiveRef.current) return;
       if (handlePaneShortcuts(e, c, navHistory)) return;

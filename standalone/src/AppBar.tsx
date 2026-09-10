@@ -1,9 +1,8 @@
 import { useState, useEffect } from 'react';
-import { MinusIcon, CornersOutIcon, CornersInIcon, XIcon, PlusIcon } from '@phosphor-icons/react';
+import { MinusIcon, CornersOutIcon, CornersInIcon, XIcon } from '@phosphor-icons/react';
 import { PopupButtonRow, chromeButton } from '../../lib/src/components/design';
-import { getPlatform, IS_MAC } from '../../lib/src/lib/platform';
-
-const WORKSPACES_ISSUE_URL = 'https://github.com/diffplug/dormouse/issues/406';
+import { WorkspaceStrip } from '../../lib/src/components/WorkspaceStrip';
+import { IS_MAC } from '../../lib/src/lib/platform';
 
 type AppWindow = {
   isFocused(): Promise<boolean>;
@@ -154,24 +153,15 @@ export function AppBar() {
       {/* On macOS, native traffic lights are shown by titleBarStyle "Overlay" —
           we just leave padding on the left (pl-[78px]) to avoid overlapping them. */}
 
-      {/* Placeholder for the workspace strip (workspaces-rollout scope,
-          docs/specs/layout.md `## Future`), occupying the spot the strip will
-          take: after the traffic lights on macOS, at the start of the bar on
-          Windows/Linux. Until then it opens the tracking issue externally. */}
-      <div className="pl-2">
-        <Tip label="Workspaces are coming — opens the tracking issue">
-          <button
-            className={chromeButton({ kind: 'labeled' })}
-            onClick={() => getPlatform().openExternal?.(WORKSPACES_ISSUE_URL)}
-          >
-            <PlusIcon size={12} weight="bold" aria-hidden="true" />
-            <span>New workspace</span>
-          </button>
-        </Tip>
+      {/* The Workspace strip: after the traffic lights on macOS, at the start of
+          the bar on Windows/Linux. Its wrapper is also the draggable spacer, so
+          the bar past the last tab still moves the window. Tauri matches
+          `data-tauri-drag-region` on the event target alone, so no tab or tab
+          button may carry it — that is what leaves a press on a tab free to
+          activate, rename, or reorder. */}
+      <div data-tauri-drag-region className="flex min-w-0 flex-1 items-center self-stretch pl-2">
+        <WorkspaceStrip className="min-w-0" />
       </div>
-
-      {/* Draggable spacer */}
-      <div data-tauri-drag-region className="flex-1 self-stretch" />
 
       {/* Theme and shell selection live in the Settings dialog at the
           bottom-right of the window (docs/specs/theme.md,
