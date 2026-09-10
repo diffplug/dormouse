@@ -58,6 +58,7 @@ import {
   type PresenceBinding,
   type SealedPushV1,
   type RelayToBurrowFrame,
+  type TransportReceipt,
 } from 'remote-lib-common';
 import type { BurrowEnrollment } from './enrollment';
 import { createSerialQueue } from '../../host/remote/serial-queue';
@@ -1336,7 +1337,10 @@ export class BurrowRuntime {
     const state = this.#clients.get(frame.clientId);
     if (!state) return;
     if (state.established?.connectionId === frame.id) {
-      this.#onEstablishedFrame(frame.clientId, state.established, frame.ct);
+      // Every rule about a frame on an authorized session — which path may
+      // carry it, and that its `ct` must decode — is the endpoint's
+      // (`docs/specs/remote-api.md` → Transport → "Direct path").
+      state.established.direct.onRelayFrame(frame.ct);
       return;
     }
     const pending = state.connection;
@@ -1571,48 +1575,29 @@ export class BurrowRuntime {
   }
 
   /**
-   * One transport frame on an authorized session, arriving on the relay.
-   *
-   * **After the Client has switched there is nothing left for it to send here**,
-   * so a frame that arrives anyway is a peer whose two paths this Burrow can no
-   * longer keep in order (`docs/specs/remote-api.md` → Transport → "Direct
-   * path").
-   */
-  #onEstablishedFrame(clientId: string, established: EstablishedSession, ct: string): void {
-    if (!established.direct.onRelayTransport()) {
-      this.#disposeEstablished(clientId);
-      return;
-    }
-    this.#receiveOnSession(clientId, established, fromBase64Url(ct));
-  }
-
-  /**
-   * Decrypt one transport ciphertext, whichever path carried it: protocol-v1, a
-   * keepalive, or one of the direct path's signals.
+   * Decrypt one transport ciphertext, whichever path carried it — protocol-v1,
+   * a keepalive, or one of the direct path's signals — and answer the receipt
+   * for the endpoint to read a signal out of.
    */
   #receiveOnSession(
     clientId: string,
     established: EstablishedSession,
     ciphertext: Uint8Array,
-  ): void {
-    let receipt;
+  ): TransportReceipt | null {
+    let receipt: TransportReceipt;
     try {
       receipt = established.session.receive(ciphertext);
     } catch {
       // A failed decrypt is not activity: it proves only that *something*
       // reached this Burrow, and the session is dead either way.
       this.#disposeEstablished(clientId);
-      return;
+      return null;
     }
     // The one thing that refreshes the idle deadline, keepalive or application
     // data alike, and on either path
     // (`docs/specs/remote-security-model.md` → Burrow bounds).
     established.lastClientActivityAt = this.#now();
-    if (receipt.kind === 'control') {
-      established.direct.onSignal(receipt.value);
-      return;
-    }
-    if (receipt.kind !== 'app') return;
+    if (receipt.kind !== 'app') return receipt;
     for (const message of receipt.messages) {
       let payload: unknown;
       try {
@@ -1629,8 +1614,9 @@ export class BurrowRuntime {
       // session from inside this loop. Handing the rest of the receipt to an
       // api that is already disposed would leave whatever it allocates with no
       // owner left to tear it down.
-      if (this.#clients.get(clientId)?.established !== established) return;
+      if (this.#clients.get(clientId)?.established !== established) return null;
     }
+    return receipt;
   }
 
   #sendApp(
@@ -1651,7 +1637,7 @@ export class BurrowRuntime {
       // **Only a poisoned session is burrow loss.** An over-cap message is
       // refused before the first `encryptWithAd`, so no ciphertext exists and
       // no counter moved; disposing there would turn a caller's size error into
-      // a re-handshake, re-entrantly from inside `#onEstablishedFrame`'s loop.
+      // a re-handshake, re-entrantly from inside `#receiveOnSession`'s loop.
       if (!session.isPoisoned) {
         console.warn('[burrow] discarding an application message the transport refused');
         return;

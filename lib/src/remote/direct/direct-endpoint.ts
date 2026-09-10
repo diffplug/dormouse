@@ -15,9 +15,11 @@
 
 import {
   DirectCutover,
+  fromBase64Url,
   isDirectSignalV1,
   type DirectPath,
   type DirectSignalV1,
+  type TransportReceipt,
 } from 'remote-lib-common';
 
 import { DirectPeer, type DirectPeerFactory } from './direct-peer';
@@ -38,10 +40,14 @@ export interface DirectEndpointDeps {
    */
   sendSignal(signal: DirectSignalV1): boolean;
   /**
-   * Decrypt one transport ciphertext that arrived on the channel — the same
-   * path a relay ciphertext takes, because it is the same session.
+   * Decrypt one transport ciphertext, whichever path carried it, process
+   * everything that is not a signal, and answer the receipt. `null` where the
+   * decrypt failed — a poisoned session, which the owner has already disposed.
+   *
+   * The signals come back here rather than being dispatched by the owner: the
+   * endpoint is the only thing that knows what one means.
    */
-  receive(ciphertext: Uint8Array): void;
+  receive(ciphertext: Uint8Array): TransportReceipt | null;
   /**
    * The session is unrecoverable: the endpoint's owner disposes it (the Burrow
    * through `#disposeEstablished`, the Client through `#loseBurrow`).
@@ -132,7 +138,7 @@ export class DirectEndpoint {
         // take: what was held is exactly what was sent after the switch.
         for (const frame of outcome.frames) {
           if (!this.#alive()) return;
-          this.#deps.receive(frame);
+          this.#deliver(frame);
         }
         return;
       }
@@ -140,14 +146,31 @@ export class DirectEndpoint {
   }
 
   /**
-   * One transport frame arriving on the relay; `false` is a violation.
+   * One transport frame arriving on the relay, as the envelope carried it.
+   * **Both ends read a relay frame through here**, so every rule about what may
+   * arrive on which path is stated once.
    *
    * **After the peer has switched there is nothing left for it to send there**,
    * so a frame that arrives anyway is a peer whose two paths this end can no
-   * longer keep in order.
+   * longer keep in order. **A `ct` that will not decode ends the session too**:
+   * the wire guard bounds the alphabet and the length, not the padding, so the
+   * decode belongs inside the session's own failure path rather than thrown out
+   * of a socket handler.
    */
-  onRelayTransport(): boolean {
-    return this.#cutover.onRelayTransport() === 'process';
+  onRelayFrame(ct: string): void {
+    if (!this.#alive()) return;
+    if (this.#cutover.onRelayTransport() !== 'process') {
+      this.#deps.fatal('a relay frame arrived after the direct switch');
+      return;
+    }
+    let ciphertext: Uint8Array;
+    try {
+      ciphertext = fromBase64Url(ct);
+    } catch {
+      this.#deps.fatal('a relay frame was not a ciphertext');
+      return;
+    }
+    this.#deliver(ciphertext);
   }
 
   /**
@@ -253,7 +276,7 @@ export class DirectEndpoint {
     if (!this.#alive()) return;
     switch (this.#cutover.onChannelFrame(frame)) {
       case 'process':
-        this.#deps.receive(frame);
+        this.#deliver(frame);
         return;
       case 'held':
         return;
@@ -261,6 +284,16 @@ export class DirectEndpoint {
         this.#deps.fatal('the direct path outran what can be held in order');
         return;
     }
+  }
+
+  /**
+   * One transport ciphertext into the session, whichever path carried it. **A
+   * control message on an established session is one of this path's signals**,
+   * and reading it here is what keeps the two ends' receive paths identical.
+   */
+  #deliver(ciphertext: Uint8Array): void {
+    const receipt = this.#deps.receive(ciphertext);
+    if (receipt?.kind === 'control') this.onSignal(receipt.value);
   }
 
   #onClosed(reason: string): void {

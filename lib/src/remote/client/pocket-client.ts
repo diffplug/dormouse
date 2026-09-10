@@ -75,6 +75,7 @@ import {
   type TerminalAttachResult,
   type TerminalClosedEvent,
   type TerminalDataEvent,
+  type TransportReceipt,
 } from 'remote-lib-common';
 import {
   PasskeyAlreadyRegisteredError,
@@ -1198,11 +1199,13 @@ export class PocketClient {
    * The end-to-end session is over while the relay socket is not: dispose it,
    * fail everything in flight, and tell the app — the same three steps a
    * `burrow-gone` frame takes, because from here they are the same event.
+   *
+   * **The socket is left alone**, which is the whole difference from
+   * {@link #teardown}: it is the socket to the *Relay*, and reconnecting is a
+   * fresh handshake over the one already open.
    */
   #loseBurrow(reason: string): void {
-    this.#disposeCeremony();
-    this.#rejectAll(new Error(reason));
-    this.#onBurrowGone?.();
+    this.#endSession(reason, { notifyGone: true });
   }
 
   /** Where this session's frames are addressed on the relay. */
@@ -1412,7 +1415,11 @@ export class PocketClient {
       frame.id === established.connectionId &&
       frame.step === 'transport'
     ) {
-      this.#onEstablishedFrame(established, frame.ct);
+      // Every rule about a frame on an authorized session — which path may
+      // carry it, and that its `ct` must decode — is the endpoint's, and it is
+      // created and dropped with `#established` (`docs/specs/remote-api.md` →
+      // Transport → "Direct path").
+      this.#direct?.onRelayFrame(frame.ct);
       return;
     }
     const key = waiterKey(frame.kind, frame.id, frame.step);
@@ -1423,42 +1430,28 @@ export class PocketClient {
   }
 
   /**
-   * One transport frame on an authorized session, arriving on the relay.
-   *
-   * **After the Burrow has switched there is nothing left for it to send here**,
-   * so a frame that arrives anyway is a peer whose two paths this Client can no
-   * longer keep in order (`docs/specs/remote-api.md` → Transport → "Direct
-   * path").
+   * Decrypt one transport ciphertext, whichever path carried it, and answer the
+   * receipt for the endpoint to read a signal out of. **Any decrypt or framing
+   * failure ends the session**: there is no resynchronization point in a stream
+   * cipher, so a poisoned session is burrow loss and the app must leave the
+   * wall.
    */
-  #onEstablishedFrame(established: EstablishedSession, ct: string): void {
-    if (this.#direct && !this.#direct.onRelayTransport()) {
-      this.#loseBurrow('a relay frame arrived after the direct switch');
-      return;
-    }
-    this.#receiveOnSession(established, fromBase64Url(ct));
-  }
-
-  /**
-   * Decrypt one transport ciphertext, whichever path carried it. **Any decrypt
-   * or framing failure ends the session**: there is no resynchronization point
-   * in a stream cipher, so a poisoned session is burrow loss and the app must
-   * leave the wall.
-   */
-  #receiveOnSession(established: EstablishedSession, ciphertext: Uint8Array): void {
-    let receipt;
+  #receiveOnSession(
+    established: EstablishedSession,
+    ciphertext: Uint8Array,
+  ): TransportReceipt | null {
+    let receipt: TransportReceipt;
     try {
       receipt = established.session.receive(ciphertext);
     } catch {
-      this.#teardown('the end-to-end session failed', { notifyGone: true });
-      return;
+      // The end-to-end session is what died, never the relay socket: it is to
+      // the *Relay*, and the app reconnects with a fresh handshake over it.
+      this.#loseBurrow('the end-to-end session failed');
+      return null;
     }
-    // A keepalive is accepted and ignored; the only control messages on an
-    // established session are the direct path's signals.
-    if (receipt.kind === 'control') {
-      this.#direct?.onSignal(receipt.value);
-      return;
-    }
-    if (receipt.kind !== 'app') return;
+    // A keepalive is accepted and ignored; a control message is one of the
+    // direct path's signals, which the endpoint reads off this receipt.
+    if (receipt.kind !== 'app') return receipt;
     for (const message of receipt.messages) {
       let payload: unknown;
       try {
@@ -1468,6 +1461,7 @@ export class PocketClient {
       }
       this.#onMsg(payload);
     }
+    return receipt;
   }
 
   #onMsg(data: unknown): void {
@@ -1506,6 +1500,11 @@ export class PocketClient {
    */
   #teardown(reason: string, { notifyGone }: { notifyGone: boolean }): void {
     this.#ws = null; // never reuse a closed socket; openSocket() makes a fresh one
+    this.#endSession(reason, { notifyGone });
+  }
+
+  /** Everything a session's end does short of the socket; see {@link #teardown}. */
+  #endSession(reason: string, { notifyGone }: { notifyGone: boolean }): void {
     this.#disposeCeremony();
     this.#rejectAll(new Error(reason));
     if (notifyGone) this.#onBurrowGone?.();

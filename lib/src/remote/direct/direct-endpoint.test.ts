@@ -18,6 +18,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DIRECT_SETUP_TIMEOUT_MS,
   MAX_DIRECT_PENDING_FRAMES,
+  toBase64Url,
   type DirectPath,
   type DirectSignalV1,
 } from 'remote-lib-common';
@@ -99,7 +100,12 @@ function pair(options: Options = {}) {
         else deliver(signal);
         return true;
       },
-      receive: (ciphertext) => void side.received.push(ciphertext),
+      receive: (ciphertext) => {
+        side.received.push(ciphertext);
+        // Signals ride the stand-in relay here rather than a real session, so
+        // nothing a frame decrypts to is a control message.
+        return { kind: 'keepalive' } as const;
+      },
       fatal: (reason) => void side.fatals.push(reason),
       isCurrent: () => side.live,
       onPathChanged: (path) => void side.paths.push(path),
@@ -324,10 +330,31 @@ describe('DirectEndpoint', () => {
     await cutover(run);
 
     // Before the peer's switch the relay is still the path it sends on.
-    expect(run.offerer.endpoint.onRelayTransport()).toBe(true);
-    run.fake.openChannels();
+    run.offerer.endpoint.onRelayFrame(toBase64Url(frame(1)));
+    expect(run.offerer.received).toEqual([frame(1)]);
 
-    expect(run.offerer.endpoint.onRelayTransport()).toBe(false);
+    run.fake.openChannels();
+    run.offerer.endpoint.onRelayFrame(toBase64Url(frame(2)));
+
+    expect(run.offerer.fatals).toEqual(['a relay frame arrived after the direct switch']);
+    // Refused before any decrypt: the ciphertext is never even looked at.
+    expect(run.offerer.received).toEqual([frame(1)]);
+  });
+
+  /**
+   * The wire guard bounds a `ct`'s alphabet and length, not its padding, so a
+   * peer can put a well-shaped envelope on the relay whose ciphertext will not
+   * decode. That is the session's failure, not an exception out of a socket
+   * handler.
+   */
+  it('ends the session on a relay frame whose ciphertext will not decode', async () => {
+    const run = pair({ opening: 'never' });
+    await cutover(run);
+
+    run.offerer.endpoint.onRelayFrame('AB');
+
+    expect(run.offerer.fatals).toEqual(['a relay frame was not a ciphertext']);
+    expect(run.offerer.received).toEqual([]);
   });
 
   it('routes a ciphertext onto the channel only after this end has switched', async () => {

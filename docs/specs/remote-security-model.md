@@ -426,9 +426,7 @@ restated here.
   nothing the Noise session does not already protect, and **the fingerprints in
   an SDP are authentic for exactly one reason — that SDP arrived inside the
   session**. A DTLS peer is never an authenticated one.
-- **Never an ICE server.** A public STUN or TURN default hands a third party the
-  user's address, and a TURN relay hands it the traffic; both ends pass an empty
-  list (rationale).
+- **Never an ICE server.** Both ends pass an empty list. (rationale)
 - **One peer connection per session, and never a longer-lived one.** Created at
   the offer and closed by every path that ends the session — outcome, expiry,
   `client-gone`, a lost relay socket, `stop()`.
@@ -448,9 +446,8 @@ on a standalone Burrow (`docs/specs/security-supply-chain.md`). A memory-safety
 bug in either is reachable by any stranger on those networks, and nothing above
 it mitigates that.
 
-**A channel lost after cutover is burrow loss, and that is accepted**: the
-counters have moved, a stream cipher has no resynchronization point, and both
-ends end the session rather than resume on the Relay (rationale). The Relay
+**A channel lost after cutover is burrow loss, and that is accepted**: both ends
+end the session rather than resume on the Relay. (rationale) The Relay
 still sees that the session exists and whether each end is online; it no longer
 sees the traffic ([Residual metadata](#residual-metadata)).
 

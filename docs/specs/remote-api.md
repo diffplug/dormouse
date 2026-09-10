@@ -88,9 +88,8 @@ over `MAX_DIRECT_SDP_LENGTH` is never sent**: the Client skips the offer, the
 Burrow declines. That bound derives from `CONTROL_PAYLOAD_SIZE`, so a maximal
 signal always fits one control body.
 
-**No ICE servers.** `iceServers: []` at both ends, host candidates only.
-**Never a public STUN or TURN default** — it would hand a third party the user's
-address. (rationale)
+**No ICE servers**, and **never a public STUN or TURN default**: `iceServers:
+[]` at both ends, host candidates only. (rationale)
 
 **Every byte on the channel is a Noise transport message of the promoted
 session**: one message per channel frame, raw bytes, the same two `CipherState`s
@@ -107,7 +106,7 @@ non-binary channel message — disposes the session. (rationale)
   `MAX_DIRECT_PENDING_BYTES`, **overflow disposing the session** — then drains
   them in arrival order through the same decrypt path.
 * **After inbound has switched, a relay `transport` frame disposes the
-  session**, refused before any decrypt.
+  session**, refused before any decrypt, as does a `ct` that will not decode.
 * **After either direction has switched, the channel closing or erroring
   disposes the session**: the Client reports burrow loss exactly as a
   `burrow-gone`, the Burrow disposes the established entry. **Before any switch
@@ -136,7 +135,8 @@ Source of truth: `remote-lib-common/src/security/direct-path.ts` (the signals,
 their guard, the constants, and the `DirectCutover` both ends run),
 `lib/src/remote/direct/direct-peer.ts` (`DirectPeerLike` and the negotiation),
 `DirectEndpoint` in `lib/src/remote/direct/direct-endpoint.ts` (the whole
-cutover policy, one per authorized session, constructed at promotion by
+cutover policy, one per authorized session; `onRelayFrame` is both ends' only
+way in from the relay; constructed at promotion by
 `PocketClient.#directEndpoint` in `lib/src/remote/client/pocket-client.ts` and
 `BurrowRuntime.#promoteConnection` in
 `lib/src/remote/burrow/burrow-runtime.ts`); pinned by

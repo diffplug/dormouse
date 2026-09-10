@@ -915,6 +915,84 @@ describe('the direct path, end to end', () => {
   });
 
   /**
+   * `isE2eCiphertext` bounds a `ct`'s alphabet and its length, not its padding,
+   * so a relay can put a well-shaped envelope on the wire whose ciphertext will
+   * not decode. Both ends must end the session on it, rather than throw out of
+   * the socket handler or warn and drop it.
+   */
+  it('disposes the Client’s session on a relay frame that will not decode', async () => {
+    // Nothing switches, so the relay is still the path this frame belongs on
+    // and the decode is the only thing that can refuse it.
+    const run = await connectedDirect({ network: { opening: 'never' } });
+    const gone = vi.fn();
+    run.harness.client.setOnBurrowGone(gone);
+
+    expect(() =>
+      run.harness.clientSocket().receive({
+        t: 'e2e',
+        burrowId: run.harness.burrowId,
+        kind: 'connection',
+        id: run.connectionId,
+        step: 'transport',
+        // Two base64url characters: one byte, with nonzero trailing bits.
+        ct: 'AB',
+      }),
+    ).not.toThrow();
+
+    expect(gone).toHaveBeenCalledOnce();
+    expect(run.harness.client.connectedBurrowId).toBeNull();
+  });
+
+  it('disposes the Burrow’s session on a relay frame that will not decode', async () => {
+    const run = await connectedDirect({ network: { opening: 'never' } });
+
+    run.harness.relay.burrowSocket.receive({
+      t: 'e2e',
+      clientId: run.harness.relay.clientId,
+      burrowId: run.harness.burrowId,
+      kind: 'connection',
+      id: run.connectionId,
+      step: 'transport',
+      ct: 'AB',
+    });
+
+    await waitFor(
+      () => run.harness.burrow.establishedSessionCount === 0,
+      'the Burrow to drop the session',
+    );
+  });
+
+  /**
+   * What a failed decrypt kills is the end-to-end session; the relay socket is
+   * to the *Relay*, and reconnecting is a fresh handshake over the one already
+   * open. Nulling it without closing it would leave it live and unreferenced,
+   * with the app's next `openSocket()` opening a second beside it.
+   */
+  it('keeps the relay socket open when the end-to-end session fails', async () => {
+    const run = await connectedDirect({ network: { opening: 'never' } });
+    const socket = run.harness.clientSocket();
+    const gone = vi.fn();
+    run.harness.client.setOnBurrowGone(gone);
+
+    // Decodes, and then fails to decrypt: 18 bytes that are not this session's.
+    socket.receive({
+      t: 'e2e',
+      burrowId: run.harness.burrowId,
+      kind: 'connection',
+      id: run.connectionId,
+      step: 'transport',
+      ct: 'A'.repeat(24),
+    });
+
+    expect(gone).toHaveBeenCalledOnce();
+    expect(run.harness.client.connectedBurrowId).toBeNull();
+    expect(run.harness.client.socketOpen).toBe(true);
+    // The same socket, still open: `openSocket()` would reuse it.
+    expect(run.harness.clientSocket()).toBe(socket);
+    expect(socket.readyState).toBe(1);
+  });
+
+  /**
    * The race the holding queue exists for: the Burrow's answers overtake the
    * `direct-switch` that precedes them on the relay. The in-memory relay routes
    * synchronously, so the test holds that direction by hand.
