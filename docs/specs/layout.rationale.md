@@ -16,7 +16,9 @@ xterm.js paints only its own rendered surface, and integer row fitting leaves a 
 
 ## Workspaces
 
-**Why `visibility: hidden` in one grid cell rather than `display: none`.** A `display:none` Wall has no box, so every xterm in it would refit on the way back — including a resize that happened while it was hidden. Sharing one grid cell keeps every Wall's box identical, so a resize refits all of them once and a switch refits nothing (checked in the browser-dev harness by resizing with Workspace 2 visible and finding Workspace 1's screen already at the new size, 2026-09).
+**Why `visibility: hidden` in one grid cell rather than `display: none`.** A `display:none` Wall has no box, so every xterm in it would refit on the way back — including a resize that happened while it was hidden. Sharing one grid cell keeps every Wall's box identical, so a switch's reattach fit finds an unchanged grid (checked in the browser-dev harness by resizing with Workspace 2 visible and finding Workspace 1's screen already at the new size, 2026-09).
+
+**Why a hidden Workspace's terminals are detached rather than merely hidden.** xterm pauses rendering only when its screen element stops intersecting (`RenderService` in `@xterm/xterm`), and a `visibility: hidden` box still intersects, so a hidden pane kept rasterizing every output frame and holding a GL context. Reusing the minimize primitives pauses it and releases the context; the box stays laid out, so the reattach fit finds the same grid and sends no PTY resize (2026-09).
 
 **Why `inert` is only defense in depth.** `visibility: hidden` already removes focusability, so the attribute exists for a future presentation that keeps the subtree visible.
 
