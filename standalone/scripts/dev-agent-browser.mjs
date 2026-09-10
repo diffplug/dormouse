@@ -2,11 +2,9 @@
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { readFile, realpath } from 'node:fs/promises';
-import { createHash, randomBytes } from 'node:crypto';
-import { createServer } from 'vite';
+import { readFile } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
 import { sessionForKey } from 'dor-lib-common/agent-browser';
-import { fileURLToPath } from 'node:url';
 // cross-spawn, not node:child_process: this script spawns `dor` and
 // `agent-browser`, which are `.cmd` shims on Windows that a bare-name spawn
 // can't resolve (ENOENT) and Node >=22 won't run directly (EINVAL). cross-spawn
@@ -16,18 +14,17 @@ import { createInterface } from 'node:readline';
 // The bridge's security boundary, in its own module so it is testable —
 // see standalone/scripts/dev-host-guard.test.mjs.
 import { corsHeaders, isAuthorized } from './dev-host-guard.mjs';
+// Worktree identity and the Vite server this harness shares with the native
+// dev runner (`dev-standalone.mjs`).
+import { repoRoot, standaloneDir, startDevVite, worktreeId } from './dev-run.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const standaloneDir = path.resolve(__dirname, '..');
-const repoRoot = path.resolve(standaloneDir, '..');
 const sidecarDir = path.join(standaloneDir, 'sidecar');
 const sidecarScript = path.join(sidecarDir, 'main.js');
 const dorBinDir = path.join(sidecarDir, 'dor-cli', 'bin');
 const dorEntrypoint = path.join(sidecarDir, 'dor-cli', 'dist', 'dor.js');
 // Bind port 0 directly: probing and then releasing a free port races other runs.
 let hostPort = Number(process.env.DORMOUSE_BROWSER_DEV_HOST_PORT || 0);
-const requestedVitePort = Number(process.env.DORMOUSE_BROWSER_DEV_VITE_PORT || 0);
-const worktreeKey = `innerdogfood-${createHash('sha256').update(await realpath(repoRoot)).digest('hex').slice(0, 16)}`;
+const worktreeKey = `innerdogfood-${await worktreeId()}`;
 const browserSession = process.env.DORMOUSE_BROWSER_DEV_AB_SESSION || sessionForKey(worktreeKey);
 const insideDormouse = Boolean(process.env.DORMOUSE_SURFACE_ID);
 // Only the token: the sidecar picks the control socket path itself (hardened
@@ -283,23 +280,11 @@ function startSidecar() {
 }
 
 async function startVite() {
-  // Own Vite in this process: listen() reports the actual bound port and close()
-  // tears down its watchers too. A TCP readiness probe could find another run.
-  vite = await createServer({
-    root: standaloneDir,
-    // Inject only into the page, never process.env: the sidecar's PTYs must not
-    // inherit the HTTP bridge credential.
-    define: {
-      'import.meta.env.VITE_DORMOUSE_BROWSER_DEV_HOST': JSON.stringify(`http://127.0.0.1:${hostPort}/?t=${bridgeToken}`),
-    },
-    server: {
-      host: '127.0.0.1', port: requestedVitePort, strictPort: true,
-      // Share Vite's listener, including when TAURI_DEV_HOST is inherited.
-      hmr: { host: 'localhost', port: 0, protocol: 'ws' },
-    },
-  });
-  await vite.listen();
-  viteOrigin = `http://localhost:${vite.httpServer.address().port}`;
+  // The bridge credential reaches the page only, never process.env: the
+  // sidecar's PTYs must not inherit it.
+  ({ vite, origin: viteOrigin } = await startDevVite({
+    'import.meta.env.VITE_DORMOUSE_BROWSER_DEV_HOST': JSON.stringify(`http://127.0.0.1:${hostPort}/?t=${bridgeToken}`),
+  }));
   log(`app URL: ${viteOrigin}`);
 }
 
