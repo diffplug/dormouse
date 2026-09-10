@@ -13,11 +13,14 @@
  * real DTLS/SCTP, and the session riding it is the real Noise session — the
  * whole loop from `test-e2e-harness.ts`, with only the addon swapped in.
  *
- * The addon is resolved from `standalone/sidecar`, which is where it is
- * installed and where the shipped bundle finds it; `lib` must not depend on it,
- * because `lib` is a browser bundle root.
+ * **The addon is resolved here rather than through the shipped factory.** It is
+ * installed under `standalone/sidecar`, which is where the shipped bundle finds
+ * it with a bare `require`; `lib` must not depend on it, because `lib` is a
+ * browser bundle root. So these cases inject a plain factory over the polyfill
+ * this file resolves, and the shipped factory is driven by the last case alone.
  */
 
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { NOISE_MAX_MESSAGE_LENGTH, type TerminalDataEvent } from 'remote-lib-common';
@@ -25,14 +28,32 @@ import { DirectPeer, type DirectPeerLike } from '../../remote/direct/direct-peer
 import { STREAMED_CHUNK, makeE2eHarness, waitFor } from '../../remote/client/test-e2e-harness';
 import { createNativeDirectPeerFactory, disposeNativeDirectPeers } from './native-direct-peer';
 
-/**
- * A file inside the package that declares the addon. The sidecar bundle sits
- * beside its own `node_modules` and needs no such hint; this file, running from
- * source under `lib/`, does.
- */
-const SIDECAR = fileURLToPath(
-  new URL('../../../../standalone/sidecar/package.json', import.meta.url),
+/** A file inside the package that declares the addon, to resolve it from. */
+const sidecarRequire = createRequire(
+  fileURLToPath(new URL('../../../../standalone/sidecar/package.json', import.meta.url)),
 );
+
+interface NativePolyfill {
+  readonly RTCPeerConnection: new (config: { iceServers: [] }) => DirectPeerLike;
+}
+
+const { RTCPeerConnection } = sidecarRequire('node-datachannel/polyfill') as NativePolyfill;
+
+/**
+ * `iceServers: []` as both shipped factories pass it: host candidates only,
+ * never a public STUN or TURN default.
+ */
+const buildPeer = (): DirectPeerLike => new RTCPeerConnection({ iceServers: [] });
+
+/** Whether the last case already tore the addon down through the shipped path. */
+let disposedByFactory = false;
+
+afterAll(() => {
+  // The addon runs its own threads, which outlive every peer and would hold
+  // this worker open after the last assertion. One teardown, whichever path
+  // reached it — both resolve the same native module.
+  if (!disposedByFactory) (sidecarRequire('node-datachannel') as { cleanup: () => void }).cleanup();
+});
 
 /**
  * What one negotiation is given before it is written off. A local pair settles
@@ -44,18 +65,6 @@ const ATTEMPT_BUDGET_MS = 5_000;
 const NEGOTIATION_ATTEMPTS = 4;
 /** Every attempt, plus the ceremonies in front of them — never vitest's default. */
 const CASE_BUDGET_MS = 45_000;
-
-const warnings: string[] = [];
-const buildPeer = createNativeDirectPeerFactory({
-  resolveFrom: SIDECAR,
-  warn: (message) => warnings.push(message),
-});
-
-afterAll(() => {
-  // The addon runs its own threads, which outlive every peer and would hold
-  // this worker open after the last assertion.
-  disposeNativeDirectPeers();
-});
 
 interface Negotiation {
   /** Whether the channel this attempt describes has come up. */
@@ -92,10 +101,10 @@ async function untilOpen<T extends Negotiation>(start: () => Promise<T>, what: s
 }
 
 /** Build a peer, keeping it so a case can close the far end by hand. */
-function collect(into: DirectPeerLike[]): () => DirectPeerLike | null {
+function collect(into: DirectPeerLike[]): () => DirectPeerLike {
   return () => {
     const peer = buildPeer();
-    if (peer) into.push(peer);
+    into.push(peer);
     return peer;
   };
 }
@@ -111,19 +120,11 @@ async function startConnected() {
     deps: { createDirectPeer: collect(clientPeers) },
     burrowDirect: collect(burrowPeers),
   });
-  await harness.pairAndApprove(await harness.mintInvitation());
-  expect(await harness.client.connect(harness.burrowId)).toMatchObject({ ok: true });
-
-  const transportFrames = (frames: Array<Record<string, unknown>>) =>
-    frames.filter((frame) => frame.kind === 'connection' && frame.step === 'transport');
+  await harness.connectPaired();
   return {
     harness,
     clientPeers,
     burrowPeers,
-    /** Client→relay transport frames on the connection, which stop at the switch. */
-    clientFrames: () => transportFrames(harness.clientSocket().frames('e2e')),
-    /** Burrow→relay transport frames on the connection, which stop at its own switch. */
-    burrowFrames: () => transportFrames(harness.relay.burrowSocket.frames('e2e')),
     open: () => harness.client.transportPath === 'direct',
     abandon: () => {
       for (const peer of [...clientPeers, ...burrowPeers]) peer.close();
@@ -138,33 +139,31 @@ describe('the direct path over the native addon', () => {
     'negotiates a channel and carries protocol-v1 on it, the relay silent after',
     async () => {
       const run = await connectedDirect();
+      const { harness } = run;
 
-      // Both ends built a peer, and nothing warned — a machine that cannot load
-      // the addon would have declined and stayed relayed instead.
-      expect(warnings).toEqual([]);
       expect(run.clientPeers).toHaveLength(1);
       expect(run.burrowPeers).toHaveLength(1);
-      expect(run.harness.client.transportPath).toBe('direct');
+      expect(harness.client.transportPath).toBe('direct');
       // Three Client→Burrow transport frames on this connection: the connection
       // request the ceremony ended with, the offer, and the switch. Three back:
       // the outcome, the answer, and the Burrow's own switch. The SDPs crossed
       // inside the session, so the Relay saw only padded control bodies.
-      expect(run.clientFrames()).toHaveLength(3);
-      expect(run.burrowFrames()).toHaveLength(3);
+      expect(harness.clientTransportFrames()).toHaveLength(3);
+      expect(harness.burrowTransportFrames()).toHaveLength(3);
 
-      const clientBefore = run.clientFrames().length;
-      const burrowBefore = run.burrowFrames().length;
+      const clientBefore = harness.clientTransportFrames().length;
+      const burrowBefore = harness.burrowTransportFrames().length;
       const chunks: TerminalDataEvent[] = [];
 
-      expect(await run.harness.client.hello()).toMatchObject({ protocolVersion: 1 });
-      await run.harness.client.watchDirectory(() => {});
-      await run.harness.client.attach('surface-1', 80, 24, { onData: (e) => chunks.push(e) });
-      await run.harness.client.write('surface-1', 'ls\n');
+      expect(await harness.client.hello()).toMatchObject({ protocolVersion: 1 });
+      await harness.client.watchDirectory(() => {});
+      await harness.client.attach('surface-1', 80, 24, { onData: (e) => chunks.push(e) });
+      await harness.client.write('surface-1', 'ls\n');
 
       // Requests, answers, and the burrow→client stream all crossed the channel;
       // the relay carried none of it, in either direction.
-      expect(run.clientFrames()).toHaveLength(clientBefore);
-      expect(run.burrowFrames()).toHaveLength(burrowBefore);
+      expect(harness.clientTransportFrames()).toHaveLength(clientBefore);
+      expect(harness.burrowTransportFrames()).toHaveLength(burrowBefore);
       expect(chunks).toEqual([STREAMED_CHUNK]);
     },
     CASE_BUDGET_MS,
@@ -194,13 +193,9 @@ describe('the direct path over the native addon', () => {
           onClosed: (reason: string) => lost.push(reason),
           onViolation: (reason: string) => lost.push(reason),
         });
-        const offererPeer = buildPeer();
-        const answererPeer = buildPeer();
-        expect(offererPeer).not.toBeNull();
-        expect(answererPeer).not.toBeNull();
-        const offerer = new DirectPeer({ peer: offererPeer!, handlers: handlers(() => {}) });
+        const offerer = new DirectPeer({ peer: buildPeer(), handlers: handlers(() => {}) });
         const answerer = new DirectPeer({
-          peer: answererPeer!,
+          peer: buildPeer(),
           handlers: handlers((frame) => inbound.push(frame)),
         });
         const offer = await offerer.offer();
@@ -224,7 +219,7 @@ describe('the direct path over the native addon', () => {
       try {
         const payload = new Uint8Array(NOISE_MAX_MESSAGE_LENGTH);
         crypto.getRandomValues(payload);
-        run.offerer.send(payload);
+        expect(run.offerer.send(payload)).toBe(true);
 
         await waitFor(() => run.inbound.length === 1, 'the frame to arrive', ATTEMPT_BUDGET_MS);
         expect(run.inbound[0]).toEqual(payload);
@@ -263,4 +258,35 @@ describe('the direct path over the native addon', () => {
     },
     CASE_BUDGET_MS,
   );
+
+  /**
+   * The shipped factory, last because its teardown is the process's.
+   *
+   * **A teardown is terminal**: the native threads are gone, so a peer built on
+   * them is not one this process can use and every later offer declines,
+   * leaving that session relayed. The other half of the contract — a load that
+   * fails warns once and declines from then on — is not drivable here: vitest's
+   * `require` resolves from inside the store, where every workspace package is
+   * reachable, so the addon cannot be made to not load without replacing the
+   * module system this case exists to exercise.
+   */
+  it('builds a peer through a bare require, and declines once torn down', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const factory = createNativeDirectPeerFactory();
+      const peer = factory();
+      expect(peer).not.toBeNull();
+      peer!.close();
+
+      disposeNativeDirectPeers();
+      disposedByFactory = true;
+
+      expect(factory()).toBeNull();
+      expect(createNativeDirectPeerFactory()()).toBeNull();
+      // Silent: only an installation the addon never loaded on warns, and once.
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
 });

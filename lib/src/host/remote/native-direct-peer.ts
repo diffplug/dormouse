@@ -15,7 +15,6 @@
  * gets no `direct-offer` never opens it at all.
  */
 
-import { createRequire } from 'node:module';
 import type { DirectPeerFactory, DirectPeerLike } from '../../remote/direct/direct-peer';
 
 /** The one polyfill export a direct path needs. */
@@ -31,20 +30,6 @@ interface DirectAddon {
 interface NativeDirect {
   readonly polyfill: DirectPolyfill;
   readonly addon: DirectAddon;
-}
-
-export interface NativeDirectPeerOptions {
-  /**
-   * A file to resolve the addon relative to, for a caller that does not sit
-   * beside the `node_modules` holding it. The sidecar bundle does — it is
-   * emitted into `standalone/sidecar/`, whose `package.json` declares the
-   * platform package — so the shipped Burrow passes nothing and the loader
-   * below uses the bundle's own `require`. A test running this file from source
-   * under `lib/` names the sidecar instead.
-   */
-  readonly resolveFrom?: string;
-  /** Where a load failure is reported; `console.warn` by default. */
-  readonly warn?: (message: string) => void;
 }
 
 /**
@@ -69,14 +54,7 @@ let declined = false;
  * esbuild `external` entries in `standalone/scripts/build-sidecar-proxy.mjs`
  * are what keeps them bare, and that build asserts it.
  */
-function requireNative(resolveFrom: string | undefined): NativeDirect {
-  if (resolveFrom !== undefined) {
-    const required = createRequire(resolveFrom);
-    return {
-      polyfill: required('node-datachannel/polyfill') as DirectPolyfill,
-      addon: required('node-datachannel') as DirectAddon,
-    };
-  }
+function requireNative(): NativeDirect {
   return {
     polyfill: require('node-datachannel/polyfill') as DirectPolyfill,
     addon: require('node-datachannel') as DirectAddon,
@@ -92,17 +70,14 @@ function requireNative(resolveFrom: string | undefined): NativeDirect {
  * native load attempt each time — and the Burrow's answer is the same either
  * way: `direct-decline`, and the session stays on the relay.
  */
-export function createNativeDirectPeerFactory(
-  options: NativeDirectPeerOptions = {},
-): DirectPeerFactory {
-  const warn = options.warn ?? ((message: string) => console.warn(message));
+export function createNativeDirectPeerFactory(): DirectPeerFactory {
   return () => {
     if (!native && !declined) {
       try {
-        native = requireNative(options.resolveFrom);
+        native = requireNative();
       } catch (error) {
         declined = true;
-        warn(`[burrow] no direct path: the WebRTC addon did not load: ${String(error)}`);
+        console.warn(`[burrow] no direct path: the WebRTC addon did not load: ${String(error)}`);
       }
     }
     // `iceServers: []` here and nowhere else: host candidates only, never a
