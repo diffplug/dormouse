@@ -627,6 +627,12 @@ into fresh shells at its saved cwds.
 - **A restore that throws degrades to a fresh Window and overwrites the blob.**
   Installing the Workspaces is the step that can reject a stored blob outright, and
   a throw at boot would leave nothing rendered, on this launch and every later one.
+- **A fresh Window mints its first Workspace's id**, rather than taking the lib's
+  `DEFAULT_WORKSPACE_ID`, which every window would otherwise start on: a second
+  window opened after the first one closed would write a blob naming a Workspace
+  id already live in another window's blob, and the next launch would meet the
+  same id twice and refuse the whole restore. A bare Wall — one Window's whole
+  application — keeps the default id (`window-restore.test.ts`).
 
 Source of truth: `restoreWindowOrFresh` / `routeUnownedPtys` in
 `standalone/src/window-restore.ts`.

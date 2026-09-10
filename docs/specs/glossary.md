@@ -88,7 +88,7 @@ A Workspace's **union status** is its display projection of member Surfaces' Act
 
 ### Implementation status
 
-The Pane / Surface model, surface kinds, the Workspace model, per-Workspace persistence, and several Windows each holding several Workspaces are live (`docs/specs/layout.md` → Workspaces). Ledger: `docs/specs/layout.md` `## Future` (**Scope: workspaces-rollout**); this glossary does not track it.
+The Pane / Surface model, surface kinds, the Workspace model, per-Workspace persistence, several Windows each holding several Workspaces, and the `dor workspace` verbs over them are all live (`docs/specs/layout.md` → Workspaces); this glossary tracks no rollout.
 
 ## Roles
 

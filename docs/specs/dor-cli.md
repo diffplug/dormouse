@@ -250,12 +250,11 @@ and each host's hop in `standalone/src/tauri-adapter.ts`,
 
 ## Handle Model
 
-`Window ⊃ Workspace ⊃ Pane ⊃ Surface` (`docs/specs/glossary.md`). **User-facing
-`dor` commands expose Surface handles only**, and because a Window can hold
-several Workspaces — and standalone can hold several Windows — the handle model
-reserves `workspace:<n|name>` and `window:<label>` refs. `Reserved:` no command
-targets another Window yet; a request reaches the window that owns its Surface
-instead (§Standalone), which is what `## Future` → `dor workspace` builds on.
+`Window ⊃ Workspace ⊃ Pane ⊃ Surface` (`docs/specs/glossary.md`). **A command's
+positional target is always a Surface; a container is named by `--workspace
+<ref>`** ([dor workspace](#dor-workspace)). `Reserved:` no command targets
+another Window; a request reaches the window that owns its Surface instead
+(§Standalone), and the ref grammar for one is [Future](#future).
 
 Invariants:
 
@@ -291,40 +290,52 @@ Invariants:
   `--id-format refs|ids|both` (`uuids` is a compatibility alias for `ids`). JSON
   list output always includes both refs and stable ids.
 - `workspace:<n>` selects a container and is **positional**, so a strip reorder
-  renumbers it; `workspace:<name>` is the stable handle and is staged with the
-  `dor workspace` commands (see [Future](#future)). **A Window is `window:<label>`
-  — its host's own name for it** (`window:main`, `window:ws-2`), and a host with
+  renumbers it; `workspace:<name>` is the stable handle and **resolves only when
+  exactly one Workspace carries that name**, else the error lists the
+  candidates. Both are accepted bare (`2`, `build`), and **a ref that reads as a
+  number is positional**, never a name. **A Window is `window:<label>` — its
+  host's own name for it** (`window:main`, `window:ws-2`), and a host with
   one Window answers `window:1`; each accepts its own ref bare, and **rejects
   every other Window's**, there being nothing it could do with one.
   **Every Workspace has a `surface:1`**, so a Surface ref alone
   never identifies a Workspace.
-- **One Wall answers each request**, resolved in order: an explicit
-  `workspace:<n>`, else the Workspace owning the calling Surface, else the
-  active one; nothing mounted leaves the request unanswered, after a bounded
+- **One Wall answers each request**, resolved in order: the Window's own verbs
+  ([dor workspace](#dor-workspace), and `dor list --all`, which fans out to
+  every Wall), an explicit `--workspace`, the Workspace holding the target
+  Surface when it is named by its **stable id** — unique Window-wide, unlike
+  `surface:N` — else the Workspace owning the calling Surface, else the active
+  one; nothing mounted leaves the request unanswered, after a bounded
   retry that covers the tick between a Workspace being created and its Wall
   registering. **Every request is answered, including a container ref of the
   wrong type and a handler that throws** — an unanswered one blocks its caller
   to the deadline. A Workspace being closed refuses the Surface-creating verbs
-  (`docs/specs/layout.md` → "Workspaces"). **Surface targets
-  resolve within the answering Workspace** — refs are Workspace-scoped — so a
-  `dor split` from a background Workspace lands beside its caller rather than
-  wherever the user is looking. Cross-Workspace targeting is staged with
-  Workspace-aware listing. Cross-window duplicate ids follow
+  (`docs/specs/layout.md` → "Workspaces"). **Surface targets resolve within the
+  answering Workspace** — refs are Workspace-scoped — so a `dor split` from a
+  background Workspace lands beside its caller rather than wherever the user is
+  looking, and **a caller that Workspace does not hold falls back to its focused
+  Surface** rather than failing, which is what gives `--workspace` a reference
+  to place against. Cross-window duplicate ids follow
   `docs/specs/vscode.md` → "Peer surfaces across windows".
 
 Source of truth: `dor/src/commands/shared.ts`, `dor/src/commands/types.ts`,
-`surfaceRefForId` / `transferSurfaceRef` in `lib/src/components/Wall.tsx`, and
+`surfaceRefForId` / `transferSurfaceRef` in `lib/src/components/Wall.tsx`,
+`resolveWorkspaceRef` in `lib/src/lib/workspace-store.ts`, and
 `resolveDorControlRoute` in `lib/src/components/wall/dor-control-router.ts`.
 
 ## Current Implemented Commands
 
 Implemented commands call private `surface.*` control methods, **enumerated once
-in `dor/src/protocol.ts` (`SURFACE_CONTROL_METHODS`)** so the emitting client
-and the dispatching webview cannot drift. `surface.list` joins the current
-Workspace's Surfaces — visible panes **plus minimized (doored)** ones, each
-tagged `view` (`paned` / `zoomed` / `minimized`) — with terminal state and
-activity snapshots, and reports the answering Workspace's own `workspace:<n>`
-alongside the answering Window's `window:<label>` (Handle Model). Per the
+in `dor/src/protocol.ts` (`SURFACE_CONTROL_METHODS`, and `WORKSPACE_CONTROL_METHODS`
+beside it)** so the emitting client and the dispatching webview cannot drift.
+`surface.list` joins one Workspace's Surfaces — visible panes
+**plus minimized (doored)** ones, each tagged `view` (`paned` / `zoomed` /
+`minimized`) — with terminal state and activity snapshots, and reports the
+answering Workspace's own `workspace:<n>` alongside the answering Window's
+`window:<label>` (Handle Model). **Its `scope: 'all'` spans every Workspace of
+the Window**, tagging each row with the Workspace it came from and carrying the
+Workspace directory beside them; **one Workspace that cannot answer fails the
+whole listing**, since a Workspace missing from the answer reads as a Workspace
+holding nothing. Per the
 visible-vs-listed split [Handle Model](#handle-model) states, **a visible split
 reference adds a pane in Lath, a minimized one a sibling Door in the
 baseboard.** **`dor list` rows sort by the Workspace-stable `surface:N` ref**, a
@@ -382,7 +393,8 @@ The spec keeps the behavior help cannot express:
 | `await` | **Must name `--until quiet\|exit`; never infer it.** Timeout 1–86400 whole seconds, default 600; `alert.md` owns wake semantics. |
 | `kill` | **Must select exactly one confirmation mode.** Conditional text needs four non-whitespace characters and must match `read`; browser Surfaces are killable. |
 | `iframe`, `agent-browser` / `ab` | `dor-browser.md` owns the renderers; see [target resolution](#browser-open-target-resolution) and [addressing](#agent-browser-surface-addressing). The passthrough is intercepted before stricli parses it. |
-| `list` | Filters are ANDed client-side; `--port` filters terminals (browser Surfaces never match) and implies the opt-in detail scan, `--ports` only requests it. |
+| `list` | Filters are ANDed client-side; `--port` filters terminals (browser Surfaces never match) and implies the opt-in detail scan, `--ports` only requests it. **Owns every Workspace read**: `--workspace` narrows to one, `--all` groups every Workspace's rows under its header (dropping a group its filters emptied), `--workspaces` is the overview, and the three cannot be combined. |
+| `workspace` | **Mutation only** ([dor workspace](#dor-workspace)). |
 | `skill` | Prints the bundled skill or installs its bootstrap stub; [Agent Skill](#agent-skill) owns the contract. |
 
 **`await` never prints terminal text.** Stdout is only the resolution cause, the
@@ -394,7 +406,13 @@ Surface death; other commands use only 0/1.
 identity, singleton Workspace/Window refs, and Host identity/runtime paths — but
 **never the control socket**. **Consumers must gate on `has_terminal` /
 `has_browser`, not `kind`**, the vocabulary commands also use in target errors.
-Activity/state filters and Workspace scope are staged (see [Future](#future)).
+Activity/state filters are staged (see [Future](#future)).
+
+**Every command that acts on a Surface accepts `--workspace <ref>`** — `split`,
+`ensure`, `read`, `send`, `await`, `kill`, `iframe`, and the `dor ab`
+passthrough, which intercepts it beside its identity flags — naming the
+Workspace its targets resolve in and, for a creating verb, the Workspace the new
+Surface joins.
 
 Source of truth: `dor/src/commands/`, `HELP_PATTERN_TOKENS` and pre-parsing in
 `dor/src/cli.ts`, `shellCommandKind` / `buildShellCommandForKind` in
@@ -402,6 +420,37 @@ Source of truth: `dor/src/commands/`, `HELP_PATTERN_TOKENS` and pre-parsing in
 `lib/src/components/Wall.tsx`, `dorCommandString` and host dispatch in
 `lib/src/components/wall/use-dor-control.ts`; help snapshots in
 `dor/test/snapshots/help/`, pinned exhaustive by `dor/test/cli-help.test.mjs`.
+
+## dor workspace
+
+**`dor workspace` mutates and `dor list` enumerates**, so the overview has one
+home. Its verbs are container verbs, answered by the Window rather than by a
+Wall (Handle Model), and each takes a `workspace:<n|name>` target except `new`:
+
+| Verb | Contract |
+|---|---|
+| `new [name]` | **Creates in the background**, never activating: moving the user to another Workspace is a larger theft than the focus a bare `dor split` takes. Answers with the new ref. |
+| `rename <ref> <name>` | Renames the Workspace only — no Surface title (`docs/specs/layout.md` → "Workspaces"). |
+| `close <ref> [--force]` | **Refuses, raising no confirmation, when the Workspace holds a touched or running Surface** unless `--force` — the caller is a command, not someone watching the Wall, exactly as `dor kill` archives silently. The last Workspace, and a Workspace whose close meets another already in flight, refuse too. Member Surfaces close through the closure coordinator (`docs/specs/notepad.md` → "Closure"). |
+| `switch <ref>` | Activates it. |
+
+**Each verb ships as one action of one command**, not a route map: the published
+CLI reference renders one help page per top-level command
+(`docs/specs/website-docs.md` → /docs/dor), and a nested command would have
+none.
+
+**VS Code refuses every Workspace-spanning request at the extension host** —
+`dor workspace`, `dor list --workspaces`, `dor list --all`, and any
+`--workspace` but this webview's own — because each Workspace there is a
+separate webview (`docs/specs/vscode.md` → "Workspaces"), so a listing would
+report one webview's Workspace as the whole Window. Aggregating them at the
+extension host stays in [Future](#future).
+
+Source of truth: `dor/src/commands/workspace.ts`, `WORKSPACE_CONTROL_METHODS` in
+`dor/src/protocol.ts`, `handleWorkspaceControl` / `listAllWorkspaceSurfaces` in
+`lib/src/components/wall/workspace-control.ts`, `closeWorkspaceWithSurfaces` in
+`lib/src/components/wall/workspace-lifecycle.ts`, and `dorWorkspaceRefusal` in
+`vscode-ext/src/dor-workspace-guard.ts`.
 
 ## Browser Open Target Resolution
 
@@ -578,29 +627,18 @@ Source of truth: `buildDorSurfacesInternal` in `lib/src/components/Wall.tsx`; `d
   npm) distributes the bootstrap stub, never a copy of the content. A user-level
   `--global` install variant waits until a story needs it.
 
+- **Cross-Window targeting.** `window:<label>` is a listing ref today: a Window
+  accepts its own and rejects every other's (Handle Model), so no command can
+  reach a sibling Window's Surfaces. What it would take is a route above the
+  per-Window router — Rust already owns the window↔Surface map it would consult
+  (`docs/specs/standalone.md` → Routing) — plus a `--window` flag whose refs
+  survive a Workspace moving between Windows.
+- **Cross-Workspace listing in VS Code.** Each Workspace is its own webview
+  there, so `dor list --all` would have to aggregate at the extension host
+  rather than in a per-webview control handler; until it does, VS Code refuses
+  the Workspace-spanning requests ([dor workspace](#dor-workspace)).
 - **Additional `dor list` filters** — activity/state filters are deliberately
   deferred: `--running` as shorthand for `--activity running`, full `--activity
   unknown|prompt|editing|running|finished`, and possible alert filters such as
   `--alert` / `--todo`. Add only once a story needs them, each with
   snapshot-tested help.
-- **`dor list` workspace scope** — today `dor list` shows only the active
-  Workspace, with no workspace rows. When workspaces land, add `--all` (every
-  Workspace, grouped by a Workspace header), `--workspace <ref>` (narrow to
-  one), and `--workspaces` (the cheap overview: one row per Workspace with its
-  `active` flag and union status — ringing / todo / count from
-  `docs/specs/glossary.md`). `dor list` owns all read/enumeration and `dor
-  workspace` below owns mutation only, so the overview is never duplicated. Host
-  asymmetry constrains `--all`: standalone can reach unmounted Workspaces
-  (stores survive unmount, layouts are persisted, `getOpenPorts` is PTY-keyed),
-  but VS Code puts each Workspace in a separate webview, so cross-Workspace
-  listing must aggregate at the extension host, not the per-webview control
-  handler. This scope also owns cross-Workspace action targeting by stable
-  Surface id, which today's handler resolves only in the mounted Workspace.
-  Staged with the workspaces rollout (`docs/specs/layout.md` `## Future`,
-  workspaces-rollout).
-- **Workspace handles and commands** — a `--workspace` target flag and `dor
-  workspace` management commands (new / rename / close / switch — mutation only)
-  consuming the reserved `workspace:<n|name>` / `window:<label>` ref grammar above.
-  Like every command they ship with snapshot-tested help and the control methods
-  that back them, not ahead of them. Staged with the workspaces rollout
-  (`docs/specs/layout.md` `## Future`, workspaces-rollout).

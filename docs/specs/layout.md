@@ -2,7 +2,7 @@
 
 > See `docs/specs/glossary.md` for canonical state names, layer definitions, and transition verbs. This spec uses the glossary's vocabulary throughout.
 >
-> **Owns:** the interaction model on top of Lath — modes and keyboard dispatch, navigation, minimize/reattach, kill/rename, the selection overlay, session lifecycle + persistence recovery, and the workspaces-rollout ledger. Pane chrome: placement and sizing only.
+> **Owns:** the interaction model on top of Lath — modes and keyboard dispatch, navigation, minimize/reattach, kill/rename, the selection overlay, session lifecycle + persistence recovery, and the Workspace model. Pane chrome: placement and sizing only.
 >
 > **Defers:** engine internals (split tree, rects, DnD, animator) to `docs/specs/tiling-engine.md`; alert/TODO/speech behavior and visual states to `docs/specs/alert.md`; per-Session semantic state (CWD, command lifecycle, title candidates, header derivation, grouping keys) to `docs/specs/terminal-state.md`; browser surfaces to `docs/specs/dor-browser.md`; selection/copy/paste and the mouse-override icon to `docs/specs/mouse-and-clipboard.md`; persisted shapes to `docs/specs/transport.md`; tokens to `docs/specs/theme.md`.
 >
@@ -10,7 +10,7 @@
 
 ## Conceptual model
 
-A Wall renders one Workspace's Surfaces as Panes in Content or Doors on the Baseboard. Pane↔Door preserves the Surface; a Doored browser Surface keeps its backing session while releasing its viewer resources ([Minimize and reattach](#minimize-and-reattach)). Standalone mounts one Wall per Workspace and switches between them ([Workspaces](#workspaces)); what that feature still owes is staged in [Future](#future) (**Scope: workspaces-rollout**). VS Code maps each Workspace to a webview (`docs/specs/vscode.md`).
+A Wall renders one Workspace's Surfaces as Panes in Content or Doors on the Baseboard. Pane↔Door preserves the Surface; a Doored browser Surface keeps its backing session while releasing its viewer resources ([Minimize and reattach](#minimize-and-reattach)). Standalone mounts one Wall per Workspace and switches between them ([Workspaces](#workspaces)). VS Code maps each Workspace to a webview (`docs/specs/vscode.md`).
 
 ## Shell layout
 
@@ -165,7 +165,7 @@ The union projection and its indicators are owned by `docs/specs/alert.md` → W
 
 Source of truth: `WorkspaceWindow` in `lib/src/components/WorkspaceWindow.tsx`; `registerWallHandle` in `lib/src/components/wall/wall-handles.ts`; `closeAll` in `lib/src/components/Wall.tsx`; `requestWorkspaceClose` in `lib/src/components/wall/workspace-lifecycle.ts`; `createWorkspace` / `closeWorkspace` / `renameWorkspace` / `moveWorkspace` / `setActiveWorkspace` in `lib/src/lib/workspace-store.ts`; `getWorkspaceUiSnapshot` in `lib/src/lib/workspace-ui-store.ts`; `setWorkspaceSurfaces` in `lib/src/lib/workspace-surfaces.ts`.
 
-What the `dor workspace` verbs still owe is staged in [Future](#future) — this spec's `## Future` is the single rollout ledger; other specs link here.
+**Every Workspace verb has a `dor` counterpart** (`docs/specs/dor-cli.md` → "dor workspace"), taking the same route as the strip and the command-mode keys: a command close raises no confirmation, refusing instead, and closes its member Surfaces silently.
 
 ## Modes
 
@@ -432,10 +432,6 @@ A store commit that empties the tree (last pane killed or minimized) triggers th
 8. **A refused close reveals its Workspace**: a `closeAll` that returns a refusal activates that Workspace, so the prompt behind the refusal is on screen rather than inside a hidden Wall.
 
 ## Future
-
-**Scope: workspaces-rollout** — what the multi-Workspace feature still owes. Current implementation: [Workspaces](#workspaces). Persisted containers are owned by `docs/specs/transport.md`; union projection by `docs/specs/alert.md`. This ledger is the single home for what remains; other specs link here rather than restating it.
-
-- **`dor workspace` verbs.** `new` / `rename` / `close` / `switch`, plus `dor list --all` for cross-Workspace targeting and `workspace:<name>` as the stable handle beside today's positional `workspace:<n>`.
 
 ### Re-arming the WebGL renderer after context loss
 

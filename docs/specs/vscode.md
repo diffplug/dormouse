@@ -81,6 +81,8 @@ Consequences:
 
 **One webview is one Workspace.** The bottom-panel `WebviewView` ("Dormouse") is the default Workspace; each `dormouse.open` editor-tab `WebviewPanel` is an independent Workspace. Several are visible at once, and VS Code — not Dormouse — owns their tabs, creation, and closing, so **Dormouse adds no create/rename/close affordances here**: the webview mounts a bare `<Wall>`, which leaves the Workspace strip and its shortcuts to standalone (`docs/specs/layout.md` → Workspaces). A Workspace's Surfaces are the terminal Sessions whose PTYs its router tracks (`ownedPtyIds`, `docs/specs/transport.md`) plus the browser Surfaces rendered in it.
 
+**The extension host refuses every Workspace-spanning `dor` request** — the container verbs, `dor list --workspaces` / `--all`, and any `--workspace` but this webview's own — before it routes one to a webview, since no webview can answer for its siblings (`docs/specs/dor-cli.md` → "dor workspace"; `dorWorkspaceRefusal` in `vscode-ext/src/dor-workspace-guard.ts`).
+
 #### Surfacing union status on native chrome
 
 The host computes each webview's union (`ringing` / `todo`) from the module-level `AlertManager` scoped to that router's `ownedPtyIds`, delivered via `attachRouter`'s `onUnion` callback. `ownedPtyIds` are PTY-backed, so **VS Code chrome reflects terminal Session ring + TODO only** — a browser Surface's TODO stays webview-local, `alert:state` being keyed by PTY-backed Session ids (see [Future](#future)).
