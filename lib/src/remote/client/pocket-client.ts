@@ -900,6 +900,11 @@ export class PocketClient {
       return { ok: false, message: CONNECTION_DENIAL_MESSAGES['burrow-error'], pairingRequired: false };
     }
     if (outcome.ok) {
+      // A second Connect on one Client replaces the first: its predecessor's
+      // endpoint, peer and channel go before the replacement is promoted, the
+      // mirror of `BurrowRuntime.#promoteConnection`. Left alive, the orphan's
+      // channel would still be reporting violations against *this* session.
+      this.#disposeCeremony();
       this.#established = { connectionId, session, lastSentAt: this.#now() };
       this.#connectedBurrowId = burrowId;
       this.#startKeepalives();

@@ -276,6 +276,19 @@ describe('DirectEndpoint', () => {
     expect(run.offerer.fatals).toEqual(['a direct channel message was not binary']);
   });
 
+  it('ignores a channel violation once its session is no longer the live one', async () => {
+    const run = pair();
+    await cutover(run);
+    // What a replacement promotion does to the session under an endpoint: the
+    // channel is still there and still reporting, and none of it is this
+    // session's business any more.
+    run.offerer.live = false;
+
+    run.fake.offererChannel!.receiveRaw('a text frame');
+
+    expect(run.offerer.fatals).toEqual([]);
+  });
+
   it('holds channel frames until the peer’s switch, then drains them in order', async () => {
     const run = pair({ opening: 'manual' });
     await cutover(run);

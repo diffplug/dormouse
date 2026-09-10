@@ -1044,6 +1044,32 @@ describe('the direct path, end to end', () => {
     expect(run.harness.client.transportPath).toBe('direct');
   });
 
+  /**
+   * A Client that connects twice replaces its own session, and the peer and
+   * channel of the one it replaced go with it: left alive, the orphan's channel
+   * would still be reporting violations against the session that replaced it.
+   */
+  it('closes the previous session’s peer when the Client connects again', async () => {
+    const run = await connectedDirect();
+    await run.cutover();
+    const firstPeer = run.clientPeers[0]!;
+    const firstChannel = run.network.offererChannel!;
+
+    const second = await run.harness.client.connect(run.harness.burrowId);
+    const gone = vi.fn();
+    run.harness.client.setOnBurrowGone(gone);
+
+    expect(second.ok).toBe(true);
+    expect(run.clientPeers).toHaveLength(2);
+    expect(firstPeer.closed).toBe(true);
+
+    // Nothing arriving on the orphan can touch the session that replaced it.
+    firstChannel.receiveRaw('a text frame');
+
+    expect(gone).not.toHaveBeenCalled();
+    expect(run.harness.client.connectedBurrowId).toBe(run.harness.burrowId);
+  });
+
   it('closes the Burrow’s peer with the client the Relay says is gone', async () => {
     const run = await connectedDirect();
     await run.cutover();

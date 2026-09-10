@@ -255,9 +255,7 @@ export class DirectEndpoint {
         onOpen: () => this.#onOpen(),
         onFrame: (frame) => this.#onFrame(frame),
         onClosed: (reason) => this.#onClosed(reason),
-        // A peer speaking something else on the channel is not one this
-        // session's counters can stay synchronized with, switched or not.
-        onViolation: (reason) => this.#deps.fatal(reason),
+        onViolation: (reason) => this.#onViolation(reason),
       },
     });
     return this.#peer;
@@ -306,6 +304,17 @@ export class DirectEndpoint {
   #onClosed(reason: string): void {
     if (!this.#alive()) return;
     this.#giveUp(reason);
+  }
+
+  /**
+   * A peer speaking something else on the channel is not one this session's
+   * counters can stay synchronized with, switched or not — but only *this*
+   * session's, so it is gated like every other channel event: a leftover
+   * channel must never end the session that replaced it.
+   */
+  #onViolation(reason: string): void {
+    if (!this.#alive()) return;
+    this.#deps.fatal(reason);
   }
 
   /**
