@@ -1,13 +1,10 @@
 /**
  * The Pocket client's two end-to-end ceremonies, driven against the **real**
- * `BurrowRuntime` through an in-memory relay (`../test-relay.ts`).
+ * `BurrowRuntime` through an in-memory relay.
  *
- * **No ceremony step is stubbed.** The Noise handshakes are the shipped suite,
- * the presence proofs are real ES256 assertions over the shared challenge
- * builder — verified by the same `verifyPresenceProof` a Burrow runs — and the
- * outcomes are decrypted on the session that produced them. Only the browser
- * and network edges are faked: `fetch`, `WebSocket`, WebAuthn's two calls, and
- * the two IndexedDB stores.
+ * The loop itself — client, relay, Burrow, and the account plane in front of
+ * them — is `./test-e2e-harness.ts`, shared with the suite that runs the same
+ * ceremonies over the native direct path. **No ceremony step is stubbed** there.
  *
  * The account-plane half (setup, sign-in, session expiry, push) drives a mocked
  * `fetch` alone; the relay is not involved in any of it.
@@ -22,27 +19,17 @@ import {
   ESTABLISHED_E2E_IDLE_TIMEOUT_MS,
   KEEPALIVE_BODY_SIZE,
   MAX_DIRECT_PENDING_FRAMES,
-  REMOTE_EVENTS,
-  REMOTE_METHODS,
   SELFHOST_ACCOUNT_ID,
   SETUP_TOKEN_INVALID_ERROR,
   formatPairingInvitationUrl,
   fromBase64Url,
   generateNoiseKeyPair,
   hashPasskeyPublicKey,
-  mintNoiseStaticKeyPair,
   parsePairingInvitationUrl,
-  presenceChallenge,
   pushEndpointFingerprint,
-  randomBase64Url,
   toBase64Url,
-  type BurrowAclRecord,
-  type NoiseStaticKeyMaterial,
-  type PairingInvitation,
   type PasskeyAssertion,
-  type PresenceBinding,
   type TerminalDataEvent,
-  utf8Encode,
 } from 'remote-lib-common';
 
 import {
@@ -59,12 +46,7 @@ import {
   type PocketClientDeps,
   type PocketStorage,
 } from './pocket-client';
-import type {
-  KnownBurrowStore,
-  KnownBurrowV1,
-  PendingDeletionStore,
-  PendingDeliveryDeletionV1,
-} from './pocket-db';
+import type { KnownBurrowV1 } from './pocket-db';
 import { FakeSocket } from '../test-fake-socket';
 import {
   FakeDirectNetwork,
@@ -73,114 +55,38 @@ import {
 } from '../direct/test-fake-peer';
 import type { DirectPeerLike } from '../direct/direct-peer';
 import type { RemoteTimer } from '../ws';
-import { createTestRelay, type TestRelay } from '../test-relay';
 import { createTestAuthenticator, type TestAuthenticator } from '../test-e2e-client';
-import { BurrowRuntime } from '../burrow/burrow-runtime';
-import type { BurrowEnrollment } from '../burrow/enrollment';
-import type { PendingPairing } from '../burrow/pairing-approval';
 import { PasskeyAlreadyRegisteredError, type WebAuthnClient } from './webauthn';
+import {
+  AUTH_ROUTES,
+  BURROW_LABEL,
+  CREDENTIAL_ID,
+  ORIGIN,
+  PASSKEY_PUBLIC_KEY,
+  RP_ID,
+  SESSION_TOKEN,
+  STREAMED_CHUNK,
+  makeE2eHarness,
+  makeFetch,
+  memoryKnownBurrows,
+  memoryPendingDeletions,
+  memoryStorage,
+  secret,
+  waitFor,
+  type E2eHarness,
+  type FetchCall,
+  type MemoryKnownBurrows,
+  type MemoryPendingDeletions,
+  type RouteHandler,
+} from './test-e2e-harness';
 
 // --- Fakes -----------------------------------------------------------------
-
-const ORIGIN = 'https://pocket.example';
-const RP_ID = 'pocket.example';
-const BURROW_LABEL = 'Ned’s laptop';
-const SESSION_TOKEN = 'tok-abc';
-/** What the stub Burrow streams on attach: a chunk whose two projections differ. */
-const STREAMED_CHUNK: TerminalDataEvent = {
-  bytes: toBase64Url(utf8Encode('pre\x1b]1337;File=inline=1:AAAA\x07post')),
-  text: toBase64Url(utf8Encode('prepost')),
-};
-
-/** A base64url string usable where a real 32-byte secret goes. */
-function secret(): string {
-  return randomBase64Url(32);
-}
-
-interface FetchCall {
-  url: string;
-  method: string;
-  headers: Record<string, string>;
-  body: unknown;
-}
-
-type RouteHandler = (
-  body: unknown,
-) => { status?: number; json?: unknown } | Promise<{ status?: number; json?: unknown }>;
-
-/** A router-style fake `fetch` that records every call. */
-function makeFetch(
-  routes: Record<string, RouteHandler>,
-  /** Answers a path no exact route claims; without one, an unknown path throws. */
-  fallback?: (path: string, method: string) => { status?: number; json?: unknown } | undefined,
-) {
-  const calls: FetchCall[] = [];
-  const fetch = (async (url: string, init?: RequestInit) => {
-    const method = init?.method ?? 'POST';
-    const headers = (init?.headers ?? {}) as Record<string, string>;
-    const body = init?.body ? JSON.parse(init.body as string) : undefined;
-    calls.push({ url, method, headers, body });
-    const path = new URL(url, 'http://test').pathname;
-    const handler = routes[path];
-    const answered = handler ? await handler(body) : fallback?.(path, method);
-    if (!answered) throw new Error(`unexpected fetch: ${path}`);
-    const { status = 200, json } = answered;
-    return {
-      ok: status >= 200 && status < 300,
-      status,
-      json: async () => json ?? {},
-    } as Response;
-  }) as unknown as typeof fetch;
-  return { fetch, calls };
-}
-
-function memoryStorage(): PocketStorage {
-  const passkeys = new Map<string, string>();
-  let pushEndpoint: string | null = null;
-  return {
-    getPasskeyPublicKey: (id) => passkeys.get(id) ?? null,
-    setPasskeyPublicKey: (id, pk) => void passkeys.set(id, pk),
-    forgetPasskeyPublicKey: (id) => void passkeys.delete(id),
-    knownCredentialIds: () => [...passkeys.keys()],
-    getRegisteredPushEndpoint: () => pushEndpoint,
-    setRegisteredPushEndpoint: (fingerprint) => void (pushEndpoint = fingerprint),
-  };
-}
-
-interface MemoryKnownBurrows extends KnownBurrowStore {
-  readonly records: Map<string, KnownBurrowV1>;
-}
-
-function memoryKnownBurrows(): MemoryKnownBurrows {
-  const records = new Map<string, KnownBurrowV1>();
-  return {
-    records,
-    get: async (burrowId) => records.get(burrowId) ?? null,
-    put: async (record) => void records.set(record.burrowId, record),
-    delete: async (burrowId) => void records.delete(burrowId),
-    list: async () => [...records.values()],
-  };
-}
 
 /** The delivery id a paired record holds; throws if the record is not paired. */
 function deliveryIdOf(store: MemoryKnownBurrows, burrowId: string): string {
   const authorization = store.records.get(burrowId)?.authorization;
   if (authorization?.state !== 'paired') throw new Error(`${burrowId} is not paired`);
   return authorization.deliveryId;
-}
-
-interface MemoryPendingDeletions extends PendingDeletionStore {
-  readonly records: Map<string, PendingDeliveryDeletionV1>;
-}
-
-function memoryPendingDeletions(): MemoryPendingDeletions {
-  const records = new Map<string, PendingDeliveryDeletionV1>();
-  return {
-    records,
-    put: async (record) => void records.set(`${record.burrowId}:${record.deliveryId}`, record),
-    delete: async (burrowId, deliveryId) => void records.delete(`${burrowId}:${deliveryId}`),
-    list: async () => [...records.values()],
-  };
 }
 
 /**
@@ -209,15 +115,6 @@ async function settleTicks(): Promise<void> {
   for (let i = 0; i < 8; i += 1) await new Promise((r) => setTimeout(r, 1));
 }
 
-/** Poll until `predicate` holds, so a Burrow awaiting WebCrypto can catch up. */
-async function waitFor(predicate: () => boolean, what = 'a condition'): Promise<void> {
-  for (let i = 0; i < 400; i++) {
-    if (predicate()) return;
-    await new Promise((r) => setTimeout(r, 2));
-  }
-  throw new Error(`timed out waiting for ${what}`);
-}
-
 // --- The account-plane harness ---------------------------------------------
 
 interface Harness {
@@ -227,9 +124,6 @@ interface Harness {
   knownBurrows: MemoryKnownBurrows;
   pendingDeletions: MemoryPendingDeletions;
 }
-
-const CREDENTIAL_ID = 'cred-123';
-const PASSKEY_PUBLIC_KEY = 'pk-spki-b64u';
 
 const assertion: PasskeyAssertion = {
   credentialId: CREDENTIAL_ID,
@@ -249,31 +143,6 @@ const fakeWebAuthn: WebAuthnClient = {
   async getAssertion() {
     return assertion;
   },
-};
-
-const AUTH_ROUTES: Record<string, RouteHandler> = {
-  '/api/setup/begin': () => ({
-    json: {
-      challenge: secret(),
-      rpId: RP_ID,
-      accountId: SELFHOST_ACCOUNT_ID,
-      existingCredentialIds: [],
-    },
-  }),
-  '/api/setup/finish': () => ({
-    json: { accountId: SELFHOST_ACCOUNT_ID, credentialId: CREDENTIAL_ID },
-  }),
-  '/api/setup/retire': () => ({ status: 204 }),
-  '/api/signin/begin': () => ({ json: { challenge: secret(), rpId: RP_ID } }),
-  '/api/signin/finish': () => ({
-    json: {
-      sessionToken: SESSION_TOKEN,
-      accountId: SELFHOST_ACCOUNT_ID,
-      expiresAt: 1,
-      passkeyPublicKey: PASSKEY_PUBLIC_KEY,
-    },
-  }),
-  '/api/burrows': () => ({ json: { burrows: [{ burrowId: 'h1', label: 'Laptop', online: true }] } }),
 };
 
 function makeClient(
@@ -330,230 +199,6 @@ async function seedRecord(
   };
   await knownBurrows.put(record);
   return record;
-}
-
-// --- The end-to-end harness -------------------------------------------------
-
-interface E2eHarness {
-  client: PocketClient;
-  burrow: BurrowRuntime;
-  relay: TestRelay;
-  burrowId: string;
-  authenticator: TestAuthenticator;
-  noiseStatic: NoiseStaticKeyMaterial;
-  knownBurrows: MemoryKnownBurrows;
-  pendingDeletions: MemoryPendingDeletions;
-  approvals: PendingPairing[];
-  savedAcl: BurrowAclRecord[];
-  calls: FetchCall[];
-  /** The harness's own `fetch`, for a second client on the same fake Relay. */
-  fetch: typeof fetch;
-  /** The Client's relay socket, once one is open — what a keepalive lands on. */
-  clientSocket(): FakeSocket;
-  /** One live invitation, as `setupQr` would mint it. */
-  mintInvitation(): Promise<PairingInvitation>;
-  /** Run a pairing and confirm it on the Burrow with the digits the phone showed. */
-  pairAndApprove(
-    invitation: PairingInvitation,
-    options?: { code?: (shown: string) => string },
-  ): Promise<Awaited<ReturnType<PocketClient['pair']>>>;
-}
-
-/**
- * A real Burrow, a real relay, and a real client — the whole loop in memory.
- *
- * `/api/reauth/*` is faked, but faithfully: `begin` derives the challenge from
- * the presented binding with the shared builder, exactly as the Relay does, so
- * the assertion the authenticator produces is one `verifyPresenceProof`
- * accepts. Nothing else about the proof is simulated.
- */
-async function makeE2eHarness(
-  options: {
-    burrowId?: string;
-    knownBurrows?: MemoryKnownBurrows;
-    pendingDeletions?: MemoryPendingDeletions;
-    authenticator?: TestAuthenticator;
-    noiseStatic?: NoiseStaticKeyMaterial;
-    /**
-     * What the Burrow *announces* as its static, when that has to differ from the
-     * key it actually handshakes with. Nothing on the Burrow validates this
-     * string, so it is how a malformed pin reaches the Client at all.
-     */
-    announcedStatic?: string;
-    loadAcl?: () => BurrowAclRecord[];
-    now?: () => number;
-    /** Make every delivery-row deletion fail, as an offline phone's would. */
-    pushDeleteFails?: boolean;
-    /** Extra `PocketClient` deps — the keepalive timer and visibility seams. */
-    deps?: Partial<PocketClientDeps>;
-    /** How this Burrow builds a peer for the direct path; absent, it declines. */
-    burrowDirect?: () => DirectPeerLike | null;
-    /** The Burrow's timers, where a case has to fire one by hand. */
-    burrowSetTimer?: RemoteTimer;
-  } = {},
-): Promise<E2eHarness> {
-  const burrowId = options.burrowId ?? randomBase64Url(16);
-  const authenticator =
-    options.authenticator ?? (await createTestAuthenticator({ rpId: RP_ID, origin: ORIGIN }));
-  const noiseStatic = options.noiseStatic ?? (await mintNoiseStaticKeyPair());
-  const knownBurrows = options.knownBurrows ?? memoryKnownBurrows();
-  const pendingDeletions = options.pendingDeletions ?? memoryPendingDeletions();
-  const approvals: PendingPairing[] = [];
-  let savedAcl: BurrowAclRecord[] = [];
-
-  const enrollment: BurrowEnrollment = {
-    relayUrl: ORIGIN,
-    burrowId,
-    burrowToken: 'burrow-tok',
-    origin: ORIGIN,
-    rpId: RP_ID,
-    label: BURROW_LABEL,
-    noiseStaticPrivateKey: noiseStatic.privateKeyPkcs8,
-    noiseStaticPublicKey: options.announcedStatic ?? noiseStatic.publicKey,
-  };
-  const burrowSocket = new FakeSocket();
-  const burrow = new BurrowRuntime({
-    enrollment,
-    reconnect: false,
-    createWebSocket: () => burrowSocket,
-    ...(options.burrowDirect ? { createDirectPeer: options.burrowDirect } : {}),
-    ...(options.burrowSetTimer ? { setTimer: options.burrowSetTimer } : {}),
-    loadAcl: options.loadAcl ?? (() => []),
-    saveAcl: (_burrowId, records) => {
-      savedAcl = [...records];
-    },
-    requestApproval: (pending) => approvals.push(pending),
-    dismissApproval: () => {},
-    createSession: ({ send }) => ({
-      // Enough protocol-v1 to prove the byte stream: every request is answered
-      // with its own `requestId`, which is what `hello` correlates on.
-      handle: (data) => {
-        const request = data as { requestId?: unknown; method?: unknown };
-        if (typeof request.requestId !== 'string') return;
-        send({
-          requestId: request.requestId,
-          ok: true,
-          result: { protocolVersion: 1, burrowId, grants: { input: true, layout: false } },
-        });
-        // An attach opens its stream under the request's own id, so one canned
-        // event proves the subscription path as well as the request one.
-        if (request.method === REMOTE_METHODS.surfaceAttach) {
-          send({
-            subId: request.requestId,
-            event: REMOTE_EVENTS.terminalData,
-            data: STREAMED_CHUNK,
-          });
-        }
-      },
-      dispose: () => {},
-    }),
-  });
-  burrow.start();
-  burrowSocket.open();
-  const relay = createTestRelay({ burrowId, burrowSocket });
-
-  // The presence routes, derived exactly as the Relay derives them.
-  const nonces = new Map<string, PresenceBinding>();
-  const routes: Record<string, RouteHandler> = {
-    ...AUTH_ROUTES,
-    // The account's real passkey, so the key the proof presents is the one the
-    // authenticator actually signs with.
-    '/api/signin/finish': () => ({
-      json: {
-        sessionToken: SESSION_TOKEN,
-        accountId: SELFHOST_ACCOUNT_ID,
-        expiresAt: 1,
-        passkeyPublicKey: authenticator.publicKey,
-      },
-    }),
-    '/api/reauth/begin': async (body) => {
-      const binding = (body as { binding: PresenceBinding }).binding;
-      const relayNonce = secret();
-      nonces.set(relayNonce, binding);
-      return {
-        json: {
-          challenge: await presenceChallenge(binding, relayNonce),
-          rpId: RP_ID,
-          relayNonce,
-          allowCredentials: [binding.passkeyCredentialId],
-        },
-      };
-    },
-    '/api/reauth/finish': (body) => {
-      const { relayNonce } = body as { relayNonce: string };
-      if (!nonces.delete(relayNonce)) return { status: 400, json: { error: 'unknown nonce' } };
-      return { json: { verifiedAt: 1 } };
-    },
-  };
-  // The delivery ids a Burrow mints are random, so the deletion route is matched
-  // by shape rather than by an exact path.
-  const { fetch, calls } = makeFetch(routes, (path, method) => {
-    if (method !== 'DELETE' || !path.startsWith('/api/push/subscriptions/')) return undefined;
-    return options.pushDeleteFails ? { status: 503, json: { error: 'down' } } : { status: 204 };
-  });
-
-  const storage = memoryStorage();
-  const webauthn: WebAuthnClient = {
-    async registerPasskey() {
-      return {
-        credentialId: authenticator.credentialId,
-        publicKey: authenticator.publicKey,
-        clientDataJSON: 'create-client-data',
-      };
-    },
-    // The real thing: a signature this Burrow's own verifier accepts.
-    getAssertion: (challenge) => authenticator.assert(challenge, ORIGIN),
-  };
-  let clientSocket: FakeSocket | null = null;
-  const client = new PocketClient({
-    wsBase: 'ws://test',
-    fetch,
-    webauthn,
-    createWebSocket: () => (clientSocket = relay.openClientSocket()),
-    knownBurrows,
-    pendingDeletions,
-    storage,
-    ...(options.now ? { now: options.now } : {}),
-    ...options.deps,
-  });
-  // Sign-in caches the asserted passkey's public key and names the credential
-  // every presence proof is built from, exactly as it does in the app.
-  await client.signin();
-
-  return {
-    client,
-    burrow,
-    relay,
-    burrowId,
-    authenticator,
-    noiseStatic,
-    knownBurrows,
-    pendingDeletions,
-    approvals,
-    get savedAcl() {
-      return savedAcl;
-    },
-    calls,
-    fetch,
-    clientSocket: () => {
-      if (!clientSocket) throw new Error('the Client has not opened a relay socket');
-      return clientSocket;
-    },
-    mintInvitation: () => burrow.mintInvitation(secret(), Date.now() + DEFAULT_PAIRING_TTL_MS),
-    async pairAndApprove(invitation, { code } = {}) {
-      // Counted from here: a harness that pairs twice must confirm the *new*
-      // request rather than re-answering the one still in the log.
-      const before = approvals.length;
-      let shown: string | null = null;
-      const pairing = client.pair(invitation, 'iPhone Safari', (value) => {
-        shown = value;
-      });
-      await waitFor(() => approvals.length > before, 'the Burrow to surface an approval');
-      const pending = approvals[approvals.length - 1]!;
-      pending.approve(code ? code(shown!) : shown!);
-      return await pairing;
-    },
-  };
 }
 
 // --- Pairing ----------------------------------------------------------------
