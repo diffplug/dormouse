@@ -109,7 +109,8 @@ test('dev honors explicit ports/origins/state and refuses an occupied port witho
   assert.match(collision.output, /EADDRINUSE/);
   assert.equal((await fetch(`${first.url}/api/hello`)).status, 200);
   await one.stop();
-  const stateDir = path.join(b.dir, 'custom-state');
+  // Preserve the path verbatim, including legal trailing spaces on POSIX.
+  const stateDir = path.join(b.dir, process.platform === 'win32' ? 'custom-state' : 'custom-state ');
   const custom = b.start({ PORT: port, DORMOUSE_STATE_DIR: stateDir, DORMOUSE_ORIGIN: 'https://dev.example.test/' });
   const listening = await custom.listening();
   assert.equal(new URL(listening.url).port, port);

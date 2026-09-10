@@ -1,6 +1,6 @@
 /**
- * Environment → {@link RelayConfig}. Pure and separate from `index.ts` so the
- * mapping is testable without binding a port or mutating `process.env`
+ * Environment → {@link RelayConfig}. `readConfig` is pure; `loadConfig` formats
+ * startup errors for the entrypoints. Neither binds a port or mutates `process.env`
  * (docs/specs/relay.md, "Configuration").
  */
 

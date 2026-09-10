@@ -28,7 +28,7 @@ import { DEV_STATE_DIR } from './dev-paths.mjs';
 const env = {
   ...process.env,
   DORMOUSE_BIND_HOST: process.env.DORMOUSE_BIND_HOST?.trim() || '127.0.0.1',
-  DORMOUSE_STATE_DIR: process.env.DORMOUSE_STATE_DIR?.trim() || DEV_STATE_DIR,
+  DORMOUSE_STATE_DIR: process.env.DORMOUSE_STATE_DIR ?? DEV_STATE_DIR,
 };
 // Only dev reads unset, blank or `0` as "any free port"; anything else goes
 // through the production parser first, so a bad one fails before the bind.
@@ -42,11 +42,11 @@ try {
   await once(server, 'listening');
   // Re-read with the bound port so every port-derived field — origin, and the
   // VAPID subject derived from it — is consistent. An explicit `DORMOUSE_ORIGIN`
-  // still wins. Requests between the bind and `startRelay`'s handler (single-digit
-  // milliseconds, and nothing knows the port yet) hang rather than 404.
+  // still wins. The listener stays bound throughout app initialization.
   await startRelay(loadConfig({ ...env, PORT: String(server.address().port) }), server);
 } catch (err) {
   console.error(err);
+  server.closeAllConnections();
   server.close();
   process.exitCode = 1;
 }

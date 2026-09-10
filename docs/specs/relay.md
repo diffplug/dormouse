@@ -1012,10 +1012,17 @@ by tapping Connect again.
 `scripts/pairing-walkthrough/` drives all three in real browsers, ending at a
 command typed from Pocket. Not in CI.
 
-**Must stage the Burrow's allowed relay origins from the walkthrough's own dev
-runner**, whose port it does not choose — a bundle baked against any other
-origin pairs against a Relay the run is not driving. Its isolation and port
-mechanics are `scripts/pairing-walkthrough/README.md` -> "Ports".
+- **Must learn the walkthrough's Relay origin from its owned dev runner, including
+  with `--skip-build`, before staging the Burrow's allowlist and opening Pocket.**
+- **Must use actual Vite and Chrome listener addresses, separate run state and
+  browser sessions, and restrict cleanup to owned processes.** Concurrent
+  worktrees keep staged bundles separate; explicit output directories must differ
+  for concurrent runs of one scenario.
+- **Must discard inherited `DORMOUSE_*` and `PORT` settings from the walkthrough's
+  Relay child**, then supply its own local state and bind settings.
+
+Source of truth: `scripts/pairing-walkthrough/run.mjs`,
+`scripts/pairing-walkthrough/steps.mjs`, `scripts/pairing-walkthrough/chrome.mjs`.
 
 ## Installing it
 
