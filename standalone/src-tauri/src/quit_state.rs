@@ -50,6 +50,15 @@ pub struct WindowQuit {
     pub progress: u64,
 }
 
+/// What forgetting a window leaves the machine owing, decided while `phase` is
+/// borrowed and applied once it is not.
+enum Forgotten {
+    Nothing,
+    Walk,
+    Exit,
+    Teardown(String, bool),
+}
+
 #[derive(Debug, Default)]
 pub struct QuitMachine {
     /// Bumped on every trigger and every cancel. A watchdog captures the value
@@ -60,16 +69,20 @@ pub struct QuitMachine {
     pub approved: bool,
     pub phase: QuitPhase,
     pub windows: HashMap<String, WindowQuit>,
+    /// The most recently focused window at the trigger, which the walk tears
+    /// down last when `main` is not open (`quit_order`).
+    focused: Option<String>,
 }
 
 impl QuitMachine {
-    /// A quit trigger over the live windows.
+    /// A quit trigger over the live windows, most recently focused first.
     ///
     /// Never clears `voted` once the walk has started: a repeat trigger fired
     /// mid-teardown must leave the walk in flight, or the fresh watchdog drops
     /// into the unbounded voting wait and stops bounding it.
-    pub fn request(&mut self, labels: &[String]) -> (u64, Vec<QuitAction>) {
+    pub fn request(&mut self, labels: &[String], focused: Option<String>) -> (u64, Vec<QuitAction>) {
         self.seq += 1;
+        self.focused = focused;
         let walking = matches!(self.phase, QuitPhase::Walking { .. });
         let mut next: HashMap<String, WindowQuit> = HashMap::new();
         for label in labels {
@@ -152,37 +165,64 @@ impl QuitMachine {
 
     /// A window left outside the quit flow (a per-window close, or a crash).
     /// Its vote can never arrive, so the flow must not wait on it.
+    ///
+    /// **A live quit that runs out of windows exits**: every window is gone and
+    /// nothing is left to tear down, so holding the phase open would leave a
+    /// headless process nobody can reach.
     pub fn forget_window(&mut self, label: &str) -> Vec<QuitAction> {
         self.windows.remove(label);
-        match &mut self.phase {
-            QuitPhase::Idle => Vec::new(),
+        // Decided against a borrow of `phase` alone, then applied: `exit` and
+        // `start_walk` both need the whole machine.
+        let next = match &mut self.phase {
+            QuitPhase::Idle => Forgotten::Nothing,
             QuitPhase::Voting => {
-                if self.windows.is_empty() || !self.windows.values().all(|entry| entry.voted) {
-                    return Vec::new();
+                if self.windows.is_empty() {
+                    Forgotten::Exit
+                } else if self.windows.values().all(|entry| entry.voted) {
+                    Forgotten::Walk
+                } else {
+                    Forgotten::Nothing
                 }
-                self.start_walk()
             }
             QuitPhase::Walking { order, index } => {
-                let Some(position) = order.iter().position(|entry| entry == label) else {
-                    return Vec::new();
-                };
-                order.remove(position);
-                if position > *index {
-                    return Vec::new();
-                }
-                if position < *index {
-                    *index -= 1;
-                    return Vec::new();
-                }
-                // It was the window being torn down: advance onto the next.
-                let next = order.get(*index).cloned();
-                let last = *index + 1 == order.len();
-                match next {
-                    Some(label) => vec![QuitAction::Teardown { label, last }],
-                    None => vec![QuitAction::Exit],
+                match order.iter().position(|entry| entry == label) {
+                    None => Forgotten::Nothing,
+                    Some(position) => {
+                        order.remove(position);
+                        if order.is_empty() {
+                            Forgotten::Exit
+                        } else if position > *index {
+                            Forgotten::Nothing
+                        } else if position < *index {
+                            *index -= 1;
+                            Forgotten::Nothing
+                        } else {
+                            // It was the window being torn down: advance.
+                            match order.get(*index).cloned() {
+                                Some(label) => {
+                                    Forgotten::Teardown(label, *index + 1 == order.len())
+                                }
+                                None => Forgotten::Exit,
+                            }
+                        }
+                    }
                 }
             }
+        };
+        match next {
+            Forgotten::Nothing => Vec::new(),
+            Forgotten::Walk => self.start_walk(),
+            Forgotten::Exit => self.exit(),
+            Forgotten::Teardown(label, last) => vec![QuitAction::Teardown { label, last }],
         }
+    }
+
+    /// Nothing left to ask or to tear down. Approving here is what stops the
+    /// `app.exit(0)` this returns from re-entering the flow as a fresh quit.
+    fn exit(&mut self) -> Vec<QuitAction> {
+        self.phase = QuitPhase::Idle;
+        self.approved = true;
+        vec![QuitAction::Exit]
     }
 
     /// Whether a watchdog spawned for `seq` still speaks for the live quit.
@@ -208,11 +248,9 @@ impl QuitMachine {
     }
 
     fn start_walk(&mut self) -> Vec<QuitAction> {
-        let order = quit_order(self.windows.keys());
+        let order = quit_order(self.windows.keys(), self.focused.as_deref());
         let Some(first) = order.first().cloned() else {
-            self.phase = QuitPhase::Idle;
-            self.approved = true;
-            return vec![QuitAction::Exit];
+            return self.exit();
         };
         let last = order.len() == 1;
         self.phase = QuitPhase::Walking { order, index: 0 };
@@ -277,7 +315,7 @@ mod tests {
     #[test]
     fn all_votes_walk_the_windows_with_main_last() {
         let mut quit = QuitMachine::default();
-        let (seq, actions) = quit.request(&labels(&["main", "ws-2"]));
+        let (seq, actions) = quit.request(&labels(&["main", "ws-2"]), None);
         assert_eq!(seq, 1);
         assert_eq!(actions, vec![QuitAction::RequestAll]);
 
@@ -315,7 +353,7 @@ mod tests {
     #[test]
     fn any_cancel_aborts_with_nothing_destroyed() {
         let mut quit = QuitMachine::default();
-        quit.request(&labels(&["main", "ws-2"]));
+        quit.request(&labels(&["main", "ws-2"]), None);
         quit.vote("main");
         let actions = quit.cancel();
         assert_eq!(actions, vec![QuitAction::CancelAll]);
@@ -331,7 +369,7 @@ mod tests {
     #[test]
     fn a_cancel_after_the_walk_started_is_refused() {
         let mut quit = QuitMachine::default();
-        quit.request(&labels(&["main"]));
+        quit.request(&labels(&["main"]), None);
         quit.vote("main");
         assert!(matches!(quit.phase, QuitPhase::Walking { .. }));
         assert_eq!(quit.cancel(), Vec::new());
@@ -341,13 +379,13 @@ mod tests {
     #[test]
     fn a_repeat_trigger_re_emits_without_interrupting_the_walk() {
         let mut quit = QuitMachine::default();
-        quit.request(&labels(&["main", "ws-2"]));
+        quit.request(&labels(&["main", "ws-2"]), None);
         quit.vote("main");
         quit.vote("ws-2");
         quit.progress("ws-2");
         assert_eq!(quit.walking_progress(), Some(("ws-2".into(), 1)));
 
-        let (seq, actions) = quit.request(&labels(&["main", "ws-2"]));
+        let (seq, actions) = quit.request(&labels(&["main", "ws-2"]), None);
         assert_eq!(seq, 2);
         assert_eq!(actions, vec![QuitAction::RequestAll]);
         // The walk survives, and so does the in-flight teardown's progress —
@@ -363,7 +401,7 @@ mod tests {
     #[test]
     fn the_last_window_exits_and_a_destroy_cannot_re_enter() {
         let mut quit = QuitMachine::default();
-        quit.request(&labels(&["main"]));
+        quit.request(&labels(&["main"]), None);
         assert_eq!(
             quit.vote("main"),
             vec![QuitAction::Teardown {
@@ -388,7 +426,7 @@ mod tests {
     #[test]
     fn a_window_that_leaves_mid_vote_does_not_hold_the_quit_open() {
         let mut quit = QuitMachine::default();
-        quit.request(&labels(&["main", "ws-2"]));
+        quit.request(&labels(&["main", "ws-2"]), None);
         quit.vote("main");
         assert_eq!(
             quit.forget_window("ws-2"),
@@ -402,7 +440,7 @@ mod tests {
     #[test]
     fn a_window_that_leaves_mid_walk_advances_the_order() {
         let mut quit = QuitMachine::default();
-        quit.request(&labels(&["main", "ws-2", "ws-3"]));
+        quit.request(&labels(&["main", "ws-2", "ws-3"]), None);
         quit.vote("main");
         quit.vote("ws-2");
         let actions = quit.vote("ws-3");
@@ -412,6 +450,58 @@ mod tests {
         // Whoever is being torn down vanishes: the next one starts.
         let next = quit.forget_window(first);
         assert!(matches!(next.as_slice(), [QuitAction::Teardown { .. }]));
+    }
+
+    /// Every window went away while the quit was still running — each one
+    /// closed, or crashed. There is nothing left to ask and nothing left to tear
+    /// down, so the app exits rather than living on with no window.
+    #[test]
+    fn a_quit_that_runs_out_of_windows_exits_instead_of_going_headless() {
+        let mut voting = QuitMachine::default();
+        voting.request(&labels(&["main", "ws-2"]), None);
+        assert_eq!(voting.forget_window("main"), Vec::new());
+        assert_eq!(voting.forget_window("ws-2"), vec![QuitAction::Exit]);
+        // Approved, so the `app.exit(0)` this asks for is not re-caught as a
+        // fresh quit trigger.
+        assert!(voting.approved);
+
+        let mut walking = QuitMachine::default();
+        walking.request(&labels(&["main", "ws-2"]), None);
+        walking.vote("main");
+        walking.vote("ws-2");
+        assert!(matches!(walking.phase, QuitPhase::Walking { .. }));
+        // The window ahead in the order leaves, then the one being torn down.
+        assert_eq!(walking.forget_window("main"), Vec::new());
+        assert_eq!(walking.forget_window("ws-2"), vec![QuitAction::Exit]);
+        assert!(walking.approved);
+    }
+
+    /// With `main` closed the walk still has a last window, and that one installs
+    /// a pending update (docs/specs/auto-update.md).
+    #[test]
+    fn without_main_the_focused_window_is_torn_down_last() {
+        let mut quit = QuitMachine::default();
+        quit.request(&labels(&["ws-2", "ws-5"]), Some("ws-2".into()));
+        quit.vote("ws-5");
+        assert_eq!(
+            quit.vote("ws-2"),
+            vec![QuitAction::Teardown {
+                label: "ws-5".into(),
+                last: false
+            }]
+        );
+        assert_eq!(
+            quit.window_done("ws-5"),
+            vec![
+                QuitAction::Destroy {
+                    label: "ws-5".into()
+                },
+                QuitAction::Teardown {
+                    label: "ws-2".into(),
+                    last: true
+                }
+            ]
+        );
     }
 
     #[test]

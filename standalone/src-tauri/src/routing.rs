@@ -32,8 +32,9 @@ pub enum Route<'a> {
     /// (the argument `docs/specs/vscode.md` -> "Peer surfaces across windows"
     /// makes for its own fan-out).
     Broadcast,
-    /// Suppressed: the id is mid-transfer and its bytes are already in the
-    /// replay the new owner is about to receive.
+    /// Nothing is delivered: the id is mid-transfer and its bytes are already in
+    /// the replay the new owner is about to receive, or no window owns it at all
+    /// and every window would otherwise ring for a pane none of them shows.
     Drop,
     /// A `dor` request naming no Surface belongs to whichever window the user
     /// is looking at. Resolved by the caller, which alone holds the focus order.
@@ -65,9 +66,20 @@ fn str_field<'a>(data: &'a JsonValue, key: &str) -> Option<&'a str> {
 fn lookup<'a>(map: &'a HashMap<String, String>, key: &str) -> Route<'a> {
     match map.get(key) {
         Some(label) => Route::EmitTo(label.as_str()),
-        // An id nobody minted is not a routing decision anyone can make; a
-        // broadcast is what the single-window build always did.
+        // Nobody is holding this request, so nothing follows it.
         None => Route::Broadcast,
+    }
+}
+
+/// Route by PTY ownership. **An id no window owns is dropped, never broadcast**:
+/// ownership is minted for every PTY this app spawns, so an unowned id is one
+/// whose window went away — and a broadcast would ring every other window's
+/// AlertManager for a pane none of them shows. The caller reaps the process
+/// (`Destroyed` in `standalone/src-tauri/src/lib.rs`).
+fn owner<'a>(map: &'a HashMap<String, String>, id: &str) -> Route<'a> {
+    match map.get(id) {
+        Some(label) => Route::EmitTo(label.as_str()),
+        None => Route::Drop,
     }
 }
 
@@ -82,12 +94,12 @@ pub fn route<'a>(event: &str, data: &'a JsonValue, view: &RouteView<'a>) -> Rout
             if view.awaiting_replay.contains_key(id) {
                 return Route::Drop;
             }
-            lookup(view.owners, id)
+            owner(view.owners, id)
         }
         // Never suppressed: a replay is exactly what the suppression is waiting
         // for, and the caller lifts the suppression after this emit.
         "pty:exit" | "pty:replay" => match str_field(data, "id") {
-            Some(id) => lookup(view.owners, id),
+            Some(id) => owner(view.owners, id),
             None => Route::Broadcast,
         },
         // The list answers one window's `pty:requestInit`, which named itself.
@@ -113,14 +125,46 @@ pub fn route<'a>(event: &str, data: &'a JsonValue, view: &RouteView<'a>) -> Rout
             Some(request_id) => lookup(view.dor_targets, request_id),
             None => Route::Broadcast,
         },
+        // A Burrow ask naming a Surface is a question exactly one window can
+        // answer, and `attach` / `resize` MUTATE that Surface — fanned out, every
+        // other window is asked to resize a pane it does not hold. The directory
+        // ask names none and stays a broadcast, because it is the union of every
+        // window's panes (docs/specs/standalone.md -> "Burrow service").
+        "burrow:ask" => match data
+            .get("params")
+            .and_then(|params| params.get("surfaceId"))
+            .and_then(JsonValue::as_str)
+        {
+            // A Surface with no PTY (a browser pane) is owned by no id here, so
+            // it keeps the fan-out: only its own window answers non-empty.
+            Some(surface_id) => lookup(view.owners, surface_id),
+            None => Route::Broadcast,
+        },
         // `alert:*` carrying an id is about one Session; the two app-global
         // stores (settings, watched commands) carry none and reach everyone.
         _ if event.starts_with("alert:") => match str_field(data, "id") {
-            Some(id) => lookup(view.owners, id),
+            Some(id) => owner(view.owners, id),
             None => Route::Broadcast,
         },
         _ => Route::Broadcast,
     }
+}
+
+/// Workspaces on their way into a window, oldest first.
+///
+/// **Held rather than emitted**: a window that has not installed its arrival
+/// listener yet — one still booting, or one torn out moments ago — is a legal
+/// drop target, and an `emit_to` it would simply be lost. The target drains the
+/// queue when it is ready (docs/specs/standalone.md -> "Arrival queue").
+pub type ArrivalQueues = HashMap<String, Vec<JsonValue>>;
+
+pub fn queue_arrival(queues: &mut ArrivalQueues, label: &str, payload: JsonValue) {
+    queues.entry(label.to_string()).or_default().push(payload);
+}
+
+/// Everything queued for `label`, removing it: an arrival is delivered once.
+pub fn take_arrivals(queues: &mut ArrivalQueues, label: &str) -> Vec<JsonValue> {
+    queues.remove(label).unwrap_or_default()
 }
 
 /// Release every suppression older than `max`, returning what was released.
@@ -200,12 +244,22 @@ pub fn restorable_labels(file_names: impl IntoIterator<Item = impl AsRef<str>>) 
     labels
 }
 
-/// Teardown order for a quit: `main` last, because it is the only window
-/// granted the updater permissions and so the only one that may install.
-pub fn quit_order(labels: impl IntoIterator<Item = impl AsRef<str>>) -> Vec<String> {
+/// Teardown order for a quit: **`main` last if it is still open, else the most
+/// recently focused window** — the last window standing is the one that installs
+/// a pending update, and a session whose `main` was closed must still be able to
+/// (docs/specs/auto-update.md).
+pub fn quit_order(
+    labels: impl IntoIterator<Item = impl AsRef<str>>,
+    focused: Option<&str>,
+) -> Vec<String> {
     let (has_main, mut order) = partition_main(labels);
     if has_main {
         order.push(MAIN_LABEL.to_string());
+        return order;
+    }
+    if let Some(position) = focused.and_then(|label| order.iter().position(|entry| entry == label)) {
+        let last = order.remove(position);
+        order.push(last);
     }
     order
 }
@@ -293,8 +347,11 @@ mod tests {
         let cases: &[(&str, JsonValue, Route)] = &[
             ("pty:data", json!({"id":"a"}), Route::EmitTo("main")),
             ("pty:data", json!({"id":"b"}), Route::EmitTo("ws-2")),
-            // An id nobody minted falls back to the single-window behavior.
-            ("pty:data", json!({"id":"zz"}), Route::Broadcast),
+            // Every PTY is minted with an owner, so an unowned id is one whose
+            // window went away: dropped, never rung through every sibling.
+            ("pty:data", json!({"id":"zz"}), Route::Drop),
+            ("pty:exit", json!({"id":"zz"}), Route::Drop),
+            ("alert:state", json!({"id":"zz"}), Route::Drop),
             (
                 "terminal:semanticEvents",
                 json!({"id":"b"}),
@@ -338,7 +395,25 @@ mod tests {
                 json!({"requestId":"dor-2"}),
                 Route::Broadcast,
             ),
-            ("burrow:ask", json!({"burrowRequestId":"ask-1"}), Route::Broadcast),
+            // The directory is the union of every window's panes.
+            (
+                "burrow:ask",
+                json!({"burrowRequestId":"ask-1","op":"directory","params":{}}),
+                Route::Broadcast,
+            ),
+            // A surface op names its Surface, and only its owner may answer:
+            // `attach` and `resize` mutate the pane they reach.
+            (
+                "burrow:ask",
+                json!({"burrowRequestId":"ask-2","op":"surfaceOp","params":{"surfaceId":"b","op":"attach"}}),
+                Route::EmitTo("ws-2"),
+            ),
+            // A Surface with no PTY here (a browser pane) keeps the fan-out.
+            (
+                "burrow:ask",
+                json!({"burrowRequestId":"ask-3","op":"surfaceOp","params":{"surfaceId":"browser-1"}}),
+                Route::Broadcast,
+            ),
             ("burrow:result", json!({}), Route::Broadcast),
             ("burrow:event", json!({}), Route::Broadcast),
         ];
@@ -439,11 +514,49 @@ mod tests {
     #[test]
     fn quit_walks_main_last() {
         assert_eq!(
-            quit_order(["main", "ws-2", "ws-5"]),
+            quit_order(["main", "ws-2", "ws-5"], Some("ws-5")),
             vec!["ws-2", "ws-5", "main"]
         );
-        assert_eq!(quit_order(["ws-2"]), vec!["ws-2"]);
-        assert_eq!(quit_order(["main"]), vec!["main"]);
+        assert_eq!(quit_order(["ws-2"], None), vec!["ws-2"]);
+        assert_eq!(quit_order(["main"], None), vec!["main"]);
+    }
+
+    /// A session whose `main` was closed still has a last window, and that one
+    /// installs a pending update (docs/specs/auto-update.md).
+    #[test]
+    fn quit_without_main_walks_the_focused_window_last() {
+        assert_eq!(
+            quit_order(["ws-2", "ws-5", "ws-7"], Some("ws-5")),
+            vec!["ws-2", "ws-7", "ws-5"]
+        );
+        // Nothing focused, or a stale label: the order given stands.
+        assert_eq!(
+            quit_order(["ws-2", "ws-5"], Some("ws-9")),
+            vec!["ws-2", "ws-5"]
+        );
+        assert_eq!(quit_order(["ws-2", "ws-5"], None), vec!["ws-2", "ws-5"]);
+    }
+
+    /// A window that has not installed its arrival listener yet is a legal drop
+    /// target, so the payload waits for it instead of being emitted into the void.
+    #[test]
+    fn an_arrival_queued_before_the_listener_exists_is_delivered_once() {
+        let mut queues = ArrivalQueues::new();
+        queue_arrival(&mut queues, "ws-2", json!({"workspaceId":"w1"}));
+        queue_arrival(&mut queues, "ws-2", json!({"workspaceId":"w2"}));
+        queue_arrival(&mut queues, "ws-3", json!({"workspaceId":"w3"}));
+
+        let taken = take_arrivals(&mut queues, "ws-2");
+        assert_eq!(
+            taken.iter().map(|p| p["workspaceId"].as_str().unwrap()).collect::<Vec<_>>(),
+            vec!["w1", "w2"],
+            "queued oldest first"
+        );
+        // Delivered once: a reload boots from the snapshot it has since written.
+        assert!(take_arrivals(&mut queues, "ws-2").is_empty());
+        // A sibling's queue is untouched, and an unknown window has none.
+        assert_eq!(take_arrivals(&mut queues, "ws-3").len(), 1);
+        assert!(take_arrivals(&mut queues, "nobody").is_empty());
     }
 
     fn rect(label: &str, origin: (i32, i32), size: (u32, u32), hittable: bool) -> WindowRect {

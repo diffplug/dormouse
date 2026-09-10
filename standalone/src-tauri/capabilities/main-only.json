@@ -1,9 +1,0 @@
-{
-  "identifier": "main-only",
-  "description": "What only the first window may do: check for an update and install it on quit. Least privilege, and it structurally enforces that the install runs in the window the quit walk tears down last (docs/specs/auto-update.md).",
-  "windows": ["main"],
-  "permissions": [
-    "core:app:allow-version",
-    "updater:default"
-  ]
-}
