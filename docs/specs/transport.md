@@ -20,7 +20,7 @@ Optional booleans:
 
 | Member | Absent reads | Set by | Effect when set |
 |---|---|---|---|
-| `persistsSession?` | `true` | `TauriAdapter`, `BrowserSidecarAdapter` → `false` | `saveSession` skips the whole record build, not just the write ("The governing rule"; rationale) |
+| `persistsSession?` | `true` | Every shipped adapter | `saveSession` skips the whole record build, not just the write, on a host that answers `false` (rationale) |
 | `hostOwnsTheme?` | `false` | `VSCodeAdapter` → `true` | Settings hides its theme picker (`docs/specs/theme.md` → "Where the user picks a theme") |
 | `hostOwnsShells?` | `false` | `VSCodeAdapter` → `true` | Settings hides its Shell row for the native QuickPick (`docs/specs/vscode.md` → "Shell selection") |
 
@@ -46,7 +46,7 @@ The bridge is a transport shim over the same sidecar protocol, not a second PTY 
 
 **An unauthorized caller gets the same `404 not found` as an unknown path**, so the port does not identify itself. The harness prints the token and a ready-made `curl` on startup.
 
-The harness **may omit** native-only desktop chrome (window controls, update checks) but **must preserve** every `PlatformAdapter` contract the app uses — PTY, control-request, clipboard, iframe-proxy, Burrow, agent-browser. It **must mirror** standalone's Session-persistence answer ("The governing rule"): the same `PERSIST_SESSION = false` gate as `TauriAdapter`, `persistsSession: false`, and any pre-gate `localStorage` blob deleted on `init()` (rationale). **Tauri APIs must not be required at static module-evaluation time** when `VITE_DORMOUSE_BROWSER_DEV_HOST` is set — a normal browser loads the page, not the Tauri WebView.
+The harness **may omit** native-only desktop chrome (window controls, update checks) but **must preserve** every `PlatformAdapter` contract the app uses — PTY, control-request, clipboard, iframe-proxy, Burrow, agent-browser. It **must mirror** standalone's Session-persistence answer ("The governing rule"): the same `persistsSession`, one `PersistedWindow` per window (in `localStorage` rather than the Rust file store), and the same agent-recovery capture against a per-run temp state directory. **Tauri APIs must not be required at static module-evaluation time** when `VITE_DORMOUSE_BROWSER_DEV_HOST` is set — a normal browser loads the page, not the Tauri WebView.
 
 Source of truth: `standalone/scripts/dev-agent-browser.mjs`, `standalone/scripts/dev-host-guard.mjs`, `standalone/src/browser-sidecar-host.ts`, `standalone/src/browser-sidecar-adapter.ts`; `stepBurrow` in `scripts/pairing-walkthrough/steps.mjs`.
 
@@ -153,9 +153,11 @@ OSC parsing/stripping rules for those rows, and the rule that **only the process
 
 **Surface kinds in the snapshot.** Each `PersistedPane` records a `surfaceType` (`docs/specs/glossary.md`): `'terminal'` — the default, **omitted from the row** so terminal snapshots stay byte-identical — or `'browser'`. It routes restore/resume, and **a pane lacking it reads as `'terminal'`**. `restoreSession` skips terminal restoration for a browser pane rather than minting a stray PTY + xterm per browser pane id, and the resume plan keeps browser panes and minimized browser doors despite their having no live PTY, so the saved layout's leaf set still matches and is not discarded. A browser pane rebuilds from the persisted layout (visible) or `PersistedDoor.params` (minimized) — its render params (`renderMode`, `url`, agent-browser `session`) live there, not in `PersistedPane`. **Must reject a layout whose leaves differ from the visible pane set during restore or resume, and omit visible browser ids from the terminal fallback.** Browser doors retain their independent render params; pinned by `lib/src/lib/session-restore.test.ts` and `lib/src/lib/reconnect.test.ts`.
 
-**Each mounted Workspace publishes its `PersistedSession` to a Window collector**, which orders them by the Workspace store and drops any Workspace that has published nothing rather than writing it empty. **The collector ships with no writer**, so standalone still stores nothing and a relaunch restores one Workspace (rollout ledger in `docs/specs/layout.md` `## Future`). A Workspace's save compares against its own previous record, never the Window's active one, or a dead PTY's retained cwd would come from the wrong Workspace. A `PersistedWorkspace` is a `WorkspaceId`, a user-facing `name`, and that Workspace's `PersistedSession`. Source of truth: `getWindowSnapshot` / `installWindowSessionWriter` in `lib/src/lib/window-session-aggregator.ts`; `SaveSink` in `lib/src/lib/session-save.ts`. The helper's top-level snapshot is a `PersistedWindow` (its own `version: 1`) wrapping v3 sessions: the ordered `PersistedWorkspace` list plus the active `WorkspaceId`. **VS Code does not use it** — each webview persists one bare `PersistedSession`, its single Workspace, through its own per-surface state API (`docs/specs/vscode.md`).
+**Each mounted Workspace publishes its `PersistedSession` to a Window collector**, which orders them by the Workspace store and writes the whole Window through one debounced writer the host installs at boot. **A Workspace with neither a published nor a boot-seeded session is dropped rather than written empty**, so a snapshot taken mid-boot cannot replace a restored Workspace with a blank one. **A Workspace's save compares against its own previous record** — seeded from disk until its Wall publishes — never the Window's active one, or a dead PTY's retained cwd and alert would come from the wrong Workspace. **Reordering, renaming, or switching the active Workspace writes too**: each changes the blob with no Session changing. A `PersistedWorkspace` is a `WorkspaceId`, a user-facing `name`, and that Workspace's `PersistedSession`. The top-level snapshot is a `PersistedWindow` (its own `version: 1`) wrapping v3 sessions: the ordered `PersistedWorkspace` list plus the active `WorkspaceId`. **VS Code does not use it** — each webview persists one bare `PersistedSession`, its single Workspace, through its own per-surface state API (`docs/specs/vscode.md`).
 
-**The wrapping lives at the standalone adapter boundary, never in the shared save/restore code.** `window-persistence.ts` translates between the host's stored top-level blob and the bare `PersistedSession` that `reconnect.ts` / `session-save.ts` operate on; both standalone adapters gate `getState` / `saveState` before reaching its `loadSessionState` / `saveSessionState`. The helpers accept a `SessionKeyValueStore` synchronous slot (`docs/specs/standalone.md` → Persistence). When called directly, flag **off** (the default) passes bare sessions through; flag **on** loads the active Workspace's session and merges saves while preserving the others.
+**The Window wrapping lives at the standalone adapter boundary, never in the shared save/restore code.** `window-persistence.ts` owns the JSON and the storage slot over a `SessionKeyValueStore` synchronous slot (`docs/specs/standalone.md` → Persistence); the shared save/restore code still operates on a bare `PersistedSession`, which the boot hands it per Workspace. **`getState` answers nothing on a Window-persisting adapter** — its blob is a Window and every shared reader of `getState` wants a Session — so the boot reads `getWindowState` instead. **A blob written before standalone persisted Windows is wrapped as the window's one Workspace**; that is the only migration.
+
+Source of truth: `getWindowSnapshot` / `seedWindowSession` / `installWindowSessionWriter` / `flushWindowSession` in `lib/src/lib/window-session-aggregator.ts`; `SaveSink` in `lib/src/lib/session-save.ts`; `loadWindowState` / `saveWindowState` in `lib/src/lib/window-persistence.ts`; `restoreWindow` in `standalone/src/main.tsx`.
 
 **A corrupt save must never block startup.** Every read goes through `readPersistedSession()` / `readPersistedWindow()`, which accept the canonical parsed object *or* a JSON-stringified blob (host state APIs may hand back the inner serialized string) and log-and-discard anything present but unreadable. `readPersistedWindow` additionally drops Workspaces whose inner session is unreadable and repairs a dangling `activeWorkspaceId` to the first Workspace.
 
@@ -163,7 +165,7 @@ OSC parsing/stripping rules for those rows, and the rule that **only the process
 
 *It is not part of the persisted session.* `PersistedPane` carries no `resumeCommand`, and `normalizeSessionV3` strips one out of a pre-upgrade blob as it strips a transcript. **Host-owned and single-use, it travels out of band**: the host puts `surfaceId -> invocation` on the webview's boot payload, the renderer reads it through `PlatformAdapter.getRecoveryCommands()`, and an adapter whose host captures nothing omits the method (rationale).
 
-*Exactly one writer, exactly one read.* The writer is the VS Code host's teardown (`docs/specs/vscode.md` → "Capturing agent recovery"); the renderer save path never derives it and standalone writes it never. **Cold restore is the one reader — resume never reads it**, the agent there still being Live. `takeRecoveryCommands` reads and unlinks on the first call of an activation, **destructively even on a parse failure**, so the durable copy is gone before any webview is served; within that activation **each webview claims only the entries matching its own saved pane ids** (rationale). **A record older than 7 days is discarded unread.**
+*One writer per host, exactly one read.* The writer is that host's teardown — the VS Code extension host's `deactivate()` (`docs/specs/vscode.md` → "Capturing agent recovery") and the Tauri sidecar's quit capture (`docs/specs/standalone.md` → "Agent recovery"); the renderer save path never derives one. Both run the same detection machine, `captureAgentRecovery` in `lib/src/host/recovery-capture.ts`, over their own PTY buffers. **Cold restore is the one reader — resume never reads it**, the agent there still being Live. The record is read and unlinked on the first claim of a host process, **destructively even on a parse failure**, so the durable copy is gone before any webview is served; within that process **each container claims only the entries matching its own saved pane ids** (rationale). **A record older than 7 days is discarded unread.**
 
 *Detection.* Executable-string constraints:
 
@@ -172,7 +174,7 @@ OSC parsing/stripping rules for those rows, and the rule that **only the process
 - **Stripping runs in boundary mode, whose rule is inverted**: *every* control becomes a newline rather than vanishing, except SGR and charset designators, the two classes that neither move the cursor nor erase. Cursor moves outside CSI count — `ESC M`, `ESC 7`/`ESC 8`, `ESC c`, VT/FF/backspace (rationale).
 - **Rightmost match in the last 50 lines wins.** No pattern spans the newline a boundary leaves, so the stripped window is scanned whole; rightmost is newest *by position*, never by pattern order (rationale). **Restore revalidates through `normalizeResumeCommand` before typing**, against a snapshot written by an older detector.
 
-Source of truth: `PersistedSession` in `lib/src/lib/session-types.ts`; `surfaceRefs` in `lib/src/components/Wall.tsx`; `saveSession` in `lib/src/lib/session-save.ts`; `restoreSession` in `lib/src/lib/session-restore.ts`; the resume plan in `lib/src/lib/reconnect.ts`; `loadSessionState` / `saveSessionState` in `lib/src/lib/window-persistence.ts`; `takeRecoveryCommands` in `vscode-ext/src/session-state.ts`; `getRecoveryCommands` in `lib/src/lib/platform/vscode-adapter.ts`; `detectResumeCommand` / `normalizeResumeCommand` in `lib/src/lib/resume-patterns.ts`; `stripTerminalControls` in `lib/src/lib/terminal-controls.ts`.
+Source of truth: `PersistedSession` in `lib/src/lib/session-types.ts`; `surfaceRefs` in `lib/src/components/Wall.tsx`; `saveSession` in `lib/src/lib/session-save.ts`; `restoreSession` in `lib/src/lib/session-restore.ts`; the resume plan in `lib/src/lib/reconnect.ts`; `captureAgentRecovery` in `lib/src/host/recovery-capture.ts`; `createRecoveryStore` in `lib/src/host/recovery-store.ts`; `takeRecoveryCommands` in `vscode-ext/src/session-state.ts`; `getRecoveryCommands` in `lib/src/lib/platform/vscode-adapter.ts`; `detectResumeCommand` / `normalizeResumeCommand` in `lib/src/lib/resume-patterns.ts`; `stripTerminalControls` in `lib/src/lib/terminal-controls.ts`.
 
 ## Persistence policy
 
@@ -185,7 +187,8 @@ Structure only: panes (id, cwd, title, `untouched`, `surfaceType`, TODO/alert bl
 **Must remove legacy transcript bytes from disk** (rationale).
 
 - **`readPersistedSession` drops `scrollback` when present**, along with any `resumeCommand`, and does not *require* it, so a snapshot written without it stays readable. A transcript can be read out of a legacy blob but never survives into a parsed Session, so nothing downstream can persist it forward.
-- **The first save after upgrade rewrites each store without transcripts.** Standalone, which stops reading its store entirely, **clears the slot outright at boot** rather than waiting for a save that may never come — including an orphaned sibling temp file from a crash before atomic rename, invisible to `load_session` but still holding the bytes.
+- **The first save after upgrade rewrites each store without transcripts**, standalone included: it reads its store again, and `readPersistedSession` is what strips them on the way in.
+- **Standalone sweeps orphaned session temp files at boot.** A crash between the temp write and the atomic rename leaves a file `load_session` cannot see and no later save will overwrite, so the sweep is the only thing that can retire a transcript sitting in one. It **never touches a live snapshot** — the window that owns one rewrites it itself. `sweep_orphan_session_temps` in `standalone/src-tauri/src/lib.rs`.
 - **No writer accepts a transcript-bearing Session shape.**
 
 ### The governing rule
@@ -195,8 +198,9 @@ something ends it:
 
 | Boundary | Deliberate? | Outcome |
 | --- | --- | --- |
-| Standalone quit — idle, confirmed, or update-install | Yes | Fresh: one default terminal |
-| Standalone crash / force-kill | No, but nothing was captured | Fresh |
+| Standalone quit — idle, confirmed, or update-install | No — window state is the app's contract | Restore structure + auto-resume agents |
+| Standalone window reload | No | Live resume over sidecar PTYs, per Workspace |
+| Standalone crash / force-kill | No, and the last save stands | Restore structure, no agent resume |
 | VS Code panel hide/show | No | Live resume over host PTYs, unchanged |
 | VS Code Reload Window | No — an editor operation, not an ending | Restore structure + auto-resume agents |
 | VS Code window close / application quit | No — window state is the host's contract | Restore structure + auto-resume agents |
@@ -205,16 +209,11 @@ something ends it:
 
 Ending something deliberately is also what *keeps* its notes: **a deliberate closure archives the Surface's notepad before teardown** (`docs/specs/notepad.md` → "Closure"), so the one thing a user asked to hold on to survives the boundary that discards everything else.
 
-**Standalone therefore persists no Session state at all**, and the write path itself
-is removed rather than written-then-ignored (rationale). Sessions still survive a
-reload — resume reads the sidecar's live PTY list, not disk — but the layout does
-not: `reconnect.ts` reads `getState()` for the saved resume plan, so every live PTY
-lands in one tab group, doors and saved titles dropped. **A legacy blob found at boot
-is deleted, not read.**
-
-> Reserved: the workspaces-rollout scope (`docs/specs/layout.md` → `## Future`)
-> assumes a persisted `PersistedWindow` in standalone. Reconciling multi-Workspace
-> persistence with this rule is part of that scope, not this one.
+**Standalone persists one `PersistedWindow` per window**, every Workspace in it, and
+restores them on the next launch (rationale). Quitting ends the processes, not the
+window: the layout, cwds, titles, doors, and TODO/alert blobs come back, and the
+agents that were running come back with them ("Consuming it"). Nothing else does —
+scrollback is never persisted, so a cold-restored pane opens empty.
 
 ### Consuming it
 

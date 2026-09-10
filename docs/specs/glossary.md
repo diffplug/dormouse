@@ -88,7 +88,7 @@ A Workspace's **union status** is its display projection of member Surfaces' Act
 
 ### Implementation status
 
-The Pane / Surface model, surface kinds, and the Workspace model are live; a Window still means one OS window, and `dormouse.flags.workspaces` still controls the stored Window wrapper (`docs/specs/layout.md` → Workspaces). Ledger: `docs/specs/layout.md` `## Future` (**Scope: workspaces-rollout**); this glossary does not track it.
+The Pane / Surface model, surface kinds, the Workspace model, and per-Workspace persistence are live; a Window still means one OS window (`docs/specs/layout.md` → Workspaces). Ledger: `docs/specs/layout.md` `## Future` (**Scope: workspaces-rollout**); this glossary does not track it.
 
 ## Roles
 

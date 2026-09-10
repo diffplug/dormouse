@@ -146,9 +146,9 @@ the rename would leave a window where the transcript is world-readable.
 
 What the current writers actually store. `normalizeSessionV3` in
 `lib/src/lib/session-types.ts` destructures `scrollback` out of every pane on
-read, `saveSession` never emits it, and standalone's `PERSIST_SESSION` is
-`false`, so the shipped app writes no snapshot at all and clears a legacy one at
-boot.
+read and `saveSession` never emits it, so a snapshot standalone writes today
+carries structure only. What a pre-upgrade one carries is retired by the first
+save over it, or — for a `.json.tmp` no save will ever reach — by the boot sweep.
 
 Why the peer-link token is listed here. It is a `randomUUID()` in the VS Code
 extension's global storage, and its own comment says it is the only thing between

@@ -36,14 +36,14 @@
 
 **What the teardown flush lost.** The pre-Rust path flushed the session on teardown into WebKit `localStorage` and lost the final debounce/heartbeat window; awaiting the write pipeline to disk (`drainSessionSaves`) recovers it, which a last fire-and-forget save would not.
 
-**What a dropped blob would still cost.** `getCwd` is a synchronous `execFileSync('lsof', …)` in the sidecar on macOS (`getCwdForPid` in `standalone/sidecar/pty-core.js`), one round trip per terminal pane. Without `persistsSession: false` the record build runs anyway, so every debounced save, every 30 s heartbeat, and both quit-time flushes pay that per pane to produce a blob discarded on the next line.
+**What a record build costs.** `getCwd` is a synchronous `execFileSync('lsof', …)` in the sidecar on macOS (`getCwdForPid` in `standalone/sidecar/pty-core.js`), one round trip per terminal pane, on every debounced save and every 30 s heartbeat. That price is why the dirty triggers are keyed to the owning Workspace: an unkeyed trigger would make every idle Workspace pay it whenever any Workspace moved.
 
-**Why the pre-upgrade snapshot is deleted, not blanked.** A `''` write leaves the old bytes on disk until some later save that may never come, and forces every reader to treat empty as a third state alongside present and absent.
+**Why the aggregator debounces on top of the Wall's own debounce.** Each Wall already coalesces its own record; the second stage coalesces *across* Walls, so one window-wide event (a store change, a theme push, a burst of output in two Workspaces) becomes one host write rather than one per Workspace.
 
-**Why the harness deletes its `localStorage` key.** Its snapshots carry transcripts, and `localStorage` is keyed by browser profile rather than by the per-run temp state directory the harness gives every other slot, so a blob written before the gate existed outlives every run.
-
-**Why the reload cost is more visible in the harness.** A developer rarely reloads real standalone; in the browser-dev harness, turning on `abDebugLogs` means reloading the page (`.claude/skills/debug-standalone-agent-browser/SKILL.md`), so long-standing behavior shows up every session.
+**Why the dev state root is a subtree rather than a separate identifier.** `app_data_dir()` is derived from the Tauri identifier, and changing the identifier for debug builds would move the notepad archive and the Burrow enrollment too — stranding a developer's notes and forcing a re-pair on every switch between the dev and installed app. A subtree splits exactly the state that is a copy of the user's window and shares the rest.
 
 ## Quit flow
 
-**Why the teardown ordering outlived its original purpose.** Flush → graceful kill → flush → drain was built to capture the final scrollback of dying terminals into the persisted session. Standalone now persists nothing, so both flushes return immediately on `persistsSession: false`; the shape is kept for the workspaces-rollout scope's Session persistence. The flushes no longer read transcripts; final PTY output is forwarded to the webview during the grace tick without a sidecar scrollback buffer.
+**Why the teardown ordering survived the transcript removal.** Flush → graceful kill → flush → drain was built to capture the final scrollback of dying terminals into the persisted session. The transcripts are gone, but the shape is still what makes the *structure* correct: the first flush reads cwds while the shells are alive, and the second catches whatever changed as they died, retaining the earlier cwd for a PTY `getCwd` can no longer answer.
+
+**Why the capture goes first and cannot abort the rest.** The resume hint exists only in the window between the interrupt and the kill, so no later step can reconstruct it — but it is also the step most likely to be slow or to fail, and losing an agent's resume is much cheaper than losing the layout, cwds, and notes behind it.

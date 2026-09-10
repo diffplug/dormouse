@@ -77,7 +77,7 @@ Consequences:
 
 > See `docs/specs/glossary.md` for the Workspace / Window containers and `docs/specs/alert.md` for the union status.
 >
-> Union reflection onto native chrome is always-on — the extension host has no `localStorage` for the standalone workspaces flag ([Future](#future)). The Window persistence container is standalone-only; VS Code keeps one bare `PersistedSession` per webview.
+> Union reflection onto native chrome is always-on. The Window persistence container is standalone-only; VS Code keeps one bare `PersistedSession` per webview.
 
 **One webview is one Workspace.** The bottom-panel `WebviewView` ("Dormouse") is the default Workspace; each `dormouse.open` editor-tab `WebviewPanel` is an independent Workspace. Several are visible at once, and VS Code — not Dormouse — owns their tabs, creation, and closing, so **Dormouse adds no create/rename/close affordances here**: the webview mounts a bare `<Wall>`, which leaves the Workspace strip and its shortcuts to standalone (`docs/specs/layout.md` → Workspaces). A Workspace's Surfaces are the terminal Sessions whose PTYs its router tracks (`ownedPtyIds`, `docs/specs/transport.md`) plus the browser Surfaces rendered in it.
 
@@ -205,9 +205,17 @@ never opened would otherwise auto-run a week-old invocation on some much later
 restore. A missing hint is ordinary: `CLAUDE_CODE_CHILD_SESSION` in a pane's env
 disables transcript saving in claude, which then prints none (rationale).
 
-Source of truth: `captureAgentRecoveryCommands` in
-`vscode-ext/src/session-state.ts`, `interrupt` in
-`vscode-ext/src/pty-manager.ts`.
+**The machine is shared, the record is not.** Every rule above lives in
+`captureAgentRecovery` (`lib/src/host/recovery-capture.ts`), over four primitives
+each host supplies — the live id set, interrupt, a monotonic received count, and the
+output since a mark — so the Tauri sidecar runs the same detection
+(`docs/specs/standalone.md` → "Agent recovery"). What stays here is where the record
+lives and how it is written; VS Code's is a plain file, written synchronously,
+because `workspaceState` batches its flush and `deactivate()` outruns it (rationale).
+
+Source of truth: `captureAgentRecoveryCommands` and `takeRecoveryCommands` in
+`vscode-ext/src/session-state.ts`, `captureAgentRecovery` in
+`lib/src/host/recovery-capture.ts`, `interrupt` in `vscode-ext/src/pty-manager.ts`.
 
 ### Theme integration
 
@@ -447,10 +455,6 @@ Source of truth: `terminalContext` in `lib/src/lib/platform/vscode-adapter.ts`; 
 ### Webview→host Surface-state channel
 
 A webview→host Surface-state message would let the native-chrome union count browser-Surface TODOs, which the PTY-keyed `alert:state` cannot carry (`docs/specs/alert.md`, `docs/specs/transport.md`).
-
-### Host-side workspaces flag gate
-
-Whether to gate the always-on union reflection on a host-side equivalent of the standalone `dormouse.flags.workspaces` localStorage flag is decided when the workspaces rollout reaches VS Code (`docs/specs/layout.md` `## Future`, workspaces-rollout).
 
 ### Context keys
 

@@ -1129,9 +1129,9 @@ fn sweep_orphan_session_temps(dir: &Path) -> Result<(), String> {
 // --- Notepad archive (docs/specs/notepad.md) ---------------------------------
 //
 // One machine-local archive per host, kept as `<app_data_dir>/notepad-archive-v1.json`
-// — a *sibling* of `sessions/`, never inside it. A Surface's notes outlive the
-// window whose closure archived them, so they must not ride the per-window
-// session blob or be swept by `clear_session`.
+// — outside `sessions/`, and outside the state root, so dev and the installed app
+// share it. A Surface's notes outlive the window whose closure archived them, so
+// they must not ride the per-window session blob or be swept with that directory.
 //
 // The port is compare-and-swap (`NotepadArchivePort` in
 // lib/src/lib/notepad/types.ts): the webview reads the bytes plus an opaque

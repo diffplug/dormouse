@@ -203,7 +203,7 @@ who had just been told the notes were not stored and had chosen Cancel.
 quit they already asked for; a slower answer is a failure worth surfacing.
 
 The file is a sibling of `sessions/` rather than a member of it because the two have
-different lifetimes: session snapshots are per window and swept by `clear_session`,
+different lifetimes: session snapshots are per window and swept with it,
 while archived notes outlive the window that produced them and must survive that
 sweep. They share `write_file_atomically` because both carry user text and both
 must survive a crash mid-write; that is one implementation, not two.

@@ -155,9 +155,9 @@ Each Wall renders one Workspace's Content (Lath layout) and Baseboard (doors). S
 
 **Create** adds a Workspace named `Workspace N`, makes it active, and gives its Wall no restored record, so Lath's fresh branch spawns one default-shell pane. **Close** confirms first when the Workspace holds touched Surfaces or running work, reusing the kill-confirm letter and key rule over the Window's content area, then routes every member Surface through the closure coordinator; **the last remaining Workspace cannot be closed** — there is always one active Workspace, as there is always one visible pane (corner case #5). **One close runs at a time for the whole Window**, with the count re-checked after the confirmation, so two of them cannot empty two Walls between them; **a close the store then refuses hands the Wall back its auto-spawn** rather than leaving it mounted and empty. **Rename** edits the Workspace `name` only — no Surface title, and not the per-pane inline rename. **Reorder** moves a tab in the strip and renumbers the positional `workspace:<n>` refs with it. **Every Workspace verb runs outside the strip**, which renders the rename editor and confirmation from a store, so a tab gesture and a command-mode key take one path.
 
-The union projection and its indicators are owned by `docs/specs/alert.md` → Workspace union; the strip that renders them by `docs/specs/standalone.md` → AppBar. Persisted containers are owned by `docs/specs/transport.md`; `dormouse.flags.workspaces` still selects the bare `PersistedSession` versus `PersistedWindow` stored format, and **both standalone adapters still disable session persistence**, so a relaunch restores one Workspace.
+The union projection and its indicators are owned by `docs/specs/alert.md` → Workspace union; the strip that renders them by `docs/specs/standalone.md` → AppBar. Persisted containers are owned by `docs/specs/transport.md`: standalone stores one `PersistedWindow` per window, so a relaunch restores every Workspace ([Session persistence](#session-persistence)).
 
-Source of truth: `WorkspaceWindow` in `lib/src/components/WorkspaceWindow.tsx`; `registerWallHandle` in `lib/src/components/wall/wall-handles.ts`; `closeAll` in `lib/src/components/Wall.tsx`; `requestWorkspaceClose` in `lib/src/components/wall/workspace-lifecycle.ts`; `createWorkspace` / `closeWorkspace` / `renameWorkspace` / `moveWorkspace` / `setActiveWorkspace` in `lib/src/lib/workspace-store.ts`; `getWorkspaceUiSnapshot` in `lib/src/lib/workspace-ui-store.ts`; `setWorkspaceSurfaces` in `lib/src/lib/workspace-surfaces.ts`; `PERSIST_SESSION` in `standalone/src/tauri-adapter.ts` and `standalone/src/browser-sidecar-adapter.ts`.
+Source of truth: `WorkspaceWindow` in `lib/src/components/WorkspaceWindow.tsx`; `registerWallHandle` in `lib/src/components/wall/wall-handles.ts`; `closeAll` in `lib/src/components/Wall.tsx`; `requestWorkspaceClose` in `lib/src/components/wall/workspace-lifecycle.ts`; `createWorkspace` / `closeWorkspace` / `renameWorkspace` / `moveWorkspace` / `setActiveWorkspace` in `lib/src/lib/workspace-store.ts`; `getWorkspaceUiSnapshot` in `lib/src/lib/workspace-ui-store.ts`; `setWorkspaceSurfaces` in `lib/src/lib/workspace-surfaces.ts`.
 
 What multi-window, per-Workspace persistence, and the `dor workspace` verbs still owe is staged in [Future](#future) — this spec's `## Future` is the single rollout ledger; other specs link here.
 
@@ -358,19 +358,21 @@ Three save triggers, in ascending urgency:
 
 `docs/specs/standalone.md` §Persistence owns the dirty-gating mechanism and the store-level identical-value backstop.
 
-Container shapes and the `dormouse.flags.workspaces` wrapping are `docs/specs/transport.md` → "Persisted session types" ([Workspaces](#workspaces)); VS Code persists one Workspace per webview (`WebviewView` / `WebviewPanel`).
+**Under a Workspace, a Wall publishes its record to the Window aggregator instead of the platform slot**, and compares each save against its own Workspace's previous record — container shapes and the aggregator's rules are `docs/specs/transport.md` → "Persisted session types" ([Workspaces](#workspaces)). **A Wall marks itself dirty only for Surfaces it owns**: both content stores are Window-global and name the Surface that changed, so an idle Workspace does not rebuild its record — a `getCwd` per pane — whenever another Workspace moves. VS Code persists one Workspace per webview (`WebviewView` / `WebviewPanel`).
 
 Snapshots are read through `readPersistedSession()`, which tolerates a stringified blob and logs-and-discards an unreadable one so malformed storage starts fresh rather than blocking startup (`docs/specs/transport.md` → "Persisted session types").
 
 Startup recovery is priority-based:
+**A Window plans once per Workspace off one live-PTY list**: `collectLivePtys` runs the single PTY-list round trip for the whole webview, and each Workspace takes the slice its own saved panes name, so one host answer restores N Workspaces (`docs/specs/standalone.md` → Persistence). A single-Wall host reaches the same behavior through `resumeOrRestore`.
+
 1. **Resume** (webview recreated, retained Live or Exited PTYs): request PTY list + replay data from the platform, `resumeTerminal()` each (500ms timeout). **Saved pane and door titles are seeded back via `setTerminalUserTitle()`** (`docs/specs/transport.md`), so persisted placeholder labels never replay as user pins. If the saved session covers every retained PTY, restore the saved Lath layout when its leaf set matches and reattach saved minimized items as doors. **Never fall through to cold restore just because the visible `paneIds` list is empty** — a wall whose retained sessions are all minimized is still a resume.
-2. **Restore** (app restart, cold start): the Wall's `seed` hydrates from the restored Lath layout, else falls to (3); `restoreTerminal()` per pane with its saved cwd and title. Browser surfaces are rebuilt from their persisted params instead.
+2. **Restore** (app restart, cold start): the Wall's `seed` hydrates from the restored Lath layout, else falls to (3); `restoreTerminal()` per pane with its saved cwd and title, plus the single-use agent resume invocation the host captured (`docs/specs/transport.md` → "Consuming it") and, on a host whose AlertManager lives in the webview, the pane's persisted TODO through `PlatformAdapter.alertSeed`. Browser surfaces are rebuilt from their persisted params instead.
 3. **Fallback/manual pane creation**: with no saved layout safely applicable, add panes as splits from the previous pane.
 4. **Empty state**: one new pane.
 
 Every PTY spawned by (2)–(4) uses the current default shell selection.
 
-Source of truth: `lib/src/components/wall/use-session-persistence.ts` (save triggers and flushes), `lib/src/lib/session-save.ts` (serialization), `lib/src/lib/reconnect.ts` (recovery priority).
+Source of truth: `lib/src/components/wall/use-session-persistence.ts` (save triggers and flushes), `lib/src/lib/session-save.ts` (serialization), `collectLivePtys` / `resumeOrRestoreFrom` in `lib/src/lib/reconnect.ts` (recovery priority), `restoreWindow` in `standalone/src/main.tsx` (the per-Workspace boot).
 
 ### Activity state
 
@@ -427,7 +429,6 @@ A store commit that empties the tree (last pane killed or minimized) triggers th
 
 **Scope: workspaces-rollout** — what the multi-Workspace feature still owes. Current implementation: [Workspaces](#workspaces). Persisted containers are owned by `docs/specs/transport.md`; union projection by `docs/specs/alert.md`. This ledger is the single home for what remains; other specs link here rather than restating it.
 
-- **Standalone persistence and agent recovery.** Every Workspace's record already reaches the Window collector, which has no writer, so nothing is stored and a relaunch restores one Workspace. Turning it on means seeding the collector at boot, debouncing and flushing its writes, adopting a restored `PersistedWindow` into the Workspace store, and lifting VS Code's agent-recovery capture into a host-agnostic module the sidecar bundles.
 - **Multiple OS windows.** PTY ownership routing in Rust, window lifecycle, tearing a Workspace out into its own window, dropping one onto another window, and restoring N windows. `WorkspaceStrip`'s `onDragOutsideWindow` / `onDropOnOtherWindow` and the router's `window:<n>` rejection are the seams; `WINDOW_REF` names the only Window this build addresses.
 - **`dor workspace` verbs.** `new` / `rename` / `close` / `switch`, plus `dor list --all` for cross-Workspace targeting and `workspace:<name>` as the stable handle beside today's positional `workspace:<n>`.
 

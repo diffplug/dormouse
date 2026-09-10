@@ -4,7 +4,7 @@
 
 ## Adapter model
 
-**What `persistsSession: false` actually saves.** The expensive half of a save is the record build, not the write: one `getCwd` round trip per pane (`docs/specs/standalone.md` → "Standalone persists no Session state", whose rationale prices it).
+**What `persistsSession: false` actually saves.** The expensive half of a save is the record build, not the write: one `getCwd` round trip per pane (`docs/specs/standalone.md` → "Persistence", whose rationale prices it). No shipped adapter answers `false` today; the gate stays because a host that persists nothing must not pay for a record it discards.
 
 ## Standalone browser-dev harness
 
@@ -58,13 +58,15 @@
 
 ## Retiring the transcripts already on disk
 
-**The legacy blobs are real, not hypothetical.** Every pre-upgrade installation had a transcript-bearing snapshot in `workspaceState` or the standalone file store, so the drop-on-read in `readPersistedSession` and standalone's boot-time clear are live migration paths, not dead defensive code.
+**The legacy blobs are real, not hypothetical.** Every pre-upgrade installation had a transcript-bearing snapshot in `workspaceState` or the standalone file store, so the drop-on-read in `readPersistedSession` and the orphan-temp sweep are live migration paths, not dead defensive code.
+
+**Why standalone stopped deleting its snapshot at boot.** Deleting was right only while nothing read the store: once the app restores its windows, an unconditional boot delete is a data-loss bug, not a migration. What the delete uniquely covered — a `.json.tmp` no reader can see and no writer will ever overwrite — is exactly what the sweep still covers, and nothing else.
 
 ## The governing rule
 
-**Why standalone persists nothing.** A clean quit has nothing to clear and a crash has nothing to recover, so the store earns no keep.
+**Why the rule reversed for standalone.** The old reading — a quit is a deliberate ending, so end everything — was a claim about the *processes*, and users do not experience a window that way. The product call is that window state is the app's contract, as it is in VS Code: the layout comes back, the agents come back, and the transcripts never do. Dropping persisted scrollback is what made that affordable — a resumed agent renders the real conversation, which is more context than the transcript it replaces ("Consuming it").
 
-**Why standalone's write path was removed rather than written-then-ignored.** The blob it wrote was the transcript-bearing one, so leaving the writer in place would have kept minting exactly the bytes "Retiring the transcripts already on disk" exists to retire.
+**What made it safe to persist again.** The two objections to the old store were both about content, not about persistence: it wrote transcripts, and it wrote them into a WKWebView `localStorage` WAL that grew without bound (`docs/specs/standalone.md` → "Persistence", rationale). Both were already fixed — no writer accepts a transcript-bearing shape, and the blob rides a Rust file store — before the rule changed.
 
 ## Consuming it
 
