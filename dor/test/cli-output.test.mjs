@@ -1056,6 +1056,20 @@ test('agent-browser raw --session skips key namespacing', async () => {
   assert.deepEqual(client.requests[0].request, { key: undefined, session: 'mine', wsPort: 61141 });
 });
 
+test('agent-browser --workspace names the Workspace and never reaches the binary', async () => {
+  const ab = fakeAgentBrowser();
+  const client = fixtureClient();
+  await runCli(['ab', '--workspace', 'build', 'open', 'surface:1'], { client, execAgentBrowser: ab.exec });
+  // Intercepted like the identity flags: the browser opens in `build`, the
+  // handle resolves there, and agent-browser sees neither the flag nor its value.
+  assert.deepEqual(ab.calls, [
+    ['agent-browser', '--session', 'dormouse.1.default', 'open', 'http://localhost:5173/'],
+    ['agent-browser', '--session', 'dormouse.1.default', 'stream', 'status', '--json'],
+  ]);
+  assert.equal(client.requests[0].request.workspace, 'build');
+  assert.equal(client.requests[1].request.workspace, 'build');
+});
+
 test('agent-browser open resolves a surface handle to a URL before forwarding', async () => {
   const ab = fakeAgentBrowser();
   const client = fixtureClient();
