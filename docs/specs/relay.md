@@ -44,7 +44,7 @@ primitive lives in `remote-lib-common`, the terminal UI in `lib`/`standalone`.
 
 ## Configuration
 
-The whole of what `relay/src/` reads from the environment:
+Production configuration (`pnpm --filter relay start`, containers, and installers):
 
 | Env var                   | Meaning                                                    |
 | ------------------------- | ---------------------------------------------------------- |
@@ -64,7 +64,7 @@ The whole of what `relay/src/` reads from the environment:
 it as configuration, and persist it as `setup-password.json`.** Use 32
 `crypto.randomBytes` bytes as lowercase hex; reject a malformed record. Source of truth:
 `generateSetupPassword` in `relay/src/setup-password.ts`,
-`SetupPasswordStore` in `relay/src/state.ts`, and `relay/src/index.ts`; test:
+`SetupPasswordStore` in `relay/src/state.ts`, and `relay/src/start.ts`; test:
 `relay/test/setup-password-store.test.mjs`.
 
 **The Relay itself always speaks plain HTTP**, and WebAuthn requires a secure
@@ -91,7 +91,7 @@ policy and the pairing URL a Burrow composes all compare against that string
 rather than re-parsing it; `createApp` parses it only to take `rpId` from the
 hostname.
 
-**`relay/src/index.ts` validates the VAPID pair and subject before building the
+**`startRelay` in `relay/src/start.ts` validates the VAPID pair and subject before building the
 app** — the only disk half of an otherwise pure env→config mapping.
 
 Source of truth: `readConfig` in `relay/src/config.ts`,
@@ -930,10 +930,27 @@ The loop at the top of this spec is implemented end to end. To test:
 pnpm dev:relay
 ```
 
-Builds the Pocket app (`lib/dist-pocket`) and the Relay, then serves both on
-`:3000`. **`./data` survives between runs**, retaining enrolled Burrows and
-registered passkeys; set `DORMOUSE_STATE_DIR` to a fresh directory to repeat first
-boot. For a real phone set `DORMOUSE_ORIGIN` to your TLS origin
+Builds Pocket and the Relay, then prints the bound URL.
+
+- **Must bind an OS-assigned port for dev**, keeping the listener bound while
+  deriving the default `http://localhost:<port>` origin and initializing the app.
+  **May pin `PORT`; an occupied port fails without stopping its owner.** Unset,
+  blank, and `0` select automatic allocation only in the dev runner.
+- **Must default dev state to `<worktree>/relay/data` regardless of cwd.**
+  `DORMOUSE_STATE_DIR` overrides it; enrollment and passkeys survive restarts.
+- **Must preserve explicit dev origin and bind-host overrides**, with blank bind
+  hosts defaulting to loopback. **Must keep production port validation, bind
+  defaults, state paths, and installer runtime records governed by Configuration.**
+- **Must use the printed origin for Burrow staging, enrollment, and Pocket.**
+  Pin `PORT` when keeping a browser origin or enrollment URL across restarts;
+  use `PORT=3000 pnpm dev:relay` for the examples below.
+
+Source of truth: `relay/scripts/dev.mjs`, `startRelay` in `relay/src/start.ts`,
+`relay/src/index.ts`; pinned by `relay/test/dev.test.mjs`,
+`relay/test/config.test.mjs`, `relay/test/bind-host.test.mjs`,
+`relay/test/runtime-file.test.mjs`.
+
+Set `DORMOUSE_STATE_DIR` to a fresh directory to repeat first boot. For a real phone set `DORMOUSE_ORIGIN` to your TLS origin
 (e.g. via `tailscale serve`); the loopback exceptions are in "Setup tokens and the
 pairing QR". On localhost **push is off**, and the Relay says so at
 startup: no routable VAPID subject (Web Push above). An https `DORMOUSE_ORIGIN`
@@ -992,6 +1009,16 @@ by tapping Connect again.
 
 `scripts/pairing-walkthrough/` drives all three in real browsers, ending at a
 command typed from Pocket. Not in CI.
+
+**Must derive the walkthrough's Relay origin from its owned dev runner, including
+with `--skip-build`, before staging the Burrow's allowlist.** **Must use actual
+listener addresses for Vite and Chrome, separate run state and browser sessions,
+and restrict cleanup to owned processes.** Parallel worktrees keep their staged
+bundles separate; concurrent runs in one worktree still share build output.
+Explicit `--out` directories must be distinct for concurrent runs of one scenario.
+
+Source of truth: `scripts/pairing-walkthrough/run.mjs`,
+`scripts/pairing-walkthrough/steps.mjs`, `scripts/pairing-walkthrough/chrome.mjs`.
 
 ## Installing it
 

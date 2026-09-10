@@ -10,7 +10,7 @@
  * afterwards.
  */
 
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { homedir, platform } from 'node:os';
 import { join } from 'node:path';
 
@@ -134,18 +134,20 @@ export function resolveChrome() {
  */
 export async function launchChrome({
   binary,
-  port,
   userDataDir,
   fakeVideoFile,
   width,
   height,
   logPath,
 }) {
+  const activePortFile = join(userDataDir, 'DevToolsActivePort');
+  rmSync(activePortFile, { force: true });
+  let port;
   const handle = spawnLogged(
     binary,
     [
       '--headless=new',
-      `--remote-debugging-port=${port}`,
+      '--remote-debugging-port=0',
       `--user-data-dir=${userDataDir}`,
       '--use-fake-device-for-media-stream',
       '--use-fake-ui-for-media-stream',
@@ -166,10 +168,13 @@ export async function launchChrome({
       if (handle.exit) {
         throw Object.assign(new Error(`Chrome exited (see ${logPath})`), { fatal: true });
       }
+      if (!existsSync(activePortFile)) return null;
+      port = Number(readFileSync(activePortFile, 'utf8').split('\n')[0]);
+      if (!Number.isInteger(port) || port < 1 || port > 65535) return null;
       const res = await fetch(`http://127.0.0.1:${port}/json/version`).catch(() => null);
       return res?.ok ? res.json() : null;
     },
-    { what: `Chrome's DevTools port :${port}`, timeoutMs: 60_000, intervalMs: 200 },
+    { what: "Chrome's DevTools listener", timeoutMs: 60_000, intervalMs: 200 },
   );
-  return { handle, version };
+  return { handle, version, port };
 }

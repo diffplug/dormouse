@@ -7,23 +7,16 @@
  * entry point. **Never wire it into `pnpm test` or a CI workflow.**
  */
 
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { SCENARIOS } from './steps.mjs';
-import { delay, exec, findFreePort, isPortFree, killTree, spawnedHandles } from './proc.mjs';
+import { delay, exec, killTree, spawnedHandles } from './proc.mjs';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
-
-/**
- * Not an option, and `--relay-port` is deliberately not one: the Burrow's allowed
- * relay origins are baked into its sidecar bundle from
- * `DORMOUSE_REMOTE_CONNECT_SRC` at stage time, and Pocket must be same-origin
- * with its own API, so both sides of a run are pinned to one origin.
- */
-const RELAY_PORT = 3000;
 
 /** The scenario a bare run drives, and the one `--until` is checked against. */
 const DEFAULT_SCENARIO = 'happy';
@@ -49,7 +42,7 @@ function artifactName(opts, name) {
 function defaults() {
   return {
     scenario: DEFAULT_SCENARIO,
-    out: '$TMPDIR/pairing-walkthrough/<timestamp>',
+    out: '$TMPDIR/pairing-walkthrough/<timestamp>-<random>',
     skipBuild: false,
     machineName: 'Walkthrough Mac',
     keep: false,
@@ -124,18 +117,14 @@ async function main(live) {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const runDir = opts.out
     ? (isAbsolute(opts.out) ? opts.out : resolve(process.cwd(), opts.out))
-    : join(tmpdir(), 'pairing-walkthrough', stamp);
+    : (() => {
+        const parent = join(tmpdir(), 'pairing-walkthrough');
+        mkdirSync(parent, { recursive: true });
+        return mkdtempSync(join(parent, `${stamp}-`));
+      })();
   mkdirSync(runDir, { recursive: true });
 
-  if (!(await isPortFree(RELAY_PORT))) {
-    throw new Error(
-      `something is already listening on :${RELAY_PORT}; stop it first ` +
-        '(the Relay origin is baked into the Burrow bundle, so this port is not negotiable)',
-    );
-  }
-  opts.vitePort = await findFreePort(15540);
-  opts.hostPort = await findFreePort(opts.vitePort + 1);
-  opts.session = `pairing-walkthrough-${stamp}`;
+  opts.session = `pairing-walkthrough-${randomUUID()}`;
   const scenario = SCENARIOS[opts.scenario];
 
   /** Every file the run left behind, by name. A re-captured QR rewrites its own. */
@@ -161,9 +150,6 @@ async function main(live) {
     runDir,
     opts,
     state,
-    relayPort: RELAY_PORT,
-    relayOrigin: `http://localhost:${RELAY_PORT}`,
-    viteOrigin: `http://localhost:${opts.vitePort}`,
     log: (message) => console.log(`[walkthrough] ${message}`),
     record: (facts) => Object.assign(summary.facts, facts),
     /**
@@ -203,10 +189,8 @@ async function main(live) {
     ctx.keep(log);
   }
 
-  ctx.record({ relayOrigin: ctx.relayOrigin });
   console.log(`[walkthrough] run directory: ${runDir}`);
   console.log(`[walkthrough] scenario ${opts.scenario}: ${scenario.expect}`);
-  console.log(`[walkthrough] relay ${ctx.relayOrigin} · vite ${ctx.viteOrigin} · bridge :${opts.hostPort}`);
   console.log(`[walkthrough] agent-browser session: ${opts.session}`);
 
   const lastIndex = scenario.steps.findIndex((step) => step.name === opts.until);
@@ -232,6 +216,7 @@ async function main(live) {
     }
   }
 
+  summary.options = { ...opts };
   summary.finishedAt = new Date().toISOString();
   summary.artifacts = [...artifacts];
   summary.reached = reached;
@@ -287,18 +272,19 @@ async function cleanup(state, opts) {
   // reads its pattern as an ERE, and a directory holding a quote or a paren
   // would otherwise turn this check into a syntax error that `catch` swallows —
   // leaving the run silent about processes it failed to stop.
-  const marks = ['dev-agent-browser.mjs', opts?.session ?? 'pairing-walkthrough', state.runDir]
+  const marks = [opts?.session, state.runDir]
     .filter(Boolean)
     .map((mark) => mark.replaceAll(/[.[\]{}()*+?^$|\\]/g, String.raw`\$&`))
     .join('|');
   // pgrep exits 1 when nothing matches, which `exec` reports as a failure.
-  const survivors = await exec('pgrep', ['-fl', marks]).catch(() => ({ stdout: '' }));
+  const survivors = marks
+    ? await exec('pgrep', ['-fl', marks]).catch(() => ({ stdout: '' }))
+    : { stdout: '' };
   // **This process and the shell that started it match the marks themselves.**
   // `pairing-walkthrough` is a substring of this script's own path, and `--out`
   // puts the run directory in its own argv — so a diagnostic whose whole job is
   // to say "something leaked" would cry wolf on every path that ends before
-  // `opts.session` exists: `--help`, a bad flag, and the `:3000` refusal a
-  // first-time run is most likely to hit. (Whether the parent is listed at all
+  // `opts.session` exists: `--help` or a bad flag. (Whether the parent is listed at all
   // is a `pgrep` difference — GNU lists it, BSD does not — which is not
   // something to leave the answer resting on.)
   const mine = new Set([process.pid, process.ppid]);
@@ -326,7 +312,7 @@ async function shutdown(code, live, { exit = false } = {}) {
 }
 
 const live = { state: {}, opts: null };
-for (const signal of ['SIGINT', 'SIGTERM']) {
+for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
   process.on(signal, () => { void shutdown(130, live, { exit: true }); });
 }
 // The two ways out that skip `main`'s own `catch`, and the two that would

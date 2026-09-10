@@ -17,7 +17,7 @@ import { AgentBrowser } from './ab.mjs';
 import { addVirtualAuthenticator, attachPage, pageUrl, virtualCredentials } from './cdp.mjs';
 import { launchChrome, resolveChrome } from './chrome.mjs';
 import { blankY4m, crop, decodeQr, imageSize, toY4m, upscale } from './qr.mjs';
-import { delay, findFreePort, spawnLogged, waitFor, waitForLine } from './proc.mjs';
+import { delay, spawnLogged, waitFor, waitForLine } from './proc.mjs';
 
 /**
  * The Pocket browser's viewport: a phone, because every Pocket screen is laid
@@ -226,7 +226,7 @@ async function stepRelay(ctx) {
 
   const handle = spawnLogged(
     'pnpm',
-    skipBuild ? ['--filter', 'relay', 'start'] : ['dev:relay'],
+    skipBuild ? ['--filter', 'relay', 'exec', 'node', 'scripts/dev.mjs'] : ['dev:relay'],
     {
       cwd: repoRoot,
       logPath: ctx.path('relay.log'),
@@ -238,15 +238,26 @@ async function stepRelay(ctx) {
         // of it (`docs/specs/security-remote.md` -> "Network posture
         // (self-hosted)"): unset, the Relay binds every interface.
         DORMOUSE_BIND_HOST: '127.0.0.1',
-        PORT: String(ctx.relayPort),
+        PORT: '0',
+        DORMOUSE_ORIGIN: '',
+        // A walkthrough must never reuse an inherited installer's offer or
+        // publish its dev pid into the installed Relay's runtime record.
+        DORMOUSE_RUNTIME_FILE: '',
+        DORMOUSE_RELEASE_ID: '',
+        DORMOUSE_ENROLL_TOKEN_FILE: '',
+        DORMOUSE_POCKET_DIR: join(repoRoot, 'lib', 'dist-pocket'),
       },
     },
   );
 
-  await waitForLine(handle, /relay listening on/, {
+  const listening = await waitForLine(handle, /relay listening on .* \(origin (http:\/\/localhost:\d+)\)/, {
     timeoutMs: skipBuild ? 60_000 : 600_000,
     what: 'the Relay to bind',
   });
+  ctx.relayOrigin = listening[1];
+  ctx.relayPort = Number(new URL(ctx.relayOrigin).port);
+  ctx.record({ relayOrigin: ctx.relayOrigin });
+  ctx.log(`relay ${ctx.relayOrigin}`);
   // The log line lands from inside the `listen` callback; a request is what
   // proves the socket actually answers.
   await waitFor(
@@ -289,8 +300,8 @@ async function stepBurrow(ctx) {
     env: {
       DORMOUSE_REMOTE_CONNECT_SRC: `${ctx.relayOrigin} ${ctx.relayOrigin.replace(/^http/, 'ws')}`,
       DORMOUSE_BROWSER_DEV_AB_SESSION: opts.session,
-      DORMOUSE_BROWSER_DEV_VITE_PORT: String(opts.vitePort),
-      DORMOUSE_BROWSER_DEV_HOST_PORT: String(opts.hostPort),
+      DORMOUSE_BROWSER_DEV_VITE_PORT: '0',
+      DORMOUSE_BROWSER_DEV_HOST_PORT: '0',
     },
   });
 
@@ -306,6 +317,10 @@ async function stepBurrow(ctx) {
     timeoutMs: 300_000,
     what: 'the harness to finish opening the app',
   });
+  const appLine = await waitForLine(handle, /app URL: (http:\/\/localhost:\d+)/);
+  ctx.viteOrigin = appLine[1];
+  opts.vitePort = Number(new URL(ctx.viteOrigin).port);
+  ctx.log(`vite ${ctx.viteOrigin}`);
   ctx.record({ burrowStateDir: stateLine[1].trim(), viteOrigin: ctx.viteOrigin });
 
   ctx.state.burrowBrowser = new AgentBrowser(opts.session, repoRoot);
@@ -527,12 +542,10 @@ async function stepPocket(ctx) {
 
   const chrome = resolveChrome();
   ctx.log(`pocket browser: ${chrome.path} (${chrome.from})`);
-  const port = await findFreePort(opts.hostPort + 100);
   const userDataDir = ctx.path('pocket-profile');
   mkdirSync(userDataDir, { recursive: true });
   const launched = await launchChrome({
     binary: chrome.path,
-    port,
     userDataDir,
     // Opened at `getUserMedia` time rather than at launch (probed), so this
     // may be — and on a rotated code is — rewritten after Chrome is up.
@@ -542,6 +555,7 @@ async function stepPocket(ctx) {
     logPath: ctx.path('pocket-chrome.log'),
   });
 
+  const { port } = launched;
   const ab = new AgentBrowser(`${opts.session}-pocket`, repoRoot);
   ctx.state.pocketBrowser = ab;
   await ab.run(['connect', String(port)]);

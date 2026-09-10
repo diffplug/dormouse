@@ -2,10 +2,6 @@
  * Process, port and log plumbing for the pairing walkthrough
  * (`scripts/pairing-walkthrough/README.md`).
  *
- * Nothing here is product code and nothing here listens: the harness only
- * *probes* ports with an outbound connect, so `scripts/loopback-lint.mjs` has
- * no listener to guard.
- *
  * `docs/specs/dor-cli.md` -> "Spawning External Binaries" requires product code
  * to spawn through `spawnAndCapture`; this file spawns raw on purpose. It is a
  * dependency-free script outside the pnpm workspace (nothing to import from),
@@ -14,7 +10,6 @@
  */
 
 import { createWriteStream } from 'node:fs';
-import net from 'node:net';
 import { spawn } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -122,35 +117,6 @@ export async function waitFor(probe, { timeoutMs = 60_000, intervalMs = 400, wha
     }
     await delay(intervalMs);
   }
-}
-
-/**
- * Whether nothing is listening on `port`.
- *
- * An outbound connect rather than a trial bind: a bind-and-close would put a
- * loopback listener in this file, which `scripts/loopback-lint.mjs` reads as a
- * product listener needing a guard, and the answer would be no more accurate.
- */
-export function isPortFree(port) {
-  return new Promise((resolve) => {
-    const socket = net.connect({ port, host: '127.0.0.1' });
-    const settle = (free) => {
-      socket.destroy();
-      resolve(free);
-    };
-    socket.setTimeout(1000);
-    socket.once('connect', () => settle(false));
-    socket.once('timeout', () => settle(true));
-    socket.once('error', () => settle(true));
-  });
-}
-
-/** The first free port at or above `start`. */
-export async function findFreePort(start) {
-  for (let port = start; port < start + 200; port++) {
-    if (await isPortFree(port)) return port;
-  }
-  throw new Error(`no free port in [${start}, ${start + 200})`);
 }
 
 /**
