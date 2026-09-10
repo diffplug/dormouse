@@ -69,20 +69,16 @@ pub struct QuitMachine {
     pub approved: bool,
     pub phase: QuitPhase,
     pub windows: HashMap<String, WindowQuit>,
-    /// The most recently focused window at the trigger, which the walk tears
-    /// down last when `main` is not open (`quit_order`).
-    focused: Option<String>,
 }
 
 impl QuitMachine {
-    /// A quit trigger over the live windows, most recently focused first.
+    /// A quit trigger over the live windows.
     ///
     /// Never clears `voted` once the walk has started: a repeat trigger fired
     /// mid-teardown must leave the walk in flight, or the fresh watchdog drops
     /// into the unbounded voting wait and stops bounding it.
-    pub fn request(&mut self, labels: &[String], focused: Option<String>) -> (u64, Vec<QuitAction>) {
+    pub fn request(&mut self, labels: &[String]) -> (u64, Vec<QuitAction>) {
         self.seq += 1;
-        self.focused = focused;
         let walking = matches!(self.phase, QuitPhase::Walking { .. });
         let mut next: HashMap<String, WindowQuit> = HashMap::new();
         for label in labels {
@@ -248,7 +244,7 @@ impl QuitMachine {
     }
 
     fn start_walk(&mut self) -> Vec<QuitAction> {
-        let order = quit_order(self.windows.keys(), self.focused.as_deref());
+        let order = quit_order(self.windows.keys());
         let Some(first) = order.first().cloned() else {
             return self.exit();
         };
@@ -315,7 +311,7 @@ mod tests {
     #[test]
     fn all_votes_walk_the_windows_with_main_last() {
         let mut quit = QuitMachine::default();
-        let (seq, actions) = quit.request(&labels(&["main", "ws-2"]), None);
+        let (seq, actions) = quit.request(&labels(&["main", "ws-2"]));
         assert_eq!(seq, 1);
         assert_eq!(actions, vec![QuitAction::RequestAll]);
 
@@ -353,7 +349,7 @@ mod tests {
     #[test]
     fn any_cancel_aborts_with_nothing_destroyed() {
         let mut quit = QuitMachine::default();
-        quit.request(&labels(&["main", "ws-2"]), None);
+        quit.request(&labels(&["main", "ws-2"]));
         quit.vote("main");
         let actions = quit.cancel();
         assert_eq!(actions, vec![QuitAction::CancelAll]);
@@ -369,7 +365,7 @@ mod tests {
     #[test]
     fn a_cancel_after_the_walk_started_is_refused() {
         let mut quit = QuitMachine::default();
-        quit.request(&labels(&["main"]), None);
+        quit.request(&labels(&["main"]));
         quit.vote("main");
         assert!(matches!(quit.phase, QuitPhase::Walking { .. }));
         assert_eq!(quit.cancel(), Vec::new());
@@ -379,13 +375,13 @@ mod tests {
     #[test]
     fn a_repeat_trigger_re_emits_without_interrupting_the_walk() {
         let mut quit = QuitMachine::default();
-        quit.request(&labels(&["main", "ws-2"]), None);
+        quit.request(&labels(&["main", "ws-2"]));
         quit.vote("main");
         quit.vote("ws-2");
         quit.progress("ws-2");
         assert_eq!(quit.walking_progress(), Some(("ws-2".into(), 1)));
 
-        let (seq, actions) = quit.request(&labels(&["main", "ws-2"]), None);
+        let (seq, actions) = quit.request(&labels(&["main", "ws-2"]));
         assert_eq!(seq, 2);
         assert_eq!(actions, vec![QuitAction::RequestAll]);
         // The walk survives, and so does the in-flight teardown's progress —
@@ -401,7 +397,7 @@ mod tests {
     #[test]
     fn the_last_window_exits_and_a_destroy_cannot_re_enter() {
         let mut quit = QuitMachine::default();
-        quit.request(&labels(&["main"]), None);
+        quit.request(&labels(&["main"]));
         assert_eq!(
             quit.vote("main"),
             vec![QuitAction::Teardown {
@@ -426,7 +422,7 @@ mod tests {
     #[test]
     fn a_window_that_leaves_mid_vote_does_not_hold_the_quit_open() {
         let mut quit = QuitMachine::default();
-        quit.request(&labels(&["main", "ws-2"]), None);
+        quit.request(&labels(&["main", "ws-2"]));
         quit.vote("main");
         assert_eq!(
             quit.forget_window("ws-2"),
@@ -440,7 +436,7 @@ mod tests {
     #[test]
     fn a_window_that_leaves_mid_walk_advances_the_order() {
         let mut quit = QuitMachine::default();
-        quit.request(&labels(&["main", "ws-2", "ws-3"]), None);
+        quit.request(&labels(&["main", "ws-2", "ws-3"]));
         quit.vote("main");
         quit.vote("ws-2");
         let actions = quit.vote("ws-3");
@@ -458,7 +454,7 @@ mod tests {
     #[test]
     fn a_quit_that_runs_out_of_windows_exits_instead_of_going_headless() {
         let mut voting = QuitMachine::default();
-        voting.request(&labels(&["main", "ws-2"]), None);
+        voting.request(&labels(&["main", "ws-2"]));
         assert_eq!(voting.forget_window("main"), Vec::new());
         assert_eq!(voting.forget_window("ws-2"), vec![QuitAction::Exit]);
         // Approved, so the `app.exit(0)` this asks for is not re-caught as a
@@ -466,7 +462,7 @@ mod tests {
         assert!(voting.approved);
 
         let mut walking = QuitMachine::default();
-        walking.request(&labels(&["main", "ws-2"]), None);
+        walking.request(&labels(&["main", "ws-2"]));
         walking.vote("main");
         walking.vote("ws-2");
         assert!(matches!(walking.phase, QuitPhase::Walking { .. }));
@@ -476,28 +472,28 @@ mod tests {
         assert!(walking.approved);
     }
 
-    /// With `main` closed the walk still has a last window, and that one installs
-    /// a pending update (docs/specs/auto-update.md).
+    /// A session whose `main` was closed still walks every window and still ends
+    /// on one of them — which one is unspecified, because only `main` ever holds
+    /// a pending update to install (docs/specs/auto-update.md).
     #[test]
-    fn without_main_the_focused_window_is_torn_down_last() {
+    fn without_main_the_walk_still_ends_on_a_last_window() {
         let mut quit = QuitMachine::default();
-        quit.request(&labels(&["ws-2", "ws-5"]), Some("ws-2".into()));
+        quit.request(&labels(&["ws-2", "ws-5"]));
         quit.vote("ws-5");
+        let actions = quit.vote("ws-2");
+        let [QuitAction::Teardown { label: first, last }] = actions.as_slice() else {
+            panic!("expected one teardown, got {actions:?}");
+        };
+        assert!(!last, "two windows: the first is not the last");
+        let second = if first == "ws-2" { "ws-5" } else { "ws-2" };
         assert_eq!(
-            quit.vote("ws-2"),
-            vec![QuitAction::Teardown {
-                label: "ws-5".into(),
-                last: false
-            }]
-        );
-        assert_eq!(
-            quit.window_done("ws-5"),
+            quit.window_done(first),
             vec![
                 QuitAction::Destroy {
-                    label: "ws-5".into()
+                    label: first.clone()
                 },
                 QuitAction::Teardown {
-                    label: "ws-2".into(),
+                    label: second.to_string(),
                     last: true
                 }
             ]

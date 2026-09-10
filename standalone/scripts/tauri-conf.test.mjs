@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -49,18 +49,16 @@ test('the first window is labelled main', () => {
   assert.equal(conf.app.windows[0].label, 'main');
 });
 
-// The quit walk tears `main` down last only while `main` is open; close it and
-// the last window standing is a `ws-*` one, which must still be able to install
-// the update it is holding. A capability split that pinned the install to `main`
-// would make that session silently unable to update
-// (docs/specs/auto-update.md -> "Quit-time install").
-test('every window may check for and install an update', () => {
+// Least privilege, and it is what structurally enforces that the update
+// install runs in the window the quit walk tears down last
+// (docs/specs/auto-update.md).
+test('only the first window may check for or install an update', () => {
   const dflt = capability('default');
+  const mainOnly = capability('main-only');
   assert.deepEqual(dflt.windows, ['main', 'ws-*'], 'torn-out windows need the AppBar controls');
+  assert.deepEqual(mainOnly.windows, ['main']);
   for (const permission of ['updater:default', 'core:app:allow-version']) {
-    assert.ok(dflt.permissions.includes(permission), `default holds ${permission}`);
+    assert.ok(mainOnly.permissions.includes(permission), `main-only holds ${permission}`);
+    assert.ok(!dflt.permissions.includes(permission), `default does not hold ${permission}`);
   }
-  // No window-scoped split may come back and re-strand a `main`-less session.
-  const capabilities = readdirSync(join(srcTauri, 'capabilities'));
-  assert.deepEqual(capabilities, ['default.json'], 'one capability set, every window');
 });

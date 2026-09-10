@@ -335,22 +335,13 @@ pub fn restorable_labels(file_names: impl IntoIterator<Item = impl AsRef<str>>) 
     labels
 }
 
-/// Teardown order for a quit: **`main` last if it is still open, else the most
-/// recently focused window** — the last window standing is the one that installs
-/// a pending update, and a session whose `main` was closed must still be able to
-/// (docs/specs/auto-update.md).
-pub fn quit_order(
-    labels: impl IntoIterator<Item = impl AsRef<str>>,
-    focused: Option<&str>,
-) -> Vec<String> {
+/// Teardown order for a quit: **`main` last**, which is the window that holds
+/// `updater:*` and installs a pending update once every sibling has handed on
+/// (docs/specs/auto-update.md). Every other label keeps the order it came in.
+pub fn quit_order(labels: impl IntoIterator<Item = impl AsRef<str>>) -> Vec<String> {
     let (has_main, mut order) = partition_main(labels);
     if has_main {
         order.push(MAIN_LABEL.to_string());
-        return order;
-    }
-    if let Some(position) = focused.and_then(|label| order.iter().position(|entry| entry == label)) {
-        let last = order.remove(position);
-        order.push(last);
     }
     order
 }
@@ -629,27 +620,11 @@ mod tests {
     #[test]
     fn quit_walks_main_last() {
         assert_eq!(
-            quit_order(["main", "ws-2", "ws-5"], Some("ws-5")),
+            quit_order(["main", "ws-2", "ws-5"]),
             vec!["ws-2", "ws-5", "main"]
         );
-        assert_eq!(quit_order(["ws-2"], None), vec!["ws-2"]);
-        assert_eq!(quit_order(["main"], None), vec!["main"]);
-    }
-
-    /// A session whose `main` was closed still has a last window, and that one
-    /// installs a pending update (docs/specs/auto-update.md).
-    #[test]
-    fn quit_without_main_walks_the_focused_window_last() {
-        assert_eq!(
-            quit_order(["ws-2", "ws-5", "ws-7"], Some("ws-5")),
-            vec!["ws-2", "ws-7", "ws-5"]
-        );
-        // Nothing focused, or a stale label: the order given stands.
-        assert_eq!(
-            quit_order(["ws-2", "ws-5"], Some("ws-9")),
-            vec!["ws-2", "ws-5"]
-        );
-        assert_eq!(quit_order(["ws-2", "ws-5"], None), vec!["ws-2", "ws-5"]);
+        assert_eq!(quit_order(["ws-2", "ws-5"]), vec!["ws-2", "ws-5"]);
+        assert_eq!(quit_order(["main"]), vec!["main"]);
     }
 
     fn arrival(workspace_id: &str, from: &str, to: &str, ids: &[&str]) -> Arrival {

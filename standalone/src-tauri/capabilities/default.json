@@ -13,8 +13,6 @@
     "core:window:allow-is-maximized",
     "core:window:allow-is-focused",
     "core:window:allow-start-dragging",
-    "core:app:allow-version",
-    "updater:default",
     "shell:default"
   ]
 }

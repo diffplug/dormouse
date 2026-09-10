@@ -513,14 +513,8 @@ fn request_quit(app: &AppHandle) {
         return;
     };
     let labels = window_labels(app);
-    // The walk ends with `main` when it is open, and otherwise with the window
-    // the user was last looking at — whichever it is, the last one standing is
-    // the one that installs a pending update (docs/specs/auto-update.md).
-    let focused = app
-        .try_state::<WindowState>()
-        .and_then(|windows| windows.focused());
     append_log(format!("[quit] requested across {labels:?}"));
-    let (my_seq, actions) = guard(&state.machine).request(&labels, focused);
+    let (my_seq, actions) = guard(&state.machine).request(&labels);
     apply_quit_actions(app, actions);
 
     // Watchdog: a cloned handle polls the machine so a dead or wedged webview
