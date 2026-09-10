@@ -60,7 +60,10 @@ export interface ResumePlanOptions {
  * 3. Neither → return empty (Wall creates a fresh terminal)
  */
 export async function resumeOrRestore(platform: PlatformAdapter): Promise<ReconnectResult> {
-  return resumeOrRestoreFrom(platform, await collectLivePtys(platform));
+  return resumeOrRestoreFrom(
+    platform,
+    await collectLivePtys(platform, { retryTimeoutMs: LIST_RETRY_MS }),
+  );
 }
 
 /** How one collection differs from the ordinary boot one. */
@@ -75,7 +78,22 @@ export interface CollectPtysOptions {
   accept?: (id: string) => boolean;
   /** The ceiling on waiting for replays. */
   timeoutMs?: number;
+  /** Ask once more on this budget when the host never answered at all. Omitted:
+   *  one attempt (`collectLivePtysOnce`). */
+  retryTimeoutMs?: number;
 }
+
+/**
+ * The second ask's budget when the first got no `pty:list` at all.
+ *
+ * A `timedOut` list is the input a cold restore reads as "the host holds
+ * nothing", and acting on it starts a second set of shells over the ones still
+ * running. A launch slow enough to outrun 500 ms — a cold sidecar behind an
+ * antivirus scan — is exactly when that happens, so the host is asked once more
+ * before its silence is believed. Costs nothing when there is nothing to say:
+ * an empty list still resolves as soon as it arrives.
+ */
+export const LIST_RETRY_MS = 3000;
 
 /** Distinct per collection and per webview reload; only ever compared for
  *  equality against the host's echo. */
@@ -94,8 +112,23 @@ let collectSeq = 0;
  * conclude the host holds nothing. The token rides the `requestInit` and comes
  * back on the list and each replay; an answer carrying none is a host that does
  * not echo it (VS Code, Pocket, the website), which has one collector anyway.
+ *
+ * **Asks twice before believing silence**, on `retryTimeoutMs`: the whole
+ * difference between "the host holds nothing" and "the host never answered" is
+ * `timedOut`, and a caller that cold-restores on the second starts a second set
+ * of shells over the ones still running.
  */
-export function collectLivePtys(
+export async function collectLivePtys(
+  platform: PlatformAdapter,
+  options: CollectPtysOptions = {},
+): Promise<LivePtys> {
+  const first = await collectLivePtysOnce(platform, options);
+  if (!first.timedOut || options.retryTimeoutMs === undefined) return first;
+  return collectLivePtysOnce(platform, { ...options, timeoutMs: options.retryTimeoutMs });
+}
+
+/** One ask and one wait. `collectLivePtys` is this, plus the retry. */
+function collectLivePtysOnce(
   platform: PlatformAdapter,
   options: CollectPtysOptions = {},
 ): Promise<LivePtys> {

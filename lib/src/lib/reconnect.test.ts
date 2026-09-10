@@ -761,6 +761,48 @@ describe('collectLivePtys addressing', () => {
     }
   });
 
+  it('asks a second time before believing silence, and resumes on the late answer', async () => {
+    vi.useFakeTimers();
+    try {
+      const { platform, asked, answer } = addressedPlatform();
+      const collecting = collectLivePtys(platform, { timeoutMs: 100, retryTimeoutMs: 3000 });
+      // The first wait runs out with nothing back: a boot that believed it here
+      // would cold-restore, starting a second set of shells over live ones.
+      await vi.advanceTimersByTimeAsync(200);
+      expect(asked).toHaveLength(2);
+
+      // The host is just slow. Its answer to the second ask is what resumes.
+      answer(asked[1]!, ['a']);
+      const collected = await collecting;
+      expect(collected.timedOut).toBe(false);
+      expect(collected.ptys.map((pty) => pty.id)).toEqual(['a']);
+      expect([...collected.replay.keys()]).toEqual(['a']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('asks once when told to, and once more only on silence', async () => {
+    vi.useFakeTimers();
+    try {
+      const { platform, asked, answer } = addressedPlatform();
+      const answered = collectLivePtys(platform, { timeoutMs: 100, retryTimeoutMs: 3000 });
+      await Promise.resolve();
+      answer(asked[0]!);
+      expect(await answered).toMatchObject({ ptys: [], timedOut: false });
+      // An answered ask is never repeated.
+      expect(asked).toHaveLength(1);
+
+      // No `retryTimeoutMs`: one ask, and the silence stands.
+      const once = collectLivePtys(platform, { timeoutMs: 100 });
+      await vi.advanceTimersByTimeAsync(200);
+      expect(await once).toMatchObject({ timedOut: true });
+      expect(asked).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('accepts an answer from a host that echoes no token', async () => {
     // VS Code, Pocket and the website each serve one webview, so their answers
     // carry none and there is nothing to tell apart.

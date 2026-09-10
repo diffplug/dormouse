@@ -11,7 +11,7 @@
  */
 
 import type { PlatformAdapter, PtyInfo } from "dormouse-lib/lib/platform/types";
-import { collectLivePtys, resumeOrRestoreFrom, type LivePtys } from "dormouse-lib/lib/reconnect";
+import { collectLivePtys, LIST_RETRY_MS, resumeOrRestoreFrom, type LivePtys } from "dormouse-lib/lib/reconnect";
 import {
   flushWindowSession,
   installWindowSessionWriter,
@@ -129,7 +129,15 @@ async function restoreWindow(
 ): Promise<WallBootPlans> {
   installWindowPersistence(platform, saved);
 
-  const live: LivePtys = await collectLivePtys(platform);
+  // Asked twice when the host says nothing at all and this Window has terminal
+  // panes to lose: `resumeOrRestoreFrom` reads a timed-out list as "no live
+  // PTYs" and cold-restores, which starts a second set of shells over the ones
+  // still running (`docs/specs/transport.md` → "Reconnection").
+  const hasTerminalPanes = (saved?.workspaces ?? []).some((workspace) =>
+    workspace.session.panes.some((pane) => pane.surfaceType !== "browser"));
+  const live: LivePtys = await collectLivePtys(platform, {
+    ...(hasTerminalPanes ? { retryTimeoutMs: LIST_RETRY_MS } : {}),
+  });
   const restoring: Array<{ id: WorkspaceId; session: PersistedSession | null }> =
     saved?.workspaces ?? [{ id: DEFAULT_WORKSPACE_ID, session: null }];
   const activeId = saved?.activeWorkspaceId ?? DEFAULT_WORKSPACE_ID;
