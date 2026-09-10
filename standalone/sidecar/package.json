@@ -7,6 +7,16 @@
     "test": "node --test"
   },
   "dependencies": {
+    "detect-libc": "2.1.2",
+    "node-datachannel": "0.33.2",
     "node-pty": "1.2.0-beta.15"
+  },
+  "optionalDependencies": {
+    "@node-datachannel/darwin-arm64": "0.33.2",
+    "@node-datachannel/darwin-x64": "0.33.2",
+    "@node-datachannel/linux-arm64-gnu": "0.33.2",
+    "@node-datachannel/linux-x64-gnu": "0.33.2",
+    "@node-datachannel/win32-arm64-msvc": "0.33.2",
+    "@node-datachannel/win32-x64-msvc": "0.33.2"
   }
 }
