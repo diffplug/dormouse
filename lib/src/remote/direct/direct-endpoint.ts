@@ -19,6 +19,7 @@ import {
   fromBase64Url,
   isDirectSignalV1,
   type DirectPath,
+  type DirectRelayCause,
   type DirectSignalV1,
   type TransportReceipt,
 } from 'remote-lib-common';
@@ -62,10 +63,9 @@ export interface DirectEndpointDeps {
   isCurrent(): boolean;
   /**
    * Notified whenever {@link DirectEndpoint.path} or {@link
-   * DirectEndpoint.detail} changes; the Client's indicator. The detail is why
-   * the session is on the path it is on — `null` once nothing is worth saying.
+   * DirectEndpoint.relayCause} changes; the Client's indicator.
    */
-  onTransportChanged?(path: DirectPath, detail: string | null): void;
+  onTransportChanged?(path: DirectPath, cause: DirectRelayCause | null): void;
   /** Every deadline the peer arms; see {@link RemoteTimer}. */
   readonly setTimer?: RemoteTimer;
 }
@@ -77,11 +77,11 @@ export class DirectEndpoint {
   readonly #setTimer: RemoteTimer;
   #peer: DirectPeer | null = null;
   #disposed = false;
-  #detail: string | null = null;
-  /** Cancels the wait for the peer's switch; see {@link #armHandoffTimeout}. */
+  #cause: DirectRelayCause | null = null;
+  /** Cancels the wait for the peer's switch; see {@link #settle}. */
   #cancelHandoff: (() => void) | null = null;
   /** The last pair announced, so an unchanged one is not announced twice. */
-  #announced: { path: DirectPath; detail: string | null } = { path: 'relay', detail: null };
+  #announced: { path: DirectPath; cause: DirectRelayCause | null } = { path: 'relay', cause: null };
 
   constructor(role: DirectRole, deps: DirectEndpointDeps) {
     this.#role = role;
@@ -95,12 +95,12 @@ export class DirectEndpoint {
   }
 
   /**
-   * Why the session is on the path it is on, or `null` where there is nothing
-   * to say. Set by every route that gives an attempt up, so a session that
-   * stayed relayed can say which of the many silent reasons it was.
+   * Why the session is still relayed, or `null` where there is nothing to say.
+   * Set by every route that gives an attempt up, so a session that stayed
+   * relayed can say which of the three {@link DirectRelayCause}s it was.
    */
-  get detail(): string | null {
-    return this.#detail;
+  get relayCause(): DirectRelayCause | null {
+    return this.#cause;
   }
 
   /**
@@ -116,7 +116,7 @@ export class DirectEndpoint {
     if (this.#role !== 'offerer' || !this.#cutover.begin()) return;
     const peer = this.#build();
     if (!peer) {
-      this.#giveUp('this device has no direct connection to offer');
+      this.#giveUp('this runtime builds no peer connection', 'unsupported');
       return;
     }
     const sdp = await peer.offer();
@@ -139,7 +139,7 @@ export class DirectEndpoint {
         if (this.#role === 'offerer') void this.#peer?.acceptAnswer(value.sdp);
         return;
       case 'direct-decline':
-        if (this.#role === 'offerer') this.#giveUp('the peer declined a direct path');
+        if (this.#role === 'offerer') this.#giveUp('the peer declined a direct path', 'declined');
         return;
       case 'direct-switch': {
         const outcome = this.#cutover.onSwitchDecrypted();
@@ -147,8 +147,7 @@ export class DirectEndpoint {
           this.#deps.fatal('the peer moved to a direct path this end had abandoned');
           return;
         }
-        this.#clearHandoffTimeout();
-        this.#announce();
+        this.#settle();
         // In arrival order, through the same decrypt path the relay's frames
         // take: what was held is exactly what was sent after the switch.
         for (const frame of outcome.frames) {
@@ -202,10 +201,11 @@ export class DirectEndpoint {
   send(ciphertext: Uint8Array): boolean {
     if (this.#disposed) return true;
     if (this.#cutover.outbound !== 'direct') return false;
-    if (this.#peer?.send(ciphertext)) return true;
-    // Switched, and the channel will not take it: there is no relay to fall
-    // back to, so this is burrow loss rather than a message to re-route.
-    this.#deps.fatal('the direct channel refused a message');
+    // Switched, so the channel is the only path this may take — there is no
+    // relay left to re-route onto. A peer that cannot carry it says why through
+    // `onClosed`, and this end's rule about a channel lost after a switch does
+    // the rest.
+    this.#peer?.send(ciphertext);
     return true;
   }
 
@@ -217,11 +217,10 @@ export class DirectEndpoint {
   dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
-    this.#clearHandoffTimeout();
     this.#peer?.close();
     this.#peer = null;
     this.#cutover.clear();
-    this.#announce();
+    this.#settle();
   }
 
   // --- Internals -------------------------------------------------------------
@@ -235,13 +234,13 @@ export class DirectEndpoint {
     if (!this.#cutover.begin()) return;
     const peer = this.#build();
     if (!peer) {
-      this.#decline('this device has no direct connection to answer with');
+      this.#decline('this runtime builds no peer connection', 'unsupported');
       return;
     }
     const sdp = await peer.answer(offerSdp);
     if (!this.#stillOurs(peer)) return;
     if (sdp === null) {
-      this.#decline('this device could not describe a direct connection');
+      this.#decline('this end could not describe a direct connection');
       return;
     }
     if (!this.#deps.sendSignal({ v: 1, t: 'direct-answer', sdp })) this.#giveUp();
@@ -262,8 +261,8 @@ export class DirectEndpoint {
    * Give the attempt up and say so, rather than leaving the offerer to wait out
    * its setup deadline for a channel that is never coming.
    */
-  #decline(reason: string): void {
-    this.#giveUp(reason);
+  #decline(reason: string, cause: DirectRelayCause = 'failed'): void {
+    this.#giveUp(reason, cause);
     this.#deps.sendSignal({ v: 1, t: 'direct-decline' });
   }
 
@@ -281,7 +280,7 @@ export class DirectEndpoint {
     if (!connection) return null;
     this.#peer = new DirectPeer({
       peer: connection,
-      setTimer: this.#deps.setTimer,
+      setTimer: this.#setTimer,
       handlers: {
         onOpen: () => this.#onOpen(),
         onFrame: (frame) => this.#onFrame(frame),
@@ -303,35 +302,9 @@ export class DirectEndpoint {
       this.#giveUp();
       return;
     }
-    if (this.#cutover.switchOutbound()) this.#armHandoffTimeout();
-    this.#detail = null;
-    this.#announce();
-  }
-
-  /**
-   * **The cutover gets a deadline of its own.** From here this end sends only on
-   * the channel, so a peer that never switches back leaves it talking into a
-   * channel nothing reads; without this the wait would end only when the held
-   * frames overran their bound, which is a function of how chatty the session
-   * happens to be rather than of anything going wrong.
-   *
-   * There is no relay left to fall back to, so expiry is burrow loss.
-   */
-  #armHandoffTimeout(): void {
-    // Nothing to wait for where the peer switched first — the ordinary order
-    // for whichever end's channel opens second.
-    if (this.#cutover.inbound === 'direct') return;
-    this.#clearHandoffTimeout();
-    this.#cancelHandoff = this.#setTimer(() => {
-      this.#cancelHandoff = null;
-      if (!this.#alive() || this.#cutover.inbound === 'direct') return;
-      this.#deps.fatal('the peer did not follow onto the direct path');
-    }, DIRECT_HANDOFF_TIMEOUT_MS);
-  }
-
-  #clearHandoffTimeout(): void {
-    this.#cancelHandoff?.();
-    this.#cancelHandoff = null;
+    this.#cutover.switchOutbound();
+    this.#cause = null;
+    this.#settle();
   }
 
   /** One frame off the channel: processed, held until the peer's switch, or fatal. */
@@ -381,17 +354,16 @@ export class DirectEndpoint {
    * riding the channel is gone and a stream cipher has no resynchronization
    * point, so the session is over.
    */
-  #giveUp(reason = 'the direct path was abandoned'): void {
+  #giveUp(reason = 'the direct path was abandoned', cause: DirectRelayCause = 'failed'): void {
     if (this.#cutover.switched) {
       this.#deps.fatal(reason);
       return;
     }
-    this.#clearHandoffTimeout();
     this.#peer?.close();
     this.#peer = null;
     this.#cutover.abandon();
-    this.#detail = reason;
-    this.#announce();
+    this.#cause = cause;
+    this.#settle();
   }
 
   /** Whether this endpoint still belongs to the session the caller is serving. */
@@ -399,11 +371,37 @@ export class DirectEndpoint {
     return !this.#disposed && this.#deps.isCurrent();
   }
 
-  #announce(): void {
+  /**
+   * Reconcile the handoff deadline with the cutover, then announce.
+   *
+   * **The deadline is derived, never remembered.** It is armed exactly while
+   * this end has switched and its peer has not — the one window in which this
+   * end sends only on the channel while nothing can reach it back — so every
+   * route that moves the cutover reconciles it by calling this, rather than by
+   * remembering to arm or clear.
+   *
+   * Its expiry is burrow loss, since there is no relay left to fall back to.
+   * Without it the wait would end only when the held frames overran their
+   * bound, which is a function of how chatty the session happens to be rather
+   * than of anything going wrong.
+   */
+  #settle(): void {
+    const waiting =
+      !this.#disposed && this.#cutover.outbound === 'direct' && this.#cutover.inbound === 'relay';
+    if (waiting && !this.#cancelHandoff) {
+      this.#cancelHandoff = this.#setTimer(() => {
+        this.#cancelHandoff = null;
+        if (!this.#alive()) return;
+        this.#deps.fatal('the peer did not follow onto the direct path');
+      }, DIRECT_HANDOFF_TIMEOUT_MS);
+    } else if (!waiting && this.#cancelHandoff) {
+      this.#cancelHandoff();
+      this.#cancelHandoff = null;
+    }
     const path = this.path;
-    const detail = this.#detail;
-    if (path === this.#announced.path && detail === this.#announced.detail) return;
-    this.#announced = { path, detail };
-    this.#deps.onTransportChanged?.(path, detail);
+    const cause = this.#cause;
+    if (path === this.#announced.path && cause === this.#announced.cause) return;
+    this.#announced = { path, cause };
+    this.#deps.onTransportChanged?.(path, cause);
   }
 }

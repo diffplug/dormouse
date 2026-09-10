@@ -119,7 +119,10 @@ overtakes a frame encrypted before it. **A frame is written once or not at all**
 the implementation's send either consumes a message or throws, and a retry would
 put counted ciphertext on the wire twice. Overflowing
 `MAX_DIRECT_OUTBOUND_FRAMES` / `MAX_DIRECT_OUTBOUND_BYTES` disposes the session,
-as the receiver's hold does.
+as the receiver's hold does. **Each failure is reported in its own words**: this
+end's queue overrunning and the channel refusing a write are opposite diagnoses,
+and the reason is all an operator reading a burrow-loss log has to tell them
+apart.
 
 **Cutover preserves order per direction:**
 
@@ -160,8 +163,9 @@ disposal path, never existing before promotion. **Both ends build it through an
 injected factory** — `PocketClientDeps.createDirectPeer`,
 `BurrowOptions.createDirectPeer`, threaded through `BurrowServiceOptions` —
 `null` where a runtime has none, so neither end reaches a WebRTC global.
-**Pocket shows which path carries the session**
-([pocket-app.md](./pocket-app.md)).
+**Pocket shows which path carries the session**, and where it stayed relayed
+which of the three `DirectRelayCause`s it was — **a closed set, never an
+attempt's failure text** ([pocket-app.md](./pocket-app.md)).
 
 Source of truth: `remote-lib-common/src/security/direct-path.ts` (the signals,
 their guard, the constants, the `DirectFrameQueue` both queues are, and the

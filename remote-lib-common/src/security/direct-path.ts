@@ -22,6 +22,15 @@ import { CONTROL_PAYLOAD_SIZE } from './noise-transport.js';
 export const DIRECT_SETUP_TIMEOUT_MS = 15_000;
 
 /**
+ * The label of the one data channel a session opens.
+ *
+ * A two-end agreement rather than one end's naming choice: the answerer checks
+ * an incoming channel against it, so an offerer that renamed the channel would
+ * be declined by a Burrow it had not shipped alongside.
+ */
+export const DIRECT_CHANNEL_LABEL = 'dormouse';
+
+/**
  * The same deadline for the answerer, which arms it a relay round trip later
  * than the offerer does and so **must be the one that gives up first**. Its
  * channel closing is what reaches the offerer while the offerer is still
@@ -125,9 +134,11 @@ export const DIRECT_BUFFER_LOW = 64 * 1024;
  * until the peer's switch decrypts, and what a sender holds while the channel
  * drains — so "over the bound" means one thing in both directions.
  *
- * **A queued frame is copied.** Queueing is what makes a frame outlive the call
- * that produced it, and on the receive side that call's buffer is a view over
- * whatever the runtime handed it.
+ * **What goes in is kept by reference.** Whether a frame outlives its caller's
+ * buffer is a question about where that buffer came from, which only the caller
+ * knows: a sender's frames are ciphertext its session just minted and nothing
+ * else holds, while a receiver's are a view over the runtime's own message
+ * buffer and are copied at {@link DirectCutover.onChannelFrame}.
  */
 export class DirectFrameQueue {
   readonly #frames: Uint8Array[] = [];
@@ -148,14 +159,14 @@ export class DirectFrameQueue {
     return this.#bytes;
   }
 
-  /** Whether one more frame of `length` bytes would break either bound. */
-  wouldOverflow(length: number): boolean {
-    return this.#frames.length >= this.#maxFrames || this.#bytes + length > this.#maxBytes;
-  }
-
-  push(frame: Uint8Array): void {
-    this.#frames.push(frame.slice());
+  /** Take one frame, or answer `false` where it would break either bound. */
+  push(frame: Uint8Array): boolean {
+    if (this.#frames.length >= this.#maxFrames || this.#bytes + frame.length > this.#maxBytes) {
+      return false;
+    }
+    this.#frames.push(frame);
     this.#bytes += frame.length;
+    return true;
   }
 
   /** The oldest frame, or `undefined` where there is none. */
@@ -185,6 +196,19 @@ export class DirectFrameQueue {
  * the only one.
  */
 export type DirectPath = 'relay' | 'direct';
+
+/**
+ * Why a session is still on the relay, as the three answers a person can act
+ * on: this device brought no WebRTC, the other end said no, or it was tried and
+ * did not work.
+ *
+ * **A closed set, never the failure text.** The reasons an attempt gives up on
+ * include a runtime's own exception message, and a set is what keeps those out
+ * of a phone's screen while leaving them in the log the operator reads. It is
+ * also what makes a new give-up path a compile error until someone decides
+ * which of the three a user is being told.
+ */
+export type DirectRelayCause = 'unsupported' | 'declined' | 'failed';
 
 /**
  * The signaling messages, as `control` transport plaintexts on an established
@@ -390,14 +414,11 @@ export class DirectCutover {
    * **A held frame is copied, and only a held frame.** Holding is what makes a
    * frame outlive this call, and the caller's buffer — a view over whatever the
    * runtime handed it — cannot be trusted to still say the same thing when the
-   * queue drains ({@link DirectFrameQueue}). A frame answered `process` is
-   * decrypted before this returns.
+   * queue drains. A frame answered `process` is decrypted before this returns.
    */
   onChannelFrame(frame: Uint8Array): DirectChannelOutcome {
     if (this.#inbound === 'direct') return 'process';
-    if (this.#held.wouldOverflow(frame.length)) return 'overflow';
-    this.#held.push(frame);
-    return 'held';
+    return this.#held.push(frame.slice()) ? 'held' : 'overflow';
   }
 
   /** Release held frames; a disposed session has nothing left to drain them. */

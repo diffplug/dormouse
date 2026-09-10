@@ -16,9 +16,8 @@
  * `TestRelay.holdToClient()`, on the side that is actually slow.
  */
 
-import { NOISE_MAX_MESSAGE_LENGTH } from 'remote-lib-common';
+import { DIRECT_CHANNEL_LABEL, NOISE_MAX_MESSAGE_LENGTH } from 'remote-lib-common';
 import {
-  DIRECT_CHANNEL_LABEL,
   type DirectChannelLike,
   type DirectPeerLike,
   type DirectSctpLike,
@@ -50,12 +49,21 @@ export interface FakeDirectNetworkOptions {
    * implementation that reports no association at all.
    */
   readonly maxMessageSize?: number | null;
-  /** A channel a Noise stream cannot ride; see {@link FakeChannel}. */
-  readonly channel?: 'unordered' | 'lossy' | 'mislabeled';
+  /** A channel a Noise stream cannot ride; see {@link ChannelDefect}. */
+  readonly channel?: ChannelDefect;
+  /**
+   * Which end's channel carries that defect; both by default. The answerer is
+   * the end where the check can fail in production — it validates a channel the
+   * *peer* created, while the offerer only re-reads its own request.
+   */
+  readonly channelSide?: FakePeerRole;
 }
 
 /** One end of the linked pair; the offerer creates the channel. */
 export type FakePeerRole = 'offerer' | 'answerer';
+
+/** One way a channel can be something a Noise stream cannot ride. */
+export type ChannelDefect = 'unordered' | 'lossy' | 'expiring' | 'mislabeled';
 
 export class FakeDirectNetwork {
   readonly #options: FakeDirectNetworkOptions;
@@ -176,8 +184,14 @@ export class FakePeer implements DirectPeerLike {
     this.#emit('connectionstatechange', {});
   }
 
+  /** This end's channel defect, if the run put one on this side. */
+  get #defect(): ChannelDefect | undefined {
+    const { channel, channelSide } = this.#options;
+    return !channelSide || channelSide === this.#role ? channel : undefined;
+  }
+
   createDataChannel(label: string): DirectChannelLike {
-    const channel = new FakeChannel(label, this.#options.channel);
+    const channel = new FakeChannel(label, this.#defect);
     this.#network.registerChannel(this.#role, channel);
     return channel;
   }
@@ -197,7 +211,7 @@ export class FakePeer implements DirectPeerLike {
   async setRemoteDescription(description: DirectSessionDescription): Promise<void> {
     if (description.type === 'offer') {
       // The answerer learns of the channel here, exactly as a real one does.
-      const channel = new FakeChannel(DIRECT_CHANNEL_LABEL, this.#options.channel);
+      const channel = new FakeChannel(DIRECT_CHANNEL_LABEL, this.#defect);
       this.#network.registerChannel(this.#role, channel);
       this.#emit('datachannel', { channel });
       return;
@@ -258,11 +272,11 @@ export class FakeChannel implements DirectChannelLike {
   readonly #inbox: Uint8Array[] = [];
   readonly #events = new FakeEventTarget();
 
-  constructor(label: string, defect?: 'unordered' | 'lossy' | 'mislabeled') {
+  constructor(label: string, defect?: ChannelDefect) {
     this.label = defect === 'mislabeled' ? `${label}-other` : label;
     this.ordered = defect !== 'unordered';
     this.maxRetransmits = defect === 'lossy' ? 3 : null;
-    this.maxPacketLifeTime = null;
+    this.maxPacketLifeTime = defect === 'expiring' ? 500 : null;
   }
 
   /** The association caught up: drop to the low-water mark and wake the sender. */

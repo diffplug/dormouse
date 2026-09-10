@@ -8,14 +8,16 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   DIRECT_BUFFER_HIGH,
+  DIRECT_CHANNEL_LABEL,
   DIRECT_DISCONNECTED_GRACE_MS,
   DIRECT_GATHER_TIMEOUT_MS,
   DIRECT_SETUP_TIMEOUT_MS,
   MAX_DIRECT_OUTBOUND_BYTES,
+  MAX_DIRECT_OUTBOUND_FRAMES,
   NOISE_MAX_MESSAGE_LENGTH,
 } from 'remote-lib-common';
 
-import { DIRECT_CHANNEL_LABEL, DirectPeer, type DirectPeerHandlers } from './direct-peer';
+import { DirectPeer, type DirectPeerHandlers } from './direct-peer';
 import { FakeDirectNetwork, type FakeDirectNetworkOptions } from './test-fake-peer';
 import { fakeTimers } from '../test-timers';
 
@@ -136,8 +138,10 @@ describe('DirectPeer', () => {
 
     expect(client.closes).toEqual(['the direct channel did not open in time']);
     expect(clientPeer.isOpen).toBe(false);
-    // And nothing may be sent on it afterwards.
-    expect(clientPeer.send(Uint8Array.of(1))).toBe(false);
+    // And nothing may be sent on it afterwards: the channel is gone, and a
+    // closed peer reports nothing twice.
+    clientPeer.send(Uint8Array.of(1));
+    expect(client.closes).toEqual(['the direct channel did not open in time']);
   });
 
   it('reports a channel that dies under a live session, at both ends', async () => {
@@ -226,8 +230,8 @@ describe('DirectPeer', () => {
       const channel = network.offererChannel!;
       channel.bufferedAmount = DIRECT_BUFFER_HIGH;
 
-      expect(clientPeer.send(Uint8Array.of(1))).toBe(true);
-      expect(clientPeer.send(Uint8Array.of(2))).toBe(true);
+      clientPeer.send(Uint8Array.of(1));
+      clientPeer.send(Uint8Array.of(2));
       await flushMicrotasks();
       // Held here rather than handed to a buffer that would refuse them.
       expect(channel.sent).toEqual([]);
@@ -254,17 +258,23 @@ describe('DirectPeer', () => {
       expect(channel.sent).toEqual([]);
     });
 
-    it('refuses a send that would outrun the queue, in bytes', async () => {
-      const { network, clientPeer } = await connected();
+    it('reports the path gone when a send would outrun the queue, in bytes', async () => {
+      const { network, clientPeer, client } = await connected();
       network.offererChannel!.bufferedAmount = DIRECT_BUFFER_HIGH;
       const frame = new Uint8Array(NOISE_MAX_MESSAGE_LENGTH);
 
       let held = 0;
-      while (clientPeer.send(frame)) held += 1;
+      while (client.closes.length === 0 && held <= MAX_DIRECT_OUTBOUND_FRAMES) {
+        clientPeer.send(frame);
+        held += 1;
+      }
 
+      // **Our bound, not the peer's stack**: an operator reading a burrow-loss
+      // log has only the reason to tell those two apart.
+      expect(client.closes).toEqual(['the direct path outran what a sender can hold in order']);
       // Bytes bind first: the frame cap is far above what this many reaches.
-      expect(held * frame.length).toBeLessThanOrEqual(MAX_DIRECT_OUTBOUND_BYTES);
-      expect((held + 1) * frame.length).toBeGreaterThan(MAX_DIRECT_OUTBOUND_BYTES);
+      expect((held - 1) * frame.length).toBeLessThanOrEqual(MAX_DIRECT_OUTBOUND_BYTES);
+      expect(held * frame.length).toBeGreaterThan(MAX_DIRECT_OUTBOUND_BYTES);
     });
 
     it('reports the channel gone when a queued frame will not go out', async () => {
@@ -282,7 +292,7 @@ describe('DirectPeer', () => {
   });
 
   describe('what the channel has to be', () => {
-    it.each(['unordered', 'lossy', 'mislabeled'] as const)(
+    it.each(['unordered', 'lossy', 'expiring', 'mislabeled'] as const)(
       'refuses a %s channel, before anything rides it',
       async (defect) => {
         const { clientPeer, client } = pair({ channel: defect });
@@ -295,6 +305,23 @@ describe('DirectPeer', () => {
         ]);
       },
     );
+
+    it('refuses one the peer created, which is where the check can fail', async () => {
+      // The offerer only re-reads the channel it asked for; the answerer is
+      // handed one by a peer it has no reason to trust to have asked for the
+      // same thing.
+      const { clientPeer, burrowPeer, burrow } = pair({
+        channel: 'unordered',
+        channelSide: 'answerer',
+      });
+
+      const offer = await clientPeer.offer();
+      expect(await burrowPeer.answer(offer!)).toBeNull();
+
+      expect(burrow.closes).toEqual([
+        'the direct channel is not the reliable ordered one this session opens',
+      ]);
+    });
 
     it('abandons a channel that cannot carry one Noise message', async () => {
       const { clientPeer, client } = await connected({ maxMessageSize: 16_384 });

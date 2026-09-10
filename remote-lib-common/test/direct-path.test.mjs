@@ -150,36 +150,42 @@ test('both directions are bounded the same way', () => {
   assert.equal(MAX_DIRECT_OUTBOUND_FRAMES, MAX_DIRECT_PENDING_FRAMES);
 });
 
-// --- The cutover ------------------------------------------------------------
+// --- The queue both directions use ------------------------------------------
 
 const frame = (n, size = 4) => new Uint8Array(size).fill(n);
 
-// --- The queue both directions use ------------------------------------------
-
 test('a queue admits frames until either bound, bytes first at PTY sizes', () => {
   const queue = new DirectFrameQueue(4, 10);
-  assert.equal(queue.wouldOverflow(10), false);
-  queue.push(frame(1, 6));
+  assert.equal(queue.push(frame(1, 6)), true);
   assert.equal(queue.length, 1);
   assert.equal(queue.bytes, 6);
-  // 6 + 5 is over the byte cap while the frame cap has room to spare.
-  assert.equal(queue.wouldOverflow(5), true);
-  assert.equal(queue.wouldOverflow(4), false);
+  // 6 + 5 is over the byte cap while the frame cap has room to spare, and a
+  // refused frame changes nothing.
+  assert.equal(queue.push(frame(2, 5)), false);
+  assert.equal(queue.length, 1);
+  assert.equal(queue.push(frame(2, 4)), true);
 });
 
 test('a queue admits no more frames than its frame cap, whatever their size', () => {
   const queue = new DirectFrameQueue(2, 1_000);
-  queue.push(frame(1, 1));
-  queue.push(frame(2, 1));
-  assert.equal(queue.wouldOverflow(1), true);
+  assert.equal(queue.push(frame(1, 1)), true);
+  assert.equal(queue.push(frame(2, 1)), true);
+  assert.equal(queue.push(frame(3, 1)), false);
 });
 
-test('a queued frame is copied, so the caller may reuse its buffer', () => {
+/**
+ * Whether a frame outlives its caller's buffer is a question about where that
+ * buffer came from, which only the caller knows — a sender's is ciphertext its
+ * session just minted and nothing else holds, a receiver's is a view over the
+ * runtime's own message buffer. So the queue keeps what it is given, and
+ * `DirectCutover` is what copies (see "a held frame is copied", below).
+ */
+test('a queue keeps what it is given, without copying it', () => {
   const queue = new DirectFrameQueue(4, 100);
   const buffer = frame(1);
   queue.push(buffer);
   buffer.fill(9);
-  assert.deepEqual(queue.take(), [frame(1)]);
+  assert.deepEqual(queue.take(), [frame(9)]);
 });
 
 test('a queue gives frames back in arrival order, and empties on take', () => {
@@ -211,6 +217,8 @@ test('the holding queue is bounded in bytes first', () => {
   // milliseconds to a phone on cellular: half a second of a fast stream fits.
   assert.ok(MAX_DIRECT_PENDING_BYTES >= 0.5 * 5_000_000);
 });
+
+// --- The cutover ------------------------------------------------------------
 
 test('starts relayed in both directions', () => {
   const cutover = new DirectCutover();

@@ -26,7 +26,12 @@ import {
 } from '../client/pocket-client';
 import { PasskeyAlreadyRegisteredError, browserWebAuthn } from '../client/webauthn';
 import { BURROW_IS_AN_APP, SCAN_LABEL } from '../setup-copy';
-import { probeNoiseSupport, type DirectPath, type PairingInvitation } from 'remote-lib-common';
+import {
+  probeNoiseSupport,
+  type DirectPath,
+  type DirectRelayCause,
+  type PairingInvitation,
+} from 'remote-lib-common';
 import {
   indexedDbKnownBurrowStore,
   indexedDbPendingDeletionStore,
@@ -353,12 +358,9 @@ export default function App({
    * render: the cutover happens seconds into a session, long after the wall is
    * up, and an attempt that quietly stays relayed changes only the detail.
    */
-  const [transport, setTransport] = useState<{ path: DirectPath; detail: string | null }>({
-    path: 'relay',
-    detail: null,
-  });
+  const [transport, setTransport] = useState<TransportView>({ path: 'relay', cause: null });
   useEffect(() => {
-    client.setOnTransportChanged((path, detail) => setTransport({ path, detail }));
+    client.setOnTransportChanged((path, cause) => setTransport({ path, cause }));
     return () => client.setOnTransportChanged(null);
   }, [client]);
 
@@ -635,8 +637,7 @@ export default function App({
         <ConnectedView
           burrow={phase.burrow}
           adapter={adapterRef.current}
-          transportPath={transport.path}
-          transportDetail={transport.detail}
+          transport={transport}
           onLeave={leaveWall}
           onError={onWallError}
         />
@@ -801,35 +802,51 @@ export const TRANSPORT_PATH_LABELS: Record<DirectPath, { label: string; title: s
 };
 
 /**
+ * What each reason for staying relayed says to the person holding the phone.
+ *
+ * **The copy lives here, with every other Pocket string**, and the transport
+ * hands up only which of the three it was ({@link DirectRelayCause}): the text
+ * an attempt fails with includes a runtime's own exception message, which
+ * belongs in the operator's log and not on a phone.
+ */
+export const TRANSPORT_RELAY_CAUSES: Record<DirectRelayCause, string> = {
+  unsupported: 'This device cannot make a direct connection.',
+  declined: 'The computer turned a direct connection down.',
+  failed: 'A direct connection was tried and did not work.',
+};
+
+/** Which path carries the session, and why it is not the direct one. */
+export interface TransportView {
+  readonly path: DirectPath;
+  readonly cause: DirectRelayCause | null;
+}
+
+/**
  * The indicator's hover text: which path, and the reason behind it where there
  * is one. **The reason is shown, never the label** — an attempt that quietly
  * stayed relayed is still `relay`, and inventing a third state for it would
  * make the common case look like a fault.
  */
-export function transportTitle(path: DirectPath, detail?: string | null): string {
+export function transportTitle({ path, cause }: TransportView): string {
   const { title } = TRANSPORT_PATH_LABELS[path];
-  return detail ? `${title} ${detail.charAt(0).toUpperCase()}${detail.slice(1)}.` : title;
+  return cause ? `${title} ${TRANSPORT_RELAY_CAUSES[cause]}` : title;
 }
 
 /** The connected Pocket shell: Burrow navigation chrome over the remote wall. */
 export function ConnectedView({
   burrow,
   adapter,
-  transportPath = 'relay',
-  transportDetail = null,
+  transport = { path: 'relay', cause: null },
   onLeave,
   onError,
 }: {
   burrow: BurrowView;
   adapter: RemotePtyAdapter;
-  /** Which path carries the session; see {@link TRANSPORT_PATH_LABELS}. */
-  transportPath?: DirectPath;
-  /** Why it is on that path; see {@link transportTitle}. */
-  transportDetail?: string | null;
+  /** Which path carries the session, and why; see {@link transportTitle}. */
+  transport?: TransportView;
   onLeave: () => void;
   onError?: (error: unknown) => void;
 }): React.ReactElement {
-  const label = TRANSPORT_PATH_LABELS[transportPath].label;
   return (
     <div className={PK.app}>
       <header className={PK.header}>
@@ -837,8 +854,8 @@ export function ConnectedView({
           ‹ {BURROWS_TITLE}
         </button>
         <h1 className={PK.headerTitle}>{burrow.label || burrow.burrowId}</h1>
-        <span className={PK.headerNote} title={transportTitle(transportPath, transportDetail)}>
-          {label}
+        <span className={PK.headerNote} title={transportTitle(transport)}>
+          {TRANSPORT_PATH_LABELS[transport.path].label}
         </span>
       </header>
       <div className={PK.wallHost}>

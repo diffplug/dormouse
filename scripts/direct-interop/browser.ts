@@ -14,9 +14,14 @@
 import { MAX_DIRECT_SDP_LENGTH } from 'remote-lib-common';
 import { DirectPeer, type DirectPeerLike } from '../../lib/src/remote/direct/direct-peer';
 
-/** What the page reports back for `run.mjs` to print. Test data only. */
+/**
+ * What the page reports back for `run.mjs` to print. Test data only.
+ *
+ * **Measurements, not a verdict.** `run.mjs` decides whether the run passed,
+ * against the frames it actually got back — the strictly stronger check, and
+ * one definition of "finished" rather than two that can disagree.
+ */
 export interface BrowserReport {
-  readonly ok: boolean;
   readonly error?: string;
   /** The offer this browser actually produced, against the signal's bound. */
   readonly offerSdpLength?: number;
@@ -31,8 +36,8 @@ export interface BrowserReport {
 
 declare const __INTEROP_TOKEN__: string;
 
-/** How long the echo half waits before reporting what it did get. */
-const ECHO_BUDGET_MS = 10_000;
+/** How long after the channel opens the page reports what it echoed. */
+const ECHO_SETTLE_MS = 2_000;
 
 async function post(path: string, body: unknown): Promise<unknown> {
   const response = await fetch(`${path}?t=${encodeURIComponent(__INTEROP_TOKEN__)}`, {
@@ -49,8 +54,6 @@ async function run(): Promise<BrowserReport> {
   const connection = new RTCPeerConnection({ iceServers: [] }) as unknown as DirectPeerLike;
   const opened = Promise.withResolvers<void>();
   const lost = Promise.withResolvers<never>();
-  let expected = 0;
-  const allEchoed = Promise.withResolvers<void>();
 
   const peer: DirectPeer = new DirectPeer({
     peer: connection,
@@ -58,11 +61,12 @@ async function run(): Promise<BrowserReport> {
       onOpen: () => opened.resolve(),
       // The addon's side sends; this end echoes each frame straight back, so
       // the bytes and the order they arrive in are checked over a real
-      // association rather than a linked pair.
+      // association rather than a linked pair. The frame is a view over the
+      // event's buffer, and `send` may queue it — so it is copied here, which
+      // production never has to do.
       onFrame: (frame) => {
         echoed.push(frame.length);
-        peer.send(frame);
-        if (echoed.length >= expected) allEchoed.resolve();
+        peer.send(frame.slice());
       },
       onClosed: (reason) => lost.reject(new Error(reason)),
       onViolation: (reason) => lost.reject(new Error(reason)),
@@ -78,28 +82,17 @@ async function run(): Promise<BrowserReport> {
   // `offer()` answers null for a description this end would not send, which on
   // a machine with many interfaces is the interesting outcome rather than a
   // crash: the attempt is skipped and the session stays relayed.
-  if (!sdp) return { ...measured, ok: false, error: 'the offer did not fit one signal' };
+  if (!sdp) return { ...measured, error: 'the offer did not fit one signal' };
 
-  const answer = (await post('/answer', { sdp })) as {
-    sdp?: string;
-    frames?: number;
-    error?: string;
-  };
-  if (!answer.sdp) return { ...measured, ok: false, error: answer.error ?? 'no answer' };
-  expected = answer.frames ?? 0;
+  const answer = (await post('/answer', { sdp })) as { sdp?: string; error?: string };
+  if (!answer.sdp) return { ...measured, error: answer.error ?? 'no answer' };
   await peer.acceptAnswer(answer.sdp);
   await Promise.race([opened.promise, lost.promise]);
 
-  const timeout = new Promise<void>((resolve) => setTimeout(resolve, ECHO_BUDGET_MS));
-  await Promise.race([allEchoed.promise, lost.promise, timeout]);
+  const settled = new Promise<void>((resolve) => setTimeout(resolve, ECHO_SETTLE_MS));
+  await Promise.race([settled, lost.promise]);
 
-  return {
-    ...measured,
-    ok: echoed.length === expected,
-    error: echoed.length === expected ? undefined : `echoed ${echoed.length} of ${expected}`,
-    maxMessageSize: connection.sctp?.maxMessageSize ?? null,
-    echoed,
-  };
+  return { ...measured, maxMessageSize: connection.sctp?.maxMessageSize ?? null, echoed };
 }
 
 function show(report: BrowserReport): void {
@@ -108,5 +101,5 @@ function show(report: BrowserReport): void {
 }
 
 run().then(show, (error: unknown) => {
-  show({ ok: false, error: String(error), maxDirectSdpLength: MAX_DIRECT_SDP_LENGTH });
+  show({ error: String(error), maxDirectSdpLength: MAX_DIRECT_SDP_LENGTH });
 });

@@ -31,14 +31,18 @@
  */
 
 import { createServer } from 'node:http';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { isLoopbackHost, isOwnOrigin } from '../../lib/src/host/loopback-guard.ts';
+import { isOwnOrigin } from '../../lib/src/host/loopback-guard.ts';
+// The same gate `standalone/scripts/dev-agent-browser.mjs` uses, for the same
+// reason: an unbundled dev script cannot import the TypeScript guard, and the
+// loopback-plus-token rule must not have a second implementation.
+import { isAuthorized } from '../../standalone/scripts/dev-host-guard.mjs';
 
 /** What the addon puts on the channel, largest first; see question 2 above. */
 const FRAME_SIZES = [65_535, 4_096, 33];
@@ -47,10 +51,9 @@ const RUN_BUDGET_MS = 60_000;
 
 const here = (path) => fileURLToPath(new URL(path, import.meta.url));
 // esbuild resolves a bare specifier from the importing file's own directory,
-// and `scripts/` is not a package: `browser.ts` names `remote-lib-common`, which
-// the workspace links under `lib/`. Both bundles are pointed there.
+// and `scripts/` is not a package: `browser.ts` names `remote-lib-common`,
+// which the workspace links under `lib/`.
 const LIB = here('../../lib');
-const LIB_MODULES = [join(LIB, 'node_modules')];
 const sidecarRequire = createRequire(here('../../standalone/sidecar/package.json'));
 const buildRequire = createRequire(here('../../standalone/package.json'));
 const { build } = buildRequire('esbuild');
@@ -58,39 +61,39 @@ const { build } = buildRequire('esbuild');
 const token = randomBytes(24).toString('hex');
 const temp = await mkdtemp(join(tmpdir(), 'dormouse-direct-interop-'));
 
-// The wrapper under test, bundled rather than imported: it is TypeScript that
-// reaches into the webview library, and this file is neither.
-await build({
-  entryPoints: [here('../../lib/src/remote/direct/direct-peer.ts')],
-  outfile: join(temp, 'direct-peer.cjs'),
-  absWorkingDir: LIB,
-  nodePaths: LIB_MODULES,
-  bundle: true,
-  platform: 'node',
-  format: 'cjs',
-  logLevel: 'warning',
-});
+// The wrapper under test is bundled rather than imported: it is TypeScript
+// that reaches into the webview library, and this file is neither. The two
+// bundles share nothing, so they are built together.
+const [, browserBundle] = await Promise.all([
+  build({
+    entryPoints: [here('../../lib/src/remote/direct/direct-peer.ts')],
+    outfile: join(temp, 'direct-peer.cjs'),
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    logLevel: 'warning',
+  }),
+  build({
+    entryPoints: [here('./browser.ts')],
+    absWorkingDir: LIB,
+    nodePaths: [join(LIB, 'node_modules')],
+    bundle: true,
+    platform: 'browser',
+    format: 'iife',
+    target: 'es2023',
+    write: false,
+    logLevel: 'warning',
+    define: { __INTEROP_TOKEN__: JSON.stringify(token) },
+  }),
+]);
 const { DirectPeer } = createRequire(import.meta.url)(join(temp, 'direct-peer.cjs'));
-
-const browserBundle = await build({
-  entryPoints: [here('./browser.ts')],
-  absWorkingDir: LIB,
-  nodePaths: LIB_MODULES,
-  bundle: true,
-  platform: 'browser',
-  format: 'iife',
-  target: 'es2023',
-  write: false,
-  logLevel: 'warning',
-  define: { __INTEROP_TOKEN__: JSON.stringify(token) },
-});
 const javascript = browserBundle.outputFiles[0].text;
 
 // `iceServers: []` as both shipped factories pass it: host candidates only.
 const { RTCPeerConnection } = sidecarRequire('node-datachannel/polyfill');
 const addon = sidecarRequire('node-datachannel');
 
-const frames = FRAME_SIZES.map((size, index) => new Uint8Array(size).fill(index + 1));
+const frames = FRAME_SIZES.map((size, index) => Buffer.alloc(size, index + 1));
 /** What the addon got back, in the order it got it. */
 const returned = [];
 let browserReport = null;
@@ -105,8 +108,7 @@ const finish = (result) => {
 
 /** Whether every frame came back byte for byte, in the order it was sent. */
 const echoedIntact = () =>
-  returned.length === frames.length &&
-  returned.every((frame, index) => Buffer.from(frame).equals(Buffer.from(frames[index])));
+  returned.length === frames.length && returned.every((frame, index) => frame.equals(frames[index]));
 
 /**
  * The run ends when both halves have spoken. The page's report and the last
@@ -116,19 +118,19 @@ const echoedIntact = () =>
  */
 const maybeFinish = () => {
   if (!browserReport || !echoedIntact()) return;
-  finish({ ok: Boolean(browserReport.ok), error: browserReport.error });
+  finish({ ok: !browserReport.error, error: browserReport.error });
 };
 
 const peer = new DirectPeer({
   peer: new RTCPeerConnection({ iceServers: [] }),
   handlers: {
+    // The addon sends; a failure comes back through `onClosed` in its own words.
     onOpen: () => {
-      for (const frame of frames) {
-        if (!peer.send(frame)) finish({ ok: false, error: 'the addon could not send a frame' });
-      }
+      for (const frame of frames) peer.send(frame);
     },
     onFrame: (frame) => {
-      returned.push(Uint8Array.from(frame));
+      // Copied out of the event's buffer, which the runtime may reuse.
+      returned.push(Buffer.from(frame));
       maybeFinish();
     },
     onClosed: (reason) => finish({ ok: false, error: `channel gone: ${reason}` }),
@@ -160,16 +162,11 @@ const server = createServer(async (req, res) => {
   try {
     const port = server.address().port;
     const url = new URL(req.url, `http://127.0.0.1:${port}`);
-    const supplied = url.searchParams.get('t') ?? '';
     // A loopback bind is not an access control: any page in the user's browser
     // reaches 127.0.0.1 too (`docs/specs/security-local.md` -> "Loopback
-    // Listeners"), so the guard modules gate the Host and Origin headers and a
-    // per-run token gates the rest.
-    if (
-      !isLoopbackHost(req.headers.host, port) ||
-      supplied.length !== token.length ||
-      !timingSafeEqual(Buffer.from(supplied), Buffer.from(token))
-    ) {
+    // Listeners"), so the shared guard gates the Host header, the per-run
+    // token, and a POST's content-type, and `isOwnOrigin` gates the rest.
+    if (!isAuthorized(req, { token, port })) {
       send(403, { error: 'forbidden' });
       return;
     }
@@ -193,7 +190,7 @@ const server = createServer(async (req, res) => {
         finish({ ok: false, error: 'the addon declined the browser offer' });
         return;
       }
-      send(200, { sdp: answer, frames: frames.length });
+      send(200, { sdp: answer });
       return;
     }
     if (url.pathname === '/report') {
@@ -201,8 +198,8 @@ const server = createServer(async (req, res) => {
       send(200, { ok: true });
       // A page that gave up says so at once; otherwise the last echoes may
       // still be in flight, and the run ends when they land.
-      if (browserReport.ok) maybeFinish();
-      else finish({ ok: false, error: browserReport.error });
+      if (browserReport.error) finish({ ok: false, error: browserReport.error });
+      else maybeFinish();
       return;
     }
     send(404, { error: 'not found' });

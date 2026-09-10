@@ -226,7 +226,7 @@ describe('the direct path over the native addon', () => {
       try {
         const payload = new Uint8Array(NOISE_MAX_MESSAGE_LENGTH);
         crypto.getRandomValues(payload);
-        expect(run.offerer.send(payload)).toBe(true);
+        run.offerer.send(payload);
 
         await waitFor(() => run.inbound.length === 1, 'the frame to arrive', ATTEMPT_BUDGET_MS);
         expect(run.inbound[0]).toEqual(payload);

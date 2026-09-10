@@ -45,6 +45,7 @@ import {
   type ConnectionDenialCode,
   type ConnectionRequestV1,
   type DirectPath,
+  type DirectRelayCause,
   type DirectSignalV1,
   type DirectoryEntry,
   type DirectorySnapshot,
@@ -365,12 +366,9 @@ export class PocketClient {
   #onBurrowGone: (() => void) | null = null;
   /** This session's direct path, or null while there is no authorized session. */
   #direct: DirectEndpoint | null = null;
-  #onTransportChanged: ((path: DirectPath, detail: string | null) => void) | null = null;
-  /**
-   * Why the live session is on the path it is on. Held here rather than read
-   * off the endpoint, which is dropped with the session that owned it.
-   */
-  #transportDetail: string | null = null;
+  #onTransportChanged:
+    | ((path: DirectPath, cause: DirectRelayCause | null) => void)
+    | null = null;
   /** Cancels the armed keepalive, and the visibility subscription behind it. */
   #cancelKeepalive: (() => void) | null = null;
   #cancelVisibility: (() => void) | null = null;
@@ -421,17 +419,17 @@ export class PocketClient {
   }
 
   /**
-   * Why this session is on the path it is on, or `null` where there is nothing
-   * to say — the sentence behind the indicator, so a session that stayed
-   * relayed can say which of the silent reasons it was.
+   * Why this session is still relayed, or `null` where there is nothing to say
+   * — what the indicator explains, so a session that quietly stayed relayed can
+   * say which of the three it was.
    */
-  get transportDetail(): string | null {
-    return this.#transportDetail;
+  get transportRelayCause(): DirectRelayCause | null {
+    return this.#direct?.relayCause ?? null;
   }
 
-  /** Notified whenever {@link transportPath} or {@link transportDetail} changes. */
+  /** Notified whenever {@link transportPath} or {@link transportRelayCause} changes. */
   setOnTransportChanged(
-    callback: ((path: DirectPath, detail: string | null) => void) | null,
+    callback: ((path: DirectPath, cause: DirectRelayCause | null) => void) | null,
   ): void {
     this.#onTransportChanged = callback;
   }
@@ -1190,10 +1188,7 @@ export class PocketClient {
       // same event, and the app must leave the wall either way.
       fatal: (reason) => this.#loseBurrow(reason),
       isCurrent: () => this.#established === established,
-      onTransportChanged: (path, detail) => {
-        this.#transportDetail = detail;
-        this.#onTransportChanged?.(path, detail);
-      },
+      onTransportChanged: (path, cause) => this.#onTransportChanged?.(path, cause),
       setTimer: this.#setTimer,
     });
   }
@@ -1545,9 +1540,6 @@ export class PocketClient {
     // none can outlive the session that authorized it.
     this.#direct?.dispose();
     this.#direct = null;
-    // After the dispose, whose own announcement is still this session's: the
-    // previous session's reason says nothing about the next one.
-    this.#transportDetail = null;
     this.#connectedBurrowId = null;
     this.#established = null;
   }

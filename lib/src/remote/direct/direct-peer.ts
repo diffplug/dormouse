@@ -18,6 +18,7 @@
 import {
   DIRECT_ANSWER_TIMEOUT_MS,
   DIRECT_BUFFER_HIGH,
+  DIRECT_CHANNEL_LABEL,
   DIRECT_BUFFER_LOW,
   DIRECT_DISCONNECTED_GRACE_MS,
   DIRECT_GATHER_TIMEOUT_MS,
@@ -29,9 +30,6 @@ import {
   isDirectSdp,
 } from 'remote-lib-common';
 import { realTimer, type RemoteTimer } from '../ws';
-
-/** The label of the one data channel a session opens. */
-export const DIRECT_CHANNEL_LABEL = 'dormouse';
 
 /** The four `RTCSdpType` values, so a real description assigns to ours. */
 export type DirectSdpType = 'offer' | 'answer' | 'pranswer' | 'rollback';
@@ -231,31 +229,36 @@ export class DirectPeer {
    * One Noise transport message as one channel frame — raw bytes, never base64
    * or JSON, so the channel carries exactly what the relay would have.
    *
-   * Answers `false` where the channel cannot take it rather than throwing: the
-   * endpoint decides what a refused send means, and on a session that has
-   * already switched it is burrow loss rather than an error for the caller.
+   * **Every way this can fail is reported here, in its own words**, through
+   * `onClosed`: the channel refusing a write and this end's own queue
+   * overrunning are opposite diagnoses — one is the peer's stack, one is our
+   * bound — and an operator reading a burrow-loss log has only the reason to
+   * tell them apart. What a report *costs* is still the endpoint's question.
+   *
+   * The frame is kept by reference: it is ciphertext the session just minted
+   * and nothing else holds ({@link DirectFrameQueue}).
    */
-  send(ciphertext: Uint8Array): boolean {
+  send(ciphertext: Uint8Array): void {
     const channel = this.#channel;
-    if (!channel || !this.isOpen) return false;
+    if (!channel || !this.isOpen) return;
     // **Once anything is queued, everything queues.** A frame handed straight to
     // the channel while others wait would reach the peer ahead of ciphertext
     // encrypted before it, and a Noise stream has no way back from a counter
     // read out of order.
     if (this.#outbound.length === 0 && channel.bufferedAmount < DIRECT_BUFFER_HIGH) {
-      return this.#write(channel, ciphertext);
+      if (!this.#write(channel, ciphertext)) this.#fail('the direct channel refused a message');
+      return;
     }
-    if (this.#outbound.wouldOverflow(ciphertext.length)) return false;
-    this.#outbound.push(ciphertext);
-    return true;
+    if (!this.#outbound.push(ciphertext)) {
+      this.#fail('the direct path outran what a sender can hold in order');
+    }
   }
 
   /** Close the channel and the connection. Idempotent, and reports nothing. */
   close(): void {
     this.#closed = true;
     this.#clearSetupTimeout();
-    this.#cancelDisconnected?.();
-    this.#cancelDisconnected = null;
+    this.#clearDisconnectedGrace();
     this.#outbound.clear();
     // The suspended `offer()`/`answer()` finishes here rather than in three
     // seconds' time: it sees `#closed`, answers `null`, and releases the
@@ -329,11 +332,11 @@ export class DirectPeer {
    */
   #onOpen(): void {
     if (this.#closed || this.#open) return;
-    const limit = this.#peer.sctp?.maxMessageSize;
     // Unknown is not small: an implementation reporting no association yet, or
     // no usable number, is one this cannot rule out either way — and every
     // inbound frame is bounded again in `#onMessage` regardless.
-    if (typeof limit === 'number' && limit > 0 && limit < NOISE_MAX_MESSAGE_LENGTH) {
+    const limit = this.#peer.sctp?.maxMessageSize ?? 0;
+    if (limit > 0 && limit < NOISE_MAX_MESSAGE_LENGTH) {
       this.#fail(`the direct channel carries only ${limit} bytes per message`);
       return;
     }
@@ -352,12 +355,11 @@ export class DirectPeer {
   #drain(): void {
     const channel = this.#channel;
     if (!channel || !this.isOpen) return;
-    while (this.#outbound.length > 0 && channel.bufferedAmount < DIRECT_BUFFER_HIGH) {
+    while (channel.bufferedAmount < DIRECT_BUFFER_HIGH) {
       const frame = this.#outbound.shift();
       if (!frame) return;
       if (this.#write(channel, frame)) continue;
-      // The channel took this frame into the queue and will not take it now:
-      // it is gone, and the endpoint decides what that costs.
+      // Accepted into the queue and refused now: the channel is gone.
       this.#fail('the direct channel refused a message');
       return;
     }
@@ -376,9 +378,9 @@ export class DirectPeer {
    * The connection's own state, which reaches here before the channel's does.
    *
    * **`disconnected` is waited out** ({@link DIRECT_DISCONNECTED_GRACE_MS}):
-   * ICE reports it on a gap the connection often recovers from, and ending a
-   * switched session there costs a fresh handshake and a WebAuthn prompt.
-   * `failed` and `closed` are terminal and end the attempt at once.
+   * ICE reports it on a gap that often recovers, so it is not a report of loss
+   * until it persists. `failed` and `closed` are terminal and end the attempt
+   * at once.
    */
   #onConnectionState(): void {
     if (this.#closed) return;
@@ -388,8 +390,7 @@ export class DirectPeer {
       return;
     }
     if (state !== 'disconnected') {
-      this.#cancelDisconnected?.();
-      this.#cancelDisconnected = null;
+      this.#clearDisconnectedGrace();
       return;
     }
     if (this.#cancelDisconnected) return;
@@ -473,6 +474,11 @@ export class DirectPeer {
   #clearSetupTimeout(): void {
     this.#cancelSetup?.();
     this.#cancelSetup = null;
+  }
+
+  #clearDisconnectedGrace(): void {
+    this.#cancelDisconnected?.();
+    this.#cancelDisconnected = null;
   }
 
   /** Report the channel gone, once, and take the connection down with it. */

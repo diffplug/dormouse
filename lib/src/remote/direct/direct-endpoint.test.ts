@@ -22,6 +22,7 @@ import {
   MAX_DIRECT_PENDING_FRAMES,
   toBase64Url,
   type DirectPath,
+  type DirectRelayCause,
   type DirectSignalV1,
 } from 'remote-lib-common';
 
@@ -39,8 +40,8 @@ interface Side {
   readonly fatals: string[];
   /** Every path change announced. */
   readonly paths: DirectPath[];
-  /** Every detail announced beside a path; see `DirectEndpoint.detail`. */
-  readonly details: Array<string | null>;
+  /** Every cause announced beside a path; see `DirectEndpoint.relayCause`. */
+  readonly causes: Array<DirectRelayCause | null>;
   /** Every signal this side put on the relay. */
   readonly sent: DirectSignalV1[];
   /** What `isCurrent()` answers; a promotion or teardown flips it. */
@@ -75,7 +76,7 @@ function pair(options: Options = {}) {
       received: [],
       fatals: [],
       paths: [],
-      details: [],
+      causes: [],
       sent: [],
       live: true,
       sendable: true,
@@ -113,9 +114,9 @@ function pair(options: Options = {}) {
       },
       fatal: (reason) => void side.fatals.push(reason),
       isCurrent: () => side.live,
-      onTransportChanged: (path, detail) => {
+      onTransportChanged: (path, cause) => {
         side.paths.push(path);
-        side.details.push(detail);
+        side.causes.push(cause);
       },
       setTimer: timers.setTimer,
     });
@@ -391,29 +392,42 @@ describe('DirectEndpoint', () => {
     expect(run.timers.live).toEqual([]);
   });
 
-  describe('the reason behind the path', () => {
-    it('says why an attempt was given up, beside the unchanged path', async () => {
+  /**
+   * **A closed set, never the failure text.** The strings an attempt gives up
+   * with include a runtime's own exception message; what the peer is told is
+   * which of the three answers a person can act on it was.
+   */
+  describe('why a session stayed relayed', () => {
+    it('says an attempt was never possible, beside the unchanged path', async () => {
       const run = pair({ offererHasPeer: false });
 
       await run.offerer.endpoint.offer();
 
-      const reason = 'this device has no direct connection to offer';
-      expect(run.offerer.endpoint.detail).toBe(reason);
-      expect(run.offerer.details).toEqual([reason]);
-      // The path never changed; the announcement is the reason alone.
+      expect(run.offerer.endpoint.relayCause).toBe('unsupported');
+      expect(run.offerer.causes).toEqual(['unsupported']);
+      // The path never changed; the announcement is the cause alone.
       expect(run.offerer.paths).toEqual(['relay']);
     });
 
-    it('says a decline is what ended the offerer’s attempt', async () => {
+    it('tells the offerer it was declined, and the answerer why it declined', async () => {
       const run = pair({ answererHasPeer: false });
 
       await run.offerer.endpoint.offer();
       await flushMicrotasks();
 
-      expect(run.offerer.endpoint.detail).toBe('the peer declined a direct path');
-      expect(run.answerer.endpoint.detail).toBe(
-        'this device has no direct connection to answer with',
-      );
+      expect(run.offerer.endpoint.relayCause).toBe('declined');
+      expect(run.answerer.endpoint.relayCause).toBe('unsupported');
+    });
+
+    it('calls a channel that never opened a failure, not a refusal', async () => {
+      const run = pair({ opening: 'never' });
+      await cutover(run);
+
+      run.timers.fireAt(DIRECT_ANSWER_TIMEOUT_MS);
+      await flushMicrotasks();
+
+      expect(run.offerer.endpoint.relayCause).toBe('failed');
+      expect(run.answerer.endpoint.relayCause).toBe('failed');
     });
 
     it('has nothing to say once the session is on the channel', async () => {
@@ -421,8 +435,9 @@ describe('DirectEndpoint', () => {
 
       await cutover(run);
 
-      expect(run.offerer.endpoint.detail).toBeNull();
-      expect(run.answerer.endpoint.detail).toBeNull();
+      expect(run.offerer.endpoint.relayCause).toBeNull();
+      expect(run.answerer.endpoint.relayCause).toBeNull();
+      expect(run.offerer.causes).toEqual([null]);
     });
   });
 

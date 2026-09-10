@@ -465,14 +465,18 @@ the relay when the browser has none or the Burrow declines
 never coloured — so a relayed fallback is visible rather than silent, **with the
 reason behind it in the hover text and never in the label**: an attempt that
 quietly stayed relayed is still `relay`, and a third state for the common case
-would read as a fault. **A
+would read as a fault. **The transport hands up a `DirectRelayCause`, never its
+failure text**, and Pocket owns the sentence for each: what an attempt fails
+with includes a runtime's own exception message, which belongs in the operator's
+log. **A
 channel that dies after the cutover is burrow loss**: the phone leaves the wall
 exactly as it does for a `burrow-gone`, and returning costs a fresh handshake
 and one WebAuthn prompt. Before the cutover a failed channel costs nothing.
 
-Source of truth: `PocketClient.transportPath` / `transportDetail` in
-`lib/src/remote/client/pocket-client.ts`, `TRANSPORT_PATH_LABELS` and
-`transportTitle` in `lib/src/remote/pocket-app/App.tsx`.
+Source of truth: `PocketClient.transportPath` / `transportRelayCause` in
+`lib/src/remote/client/pocket-client.ts`, `TRANSPORT_PATH_LABELS` /
+`TRANSPORT_RELAY_CAUSES` / `transportTitle` in
+`lib/src/remote/pocket-app/App.tsx`.
 
 ## An expired session drops to sign-in
 
