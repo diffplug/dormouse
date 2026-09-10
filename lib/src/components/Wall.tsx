@@ -1552,8 +1552,17 @@ export function Wall({
         // a real Chromium tab — which `dor ab open` refuses at the CLI
         // (`normalizeConcreteOpenUrl`). Same guard, so both sinks agree.
         const platform = getPlatform();
-        const url = rawUrl ? browserSurfaceUrl(rawUrl) : null;
-        if (!url || !platform.agentBrowserOpen) return;
+        // `browserSurfaceUrl('')` is already null (normalizeNavUrl returns ''
+        // for empty input), so one branch covers both dead ends — and warning
+        // matches the ab-* -> iframe branch above, whose own no-URL refusal is
+        // the only other silent outcome of this action.
+        const url = browserSurfaceUrl(rawUrl);
+        if (!url) {
+          const why = rawUrl ? `'${rawUrl}' is not an http(s) URL` : 'no URL observed yet';
+          console.warn(`[dormouse] cannot swap surface '${id}' to agent-browser: ${why}`);
+          return;
+        }
+        if (!platform.agentBrowserOpen) return;
         const headed = mode === 'ab-popout';
         const title = hostPathDisplay(url, true);
         const eagerId = replaceSurface(id, {

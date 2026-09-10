@@ -897,6 +897,7 @@ describe('Wall on the Lath engine', () => {
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(true);
     const open = vi.fn(async () => ({ ok: true, session: 'dormouse.1.gui-a1b2c3', wsPort: 4321 }));
     (fake as PlatformAdapter).agentBrowserOpen = open;
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     try {
       await act(async () => {
@@ -922,7 +923,14 @@ describe('Wall on the Lath engine', () => {
 
       expect(open).not.toHaveBeenCalled();
       expect(getAgentBrowserScreenController(iframeId)?.snapshot().renderMode).toBe('iframe');
+      // The Display modal closes itself on Apply, so the console is the only
+      // channel this refusal has of its own.
+      expect(warn).toHaveBeenCalledWith(
+        `[dormouse] cannot swap surface '${iframeId}' to agent-browser: `
+        + "'data:text/html,<script>alert(1)</script>' is not an http(s) URL",
+      );
     } finally {
+      warn.mockRestore();
       untouchedSpy.mockRestore();
     }
   });
