@@ -331,6 +331,34 @@ which structurally enforces that the install runs in the window the walk tears
 down last (`docs/specs/auto-update.md`). Custom commands need no capability
 entry. `standalone/scripts/tauri-conf.test.mjs` pins both.
 
+### Workspace registry
+
+**Rust holds the union of every window's Workspaces**, since each webview's
+store (`lib/src/lib/workspace-store.ts`) sees only its own. Each window reports
+its list on every change, coalesced per microtask, and the union is broadcast as
+`dormouse://workspaces` with a monotonic `revision`; a webview drops a snapshot
+behind the one it holds.
+
+- **Ids are minted only in Rust**, `workspace-<n>` off one counter, handed to a
+  webview in blocks (`workspace_reserve_ids`) so a create mints synchronously.
+  The ref `workspace:<n>` is the id's number, so it never renumbers and never
+  collides across windows; an unused reservation is a gap, nothing more.
+- **The counter is seeded above every id any snapshot on disk names**, and
+  above every id a window reports, so a fresh id never meets a restored one.
+  Never below 2: `workspace-1` is a bare Wall's only Workspace.
+- **A `dor` request naming a Workspace or Window routes to the window holding
+  it** (§Routing precedence); a target the registry cannot place falls through
+  to the caller's window, which refuses it by name.
+- **`Destroyed` forgets the window's entries** and broadcasts.
+
+Source of truth: `standalone/src-tauri/src/workspaces.rs`;
+`workspace_reserve_ids` / `workspace_report` / `workspace_registry` in
+`standalone/src-tauri/src/lib.rs`; `installWorkspaceRegistry` in
+`standalone/src/workspace-registry.ts`; `installWorkspaceIdPool` /
+`workspaceRefFor` in `lib/src/lib/workspace-store.ts`. Pinned by the tests in
+`standalone/src-tauri/src/workspaces.rs` and
+`an_explicit_target_routes_to_the_window_holding_it`.
+
 ### Routing
 
 Source of truth: `route` in `standalone/src-tauri/src/routing.rs`,
@@ -343,7 +371,7 @@ Source of truth: `route` in `standalone/src-tauri/src/routing.rs`,
 | `pty:exit`, `pty:replay` | `data.id` | its owner, never suppressed |
 | `pty:list` | `data.forWindow` | the window that asked |
 | `alert:*` carrying `data.id` | `data.id` | its owner |
-| `dor:controlRequest` | `data.surfaceId` | its owner; no Surface named → the focused window |
+| `dor:controlRequest` | `params.workspace`, `params.window`, `data.surfaceId` | in that precedence: the window holding the named Workspace (§Workspace registry), the named window, the caller's Surface's owner; none → the focused window |
 | `dor:controlCancel` | `data.requestId` | the window its request went to; unknown → every window |
 | `burrow:ask` | `data.params.surfaceId` | its owner; a Surface with no PTY here, or an ask naming none, → every window (§Burrow service) |
 | everything else | — | every window |

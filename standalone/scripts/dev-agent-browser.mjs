@@ -149,7 +149,37 @@ const invokeMap = {
   // is a quit-only step and the harness has no quit.
   take_recovery_commands: ({ paneIds }) =>
     requestSidecar('recovery:take', { paneIds }, 'recovery:commands', (data) => data.commands ?? {}),
+  // The Workspace registry (docs/specs/standalone.md -> "Workspace registry"):
+  // one id counter and one window, since the harness simulates no second one.
+  workspace_reserve_ids: ({ count }) => {
+    const n = Math.max(1, Math.min(64, Number(count) || 1));
+    const first = nextWorkspaceId;
+    nextWorkspaceId += n;
+    return Array.from({ length: n }, (_, i) => `workspace-${first + i}`);
+  },
+  workspace_report: ({ entries }) => {
+    const next = JSON.stringify(entries ?? []);
+    if (next === registryEntries) return null;
+    registryEntries = next;
+    registryRevision += 1;
+    broadcast('sidecar', { event: 'dormouse://workspaces', data: registrySnapshot() });
+    return null;
+  },
+  workspace_registry: () => registrySnapshot(),
 };
+
+let nextWorkspaceId = 2;
+let registryEntries = '[]';
+let registryRevision = 0;
+function registrySnapshot() {
+  const workspaces = JSON.parse(registryEntries).map((entry) => ({
+    id: entry.id,
+    ref: /^workspace-(\d+)$/.test(entry.id) ? `workspace:${entry.id.slice('workspace-'.length)}` : null,
+    name: entry.name,
+    active: Boolean(entry.active),
+  }));
+  return { revision: registryRevision, windows: [{ label: 'main', workspaces }] };
+}
 
 async function readJson(req) {
   // The application/json requirement is enforced in the gate below, before

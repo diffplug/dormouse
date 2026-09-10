@@ -4,6 +4,7 @@ use serde_json::{Map as JsonMap, Value as JsonValue};
 mod log_tail;
 mod quit_state;
 mod routing;
+mod workspaces;
 // The Dock's Quit, an `osascript` quit and a logout reach AppKit without ever
 // raising `RunEvent::ExitRequested` (docs/specs/standalone.md §Trigger
 // interception).
@@ -116,6 +117,11 @@ struct WindowState {
     closing: Mutex<HashSet<String>>,
     /// The next `ws-<n>`, seeded above every live and saved label at setup.
     next_ws: AtomicU64,
+    /// Every window's Workspaces under their stable refs (§Workspace registry).
+    registry: Mutex<workspaces::Registry>,
+    /// The next `workspace-<n>`, seeded above every id on disk at setup and
+    /// handed out in blocks so a webview can mint synchronously.
+    next_workspace: AtomicU64,
 }
 
 impl RoutingState {
@@ -254,6 +260,9 @@ enum Delivery {
     UnownedSurface { request_id: String, surface_id: String },
 }
 
+static EMPTY_REGISTRY: std::sync::LazyLock<workspaces::Registry> =
+    std::sync::LazyLock::new(workspaces::Registry::default);
+
 /// Route one sidecar stdout line to the window it belongs to.
 ///
 /// The hot path — once per PTY chunk — so it takes the routing lock once, reads
@@ -281,6 +290,13 @@ fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
             routing::arrival_ids(&guard(&state.arrivals))
         } else {
             HashSet::new()
+        };
+        // Only a `dor` request consults the registry; a PTY chunk never pays
+        // for the lock. Taken before the routing lock and released with it.
+        let registry_guard = (event == "dor:controlRequest").then(|| guard(&state.registry));
+        let registry: &workspaces::Registry = match registry_guard.as_deref() {
+            Some(registry) => registry,
+            None => &EMPTY_REGISTRY,
         };
         let mut routing = guard(&state.routing);
         if state.suppressed.load(Ordering::Relaxed) > 0 {
@@ -310,6 +326,7 @@ fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
                 owners: &routing.owners,
                 awaiting_replay: &routing.awaiting_replay,
                 dor_targets: &routing.dor_targets,
+                registry: &registry,
             },
         ) {
             Route::Drop => Delivery::Nowhere,
@@ -2676,6 +2693,63 @@ fn adopt_failed(
     Ok(())
 }
 
+/// Every Workspace id every snapshot on disk names. Read once at setup to
+/// seed the id counter; an unreadable file contributes nothing, which is safe
+/// because such a file restores nothing either.
+fn saved_workspace_ids(dir: &Path) -> Vec<String> {
+    session_file_names(dir)
+        .iter()
+        .filter_map(|name| name.strip_suffix(".json"))
+        .filter_map(|label| read_session_from(dir, label).ok().flatten())
+        .filter_map(|contents| serde_json::from_str::<JsonValue>(&contents).ok())
+        .flat_map(|snapshot| workspaces::snapshot_ids(&snapshot))
+        .collect()
+}
+
+/// Hand a webview a block of ids to mint from. Ids come only from this
+/// counter, so a ref is stable for the life of the Workspace and unique
+/// across windows; an unused reservation is a gap in the numbering, nothing
+/// more (§Workspace registry).
+#[tauri::command]
+fn workspace_reserve_ids(windows: tauri::State<'_, WindowState>, count: u64) -> Vec<String> {
+    let count = count.clamp(1, 64);
+    let first = windows.next_workspace.fetch_add(count, Ordering::SeqCst);
+    (first..first + count)
+        .map(|n| format!("workspace-{n}"))
+        .collect()
+}
+
+/// A window's Workspace list, as it stands. Broadcast to every window when it
+/// changed: the strip's move menu and `dor` routing read the union.
+#[tauri::command]
+fn workspace_report(
+    app: AppHandle,
+    window: tauri::Window,
+    windows: tauri::State<'_, WindowState>,
+    entries: Vec<workspaces::Entry>,
+) {
+    // A reported id above the counter (a snapshot restored from a newer
+    // build, say) must never be minted again.
+    let above = workspaces::seed_next(entries.iter().map(|entry| entry.id.as_str()));
+    windows.next_workspace.fetch_max(above, Ordering::SeqCst);
+    let changed = workspaces::report(&mut guard(&windows.registry), window.label(), entries);
+    if changed {
+        broadcast_registry(&app, &windows);
+    }
+}
+
+/// The registry as it stands, for a webview that booted after the last
+/// broadcast.
+#[tauri::command]
+fn workspace_registry(windows: tauri::State<'_, WindowState>) -> JsonValue {
+    workspaces::snapshot(&guard(&windows.registry))
+}
+
+fn broadcast_registry(app: &AppHandle, windows: &WindowState) {
+    let snapshot = workspaces::snapshot(&guard(&windows.registry));
+    let _ = app.emit("dormouse://workspaces", snapshot);
+}
+
 /// Every Workspace in flight into this window, oldest first.
 ///
 /// **Not consumed**: the record settles at `adopt_done`, so a webview that
@@ -3479,6 +3553,10 @@ pub fn run() {
                                 "the target window closed mid-arrival",
                             );
                         }
+                        let changed = workspaces::forget_window(&mut guard(&state.registry), &label);
+                        if changed {
+                            broadcast_registry(app, &state);
+                        }
                     }
                     if let Some(state) = app.try_state::<GeometryState>() {
                         state.forget(&label);
@@ -3568,6 +3646,11 @@ pub fn run() {
                     app.state::<WindowState>()
                         .next_ws
                         .store(routing::seed_next_ws(&labels), Ordering::SeqCst);
+                    // Likewise above every Workspace id any snapshot names, so
+                    // a fresh id never collides with one about to be restored.
+                    app.state::<WindowState>()
+                        .next_workspace
+                        .store(workspaces::seed_next(saved_workspace_ids(&dir)), Ordering::SeqCst);
                     restore_windows(app.handle(), &dir, &labels);
                 }
                 Err(e) => append_log(format!("[window] {e}")),
@@ -3618,6 +3701,9 @@ pub fn run() {
             adopt_done,
             adopt_failed,
             take_arrivals,
+            workspace_reserve_ids,
+            workspace_report,
+            workspace_registry,
             remove_window_session,
             window_at_cursor,
             hover_workspace_target,

@@ -57,9 +57,47 @@ export function hasWorkspace(id: WorkspaceId): boolean {
 
 let workspaceSequence = 0;
 
-/** A process-unique WorkspaceId, even when the random source repeats. */
+/** Ids the host reserved for this Window to mint from (`docs/specs/standalone.md`
+ *  → "Workspace registry"): `workspace-<n>` off one counter, so a ref is stable
+ *  and unique across windows. Refilled in the background; below the low-water
+ *  mark a burst of creates still finds one. */
+const idPool: WorkspaceId[] = [];
+const ID_POOL_SIZE = 16;
+const ID_POOL_LOW = 4;
+let reserveIds: ((count: number) => Promise<WorkspaceId[]>) | null = null;
+let refilling: Promise<void> | null = null;
+
+function refillIdPool(): Promise<void> {
+  if (!reserveIds || refilling) return refilling ?? Promise.resolve();
+  const reserve = reserveIds;
+  refilling = reserve(ID_POOL_SIZE)
+    .then((ids) => { idPool.push(...ids); })
+    .catch(() => {})
+    .finally(() => { refilling = null; });
+  return refilling;
+}
+
+/** Give this Window a host that mints ids. Resolves once the first block is
+ *  in hand, so a create that follows never falls back to a random id. */
+export function installWorkspaceIdPool(reserve: (count: number) => Promise<WorkspaceId[]>): Promise<void> {
+  reserveIds = reserve;
+  idPool.length = 0;
+  return refillIdPool();
+}
+
+/** The next id: one the host reserved when it has, else a process-unique
+ *  random one — a host with no registry (VS Code, tests) whose refs are then
+ *  positional (`workspaceRefFor`). */
 export function generateWorkspaceId(): WorkspaceId {
-  return `workspace-${Math.random().toString(36).slice(2, 10)}-${++workspaceSequence}`;
+  const reserved = idPool.shift();
+  if (idPool.length < ID_POOL_LOW) void refillIdPool();
+  return reserved ?? `workspace-${Math.random().toString(36).slice(2, 10)}-${++workspaceSequence}`;
+}
+
+/** The registry number of a `workspace-<n>` id; a random or bare id has none. */
+export function workspaceRefNumber(id: WorkspaceId): number | null {
+  const match = /^workspace-(\d+)$/.exec(id);
+  return match ? Number(match[1]) : null;
 }
 
 /** "Workspace N", one past the highest existing `Workspace <n>` name. */
@@ -147,9 +185,8 @@ export function closeWorkspace(id: WorkspaceId): boolean {
 
 /**
  * Move a Workspace to `toIndex` (clamped into range), keeping every other
- * Workspace's relative order. Returns whether the list changed. Reordering
- * renumbers `workspace:<n>` refs, which are positional by design
- * (`docs/specs/dor-cli.md` → "Handle Model").
+ * Workspace's relative order. Returns whether the list changed. Refs are
+ * stable, so a reorder renames nothing (`docs/specs/dor-cli.md` → "Handle Model").
  */
 export function moveWorkspace(id: WorkspaceId, toIndex: number): boolean {
   const from = state.workspaces.findIndex((ws) => ws.id === id);
@@ -189,15 +226,19 @@ export function isWindowRef(ref: string): boolean {
   return trimmed === windowRef || `window:${trimmed}` === windowRef;
 }
 
-/** A Workspace's positional `dor` ref. One no longer in this Window — its Wall is
- *  mid-unmount — reports the first ref, which is what a lone Workspace answers. */
+/** A Workspace's `dor` ref: **stable**, the number of its registry-minted id, so
+ *  a reorder renames nothing. An id the registry did not mint — a bare Wall's,
+ *  or one restored from before the registry — falls back to its position; one
+ *  no longer in this Window (its Wall mid-unmount) reports the first ref, which
+ *  is what a lone Workspace answers. */
 export function workspaceRefFor(id: WorkspaceId): string {
+  const number = workspaceRefNumber(id);
+  if (number !== null) return `workspace:${number}`;
   const index = state.workspaces.findIndex((ws) => ws.id === id);
   return `workspace:${index === -1 ? 1 : index + 1}`;
 }
 
-/** A Workspace a target named: its identity, plus the positional ref it had
- *  when it was resolved (a later reorder renumbers it). */
+/** A Workspace a target named: its identity, plus its ref as resolved. */
 export interface ResolvedWorkspace extends WorkspaceMeta {
   ref: string;
 }
@@ -210,17 +251,22 @@ export type WorkspaceRefResolution =
 /**
  * Resolve `workspace:<n>` / `workspace:<name>` — or either bare — to a
  * Workspace of this Window (`docs/specs/dor-cli.md` → "Handle Model"). A
- * positional ref wins over a name that reads as one; a name resolves only when
- * exactly one Workspace carries it, and an ambiguous one lists the candidates
- * rather than picking.
+ * number is the stable ref of a registry-minted id, and only where no id was
+ * minted that way does it read as a position; a numeric ref wins over a name
+ * that reads as one; a name resolves only when exactly one Workspace carries
+ * it, and an ambiguous one lists the candidates rather than picking.
  */
 export function resolveWorkspaceRef(ref: string): WorkspaceRefResolution {
   const { target, position, name } = parseWorkspaceRef(ref);
   const found = (meta: WorkspaceMeta): WorkspaceRefResolution =>
     ({ ok: true, ...meta, ref: workspaceRefFor(meta.id) });
   if (position !== null) {
+    // The one Workspace whose ref reads `workspace:<position>`: a minted id
+    // first, else the unminted one standing at that position.
+    const stable = state.workspaces.find((ws) => workspaceRefNumber(ws.id) === position);
+    if (stable) return found(stable);
     const positional = state.workspaces[position - 1];
-    if (positional) return found(positional);
+    if (positional && workspaceRefNumber(positional.id) === null) return found(positional);
   } else if (name) {
     const matches = state.workspaces.filter((workspace) => workspace.name === name);
     if (matches.length === 1) return found(matches[0]);
