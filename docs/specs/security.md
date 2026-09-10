@@ -74,7 +74,10 @@ run this knows what they are taking on.
   artifact the origin serves ([Trust Model](./remote-security-model.md#trust-model)).
 - **Traffic analysis.** The Relay sees who talks to whom, when, how often, and
   how large each ciphertext is, and keystroke timing, never keystroke values
-  ([Residual metadata](./remote-security-model.md#residual-metadata)).
+  ([Residual metadata](./remote-security-model.md#residual-metadata)). An
+  authorized session may move onto a direct connection between the two devices,
+  after which the Relay sees that the session exists and nothing about its
+  traffic ([Direct path](./remote-security-model.md#direct-path)).
 - **Push replay, when push is enabled.** A push proves confidentiality, not freshness: a Relay that
   kept an envelope can re-deliver it ([Push sealing](./remote-security-model.md#push-sealing)).
 - **Per-Burrow unlinkability, when push is enabled.** One push endpoint per browser lets the Relay see
