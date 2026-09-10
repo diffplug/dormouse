@@ -17,8 +17,13 @@ import {
   installWindowSessionWriter,
   seedWindowSession,
 } from "dormouse-lib/lib/window-session-aggregator";
-import { resetWorkspaces, setWorkspaces } from "dormouse-lib/lib/workspace-store";
-import { DEFAULT_WORKSPACE_ID, windowPaneIds } from "dormouse-lib/lib/session-types";
+import {
+  generateWorkspaceId,
+  getWorkspacesSnapshot,
+  resetWorkspaces,
+  setWorkspaces,
+} from "dormouse-lib/lib/workspace-store";
+import { DEFAULT_WORKSPACE_NAME, windowPaneIds } from "dormouse-lib/lib/session-types";
 import type { PersistedSession, PersistedWindow, WorkspaceId } from "dormouse-lib/lib/session-types";
 import { wallBootFromResult, type WallBootPlans } from "dormouse-lib/components/wall/wall-types";
 
@@ -117,6 +122,15 @@ export function installWindowPersistence(
       workspaces: saved.workspaces.map(({ id, name }) => ({ id, name })),
       activeId: saved.activeWorkspaceId,
     });
+  } else {
+    // A fresh Window mints its first Workspace's id rather than taking the
+    // lib's `DEFAULT_WORKSPACE_ID`: every window would otherwise start on the
+    // same id, and a second window opened after the first one closed would
+    // write a blob whose Workspace id is already live in another window's blob
+    // (`docs/specs/standalone.md` → "Persistence"). A bare Wall, which is one
+    // Window's whole application, keeps the default id.
+    const id = generateWorkspaceId();
+    setWorkspaces({ workspaces: [{ id, name: DEFAULT_WORKSPACE_NAME }], activeId: id });
   }
   // After `setWorkspaces`, so installing does not immediately write back what was
   // just read.
@@ -138,9 +152,11 @@ async function restoreWindow(
   const live: LivePtys = await collectLivePtys(platform, {
     ...(hasTerminalPanes ? { retryTimeoutMs: LIST_RETRY_MS } : {}),
   });
+  // The fresh Window's id was minted by `installWindowPersistence` above.
+  const installed = getWorkspacesSnapshot();
   const restoring: Array<{ id: WorkspaceId; session: PersistedSession | null }> =
-    saved?.workspaces ?? [{ id: DEFAULT_WORKSPACE_ID, session: null }];
-  const activeId = saved?.activeWorkspaceId ?? DEFAULT_WORKSPACE_ID;
+    saved?.workspaces ?? [{ id: installed.activeId, session: null }];
+  const activeId = saved?.activeWorkspaceId ?? installed.activeId;
 
   const { extra, unowned } = routeUnownedPtys(live.ptys, saved);
 
