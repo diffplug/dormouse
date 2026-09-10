@@ -19,6 +19,13 @@ let writer: ((snapshot: PersistedWindow) => void | Promise<void>) | null = null;
 let unsubscribeWorkspaces: (() => void) | null = null;
 let timer: ReturnType<typeof setTimeout> | null = null;
 let inFlight: Promise<void> | null = null;
+// Set while the page is going away, cleared if it comes back from the bfcache.
+// Nothing debounces from here on: a timer armed during `pagehide` never fires.
+let unloading = false;
+// Bound once. The aggregator is imported by Node-side tooling that has no
+// `window`, where the unload hooks simply do not exist.
+const addEventListener = typeof window === 'undefined' ? null : window.addEventListener.bind(window);
+const removeEventListener = typeof window === 'undefined' ? null : window.removeEventListener.bind(window);
 
 /**
  * How long a debounced save waits. One value for both levels: a Wall's own
@@ -66,7 +73,10 @@ export function previousWorkspaceSession(workspaceId: WorkspaceId): PersistedSes
 /**
  * The Window as it stands: Workspaces in strip order carrying the id, name, and
  * latest session of each. A Workspace with no record at all is omitted rather
- * than written empty.
+ * than written empty, and the active id then falls back to the first Workspace
+ * that is in the blob — a blob naming an absent Workspace restores nothing as
+ * active (`readPersistedWindow` repairs it, but only after the user has already
+ * landed somewhere unexpected).
  */
 export function getWindowSnapshot(): PersistedWindow {
   const { workspaces, activeId } = getWorkspacesSnapshot();
@@ -76,7 +86,10 @@ export function getWindowSnapshot(): PersistedWindow {
     if (!session) continue;
     collected.push({ id: workspace.id, name: workspace.name, session });
   }
-  return { version: 1, workspaces: collected, activeWorkspaceId: activeId };
+  const activeWorkspaceId = collected.some((workspace) => workspace.id === activeId)
+    ? activeId
+    : collected[0]?.id ?? activeId;
+  return { version: 1, workspaces: collected, activeWorkspaceId };
 }
 
 /**
@@ -90,14 +103,44 @@ export function getWindowSnapshot(): PersistedWindow {
 export function installWindowSessionWriter(write: (snapshot: PersistedWindow) => void | Promise<void>): () => void {
   writer = write;
   unsubscribeWorkspaces?.();
-  unsubscribeWorkspaces = subscribeToWorkspaces(scheduleWrite);
+  unsubscribeWorkspaces = subscribeToWorkspaces(onWorkspacesChanged);
+  addEventListener?.('pagehide', handlePageHide);
+  addEventListener?.('pageshow', handlePageShow);
   return () => {
     if (writer !== write) return;
     writer = null;
     unsubscribeWorkspaces?.();
     unsubscribeWorkspaces = null;
+    removeEventListener?.('pagehide', handlePageHide);
+    removeEventListener?.('pageshow', handlePageShow);
     cancelPending();
   };
+}
+
+/** The Window is going away. Write what the records hold NOW: a debounced write
+ *  scheduled here never runs, so the alternative is losing the last save. */
+function handlePageHide(): void {
+  unloading = true;
+  cancelPending();
+  writeNow();
+}
+
+/** Restored from the bfcache — debouncing resumes. */
+function handlePageShow(): void {
+  unloading = false;
+}
+
+/**
+ * A Workspace the store holds but nothing has published for — a just-created one
+ * — gets an empty-but-valid record, so `activeWorkspaceId` always names a
+ * Workspace the blob contains. Without it, a crash between creating a Workspace
+ * and its Wall's first save drops the new Workspace and lands the user elsewhere.
+ */
+function onWorkspacesChanged(): void {
+  for (const workspace of getWorkspacesSnapshot().workspaces) {
+    if (!records.has(workspace.id)) records.set(workspace.id, { version: 3, panes: [] });
+  }
+  scheduleWrite();
 }
 
 /**
@@ -114,7 +157,15 @@ export async function flushWindowSession(): Promise<void> {
 }
 
 function scheduleWrite(): void {
-  if (!writer || timer) return;
+  if (!writer) return;
+  // A publish that lands during `pagehide` — the Walls flush there too — has no
+  // later tick to be written on.
+  if (unloading) {
+    cancelPending();
+    writeNow();
+    return;
+  }
+  if (timer) return;
   timer = setTimeout(() => {
     timer = null;
     writeNow();
@@ -139,6 +190,9 @@ export function resetWindowSessionAggregator(): void {
   writer = null;
   unsubscribeWorkspaces?.();
   unsubscribeWorkspaces = null;
+  removeEventListener?.('pagehide', handlePageHide);
+  removeEventListener?.('pageshow', handlePageShow);
+  unloading = false;
   cancelPending();
   inFlight = null;
 }

@@ -20,7 +20,7 @@ import { getActivitySnapshot, setTerminalActivity } from '../lib/terminal-regist
 import { getWallHandle, listWallHandles, resetWallHandles } from './wall/wall-handles';
 import { mountWallHarness, type WallHarness } from './wall/wall-test-utils';
 import { getWorkspaceSurfacesSnapshot, resetWorkspaceSurfaces } from '../lib/workspace-surfaces';
-import { resetWindowSessionAggregator } from '../lib/window-session-aggregator';
+import { previousWorkspaceSession, publishWorkspaceSession, resetWindowSessionAggregator } from '../lib/window-session-aggregator';
 import { resetWorkspaceUi } from '../lib/workspace-ui-store';
 import {
   closeWorkspace,
@@ -203,6 +203,24 @@ describe('WorkspaceWindow', () => {
     await act(async () => { await handle.closeAll('discard'); });
     await flush();
     expect(handle.surfaceIds()).toEqual([]);
+  });
+
+  it('leaves no persisted record behind a closed Workspace', async () => {
+    // The closing Wall's unmount used to publish one last time, putting the
+    // Workspace it had just forgotten back into the next Window blob — with its
+    // Surfaces gone — for the next launch to restore as an empty Workspace.
+    await render();
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    await flush();
+    // Its Wall has saved at least once, as one does the moment it auto-spawns.
+    publishWorkspaceSession('ws-2', { version: 3, panes: [] });
+    expect(previousWorkspaceSession('ws-2')).not.toBeNull();
+
+    await act(async () => { await closeWorkspaceWithSurfaces('ws-2'); });
+    await flush();
+
+    expect(getWorkspacesSnapshot().workspaces.map((ws) => ws.id)).not.toContain('ws-2');
+    expect(previousWorkspaceSession('ws-2')).toBeNull();
   });
 
   it('serializes two closes started together, so the survivor keeps its Surfaces', async () => {

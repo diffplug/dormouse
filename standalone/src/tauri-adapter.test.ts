@@ -87,6 +87,27 @@ describe("TauriAdapter session-flush handshake", () => {
   });
 });
 
+describe("TauriAdapter cwd probing", () => {
+  it("sends one pty_get_cwds for the Workspaces saving together", async () => {
+    // Every Wall answers the quit flush with its own `getCwds`; uncoalesced,
+    // N Workspaces cost N sidecar round trips and N `lsof` spawns inside them.
+    const adapter = new TauriAdapter();
+    vi.mocked(rawInvoke).mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd !== "pty_get_cwds") return undefined;
+      const ids = (args as { ids: string[] }).ids;
+      return Object.fromEntries(ids.map((id) => [id, `/cwd/${id}`]));
+    });
+
+    const [a, b] = await Promise.all([adapter.getCwds(["pane-a"]), adapter.getCwds(["pane-b"])]);
+
+    const cwdCalls = vi.mocked(rawInvoke).mock.calls.filter(([cmd]) => cmd === "pty_get_cwds");
+    expect(cwdCalls).toHaveLength(1);
+    expect(cwdCalls[0][1]).toEqual({ ids: ["pane-a", "pane-b"] });
+    expect(a).toEqual({ "pane-a": "/cwd/pane-a" });
+    expect(b).toEqual({ "pane-b": "/cwd/pane-b" });
+  });
+});
+
 // docs/specs/transport.md -> "The governing rule": standalone restores window
 // state, so nothing is deleted at boot and the record is claimed once.
 describe("TauriAdapter window persistence", () => {

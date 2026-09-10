@@ -58,6 +58,23 @@ describe('readPersistedWindow', () => {
     expect(read?.workspaces[0].id).toBe('ws-a');
   });
 
+  it('keeps only the first of a duplicated Workspace id', () => {
+    // `setWorkspaces` rejects a duplicate outright, so a blob carrying one would
+    // otherwise take the whole launch down before anything rendered.
+    const win = {
+      version: 1 as const,
+      activeWorkspaceId: 'ws-a',
+      workspaces: [
+        { id: 'ws-a', name: 'First', session: sessionA },
+        { id: 'ws-a', name: 'Second', session: sessionB },
+      ],
+    };
+    const read = readPersistedWindow(win);
+    expect(read?.workspaces).toHaveLength(1);
+    expect(read?.workspaces[0].name).toBe('First');
+    expect(read?.activeWorkspaceId).toBe('ws-a');
+  });
+
   it('returns null for unusable input', () => {
     expect(readPersistedWindow(null)).toBeNull();
     expect(readPersistedWindow({ random: 'junk' })).toBeNull();

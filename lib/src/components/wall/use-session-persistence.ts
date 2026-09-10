@@ -4,6 +4,7 @@ import { getPlatform } from '../../lib/platform';
 import { saveSession, type SaveOptions, type SaveSink } from '../../lib/session-save';
 import { createSessionDirtyTracker } from '../../lib/session-dirty';
 import { previousWorkspaceSession, publishWorkspaceSession, SESSION_SAVE_DEBOUNCE_MS } from '../../lib/window-session-aggregator';
+import { hasWorkspace } from '../../lib/workspace-store';
 import {
   subscribeToActivity,
   subscribeToTerminalPaneState,
@@ -240,9 +241,16 @@ export function useSessionPersistence({
       unsubPaneState();
       unsubscribeStore();
       clearInterval(interval);
-      void persistSessionNow().catch(() => undefined);
+      // A Wall unmounting because its Workspace was closed must not publish on
+      // the way out: `closeWorkspaceWithSurfaces` has already forgotten the
+      // record, and re-publishing would put the closed Workspace back in the next
+      // Window blob (with its Surfaces gone) for the next launch to restore.
+      if (workspaceId === undefined || hasWorkspace(workspaceId)) {
+        void persistSessionNow().catch(() => undefined);
+      }
     };
   }, [
+    workspaceId,
     lath,
     flushSessionSave,
     ownsSurface,

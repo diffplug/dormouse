@@ -65,6 +65,21 @@ describe('recovery store', () => {
       // Nothing was captured, so nothing can be claimed either.
       expect(store.take(['a'])).toEqual({});
     });
+
+    it('leaves no temp behind when the rename onto the record fails', () => {
+      // A directory where the record should be: the temp is written, the rename
+      // over it cannot succeed. A fixed `recovery.json.tmp` would sit there for
+      // the next run — and for any other host sharing this directory — to rename
+      // over the record half-written.
+      fs.mkdirSync(file());
+
+      const store = createRecoveryStore(dir, { log });
+      store.beginCapture();
+      expect(() => store.record('a', 'claude --continue')).not.toThrow();
+
+      expect(messages.some((message) => message.startsWith('error [recovery] write failed'))).toBe(true);
+      expect(fs.readdirSync(dir).filter((name) => name.endsWith('.tmp'))).toEqual([]);
+    });
   });
 
   describe('take', () => {

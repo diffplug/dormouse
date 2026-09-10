@@ -36,6 +36,7 @@ import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
 import { createMemoryNotepadArchivePort } from "dormouse-lib/lib/notepad/memory-archive-port";
 import type { PersistedAlertState, PersistedWindow } from "dormouse-lib/lib/session-types";
 import { claimRecoveryCommands, windowStateSlot } from "./window-recovery";
+import { coalesceCwds } from "./coalesce-cwds";
 import {
   applyTerminalProtocolEvents,
   collectTerminalSemanticEvents,
@@ -164,9 +165,14 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     try { return await this.host.invoke("pty_get_cwd", { id }); } catch { return null; }
   }
 
-  /** See TauriAdapter: one round trip, one process scan, for the whole save. */
-  async getCwds(ids: string[]): Promise<Record<string, string | null>> {
-    try { return await this.host.invoke("pty_get_cwds", { ids }); } catch { return {}; }
+  /** See TauriAdapter: one round trip, one process scan, for the whole save —
+   *  coalesced the same way, because the harness runs the same Walls. */
+  private readonly cwdBatch = coalesceCwds(async (ids) => {
+    try { return await this.host.invoke<Record<string, string | null>>("pty_get_cwds", { ids }); } catch { return {}; }
+  });
+
+  getCwds(ids: string[]): Promise<Record<string, string | null>> {
+    return this.cwdBatch(ids);
   }
 
   /** See TauriAdapter: claimed once during `init()`, read synchronously by the

@@ -3,15 +3,7 @@ import { createRoot } from "react-dom/client";
 import { setPlatform } from "dormouse-lib/lib/platform";
 import { installPeerSurfaceResponder } from "dormouse-lib/remote/burrow/peer-surfaces";
 import type { PlatformAdapter } from "dormouse-lib/lib/platform/types";
-import { collectLivePtys, resumeOrRestoreFrom } from "dormouse-lib/lib/reconnect";
-import {
-  installWindowSessionWriter,
-  seedWindowSession,
-} from "dormouse-lib/lib/window-session-aggregator";
-import { setWorkspaces } from "dormouse-lib/lib/workspace-store";
-import { DEFAULT_WORKSPACE_ID, windowPaneIds } from "dormouse-lib/lib/session-types";
-import type { PersistedSession, WorkspaceId } from "dormouse-lib/lib/session-types";
-import { wallBootFromResult, type WallBootPlans } from "dormouse-lib/components/wall/wall-types";
+import { restoreWindowOrFresh } from "./window-restore";
 import { seedShellStore } from "dormouse-lib/lib/shell-store";
 import { restoreActiveTheme } from "dormouse-lib/lib/themes";
 import App from "dormouse-lib/App";
@@ -132,7 +124,7 @@ async function bootstrap() {
   // omits `shell` and the sidecar resolves the OS default itself.
   seedShellStore(await shellsPromise);
 
-  const initialPlans = await restoreWindow(platform);
+  const initialPlans = await restoreWindowOrFresh(platform);
 
   startUpdateCheck();
 
@@ -150,61 +142,4 @@ async function bootstrap() {
   );
 }
 
-/**
- * Rebuild the Window: install its Workspaces, then plan each one's Session off a
- * single view of the host's live PTYs (docs/specs/layout.md → "Session
- * persistence").
- *
- * Reload and relaunch are the same code path with a different live list. On a
- * reload the PTYs are still there and partition by saved pane id, so every
- * Workspace resumes over its own; on a relaunch the list is empty and every
- * Workspace cold-restores into fresh shells at its saved cwds, with nothing
- * replayed because scrollback is never persisted.
- */
-async function restoreWindow(platform: PlatformAdapter): Promise<WallBootPlans> {
-  const saved = platform.getWindowState?.() ?? null;
-  // Before any Wall mounts: a Workspace's first save compares against its own
-  // record, and a snapshot taken mid-boot must not replace a restored Workspace
-  // with a blank one.
-  seedWindowSession(saved);
-  if (saved) {
-    setWorkspaces({
-      workspaces: saved.workspaces.map(({ id, name }) => ({ id, name })),
-      activeId: saved.activeWorkspaceId,
-    });
-  }
-  // After `setWorkspaces`, so installing does not immediately write back what was
-  // just read.
-  installWindowSessionWriter((snapshot) => platform.saveWindowState?.(snapshot));
-
-  const live = await collectLivePtys(platform);
-  const restoring: Array<{ id: WorkspaceId; session: PersistedSession | null }> =
-    saved?.workspaces ?? [{ id: DEFAULT_WORKSPACE_ID, session: null }];
-  const activeId = saved?.activeWorkspaceId ?? DEFAULT_WORKSPACE_ID;
-
-  // A live PTY no saved Workspace names — a pane created inside the last save's
-  // debounce, or one left by a Workspace that is gone — goes to the active
-  // Workspace rather than being stranded with no Wall.
-  const liveIds = live.ptys.map((pty) => pty.id);
-  const named = windowPaneIds(saved);
-  const namedSet = new Set(named);
-  const unowned = new Set(liveIds.filter((id) => !namedSet.has(id)));
-
-  // The recovery claim is a host round trip started back in `init()`. Await it
-  // only when something here can actually cold-restore: a Window whose every
-  // saved pane is live resumes over those PTYs and never reads the record.
-  const liveSet = new Set(liveIds);
-  if (!named.every((id) => liveSet.has(id))) await platform.recoveryReady;
-
-  const plans: WallBootPlans = {};
-  for (const { id, session } of restoring) {
-    const result = resumeOrRestoreFrom(platform, live, {
-      savedSession: session,
-      ptyIds: new Set(session?.panes.map((pane) => pane.id) ?? []),
-      ...(id === activeId ? { claimUnowned: unowned } : {}),
-    });
-    plans[id] = wallBootFromResult(result);
-  }
-  return plans;
-}
 bootstrap();

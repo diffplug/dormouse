@@ -157,6 +157,43 @@ describe("quit orchestrator", () => {
     ]);
   });
 
+  it("finishes the final save when every step takes its worst-case time", async () => {
+    // The webview-observable worst case of each step: the two that reach the
+    // sidecar wait Rust's `timeout + 1500ms` round-trip margin on top of their own
+    // budget. A ceiling below the sum of these aborts exactly the last flush and
+    // the drain — the final save — so `drain` must still land before the exit.
+    vi.useFakeTimers();
+    try {
+      const order: string[] = [];
+      mocks.invoke.mockImplementation(async (cmd: string) => {
+        order.push(cmd);
+        return undefined;
+      });
+      const slow = (name: string, ms: number) => () =>
+        new Promise<void>((resolve) => {
+          setTimeout(() => {
+            order.push(name);
+            resolve();
+          }, ms);
+        });
+      const adapter = fakeAdapter(order, {
+        captureRecovery: slow("captureRecovery", 1300 + 1500),
+        flush: slow("flush", 1500),
+        gracefulKill: slow("gracefulKill", 2000 + 1500),
+        drain: slow("drain", 2000),
+      });
+
+      initQuitFlow(adapter);
+      quitRequested!();
+      await vi.advanceTimersByTimeAsync(30_000);
+
+      expect(order).toContain("drain");
+      expect(order.indexOf("drain")).toBeLessThan(order.indexOf("quit_proceed"));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("still saves and exits when the recovery capture rejects", async () => {
     // Recovery is the one step whose data cannot be reconstructed, but losing it
     // must never cost the save behind it.

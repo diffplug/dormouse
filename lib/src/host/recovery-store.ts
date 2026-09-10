@@ -10,6 +10,7 @@
  * (docs/specs/transport.md -> "Consuming it").
  */
 
+import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { noCommands, silent, type RecoveryLog } from './recovery-capture';
@@ -64,15 +65,20 @@ export function createRecoveryStore(dir?: string, opts: { log?: RecoveryLog } = 
   const persist = (): void => {
     if (!file) return;
     const payload: PersistedRecovery = { createdAt: Date.now(), commands: captured };
+    // Per-write name, never a fixed `${file}.tmp`: two hosts sharing this
+    // directory would otherwise rename each other's half-written temp over the
+    // record. The `finally` is what keeps a failed write from leaving one behind.
+    const tmp = `${file}.${randomUUID()}.tmp`;
     try {
       fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-      const tmp = `${file}.tmp`;
       // Mode on create, so the bytes are never briefly world-readable; the rename
       // preserves it.
       fs.writeFileSync(tmp, JSON.stringify(payload), { encoding: 'utf8', mode: 0o600 });
       fs.renameSync(tmp, file);
     } catch (err) {
       log.error(`[recovery] write failed: ${String(err)}`);
+    } finally {
+      try { fs.rmSync(tmp, { force: true }); } catch { /* the rename already took it */ }
     }
   };
 

@@ -1584,6 +1584,28 @@ test('getCwdsForPids resolves every pid in ONE lsof call', () => {
   assert.deepEqual([...cwds], [[4242, '/home/tester/one'], [4243, '/home/tester/two']]);
 });
 
+test('getCwdsForPids keeps the live pids when lsof exits non-zero over a dead one', () => {
+  // `lsof -p live,dead` exits 1 and still prints the live block on stdout.
+  const err = new Error('Command failed: lsof');
+  err.status = 1;
+  err.stdout = ['p4242', 'fcwd', 'n/home/tester/one', ''].join('\n');
+  const cwds = getCwdsForPids([4242, 4243], {
+    fsModule: { readlinkSync: () => { throw new Error('ENOENT'); } },
+    execFileSync() { throw err; },
+  });
+
+  assert.deepEqual([...cwds], [[4242, '/home/tester/one']]);
+});
+
+test('getCwdsForPids survives an lsof failure with no stdout at all', () => {
+  const cwds = getCwdsForPids([4242], {
+    fsModule: { readlinkSync: () => { throw new Error('ENOENT'); } },
+    execFileSync() { throw new Error('spawn ENOENT'); },
+  });
+
+  assert.equal(cwds.size, 0);
+});
+
 test('getCwdsForPids reads /proc where it can and never spawns for those pids', () => {
   let spawned = false;
   const cwds = getCwdsForPids([7, 8], {

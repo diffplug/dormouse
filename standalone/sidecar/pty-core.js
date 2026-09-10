@@ -573,16 +573,23 @@ function getCwdsForPids(pids, runtime = {}) {
 
   // macOS: lsof. `-a` is required so `-p` and `-d cwd` are combined instead
   // of OR'ed, which otherwise returns unrelated processes and often `/`.
+  let out = '';
   try {
-    const out = execFileSyncFn('lsof', ['-a', '-d', 'cwd', '-p', unresolved.join(','), '-Fn'], {
+    out = execFileSyncFn('lsof', ['-a', '-d', 'cwd', '-p', unresolved.join(','), '-Fn'], {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
       windowsHide: true, // see runPowerShell: avoid the console-allocation deadlock
     });
-    for (const [pid, cwd] of parseCwdsFromLsof(out)) {
-      if (cwd) found.set(pid, cwd);
-    }
-  } catch { /* fallback: every unresolved pid stays absent */ }
+  } catch (err) {
+    // `lsof` exits non-zero when ANY requested pid is gone, and still prints the
+    // ones it did resolve. Throwing that stdout away is what turned one dead pid
+    // into every pane losing its cwd for that save — and a quit teardown, which
+    // kills and then flushes, is exactly when a pid goes missing mid-batch.
+    out = typeof err?.stdout === 'string' ? err.stdout : (err?.stdout?.toString('utf-8') ?? '');
+  }
+  for (const [pid, cwd] of parseCwdsFromLsof(out)) {
+    if (cwd) found.set(pid, cwd);
+  }
 
   return found;
 }

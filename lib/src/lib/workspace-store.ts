@@ -48,6 +48,12 @@ export function getActiveWorkspaceId(): WorkspaceId {
   return state.activeId;
 }
 
+/** Whether this Window still holds the Workspace. A Wall unmounting after its
+ *  Workspace was closed reads `false`, which is what stops its teardown save. */
+export function hasWorkspace(id: WorkspaceId): boolean {
+  return state.workspaces.some((workspace) => workspace.id === id);
+}
+
 let workspaceSequence = 0;
 
 /** A process-unique WorkspaceId, even when the random source repeats. */

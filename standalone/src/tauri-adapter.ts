@@ -2,6 +2,7 @@ import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from
 import { invoke as rawInvoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-shell";
+import { coalesceCwds } from "./coalesce-cwds";
 import type {
   AgentBrowserCommandResult,
   AgentBrowserEditOp,
@@ -337,11 +338,16 @@ export class TauriAdapter implements PlatformAdapter {
   }
 
   /** One sidecar round trip, and one process scan inside it, for every pane a
-   *  save is about to persist. */
-  async getCwds(ids: string[]): Promise<Record<string, string | null>> {
+   *  save is about to persist — across every Workspace saving at the same
+   *  moment, not just one (`coalesceCwds`). */
+  private readonly cwdBatch = coalesceCwds(async (ids) => {
     try {
       return await rawInvoke<Record<string, string | null>>("pty_get_cwds", { ids });
     } catch { return {}; }
+  });
+
+  getCwds(ids: string[]): Promise<Record<string, string | null>> {
+    return this.cwdBatch(ids);
   }
 
   // Warn-and-proceed: a stalled graceful kill must not wedge a quit teardown.

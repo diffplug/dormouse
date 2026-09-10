@@ -126,11 +126,32 @@ async function archiveThenTeardown(): Promise<void> {
   await runQuitTeardown();
 }
 
+// Each teardown step's own bound, and the ceiling derived from them. The two
+// steps that reach the sidecar wait `timeout + SIDECAR_ROUND_TRIP_MARGIN_MS` —
+// the margin Rust adds in `standalone/src-tauri/src/lib.rs` — so the webview can
+// observe more than the number it passed in. A ceiling below the sum would abort
+// the last steps of a slow teardown instead of guarding a wedged one, and those
+// last steps are the final save.
+const SIDECAR_ROUND_TRIP_MARGIN_MS = 1500;
+const PRE_KILL_FLUSH_MS = 1500;
+const GRACEFUL_KILL_MS = 2000;
+const POST_KILL_FLUSH_MS = 1500;
+const DRAIN_MS = 2000;
+const STEP_BUDGET_TOTAL_MS =
+  (DEFAULT_RECOVERY_WAIT_MS + SIDECAR_ROUND_TRIP_MARGIN_MS) +
+  PRE_KILL_FLUSH_MS +
+  (GRACEFUL_KILL_MS + SIDECAR_ROUND_TRIP_MARGIN_MS) +
+  POST_KILL_FLUSH_MS +
+  DRAIN_MS;
+/** Belt-and-suspenders over the summed step budgets, with slack for scheduling.
+ *  Stays under Rust's `QUIT_PHASE_TIMEOUT_MS` (14 000 ms), which is what actually
+ *  forces the exit. Exported for the test that pins it above the sum. */
+export const QUIT_TEARDOWN_CEILING_MS = STEP_BUDGET_TOTAL_MS + 1000;
+
 // Ordering and rationale: docs/specs/standalone.md §Quit flow (Teardown
-// ordering). The 10s ceiling is belt-and-suspenders over the per-step bounds.
-// `quit_progress` tells Rust teardown has begun (ending the confirmation-wait
-// suspension) and marks each phase boundary so its watchdog gives teardown and
-// install separate budgets rather than one shared clock.
+// ordering). `quit_progress` tells Rust teardown has begun (ending the
+// confirmation-wait suspension) and marks each phase boundary so its watchdog
+// gives teardown and install separate budgets rather than one shared clock.
 async function runQuitTeardown(): Promise<void> {
   quitPhase = "tearing-down";
   const adapter = quitAdapter;
@@ -147,16 +168,16 @@ async function runQuitTeardown(): Promise<void> {
           // every live PTY.
           await adapter.captureAgentRecovery(DEFAULT_RECOVERY_WAIT_MS).catch((err) =>
             console.warn("[quit] agent recovery capture failed; proceeding", err));
-          await adapter.requestSessionFlush(1500); // save while PTYs are alive
-          await adapter.gracefulKillAllPtys(2000); // SIGTERM; wait for exits and final output
+          await adapter.requestSessionFlush(PRE_KILL_FLUSH_MS); // save while PTYs are alive
+          await adapter.gracefulKillAllPtys(GRACEFUL_KILL_MS); // SIGTERM; wait for exits and final output
           // Final post-exit save. Nothing left to probe a cwd from, and each pane
           // keeps the one the save above recorded.
-          await adapter.requestSessionFlush(1500, { probeCwd: false });
+          await adapter.requestSessionFlush(POST_KILL_FLUSH_MS, { probeCwd: false });
           await flushWindowSession(); // the Walls' records become one Window blob
-          await adapter.drainSessionSaves(2000); // last write reaches disk
+          await adapter.drainSessionSaves(DRAIN_MS); // last write reaches disk
         })(),
-        10000,
-        "[quit] teardown exceeded 10000ms; proceeding to exit",
+        QUIT_TEARDOWN_CEILING_MS,
+        `[quit] teardown exceeded ${QUIT_TEARDOWN_CEILING_MS}ms; proceeding to exit`,
       );
     }
     // Install strictly after the completed final save. A fresh `quit_progress`

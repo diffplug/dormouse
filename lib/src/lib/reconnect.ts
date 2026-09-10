@@ -150,9 +150,11 @@ function resumeLivePtys(
     if (savedInfo?.title !== undefined) resumeInfo.title = savedInfo.title;
     if (savedInfo?.untouched) resumeInfo.untouched = true;
     // A helper stays one only while its source is also live; helpers cannot
-    // have helpers. `ptyById` is this plan's slice, so a helper whose parent
-    // went to another Workspace is resumed as an ordinary pane rather than
-    // restored into a Wall that does not hold its source.
+    // have helpers. `ptyById` is this plan's slice, so a helper reaching a Wall
+    // that does not hold its source is resumed as an ordinary pane instead — a
+    // fallback, not a route: the Window planner sends every helper to its
+    // source's Workspace (`routeUnownedPtys` in
+    // `standalone/src/window-restore.ts`).
     const parent = pty.helper && ptyById.get(pty.helper.parentId);
     const helper = parent && !parent.helper ? pty.helper : undefined;
     if (helper) resumeInfo.helper = helper;

@@ -1,3 +1,7 @@
+// @vitest-environment jsdom
+//
+// jsdom for the `pagehide` hook: the aggregator writes synchronously on unload,
+// and there is no unload without a `window`.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   flushWindowSession,
@@ -168,6 +172,43 @@ describe('window session aggregator', () => {
       setActiveWorkspace(second);
       await settle();
       expect(write.mock.calls.at(-1)?.[0].activeWorkspaceId).toBe(second);
+    });
+
+    it('never names an active Workspace the blob does not contain', async () => {
+      // Creating a Workspace makes it active immediately; its Wall's first save
+      // is a debounce (or a heartbeat) away. A crash inside that window used to
+      // lose the new Workspace AND land the user on a different one.
+      const write = vi.fn();
+      installWindowSessionWriter(write);
+
+      const second = createWorkspace({ name: 'Second' }).id;
+
+      const snapshot = getWindowSnapshot();
+      expect(snapshot.activeWorkspaceId).toBe(second);
+      expect(snapshot.workspaces.map((ws) => ws.id)).toContain(second);
+      // Empty, but valid — it round-trips as a Workspace whose Wall starts fresh.
+      expect(snapshot.workspaces.at(-1)?.session).toEqual({ version: 3, panes: [] });
+
+      await settle();
+      expect(write.mock.calls.at(-1)?.[0].activeWorkspaceId).toBe(second);
+    });
+
+    it('writes synchronously on pagehide instead of arming a timer', async () => {
+      // The Walls flush on pagehide too, and a 500ms timer armed during unload
+      // never fires: without this the last save is simply lost.
+      const write = vi.fn();
+      installWindowSessionWriter(write);
+      publishWorkspaceSession(getWorkspacesSnapshot().workspaces[0].id, session('a'));
+      expect(write).not.toHaveBeenCalled();
+
+      window.dispatchEvent(new Event('pagehide'));
+
+      expect(write).toHaveBeenCalledTimes(1);
+      expect(write.mock.calls[0][0].workspaces[0].session.panes[0].id).toBe('a');
+
+      // A publish landing after pagehide is written straight through, too.
+      publishWorkspaceSession(getWorkspacesSnapshot().workspaces[0].id, session('b'));
+      expect(write).toHaveBeenCalledTimes(2);
     });
 
     it('stops writing once uninstalled, pending timer included', async () => {
