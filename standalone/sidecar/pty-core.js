@@ -1071,7 +1071,11 @@ module.exports.create = function create(send, ptyModule, { replay = false } = {}
   const helpers = new Map(); // id -> { parentId, command } for helper PTYs
   // Every spawned, unkilled PTY (exited ones included). Only the standalone host
   // asks for `replay`; VS Code's extension host keeps its own buffers.
-  const sessions = new Map(); // id -> { chunks: string[], chars: number }
+  // `chars` is what the buffer currently holds (a trim decrements it);
+  // `received` is everything ever received and is never decremented, so it is the
+  // only stable coordinate for marking a position in a pane's output
+  // (docs/specs/transport.md -> "Persisted session").
+  const sessions = new Map(); // id -> { chunks: string[], chars: number, received: number }
   const REPLAY_CHARS = 200000;
   const ptyShells = new Map(); // id -> resolved shell executable
   // Repaint restoration belongs to the PTY owner, where every local and remote
@@ -1133,7 +1137,7 @@ module.exports.create = function create(send, ptyModule, { replay = false } = {}
 
     cancelRepaint(id);
     ptys.set(id, p);
-    const session = { chunks: [], chars: 0 };
+    const session = { chunks: [], chars: 0, received: 0 };
     sessions.set(id, session);
     ptyShells.set(id, config.shell);
 
@@ -1141,6 +1145,7 @@ module.exports.create = function create(send, ptyModule, { replay = false } = {}
       if (replay && ptys.get(id) === p) {
         session.chunks.push(data);
         session.chars += data.length;
+        session.received += data.length;
         // Drop whole chunks off the front, then trim the head: O(chunk) per write.
         while (session.chunks.length > 1 && session.chars - session.chunks[0].length >= REPLAY_CHARS) session.chars -= session.chunks.shift().length;
         if (session.chars > REPLAY_CHARS) { session.chunks[0] = session.chunks[0].slice(session.chars - REPLAY_CHARS); session.chars = REPLAY_CHARS; }
@@ -1191,6 +1196,41 @@ module.exports.create = function create(send, ptyModule, { replay = false } = {}
     }, FORCE_REPAINT_BOUNCE_MS);
     timer.unref?.();
     repaintTimers.set(id, timer);
+  }
+
+  /** Ids that can still take input. An exited PTY leaves `ptys` in its `onExit`,
+   *  so this is exactly the live set the recovery capture must interrupt. */
+  function liveIds() {
+    return [...ptys.keys()];
+  }
+
+  /** A mark in the pane's output stream, cheap enough to take on every poll tick:
+   *  `received` is maintained exactly by the data handler, so a caller watching a
+   *  pane for growth pays nothing instead of a full `join()`. */
+  function receivedChars(id) {
+    const session = sessions.get(id);
+    return session ? session.received : 0;
+  }
+
+  /** The output received after a `receivedChars` mark, clamped to what the bounded
+   *  buffer still holds. Joins only the chunks that span the mark, so repeatedly
+   *  reading a pane's recent tail costs the tail, not the buffer. Eviction can have
+   *  carried the mark off the front; the oldest char still held is the furthest
+   *  back this can honestly answer. */
+  function outputSince(id, mark) {
+    const session = sessions.get(id);
+    if (!session) return '';
+    const oldestHeld = session.received - session.chars;
+    const wanted = session.received - Math.max(mark, oldestHeld);
+    if (wanted <= 0) return '';
+    const tail = [];
+    let held = 0;
+    for (let i = session.chunks.length - 1; i >= 0 && held < wanted; i--) {
+      tail.push(session.chunks[i]);
+      held += session.chunks[i].length;
+    }
+    const joined = tail.reverse().join('');
+    return held > wanted ? joined.slice(held - wanted) : joined;
   }
 
   // Synchronous lifetime observation for the Burrow's atomic
@@ -1351,5 +1391,6 @@ module.exports.create = function create(send, ptyModule, { replay = false } = {}
   }
 
   return { spawn, write, resize, hasPty, kill, killAll, list, context,
-    getCwd, getOpenPorts, interrupt, gracefulKillAll, getShells };
+    getCwd, getOpenPorts, interrupt, gracefulKillAll, getShells,
+    liveIds, receivedChars, outputSince };
 };

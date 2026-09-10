@@ -241,10 +241,14 @@ function startSidecar() {
       DORMOUSE_CLI_JS: dorEntrypoint,
       DORMOUSE_CONTROL_TOKEN: controlToken,
       DORMOUSE_STATE_DIR: stateDir,
+      // The harness mirrors the persistence answer, so a reload here exercises
+      // the same agent-recovery record the app writes — under this run's own
+      // temp state, never the installed app's.
+      DORMOUSE_RECOVERY_DIR: stateDir,
     },
   });
   log(`sidecar pid=${sidecar.pid}`);
-  log(`burrow state dir: ${stateDir}`);
+  log(`burrow + recovery state dir: ${stateDir}`);
 
   createInterface({ input: sidecar.stdout }).on('line', (line) => {
     let msg;

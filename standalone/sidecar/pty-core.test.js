@@ -1480,3 +1480,74 @@ test('getOpenPortsForPid de-duplicates and sorts by port', () => {
 test('getOpenPortsForPid returns [] for a non-integer pid', () => {
   assert.deepEqual(getOpenPortsForPid(undefined, { platform: 'linux' }), []);
 });
+
+test('receivedChars counts everything ever received, past a replay-buffer trim', () => {
+  const listeners = {};
+  const writes = [];
+  const fakePty = {
+    pid: 1,
+    onData(handler) { listeners.data = handler; },
+    onExit(handler) { listeners.exit = handler; },
+    resize() {}, write(data) { writes.push(data); }, kill() {},
+  };
+  const mgr = create(() => {}, { spawn() { return fakePty; } }, { replay: true });
+  mgr.spawn('pane-1');
+
+  assert.equal(mgr.receivedChars('pane-1'), 0);
+  const mark = mgr.receivedChars('pane-1');
+  listeners.data('hello');
+  assert.equal(mgr.receivedChars('pane-1'), 5);
+  assert.equal(mgr.outputSince('pane-1', mark), 'hello');
+
+  // Overflow the 200k replay cap: the buffer trims, but the counter is the mark
+  // space and must not move backwards.
+  const before = mgr.receivedChars('pane-1');
+  for (let i = 0; i < 30; i++) listeners.data('x'.repeat(10_000));
+  const after = mgr.receivedChars('pane-1');
+  assert.equal(after, before + 300_000);
+  // What the trimmed buffer can honestly answer is clamped to what it holds; it
+  // can only be less than the pane printed, never stale bytes offered as fresh.
+  const since = mgr.outputSince('pane-1', before);
+  assert.ok(since.length <= 200_000, `held ${since.length}`);
+  assert.ok(since.length > 0);
+  assert.equal(since, 'x'.repeat(since.length));
+
+  // A mark at or past the head answers empty rather than replaying the tail.
+  assert.equal(mgr.outputSince('pane-1', after), '');
+  assert.equal(mgr.outputSince('pane-1', after + 10), '');
+  assert.equal(mgr.outputSince('unknown-pane', 0), '');
+  assert.equal(mgr.receivedChars('unknown-pane'), 0);
+});
+
+test('liveIds names every unexited PTY, and nothing after it exits', () => {
+  const listeners = {};
+  const fakePty = (id) => ({
+    pid: 1,
+    onData() {}, onExit(handler) { listeners[id] = handler; },
+    resize() {}, write() {}, kill() {},
+  });
+  let next = 'a';
+  const mgr = create(() => {}, { spawn() { return fakePty(next); } }, { replay: true });
+  next = 'a'; mgr.spawn('a');
+  next = 'b'; mgr.spawn('b');
+  assert.deepEqual(mgr.liveIds().sort(), ['a', 'b']);
+
+  listeners.a({ exitCode: 0, signal: undefined });
+  assert.deepEqual(mgr.liveIds(), ['b']);
+});
+
+test('outputSince returns nothing without a replay buffer', () => {
+  const listeners = {};
+  const fakePty = {
+    pid: 1,
+    onData(handler) { listeners.data = handler; },
+    onExit() {}, resize() {}, write() {}, kill() {},
+  };
+  // VS Code's host keeps its own buffers, so `replay` is off there and these
+  // readers have nothing to answer from.
+  const mgr = create(() => {}, { spawn() { return fakePty; } });
+  mgr.spawn('pane-1');
+  listeners.data('hello');
+  assert.equal(mgr.receivedChars('pane-1'), 0);
+  assert.equal(mgr.outputSince('pane-1', 0), '');
+});

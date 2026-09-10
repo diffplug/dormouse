@@ -4,7 +4,9 @@
 //   - lib/src/host/iframe-proxy.ts        → sidecar/iframe-proxy.cjs
 //   - lib/src/host/agent-browser-host.ts  → sidecar/agent-browser-host.cjs
 //   - lib/src/host/remote/sidecar-entry.ts → sidecar/burrow.cjs
-// See docs/specs/dor-browser.md and docs/specs/remote-api.md.
+//   - lib/src/host/recovery.ts             → sidecar/recovery.cjs
+// See docs/specs/dor-browser.md, docs/specs/remote-api.md, and
+// docs/specs/standalone.md -> "Agent recovery".
 import { build } from 'esbuild';
 import { rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -26,6 +28,7 @@ const remoteSrc = resolveRemoteConnectSrc(process.env, 'sidecar');
 const bundles = [
   { entry: 'iframe-proxy.ts', out: 'iframe-proxy.cjs' },
   { entry: 'agent-browser-host.ts', out: 'agent-browser-host.cjs' },
+  { entry: 'recovery.ts', out: 'recovery.cjs' },
   {
     entry: 'remote/sidecar-entry.ts',
     out: 'burrow.cjs',
