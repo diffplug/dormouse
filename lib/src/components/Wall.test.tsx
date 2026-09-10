@@ -893,6 +893,40 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it('refuses a render swap away from an iframe surface holding a non-http(s) URL', async () => {
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(true);
+    const open = vi.fn(async () => ({ ok: true, session: 'dormouse.1.gui-a1b2c3', wsPort: 4321 }));
+    (fake as PlatformAdapter).agentBrowserOpen = open;
+
+    try {
+      await act(async () => {
+        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+      });
+      await flush();
+      const iframeId = (await dispatchIframe('http://localhost:5173/')).id;
+
+      // The header's URL editor is the writer the control socket never sees:
+      // `normalizeNavUrl` keeps a typed `data:` scheme on purpose, so `params.url`
+      // (and the chrome URL this swap reads first) can hold one. IframePanel
+      // refuses to frame it; the swap must refuse to spawn it too, rather than
+      // opening it in a real Chromium tab.
+      await act(async () => {
+        getAgentBrowserScreenController(iframeId)?.chromeActions.navigate('data:text/html,<script>alert(1)</script>');
+      });
+      await flush();
+
+      await act(async () => {
+        getAgentBrowserScreenController(iframeId)?.actions.setRenderMode?.('ab-screencast');
+      });
+      await flush();
+
+      expect(open).not.toHaveBeenCalled();
+      expect(getAgentBrowserScreenController(iframeId)?.snapshot().renderMode).toBe('iframe');
+    } finally {
+      untouchedSpy.mockRestore();
+    }
+  });
+
   it('resolves a browser surface handle to its agent-browser session, and gates the rest', async () => {
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
     (fake as PlatformAdapter).agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));

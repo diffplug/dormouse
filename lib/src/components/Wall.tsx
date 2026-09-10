@@ -73,7 +73,7 @@ import {
   browserUrlFromParams,
   surfaceKindFromParams,
 } from './wall/browser-surface';
-import { hostPathDisplay } from './wall/browser-url';
+import { browserSurfaceUrl, hostPathDisplay } from './wall/browser-url';
 import { WorkspaceSelectionOverlay } from './wall/WorkspaceSelectionOverlay';
 import { LathHost } from './wall/LathHost';
 import {
@@ -1545,9 +1545,14 @@ export function Wall({
       // connect (docs/specs/dor-browser.md → "Pane Context Menu Connect").
       if (currentRenderMode === 'iframe' && (mode === 'ab-screencast' || mode === 'ab-popout')) {
         const chromeUrl = getAgentBrowserScreenController(id)?.chrome().url;
-        const url = (typeof chromeUrl === 'string' && chromeUrl)
-          || (typeof params?.url === 'string' ? params.url : undefined);
+        const rawUrl = (typeof chromeUrl === 'string' && chromeUrl)
+          || (typeof params?.url === 'string' ? params.url : '');
+        // The swap is the second sink params.url reaches: IframePanel refuses a
+        // non-http(s) source but still holds it, and this path would hand it to
+        // a real Chromium tab — which `dor ab open` refuses at the CLI
+        // (`normalizeConcreteOpenUrl`). Same guard, so both sinks agree.
         const platform = getPlatform();
+        const url = rawUrl ? browserSurfaceUrl(rawUrl) : null;
         if (!url || !platform.agentBrowserOpen) return;
         const headed = mode === 'ab-popout';
         const title = hostPathDisplay(url, true);

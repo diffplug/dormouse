@@ -177,7 +177,7 @@ size landed**, so a resize transient is not read as an external override.
 
 | From -> To | Behavior |
 | --- | --- |
-| `iframe` -> `ab-screencast` / `ab-popout` | **The pane swaps at once** to a session-less agent-browser pane — inert, so it cannot race the boot (rationale) — while the host spawns a fresh `gui-<hex>` session at the current URL via `agentBrowserOpen` and hands over `{session, wsPort, binaryPath}` as **one** params refresh. `ab-popout` spawns headed in one shot, so the surface mounts already popped out. A spawn that rejects or yields no session restores the iframe; a Surface minimized meanwhile receives either outcome through its Door, while one killed meanwhile closes a spawned session. Hidden/inert without that capability. |
+| `iframe` -> `ab-screencast` / `ab-popout` | **The pane swaps at once** to a session-less agent-browser pane — inert, so it cannot race the boot (rationale) — while the host spawns a fresh `gui-<hex>` session at the current URL via `agentBrowserOpen` and hands over `{session, wsPort, binaryPath}` as **one** params refresh. `ab-popout` spawns headed in one shot, so the surface mounts already popped out. A spawn that rejects or yields no session restores the iframe; a Surface minimized meanwhile receives either outcome through its Door, while one killed meanwhile closes a spawned session. Hidden/inert without that capability. **A non-http(s) `url` refuses the swap** — the same `browserSurfaceUrl` check the iframe sink applies. |
 | `ab-screencast` <-> `ab-popout` | Same Surface id and session, headed/headless relaunch in the surface controller; preserves only the active URL. |
 | `ab-*` -> `iframe` | Uses canonical `params.url`; with multiple tabs, requires the user to press `c` in the warning overlay, because only the active tab survives. |
 
@@ -470,8 +470,7 @@ Source of truth: `lib/src/components/wall/IframePanel.tsx`,
 **Only `http:` and `https:` reach a browser Surface, re-checked at the sink.**
 `open-window` and the control socket's `surface.iframe` go through
 `browserSurfaceUrl`, and `IframePanel` checks `params.url` again before framing
-it — the header's URL editor writes there too, and `normalizeNavUrl` keeps a
-typed non-http scheme. (rationale)
+it — the header's URL editor writes there too. (rationale)
 
 **Parent listeners must validate the message origin against live proxy grants.**
 Leader messages feed the same Wall command-mode exit path as in-document
