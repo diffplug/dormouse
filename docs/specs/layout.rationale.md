@@ -74,7 +74,7 @@ Pane headers re-render on every activity, terminal-state, and palette change. An
 
 ## Animations
 
-**Why `refitSession` is throttled.** An unthrottled ResizeObserver refits once per animated cell-boundary crossing, so one 440ms motion or a single sash drag costs dozens of xterm reflows and PTY resizes; the throttle collapses that to a handful.
+Terminal entrance motion starts at a collapsed edge. Throttling still exposes several intermediate sizes to xterm and the PTY, even when reattachment ends at the original grid. Waiting for painted settlement avoids unnecessary buffer reflows, selection loss, and TUI redraws. A timer alone cannot distinguish a paused sash preview or delayed animation frame from final geometry.
 
 ## Kill (two-phase fade + tween reclaim)
 

@@ -165,7 +165,7 @@ the minimize itself** (reattach must not cost a boot every time) **or under
 memory pressure**. The headline case is Workspaces, not shutdown: an inactive
 Workspace of dehydratable tools drops to zero processes, relieving the
 parked-surface pressure the workspaces rollout projects (`docs/specs/layout.md`
-Stage 4; `MAX_PARKED_SURFACES` in `docs/specs/tiling-engine.md`).
+→ Future, workspaces-rollout; `docs/specs/tiling-engine.md` → Parked leaves).
 
 **In-session mechanism.** The payload lives with the running host; survival
 across a full quit/restart follows each host's session-persistence story

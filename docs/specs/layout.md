@@ -270,7 +270,7 @@ Source of truth: `lib/src/components/wall/WorkspaceSelectionOverlay.tsx`, `lib/s
 
 **A runtime Door is `{ id, token }` and carries no metadata.** Title, params and parked-ness stay in the Lath store, which keeps changing while the Surface is Doored, so no copy can go stale: **every reader — reattach, `dor` param matching, kill/session teardown, `dor list`, the baseboard chip's label, the session save — goes through `lath.getMeta(id)`**, and the persisted `PersistedDoor` row is materialized from the store at save time.
 
-**A minimized browser Surface parks rather than unmounting** (`shouldParkOnMinimize`); terminals do not. `docs/specs/tiling-engine.md` → "Parked leaves" owns the mechanism, who parks, the `MAX_PARKED_SURFACES` cap, and the visibility contract.
+**A minimized browser Surface parks rather than unmounting** (`shouldParkOnMinimize`); terminals do not. `docs/specs/tiling-engine.md` → "Parked leaves" owns the mechanism, who parks, and the visibility contract.
 
 ### Reattach (click door, `Enter`/`m`/`d` on door, or drag out)
 
@@ -368,7 +368,9 @@ Renderer Activity storage is owned by `docs/specs/alert.md` → Public State.
 
 ## Animations
 
-All pane motion is owned by the Lath **animator**, applied imperatively to the leaf divs by LathHost (`docs/specs/tiling-engine.md` → "Animation"): 440ms `cubic-bezier(0.22, 1, 0.36, 1)`, a 0 duration under reduced motion. **There are no CSS entrance/exit classes.** Those leaf divs carry the interpolated inline geometry, which is what lets the selection overlay measure the tween ([Position tracking](#position-tracking)). **Terminal panes must not refit every frame**: `TerminalPane`'s resize observer throttles `refitSession` — leading edge, at most one per ~150ms while resizes keep arriving, plus a trailing call at rest, so the resting geometry still gets an exact fit (rationale).
+All pane motion is owned by the Lath **animator**, applied imperatively to the leaf divs by LathHost (`docs/specs/tiling-engine.md` → "Animation"): 440ms `cubic-bezier(0.22, 1, 0.36, 1)`, a 0 duration under reduced motion. **There are no CSS entrance/exit classes.** Those leaf divs carry the interpolated inline geometry, which is what lets the selection overlay measure the tween ([Position tracking](#position-tracking)). **Never resize terminals to intermediate animation or sash-preview dimensions.** Fit after the final geometry is painted; canceled sash drags preserve the original grid, and same-size reattachment sends no PTY resize. Outside layout motion, debounce container resizes by 150ms; unmount cancels pending fitting (rationale).
+
+Source of truth: `TerminalPane` in `lib/src/components/TerminalPane.tsx`; `TerminalResizeContext` in `lib/src/components/wall/wall-context.tsx`, supplied by `LathHost` in `lib/src/components/wall/LathHost.tsx`. Tests: `lib/src/components/TerminalPane.test.tsx`.
 
 ### Zoom (elevated expansion)
 
@@ -421,7 +423,7 @@ Switch/create/close/rename shortcuts are chosen alongside that pass. Command mod
 
 `switchWorkspace` presents the target Workspace's panes and doors and hides the previously active Workspace's. Terminals reuse the `mount` / `unmount` path: the Registry entry, xterm buffer, and PTY survive, Process is unchanged, and nothing replays. Browser Surfaces keep their backing agent-browser session or proxy grant; parking follows below.
 
-Switching **parks** the outgoing Workspace's browser Surfaces rather than unmounting them, on exactly the terms minimize already does (`docs/specs/tiling-engine.md` → "Parked leaves"): the switch parks each one, then seeds the incoming Workspace's tree, which `seed` is already written to survive — it keeps parked leaves except any the seed itself admits. That is what makes an iframe survive a round trip through another Workspace. Open question: a switch parks a whole Workspace at a time, so `MAX_PARKED_SURFACES` may need raising, or becoming a per-Workspace budget. VS Code is out of reach either way — one webview per Workspace ([Workspaces](#workspaces)) bounds cross-Workspace DOM survival by webview lifetime, not by anything the Wall does. Because a terminal's Activity keeps flowing while unmounted, an inactive Workspace's tab can begin ringing or showing TODO while the user is elsewhere; **mounting must not fire a fresh ring** (glossary I8, mirroring the minimize/reattach rule I3).
+Switching **parks** the outgoing Workspace's browser Surfaces rather than unmounting them, on exactly the terms minimize already does (`docs/specs/tiling-engine.md` → "Parked leaves"): the switch parks each one, then seeds the incoming Workspace's tree, which `seed` is already written to survive — it keeps parked leaves except any the seed itself admits. That is what makes an iframe survive a round trip through another Workspace. VS Code is out of reach either way — one webview per Workspace ([Workspaces](#workspaces)) bounds cross-Workspace DOM survival by webview lifetime, not by anything the Wall does. Because a terminal's Activity keeps flowing while unmounted, an inactive Workspace's tab can begin ringing or showing TODO while the user is elsewhere; **mounting must not fire a fresh ring** (glossary I8, mirroring the minimize/reattach rule I3).
 
 Stage 4 also enables multiple Workspaces in the standalone presentation and wires the lifecycle UX:
 

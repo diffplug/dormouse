@@ -769,13 +769,13 @@ export function Wall({
    *  destroy — reattaching would then be a reload. Parking keeps the leaf mounted and
    *  invisible so the document survives intact (docs/specs/tiling-engine.md →
    *  "Parked leaves"). Terminals do not park: their state lives in the PTY and the
-   *  registry replays it, so the existing remove/restore path already loses nothing. */
+   *  registry retains it across remove/restore. */
   const minimizePane = useCallback((id: string, opts?: { select?: boolean }) => {
     setTerminalContext(current => current?.id === id ? null : current);
     const meta = lath.getMeta(id);
     if (!meta) return;
     // May auto-spawn if this was the last leaf. `doorLeaf` retains the leaf's meta in
-    // the store (it keeps changing while minimized) and caps the parked set itself.
+    // the store (it keeps changing while minimized).
     const { token } = lath.store.doorLeaf(id, { park: shouldParkOnMinimize(meta) });
     if (!token) return;
     clearSessionAttention(id);
