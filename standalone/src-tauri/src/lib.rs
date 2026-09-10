@@ -4,6 +4,11 @@ use serde_json::{Map as JsonMap, Value as JsonValue};
 mod log_tail;
 mod quit_state;
 mod routing;
+// The Dock's Quit, an `osascript` quit and a logout reach AppKit without ever
+// raising `RunEvent::ExitRequested` (docs/specs/standalone.md §Trigger
+// interception).
+#[cfg(target_os = "macos")]
+mod macos_terminate;
 use quit_state::{CloseMachine, QuitAction, QuitMachine};
 use routing::{Route, RouteView};
 use std::{
@@ -22,6 +27,8 @@ use tauri::{
     menu::{Menu, PredefinedMenuItem, Submenu},
     AppHandle, DragDropEvent, Emitter, Manager, RunEvent, WebviewWindowBuilder, WindowEvent,
 };
+#[cfg(target_os = "macos")]
+use tauri::menu::MenuItem;
 #[cfg(target_os = "macos")]
 use tauri::menu::AboutMetadata;
 use process_wrap::std::{ChildWrapper, CommandWrap};
@@ -3120,6 +3127,9 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
 
 // ── App entry point ─────────────────────────────────────────────────────────
 
+/// The app menu's Quit item, matched in `on_menu_event`. Only the macOS menu
+/// carries one; nothing else can ever raise this id.
+const QUIT_MENU_ITEM_ID: &str = "dormouse-quit";
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -3152,7 +3162,18 @@ pub fn run() {
                     &PredefinedMenuItem::hide(handle, None)?,
                     &PredefinedMenuItem::hide_others(handle, None)?,
                     &PredefinedMenuItem::separator(handle)?,
-                    &PredefinedMenuItem::quit(handle, None)?,
+                    // Never `PredefinedMenuItem::quit`: muda wires that straight
+                    // to AppKit's `terminate:`, which ends the process without
+                    // ever raising `ExitRequested`. A custom item routes the
+                    // menu and its Cmd+Q through `request_quit` like every other
+                    // trigger (docs/specs/standalone.md §Trigger interception).
+                    &MenuItem::with_id(
+                        handle,
+                        QUIT_MENU_ITEM_ID,
+                        "Quit Dormouse Terminal",
+                        true,
+                        Some("CmdOrCtrl+Q"),
+                    )?,
                 ],
             )?));
             items.push(Box::new(Submenu::with_items(
@@ -3169,6 +3190,11 @@ pub fn run() {
             )?));
             let refs: Vec<&dyn tauri::menu::IsMenuItem<_>> = items.iter().map(|b| b.as_ref()).collect();
             Menu::with_items(handle, &refs)
+        })
+        .on_menu_event(|app, event| {
+            if event.id() == QUIT_MENU_ITEM_ID {
+                request_quit(app);
+            }
         })
         .on_window_event(|window, event| {
             let app = window.app_handle();
@@ -3392,7 +3418,11 @@ pub fn run() {
         .expect("error while building Dormouse")
         .run(|app, event| match event {
             #[cfg(target_os = "macos")]
-            RunEvent::Ready => set_macos_dock_icon(),
+            RunEvent::Ready => {
+                set_macos_dock_icon();
+                // The delegate exists by now, which is what this splices onto.
+                macos_terminate::install(app);
+            }
             // Cmd+Q / app-menu / dock quit / interceptable OS logout (§Quit flow).
             // The flow's own app.exit(0) re-enters here with approved=true and
             // passes; `code` (None = user-initiated) is deliberately ignored.
