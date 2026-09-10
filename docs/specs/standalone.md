@@ -157,12 +157,15 @@ xterm size — it asks over `burrow:ask`, and
 `lib/src/remote/burrow/peer-surfaces.ts` answers as an ordinary `answer` command
 naming the ask's own `burrowRequestId`. **An ask collects one answer per window**
 and concatenates them: each window sees only its own Workspaces, so a directory
-built from the first answer would omit every other window's panes. **Rust pushes
-the window count** (`burrow:windows`) at setup and on every window create and
-destroy, and **lowering it settles the asks a closed window can no longer
-answer**; the count is only ever *lowered* for an ask already in flight, since a
-window that opened after it never received it. `ASK_BUDGET_MS` (1s) still bounds
-the whole fan-out, and whatever did answer is still the best available snapshot.
+built from the first answer would omit every other window's panes. **The
+collector is keyed by which window answered, never by how many have** — Rust
+stamps the sending window's label on every `burrow:command` it forwards — so a
+window answering twice can settle nothing and contributes its panes once. **Rust
+pushes the live window labels** (`burrow:windows`) at setup and on every window
+create and destroy, and **dropping one settles the asks that window can no longer
+answer**; an ask in flight is only ever *narrowed*, since a window that opened
+after it never received it. `ASK_BUDGET_MS` (1s) still bounds the whole fan-out,
+and whatever did answer is still the best available snapshot.
 
 **An answer for an ask the bridge no longer holds invalidates the directory**
 rather than being dropped (`docs/specs/remote-api.md` → Directory).
@@ -335,6 +338,7 @@ Source of truth: `route` in `standalone/src-tauri/src/routing.rs`,
 | `pty:list` | `data.forWindow` | the window that asked |
 | `alert:*` carrying `data.id` | `data.id` | its owner |
 | `dor:controlRequest` | `data.surfaceId` | its owner; no Surface named → the focused window |
+| `dor:controlCancel` | `data.requestId` | the window its request went to; unknown → every window |
 | everything else | — | every window |
 
 - **Ownership is minted only in `pty_spawn`**, dropped by `pty_kill`, an exit,
@@ -342,9 +346,13 @@ Source of truth: `route` in `standalone/src-tauri/src/routing.rs`,
 - **A `dor` request naming a Surface no window owns is answered with an error**,
   never handed to a sibling — acting on the wrong terminal is worse than failing
   (`docs/specs/dor-cli.md` → Standalone).
-- **`pty_request_init`, `pty_graceful_kill` and `capture_agent_recovery` are
-  scoped to the invoking window's own PTYs**, whether or not they name ids: a
-  window tearing down must not interrupt or kill a sibling's terminals.
+- **`pty_request_init`, `pty_graceful_kill` and `capture_agent_recovery` target
+  the invoking window's own PTYs**, and take no ids at all: a window tearing down
+  must not interrupt or kill a sibling's terminals, and a set it could name is a
+  set it could name wrong.
+- **A `dor` cancel follows its request**: only the window handling it holds the
+  subscription, watch or completion claim the cancel releases. Rust remembers
+  which window took each `requestId` and forgets it on the response.
 - **Every webview listener names its own window.** Tauri delivers an `emit_to`
   event to any listener registered with the default `Any` target, so a bare
   `listen` would take every other window's traffic and make this whole table
@@ -366,8 +374,14 @@ so it comes up in front.
 **Geometry is a sibling of the snapshot**, `sessions/<label>.geometry.json`,
 written through the same `write_file_atomically` and debounced past the flood a
 window drag produces; `main`'s box is re-applied to the window the config
-created. No `tauri-plugin-window-state` (rationale). Source of truth:
-`note_geometry` / `restore_windows` in `standalone/src-tauri/src/lib.rs`.
+created. No `tauri-plugin-window-state` (rationale).
+
+**The live box is cached from the window events themselves** — `Moved` and
+`Resized` carry it — and read from that cache by both the debounced write and
+the cross-window drag hit test, which probes ~16 times a second. The platform is
+asked only once per window at creation, and for the minimized and scale-factor
+checks in the debounce flush. Source of truth: `CachedRect` / `note_geometry` /
+`restore_windows` in `standalone/src-tauri/src/lib.rs`.
 
 ### Per-window close
 
@@ -376,15 +390,24 @@ window's close is the quit. Rust prevents the close and emits
 `dormouse://window-close-requested`; the webview acks (a ~2 s watchdog closes it
 anyway if that listener is dead), asks about *its own* running work, archives
 *its own* notes, removes its snapshot, kills the PTYs it owns, and calls back
-`window_close_proceed`.
+`close_window`.
 
 - **A close is deliberate, so it archives and it removes the blob** — geometry
   and temp sibling included — and the next launch does not reopen the window.
   A quit keeps every blob, which is the whole difference.
 - **It runs no agent-recovery capture**: nothing is coming back.
 - **The snapshot is removed before the kill**, and Rust refuses every later save
-  for that label, so a PTY exit's save cannot write it back.
+  for that label, so a PTY exit's save cannot write it back. That refusal is
+  dropped when the webview is destroyed and can no longer save.
+- **`close_window` is the one Rust half both endings share** — a deliberate close
+  and a window whose last Workspace moved away (§Transfer) — because what
+  separates them is entirely what the webview did before calling it.
 - **macOS keeps its rule**: closing the last window quits.
+
+**The ack, confirm and archive gates are one shared flow with the quit**
+(`createTeardownFlow` in `standalone/src/teardown-flow.ts`); what differs is only
+the step past them — a quit votes and waits its turn in the walk, a close tears
+down at once.
 
 Source of truth: `standalone/src/window-close.ts`; `request_window_close` /
 `finish_window_close` in `standalone/src-tauri/src/lib.rs`.
@@ -632,10 +655,11 @@ teardown at a time. Source of truth: `QuitMachine` in
 
 **The ack / vote / progress / proceed / cancel protocol.** `request_quit` clears
 every window's `acked`, bumps `seq`, and broadcasts `dormouse://quit-requested`
-carrying the window count. It **must not clear a window's `tearing_down`** — a
-repeat trigger fired mid-teardown must keep it set, or the fresh watchdog drops
-into the unbounded vote wait and stops bounding the teardown in flight. Each
-window's orchestrator (registered by `initQuitFlow`, Tauri-only) responds:
+carrying the window count. It **must leave a walk in flight alone** — a repeat
+trigger fired mid-teardown must not send the machine back to voting, or the fresh
+watchdog drops into the unbounded vote wait and stops bounding the teardown that
+is running. Each window's orchestrator (registered by `initQuitFlow`, Tauri-only)
+responds:
 
 1. **Always `quit_ack`** first (fire-and-catch), so phase 1 stands down even if
    the orchestrator then dedupes the event out.
@@ -647,9 +671,8 @@ window's orchestrator (registered by `initQuitFlow`, Tauri-only) responds:
 3. **`quit_vote`** when this window is ready — immediately on an all-idle quit,
    or after the user confirms and the archive gate passes. **A vote is not a
    teardown**: nothing anywhere may be destroyed until every window has agreed.
-4. **`quit_progress`** when its own `quit-teardown` arrives, setting
-   `tearing_down` and bumping a `progress` counter. Sent again at the install
-   phase boundary.
+4. **`quit_progress`** when its own `quit-teardown` arrives, bumping a
+   `progress` counter. Sent again at the install phase boundary.
 5. The teardown (below), then **`quit_window_done`** — or **`quit_proceed`** in
    the last window, which sets `approved` and calls `app.exit(0)`.
 6. A confirmation-dialog cancel (below), or a **Cancel** on the archive-failure

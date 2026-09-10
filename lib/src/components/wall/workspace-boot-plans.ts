@@ -17,6 +17,8 @@ import type { WallBootPlans, WallBootProps } from './wall-types';
 
 const plans = new Map<WorkspaceId, WallBootProps>();
 let seeded = false;
+/** No plan at all: Lath's fresh branch, and what the strip's `+` gets. */
+const EMPTY_PLAN: WallBootProps = {};
 
 /**
  * Install boot's own per-Workspace plans. **Only the first call is taken**:
@@ -52,8 +54,6 @@ export function setWorkspaceBootPlan(workspaceId: WorkspaceId, plan: WallBootPro
 export function getWorkspaceBootPlan(workspaceId: WorkspaceId): WallBootProps {
   return plans.get(workspaceId) ?? EMPTY_PLAN;
 }
-
-const EMPTY_PLAN: WallBootProps = {};
 
 /** Forget every parked plan, seed included (tests). */
 export function resetWorkspaceBootPlans(): void {
