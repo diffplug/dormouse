@@ -104,6 +104,78 @@ describe('dor control routing', () => {
     expect(handle.handleDorControl).toHaveBeenCalledTimes(2);
   });
 
+  it('answers a container target of the wrong type instead of throwing out of the listener', () => {
+    const handle = handleFor(getWorkspacesSnapshot().workspaces[0].id);
+    const release = installDorControlRouter();
+    // Whatever crossed the control socket, not a validated string: a `.trim()`
+    // on it would throw past `respond` and leave the caller blocked.
+    for (const [params, error] of [
+      [{ workspace: 2 }, "unknown workspace target '2'"],
+      [{ workspace: { ref: 'x' } }, "unknown workspace target '[object Object]'"],
+      [{ window: 1 }, "unknown window target '1'"],
+    ] as const) {
+      const detail = request({ params: params as never });
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail }));
+      expect(detail.respond).toHaveBeenCalledWith({ ok: false, error });
+    }
+    expect(handle.handleDorControl).not.toHaveBeenCalled();
+    release();
+  });
+
+  it('answers a handler that throws or rejects, rather than letting the caller time out', async () => {
+    const workspaceId = getWorkspacesSnapshot().workspaces[0].id;
+    const handle = handleFor(workspaceId);
+    const release = installDorControlRouter();
+
+    handle.handleDorControl.mockImplementationOnce(() => { throw new Error('boom'); });
+    const thrown = request();
+    window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: thrown }));
+    expect(thrown.respond).toHaveBeenCalledWith({ ok: false, error: 'boom' });
+
+    handle.handleDorControl.mockImplementationOnce(() => Promise.reject(new Error('late boom')));
+    const rejected = request();
+    window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: rejected }));
+    await Promise.resolve();
+    expect(rejected.respond).toHaveBeenCalledWith({ ok: false, error: 'late boom' });
+    release();
+  });
+
+  it('waits out the gap between createWorkspace and the new Wall registering', async () => {
+    vi.useFakeTimers();
+    try {
+      const release = installDorControlRouter();
+      // No Wall has registered yet — the request must not be dropped.
+      const detail = request();
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail }));
+      const workspaceId = createWorkspace({ id: 'ws-2' }).id;
+      const handle = handleFor(workspaceId);
+      expect(handle.handleDorControl).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(handle.handleDorControl).toHaveBeenCalledWith(detail);
+      release();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('gives up after a bounded number of retries when nothing ever mounts', async () => {
+    vi.useFakeTimers();
+    try {
+      const release = installDorControlRouter();
+      const detail = request();
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail }));
+      await vi.advanceTimersByTimeAsync(10);
+      // The retry chain is finite: registering afterwards is too late.
+      const handle = handleFor(getWorkspacesSnapshot().workspaces[0].id);
+      await vi.advanceTimersByTimeAsync(10);
+      expect(handle.handleDorControl).not.toHaveBeenCalled();
+      release();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('answers a bad container target instead of handing it to a Wall', () => {
     const handle = handleFor(getWorkspacesSnapshot().workspaces[0].id);
     const release = installDorControlRouter();

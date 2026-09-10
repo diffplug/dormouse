@@ -190,7 +190,7 @@ Source of truth: `createAnimator` in `lib/src/lib/lath/animator.ts`; the animato
 
 - **Read side**: `PaneProps` — `{ id, title, params, parked? }`, supplied by LathHost straight from `leafMeta`, parked leaves included; a meta commit re-renders the leaf, so params stay live either way.
 - **Write side**: `PaneWriteContext` (`{ setTitle(id, t), updateParams(id, patch) }`), provided by the Wall over the store (`lath.store.setTitle` / `lath.store.updateParams`); the `wsPort`-refresh and render-swap flows route through the same seam. The value is stable per mount; the `AgentBrowserPanel` controller sink captures it once.
-- **Visibility**: a mounted leaf is engine-visible unless **parked**, so `parked` is the one non-meta pane prop and absent means "not parked" — right for anything rendered outside LathHost. `useSurfaceVisibility(parked)` folds it with document visibility, so a backgrounded window and a minimized browser Surface both gate streaming while the session stays alive.
+- **Visibility**: a mounted leaf is engine-visible unless **parked**, so `parked` is the one non-meta pane prop and absent means "not parked" — right for anything rendered outside LathHost. `useSurfaceVisibility(parked)` folds it with document visibility and the Wall's Workspace being the visible one (`docs/specs/layout.md` → "Workspaces"), so a backgrounded window, a hidden Workspace, and a minimized browser Surface all gate streaming while the session stays alive.
 - `use-pane-chrome` registers the pane's root element in `PaneElementsContext`, for the overlays to measure, and nothing else — there is no CSS spawn-animation to trigger.
 
 Source of truth: `lib/src/components/wall/pane-props.ts`; `PaneWriteContext` in `lib/src/components/wall/wall-context.tsx`.

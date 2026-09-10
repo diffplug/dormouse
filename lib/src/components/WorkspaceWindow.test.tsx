@@ -8,7 +8,10 @@
 import { StrictMode, act } from 'react';
 import { type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SURFACE_CONTROL_METHODS } from 'dor/protocol';
 import { WorkspaceWindow } from './WorkspaceWindow';
+import { closeWorkspaceWithSurfaces } from './wall/workspace-lifecycle';
+import * as terminalRegistry from '../lib/terminal-registry';
 import { setPlatform } from '../lib/platform';
 import { FakePtyAdapter } from '../lib/platform/fake-adapter';
 import { clearAllNotepads, addPlainNote } from '../lib/notepad/notepad-store';
@@ -71,6 +74,11 @@ function walls(): HTMLElement[] {
 
 function wallFor(workspaceId: string): HTMLElement {
   return container.querySelector<HTMLElement>(`[data-workspace-wall="${workspaceId}"]`)!;
+}
+
+/** Every mounted kill confirmation, whichever Wall rendered it. */
+function killConfirms(): HTMLElement[] {
+  return [...container.querySelectorAll<HTMLElement>('#kill-confirm-title')];
 }
 
 function leafIdsIn(workspaceId: string): string[] {
@@ -195,6 +203,89 @@ describe('WorkspaceWindow', () => {
     await act(async () => { await handle.closeAll('discard'); });
     await flush();
     expect(handle.surfaceIds()).toEqual([]);
+  });
+
+  it('serializes two closes started together, so the survivor keeps its Surfaces', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await render();
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    await flush();
+
+    // Both close verbs run: the second is refused rather than emptying a Wall
+    // the store will then refuse to remove.
+    let refusals: Array<string | null> = [];
+    await act(async () => {
+      refusals = await Promise.all([
+        closeWorkspaceWithSurfaces(first),
+        closeWorkspaceWithSurfaces('ws-2'),
+      ]);
+    });
+    await flush();
+
+    expect(refusals.filter((refusal) => refusal === null)).toHaveLength(1);
+    const survivors = getWorkspacesSnapshot().workspaces;
+    expect(survivors).toHaveLength(1);
+    expect(getWallHandle(survivors[0].id)!.surfaceIds()).toHaveLength(1);
+    expect(leafIdsIn(survivors[0].id)).toHaveLength(1);
+  });
+
+  it('refuses a Surface-creating dor request while its Workspace is closing', async () => {
+    await render();
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    await flush();
+    const handle = getWallHandle('ws-2')!;
+    const [paneId] = handle.surfaceIds();
+    const respond = vi.fn();
+
+    await act(async () => {
+      // Dispatched INSIDE the walk: `dor split` from a member pane still routes
+      // here, and a Surface born behind the walk would ride the unmount out.
+      const closing = handle.closeAll('silent');
+      handle.handleDorControl({
+        requestId: 'r1',
+        method: SURFACE_CONTROL_METHODS.split,
+        surfaceId: paneId,
+        params: { direction: 'right' },
+        respond,
+      });
+      expect(await closing).toBeNull();
+    });
+    await flush();
+
+    expect(respond).toHaveBeenCalledWith({ ok: false, error: 'this workspace is closing' });
+    expect(handle.surfaceIds()).toEqual([]);
+    expect(leafIdsIn('ws-2')).toEqual([]);
+  });
+
+  it('keeps a hidden Workspace out of the window keyboard: its kill confirm outlives an Escape next door', async () => {
+    vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await render();
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    await flush();
+
+    const press = async (key: string) => {
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+      });
+      await flush();
+    };
+
+    // Stage the confirmation in ws-2 while it is the visible Workspace.
+    await press('x');
+    expect(killConfirms()).toHaveLength(1);
+    expect(wallFor('ws-2').contains(killConfirms()[0])).toBe(true);
+
+    // Hidden: the overlay is unmounted, so its Escape trap hears nothing…
+    await act(async () => { setActiveWorkspace(first); });
+    await flush();
+    expect(killConfirms()).toHaveLength(0);
+    await press('Escape');
+
+    // …and the staged confirmation is still there on the way back.
+    await act(async () => { setActiveWorkspace('ws-2'); });
+    await flush();
+    expect(killConfirms()).toHaveLength(1);
   });
 
   it('binds the command-mode Workspace keys through the active Wall only', async () => {

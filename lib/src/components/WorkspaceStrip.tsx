@@ -144,6 +144,11 @@ export function WorkspaceStrip({
   // One union per tab, computed in the loop it is rendered in. The visible
   // Workspace never shows indicators, so it skips the projection entirely.
   const unionsRef = useRef(new Map<WorkspaceId, WorkspaceUnion>());
+  // Closed Workspaces leave the strip and must leave this cache with them, or a
+  // long session accumulates one entry per Workspace it ever had.
+  for (const id of unionsRef.current.keys()) {
+    if (!workspaces.some((workspace) => workspace.id === id)) unionsRef.current.delete(id);
+  }
   const unionFor = (id: WorkspaceId, active: boolean): WorkspaceUnion => {
     if (active) return EMPTY_WORKSPACE_UNION;
     const next = computeWorkspaceUnion(membership.get(id) ?? [], activity);

@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { startAlertSpeech } from '../../lib/alert-speech';
+import { createRefCount } from '../../lib/ref-count';
 
 /**
  * Arm spoken alarms for the lifetime of the desktop shell. The settings that
@@ -11,18 +12,8 @@ import { startAlertSpeech } from '../../lib/alert-speech';
  * speak each ring N times and reset each other's delivery state. Reference
  * counted, so the first mounted Wall arms it and the last one disarms it.
  */
-let holders = 0;
-let stop: (() => void) | null = null;
+const acquire = createRefCount({ onFirst: () => startAlertSpeech() });
 
 export function useAlertSpeech(): void {
-  useEffect(() => {
-    holders += 1;
-    if (holders === 1) stop = startAlertSpeech();
-    return () => {
-      holders -= 1;
-      if (holders > 0) return;
-      stop?.();
-      stop = null;
-    };
-  }, []);
+  useEffect(acquire, []);
 }

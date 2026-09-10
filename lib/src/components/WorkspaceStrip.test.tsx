@@ -232,6 +232,35 @@ describe('WorkspaceStrip', () => {
     await act(async () => { window.dispatchEvent(pointer('pointerup', { clientX: 90, clientY: 12 })); });
   });
 
+  it('captures the pointer on the dragged tab, and activates on the click after the drag ends', async () => {
+    createWorkspace({ id: 'ws-2' });
+    await render();
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(
+      { left: 0, right: 100, width: 100, top: 0, bottom: 24, height: 24, x: 0, y: 0, toJSON: () => ({}) } as DOMRect,
+    );
+    // Spied on the ELEMENT, not the prototype: the capture has to land on the
+    // tab, and React 19 hands the handler a native event whose `currentTarget`
+    // is the root container.
+    const tab = tabFor(first);
+    const capture = vi.fn();
+    Object.defineProperty(tab, 'setPointerCapture', { configurable: true, value: capture });
+    Object.defineProperty(tab, 'releasePointerCapture', { configurable: true, value: () => {} });
+
+    await act(async () => { tab.dispatchEvent(pointer('pointerdown', { button: 0, clientX: 50, clientY: 12 })); });
+    await act(async () => { window.dispatchEvent(pointer('pointermove', { clientX: 90, clientY: 12 })); });
+    expect(capture).toHaveBeenCalledTimes(1);
+    await act(async () => { window.dispatchEvent(pointer('pointerup', { clientX: 90, clientY: 12 })); });
+
+    // The click the release produces is the drag's tail and must not activate…
+    await act(async () => { activateButton(first).click(); });
+    expect(getActiveWorkspaceId()).toBe('ws-2');
+    // …but the latch is one-shot, so the next click (a keyboard activation, a
+    // later plain click) is a real activate again.
+    await act(async () => { activateButton(first).click(); });
+    expect(getActiveWorkspaceId()).toBe(first);
+  });
+
   it('renders the rename editor and close flow the command-mode keys open', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     await act(async () => { createWorkspace({ id: 'ws-2' }); });

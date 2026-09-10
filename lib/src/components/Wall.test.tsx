@@ -2043,3 +2043,61 @@ describe('Wall on the Lath engine', () => {
     expect(handle.ownsSurface('pane-elsewhere')).toBe(false);
   });
 });
+
+describe('Wall session persistence: ownership filtering', () => {
+  /** The pty-data handlers the Wall and the registry registered, invoked
+   *  directly. Going through `FakePtyAdapter.writePty` would also move the alert
+   *  manager, whose activity change marks the session dirty on its own — this
+   *  isolates the ownership filter under test. */
+  function capturePtyHandlers(): Array<(detail: { id: string; data: string; textData: string }) => void> {
+    const handlers: Array<(detail: { id: string; data: string; textData: string }) => void> = [];
+    const subscribe = fake.onPtyData.bind(fake);
+    vi.spyOn(fake, 'onPtyData').mockImplementation((handler) => {
+      handlers.push(handler as (detail: { id: string; data: string; textData: string }) => void);
+      subscribe(handler);
+    });
+    return handlers;
+  }
+
+  it('marks a minimized Session\'s pty echo dirty, and ignores a foreign Session\'s', async () => {
+    vi.useFakeTimers();
+    try {
+      const ptyHandlers = capturePtyHandlers();
+      const saveState = vi.spyOn(fake, 'saveState');
+      const settle = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+      const echo = (id: string) => act(() => {
+        ptyHandlers.forEach((handler) => handler({ id, data: '', textData: '' }));
+      });
+
+      await act(async () => {
+        root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="command" showBaseboard />);
+      });
+      await settle(0);
+      await act(async () => {
+        container.querySelector<HTMLElement>('[data-lath-leaf="pane-a"] [aria-label="Minimize"]')!.click();
+      });
+      // Past the debounce, so the commit's own save has landed and the tracker
+      // is clean again.
+      await settle(1_000);
+      expect(container.querySelector('[data-door-id="pane-a"]')).not.toBeNull();
+      saveState.mockClear();
+
+      // The heartbeat writes only when something marked dirty.
+      await settle(31_000);
+      expect(saveState).not.toHaveBeenCalled();
+
+      // Another Workspace's Session, fanned to this Wall by the adapter.
+      await echo('pane-elsewhere');
+      await settle(31_000);
+      expect(saveState).not.toHaveBeenCalled();
+
+      // The Door's own Session: its `untouched` flip rides this echo and nothing
+      // else reports it, so the Wall has to hear it.
+      await echo('pane-a');
+      await settle(31_000);
+      expect(saveState).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

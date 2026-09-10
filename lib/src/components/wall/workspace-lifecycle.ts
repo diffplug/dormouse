@@ -19,6 +19,16 @@ export function workspaceNeedsCloseConfirmation(id: WorkspaceId): boolean {
   return !!handle && (handle.hasTouchedSurfaces() || handle.runningCount() > 0);
 }
 
+/** The two ways a close is turned down before it starts. Both leave every
+ *  Surface where it was. */
+export const LAST_WORKSPACE_REFUSAL = 'the last Workspace cannot be closed';
+const CLOSE_IN_FLIGHT_REFUSAL = 'another Workspace is closing';
+
+/** One close at a time, for the whole Window. Two closes overlapping would each
+ *  see the other's Workspace in the count, empty both Walls, and leave the
+ *  Window with a single Workspace whose Surfaces are all gone. */
+let closeInFlight = false;
+
 /**
  * Close every member Surface through the closure coordinator, then drop the
  * Workspace itself. Resolves the first refusal's message with the Workspace left
@@ -26,17 +36,33 @@ export function workspaceNeedsCloseConfirmation(id: WorkspaceId): boolean {
  * once it is gone. Membership is cleared by the Wall's own unmount.
  */
 export async function closeWorkspaceWithSurfaces(id: WorkspaceId): Promise<string | null> {
+  if (closeInFlight) return CLOSE_IN_FLIGHT_REFUSAL;
+  // Re-checked here, not only in `requestWorkspaceClose`: the count can drop
+  // while the typed confirmation is on screen, and emptying the Wall for a
+  // `closeWorkspace` the store then refuses would leave the Window's one
+  // Workspace with nothing in it.
+  if (getWorkspacesSnapshot().workspaces.length <= 1) return LAST_WORKSPACE_REFUSAL;
+  closeInFlight = true;
   const handle = getWallHandle(id);
-  if (handle) {
-    const refusal = await handle.closeAll('prompt');
-    if (refusal) {
-      setActiveWorkspace(id);
-      return refusal;
+  try {
+    if (handle) {
+      const refusal = await handle.closeAll('prompt');
+      if (refusal) {
+        setActiveWorkspace(id);
+        return refusal;
+      }
     }
+    if (!closeWorkspace(id)) {
+      // The Wall is empty and stays mounted, so hand it back its auto-spawn.
+      handle?.cancelClose();
+      setActiveWorkspace(id);
+      return LAST_WORKSPACE_REFUSAL;
+    }
+    forgetWorkspaceSession(id);
+    return null;
+  } finally {
+    closeInFlight = false;
   }
-  forgetWorkspaceSession(id);
-  closeWorkspace(id);
-  return null;
 }
 
 /**
@@ -45,6 +71,7 @@ export async function closeWorkspaceWithSurfaces(id: WorkspaceId): Promise<strin
  * other goes immediately.
  */
 export function requestWorkspaceClose(id: WorkspaceId): void {
+  if (closeInFlight) return;
   if (getWorkspacesSnapshot().workspaces.length <= 1) return;
   if (workspaceNeedsCloseConfirmation(id)) {
     setPendingWorkspaceClose({ id, char: randomKillChar() });

@@ -49,8 +49,10 @@ export type DorControlParams = {
   session?: unknown;
   surface?: unknown;
   url?: unknown;
-  workspace?: string;
-  window?: string;
+  // Container refs arrive unvalidated like every other param; the router types
+  // them before use (`dor-control-router.ts`).
+  workspace?: unknown;
+  window?: unknown;
   scrollback?: unknown;
   wsPort?: unknown;
 };
@@ -262,6 +264,16 @@ function waitForTerminalState(
 }
 
 const RESTART_CANCELLED: ParseResult<undefined> = { ok: false, message: 'restart was cancelled' };
+/** The control verbs that can add a Surface to the Wall. `resolveOpen` and
+ *  `resolveAgentBrowser` only answer questions, and every other verb addresses a
+ *  Surface that already exists. */
+const CREATING_CONTROL_METHODS = new Set<string>([
+  SURFACE_CONTROL_METHODS.split,
+  SURFACE_CONTROL_METHODS.ensure,
+  SURFACE_CONTROL_METHODS.iframe,
+  SURFACE_CONTROL_METHODS.agentBrowser,
+]);
+
 const ENSURE_CANCELLED = 'ensure was cancelled';
 
 /**
@@ -364,6 +376,7 @@ export function useDorControl({
   createSplitSurface,
   createContentSurface,
   isClosingSurface,
+  isClosingWorkspace,
   closeSurface,
   lastAgentBrowserBinaryPathRef,
   workspaceRef,
@@ -399,6 +412,8 @@ export function useDorControl({
   }) => ParseResult<{ id: string; ref: string; status: 'created' | 'replaced' }>;
   /** A Wall closure in flight, independent of another caller freezing notes. */
   isClosingSurface: (id: string) => boolean;
+  /** Whether this Wall's Workspace is being closed. */
+  isClosingWorkspace: () => boolean;
   /** The user-visible closure path: archive the Surface's notes, then tear it
    *  down. A string means the closure was refused, and is why; the Surface is
    *  still here. */
@@ -591,6 +606,14 @@ export function useDorControl({
   // lives in `dor-control-router.ts`, so exactly one Workspace answers.
   const handleDorControl = useCallback(async (detail: DorControlRequest) => {
     const params = detail.params ?? {};
+
+    // A Workspace being closed takes no new Surfaces: `closeAll` walks its
+    // members, and one created behind the walk would ride the Wall's unmount out
+    // as an Orphaned Session (docs/specs/glossary.md → "Invariants" I4).
+    if (CREATING_CONTROL_METHODS.has(detail.method) && isClosingWorkspace()) {
+      detail.respond({ ok: false, error: 'this workspace is closing' });
+      return;
+    }
 
     // Resolve the split reference surface across listed Surfaces. A minimized
     // reference is valid: the Wall creates the new split as a sibling Door.
@@ -1072,7 +1095,7 @@ export function useDorControl({
     }
 
     detail.respond({ ok: false, error: `unsupported Dormouse control method '${detail.method}'` });
-  }, [buildDorSurfaces, buildDorSurfaceList, closeSurface, createContentSurface, createSplitSurface, ensureAgentBrowserSurface, findSurfaceIdRunningCommand, requireBrowserSurface, requireListedSurface, requireTerminalSurface, resolveListedSurface, resolveVisibleSurface, surfaceRefForId, lath, nav, workspaceRef]);
+  }, [buildDorSurfaces, buildDorSurfaceList, closeSurface, createContentSurface, createSplitSurface, ensureAgentBrowserSurface, findSurfaceIdRunningCommand, isClosingWorkspace, requireBrowserSurface, requireListedSurface, requireTerminalSurface, resolveListedSurface, resolveVisibleSurface, surfaceRefForId, lath, nav, workspaceRef]);
 
   return { findSurfaceByParams, updateSurfaceParams, handleDorControl };
 }

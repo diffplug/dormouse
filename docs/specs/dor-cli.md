@@ -289,7 +289,12 @@ Invariants:
   never identifies a Workspace.
 - **One Wall answers each request**, resolved in order: an explicit
   `workspace:<n>`, else the Workspace owning the calling Surface, else the
-  active one; nothing mounted leaves the request unanswered. **Surface targets
+  active one; nothing mounted leaves the request unanswered, after a bounded
+  retry that covers the tick between a Workspace being created and its Wall
+  registering. **Every request is answered, including a container ref of the
+  wrong type and a handler that throws** — an unanswered one blocks its caller
+  to the deadline. A Workspace being closed refuses the Surface-creating verbs
+  (`docs/specs/layout.md` → "Workspaces"). **Surface targets
   resolve within the answering Workspace** — refs are Workspace-scoped — so a
   `dor split` from a background Workspace lands beside its caller rather than
   wherever the user is looking. Cross-Workspace targeting is staged with

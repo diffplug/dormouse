@@ -25,6 +25,7 @@ export function useSessionPersistence({
   doorsRef,
   selectedIdRef,
   selectedTypeRef,
+  ownsSurface,
   surfaceRefsForSave,
   workspaceId,
 }: {
@@ -40,6 +41,11 @@ export function useSessionPersistence({
   doorsRef: RefObject<DooredItem[]>;
   selectedIdRef: RefObject<string | null>;
   selectedTypeRef: RefObject<WallSelectionKind>;
+  /** Whether a Surface belongs to this Wall — panes AND Doors. The adapter fans
+   *  every Session's traffic to every mounted Wall, so this is what keeps one
+   *  Workspace from persisting on another's keystroke. Must be stable: the
+   *  subscription effect closes over it. */
+  ownsSurface: (id: string) => boolean;
   surfaceRefsForSave?: () => { refs: PersistedSurfaceRefs; next: number };
   /** Present when this Wall belongs to a Workspace: its record then goes to the
    *  Window collector instead of the platform slot, and is compared against its
@@ -165,17 +171,19 @@ export function useSessionPersistence({
     const platform = getPlatform();
     const { markDirty, isDirty } = trackerRef.current;
 
-    // Both PTY triggers are ownership-filtered: the adapter fans every Session's
-    // traffic to every mounted Wall, so an unfiltered one would have each
-    // Workspace persisting on every other Workspace's keystroke.
-    const ownsPane = (id: string) => lath.listPanes().some((p) => p.id === id);
+    // Both PTY triggers are ownership-filtered over MEMBERS, panes and Doors
+    // alike: a minimized Session's `untouched` flip rides the pty echo of the
+    // keystroke, so filtering on visible panes would never persist it.
     const handlePtyData = (detail: { id: string }) => {
-      if (ownsPane(detail.id)) markDirty();
+      if (ownsSurface(detail.id)) markDirty();
     };
     const handlePtyExit = (detail: { id: string }) => {
-      if (!ownsPane(detail.id)) return;
+      if (!ownsSurface(detail.id)) return;
       void flushSessionSave().catch(() => undefined);
     };
+    // Only a bare Wall answers the host directly; a Workspace Wall's answer is
+    // `WorkspaceWindow`'s, which flushes every Workspace before notifying (the
+    // adapter completes on the first notification).
     const handleSessionFlushRequest = (detail: { requestId: string }) => {
       void flushSessionSave()
         .catch(() => undefined)
@@ -192,9 +200,9 @@ export function useSessionPersistence({
     const unsubscribeStore = lath.store.subscribe(scheduleSessionSave);
 
     // Content inputs mark dirty but never schedule — the heartbeat persists them
-    // (docs/specs/layout.md → "Session persistence"). Untouched flips ride
-    // the pty echo of the keystroke, not the pane-state store (the registry mutates
-    // silently).
+    // (docs/specs/layout.md → "Session persistence"). An untouched flip has no
+    // store of its own to report it (the registry mutates silently), which is
+    // why the pty echo above is what marks it.
     platform.onPtyData(handlePtyData);
     const unsubActivity = subscribeToActivity(markDirty);
     const unsubPaneState = subscribeToTerminalPaneState(markDirty);
@@ -212,7 +220,7 @@ export function useSessionPersistence({
       if (paths.length === 0) return;
       const sid = selectedTypeRef.current === 'pane' ? selectedIdRef.current : null;
       if (!sid) return;
-      if (!lath.listPanes().some((p) => p.id === sid)) return;
+      if (!ownsSurface(sid)) return;
       pasteFilePaths(sid, paths);
     });
 
@@ -235,6 +243,7 @@ export function useSessionPersistence({
   }, [
     lath,
     flushSessionSave,
+    ownsSurface,
     ownsHostFlush,
     persistSessionNow,
     scheduleSessionSave,

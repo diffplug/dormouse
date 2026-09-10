@@ -67,6 +67,7 @@ import { hasBrowser, hasTerminal } from 'dor/commands/types';
 import { DEFAULT_WORKSPACE_ID, type PersistedSurfaceRefs, type WorkspaceId } from '../lib/session-types';
 import { clearWorkspaceSurfaces, setWorkspaceSurfaces } from '../lib/workspace-surfaces';
 import { workspaceRefFor } from '../lib/workspace-store';
+import { awaitWallEmpty } from './wall/close-all';
 import { registerWallHandle, type WallHandle } from './wall/wall-handles';
 import { installDorControlRouter } from './wall/dor-control-router';
 import type { DropTarget, RestoreToken } from '../lib/lath/ops';
@@ -939,6 +940,14 @@ export function Wall({
     [lath],
   );
 
+  /** Whether a Surface belongs to this Wall — the membership test in the hot
+   *  paths (a PTY chunk per Session per Wall), so it asks the store rather than
+   *  building a projection. Stable, so a listener can close over it. */
+  const ownsSurface = useCallback(
+    (id: string): boolean => lath.store.has(id) || doorsRef.current.some((door) => door.id === id),
+    [lath],
+  );
+
   /** Publish membership for the union projection: the Activity store is
    *  window-wide, so this map is what scopes it to one Workspace. */
   const publishMembership = useCallback(
@@ -981,8 +990,13 @@ export function Wall({
       }
       // The size check also catches pure removals, purging dead ids so a later
       // re-add of the same id fires again.
-      if (leavesChanged) prevLeafIdsRef.current = new Set(currentIds);
-      publishMembership();
+      // Only a leaf change moves membership; a title, zoom, or resize commit
+      // would otherwise republish the same list on every keystroke. The doors
+      // effect below covers the other edge.
+      if (leavesChanged) {
+        prevLeafIdsRef.current = new Set(currentIds);
+        publishMembership();
+      }
       if (closingWorkspaceRef.current) return;
       refillEmptyTree();
     });
@@ -992,11 +1006,21 @@ export function Wall({
   // of a doored Surface removes only the chip), so publish on that edge too.
   useEffect(publishMembership, [doors, publishMembership]);
 
+  /** Abandon a `closeAll`: the Workspace stays, so the Wall's "always one pane"
+   *  rule is re-armed and an emptied tree refilled. Every path that gives up on
+   *  a close — a refused Surface, the exit deadline, a `closeWorkspace` the
+   *  store refuses — ends here (`docs/specs/layout.md` → "Workspaces"). */
+  const cancelClose = useCallback(() => {
+    closingWorkspaceRef.current = false;
+    refillEmptyTree();
+  }, [refillEmptyTree]);
+
   // --- Session persistence ---
   const persistence = useSessionPersistence({
     lath,
     doors,
     doorsRef,
+    ownsSurface,
     selectedIdRef,
     selectedTypeRef,
     surfaceRefsForSave,
@@ -1012,40 +1036,41 @@ export function Wall({
    */
   const closeAll = useCallback(async (mode: CloseSurfaceMode = 'prompt'): Promise<string | null> => {
     closingWorkspaceRef.current = true;
-    for (const id of memberSurfaceIds()) {
-      // Re-checked per iteration: an earlier closure can take a Surface with it
-      // (a helper's source, a replaced leaf).
-      if (!lath.store.has(id) && !doorsRef.current.some((door) => door.id === id)) continue;
-      const refusal = await closeSurfaceRef.current(id, mode);
-      if (refusal) {
-        closingWorkspaceRef.current = false;
-        refillEmptyTree();
-        return refusal;
+    // Walked until nothing new turns up rather than over one snapshot: a member
+    // pane's `dor` request can create a Surface during the awaits, and one
+    // created after the walk had passed it would ride the unmount out as an
+    // Orphaned Session. `handleDorControl` refuses to create while this flag is
+    // set, so the walk is racing a shrinking set and terminates; `attempted`
+    // makes that true even if it did not.
+    const attempted = new Set<string>();
+    for (;;) {
+      const pending = memberSurfaceIds().filter((id) => !attempted.has(id));
+      if (pending.length === 0) break;
+      for (const id of pending) {
+        attempted.add(id);
+        // Re-checked per iteration: an earlier closure can take a Surface with it
+        // (a helper's source, a replaced leaf).
+        if (!ownsSurface(id)) continue;
+        const refusal = await closeSurfaceRef.current(id, mode);
+        if (refusal) {
+          cancelClose();
+          return refusal;
+        }
       }
     }
     // `killPaneImmediately` defers the tree removal by the exit animation;
     // unmounting the Wall before that lands would leave Orphaned Sessions
     // (docs/specs/glossary.md → "Invariants" I4). The commit that empties the
     // tree is what resolves this; the deadline only bounds a stuck fade so it
-    // cannot hang a quit.
-    const emptied = () => memberSurfaceIds().length === 0;
-    if (!emptied()) {
-      await new Promise<void>((resolve) => {
-        let done = false;
-        const settle = () => {
-          if (done) return;
-          done = true;
-          clearTimeout(timer);
-          unsubscribe();
-          resolve();
-        };
-        const timer = setTimeout(settle, lath.exitMs + 50);
-        const unsubscribe = lath.store.subscribe(() => { if (emptied()) settle(); });
-        if (emptied()) settle();
-      });
-    }
-    return null;
-  }, [lath, memberSurfaceIds, refillEmptyTree]);
+    // cannot hang a quit, and it refuses rather than reporting clean.
+    const refusal = await awaitWallEmpty({
+      members: memberSurfaceIds,
+      subscribe: (listener) => lath.store.subscribe(listener),
+      timeoutMs: lath.exitMs + 50,
+    });
+    if (refusal) cancelClose();
+    return refusal;
+  }, [lath, memberSurfaceIds, ownsSurface, cancelClose]);
 
   // --- Dev-server port → pane correlation (browser header connection chip) ---
   useDevServerPortCorrelation({ lath, doorsRef });
@@ -1498,6 +1523,7 @@ export function Wall({
     createContentSurface,
     isClosingSurface,
     closeSurface,
+    isClosingWorkspace: useCallback(() => closingWorkspaceRef.current, []),
     lastAgentBrowserBinaryPathRef,
     workspaceRef: useCallback(() => workspaceRefFor(effectiveWorkspaceId), [effectiveWorkspaceId]),
   });
@@ -1517,7 +1543,7 @@ export function Wall({
   // re-render never replaces a registered entry.
   const methods: Omit<WallHandle, 'workspaceId'> = {
     surfaceIds: memberSurfaceIds,
-    ownsSurface: (id) => lath.store.has(id) || doorsRef.current.some((door) => door.id === id),
+    ownsSurface,
     hasTouchedSurfaces: () => memberSurfaceIds().some((id) => {
       // A browser Surface has no "untouched" notion and always holds a page, so
       // it counts; a terminal counts once its Session exists and has input.
@@ -1527,6 +1553,7 @@ export function Wall({
     runningCount: () => countRunningSessionsIn(memberSurfaceIds()),
     flushPersistence: () => persistence.flush(),
     closeAll,
+    cancelClose,
     handleDorControl,
   };
   const handleRef = useRef<WallHandle | null>(null);
@@ -1993,8 +2020,12 @@ export function Wall({
               />
             ) : null}
 
-            {/* Kill confirmation overlay — centered over the pane being killed */}
-            {confirmKill && (
+            {/* Kill confirmation overlay — centered over the pane being killed.
+                Gated on `active` with the modal hosts below: its Escape trap is
+                a window listener, and a hidden Wall consumes no window input
+                (docs/specs/layout.md → "Workspaces"). The staged confirmation
+                is React state, so a switch away and back shows it again. */}
+            {active && confirmKill && (
               <KillConfirmOverlay
                 confirmKill={confirmKill}
                 paneElements={paneElements}
@@ -2004,7 +2035,7 @@ export function Wall({
 
             {/* The archive refused this Surface's notes — it is still open.
                 One prompt at a time: answering the head reveals the next. */}
-            {archiveFailures[0] && (
+            {active && archiveFailures[0] && (
               <NotepadArchiveFailureModal
                 failure={archiveFailures[0]}
                 paneElements={paneElements}

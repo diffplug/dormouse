@@ -255,10 +255,8 @@ then the strip scrolls, with no overflow arrows.
   matches that attribute on the event target alone, so a tab carrying it would
   drag the window instead of activating, renaming, or reordering. Its wrapper —
   the bar past the last tab — carries it, and is the draggable spacer.
-- **Deferred to the multi-window stage:** `onDragOutsideWindow` and
-  `onDropOnOtherWindow` are the strip's seams for tearing a Workspace out and
-  dropping it on another Window; nothing passes them yet
-  (`docs/specs/layout.md` `## Future`, workspaces-rollout).
+- `onDragOutsideWindow` / `onDropOnOtherWindow` are the strip's tear-out seams,
+  staged in `docs/specs/layout.md` `## Future` (workspaces-rollout).
 
 Source of truth: `WorkspaceStrip` in `lib/src/components/WorkspaceStrip.tsx`;
 `createWorkspaceStripDrag` in `lib/src/components/workspace-strip-drag.ts`.

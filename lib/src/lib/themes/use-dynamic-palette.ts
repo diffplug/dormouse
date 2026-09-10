@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { computeDynamicPalette } from './dynamic-palette';
+import { createRefCount } from '../ref-count';
 
 /**
  * Publish the derived palette onto `document.body` and keep it in step with the
@@ -11,9 +12,6 @@ import { computeDynamicPalette } from './dynamic-palette';
  * variables the survivors still need. Reference counted, so the first caller
  * starts it and the last one removes the variables.
  */
-let holders = 0;
-let stop: (() => void) | null = null;
-
 function start(): () => void {
   const ctx = document.createElement('canvas').getContext('2d');
   if (!ctx) return () => {};
@@ -47,15 +45,8 @@ function start(): () => void {
   };
 }
 
+const acquire = createRefCount({ onFirst: start });
+
 export function useDynamicPalette(): void {
-  useEffect(() => {
-    holders += 1;
-    if (holders === 1) stop = start();
-    return () => {
-      holders -= 1;
-      if (holders > 0) return;
-      stop?.();
-      stop = null;
-    };
-  }, []);
+  useEffect(acquire, []);
 }

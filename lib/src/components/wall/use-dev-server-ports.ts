@@ -34,6 +34,7 @@
  */
 import { useEffect } from 'react';
 import { getPlatform } from '../../lib/platform';
+import { createRefCount } from '../../lib/ref-count';
 import { deriveSessionLabel } from '../../lib/session-label';
 import {
   getWantedDevServerPorts,
@@ -82,13 +83,26 @@ function cancelIdle(handle: number | undefined): void {
 }
 
 const sources = new Set<CandidateSource>();
-let holders = 0;
 let stopLoop: (() => void) | null = null;
 let scheduleScanNow: ((delay: number) => void) | null = null;
+
 /** Ports already matched to a Surface. Not rescanned until a reload (clears the
  *  whole set), the port leaves "wanted" (navigation), or the set of Walls
  *  changes — a Wall arriving or leaving can change who owns a port. */
 const settled = new Set<number>();
+
+/** A Wall arriving or leaving changes who can own a port, so re-validate:
+ *  a resolution settled without it may now be ambiguous, or newly resolvable. */
+const acquireLoop = createRefCount({
+  onFirst: () => {
+    stopLoop = startCorrelationLoop();
+    return () => { stopLoop?.(); stopLoop = null; };
+  },
+  onChange: () => {
+    settled.clear();
+    scheduleScanNow?.(DEBOUNCE_MS);
+  },
+});
 
 /** id → fallback title across every mounted Wall; the first Wall to claim an id
  *  owns it, and a Wall only ever lists its own Surfaces. */
@@ -257,25 +271,11 @@ export function useDevServerPortCorrelation({
     };
 
     sources.add(source);
-    holders += 1;
-    if (holders === 1) stopLoop = startCorrelationLoop();
-    // A Wall arriving changes who can own a port, so re-validate: a resolution
-    // settled without it may now be ambiguous, or newly resolvable.
-    else {
-      settled.clear();
-      scheduleScanNow?.(DEBOUNCE_MS);
-    }
+    const release = acquireLoop();
 
     return () => {
       sources.delete(source);
-      holders -= 1;
-      if (holders > 0) {
-        settled.clear();
-        scheduleScanNow?.(DEBOUNCE_MS);
-        return;
-      }
-      stopLoop?.();
-      stopLoop = null;
+      release();
     };
   }, [lath, doorsRef]);
 }

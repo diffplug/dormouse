@@ -30,8 +30,10 @@ export interface WorkspaceStripDrag {
   /** Begin tracking a primary-button press on a tab. Below the threshold the
    *  tab's own click behavior (activate / rename) is untouched. */
   press(id: WorkspaceId, event: PointerEvent): void;
-  /** Whether the gesture passed the threshold, so the click that follows the
-   *  release is a drag's tail rather than an activate. */
+  /** Whether the click now being handled is a completed drag's tail rather than
+   *  an activate. **One-shot**: the browser sends exactly one click after a
+   *  release, and reading this consumes it, so a later keyboard or synthetic
+   *  `.click()` on the same tab still activates it. */
   dragged(): boolean;
   dispose(): void;
 }
@@ -42,6 +44,9 @@ export function createWorkspaceStripDrag(host: StripDragHost): WorkspaceStripDra
   let startX = 0;
   let startY = 0;
   let active = false;
+  /** Set by the release of a completed drag and consumed by the one click that
+   *  follows it. */
+  let clickIsDragTail = false;
   /** The tab the press landed on; capture goes here once the drag activates. */
   let pressedOn: HTMLElement | null = null;
   let capturedBy: HTMLElement | null = null;
@@ -49,6 +54,8 @@ export function createWorkspaceStripDrag(host: StripDragHost): WorkspaceStripDra
   function end(restore: boolean): void {
     if (dragId === null) return;
     if (restore) host.move(dragId, startIndex);
+    clickIsDragTail = active;
+    active = false;
     // jsdom (and a gesture that never reached the threshold) throws here; the
     // gesture is over either way.
     try { capturedBy?.releasePointerCapture?.(pointerId); } catch { /* not captured */ }
@@ -72,7 +79,10 @@ export function createWorkspaceStripDrag(host: StripDragHost): WorkspaceStripDra
       host.setDragging(dragId);
       // Captured only NOW, never on the press: a captured pointer retargets the
       // following `click` to the capture element, which would swallow the
-      // activate button's own click on every plain tab press.
+      // activate button's own click on every plain tab press. The capture goes
+      // on the TAB, which is what the pointer is dragging; React 19's synthetic
+      // event is dispatched from the root container, so its `nativeEvent`
+      // reports that container as the target instead.
       try { pressedOn?.setPointerCapture?.(pointerId); capturedBy = pressedOn; } catch { capturedBy = null; }
     }
     const order = host.order();
@@ -127,13 +137,18 @@ export function createWorkspaceStripDrag(host: StripDragHost): WorkspaceStripDra
       startX = event.clientX;
       startY = event.clientY;
       active = false;
-      pressedOn = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
+      clickIsDragTail = false;
+      pressedOn = host.tabElement(id);
       window.addEventListener('pointermove', onPointerMove);
       window.addEventListener('pointerup', onPointerUp);
       window.addEventListener('pointercancel', onPointerCancel);
       window.addEventListener('keydown', onKeyDown, true);
     },
-    dragged: () => active,
+    dragged: () => {
+      const tail = clickIsDragTail;
+      clickIsDragTail = false;
+      return tail;
+    },
     dispose: () => end(false),
   };
 }
