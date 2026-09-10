@@ -321,16 +321,16 @@ On cold restore, a terminal pane with a host-captured recovery invocation runs i
 
 ### Renderer
 
-Text uses `@xterm/addon-webgl`; ImageAddon uses canvas layers (rationale). **Claim the GL context on a session's first `mountElement`, never at creation**, guarded by `TerminalEntry.webglAttempted` so each session claims at most one (rationale). **xterm's built-in DOM renderer is the fallback, never the default** — its per-cell span rebuild makes a truecolor-dense TUI an order of magnitude slower (rationale). Image rules: `docs/specs/terminal-escapes.md` → "Inline graphics".
+**Must use `@xterm/addon-webgl` for mounted terminals when available**, falling back to xterm's DOM renderer on unsupported WebGL, unavailable explicit context release, activation failure, or context-budget eviction. `cfg.terminal.webglRenderer` disables WebGL and is off under Chromatic. ImageAddon owns its separate canvas layers (`docs/specs/terminal-escapes.md` → "Inline graphics"). (rationale)
 
-**Fallback to the DOM renderer must stay automatic** — two expected failure modes:
+- **Must acquire GPU resources at mount, never at Session creation.** Unmount/minimize, helper parking, and Session disposal dispose the WebGL addon and explicitly lose its context. The xterm, grid, buffers, PTY, and other addons survive a minimize.
+- **Must load a fresh addon on reattachment without resizing the terminal for the renderer swap.** Terminal fitting follows "Animations". A stale mount's cleanup must not release a newer mount's renderer.
+- **Must attempt WebGL at most once per mount.** Failure or context loss stays on DOM until the next unmount/remount; focus and metadata changes never retry. Focus-based recovery remains under `## Future`.
+- **Must preserve the addon's shared atlas cache.** Compatible mounted terminals share rasterized atlas canvases; GPU texture copies remain per context. Releasing one renderer releases only its atlas ownership; the last owner releases the cache. (rationale)
 
-- **No WebGL at all** (headless/jsdom, blocklisted GPU, a host webview with GPU disabled): construction throws and `tryEnableWebglRenderer` swallows it, behind a `typeof WebGL2RenderingContext === 'undefined'` pre-check that skips the doomed request entirely (rationale).
-- **Context-budget eviction**: browsers cap live WebGL contexts per page — on the order of **16**, evicted oldest-first (rationale) — so one context per terminal means a Window past the cap silently drops its *oldest* panes back to the DOM renderer. The `onContextLoss` handler disposes the addon, xterm's documented signal to resume DOM rendering.
+**Must report the active renderer as `data-renderer="webgl"|"dom"`** on the persistent terminal host.
 
-**Degradation is one-way**: a demoted pane stays on the DOM renderer even after other panes close. Re-arming is unbuilt — see `## Future`. The outcome is recorded as `data-renderer="webgl"|"dom"` on the host element, including after a context loss demotes a pane. `cfg.terminal.webglRenderer` disables the whole path, and it is off under Chromatic (pinned in `lib/.storybook/preview.ts`).
-
-Source of truth: `tryEnableWebglRenderer` and `createXtermHost` in `lib/src/lib/terminal-lifecycle.ts`. Not the SDF fork of `docs/specs/webgl-text.md`, a different addon consumed only by `canopy/`.
+Source of truth: `TerminalWebglRenderer` in `lib/src/lib/terminal-webgl.ts`; `mountElement` / `unmountElement` / `parkElement` / `disposeSession` in `lib/src/lib/terminal-lifecycle.ts`. Tests: `lib/src/lib/terminal-webgl.test.ts`, `lib/src/lib/terminal-registry.alert.test.ts`.
 
 ### Session persistence
 
@@ -433,6 +433,6 @@ Stage 4 also enables multiple Workspaces in the standalone presentation and wire
 
 ### Re-arming the WebGL renderer after context loss
 
-A pane that loses its WebGL context ([Renderer](#renderer)) stays on the DOM renderer for the rest of its life, even once other panes close and free budget. The eviction order is also backwards for a tiling terminal: browsers evict *oldest-first*, but the pane that most deserves the GPU is the focused one.
+A mounted pane that loses its WebGL context ([Renderer](#renderer)) stays on the DOM renderer until it is unmounted and mounted again, even once other panes close and free budget. The eviction order is also backwards for a tiling terminal: browsers evict *oldest-first*, but the pane that most deserves the GPU is the focused one.
 
-The fix is to retry `tryEnableWebglRenderer` when a DOM-fallback pane gains focus. Unbuilt because the naive version thrashes: past the context cap, focusing panes in turn would evict and rebuild glyph atlases on every focus change, plausibly worse than sitting still on the DOM renderer. Any implementation needs a re-arm budget (at most once per pane, or a cooldown) and a measurement showing focus-cycling does not regress. Not worth building until someone runs a Window past the cap — 16 concurrent terminals is well beyond observed usage.
+The future policy permits another WebGL attempt when a DOM-fallback pane gains focus. Unbuilt because the naive version thrashes: past the context cap, focusing panes in turn would evict and rebuild glyph atlases on every focus change, plausibly worse than sitting still on the DOM renderer. Any implementation needs a re-arm budget (at most once per pane, or a cooldown) and a measurement showing focus-cycling does not regress.
