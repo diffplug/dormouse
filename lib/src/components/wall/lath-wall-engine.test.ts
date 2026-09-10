@@ -7,7 +7,6 @@ import {
   leafMetaFromPersistedDoor,
   shouldParkOnMinimize,
 } from './lath-wall-engine';
-import { MAX_PARKED_SURFACES } from './lath-wall-store';
 import type { PersistedDoor } from '../../lib/session-types';
 import { leaves } from '../../lib/lath/model';
 
@@ -141,37 +140,35 @@ describe('lath-wall-engine parking policy', () => {
 
   it('parks Surfaces whose state lives in the DOM, and only those', () => {
     expect(shouldParkOnMinimize(browser)).toBe(true);
-    // A terminal's state is in the PTY and replays on reattach, so parking it would
-    // only cost memory.
+    // A terminal's registry retains its xterm across reattachment.
     expect(shouldParkOnMinimize(terminal)).toBe(false);
   });
 
-  it('doorLeaf caps the parked DOM itself, evicting oldest-first', () => {
+  it('doorLeaf retains every parked browser beyond the former eight-surface limit', () => {
     const engine = createLathWallEngine();
     engine.seed(null, ['anchor'], () => 'gen');
     const ids: string[] = [];
-    for (let i = 0; i < MAX_PARKED_SURFACES + 2; i++) {
+    for (let i = 0; i < 32; i++) {
       const id = `b${i}`;
       ids.push(id);
       engine.store.addLeaf(id, browser, { refId: 'anchor', edge: 'right' });
-      engine.store.doorLeaf(id, { park: true }); // no companion eviction call to forget
+      engine.store.doorLeaf(id, { park: true });
     }
     const parked = engine.store.parkedIds();
-    expect(parked).toHaveLength(MAX_PARKED_SURFACES);
-    // The two oldest lost only their live DOM: they stay minimized and retain their
-    // latest metadata, but reattach by reloading rather than revealing preserved DOM.
-    expect(parked).toEqual(ids.slice(2));
+    expect(parked).toHaveLength(32);
+    // Every document remains mounted until it is reattached or killed.
+    expect(parked).toEqual(ids);
     expect(engine.getMeta(ids[0])).toBeDefined();
   });
 
-  it('keeps a Door\'s metadata live after the parked DOM is evicted', () => {
+  it('keeps a Door\'s metadata live while many other browsers are parked', () => {
     const engine = createLathWallEngine();
     engine.seed(null, ['anchor'], () => 'gen');
     engine.store.addLeaf('oldest', browser, { refId: 'anchor', edge: 'right' });
     const { token } = engine.store.doorLeaf('oldest', { park: true });
     engine.store.updateParams('oldest', { url: 'https://after-park.example' });
 
-    for (let i = 0; i < MAX_PARKED_SURFACES; i++) {
+    for (let i = 0; i < 32; i++) {
       const id = `newer-${i}`;
       engine.store.addLeaf(id, browser, { refId: 'anchor', edge: 'right' });
       engine.store.doorLeaf(id, { park: true });
@@ -179,7 +176,7 @@ describe('lath-wall-engine parking policy', () => {
 
     expect(engine.getMeta('oldest')?.params).toEqual({ url: 'https://after-park.example' });
 
-    // An async agent-browser acquisition may finish after the cap unmounted the DOM.
+    // An async agent-browser acquisition may finish while minimized.
     engine.store.updateParams('oldest', { session: 'acquired-late' });
     expect(engine.getMeta('oldest')?.params).toEqual({
       url: 'https://after-park.example',

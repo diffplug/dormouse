@@ -285,6 +285,9 @@ importers:
       cross-spawn:
         specifier: ^7.0.6
         version: 7.0.6
+      dor-lib-common:
+        specifier: workspace:*
+        version: link:../dor-lib-common
       esbuild:
         specifier: ^0.28.0
         version: 0.28.2

@@ -10,8 +10,14 @@
 // bin and behaves on Windows where a bare spawn('pnpm', …) can't.
 import spawn from 'cross-spawn';
 
-const child = spawn('pnpm', ['exec', 'tauri', ...process.argv.slice(2)], { stdio: 'inherit' });
-child.on('exit', (code, signal) => {
-  if (signal) process.kill(process.pid, signal);
-  else process.exit(code ?? 1);
-});
+if (process.argv[2] === 'dev') {
+  const { runDev } = await import('./dev-standalone.mjs');
+  await runDev(process.argv.slice(3));
+} else {
+  const child = spawn('pnpm', ['exec', 'tauri', ...process.argv.slice(2)], { stdio: 'inherit' });
+  child.on('error', err => { console.error(err); process.exit(1); });
+  child.on('exit', (code, signal) => {
+    if (signal) process.kill(process.pid, signal);
+    else process.exit(code ?? 1);
+  });
+}

@@ -144,6 +144,28 @@ describe('LathHost — node identity (the no-re-parent guarantee)', () => {
 });
 
 describe('LathHost — parked leaves', () => {
+  it('retains the same document after more than eight browsers are minimized', () => {
+    const meta = leafMeta({ component: 'terminal' });
+    const store = seeded(rowOf('a', 'b'), [['a', meta], ['b', meta]]);
+    mount(store);
+    const original = leafDiv('b')!;
+    const input = document.createElement('input');
+    input.value = 'unsaved draft';
+    original.appendChild(input);
+    let token: ReturnType<LathWallStore['doorLeaf']>['token'];
+    act(() => { token = store.doorLeaf('b', { park: true }).token; });
+    for (let i = 0; i < 32; i++) {
+      act(() => store.addLeaf(`browser-${i}`, meta, { refId: 'a', edge: 'right' }));
+      act(() => { store.doorLeaf(`browser-${i}`, { park: true }); });
+    }
+    expect(leafDiv('b')).toBe(original);
+    expect(input.isConnected).toBe(true);
+    act(() => { store.restoreLeaf(meta, token!); });
+    expect(leafDiv('b')).toBe(original);
+    expect(input.value).toBe('unsaved draft');
+    expect(input.isConnected).toBe(true);
+  });
+
   it('keeps a parked leaf as the SAME element, holding its last rect but painting nothing', () => {
     const tree = rowOf('a', 'b');
     const store = seeded(tree, [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);

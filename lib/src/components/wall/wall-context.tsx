@@ -14,6 +14,13 @@ export interface PaneElementsState {
 export const ModeContext = createContext<WallMode>('command');
 export const SelectedIdContext = createContext<string | null>(null);
 
+/** Terminal fitting waits for committed, fully painted geometry. Standalone
+ *  terminal mounts have no layout coordinator and use their resize observer. */
+export const TerminalResizeContext = createContext<{
+  canFit(id: string): boolean;
+  subscribe(listener: () => void): () => void;
+} | null>(null);
+
 export const PaneElementsContext = createContext<PaneElementsState>({
   elements: new Map(),
   version: 0,

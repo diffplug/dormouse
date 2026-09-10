@@ -143,7 +143,7 @@ A **Session** is the tuple of its `SessionId` plus one state per layer (I1).
 |---|---|
 | `Unregistered` | No entry in `terminal-registry` |
 | `Mounted` | Entry present, DOM element in the document tree |
-| `Orphaned` | Entry present, element detached. Not transient — a `Doored` terminal Surface sits here as long as it stays minimized (I4) |
+| `Orphaned` | Entry present, element detached. Not transient — a `Doored` terminal Surface sits here as long as it stays minimized, and so does a `Paned` one in a hidden Workspace (I4) |
 | `Disposed` | Entry removed, xterm disposed |
 
 ### View
@@ -152,7 +152,7 @@ A **Session** is the tuple of its `SessionId` plus one state per layer (I1).
 |---|---|
 | `Paned` | Rendered in the content area: a primary Lath leaf or its shown auxiliary helper |
 | `Zoomed` | Subset of `Paned` — the passthrough-focused pane is maximized; acquiring zoom gives focus, losing focus returns it to `Paned` |
-| `Doored` | Rendered as a door on the baseboard. DOM survival is a rendering decision, not part of this state: browser DOM retention follows **parking** and eviction (`docs/specs/tiling-engine.md` → "Parked leaves"); a terminal Surface unmounts its element (Registry: `Orphaned`) and remounts the same xterm on reattach — nothing replays |
+| `Doored` | Rendered as a door on the baseboard. DOM survival is a rendering decision, not part of this state: browser DOM retention follows **parking** (`docs/specs/tiling-engine.md` → "Parked leaves"); a terminal Surface unmounts its element (Registry: `Orphaned`) and remounts the same xterm on reattach — nothing replays |
 | `Hidden` | In neither pane nor door — webview closed or mid-transition. A Surface in a hidden Workspace is **not** `Hidden`: it stays `Paned` or `Doored`, mounted and live. Process and Activity unaffected. |
 
 ### Link
@@ -197,7 +197,7 @@ A user verb is an intentional action that produces a single observable change.
 | `rename` | Update title; layer-agnostic |
 | `zoom` / `unzoom` | Paned ↔ Zoomed |
 | `swap` | Exchange two Surfaces' layout slots; ids travel with them, so Registry entries, Processes, and titles are untouched |
-| `switchWorkspace` | Set the active Workspace (`setActiveWorkspace`), revealing its Wall and hiding the outgoing one. No Surface changes state; I8 holds by construction. |
+| `switchWorkspace` | Set the active Workspace (`setActiveWorkspace`), revealing its Wall and hiding the outgoing one. Terminal elements reattach; nothing resumes or restores; I8 holds by construction. |
 | `createWorkspace` | Add a Workspace and mount its Wall, which spawns one pane; activate by default, unless `activate: false`. |
 | `closeWorkspace` | `kill` each member Surface, then remove the Workspace; the last remaining Workspace cannot be closed. |
 | `renameWorkspace` | Update a Workspace's `name`; touches no Session |
@@ -243,11 +243,11 @@ Source of truth: `focusSession` / `refitSession` in `lib/src/lib/terminal-lifecy
 - I1: `SessionId` is immutable for the life of a Session and stable across `resume` / `restore`.
 - I2: Process state is independent of Registry, View, and Link. A `Live` process may be `Doored` or `Hidden`; an `Exited` process may still be `Paned`.
 - I3: Activity state survives `minimize` / `reattach`. `ALERT_RINGING` fires only on a *fresh* transition, never on `mount` or `reattach`.
-- I4: `Registry: Orphaned` outlives no Session state except `View: Doored` — at rest every other entry is `Mounted` or `Disposed`, so an `Orphaned` entry that is not `Doored` is a leak.
+- I4: `Registry: Orphaned` outlives no Session state except `View: Doored` or a Surface in a hidden Workspace — at rest every other entry is `Mounted` or `Disposed`, so an `Orphaned` entry that is not `Doored` is a leak.
 - I5: `kill` is universally valid and always ends at `View: Hidden`; its per-kind effects are the [User verbs](#user-verbs) row.
 - I6: `rename` is universally valid including when `Process = Exited` and `View = Doored`.
 - I7: Every Surface sits in exactly one Pane; every Pane and its Surfaces belong to exactly one Workspace; every Workspace belongs to one Window.
-- I8: **Must preserve Process and Activity during `switchWorkspace`, without firing a fresh ring** (I3). A switch mounts nothing, so no ring can fire (`docs/specs/layout.md` → Workspaces).
+- I8: **Must preserve Process and Activity during `switchWorkspace`, without firing a fresh ring** (I3). A switch reattaches terminal elements but resumes and restores nothing, so no ring can fire (`docs/specs/layout.md` → Workspaces).
 - I9: A Workspace's union status is a pure projection of its members' Activity: no independent state, destroyed with the Workspace.
 - I10: **Must preserve a terminal Surface's `SessionId`** (I1). **Must transfer the `surface:N` CLI ref when replacing a browser Surface**, minting a new id in the same layout slot with its target URL. An `ab-screencast` ⇄ `ab-popout` relaunch keeps the Surface id; render-mode changes do not universally imply replacement (rationale; `docs/specs/dor-browser.md` → Display Modal And Render Swaps).
 

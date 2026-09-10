@@ -108,7 +108,7 @@ Two things to carry forward:
 - **HTTPS is not optional.** WebAuthn needs a secure context and only
   `localhost` is exempt, so a real phone needs the TLS origin. For a
   desktop-only dev loop, the shortcut is
-  `pnpm dev:relay` on `localhost:3000`; the Relay writes its generated
+  `PORT=3000 pnpm dev:relay` on `localhost:3000`; the Relay writes its generated
   password to `setup-password.json` in its data directory.
 
 The Relay-generated setup password gates exactly one thing: enrolling a Burrow from somewhere

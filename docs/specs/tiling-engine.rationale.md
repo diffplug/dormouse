@@ -32,6 +32,8 @@ Lath is named for the strips hidden behind a plaster wall. The five taxes dockvi
 
 ## Parked leaves
 
+Unbounded parking preserves unsaved iframe state; a ninth minimized browser previously evicted the oldest document and made reattachment reload it. Hidden documents can keep consuming memory and running scripts, timers, sockets, and media. A future resource warning is low priority, tracked in https://github.com/diffplug/dormouse/issues/610.
+
 **Why a parked leaf holds its rect instead of hiding cheaply.** Sizing it to zero — or `display: none` — reports a 0×0 viewport to the guest document, so the guest reflows on the way out and again on the way back; a screencast canvas and an `<iframe>`'s layout both visibly re-settle. Holding the last rect behind `visibility: hidden` skips both reflows, making reattach pixel-identical rather than merely fast.
 
 **Why the parked rect lives in the store, not the adapter.** React detaches a ref callback whenever its identity changes, and on every StrictMode commit, so adapter-local pruning keyed on `registerEl(null)` fired constantly and silently dropped every parked rect, leaving reattach on the whole-wall fallback.

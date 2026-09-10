@@ -32,7 +32,7 @@ import { TerminalPaneHeader } from './TerminalPaneHeader';
 import { SurfacePaneHeader } from './SurfacePaneHeader';
 import { AlertSpeechIndicator } from './AlertSpeechIndicator';
 import { TerminalContext } from './TerminalContext';
-import { TerminalContextContext } from './wall-context';
+import { TerminalContextContext, TerminalResizeContext } from './wall-context';
 
 /** Widened pointer target over each (thin) sash band, in px. */
 const SASH_HIT = 8;
@@ -366,6 +366,17 @@ export function LathHost({
   // otherwise be the pre-drag rects (the preview never touched it). Cleared by the
   // retarget effect that consumes it.
   const snapNextRef = useRef(false);
+  const framesSettledRef = useRef(false);
+  const terminalFitListeners = useRef(new Set<() => void>());
+  const terminalResize = useMemo(() => ({
+    // Read painted settlement, not elapsed animation time: the final frame may
+    // still be waiting for rAF. Sash previews and dying panes must never resize PTYs.
+    canFit: (id: string) => framesSettledRef.current && !dragRef.current && !lath.isDying(id),
+    subscribe: (listener: () => void) => {
+      terminalFitListeners.current.add(listener);
+      return () => { terminalFitListeners.current.delete(listener); };
+    },
+  }), [lath]);
 
   // The single pane/Door drag controller, built once (window handlers stay stable for
   // the whole gesture; nothing re-subscribes on a Wall re-render).
@@ -545,10 +556,18 @@ export function LathHost({
   // markDying wake): paint now — this runs pre-paint when called from a layout effect,
   // so the first frame is correct — tell chrome, and schedule the loop while anything is
   // still moving. Reschedules only when no frame is already pending.
-  const pump = useCallback(() => {
+  const pump = useCallback((layoutCommit = false) => {
     const t = nowMs();
     applyFrames(t);
     const settled = animator.settledAt(t);
+    // Terminals fit on painted, final geometry: whenever motion starts or ends, and on
+    // every layout commit (which may land already-settled). Fitting is gated by
+    // `canFit`, so the starting edge only drops a pending fit.
+    const settlementChanged = framesSettledRef.current !== settled;
+    framesSettledRef.current = settled;
+    if (settlementChanged || layoutCommit) {
+      for (const listener of terminalFitListeners.current) listener();
+    }
     lath.notifyFrames(settled);
     if (!settled && rafRef.current === null) rafRef.current = requestAnimationFrame(stepRef.current);
   }, [applyFrames, animator, lath]);
@@ -568,7 +587,10 @@ export function LathHost({
     const { targets, layers } = presentationTargets(snapshot.tree, rectRef.current, snapshot.zoomedId);
     animator.retarget(targets, nowMs(), lath.store.consumeEnterHints(), { snap: snapNextRef.current, layers });
     snapNextRef.current = false;
-    pump();
+    // Notify fitting AFTER painting the committed geometry: a sash commit can land on
+    // its last preview size, so neither a ResizeObserver event nor a settlement change
+    // would fire — including a final pointermove whose rAF never ran before pointerup.
+    pump(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snapshot.tree, snapshot.zoomedId]);
 
@@ -608,7 +630,7 @@ export function LathHost({
   const resolveOverlay = (component: string): ComponentType<PaneProps> | undefined =>
     componentsOverride?.overlays?.[component] ?? OVERLAY_COMPONENTS[component];
 
-  return (
+  const content = (
     <div ref={containerRef} className="lath-host">
       {sortedIds.map((id) => {
         const cb = leafCallbacks(id);
@@ -717,4 +739,5 @@ export function LathHost({
       )}
     </div>
   );
+  return <TerminalResizeContext.Provider value={terminalResize}>{content}</TerminalResizeContext.Provider>;
 }
