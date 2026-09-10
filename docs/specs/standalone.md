@@ -802,8 +802,10 @@ every window's `acked`, bumps `seq`, and broadcasts `dormouse://quit-requested`
 carrying the window count. It **must leave a walk in flight alone** — a repeat
 trigger fired mid-teardown must not send the machine back to voting, or the fresh
 watchdog drops into the unbounded vote wait and stops bounding the teardown that
-is running. Each window's orchestrator (registered by `initQuitFlow`, Tauri-only)
-responds:
+is running. It **must keep every vote already cast**: a committed window answers
+the repeat with an ack alone, so clearing its vote would hold the machine in
+voting with no dialog left to answer (`a_repeat_trigger_while_voting_keeps_the_votes_already_cast`).
+Each window's orchestrator (registered by `initQuitFlow`, Tauri-only) responds:
 
 1. **Always `quit_ack`** first (fire-and-catch), so phase 1 stands down even if
    the orchestrator then dedupes the event out.

@@ -74,17 +74,21 @@ pub struct QuitMachine {
 impl QuitMachine {
     /// A quit trigger over the live windows.
     ///
-    /// Never clears `voted` once the walk has started: a repeat trigger fired
-    /// mid-teardown must leave the walk in flight, or the fresh watchdog drops
+    /// Clears `voted` only from `Idle`. A vote already cast stands through a
+    /// repeat trigger: the webview that cast it is committed and answers the
+    /// re-request with an ack alone, so clearing it would leave the machine in
+    /// `Voting` with no dialog left to answer. Once the walk has started the
+    /// repeat must also leave the walk in flight, or the fresh watchdog drops
     /// into the unbounded voting wait and stops bounding it.
     pub fn request(&mut self, labels: &[String]) -> (u64, Vec<QuitAction>) {
         self.seq += 1;
+        let idle = self.phase == QuitPhase::Idle;
         let walking = matches!(self.phase, QuitPhase::Walking { .. });
         let mut next: HashMap<String, WindowQuit> = HashMap::new();
         for label in labels {
             let mut entry = self.windows.remove(label).unwrap_or_default();
             entry.acked = false;
-            if !walking {
+            if idle {
                 entry.voted = false;
             }
             next.insert(label.clone(), entry);
@@ -392,6 +396,42 @@ mod tests {
         // The stale watchdog stands down; the fresh one bounds the same teardown.
         assert!(quit.stale(1));
         assert!(!quit.stale(2));
+    }
+
+    #[test]
+    fn a_repeat_trigger_while_voting_keeps_the_votes_already_cast() {
+        let mut quit = QuitMachine::default();
+        quit.request(&labels(&["main", "ws-2"]));
+        // `main` had nothing running and voted at once; `ws-2` is on its dialog.
+        quit.vote("main");
+        assert_eq!(quit.phase, QuitPhase::Voting);
+
+        // Cmd+Q again: `main` is committed and only re-acks, never re-votes.
+        let (seq, actions) = quit.request(&labels(&["main", "ws-2"]));
+        assert_eq!(seq, 2);
+        assert_eq!(actions, vec![QuitAction::RequestAll]);
+        assert_eq!(quit.phase, QuitPhase::Voting);
+
+        // The dialog's yes is the last vote: the walk starts instead of wedging.
+        let actions = quit.vote("ws-2");
+        assert!(matches!(quit.phase, QuitPhase::Walking { .. }));
+        assert!(!actions.is_empty());
+    }
+
+    #[test]
+    fn a_cancelled_quit_asks_every_window_again() {
+        let mut quit = QuitMachine::default();
+        quit.request(&labels(&["main", "ws-2"]));
+        quit.vote("main");
+        quit.cancel();
+        assert_eq!(quit.phase, QuitPhase::Idle);
+
+        // From Idle every vote is fresh: `main` alone no longer carries the quit.
+        quit.request(&labels(&["main", "ws-2"]));
+        quit.vote("ws-2");
+        assert_eq!(quit.phase, QuitPhase::Voting);
+        quit.vote("main");
+        assert!(matches!(quit.phase, QuitPhase::Walking { .. }));
     }
 
     #[test]
