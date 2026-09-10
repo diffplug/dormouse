@@ -1000,7 +1000,7 @@ export default function Home() {
               </div>
             </div>
             <p className="mt-7 text-lg">
-              <a href={sitePath("/hosted")} className={SITE_LINK_CLASS}>Compare the planned services and follow the launch</a>
+              <a href={sitePath("/hosted")} className={SITE_LINK_CLASS}>See what Dormouse Hosted costs</a>
             </p>
           </div>
         </section>

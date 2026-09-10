@@ -2,4 +2,9 @@
 # pins the pair (docs/specs/website-docs.md -> Reference page chrome).
 /docs /docs/agent-skill 302
 /docs/ /docs/agent-skill 302
+# The price is a section of the Hosted page, never a page of its own; 301
+# because that will not change. Spelled with the trailing slash the host
+# serves, so /pricing costs one hop rather than two (checkPricingRedirect).
+/pricing /hosted/ 301
+/pricing/ /hosted/ 301
 /changelog/after/* /__spa-fallback 200

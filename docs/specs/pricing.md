@@ -1,9 +1,5 @@
 # Pricing
 
-> Status: design — nothing here is implemented yet. The `/hosted` preview page,
-> the free spoken alarms, and the self-host Relay exist and are owned elsewhere;
-> everything below is under [Future](#future).
-
 > See `docs/specs/glossary.md` for Burrow / Client / Relay and Pane / Session
 > vocabulary.
 > **Owns:** the tiers, the founding ladder, what a plan grants, the licence the
@@ -15,13 +11,92 @@
 > `docs/specs/relay.md`; the cloud-hosted trust boundary to
 > `docs/specs/security-remote.md` -> "Cloud-hosted mode"; alarm delivery to
 > `docs/specs/alert.md` -> "Spoken alarms".
+> **Status:** the Hosted page publishes the tiers and the FAQ; everything that
+> takes money — checkout, the licence, managed voice, the hosted Relay — is
+> under [Future](#future).
+
+## The Hosted page
+
+**`/hosted` is canonical, titled "Dormouse Hosted"; `/pricing` 301-redirects to
+it.** The header nav and the rail label do not change: the tool is free and
+open source, and Hosted is the optional service with a price, so pricing is a
+section of the Hosted page, never a page of its own.
+
+**Settings is the front door.** The spoken-alarm row's managed-voice link and
+the playground tutorial land on `/hosted#voice`, and the tier table sits within
+one screen of that anchor. `#remote-control` and `#voice` keep resolving as
+section ids.
+
+**Content, in order:** the Relay boundary notice; the tier table, with the
+30-day refund beside every buy button; what a member gets today and what ships
+later, as prose rather than checkmarks; "Self-hosting stays free"; and a short
+FAQ — what forever means, refunds and cancellation, the founding lock, what
+happens if Hosted shuts down, and that team pricing is not yet offered.
+
+**Prices, inclusions, and the FAQ are prerendered text**, and the page emits
+`Product` / `Offer` JSON-LD carrying one `Offer` per on-sale tier at its
+current price, so an assistant fetching the page can quote it. Only the
+counters load after hydration. **Offers stay `PreOrder` while checkout is
+unbuilt** — it is the one claim the page must not make.
+
+**Every price on the site has one owner**: the page, the structured data, and
+the tests read the tier table rather than restating a number.
+
+**A buy button opens the unbuilt-checkout notice** — the tier's name, that
+nothing was charged and no seat taken, and the devlog — and the page repeats
+above the table that checkout is not open. **Never render a buy button that
+silently does nothing.** The notice is where the devlog signup form lives; it
+is no longer a page section of its own.
+
+**Show remaining seats only for the cohort that is open**, read from the
+billing provider on the server with a cache of at most 60 seconds, never
+computed on the client and never stored. **Never show a counter for a closed
+cohort or a tier not yet on sale.**
+
+**The page prerenders without the billing provider**: the counter line is
+reserved and filled after hydration, and an unreachable endpoint, a non-2xx, or
+a body that is not a whole seat count renders the table without counts rather
+than an error. Only the counter is live — **a cohort closing raises the price
+at the next deploy**.
+
+**Every existing link keeps working unchanged**: the `linkedFrom` obligations,
+the root README, `vscode-ext/README.md`, the Settings dialog's voice link, and
+the hosting notice all already point at `/hosted`.
+`docs/specs/website-docs.md` -> "Reference page chrome" owns the mechanics.
+
+### Published prices
+
+Prices in USD, and the merchant of record adds or includes tax by jurisdiction.
+
+| Tier | Price | Cadence | On sale |
+|---|---|---|---|
+| Monthly | $10 | monthly | always; the reference price |
+| Annual | $100 | yearly | not yet — the struck list price founding annual is read against |
+| Founding annual (recommended) | $50, rising $10 per closed cohort of 100 | yearly | yes |
+| Founding permanent | $299 for the first 50, then $399 for the next 50 | one-time | yes |
+
+- **Never discount the monthly tier**; every other price is read against it.
+- **Annual is two months free** against monthly ($100 against $120).
+- **The step is $10 per cohort of 100, fixed**, and the ladder's last step is
+  the one below list — reaching list closes founding annual.
+- **Never sell a permanent seat past 100.**
+- **Show the current price, the struck list price, and the seats left at that
+  price — never the next step or how many cohorts remain.**
+- **Exactly one tier is marked recommended.**
+
+Source of truth: `tiersOnSale` and `pricingJsonLd` in
+`website/src/lib/hosted-pricing.ts`; `fetchCohortSeats` in
+`website/src/lib/hosted-cohorts.ts`; `website/src/pages/Hosted.tsx`; the
+`/pricing` rule in `website/public/_redirects`, pinned by
+`checkPricingRedirect` in `scripts/public-docs-lint.mjs`.
+`website/src/pages/Hosted.test.tsx` pins the page contract.
 
 ## Future
 
 **Scope: hosted-launch** — what remains, in staged order:
 
-1. **The Hosted page** at `/hosted`, with `/pricing` redirecting to it and
-   the cohort counters wired to the billing provider.
+1. **The seat endpoint** the page already calls, reading the billing provider
+   behind a cache of at most 60 seconds.
 2. **Checkout and licences**: purchase, the signed licence, activation in
    Settings, verification, grace, revocation.
 3. **Managed voice**: the TTS endpoint, the entitlement check, the disclosure,
@@ -37,24 +112,18 @@ Team and enterprise tiers are never sold through this page; they belong to the
 
 ### Tiers
 
-Prices in USD. The merchant of record adds or includes tax by jurisdiction.
+What each tier grants once checkout can sell it; [Published prices](#published-prices)
+is the ladder as the page prints it today.
 
-| Tier | Price | Cadence | Availability | Lock | Grants |
-|---|---|---|---|---|---|
-| Monthly | $10 | monthly | always; the reference price | none | the Individual plan |
-| Annual | $100 | yearly | after the founding annual cohorts close | none | the Individual plan |
-| Founding annual (recommended) | $50 for the first 100, then $10 more per cohort of 100 until it reaches list | yearly | until the ladder reaches list or the hosted Relay ships, whichever first | price locked while the subscription stays active | the Individual plan, founding badge |
-| Founding permanent | $299 for the first 50, then $399 for the next 50 | one-time | until 100 are sold | permanent | the Individual plan forever, including everything later added to it |
-
-- **Never discount the monthly tier**; every other price is read against it.
-- **Annual is two months free** against monthly ($100 against $120).
+- **Founding annual and founding permanent grant the Individual plan**, plus a
+  founding badge; monthly and annual grant the plan alone. Permanent grants it
+  forever, including everything later added to it.
 - **A founding lock survives every later price change** and ends only when the
   subscription lapses; a lapsed founder re-subscribes at list.
 - **Cohorts close by count, never by date.** The count is completed purchases
   at the billing provider; a refund returns the seat to its cohort.
-- **Show the current price, the struck list price, and the seats left at that
-  price — never the next step or how many cohorts remain.** When a cohort
-  closes, the price rises one step and the counter resets to 100.
+- **When a cohort closes the price rises one step and the counter resets to
+  100.**
 - **Founding has two stops: the ladder reaching list, or the hosted Relay
   shipping.** Whichever comes first closes founding annual for good and opens
   the Annual tier at list the same day, whatever the open cohort's count. The
@@ -62,13 +131,11 @@ Prices in USD. The merchant of record adds or includes tax by jurisdiction.
 - **Checkout honors the price it opened at.** Concurrent checkouts may oversell
   a cohort by a few seats; the overage is the customer's, and the next cohort
   still opens at a full 100.
-- **The step is $10 per cohort of 100, fixed.**
 - **List may rise while founding is open, and never falls.** Monthly and
   annual move together the same day, so list is always a price someone can buy
   at; the ladder keeps climbing $10 per cohort toward the new list; every
   founder's lock and the struck price they were shown are unchanged.
-- **Never sell a permanent seat past 100**, and never reopen the ladder at a
-  lower step once a cohort has closed.
+- **Never reopen the ladder at a lower step** once a cohort has closed.
 - **Founding badges are cosmetic**: in-app and on the credits page, never a
   capability.
 
@@ -147,43 +214,6 @@ Prices in USD. The merchant of record adds or includes tax by jurisdiction.
 - **Pocket speaks only in the foreground** — a web app cannot voice a
   background push — so the desktop is the primary voice sink. A native Pocket
   is out of scope here.
-
-### The Hosted page
-
-- **`/hosted` stays canonical, titled "Dormouse Hosted"; `/pricing`
-  301-redirects to it.** The header nav and the rail label do not change: the
-  tool is free and open source, and Hosted is the optional service with a
-  price, so pricing is a section of the Hosted page, never a page of its own.
-- **Settings is the front door.** The spoken-alarm row's managed-voice link and
-  the playground tutorial land on `/hosted#voice`, and the tier table sits
-  within one screen of that anchor. `#remote-control` and `#voice` keep
-  resolving as section ids.
-- **Content, in order:** the Relay boundary notice the preview page carries
-  today (Dormouse needs no Relay; what leaves the machine); the tier table with
-  the open cohort's remaining count, founding annual highlighted as the
-  recommended tier, and the 30-day refund stated beside every buy button; what
-  a member gets today and what ships later, as prose rather than checkmarks;
-  "Self-hosting stays free"; and a short FAQ — what forever means, refunds and
-  cancellation, the founding lock, what happens if Hosted shuts down, and that
-  team pricing is not yet offered.
-- **Prices, inclusions, and the FAQ are prerendered text**, and the page emits
-  `Product` / `Offer` JSON-LD for each tier at its current price, so an
-  assistant fetching the page can quote it. Only the counters load after
-  hydration.
-- **`/pricing` redirects in `website/public/_redirects`**, beside the `/docs`
-  entrypoint rule.
-- **Show remaining seats only for the cohort that is open**, read from the
-  billing provider on the server with a cache of at most 60 seconds, never
-  computed on the client and never stored in `localStorage`. **Never show a
-  counter for a closed cohort or a tier not yet on sale.**
-- **The page prerenders without the billing provider**: counts load after
-  hydration behind a placeholder, and a provider outage renders the table
-  without counts rather than an error.
-- **Every existing link keeps working unchanged**: the `linkedFrom`
-  obligations, the root README, `vscode-ext/README.md`, the Settings dialog's
-  voice link, and the hosting notice all already point at `/hosted`.
-  `docs/specs/website-docs.md` -> "Reference page chrome" owns the mechanics.
-- **The devlog signup form leaves the fold**; the launch is the page.
 
 ### Renewal, cancellation, refund
 

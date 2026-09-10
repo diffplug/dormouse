@@ -3,7 +3,7 @@
 > See `docs/specs/glossary.md` for canonical Surface / Session / Pane
 > vocabulary used by the public product guide and browser workflow.
 
-Dormouse publishes four specialized references and a hosted-services preview
+Dormouse publishes four specialized references and the Hosted service page
 on the marketing site. Each reference is generated from a source that lives
 next to the code it describes.
 
@@ -29,7 +29,7 @@ that once rendered it at `/docs` is retained and still runs (see
 | `/docs/dor` | Complete CLI reference | Help snapshots in `dor/test/snapshots/help/`, verified against the built CLI |
 | `/docs/agent-skill` | Agent-facing operating guide | Exact `dor/skill.md` |
 | `/docs/self-host` | Running your own Relay | The runbook half of `SELF_HOST.md` |
-| `/hosted` | Prelaunch overview of optional paid managed services | `website/src/pages/Hosted.tsx` |
+| `/hosted` | What the one paid service grants and costs | `website/src/pages/Hosted.tsx`, priced from `website/src/lib/hosted-pricing.ts` |
 | `/docs/security` | What Dormouse guarantees and how it is checked | Every section of `docs/specs/security.md`, minus title and front matter; its rows split across three pages |
 | GitHub root | Repository overview and contributor entry point | Root `README.md` |
 
@@ -86,7 +86,7 @@ checkable and by review otherwise:
   future renderers.
 - VS Code command names in getting started exist in `vscode-ext/package.json`.
 - Detailed CLI behavior links to `/docs/dor`; the complete agent operating guide
-  links to `/docs/agent-skill`; the hosted-services preview links to `/hosted`.
+  links to `/docs/agent-skill`; the Hosted service page links to `/hosted`.
 - The guide contains no `TODO:` placeholders and no copied internal future
   design.
 
@@ -333,13 +333,15 @@ Keyed on the website's own `dormouse:docs-theme-prompt-dismissed`, because
 hidden, so a returning reader never sees dismissed UI flash. Pinned by
 `website/src/components/DocsThemeControl.test.tsx`.
 
-## `/hosted` preview
+## `/hosted`
 
-**Must mark both services unavailable:** Hosted operates Pocket's Relay;
-optional ElevenLabs replaces browser voice. Terminals stay on an awake, online
-computer; browser speech and self-hosting remain. `NotifySignupForm` exposes
-the `nedshed.dev` devlog handoff and keeps email per tab.
-**Must use native required-email validation.**
+`docs/specs/pricing.md` -> "The Hosted page" owns what it says and sells; this
+section owns its place on the site.
+
+**Must mark the managed Relay unavailable:** Hosted operates Pocket's Relay,
+terminals stay on an awake, online computer, and self-hosting remains.
+`NotifySignupForm` exposes the `nedshed.dev` devlog handoff and keeps email per
+tab. **Must use native required-email validation.**
 `website/src/components/NotifySignupForm.test.tsx` pins all three.
 
 **Must open both hosting pages with the Relay boundary:** Dormouse needs none;
@@ -348,8 +350,10 @@ requests. `/docs/self-host` links `/hosted`; `/hosted` labels hosting pending re
 discloses metadata, and links the model.
 `website/src/lib/docs-rail.test.tsx` pins this.
 
-**Must also link the preview from** Pocket marketing/tutorial, self-host docs,
-and the speech and remote-control settings; `linkedFrom` owns the rest.
+**Must also link it from** Pocket marketing/tutorial, self-host docs, and the
+speech and remote-control settings; `linkedFrom` owns the rest. `/pricing`
+301-redirects here rather than becoming a page, pinned by
+`checkPricingRedirect` in `scripts/public-docs-lint.mjs`.
 
 ## `/docs/dor` reference
 
