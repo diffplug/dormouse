@@ -1438,11 +1438,9 @@ export class BurrowRuntime {
     // Cleared with the dispose, not merely overwritten below: without a session
     // factory there is no replacement, and a leftover reference would route the
     // next frame on the old id into a handler that has already been disposed.
-    if (state.established) {
-      state.established.direct.dispose();
-      state.established.api.dispose();
-      state.established = undefined;
-    }
+    // Never `#disposeEstablished`, whose prune would detach the `state` this
+    // promotion is about to write into.
+    this.#clearEstablished(state);
     this.#sendControl(clientId, 'connection', pending.connectionId, pending.session, {
       ok: true,
       burrowLabel: boundedBurrowLabel(this.#enrollment.label),
@@ -1664,10 +1662,19 @@ export class BurrowRuntime {
   #disposeEstablished(clientId: string): void {
     const state = this.#clients.get(clientId);
     if (!state?.established) return;
+    this.#clearEstablished(state);
+    this.#pruneClient(clientId);
+  }
+
+  /**
+   * Tear one established session down and clear the slot, leaving the entry
+   * itself to the caller — a promotion is about to fill it, a disposal prunes.
+   */
+  #clearEstablished(state: ClientState): void {
+    if (!state.established) return;
     state.established.direct.dispose();
     state.established.api.dispose();
     state.established = undefined;
-    this.#pruneClient(clientId);
   }
 
   // --- Shared plumbing -----------------------------------------------------

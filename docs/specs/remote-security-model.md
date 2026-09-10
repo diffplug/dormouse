@@ -412,31 +412,23 @@ admits Burrow enrollment with ([relay.md](./relay.md#http-api)). Pinned by
 the Relay as the carrier of an already-authorized session; every rule above
 holds unchanged, because nothing about *what* is carried changes.
 [remote-api.md](./remote-api.md) -> "Direct path" owns the design and is not
-restated here.
+restated here: that the channel carries transport messages of the session
+promoted at [Connection](#connection) on that `Split`'s own two `CipherState`s,
+that every signal rides inside the ciphertext, that nothing is offered before
+promotion, and that one peer connection per session is closed by every path
+that ends one, are its rules. What this model adds is what is *underneath* them.
 
-- **Same session, same counters.** The channel carries transport messages of the
-  session promoted at [Connection](#connection), on the two `CipherState`s from
-  that `Split`. **Never a second handshake, a rekey, or a byte of plaintext.**
-- **Signaling never leaves the ciphertext**, which is what makes it trustworthy:
-  a description the Relay could have written would be one it could point at
-  itself.
-- **Offered only after promotion.** A peer connection built before the
-  connection outcome would be one an unauthorized party had steered.
 - **DTLS beneath is transport hygiene this model does not rely on.** It protects
   nothing the Noise session does not already protect, and **the fingerprints in
   an SDP are authentic for exactly one reason — that SDP arrived inside the
   session**. A DTLS peer is never an authenticated one.
 - **Never an ICE server.** Both ends pass an empty list. (rationale)
-- **One peer connection per session, and never a longer-lived one.** Created at
-  the offer and closed by every path that ends the session — outcome, expiry,
-  `client-gone`, a lost relay socket, `stop()`.
 
 **The listener is UDP on every interface a candidate names, for the life of an
 attempt.** The standalone Burrow's addon binds one socket on the unspecified
-address and advertises each routable interface at that port (measured
-2026-09: four host candidates, one port, no loopback or link-local); a browser
-binds per interface. Either way the host answers UDP from anyone who can route
-to it on any of those networks.
+address and advertises each routable interface at that port; a browser binds per
+interface. Either way the host answers UDP from anyone who can route to it on
+any of those networks. (rationale)
 **Two parsers sit behind it and both are attack surface**: before DTLS, ICE's
 own STUN parser, which answers a binding request only under this attempt's
 ufrag and password (RFC 8445 requires 24 and 128 bits of randomness), both

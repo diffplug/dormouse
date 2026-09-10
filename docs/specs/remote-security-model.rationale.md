@@ -287,6 +287,11 @@ is already there. Relay-supplied ICE servers stay in `remote-api.md`'s
 `## Future` for a SaaS deployment, where the trade is real and would need its
 own analysis.
 
+**What the listener actually opens** *(measured 2026-09, standalone Burrow on
+macOS)*: four host candidates sharing one port, no loopback and no link-local
+address among them. One socket on the unspecified address, advertised once per
+routable interface.
+
 **Why the UDP listener is named in the spec at all.** Everything else the
 product opens to a network is TCP behind loopback or behind the Relay's HTTPS
 origin, and the audit's listener sweep is written for that shape

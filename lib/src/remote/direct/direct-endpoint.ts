@@ -101,12 +101,7 @@ export class DirectEndpoint {
       return;
     }
     const sdp = await peer.offer();
-    // The session may have been replaced or disposed while the description was
-    // being built; a peer left over from one is not this one's.
-    if (!this.#alive() || this.#peer !== peer) {
-      peer.close();
-      return;
-    }
+    if (!this.#stillOurs(peer)) return;
     if (sdp === null || !this.#deps.sendSignal({ v: 1, t: 'direct-offer', sdp })) this.#giveUp();
   }
 
@@ -219,21 +214,36 @@ export class DirectEndpoint {
     if (!this.#cutover.begin()) return;
     const peer = this.#build();
     if (!peer) {
-      this.#giveUp();
-      this.#deps.sendSignal({ v: 1, t: 'direct-decline' });
+      this.#decline();
       return;
     }
     const sdp = await peer.answer(offerSdp);
-    if (!this.#alive() || this.#peer !== peer) {
-      peer.close();
-      return;
-    }
+    if (!this.#stillOurs(peer)) return;
     if (sdp === null) {
-      this.#giveUp();
-      this.#deps.sendSignal({ v: 1, t: 'direct-decline' });
+      this.#decline();
       return;
     }
     if (!this.#deps.sendSignal({ v: 1, t: 'direct-answer', sdp })) this.#giveUp();
+  }
+
+  /**
+   * Whether `peer` is still this endpoint's own live attempt. A promotion or a
+   * teardown can replace the session while a description is being built, and a
+   * peer left over from one is not this one's — it is closed here.
+   */
+  #stillOurs(peer: DirectPeer): boolean {
+    if (this.#alive() && this.#peer === peer) return true;
+    peer.close();
+    return false;
+  }
+
+  /**
+   * Give the attempt up and say so, rather than leaving the offerer to wait out
+   * its setup deadline for a channel that is never coming.
+   */
+  #decline(): void {
+    this.#giveUp();
+    this.#deps.sendSignal({ v: 1, t: 'direct-decline' });
   }
 
   /** This attempt's peer, wired to the four channel events, or null if there is none. */
@@ -250,7 +260,7 @@ export class DirectEndpoint {
     if (!connection) return null;
     this.#peer = new DirectPeer({
       peer: connection,
-      ...(this.#deps.setTimer ? { setTimer: this.#deps.setTimer } : {}),
+      setTimer: this.#deps.setTimer,
       handlers: {
         onOpen: () => this.#onOpen(),
         onFrame: (frame) => this.#onFrame(frame),
