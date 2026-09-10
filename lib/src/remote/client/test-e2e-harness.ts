@@ -195,6 +195,11 @@ export const AUTH_ROUTES: Record<string, RouteHandler> = {
   '/api/burrows': () => ({ json: { burrows: [{ burrowId: 'h1', label: 'Laptop', online: true }] } }),
 };
 
+/** One socket's `e2e` frames on an established connection, in order. */
+function transportFrames(frames: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  return frames.filter((frame) => frame.kind === 'connection' && frame.step === 'transport');
+}
+
 export interface E2eHarness {
   client: PocketClient;
   burrow: BurrowRuntime;
@@ -211,8 +216,17 @@ export interface E2eHarness {
   fetch: typeof globalThis.fetch;
   /** The Client's relay socket, once one is open — what a keepalive lands on. */
   clientSocket(): FakeSocket;
+  /**
+   * Client→relay `transport` frames on the established connection, which stop
+   * at this end's `direct-switch`.
+   */
+  clientTransportFrames(): Array<Record<string, unknown>>;
+  /** The same, the other way: the Burrow's, which stop at its own switch. */
+  burrowTransportFrames(): Array<Record<string, unknown>>;
   /** One live invitation, as `setupQr` would mint it. */
   mintInvitation(): Promise<PairingInvitation>;
+  /** Pair, approve, and connect — the whole ceremony every session case starts with. */
+  connectPaired(): Promise<void>;
   /** Run a pairing and confirm it on the Burrow with the digits the phone showed. */
   pairAndApprove(
     invitation: PairingInvitation,
@@ -363,6 +377,10 @@ export async function makeE2eHarness(
     getAssertion: (challenge) => authenticator.assert(challenge, ORIGIN),
   };
   let clientSocket: FakeSocket | null = null;
+  const requireClientSocket = (): FakeSocket => {
+    if (!clientSocket) throw new Error('the Client has not opened a relay socket');
+    return clientSocket;
+  };
   const client = new PocketClient({
     wsBase: 'ws://test',
     fetch,
@@ -377,6 +395,22 @@ export async function makeE2eHarness(
   // Sign-in caches the asserted passkey's public key and names the credential
   // every presence proof is built from, exactly as it does in the app.
   await client.signin();
+
+  const mintInvitation: E2eHarness['mintInvitation'] = () =>
+    burrow.mintInvitation(secret(), Date.now() + DEFAULT_PAIRING_TTL_MS);
+  const pairAndApprove: E2eHarness['pairAndApprove'] = async (invitation, { code } = {}) => {
+    // Counted from here: a harness that pairs twice must confirm the *new*
+    // request rather than re-answering the one still in the log.
+    const before = approvals.length;
+    let shown: string | null = null;
+    const pairing = client.pair(invitation, 'iPhone Safari', (value) => {
+      shown = value;
+    });
+    await waitFor(() => approvals.length > before, 'the Burrow to surface an approval');
+    const pending = approvals[approvals.length - 1]!;
+    pending.approve(code ? code(shown!) : shown!);
+    return await pairing;
+  };
 
   return {
     client,
@@ -393,23 +427,15 @@ export async function makeE2eHarness(
     },
     calls,
     fetch,
-    clientSocket: () => {
-      if (!clientSocket) throw new Error('the Client has not opened a relay socket');
-      return clientSocket;
-    },
-    mintInvitation: () => burrow.mintInvitation(secret(), Date.now() + DEFAULT_PAIRING_TTL_MS),
-    async pairAndApprove(invitation, { code } = {}) {
-      // Counted from here: a harness that pairs twice must confirm the *new*
-      // request rather than re-answering the one still in the log.
-      const before = approvals.length;
-      let shown: string | null = null;
-      const pairing = client.pair(invitation, 'iPhone Safari', (value) => {
-        shown = value;
-      });
-      await waitFor(() => approvals.length > before, 'the Burrow to surface an approval');
-      const pending = approvals[approvals.length - 1]!;
-      pending.approve(code ? code(shown!) : shown!);
-      return await pairing;
+    clientSocket: requireClientSocket,
+    clientTransportFrames: () => transportFrames(requireClientSocket().frames('e2e')),
+    burrowTransportFrames: () => transportFrames(relay.burrowSocket.frames('e2e')),
+    mintInvitation,
+    pairAndApprove,
+    async connectPaired() {
+      await pairAndApprove(await mintInvitation());
+      const outcome = await client.connect(burrowId);
+      if (!outcome.ok) throw new Error(`the connect was denied: ${outcome.message}`);
     },
   };
 }

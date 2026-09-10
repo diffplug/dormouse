@@ -22,6 +22,7 @@ import {
   type DirectPeerLike,
   type DirectSessionDescription,
 } from './direct-peer';
+import { FakeEventTarget } from '../test-fake-socket';
 
 /** When the linked channel reports itself open. */
 export type FakeChannelOpening =
@@ -124,7 +125,7 @@ export class FakePeer implements DirectPeerLike {
   readonly #role: FakePeerRole;
   readonly #options: FakeDirectNetworkOptions;
   readonly #network: FakeDirectNetwork;
-  readonly #listeners = new Map<string, Array<(ev: unknown) => void>>();
+  readonly #events = new FakeEventTarget();
   #local: DirectSessionDescription | null = null;
   #gathering: string;
   closed = false;
@@ -178,9 +179,7 @@ export class FakePeer implements DirectPeerLike {
   }
 
   addEventListener(type: string, handler: (ev: unknown) => void): void {
-    const list = this.#listeners.get(type) ?? [];
-    list.push(handler);
-    this.#listeners.set(type, list);
+    this.#events.addEventListener(type, handler);
   }
 
   close(): void {
@@ -205,7 +204,7 @@ export class FakePeer implements DirectPeerLike {
   }
 
   #emit(type: string, ev: unknown): void {
-    for (const handler of this.#listeners.get(type) ?? []) handler(ev);
+    this.#events.emit(type, ev);
   }
 }
 
@@ -219,7 +218,7 @@ export class FakeChannel implements DirectChannelLike {
   #peer: FakeChannel | null = null;
   /** Frames delivered before this end opened, held as a real one would. */
   readonly #inbox: Uint8Array[] = [];
-  readonly #listeners = new Map<string, Array<(ev: unknown) => void>>();
+  readonly #events = new FakeEventTarget();
 
   constructor(label: string) {
     this.label = label;
@@ -230,9 +229,7 @@ export class FakeChannel implements DirectChannelLike {
   }
 
   addEventListener(type: string, handler: (ev: unknown) => void): void {
-    const list = this.#listeners.get(type) ?? [];
-    list.push(handler);
-    this.#listeners.set(type, list);
+    this.#events.addEventListener(type, handler);
   }
 
   send(data: ArrayBuffer | ArrayBufferView): void {
@@ -284,6 +281,6 @@ export class FakeChannel implements DirectChannelLike {
   }
 
   #emit(type: string, ev: unknown): void {
-    for (const handler of this.#listeners.get(type) ?? []) handler(ev);
+    this.#events.emit(type, ev);
   }
 }

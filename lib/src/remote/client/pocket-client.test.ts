@@ -54,7 +54,7 @@ import {
 } from '../direct/test-fake-peer';
 import type { DirectPeerLike } from '../direct/direct-peer';
 import type { RemoteTimer } from '../ws';
-import { createTestAuthenticator, type TestAuthenticator } from '../test-e2e-client';
+import { createTestAuthenticator, settle, type TestAuthenticator } from '../test-e2e-client';
 import { PasskeyAlreadyRegisteredError, type WebAuthnClient } from './webauthn';
 import {
   AUTH_ROUTES,
@@ -107,11 +107,6 @@ function expiringClock(): { now: () => number; expire: () => void } {
       jumping = true;
     },
   };
-}
-
-/** Let everything already queued run, for a case asserting something did not happen. */
-async function settleTicks(): Promise<void> {
-  for (let i = 0; i < 8; i += 1) await new Promise((r) => setTimeout(r, 1));
 }
 
 // --- The account-plane harness ---------------------------------------------
@@ -770,8 +765,7 @@ describe('the direct path, end to end', () => {
             },
           }),
     });
-    await harness.pairAndApprove(await harness.mintInvitation());
-    expect(await harness.client.connect(harness.burrowId)).toMatchObject({ ok: true });
+    await harness.connectPaired();
     return {
       harness,
       network,
@@ -784,16 +778,12 @@ describe('the direct path, end to end', () => {
         .frames('e2e')
         .find((frame) => frame.kind === 'connection')!.id as string,
       /** Client→relay transport frames on the connection, which stop at the switch. */
-      clientFrames: () =>
-        harness
-          .clientSocket()
-          .frames('e2e')
-          .filter((frame) => frame.kind === 'connection' && frame.step === 'transport'),
-      /** Burrow→relay frames on this connection, which stop at its own switch. */
-      burrowFrames: () =>
-        harness.relay.burrowSocket
-          .frames('e2e')
-          .filter((frame) => frame.kind === 'connection'),
+      clientFrames: harness.clientTransportFrames,
+      /** Burrow→relay transport frames on this connection, which stop at its own switch. */
+      burrowFrames: harness.burrowTransportFrames,
+      /** Wait for the Burrow's second transport frame: its answer, or its decline. */
+      answered: () =>
+        waitFor(() => harness.burrowTransportFrames().length === 2, 'the Burrow to answer'),
       /** Wait until both directions have left the relay. */
       cutover: () =>
         waitFor(() => harness.client.transportPath === 'direct', 'the session to go direct'),
@@ -813,7 +803,7 @@ describe('the direct path, end to end', () => {
       expect(fromBase64Url(frame.ct as string).length).toBe(1 + CONTROL_PAYLOAD_SIZE + 16);
     }
     // And three the other way: the outcome, the answer, and the Burrow's switch.
-    expect(run.burrowFrames().filter((frame) => frame.step === 'transport')).toHaveLength(3);
+    expect(run.burrowFrames()).toHaveLength(3);
     // Signaling only so far: the channel has carried nothing.
     expect(run.network.offererChannel!.sent).toEqual([]);
   });
@@ -858,10 +848,7 @@ describe('the direct path, end to end', () => {
     const run = await connectedDirect({ burrowHasPeer: false });
 
     // The decline is the Burrow's second transport frame, after the outcome.
-    await waitFor(
-      () => run.burrowFrames().filter((frame) => frame.step === 'transport').length === 2,
-      'the Burrow to decline',
-    );
+    await run.answered();
     await waitFor(() => run.clientPeers[0]!.closed, 'the Client to close its peer');
 
     expect(run.harness.client.transportPath).toBe('relay');
@@ -934,11 +921,8 @@ describe('the direct path, end to end', () => {
    */
   it('holds channel frames until the peer’s switch, then drains them in order', async () => {
     const run = await connectedDirect({ network: { opening: 'manual' } });
-    await waitFor(
-      () => run.burrowFrames().filter((frame) => frame.step === 'transport').length === 2,
-      'the Burrow to answer',
-    );
-    await settleTicks();
+    await run.answered();
+    await settle();
 
     run.harness.relay.holdToClient();
     run.network.openChannels();
@@ -948,7 +932,7 @@ describe('the direct path, end to end', () => {
     const order: string[] = [];
     const first = run.harness.client.hello().then(() => order.push('first'));
     const second = run.harness.client.write('surface-1', 'ls').then(() => order.push('second'));
-    await settleTicks();
+    await settle();
     expect(order).toEqual([]);
 
     run.harness.relay.releaseToClient();

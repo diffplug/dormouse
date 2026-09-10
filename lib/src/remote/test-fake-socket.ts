@@ -10,6 +10,26 @@
 
 import type { RemoteWebSocket } from './ws';
 
+/**
+ * The listener map every fake in this stack keeps: `addEventListener` plus a
+ * way to fire one. Shared because the fake socket, the fake peer connection,
+ * and the fake data channel all had a private copy of exactly this.
+ */
+export class FakeEventTarget {
+  readonly #handlers = new Map<string, Array<(ev: unknown) => void>>();
+
+  addEventListener(type: string, handler: (ev: unknown) => void): void {
+    const list = this.#handlers.get(type) ?? [];
+    list.push(handler);
+    this.#handlers.set(type, list);
+  }
+
+  /** Deliver one event to everything listening for `type`. */
+  emit(type: string, ev: unknown): void {
+    for (const handler of this.#handlers.get(type) ?? []) handler(ev);
+  }
+}
+
 export class FakeSocket implements RemoteWebSocket {
   /** `CONNECTING` until {@link open}, as a real socket is. */
   readyState = 0;
@@ -26,12 +46,10 @@ export class FakeSocket implements RemoteWebSocket {
    * timing one.
    */
   onSend: ((frame: Record<string, unknown>) => void) | null = null;
-  readonly #handlers = new Map<string, Array<(ev: unknown) => void>>();
+  readonly #events = new FakeEventTarget();
 
   addEventListener(type: string, handler: (ev: unknown) => void): void {
-    const list = this.#handlers.get(type) ?? [];
-    list.push(handler);
-    this.#handlers.set(type, list);
+    this.#events.addEventListener(type, handler);
   }
 
   send(data: string): void {
@@ -87,6 +105,6 @@ export class FakeSocket implements RemoteWebSocket {
   }
 
   #emit(type: string, ev: unknown): void {
-    for (const handler of this.#handlers.get(type) ?? []) handler(ev);
+    this.#events.emit(type, ev);
   }
 }
