@@ -134,7 +134,7 @@ end's queue overrunning and the channel refusing a write are opposite diagnoses,
 and the reason is all an operator reading a burrow-loss log has to tell them
 apart.
 
-**Cutover preserves order per direction:**
+**The switch preserves order per direction:**
 
 * A sender's `direct-switch` is its **last** message on the relay path; every
   later message, keepalives included, goes on the channel.
@@ -182,7 +182,7 @@ their guard, the constants, the `DirectFrameQueue` both queues are, and the
 `DirectCutover` both ends run),
 `lib/src/remote/direct/direct-peer.ts` (`DirectPeerLike` and the negotiation),
 `DirectEndpoint` in `lib/src/remote/direct/direct-endpoint.ts` (the whole
-cutover policy, one per authorized session; `onRelayFrame` is both ends' only
+direct-path policy, one per authorized session; `onRelayFrame` is both ends' only
 way in from the relay; constructed at promotion by
 `PocketClient.#directEndpoint` in `lib/src/remote/client/pocket-client.ts` and
 `BurrowRuntime.#promoteConnection` in

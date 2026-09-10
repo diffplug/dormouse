@@ -445,8 +445,8 @@ on a standalone Burrow (`docs/specs/security-supply-chain.md`). A memory-safety
 bug in either is reachable by any stranger on those networks, and nothing above
 it mitigates that.
 
-**A channel lost after cutover is burrow loss, and that is accepted**: both ends
-end the session rather than resume on the Relay. (rationale) The Relay
+**A channel lost after a session has switched is burrow loss, and that is
+accepted**: both ends end the session rather than resume on the Relay. (rationale) The Relay
 still sees that the session exists and whether each end is online; it no longer
 sees the traffic ([Residual metadata](#residual-metadata)).
 
@@ -454,7 +454,7 @@ Source of truth: `remote-lib-common/src/security/direct-path.ts` (the signals,
 their guard, and `DirectCutover`), `lib/src/remote/direct/direct-peer.ts`
 (`DirectPeer`), `DirectEndpoint` in
 `lib/src/remote/direct/direct-endpoint.ts` (the attempt, the peer, and the
-cutover, created at promotion by `BurrowRuntime.#promoteConnection` in
+switch, created at promotion by `BurrowRuntime.#promoteConnection` in
 `lib/src/remote/burrow/burrow-runtime.ts` and `PocketClient.#directEndpoint` in
 `lib/src/remote/client/pocket-client.ts`). The audited rows are
 `docs/specs/security-remote.md` -> "Direct path".

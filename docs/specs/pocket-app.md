@@ -469,9 +469,10 @@ would read as a fault. **The transport hands up a `DirectRelayCause`, never its
 failure text**, and Pocket owns the sentence for each: what an attempt fails
 with includes a runtime's own exception message, which belongs in the operator's
 log. **A
-channel that dies after the cutover is burrow loss**: the phone leaves the wall
-exactly as it does for a `burrow-gone`, and returning costs a fresh handshake
-and one WebAuthn prompt. Before the cutover a failed channel costs nothing.
+channel that dies after this session has switched is burrow loss**: the phone
+leaves the wall exactly as it does for a `burrow-gone`, and returning costs a
+fresh handshake and one WebAuthn prompt. Before the switch a failed channel
+costs nothing.
 
 Source of truth: `PocketClient.transportPath` / `transportRelayCause` in
 `lib/src/remote/client/pocket-client.ts`, `TRANSPORT_PATH_LABELS` /

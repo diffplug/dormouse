@@ -304,7 +304,7 @@ small but not nothing: an unauthenticated STUN parser gated only by a
 per-attempt credential, and a DTLS stack. It exists between the offer and the
 session's disposal, which is minutes, not the process's lifetime.
 
-**Why a lost channel after cutover ends the session instead of falling back.**
+**Why a lost channel after the switch ends the session instead of falling back.**
 Falling back would mean resuming a `CipherState` at the counter the peer
 believes it is on, across a gap of unknown length in an ordered stream — a
 resynchronization the Noise transport deliberately has no construction for
