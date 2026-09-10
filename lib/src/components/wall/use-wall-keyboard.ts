@@ -5,6 +5,7 @@ import { handleMouseSelectionKeys } from './keyboard/handle-mouse-selection-keys
 import { handleKillConfirm } from './keyboard/handle-kill-confirm';
 import { handlePaneShortcuts } from './keyboard/handle-pane-shortcuts';
 import { handlePaneNavigation } from './keyboard/handle-pane-navigation';
+import { handleWorkspaceShortcuts } from './keyboard/handle-workspace-shortcuts';
 import { isProxyOrigin } from '../../lib/iframe-proxy-registry';
 import { chromeKeyboardHeld } from '../../lib/chrome-keyboard-lease';
 import type { NavHistoryRef, WallKeyboardCtx } from './keyboard/types';
@@ -50,6 +51,7 @@ export function useWallKeyboard(ctx: WallKeyboardCtx): void {
       if (c.renamingRef.current || chromeKeyboardHeld()) return;
       if (handleKillConfirm(e, c)) return;
       if (c.dialogKeyboardActiveRef.current) return;
+      if (handleWorkspaceShortcuts(e, c)) return;
       if (handlePaneShortcuts(e, c, navHistory)) return;
       handlePaneNavigation(e, c, navHistory);
     };

@@ -216,6 +216,37 @@ describe('WorkspaceWindow', () => {
     expect(handle.surfaceIds()).toEqual([]);
   });
 
+  it('binds the command-mode Workspace keys through the active Wall only', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await render();
+    const press = async (key: string) => {
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+      });
+      await flush();
+    };
+
+    await press('c');
+    const ids = () => getWorkspacesSnapshot().workspaces.map((workspace) => workspace.id);
+    expect(ids()).toHaveLength(2);
+    const second = ids()[1];
+    expect(getActiveWorkspaceId()).toBe(second);
+
+    await press('p');
+    expect(getActiveWorkspaceId()).toBe(first);
+    await press('n');
+    expect(getActiveWorkspaceId()).toBe(second);
+    await press('1');
+    expect(getActiveWorkspaceId()).toBe(first);
+    // Out of range does nothing rather than wrapping.
+    await press('9');
+    expect(getActiveWorkspaceId()).toBe(first);
+
+    // Exactly one Wall dispatches, so two mounted Walls create one Workspace.
+    await press('c');
+    expect(ids()).toHaveLength(3);
+  });
+
   it('refuses to close the last Workspace', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     await render();
