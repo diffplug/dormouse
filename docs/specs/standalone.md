@@ -164,7 +164,11 @@ window answering twice can settle nothing and contributes its panes once. **Rust
 pushes the live window labels** (`burrow:windows`) at setup and on every window
 create and destroy, and **dropping one settles the asks that window can no longer
 answer**; an ask in flight is only ever *narrowed*, since a window that opened
-after it never received it. `ASK_BUDGET_MS` (1s) still bounds the whole fan-out,
+after it never received it. **An ask naming a `surfaceId` goes to that Surface's
+owner alone** — `attach` and `resize` mutate the pane they reach, and fanned out
+they ask every other window to resize one it does not hold — and Rust names the
+window it delivered to (`burrow:askDelivered`) so the collector settles on that
+one answer instead of spending the budget on windows the ask never reached. `ASK_BUDGET_MS` (1s) still bounds the whole fan-out,
 and whatever did answer is still the best available snapshot.
 
 **An answer for an ask the bridge no longer holds invalidates the directory**
@@ -321,10 +325,10 @@ label.
 so `titleBarStyle`, `hiddenTitle`, `dragDropEnabled` and the CSP carry across
 with no second copy of any of them.
 
-**Capabilities cover `main` and the `ws-*` glob**; `capabilities/main-only.json`
-holds `updater:default` and `core:app:allow-version` alone, which is what
-structurally enforces that an update installs in the window the quit walk tears
-down last (`docs/specs/auto-update.md`). Custom commands need no capability entry.
+**Capabilities cover `main` and the `ws-*` glob**, in one set: the quit walk's
+last window installs a pending update and that is not always `main`
+(`docs/specs/auto-update.md`). Custom commands need no capability entry.
+`standalone/scripts/tauri-conf.test.mjs` pins both.
 
 ### Routing
 
@@ -333,16 +337,23 @@ Source of truth: `route` in `standalone/src-tauri/src/routing.rs`,
 
 | Sidecar event | Key | Goes to |
 |---|---|---|
-| `pty:data`, `terminal:semanticEvents`, `terminal:protocolEvents` | `data.id` | its owner; dropped while the id is mid-transfer; an unowned id broadcasts |
+| `pty:data`, `terminal:semanticEvents`, `terminal:protocolEvents` | `data.id` | its owner; dropped while the id is mid-transfer |
 | `pty:exit`, `pty:replay` | `data.id` | its owner, never suppressed |
 | `pty:list` | `data.forWindow` | the window that asked |
 | `alert:*` carrying `data.id` | `data.id` | its owner |
 | `dor:controlRequest` | `data.surfaceId` | its owner; no Surface named → the focused window |
 | `dor:controlCancel` | `data.requestId` | the window its request went to; unknown → every window |
+| `burrow:ask` | `data.params.surfaceId` | its owner; a Surface with no PTY here, or an ask naming none, → every window (§Burrow service) |
 | everything else | — | every window |
 
 - **Ownership is minted only in `pty_spawn`**, dropped by `pty_kill`, an exit,
-  or the window going away, and reassigned by a transfer.
+  or the window going away, and reassigned by a transfer. Minting also clears any
+  suppression left under that id: no replay is coming for a fresh PTY.
+- **A PTY event no window owns is dropped, and the shell is reaped.** Every PTY
+  is minted with an owner, so an unowned id is one whose window went away;
+  broadcasting rang every sibling's AlertManager for a pane none of them shows.
+  `Destroyed` SIGTERMs whatever the departing window still owned, which is what
+  the close ack-timeout path never killed.
 - **A `dor` request naming a Surface no window owns is answered with an error**,
   never handed to a sibling — acting on the wrong terminal is worse than failing
   (`docs/specs/dor-cli.md` → Standalone).
@@ -380,8 +391,30 @@ created. No `tauri-plugin-window-state` (rationale).
 `Resized` carry it — and read from that cache by both the debounced write and
 the cross-window drag hit test, which probes ~16 times a second. The platform is
 asked only once per window at creation, and for the minimized and scale-factor
-checks in the debounce flush. Source of truth: `CachedRect` / `note_geometry` /
-`restore_windows` in `standalone/src-tauri/src/lib.rs`.
+checks in the debounce flush.
+
+- **Never ask the platform anything while holding the rect cache.** Off the main
+  thread `scale_factor()` and `is_minimized()` park on the event loop, which the
+  main thread may be driving while it waits inside `window_at_cursor` for that
+  same lock. The flush reads both first and hands the scale to `refresh_rect`,
+  whose signature takes no window at all.
+- **The flush slot is released in the same step as the drain.** A `Moved` landing
+  between the two was marked dirty with no thread left to write it — and that
+  move is exactly a window's final position.
+
+Source of truth: `CachedRect` / `GeometryState` / `note_geometry` /
+`restore_windows` in `standalone/src-tauri/src/lib.rs`; the sequencing is pinned
+by `the_geometry_flush_slot_is_released_with_the_drain`.
+
+### What a window's `Destroyed` settles
+
+**Everything keyed by a label is settled in the `Destroyed` arm, and only
+there**: Tauri takes the label out of `webview_windows()` at that moment and not
+before, so a `burrow:windows` push sent ahead of it names a window that can never
+answer — and every ask then waits out its whole budget. The arm forgets the
+window's PTY ownership and reaps what it still owned, drops the save refusal
+(nothing can save under a dead label), forgets its geometry, tells the quit
+machine (§Quit flow) and pushes the live labels to the sidecar.
 
 ### Per-window close
 
@@ -397,8 +430,10 @@ anyway if that listener is dead), asks about *its own* running work, archives
   A quit keeps every blob, which is the whole difference.
 - **It runs no agent-recovery capture**: nothing is coming back.
 - **The snapshot is removed before the kill**, and Rust refuses every later save
-  for that label, so a PTY exit's save cannot write it back. That refusal is
-  dropped when the webview is destroyed and can no longer save.
+  for that label, so a PTY exit's save cannot write it back. **Both close paths
+  set that refusal** — the webview's own `remove_window_session`, and
+  `finish_window_close` for the ack-timeout path, where the webview never ran at
+  all. It is dropped when the webview is destroyed and can no longer save.
 - **`close_window` is the one Rust half both endings share** — a deliberate close
   and a window whose last Workspace moved away (§Transfer) — because what
   separates them is entirely what the webview did before calling it.
@@ -409,6 +444,21 @@ anyway if that listener is dead), asks about *its own* running work, archives
 the step past them — a quit votes and waits its turn in the walk, a close tears
 down at once.
 
+**Arbitration.** They are two machines over one window, one dialog and one
+human, and **a second flow is never refused in silence**: an unsettled context
+parks its own flow and leaves its host waiting out a decision that cannot come.
+
+| Arriving | Holder | Outcome |
+|---|---|---|
+| quit | a close still on its dialog | the close is cancelled (`window_close_cancel`); the quit takes over |
+| quit | any committed flow | the quit only acks — this window is already ending, and `Destroyed` forgets it |
+| close | a quit, in any state | refused at once with `window_close_cancel`; the window stays |
+
+**A quit cancelled elsewhere drops only a quit's dialog**, never this window's
+own close question. The confirm store cancels any context it cannot open, as the
+backstop. Both orderings are pinned by
+`standalone/src/teardown-arbiter.test.ts`.
+
 Source of truth: `standalone/src/window-close.ts`; `request_window_close` /
 `finish_window_close` in `standalone/src-tauri/src/lib.rs`.
 
@@ -417,9 +467,8 @@ Source of truth: `standalone/src/window-close.ts`; `request_window_close` /
 **A Workspace moves between windows without ending anything.** Nothing is
 archived and no process is killed: a move is not a closure.
 
-1. The source builds the Workspace's record with a live cwd probe, takes its
-   notes, and **releases** every Session — detached, still running
-   (`docs/specs/transport.md` → "Transferring a Workspace").
+1. The source builds the Workspace's record with a live cwd probe and takes its
+   notes, **touching nothing**.
 2. Rust **reassigns ownership synchronously** and suppresses those PTYs' output
    until each one's replay has been emitted to the target.
 3. The target **arms its collector, then calls `adopt_ready`** — the hop that
@@ -430,20 +479,47 @@ archived and no process is killed: a move is not a closure.
 5. The source drops the Workspace; **a window whose last Workspace left closes
    itself**, with no confirmation, no archive and no kill.
 
+- **The source releases its Sessions only once the host has accepted the move**
+  — detached, still running (`docs/specs/transport.md` → "Transferring a
+  Workspace"). The target window can close between the drag's last probe and the
+  drop, and a release ahead of the invoke left a Workspace with no Sessions and
+  no window that owned them; Rust hands the PTYs back before it returns the error.
+- **A pane's helper Session travels with it.** A helper is not a member Surface,
+  so nothing else in the payload names it, and one left behind is a leaked shell
+  plus a stray pane on the source's next reload. It rides directly after its
+  source, which is what lets the target's resume re-parent it.
+- **An arrival whose PTYs never answer is refused, never cold-restored.** A
+  timed-out collection is not a collection that found nothing: those shells are
+  still running, and restoring from the record would start a second set over
+  them (`docs/specs/transport.md` → "Reconnection").
+
 **A Workspace that comes back must mount from the record it brought**, never the
 plan it first booted with, or a fresh pane lands over the Sessions that just
-arrived. Source of truth: `releaseWorkspaceForTransfer` in
+arrived. Source of truth: `prepareWorkspaceTransfer` in
 `lib/src/components/wall/workspace-transfer.ts`, `standalone/src/workspace-move.ts`,
 `transfer_workspace` / `adopt_ready` in `standalone/src-tauri/src/lib.rs`.
 
 ### Tear-out
 
 **A tear-out opens the window positioned so the dragged tab lands under the
-cursor**, at the source window's size. **Its boot payload is pulled, never
-pushed**: an `emit_to` a window that does not exist yet is lost, so Rust parks
-it and the new webview takes it with `take_boot_payload` during its own boot.
-Its first flush writes `sessions/ws-<n>.json`, and from there it is an ordinary
-restorable window. Everything else is the transfer above.
+cursor**, at the source window's size. Its first flush writes
+`sessions/ws-<n>.json`, and from there it is an ordinary restorable window.
+Everything else is the transfer above.
+
+### Arrival queue
+
+**Every arriving Workspace is queued for its target window and pulled, never
+pushed.** An `emit_to` a window that has not installed its listener — one still
+booting, one that does not exist yet — is lost, and both are legal drop targets.
+Rust holds the payload; the webview drains it with `take_arrivals` at boot and
+again the moment its listener is installed, and a transfer's `emit_to` is a
+nudge carrying nothing.
+
+**The source is told of the departure only when the target takes the arrival**
+(`adopt_ready`), so a drop the target never received leaves the Workspace where
+it is rather than dropping its tab. A target that goes away first forgets both.
+Source of truth: `ArrivalQueues` in `standalone/src-tauri/src/routing.rs`,
+`take_arrivals` / `announce_departures` in `standalone/src-tauri/src/lib.rs`.
 
 ### Dragging a Workspace between windows
 
@@ -457,6 +533,14 @@ the cursor is over no window or over this window outside its own strip**.
 **Among windows containing the cursor the most recently focused wins** — the OS
 exposes no z-order — and the caret is what makes a wrong guess visible before
 the release. **The target decides the drop index**: it alone knows its own tabs.
+
+- **The throttle probes the trailing edge too**: the leading one never sees where
+  the pointer came to rest, which is the position the drop uses.
+- **A probe answering after the gesture is ignored**, or it re-lights a caret in
+  a window the drag has already left, where it would burn until the next one.
+- **The caret clears when the pointer comes back over its own strip**, where the
+  live reorder takes the gesture back.
+
 Source of truth: `window_at` in `standalone/src-tauri/src/routing.rs`;
 `standalone/src/workspace-drag.ts`; `standalone/src/workspace-drop-caret.ts`.
 
@@ -521,9 +605,8 @@ written.
   file is fsynced before the rename and, on unix only, the sessions directory
   *after* it (rationale).
 - **Window identity is implicit**: each command keys by the invoking
-  `tauri::Window`'s `label()`, so the frontend stays window-agnostic and a second
-  window (`win-2`, …) persists to its own file rather than rewriting the first
-  window's. The store is multi-window even though the app ships one window today.
+  `tauri::Window`'s `label()`, so the frontend stays window-agnostic and every
+  window (`ws-2`, …) persists to its own file rather than rewriting a sibling's.
 - No WAL to grow, and rewriting the same path bounds the on-disk size to one
   blob (rationale).
 - **The writer removes its own temp file on every error path**, so only a crash
@@ -638,20 +721,27 @@ teardown at a time. Source of truth: `QuitMachine` in
 | Phase | What happens |
 |---|---|
 | Voting | every window acks, archives its own notes, asks about its own running work, and calls `quit_vote` — or `quit_cancel`, which tells every window and destroys nothing |
-| Walking | `quit_teardown` reaches one window at a time in an order with **`main` last**, since it is the only window granted `updater:*`; each hands on with `quit_window_done`, and the last one installs and calls `quit_proceed` |
+| Walking | `quit_teardown` reaches one window at a time in an order ending with **`main` if it is open, else the most recently focused window**; each hands on with `quit_window_done`, and the last one installs and calls `quit_proceed` |
 
 - **A cancel is refused once the walk starts**: the first window is already gone.
 - **A window that leaves outside the flow is forgotten**, so its vote is never
-  waited on and the walk advances past it.
+  waited on and the walk advances past it. **A flow that runs out of windows
+  exits** rather than leaving a process with none.
 - **A quit keeps every window's snapshot on disk** — that is what a relaunch
   restores from, and the whole difference from a per-window close.
 
-**Trigger interception.** Two Rust arms funnel into `request_quit(app)`:
+### Trigger interception
+
+Every trigger funnels into `request_quit(app)`:
 
 | Arm | Fired by | Guard |
 |---|---|---|
-| `WindowEvent::CloseRequested` | the window close button | `api.prevent_close()` unless the quit is approved or the walk is already running. Only the **last** window's close is a quit; every other one is a per-window close (§Windows) |
-| `RunEvent::ExitRequested` | Cmd+Q / app-menu Quit / dock quit / interceptable OS logout | `api.prevent_exit()` unless approved. The event's `code` is ignored: the `approved` gate alone is what lets the flow's own terminating `app.exit(0)` through without re-catching it |
+| `WindowEvent::CloseRequested` | the window close button | `api.prevent_close()` unless the quit is approved. Refused outright while the walk is running: a window taken out from under its own teardown leaves the walk emitting to a dead label. Only the **last** window's close is a quit; every other one is a per-window close (§Windows) |
+| `RunEvent::ExitRequested` | a window-level exit request | `api.prevent_exit()` unless approved. The event's `code` is ignored: the `approved` gate alone is what lets the flow's own terminating `app.exit(0)` through without re-catching it |
+| the app menu's Quit item | the menu, and its `Cmd+Q` accelerator | a **custom** `MenuItem`, never `PredefinedMenuItem::quit`, whose event calls `request_quit`; muda wires the predefined one straight to AppKit's `terminate:` (macOS; rationale) |
+| `applicationShouldTerminate:` | the Dock's Quit, `osascript`, logout, restart | spliced onto tao's live delegate class at `Ready`, answering `NSTerminateCancel` and starting the flow, then `NSTerminateNow` once the flow's own `app.exit(0)` comes back through it (macOS; rationale) |
+
+Source of truth: `standalone/src-tauri/src/macos_terminate.rs`.
 
 **The ack / vote / progress / proceed / cancel protocol.** `request_quit` clears
 every window's `acked`, bumps `seq`, and broadcasts `dormouse://quit-requested`

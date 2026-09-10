@@ -99,6 +99,19 @@ VS Code's `pty-manager` keeps two buffers plus one counter per PTY. **Must cap e
    doors, not visible panes.
 ```
 
+**A collection finishes only on its own answer.** A `requestInit` carries the
+asking collector's token, and a host serving several windows echoes it on the
+`pty:list` and on every `pty:replay` behind it; the collector ignores anything
+carrying a different one. One webview can have two collections outstanding — a
+boot and a Workspace arriving from another window, or two arrivals — and every
+listener sees every answer, so without the token each finishes on the other's
+list and concludes the host holds nothing. **An answer carrying no token is
+taken**: a host with one webview has nothing to tell apart. **A collection that
+timed out is not a collection that found no PTYs** — those shells are still
+running, and a caller that cold-restores there starts a second set over them, so
+`LivePtys` reports which it was. Source of truth: `collectLivePtys` in
+`lib/src/lib/reconnect.ts`; `list` in `standalone/sidecar/pty-core.js`.
+
 **Seeded titles reject the sentinels.** Saved pane and door titles come back through `setTerminalUserTitle()`, which rejects the reserved `<idle>` prefix (`docs/specs/terminal-state.md` → Supported OSC Inputs), and the seed callers in `terminal-lifecycle.ts` additionally skip `<unnamed>`, the default panel placeholder (rationale).
 
 **Must follow `docs/specs/notepad.md` → "Live resume" for browser-only resumes.**
@@ -109,12 +122,13 @@ A Workspace can move from one webview to another with its Sessions still
 running (`docs/specs/standalone.md` → Transfer). It is a resume, not a restore,
 and it turns on three rules:
 
-- **Release, never dispose.** The source detaches its half of each Session —
-  the alert, the pins, the listeners, the element, the xterm instance — and
-  **does not kill the PTY** (`releaseSession` in
-  `lib/src/lib/terminal-lifecycle.ts`). **Never reachable from a webview
-  unmount**: a Wall unmounts on a reload and on a StrictMode double-mount, and
-  releasing there would strand every PTY the window still owns.
+- **Release, never dispose, and only once the host has accepted the move.** The
+  source detaches its half of each Session — the alert, the pins, the listeners,
+  the element, the xterm instance — and **does not kill the PTY**
+  (`releaseSession` in `lib/src/lib/terminal-lifecycle.ts`). **Never reachable
+  from a webview unmount**: a Wall unmounts on a reload and on a StrictMode
+  double-mount, and releasing there would strand every PTY the window still owns.
+  A host that refuses the move leaves the Workspace exactly as it was.
 - **Suppress until the replay.** The host moves ownership synchronously and
   drops the moving PTYs' output until each one's replay has reached the new
   owner, so no byte is painted twice and none is lost. It fails open after a
@@ -122,7 +136,8 @@ and it turns on three rules:
 - **Ask for exactly the moving ids.** `pty:requestInit` names them, and
   `list(ids)` follows the same **omitted is not empty** rule `interrupt` carries
   — a caller forwarding a computed set that came out empty gets a no-op, not
-  every PTY in the process.
+  every PTY in the process. The moving ids include each pane's helper Session,
+  which no other field names.
 
 **Cold restore** (neither live PTYs nor a browser-only resume) falls back to saved session state: new PTYs in the saved CWDs under the currently selected Dormouse shell, plus the saved Lath layout. No transcript is replayed ("What is persisted"), and any pane carrying a recovery command auto-runs it. `reconnect.ts` waits 500 ms for the PTY list.
 
@@ -162,7 +177,7 @@ Transport constraints:
 | Host → webview | `pty:replay` | Buffered raw output since spawn; the webview runs a one-shot parser over it, the only re-parse there is. |
 | Host → webview | `dormouse:newTerminal` | May carry `shell`, `args`, display `name`, `replaceUntouched`, `announce`. The webview replaces the selected untouched terminal in place only when `replaceUntouched` is true, otherwise spawns a new pane. |
 
-**Two app-global stores relay on one pattern**: WATCHING rules (`alert:initializeWatchedCommands`, `alert:setCommandWatched` → host; `alert:watchedCommands` → webview) and alarm settings (`alert:initializeSettings`, `alert:updateSettings` → host; `alert:settings` → webview; `docs/specs/alert.md` → Alarm settings). An `initialize*` offers the renderer's persisted copy as a startup seed, and **a multi-webview host accepts only the first seed of its lifetime**. A mutation replaces the host's copy — `setCommandWatched` adds or removes one bare command key without touching unrelated rules, `updateSettings` sends the whole blob, renderer-only fields included, so every webview agrees. Either way the host broadcasts a canonical snapshot, and **every renderer replaces and persists its local mirror from it**.
+**Two app-global stores relay on one pattern**: WATCHING rules (`alert:initializeWatchedCommands`, `alert:setCommandWatched` → host; `alert:watchedCommands` → webview) and alarm settings (`alert:initializeSettings`, `alert:updateSettings` → host; `alert:settings` → webview; `docs/specs/alert.md` → Alarm settings). An `initialize*` offers the renderer's persisted copy as a startup seed, and **a multi-webview host accepts only the first seed of its lifetime**. A mutation replaces the host's copy — `setCommandWatched` adds or removes one bare command key without touching unrelated rules, `updateSettings` sends the whole blob, renderer-only fields included, so every webview agrees. Either way the host broadcasts a canonical snapshot, and **every renderer replaces and persists its local mirror from it**. **In standalone both directions ride one opaque passthrough**, the `alert_command` invoke to a `alert:command` sidecar line, where the stores live so N windows share one answer; the snapshot comes back as a broadcast `alert:settings` / `alert:watchedCommands` (`docs/specs/standalone.md` → "Windows").
 
 **The host must revalidate renderer-supplied settings, never trust them** — they become host timers. `AlertSettingsHost` runs every inbound blob through `normalizeAlertSettings`, which drops unknown keys, defaults missing ones, and clamps each delay into range. Both directions share one adapter method, `alertPublishSettings(settings, { seed })`: seed vs replace picks a message type, not a payload.
 

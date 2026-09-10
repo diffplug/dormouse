@@ -30,6 +30,12 @@
 
 **The `<unnamed>` seed skip is lossy, deliberately.** Persistence cannot tell a deliberate `<unnamed>` pin from the default panel placeholder, so a user who pinned it gets the derived header back on reload — cheaper than seeding every default placeholder as a real user title.
 
+`collectLivePtys` filtered the answer but finished on any `pty:list`. With two
+Workspaces arriving in one window at once, the second arrival's list reached the
+first collector, filtered to nothing, and resolved it as "the host holds no
+PTYs" — so that Workspace cold-restored fresh shells at the saved cwds over the
+ones still running. The 3 s timeout did the same thing on its own.
+
 ## Transferring a Workspace
 
 The suppression is bounded and fails open because the two failures are not

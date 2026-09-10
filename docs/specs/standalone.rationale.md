@@ -37,7 +37,33 @@ two-window build therefore had each window taking the other's `pty:list` at boot
 and adopting its PTYs as unowned, which corrupted both snapshots; nothing
 errored. Measured against tauri 2.11.5, 2026-09.
 
+An unowned id was broadcast at first, on the reasoning that "an id nobody minted
+is not a routing decision anyone can make". It is: every PTY in this process is
+minted in `pty_spawn`, so an unowned id is one whose window went away, and the
+broadcast reached every sibling's AlertManager — which rang, and offered a TODO,
+for a pane none of them showed.
+
+## What a window's `Destroyed` settles
+
+Tauri removes a label from `webview_windows()` only when the window is actually
+destroyed, not when `destroy()` is called. `finish_window_close` pushed the
+sidecar's window list right after `destroy()`, so the list it computed still
+named the window that was going away, and the Burrow's ask collector then waited
+that window's whole `ASK_BUDGET_MS` on every subsequent ask. The same ordering
+made the quit machine's `forget_window` fire before the label was gone.
+
 ## Boot and geometry
+
+The flush thread ran `window.scale_factor()` while holding the rect cache. Off
+the main thread both that and `is_minimized()` post to the event loop and block
+on the reply, and the main thread reaches the same cache from `window_at_cursor`
+— which a cross-window drag calls ~16 times a second. `refresh_rect` takes the
+scale rather than the window so the shape cannot come back by accident.
+
+The flush also cleared its "a thread is coming" flag after taking the dirty set
+rather than with it. A `Moved` landing in that gap was marked dirty and then saw
+the flag still set, so it scheduled nothing — and a window whose last move is its
+final position simply never had that position written.
 
 `tauri-plugin-window-state` would have been a second store answering "which
 windows exist", a new Cargo *and* npm dependency riding the disclosure
@@ -66,6 +92,14 @@ replay exactly once").
 It fails open after 5 s rather than closed: a transfer whose `adopt_ready` never
 arrived would otherwise silence its panes for the rest of the session, and
 duplicated bytes are recoverable where a dead pane is not.
+
+## Arrival queue
+
+The first build emitted `workspace-arriving` straight at the target. A window
+torn out seconds earlier, or one restoring at launch, has no listener yet and is
+a perfectly ordinary drop target — the payload went nowhere, and because the
+departure was announced in the same breath, the source dropped its tab too. The
+Workspace's Sessions were then alive, owned by a window with no pane for them.
 
 ## Dragging a Workspace between windows
 
@@ -100,7 +134,40 @@ controller must simply not assume in-range coordinates.
 
 **Why the dev state root is a subtree rather than a separate identifier.** `app_data_dir()` is derived from the Tauri identifier, and changing the identifier for debug builds would move the notepad archive and the Burrow enrollment too — stranding a developer's notes and forcing a re-pair on every switch between the dev and installed app. A subtree splits exactly the state that is a copy of the user's window and shares the rest.
 
+## Trigger interception
+
+**Why the app menu's Quit item is custom.** Tauri hands
+`PredefinedMenuItem::quit` to muda, whose macOS implementation sends
+`terminate:` to `NSApp` (`muda-0.19.1/src/platform_impl/macos/mod.rs`); tao's app
+delegate implements `applicationWillTerminate:` and nothing else
+(`tao-0.35.2/src/platform_impl/macos/app_delegate.rs`), so no
+`RunEvent::ExitRequested` is ever raised for it. The same hole swallowed the
+Dock's Quit item, `osascript`, logout and restart. Cheap while a quit was only a
+confirmation; expensive once quit captures agent recovery and writes the final
+snapshot.
+
+`applicationShouldTerminate:` is added to the *live* delegate's class rather than
+to a delegate of our own, because replacing `NSApp.delegate` would take tao's
+window and application callbacks with it. `class_addMethod` refuses when the
+class already implements the selector, which is the signal that a tao upgrade
+has started handling this itself.
+
 ## Quit flow
+
+**Why the two teardown flows arbitrate.** They are independent machines that
+share one single-slot confirm store, and the store simply returned when a second
+`openQuitConfirm` arrived. The second flow's context was never settled, so its
+`phase` stayed `confirming` for the life of the window: a quit that met an open
+close dialog never voted, and Rust's phase-2 wait is unbounded by design because
+it waits on a human. The broadcast `quit-cancelled` made it worse by dismissing
+whichever dialog was open — including a close's — without telling its flow.
+
+**Why the walk's last window is not always `main`.** The install ran in `main`
+because only `main` held `updater:*`. Nothing stops a user closing `main` with
+siblings alive, and that session could then neither check nor install: the
+capability split enforced a rule the window lifecycle does not guarantee. The
+periodic check stays in `main` because it is a timer, not a capability, and one
+per window would be N checks against the endpoint.
 
 **Why the teardown ordering survived the transcript removal.** Flush → graceful kill → flush → drain was built to capture the final scrollback of dying terminals into the persisted session. The transcripts are gone, but the shape is still what makes the *structure* correct: the first flush reads cwds while the shells are alive, and the second catches whatever changed as they died, retaining the earlier cwd for a PTY `getCwd` can no longer answer.
 

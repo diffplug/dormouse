@@ -88,7 +88,7 @@ A Workspace's **union status** is its display projection of member Surfaces' Act
 
 ### Implementation status
 
-The Pane / Surface model, surface kinds, the Workspace model, and per-Workspace persistence are live; a Window still means one OS window (`docs/specs/layout.md` → Workspaces). Ledger: `docs/specs/layout.md` `## Future` (**Scope: workspaces-rollout**); this glossary does not track it.
+The Pane / Surface model, surface kinds, the Workspace model, per-Workspace persistence, and several Windows each holding several Workspaces are live (`docs/specs/layout.md` → Workspaces). Ledger: `docs/specs/layout.md` `## Future` (**Scope: workspaces-rollout**); this glossary does not track it.
 
 ## Roles
 
@@ -205,7 +205,7 @@ A user verb is an intentional action that produces a single observable change.
 | `transferWorkspace` | Move a Workspace to another Window, Surfaces and Sessions intact: `release` each member Session (detached, Process still Live) and resume it there. Kills nothing and archives nothing — not a `closeWorkspace`. |
 | `tearOut` | `transferWorkspace` into a Window created for it. A Window whose last Workspace leaves closes itself. |
 
-Source of truth: `setActiveWorkspace` / `createWorkspace` / `closeWorkspace` / `renameWorkspace` / `moveWorkspace` in `lib/src/lib/workspace-store.ts`; `closeAll` in `lib/src/components/Wall.tsx`; `releaseWorkspaceForTransfer` in `lib/src/components/wall/workspace-transfer.ts`.
+Source of truth: `setActiveWorkspace` / `createWorkspace` / `closeWorkspace` / `renameWorkspace` / `moveWorkspace` in `lib/src/lib/workspace-store.ts`; `closeAll` in `lib/src/components/Wall.tsx`; `prepareWorkspaceTransfer` in `lib/src/components/wall/workspace-transfer.ts`.
 
 ### System verbs
 

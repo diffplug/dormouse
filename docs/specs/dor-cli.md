@@ -600,7 +600,7 @@ Source of truth: `buildDorSurfacesInternal` in `lib/src/components/Wall.tsx`; `d
   workspaces-rollout).
 - **Workspace handles and commands** — a `--workspace` target flag and `dor
   workspace` management commands (new / rename / close / switch — mutation only)
-  consuming the reserved `workspace:<n|name>` / `window:<n>` ref grammar above.
+  consuming the reserved `workspace:<n|name>` / `window:<label>` ref grammar above.
   Like every command they ship with snapshot-tested help and the control methods
   that back them, not ahead of them. Staged with the workspaces rollout
   (`docs/specs/layout.md` `## Future`, workspaces-rollout).
