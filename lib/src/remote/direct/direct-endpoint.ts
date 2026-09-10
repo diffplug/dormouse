@@ -44,7 +44,7 @@ export interface DirectEndpointDeps {
    * everything that is not a signal, and answer the receipt. `null` where the
    * decrypt failed — a poisoned session, which the owner has already disposed.
    *
-   * The signals come back here rather than being dispatched by the owner: the
+   * A signal is left in the receipt rather than dispatched by the owner: the
    * endpoint is the only thing that knows what one means.
    */
   receive(ciphertext: Uint8Array): TransportReceipt | null;
