@@ -1186,6 +1186,12 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
     ptyShells.set(id, config.shell);
 
     p.onData((data) => {
+      // Appended BEFORE the send, and synchronously. Two consumers depend on
+      // that order: the replay a reconnecting webview reads, and a Workspace
+      // transfer, whose host suppresses this id's output the instant it
+      // reassigns ownership and then asks for `list([id])` — so the chunk it
+      // suppressed has to already be in the buffer the replay is built from,
+      // exactly once (docs/specs/transport.md -> "Transferring a Workspace").
       if (replay && ptys.get(id) === p) {
         session.chunks.push(data);
         session.chars += data.length;
@@ -1295,13 +1301,24 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
     sessions.clear();
   }
 
-  function list() {
-    const result = [];
-    for (const [id] of ptys) {
-      result.push({ id, alive: true, shell: ptyShells.get(id), ...(helpers.has(id) ? { helper: helpers.get(id) } : {}) });
-    }
-    send('list', { ptys: result });
-    if (replay) for (const { id } of result) send('replay', { id, data: sessions.get(id).chunks.join('') });
+  /**
+   * List (and, where this host buffers, replay) live PTYs.
+   *
+   * `ids` omitted is every live PTY; an empty array is an empty list — the same
+   * "omitted is not empty" rule `interrupt` carries, and for the same reason: a
+   * caller forwarding a computed set that came out empty must get a no-op
+   * rather than everything. `forWindow` is echoed on the list and on each
+   * replay so the host can route both back to the window that asked
+   * (docs/specs/standalone.md -> "Windows").
+   */
+  function list(ids, forWindow) {
+    const targets = Array.isArray(ids) ? ids.filter((id) => ptys.has(id)) : [...ptys.keys()];
+    const result = targets.map((id) => ({
+      id, alive: true, shell: ptyShells.get(id), ...(helpers.has(id) ? { helper: helpers.get(id) } : {}),
+    }));
+    const addressed = forWindow ? { forWindow } : {};
+    send('list', { ptys: result, ...addressed });
+    if (replay) for (const { id } of result) send('replay', { id, data: sessions.get(id).chunks.join(''), ...addressed });
   }
 
   // Only explicit settings edits write this installation-global preference. No
@@ -1423,26 +1440,39 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
     if (requestId !== undefined) send('interruptDone', { requestId });
   }
 
-  function gracefulKillAll(timeout = 2000, requestId) {
+  /**
+   * SIGTERM `ids` (omitted: every live PTY) and resolve once they have exited.
+   *
+   * Scoped rather than blanket because one window of several tears down alone,
+   * and killing a sibling's terminals is unrecoverable. `ids` follows the same
+   * "omitted is not empty" rule as `interrupt` and `list`.
+   */
+  function gracefulKill(ids, timeout = 2000, requestId) {
     const done = () => send('gracefulKillDone', { requestId });
+    const targets = (Array.isArray(ids) ? ids : [...ptys.keys()]).filter((id) => ptys.has(id));
     // Nothing live to SIGTERM, but a just-exited PTY can still deliver final
     // output shortly after onExit (notably under ConPTY). Keep the same single
     // grace tick used after the live map empties before the quit flush runs.
-    if (ptys.size === 0) { setTimeout(done, 50); return; }
-    for (const [, p] of ptys) {
-      try { p.kill('SIGTERM'); } catch { /* already dead */ }
+    if (targets.length === 0) { setTimeout(done, 50); return; }
+    for (const id of targets) {
+      try { ptys.get(id).kill('SIGTERM'); } catch { /* already dead */ }
     }
-    // Resolve early once every PTY has exited (onExit empties the map) instead
-    // of always sitting out the full timeout — but one grace tick after the map
-    // empties, since ConPTY can fire onExit before the final data flush and that
+    // Resolve early once every target has exited (onExit removes it) instead
+    // of always sitting out the full timeout — but one grace tick after the last
+    // one goes, since ConPTY can fire onExit before the final data flush and that
     // last output must reach the host first.
     const deadline = Date.now() + timeout;
     const tick = () => {
-      if (ptys.size === 0) setTimeout(done, 50);
+      if (!targets.some((id) => ptys.has(id))) setTimeout(done, 50);
       else if (Date.now() >= deadline) done();
       else setTimeout(tick, 50);
     };
     setTimeout(tick, 50);
+  }
+
+  /** @deprecated Kept for one release so a stale bundle still tears down. */
+  function gracefulKillAll(timeout = 2000, requestId) {
+    gracefulKill(undefined, timeout, requestId);
   }
 
   function getShells(requestId) {
@@ -1450,6 +1480,6 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
   }
 
   return { spawn, write, resize, hasPty, kill, killAll, list, context,
-    getCwd, getCwds, getOpenPorts, interrupt, gracefulKillAll, getShells,
+    getCwd, getCwds, getOpenPorts, interrupt, gracefulKill, gracefulKillAll, getShells,
     liveIds, receivedChars, outputSince };
 };

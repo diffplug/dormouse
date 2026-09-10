@@ -54,8 +54,11 @@ export interface SidecarSurfaceBridgeOptions {
 
 export interface SidecarSurfaceBridge {
   provider: BurrowSurfaceProvider;
-  /** An `answer` command: settles the ask it names. */
+  /** An `answer` command: contributes to the ask it names. */
   onAnswer(params: AnswerParams | undefined): void;
+  /** How many webviews will answer an ask. Pushed by the host on every window
+   *  create and destroy (`docs/specs/standalone.md` -> "Burrow service"). */
+  setWindowCount(count: unknown): void;
   /** A `notify` command: something the directory depends on changed. */
   onNotify(): void;
   /**
@@ -83,29 +86,46 @@ export function createSidecarSurfaceBridge(
   options: SidecarSurfaceBridgeOptions,
 ): SidecarSurfaceBridge {
   interface PendingAsk {
-    settle(results: unknown[]): void;
+    /** Every answering window's results, concatenated. */
+    results: unknown[];
+    /** How many windows have answered. A window answering nothing still counts:
+     *  what settles the ask is having heard from everyone, not having found
+     *  anything. */
+    answered: number;
+    /** How many answers this ask still expects. Set from the window count when
+     *  the ask was sent, and only ever LOWERED: a window that closed mid-fan-out
+     *  will never answer, while one that opened never received the ask. */
+    expected: number;
+    settle(): void;
   }
   const asks = new Map<string, PendingAsk>();
   let askSeq = 0;
+  /** How many webviews the host says will answer. One until it says otherwise,
+   *  which is also what the browser-dev harness and the tests get. */
+  let windowCount = 1;
 
   function ask(op: string, params: unknown): Promise<unknown[]> {
     const burrowRequestId = `ask-${++askSeq}`;
     return new Promise((resolve) => {
+      const pending: PendingAsk = {
+        results: [],
+        answered: 0,
+        expected: windowCount,
+        settle: () => {
+          clearTimeout(timer);
+          asks.delete(burrowRequestId);
+          resolve(pending.results);
+        },
+      };
       const timer = setTimeout(() => {
         // Budget spent. An attach must not hang on a webview that is reloading,
         // and a directory that missed a pane re-collects on the next change.
-        asks.delete(burrowRequestId);
-        resolve([]);
+        // Whatever did answer is still the best available snapshot.
+        pending.settle();
       }, ASK_BUDGET_MS);
       // An outstanding ask must never hold the sidecar's event loop open.
       (timer as unknown as { unref?: () => void }).unref?.();
-      asks.set(burrowRequestId, {
-        settle: (results) => {
-          clearTimeout(timer);
-          asks.delete(burrowRequestId);
-          resolve(results);
-        },
-      });
+      asks.set(burrowRequestId, pending);
       options.send(BURROW_ASK_EVENT, { burrowRequestId, op, params });
     });
   }
@@ -228,10 +248,9 @@ export function createSidecarSurfaceBridge(
     provider,
 
     /**
-     * The first answer settles the ask. Standalone ships one window, so there is
-     * exactly one answerer today; the multi-window seam
-     * (docs/specs/standalone.md) is where this becomes "collect until the
-     * budget".
+     * Collect until every window has answered, or the budget runs out. Each
+     * window sees only its own Workspaces, so a directory built from the first
+     * answer would list one window's panes and silently omit the rest.
      */
     onAnswer(params) {
       if (!params || typeof params.burrowRequestId !== 'string') return;
@@ -246,7 +265,20 @@ export function createSidecarSurfaceBridge(
         notifyDirectoryChanged();
         return;
       }
-      pending.settle(Array.isArray(params.results) ? params.results : []);
+      pending.answered += 1;
+      if (Array.isArray(params.results)) pending.results.push(...params.results);
+      if (pending.answered >= pending.expected) pending.settle();
+    },
+
+    setWindowCount(count) {
+      if (typeof count !== 'number' || !Number.isFinite(count) || count < 1) return;
+      windowCount = Math.floor(count);
+      // Re-evaluate what is already out: a window that closed mid-fan-out can
+      // never answer, and must not hold an ask open to its whole budget.
+      for (const pending of [...asks.values()]) {
+        pending.expected = Math.min(pending.expected, windowCount);
+        if (pending.answered >= pending.expected) pending.settle();
+      }
     },
 
     onNotify() {
@@ -306,7 +338,7 @@ export function createSidecarSurfaceBridge(
     },
 
     dispose() {
-      for (const pending of [...asks.values()]) pending.settle([]);
+      for (const pending of [...asks.values()]) pending.settle();
       asks.clear();
       streams.clear();
       exits.clear();
@@ -328,6 +360,7 @@ export interface SidecarBurrow {
   handleCommand(data: unknown): void;
   onPtyEvent(event: string, data: unknown): void;
   onPtySpawn(id: unknown): void;
+  setWindowCount(count: unknown): void;
   setThemeColors(colors: unknown): void;
   dispose(): void;
 }
@@ -365,6 +398,7 @@ export function createSidecarBurrow(options: SidecarBurrowOptions): SidecarBurro
     },
     onPtyEvent: bridge.onPtyEvent,
     onPtySpawn: bridge.onPtySpawn,
+    setWindowCount: bridge.setWindowCount,
     setThemeColors: bridge.setThemeColors,
     dispose() {
       service.dispose();

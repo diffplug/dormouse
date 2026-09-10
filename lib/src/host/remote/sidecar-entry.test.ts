@@ -83,13 +83,60 @@ describe('asking the webview', () => {
     expect(await pending).toEqual([{ surfaceId: 's1' }]);
   });
 
-  it('settles on the first answer and ignores a later one', async () => {
-    // Standalone ships one window, so one answerer; a second is a stale reply.
+  it('settles on the one answer while one window is open', async () => {
     const pending = bridge.provider.collectDirectory();
     const ask = asks()[0]!;
     answer(ask, [{ surfaceId: 'first' }]);
+    // Settled: a later reply is stale and cannot reopen it.
     answer(ask, [{ surfaceId: 'second' }]);
     expect(await pending).toEqual([{ surfaceId: 'first' }]);
+  });
+
+  it('collects one answer per window and concatenates them', async () => {
+    // Each window sees only its own Workspaces, so a directory built from the
+    // first answer would list one window's panes and omit the rest.
+    bridge.setWindowCount(2);
+    const pending = bridge.provider.collectDirectory();
+    const ask = asks()[0]!;
+    answer(ask, [{ surfaceId: 'in-main' }]);
+    answer(ask, [{ surfaceId: 'in-ws-2' }]);
+    expect(await pending).toEqual([{ surfaceId: 'in-main' }, { surfaceId: 'in-ws-2' }]);
+  });
+
+  it('answers with what it has when a window never replies', async () => {
+    vi.useFakeTimers();
+    bridge.setWindowCount(3);
+    const pending = bridge.provider.collectDirectory();
+    const ask = asks()[0]!;
+    answer(ask, [{ surfaceId: 'in-main' }]);
+    await vi.advanceTimersByTimeAsync(ASK_BUDGET_MS);
+    // A partial directory beats an empty one; the next change re-collects.
+    expect(await pending).toEqual([{ surfaceId: 'in-main' }]);
+  });
+
+  it('a window closing mid-fan-out settles the ask instead of holding it open', async () => {
+    bridge.setWindowCount(2);
+    const pending = bridge.provider.collectDirectory();
+    const ask = asks()[0]!;
+    answer(ask, [{ surfaceId: 'in-main' }]);
+    // The second window went away without answering.
+    bridge.setWindowCount(1);
+    expect(await pending).toEqual([{ surfaceId: 'in-main' }]);
+  });
+
+  it('a window opening mid-fan-out never received the ask, so it is not waited on', async () => {
+    const pending = bridge.provider.collectDirectory();
+    const ask = asks()[0]!;
+    bridge.setWindowCount(2);
+    answer(ask, [{ surfaceId: 'in-main' }]);
+    expect(await pending).toEqual([{ surfaceId: 'in-main' }]);
+  });
+
+  it('ignores a window count that is not a usable number', async () => {
+    for (const bad of [0, -1, Number.NaN, '2', undefined, null]) bridge.setWindowCount(bad);
+    const pending = bridge.provider.collectDirectory();
+    answer(asks()[0]!, [{ surfaceId: 's1' }]);
+    expect(await pending).toEqual([{ surfaceId: 's1' }]);
   });
 
   it('gives up at the budget rather than hanging', async () => {

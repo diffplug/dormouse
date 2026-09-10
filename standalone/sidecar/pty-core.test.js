@@ -1635,3 +1635,126 @@ test('getCwds answers a key for every requested id, null for one with no PTY', (
   // A pane with no live PTY is never scanned for.
   assert.equal(answer.data.cwds['pane-gone'], null);
 });
+
+
+// --- Per-window list / replay / kill (docs/specs/standalone.md -> "Windows") ---
+
+function fakePtyModule() {
+  const listeners = new Map();
+  const killed = [];
+  return {
+    listeners,
+    killed,
+    module: {
+      spawn(shell, args, opts) {
+        const id = opts?.env?.DORMOUSE_SURFACE_ID;
+        const handlers = {};
+        listeners.set(id, handlers);
+        return {
+          pid: 100 + listeners.size,
+          onData(handler) { handlers.data = handler; },
+          onExit(handler) { handlers.exit = handler; },
+          resize() {},
+          write() {},
+          kill(signal) { killed.push([id, signal]); },
+        };
+      },
+    },
+  };
+}
+
+test('list(ids) lists and replays only those ids, naming the window that asked', () => {
+  const events = [];
+  const pty = fakePtyModule();
+  const mgr = create((event, data) => events.push({ event, data }), pty.module, { replay: true });
+  mgr.spawn('a');
+  mgr.spawn('b');
+  pty.listeners.get('a').data('from a');
+  pty.listeners.get('b').data('from b');
+
+  events.length = 0;
+  mgr.list(['a'], 'ws-2');
+
+  assert.equal(events.length, 2);
+  assert.equal(events[0].event, 'list');
+  assert.equal(events[0].data.forWindow, 'ws-2');
+  assert.deepEqual(events[0].data.ptys.map((entry) => entry.id), ['a']);
+  assert.deepEqual(events[1], { event: 'replay', data: { id: 'a', data: 'from a', forWindow: 'ws-2' } });
+});
+
+test('list omitted is every PTY; list([]) is an empty list', () => {
+  const events = [];
+  const pty = fakePtyModule();
+  const mgr = create((event, data) => events.push({ event, data }), pty.module, { replay: true });
+  mgr.spawn('a');
+  mgr.spawn('b');
+
+  events.length = 0;
+  mgr.list();
+  assert.deepEqual(events[0].data.ptys.map((p) => p.id), ['a', 'b']);
+  assert.equal('forWindow' in events[0].data, false);
+
+  // "Omitted" means omitted, never "an empty list" — the same rule `interrupt`
+  // carries. A caller forwarding a computed set that came out empty gets a
+  // no-op, not every PTY in the process.
+  events.length = 0;
+  mgr.list([], 'ws-2');
+  assert.deepEqual(events, [{ event: 'list', data: { ptys: [], forWindow: 'ws-2' } }]);
+});
+
+// The whole no-duplicate / no-loss argument for a Workspace transfer rests on
+// this ordering: `onData` appends to the replay buffer synchronously before it
+// emits, so a chunk the host suppressed the instant it saw the `data` event is
+// already in the buffer the replay behind it is built from.
+test('a chunk emitted just before list([id]) appears in the replay exactly once', () => {
+  const events = [];
+  const pty = fakePtyModule();
+  let mgr;
+  const mgrRef = () => mgr;
+  mgr = create((event, data) => {
+    events.push({ event, data });
+    // The host, on seeing this chunk, reassigns ownership (suppressing further
+    // output for this id) and immediately asks for the new owner's replay.
+    if (event === 'data' && data.data === 'mid-transfer') mgrRef().list(['a'], 'ws-2');
+  }, pty.module, { replay: true });
+  mgr.spawn('a');
+  pty.listeners.get('a').data('before\r\n');
+  pty.listeners.get('a').data('mid-transfer');
+
+  const replay = events.find((entry) => entry.event === 'replay');
+  assert.ok(replay, 'the transfer asked for a replay');
+  assert.equal(replay.data.data, 'before\r\nmid-transfer');
+  // Exactly once: the chunk is in the replay, and it was emitted as `data`
+  // exactly once — the host drops that copy, so the pane never renders it twice.
+  assert.equal(replay.data.data.split('mid-transfer').length - 1, 1);
+});
+
+test('gracefulKill targets only the named PTYs', async () => {
+  const events = [];
+  const pty = fakePtyModule();
+  let resolveDone;
+  const done = new Promise((resolve) => { resolveDone = resolve; });
+  const mgr = create((event, data) => {
+    events.push({ event, data });
+    if (event === 'gracefulKillDone') resolveDone();
+  }, pty.module, { replay: true });
+  mgr.spawn('a');
+  mgr.spawn('b');
+
+  mgr.gracefulKill(['a'], 1, 'req-1');
+  await done;
+
+  assert.deepEqual(pty.killed, [['a', 'SIGTERM']]);
+  assert.deepEqual(events.at(-1), { event: 'gracefulKillDone', data: { requestId: 'req-1' } });
+});
+
+test('gracefulKill([]) kills nothing and still answers', async () => {
+  const pty = fakePtyModule();
+  let resolveDone;
+  const done = new Promise((resolve) => { resolveDone = resolve; });
+  const mgr = create((event) => { if (event === 'gracefulKillDone') resolveDone(); }, pty.module);
+  mgr.spawn('a');
+  mgr.gracefulKill([], 1, 'req-1');
+  await done;
+  assert.deepEqual(pty.killed, []);
+});
