@@ -350,7 +350,7 @@ Source of truth: `route` in `standalone/src-tauri/src/routing.rs`,
   `listen` would take every other window's traffic and make this whole table
   decoration (rationale). `listenToWindow` in
   `standalone/src/window-label.ts` is the only caller of the event API, pinned
-  by `standalone/src/window-label.test.ts`.
+  by `standalone/scripts/window-listeners.test.mjs`.
 - **The focus order is the fallback owner** for a `dor` request naming no
   Surface, and the drag hit test's stand-in for a z-order the OS does not expose.
 

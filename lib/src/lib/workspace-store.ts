@@ -162,7 +162,8 @@ export function moveWorkspace(id: WorkspaceId, toIndex: number): boolean {
   return true;
 }
 
-/** The only Window this build addresses; `window:<n>` beyond it is an error. */
+/** How a Window names itself to `dor`. Every Window answers `window:1`: no
+ *  command takes a Window ref yet (`docs/specs/dor-cli.md` -> "Handle Model"). */
 export const WINDOW_REF = 'window:1';
 
 /** Whether `ref` names this Window — `window:1`, or the bare `1`. */
