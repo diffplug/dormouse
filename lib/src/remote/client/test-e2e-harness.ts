@@ -148,13 +148,24 @@ export function memoryPendingDeletions(): MemoryPendingDeletions {
   };
 }
 
-/** Poll until `predicate` holds, so a Burrow awaiting WebCrypto can catch up. */
-export async function waitFor(predicate: () => boolean, what = 'a condition'): Promise<void> {
-  for (let i = 0; i < 400; i++) {
+/**
+ * Poll until `predicate` holds, so a Burrow awaiting WebCrypto can catch up.
+ *
+ * The default budget covers a ceremony step, which is a run of awaited
+ * WebCrypto calls and nothing else. A caller waiting on something with a
+ * network in it — a real ICE negotiation — names its own.
+ */
+export async function waitFor(
+  predicate: () => boolean,
+  what = 'a condition',
+  timeoutMs = 800,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
     if (predicate()) return;
+    if (Date.now() >= deadline) throw new Error(`timed out waiting for ${what}`);
     await new Promise((r) => setTimeout(r, 2));
   }
-  throw new Error(`timed out waiting for ${what}`);
 }
 
 export const CREDENTIAL_ID = 'cred-123';
