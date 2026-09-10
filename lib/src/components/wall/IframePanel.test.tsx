@@ -97,6 +97,34 @@ describe('IframePanel', () => {
     expect(onOpenBrowserPane).not.toHaveBeenCalled();
   });
 
+  // The raw fallback puts `params.url` straight into `<iframe src>`, and the
+  // sandbox keeps `allow-same-origin`, so a non-http(s) scheme there can reach
+  // the embedding webview's realm. `browserSurfaceUrl` guards the control
+  // socket and the `open-window` message, but the panel is the sink every
+  // writer of `params.url` ends at — including the header's URL editor, whose
+  // `normalizeNavUrl` passes `javascript:` and `data:` through on purpose.
+  // React neutralizes `javascript:` in a `src` prop and nothing else, so
+  // `data:` is the case that proves this guard does its own work.
+  it.each([
+    'javascript:alert(1)',
+    'data:text/html,<script>alert(1)</script>',
+  ])('refuses %s as a source url instead of framing it', async (url) => {
+    await act(async () => {
+      root.render(
+        <StrictMode>
+          <PaneWriteContext.Provider value={{ updateParams: () => {}, setTitle: () => {} }}>
+            <WallActionsContext.Provider value={stubActions()}>
+              <IframePanel id="iframe-scheme" title="Raw iframe" params={{ url }} />
+            </WallActionsContext.Provider>
+          </PaneWriteContext.Provider>
+        </StrictMode>,
+      );
+    });
+
+    expect(container.querySelector('iframe')).toBeNull();
+    expect(container.textContent).toContain('only frames');
+  });
+
   it('adopts clicks into the raw iframe fallback via window blur focus', async () => {
     const onClickPanel = vi.fn();
     const actions = stubActions({ onClickPanel });

@@ -467,9 +467,11 @@ Source of truth: `lib/src/components/wall/IframePanel.tsx`,
   anchor clicks; never relayed from nested documents.
 - `open-window`: intercepted `target=_blank` anchor or `window.open` URL; relayed.
 
-**A URL from the frame is re-checked before it becomes a pane.** `open-window`
-and the control socket's `surface.iframe` both go through `browserSurfaceUrl`;
-only `http:` and `https:` are accepted. (rationale)
+**Only `http:` and `https:` reach a browser Surface, re-checked at the sink.**
+`open-window` and the control socket's `surface.iframe` go through
+`browserSurfaceUrl`, and `IframePanel` checks `params.url` again before framing
+it — the header's URL editor writes there too, and `normalizeNavUrl` keeps a
+typed non-http scheme. (rationale)
 
 **Parent listeners must validate the message origin against live proxy grants.**
 Leader messages feed the same Wall command-mode exit path as in-document

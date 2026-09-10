@@ -169,6 +169,17 @@ export function IframePanel({ id, title, params }: PaneProps) {
       setResolution({ kind: 'empty' });
       return;
     }
+    // The panel is the sink every writer of `params.url` ends at, and the raw
+    // fallback hands the string straight to `<iframe src>` under a sandbox that
+    // keeps allow-same-origin — so the scheme is checked here rather than only
+    // at the two callers the spec names (docs/specs/dor-browser.md → "Iframe
+    // Shim"). The header's URL editor is the third: `normalizeNavUrl` keeps a
+    // typed `javascript:` or `data:` scheme on purpose. React blanks a
+    // `javascript:` src and nothing else, which is not a boundary to rely on.
+    if (!browserSurfaceUrl(sourceUrl)) {
+      setResolution({ kind: 'error', reason: 'scheme' });
+      return;
+    }
     const createProxy = getPlatform().createIframeProxyUrl;
     if (!createProxy) {
       setResolution({ kind: 'raw', src: sourceUrl });
