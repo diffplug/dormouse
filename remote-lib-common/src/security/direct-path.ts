@@ -87,10 +87,17 @@ export const MAX_DIRECT_PENDING_FRAMES = 8192;
  * Its own bound rather than the holding queue's: a peer that has stopped
  * switching leaves this end sending into a channel nothing reads, and waiting
  * for {@link MAX_DIRECT_PENDING_BYTES} to fill makes the wait a function of how
- * chatty the session happens to be. Generous next to the relay round trip the
- * peer's switch actually takes.
+ * chatty the session happens to be.
+ *
+ * **Biased long, because the two outcomes are not symmetric.** What is being
+ * waited on is a relay hop — on exactly the congested uplink the direct path
+ * exists to escape — while expiry is burrow loss, costing a fresh handshake and
+ * a WebAuthn prompt. Waiting costs only queue space, which
+ * {@link MAX_DIRECT_PENDING_BYTES} already bounds, so this is no shorter than
+ * the negotiation it follows. The ordering is pinned by
+ * `remote-lib-common/test/direct-path.test.mjs`.
  */
-export const DIRECT_HANDOFF_TIMEOUT_MS = 5_000;
+export const DIRECT_HANDOFF_TIMEOUT_MS = DIRECT_SETUP_TIMEOUT_MS;
 
 /**
  * How long a connection may sit `disconnected` before the attempt is written

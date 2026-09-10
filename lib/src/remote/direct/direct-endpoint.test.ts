@@ -211,6 +211,21 @@ describe('DirectEndpoint', () => {
     expect(answering.answerer.sent.map((s) => s.t)).toEqual(['direct-decline']);
   });
 
+  it('declines rather than leaving the offerer to wait, when its channel is refused', async () => {
+    const run = pair({ channel: 'unordered', channelSide: 'answerer' });
+
+    await run.offerer.endpoint.offer();
+    await flushMicrotasks();
+
+    // The refusal reports from inside `answer()`, before there is any
+    // description to send — the offerer still has to hear about it.
+    expect(run.answerer.sent.map((s) => s.t)).toEqual(['direct-decline']);
+    expect(run.offerer.endpoint.relayCause).toBe('declined');
+    expect(run.offerer.endpoint.path).toBe('relay');
+    // And nothing is left armed to fire on a session that stayed relayed.
+    expect(run.timers.live).toEqual([]);
+  });
+
   it('abandons the attempt when the session cannot carry a signal', async () => {
     const run = pair();
     run.offerer.sendable = false;

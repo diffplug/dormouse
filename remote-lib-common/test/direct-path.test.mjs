@@ -117,10 +117,11 @@ test('the timings the spec names are the values that ship', () => {
   // answerer opens, switches, and its `direct-switch` decrypts at an offerer
   // that has just abandoned, which is fatal at both ends.
   assert.ok(DIRECT_ANSWER_TIMEOUT_MS < DIRECT_SETUP_TIMEOUT_MS);
-  // The wait for the peer's own switch begins where the setup budget ends, and
-  // is a relay round trip rather than a whole negotiation.
-  assert.equal(DIRECT_HANDOFF_TIMEOUT_MS, 5_000);
-  assert.ok(DIRECT_HANDOFF_TIMEOUT_MS < DIRECT_ANSWER_TIMEOUT_MS);
+  // The wait for the peer's own switch is a relay hop on the uplink the direct
+  // path exists to escape, and firing early is burrow loss while waiting costs
+  // only queue space — so it is never shorter than the negotiation before it.
+  assert.equal(DIRECT_HANDOFF_TIMEOUT_MS, 15_000);
+  assert.ok(DIRECT_HANDOFF_TIMEOUT_MS >= DIRECT_SETUP_TIMEOUT_MS);
   // Long enough that a gap ICE recovers from is waited out rather than charged
   // a fresh handshake and a WebAuthn prompt.
   assert.equal(DIRECT_DISCONNECTED_GRACE_MS, 5_000);

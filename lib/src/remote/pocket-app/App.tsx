@@ -367,6 +367,11 @@ export default function App({
   /** The connect half, shared so a fresh pairing can continue straight into it. */
   const connectTo = useCallback(
     async (burrow: BurrowView) => {
+      // A fresh endpoint announces nothing until something changes, and its
+      // idea of unchanged is `relay` with no cause — so the previous session's
+      // reason would sit in the header through the whole of this one's
+      // negotiation.
+      setTransport({ path: 'relay', cause: null });
       const decision: ConnectResult = await client.connect(burrow.burrowId);
       if (!decision.ok) {
         // The record has already been rewritten where the Burrow said

@@ -292,6 +292,17 @@ export class DirectPeer {
    * than the first byte — and dying here, before any switch, only abandons the
    * attempt. The label is checked alongside them: this negotiation creates
    * exactly one channel and calls it {@link DIRECT_CHANNEL_LABEL}.
+   *
+   * **The reliability half reaches only as far as the implementation reports
+   * it.** A browser hands an answerer the parameters the offerer actually
+   * negotiated, so there the check bites. `node-datachannel`'s polyfill builds
+   * every incoming channel with its own defaults instead — measured against
+   * 0.33.2, an offerer's `{ordered: false, maxRetransmits: 0}` reaches the
+   * answerer as `ordered: true, maxRetransmits: null` — so on the standalone
+   * Burrow only the label comparison is load-bearing, and a paired Client that
+   * opened an unordered channel would be adopted. Pinned, so a version that
+   * starts reporting them is noticed, by
+   * `lib/src/host/remote/native-direct-peer.test.ts`.
    */
   #adopt(channel: DirectChannelLike): void {
     if (this.#channel) return;
@@ -324,11 +335,19 @@ export class DirectPeer {
   /**
    * The channel reported open.
    *
-   * **The association's message limit is checked here**, where the attempt can
-   * still be abandoned onto a relay that is still carrying the session. One
-   * Noise transport message is one channel frame and may be
+   * **The association's message limit is checked here**, the first moment it is
+   * knowable — both stacks report `sctp` as null until the association is up.
+   * One Noise transport message is one channel frame and may be
    * {@link NOISE_MAX_MESSAGE_LENGTH} bytes, so an association that would refuse
    * one is a session that dies on its first large paste instead.
+   *
+   * **The number is the *remote's* advertised limit, so it is per direction.**
+   * Where both ends advertise the same — as both shipped stacks do, at 262 144
+   * — they abandon together and the session stays relayed. Where they disagree
+   * and only one end refuses, a peer that had already switched has no relay
+   * left to fall back to and loses the session. That is accepted: the
+   * alternative is carrying a session that dies on its first large frame
+   * anyway (`docs/specs/remote-api.md` -> Transport -> "Direct path").
    */
   #onOpen(): void {
     if (this.#closed || this.#open) return;

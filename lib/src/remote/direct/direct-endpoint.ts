@@ -78,6 +78,8 @@ export class DirectEndpoint {
   #peer: DirectPeer | null = null;
   #disposed = false;
   #cause: DirectRelayCause | null = null;
+  /** Whether an offer has been taken up and not yet answered or declined. */
+  #owesAnswer = false;
   /** Cancels the wait for the peer's switch; see {@link #settle}. */
   #cancelHandoff: (() => void) | null = null;
   /** The last pair announced, so an unchanged one is not announced twice. */
@@ -232,6 +234,7 @@ export class DirectEndpoint {
    */
   async #answer(offerSdp: string): Promise<void> {
     if (!this.#cutover.begin()) return;
+    this.#owesAnswer = true;
     const peer = this.#build();
     if (!peer) {
       this.#decline('this runtime builds no peer connection', 'unsupported');
@@ -243,6 +246,7 @@ export class DirectEndpoint {
       this.#decline('this end could not describe a direct connection');
       return;
     }
+    this.#owesAnswer = false;
     if (!this.#deps.sendSignal({ v: 1, t: 'direct-answer', sdp })) this.#giveUp();
   }
 
@@ -262,6 +266,7 @@ export class DirectEndpoint {
    * its setup deadline for a channel that is never coming.
    */
   #decline(reason: string, cause: DirectRelayCause = 'failed'): void {
+    this.#owesAnswer = false;
     this.#giveUp(reason, cause);
     this.#deps.sendSignal({ v: 1, t: 'direct-decline' });
   }
@@ -332,9 +337,18 @@ export class DirectEndpoint {
     if (receipt?.kind === 'control') this.onSignal(receipt.value);
   }
 
+  /**
+   * The channel went away. **An answerer that has not answered yet owes the
+   * offerer a decline**: the peer has heard nothing back and would otherwise
+   * wait out its whole setup budget for a channel that is never coming. The
+   * route matters because this can run *inside* `peer.answer()` — a channel
+   * refused on adopt reports here before the description is even built — and
+   * `#answer` then finds the peer already replaced and returns without a word.
+   */
   #onClosed(reason: string): void {
     if (!this.#alive()) return;
-    this.#giveUp(reason);
+    if (this.#owesAnswer) this.#decline(reason);
+    else this.#giveUp(reason);
   }
 
   /**

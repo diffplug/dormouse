@@ -110,7 +110,17 @@ non-binary channel message — disposes the session. (rationale)
 `DIRECT_CHANNEL_LABEL`**, and one whose association reports a per-message limit
 under `NOISE_MAX_MESSAGE_LENGTH` is refused: both are checked before the open is
 reported, so either abandons the attempt while the relay is still carrying the
-session. A limit the implementation does not report is not treated as small.
+session, and an answerer that refuses before it has answered declines rather
+than leaving the offerer to wait out its setup budget. A limit the
+implementation does not report is not treated as small.
+
+**Two limits of those checks are known and accepted.** The reliability flags
+reach only as far as the implementation reports them, and `node-datachannel`'s
+polyfill rebuilds an incoming channel with its own defaults — so on the
+standalone Burrow only the label comparison is load-bearing (rationale). And the
+message limit is the *remote's* advertised one, so it is per direction: where
+the two ends disagree, a peer that has already switched loses the session rather
+than staying relayed.
 
 **A sender bounds its own queue rather than the implementation's.** Past
 `DIRECT_BUFFER_HIGH` of buffered channel data the ciphertext queues, draining at

@@ -23,10 +23,19 @@
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it, vi } from 'vitest';
-import { NOISE_MAX_MESSAGE_LENGTH, type TerminalDataEvent } from 'remote-lib-common';
+import {
+  DIRECT_CHANNEL_LABEL,
+  NOISE_MAX_MESSAGE_LENGTH,
+  type TerminalDataEvent,
+} from 'remote-lib-common';
 import { DirectPeer, type DirectPeerLike } from '../../remote/direct/direct-peer';
 import { STREAMED_CHUNK, makeE2eHarness, waitFor } from '../../remote/client/test-e2e-harness';
 import { createNativeDirectPeerFactory, disposeNativeDirectPeers } from './native-direct-peer';
+
+/** The one call the reliability case needs that `DirectPeerLike` has no reason to. */
+interface AddsCandidates {
+  addIceCandidate(candidate: unknown): Promise<void>;
+}
 
 /** A file inside the package that declares the addon, to resolve it from. */
 const sidecarRequire = createRequire(
@@ -277,6 +286,64 @@ describe('the direct path over the native addon', () => {
    * reachable, so the addon cannot be made to not load without replacing the
    * module system this case exists to exercise.
    */
+  /**
+   * **What the reliability check does *not* reach on this stack.** `DirectPeer`
+   * refuses a channel that is unordered or partially reliable, and the answerer
+   * is the end where that could bite — it adopts a channel the peer created. A
+   * browser reports the parameters the offerer actually negotiated; this
+   * polyfill rebuilds every incoming channel with its own defaults, so the
+   * flags never survive the crossing and only the label comparison is
+   * load-bearing on a standalone Burrow.
+   *
+   * Pinned rather than left as prose: an addon version that starts reporting
+   * them turns a documented limitation into an enforced rule, and this is what
+   * says so (`docs/specs/remote-api.md` → Transport → "Direct path").
+   */
+  it('does not carry a channel’s reliability across to the answerer', async () => {
+    const offerer = buildPeer();
+    const answerer = buildPeer();
+    const adopted = Promise.withResolvers<Record<string, unknown>>();
+    answerer.addEventListener('datachannel', (ev) => {
+      const channel = (ev as { channel: Record<string, unknown> }).channel;
+      adopted.resolve(channel);
+    });
+    // Everything a Noise stream cannot ride, asked for explicitly.
+    const asked = offerer.createDataChannel(DIRECT_CHANNEL_LABEL, {
+      ordered: false,
+      maxRetransmits: 0,
+    } as { ordered?: boolean });
+    try {
+      // The whole negotiation: unlike a browser, this stack raises `datachannel`
+      // when the association carries the channel, not when the offer describes
+      // it — so nothing is adopted until both ends are actually connected.
+      for (const [from, to] of [
+        [offerer, answerer],
+        [answerer, offerer],
+      ] as const) {
+        from.addEventListener('icecandidate', (ev) => {
+          const candidate = (ev as { candidate?: unknown }).candidate;
+          if (candidate) void (to as unknown as AddsCandidates).addIceCandidate(candidate);
+        });
+      }
+      const offer = await offerer.createOffer();
+      await offerer.setLocalDescription(offer);
+      await answerer.setRemoteDescription(offerer.localDescription!);
+      const answer = await answerer.createAnswer();
+      await answerer.setLocalDescription(answer);
+      await offerer.setRemoteDescription(answerer.localDescription!);
+
+      const seen = await adopted.promise;
+      expect((asked as unknown as { ordered: boolean }).ordered).toBe(false);
+      expect(seen.label).toBe(DIRECT_CHANNEL_LABEL);
+      expect(seen.ordered).toBe(true);
+      expect(seen.maxRetransmits).toBeNull();
+      expect(seen.maxPacketLifeTime).toBeNull();
+    } finally {
+      offerer.close();
+      answerer.close();
+    }
+  });
+
   it('builds a peer through a bare require, and declines once torn down', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
