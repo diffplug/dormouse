@@ -18,6 +18,7 @@ import { clearAllNotepads, addPlainNote } from '../lib/notepad/notepad-store';
 import { __resetArchiveServiceForTests } from '../lib/notepad/archive-service';
 import { getActivitySnapshot, setTerminalActivity } from '../lib/terminal-registry';
 import { getWallHandle, listWallHandles, resetWallHandles } from './wall/wall-handles';
+import { resetWorkspaceBootPlans, setWorkspaceBootPlan } from './wall/workspace-boot-plans';
 import { mountWallHarness, type WallHarness } from './wall/wall-test-utils';
 import { getWorkspaceSurfacesSnapshot, resetWorkspaceSurfaces } from '../lib/workspace-surfaces';
 import { previousWorkspaceSession, publishWorkspaceSession, resetWindowSessionAggregator } from '../lib/window-session-aggregator';
@@ -52,6 +53,7 @@ beforeEach(() => {
   resetWorkspaceSurfaces();
   resetWorkspaceUi();
   resetWindowSessionAggregator();
+  resetWorkspaceBootPlans();
   fake = new FakePtyAdapter();
   setPlatform(fake);
   harness = mountWallHarness();
@@ -113,6 +115,32 @@ describe('WorkspaceWindow', () => {
     expect(wallFor(first).hasAttribute('inert')).toBe(true);
     expect(wallFor(second).className).not.toContain('invisible');
     expect(wallFor(second).hasAttribute('inert')).toBe(false);
+  });
+
+  it('mounts a returning Workspace from the record it brought, not the one it first booted with', async () => {
+    // A Workspace can leave this Window and come back — dragged out and dragged
+    // in again (docs/specs/standalone.md → "Transfer"). Its first mount latched
+    // a plan; re-using that one would put a fresh default pane over the Sessions
+    // that just arrived, and the running work would be gone.
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await render();
+
+    const moving = await act(async () => createWorkspace({ id: 'ws-travelling' }).id);
+    await flush();
+    const bootPane = leafIdsIn(moving)[0]!;
+
+    // It leaves.
+    await act(async () => { closeWorkspace(moving); });
+    await flush();
+    expect(walls().map((wall) => wall.dataset.workspaceWall)).toEqual([first]);
+
+    // …and comes back, carrying its own record.
+    setWorkspaceBootPlan(moving, { initialPaneIds: ['pane-arrived'] });
+    await act(async () => { createWorkspace({ id: moving }); });
+    await flush();
+
+    expect(leafIdsIn(moving)).toEqual(['pane-arrived']);
+    expect(leafIdsIn(moving)).not.toContain(bootPane);
   });
 
   it('registers one handle per Workspace, publishing membership, even under StrictMode', async () => {

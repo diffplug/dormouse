@@ -314,6 +314,7 @@ fn request_quit(app: &AppHandle) {
         return;
     };
     let labels = window_labels(app);
+    append_log(format!("[quit] requested across {labels:?}"));
     let (my_seq, actions) = guard(&state.machine).request(&labels);
     apply_quit_actions(app, actions);
 
@@ -393,6 +394,7 @@ fn request_window_close(app: &AppHandle, label: &str) {
     let Some(state) = app.try_state::<QuitState>() else {
         return;
     };
+    append_log(format!("[window] close requested for {label}"));
     let my_seq = guard(&state.close).request(label);
     let _ = app.emit_to(label, "dormouse://window-close-requested", ());
 
@@ -419,6 +421,7 @@ fn request_window_close(app: &AppHandle, label: &str) {
 /// snapshot, then destroy it. Called from `window_close_proceed`, and from the
 /// ack watchdog when the webview never answered.
 fn finish_window_close(app: &AppHandle, label: &str) {
+    append_log(format!("[window] closing {label} and removing its snapshot"));
     if let Some(state) = app.try_state::<QuitState>() {
         guard(&state.close).clear(label);
         // Bound before the call: the guard would otherwise live for the whole
@@ -1995,6 +1998,7 @@ fn open_workspace_window(
             _ => None,
         }
     };
+    append_log(format!("[window] tearing out into {label}"));
     guard(&windows.pending_boot).insert(label.clone(), payload.clone());
     if let Err(err) = build_window(&app, &label, geometry) {
         // Nothing will ever pull the payload, and the PTYs would stay
@@ -2036,6 +2040,10 @@ fn transfer_workspace(
     if to == window.label() {
         return Err("a Workspace cannot be transferred to its own window".to_string());
     }
+    append_log(format!(
+        "[window] transferring a Workspace from {} to {to}",
+        window.label()
+    ));
     windows.reassign(&payload_terminal_ids(&payload), &to);
     // Forward before the content lands: the user dropped here, so this is the
     // window they are now looking at, and a background webview may be throttled

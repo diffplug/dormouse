@@ -16,14 +16,14 @@ var __copyProps = (to, from, except, desc) => {
 };
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-// lib/src/host/alert-store-host.ts
+// ../lib/src/host/alert-store-host.ts
 var alert_store_host_exports = {};
 __export(alert_store_host_exports, {
   createAlertStoreHost: () => createAlertStoreHost
 });
 module.exports = __toCommonJS(alert_store_host_exports);
 
-// lib/src/cfg.ts
+// ../lib/src/cfg.ts
 var cfg = {
   marchingAnts: {
     /** Target segment length (dash + gap) in px. Smaller = more, tinier dashes. */
@@ -120,7 +120,7 @@ var cfg = {
   }
 };
 
-// lib/src/lib/alert-settings-model.ts
+// ../lib/src/lib/alert-settings-model.ts
 var MIN_DELAY_MS = 1e3;
 var MAX_DELAY_MS = 6e5;
 var DEFAULT_ALERT_SETTINGS = {
@@ -154,7 +154,7 @@ function normalizeAlertSettings(value) {
   };
 }
 
-// lib/src/lib/alert-settings-host.ts
+// ../lib/src/lib/alert-settings-host.ts
 var AlertSettingsHost = class {
   constructor(target) {
     this.target = target;
@@ -192,7 +192,7 @@ var AlertSettingsHost = class {
   }
 };
 
-// lib/src/lib/watched-command-host.ts
+// ../lib/src/lib/watched-command-host.ts
 var WatchedCommandHost = class {
   constructor(target) {
     this.target = target;
@@ -224,7 +224,7 @@ var WatchedCommandHost = class {
   }
 };
 
-// lib/src/host/alert-store-host.ts
+// ../lib/src/host/alert-store-host.ts
 var WatchedCommandMemory = class {
   names = [];
   getWatchedCommands() {

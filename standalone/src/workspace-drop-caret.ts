@@ -1,5 +1,5 @@
-import { listen } from "@tauri-apps/api/event";
 import { workspaceDropIndex } from "./workspace-move";
+import { listenToWindow } from "./window-label";
 
 /**
  * The caret another window's drag draws in this window's strip
@@ -43,7 +43,7 @@ function caretFor(point: { x: number; y: number }): number | null {
 }
 
 export function initDropCaret(): void {
-  void listen<{ x: number; y: number } | null>("dormouse://workspace-drop-hover", (event) => {
+  void listenToWindow<{ x: number; y: number } | null>("dormouse://workspace-drop-hover", (event) => {
     set(event.payload ? caretFor(event.payload) : null);
   });
 }

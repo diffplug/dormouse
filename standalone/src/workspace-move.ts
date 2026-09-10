@@ -1,5 +1,4 @@
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { collectLivePtys, resumeOrRestoreFrom } from "dormouse-lib/lib/reconnect";
 import { hydrateNotepadFromVolatile } from "dormouse-lib/lib/notepad/notepad-store";
 import { getWallHandle } from "dormouse-lib/components/wall/wall-handles";
@@ -20,6 +19,7 @@ import {
 import type { PlatformAdapter } from "dormouse-lib/lib/platform/types";
 import type { WorkspaceId } from "dormouse-lib/lib/session-types";
 import { installWindowPersistence } from "./window-restore";
+import { listenToWindow } from "./window-label";
 
 /**
  * Moving a Workspace between Windows (`docs/specs/standalone.md` → "Transfer"
@@ -172,11 +172,11 @@ function handleDeparted(workspaceId: WorkspaceId): void {
 
 /** Listen for Workspaces arriving in, and leaving, this window. */
 export function initWorkspaceMoves(platform: PlatformAdapter): void {
-  void listen<MovePayload>("dormouse://workspace-arriving", (event) => {
+  void listenToWindow<MovePayload>("dormouse://workspace-arriving", (event) => {
     void adoptWorkspace(platform, event.payload).catch((err) =>
       console.error("[workspace-move] adoption failed", err));
   });
-  void listen<{ workspaceId: WorkspaceId }>("dormouse://workspace-departed", (event) => {
+  void listenToWindow<{ workspaceId: WorkspaceId }>("dormouse://workspace-departed", (event) => {
     handleDeparted(event.payload.workspaceId);
   });
 }

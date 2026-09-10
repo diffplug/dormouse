@@ -39,6 +39,14 @@ export function WorkspaceWindow({
   // A Workspace created after first render — one arriving from another Window —
   // reads its plan from the parking store instead. Latched here so its Wall
   // sees the same record on every later render, and never a fresh one.
+  //
+  // A Workspace that LEFT takes its latched plan with it. The same Workspace can
+  // come back — dragged out and dragged in again — and it must then mount from
+  // the record it brought rather than the one it first booted with, which would
+  // put a fresh default pane over the Sessions that just arrived.
+  for (const id of Object.keys(plans)) {
+    if (!workspaces.some((workspace) => workspace.id === id)) delete plans[id];
+  }
   const planFor = (id: string) => (plans[id] ??= getWorkspaceBootPlan(id) ?? {});
 
   // The Window, not each Wall, answers the host's flush request: the adapter

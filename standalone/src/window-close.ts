@@ -1,10 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { countRunningSessions } from "dormouse-lib/lib/terminal-registry";
 import { notepadSurfaceIds, removeSurface } from "dormouse-lib/lib/notepad/notepad-store";
 import { openQuitArchiveFailure, openQuitConfirm, type QuitConfirmIntent } from "./quit-confirm-store";
 import { archiveNotesBeforeTeardown } from "./teardown-archive";
 import type { TauriAdapter } from "./tauri-adapter";
+import { listenToWindow } from "./window-label";
 
 /**
  * Closing one window of several (`docs/specs/standalone.md` → "Per-window
@@ -40,7 +40,7 @@ export function initWindowClose(
 ): void {
   closeAdapter = adapter;
   if (options.windowName) describeWindow = options.windowName;
-  void listen("dormouse://window-close-requested", handleCloseRequested);
+  void listenToWindow("dormouse://window-close-requested", handleCloseRequested);
 }
 
 function handleCloseRequested(): void {

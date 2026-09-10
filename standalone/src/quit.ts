@@ -1,5 +1,4 @@
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { countRunningSessions } from "dormouse-lib/lib/terminal-registry";
 import { notepadSurfaceIds, removeSurface } from "dormouse-lib/lib/notepad/notepad-store";
 import { flushWindowSession } from "dormouse-lib/lib/window-session-aggregator";
@@ -9,6 +8,7 @@ import { dismissQuitConfirm, openQuitArchiveFailure, type QuitConfirmIntent } fr
 import { archiveNotesBeforeTeardown } from "./teardown-archive";
 import { hasPendingUpdate, installPendingUpdate } from "./updater";
 import { withTimeout } from "./with-timeout";
+import { listenToWindow } from "./window-label";
 
 /**
  * Quit orchestrator — this window's half of it.
@@ -53,13 +53,13 @@ export function initQuitFlow(
 ): void {
   quitAdapter = adapter;
   if (options.windowName) describeWindow = options.windowName;
-  void listen<{ windows?: number }>("dormouse://quit-requested", (event) =>
+  void listenToWindow<{ windows?: number }>("dormouse://quit-requested", (event) =>
     handleQuitRequested(event.payload?.windows ?? 1));
   // Another window said no. Nothing was destroyed; drop this window's dialog
   // and go back to idle so a later quit asks again.
-  void listen("dormouse://quit-cancelled", handleQuitCancelled);
+  void listenToWindow("dormouse://quit-cancelled", handleQuitCancelled);
   // Every window voted yes, and it is now this window's turn.
-  void listen<{ last?: boolean }>("dormouse://quit-teardown", (event) => {
+  void listenToWindow<{ last?: boolean }>("dormouse://quit-teardown", (event) => {
     void runQuitTeardown(event.payload?.last === true);
   });
 }

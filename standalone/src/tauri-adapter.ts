@@ -1,6 +1,5 @@
 import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../../lib/src/lib/terminal-context-types';
 import { invoke as rawInvoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-shell";
 import { coalesceCwds } from "./coalesce-cwds";
 import type {
@@ -46,6 +45,7 @@ import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
 import type { PersistedAlertState, PersistedWindow } from "dormouse-lib/lib/session-types";
 import { TauriSessionStore } from "./tauri-session-store";
 import { claimRecoveryCommands, windowStateSlot } from "./window-recovery";
+import { listenToWindow } from "./window-label";
 import { withTimeout } from "./with-timeout";
 import {
   applyTerminalProtocolEvents,
@@ -145,7 +145,7 @@ export class TauriAdapter implements PlatformAdapter {
       // Already parsed by the sidecar, which owns the PTY: the pair arrives as
       // it is, and its events arrive as the two messages below
       // (docs/specs/terminal-escapes.md → "Parsing location").
-      listen<PtyDataDetail>("pty:data", (event) => {
+      listenToWindow<PtyDataDetail>("pty:data", (event) => {
         const { id, data, textData } = event.payload;
         // Feed visible data to alert manager for visual activity monitoring.
         this.alertManager.onData(id);
@@ -154,31 +154,31 @@ export class TauriAdapter implements PlatformAdapter {
         }
       }),
 
-      listen<{ id: string; events: TerminalProtocolEvent[] }>("terminal:protocolEvents", (event) => {
+      listenToWindow<{ id: string; events: TerminalProtocolEvent[] }>("terminal:protocolEvents", (event) => {
         applyTerminalProtocolEvents(this.alertManager, event.payload.id, event.payload.events);
       }),
 
-      listen<{ id: string; events: TerminalSemanticEvent[] }>("terminal:semanticEvents", (event) => {
+      listenToWindow<{ id: string; events: TerminalSemanticEvent[] }>("terminal:semanticEvents", (event) => {
         const { id, events } = event.payload;
         this.alertManager.applyTerminalSemanticEvents(id, events);
         applyTerminalSemanticEvents(id, events);
       }),
 
-      listen<{ id: string; exitCode: number }>("pty:exit", (event) => {
+      listenToWindow<{ id: string; exitCode: number }>("pty:exit", (event) => {
         this.alertManager.onExit(event.payload.id, event.payload.exitCode);
         for (const handler of this.exitHandlers) {
           handler(event.payload);
         }
       }),
 
-      listen<{ ptys: PtyInfo[] }>("pty:list", (event) => {
+      listenToWindow<{ ptys: PtyInfo[] }>("pty:list", (event) => {
         for (const pty of event.payload.ptys) if (pty.helper) this.alertManager.setHelper(pty.id, true);
         for (const handler of this.listHandlers) {
           handler(event.payload);
         }
       }),
 
-      listen<{ id: string; data: string }>("pty:replay", (event) => {
+      listenToWindow<{ id: string; data: string }>("pty:replay", (event) => {
         // Replay arrives as raw buffered output, the one stream the sidecar does
         // not parse. A one-shot parser here repopulates semantic state and
         // strips OSCs before xterm sees them; its responses are dropped, since
@@ -194,26 +194,26 @@ export class TauriAdapter implements PlatformAdapter {
       }),
 
       // Inert while dragDropEnabled=false in tauri.conf.json. See diffplug/dormouse#38 and tauri-apps/tauri#14373.
-      listen<{ paths: string[] }>("dormouse://files-dropped", (event) => {
+      listenToWindow<{ paths: string[] }>("dormouse://files-dropped", (event) => {
         const paths = event.payload.paths ?? [];
         if (paths.length === 0) return;
         for (const handler of this.filesDroppedHandlers) handler(paths);
       }),
 
-      listen<BurrowResult>(BURROW_RESULT_EVENT, (event) => {
+      listenToWindow<BurrowResult>(BURROW_RESULT_EVENT, (event) => {
         this.burrowClient.onResult(event.payload);
       }),
 
-      listen<BurrowAsk>(BURROW_ASK_EVENT, (event) => {
+      listenToWindow<BurrowAsk>(BURROW_ASK_EVENT, (event) => {
         const ask = event.payload;
         this.burrowClient.onAsk(ask.burrowRequestId, ask.op, ask.params);
       }),
 
-      listen<{ name?: string }>(BURROW_EVENT_EVENT, (event) => {
+      listenToWindow<{ name?: string }>(BURROW_EVENT_EVENT, (event) => {
         this.burrowClient.onEvent(event.payload);
       }),
 
-      listen<DorControlRequestPayload>("dor:controlRequest", (event) => {
+      listenToWindow<DorControlRequestPayload>("dor:controlRequest", (event) => {
         const payload = event.payload;
         dispatchDorControlRequest(payload, (response) => {
           rawInvoke("dor_control_response", {
@@ -231,19 +231,19 @@ export class TauriAdapter implements PlatformAdapter {
       // up, or its own deadline fired). Rust forwards it verbatim: `dor-*`
       // request ids never collide with its own `req-*` invoke ids, so the
       // pending-invoke lookup misses and the event reaches us.
-      listen<DorControlCancelPayload>("dor:controlCancel", (event) => {
+      listenToWindow<DorControlCancelPayload>("dor:controlCancel", (event) => {
         cancelDorControlRequest(event.payload.requestId);
       }),
 
       // The sidecar's canonical snapshots, broadcast to every window. This
       // window's own `AlertManager` is one more consumer of them.
-      listen<{ names?: string[] }>("alert:watchedCommands", (event) => {
+      listenToWindow<{ names?: string[] }>("alert:watchedCommands", (event) => {
         const names = event.payload?.names ?? [];
         this.alertManager.setWatchedCommands(names);
         for (const handler of this.watchedCommandHandlers) handler(names);
       }),
 
-      listen<{ settings?: AlertSettings }>("alert:settings", (event) => {
+      listenToWindow<{ settings?: AlertSettings }>("alert:settings", (event) => {
         const settings = event.payload?.settings;
         if (!settings) return;
         this.alertManager.applySettings(settings);
