@@ -9,7 +9,21 @@ import type { QuitConfirmContext } from "./quit";
 
 export type QuitConfirmPhase = "open" | "quitting" | "archive-failed";
 
+/**
+ * What the dialog is asking about. A quit tears every window down; a
+ * close ends this one alone (docs/specs/standalone.md §Per-window close). The
+ * Workspace name is carried only while several windows are open, so a single
+ * window's dialog is not made to name itself.
+ */
+export interface QuitConfirmIntent {
+  kind: "quit" | "close-window";
+  windowName?: string;
+}
+
+const QUIT_INTENT: QuitConfirmIntent = { kind: "quit" };
+
 let phase: QuitConfirmPhase | null = null;
+let intent: QuitConfirmIntent = QUIT_INTENT;
 // Why the archive gate refused the quit; only set alongside "archive-failed".
 let archiveError: string | null = null;
 // The orchestrator context for the open request. Nulled the instant a decision
@@ -33,6 +47,11 @@ export function getQuitArchiveError(): string | null {
   return archiveError;
 }
 
+/** What the open dialog is asking about. */
+export function getQuitConfirmIntent(): QuitConfirmIntent {
+  return intent;
+}
+
 function emit(): void {
   for (const listener of listeners) listener();
 }
@@ -41,9 +60,10 @@ function emit(): void {
 // bootstrap (order relative to `initQuitFlow` is irrelevant — the gate is read
 // only at quit time). The orchestrator never re-invokes it while a dialog is
 // up; the phase guard is belt-and-suspenders against stacking.
-export function openQuitConfirm(ctx: QuitConfirmContext): void {
+export function openQuitConfirm(ctx: QuitConfirmContext, next: QuitConfirmIntent = QUIT_INTENT): void {
   if (phase !== null) return;
   activeCtx = ctx;
+  intent = next;
   phase = "open";
   emit();
 }
@@ -56,8 +76,13 @@ export function openQuitConfirm(ctx: QuitConfirmContext): void {
  * guarded on an empty phase: it is always a transition from a decision already
  * made. `ctx.confirm()` is Quit anyway (notes discarded); `ctx.cancel()` closes.
  */
-export function openQuitArchiveFailure(message: string, ctx: QuitConfirmContext): void {
+export function openQuitArchiveFailure(
+  message: string,
+  ctx: QuitConfirmContext,
+  next: QuitConfirmIntent = QUIT_INTENT,
+): void {
   activeCtx = ctx;
+  intent = next;
   archiveError = message;
   phase = "archive-failed";
   emit();
@@ -85,9 +110,25 @@ export function cancelQuit(): void {
   ctx.cancel();
 }
 
+/**
+ * Drop the dialog because the decision was made somewhere else — another window
+ * cancelled the quit for everyone (docs/specs/standalone.md §Quit flow). Unlike
+ * `cancelQuit` it does NOT call back into the orchestrator: the cancel has
+ * already happened, and calling back would bounce it around the windows.
+ */
+export function dismissQuitConfirm(): void {
+  if (phase === null) return;
+  activeCtx = null;
+  archiveError = null;
+  phase = null;
+  intent = QUIT_INTENT;
+  emit();
+}
+
 /** @internal Reset module state for testing. */
 export function _resetQuitConfirmForTesting(): void {
   phase = null;
+  intent = QUIT_INTENT;
   activeCtx = null;
   archiveError = null;
   listeners.clear();

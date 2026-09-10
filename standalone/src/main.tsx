@@ -5,6 +5,7 @@ import { installPeerSurfaceResponder } from "dormouse-lib/remote/burrow/peer-sur
 import type { PlatformAdapter } from "dormouse-lib/lib/platform/types";
 import { restoreWindowOrFresh } from "./window-restore";
 import { isMainWindow, resolveWindowLabel } from "./window-label";
+import { getWorkspacesSnapshot } from "dormouse-lib/lib/workspace-store";
 import { seedShellStore } from "dormouse-lib/lib/shell-store";
 import { restoreActiveTheme } from "dormouse-lib/lib/themes";
 import App from "dormouse-lib/App";
@@ -108,12 +109,22 @@ async function bootstrap() {
   // Tauri APIs. !BROWSER_DEV_HOST is exactly the createPlatform branch that
   // returned a TauriAdapter.
   if (!BROWSER_DEV_HOST) {
-    const [{ initQuitFlow, setQuitConfirmGate }, { openQuitConfirm }] = await Promise.all([
-      import("./quit"),
-      import("./quit-confirm-store"),
-    ]);
-    initQuitFlow(platform as import("./tauri-adapter").TauriAdapter);
-    // A quit with ≥1 running command opens <QuitConfirmModalHost>.
+    const [{ initQuitFlow, setQuitConfirmGate }, { openQuitConfirm }, { initWindowClose }] =
+      await Promise.all([
+        import("./quit"),
+        import("./quit-confirm-store"),
+        import("./window-close"),
+      ]);
+    const adapter = platform as import("./tauri-adapter").TauriAdapter;
+    // The dialogs name a window by its visible Workspace, which is the only
+    // name a user has for one (§Quit flow, "Confirmation dialog").
+    const windowName = () => {
+      const { workspaces, activeId } = getWorkspacesSnapshot();
+      return workspaces.find((workspace) => workspace.id === activeId)?.name;
+    };
+    initQuitFlow(adapter, { windowName });
+    initWindowClose(adapter, { windowName });
+    // A quit or a close with ≥1 running command opens <QuitConfirmModalHost>.
     setQuitConfirmGate(openQuitConfirm);
   }
   const { initAlertStateReceiver } = await import("dormouse-lib/lib/terminal-registry");

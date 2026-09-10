@@ -272,7 +272,12 @@ fn apply_quit_actions(app: &AppHandle, actions: Vec<QuitAction>) {
     for action in actions {
         match action {
             QuitAction::RequestAll => {
-                let _ = app.emit("dormouse://quit-requested", ());
+                // The count is what tells each window whether to name itself in
+                // its confirmation dialog.
+                let _ = app.emit(
+                    "dormouse://quit-requested",
+                    serde_json::json!({ "windows": app.webview_windows().len() }),
+                );
             }
             QuitAction::CancelAll => {
                 let _ = app.emit("dormouse://quit-cancelled", ());

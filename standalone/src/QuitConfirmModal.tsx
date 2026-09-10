@@ -12,8 +12,10 @@ import {
   cancelQuit,
   confirmQuit,
   getQuitArchiveError,
+  getQuitConfirmIntent,
   getQuitConfirmPhase,
   subscribeQuitConfirm,
+  type QuitConfirmIntent,
 } from './quit-confirm-store';
 
 /**
@@ -27,6 +29,7 @@ import {
 export function QuitConfirmModalHost() {
   const phase = useSyncExternalStore(subscribeQuitConfirm, getQuitConfirmPhase);
   const storedArchiveError = useSyncExternalStore(subscribeQuitConfirm, getQuitArchiveError);
+  const intent = useSyncExternalStore(subscribeQuitConfirm, getQuitConfirmIntent);
   const open = phase !== null;
 
   // Suppress the Wall's command-mode key dispatch while the dialog is up.
@@ -37,6 +40,7 @@ export function QuitConfirmModalHost() {
     <QuitConfirmModal
       confirming={phase === 'quitting'}
       archiveError={phase === 'archive-failed' ? storedArchiveError : null}
+      intent={intent}
     />
   );
 }
@@ -46,12 +50,15 @@ export function QuitConfirmModalHost() {
 export function QuitConfirmModal({
   confirming,
   archiveError = null,
+  intent = { kind: 'quit' },
 }: {
   confirming: boolean;
-  /** The quit the notepad archive refused (docs/specs/notepad.md → "Standalone
-   *  quit"). Set means the running-command decision is already made and this
-   *  dialog now asks only whether to lose the notes. */
+  /** The teardown the notepad archive refused (docs/specs/notepad.md →
+   *  "Standalone quit"). Set means the running-command decision is already made
+   *  and this dialog now asks only whether to lose the notes. */
   archiveError?: string | null;
+  /** Whether this asks about the whole app or one window, and which one. */
+  intent?: QuitConfirmIntent;
 }) {
   const cancelButtonRef = useRef<HTMLButtonElement>(null);
   // Live count — the dialog stays open even if it drops to 0 (see spec).
@@ -62,17 +69,27 @@ export function QuitConfirmModal({
   // decision is already made and the only question left is whether to lose the
   // notes — so the copy changes and the default swaps to Cancel, stated once
   // here rather than as five ternaries through the markup.
-  const title = archiveError ? 'Notes could not be archived' : 'Quit Dormouse?';
+  // A quit ends every window; a close ends this one alone. The count and the
+  // notes are this window's either way — the registry and the notepad store are
+  // per webview — so only the wording changes.
+  const closing = intent.kind === 'close-window';
+  const verb = closing ? 'Close' : 'Quit';
+  // Named only when several windows are open, so a lone window's dialog is not
+  // made to introduce itself.
+  const scope = intent.windowName ? `${intent.windowName}: ` : '';
+  const title = archiveError
+    ? 'Notes could not be archived'
+    : closing ? 'Close this window?' : 'Quit Dormouse?';
   const body = archiveError
-    ? `${archiveError} Quitting anyway discards them.`
+    ? `${archiveError} ${verb === 'Close' ? 'Closing' : 'Quitting'} anyway discards them.`
     : confirming
-      ? 'Quitting…'
+      ? `${closing ? 'Closing' : 'Quitting'}…`
       : hasRunning
-        ? `${runningCount} running command${runningCount === 1 ? '' : 's'} will be stopped.`
-        : 'No commands are still running.';
+        ? `${scope}${runningCount} running command${runningCount === 1 ? '' : 's'} will be stopped.`
+        : `${scope}No commands are still running.`;
   const confirmLabel = archiveError
-    ? 'Quit anyway'
-    : hasRunning ? `Quit and stop ${runningCount}` : 'Quit';
+    ? `${verb} anyway`
+    : hasRunning ? `${verb} and stop ${runningCount}` : verb;
   const [cancelTone, confirmTone] = archiveError
     ? (['primary', 'secondary'] as const)
     : (['secondary', 'primary'] as const);
