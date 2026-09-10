@@ -1,0 +1,298 @@
+/**
+ * One authorized session's direct path, as both ends run it
+ * (`docs/specs/remote-api.md` -> Transport -> "Direct path").
+ *
+ * **One policy, two ends.** The Client and the Burrow differ in exactly four
+ * things — who offers, how a control message is put on the relay, how a
+ * ciphertext is decrypted, and what "the session is over" does — so those are
+ * injected ({@link DirectEndpointDeps}) and everything else is here: the
+ * attempt, the peer, the cutover, and every rule about what a channel event
+ * means. Two copies of that were two chances to disagree about a switch.
+ *
+ * One per authorized session, created at promotion and disposed with it, so a
+ * peer connection can neither precede authorization nor outlive it.
+ */
+
+import {
+  DirectCutover,
+  isDirectSignalV1,
+  type DirectPath,
+  type DirectSignalV1,
+} from 'remote-lib-common';
+
+import { DirectPeer, type DirectPeerFactory } from './direct-peer';
+import type { RemoteTimer } from '../ws';
+
+/**
+ * Which half of the negotiation this end plays. The Client offers and the
+ * Burrow answers, and each ignores the signals that are the other's to send.
+ */
+export type DirectRole = 'offerer' | 'answerer';
+
+export interface DirectEndpointDeps {
+  /** How this runtime builds a peer connection, or `null` where it has none. */
+  readonly createPeer: DirectPeerFactory | null;
+  /**
+   * Encrypt one signal as a control message and put it on the relay path;
+   * `false` if the session could not send it.
+   */
+  sendSignal(signal: DirectSignalV1): boolean;
+  /**
+   * Decrypt one transport ciphertext that arrived on the channel — the same
+   * path a relay ciphertext takes, because it is the same session.
+   */
+  receive(ciphertext: Uint8Array): void;
+  /**
+   * The session is unrecoverable: the endpoint's owner disposes it (the Burrow
+   * through `#disposeEstablished`, the Client through `#loseBurrow`).
+   */
+  fatal(reason: string): void;
+  /**
+   * Whether this endpoint's session is still the live one. Both ends re-check
+   * it after every await, because a promotion or a teardown can replace the
+   * session while a description is being built.
+   */
+  isCurrent(): boolean;
+  /** Notified whenever {@link DirectEndpoint.path} changes; the Client's indicator. */
+  onPathChanged?(path: DirectPath): void;
+  /** Every deadline the peer arms; see {@link RemoteTimer}. */
+  readonly setTimer?: RemoteTimer;
+}
+
+export class DirectEndpoint {
+  readonly #role: DirectRole;
+  readonly #deps: DirectEndpointDeps;
+  readonly #cutover = new DirectCutover();
+  #peer: DirectPeer | null = null;
+  #disposed = false;
+  /** The last path announced, so an unchanged one is not announced twice. */
+  #announced: DirectPath = 'relay';
+
+  constructor(role: DirectRole, deps: DirectEndpointDeps) {
+    this.#role = role;
+    this.#deps = deps;
+  }
+
+  /** What carries this session; `direct` only once **both** directions have switched. */
+  get path(): DirectPath {
+    return this.#disposed ? 'relay' : this.#cutover.path;
+  }
+
+  /**
+   * Offer a direct path, which is the offerer's alone to do: **once per session,
+   * never retried**. The whole description travels inside the session, so the
+   * Relay never sees an SDP, a candidate, or that a direct path exists.
+   *
+   * Every failure is silent and terminal for the attempt alone — no factory, a
+   * description too large to fit one control message, a negotiation that threw —
+   * and the session keeps running on the relay.
+   */
+  async offer(): Promise<void> {
+    if (this.#role !== 'offerer' || !this.#cutover.begin()) return;
+    const peer = this.#build();
+    if (!peer) {
+      this.#giveUp();
+      return;
+    }
+    const sdp = await peer.offer();
+    // The session may have been replaced or disposed while the description was
+    // being built; a peer left over from one is not this one's.
+    if (!this.#alive() || this.#peer !== peer) {
+      peer.close();
+      return;
+    }
+    if (sdp === null || !this.#deps.sendSignal({ v: 1, t: 'direct-offer', sdp })) this.#giveUp();
+  }
+
+  /**
+   * One decrypted control message on this session. **An unknown control shape is
+   * ignored, never a session failure**, which is what lets a peer without this
+   * stack simply stay relayed — as is a signal that is the other role's to send.
+   */
+  onSignal(value: Record<string, unknown>): void {
+    if (!isDirectSignalV1(value) || !this.#alive()) return;
+    switch (value.t) {
+      case 'direct-offer':
+        if (this.#role === 'answerer') void this.#answer(value.sdp);
+        return;
+      case 'direct-answer':
+        if (this.#role === 'offerer') void this.#peer?.acceptAnswer(value.sdp);
+        return;
+      case 'direct-decline':
+        if (this.#role === 'offerer') this.#giveUp('the peer declined a direct path');
+        return;
+      case 'direct-switch': {
+        const outcome = this.#cutover.onSwitchDecrypted();
+        if (outcome.kind === 'fatal') {
+          this.#deps.fatal('the peer moved to a direct path this end had abandoned');
+          return;
+        }
+        this.#announce();
+        // In arrival order, through the same decrypt path the relay's frames
+        // take: what was held is exactly what was sent after the switch.
+        for (const frame of outcome.frames) {
+          if (!this.#alive()) return;
+          this.#deps.receive(frame);
+        }
+        return;
+      }
+    }
+  }
+
+  /**
+   * One transport frame arriving on the relay; `false` is a violation.
+   *
+   * **After the peer has switched there is nothing left for it to send there**,
+   * so a frame that arrives anyway is a peer whose two paths this end can no
+   * longer keep in order.
+   */
+  onRelayTransport(): boolean {
+    return this.#cutover.onRelayTransport() === 'process';
+  }
+
+  /**
+   * One transport ciphertext, `true` once it is on the channel. The caller puts
+   * it on the relay when this answers `false`, so "after the switch, nothing on
+   * the relay" is one line rather than a rule each caller keeps.
+   */
+  send(ciphertext: Uint8Array): boolean {
+    if (this.#disposed || this.#cutover.outbound !== 'direct') return false;
+    if (this.#peer?.send(ciphertext)) return true;
+    // Switched, and the channel will not take it: there is no relay to fall
+    // back to, so this is burrow loss rather than a message to re-route.
+    this.#deps.fatal('the direct channel refused a message');
+    return true;
+  }
+
+  /**
+   * Close the peer and release what the cutover held. Idempotent, and called on
+   * every path that ends the session, so no peer connection outlives the session
+   * that authorized it.
+   */
+  dispose(): void {
+    if (this.#disposed) return;
+    this.#disposed = true;
+    this.#peer?.close();
+    this.#peer = null;
+    this.#cutover.clear();
+    this.#announce();
+  }
+
+  // --- Internals -------------------------------------------------------------
+
+  /**
+   * Answer one offer, or decline it. A runtime with no peer factory — or one
+   * whose answer would not fit a signal — declines rather than leaving the
+   * offerer waiting out the setup deadline.
+   */
+  async #answer(offerSdp: string): Promise<void> {
+    if (!this.#cutover.begin()) return;
+    const peer = this.#build();
+    if (!peer) {
+      this.#giveUp();
+      this.#deps.sendSignal({ v: 1, t: 'direct-decline' });
+      return;
+    }
+    const sdp = await peer.answer(offerSdp);
+    if (!this.#alive() || this.#peer !== peer) {
+      peer.close();
+      return;
+    }
+    if (sdp === null) {
+      this.#giveUp();
+      this.#deps.sendSignal({ v: 1, t: 'direct-decline' });
+      return;
+    }
+    if (!this.#deps.sendSignal({ v: 1, t: 'direct-answer', sdp })) this.#giveUp();
+  }
+
+  /** This attempt's peer, wired to the four channel events, or null if there is none. */
+  #build(): DirectPeer | null {
+    const factory = this.#deps.createPeer;
+    if (!factory) return null;
+    let connection;
+    try {
+      connection = factory();
+    } catch (error) {
+      console.warn('[direct] could not build a peer connection', error);
+      return null;
+    }
+    if (!connection) return null;
+    this.#peer = new DirectPeer({
+      peer: connection,
+      ...(this.#deps.setTimer ? { setTimer: this.#deps.setTimer } : {}),
+      handlers: {
+        onOpen: () => this.#onOpen(),
+        onFrame: (frame) => this.#onFrame(frame),
+        onClosed: (reason) => this.#onClosed(reason),
+        // A peer speaking something else on the channel is not one this
+        // session's counters can stay synchronized with, switched or not.
+        onViolation: (reason) => this.#deps.fatal(reason),
+      },
+    });
+    return this.#peer;
+  }
+
+  /**
+   * The channel is open. **The `direct-switch` is this end's last message on the
+   * relay** — everything after it goes on the channel, which is what keeps order
+   * per direction.
+   */
+  #onOpen(): void {
+    if (!this.#alive()) return;
+    if (!this.#deps.sendSignal({ v: 1, t: 'direct-switch' })) {
+      this.#giveUp();
+      return;
+    }
+    this.#cutover.switchOutbound();
+    this.#announce();
+  }
+
+  /** One frame off the channel: processed, held until the peer's switch, or fatal. */
+  #onFrame(frame: Uint8Array): void {
+    if (!this.#alive()) return;
+    switch (this.#cutover.onChannelFrame(frame)) {
+      case 'process':
+        this.#deps.receive(frame);
+        return;
+      case 'held':
+        return;
+      case 'overflow':
+        this.#deps.fatal('the direct path outran what can be held in order');
+        return;
+    }
+  }
+
+  #onClosed(reason: string): void {
+    if (!this.#alive()) return;
+    this.#giveUp(reason);
+  }
+
+  /**
+   * The attempt is over. **Before either direction has switched that is merely an
+   * abandoned attempt** and the session carries on relayed; afterwards what was
+   * riding the channel is gone and a stream cipher has no resynchronization
+   * point, so the session is over.
+   */
+  #giveUp(reason = 'the direct path was abandoned'): void {
+    if (this.#cutover.switched) {
+      this.#deps.fatal(reason);
+      return;
+    }
+    this.#peer?.close();
+    this.#peer = null;
+    this.#cutover.abandon();
+  }
+
+  /** Whether this endpoint still belongs to the session the caller is serving. */
+  #alive(): boolean {
+    return !this.#disposed && this.#deps.isCurrent();
+  }
+
+  #announce(): void {
+    const path = this.path;
+    if (path === this.#announced) return;
+    this.#announced = path;
+    this.#deps.onPathChanged?.(path);
+  }
+}

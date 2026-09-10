@@ -10,30 +10,7 @@ import { DIRECT_GATHER_TIMEOUT_MS, DIRECT_SETUP_TIMEOUT_MS, NOISE_MAX_MESSAGE_LE
 
 import { DIRECT_CHANNEL_LABEL, DirectPeer, type DirectPeerHandlers } from './direct-peer';
 import { FakeDirectNetwork, type FakeDirectNetworkOptions } from './test-fake-peer';
-
-/** Armed timers a test fires by hand, so no case waits fifteen seconds. */
-function fakeTimers() {
-  const armed: Array<{ run: () => void; delayMs: number; cancelled: boolean }> = [];
-  return {
-    setTimer(run: () => void, delayMs: number): () => void {
-      const timer = { run, delayMs, cancelled: false };
-      armed.push(timer);
-      return () => {
-        timer.cancelled = true;
-      };
-    },
-    get live() {
-      return armed.filter((timer) => !timer.cancelled);
-    },
-    /** Fire the one armed timer whose delay is `delayMs`. */
-    fire(delayMs: number): void {
-      const timer = this.live.find((entry) => entry.delayMs === delayMs);
-      if (!timer) throw new Error(`no timer armed for ${delayMs}ms`);
-      timer.cancelled = true;
-      timer.run();
-    },
-  };
-}
+import { fakeTimers } from '../test-timers';
 
 function handlers(): DirectPeerHandlers & {
   frames: Uint8Array[];
@@ -79,7 +56,7 @@ function pair(options: FakeDirectNetworkOptions = {}) {
 }
 
 /** Let the fake network's queued microtasks run. */
-const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+const flushMicrotasks = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe('DirectPeer', () => {
   it('negotiates one ordered channel and carries raw bytes both ways', async () => {
@@ -90,7 +67,7 @@ describe('DirectPeer', () => {
     const answer = await burrowPeer.answer(offer!);
     expect(answer).toContain('a=setup:active');
     await clientPeer.acceptAnswer(answer!);
-    await settle();
+    await flushMicrotasks();
 
     expect(client.opens).toBe(1);
     expect(burrow.opens).toBe(1);
@@ -102,7 +79,7 @@ describe('DirectPeer', () => {
 
     clientPeer.send(Uint8Array.of(1, 2, 3));
     burrowPeer.send(Uint8Array.of(4, 5));
-    await settle();
+    await flushMicrotasks();
 
     expect(burrow.frames).toEqual([Uint8Array.of(1, 2, 3)]);
     expect(client.frames).toEqual([Uint8Array.of(4, 5)]);
@@ -114,11 +91,11 @@ describe('DirectPeer', () => {
     const offering = clientPeer.offer();
     let settled = false;
     void offering.then(() => (settled = true));
-    await settle();
+    await flushMicrotasks();
     // Nothing to send yet: there is no trickle path, so the SDP waits.
     expect(settled).toBe(false);
 
-    timers.fire(DIRECT_GATHER_TIMEOUT_MS);
+    timers.fireAt(DIRECT_GATHER_TIMEOUT_MS);
     expect(await offering).toContain('m=application');
   });
 
@@ -126,7 +103,7 @@ describe('DirectPeer', () => {
     const { network, clientPeer, timers } = pair({ gathering: 'pending' });
 
     const offering = clientPeer.offer();
-    await settle();
+    await flushMicrotasks();
     network.completeGathering();
 
     expect(await offering).toContain('m=application');
@@ -139,22 +116,22 @@ describe('DirectPeer', () => {
 
     const offer = await clientPeer.offer();
     await clientPeer.acceptAnswer((await burrowPeer.answer(offer!))!);
-    await settle();
+    await flushMicrotasks();
     expect(client.opens).toBe(0);
 
-    timers.fire(DIRECT_SETUP_TIMEOUT_MS);
+    timers.fireAt(DIRECT_SETUP_TIMEOUT_MS);
 
     expect(client.closes).toEqual(['the direct channel did not open in time']);
     expect(clientPeer.isOpen).toBe(false);
     // And nothing may be sent on it afterwards.
-    expect(() => clientPeer.send(Uint8Array.of(1))).toThrow();
+    expect(clientPeer.send(Uint8Array.of(1))).toBe(false);
   });
 
   it('reports a channel that dies under a live session, at both ends', async () => {
     const { network, clientPeer, burrowPeer, client, burrow } = pair();
     const offer = await clientPeer.offer();
     await clientPeer.acceptAnswer((await burrowPeer.answer(offer!))!);
-    await settle();
+    await flushMicrotasks();
 
     network.dropChannels();
 
@@ -166,7 +143,7 @@ describe('DirectPeer', () => {
     const { network, clientPeer, burrowPeer, client } = pair();
     const offer = await clientPeer.offer();
     await clientPeer.acceptAnswer((await burrowPeer.answer(offer!))!);
-    await settle();
+    await flushMicrotasks();
 
     network.offererChannel!.receiveRaw('a text frame');
     // Bounded before it reaches a cipher, exactly as a relay ciphertext is.

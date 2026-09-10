@@ -1,0 +1,370 @@
+/**
+ * The cutover policy both ends run (`docs/specs/remote-api.md` -> Transport ->
+ * "Direct path"), driven as two endpoints over the linked fake pair.
+ *
+ * This is where the rules live now: what an attempt may do, what each signal
+ * means to each role, and what a channel event costs the session. The suites in
+ * `../client/pocket-client.test.ts` and `../burrow/burrow-runtime.test.ts` keep
+ * only the cases that prove the wiring — that the signals really are control
+ * messages on a real session, and that a loss really disposes what the runtime
+ * holds.
+ *
+ * Signals ride a stand-in for the relay here: they are plain objects, delivered
+ * to the far endpoint, with one direction holdable so a case can reproduce the
+ * race the holding queue exists for.
+ */
+
+import { describe, expect, it } from 'vitest';
+import {
+  DIRECT_SETUP_TIMEOUT_MS,
+  MAX_DIRECT_PENDING_FRAMES,
+  type DirectPath,
+  type DirectSignalV1,
+} from 'remote-lib-common';
+
+import { DirectEndpoint } from './direct-endpoint';
+import { FakeDirectNetwork, type FakeDirectNetworkOptions, type FakePeer } from './test-fake-peer';
+import { fakeTimers } from '../test-timers';
+
+interface Side {
+  endpoint: DirectEndpoint;
+  /** Every peer connection this side's factory built. */
+  readonly peers: FakePeer[];
+  /** Every ciphertext this side decrypted, in the order it did. */
+  readonly received: Uint8Array[];
+  /** Every reason this side's session was declared unrecoverable. */
+  readonly fatals: string[];
+  /** Every path change announced. */
+  readonly paths: DirectPath[];
+  /** Every signal this side put on the relay. */
+  readonly sent: DirectSignalV1[];
+  /** What `isCurrent()` answers; a promotion or teardown flips it. */
+  live: boolean;
+  /** Whether the session can still encrypt a signal. */
+  sendable: boolean;
+  /** Hold this side's outbound signals instead of delivering them. */
+  hold(): void;
+  /** Deliver everything held, in order. */
+  release(): void;
+}
+
+interface Options extends FakeDirectNetworkOptions {
+  /** Give the offerer no peer factory, as a browser without WebRTC has. */
+  offererHasPeer?: boolean;
+  /** Give the answerer none, as the VS Code host has. */
+  answererHasPeer?: boolean;
+}
+
+/** Both endpoints of one session, linked by a relay a case can hold. */
+function pair(options: Options = {}) {
+  const { offererHasPeer = true, answererHasPeer = true, ...network } = options;
+  const fake = new FakeDirectNetwork(network);
+  const timers = fakeTimers();
+  const sides = new Map<'offerer' | 'answerer', Side>();
+
+  const build = (role: 'offerer' | 'answerer', hasPeer: boolean): Side => {
+    const peers: FakePeer[] = [];
+    const queued: DirectSignalV1[] = [];
+    const side: Side = {
+      peers,
+      received: [],
+      fatals: [],
+      paths: [],
+      sent: [],
+      live: true,
+      sendable: true,
+      hold: () => void (holding = true),
+      release: () => {
+        holding = false;
+        for (const signal of queued.splice(0)) deliver(signal);
+      },
+      endpoint: undefined as unknown as DirectEndpoint,
+    };
+    let holding = false;
+    const deliver = (signal: DirectSignalV1): void => {
+      sides.get(role === 'offerer' ? 'answerer' : 'offerer')?.endpoint.onSignal({ ...signal });
+    };
+    side.endpoint = new DirectEndpoint(role, {
+      createPeer: hasPeer
+        ? () => {
+            const peer = role === 'offerer' ? fake.createOfferer() : fake.createAnswerer();
+            peers.push(peer);
+            return peer;
+          }
+        : null,
+      sendSignal: (signal) => {
+        if (!side.sendable) return false;
+        side.sent.push(signal);
+        if (holding) queued.push(signal);
+        else deliver(signal);
+        return true;
+      },
+      receive: (ciphertext) => void side.received.push(ciphertext),
+      fatal: (reason) => void side.fatals.push(reason),
+      isCurrent: () => side.live,
+      onPathChanged: (path) => void side.paths.push(path),
+      setTimer: timers.setTimer,
+    });
+    sides.set(role, side);
+    return side;
+  };
+
+  const offerer = build('offerer', offererHasPeer);
+  const answerer = build('answerer', answererHasPeer);
+  return { fake, timers, offerer, answerer };
+}
+
+/** Let the fake network's queued microtasks run. */
+const flushMicrotasks = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+/** Offer, answer, and let the channel open at both ends. */
+async function cutover(run: ReturnType<typeof pair>): Promise<void> {
+  await run.offerer.endpoint.offer();
+  await flushMicrotasks();
+  await flushMicrotasks();
+}
+
+const frame = (n: number, size = 4) => new Uint8Array(size).fill(n);
+
+describe('DirectEndpoint', () => {
+  it('offers, answers, and switches both directions onto the channel', async () => {
+    const run = pair();
+
+    await cutover(run);
+
+    expect(run.offerer.sent.map((s) => s.t)).toEqual(['direct-offer', 'direct-switch']);
+    expect(run.answerer.sent.map((s) => s.t)).toEqual(['direct-answer', 'direct-switch']);
+    expect(run.offerer.endpoint.path).toBe('direct');
+    expect(run.answerer.endpoint.path).toBe('direct');
+    // Announced once, and only once both directions had left the relay.
+    expect(run.offerer.paths).toEqual(['direct']);
+    expect(run.offerer.fatals).toEqual([]);
+    expect(run.answerer.fatals).toEqual([]);
+  });
+
+  it('spends the session’s one attempt, whichever end asks twice', async () => {
+    const run = pair();
+
+    await cutover(run);
+    const offer = run.offerer.sent[0]!;
+    if (offer.t !== 'direct-offer') throw new Error(`expected an offer, got ${offer.t}`);
+    await run.offerer.endpoint.offer();
+    run.answerer.endpoint.onSignal({ ...offer });
+
+    // A second offer allocates nothing and is not answered — not even with a
+    // decline — at either end.
+    expect(run.offerer.peers).toHaveLength(1);
+    expect(run.answerer.peers).toHaveLength(1);
+    expect(run.offerer.sent.map((s) => s.t)).toEqual(['direct-offer', 'direct-switch']);
+    expect(run.answerer.sent.map((s) => s.t)).toEqual(['direct-answer', 'direct-switch']);
+  });
+
+  it('declines an offer it has no way to answer, and stays relayed', async () => {
+    const run = pair({ answererHasPeer: false });
+
+    await run.offerer.endpoint.offer();
+    await flushMicrotasks();
+
+    expect(run.answerer.sent.map((s) => s.t)).toEqual(['direct-decline']);
+    // The decline abandons the offerer's attempt: its peer is closed and the
+    // session is exactly as relayed as it was.
+    expect(run.offerer.peers[0]!.closed).toBe(true);
+    expect(run.offerer.endpoint.path).toBe('relay');
+    expect(run.offerer.fatals).toEqual([]);
+  });
+
+  it('never offers from a runtime with no peer connection', async () => {
+    const run = pair({ offererHasPeer: false });
+
+    await run.offerer.endpoint.offer();
+    await flushMicrotasks();
+
+    expect(run.offerer.sent).toEqual([]);
+    expect(run.answerer.peers).toEqual([]);
+    // And the attempt is spent: a signal arriving later cannot start one.
+    expect(run.offerer.endpoint.path).toBe('relay');
+  });
+
+  it('skips a description too large to travel inside the session', async () => {
+    const offering = pair({ oversize: 'offer' });
+    await offering.offerer.endpoint.offer();
+    expect(offering.offerer.sent).toEqual([]);
+
+    const answering = pair({ oversize: 'answer' });
+    await answering.offerer.endpoint.offer();
+    await flushMicrotasks();
+    expect(answering.answerer.sent.map((s) => s.t)).toEqual(['direct-decline']);
+  });
+
+  it('abandons the attempt when the session cannot carry a signal', async () => {
+    const run = pair();
+    run.offerer.sendable = false;
+
+    await run.offerer.endpoint.offer();
+    await flushMicrotasks();
+
+    expect(run.offerer.peers[0]!.closed).toBe(true);
+    expect(run.answerer.peers).toEqual([]);
+    expect(run.offerer.fatals).toEqual([]);
+  });
+
+  it('closes a peer whose session was replaced while it described itself', async () => {
+    const run = pair();
+    // Flipped while `offer()` is awaiting its description, which is exactly what
+    // a replacement promotion or a teardown does to the session under it.
+    const offering = run.offerer.endpoint.offer();
+    run.offerer.live = false;
+    await offering;
+
+    expect(run.offerer.peers[0]!.closed).toBe(true);
+    expect(run.offerer.sent).toEqual([]);
+  });
+
+  it('ignores every signal that is the other role’s to send, and every unknown shape', async () => {
+    const run = pair();
+    await cutover(run);
+    const offererSent = run.offerer.sent.length;
+
+    // The compatibility rule the whole staging rests on: a control shape this
+    // peer does not know leaves the session up.
+    run.offerer.endpoint.onSignal({ v: 2, t: 'direct-decline' });
+    run.offerer.endpoint.onSignal({ t: 'something-else' });
+    run.offerer.endpoint.onSignal({ v: 1, t: 'direct-offer', sdp: 'v=0\r\n' });
+    run.answerer.endpoint.onSignal({ v: 1, t: 'direct-answer', sdp: 'v=0\r\n' });
+    run.answerer.endpoint.onSignal({ v: 1, t: 'direct-decline' });
+
+    expect(run.offerer.sent).toHaveLength(offererSent);
+    expect(run.offerer.fatals).toEqual([]);
+    expect(run.answerer.fatals).toEqual([]);
+  });
+
+  it('stays relayed when the channel never opens', async () => {
+    const run = pair({ opening: 'never' });
+    await cutover(run);
+
+    run.timers.fireAt(DIRECT_SETUP_TIMEOUT_MS);
+
+    expect(run.offerer.peers[0]!.closed).toBe(true);
+    expect(run.offerer.endpoint.path).toBe('relay');
+    // Never switched, so this is an abandoned attempt rather than burrow loss.
+    expect(run.offerer.fatals).toEqual([]);
+    expect(run.offerer.endpoint.send(frame(1))).toBe(false);
+  });
+
+  it('ends the session when the channel dies after the switch', async () => {
+    const run = pair();
+    await cutover(run);
+
+    run.fake.dropChannels();
+
+    expect(run.offerer.fatals).toEqual(['the direct channel closed']);
+    expect(run.answerer.fatals).toEqual(['the direct channel closed']);
+  });
+
+  it('ends the session on a channel message this protocol has no reading for', async () => {
+    const run = pair();
+    await cutover(run);
+
+    run.fake.offererChannel!.receiveRaw('a text frame');
+
+    expect(run.offerer.fatals).toEqual(['a direct channel message was not binary']);
+  });
+
+  it('holds channel frames until the peer’s switch, then drains them in order', async () => {
+    const run = pair({ opening: 'manual' });
+    await cutover(run);
+
+    // The race the queue exists for: the answerer's frames overtake the
+    // `direct-switch` that precedes them on the relay.
+    run.answerer.hold();
+    run.fake.openChannels();
+    expect(run.offerer.endpoint.path).toBe('relay');
+
+    run.answerer.endpoint.send(frame(1));
+    run.answerer.endpoint.send(frame(2));
+    await flushMicrotasks();
+    expect(run.offerer.received).toEqual([]);
+
+    run.answerer.release();
+
+    expect(run.offerer.received).toEqual([frame(1), frame(2)]);
+    expect(run.offerer.endpoint.path).toBe('direct');
+  });
+
+  it('ends the session when held frames outrun the queue', async () => {
+    const run = pair({ opening: 'manual' });
+    await cutover(run);
+    run.answerer.hold();
+    run.fake.openChannels();
+
+    for (let i = 0; i <= MAX_DIRECT_PENDING_FRAMES; i += 1) run.answerer.endpoint.send(frame(i));
+    await flushMicrotasks();
+
+    expect(run.offerer.fatals).toEqual(['the direct path outran what can be held in order']);
+    expect(run.offerer.received).toEqual([]);
+  });
+
+  it('ends the session when the peer switches onto a channel this end abandoned', async () => {
+    const run = pair({ opening: 'manual' });
+    await cutover(run);
+
+    run.timers.fireAt(DIRECT_SETUP_TIMEOUT_MS);
+    expect(run.offerer.fatals).toEqual([]);
+    // And only now does the peer's channel come up, so its switch lands on an
+    // end that has already closed its own.
+    run.offerer.endpoint.onSignal({ v: 1, t: 'direct-switch' });
+
+    expect(run.offerer.fatals).toEqual([
+      'the peer moved to a direct path this end had abandoned',
+    ]);
+  });
+
+  it('refuses a relay transport frame once the peer has switched', async () => {
+    const run = pair({ opening: 'manual' });
+    await cutover(run);
+
+    // Before the peer's switch the relay is still the path it sends on.
+    expect(run.offerer.endpoint.onRelayTransport()).toBe(true);
+    run.fake.openChannels();
+
+    expect(run.offerer.endpoint.onRelayTransport()).toBe(false);
+  });
+
+  it('routes a ciphertext onto the channel only after this end has switched', async () => {
+    const run = pair({ opening: 'manual' });
+    await cutover(run);
+    // Nothing on the channel yet: the caller puts it on the relay.
+    expect(run.offerer.endpoint.send(frame(1))).toBe(false);
+
+    run.fake.openChannels();
+    expect(run.offerer.endpoint.send(frame(2))).toBe(true);
+    await flushMicrotasks();
+    expect(run.answerer.received).toEqual([frame(2)]);
+  });
+
+  it('ends the session when a switched channel refuses a send', async () => {
+    const run = pair();
+    await cutover(run);
+    // Closed under the endpoint, which a radio gap does between two sends.
+    run.fake.offererChannel!.close();
+
+    expect(run.offerer.endpoint.send(frame(1))).toBe(true);
+    expect(run.offerer.fatals).toEqual(['the direct channel refused a message']);
+  });
+
+  it('disposes idempotently, closing the peer and reporting the relay', async () => {
+    const run = pair();
+    await cutover(run);
+
+    run.offerer.endpoint.dispose();
+    run.offerer.endpoint.dispose();
+
+    expect(run.offerer.peers[0]!.closed).toBe(true);
+    expect(run.offerer.endpoint.path).toBe('relay');
+    expect(run.offerer.paths).toEqual(['direct', 'relay']);
+    // Inert afterwards: nothing it is told does anything to a dead session.
+    expect(run.offerer.endpoint.send(frame(1))).toBe(false);
+    run.offerer.endpoint.onSignal({ v: 1, t: 'direct-switch' });
+    expect(run.offerer.fatals).toEqual([]);
+  });
+});

@@ -235,10 +235,13 @@ export class FakeChannel implements DirectChannelLike {
     this.#listeners.set(type, list);
   }
 
-  send(data: ArrayBuffer): void {
+  send(data: ArrayBuffer | ArrayBufferView): void {
     if (this.readyState !== 'open') throw new Error('the channel is not open');
-    // Copied on the way out: the caller's buffer is the transport's reused one.
-    const bytes = new Uint8Array(data.slice(0));
+    // Copied on the way out, so what a case reads back is what was sent rather
+    // than whatever the caller's buffer holds by the time it looks.
+    const bytes = ArrayBuffer.isView(data)
+      ? new Uint8Array(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength))
+      : new Uint8Array(data.slice(0));
     this.sent.push(bytes);
     const peer = this.#peer;
     if (!peer) return;

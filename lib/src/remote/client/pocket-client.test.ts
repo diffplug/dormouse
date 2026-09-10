@@ -14,11 +14,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   CONTROL_PAYLOAD_SIZE,
   DEFAULT_PAIRING_TTL_MS,
-  DIRECT_SETUP_TIMEOUT_MS,
   E2E_KEEPALIVE_INTERVAL_MS,
   ESTABLISHED_E2E_IDLE_TIMEOUT_MS,
   KEEPALIVE_BODY_SIZE,
-  MAX_DIRECT_PENDING_FRAMES,
   SELFHOST_ACCOUNT_ID,
   SETUP_TOKEN_INVALID_ERROR,
   formatPairingInvitationUrl,
@@ -48,6 +46,7 @@ import {
 } from './pocket-client';
 import type { KnownBurrowV1 } from './pocket-db';
 import { FakeSocket } from '../test-fake-socket';
+import { fakeTimers } from '../test-timers';
 import {
   FakeDirectNetwork,
   type FakeDirectNetworkOptions,
@@ -574,37 +573,6 @@ describe('connecting, end to end', () => {
 
 // --- Keepalives -------------------------------------------------------------
 
-/** One armed timer at a time, fired by hand — no test waits thirty seconds. */
-function fakeTimers() {
-  const armed: Array<{ run: () => void; delayMs: number; cancelled: boolean }> = [];
-  return {
-    setTimer(run: () => void, delayMs: number): () => void {
-      const timer = { run, delayMs, cancelled: false };
-      armed.push(timer);
-      return () => {
-        timer.cancelled = true;
-      };
-    },
-    get live() {
-      return armed.filter((timer) => !timer.cancelled);
-    },
-    /** Fire the armed timer, as its delay elapsing would. */
-    fire(): void {
-      const timer = this.live.at(-1);
-      if (!timer) throw new Error('no keepalive timer is armed');
-      timer.cancelled = true;
-      timer.run();
-    },
-    /** Fire the one armed for `delayMs`, where more than one deadline is live. */
-    fireAt(delayMs: number): void {
-      const timer = this.live.find((entry) => entry.delayMs === delayMs);
-      if (!timer) throw new Error(`no timer armed for ${delayMs}ms`);
-      timer.cancelled = true;
-      timer.run();
-    },
-  };
-}
-
 /** `document.visibilityState`, as a seam a test can flip. */
 function fakeVisibility() {
   let visible = true;
@@ -777,7 +745,6 @@ describe('the direct path, end to end', () => {
   ) {
     const network = new FakeDirectNetwork(options.network);
     const timers = fakeTimers();
-    const burrowTimers = fakeTimers();
     const clientPeers: FakePeer[] = [];
     const burrowPeers: FakePeer[] = [];
     const harness = await makeE2eHarness({
@@ -802,7 +769,6 @@ describe('the direct path, end to end', () => {
               return peer;
             },
           }),
-      burrowSetTimer: burrowTimers.setTimer,
     });
     await harness.pairAndApprove(await harness.mintInvitation());
     expect(await harness.client.connect(harness.burrowId)).toMatchObject({ ok: true });
@@ -810,7 +776,6 @@ describe('the direct path, end to end', () => {
       harness,
       network,
       timers,
-      burrowTimers,
       clientPeers,
       burrowPeers,
       /** This session's routing id, read off the envelope the Client addressed. */
@@ -905,34 +870,6 @@ describe('the direct path, end to end', () => {
     expect(run.clientFrames().length).toBeGreaterThan(before);
   });
 
-  it('never offers from a runtime with no peer connection', async () => {
-    const run = await connectedDirect({ clientHasPeer: false });
-    await settleTicks();
-
-    // One transport frame each way: the connection request and its outcome.
-    expect(run.clientFrames()).toHaveLength(1);
-    expect(run.burrowFrames().filter((frame) => frame.step === 'transport')).toHaveLength(1);
-    expect(run.burrowPeers).toEqual([]);
-    expect(run.harness.client.transportPath).toBe('relay');
-    expect(await run.harness.client.hello()).toMatchObject({ protocolVersion: 1 });
-  });
-
-  it('leaves the session relayed when the channel never opens', async () => {
-    const run = await connectedDirect({ network: { opening: 'never' } });
-    await waitFor(
-      () => run.burrowFrames().filter((frame) => frame.step === 'transport').length === 2,
-      'the Burrow to answer',
-    );
-
-    run.timers.fireAt(DIRECT_SETUP_TIMEOUT_MS);
-
-    expect(run.harness.client.transportPath).toBe('relay');
-    expect(run.clientPeers[0]!.closed).toBe(true);
-    // Never switched, so this is an abandoned attempt rather than burrow loss.
-    expect(run.harness.client.connectedBurrowId).toBe(run.harness.burrowId);
-    expect(await run.harness.client.hello()).toMatchObject({ protocolVersion: 1 });
-  });
-
   it('ends both ends when the channel dies after the switch', async () => {
     const run = await connectedDirect();
     await run.cutover();
@@ -1019,74 +956,6 @@ describe('the direct path, end to end', () => {
     await Promise.all([first, second]);
     expect(order).toEqual(['first', 'second']);
     expect(run.harness.client.transportPath).toBe('direct');
-  });
-
-  it('ends the session when held frames outrun the queue', async () => {
-    const run = await connectedDirect({ network: { opening: 'manual' } });
-    await waitFor(
-      () => run.burrowFrames().filter((frame) => frame.step === 'transport').length === 2,
-      'the Burrow to answer',
-    );
-    await settleTicks();
-    const gone = vi.fn();
-    run.harness.client.setOnBurrowGone(gone);
-
-    run.harness.relay.holdToClient();
-    run.network.openChannels();
-
-    // One answer per request, all of them held: the cap is what stops a peer
-    // that never sends the switch from growing this without bound.
-    const pending = [];
-    for (let i = 0; i <= MAX_DIRECT_PENDING_FRAMES; i += 1) {
-      pending.push(run.harness.client.request('hello', {}));
-    }
-    await Promise.allSettled(pending);
-
-    expect(gone).toHaveBeenCalledOnce();
-    expect(run.harness.client.connectedBurrowId).toBeNull();
-  });
-
-
-  /**
-   * The one failure a phone cannot recover from on its own: the peer that
-   * abandoned is deaf, and the other end has already stopped using the relay.
-   */
-  it('ends the session when the Burrow switches onto a channel the phone abandoned', async () => {
-    const run = await connectedDirect({ network: { opening: 'manual' } });
-    await waitFor(
-      () => run.burrowFrames().filter((frame) => frame.step === 'transport').length === 2,
-      'the Burrow to answer',
-    );
-    await settleTicks();
-    const gone = vi.fn();
-    run.harness.client.setOnBurrowGone(gone);
-
-    run.timers.fireAt(DIRECT_SETUP_TIMEOUT_MS);
-    expect(run.clientPeers[0]!.closed).toBe(true);
-    // And only now does the Burrow's channel come up, so its switch lands on a
-    // phone that has already closed its end.
-    run.network.openChannels();
-
-    expect(gone).toHaveBeenCalledOnce();
-    expect(run.harness.client.connectedBurrowId).toBeNull();
-  });
-
-  it('ends the session when the phone switches onto a channel the Burrow abandoned', async () => {
-    const run = await connectedDirect({ network: { opening: 'manual' } });
-    await waitFor(
-      () => run.burrowFrames().filter((frame) => frame.step === 'transport').length === 2,
-      'the Burrow to answer',
-    );
-    await settleTicks();
-
-    run.burrowTimers.fireAt(DIRECT_SETUP_TIMEOUT_MS);
-    expect(run.burrowPeers[0]!.closed).toBe(true);
-    run.network.openChannels();
-
-    await waitFor(
-      () => run.harness.burrow.establishedSessionCount === 0,
-      'the Burrow to drop the session',
-    );
   });
 
   it('closes the Burrow’s peer with the client the Relay says is gone', async () => {

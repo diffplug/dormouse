@@ -39,7 +39,7 @@ export interface DirectSessionDescription {
 export interface DirectChannelLike {
   binaryType: string;
   readonly readyState: string;
-  send(data: ArrayBuffer): void;
+  send(data: ArrayBuffer | ArrayBufferView): void;
   close(): void;
   addEventListener(type: string, handler: (ev: unknown) => void): void;
 }
@@ -174,15 +174,19 @@ export class DirectPeer {
    * One Noise transport message as one channel frame — raw bytes, never base64
    * or JSON, so the channel carries exactly what the relay would have.
    *
-   * Throws if the channel cannot take it, which is the same signal a refused
-   * relay send is: the caller's session is dead either way.
+   * Answers `false` where the channel cannot take it rather than throwing: the
+   * endpoint decides what a refused send means, and on a session that has
+   * already switched it is burrow loss rather than an error for the caller.
    */
-  send(ciphertext: Uint8Array): void {
+  send(ciphertext: Uint8Array): boolean {
     const channel = this.#channel;
-    if (!channel || !this.isOpen) throw new Error('the direct channel is not open');
-    // Copied into its own buffer: `send` takes an `ArrayBuffer`, and a view's
-    // backing buffer is the transport's reused one.
-    channel.send(ciphertext.slice().buffer as ArrayBuffer);
+    if (!channel || !this.isOpen) return false;
+    try {
+      channel.send(ciphertext);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /** Close the channel and the connection. Idempotent, and reports nothing. */

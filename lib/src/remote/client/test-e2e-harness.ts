@@ -50,7 +50,6 @@ import type { DirectPeerLike } from '../direct/direct-peer';
 import { FakeSocket } from '../test-fake-socket';
 import { createTestAuthenticator, type TestAuthenticator } from '../test-e2e-client';
 import { createTestRelay, type TestRelay } from '../test-relay';
-import type { RemoteTimer } from '../ws';
 
 // --- Fakes ------------------------------------------------------------------
 
@@ -250,8 +249,6 @@ export async function makeE2eHarness(
     deps?: Partial<PocketClientDeps>;
     /** How this Burrow builds a peer for the direct path; absent, it declines. */
     burrowDirect?: () => DirectPeerLike | null;
-    /** The Burrow's timers, where a case has to fire one by hand. */
-    burrowSetTimer?: RemoteTimer;
   } = {},
 ): Promise<E2eHarness> {
   const burrowId = options.burrowId ?? randomBase64Url(16);
@@ -279,7 +276,6 @@ export async function makeE2eHarness(
     reconnect: false,
     createWebSocket: () => burrowSocket,
     ...(options.burrowDirect ? { createDirectPeer: options.burrowDirect } : {}),
-    ...(options.burrowSetTimer ? { setTimer: options.burrowSetTimer } : {}),
     loadAcl: options.loadAcl ?? (() => []),
     saveAcl: (_burrowId, records) => {
       savedAcl = [...records];
