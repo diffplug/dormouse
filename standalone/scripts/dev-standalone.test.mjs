@@ -26,6 +26,10 @@ async function fixture(t) {
   await copyFile(path.resolve(scripts, '../src-tauri/tauri.conf.json'), path.join(standalone, 'src-tauri/tauri.conf.json'));
   await writeFile(path.join(standalone, 'index.html'), '<script type="module" src="/app.js"></script>');
   await writeFile(path.join(standalone, 'app.js'), 'console.log(import.meta.env.VITE_DORMOUSE_BROWSER_DEV_HOST);');
+  // Windows kill('SIGTERM') bypasses JS handlers. Deliver the same shutdown
+  // event over IPC there; POSIX tests continue exercising the actual signal.
+  const signals = path.join(bin, 'signals.mjs');
+  await writeFile(signals, "process.on('message', signal => process.emit(signal));");
   const cli = path.join(bin, 'cli.cjs');
   await writeFile(cli, `
     const args = process.argv.slice(2);
@@ -59,8 +63,8 @@ async function fixture(t) {
     start(args = ['dev'], overrides = {}) {
       const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(DORMOUSE_|VITE_|TAURI_)/.test(key)));
       env.PATH = `${bin}${path.delimiter}${process.env.PATH}`;
-      const child = spawn(process.execPath, [path.join(standalone, 'scripts/tauri.mjs'), ...args], {
-        cwd: standalone, env: { ...env, ...overrides }, stdio: ['ignore', 'pipe', 'pipe'],
+      const child = spawn(process.execPath, ['--import', signals, path.join(standalone, 'scripts/tauri.mjs'), ...args], {
+        cwd: standalone, env: { ...env, ...overrides }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
       });
       let output = '';
       let closed = false;
@@ -93,7 +97,10 @@ async function fixture(t) {
           return this;
         },
         async stop() {
-          if (!closed) child.kill('SIGTERM');
+          if (!closed) {
+            if (process.platform === 'win32' && child.connected) child.send('SIGTERM', () => {});
+            else child.kill('SIGTERM');
+          }
           const timer = setTimeout(() => child.kill('SIGKILL'), 6000);
           try { return await exited; } finally { clearTimeout(timer); }
         },
