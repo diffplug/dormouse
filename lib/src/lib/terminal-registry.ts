@@ -46,6 +46,7 @@ export {
   getTerminalOverlayDims,
   isUntouched,
   markSessionTouched,
+  claimWebglRenderer,
   mountElement,
   refitSession,
   registerSurfaceFocusHandle,

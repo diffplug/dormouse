@@ -27,7 +27,7 @@ import { KILL_CONFIRM_MS, KILL_SHAKE_MS, KillConfirmOverlay, randomKillChar, typ
 import { NotepadArchiveFailureModal, type NotepadArchiveFailure } from './NotepadArchiveFailure';
 import { messageOf } from '../lib/errors';
 import { archiveSurfaceNotes } from '../lib/notepad/close-coordinator';
-import { beginClosing, isSurfaceClosing, removeSurface, setNotepadSurfaceMetaResolver, transferNotepad } from '../lib/notepad/notepad-store';
+import { beginClosing, isSurfaceClosing, registerNotepadSurfaceMetaResolver, removeSurface, transferNotepad } from '../lib/notepad/notepad-store';
 import {
   clearSessionAttention,
   clearLocalSurfaceActivity,
@@ -44,6 +44,8 @@ import {
   getActivitySnapshot,
   isUntouched,
   getOrCreateTerminal,
+  getTerminalInstance,
+  countRunningSessionsIn,
   setTerminalUserTitle,
   UNNAMED_PANEL_TITLE,
   type SessionStatus,
@@ -62,7 +64,11 @@ import type {
   SurfaceView as DorSurfaceView,
 } from 'dor/commands/types';
 import { hasBrowser, hasTerminal } from 'dor/commands/types';
-import type { PersistedDoor, PersistedSurfaceRefs } from '../lib/session-types';
+import { DEFAULT_WORKSPACE_ID, type PersistedDoor, type PersistedSurfaceRefs, type WorkspaceId } from '../lib/session-types';
+import { clearWorkspaceSurfaces, setWorkspaceSurfaces } from '../lib/workspace-surfaces';
+import { WINDOW_REF, workspaceRefFor } from '../lib/workspace-store';
+import { registerWallHandle, type WallHandle } from './wall/wall-handles';
+import { installDorControlRouter } from './wall/dor-control-router';
 import type { DropTarget, RestoreToken } from '../lib/lath/ops';
 import type { Edge } from '../lib/lath/model';
 import { useDynamicPalette } from '../lib/themes/use-dynamic-palette';
@@ -96,6 +102,7 @@ import {
   DialogKeyboardContext,
   DoorElementsContext,
   ModeContext,
+  WorkspaceActiveContext,
   PaneElementsContext,
   PaneWriteContext,
   WallActionsContext,
@@ -108,7 +115,7 @@ import {
   type PaneWriteActions,
   type WallActions,
 } from './wall/wall-context';
-import type { CloseSurfaceMode, DoorAfterRestoreAction, DoorChip, DooredItem, WallEvent, WallMode, WallSelectionKind } from './wall/wall-types';
+import type { CloseSurfaceMode, DoorAfterRestoreAction, DoorChip, DooredItem, WallEvent, WallMode, WallSelectionKind, WorkspaceCommands } from './wall/wall-types';
 
 type ShellSpawnRequest = {
   shell?: string;
@@ -124,11 +131,12 @@ type ShellSpawnNoticeState = {
   nonce: number;
 };
 
-export type { DoorAfterRestoreAction, DoorChip, DooredItem, WallEvent, WallMode, WallSelectionKind } from './wall/wall-types';
+export type { DoorAfterRestoreAction, DoorChip, DooredItem, WallEvent, WallMode, WallSelectionKind, WorkspaceCommands } from './wall/wall-types';
 export {
   DialogKeyboardContext,
   DoorElementsContext,
   ModeContext,
+  WorkspaceActiveContext,
   WallActionsContext,
   RenamingIdContext,
   SelectedIdContext,
@@ -252,6 +260,9 @@ export function Wall({
   dialogHost,
   showBaseboard = true,
   enableBurrow = false,
+  workspaceId,
+  active = true,
+  workspaceCommands,
 }: {
   initialPaneIds?: string[];
   initialMode?: WallMode;
@@ -279,7 +290,27 @@ export function Wall({
    * `window.dormouseBurrow` console hook never load there.
    */
   enableBurrow?: boolean;
+  /**
+   * The Workspace this Wall renders. Absent means the host mounts one Wall for
+   * the whole page (VS Code, the website playground): it still registers a
+   * handle, under `DEFAULT_WORKSPACE_ID`, so the `dor` router always finds it.
+   */
+  workspaceId?: WorkspaceId;
+  /**
+   * Whether this Wall's Workspace is the visible one. An inactive Wall stays
+   * mounted and live but dispatches no window input and renders no modal host
+   * (docs/specs/layout.md → "Workspaces").
+   */
+  active?: boolean;
+  /** The Window's Workspace verbs, for the command-mode Workspace shortcuts.
+   *  Absent (a bare Wall) leaves those keys unbound. */
+  workspaceCommands?: WorkspaceCommands;
 } = {}) {
+  const effectiveWorkspaceId = workspaceId ?? DEFAULT_WORKSPACE_ID;
+  const activeRef = useRef(active);
+  activeRef.current = active;
+  const workspaceCommandsRef = useRef(workspaceCommands);
+  workspaceCommandsRef.current = workspaceCommands;
   const [terminalContext, setTerminalContext] = useState<TerminalContextState | null>(null);
   // Remove a closing context once its exit has played. A reopen or replacement
   // changes the state object, so the cleanup cancels the stale removal; the
@@ -831,8 +862,10 @@ export function Wall({
   // Surface kind, and the Session's live CWD. An archive batch and the volatile
   // mirror both read through this, so they describe a Surface identically
   // (docs/specs/notepad.md → "Closure").
+  // Every mounted Wall registers one; a Wall answers null for a Surface it does
+  // not own, so the resolver set resolves to the owning Workspace's answer.
   useEffect(() => {
-    setNotepadSurfaceMetaResolver((surfaceId) => {
+    return registerNotepadSurfaceMetaResolver((surfaceId: string) => {
       const meta = lath.getMeta(surfaceId);
       if (!meta) return null;
       const kind = surfaceKindFromParams(meta.params);
@@ -846,7 +879,6 @@ export function Wall({
         cwd: getTerminalPaneState(surfaceId).cwd,
       };
     });
-    return () => setNotepadSurfaceMetaResolver(null);
   }, [lath]);
 
   // A refused closure owns the keyboard while it is up, like the other modal
@@ -863,6 +895,7 @@ export function Wall({
     // on a real blur, else focusing an iframe wipes attention
     // (docs/specs/layout.md → Corner cases #2).
     const handleBlur = () => {
+      if (!activeRef.current) return;
       if (document.hasFocus()) return;
       clearSessionAttention();
     };
@@ -907,11 +940,32 @@ export function Wall({
     for (const id of paneIds) fireEvent({ type: 'paneAdded', id });
   }, [lath, generatePaneId, fireEvent, surfaceRefForId]);
 
+  /** Whether a `closeAll` is walking this Wall's Surfaces. It short-circuits the
+   *  auto-spawn refill, which would otherwise repopulate the Workspace being
+   *  destroyed the moment its last pane goes. */
+  const closingWorkspaceRef = useRef(false);
+
+  /** Restore the Wall's "always one pane" rule after a commit empties the tree
+   *  (last pane killed or minimized). A no-op while the tree is non-empty. */
+  const refillEmptyTree = useCallback(() => {
+    if (lath.store.getSnapshot().tree.root !== null) return;
+    const id = generatePaneId();
+    surfaceRefForId(id);
+    const defaults = getDefaultShellOpts();
+    if (defaults?.shell) setPendingShellOpts(id, { shell: defaults.shell, args: defaults.args });
+    lath.store.setEnterHint(id, 'top-left'); // grows from the top-left as the killed pane shrank to the bottom-right
+    lath.store.addLeaf(id, terminalLeafMeta(), null); // becomes the root
+    // Adopt selection only when it points at nothing real: null, or dangling (a
+    // just-killed pane). A live door (last pane minimized) keeps selection.
+    const sel = selectedIdRef.current;
+    const selDangling = sel !== null && selectedTypeRef.current === 'pane' && !lath.store.has(sel);
+    if (sel === null || selDangling) selectPane(id);
+  }, [lath, generatePaneId, surfaceRefForId, selectPane]);
+
   // Auto-spawn: whenever a commit empties the tree (last pane killed/minimized),
   // spawn one to keep a pane visible — the Wall's "always one pane" rule.
   useEffect(() => {
     return lath.store.subscribe(() => {
-      const snap = lath.store.getSnapshot();
       // `paneAdded` for any leaf new since the last commit. Runs post-commit, so the
       // pane exists. Meta/zoom/resize commits leave the id set unchanged (no fire).
       // The auto-spawn below commits re-entrantly, so its new leaf is caught here too.
@@ -927,30 +981,71 @@ export function Wall({
       // The size check also catches pure removals, purging dead ids so a later
       // re-add of the same id fires again.
       if (leavesChanged) prevLeafIdsRef.current = new Set(currentIds);
-      if (snap.tree.root !== null) return;
-      const id = generatePaneId();
-      surfaceRefForId(id);
-      const defaults = getDefaultShellOpts();
-      if (defaults?.shell) setPendingShellOpts(id, { shell: defaults.shell, args: defaults.args });
-      lath.store.setEnterHint(id, 'top-left'); // grows from the top-left as the killed pane shrank to the bottom-right
-      lath.store.addLeaf(id, terminalLeafMeta(), null); // becomes the root
-      // Adopt selection only when it points at nothing real: null, or dangling (a
-      // just-killed pane). A live door (last pane minimized) keeps selection.
-      const sel = selectedIdRef.current;
-      const selDangling = sel !== null && selectedTypeRef.current === 'pane' && !lath.store.has(sel);
-      if (sel === null || selDangling) selectPane(id);
+      // Publish membership for the union projection: the Activity store is
+      // window-wide, so this map is what scopes it to one Workspace.
+      setWorkspaceSurfaces(effectiveWorkspaceId, [...currentIds, ...doorsRef.current.map((door) => door.id)]);
+      if (closingWorkspaceRef.current) return;
+      refillEmptyTree();
     });
-  }, [lath, generatePaneId, surfaceRefForId, selectPane, fireEvent]);
+  }, [lath, fireEvent, refillEmptyTree, effectiveWorkspaceId]);
+
+  // Doors change without a leaf-id change (minimize keeps the leaf parked, a kill
+  // of a doored Surface removes only the chip), so publish on that edge too.
+  useEffect(() => {
+    setWorkspaceSurfaces(effectiveWorkspaceId, [...lath.store.leafIds(), ...doors.map((door) => door.id)]);
+  }, [doors, lath, effectiveWorkspaceId]);
 
   // --- Session persistence ---
-  useSessionPersistence({
+  const persistence = useSessionPersistence({
     lath,
     doors,
     doorsRef,
     selectedIdRef,
     selectedTypeRef,
     surfaceRefsForSave,
+    workspaceId,
+    // A Wall inside a Window leaves the host flush to `WorkspaceWindow`: the
+    // adapter's first `notifySessionFlushComplete` wins, so N Walls answering
+    // would let a quit proceed after only the first had written.
+    ownsHostFlush: workspaceId === undefined,
   });
+
+  /** This Wall's member Surfaces: visible panes then Doors. */
+  const memberSurfaceIds = useCallback(
+    (): string[] => [...lath.store.leafIds(), ...doorsRef.current.map((door) => door.id)],
+    [lath],
+  );
+
+  /**
+   * Close every Surface in this Workspace, each through the same coordinator a
+   * manual close uses (helper guard → notepad archive → kill,
+   * docs/specs/notepad.md → "Closure"). Resolves null once the Wall is empty and
+   * safe to unmount, or the first refusal's message with the Workspace left as
+   * it was — the strip then reveals it so the refusal is visible.
+   */
+  const closeAll = useCallback(async (mode: CloseSurfaceMode = 'prompt'): Promise<string | null> => {
+    closingWorkspaceRef.current = true;
+    for (const id of memberSurfaceIds()) {
+      // Re-checked per iteration: an earlier closure can take a Surface with it
+      // (a helper's source, a replaced leaf).
+      if (!lath.store.has(id) && !doorsRef.current.some((door) => door.id === id)) continue;
+      const refusal = await closeSurfaceRef.current(id, mode);
+      if (refusal) {
+        closingWorkspaceRef.current = false;
+        refillEmptyTree();
+        return refusal;
+      }
+    }
+    // `killPaneImmediately` defers the tree removal by the exit animation;
+    // unmounting the Wall before that lands would leave Orphaned Sessions
+    // (docs/specs/glossary.md → I4). Bounded so a stuck fade cannot hang a quit.
+    const deadline = Date.now() + lath.exitMs + 50;
+    while (lath.store.leafIds().length > 0 || doorsRef.current.length > 0) {
+      if (Date.now() >= deadline) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    return null;
+  }, [lath, memberSurfaceIds, refillEmptyTree]);
 
   // --- Dev-server port → pane correlation (browser header connection chip) ---
   useDevServerPortCorrelation({ lath, doorsRef });
@@ -1325,6 +1420,9 @@ export function Wall({
   // Listen for external "new terminal" requests (e.g. from the standalone AppBar)
   useEffect(() => {
     const handler = (e: Event) => {
+      // Host New Terminal (and shell replacement) targets the Workspace the user
+      // is looking at, not every mounted one.
+      if (!activeRef.current) return;
       const detail = ((e as CustomEvent<ShellSpawnRequest>).detail ?? {}) as ShellSpawnRequest;
       const newId = generatePaneId();
       surfaceRefForId(newId);
@@ -1389,7 +1487,7 @@ export function Wall({
   }, [generatePaneId, surfaceRefForId, forgetSurfaceRef, selectPane, enterTerminalMode, showShellSpawnNotice, lath, nav]);
 
   // --- dor control plane (the `dor` CLI's webview handler) ---
-  const { findSurfaceByParams, updateSurfaceParams } = useDorControl({
+  const { findSurfaceByParams, updateSurfaceParams, handleDorControl } = useDorControl({
     lath,
     nav,
     doorsRef,
@@ -1401,7 +1499,87 @@ export function Wall({
     isClosingSurface,
     closeSurface,
     lastAgentBrowserBinaryPathRef,
+    workspaceRef: useCallback(
+      () => workspaceRefFor(effectiveWorkspaceId) ?? 'workspace:1',
+      [effectiveWorkspaceId],
+    ),
+    windowRef: useCallback(() => WINDOW_REF, []),
   });
+
+  // --- Workspace handle ---
+
+  /** Put DOM focus back on this Wall's selection, honoring its own mode: each
+   *  Workspace keeps the mode it was left in across a switch. */
+  const focusSelected = useCallback(() => {
+    const id = selectedIdRef.current;
+    if (!id || selectedTypeRef.current !== 'pane' || !nav.hasPane(id)) return;
+    focusSession(id, modeRef.current === 'passthrough');
+  }, [nav]);
+
+  // The methods are rebuilt each render so they close over current state; the
+  // handle the registry holds is one stable object delegating to them, so a
+  // re-render never replaces a registered entry.
+  const handleMethodsRef = useRef<Omit<WallHandle, 'workspaceId'> | null>(null);
+  handleMethodsRef.current = {
+    surfaceIds: memberSurfaceIds,
+    ownsSurface: (id) => lath.store.has(id) || doorsRef.current.some((door) => door.id === id),
+    hasTouchedSurfaces: () => memberSurfaceIds().some((id) => {
+      // A browser Surface has no "untouched" notion and always holds a page, so
+      // it counts; a terminal counts once its Session exists and has input.
+      if (!hasTerminal(surfaceKindFromParams(lath.getMeta(id)?.params))) return true;
+      return getTerminalInstance(id) !== null && !isReplaceableShell(id);
+    }),
+    runningCount: () => countRunningSessionsIn(memberSurfaceIds()),
+    serialize: () => persistence.buildSession(),
+    flushPersistence: () => persistence.flush(),
+    focusSelected,
+    closeAll,
+    handleDorControl,
+  };
+  const handleRef = useRef<WallHandle | null>(null);
+  if (handleRef.current === null) {
+    handleRef.current = {
+      workspaceId: effectiveWorkspaceId,
+      surfaceIds: () => handleMethodsRef.current!.surfaceIds(),
+      ownsSurface: (id) => handleMethodsRef.current!.ownsSurface(id),
+      hasTouchedSurfaces: () => handleMethodsRef.current!.hasTouchedSurfaces(),
+      runningCount: () => handleMethodsRef.current!.runningCount(),
+      serialize: () => handleMethodsRef.current!.serialize(),
+      flushPersistence: () => handleMethodsRef.current!.flushPersistence(),
+      focusSelected: () => handleMethodsRef.current!.focusSelected(),
+      closeAll: (mode) => handleMethodsRef.current!.closeAll(mode),
+      handleDorControl: (detail) => handleMethodsRef.current!.handleDorControl(detail),
+    };
+  }
+
+  useEffect(() => {
+    const handle = handleRef.current!;
+    const unregister = registerWallHandle(handle);
+    // The router is the one window listener for `dor` requests; every Wall holds
+    // a share of it so a lone Wall installs it too.
+    const releaseRouter = installDorControlRouter();
+    return () => {
+      unregister();
+      releaseRouter();
+      clearWorkspaceSurfaces(handle.workspaceId);
+    };
+  }, []);
+
+  // Focus handoff on a switch. Deactivating blurs the selected pane; activating
+  // focuses it a frame later, since focus into a hidden subtree is a no-op.
+  // Skipped on mount (`active` has not changed), so a bare Wall is untouched.
+  const prevActiveRef = useRef(active);
+  useEffect(() => {
+    if (prevActiveRef.current === active) return;
+    prevActiveRef.current = active;
+    if (!active) {
+      const id = selectedIdRef.current;
+      if (id && selectedTypeRef.current === 'pane' && nav.hasPane(id)) focusSession(id, false);
+      return;
+    }
+    const frame = requestAnimationFrame(focusSelected);
+    return () => cancelAnimationFrame(frame);
+  }, [active, focusSelected, nav]);
 
   const addSplitPanel = useCallback((
     id: string | null,
@@ -1700,6 +1878,8 @@ export function Wall({
 
   useWallKeyboard({
     nav,
+    activeRef,
+    workspaces: workspaceCommands,
     swapWithNeighbor,
     modeRef,
     selectedIdRef,
@@ -1792,6 +1972,7 @@ export function Wall({
   // --- Render ---
 
   return (
+    <WorkspaceActiveContext.Provider value={active}>
     <ModeContext.Provider value={mode}>
       <SelectedIdContext.Provider value={selectedId}>
         <WallActionsContext.Provider value={wallActions}>
@@ -1863,14 +2044,23 @@ export function Wall({
               version={paneElementsVersion}
             />
 
-            <ExternalLinkModalHost />
-            <AgentBrowserScreenModalHost resolveLabel={surfaceRefForId} />
-            {enableBurrow ? (
-              <Suspense fallback={null}>
-                <RemotePairingModalHost />
-              </Suspense>
+            {/* Modal hosts belong to the visible Workspace only — each is a
+                window-level dialog, and each needs THIS Wall's
+                `DialogKeyboardContext` to suppress command-mode dispatch, so
+                they are gated rather than hoisted. Their state lives in stores,
+                so it survives a switch. */}
+            {active ? (
+              <>
+                <ExternalLinkModalHost />
+                <AgentBrowserScreenModalHost resolveLabel={surfaceRefForId} />
+                {enableBurrow ? (
+                  <Suspense fallback={null}>
+                    <RemotePairingModalHost />
+                  </Suspense>
+                ) : null}
+                {dialogHost}
+              </>
             ) : null}
-            {dialogHost}
 
           </div>
           </DialogKeyboardContext.Provider>
@@ -1884,5 +2074,6 @@ export function Wall({
         </WallActionsContext.Provider>
       </SelectedIdContext.Provider>
     </ModeContext.Provider>
+    </WorkspaceActiveContext.Provider>
   );
 }

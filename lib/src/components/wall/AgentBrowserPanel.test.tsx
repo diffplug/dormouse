@@ -10,7 +10,7 @@ import type { PaneProps } from './pane-props';
 import { AgentBrowserPanel, HIDDEN_PARK_DELAY_MS } from './AgentBrowserPanel';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
 import { disposeAllAgentBrowserSurfaceControllers } from './agent-browser-surface-controller';
-import { ModeContext, PaneWriteContext, SelectedIdContext, WallActionsContext, type PaneWriteActions } from './wall-context';
+import { ModeContext, PaneWriteContext, SelectedIdContext, WallActionsContext, WorkspaceActiveContext, type PaneWriteActions } from './wall-context';
 import { stubWallActions as stubActions } from './wall-test-utils';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -439,11 +439,11 @@ describe('AgentBrowserPanel render mode controller', () => {
 });
 
 describe('AgentBrowserPanel visibility parking', () => {
-  // Two things hide a surface (`useSurfaceVisibility`): a backgrounded window, and a
-  // PARKED leaf — minimized, so mounted but out of the tree
-  // (docs/specs/tiling-engine.md → "Parked leaves"). A window transition is a
+  // Three things hide a surface (`useSurfaceVisibility`): a backgrounded window,
+  // a hidden Workspace, and a PARKED leaf — minimized, so mounted but out of the
+  // tree (docs/specs/tiling-engine.md → "Parked leaves"). A window transition is a
   // `visibilitychange` event, driven here by overriding `document.visibilityState`;
-  // a park transition is the `parked` pane prop, driven by re-rendering.
+  // a Workspace and a park transition are both props, driven by re-rendering.
   function setDocumentHidden(hidden: boolean): void {
     Object.defineProperty(document, 'visibilityState', {
       configurable: true,
@@ -453,16 +453,22 @@ describe('AgentBrowserPanel visibility parking', () => {
 
   async function renderVisibilityPanel(
     params: TestPanelParams,
-  ): Promise<{ setVisible: (visible: boolean) => void; setParked: (parked: boolean) => void }> {
+  ): Promise<{
+    setVisible: (visible: boolean) => void;
+    setParked: (parked: boolean) => void;
+    setWorkspaceActive: (active: boolean) => void;
+  }> {
     setDocumentHidden(false); // mount on-screen
-    const render = (parked: boolean) => {
+    const render = (parked: boolean, workspaceActive = true) => {
       root.render(
         <StrictMode>
-          <PaneWriteContext.Provider value={paneWriteFor(() => {})}>
-            <WallActionsContext.Provider value={stubActions()}>
-              <AgentBrowserPanel {...paneProps('ab-panel', params)} parked={parked} />
-            </WallActionsContext.Provider>
-          </PaneWriteContext.Provider>
+          <WorkspaceActiveContext.Provider value={workspaceActive}>
+            <PaneWriteContext.Provider value={paneWriteFor(() => {})}>
+              <WallActionsContext.Provider value={stubActions()}>
+                <AgentBrowserPanel {...paneProps('ab-panel', params)} parked={parked} />
+              </WallActionsContext.Provider>
+            </PaneWriteContext.Provider>
+          </WorkspaceActiveContext.Provider>
         </StrictMode>,
       );
     };
@@ -473,6 +479,7 @@ describe('AgentBrowserPanel visibility parking', () => {
         document.dispatchEvent(new Event('visibilitychange'));
       },
       setParked: (parked) => { render(parked); },
+      setWorkspaceActive: (active) => { render(false, active); },
     };
   }
 
@@ -521,6 +528,27 @@ describe('AgentBrowserPanel visibility parking', () => {
 
     // Reattach reconnects without the panel ever having unmounted.
     await act(async () => { setParked(false); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(streamSockets(4321).length).toBeGreaterThan(before);
+    expect(liveStreamSocket(4321)?.readyState).toBe(1);
+  });
+
+  it('idles a screencast whose Workspace is hidden, and resumes it on return', async () => {
+    const { setWorkspaceActive } = await renderVisibilityPanel({
+      surfaceType: 'browser', session: 'browser-session', wsPort: 4321,
+    });
+
+    const socket = liveStreamSocket(4321);
+    expect(socket?.readyState).toBe(1);
+    const before = streamSockets(4321).length;
+
+    // The Wall stays mounted and live; only its visibility changed.
+    await act(async () => { setWorkspaceActive(false); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(HIDDEN_PARK_DELAY_MS + 50); });
+    expect(socket?.readyState).toBe(3);
+    expect(streamSockets(4321).length).toBe(before);
+
+    await act(async () => { setWorkspaceActive(true); });
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
     expect(streamSockets(4321).length).toBeGreaterThan(before);
     expect(liveStreamSocket(4321)?.readyState).toBe(1);

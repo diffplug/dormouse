@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, type RefObject } from 'react';
+import { useCallback, useEffect, useMemo, useRef, type RefObject } from 'react';
 import { pasteFilePaths } from '../../lib/clipboard';
 import { getPlatform } from '../../lib/platform';
-import { saveSession } from '../../lib/session-save';
+import { buildPersistedSession, saveSession, type SaveSink } from '../../lib/session-save';
 import { createSessionDirtyTracker } from '../../lib/session-dirty';
+import { publishWorkspaceSession } from '../../lib/window-session-aggregator';
 import {
   subscribeToActivity,
   subscribeToTerminalPaneState,
@@ -11,7 +12,14 @@ import {
 import { surfaceKindFromParams } from './browser-surface';
 import type { LathWallEngine } from './lath-wall-engine';
 import type { DooredItem, WallSelectionKind } from './wall-types';
-import type { PersistedDoor, PersistedSurfaceRefs } from '../../lib/session-types';
+import type { PersistedDoor, PersistedSession, PersistedSurfaceRefs, WorkspaceId } from '../../lib/session-types';
+
+export interface SessionPersistenceHandle {
+  /** This Workspace's record right now, built but not written. */
+  buildSession: () => Promise<PersistedSession>;
+  /** Persist immediately, awaiting the whole queued pipeline. */
+  flush: () => Promise<void>;
+}
 
 export function useSessionPersistence({
   lath,
@@ -20,6 +28,8 @@ export function useSessionPersistence({
   selectedIdRef,
   selectedTypeRef,
   surfaceRefsForSave,
+  workspaceId,
+  ownsHostFlush = true,
 }: {
   /** The Lath engine — the layout authority written on every commit, and the source
    *  of the visible-pane projection (`lath.listPanes()`). Stable identity, so the
@@ -34,22 +44,47 @@ export function useSessionPersistence({
   selectedIdRef: RefObject<string | null>;
   selectedTypeRef: RefObject<WallSelectionKind>;
   surfaceRefsForSave?: () => { refs: PersistedSurfaceRefs; next: number };
-}): void {
+  /** Present when this Wall belongs to a Workspace: its record then goes to the
+   *  Window collector instead of the platform slot, and is compared against its
+   *  own Workspace's previous record. */
+  workspaceId?: WorkspaceId;
+  /** Whether this Wall answers the host's flush request itself. `WorkspaceWindow`
+   *  sets this false and owns the one subscription for the whole Window — the
+   *  adapter's first `notifySessionFlushComplete` wins, so N Walls answering
+   *  would let a quit proceed after the first. */
+  ownsHostFlush?: boolean;
+}): SessionPersistenceHandle {
   const sessionSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sessionSavePromiseRef = useRef<Promise<void> | null>(null);
   const pendingSaveNeededRef = useRef(false);
   // See session-dirty.ts for the conservative-under-races generation model.
   const trackerRef = useRef(createSessionDirtyTracker());
+  // This Workspace's last published record: `getPreviousPaneMap`'s source, which
+  // must be this Workspace's own (a dead PTY's cwd is retained there), not the
+  // Window's active Workspace.
+  const publishedRef = useRef<PersistedSession | null>(null);
 
-  const doSave = useCallback((): Promise<void> => {
+  const sink = useMemo<SaveSink | undefined>(() => {
+    if (workspaceId === undefined) return undefined;
+    return {
+      previous: () => publishedRef.current,
+      publish: (session) => {
+        publishedRef.current = session;
+        publishWorkspaceSession(workspaceId, session);
+      },
+    };
+  }, [workspaceId]);
+
+  /** The pane + Door projection every save and serialization is built from. The
+   *  runtime Door is id + token; its metadata is materialized HERE, from the
+   *  store that owned it all along, so a Surface persists where it navigated to
+   *  rather than where it was minimized and a restart cold-loads it there. */
+  const collect = useCallback(() => {
     const panes = lath.listPanes().map((p) => ({
       id: p.id,
       title: p.title ?? UNNAMED_PANEL_TITLE,
       surfaceType: surfaceKindFromParams(p.params),
     }));
-    // The runtime Door is id + token; its metadata is materialized HERE, from the
-    // store that owned it all along, so a Surface persists where it navigated to
-    // rather than where it was minimized and a restart cold-loads it there.
     const doors: PersistedDoor[] = (doorsRef.current ?? []).map((door) => {
       const meta = lath.getMeta(door.id);
       return {
@@ -63,8 +98,26 @@ export function useSessionPersistence({
     });
     const surfaceRefs = surfaceRefsForSave?.();
     // The Lath tree is the sole persisted layout; doors ride through with their tokens.
-    return saveSession(getPlatform(), panes, doors, lath.serializeLayout(), surfaceRefs?.refs, surfaceRefs?.next);
+    return { panes, doors, lathLayout: lath.serializeLayout(), surfaceRefs };
   }, [lath, doorsRef, surfaceRefsForSave]);
+
+  const doSave = useCallback((): Promise<void> => {
+    const { panes, doors, lathLayout, surfaceRefs } = collect();
+    return saveSession(getPlatform(), panes, doors, lathLayout, surfaceRefs?.refs, surfaceRefs?.next, sink);
+  }, [collect, sink]);
+
+  const buildSession = useCallback((): Promise<PersistedSession> => {
+    const { panes, doors, lathLayout, surfaceRefs } = collect();
+    return buildPersistedSession(
+      getPlatform(),
+      panes,
+      doors,
+      lathLayout,
+      surfaceRefs?.refs,
+      surfaceRefs?.next,
+      publishedRef.current,
+    );
+  }, [collect]);
 
   const persistSessionNow = useCallback(async (): Promise<void> => {
     const runSave = (): Promise<void> => {
@@ -162,7 +215,7 @@ export function useSessionPersistence({
       if (isDirty()) scheduleSessionSave();
     }, 30_000);
     platform.onPtyExit(handlePtyExit);
-    platform.onRequestSessionFlush(handleSessionFlushRequest);
+    if (ownsHostFlush) platform.onRequestSessionFlush(handleSessionFlushRequest);
     window.addEventListener('pagehide', handlePageHide);
 
     // Inert in Tauri standalone today; see diffplug/dormouse#38 and tauri-apps/tauri#14373.
@@ -181,7 +234,7 @@ export function useSessionPersistence({
       }
       window.removeEventListener('pagehide', handlePageHide);
       unsubFilesDropped?.();
-      platform.offRequestSessionFlush(handleSessionFlushRequest);
+      if (ownsHostFlush) platform.offRequestSessionFlush(handleSessionFlushRequest);
       platform.offPtyExit(handlePtyExit);
       platform.offPtyData(markDirty);
       unsubActivity();
@@ -193,9 +246,12 @@ export function useSessionPersistence({
   }, [
     lath,
     flushSessionSave,
+    ownsHostFlush,
     persistSessionNow,
     scheduleSessionSave,
     selectedIdRef,
     selectedTypeRef,
   ]);
+
+  return { buildSession, flush: flushSessionSave };
 }

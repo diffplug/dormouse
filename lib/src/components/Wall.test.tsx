@@ -23,6 +23,8 @@ import { __resetArchiveServiceForTests } from '../lib/notepad/archive-service';
 import { addPlainNote, beginClosing, clearAllNotepads, getNotes } from '../lib/notepad/notepad-store';
 import type { NotepadArchiveV1 } from '../lib/notepad/types';
 import { createTerminalPaneState, type TerminalPaneState } from '../lib/terminal-state';
+import { getWallHandle, listWallHandles } from './wall/wall-handles';
+import { DEFAULT_WORKSPACE_ID } from '../lib/session-types';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -2052,5 +2054,17 @@ describe('Wall on the Lath engine', () => {
     } finally {
       HTMLElement.prototype.getBoundingClientRect = origRect;
     }
+  });
+
+  it('registers exactly one handle, under the default Workspace, for a bare Wall', async () => {
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
+    await flush();
+    // The compatibility rule: a Wall with no `workspaceId` still registers, so
+    // the `dor` router always finds one (docs/specs/layout.md → "Workspaces").
+    expect(listWallHandles()).toHaveLength(1);
+    const handle = getWallHandle(DEFAULT_WORKSPACE_ID)!;
+    expect(handle.surfaceIds()).toEqual(['pane-a']);
+    expect(handle.ownsSurface('pane-a')).toBe(true);
+    expect(handle.ownsSurface('pane-elsewhere')).toBe(false);
   });
 });

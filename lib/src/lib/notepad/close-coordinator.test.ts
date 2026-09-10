@@ -16,7 +16,7 @@ import {
   deleteNote,
   getNotes,
   isSurfaceClosing,
-  setNotepadSurfaceMetaResolver,
+  registerNotepadSurfaceMetaResolver,
   setNoteText,
 } from './notepad-store';
 import type { NotepadArchiveV1, RuntimeTerminalSource } from './types';
@@ -39,7 +39,7 @@ const PANE_IDS = ['s1', 's2', 's3'];
  * not fixed, so a refresh the closure performs shows up in the batch it builds.
  */
 function installMetaResolver(surfaceKind: SurfaceKind = 'terminal', surfaceTitle = 'pnpm dev'): void {
-  setNotepadSurfaceMetaResolver((id) => ({
+  registerNotepadSurfaceMetaResolver((id) => ({
     surfaceTitle,
     surfaceKind,
     cwd: getTerminalPaneState(id).cwd,

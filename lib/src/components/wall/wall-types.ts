@@ -45,6 +45,25 @@ export type DoorAfterRestoreAction =
       announce: boolean;
     };
 
+/**
+ * The Window's Workspace verbs as a Wall's keyboard sees them. `WorkspaceWindow`
+ * builds the single instance; targets resolve through the active Workspace, so a
+ * hidden Wall's stale keystroke could not act on the wrong one. Absent on a bare
+ * Wall, which leaves the Workspace keys unbound (docs/specs/shortcuts.md →
+ * "Workspaces (command mode)").
+ */
+export interface WorkspaceCommands {
+  create(): void;
+  /** `+1` next, `-1` previous; wraps at both ends. */
+  cycle(delta: 1 | -1): void;
+  /** Activate the nth Workspace (0-based); out of range does nothing. */
+  selectIndex(index: number): void;
+  /** Ask the strip to run its close flow for the active Workspace. */
+  requestClose(): void;
+  /** Ask the strip to open its rename editor on the active Workspace. */
+  requestRename(): void;
+}
+
 export type WallEvent =
   | { type: 'modeChange'; mode: WallMode }
   | { type: 'zoomChange'; zoomed: boolean }

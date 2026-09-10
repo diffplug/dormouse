@@ -26,6 +26,10 @@ export function useWallKeyboard(ctx: WallKeyboardCtx): void {
 
     const handler = (e: KeyboardEvent) => {
       const c = ctxRef.current;
+      // A hidden Workspace's Wall keeps its listeners but dispatches nothing:
+      // exactly one Wall answers window input (docs/specs/layout.md →
+      // "Workspaces").
+      if (!c.activeRef.current) return;
 
       const context = (e.target as HTMLElement | null)?.closest?.('[data-terminal-context]');
       if (context) {
@@ -57,6 +61,7 @@ export function useWallKeyboard(ctx: WallKeyboardCtx): void {
       if (!data || data.__dormouse !== 'leader') return;
       if (!isProxyOrigin(e.origin)) return;
       const c = ctxRef.current;
+      if (!c.activeRef.current) return;
       if (c.modeRef.current === 'passthrough') c.exitTerminalMode();
     };
 
