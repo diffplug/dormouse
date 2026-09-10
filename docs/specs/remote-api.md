@@ -277,9 +277,26 @@ These are the methods the dor CLI speaks today; the remote API reuses their requ
 
 **Window lease.** A VR session may request `window.lease { windowRef }`, declaring itself that Window's primary display. Sizing needs no lease — last-attach-wins already hands VR the panes it displays — so the lease is presentational: that Window tethers wholesale instead of pane by pane, and panes created in it while the lease is held open tethered to the leaseholder. One lease per Window; the Burrow user can always reclaim it locally. Phones never need it.
 
-### 8. WebRTC rendezvous
+### 8. Direct path (WebRTC)
 
-Latency. WebRTC replaces only the relay *transport* of the same Noise transport messages ([Transport](#transport)), and only after authorization: the Relay signals but is never trusted with authorization, and the presence protocol is inherited unless separately reviewed.
+**Scope: direct-path** — latency. After authorization the same Noise session moves off the Relay onto a WebRTC data channel between phone and laptop; the presence protocol is inherited unchanged and the Relay is never trusted with authorization. Staged order:
+
+1. **Shared plumbing** — `remote-lib-common`: the signaling controls, their guards, the cutover state machine and its bounds; a `direct` module under `lib/src/remote/`: one `RTCPeerConnection`-shaped peer wrapper both ends share, its peer factory injected (`PocketClientDeps.createDirectPeer`, `BurrowOptions.createDirectPeer`), null where a runtime has none.
+2. **Pocket offers; the standalone Burrow answers** — Pocket over the browser's `RTCPeerConnection`; the sidecar over `node-datachannel`'s W3C polyfill, a native addon declared in `standalone/sidecar/package.json` beside `node-pty`, loaded lazily at the first offer, a load failure answering `direct-decline`. The VS Code Burrow declines.
+3. **Security** — `docs/specs/security-remote.md` rows, `scripts/e2e-lint.mjs` rules with self-tests, the supply-chain disclosure regenerated, and a section of `docs/specs/remote-security-model.md` stating the path adds no layer to the trust model.
+4. **VS Code Burrow** — platform-targeted VSIX builds carrying the addon per target (`docs/specs/deploy.md`).
+5. **Dogfood** across a tailnet, keystroke round-trip measured relayed and direct into the rationale.
+
+The design stages 1–3 build:
+
+* **Signaling rides inside the session**, as control messages (`docs/specs/relay.md` -> E2E framing) on the established session over the relay path: `direct-offer` (Client→Burrow, SDP), `direct-answer` (Burrow→Client, SDP), `direct-decline` (Burrow→Client), `direct-switch` (either direction). **The Relay never sees an SDP, a candidate, or that a direct path exists**; a peer without the stack ignores or declines, and the session stays relayed — an old Pocket or Burrow needs nothing.
+* **Offered only after `ConnectionOutcomeV1 { ok: true }`**, once per session, never retried. The Client is the offerer and creates one ordered, reliable data channel; each side sends its SDP after ICE gathering completes (no trickle), bounded by `CONTROL_PAYLOAD_SIZE` — a Burrow whose answer would exceed it declines.
+* **No ICE servers.** `iceServers: []` at both ends, host candidates only: the shipped deployment is a tailnet, so the Burrow's tailnet address is a host candidate and the phone's mDNS-obfuscated one is learned peer-reflexively. **Never a public STUN or TURN default** — it would hand a third party the user's address. Relay-supplied ICE servers are unstaged (SaaS).
+* **Every byte on the channel is a Noise transport message of the promoted session** — one message per channel frame, raw bytes, the same two `CipherState`s and counters, every frame bounded at `NOISE_MAX_MESSAGE_LENGTH` before decryption. DTLS beneath is transport hygiene the model does not rely on; its fingerprints are authentic because the SDP arrived inside the session.
+* **Cutover preserves order per direction.** A sender's `direct-switch` is its last message on the relay path; every later message goes on the channel. A receiver processes relay frames until it decrypts `direct-switch`, holding channel frames meanwhile — at most `MAX_DIRECT_PENDING_FRAMES` / `MAX_DIRECT_PENDING_BYTES`, overflow disposing the session — then drains them in arrival order. After the switch, a relay transport frame on that connection, or the channel closing, disposes the session: burrow loss, a fresh handshake to return. A channel not open by `DIRECT_SETUP_TIMEOUT_MS` is closed and the session stays relayed.
+* **The Relay stays the lifecycle authority.** `client-gone`, `burrow-gone`, and either relay socket closing dispose the session, channel included, exactly as today; the idle deadline, keepalives, and every Burrow bound are path-agnostic. A session surviving relay loss is unstaged.
+* **One peer connection per session**: created at the offer, closed on every disposal path, never existing before promotion.
+* **Pocket shows which path carries the session**, so a relayed fallback is visible rather than silent.
 
 ### 9. Audio
 
@@ -292,4 +309,4 @@ Browser surfaces can produce audio; VR will want it (spatial, per-panel).
 
 ### Open questions
 
-* **Browser media**: screencast frames over the WebSocket first; when WebRTC arrives, a video track would be smoother for VR. Possibly phone=frames, VR=track, negotiated in the hello.
+* **Browser media**: screencast frames over the WebSocket first; once the direct path ships, a video track would be smoother for VR. Possibly phone=frames, VR=track, negotiated in the hello.
