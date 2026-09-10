@@ -166,7 +166,7 @@ describe("one window, two teardown flows", () => {
     expect(count("window_close_cancel")).toBe(1);
   });
 
-  it("a close that already committed keeps a quit from starting a second teardown", async () => {
+  it("a quit meeting a committed close votes rather than starting a second teardown", async () => {
     mocks.countRunningSessions.mockReturnValue(0); // no dialog: the close commits
     closeRequested();
     await settle();
@@ -175,11 +175,50 @@ describe("one window, two teardown flows", () => {
     quitRequested();
     await settle();
 
-    // Acked, so Rust's ack watchdog stands down; not voted, because this window
-    // is already ending and Rust forgets it when it is destroyed.
+    // Acked, so Rust's ack watchdog stands down, and voted: this window is
+    // ending anyway, and a window that never votes leaves the quit machine in
+    // `Voting` with no dialog for anyone to answer. Never `quit_cancel`, which
+    // would abort the app's quit on behalf of a window already going away.
     expect(commands()).toContain("quit_ack");
-    expect(commands()).not.toContain("quit_vote");
+    expect(count("quit_vote")).toBe(1);
     expect(commands()).not.toContain("quit_cancel");
+    // …and it started no teardown of its own: the close owns the window.
+    expect(count("close_window")).toBe(1);
+  });
+
+  it("re-asks a quit deferred to a close that then retreated and was cancelled", async () => {
+    // The close commits with no dialog and parks inside its archive — committed,
+    // and so not something the quit may take the dialog away from.
+    mocks.countRunningSessions.mockReturnValue(0);
+    mocks.notepadSurfaceIds.mockReturnValue(["pane-a"]);
+    let failArchive = (_err: Error) => {};
+    mocks.archiveSurfaceNotes.mockReturnValue(
+      new Promise<void>((_resolve, reject) => { failArchive = reject; }),
+    );
+    closeRequested();
+    await settle();
+    expect(commands()).not.toContain("close_window");
+
+    // The quit takes the committed close as a yes and votes.
+    mocks.countRunningSessions.mockReturnValue(1);
+    quitRequested();
+    await settle();
+    expect(count("quit_vote")).toBe(1);
+
+    // The archive fails: the committed close retreats to a question only a
+    // human can answer, which is where it can still be talked out of ending.
+    failArchive(new Error("the archive is locked"));
+    await settle();
+    expect(getQuitConfirmPhase()).toBe("archive-failed");
+
+    // The user declines the archive failure: the close is off and the window
+    // stays — so the quit's own question, never asked, is asked now.
+    cancelQuit();
+    await settle();
+    expect(count("window_close_cancel")).toBe(1);
+    expect(getQuitConfirmPhase()).toBe("open");
+    expect(getQuitConfirmIntent().kind).toBe("quit");
+    expect(count("quit_ack")).toBe(2);
   });
 
   it("a refused dialog always settles its context", async () => {

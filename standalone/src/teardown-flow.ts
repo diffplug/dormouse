@@ -62,7 +62,7 @@ export function describeWindow(): string | undefined {
  * | Arriving | Holder | Outcome |
  * |---|---|---|
  * | quit | close, undecided | the close is cancelled; the quit takes over |
- * | quit | anything committed | the quit only acks — the window is ending, and Rust forgets it when it is destroyed |
+ * | quit | anything committed | the quit acks **and votes** — the window is ending anyway, and a quit that never votes leaves the machine in `Voting` with no dialog anywhere |
  * | close | quit, any state | refused with `window_close_cancel`; the window stays |
  */
 interface TeardownClaim {
@@ -75,9 +75,21 @@ interface TeardownClaim {
 }
 let holder: TeardownClaim | null = null;
 
+/**
+ * A quit that voted on behalf of a committed holder, kept until that holder is
+ * done with the window.
+ *
+ * **A committed flow can still retreat**: `archive-failed` puts the notes it
+ * could not store to the user, and a decline there cancels the close and leaves
+ * the window standing — with a quit already voted for it and its own question
+ * never asked. Re-driving the quit intent is what puts that question back.
+ */
+let deferredQuit: { against: TeardownClaim; rerun: () => void } | null = null;
+
 /** @internal Forget the window-wide claim (tests). */
 export function _resetTeardownArbiterForTesting(): void {
   holder = null;
+  deferredQuit = null;
 }
 
 export function createTeardownFlow(options: {
@@ -121,6 +133,13 @@ export function createTeardownFlow(options: {
     phase = "idle";
     if (holder === claim) holder = null;
     void invoke(options.cancelCommand).catch(() => {});
+    // This window is not ending after all, and a quit deferred to it never got
+    // to ask its own question. Ask it now.
+    if (deferredQuit?.against === claim) {
+      const { rerun } = deferredQuit;
+      deferredQuit = null;
+      rerun();
+    }
   };
 
   async function archiveThenProceed(intent: QuitConfirmIntent): Promise<void> {
@@ -154,19 +173,27 @@ export function createTeardownFlow(options: {
     await options.proceed();
   }
 
-  return {
+  const flow: TeardownFlow = {
     request(intent) {
       // Ack first — stands the host's ack watchdog down even when the trigger is
       // deduped below (a repeated trigger re-emits, so re-acking is expected).
       void invoke(options.ack).catch(() => {});
       if (phase !== "idle") return;
       if (holder && holder !== claim) {
-        if (options.kind !== "quit" || !holder.undecided()) {
+        if (options.kind !== "quit") {
           // A close refused here is answered, never dropped: Rust is holding
           // the window open on a `prevent_close` waiting for exactly this.
-          // A quit refused here says nothing — `quit_cancel` would abort the
-          // whole app's quit on behalf of a window that is already ending.
-          if (options.kind !== "quit") cancel();
+          cancel();
+          return;
+        }
+        if (!holder.undecided()) {
+          // The holder has committed: this window is being torn down whatever
+          // the quit decides, so the quit takes it as a yes rather than saying
+          // nothing — a window that never votes holds the whole app in `Voting`
+          // with no dialog for the user to answer. Kept, in case that holder
+          // retreats and is cancelled (`deferredQuit`).
+          deferredQuit = { against: holder, rerun: () => flow.request(intent) };
+          void options.proceed();
           return;
         }
         holder.abandon();
@@ -186,6 +213,8 @@ export function createTeardownFlow(options: {
     reset() {
       phase = "idle";
       if (holder === claim) holder = null;
+      if (deferredQuit?.against === claim) deferredQuit = null;
     },
   };
+  return flow;
 }
