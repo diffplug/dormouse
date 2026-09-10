@@ -94,6 +94,12 @@ signal always fits one control body.
 **No ICE servers**, and **never a public STUN or TURN default**: `iceServers:
 []` at both ends, host candidates only. (rationale)
 
+**The two shipped stacks are proven against each other by hand.** No CI job has
+a browser, so `scripts/direct-interop/run.mjs` negotiates a real browser against
+the real addon over the shipped `DirectPeer` — measuring the browser's offer
+against `MAX_DIRECT_SDP_LENGTH`, which is a property of the host's interfaces
+rather than of the code (rationale).
+
 **Every byte on the channel is a Noise transport message of the promoted
 session**: one message per channel frame, raw bytes, the same two `CipherState`s
 and counters. **Every inbound channel frame is bounded at
