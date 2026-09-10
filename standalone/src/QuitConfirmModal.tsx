@@ -87,6 +87,11 @@ export function QuitConfirmModal({
       : hasRunning
         ? `${scope}${runningCount} running command${runningCount === 1 ? '' : 's'} will be stopped.`
         : `${scope}No commands are still running.`;
+  // The download lives in this webview, so closing the window throws it away and
+  // the app installs nothing on the next quit (docs/specs/auto-update.md).
+  const updateNotice = !archiveError && !confirming && intent.discardsUpdate
+    ? 'The downloaded update will be discarded.'
+    : null;
   const confirmLabel = archiveError
     ? `${verb} anyway`
     : hasRunning ? `${verb} and stop ${runningCount}` : verb;
@@ -107,6 +112,7 @@ export function QuitConfirmModal({
     >
       <h2 id="quit-confirm-modal-title" className="text-sm leading-5 text-foreground">{title}</h2>
       <p className="mt-2 text-sm text-muted">{body}</p>
+      {updateNotice && <p className="mt-1 text-sm text-muted">{updateNotice}</p>}
 
       <div className="mt-4 flex justify-end gap-2">
         <button

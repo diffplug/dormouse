@@ -69,7 +69,7 @@ import { clearWorkspaceSurfaces, setWorkspaceSurfaces } from '../lib/workspace-s
 import { getWorkspacesSnapshot, workspaceRefFor } from '../lib/workspace-store';
 import { awaitWallEmpty } from './wall/close-all';
 import { registerWallHandle, type WallHandle } from './wall/wall-handles';
-import { releaseWorkspaceForTransfer } from './wall/workspace-transfer';
+import { prepareWorkspaceTransfer } from './wall/workspace-transfer';
 import { installDorControlRouter } from './wall/dor-control-router';
 import type { DropTarget, RestoreToken } from '../lib/lath/ops';
 import type { Edge } from '../lib/lath/model';
@@ -1559,7 +1559,7 @@ export function Wall({
     }),
     runningCount: () => countRunningSessionsIn(memberSurfaceIds()),
     flushPersistence: (options) => persistence.flush(options),
-    releaseWorkspaceForTransfer: () => releaseWorkspaceForTransfer({
+    prepareWorkspaceTransfer: () => prepareWorkspaceTransfer({
       workspaceId: effectiveWorkspaceId,
       name: getWorkspacesSnapshot().workspaces
         .find((workspace) => workspace.id === effectiveWorkspaceId)?.name ?? '',

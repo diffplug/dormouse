@@ -28,6 +28,9 @@ export interface StripDragHost {
   setDragging(id: WorkspaceId | null): void;
   /** The pointer left the window's strip entirely. */
   onDragOutsideWindow?(point: StripDragPoint): void;
+  /** …and came back over it. The live reorder takes the gesture back, so a drop
+   *  caret the host lit in another window is stale from here. */
+  onDragBackInsideStrip?(): void;
   /**
    * Released. `insideStrip` is this controller's own answer — it owns the strip
    * box — so the host never re-derives it from the DOM; true means the live
@@ -57,6 +60,9 @@ export function createWorkspaceStripDrag(host: StripDragHost): WorkspaceStripDra
   let startX = 0;
   let startY = 0;
   let active = false;
+  /** Whether the last move was outside the strip, so the return crossing is
+   *  reported exactly once. */
+  let outsideStrip = false;
   /** Set by the release of a completed drag and consumed by the one click that
    *  follows it. */
   let clickIsDragTail = false;
@@ -98,6 +104,16 @@ export function createWorkspaceStripDrag(host: StripDragHost): WorkspaceStripDra
       // reports that container as the target instead.
       try { pressedOn?.setPointerCapture?.(pointerId); capturedBy = pressedOn; } catch { capturedBy = null; }
     }
+    // Ahead of the reorder scan, which returns as soon as it moves a tab: the
+    // host has to hear about the crossing whether or not one happened.
+    const inside = insideStrip(event);
+    if (inside === false) {
+      outsideStrip = true;
+      host.onDragOutsideWindow?.({ clientX: event.clientX, clientY: event.clientY });
+    } else if (inside === true && outsideStrip) {
+      outsideStrip = false;
+      host.onDragBackInsideStrip?.();
+    }
     const order = host.order();
     const from = order.indexOf(dragId);
     if (from === -1) return;
@@ -112,9 +128,6 @@ export function createWorkspaceStripDrag(host: StripDragHost): WorkspaceStripDra
         host.move(dragId, index);
         return;
       }
-    }
-    if (host.onDragOutsideWindow && insideStrip(event) === false) {
-      host.onDragOutsideWindow({ clientX: event.clientX, clientY: event.clientY });
     }
   }
 
@@ -169,6 +182,7 @@ export function createWorkspaceStripDrag(host: StripDragHost): WorkspaceStripDra
       startX = event.clientX;
       startY = event.clientY;
       active = false;
+      outsideStrip = false;
       clickIsDragTail = false;
       pressedOn = host.tabElement(id);
       window.addEventListener('pointermove', onPointerMove);

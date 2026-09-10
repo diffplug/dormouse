@@ -1309,14 +1309,19 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
    * caller forwarding a computed set that came out empty must get a no-op
    * rather than everything. `forWindow` is echoed on the list and on each
    * replay so the host can route both back to the window that asked
-   * (docs/specs/standalone.md -> "Windows").
+   * (docs/specs/standalone.md -> "Windows"), and `requestId` so the asking
+   * collector can tell its own answer from a concurrent one's
+   * (docs/specs/transport.md -> "Reconnection").
    */
-  function list(ids, forWindow) {
+  function list(ids, forWindow, requestId) {
     const targets = Array.isArray(ids) ? ids.filter((id) => ptys.has(id)) : [...ptys.keys()];
     const result = targets.map((id) => ({
       id, alive: true, shell: ptyShells.get(id), ...(helpers.has(id) ? { helper: helpers.get(id) } : {}),
     }));
-    const addressed = forWindow ? { forWindow } : {};
+    const addressed = {
+      ...(forWindow ? { forWindow } : {}),
+      ...(requestId === undefined || requestId === null ? {} : { requestId }),
+    };
     send('list', { ptys: result, ...addressed });
     if (replay) for (const { id } of result) send('replay', { id, data: sessions.get(id).chunks.join(''), ...addressed });
   }

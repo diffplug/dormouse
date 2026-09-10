@@ -62,6 +62,9 @@ export interface SidecarSurfaceBridge {
    *  every window create and destroy (`docs/specs/standalone.md` -> "Burrow
    *  service"). */
   setWindows(labels: unknown): void;
+  /** Which windows one ask actually reached. The host routes an ask naming a
+   *  Surface to its owner alone, and only the host knows the owner. */
+  setAskDelivery(detail: unknown): void;
   /** A `notify` command: something the directory depends on changed. */
   onNotify(): void;
   /**
@@ -295,6 +298,31 @@ export function createSidecarSurfaceBridge(
       }
     },
 
+    /**
+     * Narrow one outstanding ask to the windows it was actually delivered to.
+     *
+     * An ask goes out to every window, because the directory is the union of
+     * what they all hold; but an ask naming a Surface is a question exactly one
+     * window can answer, and the host routes it there. Waiting on the rest would
+     * spend the whole budget on every attach and resize. **Narrows only** —
+     * intersected with what is still awaited, so a window that already answered
+     * cannot be put back and a late line cannot re-open a settled ask.
+     */
+    setAskDelivery(detail) {
+      const params = detail as { burrowRequestId?: unknown; windows?: unknown } | null;
+      if (!params || typeof params.burrowRequestId !== 'string') return;
+      if (!Array.isArray(params.windows)) return;
+      const pending = asks.get(params.burrowRequestId);
+      if (!pending) return;
+      const delivered = new Set(
+        params.windows.filter((label): label is string => typeof label === 'string'),
+      );
+      for (const label of pending.awaiting) {
+        if (!delivered.has(label)) pending.awaiting.delete(label);
+      }
+      if (pending.awaiting.size === 0) pending.settle();
+    },
+
     onNotify() {
       notifyDirectoryChanged();
     },
@@ -375,6 +403,7 @@ export interface SidecarBurrow {
   onPtyEvent(event: string, data: unknown): void;
   onPtySpawn(id: unknown): void;
   setWindows(labels: unknown): void;
+  setAskDelivery(detail: unknown): void;
   setThemeColors(colors: unknown): void;
   dispose(): void;
 }
@@ -415,6 +444,7 @@ export function createSidecarBurrow(options: SidecarBurrowOptions): SidecarBurro
     onPtyEvent: bridge.onPtyEvent,
     onPtySpawn: bridge.onPtySpawn,
     setWindows: bridge.setWindows,
+    setAskDelivery: bridge.setAskDelivery,
     setThemeColors: bridge.setThemeColors,
     dispose() {
       service.dispose();

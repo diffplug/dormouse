@@ -59,7 +59,7 @@ async function probeCwds(
  * Exported for the transfer verb, which needs the record WITHOUT publishing it:
  * the Workspace is leaving this Window, so its record belongs in the payload
  * rather than in this Window's aggregator
- * (`releaseWorkspaceForTransfer` in `lib/src/components/wall/workspace-transfer.ts`).
+ * (`prepareWorkspaceTransfer` in `lib/src/components/wall/workspace-transfer.ts`).
  */
 export async function buildPersistedSession(
   platform: PlatformAdapter,

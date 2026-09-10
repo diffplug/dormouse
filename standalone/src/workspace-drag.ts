@@ -32,8 +32,15 @@ interface CursorHit {
 let lastProbeAt = 0;
 let probing = false;
 let lastPoint: StripDragPoint | null = null;
+let trailingTimer: ReturnType<typeof setTimeout> | null = null;
 let hoverLabel: string | null = null;
 let hoverBucket = -1;
+/**
+ * Bumped by every release and every abandon. A probe is an IPC round trip that
+ * can land after the gesture is over, and its answer would re-light a caret in a
+ * window the drag has already left — burning there until the next drag.
+ */
+let generation = 0;
 
 async function probe(): Promise<CursorHit | null> {
   try {
@@ -66,15 +73,43 @@ function hover(hit: CursorHit | null): void {
   }).catch((err) => console.error("[workspace-drag] hover_workspace_target failed", err));
 }
 
+function clearTrailing(): void {
+  if (trailingTimer === null) return;
+  clearTimeout(trailingTimer);
+  trailingTimer = null;
+}
+
+function probeNow(): void {
+  const mine = generation;
+  lastProbeAt = Date.now();
+  probing = true;
+  void probe()
+    .then((hit) => {
+      if (mine === generation) hover(hit);
+    })
+    .finally(() => { probing = false; });
+}
+
 /**
- * Where the dragged tab should sit relative to the new window's top-left, so
- * the tab lands under the cursor. Centered on the tab rather than tracking the
- * exact grab point: the pointer left the tab long before the release, so its
- * offset within it is no longer a position the user is aiming with.
+ * Ask again once the throttle window is over.
+ *
+ * The leading edge alone never sees where the pointer came to **rest**, and the
+ * resting position is the one the caret must show — a pointer that stops moving
+ * inside the last throttle window would otherwise leave the caret a tab behind
+ * the drop it is about to make.
  */
-function grabOffset(workspaceId: WorkspaceId): { x: number; y: number } {
-  const rect = workspaceTabRect(workspaceId);
-  return { x: (rect?.width ?? 180) / 2, y: (rect?.height ?? 24) / 2 };
+function scheduleTrailing(delay: number): void {
+  if (trailingTimer !== null) return;
+  const mine = generation;
+  trailingTimer = setTimeout(() => {
+    trailingTimer = null;
+    if (mine !== generation) return;
+    if (probing) {
+      scheduleTrailing(HIT_TEST_THROTTLE_MS);
+      return;
+    }
+    probeNow();
+  }, delay);
 }
 
 /** The pointer left this window's strip mid-drag. */
@@ -82,14 +117,25 @@ export function onDragOutsideWindow(point: StripDragPoint): void {
   // A pointer that has not actually moved must not cost a round trip per
   // throttle window; a coalesced or repeated move reports the same point.
   if (lastPoint?.clientX === point.clientX && lastPoint?.clientY === point.clientY) return;
-  const now = Date.now();
-  if (probing || now - lastProbeAt < HIT_TEST_THROTTLE_MS) return;
   lastPoint = point;
-  lastProbeAt = now;
-  probing = true;
-  void probe()
-    .then((hit) => hover(hit))
-    .finally(() => { probing = false; });
+  const wait = HIT_TEST_THROTTLE_MS - (Date.now() - lastProbeAt);
+  if (probing || wait > 0) {
+    scheduleTrailing(Math.max(wait, 0));
+    return;
+  }
+  probeNow();
+}
+
+/**
+ * The pointer came back over this window's own strip. The in-strip reorder takes
+ * over from here, and a caret still lit in another window would sit there
+ * claiming a drop that is no longer going to happen.
+ */
+export function onDragBackInsideStrip(): void {
+  clearTrailing();
+  generation += 1;
+  lastPoint = null;
+  hover(null);
 }
 
 /**
@@ -104,6 +150,10 @@ export function onDropOnOtherWindow(
   _point: StripDragPoint,
   insideStrip: boolean,
 ): void {
+  // Before the hover, so an in-flight probe's answer cannot re-light the caret
+  // this is about to clear.
+  clearTrailing();
+  generation += 1;
   hover(null);
   lastPoint = null;
   if (insideStrip) return;
@@ -120,18 +170,33 @@ export function onDropOnOtherWindow(
   })();
 }
 
+/**
+ * Where the dragged tab should sit relative to the new window's top-left, so
+ * the tab lands under the cursor. Centered on the tab rather than tracking the
+ * exact grab point: the pointer left the tab long before the release, so its
+ * offset within it is no longer a position the user is aiming with.
+ */
+function grabOffset(workspaceId: WorkspaceId): { x: number; y: number } {
+  const rect = workspaceTabRect(workspaceId);
+  return { x: (rect?.width ?? 180) / 2, y: (rect?.height ?? 24) / 2 };
+}
+
 /** The drag was abandoned — `pointercancel`, or Escape. Nothing moves, but a
  *  caret lit in another window would otherwise be stranded there. */
 export function onDragCancelled(): void {
+  clearTrailing();
+  generation += 1;
   hover(null);
   lastPoint = null;
 }
 
 /** @internal Reset module state for testing. */
 export function _resetWorkspaceDragForTesting(): void {
+  clearTrailing();
   lastProbeAt = 0;
   probing = false;
   lastPoint = null;
   hoverLabel = null;
   hoverBucket = -1;
+  generation += 1;
 }

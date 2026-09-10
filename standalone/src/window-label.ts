@@ -1,8 +1,8 @@
 /**
  * Which window this webview is, resolved once at boot.
  *
- * The Tauri label is a Window's persistence identity (`docs/specs/glossary.md`),
- * and `main` is the only window granted the updater permissions
+ * The Tauri label is a Window's persistence identity (`docs/specs/glossary.md`)
+ * and the only window that runs the periodic update check is `main`
  * (`docs/specs/auto-update.md`), so several modules need the answer
  * synchronously after boot. The browser-dev harness has no windows at all and
  * answers `main`.
@@ -30,8 +30,9 @@ export function currentWindowLabel(): string {
   return label;
 }
 
-/** The window the quit walk tears down last, and the only one that may install
- *  an update or check for one. */
+/** The window the quit walk tears down last while it is open, and the only one
+ *  that runs the periodic update check. Installing is not gated on it: the walk
+ *  ends with the most recently focused window when `main` has been closed. */
 export function isMainWindow(): boolean {
   return label === MAIN_WINDOW_LABEL;
 }

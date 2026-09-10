@@ -18,6 +18,10 @@ export type QuitConfirmPhase = "open" | "quitting" | "archive-failed";
 export interface QuitConfirmIntent {
   kind: "quit" | "close-window";
   windowName?: string;
+  /** This window holds an approved, downloaded update that closing throws away:
+   *  the download lives in the webview, so nothing else can install it
+   *  (docs/specs/auto-update.md). Never set on a quit, which installs it. */
+  discardsUpdate?: boolean;
 }
 
 const QUIT_INTENT: QuitConfirmIntent = { kind: "quit" };
@@ -61,7 +65,14 @@ function emit(): void {
 // only at quit time). The orchestrator never re-invokes it while a dialog is
 // up; the phase guard is belt-and-suspenders against stacking.
 export function openQuitConfirm(ctx: TeardownConfirmContext, next: QuitConfirmIntent = QUIT_INTENT): void {
-  if (phase !== null) return;
+  if (phase !== null) {
+    // **Never leave a refused context unsettled.** Its flow would sit in
+    // `confirming` for the life of the window, and the host would wait out its
+    // budget on a decision that can never arrive. The arbiter in
+    // `teardown-flow.ts` should have kept this from happening at all.
+    ctx.cancel();
+    return;
+  }
   activeCtx = ctx;
   intent = next;
   phase = "open";
@@ -116,8 +127,10 @@ export function cancelQuit(): void {
  * `cancelQuit` it does NOT call back into the orchestrator: the cancel has
  * already happened, and calling back would bounce it around the windows.
  */
-export function dismissQuitConfirm(): void {
+export function dismissQuitConfirm(kind?: QuitConfirmIntent["kind"]): void {
   if (phase === null) return;
+  // A quit cancelled elsewhere says nothing about this window's own close.
+  if (kind !== undefined && intent.kind !== kind) return;
   activeCtx = null;
   archiveError = null;
   phase = null;

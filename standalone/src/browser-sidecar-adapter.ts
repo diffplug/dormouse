@@ -12,7 +12,8 @@ import type {
   OpenPort,
   PlatformAdapter,
   PtyDataDetail,
-  PtyInfo,
+  PtyListDetail,
+  PtyReplayDetail,
   BurrowLink,
 } from "dormouse-lib/lib/platform/types";
 import {
@@ -65,8 +66,8 @@ function decodeBase64Bytes(base64: string): Uint8Array {
 export class BrowserSidecarAdapter implements PlatformAdapter {
   private dataHandlers = new Set<(detail: PtyDataDetail) => void>();
   private exitHandlers = new Set<(detail: { id: string; exitCode: number }) => void>();
-  private listHandlers = new Set<(detail: { ptys: PtyInfo[] }) => void>();
-  private replayHandlers = new Set<(detail: { id: string; data: string }) => void>();
+  private listHandlers = new Set<(detail: PtyListDetail) => void>();
+  private replayHandlers = new Set<(detail: PtyReplayDetail) => void>();
   private alertStateHandlers = new Set<(detail: AlertStateDetail) => void>();
   private alertManager = new AlertManager();
   private unlistenHost: (() => void) | null = null;
@@ -279,14 +280,14 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   offPtyData(handler: (detail: PtyDataDetail) => void): void { this.dataHandlers.delete(handler); }
   onPtyExit(handler: (detail: { id: string; exitCode: number }) => void): void { this.exitHandlers.add(handler); }
   offPtyExit(handler: (detail: { id: string; exitCode: number }) => void): void { this.exitHandlers.delete(handler); }
-  requestInit(): void {
-    this.host.send("pty_request_init");
+  requestInit(requestId?: string): void {
+    this.host.send("pty_request_init", { requestId: requestId ?? null });
     this.pushThemeColors();
   }
-  onPtyList(handler: (detail: { ptys: PtyInfo[] }) => void): void { this.listHandlers.add(handler); }
-  offPtyList(handler: (detail: { ptys: PtyInfo[] }) => void): void { this.listHandlers.delete(handler); }
-  onPtyReplay(handler: (detail: { id: string; data: string }) => void): void { this.replayHandlers.add(handler); }
-  offPtyReplay(handler: (detail: { id: string; data: string }) => void): void { this.replayHandlers.delete(handler); }
+  onPtyList(handler: (detail: PtyListDetail) => void): void { this.listHandlers.add(handler); }
+  offPtyList(handler: (detail: PtyListDetail) => void): void { this.listHandlers.delete(handler); }
+  onPtyReplay(handler: (detail: PtyReplayDetail) => void): void { this.replayHandlers.add(handler); }
+  offPtyReplay(handler: (detail: PtyReplayDetail) => void): void { this.replayHandlers.delete(handler); }
   onRequestSessionFlush(_handler: (detail: { requestId: string }) => void): void {}
   offRequestSessionFlush(_handler: (detail: { requestId: string }) => void): void {}
   notifySessionFlushComplete(_requestId: string): void {}
@@ -356,15 +357,15 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
       this.alertManager.onExit(payload.id, payload.exitCode);
       for (const handler of this.exitHandlers) handler(payload);
     } else if (event === "pty:list") {
-      for (const pty of (data as { ptys: PtyInfo[] }).ptys) if (pty.helper) this.alertManager.setHelper(pty.id, true);
-      for (const handler of this.listHandlers) handler(data as { ptys: PtyInfo[] });
+      for (const pty of (data as PtyListDetail).ptys) if (pty.helper) this.alertManager.setHelper(pty.id, true);
+      for (const handler of this.listHandlers) handler(data as PtyListDetail);
     } else if (event === "pty:replay") {
       // The one stream the sidecar does not parse; see TauriAdapter, including
       // why the one-shot parser still needs the theme.
-      const { id, data: text } = data as { id: string; data: string };
+      const { id, data: text, requestId } = data as PtyReplayDetail;
       const parsed = new TerminalProtocolParser(themeColorProvider).process(text);
       applyTerminalSemanticEvents(id, collectTerminalSemanticEvents(parsed.events));
-      for (const handler of this.replayHandlers) handler({ id, data: parsed.visibleData });
+      for (const handler of this.replayHandlers) handler({ id, data: parsed.visibleData, requestId });
     } else if (event === BURROW_RESULT_EVENT) {
       this.burrowClient.onResult(data as BurrowResult);
     } else if (event === BURROW_ASK_EVENT) {

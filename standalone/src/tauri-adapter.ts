@@ -16,6 +16,8 @@ import type {
   PlatformAdapter,
   PtyDataDetail,
   PtyInfo,
+  PtyListDetail,
+  PtyReplayDetail,
   BurrowLink,
   SessionFlushRequest,
 } from "dormouse-lib/lib/platform/types";
@@ -88,8 +90,8 @@ const errMessage = (err: unknown): string =>
 export class TauriAdapter implements PlatformAdapter {
   private dataHandlers = new Set<(detail: PtyDataDetail) => void>();
   private exitHandlers = new Set<(detail: { id: string; exitCode: number }) => void>();
-  private listHandlers = new Set<(detail: { ptys: PtyInfo[] }) => void>();
-  private replayHandlers = new Set<(detail: { id: string; data: string }) => void>();
+  private listHandlers = new Set<(detail: PtyListDetail) => void>();
+  private replayHandlers = new Set<(detail: PtyReplayDetail) => void>();
   private filesDroppedHandlers = new Set<(paths: string[]) => void>();
   private alertStateHandlers = new Set<(detail: AlertStateDetail) => void>();
   // The two app-global stores are the sidecar's, so this window applies what
@@ -171,25 +173,25 @@ export class TauriAdapter implements PlatformAdapter {
         }
       }),
 
-      listenToWindow<{ ptys: PtyInfo[] }>("pty:list", (event) => {
+      listenToWindow<{ ptys: PtyInfo[]; requestId?: string }>("pty:list", (event) => {
         for (const pty of event.payload.ptys) if (pty.helper) this.alertManager.setHelper(pty.id, true);
         for (const handler of this.listHandlers) {
           handler(event.payload);
         }
       }),
 
-      listenToWindow<{ id: string; data: string }>("pty:replay", (event) => {
+      listenToWindow<{ id: string; data: string; requestId?: string }>("pty:replay", (event) => {
         // Replay arrives as raw buffered output, the one stream the sidecar does
         // not parse. A one-shot parser here repopulates semantic state and
         // strips OSCs before xterm sees them; its responses are dropped, since
         // the asker is long gone (docs/specs/terminal-escapes.md). It still
         // needs the theme: a *declined* colour query is not consumed, so it
         // reaches xterm.js instead, and answering is the owner's alone.
-        const { id, data } = event.payload;
+        const { id, data, requestId } = event.payload;
         const parsed = new TerminalProtocolParser(themeColorProvider).process(data);
         applyTerminalSemanticEvents(id, collectTerminalSemanticEvents(parsed.events));
         for (const handler of this.replayHandlers) {
-          handler({ id, data: parsed.visibleData });
+          handler({ id, data: parsed.visibleData, requestId });
         }
       }),
 
@@ -525,8 +527,11 @@ export class TauriAdapter implements PlatformAdapter {
     this.exitHandlers.delete(handler);
   }
 
-  requestInit(): void {
-    invoke("pty_request_init");
+  requestInit(requestId?: string): void {
+    // The token rides through to the sidecar's `list`, which echoes it on the
+    // answer: one window can have a boot collection and an arriving Workspace's
+    // outstanding at once (docs/specs/transport.md -> "Reconnection").
+    invoke("pty_request_init", { requestId: requestId ?? null });
     this.pushThemeColors();
   }
 
@@ -543,19 +548,19 @@ export class TauriAdapter implements PlatformAdapter {
     });
   }
 
-  onPtyList(handler: (detail: { ptys: PtyInfo[] }) => void): void {
+  onPtyList(handler: (detail: PtyListDetail) => void): void {
     this.listHandlers.add(handler);
   }
 
-  offPtyList(handler: (detail: { ptys: PtyInfo[] }) => void): void {
+  offPtyList(handler: (detail: PtyListDetail) => void): void {
     this.listHandlers.delete(handler);
   }
 
-  onPtyReplay(handler: (detail: { id: string; data: string }) => void): void {
+  onPtyReplay(handler: (detail: PtyReplayDetail) => void): void {
     this.replayHandlers.add(handler);
   }
 
-  offPtyReplay(handler: (detail: { id: string; data: string }) => void): void {
+  offPtyReplay(handler: (detail: PtyReplayDetail) => void): void {
     this.replayHandlers.delete(handler);
   }
 

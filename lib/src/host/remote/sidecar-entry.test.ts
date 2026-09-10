@@ -154,6 +154,54 @@ describe('asking the webview', () => {
     expect(await pending).toEqual([{ surfaceId: 'in-main' }]);
   });
 
+  it('settles a Surface op on its owner alone, without waiting out the others', async () => {
+    // The host routes an ask naming a Surface to the window that owns its PTY —
+    // `attach` and `resize` MUTATE that pane — and tells the collector where it
+    // went. Waiting on the rest would spend the whole budget on every attach.
+    vi.useFakeTimers();
+    bridge.setWindows(['main', 'ws-2', 'ws-3']);
+    const pending = bridge.provider.resolveSurface('s1', { cols: 80, rows: 24 });
+    const ask = asks()[0]!;
+    bridge.setAskDelivery({ burrowRequestId: ask.burrowRequestId, windows: ['ws-2'] });
+    answer(ask, [{ ptyId: 'p1', cols: 80, rows: 24 }], 'ws-2');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await pending).toMatchObject({ ptyId: 'p1' });
+  });
+
+  it('takes a delivery line that arrives after the answer', async () => {
+    bridge.setWindows(['main', 'ws-2']);
+    const pending = bridge.provider.collectDirectory();
+    const ask = asks()[0]!;
+    answer(ask, [{ surfaceId: 'in-ws-2' }], 'ws-2');
+    bridge.setAskDelivery({ burrowRequestId: ask.burrowRequestId, windows: ['ws-2'] });
+    expect(await pending).toEqual([{ surfaceId: 'in-ws-2' }]);
+  });
+
+  it('never widens an ask, whatever the delivery names', async () => {
+    vi.useFakeTimers();
+    bridge.setWindows(['main']);
+    const pending = bridge.provider.collectDirectory();
+    const ask = asks()[0]!;
+    // A window that never received this ask cannot be put back into it.
+    bridge.setAskDelivery({ burrowRequestId: ask.burrowRequestId, windows: ['main', 'ws-9'] });
+    answer(ask, [{ surfaceId: 'in-main' }], 'main');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await pending).toEqual([{ surfaceId: 'in-main' }]);
+  });
+
+  it('ignores a delivery line that is not a usable one', async () => {
+    bridge.setWindows(['main', 'ws-2']);
+    const pending = bridge.provider.collectDirectory();
+    const ask = asks()[0]!;
+    for (const bad of [undefined, null, 2, { burrowRequestId: 7, windows: ['main'] },
+      { burrowRequestId: ask.burrowRequestId }, { burrowRequestId: 'ask-nope', windows: ['main'] }]) {
+      bridge.setAskDelivery(bad);
+    }
+    answer(ask, [{ surfaceId: 'in-main' }], 'main');
+    answer(ask, [{ surfaceId: 'in-ws-2' }], 'ws-2');
+    expect(await pending).toEqual([{ surfaceId: 'in-main' }, { surfaceId: 'in-ws-2' }]);
+  });
+
   it('ignores a window list that is not a usable one', async () => {
     for (const bad of [[], 2, 'main', undefined, null]) bridge.setWindows(bad);
     const pending = bridge.provider.collectDirectory();

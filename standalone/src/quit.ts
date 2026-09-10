@@ -38,6 +38,7 @@ export function setQuitConfirmGate(gate: TeardownConfirmGate | null): void {
 }
 
 const flow = createTeardownFlow({
+  kind: "quit",
   ack: "quit_ack",
   cancelCommand: "quit_cancel",
   gate: () => quitConfirmGate,
@@ -58,7 +59,9 @@ export function initQuitFlow(adapter: TauriAdapter): void {
   // the cancel already happened, somewhere else.
   void listenToWindow("dormouse://quit-cancelled", () => {
     flow.reset();
-    dismissQuitConfirm();
+    // Only a quit's dialog: this window may instead be asking about its own
+    // close, which another window's decision has no say over.
+    dismissQuitConfirm("quit");
   });
   // Every window voted yes, and it is now this window's turn.
   void listenToWindow<{ last?: boolean }>("dormouse://quit-teardown", (event) => {
@@ -121,7 +124,8 @@ async function runQuitTeardown(last: boolean): Promise<void> {
       );
     }
     // Install strictly after the completed final save, and only in the window
-    // the walk tears down last — `main`, the only one granted `updater:*`
+    // the walk tears down last — `main` while it is open, else the most recently
+    // focused one, which is why every window holds `updater:*`
     // (docs/specs/auto-update.md). A fresh `quit_progress` gives install its own
     // watchdog budget instead of the teardown remainder.
     if (last && hasPendingUpdate()) {

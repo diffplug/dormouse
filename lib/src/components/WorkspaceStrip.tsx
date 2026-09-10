@@ -50,6 +50,7 @@ import type { WorkspaceId } from '../lib/session-types';
 export function WorkspaceStrip({
   className,
   onDragOutsideWindow,
+  onDragBackInsideStrip,
   onDropOnOtherWindow,
   onDragCancelled,
 }: {
@@ -57,6 +58,7 @@ export function WorkspaceStrip({
   /** The three cross-Window drag hooks (`StripDragHost`). A composition with no
    *  Windows — Storybook, the website playground — supplies none. */
   onDragOutsideWindow?: StripDragHost['onDragOutsideWindow'];
+  onDragBackInsideStrip?: StripDragHost['onDragBackInsideStrip'];
   onDropOnOtherWindow?: StripDragHost['onDropOnOtherWindow'];
   onDragCancelled?: StripDragHost['onDragCancelled'];
 }) {
@@ -96,8 +98,8 @@ export function WorkspaceStrip({
   // The cross-Window hooks are read through a ref refreshed each render, so a
   // host that supplies them after first paint is not captured stale by the
   // controller.
-  const windowHooksRef = useRef({ onDragOutsideWindow, onDropOnOtherWindow, onDragCancelled });
-  windowHooksRef.current = { onDragOutsideWindow, onDropOnOtherWindow, onDragCancelled };
+  const windowHooksRef = useRef({ onDragOutsideWindow, onDragBackInsideStrip, onDropOnOtherWindow, onDragCancelled });
+  windowHooksRef.current = { onDragOutsideWindow, onDragBackInsideStrip, onDropOnOtherWindow, onDragCancelled };
 
   const dragRef = useRef<ReturnType<typeof createWorkspaceStripDrag> | null>(null);
   if (dragRef.current === null) {
@@ -108,6 +110,7 @@ export function WorkspaceStrip({
       move: (id, toIndex) => { moveWorkspace(id, toIndex); },
       setDragging: setDraggingId,
       onDragOutsideWindow: (point) => windowHooksRef.current.onDragOutsideWindow?.(point),
+      onDragBackInsideStrip: () => windowHooksRef.current.onDragBackInsideStrip?.(),
       onDropOnOtherWindow: (id, point, insideStrip) =>
         windowHooksRef.current.onDropOnOtherWindow?.(id, point, insideStrip),
       onDragCancelled: () => windowHooksRef.current.onDragCancelled?.(),

@@ -139,20 +139,25 @@ async function bootstrap() {
   // parked, not from disk: it has no snapshot yet (§Tear-out). Everything else
   // restores what the last run left.
   let initialPlans: Awaited<ReturnType<typeof restoreWindowOrFresh>> | null = null;
+  let armWorkspaceMoves: (() => void) | null = null;
   if (!BROWSER_DEV_HOST) {
     const [{ bootFromTearOut, initWorkspaceMoves }, { initDropCaret }] = await Promise.all([
       import("./workspace-move"),
       import("./workspace-drop-caret"),
     ]);
     initialPlans = await bootFromTearOut(platform);
-    initWorkspaceMoves(platform);
+    armWorkspaceMoves = () => initWorkspaceMoves(platform);
     initDropCaret();
   }
   initialPlans ??= await restoreWindowOrFresh(platform);
+  // Strictly after the restore: arming drains whatever was dropped on this
+  // window while it booted, and `restoreWindowOrFresh` installs the Workspace
+  // store wholesale (`docs/specs/standalone.md` → "Arrival queue").
+  armWorkspaceMoves?.();
 
-  // `main` is the only window holding `updater:*` and it is the last one the
-  // quit walk tears down, so it is the only one that may check or install
-  // (docs/specs/auto-update.md).
+  // Only `main` runs the periodic check, so a session whose `main` was closed
+  // has none until it relaunches. Installing is every window's, because the
+  // quit walk's last window is not always `main` (docs/specs/auto-update.md).
   if (isMainWindow()) startUpdateCheck();
 
   createRoot(document.getElementById("root")!).render(

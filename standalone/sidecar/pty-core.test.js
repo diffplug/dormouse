@@ -1682,6 +1682,35 @@ test('list(ids) lists and replays only those ids, naming the window that asked',
   assert.deepEqual(events[1], { event: 'replay', data: { id: 'a', data: 'from a', forWindow: 'ws-2' } });
 });
 
+// One window can have two collections outstanding — a boot and a Workspace
+// arriving from another window — and every listener there sees every answer.
+// The token is what tells them apart (docs/specs/transport.md -> "Reconnection").
+test('list echoes the asking collector\'s token on the list and every replay', () => {
+  const events = [];
+  const pty = fakePtyModule();
+  const mgr = create((event, data) => events.push({ event, data }), pty.module, { replay: true });
+  mgr.spawn('a');
+  pty.listeners.get('a').data('from a');
+
+  events.length = 0;
+  mgr.list(['a'], 'ws-2', 'init-7');
+  assert.equal(events[0].data.requestId, 'init-7');
+  assert.deepEqual(events[1], {
+    event: 'replay',
+    data: { id: 'a', data: 'from a', forWindow: 'ws-2', requestId: 'init-7' },
+  });
+
+  // A host with nothing to echo carries no field at all, which every adapter
+  // that serves one webview relies on.
+  events.length = 0;
+  mgr.list(['a'], 'ws-2');
+  assert.equal('requestId' in events[0].data, false);
+  assert.equal('requestId' in events[1].data, false);
+  events.length = 0;
+  mgr.list(['a'], 'ws-2', null);
+  assert.equal('requestId' in events[0].data, false);
+});
+
 test('list omitted is every PTY; list([]) is an empty list', () => {
   const events = [];
   const pty = fakePtyModule();

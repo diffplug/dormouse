@@ -4,7 +4,7 @@ import { hydrateNotepadFromVolatile } from "dormouse-lib/lib/notepad/notepad-sto
 import { getWallHandle } from "dormouse-lib/components/wall/wall-handles";
 import { setWorkspaceBootPlan } from "dormouse-lib/components/wall/workspace-boot-plans";
 import { wallBootFromResult, type WallBootPlans } from "dormouse-lib/components/wall/wall-types";
-import type { WorkspaceTransferPayload } from "dormouse-lib/components/wall/workspace-transfer";
+import type { PreparedWorkspaceTransfer, WorkspaceTransferPayload } from "dormouse-lib/components/wall/workspace-transfer";
 import {
   forgetWorkspaceSession,
   publishWorkspaceSession,
@@ -23,13 +23,15 @@ import { listenToWindow } from "./window-label";
 import { workspaceDropTarget } from "./workspace-tabs";
 
 /**
- * Moving a Workspace between Windows (`docs/specs/standalone.md` → "Transfer"
- * and "Tear-out"). Both halves live here, because they are one protocol:
+ * Moving a Workspace between Windows (`docs/specs/standalone.md` → "Transfer",
+ * "Tear-out" and "Arrival queue"). Both halves live here, because they are one
+ * protocol:
  *
- * - **Source**: release the Workspace (its record, its notes, its Sessions
- *   detached but alive) and hand the payload to Rust.
- * - **Target**: arm a collector, tell Rust it is ready, resume over the PTYs
- *   whose ownership already moved, and mount the Workspace.
+ * - **Source**: build the payload, hand it to Rust, and release the Workspace
+ *   (its record, its notes, its Sessions detached but alive) only once Rust has
+ *   accepted it.
+ * - **Target**: drain the arrival queue, arm a collector, tell Rust it is ready,
+ *   resume over the PTYs whose ownership already moved, and mount the Workspace.
  *
  * Rust reassigns ownership *synchronously* when the source invokes, and
  * suppresses those PTYs' output until each one's replay has been emitted to the
@@ -55,10 +57,32 @@ const ARRIVAL_TIMEOUT_MS = 3000;
 
 // --- Source ------------------------------------------------------------------
 
-async function release(workspaceId: WorkspaceId): Promise<WorkspaceTransferPayload | null> {
+async function prepare(workspaceId: WorkspaceId): Promise<PreparedWorkspaceTransfer | null> {
   const handle = getWallHandle(workspaceId);
   if (!handle) return null;
-  return handle.releaseWorkspaceForTransfer();
+  return handle.prepareWorkspaceTransfer();
+}
+
+/**
+ * Hand the prepared Workspace to Rust, and release it here **only on success**.
+ *
+ * A rejected invoke is an ordinary state — the target window can close between
+ * the drag's last probe and the drop — and Rust hands the PTYs back to this
+ * window before it returns the error. Committing first would leave a Workspace
+ * with no Sessions and no window that owns them.
+ */
+async function handOff(
+  prepared: PreparedWorkspaceTransfer,
+  command: string,
+  args: Record<string, unknown>,
+): Promise<void> {
+  try {
+    await invoke(command, args);
+  } catch (err) {
+    console.warn(`[workspace-move] ${command} refused; the Workspace stays here`, err);
+    return;
+  }
+  prepared.commit();
 }
 
 /** Hand this Workspace to a window that already exists. */
@@ -67,13 +91,12 @@ export async function transferWorkspaceTo(
   to: string,
   at: { x: number; y: number },
 ): Promise<void> {
-  const payload = await release(workspaceId);
-  if (!payload) return;
-  try {
-    await invoke("transfer_workspace", { to, payload: { ...payload, at } satisfies MovePayload });
-  } catch (err) {
-    console.error("[workspace-move] transfer failed", err);
-  }
+  const prepared = await prepare(workspaceId);
+  if (!prepared) return;
+  await handOff(prepared, "transfer_workspace", {
+    to,
+    payload: { ...prepared.payload, at } satisfies MovePayload,
+  });
 }
 
 /** Tear this Workspace out into a new window under the cursor. */
@@ -81,13 +104,11 @@ export async function tearOutWorkspace(
   workspaceId: WorkspaceId,
   grab: { x: number; y: number },
 ): Promise<void> {
-  const payload = await release(workspaceId);
-  if (!payload) return;
-  try {
-    await invoke("open_workspace_window", { payload: { ...payload, grab } satisfies MovePayload });
-  } catch (err) {
-    console.error("[workspace-move] tear-out failed", err);
-  }
+  const prepared = await prepare(workspaceId);
+  if (!prepared) return;
+  await handOff(prepared, "open_workspace_window", {
+    payload: { ...prepared.payload, grab } satisfies MovePayload,
+  });
 }
 
 // --- Target ------------------------------------------------------------------
@@ -97,6 +118,11 @@ export async function tearOutWorkspace(
  * from. `adopt_ready` is the hop that removes the "arrived before armed" bug
  * class: the host does not list or replay anything until the collector below is
  * listening.
+ *
+ * **Throws rather than cold-restoring when the host never answers.** An arrival
+ * whose `pty:list` did not come back is not an arrival with no PTYs: those
+ * shells are still running, and restoring from the record would start a second
+ * set over them.
  */
 async function planArrival(
   platform: PlatformAdapter,
@@ -104,11 +130,19 @@ async function planArrival(
 ): Promise<WallBootPlans[string]> {
   const ptyIds = new Set(payload.terminalIds);
   const live = await collectLivePtys(platform, {
-    trigger: () => void invoke("adopt_ready").catch((err) =>
+    // The token rides through Rust to the sidecar's `list` and comes back on the
+    // answer, so two Workspaces arriving at once cannot finish on each other's.
+    trigger: (requestId) => void invoke("adopt_ready", { requestId }).catch((err) =>
       console.error("[workspace-move] adopt_ready failed", err)),
     accept: (id) => ptyIds.has(id),
     timeoutMs: ARRIVAL_TIMEOUT_MS,
   });
+  if (live.timedOut) {
+    throw new Error(
+      `the arriving Workspace's PTYs did not answer within ${ARRIVAL_TIMEOUT_MS}ms; `
+      + "refusing rather than restarting shells that are still running",
+    );
+  }
   const result = resumeOrRestoreFrom(platform, live, {
     savedSession: payload.workspace.session,
     ptyIds,
@@ -142,8 +176,24 @@ async function adoptWorkspace(platform: PlatformAdapter, payload: MovePayload): 
 }
 
 /**
+ * Take everything Rust is holding for this window and mount it, oldest first.
+ *
+ * Drained rather than pushed: an `emit_to` a window with no listener yet is
+ * lost, and a window still booting — or torn out moments ago — is a legal drop
+ * target (`docs/specs/standalone.md` → "Arrival queue").
+ */
+async function drainArrivals(): Promise<MovePayload[]> {
+  try {
+    return (await invoke<MovePayload[] | null>("take_arrivals")) ?? [];
+  } catch (err) {
+    console.error("[workspace-move] take_arrivals failed", err);
+    return [];
+  }
+}
+
+/**
  * The source's view of the departure. Rust emits it whichever way the Workspace
- * left, so this is the one place the source drops it.
+ * left, once the target has actually asked for it.
  */
 function handleDeparted(workspaceId: WorkspaceId): void {
   // Moving a Window's last Workspace away closes it — without confirming,
@@ -161,33 +211,43 @@ function handleDeparted(workspaceId: WorkspaceId): void {
 
 /** Listen for Workspaces arriving in, and leaving, this window. */
 export function initWorkspaceMoves(platform: PlatformAdapter): void {
-  void listenToWindow<MovePayload>("dormouse://workspace-arriving", (event) => {
-    void adoptWorkspace(platform, event.payload).catch((err) =>
-      console.error("[workspace-move] adoption failed", err));
+  const adoptQueued = async () => {
+    for (const payload of await drainArrivals()) {
+      await adoptWorkspace(platform, payload).catch((err) =>
+        console.error("[workspace-move] adoption failed", err));
+    }
+  };
+  void listenToWindow("dormouse://workspace-arriving", () => {
+    void adoptQueued();
   });
   void listenToWindow<{ workspaceId: WorkspaceId }>("dormouse://workspace-departed", (event) => {
     handleDeparted(event.payload.workspaceId);
   });
+  // Immediately, and not only on the nudge: a Workspace dropped on this window
+  // while it was still booting is already in the queue, and its `emit_to`
+  // reached no listener.
+  void adoptQueued();
 }
 
 /**
  * Boot a window that was just torn out. Its payload is *pulled* rather than
- * pushed: an `emit_to` a window that does not exist yet is lost, so Rust parks
+ * pushed: an `emit_to` a window that does not exist yet is lost, so Rust queues
  * it and the new webview takes it here. Returns null for an ordinary window.
  */
 export async function bootFromTearOut(platform: PlatformAdapter): Promise<WallBootPlans | null> {
-  let payload: MovePayload | null = null;
-  try {
-    payload = await invoke<MovePayload | null>("take_boot_payload");
-  } catch (err) {
-    console.error("[workspace-move] take_boot_payload failed", err);
-  }
-  if (!payload?.workspace) return null;
-  const { id, name, session } = payload.workspace;
+  const [first, ...rest] = await drainArrivals();
+  if (!first?.workspace) return null;
+  const { id, name, session } = first.workspace;
   // Nothing on disk yet: this window's first aggregator flush writes its
   // snapshot, and from there it is an ordinary restorable window.
   installWindowPersistence(platform, { version: 1, workspaces: [{ id, name, session }], activeWorkspaceId: id });
-  const plan = await planArrival(platform, payload);
+  const plans: WallBootPlans = { [id]: await planArrival(platform, first) };
   publishWorkspaceSession(id, session);
-  return { [id]: plan };
+  // A second Workspace dropped on this window between the tear-out and this
+  // drain rides in the same queue.
+  for (const payload of rest) {
+    await adoptWorkspace(platform, payload).catch((err) =>
+      console.error("[workspace-move] adoption failed", err));
+  }
+  return plans;
 }

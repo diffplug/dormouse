@@ -1,7 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
+import { countRunningSessions } from "dormouse-lib/lib/terminal-registry";
 import { openQuitConfirm } from "./quit-confirm-store";
 import { createTeardownFlow, describeWindow } from "./teardown-flow";
 import type { TauriAdapter } from "./tauri-adapter";
+import { hasPendingUpdate } from "./updater";
 import { withTimeout } from "./with-timeout";
 import { listenToWindow } from "./window-label";
 
@@ -27,18 +29,26 @@ const CLOSE_TEARDOWN_CEILING_MS = 8000;
 let closeAdapter: TauriAdapter | null = null;
 
 const flow = createTeardownFlow({
+  kind: "close-window",
   ack: "window_close_ack",
   cancelCommand: "window_close_cancel",
   // Always asked, never optional: a close is one window's own decision, and the
   // dialog host is mounted in every window.
   gate: () => openQuitConfirm,
+  // An approved download lives in this webview's memory, so closing throws it
+  // away — worth asking about even with nothing running.
+  mustConfirm: () => countRunningSessions() > 0 || hasPendingUpdate(),
   proceed: runCloseTeardown,
 });
 
 export function initWindowClose(adapter: TauriAdapter): void {
   closeAdapter = adapter;
   void listenToWindow("dormouse://window-close-requested", () => {
-    flow.request({ kind: "close-window", windowName: describeWindow() });
+    flow.request({
+      kind: "close-window",
+      windowName: describeWindow(),
+      ...(hasPendingUpdate() ? { discardsUpdate: true } : {}),
+    });
   });
 }
 

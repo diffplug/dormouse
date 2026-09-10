@@ -149,7 +149,7 @@ function handleLine(line) {
       case 'pty:kill':    mgr.kill(data.id); break;
       // One window's own PTYs, and the answer names it so the host can route
       // the list and every replay behind it back (docs/specs/standalone.md).
-      case 'pty:requestInit': mgr.list(data?.ids, data?.forWindow); break;
+      case 'pty:requestInit': mgr.list(data?.ids, data?.forWindow, data?.requestId); break;
       case 'pty:context': mgr.context(data, data.requestId); break;
       case 'pty:getCwd':  mgr.getCwd(data.id, data.requestId); break;
       case 'pty:getCwds': mgr.getCwds(data.ids, data.requestId); break;
@@ -190,6 +190,10 @@ function handleLine(line) {
       // Which webviews will answer a Burrow ask (docs/specs/standalone.md
       // -> "Burrow service").
       case 'burrow:windows': burrow.setWindows(data?.labels); break;
+      // Which windows an ask actually reached. Only the host knows: one naming
+      // a Surface goes to its owner alone (docs/specs/standalone.md ->
+      // "Burrow service").
+      case 'burrow:askDelivered': burrow.setAskDelivery(data); break;
       case 'alert:command': alertStore.handle(data); break;
       case 'pty:themeColors': burrow.setThemeColors(data); break;
       case 'sidecar:shutdown': shutdown(); break;

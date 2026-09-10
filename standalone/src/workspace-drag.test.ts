@@ -20,6 +20,7 @@ vi.mock("./workspace-move", async (importOriginal) => ({
 }));
 
 import {
+  onDragBackInsideStrip,
   onDragCancelled,
   onDragOutsideWindow,
   onDropOnOtherWindow,
@@ -124,6 +125,38 @@ describe("hit testing while dragging", () => {
     expect(hovers()).toHaveLength(2);
   });
 
+  it("probes again where the pointer came to rest", async () => {
+    // The leading edge alone never sees the resting position, which is the one
+    // the caret must show and the one the drop uses.
+    hit = { label: "ws-2", x: 10, y: 8 };
+    onDragOutsideWindow({ clientX: 900, clientY: 8 });
+    await settle();
+    expect(probes()).toBe(1);
+
+    // Inside the same throttle window, and then the pointer stops.
+    hit = { label: "ws-2", x: 300, y: 8 };
+    onDragOutsideWindow({ clientX: 1190, clientY: 8 });
+    await settle();
+    expect(probes()).toBe(1);
+
+    await throttleElapsed();
+    expect(probes()).toBe(2);
+    expect(lastHover()).toEqual({ label: "ws-2", x: 300, y: 8 });
+  });
+
+  it("clears the caret when the pointer comes back over its own strip", async () => {
+    hit = { label: "ws-2", x: 40, y: 8 };
+    onDragOutsideWindow({ clientX: 900, clientY: 8 });
+    await settle();
+    expect(lastHover()).toEqual({ label: "ws-2", x: 40, y: 8 });
+
+    // The in-strip reorder takes the gesture back; a caret left burning in the
+    // other window claims a drop that is no longer going to happen.
+    onDragBackInsideStrip();
+    await settle();
+    expect(lastHover()).toEqual({ label: null, x: 0, y: 0 });
+  });
+
   it("never shows a caret in its own window", async () => {
     hit = { label: "main", x: 40, y: 8 };
     onDragOutsideWindow({ clientX: 100, clientY: 400 });
@@ -175,6 +208,37 @@ describe("releasing the drag", () => {
     onDropOnOtherWindow("ws-1", { clientX: 900, clientY: 8 }, true);
     await settle();
     expect(hovers()[0]).toEqual({ label: null, x: 0, y: 0 });
+  });
+
+  it("ignores a probe that lands after the release", async () => {
+    // A caret is lit, so the release has something to clear.
+    hit = { label: "ws-2", x: 40, y: 8 };
+    onDragOutsideWindow({ clientX: 900, clientY: 8 });
+    await settle();
+    expect(lastHover()).toEqual({ label: "ws-2", x: 40, y: 8 });
+
+    // A probe is an IPC round trip that can outlive the gesture. Park one.
+    let answerProbe!: (hit: { label: string; x: number; y: number } | null) => void;
+    let parked = false;
+    mocks.invoke.mockImplementation(async (cmd: string) => {
+      if (cmd !== "window_at_cursor" || parked) return undefined;
+      parked = true;
+      return new Promise((resolve) => { answerProbe = resolve; });
+    });
+    await throttleElapsed();
+    onDragOutsideWindow({ clientX: 1400, clientY: 8 });
+    await settle();
+
+    onDropOnOtherWindow("ws-1", { clientX: 1400, clientY: 8 }, true);
+    await settle();
+    expect(lastHover()).toEqual({ label: null, x: 0, y: 0 });
+    const cleared = hovers().length;
+
+    // The stale answer arrives — and must not re-light a caret in a window the
+    // drag has already left, where it would burn until the next drag.
+    answerProbe({ label: "ws-3", x: 12, y: 8 });
+    await settle();
+    expect(hovers()).toHaveLength(cleared);
   });
 
   it("clears the hover caret when the drag is abandoned", async () => {
