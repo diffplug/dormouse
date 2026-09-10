@@ -9,8 +9,21 @@
  */
 
 import { parseWorkspaceRef, spansWorkspaces } from 'dor/protocol';
+import { DEFAULT_WORKSPACE_NAME } from '../../lib/src/lib/session-types';
 
 const REFUSAL = 'Dormouse in VS Code puts each Workspace in its own webview, so';
+
+/**
+ * Whether a container ref names the one Workspace this webview *is*: its
+ * position, or the name a bare Wall registers — a caller that read the name out
+ * of `dor list` must be able to hand it straight back
+ * (`docs/specs/dor-cli.md` → "Handle Model").
+ */
+function namesThisWebviewsWorkspace(workspace: unknown): boolean {
+  if (typeof workspace !== 'string') return false;
+  const { position, name } = parseWorkspaceRef(workspace);
+  return position === 1 || name === DEFAULT_WORKSPACE_NAME;
+}
 
 /**
  * Why this request cannot be answered here, or null to let it through. Reads
@@ -19,9 +32,8 @@ const REFUSAL = 'Dormouse in VS Code puts each Workspace in its own webview, so'
  */
 export function dorWorkspaceRefusal(method: string, params: Record<string, unknown> | undefined): string | null {
   const workspace = params?.workspace;
-  if (workspace !== undefined) {
-    const named = typeof workspace === 'string' ? parseWorkspaceRef(workspace).position : null;
-    if (named !== 1) return `${REFUSAL} it has no workspace '${String(workspace)}' to act on`;
+  if (workspace !== undefined && !namesThisWebviewsWorkspace(workspace)) {
+    return `${REFUSAL} it has no workspace '${String(workspace)}': this webview is workspace:1, ${JSON.stringify(DEFAULT_WORKSPACE_NAME)}`;
   }
   if (spansWorkspaces(method, params)) {
     return `${REFUSAL} dor workspace, dor list --workspaces and dor list --all are not available here`;

@@ -84,7 +84,8 @@ export const agentBrowserCommand: Command = {
 
 dor intercepts exactly three mutually exclusive identity flags:
   --key <name>       Managed, workspace-scoped browser identity (default "default").
-                     Maps to agent-browser session dormouse.1.<name>.
+                     Maps to agent-browser session dormouse.<workspace>.<name>,
+                     so the same key in another Workspace is another browser.
   --session <name>   Attach to a raw agent-browser session by its literal name.
   --surface <handle> Drive the browser Surface a handle names (surface:N,
                      surface:focused, a stable id, title:<title>). dor asks the
@@ -149,14 +150,14 @@ const IDENTITY_FLAGS = ['--key', '--session', '--surface'] as const;
 const INTERCEPTED_FLAGS = [...IDENTITY_FLAGS, '--workspace'] as const;
 type InterceptedFlag = (typeof INTERCEPTED_FLAGS)[number];
 
-/** Either a session known CLI-side (from `--session`, or namespaced from
- *  `--key`) or a Surface handle for the host to resolve — never neither, never
- *  both. A union rather than two optionals so the arm that has no session is
- *  the arm that has a surface, by construction. `key` rides along only when it
- *  named the session: a raw or surface-addressed session may be GUI-minted,
- *  which no key names. */
+/** How the browser was named: a raw session known CLI-side, a managed `--key`
+ *  the host namespaces under the target Workspace, or a Surface handle the host
+ *  resolves — exactly one of the three, by construction. `key` rides along only
+ *  when it named the session: a raw or surface-addressed session may be
+ *  GUI-minted, which no key names. */
 type ResolvedSessionFlags = { rest: string[]; workspace?: string } & (
-  | { session: string; key?: string; surface?: undefined }
+  | { session: string; key?: undefined; surface?: undefined }
+  | { key: string; session?: undefined; surface?: undefined }
   | { surface: string; session?: undefined; key?: undefined }
 );
 
@@ -208,8 +209,9 @@ export function extractSessionFlags(args: string[]): ParseResult<ResolvedSession
   const session = values.get('--session');
   if (session !== undefined) return { ok: true, value: { session, rest, ...workspace } };
 
-  const resolvedKey = key ?? 'default';
-  return { ok: true, value: { key: resolvedKey, session: sessionForKey(resolvedKey), rest, ...workspace } };
+  // The key's session name belongs to the Workspace that will hold the browser,
+  // so it is resolved host-side rather than built here (`resolveSession`).
+  return { ok: true, value: { key: key ?? 'default', rest, ...workspace } };
 }
 
 export async function runAgentBrowserCli(args: string[], options: CliOptions): Promise<CliResult> {
@@ -295,13 +297,20 @@ export async function runAgentBrowserCli(args: string[], options: CliOptions): P
 }
 
 /**
- * The agent-browser session to forward: the one the flags already produced, or —
- * for `--surface <handle>` — the one the host says that Surface is bound to
- * (`surface.resolveAgentBrowser`). A handle needs a live control endpoint, and
- * the host owns the gating: the target must have a browser, and that browser
- * must be agent-browser-rendered with a session (an `iframe` renderer has no
- * session to drive). Its messages are printed verbatim; dor does not
- * re-interpret them.
+ * The agent-browser session to forward — one `surface.resolveAgentBrowser` round
+ * trip for the two forms only the host can name:
+ *
+ * - `--session <name>` is already the session; nothing is asked.
+ * - `--key <name>` is namespaced under the Workspace that will hold the browser,
+ *   which only that Workspace knows (`docs/specs/dor-browser.md` → "Managed identity").
+ *   **Outside Dormouse the CLI namespaces it itself**, so `dor ab` stays a
+ *   passthrough with no control endpoint.
+ * - `--surface <handle>` is the session the host says that Surface is bound to.
+ *   The host owns the gating: the target must have a browser, and that browser
+ *   must be agent-browser-rendered with a session (an `iframe` renderer has no
+ *   session to drive).
+ *
+ * The host's messages are printed verbatim; dor does not re-interpret them.
  */
 async function resolveSession(
   flags: ResolvedSessionFlags,
@@ -309,10 +318,14 @@ async function resolveSession(
 ): Promise<ParseResult<string>> {
   if (flags.session !== undefined) return { ok: true, value: flags.session };
   const client = requireControlClient(options);
-  if (client instanceof Error) return { ok: false, message: client.message };
+  if (client instanceof Error) {
+    return flags.key === undefined
+      ? { ok: false, message: client.message }
+      : { ok: true, value: sessionForKey(flags.key) };
+  }
   try {
     const { session } = await client.resolveAgentBrowserSession({
-      surface: flags.surface,
+      ...(flags.key === undefined ? { surface: flags.surface } : { key: flags.key }),
       ...workspaceParam(flags.workspace),
     });
     return { ok: true, value: session };

@@ -1,6 +1,8 @@
 import { useCallback, type MutableRefObject } from 'react';
+import { sessionForKey } from 'dor-lib-common/agent-browser';
 import { getPlatform, PLATFORM_STRING } from '../../lib/platform';
 import { currentWindowRef } from '../../lib/workspace-store';
+import type { WorkspaceId } from '../../lib/session-types';
 import type { DorControlRequestPayload, DorControlResult } from 'dor/protocol';
 import { SURFACE_CONTROL_METHODS } from 'dor/protocol';
 import type {
@@ -8,7 +10,6 @@ import type {
   SplitDirection as DorSplitDirection,
   ResolvedSplitDirection as DorResolvedSplitDirection,
   ParseResult,
-  SurfacePort as DorSurfacePort,
 } from 'dor/commands/types';
 import { hasBrowser, hasTerminal } from 'dor/commands/types';
 import { MAX_AWAIT_TIMEOUT_MS } from '../../lib/alert-manager';
@@ -23,6 +24,7 @@ import {
 import { surfaceRunsCommand, type TerminalPaneState } from '../../lib/terminal-state';
 import { isAllowedAgentBrowserBinary } from '../../lib/agent-browser-binary';
 import { stringParam } from './dor-control-shared';
+import { attachSurfacePorts } from './surface-ports';
 import { browserSurfaceUrl, hostPathDisplay } from './browser-url';
 import { agentBrowserSessionFromParams } from './browser-surface';
 import { listenerUrlsByPort } from './port-url';
@@ -203,32 +205,6 @@ function resolveSurfaceTarget(
   const fallback = !target && !callerSurfaceId ? (surfaces[0] ?? null) : null;
   if (fallback) return { ok: true, value: fallback };
   return { ok: false, message: `surface '${resolvedTarget}' was not found` };
-}
-
-function toSurfacePort(port: OpenPort): DorSurfacePort {
-  return {
-    family: port.family,
-    address: port.address,
-    port: port.port,
-    pid: port.pid,
-    ...(port.processName ? { processName: port.processName } : {}),
-  };
-}
-
-/** Enumerate each terminal Surface's listening ports for `dor list --ports`.
- *  The adapter shells out per pane (and returns `[]` on remote / on error), so
- *  the fetches run in parallel and failures degrade to no ports, never a reject. */
-async function attachSurfacePorts(surfaces: DorSurface[]): Promise<DorSurface[]> {
-  const platform = getPlatform();
-  return Promise.all(surfaces.map(async (surface) => {
-    if (!hasTerminal(surface.kind)) return surface;
-    try {
-      const ports = await platform.getOpenPorts(surface.id);
-      return { ...surface, ports: ports.map(toSurfacePort) };
-    } catch {
-      return { ...surface, ports: [] };
-    }
-  }));
 }
 
 function booleanParam(value: unknown): boolean {
@@ -425,6 +401,7 @@ export function useDorControl({
   closeSurface,
   lastAgentBrowserBinaryPathRef,
   workspaceRef,
+  workspaceScope,
 }: {
   /** The Lath engine — visible-pane projection (`lath.listPanes()`), aspect-ratio
    *  split resolution (`autoEdgeFor`), and per-leaf param writes. */
@@ -470,6 +447,10 @@ export function useDorControl({
    *  The Window's own ref rides beside it, so `dor list` says which Window
    *  answered too (`currentWindowRef`). */
   workspaceRef: () => string;
+  /** This Wall's Workspace id, which namespaces the managed `dor ab --key`
+   *  sessions it answers for; `undefined` on a bare Wall, whose keys keep the
+   *  unscoped names (docs/specs/dor-browser.md → Managed identity). */
+  workspaceScope: () => WorkspaceId | undefined;
 }): {
   /** The live surface (visible pane or minimized door) whose params match, or
    *  null. Shared with the context's port launches in Wall.tsx. */
@@ -1110,6 +1091,16 @@ export function useDorControl({
     }
 
     if (detail.method === SURFACE_CONTROL_METHODS.resolveAgentBrowser) {
+      // A managed `--key` names no Surface: it names this Workspace's browser of
+      // that name, so the answer is the key namespaced under the Workspace that
+      // will hold it (docs/specs/dor-browser.md → Managed identity). Answered
+      // whether or not a Surface holds that session yet — `surface.agentBrowser`
+      // is what creates or reuses one.
+      const keyParam = stringParam(params.key);
+      if (keyParam) {
+        detail.respond({ ok: true, result: { session: sessionForKey(keyParam, workspaceScope()) } });
+        return;
+      }
       // Resolve a browser Surface handle to the agent-browser session bound to
       // it, for `dor ab --surface <handle> <verb...>`. Past the browser gate,
       // web verbs stay renderMode-gated: an `iframe` renderer is a browser
@@ -1141,7 +1132,7 @@ export function useDorControl({
     }
 
     detail.respond({ ok: false, error: `unsupported Dormouse control method '${detail.method}'` });
-  }, [buildDorSurfaces, buildDorSurfaceList, closeSurface, createContentSurface, createSplitSurface, ensureAgentBrowserSurface, findSurfaceIdRunningCommand, isClosingWorkspace, requireBrowserSurface, requireListedSurface, requireTerminalSurface, resolveListedSurface, resolveVisibleSurface, surfaceRefForId, lath, nav, workspaceRef]);
+  }, [buildDorSurfaces, buildDorSurfaceList, closeSurface, createContentSurface, createSplitSurface, ensureAgentBrowserSurface, findSurfaceIdRunningCommand, isClosingWorkspace, requireBrowserSurface, requireListedSurface, requireTerminalSurface, resolveListedSurface, resolveVisibleSurface, surfaceRefForId, lath, nav, workspaceRef, workspaceScope]);
 
   return { findSurfaceByParams, updateSurfaceParams, handleDorControl };
 }

@@ -1,7 +1,7 @@
 import { isWorkspaceControlMethod, SURFACE_CONTROL_METHODS } from 'dor/protocol';
 import { createRefCount } from '../../lib/ref-count';
 import { getActiveWorkspaceId, isWindowRef, resolveWorkspaceRef } from '../../lib/workspace-store';
-import { errorText } from './dor-control-shared';
+import { errorText, mountingRefusal, ROUTE_RETRIES } from './dor-control-shared';
 import { getWallHandle, wallHandleOwning, type WallHandle } from './wall-handles';
 import { handleWorkspaceControl, listAllWorkspaceSurfaces, type WindowControlParams } from './workspace-control';
 import { classifySurfaceTarget, type DorControlRequest } from './use-dor-control';
@@ -21,6 +21,9 @@ export type DorControlRoute =
    *  (`container: true`), or the `--all` listing that spans them. */
   | { kind: 'window'; container: boolean }
   | { kind: 'error'; message: string }
+  /** The Workspace exists but its Wall has not registered yet: retried like
+   *  `none`, and answered with `message` if it never does. */
+  | { kind: 'pending'; message: string }
   /** Nothing is mounted that could answer; the request is left to time out. */
   | { kind: 'none' };
 
@@ -56,8 +59,9 @@ export function resolveDorControlRoute(detail: DorControlRequest): DorControlRou
     return { kind: 'window', container: false };
   }
   if (params.workspace !== undefined) {
-    // A ref of the wrong type, one outside the strip, and one whose Wall is not
-    // mounted are the same answer: this Window has no such Workspace to route to.
+    // A ref of the wrong type and one outside the strip name no Workspace of
+    // this Window. One whose Wall has simply not registered yet is a different
+    // answer — the Workspace is there — so it waits like `none` instead.
     const resolved = typeof params.workspace === 'string'
       ? resolveWorkspaceRef(params.workspace)
       : { ok: false as const, message: `unknown workspace target '${String(params.workspace)}'` };
@@ -65,7 +69,7 @@ export function resolveDorControlRoute(detail: DorControlRequest): DorControlRou
     const handle = getWallHandle(resolved.id);
     return handle
       ? { kind: 'handle', handle }
-      : { kind: 'error', message: `unknown workspace target '${String(params.workspace)}'` };
+      : { kind: 'pending', message: mountingRefusal(String(params.workspace).trim()) };
   }
   // A stable id names one Surface in the whole Window, so a command targeting
   // one is answered by whichever Workspace holds it, caller or not.
@@ -81,24 +85,20 @@ export function resolveDorControlRoute(detail: DorControlRequest): DorControlRou
   return active ? { kind: 'handle', handle: active } : { kind: 'none' };
 }
 
-/**
- * How many macrotasks a request waits for a Wall to appear. A Wall registers its
- * handle in a passive effect, so a request landing between `createWorkspace()`
- * and that effect — `dor workspace new && dor split`, the strip's `+` under a
- * scripted caller — finds nothing to route to. Retrying is what answers it
- * instead of dropping it; the bound keeps a Window with no Walls at all (a
- * Storybook strip) from retrying forever.
- */
-const ROUTE_RETRIES = 5;
-
 function dispatchDorControl(detail: DorControlRequest, attempt: number): void {
   const route = resolveDorControlRoute(detail);
   if (route.kind === 'error') {
     detail.respond({ ok: false, error: route.message });
     return;
   }
-  if (route.kind === 'none') {
-    if (attempt < ROUTE_RETRIES) setTimeout(() => dispatchDorControl(detail, attempt + 1), 0);
+  if (route.kind === 'none' || route.kind === 'pending') {
+    if (attempt < ROUTE_RETRIES) {
+      setTimeout(() => dispatchDorControl(detail, attempt + 1), 0);
+      return;
+    }
+    // A Workspace whose Wall never registered says so; a Window with nothing
+    // mounted at all has nobody to answer for, and is left to time out.
+    if (route.kind === 'pending') detail.respond({ ok: false, error: route.message });
     return;
   }
   // Every failure the handler can raise is answered: an unanswered request

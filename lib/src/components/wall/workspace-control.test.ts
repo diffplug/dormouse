@@ -14,6 +14,8 @@ import {
 import { clearTerminalActivity, setTerminalActivity } from '../../lib/session-activity-store';
 import { resetWorkspaceSurfaces, setWorkspaceSurfaces } from '../../lib/workspace-surfaces';
 import { resetWindowSessionAggregator } from '../../lib/window-session-aggregator';
+import { setPlatform } from '../../lib/platform';
+import type { OpenPort, PlatformAdapter } from '../../lib/platform/types';
 
 const disposers: Array<() => void> = [];
 
@@ -153,6 +155,17 @@ describe('workspace.close', () => {
     expect(getWorkspacesSnapshot().workspaces).toHaveLength(1);
   });
 
+  it('refuses a Workspace whose Wall never registered, rather than orphaning its Sessions', async () => {
+    createWorkspace({ id: 'ws-2', name: 'build', activate: false });
+    handleFor(getWorkspacesSnapshot().workspaces[0].id);
+    // The Wall is what walks the member Surfaces; without one, dropping the
+    // Workspace would leave its PTYs running with nothing holding them.
+    const detail = request('workspace.close', { workspace: 'workspace:2', force: true });
+    await handleWorkspaceControl(detail);
+    expect(answer(detail)).toBe("workspace 'workspace:2' is still mounting");
+    expect(getWorkspacesSnapshot().workspaces).toHaveLength(2);
+  });
+
   it('refuses the last Workspace', async () => {
     const only = getWorkspacesSnapshot().workspaces[0].id;
     handleFor(only);
@@ -185,25 +198,31 @@ describe('workspace.close', () => {
   });
 });
 
+/** A Wall that answers `surface.list` with these Surfaces. */
+function listing(surfaces: Array<Record<string, unknown>>) {
+  return vi.fn((detail: DorControlRequest) => {
+    detail.respond({
+      ok: true,
+      result: { surfaces, workspaceRef: 'workspace:x', windowRef: 'window:1' },
+    });
+  });
+}
+
+/** Terminal rows as a Wall reports them, `focused` on the first. Stable ids are
+ *  unique Window-wide, so each Wall's rows carry its own prefix. */
+function terminalRows(prefix: string, refs: string[]): Array<Record<string, unknown>> {
+  return refs.map((ref, index) => ({ ref, id: `${prefix}-${ref}`, kind: 'terminal', focused: index === 0 }));
+}
+
 describe('surface.list --all', () => {
   it('tags every row with its Workspace and carries the directory', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     createWorkspace({ id: 'ws-2', name: 'build', activate: false });
-    const listing = (refs: string[]) => vi.fn((detail: DorControlRequest) => {
-      detail.respond({
-        ok: true,
-        result: {
-          surfaces: refs.map((ref) => ({ ref, id: `${ref}-id` })),
-          workspaceRef: 'workspace:x',
-          windowRef: 'window:1',
-        },
-      });
-    });
-    handleFor(first, { handleDorControl: listing(['surface:1']) });
-    const second = listing(['surface:1', 'surface:2']);
+    handleFor(first, { handleDorControl: listing(terminalRows('a', ['surface:1'])) });
+    const second = listing(terminalRows('b', ['surface:1', 'surface:2']));
     handleFor('ws-2', { handleDorControl: second });
 
-    const detail = request('surface.list', { scope: 'all', includePorts: true });
+    const detail = request('surface.list', { scope: 'all' });
     await listAllWorkspaceSurfaces(detail);
 
     const result = answer(detail) as { surfaces: Array<{ ref: string; workspaceRef: string }>; workspaces: unknown[] };
@@ -215,14 +234,68 @@ describe('surface.list --all', () => {
     expect(result.workspaces).toHaveLength(2);
     // Each Wall is asked for its own Workspace: the caller's container target
     // is cleared, and a Wall has no scope of its own to read.
-    expect(second.mock.calls[0][0].params).toEqual({ scope: 'all', includePorts: true, workspace: undefined });
+    expect(second.mock.calls[0][0].params).toEqual({ scope: 'all', includePorts: false, workspace: undefined });
+  });
+
+  it('marks only the active Workspace selection focused', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    // Every Wall marks its own selection; the Window has one focus, and it is
+    // in the Workspace the user is looking at.
+    createWorkspace({ id: 'ws-2', name: 'build', activate: true });
+    handleFor(first, { handleDorControl: listing(terminalRows('a', ['surface:1', 'surface:2'])) });
+    handleFor('ws-2', { handleDorControl: listing(terminalRows('b', ['surface:1'])) });
+
+    const detail = request('surface.list', { scope: 'all' });
+    await listAllWorkspaceSurfaces(detail);
+
+    const result = answer(detail) as { surfaces: Array<{ ref: string; workspaceRef: string; focused: boolean }> };
+    expect(result.surfaces.map((surface) => [surface.workspaceRef, surface.ref, surface.focused])).toEqual([
+      ['workspace:1', 'surface:1', false],
+      ['workspace:1', 'surface:2', false],
+      ['workspace:2', 'surface:1', true],
+    ]);
+  });
+
+  it('scans every Workspace terminal in one batched call, never per Wall', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    createWorkspace({ id: 'ws-2', name: 'build', activate: false });
+    const port = (value: number): OpenPort => ({ family: 'IPv4', address: '127.0.0.1', port: value, pid: 1 });
+    const getOpenPortsMany = vi.fn(async (ids: string[]) => Object.fromEntries(
+      ids.map((id, index) => [id, [port(5000 + index)]]),
+    ));
+    const getOpenPorts = vi.fn(async () => []);
+    setPlatform({ getOpenPorts, getOpenPortsMany } as unknown as PlatformAdapter);
+    const firstWall = listing(terminalRows('a', ['surface:1']));
+    handleFor(first, { handleDorControl: firstWall });
+    handleFor('ws-2', { handleDorControl: listing(terminalRows('b', ['surface:1', 'surface:2'])) });
+
+    const detail = request('surface.list', { scope: 'all', includePorts: true });
+    await listAllWorkspaceSurfaces(detail);
+
+    // One scan for the whole Window, not one per Workspace and not one per row.
+    expect(getOpenPortsMany).toHaveBeenCalledTimes(1);
+    expect(getOpenPortsMany).toHaveBeenCalledWith(['a-surface:1', 'b-surface:1', 'b-surface:2']);
+    expect(getOpenPorts).not.toHaveBeenCalled();
+    // The Walls are asked for rows only: a forwarded `includePorts` would be N
+    // scans again.
+    expect(firstWall.mock.calls[0][0].params).toMatchObject({ includePorts: false });
+    const result = answer(detail) as { surfaces: Array<{ ports: Array<{ port: number }> }> };
+    expect(result.surfaces.map((surface) => surface.ports[0].port)).toEqual([5000, 5001, 5002]);
+  });
+
+  it('fails the listing when a Workspace Wall never registers', async () => {
+    createWorkspace({ id: 'ws-2', name: 'build', activate: false });
+    handleFor(getWorkspacesSnapshot().workspaces[0].id, { handleDorControl: listing([]) });
+    // No Wall for `ws-2`: a Workspace missing from the answer would read as a
+    // Workspace holding nothing, so the whole listing fails instead.
+    const detail = request('surface.list', { scope: 'all' });
+    await listAllWorkspaceSurfaces(detail);
+    expect(answer(detail)).toBe("workspace 'workspace:2' is still mounting");
   });
 
   it('fails the whole listing when one Workspace cannot answer', async () => {
     createWorkspace({ id: 'ws-2', name: 'build', activate: false });
-    handleFor(getWorkspacesSnapshot().workspaces[0].id, {
-      handleDorControl: (detail) => detail.respond({ ok: true, result: { surfaces: [], workspaceRef: 'workspace:1', windowRef: 'window:1' } }),
-    });
+    handleFor(getWorkspacesSnapshot().workspaces[0].id, { handleDorControl: listing([]) });
     handleFor('ws-2', { handleDorControl: () => { throw new Error('boom'); } });
 
     const detail = request('surface.list', { scope: 'all' });

@@ -306,7 +306,10 @@ Invariants:
   `surface:N` — else the Workspace owning the calling Surface, else the active
   one; nothing mounted leaves the request unanswered, after a bounded
   retry that covers the tick between a Workspace being created and its Wall
-  registering. **Every request is answered, including a container ref of the
+  registering. **A `--workspace` the store resolves but whose Wall has not
+  registered waits out that same retry**, then answers `workspace '<ref>' is
+  still mounting` — it is not the unknown-Workspace answer, the Workspace being
+  there. **Every request is answered, including a container ref of the
   wrong type and a handler that throws** — an unanswered one blocks its caller
   to the deadline. A Workspace being closed refuses the Surface-creating verbs
   (`docs/specs/layout.md` → "Workspaces"). **Surface targets resolve within the
@@ -337,8 +340,11 @@ answering Workspace's own `workspace:<n>` alongside the answering Window's
 `window:<label>` (Handle Model). **Its `scope: 'all'` spans every Workspace of
 the Window**, tagging each row with the Workspace it came from and carrying the
 Workspace directory beside them; **one Workspace that cannot answer fails the
-whole listing**, since a Workspace missing from the answer reads as a Workspace
-holding nothing. Per the
+whole listing** — including one whose Wall never registers, after the same
+registration-gap wait routing gives (Handle Model) — since a Workspace missing
+from the answer reads as a Workspace holding nothing. **Only the active
+Workspace's selection is `focused`** in such a listing: each Wall marks its own,
+and the Window has one focus. Per the
 visible-vs-listed split [Handle Model](#handle-model) states, **a visible split
 reference adds a pane in Lath, a minimized one a sibling Door in the
 baseboard.** **`dor list` rows sort by the Workspace-stable `surface:N` ref**, a
@@ -346,11 +352,18 @@ registry `Wall` owns and persists with the session, independent of Lath layout
 order.
 
 **Port enumeration is opt-in.** With `includePorts` set (`dor list --ports` /
-`--port`) the host calls `PlatformAdapter.getOpenPorts(id)`
-(`docs/specs/dor-browser.md` → Dev-Server Chip) per terminal Surface in
-parallel, shelling out per pane (`lsof` / `Get-NetTCPConnection`) under
-`OPEN_PORT_TIMEOUT_MS`. A remote paired session reports none, and any error
-degrades to an empty list rather than failing the call.
+`--port`) the host scans each terminal Surface's process tree
+(`docs/specs/dor-browser.md` → Dev-Server Chip), shelling out (`lsof` /
+`Get-NetTCPConnection`) under `OPEN_PORT_TIMEOUT_MS`. **One listing costs one
+scan where the adapter can batch it** (`PlatformAdapter.getOpenPortsMany`), and
+`getOpenPorts(id)` per Surface in parallel where it cannot — so a listing
+spanning Workspaces does not multiply a synchronous host scan by its row count.
+**A `--all` listing never forwards `includePorts` to a Wall**, scanning once for
+every Workspace's terminals instead. A remote paired session reports none, and
+any error degrades to an empty list rather than failing the call.
+Source of truth: `attachSurfacePorts` in
+`lib/src/components/wall/surface-ports.ts`, `getOpenPortsForPids` in
+`standalone/sidecar/pty-core.js`.
 
 **`dor` forwards command tails as raw argv; the host quotes them** — `dor`
 cannot know the configured default shell used for creation, so tails after `--`
@@ -396,7 +409,7 @@ The spec keeps the behavior help cannot express:
 | `await` | **Must name `--until quiet\|exit`; never infer it.** Timeout 1–86400 whole seconds, default 600; `alert.md` owns wake semantics. |
 | `kill` | **Must select exactly one confirmation mode.** Conditional text needs four non-whitespace characters and must match `read`; browser Surfaces are killable. |
 | `iframe`, `agent-browser` / `ab` | `dor-browser.md` owns the renderers; see [target resolution](#browser-open-target-resolution) and [addressing](#agent-browser-surface-addressing). The passthrough is intercepted before stricli parses it. |
-| `list` | Filters are ANDed client-side; `--port` filters terminals (browser Surfaces never match) and implies the opt-in detail scan, `--ports` only requests it. **Owns every Workspace read**: `--workspace` narrows to one, `--all` groups every Workspace's rows under its header (dropping a group its filters emptied), `--workspaces` is the overview, and the three cannot be combined. |
+| `list` | Filters are ANDed client-side; `--port` filters terminals (browser Surfaces never match) and implies the opt-in detail scan, `--ports` only requests it. **Owns every Workspace read**: `--workspace` narrows to one, `--all` groups every Workspace's rows under its header — **every Workspace keeps its header**, including one a filter emptied, so the text listing and the JSON `workspaces` array name the same Workspaces — `--workspaces` is the overview, and the three cannot be combined. **`--workspaces` takes `--json` and nothing else**, by an allowlist, so a flag added to `list` is refused there until it is named. |
 | `workspace` | **Mutation only** ([dor workspace](#dor-workspace)). |
 | `skill` | Prints the bundled skill or installs its bootstrap stub; [Agent Skill](#agent-skill) owns the contract. |
 
@@ -434,7 +447,7 @@ Wall (Handle Model), and each takes a `workspace:<n|name>` target except `new`:
 |---|---|
 | `new [name]` | **Creates in the background**, never activating: moving the user to another Workspace is a larger theft than the focus a bare `dor split` takes. Answers with the new ref. |
 | `rename <ref> <name>` | Renames the Workspace only — no Surface title (`docs/specs/layout.md` → "Workspaces"). |
-| `close <ref> [--force]` | **Refuses, raising no confirmation, when the Workspace holds a touched or running Surface** unless `--force` — the caller is a command, not someone watching the Wall, exactly as `dor kill` archives silently. The last Workspace, and a Workspace whose close meets another already in flight, refuse too. Member Surfaces close through the closure coordinator (`docs/specs/notepad.md` → "Closure"). |
+| `close <ref> [--force]` | **Refuses, raising no confirmation, when the Workspace holds a touched or running Surface** unless `--force` — the caller is a command, not someone watching the Wall, exactly as `dor kill` archives silently. The last Workspace, a Workspace whose close meets another already in flight, and one whose Wall never registers (`still mounting`, after the routing retry — closing past it would leave its Sessions running with nothing holding them) refuse too. Member Surfaces close through the closure coordinator, and a refusal leaves the Workspace open and the user where they were (`docs/specs/notepad.md` → "Closure"). |
 | `switch <ref>` | Activates it. |
 
 **Each verb ships as one action of one command**, not a route map: the published
@@ -518,6 +531,9 @@ session name that becomes a filesystem path.
 
 **Resolution is host-side**, mirroring `surface.resolveOpen`: the CLI sends the
 handle to `surface.resolveAgentBrowser` and forwards the session it gets back.
+A managed `--key` takes the same method (with `key` in place of `surface`),
+because the Workspace that will hold the browser is what namespaces a key
+(`docs/specs/dor-browser.md` → Managed identity).
 The handle resolves against **listed** Surfaces ([Handle Model](#handle-model)),
 and the host applies two gates in order:
 

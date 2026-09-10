@@ -108,6 +108,33 @@ describe("TauriAdapter cwd probing", () => {
   });
 });
 
+describe("TauriAdapter port probing", () => {
+  it("sends one pty_get_open_ports_many for a whole listing, and fails soft", async () => {
+    // `dor list --ports` across Workspaces asks once for every terminal: the
+    // sidecar's scan is synchronous, so one call is one pass over the process
+    // and socket tables instead of one per terminal.
+    const adapter = new TauriAdapter();
+    const port = (value: number) => ({ family: "IPv4", address: "127.0.0.1", port: value, pid: 1 });
+    vi.mocked(rawInvoke).mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd !== "pty_get_open_ports_many") return undefined;
+      const ids = (args as { ids: string[] }).ids;
+      return Object.fromEntries(ids.map((id, index) => [id, [port(5000 + index)]]));
+    });
+
+    expect(await adapter.getOpenPortsMany(["pane-a", "pane-b"])).toEqual({
+      "pane-a": [port(5000)],
+      "pane-b": [port(5001)],
+    });
+    const calls = vi.mocked(rawInvoke).mock.calls.filter(([cmd]) => cmd === "pty_get_open_ports_many");
+    expect(calls).toHaveLength(1);
+    expect(calls[0][1]).toEqual({ ids: ["pane-a", "pane-b"] });
+
+    // A failed scan is no ports, never a rejected listing.
+    vi.mocked(rawInvoke).mockRejectedValueOnce(new Error("sidecar is gone"));
+    expect(await adapter.getOpenPortsMany(["pane-a"])).toEqual({});
+  });
+});
+
 // docs/specs/transport.md -> "The governing rule": standalone restores window
 // state, so nothing is deleted at boot and the record is claimed once.
 describe("TauriAdapter window persistence", () => {

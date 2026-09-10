@@ -67,7 +67,7 @@ JSON output (--json) always includes both stable ids and refs, and each row carr
 
 --workspace <ref> lists another Workspace of this Window instead: workspace:<n> (positional) or workspace:<name>, which resolves only when exactly one Workspace carries that name. Both are accepted bare ("2", "build").
 
---all lists every Workspace of this Window, grouped under a Workspace header. Rows keep their own Workspace-scoped surface:N refs, so several groups have a surface:1 and several may carry the focus marker; each JSON row adds workspace_ref, and the payload adds a workspaces array. Target a row from another Workspace by its stable id, or pass --workspace.
+--all lists every Workspace of this Window, grouped under a Workspace header — every Workspace keeps its header, including one holding nothing and one the filters emptied. Rows keep their own Workspace-scoped surface:N refs, so several groups have a surface:1, but only the active Workspace's selection carries the focus marker; each JSON row adds workspace_ref, and the payload adds a workspaces array. Target a row from another Workspace by its stable id, or pass --workspace.
 
 --workspaces prints the Workspace overview instead of any Surface: one row per Workspace with the active marker, its name, [ringing]/[todo] when any member Surface is, and [attention N] for the number owing it. It takes no other flag but --json.
 
@@ -204,19 +204,14 @@ async function runListCommand(
   }
 }
 
-/** Every flag the Workspace overview does not take, spelled as the user typed
- *  it and listed in help order. `--json` and `--workspaces` are the two it does. */
-const SURFACE_ONLY_FLAGS: ReadonlyArray<[keyof ListFlags, string]> = [
-  ['all', '--all'],
-  ['command', '--command'],
-  ['cwd', '--cwd'],
-  ['idFormat', '--id-format'],
-  ['kind', '--kind'],
-  ['port', '--port'],
-  ['ports', '--ports'],
-  ['view', '--view'],
-  ['workspace', '--workspace'],
-];
+/** The only flags the Workspace overview takes — an allowlist, so a flag added
+ *  to this command is refused there until it is named here. */
+const WORKSPACES_FLAGS: ReadonlySet<keyof ListFlags> = new Set(['json', 'workspaces']);
+
+/** A flag as the user typed it, from the name stricli parsed it into. */
+function flagSpelling(name: string): string {
+  return `--${name.replace(/[A-Z]/g, (upper) => `-${upper.toLowerCase()}`)}`;
+}
 
 /** The three container flags name one scope between them, and the overview is a
  *  different listing rather than a filter on this one. */
@@ -225,9 +220,10 @@ function checkScopeFlags(flags: ListFlags): { ok: true } | { ok: false; message:
     return { ok: false, message: '--all and --workspace are mutually exclusive' };
   }
   if (flags.workspaces === true) {
-    const others = SURFACE_ONLY_FLAGS
-      .filter(([name]) => flags[name] !== undefined)
-      .map(([, spelling]) => spelling);
+    const others = (Object.keys(flags) as Array<keyof ListFlags>)
+      .filter((name) => flags[name] !== undefined && !WORKSPACES_FLAGS.has(name))
+      .map((name) => flagSpelling(name))
+      .sort();
     if (others.length > 0) {
       return { ok: false, message: `dor list --workspaces takes only --json, not ${others.join(', ')}` };
     }
@@ -277,18 +273,15 @@ function renderListText(
   if (!response.workspaces) return rows.length === 0 ? '' : `${rows.join('\n')}\n`;
 
   // Every row of a `--all` answer carries the Workspace it came from
-  // (`GroupedSurface`), so a group is its own rows in response order.
-  const groups = response.workspaces
-    .map((workspace) => ({
-      header: `${workspace.ref}  ${workspace.name}${workspace.active ? '  [active]' : ''}`,
-      lines: response.surfaces.flatMap((surface, index) => (
-        surface.workspaceRef === workspace.ref ? [`  ${rows[index]}`] : []
-      )),
-    }))
-    // A Workspace every filter emptied prints no header: the group is not there
-    // to be listed.
-    .filter((group) => group.lines.length > 0)
-    .map((group) => [group.header, ...group.lines].join('\n'));
+  // (`GroupedSurface`), so a group is its own rows in response order. **Every
+  // Workspace keeps its header**, even one no row survived: the listing says
+  // which Workspaces there are, and the JSON payload lists them all either way.
+  const groups = response.workspaces.map((workspace) => [
+    `${workspace.ref}  ${workspace.name}${workspace.active ? '  [active]' : ''}`,
+    ...response.surfaces.flatMap((surface, index) => (
+      surface.workspaceRef === workspace.ref ? [`  ${rows[index]}`] : []
+    )),
+  ].join('\n'));
   return groups.length === 0 ? '' : `${groups.join('\n\n')}\n`;
 }
 

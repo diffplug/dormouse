@@ -11,7 +11,8 @@ Forwards all arguments verbatim to your own agent-browser binary and binds the s
 
 dor intercepts exactly three mutually exclusive identity flags:
   --key <name>       Managed, workspace-scoped browser identity (default "default").
-                     Maps to agent-browser session dormouse.1.<name>.
+                     Maps to agent-browser session dormouse.<workspace>.<name>,
+                     so the same key in another Workspace is another browser.
   --session <name>   Attach to a raw agent-browser session by its literal name.
   --surface <handle> Drive the browser Surface a handle names (surface:N,
                      surface:focused, a stable id, title:<title>). dor asks the

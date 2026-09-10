@@ -1055,10 +1055,14 @@ module.exports.getListeningPortsForPids = getListeningPortsForPids;
  * any platform-specific failure rather than throwing.
  */
 function getOpenPortsForPid(rootPid, runtime = {}) {
-  if (!Number.isInteger(rootPid)) return [];
-  const pids = getDescendantPids(rootPid, runtime);
-  const ports = getListeningPortsForPids(pids, runtime);
+  return getOpenPortsForPids([rootPid], runtime).get(rootPid) ?? [];
+}
 
+module.exports.getOpenPortsForPid = getOpenPortsForPid;
+
+/** De-duplicated by (family, address, port) and sorted by port — the shape a
+ *  caller reads a Surface's ports in. */
+function dedupeListeningPorts(ports) {
   const seen = new Map();
   for (const entry of ports) {
     const key = `${entry.family}|${entry.address}|${entry.port}`;
@@ -1067,7 +1071,36 @@ function getOpenPortsForPid(rootPid, runtime = {}) {
   return [...seen.values()].sort((a, b) => a.port - b.port || a.address.localeCompare(b.address));
 }
 
-module.exports.getOpenPortsForPid = getOpenPortsForPid;
+/**
+ * `rootPid -> listening ports` for a whole set of terminals, in ONE process-table
+ * read and ONE socket scan.
+ *
+ * Batched at this layer for the same reason `getCwdsForPids` is: `dor list --all
+ * --ports` asks about every terminal of every Workspace at once, and each step is
+ * a synchronous subprocess on the sidecar's only event loop — two spawns for N
+ * terminals instead of 2N. Returns [] per pid on any platform failure rather than
+ * throwing.
+ */
+function getOpenPortsForPids(rootPids, runtime = {}) {
+  const byRoot = new Map();
+  const roots = [...new Set(rootPids.filter((pid) => Number.isInteger(pid)))];
+  if (roots.length === 0) return byRoot;
+
+  const pairs = readProcessTable(runtime);
+  // A failed scan is tolerated here (unlike helper-work inspection): each root
+  // then owns only itself, exactly as `getDescendantPids` falls back.
+  const owned = new Map(roots.map((root) => [root, pairs ? buildDescendantSet(pairs, root) : new Set([root])]));
+  const union = new Set();
+  for (const pids of owned.values()) for (const pid of pids) union.add(pid);
+
+  const ports = getListeningPortsForPids([...union], runtime);
+  for (const [root, pids] of owned) {
+    byRoot.set(root, dedupeListeningPorts(ports.filter((entry) => pids.has(entry.pid))));
+  }
+  return byRoot;
+}
+
+module.exports.getOpenPortsForPids = getOpenPortsForPids;
 
 /** Directory validation belongs to context(); this only launches the native UI. */
 function openNativeDirectory(nativePath, done, runtime = {}) {
@@ -1410,6 +1443,30 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
     send('openPorts', { id, ports: p ? getOpenPortsForPid(p.pid) : [], requestId });
   }
 
+  /** One answer for every id a listing asks about, so N terminals cost one
+   *  process scan rather than N (`docs/specs/dor-cli.md` -> "Current Implemented
+   *  Commands"). An id with no live PTY answers `[]`, exactly as `getOpenPorts`
+   *  does. */
+  function getOpenPortsMany(ids, requestId) {
+    const targets = Array.isArray(ids) ? ids : [];
+    const ports = {};
+    const idsByPid = new Map();
+    for (const id of targets) {
+      ports[id] = [];
+      const p = ptys.get(id);
+      if (!p) continue;
+      const sharing = idsByPid.get(p.pid);
+      if (sharing) sharing.push(id);
+      else idsByPid.set(p.pid, [id]);
+    }
+    const resolved = getOpenPortsForPids([...idsByPid.keys()]);
+    for (const [pid, sharing] of idsByPid) {
+      const found = resolved.get(pid) ?? [];
+      for (const id of sharing) ports[id] = found;
+    }
+    send('openPortsMany', { ports, requestId });
+  }
+
   // Send ONE ^C to the given PTYs (all live ones when `ids` is omitted), so an
   // agent prints its resume invocation before the host tears the process down
   // (docs/specs/vscode.md -> "Capturing agent recovery"). Writes ^C into
@@ -1481,6 +1538,6 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
   }
 
   return { spawn, write, resize, hasPty, kill, killAll, list, context,
-    getCwd, getCwds, getOpenPorts, interrupt, gracefulKill, getShells,
+    getCwd, getCwds, getOpenPorts, getOpenPortsMany, interrupt, gracefulKill, getShells,
     liveIds, receivedChars, outputSince };
 };

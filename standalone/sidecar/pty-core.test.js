@@ -24,6 +24,7 @@ const {
   getDescendantPids,
   getListeningPortsForPids,
   getOpenPortsForPid,
+  getOpenPortsForPids,
 } = require('./pty-core');
 
 test('resolveSpawnConfig uses POSIX shell and home defaults', () => {
@@ -1481,6 +1482,49 @@ test('getOpenPortsForPid de-duplicates and sorts by port', () => {
 
 test('getOpenPortsForPid returns [] for a non-integer pid', () => {
   assert.deepEqual(getOpenPortsForPid(undefined, { platform: 'linux' }), []);
+});
+
+test('getOpenPortsForPids answers per root pid from ONE process table and ONE socket scan', () => {
+  // Two terminals, each with a child serving a port. A listing that spans them
+  // must not pay for a `ps` + `lsof` pair per terminal.
+  const spawns = [];
+  const execFileSync = (cmd, args) => {
+    spawns.push(cmd);
+    if (cmd === 'ps') return '100 1\n200 100\n300 1\n400 300\n';
+    if (cmd === 'lsof') {
+      assert.ok(args.includes('100,200,300,400'), `one scan over every descendant: ${args.join(' ')}`);
+      return [
+        'p200', 'cnode', 'tIPv4', 'n*:3000',
+        'p400', 'cnode', 'tIPv4', 'n*:5173',
+      ].join('\n');
+    }
+    throw new Error(`unexpected spawn: ${cmd}`);
+  };
+
+  const ports = getOpenPortsForPids([100, 300], { platform: 'darwin', execFileSync });
+
+  assert.deepEqual(spawns, ['ps', 'lsof']);
+  // Each root owns only what its own descendants opened.
+  assert.deepEqual(ports.get(100).map((p) => p.port), [3000]);
+  assert.deepEqual(ports.get(300).map((p) => p.port), [5173]);
+});
+
+test('getOpenPortsMany answers a key for every requested id, [] for one with no PTY', () => {
+  const events = [];
+  const mgr = create((event, data) => events.push({ event, data }), {
+    spawn() {
+      return { pid: 999_002, onData() {}, onExit() {}, resize() {}, write() {}, kill() {} };
+    },
+  }, { replay: true });
+  mgr.spawn('pane-a');
+
+  mgr.getOpenPortsMany(['pane-a', 'pane-gone'], 'req-2');
+
+  const answer = events.find((e) => e.event === 'openPortsMany');
+  assert.equal(answer.data.requestId, 'req-2');
+  assert.deepEqual(Object.keys(answer.data.ports).sort(), ['pane-a', 'pane-gone']);
+  // A pane with no live PTY is never scanned for.
+  assert.deepEqual(answer.data.ports['pane-gone'], []);
 });
 
 // The clamping arithmetic itself lives in lib/src/host/replay-buffer.ts and is

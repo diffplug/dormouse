@@ -20,8 +20,9 @@ import {
 } from '../../lib/workspace-store';
 import { getWorkspaceSurfacesSnapshot } from '../../lib/workspace-surfaces';
 import { computeWorkspaceUnion } from '../../lib/workspace-union';
-import { errorText, stringParam } from './dor-control-shared';
-import { getWallHandle, type WallHandle } from './wall-handles';
+import { awaitWallHandle, errorText, mountingRefusal, stringParam } from './dor-control-shared';
+import { attachSurfacePorts } from './surface-ports';
+import type { WallHandle } from './wall-handles';
 import { closeWorkspaceWithSurfaces, workspaceNeedsCloseConfirmation } from './workspace-lifecycle';
 import type { DorControlParams, DorControlRequest } from './use-dor-control';
 
@@ -46,10 +47,10 @@ export function workspaceRows(): WorkspaceRow[] {
   const { workspaces, activeId } = getWorkspacesSnapshot();
   const membership = getWorkspaceSurfacesSnapshot();
   const activity = getActivitySnapshot();
-  return workspaces.map((workspace, index) => {
+  return workspaces.map((workspace) => {
     const union = computeWorkspaceUnion(membership.get(workspace.id) ?? [], activity);
     return {
-      ref: `workspace:${index + 1}`,
+      ref: workspaceRefFor(workspace.id),
       id: workspace.id,
       name: workspace.name,
       active: workspace.id === activeId,
@@ -90,35 +91,50 @@ function askWall(
 /**
  * `dor list --all`: every Workspace's Surfaces in one answer, each row tagged
  * with the Workspace it came from and the directory of Workspaces beside them.
- * **A Workspace that fails to list fails the whole call** rather than dropping
- * out of the answer, which would read as a Workspace holding nothing.
+ * **A Workspace that cannot answer fails the whole call** — a Wall that never
+ * registers included, after the router's own registration-gap wait — rather than
+ * dropping out of the answer, which would read as a Workspace holding nothing.
  */
 export async function listAllWorkspaceSurfaces(detail: DorControlRequest): Promise<void> {
   const params: WindowControlParams = detail.params ?? {};
   const rows = workspaceRows();
-  // Asked in parallel, assembled in strip order: a Workspace whose Wall is not
-  // mounted contributes nothing, which is the tick between `createWorkspace`
-  // and the Wall registering.
+  const includePorts = params.includePorts === true;
+  // Asked in parallel, assembled in strip order. The port scan is **not**
+  // forwarded: a Wall would scan its own terminals, so N Workspaces would cost N
+  // process scans; this listing runs one for all of them below.
   const answers = await Promise.all(rows.map(async (row) => {
-    const handle = getWallHandle(row.id as WorkspaceId);
-    return { row, answer: handle ? await askWall(handle, detail, { ...params, workspace: undefined }) : null };
+    const handle = await awaitWallHandle(row.id as WorkspaceId);
+    return {
+      row,
+      answer: handle
+        ? await askWall(handle, detail, { ...params, workspace: undefined, includePorts: false })
+        : null,
+    };
   }));
 
   const surfaces: GroupedSurface[] = [];
   for (const { row, answer } of answers) {
-    if (!answer) continue;
+    if (!answer) {
+      detail.respond({ ok: false, error: mountingRefusal(row.ref) });
+      return;
+    }
     if (!answer.ok) {
       detail.respond({ ok: false, error: `${row.ref}: ${answer.error ?? 'listing failed'}` });
       return;
     }
     const listed = answer.result as ListSurfacesResponse;
-    for (const surface of listed.surfaces) surfaces.push({ ...surface, workspaceRef: row.ref });
+    for (const surface of listed.surfaces) {
+      // Each Wall marks its own selection focused, but the Window has one focus:
+      // a row of an inactive Workspace is not it (`docs/specs/dor-cli.md` →
+      // "Current Implemented Commands").
+      surfaces.push({ ...surface, workspaceRef: row.ref, focused: surface.focused && row.active });
+    }
   }
 
   detail.respond({
     ok: true,
     result: {
-      surfaces,
+      surfaces: includePorts ? await attachSurfacePorts(surfaces) : surfaces,
       workspaces: rows,
       workspaceRef: (rows.find((row) => row.active) ?? rows[0]).ref,
       windowRef: currentWindowRef(),
@@ -206,6 +222,14 @@ export async function handleWorkspaceControl(detail: DorControlRequest): Promise
     case WORKSPACE_CONTROL_METHODS.close: {
       const target = requireWorkspace(detail);
       if (!target) return;
+      // A close is answered only once the Workspace's Wall is there to answer
+      // for it: the Wall is what knows the member Surfaces, so closing past a
+      // missing one would drop the Workspace with its Sessions still running
+      // (`docs/specs/glossary.md` → "Invariants" I4).
+      if (!await awaitWallHandle(target.id)) {
+        detail.respond({ ok: false, error: mountingRefusal(target.ref) });
+        return;
+      }
       // Like `dor kill`, a command close raises no prompt: it refuses instead,
       // and `--force` is the caller's answer to the confirmation the strip would
       // have shown (`docs/specs/dor-cli.md` → "dor workspace").

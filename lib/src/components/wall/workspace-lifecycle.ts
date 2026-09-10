@@ -20,10 +20,11 @@ export function workspaceNeedsCloseConfirmation(id: WorkspaceId): boolean {
   return !!handle && (handle.hasTouchedSurfaces() || handle.runningCount() > 0);
 }
 
-/** The two ways a close is turned down before it starts. Both leave every
+/** The three ways a close is turned down before it starts. All leave every
  *  Surface where it was. */
 export const LAST_WORKSPACE_REFUSAL = 'the last Workspace cannot be closed';
 const CLOSE_IN_FLIGHT_REFUSAL = 'another Workspace is closing';
+export const NO_WALL_REFUSAL = 'the workspace is still mounting';
 
 /** One close at a time, for the whole Window. Two closes overlapping would each
  *  see the other's Workspace in the count, empty both Walls, and leave the
@@ -33,12 +34,20 @@ let closeInFlight = false;
 /**
  * Close every member Surface through the closure coordinator, then drop the
  * Workspace itself. Resolves the first refusal's message with the Workspace left
- * as it was — revealed, so the prompt behind the refusal is on screen — or null
- * once it is gone. Membership is cleared by the Wall's own unmount.
+ * as it was, or null once it is gone. Membership is cleared by the Wall's own
+ * unmount.
  *
  * `mode` is the closure mode each member Surface is closed with: `prompt` for a
  * user gesture, `silent` for `dor workspace close`, whose caller is a command
  * rather than someone looking at the Wall (`docs/specs/notepad.md` → "Closure").
+ * **A refusal reveals the Workspace only in `prompt` mode** — there is a prompt
+ * behind it to show; a silent caller gets the message and the user is left where
+ * they were.
+ *
+ * **A Workspace whose Wall is not registered is refused**, never closed: the
+ * Wall is what walks the member Surfaces, so dropping the Workspace without one
+ * would leave its Sessions running with nothing holding them
+ * (`docs/specs/glossary.md` → "Invariants" I4).
  */
 export async function closeWorkspaceWithSurfaces(
   id: WorkspaceId,
@@ -50,20 +59,21 @@ export async function closeWorkspaceWithSurfaces(
   // `closeWorkspace` the store then refuses would leave the Window's one
   // Workspace with nothing in it.
   if (getWorkspacesSnapshot().workspaces.length <= 1) return LAST_WORKSPACE_REFUSAL;
-  closeInFlight = true;
   const handle = getWallHandle(id);
+  if (!handle) return NO_WALL_REFUSAL;
+  closeInFlight = true;
+  /** Put the user in front of the prompt a refusal left behind — and only then. */
+  const revealForPrompt = () => { if (mode === 'prompt') setActiveWorkspace(id); };
   try {
-    if (handle) {
-      const refusal = await handle.closeAll(mode);
-      if (refusal) {
-        setActiveWorkspace(id);
-        return refusal;
-      }
+    const refusal = await handle.closeAll(mode);
+    if (refusal) {
+      revealForPrompt();
+      return refusal;
     }
     if (!closeWorkspace(id)) {
       // The Wall is empty and stays mounted, so hand it back its auto-spawn.
-      handle?.cancelClose();
-      setActiveWorkspace(id);
+      handle.cancelClose();
+      revealForPrompt();
       return LAST_WORKSPACE_REFUSAL;
     }
     forgetWorkspaceSession(id);

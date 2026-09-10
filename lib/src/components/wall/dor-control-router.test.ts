@@ -228,6 +228,36 @@ describe('dor control routing', () => {
     }
   });
 
+  it('waits out the same gap for an explicit --workspace, then says it is still mounting', async () => {
+    vi.useFakeTimers();
+    try {
+      handleFor(getWorkspacesSnapshot().workspaces[0].id, ['pane-a']);
+      const release = installDorControlRouter();
+
+      // `dor workspace new build && dor split --workspace build`: the Workspace
+      // is in the store, its Wall is one effect away.
+      createWorkspace({ id: 'ws-2', name: 'build', activate: false });
+      const detail = request({ surfaceId: 'pane-a', params: { workspace: 'build' } });
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail }));
+      expect(detail.respond).not.toHaveBeenCalled();
+      const target = handleFor('ws-2');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(target.handleDorControl).toHaveBeenCalledTimes(1);
+      expect(detail.respond).not.toHaveBeenCalled();
+
+      // One that never registers is answered — not left as "no such Workspace",
+      // which it is not, and not left unanswered, which blocks the caller.
+      createWorkspace({ id: 'ws-3', name: 'agents', activate: false });
+      const never = request({ params: { workspace: 'agents' } });
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: never }));
+      await vi.advanceTimersByTimeAsync(10);
+      expect(never.respond).toHaveBeenCalledWith({ ok: false, error: "workspace 'agents' is still mounting" });
+      release();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('gives up after a bounded number of retries when nothing ever mounts', async () => {
     vi.useFakeTimers();
     try {

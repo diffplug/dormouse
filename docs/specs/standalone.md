@@ -632,7 +632,7 @@ into fresh shells at its saved cwds.
   window opened after the first one closed would write a blob naming a Workspace
   id already live in another window's blob, and the next launch would meet the
   same id twice and refuse the whole restore. A bare Wall — one Window's whole
-  application — keeps the default id (`window-restore.test.ts`).
+  application — keeps the default id (`standalone/src/window-restore.test.ts`).
 
 Source of truth: `restoreWindowOrFresh` / `routeUnownedPtys` in
 `standalone/src/window-restore.ts`.
@@ -642,6 +642,12 @@ fans out to every Wall at once, so both adapters put their cwd probe behind
 `coalesceCwds` (`standalone/src/coalesce-cwds.ts`), which folds the calls arriving
 in one microtask into a single invoke — the same batching `getCwdsForPids` already
 does one layer down, extended across the callers.
+
+**A listing that spans terminals costs one `pty_get_open_ports_many`.** Both
+adapters carry it, and the sidecar answers every id from one process-table read
+and one socket scan (`getOpenPortsForPids`) — the scans are synchronous on its
+only event loop, so a `dor list --ports` across Workspaces must not multiply them
+by its row count (`docs/specs/dor-cli.md` → "Current Implemented Commands").
 
 **Nothing is deleted at boot but orphaned session temp files**
 (`docs/specs/transport.md` → "Retiring the transcripts already on disk"). **The

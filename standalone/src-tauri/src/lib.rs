@@ -1081,6 +1081,27 @@ fn pty_get_open_ports(
         .unwrap_or_else(|| JsonValue::Array(Vec::new())))
 }
 
+/// Every id's listening ports in one sidecar round trip, for a listing that spans
+/// terminals (`dor list --ports`, and `--all` across every Workspace). The
+/// sidecar resolves them with synchronous process scans on its only event loop,
+/// so N terminals must cost one scan rather than N.
+#[tauri::command(async)]
+fn pty_get_open_ports_many(
+    state: tauri::State<'_, SidecarState>,
+    ids: Vec<String>,
+) -> Result<JsonValue, String> {
+    let response = request_from_sidecar_timeout(
+        &state,
+        "pty:getOpenPortsMany",
+        serde_json::json!({ "ids": ids }),
+        Duration::from_millis(OPEN_PORT_TIMEOUT_MS),
+    )?;
+    Ok(response
+        .get("ports")
+        .cloned()
+        .unwrap_or_else(|| JsonValue::Object(JsonMap::new())))
+}
+
 // Wait for PTY exits and their final output before this window goes away.
 // Async: waits up to `timeout + 1500ms` (margin for the round trip beyond the
 // sidecar's own kill timer) and must not block the main thread for that long.
@@ -3501,6 +3522,7 @@ pub fn run() {
             pty_get_cwds,
             pty_context,
             pty_get_open_ports,
+            pty_get_open_ports_many,
             pty_graceful_kill,
             capture_agent_recovery,
             take_recovery_commands,

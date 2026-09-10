@@ -298,6 +298,15 @@ export interface PlatformAdapter {
   getCwds?(ids: string[]): Promise<Record<string, string | null>>;
   /** TCP listening ports opened by this terminal's process tree (shell + descendants). */
   getOpenPorts(id: string): Promise<OpenPort[]>;
+  /**
+   * One answer per id, for a whole listing at once (`dor list --ports`, and
+   * `--all` across every Workspace). Present where a host can resolve many in
+   * one scan, for the reason `getCwds` is: standalone walks the process table
+   * and the socket table synchronously on the sidecar's only event loop, so N
+   * terminals must cost one pass rather than N. Absent falls back to
+   * `getOpenPorts` per id.
+   */
+  getOpenPortsMany?(ids: string[]): Promise<Record<string, OpenPort[]>>;
 
   // Clipboard support for file references and raw images.
   readClipboardFilePaths(): Promise<string[] | null>;

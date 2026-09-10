@@ -329,18 +329,32 @@ export interface ResolveOpenTargetResponse {
   port: number;
 }
 
-export interface ResolveAgentBrowserSessionRequest extends WorkspaceScopedRequest {
-  /** A Surface handle (surface:N, surface:<stable-id>, surface:self,
-   *  surface:focused, title:<title>) naming the browser Surface to drive. */
-  surface: string;
-}
+/** The two ways `dor ab` asks the host to name a session: a Surface handle whose
+ *  bound session it wants, or a managed `--key`, whose session name is the
+ *  answering Workspace's (`docs/specs/dor-browser.md` → Managed identity). Never
+ *  both — a key names no Surface, and a Surface's session was minted long ago. */
+export type ResolveAgentBrowserSessionRequest = WorkspaceScopedRequest & (
+  | {
+    /** A Surface handle (surface:N, surface:<stable-id>, surface:self,
+     *  surface:focused, title:<title>) naming the browser Surface to drive. */
+    surface: string;
+    key?: undefined;
+  }
+  | {
+    /** A managed browser key (`dor ab --key`), which only the answering
+     *  Workspace can namespace. */
+    key: string;
+    surface?: undefined;
+  }
+);
 
 export interface ResolveAgentBrowserSessionResponse {
-  surfaceId: string;
-  surfaceRef: string;
-  /** The agent-browser session bound to that Surface — what `dor ab --surface`
-   *  forwards as `--session`. Includes GUI-minted sessions, which no `--key`
-   *  can name. */
+  /** The Surface the handle named; absent when the request named a `key`, which
+   *  is answered whether or not a Surface holds that session yet. */
+  surfaceId?: string;
+  surfaceRef?: string;
+  /** The agent-browser session — what `dor ab` forwards as `--session`. Includes
+   *  GUI-minted sessions, which no `--key` can name. */
   session: string;
 }
 

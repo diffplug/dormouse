@@ -1,7 +1,12 @@
-// Workspace id baked into managed agent-browser session names. Hardcoded until
-// Dormouse exposes real workspaces; encoded now to avoid a later rename. Private:
-// callers build session names through sessionForKey, never by hand.
-const WORKSPACE_ID = '1';
+// The scope a Window with one implicit Workspace answers with: a bare Wall (VS
+// Code, the website, Pocket) has no Workspace id of its own, so its keys keep
+// the names they have always had. Private: callers build session names through
+// sessionForKey, never by hand.
+const BARE_WALL_SCOPE = '1';
+
+// A session name becomes a filesystem path (the daemon's socket dir), so the
+// scope is held to the same charset `dor ab --key` is.
+const UNSAFE_SCOPE_CHARS = /[^A-Za-z0-9._-]/g;
 
 /** Env var that overrides which agent-browser binary to run; shared so `dor ab`
  * and the host key off the same name. */
@@ -17,13 +22,19 @@ export function streamStatusArgs(session: string): string[] {
 }
 
 /**
- * Managed, workspace-scoped agent-browser session name: `dormouse.<workspaceId>.<key>`.
+ * Managed, workspace-scoped agent-browser session name:
+ * `dormouse.<workspaceId>.<key>`, and `dormouse.1.<key>` for a Window whose one
+ * Wall has no Workspace id (`workspaceId` omitted). The scope is what keeps one
+ * `--key default` per Workspace from being one shared browser
+ * (`docs/specs/dor-browser.md` → Managed identity).
+ *
  * agent-browser session names become filesystem paths (the socket dir), so `/`
  * can't separate the namespace — the daemon fails to start; dots keep it
  * readable. Shared by `dor ab` (--key resolution) and the lib host (GUI sessions).
  */
-export function sessionForKey(key: string): string {
-  return `dormouse.${WORKSPACE_ID}.${key}`;
+export function sessionForKey(key: string, workspaceId?: string): string {
+  const scope = workspaceId ? workspaceId.replace(UNSAFE_SCOPE_CHARS, '-') : BARE_WALL_SCOPE;
+  return `dormouse.${scope}.${key}`;
 }
 
 /**
