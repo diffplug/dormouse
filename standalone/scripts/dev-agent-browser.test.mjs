@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
+import { sessionForKey } from 'dor-lib-common/agent-browser';
 
 const scripts = path.dirname(fileURLToPath(import.meta.url));
 
@@ -67,11 +68,16 @@ async function fixture(t) {
         cwd: root, env: { ...env, ...overrides }, stdio: ['ignore', 'pipe', 'pipe'],
       });
       let output = '';
+      let closed = false;
       child.stdout.on('data', chunk => { output += chunk; });
       child.stderr.on('data', chunk => { output += chunk; });
       const exited = new Promise((resolve, reject) => {
         child.once('error', reject);
-        child.once('exit', (code, signal) => resolve({ code, signal }));
+        // close includes stdio EOF, so final diagnostics are available to assertions.
+        child.once('close', (code, signal) => {
+          closed = true;
+          resolve({ code, signal });
+        });
       });
       const run = {
         child, exited,
@@ -81,7 +87,7 @@ async function fixture(t) {
           while (Date.now() < deadline) {
             const match = output.match(pattern);
             if (match) return match;
-            if (child.exitCode !== null || child.signalCode !== null) break;
+            if (closed) break;
             await delay(25);
           }
           throw new Error(`Harness did not log ${pattern}:\n${output}`);
@@ -129,7 +135,10 @@ test('parallel worktrees own ports, browser identities and bridges; stopping one
   assert.equal(new Set([one.app.split(':').at(-1), two.app.split(':').at(-1), one.bridge.split(':').at(-1), two.bridge.split(':').at(-1)]).size, 4);
   assert.notEqual(one.session, two.session);
   assert.notEqual(one.token, two.token);
-  assert.deepEqual(one.args, ['ab', '--key', one.session.replace('dormouse.1.', ''), 'open', one.app]);
+  const key = one.args[2];
+  assert.match(key, /^innerdogfood-[a-f0-9]{16}$/);
+  assert.deepEqual(one.args, ['ab', '--key', key, 'open', one.app]);
+  assert.equal(one.session, sessionForKey(key));
   assert.deepEqual(two.args, ['--session', two.session, 'open', two.app]);
   for (const [run, dir, other] of [[one, a.root, two], [two, b.root, one]]) {
     const js = await (await fetch(`${run.app}/app.js`)).text();

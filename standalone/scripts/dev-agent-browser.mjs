@@ -5,6 +5,7 @@ import path from 'node:path';
 import { readFile, realpath } from 'node:fs/promises';
 import { createHash, randomBytes } from 'node:crypto';
 import { createServer } from 'vite';
+import { sessionForKey } from 'dor-lib-common/agent-browser';
 import { fileURLToPath } from 'node:url';
 // cross-spawn, not node:child_process: this script spawns `dor` and
 // `agent-browser`, which are `.cmd` shims on Windows that a bare-name spawn
@@ -25,9 +26,9 @@ const dorBinDir = path.join(sidecarDir, 'dor-cli', 'bin');
 const dorEntrypoint = path.join(sidecarDir, 'dor-cli', 'dist', 'dor.js');
 // Bind port 0 directly: probing and then releasing a free port races other runs.
 let hostPort = Number(process.env.DORMOUSE_BROWSER_DEV_HOST_PORT || 0);
-const vitePort = Number(process.env.DORMOUSE_BROWSER_DEV_VITE_PORT || 0);
+const requestedVitePort = Number(process.env.DORMOUSE_BROWSER_DEV_VITE_PORT || 0);
 const worktreeKey = `innerdogfood-${createHash('sha256').update(await realpath(repoRoot)).digest('hex').slice(0, 16)}`;
-const browserSession = process.env.DORMOUSE_BROWSER_DEV_AB_SESSION || `dormouse.1.${worktreeKey}`;
+const browserSession = process.env.DORMOUSE_BROWSER_DEV_AB_SESSION || sessionForKey(worktreeKey);
 const insideDormouse = Boolean(process.env.DORMOUSE_SURFACE_ID);
 // Only the token: the sidecar picks the control socket path itself (hardened
 // per-user directory on POSIX, unguessable pipe name on Windows) and reports it
@@ -292,7 +293,7 @@ async function startVite() {
       'import.meta.env.VITE_DORMOUSE_BROWSER_DEV_HOST': JSON.stringify(`http://127.0.0.1:${hostPort}/?t=${bridgeToken}`),
     },
     server: {
-      host: '127.0.0.1', port: vitePort, strictPort: true,
+      host: '127.0.0.1', port: requestedVitePort, strictPort: true,
       // Share Vite's listener, including when TAURI_DEV_HOST is inherited.
       hmr: { host: 'localhost', port: 0, protocol: 'ws' },
     },
