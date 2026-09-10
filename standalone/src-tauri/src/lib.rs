@@ -97,12 +97,13 @@ struct WindowState {
     suppressed: AtomicUsize,
     /// Window labels, most recently focused first.
     focus_order: Mutex<Vec<String>>,
-    /// Workspaces on their way into each window, drained by `take_arrivals`.
-    /// Pulled, never pushed (`routing::ArrivalQueues`).
-    arrivals: Mutex<routing::ArrivalQueues>,
-    /// Which window each queued arrival left, so the source is told of the
-    /// departure only once the target has actually taken it.
-    departures: Mutex<Vec<Departure>>,
+    /// Every Workspace in flight, from the source's invoke until its target
+    /// adopts it or dies (`routing::Arrival`). Pulled, never pushed.
+    ///
+    /// **Never take this lock while holding `routing`.** `dispatch_sidecar_event`
+    /// reads it before it takes `routing`, so the two are only ever acquired in
+    /// that order.
+    arrivals: Mutex<routing::Arrivals>,
     /// The window currently showing a cross-window drop caret, so the previous
     /// one can be told to clear it.
     hover_target: Mutex<Option<String>>,
@@ -112,19 +113,6 @@ struct WindowState {
     closing: Mutex<HashSet<String>>,
     /// The next `ws-<n>`, seeded above every live and saved label at setup.
     next_ws: AtomicU64,
-}
-
-/// One Workspace that has left `from` and is waiting for `to` to adopt it.
-///
-/// **The source is told only once the target has asked for the arrival**: a
-/// departure announced at the invoke would drop the tab in a window that may be
-/// the only place the Workspace still exists (docs/specs/standalone.md ->
-/// "Arrival queue").
-#[derive(Clone)]
-struct Departure {
-    from: String,
-    to: String,
-    workspace_id: JsonValue,
 }
 
 impl RoutingState {
@@ -169,8 +157,8 @@ impl WindowState {
 
     /// Hand `ids` to `label`. `suppress` holds their output until each one's
     /// replay has been emitted to it (docs/specs/standalone.md §Transfer);
-    /// without it the ids go straight back into service, which is how a failed
-    /// tear-out returns them to the window that still has them.
+    /// without it the ids go straight back into service, which is how a refused
+    /// arrival returns them to the window that still has them.
     fn reassign(&self, ids: &[String], label: &str, suppress: bool) {
         let mut routing = guard(&self.routing);
         let now = Instant::now();
@@ -195,11 +183,34 @@ impl WindowState {
             .store(routing.awaiting_replay.len(), Ordering::Relaxed);
     }
 
-    /// Forget a window: its ownership, its outstanding `dor` requests, its focus
-    /// entry, and any boot payload it never pulled. Returns the ids it owned.
-    fn drop_window(&self, label: &str) -> Vec<String> {
+    /// Drop any suppression on `ids`, leaving ownership alone. What settles an
+    /// adopted arrival: each replay lifted its own on the way out, and this is
+    /// the defensive clear for an id whose replay never came because the shell
+    /// exited mid-transfer.
+    fn clear_suppression(&self, ids: &[String]) {
+        let mut routing = guard(&self.routing);
+        for id in ids {
+            routing.awaiting_replay.remove(id);
+        }
+        self.suppressed
+            .store(routing.awaiting_replay.len(), Ordering::Relaxed);
+    }
+
+    /// Forget a window: its ownership, its outstanding `dor` requests and its
+    /// focus entry. Returns the arrivals it can no longer take — **whose shells
+    /// are deliberately not in the second half** — and the ids it owned outright,
+    /// which the caller reaps.
+    fn drop_window(&self, label: &str) -> (Vec<routing::Arrival>, Vec<String>) {
+        // Taken first, and their ids dropped from `owners` before `owned_by`
+        // reads it: an arriving shell belongs to its source again, and reaping
+        // it here would kill a terminal the source is still showing.
+        let lost = routing::take_arrivals_to(&mut guard(&self.arrivals), label);
         let owned = {
             let mut routing = guard(&self.routing);
+            for id in lost.iter().flat_map(|arrival| &arrival.terminal_ids) {
+                routing.owners.remove(id);
+                routing.awaiting_replay.remove(id);
+            }
             let owned = routing.owned_by(label);
             for id in &owned {
                 routing.owners.remove(id);
@@ -207,14 +218,12 @@ impl WindowState {
             // Its answers can never arrive, so neither can the cancels that
             // would have retired them.
             routing.dor_targets.retain(|_, target| target != label);
+            self.suppressed
+                .store(routing.awaiting_replay.len(), Ordering::Relaxed);
             owned
         };
         guard(&self.focus_order).retain(|entry| entry != label);
-        routing::take_arrivals(&mut guard(&self.arrivals), label);
-        // A Workspace on its way here can never arrive, so its source keeps it
-        // rather than being told of a departure that did not happen.
-        guard(&self.departures).retain(|departure| departure.to != label);
-        owned
+        (lost, owned)
     }
 
     fn touch_focus(&self, label: &str) {
@@ -256,12 +265,21 @@ fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
 
     let mut released: Vec<String> = Vec::new();
     let delivery = {
+        // Before the routing lock, never inside it (§`arrivals`). Nothing is
+        // transferring in the steady state, so this second acquisition is paid
+        // only while something is.
+        let arriving = if state.suppressed.load(Ordering::Relaxed) > 0 {
+            routing::arrival_ids(&guard(&state.arrivals))
+        } else {
+            HashSet::new()
+        };
         let mut routing = guard(&state.routing);
         if state.suppressed.load(Ordering::Relaxed) > 0 {
             released = routing::sweep_awaiting(
                 &mut routing.awaiting_replay,
                 Instant::now(),
                 routing::AWAITING_REPLAY_MAX,
+                &arriving,
             );
             if !released.is_empty() {
                 state
@@ -388,7 +406,7 @@ fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
     // next PTY chunk's routing decision.
     for id in released {
         append_log(format!(
-            "[window] transfer suppression for {id} expired; releasing"
+            "[window] suppression for {id} expired with no arrival claiming it; releasing"
         ));
     }
 }
@@ -925,6 +943,12 @@ fn pty_kill(state: tauri::State<'_, SidecarState>, windows: tauri::State<'_, Win
 /// the `pty:list` and every `pty:replay` behind it route back to the asker
 /// alone (docs/specs/standalone.md §Windows).
 ///
+/// **Excludes every id an in-flight arrival claims.** Ownership moves the
+/// instant the source invokes, so a window booting with a Workspace already
+/// queued for it would otherwise list those shells here and place them as
+/// top-level panes — beside the Workspace the arrival is about to mount them
+/// into. They come through `adopt_ready`, and only there.
+///
 /// `request_id` is the asking collector's own token, echoed on the answer:
 /// one window can have two collections outstanding (a boot and an arrival), and
 /// neither may finish on the other's list (docs/specs/transport.md §Reconnection).
@@ -935,11 +959,15 @@ fn pty_request_init(
     windows: tauri::State<'_, WindowState>,
     request_id: Option<String>,
 ) {
+    let ids = routing::boot_list_ids(
+        windows.owned_by(window.label()),
+        &guard(&windows.arrivals),
+    );
     let msg = serde_json::json!({
         "event": "pty:requestInit",
         "data": {
             "forWindow": window.label(),
-            "ids": windows.owned_by(window.label()),
+            "ids": ids,
             "requestId": request_id,
         },
     });
@@ -2293,36 +2321,6 @@ fn next_window_label(windows: &WindowState) -> String {
     )
 }
 
-/// Record that a Workspace has left `from` for `to`. Announced to the source
-/// only when the target actually takes the arrival (`adopt_ready`).
-fn note_departure(windows: &WindowState, from: &str, to: &str, payload: &JsonValue) {
-    guard(&windows.departures).push(Departure {
-        from: from.to_string(),
-        to: to.to_string(),
-        workspace_id: payload
-            .get("workspaceId")
-            .cloned()
-            .unwrap_or(JsonValue::Null),
-    });
-}
-
-/// Tell every window that has lost a Workspace to `to` that it is gone.
-fn announce_departures(app: &AppHandle, windows: &WindowState, to: &str) {
-    let mine: Vec<Departure> = {
-        let mut pending = guard(&windows.departures);
-        let (mine, rest) = pending.drain(..).partition(|entry| entry.to == to);
-        *pending = rest;
-        mine
-    };
-    for departure in mine {
-        let _ = app.emit_to(
-            departure.from.as_str(),
-            "dormouse://workspace-departed",
-            serde_json::json!({ "workspaceId": departure.workspace_id }),
-        );
-    }
-}
-
 fn payload_terminal_ids(payload: &JsonValue) -> Vec<String> {
     payload
         .get("terminalIds")
@@ -2333,6 +2331,75 @@ fn payload_terminal_ids(payload: &JsonValue) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// The record one drop becomes.
+fn arrival_from(from: &str, to: &str, payload: JsonValue) -> Result<routing::Arrival, String> {
+    let workspace_id = payload
+        .get("workspaceId")
+        .and_then(JsonValue::as_str)
+        .ok_or_else(|| "a transfer payload must name its workspaceId".to_string())?
+        .to_string();
+    let terminal_ids = payload_terminal_ids(&payload);
+    Ok(routing::Arrival {
+        workspace_id,
+        from: from.to_string(),
+        to: to.to_string(),
+        terminal_ids,
+        payload,
+    })
+}
+
+/// Open one arrival: reassign its shells to the target and suppress them, then
+/// queue the record. **Ownership moves synchronously here**, before either
+/// window is told anything — the single Rust reader thread processes sidecar
+/// lines in order, so every byte after this point is either dropped (and present
+/// in the replay the target is about to get) or delivered to the target
+/// (docs/specs/standalone.md §Transfer).
+fn begin_arrival(windows: &WindowState, arrival: routing::Arrival) -> Result<(), String> {
+    let mut arrivals = guard(&windows.arrivals);
+    if routing::has_arrival(&arrivals, &arrival.workspace_id) {
+        return Err(format!(
+            "Workspace '{}' is already in flight",
+            arrival.workspace_id
+        ));
+    }
+    windows.reassign(&arrival.terminal_ids, &arrival.to, true);
+    routing::queue_arrival(&mut arrivals, arrival);
+    Ok(())
+}
+
+/// One arrival will never be adopted: give its shells back to the source,
+/// unsuppressed, and tell the source so it clears the Workspace's transferring
+/// mark. **The Workspace simply stays where it is** — nothing was released, so
+/// there is nothing to put back.
+///
+/// The record must already be out of the queue; the caller took it.
+fn hand_back_arrival(
+    app: &AppHandle,
+    windows: &WindowState,
+    arrival: &routing::Arrival,
+    reason: &str,
+) {
+    append_log(format!(
+        "[window] {} never arrived in {} ({reason}); handing it back to {}",
+        arrival.workspace_id, arrival.to, arrival.from
+    ));
+    if app.get_webview_window(&arrival.from).is_some() {
+        windows.reassign(&arrival.terminal_ids, &arrival.from, false);
+        let _ = app.emit_to(
+            arrival.from.as_str(),
+            "dormouse://workspace-arrival-failed",
+            serde_json::json!({ "workspaceId": arrival.workspace_id, "reason": reason }),
+        );
+        return;
+    }
+    // Both ends are gone, so these shells belong to no window and nothing would
+    // ever paint them (`routing::owner`).
+    for id in &arrival.terminal_ids {
+        windows.forget_pty(id);
+    }
+    reap_orphaned_ptys(app, &arrival.from, arrival.terminal_ids.clone());
 }
 
 /// Tear a Workspace out into a brand-new window under the cursor.
@@ -2348,10 +2415,6 @@ fn open_workspace_window(
     payload: JsonValue,
 ) -> Result<String, String> {
     let label = next_window_label(&windows);
-    let terminal_ids = payload_terminal_ids(&payload);
-    // Ownership moves before the window exists, so every byte from this instant
-    // is suppressed rather than painted in the window losing the Workspace.
-    windows.reassign(&terminal_ids, &label, true);
     // Positioned so the dragged tab lands under the cursor, at the source
     // window's size. Only Rust knows where the cursor is on screen, so the
     // webview sends the offset the tab should keep inside the new window.
@@ -2375,16 +2438,22 @@ fn open_workspace_window(
             _ => None,
         }
     };
-    append_log(format!("[window] tearing out into {label}"));
-    routing::queue_arrival(&mut guard(&windows.arrivals), &label, payload.clone());
-    note_departure(&windows, window.label(), &label, &payload);
+    let arrival = arrival_from(window.label(), &label, payload)?;
+    // The one thing needed after the record is queued, so the payload itself is
+    // moved rather than cloned.
+    let workspace_id = arrival.workspace_id.clone();
+    append_log(format!("[window] tearing {workspace_id} out into {label}"));
+    begin_arrival(&windows, arrival)?;
     if let Err(err) = build_window(&app, &label, geometry) {
         // Nothing will ever drain the queue, and the PTYs would stay suppressed
-        // and ownerless: hand them straight back, unsuppressed, and keep the
-        // Workspace where it still is.
-        routing::take_arrivals(&mut guard(&windows.arrivals), &label);
-        guard(&windows.departures).retain(|departure| departure.to != label);
-        windows.reassign(&terminal_ids, window.label(), false);
+        // and ownerless. The source is waiting on this `Err` and has released
+        // nothing, so the ids go back in silence — no `arrival-failed`, which
+        // would clear a transferring mark that was never set.
+        if let Some(arrival) =
+            routing::take_arrival(&mut guard(&windows.arrivals), &workspace_id, &label)
+        {
+            windows.reassign(&arrival.terminal_ids, &arrival.from, false);
+        }
         return Err(err);
     }
     send_window_labels(&app);
@@ -2392,12 +2461,6 @@ fn open_workspace_window(
 }
 
 /// Move a Workspace into a window that already exists.
-///
-/// Ownership and the output suppression move synchronously here, before either
-/// window is told anything: the single Rust reader thread processes sidecar
-/// lines in order, so every byte after this point is either dropped (and
-/// present in the replay the target is about to get) or delivered to the target
-/// (docs/specs/standalone.md §Transfer).
 #[tauri::command]
 fn transfer_workspace(
     app: AppHandle,
@@ -2412,16 +2475,16 @@ fn transfer_workspace(
     if to == window.label() {
         return Err("a Workspace cannot be transferred to its own window".to_string());
     }
+    let arrival = arrival_from(window.label(), &to, payload)?;
     append_log(format!(
-        "[window] transferring a Workspace from {} to {to}",
+        "[window] transferring {} from {} to {to}",
+        arrival.workspace_id,
         window.label()
     ));
-    windows.reassign(&payload_terminal_ids(&payload), &to, true);
     // Queued, not emitted: the target may be booting, or torn out moments ago,
     // and have no listener yet — and it is a legal drop target either way
     // (docs/specs/standalone.md §Arrival queue).
-    routing::queue_arrival(&mut guard(&windows.arrivals), &to, payload.clone());
-    note_departure(&windows, window.label(), &to, &payload);
+    begin_arrival(&windows, arrival)?;
     // Forward before the content lands: the user dropped here, so this is the
     // window they are now looking at, and a background webview may be throttled
     // out of answering `adopt_ready` promptly.
@@ -2434,45 +2497,107 @@ fn transfer_workspace(
     Ok(())
 }
 
-/// The target has armed its collector; ask the sidecar to list and replay every
-/// PTY still suppressed for it. This hop is what removes the whole
-/// "arrived before armed" bug class.
+/// The target has armed its collector for one arrival; ask the sidecar to list
+/// and replay **exactly that arrival's** PTYs. This hop is what removes the
+/// whole "arrived before armed" bug class.
 ///
-/// **Always answers**, even with nothing suppressed: the collector waits on its
-/// own `pty:list`, and a Workspace of browser panes alone would otherwise sit
-/// out its whole timeout. Only now is the source told the Workspace has left it.
+/// **Never "everything suppressed for this window".** Two Workspaces can be in
+/// flight into one window at once — a tear-out with a second tab dropped on it
+/// moments later — and a window-wide answer would let each collector finish on
+/// the other's shells, resuming a Workspace over panes that belong to its
+/// neighbour.
+///
+/// **Always answers**, even with no ids at all: the collector waits on its own
+/// `pty:list`, and a Workspace of browser panes alone would otherwise sit out
+/// its whole timeout. An empty `ids` is an empty list, never everything
+/// (`list` in `standalone/sidecar/pty-core.js`).
 #[tauri::command]
 fn adopt_ready(
-    app: AppHandle,
     window: tauri::Window,
     state: tauri::State<'_, SidecarState>,
     windows: tauri::State<'_, WindowState>,
+    workspace_id: String,
     request_id: Option<String>,
-) {
+) -> Result<(), String> {
     let label = window.label();
-    // Exactly the arriving set: owned by this window and still suppressed.
-    let ids: Vec<String> = {
-        let routing = guard(&windows.routing);
-        routing
-            .awaiting_replay
-            .keys()
-            .filter(|id| routing.owners.get(*id).map(String::as_str) == Some(label))
-            .cloned()
-            .collect()
+    let ids = {
+        let arrivals = guard(&windows.arrivals);
+        let arrival = routing::find_arrival(&arrivals, &workspace_id)
+            .filter(|arrival| arrival.to == label)
+            .ok_or_else(|| format!("no arrival of '{workspace_id}' into {label}"))?;
+        arrival.terminal_ids.clone()
     };
     let msg = serde_json::json!({
         "event": "pty:requestInit",
         "data": { "forWindow": label, "ids": ids, "requestId": request_id },
     });
     send_to_sidecar(&state, msg.to_string());
-    announce_departures(&app, &windows, label);
+    Ok(())
 }
 
-/// Every Workspace queued for this window, oldest first. Draining consumes them:
-/// a reload must boot from the snapshot the window has since written.
+/// The target has mounted the Workspace. Retire the record, drop what is left of
+/// its suppression, and **only now** tell the source it may commit.
+///
+/// One Workspace, one message: a source with two Workspaces in flight into the
+/// same window must not lose both because one of them landed.
+#[tauri::command]
+fn adopt_done(
+    app: AppHandle,
+    window: tauri::Window,
+    windows: tauri::State<'_, WindowState>,
+    workspace_id: String,
+) -> Result<(), String> {
+    let arrival = routing::take_arrival(
+        &mut guard(&windows.arrivals),
+        &workspace_id,
+        window.label(),
+    )
+    .ok_or_else(|| format!("no arrival of '{workspace_id}' into {}", window.label()))?;
+    windows.clear_suppression(&arrival.terminal_ids);
+    append_log(format!(
+        "[window] {workspace_id} adopted by {}; telling {}",
+        arrival.to, arrival.from
+    ));
+    let _ = app.emit_to(
+        arrival.from.as_str(),
+        "dormouse://workspace-departed",
+        serde_json::json!({ "workspaceId": arrival.workspace_id }),
+    );
+    Ok(())
+}
+
+/// The target refused the arrival — its PTYs never answered, or the mount threw.
+#[tauri::command]
+fn adopt_failed(
+    app: AppHandle,
+    window: tauri::Window,
+    windows: tauri::State<'_, WindowState>,
+    workspace_id: String,
+    reason: Option<String>,
+) -> Result<(), String> {
+    let arrival = routing::take_arrival(
+        &mut guard(&windows.arrivals),
+        &workspace_id,
+        window.label(),
+    )
+    .ok_or_else(|| format!("no arrival of '{workspace_id}' into {}", window.label()))?;
+    hand_back_arrival(
+        &app,
+        &windows,
+        &arrival,
+        reason.as_deref().unwrap_or("the target refused it"),
+    );
+    Ok(())
+}
+
+/// Every Workspace in flight into this window, oldest first.
+///
+/// **Not consumed**: the record settles at `adopt_done`, so a webview that
+/// drains at boot and again when its listener is installed sees only what it has
+/// yet to adopt. The webview dedupes what it is already mounting.
 #[tauri::command]
 fn take_arrivals(window: tauri::Window, windows: tauri::State<'_, WindowState>) -> Vec<JsonValue> {
-    routing::take_arrivals(&mut guard(&windows.arrivals), window.label())
+    routing::arrival_payloads(&guard(&windows.arrivals), window.label())
 }
 
 /// Remove this window's persisted snapshot and stop it being written again.
@@ -3252,11 +3377,22 @@ pub fn run() {
                     if let Some(state) = app.try_state::<WindowState>() {
                         // Shells it still owned belong to nobody now, and
                         // unowned output routes nowhere.
-                        let orphaned = state.drop_window(&label);
+                        let (lost, orphaned) = state.drop_window(&label);
                         // The webview is gone, so no save can arrive under this
                         // label again and the refusal can go with it.
                         guard(&state.closing).remove(&label);
                         reap_orphaned_ptys(app, &label, orphaned);
+                        // A Workspace on its way here can never arrive: its
+                        // source still shows it, still holds its Sessions, and
+                        // has released nothing (§Arrival queue).
+                        for arrival in lost {
+                            hand_back_arrival(
+                                app,
+                                &state,
+                                &arrival,
+                                "the target window closed mid-arrival",
+                            );
+                        }
                     }
                     if let Some(state) = app.try_state::<GeometryState>() {
                         state.forget(&label);
@@ -3392,6 +3528,8 @@ pub fn run() {
             open_workspace_window,
             transfer_workspace,
             adopt_ready,
+            adopt_done,
+            adopt_failed,
             take_arrivals,
             remove_window_session,
             window_at_cursor,

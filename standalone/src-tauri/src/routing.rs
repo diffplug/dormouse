@@ -7,7 +7,7 @@
 
 use serde::Serialize;
 use serde_json::Value as JsonValue;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 /// The first window's label, fixed in `tauri.conf.json` so a snapshot written
@@ -150,31 +150,122 @@ pub fn route<'a>(event: &str, data: &'a JsonValue, view: &RouteView<'a>) -> Rout
     }
 }
 
-/// Workspaces on their way into a window, oldest first.
+/// One Workspace in flight between two windows, keyed by `workspace_id`.
+///
+/// **The record is the whole transaction.** It is created when the source
+/// invokes and lives until the target adopts the Workspace or dies, and it is
+/// what scopes the target's `pty:requestInit`, what keeps the sweep off a real
+/// arrival's suppression, what a boot list excludes, and what the hand-back on
+/// failure reads (docs/specs/standalone.md -> "Arrival queue").
 ///
 /// **Held rather than emitted**: a window that has not installed its arrival
 /// listener yet — one still booting, or one torn out moments ago — is a legal
-/// drop target, and an `emit_to` it would simply be lost. The target drains the
-/// queue when it is ready (docs/specs/standalone.md -> "Arrival queue").
-pub type ArrivalQueues = HashMap<String, Vec<JsonValue>>;
-
-pub fn queue_arrival(queues: &mut ArrivalQueues, label: &str, payload: JsonValue) {
-    queues.entry(label.to_string()).or_default().push(payload);
+/// drop target, and an `emit_to` it would simply be lost.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Arrival {
+    pub workspace_id: String,
+    /// The window that still shows the Workspace until the target adopts it.
+    pub from: String,
+    pub to: String,
+    /// Exactly the PTYs whose ownership moved, helpers included.
+    pub terminal_ids: Vec<String>,
+    /// What the target mounts the Workspace from.
+    pub payload: JsonValue,
 }
 
-/// Everything queued for `label`, removing it: an arrival is delivered once.
-pub fn take_arrivals(queues: &mut ArrivalQueues, label: &str) -> Vec<JsonValue> {
-    queues.remove(label).unwrap_or_default()
+/// Every arrival in flight, oldest first. A Vec, not a map: there are a handful
+/// at most, and both the per-window drain and the by-Workspace lookup want the
+/// order the drops happened in.
+pub type Arrivals = Vec<Arrival>;
+
+/// Whether a Workspace is already in flight. **One arrival per Workspace**: a
+/// second would silence the same ids twice and leave one record to hand back.
+pub fn has_arrival(arrivals: &Arrivals, workspace_id: &str) -> bool {
+    arrivals
+        .iter()
+        .any(|arrival| arrival.workspace_id == workspace_id)
 }
 
-/// Release every suppression older than `max`, returning what was released.
+pub fn queue_arrival(arrivals: &mut Arrivals, arrival: Arrival) {
+    arrivals.push(arrival);
+}
+
+pub fn find_arrival<'a>(arrivals: &'a Arrivals, workspace_id: &str) -> Option<&'a Arrival> {
+    arrivals
+        .iter()
+        .find(|arrival| arrival.workspace_id == workspace_id)
+}
+
+/// Settle one arrival, but **only from the window it was queued for**: a stale
+/// `adopt_done` from the source could otherwise retire a transfer the target is
+/// still resuming.
+pub fn take_arrival(arrivals: &mut Arrivals, workspace_id: &str, to: &str) -> Option<Arrival> {
+    let position = arrivals
+        .iter()
+        .position(|arrival| arrival.workspace_id == workspace_id && arrival.to == to)?;
+    Some(arrivals.remove(position))
+}
+
+/// Every arrival `label` will never take, removed: its window is gone.
+pub fn take_arrivals_to(arrivals: &mut Arrivals, label: &str) -> Vec<Arrival> {
+    let mut lost = Vec::new();
+    arrivals.retain(|arrival| {
+        if arrival.to == label {
+            lost.push(arrival.clone());
+            false
+        } else {
+            true
+        }
+    });
+    lost
+}
+
+/// What `label` mounts, oldest first. **Not consumed**: the record settles at
+/// `adopt_done`, so a webview that drains twice — at boot and again when its
+/// listener is installed — finds an arrival it has not settled yet rather than
+/// losing the Workspace to a drain that happened too early.
+pub fn arrival_payloads(arrivals: &Arrivals, label: &str) -> Vec<JsonValue> {
+    arrivals
+        .iter()
+        .filter(|arrival| arrival.to == label)
+        .map(|arrival| arrival.payload.clone())
+        .collect()
+}
+
+/// Every id an in-flight arrival claims: the ids the sweep may not release and
+/// a boot list may not place as panes.
+pub fn arrival_ids(arrivals: &Arrivals) -> HashSet<String> {
+    arrivals
+        .iter()
+        .flat_map(|arrival| arrival.terminal_ids.iter().cloned())
+        .collect()
+}
+
+/// What a window's own `pty:requestInit` may name: the ids it owns, **minus
+/// every id an arrival claims**. Ownership moves at the source's invoke, so a
+/// window booting with a Workspace already queued for it owns those shells
+/// before it has any idea what they belong to; listed here they would be placed
+/// as top-level panes beside the Workspace about to mount them.
+pub fn boot_list_ids(owned: Vec<String>, arrivals: &Arrivals) -> Vec<String> {
+    if arrivals.is_empty() {
+        return owned;
+    }
+    let arriving = arrival_ids(arrivals);
+    owned.into_iter().filter(|id| !arriving.contains(id)).collect()
+}
+
+/// Release every suppression older than `max` that **no arrival claims**,
+/// returning what was released.
 ///
-/// Fail open: a transfer whose `adopt_ready` never arrived would otherwise
-/// silence its panes for the rest of the session.
+/// Fail open, but only defensively: a suppression whose arrival record is gone
+/// is bookkeeping nothing will ever lift, while a real arrival's is lifted by
+/// its own replay — and a cold boot slow enough to outrun `max` would otherwise
+/// have its shells unsilenced into a window that has not resumed them yet.
 pub fn sweep_awaiting(
     map: &mut HashMap<String, Instant>,
     now: Instant,
     max: Duration,
+    arriving: &HashSet<String>,
 ) -> Vec<String> {
     // The steady state: nothing is transferring, so this costs one branch.
     if map.is_empty() {
@@ -182,7 +273,7 @@ pub fn sweep_awaiting(
     }
     let stale: Vec<String> = map
         .iter()
-        .filter(|(_, at)| now.duration_since(**at) >= max)
+        .filter(|(id, at)| now.duration_since(**at) >= max && !arriving.contains(*id))
         .map(|(id, _)| id.clone())
         .collect();
     for id in &stale {
@@ -476,14 +567,38 @@ mod tests {
     }
 
     #[test]
-    fn a_stale_suppression_fails_open() {
+    fn a_stale_suppression_with_no_arrival_fails_open() {
         let mut map = HashMap::new();
         let now = Instant::now();
         map.insert("old".to_string(), now - Duration::from_secs(9));
         map.insert("fresh".to_string(), now);
-        let swept = sweep_awaiting(&mut map, now, AWAITING_REPLAY_MAX);
+        let swept = sweep_awaiting(&mut map, now, AWAITING_REPLAY_MAX, &HashSet::new());
         assert_eq!(swept, vec!["old".to_string()]);
         assert!(map.contains_key("fresh"));
+    }
+
+    /// A cold boot slower than `AWAITING_REPLAY_MAX` must not have its shells
+    /// unsilenced into a window that has not resumed them yet: the fail-open is
+    /// for suppressions no arrival claims.
+    #[test]
+    fn the_sweep_never_releases_a_live_arrivals_suppression() {
+        let mut map = HashMap::new();
+        let now = Instant::now();
+        map.insert("arriving".to_string(), now - Duration::from_secs(9));
+        map.insert("orphan".to_string(), now - Duration::from_secs(9));
+        let mut arrivals = Arrivals::new();
+        queue_arrival(&mut arrivals, arrival("w1", "main", "ws-2", &["arriving"]));
+
+        let swept = sweep_awaiting(&mut map, now, AWAITING_REPLAY_MAX, &arrival_ids(&arrivals));
+        assert_eq!(swept, vec!["orphan".to_string()]);
+        assert!(map.contains_key("arriving"));
+
+        // Its record settled: the suppression is ordinary bookkeeping again.
+        take_arrival(&mut arrivals, "w1", "ws-2").unwrap();
+        assert_eq!(
+            sweep_awaiting(&mut map, now, AWAITING_REPLAY_MAX, &arrival_ids(&arrivals)),
+            vec!["arriving".to_string()]
+        );
     }
 
     #[test]
@@ -537,26 +652,90 @@ mod tests {
         assert_eq!(quit_order(["ws-2", "ws-5"], None), vec!["ws-2", "ws-5"]);
     }
 
-    /// A window that has not installed its arrival listener yet is a legal drop
-    /// target, so the payload waits for it instead of being emitted into the void.
-    #[test]
-    fn an_arrival_queued_before_the_listener_exists_is_delivered_once() {
-        let mut queues = ArrivalQueues::new();
-        queue_arrival(&mut queues, "ws-2", json!({"workspaceId":"w1"}));
-        queue_arrival(&mut queues, "ws-2", json!({"workspaceId":"w2"}));
-        queue_arrival(&mut queues, "ws-3", json!({"workspaceId":"w3"}));
+    fn arrival(workspace_id: &str, from: &str, to: &str, ids: &[&str]) -> Arrival {
+        Arrival {
+            workspace_id: workspace_id.to_string(),
+            from: from.to_string(),
+            to: to.to_string(),
+            terminal_ids: ids.iter().map(|id| (*id).to_string()).collect(),
+            payload: json!({ "workspaceId": workspace_id }),
+        }
+    }
 
-        let taken = take_arrivals(&mut queues, "ws-2");
+    /// A window that has not installed its arrival listener yet is a legal drop
+    /// target, so the payload waits for it instead of being emitted into the void
+    /// — and it keeps waiting until that window has actually adopted it.
+    #[test]
+    fn an_arrival_waits_for_its_window_and_settles_only_on_adoption() {
+        let mut arrivals = Arrivals::new();
+        queue_arrival(&mut arrivals, arrival("w1", "main", "ws-2", &["a"]));
+        queue_arrival(&mut arrivals, arrival("w2", "main", "ws-2", &["b"]));
+        queue_arrival(&mut arrivals, arrival("w3", "main", "ws-3", &["c"]));
+
+        let ids = |payloads: Vec<JsonValue>| {
+            payloads
+                .iter()
+                .map(|payload| payload["workspaceId"].as_str().unwrap().to_string())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(ids(arrival_payloads(&arrivals, "ws-2")), vec!["w1", "w2"], "oldest first");
+        // Draining does not consume: a webview drains at boot and again when its
+        // listener is installed, and neither may lose a Workspace.
+        assert_eq!(ids(arrival_payloads(&arrivals, "ws-2")), vec!["w1", "w2"]);
+        assert_eq!(arrival_payloads(&arrivals, "nobody").len(), 0);
+
+        // Settling is keyed by Workspace and scoped to the window it arrived in.
+        assert_eq!(take_arrival(&mut arrivals, "w1", "main"), None);
+        assert_eq!(take_arrival(&mut arrivals, "w1", "ws-2").unwrap().from, "main");
+        assert_eq!(ids(arrival_payloads(&arrivals, "ws-2")), vec!["w2"]);
+        assert!(!has_arrival(&arrivals, "w1"));
+        assert!(has_arrival(&arrivals, "w2"));
+
+        // The target went away: every arrival it will never take comes back, and
+        // a sibling's is untouched.
+        let lost = take_arrivals_to(&mut arrivals, "ws-2");
+        assert_eq!(lost.iter().map(|a| a.workspace_id.as_str()).collect::<Vec<_>>(), vec!["w2"]);
+        assert_eq!(lost[0].terminal_ids, vec!["b".to_string()]);
+        assert_eq!(ids(arrival_payloads(&arrivals, "ws-3")), vec!["w3"]);
+    }
+
+    /// Each arrival names its own shells: two in flight at once must not each
+    /// resume over the other's (docs/specs/standalone.md -> "Arrival queue").
+    #[test]
+    fn arrival_ids_are_per_arrival_not_per_window() {
+        let mut arrivals = Arrivals::new();
+        queue_arrival(&mut arrivals, arrival("w1", "main", "ws-2", &["a", "a-helper"]));
+        queue_arrival(&mut arrivals, arrival("w2", "ws-9", "ws-2", &["b"]));
+
         assert_eq!(
-            taken.iter().map(|p| p["workspaceId"].as_str().unwrap()).collect::<Vec<_>>(),
-            vec!["w1", "w2"],
-            "queued oldest first"
+            find_arrival(&arrivals, "w1").unwrap().terminal_ids,
+            vec!["a".to_string(), "a-helper".to_string()]
         );
-        // Delivered once: a reload boots from the snapshot it has since written.
-        assert!(take_arrivals(&mut queues, "ws-2").is_empty());
-        // A sibling's queue is untouched, and an unknown window has none.
-        assert_eq!(take_arrivals(&mut queues, "ws-3").len(), 1);
-        assert!(take_arrivals(&mut queues, "nobody").is_empty());
+        assert_eq!(find_arrival(&arrivals, "w2").unwrap().terminal_ids, vec!["b".to_string()]);
+        assert_eq!(
+            arrival_ids(&arrivals),
+            ["a", "a-helper", "b"].iter().map(|id| (*id).to_string()).collect::<HashSet<_>>()
+        );
+    }
+
+    /// A window booting with a Workspace already queued for it owns those shells
+    /// from the source's invoke. Listing them here would place them as top-level
+    /// panes beside the Workspace about to mount them.
+    #[test]
+    fn a_boot_list_never_names_an_arrivals_shells() {
+        let owned = || vec!["own-1".to_string(), "a".to_string(), "own-2".to_string()];
+        let mut arrivals = Arrivals::new();
+        assert_eq!(boot_list_ids(owned(), &arrivals), owned(), "nothing in flight");
+
+        queue_arrival(&mut arrivals, arrival("w1", "main", "ws-2", &["a"]));
+        assert_eq!(
+            boot_list_ids(owned(), &arrivals),
+            vec!["own-1".to_string(), "own-2".to_string()]
+        );
+
+        // Adopted: the ids are ordinary panes of this window again.
+        take_arrival(&mut arrivals, "w1", "ws-2").unwrap();
+        assert_eq!(boot_list_ids(owned(), &arrivals), owned());
     }
 
     fn rect(label: &str, origin: (i32, i32), size: (u32, u32), hittable: bool) -> WindowRect {
