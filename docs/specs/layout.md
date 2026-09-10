@@ -321,9 +321,9 @@ On cold restore, a terminal pane with a host-captured recovery invocation runs i
 
 ### Renderer
 
-**Must use `@xterm/addon-webgl` for mounted terminals when available**, falling back to xterm's DOM renderer on unsupported WebGL, unavailable explicit context release, activation failure, or context-budget eviction. `cfg.terminal.webglRenderer` disables WebGL and is off under Chromatic. ImageAddon owns its separate canvas layers (`docs/specs/terminal-escapes.md` → "Inline graphics"). (rationale)
+**Must use `@xterm/addon-webgl` for mounted terminals when available**, falling back to xterm's DOM renderer on unsupported WebGL, activation failure, or context-budget eviction. `cfg.terminal.webglRenderer` disables WebGL and is off under Chromatic. ImageAddon owns its separate canvas layers (`docs/specs/terminal-escapes.md` → "Inline graphics"). (rationale)
 
-- **Must acquire GPU resources at mount, never at Session creation.** Unmount/minimize, helper parking, and Session disposal dispose the WebGL addon and explicitly lose its context. The xterm, grid, buffers, PTY, and other addons survive a minimize.
+- **Must acquire GPU resources at mount, never at Session creation.** Unmount/minimize, helper parking, and Session disposal dispose the WebGL addon and explicitly lose its context when capture and `WEBGL_lose_context` are available. **Must retain a working renderer if explicit loss is unavailable**; disposal still releases its GPU objects, with context-slot reclamation left to GC. (rationale) The xterm, grid, buffers, PTY, and other addons survive a minimize.
 - **Must load a fresh addon on reattachment without resizing the terminal for the renderer swap.** Terminal fitting follows "Animations". A stale mount's cleanup must not release a newer mount's renderer.
 - **Must attempt WebGL at most once per mount.** Failure or context loss stays on DOM until the next unmount/remount; focus and metadata changes never retry. Focus-based recovery remains under `## Future`.
 - **Must preserve the addon's shared atlas cache.** Compatible mounted terminals share rasterized atlas canvases; GPU texture copies remain per context. Releasing one renderer releases only its atlas ownership; the last owner releases the cache. (rationale)

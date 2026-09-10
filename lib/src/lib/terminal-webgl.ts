@@ -28,13 +28,13 @@ export class TerminalWebglRenderer {
       try {
         this.terminal.loadAddon(addon);
       } finally {
-        this.captureContext(existingCanvases);
-      }
-      // Retain only contexts we can explicitly release. Disposal alone removes
-      // the canvas and GPU objects but leaves context reclamation to GC.
-      if (!this.loseContext) {
-        this.release();
-        return;
+        try {
+          this.captureContext(existingCanvases);
+        } catch {
+          // Capture is best-effort across host capabilities and addon updates.
+          // Keep a healthy renderer; disposal still frees its GPU objects, with
+          // GC reclaiming the context slot if explicit loss is unavailable.
+        }
       }
       this.host.setAttribute('data-renderer', 'webgl');
     } catch {

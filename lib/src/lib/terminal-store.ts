@@ -21,7 +21,7 @@ export interface TerminalEntry {
   setSelectionBaseline: (baseline: string | null) => void;
   isReplaying: boolean;
   untouched: boolean;
-  /** Renderer ownership across mount/unmount; minimized terminals retain no GL context. */
+  /** Renderer ownership follows mount/unmount rather than terminal lifetime. */
   webglRenderer?: TerminalWebglRenderer;
   /**
    * The PTY process has exited (onPtyExit fired or resume restored it as

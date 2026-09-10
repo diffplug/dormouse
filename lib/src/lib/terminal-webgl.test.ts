@@ -9,6 +9,8 @@ const state = vi.hoisted(() => ({
   order: [] as string[],
   failLoad: false,
   extension: true,
+  exposeCanvas: true,
+  probeFails: false,
   contexts: new Map<HTMLCanvasElement, object | null>(),
 }));
 vi.mock('@xterm/addon-webgl', () => ({
@@ -32,7 +34,8 @@ vi.mock('@xterm/addon-webgl', () => ({
         },
       };
       state.contexts.set(this.canvas, gl);
-      host.append(link, this.canvas);
+      host.append(link);
+      if (state.exposeCanvas) host.append(this.canvas);
       if (state.failLoad) throw new Error('activation failed');
     }
     dispose = vi.fn(() => {
@@ -54,10 +57,13 @@ beforeEach(() => {
   state.contexts.clear();
   state.failLoad = false;
   state.extension = true;
+  state.exposeCanvas = true;
+  state.probeFails = false;
   previousEnabled = cfg.terminal.webglRenderer;
   cfg.terminal.webglRenderer = true;
   vi.stubGlobal('WebGL2RenderingContext', class {});
   getContext = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(function (this: HTMLCanvasElement) {
+    if (state.probeFails) throw new Error('Context probe failed');
     if (!state.contexts.has(this)) throw new Error('Probed a canvas not initialized by the WebGL addon');
     return state.contexts.get(this) as WebGL2RenderingContext | null;
   });
@@ -147,13 +153,19 @@ describe('mount-scoped terminal WebGL resources', () => {
     expect(host.dataset.renderer).toBe('webgl');
   });
 
-  it('does not retain a renderer without explicit context release support', () => {
-    state.extension = false;
+  it.each(['extension unavailable', 'canvas missing', 'probe throws'])('keeps healthy WebGL when %s', reason => {
+    if (reason === 'extension unavailable') state.extension = false;
+    if (reason === 'canvas missing') state.exposeCanvas = false;
+    if (reason === 'probe throws') state.probeFails = true;
     renderer.mount();
-    expect(state.addons[0].dispose).toHaveBeenCalledOnce();
-    expect(host.dataset.renderer).toBe('dom');
+    expect(state.addons[0].dispose).not.toHaveBeenCalled();
+    expect(host.dataset.renderer).toBe('webgl');
     renderer.mount();
     expect(state.addons).toHaveLength(1);
+    renderer.unmount();
+    expect(state.addons[0].dispose).toHaveBeenCalledOnce();
+    expect(state.order).toEqual(['dispose']);
+    expect(host.dataset.renderer).toBe('dom');
   });
 
   it('never probes or disposes a pre-existing image canvas', () => {

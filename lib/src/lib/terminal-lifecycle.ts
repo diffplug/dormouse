@@ -532,7 +532,7 @@ export function mountElement(id: string, container: HTMLElement, options: { fit?
 }
 
 /** Where a hidden helper's xterm element waits between reveals: still in the
- *  document, so its renderer and scrollback survive
+ *  document, preserving its DOM state and scrollback
  *  (docs/specs/terminal-context.md → Helper lifecycle). */
 let helperParking: HTMLElement | null = null;
 
@@ -580,8 +580,9 @@ export function disposeSession(id: string): void {
   dropSourcesForTerminal(id);
   entry.cleanup();
   getPlatform().killPty(id);
-  entry.webglRenderer?.unmount();
+  // Addon disposal constructs the fallback renderer; keep that work detached.
   entry.element.remove();
+  entry.webglRenderer?.unmount();
   entry.terminal.dispose();
   registry.delete(id);
   removeTerminalPaneState(id);
