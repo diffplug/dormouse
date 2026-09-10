@@ -119,9 +119,10 @@ test('the timings the spec names are the values that ship', () => {
   assert.ok(DIRECT_ANSWER_TIMEOUT_MS < DIRECT_SETUP_TIMEOUT_MS);
   // The wait for the peer's own switch is a relay hop on the uplink the direct
   // path exists to escape, and firing early is burrow loss while waiting costs
-  // only queue space — so it is never shorter than the negotiation before it.
-  assert.equal(DIRECT_HANDOFF_TIMEOUT_MS, 15_000);
-  assert.ok(DIRECT_HANDOFF_TIMEOUT_MS >= DIRECT_SETUP_TIMEOUT_MS);
+  // only queue space — so it is the setup budget itself rather than a number of
+  // its own. Asserted as the alias it is: `>=` would be a tautology through it,
+  // and a literal would fail a legitimate re-tuning of the budget.
+  assert.equal(DIRECT_HANDOFF_TIMEOUT_MS, DIRECT_SETUP_TIMEOUT_MS);
   // Long enough that a gap ICE recovers from is waited out rather than charged
   // a fresh handshake and a WebAuthn prompt.
   assert.equal(DIRECT_DISCONNECTED_GRACE_MS, 5_000);

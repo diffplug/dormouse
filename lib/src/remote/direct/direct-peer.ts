@@ -59,10 +59,12 @@ export interface DirectChannelLike {
 /**
  * As much of `RTCSctpTransport` as the size check needs. The association's own
  * limit, negotiated from both ends' `a=max-message-size`, so it is knowable only
- * once the channel is open.
+ * once the channel is open — `node-datachannel`'s polyfill exposes the transport
+ * from construction and leaves this null until then, which is why it is nullable
+ * here even though the W3C type is not.
  */
 export interface DirectSctpLike {
-  readonly maxMessageSize: number;
+  readonly maxMessageSize: number | null;
 }
 
 /** The subset of `RTCPeerConnection` one negotiation needs. */
@@ -336,7 +338,7 @@ export class DirectPeer {
    * The channel reported open.
    *
    * **The association's message limit is checked here**, the first moment it is
-   * knowable — both stacks report `sctp` as null until the association is up.
+   * knowable — until the association is up neither stack has a number to give.
    * One Noise transport message is one channel frame and may be
    * {@link NOISE_MAX_MESSAGE_LENGTH} bytes, so an association that would refuse
    * one is a session that dies on its first large paste instead.

@@ -17,6 +17,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DIRECT_ANSWER_TIMEOUT_MS,
+  DIRECT_GATHER_TIMEOUT_MS,
   DIRECT_HANDOFF_TIMEOUT_MS,
   DIRECT_SETUP_TIMEOUT_MS,
   MAX_DIRECT_PENDING_FRAMES,
@@ -220,10 +221,36 @@ describe('DirectEndpoint', () => {
     // The refusal reports from inside `answer()`, before there is any
     // description to send — the offerer still has to hear about it.
     expect(run.answerer.sent.map((s) => s.t)).toEqual(['direct-decline']);
-    expect(run.offerer.endpoint.relayCause).toBe('declined');
-    expect(run.offerer.endpoint.path).toBe('relay');
-    // And nothing is left armed to fire on a session that stayed relayed.
+    // And the answerer's setup deadline, armed inside `answer()`, went with it.
     expect(run.timers.live).toEqual([]);
+  });
+
+  /**
+   * A decline is a message on the relay, so it only means anything while there
+   * is still a relay to send it on. A peer that put its own `direct-switch`
+   * across before this end had answered has already taken the session with it —
+   * `DirectCutover` accepts that switch while the attempt is merely
+   * `attempting` — and a decline sent after would reach a Client that reads it
+   * as a refusal rather than as the channel that never opened.
+   */
+  it('never declines onto a session its own give-up has already ended', async () => {
+    // Gathering is held open so the answerer is still suspended inside
+    // `answer()` when the switch lands.
+    const run = pair({ oversize: 'answer', gathering: 'pending' });
+    const offering = run.offerer.endpoint.offer();
+    await flushMicrotasks();
+    run.timers.fireAt(DIRECT_GATHER_TIMEOUT_MS);
+    await offering;
+    await flushMicrotasks();
+
+    // The peer switches before it has been answered, and only then does this
+    // end find it has no description it can send.
+    run.answerer.endpoint.onSignal({ v: 1, t: 'direct-switch' });
+    run.timers.fireAt(DIRECT_GATHER_TIMEOUT_MS);
+    await flushMicrotasks();
+
+    expect(run.answerer.sent.map((s) => s.t)).toEqual([]);
+    expect(run.answerer.fatals).toHaveLength(1);
   });
 
   it('abandons the attempt when the session cannot carry a signal', async () => {

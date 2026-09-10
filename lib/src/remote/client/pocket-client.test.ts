@@ -1073,33 +1073,46 @@ describe('the direct path, end to end', () => {
   it('preserves a replacement connection when the old channel closes before its outcome arrives', async () => {
     const run = await connectedDirect();
     await run.cutover();
-    const firstPeer = run.clientPeers[0]!;
     const firstChannel = run.network.offererChannel!;
     const gone = vi.fn();
     run.harness.client.setOnBurrowGone(gone);
 
-    // Deliver the handshake normally, but hold the replacement's outcome so
-    // the previous channel's close reaches the Client first.
-    const socket = run.harness.relay.burrowSocket;
-    const forward = socket.onSend!;
-    let outcomeHeld = false;
-    socket.onSend = (frame) => {
-      if (frame.kind === 'connection' && frame.id !== run.connectionId && frame.step === 'transport') {
-        run.harness.relay.holdToClient();
-        outcomeHeld = true;
-        socket.onSend = forward;
-      }
-      forward(frame);
-    };
+    // Hold the replacement's outcome — anything on a connection that is not the
+    // live one — so the previous channel's close reaches the Client first.
+    run.harness.relay.holdToClientWhen(
+      (frame) => frame.id !== run.connectionId && frame.step === 'transport',
+    );
     const replacement = run.harness.client.connect(run.harness.burrowId);
-    await waitFor(() => outcomeHeld && firstChannel.readyState === 'closed', 'the old channel to close before the outcome');
+    await waitFor(
+      () => run.harness.relay.isHoldingToClient() && firstChannel.readyState === 'closed',
+      'the old channel to close while the outcome is held',
+    );
     run.harness.relay.releaseToClient();
 
     expect(await replacement).toEqual({ ok: true, burrowLabel: BURROW_LABEL });
-    expect(firstPeer.closed).toBe(true);
+    expect(gone).not.toHaveBeenCalled();
+    // And the replacement is a working session, not just a resolved promise.
+    await run.cutover();
+    expect((await run.harness.client.hello()).burrowId).toBe(run.harness.burrowId);
+  });
+
+  /**
+   * The retire destroys a live session, so it may not run until the only thing
+   * that can race it — the connection request — is about to be sent. A presence
+   * proof the user dismisses never reaches the Burrow.
+   */
+  it('leaves a working session alone when the replacement never reaches the Burrow', async () => {
+    const run = await connectedDirect();
+    await run.cutover();
+    const gone = vi.fn();
+    run.harness.client.setOnBurrowGone(gone);
+    vi.spyOn(run.harness.authenticator, 'assert').mockRejectedValueOnce(new Error('dismissed'));
+
+    await expect(run.harness.client.connect(run.harness.burrowId)).rejects.toThrow('dismissed');
+
     expect(gone).not.toHaveBeenCalled();
     expect(run.harness.client.connectedBurrowId).toBe(run.harness.burrowId);
-    await run.cutover();
+    expect(run.harness.client.transportPath).toBe('direct');
     expect((await run.harness.client.hello()).burrowId).toBe(run.harness.burrowId);
   });
 

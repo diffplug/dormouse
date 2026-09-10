@@ -264,11 +264,16 @@ export class DirectEndpoint {
   /**
    * Give the attempt up and say so, rather than leaving the offerer to wait out
    * its setup deadline for a channel that is never coming.
+   *
+   * **Only where the attempt was merely abandoned.** A peer that put its own
+   * `direct-switch` on the relay before this end had answered leaves
+   * {@link #giveUp} taking its fatal branch instead — and a decline encrypted
+   * onto a session its owner has just disposed would reach a Client that reads
+   * it as a refusal rather than as the channel that never opened.
    */
   #decline(reason: string, cause: DirectRelayCause = 'failed'): void {
     this.#owesAnswer = false;
-    this.#giveUp(reason, cause);
-    this.#deps.sendSignal({ v: 1, t: 'direct-decline' });
+    if (this.#giveUp(reason, cause)) this.#deps.sendSignal({ v: 1, t: 'direct-decline' });
   }
 
   /** This attempt's peer, wired to the four channel events, or null if there is none. */
@@ -367,17 +372,21 @@ export class DirectEndpoint {
    * abandoned attempt** and the session carries on relayed; afterwards what was
    * riding the channel is gone and a stream cipher has no resynchronization
    * point, so the session is over.
+   *
+   * Answers whether the attempt was abandoned — `false` means the session went
+   * with it, and the caller has nothing left to say on it.
    */
-  #giveUp(reason = 'the direct path was abandoned', cause: DirectRelayCause = 'failed'): void {
+  #giveUp(reason = 'the direct path was abandoned', cause: DirectRelayCause = 'failed'): boolean {
     if (this.#cutover.switched) {
       this.#deps.fatal(reason);
-      return;
+      return false;
     }
     this.#peer?.close();
     this.#peer = null;
     this.#cutover.abandon();
     this.#cause = cause;
     this.#settle();
+    return true;
   }
 
   /** Whether this endpoint still belongs to the session the caller is serving. */

@@ -873,9 +873,6 @@ export class PocketClient {
     if (record.authorization.state !== 'paired') {
       return { ok: false, message: CONNECTION_DENIAL_MESSAGES['pairing-required'], pairingRequired: true };
     }
-    // Retire the old channel before registering any replacement waiters: the
-    // Burrow closes it at promotion, which can beat the outcome over the relay.
-    if (this.#established) this.#endSession('connection replaced', { notifyGone: false });
     const deadline = this.#now() + DEFAULT_CHALLENGE_TTL_MS;
     const connectionId = randomBase64Url(E2E_ID_BYTE_LENGTH);
     const route = { kind: 'connection', id: connectionId, burrowId } as const;
@@ -906,6 +903,19 @@ export class PocketClient {
       handshakeHash: toBase64Url(session.handshakeHash),
       passkeyCredentialId: record.passkeyCredentialId,
     });
+    // **A second Connect on one Client replaces the first**, the mirror of
+    // `BurrowRuntime.#promoteConnection`: its predecessor's endpoint, peer and
+    // channel go, and left alive the orphan's channel would report violations
+    // against *this* session. The Burrow closes that channel at promotion, and
+    // on a direct path that close travels peer-to-peer while the outcome
+    // travels over the relay — so it can arrive first, and `#rejectAll` would
+    // fail the waiter registered on the next line.
+    //
+    // **Here and no earlier.** Only the connection request can reach
+    // `#promoteConnection`, so nothing before this line can close the old
+    // channel — and a presence proof the user cancels, or a handshake that
+    // throws, must leave a working session exactly as it was.
+    if (this.#established) this.#endSession('connection replaced', { notifyGone: false });
     let outcome: unknown;
     try {
       const request: ConnectionRequestV1 = { presence };
@@ -917,6 +927,9 @@ export class PocketClient {
       return { ok: false, message: CONNECTION_DENIAL_MESSAGES['burrow-error'], pairingRequired: false };
     }
     if (outcome.ok) {
+      // Still load-bearing for a *concurrent* Connect to another Burrow, which
+      // the retire above cannot see: without it that session's endpoint and
+      // peer would be overwritten below rather than closed.
       this.#disposeCeremony();
       this.#established = { connectionId, session, lastSentAt: this.#now() };
       this.#connectedBurrowId = burrowId;

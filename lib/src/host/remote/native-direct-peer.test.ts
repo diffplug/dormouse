@@ -143,6 +143,62 @@ async function startConnected() {
 
 const connectedDirect = () => untilOpen(startConnected, 'the session to go direct');
 
+/** As much of `RTCDataChannel` as the reliability probe reads off either end. */
+interface ChannelFacts {
+  readonly label: string;
+  readonly ordered: boolean;
+  readonly maxRetransmits: number | null;
+  readonly maxPacketLifeTime: number | null;
+}
+
+/**
+ * One negotiation whose offerer asks for everything a Noise stream cannot ride,
+ * so the answerer's view of the channel can be compared against it.
+ *
+ * Unlike a browser, this stack raises `datachannel` when the association
+ * carries the channel rather than when the offer describes it, so the whole
+ * negotiation has to complete — which is why it goes through
+ * {@link untilOpen} like every other one here.
+ */
+async function startReliabilityProbe() {
+  const offerer = buildPeer();
+  const answerer = buildPeer();
+  let adopted: ChannelFacts | null = null;
+  answerer.addEventListener('datachannel', (ev) => {
+    adopted = (ev as { channel: ChannelFacts }).channel;
+  });
+  for (const [from, to] of [
+    [offerer, answerer],
+    [answerer, offerer],
+  ] as const) {
+    from.addEventListener('icecandidate', (ev) => {
+      const candidate = (ev as { candidate?: unknown }).candidate;
+      if (candidate) void (to as unknown as AddsCandidates).addIceCandidate(candidate);
+    });
+  }
+  const asked = offerer.createDataChannel(DIRECT_CHANNEL_LABEL, {
+    ordered: false,
+    maxRetransmits: 0,
+  } as { ordered?: boolean }) as unknown as ChannelFacts;
+  const offer = await offerer.createOffer();
+  await offerer.setLocalDescription(offer);
+  await answerer.setRemoteDescription(offerer.localDescription!);
+  const answer = await answerer.createAnswer();
+  await answerer.setLocalDescription(answer);
+  await offerer.setRemoteDescription(answerer.localDescription!);
+  return {
+    asked,
+    get adopted() {
+      return adopted;
+    },
+    open: () => adopted !== null,
+    abandon: () => {
+      offerer.close();
+      answerer.close();
+    },
+  };
+}
+
 describe('the direct path over the native addon', () => {
   it(
     'negotiates a channel and carries protocol-v1 on it, the relay silent after',
@@ -299,50 +355,23 @@ describe('the direct path over the native addon', () => {
    * them turns a documented limitation into an enforced rule, and this is what
    * says so (`docs/specs/remote-api.md` → Transport → "Direct path").
    */
-  it('does not carry a channel’s reliability across to the answerer', async () => {
-    const offerer = buildPeer();
-    const answerer = buildPeer();
-    const adopted = Promise.withResolvers<Record<string, unknown>>();
-    answerer.addEventListener('datachannel', (ev) => {
-      const channel = (ev as { channel: Record<string, unknown> }).channel;
-      adopted.resolve(channel);
-    });
-    // Everything a Noise stream cannot ride, asked for explicitly.
-    const asked = offerer.createDataChannel(DIRECT_CHANNEL_LABEL, {
-      ordered: false,
-      maxRetransmits: 0,
-    } as { ordered?: boolean });
-    try {
-      // The whole negotiation: unlike a browser, this stack raises `datachannel`
-      // when the association carries the channel, not when the offer describes
-      // it — so nothing is adopted until both ends are actually connected.
-      for (const [from, to] of [
-        [offerer, answerer],
-        [answerer, offerer],
-      ] as const) {
-        from.addEventListener('icecandidate', (ev) => {
-          const candidate = (ev as { candidate?: unknown }).candidate;
-          if (candidate) void (to as unknown as AddsCandidates).addIceCandidate(candidate);
-        });
+  it(
+    'does not carry a channel’s reliability across to the answerer',
+    async () => {
+      const run = await untilOpen(startReliabilityProbe, 'the answerer to adopt the channel');
+      try {
+        const seen = run.adopted!;
+        expect(run.asked.ordered).toBe(false);
+        expect(seen.label).toBe(DIRECT_CHANNEL_LABEL);
+        expect(seen.ordered).toBe(true);
+        expect(seen.maxRetransmits).toBeNull();
+        expect(seen.maxPacketLifeTime).toBeNull();
+      } finally {
+        run.abandon();
       }
-      const offer = await offerer.createOffer();
-      await offerer.setLocalDescription(offer);
-      await answerer.setRemoteDescription(offerer.localDescription!);
-      const answer = await answerer.createAnswer();
-      await answerer.setLocalDescription(answer);
-      await offerer.setRemoteDescription(answerer.localDescription!);
-
-      const seen = await adopted.promise;
-      expect((asked as unknown as { ordered: boolean }).ordered).toBe(false);
-      expect(seen.label).toBe(DIRECT_CHANNEL_LABEL);
-      expect(seen.ordered).toBe(true);
-      expect(seen.maxRetransmits).toBeNull();
-      expect(seen.maxPacketLifeTime).toBeNull();
-    } finally {
-      offerer.close();
-      answerer.close();
-    }
-  });
+    },
+    CASE_BUDGET_MS,
+  );
 
   it('builds a peer through a bare require, and declines once torn down', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
