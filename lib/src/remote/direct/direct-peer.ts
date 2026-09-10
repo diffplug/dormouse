@@ -16,6 +16,7 @@
  */
 
 import {
+  DIRECT_ANSWER_TIMEOUT_MS,
   DIRECT_GATHER_TIMEOUT_MS,
   DIRECT_SETUP_TIMEOUT_MS,
   NOISE_MAX_MESSAGE_LENGTH,
@@ -100,7 +101,8 @@ export interface DirectPeerDeps {
  * **One negotiation, no trickle**: each side sends its whole description once
  * ICE gathering has completed (or `DIRECT_GATHER_TIMEOUT_MS` has passed), so
  * the candidates travel inside the session with the SDP and the relay never
- * sees either. **The channel must be open by `DIRECT_SETUP_TIMEOUT_MS`** or the
+ * sees either. **The channel must be open by `DIRECT_SETUP_TIMEOUT_MS`** — by
+ * `DIRECT_ANSWER_TIMEOUT_MS` on the answering side, which arms later — or the
  * attempt is abandoned and the session stays relayed.
  */
 export class DirectPeer {
@@ -132,7 +134,7 @@ export class DirectPeer {
    * never offers.
    */
   async offer(): Promise<string | null> {
-    this.#armSetupTimeout();
+    this.#armSetupTimeout(DIRECT_SETUP_TIMEOUT_MS);
     try {
       this.#adopt(this.#peer.createDataChannel(DIRECT_CHANNEL_LABEL, { ordered: true }));
       const offer = await this.#peer.createOffer();
@@ -149,7 +151,9 @@ export class DirectPeer {
    * answer with the SDP to put in a `direct-answer`. `null` means decline.
    */
   async answer(offerSdp: string): Promise<string | null> {
-    this.#armSetupTimeout();
+    // The shorter budget, because this end arms it a relay hop after the
+    // offerer armed its own; see {@link DIRECT_ANSWER_TIMEOUT_MS}.
+    this.#armSetupTimeout(DIRECT_ANSWER_TIMEOUT_MS);
     try {
       // Registered before the remote description is set: the channel event can
       // fire inside `setRemoteDescription`, and a listener added after it would
@@ -296,13 +300,13 @@ export class DirectPeer {
     });
   }
 
-  #armSetupTimeout(): void {
+  #armSetupTimeout(budgetMs: number): void {
     this.#clearSetupTimeout();
     this.#cancelSetup = this.#setTimer(() => {
       this.#cancelSetup = null;
       if (this.#open || this.#closed) return;
       this.#fail('the direct channel did not open in time');
-    }, DIRECT_SETUP_TIMEOUT_MS);
+    }, budgetMs);
   }
 
   #clearSetupTimeout(): void {

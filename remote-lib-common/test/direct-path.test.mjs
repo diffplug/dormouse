@@ -13,6 +13,7 @@ import assert from 'node:assert/strict';
 
 import {
   CONTROL_PAYLOAD_SIZE,
+  DIRECT_ANSWER_TIMEOUT_MS,
   DIRECT_GATHER_TIMEOUT_MS,
   DIRECT_SETUP_TIMEOUT_MS,
   DirectCutover,
@@ -99,8 +100,16 @@ test('any signal with a maximal sdp fits one control message', () => {
 
 test('the timings the spec names are the values that ship', () => {
   assert.equal(DIRECT_SETUP_TIMEOUT_MS, 15_000);
+  assert.equal(DIRECT_ANSWER_TIMEOUT_MS, 10_000);
   assert.equal(DIRECT_GATHER_TIMEOUT_MS, 3_000);
   assert.ok(DIRECT_GATHER_TIMEOUT_MS < DIRECT_SETUP_TIMEOUT_MS);
+  // The answerer arms its deadline a relay hop after the offerer arms its own,
+  // so it has to be the end that gives up first: its channel closing reaches
+  // the offerer while the offerer is still unswitched and can abandon cleanly.
+  // The other order kills a healthy relayed session on a slow ICE — the
+  // answerer opens, switches, and its `direct-switch` decrypts at an offerer
+  // that has just abandoned, which is fatal at both ends.
+  assert.ok(DIRECT_ANSWER_TIMEOUT_MS < DIRECT_SETUP_TIMEOUT_MS);
 });
 
 /**

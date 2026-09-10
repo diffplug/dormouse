@@ -83,7 +83,10 @@ retries**; it is always the offerer and creates the one ordered, reliable data
 channel (`dormouse`, `arraybuffer`). **The Burrow answers at most one offer per
 session**, and declines where it has no peer to build. **Each side sends its
 whole description only after ICE gathering completes** — no trickle — bounded by
-`DIRECT_GATHER_TIMEOUT_MS`, past which what it has is what travels. **An SDP
+`DIRECT_GATHER_TIMEOUT_MS`, past which what it has is what travels. **The
+answerer's setup budget is the shorter one** (`DIRECT_ANSWER_TIMEOUT_MS`, not
+`DIRECT_SETUP_TIMEOUT_MS`), since it arms a relay hop later and must be the end
+that gives up first. **An SDP
 over `MAX_DIRECT_SDP_LENGTH` is never sent**: the Client skips the offer, the
 Burrow declines. That bound derives from `CONTROL_PAYLOAD_SIZE`, so a maximal
 signal always fits one control body.

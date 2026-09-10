@@ -22,6 +22,16 @@ import { CONTROL_PAYLOAD_SIZE } from './noise-transport.js';
 export const DIRECT_SETUP_TIMEOUT_MS = 15_000;
 
 /**
+ * The same deadline for the answerer, which arms it a relay round trip later
+ * than the offerer does and so **must be the one that gives up first**. Its
+ * channel closing is what reaches the offerer while the offerer is still
+ * unswitched, so both ends abandon a slow attempt and stay relayed instead of
+ * meeting on the fatal rule for a switch onto an abandoned channel. The
+ * ordering is pinned by `remote-lib-common/test/direct-path.test.mjs`.
+ */
+export const DIRECT_ANSWER_TIMEOUT_MS = 10_000;
+
+/**
  * How long a peer waits for ICE gathering to finish before sending whatever
  * local description it has. There is no trickle path — the SDP crosses inside
  * the session as one control message — so a gatherer that never completes must

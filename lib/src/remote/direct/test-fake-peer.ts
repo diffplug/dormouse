@@ -249,6 +249,9 @@ export class FakeChannel implements DirectChannelLike {
   close(): void {
     if (this.readyState === 'closed') return;
     this.readyState = 'closed';
+    // The far end learns of it, as it does over a real SCTP association — on a
+    // task rather than in this stack, since the network is between them.
+    queueMicrotask(() => this.#peer?.drop());
   }
 
   open(): void {

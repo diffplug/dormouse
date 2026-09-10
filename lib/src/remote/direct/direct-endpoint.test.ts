@@ -16,6 +16,7 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  DIRECT_ANSWER_TIMEOUT_MS,
   DIRECT_SETUP_TIMEOUT_MS,
   MAX_DIRECT_PENDING_FRAMES,
   toBase64Url,
@@ -321,6 +322,34 @@ describe('DirectEndpoint', () => {
 
     expect(run.offerer.fatals).toEqual(['the direct path outran what can be held in order']);
     expect(run.offerer.received).toEqual([]);
+  });
+
+  /**
+   * The two deadlines are armed on different clocks — the offerer's at `offer()`
+   * and the answerer's a relay hop later, at `answer()` — so a channel that
+   * comes up near the end of the budget must not have the answerer opening,
+   * switching, and landing its `direct-switch` on an offerer that has just
+   * abandoned. Giving the answerer the shorter budget makes its channel closing
+   * the event that reaches the offerer, and both ends abandon.
+   */
+  it('gives the answerer the deadline that fires first, so a slow channel only abandons', async () => {
+    const run = pair({ opening: 'never' });
+    await cutover(run);
+
+    run.timers.fireAt(DIRECT_ANSWER_TIMEOUT_MS);
+    await flushMicrotasks();
+
+    expect(run.answerer.peers[0]!.closed).toBe(true);
+    // The answerer's channel closing is what the offerer sees, while it is
+    // still unswitched and can give the attempt up.
+    expect(run.offerer.peers[0]!.closed).toBe(true);
+    expect(run.offerer.fatals).toEqual([]);
+    expect(run.answerer.fatals).toEqual([]);
+    expect(run.offerer.endpoint.path).toBe('relay');
+    expect(run.answerer.endpoint.path).toBe('relay');
+    // And the offerer's own budget is gone with its peer, so nothing is left
+    // armed to fire on a session that has moved on.
+    expect(run.timers.live).toEqual([]);
   });
 
   it('ends the session when the peer switches onto a channel this end abandoned', async () => {
