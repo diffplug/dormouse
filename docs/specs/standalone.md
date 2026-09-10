@@ -519,7 +519,8 @@ Source of truth: `init_log` / `read_update_log` in `standalone/src-tauri/src/lib
 
 Source of truth: `standalone/package.json` (package scripts),
 `standalone/src-tauri/tauri.conf.json` (`build`, `bundle.resources`), and the root
-`package.json` for the `dev:standalone` and `innerdogfood` orchestration.
+`package.json` for the `dev:standalone` and `innerdogfood` orchestration;
+`runDev` in `standalone/scripts/dev-standalone.mjs`; `scripts/clean-dev-sidecar.mjs`.
 
 - `stage` = `stage:dor-cli` (build + stage the dor CLI, `docs/specs/dor-cli.md`)
   plus `stage:sidecar-proxy` (`build-sidecar-proxy.mjs` bundles the
@@ -534,10 +535,21 @@ Source of truth: `standalone/package.json` (package scripts),
 - The Tauri bundle ships the whole sidecar via the `../sidecar/**/*` resources
   glob — including node-pty's prebuilds + bundled ConPTY and the
   shell-integration scripts (`docs/specs/terminal-escapes.md`).
-- **Dev caveat:** `tauri.conf.json`'s `beforeDevCommand` is `pnpm dev` (Vite only).
-  Frontend edits hot-reload, but changes to the sidecar, the staged dor CLI, or the
-  bundled `lib/src/host/` sources need a manual re-stage and app restart — the dev
-  loop does not watch them.
+- **Must isolate native dev runs by canonical worktree path.** `pnpm dev:standalone`
+  stages the app, starts Vite on an OS-assigned loopback port, and passes the bound
+  URL to Tauri with its `beforeDevCommand` disabled. HMR shares Vite's listener.
+  **May pin the port with `DORMOUSE_BROWSER_DEV_VITE_PORT`; an occupied port must
+  fail without stopping its owner.**
+- **Must use a stable worktree-specific Tauri identifier for native dev**, separating
+  app data from other worktrees and the installed app. The default log is
+  `<worktree>/standalone/src-tauri/target/dormouse-dev.log`; `DORMOUSE_LOG_FILE` overrides it.
+  **Must close Vite and the owned Tauri process tree when dev exits or fails.**
+  Pinned by `standalone/scripts/dev-standalone.test.mjs`.
+- **Must limit Windows pre-dev cleanup to sidecars executing from this worktree's
+  default debug directory; never kill a listener by port.**
+- **Must re-stage and restart after changing sidecar, staged CLI, or bundled host
+  sources.** Frontend edits hot-reload; Tauri watches Rust. Direct Tauri CLI use
+  outside the package wrapper retains `tauri.conf.json`'s defaults.
 - `pnpm innerdogfood` runs the sidecar + webview in a normal browser via the
   browser-dev harness instead of the Tauri WebView (`docs/specs/transport.md`,
   Standalone browser-dev harness).
