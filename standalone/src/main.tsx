@@ -4,6 +4,7 @@ import { setPlatform } from "dormouse-lib/lib/platform";
 import { installPeerSurfaceResponder } from "dormouse-lib/remote/burrow/peer-surfaces";
 import type { PlatformAdapter } from "dormouse-lib/lib/platform/types";
 import { restoreWindowOrFresh } from "./window-restore";
+import { isMainWindow, resolveWindowLabel } from "./window-label";
 import { seedShellStore } from "dormouse-lib/lib/shell-store";
 import { restoreActiveTheme } from "dormouse-lib/lib/themes";
 import App from "dormouse-lib/App";
@@ -82,6 +83,9 @@ async function createPlatform(): Promise<PlatformAdapter> {
 
 // Await init() first to register event listeners before reconnecting
 async function bootstrap() {
+  // First: several modules below key off which window this is, and the Rust
+  // commands are all keyed by the invoking window's label.
+  await resolveWindowLabel();
   const platform = await createPlatform();
   setPlatform(platform);
   await platform.init();
@@ -126,7 +130,10 @@ async function bootstrap() {
 
   const initialPlans = await restoreWindowOrFresh(platform);
 
-  startUpdateCheck();
+  // `main` is the only window holding `updater:*` and it is the last one the
+  // quit walk tears down, so it is the only one that may check or install
+  // (docs/specs/auto-update.md).
+  if (isMainWindow()) startUpdateCheck();
 
   createRoot(document.getElementById("root")!).render(
     <StrictMode>

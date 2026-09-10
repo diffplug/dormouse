@@ -169,7 +169,7 @@ async function runQuitTeardown(): Promise<void> {
           await adapter.captureAgentRecovery(DEFAULT_RECOVERY_WAIT_MS).catch((err) =>
             console.warn("[quit] agent recovery capture failed; proceeding", err));
           await adapter.requestSessionFlush(PRE_KILL_FLUSH_MS); // save while PTYs are alive
-          await adapter.gracefulKillAllPtys(GRACEFUL_KILL_MS); // SIGTERM; wait for exits and final output
+          await adapter.gracefulKillPtys(GRACEFUL_KILL_MS); // SIGTERM; wait for exits and final output
           // Final post-exit save. Nothing left to probe a cwd from, and each pane
           // keeps the one the save above recorded.
           await adapter.requestSessionFlush(POST_KILL_FLUSH_MS, { probeCwd: false });

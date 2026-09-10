@@ -350,13 +350,20 @@ export class TauriAdapter implements PlatformAdapter {
     return this.cwdBatch(ids);
   }
 
-  // Warn-and-proceed: a stalled graceful kill must not wedge a quit teardown.
-  // Callers own the timeout — the teardown bounds live in one place, quit.ts.
-  async gracefulKillAllPtys(timeoutMs: number): Promise<void> {
+  /**
+   * SIGTERM this window's PTYs and wait for their exits and final output.
+   *
+   * Scoped to the calling window either way: Rust intersects `ids` with what
+   * this window owns, and omitting them takes exactly that set
+   * (`docs/specs/standalone.md` -> "Windows"). Warn-and-proceed, because a
+   * stalled kill must not wedge a teardown; callers own the timeout, so the
+   * bounds live in one place (`quit.ts`).
+   */
+  async gracefulKillPtys(timeoutMs: number, ids?: string[]): Promise<void> {
     try {
-      await rawInvoke("pty_graceful_kill_all", { timeout: timeoutMs });
+      await rawInvoke("pty_graceful_kill", { ids: ids ?? null, timeout: timeoutMs });
     } catch (err) {
-      console.warn("[tauri-adapter] gracefulKillAllPtys failed; proceeding", err);
+      console.warn("[tauri-adapter] gracefulKillPtys failed; proceeding", err);
     }
   }
 

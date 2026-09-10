@@ -77,7 +77,7 @@ function fakeAdapter(order: string[] = [], overrides: Partial<Record<string, () 
   return {
     captureAgentRecovery: step("captureRecovery"),
     requestSessionFlush: step("flush"),
-    gracefulKillAllPtys: step("gracefulKill"),
+    gracefulKillPtys: step("gracefulKill"),
     drainSessionSaves: step("drain"),
   } as unknown as TauriAdapter;
 }

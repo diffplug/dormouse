@@ -2,6 +2,10 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map as JsonMap, Value as JsonValue};
 mod log_tail;
+mod quit_state;
+mod routing;
+use quit_state::{CloseMachine, QuitAction, QuitMachine};
+use routing::{Route, RouteView};
 use std::{
     collections::HashMap,
     env,
@@ -9,14 +13,14 @@ use std::{
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
     process::Stdio,
-    sync::atomic::{AtomicBool, AtomicU64, Ordering},
+    sync::atomic::{AtomicU64, Ordering},
     sync::mpsc,
     sync::{Arc, Mutex, MutexGuard, OnceLock},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tauri::{
     menu::{Menu, PredefinedMenuItem, Submenu},
-    AppHandle, DragDropEvent, Emitter, Manager, RunEvent, WindowEvent,
+    AppHandle, DragDropEvent, Emitter, Manager, RunEvent, WebviewWindowBuilder, WindowEvent,
 };
 #[cfg(target_os = "macos")]
 use tauri::menu::AboutMetadata;
@@ -48,121 +52,387 @@ struct SidecarState {
     child: SharedChild,
 }
 
-// ── Quit interception ─────────────────────────────────────────────────────────
-//
-// Every quit trigger funnels through `request_quit`, which asks the webview's
-// orchestrator (standalone/src/quit.ts) to tear down and call back
-// `quit_proceed`. Protocol + watchdog phases: docs/specs/standalone.md §Quit flow.
-#[derive(Default)]
-struct QuitState {
-    // The webview acknowledged quit-requested — its listener is alive.
-    acked: AtomicBool,
-    // Teardown has actually begun (user confirmed, or there was nothing to
-    // confirm). Until this is set the webview may be parked on the confirmation
-    // dialog waiting for a human, so the teardown deadline below must stay
-    // suspended — a slow user must not be force-quit out from under the dialog.
-    tearing_down: AtomicBool,
-    // Bumped by `quit_progress` at each teardown phase boundary (teardown start,
-    // install start). The phase-3 watchdog treats a bump as "still making
-    // progress" and refreshes its deadline, so a long-but-live install isn't cut
-    // off by a long teardown — each phase gets its own budget rather than sharing
-    // one total.
-    progress: AtomicU64,
-    // Teardown finished (or a watchdog gave up): cleared to exit. Gates the
-    // CloseRequested/ExitRequested arms so the final app.exit(0) isn't re-caught.
-    approved: AtomicBool,
-    // Bumped on every request_quit and on quit_cancel. A watchdog captures the
-    // seq it was spawned for; if it no longer matches, a repeated trigger or a
-    // cancel has superseded it and the watchdog exits without acting.
-    seq: AtomicU64,
+/// A lock taken for a short read or write, treating poisoning as recoverable:
+/// every value behind one here is plain bookkeeping that a panicking thread
+/// cannot leave half-written into an unusable shape.
+fn guard<T>(lock: &Mutex<T>) -> MutexGuard<'_, T> {
+    lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-// Phase 1: no ack within this window ⇒ webview listener is dead — exit.
+// ── Window ownership (docs/specs/standalone.md §Windows) ──────────────────────
+//
+// The sidecar has no window concept, so Rust keeps the map from PTY to window
+// and routes every stdout line through `routing::route`.
+#[derive(Default)]
+struct WindowState {
+    /// ptyId -> window label. Minted only in `pty_spawn`, dropped by
+    /// `pty_kill`, an exit, or a window going away; reassigned by a transfer.
+    owners: Mutex<HashMap<String, String>>,
+    /// Ids whose output is suppressed until the replay their new owner is about
+    /// to be sent has been emitted, each with the instant it began.
+    awaiting_replay: Mutex<HashMap<String, Instant>>,
+    /// Window labels, most recently focused first.
+    focus_order: Mutex<Vec<String>>,
+    /// A torn-out window's boot payload, pulled by `take_boot_payload`. Pulled,
+    /// never pushed: an `emit_to` a window that does not exist yet is lost.
+    pending_boot: Mutex<HashMap<String, JsonValue>>,
+    /// The window currently showing a cross-window drop caret, so the previous
+    /// one can be told to clear it.
+    hover_target: Mutex<Option<String>>,
+    /// Labels whose snapshot has been deliberately removed. A save arriving
+    /// from a webview that is going away must not put the file back.
+    closing: Mutex<std::collections::HashSet<String>>,
+    /// The next `ws-<n>`, seeded above every live and saved label at setup.
+    next_ws: AtomicU64,
+}
+
+impl WindowState {
+    fn owned_by(&self, label: &str) -> Vec<String> {
+        guard(&self.owners)
+            .iter()
+            .filter(|(_, owner)| owner.as_str() == label)
+            .map(|(id, _)| id.clone())
+            .collect()
+    }
+
+    fn mint(&self, id: &str, label: &str) {
+        guard(&self.owners).insert(id.to_string(), label.to_string());
+    }
+
+    /// Hand `ids` to `label` and suppress their output until each one's replay
+    /// has been emitted to it (docs/specs/standalone.md §Transfer).
+    fn reassign(&self, ids: &[String], label: &str) {
+        let mut owners = guard(&self.owners);
+        let mut awaiting = guard(&self.awaiting_replay);
+        let now = Instant::now();
+        for id in ids {
+            owners.insert(id.clone(), label.to_string());
+            awaiting.insert(id.clone(), now);
+        }
+    }
+
+    /// Forget a window: its ownership, its focus entry, and any boot payload it
+    /// never pulled. Returns the ids it owned.
+    fn drop_window(&self, label: &str) -> Vec<String> {
+        let owned = self.owned_by(label);
+        let mut owners = guard(&self.owners);
+        for id in &owned {
+            owners.remove(id);
+        }
+        drop(owners);
+        guard(&self.focus_order).retain(|entry| entry != label);
+        guard(&self.pending_boot).remove(label);
+        owned
+    }
+
+    fn touch_focus(&self, label: &str) {
+        let mut order = guard(&self.focus_order);
+        order.retain(|entry| entry != label);
+        order.insert(0, label.to_string());
+    }
+}
+
+/// Route one sidecar stdout line to the window it belongs to.
+fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
+    let Some(state) = app.try_state::<WindowState>() else {
+        let _ = app.emit(event, data);
+        return;
+    };
+    // Read once, ahead of the emit that moves `data`.
+    let id = data
+        .get("id")
+        .and_then(JsonValue::as_str)
+        .map(str::to_string);
+
+    let decision = {
+        let owners = guard(&state.owners);
+        let mut awaiting = guard(&state.awaiting_replay);
+        for stale in routing::sweep_awaiting(
+            &mut awaiting,
+            Instant::now(),
+            routing::AWAITING_REPLAY_MAX,
+        ) {
+            append_log(format!(
+                "[window] transfer suppression for {stale} expired; releasing"
+            ));
+        }
+        let focus = guard(&state.focus_order);
+        routing::route(
+            event,
+            &data,
+            &RouteView {
+                owners: &owners,
+                awaiting_replay: &awaiting,
+                focused: focus.first().map(String::as_str),
+            },
+        )
+    };
+
+    match decision {
+        Route::Drop => {}
+        Route::Broadcast => {
+            let _ = app.emit(event, data);
+        }
+        Route::EmitTo(label) => {
+            let _ = app.emit_to(label.as_str(), event, data);
+        }
+        Route::UnownedSurface {
+            request_id,
+            surface_id,
+        } => {
+            // Never a sibling window: acting on the wrong terminal is worse
+            // than failing (docs/specs/dor-cli.md → "Control socket").
+            if let Some(sidecar) = app.try_state::<SidecarState>() {
+                let response = serde_json::json!({
+                    "event": "dor:controlResponse",
+                    "data": {
+                        "requestId": request_id,
+                        "ok": false,
+                        "error": format!("No Dormouse window owns surface '{surface_id}'"),
+                    },
+                });
+                send_to_sidecar(&sidecar, response.to_string());
+            }
+        }
+    }
+
+    // Bookkeeping strictly after the emit, so a replay lifts its own
+    // suppression only once the new owner has actually been sent it.
+    if let Some(id) = id {
+        match event {
+            "pty:exit" => {
+                guard(&state.owners).remove(&id);
+                guard(&state.awaiting_replay).remove(&id);
+            }
+            "pty:replay" => {
+                guard(&state.awaiting_replay).remove(&id);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Tell the sidecar's Burrow how many webviews will answer an ask
+/// (docs/specs/standalone.md §Burrow service).
+fn send_window_count(app: &AppHandle) {
+    let Some(state) = app.try_state::<SidecarState>() else {
+        return;
+    };
+    let count = app.webview_windows().len();
+    send_to_sidecar(
+        &state,
+        serde_json::json!({ "event": "burrow:windows", "data": { "count": count } }).to_string(),
+    );
+}
+
+// ── Quit interception ─────────────────────────────────────────────────────────
+//
+// Every quit trigger funnels through `request_quit`, which asks each window's
+// orchestrator (standalone/src/quit.ts) to vote, then walks them one at a time.
+// Protocol + watchdog phases: docs/specs/standalone.md §Quit flow.
+#[derive(Default)]
+struct QuitState {
+    machine: Mutex<QuitMachine>,
+    close: Mutex<CloseMachine>,
+}
+
+// Phase 1: no ack within this window ⇒ a webview listener is dead — exit.
 const QUIT_ACK_TIMEOUT_MS: u64 = 2_000;
-// Phase 3: per-phase budget once teardown is running. Each reported phase
-// (teardown, install) refreshes it, so it bounds a single stalled phase, not the
-// sum of all teardown work. Comfortably exceeds the webview's own 10 s teardown
-// ceiling (docs/specs/standalone.md §Quit flow).
+// Phase 3: per-phase budget once a window's teardown is running. Each reported
+// phase (teardown, install) refreshes it, so it bounds a single stalled phase,
+// not the sum of all teardown work. Comfortably exceeds the webview's own 10 s
+// teardown ceiling (docs/specs/standalone.md §Quit flow).
 const QUIT_PHASE_TIMEOUT_MS: u64 = 14_000;
 const QUIT_POLL_STEP_MS: u64 = 500;
+// A per-window close whose webview never acks: its listener is dead, so close it.
+const CLOSE_ACK_TIMEOUT_MS: u64 = 2_000;
 
 fn quit_approved(app: &AppHandle) -> bool {
     app.try_state::<QuitState>()
-        .is_some_and(|q| q.approved.load(Ordering::SeqCst))
+        .is_some_and(|state| guard(&state.machine).approved)
+}
+
+/// Whether the windows are already being torn down, in which case a `destroy`
+/// must not re-enter the quit as a fresh close.
+fn quit_walking(app: &AppHandle) -> bool {
+    app.try_state::<QuitState>().is_some_and(|state| {
+        matches!(
+            guard(&state.machine).phase,
+            quit_state::QuitPhase::Walking { .. }
+        )
+    })
+}
+
+fn window_labels(app: &AppHandle) -> Vec<String> {
+    app.webview_windows().keys().cloned().collect()
+}
+
+/// Perform what a `QuitMachine` transition asked for.
+fn apply_quit_actions(app: &AppHandle, actions: Vec<QuitAction>) {
+    for action in actions {
+        match action {
+            QuitAction::RequestAll => {
+                let _ = app.emit("dormouse://quit-requested", ());
+            }
+            QuitAction::CancelAll => {
+                let _ = app.emit("dormouse://quit-cancelled", ());
+            }
+            QuitAction::Teardown { label, last } => {
+                let _ = app.emit_to(
+                    label.as_str(),
+                    "dormouse://quit-teardown",
+                    serde_json::json!({ "last": last }),
+                );
+            }
+            QuitAction::Destroy { label } => {
+                if let Some(window) = app.get_webview_window(&label) {
+                    // The snapshot stays on disk — that is what separates a
+                    // quit from a per-window close.
+                    if let Some(state) = app.try_state::<WindowState>() {
+                        state.drop_window(&label);
+                    }
+                    let _ = window.destroy();
+                }
+            }
+            QuitAction::Exit => {
+                if let Some(state) = app.try_state::<QuitState>() {
+                    guard(&state.machine).approved = true;
+                }
+                app.exit(0);
+            }
+        }
+    }
 }
 
 fn request_quit(app: &AppHandle) {
-    let Some(quit) = app.try_state::<QuitState>() else {
+    let Some(state) = app.try_state::<QuitState>() else {
         return;
     };
-    quit.acked.store(false, Ordering::SeqCst);
-    // Deliberately do NOT reset `tearing_down` here. A cancel happens before
-    // teardown, so it's already false for a genuinely fresh quit; and once
-    // teardown begins it only ever ends in `quit_proceed` (app exit), so a repeat
-    // trigger fired mid-teardown must keep the flag set — otherwise the fresh
-    // watchdog would drop into the unbounded phase-2 wait and stop bounding the
-    // in-flight teardown.
-    // fetch_add returns the prior value; our watchdog's seq is that + 1.
-    let my_seq = quit.seq.fetch_add(1, Ordering::SeqCst) + 1;
-    let _ = app.emit("dormouse://quit-requested", ());
+    let labels = window_labels(app);
+    let (my_seq, actions) = guard(&state.machine).request(&labels);
+    apply_quit_actions(app, actions);
 
-    // Watchdog: a cloned handle polls QuitState so a dead or wedged webview can't
-    // make quit hang. A repeated trigger bumps seq, so this (now-stale) watchdog
-    // returns and the fresh request_quit spawns a replacement.
+    // Watchdog: a cloned handle polls the machine so a dead or wedged webview
+    // can't make quit hang. A repeated trigger bumps seq, so this (now-stale)
+    // watchdog returns and the fresh request_quit spawns a replacement.
     let app = app.clone();
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_millis(QUIT_ACK_TIMEOUT_MS));
-        let Some(quit) = app.try_state::<QuitState>() else {
-            return;
-        };
-        // Superseded (seq bumped by a repeated trigger or a cancel) or already
-        // exiting (approved) ⇒ this watchdog has nothing to do.
-        let stale = |quit: &QuitState| {
-            quit.seq.load(Ordering::SeqCst) != my_seq || quit.approved.load(Ordering::SeqCst)
-        };
-        if stale(&quit) {
-            return;
-        }
-        if !quit.acked.load(Ordering::SeqCst) {
-            append_log("[quit] no ack from webview; exiting");
-            quit.approved.store(true, Ordering::SeqCst);
-            app.exit(0);
-            return;
-        }
-        // Phase 2: acked but teardown hasn't begun. The webview may be parked on
-        // the confirmation dialog waiting for a human, so hold with no deadline —
-        // only proceed (approved) or cancel (seq bump) ends the wait.
-        while !quit.tearing_down.load(Ordering::SeqCst) {
-            std::thread::sleep(Duration::from_millis(QUIT_POLL_STEP_MS));
-            if stale(&quit) {
-                return;
+        let give_up = |reason: &str| {
+            append_log(format!("[quit] {reason}; exiting"));
+            if let Some(state) = app.try_state::<QuitState>() {
+                guard(&state.machine).approved = true;
             }
+            app.exit(0);
+        };
+        let Some(acked) = read_quit(&app, my_seq, QuitMachine::all_acked) else {
+            return;
+        };
+        if !acked {
+            give_up("a window never acked");
+            return;
         }
-        // Phase 3: teardown running. Bound it, but a `quit_progress` bump (a phase
-        // boundary: teardown start, install start) refreshes the deadline so one
-        // long phase can't starve the next — each phase gets its own budget.
-        let mut last_progress = quit.progress.load(Ordering::SeqCst);
+        // Phase 2: acked but no window has begun tearing down. Each may be
+        // parked on its confirmation dialog waiting for a human, who must never
+        // be force-quit out from under it — so hold with no deadline.
+        loop {
+            let Some(walking) = read_quit(&app, my_seq, |machine| {
+                machine.walking_progress().is_some()
+            }) else {
+                return;
+            };
+            if walking {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(QUIT_POLL_STEP_MS));
+        }
+        // Phase 3: one window is tearing down. Bound it, but a `quit_progress`
+        // bump (a phase boundary) or the walk advancing to the next window
+        // refreshes the deadline, so each phase gets its own budget.
+        let mut last = read_quit(&app, my_seq, QuitMachine::walking_progress);
         let mut elapsed = 0u64;
         loop {
             std::thread::sleep(Duration::from_millis(QUIT_POLL_STEP_MS));
-            if stale(&quit) {
+            let Some(now) = read_quit(&app, my_seq, QuitMachine::walking_progress) else {
                 return;
-            }
-            let progress = quit.progress.load(Ordering::SeqCst);
-            if progress != last_progress {
-                last_progress = progress;
+            };
+            if Some(&now) != last.as_ref() {
+                last = Some(now);
                 elapsed = 0;
                 continue;
             }
             elapsed += QUIT_POLL_STEP_MS;
             if elapsed >= QUIT_PHASE_TIMEOUT_MS {
-                append_log("[quit] teardown phase stalled; exiting");
-                quit.approved.store(true, Ordering::SeqCst);
-                app.exit(0);
+                give_up("teardown phase stalled");
                 return;
             }
         }
     });
+}
+
+/// Read the quit machine on behalf of a watchdog spawned for `seq`. `None`
+/// means the watchdog has been superseded (a repeat trigger or a cancel) or the
+/// app is already exiting, and it must stand down without acting.
+fn read_quit<T>(app: &AppHandle, seq: u64, read: impl FnOnce(&QuitMachine) -> T) -> Option<T> {
+    let state = app.try_state::<QuitState>()?;
+    let machine = guard(&state.machine);
+    if machine.stale(seq) {
+        return None;
+    }
+    Some(read(&machine))
+}
+
+/// Ask one window to close itself (docs/specs/standalone.md §Per-window close).
+/// The app keeps running; only the last window's close is a quit.
+fn request_window_close(app: &AppHandle, label: &str) {
+    let Some(state) = app.try_state::<QuitState>() else {
+        return;
+    };
+    let my_seq = guard(&state.close).request(label);
+    let _ = app.emit_to(label, "dormouse://window-close-requested", ());
+
+    let app = app.clone();
+    let label = label.to_string();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(CLOSE_ACK_TIMEOUT_MS));
+        let Some(state) = app.try_state::<QuitState>() else {
+            return;
+        };
+        let close = guard(&state.close);
+        if close.stale(&label, my_seq) || close.acked(&label) {
+            return;
+        }
+        drop(close);
+        append_log(format!(
+            "[window] {label} never acked its close; closing it anyway"
+        ));
+        finish_window_close(&app, &label);
+    });
+}
+
+/// The last step of a per-window close: forget the window's PTYs and its
+/// snapshot, then destroy it. Called from `window_close_proceed`, and from the
+/// ack watchdog when the webview never answered.
+fn finish_window_close(app: &AppHandle, label: &str) {
+    if let Some(state) = app.try_state::<QuitState>() {
+        guard(&state.close).clear(label);
+        // Bound before the call: the guard would otherwise live for the whole
+        // statement, and `apply_quit_actions` takes the same lock.
+        let actions = guard(&state.machine).forget_window(label);
+        apply_quit_actions(app, actions);
+    }
+    if let Some(state) = app.try_state::<WindowState>() {
+        state.drop_window(label);
+    }
+    if let Ok(dir) = sessions_dir(app) {
+        if let Err(err) = remove_session_from(&dir, label) {
+            append_log(format!("[session] {err}"));
+        }
+    }
+    if let Some(window) = app.get_webview_window(label) {
+        let _ = window.destroy();
+    }
+    send_window_count(app);
 }
 
 const LOG_FILE_ENV: &str = "DORMOUSE_LOG_FILE";
@@ -369,8 +639,17 @@ fn request_from_sidecar_timeout(
 
 // ── Tauri commands ──────────────────────────────────────────────────────────
 
+/// The only place PTY ownership is minted: whichever window asked for the PTY
+/// owns it until a transfer moves it (docs/specs/standalone.md §Windows).
 #[tauri::command]
-fn pty_spawn(state: tauri::State<'_, SidecarState>, id: String, options: Option<PtySpawnOptions>) {
+fn pty_spawn(
+    window: tauri::Window,
+    state: tauri::State<'_, SidecarState>,
+    windows: tauri::State<'_, WindowState>,
+    id: String,
+    options: Option<PtySpawnOptions>,
+) {
+    windows.mint(&id, window.label());
     let msg = serde_json::json!({
         "event": "pty:spawn",
         "data": { "id": id, "options": options }
@@ -409,7 +688,8 @@ fn pty_theme_colors(state: tauri::State<'_, SidecarState>, colors: JsonValue) {
 }
 
 #[tauri::command]
-fn pty_kill(state: tauri::State<'_, SidecarState>, id: String) {
+fn pty_kill(state: tauri::State<'_, SidecarState>, windows: tauri::State<'_, WindowState>, id: String) {
+    guard(&windows.owners).remove(&id);
     let msg = serde_json::json!({
         "event": "pty:kill",
         "data": { "id": id }
@@ -417,9 +697,19 @@ fn pty_kill(state: tauri::State<'_, SidecarState>, id: String) {
     send_to_sidecar(&state, msg.to_string());
 }
 
+/// List and replay only what this window owns. The answer names the window, so
+/// the `pty:list` and every `pty:replay` behind it route back to the asker
+/// alone (docs/specs/standalone.md §Windows).
 #[tauri::command]
-fn pty_request_init(state: tauri::State<'_, SidecarState>) {
-    let msg = serde_json::json!({ "event": "pty:requestInit" });
+fn pty_request_init(
+    window: tauri::Window,
+    state: tauri::State<'_, SidecarState>,
+    windows: tauri::State<'_, WindowState>,
+) {
+    let msg = serde_json::json!({
+        "event": "pty:requestInit",
+        "data": { "forWindow": window.label(), "ids": windows.owned_by(window.label()) },
+    });
     send_to_sidecar(&state, msg.to_string());
 }
 
@@ -503,18 +793,29 @@ fn pty_get_open_ports(
         .unwrap_or_else(|| JsonValue::Array(Vec::new())))
 }
 
-// Wait for PTY exits and their final output before shutdown. Async: waits up to
-// `timeout + 1500ms` (margin for the round trip beyond the sidecar's own kill
-// timer) and must not block the main thread for that long.
+// Wait for PTY exits and their final output before this window goes away.
+// Async: waits up to `timeout + 1500ms` (margin for the round trip beyond the
+// sidecar's own kill timer) and must not block the main thread for that long.
+//
+// **Scoped to the caller's own PTYs**, whether it names ids or not: a window
+// tearing down must never kill a sibling's terminals.
 #[tauri::command]
-async fn pty_graceful_kill_all(
+async fn pty_graceful_kill(
+    window: tauri::Window,
     state: tauri::State<'_, SidecarState>,
+    windows: tauri::State<'_, WindowState>,
+    ids: Option<Vec<String>>,
     timeout: u64,
 ) -> Result<(), String> {
+    let owned = windows.owned_by(window.label());
+    let targets: Vec<String> = match ids {
+        Some(ids) => ids.into_iter().filter(|id| owned.contains(id)).collect(),
+        None => owned,
+    };
     request_from_sidecar_timeout(
         &state,
-        "pty:gracefulKillAll",
-        serde_json::json!({ "timeout": timeout }),
+        "pty:gracefulKill",
+        serde_json::json!({ "ids": targets, "timeout": timeout }),
         Duration::from_millis(timeout + 1500),
     )?;
     Ok(())
@@ -533,10 +834,16 @@ async fn pty_graceful_kill_all(
 /// between the interrupt and the kill.
 #[tauri::command(async)]
 fn capture_agent_recovery(
+    window: tauri::Window,
     state: tauri::State<'_, SidecarState>,
+    windows: tauri::State<'_, WindowState>,
     ids: Option<Vec<String>>,
     timeout: u64,
 ) -> Result<(), String> {
+    // Defaults to this window's own PTYs: a quit walks the windows one at a
+    // time, and interrupting a sibling's agents would destroy the very hint the
+    // sibling is about to capture.
+    let ids = ids.unwrap_or_else(|| windows.owned_by(window.label()));
     request_from_sidecar_timeout(
         &state,
         "pty:captureRecovery",
@@ -1102,6 +1409,14 @@ async fn load_session(window: tauri::Window) -> Result<Option<String>, String> {
 
 #[tauri::command]
 async fn save_session(window: tauri::Window, state: String) -> Result<(), String> {
+    // A deliberate close removes the snapshot; a save still in flight from the
+    // webview that is going away must not put it back
+    // (docs/specs/standalone.md §Per-window close).
+    if let Some(windows) = window.app_handle().try_state::<WindowState>() {
+        if guard(&windows.closing).contains(window.label()) {
+            return Ok(());
+        }
+    }
     write_session_to(&sessions_dir(window.app_handle())?, window.label(), &state)
 }
 
@@ -1148,6 +1463,123 @@ fn sweep_orphan_session_temps(dir: &Path) -> Result<(), String> {
         }
     }
     first_error.map_or(Ok(()), Err)
+}
+
+/// Delete everything a window leaves on disk: its snapshot, any temp write, and
+/// its geometry sibling. A per-window close is deliberate, so unlike a quit it
+/// takes the window off the next launch's restore list
+/// (docs/specs/standalone.md §Per-window close).
+fn remove_session_from(dir: &Path, label: &str) -> Result<(), String> {
+    let mut first_error = None;
+    let session = dir.join(session_file_name(label));
+    for path in [temp_write_path(&session), geometry_path(dir, label), session] {
+        match std::fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) if first_error.is_none() => {
+                first_error = Some(format!("remove {}: {e}", path.display()));
+            }
+            Err(_) => {}
+        }
+    }
+    first_error.map_or(Ok(()), Err)
+}
+
+// --- Window geometry (docs/specs/standalone.md §Windows) ---------------------
+//
+// A sibling of the session snapshot rather than `tauri-plugin-window-state`:
+// one store answers "which windows exist", the boot enumeration is already
+// Rust's job, and no new Cargo/npm dependency rides the disclosure and cooldown.
+
+/// Logical, not physical: a snapshot taken on one display must reopen sensibly
+/// on another with a different scale factor.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+struct WindowGeometry {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
+
+/// Moves and resizes arrive per frame while a window is dragged; write at most
+/// one file per window per this interval.
+const GEOMETRY_DEBOUNCE_MS: u64 = 400;
+
+#[derive(Default)]
+struct GeometryState {
+    pending: Mutex<HashMap<String, WindowGeometry>>,
+    /// Whether a debounce thread is already going to drain `pending`.
+    flushing: std::sync::atomic::AtomicBool,
+}
+
+fn geometry_path(dir: &Path, label: &str) -> PathBuf {
+    let safe = session_file_name(label);
+    let stem = safe.strip_suffix(".json").unwrap_or(&safe);
+    dir.join(format!("{stem}.geometry.json"))
+}
+
+fn read_geometry(dir: &Path, label: &str) -> Option<WindowGeometry> {
+    let raw = std::fs::read_to_string(geometry_path(dir, label)).ok()?;
+    serde_json::from_str(&raw).ok()
+}
+
+/// Record this window's box and schedule the debounced write.
+fn note_geometry(app: &AppHandle, label: &str) {
+    let Some(window) = app.get_webview_window(label) else {
+        return;
+    };
+    // A minimized window reports a nonsense box on some platforms; keep the
+    // last real one instead.
+    if window.is_minimized().unwrap_or(false) {
+        return;
+    }
+    let scale = window.scale_factor().unwrap_or(1.0);
+    let (Ok(position), Ok(size)) = (window.outer_position(), window.outer_size()) else {
+        return;
+    };
+    let position = position.to_logical::<f64>(scale);
+    let size = size.to_logical::<f64>(scale);
+    let Some(state) = app.try_state::<GeometryState>() else {
+        return;
+    };
+    guard(&state.pending).insert(
+        label.to_string(),
+        WindowGeometry {
+            x: position.x,
+            y: position.y,
+            width: size.width,
+            height: size.height,
+        },
+    );
+    if state
+        .flushing
+        .swap(true, Ordering::SeqCst)
+    {
+        return;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(GEOMETRY_DEBOUNCE_MS));
+        let Some(state) = app.try_state::<GeometryState>() else {
+            return;
+        };
+        let pending: HashMap<String, WindowGeometry> = std::mem::take(&mut guard(&state.pending));
+        state.flushing.store(false, Ordering::SeqCst);
+        let Ok(dir) = sessions_dir(&app) else { return };
+        for (label, geometry) in pending {
+            // A window that closed inside the debounce took its geometry file
+            // with it; do not resurrect one for it.
+            if app.get_webview_window(&label).is_none() {
+                continue;
+            }
+            let Ok(json) = serde_json::to_string(&geometry) else {
+                continue;
+            };
+            if let Err(err) = write_file_atomically(&geometry_path(&dir, &label), &json) {
+                append_log(format!("[window] geometry write for {label}: {err}"));
+            }
+        }
+    });
 }
 
 // --- Notepad archive (docs/specs/notepad.md) ---------------------------------
@@ -1385,44 +1817,403 @@ fn reset_notepad_archive(
     reset_notepad_archive_at(&notepad_archive_path(&app)?, &archive.gate)
 }
 
+// ── Window lifecycle (docs/specs/standalone.md §Windows) ─────────────────────
+
+/// Every file name in the sessions directory, for the boot enumeration.
+fn session_file_names(dir: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| entry.file_name().to_str().map(str::to_string))
+        .collect()
+}
+
+/// Give `main` back its saved box and reopen every other saved window, in the
+/// order `restorable_labels` produced (`main` first). The cap is a ceiling on
+/// how many windows one launch may open; the excess stays on disk untouched.
+fn restore_windows(app: &AppHandle, dir: &Path, labels: &[String]) {
+    if let Some(window) = app.get_webview_window(routing::MAIN_LABEL) {
+        if let Some(geometry) = read_geometry(dir, routing::MAIN_LABEL) {
+            let _ = window.set_position(tauri::LogicalPosition::new(geometry.x, geometry.y));
+            let _ = window.set_size(tauri::LogicalSize::new(geometry.width, geometry.height));
+        }
+    }
+    let mut opened = 1usize;
+    for label in labels.iter().filter(|label| *label != routing::MAIN_LABEL) {
+        if opened >= routing::MAX_RESTORED_WINDOWS {
+            append_log(format!(
+                "[window] not reopening {label}: {} windows is the cap; its snapshot stays on disk",
+                routing::MAX_RESTORED_WINDOWS
+            ));
+            continue;
+        }
+        // An unreadable snapshot still opens its window: the webview boots
+        // fresh, which is a window the user can use rather than one they lost.
+        if let Err(err) = build_window(app, label, read_geometry(dir, label)) {
+            append_log(format!("[window] {err}"));
+            continue;
+        }
+        opened += 1;
+    }
+    // Last, so it comes up in front of the windows opened behind it.
+    if let Some(window) = app.get_webview_window(routing::MAIN_LABEL) {
+        let _ = window.set_focus();
+    }
+}
+
+
+/// Open a window cloned from `tauri.conf.json`'s first window config, so
+/// `titleBarStyle`, `hiddenTitle`, `dragDropEnabled` and the CSP carry across
+/// without a second copy of any of them.
+fn build_window(
+    app: &AppHandle,
+    label: &str,
+    geometry: Option<WindowGeometry>,
+) -> Result<(), String> {
+    let mut config = app
+        .config()
+        .app
+        .windows
+        .first()
+        .cloned()
+        .ok_or_else(|| "no window config to clone".to_string())?;
+    config.label = label.to_string();
+    if let Some(geometry) = geometry {
+        config.x = Some(geometry.x);
+        config.y = Some(geometry.y);
+        config.width = geometry.width;
+        config.height = geometry.height;
+        // An explicit position and a centering request are contradictory.
+        config.center = false;
+    }
+    let window = WebviewWindowBuilder::from_config(app, &config)
+        .map_err(|err| format!("configure window {label}: {err}"))?
+        .build()
+        .map_err(|err| format!("build window {label}: {err}"))?;
+    // macOS keeps `titleBarStyle: "Overlay"` from the config, which preserves
+    // rounded corners and native traffic lights; everywhere else the title bar
+    // is fully custom (§AppBar).
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = window.set_decorations(false);
+    }
+    #[cfg(target_os = "macos")]
+    let _ = &window;
+    Ok(())
+}
+
+/// The label a new window takes: `ws-<n>` above every live and saved one.
+fn next_window_label(windows: &WindowState) -> String {
+    format!(
+        "{}{}",
+        routing::WS_LABEL_PREFIX,
+        windows.next_ws.fetch_add(1, Ordering::SeqCst)
+    )
+}
+
+/// A Workspace leaving a window: the source window's own view of the departure.
+fn announce_departure(app: &AppHandle, from: &str, workspace_id: &JsonValue) {
+    let _ = app.emit_to(
+        from,
+        "dormouse://workspace-departed",
+        serde_json::json!({ "workspaceId": workspace_id }),
+    );
+}
+
+fn payload_terminal_ids(payload: &JsonValue) -> Vec<String> {
+    payload
+        .get("terminalIds")
+        .and_then(JsonValue::as_array)
+        .map(|ids| {
+            ids.iter()
+                .filter_map(|id| id.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Tear a Workspace out into a brand-new window under the cursor.
+///
+/// The payload is *stored*, never emitted: an `emit_to` a window that does not
+/// exist yet is lost, so the new webview pulls it with `take_boot_payload`
+/// during its own boot (docs/specs/standalone.md §Tear-out).
+#[tauri::command]
+fn open_workspace_window(
+    app: AppHandle,
+    window: tauri::Window,
+    windows: tauri::State<'_, WindowState>,
+    payload: JsonValue,
+) -> Result<String, String> {
+    let label = next_window_label(&windows);
+    // Ownership moves before the window exists, so every byte from this instant
+    // is suppressed rather than painted in the window losing the Workspace.
+    windows.reassign(&payload_terminal_ids(&payload), &label);
+    let geometry = {
+        let scale = window.scale_factor().unwrap_or(1.0);
+        let size = window
+            .outer_size()
+            .map(|size| size.to_logical::<f64>(scale))
+            .ok();
+        let at = payload.get("at");
+        match (at.and_then(|at| at.get("x")), at.and_then(|at| at.get("y")), size) {
+            (Some(x), Some(y), Some(size)) => x.as_f64().zip(y.as_f64()).map(|(x, y)| WindowGeometry {
+                x,
+                y,
+                width: size.width,
+                height: size.height,
+            }),
+            _ => None,
+        }
+    };
+    guard(&windows.pending_boot).insert(label.clone(), payload.clone());
+    if let Err(err) = build_window(&app, &label, geometry) {
+        // Nothing will ever pull the payload, and the PTYs would stay
+        // suppressed and ownerless: hand them straight back.
+        guard(&windows.pending_boot).remove(&label);
+        windows.reassign(&payload_terminal_ids(&payload), window.label());
+        for id in payload_terminal_ids(&payload) {
+            guard(&windows.awaiting_replay).remove(&id);
+        }
+        return Err(err);
+    }
+    send_window_count(&app);
+    announce_departure(
+        &app,
+        window.label(),
+        payload.get("workspaceId").unwrap_or(&JsonValue::Null),
+    );
+    Ok(label)
+}
+
+/// Move a Workspace into a window that already exists.
+///
+/// Ownership and the output suppression move synchronously here, before either
+/// window is told anything: the single Rust reader thread processes sidecar
+/// lines in order, so every byte after this point is either dropped (and
+/// present in the replay the target is about to get) or delivered to the target
+/// (docs/specs/standalone.md §Transfer).
+#[tauri::command]
+fn transfer_workspace(
+    app: AppHandle,
+    window: tauri::Window,
+    windows: tauri::State<'_, WindowState>,
+    to: String,
+    payload: JsonValue,
+) -> Result<(), String> {
+    if app.get_webview_window(&to).is_none() {
+        return Err(format!("no window '{to}'"));
+    }
+    if to == window.label() {
+        return Err("a Workspace cannot be transferred to its own window".to_string());
+    }
+    windows.reassign(&payload_terminal_ids(&payload), &to);
+    let _ = app.emit_to(to.as_str(), "dormouse://workspace-arriving", payload.clone());
+    announce_departure(
+        &app,
+        window.label(),
+        payload.get("workspaceId").unwrap_or(&JsonValue::Null),
+    );
+    Ok(())
+}
+
+/// The target has armed its collector; ask the sidecar to list and replay every
+/// PTY still suppressed for it. This hop is what removes the whole
+/// "arrived before armed" bug class.
+#[tauri::command]
+fn adopt_ready(
+    window: tauri::Window,
+    state: tauri::State<'_, SidecarState>,
+    windows: tauri::State<'_, WindowState>,
+) {
+    let label = window.label();
+    // Exactly the arriving set: owned by this window and still suppressed.
+    let ids: Vec<String> = {
+        let owners = guard(&windows.owners);
+        guard(&windows.awaiting_replay)
+            .keys()
+            .filter(|id| owners.get(*id).map(String::as_str) == Some(label))
+            .cloned()
+            .collect()
+    };
+    if ids.is_empty() {
+        return;
+    }
+    let msg = serde_json::json!({
+        "event": "pty:requestInit",
+        "data": { "forWindow": label, "ids": ids },
+    });
+    send_to_sidecar(&state, msg.to_string());
+}
+
+/// A torn-out window's boot payload, or null for an ordinary window. Taking it
+/// consumes it: a reload must boot from the snapshot it has since written.
+#[tauri::command]
+fn take_boot_payload(window: tauri::Window, windows: tauri::State<'_, WindowState>) -> JsonValue {
+    guard(&windows.pending_boot)
+        .remove(window.label())
+        .unwrap_or(JsonValue::Null)
+}
+
+/// Remove this window's persisted snapshot and stop it being written again.
+#[tauri::command]
+async fn remove_window_session(window: tauri::Window) -> Result<(), String> {
+    let app = window.app_handle();
+    if let Some(windows) = app.try_state::<WindowState>() {
+        guard(&windows.closing).insert(window.label().to_string());
+    }
+    remove_session_from(&sessions_dir(app)?, window.label())
+}
+
+/// Which window is under the cursor, in that window's own logical client space.
+///
+/// Tauri exposes no z-order, so among the windows containing the point the most
+/// recently focused wins — right for a drag, and the hover caret makes a wrong
+/// guess visible before release.
+#[tauri::command]
+fn window_at_cursor(
+    app: AppHandle,
+    windows: tauri::State<'_, WindowState>,
+) -> Option<routing::CursorHit> {
+    let point = app.cursor_position().ok()?;
+    let rects: Vec<routing::WindowRect> = app
+        .webview_windows()
+        .into_iter()
+        .filter_map(|(label, window)| {
+            Some(routing::WindowRect {
+                label,
+                origin: {
+                    let position = window.outer_position().ok()?;
+                    (position.x, position.y)
+                },
+                size: {
+                    let size = window.outer_size().ok()?;
+                    (size.width, size.height)
+                },
+                scale: window.scale_factor().unwrap_or(1.0),
+                hittable: window.is_visible().unwrap_or(true)
+                    && !window.is_minimized().unwrap_or(false),
+            })
+        })
+        .collect();
+    let focus_order = guard(&windows.focus_order).clone();
+    routing::window_at(&rects, &focus_order, (point.x, point.y))
+}
+
+/// Show (or clear) another window's drop caret while a tab is dragged over it.
+/// The previously hovered window is always cleared, so a caret can never be
+/// left behind in a window the pointer has since left.
+#[tauri::command]
+fn hover_workspace_target(
+    app: AppHandle,
+    windows: tauri::State<'_, WindowState>,
+    label: Option<String>,
+    x: f64,
+    y: f64,
+) {
+    let mut current = guard(&windows.hover_target);
+    if current.as_deref() != label.as_deref() {
+        if let Some(previous) = current.as_deref() {
+            let _ = app.emit_to(previous, "dormouse://workspace-drop-hover", JsonValue::Null);
+        }
+    }
+    *current = label.clone();
+    if let Some(label) = label {
+        let _ = app.emit_to(
+            label.as_str(),
+            "dormouse://workspace-drop-hover",
+            serde_json::json!({ "x": x, "y": y }),
+        );
+    }
+}
+
 #[tauri::command]
 fn kill_sidecar_now(state: tauri::State<'_, SidecarState>) {
     kill_sidecar_and_wait(&state.child);
 }
 
 // ── Quit protocol commands (docs/specs/standalone.md §Quit flow) ─────────────
+//
+// Every one keys by the invoking window's label: a quit is N conversations, and
+// only the window that voted may be the window that tears down.
 
-// The webview's quit orchestrator received quit-requested and its listener is
+// This window's quit orchestrator received quit-requested and its listener is
 // alive; stand the phase-1 ack watchdog down.
 #[tauri::command]
-fn quit_ack(state: tauri::State<'_, QuitState>) {
-    state.acked.store(true, Ordering::SeqCst);
+fn quit_ack(window: tauri::Window, state: tauri::State<'_, QuitState>) {
+    guard(&state.machine).ack(window.label());
 }
 
-// The orchestrator has started (or advanced) teardown: the confirmation wait is
-// over, and this phase boundary refreshes the watchdog's per-phase deadline. The
-// webview calls this at teardown start and again before installing an update, so
-// a long install gets its own budget instead of sharing the teardown clock.
+// This window is ready to be torn down: its confirmation and archive gates are
+// done. The last vote starts the walk.
 #[tauri::command]
-fn quit_progress(state: tauri::State<'_, QuitState>) {
-    state.tearing_down.store(true, Ordering::SeqCst);
-    state.progress.fetch_add(1, Ordering::SeqCst);
+fn quit_vote(app: AppHandle, window: tauri::Window, state: tauri::State<'_, QuitState>) {
+    let actions = guard(&state.machine).vote(window.label());
+    apply_quit_actions(&app, actions);
 }
 
-// The user declined the quit (confirmation cancel). Bumping seq invalidates any
-// live watchdog for this quit so nothing exits; the next request_quit starts
-// fresh (it re-clears `acked` itself).
+// This window has started (or advanced) its teardown: the vote wait is over,
+// and this phase boundary refreshes the watchdog's per-phase deadline. Sent at
+// teardown start and again before installing an update, so a long install gets
+// its own budget instead of sharing the teardown clock.
 #[tauri::command]
-fn quit_cancel(state: tauri::State<'_, QuitState>) {
-    state.seq.fetch_add(1, Ordering::SeqCst);
+fn quit_progress(window: tauri::Window, state: tauri::State<'_, QuitState>) {
+    guard(&state.machine).progress(window.label());
 }
 
-// Teardown is done (or the orchestrator bailed under its own timeout); approve so
-// the app.exit(0) below re-enters ExitRequested with approved=true and proceeds.
+// A window declined the quit. Bumping seq invalidates any live watchdog so
+// nothing exits, every window's dialog is told to close, and nothing has been
+// destroyed — which is the whole reason the windows vote before they walk.
+#[tauri::command]
+fn quit_cancel(app: AppHandle, state: tauri::State<'_, QuitState>) {
+    let actions = guard(&state.machine).cancel();
+    apply_quit_actions(&app, actions);
+}
+
+// A non-last window finished its teardown: destroy it and start the next one.
+// Its snapshot stays on disk, which is what a relaunch restores it from.
+#[tauri::command]
+fn quit_window_done(app: AppHandle, window: tauri::Window, state: tauri::State<'_, QuitState>) {
+    let actions = guard(&state.machine).window_done(window.label());
+    apply_quit_actions(&app, actions);
+}
+
+// The last window is done (or its orchestrator bailed under its own timeout);
+// approve so the app.exit(0) re-enters ExitRequested with approved=true.
 #[tauri::command]
 fn quit_proceed(app: AppHandle, state: tauri::State<'_, QuitState>) {
-    state.approved.store(true, Ordering::SeqCst);
-    app.exit(0);
+    let actions = guard(&state.machine).proceed();
+    apply_quit_actions(&app, actions);
+}
+
+// ── Per-window close (docs/specs/standalone.md §Per-window close) ─────────────
+
+// This window's close orchestrator is alive; stand its ack watchdog down.
+#[tauri::command]
+fn window_close_ack(window: tauri::Window, state: tauri::State<'_, QuitState>) {
+    guard(&state.close).ack(window.label());
+}
+
+// The user declined the close, or its archive gate refused it. The window stays
+// exactly as it was.
+#[tauri::command]
+fn window_close_cancel(window: tauri::Window, state: tauri::State<'_, QuitState>) {
+    guard(&state.close).clear(window.label());
+}
+
+// The window archived its notes, removed its snapshot and killed its PTYs.
+#[tauri::command]
+fn window_close_proceed(app: AppHandle, window: tauri::Window) {
+    finish_window_close(&app, window.label());
+}
+
+// A window whose last Workspace moved away closes with no confirmation, no
+// archive and no kill: its Surfaces are alive in another window
+// (docs/specs/standalone.md §Transfer).
+#[tauri::command]
+fn close_window_self(app: AppHandle, window: tauri::Window) {
+    finish_window_close(&app, window.label());
 }
 
 // Normal app quit should let the Node sidecar run its shutdown handler first:
@@ -1856,7 +2647,9 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
                 }
             }
 
-            let _ = handle.emit(&event, data);
+            // Every line goes through the ownership map: one sidecar serves
+            // every window (§Windows).
+            dispatch_sidecar_event(&handle, &event, data);
         }
     });
 
@@ -1973,30 +2766,58 @@ pub fn run() {
             let refs: Vec<&dyn tauri::menu::IsMenuItem<_>> = items.iter().map(|b| b.as_ref()).collect();
             Menu::with_items(handle, &refs)
         })
-        // Inert while tauri.conf.json sets dragDropEnabled=false (needed for HTML5 pane drag). See diffplug/dormouse#38 and tauri-apps/tauri#14373.
         .on_window_event(|window, event| {
-            if let WindowEvent::DragDrop(DragDropEvent::Drop { paths, .. }) = event {
-                let payload: Vec<String> = paths
-                    .iter()
-                    .map(|p| p.to_string_lossy().into_owned())
-                    .collect();
-                let _ = window.emit("dormouse://files-dropped", serde_json::json!({ "paths": payload }));
-            }
-            // Window close funnels into the app-wide quit flow (§Quit flow).
-            // Multi-window seam: one window ships today, so a per-window close is
-            // the whole-app quit; a multi-window build would give each close a
-            // per-window teardown and only quit on the last one.
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                let app = window.app_handle();
-                if !quit_approved(app) {
-                    api.prevent_close();
-                    request_quit(app);
+            let app = window.app_handle();
+            match event {
+                // Inert while tauri.conf.json sets dragDropEnabled=false (needed for HTML5 pane drag). See diffplug/dormouse#38 and tauri-apps/tauri#14373.
+                WindowEvent::DragDrop(DragDropEvent::Drop { paths, .. }) => {
+                    let payload: Vec<String> = paths
+                        .iter()
+                        .map(|p| p.to_string_lossy().into_owned())
+                        .collect();
+                    let _ = window.emit("dormouse://files-dropped", serde_json::json!({ "paths": payload }));
                 }
+                // Focus order is the drag hit test's z-order stand-in and the
+                // fallback owner for a `dor` request naming no Surface.
+                WindowEvent::Focused(true) => {
+                    if let Some(state) = app.try_state::<WindowState>() {
+                        state.touch_focus(window.label());
+                    }
+                }
+                WindowEvent::Moved(_) | WindowEvent::Resized(_) => {
+                    note_geometry(app, window.label());
+                }
+                // The close button: this window alone unless it is the last one,
+                // which is the whole-app quit (§Per-window close). Gated on the
+                // quit walk so a teardown's own destroy cannot re-enter it.
+                WindowEvent::CloseRequested { api, .. } => {
+                    if quit_approved(app) || quit_walking(app) {
+                        return;
+                    }
+                    api.prevent_close();
+                    if app.webview_windows().len() > 1 {
+                        request_window_close(app, window.label());
+                    } else {
+                        request_quit(app);
+                    }
+                }
+                // Backstop for a window that went away by any other route.
+                WindowEvent::Destroyed => {
+                    if let Some(state) = app.try_state::<WindowState>() {
+                        state.drop_window(window.label());
+                    }
+                }
+                _ => {}
             }
         })
         .setup(|app| {
             init_log();
             append_log("[app] setup started");
+
+            // Managed before the sidecar starts: its stdout reader routes every
+            // line through this map (§Windows).
+            app.manage(WindowState::default());
+            app.manage(GeometryState::default());
 
             let sidecar_state = start_sidecar(app.handle()).map_err(|err| {
                 append_log(format!("[sidecar] {err}"));
@@ -2032,10 +2853,30 @@ pub fn run() {
             // rounded corners and native traffic-light buttons.
             #[cfg(not(target_os = "macos"))]
             {
-                if let Some(window) = app.get_webview_window("main") {
+                if let Some(window) = app.get_webview_window(routing::MAIN_LABEL) {
                     let _ = window.set_decorations(false);
                 }
             }
+
+            // Reopen every window the last run left behind (§Windows). `main` is
+            // already up from the config; the rest are cloned from it.
+            match sessions_dir(app.handle()) {
+                Ok(dir) => {
+                    let labels = routing::restorable_labels(session_file_names(&dir));
+                    // Above every SAVED label too, not just the live ones: a
+                    // torn-out window must never claim a snapshot still on disk.
+                    app.state::<WindowState>()
+                        .next_ws
+                        .store(routing::seed_next_ws(&labels), Ordering::SeqCst);
+                    restore_windows(app.handle(), &dir, &labels);
+                }
+                Err(e) => append_log(format!("[window] {e}")),
+            }
+            if let Some(state) = app.try_state::<WindowState>() {
+                state.touch_focus(routing::MAIN_LABEL);
+            }
+            // The Burrow fans an ask out to every window and collects N answers.
+            send_window_count(app.handle());
 
             Ok(())
         })
@@ -2049,7 +2890,7 @@ pub fn run() {
             pty_get_cwds,
             pty_context,
             pty_get_open_ports,
-            pty_graceful_kill_all,
+            pty_graceful_kill,
             capture_agent_recovery,
             take_recovery_commands,
             iframe_create_proxy_url,
@@ -2058,9 +2899,22 @@ pub fn run() {
             burrow_command,
             kill_sidecar_now,
             quit_ack,
+            quit_vote,
             quit_progress,
             quit_cancel,
+            quit_window_done,
             quit_proceed,
+            window_close_ack,
+            window_close_cancel,
+            window_close_proceed,
+            close_window_self,
+            open_workspace_window,
+            transfer_workspace,
+            adopt_ready,
+            take_boot_payload,
+            remove_window_session,
+            window_at_cursor,
+            hover_workspace_target,
             get_available_shells,
             read_clipboard_file_paths,
             read_clipboard_image_as_file_path,
@@ -2570,6 +3424,59 @@ mod tests {
                 .mode()
                 & 0o777,
             0o600
+        );
+        // The geometry sibling rides the same writer, so it is owner-only too
+        // (docs/specs/security-local.md -> "Persisted state").
+        super::write_file_atomically(
+            &super::geometry_path(dir.path(), "main"),
+            r#"{"x":0.0,"y":0.0,"width":1.0,"height":1.0}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            fs::metadata(super::geometry_path(dir.path(), "main"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+    }
+
+    /// A per-window close is deliberate: everything the window left on disk
+    /// goes, so the next launch does not reopen it
+    /// (docs/specs/standalone.md -> "Per-window close").
+    #[test]
+    fn removing_a_window_session_takes_its_temp_and_geometry_with_it() {
+        let dir = TempDir::new("sessions-remove");
+        write_session_to(dir.path(), "ws-2", r#"{"v":1}"#).unwrap();
+        write_session_to(dir.path(), "main", r#"{"v":1}"#).unwrap();
+        fs::write(dir.path().join("ws-2.json.tmp"), b"orphan").unwrap();
+        fs::write(super::geometry_path(dir.path(), "ws-2"), b"{}").unwrap();
+
+        super::remove_session_from(dir.path(), "ws-2").unwrap();
+
+        assert!(!dir.path().join("ws-2.json").exists());
+        assert!(!dir.path().join("ws-2.json.tmp").exists());
+        assert!(!super::geometry_path(dir.path(), "ws-2").exists());
+        // Never a sibling window's.
+        assert!(dir.path().join("main.json").exists());
+        // Removing what is already gone is the desired end state, not an error.
+        super::remove_session_from(dir.path(), "ws-2").unwrap();
+    }
+
+    /// The geometry sibling must not read back as a window: a boot that opened
+    /// `ws-2.geometry` would fight the real `ws-2` for its snapshot.
+    #[test]
+    fn the_geometry_sibling_is_not_a_restorable_window() {
+        let dir = TempDir::new("sessions-enumerate");
+        write_session_to(dir.path(), "main", r#"{"v":1}"#).unwrap();
+        write_session_to(dir.path(), "ws-2", r#"{"v":1}"#).unwrap();
+        super::write_file_atomically(&super::geometry_path(dir.path(), "ws-2"), "{}").unwrap();
+        let mut names = super::session_file_names(dir.path());
+        names.sort();
+        assert_eq!(
+            super::routing::restorable_labels(&names),
+            vec!["main".to_string(), "ws-2".to_string()]
         );
     }
 
