@@ -381,6 +381,11 @@ export class DirectEndpoint {
       this.#deps.fatal(reason);
       return false;
     }
+    // **The abandoned half of the reason, which the user never sees.** A cause
+    // is three buckets wide; this is the sentence that says which failure it
+    // actually was, and staying relayed is the outcome an operator most often
+    // has to explain. Once per session at most: the attempt is not retried.
+    console.warn(`[direct] staying on the relay: ${reason}`);
     this.#peer?.close();
     this.#peer = null;
     this.#cutover.abandon();
