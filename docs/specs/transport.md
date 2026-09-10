@@ -109,7 +109,10 @@ list and concludes the host holds nothing. **An answer carrying no token is
 taken**: a host with one webview has nothing to tell apart. **A collection that
 timed out is not a collection that found no PTYs** — those shells are still
 running, and a caller that cold-restores there starts a second set over them, so
-`LivePtys` reports which it was. Source of truth: `collectLivePtys` in
+`LivePtys` reports which it was. **A collector given `retryTimeoutMs` asks once
+more on that budget before reporting silence**, since an empty list still
+resolves as soon as it arrives and a slow launch is exactly when the two are
+confused (rationale). Source of truth: `collectLivePtys` in
 `lib/src/lib/reconnect.ts`; `list` in `standalone/sidecar/pty-core.js`.
 
 **Seeded titles reject the sentinels.** Saved pane and door titles come back through `setTerminalUserTitle()`, which rejects the reserved `<idle>` prefix (`docs/specs/terminal-state.md` → Supported OSC Inputs), and the seed callers in `terminal-lifecycle.ts` additionally skip `<unnamed>`, the default panel placeholder (rationale).
@@ -122,13 +125,13 @@ A Workspace can move from one webview to another with its Sessions still
 running (`docs/specs/standalone.md` → Transfer). It is a resume, not a restore,
 and it turns on three rules:
 
-- **Release, never dispose, and only once the host has accepted the move.** The
-  source detaches its half of each Session — the alert, the pins, the listeners,
-  the element, the xterm instance — and **does not kill the PTY**
+- **Release, never dispose, and only once the target has adopted the Workspace.**
+  The source detaches its half of each Session — the alert, the pins, the
+  listeners, the element, the xterm instance — and **does not kill the PTY**
   (`releaseSession` in `lib/src/lib/terminal-lifecycle.ts`). **Never reachable
   from a webview unmount**: a Wall unmounts on a reload and on a StrictMode
   double-mount, and releasing there would strand every PTY the window still owns.
-  A host that refuses the move leaves the Workspace exactly as it was.
+  A move the target never took leaves the Workspace exactly as it was.
 - **Suppress until the replay.** The host moves ownership synchronously and
   drops the moving PTYs' output until each one's replay has reached the new
   owner, so no byte is painted twice and none is lost. It fails open after a
@@ -139,7 +142,7 @@ and it turns on three rules:
   every PTY in the process. The moving ids include each pane's helper Session,
   which no other field names.
 
-**Cold restore** (neither live PTYs nor a browser-only resume) falls back to saved session state: new PTYs in the saved CWDs under the currently selected Dormouse shell, plus the saved Lath layout. No transcript is replayed ("What is persisted"), and any pane carrying a recovery command auto-runs it. `reconnect.ts` waits 500 ms for the PTY list.
+**Cold restore** (neither live PTYs nor a browser-only resume) falls back to saved session state: new PTYs in the saved CWDs under the currently selected Dormouse shell, plus the saved Lath layout. No transcript is replayed ("What is persisted"), and any pane carrying a recovery command auto-runs it. `reconnect.ts` waits 500 ms for the PTY list, and 3 s more where a retry is asked for.
 
 ## Message protocol
 

@@ -325,10 +325,11 @@ label.
 so `titleBarStyle`, `hiddenTitle`, `dragDropEnabled` and the CSP carry across
 with no second copy of any of them.
 
-**Capabilities cover `main` and the `ws-*` glob**, in one set: the quit walk's
-last window installs a pending update and that is not always `main`
-(`docs/specs/auto-update.md`). Custom commands need no capability entry.
-`standalone/scripts/tauri-conf.test.mjs` pins both.
+**Capabilities are split**: `default.json` covers `main` and the `ws-*` glob,
+and `main-only.json` scopes `updater:*` and `core:app:allow-version` to `main`,
+which structurally enforces that the install runs in the window the walk tears
+down last (`docs/specs/auto-update.md`). Custom commands need no capability
+entry. `standalone/scripts/tauri-conf.test.mjs` pins both.
 
 ### Routing
 
@@ -360,7 +361,8 @@ Source of truth: `route` in `standalone/src-tauri/src/routing.rs`,
 - **`pty_request_init`, `pty_graceful_kill` and `capture_agent_recovery` target
   the invoking window's own PTYs**, and take no ids at all: a window tearing down
   must not interrupt or kill a sibling's terminals, and a set it could name is a
-  set it could name wrong.
+  set it could name wrong. `pty_request_init` further excludes what an arrival
+  claims (§Arrival queue).
 - **A `dor` cancel follows its request**: only the window handling it holds the
   subscription, watch or completion claim the cancel releases. Rust remembers
   which window took each `requestId` and forgets it on the response.
@@ -412,9 +414,12 @@ by `the_geometry_flush_slot_is_released_with_the_drain`.
 there**: Tauri takes the label out of `webview_windows()` at that moment and not
 before, so a `burrow:windows` push sent ahead of it names a window that can never
 answer — and every ask then waits out its whole budget. The arm forgets the
-window's PTY ownership and reaps what it still owned, drops the save refusal
-(nothing can save under a dead label), forgets its geometry, tells the quit
-machine (§Quit flow) and pushes the live labels to the sidecar.
+window's PTY ownership and reaps what it still owned, hands back every arrival it
+will never take (§Arrival queue), drops the save refusal (nothing can save under
+a dead label), forgets its geometry, tells the quit machine (§Quit flow) and
+pushes the live labels to the sidecar. **An arriving Workspace's shells are taken
+out of the reap first**: they belong to its source again, which is still showing
+those terminals.
 
 ### Per-window close
 
@@ -429,6 +434,9 @@ anyway if that listener is dead), asks about *its own* running work, archives
   and temp sibling included — and the next launch does not reopen the window.
   A quit keeps every blob, which is the whole difference.
 - **It runs no agent-recovery capture**: nothing is coming back.
+- **It confirms on a pending download as well as on running work.** An approved,
+  downloaded update lives in this webview's memory, so closing the window throws
+  it away and nothing else can install it (`docs/specs/auto-update.md`).
 - **The snapshot is removed before the kill**, and Rust refuses every later save
   for that label, so a PTY exit's save cannot write it back. **Both close paths
   set that refusal** — the webview's own `remove_window_session`, and
@@ -451,8 +459,13 @@ parks its own flow and leaves its host waiting out a decision that cannot come.
 | Arriving | Holder | Outcome |
 |---|---|---|
 | quit | a close still on its dialog | the close is cancelled (`window_close_cancel`); the quit takes over |
-| quit | any committed flow | the quit only acks — this window is already ending, and `Destroyed` forgets it |
+| quit | any committed flow | the quit acks and **votes** — this window is ending anyway, and a window that never votes holds the machine in `Voting` with no dialog to answer |
 | close | a quit, in any state | refused at once with `window_close_cancel`; the window stays |
+
+**A committed flow that retreats and is then cancelled re-drives the quit it
+took the vote for.** `archive-failed` is a committed close asking a human about
+notes it could not store, and declining there leaves the window standing with the
+quit's own question never asked.
 
 **A quit cancelled elsewhere drops only a quit's dialog**, never this window's
 own close question. The confirm store cancels any context it cannot open, as the
@@ -467,23 +480,10 @@ Source of truth: `standalone/src/window-close.ts`; `request_window_close` /
 **A Workspace moves between windows without ending anything.** Nothing is
 archived and no process is killed: a move is not a closure.
 
-1. The source builds the Workspace's record with a live cwd probe and takes its
-   notes, **touching nothing**.
-2. Rust **reassigns ownership synchronously** and suppresses those PTYs' output
-   until each one's replay has been emitted to the target.
-3. The target **arms its collector, then calls `adopt_ready`** — the hop that
-   removes the whole "arrived before armed" class of bug, since nothing is
-   listed or replayed until something is listening (rationale).
-4. It resumes over the arriving PTYs, hydrates the notes, seeds each persisted
-   TODO into its own `AlertManager`, and mounts the Workspace at the drop index.
-5. The source drops the Workspace; **a window whose last Workspace left closes
-   itself**, with no confirmation, no archive and no kill.
+The protocol and every failure path are §Arrival queue; what a move *is*:
 
-- **The source releases its Sessions only once the host has accepted the move**
-  — detached, still running (`docs/specs/transport.md` → "Transferring a
-  Workspace"). The target window can close between the drag's last probe and the
-  drop, and a release ahead of the invoke left a Workspace with no Sessions and
-  no window that owned them; Rust hands the PTYs back before it returns the error.
+- **A window whose last Workspace left closes itself**, with no confirmation, no
+  archive and no kill: nothing ended.
 - **A pane's helper Session travels with it.** A helper is not a member Surface,
   so nothing else in the payload names it, and one left behind is a leaked shell
   plus a stray pane on the source's next reload. It rides directly after its
@@ -492,12 +492,13 @@ archived and no process is killed: a move is not a closure.
   timed-out collection is not a collection that found nothing: those shells are
   still running, and restoring from the record would start a second set over
   them (`docs/specs/transport.md` → "Reconnection").
+- **A Workspace that comes back must mount from the record it brought**, never
+  the plan it first booted with, or a fresh pane lands over the Sessions that
+  just arrived.
 
-**A Workspace that comes back must mount from the record it brought**, never the
-plan it first booted with, or a fresh pane lands over the Sessions that just
-arrived. Source of truth: `prepareWorkspaceTransfer` in
+Source of truth: `prepareWorkspaceTransfer` in
 `lib/src/components/wall/workspace-transfer.ts`, `standalone/src/workspace-move.ts`,
-`transfer_workspace` / `adopt_ready` in `standalone/src-tauri/src/lib.rs`.
+`transfer_workspace` in `standalone/src-tauri/src/lib.rs`.
 
 ### Tear-out
 
@@ -508,18 +509,69 @@ Everything else is the transfer above.
 
 ### Arrival queue
 
-**Every arriving Workspace is queued for its target window and pulled, never
-pushed.** An `emit_to` a window that has not installed its listener — one still
-booting, one that does not exist yet — is lost, and both are legal drop targets.
-Rust holds the payload; the webview drains it with `take_arrivals` at boot and
-again the moment its listener is installed, and a transfer's `emit_to` is a
-nudge carrying nothing.
+**An arrival is one transaction keyed by `workspaceId`**, carrying
+`{ from, to, workspace, notepad, terminalIds }`. Rust holds the record from the
+source's invoke until the target adopts the Workspace or dies, and every step
+below reads that record rather than inferring itself from the suppression map.
 
-**The source is told of the departure only when the target takes the arrival**
-(`adopt_ready`), so a drop the target never received leaves the Workspace where
-it is rather than dropping its tab. A target that goes away first forgets both.
-Source of truth: `ArrivalQueues` in `standalone/src-tauri/src/routing.rs`,
-`take_arrivals` / `announce_departures` in `standalone/src-tauri/src/lib.rs`.
+1. **Source** prepares the Workspace, touching nothing, and invokes
+   `transfer_workspace` / `open_workspace_window`. On `Ok` it marks the Workspace
+   **transferring**: the Wall stays mounted and the notes stay put, nothing is
+   released, and `getWindowSnapshot` omits it.
+2. **Rust** reassigns `terminalIds` to the target and suppresses their output
+   until each one's replay has been emitted there; the sidecar buffers a chunk
+   before it emits and Rust's reader is one ordered thread, so a chunk in the gap
+   is dropped once and replayed once (rationale). It queues the record and nudges
+   the target with `workspace-arriving` carrying nothing — a new window has no
+   listener, so its payload is pulled at boot instead.
+3. **Target** drains with `take_arrivals` and, per arrival, arms its collector
+   *before* calling `adopt_ready(workspaceId)` — the hop that removes the whole
+   "arrived before armed" class of bug (rationale). Rust answers
+   `pty:requestInit` with **that arrival's ids and no others**; `pty:list` and
+   each `pty:replay` echo the collector's token. The target resumes over them,
+   hydrates the notes, seeds each persisted TODO into its own `AlertManager`,
+   and mounts the Workspace at the drop index.
+4. **Target adopted** invokes `adopt_done(workspaceId)`. Rust retires the record,
+   clears what is left of the suppression, and emits `workspace-departed` for
+   **that Workspace alone** to its own source.
+5. **Source** commits on `workspace-departed`: releases every Session (never
+   kills one), drops the notes and the helper, closes the Workspace, and closes
+   the window if it was the last one (§Transfer).
+
+- **Nothing is released before the target has adopted it.** The target can refuse
+  the arrival or close before taking it, and a Workspace released at the invoke
+  had no Sessions and no window that owned them.
+- **A transferring Workspace is in no snapshot its source writes**, and its
+  source kills nothing of it — its shells already belong to the target
+  (`pty_graceful_kill` is scoped by ownership). A quit or a close in the gap
+  would otherwise persist the same Workspace in two windows.
+- **A refused arrival hands the shells back.** The target's `adopt_failed`
+  (a `planArrival` timeout, a missing list, a mount error) and a target
+  `Destroyed` with the arrival still queued both return `terminalIds` to the
+  source unsuppressed, drop the record, and emit `workspace-arrival-failed`; the
+  source clears **transferring** and the Workspace is simply still there. With
+  both ends gone the shells are reaped rather than left owned by a dead label.
+- **`planArrival` never throws into `bootstrap()`.** A refused sole arrival on
+  the boot path renders a fresh one-pane Workspace, never a blank window.
+- **`take_arrivals` does not consume.** The record settles at `adopt_done`, so a
+  webview that drains at boot and again when its listener is installed cannot
+  lose a Workspace to a drain that happened too early; the webview dedupes by id.
+- **A window with a snapshot boots as itself**, mounting whatever was dropped on
+  it mid-boot over the restore rather than instead of it.
+- **`AWAITING_REPLAY_MAX` fails open only for suppressions no arrival claims.** A
+  cold boot slower than it would otherwise have a real arrival's shells
+  unsilenced into a window that has not resumed them yet.
+- **A boot's `pty_request_init` excludes every id an arrival claims.** Ownership
+  moves at the invoke, so those shells would otherwise be listed as top-level
+  panes beside the Workspace about to mount them.
+
+Source of truth: `Arrival` / `sweep_awaiting` / `boot_list_ids` in
+`standalone/src-tauri/src/routing.rs`; `begin_arrival` / `adopt_ready` /
+`adopt_done` / `adopt_failed` / `hand_back_arrival` in
+`standalone/src-tauri/src/lib.rs`; `standalone/src/workspace-move.ts`;
+`markWorkspaceTransferring` in `lib/src/lib/window-session-aggregator.ts`.
+Pinned by `standalone/src/workspace-move.test.ts` and the arrival tests in
+`standalone/src-tauri/src/routing.rs`.
 
 ### Dragging a Workspace between windows
 
@@ -721,14 +773,16 @@ teardown at a time. Source of truth: `QuitMachine` in
 | Phase | What happens |
 |---|---|
 | Voting | every window acks, archives its own notes, asks about its own running work, and calls `quit_vote` — or `quit_cancel`, which tells every window and destroys nothing |
-| Walking | `quit_teardown` reaches one window at a time in an order ending with **`main` if it is open, else the most recently focused window**; each hands on with `quit_window_done`, and the last one installs and calls `quit_proceed` |
+| Walking | `quit_teardown` reaches one window at a time, **`main` last**; each hands on with `quit_window_done`, and the last one installs and calls `quit_proceed` |
 
 - **A cancel is refused once the walk starts**: the first window is already gone.
 - **A window that leaves outside the flow is forgotten**, so its vote is never
   waited on and the walk advances past it. **A flow that runs out of windows
   exits** rather than leaving a process with none.
 - **A quit keeps every window's snapshot on disk** — that is what a relaunch
-  restores from, and the whole difference from a per-window close.
+  restores from, and the whole difference from a per-window close. **A Workspace
+  transferring out is in no window's snapshot and is killed by neither end**
+  (§Arrival queue), so a quit mid-transfer restores it exactly once.
 
 ### Trigger interception
 
@@ -790,7 +844,9 @@ visible Workspace only while more than one window is open.** The registry and th
 notepad store are per webview, so the count and the notes a dialog speaks for are
 already its own window's. `handleQuitRequested` hands the decision to the installed
 gate when it finds **≥1 running session**; with no running work (or no gate) it
-falls straight through to the teardown, so an all-idle quit never prompts. A
+falls straight through to the teardown, so an all-idle quit never prompts. **A
+close asks on a pending download too** (§Per-window close), which a quit never
+does — it installs it. A
 session counts as running iff its latest activity is a live command
 (`activity.kind === 'running'`); `countRunningSessions`
 (`lib/src/lib/terminal-state-store.ts`) is both the gate's predicate and the

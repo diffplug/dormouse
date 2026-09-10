@@ -91,7 +91,10 @@ replay exactly once").
 
 It fails open after 5 s rather than closed: a transfer whose `adopt_ready` never
 arrived would otherwise silence its panes for the rest of the session, and
-duplicated bytes are recoverable where a dead pane is not.
+duplicated bytes are recoverable where a dead pane is not. That fail-open is now
+scoped to suppressions no arrival record claims, which is the same argument with
+the "never arrived" case actually detectable — an arrival that is genuinely stuck
+ends at `adopt_failed` or at the target's `Destroyed`, not at a timer.
 
 ## Arrival queue
 
@@ -100,6 +103,30 @@ torn out seconds earlier, or one restoring at launch, has no listener yet and is
 a perfectly ordinary drop target — the payload went nowhere, and because the
 departure was announced in the same breath, the source dropped its tab too. The
 Workspace's Sessions were then alive, owned by a window with no pane for them.
+
+Queueing fixed the delivery but not the bookkeeping, and the follow-up review
+found five symptoms of one gap: the arrival was not a single keyed thing. The
+suppression map, the departure list, the boot list and the sweep each held a
+piece and each inferred the rest, so `adopt_ready` answered with "everything
+suppressed for this window" (two arrivals resumed over each other), a departure
+announced every Workspace a source had sent to that window (one landing released
+them all), the sweep could lift a live arrival's suppression on a slow boot, and
+a boot list placed an arriving Workspace's shells as loose panes. The record
+keyed by `workspaceId` is the fix for all five at once, which is why it is one
+change rather than five.
+
+Two phases rather than one, because the target can genuinely refuse. A release at
+the invoke was safe only while nothing could go wrong between the invoke and the
+mount; closing the target mid-arrival made the Workspace's Sessions live and
+ownerless. Holding the source's state until `workspace-departed` costs a
+transferring Workspace being briefly absent from the snapshot — deliberate, since
+the alternative is both windows persisting it and a relaunch restoring it twice.
+
+`take_arrivals` stopped consuming for the same reason: consuming made the drain
+the point of no return, and a webview that drained and then failed had nothing
+left to fall back on. With the record settling at `adopt_done` the drain is
+idempotent, and a reload mid-arrival finds its Workspace again instead of losing
+it. The webview's `adopting` set is what makes repeated drains safe.
 
 ## Dragging a Workspace between windows
 
@@ -129,6 +156,8 @@ controller must simply not assume in-range coordinates.
 **What the teardown flush lost.** The pre-Rust path flushed the session on teardown into WebKit `localStorage` and lost the final debounce/heartbeat window; awaiting the write pipeline to disk (`drainSessionSaves`) recovers it, which a last fire-and-forget save would not.
 
 **What a record build costs.** `getCwd` is a synchronous `execFileSync('lsof', …)` in the sidecar on macOS (`getCwdForPid` in `standalone/sidecar/pty-core.js`), one round trip per terminal pane, on every debounced save and every 30 s heartbeat. That price is why the dirty triggers are keyed to the owning Workspace: an unkeyed trigger would make every idle Workspace pay it whenever any Workspace moved.
+
+**Why a timed-out boot list is asked again rather than acted on.** `timedOut` is the whole difference between "the host holds nothing" and "the host never answered", and `resumeOrRestoreFrom` cannot tell them apart — it cold-restores over the second, starting a second set of shells on top of the ones still running. The arrival path already refused rather than restore; the ordinary boot path had no such guard, and a launch slower than the 500 ms budget (a cold sidecar behind an antivirus scan, a laptop waking) is exactly when it bites. A retry is cheap in the case that matters and free in every other: an empty list still resolves the moment it arrives.
 
 **Why the aggregator debounces on top of the Wall's own debounce.** Each Wall already coalesces its own record; the second stage coalesces *across* Walls, so one window-wide event (a store change, a theme push, a burst of output in two Workspaces) becomes one host write rather than one per Workspace.
 
@@ -162,12 +191,22 @@ close dialog never voted, and Rust's phase-2 wait is unbounded by design because
 it waits on a human. The broadcast `quit-cancelled` made it worse by dismissing
 whichever dialog was open — including a close's — without telling its flow.
 
-**Why the walk's last window is not always `main`.** The install ran in `main`
-because only `main` held `updater:*`. Nothing stops a user closing `main` with
-siblings alive, and that session could then neither check nor install: the
-capability split enforced a rule the window lifecycle does not guarantee. The
-periodic check stays in `main` because it is a timer, not a capability, and one
-per window would be N checks against the endpoint.
+Arbitrating fixed the dialog and left the vote: a quit meeting a *committed*
+close acked and stopped, which is the same unbounded wait reached by a different
+route. Voting is right because the window really is ending — and the one case
+where it is not, a committed close retreating to `archive-failed` and being
+declined, is why the intent is kept rather than dropped.
+
+**Why the walk ends on `main`, and why the grant to every window was reverted.**
+Widening `updater:*` to every window was meant to cover a session whose `main`
+was closed. It covers nothing: only `main` runs the periodic check, so only
+`main` can be holding a downloaded update, and a `main`-less session has none to
+install whichever window goes last. The grant traded a structural guarantee — the
+install can only happen in the window torn down last — for a case that cannot
+arise. What that session does need is to be told, which is the close
+confirmation's "this throws away the downloaded update" arm. The periodic check
+stays in `main` because it is a timer, not a capability, and one per window would
+be N checks against the endpoint.
 
 **Why the teardown ordering survived the transcript removal.** Flush → graceful kill → flush → drain was built to capture the final scrollback of dying terminals into the persisted session. The transcripts are gone, but the shape is still what makes the *structure* correct: the first flush reads cwds while the shells are alive, and the second catches whatever changed as they died, retaining the earlier cwd for a PTY `getCwd` can no longer answer.
 

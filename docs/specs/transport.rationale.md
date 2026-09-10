@@ -36,6 +36,12 @@ first collector, filtered to nothing, and resolved it as "the host holds no
 PTYs" — so that Workspace cold-restored fresh shells at the saved cwds over the
 ones still running. The 3 s timeout did the same thing on its own.
 
+The retry is the same argument applied to the plain boot: the arrival path
+refuses on `timedOut` because it knows those shells are running, but the boot
+path has nothing else to fall back on and restores. Asking again costs 3 s only
+in the case where the first ask genuinely got nothing, and a host that holds no
+PTYs answers the second ask as fast as the first.
+
 ## Transferring a Workspace
 
 The suppression is bounded and fails open because the two failures are not
