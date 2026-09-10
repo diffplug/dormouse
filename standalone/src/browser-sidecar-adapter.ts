@@ -34,7 +34,8 @@ import type { AwaitHandle, AwaitOptions } from "dormouse-lib/lib/alert-manager";
 import type { AlertSettings } from "dormouse-lib/lib/alert-settings";
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
 import { createMemoryNotepadArchivePort } from "dormouse-lib/lib/notepad/memory-archive-port";
-import { loadSessionState, saveSessionState } from "dormouse-lib/lib/window-persistence";
+import { loadWindowState, saveWindowState } from "dormouse-lib/lib/window-persistence";
+import type { PersistedWindow } from "dormouse-lib/lib/session-types";
 import {
   applyTerminalProtocolEvents,
   collectTerminalSemanticEvents,
@@ -278,19 +279,24 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
 
   readonly persistsSession = BrowserSidecarAdapter.PERSIST_SESSION;
 
-  // See TauriAdapter: PersistedWindow when the workspaces flag is on, bare
-  // PersistedSession when off; the helpers own the translation + JSON/storage
-  // plumbing (docs/specs/transport.md).
+  // See TauriAdapter: one `PersistedWindow` per window, in `localStorage` rather
+  // than the Rust file store (docs/specs/transport.md).
   saveState(state: unknown): void {
     if (!BrowserSidecarAdapter.PERSIST_SESSION) return;
-    try { saveSessionState(localStorage, BrowserSidecarAdapter.STATE_KEY, state); }
+    try { saveWindowState(localStorage, BrowserSidecarAdapter.STATE_KEY, state as PersistedWindow); }
     catch { console.error('[browser-sidecar] Failed to save session state'); }
   }
 
+  /** See TauriAdapter.getState: the blob here is a Window, and the boot reads it
+   *  through `getWindowState`. */
   getState(): unknown {
+    return null;
+  }
+
+  getWindowState(): PersistedWindow | null {
     if (!BrowserSidecarAdapter.PERSIST_SESSION) return null;
     try {
-      return loadSessionState(localStorage, BrowserSidecarAdapter.STATE_KEY);
+      return loadWindowState(localStorage, BrowserSidecarAdapter.STATE_KEY);
     } catch {
       return null;
     }

@@ -11,10 +11,9 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { FakePtyAdapter, setPlatform } from '../platform';
-import { setWorkspacesEnabled } from '../feature-flags';
 import { saveSession } from '../session-save';
-import { readPersistedSession, type PersistedDoor } from '../session-types';
-import { saveSessionState, storedValueForSession } from '../window-persistence';
+import { readPersistedSession, wrapSessionInWindow, type PersistedDoor } from '../session-types';
+import { saveWindowState } from '../window-persistence';
 import { addPlainNote, addTerminalNote, buildVolatileSnapshot, clearAllNotepads } from './notepad-store';
 
 /** Distinctive enough that a substring hit anywhere is a real leak. */
@@ -41,7 +40,6 @@ beforeEach(() => {
 
 afterEach(() => {
   clearAllNotepads();
-  setWorkspacesEnabled(false);
 });
 
 describe('live notes are never persisted', () => {
@@ -71,13 +69,10 @@ describe('live notes are never persisted', () => {
       getItem: (key: string) => store.get(key) ?? null,
       setItem: (key: string, value: string) => void store.set(key, value),
     };
-    saveSessionState(storage, 'dormouse.session', saved);
+    // The standalone Window wrapper re-nests the same Session, so it inherits
+    // the property rather than reintroducing notes.
+    saveWindowState(storage, 'dormouse.session', wrapSessionInWindow(saved!));
     expect(store.get('dormouse.session')).not.toContain(SECRET);
-
-    // The standalone Window wrapper (workspaces flag on) re-nests the same
-    // Session, so it inherits the property rather than reintroducing notes.
-    setWorkspacesEnabled(true);
-    expect(JSON.stringify(storedValueForSession(null, saved))).not.toContain(SECRET);
 
     // The one place the notes do live outside the store: host memory, cleared on
     // restart and never written to disk.

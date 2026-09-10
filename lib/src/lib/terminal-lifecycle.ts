@@ -387,7 +387,7 @@ function setupTerminalEntry(id: string, options: { shell?: string; untouched?: b
 
   registry.set(id, entry);
   ensureTerminalPaneState(id);
-  notifyActivityListeners();
+  notifyActivityListeners(id);
   startThemeObserver();
   return entry;
 }

@@ -41,7 +41,8 @@ import { AlertManager } from "dormouse-lib/lib/alert-manager";
 import type { AwaitHandle, AwaitOptions } from "dormouse-lib/lib/alert-manager";
 import type { AlertSettings } from "dormouse-lib/lib/alert-settings";
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
-import { loadSessionState, saveSessionState } from "dormouse-lib/lib/window-persistence";
+import { loadWindowState, saveWindowState } from "dormouse-lib/lib/window-persistence";
+import type { PersistedWindow } from "dormouse-lib/lib/session-types";
 import { TauriSessionStore } from "./tauri-session-store";
 import { withTimeout } from "./with-timeout";
 import {
@@ -611,19 +612,30 @@ export class TauriAdapter implements PlatformAdapter {
    */
   readonly persistsSession = TauriAdapter.PERSIST_SESSION;
 
+  /** The aggregator's writer: one `PersistedWindow` per window
+   *  (`docs/specs/transport.md` -> "Persisted session"). */
   saveState(state: unknown): void {
     if (!TauriAdapter.PERSIST_SESSION) return;
     try {
-      saveSessionState(this.sessionStore, TauriAdapter.STATE_KEY, state);
+      saveWindowState(this.sessionStore, TauriAdapter.STATE_KEY, state as PersistedWindow);
     } catch {
       console.error('[tauri-adapter] Failed to save session state');
     }
   }
 
+  /** The stored blob here is a Window, and the shared readers of `getState` want a
+   *  bare Session — so this answers nothing and `getWindowState` is the reader.
+   *  Standalone boots per Workspace, handing each plan its own record, so no
+   *  shared caller reaches this (`standalone/src/main.tsx`). */
   getState(): unknown {
+    return null;
+  }
+
+  /** The persisted Window, read from the boot-seeded cache. */
+  getWindowState(): PersistedWindow | null {
     if (!TauriAdapter.PERSIST_SESSION) return null;
     try {
-      return loadSessionState(this.sessionStore, TauriAdapter.STATE_KEY);
+      return loadWindowState(this.sessionStore, TauriAdapter.STATE_KEY);
     } catch {
       return null;
     }

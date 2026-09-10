@@ -26,6 +26,8 @@ import { createTerminalPaneState, type TerminalPaneState } from '../lib/terminal
 import { getWallHandle, listWallHandles } from './wall/wall-handles';
 import { mountWallHarness, type WallHarness } from './wall/wall-test-utils';
 import { DEFAULT_WORKSPACE_ID } from '../lib/session-types';
+import { clearTerminalActivity, setTerminalActivity } from '../lib/session-activity-store';
+import { resetTerminalPaneState } from '../lib/terminal-state-store';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -2096,6 +2098,41 @@ describe('Wall session persistence: ownership filtering', () => {
       await echo('pane-a');
       await settle(31_000);
       expect(saveState).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('ignores an activity or pane-state change belonging to another Workspace', async () => {
+    vi.useFakeTimers();
+    try {
+      const saveState = vi.spyOn(fake, 'saveState');
+      const settle = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+
+      await act(async () => {
+        root.render(<Wall initialPaneIds={['pane-a']} showBaseboard />);
+      });
+      // Past a heartbeat, so the mount's own dirty state has been written off.
+      await settle(31_000);
+      saveState.mockClear();
+
+      // Both stores are Window-global. A change keyed to a foreign Surface must
+      // not make this Wall rebuild its record — that is a `getCwd` per pane, on
+      // every idle Workspace, every heartbeat.
+      await act(async () => { setTerminalActivity('pane-elsewhere', { todo: true }); });
+      await act(async () => { resetTerminalPaneState('pane-elsewhere'); });
+      await settle(31_000);
+      expect(saveState, 'foreign Surface').not.toHaveBeenCalled();
+
+      await act(async () => { setTerminalActivity('pane-a', { todo: true }); });
+      await settle(31_000);
+      expect(saveState, 'own Surface').toHaveBeenCalled();
+      saveState.mockClear();
+
+      // An unkeyed notification is a store-wide reset, which every Wall takes.
+      await act(async () => { clearTerminalActivity(); });
+      await settle(31_000);
+      expect(saveState, 'store-wide reset').toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }

@@ -3,7 +3,7 @@ import { pasteFilePaths } from '../../lib/clipboard';
 import { getPlatform } from '../../lib/platform';
 import { saveSession, type SaveSink } from '../../lib/session-save';
 import { createSessionDirtyTracker } from '../../lib/session-dirty';
-import { publishWorkspaceSession } from '../../lib/window-session-aggregator';
+import { previousWorkspaceSession, publishWorkspaceSession } from '../../lib/window-session-aggregator';
 import {
   subscribeToActivity,
   subscribeToTerminalPaneState,
@@ -12,7 +12,7 @@ import {
 import { surfaceKindFromParams } from './browser-surface';
 import type { LathWallEngine } from './lath-wall-engine';
 import type { DooredItem, WallSelectionKind } from './wall-types';
-import type { PersistedDoor, PersistedSession, PersistedSurfaceRefs, WorkspaceId } from '../../lib/session-types';
+import type { PersistedDoor, PersistedSurfaceRefs, WorkspaceId } from '../../lib/session-types';
 
 export interface SessionPersistenceHandle {
   /** Persist immediately, awaiting the whole queued pipeline. */
@@ -61,19 +61,15 @@ export function useSessionPersistence({
   const pendingSaveNeededRef = useRef(false);
   // See session-dirty.ts for the conservative-under-races generation model.
   const trackerRef = useRef(createSessionDirtyTracker());
-  // This Workspace's last published record: `getPreviousPaneMap`'s source, which
-  // must be this Workspace's own (a dead PTY's cwd is retained there), not the
-  // Window's active Workspace.
-  const publishedRef = useRef<PersistedSession | null>(null);
-
+  // This Workspace's own previous record, which is where a dead PTY's retained
+  // cwd and alert live. The aggregator holds it because the first save after a
+  // restore has to read the record BOOT seeded, not the (still empty) one this
+  // Wall has published.
   const sink = useMemo<SaveSink | undefined>(() => {
     if (workspaceId === undefined) return undefined;
     return {
-      previous: () => publishedRef.current,
-      publish: (session) => {
-        publishedRef.current = session;
-        publishWorkspaceSession(workspaceId, session);
-      },
+      previous: () => previousWorkspaceSession(workspaceId),
+      publish: (session) => publishWorkspaceSession(workspaceId, session),
     };
   }, [workspaceId]);
 
@@ -204,8 +200,14 @@ export function useSessionPersistence({
     // store of its own to report it (the registry mutates silently), which is
     // why the pty echo above is what marks it.
     platform.onPtyData(handlePtyData);
-    const unsubActivity = subscribeToActivity(markDirty);
-    const unsubPaneState = subscribeToTerminalPaneState(markDirty);
+    // Keyed like the PTY triggers: both stores are Window-global, so an
+    // unfiltered listener would rebuild every idle Workspace's record — a
+    // `getCwd` per pane — whenever any Workspace changed. A notification with no
+    // id is a store-wide reset, which every Wall must take.
+    const ownsChange = (id?: string) => id === undefined || ownsSurface(id);
+    const markDirtyFor = (id?: string) => { if (ownsChange(id)) markDirty(); };
+    const unsubActivity = subscribeToActivity(markDirtyFor);
+    const unsubPaneState = subscribeToTerminalPaneState(markDirtyFor);
 
     // Heartbeat: idle sessions no longer write (only when something marked dirty).
     const interval = setInterval(() => {

@@ -28,7 +28,7 @@ const promptAltScreenFilters = new Map<string, PromptAltScreenFilter>();
 // Panes with authentic OSC 633/133 boundaries; the keystroke fallback stands
 // down for each id here until the pane is reset or removed.
 const oscDrivenPanes = new Set<string>();
-const listeners = new Set<() => void>();
+const listeners = new Set<(changedId?: string) => void>();
 
 // Authentic shell boundaries; heuristic-synthesized prompt markers are excluded.
 function isOscDrivenBoundary(event: TerminalSemanticEvent): boolean {
@@ -45,7 +45,9 @@ function isOscDrivenBoundary(event: TerminalSemanticEvent): boolean {
 }
 let cachedSnapshot: Map<string, TerminalPaneState> | null = null;
 
-export function subscribeToTerminalPaneState(listener: () => void): () => void {
+/** `changedId` names the one pane whose state moved; omitting it means a
+ *  store-wide change every listener must take. */
+export function subscribeToTerminalPaneState(listener: (changedId?: string) => void): () => void {
   listeners.add(listener);
   return () => {
     listeners.delete(listener);
@@ -105,7 +107,7 @@ export function ensureTerminalPaneState(id: string, initial?: Partial<TerminalPa
   if (existing) return existing;
   const next = createTerminalPaneState(initial);
   paneStates.set(id, next);
-  notifyTerminalPaneStateListeners();
+  notifyTerminalPaneStateListeners(id);
   return next;
 }
 
@@ -122,13 +124,13 @@ function clearPaneScratch(id: string): void {
 export function resetTerminalPaneState(id: string, initial?: Partial<TerminalPaneState>): void {
   clearPaneScratch(id);
   paneStates.set(id, createTerminalPaneState(initial));
-  notifyTerminalPaneStateListeners();
+  notifyTerminalPaneStateListeners(id);
 }
 
 export function removeTerminalPaneState(id: string): void {
   clearPaneScratch(id);
   if (!paneStates.delete(id)) return;
-  notifyTerminalPaneStateListeners();
+  notifyTerminalPaneStateListeners(id);
 }
 
 export function applyTerminalSemanticEvents(
@@ -155,7 +157,7 @@ export function applyTerminalSemanticEvents(
   }
   if (next === prev && paneStates.has(id)) return;
   paneStates.set(id, next);
-  notifyTerminalPaneStateListeners();
+  notifyTerminalPaneStateListeners(id);
 }
 
 // Reads the cursor's full rendered logical line (`prompt + command`) from the
@@ -307,7 +309,7 @@ export function seedTerminalManualCwd(id: string, path: string | null | undefine
   }
   if (current.cwd) return;
   paneStates.set(id, { ...current, cwd });
-  notifyTerminalPaneStateListeners();
+  notifyTerminalPaneStateListeners(id);
 }
 
 export function fillTerminalProcessCwd(id: string, path: string | null | undefined): void {
@@ -322,7 +324,7 @@ function updateCwdIfAllowed(id: string, cwd: CwdState): void {
   if (!current) return;
   if (!processCwdMayReplace(current.cwd?.source)) return;
   paneStates.set(id, { ...current, cwd });
-  notifyTerminalPaneStateListeners();
+  notifyTerminalPaneStateListeners(id);
 }
 
 // Detect a returned/idle shell prompt for shells without OSC 133/633
@@ -475,7 +477,7 @@ class PromptAltScreenFilter {
   }
 }
 
-function notifyTerminalPaneStateListeners(): void {
+function notifyTerminalPaneStateListeners(changedId?: string): void {
   cachedSnapshot = null;
-  listeners.forEach((listener) => listener());
+  listeners.forEach((listener) => listener(changedId));
 }
