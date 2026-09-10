@@ -367,17 +367,14 @@ export function LathHost({
   // retarget effect that consumes it.
   const snapNextRef = useRef(false);
   const framesSettledRef = useRef(false);
+  const terminalFitListeners = useRef(new Set<() => void>());
   const terminalResize = useMemo(() => ({
     // Read painted settlement, not elapsed animation time: the final frame may
     // still be waiting for rAF. Sash previews and dying panes must never resize PTYs.
     canFit: (id: string) => framesSettledRef.current && !dragRef.current && !lath.isDying(id),
     subscribe: (listener: () => void) => {
-      let previous = framesSettledRef.current;
-      return lath.subscribeFrames(settled => {
-        if (settled === previous) return;
-        previous = settled;
-        listener();
-      });
+      terminalFitListeners.current.add(listener);
+      return () => { terminalFitListeners.current.delete(listener); };
     },
   }), [lath]);
 
@@ -559,11 +556,15 @@ export function LathHost({
   // markDying wake): paint now — this runs pre-paint when called from a layout effect,
   // so the first frame is correct — tell chrome, and schedule the loop while anything is
   // still moving. Reschedules only when no frame is already pending.
-  const pump = useCallback(() => {
+  const pump = useCallback((forceTerminalFit = false) => {
     const t = nowMs();
     applyFrames(t);
     const settled = animator.settledAt(t);
+    const settlementChanged = framesSettledRef.current !== settled;
     framesSettledRef.current = settled;
+    if (settlementChanged || forceTerminalFit) {
+      for (const listener of terminalFitListeners.current) listener();
+    }
     lath.notifyFrames(settled);
     if (!settled && rafRef.current === null) rafRef.current = requestAnimationFrame(stepRef.current);
   }, [applyFrames, animator, lath]);
@@ -581,9 +582,13 @@ export function LathHost({
   // only presentation geometry + stacking, so the split tree stays unchanged.
   useLayoutEffect(() => {
     const { targets, layers } = presentationTargets(snapshot.tree, rectRef.current, snapshot.zoomedId);
-    animator.retarget(targets, nowMs(), lath.store.consumeEnterHints(), { snap: snapNextRef.current, layers });
+    const snap = snapNextRef.current;
+    animator.retarget(targets, nowMs(), lath.store.consumeEnterHints(), { snap, layers });
     snapNextRef.current = false;
-    pump();
+    // A sash commit can match the last preview: no ResizeObserver event and no
+    // settlement change. Notify fitting AFTER painting the committed geometry,
+    // including a final pointermove whose preview rAF never ran before pointerup.
+    pump(snap);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snapshot.tree, snapshot.zoomedId]);
 

@@ -55,7 +55,7 @@ let engine: LathWallEngine;
 let hostWidth: number;
 let rafs: Map<number, FrameRequestCallback>;
 let nextRaf: number;
-let observers: Set<{ callback: ResizeObserverCallback; elements: Set<Element> }>;
+let observers: Set<{ callback: ResizeObserverCallback; elements: Map<Element, { width: number; height: number } | null> }>;
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -72,9 +72,9 @@ beforeEach(() => {
   });
   vi.stubGlobal('cancelAnimationFrame', (id: number) => rafs.delete(id));
   vi.stubGlobal('ResizeObserver', class {
-    elements = new Set<Element>();
+    elements = new Map<Element, { width: number; height: number } | null>();
     constructor(readonly callback: ResizeObserverCallback) { observers.add(this); }
-    observe(el: Element) { this.elements.add(el); }
+    observe(el: Element) { this.elements.set(el, null); }
     disconnect() { observers.delete(this); }
   });
   vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
@@ -102,10 +102,16 @@ afterEach(() => {
 
 function notifyResize() {
   act(() => {
-    for (const observer of [...observers]) observer.callback(
-      [...observer.elements].map(target => ({ target, contentRect: target.getBoundingClientRect() }) as ResizeObserverEntry),
-      observer as unknown as ResizeObserver,
-    );
+    for (const observer of [...observers]) {
+      const entries: ResizeObserverEntry[] = [];
+      for (const [target, previous] of observer.elements) {
+        const contentRect = target.getBoundingClientRect();
+        if (previous?.width === contentRect.width && previous.height === contentRect.height) continue;
+        observer.elements.set(target, { width: contentRect.width, height: contentRect.height });
+        entries.push({ target, contentRect } as ResizeObserverEntry);
+      }
+      if (entries.length) observer.callback(entries, observer as unknown as ResizeObserver);
+    }
   });
 }
 function frame(ms = 16) {
@@ -214,6 +220,17 @@ describe('terminal fitting follows settled layout, not animated geometry', () =>
     settle();
     expect(registry.resizes).toEqual([
       { id: 'a', cols: 49, rows: 28 }, { id: 'b', cols: 29, rows: 28 },
+    ]);
+  });
+
+  it('fits the final sash commit when pointerup beats the last preview frame', () => {
+    mount();
+    sashDrag();
+    pointer(window, 'pointermove', 600);
+    pointer(window, 'pointerup', 600);
+    settle();
+    expect(registry.resizes).toEqual([
+      { id: 'a', cols: 59, rows: 28 }, { id: 'b', cols: 19, rows: 28 },
     ]);
   });
 
