@@ -257,6 +257,26 @@ transport messages on the same counters (so no second cipher exists to get
 wrong). A design that trickled candidates, or that negotiated on a side
 channel, would have broken all three at once.
 
+**Why the holding queue is 4 MiB and 8,192 frames, and why bytes are the bound
+that matters** *(2026-09)*. A receiver holds channel frames from the instant the
+peer's channel opens until the peer's `direct-switch` decrypts off the relay, so
+the window is exactly one relay one-way hop — 100–300 ms with a VPS relay and a
+phone on cellular. What fills it is the Burrow's terminal stream, and that
+stream is not coalesced: node-pty's `onData` becomes one `data` message per
+chunk (`standalone/sidecar/pty-core.js`), one `terminalData` event
+(`lib/src/remote/burrow/remote-api.ts`), and one `#sendApp` call, at the ~1 KiB
+chunks a PTY emits. A single streaming pane is therefore of the order of a
+thousand frames a second, and the original 64-frame cap overflowed in ~65 ms —
+with overflow fatal, a `yes` running in one pane would have killed the session
+at the moment it switched. Bytes are what the machine actually holds, so the
+byte cap is the real one: 4 MiB is half a second of a 5 MB/s stream, well past
+the worst hop. The frame cap is then placed above where 1 KiB frames can reach
+it (8,192 × 1 KiB > 4 MiB) so that it constrains only a peer sending thousands
+of frames too small to fill the byte cap. The worst case is per session, and
+transient: `MAX_ESTABLISHED_E2E_SESSIONS` × 4 MiB = 64 MiB of held ciphertext if
+all sixteen authorized phones cut over at once, on a machine that is already
+running their terminals.
+
 **Why no ICE servers, stated as a hard rule rather than a default.** A STUN
 server learns the client's public address and the fact of a session, from a
 party neither endpoint chose; a TURN server learns the traffic pattern and

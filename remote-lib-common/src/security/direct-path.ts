@@ -43,11 +43,23 @@ export const DIRECT_GATHER_TIMEOUT_MS = 3_000;
  */
 export const MAX_DIRECT_SDP_LENGTH = 2000;
 
-/** How many channel frames a receiver holds while awaiting the peer's switch. */
-export const MAX_DIRECT_PENDING_FRAMES = 64;
+/**
+ * How many bytes of held channel frames a receiver holds while awaiting the
+ * peer's switch. **The operative bound of the two**: what the window has to
+ * cover is one relay one-way hop of a terminal stream, and bytes are what the
+ * machine actually holds (`docs/specs/remote-security-model.md` -> "Burrow
+ * bounds").
+ */
+export const MAX_DIRECT_PENDING_BYTES = 4 * 1024 * 1024;
 
-/** How many bytes of held channel frames a receiver holds, whatever the count. */
-export const MAX_DIRECT_PENDING_BYTES = 1024 * 1024;
+/**
+ * How many channel frames a receiver holds, whatever their size. Set above
+ * where the ~1 KiB frames a PTY produces can reach it, so it stops only a peer
+ * sending thousands of tiny ones; {@link MAX_DIRECT_PENDING_BYTES} is what
+ * bounds real traffic. The relationship is pinned by
+ * `remote-lib-common/test/direct-path.test.mjs`.
+ */
+export const MAX_DIRECT_PENDING_FRAMES = 8192;
 
 /**
  * Which path carries a session's traffic. `direct` only once **both**

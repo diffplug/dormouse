@@ -342,7 +342,7 @@ omits `client-gone`, invents client IDs, or reorders frames.
 | `E2E_INIT_BURST` / `E2E_INIT_REFILL_INTERVAL_MS` | 8 / 1 000 | same |
 | `DIRECT_SETUP_TIMEOUT_MS` / `DIRECT_GATHER_TIMEOUT_MS` | 15 000 / 3 000 | `remote-lib-common/src/security/direct-path.ts` |
 | `MAX_DIRECT_SDP_LENGTH` | 2 000 characters | same |
-| `MAX_DIRECT_PENDING_FRAMES` / `MAX_DIRECT_PENDING_BYTES` | 64 frames / 1 MiB | same |
+| `MAX_DIRECT_PENDING_FRAMES` / `MAX_DIRECT_PENDING_BYTES` | 8 192 frames / 4 MiB, bytes binding first (rationale) | same |
 
 - **Must bound waiting relay frames before enqueueing**, by count and cumulative
   received-string length; both `e2e` and `client-gone` share one FIFO and one

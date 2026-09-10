@@ -103,6 +103,24 @@ test('the timings the spec names are the values that ship', () => {
   assert.ok(DIRECT_GATHER_TIMEOUT_MS < DIRECT_SETUP_TIMEOUT_MS);
 });
 
+/**
+ * The two holding bounds are not independent: the byte cap is the one meant to
+ * bind, and the frame cap only exists so a peer cannot hold the queue open with
+ * frames too small to fill it.
+ */
+test('the holding queue is bounded in bytes first', () => {
+  assert.equal(MAX_DIRECT_PENDING_BYTES, 4 * 1024 * 1024);
+  // A PTY emits ~1 KiB chunks uncoalesced, one per channel frame, so at the
+  // frame size terminal traffic actually has the byte cap is reached first.
+  assert.ok(
+    MAX_DIRECT_PENDING_FRAMES * 1024 >= MAX_DIRECT_PENDING_BYTES,
+    `${MAX_DIRECT_PENDING_FRAMES} frames of 1 KiB is under the ${MAX_DIRECT_PENDING_BYTES}-byte cap`,
+  );
+  // And the window it covers is one relay one-way hop, which is hundreds of
+  // milliseconds to a phone on cellular: half a second of a fast stream fits.
+  assert.ok(MAX_DIRECT_PENDING_BYTES >= 0.5 * 5_000_000);
+});
+
 // --- The cutover ------------------------------------------------------------
 
 const frame = (n, size = 4) => new Uint8Array(size).fill(n);
