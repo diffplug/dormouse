@@ -528,20 +528,24 @@ Source of truth: `standalone/package.json` (package scripts),
   `lib/src/host/` sources into the sidecar `.cjs` files).
 - The `tauri` script stages, then runs `standalone/scripts/tauri.mjs`, which
   delegates to the Tauri CLI — except `dev`, which it routes through `runDev`
-  below. The `DORMOUSE_REMOTE_CONNECT_SRC` build-time override
-  for self-host relay origins is baked into the sidecar's burrow bundle by
-  `build-sidecar-proxy.mjs` — the Burrow runs in the sidecar, so the webview CSP has
-  no relay sources at all, which `standalone/scripts/tauri-conf.test.mjs` asserts
-  against `tauri.conf.json` (`docs/specs/relay.md`, "Where a Burrow may reach a
-  Relay").
+  below. `build-sidecar-proxy.mjs` bakes `DORMOUSE_REMOTE_CONNECT_SRC` into the
+  sidecar's Burrow bundle. The webview CSP contains no relay sources, pinned by
+  `standalone/scripts/tauri-conf.test.mjs` (`docs/specs/relay.md`, "Where a Burrow
+  may reach a Relay").
 - The Tauri bundle ships the whole sidecar via the `../sidecar/**/*` resources
   glob — including node-pty's prebuilds + bundled ConPTY and the
   shell-integration scripts (`docs/specs/terminal-escapes.md`).
-- **`pnpm dev:standalone` stages, starts Vite, and hands Tauri the bound URL with
-  `beforeDevCommand` disabled** — a per-run in-memory overlay, so a direct
-  `pnpm exec tauri dev` keeps `tauri.conf.json`'s defaults. Vite ports, HMR and
-  owned-child teardown follow `docs/specs/transport.md`, Standalone browser-dev
-  harness; the owned child here is the Tauri process tree.
+- **Must start native dev with Vite on an OS-assigned loopback port and pass its
+  bound URL to Tauri**, with `beforeDevCommand` disabled in a per-run overlay.
+  Direct `pnpm exec tauri dev` keeps
+  `tauri.conf.json`'s defaults. HMR shares Vite's listener, including when
+  `TAURI_DEV_HOST` is inherited; inherited browser-dev settings never enable
+  browser mode.
+- **May pin Vite with `DORMOUSE_BROWSER_DEV_VITE_PORT`; an occupied port must fail
+  without stopping its owner.**
+- **Must close Vite and the owned Tauri process tree on startup failure or exit.**
+  POSIX shutdown escalates to SIGKILL after three seconds; Windows terminates
+  the owned tree with `taskkill /T /F`.
 - **Must key the native dev Tauri identifier to the canonical worktree path**, so
   parallel worktrees and the installed app never share app data. The default log is
   `<worktree>/standalone/src-tauri/target/dormouse-dev.log`, overridden by
