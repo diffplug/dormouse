@@ -146,6 +146,28 @@ describe('IframePanel', () => {
     expect(createIframeProxyUrl).toHaveBeenCalledWith('http://localhost:5173');
   });
 
+  // The frame is not the only consumer of the source URL: `liveUrl`, the
+  // history entries, and the upstream base that in-frame locations are mapped
+  // against all read the same string. Normalized only at the frame, a
+  // schemeless `localhost:5173` parses as scheme `localhost:` with origin
+  // `"null"`, so this navigation would land on `null/app` — and Back would
+  // persist that into `params.url`.
+  it('maps an in-frame navigation against the normalized source url', async () => {
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'createIframeProxyUrl'>;
+    platform.createIframeProxyUrl = vi.fn(async () => ({ ok: true as const, url: 'http://127.0.0.1:61234/' }));
+    setPlatform(platform);
+    await renderPanel(stubActions(), { id: 'iframe-bare-nav', title: 'Raw iframe', params: { url: 'localhost:5173' } });
+
+    await act(async () => {
+      window.dispatchEvent(new MessageEvent('message', {
+        origin: 'http://127.0.0.1:61234',
+        data: { __dormouse: 'location', url: 'http://127.0.0.1:61234/app' },
+      }));
+    });
+
+    expect(getAgentBrowserScreenController('iframe-bare-nav')?.chrome().url).toBe('http://localhost:5173/app');
+  });
+
   it('adopts clicks into the raw iframe fallback via window blur focus', async () => {
     const onClickPanel = vi.fn();
     const actions = stubActions({ onClickPanel });

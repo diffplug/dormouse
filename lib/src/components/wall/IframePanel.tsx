@@ -95,7 +95,15 @@ export function IframePanel({ id, title, params }: PaneProps) {
   const elRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   usePaneChrome(id, elRef);
-  const sourceUrl = typeof params?.url === 'string' ? params.url : '';
+  const rawUrl = typeof params?.url === 'string' ? params.url : '';
+  // Normalize once, at the source. `sourceUrl` is not only what gets framed: it
+  // seeds `liveUrl` and the history entries, and it is the upstream base
+  // `upstreamUrlFromFrameLocation` parses. Normalizing only at the frame would
+  // leave a schemeless `host:port` parsed as scheme `host:` everywhere else —
+  // `.origin` is the string "null", so an in-frame navigation would map to
+  // `null/<path>` and Back would persist that into `params.url`. A non-http(s)
+  // URL has no normalized form, so it survives raw and the refusal below fires.
+  const sourceUrl = browserSurfaceUrl(rawUrl) ?? rawUrl;
   const [liveUrl, setLiveUrl] = useState(sourceUrl);
   // A new-tab/window request from the proxy shim, pending the user's choice to
   // open it as a new pane (docs/specs/dor-browser.md → "Iframe Shim").
@@ -178,22 +186,20 @@ export function IframePanel({ id, title, params }: PaneProps) {
     // Shim"). The header's URL editor is the third: `normalizeNavUrl` keeps a
     // typed `javascript:` or `data:` scheme on purpose. React blanks a
     // `javascript:` src and nothing else, which is not a boundary to rely on.
-    // Frame the checked string, not the one handed in — the sibling call sites
-    // keep the return too, so a schemeless `host:port` frames as
-    // `http://host:port` instead of resolving against the app's own origin.
-    const framedUrl = browserSurfaceUrl(sourceUrl);
-    if (!framedUrl) {
+    // `sourceUrl` is already normalized where a normalized form exists, so what
+    // is checked here is exactly what is framed below.
+    if (!browserSurfaceUrl(sourceUrl)) {
       setResolution({ kind: 'error', reason: 'non-http' });
       return;
     }
     const createProxy = getPlatform().createIframeProxyUrl;
     if (!createProxy) {
-      setResolution({ kind: 'raw', src: framedUrl });
+      setResolution({ kind: 'raw', src: sourceUrl });
       return;
     }
     let cancelled = false;
     setResolution({ kind: 'resolving' });
-    createProxy(framedUrl).then(
+    createProxy(sourceUrl).then(
       (result: IframeProxyResult) => {
         if (cancelled) return;
         if (result.ok) setResolution({ kind: 'proxied', src: result.url, origin: originOf(result.url) });
