@@ -64,10 +64,10 @@ async function fixture(t) {
           this.args = JSON.parse((await this.wait(/CLI_ARGS (.+)/))[1]);
           return this;
         },
-        async stop() {
+        async stop(signal = 'SIGTERM') {
           if (!this.closed) {
-            if (process.platform === 'win32' && child.connected) child.send('SIGTERM', () => {});
-            else child.kill('SIGTERM');
+            if (process.platform === 'win32' && child.connected) child.send(signal, () => {});
+            else child.kill(signal);
           }
           const timer = setTimeout(() => child.kill('SIGKILL'), 6000);
           try { return await this.exited; } finally { clearTimeout(timer); }
@@ -124,6 +124,11 @@ test('parallel native dev runs isolate listeners, app data and logs, and stop on
   const restarted = await a.start().ready();
   assert.equal(restarted.config.identifier, one.config.identifier);
   assert.equal(restarted.logFile, one.logFile);
+  // A terminal/pane hangup must also reap the detached native process tree.
+  assert.equal((await restarted.stop('SIGHUP')).code, 0);
+  await assertStopped(restarted);
+  assert.equal((await fetch(two.url)).status, 200);
+  process.kill(two.appPid, 0);
 });
 
 test('an occupied explicit port fails without touching its owner; native failures close Vite', { timeout: 60000 }, async t => {

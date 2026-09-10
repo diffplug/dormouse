@@ -59,6 +59,7 @@ export async function runDev(args) {
   const fail = err => { console.error(err); return shutdown(1); };
   process.on('SIGINT', () => shutdown(0));
   process.on('SIGTERM', () => shutdown(0));
+  process.on('SIGHUP', () => shutdown(0));
   try {
     // Native mode even when a browser-dev shell exported the harness's host var.
     const server = await startDevVite({ 'import.meta.env.VITE_DORMOUSE_BROWSER_DEV_HOST': 'undefined' });

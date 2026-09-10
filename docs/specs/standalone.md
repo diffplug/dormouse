@@ -543,7 +543,8 @@ Source of truth: `standalone/package.json` (package scripts),
   browser mode.
 - **May pin Vite with `DORMOUSE_BROWSER_DEV_VITE_PORT`; an occupied port must fail
   without stopping its owner.**
-- **Must close Vite and the owned Tauri process tree on startup failure or exit.**
+- **Must close Vite and the owned Tauri process tree on startup failure, exit,
+  SIGINT, SIGTERM or SIGHUP.**
   POSIX shutdown escalates to SIGKILL after three seconds; Windows terminates
   the owned tree with `taskkill /T /F`.
 - **Must key the native dev Tauri identifier to the canonical worktree path**, so
