@@ -60,7 +60,9 @@ Pane headers re-render on every activity, terminal-state, and palette change. An
 
 ## Renderer
 
-**Why the GL context is claimed lazily.** A GL context is a scarce per-page resource, and claiming at create would spend the budget on surfaces that never paint — cold restore builds a session for every persisted pane, minimized doors included. Because eviction is oldest-first and one-way, the panes it demoted would be the earliest-restored ones, permanently.
+**Why the GL context follows the mount.** Creating a renderer for minimized terminals spends scarce context slots on content that never paints. The pinned addon deletes GPU objects and removes its canvas on disposal but does not call `WEBGL_lose_context`; explicit loss avoids waiting for garbage collection to reclaim a slot. Disposing before loss removes the old renderer’s loss listeners so they cannot affect a replacement.
+
+**Why capture failure keeps WebGL.** Canvas capture depends on the pinned addon’s synchronous activation, and explicit loss depends on a browser extension. A missing canvas, failed probe, or unavailable extension is not a rendering failure. Keeping the addon avoids turning dependency drift into the sustained DOM-renderer cost below; disposal still frees GPU objects on unmount, with only context-slot reclamation reverting to GC. The scan continues past a canvas that refuses the probe, so the addon's 2D link canvas cannot hide its WebGL one. Containing exceptions from both release steps prevents a renderer failure from leaving a pane half-unmounted or a Session undisposed.
 
 **DOM-renderer cost.** The DOM renderer emits one `<span>` per style run per row, so a TUI that paints every cell its own truecolor collapses to one span-with-inline-style *per cell*, rebuilt every frame. On a 99×25 pane that is ~1150 elements of style recalc plus layout per frame: measured in Safari 26.5 (2026-08), a single such pane held the whole page at ~110ms/frame (~9fps) while the rest of the app was idle. The same pane on the WebGL renderer holds a locked 60fps (16.6ms, zero frames over 25ms).
 
@@ -68,9 +70,11 @@ Pane headers re-render on every activity, terminal-state, and palette change. An
 
 **Context budget.** The per-page live-context cap was measured at 16 in Safari 26.5, evicted oldest-first. The `onContextLoss` → dispose-the-addon → DOM-fallback path was verified live by exhausting the budget and watching the demoted panes keep painting.
 
+**Atlas sharing.** Stock addon-webgl already caches rasterized atlas canvases by font metrics/options, DPR, texture limits, glyph mode, and foreground/background/ANSI colors; terminal columns and rows are absent from the key. Each renderer uploads its own texture copy into its own WebGL context. A reattached terminal reuses the atlas while another compatible renderer owns it; no extra Dormouse cache is needed. Sharing GPU textures would require a different rendering architecture using one context across terminals.
+
 **Why image support loads before the renderer.** An ImageAddon registers protocol handlers and draws into canvas layers separate from the text renderer; its renderer hook removes those layers during a WebGL/DOM swap and the next image render recreates them. Loading it only at mount would lose graphics emitted while a Session was minimized — unlike the GL context, which no minimized pane needs. The limits themselves are `docs/specs/terminal-escapes.rationale.md` -> "Inline graphics".
 
-**Verification status.** The numbers above are Safari 26.5; Chrome was checked structurally. Not yet verified inside Tauri's WKWebView (as of 2026-08) — same engine as Safari, and Tauri does not disable the GPU; read `data-renderer` on a pane's host element to confirm.
+**Verification status.** In the standalone browser-dev harness (Chromium 150, 2026-09), 24 unmount/remount cycles explicitly lost every old context, retained the same terminal buffer, selection, and grid, emitted zero terminal resize events, and reused a second mounted terminal’s atlas canvas. Inline-image storage survived the swap and its layer repainted. The lifecycle change has not been verified inside Tauri’s WKWebView; the performance measurements above are Safari 26.5.
 
 ## Animations
 

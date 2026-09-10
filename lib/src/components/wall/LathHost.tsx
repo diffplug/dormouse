@@ -556,13 +556,16 @@ export function LathHost({
   // markDying wake): paint now — this runs pre-paint when called from a layout effect,
   // so the first frame is correct — tell chrome, and schedule the loop while anything is
   // still moving. Reschedules only when no frame is already pending.
-  const pump = useCallback((forceTerminalFit = false) => {
+  const pump = useCallback((layoutCommit = false) => {
     const t = nowMs();
     applyFrames(t);
     const settled = animator.settledAt(t);
+    // Terminals fit on painted, final geometry: whenever motion starts or ends, and on
+    // every layout commit (which may land already-settled). Fitting is gated by
+    // `canFit`, so the starting edge only drops a pending fit.
     const settlementChanged = framesSettledRef.current !== settled;
     framesSettledRef.current = settled;
-    if (settlementChanged || forceTerminalFit) {
+    if (settlementChanged || layoutCommit) {
       for (const listener of terminalFitListeners.current) listener();
     }
     lath.notifyFrames(settled);
@@ -582,13 +585,12 @@ export function LathHost({
   // only presentation geometry + stacking, so the split tree stays unchanged.
   useLayoutEffect(() => {
     const { targets, layers } = presentationTargets(snapshot.tree, rectRef.current, snapshot.zoomedId);
-    const snap = snapNextRef.current;
-    animator.retarget(targets, nowMs(), lath.store.consumeEnterHints(), { snap, layers });
+    animator.retarget(targets, nowMs(), lath.store.consumeEnterHints(), { snap: snapNextRef.current, layers });
     snapNextRef.current = false;
-    // A sash commit can match the last preview: no ResizeObserver event and no
-    // settlement change. Notify fitting AFTER painting the committed geometry,
-    // including a final pointermove whose preview rAF never ran before pointerup.
-    pump(snap);
+    // Notify fitting AFTER painting the committed geometry: a sash commit can land on
+    // its last preview size, so neither a ResizeObserver event nor a settlement change
+    // would fire — including a final pointermove whose rAF never ran before pointerup.
+    pump(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snapshot.tree, snapshot.zoomedId]);
 
