@@ -15,10 +15,13 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  CONTROL_PAYLOAD_SIZE,
   DEFAULT_PAIRING_TTL_MS,
+  DIRECT_SETUP_TIMEOUT_MS,
   E2E_KEEPALIVE_INTERVAL_MS,
   ESTABLISHED_E2E_IDLE_TIMEOUT_MS,
   KEEPALIVE_BODY_SIZE,
+  MAX_DIRECT_PENDING_FRAMES,
   REMOTE_EVENTS,
   REMOTE_METHODS,
   SELFHOST_ACCOUNT_ID,
@@ -63,6 +66,13 @@ import type {
   PendingDeliveryDeletionV1,
 } from './pocket-db';
 import { FakeSocket } from '../test-fake-socket';
+import {
+  FakeDirectNetwork,
+  type FakeDirectNetworkOptions,
+  type FakePeer,
+} from '../direct/test-fake-peer';
+import type { DirectPeerLike } from '../direct/direct-peer';
+import type { RemoteTimer } from '../ws';
 import { createTestRelay, type TestRelay } from '../test-relay';
 import { createTestAuthenticator, type TestAuthenticator } from '../test-e2e-client';
 import { BurrowRuntime } from '../burrow/burrow-runtime';
@@ -192,6 +202,11 @@ function expiringClock(): { now: () => number; expire: () => void } {
       jumping = true;
     },
   };
+}
+
+/** Let everything already queued run, for a case asserting something did not happen. */
+async function settleTicks(): Promise<void> {
+  for (let i = 0; i < 8; i += 1) await new Promise((r) => setTimeout(r, 1));
 }
 
 /** Poll until `predicate` holds, so a Burrow awaiting WebCrypto can catch up. */
@@ -371,6 +386,10 @@ async function makeE2eHarness(
     pushDeleteFails?: boolean;
     /** Extra `PocketClient` deps — the keepalive timer and visibility seams. */
     deps?: Partial<PocketClientDeps>;
+    /** How this Burrow builds a peer for the direct path; absent, it declines. */
+    burrowDirect?: () => DirectPeerLike | null;
+    /** The Burrow's timers, where a case has to fire one by hand. */
+    burrowSetTimer?: RemoteTimer;
   } = {},
 ): Promise<E2eHarness> {
   const burrowId = options.burrowId ?? randomBase64Url(16);
@@ -397,6 +416,8 @@ async function makeE2eHarness(
     enrollment,
     reconnect: false,
     createWebSocket: () => burrowSocket,
+    ...(options.burrowDirect ? { createDirectPeer: options.burrowDirect } : {}),
+    ...(options.burrowSetTimer ? { setTimer: options.burrowSetTimer } : {}),
     loadAcl: options.loadAcl ?? (() => []),
     saveAcl: (_burrowId, records) => {
       savedAcl = [...records];
@@ -929,6 +950,13 @@ function fakeTimers() {
       timer.cancelled = true;
       timer.run();
     },
+    /** Fire the one armed for `delayMs`, where more than one deadline is live. */
+    fireAt(delayMs: number): void {
+      const timer = this.live.find((entry) => entry.delayMs === delayMs);
+      if (!timer) throw new Error(`no timer armed for ${delayMs}ms`);
+      timer.cancelled = true;
+      timer.run();
+    },
   };
 }
 
@@ -1079,6 +1107,321 @@ describe('keepalives on an established session', () => {
     // keepalived again rather than silently reaped.
     expect(timers.live).toHaveLength(1);
     send.mockRestore();
+  });
+});
+
+// --- The direct path --------------------------------------------------------
+
+describe('the direct path, end to end', () => {
+  /**
+   * A connected phone and a real Burrow holding the two ends of one linked peer
+   * pair, with every timer on both sides the test's own.
+   *
+   * Nothing about the negotiation is stubbed: the signals are real control
+   * messages on the real session, and each side runs the shipped
+   * `DirectPeer` — only the `RTCPeerConnection` underneath is in memory.
+   */
+  async function connectedDirect(
+    options: {
+      network?: FakeDirectNetworkOptions;
+      /** Give the Client no peer factory, as a browser without WebRTC has. */
+      clientHasPeer?: boolean;
+      /** Give the Burrow none, as the VS Code host has. */
+      burrowHasPeer?: boolean;
+    } = {},
+  ) {
+    const network = new FakeDirectNetwork(options.network);
+    const timers = fakeTimers();
+    const burrowTimers = fakeTimers();
+    const clientPeers: FakePeer[] = [];
+    const burrowPeers: FakePeer[] = [];
+    const harness = await makeE2eHarness({
+      deps: {
+        setTimer: timers.setTimer,
+        ...(options.clientHasPeer === false
+          ? {}
+          : {
+              createDirectPeer: () => {
+                const peer = network.createOfferer();
+                clientPeers.push(peer);
+                return peer;
+              },
+            }),
+      },
+      ...(options.burrowHasPeer === false
+        ? {}
+        : {
+            burrowDirect: () => {
+              const peer = network.createAnswerer();
+              burrowPeers.push(peer);
+              return peer;
+            },
+          }),
+      burrowSetTimer: burrowTimers.setTimer,
+    });
+    await harness.pairAndApprove(await harness.mintInvitation());
+    expect(await harness.client.connect(harness.burrowId)).toMatchObject({ ok: true });
+    return {
+      harness,
+      network,
+      timers,
+      burrowTimers,
+      clientPeers,
+      burrowPeers,
+      /** This session's routing id, read off the envelope the Client addressed. */
+      connectionId: harness
+        .clientSocket()
+        .frames('e2e')
+        .find((frame) => frame.kind === 'connection')!.id as string,
+      /** Client→relay transport frames on the connection, which stop at the switch. */
+      clientFrames: () =>
+        harness
+          .clientSocket()
+          .frames('e2e')
+          .filter((frame) => frame.kind === 'connection' && frame.step === 'transport'),
+      /** Burrow→relay frames on this connection, which stop at its own switch. */
+      burrowFrames: () =>
+        harness.relay.burrowSocket
+          .frames('e2e')
+          .filter((frame) => frame.kind === 'connection'),
+      /** Wait until both directions have left the relay. */
+      cutover: () =>
+        waitFor(() => harness.client.transportPath === 'direct', 'the session to go direct'),
+    };
+  }
+
+  it('offers after the outcome and cuts over, all as control messages on the relay', async () => {
+    const run = await connectedDirect();
+    await run.cutover();
+
+    // Three Client→Burrow transport frames on this connection: the connection
+    // request the ceremony ended with, the offer, and the switch. Nothing else
+    // rides the relay, and the Relay never sees an SDP — only a padded
+    // control body it cannot read.
+    expect(run.clientFrames()).toHaveLength(3);
+    for (const frame of run.clientFrames()) {
+      expect(fromBase64Url(frame.ct as string).length).toBe(1 + CONTROL_PAYLOAD_SIZE + 16);
+    }
+    // And three the other way: the outcome, the answer, and the Burrow's switch.
+    expect(run.burrowFrames().filter((frame) => frame.step === 'transport')).toHaveLength(3);
+    // Signaling only so far: the channel has carried nothing.
+    expect(run.network.offererChannel!.sent).toEqual([]);
+  });
+
+  it('carries protocol-v1 on the channel afterwards, and nothing more on the relay', async () => {
+    const run = await connectedDirect();
+    await run.cutover();
+    const clientBefore = run.clientFrames().length;
+    const burrowBefore = run.burrowFrames().length;
+    const chunks: TerminalDataEvent[] = [];
+
+    expect(await run.harness.client.hello()).toMatchObject({ protocolVersion: 1 });
+    await run.harness.client.watchDirectory(() => {});
+    await run.harness.client.attach('surface-1', 80, 24, { onData: (e) => chunks.push(e) });
+    await run.harness.client.write('surface-1', 'ls\n');
+
+    // The relay carried none of it, in either direction.
+    expect(run.clientFrames()).toHaveLength(clientBefore);
+    expect(run.burrowFrames()).toHaveLength(burrowBefore);
+    // The channel carried all of it — including the burrow→client stream.
+    expect(run.network.offererChannel!.sent.length).toBe(4);
+    expect(run.network.answererChannel!.sent.length).toBeGreaterThanOrEqual(5);
+    expect(chunks).toEqual([STREAMED_CHUNK]);
+  });
+
+  it('keepalives ride the channel once the session has switched', async () => {
+    const run = await connectedDirect();
+    await run.cutover();
+    const clientBefore = run.clientFrames().length;
+    const sentBefore = run.network.offererChannel!.sent.length;
+
+    run.timers.fireAt(E2E_KEEPALIVE_INTERVAL_MS);
+
+    expect(run.clientFrames()).toHaveLength(clientBefore);
+    const sent = run.network.offererChannel!.sent.slice(sentBefore);
+    // The kind byte, 32 zero bytes, and the Poly1305 tag: the same fixed-size
+    // keepalive the relay would have carried.
+    expect(sent.map((frame) => frame.length)).toEqual([1 + KEEPALIVE_BODY_SIZE + 16]);
+  });
+
+  it('stays relayed and fully working against a Burrow that declines', async () => {
+    const run = await connectedDirect({ burrowHasPeer: false });
+
+    // The decline is the Burrow's second transport frame, after the outcome.
+    await waitFor(
+      () => run.burrowFrames().filter((frame) => frame.step === 'transport').length === 2,
+      'the Burrow to decline',
+    );
+    await waitFor(() => run.clientPeers[0]!.closed, 'the Client to close its peer');
+
+    expect(run.harness.client.transportPath).toBe('relay');
+    const before = run.clientFrames().length;
+    expect(await run.harness.client.hello()).toMatchObject({ protocolVersion: 1 });
+    expect(run.clientFrames().length).toBeGreaterThan(before);
+  });
+
+  it('never offers from a runtime with no peer connection', async () => {
+    const run = await connectedDirect({ clientHasPeer: false });
+    await settleTicks();
+
+    // One transport frame each way: the connection request and its outcome.
+    expect(run.clientFrames()).toHaveLength(1);
+    expect(run.burrowFrames().filter((frame) => frame.step === 'transport')).toHaveLength(1);
+    expect(run.burrowPeers).toEqual([]);
+    expect(run.harness.client.transportPath).toBe('relay');
+    expect(await run.harness.client.hello()).toMatchObject({ protocolVersion: 1 });
+  });
+
+  it('leaves the session relayed when the channel never opens', async () => {
+    const run = await connectedDirect({ network: { opening: 'never' } });
+    await waitFor(
+      () => run.burrowFrames().filter((frame) => frame.step === 'transport').length === 2,
+      'the Burrow to answer',
+    );
+
+    run.timers.fireAt(DIRECT_SETUP_TIMEOUT_MS);
+
+    expect(run.harness.client.transportPath).toBe('relay');
+    expect(run.clientPeers[0]!.closed).toBe(true);
+    // Never switched, so this is an abandoned attempt rather than burrow loss.
+    expect(run.harness.client.connectedBurrowId).toBe(run.harness.burrowId);
+    expect(await run.harness.client.hello()).toMatchObject({ protocolVersion: 1 });
+  });
+
+  it('ends both ends when the channel dies after the switch', async () => {
+    const run = await connectedDirect();
+    await run.cutover();
+    const gone = vi.fn();
+    run.harness.client.setOnBurrowGone(gone);
+
+    run.network.dropChannels();
+
+    await waitFor(
+      () => run.harness.burrow.establishedSessionCount === 0,
+      'the Burrow to drop the session',
+    );
+    expect(gone).toHaveBeenCalledOnce();
+    expect(run.harness.client.connectedBurrowId).toBeNull();
+    expect(run.harness.client.transportPath).toBe('relay');
+  });
+
+  it('disposes the Client’s session on a relay frame that arrives after the switch', async () => {
+    const run = await connectedDirect();
+    await run.cutover();
+    const gone = vi.fn();
+    run.harness.client.setOnBurrowGone(gone);
+
+    // Refused before any decrypt: the ciphertext is never even looked at.
+    run.harness.clientSocket().receive({
+      t: 'e2e',
+      burrowId: run.harness.burrowId,
+      kind: 'connection',
+      id: run.connectionId,
+      step: 'transport',
+      ct: 'AAAA',
+    });
+
+    expect(gone).toHaveBeenCalledOnce();
+    expect(run.harness.client.connectedBurrowId).toBeNull();
+  });
+
+  it('disposes the Burrow’s session on a relay frame that arrives after the switch', async () => {
+    const run = await connectedDirect();
+    await run.cutover();
+
+    run.harness.relay.burrowSocket.receive({
+      t: 'e2e',
+      clientId: run.harness.relay.clientId,
+      burrowId: run.harness.burrowId,
+      kind: 'connection',
+      id: run.connectionId,
+      step: 'transport',
+      ct: 'AAAA',
+    });
+
+    await waitFor(
+      () => run.harness.burrow.establishedSessionCount === 0,
+      'the Burrow to drop the session',
+    );
+  });
+
+  /**
+   * The race the holding queue exists for: the Burrow's answers overtake the
+   * `direct-switch` that precedes them on the relay. The in-memory relay routes
+   * synchronously, so the test holds that direction by hand.
+   */
+  it('holds channel frames until the peer’s switch, then drains them in order', async () => {
+    const run = await connectedDirect({ network: { opening: 'manual' } });
+    await waitFor(
+      () => run.burrowFrames().filter((frame) => frame.step === 'transport').length === 2,
+      'the Burrow to answer',
+    );
+    await settleTicks();
+
+    run.harness.relay.holdToClient();
+    run.network.openChannels();
+    // The Client has switched its own sends; the Burrow's switch is held.
+    expect(run.harness.client.transportPath).toBe('relay');
+
+    const order: string[] = [];
+    const first = run.harness.client.hello().then(() => order.push('first'));
+    const second = run.harness.client.write('surface-1', 'ls').then(() => order.push('second'));
+    await settleTicks();
+    expect(order).toEqual([]);
+
+    run.harness.relay.releaseToClient();
+
+    await Promise.all([first, second]);
+    expect(order).toEqual(['first', 'second']);
+    expect(run.harness.client.transportPath).toBe('direct');
+  });
+
+  it('ends the session when held frames outrun the queue', async () => {
+    const run = await connectedDirect({ network: { opening: 'manual' } });
+    await waitFor(
+      () => run.burrowFrames().filter((frame) => frame.step === 'transport').length === 2,
+      'the Burrow to answer',
+    );
+    await settleTicks();
+    const gone = vi.fn();
+    run.harness.client.setOnBurrowGone(gone);
+
+    run.harness.relay.holdToClient();
+    run.network.openChannels();
+
+    // One answer per request, all of them held: the cap is what stops a peer
+    // that never sends the switch from growing this without bound.
+    const pending = [];
+    for (let i = 0; i <= MAX_DIRECT_PENDING_FRAMES; i += 1) {
+      pending.push(run.harness.client.request('hello', {}));
+    }
+    await Promise.allSettled(pending);
+
+    expect(gone).toHaveBeenCalledOnce();
+    expect(run.harness.client.connectedBurrowId).toBeNull();
+  });
+
+  it('closes the Burrow’s peer with the client the Relay says is gone', async () => {
+    const run = await connectedDirect();
+    await run.cutover();
+
+    run.harness.relay.burrowSocket.receive({
+      t: 'client-gone',
+      clientId: run.harness.relay.clientId,
+    });
+
+    await waitFor(() => run.burrowPeers[0]!.closed, 'the Burrow to close its peer');
+    expect(run.harness.burrow.establishedSessionCount).toBe(0);
+  });
+
+  it('closes the Burrow’s peer when its own relay socket drops', async () => {
+    const run = await connectedDirect();
+    await run.cutover();
+
+    run.harness.relay.burrowSocket.drop();
+
+    await waitFor(() => run.burrowPeers[0]!.closed, 'the Burrow to close its peer');
+    expect(run.harness.burrow.establishedSessionCount).toBe(0);
   });
 });
 

@@ -34,6 +34,9 @@ import {
   type PresenceProofV1,
 } from 'remote-lib-common';
 import type { FakeSocket } from './test-fake-socket';
+import { DirectPeer } from './direct/direct-peer';
+import type { FakeDirectNetwork } from './direct/test-fake-peer';
+import type { RemoteTimer } from './ws';
 
 const subtle = globalThis.crypto.subtle;
 
@@ -390,4 +393,83 @@ export async function openConnectionSession(options: {
     session: new NoiseTransportSession(handshake.session),
     burrowChallenge: toBase64Url(payload),
   };
+}
+
+/**
+ * The Client half of the direct path, as a test drives it against a real
+ * Burrow: offer, read the answer, accept it, and — once the channel opens —
+ * announce this end's own switch (`docs/specs/remote-api.md` → Transport →
+ * "Direct path").
+ *
+ * It decrypts every Burrow→Client transport frame it consumes, so a caller must
+ * not also read the session's relay frames while it is running.
+ */
+export interface TestDirectPath {
+  /** The Client-side wrapper; `send` puts one transport ciphertext on the channel. */
+  readonly peer: DirectPeer;
+  /** Ciphertexts the Burrow put on the channel, in arrival order. */
+  readonly inbound: Uint8Array[];
+  /** The signals decrypted off the relay while opening it, in order. */
+  readonly signals: Array<Record<string, unknown>>;
+}
+
+export async function openDirectPath(options: {
+  socket: FakeSocket;
+  burrowId: string;
+  clientId: string;
+  connectionId: string;
+  session: NoiseTransportSession;
+  network: FakeDirectNetwork;
+  /** This end's own `direct-switch`, once the channel is open (default true). */
+  switchOutbound?: boolean;
+  /** The wrapper's deadlines; a Burrow suite shares its own clock's. */
+  setTimer?: RemoteTimer;
+}): Promise<TestDirectPath> {
+  const { socket, burrowId, clientId, connectionId, session, network } = options;
+  const inbound: Uint8Array[] = [];
+  const signals: Array<Record<string, unknown>> = [];
+  const peer = new DirectPeer({
+    peer: network.createOfferer(),
+    ...(options.setTimer ? { setTimer: options.setTimer } : {}),
+    handlers: {
+      onOpen: () => {},
+      onFrame: (frame) => inbound.push(frame),
+      onClosed: () => {},
+      onViolation: () => {},
+    },
+  });
+  const transportFrames = () =>
+    e2eFramesFor(socket, 'connection', connectionId).filter((frame) => frame.step === 'transport');
+  let cursor = transportFrames().length;
+  const nextSignal = async (): Promise<Record<string, unknown>> => {
+    const frame = await flushUntil(() => transportFrames()[cursor]);
+    cursor += 1;
+    const receipt = session.receive(fromBase64Url(frame.ct as string));
+    if (receipt.kind !== 'control') throw new Error(`expected a signal, got ${receipt.kind}`);
+    signals.push(receipt.value);
+    return receipt.value;
+  };
+  const sendControl = (value: Record<string, unknown>): void => {
+    sendE2eFrame(socket, {
+      clientId,
+      burrowId,
+      kind: 'connection',
+      id: connectionId,
+      step: 'transport',
+      ct: toBase64Url(session.sendControl(value)),
+    });
+  };
+
+  const offer = await peer.offer();
+  if (offer === null) throw new Error('the test peer could not describe an offer');
+  sendControl({ v: 1, t: 'direct-offer', sdp: offer });
+  const answer = await nextSignal();
+  // A decline is an answer too: the caller reads it off `signals`.
+  if (answer.t !== 'direct-answer') return { peer, inbound, signals };
+  await peer.acceptAnswer(answer.sdp as string);
+  // The Burrow's own switch is its last message on the relay.
+  await nextSignal();
+  if (options.switchOutbound !== false) sendControl({ v: 1, t: 'direct-switch' });
+  await settle();
+  return { peer, inbound, signals };
 }

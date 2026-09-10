@@ -39,6 +39,16 @@ export interface TestRelay {
   errorClient(message: string): void;
   /** Corrupt the `ct` of the next Burrow→Client frame, as a hostile relay would. */
   tamperNextBurrowFrame(): void;
+  /**
+   * Buffer Burrow→Client frames instead of delivering them, until
+   * {@link releaseToClient}. The one ordering an in-memory relay cannot
+   * otherwise produce: this relay routes synchronously, so a direct channel
+   * frame can never overtake the `direct-switch` that precedes it — which is
+   * exactly the race the receiver's holding queue exists for.
+   */
+  holdToClient(): void;
+  /** Deliver everything held, in the order it was sent. */
+  releaseToClient(): void;
   /** Stop routing, without closing either socket. */
   stop(): void;
 }
@@ -58,6 +68,8 @@ export function createTestRelay(options: {
   let client: { socket: FakeSocket; bound: string | null } | null = null;
   let live = true;
   let tamper = false;
+  /** Buffered Burrow→Client deliveries, or null while routing normally. */
+  let held: Array<() => void> | null = null;
 
   burrowSocket.onSend = (frame) => {
     if (!live || !client) return;
@@ -70,14 +82,18 @@ export function createTestRelay(options: {
     if (client.bound !== burrowId) return;
     const ct = tamper ? flipLastCharacter(frame.ct) : frame.ct;
     tamper = false;
-    client.socket.receive({
-      t: 'e2e',
-      burrowId,
-      kind: frame.kind as E2eKind,
-      id: frame.id,
-      step: frame.step,
-      ct,
-    });
+    const target = client.socket;
+    const deliver = () =>
+      target.receive({
+        t: 'e2e',
+        burrowId,
+        kind: frame.kind as E2eKind,
+        id: frame.id,
+        step: frame.step,
+        ct,
+      });
+    if (held) held.push(deliver);
+    else deliver();
   };
 
   return {
@@ -124,6 +140,14 @@ export function createTestRelay(options: {
     },
     tamperNextBurrowFrame() {
       tamper = true;
+    },
+    holdToClient() {
+      held ??= [];
+    },
+    releaseToClient() {
+      const pending = held ?? [];
+      held = null;
+      for (const deliver of pending) deliver();
     },
     stop() {
       live = false;
