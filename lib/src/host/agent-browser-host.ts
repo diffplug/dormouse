@@ -456,7 +456,14 @@ export function createAgentBrowserHost(deps: AgentBrowserHostDeps): AgentBrowser
     if (typeof session !== 'string' || !session) {
       return { ok: false, error: 'session is required' };
     }
-    const script = EDIT_SCRIPTS[op];
+    // `op` is typed but arrives from webview IPC unvalidated, and a plain-object
+    // lookup answers for inherited keys too: `op: 'constructor'` yields `Object`,
+    // which is truthy and walks straight past the rejection below into the `eval`
+    // argument. `hasOwnProperty.call` keeps the table's own three names the only
+    // ones that select a script, which is what the comment on `EDIT_SCRIPTS`
+    // claims. Same guard, same reason as `own()` in `RemoteControlSection.tsx`;
+    // `Object.hasOwn` is ES2022 and this build's lib is ES2020.
+    const script = Object.prototype.hasOwnProperty.call(EDIT_SCRIPTS, op) ? EDIT_SCRIPTS[op] : undefined;
     if (!script) {
       return { ok: false, error: `unknown edit op '${op}'` };
     }
