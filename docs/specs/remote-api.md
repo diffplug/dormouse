@@ -63,8 +63,11 @@ Source of truth: `BurrowRuntime.#promoteConnection` in `lib/src/remote/burrow/bu
 
 After authorization the same Noise session moves off the Relay onto a WebRTC
 data channel. **The presence protocol is inherited unchanged and the Relay is
-never trusted with authorization.** Which Burrows answer is staged
-([Future](#future)).
+never trusted with authorization.** **The standalone Burrow answers**, over
+`node-datachannel`'s W3C polyfill in the sidecar — **loaded at the first offer,
+never at boot**, a load failure declining from then on
+([standalone.md](./standalone.md) → "Burrow service"). **VS Code declines**: it
+carries no addon ([Future](#future)).
 
 **Every signal rides inside the session**, as one of four control messages
 ([relay.md](./relay.md) → E2E framing) on the established session over the relay
@@ -359,12 +362,11 @@ These are the methods the dor CLI speaks today; the remote API reuses their requ
 
 ### 8. Direct path (WebRTC)
 
-**Scope: direct-path** — latency. The shipped half is [Transport → Direct path](#direct-path), which Pocket offers and answers today. What remains, in staged order:
+**Scope: direct-path** — latency. The shipped half is [Transport → Direct path](#direct-path), which Pocket and the standalone Burrow speak today. What remains, in staged order:
 
-1. **The standalone Burrow answers** — the sidecar over `node-datachannel`'s W3C polyfill, a native addon declared in `standalone/sidecar/package.json` beside `node-pty`, loaded lazily at the first offer, a load failure answering `direct-decline`.
-2. **Security** — `docs/specs/security-remote.md` rows, `scripts/e2e-lint.mjs` rules with self-tests, the supply-chain disclosure regenerated, and a section of `docs/specs/remote-security-model.md` stating the path adds no layer to the trust model.
-3. **VS Code Burrow** — platform-targeted VSIX builds carrying the addon per target (`docs/specs/deploy.md`).
-4. **Dogfood** across a tailnet, keystroke round-trip measured relayed and direct into the rationale.
+1. **Security** — `docs/specs/security-remote.md` rows, `scripts/e2e-lint.mjs` rules with self-tests, and a section of `docs/specs/remote-security-model.md` stating the path adds no layer to the trust model.
+2. **VS Code Burrow** — platform-targeted VSIX builds carrying the addon per target (`docs/specs/deploy.md`).
+3. **Dogfood** across a tailnet, keystroke round-trip measured relayed and direct into the rationale.
 
 Relay-supplied ICE servers are unstaged (SaaS), as is a session surviving relay loss.
 
