@@ -130,9 +130,11 @@ On a failed archive:
 
 **An in-place replacement keeps the notepad instead of archiving it.** Renderer swaps, browser/terminal mode changes, and shell replacement each mint a new Surface id, so the notes migrate with the ref wherever `transferSurfaceRef` runs; pins into the disposed terminal are dropped on the way.
 
-Reserved: Workspace and Window closure has no live code path today (`closeWorkspace` has only test callers and the workspaces flag is dormant), so nothing is wired to it; routing it through the coordinator belongs to the **workspaces-rollout** scope.
+**A Workspace closure routes every member Surface through the coordinator**, one at a time, and the first refusal stops it with that Workspace intact (`docs/specs/layout.md` → Workspaces).
 
-Source of truth: `archiveSurfaceNotes` in `lib/src/lib/notepad/close-coordinator.ts`; `closeSurface` and `killPaneImmediately` in `lib/src/components/Wall.tsx`; `NotepadArchiveFailureModal` in `lib/src/components/NotepadArchiveFailure.tsx`; `beginClosing` and `transferNotepad` in `lib/src/lib/notepad/notepad-store.ts`; `useSurfaceClosing` in `lib/src/components/use-notepad.ts`.
+**Each mounted Wall registers one Surface-metadata resolver**, and a Wall answers `null` for a Surface it does not own, so the first non-null answer is the owning Workspace's — a batch and the volatile mirror describe a Surface identically no matter which Workspace holds it.
+
+Source of truth: `archiveSurfaceNotes` in `lib/src/lib/notepad/close-coordinator.ts`; `closeSurface` / `killPaneImmediately` / `closeAll` in `lib/src/components/Wall.tsx`; `NotepadArchiveFailureModal` in `lib/src/components/NotepadArchiveFailure.tsx`; `beginClosing`, `transferNotepad` and `registerNotepadSurfaceMetaResolver` in `lib/src/lib/notepad/notepad-store.ts`; `useSurfaceClosing` in `lib/src/components/use-notepad.ts`.
 
 ## Standalone quit
 

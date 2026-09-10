@@ -28,6 +28,18 @@ A focused cross-origin iframe surface swallows the gesture; the proxy shim detec
 | `t` | Toggle todo | Toggle the TODO marker on the selected Surface, terminal or browser; doors excluded. |
 | `>` | Terminal context | Terminal panes only; consumed no-op on browser panes, inert on doors. |
 
+## Workspaces (command mode)
+
+Standalone only — a bare Wall (VS Code, the website playground) leaves every key here unbound. Follows the tmux *window* bindings, except rename: tmux's `,` is already pane rename.
+
+| Key | Action | Description |
+|-----|--------|-------------|
+| `c` | Create Workspace | Adds `Workspace N`, activates it, and spawns its one pane. |
+| `n` / `p` | Next / previous | Wraps at both ends. |
+| `1`–`9` | Select by position | The nth Workspace in strip order; out of range is a consumed no-op. |
+| `&` | Close Workspace | Opens the strip's close flow; confirms first when the Workspace holds work, and the last Workspace never closes. |
+| `$` | Rename Workspace | Opens the strip's inline editor on the active tab. |
+
 ## Navigation (command mode)
 
 | Key | Action | Description |
@@ -86,12 +98,10 @@ The standalone host contributes no chords; `docs/specs/standalone.md` owns its n
 ## Implementation references
 
 - `lib/src/components/wall/use-wall-keyboard.ts` — the capture-phase listener; the iframe-shim leader `message` listener
-- `lib/src/components/wall/keyboard/` — one module per dispatch branch: `handle-dual-tap.ts`, `handle-editable-clipboard.ts`, `handle-mouse-selection-keys.ts`, `handle-kill-confirm.ts`, `handle-pane-shortcuts.ts`, `handle-pane-navigation.ts`; platform modifiers in `chords.ts`
+- `lib/src/components/wall/keyboard/` — one module per dispatch branch: `handle-dual-tap.ts`, `handle-editable-clipboard.ts`, `handle-mouse-selection-keys.ts`, `handle-kill-confirm.ts`, `handle-workspace-shortcuts.ts`, `handle-pane-shortcuts.ts`, `handle-pane-navigation.ts`; platform modifiers in `chords.ts`
+- `lib/src/lib/chrome-keyboard-lease.ts`, `lib/src/lib/workspace-strip-intent.ts` — the strip's keyboard suppression, and the bridge that carries `&` / `$` out to it
 - `lib/src/lib/vscode-keybindings.ts` — the workbench mirror allowlist
 - `lib/src/lib/terminal-mouse-router.ts` — live Alt tracking during a drag
 - `lib/src/components/SelectionPopup.tsx`, `lib/src/components/wall/TerminalContextView.tsx`, `lib/src/components/wall/InlineEditInput.tsx` — the popover/dialog handlers
 - `lib/src/components/wall/agent-browser-surface-controller.ts` — browser key forwarding and the edit-chord bridge
 
-## Future
-
-Workspace switch / create / close / rename shortcuts (command mode) are staged with the workspaces rollout ([layout.md](layout.md#future), **Scope: workspaces-rollout**), following the tmux *window* bindings the rest of the keymap mirrors; listed here once bound.

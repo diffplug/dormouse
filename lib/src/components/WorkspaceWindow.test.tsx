@@ -153,7 +153,7 @@ describe('WorkspaceWindow', () => {
 
     // A switch flips a prop; it never unmounts a leaf, so nothing calls
     // mountElement / resumeTerminal / restoreTerminal and `ringSeq` cannot
-    // advance (docs/specs/glossary.md → I8).
+    // advance (docs/specs/glossary.md → "Invariants" I8).
     expect(wallFor(first).querySelector('[data-lath-leaf="pane-a"]')).toBe(leafBefore);
     expect(wallFor(first).querySelector('[data-session-id="pane-a"]')).toBe(paneBefore);
     expect(getActivitySnapshot().get('pane-a')!.ringSeq).toBe(ringBefore);

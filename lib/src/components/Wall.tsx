@@ -1038,7 +1038,7 @@ export function Wall({
     }
     // `killPaneImmediately` defers the tree removal by the exit animation;
     // unmounting the Wall before that lands would leave Orphaned Sessions
-    // (docs/specs/glossary.md → I4). Bounded so a stuck fade cannot hang a quit.
+    // (docs/specs/glossary.md → "Invariants" I4). Bounded so a stuck fade cannot hang a quit.
     const deadline = Date.now() + lath.exitMs + 50;
     while (lath.store.leafIds().length > 0 || doorsRef.current.length > 0) {
       if (Date.now() >= deadline) break;
