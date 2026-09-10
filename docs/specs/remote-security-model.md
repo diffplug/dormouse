@@ -433,9 +433,12 @@ restated here.
   the offer and closed by every path that ends the session — outcome, expiry,
   `client-gone`, a lost relay socket, `stop()`.
 
-**The listener is a UDP socket per local address, for the life of an attempt.**
-ICE gathering binds one on every interface it gathers a candidate on, so the
-host answers UDP from anyone who can route to it on any of those networks.
+**The listener is UDP on every interface a candidate names, for the life of an
+attempt.** The standalone Burrow's addon binds one socket on the unspecified
+address and advertises each routable interface at that port (measured
+2026-09: four host candidates, one port, no loopback or link-local); a browser
+binds per interface. Either way the host answers UDP from anyone who can route
+to it on any of those networks.
 **Two parsers sit behind it and both are attack surface**: before DTLS, ICE's
 own STUN parser, which answers a binding request only under this attempt's
 ufrag and password (RFC 8445 requires 24 and 128 bits of randomness), both
