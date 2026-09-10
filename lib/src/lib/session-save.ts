@@ -53,8 +53,15 @@ async function probeCwds(
   return cwds;
 }
 
-/** Build one Workspace's `PersistedSession` from its live panes and Doors. */
-async function buildPersistedSession(
+/**
+ * Build one Workspace's `PersistedSession` from its live panes and Doors.
+ *
+ * Exported for the transfer verb, which needs the record WITHOUT publishing it:
+ * the Workspace is leaving this Window, so its record belongs in the payload
+ * rather than in this Window's aggregator
+ * (`releaseWorkspaceForTransfer` in `lib/src/components/wall/workspace-transfer.ts`).
+ */
+export async function buildPersistedSession(
   platform: PlatformAdapter,
   panes: SavePaneInput[],
   doors: PersistedDoor[] = [],

@@ -50,6 +50,7 @@ export {
   mountElement,
   refitSession,
   registerSurfaceFocusHandle,
+  releaseSession,
   restoreTerminal,
   resumeTerminal,
   setPendingShellOpts,

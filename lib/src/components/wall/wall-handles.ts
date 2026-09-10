@@ -1,5 +1,6 @@
 import type { WorkspaceId } from '../../lib/session-types';
 import type { SaveOptions } from '../../lib/session-save';
+import type { WorkspaceTransferPayload } from './workspace-transfer';
 import type { CloseSurfaceMode } from './wall-types';
 import type { DorControlRequest } from './use-dor-control';
 
@@ -21,6 +22,11 @@ export interface WallHandle {
   runningCount(): number;
   /** Persist now. `probeCwd: false` skips the cwd re-read (`SessionFlushRequest`). */
   flushPersistence(options?: SaveOptions): Promise<void>;
+  /** Hand this Workspace to another Window: build its record, take its notes,
+   *  and detach every Session **without killing one**. An explicit verb, never
+   *  an unmount effect (`releaseSession` in
+   *  `lib/src/lib/terminal-lifecycle.ts`). */
+  releaseWorkspaceForTransfer(): Promise<WorkspaceTransferPayload>;
   /** Close every member Surface through the closure coordinator. Resolves null
    *  once the Wall is empty, else the first refusal's message with the Workspace
    *  left as it was. */
@@ -81,6 +87,13 @@ export function stubWallHandle(workspaceId: WorkspaceId, overrides: Partial<Wall
     hasTouchedSurfaces: () => false,
     runningCount: () => 0,
     flushPersistence: async () => {},
+    releaseWorkspaceForTransfer: async () => ({
+      workspaceId,
+      workspace: { id: workspaceId, name: '', session: { version: 3, panes: [] } },
+      notepad: { surfaces: [], stagedDeletions: {} },
+      terminalIds: [],
+      allIds: [],
+    }),
     closeAll: async () => null,
     cancelClose: () => {},
     handleDorControl: () => {},

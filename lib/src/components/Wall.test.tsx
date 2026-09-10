@@ -2044,6 +2044,30 @@ describe('Wall on the Lath engine', () => {
     expect(handle.ownsSurface('pane-a')).toBe(true);
     expect(handle.ownsSurface('pane-elsewhere')).toBe(false);
   });
+
+  it('unmounting leaves every PTY alive and every registry entry intact', async () => {
+    // The two teardown verbs are explicit handle methods, never unmount
+    // effects: a Wall unmounts on a reload, a StrictMode double-mount, and a
+    // Workspace switch, and killing or releasing there would cost the user
+    // every Session (`releaseSession` in `lib/src/lib/terminal-lifecycle.ts`).
+    const killPty = vi.spyOn(fake, 'killPty');
+    const dispose = vi.spyOn(terminalRegistry, 'disposeSession');
+    const release = vi.spyOn(terminalRegistry, 'releaseSession');
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} />));
+    await flush();
+    const handle = getWallHandle(DEFAULT_WORKSPACE_ID)!;
+    expect(handle.surfaceIds()).toEqual(['pane-a', 'pane-b']);
+
+    await act(async () => root.render(<></>));
+    await flush();
+
+    expect(dispose).not.toHaveBeenCalled();
+    expect(release).not.toHaveBeenCalled();
+    expect(killPty).not.toHaveBeenCalled();
+    // The handle deregisters, so nothing addresses the gone Wall — but the
+    // Sessions it held are untouched.
+    expect(getWallHandle(DEFAULT_WORKSPACE_ID)).toBeNull();
+  });
 });
 
 describe('Wall session persistence: ownership filtering', () => {

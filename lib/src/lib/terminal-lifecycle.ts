@@ -629,7 +629,15 @@ export function disposeAllSessions(): void {
   }
 }
 
-export function disposeSession(id: string): void {
+/**
+ * Tear this webview's half of a Session down: the alert, the notepad pins, the
+ * listeners, the element and the xterm instance, plus the registry, pane,
+ * selection and activity state keyed to it.
+ *
+ * `kill` is the only difference between the two verbs below, and it is the
+ * whole difference between ending a Session and letting another Window take it.
+ */
+function teardownSession(id: string, { kill }: { kill: boolean }): void {
   const entry = registry.get(id);
   if (!entry) return;
   getPlatform().alertRemove(id);
@@ -637,13 +645,32 @@ export function disposeSession(id: string): void {
   // a disposed marker cannot be dropped cleanly afterwards. The notes stay.
   dropSourcesForTerminal(id);
   entry.cleanup();
-  getPlatform().killPty(id);
+  if (kill) getPlatform().killPty(id);
   entry.element.remove();
   entry.terminal.dispose();
   registry.delete(id);
   removeTerminalPaneState(id);
   removeMouseSelectionState(id);
   clearTerminalActivity(id);
+}
+
+/** End a Session: the process goes with it. */
+export function disposeSession(id: string): void {
+  teardownSession(id, { kill: true });
+}
+
+/**
+ * Detach a Session from this Window WITHOUT killing it — the process keeps
+ * running and another Window resumes over it
+ * (`docs/specs/transport.md` → "Transferring a Workspace").
+ *
+ * **Never reachable from a Wall unmount.** A Wall unmounts on a reload, a
+ * StrictMode double-mount, and a Workspace switch, and releasing there would
+ * silently strand every PTY the Window still owns. The only caller is the
+ * explicit transfer verb on the Wall's handle.
+ */
+export function releaseSession(id: string): void {
+  teardownSession(id, { kill: false });
 }
 
 export function refitSession(id: string): void {

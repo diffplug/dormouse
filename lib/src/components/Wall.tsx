@@ -66,9 +66,10 @@ import type {
 import { hasBrowser, hasTerminal } from 'dor/commands/types';
 import { DEFAULT_WORKSPACE_ID, type PersistedSurfaceRefs, type WorkspaceId } from '../lib/session-types';
 import { clearWorkspaceSurfaces, setWorkspaceSurfaces } from '../lib/workspace-surfaces';
-import { workspaceRefFor } from '../lib/workspace-store';
+import { getWorkspacesSnapshot, workspaceRefFor } from '../lib/workspace-store';
 import { awaitWallEmpty } from './wall/close-all';
 import { registerWallHandle, type WallHandle } from './wall/wall-handles';
+import { releaseWorkspaceForTransfer } from './wall/workspace-transfer';
 import { installDorControlRouter } from './wall/dor-control-router';
 import type { DropTarget, RestoreToken } from '../lib/lath/ops';
 import type { Edge } from '../lib/lath/model';
@@ -940,6 +941,12 @@ export function Wall({
     [lath],
   );
 
+  /** Whether a member Surface has a PTY behind it, as against a browser view. */
+  const surfaceHasTerminal = useCallback(
+    (id: string): boolean => hasTerminal(surfaceKindFromParams(lath.getMeta(id)?.params)),
+    [lath],
+  );
+
   /** Whether a Surface belongs to this Wall — the membership test in the hot
    *  paths (a PTY chunk per Session per Wall), so it asks the store rather than
    *  building a projection. Stable, so a listener can close over it. */
@@ -1547,11 +1554,19 @@ export function Wall({
     hasTouchedSurfaces: () => memberSurfaceIds().some((id) => {
       // A browser Surface has no "untouched" notion and always holds a page, so
       // it counts; a terminal counts once its Session exists and has input.
-      if (!hasTerminal(surfaceKindFromParams(lath.getMeta(id)?.params))) return true;
+      if (!surfaceHasTerminal(id)) return true;
       return getTerminalInstance(id) !== null && !isReplaceableShell(id);
     }),
     runningCount: () => countRunningSessionsIn(memberSurfaceIds()),
     flushPersistence: (options) => persistence.flush(options),
+    releaseWorkspaceForTransfer: () => releaseWorkspaceForTransfer({
+      workspaceId: effectiveWorkspaceId,
+      name: getWorkspacesSnapshot().workspaces
+        .find((workspace) => workspace.id === effectiveWorkspaceId)?.name ?? '',
+      serialize: persistence.serialize,
+      surfaceIds: memberSurfaceIds,
+      hasTerminal: surfaceHasTerminal,
+    }),
     closeAll,
     cancelClose,
     handleDorControl,
