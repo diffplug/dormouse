@@ -34,7 +34,7 @@ const LINT = 'scripts/loopback-lint.mjs';
  * dev helper, so a mutation cannot disturb a build even if a run is killed
  * between the edit and the restore.
  */
-const TARGET = 'scripts/clean-dev-sidecar.mjs';
+const TARGET = 'standalone/scripts/clean-dev-sidecar.mjs';
 
 /**
  * A fixture per bind form, keyed by the label the lint's own `BIND_FORMS`

@@ -34,7 +34,7 @@ const SPEC = readdirSync(join(repoRoot, 'docs/specs'))
   .map((f) => [f, budgets[f] - countWords(readRepoFile(f))])
   .sort((a, b) => b[1] - a[1])[0][0];
 const RATIONALE = SPEC.replace(/\.md$/, '.rationale.md');
-const SOURCE = 'scripts/clean-dev-sidecar.mjs'; // a comment appended here disturbs nothing
+const SOURCE = 'standalone/scripts/clean-dev-sidecar.mjs'; // a comment appended here disturbs nothing
 // Assembled at runtime so this file's own planted citations are invisible to
 // the citation check, which scans every tracked source file, this one included.
 const spec = (name) => ['docs/specs', name].join('/');
