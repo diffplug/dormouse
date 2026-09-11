@@ -1026,51 +1026,46 @@ function runPowerShellJson(script, execFileSyncFn) {
 }
 
 function windowsListeningPorts(pids, runtime = {}) {
-  const spawn = runtime.execFileSync || execFileSync;
+  const rawExecFileSync = runtime.execFileSync || execFileSync;
   const now = runtime.now || (() => performance.now());
   const deadline = now() + (runtime.scanTimeoutMs ?? OPEN_PORT_TIMEOUT_MS);
-  // Name resolution, the preferred cmdlet, and netstat share one socket-scan
-  // budget. Each fallback spends only what the preceding subprocesses left.
+  // Mandatory port enumeration gets the budget first; optional process names
+  // spend only what remains after the cmdlet or its netstat fallback.
   const execFileSyncFn = (command, args, options) => {
     const remaining = Math.ceil(deadline - now());
     if (remaining <= 0) throw new Error('port scan deadline exhausted');
-    return spawn(command, args, { ...options, timeout: remaining });
+    return rawExecFileSync(command, args, { ...options, timeout: remaining });
   };
   const pidSet = new Set(pids);
-
-  // Resolve pid -> process name once (best-effort; ports still returned without).
   const nameByPid = new Map();
-  try {
-    const rows = runPowerShellJson(
-      'Get-CimInstance Win32_Process | Select-Object ProcessId,Name | ConvertTo-Json -Compress',
-      execFileSyncFn,
-    );
-    for (const row of rows) {
-      nameByPid.set(Number(row.ProcessId), String(row.Name));
-    }
-  } catch { /* names are optional */ }
-
-  // Preferred: Get-NetTCPConnection (Windows 8+/Server 2012+).
+  let ports;
   try {
     const json = runPowerShell(
       'Get-NetTCPConnection -State Listen | Select-Object LocalAddress,LocalPort,OwningProcess | ConvertTo-Json -Compress',
       execFileSyncFn,
     );
-    return parseNetTcpConnections(json, pidSet, nameByPid);
-  } catch { /* fall through to netstat */ }
-
-  // Fallback: netstat -ano.
-  try {
-    const out = execFileSyncFn('netstat', ['-ano', '-p', 'TCP'], {
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-      timeout: OPEN_PORT_TIMEOUT_MS,
-      windowsHide: true, // see runPowerShell: avoid the console-allocation deadlock
-    });
-    return parseNetstatListening(out, pidSet, nameByPid);
+    ports = parseNetTcpConnections(json, pidSet, nameByPid);
   } catch {
-    return [];
+    try {
+      const out = execFileSyncFn('netstat', ['-ano', '-p', 'TCP'], {
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+        windowsHide: true,
+      });
+      ports = parseNetstatListening(out, pidSet, nameByPid);
+    } catch { return []; }
   }
+  if (!ports.length) return ports;
+
+  // Names are best-effort: exhaustion here must still return the ports.
+  try {
+    const rows = runPowerShellJson(
+      'Get-CimInstance Win32_Process | Select-Object ProcessId,Name | ConvertTo-Json -Compress',
+      execFileSyncFn,
+    );
+    for (const row of rows) nameByPid.set(Number(row.ProcessId), String(row.Name));
+  } catch { /* names are optional */ }
+  return ports.map((port) => ({ ...port, processName: nameByPid.get(port.pid) }));
 }
 
 function getListeningPortsForPids(pids, runtime = {}) {
