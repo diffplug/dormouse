@@ -4532,8 +4532,9 @@ mod tests {
 
     #[test]
     fn journal_commands_run_off_the_main_thread() {
-        let source = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
+        let source = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap().replace("\r\n", "\n");
         for command in ["transfer_workspace", "transfer_workspace_content", "open_workspace_window", "adopt_done", "adopt_failed", "close_window"] {
+
             assert!(source.contains(&format!("#[tauri::command(async)]\nfn {command}(")), "{command} must run off the UI thread");
         }
     }
