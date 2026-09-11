@@ -59,6 +59,11 @@ export async function closeWorkspaceWithSurfaces(id: WorkspaceId): Promise<strin
       return LAST_WORKSPACE_REFUSAL;
     }
     forgetWorkspaceSession(id);
+    // Neither strip UI state survives its Workspace: a `renamingId` left on a
+    // closed one holds the chrome keyboard lease forever, which suppresses
+    // command-mode dispatch in every Wall for the rest of the session.
+    setRenamingWorkspace(null);
+    setPendingWorkspaceClose(null);
     return null;
   } finally {
     closeInFlight = false;

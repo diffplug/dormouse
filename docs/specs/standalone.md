@@ -267,8 +267,9 @@ then the strip scrolls, with no overflow arrows.
 
 - **Never put `data-tauri-drag-region` on a tab or anything inside one.** Tauri
   matches that attribute on the event target alone, so a tab carrying it would
-  drag the window instead of activating, renaming, or reordering. Its wrapper —
-  the bar past the last tab — carries it, and is the draggable spacer.
+  drag the window instead of activating, renaming, or reordering. **A dedicated
+  spacer after the strip carries it, with a minimum width**, so the window stays
+  draggable at every tab count and the strip scrolls into what is left.
 - `onDragOutsideWindow` / `onDropOnOtherWindow` carry the drag past the strip's
   own edge (§Tear-out, and dragging between windows); the browser-dev harness
   supplies neither, because it has no windows.
@@ -909,7 +910,8 @@ bounded** so a stall cannot wedge quit, and the whole is wrapped in a ceiling
 **derived from the sum of those bounds, never a literal** — one below the sum
 aborts the final save of a slow teardown instead of guarding a wedged one. The two
 steps that reach the sidecar cost their own budget *plus* Rust's round-trip margin,
-so both terms count (`QUIT_TEARDOWN_CEILING_MS` in `standalone/src/quit.ts`). The notepad
+so both terms count (`QUIT_TEARDOWN_CEILING_MS` in `standalone/src/quit.ts`; pinned by
+`lib/src/lib/mirrored-constants.test.ts`). The notepad
 archive is **not** a step here: it runs ahead of `quit_progress` precisely because
 teardown's rule below holds — no failing step prevents exit — and archiving must be
 able to stop the quit (`docs/specs/notepad.md` -> "Standalone quit"):
@@ -928,7 +930,8 @@ able to stop the quit (`docs/specs/notepad.md` -> "Standalone quit"):
    (`docs/specs/transport.md` → "Persisted session types").
 5. `flushWindowSession` — the Workspaces' records become one Window blob
    (`docs/specs/transport.md` → "Persisted session types"); a debounce timer still
-   pending at exit would otherwise lose the final save.
+   pending at exit would otherwise lose the final save. **Bounded like the rest,
+   its term in the ceiling**, though both writers are synchronous today.
 6. `drainSessionSaves` — await the store pipeline becoming idle or its timeout
    (§Persistence).
 7. **In the last window only**, if an update is pending, a fresh `quit_progress`
