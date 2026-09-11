@@ -25,6 +25,7 @@ import type {
 } from '../../remote/burrow/burrow-surface-provider';
 import { createAskSurfaceProvider } from './ask-surface-provider';
 import { bakedConnectSrc } from './connect-src';
+import { createNativeDirectPeerFactory, disposeNativeDirectPeers } from './native-direct-peer';
 import {
   createEphemeralBurrowStateStore,
   FileBurrowStateStore,
@@ -348,6 +349,10 @@ export function createSidecarBurrow(options: SidecarBurrowOptions): SidecarBurro
     kind: 'standalone',
     sendToUi: options.send,
     connectSrc: bakedConnectSrc(),
+    // The one host that answers a `direct-offer` today. Building the factory
+    // loads nothing: the addon is opened inside the first offer, if one ever
+    // comes (`native-direct-peer.ts`).
+    createDirectPeer: createNativeDirectPeerFactory(),
   });
   void service.start().catch((error: unknown) => {
     console.error(`[burrow] failed to start: ${String(error)}`);
@@ -369,6 +374,9 @@ export function createSidecarBurrow(options: SidecarBurrowOptions): SidecarBurro
     dispose() {
       service.dispose();
       bridge.dispose();
+      // After the service, so no session is still holding a channel: the addon's
+      // threads are what would otherwise keep the sidecar from exiting.
+      disposeNativeDirectPeers();
     },
   };
 }

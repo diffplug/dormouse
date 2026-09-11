@@ -37,6 +37,7 @@ import {
   type PairingOutcome,
   type WebSocketLike,
 } from '../../remote/burrow/burrow-runtime';
+import type { DirectPeerFactory } from '../../remote/direct/direct-peer';
 import { originAllowedByConnectSrc } from './connect-src';
 import { readEnrollmentOffer } from './enroll-offer';
 import type { BurrowStateStore } from './burrow-state-store';
@@ -75,6 +76,13 @@ export interface BurrowServiceOptions {
   /** The CSP-shaped allowlist this build was compiled with (`connect-src.ts`). */
   connectSrc: string;
   createWebSocket?: (url: string) => WebSocketLike;
+  /**
+   * How this host builds a peer connection for the direct path
+   * (`docs/specs/remote-api.md` → Transport → "Direct path"). Threaded rather
+   * than defaulted: the runtimes that have one differ per host, and a Burrow
+   * without it declines every offer and stays relayed.
+   */
+  createDirectPeer?: DirectPeerFactory;
   fetch?: typeof globalThis.fetch;
   now?: () => number;
   /**
@@ -156,6 +164,7 @@ export class BurrowService {
   readonly #connectSrc: string;
   readonly #kind: BurrowKind;
   readonly #createWebSocket?: (url: string) => WebSocketLike;
+  readonly #createDirectPeer?: DirectPeerFactory;
   readonly #fetch?: typeof globalThis.fetch;
   readonly #now: () => number;
   readonly #readOffer: () => Promise<EnrollmentOffer | null>;
@@ -192,6 +201,7 @@ export class BurrowService {
     this.#connectSrc = options.connectSrc;
     this.#kind = options.kind;
     this.#createWebSocket = options.createWebSocket;
+    this.#createDirectPeer = options.createDirectPeer;
     this.#fetch = options.fetch;
     this.#now = options.now ?? (() => Date.now());
     this.#readOffer = options.readOffer ?? (() => readEnrollmentOffer());
@@ -607,6 +617,7 @@ export class BurrowService {
     this.#burrow = new BurrowRuntime({
       enrollment,
       createWebSocket: this.#createWebSocket,
+      createDirectPeer: this.#createDirectPeer,
       createSession: (opts) =>
         new RemoteApiSession({
           burrowId: opts.burrowId,

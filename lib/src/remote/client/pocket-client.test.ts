@@ -1,13 +1,10 @@
 /**
  * The Pocket client's two end-to-end ceremonies, driven against the **real**
- * `BurrowRuntime` through an in-memory relay (`../test-relay.ts`).
+ * `BurrowRuntime` through an in-memory relay.
  *
- * **No ceremony step is stubbed.** The Noise handshakes are the shipped suite,
- * the presence proofs are real ES256 assertions over the shared challenge
- * builder — verified by the same `verifyPresenceProof` a Burrow runs — and the
- * outcomes are decrypted on the session that produced them. Only the browser
- * and network edges are faked: `fetch`, `WebSocket`, WebAuthn's two calls, and
- * the two IndexedDB stores.
+ * The loop itself — client, relay, Burrow, and the account plane in front of
+ * them — is `./test-e2e-harness.ts`, shared with the suite that runs the same
+ * ceremonies over the native direct path. **No ceremony step is stubbed** there.
  *
  * The account-plane half (setup, sign-in, session expiry, push) drives a mocked
  * `fetch` alone; the relay is not involved in any of it.
@@ -15,31 +12,22 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  CONTROL_PAYLOAD_SIZE,
   DEFAULT_PAIRING_TTL_MS,
   E2E_KEEPALIVE_INTERVAL_MS,
   ESTABLISHED_E2E_IDLE_TIMEOUT_MS,
   KEEPALIVE_BODY_SIZE,
-  REMOTE_EVENTS,
-  REMOTE_METHODS,
   SELFHOST_ACCOUNT_ID,
   SETUP_TOKEN_INVALID_ERROR,
   formatPairingInvitationUrl,
   fromBase64Url,
   generateNoiseKeyPair,
   hashPasskeyPublicKey,
-  mintNoiseStaticKeyPair,
   parsePairingInvitationUrl,
-  presenceChallenge,
   pushEndpointFingerprint,
-  randomBase64Url,
   toBase64Url,
-  type BurrowAclRecord,
-  type NoiseStaticKeyMaterial,
-  type PairingInvitation,
   type PasskeyAssertion,
-  type PresenceBinding,
   type TerminalDataEvent,
-  utf8Encode,
 } from 'remote-lib-common';
 
 import {
@@ -56,121 +44,49 @@ import {
   type PocketClientDeps,
   type PocketStorage,
 } from './pocket-client';
-import type {
-  KnownBurrowStore,
-  KnownBurrowV1,
-  PendingDeletionStore,
-  PendingDeliveryDeletionV1,
-} from './pocket-db';
+import type { KnownBurrowV1 } from './pocket-db';
 import { FakeSocket } from '../test-fake-socket';
-import { createTestRelay, type TestRelay } from '../test-relay';
-import { createTestAuthenticator, type TestAuthenticator } from '../test-e2e-client';
-import { BurrowRuntime } from '../burrow/burrow-runtime';
-import type { BurrowEnrollment } from '../burrow/enrollment';
-import type { PendingPairing } from '../burrow/pairing-approval';
+import { fakeTimers } from '../test-timers';
+import {
+  FakeDirectNetwork,
+  type FakeDirectNetworkOptions,
+  type FakePeer,
+} from '../direct/test-fake-peer';
+import type { DirectPeerLike } from '../direct/direct-peer';
+import type { RemoteTimer } from '../ws';
+import { createTestAuthenticator, settle, type TestAuthenticator } from '../test-e2e-client';
 import { PasskeyAlreadyRegisteredError, type WebAuthnClient } from './webauthn';
+import {
+  AUTH_ROUTES,
+  BURROW_LABEL,
+  CREDENTIAL_ID,
+  ORIGIN,
+  PASSKEY_PUBLIC_KEY,
+  RP_ID,
+  SESSION_TOKEN,
+  STREAMED_CHUNK,
+  collect,
+  makeE2eHarness,
+  makeFetch,
+  memoryKnownBurrows,
+  memoryPendingDeletions,
+  memoryStorage,
+  secret,
+  waitFor,
+  type E2eHarness,
+  type FetchCall,
+  type MemoryKnownBurrows,
+  type MemoryPendingDeletions,
+  type RouteHandler,
+} from './test-e2e-harness';
 
 // --- Fakes -----------------------------------------------------------------
-
-const ORIGIN = 'https://pocket.example';
-const RP_ID = 'pocket.example';
-const BURROW_LABEL = 'Ned’s laptop';
-const SESSION_TOKEN = 'tok-abc';
-/** What the stub Burrow streams on attach: a chunk whose two projections differ. */
-const STREAMED_CHUNK: TerminalDataEvent = {
-  bytes: toBase64Url(utf8Encode('pre\x1b]1337;File=inline=1:AAAA\x07post')),
-  text: toBase64Url(utf8Encode('prepost')),
-};
-
-/** A base64url string usable where a real 32-byte secret goes. */
-function secret(): string {
-  return randomBase64Url(32);
-}
-
-interface FetchCall {
-  url: string;
-  method: string;
-  headers: Record<string, string>;
-  body: unknown;
-}
-
-type RouteHandler = (
-  body: unknown,
-) => { status?: number; json?: unknown } | Promise<{ status?: number; json?: unknown }>;
-
-/** A router-style fake `fetch` that records every call. */
-function makeFetch(
-  routes: Record<string, RouteHandler>,
-  /** Answers a path no exact route claims; without one, an unknown path throws. */
-  fallback?: (path: string, method: string) => { status?: number; json?: unknown } | undefined,
-) {
-  const calls: FetchCall[] = [];
-  const fetch = (async (url: string, init?: RequestInit) => {
-    const method = init?.method ?? 'POST';
-    const headers = (init?.headers ?? {}) as Record<string, string>;
-    const body = init?.body ? JSON.parse(init.body as string) : undefined;
-    calls.push({ url, method, headers, body });
-    const path = new URL(url, 'http://test').pathname;
-    const handler = routes[path];
-    const answered = handler ? await handler(body) : fallback?.(path, method);
-    if (!answered) throw new Error(`unexpected fetch: ${path}`);
-    const { status = 200, json } = answered;
-    return {
-      ok: status >= 200 && status < 300,
-      status,
-      json: async () => json ?? {},
-    } as Response;
-  }) as unknown as typeof fetch;
-  return { fetch, calls };
-}
-
-function memoryStorage(): PocketStorage {
-  const passkeys = new Map<string, string>();
-  let pushEndpoint: string | null = null;
-  return {
-    getPasskeyPublicKey: (id) => passkeys.get(id) ?? null,
-    setPasskeyPublicKey: (id, pk) => void passkeys.set(id, pk),
-    forgetPasskeyPublicKey: (id) => void passkeys.delete(id),
-    knownCredentialIds: () => [...passkeys.keys()],
-    getRegisteredPushEndpoint: () => pushEndpoint,
-    setRegisteredPushEndpoint: (fingerprint) => void (pushEndpoint = fingerprint),
-  };
-}
-
-interface MemoryKnownBurrows extends KnownBurrowStore {
-  readonly records: Map<string, KnownBurrowV1>;
-}
-
-function memoryKnownBurrows(): MemoryKnownBurrows {
-  const records = new Map<string, KnownBurrowV1>();
-  return {
-    records,
-    get: async (burrowId) => records.get(burrowId) ?? null,
-    put: async (record) => void records.set(record.burrowId, record),
-    delete: async (burrowId) => void records.delete(burrowId),
-    list: async () => [...records.values()],
-  };
-}
 
 /** The delivery id a paired record holds; throws if the record is not paired. */
 function deliveryIdOf(store: MemoryKnownBurrows, burrowId: string): string {
   const authorization = store.records.get(burrowId)?.authorization;
   if (authorization?.state !== 'paired') throw new Error(`${burrowId} is not paired`);
   return authorization.deliveryId;
-}
-
-interface MemoryPendingDeletions extends PendingDeletionStore {
-  readonly records: Map<string, PendingDeliveryDeletionV1>;
-}
-
-function memoryPendingDeletions(): MemoryPendingDeletions {
-  const records = new Map<string, PendingDeliveryDeletionV1>();
-  return {
-    records,
-    put: async (record) => void records.set(`${record.burrowId}:${record.deliveryId}`, record),
-    delete: async (burrowId, deliveryId) => void records.delete(`${burrowId}:${deliveryId}`),
-    list: async () => [...records.values()],
-  };
 }
 
 /**
@@ -194,15 +110,6 @@ function expiringClock(): { now: () => number; expire: () => void } {
   };
 }
 
-/** Poll until `predicate` holds, so a Burrow awaiting WebCrypto can catch up. */
-async function waitFor(predicate: () => boolean, what = 'a condition'): Promise<void> {
-  for (let i = 0; i < 400; i++) {
-    if (predicate()) return;
-    await new Promise((r) => setTimeout(r, 2));
-  }
-  throw new Error(`timed out waiting for ${what}`);
-}
-
 // --- The account-plane harness ---------------------------------------------
 
 interface Harness {
@@ -212,9 +119,6 @@ interface Harness {
   knownBurrows: MemoryKnownBurrows;
   pendingDeletions: MemoryPendingDeletions;
 }
-
-const CREDENTIAL_ID = 'cred-123';
-const PASSKEY_PUBLIC_KEY = 'pk-spki-b64u';
 
 const assertion: PasskeyAssertion = {
   credentialId: CREDENTIAL_ID,
@@ -234,31 +138,6 @@ const fakeWebAuthn: WebAuthnClient = {
   async getAssertion() {
     return assertion;
   },
-};
-
-const AUTH_ROUTES: Record<string, RouteHandler> = {
-  '/api/setup/begin': () => ({
-    json: {
-      challenge: secret(),
-      rpId: RP_ID,
-      accountId: SELFHOST_ACCOUNT_ID,
-      existingCredentialIds: [],
-    },
-  }),
-  '/api/setup/finish': () => ({
-    json: { accountId: SELFHOST_ACCOUNT_ID, credentialId: CREDENTIAL_ID },
-  }),
-  '/api/setup/retire': () => ({ status: 204 }),
-  '/api/signin/begin': () => ({ json: { challenge: secret(), rpId: RP_ID } }),
-  '/api/signin/finish': () => ({
-    json: {
-      sessionToken: SESSION_TOKEN,
-      accountId: SELFHOST_ACCOUNT_ID,
-      expiresAt: 1,
-      passkeyPublicKey: PASSKEY_PUBLIC_KEY,
-    },
-  }),
-  '/api/burrows': () => ({ json: { burrows: [{ burrowId: 'h1', label: 'Laptop', online: true }] } }),
 };
 
 function makeClient(
@@ -315,224 +194,6 @@ async function seedRecord(
   };
   await knownBurrows.put(record);
   return record;
-}
-
-// --- The end-to-end harness -------------------------------------------------
-
-interface E2eHarness {
-  client: PocketClient;
-  burrow: BurrowRuntime;
-  relay: TestRelay;
-  burrowId: string;
-  authenticator: TestAuthenticator;
-  noiseStatic: NoiseStaticKeyMaterial;
-  knownBurrows: MemoryKnownBurrows;
-  pendingDeletions: MemoryPendingDeletions;
-  approvals: PendingPairing[];
-  savedAcl: BurrowAclRecord[];
-  calls: FetchCall[];
-  /** The harness's own `fetch`, for a second client on the same fake Relay. */
-  fetch: typeof fetch;
-  /** The Client's relay socket, once one is open — what a keepalive lands on. */
-  clientSocket(): FakeSocket;
-  /** One live invitation, as `setupQr` would mint it. */
-  mintInvitation(): Promise<PairingInvitation>;
-  /** Run a pairing and confirm it on the Burrow with the digits the phone showed. */
-  pairAndApprove(
-    invitation: PairingInvitation,
-    options?: { code?: (shown: string) => string },
-  ): Promise<Awaited<ReturnType<PocketClient['pair']>>>;
-}
-
-/**
- * A real Burrow, a real relay, and a real client — the whole loop in memory.
- *
- * `/api/reauth/*` is faked, but faithfully: `begin` derives the challenge from
- * the presented binding with the shared builder, exactly as the Relay does, so
- * the assertion the authenticator produces is one `verifyPresenceProof`
- * accepts. Nothing else about the proof is simulated.
- */
-async function makeE2eHarness(
-  options: {
-    burrowId?: string;
-    knownBurrows?: MemoryKnownBurrows;
-    pendingDeletions?: MemoryPendingDeletions;
-    authenticator?: TestAuthenticator;
-    noiseStatic?: NoiseStaticKeyMaterial;
-    /**
-     * What the Burrow *announces* as its static, when that has to differ from the
-     * key it actually handshakes with. Nothing on the Burrow validates this
-     * string, so it is how a malformed pin reaches the Client at all.
-     */
-    announcedStatic?: string;
-    loadAcl?: () => BurrowAclRecord[];
-    now?: () => number;
-    /** Make every delivery-row deletion fail, as an offline phone's would. */
-    pushDeleteFails?: boolean;
-    /** Extra `PocketClient` deps — the keepalive timer and visibility seams. */
-    deps?: Partial<PocketClientDeps>;
-  } = {},
-): Promise<E2eHarness> {
-  const burrowId = options.burrowId ?? randomBase64Url(16);
-  const authenticator =
-    options.authenticator ?? (await createTestAuthenticator({ rpId: RP_ID, origin: ORIGIN }));
-  const noiseStatic = options.noiseStatic ?? (await mintNoiseStaticKeyPair());
-  const knownBurrows = options.knownBurrows ?? memoryKnownBurrows();
-  const pendingDeletions = options.pendingDeletions ?? memoryPendingDeletions();
-  const approvals: PendingPairing[] = [];
-  let savedAcl: BurrowAclRecord[] = [];
-
-  const enrollment: BurrowEnrollment = {
-    relayUrl: ORIGIN,
-    burrowId,
-    burrowToken: 'burrow-tok',
-    origin: ORIGIN,
-    rpId: RP_ID,
-    label: BURROW_LABEL,
-    noiseStaticPrivateKey: noiseStatic.privateKeyPkcs8,
-    noiseStaticPublicKey: options.announcedStatic ?? noiseStatic.publicKey,
-  };
-  const burrowSocket = new FakeSocket();
-  const burrow = new BurrowRuntime({
-    enrollment,
-    reconnect: false,
-    createWebSocket: () => burrowSocket,
-    loadAcl: options.loadAcl ?? (() => []),
-    saveAcl: (_burrowId, records) => {
-      savedAcl = [...records];
-    },
-    requestApproval: (pending) => approvals.push(pending),
-    dismissApproval: () => {},
-    createSession: ({ send }) => ({
-      // Enough protocol-v1 to prove the byte stream: every request is answered
-      // with its own `requestId`, which is what `hello` correlates on.
-      handle: (data) => {
-        const request = data as { requestId?: unknown; method?: unknown };
-        if (typeof request.requestId !== 'string') return;
-        send({
-          requestId: request.requestId,
-          ok: true,
-          result: { protocolVersion: 1, burrowId, grants: { input: true, layout: false } },
-        });
-        // An attach opens its stream under the request's own id, so one canned
-        // event proves the subscription path as well as the request one.
-        if (request.method === REMOTE_METHODS.surfaceAttach) {
-          send({
-            subId: request.requestId,
-            event: REMOTE_EVENTS.terminalData,
-            data: STREAMED_CHUNK,
-          });
-        }
-      },
-      dispose: () => {},
-    }),
-  });
-  burrow.start();
-  burrowSocket.open();
-  const relay = createTestRelay({ burrowId, burrowSocket });
-
-  // The presence routes, derived exactly as the Relay derives them.
-  const nonces = new Map<string, PresenceBinding>();
-  const routes: Record<string, RouteHandler> = {
-    ...AUTH_ROUTES,
-    // The account's real passkey, so the key the proof presents is the one the
-    // authenticator actually signs with.
-    '/api/signin/finish': () => ({
-      json: {
-        sessionToken: SESSION_TOKEN,
-        accountId: SELFHOST_ACCOUNT_ID,
-        expiresAt: 1,
-        passkeyPublicKey: authenticator.publicKey,
-      },
-    }),
-    '/api/reauth/begin': async (body) => {
-      const binding = (body as { binding: PresenceBinding }).binding;
-      const relayNonce = secret();
-      nonces.set(relayNonce, binding);
-      return {
-        json: {
-          challenge: await presenceChallenge(binding, relayNonce),
-          rpId: RP_ID,
-          relayNonce,
-          allowCredentials: [binding.passkeyCredentialId],
-        },
-      };
-    },
-    '/api/reauth/finish': (body) => {
-      const { relayNonce } = body as { relayNonce: string };
-      if (!nonces.delete(relayNonce)) return { status: 400, json: { error: 'unknown nonce' } };
-      return { json: { verifiedAt: 1 } };
-    },
-  };
-  // The delivery ids a Burrow mints are random, so the deletion route is matched
-  // by shape rather than by an exact path.
-  const { fetch, calls } = makeFetch(routes, (path, method) => {
-    if (method !== 'DELETE' || !path.startsWith('/api/push/subscriptions/')) return undefined;
-    return options.pushDeleteFails ? { status: 503, json: { error: 'down' } } : { status: 204 };
-  });
-
-  const storage = memoryStorage();
-  const webauthn: WebAuthnClient = {
-    async registerPasskey() {
-      return {
-        credentialId: authenticator.credentialId,
-        publicKey: authenticator.publicKey,
-        clientDataJSON: 'create-client-data',
-      };
-    },
-    // The real thing: a signature this Burrow's own verifier accepts.
-    getAssertion: (challenge) => authenticator.assert(challenge, ORIGIN),
-  };
-  let clientSocket: FakeSocket | null = null;
-  const client = new PocketClient({
-    wsBase: 'ws://test',
-    fetch,
-    webauthn,
-    createWebSocket: () => (clientSocket = relay.openClientSocket()),
-    knownBurrows,
-    pendingDeletions,
-    storage,
-    ...(options.now ? { now: options.now } : {}),
-    ...options.deps,
-  });
-  // Sign-in caches the asserted passkey's public key and names the credential
-  // every presence proof is built from, exactly as it does in the app.
-  await client.signin();
-
-  return {
-    client,
-    burrow,
-    relay,
-    burrowId,
-    authenticator,
-    noiseStatic,
-    knownBurrows,
-    pendingDeletions,
-    approvals,
-    get savedAcl() {
-      return savedAcl;
-    },
-    calls,
-    fetch,
-    clientSocket: () => {
-      if (!clientSocket) throw new Error('the Client has not opened a relay socket');
-      return clientSocket;
-    },
-    mintInvitation: () => burrow.mintInvitation(secret(), Date.now() + DEFAULT_PAIRING_TTL_MS),
-    async pairAndApprove(invitation, { code } = {}) {
-      // Counted from here: a harness that pairs twice must confirm the *new*
-      // request rather than re-answering the one still in the log.
-      const before = approvals.length;
-      let shown: string | null = null;
-      const pairing = client.pair(invitation, 'iPhone Safari', (value) => {
-        shown = value;
-      });
-      await waitFor(() => approvals.length > before, 'the Burrow to surface an approval');
-      const pending = approvals[approvals.length - 1]!;
-      pending.approve(code ? code(shown!) : shown!);
-      return await pairing;
-    },
-  };
 }
 
 // --- Pairing ----------------------------------------------------------------
@@ -908,30 +569,6 @@ describe('connecting, end to end', () => {
 
 // --- Keepalives -------------------------------------------------------------
 
-/** One armed timer at a time, fired by hand — no test waits thirty seconds. */
-function fakeTimers() {
-  const armed: Array<{ run: () => void; delayMs: number; cancelled: boolean }> = [];
-  return {
-    setTimer(run: () => void, delayMs: number): () => void {
-      const timer = { run, delayMs, cancelled: false };
-      armed.push(timer);
-      return () => {
-        timer.cancelled = true;
-      };
-    },
-    get live() {
-      return armed.filter((timer) => !timer.cancelled);
-    },
-    /** Fire the armed timer, as its delay elapsing would. */
-    fire(): void {
-      const timer = this.live.at(-1);
-      if (!timer) throw new Error('no keepalive timer is armed');
-      timer.cancelled = true;
-      timer.run();
-    },
-  };
-}
-
 /** `document.visibilityState`, as a seam a test can flip. */
 function fakeVisibility() {
   let visible = true;
@@ -1079,6 +716,416 @@ describe('keepalives on an established session', () => {
     // keepalived again rather than silently reaped.
     expect(timers.live).toHaveLength(1);
     send.mockRestore();
+  });
+});
+
+// --- The direct path --------------------------------------------------------
+
+describe('the direct path, end to end', () => {
+  /**
+   * A connected phone and a real Burrow holding the two ends of one linked peer
+   * pair, with every timer on both sides the test's own.
+   *
+   * Nothing about the negotiation is stubbed: the signals are real control
+   * messages on the real session, and each side runs the shipped
+   * `DirectPeer` — only the `RTCPeerConnection` underneath is in memory.
+   */
+  async function connectedDirect(
+    options: {
+      network?: FakeDirectNetworkOptions;
+      /** Give the Client no peer factory, as a browser without WebRTC has. */
+      clientHasPeer?: boolean;
+      /** Give the Burrow none, as the VS Code host has. */
+      burrowHasPeer?: boolean;
+    } = {},
+  ) {
+    const network = new FakeDirectNetwork(options.network);
+    const timers = fakeTimers();
+    const clientPeers: FakePeer[] = [];
+    const burrowPeers: FakePeer[] = [];
+    const harness = await makeE2eHarness({
+      deps: {
+        setTimer: timers.setTimer,
+        ...(options.clientHasPeer === false
+          ? {}
+          : { createDirectPeer: collect(clientPeers, () => network.createOfferer()) }),
+      },
+      ...(options.burrowHasPeer === false
+        ? {}
+        : { burrowDirect: collect(burrowPeers, () => network.createAnswerer()) }),
+    });
+    await harness.connectPaired();
+    return {
+      harness,
+      network,
+      timers,
+      clientPeers,
+      burrowPeers,
+      /** This session's routing id, read off the envelope the Client addressed. */
+      connectionId: harness
+        .clientSocket()
+        .frames('e2e')
+        .find((frame) => frame.kind === 'connection')!.id as string,
+      /** Client→relay transport frames on the connection, which stop at the switch. */
+      clientFrames: harness.clientTransportFrames,
+      /** Burrow→relay transport frames on this connection, which stop at its own switch. */
+      burrowFrames: harness.burrowTransportFrames,
+      /** Wait for the Burrow's second transport frame: its answer, or its decline. */
+      answered: () =>
+        waitFor(() => harness.burrowTransportFrames().length === 2, 'the Burrow to answer'),
+      /** Wait until both directions have left the relay. */
+      cutover: () =>
+        waitFor(() => harness.client.transportPath === 'direct', 'the session to go direct'),
+    };
+  }
+
+  it('offers after the outcome and cuts over, all as control messages on the relay', async () => {
+    const run = await connectedDirect();
+    await run.cutover();
+
+    // Three Client→Burrow transport frames on this connection: the connection
+    // request the ceremony ended with, the offer, and the switch. Nothing else
+    // rides the relay, and the Relay never sees an SDP — only a padded
+    // control body it cannot read.
+    expect(run.clientFrames()).toHaveLength(3);
+    for (const frame of run.clientFrames()) {
+      expect(fromBase64Url(frame.ct as string).length).toBe(1 + CONTROL_PAYLOAD_SIZE + 16);
+    }
+    // And three the other way: the outcome, the answer, and the Burrow's switch.
+    expect(run.burrowFrames()).toHaveLength(3);
+    // Signaling only so far: the channel has carried nothing.
+    expect(run.network.offererChannel!.sent).toEqual([]);
+  });
+
+  it('carries protocol-v1 on the channel afterwards, and nothing more on the relay', async () => {
+    const run = await connectedDirect();
+    await run.cutover();
+    const clientBefore = run.clientFrames().length;
+    const burrowBefore = run.burrowFrames().length;
+    const chunks: TerminalDataEvent[] = [];
+
+    expect(await run.harness.client.hello()).toMatchObject({ protocolVersion: 1 });
+    await run.harness.client.watchDirectory(() => {});
+    await run.harness.client.attach('surface-1', 80, 24, { onData: (e) => chunks.push(e) });
+    await run.harness.client.write('surface-1', 'ls\n');
+
+    // The relay carried none of it, in either direction.
+    expect(run.clientFrames()).toHaveLength(clientBefore);
+    expect(run.burrowFrames()).toHaveLength(burrowBefore);
+    // The channel carried all of it — including the burrow→client stream.
+    expect(run.network.offererChannel!.sent.length).toBe(4);
+    expect(run.network.answererChannel!.sent.length).toBeGreaterThanOrEqual(5);
+    expect(chunks).toEqual([STREAMED_CHUNK]);
+  });
+
+  it('keepalives ride the channel once the session has switched', async () => {
+    const run = await connectedDirect();
+    await run.cutover();
+    const clientBefore = run.clientFrames().length;
+    const sentBefore = run.network.offererChannel!.sent.length;
+
+    run.timers.fireAt(E2E_KEEPALIVE_INTERVAL_MS);
+
+    expect(run.clientFrames()).toHaveLength(clientBefore);
+    const sent = run.network.offererChannel!.sent.slice(sentBefore);
+    // The kind byte, 32 zero bytes, and the Poly1305 tag: the same fixed-size
+    // keepalive the relay would have carried.
+    expect(sent.map((frame) => frame.length)).toEqual([1 + KEEPALIVE_BODY_SIZE + 16]);
+  });
+
+  it('stays relayed and fully working against a Burrow that declines', async () => {
+    const run = await connectedDirect({ burrowHasPeer: false });
+
+    // The decline is the Burrow's second transport frame, after the outcome.
+    await run.answered();
+    await waitFor(() => run.clientPeers[0]!.closed, 'the Client to close its peer');
+
+    expect(run.harness.client.transportPath).toBe('relay');
+    const before = run.clientFrames().length;
+    expect(await run.harness.client.hello()).toMatchObject({ protocolVersion: 1 });
+    expect(run.clientFrames().length).toBeGreaterThan(before);
+  });
+
+  it('ends both ends when the channel dies after the switch', async () => {
+    const run = await connectedDirect();
+    await run.cutover();
+    const gone = vi.fn();
+    run.harness.client.setOnBurrowGone(gone);
+
+    run.network.dropChannels();
+
+    await waitFor(
+      () => run.harness.burrow.establishedSessionCount === 0,
+      'the Burrow to drop the session',
+    );
+    expect(gone).toHaveBeenCalledOnce();
+    expect(run.harness.client.connectedBurrowId).toBeNull();
+    expect(run.harness.client.transportPath).toBe('relay');
+  });
+
+  it('disposes the Client’s session on a relay frame that arrives after the switch', async () => {
+    const run = await connectedDirect();
+    await run.cutover();
+    const gone = vi.fn();
+    run.harness.client.setOnBurrowGone(gone);
+
+    // Refused before any decrypt: the ciphertext is never even looked at.
+    run.harness.clientSocket().receive({
+      t: 'e2e',
+      burrowId: run.harness.burrowId,
+      kind: 'connection',
+      id: run.connectionId,
+      step: 'transport',
+      ct: 'AAAA',
+    });
+
+    expect(gone).toHaveBeenCalledOnce();
+    expect(run.harness.client.connectedBurrowId).toBeNull();
+  });
+
+  it('disposes the Burrow’s session on a relay frame that arrives after the switch', async () => {
+    const run = await connectedDirect();
+    await run.cutover();
+
+    run.harness.relay.burrowSocket.receive({
+      t: 'e2e',
+      clientId: run.harness.relay.clientId,
+      burrowId: run.harness.burrowId,
+      kind: 'connection',
+      id: run.connectionId,
+      step: 'transport',
+      ct: 'AAAA',
+    });
+
+    await waitFor(
+      () => run.harness.burrow.establishedSessionCount === 0,
+      'the Burrow to drop the session',
+    );
+  });
+
+  /**
+   * `isE2eCiphertext` bounds a `ct`'s alphabet and its length, not its padding,
+   * so a relay can put a well-shaped envelope on the wire whose ciphertext will
+   * not decode. Both ends must end the session on it, rather than throw out of
+   * the socket handler or warn and drop it.
+   */
+  /**
+   * A refused chunk disposes the session synchronously, from inside the loop
+   * that is still chunking the message. The rest of it belongs nowhere: routing
+   * it onto the relay would put post-switch ciphertext there and kill the peer
+   * with a misleading reason.
+   */
+  it('stops a multi-chunk message when the channel refuses its first chunk', async () => {
+    const run = await connectedDirect();
+    await run.cutover();
+    const clientBefore = run.clientFrames().length;
+    const gone = vi.fn();
+    run.harness.client.setOnBurrowGone(gone);
+    // Closed under the session, which a radio gap does between two sends.
+    run.network.offererChannel!.close();
+
+    // Over one Noise message, so the transport chunks it into two ciphertexts.
+    await expect(run.harness.client.write('surface-1', 'x'.repeat(70_000))).rejects.toThrow();
+
+    expect(gone).toHaveBeenCalledOnce();
+    expect(run.harness.client.connectedBurrowId).toBeNull();
+    // Neither chunk reached the relay of a session that had just been torn down.
+    expect(run.clientFrames()).toHaveLength(clientBefore);
+  });
+
+  it('disposes the Client’s session on a relay frame that will not decode', async () => {
+    // Nothing switches, so the relay is still the path this frame belongs on
+    // and the decode is the only thing that can refuse it.
+    const run = await connectedDirect({ network: { opening: 'never' } });
+    const gone = vi.fn();
+    run.harness.client.setOnBurrowGone(gone);
+
+    expect(() =>
+      run.harness.clientSocket().receive({
+        t: 'e2e',
+        burrowId: run.harness.burrowId,
+        kind: 'connection',
+        id: run.connectionId,
+        step: 'transport',
+        // Two base64url characters: one byte, with nonzero trailing bits.
+        ct: 'AB',
+      }),
+    ).not.toThrow();
+
+    expect(gone).toHaveBeenCalledOnce();
+    expect(run.harness.client.connectedBurrowId).toBeNull();
+  });
+
+  it('disposes the Burrow’s session on a relay frame that will not decode', async () => {
+    const run = await connectedDirect({ network: { opening: 'never' } });
+
+    run.harness.relay.burrowSocket.receive({
+      t: 'e2e',
+      clientId: run.harness.relay.clientId,
+      burrowId: run.harness.burrowId,
+      kind: 'connection',
+      id: run.connectionId,
+      step: 'transport',
+      ct: 'AB',
+    });
+
+    await waitFor(
+      () => run.harness.burrow.establishedSessionCount === 0,
+      'the Burrow to drop the session',
+    );
+  });
+
+  /**
+   * What a failed decrypt kills is the end-to-end session; the relay socket is
+   * to the *Relay*, and reconnecting is a fresh handshake over the one already
+   * open. Nulling it without closing it would leave it live and unreferenced,
+   * with the app's next `openSocket()` opening a second beside it.
+   */
+  it('keeps the relay socket open when the end-to-end session fails', async () => {
+    const run = await connectedDirect({ network: { opening: 'never' } });
+    const socket = run.harness.clientSocket();
+    const gone = vi.fn();
+    run.harness.client.setOnBurrowGone(gone);
+
+    // Decodes, and then fails to decrypt: 18 bytes that are not this session's.
+    socket.receive({
+      t: 'e2e',
+      burrowId: run.harness.burrowId,
+      kind: 'connection',
+      id: run.connectionId,
+      step: 'transport',
+      ct: 'A'.repeat(24),
+    });
+
+    expect(gone).toHaveBeenCalledOnce();
+    expect(run.harness.client.connectedBurrowId).toBeNull();
+    expect(run.harness.client.socketOpen).toBe(true);
+    // The same socket, still open: `openSocket()` would reuse it.
+    expect(run.harness.clientSocket()).toBe(socket);
+    expect(socket.readyState).toBe(1);
+  });
+
+  /**
+   * The race the holding queue exists for: the Burrow's answers overtake the
+   * `direct-switch` that precedes them on the relay. The in-memory relay routes
+   * synchronously, so the test holds that direction by hand.
+   */
+  it('holds channel frames until the peer’s switch, then drains them in order', async () => {
+    const run = await connectedDirect({ network: { opening: 'manual' } });
+    await run.answered();
+    await settle();
+
+    run.harness.relay.holdToClient();
+    run.network.openChannels();
+    // The Client has switched its own sends; the Burrow's switch is held.
+    expect(run.harness.client.transportPath).toBe('relay');
+
+    const order: string[] = [];
+    const first = run.harness.client.hello().then(() => order.push('first'));
+    const second = run.harness.client.write('surface-1', 'ls').then(() => order.push('second'));
+    await settle();
+    expect(order).toEqual([]);
+
+    run.harness.relay.releaseToClient();
+
+    await Promise.all([first, second]);
+    expect(order).toEqual(['first', 'second']);
+    expect(run.harness.client.transportPath).toBe('direct');
+  });
+
+  /**
+   * A Client that connects twice replaces its own session, and the peer and
+   * channel of the one it replaced go with it: left alive, the orphan's channel
+   * would still be reporting violations against the session that replaced it.
+   */
+  it('closes the previous session’s peer when the Client connects again', async () => {
+    const run = await connectedDirect();
+    await run.cutover();
+    const firstPeer = run.clientPeers[0]!;
+    const firstChannel = run.network.offererChannel!;
+
+    const second = await run.harness.client.connect(run.harness.burrowId);
+    const gone = vi.fn();
+    run.harness.client.setOnBurrowGone(gone);
+
+    expect(second.ok).toBe(true);
+    expect(run.clientPeers).toHaveLength(2);
+    expect(firstPeer.closed).toBe(true);
+
+    // Nothing arriving on the orphan can touch the session that replaced it.
+    firstChannel.receiveRaw('a text frame');
+
+    expect(gone).not.toHaveBeenCalled();
+    expect(run.harness.client.connectedBurrowId).toBe(run.harness.burrowId);
+  });
+
+  it('preserves a replacement connection when the old channel closes before its outcome arrives', async () => {
+    const run = await connectedDirect();
+    await run.cutover();
+    const firstChannel = run.network.offererChannel!;
+    const gone = vi.fn();
+    run.harness.client.setOnBurrowGone(gone);
+
+    // Hold the replacement's outcome — anything on a connection that is not the
+    // live one — so the previous channel's close reaches the Client first.
+    run.harness.relay.holdToClientWhen(
+      (frame) => frame.id !== run.connectionId && frame.step === 'transport',
+    );
+    const replacement = run.harness.client.connect(run.harness.burrowId);
+    await waitFor(
+      () => run.harness.relay.isHoldingToClient() && firstChannel.readyState === 'closed',
+      'the old channel to close while the outcome is held',
+    );
+    run.harness.relay.releaseToClient();
+
+    expect(await replacement).toEqual({ ok: true, burrowLabel: BURROW_LABEL });
+    expect(gone).not.toHaveBeenCalled();
+    // And the replacement is a working session, not just a resolved promise.
+    await run.cutover();
+    expect((await run.harness.client.hello()).burrowId).toBe(run.harness.burrowId);
+  });
+
+  /**
+   * The retire destroys a live session, so it may not run until the only thing
+   * that can race it — the connection request — is about to be sent. A presence
+   * proof the user dismisses never reaches the Burrow.
+   */
+  it('leaves a working session alone when the replacement never reaches the Burrow', async () => {
+    const run = await connectedDirect();
+    await run.cutover();
+    const gone = vi.fn();
+    run.harness.client.setOnBurrowGone(gone);
+    vi.spyOn(run.harness.authenticator, 'assert').mockRejectedValueOnce(new Error('dismissed'));
+
+    await expect(run.harness.client.connect(run.harness.burrowId)).rejects.toThrow('dismissed');
+
+    expect(gone).not.toHaveBeenCalled();
+    expect(run.harness.client.connectedBurrowId).toBe(run.harness.burrowId);
+    expect(run.harness.client.transportPath).toBe('direct');
+    expect((await run.harness.client.hello()).burrowId).toBe(run.harness.burrowId);
+  });
+
+  it('closes the Burrow’s peer with the client the Relay says is gone', async () => {
+    const run = await connectedDirect();
+    await run.cutover();
+
+    run.harness.relay.burrowSocket.receive({
+      t: 'client-gone',
+      clientId: run.harness.relay.clientId,
+    });
+
+    await waitFor(() => run.burrowPeers[0]!.closed, 'the Burrow to close its peer');
+    expect(run.harness.burrow.establishedSessionCount).toBe(0);
+  });
+
+  it('closes the Burrow’s peer when its own relay socket drops', async () => {
+    const run = await connectedDirect();
+    await run.cutover();
+
+    run.harness.relay.burrowSocket.drop();
+
+    await waitFor(() => run.burrowPeers[0]!.closed, 'the Burrow to close its peer');
+    expect(run.harness.burrow.establishedSessionCount).toBe(0);
   });
 });
 

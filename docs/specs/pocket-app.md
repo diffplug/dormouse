@@ -454,6 +454,43 @@ nothing** — there is no frame to send — and this Client's relay socket is to
 Source of truth: `PocketClient.sendKeepalive` / `#reapedByBurrow` and the injected
 timer, clock, and visibility seams in `lib/src/remote/client/pocket-client.ts`.
 
+## The path the session takes
+
+**Pocket offers a direct path once the connection outcome says `ok`**, over the
+browser's own `RTCPeerConnection` with no ICE servers, and keeps the session on
+the relay when the browser has none or the Burrow declines
+([remote-api.md](./remote-api.md) → Direct path owns the whole protocol).
+
+**Must retire the previous session — its peer, its channel, and its pending
+requests — immediately before the replacement's connection request goes out, and
+never report burrow loss for it.** The Burrow closes the old channel at
+promotion, and on a direct path that close travels peer-to-peer while the
+outcome travels over the relay, so it can arrive first and fail the
+replacement's own waiter. **Never earlier than that**: a presence proof the user
+dismisses, or a handshake that fails, leaves a working session untouched, and a
+replacement refused after the request has gone leaves none. Pinned by
+`preserves a replacement connection when the old channel closes before its
+outcome arrives` and `leaves a working session alone when the replacement never
+reaches the Burrow` in `lib/src/remote/client/pocket-client.test.ts`.
+
+**The connected header names the live path** — `relay` or `direct`, captioned,
+never coloured — so a relayed fallback is visible rather than silent, **with the
+reason behind it in the hover text and never in the label**: an attempt that
+quietly stayed relayed is still `relay`, and a third state for the common case
+would read as a fault. **The transport hands up a `DirectRelayCause`, never its
+failure text**, and Pocket owns the sentence for each: what an attempt fails
+with includes a runtime's own exception message, which belongs in the operator's
+log. **A
+channel that dies after this session has switched is burrow loss**: the phone
+leaves the wall exactly as it does for a `burrow-gone`, and returning costs a
+fresh handshake and one WebAuthn prompt. Before the switch a failed channel
+costs nothing.
+
+Source of truth: `PocketClient.connect` / `transportPath` /
+`setOnTransportChanged` in `lib/src/remote/client/pocket-client.ts`, `TRANSPORT_PATH_LABELS` /
+`TRANSPORT_RELAY_CAUSES` / `transportTitle` in
+`lib/src/remote/pocket-app/App.tsx`.
+
 ## An expired session drops to sign-in
 
 Sessions live only in the Relay's memory ([relay.md](./relay.md)), so they end

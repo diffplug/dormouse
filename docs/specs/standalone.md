@@ -137,6 +137,23 @@ realm**. Against the shared store contract (`docs/specs/relay.md` → "Burrow si
   browser dev harness is *not* this case: its per-run temp directory makes a dev
   enrollment live and die with the run.
 
+**The direct path.** The sidecar is the one Burrow that answers a `direct-offer`
+(`docs/specs/remote-api.md` → Transport → "Direct path"), over
+`node-datachannel`'s W3C polyfill. **A sidecar package's transitive dependencies
+do not ship** — the Tauri bundle copies `standalone/sidecar/node_modules` and
+nothing else — so the addon's platform package and `detect-libc` are declared in
+`standalone/sidecar/package.json` directly. **Every `dependencies` entry that
+manifest declares stays `external` to `burrow.cjs`**, the `external` list being
+derived from that key rather than listed beside it. The build fails if the
+manifest stops declaring the addon, and asserts from esbuild's metafile that
+none of those packages was inlined: the addon resolves its `.node`
+relative to its own `__dirname`, and inlining would move that out of the
+installed package.
+
+Source of truth: `standalone/sidecar/package.json`,
+`lib/src/host/remote/native-direct-peer.ts`, `assertNothingInlined` in
+`standalone/scripts/build-sidecar-proxy.mjs`.
+
 **The bridge.** Webview → sidecar is one generic passthrough invoke,
 `burrow_command(payload)`, writing `{"event":"burrow:command",
 "data":payload}` to stdin for the dispatch table's `handleCommand`. Sidecar →

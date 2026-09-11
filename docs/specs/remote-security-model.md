@@ -340,6 +340,12 @@ omits `client-gone`, invents client IDs, or reorders frames.
 | `MAX_ESTABLISHED_E2E_SESSIONS` | 16 | `remote-lib-common/src/security/e2e-bounds.ts` |
 | `ESTABLISHED_E2E_IDLE_TIMEOUT_MS` | 120 000 | same |
 | `E2E_INIT_BURST` / `E2E_INIT_REFILL_INTERVAL_MS` | 8 / 1 000 | same |
+| `DIRECT_SETUP_TIMEOUT_MS` / `DIRECT_ANSWER_TIMEOUT_MS` / `DIRECT_GATHER_TIMEOUT_MS` | 15 000 / 10 000 / 3 000 | `remote-lib-common/src/security/direct-path.ts` |
+| `DIRECT_HANDOFF_TIMEOUT_MS` / `DIRECT_DISCONNECTED_GRACE_MS` | 5 000 / 5 000 | same |
+| `MAX_DIRECT_SDP_LENGTH` | 2 000 characters | same |
+| `MAX_DIRECT_PENDING_FRAMES` / `MAX_DIRECT_PENDING_BYTES` | 8 192 frames / 4 MiB, bytes binding first (rationale) | same |
+| `MAX_DIRECT_OUTBOUND_FRAMES` / `MAX_DIRECT_OUTBOUND_BYTES` | the same pair, for what a sender holds | same |
+| `DIRECT_BUFFER_HIGH` / `DIRECT_BUFFER_LOW` | 256 KiB / 64 KiB | same |
 
 - **Must bound waiting relay frames before enqueueing**, by count and cumulative
   received-string length; both `e2e` and `client-gone` share one FIFO and one
@@ -402,6 +408,56 @@ admits Burrow enrollment with ([relay.md](./relay.md#http-api)). Pinned by
 `lib/src/remote/burrow/burrow-bounds.test.ts`,
 `relay/test/malicious-relay.test.mjs` and
 `remote-lib-common/test/token-bucket.test.mjs`.
+
+## Direct path
+
+**The direct path adds no layer to this model.** A WebRTC data channel replaces
+the Relay as the carrier of an already-authorized session; every rule above
+holds unchanged, because nothing about *what* is carried changes.
+[remote-api.md](./remote-api.md) -> "Direct path" owns the design and is not
+restated here: that the channel carries transport messages of the session
+promoted at [Connection](#connection) on that `Split`'s own two `CipherState`s,
+that every signal rides inside the ciphertext, that nothing is offered before
+promotion, and that one peer connection per session is closed by every path
+that ends one, are its rules. What this model adds is what is *underneath* them.
+
+- **DTLS beneath is transport hygiene this model does not rely on.** It protects
+  nothing the Noise session does not already protect, and **the fingerprints in
+  an SDP are authentic for exactly one reason — that SDP arrived inside the
+  session**. A DTLS peer is never an authenticated one.
+- **Never an ICE server.** Both ends pass an empty list. (rationale)
+- **What the channel may buffer is this side's bound, not the
+  implementation's**, in both directions ([remote-api.md](./remote-api.md) ->
+  "Direct path"): the same pair of numbers holds a sender's queue and a
+  receiver's, and overrunning either disposes the session.
+
+**The listener is UDP on every interface a candidate names, for the life of an
+attempt.** The standalone Burrow's addon binds one socket on the unspecified
+address and advertises each routable interface at that port; a browser binds per
+interface. Either way the host answers UDP from anyone who can route to it on
+any of those networks. (rationale)
+**Two parsers sit behind it and both are attack surface**: before DTLS, ICE's
+own STUN parser, which answers a binding request only under this attempt's
+ufrag and password (RFC 8445 requires 24 and 128 bits of randomness), both
+freshly generated and reaching the peer only inside the session; after DTLS,
+the peer implementation's TLS stack — the browser's on the phone, the addon's
+on a standalone Burrow (`docs/specs/security-supply-chain.md`). A memory-safety
+bug in either is reachable by any stranger on those networks, and nothing above
+it mitigates that.
+
+**A channel lost after a session has switched is burrow loss, and that is
+accepted**: both ends end the session rather than resume on the Relay. (rationale) The Relay
+still sees that the session exists and whether each end is online; it no longer
+sees the traffic ([Residual metadata](#residual-metadata)).
+
+Source of truth: `remote-lib-common/src/security/direct-path.ts` (the signals,
+their guard, and `DirectCutover`), `lib/src/remote/direct/direct-peer.ts`
+(`DirectPeer`), `DirectEndpoint` in
+`lib/src/remote/direct/direct-endpoint.ts` (the attempt, the peer, and the
+switch, created at promotion by `BurrowRuntime.#promoteConnection` in
+`lib/src/remote/burrow/burrow-runtime.ts` and `PocketClient.#directEndpoint` in
+`lib/src/remote/client/pocket-client.ts`). The audited rows are
+`docs/specs/security-remote.md` -> "Direct path".
 
 ## Noise suite
 
@@ -525,9 +581,14 @@ such claim.
 **No traffic-analysis resistance, per-Burrow unlinkability, or metadata anonymity
 is claimed.** The Relay still observes account and passkey authentication data,
 IPs, Burrow IDs and online state, routing relationships, every session's reauth
-exchange, push endpoints, timing, ciphertext sizes, and volume. Two leaks follow
-and are accepted rather than closed (rationale): Client→Burrow timing exposes
-inter-keystroke timing while keystroke *values* stay encrypted, and one
+exchange, push endpoints, timing, ciphertext sizes, and volume — **the last
+three only while the Relay is carrying the session**, since a session that has
+switched to the [direct path](#direct-path) leaves it the fact of the session
+and each end's liveness and nothing else. Two leaks follow and are accepted
+rather than closed (rationale): Client→Burrow timing exposes inter-keystroke
+timing on a relayed session while keystroke *values* stay encrypted, ending at
+the switch — which in exchange shows each paired peer the other's addresses,
+until then known only to the Relay — and one
 `PushSubscription` per worker scope lets a shared endpoint correlate every
 `deliveryId` one Pocket profile registers across Burrows. A push carries no
 counter, so a Relay that kept an envelope can re-deliver it

@@ -26,7 +26,12 @@ import {
 } from '../client/pocket-client';
 import { PasskeyAlreadyRegisteredError, browserWebAuthn } from '../client/webauthn';
 import { BURROW_IS_AN_APP, SCAN_LABEL } from '../setup-copy';
-import { probeNoiseSupport, type PairingInvitation } from 'remote-lib-common';
+import {
+  probeNoiseSupport,
+  type DirectPath,
+  type DirectRelayCause,
+  type PairingInvitation,
+} from 'remote-lib-common';
 import {
   indexedDbKnownBurrowStore,
   indexedDbPendingDeletionStore,
@@ -120,6 +125,14 @@ export default function App({
         fetch: window.fetch.bind(window),
         webauthn: browserWebAuthn,
         createWebSocket: (url) => new WebSocket(url) as unknown as PocketSocket,
+        // **No ICE servers**: a public STUN or TURN default would hand a third
+        // party this phone's address, and the shipped deployment is a tailnet
+        // where host candidates reach (`docs/specs/remote-api.md` → Transport →
+        // "Direct path"). A browser without WebRTC keeps its session relayed.
+        createDirectPeer: () =>
+          typeof RTCPeerConnection === 'undefined'
+            ? null
+            : new RTCPeerConnection({ iceServers: [] }),
         knownBurrows: indexedDbKnownBurrowStore(),
         pendingDeletions: indexedDbPendingDeletionStore(),
       }),
@@ -339,6 +352,17 @@ export default function App({
     });
     return () => client.setOnBurrowGone(null);
   }, [client, teardownAdapter]);
+
+  /**
+   * Which path carries the live session, and why. Subscribed rather than read on
+   * render: the cutover happens seconds into a session, long after the wall is
+   * up, and an attempt that quietly stays relayed changes only the detail.
+   */
+  const [transport, setTransport] = useState<TransportView>(RELAYED_TRANSPORT);
+  useEffect(() => {
+    client.setOnTransportChanged((path, cause) => setTransport({ path, cause }));
+    return () => client.setOnTransportChanged(null);
+  }, [client]);
 
   /** The connect half, shared so a fresh pairing can continue straight into it. */
   const connectTo = useCallback(
@@ -610,7 +634,13 @@ export default function App({
       // The adapter is stood up before the phase moves, so the ref is set
       // whenever this branch is reachable.
       return adapterRef.current ? (
-        <ConnectedView burrow={phase.burrow} adapter={adapterRef.current} onLeave={leaveWall} onError={onWallError} />
+        <ConnectedView
+          burrow={phase.burrow}
+          adapter={adapterRef.current}
+          transport={transport}
+          onLeave={leaveWall}
+          onError={onWallError}
+        />
       ) : (
         <Waiting />
       );
@@ -761,15 +791,65 @@ export const BURROWS_EMPTY =
   `No Burrows paired yet. ${BURROW_IS_AN_APP} On the computer, open Settings → `
   + 'Remote control → Set up a phone, then scan the code.';
 
+/**
+ * What the path indicator says, and the sentence behind each. **Which path
+ * carries the session is shown, never inferred**, so a relayed fallback is
+ * visible rather than silent (`docs/specs/pocket-app.md`).
+ */
+export const TRANSPORT_PATH_LABELS: Record<DirectPath, { label: string; title: string }> = {
+  relay: { label: 'relay', title: 'This session goes through the relay.' },
+  direct: { label: 'direct', title: 'This session goes straight to the computer.' },
+};
+
+/**
+ * What each reason for staying relayed says to the person holding the phone.
+ *
+ * **The copy lives here, with every other Pocket string**, and the transport
+ * hands up only which of the three it was ({@link DirectRelayCause}): the text
+ * an attempt fails with includes a runtime's own exception message, which
+ * belongs in the operator's log and not on a phone.
+ */
+export const TRANSPORT_RELAY_CAUSES: Record<DirectRelayCause, string> = {
+  unsupported: 'This device cannot make a direct connection.',
+  declined: 'The computer turned a direct connection down.',
+  failed: 'A direct connection was tried and did not work.',
+};
+
+/** Which path carries the session, and why it is not the direct one. */
+export interface TransportView {
+  readonly path: DirectPath;
+  readonly cause: DirectRelayCause | null;
+}
+
+/**
+ * Where every session starts and where each one ends: relayed, with no reason
+ * to give. Shared so the initial state and the default prop are one value.
+ */
+export const RELAYED_TRANSPORT: TransportView = { path: 'relay', cause: null };
+
+/**
+ * The indicator's hover text: which path, and the reason behind it where there
+ * is one. **The reason is shown, never the label** — an attempt that quietly
+ * stayed relayed is still `relay`, and inventing a third state for it would
+ * make the common case look like a fault.
+ */
+export function transportTitle({ path, cause }: TransportView): string {
+  const { title } = TRANSPORT_PATH_LABELS[path];
+  return cause ? `${title} ${TRANSPORT_RELAY_CAUSES[cause]}` : title;
+}
+
 /** The connected Pocket shell: Burrow navigation chrome over the remote wall. */
 export function ConnectedView({
   burrow,
   adapter,
+  transport = RELAYED_TRANSPORT,
   onLeave,
   onError,
 }: {
   burrow: BurrowView;
   adapter: RemotePtyAdapter;
+  /** Which path carries the session, and why; see {@link transportTitle}. */
+  transport?: TransportView;
   onLeave: () => void;
   onError?: (error: unknown) => void;
 }): React.ReactElement {
@@ -780,6 +860,9 @@ export function ConnectedView({
           ‹ {BURROWS_TITLE}
         </button>
         <h1 className={PK.headerTitle}>{burrow.label || burrow.burrowId}</h1>
+        <span className={PK.headerNote} title={transportTitle(transport)}>
+          {TRANSPORT_PATH_LABELS[transport.path].label}
+        </span>
       </header>
       <div className={PK.wallHost}>
         <PocketWall adapter={adapter} onError={onError} />

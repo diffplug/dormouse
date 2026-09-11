@@ -106,30 +106,55 @@ const workspacePackagesByName = new Map(workspacePackages.map((workspacePackage)
   workspacePackage.pkg.name,
   workspacePackage,
 ]));
+const productRoots = new Set(productDependencyFilters);
 const externalPackages = new Map();
 const visitedExternalPackagePaths = new Set();
 const visitedWorkspacePackageNames = new Set();
+/**
+ * Optional dependencies of a product root this machine cannot install, mapped to
+ * the siblings they may be described from. See
+ * docs/specs/security-supply-chain.md -> "Disclosure".
+ */
+const undescribedPackages = new Map();
+
+/**
+ * Identity of a disclosed package. Two installs of one name that agree on all
+ * four fields are one row with two versions; a disagreement is two rows.
+ */
+function externalPackageKey({ name, license, author, homepage }) {
+  return [name, license ?? "", author ?? "", homepage ?? ""].join("\0");
+}
 
 function addExternalPackage(pkg) {
-  const key = [
-    pkg.name,
-    pkg.license ?? "",
-    formatAuthor(pkg.author) ?? "",
-    getHomepage(pkg) ?? "",
-  ].join("\0");
+  const identity = {
+    name: pkg.name,
+    license: pkg.license ?? null,
+    author: formatAuthor(pkg.author),
+    homepage: getHomepage(pkg),
+  };
+  const key = externalPackageKey(identity);
   const existing = externalPackages.get(key);
   if (existing) {
     existing.versions.add(pkg.version);
     return;
   }
 
-  externalPackages.set(key, {
-    name: pkg.name,
-    versions: new Set([pkg.version]),
-    license: pkg.license ?? null,
-    author: formatAuthor(pkg.author),
-    homepage: getHomepage(pkg),
-  });
+  externalPackages.set(key, { ...identity, versions: new Set([pkg.version]) });
+}
+
+/**
+ * The names declared beside `packageName` in the same `optionalDependencies`
+ * block at the same exact version string. A prebuilt family is published in
+ * lockstep from one repository under one pinned version, so any of these
+ * describes the absent one exactly — which is also what keeps this disclosure
+ * identical on every machine that generates it.
+ */
+function optionalSiblingsAtSameVersion(pkg, packageName) {
+  const optionalDependencies = pkg.optionalDependencies ?? {};
+  const version = optionalDependencies[packageName];
+  return Object.keys(optionalDependencies).filter(
+    (name) => name !== packageName && optionalDependencies[name] === version,
+  );
 }
 
 function scanWorkspacePackage(name) {
@@ -143,7 +168,7 @@ function scanWorkspacePackage(name) {
   scanDependencies(workspacePackage.pkg, workspacePackage.dir);
 }
 
-function scanDependency(fromDir, packageName) {
+function scanDependency(fromDir, packageName, declaredBy) {
   if (workspacePackagesByName.has(packageName)) {
     scanWorkspacePackage(packageName);
     return;
@@ -151,6 +176,23 @@ function scanDependency(fromDir, packageName) {
 
   const packageJsonPath = getPackageJsonPath(fromDir, packageName);
   if (!packageJsonPath) {
+    // Absent by design rather than under-reported, in one of two ways. An
+    // optional dependency of an external package ships to nobody: the Tauri
+    // bundle copies `standalone/sidecar/node_modules`, and pnpm puts a package
+    // there only if that manifest declares it — the addon's own list also names
+    // builds this project never releases (android, musl). An optional
+    // dependency a product root declares itself does ship, on the platform that
+    // can hold it, so it is described from a sibling below. Anything else
+    // missing is still a hard error.
+    if (declaredBy.optional) {
+      if (declaredBy.isProductRoot) {
+        undescribedPackages.set(
+          packageName,
+          optionalSiblingsAtSameVersion(declaredBy.pkg, packageName),
+        );
+      }
+      return;
+    }
     throw new Error(`Could not resolve package.json for "${packageName}" from ${fromDir}`);
   }
 
@@ -164,13 +206,31 @@ function scanDependency(fromDir, packageName) {
 }
 
 function scanDependencies(pkg, fromDir) {
-  for (const packageName of getDependencyNames(pkg)) {
-    scanDependency(fromDir, packageName);
+  const isProductRoot = productRoots.has(pkg.name);
+  for (const { name, optional } of getDependencyNames(pkg)) {
+    scanDependency(fromDir, name, { pkg, optional, isProductRoot });
   }
 }
 
 for (const packageName of productDependencyFilters) {
   scanWorkspacePackage(packageName);
+}
+
+// Snapshotted before the loop writes to `externalPackages`, so nothing is ever
+// described from something that was itself described rather than read.
+const describedPackagesByName = new Map();
+for (const pkg of externalPackages.values()) {
+  if (!describedPackagesByName.has(pkg.name)) describedPackagesByName.set(pkg.name, pkg);
+}
+for (const [packageName, siblings] of undescribedPackages) {
+  const sibling = siblings.map((name) => describedPackagesByName.get(name)).find(Boolean);
+  if (!sibling) {
+    throw new Error(
+      `"${packageName}" is not installed and neither is any sibling declared beside it at the same version, so it cannot be described`,
+    );
+  }
+  const described = { ...sibling, name: packageName, versions: new Set(sibling.versions) };
+  externalPackages.set(externalPackageKey(described), described);
 }
 
 // Within a single "A OR B OR ..." choice, move MIT to the front so the
@@ -247,6 +307,15 @@ const missingLicense = {
 };
 const missingAuthor = {
   "@hono/node-ws": "Hono middleware contributors",
+  // The addon ships a `contributors` array rather than npm's singular `author`
+  // field, and its prebuilt platform packages carry neither.
+  "@node-datachannel/darwin-arm64": "Murat Doğan, Paul-Louis Ageneau",
+  "@node-datachannel/darwin-x64": "Murat Doğan, Paul-Louis Ageneau",
+  "@node-datachannel/linux-arm64-gnu": "Murat Doğan, Paul-Louis Ageneau",
+  "@node-datachannel/linux-x64-gnu": "Murat Doğan, Paul-Louis Ageneau",
+  "@node-datachannel/win32-arm64-msvc": "Murat Doğan, Paul-Louis Ageneau",
+  "@node-datachannel/win32-x64-msvc": "Murat Doğan, Paul-Louis Ageneau",
+  "node-datachannel": "Murat Doğan, Paul-Louis Ageneau",
   "@tauri-apps/api": "Tauri Apps Contributors",
   "@tauri-apps/plugin-shell": "Tauri Apps Contributors",
   "@tauri-apps/plugin-updater": "Tauri Apps Contributors",
