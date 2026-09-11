@@ -360,6 +360,31 @@ describe("the source half", () => {
     expect(mocks.invoke).not.toHaveBeenCalledWith("transfer_workspace_content", expect.anything());
   });
 
+  it("keeps the first move recoverable when the same tab is dropped twice", async () => {
+    initWorkspaceMoves(fakePlatform());
+    getOrCreateTerminal("pane-a");
+    registerWallHandle(stubWallHandle(WORKSPACE_ID, { prepareWorkspaceTransfer: async () => prepared() }));
+    const host = mocks.invoke.getMockImplementation()!;
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    mocks.invoke.mockImplementation(async (cmd, args) => {
+      const result = await host(cmd, args);
+      if (cmd === "transfer_workspace") await blocked;
+      return result;
+    });
+    const first = transferWorkspaceTo(WORKSPACE_ID, "ws-2", { x: 0, y: 0 });
+    await vi.waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("transfer_workspace", expect.anything()));
+    await transferWorkspaceTo(WORKSPACE_ID, "ws-3", { x: 0, y: 0 });
+    expect(mocks.invoke.mock.calls.filter(([cmd]) => cmd === "transfer_workspace")).toHaveLength(1);
+    release();
+    await vi.waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("transfer_workspace_content", expect.anything()));
+    await emit("dormouse://workspace-arrival-failed", { workspaceId: WORKSPACE_ID, replayIds: ["pane-a"] });
+    mocks.writes.length = 0;
+    deliverReplay({ id: "pane-a", data: "first-move-gap", requestId: `handback-${WORKSPACE_ID}` });
+    await first;
+    expect(mocks.writes).toEqual(["first-move-gap"]);
+  });
+
   it("accepts no hand-back replay for an id the host never marked", async () => {
     // An unmarked id was serialized whole and its xterm still holds every
     // byte: Rust asks the sidecar for nothing, and a whole-buffer replay
