@@ -1,3 +1,4 @@
+import type { TerminalGrid } from './terminal-transfer';
 import { adoptOrphanedHelper, restoreHelper } from './helper-terminal';
 import type { LathPersistedLayout } from './lath/persistence';
 import type { PlatformAdapter, PtyInfo } from './platform/types';
@@ -38,6 +39,8 @@ export interface LivePtys {
  * same behavior through `resumeOrRestore`.
  */
 export interface ResumePlanOptions {
+  /** Source grids for serialized transfer buffers, before target layout fits. */
+  terminalGrids?: ReadonlyMap<string, TerminalGrid>;
   /** The record to plan from; `undefined` reads the platform slot, `null` is "none". */
   savedSession?: PersistedSession | null;
   /** Live ids this plan owns by name. Omitted claims every live PTY. */
@@ -196,7 +199,7 @@ export function resumeOrRestoreFrom(
 
   const mine = live.ptys.filter((pty) =>
     opts.ptyIds === undefined || opts.ptyIds.has(pty.id) || opts.claimUnowned?.has(pty.id));
-  const resumed = mine.length > 0 ? resumeLivePtys(mine, live.replay, saved) : null;
+  const resumed = mine.length > 0 ? resumeLivePtys(mine, live.replay, saved, opts.terminalGrids) : null;
   if (resumed) return hydrateNotepad(platform, resumed);
 
   const restored = restoreSession(platform, { savedSession: saved });
@@ -217,15 +220,18 @@ function resumeLivePtys(
   ptyList: PtyInfo[],
   replayBuffer: Map<string, string>,
   saved: PersistedSession | null,
+  grids?: ReadonlyMap<string, TerminalGrid>,
 ): ReconnectResult {
   const savedResumeInfo = getSavedPaneResumeInfo(saved, ptyList.map((pty) => pty.id));
   const ids: string[] = [];
   const ptyById = new Map(ptyList.map((pty) => [pty.id, pty]));
   for (const pty of ptyList) {
-    const resumeInfo: { alive: boolean; exitCode?: number; shell?: string; title?: string; untouched?: boolean; helper?: PtyInfo['helper'] } = {
+    const resumeInfo: { alive: boolean; exitCode?: number; shell?: string; title?: string; untouched?: boolean; helper?: PtyInfo['helper']; grid?: TerminalGrid } = {
       alive: pty.alive,
       exitCode: pty.exitCode,
     };
+    const grid = grids?.get(pty.id);
+    if (grid) resumeInfo.grid = grid;
     if (pty.shell !== undefined) resumeInfo.shell = pty.shell;
     const savedInfo = savedResumeInfo.get(pty.id);
     if (savedInfo?.title !== undefined) resumeInfo.title = savedInfo.title;

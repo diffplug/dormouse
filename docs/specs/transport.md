@@ -127,7 +127,7 @@ nothing holds first paint for 500 ms, not the whole budget. Source of truth:
 
 A Workspace can move from one webview to another with its Sessions still
 running (`docs/specs/standalone.md` → Transfer). It is a resume, not a restore,
-and it turns on three rules:
+with these transfer rules:
 
 - **Release, never dispose, and only once the target has adopted the Workspace.**
   The source detaches its half of each Session — the alert, the pins, the
@@ -161,14 +161,16 @@ and it turns on three rules:
   is not empty** rule `interrupt` carries — a caller forwarding a computed set
   that came out empty gets a no-op, not every PTY in the process. The moving
   ids include each pane's helper Session, which no other field names.
-- **Pins travel with the buffers.** The source takes each note's marker lines at
-  the instant it serializes (`snapshotTerminalPins`); the target re-registers
-  them at those lines once the rebuilt buffer has been parsed
-  (`restoreTerminalPins`), and the pin's byte-for-byte proof still decides
-  whether it is trusted (`docs/specs/notepad.md` → Source pins).
+- **Must replay a transfer at its source grid and drain parsing before mounting
+  the target Wall**, then fit the target pane. **Must preserve mouse encoding
+  as well as tracking**, including SGR and SGR-pixel encoding omitted by xterm's
+  serializer. Pinned by `lib/src/lib/terminal-transfer.test.ts` and
+  `standalone/src/workspace-move.test.ts`.
+- Source-pin limitations belong to `docs/specs/notepad.md` → Source links.
 
 Source of truth: `captureTransferContent` in
-`lib/src/components/wall/workspace-transfer.ts`; `mark` / `list` in
+`lib/src/components/wall/workspace-transfer.ts`; `serializeTransferTerminal` in
+`lib/src/lib/terminal-transfer.ts`; `mark` / `list` in
 `standalone/sidecar/pty-core.js`; `standalone/src/workspace-move.ts`. Pinned by
 `a mark is ordered in the stream and a since-mark replay is exactly the
 remainder` in `standalone/sidecar/pty-core.test.js` and

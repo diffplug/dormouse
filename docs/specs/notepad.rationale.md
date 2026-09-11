@@ -67,6 +67,10 @@ first sixteen are the user's and the rest are a fixed formula xterm itself appli
 
 ## Source links
 
+In Tauri manual testing (2026-09-11), a transferred pin remained visible but failed
+its text proof on use. Rebuilt buffers do not guarantee identical absolute row
+positions. Transfers therefore retain notes without presenting unusable pins.
+
 The pin could have stored a scrollback line number. It stores two xterm markers
 because a marker is the only handle xterm keeps correct as the buffer scrolls, and
 scrolling is the normal case — a capture is usually of something that has already

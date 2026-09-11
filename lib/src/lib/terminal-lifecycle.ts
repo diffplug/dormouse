@@ -1,3 +1,4 @@
+import { serializeTransferTerminal, type TerminalGrid } from './terminal-transfer';
 import { Terminal, type IBufferRange } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { SerializeAddon } from '@xterm/addon-serialize';
@@ -133,13 +134,14 @@ function readDisplayTextFromBuffer(terminal: Terminal, range: IBufferRange): str
   }
 }
 
-function createXtermHost(): { terminal: Terminal; fit: FitAddon; serialize: SerializeAddon; element: HTMLDivElement } {
+function createXtermHost(grid?: TerminalGrid): { terminal: Terminal; fit: FitAddon; serialize: SerializeAddon; element: HTMLDivElement } {
   const styles = getComputedStyle(document.body);
   const editorFontSize = parseInt(styles.getPropertyValue('--vscode-editor-font-size'), 10) || 12;
   const editorFontFamily = styles.getPropertyValue('--vscode-editor-font-family').trim() || "'SF Mono', Menlo, Monaco, monospace";
 
   const theme = getTerminalTheme();
   const terminal = new Terminal({
+    ...grid,
     allowProposedApi: true,
     fontSize: editorFontSize,
     fontFamily: editorFontFamily,
@@ -290,8 +292,8 @@ function wireXtermHandlers(
   };
 }
 
-function setupTerminalEntry(id: string, options: { shell?: string; untouched?: boolean; helper?: HelperIdentity } = {}): TerminalEntry {
-  const { terminal, fit, serialize, element } = createXtermHost();
+function setupTerminalEntry(id: string, options: { shell?: string; untouched?: boolean; helper?: HelperIdentity; grid?: TerminalGrid } = {}): TerminalEntry {
+  const { terminal, fit, serialize, element } = createXtermHost(options.grid);
   const selectionBaselineRef = { current: null as string | null };
   // Every module that finalizes a selection arms the render handler through
   // this one setter: the mouse router at drag end, a note's pin on reveal.
@@ -439,12 +441,13 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
 export function resumeTerminal(
   id: string,
   replayData: string | null,
-  exitInfo?: { alive: boolean; exitCode?: number; shell?: string; title?: string | null; untouched?: boolean; helper?: HelperIdentity },
+  exitInfo?: { alive: boolean; exitCode?: number; shell?: string; title?: string | null; untouched?: boolean; helper?: HelperIdentity; grid?: TerminalGrid },
 ): TerminalEntry {
   const existing = registry.get(id);
   if (existing) return existing;
 
   const entry = setupTerminalEntry(id, {
+    grid: exitInfo?.grid,
     helper: exitInfo?.helper,
     shell: exitInfo?.shell,
     untouched: exitInfo?.untouched ?? false,
@@ -544,7 +547,7 @@ export async function serializeTerminal(id: string): Promise<string | null> {
   const entry = registry.get(id);
   if (!entry) return null;
   await flushTerminal(id);
-  return entry.serialize.serialize();
+  return serializeTransferTerminal(entry.terminal, entry.serialize);
 }
 
 /** Resolves once everything written to the Session so far is in its buffer.
