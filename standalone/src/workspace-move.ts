@@ -108,6 +108,7 @@ async function handOff(
   args: Record<string, unknown>,
 ): Promise<void> {
   const { workspaceId, terminalIds } = prepared.payload;
+  if (inFlight.has(workspaceId)) return;
   // Armed before the invoke: Rust asks the sidecar to stamp the marks inside
   // `begin_arrival`, so a `marked` line can arrive ahead of the invoke's reply.
   const pendingMarks = marksFor(terminalIds, `mark-${workspaceId}`);
@@ -115,19 +116,19 @@ async function handOff(
   try {
     await invoke(command, args);
   } catch (err) {
-    inFlight.delete(workspaceId);
+    if (inFlight.get(workspaceId) === prepared) inFlight.delete(workspaceId);
     console.warn(`[workspace-move] ${command} refused; the Workspace stays here`, err);
     return; // `pendingMarks` unsubscribes itself at the timeout
   }
-  if (!inFlight.has(workspaceId)) return; // handed back before invoke replied
+  if (inFlight.get(workspaceId) !== prepared) return; // handed back before invoke replied
   markWorkspaceTransferring(workspaceId);
   // The second half: once every terminal's mark has passed this window, what it
   // holds is exactly the bytes before the mark. Serialized here, attached to the
   // arrival by Rust, and only then drained by the target.
   const marks = await pendingMarks;
-  if (!inFlight.has(workspaceId)) return; // handed back while we waited
+  if (inFlight.get(workspaceId) !== prepared) return; // handed back while we waited
   const content = await captureTransferContent(terminalIds, marks);
-  if (!inFlight.has(workspaceId)) return; // handed back while serializing
+  if (inFlight.get(workspaceId) !== prepared) return; // handed back while serializing
   try {
     await invoke("transfer_workspace_content", { workspaceId, content });
   } catch (err) {

@@ -614,6 +614,10 @@ below reads that record rather than inferring itself from the suppression map.
   source unsuppressed, drop the record, and emit `workspace-arrival-failed`; the
   source clears **transferring** and the Workspace is simply still there. With
   both ends gone the shells are reaped rather than left owned by a dead label.
+- **Must reject a repeated move while that Workspace is in flight**, preserving
+  the first attempt’s content and recovery state. Async continuations act only
+  on their own attempt (`keeps the first move recoverable when the same tab is
+  dropped twice` in `standalone/src/workspace-move.test.ts`).
 - **A hand-back replays what the marked ids missed.** From an id's mark to the
   hand-back every byte went to the target, or nowhere, so `hand_back_arrival`
   returns each id the content marked to the source *suppressed* and asks the
