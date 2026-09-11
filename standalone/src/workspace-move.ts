@@ -3,7 +3,8 @@ import { releaseSession } from "dormouse-lib/lib/terminal-registry";
 import { forgetHelper } from "dormouse-lib/lib/helper-terminal";
 import { collectLivePtys, resumeOrRestoreFrom } from "dormouse-lib/lib/reconnect";
 import { flushTerminal } from "dormouse-lib/lib/terminal-registry";
-import { writeReplay } from "dormouse-lib/lib/terminal-report-filter";
+import { REPLAY_MODE_RESET, writeReplay } from "dormouse-lib/lib/terminal-report-filter";
+import { applyTerminalSemanticEvents } from "dormouse-lib/lib/terminal-state-store";
 import { registry as terminalRegistry } from "dormouse-lib/lib/terminal-store";
 import { hydrateNotepadFromVolatile, removeSurface, restoreTerminalPins } from "dormouse-lib/lib/notepad/notepad-store";
 import { getWallHandle } from "dormouse-lib/components/wall/wall-handles";
@@ -28,7 +29,7 @@ import {
   moveWorkspace,
   setActiveWorkspace,
 } from "dormouse-lib/lib/workspace-store";
-import type { PlatformAdapter, PtyReplayDetail } from "dormouse-lib/lib/platform/types";
+import type { PlatformAdapter, PtyInfo, PtyReplayDetail } from "dormouse-lib/lib/platform/types";
 import type { WorkspaceId } from "dormouse-lib/lib/session-types";
 import { installWindowPersistence } from "./window-restore";
 import { listenToWindow } from "./window-label";
@@ -295,16 +296,33 @@ function acceptHandBackReplay(workspaceId: WorkspaceId, ids: readonly string[]):
   if (!platform) return;
   const requestId = `handback-${workspaceId}`;
   const wanted = new Set(ids);
+  const exited = new Map<string, number>();
+  const onList = (detail: { ptys: PtyInfo[]; requestId?: string }) => {
+    if (detail.requestId !== requestId) return;
+    for (const pty of detail.ptys) {
+      if (wanted.has(pty.id) && !pty.alive) exited.set(pty.id, pty.exitCode ?? -1);
+    }
+  };
   const finish = () => {
     clearTimeout(timer);
     platform.offPtyReplay(onReplay);
+    platform.offPtyList(onList);
   };
   const onReplay = (detail: PtyReplayDetail) => {
     if (detail.requestId !== requestId || !wanted.delete(detail.id)) return;
     const entry = terminalRegistry.get(detail.id);
-    if (entry) writeReplay(entry, detail.data);
+    if (entry) {
+      const exitCode = exited.get(detail.id);
+      writeReplay(entry, detail.data, ...(exitCode === undefined ? [] : [REPLAY_MODE_RESET]));
+      if (exitCode !== undefined) {
+        if (!entry.exited) entry.terminal.write(`\r\n[Process exited with code ${exitCode}]\r\n`);
+        entry.exited = true;
+        applyTerminalSemanticEvents(detail.id, [{ type: 'commandFinish', exitCode }]);
+      }
+    }
     if (wanted.size === 0) finish();
   };
+  platform.onPtyList(onList);
   platform.onPtyReplay(onReplay);
   const timer = setTimeout(finish, HAND_BACK_REPLAY_TIMEOUT_MS);
 }
