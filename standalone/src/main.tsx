@@ -174,4 +174,14 @@ async function bootstrap() {
   );
 }
 
-bootstrap();
+void bootstrap().catch((error: unknown) => {
+  console.error("[dormouse] startup failed", error);
+  const root = document.getElementById("root");
+  if (!root) return;
+  const message = document.createElement("p");
+  message.textContent = `Dormouse could not start: ${error instanceof Error ? error.message : String(error)}`;
+  const retry = document.createElement("button");
+  retry.textContent = "Reload";
+  retry.addEventListener("click", () => window.location.reload());
+  root.replaceChildren(message, retry);
+});

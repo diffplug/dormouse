@@ -178,7 +178,7 @@ let registryRevision = 0;
 function registrySnapshot() {
   const workspaces = JSON.parse(registryEntries).map((entry) => ({
     id: entry.id,
-    ref: /^workspace-(\d+)$/.test(entry.id) ? `workspace:${entry.id.slice('workspace-'.length)}` : null,
+    ref: /^workspace-(\d+)$/.test(entry.id) ? `workspace:${entry.id.slice('workspace-'.length)}` : `workspace:${entry.id}`,
     name: entry.name,
     active: Boolean(entry.active),
   }));

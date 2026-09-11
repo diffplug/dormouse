@@ -33,14 +33,16 @@ describe("BrowserSidecarHost.url", () => {
 // gives it the `addEventListener` surface the host subscribes through.
 class FakeEventSource extends EventTarget {
   static instances: FakeEventSource[] = [];
+  static readonly CLOSED = 2;
+  readyState = 0;
   closed = false;
   constructor(readonly url: string | URL) {
     super();
     FakeEventSource.instances.push(this);
   }
-  close(): void { this.closed = true; }
-  open(): void { this.dispatchEvent(new Event("open")); }
-  fail(): void { this.dispatchEvent(new Event("error")); }
+  close(): void { this.closed = true; this.readyState = FakeEventSource.CLOSED; }
+  open(): void { this.readyState = 1; this.dispatchEvent(new Event("open")); }
+  fail(fatal = false): void { this.readyState = fatal ? FakeEventSource.CLOSED : 0; this.dispatchEvent(new Event("error")); }
 }
 
 // The bridge only fans a broadcast out to streams it has already registered,
@@ -83,9 +85,19 @@ describe("BrowserSidecarHost.init", () => {
   it("rejects, and stops the stream, when it errors before opening", async () => {
     const host = new BrowserSidecarHost("http://127.0.0.1:1422/?t=deadbeef");
     const ready = host.init();
-    stream().fail();
+    stream().fail(true);
     await expect(ready).rejects.toThrow("failed before it opened");
     expect(stream().closed).toBe(true);
+  });
+
+  it("allows retryable pre-open failures to reconnect within the deadline", async () => {
+    const host = new BrowserSidecarHost("http://127.0.0.1:1422");
+    const ready = host.init();
+    stream().fail();
+    expect(await settled(ready)).toBe("pending");
+    expect(stream().closed).toBe(false);
+    stream().open();
+    await expect(ready).resolves.toBeUndefined();
   });
 
   it("gives up after a bounded wait when neither event arrives", async () => {

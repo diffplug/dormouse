@@ -72,7 +72,8 @@ export class BrowserSidecarHost {
       });
       events.addEventListener('error', () => {
         if (!opened) {
-          giveUp('failed before it opened');
+          // CONNECTING is retryable; EventSource retries within the open budget.
+          if (events.readyState === EventSource.CLOSED) giveUp('failed before it opened');
           return;
         }
         console.error('[browser-sidecar] event stream disconnected');
