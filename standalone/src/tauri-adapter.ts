@@ -190,9 +190,15 @@ export class TauriAdapter implements PlatformAdapter {
         // the asker is long gone (docs/specs/terminal-escapes.md). It still
         // needs the theme: a *declined* colour query is not consumed, so it
         // reaches xterm.js instead, and answering is the owner's alone.
+        // Both consumers of the live `terminal:semanticEvents` path, because a
+        // replay is the whole of what a transferred pane's new window has: Rust
+        // drops the gap's semantic events rather than holding them
+        // (docs/specs/standalone.md → "Routing").
         const { id, data, requestId } = event.payload;
         const parsed = new TerminalProtocolParser(themeColorProvider).process(data);
-        applyTerminalSemanticEvents(id, collectTerminalSemanticEvents(parsed.events));
+        const events = collectTerminalSemanticEvents(parsed.events);
+        this.alertManager.applyTerminalSemanticEvents(id, events);
+        applyTerminalSemanticEvents(id, events);
         for (const handler of this.replayHandlers) {
           handler({ id, data: parsed.visibleData, requestId });
         }

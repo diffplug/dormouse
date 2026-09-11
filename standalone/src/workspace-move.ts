@@ -5,7 +5,7 @@ import { writeReplay } from "dormouse-lib/lib/terminal-report-filter";
 import { registry as terminalRegistry } from "dormouse-lib/lib/terminal-store";
 import { hydrateNotepadFromVolatile, restoreTerminalPins } from "dormouse-lib/lib/notepad/notepad-store";
 import { getWallHandle } from "dormouse-lib/components/wall/wall-handles";
-import { setWorkspaceBootPlan } from "dormouse-lib/components/wall/workspace-boot-plans";
+import { forgetWorkspaceBootPlan, setWorkspaceBootPlan } from "dormouse-lib/components/wall/workspace-boot-plans";
 import { wallBootFromResult, type WallBootPlans } from "dormouse-lib/components/wall/wall-types";
 import {
   captureTransferContent,
@@ -367,13 +367,37 @@ async function adoptWorkspace(platform: PlatformAdapter, payload: MovePayload): 
     if (index !== undefined) moveWorkspace(id, index);
     setActiveWorkspace(id);
     // Last, and only now: it is what tells the source to let the Workspace go.
-    settle("adopt_done", id);
+    // Awaited, because a refusal is the one signal that the transaction was
+    // retired underneath this window.
+    try {
+      await invoke("adopt_done", { workspaceId: id });
+    } catch (err) {
+      console.error("[workspace-move] adopt_done refused; unwinding the mount", err);
+      await unwindAdoption(id);
+    }
   } catch (err) {
     console.error("[workspace-move] adoption failed; handing the Workspace back", err);
     settle("adopt_failed", id, err instanceof Error ? err.message : String(err));
   } finally {
     adopting.delete(id);
   }
+}
+
+/**
+ * `adopt_done` was refused: the `ARRIVAL_MAX` watchdog had already expired the
+ * record and handed the shells back, and the source cleared its transferring
+ * mark and kept the Workspace. Left mounted here too, the same Workspace would
+ * be live in two windows and persisted by both — the next launch restoring it
+ * twice over one set of PTYs. Take it out the way a departure does: the
+ * Sessions released, **never killed**, because the shells are the source's
+ * again; the notes dropped; the record and the parked plan forgotten.
+ */
+async function unwindAdoption(id: WorkspaceId): Promise<void> {
+  const handle = getWallHandle(id);
+  if (handle) (await handle.prepareWorkspaceTransfer()).commit();
+  closeWorkspace(id);
+  forgetWorkspaceSession(id);
+  forgetWorkspaceBootPlan(id);
 }
 
 /**

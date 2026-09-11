@@ -520,6 +520,40 @@ describe("the target half", () => {
     }
   });
 
+  it("unwinds the mount when adopt_done is refused, releasing the Sessions rather than killing them", async () => {
+    const platform = fakePlatform();
+    const killPty = vi.spyOn(platform, "killPty");
+    const host = mocks.invoke.getMockImplementation()!;
+    mocks.invoke.mockImplementation(async (cmd: string, args?: unknown) => {
+      // The `ARRIVAL_MAX` watchdog retired the record while this window was
+      // wedged between the drain and the mount: Rust has handed the shells
+      // back to the source, so `adopt_done` finds no arrival to settle.
+      if (cmd === "adopt_done") arrivals = [];
+      return host(cmd, args);
+    });
+    // The Wall this window mounts for the arrival, with its release observable.
+    const released = vi.fn();
+    registerWallHandle(stubWallHandle(WORKSPACE_ID, {
+      prepareWorkspaceTransfer: async () => prepared(released),
+    }));
+    arrivals = [payload()];
+    initWorkspaceMoves(platform);
+    await settle();
+    await settle();
+
+    expect(mocks.invoke).toHaveBeenCalledWith("adopt_done", { workspaceId: WORKSPACE_ID });
+    // The source kept the Workspace, so this window holds none of it: not in
+    // the store, not in the snapshot it writes, no plan parked for it.
+    expect(getWorkspacesSnapshot().workspaces.map((w) => w.id)).not.toContain(WORKSPACE_ID);
+    expect(getWindowSnapshot().workspaces.map((w) => w.id)).not.toContain(WORKSPACE_ID);
+    expect(getWorkspaceBootPlan(WORKSPACE_ID)).toEqual({});
+    // Its Sessions were released — the shells are the source's again — and
+    // nothing was killed.
+    expect(released).toHaveBeenCalledTimes(1);
+    expect(killPty).not.toHaveBeenCalled();
+    expect(mocks.invoke).not.toHaveBeenCalledWith("adopt_failed", expect.anything());
+  });
+
   it("closes the window when its last Workspace leaves, instead of emptying it", async () => {
     initWorkspaceMoves(fakePlatform());
     const workspaceId = getWorkspacesSnapshot().activeId;

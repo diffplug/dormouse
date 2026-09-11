@@ -68,6 +68,16 @@ export interface OpenPort {
  */
 export const OPEN_PORT_TIMEOUT_MS = 3000;
 
+/**
+ * What a batched scan (`getOpenPortsMany`) adds to `OPEN_PORT_TIMEOUT_MS` per
+ * terminal it covers: the sidecar's socket scan lists every descendant of every
+ * terminal in one `lsof`, so one terminal's budget cannot be the whole
+ * Window's. Mirrored as `OPEN_PORT_TIMEOUT_PER_ID_MS` in
+ * `standalone/sidecar/pty-core.js` and `standalone/src-tauri/src/lib.rs`;
+ * pinned by `mirrored-constants.test.ts`.
+ */
+export const OPEN_PORT_TIMEOUT_PER_ID_MS = 100;
+
 export type AlertStateDetail = { id: string } & AlertState;
 
 export interface AgentBrowserCommandResult {
