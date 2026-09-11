@@ -67,6 +67,8 @@ A pin is the runtime link from a captured note back to the scrollback it came fr
 - **While the alternate buffer is active a pin is temporarily unavailable and kept** — the markers belong to the normal buffer and resolve again once the program exits; the notepad says to exit it.
 - **Every other pin failure removes the pin and keeps the note.** Disposed markers, rows out of range, and a text mismatch all report that the source is no longer available, the notepad kept or reopened to say so.
 - **Disposing or replacing a terminal instance drops its pins immediately**, notes untouched — a marker belongs to one xterm instance.
+- **Must drop source pins when a Workspace moves between windows**, keeping the
+  notes (rationale).
 - **Pins never affect ordering and are not user-controlled favorites.**
 
 Source of truth: `registerTerminalSource`, `resolveTerminalSource` and `revealResolvedSource` in `lib/src/lib/notepad/source-link.ts`; `revealNoteSource` in `lib/src/lib/notepad/pin.ts`; `setTerminalSelectionBaseline` in `lib/src/lib/terminal-store.ts`; `dropSourcesForTerminal` in `lib/src/lib/notepad/notepad-store.ts`, called from `disposeSession` in `lib/src/lib/terminal-lifecycle.ts`.
@@ -140,7 +142,7 @@ Source of truth: `archiveSurfaceNotes` in `lib/src/lib/notepad/close-coordinator
 
 **Archiving is a gate step before teardown**: after the running-work confirmation, or immediately on an all-idle quit, and **before the first `quit_progress`** (`docs/specs/standalone.md` → "Quit flow"; rationale). **It is bounded at 3 s.**
 
-**Both deliberate endings run the same gate**, over their own window's Surfaces: a quit, and closing one window of several (`docs/specs/standalone.md` → "Per-window close"). **Moving a Workspace to another window runs neither** — nothing ended, so the notes ride the move and the target hydrates them, minus their pins, which are markers in the xterm instances the source disposed. **Several windows archiving at once contend through the archive's own file lock and compare-and-swap retry** ([The archive port](#the-archive-port)), so a window whose write lost the race retries against fresh bytes rather than dropping the other window's batches.
+**Both deliberate endings run the same gate**, over their own window's Surfaces: a quit, and closing one window of several (`docs/specs/standalone.md` → "Per-window close"). **Moving a Workspace to another window runs neither** — nothing ended, so the target hydrates the notes; pin behavior follows [Source links](#source-links). **Several windows archiving at once contend through the archive's own file lock and compare-and-swap retry** ([The archive port](#the-archive-port)), so a window whose write lost the race retries against fresh bytes rather than dropping the other window's batches.
 
 **Standalone still archives at quit even though it now restores its windows** (`docs/specs/transport.md` → "The governing rule"): VS Code's live notes survive a Reload only through the extension host's in-memory mirror ([Live resume](#live-resume)), and quitting standalone leaves no such survivor.
 

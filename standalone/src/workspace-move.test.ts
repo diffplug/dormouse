@@ -16,6 +16,9 @@ import type {
 
 const mocks = vi.hoisted(() => ({
   writes: [] as string[],
+  grids: [] as unknown[],
+  deferWrites: false,
+  writeCallbacks: [] as (() => void)[],
   invoke: vi.fn(async (_cmd: string, _args?: unknown) => undefined as unknown),
   listen: vi.fn(async () => () => {}),
 }));
@@ -35,11 +38,17 @@ vi.mock("@xterm/addon-serialize", () => ({ SerializeAddon: class { serialize(): 
 vi.mock("@xterm/addon-unicode-graphemes", () => ({ UnicodeGraphemesAddon: class {} }));
 vi.mock("@xterm/xterm", () => ({
   Terminal: class {
+    _core = { mouseStateService: { activeEncoding: "DEFAULT" } };
+    constructor(options: unknown) { mocks.grids.push(options); }
     parser = { registerCsiHandler: () => ({ dispose: () => {} }) };
     modes = { mouseTrackingMode: "none" as const, bracketedPasteMode: false };
     loadAddon(): void {}
     open(): void {}
-    write(data: string, callback?: () => void): void { mocks.writes.push(data); callback?.(); }
+    write(data: string, callback?: () => void): void {
+      mocks.writes.push(data);
+      if (callback && mocks.deferWrites) mocks.writeCallbacks.push(callback);
+      else callback?.();
+    }
     focus(): void {}
     blur(): void {}
     onData(): { dispose: () => void } { return { dispose: () => {} }; }
@@ -203,6 +212,9 @@ function fakePlatform(
 }
 
 beforeEach(() => {
+  mocks.deferWrites = false;
+  mocks.writeCallbacks.length = 0;
+  mocks.grids.length = 0;
   vi.clearAllMocks();
   mocks.writes.length = 0;
   arrivals = [];
@@ -705,6 +717,27 @@ describe("the target half", () => {
 });
 
 describe("a transfer's content", () => {
+  it("drains replay before adopting even when no note has a pin", async () => {
+    arrivals = [payload()];
+    mocks.deferWrites = true;
+    const boot = bootFromTearOut(fakePlatform());
+    await vi.waitFor(() => expect(mocks.writeCallbacks).toHaveLength(2));
+    expect(mocks.invoke).not.toHaveBeenCalledWith("adopt_done", expect.anything());
+    mocks.writeCallbacks.splice(0).forEach(callback => callback());
+    await boot;
+    expect(mocks.invoke).toHaveBeenCalledWith("adopt_done", { workspaceId: WORKSPACE_ID });
+  });
+
+  it("keeps notes without restoring legacy transferred pins", async () => {
+    arrivals = [payload({ pins: [{
+      surfaceId: "pane-a", noteId: "n1", startLine: 0, endLine: 0,
+      startColumn: 0, endColumn: 1, shape: "linewise", expectedRawText: "x",
+    }] } as Partial<WorkspaceTransferPayload>)];
+    await bootFromTearOut(fakePlatform());
+    expect(getNotes("pane-a")).toHaveLength(1);
+    expect(getNotes("pane-a")[0].source).toBeUndefined();
+  });
+
   it("serializes each terminal at the host's mark and hands the content over behind the invoke", async () => {
     const order: string[] = [];
     initWorkspaceMoves(fakePlatform(order, { marks: { "pane-a": 42 } }));
@@ -725,10 +758,11 @@ describe("a transfer's content", () => {
 
   it("writes the source's buffer ahead of the since-mark replay when it mounts the arrival", async () => {
     arrivals = [payload({
-      terminals: { "pane-a": { serialized: "\u001b[1mfrom-source\u001b[0m", mark: 42 } },
+      terminals: { "pane-a": { serialized: "\u001b[1mfrom-source\u001b[0m", mark: 42, grid: { cols: 120, rows: 45 } } },
       pins: [],
     } as Partial<WorkspaceTransferPayload>)];
     await bootFromTearOut(fakePlatform());
+    expect(mocks.grids[mocks.grids.length - 1]).toMatchObject({ cols: 120, rows: 45 });
     // One write: the rebuilt buffer, then everything after the mark, in order.
     expect(mocks.writes).toContain("\u001b[1mfrom-source\u001b[0mscrollback:pane-a");
     expect(mocks.writes.filter((w) => w.includes("scrollback:pane-a"))).toHaveLength(1);

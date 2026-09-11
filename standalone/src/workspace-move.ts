@@ -6,7 +6,7 @@ import { flushTerminal } from "dormouse-lib/lib/terminal-registry";
 import { REPLAY_MODE_RESET, writeReplay } from "dormouse-lib/lib/terminal-report-filter";
 import { applyTerminalSemanticEvents } from "dormouse-lib/lib/terminal-state-store";
 import { registry as terminalRegistry } from "dormouse-lib/lib/terminal-store";
-import { hydrateNotepadFromVolatile, removeSurface, restoreTerminalPins } from "dormouse-lib/lib/notepad/notepad-store";
+import { hydrateNotepadFromVolatile, removeSurface } from "dormouse-lib/lib/notepad/notepad-store";
 import { getWallHandle } from "dormouse-lib/components/wall/wall-handles";
 import { forgetWorkspaceBootPlan, setWorkspaceBootPlan } from "dormouse-lib/components/wall/workspace-boot-plans";
 import { wallBootFromResult, type WallBootPlans } from "dormouse-lib/components/wall/wall-types";
@@ -383,16 +383,16 @@ async function planArrival(
   const result = resumeOrRestoreFrom(platform, live, {
     savedSession: payload.workspace.session,
     ptyIds,
+    terminalGrids: new Map(Object.entries(payload.terminals ?? {}).flatMap(
+      ([id, terminal]) => terminal.grid ? [[id, terminal.grid] as const] : [],
+    )),
   });
   // The notes travelled in the payload rather than through the archive: a move
   // is not a closure (`docs/specs/notepad.md` → "Closure").
   hydrateNotepadFromVolatile(payload.notepad, payload.allIds);
-  // Their pins point into the buffers just rebuilt at the same lines — once
-  // xterm has parsed the rebuild, which it does asynchronously.
-  if (payload.pins?.length) {
-    await Promise.all([...ptyIds].map((id) => flushTerminal(id)));
-    restoreTerminalPins(payload.pins);
-  }
+  // Finish parsing at the source grid before the Wall can fit the target pane.
+  // Notes survive, but source markers belong to the disposed xterm instance.
+  await Promise.all([...ptyIds].map((id) => flushTerminal(id)));
   return wallBootFromResult(result);
 }
 

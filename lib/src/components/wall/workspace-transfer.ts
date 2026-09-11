@@ -1,7 +1,8 @@
-import { snapshotNotepadForTransfer, snapshotTerminalPins, removeSurface } from '../../lib/notepad/notepad-store';
+import { snapshotNotepadForTransfer, removeSurface } from '../../lib/notepad/notepad-store';
 import type { TransferredPin } from '../../lib/notepad/source-link';
+import type { TerminalGrid } from '../../lib/terminal-transfer';
 import { forgetHelper, getHelper } from '../../lib/helper-terminal';
-import { releaseSession, serializeTerminal } from '../../lib/terminal-registry';
+import { releaseSession, serializeTerminal, getTerminalInstance } from '../../lib/terminal-registry';
 import type { VolatileNotepadSnapshot } from '../../lib/notepad/types';
 import type { PersistedSession, PersistedWorkspace, WorkspaceId } from '../../lib/session-types';
 import type { SaveOptions } from '../../lib/session-save';
@@ -19,9 +20,7 @@ export interface WorkspaceTransferPayload {
   workspaceId: WorkspaceId;
   /** What the target restores the Workspace from. */
   workspace: PersistedWorkspace;
-  /** The notes riding along; the target hydrates them. Their pins follow in
-   *  the content (`captureTransferContent`), once the buffers they point
-   *  into have been serialized. */
+  /** The notes riding along; the target hydrates them. Runtime source pins are dropped on arrival. */
   notepad: VolatileNotepadSnapshot;
   /** Member Surfaces holding a PTY, **plus each one's helper Session**: exactly
    *  what changes ownership. A helper is not a member Surface — it has no pane
@@ -125,6 +124,7 @@ export interface TransferredTerminal {
   /** The buffer as the escape stream that rebuilds it; `''` for a Session this
    *  Window no longer held. */
   serialized: string;
+  grid?: TerminalGrid;
   /** The sidecar's output position the serialization stands at; absent when
    *  the host never stamped one, and the target then replays the whole buffer
    *  behind the serialized one. */
@@ -136,11 +136,12 @@ export interface TransferredTerminal {
  *  passed, and attached to the arrival the host queued at the invoke. */
 export interface WorkspaceTransferContent {
   terminals: Record<string, TransferredTerminal>;
+  /** Kept empty; old payloads may contain pins, which arrivals ignore. */
   pins: TransferredPin[];
 }
 
 /**
- * Serialize every terminal at its mark, and take its pins at the same instant.
+ * Serialize every terminal at its mark with its source grid. Pins do not transfer.
  *
  * **Only after the host's `marked` line for each id**: everything this Window
  * was sent before that line is in the buffer once the write queue drains, and
@@ -156,8 +157,10 @@ export async function captureTransferContent(
   const terminals: Record<string, TransferredTerminal> = {};
   for (const id of terminalIds) {
     const serialized = (await serializeTerminal(id)) ?? '';
+    const terminal = getTerminalInstance(id);
+    const grid = terminal ? { cols: terminal.cols, rows: terminal.rows } : undefined;
     const mark = marks.get(id);
-    terminals[id] = mark === undefined ? { serialized } : { serialized, mark };
+    terminals[id] = { serialized, ...(grid ? { grid } : {}), ...(mark === undefined ? {} : { mark }) };
   }
-  return { terminals, pins: snapshotTerminalPins(terminalIds) };
+  return { terminals, pins: [] };
 }

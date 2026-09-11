@@ -124,8 +124,8 @@ Tests that pin the stack's non-obvious rules, by concern:
 
 ## 5. Manual test checklist
 
-Nothing below has been run in the Tauri app yet. Items marked **WKWebView** are
-the ones the design depends on and that were validated only in Chromium.
+User-run results are recorded under "Transfer findings" below. Items marked
+**WKWebView** need native testing beyond their Chromium coverage.
 
 **Hidden-Workspace minimize (WKWebView)**
 - Two Workspaces, three terminals each. Switch away; in Safari Web Inspector the
@@ -143,7 +143,7 @@ the ones the design depends on and that were validated only in Chromium.
 - Move a Workspace with a long-running TUI and 10k+ lines of scrollback to a
   second window: scrollback, cursor, and colors intact; output continues with
   nothing repeated or lost at the seam.
-- A note pinned to scrollback survives the move (click the pin in the target).
+- A captured note survives the move without its source pin.
 - Kill the app mid-drag (after the drop, before the target finishes): on
   relaunch the Workspace is in the target window with fresh shells, and not in
   the source.
@@ -237,3 +237,16 @@ the heading, and the rule gets a `(rationale)` marker.
   until a window re-seeds.
 - The one-frame blank on switch-back and WKWebView context release are unverified
   (§5).
+
+## Transfer findings (user-run Tauri, 2026-09-11)
+
+- `ascii-splash` mouse interaction failed after both tear-out and transfer into
+  an existing window; resizing did not repair it, restarting the TUI did.
+  Ordinary Workspace switching and window focus changes preserved mouse input.
+- Moving a window's last Workspace into another window left stale TUI drawing
+  until a resize. Tear-out drawing appeared correct.
+- A source pin remained visible after moving, then reported unavailable and
+  disappeared on use. Pins are now intentionally dropped on transfer.
+- Earlier checks passed: switching, idle tear-out, stable cross-window refs,
+  continuous numbered output without observed gaps, and identical retained
+  scrollback before and after transfer.
