@@ -42,7 +42,7 @@ So do not end your turn. Block inside a Bash call instead, waiting for the
 files the subagents write:
 
 ```sh
-# 25 minutes, counted from the first time this loop runs — i.e. after
+# 32 minutes, counted from the first time this loop runs — i.e. after
 # checkout, setup-node, and the install have already spent runner time.
 # Persisted to a file because the prose below tells you to re-issue this
 # block past the ten-minute Bash cap: a fresh shell would otherwise
@@ -58,7 +58,7 @@ files the subagents write:
 # deadline without raising that one puts the runner's cancellation first
 # again, and this graceful path stops being reachable at all.
 DEADLINE_FILE="$RUNNER_TEMP/audit-deadline"
-[ -f "$DEADLINE_FILE" ] || echo $(( $(date +%s) + 1500 )) > "$DEADLINE_FILE"
+[ -f "$DEADLINE_FILE" ] || echo $(( $(date +%s) + 1920 )) > "$DEADLINE_FILE"
 DEADLINE=$(cat "$DEADLINE_FILE")
 # Every call ends itself while it can still print. A Bash call that reaches
 # the harness's ten-minute cap is moved to the background instead of
@@ -79,12 +79,12 @@ ls -la audit-*.md
 A single Bash call is capped at ten minutes, and a domain can legitimately take
 longer than that. Issue this call with the maximum Bash timeout
 (`timeout: 600000`) — the harness default is two minutes, and at that length
-the 25 minutes take a dozen re-issues instead of three. **The loop's own last
+the 32 minutes take a dozen re-issues instead of four. **The loop's own last
 line is what you act on, and there are exactly two answers:**
 
 - `STILL WAITING` — the nine minutes elapsed and a fragment is still missing.
   Re-issue the block **verbatim**, including the `DEADLINE_FILE` lines: they
-  read back the deadline the first call wrote, so the 25 minutes accumulate
+  read back the deadline the first call wrote, so the 32 minutes accumulate
   across re-issues instead of restarting. This is not a failure, and it is the
   whole technique — treating it as "the subagents died" throws away work that
   was still running.

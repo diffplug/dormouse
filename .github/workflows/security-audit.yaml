@@ -32,7 +32,7 @@ jobs:
       # and carries a pointer back here.
       AUDIT_FRAGMENTS: audit-supply-chain.md audit-ci-secrets.md audit-application.md
     # Must stay well above the orchestrator's own wait deadline in
-    # `.github/audit/orchestrator.md` (25 minutes, counted from the first
+    # `.github/audit/orchestrator.md` (32 minutes, counted from the first
     # time its wait loop runs — i.e. after checkout, setup-node, the
     # install, and the spawn — and persisted across the loop's
     # re-issues so it accumulates rather than restarting).

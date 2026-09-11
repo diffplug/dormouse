@@ -36,6 +36,8 @@ The deadline is persisted because one longer than the ten-minute Bash cap cannot
 
 A call that reaches the cap is *moved to the background*, not returned: it prints nothing back, so re-issuing becomes a judgement call rather than a step. Run 34457954349 happened to re-issue a third time and its deadline fell inside that call, so it merged and published two PASS domains; run 34581574869 spent one extra call checking the fragments, which shifted the phase enough that a third wait would have been needed, ended its turn instead, and published no report at all — the same two domains' PASS fragments survived only in the artifact. A loop that ends itself under the cap turns both nights into the same printed answer.
 
+The 25-minute deadline was raised to 32 after `application-security` failed to report inside it two nights running — the deadline expired on it on 2026-09-10, and on 2026-09-11 it was still sweeping when the run ended at 21 minutes — while roughly 13 of the job's 40 minutes went unused on both nights.
+
 At `timeout-minutes: 20` the runner cancelled the job before the 25-minute deadline could fire, so the graceful "give up and report what the domains found" path was unreachable and every overrun landed as INCONCLUSIVE. The 40-minute slack also covers the merge, verdict, redact, upload, and reporting steps after the wait.
 
 A missing fragment is indistinguishable, in the merged report, from a domain that found nothing, and only one of those is safe to publish a release on.
