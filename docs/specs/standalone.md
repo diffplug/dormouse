@@ -455,10 +455,14 @@ by `the_geometry_flush_slot_is_released_with_the_drain`.
 **Must clear label-keyed ownership, registry, geometry, and close state in the
 `Destroyed` arm**, when Tauri has removed the window from `webview_windows()`.
 **Must remove incoming arrivals from the reap before killing orphaned PTYs**;
-the source still holds those Sessions. Hand-backs run in a blocking worker,
-then complete on the main thread. **Must defer every approved exit until all
+the source still holds those Sessions. Hand-backs run in a blocking worker that
+reports completion on the main thread. **Must defer every approved exit until all
 such workers have completed**, including exit requested through the quit walk
-or Tauri (`quit_waits_for_every_destroyed_window_handback`). The arm updates the
+or Tauri/AppKit (`every_approved_exit_path_checks_cleanup`;
+`quit_waits_for_every_destroyed_window_handback` pins the counter). **Must force an
+approved exit after `QUIT_PHASE_TIMEOUT_MS` waiting for cleanup**, logging the
+timeout; a stalled disk operation or completion callback cannot trap the app
+(`stalled_cleanup_cannot_block_an_approved_exit_forever`). The arm updates the
 quit machine and sends the remaining live labels to the sidecar; the Burrow’s
 ask collector must never wait for a window that cannot answer.
 
@@ -937,9 +941,9 @@ Every trigger funnels into `request_quit(app)`:
 | Arm | Fired by | Guard |
 |---|---|---|
 | `WindowEvent::CloseRequested` | the window close button | `api.prevent_close()` unless the quit is approved. Refused outright while the walk is running: a window taken out from under its own teardown leaves the walk emitting to a dead label. Only the **last** window's close is a quit; every other one is a per-window close (§Windows) |
-| `RunEvent::ExitRequested` | a window-level exit request | `api.prevent_exit()` unless approved. The event's `code` is ignored: the `approved` gate alone is what lets the flow's own terminating `app.exit(0)` through without re-catching it |
+| `RunEvent::ExitRequested` | a window-level exit request | `api.prevent_exit()` unless approved and cleared by the bounded cleanup gate (§What a window's `Destroyed` settles). The event's `code` is ignored |
 | the app menu's Quit item | the menu, and its `Cmd+Q` accelerator | a **custom** `MenuItem`, never `PredefinedMenuItem::quit`, whose event calls `request_quit`; muda wires the predefined one straight to AppKit's `terminate:` (macOS; rationale) |
-| `applicationShouldTerminate:` | the Dock's Quit, `osascript`, logout, restart | spliced onto tao's live delegate class at `Ready`, answering `NSTerminateCancel` and starting the flow, then `NSTerminateNow` once the flow's own `app.exit(0)` comes back through it (macOS; rationale) |
+| `applicationShouldTerminate:` | the Dock's Quit, `osascript`, logout, restart | spliced onto tao's live delegate class at `Ready`, answering `NSTerminateCancel` and starting the flow, then `NSTerminateNow` once approved and cleared by the bounded cleanup gate (§What a window's `Destroyed` settles; macOS; rationale) |
 
 Source of truth: `standalone/src-tauri/src/macos_terminate.rs`.
 
@@ -980,6 +984,9 @@ wedged webview, in three phases:
 | 1 — ack | some window has not acked | ~2 s; a listener is dead ⇒ log and `app.exit(0)` |
 | 2 — voting | acked, no window walking yet | **none** — a window may be parked on its confirmation dialog waiting on a human, who must never be force-quit out from under it. Only `quit_proceed` (`approved`) or `quit_cancel`/repeat-trigger (`seq` bump) ends the wait |
 | 3 — walking | one window tearing down | **per phase**, ~14 s, refreshed by its `quit_progress` bumps *and* by the walk advancing to the next window, so each phase and each window gets its own budget; no progress for the budget ⇒ log and exit |
+
+Approved exits from these watchdogs also pass the bounded cleanup gate
+(§What a window’s `Destroyed` settles).
 
 Phase 3's budget comfortably exceeds the webview's own teardown ceiling. Each
 watchdog captures the `seq` it was spawned for, so a **repeated quit trigger** —
