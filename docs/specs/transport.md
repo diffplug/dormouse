@@ -150,7 +150,10 @@ and it turns on three rules:
   serialized anyway and replayed whole. A hand-back is the same split kept: the
   source still holds the bytes before the mark and receives the host's replay of
   everything after it into the same xterm (`docs/specs/standalone.md` →
-  "Arrival queue"). Suppression fails open after a bound rather than silencing
+  "Arrival queue"). **Must include retained, naturally exited buffers in explicit
+  marked requests with `alive: false` and their exit code**, replaying their
+  since-mark tail; ordinary discovery remains live-only, and explicit kill
+  discards the buffer (`list` in `standalone/sidecar/pty-core.js`). Suppression fails open after a bound rather than silencing
   a pane forever (rationale).
 - **Ask for exactly the moving ids, at their marks.** `pty:requestInit` names
   them with their marks, and `list(ids, …, marks)` replays `outputSince(mark)`
