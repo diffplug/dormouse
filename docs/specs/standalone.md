@@ -643,7 +643,7 @@ below reads that record rather than inferring itself from the suppression map.
   array of `{ workspaceId, from, to, workspace }`, never an entry in either
   window's snapshot (rationale). **Must retain an adopted record until target
   and source snapshots both reflect the move**, marking it settled at
-  `adopt_done` and checking after each `save_session`
+  `adopt_done` and checking after each `save_session` or source-window close
   (`adoption_keeps_the_journal_until_both_snapshots_are_durable`). Every hand-back path
   (`adopt_failed`, the target's `Destroyed`, the watchdog, a failed
   `build_window`) drop the record; a record left at boot is merged into its
@@ -651,7 +651,8 @@ below reads that record rather than inferring itself from the suppression map.
   holding just it, active; a source snapshot still naming the id loses it, an
   emptied one is removed — so the Workspace restores once, with fresh shells,
   and successful records are deleted; **must retain failed records for retry
-  and roll back the target if trimming the source fails**
+  and roll back the target if trimming the source fails**. **Must preserve a
+  settled arrival’s newer target record during boot recovery**
   (`an_arrival_record_round_trips_until_it_is_forgotten`,
   `a_leftover_arrival_boots_into_an_existing_target_snapshot`,
   `a_leftover_arrival_boots_into_a_tear_out_targets_new_snapshot`,
