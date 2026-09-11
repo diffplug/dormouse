@@ -1,6 +1,6 @@
 import { useCallback, type MutableRefObject } from 'react';
 import { getPlatform, PLATFORM_STRING } from '../../lib/platform';
-import { WINDOW_REF } from '../../lib/workspace-store';
+import { currentWindowRef } from '../../lib/workspace-store';
 import type { DorControlRequestPayload, DorControlResult } from 'dor/protocol';
 import { SURFACE_CONTROL_METHODS } from 'dor/protocol';
 import type {
@@ -422,7 +422,8 @@ export function useDorControl({
   lastAgentBrowserBinaryPathRef: MutableRefObject<string | undefined>;
   /** This Wall's own positional Workspace ref, reported by `dor list` so a caller
    *  learns which Workspace answered (docs/specs/dor-cli.md → "Handle Model").
-   *  The Window is `WINDOW_REF` until there is more than one. */
+   *  The Window's own ref rides beside it, so `dor list` says which Window
+   *  answered too (`currentWindowRef`). */
   workspaceRef: () => string;
 }): {
   /** The live surface (visible pane or minimized door) whose params match, or
@@ -641,7 +642,7 @@ export function useDorControl({
         result: {
           surfaces,
           workspaceRef: workspaceRef(),
-          windowRef: WINDOW_REF,
+          windowRef: currentWindowRef(),
         },
       });
       return;

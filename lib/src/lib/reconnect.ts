@@ -25,6 +25,11 @@ export interface ReconnectResult {
 export interface LivePtys {
   ptys: PtyInfo[];
   replay: Map<string, string>;
+  /** The host never answered this collection's own `requestInit`. **An empty
+   *  `ptys` means "the host holds none" only when this is false**: a caller that
+   *  cold-restores on a timeout starts fresh shells over PTYs that are still
+   *  running (`planArrival` in `standalone/src/workspace-move.ts`). */
+  timedOut: boolean;
 }
 
 /**
@@ -55,8 +60,52 @@ export interface ResumePlanOptions {
  * 3. Neither → return empty (Wall creates a fresh terminal)
  */
 export async function resumeOrRestore(platform: PlatformAdapter): Promise<ReconnectResult> {
-  return resumeOrRestoreFrom(platform, await collectLivePtys(platform));
+  const savedSession = readPersistedSession(platform.getState());
+  // The retry protects live shells from being restored over, and a record with
+  // no terminal pane has none to lose: without the gate a host whose
+  // `requestInit` answers nothing holds first paint for the whole budget
+  // (`restoreWindow` in `standalone/src/window-restore.ts` gates the same way).
+  const hasTerminalPanes =
+    savedSession?.panes.some((pane) => pane.surfaceType !== 'browser') ?? false;
+  const live = await collectLivePtys(
+    platform,
+    hasTerminalPanes ? { retryTimeoutMs: LIST_RETRY_MS } : {},
+  );
+  return resumeOrRestoreFrom(platform, live, { savedSession });
 }
+
+/** How one collection differs from the ordinary boot one. */
+export interface CollectPtysOptions {
+  /** What makes the host answer, given this collection's own token to carry.
+   *  Defaults to `platform.requestInit(requestId)` — the whole Window. A
+   *  Workspace arriving from another Window instead asks the host for exactly
+   *  the PTYs whose ownership just moved to it. */
+  trigger?: (requestId: string) => void;
+  /** Which ids this collection is about; everything else in the answer is
+   *  another Workspace's and must not be taken for it. */
+  accept?: (id: string) => boolean;
+  /** The ceiling on waiting for replays. */
+  timeoutMs?: number;
+  /** Ask once more on this budget when the host never answered at all. Omitted:
+   *  one attempt (`collectLivePtysOnce`). */
+  retryTimeoutMs?: number;
+}
+
+/**
+ * The second ask's budget when the first got no `pty:list` at all.
+ *
+ * A `timedOut` list is the input a cold restore reads as "the host holds
+ * nothing", and acting on it starts a second set of shells over the ones still
+ * running. A launch slow enough to outrun 500 ms — a cold sidecar behind an
+ * antivirus scan — is exactly when that happens, so the host is asked once more
+ * before its silence is believed. Costs nothing when there is nothing to say:
+ * an empty list still resolves as soon as it arrives.
+ */
+export const LIST_RETRY_MS = 3000;
+
+/** Distinct per collection and per webview reload; only ever compared for
+ *  equality against the host's echo. */
+let collectSeq = 0;
 
 /**
  * Ask the host for its PTYs and gather the replay each one sends back.
@@ -64,22 +113,53 @@ export async function resumeOrRestore(platform: PlatformAdapter): Promise<Reconn
  * Bounded rather than counted-to-completion: a host that lists PTYs but never
  * replays one of them must not hold up boot, so 500 ms is the ceiling and a
  * short list resolves as soon as every replay has arrived.
+ *
+ * **Finishes only on its own answer.** Every listener sees every `pty:list`, so
+ * one window running two collections at once — a boot and a Workspace arriving,
+ * or two arrivals — would otherwise let each finish on the other's list and
+ * conclude the host holds nothing. The token rides the `requestInit` and comes
+ * back on the list and each replay; an answer carrying none is a host that does
+ * not echo it (VS Code, Pocket, the website), which has one collector anyway.
+ *
+ * **Asks twice before believing silence**, on `retryTimeoutMs`: the whole
+ * difference between "the host holds nothing" and "the host never answered" is
+ * `timedOut`, and a caller that cold-restores on the second starts a second set
+ * of shells over the ones still running.
  */
-export function collectLivePtys(platform: PlatformAdapter): Promise<LivePtys> {
+export async function collectLivePtys(
+  platform: PlatformAdapter,
+  options: CollectPtysOptions = {},
+): Promise<LivePtys> {
+  const first = await collectLivePtysOnce(platform, options);
+  if (!first.timedOut || options.retryTimeoutMs === undefined) return first;
+  return collectLivePtysOnce(platform, { ...options, timeoutMs: options.retryTimeoutMs });
+}
+
+/** One ask and one wait. `collectLivePtys` is this, plus the retry. */
+function collectLivePtysOnce(
+  platform: PlatformAdapter,
+  options: CollectPtysOptions = {},
+): Promise<LivePtys> {
+  const accept = options.accept ?? (() => true);
+  const requestId = `init-${++collectSeq}`;
+  const mine = (detail: { requestId?: string }) =>
+    detail.requestId === undefined || detail.requestId === requestId;
   return new Promise<LivePtys>((resolve) => {
     const replay = new Map<string, string>();
     let ptyList: PtyInfo[] | null = null;
 
-    const timeout = setTimeout(() => finish(), 500);
+    const timeout = setTimeout(() => finish(), options.timeoutMs ?? 500);
 
-    const handleList = (detail: { ptys: PtyInfo[] }) => {
-      ptyList = detail.ptys;
+    const handleList = (detail: { ptys: PtyInfo[]; requestId?: string }) => {
+      if (!mine(detail)) return;
+      ptyList = detail.ptys.filter((pty) => accept(pty.id));
       if (ptyList.length === 0) {
         finish();
       }
     };
 
-    const handleReplay = (detail: { id: string; data: string }) => {
+    const handleReplay = (detail: { id: string; data: string; requestId?: string }) => {
+      if (!mine(detail) || !accept(detail.id)) return;
       replay.set(detail.id, detail.data);
       if (ptyList && replay.size >= ptyList.length) {
         finish();
@@ -93,12 +173,13 @@ export function collectLivePtys(platform: PlatformAdapter): Promise<LivePtys> {
       clearTimeout(timeout);
       platform.offPtyList(handleList);
       platform.offPtyReplay(handleReplay);
-      resolve({ ptys: ptyList ?? [], replay });
+      resolve({ ptys: ptyList ?? [], replay, timedOut: ptyList === null });
     }
 
     platform.onPtyList(handleList);
     platform.onPtyReplay(handleReplay);
-    platform.requestInit();
+    // Last: the handlers must be armed before anything can answer.
+    (options.trigger ?? ((token: string) => platform.requestInit(token)))(requestId);
   });
 }
 

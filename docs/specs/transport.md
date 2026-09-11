@@ -61,12 +61,16 @@ Platform host (always running while the adapter is active)
 │   ├── pty-2 (Process: Live)
 │   └── pty-3 (Process: Exited)
 │
-├── Webview (e.g. VS Code WebviewView, standalone window)
+├── Webview (e.g. VS Code WebviewView, a standalone window)
 │   └── message-router: owns pty-1, pty-2
 │
-└── Optional secondary webview (e.g. VS Code editor-tab WebviewPanel)
+└── Secondary webview (a VS Code editor-tab WebviewPanel, another standalone window)
     └── message-router: owns pty-3
 ```
+
+**Every host is multi-webview.** Ownership is what keeps one webview's traffic
+out of another's, and each host owns the map: `docs/specs/vscode.md` → "Peer
+surfaces across windows", `docs/specs/standalone.md` → Routing.
 
 - **Hiding a webview does not kill its PTYs**, and becoming visible again resumes over the still-owned ones ("Reconnection protocol").
 - **A naturally exited PTY may stay mounted as an exited pane**; frontend semantic state — CWD, title candidates, last command — is retained until the Session is disposed.
@@ -95,11 +99,54 @@ VS Code's `pty-manager` keeps two buffers plus one counter per PTY. **Must cap e
    doors, not visible panes.
 ```
 
+**A collection finishes only on its own answer.** A `requestInit` carries the
+asking collector's token, and a host serving several windows echoes it on the
+`pty:list` and on every `pty:replay` behind it; the collector ignores anything
+carrying a different one. One webview can have two collections outstanding — a
+boot and a Workspace arriving from another window, or two arrivals — and every
+listener sees every answer, so without the token each finishes on the other's
+list and concludes the host holds nothing. **An answer carrying no token is
+taken**: a host with one webview has nothing to tell apart. **A collection that
+timed out is not a collection that found no PTYs** — those shells are still
+running, and a caller that cold-restores there starts a second set over them, so
+`LivePtys` reports which it was. **A collector given `retryTimeoutMs` asks once
+more on that budget before reporting silence**, since an empty list still
+resolves as soon as it arrives and a slow launch is exactly when the two are
+confused (rationale). **`resumeOrRestore` asks for the retry only when the saved
+session names a terminal pane** — the shells the retry protects; `restoreWindow`
+in `standalone/src/window-restore.ts` gates the same way — so a host that answers
+nothing holds first paint for 500 ms, not the whole budget. Source of truth:
+`collectLivePtys` in `lib/src/lib/reconnect.ts`; `list` in
+`standalone/sidecar/pty-core.js`.
+
 **Seeded titles reject the sentinels.** Saved pane and door titles come back through `setTerminalUserTitle()`, which rejects the reserved `<idle>` prefix (`docs/specs/terminal-state.md` → Supported OSC Inputs), and the seed callers in `terminal-lifecycle.ts` additionally skip `<unnamed>`, the default panel placeholder (rationale).
 
 **Must follow `docs/specs/notepad.md` → "Live resume" for browser-only resumes.**
 
-**Cold restore** (neither live PTYs nor a browser-only resume) falls back to saved session state: new PTYs in the saved CWDs under the currently selected Dormouse shell, plus the saved Lath layout. No transcript is replayed ("What is persisted"), and any pane carrying a recovery command auto-runs it. `reconnect.ts` waits 500 ms for the PTY list.
+#### Transferring a Workspace
+
+A Workspace can move from one webview to another with its Sessions still
+running (`docs/specs/standalone.md` → Transfer). It is a resume, not a restore,
+and it turns on three rules:
+
+- **Release, never dispose, and only once the target has adopted the Workspace.**
+  The source detaches its half of each Session — the alert, the pins, the
+  listeners, the element, the xterm instance — and **does not kill the PTY**
+  (`releaseSession` in `lib/src/lib/terminal-lifecycle.ts`). **Never reachable
+  from a webview unmount**: a Wall unmounts on a reload and on a StrictMode
+  double-mount, and releasing there would strand every PTY the window still owns.
+  A move the target never took leaves the Workspace exactly as it was.
+- **Suppress until the replay.** The host moves ownership synchronously and
+  drops the moving PTYs' output until each one's replay has reached the new
+  owner, so no byte is painted twice and none is lost. It fails open after a
+  bound rather than silencing a pane forever (rationale).
+- **Ask for exactly the moving ids.** `pty:requestInit` names them, and
+  `list(ids)` follows the same **omitted is not empty** rule `interrupt` carries
+  — a caller forwarding a computed set that came out empty gets a no-op, not
+  every PTY in the process. The moving ids include each pane's helper Session,
+  which no other field names.
+
+**Cold restore** (neither live PTYs nor a browser-only resume) falls back to saved session state: new PTYs in the saved CWDs under the currently selected Dormouse shell, plus the saved Lath layout. No transcript is replayed ("What is persisted"), and any pane carrying a recovery command auto-runs it. `reconnect.ts` waits 500 ms for the PTY list, and 3 s more where a retry is asked for.
 
 ## Message protocol
 
@@ -137,7 +184,7 @@ Transport constraints:
 | Host → webview | `pty:replay` | Buffered raw output since spawn; the webview runs a one-shot parser over it, the only re-parse there is. |
 | Host → webview | `dormouse:newTerminal` | May carry `shell`, `args`, display `name`, `replaceUntouched`, `announce`. The webview replaces the selected untouched terminal in place only when `replaceUntouched` is true, otherwise spawns a new pane. |
 
-**Two app-global stores relay on one pattern**: WATCHING rules (`alert:initializeWatchedCommands`, `alert:setCommandWatched` → host; `alert:watchedCommands` → webview) and alarm settings (`alert:initializeSettings`, `alert:updateSettings` → host; `alert:settings` → webview; `docs/specs/alert.md` → Alarm settings). An `initialize*` offers the renderer's persisted copy as a startup seed, and **a multi-webview host accepts only the first seed of its lifetime**. A mutation replaces the host's copy — `setCommandWatched` adds or removes one bare command key without touching unrelated rules, `updateSettings` sends the whole blob, renderer-only fields included, so every webview agrees. Either way the host broadcasts a canonical snapshot, and **every renderer replaces and persists its local mirror from it**.
+**Two app-global stores relay on one pattern**: WATCHING rules (`alert:initializeWatchedCommands`, `alert:setCommandWatched` → host; `alert:watchedCommands` → webview) and alarm settings (`alert:initializeSettings`, `alert:updateSettings` → host; `alert:settings` → webview; `docs/specs/alert.md` → Alarm settings). An `initialize*` offers the renderer's persisted copy as a startup seed, and **a multi-webview host accepts only the first seed of its lifetime**. A mutation replaces the host's copy — `setCommandWatched` adds or removes one bare command key without touching unrelated rules, `updateSettings` sends the whole blob, renderer-only fields included, so every webview agrees. Either way the host broadcasts a canonical snapshot, and **every renderer replaces and persists its local mirror from it**. **In standalone both directions ride one opaque passthrough**, the `alert_command` invoke to a `alert:command` sidecar line, where the stores live so N windows share one answer; the snapshot comes back as a broadcast `alert:settings` / `alert:watchedCommands` (`docs/specs/standalone.md` → "Windows").
 
 **The host must revalidate renderer-supplied settings, never trust them** — they become host timers. `AlertSettingsHost` runs every inbound blob through `normalizeAlertSettings`, which drops unknown keys, defaults missing ones, and clamps each delay into range. Both directions share one adapter method, `alertPublishSettings(settings, { seed })`: seed vs replace picks a message type, not a payload.
 
@@ -202,6 +249,8 @@ something ends it:
 | --- | --- | --- |
 | Standalone quit — idle, confirmed, or update-install | No — window state is the app's contract | Restore structure + auto-resume agents |
 | Standalone window reload | No | Live resume over sidecar PTYs, per Workspace |
+| Standalone per-window close, one of several | Yes | Fresh: that window's notes archived, its PTYs killed, its snapshot removed |
+| Standalone Workspace transfer between windows | Neither — nothing ended | The same Sessions, resumed in the other window |
 | Standalone crash / force-kill | No, and the last save stands | Restore structure, no agent resume |
 | VS Code panel hide/show | No | Live resume over host PTYs, unchanged |
 | VS Code Reload Window | No — an editor operation, not an ending | Restore structure + auto-resume agents |
@@ -244,7 +293,7 @@ prompt** (rationale).
 - **Must preserve VS Code scrollback across PTY exit.** In `pty-manager.ts` only `kill`/`killAll` (or host-process exit) clears it; natural exit, signal-driven exit, and `gracefulKillAll` leave it readable via `getScrollback` (rationale).
 - **A position in a pane's output is a received count, not a buffer length.** The capped host-side buffer evicts from the front, so `scrollbackChars` goes flat while output keeps flowing (rationale). Anything marking a point in the stream, or watching a pane for growth, reads the monotonic `getScrollbackReceived` and slices with `getScrollbackSince`, which joins only the chunks spanning the mark and clamps to what the buffer still holds.
 - **A spawn that fails still reports an exit.** `pty-core.spawn` answers a node-pty failure with `error` *and* `exit`; `error` reaches no webview (rationale).
-- **Whole-host acks are correlated by request id, never by message type alone.** For `interrupt` and `gracefulKillAll` the pty-host echoes `requestId` on `interruptDone` / `gracefulKillDone` and the caller compares it — a timed-out teardown call's ack still arrives afterwards (rationale).
+- **Teardown acks are correlated by request id, never by message type alone.** For `interrupt` and the graceful kill (`gracefulKillAll` in VS Code, `gracefulKill(ids)` in the sidecar, since one standalone window tears down alone) the pty-host echoes `requestId` on `interruptDone` / `gracefulKillDone` and the caller compares it — a timed-out teardown call's ack still arrives afterwards (rationale).
 - **An omitted interrupt target list is not an empty one.** `pty-core.interrupt(ids)` broadcasts to every live PTY only when `ids` is *omitted*; an empty array is a no-op. A caller whose computed set comes out empty must get silence, not the blanket second press that destroys codex's hint.
 - **Shell login args are shell-specific.** `pty-core.js` launches POSIX shells with `-l` only where the shell accepts it; `csh`/`tcsh` must be spawned without it, so a C-shell-derived login shell still opens a usable terminal in any adapter.
 - **Replay drops terminal replies only** — never a user keyboard escape sequence (`docs/specs/terminal-escapes.md` → "Report filtering on the input side").

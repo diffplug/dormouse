@@ -683,3 +683,170 @@ describe('resumeOrRestoreFrom', () => {
     );
   });
 });
+
+/**
+ * One webview can have two collections outstanding at once — a boot and a
+ * Workspace arriving from another Window, or two arrivals — and every listener
+ * sees every answer. The token is what keeps each on its own
+ * (`docs/specs/transport.md` → "Reconnection").
+ */
+describe('collectLivePtys addressing', () => {
+  /** A host that answers each `requestInit` with only the PTYs named for that
+   *  token, echoing it exactly as the sidecar's `list` does. */
+  function addressedPlatform() {
+    const listHandlers = new Set<(detail: { ptys: PtyInfo[]; requestId?: string }) => void>();
+    const replayHandlers = new Set<(detail: { id: string; data: string; requestId?: string }) => void>();
+    const asked: string[] = [];
+    const platform = {
+      requestInit: (requestId?: string) => {
+        asked.push(requestId ?? '(none)');
+      },
+      onPtyList: (handler: (detail: { ptys: PtyInfo[]; requestId?: string }) => void) => { listHandlers.add(handler); },
+      offPtyList: (handler: (detail: { ptys: PtyInfo[]; requestId?: string }) => void) => { listHandlers.delete(handler); },
+      onPtyReplay: (handler: (detail: { id: string; data: string; requestId?: string }) => void) => { replayHandlers.add(handler); },
+      offPtyReplay: (handler: (detail: { id: string; data: string; requestId?: string }) => void) => { replayHandlers.delete(handler); },
+    } as unknown as PlatformAdapter;
+    const answer = (requestId: string, ids: string[] = []) => {
+      const ptys = ids.map((id) => ({ id, alive: true }) as PtyInfo);
+      for (const handler of [...listHandlers]) handler({ ptys, requestId });
+      for (const id of ids) {
+        for (const handler of [...replayHandlers]) handler({ id, data: `${id}-replay`, requestId });
+      }
+    };
+    return { platform, asked, answer };
+  }
+
+  it('gives two concurrent arrivals their own PTYs', async () => {
+    const { platform, asked, answer } = addressedPlatform();
+    const first = collectLivePtys(platform, { accept: (id) => id === 'a', timeoutMs: 1000 });
+    const second = collectLivePtys(platform, { accept: (id) => id === 'b', timeoutMs: 1000 });
+    await Promise.resolve();
+    const [firstToken, secondToken] = asked;
+    expect(firstToken).not.toBe(secondToken);
+
+    // The second arrival's list reaches the first collector too. Filtered by
+    // `accept` it is empty, and taken as this collector's own answer it would
+    // read as "the host holds none" — a cold restore over live shells.
+    answer(secondToken!, ['b']);
+    answer(firstToken!, ['a']);
+
+    const [a, b] = await Promise.all([first, second]);
+    expect(a).toMatchObject({ timedOut: false });
+    expect(b).toMatchObject({ timedOut: false });
+    expect(a.ptys.map((pty) => pty.id)).toEqual(['a']);
+    expect(b.ptys.map((pty) => pty.id)).toEqual(['b']);
+    // Each resumes over its own replay, never the other's.
+    expect([...a.replay.keys()]).toEqual(['a']);
+    expect([...b.replay.keys()]).toEqual(['b']);
+  });
+
+  it('tells an empty answer apart from no answer at all', async () => {
+    vi.useFakeTimers();
+    try {
+      const { platform, asked, answer } = addressedPlatform();
+      const empty = collectLivePtys(platform, { timeoutMs: 100 });
+      await Promise.resolve();
+      answer(asked[0]!);
+      const settled = await empty;
+      // The host answered, and it holds nothing.
+      expect(settled).toMatchObject({ ptys: [], timedOut: false });
+
+      const silent = collectLivePtys(platform, { timeoutMs: 100 });
+      await vi.advanceTimersByTimeAsync(200);
+      // Nothing came back, so nothing is known: a caller that cold-restores
+      // here starts fresh shells over PTYs that are still running.
+      expect(await silent).toMatchObject({ ptys: [], timedOut: true });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('resumeOrRestore buys the retry only for a saved terminal pane', async () => {
+    vi.useFakeTimers();
+    try {
+      // Nothing saved, and a host that never answers: the retry protects live
+      // shells a cold restore would start over, and there are none to protect,
+      // so first paint is not held for its whole budget.
+      const fresh = addressedPlatform();
+      (fresh.platform as { getState: () => unknown }).getState = () => null;
+      const booted = resumeOrRestore(fresh.platform);
+      await vi.advanceTimersByTimeAsync(600);
+      expect(await booted).toEqual({ paneIds: [] });
+      expect(fresh.asked).toHaveLength(1);
+
+      // A saved terminal pane is exactly what the retry protects: ask again.
+      const saved = addressedPlatform();
+      (saved.platform as { getState: () => unknown }).getState = () => ({
+        version: 3,
+        panes: [{ id: 'a', title: 'a', cwd: '/tmp', untouched: false, alert: null }],
+      });
+      const restoring = resumeOrRestore(saved.platform);
+      await vi.advanceTimersByTimeAsync(600);
+      expect(saved.asked).toHaveLength(2);
+      saved.answer(saved.asked[1]!, ['a']);
+      expect((await restoring).paneIds).toEqual(['a']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('asks a second time before believing silence, and resumes on the late answer', async () => {
+    vi.useFakeTimers();
+    try {
+      const { platform, asked, answer } = addressedPlatform();
+      const collecting = collectLivePtys(platform, { timeoutMs: 100, retryTimeoutMs: 3000 });
+      // The first wait runs out with nothing back: a boot that believed it here
+      // would cold-restore, starting a second set of shells over live ones.
+      await vi.advanceTimersByTimeAsync(200);
+      expect(asked).toHaveLength(2);
+
+      // The host is just slow. Its answer to the second ask is what resumes.
+      answer(asked[1]!, ['a']);
+      const collected = await collecting;
+      expect(collected.timedOut).toBe(false);
+      expect(collected.ptys.map((pty) => pty.id)).toEqual(['a']);
+      expect([...collected.replay.keys()]).toEqual(['a']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('asks once when told to, and once more only on silence', async () => {
+    vi.useFakeTimers();
+    try {
+      const { platform, asked, answer } = addressedPlatform();
+      const answered = collectLivePtys(platform, { timeoutMs: 100, retryTimeoutMs: 3000 });
+      await Promise.resolve();
+      answer(asked[0]!);
+      expect(await answered).toMatchObject({ ptys: [], timedOut: false });
+      // An answered ask is never repeated.
+      expect(asked).toHaveLength(1);
+
+      // No `retryTimeoutMs`: one ask, and the silence stands.
+      const once = collectLivePtys(platform, { timeoutMs: 100 });
+      await vi.advanceTimersByTimeAsync(200);
+      expect(await once).toMatchObject({ timedOut: true });
+      expect(asked).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('accepts an answer from a host that echoes no token', async () => {
+    // VS Code, Pocket and the website each serve one webview, so their answers
+    // carry none and there is nothing to tell apart.
+    const listHandlers = new Set<(detail: { ptys: PtyInfo[] }) => void>();
+    const platform = {
+      requestInit: () => {
+        for (const handler of [...listHandlers]) handler({ ptys: [{ id: 'a', alive: true } as PtyInfo] });
+      },
+      onPtyList: (handler: (detail: { ptys: PtyInfo[] }) => void) => { listHandlers.add(handler); },
+      offPtyList: (handler: (detail: { ptys: PtyInfo[] }) => void) => { listHandlers.delete(handler); },
+      onPtyReplay: () => {},
+      offPtyReplay: () => {},
+    } as unknown as PlatformAdapter;
+    const collected = await collectLivePtys(platform, { timeoutMs: 1000 });
+    expect(collected.ptys.map((pty) => pty.id)).toEqual(['a']);
+    expect(collected.timedOut).toBe(false);
+  });
+});

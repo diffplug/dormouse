@@ -6,6 +6,8 @@
 
 **Why install runs last.** A Windows NSIS install force-kills the app the moment it starts, so starting it early interrupts teardown. This ordering originally protected persisted scrollback; what it protects now is the window's structure, which standalone does persist. The retained save/drain hooks and their completion semantics are explained in `docs/specs/standalone.rationale.md` → Quit flow.
 
+**Why `updater:*` stayed scoped to `main`.** Widening it to every window was meant to cover a session whose `main` was closed. It covers nothing: only `main` runs the periodic check, so only `main` can be holding a download, and a `main`-less session has none to install whichever window the walk ends on. The grant gave up a structural guarantee — the install can only happen in the window torn down last — for a case that cannot arise. What that session needs is to be told before it happens, which is the close confirmation's discard warning.
+
 **Why Vite dev mode skips `install()`.** The updater resolves its replacement target from the current executable path, which in dev is the dev executable's directory, not a packaged bundle.
 
 ## Sidecar teardown on Windows

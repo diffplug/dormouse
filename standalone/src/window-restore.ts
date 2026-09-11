@@ -11,7 +11,7 @@
  */
 
 import type { PlatformAdapter, PtyInfo } from "dormouse-lib/lib/platform/types";
-import { collectLivePtys, resumeOrRestoreFrom, type LivePtys } from "dormouse-lib/lib/reconnect";
+import { collectLivePtys, LIST_RETRY_MS, resumeOrRestoreFrom, type LivePtys } from "dormouse-lib/lib/reconnect";
 import {
   flushWindowSession,
   installWindowSessionWriter,
@@ -100,13 +100,17 @@ export async function restoreWindowOrFresh(platform: PlatformAdapter): Promise<W
   }
 }
 
-async function restoreWindow(
+/**
+ * Seed the Window's records and install its Workspaces and writer, before any
+ * Wall mounts. Shared with the tear-out boot, whose one Workspace arrives from
+ * another Window rather than from disk (`standalone/src/workspace-move.ts`).
+ */
+export function installWindowPersistence(
   platform: PlatformAdapter,
   saved: PersistedWindow | null,
-): Promise<WallBootPlans> {
-  // Before any Wall mounts: a Workspace's first save compares against its own
-  // record, and a snapshot taken mid-boot must not replace a restored Workspace
-  // with a blank one.
+): void {
+  // A Workspace's first save compares against its own record, and a snapshot
+  // taken mid-boot must not replace a restored Workspace with a blank one.
   seedWindowSession(saved);
   if (saved) {
     setWorkspaces({
@@ -117,8 +121,23 @@ async function restoreWindow(
   // After `setWorkspaces`, so installing does not immediately write back what was
   // just read.
   installWindowSessionWriter((snapshot) => platform.saveWindowState?.(snapshot));
+}
 
-  const live: LivePtys = await collectLivePtys(platform);
+async function restoreWindow(
+  platform: PlatformAdapter,
+  saved: PersistedWindow | null,
+): Promise<WallBootPlans> {
+  installWindowPersistence(platform, saved);
+
+  // Asked twice when the host says nothing at all and this Window has terminal
+  // panes to lose: `resumeOrRestoreFrom` reads a timed-out list as "no live
+  // PTYs" and cold-restores, which starts a second set of shells over the ones
+  // still running (`docs/specs/transport.md` → "Reconnection").
+  const hasTerminalPanes = (saved?.workspaces ?? []).some((workspace) =>
+    workspace.session.panes.some((pane) => pane.surfaceType !== "browser"));
+  const live: LivePtys = await collectLivePtys(platform, {
+    ...(hasTerminalPanes ? { retryTimeoutMs: LIST_RETRY_MS } : {}),
+  });
   const restoring: Array<{ id: WorkspaceId; session: PersistedSession | null }> =
     saved?.workspaces ?? [{ id: DEFAULT_WORKSPACE_ID, session: null }];
   const activeId = saved?.activeWorkspaceId ?? DEFAULT_WORKSPACE_ID;

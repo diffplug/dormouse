@@ -54,8 +54,17 @@ export interface SidecarSurfaceBridgeOptions {
 
 export interface SidecarSurfaceBridge {
   provider: BurrowSurfaceProvider;
-  /** An `answer` command: settles the ask it names. */
-  onAnswer(params: AnswerParams | undefined): void;
+  /** An `answer` command: contributes to the ask it names, on behalf of the
+   *  window `from`. The host stamps that label onto every command it forwards;
+   *  a host with one unnamed webview omits it. */
+  onAnswer(params: AnswerParams | undefined, from?: string): void;
+  /** Which webviews will answer an ask, by host label. Pushed by the host on
+   *  every window create and destroy (`docs/specs/standalone.md` -> "Burrow
+   *  service"). */
+  setWindows(labels: unknown): void;
+  /** Which windows one ask actually reached. The host routes an ask naming a
+   *  Surface to its owner alone, and only the host knows the owner. */
+  setAskDelivery(detail: unknown): void;
   /** A `notify` command: something the directory depends on changed. */
   onNotify(): void;
   /**
@@ -83,29 +92,47 @@ export function createSidecarSurfaceBridge(
   options: SidecarSurfaceBridgeOptions,
 ): SidecarSurfaceBridge {
   interface PendingAsk {
-    settle(results: unknown[]): void;
+    /** Every answering window's results, concatenated. */
+    results: unknown[];
+    /** The windows this ask went to that have not answered yet. A window
+     *  answering nothing still empties its entry: what settles the ask is having
+     *  heard from everyone, not having found anything. Only ever SHRINKS — a
+     *  window that closed mid-fan-out will never answer, and one that opened
+     *  never received the ask. */
+    awaiting: Set<string>;
+    settle(): void;
   }
   const asks = new Map<string, PendingAsk>();
   let askSeq = 0;
+  /**
+   * Which webviews will answer an ask, by host label. The empty label is the
+   * sole unnamed window — a host that never pushes labels (the browser-dev
+   * harness, the tests) has exactly one webview, and its answers carry none.
+   */
+  const SOLE_WINDOW = '';
+  let windows = new Set<string>([SOLE_WINDOW]);
 
   function ask(op: string, params: unknown): Promise<unknown[]> {
     const burrowRequestId = `ask-${++askSeq}`;
     return new Promise((resolve) => {
+      const pending: PendingAsk = {
+        results: [],
+        awaiting: new Set(windows),
+        settle: () => {
+          clearTimeout(timer);
+          asks.delete(burrowRequestId);
+          resolve(pending.results);
+        },
+      };
       const timer = setTimeout(() => {
         // Budget spent. An attach must not hang on a webview that is reloading,
         // and a directory that missed a pane re-collects on the next change.
-        asks.delete(burrowRequestId);
-        resolve([]);
+        // Whatever did answer is still the best available snapshot.
+        pending.settle();
       }, ASK_BUDGET_MS);
       // An outstanding ask must never hold the sidecar's event loop open.
       (timer as unknown as { unref?: () => void }).unref?.();
-      asks.set(burrowRequestId, {
-        settle: (results) => {
-          clearTimeout(timer);
-          asks.delete(burrowRequestId);
-          resolve(results);
-        },
-      });
+      asks.set(burrowRequestId, pending);
       options.send(BURROW_ASK_EVENT, { burrowRequestId, op, params });
     });
   }
@@ -228,12 +255,15 @@ export function createSidecarSurfaceBridge(
     provider,
 
     /**
-     * The first answer settles the ask. Standalone ships one window, so there is
-     * exactly one answerer today; the multi-window seam
-     * (docs/specs/standalone.md) is where this becomes "collect until the
-     * budget".
+     * Collect until every window has answered, or the budget runs out. Each
+     * window sees only its own Workspaces, so a directory built from the first
+     * answer would list one window's panes and silently omit the rest.
+     *
+     * Keyed by *who* answered, not by how many have: two answers from one window
+     * — a reload racing its own reply — must never settle an ask the other
+     * windows have not spoken to.
      */
-    onAnswer(params) {
+    onAnswer(params, from = SOLE_WINDOW) {
       if (!params || typeof params.burrowRequestId !== 'string') return;
       const pending = asks.get(params.burrowRequestId);
       if (!pending) {
@@ -246,7 +276,51 @@ export function createSidecarSurfaceBridge(
         notifyDirectoryChanged();
         return;
       }
-      pending.settle(Array.isArray(params.results) ? params.results : []);
+      // Not awaited: either this window already answered, or it opened after the
+      // ask went out and never received it. Its results are not this snapshot's.
+      if (!pending.awaiting.delete(from)) return;
+      if (Array.isArray(params.results)) pending.results.push(...params.results);
+      if (pending.awaiting.size === 0) pending.settle();
+    },
+
+    setWindows(labels) {
+      if (!Array.isArray(labels)) return;
+      const live = labels.filter((label): label is string => typeof label === 'string');
+      if (live.length === 0) return;
+      windows = new Set(live);
+      // Re-evaluate what is already out: a window that closed mid-fan-out can
+      // never answer, and must not hold an ask open to its whole budget.
+      for (const pending of [...asks.values()]) {
+        for (const label of pending.awaiting) {
+          if (!windows.has(label)) pending.awaiting.delete(label);
+        }
+        if (pending.awaiting.size === 0) pending.settle();
+      }
+    },
+
+    /**
+     * Narrow one outstanding ask to the windows it was actually delivered to.
+     *
+     * An ask goes out to every window, because the directory is the union of
+     * what they all hold; but an ask naming a Surface is a question exactly one
+     * window can answer, and the host routes it there. Waiting on the rest would
+     * spend the whole budget on every attach and resize. **Narrows only** —
+     * intersected with what is still awaited, so a window that already answered
+     * cannot be put back and a late line cannot re-open a settled ask.
+     */
+    setAskDelivery(detail) {
+      const params = detail as { burrowRequestId?: unknown; windows?: unknown } | null;
+      if (!params || typeof params.burrowRequestId !== 'string') return;
+      if (!Array.isArray(params.windows)) return;
+      const pending = asks.get(params.burrowRequestId);
+      if (!pending) return;
+      const delivered = new Set(
+        params.windows.filter((label): label is string => typeof label === 'string'),
+      );
+      for (const label of pending.awaiting) {
+        if (!delivered.has(label)) pending.awaiting.delete(label);
+      }
+      if (pending.awaiting.size === 0) pending.settle();
     },
 
     onNotify() {
@@ -306,7 +380,7 @@ export function createSidecarSurfaceBridge(
     },
 
     dispose() {
-      for (const pending of [...asks.values()]) pending.settle([]);
+      for (const pending of [...asks.values()]) pending.settle();
       asks.clear();
       streams.clear();
       exits.clear();
@@ -328,6 +402,8 @@ export interface SidecarBurrow {
   handleCommand(data: unknown): void;
   onPtyEvent(event: string, data: unknown): void;
   onPtySpawn(id: unknown): void;
+  setWindows(labels: unknown): void;
+  setAskDelivery(detail: unknown): void;
   setThemeColors(colors: unknown): void;
   dispose(): void;
 }
@@ -359,12 +435,16 @@ export function createSidecarBurrow(options: SidecarBurrowOptions): SidecarBurro
       const command = data;
       // Both of these feed something already waiting on this side, so they
       // answer nothing and never reach the service's dispatch.
-      if (command.cmd === 'answer') return bridge.onAnswer(command.params as AnswerParams);
+      if (command.cmd === 'answer') {
+        return bridge.onAnswer(command.params as AnswerParams, command.window);
+      }
       if (command.cmd === 'notify') return bridge.onNotify();
       void service.handleCommand(command);
     },
     onPtyEvent: bridge.onPtyEvent,
     onPtySpawn: bridge.onPtySpawn,
+    setWindows: bridge.setWindows,
+    setAskDelivery: bridge.setAskDelivery,
     setThemeColors: bridge.setThemeColors,
     dispose() {
       service.dispose();

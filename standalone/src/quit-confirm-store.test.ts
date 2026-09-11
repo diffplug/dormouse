@@ -10,10 +10,9 @@ import {
   _resetQuitConfirmForTesting,
 } from "./quit-confirm-store";
 
-// The store's only runtime dependency on ./quit is the QuitConfirmContext TYPE
-// (erased), so these tests need no Tauri/orchestrator mocks: drive the gate
-// with a hand-made context. The gate↔orchestrator seam itself is covered by
-// quit.test.ts.
+// The store imports one erased TYPE and nothing else, so these tests need no
+// Tauri/orchestrator mocks: drive the gate with a hand-made context. The
+// gate↔orchestrator seam itself is covered by quit.test.ts.
 const makeCtx = () => ({ confirm: vi.fn(), cancel: vi.fn() });
 
 describe("quit-confirm store", () => {

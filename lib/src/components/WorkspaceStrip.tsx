@@ -15,7 +15,7 @@ import { InlineEditInput } from './wall/InlineEditInput';
 import { KillConfirmModal } from './KillConfirm';
 import { useTodoPillContent } from './TodoPillBody';
 import { chromeButton, TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from './design';
-import { createWorkspaceStripDrag } from './workspace-strip-drag';
+import { createWorkspaceStripDrag, type StripDragHost } from './workspace-strip-drag';
 import { acquireChromeKeyboardLease } from './wall/chrome-keyboard-lease';
 import { acceptsKillChar } from './wall/keyboard/handle-kill-confirm';
 import { useDialogKeyboardOwner } from './wall/wall-context';
@@ -50,13 +50,17 @@ import type { WorkspaceId } from '../lib/session-types';
 export function WorkspaceStrip({
   className,
   onDragOutsideWindow,
+  onDragBackInsideStrip,
   onDropOnOtherWindow,
+  onDragCancelled,
 }: {
   className?: string;
-  /** PR C: the reorder drag left this Window's strip. */
-  onDragOutsideWindow?: (id: WorkspaceId, point: { clientX: number; clientY: number }) => void;
-  /** PR C: released over another Window; true means that Window took it. */
-  onDropOnOtherWindow?: (id: WorkspaceId, point: { clientX: number; clientY: number }) => boolean;
+  /** The three cross-Window drag hooks (`StripDragHost`). A composition with no
+   *  Windows — Storybook, the website playground — supplies none. */
+  onDragOutsideWindow?: StripDragHost['onDragOutsideWindow'];
+  onDragBackInsideStrip?: StripDragHost['onDragBackInsideStrip'];
+  onDropOnOtherWindow?: StripDragHost['onDropOnOtherWindow'];
+  onDragCancelled?: StripDragHost['onDragCancelled'];
 }) {
   const { workspaces, activeId } = useSyncExternalStore(subscribeToWorkspaces, getWorkspacesSnapshot);
   const membership = useSyncExternalStore(subscribeToWorkspaceSurfaces, getWorkspaceSurfacesSnapshot);
@@ -91,10 +95,11 @@ export function WorkspaceStrip({
   }, []);
   const cancelRename = useCallback(() => setRenamingWorkspace(null), []);
 
-  // The PR C hooks are read through a ref refreshed each render, so a host that
-  // supplies them after first paint is not captured stale by the controller.
-  const windowHooksRef = useRef({ onDragOutsideWindow, onDropOnOtherWindow });
-  windowHooksRef.current = { onDragOutsideWindow, onDropOnOtherWindow };
+  // The cross-Window hooks are read through a ref refreshed each render, so a
+  // host that supplies them after first paint is not captured stale by the
+  // controller.
+  const windowHooksRef = useRef({ onDragOutsideWindow, onDragBackInsideStrip, onDropOnOtherWindow, onDragCancelled });
+  windowHooksRef.current = { onDragOutsideWindow, onDragBackInsideStrip, onDropOnOtherWindow, onDragCancelled };
 
   const dragRef = useRef<ReturnType<typeof createWorkspaceStripDrag> | null>(null);
   if (dragRef.current === null) {
@@ -104,8 +109,11 @@ export function WorkspaceStrip({
       stripRect: () => stripRef.current?.getBoundingClientRect() ?? null,
       move: (id, toIndex) => { moveWorkspace(id, toIndex); },
       setDragging: setDraggingId,
-      onDragOutsideWindow: (id, point) => windowHooksRef.current.onDragOutsideWindow?.(id, point),
-      onDropOnOtherWindow: (id, point) => windowHooksRef.current.onDropOnOtherWindow?.(id, point) ?? false,
+      onDragOutsideWindow: (point) => windowHooksRef.current.onDragOutsideWindow?.(point),
+      onDragBackInsideStrip: () => windowHooksRef.current.onDragBackInsideStrip?.(),
+      onDropOnOtherWindow: (id, point, insideStrip) =>
+        windowHooksRef.current.onDropOnOtherWindow?.(id, point, insideStrip),
+      onDragCancelled: () => windowHooksRef.current.onDragCancelled?.(),
     });
   }
   const drag = dragRef.current;
@@ -166,7 +174,11 @@ export function WorkspaceStrip({
   };
 
   return (
-    <div ref={stripRef} className={clsx('flex min-w-0 items-center gap-0.5 overflow-x-auto', className)}>
+    <div
+      ref={stripRef}
+      data-workspace-strip
+      className={clsx('flex min-w-0 items-center gap-0.5 overflow-x-auto', className)}
+    >
       {workspaces.map((workspace) => {
         const isActive = workspace.id === activeId;
         return (

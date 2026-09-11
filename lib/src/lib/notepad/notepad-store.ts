@@ -454,8 +454,27 @@ export function notepadSurfaceIds(): string[] {
 /** Everything a close would archive for every Surface holding notes, minus the
  *  markers (`toArchivedNote` strips them). */
 export function buildVolatileSnapshot(): VolatileNotepadSnapshot {
+  return collectVolatile(notepadSurfaceIds());
+}
+
+/**
+ * The notes riding along with a Workspace moving to another Window
+ * (`docs/specs/notepad.md` → "Closure"). **A transfer archives nothing**: a
+ * move is not a closure, so the notes travel in this snapshot and the target
+ * hydrates them with `hydrateNotepadFromVolatile`.
+ *
+ * Source pins do not travel: a pin is a marker in an xterm instance, and the
+ * source Window's instances are disposed by the release behind this. The
+ * projection drops them anyway (`toArchivedNote`).
+ */
+export function snapshotNotepadForTransfer(surfaceIds: Iterable<string>): VolatileNotepadSnapshot {
+  const wanted = new Set(surfaceIds);
+  return collectVolatile(notepadSurfaceIds().filter((id) => wanted.has(id)));
+}
+
+function collectVolatile(ids: readonly string[]): VolatileNotepadSnapshot {
   const surfaces: VolatileSurfaceNotes[] = [];
-  for (const surfaceId of notepadSurfaceIds()) {
+  for (const surfaceId of ids) {
     const notes = getNotes(surfaceId);
     const pendingBatchId = pendingBatchIdBySurface.get(surfaceId);
     const meta = getNotepadSurfaceMeta(surfaceId);

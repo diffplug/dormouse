@@ -15,6 +15,8 @@ import type { PersistedSession, PersistedWindow, PersistedWorkspace, WorkspaceId
  */
 
 const records = new Map<WorkspaceId, PersistedSession>();
+/** Workspaces this Window has handed to another one and not yet released. */
+const transferring = new Set<WorkspaceId>();
 let writer: ((snapshot: PersistedWindow) => void | Promise<void>) | null = null;
 let unsubscribeWorkspaces: (() => void) | null = null;
 let timer: ReturnType<typeof setTimeout> | null = null;
@@ -56,7 +58,30 @@ export function publishWorkspaceSession(workspaceId: WorkspaceId, session: Persi
 
 /** Drop a Workspace's session (its Workspace was closed or moved away). */
 export function forgetWorkspaceSession(workspaceId: WorkspaceId): void {
+  transferring.delete(workspaceId);
   if (!records.delete(workspaceId)) return;
+  scheduleWrite();
+}
+
+/**
+ * This Workspace has been handed to another Window and not yet released
+ * (`docs/specs/standalone.md` → "Arrival queue").
+ *
+ * **A transferring Workspace is in no snapshot this Window writes.** It is still
+ * mounted here, and its Sessions are still attached, because the target may
+ * refuse it — but its shells already belong to the target, so a quit or a crash
+ * in the gap must not leave the same Workspace persisted by two Windows and
+ * restored twice. Cleared by `clearWorkspaceTransferring` (the target refused
+ * it) or by `forgetWorkspaceSession` (it landed).
+ */
+export function markWorkspaceTransferring(workspaceId: WorkspaceId): void {
+  transferring.add(workspaceId);
+  scheduleWrite();
+}
+
+/** The transfer was refused: this Window persists the Workspace again. */
+export function clearWorkspaceTransferring(workspaceId: WorkspaceId): void {
+  if (!transferring.delete(workspaceId)) return;
   scheduleWrite();
 }
 
@@ -72,16 +97,17 @@ export function previousWorkspaceSession(workspaceId: WorkspaceId): PersistedSes
 
 /**
  * The Window as it stands: Workspaces in strip order carrying the id, name, and
- * latest session of each. A Workspace with no record at all is omitted rather
- * than written empty, and the active id then falls back to the first Workspace
- * that is in the blob — a blob naming an absent Workspace restores nothing as
- * active (`readPersistedWindow` repairs it, but only after the user has already
- * landed somewhere unexpected).
+ * latest session of each. A Workspace with no record at all — or one in flight
+ * to another Window — is omitted rather than written empty, and the active id
+ * then falls back to the first Workspace that is in the blob; a blob naming an
+ * absent Workspace restores nothing as active (`readPersistedWindow` repairs it,
+ * but only after the user has already landed somewhere unexpected).
  */
 export function getWindowSnapshot(): PersistedWindow {
   const { workspaces, activeId } = getWorkspacesSnapshot();
   const collected: PersistedWorkspace[] = [];
   for (const workspace of workspaces) {
+    if (transferring.has(workspace.id)) continue;
     const session = previousWorkspaceSession(workspace.id);
     if (!session) continue;
     collected.push({ id: workspace.id, name: workspace.name, session });
@@ -187,6 +213,7 @@ function cancelPending(): void {
 /** Forget every session, seed, and installed writer (tests). */
 export function resetWindowSessionAggregator(): void {
   records.clear();
+  transferring.clear();
   writer = null;
   unsubscribeWorkspaces?.();
   unsubscribeWorkspaces = null;

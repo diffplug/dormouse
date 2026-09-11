@@ -106,7 +106,7 @@ const fireAndForget = {
   pty_resize: ({ id, cols, rows }) => writeSidecar('pty:resize', { id, cols, rows }),
   pty_theme_colors: ({ colors }) => writeSidecar('pty:themeColors', colors),
   pty_kill: ({ id }) => writeSidecar('pty:kill', { id }),
-  pty_request_init: () => writeSidecar('pty:requestInit'),
+  pty_request_init: ({ requestId } = {}) => writeSidecar('pty:requestInit', { requestId }),
   dor_control_response: ({ response }) => writeSidecar('dor:controlResponse', response),
   // The Burrow's whole bridge rides one passthrough, exactly as it does
   // through Rust (`burrow_command` in src-tauri/src/lib.rs).

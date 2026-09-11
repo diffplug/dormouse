@@ -184,7 +184,7 @@ describe("TauriAdapter window persistence", () => {
       return undefined;
     });
     await expect(adapter.captureAgentRecovery(1300)).resolves.toBeUndefined();
-    expect(invoke).toHaveBeenCalledWith("capture_agent_recovery", { ids: null, timeout: 1300 });
+    expect(invoke).toHaveBeenCalledWith("capture_agent_recovery", { timeout: 1300 });
     adapter.shutdown();
   });
 });

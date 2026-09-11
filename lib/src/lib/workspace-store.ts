@@ -162,12 +162,30 @@ export function moveWorkspace(id: WorkspaceId, toIndex: number): boolean {
   return true;
 }
 
-/** The only Window this build addresses; `window:<n>` beyond it is an error. */
-export const WINDOW_REF = 'window:1';
+/** A Window that never names itself: one webview is the whole application
+ *  (VS Code, Pocket, the website playground). */
+const DEFAULT_WINDOW_REF = 'window:1';
+let windowRef = DEFAULT_WINDOW_REF;
 
-/** Whether `ref` names this Window — `window:1`, or the bare `1`. */
+/**
+ * Name this Window to `dor`, as `window:<label>`. Injected by a host that has
+ * more than one Window and so knows its own labels — the lib cannot
+ * (`docs/specs/dor-cli.md` -> "Handle Model").
+ */
+export function setWindowLabel(label: string): void {
+  windowRef = `window:${label}`;
+}
+
+/** How this Window names itself to `dor`, which is what `dor list` reports. */
+export function currentWindowRef(): string {
+  return windowRef;
+}
+
+/** Whether `ref` names **this** Window — its full ref, or the bare label. A ref
+ *  naming another Window is not one this Window can act on. */
 export function isWindowRef(ref: string): boolean {
-  return ref.trim() === WINDOW_REF || ref.trim() === '1';
+  const trimmed = ref.trim();
+  return trimmed === windowRef || `window:${trimmed}` === windowRef;
 }
 
 /** A Workspace's positional `dor` ref. One no longer in this Window — its Wall is

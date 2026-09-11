@@ -4,6 +4,8 @@ import { setPlatform } from "dormouse-lib/lib/platform";
 import { installPeerSurfaceResponder } from "dormouse-lib/remote/burrow/peer-surfaces";
 import type { PlatformAdapter } from "dormouse-lib/lib/platform/types";
 import { restoreWindowOrFresh } from "./window-restore";
+import { isMainWindow, resolveWindowLabel } from "./window-label";
+import { setWindowLabel } from "dormouse-lib/lib/workspace-store";
 import { seedShellStore } from "dormouse-lib/lib/shell-store";
 import { restoreActiveTheme } from "dormouse-lib/lib/themes";
 import App from "dormouse-lib/App";
@@ -82,6 +84,11 @@ async function createPlatform(): Promise<PlatformAdapter> {
 
 // Await init() first to register event listeners before reconnecting
 async function bootstrap() {
+  // First: several modules below key off which window this is, and the Rust
+  // commands are all keyed by the invoking window's label. The lib gets the
+  // label too, so `dor list` names the Window that answered
+  // (`docs/specs/dor-cli.md` → "Handle Model").
+  setWindowLabel(await resolveWindowLabel());
   const platform = await createPlatform();
   setPlatform(platform);
   await platform.init();
@@ -104,12 +111,16 @@ async function bootstrap() {
   // Tauri APIs. !BROWSER_DEV_HOST is exactly the createPlatform branch that
   // returned a TauriAdapter.
   if (!BROWSER_DEV_HOST) {
-    const [{ initQuitFlow, setQuitConfirmGate }, { openQuitConfirm }] = await Promise.all([
-      import("./quit"),
-      import("./quit-confirm-store"),
-    ]);
-    initQuitFlow(platform as import("./tauri-adapter").TauriAdapter);
-    // A quit with ≥1 running command opens <QuitConfirmModalHost>.
+    const [{ initQuitFlow, setQuitConfirmGate }, { openQuitConfirm }, { initWindowClose }] =
+      await Promise.all([
+        import("./quit"),
+        import("./quit-confirm-store"),
+        import("./window-close"),
+      ]);
+    const adapter = platform as import("./tauri-adapter").TauriAdapter;
+    initQuitFlow(adapter);
+    initWindowClose(adapter);
+    // A quit or a close with ≥1 running command opens <QuitConfirmModalHost>.
     setQuitConfirmGate(openQuitConfirm);
   }
   const { initAlertStateReceiver } = await import("dormouse-lib/lib/terminal-registry");
@@ -124,9 +135,30 @@ async function bootstrap() {
   // omits `shell` and the sidecar resolves the OS default itself.
   seedShellStore(await shellsPromise);
 
-  const initialPlans = await restoreWindowOrFresh(platform);
+  // A window Rust just built for a torn-out Workspace boots from the payload it
+  // parked, not from disk: it has no snapshot yet (§Tear-out). Everything else
+  // restores what the last run left.
+  let initialPlans: Awaited<ReturnType<typeof restoreWindowOrFresh>> | null = null;
+  let armWorkspaceMoves: (() => void) | null = null;
+  if (!BROWSER_DEV_HOST) {
+    const [{ bootFromTearOut, initWorkspaceMoves }, { initDropCaret }] = await Promise.all([
+      import("./workspace-move"),
+      import("./workspace-drop-caret"),
+    ]);
+    initialPlans = await bootFromTearOut(platform);
+    armWorkspaceMoves = () => initWorkspaceMoves(platform);
+    initDropCaret();
+  }
+  initialPlans ??= await restoreWindowOrFresh(platform);
+  // Strictly after the restore: arming drains whatever was dropped on this
+  // window while it booted, and `restoreWindowOrFresh` installs the Workspace
+  // store wholesale (`docs/specs/standalone.md` → "Arrival queue").
+  armWorkspaceMoves?.();
 
-  startUpdateCheck();
+  // Only `main` runs the periodic check, and only `main` holds `updater:*`
+  // (`capabilities/main-only.json`), so a session whose `main` was closed has
+  // no update to install until it relaunches (docs/specs/auto-update.md).
+  if (isMainWindow()) startUpdateCheck();
 
   createRoot(document.getElementById("root")!).render(
     <StrictMode>

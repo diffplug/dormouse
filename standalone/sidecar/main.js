@@ -26,6 +26,11 @@ const { createSidecarBurrow } = require('./burrow.cjs');
 // machine (shared with the VS Code extension host) plus the single-use record
 // store. See docs/specs/standalone.md -> "Agent recovery".
 const { captureAgentRecovery, createRecoveryStore, sliceSince } = require('./recovery.cjs');
+// Same pattern again: lib/src/host/alert-store-host.ts holds the two
+// app-global alert stores — one WATCHING rule set and one alarm-settings blob
+// for every window — running the same classes the VS Code extension host runs.
+// See docs/specs/alert.md.
+const { createAlertStoreHost } = require('./alert-store.cjs');
 
 const agentBrowser = createAgentBrowserHost({
   writeClipboardText: (text) => clipboard.writeClipboardText(text),
@@ -76,6 +81,10 @@ const burrow = createSidecarBurrow({
 const dorControlToken = process.env.DORMOUSE_CONTROL_TOKEN;
 delete process.env.DORMOUSE_CONTROL_TOKEN;
 delete process.env.DORMOUSE_CONTROL_SOCKET;
+
+// Broadcast, never addressed: both stores are one per machine, so every window
+// gets the same canonical snapshot (docs/specs/standalone.md -> "Windows").
+const alertStore = createAlertStoreHost({ send });
 
 const dorControl = createDorControlServer({
   token: dorControlToken,
@@ -138,7 +147,9 @@ function handleLine(line) {
       case 'pty:input':   mgr.write(data.id, data.data); break;
       case 'pty:resize':  mgr.resize(data.id, data.cols, data.rows); break;
       case 'pty:kill':    mgr.kill(data.id); break;
-      case 'pty:requestInit': mgr.list(); break;
+      // One window's own PTYs, and the answer names it so the host can route
+      // the list and every replay behind it back (docs/specs/standalone.md).
+      case 'pty:requestInit': mgr.list(data?.ids, data?.forWindow, data?.requestId); break;
       case 'pty:context': mgr.context(data, data.requestId); break;
       case 'pty:getCwd':  mgr.getCwd(data.id, data.requestId); break;
       case 'pty:getCwds': mgr.getCwds(data.ids, data.requestId); break;
@@ -173,9 +184,17 @@ function handleLine(line) {
           commands: recovery.take(Array.isArray(data.paneIds) ? data.paneIds : []),
         }));
         break;
-      case 'pty:gracefulKillAll': mgr.gracefulKillAll(data.timeout, data.requestId); break;
+      case 'pty:gracefulKill': mgr.gracefulKill(data.ids, data.timeout, data.requestId); break;
       // The webview's resolved terminal theme, so the parser here can answer
       // OSC 10/11/12 (docs/specs/terminal-escapes.md → Supported OSCs).
+      // Which webviews will answer a Burrow ask (docs/specs/standalone.md
+      // -> "Burrow service").
+      case 'burrow:windows': burrow.setWindows(data?.labels); break;
+      // Which windows an ask actually reached. Only the host knows: one naming
+      // a Surface goes to its owner alone (docs/specs/standalone.md ->
+      // "Burrow service").
+      case 'burrow:askDelivered': burrow.setAskDelivery(data); break;
+      case 'alert:command': alertStore.handle(data); break;
       case 'pty:themeColors': burrow.setThemeColors(data); break;
       case 'sidecar:shutdown': shutdown(); break;
       case 'dor:controlResponse': dorControl?.respond(data); break;
@@ -270,6 +289,7 @@ async function shutdown() {
     ]);
   } catch {}
   dorControl?.close();
+  alertStore.dispose();
   burrow.dispose();
   mgr.killAll();
   process.exit(0);

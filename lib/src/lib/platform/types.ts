@@ -19,6 +19,20 @@ export interface PtyInfo {
   shell?: string;
 }
 
+/** The host's answer to one `requestInit`, echoing the token it was asked with
+ *  where the host has one to echo (`PlatformAdapter.requestInit`). */
+export interface PtyListDetail {
+  ptys: PtyInfo[];
+  requestId?: string;
+}
+
+/** One PTY's buffered output, behind the list that named it. */
+export interface PtyReplayDetail {
+  id: string;
+  data: string;
+  requestId?: string;
+}
+
 /**
  * A TCP socket in the LISTEN state opened by a terminal's shell process or any
  * of its descendant subprocesses. `address` is the bind interface — `0.0.0.0`
@@ -366,11 +380,16 @@ export interface PlatformAdapter {
   offPtyExit(handler: (detail: { id: string; exitCode: number }) => void): void;
 
   // Resume (live-PTY replay after webview hide/show)
-  requestInit(): void;
-  onPtyList(handler: (detail: { ptys: PtyInfo[] }) => void): void;
-  offPtyList(handler: (detail: { ptys: PtyInfo[] }) => void): void;
-  onPtyReplay(handler: (detail: { id: string; data: string }) => void): void;
-  offPtyReplay(handler: (detail: { id: string; data: string }) => void): void;
+  /** Ask for the live PTY list and each one's replay. `requestId` is the asking
+   *  collector's token: a host serving several windows echoes it on the answer
+   *  so two collections in one webview cannot finish on each other's list
+   *  (docs/specs/transport.md -> "Reconnection"). A host with one webview may
+   *  ignore it, and its answers then carry none. */
+  requestInit(requestId?: string): void;
+  onPtyList(handler: (detail: PtyListDetail) => void): void;
+  offPtyList(handler: (detail: PtyListDetail) => void): void;
+  onPtyReplay(handler: (detail: PtyReplayDetail) => void): void;
+  offPtyReplay(handler: (detail: PtyReplayDetail) => void): void;
 
   // Host-initiated session persistence
   onRequestSessionFlush(handler: (detail: SessionFlushRequest) => void): void;

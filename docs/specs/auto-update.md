@@ -14,7 +14,9 @@ The standalone app checks for updates on launch and prompts in the Baseboard. **
 
 ### Quit-time install
 
-**The updater owns no quit interception** — install runs only when `hasPendingUpdate()` is true, after the quit orchestrator's teardown and save/drain steps (`docs/specs/standalone.md` §Quit flow) (rationale). `installPendingUpdate()` writes the success marker *before* `install()` (§localStorage), and on Windows first awaits bounded sidecar teardown (§Sidecar teardown on Windows). **It never closes the window itself** — exiting the process is `quit_proceed`'s job, after this returns.
+**The updater owns no quit interception** — install runs only when `hasPendingUpdate()` is true, after the quit orchestrator's teardown and save/drain steps (`docs/specs/standalone.md` §Quit flow) (rationale). **It runs in `main`, the window the quit walk tears down last and the only one holding `updater:*`** (`capabilities/main-only.json`); every other window has handed on by then, so nothing it could still be writing outlives the install.
+
+**Only `main` ever checks**, so it is the only window that can hold a download at all — and **closing `main` throws away an approved one**, which lives in that webview's memory. Its close confirmation says so, and is shown for that reason alone even with nothing running (`docs/specs/standalone.md` → "Per-window close"); a session that has closed `main` simply has no update to install until it relaunches (rationale). `installPendingUpdate()` writes the success marker *before* `install()` (§localStorage), and on Windows first awaits bounded sidecar teardown (§Sidecar teardown on Windows). **It never closes the window itself** — exiting the process is `quit_proceed`'s job, after this returns.
 
 **In Vite dev mode (`pnpm dev:standalone`) `installPendingUpdate()` drops the pending update and skips `install()`** (rationale), so install must be tested from a packaged app; **`MODE === 'test'` lifts the skip** for `standalone/src/updater.test.ts`.
 
@@ -83,7 +85,8 @@ Single key: `dormouse:update-result`
 | [`standalone/src/main.tsx`](../../standalone/src/main.tsx) | `<ConnectedUpdateBanner />` (banner + modal) as `<App />`'s `baseboardNotice`; `startUpdateCheck()` after restore |
 | [`standalone/src-tauri/tauri.conf.json`](../../standalone/src-tauri/tauri.conf.json) | Updater endpoint, public key, artifact mode, Windows install mode |
 | [`standalone/src-tauri/src/lib.rs`](../../standalone/src-tauri/src/lib.rs) | Plugin registration, sidecar teardown, update-log tail |
-| [`standalone/src-tauri/capabilities/default.json`](../../standalone/src-tauri/capabilities/default.json) | Updater, version, and shell permissions |
+| [`standalone/src-tauri/capabilities/default.json`](../../standalone/src-tauri/capabilities/default.json) | Shell and window permissions, for `main` and every `ws-*` window |
+| [`standalone/src-tauri/capabilities/main-only.json`](../../standalone/src-tauri/capabilities/main-only.json) | Updater and app-version permissions, scoped to `main` alone |
 
 ## Configuration
 

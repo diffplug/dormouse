@@ -4,10 +4,12 @@
 // and there is no unload without a `window`.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  clearWorkspaceTransferring,
   flushWindowSession,
   forgetWorkspaceSession,
   getWindowSnapshot,
   installWindowSessionWriter,
+  markWorkspaceTransferring,
   previousWorkspaceSession,
   publishWorkspaceSession,
   resetWindowSessionAggregator,
@@ -65,6 +67,31 @@ describe('window session aggregator', () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     createWorkspace({ name: 'Second' });
     publishWorkspaceSession(first, session('a'));
+    expect(getWindowSnapshot().workspaces.map((ws) => ws.id)).toEqual([first]);
+  });
+
+  it('writes no Workspace that is in flight to another Window', () => {
+    // Its shells already belong to the target, so a quit or a crash in the gap
+    // must not persist the same Workspace in two Windows and restore it twice
+    // (`docs/specs/standalone.md` → "Arrival queue").
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    const second = createWorkspace({ name: 'Second' }).id;
+    publishWorkspaceSession(first, session('a'));
+    publishWorkspaceSession(second, session('b'));
+
+    markWorkspaceTransferring(second);
+    expect(getWindowSnapshot().workspaces.map((ws) => ws.id)).toEqual([first]);
+    // The active id falls back to a Workspace the blob actually contains.
+    expect(getWindowSnapshot().activeWorkspaceId).toBe(first);
+
+    // Refused: this Window persists it again, record and all.
+    clearWorkspaceTransferring(second);
+    expect(getWindowSnapshot().workspaces.map((ws) => ws.id)).toEqual([first, second]);
+
+    // Adopted instead: forgetting it clears the mark with the record.
+    markWorkspaceTransferring(second);
+    forgetWorkspaceSession(second);
+    clearWorkspaceTransferring(second);
     expect(getWindowSnapshot().workspaces.map((ws) => ws.id)).toEqual([first]);
   });
 

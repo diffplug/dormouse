@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, type RefObject } from 'react';
 import { pasteFilePaths } from '../../lib/clipboard';
 import { getPlatform } from '../../lib/platform';
-import { saveSession, type SaveOptions, type SaveSink } from '../../lib/session-save';
+import { buildPersistedSession, saveSession, type SaveOptions, type SaveSink } from '../../lib/session-save';
 import { createSessionDirtyTracker } from '../../lib/session-dirty';
 import { previousWorkspaceSession, publishWorkspaceSession, SESSION_SAVE_DEBOUNCE_MS } from '../../lib/window-session-aggregator';
 import { hasWorkspace } from '../../lib/workspace-store';
@@ -13,12 +13,15 @@ import {
 import { surfaceKindFromParams } from './browser-surface';
 import type { LathWallEngine } from './lath-wall-engine';
 import type { DooredItem, WallSelectionKind } from './wall-types';
-import type { PersistedDoor, PersistedSurfaceRefs, WorkspaceId } from '../../lib/session-types';
+import type { PersistedDoor, PersistedSession, PersistedSurfaceRefs, WorkspaceId } from '../../lib/session-types';
 import type { SessionFlushRequest } from '../../lib/platform/types';
 
 export interface SessionPersistenceHandle {
   /** Persist immediately, awaiting the whole queued pipeline. */
   flush: (options?: SaveOptions) => Promise<void>;
+  /** Build this Workspace's record without publishing it — what a Workspace
+   *  leaving for another Window carries with it. */
+  serialize: (options?: SaveOptions) => Promise<PersistedSession>;
 }
 
 export function useSessionPersistence({
@@ -104,6 +107,16 @@ export function useSessionPersistence({
   const doSave = useCallback((options?: SaveOptions): Promise<void> => {
     const { panes, doors, lathLayout, surfaceRefs } = collect();
     return saveSession(getPlatform(), panes, doors, lathLayout, surfaceRefs?.refs, surfaceRefs?.next, sink, options);
+  }, [collect, sink]);
+
+  /** The same record a save would publish, handed back instead. The Workspace
+   *  is leaving, so nothing here may touch this Window's aggregator. */
+  const serialize = useCallback((options?: SaveOptions): Promise<PersistedSession> => {
+    const { panes, doors, lathLayout, surfaceRefs } = collect();
+    return buildPersistedSession(
+      getPlatform(), panes, doors, lathLayout, surfaceRefs?.refs, surfaceRefs?.next,
+      sink?.previous() ?? null, options,
+    );
   }, [collect, sink]);
 
   const persistSessionNow = useCallback(async (options?: SaveOptions): Promise<void> => {
@@ -261,5 +274,5 @@ export function useSessionPersistence({
     selectedTypeRef,
   ]);
 
-  return { flush: flushSessionSave };
+  return { flush: flushSessionSave, serialize };
 }

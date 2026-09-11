@@ -143,6 +143,12 @@ Control direction: `dor` → sidecar JSON-lines net socket → Rust command/even
 bridge → `TauriAdapter` `CustomEvent("dormouse:control-request")` → Wall
 handler, and back along the same hops.
 
+**A request is routed to the window that owns its `DORMOUSE_SURFACE_ID`**, and
+one naming no Surface goes to the focused window. **A Surface no window owns
+fails** — `No Dormouse window owns surface '<id>'` — rather than being handed to
+a sibling, which would act on the wrong terminal. **A cancel follows its own
+request** to the window holding it (`docs/specs/standalone.md` → Routing).
+
 ### VS Code
 
 `vscode-ext/package.json` runs `pnpm stage:dor-cli` before bundling the
@@ -246,8 +252,10 @@ and each host's hop in `standalone/src/tauri-adapter.ts`,
 
 `Window ⊃ Workspace ⊃ Pane ⊃ Surface` (`docs/specs/glossary.md`). **User-facing
 `dor` commands expose Surface handles only**, and because a Window can hold
-several Workspaces the handle model reserves `workspace:<n|name>` and
-`window:<n>` refs.
+several Workspaces — and standalone can hold several Windows — the handle model
+reserves `workspace:<n|name>` and `window:<label>` refs. `Reserved:` no command
+targets another Window yet; a request reaches the window that owns its Surface
+instead (§Standalone), which is what `## Future` → `dor workspace` builds on.
 
 Invariants:
 
@@ -284,8 +292,11 @@ Invariants:
   list output always includes both refs and stable ids.
 - `workspace:<n>` selects a container and is **positional**, so a strip reorder
   renumbers it; `workspace:<name>` is the stable handle and is staged with the
-  `dor workspace` commands (see [Future](#future)). `window:<n>` is rejected for
-  every `n` but 1. **Every Workspace has a `surface:1`**, so a Surface ref alone
+  `dor workspace` commands (see [Future](#future)). **A Window is `window:<label>`
+  — its host's own name for it** (`window:main`, `window:ws-2`), and a host with
+  one Window answers `window:1`; each accepts its own ref bare, and **rejects
+  every other Window's**, there being nothing it could do with one.
+  **Every Workspace has a `surface:1`**, so a Surface ref alone
   never identifies a Workspace.
 - **One Wall answers each request**, resolved in order: an explicit
   `workspace:<n>`, else the Workspace owning the calling Surface, else the
@@ -313,7 +324,7 @@ and the dispatching webview cannot drift. `surface.list` joins the current
 Workspace's Surfaces — visible panes **plus minimized (doored)** ones, each
 tagged `view` (`paned` / `zoomed` / `minimized`) — with terminal state and
 activity snapshots, and reports the answering Workspace's own `workspace:<n>`
-alongside `window:1`. Per the
+alongside the answering Window's `window:<label>` (Handle Model). Per the
 visible-vs-listed split [Handle Model](#handle-model) states, **a visible split
 reference adds a pane in Lath, a minimized one a sibling Door in the
 baseboard.** **`dor list` rows sort by the Workspace-stable `surface:N` ref**, a
@@ -589,7 +600,7 @@ Source of truth: `buildDorSurfacesInternal` in `lib/src/components/Wall.tsx`; `d
   workspaces-rollout).
 - **Workspace handles and commands** — a `--workspace` target flag and `dor
   workspace` management commands (new / rename / close / switch — mutation only)
-  consuming the reserved `workspace:<n|name>` / `window:<n>` ref grammar above.
+  consuming the reserved `workspace:<n|name>` / `window:<label>` ref grammar above.
   Like every command they ship with snapshot-tested help and the control methods
   that back them, not ahead of them. Staged with the workspaces rollout
   (`docs/specs/layout.md` `## Future`, workspaces-rollout).

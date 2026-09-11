@@ -269,7 +269,7 @@ describe('quit teardown budget mirrors', () => {
     expect(ceiling).toBeLessThan(rustMs('QUIT_PHASE_TIMEOUT_MS'));
   });
 
-  it.each(['capture_agent_recovery', 'pty_graceful_kill_all'])(
+  it.each(['capture_agent_recovery', 'pty_graceful_kill'])(
     'counts the round-trip margin Rust adds in %s',
     (command) => {
       const body = extract(rsSrc, rs, new RegExp(`\\n(?:async )?fn ${command}\\(([^]*?)\\n}`));

@@ -1,4 +1,4 @@
-import type { QuitConfirmContext } from "./quit";
+import type { TeardownConfirmContext } from "./teardown-flow";
 
 /**
  * Module store backing the quit-confirmation dialog. The quit orchestrator's
@@ -9,12 +9,30 @@ import type { QuitConfirmContext } from "./quit";
 
 export type QuitConfirmPhase = "open" | "quitting" | "archive-failed";
 
+/**
+ * What the dialog is asking about. A quit tears every window down; a
+ * close ends this one alone (docs/specs/standalone.md §Per-window close). The
+ * Workspace name is carried only while several windows are open, so a single
+ * window's dialog is not made to name itself.
+ */
+export interface QuitConfirmIntent {
+  kind: "quit" | "close-window";
+  windowName?: string;
+  /** This window holds an approved, downloaded update that closing throws away:
+   *  the download lives in the webview, so nothing else can install it
+   *  (docs/specs/auto-update.md). Never set on a quit, which installs it. */
+  discardsUpdate?: boolean;
+}
+
+const QUIT_INTENT: QuitConfirmIntent = { kind: "quit" };
+
 let phase: QuitConfirmPhase | null = null;
+let intent: QuitConfirmIntent = QUIT_INTENT;
 // Why the archive gate refused the quit; only set alongside "archive-failed".
 let archiveError: string | null = null;
 // The orchestrator context for the open request. Nulled the instant a decision
 // is made, so a repeated confirm / a late cancel is a no-op.
-let activeCtx: QuitConfirmContext | null = null;
+let activeCtx: TeardownConfirmContext | null = null;
 const listeners = new Set<() => void>();
 
 export function subscribeQuitConfirm(listener: () => void): () => void {
@@ -33,6 +51,11 @@ export function getQuitArchiveError(): string | null {
   return archiveError;
 }
 
+/** What the open dialog is asking about. */
+export function getQuitConfirmIntent(): QuitConfirmIntent {
+  return intent;
+}
+
 function emit(): void {
   for (const listener of listeners) listener();
 }
@@ -41,9 +64,17 @@ function emit(): void {
 // bootstrap (order relative to `initQuitFlow` is irrelevant — the gate is read
 // only at quit time). The orchestrator never re-invokes it while a dialog is
 // up; the phase guard is belt-and-suspenders against stacking.
-export function openQuitConfirm(ctx: QuitConfirmContext): void {
-  if (phase !== null) return;
+export function openQuitConfirm(ctx: TeardownConfirmContext, next: QuitConfirmIntent = QUIT_INTENT): void {
+  if (phase !== null) {
+    // **Never leave a refused context unsettled.** Its flow would sit in
+    // `confirming` for the life of the window, and the host would wait out its
+    // budget on a decision that can never arrive. The arbiter in
+    // `teardown-flow.ts` should have kept this from happening at all.
+    ctx.cancel();
+    return;
+  }
   activeCtx = ctx;
+  intent = next;
   phase = "open";
   emit();
 }
@@ -56,8 +87,13 @@ export function openQuitConfirm(ctx: QuitConfirmContext): void {
  * guarded on an empty phase: it is always a transition from a decision already
  * made. `ctx.confirm()` is Quit anyway (notes discarded); `ctx.cancel()` closes.
  */
-export function openQuitArchiveFailure(message: string, ctx: QuitConfirmContext): void {
+export function openQuitArchiveFailure(
+  message: string,
+  ctx: TeardownConfirmContext,
+  next: QuitConfirmIntent = QUIT_INTENT,
+): void {
   activeCtx = ctx;
+  intent = next;
   archiveError = message;
   phase = "archive-failed";
   emit();
@@ -85,9 +121,27 @@ export function cancelQuit(): void {
   ctx.cancel();
 }
 
+/**
+ * Drop the dialog because the decision was made somewhere else — another window
+ * cancelled the quit for everyone (docs/specs/standalone.md §Quit flow). Unlike
+ * `cancelQuit` it does NOT call back into the orchestrator: the cancel has
+ * already happened, and calling back would bounce it around the windows.
+ */
+export function dismissQuitConfirm(kind?: QuitConfirmIntent["kind"]): void {
+  if (phase === null) return;
+  // A quit cancelled elsewhere says nothing about this window's own close.
+  if (kind !== undefined && intent.kind !== kind) return;
+  activeCtx = null;
+  archiveError = null;
+  phase = null;
+  intent = QUIT_INTENT;
+  emit();
+}
+
 /** @internal Reset module state for testing. */
 export function _resetQuitConfirmForTesting(): void {
   phase = null;
+  intent = QUIT_INTENT;
   activeCtx = null;
   archiveError = null;
   listeners.clear();

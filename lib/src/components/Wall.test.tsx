@@ -28,6 +28,7 @@ import { mountWallHarness, type WallHarness } from './wall/wall-test-utils';
 import { DEFAULT_WORKSPACE_ID } from '../lib/session-types';
 import { clearTerminalActivity, setTerminalActivity } from '../lib/session-activity-store';
 import { resetTerminalPaneState } from '../lib/terminal-state-store';
+import { setWindowLabel } from '../lib/workspace-store';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -2085,6 +2086,58 @@ describe('Wall on the Lath engine', () => {
     expect(handle.surfaceIds()).toEqual(['pane-a']);
     expect(handle.ownsSurface('pane-a')).toBe(true);
     expect(handle.ownsSurface('pane-elsewhere')).toBe(false);
+  });
+
+  it('unmounting leaves every PTY alive and every registry entry intact', async () => {
+    // The two teardown verbs are explicit handle methods, never unmount
+    // effects: a Wall unmounts on a reload, a StrictMode double-mount, and a
+    // Workspace switch, and killing or releasing there would cost the user
+    // every Session (`releaseSession` in `lib/src/lib/terminal-lifecycle.ts`).
+    const killPty = vi.spyOn(fake, 'killPty');
+    const dispose = vi.spyOn(terminalRegistry, 'disposeSession');
+    const release = vi.spyOn(terminalRegistry, 'releaseSession');
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} />));
+    await flush();
+    const handle = getWallHandle(DEFAULT_WORKSPACE_ID)!;
+    expect(handle.surfaceIds()).toEqual(['pane-a', 'pane-b']);
+
+    await act(async () => root.render(<></>));
+    await flush();
+
+    expect(dispose).not.toHaveBeenCalled();
+    expect(release).not.toHaveBeenCalled();
+    expect(killPty).not.toHaveBeenCalled();
+    // The handle deregisters, so nothing addresses the gone Wall — but the
+    // Sessions it held are untouched.
+    expect(getWallHandle(DEFAULT_WORKSPACE_ID)).toBeNull();
+  });
+
+  it('names the Window that answered `dor list`, once the host has named it', async () => {
+    // A caller needs a ref it can hand back, and with several Windows open
+    // `window:1` names none of them (docs/specs/dor-cli.md -> "Handle Model").
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
+    await flush();
+
+    const list = async (): Promise<{ workspaceRef: string; windowRef: string }> => {
+      let listed: { result?: { workspaceRef: string; windowRef: string } } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.list,
+            params: {},
+            respond: (r: typeof listed) => { listed = r; },
+          },
+        }));
+      });
+      await flush();
+      return listed!.result!;
+    };
+
+    // A Window that never names itself, which is every host but standalone.
+    expect(await list()).toMatchObject({ workspaceRef: 'workspace:1', windowRef: 'window:1' });
+
+    setWindowLabel('ws-3');
+    expect(await list()).toMatchObject({ workspaceRef: 'workspace:1', windowRef: 'window:ws-3' });
   });
 });
 
