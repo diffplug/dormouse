@@ -714,9 +714,10 @@ adapters carry it, and the sidecar answers every id from one process-table read
 and one socket scan (`getOpenPortsForPids`) — the scans are synchronous on its
 only event loop, so a `dor list --ports` across Workspaces must not multiply them
 by its row count (`docs/specs/dor-cli.md` → "Current Implemented Commands").
-**Its budget scales with the batch**: the socket scan runs under
+**Must budget both port commands for the serial scans plus 1000 ms for IPC.**
+The macOS socket scan runs under
 `OPEN_PORT_TIMEOUT_MS + OPEN_PORT_TIMEOUT_PER_ID_MS × ids`, and the command waits
-that plus the process-table read's `OPEN_PORT_TIMEOUT_MS` — one terminal's cap
+that plus the process-table read's `OPEN_PORT_TIMEOUT_MS` and IPC margin — one terminal's cap
 never bounds the whole Window (`open_ports_many_timeout` in
 `standalone/src-tauri/src/lib.rs`). **A macOS socket scan keeps the rows `lsof`
 printed before a non-zero exit** — a pid gone mid-batch would otherwise empty
