@@ -2,7 +2,7 @@ import { randomKillChar } from '../KillConfirm';
 import { awaitWallHandle, mountingRefusal } from './dor-control-shared';
 import { getWallHandle } from './wall-handles';
 import { forgetWorkspaceSession } from '../../lib/window-session-aggregator';
-import { setPendingWorkspaceClose, setRenamingWorkspace } from '../../lib/workspace-ui-store';
+import { getWorkspaceUiSnapshot, setPendingWorkspaceClose, setRenamingWorkspace } from '../../lib/workspace-ui-store';
 import { closeWorkspace, getWorkspacesSnapshot, setActiveWorkspace, workspaceRefFor } from '../../lib/workspace-store';
 import type { WorkspaceId } from '../../lib/session-types';
 import type { CloseSurfaceMode } from './wall-types';
@@ -82,8 +82,10 @@ export async function closeWorkspaceWithSurfaces(
     // Neither strip UI state survives its Workspace: a `renamingId` left on a
     // closed one holds the chrome keyboard lease forever, which suppresses
     // command-mode dispatch in every Wall for the rest of the session.
-    setRenamingWorkspace(null);
-    setPendingWorkspaceClose(null);
+    // Closing one Workspace must preserve another's editor or confirmation.
+    const ui = getWorkspaceUiSnapshot();
+    if (ui.renamingId === id) setRenamingWorkspace(null);
+    if (ui.pendingClose?.id === id) setPendingWorkspaceClose(null);
     return null;
   } finally {
     closeInFlight = false;
