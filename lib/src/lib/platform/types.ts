@@ -47,16 +47,9 @@ export interface OpenPort {
   processName?: string;
 }
 
-/**
- * End-to-end budget for `getOpenPorts()` at every transport boundary
- * (webview → host adapter, host → pty-host child, Tauri command → sidecar) and
- * for the per-subprocess execs inside `getOpenPortsForPid()` (lsof, PowerShell,
- * `Get-NetTCPConnection`, `netstat`). Wider than the 1 s cwd query because
- * enumeration shells out on macOS/Windows; tight enough to fail visibly rather
- * than hang a pane header. Mirrored as `OPEN_PORT_TIMEOUT_MS` in
- * `standalone/sidecar/pty-core.js` and `standalone/src-tauri/src/lib.rs`;
- * pinned by `mirrored-constants.test.ts`.
- */
+/** Base subprocess scan budget. The macOS socket scan adds a per-id allowance;
+ *  transport deadlines cover both serial scans plus a margin per IPC hop.
+ *  Rust and sidecar copies are pinned by `mirrored-constants.test.ts`. */
 export const OPEN_PORT_TIMEOUT_MS = 3000;
 
 /**
@@ -68,6 +61,15 @@ export const OPEN_PORT_TIMEOUT_MS = 3000;
  * pinned by `mirrored-constants.test.ts`.
  */
 export const OPEN_PORT_TIMEOUT_PER_ID_MS = 100;
+
+/** Margin for each transport hop, mirrored in Rust and pinned by the constants test. */
+export const OPEN_PORT_ROUND_TRIP_MARGIN_MS = 1000;
+
+export function openPortRequestTimeoutMs(count: number, hops = 1): number {
+  return 2 * OPEN_PORT_TIMEOUT_MS + OPEN_PORT_TIMEOUT_PER_ID_MS * count
+    + OPEN_PORT_ROUND_TRIP_MARGIN_MS * hops;
+}
+
 
 export type AlertStateDetail = { id: string } & AlertState;
 
