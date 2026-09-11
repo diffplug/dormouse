@@ -91,11 +91,23 @@ struct RoutingState {
     /// to the new owner behind its replay (`routing::Route::Hold`). Only ever
     /// emptied together with `awaiting_replay` (`lift_suppression`).
     held: HashMap<String, Vec<routing::HeldEvent>>,
+    /// Ids between a transfer's invoke and the sidecar's `marked` line, each
+    /// with the source still consuming (`routing::RouteView::marking`).
+    marking: HashMap<String, String>,
+    // Source cut points survive target replay until the arrival settles.
+    transfer_marks: HashMap<String, u64>,
 }
 
 impl RoutingState {
     /// `routing::lift_suppression` over this state's two halves. The caller
     /// republishes `WindowState::suppressed` after it, still under the lock.
+    fn mark_transfer(&mut self, id: &str, mark: u64) {
+        if self.marking.remove(id).is_some() {
+            self.transfer_marks.insert(id.to_string(), mark);
+            self.awaiting_replay.insert(id.to_string(), Instant::now());
+        }
+    }
+
     fn lift_suppression(&mut self, id: &str) -> Vec<routing::HeldEvent> {
         routing::lift_suppression(&mut self.awaiting_replay, &mut self.held, id)
     }
@@ -157,6 +169,7 @@ impl WindowState {
     fn mint(&self, id: &str, label: &str) {
         let mut routing = guard(&self.routing);
         routing.owners.insert(id.to_string(), label.to_string());
+        routing.transfer_marks.remove(id);
         // Whatever was held belonged to the PTY that never arrived, not this one.
         routing.lift_suppression(id);
         self.suppressed
@@ -185,25 +198,63 @@ impl WindowState {
             if suppress {
                 routing.awaiting_replay.insert(id.clone(), now);
             } else {
-                // A hand-back. The gap is lost here: the source was suppressed
-                // like any other non-owner from the invoke on, and no replay
-                // follows a hand-back, so the bytes and everything derived from
-                // them are gone from its pane. A later stage recovers the gap
-                // (docs/specs/standalone.md -> "Arrival queue").
+                // A hand-back. What was held for the target has nothing to
+                // follow here: an unmarked id's source saw every byte live,
+                // and a marked one is re-suppressed by `hand_back_arrival`
+                // until its since-mark replay.
                 routing.lift_suppression(id);
+                routing.marking.remove(id);
             }
         }
         self.suppressed
             .store(routing.awaiting_replay.len(), Ordering::Relaxed);
     }
 
-    /// Forget one PTY entirely (a kill, or its exit).
-    fn forget_pty(&self, id: &str) {
+    /// Move ownership and open source routing under one lock, before any chunk
+    /// can observe the target owner without the source's marking phase.
+    fn begin_transfer(&self, ids: &[String], source: &str, target: &str) {
+        let mut routing = guard(&self.routing);
+        for id in ids {
+            if let Some(owner) = routing.owners.get_mut(id) {
+                *owner = target.to_string();
+            }
+            routing.lift_suppression(id);
+            routing.transfer_marks.remove(id);
+            routing.marking.insert(id.clone(), source.to_string());
+        }
+        self.suppressed.store(routing.awaiting_replay.len(), Ordering::Relaxed);
+    }
+
+    /// Drain the source cuts and return only still-live ownership. An exited
+    /// id gets its retained replay by explicit address, never a phantom owner.
+    fn hand_back(&self, ids: &[String], source: &str) -> JsonValue {
+        let mut routing = guard(&self.routing);
+        let mut marks = serde_json::Map::new();
+        for id in ids {
+            let mark = routing.transfer_marks.remove(id);
+            if let Some(mark) = mark { marks.insert(id.clone(), JsonValue::from(mark)); }
+            routing.marking.remove(id);
+            if let Some(owner) = routing.owners.get_mut(id) {
+                *owner = source.to_string();
+                if mark.is_some() { routing.awaiting_replay.insert(id.clone(), Instant::now()); }
+                else { routing.lift_suppression(id); }
+            }
+        }
+        self.suppressed.store(routing.awaiting_replay.len(), Ordering::Relaxed);
+        JsonValue::Object(marks)
+    }
+
+    fn forget_pty(&self, id: &str) { self.remove_pty(id, false); }
+    fn exited_pty(&self, id: &str) { self.remove_pty(id, true); }
+
+    fn remove_pty(&self, id: &str, keep_cut: bool) {
         let mut routing = guard(&self.routing);
         routing.owners.remove(id);
         routing.lift_suppression(id);
-        self.suppressed
-            .store(routing.awaiting_replay.len(), Ordering::Relaxed);
+        routing.marking.remove(id);
+        // Natural exit retains the sidecar buffer; explicit kill discards it.
+        if !keep_cut { routing.transfer_marks.remove(id); }
+        self.suppressed.store(routing.awaiting_replay.len(), Ordering::Relaxed);
     }
 
     /// Drop any suppression on `ids`, leaving ownership alone. What settles an
@@ -214,6 +265,7 @@ impl WindowState {
         let mut routing = guard(&self.routing);
         for id in ids {
             routing.lift_suppression(id);
+            routing.transfer_marks.remove(id);
         }
         self.suppressed
             .store(routing.awaiting_replay.len(), Ordering::Relaxed);
@@ -340,6 +392,7 @@ fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
                 awaiting_replay: &routing.awaiting_replay,
                 dor_targets: &routing.dor_targets,
                 registry: &registry,
+                marking: &routing.marking,
             },
         ) {
             Route::Drop => Delivery::Nowhere,
@@ -411,7 +464,20 @@ fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
     match event {
         "pty:exit" => {
             if let Some(id) = id() {
-                state.forget_pty(id);
+                state.exited_pty(id);
+            }
+        }
+        // The source has been sent everything before the mark; from here the
+        // id is silent until the target's replay of everything after it.
+        "pty:marked" => {
+            if let Some(id) = id() {
+                let mut routing = guard(&state.routing);
+                if let Some(mark) = data.get("mark").and_then(JsonValue::as_u64) {
+                    routing.mark_transfer(id, mark);
+                    state
+                        .suppressed
+                        .store(routing.awaiting_replay.len(), Ordering::Relaxed);
+                }
             }
         }
         "pty:replay" => {
@@ -2799,6 +2865,8 @@ fn arrival_from(from: &str, to: &str, payload: JsonValue) -> Result<routing::Arr
         terminal_ids,
         payload,
         queued_at: Instant::now(),
+        content: None,
+        pending_window: None,
     })
 }
 
@@ -2821,8 +2889,20 @@ fn begin_arrival(
                 arrival.workspace_id
             ));
         }
-        windows.reassign(&arrival.terminal_ids, &arrival.to, true);
+        // Ownership moves now; suppression waits for each id's `marked` line.
+        windows.begin_transfer(&arrival.terminal_ids, &arrival.from, &arrival.to);
         routing::queue_arrival(&mut arrivals, arrival.clone());
+    }
+    // The split point, stamped in the stream by the sidecar and routed to the
+    // source, which serializes what it holds when it sees it (§Transfer). A
+    // Workspace of browser panes alone has no ids to mark; its source sends
+    // content at once.
+    if let Some(sidecar) = app.try_state::<SidecarState>() {
+        let msg = serde_json::json!({
+            "event": "pty:mark",
+            "data": { "ids": arrival.terminal_ids, "requestId": format!("mark-{}", arrival.workspace_id) },
+        });
+        send_to_sidecar(&sidecar, msg.to_string());
     }
     // Recorded on disk here, in neither window's snapshot: the source omits a
     // transferring Workspace from its saves and the target writes only after
@@ -2866,10 +2946,19 @@ fn spawn_arrival_watchdog(app: AppHandle, arrival: &routing::Arrival) {
     });
 }
 
-/// One arrival will never be adopted: give its shells back to the source,
-/// unsuppressed, and tell the source so it clears the Workspace's transferring
-/// mark. **The Workspace simply stays where it is** — nothing was released, so
-/// there is nothing to put back.
+/// One arrival will never be adopted: give its shells back to the source and
+/// tell the source so it clears the Workspace's transferring mark. **The
+/// Workspace simply stays where it is** — nothing was released, so there is
+/// nothing to put back.
+///
+/// **A marked id goes back suppressed, behind a replay of what it missed.**
+/// From its mark to now every byte went to the target, or nowhere, and the
+/// source's xterm stands at the mark; so the sidecar is asked for
+/// `outputSince(mark)` scoped to the source, and that replay lifts the
+/// suppression on its way out (`dispatch_sidecar_event`), the held protocol
+/// events behind it. Marks come from the routing state at `pty:marked`, never
+/// from the later serialized content. Only an id the sidecar never stamped
+/// goes straight back.
 ///
 /// The record must already be out of the queue; the caller took it.
 fn hand_back_arrival(
@@ -2888,12 +2977,31 @@ fn hand_back_arrival(
                 append_log(format!("[window] could not record hand-back: {e}"));
             }
         }
-        windows.reassign(&arrival.terminal_ids, &arrival.from, false);
+        let marks = windows.hand_back(&arrival.terminal_ids, &arrival.from);
+        let (marked, _) = routing::hand_back_ids(arrival, &marks);
+        // Told before the replay is asked for, so the source is listening for
+        // it (`acceptHandBackReplay` in `standalone/src/workspace-move.ts`).
+
         let _ = app.emit_to(
             arrival.from.as_str(),
             "dormouse://workspace-arrival-failed",
-            serde_json::json!({ "workspaceId": arrival.workspace_id, "reason": reason }),
+            serde_json::json!({ "workspaceId": arrival.workspace_id, "reason": reason, "replayIds": marked }),
         );
+        if marked.is_empty() {
+            return;
+        }
+        if let Some(sidecar) = app.try_state::<SidecarState>() {
+            let msg = serde_json::json!({
+                "event": "pty:requestInit",
+                "data": {
+                    "forWindow": arrival.from,
+                    "ids": marked,
+                    "requestId": format!("handback-{}", arrival.workspace_id),
+                    "marks": marks,
+                },
+            });
+            send_to_sidecar(&sidecar, msg.to_string());
+        }
         return;
     }
     if let Ok(dir) = sessions_dir(app) {
@@ -2945,29 +3053,68 @@ fn open_workspace_window(
             _ => None,
         }
     };
-    let arrival = arrival_from(window.label(), &label, payload)?;
-    // The one thing needed after the record is queued, so the payload itself is
-    // moved rather than cloned.
-    let workspace_id = arrival.workspace_id.clone();
-    append_log(format!("[window] tearing {workspace_id} out into {label}"));
+    let mut arrival = arrival_from(window.label(), &label, payload)?;
+    // Built once the content lands (`transfer_workspace_content`), so the new
+    // window's boot drains a payload that is complete; held as JSON so the
+    // record stays free of window types.
+    arrival.pending_window = Some(match geometry {
+        Some(g) => serde_json::json!({ "x": g.x, "y": g.y, "width": g.width, "height": g.height }),
+        None => JsonValue::Null,
+    });
+    append_log(format!("[window] tearing {} out into {label}", arrival.workspace_id));
     begin_arrival(&app, &windows, arrival)?;
-    if let Err(err) = build_window(&app, &label, geometry) {
-        // Nothing will ever drain the queue, and the PTYs would stay suppressed
-        // and ownerless. The source is waiting on this `Err` and has released
-        // nothing, so the ids go back in silence — no `arrival-failed`, which
-        // would clear a transferring mark that was never set.
-        if let Some(arrival) =
-            routing::take_arrival(&mut guard(&windows.arrivals), &workspace_id, &label)
-        {
-            windows.reassign(&arrival.terminal_ids, &arrival.from, false);
-            if let Ok(dir) = sessions_dir(&app) {
-                let _ = return_arrival_on_disk(&dir, &arrival);
-            }
-        }
-        return Err(err);
-    }
-    send_window_labels(&app);
+
     Ok(label)
+}
+
+/// The source has serialized every terminal at its mark: attach the content,
+/// then either build the torn-out window or nudge the existing target.
+#[tauri::command(async)]
+fn transfer_workspace_content(
+    app: AppHandle,
+    window: tauri::Window,
+    windows: tauri::State<'_, WindowState>,
+    workspace_id: String,
+    content: JsonValue,
+) -> Result<(), String> {
+    let (to, pending_window) = {
+        let mut arrivals = guard(&windows.arrivals);
+        let arrival = arrivals
+            .iter_mut()
+            .find(|arrival| arrival.workspace_id == workspace_id && arrival.from == window.label())
+            .ok_or_else(|| format!("no arrival of '{workspace_id}' from {}", window.label()))?;
+        arrival.content = Some(content);
+        (arrival.to.clone(), arrival.pending_window.take())
+    };
+    match pending_window {
+        Some(geometry) => {
+            let geometry = geometry.as_object().map(|g| WindowGeometry {
+                x: g.get("x").and_then(JsonValue::as_f64).unwrap_or(0.0),
+                y: g.get("y").and_then(JsonValue::as_f64).unwrap_or(0.0),
+                width: g.get("width").and_then(JsonValue::as_f64).unwrap_or(0.0),
+                height: g.get("height").and_then(JsonValue::as_f64).unwrap_or(0.0),
+            });
+            if let Err(err) = build_window(&app, &to, geometry) {
+                // Nothing will ever drain the queue, and the source has
+                // already marked the Workspace transferring — `handOff` set
+                // it when the invoke returned. So the ids go back *and* the
+                // source is told: `arrival-failed` is what clears that mark.
+                if let Some(arrival) =
+                    routing::take_arrival(&mut guard(&windows.arrivals), &workspace_id, &to)
+                {
+                    hand_back_arrival(&app, &windows, &arrival, "the new window could not be built");
+                }
+                return Err(err);
+            }
+            send_window_labels(&app);
+        }
+        None => {
+            // A nudge, carrying nothing: the payload is in the queue, and a
+            // window with no listener yet finds it there.
+            let _ = app.emit_to(to.as_str(), "dormouse://workspace-arriving", ());
+        }
+    }
+    Ok(())
 }
 
 /// Move a Workspace into a window that already exists.
@@ -3001,9 +3148,7 @@ fn transfer_workspace(
     if let Some(target) = app.get_webview_window(&to) {
         let _ = target.set_focus();
     }
-    // A nudge, carrying nothing: the payload is in the queue, and a window with
-    // no listener yet finds it there.
-    let _ = app.emit_to(to.as_str(), "dormouse://workspace-arriving", ());
+    // Nudged from `transfer_workspace_content`, once there is content to drain.
     Ok(())
 }
 
@@ -3030,16 +3175,16 @@ fn adopt_ready(
     request_id: Option<String>,
 ) -> Result<(), String> {
     let label = window.label();
-    let ids = {
+    let (ids, marks) = {
         let arrivals = guard(&windows.arrivals);
         let arrival = routing::find_arrival(&arrivals, &workspace_id)
             .filter(|arrival| arrival.to == label)
             .ok_or_else(|| format!("no arrival of '{workspace_id}' into {label}"))?;
-        arrival.terminal_ids.clone()
+        (arrival.terminal_ids.clone(), routing::arrival_marks(arrival))
     };
     let msg = serde_json::json!({
         "event": "pty:requestInit",
-        "data": { "forWindow": label, "ids": ids, "requestId": request_id },
+        "data": { "forWindow": label, "ids": ids, "requestId": request_id, "marks": marks },
     });
     send_to_sidecar(&state, msg.to_string());
     Ok(())
@@ -4139,6 +4284,7 @@ pub fn run() {
             adopt_done,
             adopt_failed,
             take_arrivals,
+            transfer_workspace_content,
             workspace_reserve_ids,
             workspace_report,
             workspace_registry,
@@ -4261,6 +4407,8 @@ mod tests {
             to: to.to_string(),
             terminal_ids: Vec::new(),
             payload: serde_json::json!({ "workspaceId": id, "workspace": workspace_json(id, "Moved") }),
+            content: None,
+            pending_window: None,
             queued_at: std::time::Instant::now(),
         }
     }
@@ -4388,6 +4536,59 @@ mod tests {
     }
 
     #[test]
+    fn a_pty_exit_keeps_its_cut_until_the_arrival_settles() {
+        let windows = super::WindowState::default();
+        windows.mint("t1", "main");
+        windows.begin_transfer(&["t1".to_string()], "main", "ws-2");
+        guard(&windows.routing).mark_transfer("t1", 42);
+        windows.exited_pty("t1");
+        assert_eq!(guard(&windows.routing).transfer_marks.get("t1"), Some(&42));
+        assert_eq!(windows.hand_back(&["t1".to_string()], "main")["t1"], 42);
+        let routing = guard(&windows.routing);
+        assert!(!routing.transfer_marks.contains_key("t1"));
+        assert!(!routing.owners.contains_key("t1"));
+        assert!(!routing.awaiting_replay.contains_key("t1"));
+    }
+
+    #[test]
+    fn transfer_ownership_and_source_routing_change_together() {
+        let windows = super::WindowState::default();
+        windows.mint("t1", "main");
+        windows.begin_transfer(&["t1".to_string()], "main", "ws-2");
+        let state = guard(&windows.routing);
+        let view = super::RouteView {
+            owners: &state.owners, awaiting_replay: &state.awaiting_replay,
+            dor_targets: &state.dor_targets, registry: &super::workspaces::Registry::default(),
+            marking: &state.marking,
+        };
+        assert_eq!(state.owners.get("t1").map(String::as_str), Some("ws-2"));
+        assert!(matches!(super::routing::route("pty:data", &serde_json::json!({"id": "t1", "data": "before-mark"}), &view), super::routing::Route::EmitTo("main")));
+    }
+
+    #[test]
+    fn explicit_kill_discards_a_cut_with_its_buffer() {
+        let windows = super::WindowState::default();
+        windows.mint("t1", "main");
+        windows.begin_transfer(&["t1".to_string()], "main", "ws-2");
+        guard(&windows.routing).mark_transfer("t1", 42);
+        windows.forget_pty("t1");
+        assert!(!guard(&windows.routing).transfer_marks.contains_key("t1"));
+    }
+
+    #[test]
+    fn a_source_cut_survives_target_replay_and_needs_no_serialized_content() {
+        let mut state = super::RoutingState::default();
+        state.marking.insert("t1".to_string(), "main".to_string());
+        state.mark_transfer("t1", 42);
+        assert!(state.awaiting_replay.contains_key("t1"));
+        assert_eq!(state.transfer_marks.get("t1"), Some(&42));
+        state.lift_suppression("t1");
+        assert_eq!(state.transfer_marks.get("t1"), Some(&42));
+        state.mark_transfer("t2", 99); // a late mark after hand-back is inert
+        assert!(!state.transfer_marks.contains_key("t2"));
+    }
+
+    #[test]
     fn adoption_keeps_the_journal_until_both_snapshots_are_durable() {
         let dir = TempDir::new("arrival-commit");
         write_session_to(dir.path(), "main", &snapshot_json(&[("workspace-7", "Moved")], "workspace-7")).unwrap();
@@ -4469,7 +4670,8 @@ mod tests {
     #[test]
     fn journal_commands_run_off_the_main_thread() {
         let source = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap().replace("\r\n", "\n");
-        for command in ["transfer_workspace", "open_workspace_window", "adopt_done", "adopt_failed", "close_window"] {
+        for command in ["transfer_workspace", "transfer_workspace_content", "open_workspace_window", "adopt_done", "adopt_failed", "close_window"] {
+
             assert!(source.contains(&format!("#[tauri::command(async)]\nfn {command}(")), "{command} must run off the UI thread");
         }
     }

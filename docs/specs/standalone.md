@@ -374,10 +374,12 @@ Source of truth: `route` in `standalone/src-tauri/src/routing.rs`,
 
 | Sidecar event | Key | Goes to |
 |---|---|---|
-| `pty:data` | `data.id` | its owner; dropped while the id is mid-transfer, its bytes being in the replay |
-| `terminal:semanticEvents` | `data.id` | its owner; dropped while the id is mid-transfer — the target re-derives them from the raw replay, feeding both pane state and its `AlertManager` (rationale) |
-| `terminal:protocolEvents` | `data.id` | its owner; **held** while the id is mid-transfer and delivered, in order, behind the replay, which rebuilds none of them; at most `HELD_EVENTS_MAX` (256) per id, overflow dropping the oldest (`held_events_come_back_in_order_and_bounded`) |
-| `pty:exit`, `pty:replay` | `data.id` | its owner, never suppressed |
+| `pty:data` | `data.id` | its owner; the source until the id's mark passes, then dropped until its replay, its bytes being in it |
+| `terminal:semanticEvents` | `data.id` | its owner; the source until the id's mark passes, then dropped until its replay — the window receiving the replay re-derives them from it, feeding both pane state and its `AlertManager` (rationale) |
+| `terminal:protocolEvents` | `data.id` | its owner; the source until the id's mark passes, then **held** and delivered, in order, behind the replay, which rebuilds none of them; at most `HELD_EVENTS_MAX` (256) per id, the oldest dropped past it (`held_events_come_back_in_order_and_bounded`) |
+| `pty:exit` | `data.id` | its owner, never suppressed |
+| `pty:replay` | `data.forWindow`, then `data.id` | the requesting window, including exited buffers; without an address, its owner; never suppressed |
+| `pty:marked` | `data.id` | the source still consuming the id, which then falls silent until its replay; otherwise its owner |
 | `pty:list` | `data.forWindow` | the window that asked |
 | `alert:*` carrying `data.id` | `data.id` | its owner |
 | `dor:controlRequest` | `params.workspace`, `params.window`, `data.surfaceId` | in that precedence: the window holding the named Workspace (§Workspace registry), the named window, the caller's Surface's owner; none → the focused window |
@@ -572,12 +574,16 @@ below reads that record rather than inferring itself from the suppression map.
    `transfer_workspace` / `open_workspace_window`. On `Ok` it marks the Workspace
    **transferring**: the Wall stays mounted and the notes stay put, nothing is
    released, and `getWindowSnapshot` omits it.
-2. **Rust** reassigns `terminalIds` to the target and suppresses their output
-   until each one's replay has been emitted there; the sidecar buffers a chunk
-   before it emits and Rust's reader is one ordered thread, so a chunk in the gap
-   is dropped once and replayed once (rationale). It queues the record and nudges
-   the target with `workspace-arriving` carrying nothing — a new window has no
-   listener, so its payload is pulled at boot instead.
+2. **Rust** reassigns `terminalIds` to the target, keeps routing their output to
+   the source, and asks the sidecar to stamp a `pty:marked` line per id; at that
+   line the id's suppression begins, until its replay has been emitted to the
+   target. The source serializes each buffer at its mark and invokes
+   `transfer_workspace_content`, which attaches the content to the record and
+   only then nudges the target with `workspace-arriving` carrying nothing — or,
+   for a tear-out, builds the new window, whose boot pulls a payload that is
+   complete (`docs/specs/transport.md` → "Transferring a Workspace";
+   rationale). **An arrival without content is not drainable**
+   (`an_arrival_is_drainable_only_once_its_content_landed`).
 3. **Target** drains with `take_arrivals` and, per arrival, arms its collector
    *before* calling `adopt_ready(workspaceId)` — the hop that removes the whole
    "arrived before armed" class of bug (rationale). Rust answers
@@ -615,8 +621,30 @@ below reads that record rather than inferring itself from the suppression map.
   source unsuppressed, drop the record, and emit `workspace-arrival-failed`; the
   source clears **transferring** and the Workspace is simply still there. With
   both ends gone the shells are reaped rather than left owned by a dead label.
-  **The gap is lost on a hand-back**: suppressed from the invoke with no replay
-  to follow, it is the one path nothing recovers.
+- **Must change transfer ownership and source routing under one routing lock**,
+  so output before the mark always reaches the source
+  (`transfer_ownership_and_source_routing_change_together`).
+- **Must reject a repeated move while that Workspace is in flight**, preserving
+  the first attempt’s content and recovery state. Async continuations act only
+  on their own attempt (`keeps the first move recoverable when the same tab is
+  dropped twice` in `standalone/src/workspace-move.test.ts`).
+- **A hand-back replays what the marked ids missed.** From an id's mark to the
+  hand-back every byte went to the target, or nowhere, so `hand_back_arrival`
+  returns each id the content marked to the source *suppressed* and asks the
+  sidecar for `outputSince(mark)` scoped to the source (`requestId`
+  `handback-<workspaceId>`); that replay lifts the suppression and lands in the
+  existing xterms (`acceptHandBackReplay`), the held protocol events behind it.
+  **Must record source cuts at `pty:marked`, retaining them through target
+  replay and natural PTY exit until settlement, and carry replay ids in the failure event**; content
+  submission and the source invoke reply may both still be pending. **Must discard
+  cuts on explicit kill and never recreate an exited PTY’s owner on hand-back.**
+  **Must apply a handed-back PTY’s exit status after its replay**, leaving its
+  existing pane dead with no running command or active watch
+  (`settles the replayed watch when a marked buffer belongs to an exited PTY` in
+  `standalone/src/tauri-adapter.test.ts`). An id the
+  sidecar never stamped goes straight back: a whole-buffer
+  replay would paint it twice (`a_hand_back_replays_only_the_marked_ids`;
+  rationale).
 - **`planArrival` never throws into `bootstrap()`.** A refused sole arrival on
   the boot path renders a fresh one-pane Workspace, never a blank window.
 - **`take_arrivals` does not consume.** The record settles at `adopt_done`, so a

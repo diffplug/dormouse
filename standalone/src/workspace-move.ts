@@ -2,11 +2,20 @@ import { invoke } from "@tauri-apps/api/core";
 import { releaseSession } from "dormouse-lib/lib/terminal-registry";
 import { forgetHelper } from "dormouse-lib/lib/helper-terminal";
 import { collectLivePtys, resumeOrRestoreFrom } from "dormouse-lib/lib/reconnect";
-import { hydrateNotepadFromVolatile, removeSurface } from "dormouse-lib/lib/notepad/notepad-store";
+import { flushTerminal } from "dormouse-lib/lib/terminal-registry";
+import { REPLAY_MODE_RESET, writeReplay } from "dormouse-lib/lib/terminal-report-filter";
+import { applyTerminalSemanticEvents } from "dormouse-lib/lib/terminal-state-store";
+import { registry as terminalRegistry } from "dormouse-lib/lib/terminal-store";
+import { hydrateNotepadFromVolatile, removeSurface, restoreTerminalPins } from "dormouse-lib/lib/notepad/notepad-store";
 import { getWallHandle } from "dormouse-lib/components/wall/wall-handles";
 import { forgetWorkspaceBootPlan, setWorkspaceBootPlan } from "dormouse-lib/components/wall/workspace-boot-plans";
 import { wallBootFromResult, type WallBootPlans } from "dormouse-lib/components/wall/wall-types";
-import type { PreparedWorkspaceTransfer, WorkspaceTransferPayload } from "dormouse-lib/components/wall/workspace-transfer";
+import {
+  captureTransferContent,
+  type PreparedWorkspaceTransfer,
+  type WorkspaceTransferContent,
+  type WorkspaceTransferPayload,
+} from "dormouse-lib/components/wall/workspace-transfer";
 import {
   clearWorkspaceTransferring,
   forgetWorkspaceSession,
@@ -20,7 +29,7 @@ import {
   moveWorkspace,
   setActiveWorkspace,
 } from "dormouse-lib/lib/workspace-store";
-import type { PlatformAdapter } from "dormouse-lib/lib/platform/types";
+import type { PlatformAdapter, PtyInfo, PtyReplayDetail } from "dormouse-lib/lib/platform/types";
 import type { WorkspaceId } from "dormouse-lib/lib/session-types";
 import { installWindowPersistence } from "./window-restore";
 import { listenToWindow } from "./window-label";
@@ -42,13 +51,17 @@ import { workspaceDropTarget } from "./workspace-tabs";
  *   arrival's* PTYs, mount the Workspace, and call `adopt_done` — which is what
  *   releases the source.
  *
- * Rust reassigns ownership *synchronously* when the source invokes, and
- * suppresses those PTYs' output until each one's replay has been emitted to the
- * target — so between the two halves no byte is painted twice and none is lost.
+ * Rust reassigns ownership *synchronously* when the source invokes, but the
+ * source keeps consuming each PTY until the sidecar's `marked` line for it
+ * passes; it then serializes what it holds and hands that over as the
+ * arrival's *content*, and Rust suppresses the PTY until the target's replay of
+ * everything after the mark has been emitted — so between the two halves no
+ * byte is painted twice and none is lost, and the target rebuilds the whole
+ * buffer rather than the sidecar's bounded tail.
  */
 
 /** Wire the payload up as one drop point, so both invokes carry the same shape. */
-interface MovePayload extends WorkspaceTransferPayload {
+interface MovePayload extends WorkspaceTransferPayload, Partial<WorkspaceTransferContent> {
   /** Where the pointer released, in the target window's logical client space.
    *  The target turns it into a strip index; it alone knows its own tabs. */
   at?: { x: number; y: number };
@@ -95,15 +108,66 @@ async function handOff(
   command: string,
   args: Record<string, unknown>,
 ): Promise<void> {
+  const { workspaceId, terminalIds } = prepared.payload;
+  if (inFlight.has(workspaceId)) return;
+  // Armed before the invoke: Rust asks the sidecar to stamp the marks inside
+  // `begin_arrival`, so a `marked` line can arrive ahead of the invoke's reply.
+  const pendingMarks = marksFor(terminalIds, `mark-${workspaceId}`);
+  inFlight.set(workspaceId, prepared);
   try {
     await invoke(command, args);
   } catch (err) {
+    if (inFlight.get(workspaceId) === prepared) inFlight.delete(workspaceId);
     console.warn(`[workspace-move] ${command} refused; the Workspace stays here`, err);
-    return;
+    return; // `pendingMarks` unsubscribes itself at the timeout
   }
-  const { workspaceId } = prepared.payload;
-  inFlight.set(workspaceId, prepared);
+  if (inFlight.get(workspaceId) !== prepared) return; // handed back before invoke replied
   markWorkspaceTransferring(workspaceId);
+  // The second half: once every terminal's mark has passed this window, what it
+  // holds is exactly the bytes before the mark. Serialized here, attached to the
+  // arrival by Rust, and only then drained by the target.
+  const marks = await pendingMarks;
+  if (inFlight.get(workspaceId) !== prepared) return; // handed back while we waited
+  const content = await captureTransferContent(terminalIds, marks);
+  if (inFlight.get(workspaceId) !== prepared) return; // handed back while serializing
+  try {
+    await invoke("transfer_workspace_content", { workspaceId, content });
+  } catch (err) {
+    // The arrival is gone (the target closed, or the watchdog handed it back);
+    // `workspace-arrival-failed` has put, or will put, this Window back.
+    console.warn("[workspace-move] transfer_workspace_content refused", err);
+  }
+}
+
+/** The host stamps marks well inside this; past it, an unmarked id is
+ *  serialized anyway and replayed whole, which at worst repeats its tail. */
+const MARK_TIMEOUT_MS = 2000;
+
+/** The platform this window moves through; set by `initWorkspaceMoves`. */
+let movePlatform: PlatformAdapter | null = null;
+
+/** Wait for the sidecar's `marked` line for each id, in stream order behind
+ *  every byte this window was sent before it. */
+function marksFor(ids: readonly string[], requestId: string): Promise<Map<string, number>> {
+  const marks = new Map<string, number>();
+  const wanted = new Set(ids);
+  if (wanted.size === 0 || !movePlatform?.onPtyMarked) return Promise.resolve(marks);
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      unsubscribe();
+      resolve(marks);
+    };
+    const unsubscribe = movePlatform!.onPtyMarked!((detail) => {
+      if (detail.requestId !== requestId || !wanted.has(detail.id)) return;
+      marks.set(detail.id, detail.mark);
+      if (marks.size === wanted.size) finish();
+    });
+    const timer = setTimeout(finish, MARK_TIMEOUT_MS);
+  });
 }
 
 /** Hand this Workspace to a window that already exists. */
@@ -161,12 +225,62 @@ function handleDeparted(workspaceId: WorkspaceId): void {
 /**
  * The target never took it. Nothing was released, so there is nothing to put
  * back: drop the transferring mark and the Workspace is simply still here, its
- * xterms receiving output again the moment Rust unsuppresses them.
+ * xterms receiving output again the moment Rust unsuppresses them — behind the
+ * replay of what they missed, where a mark had passed.
  */
-function handleArrivalFailed(workspaceId: WorkspaceId, reason: string): void {
+function handleArrivalFailed(workspaceId: WorkspaceId, reason: string, replayIds: readonly string[]): void {
   if (!inFlight.delete(workspaceId)) return;
   clearWorkspaceTransferring(workspaceId);
   console.warn(`[workspace-move] ${workspaceId} was not adopted (${reason}); it stays here`);
+  if (replayIds.length) acceptHandBackReplay(workspaceId, replayIds);
+}
+
+/** A hand-back's replay is one since-mark slice per id over the sidecar's
+ *  stdio; the same room an arrival gets. */
+const HAND_BACK_REPLAY_TIMEOUT_MS = ARRIVAL_TIMEOUT_MS;
+
+/**
+ * Catch the replay Rust requests for a handed-back Workspace: every byte from
+ * each id's mark to the hand-back went to the target, or nowhere, and its xterm
+ * here stands at the mark. The replay of `outputSince(mark)` for exactly the
+ * marked ids goes into the existing instances (`docs/specs/standalone.md` →
+ * "Arrival queue"). Collector-free: subscribe, write, and let go on the last
+ * id or the timeout.
+ */
+function acceptHandBackReplay(workspaceId: WorkspaceId, ids: readonly string[]): void {
+  const platform = movePlatform;
+  if (!platform) return;
+  const requestId = `handback-${workspaceId}`;
+  const wanted = new Set(ids);
+  const exited = new Map<string, number>();
+  const onList = (detail: { ptys: PtyInfo[]; requestId?: string }) => {
+    if (detail.requestId !== requestId) return;
+    for (const pty of detail.ptys) {
+      if (wanted.has(pty.id) && !pty.alive) exited.set(pty.id, pty.exitCode ?? -1);
+    }
+  };
+  const finish = () => {
+    clearTimeout(timer);
+    platform.offPtyReplay(onReplay);
+    platform.offPtyList(onList);
+  };
+  const onReplay = (detail: PtyReplayDetail) => {
+    if (detail.requestId !== requestId || !wanted.delete(detail.id)) return;
+    const entry = terminalRegistry.get(detail.id);
+    if (entry) {
+      const exitCode = exited.get(detail.id);
+      writeReplay(entry, detail.data, ...(exitCode === undefined ? [] : [REPLAY_MODE_RESET]));
+      if (exitCode !== undefined) {
+        if (!entry.exited) entry.terminal.write(`\r\n[Process exited with code ${exitCode}]\r\n`);
+        entry.exited = true;
+        applyTerminalSemanticEvents(detail.id, [{ type: 'commandFinish', exitCode }]);
+      }
+    }
+    if (wanted.size === 0) finish();
+  };
+  platform.onPtyList(onList);
+  platform.onPtyReplay(onReplay);
+  const timer = setTimeout(finish, HAND_BACK_REPLAY_TIMEOUT_MS);
 }
 
 // --- Target ------------------------------------------------------------------
@@ -215,6 +329,13 @@ async function planArrival(
       + "refusing rather than restarting shells that are still running",
     );
   }
+  // The source's buffers come first, then the host's replay of everything
+  // after each mark: together they are the whole transcript, not the sidecar's
+  // bounded tail (`docs/specs/transport.md` → "Transferring a Workspace").
+  for (const [id, terminal] of Object.entries(payload.terminals ?? {})) {
+    if (!ptyIds.has(id) || !terminal.serialized) continue;
+    live.replay.set(id, terminal.serialized + (live.replay.get(id) ?? ""));
+  }
   const result = resumeOrRestoreFrom(platform, live, {
     savedSession: payload.workspace.session,
     ptyIds,
@@ -222,6 +343,12 @@ async function planArrival(
   // The notes travelled in the payload rather than through the archive: a move
   // is not a closure (`docs/specs/notepad.md` → "Closure").
   hydrateNotepadFromVolatile(payload.notepad, payload.allIds);
+  // Their pins point into the buffers just rebuilt at the same lines — once
+  // xterm has parsed the rebuild, which it does asynchronously.
+  if (payload.pins?.length) {
+    await Promise.all([...ptyIds].map((id) => flushTerminal(id)));
+    restoreTerminalPins(payload.pins);
+  }
   return wallBootFromResult(result);
 }
 
@@ -303,6 +430,7 @@ async function drainArrivals(): Promise<MovePayload[]> {
 
 /** Listen for Workspaces arriving in, and leaving, this window. */
 export function initWorkspaceMoves(platform: PlatformAdapter): void {
+  movePlatform = platform;
   const adoptQueued = async () => {
     for (const payload of await drainArrivals()) await adoptWorkspace(platform, payload);
   };
@@ -312,9 +440,9 @@ export function initWorkspaceMoves(platform: PlatformAdapter): void {
   void listenToWindow<{ workspaceId: WorkspaceId }>("dormouse://workspace-departed", (event) => {
     handleDeparted(event.payload.workspaceId);
   });
-  void listenToWindow<{ workspaceId: WorkspaceId; reason?: string }>(
+  void listenToWindow<{ workspaceId: WorkspaceId; reason?: string; replayIds?: string[] }>(
     "dormouse://workspace-arrival-failed",
-    (event) => handleArrivalFailed(event.payload.workspaceId, event.payload.reason ?? "no reason given"),
+    (event) => handleArrivalFailed(event.payload.workspaceId, event.payload.reason ?? "no reason given", event.payload.replayIds ?? []),
   );
   // Immediately, and not only on the nudge: a Workspace dropped on this window
   // while it was still booting is already in the queue, and its `emit_to`

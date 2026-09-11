@@ -8,6 +8,8 @@ import { hasTerminal, type SurfaceKind } from 'dor/commands/types';
 import { getPlatformOrNull } from '../platform';
 import type { CwdState } from '../terminal-state';
 import { toArchivedNote } from './archive-model';
+import { getTerminalInstance } from '../terminal-registry';
+import { registerTerminalSourceAtLines, transferredPinOf, type TransferredPin } from './source-link';
 import type {
   LiveNote,
   NotepadArchiveMutation,
@@ -470,6 +472,47 @@ export function buildVolatileSnapshot(): VolatileNotepadSnapshot {
 export function snapshotNotepadForTransfer(surfaceIds: Iterable<string>): VolatileNotepadSnapshot {
   const wanted = new Set(surfaceIds);
   return collectVolatile(notepadSurfaceIds().filter((id) => wanted.has(id)));
+}
+
+/**
+ * The pins riding along with a Workspace, taken at the same instant as the
+ * terminal buffers they point into (`docs/specs/transport.md` → "Transferring
+ * a Workspace"). Helpers and browser Surfaces hold no sources, so they add none.
+ */
+export function snapshotTerminalPins(surfaceIds: Iterable<string>): TransferredPin[] {
+  const pins: TransferredPin[] = [];
+  for (const surfaceId of surfaceIds) {
+    for (const note of getNotes(surfaceId)) {
+      const pin = note.source ? transferredPinOf(surfaceId, note.id, note.source) : null;
+      if (pin) pins.push(pin);
+    }
+  }
+  return pins;
+}
+
+/**
+ * Re-pin transferred notes into the terminals this Window has rebuilt. Runs
+ * after `hydrateNotepadFromVolatile` and after each terminal's serialized
+ * buffer is written, so the lines line up; a pin whose note or terminal is not
+ * here, or whose lines fall outside the rebuilt buffer, is simply left unpinned
+ * — the note itself travelled either way.
+ */
+export function restoreTerminalPins(pins: readonly TransferredPin[]): void {
+  let changed = false;
+  for (const pin of pins) {
+    const notes = notesBySurface.get(pin.surfaceId);
+    const terminal = getTerminalInstance(pin.surfaceId);
+    if (!notes || !terminal) continue;
+    const index = notes.findIndex((note) => note.id === pin.noteId && !note.source);
+    if (index === -1) continue;
+    const source = registerTerminalSourceAtLines(terminal, pin);
+    if (!source) continue;
+    const next = [...notes];
+    next[index] = { ...next[index], source };
+    notesBySurface.set(pin.surfaceId, next);
+    changed = true;
+  }
+  if (changed) notify();
 }
 
 function collectVolatile(ids: readonly string[]): VolatileNotepadSnapshot {

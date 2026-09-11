@@ -1,5 +1,6 @@
 import { Terminal, type IBufferRange } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { SerializeAddon } from '@xterm/addon-serialize';
 import { ImageAddon, type IImageAddonOptions } from '@xterm/addon-image';
 import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes';
 import { TerminalWebglRenderer } from './terminal-webgl';
@@ -132,7 +133,7 @@ function readDisplayTextFromBuffer(terminal: Terminal, range: IBufferRange): str
   }
 }
 
-function createXtermHost(): { terminal: Terminal; fit: FitAddon; element: HTMLDivElement } {
+function createXtermHost(): { terminal: Terminal; fit: FitAddon; serialize: SerializeAddon; element: HTMLDivElement } {
   const styles = getComputedStyle(document.body);
   const editorFontSize = parseInt(styles.getPropertyValue('--vscode-editor-font-size'), 10) || 12;
   const editorFontFamily = styles.getPropertyValue('--vscode-editor-font-family').trim() || "'SF Mono', Menlo, Monaco, monospace";
@@ -179,6 +180,8 @@ function createXtermHost(): { terminal: Terminal; fit: FitAddon; element: HTMLDi
   terminal.loadAddon(new UnicodeGraphemesAddon());
   const fit = new FitAddon();
   terminal.loadAddon(fit);
+  const serialize = new SerializeAddon();
+  terminal.loadAddon(serialize);
   if (cfg.terminal.inlineImages) terminal.loadAddon(new ImageAddon(IMAGE_ADDON_OPTIONS));
 
   const element = document.createElement('div');
@@ -187,7 +190,7 @@ function createXtermHost(): { terminal: Terminal; fit: FitAddon; element: HTMLDi
   terminal.open(element);
   paintTerminalHost(element, terminal, theme.background);
 
-  return { terminal, fit, element };
+  return { terminal, fit, serialize, element };
 }
 
 /** PTY data/exit listeners. Returns the unsubscribe pair. */
@@ -288,7 +291,7 @@ function wireXtermHandlers(
 }
 
 function setupTerminalEntry(id: string, options: { shell?: string; untouched?: boolean; helper?: HelperIdentity } = {}): TerminalEntry {
-  const { terminal, fit, element } = createXtermHost();
+  const { terminal, fit, serialize, element } = createXtermHost();
   const selectionBaselineRef = { current: null as string | null };
   // Every module that finalizes a selection arms the render handler through
   // this one setter: the mouse router at drag end, a note's pin on reveal.
@@ -323,6 +326,7 @@ function setupTerminalEntry(id: string, options: { shell?: string; untouched?: b
     shellKind: shellCommandKind(options.shell, PLATFORM_STRING),
     terminal,
     fit,
+    serialize,
     element,
     cleanup,
     setSelectionBaseline,
@@ -526,6 +530,30 @@ export function mountElement(id: string, container: HTMLElement): void {
   container.appendChild(entry.element);
   // The renderer owns only this mount's GPU resources; xterm state survives it.
   (entry.webglRenderer ??= new TerminalWebglRenderer(entry.terminal, entry.element)).mount();
+}
+
+/**
+ * The buffer as the escape stream that rebuilds it — scrollback, cursor, modes
+ * — for a Session about to be handed to another Window
+ * (`docs/specs/transport.md` → "Transferring a Workspace"). **Flushed first**:
+ * xterm parses writes asynchronously, and the split point the host stamped is
+ * everything this Session was *sent*, so anything still queued is drained into
+ * the buffer before it is read. Null for a Session this webview does not hold.
+ */
+export async function serializeTerminal(id: string): Promise<string | null> {
+  const entry = registry.get(id);
+  if (!entry) return null;
+  await flushTerminal(id);
+  return entry.serialize.serialize();
+}
+
+/** Resolves once everything written to the Session so far is in its buffer.
+ *  xterm parses asynchronously, so a reader of buffer lines — a pin being
+ *  re-registered over a rebuilt transcript — waits here first. */
+export function flushTerminal(id: string): Promise<void> {
+  const entry = registry.get(id);
+  if (!entry) return Promise.resolve();
+  return new Promise<void>((resolve) => entry.terminal.write('', resolve));
 }
 
 /** Where a hidden helper's xterm element waits between reveals: still in the

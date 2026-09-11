@@ -108,6 +108,31 @@ ends at `adopt_failed` or at the target's `Destroyed`, not at a timer.
 
 ## Arrival queue
 
+**Why the mark is stamped in the stream rather than asked for.** A mark fetched
+by request answers at some instant the sidecar chose, while the source's xterm
+stands at whatever `pty:data` had reached it — two clocks nothing aligns, so a
+serialization taken against a fetched mark either repeats or loses the bytes
+between them. A `marked` line written into the same stdout as the data is
+ordered with it by construction: the sidecar's reader is one thread, Rust's
+reader is one thread, and the webview's event queue is one queue. The one gap
+left is the parser's incomplete-sequence buffer, which can hold bytes older
+than the mark past it; that tail is the same class of cut the bounded replay
+always made, and the target's parser resynchronizes on the next ground byte
+(2026-09).
+
+
+
+**Why a hand-back replays since the mark, and only the marked ids.** The first
+hand-back returned the ids unsuppressed and silent: the source's xterm stood at
+the mark, and every byte from there to the hand-back had gone to a target that
+never mounted it — dropped while suppressed, or painted in a webview that then
+closed. The since-mark replay is the arrival's own second half aimed back at the
+source, which is why it rides the same `pty:requestInit` and the same
+suppression-lifting `pty:replay` path rather than a new message. An id the
+content did not mark has no such gap: the source either saw every byte live or
+serialized the whole buffer it still holds, and the sidecar's only answer for
+an unmarked id is that whole buffer again (2026-09).
+
 The first build emitted `workspace-arriving` straight at the target. A window
 torn out seconds earlier, or one restoring at launch, has no listener yet and is
 a perfectly ordinary drop target — the payload went nowhere, and because the

@@ -17,6 +17,7 @@ import type {
   PtyDataDetail,
   PtyInfo,
   PtyListDetail,
+  PtyMarkedDetail,
   PtyReplayDetail,
   BurrowLink,
   SessionFlushRequest,
@@ -93,6 +94,7 @@ export class TauriAdapter implements PlatformAdapter {
   private exitHandlers = new Set<(detail: { id: string; exitCode: number }) => void>();
   private listHandlers = new Set<(detail: PtyListDetail) => void>();
   private replayHandlers = new Set<(detail: PtyReplayDetail) => void>();
+  private markedHandlers = new Set<(detail: PtyMarkedDetail) => void>();
   private filesDroppedHandlers = new Set<(paths: string[]) => void>();
   private alertStateHandlers = new Set<(detail: AlertStateDetail) => void>();
   // The two app-global stores are the sidecar's, so this window applies what
@@ -141,6 +143,8 @@ export class TauriAdapter implements PlatformAdapter {
   }
 
   async init(): Promise<void> {
+    const replayExits = new Map<string, number>();
+    const replayKey = (id: string, requestId?: string) => JSON.stringify([requestId, id]);
     // Registered together rather than one await after another: every `listen`
     // is an independent round trip to Rust, and serializing them puts the whole
     // set in front of the first paint.
@@ -175,6 +179,11 @@ export class TauriAdapter implements PlatformAdapter {
       }),
 
       listenToWindow<{ ptys: PtyInfo[]; requestId?: string }>("pty:list", (event) => {
+        for (const pty of event.payload.ptys) {
+          const key = replayKey(pty.id, event.payload.requestId);
+          if (!pty.alive) replayExits.set(key, pty.exitCode ?? -1);
+          else replayExits.delete(key);
+        }
         for (const pty of event.payload.ptys) if (pty.helper) this.alertManager.setHelper(pty.id, true);
         for (const handler of this.listHandlers) {
           handler(event.payload);
@@ -197,9 +206,23 @@ export class TauriAdapter implements PlatformAdapter {
         const events = collectTerminalSemanticEvents(parsed.events);
         this.alertManager.applyTerminalSemanticEvents(id, events);
         applyTerminalSemanticEvents(id, events);
+        // A listed exited buffer can contain a command-start with no finish.
+        // Apply its exit after rebuilding the replay's watch, for either target
+        // adoption or source hand-back.
+        const key = replayKey(id, requestId);
+        const exitCode = replayExits.get(key);
+        if (exitCode !== undefined) {
+          replayExits.delete(key);
+          this.alertManager.onExit(id, exitCode);
+          applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode }]);
+        }
         for (const handler of this.replayHandlers) {
           handler({ id, data: parsed.visibleData, requestId });
         }
+      }),
+
+      listenToWindow<PtyMarkedDetail>("pty:marked", (event) => {
+        for (const handler of this.markedHandlers) handler(event.payload);
       }),
 
       // Inert while dragDropEnabled=false in tauri.conf.json. See diffplug/dormouse#38 and tauri-apps/tauri#14373.
@@ -581,6 +604,11 @@ export class TauriAdapter implements PlatformAdapter {
 
   onPtyReplay(handler: (detail: PtyReplayDetail) => void): void {
     this.replayHandlers.add(handler);
+  }
+
+  onPtyMarked(handler: (detail: PtyMarkedDetail) => void): () => void {
+    this.markedHandlers.add(handler);
+    return () => { this.markedHandlers.delete(handler); };
   }
 
   offPtyReplay(handler: (detail: PtyReplayDetail) => void): void {

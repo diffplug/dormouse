@@ -14,6 +14,7 @@ import type {
   PlatformAdapter,
   PtyDataDetail,
   PtyListDetail,
+  PtyMarkedDetail,
   PtyReplayDetail,
   BurrowLink,
 } from "dormouse-lib/lib/platform/types";
@@ -69,6 +70,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   private exitHandlers = new Set<(detail: { id: string; exitCode: number }) => void>();
   private listHandlers = new Set<(detail: PtyListDetail) => void>();
   private replayHandlers = new Set<(detail: PtyReplayDetail) => void>();
+  private markedHandlers = new Set<(detail: PtyMarkedDetail) => void>();
   private alertStateHandlers = new Set<(detail: AlertStateDetail) => void>();
   private alertManager = new AlertManager();
   private unlistenHost: (() => void) | null = null;
@@ -308,6 +310,10 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   offPtyList(handler: (detail: PtyListDetail) => void): void { this.listHandlers.delete(handler); }
   onPtyReplay(handler: (detail: PtyReplayDetail) => void): void { this.replayHandlers.add(handler); }
   offPtyReplay(handler: (detail: PtyReplayDetail) => void): void { this.replayHandlers.delete(handler); }
+  onPtyMarked(handler: (detail: PtyMarkedDetail) => void): () => void {
+    this.markedHandlers.add(handler);
+    return () => { this.markedHandlers.delete(handler); };
+  }
   onRequestSessionFlush(_handler: (detail: { requestId: string }) => void): void {}
   offRequestSessionFlush(_handler: (detail: { requestId: string }) => void): void {}
   notifySessionFlushComplete(_requestId: string): void {}
@@ -383,6 +389,8 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     } else if (event === "pty:list") {
       for (const pty of (data as PtyListDetail).ptys) if (pty.helper) this.alertManager.setHelper(pty.id, true);
       for (const handler of this.listHandlers) handler(data as PtyListDetail);
+    } else if (event === "pty:marked") {
+      for (const handler of this.markedHandlers) handler(data as PtyMarkedDetail);
     } else if (event === "pty:replay") {
       // The one stream the sidecar does not parse; see TauriAdapter, including
       // why the one-shot parser still needs the theme.

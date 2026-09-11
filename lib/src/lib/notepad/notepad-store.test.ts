@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const registryMock = vi.hoisted(() => ({ getTerminalInstance: vi.fn<(id: string) => unknown>() }));
+vi.mock('../terminal-registry', () => ({ getTerminalInstance: registryMock.getTerminalInstance }));
 import type { IMarker } from '@xterm/xterm';
 import { FakePtyAdapter, setPlatform } from '../platform';
 import type { CwdState } from '../terminal-state';
@@ -20,7 +23,9 @@ import {
   pendingBatchId,
   pruneEmptyNote,
   removeSurface,
+  restoreTerminalPins,
   registerNotepadSurfaceMetaResolver,
+  snapshotTerminalPins,
   setNoteText,
   setOpenNotepadId,
   setStagedArchiveDeletions,
@@ -603,4 +608,65 @@ it('mirrors and resumes a pending batch even after its last note is deleted', as
   hydrateNotepadFromVolatile(snapshot, ['s1']);
   expect(pendingBatchId('s1')).toBe(batchId);
   expect(buildVolatileSnapshot().surfaces[0].notes).toEqual([]);
+});
+
+describe('pins travelling with a Workspace', () => {
+  beforeEach(() => {
+    registryMock.getTerminalInstance.mockReset();
+  });
+
+  it('snapshots the live pins of the named terminals and re-pins them at the same lines', () => {
+    const pinned = source('term-1');
+    const noteId = addTerminalNote('term-1', [{ text: 'twelve chars' }], pinned)!;
+    addTerminalNote('term-1', [{ text: 'unpinned' }]);
+    addTerminalNote('term-2', [{ text: 'elsewhere' }], source('term-2'));
+
+    const pins = snapshotTerminalPins(['term-1']);
+    expect(pins).toEqual([{
+      surfaceId: 'term-1',
+      noteId,
+      startLine: 3,
+      endLine: 3,
+      startColumn: 0,
+      endColumn: 12,
+      shape: pinned.shape,
+      expectedRawText: pinned.expectedRawText,
+    }]);
+
+    // The target: notes hydrated without sources, a rebuilt buffer, and the
+    // same absolute lines to point at.
+    clearAllNotepads();
+    hydrateNotepadFromVolatile(
+      { surfaces: [{ surfaceId: 'term-1', surfaceTitle: '', surfaceKind: 'terminal', cwd: null, terminalId: 'term-1',
+        notes: [{ id: noteId, createdAt: 1, content: { kind: 'terminal', runs: [{ text: 'twelve chars' }] } }] }], stagedDeletions: {} },
+      ['term-1'],
+    );
+    const registered: number[] = [];
+    registryMock.getTerminalInstance.mockImplementation((id) => id === 'term-1' ? {
+      cols: 80,
+      buffer: { active: { type: 'normal', baseY: 0, cursorY: 5, length: 10, getLine: () => undefined } },
+      registerMarker: (offset: number) => { registered.push(5 + offset); return marker(); },
+    } : null);
+    restoreTerminalPins(pins);
+    expect(registered).toEqual([3, 3]);
+    expect(getNotes('term-1')[0].source?.terminalId).toBe('term-1');
+    // Again is a no-op: a note already pinned is not pinned twice.
+    restoreTerminalPins(pins);
+    expect(registered).toEqual([3, 3]);
+  });
+
+  it('leaves a note unpinned when its terminal is not here or the lines fall outside the buffer', () => {
+    const noteId = addTerminalNote('term-1', [{ text: 'x' }])!;
+    const pin = { surfaceId: 'term-1', noteId, startLine: 30, endLine: 31, startColumn: 0, endColumn: 1, shape: 'linewise' as const, expectedRawText: 'x' };
+    registryMock.getTerminalInstance.mockReturnValue(null);
+    restoreTerminalPins([pin]);
+    expect(getNotes('term-1')[0].source).toBeUndefined();
+    registryMock.getTerminalInstance.mockReturnValue({
+      cols: 80,
+      buffer: { active: { type: 'normal', baseY: 0, cursorY: 0, length: 10, getLine: () => undefined } },
+      registerMarker: () => marker(),
+    });
+    restoreTerminalPins([pin]);
+    expect(getNotes('term-1')[0].source).toBeUndefined();
+  });
 });
