@@ -510,14 +510,20 @@ struct QuitState {
 struct CleanupGate {
     pending: usize,
     exit_requested: bool,
+    forced: bool,
 }
 
 impl CleanupGate {
     fn begin(&mut self) { self.pending += 1; }
     fn request_exit(&mut self) -> bool {
-        if self.pending == 0 { return true; }
+        if self.pending == 0 || self.forced { return true; }
         self.exit_requested = true;
         false
+    }
+    fn force_if_waiting(&mut self) -> bool {
+        if self.pending == 0 || !self.exit_requested { return false; }
+        self.forced = true;
+        true
     }
     fn finish(&mut self) -> bool {
         self.pending -= 1;
@@ -526,7 +532,29 @@ impl CleanupGate {
 }
 
 fn exit_after_cleanup(app: &AppHandle) -> bool {
-    app.try_state::<QuitState>().is_none_or(|state| guard(&state.cleanup).request_exit())
+    let Some(state) = app.try_state::<QuitState>() else { return true; };
+    let (exit, start_watchdog) = {
+        let mut gate = guard(&state.cleanup);
+        let was_waiting = gate.exit_requested;
+        let exit = gate.request_exit();
+        (exit, !exit && !was_waiting)
+    };
+    if start_watchdog {
+        let app = app.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            std::thread::sleep(Duration::from_millis(QUIT_PHASE_TIMEOUT_MS));
+            let force = app.try_state::<QuitState>()
+                .is_some_and(|state| guard(&state.cleanup).force_if_waiting());
+            if force {
+                append_log("[quit] hand-back cleanup timed out; forcing exit");
+                if let Some(state) = app.try_state::<QuitState>() {
+                    guard(&state.machine).approved = true;
+                }
+                app.exit(0);
+            }
+        });
+    }
+    exit
 }
 
 // Phase 1: no ack within this window ⇒ a webview listener is dead — exit.
@@ -3952,11 +3980,13 @@ pub fn run() {
                                 }
                             }
                             let finish_app = cleanup_app.clone();
-                            let _ = cleanup_app.run_on_main_thread(move || {
+                            if let Err(err) = cleanup_app.run_on_main_thread(move || {
                                 let exit = finish_app.try_state::<QuitState>()
                                     .is_some_and(|state| guard(&state.cleanup).finish());
                                 if exit { apply_quit_actions(&finish_app, vec![QuitAction::Exit]); }
-                            });
+                            }) {
+                                append_log(format!("[quit] could not complete hand-back cleanup: {err}"));
+                            }
                         });
                     }
                     if let Some(state) = app.try_state::<GeometryState>() {
@@ -4395,6 +4425,31 @@ mod tests {
         assert!(read_session_from(dir.path(), "ws-2").unwrap().is_none());
         assert_eq!(snapshot_ids(&read_snapshot(dir.path(), "main").unwrap()), vec!["workspace-8"]);
         assert!(!arrivals_path(dir.path()).exists());
+    }
+
+    #[test]
+    fn every_approved_exit_path_checks_cleanup() {
+        let source = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
+        let action = source.split("QuitAction::Exit => {").nth(1).unwrap().split("app.exit(0)").next().unwrap();
+        assert!(action.contains("exit_after_cleanup(app)"));
+        let event = source.split("RunEvent::ExitRequested { api, .. } => {").nth(1).unwrap().split("RunEvent::Exit =>").next().unwrap();
+        assert!(event.contains("exit_after_cleanup(app)"));
+        let macos = include_str!("macos_terminate.rs");
+        let delegate = macos.split("if quit_approved(app) {").nth(1).unwrap().split("append_log(").next().unwrap();
+        assert!(delegate.contains("exit_after_cleanup(app)"));
+        assert!(delegate.contains("TerminateCancel"));
+    }
+
+    #[test]
+    fn stalled_cleanup_cannot_block_an_approved_exit_forever() {
+        let mut gate = super::CleanupGate::default();
+        gate.begin();
+        assert!(!gate.force_if_waiting()); // no quit requested yet
+        assert!(!gate.request_exit());
+        assert!(gate.force_if_waiting()); // cleanup watchdog expired
+        assert!(gate.request_exit());
+        assert!(gate.finish()); // late completion remains safe
+        assert!(!gate.force_if_waiting());
     }
 
     #[test]
