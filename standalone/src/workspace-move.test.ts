@@ -67,6 +67,7 @@ import {
   publishWorkspaceSession,
   resetWindowSessionAggregator,
 } from "dormouse-lib/lib/window-session-aggregator";
+import { getTerminalInstance } from "dormouse-lib/lib/terminal-registry";
 import { setPlatform } from "dormouse-lib/lib/platform";
 import { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
 
@@ -496,6 +497,23 @@ describe("a torn-out window's boot", () => {
     // The window has no snapshot yet; its Workspace comes from the payload.
     expect(getWorkspacesSnapshot().workspaces.map((workspace) => workspace.name)).toEqual(["Deploys"]);
     expect(getNotes("pane-a")).toHaveLength(1);
+  });
+
+  it("boots fresh without installing a refused tear-out or retaining its Sessions", async () => {
+    const platform = fakePlatform();
+    const kill = vi.spyOn(platform, "killPty");
+    const host = mocks.invoke.getMockImplementation()!;
+    mocks.invoke.mockImplementation(async (cmd, args) => {
+      if (cmd === "adopt_done") throw new Error("arrival expired");
+      return host(cmd, args);
+    });
+    arrivals = [payload()];
+    expect(await bootFromTearOut(platform)).toBeNull();
+    expect(getWorkspacesSnapshot().workspaces.map((w) => w.id)).not.toContain(WORKSPACE_ID);
+    expect(getWindowSnapshot().workspaces.map((w) => w.id)).not.toContain(WORKSPACE_ID);
+    expect(getNotes("pane-a")).toHaveLength(0);
+    expect(getTerminalInstance("pane-a")).toBeNull();
+    expect(kill).not.toHaveBeenCalled();
   });
 
   it("boots fresh, never blank, when the sole arrival cannot be resumed", async () => {
