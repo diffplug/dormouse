@@ -1,0 +1,170 @@
+name: Hosted PR preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+
+permissions:
+  contents: read
+
+# Let provisioning finish before cleanup/redeploy; canceling halfway leaks resources.
+concurrency:
+  group: hosted-pr-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  changes:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      hosted: ${{ steps.paths.outputs.hosted }}
+    steps:
+      # Build the PR merge revision, including Hosted files added to its base.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Detect changes across the full PR
+        id: paths
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
+        run: |
+          # GitHub caps this API at 3,000 files. Verify conservatively above the cap.
+          if [ "$CHANGED_FILES" -gt 3000 ]; then
+            echo "hosted=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files" --jq '.[] | .filename, (.previous_filename // empty)' > "$RUNNER_TEMP/hosted-files"
+          node hosted/scripts/changed.mjs "$RUNNER_TEMP/hosted-files" >> "$GITHUB_OUTPUT"
+
+  verify:
+    needs: changes
+    if: needs.changes.outputs.hosted == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # Build the PR merge revision, including Hosted files added to its base.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:hosted
+      - run: pnpm build:hosted
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: preview-assets
+          path: hosted/dist
+          retention-days: 3
+      - if: vars.HOSTED_PREVIEWS_ENABLED != 'true'
+        run: echo '::notice::Cloud previews are not configured yet. Follow hosted/DEPLOYMENT.md, set HOSTED_PREVIEWS_ENABLED=true, then rerun this workflow.'
+
+  deploy:
+    needs: verify
+    # Never expose deployment credentials to fork code or pull_request_target.
+    if: >-
+      github.event.action != 'closed' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      vars.HOSTED_PREVIEWS_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: hosted-preview
+      url: ${{ steps.deploy.outputs.url }}
+    env:
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      BUILD_SHA: ${{ github.sha }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_WORKERS_SUBDOMAIN: ${{ vars.CLOUDFLARE_WORKERS_SUBDOMAIN }}
+    steps:
+      # Build the PR merge revision, including Hosted files added to its base.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: preview-assets
+          path: hosted/dist
+      - name: Check preview settings before creating resources
+        run: |
+          node --input-type=module <<'JS'
+          import { required } from './hosted/scripts/preview.mjs';
+          for (const name of ['CLOUDFLARE_ACCOUNT_ID', 'CLOUDFLARE_WORKERS_SUBDOMAIN',
+            'NEON_PROJECT_ID', 'NEON_PREVIEW_PARENT_BRANCH',
+            'CLOUDFLARE_API_TOKEN', 'NEON_API_KEY', 'PREVIEW_AUTH_SECRET'])
+            required(process.env, name);
+          JS
+        env:
+          NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
+          NEON_PREVIEW_PARENT_BRANCH: ${{ vars.NEON_PREVIEW_PARENT_BRANCH }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          PREVIEW_AUTH_SECRET: ${{ secrets.PREVIEW_AUTH_SECRET }}
+      - name: Create or reuse PR database branch
+        id: database
+        uses: neondatabase/create-branch-action@fb620d43d4c565abaf088b848a4e28e5c4ea4d9c # v6
+        with:
+          project_id: ${{ vars.NEON_PROJECT_ID }}
+          parent_branch: ${{ vars.NEON_PREVIEW_PARENT_BRANCH }}
+          branch_name: dormouse-hosted-pr-${{ github.event.pull_request.number }}
+          api_key: ${{ secrets.NEON_API_KEY }}
+          # Use the plan default (5 minutes); Free rejects custom timeouts.
+          suspend_timeout: 0
+      - name: Apply and validate SQL migrations on this PR's database
+        run: pnpm --filter dormouse-hosted db:migrate --preview && pnpm --filter dormouse-hosted db:validate --preview
+        env:
+          DATABASE_URL: ${{ steps.database.outputs.db_url }}
+      - name: Deploy Worker and Hyperdrive
+        id: deploy
+        run: pnpm --filter dormouse-hosted preview:deploy
+        env:
+          DATABASE_URL: ${{ steps.database.outputs.db_url }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          PREVIEW_AUTH_SECRET: ${{ secrets.PREVIEW_AUTH_SECRET }}
+      - name: Check deployed revision, database, cookies and routes
+        run: pnpm --filter dormouse-hosted preview:smoke "$PREVIEW_ORIGIN" "$BUILD_SHA"
+        env:
+          PREVIEW_ORIGIN: ${{ steps.deploy.outputs.url }}
+
+  cleanup:
+    if: >-
+      github.event.action == 'closed' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      vars.HOSTED_PREVIEWS_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: hosted-preview
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json
+      - name: Remove this PR's Worker, Hyperdrive and Neon branch
+        run: node hosted/scripts/preview.mjs cleanup
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}

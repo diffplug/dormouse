@@ -3,7 +3,7 @@
 > See `docs/specs/glossary.md` for Session, Pane, Surface, and remote-role vocabulary.
 > Owns the guarantees Dormouse makes, what it does not defend, the gaps it
 > knows about, and how all of it is checked. Defers every mechanism to the spec
-> that owns it, and every audited check to the five specs under
+> that owns it, and every audited check to the specs under
 > [How the guarantees are checked](#how-the-guarantees-are-checked). Published
 > at `https://dormouse.sh/docs/security`, whole but for the three blocks split
 > by audience; `docs/specs/website-docs.md` owns the page.
@@ -13,7 +13,9 @@ Dormouse holds shells, source trees, credentials, and local files. Its
 **remote control** admits an authorized phone as a person at the keyboard;
 **loopback listeners** receive requests from pages in the user's browser.
 
-**Only the self-hosted deployment ships.** The relay runs on hardware the user
+**Only the self-hosted remote-control deployment ships.** Hosted account code is
+implemented with production provisioning pending ([Hosted accounts](./hosted.md));
+it grants no terminal access. The relay runs on hardware the user
 owns and is private to their tailnet by default, but its application boundary
 assumes the HTTPS origin is public ([SELF_HOST.md](../../SELF_HOST.md)).
 **Nothing about remote control applies to a Burrow (a Standalone or VS Code
@@ -152,7 +154,7 @@ ones are the record of what tripped and what changed.
 
 | Domain | Specs | Covers |
 | --- | --- | --- |
-| `application-security` | [security-local.md](./security-local.md), [security-remote.md](./security-remote.md) | the local application's boundaries, remote control, and every path no other domain claims |
+| `application-security` | [security-local.md](./security-local.md), [security-remote.md](./security-remote.md), [security-hosted.md](./security-hosted.md) | local boundaries, remote control, Hosted accounts, and every path no other domain claims |
 | `supply-chain` | [security-supply-chain.md](./security-supply-chain.md) | the dependency graph, the lockfile, the disclosure and its generator |
 | `ci-and-secrets` | [security-ci.md](./security-ci.md), [security-audit.md](./security-audit.md), this spec | GitHub Actions, the bot, releases, secrets, and the audit itself |
 

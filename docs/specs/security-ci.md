@@ -62,7 +62,7 @@ This repository runs the [tend](https://github.com/max-sixty/tend) agent harness
 - **FAIL IF** `.github/workflows/workflow-audit.yaml` starts deriving its lower bound from anything the pusher controls; it must stay the previous successful run's server-set `created_at` (rationale). The `--since` filter is the known evasion above.
 - **FAIL IF** either admin-gating ruleset is missing or weakened. `Merge access` must target `~DEFAULT_BRANCH`, block nothing beyond `update`, and carry admin (`RepositoryRole` actor `5`) as its sole bypass actor; `Tag operations` must target `~ALL` tags, block both `creation` and `update`, and carry the same admin-only bypass.
 - **FAIL IF** `dormouse-bot` holds `maintain` or `admin` on this repository. `GET /collaborators/dormouse-bot/permission` spells `push` as `write` in both `permission` and `role_name`, so check that neither of those two roles appears rather than string-comparing against `push`.
-- **FAIL IF** any GitHub environment's deployment-branch-policies admit a ref that is not admin-gated by the `Tag operations` or `Merge access` rulesets. Today: `vscode-extension-publish` and `release-attest` (`v*` tag, admin-only via `Tag operations`); `security-audit` (`main` admin-only via `Merge access`, plus `v*` tag); `tend` (`main` only, admin-only via `Merge access`).
+- **FAIL IF** any GitHub environment except `hosted-preview` admits a ref that is not admin-gated by the `Tag operations` or `Merge access` rulesets. Hosted environments follow "Hosted Deployments" below. Today: `vscode-extension-publish` and `release-attest` (`v*` tag, admin-only via `Tag operations`); `security-audit` (`main` admin-only via `Merge access`, plus `v*` tag); `tend` (`main` only, admin-only via `Merge access`).
 - **FAIL IF** the secret inventory departs from this placement (rationale). One pass over `actions/secrets`, `actions/organization-secrets`, and each environment's secret listing answers every line:
   - `AUDIT_PAT` — in `security-audit`, absent at repo level.
   - `TEND_BOT_TOKEN` — in `tend`, absent at repo level.
@@ -79,6 +79,17 @@ This repository runs the [tend](https://github.com/max-sixty/tend) agent harness
 - **FAIL IF** `default_workflow_permissions` for this repository is not `read`, or `can_approve_pull_request_reviews` is not `false` (`gh api repos/diffplug/dormouse/actions/permissions/workflow`) — the backstop for every permission bullet in this spec (rationale).
 
 Source of truth: `WINDOW` and `is_tend_regen` in `.github/workflows/workflow-audit.yaml`.
+
+## Hosted Deployments
+
+**Must keep Hosted credentials in dedicated environments.** `hosted-production` and `hosted-release-tag` admit only `main`; `hosted-preview` admits only `main` and `refs/pull/*/merge`. All require Ned or Edgar's review with administrator bypass disabled; self-review is allowed. Preview approval authorizes the PR code to receive test-resource credentials only.
+
+- **FAIL IF** a Hosted environment lacks those branch restrictions, required reviewers, or disabled administrator bypass; inspect all three environments and their deployment policies.
+- **FAIL IF** Hosted credentials appear at repository/org scope, production credentials appear in `hosted-preview`, or preview credentials can reach production/TTR/marketing resources. Inspect GitHub secret placement and Cloudflare/Neon token scope; names alone do not isolate resources.
+- **FAIL IF** `HOSTED_TAG_TOKEN` appears outside `hosted-release-tag`, or that environment is used by a job other than `tag` in `.github/workflows/hosted-production.yml`. Its admin identity's repository-scoped Contents-write PAT can write code and bypass tag protection; it must never enter a deployment job or PR execution.
+- **FAIL IF** a Hosted preview deploy accepts a fork or a failing verification, or a Hosted production tag can run before live verification succeeds; inspect the workflow dependency/condition graph.
+
+Source of truth: `hosted/scripts/setup-github.mjs`; `.github/workflows/hosted-preview.yml`; `.github/workflows/hosted-production.yml`.
 
 ## VS Code Extension Releases
 

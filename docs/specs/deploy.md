@@ -174,6 +174,10 @@ Source of truth: `create_release` in `scripts/sign-and-deploy.sh`; `website/scri
 
 `docs/specs/security-ci.md` -> "Desktop Releases" owns the argv-exposure rules for the three prompted secrets.
 
+## Hosted account releases
+
+See `docs/specs/hosted.md` -> "Production releases" for the Hosted pipeline and `hosted/DEPLOYMENT.md` for provisioning and operator commands.
+
 ## Future
 
 **Analytics-backed download URLs.** The `/latest/download/` hotlinks could move to `dormouse.sh/download/...` behind Cloudflare R2. Changing website links and manifest bundle URLs needs no app update while the manifest endpoint remains stable.

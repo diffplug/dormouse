@@ -58,6 +58,11 @@ website/public/guide/
 
 # Environment
 .env.local
+hosted/.env
+hosted/.dev.vars*
+hosted/.wrangler/
+hosted/.pgstencil/
+hosted/dist-worker/
 
 # Storybook / Chromatic
 storybook-static/
