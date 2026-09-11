@@ -27,7 +27,8 @@ if (isVscode) {
 initAlertStateReceiver();
 
 // Request PTY list before rendering so Wall can restore existing sessions.
-// On non-VSCode platforms (or first launch), this resolves immediately with no IDs.
+// With nothing saved (a first launch, or the fake adapter) this self-caps at
+// 500 ms; only a saved terminal pane buys the 3 s retry.
 resumeOrRestore(platform).then((result) => {
   createRoot(document.getElementById("root")!).render(
     <StrictMode>

@@ -112,8 +112,12 @@ running, and a caller that cold-restores there starts a second set over them, so
 `LivePtys` reports which it was. **A collector given `retryTimeoutMs` asks once
 more on that budget before reporting silence**, since an empty list still
 resolves as soon as it arrives and a slow launch is exactly when the two are
-confused (rationale). Source of truth: `collectLivePtys` in
-`lib/src/lib/reconnect.ts`; `list` in `standalone/sidecar/pty-core.js`.
+confused (rationale). **`resumeOrRestore` asks for the retry only when the saved
+session names a terminal pane** — the shells the retry protects; `restoreWindow`
+in `standalone/src/window-restore.ts` gates the same way — so a host that answers
+nothing holds first paint for 500 ms, not the whole budget. Source of truth:
+`collectLivePtys` in `lib/src/lib/reconnect.ts`; `list` in
+`standalone/sidecar/pty-core.js`.
 
 **Seeded titles reject the sentinels.** Saved pane and door titles come back through `setTerminalUserTitle()`, which rejects the reserved `<idle>` prefix (`docs/specs/terminal-state.md` → Supported OSC Inputs), and the seed callers in `terminal-lifecycle.ts` additionally skip `<unnamed>`, the default panel placeholder (rationale).
 
