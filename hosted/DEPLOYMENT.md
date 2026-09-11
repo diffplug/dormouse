@@ -69,7 +69,8 @@ gh variable set HOSTED_PREVIEWS_ENABLED --repo diffplug/dormouse --body true
 ```
 
 A PR touching `hosted/`, the workflow, vendored packages, or shared build inputs
-runs Hosted tests and builds before provisioning. Forks verify without credentials.
+runs Hosted tests and builds the exact PR merge revision before provisioning.
+Forks verify without credentials.
 The changed-files check paginates the entire PR and includes renamed source paths.
 The URL is in the deployment environment link and job summary; no PR comment bot
 or write-scoped workflow token is needed. Draft PRs receive previews too.
