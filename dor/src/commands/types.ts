@@ -178,11 +178,24 @@ export interface SwitchWorkspaceRequest {
   window?: string;
 }
 
+/** Move a Workspace: to another Window (`toWindow`, a label or `new` for a
+ *  torn-out one), to a strip position (`index`, 0-based), or both. */
+export interface MoveWorkspaceRequest {
+  workspace: string;
+  toWindow?: string;
+  index?: number;
+  /** A move between Windows destroys every plain iframe's page state (the
+   *  document cannot leave its webview); the host refuses such a move unless
+   *  the caller passed this. */
+  dangerouslyDestroyIframePageState: boolean;
+  window?: string;
+}
+
 /** The answer every mutating Workspace verb gives: what it did, and the
  *  Workspace it did it to. `workspaceRef` is positional, so for `close` it is
  *  the ref the Workspace had. */
 export interface WorkspaceMutationResponse {
-  status: 'created' | 'renamed' | 'closed' | 'active';
+  status: 'created' | 'renamed' | 'closed' | 'active' | 'moved';
   workspaceId: string;
   workspaceRef: string;
   name: string;
@@ -397,6 +410,7 @@ export interface ControlClient {
   renameWorkspace(request: RenameWorkspaceRequest): Promise<WorkspaceMutationResponse>;
   closeWorkspace(request: CloseWorkspaceRequest): Promise<WorkspaceMutationResponse>;
   switchWorkspace(request: SwitchWorkspaceRequest): Promise<WorkspaceMutationResponse>;
+  moveWorkspace(request: MoveWorkspaceRequest): Promise<WorkspaceMutationResponse>;
 }
 
 export interface AgentBrowserExecResult {

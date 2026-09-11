@@ -6,12 +6,15 @@ import type {
   WorkspaceMutationResponse,
   WorkspaceRow,
 } from 'dor/commands/types';
+import { getPlatformOrNull } from '../../lib/platform';
 import { getActivitySnapshot } from '../../lib/session-activity-store';
 import type { WorkspaceId } from '../../lib/session-types';
 import {
   createWorkspace,
   currentWindowRef,
   getWorkspacesSnapshot,
+  isWindowRef,
+  moveWorkspace,
   renameWorkspace,
   resolveWorkspaceRef,
   setActiveWorkspace,
@@ -40,6 +43,9 @@ export type WindowControlParams = DorControlParams & {
   scope?: unknown;
   name?: unknown;
   force?: unknown;
+  toWindow?: unknown;
+  index?: unknown;
+  dangerouslyDestroyIframePageState?: unknown;
 };
 
 /** This Window's Workspaces in strip order, each with its union status. */
@@ -216,6 +222,59 @@ export async function handleWorkspaceControl(detail: DorControlRequest): Promise
       if (!target) return;
       setActiveWorkspace(target.id);
       respondMutation('active', target);
+      return;
+    }
+
+    case WORKSPACE_CONTROL_METHODS.move: {
+      const target = requireWorkspace(detail);
+      if (!target) return;
+      const toWindow = stringParam(params.toWindow)?.trim();
+      const index = typeof params.index === 'number' && Number.isInteger(params.index) && params.index >= 0
+        ? params.index : undefined;
+      if (toWindow === undefined && index === undefined) {
+        detail.respond({ ok: false, error: 'workspace.move needs a window, an index, or both' });
+        return;
+      }
+      if (toWindow !== undefined && !isWindowRef(toWindow)) {
+        const handle = await awaitWallHandle(target.id);
+        if (!handle) {
+          detail.respond({ ok: false, error: mountingRefusal(target.ref) });
+          return;
+        }
+        const platform = getPlatformOrNull();
+        if (!platform?.transferWorkspace) {
+          detail.respond({ ok: false, error: 'this host has one window; workspace.move can only reorder here' });
+          return;
+        }
+        // The one thing a move between Windows cannot carry is a plain
+        // iframe's document: it reopens at its saved URL, its page state gone
+        // (`docs/specs/layout.md` → Workspaces). The caller says so explicitly.
+        const iframes = handle.iframeSurfaceIds();
+        if (iframes.length > 0 && params.dangerouslyDestroyIframePageState !== true) {
+          const refs = iframes.map((id) => `surface:${id}`).join(', ');
+          detail.respond({
+            ok: false,
+            error: `workspace '${target.ref}' holds ${iframes.length} iframe Surface(s) whose page state a move destroys (${refs}); `
+              + 'pass --dangerously-destroy-iframe-page-state to move it anyway',
+          });
+          return;
+        }
+        const label = toWindow.startsWith('window:') ? toWindow.slice('window:'.length) : toWindow;
+        // The index travels with it: the slot it names is in the target's strip.
+        // `moved` only once that Window has adopted the Workspace; one handed
+        // back is an error naming why, and it is still here
+        // (`docs/specs/dor-cli.md` → "dor workspace").
+        try {
+          await platform.transferWorkspace(target.id, label, index === undefined ? {} : { index });
+        } catch (err) {
+          detail.respond({ ok: false, error: `workspace '${target.ref}' was not moved: ${errorText(err)}` });
+          return;
+        }
+        respondMutation('moved', target);
+        return;
+      }
+      if (index !== undefined) moveWorkspace(target.id, index);
+      respondMutation('moved', target);
       return;
     }
 

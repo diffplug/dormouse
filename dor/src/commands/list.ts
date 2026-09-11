@@ -51,6 +51,7 @@ interface ListFlags extends WorkspaceScopedFlags {
   readonly ports?: boolean;
   readonly view?: SurfaceView;
   readonly workspaces?: boolean;
+  readonly window?: string;
 }
 
 const FULL_DESCRIPTION = `Lists every Surface in the current Workspace — terminals and browser Surfaces, including minimized ones (view "minimized").
@@ -65,7 +66,7 @@ Filters are ANDed. --command is an exact match against the running command repor
 
 JSON output (--json) always includes both stable ids and refs, and each row carries has_terminal (a PTY) and has_browser (a browser renderer) — gate on those, not on kind, so a Surface that has both still matches. It adds top-level caller_surface_ref/caller_surface_id and focused_surface_ref/focused_surface_id — the calling and focused Surfaces, null when neither is in the list — plus workspace_ref, window_ref, and a host block (app, workspace, cli_js_path, node_path): the identity dump dor identify used to print.
 
---workspace <ref> lists another Workspace instead, in this window or another: workspace:<n> (a stable number) or workspace:<name>, which resolves only when exactly one Workspace carries that name. Both are accepted bare ("2", "build").
+--workspace <ref> lists another Workspace instead, in this window or another: workspace:<n> (a stable number) or workspace:<name>, which resolves only when exactly one Workspace carries that name. Both are accepted bare ("2", "build"). --window <label> lists another window's Surfaces or Workspaces (window:main, ws-2).
 
 --all lists every Workspace of this Window, grouped under a Workspace header — every Workspace keeps its header, including one holding nothing and one the filters emptied. Rows keep their own Workspace-scoped surface:N refs, so several groups have a surface:1, but only the active Workspace's selection carries the focus marker; each JSON row adds workspace_ref, and the payload adds a workspaces array plus caller_workspace_ref/focused_workspace_ref, because caller_surface_ref/focused_surface_ref then name a ref several groups share (the _id halves stay unique). Target a row from another Workspace by its stable id, or pass --workspace.
 
@@ -149,14 +150,21 @@ function buildListCommand(): Command['command'] {
       optional: true,
       withNegated: false,
     },
+    window: {
+      kind: 'parsed',
+      parse: stringParser,
+      brief: "Another window to list, by its label (window:main, ws-2).",
+      optional: true,
+      placeholder: 'label',
+    },
   };
 
   return buildCommand<ListFlags, [], DorCommandContext>({
     docs: {
       brief: 'List Dormouse Surfaces.',
       customUsage: [
-        '[--workspace ref|--all] [--kind terminal|browser] [--view paned|zoomed|minimized] [--command text] [--cwd path] [--port number] [--ports] [--json] [--id-format refs|ids|both]',
-        '--workspaces [--json]',
+        '[--workspace ref|--all] [--window label] [--kind terminal|browser] [--view paned|zoomed|minimized] [--command text] [--cwd path] [--port number] [--ports] [--json] [--id-format refs|ids|both]',
+        '--workspaces [--window label] [--json]',
       ],
       fullDescription: FULL_DESCRIPTION,
     },
@@ -179,7 +187,7 @@ async function runListCommand(
 
   try {
     if (flags.workspaces === true) {
-      const overview = await client.listWorkspaces({});
+      const overview = await client.listWorkspaces(flags.window === undefined ? {} : { window: flags.window });
       writeStdout(context, flags.json === true
         ? renderWorkspacesJson(overview)
         : renderWorkspacesText(overview));
@@ -190,6 +198,7 @@ async function runListCommand(
       includePorts,
       ...(flags.all === true ? { scope: 'all' as const } : {}),
       ...workspaceParam(flags.workspace),
+      ...(flags.window === undefined ? {} : { window: flags.window }),
     });
     const env = context.options.env ?? {};
     const filtered = applyListFilters(response, flags, env);
@@ -206,7 +215,7 @@ async function runListCommand(
 
 /** The only flags the Workspace overview takes — an allowlist, so a flag added
  *  to this command is refused there until it is named here. */
-const WORKSPACES_FLAGS: ReadonlySet<keyof ListFlags> = new Set(['json', 'workspaces']);
+const WORKSPACES_FLAGS: ReadonlySet<keyof ListFlags> = new Set(['json', 'window', 'workspaces']);
 
 /** A flag as the user typed it, from the name stricli parsed it into. */
 function flagSpelling(name: string): string {
@@ -225,7 +234,7 @@ function checkScopeFlags(flags: ListFlags): { ok: true } | { ok: false; message:
       .map((name) => flagSpelling(name))
       .sort();
     if (others.length > 0) {
-      return { ok: false, message: `dor list --workspaces takes only --json, not ${others.join(', ')}` };
+      return { ok: false, message: `dor list --workspaces takes only --json and --window, not ${others.join(', ')}` };
     }
   }
   return { ok: true };

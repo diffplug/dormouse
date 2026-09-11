@@ -27,6 +27,8 @@ import {
   _resetWorkspaceDragForTesting,
 } from "./workspace-drag";
 import { _setWindowLabelForTesting } from "./window-label";
+import { registerWallHandle, resetWallHandles, stubWallHandle } from "dormouse-lib/components/wall/wall-handles";
+import { getWorkspaceUiSnapshot, resetWorkspaceUi } from "dormouse-lib/lib/workspace-ui-store";
 
 const settle = () => vi.advanceTimersByTimeAsync(0);
 /** Past the hit-test throttle, so the next move probes again. */
@@ -181,6 +183,35 @@ describe("releasing the drag", () => {
     await settle();
     expect(mocks.transferWorkspaceTo).toHaveBeenCalledWith("ws-1", "ws-2", { x: 120, y: 9 });
     expect(mocks.tearOutWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("asks first when the Workspace holds an iframe, and moves only on the typed letter", async () => {
+    resetWallHandles();
+    resetWorkspaceUi();
+    registerWallHandle(stubWallHandle("ws-1", { iframeSurfaceIds: () => ["browser-1", "browser-2"] }));
+    hit = { label: "ws-2", x: 120, y: 9 };
+    onDropOnOtherWindow("ws-1", { clientX: 900, clientY: 9 }, false);
+    await settle();
+    // Nothing moved: the gate is up, naming what it would cost.
+    expect(mocks.transferWorkspaceTo).not.toHaveBeenCalled();
+    const pending = getWorkspaceUiSnapshot().pendingMove;
+    expect(pending).toMatchObject({ id: "ws-1", iframeCount: 2 });
+    // The strip's key handler settles it; here, the letter's own effect.
+    pending!.proceed();
+    expect(mocks.transferWorkspaceTo).toHaveBeenCalledWith("ws-1", "ws-2", { x: 120, y: 9 });
+    resetWallHandles();
+    resetWorkspaceUi();
+  });
+
+  it("does not ask for a Workspace of terminals and agent-browser Surfaces", async () => {
+    resetWallHandles();
+    registerWallHandle(stubWallHandle("ws-1", { iframeSurfaceIds: () => [] }));
+    hit = null;
+    onDropOnOtherWindow("ws-1", { clientX: 2000, clientY: 800 }, false);
+    await settle();
+    expect(mocks.tearOutWorkspace).toHaveBeenCalled();
+    expect(getWorkspaceUiSnapshot().pendingMove).toBeNull();
+    resetWallHandles();
   });
 
   it("tears out when released over no window", async () => {

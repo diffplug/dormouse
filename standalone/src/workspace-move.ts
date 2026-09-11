@@ -65,6 +65,10 @@ interface MovePayload extends WorkspaceTransferPayload, Partial<WorkspaceTransfe
   /** Where the pointer released, in the target window's logical client space.
    *  The target turns it into a strip index; it alone knows its own tabs. */
   at?: { x: number; y: number };
+  /** The strip slot the caller named outright (`dor workspace move --index`);
+   *  wins over `at`. A drag never sends one, and a tear-out has no use for
+   *  one: its window has one tab. */
+  index?: number;
   /** Where the dragged tab should sit inside the new window, so it lands under
    *  the cursor. Rust turns it into the window's position, because only Rust
    *  knows where the cursor is on the screen. */
@@ -79,6 +83,16 @@ const ARRIVAL_TIMEOUT_MS = 3000;
 
 // --- Source ------------------------------------------------------------------
 
+/** How a hand-off ended: the target adopted the Workspace, or it came back. */
+export type MoveOutcome = { moved: true } | { moved: false; reason: string };
+
+interface InFlightMove {
+  prepared: PreparedWorkspaceTransfer;
+  /** Settles the caller's promise: `handleDeparted` with `moved`,
+   *  `handleArrivalFailed` with the host's reason. */
+  settle: (outcome: MoveOutcome) => void;
+}
+
 /**
  * Workspaces this Window has handed over and not yet released, by id.
  *
@@ -87,7 +101,9 @@ const ARRIVAL_TIMEOUT_MS = 3000;
  * Wall stays mounted, the notes stay put, and the only thing that changed here
  * is that the Workspace is in no snapshot (`markWorkspaceTransferring`).
  */
-const inFlight = new Map<WorkspaceId, PreparedWorkspaceTransfer>();
+const inFlight = new Map<WorkspaceId, InFlightMove>();
+
+const reasonOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 async function prepare(workspaceId: WorkspaceId): Promise<PreparedWorkspaceTransfer | null> {
   const handle = getWallHandle(workspaceId);
@@ -97,7 +113,12 @@ async function prepare(workspaceId: WorkspaceId): Promise<PreparedWorkspaceTrans
 
 /**
  * Hand the prepared Workspace to Rust and mark it transferring **only on
- * success**.
+ * success**, then wait for the transaction to settle: **`moved` means the
+ * target adopted it** (`workspace-departed`), and a hand-back
+ * (`workspace-arrival-failed`) is the reason Rust gave. The host accepting the
+ * invoke is not a move: the target can still close mid-transfer, or the
+ * watchdog can hand the Workspace back, and a caller told `moved` then would
+ * read one that never happened (`dor workspace move`).
  *
  * A rejected invoke is an ordinary state — the target window can close between
  * the drag's last probe and the drop — and Rust hands the PTYs back to this
@@ -107,36 +128,41 @@ async function handOff(
   prepared: PreparedWorkspaceTransfer,
   command: string,
   args: Record<string, unknown>,
-): Promise<void> {
+): Promise<MoveOutcome> {
   const { workspaceId, terminalIds } = prepared.payload;
-  if (inFlight.has(workspaceId)) return;
+  if (inFlight.has(workspaceId)) return { moved: false, reason: "Workspace is already in flight" };
   // Armed before the invoke: Rust asks the sidecar to stamp the marks inside
   // `begin_arrival`, so a `marked` line can arrive ahead of the invoke's reply.
   const pendingMarks = marksFor(terminalIds, `mark-${workspaceId}`);
-  inFlight.set(workspaceId, prepared);
+  const outcome = new Promise<MoveOutcome>((settle) => inFlight.set(workspaceId, { prepared, settle }));
   try {
     await invoke(command, args);
   } catch (err) {
-    if (inFlight.get(workspaceId) === prepared) inFlight.delete(workspaceId);
+    if (inFlight.get(workspaceId)?.prepared === prepared) inFlight.delete(workspaceId);
     console.warn(`[workspace-move] ${command} refused; the Workspace stays here`, err);
-    return; // `pendingMarks` unsubscribes itself at the timeout
+    return { moved: false, reason: reasonOf(err) }; // `pendingMarks` unsubscribes itself at the timeout
   }
-  if (inFlight.get(workspaceId) !== prepared) return; // handed back before invoke replied
+  if (inFlight.get(workspaceId)?.prepared !== prepared) return outcome; // handed back before invoke replied
+
   markWorkspaceTransferring(workspaceId);
   // The second half: once every terminal's mark has passed this window, what it
   // holds is exactly the bytes before the mark. Serialized here, attached to the
   // arrival by Rust, and only then drained by the target.
   const marks = await pendingMarks;
-  if (inFlight.get(workspaceId) !== prepared) return; // handed back while we waited
-  const content = await captureTransferContent(terminalIds, marks);
-  if (inFlight.get(workspaceId) !== prepared) return; // handed back while serializing
-  try {
-    await invoke("transfer_workspace_content", { workspaceId, content });
-  } catch (err) {
-    // The arrival is gone (the target closed, or the watchdog handed it back);
-    // `workspace-arrival-failed` has put, or will put, this Window back.
-    console.warn("[workspace-move] transfer_workspace_content refused", err);
+  if (inFlight.get(workspaceId)?.prepared === prepared) { // else handed back while we waited: nothing to send
+    const content = await captureTransferContent(terminalIds, marks);
+    if (inFlight.get(workspaceId)?.prepared === prepared) { // else handed back while serializing
+      try {
+        await invoke("transfer_workspace_content", { workspaceId, content });
+      } catch (err) {
+        // The arrival is gone (the target closed, or the watchdog handed it back);
+        // `workspace-arrival-failed` has put, or will put, this Window back.
+        console.warn("[workspace-move] transfer_workspace_content refused", err);
+      }
+    }
+
   }
+  return outcome;
 }
 
 /** The host stamps marks well inside this; past it, an unmarked id is
@@ -170,28 +196,37 @@ function marksFor(ids: readonly string[], requestId: string): Promise<Map<string
   });
 }
 
-/** Hand this Workspace to a window that already exists. */
+/** Hand this Workspace to a window that already exists. `at` is where the
+ *  pointer released in the target's strip, `index` a slot named outright (`dor
+ *  workspace move --index`), which wins; with neither the target appends.
+ *  Resolves once the target has adopted it, or handed it back. */
 export async function transferWorkspaceTo(
   workspaceId: WorkspaceId,
   to: string,
-  at: { x: number; y: number },
-): Promise<void> {
+  at?: { x: number; y: number },
+  index?: number,
+): Promise<MoveOutcome> {
   const prepared = await prepare(workspaceId);
-  if (!prepared) return;
-  await handOff(prepared, "transfer_workspace", {
+  if (!prepared) return { moved: false, reason: `no mounted Wall for '${workspaceId}'` };
+  return handOff(prepared, "transfer_workspace", {
     to,
-    payload: { ...prepared.payload, at } satisfies MovePayload,
+    payload: {
+      ...prepared.payload,
+      ...(at ? { at } : {}),
+      ...(index === undefined ? {} : { index }),
+    } satisfies MovePayload,
   });
 }
 
-/** Tear this Workspace out into a new window under the cursor. */
+/** Tear this Workspace out into a new window under the cursor. Resolves once
+ *  the new window has adopted it, or handed it back. */
 export async function tearOutWorkspace(
   workspaceId: WorkspaceId,
   grab: { x: number; y: number },
-): Promise<void> {
+): Promise<MoveOutcome> {
   const prepared = await prepare(workspaceId);
-  if (!prepared) return;
-  await handOff(prepared, "open_workspace_window", {
+  if (!prepared) return { moved: false, reason: `no mounted Wall for '${workspaceId}'` };
+  return handOff(prepared, "open_workspace_window", {
     payload: { ...prepared.payload, grab } satisfies MovePayload,
   });
 }
@@ -202,20 +237,26 @@ export async function tearOutWorkspace(
  * the Workspace out of the strip.
  */
 function handleDeparted(workspaceId: WorkspaceId): void {
-  const prepared = inFlight.get(workspaceId);
-  if (!prepared) {
+  const move = inFlight.get(workspaceId);
+  if (!move) {
     console.warn("[workspace-move] a departure for a Workspace that was not in flight", workspaceId);
     return;
   }
   inFlight.delete(workspaceId);
-  prepared.commit();
+  move.prepared.commit();
+  move.settle({ moved: true });
   // Moving a Window's last Workspace away closes it — without confirming,
   // archiving or killing, because nothing ended: the Surfaces are alive
   // somewhere else (`docs/specs/standalone.md` → "Transfer").
   if (getWorkspacesSnapshot().workspaces.length <= 1) {
     forgetWorkspaceSession(workspaceId);
-    void invoke("close_window").catch((err) =>
-      console.error("[workspace-move] close_window failed", err));
+    // On a later task, so the caller's answer leaves first: a `dor workspace
+    // move` that empties this window reports `moved` through this webview,
+    // and Rust destroys the window the moment it takes `close_window`.
+    setTimeout(() => {
+      void invoke("close_window").catch((err) =>
+        console.error("[workspace-move] close_window failed", err));
+    }, 0);
     return;
   }
   closeWorkspace(workspaceId);
@@ -229,10 +270,13 @@ function handleDeparted(workspaceId: WorkspaceId): void {
  * replay of what they missed, where a mark had passed.
  */
 function handleArrivalFailed(workspaceId: WorkspaceId, reason: string, replayIds: readonly string[]): void {
-  if (!inFlight.delete(workspaceId)) return;
+  const move = inFlight.get(workspaceId);
+  if (!move) return;
+  inFlight.delete(workspaceId);
   clearWorkspaceTransferring(workspaceId);
   console.warn(`[workspace-move] ${workspaceId} was not adopted (${reason}); it stays here`);
   if (replayIds.length) acceptHandBackReplay(workspaceId, replayIds);
+  move.settle({ moved: false, reason });
 }
 
 /** A hand-back's replay is one since-mark slice per id over the sidecar's
@@ -370,9 +414,11 @@ async function adoptWorkspace(platform: PlatformAdapter, payload: MovePayload): 
     // Before the store change too, so the Window blob it triggers already carries
     // the arriving Workspace's record rather than an empty one.
     publishWorkspaceSession(id, session);
-    // Where in this window's strip the pointer released. This window alone knows
-    // its own tabs, which is why the source sends a point rather than an index.
-    const index = payload.at ? workspaceDropTarget(payload.at.x).index : undefined;
+    // Where in this window's strip it lands: the slot the caller named, else
+    // the one under the pointer's release — this window alone knows its own
+    // tabs, which is why a drag sends a point rather than an index — else the
+    // end.
+    const index = payload.index ?? (payload.at ? workspaceDropTarget(payload.at.x).index : undefined);
     createWorkspace({ id, name });
     if (index !== undefined) moveWorkspace(id, index);
     setActiveWorkspace(id);
@@ -387,7 +433,7 @@ async function adoptWorkspace(platform: PlatformAdapter, payload: MovePayload): 
     }
   } catch (err) {
     console.error("[workspace-move] adoption failed; handing the Workspace back", err);
-    settle("adopt_failed", id, err instanceof Error ? err.message : String(err));
+    settle("adopt_failed", id, reasonOf(err));
   } finally {
     adopting.delete(id);
   }
@@ -474,7 +520,7 @@ export async function bootFromTearOut(platform: PlatformAdapter): Promise<WallBo
     // is a window the user can use rather than a blank one. Anything else in
     // the queue is left for `initWorkspaceMoves` to drain over it.
     console.error("[workspace-move] the torn-out Workspace could not be resumed", err);
-    settle("adopt_failed", id, err instanceof Error ? err.message : String(err));
+    settle("adopt_failed", id, reasonOf(err));
     adopting.delete(id);
     return null;
   }

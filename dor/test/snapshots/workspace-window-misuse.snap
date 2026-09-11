@@ -1,0 +1,5 @@
+exitCode: 1
+stdout:
+
+stderr:
+Error: --window applies only to dor workspace move

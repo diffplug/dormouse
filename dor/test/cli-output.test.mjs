@@ -306,6 +306,11 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
       const target = fixtureWorkspace(request.workspace);
       return { status: 'active', workspaceId: target.id, workspaceRef: target.ref, name: target.name };
     },
+    async moveWorkspace(request) {
+      this.requests.push({ method: 'moveWorkspace', request });
+      const target = fixtureWorkspace(request.workspace);
+      return { status: 'moved', workspaceId: target.id, workspaceRef: target.ref, name: target.name };
+    },
     async resolveOpenTarget(request) {
       this.requests.push({ method: 'resolveOpenTarget', request });
       // Mirror the host: surface:1 owns port 5173; surface:2 owns nothing.
@@ -1488,6 +1493,38 @@ test('workspace close refuses running work until forced', async () => {
   const client = fixtureClient();
   await snapshot('workspace-close-force', await runCli(['workspace', 'close', 'workspace:2', '--force'], { client, env: listEnv }));
   assert.deepEqual(client.requests, [{ method: 'closeWorkspace', request: { workspace: 'workspace:2', force: true } }]);
+});
+
+test('workspace move sends the window and the index in one request', async () => {
+  // `--window` becomes `toWindow` and `--index` rides beside it: the slot is
+  // the target's, and the host carries it across rather than dropping it.
+  const client = fixtureClient();
+  await snapshot(
+    'workspace-move',
+    await runCli(['workspace', 'move', 'build', '--window', 'ws-2', '--index', '0'], { client, env: listEnv }),
+  );
+  assert.deepEqual(client.requests, [{
+    method: 'moveWorkspace',
+    request: { workspace: 'build', toWindow: 'ws-2', index: 0, dangerouslyDestroyIframePageState: false },
+  }]);
+});
+
+test('workspace move flags are refused off the action, and move needs one of them', async () => {
+  await snapshot('workspace-window-misuse', await runCli(['workspace', 'switch', '2', '--window', 'ws-2'], { client: fixtureClient(), env: listEnv }));
+  await snapshot('workspace-index-misuse', await runCli(['workspace', 'switch', '2', '--index', '0'], { client: fixtureClient(), env: listEnv }));
+  await snapshot('workspace-destroy-iframe-misuse', await runCli(['workspace', 'switch', '2', '--dangerously-destroy-iframe-page-state'], { client: fixtureClient(), env: listEnv }));
+  await snapshot('workspace-move-needs-flag', await runCli(['workspace', 'move', '2'], { client: fixtureClient(), env: listEnv }));
+  await snapshot('workspace-invalid-index', await runCli(['workspace', 'move', '2', '--index', 'x'], { client: fixtureClient(), env: listEnv }));
+});
+
+test('list --window asks the host for another window', async () => {
+  const client = fixtureClient();
+  await runCli(['list', '--window', 'ws-2'], { client, env: listEnv });
+  await runCli(['list', '--workspaces', '--window', 'ws-2'], { client, env: listEnv });
+  assert.deepEqual(client.requests, [
+    { includePorts: false, window: 'ws-2' },
+    { method: 'listWorkspaces', request: { window: 'ws-2' } },
+  ]);
 });
 
 test('workspace usage errors name the action', async () => {

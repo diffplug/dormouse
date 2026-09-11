@@ -20,6 +20,8 @@ xterm.js paints only its own rendered surface, and integer row fitting leaves a 
 
 **Why a hidden Workspace's terminals are detached rather than merely hidden.** xterm pauses rendering only when its screen element stops intersecting (`RenderService` in `@xterm/xterm`), and a `visibility: hidden` box still intersects, so a hidden pane kept rasterizing every output frame and holding a GL context. Reusing the minimize primitives pauses it and releases the context; the box stays laid out, so the reattach fit finds the same grid and sends no PTY resize (2026-09).
 
+**Why a move confirms for iframes but not for agent-browser Surfaces.** An agent-browser Surface's session lives in the host process; the target window reconnects its viewer and the page is as it was. A plain iframe is a document inside the source webview, and no API carries a document between webviews — the alternative, keeping every Workspace in its own native child webview and reparenting it, was prototyped on a vendored Tauri fork and rejected for the fork (2026-09). The confirmation is the kill's typed letter rather than a button because what is lost is as gone as a killed process, and the same gesture already means that.
+
 **Why `inert` is only defense in depth.** `visibility: hidden` already removes focusability, so the attribute exists for a future presentation that keeps the subtree visible.
 
 **Why the strip's reorder drag does not capture the pointer on press.** A captured pointer retargets the following `click` to the capture element, so capturing on `pointerdown` swallowed the activate button's click and no tab could be activated by mouse (found in the browser-dev harness, 2026-09). Capture is only useful once the gesture is a drag, which is where it now happens.

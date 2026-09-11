@@ -144,7 +144,8 @@ bridge → `TauriAdapter` `CustomEvent("dormouse:control-request")` → Wall
 handler, and back along the same hops.
 
 **A request naming a Workspace or a Window is routed to the window holding
-it**, whichever window the caller sits in; one naming neither goes to the
+it** (`--workspace`, or `dor list --window <label>`), whichever window the
+caller sits in; one naming neither goes to the
 window that owns its `DORMOUSE_SURFACE_ID`, and one naming no Surface to the
 focused window. A target the registry cannot place — an unknown ref, or a name
 two windows use — reaches the caller's own window, which refuses it by name.
@@ -458,6 +459,7 @@ Wall (Handle Model), and each takes a `workspace:<n|name>` target except `new`:
 | `rename <ref> <name>` | Renames the Workspace only — no Surface title (`docs/specs/layout.md` → "Workspaces"). |
 | `close <ref> [--force]` | **Refuses, raising no confirmation, when the Workspace holds a touched or running Surface** unless `--force` — the caller is a command, not someone watching the Wall, exactly as `dor kill` archives silently. The last Workspace, a Workspace whose close meets another already in flight, and one whose Wall never registers (`still mounting`, after the routing retry — closing past it would leave its Sessions running with nothing holding them) refuse too. Member Surfaces close through the closure coordinator, and a refusal leaves the Workspace open and the user where they were (`docs/specs/notepad.md` → "Closure"). |
 | `switch <ref>` | Activates it. |
+| `move <ref> [--window <label\|new>] [--index <n>] [--dangerously-destroy-iframe-page-state]` | To another Window (`new` tears out), a strip position, or both — with both, the position is in the target's strip; the Window handling it runs the same transfer the strip's drag does (`docs/specs/standalone.md` → Transfer), with no pointer to place the tab by. **Answers `moved` only once the target Window has adopted the Workspace**; one handed back (the target closed mid-transfer, or never answered) is an error naming the reason, and the Workspace stays where it was. **Refuses a move between Windows while the Workspace holds a plain iframe Surface unless the flag is passed**, naming them: the page state is lost (`docs/specs/layout.md` → Workspaces). A host with one Window reorders only. |
 
 **Each verb ships as one action of one command**, not a route map: the published
 CLI reference renders one help page per top-level command
@@ -656,12 +658,10 @@ Source of truth: `buildDorSurfacesInternal` in `lib/src/components/Wall.tsx`; `d
   npm) distributes the bootstrap stub, never a copy of the content. A user-level
   `--global` install variant waits until a story needs it.
 
-- **Cross-Window listing and moves.** `--workspace` already reaches a sibling
-  Window's Workspace ([Standalone](#standalone)); the router places a `window`
-  target too, but no command takes that flag yet. `dor list --all` still lists
-  the answering Window alone, and no verb moves a Workspace between Windows or
-  reorders the strip. Both read the registry
-  (`docs/specs/standalone.md` → "Workspace registry").
+- **Cross-Window `--all`.** `dor list --window <label>` lists one other Window
+  and `--workspace` reaches a sibling's Workspace ([Standalone](#standalone)),
+  but `dor list --all` still lists the answering Window alone; a union would
+  read the registry (`docs/specs/standalone.md` → "Workspace registry").
 - **Cross-Workspace listing in VS Code.** Each Workspace is its own webview
   there, so `dor list --all` would have to aggregate at the extension host
   rather than in a per-webview control handler; until it does, VS Code refuses

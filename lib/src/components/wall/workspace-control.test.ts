@@ -10,6 +10,8 @@ import {
   getWorkspacesSnapshot,
   renameWorkspace,
   resetWorkspaces,
+  installWorkspaceIdPool,
+  resetWorkspaceIdPool,
 } from '../../lib/workspace-store';
 import { clearTerminalActivity, setTerminalActivity } from '../../lib/session-activity-store';
 import { resetWorkspaceSurfaces, setWorkspaceSurfaces } from '../../lib/workspace-surfaces';
@@ -127,6 +129,98 @@ describe('workspace mutation verbs', () => {
     const noName = request('workspace.rename', { workspace: 'workspace:1', name: '   ' });
     await handleWorkspaceControl(noName);
     expect(answer(noName)).toBe('name is required');
+  });
+});
+
+describe('workspace.move', () => {
+  // Refs are the minted id's number only once a pool is installed; without
+  // one, `workspace-7` would read as a position (`docs/specs/dor-cli.md`).
+  beforeEach(async () => {
+    await installWorkspaceIdPool(async (count) => Array.from({ length: count }, (_, i) => `workspace-${100 + i}`));
+  });
+  afterEach(() => { resetWorkspaceIdPool(); });
+
+  it('reorders within the Window without a host, and refuses a move between Windows there', async () => {
+    const second = createWorkspace({ id: 'workspace-7', name: 'build', activate: false }).id;
+    handleFor(getWorkspacesSnapshot().workspaces[0].id);
+    handleFor(second);
+    const reorder = request('workspace.move', { workspace: 'workspace:7', index: 0 });
+    await handleWorkspaceControl(reorder);
+    expect(answer(reorder)).toMatchObject({ status: 'moved', workspaceId: second, workspaceRef: 'workspace:7' });
+    expect(getWorkspacesSnapshot().workspaces[0].id).toBe(second);
+
+    setPlatform({} as unknown as PlatformAdapter);
+    const across = request('workspace.move', { workspace: 'workspace:7', toWindow: 'ws-2' });
+    await handleWorkspaceControl(across);
+    expect(answer(across)).toMatch(/one window/);
+
+    const neither = request('workspace.move', { workspace: 'workspace:7' });
+    await handleWorkspaceControl(neither);
+    expect(answer(neither)).toMatch(/needs a window, an index, or both/);
+  });
+
+  it('refuses to move a Workspace holding iframes unless told to destroy their page state', async () => {
+    const second = createWorkspace({ id: 'workspace-7', name: 'build', activate: false }).id;
+    handleFor(getWorkspacesSnapshot().workspaces[0].id);
+    handleFor(second, { iframeSurfaceIds: () => ['browser-1'] });
+    const transferWorkspace = vi.fn(async () => {});
+    setPlatform({ transferWorkspace } as unknown as PlatformAdapter);
+
+    const refused = request('workspace.move', { workspace: 'workspace:7', toWindow: 'window:ws-2' });
+    await handleWorkspaceControl(refused);
+    expect(answer(refused)).toMatch(/1 iframe Surface\(s\).*surface:browser-1.*--dangerously-destroy-iframe-page-state/);
+    expect(transferWorkspace).not.toHaveBeenCalled();
+
+    const forced = request('workspace.move', {
+      workspace: 'workspace:7', toWindow: 'window:ws-2', dangerouslyDestroyIframePageState: true,
+    });
+    await handleWorkspaceControl(forced);
+    expect(transferWorkspace).toHaveBeenCalledWith(second, 'ws-2', {});
+    expect(answer(forced)).toMatchObject({ status: 'moved', workspaceRef: 'workspace:7' });
+
+    transferWorkspace.mockRejectedValueOnce(new Error('the host refused'));
+    const failed = request('workspace.move', { workspace: 'workspace:7', toWindow: 'new', dangerouslyDestroyIframePageState: true });
+    await handleWorkspaceControl(failed);
+    expect(answer(failed)).toMatch(/was not moved: the host refused/);
+  });
+
+  it('carries --index to the target window rather than reordering here', async () => {
+    const second = createWorkspace({ id: 'workspace-7', name: 'build', activate: false }).id;
+    handleFor(getWorkspacesSnapshot().workspaces[0].id);
+    handleFor(second);
+    const transferWorkspace = vi.fn(async () => {});
+    setPlatform({ transferWorkspace } as unknown as PlatformAdapter);
+
+    const both = request('workspace.move', { workspace: 'workspace:7', toWindow: 'ws-2', index: 0 });
+    await handleWorkspaceControl(both);
+    expect(transferWorkspace).toHaveBeenCalledWith(second, 'ws-2', { index: 0 });
+    expect(answer(both)).toMatchObject({ status: 'moved', workspaceRef: 'workspace:7' });
+    // The slot it names is the target's: this strip is not reordered on the way out.
+    expect(getWorkspacesSnapshot().workspaces.map((workspace) => workspace.id)[1]).toBe(second);
+  });
+
+  it('answers moved only once the target has adopted the Workspace, and the hand-back reason otherwise', async () => {
+    const second = createWorkspace({ id: 'workspace-7', name: 'build', activate: false }).id;
+    handleFor(getWorkspacesSnapshot().workspaces[0].id);
+    handleFor(second);
+    let adopt!: () => void;
+    const transferWorkspace = vi.fn(() => new Promise<void>((resolve) => { adopt = resolve; }));
+    setPlatform({ transferWorkspace } as unknown as PlatformAdapter);
+
+    const pending = request('workspace.move', { workspace: 'workspace:7', toWindow: 'ws-2' });
+    const running = handleWorkspaceControl(pending);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(transferWorkspace).toHaveBeenCalled();
+    // The host took the hand-off; nothing is said until the target settles it.
+    expect(pending.respond).not.toHaveBeenCalled();
+    adopt();
+    await running;
+    expect(answer(pending)).toMatchObject({ status: 'moved', workspaceRef: 'workspace:7' });
+
+    transferWorkspace.mockRejectedValueOnce(new Error('the target window closed mid-arrival'));
+    const handedBack = request('workspace.move', { workspace: 'workspace:7', toWindow: 'ws-2' });
+    await handleWorkspaceControl(handedBack);
+    expect(answer(handedBack)).toBe("workspace 'workspace:7' was not moved: the target window closed mid-arrival");
   });
 });
 

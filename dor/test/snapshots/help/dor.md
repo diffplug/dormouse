@@ -14,8 +14,8 @@ USAGE
   dor kill <surface> [--confirm-if-read text|--confirm-dangerously] [--json] [--workspace ref]
   dor iframe [--json] [--minimize] [--surface id|ref] [--workspace ref] <target>
   dor agent-browser [--key name|--session name|--surface handle] [--workspace ref] [args...]
-  dor list [--all] [--command text] [--cwd path] [--id-format refs|ids|both] [--json] [--kind terminal|browser] [--port number] [--ports] [--view paned|zoomed|minimized] [--workspace ref] [--workspaces]
-  dor workspace new|rename|close|switch [args...] [--force] [--json]
+  dor list [--all] [--command text] [--cwd path] [--id-format refs|ids|both] [--json] [--kind terminal|browser] [--port number] [--ports] [--view paned|zoomed|minimized] [--workspace ref] [--workspaces] [--window label]
+  dor workspace new|rename|close|switch|move [args...] [flags...]
   dor --help
 
 Dormouse bundles the dor CLI into every terminal it launches.
@@ -36,6 +36,6 @@ COMMANDS
   iframe         Open a target in an iframe surface.
   agent-browser  Drive a browser surface via your agent-browser install (alias: dor ab).
   list           List Dormouse Surfaces.
-  workspace      Create, rename, close, or switch Workspaces.
+  workspace      Create, rename, close, switch, or move Workspaces.
 
 ```

@@ -19,6 +19,7 @@ import type {
 } from './types.js';
 import {
   errorMessage,
+  parseNonNegativeInt,
   renderJson,
   requireControlClient,
   stringParser,
@@ -28,6 +29,9 @@ import {
 interface WorkspaceFlags {
   readonly force?: boolean;
   readonly json?: boolean;
+  readonly window?: string;
+  readonly index?: number;
+  readonly dangerouslyDestroyIframePageState?: boolean;
 }
 
 /** One action of `dor workspace`: how it is spelled in help, what argument
@@ -66,6 +70,17 @@ const ACTIONS = {
     arityError: 'dor workspace switch takes one workspace',
     run: (client, args) => client.switchWorkspace({ workspace: args[0] }),
   },
+  move: {
+    usage: '<workspace> [--window <label|new>] [--index <n>] [--dangerously-destroy-iframe-page-state] [--json]',
+    accepts: (args) => args.length === 1,
+    arityError: 'dor workspace move takes one workspace',
+    run: (client, args, flags) => client.moveWorkspace({
+      workspace: args[0],
+      ...(flags.window === undefined ? {} : { toWindow: flags.window }),
+      ...(flags.index === undefined ? {} : { index: flags.index }),
+      dangerouslyDestroyIframePageState: flags.dangerouslyDestroyIframePageState === true,
+    }),
+  },
 } as const satisfies Record<string, WorkspaceActionSpec>;
 
 type WorkspaceAction = keyof typeof ACTIONS;
@@ -81,14 +96,14 @@ export const workspaceCommand: Command = {
       // actions collapse to the shape they share.
       scope: 'root',
       findReplace: [
-        '  dor workspace [--force] [--json]<TO-EOL>',
-        `  dor workspace ${ACTION_NAMES.join('|')} [args...] [--force] [--json]\n`,
+        '  dor workspace [--force] [--json] [--window label] [--index n] [--dangerously-destroy-iframe-page-state]<TO-EOL>',
+        `  dor workspace ${ACTION_NAMES.join('|')} [args...] [flags...]\n`,
       ],
     },
   ],
   command: buildCommand<WorkspaceFlags, string[], DorCommandContext>({
     docs: {
-      brief: 'Create, rename, close, or switch Workspaces.',
+      brief: 'Create, rename, close, switch, or move Workspaces.',
       customUsage: USAGE,
       fullDescription: `Manages this Window's Workspaces. Listing them is dor list --workspaces (the overview) and dor list --all (every Workspace's Surfaces); this command only mutates.
 
@@ -98,9 +113,12 @@ new creates a Workspace in the background and prints its ref: it never moves the
 
 close archives and kills every Surface in the Workspace. It refuses — raising no confirmation, because the caller is a command rather than someone watching the Wall — when the Workspace holds a Surface the user has typed into or a running command; --force closes it anyway. The last remaining Workspace cannot be closed.
 
+move puts a Workspace in another window (--window <label>, or --window new to tear it out into its own) and/or at a strip position (--index <n>, 0-based; with --window, a position in that window's strip). Nothing is archived or killed: its terminals, notes, and pins travel whole. "moved" is printed only once the target window has adopted the Workspace; one it hands back (it closed mid-transfer, or never answered) is an error naming the reason, and the Workspace stays where it was. The one thing a move between windows cannot carry is a plain iframe's page state — the document cannot leave its webview, so the iframe reopens at its saved URL — and the move is refused when the Workspace holds one unless --dangerously-destroy-iframe-page-state is passed. Agent-browser Surfaces are not affected.
+
 Text output:
   created workspace:2 "build"
   closed workspace:2 "build"
+  moved workspace:2 "build"
 
 JSON output:
   {
@@ -114,6 +132,9 @@ JSON output:
       flags: {
         force: { kind: 'boolean', brief: 'Close even when the Workspace holds running or touched Surfaces.', optional: true, withNegated: false },
         json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
+        window: { kind: 'parsed', parse: stringParser, brief: 'move: the window to move to (a label, or "new").', optional: true, placeholder: 'label' },
+        index: { kind: 'parsed', parse: (value) => parseNonNegativeInt(value, '--index'), brief: 'move: the 0-based strip position to move to.', optional: true, placeholder: 'n' },
+        dangerouslyDestroyIframePageState: { kind: 'boolean', brief: 'move: accept losing every iframe Surface\'s page state.', optional: true, withNegated: false },
       },
       positional: {
         kind: 'array',
@@ -137,6 +158,15 @@ async function runWorkspaceCommand(
   if (!action.accepts(rest)) return new Error(action.arityError);
   if (flags.force === true && parsed.value !== 'close') {
     return new Error('--force applies only to dor workspace close');
+  }
+  if (parsed.value !== 'move') {
+    if (flags.window !== undefined) return new Error('--window applies only to dor workspace move');
+    if (flags.index !== undefined) return new Error('--index applies only to dor workspace move');
+    if (flags.dangerouslyDestroyIframePageState === true) {
+      return new Error('--dangerously-destroy-iframe-page-state applies only to dor workspace move');
+    }
+  } else if (flags.window === undefined && flags.index === undefined) {
+    return new Error('dor workspace move needs --window, --index, or both');
   }
 
   const client = requireControlClient(this.options);

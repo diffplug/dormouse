@@ -606,6 +606,21 @@ export class TauriAdapter implements PlatformAdapter {
     this.replayHandlers.add(handler);
   }
 
+  /** `dor workspace move` between windows: the same transfer the strip's drag
+   *  runs, with no pointer to place the tab by (docs/specs/standalone.md →
+   *  Transfer). Settles as the transaction does: resolved once the target has
+   *  adopted the Workspace, rejected with the host's reason when it was handed
+   *  back. Imported on use: `workspace-move` pulls the whole move protocol in,
+   *  which a window that never moves anything need not load. */
+  async transferWorkspace(workspaceId: string, toWindow: string, options: { index?: number } = {}): Promise<void> {
+    const { tearOutWorkspace, transferWorkspaceTo } = await import("./workspace-move");
+    // A torn-out window has one tab, so an index names no slot there.
+    const outcome = toWindow === "new"
+      ? await tearOutWorkspace(workspaceId, { x: 0, y: 0 })
+      : await transferWorkspaceTo(workspaceId, toWindow, undefined, options.index);
+    if (!outcome.moved) throw new Error(outcome.reason);
+  }
+
   onPtyMarked(handler: (detail: PtyMarkedDetail) => void): () => void {
     this.markedHandlers.add(handler);
     return () => { this.markedHandlers.delete(handler); };

@@ -158,6 +158,11 @@ its own window, or dropped onto an existing one — carrying its Surfaces, its
 Sessions and its notes with it, and killing nothing on the way
 (`docs/specs/standalone.md` → Transfer). Leaving is not a close and arriving is
 not a create: a Workspace that arrives mounts from the record it brought.
+**Must confirm before a move that would destroy an iframe's page state**: a
+plain iframe Surface's document cannot leave its webview, so it reopens at its
+saved URL, and a Workspace holding one — Doored ones included — asks with the
+kill's typed letter before it leaves; agent-browser Surfaces reconnect and ask
+nothing (`iframeSurfaceIds` on the Wall handle; `workspace-drag.test.ts`).
 
 **Create** adds a Workspace named `Workspace N`, makes it active, and gives its Wall no restored record, so Lath's fresh branch spawns one default-shell pane. **Close** confirms first when the Workspace holds touched Surfaces or running work, reusing the kill-confirm letter and key rule over the Window's content area (**a bare `Shift` or `Meta` is not an answer**, as for a pane kill), then routes every member Surface through the closure coordinator; **the last remaining Workspace cannot be closed** — there is always one active Workspace, as there is always one visible pane (corner case #5). **One close runs at a time for the whole Window**, with the count re-checked after the confirmation, so two of them cannot empty two Walls between them; **a close the store then refuses hands the Wall back its auto-spawn** rather than leaving it mounted and empty. **A Workspace whose Wall has not registered is refused** (`workspace '<ref>' is still mounting`, one wording for every caller), never closed past — the Wall walks the member Surfaces, so dropping it would leave its Sessions running unheld (`docs/specs/glossary.md` → "Invariants" I4); **a gesture waits out the registration gap first**, as `dor workspace close` does, so `×` or `&` right after a create closes rather than silently doing nothing. **Rename** edits the Workspace `name` only — no Surface title, and not the per-pane inline rename. **Reorder** moves a tab in the strip and renumbers `workspace:<n>` refs with it only where they are positional (`docs/specs/dor-cli.md` → "Handle Model"); **a press inside the open rename editor never starts a reorder**. **Must drop only the closing Workspace’s rename editor and pending confirmation**, or a stale `renamingId` holds the chrome keyboard lease for the session (`WorkspaceStrip.test.tsx`). **Every Workspace verb runs outside the strip**, which renders the rename editor and confirmation from a store, so a tab gesture and a command-mode key take one path.
 
@@ -165,7 +170,7 @@ The union projection and its indicators are owned by `docs/specs/alert.md` → W
 
 Source of truth: `WorkspaceWindow` in `lib/src/components/WorkspaceWindow.tsx`; `registerWallHandle` in `lib/src/components/wall/wall-handles.ts`; `closeAll` in `lib/src/components/Wall.tsx`; `requestWorkspaceClose` in `lib/src/components/wall/workspace-lifecycle.ts`; `createWorkspace` / `closeWorkspace` / `renameWorkspace` / `moveWorkspace` / `setActiveWorkspace` in `lib/src/lib/workspace-store.ts`; `getWorkspaceUiSnapshot` in `lib/src/lib/workspace-ui-store.ts`; `setWorkspaceSurfaces` in `lib/src/lib/workspace-surfaces.ts`.
 
-**Create, rename, close, and switch have `dor` counterparts** (`docs/specs/dor-cli.md` → "dor workspace"); reorder is strip-only, and transfer and tear-out stay drag-only until `docs/specs/dor-cli.md` → Future "Cross-Window targeting" lands. Each takes the same route as the strip and the command-mode keys: a command close raises no confirmation, refusing instead, and closes its member Surfaces silently.
+**Every Workspace verb has a `dor` counterpart** (`docs/specs/dor-cli.md` → "dor workspace"), taking the same route as the strip and the command-mode keys: a command close raises no confirmation, refusing instead, and closes its member Surfaces silently.
 
 ## Modes
 
