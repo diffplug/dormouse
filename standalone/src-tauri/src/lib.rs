@@ -94,11 +94,20 @@ struct RoutingState {
     /// Ids between a transfer's invoke and the sidecar's `marked` line, each
     /// with the source still consuming (`routing::RouteView::marking`).
     marking: HashMap<String, String>,
+    // Source cut points survive target replay until the arrival settles.
+    transfer_marks: HashMap<String, u64>,
 }
 
 impl RoutingState {
     /// `routing::lift_suppression` over this state's two halves. The caller
     /// republishes `WindowState::suppressed` after it, still under the lock.
+    fn mark_transfer(&mut self, id: &str, mark: u64) {
+        if self.marking.remove(id).is_some() {
+            self.transfer_marks.insert(id.to_string(), mark);
+            self.awaiting_replay.insert(id.to_string(), Instant::now());
+        }
+    }
+
     fn lift_suppression(&mut self, id: &str) -> Vec<routing::HeldEvent> {
         routing::lift_suppression(&mut self.awaiting_replay, &mut self.held, id)
     }
@@ -206,6 +215,7 @@ impl WindowState {
     fn begin_marking(&self, ids: &[String], source: &str) {
         let mut routing = guard(&self.routing);
         for id in ids {
+            routing.transfer_marks.remove(id);
             routing.marking.insert(id.clone(), source.to_string());
         }
     }
@@ -216,6 +226,7 @@ impl WindowState {
         routing.owners.remove(id);
         routing.lift_suppression(id);
         routing.marking.remove(id);
+        routing.transfer_marks.remove(id);
         self.suppressed
             .store(routing.awaiting_replay.len(), Ordering::Relaxed);
     }
@@ -228,6 +239,7 @@ impl WindowState {
         let mut routing = guard(&self.routing);
         for id in ids {
             routing.lift_suppression(id);
+            routing.transfer_marks.remove(id);
         }
         self.suppressed
             .store(routing.awaiting_replay.len(), Ordering::Relaxed);
@@ -434,8 +446,8 @@ fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
         "pty:marked" => {
             if let Some(id) = id() {
                 let mut routing = guard(&state.routing);
-                if routing.marking.remove(id).is_some() {
-                    routing.awaiting_replay.insert(id.to_string(), Instant::now());
+                if let Some(mark) = data.get("mark").and_then(JsonValue::as_u64) {
+                    routing.mark_transfer(id, mark);
                     state
                         .suppressed
                         .store(routing.awaiting_replay.len(), Ordering::Relaxed);
@@ -2807,9 +2819,9 @@ fn spawn_arrival_watchdog(app: AppHandle, arrival: &routing::Arrival) {
 /// source's xterm stands at the mark; so the sidecar is asked for
 /// `outputSince(mark)` scoped to the source, and that replay lifts the
 /// suppression on its way out (`dispatch_sidecar_event`), the held protocol
-/// events behind it. An id with no mark — no content yet, or one the sidecar
-/// never stamped — missed nothing the source does not hold, and a whole-buffer
-/// replay would paint its transcript twice: it goes straight back.
+/// events behind it. Marks come from the routing state at `pty:marked`, never
+/// from the later serialized content. Only an id the sidecar never stamped
+/// goes straight back.
 ///
 /// The record must already be out of the queue; the caller took it.
 fn hand_back_arrival(
@@ -2831,7 +2843,16 @@ fn hand_back_arrival(
         }
     }
     if app.get_webview_window(&arrival.from).is_some() {
-        let marks = routing::arrival_marks(arrival);
+        let marks = {
+            let mut routing = guard(&windows.routing);
+            let mut marks = serde_json::Map::new();
+            for id in &arrival.terminal_ids {
+                if let Some(mark) = routing.transfer_marks.remove(id) {
+                    marks.insert(id.clone(), JsonValue::from(mark));
+                }
+            }
+            JsonValue::Object(marks)
+        };
         let (marked, unmarked) = routing::hand_back_ids(arrival, &marks);
         windows.reassign(&unmarked, &arrival.from, false);
         windows.reassign(&marked, &arrival.from, true);
@@ -2840,7 +2861,7 @@ fn hand_back_arrival(
         let _ = app.emit_to(
             arrival.from.as_str(),
             "dormouse://workspace-arrival-failed",
-            serde_json::json!({ "workspaceId": arrival.workspace_id, "reason": reason }),
+            serde_json::json!({ "workspaceId": arrival.workspace_id, "reason": reason, "replayIds": marked }),
         );
         if marked.is_empty() {
             return;
@@ -4372,6 +4393,19 @@ mod tests {
             routing::restorable_labels(session_file_names(dir.path())),
             vec!["main", "ws-3"]
         );
+    }
+
+    #[test]
+    fn a_source_cut_survives_target_replay_and_needs_no_serialized_content() {
+        let mut state = super::RoutingState::default();
+        state.marking.insert("t1".to_string(), "main".to_string());
+        state.mark_transfer("t1", 42);
+        assert!(state.awaiting_replay.contains_key("t1"));
+        assert_eq!(state.transfer_marks.get("t1"), Some(&42));
+        state.lift_suppression("t1");
+        assert_eq!(state.transfer_marks.get("t1"), Some(&42));
+        state.mark_transfer("t2", 99); // a late mark after hand-back is inert
+        assert!(!state.transfer_marks.contains_key("t2"));
     }
 
     #[test]
