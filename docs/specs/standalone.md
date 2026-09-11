@@ -142,14 +142,15 @@ realm**. Against the shared store contract (`docs/specs/relay.md` → "Burrow si
 `node-datachannel`'s W3C polyfill. **A sidecar package's transitive dependencies
 do not ship** — the Tauri bundle copies `standalone/sidecar/node_modules` and
 nothing else — so the addon's platform package and `detect-libc` are declared in
-`standalone/sidecar/package.json` directly. **Both specifiers stay `external` to
-`burrow.cjs`**, which the build asserts from esbuild's metafile — each has to
-leave the bundle as an external `require-call` edge: the addon resolves its
-`.node` relative to its own `__dirname`, and inlining would move that out of the
+`standalone/sidecar/package.json` directly. **Every runtime dependency that
+manifest declares stays `external` to `burrow.cjs`**, the `external` list being
+derived from it rather than listed beside it, and the build asserts from
+esbuild's metafile that none was inlined: the addon resolves its `.node`
+relative to its own `__dirname`, and inlining would move that out of the
 installed package.
 
 Source of truth: `standalone/sidecar/package.json`,
-`lib/src/host/remote/native-direct-peer.ts`, `assertExternalImports` in
+`lib/src/host/remote/native-direct-peer.ts`, `assertNothingInlined` in
 `standalone/scripts/build-sidecar-proxy.mjs`.
 
 **The bridge.** Webview → sidecar is one generic passthrough invoke,

@@ -42,6 +42,12 @@ export interface DirectEndpointDeps {
    */
   sendSignal(signal: DirectSignalV1): boolean;
   /**
+   * Put one transport ciphertext on the relay path — the half of
+   * {@link DirectEndpoint.send}'s routing that carries a session until it has
+   * switched, and every session that never does.
+   */
+  sendRelay(ciphertext: Uint8Array): void;
+  /**
    * Decrypt one transport ciphertext, whichever path carried it, process
    * everything that is not a signal, and answer the receipt. `null` where the
    * decrypt failed — a poisoned session, which the owner has already disposed.
@@ -94,6 +100,16 @@ export class DirectEndpoint {
   /** What carries this session; `direct` only once **both** directions have switched. */
   get path(): DirectPath {
     return this.#disposed ? 'relay' : this.#cutover.path;
+  }
+
+  /**
+   * Whether the session this endpoint carries is over. **Its owner's one test
+   * for a session that is no longer live**: every route that replaces or tears
+   * one down disposes its endpoint first, so a send loop mid-message needs no
+   * second look at where the session was registered.
+   */
+  get disposed(): boolean {
+    return this.#disposed;
   }
 
   /**
@@ -190,25 +206,26 @@ export class DirectEndpoint {
   }
 
   /**
-   * One transport ciphertext, `true` once it is consumed. The caller puts it on
-   * the relay when this answers `false`, so "after the switch, nothing on the
-   * relay" is one line rather than a rule each caller keeps.
+   * One transport ciphertext onto whichever path this session has. **Both ends
+   * send every byte of an established session through here**, so "after the
+   * switch, nothing on the relay" is one rule in one place rather than one each
+   * caller keeps — the mirror of {@link onRelayFrame} on the way in.
    *
-   * **A disposed endpoint consumes it too.** A refused send disposes the session
+   * **A disposed endpoint drops it.** A refused send disposes the session
    * synchronously, and the caller's loop is mid-message: the remaining chunks
-   * belong nowhere, least of all on the relay of a session that is over. The
-   * callers stop on their own next check; this only keeps the interval between
-   * the two from reaching the wire.
+   * belong nowhere, least of all on the relay of a session that is over.
    */
-  send(ciphertext: Uint8Array): boolean {
-    if (this.#disposed) return true;
-    if (this.#cutover.outbound !== 'direct') return false;
+  send(ciphertext: Uint8Array): void {
+    if (this.#disposed) return;
+    if (this.#cutover.outbound !== 'direct') {
+      this.#deps.sendRelay(ciphertext);
+      return;
+    }
     // Switched, so the channel is the only path this may take — there is no
     // relay left to re-route onto. A peer that cannot carry it says why through
     // `onClosed`, and this end's rule about a channel lost after a switch does
     // the rest.
     this.#peer?.send(ciphertext);
-    return true;
   }
 
   /**

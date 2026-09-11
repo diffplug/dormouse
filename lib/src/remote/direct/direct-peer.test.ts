@@ -18,7 +18,7 @@ import {
 } from 'remote-lib-common';
 
 import { DirectPeer, type DirectPeerHandlers } from './direct-peer';
-import { FakeDirectNetwork, type FakeDirectNetworkOptions } from './test-fake-peer';
+import { FakeDirectNetwork, flushMicrotasks, type FakeDirectNetworkOptions } from './test-fake-peer';
 import { fakeTimers } from '../test-timers';
 
 function handlers(): DirectPeerHandlers & {
@@ -60,9 +60,6 @@ function pair(options: FakeDirectNetworkOptions = {}) {
     burrowPeer: new DirectPeer({ peer: answerer, handlers: burrow, setTimer: timers.setTimer }),
   };
 }
-
-/** Let the fake network's queued microtasks run. */
-const flushMicrotasks = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 /** One negotiated pair with both channels open, as most cases start. */
 async function connected(options: FakeDirectNetworkOptions = {}) {

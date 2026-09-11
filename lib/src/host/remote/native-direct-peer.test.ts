@@ -29,7 +29,7 @@ import {
   type TerminalDataEvent,
 } from 'remote-lib-common';
 import { DirectPeer, type DirectPeerLike } from '../../remote/direct/direct-peer';
-import { STREAMED_CHUNK, makeE2eHarness, waitFor } from '../../remote/client/test-e2e-harness';
+import { STREAMED_CHUNK, collect, makeE2eHarness, waitFor } from '../../remote/client/test-e2e-harness';
 import { createNativeDirectPeerFactory, disposeNativeDirectPeers } from './native-direct-peer';
 
 /** The one call the reliability case needs that `DirectPeerLike` has no reason to. */
@@ -109,15 +109,6 @@ async function untilOpen<T extends Negotiation>(start: () => Promise<T>, what: s
   throw lost;
 }
 
-/** Build a peer, keeping it so a case can close the far end by hand. */
-function collect(into: DirectPeerLike[]): () => DirectPeerLike {
-  return () => {
-    const peer = buildPeer();
-    into.push(peer);
-    return peer;
-  };
-}
-
 /**
  * The whole loop — phone, relay, Burrow — with both ends on the native addon,
  * paired, connected, and offered a direct path.
@@ -126,8 +117,8 @@ async function startConnected() {
   const clientPeers: DirectPeerLike[] = [];
   const burrowPeers: DirectPeerLike[] = [];
   const harness = await makeE2eHarness({
-    deps: { createDirectPeer: collect(clientPeers) },
-    burrowDirect: collect(burrowPeers),
+    deps: { createDirectPeer: collect(clientPeers, buildPeer) },
+    burrowDirect: collect(burrowPeers, buildPeer),
   });
   await harness.connectPaired();
   return {

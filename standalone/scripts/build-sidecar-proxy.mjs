@@ -6,6 +6,7 @@
 //   - lib/src/host/remote/sidecar-entry.ts → sidecar/burrow.cjs
 // See docs/specs/dor-browser.md and docs/specs/remote-api.md.
 import { build } from 'esbuild';
+import { readFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -23,11 +24,17 @@ const sidecar = path.resolve(here, '../sidecar');
 // so this is the enforcement point — there is no webview CSP in front of it.
 const remoteSrc = resolveRemoteConnectSrc(process.env, 'sidecar');
 
-// The Burrow's direct-path peer. `node-datachannel` resolves its platform
-// package and `detect-libc` relative to its own `__dirname`, so it has to stay
-// an installed package under `sidecar/node_modules` and be required by name —
-// inlining it here would leave that loader looking beside `burrow.cjs`.
-const NATIVE_DIRECT = ['node-datachannel', 'node-datachannel/polyfill'];
+// What the sidecar installs at runtime, read from the manifest that installs
+// it: `node-datachannel` resolves its platform package and `detect-libc`
+// relative to its own `__dirname`, so every one of these has to stay an
+// installed package under `sidecar/node_modules` and be required by name —
+// inlining one here would leave that loader looking beside `burrow.cjs`.
+// Derived rather than listed, so declaring a dependency is what keeps it out.
+const SIDECAR_RUNTIME_DEPS = Object.keys(
+  JSON.parse(readFileSync(path.resolve(sidecar, 'package.json'), 'utf8')).dependencies ?? {},
+);
+// Each package by name, plus every subpath export of it (`node-datachannel/polyfill`).
+const NATIVE_DIRECT = SIDECAR_RUNTIME_DEPS.flatMap((name) => [name, `${name}/*`]);
 
 const bundles = [
   { entry: 'iframe-proxy.ts', out: 'iframe-proxy.cjs' },
@@ -42,32 +49,34 @@ const bundles = [
 ];
 
 /**
- * Fail the build if esbuild bundled a module the `external` list has to keep out.
+ * Fail the build if esbuild inlined a package the sidecar installs at runtime.
  *
  * `native-direct-peer.ts` calls `require('<specifier>')` by literal, so an
- * external specifier stays a `require-call` edge out of the bundle and a bundled
- * one becomes an inlined module with no edge at all. That difference is the
- * whole check: a lost `external` entry produces a `burrow.cjs` that loads and
- * then cannot find the addon's `.node` file, which nothing before the first
- * `direct-offer` on a real machine would notice.
+ * external specifier stays a `require-call` edge out of the bundle while a
+ * bundled one becomes an input of it. That difference is the whole check: an
+ * inlined addon produces a `burrow.cjs` that loads and then cannot find the
+ * addon's `.node` file, which nothing before the first `direct-offer` on a real
+ * machine would notice.
  */
-function assertExternalImports(metafile, outfile, specifiers) {
+function assertNothingInlined(metafile, outfile, names) {
   // esbuild keys `metafile.outputs` by path relative to the process cwd, with
   // `/` separators on every platform.
   const outputKey = path.relative(process.cwd(), outfile).split(path.sep).join('/');
-  const imports = metafile.outputs[outputKey]?.imports;
-  if (!imports) {
+  const output = metafile.outputs[outputKey];
+  if (!output) {
     throw new Error(
-      `sidecar: esbuild metafile has no output for "${outputKey}" — cannot check external imports.`,
+      `sidecar: esbuild metafile has no output for "${outputKey}" — cannot check what it bundled.`,
     );
   }
-  for (const specifier of specifiers) {
-    const kept = imports.some(
-      (edge) => edge.path === specifier && edge.kind === 'require-call' && edge.external === true,
+  for (const name of names) {
+    // Every layout a package manager resolves through ends in this segment,
+    // pnpm's content-addressed store included.
+    const inlined = Object.keys(output.inputs).find((input) =>
+      input.includes(`node_modules/${name}/`),
     );
-    if (kept) continue;
+    if (!inlined) continue;
     throw new Error(
-      `sidecar: ${outputKey} has no external require("${specifier}") — esbuild bundled it, and ` +
+      `sidecar: ${outputKey} inlined "${inlined}" — "${name}" is a sidecar runtime dependency, and ` +
         'the addon would look for its platform package beside the bundle instead of inside ' +
         'sidecar/node_modules.',
     );
@@ -89,11 +98,11 @@ for (const { entry, out, define, assertBaked, external } of bundles) {
     format: 'cjs',
     target: 'node24',
     logLevel: 'warning',
-    metafile: true,
     ...(define ? { define } : {}),
-    ...(external ? { external } : {}),
+    // Only the bundle with externals to check reads one.
+    ...(external ? { external, metafile: true } : {}),
   });
   if (assertBaked) assertConnectSrcBaked(outfile, remoteSrc);
-  if (external) assertExternalImports(result.metafile, outfile, external);
+  if (external) assertNothingInlined(result.metafile, outfile, SIDECAR_RUNTIME_DEPS);
   console.log(`[sidecar] built ${path.relative(process.cwd(), outfile)}`);
 }

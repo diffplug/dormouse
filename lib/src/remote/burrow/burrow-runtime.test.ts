@@ -151,6 +151,11 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
     return e2eFramesFor(socket, kind, id);
   }
 
+  /** The Burrow's transport frames on one connection; index 0 is the outcome. */
+  function transportFrames(connectionId: string): Array<Record<string, unknown>> {
+    return e2eFramesFor(socket, 'connection', connectionId, 'transport');
+  }
+
   function sendE2e(
     clientId: string,
     kind: 'pairing' | 'connection',
@@ -1369,21 +1374,16 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
     return { session, connectionId, clientId };
   }
 
-  /** The Burrow's transport frames on one connection; index 0 is the outcome. */
-  function transportFrames(connectionId: string): Array<Record<string, unknown>> {
-    return e2eFrames('connection', connectionId).filter((frame) => frame.step === 'transport');
-  }
-
-  /** Decrypt the transport frame at `index`, which must be a control message. */
-  async function controlAt(
+  /**
+   * Decrypt the transport frame at `index`, which must be a control message;
+   * index 0 is the connection outcome and the signals follow it.
+   */
+  function controlAt(
     session: NoiseTransportSession,
     connectionId: string,
     index: number,
   ): Promise<Record<string, unknown>> {
-    const frame = await flushUntil(() => transportFrames(connectionId)[index]);
-    const receipt = session.receive(fromBase64Url(frame.ct as string));
-    if (receipt.kind !== 'control') throw new Error(`expected a signal, got ${receipt.kind}`);
-    return receipt.value;
+    return readOutcome(socket, session, 'connection', connectionId, index);
   }
 
   /** One `direct-*` signal from the Client, on the established session. */

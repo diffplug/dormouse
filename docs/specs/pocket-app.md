@@ -486,8 +486,8 @@ leaves the wall exactly as it does for a `burrow-gone`, and returning costs a
 fresh handshake and one WebAuthn prompt. Before the switch a failed channel
 costs nothing.
 
-Source of truth: `PocketClient.connect` / `transportPath` / `transportRelayCause` in
-`lib/src/remote/client/pocket-client.ts`, `TRANSPORT_PATH_LABELS` /
+Source of truth: `PocketClient.connect` / `transportPath` /
+`setOnTransportChanged` in `lib/src/remote/client/pocket-client.ts`, `TRANSPORT_PATH_LABELS` /
 `TRANSPORT_RELAY_CAUSES` / `transportTitle` in
 `lib/src/remote/pocket-app/App.tsx`.
 

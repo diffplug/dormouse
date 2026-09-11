@@ -358,7 +358,7 @@ export default function App({
    * render: the cutover happens seconds into a session, long after the wall is
    * up, and an attempt that quietly stays relayed changes only the detail.
    */
-  const [transport, setTransport] = useState<TransportView>({ path: 'relay', cause: null });
+  const [transport, setTransport] = useState<TransportView>(RELAYED_TRANSPORT);
   useEffect(() => {
     client.setOnTransportChanged((path, cause) => setTransport({ path, cause }));
     return () => client.setOnTransportChanged(null);
@@ -367,11 +367,6 @@ export default function App({
   /** The connect half, shared so a fresh pairing can continue straight into it. */
   const connectTo = useCallback(
     async (burrow: BurrowView) => {
-      // A fresh endpoint announces nothing until something changes, and its
-      // idea of unchanged is `relay` with no cause — so the previous session's
-      // reason would sit in the header through the whole of this one's
-      // negotiation.
-      setTransport({ path: 'relay', cause: null });
       const decision: ConnectResult = await client.connect(burrow.burrowId);
       if (!decision.ok) {
         // The record has already been rewritten where the Burrow said
@@ -827,6 +822,12 @@ export interface TransportView {
 }
 
 /**
+ * Where every session starts and where each one ends: relayed, with no reason
+ * to give. Shared rather than rebuilt, so re-announcing it re-renders nothing.
+ */
+export const RELAYED_TRANSPORT: TransportView = { path: 'relay', cause: null };
+
+/**
  * The indicator's hover text: which path, and the reason behind it where there
  * is one. **The reason is shown, never the label** — an attempt that quietly
  * stayed relayed is still `relay`, and inventing a third state for it would
@@ -841,7 +842,7 @@ export function transportTitle({ path, cause }: TransportView): string {
 export function ConnectedView({
   burrow,
   adapter,
-  transport = { path: 'relay', cause: null },
+  transport = RELAYED_TRANSPORT,
   onLeave,
   onError,
 }: {

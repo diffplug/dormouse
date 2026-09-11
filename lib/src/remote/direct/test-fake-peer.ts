@@ -65,6 +65,14 @@ export type FakePeerRole = 'offerer' | 'answerer';
 /** One way a channel can be something a Noise stream cannot ride. */
 export type ChannelDefect = 'unordered' | 'lossy' | 'expiring' | 'mislabeled';
 
+/**
+ * Let this file's queued microtasks run: every fake channel event is delivered
+ * through `queueMicrotask`, so a case that has just opened or sent needs one
+ * turn of the loop before it can read what happened.
+ */
+export const flushMicrotasks = (): Promise<unknown> =>
+  new Promise((resolve) => setTimeout(resolve, 0));
+
 export class FakeDirectNetwork {
   readonly #options: FakeDirectNetworkOptions;
   readonly #peers = new Map<FakePeerRole, FakePeer>();
