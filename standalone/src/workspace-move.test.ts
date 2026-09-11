@@ -467,6 +467,7 @@ describe("the target half", () => {
     const platform = fakePlatform(order);
     vi.mocked(platform.alertSeed!).mockImplementation(() => { order.push("seed"); });
     arrivals = [payload()];
+    arrivals[0].workspace.session.panes[0].alert = { status: "WATCHING_DISABLED", todo: true, notification: null };
     initWorkspaceMoves(platform);
     await settle();
     expect(order.indexOf("seed")).toBeGreaterThan(-1);
