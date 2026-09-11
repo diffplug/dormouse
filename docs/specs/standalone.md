@@ -451,16 +451,18 @@ by `the_geometry_flush_slot_is_released_with_the_drain`.
 
 ### What a window's `Destroyed` settles
 
-**Everything keyed by a label is settled in the `Destroyed` arm, and only
-there**: Tauri takes the label out of `webview_windows()` at that moment and not
-before, so a `burrow:windows` push sent ahead of it names a window that can never
-answer — and every ask then waits out its whole budget. The arm forgets the
-window's PTY ownership and reaps what it still owned, hands back every arrival it
-will never take (§Arrival queue), drops the save refusal (nothing can save under
-a dead label), forgets its geometry, tells the quit machine (§Quit flow) and
-pushes the live labels to the sidecar. **An arriving Workspace's shells are taken
-out of the reap first**: they belong to its source again, which is still showing
-those terminals.
+**Must clear label-keyed ownership, registry, geometry, and close state in the
+`Destroyed` arm**, when Tauri has removed the window from `webview_windows()`.
+**Must remove incoming arrivals from the reap before killing orphaned PTYs**;
+the source still holds those Sessions. Hand-backs run in a blocking worker,
+then complete on the main thread. **Must defer every approved exit until all
+such workers have completed**, including exit requested through the quit walk
+or Tauri (`quit_waits_for_every_destroyed_window_handback`). The arm updates the
+quit machine and sends the remaining live labels to the sidecar; the Burrow’s
+ask collector must never wait for a window that cannot answer.
+
+Source of truth: `CleanupGate` and `WindowEvent::Destroyed` in
+`standalone/src-tauri/src/lib.rs`.
 
 ### Per-window close
 
