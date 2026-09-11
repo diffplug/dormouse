@@ -4,12 +4,18 @@
 
 - `docs/specs/security-local.md`
 - `docs/specs/security-remote.md`
+- `docs/specs/security-hosted.md`
 
 **Output file:** `audit-application.md`
 
 This is a code-and-specs audit of the product's own boundaries — the remote
 control stack, and the local application. You need no GitHub API access and no
 PAT — do not use one.
+
+For Hosted accounts, read `docs/specs/hosted.md`, `hosted/server/`, the packed
+core/auth modules in `vendor/`, and `hosted/src/`. Verify the archive hashes
+against `vendor/build.json`. Distinguish tested code from pending production
+configuration; do not treat local provider simulations as live OAuth acceptance.
 
 Read, at minimum: `docs/specs/remote-security-model.md` **and its paired
 `docs/specs/remote-security-model.rationale.md`**, `docs/specs/relay.md`,
