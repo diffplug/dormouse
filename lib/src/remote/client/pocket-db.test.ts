@@ -2,10 +2,9 @@
  * Pocket's IndexedDB layout (`docs/specs/pocket-app.md` → "What Pocket
  * stores"): the v4 upgrade, and the two stores it leaves behind.
  *
- * `fake-indexeddb` structured-clones what it is handed, and a `CryptoKey` is
- * not cloneable there, so the records below carry plain stand-ins where the
- * real ones carry keys. What is under test is the database shape and the store
- * operations, not what a browser does with key material.
+ * These schema tests use plain key stand-ins. `pocket-key-storage.test.ts`
+ * exercises real keys with Node's structured clone; neither emulates WebKit's
+ * platform-specific key serialization.
  */
 
 import 'fake-indexeddb/auto';
@@ -37,7 +36,9 @@ function knownBurrow(burrowId: string, overrides: Partial<KnownBurrowV1> = {}): 
     burrowStaticPublicKey: 'aG9zdC1zdGF0aWM',
     clientStaticKeyPair: {
       // A stand-in: see the file header.
-      privateKey: { kind: 'private' } as unknown as CryptoKey,
+      privateKey: {
+        type: 'private', extractable: false, algorithm: { name: 'X25519' }, usages: ['deriveBits'],
+      } as unknown as CryptoKey,
       publicKeyRaw: 'Y2xpZW50LXN0YXRpYw',
     },
     passkeyCredentialId: 'cred-1',

@@ -1,0 +1,178 @@
+import { webcrypto } from 'node:crypto';
+import { IDBFactory, IDBObjectStore } from 'fake-indexeddb';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { fromBase64Url, generateNoiseKeyPair, sealPush, toBase64Url, utf8Encode } from 'remote-lib-common';
+import {
+  indexedDbKnownBurrowStore, requirePocketKeyStorage, withPocketStore,
+  KNOWN_BURROWS_STORE, type KnownBurrowV1,
+} from './pocket-db';
+import { generatePocketKeyPair, loadPocketPrivateKey, storePocketPrivateKey } from './pocket-private-key';
+import { makeE2eHarness } from './test-e2e-harness';
+import { installPocketWorker, type WorkerScope } from '../pocket-app/sw';
+
+beforeEach(() => {
+  vi.stubGlobal('crypto', webcrypto);
+  vi.stubGlobal('indexedDB', new IDBFactory());
+});
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+function breakNativeStorage() {
+  const put = IDBObjectStore.prototype.put;
+  vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (value, key) {
+    if (value?.clientStaticKeyPair?.privateKey?.algorithm?.name === 'X25519') {
+      throw new DOMException('WebKit clone failure', 'DataError');
+    }
+    if (value?.algorithm?.name === 'X25519') return put.call(this, null, key);
+    return put.call(this, value, key);
+  });
+}
+
+async function rawRecord(burrowId: string): Promise<any> {
+  return withPocketStore(KNOWN_BURROWS_STORE, 'readonly', store => new Promise((resolve, reject) => {
+    const request = store.get(burrowId);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  }));
+}
+
+it('prefers native storage when it works and never exports a private key', async () => {
+  const exportKey = vi.spyOn(crypto.subtle, 'exportKey');
+  await requirePocketKeyStorage();
+  const pair = await indexedDbKnownBurrowStore().generateKey!('burrow');
+  expect(pair.privateKey.extractable).toBe(false);
+  expect(storePocketPrivateKey(pair.privateKey as CryptoKey)).toBe(pair.privateKey);
+  expect(exportKey.mock.calls.every(([format]) => format === 'raw')).toBe(true);
+});
+
+it('blocks pairing when neither key encoding survives storage', async () => {
+  vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(() => {
+    throw new DOMException('secret detail', 'QuotaExceededError');
+  });
+  await expect(requirePocketKeyStorage()).rejects.toThrow('Encrypted storage:');
+  await expect(indexedDbKnownBurrowStore().generateKey!('burrow')).rejects.toThrow('Pairing has not started');
+});
+
+it('rejects silent loss of the encrypted wrapping key during the preflight', async () => {
+  const put = IDBObjectStore.prototype.put;
+  vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (value, key) {
+    if (value?.clientStaticKeyPair?.privateKey?.format) {
+      const changed = structuredClone(value);
+      changed.clientStaticKeyPair.privateKey.wrappingKey = null;
+      return put.call(this, changed, key);
+    }
+    if (value?.clientStaticKeyPair?.privateKey?.algorithm?.name === 'X25519') {
+      throw new DOMException('clone failed', 'DataError');
+    }
+    return put.call(this, value, key);
+  });
+  await expect(requirePocketKeyStorage()).rejects.toThrow('Encrypted storage:');
+});
+
+it('does not persist an encrypted identity when the laptop denies pairing', async () => {
+  breakNativeStorage();
+  await requirePocketKeyStorage();
+  const store = indexedDbKnownBurrowStore();
+  const harness = await makeE2eHarness({ deps: { knownBurrows: store } });
+  try {
+    const result = await harness.pairAndApprove(await harness.mintInvitation(), {
+      code: shown => shown === '00' ? '01' : '00',
+    });
+    expect(result.ok).toBe(false);
+    expect(await store.list()).toEqual([]);
+  } finally { harness.client.close(); harness.burrow.stop(); }
+});
+
+it('pairs, reconnects after fresh module load, and decrypts worker push with the encrypted record', async () => {
+  breakNativeStorage();
+  await requirePocketKeyStorage();
+  const store = indexedDbKnownBurrowStore();
+  const harness = await makeE2eHarness({ deps: { knownBurrows: store } });
+  try {
+    expect(await harness.pairAndApprove(await harness.mintInvitation())).toMatchObject({ ok: true });
+    const raw = await rawRecord(harness.burrowId);
+    expect(raw.clientStaticKeyPair.privateKey).toMatchObject({
+      format: 'aes-gcm-x25519-v1', wrappingKey: { extractable: false },
+    });
+    expect(raw.clientStaticKeyPair.privateKey.algorithm).toBeUndefined();
+    expect(await harness.client.connect(harness.burrowId)).toMatchObject({ ok: true });
+    harness.client.close();
+
+    // Drop module-local key/envelope maps. A worker or new page must recover
+    // using IndexedDB alone, not an in-memory association.
+    vi.resetModules();
+    const reloaded = await import('./pocket-db');
+    const freshStore = reloaded.indexedDbKnownBurrowStore();
+    const record = (await freshStore.get(harness.burrowId))!;
+    expect(record.clientStaticKeyPair.privateKey.extractable).toBe(false);
+    await expect(crypto.subtle.exportKey('pkcs8', record.clientStaticKeyPair.privateKey)).rejects.toThrow();
+    const newHarness = await makeE2eHarness({
+      burrowId: harness.burrowId, authenticator: harness.authenticator,
+      noiseStatic: harness.noiseStatic, loadAcl: () => harness.savedAcl,
+      deps: { knownBurrows: freshStore },
+    });
+    try { expect(await newHarness.client.connect(harness.burrowId)).toMatchObject({ ok: true }); }
+    finally { newHarness.client.close(); newHarness.burrow.stop(); }
+
+    const burrowKey = await crypto.subtle.importKey('pkcs8',
+      new Uint8Array(fromBase64Url(harness.noiseStatic.privateKeyPkcs8)), 'X25519', false, ['deriveBits']);
+    const sealed = await sealPush({
+      burrowStaticPrivateKey: burrowKey,
+      clientStaticPublicKey: fromBase64Url(record.clientStaticKeyPair.publicKeyRaw),
+      plaintext: utf8Encode(JSON.stringify({ title: 'Saved key works', body: 'Worker decrypted', tag: 'test' })),
+    });
+    const listeners = new Map<string, any>();
+    const showNotification = vi.fn(async () => {});
+    installPocketWorker({
+      addEventListener: (type: string, listener: unknown) => listeners.set(type, listener),
+      skipWaiting: () => {}, clients: { claim: async () => {}, matchAll: async () => [] },
+      registration: { showNotification },
+    } as unknown as WorkerScope, freshStore);
+    let work: Promise<unknown> = Promise.resolve();
+    listeners.get('push')({
+      data: { json: () => ({ burrowId: harness.burrowId, ...sealed }) },
+      waitUntil: (promise: Promise<unknown>) => { work = promise; },
+    });
+    await work;
+    expect(showNotification).toHaveBeenCalledWith('Saved key works', expect.objectContaining({ body: 'Worker decrypted' }));
+    await freshStore.put({ ...record, authorization: { state: 'pairing-required' } });
+    expect((await rawRecord(harness.burrowId)).clientStaticKeyPair.privateKey.format).toBe('aes-gcm-x25519-v1');
+    expect((await freshStore.list())[0]!.authorization.state).toBe('pairing-required');
+    await freshStore.delete(harness.burrowId);
+    expect(await freshStore.list()).toEqual([]);
+  } finally { harness.client.close(); harness.burrow.stop(); }
+});
+
+it('rejects ciphertext damage, wrong Burrow/public context, unknown formats, and extractable wrapping keys', async () => {
+  const pair = await generatePocketKeyPair('encrypted', 'burrow');
+  const publicRaw = toBase64Url(new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey)));
+  const envelope = storePocketPrivateKey(pair.privateKey);
+  if (!('format' in envelope)) throw new Error('Expected encrypted envelope');
+  const another = storePocketPrivateKey((await generatePocketKeyPair('encrypted', 'other')).privateKey);
+  if (!('format' in another)) throw new Error('Expected second envelope');
+  expect(another.wrappingKey).not.toBe(envelope.wrappingKey);
+  expect(another.iv).not.toEqual(envelope.iv);
+  await expect(crypto.subtle.exportKey('raw', envelope.wrappingKey)).rejects.toThrow();
+  await expect(loadPocketPrivateKey(envelope, 'other', publicRaw)).rejects.toThrow();
+  await expect(loadPocketPrivateKey(envelope, 'burrow', 'wrong')).rejects.toThrow();
+  const damaged = structuredClone(envelope);
+  new Uint8Array(damaged.ciphertext)[0] ^= 1;
+  await expect(loadPocketPrivateKey(damaged, 'burrow', publicRaw)).rejects.toThrow();
+  await expect(loadPocketPrivateKey({ ...envelope, format: 'unknown' } as any, 'burrow', publicRaw)).rejects.toThrow();
+  const wrappingKey = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
+  await expect(loadPocketPrivateKey({ ...envelope, wrappingKey }, 'burrow', publicRaw)).rejects.toThrow();
+});
+
+it('keeps legacy native records usable without changing their encoding', async () => {
+  const pair = await generateNoiseKeyPair();
+  const record: KnownBurrowV1 = {
+    burrowId: 'legacy', accountId: 'owner', label: 'Laptop', burrowStaticPublicKey: 'pin',
+    clientStaticKeyPair: { privateKey: pair.privateKey as CryptoKey, publicKeyRaw: toBase64Url(pair.publicKey) },
+    passkeyCredentialId: 'cred', passkeyPublicKeyHash: 'hash', authorization: { state: 'pairing-required' },
+  };
+  const store = indexedDbKnownBurrowStore();
+  await store.put(record);
+  const restored = (await store.get('legacy'))!;
+  expect(restored.clientStaticKeyPair.privateKey.algorithm.name).toBe('X25519');
+  await store.put(restored);
+  expect((await rawRecord('legacy')).clientStaticKeyPair.privateKey.algorithm.name).toBe('X25519');
+});

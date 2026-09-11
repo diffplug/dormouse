@@ -81,6 +81,13 @@ for (const rule of RULES) {
 }
 
 const security = readFileSync(join(repoRoot, SECURITY_SPEC), 'utf8');
+// A file-scoped storage exception must not become a directory-scoped escape.
+selftest.withAppended(
+  'lib/src/remote/client/pocket-db.ts',
+  "\nconst __selftest = { name: 'AES-GCM' };\n",
+  'AES-GCM in the module beside the at-rest wrapper stays green',
+);
+
 for (const line of new Set(RULES.map((rule) => rule.security))) {
   if (!security.includes(line)) {
     selftest.weak.push(`${SECURITY_SPEC} does not contain the line a rule names: "${line}"`);

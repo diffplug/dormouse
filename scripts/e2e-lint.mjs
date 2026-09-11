@@ -157,10 +157,12 @@ export const RULES = [
     violation: '\nexport interface SelftestOptions {\n  readonly pattern: string;\n}\n',
   },
   {
-    rule: 'No second AEAD anywhere in the shipped source',
-    security: 'no negotiation, no cipher or pattern selector',
+    rule: 'No second AEAD outside Pocket at-rest key wrapping',
+    security: 'AES-GCM appears in non-diagnostic production source outside the local at-rest',
     kind: 'forbid',
     trees: SOURCE_TREES,
+    excludeFiles: ['lib/src/remote/client/pocket-private-key.ts'],
+    // The one exception encrypts local private-key storage, never wire data.
     // `AES-GCM` is the substitution the Noise suite exists to refuse: it *is* in
     // shipping WebCrypto, which is exactly what makes it the tempting one, and
     // the protocol name is part of the transcript so swapping it is a different
@@ -355,7 +357,8 @@ function sourceFilesUnder(trees) {
 
 /** The files a rule scans: an explicit list, or every source file under its trees. */
 export function filesFor(rule) {
-  return rule.files ?? sourceFilesUnder(rule.trees);
+  return (rule.files ?? sourceFilesUnder(rule.trees))
+    .filter(file => !rule.excludeFiles?.includes(file));
 }
 
 export function check() {

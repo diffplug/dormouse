@@ -760,7 +760,9 @@ export class PocketClient {
     const deadline = this.#now() + DEFAULT_PAIRING_TTL_MS;
     const { burrowId, inviteId } = invitation;
     const route = { kind: 'pairing', id: inviteId, burrowId } as const;
-    const clientStatic = await generateNoiseKeyPair();
+    const clientStatic = this.#knownBurrows.generateKey
+      ? await this.#knownBurrows.generateKey(burrowId)
+      : await generateNoiseKeyPair();
     const handshake = await createNoiseInitiator({
       prologue: pairingInvitationPrologue(invitation),
       staticKeyPair: clientStatic,

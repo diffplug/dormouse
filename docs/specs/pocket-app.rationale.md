@@ -86,6 +86,31 @@ mode. [WebKit's iOS Web Push guidance](https://webkit.org/blog/13878/web-push-fo
 
 ## What Pocket stores
 
+The operator confirmed successful production pairing on the affected iPhone on
+September 11, 2026 after installing the encrypted fallback. No Android hardware
+was tested in this investigation; the retained harness measures the device on
+which it runs rather than selecting behavior from a user-agent string.
+
+The encrypted representation keeps a per-key AES key beside its ciphertext in
+the same record, so a committed record is sufficient for a fresh page or worker.
+Runtime keys have a weakly held encrypted representation; reads restore that
+association, preventing an authorization-only update from trying the broken
+native X25519 serialization again. Neither database version nor store layout
+changes; v4 native records remain readable without migration. The security
+tradeoff and device restart evidence are in remote-security-model, Client statics.
+
+The iOS 26.6.1 pairing failure reported in September 2026 occurred after local
+approval, at the IndexedDB write. WebKit evaluates the inline key path on a
+deserialized clone, so a failed embedded-key clone can look like a missing
+`burrowId`. WebKit bug 312279 reports X25519 key storage returning null.
+Generation and agreement alone do not test persistence; reopening and using the
+stored key detects silent readback failure as well as a rejected write.
+
+The phone subsequently reported `write-record / DataError` in the disposable
+database. Testing a separately stored key distinguishes an inline-key check
+failure from broken key deserialization; an explicit key can bypass the former
+while hiding the latter until readback. This diagnostic does not migrate records.
+
 **Why one module owns every IndexedDB open.** Two modules opening the same database can disagree about the version, and a connection held open across an upgrade blocks it indefinitely. Centralizing name, version, upgrade and open makes both states unreachable rather than merely unlikely.
 
 **Why the `device-key` store is dropped on upgrade.** It belonged to the protocol that has been replaced, and a key nothing can use is only a credential left lying about.
@@ -95,6 +120,14 @@ The v4 rename also drops `known-hosts` and empties `pending-deletions`: their ol
 **Why only the private half is stored as a `CryptoKey`.** A second stored `CryptoKey` would be a structured clone nothing ever reads — dead weight a future reader could mistake for the authoritative copy.
 
 ## Serving the built bundle
+
+Measured on iPhone 15 Pro, Safari 26.6.1, September 2026: X25519 generation
+worked, but structured cloning failed, inline IndexedDB writes raised DataError,
+and explicit-key reads returned null. AES-GCM, Ed25519, and P-256 passed all
+three storage/clone tests; AES-encrypted X25519 bytes also passed. A connection
+reopen does not prove app-restart persistence, so the separate restart test
+retains only a disposable checkpoint. Its page-instance check rules out an
+in-memory retry, not OS process restoration; the user supplies that evidence.
 
 **Why `no-cache` on the shell is load-bearing.** `emptyOutDir` deletes the previous build's hashed assets, so a browser reusing a heuristically cached `index.html` does not merely run stale code — it requests files that no longer exist and fails to boot, with no user recovery but clearing site data.
 

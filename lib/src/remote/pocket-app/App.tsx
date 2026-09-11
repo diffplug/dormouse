@@ -35,6 +35,7 @@ import {
 import {
   indexedDbKnownBurrowStore,
   indexedDbPendingDeletionStore,
+  requirePocketKeyStorage,
   type KnownBurrowV1,
 } from '../client/pocket-db';
 import {
@@ -422,6 +423,7 @@ export default function App({
   const onScanned = useCallback(
     (invitation: PairingInvitation) =>
       run('pair', async () => {
+        await requirePocketKeyStorage();
         cancelledPairingRef.current = false;
         const label = deviceLabel();
         let spentOnSetup = false;

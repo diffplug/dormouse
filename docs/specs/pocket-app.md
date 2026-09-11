@@ -389,6 +389,33 @@ Source of truth: `isInstalledWebApp` / `requiresInstallForPush` /
 
 ## What Pocket stores
 
+**Must verify private-key storage before a scan starts registration, sign-in,
+token retirement, or pairing.** Probe native storage first, then encrypted
+storage only if native fails, using fresh disposable keys in Pocket's record
+shape. Reopen and verify identical key agreement; reject missing or extractable
+runtime keys. Both formats failing shows a storage
+compatibility error without resetting pairing data. Attempt probe database
+deletion on exit. (rationale)
+**Must identify the failed probe stage and an allowlisted exception name;
+never display browser exception messages or key material.**
+**Must diagnose a failed inline record with a separate, explicitly keyed
+private-key round trip when its probe database remains open.** Reopen and use
+that key; its result is diagnostic only, never a storage selection.
+
+**Must use the selected format for new keys and decode both formats in the
+shared page/worker store.** The encrypted format stores AES-GCM ciphertext,
+a nonextractable per-key AES-256 key, a random 96-bit IV, and authenticated
+domain/Burrow/public-key context. Generate and encrypt before the ceremony,
+persist only after approval, and re-import X25519 nonextractably. Preserve its
+envelope across authorization rewrites; reject corruption without generating a
+replacement. Native records stay native. Older builds cannot read encrypted
+records; rollback requires returning to a compatible build or pairing again.
+
+Source of truth: `requirePocketKeyStorage` in `lib/src/remote/client/pocket-db.ts`;
+tests: `lib/src/remote/client/pocket-key-storage.test.ts`,
+`lib/src/remote/client/pocket-encrypted-storage.test.ts`,
+`lib/src/remote/pocket-app/App.scan.test.tsx`.
+
 **One module owns the IndexedDB name, its version, its upgrade, and every open**
 (rationale). `dormouse-pocket` is at **v4**: `known-burrows` (`KnownBurrowV1`, keyed
 by `burrowId`) and `pending-deletions` (`PendingDeliveryDeletionV1`, keyed
@@ -400,7 +427,7 @@ ordinary eviction-prone storage, which re-pairing survives
 ([remote-security-model.md](./remote-security-model.md) → Client static loss).
 
 **A `KnownBurrowV1` is this Client's whole authorization state** — the pinned Burrow
-static, the per-Burrow X25519 private half as a nonextractable `CryptoKey` beside
+static, the per-Burrow X25519 private half decoded to a nonextractable `CryptoKey` beside
 its raw public point, the paired passkey identifiers, and either
 `{ paired, deliveryId }` or `pairing-required`. **Only the private half is a key
 object**: a `NoiseKeyPair` wants the public half as raw bytes (rationale).
@@ -412,6 +439,27 @@ Source of truth: `lib/src/remote/client/pocket-db.ts`, `purgeLegacyPairedMarkers
 in `lib/src/remote/client/pocket-client.ts`.
 
 ## Serving the built bundle
+
+**Must serve the opt-in capability harness at `/diagnostics/index.html` from
+`lib/pocket/public/diagnostics/`.** Test fresh keys and isolated temporary
+storage, report stage failures and cleanup failures, and never read pairing
+data, request passkeys or media permissions, or upload results. API presence
+is observational; crypto storage success requires reopening and using the key.
+The encrypted-X25519 experiment does not change production key storage.
+**Must keep diagnostics platform-neutral and state which browser/app context
+was tested.** API presence alone never certifies Android, iOS, or desktop support.
+
+**Must retain a restart checkpoint only on explicit preparation, in a
+diagnostic-only database, until explicit cleanup.** Verification requires a new
+page instance and derives the saved expected result using the recovered key;
+never claim page reload proves process termination. The diagnostic manifest has
+its own identity and start URL. Reports omit key material. Pinned by
+`lib/src/remote/client/capability-harness.test.ts`.
+
+Source of truth: `runCapabilities` in
+`lib/pocket/public/diagnostics/capabilities.js`; UI:
+`lib/pocket/public/diagnostics/page.js`; restart: `verifyRestart` in
+`lib/pocket/public/diagnostics/restart.js`.
 
 Content types need no special-casing: `serveStatic` already answers
 `application/manifest+json` for `.webmanifest` and `text/javascript` for `sw.js`.

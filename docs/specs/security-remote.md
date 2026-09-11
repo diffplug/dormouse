@@ -34,7 +34,7 @@ no plaintext relay route, and no reader for any of the pre-cutover frames.
 | Setup password | one endpoint, `/api/burrow/enroll`, and thence a `burrowToken` | it registers **no** passkey — `/api/setup/*` takes a Burrow-minted setup token and nothing else — so it reaches an owner passkey only via the next row. `/api/burrow/enroll` accepts one other credential, the installer's enrollment offer: owner-only *at rest*, the whole of what the file mode protects, checked by possession over HTTPS rather than local identity, so a leaked token redeems remotely — bounded single-use, 24-hour expiry, permanently disabled by the first Burrow enrollment. Still **no Burrow access** |
 | `burrowToken` | the Burrow's own relay traffic and, transitively, **account takeover**: it mints setup tokens at `/api/burrow/setup-token`, the only thing that registers an owner passkey | bounded three ways — single-use and dead 5 minutes after minting; revoking the Burrow (deleting its row from `burrows.json`) stops minting immediately *and* kills already-minted tokens, re-checked at both setup gates; a signed-in phone retires an unused token at `/api/setup/retire`. Still **no Burrow access**: pairing runs Noise IK against an invitation keypair the Burrow never sent anywhere (rationale) |
 | Synced or stolen passkey | sign-in, and the ability to *ask* | the paired Client static is missing, so `BurrowAcl` answers `client-not-paired` |
-| Client static | use of the key in place, and only through a compromised browser or OS, or XSS in the Pocket origin | the key is not extractable, connecting still needs a fresh passkey assertion, and it authorizes exactly one Burrow |
+| Client static | use in place; encrypted fallback also permits private-byte extraction by compromised same-origin code | connecting still needs the paired passkey's fresh assertion, and it authorizes exactly one Burrow |
 
 **The only path into a Burrow's ACL is a human typing, on that Burrow, two digits displayed
 on the phone that is asking**, and the Burrow gets the comparison exactly once. **The
@@ -91,8 +91,20 @@ are a silent no-op. Rows carry only what is additional.
 
 **Without explicit modes these files inherit the umask and end up world-readable**,
 handing live burrow tokens to any other local account on a shared machine. The Client's
-per-Burrow statics are the exception that needs no file protection: non-extractable
-`CryptoKey`s in IndexedDB, never exported.
+per-Burrow browser storage follows `docs/specs/remote-security-model.md` ->
+"Client statics".
+
+- **FAIL IF** Pocket persists plaintext Client private bytes, uses an extractable
+  AES wrapping key, selects encrypted storage without a failed native probe and
+  a passing encrypted reopen/use probe, or treats a corrupt encrypted record as
+  permission to generate a replacement identity. Read
+  `lib/src/remote/client/pocket-private-key.ts` and
+  `lib/src/remote/client/pocket-db.ts`; pinned by
+  `lib/src/remote/client/pocket-encrypted-storage.test.ts`.
+- **FAIL IF** AES-GCM appears in non-diagnostic production source outside the local at-rest
+  wrapper `lib/src/remote/client/pocket-private-key.ts`. The wire cipher remains
+  unchanged; `scripts/e2e-lint.mjs` and `scripts/e2e-lint-selftest.mjs` pin
+  the file-scoped exception.
 
 - **FAIL IF** `relay/src/state.ts` stops creating `$DORMOUSE_STATE_DIR` mode `0o700`, or stops writing every file through `writeAtomic` at mode `0o600`. The "every file" clause is a negative search over `relay/src/`: no `writeFile`, `appendFile`, or `createWriteStream` may target the state directory outside `writeAtomic`. A cheap default, not a cross-platform guarantee; the installer's directory permissions below protect the installed Relay's state (rationale).
 - **FAIL IF** `FileBurrowStateStore` (`lib/src/host/remote/burrow-state-store.ts`) stops creating its directory `0o700` and writing `0o600` on non-Windows platforms, or if `VsCodeBurrowStateStore` stops keeping the **enrollment** in `SecretStorage`. The ACL's home in `globalState` is deliberate and is not a finding; the enrollment's is what carries `burrowToken`.
