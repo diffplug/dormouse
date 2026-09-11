@@ -679,7 +679,7 @@ and one socket scan (`getOpenPortsForPids`) — the scans are synchronous on its
 only event loop, so a `dor list --ports` across Workspaces must not multiply them
 by its row count (`docs/specs/dor-cli.md` → "Current Implemented Commands").
 **Must follow `docs/specs/transport.md` → "Port scan deadlines" for both port commands.**
-The macOS socket scan runs under
+The macOS and Windows socket scans run under
 `OPEN_PORT_TIMEOUT_MS + OPEN_PORT_TIMEOUT_PER_ID_MS × ids`, and the command waits
 that plus the process-table read's `OPEN_PORT_TIMEOUT_MS` and IPC margin — one terminal's cap
 never bounds the whole Window (`open_ports_many_timeout` in

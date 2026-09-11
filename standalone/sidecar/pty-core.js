@@ -1026,7 +1026,16 @@ function runPowerShellJson(script, execFileSyncFn) {
 }
 
 function windowsListeningPorts(pids, runtime = {}) {
-  const execFileSyncFn = runtime.execFileSync || execFileSync;
+  const spawn = runtime.execFileSync || execFileSync;
+  const now = runtime.now || (() => performance.now());
+  const deadline = now() + (runtime.scanTimeoutMs ?? OPEN_PORT_TIMEOUT_MS);
+  // Name resolution, the preferred cmdlet, and netstat share one socket-scan
+  // budget. Each fallback spends only what the preceding subprocesses left.
+  const execFileSyncFn = (command, args, options) => {
+    const remaining = Math.ceil(deadline - now());
+    if (remaining <= 0) throw new Error('port scan deadline exhausted');
+    return spawn(command, args, { ...options, timeout: remaining });
+  };
   const pidSet = new Set(pids);
 
   // Resolve pid -> process name once (best-effort; ports still returned without).
