@@ -21,16 +21,16 @@ const contextFor = (burrowId: string, publicKeyRaw: string) =>
 export async function generatePocketKeyPair(mode: PocketKeyStorageMode, burrowId: string): Promise<CryptoKeyPair> {
   const pair = await crypto.subtle.generateKey('X25519', mode === 'encrypted', ['deriveBits']);
   if (mode === 'native') return pair;
-  // None of the three depends on another, and a phone pays for each round trip.
-  const [publicRaw, wrappingKey, pkcs8] = await Promise.all([
+  // Finish fallible setup before exporting private bytes. Promise.all rejection
+  // must never strand a successful private export outside its cleanup scope.
+  const [publicRaw, wrappingKey] = await Promise.all([
     crypto.subtle.exportKey('raw', pair.publicKey),
     crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']),
-    crypto.subtle.exportKey('pkcs8', pair.privateKey),
   ]);
   const publicKeyRaw = toBase64Url(new Uint8Array(publicRaw));
   const context = contextFor(burrowId, publicKeyRaw);
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const clear = new Uint8Array(pkcs8);
+  const clear = new Uint8Array(await crypto.subtle.exportKey('pkcs8', pair.privateKey));
   try {
     const ciphertext = await crypto.subtle.encrypt({
       name: 'AES-GCM', iv, additionalData: encoder.encode(context),

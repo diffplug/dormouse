@@ -37,6 +37,7 @@ import {
   indexedDbPendingDeletionStore,
   requirePocketKeyStorage,
   type KnownBurrowV1,
+  type KnownBurrowSummary,
 } from '../client/pocket-db';
 import {
   getPushAvailability,
@@ -676,7 +677,7 @@ function Waiting(): React.ReactElement {
 }
 
 /** One pinned record as the list renders it. */
-function toBurrowView(record: KnownBurrowV1, online: boolean): BurrowView {
+function toBurrowView(record: KnownBurrowSummary, online: boolean): BurrowView {
   return {
     burrowId: record.burrowId,
     label: record.label || record.burrowId,

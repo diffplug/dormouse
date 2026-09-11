@@ -3,7 +3,7 @@ import { IDBFactory, IDBObjectStore } from 'fake-indexeddb';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 // Public diagnostic module is intentionally standalone and browser-native.
 // @ts-ignore JavaScript artifact has no separate type declaration.
-import { commit, request, runCapabilities } from '../../../pocket/public/diagnostics/capabilities.js';
+import { commit, request, runCapabilities } from '../../../pocket/diagnostics/capabilities.js';
 
 beforeEach(() => {
   vi.stubGlobal('crypto', webcrypto);
@@ -21,7 +21,7 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 // @ts-ignore Browser-native diagnostic module.
-const restartModule = () => import('../../../pocket/public/diagnostics/restart.js');
+const restartModule = () => import('../../../pocket/diagnostics/restart.js');
 
 it('retains an isolated checkpoint, rejects same-page verification, and recovers after module restart', async () => {
   vi.resetModules();
@@ -32,7 +32,10 @@ it('retains an isolated checkpoint, rejects same-page verification, and recovers
   vi.resetModules();
   const second = await restartModule();
   const report = await second.verifyRestart();
-  expect(report).toMatchObject({ status: 'PASS', newPageInstance: true, retained: true });
+  expect(report).toMatchObject({
+    version: '3', format: 'aes-gcm-x25519-v1', authenticatedContext: true,
+    status: 'PASS', newPageInstance: true, retained: true,
+  });
   expect(JSON.stringify(report)).not.toMatch(/ciphertext|peerPublic|expected|privateKey/);
   expect(await second.verifyRestart()).toMatchObject({ status: 'PASS' });
   expect(await indexedDB.databases()).toEqual([{ name: 'dormouse-capability-probe-restart-v1', version: 1 }]);
@@ -51,13 +54,13 @@ it('fails closed when a retained checkpoint ciphertext is corrupted', async () =
   const store = tx.objectStore('inline');
   const saved = await request(store.get('test'));
   await commit(tx, () => {
-    new Uint8Array(saved.ciphertext)[0] ^= 1;
+    new Uint8Array(saved.envelope.ciphertext)[0] ^= 1;
     store.put(saved);
   });
   db.close();
   vi.resetModules();
   const second = await restartModule();
-  expect(await second.verifyRestart()).toMatchObject({ status: 'FAIL', stage: 'decrypt' });
+  expect(await second.verifyRestart()).toMatchObject({ status: 'FAIL', stage: 'restore-production-key' });
   await second.clearRestart();
 });
 
@@ -69,6 +72,30 @@ it('runs real crypto operations, including encrypted X25519, without touching Po
   expect(report.cleanupErrors).toEqual([]);
   expect(open.mock.calls.every(([name]) => name.startsWith('dormouse-capability-probe-'))).toBe(true);
   expect(await indexedDB.databases()).toEqual([]);
+});
+
+it.each(['legacy', 'context', 'public-key'])('rejects a %s checkpoint without replacing it', async change => {
+  vi.resetModules();
+  const first = await restartModule();
+  await first.prepareRestart();
+  const db: IDBDatabase = await request(indexedDB.open('dormouse-capability-probe-restart-v1'));
+  const tx = db.transaction('inline', 'readwrite');
+  const store = tx.objectStore('inline');
+  const saved = await request(store.get('test'));
+  if (change === 'legacy') saved.schema = 1;
+  if (change === 'context') saved.envelope.context = 'wrong context';
+  if (change === 'public-key') saved.publicKeyRaw = 'wrong public key';
+  await commit(tx, () => store.put(saved));
+  db.close();
+  vi.resetModules();
+  const second = await restartModule();
+  const report = await second.verifyRestart();
+  expect(report).toMatchObject({
+    status: 'FAIL', stage: change === 'legacy' ? 'read-checkpoint' : 'restore-production-key',
+  });
+  if (change === 'legacy') expect(report.error).toContain('prepare a new production-format test');
+  await expect(second.prepareRestart()).rejects.toThrow('already exists');
+  await second.clearRestart();
 });
 
 it('continues after simulated WebKit X25519 failures and distinguishes missing readback', async () => {

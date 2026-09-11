@@ -483,6 +483,9 @@ restart result**. Do not prepare again between those steps. Finish with
 Browser and installed-app results are separate evidence; a passing test on one
 device is not certification of another. The diagnostic contract is
 `docs/specs/pocket-app.md` -> "Serving the built bundle".
+Harness v3 tests the production encrypted-key format, including authenticated
+context. A v1/v2 experimental checkpoint must be removed and prepared again;
+old restart reports do not establish the production-format restart result.
 
 ### Service and deployment failures
 

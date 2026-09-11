@@ -21,6 +21,10 @@ environment.
 
 ## Client statics
 
+The initial restart harness used an experimental envelope without the
+production AAD binding. Its restart evidence below is primitive-level evidence;
+the v3 harness uses the production codec and requires a fresh checkpoint.
+
 On September 11, 2026, an iPhone 15 Pro running Safari 26.6.1 failed X25519
 structured cloning and native IndexedDB persistence in both Safari and a Home
 Screen app, while X25519 agreement and AES key persistence worked. The isolated

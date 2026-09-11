@@ -67,32 +67,3 @@ it('allows a fresh retry after a storage failure', async () => {
   await expect(requirePocketKeyStorage()).rejects.toThrow('Diagnostic: write-record / DataError.');
   await expect(requirePocketKeyStorage()).resolves.toBeUndefined();
 });
-
-it('proves separate-key readback and use when only inline writes fail, but still blocks pairing', async () => {
-  const put = IDBObjectStore.prototype.put;
-  vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (value, key) {
-    if (this.keyPath) throw new DOMException('inline clone failed', 'DataError');
-    return put.call(this, value, key);
-  });
-  await expect(requirePocketKeyStorage()).rejects.toThrow(
-    'Diagnostic: write-record / DataError. Separate key: separate-key / passed.',
-  );
-});
-
-it('does not mistake a separate-key write followed by null readback for a fix', async () => {
-  const put = IDBObjectStore.prototype.put;
-  vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (_value, key) {
-    if (this.keyPath) throw new DOMException('inline clone failed', 'DataError');
-    return put.call(this, null, key);
-  });
-  await expect(requirePocketKeyStorage()).rejects.toThrow('Separate key: separate-read-key / missing.');
-});
-
-it('rejects an unusable separate key even when its metadata looks correct', async () => {
-  const put = IDBObjectStore.prototype.put;
-  vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (_value, key) {
-    if (this.keyPath) throw new DOMException('inline clone failed', 'DataError');
-    return put.call(this, { type: 'private', extractable: false }, key);
-  });
-  await expect(requirePocketKeyStorage()).rejects.toThrow('Separate key: separate-use-key / TypeError.');
-});

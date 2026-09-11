@@ -389,8 +389,11 @@ Source of truth: `isInstalledWebApp` / `requiresInstallForPush` /
 
 ## What Pocket stores
 
-**Must verify private-key storage before a scan starts registration, sign-in,
-token retirement, or pairing.** Probe native storage first, then encrypted
+**Must have a successful current-page storage probe before a scan starts
+registration, sign-in, token retirement, or pairing.** Share in-flight work and
+cache successful selection only in memory for that page; never retain failures.
+Invalidate selection after production store or key-generation failure.
+Probe native storage first, then encrypted
 storage only if native fails, using fresh disposable keys in Pocket's record
 shape. Reopen and verify identical key agreement; reject missing or extractable
 runtime keys. Both formats failing shows a storage
@@ -398,9 +401,13 @@ compatibility error without resetting pairing data. Attempt probe database
 deletion on exit. (rationale)
 **Must identify the failed probe stage and an allowlisted exception name;
 never display browser exception messages or key material.**
-**Must diagnose a failed inline record with a separate, explicitly keyed
-private-key round trip when its probe database remains open.** Reopen and use
-that key; its result is diagnostic only, never a storage selection.
+**Must keep the separate-key experiment out of pairing preflight.** Direct
+compatibility failures to `/diagnostics/index.html`.
+
+**Must use metadata-only summaries for Burrow listing, push-subscription queries,
+and removal.** `getSummary` and `listSummaries` omit key material and perform no
+decryption/import; a corrupt key must not block listing or removal. Connection
+and push decryption use full records.
 
 **Must use the selected format for new keys and decode both formats in the
 shared page/worker store.** The encrypted format stores AES-GCM ciphertext,
@@ -440,12 +447,14 @@ in `lib/src/remote/client/pocket-client.ts`.
 
 ## Serving the built bundle
 
-**Must serve the opt-in capability harness at `/diagnostics/index.html` from
-`lib/pocket/public/diagnostics/`.** Test fresh keys and isolated temporary
+**Must serve the opt-in capability harness at `/diagnostics/index.html`, built
+from `lib/pocket/diagnostics/` as a second Pocket HTML entry.** Test fresh keys and isolated temporary
 storage, report stage failures and cleanup failures, and never read pairing
 data, request passkeys or media permissions, or upload results. API presence
 is observational; crypto storage success requires reopening and using the key.
-The encrypted-X25519 experiment does not change production key storage.
+**Must use the production key codec for encrypted round-trip and restart tests,
+including authenticated context.** Diagnostics never open production databases.
+Keep primitive checks independently generated and database-isolated.
 **Must keep diagnostics platform-neutral and state which browser/app context
 was tested.** API presence alone never certifies Android, iOS, or desktop support.
 
@@ -455,11 +464,17 @@ page instance and derives the saved expected result using the recovered key;
 never claim page reload proves process termination. The diagnostic manifest has
 its own identity and start URL. Reports omit key material. Pinned by
 `lib/src/remote/client/capability-harness.test.ts`.
+**Must identify harness v3 production-format reports and reject legacy restart
+checkpoints with explicit cleanup/reprepare instructions**, never silently
+reclassify experimental evidence. Preserve the v1 production envelope/context.
 
 Source of truth: `runCapabilities` in
-`lib/pocket/public/diagnostics/capabilities.js`; UI:
-`lib/pocket/public/diagnostics/page.js`; restart: `verifyRestart` in
-`lib/pocket/public/diagnostics/restart.js`.
+`lib/pocket/diagnostics/capabilities.js`; UI:
+`lib/pocket/diagnostics/page.js`; restart: `verifyRestart` in
+`lib/pocket/diagnostics/restart.js`; codec: `generatePocketKeyPair` /
+`loadPocketPrivateKey` in `lib/src/remote/client/pocket-private-key.ts`.
+Both built HTML shells are checked by `assertPocketShell` in
+`lib/scripts/assert-pocket-worker.mjs`.
 
 Content types need no special-casing: `serveStatic` already answers
 `application/manifest+json` for `.webmanifest` and `text/javascript` for `sw.js`.

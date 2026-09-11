@@ -6,16 +6,16 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { assertPocketShell } from '../../../scripts/assert-pocket-worker.mjs';
 
 const fake = vi.hoisted(() => ({ run: vi.fn(), prepare: vi.fn(), verify: vi.fn(), clear: vi.fn() }));
-vi.mock('../../../pocket/public/diagnostics/restart.js', () => ({
+vi.mock('../../../pocket/diagnostics/restart.js', () => ({
   prepareRestart: fake.prepare, verifyRestart: fake.verify, clearRestart: fake.clear,
 }));
-vi.mock('../../../pocket/public/diagnostics/capabilities.js', () => ({
+vi.mock('../../../pocket/diagnostics/capabilities.js', () => ({
   HARNESS_VERSION: '1', runCapabilities: fake.run,
 }));
 afterEach(() => { vi.unstubAllGlobals(); document.body.replaceChildren(); });
 
 it('wires explicit restart preparation, verification, copy, and cleanup', async () => {
-  const html = readFileSync(resolve('pocket/public/diagnostics/index.html'), 'utf8');
+  const html = readFileSync(resolve('pocket/diagnostics/index.html'), 'utf8');
   document.body.innerHTML = html.match(/<body>([\s\S]*)<\/body>/)![1]!;
   fake.prepare.mockResolvedValue({ status: 'PREPARED' });
   fake.verify.mockResolvedValue({ status: 'PASS', newPageInstance: true });
@@ -23,7 +23,7 @@ it('wires explicit restart preparation, verification, copy, and cleanup', async 
   const copy = vi.fn().mockResolvedValue(undefined);
   vi.stubGlobal('navigator', { clipboard: { writeText: copy } });
   // @ts-ignore Browser-native JavaScript entry point.
-  await import('../../../pocket/public/diagnostics/restart-page.js');
+  await import('../../../pocket/diagnostics/restart-page.js');
   expect(fake.prepare).not.toHaveBeenCalled();
   document.getElementById('prepare-restart')!.click();
   await vi.waitFor(() => expect(document.getElementById('restart-status')!.textContent).toContain('Prepared.'));
@@ -36,9 +36,9 @@ it('wires explicit restart preparation, verification, copy, and cleanup', async 
 });
 
 it('renders completed and failed checks and copies a report without HTML injection', async () => {
-  const root = resolve('pocket/public/diagnostics');
+  const root = resolve('pocket/diagnostics');
   expect(assertPocketShell(root)).toBe(2);
-  const manifest = JSON.parse(readFileSync(resolve(root, 'manifest.webmanifest'), 'utf8'));
+  const manifest = JSON.parse(readFileSync(resolve('pocket/public/diagnostics/manifest.webmanifest'), 'utf8'));
   expect(manifest).toMatchObject({ id: '/diagnostics/', start_url: '/diagnostics/index.html', display: 'standalone' });
   const html = readFileSync(resolve(root, 'index.html'), 'utf8');
   document.body.innerHTML = html.match(/<body>([\s\S]*)<\/body>/)![1]!;
@@ -53,7 +53,7 @@ it('renders completed and failed checks and copies a report without HTML injecti
   const copy = vi.fn().mockResolvedValue(undefined);
   vi.stubGlobal('navigator', { clipboard: { writeText: copy } });
   // @ts-ignore Browser-native JavaScript entry point.
-  await import('../../../pocket/public/diagnostics/page.js');
+  await import('../../../pocket/diagnostics/page.js');
   document.getElementById('run')!.click();
   await vi.waitFor(() => expect(document.getElementById('status')!.textContent).toContain('1 passed, 1 failed'));
   expect(document.querySelectorAll('#results li')).toHaveLength(2);

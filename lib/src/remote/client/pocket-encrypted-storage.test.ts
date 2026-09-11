@@ -4,13 +4,113 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { fromBase64Url, generateNoiseKeyPair, sealPush, toBase64Url, utf8Encode } from 'remote-lib-common';
 import {
   indexedDbKnownBurrowStore, promisifyRequest, requirePocketKeyStorage, withPocketStore,
+  invalidatePocketKeyStorage,
   KNOWN_BURROWS_STORE, POCKET_KEY_STORAGE_ERROR, type KnownBurrowV1,
 } from './pocket-db';
 import { generatePocketKeyPair, loadPocketPrivateKey, storePocketPrivateKey } from './pocket-private-key';
 import { makeE2eHarness } from './test-e2e-harness';
 import { installPocketWorker, type WorkerScope } from '../pocket-app/sw';
 
+it('does not export private bytes if parallel wrapping-key setup fails', async () => {
+  const generate = crypto.subtle.generateKey.bind(crypto.subtle);
+  const exportKey = vi.spyOn(crypto.subtle, 'exportKey');
+  vi.spyOn(crypto.subtle, 'generateKey').mockImplementation((algorithm, extractable, usages) => {
+    if (typeof algorithm === 'object' && algorithm.name === 'AES-GCM') {
+      return Promise.reject(new Error('AES unavailable'));
+    }
+    return generate(algorithm, extractable, usages);
+  });
+  await expect(generatePocketKeyPair('encrypted', 'probe')).rejects.toThrow('AES unavailable');
+  expect(exportKey.mock.calls.some(([format]) => format === 'pkcs8')).toBe(false);
+});
+
+it.each(['encrypt', 'importKey'] as const)('clears exported private bytes when %s fails', async operation => {
+  const original = crypto.subtle.exportKey.bind(crypto.subtle);
+  let clear: Uint8Array | undefined;
+  vi.spyOn(crypto.subtle, 'exportKey').mockImplementation(async (format, key) => {
+    const result = await original(format, key);
+    if (format === 'pkcs8') clear = new Uint8Array(result as ArrayBuffer);
+    return result;
+  });
+  vi.spyOn(crypto.subtle, operation).mockRejectedValue(new Error('injected failure'));
+  await expect(generatePocketKeyPair('encrypted', 'probe')).rejects.toThrow('injected failure');
+  expect(clear?.byteLength).toBeGreaterThan(0);
+  expect(clear?.every(byte => byte === 0)).toBe(true);
+});
+
+it('shares one successful probe across concurrent scans, but probes again in a fresh module', async () => {
+  const open = vi.spyOn(indexedDB, 'open');
+  await Promise.all([requirePocketKeyStorage(), requirePocketKeyStorage(), requirePocketKeyStorage()]);
+  expect(open).toHaveBeenCalledTimes(2);
+  await requirePocketKeyStorage();
+  expect(open).toHaveBeenCalledTimes(2);
+  vi.resetModules();
+  const fresh = await import('./pocket-db');
+  await fresh.requirePocketKeyStorage();
+  expect(open).toHaveBeenCalledTimes(4);
+});
+
+it('does not memoize failure and invalidates successful evidence on a store failure', async () => {
+  const put = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(() => {
+    throw new DOMException('injected failure', 'QuotaExceededError');
+  });
+  await expect(requirePocketKeyStorage()).rejects.toThrow('Encrypted storage:');
+  put.mockRestore();
+  await requirePocketKeyStorage();
+  const open = vi.spyOn(indexedDB, 'open');
+  await expect(withPocketStore(KNOWN_BURROWS_STORE, 'readonly', async () => {
+    throw new DOMException('injected failure', 'UnknownError');
+  })).rejects.toThrow();
+  open.mockClear();
+  await requirePocketKeyStorage();
+  expect(open).toHaveBeenCalledTimes(2);
+});
+
+it('does not let an invalidated in-flight probe authorize a scan', async () => {
+  const checking = requirePocketKeyStorage();
+  invalidatePocketKeyStorage();
+  await expect(checking).rejects.toThrow('Pairing has not started');
+  await expect(requirePocketKeyStorage()).resolves.toBeUndefined();
+});
+
+it('invalidates cached compatibility when opening the production database fails', async () => {
+  await requirePocketKeyStorage();
+  const open = vi.spyOn(indexedDB, 'open').mockImplementationOnce(() => {
+    throw new DOMException('storage denied', 'SecurityError');
+  });
+  await expect(indexedDbKnownBurrowStore().listSummaries()).rejects.toThrow('storage denied');
+  open.mockRestore();
+  const retried = vi.spyOn(indexedDB, 'open');
+  await requirePocketKeyStorage();
+  expect(retried).toHaveBeenCalledTimes(2);
+});
+
+it('lists and removes a paired record without decrypting its corrupt key', async () => {
+  breakNativeStorage();
+  const store = indexedDbKnownBurrowStore();
+  const harness = await makeE2eHarness({ deps: { knownBurrows: store } });
+  try {
+    expect(await harness.pairAndApprove(await harness.mintInvitation())).toMatchObject({ ok: true });
+    const raw = await rawRecord(harness.burrowId);
+    raw.clientStaticKeyPair.privateKey.ciphertext = new ArrayBuffer(16);
+    await withPocketStore(KNOWN_BURROWS_STORE, 'readwrite', async target => {
+      await promisifyRequest(target.put(raw));
+    });
+    const decrypt = vi.spyOn(crypto.subtle, 'decrypt');
+    const importKey = vi.spyOn(crypto.subtle, 'importKey');
+    const summaries = await harness.client.listKnownBurrows();
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]).not.toHaveProperty('clientStaticKeyPair');
+    expect(await store.getSummary(harness.burrowId)).toEqual(summaries[0]);
+    await harness.client.forgetBurrow(harness.burrowId);
+    expect(await store.listSummaries()).toEqual([]);
+    expect(decrypt).not.toHaveBeenCalled();
+    expect(importKey).not.toHaveBeenCalled();
+  } finally { harness.client.close(); harness.burrow.stop(); }
+});
+
 beforeEach(() => {
+  invalidatePocketKeyStorage();
   vi.stubGlobal('crypto', webcrypto);
   vi.stubGlobal('indexedDB', new IDBFactory());
 });

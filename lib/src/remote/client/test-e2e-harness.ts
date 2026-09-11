@@ -129,6 +129,13 @@ export function memoryKnownBurrows(): MemoryKnownBurrows {
     records,
     generateKey: () => generateNoiseKeyPair(),
     get: async (burrowId) => records.get(burrowId) ?? null,
+    getSummary: async (burrowId) => {
+      const value = records.get(burrowId);
+      if (!value) return null;
+      const { clientStaticKeyPair: _key, ...summary } = value;
+      return summary;
+    },
+    listSummaries: async () => [...records.values()].map(({ clientStaticKeyPair: _key, ...summary }) => summary),
     put: async (record) => void records.set(record.burrowId, record),
     delete: async (burrowId) => void records.delete(burrowId),
     list: async () => [...records.values()],

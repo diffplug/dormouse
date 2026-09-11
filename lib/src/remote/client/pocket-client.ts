@@ -86,6 +86,7 @@ import {
 import {
   type KnownBurrowStore,
   type KnownBurrowV1,
+  type KnownBurrowSummary,
   type PendingDeletionStore,
 } from './pocket-db';
 import { DirectEndpoint } from '../direct/direct-endpoint';
@@ -583,8 +584,8 @@ export class PocketClient {
   // --- The pinned Burrows ----------------------------------------------------
 
   /** Every Burrow this browser holds a record for, paired or not. */
-  listKnownBurrows(): Promise<KnownBurrowV1[]> {
-    return this.#knownBurrows.list();
+  listKnownBurrows(): Promise<KnownBurrowSummary[]> {
+    return this.#knownBurrows.listSummaries();
   }
 
   /**
@@ -593,7 +594,7 @@ export class PocketClient {
    * push row nothing can name again.
    */
   async forgetBurrow(burrowId: string): Promise<void> {
-    const record = await this.#knownBurrows.get(burrowId);
+    const record = await this.#knownBurrows.getSummary(burrowId);
     if (record?.authorization.state === 'paired') {
       await this.#tombstone(burrowId, record.authorization.deliveryId);
     }
@@ -624,7 +625,7 @@ export class PocketClient {
    * capability for (`docs/specs/relay.md` → Web Push).
    */
   async listPushSubscribedBurrows(): Promise<string[]> {
-    const deliveryIds = (await this.#knownBurrows.list())
+    const deliveryIds = (await this.#knownBurrows.listSummaries())
       .flatMap((record) =>
         record.authorization.state === 'paired' ? [record.authorization.deliveryId] : [],
       )

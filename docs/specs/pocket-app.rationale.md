@@ -86,6 +86,17 @@ mode. [WebKit's iOS Web Push guidance](https://webkit.org/blog/13878/web-push-fo
 
 ## What Pocket stores
 
+Repeated scans measured the same browser compatibility while delaying each
+attempt; a page-local successful promise shares that work without persisting an
+assumption across app restarts. Actual writes can still fail after any probe,
+so store failures invalidate the cache. Separate-key probing cannot select a
+production format and now remains only in the diagnostic tool.
+
+Burrow listing and push-subscription queries formerly decrypted every stored
+key despite using metadata alone. Besides duplicate work, this prevented
+listing/removing a record with a damaged envelope. Summary reads omit the
+private-key field without interpreting it.
+
 The operator confirmed successful production pairing on the affected iPhone on
 September 11, 2026 after installing the encrypted fallback. No Android hardware
 was tested in this investigation; the retained harness measures the device on
@@ -120,6 +131,12 @@ The v4 rename also drops `known-hosts` and empties `pending-deletions`: their ol
 **Why only the private half is stored as a `CryptoKey`.** A second stored `CryptoKey` would be a structured clone nothing ever reads — dead weight a future reader could mistake for the authoritative copy.
 
 ## Serving the built bundle
+
+Harness v1/v2 encrypted tests were experimental look-alikes without production
+AAD. Their restart results established primitive persistence, not the shipped
+envelope. Harness v3 imports the production codec through the same Vite build
+as Pocket and rejects the old checkpoint schema instead of upgrading its
+evidence. A new device restart run is needed for that stronger claim.
 
 Measured on iPhone 15 Pro, Safari 26.6.1, September 2026: X25519 generation
 worked, but structured cloning failed, inline IndexedDB writes raised DataError,
