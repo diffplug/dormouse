@@ -1064,6 +1064,19 @@ fn pty_get_cwds(
 // `lib/src/lib/mirrored-constants.test.ts`.
 const OPEN_PORT_TIMEOUT_MS: u64 = 3000;
 
+// Mirrors `OPEN_PORT_TIMEOUT_PER_ID_MS` in `lib/src/lib/platform/types.ts` —
+// pinned by `lib/src/lib/mirrored-constants.test.ts`.
+const OPEN_PORT_TIMEOUT_PER_ID_MS: u64 = 100;
+
+/// Budget for one `pty:getOpenPortsMany` over `count` ids. The sidecar runs two
+/// scans serially: the process table under `OPEN_PORT_TIMEOUT_MS`, then one
+/// socket scan under that cap plus `OPEN_PORT_TIMEOUT_PER_ID_MS` per id
+/// (`getOpenPortsForPids` in `standalone/sidecar/pty-core.js`) — so the whole
+/// Window is not held to one terminal's budget, and the reply outlasts both.
+fn open_ports_many_timeout(count: usize) -> Duration {
+    Duration::from_millis(2 * OPEN_PORT_TIMEOUT_MS + OPEN_PORT_TIMEOUT_PER_ID_MS * count as u64)
+}
+
 #[tauri::command(async)]
 fn pty_get_open_ports(
     state: tauri::State<'_, SidecarState>,
@@ -1090,11 +1103,12 @@ fn pty_get_open_ports_many(
     state: tauri::State<'_, SidecarState>,
     ids: Vec<String>,
 ) -> Result<JsonValue, String> {
+    let timeout = open_ports_many_timeout(ids.len());
     let response = request_from_sidecar_timeout(
         &state,
         "pty:getOpenPortsMany",
         serde_json::json!({ "ids": ids }),
-        Duration::from_millis(OPEN_PORT_TIMEOUT_MS),
+        timeout,
     )?;
     Ok(response
         .get("ports")
@@ -3635,11 +3649,12 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        find_node_binary, notepad_archive_lock_path, read_notepad_archive_from, read_session_from,
-        reset_notepad_archive_at, resolve_dor_cli_paths, resolve_sidecar_path, session_file_name,
-        state_root_from, strip_windows_verbatim_prefix, sweep_orphan_session_temps,
-        temp_write_path, write_notepad_archive_to, write_session_to, SESSION_TEMP_SUFFIX,
-        NOTEPAD_ARCHIVE_FILE,
+        find_node_binary, notepad_archive_lock_path, open_ports_many_timeout,
+        read_notepad_archive_from, read_session_from, reset_notepad_archive_at,
+        resolve_dor_cli_paths, resolve_sidecar_path, session_file_name, state_root_from,
+        strip_windows_verbatim_prefix, sweep_orphan_session_temps, temp_write_path,
+        write_notepad_archive_to, write_session_to, NOTEPAD_ARCHIVE_FILE,
+        OPEN_PORT_TIMEOUT_MS, OPEN_PORT_TIMEOUT_PER_ID_MS, SESSION_TEMP_SUFFIX,
     };
     use super::guard;
     use std::collections::HashSet;
@@ -3648,6 +3663,16 @@ mod tests {
     use std::sync::atomic::Ordering;
     use std::sync::Mutex;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    /// A Window-wide port listing is budgeted for its batch: both of the
+    /// sidecar's serial scans, plus the per-id allowance the socket scan gets.
+    #[test]
+    fn open_ports_many_timeout_scales_with_the_batch() {
+        let one = open_ports_many_timeout(1).as_millis() as u64;
+        let twenty = open_ports_many_timeout(20).as_millis() as u64;
+        assert_eq!(one, 2 * OPEN_PORT_TIMEOUT_MS + OPEN_PORT_TIMEOUT_PER_ID_MS);
+        assert_eq!(twenty - one, 19 * OPEN_PORT_TIMEOUT_PER_ID_MS);
+    }
 
     // RAII guard so a failing assert doesn't leak the temp dir.
     struct TempDir(PathBuf);

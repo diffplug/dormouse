@@ -7,7 +7,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   closeWorkspaceWithSurfaces,
   LAST_WORKSPACE_REFUSAL,
-  NO_WALL_REFUSAL,
   requestWorkspaceClose,
 } from './workspace-lifecycle';
 import { registerWallHandle, resetWallHandles, stubWallHandle, type WallHandle } from './wall-handles';
@@ -106,8 +105,9 @@ describe('closeWorkspaceWithSurfaces', () => {
     const [first] = ids();
     createWorkspace({ id: 'ws-2', activate: false });
     // No `handleFor('ws-2')`: nothing would walk its member Surfaces, so
-    // removing the Workspace would leave them running and unreachable.
-    expect(await closeWorkspaceWithSurfaces('ws-2', 'silent')).toBe(NO_WALL_REFUSAL);
+    // removing the Workspace would leave them running and unreachable. The
+    // wording is the router's, so a `dor` caller reads one refusal either way.
+    expect(await closeWorkspaceWithSurfaces('ws-2', 'silent')).toBe("workspace 'workspace:2' is still mounting");
     expect(ids()).toEqual([first, 'ws-2']);
   });
 
@@ -121,5 +121,39 @@ describe('closeWorkspaceWithSurfaces', () => {
     handleFor('ws-2', { closeAll: async () => null });
     expect(await closeWorkspaceWithSurfaces('ws-2')).toBeNull();
     expect(ids()).toEqual([first]);
+  });
+});
+
+describe('requestWorkspaceClose', () => {
+  it('waits out the Wall registration gap, then closes rather than refusing unseen', async () => {
+    vi.useFakeTimers();
+    try {
+      const [first] = ids();
+      createWorkspace({ id: 'ws-2' });
+      // The strip's `×` right after a create: the Workspace is in the store,
+      // its Wall is one passive effect away. A gesture has nobody to hand a
+      // refusal to, so it waits like the `dor` path instead.
+      requestWorkspaceClose('ws-2');
+      expect(ids()).toEqual([first, 'ws-2']);
+      const closeAll = vi.fn(async () => null);
+      handleFor('ws-2', { closeAll });
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(closeAll).toHaveBeenCalledWith('prompt');
+      expect(ids()).toEqual([first]);
+      expect(getWorkspaceUiSnapshot().pendingClose).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('raises the confirmation once the registered Wall reports work', async () => {
+    const [first] = ids();
+    createWorkspace({ id: 'ws-2' });
+    handleFor('ws-2', { runningCount: () => 1 });
+    requestWorkspaceClose('ws-2');
+    await Promise.resolve();
+    expect(getWorkspaceUiSnapshot().pendingClose?.id).toBe('ws-2');
+    expect(ids()).toEqual([first, 'ws-2']);
   });
 });

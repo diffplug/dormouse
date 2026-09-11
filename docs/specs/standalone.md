@@ -81,8 +81,8 @@ are *not* forwarded:
 | `agent_browser_screenshot` | Rust reads the bytes from a sidecar-supplied temp-file *path* | images must never ride the JSON-lines pipe shared with PTY traffic (`docs/specs/dor-browser.md`) |
 
 Request/response commands block on the sidecar's reply under a timeout.
-`OPEN_PORT_TIMEOUT_MS` in `lib.rs` mirrors the constant in
-`lib/src/lib/platform/types.ts` (and `standalone/sidecar/pty-core.js`);
+`OPEN_PORT_TIMEOUT_MS` and `OPEN_PORT_TIMEOUT_PER_ID_MS` in `lib.rs` mirror the
+constants in `lib/src/lib/platform/types.ts` (and `standalone/sidecar/pty-core.js`);
 `lib/src/lib/mirrored-constants.test.ts` pins the copies together.
 
 **Blocking commands must be `#[tauri::command(async)]`** — Tauri runs a *plain*
@@ -653,6 +653,13 @@ adapters carry it, and the sidecar answers every id from one process-table read
 and one socket scan (`getOpenPortsForPids`) — the scans are synchronous on its
 only event loop, so a `dor list --ports` across Workspaces must not multiply them
 by its row count (`docs/specs/dor-cli.md` → "Current Implemented Commands").
+**Its budget scales with the batch**: the socket scan runs under
+`OPEN_PORT_TIMEOUT_MS + OPEN_PORT_TIMEOUT_PER_ID_MS × ids`, and the command waits
+that plus the process-table read's `OPEN_PORT_TIMEOUT_MS` — one terminal's cap
+never bounds the whole Window (`open_ports_many_timeout` in
+`standalone/src-tauri/src/lib.rs`). **A macOS socket scan keeps the rows `lsof`
+printed before a non-zero exit** — a pid gone mid-batch would otherwise empty
+every terminal's answer, as `getCwdsForPids` already guards.
 
 **Nothing is deleted at boot but orphaned session temp files**
 (`docs/specs/transport.md` → "Retiring the transcripts already on disk"). **The

@@ -620,6 +620,21 @@ module.exports.getCwdsForPids = getCwdsForPids;
 const OPEN_PORT_TIMEOUT_MS = 3000;
 module.exports.OPEN_PORT_TIMEOUT_MS = OPEN_PORT_TIMEOUT_MS;
 
+// Mirrors `OPEN_PORT_TIMEOUT_PER_ID_MS` in `lib/src/lib/platform/types.ts` and
+// `standalone/src-tauri/src/lib.rs` — pinned by
+// `lib/src/lib/mirrored-constants.test.ts`. A batched scan's socket
+// enumeration is capped at `openPortScanTimeoutMs(terminals)`, not the
+// per-terminal cap, because its `lsof` argument grows with the batch.
+const OPEN_PORT_TIMEOUT_PER_ID_MS = 100;
+module.exports.OPEN_PORT_TIMEOUT_PER_ID_MS = OPEN_PORT_TIMEOUT_PER_ID_MS;
+
+/** Socket-scan budget for one scan covering `count` terminals. The single-
+ *  terminal path (`count` = 1) keeps `OPEN_PORT_TIMEOUT_MS` plus one allowance. */
+function openPortScanTimeoutMs(count) {
+  return OPEN_PORT_TIMEOUT_MS + OPEN_PORT_TIMEOUT_PER_ID_MS * count;
+}
+module.exports.openPortScanTimeoutMs = openPortScanTimeoutMs;
+
 /**
  * Build the set of descendant PIDs (including rootPid) from a flat list of
  * [pid, ppid] pairs via breadth-first walk. Shared by every platform.
@@ -912,17 +927,27 @@ function parseHostPort(token, wildcardFamily = 'IPv4') {
 function macListeningPorts(pids, runtime = {}) {
   const execFileSyncFn = runtime.execFileSync || execFileSync;
   if (pids.length === 0) return [];
+  let out = '';
   try {
-    const out = execFileSyncFn(
+    out = execFileSyncFn(
       'lsof',
       ['-nP', '-a', '-iTCP', '-sTCP:LISTEN', '-p', pids.join(','), '-Fpcnt'],
-      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], timeout: OPEN_PORT_TIMEOUT_MS, windowsHide: true },
+      {
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+        timeout: runtime.scanTimeoutMs ?? OPEN_PORT_TIMEOUT_MS,
+        windowsHide: true,
+      },
     );
-    return parseLsofListening(out);
-  } catch {
-    // lsof exits non-zero when none of the pids have matching files.
-    return [];
+  } catch (err) {
+    // lsof exits non-zero when ANY requested pid is gone (or has no matching
+    // files) and still prints the ones it did resolve — the same trap
+    // `getCwdsForPids` documents. A batched scan covers every descendant of
+    // every terminal, so a child exiting between `ps` and `lsof` would
+    // otherwise empty the whole Window's listing.
+    out = typeof err?.stdout === 'string' ? err.stdout : (err?.stdout?.toString('utf-8') ?? '');
   }
+  return parseLsofListening(out);
 }
 
 /** ConvertTo-Json emits a bare object (not an array) for a single row. */
@@ -1093,7 +1118,9 @@ function getOpenPortsForPids(rootPids, runtime = {}) {
   const union = new Set();
   for (const pids of owned.values()) for (const pid of pids) union.add(pid);
 
-  const ports = getListeningPortsForPids([...union], runtime);
+  // The socket scan's budget scales with the batch; the process-table read
+  // above does not, its cost being the whole table either way.
+  const ports = getListeningPortsForPids([...union], { ...runtime, scanTimeoutMs: openPortScanTimeoutMs(roots.length) });
   for (const [root, pids] of owned) {
     byRoot.set(root, dedupeListeningPorts(ports.filter((entry) => pids.has(entry.pid))));
   }

@@ -311,6 +311,9 @@ export async function runAgentBrowserCli(args: string[], options: CliOptions): P
  *   session to drive).
  *
  * The host's messages are printed verbatim; dor does not re-interpret them.
+ * **A host that refuses fails the command** before the binary runs — there is
+ * no fallback to a CLI-namespaced key, which would name the wrong Workspace's
+ * browser (`docs/specs/dor-browser.md` → "Managed identity").
  */
 async function resolveSession(
   flags: ResolvedSessionFlags,
