@@ -169,6 +169,7 @@ impl WindowState {
     fn mint(&self, id: &str, label: &str) {
         let mut routing = guard(&self.routing);
         routing.owners.insert(id.to_string(), label.to_string());
+        routing.transfer_marks.remove(id);
         // Whatever was held belonged to the PTY that never arrived, not this one.
         routing.lift_suppression(id);
         self.suppressed
@@ -226,7 +227,8 @@ impl WindowState {
         routing.owners.remove(id);
         routing.lift_suppression(id);
         routing.marking.remove(id);
-        routing.transfer_marks.remove(id);
+        // An exited PTY still has replay bytes; keep its source cut until
+        // adoption or hand-back settles the arrival.
         self.suppressed
             .store(routing.awaiting_replay.len(), Ordering::Relaxed);
     }
@@ -4402,6 +4404,18 @@ mod tests {
             routing::restorable_labels(session_file_names(dir.path())),
             vec!["main", "ws-3"]
         );
+    }
+
+    #[test]
+    fn a_pty_exit_keeps_its_cut_until_the_arrival_settles() {
+        let windows = super::WindowState::default();
+        windows.mint("t1", "main");
+        windows.begin_marking(&["t1".to_string()], "main");
+        guard(&windows.routing).mark_transfer("t1", 42);
+        windows.forget_pty("t1");
+        assert_eq!(guard(&windows.routing).transfer_marks.get("t1"), Some(&42));
+        windows.clear_suppression(&["t1".to_string()]);
+        assert!(!guard(&windows.routing).transfer_marks.contains_key("t1"));
     }
 
     #[test]

@@ -621,7 +621,7 @@ below reads that record rather than inferring itself from the suppression map.
   `handback-<workspaceId>`); that replay lifts the suppression and lands in the
   existing xterms (`acceptHandBackReplay`), the held protocol events behind it.
   **Must record source cuts at `pty:marked`, retaining them through target
-  replay until settlement, and carry replay ids in the failure event**; content
+  replay and PTY exit until settlement, and carry replay ids in the failure event**; content
   submission and the source invoke reply may both still be pending. An id the
   sidecar never stamped goes straight back: a whole-buffer
   replay would paint it twice (`a_hand_back_replays_only_the_marked_ids`;
