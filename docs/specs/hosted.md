@@ -11,7 +11,7 @@
 
 **Must pin locally packed core/auth packages through root pnpm overrides and commit archives, provenance, and lockfile together.** `vendor/build.json` records the source commit, dirty state, and archive hashes. No runtime import depends on a sibling checkout. The auth migrations remain owned by the package.
 
-Source of truth: `auth` in `hosted/server/worker.ts`; `migrations` in `hosted/server/migrations.ts`; `scripts/sync-pgstencil.mjs`.
+Source of truth: `auth` in `hosted/server/worker.ts`; `workerApp` in `hosted/server/worker-app.ts`; `migrations` in `hosted/server/migrations.ts`; `scripts/sync-pgstencil.mjs`.
 
 ## Identity and login
 
@@ -45,9 +45,27 @@ Source of truth: `App` in `hosted/src/App.tsx`; `restoreTheme` in `hosted/src/ma
 
 **Must verify the production Worker bundle and run the consumer's integration suite before release.** The test entry alone injects the actual packed Better Auth deterministic module. Simulated callbacks do not certify provider registrations; production acceptance requires real browser login with each enabled provider and email delivery.
 
-**Must keep production, test, and preview databases and credentials separate.** The current development entry is email-only; public PR preview deployment is not implemented. Production configuration and operator steps live in `hosted/README.md`.
+**Must keep production, test, and preview databases and credentials separate.** The development and preview entries are email-only. Production configuration and operator steps live in `hosted/README.md` and `hosted/DEPLOYMENT.md`.
 
 Source of truth: `allowedDevRequest` in `hosted/server/dev-host-guard.ts`; `hosted/server/dev.ts`; `hosted/server/tests/workers.test.ts`; `hosted/wrangler.jsonc`.
+
+## PR previews
+
+**Must deploy only verified same-repository PRs touching Hosted or its shared build inputs.** Drafts qualify; forks receive no deployment credentials. Changed paths include rename sources and all API pages. Deployment runs serialize per PR without cancellation; close/merge cleanup ignores path filtering and tolerates absent resources.
+
+**Must isolate each PR in a persistent Worker, uncached Hyperdrive, and Neon branch from an empty dedicated preview project.** Reuse `dormouse-hosted-pr-N` until close. No production database is copied. The preview config excludes production routes and credentials; runtime bindings cannot enable OAuth or Postmark.
+
+**Must capture preview mail in Postgres and expose escaped text only.** The public inbox shows the newest 100 messages from the last 24 hours, prunes expired rows on capture, and accepts only the preview's configured origin. No test clock is deployed. Preview data is disposable; it is not access-controlled.
+
+Source of truth: `touchesHosted` in `hosted/scripts/changed.mjs`; `.github/workflows/hosted-preview.yml`; `previewConfig` / `cleanup` in `hosted/scripts/preview.mjs`; `postgresInbox` in `hosted/server/preview-inbox.ts`; `hosted/server/preview-worker.ts`. Pinned by `hosted/scripts/preview.test.mjs`, `hosted/scripts/changed.test.mjs`, and `hosted/server/tests/workers.test.ts`.
+
+## Production releases
+
+**Must deploy only manually selected main revisions after Hosted tests/build and accepted clean package provenance.** Preflight checks archive hashes, uncached Hyperdrive, matching migration/runtime database identity with distinct roles, and required Worker secret names. Back up, encrypt, decrypt, and restore-test before applying migrations; upload only the encrypted archive. Production has no public candidate URL.
+
+**Must record an immutable annotated hosted/YYYY-MM-DD tag only after live verification.** Dates use America/Los_Angeles; later deployments use numeric `--r2`, `--r3` suffixes. Tags identify the deployed commit and verification run/attempt. Tag retries are idempotent; redeployments get new tags. Code rollback never reverses migrations.
+
+Source of truth: `.github/workflows/hosted-production.yml`; `verifyPackages` / `preflight` in `hosted/scripts/production.mjs`; `hosted/scripts/production-backup.mjs`; `recordDeployment` in `hosted/scripts/production-tag.mjs`. Pinned by `hosted/scripts/production.test.mjs` and `hosted/scripts/production-tag.test.mjs`.
 
 ## Future
 

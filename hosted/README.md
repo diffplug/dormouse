@@ -69,15 +69,15 @@ accounts. Do not reuse TTR's database, mail server/token, or OAuth registrations
    or rewriting rules. Disable account API caching. Keep `workers_dev` and
    public preview URLs disabled.
 
-Deployment is operator-run from `hosted/`; no workflow receives production
-secrets in this milestone. The checked-in deployment has a placeholder
-Hyperdrive ID and enables no OAuth providers until configured.
+PR previews and production releases use the workflows and isolated GitHub
+environments in [DEPLOYMENT.md](DEPLOYMENT.md). The checked-in deployment has
+a placeholder Hyperdrive ID and enables no OAuth providers until configured.
 
 Authenticate Wrangler to the intended Cloudflare account before provisioning.
 Inside Dormouse, run `dor ensure -- pnpm exec wrangler login --browser=false --use-keyring`
 from `hosted/`, then open the printed authorization link with `dor ab`. Review
 the account and requested access before granting it. Secrets remain in the OS
-keychain. The current checkout has not authenticated or deployed to Cloudflare.
+keychain. Authenticate in your own terminal; account/provider sign-in is operator-owned.
 
 ## Separate OAuth registrations
 
@@ -139,7 +139,7 @@ credentials fail closed. Facebook is outside this milestone.
 
 1. Review the exact package provenance and code revision. Run `pnpm test:hosted`,
    `pnpm build:hosted`, and the repository lints. Validate production migrations.
-2. From `hosted/`, run `pnpm deploy`. Check `/api/health` and `/api/ready` on the
+2. Run the production workflow in [DEPLOYMENT.md](DEPLOYMENT.md). Check `/api/health` and `/api/ready` on the
    canonical hostname. Inspect the actual HTML response/CSP and browser network
    requests for injected marketing scripts or unexpected third-party assets.
 3. Request a real email, enter its code, reload, and log out. Enter a code in a
@@ -167,4 +167,5 @@ Use the Worker's deployment history for code rollback; migrations are append-onl
 and are not reversed by a code rollback. Database restoration requires an
 explicit operator decision and a tested backup. Current limitations: fixed
 24-hour logins, no device-revocation screen or sign-out-everywhere, no account
-merge/recovery, no public PR preview deployment, and no paid-service activation.
+merge/recovery, no paid-service activation. PR preview provisioning is documented in
+[DEPLOYMENT.md](DEPLOYMENT.md).

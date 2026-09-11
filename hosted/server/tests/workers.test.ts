@@ -10,6 +10,10 @@ import {
 import { createTestContext } from "pgstencil/testing";
 import { queryDatabase } from "pgstencil/postgres";
 import { migrations } from "../migrations";
+import { previewMigrations } from "../preview-migrations";
+import { postgresInbox } from "../preview-inbox";
+// @ts-expect-error Deployment smoke is shared with the Node CLI.
+import { smoke } from "../../scripts/preview-smoke.mjs";
 import { providerIds } from "../policy";
 import {
   betterAuthCredentials,
@@ -19,10 +23,14 @@ import {
 import type { Session } from "../../src/api";
 
 const origin = "https://hosted.dormouse.sh";
-const bundle = (production: boolean) =>
+const bundle = (production: boolean | "preview") =>
   build({
     entryPoints: [
-      production ? "server/worker.ts" : "server/tests/worker-entry.ts",
+      production === "preview"
+        ? "server/preview-worker.ts"
+        : production
+          ? "server/worker.ts"
+          : "server/tests/worker-entry.ts",
     ],
     inject: production
       ? []
@@ -48,16 +56,23 @@ const bundle = (production: boolean) =>
   });
 const testBundle = bundle(false);
 const productionBundle = bundle(true);
+const previewBundle = bundle("preview");
 type Result = Awaited<ReturnType<Miniflare["dispatchFetch"]>>;
 
-async function fixture(production = false, enabled = providerIds.join(",")) {
-  const context = await createTestContext({ migrations });
+async function fixture(
+  production: boolean | "preview" = false,
+  enabled = providerIds.join(","),
+) {
+  const context = await createTestContext({
+    migrations: production === "preview" ? previewMigrations : migrations,
+  });
   const provider = await mockOAuthServer({
     betterAuth: true,
     now: production ? undefined : () => context.time.now(),
   });
   const bindings: Record<string, string> = {
     APP_ORIGIN: origin,
+    BUILD_SHA: "a".repeat(40),
     AUTH_SECRET: "dormouse-test-secret-with-at-least-32-characters",
     EMAIL_FROM: "signin@example.test",
     POSTMARK_SERVER_TOKEN: "test-token",
@@ -70,19 +85,31 @@ async function fixture(production = false, enabled = providerIds.join(",")) {
   const worker = new Miniflare(
     convertV4MiniflareOptions({
       modules: true,
-      script: (await (production ? productionBundle : testBundle))
-        .outputFiles![0].text,
+      script: (
+        await (production === "preview"
+          ? previewBundle
+          : production
+            ? productionBundle
+            : testBundle)
+      ).outputFiles![0].text,
       compatibilityDate: "2026-09-08",
       compatibilityFlags: ["nodejs_compat"],
       bindings,
       hyperdrives: { HYPERDRIVE: context.database.url },
       serviceBindings: {
         ASSETS: () =>
-          new WorkerResponse("<!doctype html><title>Dormouse Hosted</title>", {
-            headers: { "content-type": "text/html" },
-          }),
+          new WorkerResponse(
+            "<!doctype html><html><title>Dormouse Hosted</title></html>",
+            {
+              headers: { "content-type": "text/html" },
+            },
+          ),
       },
       async outboundService(request) {
+        if (production === "preview")
+          throw new Error(
+            "Preview must never send external mail or OAuth requests",
+          );
         const url = new URL(request.url);
         if (url.href === "https://api.postmarkapp.com/email") {
           expect(request.headers.get("x-postmark-server-token")).toBe(
@@ -385,4 +412,45 @@ test("explicit connection callback cannot outlive its initiating login", async (
   expect(
     (await browser.request(callback.href)).headers.get("location"),
   ).toContain("/login?error=");
+});
+
+test("preview runs cloud smoke against real auth, ignores stale providers, and persists escaped inbox messages", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture("preview");
+  onTestFinished(f.close);
+  await smoke(
+    origin,
+    "a".repeat(40),
+    (url: string, init: Parameters<typeof f.worker.dispatchFetch>[1]) =>
+      f.worker.dispatchFetch(url, init),
+    true,
+  );
+  const inbox = postgresInbox(f.database.url);
+  await inbox.send({
+    to: ["<script>@example.test"],
+    from: "test@example.test",
+    subject: "<script>alert(1)</script>",
+    text: "<img src=x onerror=alert(1)>",
+    html: "<script>alert(1)</script>",
+  });
+  const messages = await inbox.all();
+  const id = messages[0].id;
+  const detail = await f.worker.dispatchFetch(origin + `/dev/emails/${id}`);
+  expect(await detail.text()).toContain("&lt;img");
+  const page = await f.worker.dispatchFetch(origin + "/dev/emails");
+  expect(await page.text()).not.toContain("<script>");
+  expect(
+    (await f.worker.dispatchFetch("https://wrong.invalid/dev/emails")).status,
+  ).toBe(421);
+  // The independently allocated pool reads the same persisted mail.
+  expect((await postgresInbox(f.database.url).get(id))?.subject).toContain(
+    "<script>",
+  );
+  await queryDatabase(
+    f.database.url,
+    "UPDATE preview.email_messages SET captured_at = now() - interval '25 hours' WHERE id = $1",
+    [id],
+  );
+  expect(await inbox.get(id)).toBeUndefined();
 });

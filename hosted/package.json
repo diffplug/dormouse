@@ -6,12 +6,16 @@
     "dev": "tsx server/dev.ts",
     "typecheck": "tsc --noEmit",
     "build": "pnpm typecheck && vite build && wrangler deploy --dry-run --outdir dist-worker",
-    "test": "vitest run",
+    "test": "pnpm test:deploy && vitest run",
     "db:migrate": "tsx server/db.ts migrate",
     "db:validate": "tsx server/db.ts validate",
     "db:status": "tsx server/db.ts status",
     "deploy": "pnpm build && wrangler deploy",
-    "preview:worker": "wrangler dev --local --local-protocol https"
+    "preview:worker": "wrangler dev --local --local-protocol https",
+    "test:deploy": "node --test scripts/*.test.mjs",
+    "preview:deploy": "node scripts/preview.mjs deploy",
+    "preview:cleanup": "node scripts/preview.mjs cleanup",
+    "preview:smoke": "node scripts/preview-smoke.mjs"
   },
   "dependencies": {
     "@pgstencil/auth": "file:../vendor/pgstencil-auth-0.1.0.tgz",
