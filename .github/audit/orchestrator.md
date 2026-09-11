@@ -73,13 +73,14 @@ until [ -s audit-supply-chain.md ] && [ -s audit-ci-secrets.md ] && [ -s audit-a
   [ "$NOW" -ge "$CALL_END" ] && { echo "STILL WAITING"; break; }
   sleep 10
 done
-ls -la audit-*.md
+ls -la audit-*.md 2>/dev/null || echo "no fragments yet"
 ```
 
 A single Bash call is capped at ten minutes, and a domain can legitimately take
 longer than that. Issue this call with the maximum Bash timeout
-(`timeout: 600000`) — the harness default is two minutes, and at that length
-the 32 minutes take a dozen re-issues instead of four. **The loop's own last
+(`timeout: 600000`) — at the harness default of two minutes every call is
+backgrounded before the loop's own 540-second break can print, so no answer
+comes back at all. **The loop's own last
 line is what you act on, and there are exactly two answers:**
 
 - `STILL WAITING` — the nine minutes elapsed and a fragment is still missing.

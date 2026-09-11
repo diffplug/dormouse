@@ -85,6 +85,13 @@ jobs:
           # and have the prompt instruct Claude to prefix `gh api`
           # calls with `GH_TOKEN=$AUDIT_PAT`.
           AUDIT_PAT: ${{ secrets.AUDIT_PAT }}
+          # The orchestrator's wait loop breaks itself at 540s so a capped
+          # call still prints `STILL WAITING`. At the harness default of two
+          # minutes the call is backgrounded first and prints nothing at all,
+          # leaving the orchestrator no line to act on — the run 34581574869
+          # failure. The prompt asks for `timeout: 600000` per call; this
+          # raises the default so forgetting it is harmless rather than fatal.
+          BASH_DEFAULT_TIMEOUT_MS: "600000"
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # release.yml dispatches this workflow with the default

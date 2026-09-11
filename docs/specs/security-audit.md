@@ -56,7 +56,7 @@ Source of truth: `--agents` in `.github/workflows/security-audit.yaml`; `run_dom
 - **`--allowed-tools` enforces none of this**: it only auto-approves and removes nothing. `Task`/`Agent` are allowed on purpose; only `Workflow` is denied.
 - **Each subagent writes its own report fragment before returning its verdict** — `audit-supply-chain.md`, `audit-ci-secrets.md`, `audit-application.md` — and the orchestrator concatenates them rather than retyping. Fragments upload with the transcript, so an orchestrator that dies mid-merge still ships what the domains found.
 
-- **FAIL IF** the orchestrator prompt stops requiring a non-turn-ending wait — a Bash `until` loop over the fragment files, **breaking on its own sub-cap under the ten-minute Bash cap** so every call prints `STILL WAITING` or `DEADLINE`, re-issued under a bounded 32-minute deadline **persisted to a file** (`$RUNNER_TEMP/audit-deadline`) rather than recomputed from `now` (rationale).
+- **FAIL IF** the orchestrator prompt stops requiring a non-turn-ending wait — a Bash `until` loop over the fragment files, **breaking on its own sub-cap under the ten-minute Bash cap** so a capped call still prints `STILL WAITING`, re-issued under a bounded 32-minute deadline **persisted to a file** (`$RUNNER_TEMP/audit-deadline`) rather than recomputed from `now` (rationale).
 - **FAIL IF** the prompt permits ending the turn without `audit-report.md` (rationale).
 - **FAIL IF** the orchestrator can report `PASS` while a subagent left no report fragment — nor `FAIL`, unless some domain actually returned one: the prompt writes no status file when a fragment is missing and no domain failed, routing an audit that ran out of time to INCONCLUSIVE. Both exit non-zero and hold the release gate shut (rationale).
 
