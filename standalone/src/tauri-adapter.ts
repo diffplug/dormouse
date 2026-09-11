@@ -143,6 +143,8 @@ export class TauriAdapter implements PlatformAdapter {
   }
 
   async init(): Promise<void> {
+    const replayExits = new Map<string, number>();
+    const replayKey = (id: string, requestId?: string) => JSON.stringify([requestId, id]);
     // Registered together rather than one await after another: every `listen`
     // is an independent round trip to Rust, and serializing them puts the whole
     // set in front of the first paint.
@@ -177,6 +179,11 @@ export class TauriAdapter implements PlatformAdapter {
       }),
 
       listenToWindow<{ ptys: PtyInfo[]; requestId?: string }>("pty:list", (event) => {
+        for (const pty of event.payload.ptys) {
+          const key = replayKey(pty.id, event.payload.requestId);
+          if (!pty.alive) replayExits.set(key, pty.exitCode ?? -1);
+          else replayExits.delete(key);
+        }
         for (const pty of event.payload.ptys) if (pty.helper) this.alertManager.setHelper(pty.id, true);
         for (const handler of this.listHandlers) {
           handler(event.payload);
@@ -199,6 +206,16 @@ export class TauriAdapter implements PlatformAdapter {
         const events = collectTerminalSemanticEvents(parsed.events);
         this.alertManager.applyTerminalSemanticEvents(id, events);
         applyTerminalSemanticEvents(id, events);
+        // A listed exited buffer can contain a command-start with no finish.
+        // Apply its exit after rebuilding the replay's watch, for either target
+        // adoption or source hand-back.
+        const key = replayKey(id, requestId);
+        const exitCode = replayExits.get(key);
+        if (exitCode !== undefined) {
+          replayExits.delete(key);
+          this.alertManager.onExit(id, exitCode);
+          applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode }]);
+        }
         for (const handler of this.replayHandlers) {
           handler({ id, data: parsed.visibleData, requestId });
         }
