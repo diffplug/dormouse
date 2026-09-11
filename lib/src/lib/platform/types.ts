@@ -56,7 +56,7 @@ export interface OpenPort {
   processName?: string;
 }
 
-/** Base subprocess scan budget. The macOS socket scan adds a per-id allowance;
+/** Base scan budget. The macOS and Windows socket scans add a per-id allowance;
  *  transport deadlines cover both serial scans plus a margin per IPC hop.
  *  Rust and sidecar copies are pinned by `mirrored-constants.test.ts`. */
 export const OPEN_PORT_TIMEOUT_MS = 3000;
