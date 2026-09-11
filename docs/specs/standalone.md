@@ -620,8 +620,10 @@ below reads that record rather than inferring itself from the suppression map.
   sidecar for `outputSince(mark)` scoped to the source (`requestId`
   `handback-<workspaceId>`); that replay lifts the suppression and lands in the
   existing xterms (`acceptHandBackReplay`), the held protocol events behind it.
-  An id without a mark — no content yet, or one the sidecar never stamped —
-  missed nothing its source does not hold and goes straight back: a whole-buffer
+  **Must record source cuts at `pty:marked`, retaining them through target
+  replay until settlement, and carry replay ids in the failure event**; content
+  submission and the source invoke reply may both still be pending. An id the
+  sidecar never stamped goes straight back: a whole-buffer
   replay would paint it twice (`a_hand_back_replays_only_the_marked_ids`;
   rationale).
 - **`planArrival` never throws into `bootstrap()`.** A refused sole arrival on

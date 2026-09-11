@@ -372,7 +372,7 @@ pub fn arrival_marks(arrival: &Arrival) -> JsonValue {
 }
 
 /// What a hand-back does with an arrival's ids, split by whether `marks`
-/// (`arrival_marks`) carries one: the marked ids go back to the source
+/// (recorded at `pty:marked`, independently of content) carries one: the marked ids go back to the source
 /// suppressed, behind a replay since their marks, and the rest go straight
 /// back — the source still holds their whole buffer, so a replay would paint
 /// it twice.
@@ -981,16 +981,15 @@ mod tests {
     }
 
     /// A hand-back replays exactly the marked ids since their marks; an id the
-    /// content did not mark, or an arrival with no content yet, goes straight
-    /// back — its source still holds the whole buffer.
+    /// sidecar did not mark goes straight back. Content need not exist yet.
     #[test]
     fn a_hand_back_replays_only_the_marked_ids() {
         let mut pending = arrival("ws-a", "main", "ws-2", &["t1", "t2"]);
         pending.content = None;
-        let marks = arrival_marks(&pending);
+        let marks = json!({ "t1": 42 });
         assert_eq!(
             hand_back_ids(&pending, &marks),
-            (vec![], vec!["t1".to_string(), "t2".to_string()])
+            (vec!["t1".to_string()], vec!["t2".to_string()])
         );
 
         pending.content = Some(json!({

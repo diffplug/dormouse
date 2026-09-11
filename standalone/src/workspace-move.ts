@@ -104,14 +104,6 @@ const inFlight = new Map<WorkspaceId, InFlightMove>();
 
 const reasonOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
-/**
- * The marks the content this Window handed over carries, by Workspace: exactly
- * the ids whose bytes since the mark went to the target — or nowhere — and so
- * exactly what a hand-back replays into the xterms still here. Recorded before
- * `transfer_workspace_content`, because that invoke can itself hand back.
- */
-const handedMarks = new Map<WorkspaceId, ReadonlyMap<string, number>>();
-
 async function prepare(workspaceId: WorkspaceId): Promise<PreparedWorkspaceTransfer | null> {
   const handle = getWallHandle(workspaceId);
   if (!handle) return null;
@@ -140,13 +132,15 @@ async function handOff(
   // Armed before the invoke: Rust asks the sidecar to stamp the marks inside
   // `begin_arrival`, so a `marked` line can arrive ahead of the invoke's reply.
   const pendingMarks = marksFor(terminalIds, `mark-${workspaceId}`);
+  const outcome = new Promise<MoveOutcome>((settle) => inFlight.set(workspaceId, { prepared, settle }));
   try {
     await invoke(command, args);
   } catch (err) {
+    inFlight.delete(workspaceId);
     console.warn(`[workspace-move] ${command} refused; the Workspace stays here`, err);
     return { moved: false, reason: reasonOf(err) }; // `pendingMarks` unsubscribes itself at the timeout
   }
-  const outcome = new Promise<MoveOutcome>((settle) => inFlight.set(workspaceId, { prepared, settle }));
+  if (!inFlight.has(workspaceId)) return outcome; // handed back before invoke replied
   markWorkspaceTransferring(workspaceId);
   // The second half: once every terminal's mark has passed this window, what it
   // holds is exactly the bytes before the mark. Serialized here, attached to the
@@ -155,7 +149,6 @@ async function handOff(
   if (inFlight.has(workspaceId)) { // else handed back while we waited: nothing to send
     const content = await captureTransferContent(terminalIds, marks);
     if (inFlight.has(workspaceId)) { // else handed back while serializing
-      handedMarks.set(workspaceId, marks);
       try {
         await invoke("transfer_workspace_content", { workspaceId, content });
       } catch (err) {
@@ -246,7 +239,6 @@ function handleDeparted(workspaceId: WorkspaceId): void {
     return;
   }
   inFlight.delete(workspaceId);
-  handedMarks.delete(workspaceId);
   move.prepared.commit();
   move.settle({ moved: true });
   // Moving a Window's last Workspace away closes it — without confirming,
@@ -273,15 +265,13 @@ function handleDeparted(workspaceId: WorkspaceId): void {
  * xterms receiving output again the moment Rust unsuppresses them — behind the
  * replay of what they missed, where a mark had passed.
  */
-function handleArrivalFailed(workspaceId: WorkspaceId, reason: string): void {
+function handleArrivalFailed(workspaceId: WorkspaceId, reason: string, replayIds: readonly string[]): void {
   const move = inFlight.get(workspaceId);
   if (!move) return;
   inFlight.delete(workspaceId);
-  const marks = handedMarks.get(workspaceId);
-  handedMarks.delete(workspaceId);
   clearWorkspaceTransferring(workspaceId);
   console.warn(`[workspace-move] ${workspaceId} was not adopted (${reason}); it stays here`);
-  if (marks?.size) acceptHandBackReplay(workspaceId, [...marks.keys()]);
+  if (replayIds.length) acceptHandBackReplay(workspaceId, replayIds);
   move.settle({ moved: false, reason });
 }
 
@@ -475,9 +465,9 @@ export function initWorkspaceMoves(platform: PlatformAdapter): void {
   void listenToWindow<{ workspaceId: WorkspaceId }>("dormouse://workspace-departed", (event) => {
     handleDeparted(event.payload.workspaceId);
   });
-  void listenToWindow<{ workspaceId: WorkspaceId; reason?: string }>(
+  void listenToWindow<{ workspaceId: WorkspaceId; reason?: string; replayIds?: string[] }>(
     "dormouse://workspace-arrival-failed",
-    (event) => handleArrivalFailed(event.payload.workspaceId, event.payload.reason ?? "no reason given"),
+    (event) => handleArrivalFailed(event.payload.workspaceId, event.payload.reason ?? "no reason given", event.payload.replayIds ?? []),
   );
   // Immediately, and not only on the nudge: a Workspace dropped on this window
   // while it was still booting is already in the queue, and its `emit_to`
@@ -540,6 +530,5 @@ export async function bootFromTearOut(platform: PlatformAdapter): Promise<WallBo
 /** @internal Forget what this window is moving (tests). */
 export function _resetWorkspaceMovesForTesting(): void {
   inFlight.clear();
-  handedMarks.clear();
   adopting.clear();
 }

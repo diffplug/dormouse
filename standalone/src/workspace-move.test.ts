@@ -326,7 +326,7 @@ describe("the source half", () => {
     await contentSent();
     mocks.writes.length = 0;
 
-    await emit("dormouse://workspace-arrival-failed", { workspaceId: WORKSPACE_ID, reason: "wedged" });
+    await emit("dormouse://workspace-arrival-failed", { workspaceId: WORKSPACE_ID, reason: "wedged", replayIds: ["pane-a"] });
     // Another collection's replay is not this one's.
     deliverReplay({ id: "pane-a", data: "not-mine", requestId: "boot-1" });
     deliverReplay({ id: "pane-a", data: "since-the-mark", requestId: `handback-${WORKSPACE_ID}` });
@@ -337,6 +337,27 @@ describe("the source half", () => {
     expect(platform.offPtyReplay).toHaveBeenCalled();
     deliverReplay({ id: "pane-a", data: "late", requestId: `handback-${WORKSPACE_ID}` });
     expect(mocks.writes).toEqual(["since-the-mark"]);
+  });
+
+  it("receives recovery replay when hand-back precedes the source invoke reply", async () => {
+    const platform = fakePlatform();
+    initWorkspaceMoves(platform);
+    getOrCreateTerminal("pane-a");
+    createWorkspace({ id: WORKSPACE_ID });
+    registerWallHandle(stubWallHandle(WORKSPACE_ID, { prepareWorkspaceTransfer: async () => prepared() }));
+    const host = mocks.invoke.getMockImplementation()!;
+    mocks.invoke.mockImplementation(async (cmd, args) => {
+      const result = await host(cmd, args);
+      if (cmd === "transfer_workspace") {
+        await emit("dormouse://workspace-arrival-failed", { workspaceId: WORKSPACE_ID, replayIds: ["pane-a"] });
+        mocks.writes.length = 0;
+        deliverReplay({ id: "pane-a", data: "early-gap", requestId: `handback-${WORKSPACE_ID}` });
+      }
+      return result;
+    });
+    await transferWorkspaceTo(WORKSPACE_ID, "ws-2", { x: 0, y: 0 });
+    expect(mocks.writes).toEqual(["early-gap"]);
+    expect(mocks.invoke).not.toHaveBeenCalledWith("transfer_workspace_content", expect.anything());
   });
 
   it("accepts no hand-back replay for an id the host never marked", async () => {
@@ -359,7 +380,7 @@ describe("the source half", () => {
       expect(args).toMatchObject({ content: { terminals: { "pane-a": { serialized: "" } } } });
       mocks.writes.length = 0;
 
-      const failed = emit("dormouse://workspace-arrival-failed", { workspaceId: WORKSPACE_ID, reason: "wedged" });
+      const failed = emit("dormouse://workspace-arrival-failed", { workspaceId: WORKSPACE_ID, reason: "wedged", replayIds: [] });
       await vi.advanceTimersByTimeAsync(1);
       await failed;
       deliverReplay({ id: "pane-a", data: "whole-buffer", requestId: `handback-${WORKSPACE_ID}` });
