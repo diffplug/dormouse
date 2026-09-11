@@ -639,13 +639,17 @@ below reads that record rather than inferring itself from the suppression map.
   panes beside the Workspace about to mount them.
 - **`begin_arrival` records the arrival in `sessions/arrivals.json`** — a JSON
   array of `{ workspaceId, from, to, workspace }`, never an entry in either
-  window's snapshot (rationale) — and `adopt_done` and every hand-back path
+  window's snapshot (rationale). **Must retain an adopted record until target
+  and source snapshots both reflect the move**, marking it settled at
+  `adopt_done` and checking after each `save_session`
+  (`adoption_keeps_the_journal_until_both_snapshots_are_durable`). Every hand-back path
   (`adopt_failed`, the target's `Destroyed`, the watchdog, a failed
   `build_window`) drop the record; a record left at boot is merged into its
   target's snapshot before `restore_windows` — a tear-out target gets a file
   holding just it, active; a source snapshot still naming the id loses it, an
   emptied one is removed — so the Workspace restores once, with fresh shells,
-  and the file is deleted
+  and successful records are deleted; **must retain failed records for retry
+  and roll back the target if trimming the source fails**
   (`an_arrival_record_round_trips_until_it_is_forgotten`,
   `a_leftover_arrival_boots_into_an_existing_target_snapshot`,
   `a_leftover_arrival_boots_into_a_tear_out_targets_new_snapshot`,
@@ -663,7 +667,8 @@ Source of truth: `Arrival` / `sweep_awaiting` / `expire_arrival` / `boot_list_id
 `forget_arrival_on_disk` / `restore_arrivals` in
 `standalone/src-tauri/src/lib.rs`; `standalone/src/workspace-move.ts`;
 `markWorkspaceTransferring` in `lib/src/lib/window-session-aggregator.ts`.
-Pinned by `standalone/src/workspace-move.test.ts` and the arrival tests in
+Pinned by `standalone/src/workspace-move.test.ts`, the disk tests in
+`standalone/src-tauri/src/lib.rs`, and the arrival tests in
 `standalone/src-tauri/src/routing.rs`.
 
 ### Dragging a Workspace between windows
