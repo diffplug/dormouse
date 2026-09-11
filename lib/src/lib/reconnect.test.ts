@@ -761,6 +761,35 @@ describe('collectLivePtys addressing', () => {
     }
   });
 
+  it('resumeOrRestore buys the retry only for a saved terminal pane', async () => {
+    vi.useFakeTimers();
+    try {
+      // Nothing saved, and a host that never answers: the retry protects live
+      // shells a cold restore would start over, and there are none to protect,
+      // so first paint is not held for its whole budget.
+      const fresh = addressedPlatform();
+      (fresh.platform as { getState: () => unknown }).getState = () => null;
+      const booted = resumeOrRestore(fresh.platform);
+      await vi.advanceTimersByTimeAsync(600);
+      expect(await booted).toEqual({ paneIds: [] });
+      expect(fresh.asked).toHaveLength(1);
+
+      // A saved terminal pane is exactly what the retry protects: ask again.
+      const saved = addressedPlatform();
+      (saved.platform as { getState: () => unknown }).getState = () => ({
+        version: 3,
+        panes: [{ id: 'a', title: 'a', cwd: '/tmp', untouched: false, alert: null }],
+      });
+      const restoring = resumeOrRestore(saved.platform);
+      await vi.advanceTimersByTimeAsync(600);
+      expect(saved.asked).toHaveLength(2);
+      saved.answer(saved.asked[1]!, ['a']);
+      expect((await restoring).paneIds).toEqual(['a']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('asks a second time before believing silence, and resumes on the late answer', async () => {
     vi.useFakeTimers();
     try {

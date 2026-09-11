@@ -1,6 +1,6 @@
 import { isWorkspaceControlMethod, SURFACE_CONTROL_METHODS } from 'dor/protocol';
 import { createRefCount } from '../../lib/ref-count';
-import { getActiveWorkspaceId, isWindowRef, resolveWorkspaceRef } from '../../lib/workspace-store';
+import { getActiveWorkspaceId, isWindowRef, resolveWorkspaceRef, workspaceRefFor } from '../../lib/workspace-store';
 import { errorText, mountingRefusal, ROUTE_RETRIES } from './dor-control-shared';
 import { getWallHandle, wallHandleOwning, type WallHandle } from './wall-handles';
 import { handleWorkspaceControl, listAllWorkspaceSurfaces, type WindowControlParams } from './workspace-control';
@@ -24,8 +24,9 @@ export type DorControlRoute =
   /** The Workspace exists but its Wall has not registered yet: retried like
    *  `none`, and answered with `message` if it never does. */
   | { kind: 'pending'; message: string }
-  /** Nothing is mounted that could answer; the request is left to time out. */
-  | { kind: 'none' };
+  /** Nothing is mounted that could answer: retried, and answered with
+   *  `message` — the active Workspace still mounting — if nothing ever does. */
+  | { kind: 'none'; message: string };
 
 /**
  * The Workspace holding the Surface this target names, when the target names
@@ -81,8 +82,11 @@ export function resolveDorControlRoute(detail: DorControlRequest): DorControlRou
   if (owner) return { kind: 'handle', handle: owner };
   // An unknown caller (a shell started outside Dormouse, a killed Surface's
   // late request) is served by the Workspace the user is in.
-  const active = getWallHandle(getActiveWorkspaceId());
-  return active ? { kind: 'handle', handle: active } : { kind: 'none' };
+  const activeId = getActiveWorkspaceId();
+  const active = getWallHandle(activeId);
+  return active
+    ? { kind: 'handle', handle: active }
+    : { kind: 'none', message: mountingRefusal(workspaceRefFor(activeId)) };
 }
 
 function dispatchDorControl(detail: DorControlRequest, attempt: number): void {
@@ -96,9 +100,12 @@ function dispatchDorControl(detail: DorControlRequest, attempt: number): void {
       setTimeout(() => dispatchDorControl(detail, attempt + 1), 0);
       return;
     }
-    // A Workspace whose Wall never registered says so; a Window with nothing
-    // mounted at all has nobody to answer for, and is left to time out.
-    if (route.kind === 'pending') detail.respond({ ok: false, error: route.message });
+    // The Workspace that would have answered says it is still mounting — the
+    // one named, or the active one when nothing is mounted at all. Dropping
+    // the request instead would hold the caller to its own deadline, and
+    // `dor ab` makes this round trip on every managed invocation
+    // (`docs/specs/dor-browser.md` → "Managed identity").
+    detail.respond({ ok: false, error: route.message });
     return;
   }
   // Every failure the handler can raise is answered: an unanswered request

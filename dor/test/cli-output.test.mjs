@@ -1272,6 +1272,23 @@ test('agent-browser --surface prints the host gate error and never forwards', as
   assert.deepEqual(ab.calls, []);
 });
 
+test('agent-browser fails fast when the host refuses to name a managed key, never running the binary', async () => {
+  // A Wall still mounting, a webview mid-reload, the VS Code guard: the host
+  // answers with a refusal rather than the session, and there is no CLI-side
+  // fallback that could name the right Workspace's browser
+  // (`docs/specs/dor-browser.md` → "Managed identity").
+  const ab = fakeAgentBrowser();
+  const client = fixtureClient();
+  client.resolveAgentBrowserSession = async () => {
+    throw new Error("workspace 'workspace:1' is still mounting");
+  };
+  const result = await runCli(['ab', 'tab', 'list'], { client, execAgentBrowser: ab.exec });
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.stdout, '');
+  assert.equal(result.stderr, "Error: workspace 'workspace:1' is still mounting\n");
+  assert.deepEqual(ab.calls, []);
+});
+
 test('agent-browser --surface needs a control endpoint', async () => {
   const ab = fakeAgentBrowser();
   const result = await runCli(['ab', '--surface', 'surface:3', 'reload'], { execAgentBrowser: ab.exec });

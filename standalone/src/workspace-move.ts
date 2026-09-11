@@ -1,9 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { collectLivePtys, resumeOrRestoreFrom } from "dormouse-lib/lib/reconnect";
 import { flushTerminal } from "dormouse-lib/lib/terminal-registry";
+import { writeReplay } from "dormouse-lib/lib/terminal-report-filter";
+import { registry as terminalRegistry } from "dormouse-lib/lib/terminal-store";
 import { hydrateNotepadFromVolatile, restoreTerminalPins } from "dormouse-lib/lib/notepad/notepad-store";
 import { getWallHandle } from "dormouse-lib/components/wall/wall-handles";
-import { setWorkspaceBootPlan } from "dormouse-lib/components/wall/workspace-boot-plans";
+import { forgetWorkspaceBootPlan, setWorkspaceBootPlan } from "dormouse-lib/components/wall/workspace-boot-plans";
 import { wallBootFromResult, type WallBootPlans } from "dormouse-lib/components/wall/wall-types";
 import {
   captureTransferContent,
@@ -24,7 +26,7 @@ import {
   moveWorkspace,
   setActiveWorkspace,
 } from "dormouse-lib/lib/workspace-store";
-import type { PlatformAdapter } from "dormouse-lib/lib/platform/types";
+import type { PlatformAdapter, PtyReplayDetail } from "dormouse-lib/lib/platform/types";
 import type { WorkspaceId } from "dormouse-lib/lib/session-types";
 import { installWindowPersistence } from "./window-restore";
 import { listenToWindow } from "./window-label";
@@ -100,6 +102,14 @@ const inFlight = new Map<WorkspaceId, InFlightMove>();
 
 const reasonOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
+/**
+ * The marks the content this Window handed over carries, by Workspace: exactly
+ * the ids whose bytes since the mark went to the target — or nowhere — and so
+ * exactly what a hand-back replays into the xterms still here. Recorded before
+ * `transfer_workspace_content`, because that invoke can itself hand back.
+ */
+const handedMarks = new Map<WorkspaceId, ReadonlyMap<string, number>>();
+
 async function prepare(workspaceId: WorkspaceId): Promise<PreparedWorkspaceTransfer | null> {
   const handle = getWallHandle(workspaceId);
   if (!handle) return null;
@@ -124,27 +134,33 @@ async function handOff(
   command: string,
   args: Record<string, unknown>,
 ): Promise<MoveOutcome> {
+  const { workspaceId, terminalIds } = prepared.payload;
+  // Armed before the invoke: Rust asks the sidecar to stamp the marks inside
+  // `begin_arrival`, so a `marked` line can arrive ahead of the invoke's reply.
+  const pendingMarks = marksFor(terminalIds, `mark-${workspaceId}`);
   try {
     await invoke(command, args);
   } catch (err) {
     console.warn(`[workspace-move] ${command} refused; the Workspace stays here`, err);
-    return { moved: false, reason: reasonOf(err) };
+    return { moved: false, reason: reasonOf(err) }; // `pendingMarks` unsubscribes itself at the timeout
   }
-  const { workspaceId, terminalIds } = prepared.payload;
   const outcome = new Promise<MoveOutcome>((settle) => inFlight.set(workspaceId, { prepared, settle }));
   markWorkspaceTransferring(workspaceId);
   // The second half: once every terminal's mark has passed this window, what it
   // holds is exactly the bytes before the mark. Serialized here, attached to the
   // arrival by Rust, and only then drained by the target.
-  const marks = await marksFor(terminalIds, `mark-${workspaceId}`);
+  const marks = await pendingMarks;
   if (inFlight.has(workspaceId)) { // else handed back while we waited: nothing to send
     const content = await captureTransferContent(terminalIds, marks);
-    try {
-      await invoke("transfer_workspace_content", { workspaceId, content });
-    } catch (err) {
-      // The arrival is gone (the target closed, or the watchdog handed it back);
-      // `workspace-arrival-failed` has put, or will put, this Window back.
-      console.warn("[workspace-move] transfer_workspace_content refused", err);
+    if (inFlight.has(workspaceId)) { // else handed back while serializing
+      handedMarks.set(workspaceId, marks);
+      try {
+        await invoke("transfer_workspace_content", { workspaceId, content });
+      } catch (err) {
+        // The arrival is gone (the target closed, or the watchdog handed it back);
+        // `workspace-arrival-failed` has put, or will put, this Window back.
+        console.warn("[workspace-move] transfer_workspace_content refused", err);
+      }
     }
   }
   return outcome;
@@ -228,6 +244,7 @@ function handleDeparted(workspaceId: WorkspaceId): void {
     return;
   }
   inFlight.delete(workspaceId);
+  handedMarks.delete(workspaceId);
   move.prepared.commit();
   move.settle({ moved: true });
   // Moving a Window's last Workspace away closes it — without confirming,
@@ -251,15 +268,50 @@ function handleDeparted(workspaceId: WorkspaceId): void {
 /**
  * The target never took it. Nothing was released, so there is nothing to put
  * back: drop the transferring mark and the Workspace is simply still here, its
- * xterms receiving output again the moment Rust unsuppresses them.
+ * xterms receiving output again the moment Rust unsuppresses them — behind the
+ * replay of what they missed, where a mark had passed.
  */
 function handleArrivalFailed(workspaceId: WorkspaceId, reason: string): void {
   const move = inFlight.get(workspaceId);
   if (!move) return;
   inFlight.delete(workspaceId);
+  const marks = handedMarks.get(workspaceId);
+  handedMarks.delete(workspaceId);
   clearWorkspaceTransferring(workspaceId);
   console.warn(`[workspace-move] ${workspaceId} was not adopted (${reason}); it stays here`);
+  if (marks?.size) acceptHandBackReplay(workspaceId, [...marks.keys()]);
   move.settle({ moved: false, reason });
+}
+
+/** A hand-back's replay is one since-mark slice per id over the sidecar's
+ *  stdio; the same room an arrival gets. */
+const HAND_BACK_REPLAY_TIMEOUT_MS = ARRIVAL_TIMEOUT_MS;
+
+/**
+ * Catch the replay Rust requests for a handed-back Workspace: every byte from
+ * each id's mark to the hand-back went to the target, or nowhere, and its xterm
+ * here stands at the mark. The replay of `outputSince(mark)` for exactly the
+ * marked ids goes into the existing instances (`docs/specs/standalone.md` →
+ * "Arrival queue"). Collector-free: subscribe, write, and let go on the last
+ * id or the timeout.
+ */
+function acceptHandBackReplay(workspaceId: WorkspaceId, ids: readonly string[]): void {
+  const platform = movePlatform;
+  if (!platform) return;
+  const requestId = `handback-${workspaceId}`;
+  const wanted = new Set(ids);
+  const finish = () => {
+    clearTimeout(timer);
+    platform.offPtyReplay(onReplay);
+  };
+  const onReplay = (detail: PtyReplayDetail) => {
+    if (detail.requestId !== requestId || !wanted.delete(detail.id)) return;
+    const entry = terminalRegistry.get(detail.id);
+    if (entry) writeReplay(entry, detail.data);
+    if (wanted.size === 0) finish();
+  };
+  platform.onPtyReplay(onReplay);
+  const timer = setTimeout(finish, HAND_BACK_REPLAY_TIMEOUT_MS);
 }
 
 // --- Target ------------------------------------------------------------------
@@ -359,13 +411,37 @@ async function adoptWorkspace(platform: PlatformAdapter, payload: MovePayload): 
     if (index !== undefined) moveWorkspace(id, index);
     setActiveWorkspace(id);
     // Last, and only now: it is what tells the source to let the Workspace go.
-    settle("adopt_done", id);
+    // Awaited, because a refusal is the one signal that the transaction was
+    // retired underneath this window.
+    try {
+      await invoke("adopt_done", { workspaceId: id });
+    } catch (err) {
+      console.error("[workspace-move] adopt_done refused; unwinding the mount", err);
+      await unwindAdoption(id);
+    }
   } catch (err) {
     console.error("[workspace-move] adoption failed; handing the Workspace back", err);
     settle("adopt_failed", id, reasonOf(err));
   } finally {
     adopting.delete(id);
   }
+}
+
+/**
+ * `adopt_done` was refused: the `ARRIVAL_MAX` watchdog had already expired the
+ * record and handed the shells back, and the source cleared its transferring
+ * mark and kept the Workspace. Left mounted here too, the same Workspace would
+ * be live in two windows and persisted by both — the next launch restoring it
+ * twice over one set of PTYs. Take it out the way a departure does: the
+ * Sessions released, **never killed**, because the shells are the source's
+ * again; the notes dropped; the record and the parked plan forgotten.
+ */
+async function unwindAdoption(id: WorkspaceId): Promise<void> {
+  const handle = getWallHandle(id);
+  if (handle) (await handle.prepareWorkspaceTransfer()).commit();
+  closeWorkspace(id);
+  forgetWorkspaceSession(id);
+  forgetWorkspaceBootPlan(id);
 }
 
 /**
@@ -452,5 +528,6 @@ export async function bootFromTearOut(platform: PlatformAdapter): Promise<WallBo
 /** @internal Forget what this window is moving (tests). */
 export function _resetWorkspaceMovesForTesting(): void {
   inFlight.clear();
+  handedMarks.clear();
   adopting.clear();
 }

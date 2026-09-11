@@ -296,9 +296,11 @@ Invariants:
   list output always includes both refs and stable ids.
 - `workspace:<n>` selects a container and is **stable**: `n` is the number of
   the Workspace's registry-minted id (`docs/specs/standalone.md` → "Workspace
-  registry"), so a strip reorder and a move between Windows rename nothing. A
-  host with no registry — VS Code, a snapshot from before it — numbers by
-  position instead. `workspace:<name>` **resolves only when exactly one
+  registry"), so a strip reorder and a move between Windows rename nothing.
+  **Refs are positional only while no id in the Window was minted** — a host
+  with no registry (VS Code), or a snapshot from before it until its first
+  create — and an unminted id beside minted ones has no number and is addressed
+  by name, so one ref never reads two ways. `workspace:<name>` **resolves only when exactly one
   Workspace carries that name**, else the error lists the candidates. Both are
   accepted bare (`2`, `build`), and **a ref that reads as a number is a ref**,
   never a name. **A Window is `window:<label>` — its host's own name for it**
@@ -311,14 +313,15 @@ Invariants:
   every Wall), an explicit `--workspace`, the Workspace holding the target
   Surface when it is named by its **stable id** — unique Window-wide, unlike
   `surface:N` — else the Workspace owning the calling Surface, else the active
-  one; nothing mounted leaves the request unanswered, after a bounded
-  retry that covers the tick between a Workspace being created and its Wall
-  registering. **A `--workspace` the store resolves but whose Wall has not
-  registered waits out that same retry**, then answers `workspace '<ref>' is
-  still mounting` — it is not the unknown-Workspace answer, the Workspace being
-  there. **Every request is answered, including a container ref of the
-  wrong type and a handler that throws** — an unanswered one blocks its caller
-  to the deadline. A Workspace being closed refuses the Surface-creating verbs
+  one; **nothing mounted answers `workspace '<ref>' is still mounting` for the
+  active Workspace**, after a bounded retry that covers the tick between a
+  Workspace being created and its Wall registering — never left to the caller's
+  deadline, which every managed `dor ab` would pay (`docs/specs/dor-browser.md`
+  → "Managed identity"). **A `--workspace` the store resolves but whose Wall has
+  not registered waits out that same retry**, then answers the same refusal for
+  that ref — it is not the unknown-Workspace answer, the Workspace being there.
+  **Every request is answered, including a container ref of the wrong type and
+  a handler that throws** — an unanswered one blocks its caller to the deadline. A Workspace being closed refuses the Surface-creating verbs
   (`docs/specs/layout.md` → "Workspaces"). **Surface targets resolve within the
   answering Workspace** — refs are Workspace-scoped — so a `dor split` from a
   background Workspace lands beside its caller rather than wherever the user is
@@ -416,7 +419,7 @@ The spec keeps the behavior help cannot express:
 | `await` | **Must name `--until quiet\|exit`; never infer it.** Timeout 1–86400 whole seconds, default 600; `alert.md` owns wake semantics. |
 | `kill` | **Must select exactly one confirmation mode.** Conditional text needs four non-whitespace characters and must match `read`; browser Surfaces are killable. |
 | `iframe`, `agent-browser` / `ab` | `dor-browser.md` owns the renderers; see [target resolution](#browser-open-target-resolution) and [addressing](#agent-browser-surface-addressing). The passthrough is intercepted before stricli parses it. |
-| `list` | Filters are ANDed client-side; `--port` filters terminals (browser Surfaces never match) and implies the opt-in detail scan, `--ports` only requests it. **Owns every Workspace read**: `--workspace` narrows to one, `--all` groups every Workspace's rows under its header — **every Workspace keeps its header**, including one a filter emptied, so the text listing and the JSON `workspaces` array name the same Workspaces — `--workspaces` is the overview, and the three cannot be combined. **`--workspaces` takes `--json` and nothing else**, by an allowlist, so a flag added to `list` is refused there until it is named. |
+| `list` | Filters are ANDed client-side; `--port` filters terminals (browser Surfaces never match) and implies the opt-in detail scan, `--ports` only requests it. **Owns every Workspace read**: `--workspace` narrows to one, `--all` groups every Workspace's rows under its header — **every Workspace keeps its header**, including one a filter emptied, so the text listing and the JSON `workspaces` array name the same Workspaces — `--workspaces` is the overview, and the three cannot be combined. **`--all --json` adds `caller_workspace_ref` / `focused_workspace_ref`** beside the `_surface_ref` pair, which under `--all` names a `surface:N` every Workspace has; the `_surface_id` halves stay unique. **`--workspaces` takes `--json` and nothing else**, by an allowlist, so a flag added to `list` is refused there until it is named. |
 | `workspace` | **Mutation only** ([dor workspace](#dor-workspace)). |
 | `skill` | Prints the bundled skill or installs its bootstrap stub; [Agent Skill](#agent-skill) owns the contract. |
 

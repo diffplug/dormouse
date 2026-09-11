@@ -43,6 +43,16 @@ minted in `pty_spawn`, so an unowned id is one whose window went away, and the
 broadcast reached every sibling's AlertManager — which rang, and offered a TODO,
 for a pane none of them showed.
 
+The first hold queued both derived streams, on the premise that neither is in
+any replay. Semantic events are: the replay is the raw bytes, OSCs included, and
+the target's replay listener re-parses them. The flushed queue then re-applied
+`commandStart` on top of state the replay had just rebuilt, and `commandStart`
+is not idempotent — it mints a fresh id and consumes the pending command line —
+so a transfer that split a command's `commandLine` from its `commandStart` left
+the arriving window with a derived title for a command whose real line the
+replay had already recovered. What the replay path genuinely did not rebuild was
+the AlertManager's copy, and that is a listener fix, not a routing one.
+
 ## What a window's `Destroyed` settles
 
 Tauri removes a label from `webview_windows()` only when the window is actually
@@ -112,6 +122,17 @@ always made, and the target's parser resynchronizes on the next ground byte
 
 
 
+**Why a hand-back replays since the mark, and only the marked ids.** The first
+hand-back returned the ids unsuppressed and silent: the source's xterm stood at
+the mark, and every byte from there to the hand-back had gone to a target that
+never mounted it — dropped while suppressed, or painted in a webview that then
+closed. The since-mark replay is the arrival's own second half aimed back at the
+source, which is why it rides the same `pty:requestInit` and the same
+suppression-lifting `pty:replay` path rather than a new message. An id the
+content did not mark has no such gap: the source either saw every byte live or
+serialized the whole buffer it still holds, and the sidecar's only answer for
+an unmarked id is that whole buffer again (2026-09).
+
 The first build emitted `workspace-arriving` straight at the target. A window
 torn out seconds earlier, or one restoring at launch, has no listener yet and is
 a perfectly ordinary drop target — the payload went nowhere, and because the
@@ -141,6 +162,20 @@ the point of no return, and a webview that drained and then failed had nothing
 left to fall back on. With the record settling at `adopt_done` the drain is
 idempotent, and a reload mid-arrival finds its Workspace again instead of losing
 it. The webview's `adopting` set is what makes repeated drains safe.
+
+The pending-arrival record is its own file rather than an entry staged into a
+snapshot. The first durability attempt wrote the arriving Workspace into the
+target's `sessions/<label>.json` at the invoke and it failed two ways. A torn-out
+window then had a snapshot before it opened, and `bootFromTearOut` reads "this
+window has a snapshot" as "this is an ordinary restore": the new window
+cold-restored the staged copy over fresh shells, drained the arrival, and threw
+`Duplicate Workspace id` adopting the real one — the tear-out was handed back and
+both windows persisted the id. And for a transfer into a live window the staged
+entry did not survive to adoption: `getWindowSnapshot` iterates the target's
+store, which does not hold the Workspace yet, so the target's next debounced
+flush (500 ms after any change, inside the 3 s arrival timeout) rewrote its file
+without it. A file neither webview writes has neither problem, and merging it at
+boot is the only moment no flush can race it.
 
 ## Dragging a Workspace between windows
 

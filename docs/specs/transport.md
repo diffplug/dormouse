@@ -112,8 +112,12 @@ running, and a caller that cold-restores there starts a second set over them, so
 `LivePtys` reports which it was. **A collector given `retryTimeoutMs` asks once
 more on that budget before reporting silence**, since an empty list still
 resolves as soon as it arrives and a slow launch is exactly when the two are
-confused (rationale). Source of truth: `collectLivePtys` in
-`lib/src/lib/reconnect.ts`; `list` in `standalone/sidecar/pty-core.js`.
+confused (rationale). **`resumeOrRestore` asks for the retry only when the saved
+session names a terminal pane** — the shells the retry protects; `restoreWindow`
+in `standalone/src/window-restore.ts` gates the same way — so a host that answers
+nothing holds first paint for 500 ms, not the whole budget. Source of truth:
+`collectLivePtys` in `lib/src/lib/reconnect.ts`; `list` in
+`standalone/sidecar/pty-core.js`.
 
 **Seeded titles reject the sentinels.** Saved pane and door titles come back through `setTerminalUserTitle()`, which rejects the reserved `<idle>` prefix (`docs/specs/terminal-state.md` → Supported OSC Inputs), and the seed callers in `terminal-lifecycle.ts` additionally skip `<unnamed>`, the default panel placeholder (rationale).
 
@@ -143,8 +147,11 @@ and it turns on three rules:
   it. The target writes the serialized buffer, then the replay of everything
   after the mark, so the whole transcript crosses, not the sidecar's bounded
   tail, and no byte is painted twice or lost. An id the host never marked is
-  serialized anyway and replayed whole. Suppression fails open after a bound
-  rather than silencing a pane forever (rationale).
+  serialized anyway and replayed whole. A hand-back is the same split kept: the
+  source still holds the bytes before the mark and receives the host's replay of
+  everything after it into the same xterm (`docs/specs/standalone.md` →
+  "Arrival queue"). Suppression fails open after a bound rather than silencing
+  a pane forever (rationale).
 - **Ask for exactly the moving ids, at their marks.** `pty:requestInit` names
   them with their marks, and `list(ids, …, marks)` replays `outputSince(mark)`
   for a marked id and the whole buffer otherwise; ids follow the same **omitted

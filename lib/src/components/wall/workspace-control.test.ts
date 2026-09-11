@@ -10,6 +10,8 @@ import {
   getWorkspacesSnapshot,
   renameWorkspace,
   resetWorkspaces,
+  installWorkspaceIdPool,
+  resetWorkspaceIdPool,
 } from '../../lib/workspace-store';
 import { clearTerminalActivity, setTerminalActivity } from '../../lib/session-activity-store';
 import { resetWorkspaceSurfaces, setWorkspaceSurfaces } from '../../lib/workspace-surfaces';
@@ -131,6 +133,13 @@ describe('workspace mutation verbs', () => {
 });
 
 describe('workspace.move', () => {
+  // Refs are the minted id's number only once a pool is installed; without
+  // one, `workspace-7` would read as a position (`docs/specs/dor-cli.md`).
+  beforeEach(async () => {
+    await installWorkspaceIdPool(async (count) => Array.from({ length: count }, (_, i) => `workspace-${100 + i}`));
+  });
+  afterEach(() => { resetWorkspaceIdPool(); });
+
   it('reorders within the Window without a host, and refuses a move between Windows there', async () => {
     const second = createWorkspace({ id: 'workspace-7', name: 'build', activate: false }).id;
     handleFor(getWorkspacesSnapshot().workspaces[0].id);
