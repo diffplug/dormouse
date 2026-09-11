@@ -1137,13 +1137,13 @@ const OPEN_PORT_TIMEOUT_MS: u64 = 3000;
 // pinned by `lib/src/lib/mirrored-constants.test.ts`.
 const OPEN_PORT_TIMEOUT_PER_ID_MS: u64 = 100;
 
-/// Budget for one `pty:getOpenPortsMany` over `count` ids. The sidecar runs two
+/// Budget for either port command over `count` ids, including 1 s for IPC. The sidecar runs two
 /// scans serially: the process table under `OPEN_PORT_TIMEOUT_MS`, then one
 /// socket scan under that cap plus `OPEN_PORT_TIMEOUT_PER_ID_MS` per id
 /// (`getOpenPortsForPids` in `standalone/sidecar/pty-core.js`) — so the whole
 /// Window is not held to one terminal's budget, and the reply outlasts both.
 fn open_ports_many_timeout(count: usize) -> Duration {
-    Duration::from_millis(2 * OPEN_PORT_TIMEOUT_MS + OPEN_PORT_TIMEOUT_PER_ID_MS * count as u64)
+    Duration::from_millis(2 * OPEN_PORT_TIMEOUT_MS + OPEN_PORT_TIMEOUT_PER_ID_MS * count as u64 + 1000)
 }
 
 #[tauri::command(async)]
@@ -1155,7 +1155,7 @@ fn pty_get_open_ports(
         &state,
         "pty:getOpenPorts",
         serde_json::json!({ "id": id }),
-        Duration::from_millis(OPEN_PORT_TIMEOUT_MS),
+        open_ports_many_timeout(1),
     )?;
     Ok(response
         .get("ports")
@@ -4052,7 +4052,7 @@ mod tests {
     fn open_ports_many_timeout_scales_with_the_batch() {
         let one = open_ports_many_timeout(1).as_millis() as u64;
         let twenty = open_ports_many_timeout(20).as_millis() as u64;
-        assert_eq!(one, 2 * OPEN_PORT_TIMEOUT_MS + OPEN_PORT_TIMEOUT_PER_ID_MS);
+        assert_eq!(one, 2 * OPEN_PORT_TIMEOUT_MS + OPEN_PORT_TIMEOUT_PER_ID_MS + 1000);
         assert_eq!(twenty - one, 19 * OPEN_PORT_TIMEOUT_PER_ID_MS);
     }
 
