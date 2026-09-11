@@ -472,6 +472,20 @@ describe("TauriAdapter terminal stream", () => {
     expect(alerts.some((detail) => detail.id === "replay-pty" && detail.watchingEnabled)).toBe(true);
   });
 
+  it("settles the replayed watch when a marked buffer belongs to an exited PTY", async () => {
+    const { adapter, deliver } = await listening();
+    const alerts: AlertStateDetail[] = [];
+    adapter.onAlertState((detail) => void alerts.push(detail));
+    deliver("alert:watchedCommands", { names: ["sleep"] });
+    deliver("pty:list", { ptys: [{ id: "exited-replay", alive: false, exitCode: 7 }], requestId: "handback-1" });
+    deliver("pty:replay", {
+      id: "exited-replay", requestId: "handback-1",
+      data: "\x1b]633;E;sleep 5\x07\x1b]633;C\x07",
+    });
+    expect(getTerminalPaneState("exited-replay").currentCommand).toBeNull();
+    expect(alerts[alerts.length - 1]?.watchingEnabled).toBe(false);
+  });
+
   it("pushes the resolved theme so the sidecar can answer a colour query", async () => {
     const { adapter, invoke } = await listening();
     adapter.requestInit();
