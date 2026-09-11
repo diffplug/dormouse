@@ -90,6 +90,7 @@ import {
   type PendingDeletionStore,
 } from './pocket-db';
 import { DirectEndpoint } from '../direct/direct-endpoint';
+import { SCAN_LABEL } from '../setup-copy';
 import type { DirectPeerFactory } from '../direct/direct-peer';
 import { realTimer, type RemoteTimer, type RemoteWebSocket } from '../ws';
 
@@ -310,6 +311,12 @@ export const CONNECTION_DENIAL_MESSAGES: Record<ConnectionDenialCode, string> = 
  */
 export const BURROW_UNAVAILABLE_MESSAGE =
   'The computer did not answer. Check that it is awake and connected, then try again.';
+
+/** Fixed local-read recovery copy: browser errors can contain private details. */
+export const CONNECTION_RECORD_UNREADABLE_MESSAGE =
+  'This browser could not read the saved pairing record. '
+  + `Try again, or use ${SCAN_LABEL} to pair again with fresh approval. `
+  + 'Diagnostics: /diagnostics/index.html.';
 
 /** Where a pairing ended, as the UI reports it. */
 export type PairingResult =
@@ -875,7 +882,7 @@ export class PocketClient {
       // pin and delivery capability, and never expose browser exception text.
       return {
         ok: false,
-        message: 'This browser could not read the saved pairing record. Try again, or use Scan a setup code to pair again with fresh approval. Diagnostics: /diagnostics/index.html.',
+        message: CONNECTION_RECORD_UNREADABLE_MESSAGE,
         pairingRequired: false,
       };
     }

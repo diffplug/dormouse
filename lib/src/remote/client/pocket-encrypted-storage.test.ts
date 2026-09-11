@@ -9,6 +9,8 @@ import {
 } from './pocket-db';
 import { generatePocketKeyPair, loadPocketPrivateKey, storePocketPrivateKey } from './pocket-private-key';
 import { makeE2eHarness } from './test-e2e-harness';
+import { CONNECTION_RECORD_UNREADABLE_MESSAGE } from './pocket-client';
+import { SCAN_LABEL } from '../setup-copy';
 import { installPocketWorker, type WorkerScope } from '../pocket-app/sw';
 
 it('does not export private bytes if parallel wrapping-key setup fails', async () => {
@@ -124,8 +126,8 @@ it('re-pairs a damaged envelope only after approval, preserving the Burrow pin a
     });
     await expect(store.get(harness.burrowId)).rejects.toThrow();
     const failed = await harness.client.connect(harness.burrowId);
-    expect(failed).toMatchObject({ ok: false, pairingRequired: false });
-    if (!failed.ok) expect(failed.message).toContain('Scan a setup code');
+    expect(failed).toEqual({ ok: false, pairingRequired: false, message: CONNECTION_RECORD_UNREADABLE_MESSAGE });
+    expect(CONNECTION_RECORD_UNREADABLE_MESSAGE).toContain(SCAN_LABEL);
     const read = vi.spyOn(store, 'get').mockRejectedValueOnce(new DOMException('private browser details', 'OperationError'));
     expect(await harness.client.connect(harness.burrowId)).toEqual(failed);
     read.mockRestore();
