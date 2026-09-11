@@ -129,6 +129,7 @@ async function handOff(
   args: Record<string, unknown>,
 ): Promise<MoveOutcome> {
   const { workspaceId, terminalIds } = prepared.payload;
+  if (inFlight.has(workspaceId)) return { moved: false, reason: "Workspace is already in flight" };
   // Armed before the invoke: Rust asks the sidecar to stamp the marks inside
   // `begin_arrival`, so a `marked` line can arrive ahead of the invoke's reply.
   const pendingMarks = marksFor(terminalIds, `mark-${workspaceId}`);
@@ -136,19 +137,20 @@ async function handOff(
   try {
     await invoke(command, args);
   } catch (err) {
-    inFlight.delete(workspaceId);
+    if (inFlight.get(workspaceId)?.prepared === prepared) inFlight.delete(workspaceId);
     console.warn(`[workspace-move] ${command} refused; the Workspace stays here`, err);
     return { moved: false, reason: reasonOf(err) }; // `pendingMarks` unsubscribes itself at the timeout
   }
-  if (!inFlight.has(workspaceId)) return outcome; // handed back before invoke replied
+  if (inFlight.get(workspaceId)?.prepared !== prepared) return outcome; // handed back before invoke replied
+
   markWorkspaceTransferring(workspaceId);
   // The second half: once every terminal's mark has passed this window, what it
   // holds is exactly the bytes before the mark. Serialized here, attached to the
   // arrival by Rust, and only then drained by the target.
   const marks = await pendingMarks;
-  if (inFlight.has(workspaceId)) { // else handed back while we waited: nothing to send
+  if (inFlight.get(workspaceId)?.prepared === prepared) { // else handed back while we waited: nothing to send
     const content = await captureTransferContent(terminalIds, marks);
-    if (inFlight.has(workspaceId)) { // else handed back while serializing
+    if (inFlight.get(workspaceId)?.prepared === prepared) { // else handed back while serializing
       try {
         await invoke("transfer_workspace_content", { workspaceId, content });
       } catch (err) {
@@ -157,6 +159,7 @@ async function handOff(
         console.warn("[workspace-move] transfer_workspace_content refused", err);
       }
     }
+
   }
   return outcome;
 }
