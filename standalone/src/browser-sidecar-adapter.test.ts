@@ -38,10 +38,16 @@ describe("BrowserSidecarAdapter capability surface", () => {
   });
 });
 
-// The harness must not persist Session state that production standalone drops
-// (docs/specs/standalone.md -> "Standalone persists no Session state").
+// The harness mirrors the shipped persistence answer, so a reload there
+// exercises what the app does (docs/specs/transport.md -> "The governing rule").
 describe("BrowserSidecarAdapter session persistence", () => {
   const KEY = "dormouse.browser-sidecar.session";
+  const session = { version: 3 as const, panes: [{ id: "pane-a", title: "A", cwd: "/a", untouched: false }] };
+  const windowBlob = {
+    version: 1 as const,
+    workspaces: [{ id: "ws-1", name: "One", session }],
+    activeWorkspaceId: "ws-1",
+  };
 
   it("reports the same persistsSession as TauriAdapter", () => {
     const harness: PlatformAdapter = new BrowserSidecarAdapter(
@@ -49,39 +55,45 @@ describe("BrowserSidecarAdapter session persistence", () => {
     );
     const tauri: PlatformAdapter = new TauriAdapter();
     expect(harness.persistsSession).toBe(tauri.persistsSession);
-    expect(harness.persistsSession).toBe(false);
+    expect(harness.persistsSession).toBe(true);
   });
 
-  it("does not write session state to localStorage", () => {
+  it("round-trips a Window through localStorage", () => {
     localStorage.removeItem(KEY);
-    const adapter: PlatformAdapter = new BrowserSidecarAdapter(
-      new BrowserSidecarHost("http://localhost:1234"),
-    );
-    adapter.saveState({ version: 3, panes: [], lathLayout: null });
-    expect(localStorage.getItem(KEY)).toBeNull();
-  });
-
-  it("does not restore a stale blob left by an earlier run", () => {
-    localStorage.setItem(KEY, JSON.stringify({ version: 3, panes: [], lathLayout: null }));
-    const adapter: PlatformAdapter = new BrowserSidecarAdapter(
-      new BrowserSidecarHost("http://localhost:1234"),
-    );
-    expect(adapter.getState()).toBeNull();
+    const adapter = new BrowserSidecarAdapter(new BrowserSidecarHost("http://localhost:1234"));
+    adapter.saveWindowState(windowBlob);
+    expect(adapter.getWindowState()).toEqual(windowBlob);
+    // The shared `getState` readers want a bare Session and the blob is a Window,
+    // so it answers nothing; the boot reads `getWindowState`.
+    expect((adapter as PlatformAdapter).getState()).toBeNull();
     localStorage.removeItem(KEY);
   });
 
-  it("deletes a pre-gate blob on init", async () => {
-    localStorage.setItem(KEY, JSON.stringify({ version: 3, panes: [], lathLayout: null }));
+  it("wraps a pre-Window blob rather than dropping it", () => {
+    localStorage.setItem(KEY, JSON.stringify(session));
+    const adapter = new BrowserSidecarAdapter(new BrowserSidecarHost("http://localhost:1234"));
+    expect(adapter.getWindowState()?.workspaces.map((ws) => ws.session)).toEqual([session]);
+    localStorage.removeItem(KEY);
+  });
+
+  it("claims the recovery commands for its saved panes during init", async () => {
+    localStorage.setItem(KEY, JSON.stringify(windowBlob));
     const host = new BrowserSidecarHost("http://localhost:1234");
     vi.spyOn(host, "init").mockResolvedValue(undefined);
     vi.spyOn(host, "onEvent").mockReturnValue(() => {});
+    const invoke = vi.spyOn(host, "invoke").mockResolvedValue({ "pane-a": "claude --continue" });
     // Claim the console-forwarder flag so init() doesn't patch console.* on the
     // shared jsdom window for every later test in this file.
     (window as typeof window & { __DORMOUSE_BROWSER_CONSOLE_PATCHED__?: boolean })
       .__DORMOUSE_BROWSER_CONSOLE_PATCHED__ = true;
+
     const adapter = new BrowserSidecarAdapter(host);
     await adapter.init();
-    expect(localStorage.getItem(KEY)).toBeNull();
+    await adapter.recoveryReady;
+
+    expect(invoke).toHaveBeenCalledWith("take_recovery_commands", { paneIds: ["pane-a"] });
+    expect(adapter.getRecoveryCommands()).toEqual({ "pane-a": "claude --continue" });
+    localStorage.removeItem(KEY);
   });
 });
 

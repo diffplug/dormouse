@@ -1,4 +1,5 @@
 import type { WorkspaceId } from '../../lib/session-types';
+import type { SaveOptions } from '../../lib/session-save';
 import type { CloseSurfaceMode } from './wall-types';
 import type { DorControlRequest } from './use-dor-control';
 
@@ -18,7 +19,8 @@ export interface WallHandle {
    *  gate, alongside `runningCount`). */
   hasTouchedSurfaces(): boolean;
   runningCount(): number;
-  flushPersistence(): Promise<void>;
+  /** Persist now. `probeCwd: false` skips the cwd re-read (`SessionFlushRequest`). */
+  flushPersistence(options?: SaveOptions): Promise<void>;
   /** Close every member Surface through the closure coordinator. Resolves null
    *  once the Wall is empty, else the first refusal's message with the Workspace
    *  left as it was. */

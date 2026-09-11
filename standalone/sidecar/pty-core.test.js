@@ -7,6 +7,8 @@ const {
   detectAvailableShells,
   getCwdForPid,
   parseCwdFromLsof,
+  parseCwdsFromLsof,
+  getCwdsForPids,
   resolveSpawnConfig,
   withPrependedPath,
   canonicalizeWindowsCwd,
@@ -1479,4 +1481,157 @@ test('getOpenPortsForPid de-duplicates and sorts by port', () => {
 
 test('getOpenPortsForPid returns [] for a non-integer pid', () => {
   assert.deepEqual(getOpenPortsForPid(undefined, { platform: 'linux' }), []);
+});
+
+// The clamping arithmetic itself lives in lib/src/host/replay-buffer.ts and is
+// tested there; what belongs here is the buffer accounting this file owns and
+// hands it.
+test('receivedChars counts everything ever received, past a replay-buffer trim', () => {
+  const listeners = {};
+  const reads = [];
+  const fakePty = {
+    pid: 1,
+    onData(handler) { listeners.data = handler; },
+    onExit(handler) { listeners.exit = handler; },
+    resize() {}, write() {}, kill() {},
+  };
+  const sliceSince = (chunks, held, received, mark) => {
+    reads.push({ buffered: chunks.join(''), held, received, mark });
+    return 'sliced';
+  };
+  const mgr = create(() => {}, { spawn() { return fakePty; } }, { replay: true, sliceSince });
+  mgr.spawn('pane-1');
+
+  assert.equal(mgr.receivedChars('pane-1'), 0);
+  const mark = mgr.receivedChars('pane-1');
+  listeners.data('hello');
+  assert.equal(mgr.receivedChars('pane-1'), 5);
+  assert.equal(mgr.outputSince('pane-1', mark), 'sliced');
+  assert.deepEqual(reads.at(-1), { buffered: 'hello', held: 5, received: 5, mark: 0 });
+
+  // Overflow the 200k replay cap: the buffer trims, but the counter is the mark
+  // space and must not move backwards — so what the slicer is handed is a held
+  // length capped at 200k beside a received count that keeps climbing.
+  const before = mgr.receivedChars('pane-1');
+  for (let i = 0; i < 30; i++) listeners.data('x'.repeat(10_000));
+  const after = mgr.receivedChars('pane-1');
+  assert.equal(after, before + 300_000);
+  mgr.outputSince('pane-1', before);
+  assert.equal(reads.at(-1).held, 200_000);
+  assert.equal(reads.at(-1).received, after);
+  assert.equal(reads.at(-1).buffered.length, 200_000);
+
+  // An unknown pane never reaches the slicer at all.
+  const seen = reads.length;
+  assert.equal(mgr.outputSince('unknown-pane', 0), '');
+  assert.equal(mgr.receivedChars('unknown-pane'), 0);
+  assert.equal(reads.length, seen);
+});
+
+test('liveIds names every unexited PTY, and nothing after it exits', () => {
+  const listeners = {};
+  const fakePty = (id) => ({
+    pid: 1,
+    onData() {}, onExit(handler) { listeners[id] = handler; },
+    resize() {}, write() {}, kill() {},
+  });
+  let next = 'a';
+  const mgr = create(() => {}, { spawn() { return fakePty(next); } }, { replay: true });
+  next = 'a'; mgr.spawn('a');
+  next = 'b'; mgr.spawn('b');
+  assert.deepEqual(mgr.liveIds().sort(), ['a', 'b']);
+
+  listeners.a({ exitCode: 0, signal: undefined });
+  assert.deepEqual(mgr.liveIds(), ['b']);
+});
+
+test('outputSince returns nothing without a replay buffer', () => {
+  const listeners = {};
+  const fakePty = {
+    pid: 1,
+    onData(handler) { listeners.data = handler; },
+    onExit() {}, resize() {}, write() {}, kill() {},
+  };
+  // No `replay`, and so no slicer either: nothing is buffered to answer from.
+  const mgr = create(() => {}, { spawn() { return fakePty; } });
+  mgr.spawn('pane-1');
+  listeners.data('hello');
+  assert.equal(mgr.receivedChars('pane-1'), 0);
+  assert.equal(mgr.outputSince('pane-1', 0), '');
+});
+
+test('parseCwdsFromLsof keys every process block by its pid', () => {
+  const output = ['p100', 'fcwd', 'n/', 'p4242', 'fcwd', 'n/home/tester/project', ''].join('\n');
+  assert.deepEqual([...parseCwdsFromLsof(output)], [[100, '/'], [4242, '/home/tester/project']]);
+});
+
+test('getCwdsForPids resolves every pid in ONE lsof call', () => {
+  const calls = [];
+  const cwds = getCwdsForPids([4242, 4243], {
+    fsModule: { readlinkSync: () => { throw new Error('ENOENT'); } },
+    execFileSync(file, args, options) {
+      calls.push({ file, args, options });
+      return [
+        'p4242', 'fcwd', 'n/home/tester/one',
+        'p4243', 'fcwd', 'n/home/tester/two',
+        '',
+      ].join('\n');
+    },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].args, ['-a', '-d', 'cwd', '-p', '4242,4243', '-Fn']);
+  assert.deepEqual([...cwds], [[4242, '/home/tester/one'], [4243, '/home/tester/two']]);
+});
+
+test('getCwdsForPids keeps the live pids when lsof exits non-zero over a dead one', () => {
+  // `lsof -p live,dead` exits 1 and still prints the live block on stdout.
+  const err = new Error('Command failed: lsof');
+  err.status = 1;
+  err.stdout = ['p4242', 'fcwd', 'n/home/tester/one', ''].join('\n');
+  const cwds = getCwdsForPids([4242, 4243], {
+    fsModule: { readlinkSync: () => { throw new Error('ENOENT'); } },
+    execFileSync() { throw err; },
+  });
+
+  assert.deepEqual([...cwds], [[4242, '/home/tester/one']]);
+});
+
+test('getCwdsForPids survives an lsof failure with no stdout at all', () => {
+  const cwds = getCwdsForPids([4242], {
+    fsModule: { readlinkSync: () => { throw new Error('ENOENT'); } },
+    execFileSync() { throw new Error('spawn ENOENT'); },
+  });
+
+  assert.equal(cwds.size, 0);
+});
+
+test('getCwdsForPids reads /proc where it can and never spawns for those pids', () => {
+  let spawned = false;
+  const cwds = getCwdsForPids([7, 8], {
+    fsModule: { readlinkSync: (p) => `/proc-cwd-for${p}` },
+    execFileSync() { spawned = true; return ''; },
+  });
+  assert.equal(spawned, false);
+  assert.deepEqual([...cwds], [[7, '/proc-cwd-for/proc/7/cwd'], [8, '/proc-cwd-for/proc/8/cwd']]);
+});
+
+test('getCwds answers a key for every requested id, null for one with no PTY', () => {
+  const events = [];
+  const fakePty = () => ({
+    pid: 999_001,
+    onData() {}, onExit() {}, resize() {}, write() {}, kill() {},
+  });
+  const mgr = create((event, data) => events.push({ event, data }), {
+    spawn() { return fakePty(); },
+  }, { replay: true });
+  mgr.spawn('pane-a');
+
+  mgr.getCwds(['pane-a', 'pane-gone'], 'req-1');
+
+  const answer = events.find((e) => e.event === 'cwds');
+  assert.equal(answer.data.requestId, 'req-1');
+  assert.deepEqual(Object.keys(answer.data.cwds).sort(), ['pane-a', 'pane-gone']);
+  // A pane with no live PTY is never scanned for.
+  assert.equal(answer.data.cwds['pane-gone'], null);
 });

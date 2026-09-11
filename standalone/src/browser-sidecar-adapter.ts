@@ -34,7 +34,9 @@ import type { AwaitHandle, AwaitOptions } from "dormouse-lib/lib/alert-manager";
 import type { AlertSettings } from "dormouse-lib/lib/alert-settings";
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
 import { createMemoryNotepadArchivePort } from "dormouse-lib/lib/notepad/memory-archive-port";
-import { loadSessionState, saveSessionState } from "dormouse-lib/lib/window-persistence";
+import type { PersistedAlertState, PersistedWindow } from "dormouse-lib/lib/session-types";
+import { claimRecoveryCommands, windowStateSlot } from "./window-recovery";
+import { coalesceCwds } from "./coalesce-cwds";
 import {
   applyTerminalProtocolEvents,
   collectTerminalSemanticEvents,
@@ -68,6 +70,8 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   private alertStateHandlers = new Set<(detail: AlertStateDetail) => void>();
   private alertManager = new AlertManager();
   private unlistenHost: (() => void) | null = null;
+  private static STATE_KEY = 'dormouse.browser-sidecar.session';
+  private windowSlot = windowStateSlot(localStorage, BrowserSidecarAdapter.STATE_KEY, 'browser-sidecar');
   // Remote-host bridge, identical in shape to TauriAdapter's — the dev harness
   // forwards the same `burrow:*` messages over its own transport.
   private readonly burrowClient = createBurrowLinkClient({
@@ -102,10 +106,15 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   }
 
   async init(): Promise<void> {
-    this.clearPersistedState();
     await this.host.init();
     this.unlistenHost = this.host.onEvent(({ event, data }) => this.handleHostEvent(event, data));
     this.installConsoleForwarder();
+    // Started, not awaited — see TauriAdapter.
+    this.recoveryReady = claimRecoveryCommands(
+      (paneIds) => this.host.invoke<Record<string, string>>("take_recovery_commands", { paneIds }),
+      this.windowSlot.read(),
+      'browser-sidecar',
+    ).then((commands) => { this.recoveryCommands = commands; });
   }
 
   shutdown(): void {
@@ -154,6 +163,35 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
 
   async getCwd(id: string): Promise<string | null> {
     try { return await this.host.invoke("pty_get_cwd", { id }); } catch { return null; }
+  }
+
+  /** See TauriAdapter: one round trip, one process scan, for the whole save —
+   *  coalesced the same way, because the harness runs the same Walls. */
+  private readonly cwdBatch = coalesceCwds(async (ids) => {
+    try { return await this.host.invoke<Record<string, string | null>>("pty_get_cwds", { ids }); } catch { return {}; }
+  });
+
+  getCwds(ids: string[]): Promise<Record<string, string | null>> {
+    return this.cwdBatch(ids);
+  }
+
+  /** See TauriAdapter: claimed once during `init()`, read synchronously by the
+   *  cold restore. */
+  private recoveryCommands: Record<string, string> = {};
+  recoveryReady: Promise<void> = Promise.resolve();
+
+  getRecoveryCommands(): Record<string, string> {
+    return this.recoveryCommands;
+  }
+
+  // No `captureAgentRecovery` here. Capture is a quit-only step, and this
+  // harness has no quit: a reload is a live resume over PTYs that survive it, so
+  // sending `^C` to every agent would interrupt work that is still running. What
+  // a reload does exercise is the claim above, against whatever the app's own
+  // quit last wrote (docs/specs/standalone.md -> "Agent recovery").
+
+  alertSeed(id: string, state: PersistedAlertState): void {
+    this.alertManager.seed(id, state);
   }
 
   async getOpenPorts(id: string): Promise<OpenPort[]> {
@@ -270,30 +308,22 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   onWatchedCommands(_handler: (names: string[]) => void): void {}
   onAlertSettings(_handler: (settings: AlertSettings) => void): void {}
 
-  private static STATE_KEY = 'dormouse.browser-sidecar.session';
+  // The harness mirrors the shipped persistence answer, so a reload here
+  // exercises what the app does (docs/specs/transport.md -> "The governing rule").
+  readonly persistsSession = true;
 
-  // Mirrors TauriAdapter's gate (docs/specs/standalone.md -> "Standalone persists
-  // no Session state"); flip both flags together.
-  private static PERSIST_SESSION = false;
+  // See TauriAdapter: no bare-Session slot on this host.
+  saveState(_state: unknown): void {}
+  getState(): unknown { return null; }
 
-  readonly persistsSession = BrowserSidecarAdapter.PERSIST_SESSION;
-
-  // See TauriAdapter: PersistedWindow when the workspaces flag is on, bare
-  // PersistedSession when off; the helpers own the translation + JSON/storage
-  // plumbing (docs/specs/transport.md).
-  saveState(state: unknown): void {
-    if (!BrowserSidecarAdapter.PERSIST_SESSION) return;
-    try { saveSessionState(localStorage, BrowserSidecarAdapter.STATE_KEY, state); }
-    catch { console.error('[browser-sidecar] Failed to save session state'); }
+  // See TauriAdapter: one `PersistedWindow` per window, in `localStorage` rather
+  // than the Rust file store (docs/specs/transport.md).
+  saveWindowState(snapshot: PersistedWindow): void {
+    this.windowSlot.write(snapshot);
   }
 
-  getState(): unknown {
-    if (!BrowserSidecarAdapter.PERSIST_SESSION) return null;
-    try {
-      return loadSessionState(localStorage, BrowserSidecarAdapter.STATE_KEY);
-    } catch {
-      return null;
-    }
+  getWindowState(): PersistedWindow | null {
+    return this.windowSlot.read();
   }
 
   // The notepad archive as memory, not the Tauri file: this harness is a browser
@@ -306,14 +336,6 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   // harness shows no chord and binds none — the same reason the website's demo
   // adapter sets this. The shipped Tauri build owns its keyboard and does not.
   readonly browserReservesNotepadChord = true;
-
-  // Delete (not just ignore) pre-gate blobs: they carry transcripts and localStorage
-  // outlives the harness's per-run temp state dir.
-  private clearPersistedState(): void {
-    if (BrowserSidecarAdapter.PERSIST_SESSION) return;
-    try { localStorage.removeItem(BrowserSidecarAdapter.STATE_KEY); }
-    catch { /* private-mode storage: nothing to clear */ }
-  }
 
   private handleHostEvent(event: string, data: unknown): void {
     if (event === "pty:data") {

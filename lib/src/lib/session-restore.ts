@@ -21,8 +21,18 @@ export function persistedLathLayout(saved: PersistedSession): LathPersistedLayou
   return isLathPersistedLayout(saved.lathLayout) ? saved.lathLayout : undefined;
 }
 
-export function restoreSession(platform: PlatformAdapter): RestoredSession | null {
-  const saved = readPersistedSession(platform.getState());
+/** What a restore reads instead of the platform slot, so one Window can plan a
+ *  cold restore per Workspace off one boot payload. Defaults to the platform's
+ *  own answer, which is what the single-Wall hosts still take. */
+export interface RestoreSources {
+  /** The record to restore; `undefined` reads the platform slot, `null` is "none". */
+  savedSession?: PersistedSession | null;
+}
+
+export function restoreSession(platform: PlatformAdapter, sources: RestoreSources = {}): RestoredSession | null {
+  const saved = sources.savedSession !== undefined
+    ? sources.savedSession
+    : readPersistedSession(platform.getState());
   if (!saved || !saved.panes || saved.panes.length === 0) return null;
   const doors = saved.doors ?? [];
   const doorIds = new Set(doors.map((item) => item.id));
@@ -56,6 +66,11 @@ export function restoreSession(platform: PlatformAdapter): RestoredSession | nul
       untouched: pane.untouched,
       resumeCommand: recoveryCommands[pane.id] ?? null,
     });
+    // The fresh PTY inherits the pane's persisted TODO/alert, on the hosts whose
+    // AlertManager lives in the webview. Seeded after `restoreTerminal` so the
+    // state change lands on a registered pane. Restore-only: a live resume still
+    // has the manager's own state (docs/specs/alert.md -> "Persist only").
+    if (pane.alert) platform.alertSeed?.(pane.id, pane.alert);
   }
 
   return {

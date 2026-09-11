@@ -344,4 +344,56 @@ describe('saveSession', () => {
 
     expect(platform.saveState).toHaveBeenCalled();
   });
+
+  describe('cwd probe', () => {
+    it('prefers the batch, in one call for every terminal pane', async () => {
+      const platform = createPlatform(null);
+      platform.getCwds = vi.fn(async () => ({ 'pane-a': '/a', 'pane-b': '/b' }));
+
+      await saveSession(platform, [
+        { id: 'pane-a', title: 'Pane A' },
+        { id: 'pane-b', title: 'Pane B' },
+        // A browser Surface has no PTY, so it is never probed.
+        { id: 'pane-web', title: 'localhost', surfaceType: 'browser' },
+      ]);
+
+      expect(platform.getCwds).toHaveBeenCalledTimes(1);
+      expect(platform.getCwds).toHaveBeenCalledWith(['pane-a', 'pane-b']);
+      expect(platform.getCwd).not.toHaveBeenCalled();
+      const saved = vi.mocked(platform.saveState).mock.calls[0]![0] as PersistedSession;
+      expect(saved.panes.map((pane) => [pane.id, pane.cwd])).toEqual([
+        ['pane-a', '/a'], ['pane-b', '/b'], ['pane-web', null],
+      ]);
+    });
+
+    it('falls back to one getCwd per pane where the host has no batch', async () => {
+      const platform = createPlatform(null);
+
+      await saveSession(platform, [
+        { id: 'pane-a', title: 'Pane A' },
+        { id: 'pane-b', title: 'Pane B' },
+      ]);
+
+      expect(platform.getCwd).toHaveBeenCalledTimes(2);
+      const saved = vi.mocked(platform.saveState).mock.calls[0]![0] as PersistedSession;
+      expect(saved.panes.map((pane) => pane.cwd)).toEqual(['/tmp/live', '/tmp/live']);
+    });
+
+    it('probes nothing and keeps the previous cwd when the flush says not to', async () => {
+      // The post-kill flush: every probe would answer null and be discarded for
+      // the previous record's value anyway.
+      const platform = createPlatform({
+        version: 3,
+        panes: [{ id: 'pane-a', title: 'Pane A', cwd: '/before-the-kill', untouched: false }],
+      });
+      platform.getCwds = vi.fn(async () => ({}));
+
+      await saveSession(platform, [{ id: 'pane-a', title: 'Pane A' }], [], undefined, undefined, undefined, undefined, { probeCwd: false });
+
+      expect(platform.getCwds).not.toHaveBeenCalled();
+      expect(platform.getCwd).not.toHaveBeenCalled();
+      const saved = vi.mocked(platform.saveState).mock.calls[0]![0] as PersistedSession;
+      expect(saved.panes[0].cwd).toBe('/before-the-kill');
+    });
+  });
 });

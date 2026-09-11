@@ -117,6 +117,7 @@ const fireAndForget = {
 const invokeMap = {
   get_available_shells: (_args) => requestSidecar('pty:getShells', {}, 'pty:shells', (data) => data.shells ?? []),
   pty_get_cwd: ({ id }) => requestSidecar('pty:getCwd', { id }, 'pty:cwd', (data) => data.cwd ?? null),
+  pty_get_cwds: ({ ids }) => requestSidecar('pty:getCwds', { ids }, 'pty:cwds', (data) => data.cwds ?? {}),
   pty_context: ({ request }) => requestSidecar('pty:context', request, 'pty:context', data => data),
   pty_get_open_ports: ({ id }) => requestSidecar('pty:getOpenPorts', { id }, 'pty:openPorts', (data) => data.ports ?? []),
   read_clipboard_file_paths: () => requestSidecar('clipboard:readFiles', {}, 'clipboard:files', (data) => data.paths ?? null),
@@ -141,6 +142,12 @@ const invokeMap = {
   agent_browser_open: ({ url, headed, binaryPath }) => requestSidecar('agentBrowser:open', { url, headed, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
   agent_browser_pop_out: ({ session, url, rect, binaryPath }) => requestSidecar('agentBrowser:popOut', { session, url, rect, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
   agent_browser_pop_in: ({ session, url, binaryPath }) => requestSidecar('agentBrowser:popIn', { session, url, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
+  // Agent recovery (docs/specs/standalone.md -> "Agent recovery"). The harness
+  // mirrors the persistence answer, so it claims exactly as Rust does, over the
+  // identical sidecar half. There is no `capture_agent_recovery` here: capture
+  // is a quit-only step and the harness has no quit.
+  take_recovery_commands: ({ paneIds }) =>
+    requestSidecar('recovery:take', { paneIds }, 'recovery:commands', (data) => data.commands ?? {}),
 };
 
 async function readJson(req) {
@@ -239,10 +246,15 @@ function startSidecar() {
       DORMOUSE_CLI_JS: dorEntrypoint,
       DORMOUSE_CONTROL_TOKEN: controlToken,
       DORMOUSE_STATE_DIR: stateDir,
+      // The harness mirrors the persistence answer, so a reload here claims from
+      // the same agent-recovery record the app's quit writes — under this run's
+      // own temp state, never the installed app's.
+      DORMOUSE_RECOVERY_DIR: stateDir,
     },
   });
   log(`sidecar pid=${sidecar.pid}`);
   log(`burrow state dir: ${stateDir}`);
+  log(`recovery state dir: ${stateDir}`);
 
   createInterface({ input: sidecar.stdout }).on('line', (line) => {
     let msg;

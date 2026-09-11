@@ -33,6 +33,7 @@ standalone/src-tauri/gen/
 standalone/dist/
 standalone/sidecar/dor-cli/
 standalone/sidecar/iframe-proxy.cjs
+standalone/sidecar/recovery.cjs
 standalone/sidecar/agent-browser-host.cjs
 standalone/sidecar/burrow.cjs
 # Kept beside it: a checkout that built before the Burrow rename still holds

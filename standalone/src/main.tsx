@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { setPlatform } from "dormouse-lib/lib/platform";
 import { installPeerSurfaceResponder } from "dormouse-lib/remote/burrow/peer-surfaces";
 import type { PlatformAdapter } from "dormouse-lib/lib/platform/types";
-import { resumeOrRestore } from "dormouse-lib/lib/reconnect";
+import { restoreWindowOrFresh } from "./window-restore";
 import { seedShellStore } from "dormouse-lib/lib/shell-store";
 import { restoreActiveTheme } from "dormouse-lib/lib/themes";
 import App from "dormouse-lib/App";
@@ -124,7 +124,7 @@ async function bootstrap() {
   // omits `shell` and the sidecar resolves the OS default itself.
   seedShellStore(await shellsPromise);
 
-  const result = await resumeOrRestore(platform);
+  const initialPlans = await restoreWindowOrFresh(platform);
 
   startUpdateCheck();
 
@@ -132,11 +132,7 @@ async function bootstrap() {
     <StrictMode>
       <AppBar />
       <App
-        initialPaneIds={result.paneIds}
-        restoredLathLayout={result.lathLayout}
-        initialDoors={result.doors}
-        initialSurfaceRefs={result.surfaceRefs}
-        initialSurfaceRefsNext={result.surfaceRefsNext}
+        initialPlans={initialPlans}
         baseboardNotice={<ConnectedUpdateBanner />}
         dialogHost={<QuitConfirmModalHost />}
         enableBurrow
@@ -145,4 +141,5 @@ async function bootstrap() {
     </StrictMode>,
   );
 }
+
 bootstrap();

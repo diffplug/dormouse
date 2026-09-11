@@ -135,31 +135,39 @@ Source of truth: the shared rule and predicates — `isLoopbackHost`, `isOwnOrig
 The attacker is another local account reading disk; what the remote stack leaves
 behind is `docs/specs/security-remote.md` -> "Credentials at rest".
 
-**Session snapshots are owner-only before any bytes are written.**
-`restrict_to_owner` locks `<app_data_dir>/sessions/` and, *first*, the temp file
-renamed into it, applying a protected single-ACE DACL on Windows where a unix
-mode is a silent no-op (`docs/specs/standalone.md` -> "Persistence"). The same
-helper locks the whole standalone app-data directory before the sidecar spawns.
+**Session snapshots are owner-only before any bytes are written.** Standalone
+persists one window's structure per file as `<state root>/sessions/<label>.json`
+— panes, cwds, titles, doors, layout, TODO flags, never terminal text
+(`docs/specs/standalone.md` -> "Persistence"). `restrict_to_owner` locks the
+directory and, *first*, the temp file renamed into it, applying a protected
+single-ACE DACL on Windows where a unix mode is a silent no-op. The same helper
+locks the whole standalone app-data directory before the sidecar spawns.
 
 **No writer persists scrollback** (`docs/specs/transport.md` -> "What is
-persisted"): `normalizeSessionV3` strips it on read, and the standalone store is
-switched off today, clearing any legacy snapshot at boot. Snapshots older
-versions left behind do carry transcripts (rationale).
+persisted"): `normalizeSessionV3` strips it on read, so the first save after an
+upgrade rewrites the snapshot without it, and a boot sweep deletes orphaned
+`*.json.tmp` files no save would ever overwrite. Snapshots older versions left
+behind do carry transcripts (rationale).
+
+**Standalone writes `recovery.json` beside its sessions directory**, under the
+state root, owner-only: one rebuilt agent-resume invocation per Surface, never a
+buffer, unlinked as it is read (`docs/specs/standalone.md` -> "Agent recovery").
 
 **The notepad archive is the one store holding terminal text on purpose** —
 excerpts the user explicitly captured, their colors, the Surface title and kind,
 and the CWD at closure, appended only by a Surface closing
 (`docs/specs/notepad.md` -> "Archive"). Standalone keeps it as
-`<app_data_dir>/notepad-archive-v1.json`, owner-only; VS Code keeps it in
+`<app_data_dir>/notepad-archive-v1.json`, owner-only and shared by every build
+so notes are not stranded in a dev subtree; VS Code keeps it in
 `<globalStorageUri>/notepad-archive.json`, mode `0600` on Unix and inheriting VS Code's directory ACL on Windows. Migration and Settings Sync follow `docs/specs/notepad.md` -> "VS Code lifecycle". Its live half never reaches disk.
 
 **VS Code persists pane structure in VS Code's own storage** — `workspaceState`
 under `dormouse.session`, and `vscode.setState()`, a WebviewPanel's only store —
 so the modes there are VS Code's, not ours, and no transcript reaches either
 (`docs/specs/vscode.md` -> "Serialization and restore"). Dormouse also writes
-`recovery.json` there, at the umask: one rebuilt agent-resume
-invocation per Surface, no buffer, unlinked as it is read
-(`docs/specs/vscode.md` -> "Capturing agent recovery").
+`recovery.json` under the extension's storage directory, owner-only and
+temp-then-rename: one rebuilt agent-resume invocation per Surface, no buffer,
+unlinked as it is read (`docs/specs/vscode.md` -> "Capturing agent recovery").
 
 **The VS Code peer-link token is a local credential at rest** —
 `burrow.peer-token` in the extension's global storage, written mode `0600`

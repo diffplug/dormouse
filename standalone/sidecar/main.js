@@ -22,6 +22,10 @@ const { createAgentBrowserHost } = require('./agent-browser-host.cjs');
 // the relay socket, the enrollment, the ACL, and remote-api v1 — running next to
 // the PTYs it serves. See docs/specs/remote-api.md.
 const { createSidecarBurrow } = require('./burrow.cjs');
+// Same pattern again: lib/src/host/recovery.ts is the agent-recovery capture
+// machine (shared with the VS Code extension host) plus the single-use record
+// store. See docs/specs/standalone.md -> "Agent recovery".
+const { captureAgentRecovery, createRecoveryStore, sliceSince } = require('./recovery.cjs');
 
 const agentBrowser = createAgentBrowserHost({
   writeClipboardText: (text) => clipboard.writeClipboardText(text),
@@ -31,6 +35,14 @@ const agentBrowser = createAgentBrowserHost({
 function send(event, data) {
   process.stdout.write(JSON.stringify({ event, data }) + '\n');
 }
+
+// stdout is the JSON-lines protocol channel, so every log line goes to stderr.
+const recoveryLog = { info: (m) => console.error(m), error: (m) => console.error(m) };
+
+// The record lives beside the session snapshots, under the state root Rust
+// picks (dev and the installed app get different ones). Without a directory the
+// store is memory-only and says so once.
+const recovery = createRecoveryStore(process.env.DORMOUSE_RECOVERY_DIR || undefined, { log: recoveryLog });
 
 const mgr = create((event, data) => {
   // Output goes through the host's parser — one per PTY, feeding the webview
@@ -44,7 +56,10 @@ const mgr = create((event, data) => {
     console.error(`[sidecar] burrow ${event} tap failed:`, err && err.message || err);
   }
   if (event !== 'data') send(`pty:${event}`, data);
-}, nodePty, { replay: true });
+  // `sliceSince` comes from the shared bundle above rather than living in
+  // pty-core, so this host and the VS Code extension host read their replay
+  // buffers through one implementation.
+}, nodePty, { replay: true, sliceSince });
 
 const burrow = createSidecarBurrow({
   send,
@@ -126,13 +141,38 @@ function handleLine(line) {
       case 'pty:requestInit': mgr.list(); break;
       case 'pty:context': mgr.context(data, data.requestId); break;
       case 'pty:getCwd':  mgr.getCwd(data.id, data.requestId); break;
+      case 'pty:getCwds': mgr.getCwds(data.ids, data.requestId); break;
       case 'pty:getOpenPorts': mgr.getOpenPorts(data.id, data.requestId); break;
       case 'pty:getShells':  mgr.getShells(data.requestId); break;
-      // Reserved: no standalone caller yet — recovery capture ships for VS Code
-      // only, which reaches the same `pty-core` through its own `pty-host.js`
-      // rather than this route (docs/specs/vscode.md -> "Capturing agent
-      // recovery").
       case 'pty:interrupt': mgr.interrupt(data.ids, data.requestId); break;
+      // Quit teardown, first step: press ^C, detect each agent's resume
+      // invocation, and write the single-use record. Runs here rather than in
+      // Rust because the replay buffers the detection reads are here, this
+      // process's lifetime is exactly one activation, and the browser-dev
+      // harness gets the same answer for free.
+      case 'pty:captureRecovery':
+        respondAsync('recoveryDone', data.requestId, async () => {
+          recovery.beginCapture();
+          const count = await captureAgentRecovery({
+            liveIds: () => mgr.liveIds(),
+            // One press, and the caller decides about a second: `mgr.interrupt`
+            // writes synchronously, so the ack is immediate.
+            interrupt: async (ids) => { mgr.interrupt(ids); },
+            receivedChars: (id) => mgr.receivedChars(id),
+            outputSince: (id, mark) => mgr.outputSince(id, mark),
+            onCommand: (id, command) => recovery.record(id, command),
+            log: recoveryLog,
+          }, { ids: data.ids, maxWaitMs: data.timeout });
+          return { count };
+        });
+        break;
+      // Cold start: claim the invocations belonging to these panes. Destructive
+      // on the first call, so nothing can replay them.
+      case 'recovery:take':
+        respondAsync('recovery:commands', data.requestId, async () => ({
+          commands: recovery.take(Array.isArray(data.paneIds) ? data.paneIds : []),
+        }));
+        break;
       case 'pty:gracefulKillAll': mgr.gracefulKillAll(data.timeout, data.requestId); break;
       // The webview's resolved terminal theme, so the parser here can answer
       // OSC 10/11/12 (docs/specs/terminal-escapes.md → Supported OSCs).

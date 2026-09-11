@@ -3,6 +3,8 @@ import { listen } from "@tauri-apps/api/event";
 import { countRunningSessions } from "dormouse-lib/lib/terminal-registry";
 import { archiveSurfaceNotes } from "dormouse-lib/lib/notepad/close-coordinator";
 import { notepadSurfaceIds, removeSurface } from "dormouse-lib/lib/notepad/notepad-store";
+import { flushWindowSession } from "dormouse-lib/lib/window-session-aggregator";
+import { DEFAULT_RECOVERY_WAIT_MS } from "dormouse-lib/host/recovery-capture";
 import type { TauriAdapter } from "./tauri-adapter";
 import { openQuitArchiveFailure } from "./quit-confirm-store";
 import { hasPendingUpdate, installPendingUpdate } from "./updater";
@@ -124,11 +126,38 @@ async function archiveThenTeardown(): Promise<void> {
   await runQuitTeardown();
 }
 
+// Each teardown step's own bound, and the ceiling derived from them. The two
+// steps that reach the sidecar wait `timeout + SIDECAR_ROUND_TRIP_MARGIN_MS` —
+// the margin Rust adds in `standalone/src-tauri/src/lib.rs` — so the webview can
+// observe more than the number it passed in. A ceiling below the sum would abort
+// the last steps of a slow teardown instead of guarding a wedged one, and those
+// last steps are the final save.
+const SIDECAR_ROUND_TRIP_MARGIN_MS = 1500;
+const PRE_KILL_FLUSH_MS = 1500;
+const GRACEFUL_KILL_MS = 2000;
+const POST_KILL_FLUSH_MS = 1500;
+// The Window write is synchronous on both standalone adapters today, but the
+// step is bounded on what the writer may return, not on what it happens to be.
+const WINDOW_WRITE_MS = 1000;
+const DRAIN_MS = 2000;
+const STEP_BUDGET_TOTAL_MS =
+  (DEFAULT_RECOVERY_WAIT_MS + SIDECAR_ROUND_TRIP_MARGIN_MS) +
+  PRE_KILL_FLUSH_MS +
+  (GRACEFUL_KILL_MS + SIDECAR_ROUND_TRIP_MARGIN_MS) +
+  POST_KILL_FLUSH_MS +
+  WINDOW_WRITE_MS +
+  DRAIN_MS;
+/** Belt-and-suspenders over the summed step budgets, with slack for scheduling.
+ *  Stays under Rust's `QUIT_PHASE_TIMEOUT_MS`, which is what actually forces the
+ *  exit; `lib/src/lib/mirrored-constants.test.ts` reads this derivation out of
+ *  the source and pins it under the Rust constant, and pins the margin above to
+ *  the two Rust call sites that add it. */
+const QUIT_TEARDOWN_CEILING_MS = STEP_BUDGET_TOTAL_MS + 1000;
+
 // Ordering and rationale: docs/specs/standalone.md §Quit flow (Teardown
-// ordering). The 8s ceiling is belt-and-suspenders over the per-step bounds.
-// `quit_progress` tells Rust teardown has begun (ending the confirmation-wait
-// suspension) and marks each phase boundary so its watchdog gives teardown and
-// install separate budgets rather than one shared clock.
+// ordering). `quit_progress` tells Rust teardown has begun (ending the
+// confirmation-wait suspension) and marks each phase boundary so its watchdog
+// gives teardown and install separate budgets rather than one shared clock.
 async function runQuitTeardown(): Promise<void> {
   quitPhase = "tearing-down";
   const adapter = quitAdapter;
@@ -137,18 +166,30 @@ async function runQuitTeardown(): Promise<void> {
     if (adapter) {
       await withTimeout(
         (async () => {
-          // The two flushes are near-free while standalone persists nothing —
-          // `saveSession` returns immediately on `persistsSession: false`, so
-          // neither one runs a `getCwd` round trip. The shape is kept because
-          // the ordering is the load-bearing part and the workspaces-rollout
-          // scope turns persistence back on (docs/specs/layout.md -> `## Future`).
-          await adapter.requestSessionFlush(1500); // save while PTYs are alive
-          await adapter.gracefulKillAllPtys(2000); // SIGTERM; wait for exits and final output
-          await adapter.requestSessionFlush(1500); // final post-exit save
-          await adapter.drainSessionSaves(2000); // last write reaches disk
+          // Capture FIRST: an agent's resume invocation exists only between the
+          // interrupt and the kill, and it is the one thing here that cannot be
+          // reconstructed afterwards. Losing it must never cost the save behind
+          // it, so this step alone cannot abort the rest.
+          // No `ids`: a quit tears down the whole Window, so the capture takes
+          // every live PTY.
+          await adapter.captureAgentRecovery(DEFAULT_RECOVERY_WAIT_MS).catch((err) =>
+            console.warn("[quit] agent recovery capture failed; proceeding", err));
+          await adapter.requestSessionFlush(PRE_KILL_FLUSH_MS); // save while PTYs are alive
+          await adapter.gracefulKillAllPtys(GRACEFUL_KILL_MS); // SIGTERM; wait for exits and final output
+          // Final post-exit save. Nothing left to probe a cwd from, and each pane
+          // keeps the one the save above recorded.
+          await adapter.requestSessionFlush(POST_KILL_FLUSH_MS, { probeCwd: false });
+          // The Walls' records become one Window blob. Bounded like the rest, so
+          // a writer that stalls cannot eat the drain's budget behind it.
+          await withTimeout(
+            flushWindowSession(),
+            WINDOW_WRITE_MS,
+            `[quit] Window write exceeded ${WINDOW_WRITE_MS}ms; proceeding to drain`,
+          );
+          await adapter.drainSessionSaves(DRAIN_MS); // last write reaches disk
         })(),
-        8000,
-        "[quit] teardown exceeded 8000ms; proceeding to exit",
+        QUIT_TEARDOWN_CEILING_MS,
+        `[quit] teardown exceeded ${QUIT_TEARDOWN_CEILING_MS}ms; proceeding to exit`,
       );
     }
     // Install strictly after the completed final save. A fresh `quit_progress`

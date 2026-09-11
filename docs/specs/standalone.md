@@ -15,6 +15,7 @@ Start at the runtime boundary involved, then follow its imports and dispatch:
 | `standalone/src/tauri-adapter.ts` | Shared frontend's Tauri command/event bridge. |
 | `standalone/src-tauri/src/lib.rs` | Native app entry, sidecar supervision, and command registration. |
 | `standalone/sidecar/main.js` | JSON-lines command dispatch into PTY and shared host modules. |
+| `standalone/src/window-restore.ts` | Per-Workspace boot planning over one live-PTY list. |
 | `standalone/src/quit.ts` | Webview quit orchestration and updater handoff. |
 
 ## Architecture
@@ -31,9 +32,9 @@ Source of truth: `standalone/src/main.tsx` (`bootstrap()`).
 
 1. Pick the platform: `BrowserSidecarAdapter` when `VITE_DORMOUSE_BROWSER_DEV_HOST`
    is set (the browser-dev harness, `docs/specs/transport.md`), else `TauriAdapter`.
-2. `setPlatform(platform)`, then `await platform.init()` **before**
-   `resumeOrRestore` — init registers the listeners resume replay arrives on and
-   hydrates the session cache (§Persistence).
+2. `setPlatform(platform)`, then `await platform.init()` **before** the restore —
+   init registers the listeners resume replay arrives on and hydrates the session
+   cache (§Persistence).
 3. `installPeerSurfaceResponder()` **after `init()`, never before** (§Burrow
    service) — the responder seeds itself with a `status` command that the adapter
    must already have listeners for (rationale).
@@ -47,8 +48,8 @@ Source of truth: `standalone/src/main.tsx` (`bootstrap()`).
    default-shell slot for split/spawn/restore (`docs/specs/layout.md`).
    **Awaited**: seeding must finish before the Wall mounts, so the first restored
    pane already spawns with that shell.
-8. `resumeOrRestore(platform)` — the priority-based recovery from
-   `docs/specs/transport.md`.
+8. `restoreWindowOrFresh(platform)` — the per-Workspace boot (§Persistence) over
+   the priority-based recovery from `docs/specs/transport.md`.
 9. `startUpdateCheck()` (`docs/specs/auto-update.md`), then render `AppBar` +
    `App` with `multiWorkspace` — one Wall per Workspace (`docs/specs/layout.md`
    → Workspaces) — and `enableBurrow`, the mount gate for the lazily-imported
@@ -73,7 +74,7 @@ are *not* forwarded:
 
 | Not forwarded | Handled | Why |
 |---|---|---|
-| `load_session` / `save_session` / `clear_session` | Rust | the per-window session file is Rust's store (§Persistence) |
+| `load_session` / `save_session` | Rust | the per-window session file is Rust's store (§Persistence) |
 | the `clipboard` readers (Windows only) | Rust (`clipboard_win.rs`) | native Win32 reads (`docs/specs/mouse-and-clipboard.md` §8.6) |
 | `agent_browser_screenshot` | Rust reads the bytes from a sidecar-supplied temp-file *path* | images must never ride the JSON-lines pipe shared with PTY traffic (`docs/specs/dor-browser.md`) |
 
@@ -297,39 +298,49 @@ chord the webview already handles.**
 
 ## Persistence
 
-**Standalone persists no Session state**: every launch starts fresh
-(`docs/specs/transport.md` → "The governing rule"). One `PERSIST_SESSION` gate
-drives all of it — `TauriAdapter.getState` returns null, `saveState` is a no-op,
-and the adapter reports `persistsSession: false` so `saveSession` skips building a
-record at all. **That last part is what keeps the gate from being cosmetic**,
-since the record build costs a `getCwd` round trip per terminal pane regardless
-(rationale). `init()` also **deletes** any pre-upgrade snapshot via
-`clear_session`, unconditionally and including an orphaned
-`<label>.json.tmp` (`docs/specs/transport.md` → "Retiring the transcripts already
-on disk"), deleting rather than blanking (rationale). The store beneath the gate
-is intact and still needed by the workspaces-rollout scope
-(`docs/specs/layout.md` → `## Future`). The Tauri boot cleanup runs regardless
-of the flag; future recovery must also reconcile that deletion and add capture
-to the quit teardown.
+**Standalone persists one `PersistedWindow` per window** and restores every
+Workspace in it on the next launch (`docs/specs/transport.md` → "The governing
+rule"). The webview owns the composition: each Workspace's Wall publishes its
+`PersistedSession` to the Window aggregator, whose one debounced writer is
+`TauriAdapter.saveWindowState` (`docs/specs/transport.md` → "Persisted session
+types"). `getWindowState` is the boot reader, and it **parses the blob once** —
+the store behind it is a boot-seeded cache and every later write comes through
+`saveWindowState`. The bare-Session `saveState` / `getState` pair answers nothing
+on either standalone adapter, because the stored blob is a Window and every
+shared reader of `getState` wants a Session. Source of truth: `windowStateSlot` in
+`standalone/src/window-recovery.ts`.
 
-**Flip both `PERSIST_SESSION` flags together** — a harness that restored panes
-across a reload would be debugging a path the shipped app never takes; the rest
-of the mirroring rule is `docs/specs/transport.md` → Standalone browser-dev
-harness. `BrowserSidecarAdapter` **deletes** the
-`dormouse.browser-sidecar.session` key on `init()` rather than ignoring it
-(rationale).
+**Boot restores per Workspace off one live-PTY list.** `restoreWindowOrFresh`
+seeds the aggregator, installs the Workspaces and the
+writer, then runs one `collectLivePtys` and plans each Workspace from its own saved
+record. Reload and relaunch are the same path with a different list: nothing wires
+`shutdown()` to `beforeunload`, so a reload's PTYs are still there and partition by
+saved pane id, while a relaunch's list is empty and every Workspace cold-restores
+into fresh shells at its saved cwds.
 
-**What the gate costs on reload is the *layout*, not the Sessions.** Nothing wires
-`shutdown()` to `beforeunload`, so the sidecar's PTYs outlive a page reload and
-`lib/src/lib/reconnect.ts` resumes over them — but with no `getState()` resume plan
-every live PTY lands in one tab group, doors and saved titles dropped. Real
-standalone has always done this across a WebView reload (rationale).
+- **A live PTY no saved Workspace names goes to the active Workspace**, which is
+  the only one that can hold it — **except a helper**, which is never a persisted
+  pane and so is always unnamed. **A helper is routed to the Workspace holding its
+  source**, resolving parents across the whole live list before any slicing; one
+  landing anywhere else is resumed as an ordinary pane and its stray id voids that
+  Workspace's whole saved layout.
+- **A restore that throws degrades to a fresh Window and overwrites the blob.**
+  Installing the Workspaces is the step that can reject a stored blob outright, and
+  a throw at boot would leave nothing rendered, on this launch and every later one.
 
-**Must keep the implemented store plumbing dormant while persistence is disabled.**
-Below the gate, `TauriAdapter.saveState` / `getState` route the session blob through
-`lib/src/lib/window-persistence.ts` (`loadSessionState` / `saveSessionState`) —
-the standalone adapter boundary where the `PersistedWindow` wrapping lives
-(`docs/specs/transport.md`, Workspace/Window containers).
+Source of truth: `restoreWindowOrFresh` / `routeUnownedPtys` in
+`standalone/src/window-restore.ts`.
+
+**Every Workspace saving at the same moment costs one `pty_get_cwds`.** A flush
+fans out to every Wall at once, so both adapters put their cwd probe behind
+`coalesceCwds` (`standalone/src/coalesce-cwds.ts`), which folds the calls arriving
+in one microtask into a single invoke — the same batching `getCwdsForPids` already
+does one layer down, extended across the callers.
+
+**Nothing is deleted at boot but orphaned session temp files**
+(`docs/specs/transport.md` → "Retiring the transcripts already on disk"). **The
+harness mirrors this answer** (`docs/specs/transport.md` → Standalone browser-dev
+harness), in `localStorage` and a per-run temp state directory.
 
 **Never back the session blob with WebKit `localStorage`** — a WAL that grows
 without bound (rationale). The blob rides the `SessionKeyValueStore` seam instead,
@@ -337,9 +348,9 @@ over the Rust-backed `standalone/src/tauri-session-store.ts`. Theme selection
 still persists on `localStorage` (`docs/specs/theme.md`) — tiny and rarely
 written.
 
-**Rust file store.** `save_session(window, state)` / `load_session(window)` /
-`clear_session(window)` (`lib.rs`) persist the blob as one atomic file per Tauri
-window, `<app_data_dir>/sessions/<label>.json`:
+**Rust file store.** `save_session(window, state)` / `load_session(window)`
+(`lib.rs`) persist the blob as one atomic file per Tauri window,
+`<state root>/sessions/<label>.json`:
 
 - **The label is sanitized** so it cannot escape the directory.
 - **Temp-then-rename**, so a crash cannot truncate the previous snapshot. The temp
@@ -351,10 +362,64 @@ window, `<app_data_dir>/sessions/<label>.json`:
   window's. The store is multi-window even though the app ships one window today.
 - No WAL to grow, and rewriting the same path bounds the on-disk size to one
   blob (rationale).
+- **The writer removes its own temp file on every error path**, so only a crash
+  can leave one behind.
+- **`sweep_orphan_session_temps` runs once in `setup()`** and deletes every
+  `<label>.json.tmp` — the legacy and hard-crash migration, given the rule above.
+  `SESSION_TEMP_SUFFIX` is pinned against the writer by
+  `session_temp_suffix_matches_what_the_writer_leaves`, so the two cannot drift.
+  It **never touches a live snapshot**.
 
-**The notepad archive is a sibling of `sessions/`, not a member of it** —
+**The state root is `<app_data_dir>`, or `<app_data_dir>/dev` under
+`cfg(debug_assertions)`.** `app_data_dir()` is keyed by the Tauri identifier, so a
+`pnpm dev:standalone` run and the installed app resolve to the same directory:
+without the split a dev launch would restore the installed app's Workspaces and the
+two would clobber one snapshot. **The notepad archive and the Burrow state directory
+stay under `app_data_dir` itself** — machine-local stores, not this build's copy of
+the user's window. `state_root_from` in `standalone/src-tauri/src/lib.rs`.
+
+**Rust passes the sidecar its two directories by environment**, each created
+owner-only first and each an empty string when it could not be:
+`DORMOUSE_STATE_DIR` (the Burrow store, `app_data_dir`) and
+`DORMOUSE_RECOVERY_DIR` (the recovery record, the state root — so a dev run's
+record cannot reach the installed app). The browser-dev harness sets both to its
+own per-run temp directory. Source of truth: `recovery_state_dir` in
+`standalone/src-tauri/src/lib.rs`.
+
+### Agent recovery
+
+**The sidecar owns the capture and the record** (`docs/specs/transport.md` →
+"Consuming it"): it holds the replay buffers the detection reads, and its lifetime is
+exactly one activation, so read-and-unlink has one home. Rust only bridges —
+`capture_agent_recovery` and `take_recovery_commands`, both
+`#[tauri::command(async)]` like every command reaching the blocking sidecar helper.
+**Every sidecar answer rides `respondAsync`**, so a throw comes back as `{ error }`
+rather than stranding the Rust invoke to its timeout.
+
+- **The record is `<state root>/recovery.json`**, owner-only, temp-then-rename,
+  written on every detection rather than once at the end, because the quit budget
+  can end the capture at any instant.
+- **`beginCapture` clears the previous record once per sidecar process and merges
+  after**, so a teardown that captures nothing cannot carry a stale record forward
+  and a second window's capture cannot wipe the first's.
+- **`take` is claimed once**, started by `TauriAdapter.init()` for every pane id
+  across the saved Window's Workspaces. `init()` does not await it: the boot
+  awaits `recoveryReady` before planning, and only on the branch that can
+  cold-restore, so the round trip overlaps the rest of boot.
+- **Without a state directory the store is memory-only**, warning once.
+
+Both the detection (`lib/src/host/recovery-capture.ts`) and the record store
+(`lib/src/host/recovery-store.ts`) are shared with the VS Code extension host
+(`docs/specs/vscode.md` → "Capturing agent recovery"); the primitives the detection
+runs on — `liveIds`, `receivedChars`, `outputSince` — are
+`standalone/sidecar/pty-core.js`'s. **The browser-dev harness claims but never
+captures**: a reload there is a live resume over PTYs that survive it, so pressing
+`^C` would interrupt work that is still running. Source of truth:
+`pty:captureRecovery` / `recovery:take` in `standalone/sidecar/main.js`.
+
+**The notepad archive is outside `sessions/`, and outside the state root** —
 `<app_data_dir>/notepad-archive-v1.json`, its own compare-and-swap commands and
-its own lifetime, so `clear_session` never sweeps it
+its own lifetime, so the session sweep never reaches it
 (`docs/specs/notepad.md` -> "Standalone quit"). Both stores write through the one
 `write_file_atomically`.
 
@@ -440,9 +505,9 @@ wedged webview, in three phases:
 |---|---|---|
 | 1 — ack | no `quit_ack` yet | ~2 s; the listener is dead ⇒ log and `app.exit(0)` |
 | 2 — awaiting teardown | acked, `tearing_down` unset | **none** — the webview may be parked on the confirmation dialog waiting on a human, who must never be force-quit out from under it. Only `quit_proceed` (`approved`) or `quit_cancel`/repeat-trigger (`seq` bump) ends the wait |
-| 3 — teardown running | `tearing_down` set | **per phase**, ~12 s, refreshed by every `quit_progress` bump, so teardown and update install get separate budgets rather than one total; a phase making no progress for the budget ⇒ log and exit |
+| 3 — teardown running | `tearing_down` set | **per phase**, ~14 s, refreshed by every `quit_progress` bump, so teardown and update install get separate budgets rather than one total; a phase making no progress for the budget ⇒ log and exit |
 
-Phase 3's budget comfortably exceeds the webview's own 8 s teardown ceiling. Each
+Phase 3's budget comfortably exceeds the webview's own teardown ceiling. Each
 watchdog captures the `seq` it was spawned for, so a **repeated quit trigger** —
 which bumps `seq`, spawns a fresh watchdog and re-emits — leaves the stale one to
 exit without acting: the user's escape hatch if the webview acked then wedged.
@@ -478,25 +543,39 @@ irrelevant — the gate is read only at quit time.
 Source of truth: `standalone/src/quit-confirm-store.ts` (the module store + gate),
 `standalone/src/QuitConfirmModal.tsx` (the modal).
 
-**Teardown ordering (`runQuitTeardown`), and why.** Wrapped in an 8 s ceiling, with
-**every step individually bounded** so a stall cannot wedge quit. The notepad
+**Teardown ordering (`runQuitTeardown`), and why.** **Every step is individually
+bounded** so a stall cannot wedge quit, and the whole is wrapped in a ceiling
+**derived from the sum of those bounds, never a literal** — one below the sum
+aborts the final save of a slow teardown instead of guarding a wedged one. The two
+steps that reach the sidecar cost their own budget *plus* Rust's round-trip margin,
+so both terms count (`QUIT_TEARDOWN_CEILING_MS` in `standalone/src/quit.ts`; pinned by
+`lib/src/lib/mirrored-constants.test.ts`). The notepad
 archive is **not** a step here: it runs ahead of `quit_progress` precisely because
 teardown's rule below holds — no failing step prevents exit — and archiving must be
 able to stop the quit (`docs/specs/notepad.md` -> "Standalone quit"):
 
-1. `requestSessionFlush` — save while PTYs are alive, so CWDs are fresh.
-2. `gracefulKillAllPtys` — SIGTERM every PTY, resolving early once all exit and
+1. `captureAgentRecovery` — **first**, because an agent's resume invocation exists
+   only between the interrupt and the kill and is the one thing here that cannot be
+   reconstructed afterwards (§Agent recovery). **A failed capture must not abort the
+   steps behind it.**
+2. `requestSessionFlush` — save while PTYs are alive, so CWDs are fresh.
+3. `gracefulKillAllPtys` — SIGTERM every PTY, resolving early once all exit and
    their final output has had a grace tick to reach the webview (§Rust ↔ sidecar
    bridge).
-3. `requestSessionFlush` — flush the post-exit Session state. **Must retain the
-   previously persisted CWD when `getCwd` returns null for a dead PTY.** Both
-   flushes are no-ops while `persistsSession: false` (§Persistence).
-4. `drainSessionSaves` — await the store pipeline becoming idle or its timeout
+4. `requestSessionFlush({ probeCwd: false })` — flush the post-exit Session state.
+   **Must skip the cwd probe and retain the previously persisted CWD**: every
+   probe against a dead PTY answers null and is discarded for that value anyway
+   (`docs/specs/transport.md` → "Persisted session types").
+5. `flushWindowSession` — the Workspaces' records become one Window blob
+   (`docs/specs/transport.md` → "Persisted session types"); a debounce timer still
+   pending at exit would otherwise lose the final save. **Bounded like the rest,
+   its term in the ceiling**, though both writers are synchronous today.
+6. `drainSessionSaves` — await the store pipeline becoming idle or its timeout
    (§Persistence).
-5. If an update is pending, a fresh `quit_progress` then `installPendingUpdate()`
+7. If an update is pending, a fresh `quit_progress` then `installPendingUpdate()`
    — strictly *after* the completed save (`docs/specs/auto-update.md`); Rust's
    phase-3 watchdog backstops a hung installer.
-6. **Always** `quit_proceed` (in `finally`, even on throw/timeout).
+8. **Always** `quit_proceed` (in `finally`, even on throw/timeout).
 
 **Windows note.** node-pty's `kill('SIGTERM')` is an immediate kill under ConPTY,
 so step 2 terminates promptly there, retaining the same final-output grace tick.

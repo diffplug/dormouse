@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, type RefObject } from 'react';
 import { pasteFilePaths } from '../../lib/clipboard';
 import { getPlatform } from '../../lib/platform';
-import { saveSession, type SaveSink } from '../../lib/session-save';
+import { saveSession, type SaveOptions, type SaveSink } from '../../lib/session-save';
 import { createSessionDirtyTracker } from '../../lib/session-dirty';
-import { publishWorkspaceSession } from '../../lib/window-session-aggregator';
+import { previousWorkspaceSession, publishWorkspaceSession, SESSION_SAVE_DEBOUNCE_MS } from '../../lib/window-session-aggregator';
+import { hasWorkspace } from '../../lib/workspace-store';
 import {
   subscribeToActivity,
   subscribeToTerminalPaneState,
@@ -12,11 +13,12 @@ import {
 import { surfaceKindFromParams } from './browser-surface';
 import type { LathWallEngine } from './lath-wall-engine';
 import type { DooredItem, WallSelectionKind } from './wall-types';
-import type { PersistedDoor, PersistedSession, PersistedSurfaceRefs, WorkspaceId } from '../../lib/session-types';
+import type { PersistedDoor, PersistedSurfaceRefs, WorkspaceId } from '../../lib/session-types';
+import type { SessionFlushRequest } from '../../lib/platform/types';
 
 export interface SessionPersistenceHandle {
   /** Persist immediately, awaiting the whole queued pipeline. */
-  flush: () => Promise<void>;
+  flush: (options?: SaveOptions) => Promise<void>;
 }
 
 export function useSessionPersistence({
@@ -61,19 +63,15 @@ export function useSessionPersistence({
   const pendingSaveNeededRef = useRef(false);
   // See session-dirty.ts for the conservative-under-races generation model.
   const trackerRef = useRef(createSessionDirtyTracker());
-  // This Workspace's last published record: `getPreviousPaneMap`'s source, which
-  // must be this Workspace's own (a dead PTY's cwd is retained there), not the
-  // Window's active Workspace.
-  const publishedRef = useRef<PersistedSession | null>(null);
-
+  // This Workspace's own previous record, which is where a dead PTY's retained
+  // cwd and alert live. The aggregator holds it because the first save after a
+  // restore has to read the record BOOT seeded, not the (still empty) one this
+  // Wall has published.
   const sink = useMemo<SaveSink | undefined>(() => {
     if (workspaceId === undefined) return undefined;
     return {
-      previous: () => publishedRef.current,
-      publish: (session) => {
-        publishedRef.current = session;
-        publishWorkspaceSession(workspaceId, session);
-      },
+      previous: () => previousWorkspaceSession(workspaceId),
+      publish: (session) => publishWorkspaceSession(workspaceId, session),
     };
   }, [workspaceId]);
 
@@ -103,17 +101,17 @@ export function useSessionPersistence({
     return { panes, doors, lathLayout: lath.serializeLayout(), surfaceRefs };
   }, [lath, doorsRef, surfaceRefsForSave]);
 
-  const doSave = useCallback((): Promise<void> => {
+  const doSave = useCallback((options?: SaveOptions): Promise<void> => {
     const { panes, doors, lathLayout, surfaceRefs } = collect();
-    return saveSession(getPlatform(), panes, doors, lathLayout, surfaceRefs?.refs, surfaceRefs?.next, sink);
+    return saveSession(getPlatform(), panes, doors, lathLayout, surfaceRefs?.refs, surfaceRefs?.next, sink, options);
   }, [collect, sink]);
 
-  const persistSessionNow = useCallback(async (): Promise<void> => {
+  const persistSessionNow = useCallback(async (options?: SaveOptions): Promise<void> => {
     const runSave = (): Promise<void> => {
       pendingSaveNeededRef.current = false;
       // Clear dirty only on a fulfilled write (.then, not .finally).
       const token = trackerRef.current.beginSave();
-      const savePromise = doSave()
+      const savePromise = doSave(options)
         .then(() => {
           trackerRef.current.completeSave(token);
         })
@@ -150,12 +148,12 @@ export function useSessionPersistence({
 
   // Never gated on the dirty tracker — the correctness net for dirty-trigger
   // gaps (e.g. a program calling chdir() silently produces no event).
-  const flushSessionSave = useCallback((): Promise<void> => {
+  const flushSessionSave = useCallback((options?: SaveOptions): Promise<void> => {
     if (sessionSaveTimerRef.current) {
       clearTimeout(sessionSaveTimerRef.current);
       sessionSaveTimerRef.current = null;
     }
-    return persistSessionNow();
+    return persistSessionNow(options);
   }, [persistSessionNow]);
 
   const scheduleSessionSave = useCallback(() => {
@@ -164,7 +162,7 @@ export function useSessionPersistence({
     sessionSaveTimerRef.current = setTimeout(() => {
       sessionSaveTimerRef.current = null;
       void persistSessionNow().catch(() => undefined);
-    }, 500);
+    }, SESSION_SAVE_DEBOUNCE_MS);
   }, [persistSessionNow]);
 
   useEffect(() => {
@@ -184,8 +182,8 @@ export function useSessionPersistence({
     // Only a bare Wall answers the host directly; a Workspace Wall's answer is
     // `WorkspaceWindow`'s, which flushes every Workspace before notifying (the
     // adapter completes on the first notification).
-    const handleSessionFlushRequest = (detail: { requestId: string }) => {
-      void flushSessionSave()
+    const handleSessionFlushRequest = (detail: SessionFlushRequest) => {
+      void flushSessionSave({ probeCwd: detail.probeCwd })
         .catch(() => undefined)
         .finally(() => {
           platform.notifySessionFlushComplete(detail.requestId);
@@ -204,8 +202,13 @@ export function useSessionPersistence({
     // store of its own to report it (the registry mutates silently), which is
     // why the pty echo above is what marks it.
     platform.onPtyData(handlePtyData);
-    const unsubActivity = subscribeToActivity(markDirty);
-    const unsubPaneState = subscribeToTerminalPaneState(markDirty);
+    // Keyed like the PTY triggers: both stores are Window-global, so an
+    // unfiltered listener would rebuild every idle Workspace's record — a
+    // `getCwd` per pane — whenever any Workspace changed. A notification with no
+    // id is a store-wide reset, which every Wall must take.
+    const markDirtyFor = (id?: string) => { if (id === undefined || ownsSurface(id)) markDirty(); };
+    const unsubActivity = subscribeToActivity(markDirtyFor);
+    const unsubPaneState = subscribeToTerminalPaneState(markDirtyFor);
 
     // Heartbeat: idle sessions no longer write (only when something marked dirty).
     const interval = setInterval(() => {
@@ -238,9 +241,16 @@ export function useSessionPersistence({
       unsubPaneState();
       unsubscribeStore();
       clearInterval(interval);
-      void persistSessionNow().catch(() => undefined);
+      // A Wall unmounting because its Workspace was closed must not publish on
+      // the way out: `closeWorkspaceWithSurfaces` has already forgotten the
+      // record, and re-publishing would put the closed Workspace back in the next
+      // Window blob (with its Surfaces gone) for the next launch to restore.
+      if (workspaceId === undefined || hasWorkspace(workspaceId)) {
+        void persistSessionNow().catch(() => undefined);
+      }
     };
   }, [
+    workspaceId,
     lath,
     flushSessionSave,
     ownsSurface,

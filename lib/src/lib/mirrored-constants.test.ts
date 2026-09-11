@@ -13,6 +13,7 @@ import { SCAN_REJECTED_MESSAGE } from '../remote/pocket-app/ScanInvitation';
 import { SCAN_LABEL } from '../remote/setup-copy';
 import { ITERM2_COMPAT_VERSION } from './terminal-protocol';
 import { OPEN_PORT_TIMEOUT_MS } from './platform/types';
+import { DEFAULT_RECOVERY_WAIT_MS } from '../host/recovery-capture';
 
 // Pins for constants defined in more than one language/runtime, where an
 // import is impossible (the sidecar is plain CJS, the Tauri backend is Rust,
@@ -229,4 +230,51 @@ describe('OPEN_PORT_TIMEOUT_MS mirrors', () => {
     const ms = extract(readRepoFile(file), file, /^const OPEN_PORT_TIMEOUT_MS: u64 = (\d+);$/m);
     expect(Number(ms)).toBe(OPEN_PORT_TIMEOUT_MS);
   });
+});
+
+// docs/specs/standalone.md -> "Quit flow" (Teardown ordering). The webview's
+// teardown ceiling is derived from its step budgets, two of which carry the
+// margin Rust adds to a sidecar round trip; Rust's per-phase watchdog is what
+// actually forces the exit and has to sit above the whole derivation. Neither
+// side can import the other, so the derivation is read out of `quit.ts` as
+// written — every `NAME_MS` resolves to its own `const`, the one lib import to
+// the lib export — and summed here, so a budget raised on one side without the
+// other fails loudly instead of aborting the final save.
+describe('quit teardown budget mirrors', () => {
+  const ts = 'standalone/src/quit.ts';
+  const rs = 'standalone/src-tauri/src/lib.rs';
+  const tsSrc = readRepoFile(ts);
+  const rsSrc = readRepoFile(rs);
+
+  /** A `quit.ts` millisecond constant, following its derivation term by term. */
+  const valueOf = (name: string): number => {
+    if (name === 'DEFAULT_RECOVERY_WAIT_MS') return DEFAULT_RECOVERY_WAIT_MS;
+    const expr = extract(tsSrc, ts, new RegExp(`^(?:export )?const ${name} =\\s*([^;]+);`, 'm'));
+    return expr
+      .replace(/[()\s]/g, '')
+      .split('+')
+      .map((term) => {
+        if (/^\d+$/.test(term)) return Number(term);
+        if (/^[A-Z_]+_MS$/.test(term)) return valueOf(term);
+        throw new Error(`${name} in ${ts} is not a sum: unexpected term ${JSON.stringify(term)}`);
+      })
+      .reduce((sum, term) => sum + term, 0);
+  };
+  const rustMs = (name: string) =>
+    Number(extract(rsSrc, rs, new RegExp(`^const ${name}: u64 = ([\\d_]+);$`, 'm')).replace(/_/g, ''));
+
+  it('keeps the webview ceiling under the Rust per-phase watchdog', () => {
+    const ceiling = valueOf('QUIT_TEARDOWN_CEILING_MS');
+    expect(ceiling).toBeGreaterThan(valueOf('STEP_BUDGET_TOTAL_MS'));
+    expect(ceiling).toBeLessThan(rustMs('QUIT_PHASE_TIMEOUT_MS'));
+  });
+
+  it.each(['capture_agent_recovery', 'pty_graceful_kill_all'])(
+    'counts the round-trip margin Rust adds in %s',
+    (command) => {
+      const body = extract(rsSrc, rs, new RegExp(`\\n(?:async )?fn ${command}\\(([^]*?)\\n}`));
+      const margin = extract(body, `${rs} (${command})`, /Duration::from_millis\(timeout \+ (\d+)\)/);
+      expect(Number(margin)).toBe(valueOf('SIDECAR_ROUND_TRIP_MARGIN_MS'));
+    },
+  );
 });
