@@ -11,7 +11,7 @@ test('sessionForKey namespaces a key under the workspace', () => {
 test('sessionForKey scrubs the key like the scope: a session name is a socket path', () => {
   // The key crosses the control socket from any client, not only `dor` (which
   // rejects this shape itself), so it cannot be allowed to escape the socket dir.
-  assert.equal(sessionForKey('../../../tmp/x', 'ws/1'), 'dormouse.ws-1.-.-.-.-tmp-x');
+  assert.equal(sessionForKey('../../../tmp/x', 'ws/1'), 'dormouse.ws-1...-..-..-tmp-x');
   // A valid key is unchanged.
   assert.equal(sessionForKey('a.b_c-D9', 'ws'), 'dormouse.ws.a.b_c-D9');
 });
