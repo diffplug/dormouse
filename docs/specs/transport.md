@@ -334,7 +334,10 @@ Source of truth: `getScrollbackReceived` / `getScrollbackSince` in `vscode-ext/s
 **Must budget port requests for both serial scans and an IPC margin per hop**:
 `2 × OPEN_PORT_TIMEOUT_MS + count × OPEN_PORT_TIMEOUT_PER_ID_MS + hops × OPEN_PORT_ROUND_TRIP_MARGIN_MS`.
 VS Code's child request uses one hop; its webview request uses two. Tauri's
-sidecar request uses one. Pinned by the port-deadline tests in
+sidecar request uses one. **Must share the Windows socket-scan allowance across
+name lookup, `Get-NetTCPConnection`, and the `netstat` fallback**, reducing each
+subprocess timeout by elapsed time and starting none after exhaustion. Pinned by
+the Windows budget tests in `standalone/sidecar/pty-core.test.js` and by the port-deadline tests in
 `lib/src/lib/platform/vscode-adapter.test.ts`, `vscode-ext/test/pty-manager.test.ts`,
 and `lib/src/lib/mirrored-constants.test.ts`.
 
