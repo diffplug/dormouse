@@ -35,7 +35,9 @@ import {
 import {
   indexedDbKnownBurrowStore,
   indexedDbPendingDeletionStore,
+  requirePocketKeyStorage,
   type KnownBurrowV1,
+  type KnownBurrowSummary,
 } from '../client/pocket-db';
 import {
   getPushAvailability,
@@ -417,6 +419,7 @@ export default function App({
   const onScanned = useCallback(
     (invitation: PairingInvitation) =>
       run('pair', async () => {
+        await requirePocketKeyStorage();
         cancelledPairingRef.current = false;
         const label = deviceLabel();
         let spentOnSetup = false;
@@ -674,7 +677,7 @@ function Waiting(): React.ReactElement {
 }
 
 /** One pinned record as the list renders it. */
-function toBurrowView(record: KnownBurrowV1, online: boolean): BurrowView {
+function toBurrowView(record: KnownBurrowSummary, online: boolean): BurrowView {
   return {
     burrowId: record.burrowId,
     label: record.label || record.burrowId,

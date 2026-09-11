@@ -21,6 +21,30 @@ environment.
 
 ## Client statics
 
+The initial restart harness used an experimental envelope without the
+production AAD binding. Its restart evidence below is primitive-level evidence;
+the v3 harness uses the production codec and requires a fresh checkpoint.
+The operator's v3 Home Screen report at 17:17:44 UTC on September 11, 2026
+passed with authenticated context and a retained production-format key from
+17:14:19 UTC. It detects a new page instance after the requested phone restart,
+not process termination itself.
+
+On September 11, 2026, an iPhone 15 Pro running Safari 26.6.1 failed X25519
+structured cloning and native IndexedDB persistence in both Safari and a Home
+Screen app, while X25519 agreement and AES key persistence worked. The isolated
+encrypted-key checkpoint passed after app closure and the requested phone
+restart, using the same checkpoint created at 07:15:58 UTC. The report proves
+a new page instance; process termination is operator evidence, not detectable
+by that page.
+
+The self-host operator explicitly accepted the fallback tradeoff: same-origin
+malicious JavaScript can decrypt and export the private bytes, so the previous
+use-only XSS limitation no longer applies to that format. A nonextractable AES
+key prevents a plain stored-byte copy from including its wrapping secret; it
+does not protect against code running in the origin. Fresh paired-passkey
+presence and Burrow approval remain unchanged. Zeroing application buffers is
+best effort, not a claim about browser-internal or garbage-collected copies.
+
 **Why possession is proven by the handshake rather than by a signature.** The
 dead approach was an ECDSA P-256 device key signing a Burrow challenge in a
 separate, domain-separated construction, checked as one term of a decision that

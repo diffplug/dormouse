@@ -13,7 +13,7 @@ The trust model for remote control: three primitives between the Client
   access to no Burrow.
 * **Each Client pairs explicitly, one-to-one, with each Burrow** — the Burrow keeps
   its own local ACL of approved Clients, each identified by a per-Burrow X25519
-  static generated in the browser and stored non-extractably.
+  static generated in the browser; storage follows Client statics below.
 
 Account compromise is therefore insufficient for burrow access
 ([Security Guarantees](#security-guarantees)). `docs/specs/security-remote.md` -> "Remote Control"
@@ -89,18 +89,26 @@ Source of truth: `verifyPasskeyAssertion` / `hashPasskeyPublicKey` in
 A Client static is long-lived Client identity — the capability the Burrow actually
 authorizes.
 
-**One X25519 keypair per Burrow, generated at scan time** (rationale), persisted
-non-extractably in that Burrow's local record only after the Burrow approves, never
-shared between Burrows. The raw 32-byte public half, base64url, is the Client
+**Must generate one X25519 keypair per Burrow at scan time and persist it only
+after approval, never shared between Burrows.** (rationale) The raw 32-byte public
+half, base64url, is the Client
 identifier on the ACL; **Noise IK proves possession of the private half**
 (rationale).
 
-It is durable across restarts and non-extractable through normal browser APIs,
-but **active XSS can *use* it**, browser or OS compromise defeats the model, and
-clearing browser data destroys it ([Client static loss](#client-static-loss)).
+**Must prefer a directly persisted nonextractable private key.** Only a failed
+native storage probe may select AES-256-GCM-encrypted PKCS#8 with a per-key
+nonextractable AES key, after that format passes reopen and key agreement.
+**Must import recovered X25519 keys nonextractably, never persist plaintext
+private bytes, and leave existing native records unchanged.** (rationale)
 
-Source of truth: `generateNoiseKeyPair` in
-`remote-lib-common/src/security/noise.ts`; what Pocket stores is
+Active XSS can use either format and can extract the X25519 private bytes in
+the encrypted format. Nonextractability is therefore not a universal at-rest
+guarantee; browser/OS compromise defeats both formats. A stolen static still
+requires its paired passkey's fresh presence proof. Clearing browser data
+destroys either format ([Client static loss](#client-static-loss)).
+
+Source of truth: `generatePocketKeyPair` in
+`lib/src/remote/client/pocket-private-key.ts`; what Pocket stores is
 [pocket-app.md](./pocket-app.md).
 
 ## Burrow Authorization
@@ -602,9 +610,8 @@ Onboarding changes with security surface are staged in the
 ### Device verification
 
 Two properties of the shipped Pocket client are observable only on a real iOS
-device, and both are load-bearing: an X25519 `CryptoKey` surviving a structured
-clone into IndexedDB (a Client static that does not is one the phone loses on
-every reload), and `getUserMedia` working inside a Home Screen web app (without
+device, and both are load-bearing: the selected Client-static storage format
+surviving an app and phone restart, and `getUserMedia` working inside a Home Screen web app (without
 it the install has only the paste field).
 
 ### Revocation propagation

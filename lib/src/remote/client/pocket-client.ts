@@ -28,7 +28,6 @@ import {
   createNoiseInitiator,
   e2eConnectionPrologue,
   fromBase64Url,
-  generateNoiseKeyPair,
   hashPasskeyPublicKey,
   isConnectionOutcomeV1,
   isE2eRelayToClientFrame,
@@ -87,9 +86,11 @@ import {
 import {
   type KnownBurrowStore,
   type KnownBurrowV1,
+  type KnownBurrowSummary,
   type PendingDeletionStore,
 } from './pocket-db';
 import { DirectEndpoint } from '../direct/direct-endpoint';
+import { SCAN_LABEL } from '../setup-copy';
 import type { DirectPeerFactory } from '../direct/direct-peer';
 import { realTimer, type RemoteTimer, type RemoteWebSocket } from '../ws';
 
@@ -310,6 +311,12 @@ export const CONNECTION_DENIAL_MESSAGES: Record<ConnectionDenialCode, string> = 
  */
 export const BURROW_UNAVAILABLE_MESSAGE =
   'The computer did not answer. Check that it is awake and connected, then try again.';
+
+/** Fixed local-read recovery copy: browser errors can contain private details. */
+export const CONNECTION_RECORD_UNREADABLE_MESSAGE =
+  'This browser could not read the saved pairing record. '
+  + `Try again, or use ${SCAN_LABEL} to pair again with fresh approval. `
+  + 'Diagnostics: /diagnostics/index.html.';
 
 /** Where a pairing ended, as the UI reports it. */
 export type PairingResult =
@@ -584,8 +591,8 @@ export class PocketClient {
   // --- The pinned Burrows ----------------------------------------------------
 
   /** Every Burrow this browser holds a record for, paired or not. */
-  listKnownBurrows(): Promise<KnownBurrowV1[]> {
-    return this.#knownBurrows.list();
+  listKnownBurrows(): Promise<KnownBurrowSummary[]> {
+    return this.#knownBurrows.listSummaries();
   }
 
   /**
@@ -594,7 +601,7 @@ export class PocketClient {
    * push row nothing can name again.
    */
   async forgetBurrow(burrowId: string): Promise<void> {
-    const record = await this.#knownBurrows.get(burrowId);
+    const record = await this.#knownBurrows.getSummary(burrowId);
     if (record?.authorization.state === 'paired') {
       await this.#tombstone(burrowId, record.authorization.deliveryId);
     }
@@ -625,7 +632,7 @@ export class PocketClient {
    * capability for (`docs/specs/relay.md` → Web Push).
    */
   async listPushSubscribedBurrows(): Promise<string[]> {
-    const deliveryIds = (await this.#knownBurrows.list())
+    const deliveryIds = (await this.#knownBurrows.listSummaries())
       .flatMap((record) =>
         record.authorization.state === 'paired' ? [record.authorization.deliveryId] : [],
       )
@@ -650,7 +657,7 @@ export class PocketClient {
     burrowId: string,
     subscription: PushSubscriptionPayload,
   ): Promise<PushSubscribeResponse> {
-    const record = await this.#knownBurrows.get(burrowId);
+    const record = await this.#knownBurrows.getSummary(burrowId);
     if (record?.authorization.state !== 'paired') {
       throw new Error('this phone is not paired with that computer');
     }
@@ -761,7 +768,7 @@ export class PocketClient {
     const deadline = this.#now() + DEFAULT_PAIRING_TTL_MS;
     const { burrowId, inviteId } = invitation;
     const route = { kind: 'pairing', id: inviteId, burrowId } as const;
-    const clientStatic = await generateNoiseKeyPair();
+    const clientStatic = await this.#knownBurrows.generateKey(burrowId);
     const handshake = await createNoiseInitiator({
       prologue: pairingInvitationPrologue(invitation),
       staticKeyPair: clientStatic,
@@ -824,7 +831,7 @@ export class PocketClient {
     ) {
       return { ok: false, message: PAIRING_DENIAL_MESSAGES['burrow-error'] };
     }
-    const existing = await this.#knownBurrows.get(burrowId);
+    const existing = await this.#knownBurrows.getSummary(burrowId);
     if (existing && existing.burrowStaticPublicKey !== outcome.burrowStaticPublicKey) {
       // Terminal, and the old record is untouched — see BurrowIdentityMismatchError.
       throw new BurrowIdentityMismatchError();
@@ -867,7 +874,18 @@ export class PocketClient {
    */
   async connect(burrowId: string): Promise<ConnectResult> {
     await this.#ensureSocket();
-    const record = await this.#knownBurrows.get(burrowId);
+    let record: KnownBurrowV1 | null;
+    try {
+      record = await this.#knownBurrows.get(burrowId);
+    } catch {
+      // A local read failure is not an authenticated revocation. Preserve the
+      // pin and delivery capability, and never expose browser exception text.
+      return {
+        ok: false,
+        message: CONNECTION_RECORD_UNREADABLE_MESSAGE,
+        pairingRequired: false,
+      };
+    }
     if (!record) {
       return { ok: false, message: CONNECTION_DENIAL_MESSAGES['pairing-required'], pairingRequired: true };
     }

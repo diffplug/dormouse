@@ -1267,6 +1267,9 @@ describe('push registration by capability', () => {
     await seedRecord(harness.knownBurrows, 'h1');
     expect(harness.client.registeredPushEndpoint()).toBeNull();
 
+    // Push registration needs only metadata, even if the private key will not decode.
+    vi.spyOn(harness.knownBurrows, 'get').mockRejectedValue(new Error('unreadable private key'));
+
     await harness.client.subscribeToPush('h1', SUBSCRIPTION);
 
     const call = harness.calls.find((c) => c.url.endsWith('/api/push/subscribe'))!;

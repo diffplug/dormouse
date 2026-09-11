@@ -45,6 +45,7 @@ import {
 import { setNativeFieldValue } from '../../lib/dom';
 
 const fake = vi.hoisted(() => ({
+  keyStorage: vi.fn<() => Promise<void>>(),
   noiseSupported: true as boolean,
   /** The path callback `App` registered, so a case can report a cutover. */
   onTransportPath: null as
@@ -86,6 +87,11 @@ vi.mock('../client/push-subscribe', () => ({
   isInstalledWebApp: () => true,
   needsHomeScreenInstall: () => false,
   subscribeToPushInBrowser: () => Promise.reject(new Error('not under test')),
+}));
+
+vi.mock('../client/pocket-db', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../client/pocket-db')>()),
+  requirePocketKeyStorage: () => fake.keyStorage(),
 }));
 
 // Only `PocketClient` is doubled: the error classes and their messages are the
@@ -181,6 +187,7 @@ async function knownBurrow(burrowId: string, label = 'First laptop'): Promise<Kn
 const invitationUrl = () => sharedInvitationUrl(location.origin);
 
 beforeEach(() => {
+  fake.keyStorage.mockReset().mockResolvedValue(undefined);
   fake.noiseSupported = true;
   fake.hasPriorUse = false;
   fake.sessionToken = null;
@@ -266,6 +273,16 @@ describe('the capability gate', () => {
 });
 
 describe('a first run, from the scan to the terminal', () => {
+  it('stops failed key storage before registration, token retirement, or pairing', async () => {
+    fake.keyStorage.mockRejectedValue(new Error('Private key storage is unavailable'));
+    await boot();
+    await pasteCode((await invitationUrl()).url);
+    expect(alertText(container)).toContain('Private key storage is unavailable');
+    expect(fake.setup).not.toHaveBeenCalled();
+    expect(fake.signin).not.toHaveBeenCalled();
+    expect(fake.retireSetupToken).not.toHaveBeenCalled();
+    expect(fake.pair).not.toHaveBeenCalled();
+  });
   it('registers with the scanned token, pairs, shows the code, and connects', async () => {
     const { url, invitation } = await invitationUrl();
     let releasePair!: (result: PairingResult) => void;

@@ -389,6 +389,45 @@ Source of truth: `isInstalledWebApp` / `requiresInstallForPush` /
 
 ## What Pocket stores
 
+**Must have a successful current-page storage probe before a scan starts
+registration, sign-in, token retirement, or pairing.** Share in-flight work and
+cache successful selection only in memory for that page; never retain failures.
+Invalidate selection after production store or key-generation failure.
+Probe native storage first, then encrypted
+storage only if native fails, using fresh disposable keys in Pocket's record
+shape. Reopen and verify identical key agreement; reject missing or extractable
+runtime keys. Both formats failing shows a storage
+compatibility error without resetting pairing data. Attempt probe database
+deletion on exit. (rationale)
+**Must identify the failed probe stage and an allowlisted exception name;
+never display browser exception messages or key material.**
+**Must keep the separate-key experiment out of pairing preflight.** Direct
+compatibility failures to `/diagnostics/index.html`.
+
+**Must use metadata-only summaries for listing, push registration/queries,
+removal, and re-pair identity checks.** `getSummary` and `listSummaries` omit key
+material without decryption/import. Corrupt keys cannot block these operations;
+re-pairing requires fresh approval and preserves the Burrow pin. Connection
+and push decryption use full records.
+
+**Must report connection-record read failures with fixed retry/scan recovery
+text, never browser exception details or authorization changes.** A fresh scan
+retains the pin and requires approval; a read failure grants nothing.
+
+**Must use the selected format for new keys and decode both formats in the
+shared page/worker store.** The encrypted format stores AES-GCM ciphertext,
+a nonextractable per-key AES-256 key, a random 96-bit IV, and authenticated
+domain/Burrow/public-key context. Generate and encrypt before the ceremony,
+persist only after approval, and re-import X25519 nonextractably. Preserve its
+envelope across authorization rewrites; reject corruption without generating a
+replacement. Native records stay native. Older builds cannot read encrypted
+records; rollback requires returning to a compatible build or pairing again.
+
+Source of truth: `requirePocketKeyStorage` in `lib/src/remote/client/pocket-db.ts`;
+tests: `lib/src/remote/client/pocket-key-storage.test.ts`,
+`lib/src/remote/client/pocket-encrypted-storage.test.ts`,
+`lib/src/remote/pocket-app/App.scan.test.tsx`.
+
 **One module owns the IndexedDB name, its version, its upgrade, and every open**
 (rationale). `dormouse-pocket` is at **v4**: `known-burrows` (`KnownBurrowV1`, keyed
 by `burrowId`) and `pending-deletions` (`PendingDeliveryDeletionV1`, keyed
@@ -400,7 +439,7 @@ ordinary eviction-prone storage, which re-pairing survives
 ([remote-security-model.md](./remote-security-model.md) → Client static loss).
 
 **A `KnownBurrowV1` is this Client's whole authorization state** — the pinned Burrow
-static, the per-Burrow X25519 private half as a nonextractable `CryptoKey` beside
+static, the per-Burrow X25519 private half decoded to a nonextractable `CryptoKey` beside
 its raw public point, the paired passkey identifiers, and either
 `{ paired, deliveryId }` or `pairing-required`. **Only the private half is a key
 object**: a `NoiseKeyPair` wants the public half as raw bytes (rationale).
@@ -412,6 +451,35 @@ Source of truth: `lib/src/remote/client/pocket-db.ts`, `purgeLegacyPairedMarkers
 in `lib/src/remote/client/pocket-client.ts`.
 
 ## Serving the built bundle
+
+**Must serve the opt-in capability harness at `/diagnostics/index.html`, built
+from `lib/pocket/diagnostics/` as a second Pocket HTML entry.** Test fresh keys and isolated temporary
+storage, report stage failures and cleanup failures, and never read pairing
+data, request passkeys or media permissions, or upload results. API presence
+is observational; crypto storage success requires reopening and using the key.
+**Must use the production key codec for encrypted round-trip and restart tests,
+including authenticated context.** Diagnostics never open production databases.
+Keep primitive checks independently generated and database-isolated.
+**Must keep diagnostics platform-neutral and state which browser/app context
+was tested.** API presence alone never certifies Android, iOS, or desktop support.
+
+**Must retain a restart checkpoint only on explicit preparation, in a
+diagnostic-only database, until explicit cleanup.** Verification requires a new
+page instance and derives the saved expected result using the recovered key;
+never claim page reload proves process termination. The diagnostic manifest has
+its own identity and start URL. Reports omit key material. Pinned by
+`lib/src/remote/client/capability-harness.test.ts`.
+**Must identify harness v3 production-format reports and reject legacy restart
+checkpoints with explicit cleanup/reprepare instructions**, never silently
+reclassify experimental evidence. Preserve the v1 production envelope/context.
+
+Source of truth: `runCapabilities` in
+`lib/pocket/diagnostics/capabilities.js`; UI:
+`lib/pocket/diagnostics/page.js`; restart: `verifyRestart` in
+`lib/pocket/diagnostics/restart.js`; codec: `generatePocketKeyPair` /
+`loadPocketPrivateKey` in `lib/src/remote/client/pocket-private-key.ts`.
+Both built HTML shells are checked by `assertPocketShell` in
+`lib/scripts/assert-pocket-worker.mjs`.
 
 Content types need no special-casing: `serveStatic` already answers
 `application/manifest+json` for `.webmanifest` and `text/javascript` for `sw.js`.

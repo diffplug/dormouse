@@ -428,6 +428,9 @@ own `reason`. What survives is the runbook — prerequisites, what the installer
 does, the definition of done, the six checkpoints, official references,
 troubleshooting boundaries, and keeping the relay up while the laptop sleeps.
 
+**Must preserve published subsections and withhold removed subsections.**
+`website/scripts/generate-docs.test.js`.
+
 **Must** keep every withheld section present in `SELF_HOST.md`. `applyDelta`
 owns this: a rule matching nothing fails the build naming the rule, so a
 renamed section is a decision rather than a silent republication of what the
