@@ -542,8 +542,9 @@ below reads that record rather than inferring itself from the suppression map.
    "arrived before armed" class of bug (rationale). Rust answers
    `pty:requestInit` with **that arrival's ids and no others**; `pty:list` and
    each `pty:replay` echo the collector's token. The target resumes over them,
-   hydrates the notes, seeds each persisted TODO into its own `AlertManager`,
-   and mounts the Workspace at the drop index.
+   hydrates the notes and mounts the Workspace at the drop index.
+   **Must seed persisted alerts before requesting replay**, so the older state
+   cannot erase WATCHING rebuilt by replay (`standalone/src/workspace-move.test.ts`).
 4. **Target adopted** invokes `adopt_done(workspaceId)`. Rust retires the record,
    clears what is left of the suppression, and emits `workspace-departed` for
    **that Workspace alone** to its own source.
