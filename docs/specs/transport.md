@@ -304,6 +304,18 @@ prompt** (rationale).
 
 Source of truth: `getScrollbackReceived` / `getScrollbackSince` in `vscode-ext/src/pty-manager.ts`; the replay filter in `lib/src/lib/terminal-report-filter.ts`.
 
+## Port scan deadlines
+
+**Must budget port requests for both serial scans and an IPC margin per hop**:
+`2 × OPEN_PORT_TIMEOUT_MS + count × OPEN_PORT_TIMEOUT_PER_ID_MS + hops × OPEN_PORT_ROUND_TRIP_MARGIN_MS`.
+VS Code's child request uses one hop; its webview request uses two. Tauri's
+sidecar request uses one. Pinned by the port-deadline tests in
+`lib/src/lib/platform/vscode-adapter.test.ts`, `vscode-ext/test/pty-manager.test.ts`,
+and `lib/src/lib/mirrored-constants.test.ts`.
+
+Source of truth: `openPortRequestTimeoutMs` in `lib/src/lib/platform/types.ts`;
+`open_ports_many_timeout` in `standalone/src-tauri/src/lib.rs`.
+
 ## Auxiliary helper metadata
 
 **Must carry helper parent identity and captured autorun command in live PTY metadata**, validating that the parent is owned and is not itself a helper. Promotion clears that association without restarting the PTY. Reconnect restores helper entries before reconciling the primary layout, excluding them from ordinary orphan-pane recovery. A missing parent recovers its helper as an ordinary Pane. Recovered helpers conservatively disable automatic refresh.
