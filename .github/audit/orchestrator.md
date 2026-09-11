@@ -80,8 +80,8 @@ A single Bash call is capped at ten minutes, and a domain can legitimately take
 longer than that. Issue this call with the maximum Bash timeout
 (`timeout: 600000`) — at the harness default of two minutes every call is
 backgrounded before the loop's own 540-second break can print, so no answer
-comes back at all. **The loop's own last
-line is what you act on, and there are exactly two answers:**
+comes back at all. **What the call printed is what you act on, and there are
+exactly two decisions:**
 
 - `STILL WAITING` — the nine minutes elapsed and a fragment is still missing.
   Re-issue the block **verbatim**, including the `DEADLINE_FILE` lines: they

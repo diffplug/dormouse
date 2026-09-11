@@ -85,12 +85,19 @@ jobs:
           # and have the prompt instruct Claude to prefix `gh api`
           # calls with `GH_TOKEN=$AUDIT_PAT`.
           AUDIT_PAT: ${{ secrets.AUDIT_PAT }}
-          # The orchestrator's wait loop breaks itself at 540s so a capped
-          # call still prints `STILL WAITING`. At the harness default of two
-          # minutes the call is backgrounded first and prints nothing at all,
-          # leaving the orchestrator no line to act on — the run 34581574869
-          # failure. The prompt asks for `timeout: 600000` per call; this
-          # raises the default so forgetting it is harmless rather than fatal.
+          # Process-wide: this raises the cap on every Bash call in the
+          # session, the three domain subagents' as well as the
+          # orchestrator's. What it is for is the orchestrator's wait loop,
+          # which breaks itself at 540s so a capped call still prints
+          # `STILL WAITING`; at the two-minute default that call is
+          # backgrounded before the break can print, leaving no line to act
+          # on — the run 34581574869 failure. The prompt asks for
+          # `timeout: 600000` per call, and this makes forgetting it
+          # harmless rather than fatal. The wider scope is accepted, not
+          # incidental: a domain's own long commands (`application-security`
+          # re-runs vitest and the repo lints) stop being backgrounded
+          # mid-run, and the cost is that a subagent that blocks with no
+          # self-break loses ten minutes rather than two.
           BASH_DEFAULT_TIMEOUT_MS: "600000"
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
