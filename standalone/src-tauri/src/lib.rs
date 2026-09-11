@@ -1846,7 +1846,10 @@ async fn save_session(window: tauri::Window, state: String) -> Result<(), String
             return Ok(());
         }
     }
-    write_session_to(&sessions_dir(window.app_handle())?, window.label(), &state)
+    let _disk = guard(&ARRIVAL_DISK_LOCK);
+    let dir = sessions_dir(window.app_handle())?;
+    write_session_to(&dir, window.label(), &state)?;
+    retire_saved_arrivals(&dir)
 }
 
 /// The suffix `write_file_atomically` leaves on a session snapshot's temp
@@ -2489,9 +2492,42 @@ fn payload_terminal_ids(payload: &JsonValue) -> Vec<String> {
 // window that finds a snapshot boots as a restore (`bootFromTearOut`) and then
 // throws on adopting the same id, and a live target's own debounced flush
 // rewrites its file without anything it has not adopted yet. On the normal
-// path the record is gone before either window flushes, so the file is absent.
+// path the record retires after both windows flush their new membership.
 
 const ARRIVALS_FILE: &str = "arrivals.json";
+// Serializes journal updates with snapshot writes and retirement checks. Never
+// acquired while emitting events; helpers below do not acquire it recursively.
+static ARRIVAL_DISK_LOCK: Mutex<()> = Mutex::new(());
+
+/// An adopted arrival stays recoverable until BOTH snapshots reflect the move.
+fn retire_saved_arrivals(dir: &Path) -> Result<(), String> {
+    let records = read_arrivals_from(dir)?;
+    let mut keep = Vec::new();
+    for record in &records {
+        let durable = (|| -> Result<bool, String> {
+            if record.get("settled").and_then(JsonValue::as_bool) != Some(true) { return Ok(false); }
+            let Some(id) = record_workspace_id(record) else { return Ok(false); };
+            let Some(from) = record.get("from").and_then(JsonValue::as_str) else { return Ok(false); };
+            let Some(to) = record.get("to").and_then(JsonValue::as_str) else { return Ok(false); };
+            let target_has = read_snapshot_from(dir, to)?.is_some_and(|s| workspaces::snapshot_ids(&s).iter().any(|v| v == id));
+            let source_has = read_snapshot_from(dir, from)?.is_some_and(|s| workspaces::snapshot_ids(&s).iter().any(|v| v == id));
+            Ok(target_has && !source_has)
+        })();
+        if !matches!(durable, Ok(true)) { keep.push(record.clone()); }
+    }
+    if keep.len() != records.len() { write_arrivals_to(dir, &keep)?; }
+    Ok(())
+}
+
+fn mark_arrival_adopted_on_disk(dir: &Path, workspace_id: &str) -> Result<(), String> {
+    let _disk = guard(&ARRIVAL_DISK_LOCK);
+    let mut records = read_arrivals_from(dir)?;
+    for record in &mut records {
+        if record_workspace_id(record) == Some(workspace_id) { record["settled"] = JsonValue::Bool(true); }
+    }
+    write_arrivals_to(dir, &records)?;
+    retire_saved_arrivals(dir)
+}
 
 fn arrivals_path(dir: &Path) -> PathBuf {
     dir.join(ARRIVALS_FILE)
@@ -2524,6 +2560,7 @@ fn record_workspace_id(record: &JsonValue) -> Option<&str> {
 
 /// Append one arrival's record, replacing any earlier record of the same id.
 fn record_arrival_on_disk(dir: &Path, arrival: &routing::Arrival) -> Result<(), String> {
+    let _disk = guard(&ARRIVAL_DISK_LOCK);
     let Some(workspace) = arrival.payload.get("workspace") else {
         return Err("arrival payload carries no workspace".to_string());
     };
@@ -2543,6 +2580,7 @@ fn record_arrival_on_disk(dir: &Path, arrival: &routing::Arrival) -> Result<(), 
 /// again as soon as it clears the transferring mark. A no-op for an id that
 /// was never recorded.
 fn forget_arrival_on_disk(dir: &Path, workspace_id: &str) -> Result<(), String> {
+    let _disk = guard(&ARRIVAL_DISK_LOCK);
     let mut records = read_arrivals_from(dir)?;
     let before = records.len();
     records.retain(|record| record_workspace_id(record) != Some(workspace_id));
@@ -2599,9 +2637,10 @@ fn read_snapshot_from(dir: &Path, label: &str) -> Result<Option<JsonValue>, Stri
 /// out of the source's where that still names it (the source crashed before its
 /// own flush), so it restores once. A source emptied that way is removed like
 /// a closed window: its last Workspace left. The file goes last, so a crash
-/// mid-merge replays it; a record that cannot be merged, or a file that cannot
-/// be read, is logged and dropped rather than replayed on every launch.
+/// mid-merge replays it; a failed record stays for retry. An unreadable journal
+/// is logged and dropped because its entries cannot be recovered.
 fn restore_arrivals(dir: &Path) -> Result<(), String> {
+    let _disk = guard(&ARRIVAL_DISK_LOCK);
     let records = match read_arrivals_from(dir) {
         Ok(records) => records,
         Err(e) => {
@@ -2612,12 +2651,14 @@ fn restore_arrivals(dir: &Path) -> Result<(), String> {
     if records.is_empty() {
         return Ok(());
     }
+    let mut failed = Vec::new();
     for record in &records {
         if let Err(e) = restore_arrival(dir, record) {
-            append_log(format!("[window] dropping a record from {ARRIVALS_FILE}: {e}"));
+            append_log(format!("[window] retaining a record from {ARRIVALS_FILE}: {e}"));
+            failed.push(record.clone());
         }
     }
-    write_arrivals_to(dir, &[])
+    write_arrivals_to(dir, &failed)
 }
 
 /// One record of the boot merge above: into the target's snapshot, out of the
@@ -2635,23 +2676,28 @@ fn restore_arrival(dir: &Path, record: &JsonValue) -> Result<(), String> {
     append_log(format!(
         "[window] {id} was in flight from {from} to {to} at the last exit; restoring it in {to}"
     ));
-    let merged = snapshot_with_workspace(read_snapshot_from(dir, to)?, workspace)?;
+    // Read both before writing either. If trimming the source fails after the
+    // target write, restore its old bytes and retain the journal for retry.
+    let previous_target = read_snapshot_from(dir, to)?;
+    let source = read_snapshot_from(dir, from)?;
+    let merged = snapshot_with_workspace(previous_target.clone(), workspace)?;
     write_session_to(dir, to, &merged.to_string())?;
-    let Some(mut source) = read_snapshot_from(dir, from)? else {
-        return Ok(());
-    };
-    if !snapshot_without_workspace(&mut source, id) {
-        return Ok(());
+    let trim = (|| -> Result<(), String> {
+        let Some(mut source) = source else { return Ok(()); };
+        if !snapshot_without_workspace(&mut source, id) { return Ok(()); }
+        let emptied = source.get("workspaces").and_then(JsonValue::as_array).is_some_and(Vec::is_empty);
+        if emptied { remove_session_from(dir, from) }
+        else { write_session_to(dir, from, &source.to_string()) }
+    })();
+    if let Err(error) = trim {
+        let rollback = match previous_target {
+            Some(snapshot) => write_session_to(dir, to, &snapshot.to_string()),
+            None => std::fs::remove_file(dir.join(session_file_name(to))).map_err(|e| e.to_string()),
+        };
+        if let Err(e) = rollback { append_log(format!("[window] arrival rollback failed: {e}")); }
+        return Err(error);
     }
-    let emptied = source
-        .get("workspaces")
-        .and_then(JsonValue::as_array)
-        .is_some_and(Vec::is_empty);
-    if emptied {
-        remove_session_from(dir, from)
-    } else {
-        write_session_to(dir, from, &source.to_string())
-    }
+    Ok(())
 }
 
 /// The record one drop becomes.
@@ -3012,9 +3058,9 @@ fn adopt_done(
     )
     .ok_or_else(|| format!("no arrival of '{workspace_id}' into {}", window.label()))?;
     windows.clear_suppression(&arrival.terminal_ids);
-    // The target's own flush persists the Workspace from here (§Arrival queue).
+    // Keep the journal until source and target saves both reflect the move.
     if let Ok(dir) = sessions_dir(&app) {
-        if let Err(e) = forget_arrival_on_disk(&dir, &workspace_id) {
+        if let Err(e) = mark_arrival_adopted_on_disk(&dir, &workspace_id) {
             append_log(format!("[window] could not forget {workspace_id} on disk: {e}"));
         }
     }
@@ -4326,6 +4372,35 @@ mod tests {
             routing::restorable_labels(session_file_names(dir.path())),
             vec!["main", "ws-3"]
         );
+    }
+
+    #[test]
+    fn adoption_keeps_the_journal_until_both_snapshots_are_durable() {
+        let dir = TempDir::new("arrival-commit");
+        write_session_to(dir.path(), "main", &snapshot_json(&[("workspace-7", "Moved")], "workspace-7")).unwrap();
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace-7", "main", "ws-2")).unwrap();
+        super::mark_arrival_adopted_on_disk(dir.path(), "workspace-7").unwrap();
+        assert_eq!(read_arrivals_from(dir.path()).unwrap().len(), 1);
+        write_session_to(dir.path(), "ws-2", &snapshot_json(&[("workspace-7", "Moved")], "workspace-7")).unwrap();
+        super::retire_saved_arrivals(dir.path()).unwrap();
+        assert_eq!(read_arrivals_from(dir.path()).unwrap().len(), 1);
+        write_session_to(dir.path(), "main", &snapshot_json(&[], "workspace-1")).unwrap();
+        super::retire_saved_arrivals(dir.path()).unwrap();
+        assert!(!arrivals_path(dir.path()).exists());
+    }
+
+    #[test]
+    fn an_unreadable_source_retains_the_record_without_changing_the_target() {
+        let dir = TempDir::new("arrival-retry");
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace-7", "main", "ws-2")).unwrap();
+        write_session_to(dir.path(), "main", "broken json").unwrap();
+        restore_arrivals(dir.path()).unwrap();
+        assert!(read_session_from(dir.path(), "ws-2").unwrap().is_none());
+        assert_eq!(read_arrivals_from(dir.path()).unwrap().len(), 1);
+        write_session_to(dir.path(), "main", &snapshot_json(&[("workspace-7", "Moved")], "workspace-7")).unwrap();
+        restore_arrivals(dir.path()).unwrap();
+        assert!(!arrivals_path(dir.path()).exists());
+        assert_eq!(snapshot_ids(&read_snapshot(dir.path(), "ws-2").unwrap()), vec!["workspace-7"]);
     }
 
     #[test]
