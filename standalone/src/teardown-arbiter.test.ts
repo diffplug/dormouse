@@ -51,6 +51,7 @@ import { initWindowClose, _resetWindowCloseForTesting } from "./window-close";
 import { _resetTeardownArbiterForTesting } from "./teardown-flow";
 import {
   cancelQuit,
+  confirmQuit,
   getQuitConfirmIntent,
   getQuitConfirmPhase,
   openQuitConfirm,
@@ -219,6 +220,97 @@ describe("one window, two teardown flows", () => {
     expect(getQuitConfirmPhase()).toBe("open");
     expect(getQuitConfirmIntent().kind).toBe("quit");
     expect(count("quit_ack")).toBe(2);
+  });
+
+  /** A close committed with no dialog and parked inside its archive, with a quit
+   *  deferred to it and voted; then the archive fails, so the close retreats to
+   *  `archive-failed` — undecided again, with the deferred quit still standing. */
+  async function deferredQuitAgainstRetreatedClose(): Promise<void> {
+    mocks.countRunningSessions.mockReturnValue(0);
+    mocks.notepadSurfaceIds.mockReturnValue(["pane-a"]);
+    let failArchive = (_err: Error) => {};
+    mocks.archiveSurfaceNotes.mockReturnValueOnce(
+      new Promise<void>((_resolve, reject) => { failArchive = reject; }),
+    );
+    closeRequested();
+    await settle();
+    mocks.countRunningSessions.mockReturnValue(1);
+    quitRequested();
+    await settle();
+    expect(count("quit_vote")).toBe(1);
+    failArchive(new Error("the archive is locked"));
+    await settle();
+    expect(getQuitConfirmPhase()).toBe("archive-failed");
+  }
+
+  it("gates a quit re-driven through a retreated close exactly once", async () => {
+    await deferredQuitAgainstRetreatedClose();
+
+    // Cmd+Q again. The retreated close is undecided, so the quit abandons it —
+    // and the close's cancel re-drives the deferred quit from inside that call,
+    // opening the quit dialog before the second trigger's own `request`
+    // resumes. That outer request must not gate the intent a second time: the
+    // store refuses a second dialog by cancelling it, which is `quit_cancel`
+    // for the whole app under a "Quit Dormouse?" the user is looking at.
+    quitRequested();
+    await settle();
+    expect(count("window_close_cancel")).toBe(1);
+    expect(getQuitConfirmPhase()).toBe("open");
+    expect(getQuitConfirmIntent().kind).toBe("quit");
+    expect(commands()).not.toContain("quit_cancel");
+
+    // …and the one dialog carries the one vote.
+    confirmQuit();
+    await settle();
+    expect(count("quit_vote")).toBe(2);
+    expect(count("quit_cancel")).toBe(0);
+  });
+
+  it("archives and votes once for a re-driven quit that needs no dialog", async () => {
+    await deferredQuitAgainstRetreatedClose();
+    const archives = mocks.archiveSurfaceNotes.mock.calls.length;
+
+    // Nothing running now: the re-driven quit goes straight to its archive.
+    mocks.countRunningSessions.mockReturnValue(0);
+    quitRequested();
+    await settle();
+    expect(count("window_close_cancel")).toBe(1);
+    expect(mocks.archiveSurfaceNotes.mock.calls.length - archives).toBe(1);
+    // The deferred vote, then the re-driven one — never a third.
+    expect(count("quit_vote")).toBe(2);
+    expect(getQuitConfirmPhase()).toBeNull();
+  });
+
+  it("a quit cancelled elsewhere is not re-driven when the close it deferred to retreats", async () => {
+    mocks.countRunningSessions.mockReturnValue(0);
+    mocks.notepadSurfaceIds.mockReturnValue(["pane-a"]);
+    let failArchive = (_err: Error) => {};
+    mocks.archiveSurfaceNotes.mockReturnValueOnce(
+      new Promise<void>((_resolve, reject) => { failArchive = reject; }),
+    );
+    closeRequested();
+    await settle();
+    mocks.countRunningSessions.mockReturnValue(1);
+    quitRequested();
+    await settle();
+    expect(count("quit_vote")).toBe(1);
+
+    // Another window declined: Rust abandoned that quit, and this window's flow
+    // went back to idle — forgetting what it deferred, not only its own phase.
+    quitCancelled();
+    await settle();
+
+    // Later the close's archive fails and the user declines it. The close is
+    // off and the window stays; a "Quit Dormouse?" for the quit Rust abandoned
+    // would vote into an idle machine and hang on "Quitting…".
+    failArchive(new Error("the archive is locked"));
+    await settle();
+    expect(getQuitConfirmPhase()).toBe("archive-failed");
+    cancelQuit();
+    await settle();
+    expect(count("window_close_cancel")).toBe(1);
+    expect(getQuitConfirmPhase()).toBeNull();
+    expect(count("quit_ack")).toBe(1);
   });
 
   it("a refused dialog always settles its context", async () => {
