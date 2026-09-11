@@ -63,7 +63,7 @@ const oneNotedSurface = () => ["pane-a"];
 let quitRequested: (() => void) | null = null;
 
 // Drain the microtask-driven teardown chain (no real timers on the happy path —
-// withTimeout's 10s guard is cleared when the work wins).
+// withTimeout's ceiling guard is cleared when the work wins).
 const settle = () => new Promise((r) => setTimeout(r, 0));
 
 // A fake adapter whose teardown steps append their name to `order` so the call
@@ -105,6 +105,7 @@ describe("quit orchestrator", () => {
     mocks.invoke.mockResolvedValue(undefined);
     mocks.archiveSurfaceNotes.mockResolvedValue(undefined);
     mocks.notepadSurfaceIds.mockReturnValue([]);
+    mocks.flushWindowSession.mockResolvedValue(undefined);
   });
 
   afterEach(() => setQuitConfirmGate(null));
@@ -159,9 +160,9 @@ describe("quit orchestrator", () => {
 
   it("finishes the final save when every step takes its worst-case time", async () => {
     // The webview-observable worst case of each step: the two that reach the
-    // sidecar wait Rust's `timeout + 1500ms` round-trip margin on top of their own
-    // budget. A ceiling below the sum of these aborts exactly the last flush and
-    // the drain — the final save — so `drain` must still land before the exit.
+    // sidecar wait Rust's round-trip margin on top of their own budget. A
+    // ceiling below the sum of these aborts exactly the last steps — the final
+    // save — so `drain` must still land before the exit.
     vi.useFakeTimers();
     try {
       const order: string[] = [];
@@ -182,13 +183,40 @@ describe("quit orchestrator", () => {
         gracefulKill: slow("gracefulKill", 2000 + 1500),
         drain: slow("drain", 2000),
       });
+      mocks.flushWindowSession.mockImplementation(slow("flushWindow", 1000));
 
       initQuitFlow(adapter);
       quitRequested!();
       await vi.advanceTimersByTimeAsync(30_000);
 
+      expect(order).toContain("flushWindow");
       expect(order).toContain("drain");
       expect(order.indexOf("drain")).toBeLessThan(order.indexOf("quit_proceed"));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("bounds a wedged Window write so the drain behind it still runs", async () => {
+    // Both standalone writers are synchronous today, so this step never waits;
+    // but it is bounded on what the writer may return, not on what it happens
+    // to be — a writer that never settles must cost its own budget, not the
+    // ceiling's slack and then the drain.
+    vi.useFakeTimers();
+    try {
+      const order: string[] = [];
+      mocks.invoke.mockImplementation(async (cmd: string) => {
+        order.push(cmd);
+        return undefined;
+      });
+      mocks.flushWindowSession.mockReturnValue(new Promise<void>(() => {})); // never settles
+      const adapter = fakeAdapter(order);
+
+      initQuitFlow(adapter);
+      quitRequested!();
+      await vi.advanceTimersByTimeAsync(1000);
+
+      expect(order.slice(-2)).toEqual(["drain", "quit_proceed"]);
     } finally {
       vi.useRealTimers();
     }

@@ -81,8 +81,10 @@ struct QuitState {
 const QUIT_ACK_TIMEOUT_MS: u64 = 2_000;
 // Phase 3: per-phase budget once teardown is running. Each reported phase
 // (teardown, install) refreshes it, so it bounds a single stalled phase, not the
-// sum of all teardown work. Comfortably exceeds the webview's own 10 s teardown
-// ceiling (docs/specs/standalone.md §Quit flow).
+// sum of all teardown work. Comfortably exceeds the webview's own teardown
+// ceiling (docs/specs/standalone.md §Quit flow) — `QUIT_TEARDOWN_CEILING_MS` in
+// `standalone/src/quit.ts`, pinned under this by
+// `lib/src/lib/mirrored-constants.test.ts`.
 const QUIT_PHASE_TIMEOUT_MS: u64 = 14_000;
 const QUIT_POLL_STEP_MS: u64 = 500;
 
@@ -504,8 +506,10 @@ fn pty_get_open_ports(
 }
 
 // Wait for PTY exits and their final output before shutdown. Async: waits up to
-// `timeout + 1500ms` (margin for the round trip beyond the sidecar's own kill
-// timer) and must not block the main thread for that long.
+// `timeout` plus a margin for the round trip beyond the sidecar's own kill
+// timer, and must not block the main thread for that long. The margin here and
+// in `capture_agent_recovery` is `SIDECAR_ROUND_TRIP_MARGIN_MS` in
+// `standalone/src/quit.ts` — pinned by `lib/src/lib/mirrored-constants.test.ts`.
 #[tauri::command]
 async fn pty_graceful_kill_all(
     state: tauri::State<'_, SidecarState>,
@@ -541,7 +545,8 @@ fn capture_agent_recovery(
         &state,
         "pty:captureRecovery",
         serde_json::json!({ "ids": ids, "timeout": timeout }),
-        // Margin for the round trip beyond the sidecar's own ceiling.
+        // Margin for the round trip beyond the sidecar's own ceiling; the same
+        // one `pty_graceful_kill_all` adds (see its comment for the pin).
         Duration::from_millis(timeout + 1500),
     )?;
     Ok(())

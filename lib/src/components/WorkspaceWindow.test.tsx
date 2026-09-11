@@ -20,7 +20,7 @@ import { getActivitySnapshot, setTerminalActivity } from '../lib/terminal-regist
 import { getWallHandle, listWallHandles, resetWallHandles } from './wall/wall-handles';
 import { mountWallHarness, type WallHarness } from './wall/wall-test-utils';
 import { getWorkspaceSurfacesSnapshot, resetWorkspaceSurfaces } from '../lib/workspace-surfaces';
-import { previousWorkspaceSession, publishWorkspaceSession, resetWindowSessionAggregator } from '../lib/window-session-aggregator';
+import { previousWorkspaceSession, publishWorkspaceSession, resetWindowSessionAggregator, seedWindowSession } from '../lib/window-session-aggregator';
 import { resetWorkspaceUi } from '../lib/workspace-ui-store';
 import {
   closeWorkspace,
@@ -203,6 +203,33 @@ describe('WorkspaceWindow', () => {
     await act(async () => { await handle.closeAll('discard'); });
     await flush();
     expect(handle.surfaceIds()).toEqual([]);
+  });
+
+  it('keeps a dead PTY\'s retained cwd and alert across a restored Workspace\'s first save', async () => {
+    // The first save after a restore has nothing of its own to compare against:
+    // it must read the record boot seeded, or a pane whose PTY did not survive
+    // the relaunch (its probe answers null) loses the cwd and alert the last
+    // run persisted for it — exactly the values a cold restore spawns it from.
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    seedWindowSession({
+      version: 1,
+      workspaces: [{
+        id: first,
+        name: 'One',
+        session: {
+          version: 3,
+          doors: [],
+          panes: [{ id: 'pane-a', title: 'Pane A', cwd: '/retained', untouched: false, alert: { status: 'NOTHING_TO_SHOW', todo: true } }],
+        },
+      }],
+      activeWorkspaceId: first,
+    });
+    await render();
+
+    await act(async () => { await getWallHandle(first)!.flushPersistence(); });
+
+    const saved = previousWorkspaceSession(first)!.panes.find((pane) => pane.id === 'pane-a');
+    expect(saved).toMatchObject({ cwd: '/retained', alert: { status: 'NOTHING_TO_SHOW', todo: true } });
   });
 
   it('leaves no persisted record behind a closed Workspace', async () => {
