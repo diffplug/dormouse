@@ -38,12 +38,13 @@ pub enum Route<'a> {
     /// (the argument `docs/specs/vscode.md` -> "Peer surfaces across windows"
     /// makes for its own fan-out).
     Broadcast,
-    /// Nothing is delivered: the id is mid-transfer and its bytes are already in
-    /// the replay the new owner is about to receive, or no window owns it at all
-    /// and every window would otherwise ring for a pane none of them shows.
+    /// Nothing is delivered: the id is mid-transfer and what this carries is
+    /// already in the replay the new owner is about to receive (its bytes, or
+    /// the semantic events the owner re-derives from them), or no window owns it
+    /// at all and every window would otherwise ring for a pane none of them shows.
     Drop,
-    /// Kept for the id's next owner: the id is mid-transfer and, unlike its
-    /// bytes, this event is in no replay. The caller queues it and delivers
+    /// Kept for the id's next owner: the id is mid-transfer and this event is
+    /// in no replay and re-derived from none. The caller queues it and delivers
     /// the queue, in order, right after the replay that lifts the suppression.
     Hold,
     /// A `dor` request naming no Surface belongs to whichever window the user
@@ -106,9 +107,21 @@ pub fn route<'a>(event: &str, data: &'a JsonValue, view: &RouteView<'a>) -> Rout
             }
             owner(view.owners, id)
         }
-        // Derived once at the sidecar's parse site and carried by no replay, so
-        // a chunk's events outlive the chunk's drop.
-        "terminal:semanticEvents" | "terminal:protocolEvents" => {
+        // The replay is the raw bytes, OSCs included, and the target's replay
+        // path re-derives these from it — so a held copy would apply on top of
+        // what the replay rebuilt, and `commandStart` is not idempotent.
+        "terminal:semanticEvents" => {
+            let Some(id) = str_field(data, "id") else {
+                return Route::Broadcast;
+            };
+            if view.awaiting_replay.contains_key(id) {
+                return Route::Drop;
+            }
+            owner(view.owners, id)
+        }
+        // Derived once at the sidecar's parse site and rebuilt by no replay
+        // path, so a chunk's protocol events outlive the chunk's drop.
+        "terminal:protocolEvents" => {
             let Some(id) = str_field(data, "id") else {
                 return Route::Broadcast;
             };
@@ -327,7 +340,8 @@ pub type HeldEvent = (String, JsonValue);
 
 /// Queue an event for an id whose suppression is up. Bounded per id: a
 /// transfer lasts seconds, and an id that outruns the bound is one whose
-/// arrival is wedged, which the arrival watchdog hands back anyway.
+/// arrival is wedged, which the arrival watchdog hands back anyway. Past the
+/// bound the oldest goes, so a long gap delivers its suffix.
 pub fn hold_event(
     held: &mut HashMap<String, Vec<HeldEvent>>,
     id: &str,
@@ -344,8 +358,17 @@ pub fn hold_event(
 /// Cap on events held per id.
 pub const HELD_EVENTS_MAX: usize = 256;
 
-/// Everything held for `id`, in order, and nothing left behind.
-pub fn take_held(held: &mut HashMap<String, Vec<HeldEvent>>, id: &str) -> Vec<HeldEvent> {
+/// Lift `id`'s transfer suppression. The suppression and what was held under
+/// it go together — one site clearing the map and leaving the queue would
+/// deliver a stale gap ahead of the next transfer's own — so this is the one
+/// way out of both, and the caller decides whether the queue is delivered
+/// (behind the replay) or discarded (a hand-back, a reuse, an exit).
+pub fn lift_suppression(
+    awaiting_replay: &mut HashMap<String, Instant>,
+    held: &mut HashMap<String, Vec<HeldEvent>>,
+    id: &str,
+) -> Vec<HeldEvent> {
+    awaiting_replay.remove(id);
     held.remove(id).unwrap_or_default()
 }
 
@@ -596,24 +619,28 @@ mod tests {
 
     #[test]
     fn held_events_come_back_in_order_and_bounded() {
+        let mut awaiting = awaiting(&["a", "b", "c"]);
         let mut held = HashMap::new();
-        hold_event(&mut held, "a", "terminal:semanticEvents", json!({"n":1}));
+        hold_event(&mut held, "a", "terminal:protocolEvents", json!({"n":1}));
         hold_event(&mut held, "a", "terminal:protocolEvents", json!({"n":2}));
-        hold_event(&mut held, "b", "terminal:semanticEvents", json!({"n":3}));
+        hold_event(&mut held, "b", "terminal:protocolEvents", json!({"n":3}));
         assert_eq!(
-            take_held(&mut held, "a"),
+            lift_suppression(&mut awaiting, &mut held, "a"),
             vec![
-                ("terminal:semanticEvents".to_string(), json!({"n":1})),
+                ("terminal:protocolEvents".to_string(), json!({"n":1})),
                 ("terminal:protocolEvents".to_string(), json!({"n":2})),
             ]
         );
-        assert!(take_held(&mut held, "a").is_empty());
+        // Both halves went together, and nothing of "b" went with them.
+        assert!(!awaiting.contains_key("a"));
+        assert!(awaiting.contains_key("b"));
+        assert!(lift_suppression(&mut awaiting, &mut held, "a").is_empty());
         assert_eq!(held.len(), 1);
 
         for n in 0..(HELD_EVENTS_MAX + 5) {
-            hold_event(&mut held, "c", "terminal:semanticEvents", json!({"n":n}));
+            hold_event(&mut held, "c", "terminal:protocolEvents", json!({"n":n}));
         }
-        let queue = take_held(&mut held, "c");
+        let queue = lift_suppression(&mut awaiting, &mut held, "c");
         assert_eq!(queue.len(), HELD_EVENTS_MAX);
         assert_eq!(queue[0].1, json!({"n":5}));
     }
@@ -630,11 +657,13 @@ mod tests {
             dor_targets: &no_dor,
         };
         assert_eq!(route("pty:data", &json!({"id":"a"}), &suppressed), Route::Drop);
-        // A chunk's derived events are in no replay: held, not dropped.
+        // The target re-derives semantic events from the raw replay, so a held
+        // copy would apply twice: dropped with the bytes they describe.
         assert_eq!(
             route("terminal:semanticEvents", &json!({"id":"a"}), &suppressed),
-            Route::Hold
+            Route::Drop
         );
+        // Protocol events are rebuilt by no replay path: held, not dropped.
         assert_eq!(
             route("terminal:protocolEvents", &json!({"id":"a"}), &suppressed),
             Route::Hold

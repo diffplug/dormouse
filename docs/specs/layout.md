@@ -165,7 +165,7 @@ The union projection and its indicators are owned by `docs/specs/alert.md` → W
 
 Source of truth: `WorkspaceWindow` in `lib/src/components/WorkspaceWindow.tsx`; `registerWallHandle` in `lib/src/components/wall/wall-handles.ts`; `closeAll` in `lib/src/components/Wall.tsx`; `requestWorkspaceClose` in `lib/src/components/wall/workspace-lifecycle.ts`; `createWorkspace` / `closeWorkspace` / `renameWorkspace` / `moveWorkspace` / `setActiveWorkspace` in `lib/src/lib/workspace-store.ts`; `getWorkspaceUiSnapshot` in `lib/src/lib/workspace-ui-store.ts`; `setWorkspaceSurfaces` in `lib/src/lib/workspace-surfaces.ts`.
 
-**Create, rename, close, and switch have `dor` counterparts** (`docs/specs/dor-cli.md` → "dor workspace"); reorder, transfer, and tear-out are drag-only until `docs/specs/dor-cli.md` → Future "Cross-Window targeting" lands. Each takes the same route as the strip and the command-mode keys: a command close raises no confirmation, refusing instead, and closes its member Surfaces silently.
+**Create, rename, close, and switch have `dor` counterparts** (`docs/specs/dor-cli.md` → "dor workspace"); reorder is strip-only, and transfer and tear-out stay drag-only until `docs/specs/dor-cli.md` → Future "Cross-Window targeting" lands. Each takes the same route as the strip and the command-mode keys: a command close raises no confirmation, refusing instead, and closes its member Surfaces silently.
 
 ## Modes
 

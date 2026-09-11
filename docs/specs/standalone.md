@@ -339,7 +339,8 @@ Source of truth: `route` in `standalone/src-tauri/src/routing.rs`,
 | Sidecar event | Key | Goes to |
 |---|---|---|
 | `pty:data` | `data.id` | its owner; dropped while the id is mid-transfer, its bytes being in the replay |
-| `terminal:semanticEvents`, `terminal:protocolEvents` | `data.id` | its owner; **held** while the id is mid-transfer and delivered, in order, behind the replay (`held_events_come_back_in_order_and_bounded`) — no replay carries them |
+| `terminal:semanticEvents` | `data.id` | its owner; dropped while the id is mid-transfer — the target re-derives them from the raw replay, feeding both pane state and its `AlertManager` (rationale) |
+| `terminal:protocolEvents` | `data.id` | its owner; **held** while the id is mid-transfer and delivered, in order, behind the replay, which rebuilds none of them; at most `HELD_EVENTS_MAX` (256) per id, overflow dropping the oldest (`held_events_come_back_in_order_and_bounded`) |
 | `pty:exit`, `pty:replay` | `data.id` | its owner, never suppressed |
 | `pty:list` | `data.forWindow` | the window that asked |
 | `alert:*` carrying `data.id` | `data.id` | its owner |
@@ -552,6 +553,8 @@ below reads that record rather than inferring itself from the suppression map.
   source unsuppressed, drop the record, and emit `workspace-arrival-failed`; the
   source clears **transferring** and the Workspace is simply still there. With
   both ends gone the shells are reaped rather than left owned by a dead label.
+  **The gap is lost on a hand-back**: suppressed from the invoke with no replay
+  to follow, it is the one path nothing recovers.
 - **`planArrival` never throws into `bootstrap()`.** A refused sole arrival on
   the boot path renders a fresh one-pane Workspace, never a blank window.
 - **`take_arrivals` does not consume.** The record settles at `adopt_done`, so a
