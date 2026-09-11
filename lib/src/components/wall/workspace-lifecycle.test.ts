@@ -10,7 +10,7 @@ import {
   requestWorkspaceClose,
 } from './workspace-lifecycle';
 import { registerWallHandle, resetWallHandles, stubWallHandle, type WallHandle } from './wall-handles';
-import { resetWorkspaceUi, getWorkspaceUiSnapshot } from '../../lib/workspace-ui-store';
+import { getWorkspaceUiSnapshot, resetWorkspaceUi, setRenamingWorkspace } from '../../lib/workspace-ui-store';
 import {
   closeWorkspace,
   createWorkspace,
@@ -121,6 +121,18 @@ describe('closeWorkspaceWithSurfaces', () => {
     handleFor('ws-2', { closeAll: async () => null });
     expect(await closeWorkspaceWithSurfaces('ws-2')).toBeNull();
     expect(ids()).toEqual([first]);
+  });
+
+  it('drops the strip UI state with the Workspace, so a stranded rename cannot hold the keyboard lease', async () => {
+    createWorkspace({ id: 'ws-2' });
+    handleFor('ws-2', { closeAll: async () => null });
+    // The rename editor is open on the Workspace being closed: nothing unmounts
+    // it through `blur`, so the verb itself has to clear it.
+    setRenamingWorkspace('ws-2');
+
+    expect(await closeWorkspaceWithSurfaces('ws-2')).toBeNull();
+    expect(getWorkspaceUiSnapshot().renamingId).toBeNull();
+    expect(getWorkspaceUiSnapshot().pendingClose).toBeNull();
   });
 });
 

@@ -94,6 +94,12 @@ impl QuitMachine {
             next.insert(label.clone(), entry);
         }
         self.windows = next;
+        // Nothing left to ask. An `ExitRequested` raised after the last window
+        // was closed would otherwise park the machine in `Voting` with no
+        // window to vote and refuse every later exit.
+        if self.windows.is_empty() {
+            return (self.seq, self.exit());
+        }
         if !walking {
             self.phase = QuitPhase::Voting;
         }
@@ -288,10 +294,16 @@ impl CloseMachine {
         }
     }
 
-    /// The user declined, or the window is gone: forget the pending close so a
-    /// live watchdog stops speaking for it.
+    /// The user declined, or the window is gone: retire the pending close so a
+    /// live watchdog stops speaking for it. **The seq is bumped, never reused**
+    /// — removing the entry hands the next `request` for this label the same
+    /// token a sleeping watchdog still holds, which would then destroy the
+    /// window out from under its second dialog.
     pub fn clear(&mut self, label: &str) {
-        self.pending.remove(label);
+        if let Some(entry) = self.pending.get_mut(label) {
+            entry.seq += 1;
+            entry.acked = false;
+        }
     }
 
     /// Whether a watchdog spawned for `seq` still speaks for `label`'s close.
@@ -512,6 +524,21 @@ mod tests {
         assert!(walking.approved);
     }
 
+    /// The trigger itself found no window: `main` and `ws-2` were both closed
+    /// while the other's teardown ran, and the `ExitRequested` that followed
+    /// carries an empty label list. Parking in `Voting` here would leave nothing
+    /// able to vote, cancel or be forgotten, and every later exit refused.
+    #[test]
+    fn a_trigger_with_no_windows_exits_instead_of_parking_in_voting() {
+        let mut quit = QuitMachine::default();
+        let (seq, actions) = quit.request(&labels(&[]));
+        assert_eq!(seq, 1);
+        assert_eq!(actions, vec![QuitAction::Exit]);
+        assert_eq!(quit.phase, QuitPhase::Idle);
+        assert!(quit.approved);
+        assert!(quit.stale(seq), "nothing is left for a watchdog to bound");
+    }
+
     /// A session whose `main` was closed still walks every window and still ends
     /// on one of them — which one is unspecified, because only `main` ever holds
     /// a pending update to install (docs/specs/auto-update.md).
@@ -553,5 +580,22 @@ mod tests {
         assert!(!close.stale("ws-2", second));
         close.clear("ws-2");
         assert!(close.stale("ws-2", second));
+    }
+
+    /// Cancel, then X again while the first watchdog still sleeps: the second
+    /// close must not be handed the token the first watchdog holds, or its wake
+    /// would destroy the window 1.2 s into the user's second dialog.
+    #[test]
+    fn a_cleared_close_never_hands_its_seq_to_the_next_request() {
+        let mut close = CloseMachine::default();
+        let first = close.request("ws-2");
+        close.ack("ws-2");
+        close.clear("ws-2");
+        let second = close.request("ws-2");
+        assert_ne!(first, second);
+        assert!(close.stale("ws-2", first), "the cancelled close's watchdog stands down");
+        assert!(!close.stale("ws-2", second));
+        // The cleared ack does not carry over to the new close either.
+        assert!(!close.acked("ws-2"));
     }
 }

@@ -11,7 +11,7 @@ import { ensureResizeObserver } from './wall/wall-test-utils';
 import { requestWorkspaceClose, requestWorkspaceRename } from './wall/workspace-lifecycle';
 import { resetWorkspaceSurfaces, setWorkspaceSurfaces } from '../lib/workspace-surfaces';
 import { clearTerminalActivity, setTerminalActivity } from '../lib/terminal-registry';
-import { resetWorkspaceUi } from '../lib/workspace-ui-store';
+import { getWorkspaceUiSnapshot, resetWorkspaceUi } from '../lib/workspace-ui-store';
 import {
   createWorkspace,
   getActiveWorkspaceId,
@@ -277,5 +277,78 @@ describe('WorkspaceStrip', () => {
     stubHandle('ws-2', { closeAll: closed });
     await act(async () => { requestWorkspaceClose('ws-2'); });
     expect(closed).toHaveBeenCalled();
+  });
+
+  it('releases the rename lease when the tab being renamed is middle-clicked closed', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    stubHandle('ws-2', { closeAll: async () => null });
+    await render();
+
+    await act(async () => {
+      activateButton('ws-2').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    });
+    expect(chromeKeyboardHeld()).toBe(true);
+    // Removing the focused input fires no `blur`, so neither submit nor cancel
+    // runs: only the close verb can put `renamingId` back.
+    await act(async () => {
+      tabFor('ws-2').dispatchEvent(new MouseEvent('auxclick', { button: 1, bubbles: true, cancelable: true }));
+    });
+    await act(async () => { await Promise.resolve(); });
+    expect(getWorkspacesSnapshot().workspaces.map((workspace) => workspace.id)).toEqual([first]);
+    expect(getWorkspaceUiSnapshot().renamingId).toBeNull();
+    expect(chromeKeyboardHeld()).toBe(false);
+  });
+
+  it('never starts a reorder from a press inside the open rename editor', async () => {
+    createWorkspace({ id: 'ws-2' });
+    createWorkspace({ id: 'ws-3' });
+    await render();
+    const order = () => getWorkspacesSnapshot().workspaces.map((workspace) => workspace.id);
+    const first = order()[0];
+    const capture = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, 'setPointerCapture', { configurable: true, value: capture });
+    Object.defineProperty(HTMLElement.prototype, 'releasePointerCapture', { configurable: true, value: () => {} });
+    const boxes = new Map(order().map((id, index) => [id, { left: index * 100, width: 100 }]));
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const id = this.dataset.workspaceTab;
+      const box = id ? boxes.get(id) : undefined;
+      const left = box?.left ?? 0;
+      const width = box?.width ?? 300;
+      return { left, right: left + width, width, top: 0, bottom: 24, height: 24, x: left, y: 0, toJSON: () => ({}) } as DOMRect;
+    });
+
+    await act(async () => { requestWorkspaceRename(first); });
+    const input = container.querySelector<HTMLInputElement>(`[data-workspace-rename-for="${first}"]`)!;
+    // A drag-select across the editor's text, well past the reorder threshold.
+    await act(async () => { input.dispatchEvent(pointer('pointerdown', { button: 0, clientX: 50, clientY: 12 })); });
+    await act(async () => { window.dispatchEvent(pointer('pointermove', { clientX: 160, clientY: 12 })); });
+    await act(async () => { window.dispatchEvent(pointer('pointerup', { clientX: 160, clientY: 12 })); });
+    expect(order()).toEqual([first, 'ws-2', 'ws-3']);
+    expect(capture).not.toHaveBeenCalled();
+    expect(getWorkspaceUiSnapshot().renamingId).toBe(first);
+  });
+
+  it('keeps the close confirmation up through a bare Shift or Meta, as the pane kill does', async () => {
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    stubHandle('ws-2', { hasTouchedSurfaces: () => true, closeAll: async () => null });
+    await render();
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-workspace-tab-close="ws-2"]')!.click();
+    });
+    expect(container.querySelector('#kill-confirm-title')).not.toBeNull();
+
+    for (const key of ['Shift', 'Meta']) {
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+      });
+      expect(container.querySelector('#kill-confirm-title')).not.toBeNull();
+    }
+    // Any other key still answers.
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(container.querySelector('#kill-confirm-title')).toBeNull();
+    expect(getWorkspacesSnapshot().workspaces).toHaveLength(2);
   });
 });

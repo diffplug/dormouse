@@ -267,8 +267,9 @@ then the strip scrolls, with no overflow arrows.
 
 - **Never put `data-tauri-drag-region` on a tab or anything inside one.** Tauri
   matches that attribute on the event target alone, so a tab carrying it would
-  drag the window instead of activating, renaming, or reordering. Its wrapper —
-  the bar past the last tab — carries it, and is the draggable spacer.
+  drag the window instead of activating, renaming, or reordering. **A dedicated
+  spacer after the strip carries it, with a minimum width**, so the window stays
+  draggable at every tab count and the strip scrolls into what is left.
 - `onDragOutsideWindow` / `onDropOnOtherWindow` carry the drag past the strip's
   own edge (§Tear-out, and dragging between windows); the browser-dev harness
   supplies neither, because it has no windows.
@@ -382,7 +383,9 @@ the config) then each `ws-<n>` in numeric order, capped at
 `MAX_RESTORED_WINDOWS` (8) with the excess logged and left on disk. **An
 unreadable snapshot still opens its window** — the webview boots fresh, which is
 a window the user can use rather than one they lost. **`main` is focused last**,
-so it comes up in front.
+so it comes up in front. **A session naming no `main` relaunches with a fresh,
+empty `main`** — the config creates it unconditionally — focused last, in front
+of the restored `ws-*` windows.
 
 **Geometry is a sibling of the snapshot**, `sessions/<label>.geometry.json`,
 written through the same `write_file_atomically` and debounced past the flood a
@@ -434,6 +437,10 @@ anyway if that listener is dead), asks about *its own* running work, archives
   and temp sibling included — and the next launch does not reopen the window.
   A quit keeps every blob, which is the whole difference.
 - **It runs no agent-recovery capture**: nothing is coming back.
+- **A cancelled close retires its watchdog's token and never reuses it**: the
+  next close on that window is a fresh seq, so a watchdog still sleeping on the
+  cancelled one cannot destroy the window under the second dialog
+  (`a_cleared_close_never_hands_its_seq_to_the_next_request`).
 - **It confirms on a pending download as well as on running work.** An approved,
   downloaded update lives in this webview's memory, so closing the window throws
   it away and nothing else can install it (`docs/specs/auto-update.md`).
@@ -465,7 +472,11 @@ parks its own flow and leaves its host waiting out a decision that cannot come.
 **A committed flow that retreats and is then cancelled re-drives the quit it
 took the vote for.** `archive-failed` is a committed close asking a human about
 notes it could not store, and declining there leaves the window standing with the
-quit's own question never asked.
+quit's own question never asked. **The re-drive gates the intent once**: it
+re-enters the quit's `request` from inside the close's cancel, and the trigger
+that caused it returns without gating again. **A quit cancelled elsewhere
+forgets what it deferred**, so a later retreat cannot re-open a quit Rust has
+abandoned.
 
 **A quit cancelled elsewhere drops only a quit's dialog**, never this window's
 own close question. The confirm store cancels any context it cannot open, as the
@@ -541,10 +552,17 @@ below reads that record rather than inferring itself from the suppression map.
 - **Nothing is released before the target has adopted it.** The target can refuse
   the arrival or close before taking it, and a Workspace released at the invoke
   had no Sessions and no window that owned them.
-- **A transferring Workspace is in no snapshot its source writes**, and its
-  source kills nothing of it — its shells already belong to the target
-  (`pty_graceful_kill` is scoped by ownership). A quit or a close in the gap
-  would otherwise persist the same Workspace in two windows.
+- **A transferring Workspace is in no snapshot its source writes, and neither
+  end's teardown kills or interrupts its shells.** They belong to the target by
+  ownership from the invoke, and the target's `pty_graceful_kill` and
+  `capture_agent_recovery` exclude every id an arrival claims (`boot_list_ids`),
+  since the source is still showing them. A quit or a close in the gap would
+  otherwise persist the same Workspace in two windows, or kill it under the
+  source.
+- **A refused `adopt_done` unwinds the mount.** The `ARRIVAL_MAX` watchdog has
+  already handed the shells back and the source kept the Workspace, so the
+  target releases its Sessions (never kills them), drops the notes, and closes
+  the Workspace rather than leaving it live and persisted in two windows.
 - **A refused arrival hands the shells back.** The target's `adopt_failed`
   (a `planArrival` timeout, a missing list, a mount error) and a target
   `Destroyed` with the arrival still queued both return `terminalIds` to the
@@ -802,11 +820,16 @@ teardown at a time. Source of truth: `QuitMachine` in
 - **A cancel is refused once the walk starts**: the first window is already gone.
 - **A window that leaves outside the flow is forgotten**, so its vote is never
   waited on and the walk advances past it. **A flow that runs out of windows
-  exits** rather than leaving a process with none.
+  exits** rather than leaving a process with none, and so does a trigger that
+  finds none: parked in `Voting` it would have no window to vote and refuse
+  every later exit.
 - **A quit keeps every window's snapshot on disk** — that is what a relaunch
   restores from, and the whole difference from a per-window close. **A Workspace
-  transferring out is in no window's snapshot and is killed by neither end**
-  (§Arrival queue), so a quit mid-transfer restores it exactly once.
+  in transfer is in no snapshot until its target publishes it, and neither end's
+  teardown kills its shells** (§Arrival queue). A quit mid-transfer restores it
+  at most once: from the target once it has published it, or from a source
+  handed it back because the target was destroyed first; a source torn down
+  before its target adopts leaves it in no snapshot.
 
 ### Trigger interception
 
@@ -906,7 +929,8 @@ bounded** so a stall cannot wedge quit, and the whole is wrapped in a ceiling
 **derived from the sum of those bounds, never a literal** — one below the sum
 aborts the final save of a slow teardown instead of guarding a wedged one. The two
 steps that reach the sidecar cost their own budget *plus* Rust's round-trip margin,
-so both terms count (`QUIT_TEARDOWN_CEILING_MS` in `standalone/src/quit.ts`). The notepad
+so both terms count (`QUIT_TEARDOWN_CEILING_MS` in `standalone/src/quit.ts`; pinned by
+`lib/src/lib/mirrored-constants.test.ts`). The notepad
 archive is **not** a step here: it runs ahead of `quit_progress` precisely because
 teardown's rule below holds — no failing step prevents exit — and archiving must be
 able to stop the quit (`docs/specs/notepad.md` -> "Standalone quit"):
@@ -925,7 +949,8 @@ able to stop the quit (`docs/specs/notepad.md` -> "Standalone quit"):
    (`docs/specs/transport.md` → "Persisted session types").
 5. `flushWindowSession` — the Workspaces' records become one Window blob
    (`docs/specs/transport.md` → "Persisted session types"); a debounce timer still
-   pending at exit would otherwise lose the final save.
+   pending at exit would otherwise lose the final save. **Bounded like the rest,
+   its term in the ceiling**, though both writers are synchronous today.
 6. `drainSessionSaves` — await the store pipeline becoming idle or its timeout
    (§Persistence).
 7. **In the last window only**, if an update is pending, a fresh `quit_progress`

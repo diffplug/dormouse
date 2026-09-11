@@ -79,17 +79,23 @@ const SIDECAR_ROUND_TRIP_MARGIN_MS = 1500;
 const PRE_KILL_FLUSH_MS = 1500;
 const GRACEFUL_KILL_MS = 2000;
 const POST_KILL_FLUSH_MS = 1500;
+// The Window write is synchronous on both standalone adapters today, but the
+// step is bounded on what the writer may return, not on what it happens to be.
+const WINDOW_WRITE_MS = 1000;
 const DRAIN_MS = 2000;
 const STEP_BUDGET_TOTAL_MS =
   (DEFAULT_RECOVERY_WAIT_MS + SIDECAR_ROUND_TRIP_MARGIN_MS) +
   PRE_KILL_FLUSH_MS +
   (GRACEFUL_KILL_MS + SIDECAR_ROUND_TRIP_MARGIN_MS) +
   POST_KILL_FLUSH_MS +
+  WINDOW_WRITE_MS +
   DRAIN_MS;
 /** Belt-and-suspenders over the summed step budgets, with slack for scheduling.
- *  Stays under Rust's `QUIT_PHASE_TIMEOUT_MS` (14 000 ms), which is what actually
- *  forces the exit. Exported for the test that pins it above the sum. */
-export const QUIT_TEARDOWN_CEILING_MS = STEP_BUDGET_TOTAL_MS + 1000;
+ *  Stays under Rust's `QUIT_PHASE_TIMEOUT_MS`, which is what actually forces the
+ *  exit; `lib/src/lib/mirrored-constants.test.ts` reads this derivation out of
+ *  the source and pins it under the Rust constant, and pins the margin above to
+ *  the two Rust call sites that add it. */
+const QUIT_TEARDOWN_CEILING_MS = STEP_BUDGET_TOTAL_MS + 1000;
 
 // Ordering and rationale: docs/specs/standalone.md §Quit flow (Teardown
 // ordering). `quit_progress` marks each phase boundary so Rust's watchdog gives
@@ -116,18 +122,24 @@ async function runQuitTeardown(last: boolean): Promise<void> {
           // Final post-exit save. Nothing left to probe a cwd from, and each pane
           // keeps the one the save above recorded.
           await adapter.requestSessionFlush(POST_KILL_FLUSH_MS, { probeCwd: false });
-          await flushWindowSession(); // the Walls' records become one Window blob
+          // The Walls' records become one Window blob. Bounded like the rest, so
+          // a writer that stalls cannot eat the drain's budget behind it.
+          await withTimeout(
+            flushWindowSession(),
+            WINDOW_WRITE_MS,
+            `[quit] Window write exceeded ${WINDOW_WRITE_MS}ms; proceeding to drain`,
+          );
           await adapter.drainSessionSaves(DRAIN_MS); // last write reaches disk
         })(),
         QUIT_TEARDOWN_CEILING_MS,
         `[quit] teardown exceeded ${QUIT_TEARDOWN_CEILING_MS}ms; proceeding to exit`,
       );
     }
-    // Install strictly after the completed final save, and only in the window
-    // the walk tears down last — `main` while it is open, else the most recently
-    // focused one, which is why every window holds `updater:*`
-    // (docs/specs/auto-update.md). A fresh `quit_progress` gives install its own
-    // watchdog budget instead of the teardown remainder.
+    // Install strictly after the completed final save, and only in `main` —
+    // the window the walk tears down last, and the only one holding `updater:*`
+    // (`capabilities/main-only.json`; docs/specs/auto-update.md). A fresh
+    // `quit_progress` gives install its own watchdog budget instead of the
+    // teardown remainder.
     if (last && hasPendingUpdate()) {
       void invoke("quit_progress").catch(() => {}); // install phase begins
       await installPendingUpdate();

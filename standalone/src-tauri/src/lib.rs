@@ -232,7 +232,9 @@ impl WindowState {
         order.insert(0, label.to_string());
     }
 
-    /// Window labels, most recently focused first, for the quit walk's order.
+    /// The most recently focused window: where a sidecar event naming no window
+    /// is delivered (`Route::Focused`). The quit walk never reads focus — its
+    /// order is `quit_order`, `main` last and the rest unordered.
     fn focused(&self) -> Option<String> {
         guard(&self.focus_order).first().cloned()
     }
@@ -439,10 +441,12 @@ struct QuitState {
 
 // Phase 1: no ack within this window ⇒ a webview listener is dead — exit.
 const QUIT_ACK_TIMEOUT_MS: u64 = 2_000;
-// Phase 3: per-phase budget once a window's teardown is running. Each reported
-// phase (teardown, install) refreshes it, so it bounds a single stalled phase,
-// not the sum of all teardown work. Comfortably exceeds the webview's own 10 s
-// teardown ceiling (docs/specs/standalone.md §Quit flow).
+// Phase 3: per-phase budget once teardown is running. Each reported phase
+// (teardown, install) refreshes it, so it bounds a single stalled phase, not the
+// sum of all teardown work. Comfortably exceeds the webview's own teardown
+// ceiling (docs/specs/standalone.md §Quit flow) — `QUIT_TEARDOWN_CEILING_MS` in
+// `standalone/src/quit.ts`, pinned under this by
+// `lib/src/lib/mirrored-constants.test.ts`.
 const QUIT_PHASE_TIMEOUT_MS: u64 = 14_000;
 const QUIT_POLL_STEP_MS: u64 = 500;
 // A per-window close whose webview never acks: its listener is dead, so close it.
@@ -1116,9 +1120,11 @@ fn pty_get_open_ports_many(
         .unwrap_or_else(|| JsonValue::Object(JsonMap::new())))
 }
 
-// Wait for PTY exits and their final output before this window goes away.
-// Async: waits up to `timeout + 1500ms` (margin for the round trip beyond the
-// sidecar's own kill timer) and must not block the main thread for that long.
+// Wait for PTY exits and their final output before shutdown. Async: waits up to
+// `timeout` plus a margin for the round trip beyond the sidecar's own kill
+// timer, and must not block the main thread for that long. The margin here and
+// in `capture_agent_recovery` is `SIDECAR_ROUND_TRIP_MARGIN_MS` in
+// `standalone/src/quit.ts` — pinned by `lib/src/lib/mirrored-constants.test.ts`.
 //
 // **The target set is the caller's own PTYs**, and only those: a window tearing
 // down must never kill a sibling's terminals.
@@ -1129,10 +1135,18 @@ async fn pty_graceful_kill(
     windows: tauri::State<'_, WindowState>,
     timeout: u64,
 ) -> Result<(), String> {
+    // Minus every id an arrival claims: ownership moves at the source's invoke,
+    // so those shells are still shown by the window that sent them
+    // (`pty_request_init` filters the same set). Bound here so the arrivals
+    // guard is released before the blocking round trip below.
+    let ids = routing::boot_list_ids(
+        windows.owned_by(window.label()),
+        &guard(&windows.arrivals),
+    );
     request_from_sidecar_timeout(
         &state,
         "pty:gracefulKill",
-        serde_json::json!({ "ids": windows.owned_by(window.label()), "timeout": timeout }),
+        serde_json::json!({ "ids": ids, "timeout": timeout }),
         Duration::from_millis(timeout + 1500),
     )?;
     Ok(())
@@ -1158,12 +1172,19 @@ fn capture_agent_recovery(
 ) -> Result<(), String> {
     // This window's own PTYs, and only those: a quit walks the windows one at a
     // time, and interrupting a sibling's agents would destroy the very hint the
-    // sibling is about to capture.
+    // sibling is about to capture. An arriving Workspace's shells are the
+    // source's until it adopts them, and Ctrl-C there would hit agents the
+    // source is still showing (`pty_graceful_kill` filters the same set).
+    let ids = routing::boot_list_ids(
+        windows.owned_by(window.label()),
+        &guard(&windows.arrivals),
+    );
     request_from_sidecar_timeout(
         &state,
         "pty:captureRecovery",
-        serde_json::json!({ "ids": windows.owned_by(window.label()), "timeout": timeout }),
-        // Margin for the round trip beyond the sidecar's own ceiling.
+        serde_json::json!({ "ids": ids, "timeout": timeout }),
+        // Margin for the round trip beyond the sidecar's own ceiling; the same
+        // one `pty_graceful_kill` adds (see its comment for the pin).
         Duration::from_millis(timeout + 1500),
     )?;
     Ok(())
@@ -1948,12 +1969,14 @@ fn seed_geometry(app: &AppHandle, label: &str) {
     let (Ok(position), Ok(size)) = (window.outer_position(), window.outer_size()) else {
         return;
     };
+    // Every platform read before the lock (`GeometryState`).
+    let scale = window.scale_factor().unwrap_or(1.0);
     guard(&state.rects).insert(
         label.to_string(),
         CachedRect {
             origin: (position.x, position.y),
             size: (size.width, size.height),
-            scale: window.scale_factor().unwrap_or(1.0),
+            scale,
         },
     );
 }
@@ -2690,13 +2713,19 @@ fn window_at_cursor(
     geometry: tauri::State<'_, GeometryState>,
 ) -> Option<routing::CursorHit> {
     let point = app.cursor_position().ok()?;
-    let rects: Vec<routing::WindowRect> = guard(&geometry.rects)
+    // Copied out first: the visibility queries below reach the platform, and
+    // nothing may ask it anything while `rects` is held (`GeometryState`).
+    let cached: Vec<(String, CachedRect)> = guard(&geometry.rects)
         .iter()
+        .map(|(label, rect)| (label.clone(), *rect))
+        .collect();
+    let rects: Vec<routing::WindowRect> = cached
+        .into_iter()
         .filter_map(|(label, rect)| {
-            let window = app.get_webview_window(label)?;
+            let window = app.get_webview_window(&label)?;
             let hittable =
                 window.is_visible().unwrap_or(true) && !window.is_minimized().unwrap_or(false);
-            Some(rect.hit_rect(label, hittable))
+            Some(rect.hit_rect(&label, hittable))
         })
         .collect();
     let focus_order = guard(&windows.focus_order).clone();
