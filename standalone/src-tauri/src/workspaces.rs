@@ -34,15 +34,14 @@ pub struct Registry {
 }
 
 /// The counter's suffix of a `workspace-<n>` id, if it has one. Ids minted
-/// elsewhere (a bare Wall's `workspace-1`, a pre-registry random id) carry no
-/// stable ref and are addressed by name or position instead.
+/// elsewhere retain their opaque id as a stable ref.
 pub fn ref_number(id: &str) -> Option<u64> {
     id.strip_prefix("workspace-")?.parse().ok()
 }
 
 /// The stable `dor` ref of an id, when it has one.
 pub fn ref_for(id: &str) -> Option<String> {
-    ref_number(id).map(|n| format!("workspace:{n}"))
+    Some(ref_number(id).map_or_else(|| format!("workspace:{id}"), |n| format!("workspace:{n}")))
 }
 
 /// The next counter value, above every id given. Never below 2: `workspace-1`
@@ -125,6 +124,12 @@ pub fn window_of<'a>(registry: &'a Registry, target: &str) -> Option<&'a str> {
                 .then_some(label.as_str())
         }),
         Target::Name(name) => {
+            // Canonical opaque ids win over mutable names in every window.
+            if let Some((label, _)) = registry.windows.iter().find(|(_, entries)| {
+                entries.iter().any(|entry| entry.id == name)
+            }) {
+                return Some(label.as_str());
+            }
             let mut holders = registry.windows.iter().filter_map(|(label, entries)| {
                 entries
                     .iter()
@@ -171,8 +176,8 @@ mod tests {
     #[test]
     fn refs_come_from_the_id_and_never_from_position() {
         assert_eq!(ref_for("workspace-7"), Some("workspace:7".to_string()));
-        assert_eq!(ref_for("workspace-abc12345-3"), None);
-        assert_eq!(ref_for("workspace-"), None);
+        assert_eq!(ref_for("workspace-abc12345-3"), Some("workspace:workspace-abc12345-3".to_string()));
+        assert_eq!(ref_for("workspace-"), Some("workspace:workspace-".to_string()));
     }
 
     #[test]
@@ -224,6 +229,16 @@ mod tests {
         assert_eq!(window_of(&registry, "Build"), None);
         assert_eq!(window_of(&registry, "workspace:9"), None);
         assert_eq!(window_of(&registry, "nope"), None);
+    }
+
+    #[test]
+    fn legacy_ids_never_route_as_positions_or_conflicting_names() {
+        let mut registry = Registry::default();
+        report(&mut registry, "main", vec![entry("ws-a", "2", true), entry("ws-b", "2", false)]);
+        report(&mut registry, "ws-2", vec![entry("workspace-2", "ws-b", true)]);
+        assert_eq!(window_of(&registry, "workspace:ws-b"), Some("main"));
+        assert_eq!(window_of(&registry, "workspace:2"), Some("ws-2"));
+        assert_eq!(window_of(&registry, &ref_for("ws-a").unwrap()), Some("main"));
     }
 
     #[test]

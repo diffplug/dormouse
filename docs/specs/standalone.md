@@ -340,15 +340,13 @@ its list on every change, coalesced per microtask, and the union is broadcast as
 `dormouse://workspaces` with a monotonic `revision`; a webview drops a snapshot
 behind the one it holds.
 
-- **Ids are minted only in Rust**, `workspace-<n>` off one counter, handed to a
+- **Must mint numbered ids only in Rust**, `workspace-<n>` off one counter, handed to a
   webview in blocks (`workspace_reserve_ids`) so a create mints synchronously.
   The ref `workspace:<n>` is the id's number, so it never renumbers and never
   collides across windows; an unused reservation is a gap, nothing more.
-- **A webview with a pool installed never mints a random id**: an empty pool
-  fails the create, naming the reservation still in flight or the one that
-  failed (logged, never swallowed), since a random id beside minted ones would
-  take a ref no reading agrees with. The block (32) and its low-water mark (8)
-  keep that failure unreachable in practice.
+- **Must allow boot and creation when reservation fails**, using opaque UUID
+  ids until the pool recovers; log the failure. Canonical refs follow
+  `docs/specs/dor-cli.md` → "Handle Model" (`workspace-store.test.ts`).
 - **The counter is seeded above every id any snapshot on disk names**, and
   above every id a window reports, so a fresh id never meets a restored one.
   Never below 2: `workspace-1` is a bare Wall's only Workspace.
