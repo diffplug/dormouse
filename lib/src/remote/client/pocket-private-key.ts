@@ -1,5 +1,7 @@
 import { toBase64Url } from 'remote-lib-common';
 
+const encoder = new TextEncoder();
+
 export type PocketKeyStorageMode = 'native' | 'encrypted';
 interface EncryptedPrivateKey {
   readonly format: 'aes-gcm-x25519-v1';
@@ -19,14 +21,19 @@ const contextFor = (burrowId: string, publicKeyRaw: string) =>
 export async function generatePocketKeyPair(mode: PocketKeyStorageMode, burrowId: string): Promise<CryptoKeyPair> {
   const pair = await crypto.subtle.generateKey('X25519', mode === 'encrypted', ['deriveBits']);
   if (mode === 'native') return pair;
-  const publicKeyRaw = toBase64Url(new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey)));
+  // None of the three depends on another, and a phone pays for each round trip.
+  const [publicRaw, wrappingKey, pkcs8] = await Promise.all([
+    crypto.subtle.exportKey('raw', pair.publicKey),
+    crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']),
+    crypto.subtle.exportKey('pkcs8', pair.privateKey),
+  ]);
+  const publicKeyRaw = toBase64Url(new Uint8Array(publicRaw));
   const context = contextFor(burrowId, publicKeyRaw);
-  const wrappingKey = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const clear = new Uint8Array(await crypto.subtle.exportKey('pkcs8', pair.privateKey));
+  const clear = new Uint8Array(pkcs8);
   try {
     const ciphertext = await crypto.subtle.encrypt({
-      name: 'AES-GCM', iv, additionalData: new TextEncoder().encode(context),
+      name: 'AES-GCM', iv, additionalData: encoder.encode(context),
     }, wrappingKey, clear);
     const privateKey = await crypto.subtle.importKey('pkcs8', clear, 'X25519', false, ['deriveBits']);
     envelopes.set(privateKey, { format: 'aes-gcm-x25519-v1', wrappingKey, iv, ciphertext, context });
@@ -65,7 +72,7 @@ export async function loadPocketPrivateKey(
     throw new Error('Invalid encrypted Pocket private key');
   }
   const clear = new Uint8Array(await crypto.subtle.decrypt({
-    name: 'AES-GCM', iv: stored.iv, additionalData: new TextEncoder().encode(stored.context),
+    name: 'AES-GCM', iv: stored.iv, additionalData: encoder.encode(stored.context),
   }, stored.wrappingKey, stored.ciphertext));
   try {
     const key = await crypto.subtle.importKey('pkcs8', clear, 'X25519', false, ['deriveBits']);

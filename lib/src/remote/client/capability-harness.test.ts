@@ -3,7 +3,7 @@ import { IDBFactory, IDBObjectStore } from 'fake-indexeddb';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 // Public diagnostic module is intentionally standalone and browser-native.
 // @ts-ignore JavaScript artifact has no separate type declaration.
-import { runCapabilities } from '../../../pocket/public/diagnostics/capabilities.js';
+import { commit, request, runCapabilities } from '../../../pocket/public/diagnostics/capabilities.js';
 
 beforeEach(() => {
   vi.stubGlobal('crypto', webcrypto);
@@ -46,22 +46,13 @@ it('fails closed when a retained checkpoint ciphertext is corrupted', async () =
   vi.resetModules();
   const first = await restartModule();
   await first.prepareRestart();
-  const db = await new Promise<IDBDatabase>((resolve, reject) => {
-    const req = indexedDB.open('dormouse-capability-probe-restart-v1');
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction('inline', 'readwrite');
-    const store = tx.objectStore('inline');
-    const req = store.get('test');
-    req.onsuccess = () => {
-      const saved = req.result;
-      new Uint8Array(saved.ciphertext)[0] ^= 1;
-      store.put(saved);
-    };
-    tx.oncomplete = () => resolve();
-    tx.onabort = () => reject(tx.error);
+  const db: IDBDatabase = await request(indexedDB.open('dormouse-capability-probe-restart-v1'));
+  const tx = db.transaction('inline', 'readwrite');
+  const store = tx.objectStore('inline');
+  const saved = await request(store.get('test'));
+  await commit(tx, () => {
+    new Uint8Array(saved.ciphertext)[0] ^= 1;
+    store.put(saved);
   });
   db.close();
   vi.resetModules();

@@ -9,7 +9,7 @@
  * `docs/specs/remote-security-model.md`.
  */
 
-import { toBase64Url, type NoiseKeyPair } from 'remote-lib-common';
+import { constantTimeEqual, toBase64Url, type NoiseKeyPair } from 'remote-lib-common';
 import {
   generatePocketKeyPair, loadPocketPrivateKey, storePocketPrivateKey,
   type PocketKeyStorageMode, type StoredPocketPrivateKey,
@@ -40,6 +40,28 @@ export const POCKET_KEY_STORAGE_ERROR =
   'This browser could not save and reload the private key needed for pairing. '
   + 'Pairing has not started. No permission dialog is expected. '
   + 'Keep your existing passkey and website data. Report the diagnostic below.';
+
+/** One side of an X25519 agreement against `publicKey`; the probe's only measurement. */
+function deriveShared(publicKey: CryptoKey, key: CryptoKey): Promise<ArrayBuffer> {
+  return crypto.subtle.deriveBits({ name: 'X25519', public: publicKey }, key, 256);
+}
+
+/**
+ * Write inside `tx` and wait for it to commit, aborting on a throw so a failed
+ * probe leaves no half-open transaction behind. `write` runs inside the try, so
+ * a `DataCloneError` on the `put` itself takes the same path as a failed commit.
+ */
+async function commitOrAbort(tx: IDBTransaction, write: () => void): Promise<void> {
+  const done = promisifyTransaction(tx);
+  try {
+    write();
+    await done;
+  } catch (error) {
+    try { tx.abort(); } catch { /* It may have already finished. */ }
+    await done.catch(() => {});
+    throw error;
+  }
+}
 
 function storageErrorName(error: unknown): string {
   // Fixed names only: browser error messages can contain private details.
@@ -74,16 +96,10 @@ export async function probePocketKeyStorage(mode: PocketKeyStorageMode = 'native
     let separateStage = 'separate-write-key';
     try {
       const tx = db!.transaction('separate-key', 'readwrite');
-      const done = promisifyTransaction(tx);
-      try {
+      await commitOrAbort(tx, () => {
         tx.objectStore('separate-key').put(keys.privateKey, 'probe');
         separateStage = 'separate-commit-key';
-        await done;
-      } catch (error) {
-        try { tx.abort(); } catch { /* It may have already finished. */ }
-        await done.catch(() => {});
-        throw error;
-      }
+      });
       db!.close();
       separateStage = 'separate-reopen-database';
       db = await open(name!);
@@ -96,10 +112,9 @@ export async function probePocketKeyStorage(mode: PocketKeyStorageMode = 'native
         return 'separate-validate-key / invalid';
       }
       separateStage = 'separate-use-key';
-      const algorithm = { name: 'X25519', public: keys.publicKey };
-      const actual = new Uint8Array(await crypto.subtle.deriveBits(algorithm, key, 256));
-      const expected = new Uint8Array(await crypto.subtle.deriveBits(algorithm, keys.privateKey, 256));
-      if (actual.length !== expected.length || actual.some((byte, i) => byte !== expected[i])) {
+      const actual = new Uint8Array(await deriveShared(keys.publicKey, key));
+      const expected = new Uint8Array(await deriveShared(keys.publicKey, keys.privateKey));
+      if (!constantTimeEqual(actual, expected)) {
         return 'separate-compare-key-agreement / mismatch';
       }
       return 'separate-key / passed';
@@ -108,33 +123,23 @@ export async function probePocketKeyStorage(mode: PocketKeyStorageMode = 'native
     }
   };
   try {
-    const generated = await generatePocketKeyPair(mode, 'probe');
-    const publicKeyRaw = toBase64Url(new Uint8Array(await crypto.subtle.exportKey('raw', generated.publicKey)));
-    pair = generated;
-    const derive = (key: CryptoKey) => crypto.subtle.deriveBits(
-      { name: 'X25519', public: generated.publicKey }, key, 256,
-    );
+    pair = await generatePocketKeyPair(mode, 'probe');
+    const publicKeyRaw = toBase64Url(new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey)));
     stage = 'use-original-key';
-    const expected = new Uint8Array(await derive(pair.privateKey));
+    const expected = new Uint8Array(await deriveShared(pair.publicKey, pair.privateKey));
     stage = 'open-database';
     name = `dormouse-pocket-key-probe-${crypto.randomUUID()}`;
     db = await open(name);
     stage = 'write-record';
     const tx = db.transaction(KNOWN_BURROWS_STORE, 'readwrite');
-    const done = promisifyTransaction(tx);
-    try {
+    await commitOrAbort(tx, () => {
       tx.objectStore(KNOWN_BURROWS_STORE).put({
         burrowId: 'probe', clientStaticKeyPair: {
-          privateKey: storePocketPrivateKey(pair.privateKey), publicKeyRaw,
+          privateKey: storePocketPrivateKey(pair!.privateKey), publicKeyRaw,
         },
       });
       stage = 'commit-record';
-      await done;
-    } catch (error) {
-      try { tx.abort(); } catch { /* It may have already finished. */ }
-      await done.catch(() => {});
-      throw error;
-    }
+    });
     db.close();
     stage = 'reopen-database';
     db = await open(name);
@@ -149,16 +154,14 @@ export async function probePocketKeyStorage(mode: PocketKeyStorageMode = 'native
       throw new Error('stored key did not survive');
     }
     stage = 'use-reloaded-key';
-    const actual = new Uint8Array(await derive(key));
+    const actual = new Uint8Array(await deriveShared(pair.publicKey, key));
     stage = 'compare-key-agreement';
-    if (actual.length !== expected.length || actual.some((byte, i) => byte !== expected[i])) {
-      throw new Error('stored key changed');
-    }
+    if (!constantTimeEqual(actual, expected)) throw new Error('stored key changed');
   } catch (error) {
     const failure = `${stage} / ${storageErrorName(error)}`;
     const separate = mode === 'native' && db && pair && stage !== 'reopen-database'
       ? ` Separate key: ${await probeSeparateKey(pair)}.` : '';
-    throw new Error(`${POCKET_KEY_STORAGE_ERROR} Diagnostic: ${failure}.${separate}`);
+    throw new Error(`Diagnostic: ${failure}.${separate}`);
   } finally {
     db?.close();
     if (name) {
@@ -182,7 +185,8 @@ export async function requirePocketKeyStorage(): Promise<void> {
       keyStorageMode = 'encrypted';
     } catch (encryptedError) {
       // Both probe errors contain only fixed diagnostics, never browser messages.
-      throw new Error(`${(nativeError as Error).message} Encrypted storage: ${(encryptedError as Error).message}`);
+      throw new Error(`${POCKET_KEY_STORAGE_ERROR} ${(nativeError as Error).message}`
+        + ` Encrypted storage: ${(encryptedError as Error).message}`);
     }
   }
 }
@@ -253,7 +257,7 @@ export interface PendingDeliveryDeletionV1 {
 /** Where {@link KnownBurrowV1} records live; faked in tests. */
 export interface KnownBurrowStore {
   /** Production stores generate a key in a verified, persistable format. */
-  generateKey?(burrowId: string): Promise<NoiseKeyPair>;
+  generateKey(burrowId: string): Promise<NoiseKeyPair>;
   get(burrowId: string): Promise<KnownBurrowV1 | null>;
   put(record: KnownBurrowV1): Promise<void>;
   delete(burrowId: string): Promise<void>;

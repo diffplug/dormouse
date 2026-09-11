@@ -1,7 +1,7 @@
 import { webcrypto } from 'node:crypto';
 import { IDBFactory, IDBObjectStore } from 'fake-indexeddb';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { POCKET_KEY_STORAGE_ERROR, probePocketKeyStorage as requirePocketKeyStorage } from './pocket-db';
+import { probePocketKeyStorage as requirePocketKeyStorage } from './pocket-db';
 
 beforeEach(() => {
   vi.stubGlobal('crypto', webcrypto);
@@ -25,9 +25,8 @@ it('reports a rejected key clone before pairing, and cleans up', async () => {
   vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(() => {
     throw new DOMException('Key path did not yield a value', 'DataError');
   });
-  await expect(requirePocketKeyStorage()).rejects.toThrow(POCKET_KEY_STORAGE_ERROR);
-  expect(remove).toHaveBeenCalledOnce();
   await expect(requirePocketKeyStorage()).rejects.toThrow('Diagnostic: write-record / DataError.');
+  expect(remove).toHaveBeenCalledOnce();
 });
 
 it('rejects a successful write whose private key does not survive readback', async () => {
@@ -65,7 +64,7 @@ it('allows a fresh retry after a storage failure', async () => {
   vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementationOnce(() => {
     throw new DOMException('Storage unavailable', 'DataError');
   });
-  await expect(requirePocketKeyStorage()).rejects.toThrow(POCKET_KEY_STORAGE_ERROR);
+  await expect(requirePocketKeyStorage()).rejects.toThrow('Diagnostic: write-record / DataError.');
   await expect(requirePocketKeyStorage()).resolves.toBeUndefined();
 });
 

@@ -23,6 +23,7 @@ import {
   REMOTE_EVENTS,
   REMOTE_METHODS,
   SELFHOST_ACCOUNT_ID,
+  generateNoiseKeyPair,
   mintNoiseStaticKeyPair,
   presenceChallenge,
   randomBase64Url,
@@ -126,6 +127,7 @@ export function memoryKnownBurrows(): MemoryKnownBurrows {
   const records = new Map<string, KnownBurrowV1>();
   return {
     records,
+    generateKey: () => generateNoiseKeyPair(),
     get: async (burrowId) => records.get(burrowId) ?? null,
     put: async (record) => void records.set(record.burrowId, record),
     delete: async (burrowId) => void records.delete(burrowId),

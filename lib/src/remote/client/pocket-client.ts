@@ -28,7 +28,6 @@ import {
   createNoiseInitiator,
   e2eConnectionPrologue,
   fromBase64Url,
-  generateNoiseKeyPair,
   hashPasskeyPublicKey,
   isConnectionOutcomeV1,
   isE2eRelayToClientFrame,
@@ -760,9 +759,7 @@ export class PocketClient {
     const deadline = this.#now() + DEFAULT_PAIRING_TTL_MS;
     const { burrowId, inviteId } = invitation;
     const route = { kind: 'pairing', id: inviteId, burrowId } as const;
-    const clientStatic = this.#knownBurrows.generateKey
-      ? await this.#knownBurrows.generateKey(burrowId)
-      : await generateNoiseKeyPair();
+    const clientStatic = await this.#knownBurrows.generateKey(burrowId);
     const handshake = await createNoiseInitiator({
       prologue: pairingInvitationPrologue(invitation),
       staticKeyPair: clientStatic,

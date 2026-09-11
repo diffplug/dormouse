@@ -109,6 +109,13 @@ const FRAME_MODULES = [
 const SOURCE_TREES = ['remote-lib-common/src/', 'lib/src/', 'relay/src/'];
 
 /**
+ * The one file the AES-GCM ban excuses, as `docs/specs/security-remote.md` ->
+ * "Credentials at rest" names it. Excused by path rather than dropped from the
+ * scan, so a rename that leaves the cipher behind turns the rule red.
+ */
+const AT_REST_KEY_WRAPPER = 'lib/src/remote/client/pocket-private-key.ts';
+
+/**
  * One entry per structural property. Every rule states the `SECURITY_SPEC`
  * line it enforces in `security`, which must still appear in that file — as a
  * substring of the raw text, so the phrase has to sit on one line: reflow the
@@ -161,7 +168,7 @@ export const RULES = [
     security: 'AES-GCM appears in non-diagnostic production source outside the local at-rest',
     kind: 'forbid',
     trees: SOURCE_TREES,
-    excludeFiles: ['lib/src/remote/client/pocket-private-key.ts'],
+    allow: (match, file) => file === AT_REST_KEY_WRAPPER,
     // The one exception encrypts local private-key storage, never wire data.
     // `AES-GCM` is the substitution the Noise suite exists to refuse: it *is* in
     // shipping WebCrypto, which is exactly what makes it the tempting one, and
@@ -357,8 +364,7 @@ function sourceFilesUnder(trees) {
 
 /** The files a rule scans: an explicit list, or every source file under its trees. */
 export function filesFor(rule) {
-  return (rule.files ?? sourceFilesUnder(rule.trees))
-    .filter(file => !rule.excludeFiles?.includes(file));
+  return rule.files ?? sourceFilesUnder(rule.trees);
 }
 
 export function check() {
@@ -424,7 +430,7 @@ export function check() {
         failures.push(`${rule.rule}\n    ${file}: missing`);
         continue;
       }
-      const hits = (text.match(rule.pattern) ?? []).filter((m) => !rule.allow?.(m));
+      const hits = (text.match(rule.pattern) ?? []).filter((m) => !rule.allow?.(m, file));
       total += hits.length;
       if (rule.kind === 'forbid' && hits.length > 0) {
         failures.push(`${rule.rule}\n    ${file}: ${[...new Set(hits)].join(', ')}`);

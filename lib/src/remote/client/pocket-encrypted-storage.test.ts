@@ -3,8 +3,8 @@ import { IDBFactory, IDBObjectStore } from 'fake-indexeddb';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { fromBase64Url, generateNoiseKeyPair, sealPush, toBase64Url, utf8Encode } from 'remote-lib-common';
 import {
-  indexedDbKnownBurrowStore, requirePocketKeyStorage, withPocketStore,
-  KNOWN_BURROWS_STORE, type KnownBurrowV1,
+  indexedDbKnownBurrowStore, promisifyRequest, requirePocketKeyStorage, withPocketStore,
+  KNOWN_BURROWS_STORE, POCKET_KEY_STORAGE_ERROR, type KnownBurrowV1,
 } from './pocket-db';
 import { generatePocketKeyPair, loadPocketPrivateKey, storePocketPrivateKey } from './pocket-private-key';
 import { makeE2eHarness } from './test-e2e-harness';
@@ -28,17 +28,13 @@ function breakNativeStorage() {
 }
 
 async function rawRecord(burrowId: string): Promise<any> {
-  return withPocketStore(KNOWN_BURROWS_STORE, 'readonly', store => new Promise((resolve, reject) => {
-    const request = store.get(burrowId);
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  }));
+  return withPocketStore(KNOWN_BURROWS_STORE, 'readonly', store => promisifyRequest(store.get(burrowId)));
 }
 
 it('prefers native storage when it works and never exports a private key', async () => {
   const exportKey = vi.spyOn(crypto.subtle, 'exportKey');
   await requirePocketKeyStorage();
-  const pair = await indexedDbKnownBurrowStore().generateKey!('burrow');
+  const pair = await indexedDbKnownBurrowStore().generateKey('burrow');
   expect(pair.privateKey.extractable).toBe(false);
   expect(storePocketPrivateKey(pair.privateKey as CryptoKey)).toBe(pair.privateKey);
   expect(exportKey.mock.calls.every(([format]) => format === 'raw')).toBe(true);
@@ -48,8 +44,11 @@ it('blocks pairing when neither key encoding survives storage', async () => {
   vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(() => {
     throw new DOMException('secret detail', 'QuotaExceededError');
   });
-  await expect(requirePocketKeyStorage()).rejects.toThrow('Encrypted storage:');
-  await expect(indexedDbKnownBurrowStore().generateKey!('burrow')).rejects.toThrow('Pairing has not started');
+  const failure = await requirePocketKeyStorage().catch((error: Error) => error);
+  expect(failure.message).toContain('Encrypted storage:');
+  // Both probes failed, and the sentence the user reads says so once, not twice.
+  expect(failure.message.split(POCKET_KEY_STORAGE_ERROR)).toHaveLength(2);
+  await expect(indexedDbKnownBurrowStore().generateKey('burrow')).rejects.toThrow('Pairing has not started');
 });
 
 it('rejects silent loss of the encrypted wrapping key during the preflight', async () => {
