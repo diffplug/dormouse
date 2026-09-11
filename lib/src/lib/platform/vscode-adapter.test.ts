@@ -667,3 +667,19 @@ describe('VSCodeAdapter remote host link', () => {
     }
   });
 });
+
+
+describe('VSCodeAdapter port deadline', () => {
+  beforeEach(stubWebviewEnv);
+  afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
+  it('allows both scans and the child hop before the host reply', async () => {
+    vi.useFakeTimers();
+    const adapter = new VSCodeAdapter();
+    const answer = adapter.getOpenPorts('pane-1');
+    const request = postMessage.mock.calls.at(-1)![0];
+    await vi.advanceTimersByTimeAsync(7500);
+    const ports = [{ address: '127.0.0.1', port: 5173, pid: 1 }];
+    windowTarget.dispatchEvent(hostMessage({ type: 'pty:openPorts', requestId: request.requestId, ports }));
+    expect(await answer).toEqual(ports);
+  });
+});
