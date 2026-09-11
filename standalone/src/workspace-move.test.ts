@@ -70,13 +70,19 @@ import {
   resetWindowSessionAggregator,
 } from "dormouse-lib/lib/window-session-aggregator";
 import { setPlatform } from "dormouse-lib/lib/platform";
-import { disposeAllSessions } from "dormouse-lib/lib/terminal-registry";
+import { disposeAllSessions, getOrCreateTerminal } from "dormouse-lib/lib/terminal-registry";
 import { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
 
 const WORKSPACE_ID = "ws-moving";
 
 /** Drain the microtask chain the arrival drain runs on. */
 const settle = () => new Promise((r) => setTimeout(r, 0));
+
+/** The source's second half has gone over: the marks passed and the content
+ *  followed. A hand-off resolves only when the target settles it, so a test
+ *  that needs the invoke sequence waits for this rather than the call. */
+const contentSent = () => vi.waitFor(() =>
+  expect(mocks.invoke).toHaveBeenCalledWith("transfer_workspace_content", expect.anything()));
 
 function payload(overrides: Partial<WorkspaceTransferPayload> = {}): WorkspaceTransferPayload {
   return {
@@ -109,6 +115,9 @@ function payload(overrides: Partial<WorkspaceTransferPayload> = {}): WorkspaceTr
 /** Rust's arrival table: what is in flight into this window, keyed by Workspace. */
 let arrivals: WorkspaceTransferPayload[] = [];
 
+/** Push one `pty:replay` at whatever this window's adapter has subscribed. */
+let deliverReplay: (detail: { id: string; data: string; requestId?: string }) => void = () => {};
+
 /** A prepared transfer whose commit is observable. */
 function prepared(
   onCommit: () => void = () => {},
@@ -125,7 +134,10 @@ function prepared(
  * The adapter's `pty:list` / `pty:replay` answer only once something asks —
  * which is the property the `adopt_ready` hop exists to guarantee.
  */
-function fakePlatform(order: string[] = [], opts: { answer?: boolean; marks?: Record<string, number> } = {}): PlatformAdapter {
+function fakePlatform(
+  order: string[] = [],
+  opts: { answer?: boolean; marks?: Record<string, number>; stamp?: boolean } = {},
+): PlatformAdapter {
   const platform = new FakePtyAdapter();
   let listHandler: ((detail: { ptys: PtyInfo[]; requestId?: string }) => void) | null = null;
   let replayHandler: ((detail: { id: string; data: string; requestId?: string }) => void) | null = null;
@@ -133,6 +145,8 @@ function fakePlatform(order: string[] = [], opts: { answer?: boolean; marks?: Re
   vi.spyOn(platform, "offPtyList").mockImplementation(() => { listHandler = null; });
   vi.spyOn(platform, "onPtyReplay").mockImplementation((handler) => { replayHandler = handler; });
   vi.spyOn(platform, "offPtyReplay").mockImplementation(() => { replayHandler = null; });
+  // What Rust routes to this window unasked: a hand-back's since-mark replay.
+  deliverReplay = (detail) => replayHandler?.(detail);
   let markedHandler: ((detail: { id: string; mark: number; requestId?: string }) => void) | null = null;
   (platform as unknown as { onPtyMarked: unknown }).onPtyMarked = (handler: typeof markedHandler) => {
     markedHandler = handler;
@@ -156,11 +170,11 @@ function fakePlatform(order: string[] = [], opts: { answer?: boolean; marks?: Re
     if (cmd === "take_arrivals") return arrivals.map((arrival) => ({ ...arrival }));
     if (cmd === "transfer_workspace" || cmd === "open_workspace_window") {
       // The host stamps each id's mark in the stream, behind every byte the
-      // source was sent; the source serializes at that line.
-      const ids = (args as { payload: { terminalIds: string[] } }).payload.terminalIds;
-      setTimeout(() => {
-        for (const id of ids) markedHandler?.({ id, mark: opts.marks?.[id] ?? 0, requestId: `mark-${workspaceId}` });
-      }, 0);
+      // source was sent; the source serializes at that line. Stamped *before*
+      // the invoke resolves, as Rust does inside `begin_arrival`: a source that
+      // only listens once the invoke is back misses every one of them.
+      const ids = opts.stamp === false ? [] : (args as { payload: { terminalIds: string[] } }).payload.terminalIds;
+      for (const id of ids) markedHandler?.({ id, mark: opts.marks?.[id] ?? 0, requestId: `mark-${workspaceId}` });
     }
     if (cmd === "adopt_done" || cmd === "adopt_failed") { settle(); return undefined; }
     if (cmd === "adopt_ready") {
@@ -210,29 +224,45 @@ const emit = async (event: string, data: unknown) => {
 describe("the source half", () => {
   it("prepares the Workspace, tells the host, and commits only when it lands", async () => {
     const order: string[] = [];
-    mocks.invoke.mockImplementation(async (cmd: string) => void order.push(cmd));
     registerWallHandle(stubWallHandle(WORKSPACE_ID, {
       prepareWorkspaceTransfer: async () => {
         order.push("prepare");
         return prepared(() => order.push("commit"));
       },
     }));
-    initWorkspaceMoves(fakePlatform());
-    mocks.invoke.mockImplementation(async (cmd: string) => void order.push(cmd));
+    initWorkspaceMoves(fakePlatform(order));
 
-    await transferWorkspaceTo(WORKSPACE_ID, "ws-2", { x: 10, y: 4 });
+    const moved = transferWorkspaceTo(WORKSPACE_ID, "ws-2", { x: 10, y: 4 });
+    await contentSent();
 
     // The record is built while the Sessions are live. Nothing is released at
     // the invoke: the target can still refuse, and a Workspace released here
-    // would have no Sessions and no window that owned them.
-    // The content follows once the marks pass: the fake host stamps none,
-    // so it is serialized at once and replayed whole.
-    expect(order).toEqual(["prepare", "transfer_workspace", "transfer_workspace_content"]);
+    // would have no Sessions and no window that owned them. The content
+    // follows once the marks pass.
+    expect(order.filter((cmd) => cmd !== "take_arrivals"))
+      .toEqual(["prepare", "transfer_workspace", "transfer_workspace_content"]);
     const [, args] = mocks.invoke.mock.calls.find(([cmd]) => cmd === "transfer_workspace")!;
     expect(args).toMatchObject({ to: "ws-2", payload: { at: { x: 10, y: 4 }, terminalIds: ["pane-a"] } });
+    expect(order).not.toContain("commit");
 
     await emit("dormouse://workspace-departed", { workspaceId: WORKSPACE_ID });
     expect(order).toContain("commit");
+    // `moved` is the target's adoption, not the host taking the invoke: a
+    // caller told sooner (`dor workspace move`) would read a move that can
+    // still be handed back.
+    await expect(moved).resolves.toEqual({ moved: true });
+  });
+
+  it("carries a strip slot named outright, which the target reads ahead of a pointer", async () => {
+    registerWallHandle(stubWallHandle(WORKSPACE_ID, { prepareWorkspaceTransfer: async () => prepared() }));
+    initWorkspaceMoves(fakePlatform());
+
+    void transferWorkspaceTo(WORKSPACE_ID, "ws-2", undefined, 2);
+    await settle();
+
+    const [, args] = mocks.invoke.mock.calls.find(([cmd]) => cmd === "transfer_workspace")!;
+    expect(args).toMatchObject({ to: "ws-2", payload: { index: 2 } });
+    expect((args as { payload: { at?: unknown } }).payload.at).toBeUndefined();
   });
 
   it("keeps a transferring Workspace out of every snapshot until it settles", async () => {
@@ -246,12 +276,15 @@ describe("the source half", () => {
     }));
     expect(getWindowSnapshot().workspaces.map((w) => w.id)).toContain(WORKSPACE_ID);
 
-    await transferWorkspaceTo(WORKSPACE_ID, "ws-2", { x: 10, y: 4 });
+    const moved = transferWorkspaceTo(WORKSPACE_ID, "ws-2", { x: 10, y: 4 });
+    await settle();
     expect(getWindowSnapshot().workspaces.map((w) => w.id)).not.toContain(WORKSPACE_ID);
 
-    // Refused: it is this Window's again, snapshot included.
+    // Refused: it is this Window's again, snapshot included, and the caller
+    // hears the host's reason rather than `moved`.
     await emit("dormouse://workspace-arrival-failed", { workspaceId: WORKSPACE_ID, reason: "closed" });
     expect(getWindowSnapshot().workspaces.map((w) => w.id)).toContain(WORKSPACE_ID);
+    await expect(moved).resolves.toEqual({ moved: false, reason: "closed" });
   });
 
   it("keeps the Workspace, with its Sessions, when the target never adopts it", async () => {
@@ -264,7 +297,8 @@ describe("the source half", () => {
     }));
     createWorkspace({ id: WORKSPACE_ID, name: "Deploys" });
 
-    await transferWorkspaceTo(WORKSPACE_ID, "ws-2", { x: 10, y: 4 });
+    const moved = transferWorkspaceTo(WORKSPACE_ID, "ws-2", { x: 10, y: 4 });
+    await settle();
     await emit("dormouse://workspace-arrival-failed", {
       workspaceId: WORKSPACE_ID,
       reason: "the target window closed mid-arrival",
@@ -272,6 +306,70 @@ describe("the source half", () => {
 
     expect(committed).not.toHaveBeenCalled();
     expect(getWorkspacesSnapshot().workspaces.map((w) => w.id)).toContain(WORKSPACE_ID);
+    await expect(moved).resolves.toEqual({ moved: false, reason: "the target window closed mid-arrival" });
+  });
+
+  it("writes a hand-back's since-mark replay into the xterms that never left", async () => {
+    // Between the mark and the hand-back every byte went to the target, or
+    // nowhere. Rust replays that slice to this window; it lands in the existing
+    // instances, and no Session is restarted or killed for it.
+    const platform = fakePlatform([], { marks: { "pane-a": 42 } });
+    const killed = vi.spyOn(platform, "killPty");
+    initWorkspaceMoves(platform);
+    getOrCreateTerminal("pane-a");
+    registerWallHandle(stubWallHandle(WORKSPACE_ID, {
+      prepareWorkspaceTransfer: async () => prepared(),
+    }));
+    createWorkspace({ id: WORKSPACE_ID, name: "Deploys" });
+    void transferWorkspaceTo(WORKSPACE_ID, "ws-2", { x: 10, y: 4 });
+    await contentSent();
+    mocks.writes.length = 0;
+
+    await emit("dormouse://workspace-arrival-failed", { workspaceId: WORKSPACE_ID, reason: "wedged" });
+    // Another collection's replay is not this one's.
+    deliverReplay({ id: "pane-a", data: "not-mine", requestId: "boot-1" });
+    deliverReplay({ id: "pane-a", data: "since-the-mark", requestId: `handback-${WORKSPACE_ID}` });
+
+    expect(mocks.writes).toEqual(["since-the-mark"]);
+    expect(killed).not.toHaveBeenCalled();
+    // The last id lets go of the adapter.
+    expect(platform.offPtyReplay).toHaveBeenCalled();
+    deliverReplay({ id: "pane-a", data: "late", requestId: `handback-${WORKSPACE_ID}` });
+    expect(mocks.writes).toEqual(["since-the-mark"]);
+  });
+
+  it("accepts no hand-back replay for an id the host never marked", async () => {
+    // An unmarked id was serialized whole and its xterm still holds every
+    // byte: Rust asks the sidecar for nothing, and a whole-buffer replay
+    // arriving anyway would paint the transcript twice.
+    vi.useFakeTimers();
+    try {
+      const platform = fakePlatform([], { stamp: false });
+      initWorkspaceMoves(platform);
+      getOrCreateTerminal("pane-a");
+      registerWallHandle(stubWallHandle(WORKSPACE_ID, {
+        prepareWorkspaceTransfer: async () => prepared(),
+      }));
+      createWorkspace({ id: WORKSPACE_ID, name: "Deploys" });
+      const moved = transferWorkspaceTo(WORKSPACE_ID, "ws-2", { x: 10, y: 4 });
+      await vi.advanceTimersByTimeAsync(3000); // past the mark wait
+      await vi.advanceTimersByTimeAsync(0); // the content follows the serialization
+      const [, args] = mocks.invoke.mock.calls.find(([cmd]) => cmd === "transfer_workspace_content")!;
+      expect(args).toMatchObject({ content: { terminals: { "pane-a": { serialized: "" } } } });
+      mocks.writes.length = 0;
+
+      const failed = emit("dormouse://workspace-arrival-failed", { workspaceId: WORKSPACE_ID, reason: "wedged" });
+      await vi.advanceTimersByTimeAsync(1);
+      await failed;
+      deliverReplay({ id: "pane-a", data: "whole-buffer", requestId: `handback-${WORKSPACE_ID}` });
+
+      expect(mocks.writes).toEqual([]);
+      expect(getWorkspacesSnapshot().workspaces.map((w) => w.id)).toContain(WORKSPACE_ID);
+      // The move itself settles on the hand-back, with its reason.
+      expect(await moved).toEqual({ moved: false, reason: "wedged" });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("releases only the Workspace that departed", async () => {
@@ -284,7 +382,8 @@ describe("the source half", () => {
       registerWallHandle(stubWallHandle(id, {
         prepareWorkspaceTransfer: async () => prepared(commit, { workspaceId: id }),
       }));
-      await transferWorkspaceTo(id, "ws-2", { x: 0, y: 0 });
+      void transferWorkspaceTo(id, "ws-2", { x: 0, y: 0 });
+      await settle();
     }
 
     await emit("dormouse://workspace-departed", { workspaceId: "ws-a" });
@@ -302,7 +401,9 @@ describe("the source half", () => {
       prepareWorkspaceTransfer: async () => prepared(committed),
     }));
 
-    await transferWorkspaceTo(WORKSPACE_ID, "ws-2", { x: 10, y: 4 });
+    // A refused invoke settles at once, with the host's reason.
+    await expect(transferWorkspaceTo(WORKSPACE_ID, "ws-2", { x: 10, y: 4 }))
+      .resolves.toEqual({ moved: false, reason: "no window 'ws-2'" });
 
     expect(committed).not.toHaveBeenCalled();
   });
@@ -314,7 +415,8 @@ describe("the source half", () => {
       prepareWorkspaceTransfer: async () => prepared(committed),
     }));
 
-    await tearOutWorkspace(WORKSPACE_ID, { x: 90, y: 12 });
+    await expect(tearOutWorkspace(WORKSPACE_ID, { x: 90, y: 12 }))
+      .resolves.toEqual({ moved: false, reason: "build window ws-3: no display" });
 
     expect(committed).not.toHaveBeenCalled();
   });
@@ -323,14 +425,15 @@ describe("the source half", () => {
     registerWallHandle(stubWallHandle(WORKSPACE_ID, { prepareWorkspaceTransfer: async () => prepared() }));
     // Only Rust knows where the cursor is on screen, so the payload carries
     // where the tab should sit inside the new window rather than a position.
-    await tearOutWorkspace(WORKSPACE_ID, { x: 90, y: 12 });
+    void tearOutWorkspace(WORKSPACE_ID, { x: 90, y: 12 });
+    await settle();
     expect(mocks.invoke).toHaveBeenCalledWith("open_workspace_window", {
       payload: expect.objectContaining({ grab: { x: 90, y: 12 } }),
     });
   });
 
   it("does nothing when the Workspace has no mounted Wall", async () => {
-    await transferWorkspaceTo("gone", "ws-2", { x: 0, y: 0 });
+    await expect(transferWorkspaceTo("gone", "ws-2", { x: 0, y: 0 })).resolves.toMatchObject({ moved: false });
     expect(mocks.invoke).not.toHaveBeenCalled();
   });
 });
@@ -419,6 +522,18 @@ describe("the target half", () => {
     expect(getWorkspacesSnapshot().workspaces.filter((w) => w.id === WORKSPACE_ID)).toHaveLength(1);
   });
 
+  it("lands at the slot the payload names, ahead of the pointer's", async () => {
+    // `dor workspace move --window ws-2 --index 0` names the target's slot
+    // outright; a drag sends only a point, and with no tab under it appends.
+    createWorkspace({ id: "ws-here", name: "Here" });
+    arrivals = [{ ...payload(), index: 0, at: { x: 900, y: 0 } } as WorkspaceTransferPayload];
+
+    initWorkspaceMoves(fakePlatform());
+    await settle();
+
+    expect(getWorkspacesSnapshot().workspaces[0]?.id).toBe(WORKSPACE_ID);
+  });
+
   it("seeds a persisted TODO into this window's own AlertManager", async () => {
     const platform = fakePlatform();
     const alert = { kind: "todo" } as never;
@@ -452,19 +567,59 @@ describe("the target half", () => {
     }
   });
 
+  it("unwinds the mount when adopt_done is refused, releasing the Sessions rather than killing them", async () => {
+    const platform = fakePlatform();
+    const killPty = vi.spyOn(platform, "killPty");
+    const host = mocks.invoke.getMockImplementation()!;
+    mocks.invoke.mockImplementation(async (cmd: string, args?: unknown) => {
+      // The `ARRIVAL_MAX` watchdog retired the record while this window was
+      // wedged between the drain and the mount: Rust has handed the shells
+      // back to the source, so `adopt_done` finds no arrival to settle.
+      if (cmd === "adopt_done") arrivals = [];
+      return host(cmd, args);
+    });
+    // The Wall this window mounts for the arrival, with its release observable.
+    const released = vi.fn();
+    registerWallHandle(stubWallHandle(WORKSPACE_ID, {
+      prepareWorkspaceTransfer: async () => prepared(released),
+    }));
+    arrivals = [payload()];
+    initWorkspaceMoves(platform);
+    await settle();
+    await settle();
+
+    expect(mocks.invoke).toHaveBeenCalledWith("adopt_done", { workspaceId: WORKSPACE_ID });
+    // The source kept the Workspace, so this window holds none of it: not in
+    // the store, not in the snapshot it writes, no plan parked for it.
+    expect(getWorkspacesSnapshot().workspaces.map((w) => w.id)).not.toContain(WORKSPACE_ID);
+    expect(getWindowSnapshot().workspaces.map((w) => w.id)).not.toContain(WORKSPACE_ID);
+    expect(getWorkspaceBootPlan(WORKSPACE_ID)).toEqual({});
+    // Its Sessions were released — the shells are the source's again — and
+    // nothing was killed.
+    expect(released).toHaveBeenCalledTimes(1);
+    expect(killPty).not.toHaveBeenCalled();
+    expect(mocks.invoke).not.toHaveBeenCalledWith("adopt_failed", expect.anything());
+  });
+
   it("closes the window when its last Workspace leaves, instead of emptying it", async () => {
     initWorkspaceMoves(fakePlatform());
     const workspaceId = getWorkspacesSnapshot().activeId;
     registerWallHandle(stubWallHandle(workspaceId, {
       prepareWorkspaceTransfer: async () => prepared(() => {}, { workspaceId }),
     }));
-    await transferWorkspaceTo(workspaceId, "ws-2", { x: 0, y: 0 });
+    const moved = transferWorkspaceTo(workspaceId, "ws-2", { x: 0, y: 0 });
+    await contentSent();
+    const order: string[] = [];
+    void moved.then(() => order.push("answered"));
+    mocks.invoke.mockImplementation(async (cmd: string) => void order.push(cmd));
 
     await emit("dormouse://workspace-departed", { workspaceId });
 
     // Nothing ended — the Surfaces are alive in another window — so this is a
-    // close with no confirmation, no archive and no kill.
-    expect(mocks.invoke).toHaveBeenCalledWith("close_window");
+    // close with no confirmation, no archive and no kill. The caller's answer
+    // goes first: Rust destroys the window on `close_window`, and a `dor
+    // workspace move` that emptied it still has `moved` to say.
+    expect(order).toEqual(["answered", "close_window"]);
     expect(getWorkspacesSnapshot().workspaces).toHaveLength(1);
   });
 });
@@ -477,7 +632,8 @@ describe("a transfer's content", () => {
       prepareWorkspaceTransfer: async () => prepared(),
     }));
 
-    await transferWorkspaceTo(WORKSPACE_ID, "ws-2", { x: 1, y: 1 });
+    void transferWorkspaceTo(WORKSPACE_ID, "ws-2", { x: 1, y: 1 });
+    await contentSent();
 
     expect(order.filter((cmd) => cmd !== "take_arrivals")).toEqual(["transfer_workspace", "transfer_workspace_content"]);
     const [, args] = mocks.invoke.mock.calls.find(([cmd]) => cmd === "transfer_workspace_content")!;

@@ -49,7 +49,7 @@ describe("workspace registry", () => {
   it("mints from the host's block and reports the store once per change, coalesced", async () => {
     const h = host();
     uninstall = await installWorkspaceRegistry(h);
-    expect(h.invoke).toHaveBeenCalledWith("workspace_reserve_ids", { count: 16 });
+    expect(h.invoke).toHaveBeenCalledWith("workspace_reserve_ids", { count: 32 });
     expect(generateWorkspaceId()).toBe("workspace-50");
     await Promise.resolve();
     // The boot report: the store as it stood at install.

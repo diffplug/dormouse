@@ -103,16 +103,19 @@ fn parse_target(target: &str) -> Target<'_> {
         .strip_prefix("workspace:")
         .unwrap_or(target.trim())
         .trim();
+    // Mirrors `POSITIONAL_WORKSPACE_REF` in `dor/src/protocol.ts`: a ref is a
+    // digit run with no leading zero, so a Workspace named "007" stays a name
+    // rather than routing as `workspace:7`.
     match bare.parse::<u64>() {
-        Ok(n) => Target::Number(n),
-        Err(_) => Target::Name(bare),
+        Ok(n) if !bare.starts_with('0') && bare.bytes().all(|b| b.is_ascii_digit()) => Target::Number(n),
+        _ => Target::Name(bare),
     }
 }
 
 /// The window holding the Workspace a `dor` target names, or `None` when no
-/// window reports one — or when a name is ambiguous across windows, which the
-/// caller's own window then refuses with the candidates listed, as it would
-/// for a duplicate name inside one window.
+/// window reports one — or when a name is ambiguous across windows, which
+/// falls through to the caller's own window: it refuses a name duplicated
+/// there, and otherwise resolves its own, so a local Workspace wins.
 pub fn window_of<'a>(registry: &'a Registry, target: &str) -> Option<&'a str> {
     match parse_target(target) {
         Target::Number(n) => registry.windows.iter().find_map(|(label, entries)| {
@@ -215,11 +218,30 @@ mod tests {
         assert_eq!(window_of(&registry, " 3 "), Some("ws-2"));
         assert_eq!(window_of(&registry, "Docs"), Some("main"));
         assert_eq!(window_of(&registry, "workspace:Docs"), Some("main"));
-        // A name two windows use names nothing here; the caller's window
-        // refuses it with the candidates, as it does inside one window.
+        // A name two windows use names nothing here: it falls through to the
+        // caller's window, which refuses a duplicate of its own and otherwise
+        // resolves its own, so a local Workspace wins.
         assert_eq!(window_of(&registry, "Build"), None);
         assert_eq!(window_of(&registry, "workspace:9"), None);
         assert_eq!(window_of(&registry, "nope"), None);
+    }
+
+    #[test]
+    fn a_number_with_a_leading_zero_is_a_name() {
+        let mut registry = Registry::default();
+        report(
+            &mut registry,
+            "main",
+            vec![entry("workspace-7", "Build", true), entry("workspace-8", "0", false)],
+        );
+        report(&mut registry, "ws-2", vec![entry("workspace-9", "007", true)]);
+        // `POSITIONAL_WORKSPACE_REF` reads neither as a ref, so each routes to
+        // the window holding the Workspace so named, never to `workspace-7`.
+        assert_eq!(window_of(&registry, "007"), Some("ws-2"));
+        assert_eq!(window_of(&registry, "workspace:007"), Some("ws-2"));
+        assert_eq!(window_of(&registry, "0"), Some("main"));
+        assert_eq!(window_of(&registry, "+7"), None);
+        assert_eq!(window_of(&registry, "7"), Some("main"));
     }
 
     #[test]

@@ -190,9 +190,15 @@ export class TauriAdapter implements PlatformAdapter {
         // the asker is long gone (docs/specs/terminal-escapes.md). It still
         // needs the theme: a *declined* colour query is not consumed, so it
         // reaches xterm.js instead, and answering is the owner's alone.
+        // Both consumers of the live `terminal:semanticEvents` path, because a
+        // replay is the whole of what a transferred pane's new window has: Rust
+        // drops the gap's semantic events rather than holding them
+        // (docs/specs/standalone.md → "Routing").
         const { id, data, requestId } = event.payload;
         const parsed = new TerminalProtocolParser(themeColorProvider).process(data);
-        applyTerminalSemanticEvents(id, collectTerminalSemanticEvents(parsed.events));
+        const events = collectTerminalSemanticEvents(parsed.events);
+        this.alertManager.applyTerminalSemanticEvents(id, events);
+        applyTerminalSemanticEvents(id, events);
         for (const handler of this.replayHandlers) {
           handler({ id, data: parsed.visibleData, requestId });
         }
@@ -585,14 +591,17 @@ export class TauriAdapter implements PlatformAdapter {
 
   /** `dor workspace move` between windows: the same transfer the strip's drag
    *  runs, with no pointer to place the tab by (docs/specs/standalone.md →
-   *  Transfer). Imported on use: `workspace-move` pulls the whole move
-   *  protocol in, which a window that never moves anything need not load. */
-  async transferWorkspace(workspaceId: string, toWindow: string): Promise<void> {
+   *  Transfer). Settles as the transaction does: resolved once the target has
+   *  adopted the Workspace, rejected with the host's reason when it was handed
+   *  back. Imported on use: `workspace-move` pulls the whole move protocol in,
+   *  which a window that never moves anything need not load. */
+  async transferWorkspace(workspaceId: string, toWindow: string, options: { index?: number } = {}): Promise<void> {
     const { tearOutWorkspace, transferWorkspaceTo } = await import("./workspace-move");
-    const accepted = toWindow === "new"
+    // A torn-out window has one tab, so an index names no slot there.
+    const outcome = toWindow === "new"
       ? await tearOutWorkspace(workspaceId, { x: 0, y: 0 })
-      : await transferWorkspaceTo(workspaceId, toWindow);
-    if (!accepted) throw new Error(`the host refused to move the Workspace to '${toWindow}'`);
+      : await transferWorkspaceTo(workspaceId, toWindow, undefined, options.index);
+    if (!outcome.moved) throw new Error(outcome.reason);
   }
 
   onPtyMarked(handler: (detail: PtyMarkedDetail) => void): () => void {

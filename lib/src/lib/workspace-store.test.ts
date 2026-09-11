@@ -8,6 +8,7 @@ import {
   getWorkspacesSnapshot,
   moveWorkspace,
   renameWorkspace,
+  resetWorkspaceIdPool,
   resetWorkspaces,
   setActiveWorkspace,
   setWorkspaces,
@@ -17,8 +18,17 @@ import {
 } from './workspace-store';
 import { DEFAULT_WORKSPACE_ID, DEFAULT_WORKSPACE_NAME } from './session-types';
 
+/** A host that mints: `workspace-<from>` upward, one block per call. */
+function minting(from = 100) {
+  let next = from;
+  return vi.fn(async (count: number) => Array.from({ length: count }, () => `workspace-${next++}`));
+}
+
 describe('workspace-store', () => {
-  beforeEach(() => resetWorkspaces());
+  beforeEach(() => {
+    resetWorkspaceIdPool();
+    resetWorkspaces();
+  });
 
   it('defaults to a single "Workspace 1", active', () => {
     expect(getWorkspacesSnapshot()).toEqual({
@@ -156,12 +166,15 @@ describe('workspace-store', () => {
     expect(getActiveWorkspaceId()).toBe('ws-3');
   });
 
-  it('workspace refs are the minted id number, and survive a reorder', () => {
-    createWorkspace({ id: 'workspace-7' });
+  it('workspace refs are the minted id number under a registry, and survive a reorder', async () => {
+    await installWorkspaceIdPool(minting(7));
+    // Under a registry the bare Wall's default id, `workspace-1`, is a minted one.
+    const second = createWorkspace();
+    expect(second.id).toBe('workspace-7');
     expect(workspaceRefFor(DEFAULT_WORKSPACE_ID)).toBe('workspace:1');
     expect(workspaceRefFor('workspace-7')).toBe('workspace:7');
-    // A Workspace already gone (its Wall is mid-unmount) answers the first ref.
-    expect(workspaceRefFor('missing')).toBe('workspace:1');
+    // A minted Workspace already gone (its Wall is mid-unmount) keeps its number.
+    expect(workspaceRefFor('workspace-9')).toBe('workspace:9');
     // A resolution carries the Workspace, so a caller needs no second lookup.
     expect(resolveWorkspaceRef('workspace:7')).toEqual({ ok: true, id: 'workspace-7', name: 'Workspace 2', ref: 'workspace:7' });
     expect(resolveWorkspaceRef('7')).toMatchObject({ ok: true, id: 'workspace-7' });
@@ -176,27 +189,81 @@ describe('workspace-store', () => {
     expect(resolveWorkspaceRef('workspace:1')).toMatchObject({ ok: true, id: DEFAULT_WORKSPACE_ID });
   });
 
-  it('an id the registry did not mint keeps a positional ref', () => {
-    createWorkspace({ id: 'ws-random' });
-    expect(workspaceRefFor('ws-random')).toBe('workspace:2');
-    expect(resolveWorkspaceRef('workspace:2')).toMatchObject({ ok: true, id: 'ws-random', ref: 'workspace:2' });
-    moveWorkspace('ws-random', 0);
-    // Position 1 now belongs to a minted id, which the number names first.
-    expect(resolveWorkspaceRef('workspace:1')).toMatchObject({ ok: true, id: DEFAULT_WORKSPACE_ID });
-    expect(workspaceRefFor('ws-random')).toBe('workspace:1');
+  it('refs are positional only while nothing in the Window was minted', async () => {
+    await installWorkspaceIdPool(minting(7));
+    // A snapshot from before the registry: every id unminted, so refs are
+    // positions and a reorder renumbers them.
+    setWorkspaces({ workspaces: [{ id: 'ws-a', name: 'A' }, { id: 'ws-b', name: 'B' }], activeId: 'ws-a' });
+    expect(workspaceRefFor('ws-b')).toBe('workspace:2');
+    expect(resolveWorkspaceRef('workspace:2')).toMatchObject({ ok: true, id: 'ws-b', ref: 'workspace:2' });
+    moveWorkspace('ws-b', 0);
+    expect(workspaceRefFor('ws-b')).toBe('workspace:1');
+    expect(resolveWorkspaceRef('workspace:1')).toMatchObject({ ok: true, id: 'ws-b' });
+    // A Workspace already gone reports the first ref.
+    expect(workspaceRefFor('missing')).toBe('workspace:1');
+
+    // The first minted id flips the whole Window to stable refs: the number
+    // names the minted Workspace and nothing else, and an unminted one is
+    // addressed by its name, so no ref reads two ways.
+    createWorkspace({ activate: false });
+    expect(workspaceRefFor('workspace-7')).toBe('workspace:7');
+    expect(resolveWorkspaceRef('workspace:1')).toEqual({ ok: false, message: "unknown workspace target 'workspace:1'" });
+    expect(resolveWorkspaceRef('workspace:2')).toEqual({ ok: false, message: "unknown workspace target 'workspace:2'" });
+    expect(workspaceRefFor('ws-b')).toBe('workspace:B');
+    expect(resolveWorkspaceRef('workspace:B')).toMatchObject({ ok: true, id: 'ws-b', ref: 'workspace:B' });
+    expect(workspaceRefFor('missing')).toBe('workspace:B');
+  });
+
+  it('a host with no registry numbers by position, its default id included', () => {
+    // VS Code: the default `workspace-1` beside random ids, and no pool. The
+    // default is not a minted id here, so a reorder renumbers it like the rest.
+    const second = createWorkspace();
+    expect(second.id).not.toMatch(/^workspace-\d+$/);
+    expect(workspaceRefFor(DEFAULT_WORKSPACE_ID)).toBe('workspace:1');
+    expect(workspaceRefFor(second.id)).toBe('workspace:2');
+    moveWorkspace(second.id, 0);
+    expect(workspaceRefFor(second.id)).toBe('workspace:1');
+    expect(workspaceRefFor(DEFAULT_WORKSPACE_ID)).toBe('workspace:2');
+    expect(resolveWorkspaceRef('workspace:1')).toMatchObject({ ok: true, id: second.id, ref: 'workspace:1' });
+    expect(resolveWorkspaceRef('workspace:2')).toMatchObject({ ok: true, id: DEFAULT_WORKSPACE_ID, ref: 'workspace:2' });
+    // An explicit `workspace-<n>` id is no more minted than a random one.
+    createWorkspace({ id: 'workspace-7' });
+    expect(workspaceRefFor('workspace-7')).toBe('workspace:3');
+    expect(resolveWorkspaceRef('workspace:7')).toEqual({ ok: false, message: "unknown workspace target 'workspace:7'" });
   });
 
   it('mints ids from the host pool once one is installed', async () => {
-    const reserve = vi.fn(async (count: number) => Array.from({ length: count }, (_, i) => `workspace-${100 + i}`));
+    const reserve = minting(100);
     await installWorkspaceIdPool(reserve);
-    expect(reserve).toHaveBeenCalledWith(16);
+    expect(reserve).toHaveBeenCalledWith(32);
     expect(generateWorkspaceId()).toBe('workspace-100');
     expect(createWorkspace().id).toBe('workspace-101');
     expect(workspaceRefFor('workspace-101')).toBe('workspace:101');
     // Draining past the low-water mark refills in the background.
-    for (let i = 0; i < 12; i++) generateWorkspaceId();
+    for (let i = 0; i < 23; i++) generateWorkspaceId();
     await Promise.resolve();
     expect(reserve).toHaveBeenCalledTimes(2);
+  });
+
+  it('an installed pool that ran dry throws rather than mint a random id', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      let reject: (reason: Error) => void = () => {};
+      const reserve = vi.fn(() => new Promise<string[]>((_, r) => { reject = r; }));
+      const installed = installWorkspaceIdPool(reserve);
+      // The first block is still in flight.
+      expect(() => generateWorkspaceId()).toThrow('still reserving a block');
+      reject(new Error('host down'));
+      await installed;
+      // The rejection is logged, not swallowed, and the next create names it.
+      expect(error).toHaveBeenCalledWith(expect.stringContaining('did not reserve Workspace ids'), expect.any(Error));
+      expect(() => createWorkspace()).toThrow('the last reservation failed');
+      // A host with no registry falls back to a random id.
+      resetWorkspaceIdPool();
+      expect(createWorkspace().id).toMatch(/^workspace-[a-z0-9]+-\d+$/);
+    } finally {
+      error.mockRestore();
+    }
   });
 
   it('resolves a Workspace by name, and refuses an ambiguous one', () => {

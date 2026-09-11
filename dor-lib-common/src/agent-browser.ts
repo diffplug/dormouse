@@ -4,9 +4,10 @@
 // sessionForKey, never by hand.
 const BARE_WALL_SCOPE = '1';
 
-// A session name becomes a filesystem path (the daemon's socket dir), so the
-// scope is held to the same charset `dor ab --key` is.
-const UNSAFE_SCOPE_CHARS = /[^A-Za-z0-9._-]/g;
+// A session name becomes a filesystem path (the daemon's socket dir), so both
+// halves are held to the charset `dor ab --key` enforces CLI-side: the key
+// arrives over the control socket too, from clients that are not `dor`.
+const UNSAFE_SESSION_CHARS = /[^A-Za-z0-9._-]/g;
 
 /** Env var that overrides which agent-browser binary to run; shared so `dor ab`
  * and the host key off the same name. */
@@ -33,8 +34,8 @@ export function streamStatusArgs(session: string): string[] {
  * readable. Shared by `dor ab` (--key resolution) and the lib host (GUI sessions).
  */
 export function sessionForKey(key: string, workspaceId?: string): string {
-  const scope = workspaceId ? workspaceId.replace(UNSAFE_SCOPE_CHARS, '-') : BARE_WALL_SCOPE;
-  return `dormouse.${scope}.${key}`;
+  const scope = workspaceId ? workspaceId.replace(UNSAFE_SESSION_CHARS, '-') : BARE_WALL_SCOPE;
+  return `dormouse.${scope}.${key.replace(UNSAFE_SESSION_CHARS, '-')}`;
 }
 
 /**

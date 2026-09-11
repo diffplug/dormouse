@@ -222,6 +222,13 @@ Spawning External Binaries).
   so `dor ab` asks the host (`surface.resolveAgentBrowser` with `key`) before it
   forwards anything, and namespaces the key itself only when there is no control
   endpoint at all — outside Dormouse, where `dor ab` is a pure passthrough.
+  **Every managed `dor ab` invocation depends on the host answering** — a
+  passthrough verb included — with no CLI-side fallback: a refusal (a Wall still
+  mounting, a webview mid-reload, the VS Code guard) fails the command with the
+  host's message before the binary runs, and the router answers the no-Wall
+  case after its bounded retry rather than leaving `dor ab` to its deadline
+  (`docs/specs/dor-cli.md` → "Handle Model"). A CLI-namespaced fallback would
+  name the wrong Workspace's browser.
 - GUI-spawned sessions use `dormouse.1.gui-<hex>`, minted host-wide (the Window's
   one agent-browser host, not a Workspace), which no `--key` names; they
   are reachable by `dor ab --surface <handle>` (`docs/specs/dor-cli.md` →

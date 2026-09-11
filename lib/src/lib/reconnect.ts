@@ -60,10 +60,18 @@ export interface ResumePlanOptions {
  * 3. Neither → return empty (Wall creates a fresh terminal)
  */
 export async function resumeOrRestore(platform: PlatformAdapter): Promise<ReconnectResult> {
-  return resumeOrRestoreFrom(
+  const savedSession = readPersistedSession(platform.getState());
+  // The retry protects live shells from being restored over, and a record with
+  // no terminal pane has none to lose: without the gate a host whose
+  // `requestInit` answers nothing holds first paint for the whole budget
+  // (`restoreWindow` in `standalone/src/window-restore.ts` gates the same way).
+  const hasTerminalPanes =
+    savedSession?.panes.some((pane) => pane.surfaceType !== 'browser') ?? false;
+  const live = await collectLivePtys(
     platform,
-    await collectLivePtys(platform, { retryTimeoutMs: LIST_RETRY_MS }),
+    hasTerminalPanes ? { retryTimeoutMs: LIST_RETRY_MS } : {},
   );
+  return resumeOrRestoreFrom(platform, live, { savedSession });
 }
 
 /** How one collection differs from the ordinary boot one. */

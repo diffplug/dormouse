@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import type { PlatformAdapter, PtyDataDetail } from "dormouse-lib/lib/platform/types";
+import type { AlertStateDetail, PlatformAdapter, PtyDataDetail } from "dormouse-lib/lib/platform/types";
+import { getTerminalPaneState } from "dormouse-lib/lib/terminal-state-store";
 
 // Stub the Tauri modules so `./tauri-adapter` imports and constructs outside a
 // Tauri webview — same reason as tauri-adapter.test.ts. Nothing here exercises
@@ -197,6 +198,23 @@ describe("BrowserSidecarAdapter terminal stream", () => {
       { payload: { op: "initializeWatchedCommands", names: ["cargo"] } },
       { payload: { op: "initializeSettings", settings: quiet } },
     ]);
+  });
+
+  // Same contract as TauriAdapter: the replay is all a transferred pane's new
+  // window sees, so it rebuilds the AlertManager's half too.
+  it("rebuilds alert state from a replay, not only pane state", async () => {
+    const { adapter, deliver } = await listening();
+    const alerts: AlertStateDetail[] = [];
+    adapter.onAlertState((detail) => void alerts.push(detail));
+    // The rule set lives in the sidecar here: the seed goes out, its snapshot
+    // comes back, and only then does this manager watch anything.
+    adapter.alertSetWatchedCommands(["sleep"]);
+    deliver("alert:watchedCommands", { names: ["sleep"] });
+
+    deliver("pty:replay", { id: "replay-b", data: "\x1b]633;E;sleep 5\x07\x1b]633;C\x07" });
+
+    expect(getTerminalPaneState("replay-b").currentCommand?.rawCommandLine).toBe("sleep 5");
+    expect(alerts.some((detail) => detail.id === "replay-b" && detail.watchingEnabled)).toBe(true);
   });
 
   it("pushes the resolved theme so the sidecar can answer a colour query", async () => {

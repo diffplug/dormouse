@@ -134,6 +134,10 @@ export function WorkspaceStrip({
     const onKeyDown = (event: KeyboardEvent) => {
       event.preventDefault();
       event.stopPropagation();
+      // A bare modifier is not an answer: `handleDualTap` consumes Meta and
+      // Shift before the pane kill confirmation sees them, so neither may
+      // dismiss this one either.
+      if (event.key === 'Shift' || event.key === 'Meta') return;
       setPendingWorkspaceClose(null);
       if (acceptsKillChar(event.key, char)) void closeWorkspaceWithSurfaces(id);
     };
@@ -142,19 +146,25 @@ export function WorkspaceStrip({
   }, [pendingClose]);
 
   // The move gate is the same typed letter: the page state it destroys is as
-  // gone as a killed pane's process.
+  // gone as a killed pane's process. It waits behind a close confirmation,
+  // which the render below shows instead: the letter on screen is the close's,
+  // and a key typed at it must reach that handler alone — the two are siblings
+  // on one node, so `stopPropagation` would not keep it from this one.
   useEffect(() => {
-    if (!pendingMove) return;
+    if (!pendingMove || pendingClose) return;
     const { char, proceed } = pendingMove;
     const onKeyDown = (event: KeyboardEvent) => {
       event.preventDefault();
       event.stopPropagation();
+      // handleDualTap consumes a bare Shift or Meta before the pane kill
+      // confirmation sees it; the strip's own listener keeps the same rule.
+      if (event.key === 'Shift' || event.key === 'Meta') return;
       setPendingWorkspaceMove(null);
       if (acceptsKillChar(event.key, char)) proceed();
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [pendingMove]);
+  }, [pendingMove, pendingClose]);
 
   // Anchored to the Window's content area, not the tab: a 24px tab is too small
   // a box to center a dialog over, and every Wall shares one grid cell, so the
@@ -303,6 +313,9 @@ const WorkspaceTab = memo(function WorkspaceTab({
       )}
       style={dragging ? { opacity: 0.6 } : undefined}
       onPointerDown={(event) => {
+        // The close button has its own click, and a press inside the open rename
+        // editor is a text selection — neither may start a reorder drag.
+        if (renaming) return;
         if (event.target instanceof Element && event.target.closest('[data-workspace-tab-close]')) return;
         onPress(id, event);
       }}

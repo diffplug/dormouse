@@ -19,6 +19,7 @@ import type {
 } from './types.js';
 import {
   errorMessage,
+  parseNonNegativeInt,
   renderJson,
   requireControlClient,
   stringParser,
@@ -112,7 +113,7 @@ new creates a Workspace in the background and prints its ref: it never moves the
 
 close archives and kills every Surface in the Workspace. It refuses — raising no confirmation, because the caller is a command rather than someone watching the Wall — when the Workspace holds a Surface the user has typed into or a running command; --force closes it anyway. The last remaining Workspace cannot be closed.
 
-move puts a Workspace in another window (--window <label>, or --window new to tear it out into its own) and/or at a strip position (--index <n>, 0-based). Nothing is archived or killed: its terminals, notes, and pins travel whole. The one thing a move between windows cannot carry is a plain iframe's page state — the document cannot leave its webview, so the iframe reopens at its saved URL — and the move is refused when the Workspace holds one unless --dangerously-destroy-iframe-page-state is passed. Agent-browser Surfaces are not affected.
+move puts a Workspace in another window (--window <label>, or --window new to tear it out into its own) and/or at a strip position (--index <n>, 0-based; with --window, a position in that window's strip). Nothing is archived or killed: its terminals, notes, and pins travel whole. "moved" is printed only once the target window has adopted the Workspace; one it hands back (it closed mid-transfer, or never answered) is an error naming the reason, and the Workspace stays where it was. The one thing a move between windows cannot carry is a plain iframe's page state — the document cannot leave its webview, so the iframe reopens at its saved URL — and the move is refused when the Workspace holds one unless --dangerously-destroy-iframe-page-state is passed. Agent-browser Surfaces are not affected.
 
 Text output:
   created workspace:2 "build"
@@ -132,7 +133,7 @@ JSON output:
         force: { kind: 'boolean', brief: 'Close even when the Workspace holds running or touched Surfaces.', optional: true, withNegated: false },
         json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
         window: { kind: 'parsed', parse: stringParser, brief: 'move: the window to move to (a label, or "new").', optional: true, placeholder: 'label' },
-        index: { kind: 'parsed', parse: indexParser, brief: 'move: the 0-based strip position to move to.', optional: true, placeholder: 'n' },
+        index: { kind: 'parsed', parse: (value) => parseNonNegativeInt(value, '--index'), brief: 'move: the 0-based strip position to move to.', optional: true, placeholder: 'n' },
         dangerouslyDestroyIframePageState: { kind: 'boolean', brief: 'move: accept losing every iframe Surface\'s page state.', optional: true, withNegated: false },
       },
       positional: {
@@ -178,12 +179,6 @@ async function runWorkspaceCommand(
   } catch (error) {
     return new Error(errorMessage(error));
   }
-}
-
-function indexParser(value: string): number {
-  const index = Number(value);
-  if (!Number.isInteger(index) || index < 0) throw new Error(`--index must be a non-negative integer, got '${value}'`);
-  return index;
 }
 
 function parseAction(value: string | undefined): ParseResult<WorkspaceAction> {
