@@ -90,6 +90,18 @@ describe('resumeOrRestore', () => {
     vi.clearAllMocks();
   });
 
+  it('resumes an explicitly listed exited buffer without restarting its shell', async () => {
+    const platform = createPlatform([{ id: 'exited', alive: false, exitCode: 7 }], null);
+    const live = await collectLivePtys(platform);
+    expect(live.timedOut).toBe(false);
+    expect(live.replay.get('exited')).toBe('exited-replay');
+    const result = resumeOrRestoreFrom(platform, live);
+    expect(result.paneIds).toEqual(['exited']);
+    expect(terminalRegistryMocks.resumeTerminal).toHaveBeenCalledWith('exited', 'exited-replay', { alive: false, exitCode: 7 });
+    expect(terminalRegistryMocks.restoreTerminal).not.toHaveBeenCalled();
+    expect(platform.spawnPty).not.toHaveBeenCalled();
+  });
+
   it('restores helpers outside the primary layout and disarms autorun', async () => {
     const layout = lathLayoutFor('parent');
     const helper = { parentId: 'parent', command: 'git status' };

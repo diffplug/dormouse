@@ -210,27 +210,51 @@ impl WindowState {
             .store(routing.awaiting_replay.len(), Ordering::Relaxed);
     }
 
-    /// Open a transfer's marking phase: ownership is the target's, but every
-    /// byte keeps reaching `source` until the sidecar's `marked` line passes
-    /// (§Transfer). Suppression begins at that line, not here.
-    fn begin_marking(&self, ids: &[String], source: &str) {
+    /// Move ownership and open source routing under one lock, before any chunk
+    /// can observe the target owner without the source's marking phase.
+    fn begin_transfer(&self, ids: &[String], source: &str, target: &str) {
         let mut routing = guard(&self.routing);
         for id in ids {
+            if let Some(owner) = routing.owners.get_mut(id) {
+                *owner = target.to_string();
+            }
+            routing.lift_suppression(id);
             routing.transfer_marks.remove(id);
             routing.marking.insert(id.clone(), source.to_string());
         }
+        self.suppressed.store(routing.awaiting_replay.len(), Ordering::Relaxed);
     }
 
-    /// Forget one PTY entirely (a kill, or its exit).
-    fn forget_pty(&self, id: &str) {
+    /// Drain the source cuts and return only still-live ownership. An exited
+    /// id gets its retained replay by explicit address, never a phantom owner.
+    fn hand_back(&self, ids: &[String], source: &str) -> JsonValue {
+        let mut routing = guard(&self.routing);
+        let mut marks = serde_json::Map::new();
+        for id in ids {
+            let mark = routing.transfer_marks.remove(id);
+            if let Some(mark) = mark { marks.insert(id.clone(), JsonValue::from(mark)); }
+            routing.marking.remove(id);
+            if let Some(owner) = routing.owners.get_mut(id) {
+                *owner = source.to_string();
+                if mark.is_some() { routing.awaiting_replay.insert(id.clone(), Instant::now()); }
+                else { routing.lift_suppression(id); }
+            }
+        }
+        self.suppressed.store(routing.awaiting_replay.len(), Ordering::Relaxed);
+        JsonValue::Object(marks)
+    }
+
+    fn forget_pty(&self, id: &str) { self.remove_pty(id, false); }
+    fn exited_pty(&self, id: &str) { self.remove_pty(id, true); }
+
+    fn remove_pty(&self, id: &str, keep_cut: bool) {
         let mut routing = guard(&self.routing);
         routing.owners.remove(id);
         routing.lift_suppression(id);
         routing.marking.remove(id);
-        // An exited PTY still has replay bytes; keep its source cut until
-        // adoption or hand-back settles the arrival.
-        self.suppressed
-            .store(routing.awaiting_replay.len(), Ordering::Relaxed);
+        // Natural exit retains the sidecar buffer; explicit kill discards it.
+        if !keep_cut { routing.transfer_marks.remove(id); }
+        self.suppressed.store(routing.awaiting_replay.len(), Ordering::Relaxed);
     }
 
     /// Drop any suppression on `ids`, leaving ownership alone. What settles an
@@ -440,7 +464,7 @@ fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
     match event {
         "pty:exit" => {
             if let Some(id) = id() {
-                state.forget_pty(id);
+                state.exited_pty(id);
             }
         }
         // The source has been sent everything before the mark; from here the
@@ -2812,8 +2836,7 @@ fn begin_arrival(
             ));
         }
         // Ownership moves now; suppression waits for each id's `marked` line.
-        windows.reassign(&arrival.terminal_ids, &arrival.to, false);
-        windows.begin_marking(&arrival.terminal_ids, &arrival.from);
+        windows.begin_transfer(&arrival.terminal_ids, &arrival.from, &arrival.to);
         routing::queue_arrival(&mut arrivals, arrival.clone());
     }
     // The split point, stamped in the stream by the sidecar and routed to the
@@ -2900,19 +2923,8 @@ fn hand_back_arrival(
                 append_log(format!("[window] could not record hand-back: {e}"));
             }
         }
-        let marks = {
-            let mut routing = guard(&windows.routing);
-            let mut marks = serde_json::Map::new();
-            for id in &arrival.terminal_ids {
-                if let Some(mark) = routing.transfer_marks.remove(id) {
-                    marks.insert(id.clone(), JsonValue::from(mark));
-                }
-            }
-            JsonValue::Object(marks)
-        };
-        let (marked, unmarked) = routing::hand_back_ids(arrival, &marks);
-        windows.reassign(&unmarked, &arrival.from, false);
-        windows.reassign(&marked, &arrival.from, true);
+        let marks = windows.hand_back(&arrival.terminal_ids, &arrival.from);
+        let (marked, _) = routing::hand_back_ids(arrival, &marks);
         // Told before the replay is asked for, so the source is listening for
         // it (`acceptHandBackReplay` in `standalone/src/workspace-move.ts`).
 
@@ -4469,11 +4481,39 @@ mod tests {
     fn a_pty_exit_keeps_its_cut_until_the_arrival_settles() {
         let windows = super::WindowState::default();
         windows.mint("t1", "main");
-        windows.begin_marking(&["t1".to_string()], "main");
+        windows.begin_transfer(&["t1".to_string()], "main", "ws-2");
+        guard(&windows.routing).mark_transfer("t1", 42);
+        windows.exited_pty("t1");
+        assert_eq!(guard(&windows.routing).transfer_marks.get("t1"), Some(&42));
+        assert_eq!(windows.hand_back(&["t1".to_string()], "main")["t1"], 42);
+        let routing = guard(&windows.routing);
+        assert!(!routing.transfer_marks.contains_key("t1"));
+        assert!(!routing.owners.contains_key("t1"));
+        assert!(!routing.awaiting_replay.contains_key("t1"));
+    }
+
+    #[test]
+    fn transfer_ownership_and_source_routing_change_together() {
+        let windows = super::WindowState::default();
+        windows.mint("t1", "main");
+        windows.begin_transfer(&["t1".to_string()], "main", "ws-2");
+        let state = guard(&windows.routing);
+        let view = super::RouteView {
+            owners: &state.owners, awaiting_replay: &state.awaiting_replay,
+            dor_targets: &state.dor_targets, registry: &super::workspaces::Registry::default(),
+            marking: &state.marking,
+        };
+        assert_eq!(state.owners.get("t1").map(String::as_str), Some("ws-2"));
+        assert!(matches!(super::routing::route("pty:data", &serde_json::json!({"id": "t1", "data": "before-mark"}), &view), super::routing::Route::EmitTo("main")));
+    }
+
+    #[test]
+    fn explicit_kill_discards_a_cut_with_its_buffer() {
+        let windows = super::WindowState::default();
+        windows.mint("t1", "main");
+        windows.begin_transfer(&["t1".to_string()], "main", "ws-2");
         guard(&windows.routing).mark_transfer("t1", 42);
         windows.forget_pty("t1");
-        assert_eq!(guard(&windows.routing).transfer_marks.get("t1"), Some(&42));
-        windows.clear_suppression(&["t1".to_string()]);
         assert!(!guard(&windows.routing).transfer_marks.contains_key("t1"));
     }
 
