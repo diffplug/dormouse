@@ -1,8 +1,13 @@
 export type BrowserSidecarEvent = { event: string; data: unknown };
 
 export class BrowserSidecarHost {
+  /** How long `init()` waits for the stream to open before giving up. */
+  static readonly OPEN_TIMEOUT_MS = 10_000;
+
   private events: EventSource | null = null;
+  private ready: Promise<void> | null = null;
   private readonly eventHandlers = new Set<(event: BrowserSidecarEvent) => void>();
+  private readonly reconnectHandlers = new Set<() => void>();
   private nextId = 1;
 
   constructor(private readonly baseUrl: string) {}
@@ -24,27 +29,74 @@ export class BrowserSidecarHost {
     return url;
   }
 
-  async init(): Promise<void> {
-    if (this.events) return;
+  /**
+   * Resolves once the SSE stream is *open*, not once the `EventSource` is
+   * constructed. The bridge registers a stream in `sseClients` when the GET
+   * arrives, and the app's first act after `init()` is to POST the two alert
+   * seeds whose replies come back only over that stream — a POST that beat
+   * the GET would be answered to nobody (docs/specs/transport.md ->
+   * "Standalone browser-dev harness"). Tauri awaits its listener
+   * registration for the same reason.
+   */
+  init(): Promise<void> {
+    if (this.ready) return this.ready;
     const url = this.url('/__dormouse_dev_host/events');
-    this.events = new EventSource(url);
-    this.events.addEventListener('sidecar', (event) => {
+    const events = new EventSource(url);
+    this.events = events;
+    events.addEventListener('sidecar', (event) => {
       const parsed = JSON.parse((event as MessageEvent).data) as BrowserSidecarEvent;
       this.deliver(parsed);
     });
-    this.events.onerror = () => {
-      console.error('[browser-sidecar] event stream disconnected');
-    };
+    this.ready = new Promise<void>((resolve, reject) => {
+      let opened = false;
+      const giveUp = (why: string) => {
+        clearTimeout(timer);
+        events.close();
+        reject(new Error(`[browser-sidecar] event stream ${why}`));
+      };
+      const timer = setTimeout(
+        () => giveUp(`did not open within ${BrowserSidecarHost.OPEN_TIMEOUT_MS}ms`),
+        BrowserSidecarHost.OPEN_TIMEOUT_MS,
+      );
+      events.addEventListener('open', () => {
+        if (!opened) {
+          opened = true;
+          clearTimeout(timer);
+          resolve();
+          return;
+        }
+        // The browser reconnected on its own after a drop. The bridge's
+        // fan-out set forgot this client in between, so anything it would
+        // have broadcast is gone; subscribers re-ask for what they need.
+        for (const handler of this.reconnectHandlers) handler();
+      });
+      events.addEventListener('error', () => {
+        if (!opened) {
+          giveUp('failed before it opened');
+          return;
+        }
+        console.error('[browser-sidecar] event stream disconnected');
+      });
+    });
+    return this.ready;
   }
 
   close(): void {
     this.events?.close();
     this.events = null;
+    this.ready = null;
   }
 
   onEvent(handler: (event: BrowserSidecarEvent) => void): () => void {
     this.eventHandlers.add(handler);
     return () => this.eventHandlers.delete(handler);
+  }
+
+  /** Fires on every `open` after the first — the stream was dropped and the
+   *  browser re-established it. Not on the initial open; `init()` covers that. */
+  onReconnect(handler: () => void): () => void {
+    this.reconnectHandlers.add(handler);
+    return () => this.reconnectHandlers.delete(handler);
   }
 
   send(cmd: string, args?: Record<string, unknown>): void {

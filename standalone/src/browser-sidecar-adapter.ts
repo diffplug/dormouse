@@ -76,7 +76,14 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   private alertSettingsHandlers = new Set<(settings: AlertSettings) => void>();
   private alertManager = new AlertManager();
   private unlistenHost: (() => void) | null = null;
+  private unlistenReconnect: (() => void) | null = null;
   private unlistenRegistry: (() => void) | null = null;
+  // The seeds this renderer last offered, keyed by op. The SSE stream is the
+  // only way a store's snapshot reaches this adapter, and a dropped stream
+  // takes the bridge's fan-out entry with it; re-offering the seeds after a
+  // reconnect makes the sidecar republish both stores (a repeat seed is
+  // ignored as a seed but still answered with the canonical snapshot).
+  private readonly alertSeeds = new Map<string, Record<string, unknown>>();
   private onRegistrySnapshot: ((snapshot: WorkspaceRegistrySnapshot) => void) | null = null;
   private static STATE_KEY = 'dormouse.browser-sidecar.session';
   private windowSlot = windowStateSlot(localStorage, BrowserSidecarAdapter.STATE_KEY, 'browser-sidecar');
@@ -116,6 +123,9 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   async init(): Promise<void> {
     await this.host.init();
     this.unlistenHost = this.host.onEvent(({ event, data }) => this.handleHostEvent(event, data));
+    this.unlistenReconnect = this.host.onReconnect(() => {
+      for (const payload of this.alertSeeds.values()) this.host.send("alert_command", { payload });
+    });
     this.installConsoleForwarder();
     this.unlistenRegistry = await installWorkspaceRegistry({
       invoke: (cmd, args) => this.host.invoke(cmd, args),
@@ -137,6 +147,8 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     this.alertManager.dispose();
     this.unlistenHost?.();
     this.unlistenHost = null;
+    this.unlistenReconnect?.();
+    this.unlistenReconnect = null;
     this.unlistenRegistry?.();
     this.unlistenRegistry = null;
     this.burrowClient.dispose();
@@ -325,15 +337,18 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   // path the shipped app takes (see TauriAdapter), so the harness exercises
   // the seed-once and delta rules rather than a private copy of the state.
   alertSetWatchedCommands(names: string[]): void {
-    this.host.send("alert_command", { payload: { op: "initializeWatchedCommands", names } });
+    this.sendAlertSeed({ op: "initializeWatchedCommands", names });
   }
   alertSetCommandWatched(name: string, watched: boolean): void {
     this.host.send("alert_command", { payload: { op: "setCommandWatched", name, watched } });
   }
   alertPublishSettings(settings: AlertSettings, opts: { seed: boolean }): void {
-    this.host.send("alert_command", {
-      payload: { op: opts.seed ? "initializeSettings" : "updateSettings", settings },
-    });
+    if (opts.seed) this.sendAlertSeed({ op: "initializeSettings", settings });
+    else this.host.send("alert_command", { payload: { op: "updateSettings", settings } });
+  }
+  private sendAlertSeed(payload: { op: string } & Record<string, unknown>): void {
+    this.alertSeeds.set(payload.op, payload);
+    this.host.send("alert_command", { payload });
   }
   alertDismiss(id: string): void { this.alertManager.dismissAlert(id); }
   alertAttend(id: string): void { this.alertManager.attend(id); }
