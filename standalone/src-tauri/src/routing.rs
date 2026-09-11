@@ -159,6 +159,9 @@ pub fn route<'a>(event: &str, data: &'a JsonValue, view: &RouteView<'a>) -> Rout
         },
         // Never suppressed: a replay is exactly what the suppression is waiting
         // for, and the caller lifts the suppression after this emit.
+        "pty:replay" if str_field(data, "forWindow").is_some() => {
+            Route::EmitTo(str_field(data, "forWindow").unwrap())
+        }
         "pty:exit" | "pty:replay" => match str_field(data, "id") {
             Some(id) => owner(view.owners, id),
             None => Route::Broadcast,
@@ -695,6 +698,9 @@ mod tests {
             ),
             ("pty:exit", json!({"id":"b"}), Route::EmitTo("ws-2")),
             ("pty:replay", json!({"id":"a"}), Route::EmitTo("main")),
+            ("pty:replay", json!({"id":"exited", "forWindow":"ws-2"}), Route::EmitTo("ws-2")),
+            ("pty:replay", json!({"id":"b", "forWindow":"main"}), Route::EmitTo("main")),
+            ("pty:replay", json!({"id":"exited"}), Route::Drop),
             (
                 "pty:list",
                 json!({"forWindow":"ws-2","ptys":[]}),
