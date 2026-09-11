@@ -130,11 +130,11 @@ On a failed archive:
 
 **An in-place replacement keeps the notepad instead of archiving it.** Renderer swaps, browser/terminal mode changes, and shell replacement each mint a new Surface id, so the notes migrate with the ref wherever `transferSurfaceRef` runs; pins into the disposed terminal are dropped on the way.
 
-**A Workspace closure routes every member Surface through the coordinator**, one at a time, and the first refusal stops it with that Workspace intact (`docs/specs/layout.md` → Workspaces).
+**A Workspace closure routes every member Surface through the coordinator**, one at a time, in the closure mode its caller gives, and the first refusal stops it with that Workspace intact (`docs/specs/layout.md` → Workspaces). A user gesture — the strip, the command-mode key — closes in `prompt` mode and a refusal **reveals** the Workspace, the archive-failure prompt being on its Wall. `dor workspace close` closes in `silent` mode: like `dor kill`, **it raises no prompt, leaves the Workspace open and un-revealed, and returns the error to the caller** (`docs/specs/dor-cli.md` → "dor workspace", the `close` row).
 
 **Each mounted Wall registers one Surface-metadata resolver**, and a Wall answers `null` for a Surface it does not own, so the first non-null answer is the owning Workspace's — a batch and the volatile mirror describe a Surface identically no matter which Workspace holds it.
 
-Source of truth: `archiveSurfaceNotes` in `lib/src/lib/notepad/close-coordinator.ts`; `closeSurface` / `killPaneImmediately` / `closeAll` in `lib/src/components/Wall.tsx`; `NotepadArchiveFailureModal` in `lib/src/components/NotepadArchiveFailure.tsx`; `beginClosing`, `transferNotepad` and `registerNotepadSurfaceMetaResolver` in `lib/src/lib/notepad/notepad-store.ts`; `useSurfaceClosing` in `lib/src/components/use-notepad.ts`.
+Source of truth: `archiveSurfaceNotes` in `lib/src/lib/notepad/close-coordinator.ts`; `closeSurface` / `killPaneImmediately` / `closeAll` in `lib/src/components/Wall.tsx`; `closeWorkspaceWithSurfaces` in `lib/src/components/wall/workspace-lifecycle.ts`; `NotepadArchiveFailureModal` in `lib/src/components/NotepadArchiveFailure.tsx`; `beginClosing`, `transferNotepad` and `registerNotepadSurfaceMetaResolver` in `lib/src/lib/notepad/notepad-store.ts`; `useSurfaceClosing` in `lib/src/components/use-notepad.ts`.
 
 ## Standalone quit
 

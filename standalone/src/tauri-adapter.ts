@@ -390,6 +390,15 @@ export class TauriAdapter implements PlatformAdapter {
     } catch { return []; }
   }
 
+  /** Every terminal of a listing in one round trip, so a `dor list --ports` that
+   *  spans Workspaces costs the sidecar one process scan rather than one per
+   *  terminal. Fails soft to no ports, exactly as the per-id call does. */
+  async getOpenPortsMany(ids: string[]): Promise<Record<string, OpenPort[]>> {
+    try {
+      return await rawInvoke<Record<string, OpenPort[]>>("pty_get_open_ports_many", { ids });
+    } catch { return {}; }
+  }
+
   async readClipboardFilePaths(): Promise<string[] | null> {
     try {
       return await rawInvoke<string[]>("read_clipboard_file_paths");

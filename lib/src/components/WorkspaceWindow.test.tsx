@@ -330,6 +330,32 @@ describe('WorkspaceWindow', () => {
     expect(leafIdsIn('ws-2')).toEqual([]);
   });
 
+  it('names each Workspace its own agent-browser session for the same --key', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await render();
+    await act(async () => { createWorkspace({ id: 'ws-2', name: 'build' }); });
+    await flush();
+
+    /** `dor ab --key default` asking whichever Workspace will hold the browser
+     *  what that key's session is called. */
+    const sessionFor = (workspaceId: string): string => {
+      const respond = vi.fn();
+      getWallHandle(workspaceId)!.handleDorControl({
+        requestId: 'r1',
+        method: SURFACE_CONTROL_METHODS.resolveAgentBrowser,
+        params: { key: 'default' },
+        respond,
+      });
+      expect(respond).toHaveBeenCalledWith({ ok: true, result: { session: expect.any(String) } });
+      return respond.mock.calls[0][0].result.session;
+    };
+
+    // One `--key default` per Workspace, not one shared browser: the session
+    // name carries the Workspace's stable id.
+    expect(sessionFor(first)).toBe(`dormouse.${first}.default`);
+    expect(sessionFor('ws-2')).toBe('dormouse.ws-2.default');
+  });
+
   it('keeps a hidden Workspace out of the window keyboard: its kill confirm outlives an Escape next door', async () => {
     vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
     const first = getWorkspacesSnapshot().workspaces[0].id;

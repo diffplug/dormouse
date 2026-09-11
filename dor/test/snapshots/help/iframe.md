@@ -4,7 +4,7 @@ Invocation: `dor iframe --help`
 
 ```text
 USAGE
-  dor iframe [--json] [--minimize] [--surface id|ref] <target>
+  dor iframe [--json] [--minimize] [--surface id|ref] [--workspace ref] <target>
   dor iframe --help
 
 Opens a target in a high-fidelity iframe surface for human inspection.
@@ -37,11 +37,12 @@ JSON output:
   }
 
 FLAGS
-     [--json]      Print JSON output.
-     [--minimize]  Create or replace the surface minimized.
-     [--surface]   Surface to replace or split from.
-  -h  --help       Print help information and exit
-      --           All subsequent inputs should be interpreted as arguments
+     [--json]       Print JSON output.
+     [--minimize]   Create or replace the surface minimized.
+     [--surface]    Surface to replace or split from.
+     [--workspace]  Workspace to act in, instead of the caller's.
+  -h  --help        Print help information and exit
+      --            All subsequent inputs should be interpreted as arguments
 
 ARGUMENTS
   target  URL, host:port, :port, or surface handle to open.

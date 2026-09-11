@@ -1,9 +1,9 @@
 /**
  * @vitest-environment jsdom
  */
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { handleWorkspaceShortcuts } from './handle-workspace-shortcuts';
-import { resetWallHandles } from '../wall-handles';
+import { registerWallHandle, resetWallHandles, stubWallHandle } from '../wall-handles';
 import { getWorkspaceUiSnapshot, resetWorkspaceUi } from '../../../lib/workspace-ui-store';
 import {
   createWorkspace,
@@ -66,17 +66,30 @@ describe('handleWorkspaceShortcuts', () => {
     expect(getActiveWorkspaceId()).toBe(first);
   });
 
-  it('opens the strip rename editor and close flow on the ACTIVE Workspace', () => {
-    createWorkspace({ id: 'ws-2' });
-    handleWorkspaceShortcuts(keydown('$'), ctx);
-    expect(getWorkspaceUiSnapshot().renamingId).toBe('ws-2');
+  it('opens the strip rename editor and close flow on the ACTIVE Workspace', async () => {
+    vi.useFakeTimers();
+    try {
+      const [first] = ids();
+      createWorkspace({ id: 'ws-2' });
+      handleWorkspaceShortcuts(keydown('$'), ctx);
+      expect(getWorkspaceUiSnapshot().renamingId).toBe('ws-2');
 
-    // No Wall is mounted, so nothing is touched and the close goes straight
-    // through — but the last Workspace still cannot be closed.
-    handleWorkspaceShortcuts(keydown('&'), ctx);
-    expect(ids()).toEqual([getWorkspacesSnapshot().workspaces[0].id]);
-    handleWorkspaceShortcuts(keydown('&'), ctx);
-    expect(ids()).toHaveLength(1);
+      // No Wall has registered yet — `&` right after `c` — so the close waits
+      // for it rather than being refused unseen; nothing in the Wall is
+      // touched, so it then goes straight through — but the last Workspace
+      // still cannot be closed.
+      handleWorkspaceShortcuts(keydown('&'), ctx);
+      expect(ids()).toEqual([first, 'ws-2']);
+      registerWallHandle(stubWallHandle(first));
+      registerWallHandle(stubWallHandle('ws-2'));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(ids()).toEqual([first]);
+      handleWorkspaceShortcuts(keydown('&'), ctx);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(ids()).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('claims the key it handles and leaves every other one alone', () => {

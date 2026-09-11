@@ -24,7 +24,7 @@ import type {
   DorCommandContext,
   ParseResult,
 } from './types.js';
-import { errorMessage, fail, requireControlClient, stringParser } from './shared.js';
+import { errorMessage, fail, requireControlClient, stringParser, workspaceFlag, workspaceParam } from './shared.js';
 import {
   inferredHttpUrl,
   isSpecialOpenTarget,
@@ -70,26 +70,31 @@ export const agentBrowserCommand: Command = {
   helpPatches: [
     {
       scope: 'root',
-      findReplace: ['agent-browser [--key name] [--session name] [--surface handle]<TO-EOL>', 'agent-browser [--key name|--session name|--surface handle] [args...]\n'],
+      findReplace: ['agent-browser [--key name] [--session name] [--surface handle]<TO-EOL>', 'agent-browser [--key name|--session name|--surface handle] [--workspace ref] [args...]\n'],
     },
     {
       scope: 'command-usage',
-      findReplace: ['agent-browser [--key name] [--session name] [--surface handle]<TO-EOL>', 'agent-browser [--key name|--session name|--surface handle] [args...]\n'],
+      findReplace: ['agent-browser [--key name] [--session name] [--surface handle]<TO-EOL>', 'agent-browser [--key name|--session name|--surface handle] [--workspace ref] [args...]\n'],
     },
   ],
-  command: buildCommand<{ key?: string; session?: string; surface?: string }, [...args: string[]], DorCommandContext>({
+  command: buildCommand<{ key?: string; session?: string; surface?: string; workspace?: string }, [...args: string[]], DorCommandContext>({
     docs: {
       brief: 'Drive a browser surface via your agent-browser install (alias: dor ab).',
       fullDescription: `Forwards all arguments verbatim to your own agent-browser binary and binds the session to a Dormouse browser surface.
 
 dor intercepts exactly three mutually exclusive identity flags:
   --key <name>       Managed, workspace-scoped browser identity (default "default").
-                     Maps to agent-browser session dormouse.1.<name>.
+                     Maps to agent-browser session dormouse.<workspace>.<name>,
+                     so the same key in another Workspace is another browser.
   --session <name>   Attach to a raw agent-browser session by its literal name.
   --surface <handle> Drive the browser Surface a handle names (surface:N,
                      surface:focused, a stable id, title:<title>). dor asks the
                      host which agent-browser session that Surface is bound to,
                      which is the only way to address a GUI-spawned session.
+
+It also intercepts --workspace <ref>, which is not an identity: it says which
+Workspace of this Window the browser Surface is opened in and which one a
+handle resolves against (workspace:<n> or workspace:<name>).
 
 Everything else — subcommands, flags, selectors — is agent-browser's own
 command surface. The binary is resolved from PATH (override with
@@ -120,6 +125,7 @@ Examples:
         key: { kind: 'parsed', parse: stringParser, brief: 'Workspace-scoped browser key (default "default").', optional: true, placeholder: 'name' },
         session: { kind: 'parsed', parse: stringParser, brief: 'Raw agent-browser session name (mutually exclusive with --key/--surface).', optional: true, placeholder: 'name' },
         surface: { kind: 'parsed', parse: stringParser, brief: 'Surface handle whose bound session to drive (mutually exclusive with --key/--session).', optional: true, placeholder: 'handle' },
+        workspace: workspaceFlag,
       },
       positional: {
         kind: 'array',
@@ -127,7 +133,7 @@ Examples:
         minimum: 0,
       },
     },
-    func: async function (this: DorCommandContext, _flags: { key?: string; session?: string; surface?: string }, ..._args: string[]): Promise<void | Error> {
+    func: async function (this: DorCommandContext, _flags: { key?: string; session?: string; surface?: string; workspace?: string }, ..._args: string[]): Promise<void | Error> {
       // runCli intercepts every non-help agent-browser invocation before
       // stricli; reaching this func means that interception regressed.
       return new Error('internal: agent-browser passthrough was not intercepted');
@@ -138,26 +144,30 @@ Examples:
 /** The three identity flags dor intercepts, in the order they are reported when
  *  more than one is given. */
 const IDENTITY_FLAGS = ['--key', '--session', '--surface'] as const;
-type IdentityFlag = (typeof IDENTITY_FLAGS)[number];
 
-/** Either a session known CLI-side (from `--session`, or namespaced from
- *  `--key`) or a Surface handle for the host to resolve — never neither, never
- *  both. A union rather than two optionals so the arm that has no session is
- *  the arm that has a surface, by construction. `key` rides along only when it
- *  named the session: a raw or surface-addressed session may be GUI-minted,
- *  which no key names. */
-type ResolvedSessionFlags = { rest: string[] } & (
-  | { session: string; key?: string; surface?: undefined }
+/** Every flag dor takes out of the forwarded argv: the identities plus the
+ *  container, which names a Workspace rather than a browser. */
+const INTERCEPTED_FLAGS = [...IDENTITY_FLAGS, '--workspace'] as const;
+type InterceptedFlag = (typeof INTERCEPTED_FLAGS)[number];
+
+/** How the browser was named: a raw session known CLI-side, a managed `--key`
+ *  the host namespaces under the target Workspace, or a Surface handle the host
+ *  resolves — exactly one of the three, by construction. `key` rides along only
+ *  when it named the session: a raw or surface-addressed session may be
+ *  GUI-minted, which no key names. */
+type ResolvedSessionFlags = { rest: string[]; workspace?: string } & (
+  | { session: string; key?: undefined; surface?: undefined }
+  | { key: string; session?: undefined; surface?: undefined }
   | { surface: string; session?: undefined; key?: undefined }
 );
 
 export function extractSessionFlags(args: string[]): ParseResult<ResolvedSessionFlags> {
-  const values = new Map<IdentityFlag, string>();
+  const values = new Map<InterceptedFlag, string>();
   const rest: string[] = [];
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index] ?? '';
-    const flag = IDENTITY_FLAGS.find((name) => arg === name || arg.startsWith(`${name}=`));
+    const flag = INTERCEPTED_FLAGS.find((name) => arg === name || arg.startsWith(`${name}=`));
     if (!flag) {
       rest.push(arg);
       continue;
@@ -191,14 +201,17 @@ export function extractSessionFlags(args: string[]): ParseResult<ResolvedSession
     return { ok: false, message: `--key must match ${KEY_PATTERN} (it becomes part of an agent-browser session name)` };
   }
 
+  const workspace = workspaceParam(values.get('--workspace'));
+
   const surface = values.get('--surface');
-  if (surface !== undefined) return { ok: true, value: { surface, rest } };
+  if (surface !== undefined) return { ok: true, value: { surface, rest, ...workspace } };
 
   const session = values.get('--session');
-  if (session !== undefined) return { ok: true, value: { session, rest } };
+  if (session !== undefined) return { ok: true, value: { session, rest, ...workspace } };
 
-  const resolvedKey = key ?? 'default';
-  return { ok: true, value: { key: resolvedKey, session: sessionForKey(resolvedKey), rest } };
+  // The key's session name belongs to the Workspace that will hold the browser,
+  // so it is resolved host-side rather than built here (`resolveSession`).
+  return { ok: true, value: { key: key ?? 'default', rest, ...workspace } };
 }
 
 export async function runAgentBrowserCli(args: string[], options: CliOptions): Promise<CliResult> {
@@ -217,7 +230,7 @@ export async function runAgentBrowserCli(args: string[], options: CliOptions): P
   // `dor ab open <target>` accepts a Surface handle / bare :port wherever it
   // takes a URL; resolve it to a URL before forwarding, because agent-browser
   // only understands URLs. Every other command's args pass through untouched.
-  const resolvedRest = await resolveOpenTargetArgs(flags.value.rest, options);
+  const resolvedRest = await resolveOpenTargetArgs(flags.value.rest, options, flags.value.workspace);
   if (!resolvedRest.ok) return fail(resolvedRest.message);
   const rest = resolvedRest.value;
 
@@ -268,6 +281,7 @@ export async function runAgentBrowserCli(args: string[], options: CliOptions): P
           session,
           wsPort,
           ...(binaryPath ? { binaryPath } : {}),
+          ...workspaceParam(flags.value.workspace),
         });
       } catch (error) {
         stderrSuffix = `Warning: could not open the Dormouse browser surface: ${errorMessage(error)}\n`;
@@ -283,13 +297,23 @@ export async function runAgentBrowserCli(args: string[], options: CliOptions): P
 }
 
 /**
- * The agent-browser session to forward: the one the flags already produced, or —
- * for `--surface <handle>` — the one the host says that Surface is bound to
- * (`surface.resolveAgentBrowser`). A handle needs a live control endpoint, and
- * the host owns the gating: the target must have a browser, and that browser
- * must be agent-browser-rendered with a session (an `iframe` renderer has no
- * session to drive). Its messages are printed verbatim; dor does not
- * re-interpret them.
+ * The agent-browser session to forward — one `surface.resolveAgentBrowser` round
+ * trip for the two forms only the host can name:
+ *
+ * - `--session <name>` is already the session; nothing is asked.
+ * - `--key <name>` is namespaced under the Workspace that will hold the browser,
+ *   which only that Workspace knows (`docs/specs/dor-browser.md` → "Managed identity").
+ *   **Outside Dormouse the CLI namespaces it itself**, so `dor ab` stays a
+ *   passthrough with no control endpoint.
+ * - `--surface <handle>` is the session the host says that Surface is bound to.
+ *   The host owns the gating: the target must have a browser, and that browser
+ *   must be agent-browser-rendered with a session (an `iframe` renderer has no
+ *   session to drive).
+ *
+ * The host's messages are printed verbatim; dor does not re-interpret them.
+ * **A host that refuses fails the command** before the binary runs — there is
+ * no fallback to a CLI-namespaced key, which would name the wrong Workspace's
+ * browser (`docs/specs/dor-browser.md` → "Managed identity").
  */
 async function resolveSession(
   flags: ResolvedSessionFlags,
@@ -297,9 +321,16 @@ async function resolveSession(
 ): Promise<ParseResult<string>> {
   if (flags.session !== undefined) return { ok: true, value: flags.session };
   const client = requireControlClient(options);
-  if (client instanceof Error) return { ok: false, message: client.message };
+  if (client instanceof Error) {
+    return flags.key === undefined
+      ? { ok: false, message: client.message }
+      : { ok: true, value: sessionForKey(flags.key) };
+  }
   try {
-    const { session } = await client.resolveAgentBrowserSession({ surface: flags.surface });
+    const { session } = await client.resolveAgentBrowserSession({
+      ...(flags.key === undefined ? { surface: flags.surface } : { key: flags.key }),
+      ...workspaceParam(flags.workspace),
+    });
     return { ok: true, value: session };
   } catch (error) {
     return { ok: false, message: errorMessage(error) };
@@ -324,7 +355,11 @@ const OPEN_SUBCOMMANDS = new Set(['open', 'goto', 'navigate']);
  * rejects a bare-integer host so a stray `n:n` value can't become a URL. Only the
  * first special-shaped arg is rewritten — these verbs take a single target.
  */
-async function resolveOpenTargetArgs(rest: string[], options: CliOptions): Promise<ParseResult<string[]>> {
+async function resolveOpenTargetArgs(
+  rest: string[],
+  options: CliOptions,
+  workspace?: string,
+): Promise<ParseResult<string[]>> {
   const subcommand = rest.find((arg) => !arg.startsWith('-'));
   if (subcommand === undefined || !OPEN_SUBCOMMANDS.has(subcommand)) return { ok: true, value: rest };
 
@@ -338,7 +373,7 @@ async function resolveOpenTargetArgs(rest: string[], options: CliOptions): Promi
     // there is no control endpoint and the error says so.
     const client = requireControlClient(options);
     if (client instanceof Error) return { ok: false, message: client.message };
-    const resolved = await resolveSurfaceOpenTarget(raw, client);
+    const resolved = await resolveSurfaceOpenTarget(raw, client, workspace);
     if (!resolved.ok) return resolved;
     url = resolved.value;
   } else {

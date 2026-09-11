@@ -1,6 +1,6 @@
 import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../terminal-context-types';
 import type { AgentBrowserCommandResult, AgentBrowserEditOp, AgentBrowserEditResult, AgentBrowserOpenResult, AgentBrowserPopResult, AgentBrowserScreenshotResult, AgentBrowserStreamStatusResult, AlertStateDetail, IframeProxyResult, OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, BurrowLink } from './types';
-import { OPEN_PORT_TIMEOUT_MS } from './types';
+import { openPortRequestTimeoutMs } from './types';
 import { createBurrowLinkClient } from '../../host/remote/link-client';
 import type { AwaitHandle, AwaitOptions, AwaitOutcome } from '../alert-manager';
 import type { AlertSettings } from '../alert-settings';
@@ -363,7 +363,7 @@ export class VSCodeAdapter implements PlatformAdapter {
     const result = await this.requestResponse<OpenPort[]>(
       'pty:getOpenPorts', 'pty:openPorts', { id },
       (msg) => msg.ports as OpenPort[],
-      OPEN_PORT_TIMEOUT_MS,
+      openPortRequestTimeoutMs(1, 2),
     );
     return result ?? [];
   }

@@ -1,6 +1,8 @@
 import { useCallback, type MutableRefObject } from 'react';
+import { sessionForKey } from 'dor-lib-common/agent-browser';
 import { getPlatform, PLATFORM_STRING } from '../../lib/platform';
 import { currentWindowRef } from '../../lib/workspace-store';
+import type { WorkspaceId } from '../../lib/session-types';
 import type { DorControlRequestPayload, DorControlResult } from 'dor/protocol';
 import { SURFACE_CONTROL_METHODS } from 'dor/protocol';
 import type {
@@ -8,7 +10,6 @@ import type {
   SplitDirection as DorSplitDirection,
   ResolvedSplitDirection as DorResolvedSplitDirection,
   ParseResult,
-  SurfacePort as DorSurfacePort,
 } from 'dor/commands/types';
 import { hasBrowser, hasTerminal } from 'dor/commands/types';
 import { MAX_AWAIT_TIMEOUT_MS } from '../../lib/alert-manager';
@@ -22,6 +23,8 @@ import {
 } from '../../lib/terminal-registry';
 import { surfaceRunsCommand, type TerminalPaneState } from '../../lib/terminal-state';
 import { isAllowedAgentBrowserBinary } from '../../lib/agent-browser-binary';
+import { stringParam } from './dor-control-shared';
+import { attachSurfacePorts } from './surface-ports';
 import { browserSurfaceUrl, hostPathDisplay } from './browser-url';
 import { agentBrowserSessionFromParams } from './browser-surface';
 import { listenerUrlsByPort } from './port-url';
@@ -29,6 +32,9 @@ import { dorDirectionForEdge, type LathWallEngine } from './lath-wall-engine';
 import type { WallNav } from './keyboard/types';
 import type { CloseSurfaceMode, DooredItem } from './wall-types';
 
+/** The params a Wall reads. The Window-level params (`scope`, and the container
+ *  verbs' own) are the router's, not a Wall's: `WindowControlParams` in
+ *  `workspace-control.ts`. */
 export type DorControlParams = {
   command?: unknown;
   confirmation?: unknown;
@@ -100,22 +106,65 @@ type EnsureAgentBrowserSurface = (args: {
   minimized?: boolean;
 }) => EnsureAgentBrowserSurfaceResult;
 
+/**
+ * What a `dor` Surface target names, in the one grammar
+ * `docs/specs/dor-cli.md` → "Handle Model" defines. `stable` is the only kind
+ * that identifies a Surface Window-wide, which is what lets the router send a
+ * request to whichever Workspace holds it; `ref` is Workspace-scoped (every
+ * Workspace has a `surface:1`), and `nothing` is a target that names no
+ * Surface at all (a bare `surface:`).
+ */
+export type SurfaceTargetKind =
+  | { kind: 'title'; title: string }
+  | { kind: 'self' }
+  | { kind: 'focused' }
+  | { kind: 'ref'; ref: string }
+  | { kind: 'stable'; id: string }
+  | { kind: 'nothing' };
+
+const POSITIONAL_SURFACE_REF = /^\d+$/;
+
+/** Classify a target once, for the matcher below and for the router's routing
+ *  decision (`dor-control-router.ts`). */
+export function classifySurfaceTarget(target: string): SurfaceTargetKind {
+  if (target.startsWith('title:')) return { kind: 'title', title: target.slice('title:'.length) };
+  if (target === 'surface:focused') return { kind: 'focused' };
+  if (target === 'surface:self') return { kind: 'self' };
+  if (!target.startsWith('surface:')) return { kind: 'stable', id: target };
+  const rest = target.slice('surface:'.length);
+  if (!rest) return { kind: 'nothing' };
+  return POSITIONAL_SURFACE_REF.test(rest) ? { kind: 'ref', ref: target } : { kind: 'stable', id: rest };
+}
+
+function matchesTarget(
+  classified: SurfaceTargetKind,
+  surface: DorSurface,
+  callerSurfaceId: string | undefined,
+): boolean {
+  switch (classified.kind) {
+    case 'focused':
+      return surface.focused;
+    case 'self':
+      return callerSurfaceId !== undefined && surface.id === callerSurfaceId;
+    case 'ref':
+      return classified.ref === surface.ref;
+    case 'stable':
+      return classified.id === surface.id;
+    case 'title':
+      return surface.title === classified.title;
+    // What a bare `surface:` names.
+    case 'nothing':
+      return false;
+  }
+}
+
+/** Whether one Surface answers a target; an absent target matches every one. */
 function matchesDorSurfaceTarget(
   target: string | undefined,
   surface: DorSurface,
   callerSurfaceId: string | undefined,
 ): boolean {
-  if (!target) return true;
-  if (target === 'surface:focused') return surface.focused;
-  if (target === 'surface:self') return callerSurfaceId !== undefined && surface.id === callerSurfaceId;
-  if (target === surface.id || target === surface.ref) return true;
-  if (!target.startsWith('surface:')) return false;
-  const stableId = target.slice('surface:'.length);
-  return stableId.length > 0 && stableId === surface.id;
-}
-
-function surfaceTitleTarget(target: string): string | null {
-  return target.startsWith('title:') ? target.slice('title:'.length) : null;
+  return !target || matchesTarget(classifySurfaceTarget(target), surface, callerSurfaceId);
 }
 
 function renderSurfaceForError(surface: DorSurface): string {
@@ -140,50 +189,22 @@ function resolveSurfaceTarget(
   target: string | undefined,
   callerSurfaceId: string | undefined,
 ): ParseResult<DorSurface> {
+  // A caller this Wall does not hold never reaches here as one: the router
+  // drops it before dispatching (`dor-control-router.ts`), so an omitted target
+  // falls back to this Workspace's focused Surface.
   const resolvedTarget = target ?? callerSurfaceId ?? 'surface:focused';
-  const titleTarget = surfaceTitleTarget(resolvedTarget);
-  if (titleTarget !== null) {
-    const matches = surfaces.filter((surface) => surface.title === titleTarget);
-    return pickSingleMatch(matches, resolvedTarget)
-      ?? { ok: false, message: `surface target '${resolvedTarget}' was not found` };
-  }
-
-  const matches = surfaces.filter((surface) => matchesDorSurfaceTarget(resolvedTarget, surface, callerSurfaceId));
+  const classified = classifySurfaceTarget(resolvedTarget);
+  const matches = surfaces.filter((surface) => matchesTarget(classified, surface, callerSurfaceId));
   const single = pickSingleMatch(matches, resolvedTarget);
   if (single) return single;
+  // A title names a Surface the user can see; there is no falling back to
+  // another one when it names none.
+  if (classified.kind === 'title') {
+    return { ok: false, message: `surface target '${resolvedTarget}' was not found` };
+  }
   const fallback = !target && !callerSurfaceId ? (surfaces[0] ?? null) : null;
   if (fallback) return { ok: true, value: fallback };
   return { ok: false, message: `surface '${resolvedTarget}' was not found` };
-}
-
-function toSurfacePort(port: OpenPort): DorSurfacePort {
-  return {
-    family: port.family,
-    address: port.address,
-    port: port.port,
-    pid: port.pid,
-    ...(port.processName ? { processName: port.processName } : {}),
-  };
-}
-
-/** Enumerate each terminal Surface's listening ports for `dor list --ports`.
- *  The adapter shells out per pane (and returns `[]` on remote / on error), so
- *  the fetches run in parallel and failures degrade to no ports, never a reject. */
-async function attachSurfacePorts(surfaces: DorSurface[]): Promise<DorSurface[]> {
-  const platform = getPlatform();
-  return Promise.all(surfaces.map(async (surface) => {
-    if (!hasTerminal(surface.kind)) return surface;
-    try {
-      const ports = await platform.getOpenPorts(surface.id);
-      return { ...surface, ports: ports.map(toSurfacePort) };
-    } catch {
-      return { ...surface, ports: [] };
-    }
-  }));
-}
-
-function stringParam(value: unknown): string | undefined {
-  return typeof value === 'string' ? value : undefined;
 }
 
 function booleanParam(value: unknown): boolean {
@@ -380,6 +401,7 @@ export function useDorControl({
   closeSurface,
   lastAgentBrowserBinaryPathRef,
   workspaceRef,
+  workspaceScope,
 }: {
   /** The Lath engine — visible-pane projection (`lath.listPanes()`), aspect-ratio
    *  split resolution (`autoEdgeFor`), and per-leaf param writes. */
@@ -425,6 +447,10 @@ export function useDorControl({
    *  The Window's own ref rides beside it, so `dor list` says which Window
    *  answered too (`currentWindowRef`). */
   workspaceRef: () => string;
+  /** This Wall's Workspace id, which namespaces the managed `dor ab --key`
+   *  sessions it answers for; `undefined` on a bare Wall, whose keys keep the
+   *  unscoped names (docs/specs/dor-browser.md → Managed identity). */
+  workspaceScope: () => WorkspaceId | undefined;
 }): {
   /** The live surface (visible pane or minimized door) whose params match, or
    *  null. Shared with the context's port launches in Wall.tsx. */
@@ -1065,6 +1091,16 @@ export function useDorControl({
     }
 
     if (detail.method === SURFACE_CONTROL_METHODS.resolveAgentBrowser) {
+      // A managed `--key` names no Surface: it names this Workspace's browser of
+      // that name, so the answer is the key namespaced under the Workspace that
+      // will hold it (docs/specs/dor-browser.md → Managed identity). Answered
+      // whether or not a Surface holds that session yet — `surface.agentBrowser`
+      // is what creates or reuses one.
+      const keyParam = stringParam(params.key);
+      if (keyParam) {
+        detail.respond({ ok: true, result: { session: sessionForKey(keyParam, workspaceScope()) } });
+        return;
+      }
       // Resolve a browser Surface handle to the agent-browser session bound to
       // it, for `dor ab --surface <handle> <verb...>`. Past the browser gate,
       // web verbs stay renderMode-gated: an `iframe` renderer is a browser
@@ -1096,7 +1132,7 @@ export function useDorControl({
     }
 
     detail.respond({ ok: false, error: `unsupported Dormouse control method '${detail.method}'` });
-  }, [buildDorSurfaces, buildDorSurfaceList, closeSurface, createContentSurface, createSplitSurface, ensureAgentBrowserSurface, findSurfaceIdRunningCommand, isClosingWorkspace, requireBrowserSurface, requireListedSurface, requireTerminalSurface, resolveListedSurface, resolveVisibleSurface, surfaceRefForId, lath, nav, workspaceRef]);
+  }, [buildDorSurfaces, buildDorSurfaceList, closeSurface, createContentSurface, createSplitSurface, ensureAgentBrowserSurface, findSurfaceIdRunningCommand, isClosingWorkspace, requireBrowserSurface, requireListedSurface, requireTerminalSurface, resolveListedSurface, resolveVisibleSurface, surfaceRefForId, lath, nav, workspaceRef, workspaceScope]);
 
   return { findSurfaceByParams, updateSurfaceParams, handleDorControl };
 }

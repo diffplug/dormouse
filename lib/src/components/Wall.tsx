@@ -1533,6 +1533,9 @@ export function Wall({
     isClosingWorkspace: useCallback(() => closingWorkspaceRef.current, []),
     lastAgentBrowserBinaryPathRef,
     workspaceRef: useCallback(() => workspaceRefFor(effectiveWorkspaceId), [effectiveWorkspaceId]),
+    // The raw prop, not `effectiveWorkspaceId`: a bare Wall keeps the unscoped
+    // agent-browser session names (docs/specs/dor-browser.md → Managed identity).
+    workspaceScope: useCallback(() => workspaceId, [workspaceId]),
   });
 
   // --- Workspace handle ---

@@ -209,12 +209,28 @@ PATH. **Both `dor ab` and the host must spawn `agent-browser` through
 `.cmd`-shim recipe applies even to that absolute path (`docs/specs/dor-cli.md` →
 Spawning External Binaries).
 
-Managed identity:
+### Managed identity
 
-- Default is `--key default`; `--key <name>` maps to `dormouse.1.<name>` and must
-  match `[A-Za-z0-9._-]+`. `--key`, raw `--session`, `--surface` are mutually
-  exclusive.
-- GUI-spawned sessions use `dormouse.1.gui-<hex>`, which no `--key` names; they
+- Default is `--key default`; `--key <name>` must match `[A-Za-z0-9._-]+`.
+  `--key`, raw `--session`, `--surface` are mutually exclusive.
+- **A key is namespaced by the Workspace that holds the browser** —
+  `dormouse.<workspaceId>.<name>`, the Workspace's *stable* id so a strip reorder
+  renames nothing — and `dormouse.1.<name>` for a bare Wall, which has no
+  Workspace id (VS Code, the website, Pocket). The same key in two Workspaces is
+  therefore two browsers, which is what keeps one Surface per session (below)
+  once several Workspaces each run `dor ab --key default`. **Only the answering Workspace can name it**,
+  so `dor ab` asks the host (`surface.resolveAgentBrowser` with `key`) before it
+  forwards anything, and namespaces the key itself only when there is no control
+  endpoint at all — outside Dormouse, where `dor ab` is a pure passthrough.
+  **Every managed `dor ab` invocation depends on the host answering** — a
+  passthrough verb included — with no CLI-side fallback: a refusal (a Wall still
+  mounting, a webview mid-reload, the VS Code guard) fails the command with the
+  host's message before the binary runs, and the router answers the no-Wall
+  case after its bounded retry rather than leaving `dor ab` to its deadline
+  (`docs/specs/dor-cli.md` → "Handle Model"). A CLI-namespaced fallback would
+  name the wrong Workspace's browser.
+- GUI-spawned sessions use `dormouse.1.gui-<hex>`, minted host-wide (the Window's
+  one agent-browser host, not a Workspace), which no `--key` names; they
   are reachable by `dor ab --surface <handle>` (`docs/specs/dor-cli.md` →
   Agent-Browser Surface Addressing). **The host answers only for an
   agent-browser-rendered Surface** — an `iframe`-rendered Surface has a browser
@@ -225,7 +241,8 @@ Managed identity:
   or render-swapped mid-command leaves the trailing request to mint a fresh pane
   (rationale).
 
-Source of truth: `dor/src/commands/agent-browser.ts`, `dor/src/commands/types.ts`
+Source of truth: `sessionForKey` in `dor-lib-common/src/agent-browser.ts`,
+`resolveSession` in `dor/src/commands/agent-browser.ts`, `dor/src/commands/types.ts`
 (`AgentBrowserSurfaceRequest`, `ResolveAgentBrowserSessionRequest`), `lib/src/components/Wall.tsx` /
 `lib/src/components/wall/use-dor-control.ts` (`findAgentBrowserSurface`, `surface.agentBrowser`,
 `surface.resolveAgentBrowser`).

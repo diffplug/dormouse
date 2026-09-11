@@ -76,6 +76,53 @@ describe('dor control routing', () => {
     }
   });
 
+  it('routes an explicit workspace target by name', () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    createWorkspace({ id: 'ws-2', name: 'build' });
+    const target = handleFor('ws-2');
+    handleFor(first, ['pane-a']);
+    for (const value of ['workspace:build', 'build']) {
+      expect(resolveDorControlRoute(request({ surfaceId: 'pane-a', params: { workspace: value } })))
+        .toEqual({ kind: 'handle', handle: target });
+    }
+    createWorkspace({ id: 'ws-3', name: 'build' });
+    handleFor('ws-3');
+    expect(resolveDorControlRoute(request({ params: { workspace: 'build' } })))
+      .toEqual({
+        kind: 'error',
+        message: 'workspace target \'build\' matched multiple Workspaces: workspace:2 "build", workspace:3 "build"',
+      });
+  });
+
+  it('routes a stable-id target to the Workspace holding it, over the caller', () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    createWorkspace({ id: 'ws-2' });
+    const caller = handleFor(first, ['pane-a']);
+    const owner = handleFor('ws-2', ['pane-b']);
+    for (const surface of ['pane-b', 'surface:pane-b']) {
+      expect(resolveDorControlRoute(request({ surfaceId: 'pane-a', params: { surface } })))
+        .toEqual({ kind: 'handle', handle: owner });
+    }
+    // A Workspace-scoped `surface:N`, `surface:self` and a title stay with the
+    // caller: every Workspace has a `surface:1`.
+    for (const surface of ['surface:1', 'surface:self', 'title:pane-b']) {
+      expect(resolveDorControlRoute(request({ surfaceId: 'pane-a', params: { surface } })))
+        .toEqual({ kind: 'handle', handle: caller });
+    }
+  });
+
+  it('answers the container verbs and --all at the Window, with no Wall involved', () => {
+    handleFor(getWorkspacesSnapshot().workspaces[0].id, ['pane-a']);
+    for (const method of ['workspace.list', 'workspace.new', 'workspace.close']) {
+      expect(resolveDorControlRoute(request({ method, surfaceId: 'pane-a' })))
+        .toEqual({ kind: 'window', container: true });
+    }
+    expect(resolveDorControlRoute(request({ method: 'surface.list', params: { scope: 'all' } })))
+      .toEqual({ kind: 'window', container: false });
+    expect(resolveDorControlRoute(request({ method: 'surface.list', params: { scope: 'workspace' } })).kind)
+      .toBe('handle');
+  });
+
   it('errors on a workspace or window target this Window does not have', () => {
     handleFor(getWorkspacesSnapshot().workspaces[0].id);
     expect(resolveDorControlRoute(request({ params: { workspace: 'workspace:9' } })))
@@ -102,8 +149,11 @@ describe('dor control routing', () => {
     expect(resolveDorControlRoute(request({ params: { window: 'window:1' } })).kind).toBe('error');
   });
 
-  it('does nothing when no Wall is mounted', () => {
-    expect(resolveDorControlRoute(request())).toEqual({ kind: 'none' });
+  it('names the active Workspace as still mounting when no Wall is mounted', () => {
+    expect(resolveDorControlRoute(request())).toEqual({
+      kind: 'none',
+      message: "workspace 'workspace:1' is still mounting",
+    });
   });
 
   it('shares one window listener across every Wall that holds it', () => {
@@ -181,13 +231,48 @@ describe('dor control routing', () => {
     }
   });
 
-  it('gives up after a bounded number of retries when nothing ever mounts', async () => {
+  it('waits out the same gap for an explicit --workspace, then says it is still mounting', async () => {
+    vi.useFakeTimers();
+    try {
+      handleFor(getWorkspacesSnapshot().workspaces[0].id, ['pane-a']);
+      const release = installDorControlRouter();
+
+      // `dor workspace new build && dor split --workspace build`: the Workspace
+      // is in the store, its Wall is one effect away.
+      createWorkspace({ id: 'ws-2', name: 'build', activate: false });
+      const detail = request({ surfaceId: 'pane-a', params: { workspace: 'build' } });
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail }));
+      expect(detail.respond).not.toHaveBeenCalled();
+      const target = handleFor('ws-2');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(target.handleDorControl).toHaveBeenCalledTimes(1);
+      expect(detail.respond).not.toHaveBeenCalled();
+
+      // One that never registers is answered — not left as "no such Workspace",
+      // which it is not, and not left unanswered, which blocks the caller.
+      createWorkspace({ id: 'ws-3', name: 'agents', activate: false });
+      const never = request({ params: { workspace: 'agents' } });
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: never }));
+      await vi.advanceTimersByTimeAsync(10);
+      expect(never.respond).toHaveBeenCalledWith({ ok: false, error: "workspace 'agents' is still mounting" });
+      release();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('gives up after a bounded number of retries when nothing ever mounts, and says so', async () => {
     vi.useFakeTimers();
     try {
       const release = installDorControlRouter();
       const detail = request();
       window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail }));
+      expect(detail.respond).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(10);
+      // Answered promptly, not left to the client's own deadline: `dor ab`
+      // makes this round trip on every managed invocation and must fail fast.
+      expect(detail.respond).toHaveBeenCalledTimes(1);
+      expect(detail.respond).toHaveBeenCalledWith({ ok: false, error: "workspace 'workspace:1' is still mounting" });
       // The retry chain is finite: registering afterwards is too late.
       const handle = handleFor(getWorkspacesSnapshot().workspaces[0].id);
       await vi.advanceTimersByTimeAsync(10);
@@ -196,6 +281,27 @@ describe('dor control routing', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('drops a caller the answering Wall does not hold', () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    createWorkspace({ id: 'ws-2', name: 'build' });
+    handleFor(first, ['pane-a']);
+    const target = handleFor('ws-2', ['pane-b']);
+    const release = installDorControlRouter();
+
+    // `dor split --workspace build` from pane-a: the caller belongs to another
+    // Workspace, so the answering Wall is handed no caller and falls back to
+    // its own focused Surface.
+    const foreign = request({ surfaceId: 'pane-a', params: { workspace: 'build' } });
+    window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: foreign }));
+    expect(target.handleDorControl).toHaveBeenCalledWith({ ...foreign, surfaceId: undefined });
+
+    // A caller its own Wall holds arrives untouched.
+    const own = request({ surfaceId: 'pane-b' });
+    window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: own }));
+    expect(target.handleDorControl).toHaveBeenLastCalledWith(own);
+    release();
   });
 
   it('answers a bad container target instead of handing it to a Wall', () => {

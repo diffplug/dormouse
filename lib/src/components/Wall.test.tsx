@@ -951,6 +951,13 @@ describe('Wall on the Lath engine', () => {
         ok: false,
         error: `surface '${iframeRef}' is not agent-browser rendered (render_mode: iframe)`,
       });
+
+      // A managed `--key` names no Surface, and a bare Wall — VS Code, the
+      // website — keeps the unscoped session names it always had.
+      expect(await dispatchResolveAgentBrowserKey('storybook')).toEqual({
+        ok: true,
+        result: { session: sessionForKey('storybook') },
+      });
     } finally {
       untouchedSpy.mockRestore();
     }
@@ -1554,6 +1561,22 @@ describe('Wall on the Lath engine', () => {
   }
 
   /** `dor ab --surface <handle>`'s host half; returns the raw control response. */
+  /** `dor ab --key <name>` asking this Wall what that key's session is called. */
+  async function dispatchResolveAgentBrowserKey(key: string): Promise<unknown> {
+    let response: unknown;
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+        detail: {
+          method: SURFACE_CONTROL_METHODS.resolveAgentBrowser,
+          params: { key },
+          respond: (r: unknown) => { response = r; },
+        },
+      }));
+    });
+    await flush();
+    return response;
+  }
+
   async function dispatchResolveAgentBrowser(surface: string): Promise<unknown> {
     let response: unknown;
     await act(async () => {

@@ -47,17 +47,29 @@ export interface OpenPort {
   processName?: string;
 }
 
+/** Base scan budget. The macOS and Windows socket scans add a per-id allowance;
+ *  transport deadlines cover both serial scans plus a margin per IPC hop.
+ *  Rust and sidecar copies are pinned by `mirrored-constants.test.ts`. */
+export const OPEN_PORT_TIMEOUT_MS = 3000;
+
 /**
- * End-to-end budget for `getOpenPorts()` at every transport boundary
- * (webview → host adapter, host → pty-host child, Tauri command → sidecar) and
- * for the per-subprocess execs inside `getOpenPortsForPid()` (lsof, PowerShell,
- * `Get-NetTCPConnection`, `netstat`). Wider than the 1 s cwd query because
- * enumeration shells out on macOS/Windows; tight enough to fail visibly rather
- * than hang a pane header. Mirrored as `OPEN_PORT_TIMEOUT_MS` in
+ * What a batched scan (`getOpenPortsMany`) adds to `OPEN_PORT_TIMEOUT_MS` per
+ * terminal it covers: the sidecar's socket scan lists every descendant of every
+ * terminal in one `lsof`, so one terminal's budget cannot be the whole
+ * Window's. Mirrored as `OPEN_PORT_TIMEOUT_PER_ID_MS` in
  * `standalone/sidecar/pty-core.js` and `standalone/src-tauri/src/lib.rs`;
  * pinned by `mirrored-constants.test.ts`.
  */
-export const OPEN_PORT_TIMEOUT_MS = 3000;
+export const OPEN_PORT_TIMEOUT_PER_ID_MS = 100;
+
+/** Margin for each transport hop, mirrored in Rust and pinned by the constants test. */
+export const OPEN_PORT_ROUND_TRIP_MARGIN_MS = 1000;
+
+export function openPortRequestTimeoutMs(count: number, hops = 1): number {
+  return 2 * OPEN_PORT_TIMEOUT_MS + OPEN_PORT_TIMEOUT_PER_ID_MS * count
+    + OPEN_PORT_ROUND_TRIP_MARGIN_MS * hops;
+}
+
 
 export type AlertStateDetail = { id: string } & AlertState;
 
@@ -298,6 +310,15 @@ export interface PlatformAdapter {
   getCwds?(ids: string[]): Promise<Record<string, string | null>>;
   /** TCP listening ports opened by this terminal's process tree (shell + descendants). */
   getOpenPorts(id: string): Promise<OpenPort[]>;
+  /**
+   * One answer per id, for a whole listing at once (`dor list --ports`, and
+   * `--all` across every Workspace). Present where a host can resolve many in
+   * one scan, for the reason `getCwds` is: standalone walks the process table
+   * and the socket table synchronously on the sidecar's only event loop, so N
+   * terminals must cost one pass rather than N. Absent falls back to
+   * `getOpenPorts` per id.
+   */
+  getOpenPortsMany?(ids: string[]): Promise<Record<string, OpenPort[]>>;
 
   // Clipboard support for file references and raw images.
   readClipboardFilePaths(): Promise<string[] | null>;

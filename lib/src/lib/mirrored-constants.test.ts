@@ -12,7 +12,7 @@ import { PAIRING_CODE_LABEL } from '../remote/pocket-app/App';
 import { SCAN_REJECTED_MESSAGE } from '../remote/pocket-app/ScanInvitation';
 import { SCAN_LABEL } from '../remote/setup-copy';
 import { ITERM2_COMPAT_VERSION } from './terminal-protocol';
-import { OPEN_PORT_TIMEOUT_MS } from './platform/types';
+import { OPEN_PORT_TIMEOUT_MS, OPEN_PORT_TIMEOUT_PER_ID_MS, OPEN_PORT_ROUND_TRIP_MARGIN_MS } from './platform/types';
 import { DEFAULT_RECOVERY_WAIT_MS } from '../host/recovery-capture';
 
 // Pins for constants defined in more than one language/runtime, where an
@@ -232,6 +232,21 @@ describe('OPEN_PORT_TIMEOUT_MS mirrors', () => {
   });
 });
 
+// docs/specs/standalone.md -> "Rust ↔ sidecar bridge"
+describe('OPEN_PORT_TIMEOUT_PER_ID_MS mirrors', () => {
+  it('matches the sidecar copy in standalone/sidecar/pty-core.js', () => {
+    const file = 'standalone/sidecar/pty-core.js';
+    const ms = extract(readRepoFile(file), file, /^const OPEN_PORT_TIMEOUT_PER_ID_MS = (\d+);$/m);
+    expect(Number(ms)).toBe(OPEN_PORT_TIMEOUT_PER_ID_MS);
+  });
+
+  it('matches the Rust copy in standalone/src-tauri/src/lib.rs', () => {
+    const file = 'standalone/src-tauri/src/lib.rs';
+    const ms = extract(readRepoFile(file), file, /^const OPEN_PORT_TIMEOUT_PER_ID_MS: u64 = (\d+);$/m);
+    expect(Number(ms)).toBe(OPEN_PORT_TIMEOUT_PER_ID_MS);
+  });
+});
+
 // docs/specs/standalone.md -> "Quit flow" (Teardown ordering). The webview's
 // teardown ceiling is derived from its step budgets, two of which carry the
 // margin Rust adds to a sidecar round trip; Rust's per-phase watchdog is what
@@ -277,4 +292,13 @@ describe('quit teardown budget mirrors', () => {
       expect(Number(margin)).toBe(valueOf('SIDECAR_ROUND_TRIP_MARGIN_MS'));
     },
   );
+});
+
+
+describe('port request IPC margin', () => {
+  it('matches the Rust boundary margin', () => {
+    const file = 'standalone/src-tauri/src/lib.rs';
+    const ms = extract(readRepoFile(file), file, /^const OPEN_PORT_ROUND_TRIP_MARGIN_MS: u64 = (\d+);$/m);
+    expect(Number(ms)).toBe(OPEN_PORT_ROUND_TRIP_MARGIN_MS);
+  });
 });

@@ -1,0 +1,5 @@
+exitCode: 1
+stdout:
+
+stderr:
+Error: unknown dor workspace action 'destroy' (expected new, rename, close, switch)

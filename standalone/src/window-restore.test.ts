@@ -12,6 +12,7 @@ const registryMocks = vi.hoisted(() => ({
 vi.mock("dormouse-lib/lib/terminal-registry", () => registryMocks);
 
 import type { PlatformAdapter, PtyInfo } from "dormouse-lib/lib/platform/types";
+import { DEFAULT_WORKSPACE_ID } from "dormouse-lib/lib/session-types";
 import type { PersistedSession, PersistedWindow } from "dormouse-lib/lib/session-types";
 import { forgetHelper, getHelper } from "dormouse-lib/lib/helper-terminal";
 import { setPlatform } from "dormouse-lib/lib/platform";
@@ -169,10 +170,31 @@ describe("restoreWindowOrFresh", () => {
 
     const plans = await restoreWindowOrFresh(platform);
 
-    // One default Workspace, planned and renderable.
-    expect(Object.keys(plans)).toEqual(["workspace-1"]);
+    // One freshly minted Workspace, planned and renderable.
+    const [id] = getWorkspacesSnapshot().workspaces.map((workspace) => workspace.id);
+    expect(Object.keys(plans)).toEqual([id]);
     expect(getWorkspacesSnapshot().workspaces).toHaveLength(1);
     // And the blob that could not be restored is gone.
     expect(saves[saves.length - 1]?.workspaces).toEqual([]);
+  });
+
+  it("mints a unique first Workspace id for every fresh Window", async () => {
+    // Two windows that both started fresh must not both hold `workspace-1`:
+    // each writes its own blob, and a relaunch would then meet the same
+    // Workspace id twice and refuse the whole restore.
+    const first = fakePlatform([], null);
+    const firstPlans = await restoreWindowOrFresh(first.platform);
+    const firstId = getWorkspacesSnapshot().workspaces[0].id;
+
+    resetWorkspaces();
+    resetWindowSessionAggregator();
+    const second = fakePlatform([], null);
+    const secondPlans = await restoreWindowOrFresh(second.platform);
+    const secondId = getWorkspacesSnapshot().workspaces[0].id;
+
+    expect(Object.keys(firstPlans)).toEqual([firstId]);
+    expect(Object.keys(secondPlans)).toEqual([secondId]);
+    expect(firstId).not.toBe(secondId);
+    expect(firstId).not.toBe(DEFAULT_WORKSPACE_ID);
   });
 });

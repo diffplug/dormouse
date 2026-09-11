@@ -154,6 +154,7 @@ function handleLine(line) {
       case 'pty:getCwd':  mgr.getCwd(data.id, data.requestId); break;
       case 'pty:getCwds': mgr.getCwds(data.ids, data.requestId); break;
       case 'pty:getOpenPorts': mgr.getOpenPorts(data.id, data.requestId); break;
+      case 'pty:getOpenPortsMany': mgr.getOpenPortsMany(data.ids, data.requestId); break;
       case 'pty:getShells':  mgr.getShells(data.requestId); break;
       case 'pty:interrupt': mgr.interrupt(data.ids, data.requestId); break;
       // Quit teardown, first step: press ^C, detect each agent's resume

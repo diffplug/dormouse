@@ -6,7 +6,7 @@ import { randomBytes } from 'crypto';
 import { log } from './log';
 import type { DorControlCancelPayload, DorControlRequestPayload, DorControlResponsePayload } from '../../dor/src/protocol';
 import type { OpenPort } from '../../lib/src/lib/platform/types';
-import { OPEN_PORT_TIMEOUT_MS } from '../../lib/src/lib/platform/types';
+import { openPortRequestTimeoutMs } from '../../lib/src/lib/platform/types';
 import { sliceSince } from '../../lib/src/host/replay-buffer';
 
 export interface PtyCallbacks {
@@ -439,7 +439,7 @@ export function getCwd(id: string): Promise<string | null> {
 }
 
 export function getOpenPorts(id: string): Promise<OpenPort[]> {
-  return requestChild<{ ports?: OpenPort[] }>({ type: 'getOpenPorts', id }, (msg) => msg.type === 'openPorts' && msg.id === id, OPEN_PORT_TIMEOUT_MS)
+  return requestChild<{ ports?: OpenPort[] }>({ type: 'getOpenPorts', id }, (msg) => msg.type === 'openPorts' && msg.id === id, openPortRequestTimeoutMs(1))
     .then((msg) => msg.ports || [], () => []);
 }
 

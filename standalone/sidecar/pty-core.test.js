@@ -24,6 +24,10 @@ const {
   getDescendantPids,
   getListeningPortsForPids,
   getOpenPortsForPid,
+  getOpenPortsForPids,
+  openPortScanTimeoutMs,
+  OPEN_PORT_TIMEOUT_MS,
+  OPEN_PORT_TIMEOUT_PER_ID_MS,
 } = require('./pty-core');
 
 test('resolveSpawnConfig uses POSIX shell and home defaults', () => {
@@ -1425,6 +1429,20 @@ test('getListeningPortsForPids (darwin) runs lsof with the descendant pid list',
   ]);
 });
 
+test('getListeningPortsForPids (darwin) keeps the live pids when lsof exits non-zero over a dead one', () => {
+  // A batched scan covers every descendant of every terminal, so one child
+  // exiting between `ps` and `lsof` is the common case, not the odd one; the
+  // stdout lsof printed before its non-zero exit is the answer.
+  const execFileSync = () => {
+    const err = new Error('lsof exited 1');
+    err.status = 1;
+    err.stdout = ['p4242', 'cnode', 'tIPv4', 'n*:3000', ''].join('\n');
+    throw err;
+  };
+  const ports = getListeningPortsForPids([100, 4242, 999_999], { platform: 'darwin', execFileSync });
+  assert.deepEqual(ports.map((p) => [p.pid, p.port]), [[4242, 3000]]);
+});
+
 test('getListeningPortsForPids (win32) prefers Get-NetTCPConnection', () => {
   const execFileSync = (cmd, args) => {
     assert.equal(cmd, 'powershell.exe');
@@ -1461,6 +1479,70 @@ test('getListeningPortsForPids (win32) falls back to netstat when the cmdlet fai
   ]);
 });
 
+test('Windows port subprocesses share the socket budget, including netstat fallback', () => {
+  let now = 0;
+  const timeouts = [];
+  const execFileSync = (cmd, args, options) => {
+    timeouts.push(options.timeout);
+    const script = args.at(-1);
+    if (script.includes('ParentProcessId')) {
+      now += OPEN_PORT_TIMEOUT_MS;
+      return JSON.stringify([{ ProcessId: 4242, ParentProcessId: 1 }]);
+    }
+    if (script.includes('Win32_Process')) {
+      now += options.timeout;
+      return JSON.stringify([{ ProcessId: 4242, Name: 'node.exe' }]);
+    }
+    if (script.includes('Get-NetTCPConnection')) {
+      now += 1000;
+      throw new Error('cmdlet failed');
+    }
+    assert.equal(cmd, 'netstat');
+    now += 500;
+    return '  TCP    0.0.0.0:3000   0.0.0.0:0   LISTENING   4242\n';
+  };
+  const result = getOpenPortsForPids([4242], { platform: 'win32', execFileSync, now: () => now });
+  const budget = openPortScanTimeoutMs(1);
+  assert.deepEqual(timeouts, [OPEN_PORT_TIMEOUT_MS, budget, budget - 1000, budget - 1500]);
+  assert.equal(now, OPEN_PORT_TIMEOUT_MS + budget);
+  assert.equal(result.get(4242)[0].processName, 'node.exe');
+});
+
+test('Windows does not start netstat after the socket deadline expires', () => {
+  let now = 0;
+  const commands = [];
+  const execFileSync = (cmd, args, options) => {
+    commands.push(cmd);
+    if (args.at(-1).includes('Win32_Process')) return '[]';
+    now += options.timeout;
+    throw new Error('timed out');
+  };
+  assert.deepEqual(getListeningPortsForPids([4242], {
+    platform: 'win32', execFileSync, now: () => now, scanTimeoutMs: 3100,
+  }), []);
+  assert.deepEqual(commands, ['powershell.exe']);
+  assert.equal(now, 3100);
+});
+
+test('a slow optional Windows name lookup cannot hide already enumerated ports', () => {
+  let now = 0;
+  const execFileSync = (cmd, args, options) => {
+    if (args.at(-1).includes('Get-NetTCPConnection')) {
+      now += 10;
+      return JSON.stringify([{ LocalAddress: '0.0.0.0', LocalPort: 3000, OwningProcess: 4242 }]);
+    }
+    assert.ok(args.at(-1).includes('Win32_Process'));
+    assert.equal(options.timeout, 3090);
+    now += options.timeout;
+    throw new Error('WMI timed out');
+  };
+  const ports = getListeningPortsForPids([4242], {
+    platform: 'win32', execFileSync, now: () => now, scanTimeoutMs: 3100,
+  });
+  assert.deepEqual(ports.map(({ port, processName }) => ({ port, processName })), [{ port: 3000, processName: undefined }]);
+  assert.equal(now, 3100);
+});
+
 test('getOpenPortsForPid de-duplicates and sorts by port', () => {
   // darwin path: lsof returns a duplicate (same family/addr/port) plus an
   // out-of-order pair to exercise sorting.
@@ -1481,6 +1563,52 @@ test('getOpenPortsForPid de-duplicates and sorts by port', () => {
 
 test('getOpenPortsForPid returns [] for a non-integer pid', () => {
   assert.deepEqual(getOpenPortsForPid(undefined, { platform: 'linux' }), []);
+});
+
+test('getOpenPortsForPids answers per root pid from ONE process table and ONE socket scan', () => {
+  // Two terminals, each with a child serving a port. A listing that spans them
+  // must not pay for a `ps` + `lsof` pair per terminal.
+  const spawns = [];
+  const execFileSync = (cmd, args, options) => {
+    spawns.push(cmd);
+    if (cmd === 'ps') return '100 1\n200 100\n300 1\n400 300\n';
+    if (cmd === 'lsof') {
+      assert.ok(args.includes('100,200,300,400'), `one scan over every descendant: ${args.join(' ')}`);
+      // The socket scan is budgeted for the batch, not for one terminal.
+      assert.equal(options.timeout, openPortScanTimeoutMs(2));
+      assert.equal(options.timeout, OPEN_PORT_TIMEOUT_MS + 2 * OPEN_PORT_TIMEOUT_PER_ID_MS);
+      return [
+        'p200', 'cnode', 'tIPv4', 'n*:3000',
+        'p400', 'cnode', 'tIPv4', 'n*:5173',
+      ].join('\n');
+    }
+    throw new Error(`unexpected spawn: ${cmd}`);
+  };
+
+  const ports = getOpenPortsForPids([100, 300], { platform: 'darwin', execFileSync });
+
+  assert.deepEqual(spawns, ['ps', 'lsof']);
+  // Each root owns only what its own descendants opened.
+  assert.deepEqual(ports.get(100).map((p) => p.port), [3000]);
+  assert.deepEqual(ports.get(300).map((p) => p.port), [5173]);
+});
+
+test('getOpenPortsMany answers a key for every requested id, [] for one with no PTY', () => {
+  const events = [];
+  const mgr = create((event, data) => events.push({ event, data }), {
+    spawn() {
+      return { pid: 999_002, onData() {}, onExit() {}, resize() {}, write() {}, kill() {} };
+    },
+  }, { replay: true });
+  mgr.spawn('pane-a');
+
+  mgr.getOpenPortsMany(['pane-a', 'pane-gone'], 'req-2');
+
+  const answer = events.find((e) => e.event === 'openPortsMany');
+  assert.equal(answer.data.requestId, 'req-2');
+  assert.deepEqual(Object.keys(answer.data.ports).sort(), ['pane-a', 'pane-gone']);
+  // A pane with no live PTY is never scanned for.
+  assert.deepEqual(answer.data.ports['pane-gone'], []);
 });
 
 // The clamping arithmetic itself lives in lib/src/host/replay-buffer.ts and is

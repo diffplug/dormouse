@@ -199,6 +199,13 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     try { return await this.host.invoke("pty_get_open_ports", { id }); } catch { return []; }
   }
 
+  /** See TauriAdapter: one round trip, one process scan, for a whole listing. */
+  async getOpenPortsMany(ids: string[]): Promise<Record<string, OpenPort[]>> {
+    try {
+      return await this.host.invoke<Record<string, OpenPort[]>>("pty_get_open_ports_many", { ids });
+    } catch { return {}; }
+  }
+
   async readClipboardFilePaths(): Promise<string[] | null> {
     try { return await this.host.invoke("read_clipboard_file_paths"); } catch { return null; }
   }

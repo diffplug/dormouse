@@ -1,3 +1,4 @@
+import { parseWorkspaceRef } from 'dor/protocol';
 import { DEFAULT_WORKSPACE_ID, DEFAULT_WORKSPACE_NAME, type WorkspaceId } from './session-types';
 
 /**
@@ -195,11 +196,42 @@ export function workspaceRefFor(id: WorkspaceId): string {
   return `workspace:${index === -1 ? 1 : index + 1}`;
 }
 
-/** Resolve `workspace:<n>` or a bare `<n>` (1-based) to a Workspace id. */
-export function workspaceIdForRef(ref: string): WorkspaceId | null {
-  const match = /^(?:workspace:)?([1-9]\d*)$/.exec(ref.trim());
-  if (!match) return null;
-  return state.workspaces[Number(match[1]) - 1]?.id ?? null;
+/** A Workspace a target named: its identity, plus the positional ref it had
+ *  when it was resolved (a later reorder renumbers it). */
+export interface ResolvedWorkspace extends WorkspaceMeta {
+  ref: string;
+}
+
+/** What a `workspace:<n|name>` target named, or why it named nothing. */
+export type WorkspaceRefResolution =
+  | ({ ok: true } & ResolvedWorkspace)
+  | { ok: false; message: string };
+
+/**
+ * Resolve `workspace:<n>` / `workspace:<name>` — or either bare — to a
+ * Workspace of this Window (`docs/specs/dor-cli.md` → "Handle Model"). A
+ * positional ref wins over a name that reads as one; a name resolves only when
+ * exactly one Workspace carries it, and an ambiguous one lists the candidates
+ * rather than picking.
+ */
+export function resolveWorkspaceRef(ref: string): WorkspaceRefResolution {
+  const { target, position, name } = parseWorkspaceRef(ref);
+  const found = (meta: WorkspaceMeta): WorkspaceRefResolution =>
+    ({ ok: true, ...meta, ref: workspaceRefFor(meta.id) });
+  if (position !== null) {
+    const positional = state.workspaces[position - 1];
+    if (positional) return found(positional);
+  } else if (name) {
+    const matches = state.workspaces.filter((workspace) => workspace.name === name);
+    if (matches.length === 1) return found(matches[0]);
+    if (matches.length > 1) {
+      const candidates = matches
+        .map((workspace) => `${workspaceRefFor(workspace.id)} ${JSON.stringify(workspace.name)}`)
+        .join(', ');
+      return { ok: false, message: `workspace target '${target}' matched multiple Workspaces: ${candidates}` };
+    }
+  }
+  return { ok: false, message: `unknown workspace target '${target}'` };
 }
 
 /** Reset to the single default Workspace (fresh start / tests). */

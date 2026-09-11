@@ -81,8 +81,8 @@ are *not* forwarded:
 | `agent_browser_screenshot` | Rust reads the bytes from a sidecar-supplied temp-file *path* | images must never ride the JSON-lines pipe shared with PTY traffic (`docs/specs/dor-browser.md`) |
 
 Request/response commands block on the sidecar's reply under a timeout.
-`OPEN_PORT_TIMEOUT_MS` in `lib.rs` mirrors the constant in
-`lib/src/lib/platform/types.ts` (and `standalone/sidecar/pty-core.js`);
+`OPEN_PORT_TIMEOUT_MS` and `OPEN_PORT_TIMEOUT_PER_ID_MS` in `lib.rs` mirror the
+constants in `lib/src/lib/platform/types.ts` (and `standalone/sidecar/pty-core.js`);
 `lib/src/lib/mirrored-constants.test.ts` pins the copies together.
 
 **Blocking commands must be `#[tauri::command(async)]`** — Tauri runs a *plain*
@@ -652,6 +652,12 @@ into fresh shells at its saved cwds.
 - **A restore that throws degrades to a fresh Window and overwrites the blob.**
   Installing the Workspaces is the step that can reject a stored blob outright, and
   a throw at boot would leave nothing rendered, on this launch and every later one.
+- **A fresh Window mints its first Workspace's id**, rather than taking the lib's
+  `DEFAULT_WORKSPACE_ID`, which every window would otherwise start on: a second
+  window opened after the first one closed would write a blob naming a Workspace
+  id already live in another window's blob, and the next launch would meet the
+  same id twice and refuse the whole restore. A bare Wall — one Window's whole
+  application — keeps the default id (`standalone/src/window-restore.test.ts`).
 
 Source of truth: `restoreWindowOrFresh` / `routeUnownedPtys` in
 `standalone/src/window-restore.ts`.
@@ -661,6 +667,20 @@ fans out to every Wall at once, so both adapters put their cwd probe behind
 `coalesceCwds` (`standalone/src/coalesce-cwds.ts`), which folds the calls arriving
 in one microtask into a single invoke — the same batching `getCwdsForPids` already
 does one layer down, extended across the callers.
+
+**A listing that spans terminals costs one `pty_get_open_ports_many`.** Both
+adapters carry it, and the sidecar answers every id from one process-table read
+and one socket scan (`getOpenPortsForPids`) — the scans are synchronous on its
+only event loop, so a `dor list --ports` across Workspaces must not multiply them
+by its row count (`docs/specs/dor-cli.md` → "Current Implemented Commands").
+**Must follow `docs/specs/transport.md` → "Port scan deadlines" for both port commands.**
+The macOS and Windows socket scans run under
+`OPEN_PORT_TIMEOUT_MS + OPEN_PORT_TIMEOUT_PER_ID_MS × ids`, and the command waits
+that plus the process-table read's `OPEN_PORT_TIMEOUT_MS` and IPC margin — one terminal's cap
+never bounds the whole Window (`open_ports_many_timeout` in
+`standalone/src-tauri/src/lib.rs`). **A macOS socket scan keeps the rows `lsof`
+printed before a non-zero exit** — a pid gone mid-batch would otherwise empty
+every terminal's answer, as `getCwdsForPids` already guards.
 
 **Nothing is deleted at boot but orphaned session temp files**
 (`docs/specs/transport.md` → "Retiring the transcripts already on disk"). **The

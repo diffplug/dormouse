@@ -206,6 +206,6 @@ Source of truth: `LeafMeta` / `LathPersistedLayout` / `lathLayoutFromStore` / `i
 
 ## Testing
 
-Ordering constraint: the remaining stages of the **workspaces-rollout** scope (defined in [layout.md](layout.md)) build on this engine — one engine instance per mounted Wall, never a shared one. `onApiReady` (the old tiling-api ready callback) is gone and **must not come back**: its last consumer, the website tutorial, drives off the engine-neutral `WallEvent` stream (`paneAdded`, `selectionChange`).
+Ordering constraint: the Workspace model ([layout.md](layout.md) → Workspaces) runs one engine instance per mounted Wall, never a shared one. `onApiReady` (the old tiling-api ready callback) is gone and **must not come back**: its last consumer, the website tutorial, drives off the engine-neutral `WallEvent` stream (`paneAdded`, `selectionChange`).
 
 Source of truth: the DOM-free suites in `lib/src/lib/lath/`, the binding suites under `lib/src/components/wall/`, and `lib/src/components/Wall.test.tsx`; live acceptance evidence is retained in the rationale.

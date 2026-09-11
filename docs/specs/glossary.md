@@ -88,7 +88,7 @@ A Workspace's **union status** is its display projection of member Surfaces' Act
 
 ### Implementation status
 
-The Pane / Surface model, surface kinds, the Workspace model, per-Workspace persistence, and several Windows each holding several Workspaces are live (`docs/specs/layout.md` → Workspaces). Ledger: `docs/specs/layout.md` `## Future` (**Scope: workspaces-rollout**); this glossary does not track it.
+The Pane / Surface model, surface kinds, the Workspace model, per-Workspace persistence, several Windows each holding several Workspaces, and the `dor workspace` verbs over them are all live (`docs/specs/layout.md` → Workspaces); this glossary tracks no rollout.
 
 ## Roles
 
@@ -261,7 +261,7 @@ Use glossary names instead. A left-column term retains meaning only where noted.
 | **reconnect** | Retired: live-PTY case → **resume**; cold start → **restore**. |
 | **restore** | Keeps its cold-start rehydrate meaning. Never for Door→Pane (**reattach**) or alert-manager seeding (**seed**). |
 | **attach** | Retired at the DOM layer (`attachTerminal`) → **mount**; user-level **reattach** (Door→Pane) keeps the `re-` prefix. |
-| **session** | The durable identity of a **terminal Surface**. Never for the Activity projection (`ActivityState`, not `SessionUiState`), nor for the agent-browser daemon's lowercase `session` string (`dormouse.1.<key>`) — not a Dormouse durable unit. |
+| **session** | The durable identity of a **terminal Surface**. Never for the Activity projection (`ActivityState`, not `SessionUiState`), nor for the agent-browser daemon's lowercase `session` string (`dormouse.<workspace>.<key>`) — not a Dormouse durable unit. |
 | **terminal** | Keeps its meaning for the `xterm.Terminal` instance; prose meaning "the whole thing" is **Session**. |
 | **surface** | Not retired. **Session** names only the terminal kind; **Surface** covers both. |
 | **panel / pane / leaf** | Prefer **pane** for the layout slot; **leaf** is Lath's tree node for it (1:1). "panel" survives only in React component names (`TerminalPanel`, `BrowserPanel`, `IframePanel`, `AgentBrowserPanel`). |

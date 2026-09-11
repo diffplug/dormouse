@@ -4,7 +4,10 @@
  * `dor identify` used to print (caller / focused pointers + host block).
  *
  * Lists every Surface in the current Workspace, including minimized ones, and
- * optionally each terminal's listening ports (`--ports` / `--port`).
+ * optionally each terminal's listening ports (`--ports` / `--port`). It also
+ * owns every cross-Workspace read: `--workspace` narrows to one, `--all` groups
+ * every Workspace's Surfaces, and `--workspaces` is the overview
+ * (`docs/specs/dor-cli.md` → "dor workspace" owns the mutation half).
  */
 
 import { buildCommand, type FlagParametersForType } from '@stricli/core';
@@ -14,10 +17,13 @@ import type {
   DorCommandContext,
   IdFormat,
   ListSurfacesResponse,
+  ListWorkspacesResponse,
   Surface,
   SurfaceKind,
   SurfacePort,
   SurfaceView,
+  WorkspaceRow,
+  WorkspaceScopedFlags,
 } from './types.js';
 import { hasBrowser, hasTerminal, SURFACE_KINDS } from './types.js';
 import {
@@ -29,10 +35,13 @@ import {
   renderJson,
   requireControlClient,
   stringParser,
+  workspaceFlag,
+  workspaceParam,
   writeStdout,
 } from './shared.js';
 
-interface ListFlags {
+interface ListFlags extends WorkspaceScopedFlags {
+  readonly all?: boolean;
   readonly command?: string;
   readonly cwd?: string;
   readonly idFormat?: IdFormat;
@@ -41,6 +50,7 @@ interface ListFlags {
   readonly port?: number;
   readonly ports?: boolean;
   readonly view?: SurfaceView;
+  readonly workspaces?: boolean;
 }
 
 const FULL_DESCRIPTION = `Lists every Surface in the current Workspace — terminals and browser Surfaces, including minimized ones (view "minimized").
@@ -55,8 +65,20 @@ Filters are ANDed. --command is an exact match against the running command repor
 
 JSON output (--json) always includes both stable ids and refs, and each row carries has_terminal (a PTY) and has_browser (a browser renderer) — gate on those, not on kind, so a Surface that has both still matches. It adds top-level caller_surface_ref/caller_surface_id and focused_surface_ref/focused_surface_id — the calling and focused Surfaces, null when neither is in the list — plus workspace_ref, window_ref, and a host block (app, workspace, cli_js_path, node_path): the identity dump dor identify used to print.
 
+--workspace <ref> lists another Workspace of this Window instead: workspace:<n> (positional) or workspace:<name>, which resolves only when exactly one Workspace carries that name. Both are accepted bare ("2", "build").
+
+--all lists every Workspace of this Window, grouped under a Workspace header — every Workspace keeps its header, including one holding nothing and one the filters emptied. Rows keep their own Workspace-scoped surface:N refs, so several groups have a surface:1, but only the active Workspace's selection carries the focus marker; each JSON row adds workspace_ref, and the payload adds a workspaces array plus caller_workspace_ref/focused_workspace_ref, because caller_surface_ref/focused_surface_ref then name a ref several groups share (the _id halves stay unique). Target a row from another Workspace by its stable id, or pass --workspace.
+
+--workspaces prints the Workspace overview instead of any Surface: one row per Workspace with the active marker, its name, [ringing]/[todo] when any member Surface is, and [attention N] for the number owing it. It takes no other flag but --json.
+
 Text output:
-  * surface:1  terminal  -              paned  ~/projects/site  pnpm dev  :5173`;
+  * surface:1  terminal  -              paned  ~/projects/site  pnpm dev  :5173
+
+  workspace:1  Workspace 1  [active]
+    * surface:1  terminal  -  paned  ~/projects/site  pnpm dev
+
+  * workspace:1  Workspace 1
+    workspace:2  build        [ringing]  [attention 1]`;
 
 export const listCommand: Command = {
   name: 'list',
@@ -65,6 +87,12 @@ export const listCommand: Command = {
 
 function buildListCommand(): Command['command'] {
   const flags: FlagParametersForType<ListFlags, DorCommandContext> = {
+    all: {
+      kind: 'boolean',
+      brief: 'List every Workspace, grouped by a Workspace header.',
+      optional: true,
+      withNegated: false,
+    },
     command: {
       kind: 'parsed',
       parse: stringParser,
@@ -114,12 +142,22 @@ function buildListCommand(): Command['command'] {
       optional: true,
       placeholder: 'paned|zoomed|minimized',
     },
+    workspace: workspaceFlag,
+    workspaces: {
+      kind: 'boolean',
+      brief: 'Print the Workspace overview instead of Surfaces.',
+      optional: true,
+      withNegated: false,
+    },
   };
 
   return buildCommand<ListFlags, [], DorCommandContext>({
     docs: {
       brief: 'List Dormouse Surfaces.',
-      customUsage: ['[--kind terminal|browser] [--view paned|zoomed|minimized] [--command text] [--cwd path] [--port number] [--ports] [--json] [--id-format refs|ids|both]'],
+      customUsage: [
+        '[--workspace ref|--all] [--kind terminal|browser] [--view paned|zoomed|minimized] [--command text] [--cwd path] [--port number] [--ports] [--json] [--id-format refs|ids|both]',
+        '--workspaces [--json]',
+      ],
       fullDescription: FULL_DESCRIPTION,
     },
     parameters: { flags },
@@ -133,12 +171,26 @@ async function runListCommand(
   flags: ListFlags,
   context: DorCommandContext,
 ): Promise<void | Error> {
+  const scoping = checkScopeFlags(flags);
+  if (!scoping.ok) return new Error(scoping.message);
+
   const client = requireControlClient(context.options);
   if (client instanceof Error) return client;
 
   try {
+    if (flags.workspaces === true) {
+      const overview = await client.listWorkspaces({});
+      writeStdout(context, flags.json === true
+        ? renderWorkspacesJson(overview)
+        : renderWorkspacesText(overview));
+      return undefined;
+    }
     const includePorts = flags.ports === true || flags.port !== undefined;
-    const response = await client.listSurfaces({ includePorts });
+    const response = await client.listSurfaces({
+      includePorts,
+      ...(flags.all === true ? { scope: 'all' as const } : {}),
+      ...workspaceParam(flags.workspace),
+    });
     const env = context.options.env ?? {};
     const filtered = applyListFilters(response, flags, env);
     const idFormat = flags.idFormat ?? 'refs';
@@ -150,6 +202,33 @@ async function runListCommand(
   } catch (error) {
     return new Error(errorMessage(error));
   }
+}
+
+/** The only flags the Workspace overview takes — an allowlist, so a flag added
+ *  to this command is refused there until it is named here. */
+const WORKSPACES_FLAGS: ReadonlySet<keyof ListFlags> = new Set(['json', 'workspaces']);
+
+/** A flag as the user typed it, from the name stricli parsed it into. */
+function flagSpelling(name: string): string {
+  return `--${name.replace(/[A-Z]/g, (upper) => `-${upper.toLowerCase()}`)}`;
+}
+
+/** The three container flags name one scope between them, and the overview is a
+ *  different listing rather than a filter on this one. */
+function checkScopeFlags(flags: ListFlags): { ok: true } | { ok: false; message: string } {
+  if (flags.all === true && flags.workspace !== undefined) {
+    return { ok: false, message: '--all and --workspace are mutually exclusive' };
+  }
+  if (flags.workspaces === true) {
+    const others = (Object.keys(flags) as Array<keyof ListFlags>)
+      .filter((name) => flags[name] !== undefined && !WORKSPACES_FLAGS.has(name))
+      .map((name) => flagSpelling(name))
+      .sort();
+    if (others.length > 0) {
+      return { ok: false, message: `dor list --workspaces takes only --json, not ${others.join(', ')}` };
+    }
+  }
+  return { ok: true };
 }
 
 // Display predicates applied to the host's full surface projection. Cheap by
@@ -179,14 +258,52 @@ function surfaceLocation(surface: Surface): string {
   return surface.cwd ?? surface.url ?? '';
 }
 
+/**
+ * Rows for one Workspace, or every group under its Workspace header when the
+ * answer spans them (`--all`). Column widths are computed across every row, so
+ * the groups line up with each other.
+ */
 function renderListText(
   response: ListSurfacesResponse,
   env: Record<string, string | undefined>,
   idFormat: IdFormat,
   includePorts: boolean,
 ): string {
+  const rows = surfaceRows(response, env, idFormat, includePorts);
+  if (!response.workspaces) return rows.length === 0 ? '' : `${rows.join('\n')}\n`;
+
+  // Every row of a `--all` answer carries the Workspace it came from
+  // (`GroupedSurface`), so a group is its own rows in response order. **Every
+  // Workspace keeps its header**, even one no row survived: the listing says
+  // which Workspaces there are, and the JSON payload lists them all either way.
+  const groups = response.workspaces.map((workspace) => [
+    `${workspace.ref}  ${workspace.name}${workspace.active ? '  [active]' : ''}`,
+    ...response.surfaces.flatMap((surface, index) => (
+      surface.workspaceRef === workspace.ref ? [`  ${rows[index]}`] : []
+    )),
+  ].join('\n'));
+  return groups.length === 0 ? '' : `${groups.join('\n\n')}\n`;
+}
+
+/** The trailing tag block both listings share: two spaces before each tag. */
+function tagTrailer(tags: string[]): string {
+  return tags.length > 0 ? `  ${tags.join('  ')}` : '';
+}
+
+/** The attention tags a Surface row and a Workspace row spell the same way. */
+function attentionTags(row: { ringing: boolean; todo: boolean }): string[] {
+  return [...(row.ringing ? ['[ringing]'] : []), ...(row.todo ? ['[todo]'] : [])];
+}
+
+/** One text row per Surface, in response order, sharing one set of columns. */
+function surfaceRows(
+  response: ListSurfacesResponse,
+  env: Record<string, string | undefined>,
+  idFormat: IdFormat,
+  includePorts: boolean,
+): string[] {
   const surfaces = response.surfaces;
-  if (surfaces.length === 0) return '';
+  if (surfaces.length === 0) return [];
 
   const callerId = env.DORMOUSE_SURFACE_ID;
   const handles = surfaces.map((surface) => renderHandle(surface, idFormat));
@@ -206,20 +323,54 @@ function renderListText(
     const view = surface.view.padEnd(viewWidth);
     const location = locations[index].padEnd(locationWidth);
 
-    const tags: string[] = [];
-    if (callerId !== undefined && surface.id === callerId) tags.push('(you)');
-    if (surface.ringing) tags.push('[ringing]');
-    if (surface.todo) tags.push('[todo]');
-    if (surface.awaited) tags.push('[awaited]');
-    if (includePorts && surface.ports && surface.ports.length > 0) {
-      tags.push(surface.ports.map((port) => `:${port.port}`).join(' '));
-    }
-    const trailer = tags.length > 0 ? `  ${tags.join('  ')}` : '';
+    const tags = [
+      ...(callerId !== undefined && surface.id === callerId ? ['(you)'] : []),
+      ...attentionTags(surface),
+      ...(surface.awaited ? ['[awaited]'] : []),
+      ...(includePorts && surface.ports && surface.ports.length > 0
+        ? [surface.ports.map((port) => `:${port.port}`).join(' ')]
+        : []),
+    ];
 
-    return `${marker} ${handle}  ${kind}  ${renderMode}  ${view}  ${location}  ${surface.title}${trailer}`.trimEnd();
+    return `${marker} ${handle}  ${kind}  ${renderMode}  ${view}  ${location}  ${surface.title}${tagTrailer(tags)}`.trimEnd();
   });
 
+  return lines;
+}
+
+/** The Workspace overview (`dor list --workspaces`). */
+function renderWorkspacesText(response: ListWorkspacesResponse): string {
+  const rows = response.workspaces;
+  if (rows.length === 0) return '';
+  const refWidth = Math.max(...rows.map((row) => row.ref.length));
+  const nameWidth = Math.max(...rows.map((row) => row.name.length));
+  const lines = rows.map((row) => {
+    const tags = [
+      ...attentionTags(row),
+      ...(row.count > 0 ? [`[attention ${row.count}]`] : []),
+    ];
+    return `${row.active ? '*' : ' '} ${row.ref.padEnd(refWidth)}  ${row.name.padEnd(nameWidth)}${tagTrailer(tags)}`.trimEnd();
+  });
   return `${lines.join('\n')}\n`;
+}
+
+function renderWorkspacesJson(response: ListWorkspacesResponse): string {
+  return renderJson({
+    workspaces: response.workspaces.map(renderWorkspaceJson),
+    window_ref: response.windowRef,
+  });
+}
+
+function renderWorkspaceJson(row: WorkspaceRow): Record<string, unknown> {
+  return {
+    ref: row.ref,
+    id: row.id,
+    name: row.name,
+    active: row.active,
+    ringing: row.ringing,
+    todo: row.todo,
+    count: row.count,
+  };
 }
 
 function renderListJson(
@@ -239,6 +390,14 @@ function renderListJson(
     focused_surface_id: focused?.id ?? null,
     window_ref: response.windowRef,
     workspace_ref: response.workspaceRef,
+    // Under `--all` a `surface:N` ref is shared by every Workspace, so the two
+    // ref pointers above name a row only together with the Workspace it is in;
+    // the `_id` halves stay unique on their own.
+    ...(response.workspaces ? {
+      caller_workspace_ref: caller?.workspaceRef ?? null,
+      focused_workspace_ref: focused?.workspaceRef ?? null,
+      workspaces: response.workspaces.map(renderWorkspaceJson),
+    } : {}),
     host: {
       app: env.DORMOUSE_HOST ?? null,
       workspace: env.DORMOUSE_HOST_WORKSPACE ?? null,
@@ -276,6 +435,9 @@ function renderSurfaceJson(
     ...(includePorts && hasTerminal(surface.kind)
       ? { ports: (surface.ports ?? []).map(renderPortJson) }
       : {}),
+    // Only a cross-Workspace listing carries it; within one Workspace the
+    // top-level `workspace_ref` already says which.
+    ...(surface.workspaceRef ? { workspace_ref: surface.workspaceRef } : {}),
   };
 }
 

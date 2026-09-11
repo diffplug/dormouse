@@ -4,12 +4,17 @@
  * `WorkspaceWindow.test.tsx`; this pins what the verb refuses.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { closeWorkspaceWithSurfaces, LAST_WORKSPACE_REFUSAL, requestWorkspaceClose } from './workspace-lifecycle';
+import {
+  closeWorkspaceWithSurfaces,
+  LAST_WORKSPACE_REFUSAL,
+  requestWorkspaceClose,
+} from './workspace-lifecycle';
 import { registerWallHandle, resetWallHandles, stubWallHandle, type WallHandle } from './wall-handles';
 import { getWorkspaceUiSnapshot, resetWorkspaceUi, setPendingWorkspaceClose, setRenamingWorkspace } from '../../lib/workspace-ui-store';
 import {
   closeWorkspace,
   createWorkspace,
+  getActiveWorkspaceId,
   getWorkspacesSnapshot,
   resetWorkspaces,
 } from '../../lib/workspace-store';
@@ -80,6 +85,32 @@ describe('closeWorkspaceWithSurfaces', () => {
     expect(ids()).toEqual(['ws-2']);
   });
 
+  it('reveals a refused Workspace only when a prompt is what refused it', async () => {
+    const [first] = ids();
+    createWorkspace({ id: 'ws-2', activate: false });
+    handleFor('ws-2', { closeAll: async () => 'notepad archive failed' });
+
+    // `dor workspace close`: the caller is a command, so the refusal comes back
+    // as a message and the user stays where they were.
+    expect(await closeWorkspaceWithSurfaces('ws-2', 'silent')).toBe('notepad archive failed');
+    expect(getActiveWorkspaceId()).toBe(first);
+
+    // A user gesture: the archive-failure prompt is on the refused Workspace's
+    // Wall, so that Workspace is revealed.
+    expect(await closeWorkspaceWithSurfaces('ws-2', 'prompt')).toBe('notepad archive failed');
+    expect(getActiveWorkspaceId()).toBe('ws-2');
+  });
+
+  it('refuses a Workspace with no registered Wall instead of closing past its Sessions', async () => {
+    const [first] = ids();
+    createWorkspace({ id: 'ws-2', activate: false });
+    // No `handleFor('ws-2')`: nothing would walk its member Surfaces, so
+    // removing the Workspace would leave them running and unreachable. The
+    // wording is the router's, so a `dor` caller reads one refusal either way.
+    expect(await closeWorkspaceWithSurfaces('ws-2', 'silent')).toBe("workspace 'workspace:2' is still mounting");
+    expect(ids()).toEqual([first, 'ws-2']);
+  });
+
   it('releases the lock after a refusal, so the next close still works', async () => {
     const [first] = ids();
     createWorkspace({ id: 'ws-2' });
@@ -106,9 +137,44 @@ describe('closeWorkspaceWithSurfaces', () => {
   });
 });
 
+describe('requestWorkspaceClose', () => {
+  it('waits out the Wall registration gap, then closes rather than refusing unseen', async () => {
+    vi.useFakeTimers();
+    try {
+      const [first] = ids();
+      createWorkspace({ id: 'ws-2' });
+      // The strip's `×` right after a create: the Workspace is in the store,
+      // its Wall is one passive effect away. A gesture has nobody to hand a
+      // refusal to, so it waits like the `dor` path instead.
+      requestWorkspaceClose('ws-2');
+      expect(ids()).toEqual([first, 'ws-2']);
+      const closeAll = vi.fn(async () => null);
+      handleFor('ws-2', { closeAll });
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(closeAll).toHaveBeenCalledWith('prompt');
+      expect(ids()).toEqual([first]);
+      expect(getWorkspaceUiSnapshot().pendingClose).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('raises the confirmation once the registered Wall reports work', async () => {
+    const [first] = ids();
+    createWorkspace({ id: 'ws-2' });
+    handleFor('ws-2', { runningCount: () => 1 });
+    requestWorkspaceClose('ws-2');
+    await Promise.resolve();
+    expect(getWorkspaceUiSnapshot().pendingClose?.id).toBe('ws-2');
+    expect(ids()).toEqual([first, 'ws-2']);
+  });
+});
+
 it('preserves another Workspace’s rename and close confirmation when closing a sibling', async () => {
   const [first] = ids();
   createWorkspace({ id: 'ws-2' });
+  handleFor('ws-2');
   setRenamingWorkspace(first);
   setPendingWorkspaceClose({ id: first, char: 'x' });
   const before = getWorkspaceUiSnapshot();
