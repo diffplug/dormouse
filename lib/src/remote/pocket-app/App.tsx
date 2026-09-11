@@ -823,7 +823,7 @@ export interface TransportView {
 
 /**
  * Where every session starts and where each one ends: relayed, with no reason
- * to give. Shared rather than rebuilt, so re-announcing it re-renders nothing.
+ * to give. Shared so the initial state and the default prop are one value.
  */
 export const RELAYED_TRANSPORT: TransportView = { path: 'relay', cause: null };
 

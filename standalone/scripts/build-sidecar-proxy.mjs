@@ -35,6 +35,16 @@ const SIDECAR_RUNTIME_DEPS = Object.keys(
 );
 // Each package by name, plus every subpath export of it (`node-datachannel/polyfill`).
 const NATIVE_DIRECT = SIDECAR_RUNTIME_DEPS.flatMap((name) => [name, `${name}/*`]);
+// The list `assertNothingInlined` checks is this same one, so a manifest that
+// stopped declaring the addon would take the check away with the `external`
+// entry and the build would go green on a `burrow.cjs` that cannot load it.
+if (!SIDECAR_RUNTIME_DEPS.includes('node-datachannel')) {
+  throw new Error(
+    'sidecar: package.json no longer declares "node-datachannel" under "dependencies" — it would ' +
+      'be inlined into burrow.cjs, and nothing before the first direct-offer on a real machine ' +
+      'would notice.',
+  );
+}
 
 const bundles = [
   { entry: 'iframe-proxy.ts', out: 'iframe-proxy.cjs' },
