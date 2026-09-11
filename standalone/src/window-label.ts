@@ -31,9 +31,7 @@ export function currentWindowLabel(): string {
 }
 
 /** The window the quit walk tears down last while it is open, and the only one
- *  that runs the periodic update check or holds `updater:*`
- *  (`capabilities/main-only.json`). With `main` closed the walk still ends on
- *  some window, which has nothing to install (docs/specs/auto-update.md). */
+ *  that checks for, downloads, and installs updates (`capabilities/main-only.json`). */
 export function isMainWindow(): boolean {
   return label === MAIN_WINDOW_LABEL;
 }

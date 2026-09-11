@@ -155,9 +155,9 @@ async function bootstrap() {
   // store wholesale (`docs/specs/standalone.md` → "Arrival queue").
   armWorkspaceMoves?.();
 
-  // Only `main` runs the periodic check, and only `main` holds `updater:*`
-  // (`capabilities/main-only.json`), so a session whose `main` was closed has
-  // no update to install until it relaunches (docs/specs/auto-update.md).
+  // Only `main` runs the periodic check and holds the updater capability, so a
+  // session whose `main` was closed has no update until it relaunches
+  // (docs/specs/auto-update.md).
   if (isMainWindow()) startUpdateCheck();
 
   createRoot(document.getElementById("root")!).render(

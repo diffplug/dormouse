@@ -86,6 +86,18 @@ struct RoutingState {
     /// dor requestId -> the window handling it, so a cancel reaches the window
     /// holding the subscription, watch or completion claim it releases.
     dor_targets: HashMap<String, String>,
+    /// Protocol events that arrived while their id was suppressed, delivered
+    /// to the new owner behind its replay (`routing::Route::Hold`). Only ever
+    /// emptied together with `awaiting_replay` (`lift_suppression`).
+    held: HashMap<String, Vec<routing::HeldEvent>>,
+}
+
+impl RoutingState {
+    /// `routing::lift_suppression` over this state's two halves. The caller
+    /// republishes `WindowState::suppressed` after it, still under the lock.
+    fn lift_suppression(&mut self, id: &str) -> Vec<routing::HeldEvent> {
+        routing::lift_suppression(&mut self.awaiting_replay, &mut self.held, id)
+    }
 }
 
 #[derive(Default)]
@@ -139,10 +151,10 @@ impl WindowState {
     fn mint(&self, id: &str, label: &str) {
         let mut routing = guard(&self.routing);
         routing.owners.insert(id.to_string(), label.to_string());
-        if routing.awaiting_replay.remove(id).is_some() {
-            self.suppressed
-                .store(routing.awaiting_replay.len(), Ordering::Relaxed);
-        }
+        // Whatever was held belonged to the PTY that never arrived, not this one.
+        routing.lift_suppression(id);
+        self.suppressed
+            .store(routing.awaiting_replay.len(), Ordering::Relaxed);
     }
 
     /// Refuse every later `save_session` for `label` (a deliberate close removed
@@ -167,7 +179,12 @@ impl WindowState {
             if suppress {
                 routing.awaiting_replay.insert(id.clone(), now);
             } else {
-                routing.awaiting_replay.remove(id);
+                // A hand-back. The gap is lost here: the source was suppressed
+                // like any other non-owner from the invoke on, and no replay
+                // follows a hand-back, so the bytes and everything derived from
+                // them are gone from its pane. A later stage recovers the gap
+                // (docs/specs/standalone.md -> "Arrival queue").
+                routing.lift_suppression(id);
             }
         }
         self.suppressed
@@ -178,7 +195,7 @@ impl WindowState {
     fn forget_pty(&self, id: &str) {
         let mut routing = guard(&self.routing);
         routing.owners.remove(id);
-        routing.awaiting_replay.remove(id);
+        routing.lift_suppression(id);
         self.suppressed
             .store(routing.awaiting_replay.len(), Ordering::Relaxed);
     }
@@ -190,7 +207,7 @@ impl WindowState {
     fn clear_suppression(&self, ids: &[String]) {
         let mut routing = guard(&self.routing);
         for id in ids {
-            routing.awaiting_replay.remove(id);
+            routing.lift_suppression(id);
         }
         self.suppressed
             .store(routing.awaiting_replay.len(), Ordering::Relaxed);
@@ -209,7 +226,7 @@ impl WindowState {
             let mut routing = guard(&self.routing);
             for id in lost.iter().flat_map(|arrival| &arrival.terminal_ids) {
                 routing.owners.remove(id);
-                routing.awaiting_replay.remove(id);
+                routing.lift_suppression(id);
             }
             let owned = routing.owned_by(label);
             for id in &owned {
@@ -266,6 +283,8 @@ fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
     };
 
     let mut released: Vec<String> = Vec::new();
+    // Held events an expired suppression releases, flushed to the owner below.
+    let mut flushed: Vec<(String, Vec<routing::HeldEvent>)> = Vec::new();
     let delivery = {
         // Before the routing lock, never inside it (§`arrivals`). Nothing is
         // transferring in the steady state, so this second acquisition is paid
@@ -287,6 +306,13 @@ fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
                 state
                     .suppressed
                     .store(routing.awaiting_replay.len(), Ordering::Relaxed);
+                for id in &released {
+                    // The sweep already took the map entry; this takes the queue.
+                    let queue = routing.lift_suppression(id);
+                    if let (false, Some(label)) = (queue.is_empty(), routing.owners.get(id)) {
+                        flushed.push((label.clone(), queue));
+                    }
+                }
             }
         }
 
@@ -300,6 +326,12 @@ fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
             },
         ) {
             Route::Drop => Delivery::Nowhere,
+            Route::Hold => {
+                if let Some(id) = data.get("id").and_then(JsonValue::as_str) {
+                    routing::hold_event(&mut routing.held, id, event, data.clone());
+                }
+                Delivery::Nowhere
+            }
             Route::Broadcast => Delivery::Broadcast,
             Route::EmitTo(label) => Delivery::To(label.to_string()),
             // Resolved here, where the focus order is a sibling of the map the
@@ -317,6 +349,12 @@ fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
             },
         }
     };
+
+    for (label, queue) in flushed {
+        for (held_event, held_data) in queue {
+            let _ = app.emit_to(label.as_str(), held_event.as_str(), &held_data);
+        }
+    }
 
     let mut delivered: Option<&str> = None;
     match &delivery {
@@ -361,11 +399,21 @@ fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
         }
         "pty:replay" => {
             if let Some(id) = id() {
-                let mut routing = guard(&state.routing);
-                routing.awaiting_replay.remove(id);
-                state
-                    .suppressed
-                    .store(routing.awaiting_replay.len(), Ordering::Relaxed);
+                let queue = {
+                    let mut routing = guard(&state.routing);
+                    let queue = routing.lift_suppression(id);
+                    state
+                        .suppressed
+                        .store(routing.awaiting_replay.len(), Ordering::Relaxed);
+                    queue
+                };
+                // Behind the replay, to the window that just received it: the
+                // events describe bytes the replay carried.
+                if let Some(label) = delivered {
+                    for (held_event, held_data) in queue {
+                        let _ = app.emit_to(label, held_event.as_str(), &held_data);
+                    }
+                }
             }
         }
         "dor:controlRequest" => {
@@ -4334,10 +4382,54 @@ mod tests {
         state.reassign(&["pane-a".to_string()], "ws-2", true);
         assert_eq!(state.suppressed.load(Ordering::Relaxed), 1);
 
+        super::routing::hold_event(
+            &mut guard(&state.routing).held,
+            "pane-a",
+            "terminal:protocolEvents",
+            serde_json::json!({"n": 1}),
+        );
+
         state.mint("pane-a", "main");
         assert!(guard(&state.routing).awaiting_replay.is_empty());
+        // Nothing held for the PTY that never arrived survives under its id.
+        assert!(guard(&state.routing).held.is_empty());
         assert_eq!(state.suppressed.load(Ordering::Relaxed), 0);
         assert_eq!(state.owned_by("main"), vec!["pane-a".to_string()]);
+    }
+
+    /// Every way out of a suppression takes the held queue with it: a queue
+    /// left behind would be flushed ahead of the *next* transfer's own gap.
+    #[test]
+    fn every_lift_of_a_suppression_takes_its_held_queue() {
+        let state = super::WindowState::default();
+        let ids = ["pane-a".to_string()];
+        let queue_up = || {
+            state.reassign(&ids, "ws-2", true);
+            super::routing::hold_event(
+                &mut guard(&state.routing).held,
+                "pane-a",
+                "terminal:protocolEvents",
+                serde_json::json!({"n": 1}),
+            );
+            assert_eq!(state.suppressed.load(Ordering::Relaxed), 1);
+        };
+        let lifted = || {
+            let routing = guard(&state.routing);
+            routing.awaiting_replay.is_empty() && routing.held.is_empty()
+        };
+
+        queue_up();
+        state.clear_suppression(&ids);
+        assert!(lifted());
+        assert_eq!(state.suppressed.load(Ordering::Relaxed), 0);
+
+        queue_up();
+        state.reassign(&ids, "main", false);
+        assert!(lifted());
+
+        queue_up();
+        state.forget_pty("pane-a");
+        assert!(lifted());
     }
 
     #[test]

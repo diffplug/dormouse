@@ -327,7 +327,7 @@ so `titleBarStyle`, `hiddenTitle`, `dragDropEnabled` and the CSP carry across
 with no second copy of any of them.
 
 **Capabilities are split**: `default.json` covers `main` and the `ws-*` glob,
-and `main-only.json` scopes `updater:*` and `core:app:allow-version` to `main`,
+and `main-only.json` scopes `updater:default` and `core:app:allow-version` to `main`,
 which structurally enforces that the install runs in the window the walk tears
 down last (`docs/specs/auto-update.md`). Custom commands need no capability
 entry. `standalone/scripts/tauri-conf.test.mjs` pins both.
@@ -339,7 +339,9 @@ Source of truth: `route` in `standalone/src-tauri/src/routing.rs`,
 
 | Sidecar event | Key | Goes to |
 |---|---|---|
-| `pty:data`, `terminal:semanticEvents`, `terminal:protocolEvents` | `data.id` | its owner; dropped while the id is mid-transfer |
+| `pty:data` | `data.id` | its owner; dropped while the id is mid-transfer, its bytes being in the replay |
+| `terminal:semanticEvents` | `data.id` | its owner; dropped while the id is mid-transfer — the target re-derives them from the raw replay, feeding both pane state and its `AlertManager` (rationale) |
+| `terminal:protocolEvents` | `data.id` | its owner; **held** while the id is mid-transfer and delivered, in order, behind the replay, which rebuilds none of them; at most `HELD_EVENTS_MAX` (256) per id, overflow dropping the oldest (`held_events_come_back_in_order_and_bounded`) |
 | `pty:exit`, `pty:replay` | `data.id` | its owner, never suppressed |
 | `pty:list` | `data.forWindow` | the window that asked |
 | `alert:*` carrying `data.id` | `data.id` | its owner |
@@ -540,8 +542,9 @@ below reads that record rather than inferring itself from the suppression map.
    "arrived before armed" class of bug (rationale). Rust answers
    `pty:requestInit` with **that arrival's ids and no others**; `pty:list` and
    each `pty:replay` echo the collector's token. The target resumes over them,
-   hydrates the notes, seeds each persisted TODO into its own `AlertManager`,
-   and mounts the Workspace at the drop index.
+   hydrates the notes and mounts the Workspace at the drop index.
+   **Must seed persisted alerts before requesting replay**, so the older state
+   cannot erase WATCHING rebuilt by replay (`standalone/src/workspace-move.test.ts`).
 4. **Target adopted** invokes `adopt_done(workspaceId)`. Rust retires the record,
    clears what is left of the suppression, and emits `workspace-departed` for
    **that Workspace alone** to its own source.
@@ -571,6 +574,8 @@ below reads that record rather than inferring itself from the suppression map.
   source unsuppressed, drop the record, and emit `workspace-arrival-failed`; the
   source clears **transferring** and the Workspace is simply still there. With
   both ends gone the shells are reaped rather than left owned by a dead label.
+  **The gap is lost on a hand-back**: suppressed from the invoke with no replay
+  to follow, it is the one path nothing recovers.
 - **`planArrival` never throws into `bootstrap()`.** A refused sole arrival on
   the boot path renders a fresh one-pane Workspace, never a blank window.
 - **`take_arrivals` does not consume.** The record settles at `adopt_done`, so a

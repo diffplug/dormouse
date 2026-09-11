@@ -135,11 +135,11 @@ async function runQuitTeardown(last: boolean): Promise<void> {
         `[quit] teardown exceeded ${QUIT_TEARDOWN_CEILING_MS}ms; proceeding to exit`,
       );
     }
-    // Install strictly after the completed final save, and only in `main` —
-    // the window the walk tears down last, and the only one holding `updater:*`
-    // (`capabilities/main-only.json`; docs/specs/auto-update.md). A fresh
-    // `quit_progress` gives install its own watchdog budget instead of the
-    // teardown remainder.
+    // Install strictly after the completed final save, in the window the walk
+    // tears down last. Only `main` ever holds a pending download and the
+    // updater capability (docs/specs/auto-update.md), so this is `main` or a
+    // no-op. A fresh `quit_progress` gives install its own watchdog budget
+    // instead of the teardown remainder.
     if (last && hasPendingUpdate()) {
       void invoke("quit_progress").catch(() => {}); // install phase begins
       await installPendingUpdate();
