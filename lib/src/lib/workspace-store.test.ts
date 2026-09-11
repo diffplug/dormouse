@@ -189,29 +189,20 @@ describe('workspace-store', () => {
     expect(resolveWorkspaceRef('workspace:1')).toMatchObject({ ok: true, id: DEFAULT_WORKSPACE_ID });
   });
 
-  it('refs are positional only while nothing in the Window was minted', async () => {
+  it('legacy ids keep unambiguous refs before and after a numbered create', async () => {
     await installWorkspaceIdPool(minting(7));
-    // A snapshot from before the registry: every id unminted, so refs are
-    // positions and a reorder renumbers them.
-    setWorkspaces({ workspaces: [{ id: 'ws-a', name: 'A' }, { id: 'ws-b', name: 'B' }], activeId: 'ws-a' });
-    expect(workspaceRefFor('ws-b')).toBe('workspace:2');
-    expect(resolveWorkspaceRef('workspace:2')).toMatchObject({ ok: true, id: 'ws-b', ref: 'workspace:2' });
+    setWorkspaces({ workspaces: [{ id: 'ws-a', name: '2' }, { id: 'ws-b', name: '2' }], activeId: 'ws-a' });
+    expect(resolveWorkspaceRef('workspace:2').ok).toBe(false);
+    for (const id of ['ws-a', 'ws-b']) {
+      expect(workspaceRefFor(id)).toBe(`workspace:${id}`);
+      expect(resolveWorkspaceRef(workspaceRefFor(id))).toMatchObject({ ok: true, id });
+    }
     moveWorkspace('ws-b', 0);
-    expect(workspaceRefFor('ws-b')).toBe('workspace:1');
-    expect(resolveWorkspaceRef('workspace:1')).toMatchObject({ ok: true, id: 'ws-b' });
-    // A Workspace already gone reports the first ref.
-    expect(workspaceRefFor('missing')).toBe('workspace:1');
-
-    // The first minted id flips the whole Window to stable refs: the number
-    // names the minted Workspace and nothing else, and an unminted one is
-    // addressed by its name, so no ref reads two ways.
     createWorkspace({ activate: false });
-    expect(workspaceRefFor('workspace-7')).toBe('workspace:7');
-    expect(resolveWorkspaceRef('workspace:1')).toEqual({ ok: false, message: "unknown workspace target 'workspace:1'" });
-    expect(resolveWorkspaceRef('workspace:2')).toEqual({ ok: false, message: "unknown workspace target 'workspace:2'" });
-    expect(workspaceRefFor('ws-b')).toBe('workspace:B');
-    expect(resolveWorkspaceRef('workspace:B')).toMatchObject({ ok: true, id: 'ws-b', ref: 'workspace:B' });
-    expect(workspaceRefFor('missing')).toBe('workspace:B');
+    renameWorkspace('workspace-7', 'ws-b');
+    expect(resolveWorkspaceRef('workspace:ws-b')).toMatchObject({ ok: true, id: 'ws-b' });
+    expect(resolveWorkspaceRef('workspace:7')).toMatchObject({ ok: true, id: 'workspace-7' });
+    expect(resolveWorkspaceRef('workspace:2').ok).toBe(false);
   });
 
   it('a host with no registry numbers by position, its default id included', () => {
@@ -245,22 +236,17 @@ describe('workspace-store', () => {
     expect(reserve).toHaveBeenCalledTimes(2);
   });
 
-  it('an installed pool that ran dry throws rather than mint a random id', async () => {
+  it('a failed first reservation still creates stable opaque refs and can recover', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
-      let reject: (reason: Error) => void = () => {};
-      const reserve = vi.fn(() => new Promise<string[]>((_, r) => { reject = r; }));
-      const installed = installWorkspaceIdPool(reserve);
-      // The first block is still in flight.
-      expect(() => generateWorkspaceId()).toThrow('still reserving a block');
-      reject(new Error('host down'));
-      await installed;
-      // The rejection is logged, not swallowed, and the next create names it.
-      expect(error).toHaveBeenCalledWith(expect.stringContaining('did not reserve Workspace ids'), expect.any(Error));
-      expect(() => createWorkspace()).toThrow('the last reservation failed');
-      // A host with no registry falls back to a random id.
-      resetWorkspaceIdPool();
-      expect(createWorkspace().id).toMatch(/^workspace-[a-z0-9]+-\d+$/);
+      await installWorkspaceIdPool(async () => { throw new Error('host down'); });
+      const first = createWorkspace({ name: '7' });
+      expect(first.id).toMatch(/^workspace-[0-9a-f-]{36}$/);
+      expect(resolveWorkspaceRef(workspaceRefFor(first.id))).toMatchObject({ ok: true, id: first.id });
+      await installWorkspaceIdPool(minting(7));
+      createWorkspace({ name: '7' });
+      expect(resolveWorkspaceRef(workspaceRefFor(first.id))).toMatchObject({ ok: true, id: first.id });
+      expect(resolveWorkspaceRef('workspace:7')).toMatchObject({ ok: true, id: 'workspace-7' });
     } finally {
       error.mockRestore();
     }
