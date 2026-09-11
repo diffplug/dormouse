@@ -243,7 +243,7 @@ Source of truth: `focusSession` / `refitSession` in `lib/src/lib/terminal-lifecy
 - I1: `SessionId` is immutable for the life of a Session and stable across `resume` / `restore`.
 - I2: Process state is independent of Registry, View, and Link. A `Live` process may be `Doored` or `Hidden`; an `Exited` process may still be `Paned`.
 - I3: Activity state survives `minimize` / `reattach`. `ALERT_RINGING` fires only on a *fresh* transition, never on `mount` or `reattach`.
-- I4: `Registry: Orphaned` outlives no Session state except `View: Doored` or a Surface in a hidden Workspace — at rest every other entry is `Mounted` or `Disposed`, so an `Orphaned` entry that is not `Doored` is a leak.
+- I4: `Registry: Orphaned` outlives no Session state except `View: Doored` or a Surface in a hidden Workspace — at rest every other entry is `Mounted` or `Disposed`, so an `Orphaned` entry that is neither is a leak.
 - I5: `kill` is universally valid and always ends at `View: Hidden`; its per-kind effects are the [User verbs](#user-verbs) row.
 - I6: `rename` is universally valid including when `Process = Exited` and `View = Doored`.
 - I7: Every Surface sits in exactly one Pane; every Pane and its Surfaces belong to exactly one Workspace; every Workspace belongs to one Window.

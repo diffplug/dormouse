@@ -25,6 +25,9 @@ const {
   getListeningPortsForPids,
   getOpenPortsForPid,
   getOpenPortsForPids,
+  openPortScanTimeoutMs,
+  OPEN_PORT_TIMEOUT_MS,
+  OPEN_PORT_TIMEOUT_PER_ID_MS,
 } = require('./pty-core');
 
 test('resolveSpawnConfig uses POSIX shell and home defaults', () => {
@@ -1426,6 +1429,20 @@ test('getListeningPortsForPids (darwin) runs lsof with the descendant pid list',
   ]);
 });
 
+test('getListeningPortsForPids (darwin) keeps the live pids when lsof exits non-zero over a dead one', () => {
+  // A batched scan covers every descendant of every terminal, so one child
+  // exiting between `ps` and `lsof` is the common case, not the odd one; the
+  // stdout lsof printed before its non-zero exit is the answer.
+  const execFileSync = () => {
+    const err = new Error('lsof exited 1');
+    err.status = 1;
+    err.stdout = ['p4242', 'cnode', 'tIPv4', 'n*:3000', ''].join('\n');
+    throw err;
+  };
+  const ports = getListeningPortsForPids([100, 4242, 999_999], { platform: 'darwin', execFileSync });
+  assert.deepEqual(ports.map((p) => [p.pid, p.port]), [[4242, 3000]]);
+});
+
 test('getListeningPortsForPids (win32) prefers Get-NetTCPConnection', () => {
   const execFileSync = (cmd, args) => {
     assert.equal(cmd, 'powershell.exe');
@@ -1488,11 +1505,14 @@ test('getOpenPortsForPids answers per root pid from ONE process table and ONE so
   // Two terminals, each with a child serving a port. A listing that spans them
   // must not pay for a `ps` + `lsof` pair per terminal.
   const spawns = [];
-  const execFileSync = (cmd, args) => {
+  const execFileSync = (cmd, args, options) => {
     spawns.push(cmd);
     if (cmd === 'ps') return '100 1\n200 100\n300 1\n400 300\n';
     if (cmd === 'lsof') {
       assert.ok(args.includes('100,200,300,400'), `one scan over every descendant: ${args.join(' ')}`);
+      // The socket scan is budgeted for the batch, not for one terminal.
+      assert.equal(options.timeout, openPortScanTimeoutMs(2));
+      assert.equal(options.timeout, OPEN_PORT_TIMEOUT_MS + 2 * OPEN_PORT_TIMEOUT_PER_ID_MS);
       return [
         'p200', 'cnode', 'tIPv4', 'n*:3000',
         'p400', 'cnode', 'tIPv4', 'n*:5173',

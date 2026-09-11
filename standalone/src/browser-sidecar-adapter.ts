@@ -388,7 +388,9 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
       // why the one-shot parser still needs the theme.
       const { id, data: text, requestId } = data as PtyReplayDetail;
       const parsed = new TerminalProtocolParser(themeColorProvider).process(text);
-      applyTerminalSemanticEvents(id, collectTerminalSemanticEvents(parsed.events));
+      const events = collectTerminalSemanticEvents(parsed.events);
+      this.alertManager.applyTerminalSemanticEvents(id, events);
+      applyTerminalSemanticEvents(id, events);
       for (const handler of this.replayHandlers) handler({ id, data: parsed.visibleData, requestId });
     } else if (event === BURROW_RESULT_EVENT) {
       this.burrowClient.onResult(data as BurrowResult);

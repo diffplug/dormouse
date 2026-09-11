@@ -1,8 +1,9 @@
 import { randomKillChar } from '../KillConfirm';
+import { awaitWallHandle, mountingRefusal } from './dor-control-shared';
 import { getWallHandle } from './wall-handles';
 import { forgetWorkspaceSession } from '../../lib/window-session-aggregator';
 import { setPendingWorkspaceClose, setRenamingWorkspace } from '../../lib/workspace-ui-store';
-import { closeWorkspace, getWorkspacesSnapshot, setActiveWorkspace } from '../../lib/workspace-store';
+import { closeWorkspace, getWorkspacesSnapshot, setActiveWorkspace, workspaceRefFor } from '../../lib/workspace-store';
 import type { WorkspaceId } from '../../lib/session-types';
 import type { CloseSurfaceMode } from './wall-types';
 
@@ -20,11 +21,12 @@ export function workspaceNeedsCloseConfirmation(id: WorkspaceId): boolean {
   return !!handle && (handle.hasTouchedSurfaces() || handle.runningCount() > 0);
 }
 
-/** The three ways a close is turned down before it starts. All leave every
- *  Surface where it was. */
+/** The ways a close is turned down before it starts — these two, and
+ *  `mountingRefusal` for a Wall that has not registered, the one wording the
+ *  `dor` router uses for the same condition. All leave every Surface where it
+ *  was. */
 export const LAST_WORKSPACE_REFUSAL = 'the last Workspace cannot be closed';
 const CLOSE_IN_FLIGHT_REFUSAL = 'another Workspace is closing';
-export const NO_WALL_REFUSAL = 'the workspace is still mounting';
 
 /** One close at a time, for the whole Window. Two closes overlapping would each
  *  see the other's Workspace in the count, empty both Walls, and leave the
@@ -60,7 +62,7 @@ export async function closeWorkspaceWithSurfaces(
   // Workspace with nothing in it.
   if (getWorkspacesSnapshot().workspaces.length <= 1) return LAST_WORKSPACE_REFUSAL;
   const handle = getWallHandle(id);
-  if (!handle) return NO_WALL_REFUSAL;
+  if (!handle) return mountingRefusal(workspaceRefFor(id));
   closeInFlight = true;
   /** Put the user in front of the prompt a refusal left behind — and only then. */
   const revealForPrompt = () => { if (mode === 'prompt') setActiveWorkspace(id); };
@@ -77,6 +79,11 @@ export async function closeWorkspaceWithSurfaces(
       return LAST_WORKSPACE_REFUSAL;
     }
     forgetWorkspaceSession(id);
+    // Neither strip UI state survives its Workspace: a `renamingId` left on a
+    // closed one holds the chrome keyboard lease forever, which suppresses
+    // command-mode dispatch in every Wall for the rest of the session.
+    setRenamingWorkspace(null);
+    setPendingWorkspaceClose(null);
     return null;
   } finally {
     closeInFlight = false;
@@ -91,11 +98,24 @@ export async function closeWorkspaceWithSurfaces(
 export function requestWorkspaceClose(id: WorkspaceId): void {
   if (closeInFlight) return;
   if (getWorkspacesSnapshot().workspaces.length <= 1) return;
+  void closeOnceWallRegisters(id);
+}
+
+/**
+ * The Wall is what says whether the Workspace holds work, so a gesture landing
+ * in the registration gap — the strip's `×` or the `&` key right after a create
+ * — waits it out, as `dor workspace close` does, rather than deciding on a
+ * handle that is one effect away and having the close refused where nobody
+ * reads the refusal (`docs/specs/layout.md` → "Workspaces").
+ */
+async function closeOnceWallRegisters(id: WorkspaceId): Promise<void> {
+  await awaitWallHandle(id);
+  if (closeInFlight) return;
   if (workspaceNeedsCloseConfirmation(id)) {
     setPendingWorkspaceClose({ id, char: randomKillChar() });
     return;
   }
-  void closeWorkspaceWithSurfaces(id);
+  await closeWorkspaceWithSurfaces(id);
 }
 
 /** Open the strip's inline rename editor on a Workspace. */
