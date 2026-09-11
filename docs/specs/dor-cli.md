@@ -295,9 +295,11 @@ Invariants:
   list output always includes both refs and stable ids.
 - `workspace:<n>` selects a container and is **stable**: `n` is the number of
   the Workspace's registry-minted id (`docs/specs/standalone.md` → "Workspace
-  registry"), so a strip reorder and a move between Windows rename nothing. A
-  host with no registry — VS Code, a snapshot from before it — numbers by
-  position instead. `workspace:<name>` **resolves only when exactly one
+  registry"), so a strip reorder and a move between Windows rename nothing.
+  **Refs are positional only while no id in the Window was minted** — a host
+  with no registry (VS Code), or a snapshot from before it until its first
+  create — and an unminted id beside minted ones has no number and is addressed
+  by name, so one ref never reads two ways. `workspace:<name>` **resolves only when exactly one
   Workspace carries that name**, else the error lists the candidates. Both are
   accepted bare (`2`, `build`), and **a ref that reads as a number is a ref**,
   never a name. **A Window is `window:<label>` — its host's own name for it**
@@ -653,10 +655,11 @@ Source of truth: `buildDorSurfacesInternal` in `lib/src/components/Wall.tsx`; `d
   npm) distributes the bootstrap stub, never a copy of the content. A user-level
   `--global` install variant waits until a story needs it.
 
-- **Cross-Window listing and moves.** `--workspace` and `--window` already reach
-  a sibling Window's Workspace ([Standalone](#standalone)); `dor list --all`
-  still lists the answering Window alone, and no verb moves a Workspace between
-  Windows or reorders the strip. Both read the registry
+- **Cross-Window listing and moves.** `--workspace` already reaches a sibling
+  Window's Workspace ([Standalone](#standalone)); the router places a `window`
+  target too, but no command takes that flag yet. `dor list --all` still lists
+  the answering Window alone, and no verb moves a Workspace between Windows or
+  reorders the strip. Both read the registry
   (`docs/specs/standalone.md` → "Workspace registry").
 - **Cross-Workspace listing in VS Code.** Each Workspace is its own webview
   there, so `dor list --all` would have to aggregate at the extension host

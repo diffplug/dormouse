@@ -62,17 +62,27 @@ let workspaceSequence = 0;
  *  and unique across windows. Refilled in the background; below the low-water
  *  mark a burst of creates still finds one. */
 const idPool: WorkspaceId[] = [];
-const ID_POOL_SIZE = 16;
-const ID_POOL_LOW = 4;
+// A block this size, refilled this early, keeps a burst of creates ahead of
+// the reservation round-trip; `generateWorkspaceId` throws rather than mint a
+// random id once a pool is installed, so the margin is what keeps that throw
+// unreachable in practice.
+const ID_POOL_SIZE = 32;
+const ID_POOL_LOW = 8;
 let reserveIds: ((count: number) => Promise<WorkspaceId[]>) | null = null;
 let refilling: Promise<void> | null = null;
+/** Whether a host that mints ids is installed. Only then does a `workspace-<n>`
+ *  id read as minted: a bare Wall's `DEFAULT_WORKSPACE_ID` is `workspace-1`,
+ *  which beside VS Code's random ids would otherwise make one store both. */
+let registryInstalled = false;
 
 function refillIdPool(): Promise<void> {
   if (!reserveIds || refilling) return refilling ?? Promise.resolve();
   const reserve = reserveIds;
   refilling = reserve(ID_POOL_SIZE)
-    .then((ids) => { idPool.push(...ids); })
-    .catch(() => {})
+    .then((ids) => { if (reserveIds === reserve) idPool.push(...ids); })
+    .catch((error: unknown) => {
+      console.error('[workspace-store] the host did not reserve Workspace ids; a create will fail until it does', error);
+    })
     .finally(() => { refilling = null; });
   return refilling;
 }
@@ -81,23 +91,53 @@ function refillIdPool(): Promise<void> {
  *  in hand, so a create that follows never falls back to a random id. */
 export function installWorkspaceIdPool(reserve: (count: number) => Promise<WorkspaceId[]>): Promise<void> {
   reserveIds = reserve;
+  registryInstalled = true;
   idPool.length = 0;
   return refillIdPool();
 }
 
-/** The next id: one the host reserved when it has, else a process-unique
- *  random one — a host with no registry (VS Code, tests) whose refs are then
- *  positional (`workspaceRefFor`). */
+/** Forget the installed pool, back to a host with no registry (tests). */
+export function resetWorkspaceIdPool(): void {
+  reserveIds = null;
+  registryInstalled = false;
+  idPool.length = 0;
+}
+
+/** The next id: one the host reserved when a pool is installed, else a
+ *  process-unique random one — a host with no registry (VS Code, tests) whose
+ *  refs are then positional (`workspaceRefFor`). An installed pool that ran dry
+ *  throws rather than fall back: a random id beside minted ones would take a
+ *  ref no other reading agrees with (`docs/specs/standalone.md` → "Workspace
+ *  registry"). */
 export function generateWorkspaceId(): WorkspaceId {
   const reserved = idPool.shift();
+  const reserving = refilling !== null;
   if (idPool.length < ID_POOL_LOW) void refillIdPool();
-  return reserved ?? `workspace-${Math.random().toString(36).slice(2, 10)}-${++workspaceSequence}`;
+  if (reserved !== undefined) return reserved;
+  if (registryInstalled) {
+    throw new Error(reserving
+      ? 'no Workspace id is reserved yet: the host is still reserving a block'
+      : 'no Workspace id is reserved: the last reservation failed');
+  }
+  return `workspace-${Math.random().toString(36).slice(2, 10)}-${++workspaceSequence}`;
 }
 
 /** The registry number of a `workspace-<n>` id; a random or bare id has none. */
 export function workspaceRefNumber(id: WorkspaceId): number | null {
   const match = /^workspace-(\d+)$/.exec(id);
   return match ? Number(match[1]) : null;
+}
+
+/** Whether the registry minted `id`: a `workspace-<n>` id under an installed pool. */
+function isMintedId(id: WorkspaceId): boolean {
+  return registryInstalled && workspaceRefNumber(id) !== null;
+}
+
+/** Whether refs number by strip position: only while no id in this Window was
+ *  minted — a host with no registry, or a snapshot from before it until its
+ *  first create. All-or-nothing, so one ref names one Workspace. */
+function refsArePositional(): boolean {
+  return !state.workspaces.some((ws) => isMintedId(ws.id));
 }
 
 /** "Workspace N", one past the highest existing `Workspace <n>` name. */
@@ -227,15 +267,21 @@ export function isWindowRef(ref: string): boolean {
 }
 
 /** A Workspace's `dor` ref: **stable**, the number of its registry-minted id, so
- *  a reorder renames nothing. An id the registry did not mint — a bare Wall's,
- *  or one restored from before the registry — falls back to its position; one
- *  no longer in this Window (its Wall mid-unmount) reports the first ref, which
+ *  a reorder renames nothing. Only while nothing in this Window was minted
+ *  (`refsArePositional`) is it the strip position instead; an unminted id
+ *  beside minted ones — restored from before the registry — has no number and
+ *  is addressed by its name. One no longer in this Window (its Wall
+ *  mid-unmount) keeps its number; unnumbered, it reports the first ref, which
  *  is what a lone Workspace answers. */
 export function workspaceRefFor(id: WorkspaceId): string {
+  if (refsArePositional()) {
+    const index = state.workspaces.findIndex((ws) => ws.id === id);
+    return `workspace:${index === -1 ? 1 : index + 1}`;
+  }
   const number = workspaceRefNumber(id);
   if (number !== null) return `workspace:${number}`;
-  const index = state.workspaces.findIndex((ws) => ws.id === id);
-  return `workspace:${index === -1 ? 1 : index + 1}`;
+  const meta = state.workspaces.find((ws) => ws.id === id);
+  return meta ? `workspace:${meta.name}` : workspaceRefFor(state.workspaces[0].id);
 }
 
 /** A Workspace a target named: its identity, plus its ref as resolved. */
@@ -251,22 +297,21 @@ export type WorkspaceRefResolution =
 /**
  * Resolve `workspace:<n>` / `workspace:<name>` — or either bare — to a
  * Workspace of this Window (`docs/specs/dor-cli.md` → "Handle Model"). A
- * number is the stable ref of a registry-minted id, and only where no id was
- * minted that way does it read as a position; a numeric ref wins over a name
- * that reads as one; a name resolves only when exactly one Workspace carries
- * it, and an ambiguous one lists the candidates rather than picking.
+ * number is the stable ref of a registry-minted id, and only while no id in
+ * the Window was minted does it read as a position (`refsArePositional`, the
+ * same rule `workspaceRefFor` prints by); a numeric ref wins over a name that
+ * reads as one; a name resolves only when exactly one Workspace carries it,
+ * and an ambiguous one lists the candidates rather than picking.
  */
 export function resolveWorkspaceRef(ref: string): WorkspaceRefResolution {
   const { target, position, name } = parseWorkspaceRef(ref);
   const found = (meta: WorkspaceMeta): WorkspaceRefResolution =>
     ({ ok: true, ...meta, ref: workspaceRefFor(meta.id) });
   if (position !== null) {
-    // The one Workspace whose ref reads `workspace:<position>`: a minted id
-    // first, else the unminted one standing at that position.
-    const stable = state.workspaces.find((ws) => workspaceRefNumber(ws.id) === position);
-    if (stable) return found(stable);
-    const positional = state.workspaces[position - 1];
-    if (positional && workspaceRefNumber(positional.id) === null) return found(positional);
+    const match = refsArePositional()
+      ? state.workspaces[position - 1]
+      : state.workspaces.find((ws) => workspaceRefNumber(ws.id) === position);
+    if (match) return found(match);
   } else if (name) {
     const matches = state.workspaces.filter((workspace) => workspace.name === name);
     if (matches.length === 1) return found(matches[0]);

@@ -343,12 +343,21 @@ behind the one it holds.
   webview in blocks (`workspace_reserve_ids`) so a create mints synchronously.
   The ref `workspace:<n>` is the id's number, so it never renumbers and never
   collides across windows; an unused reservation is a gap, nothing more.
+- **A webview with a pool installed never mints a random id**: an empty pool
+  fails the create, naming the reservation still in flight or the one that
+  failed (logged, never swallowed), since a random id beside minted ones would
+  take a ref no reading agrees with. The block (32) and its low-water mark (8)
+  keep that failure unreachable in practice.
 - **The counter is seeded above every id any snapshot on disk names**, and
   above every id a window reports, so a fresh id never meets a restored one.
   Never below 2: `workspace-1` is a bare Wall's only Workspace.
 - **A `dor` request naming a Workspace or Window routes to the window holding
-  it** (§Routing precedence); a target the registry cannot place falls through
-  to the caller's window, which refuses it by name.
+  it** (§Routing precedence). A target the registry cannot place — one no
+  window reports, or a name two windows carry — falls through to the caller's
+  window, which refuses a name duplicated there and otherwise resolves its own,
+  so a local Workspace wins. **A target routes as a number only when it reads
+  as `POSITIONAL_WORKSPACE_REF`** (`dor/src/protocol.ts`); `007` and `0` are
+  names (`a_number_with_a_leading_zero_is_a_name`).
 - **`Destroyed` forgets the window's entries** and broadcasts.
 
 Source of truth: `standalone/src-tauri/src/workspaces.rs`;

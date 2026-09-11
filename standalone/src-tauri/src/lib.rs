@@ -2713,6 +2713,10 @@ fn saved_workspace_ids(dir: &Path) -> Vec<String> {
 #[tauri::command]
 fn workspace_reserve_ids(windows: tauri::State<'_, WindowState>, count: u64) -> Vec<String> {
     let count = count.clamp(1, 64);
+    // Setup seeds this above every id on disk, but skips that when
+    // `sessions_dir` fails; `workspace-1` is the bare Wall's own and
+    // `workspace:0` names nothing (§Workspace registry).
+    windows.next_workspace.fetch_max(2, Ordering::SeqCst);
     let first = windows.next_workspace.fetch_add(count, Ordering::SeqCst);
     (first..first + count)
         .map(|n| format!("workspace-{n}"))
