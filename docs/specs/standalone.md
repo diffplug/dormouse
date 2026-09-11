@@ -254,8 +254,9 @@ then the strip scrolls, with no overflow arrows.
 
 - **Never put `data-tauri-drag-region` on a tab or anything inside one.** Tauri
   matches that attribute on the event target alone, so a tab carrying it would
-  drag the window instead of activating, renaming, or reordering. Its wrapper —
-  the bar past the last tab — carries it, and is the draggable spacer.
+  drag the window instead of activating, renaming, or reordering. **A dedicated
+  spacer after the strip carries it, with a minimum width**, so the window stays
+  draggable at every tab count and the strip scrolls into what is left.
 - `onDragOutsideWindow` / `onDropOnOtherWindow` are the strip's tear-out seams,
   staged in `docs/specs/layout.md` `## Future` (workspaces-rollout).
 
