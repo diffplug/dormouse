@@ -201,7 +201,7 @@ A user verb is an intentional action that produces a single observable change.
 | `createWorkspace` | Add a Workspace and mount its Wall, which spawns one pane; activate by default, unless `activate: false`. |
 | `closeWorkspace` | `kill` each member Surface, then remove the Workspace; the last remaining Workspace cannot be closed. |
 | `renameWorkspace` | Update a Workspace's `name`; touches no Session |
-| `moveWorkspace` | Reorder a Workspace within its Window; renumbers the positional `workspace:<n>` refs and touches no Session |
+| `moveWorkspace` | Reorder a Workspace within its Window; a minted ref renames nothing (a host with no registry still numbers by position) and touches no Session |
 | `transferWorkspace` | Move a Workspace to another Window, Surfaces and Sessions intact: `release` each member Session (detached, Process still Live) and resume it there. Kills nothing and archives nothing — not a `closeWorkspace`. |
 | `tearOut` | `transferWorkspace` into a Window created for it. A Window whose last Workspace leaves closes itself. |
 

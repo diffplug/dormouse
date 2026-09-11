@@ -65,7 +65,7 @@ Filters are ANDed. --command is an exact match against the running command repor
 
 JSON output (--json) always includes both stable ids and refs, and each row carries has_terminal (a PTY) and has_browser (a browser renderer) — gate on those, not on kind, so a Surface that has both still matches. It adds top-level caller_surface_ref/caller_surface_id and focused_surface_ref/focused_surface_id — the calling and focused Surfaces, null when neither is in the list — plus workspace_ref, window_ref, and a host block (app, workspace, cli_js_path, node_path): the identity dump dor identify used to print.
 
---workspace <ref> lists another Workspace of this Window instead: workspace:<n> (positional) or workspace:<name>, which resolves only when exactly one Workspace carries that name. Both are accepted bare ("2", "build").
+--workspace <ref> lists another Workspace instead, in this window or another: workspace:<n> (a stable number) or workspace:<name>, which resolves only when exactly one Workspace carries that name. Both are accepted bare ("2", "build").
 
 --all lists every Workspace of this Window, grouped under a Workspace header — every Workspace keeps its header, including one holding nothing and one the filters emptied. Rows keep their own Workspace-scoped surface:N refs, so several groups have a surface:1, but only the active Workspace's selection carries the focus marker; each JSON row adds workspace_ref, and the payload adds a workspaces array plus caller_workspace_ref/focused_workspace_ref, because caller_surface_ref/focused_surface_ref then name a ref several groups share (the _id halves stay unique). Target a row from another Workspace by its stable id, or pass --workspace.
 

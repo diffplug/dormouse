@@ -68,6 +68,8 @@ pub struct RouteView<'a> {
     /// Which window took each outstanding `dor` request, so its cancel follows
     /// the request instead of waking every window.
     pub dor_targets: &'a HashMap<String, String>,
+    /// Every window's Workspaces, for a request naming one explicitly.
+    pub registry: &'a crate::workspaces::Registry,
 }
 
 fn str_field<'a>(data: &'a JsonValue, key: &str) -> Option<&'a str> {
@@ -141,7 +143,31 @@ pub fn route<'a>(event: &str, data: &'a JsonValue, view: &RouteView<'a>) -> Rout
             Some(label) => Route::EmitTo(label),
             None => Route::Broadcast,
         },
+        // Precedence: an explicit `--workspace` goes to the window holding it
+        // and an explicit `--window` to that window — cross-window targeting —
+        // then the caller's own Surface's owner, then the focused window. A
+        // target the registry cannot place falls through, so the caller's own
+        // window refuses it by name (docs/specs/dor-cli.md -> "Standalone").
         "dor:controlRequest" => {
+            let params = data.get("params");
+            if let Some(target) = params
+                .and_then(|params| params.get("workspace"))
+                .and_then(JsonValue::as_str)
+            {
+                if let Some(label) = crate::workspaces::window_of(view.registry, target) {
+                    return Route::EmitTo(label);
+                }
+            }
+            if let Some(target) = params
+                .and_then(|params| params.get("window"))
+                .and_then(JsonValue::as_str)
+            {
+                let label = target.trim();
+                let label = label.strip_prefix("window:").unwrap_or(label).trim();
+                if let Some((label, _)) = view.registry.windows.get_key_value(label) {
+                    return Route::EmitTo(label.as_str());
+                }
+            }
             let Some(surface_id) = str_field(data, "surfaceId") else {
                 return Route::Focused;
             };
@@ -506,16 +532,71 @@ mod tests {
         ids.iter().map(|id| ((*id).to_string(), now)).collect()
     }
 
+    /// An explicit target crosses windows; an unplaceable one falls through to
+    /// the caller's window, which refuses it by name.
+    #[test]
+    fn an_explicit_target_routes_to_the_window_holding_it() {
+        let owned = labels(&[("a", "main"), ("b", "ws-2")]);
+        let none = awaiting(&[]);
+        let no_dor = HashMap::new();
+        let mut registry = crate::workspaces::Registry::default();
+        crate::workspaces::report(
+            &mut registry,
+            "main",
+            vec![crate::workspaces::Entry { id: "workspace-2".into(), name: "Build".into(), active: true }],
+        );
+        crate::workspaces::report(
+            &mut registry,
+            "ws-2",
+            vec![crate::workspaces::Entry { id: "workspace-5".into(), name: "Docs".into(), active: true }],
+        );
+        let view = RouteView {
+            owners: &owned,
+            awaiting_replay: &none,
+            dor_targets: &no_dor,
+            registry: &registry,
+        };
+        let from_main = |params: JsonValue| json!({ "surfaceId": "a", "params": params });
+        assert_eq!(
+            route("dor:controlRequest", &from_main(json!({ "workspace": "workspace:5" })), &view),
+            Route::EmitTo("ws-2")
+        );
+        assert_eq!(
+            route("dor:controlRequest", &from_main(json!({ "workspace": "Docs" })), &view),
+            Route::EmitTo("ws-2")
+        );
+        assert_eq!(
+            route("dor:controlRequest", &from_main(json!({ "window": "window:ws-2" })), &view),
+            Route::EmitTo("ws-2")
+        );
+        // The Workspace wins over the window when both are named.
+        assert_eq!(
+            route("dor:controlRequest", &from_main(json!({ "workspace": "workspace:2", "window": "ws-2" })), &view),
+            Route::EmitTo("main")
+        );
+        // Unknown: the caller's own window answers, and refuses by name.
+        assert_eq!(
+            route("dor:controlRequest", &from_main(json!({ "workspace": "workspace:9" })), &view),
+            Route::EmitTo("main")
+        );
+        assert_eq!(
+            route("dor:controlRequest", &from_main(json!({ "window": "ws-9" })), &view),
+            Route::EmitTo("main")
+        );
+    }
+
     /// Every row of the routing table (docs/specs/standalone.md -> "Windows").
     #[test]
     fn routes_every_sidecar_event_to_its_window() {
         let owned = labels(&[("a", "main"), ("b", "ws-2")]);
         let none = awaiting(&[]);
         let dor = labels(&[("dor-7", "ws-2")]);
+        let no_registry = crate::workspaces::Registry::default();
         let view = RouteView {
             owners: &owned,
             awaiting_replay: &none,
             dor_targets: &dor,
+            registry: &no_registry,
         };
         let cases: &[(&str, JsonValue, Route)] = &[
             ("pty:data", json!({"id":"a"}), Route::EmitTo("main")),
@@ -600,10 +681,12 @@ mod tests {
         let owned = labels(&[("a", "main")]);
         let none = awaiting(&[]);
         let no_dor = HashMap::new();
+        let no_registry = crate::workspaces::Registry::default();
         let view = RouteView {
             owners: &owned,
             awaiting_replay: &none,
             dor_targets: &no_dor,
+            registry: &no_registry,
         };
         assert_eq!(
             route(
@@ -652,10 +735,12 @@ mod tests {
         let held = awaiting(&["a"]);
         let none = awaiting(&[]);
         let no_dor = HashMap::new();
+        let no_registry = crate::workspaces::Registry::default();
         let suppressed = RouteView {
             owners: &owned,
             awaiting_replay: &held,
             dor_targets: &no_dor,
+            registry: &no_registry,
         };
         assert_eq!(route("pty:data", &json!({"id":"a"}), &suppressed), Route::Drop);
         // The target re-derives semantic events from the raw replay, so a held
@@ -680,6 +765,7 @@ mod tests {
             owners: &owned,
             awaiting_replay: &none,
             dor_targets: &no_dor,
+            registry: &no_registry,
         };
         assert_eq!(
             route("pty:data", &json!({"id":"a"}), &released),

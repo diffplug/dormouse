@@ -143,11 +143,15 @@ Control direction: `dor` → sidecar JSON-lines net socket → Rust command/even
 bridge → `TauriAdapter` `CustomEvent("dormouse:control-request")` → Wall
 handler, and back along the same hops.
 
-**A request is routed to the window that owns its `DORMOUSE_SURFACE_ID`**, and
-one naming no Surface goes to the focused window. **A Surface no window owns
-fails** — `No Dormouse window owns surface '<id>'` — rather than being handed to
-a sibling, which would act on the wrong terminal. **A cancel follows its own
-request** to the window holding it (`docs/specs/standalone.md` → Routing).
+**A request naming a Workspace or a Window is routed to the window holding
+it**, whichever window the caller sits in; one naming neither goes to the
+window that owns its `DORMOUSE_SURFACE_ID`, and one naming no Surface to the
+focused window. A target the registry cannot place — an unknown ref, or a name
+two windows use — reaches the caller's own window, which refuses it by name.
+**A Surface no window owns fails** — `No Dormouse window owns surface '<id>'` —
+rather than being handed to a sibling, which would act on the wrong terminal.
+**A cancel follows its own request** to the window holding it
+(`docs/specs/standalone.md` → Routing).
 
 ### VS Code
 
@@ -289,14 +293,18 @@ Invariants:
 - Text list output defaults to refs; commands that list handles accept
   `--id-format refs|ids|both` (`uuids` is a compatibility alias for `ids`). JSON
   list output always includes both refs and stable ids.
-- `workspace:<n>` selects a container and is **positional**, so a strip reorder
-  renumbers it; `workspace:<name>` is the stable handle and **resolves only when
-  exactly one Workspace carries that name**, else the error lists the
-  candidates. Both are accepted bare (`2`, `build`), and **a ref that reads as a
-  number is positional**, never a name. **A Window is `window:<label>` — its
-  host's own name for it** (`window:main`, `window:ws-2`), and a host with
-  one Window answers `window:1`; each accepts its own ref bare, and **rejects
-  every other Window's**, there being nothing it could do with one.
+- `workspace:<n>` selects a container and is **stable**: `n` is the number of
+  the Workspace's registry-minted id (`docs/specs/standalone.md` → "Workspace
+  registry"), so a strip reorder and a move between Windows rename nothing.
+  **Must use positional refs only on hosts without a registry (VS Code).**
+  **Must address unnumbered registry Workspaces as `workspace:<id>`, resolving
+  exact ids before names**, so legacy snapshots, duplicate names, and numeric
+  names cannot redirect a ref. `workspace:<name>` **resolves only when exactly one
+  Workspace carries that name**, else the error lists the candidates. Both are
+  accepted bare (`2`, `build`), and **a ref that reads as a number is a ref**,
+  never a name. **A Window is `window:<label>` — its host's own name for it**
+  (`window:main`, `window:ws-2`), and a host with one Window answers
+  `window:1`; each accepts its own ref bare.
   **Every Workspace has a `surface:1`**, so a Surface ref alone
   never identifies a Workspace.
 - **One Wall answers each request**, resolved in order: the Window's own verbs
@@ -648,12 +656,12 @@ Source of truth: `buildDorSurfacesInternal` in `lib/src/components/Wall.tsx`; `d
   npm) distributes the bootstrap stub, never a copy of the content. A user-level
   `--global` install variant waits until a story needs it.
 
-- **Cross-Window targeting.** `window:<label>` is a listing ref today: a Window
-  accepts its own and rejects every other's (Handle Model), so no command can
-  reach a sibling Window's Surfaces. What it would take is a route above the
-  per-Window router — Rust already owns the window↔Surface map it would consult
-  (`docs/specs/standalone.md` → Routing) — plus a `--window` flag whose refs
-  survive a Workspace moving between Windows.
+- **Cross-Window listing and moves.** `--workspace` already reaches a sibling
+  Window's Workspace ([Standalone](#standalone)); the router places a `window`
+  target too, but no command takes that flag yet. `dor list --all` still lists
+  the answering Window alone, and no verb moves a Workspace between Windows or
+  reorders the strip. Both read the registry
+  (`docs/specs/standalone.md` → "Workspace registry").
 - **Cross-Workspace listing in VS Code.** Each Workspace is its own webview
   there, so `dor list --all` would have to aggregate at the extension host
   rather than in a per-webview control handler; until it does, VS Code refuses

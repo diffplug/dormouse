@@ -48,6 +48,7 @@ import type { PersistedAlertState, PersistedWindow } from "dormouse-lib/lib/sess
 import { TauriSessionStore } from "./tauri-session-store";
 import { claimRecoveryCommands, windowStateSlot } from "./window-recovery";
 import { listenToWindow } from "./window-label";
+import { installWorkspaceRegistry, type WorkspaceRegistrySnapshot } from "./workspace-registry";
 import { withTimeout } from "./with-timeout";
 import {
   applyTerminalProtocolEvents,
@@ -260,6 +261,13 @@ export class TauriAdapter implements PlatformAdapter {
     ])));
 
     await this.hydrateSessionStore();
+    // Before restore too: a fresh Window mints its first Workspace id from
+    // the block this reserves (docs/specs/standalone.md → "Workspace registry").
+    this.unlistenFns.push(await installWorkspaceRegistry({
+      invoke: (cmd, args) => rawInvoke(cmd, args),
+      onSnapshot: (handler) =>
+        listenToWindow<WorkspaceRegistrySnapshot>("dormouse://workspaces", (event) => handler(event.payload)),
+    }));
   }
 
   // Seed the session cache from the Rust file store before restore reads it

@@ -57,9 +57,72 @@ export function hasWorkspace(id: WorkspaceId): boolean {
 
 let workspaceSequence = 0;
 
-/** A process-unique WorkspaceId, even when the random source repeats. */
+/** Ids the host reserved for this Window to mint from (`docs/specs/standalone.md`
+ *  → "Workspace registry"): `workspace-<n>` off one counter, so a ref is stable
+ *  and unique across windows. Refilled in the background; below the low-water
+ *  mark a burst of creates still finds one. */
+const idPool: WorkspaceId[] = [];
+// A block this size, refilled this early, keeps a burst of creates ahead of
+// the reservation round-trip; an exhausted pool uses an opaque UUID ref.
+const ID_POOL_SIZE = 32;
+const ID_POOL_LOW = 8;
+let reserveIds: ((count: number) => Promise<WorkspaceId[]>) | null = null;
+let refilling: Promise<void> | null = null;
+/** Whether a host that mints ids is installed. Only then does a `workspace-<n>`
+ *  id read as minted: a bare Wall's `DEFAULT_WORKSPACE_ID` is `workspace-1`,
+ *  which beside VS Code's random ids would otherwise make one store both. */
+let registryInstalled = false;
+
+function refillIdPool(): Promise<void> {
+  if (!reserveIds || refilling) return refilling ?? Promise.resolve();
+  const reserve = reserveIds;
+  const pending = reserve(ID_POOL_SIZE)
+    .then((ids) => { if (reserveIds === reserve) idPool.push(...ids); })
+    .catch((error: unknown) => {
+      console.error('[workspace-store] the host did not reserve Workspace ids; using opaque ids until it does', error);
+    })
+    .finally(() => { if (refilling === pending) refilling = null; });
+  refilling = pending;
+  return pending;
+}
+
+/** Give this Window a host that mints ids. Resolves once the first block is
+ *  in hand, so a create that follows never falls back to a random id. */
+export function installWorkspaceIdPool(reserve: (count: number) => Promise<WorkspaceId[]>): Promise<void> {
+  reserveIds = reserve;
+  refilling = null;
+  registryInstalled = true;
+  idPool.length = 0;
+  return refillIdPool();
+}
+
+/** Forget the installed pool, back to a host with no registry (tests). */
+export function resetWorkspaceIdPool(): void {
+  reserveIds = null;
+  refilling = null;
+  registryInstalled = false;
+  idPool.length = 0;
+}
+
+/** Prefer a Rust-reserved number; a failed reservation must not prevent boot
+ *  from installing persistence. Opaque UUIDs have stable refs too. */
 export function generateWorkspaceId(): WorkspaceId {
+  const reserved = idPool.shift();
+  if (idPool.length < ID_POOL_LOW) void refillIdPool();
+  if (reserved !== undefined) return reserved;
+  if (registryInstalled) return `workspace-${crypto.randomUUID()}`;
   return `workspace-${Math.random().toString(36).slice(2, 10)}-${++workspaceSequence}`;
+}
+
+/** The registry number of a `workspace-<n>` id; a random or bare id has none. */
+export function workspaceRefNumber(id: WorkspaceId): number | null {
+  const match = /^workspace-(\d+)$/.exec(id);
+  return match ? Number(match[1]) : null;
+}
+
+/** Positions exist only on hosts without an application-wide registry. */
+function refsArePositional(): boolean {
+  return !registryInstalled;
 }
 
 /** "Workspace N", one past the highest existing `Workspace <n>` name. */
@@ -147,9 +210,8 @@ export function closeWorkspace(id: WorkspaceId): boolean {
 
 /**
  * Move a Workspace to `toIndex` (clamped into range), keeping every other
- * Workspace's relative order. Returns whether the list changed. Reordering
- * renumbers `workspace:<n>` refs, which are positional by design
- * (`docs/specs/dor-cli.md` → "Handle Model").
+ * Workspace's relative order. Returns whether the list changed. Refs are
+ * stable, so a reorder renames nothing (`docs/specs/dor-cli.md` → "Handle Model").
  */
 export function moveWorkspace(id: WorkspaceId, toIndex: number): boolean {
   const from = state.workspaces.findIndex((ws) => ws.id === id);
@@ -189,15 +251,19 @@ export function isWindowRef(ref: string): boolean {
   return trimmed === windowRef || `window:${trimmed}` === windowRef;
 }
 
-/** A Workspace's positional `dor` ref. One no longer in this Window — its Wall is
- *  mid-unmount — reports the first ref, which is what a lone Workspace answers. */
+/** Registry refs are stable numbers or opaque ids, independent of names and
+ *  strip order. Hosts without a registry retain positional refs. */
 export function workspaceRefFor(id: WorkspaceId): string {
-  const index = state.workspaces.findIndex((ws) => ws.id === id);
-  return `workspace:${index === -1 ? 1 : index + 1}`;
+  if (refsArePositional()) {
+    const index = state.workspaces.findIndex((ws) => ws.id === id);
+    return `workspace:${index === -1 ? 1 : index + 1}`;
+  }
+  const number = workspaceRefNumber(id);
+  if (number !== null) return `workspace:${number}`;
+  return `workspace:${id}`;
 }
 
-/** A Workspace a target named: its identity, plus the positional ref it had
- *  when it was resolved (a later reorder renumbers it). */
+/** A Workspace a target named: its identity, plus its ref as resolved. */
 export interface ResolvedWorkspace extends WorkspaceMeta {
   ref: string;
 }
@@ -207,21 +273,19 @@ export type WorkspaceRefResolution =
   | ({ ok: true } & ResolvedWorkspace)
   | { ok: false; message: string };
 
-/**
- * Resolve `workspace:<n>` / `workspace:<name>` — or either bare — to a
- * Workspace of this Window (`docs/specs/dor-cli.md` → "Handle Model"). A
- * positional ref wins over a name that reads as one; a name resolves only when
- * exactly one Workspace carries it, and an ambiguous one lists the candidates
- * rather than picking.
- */
+/** Resolve the host's canonical ref first, then an unambiguous name. */
 export function resolveWorkspaceRef(ref: string): WorkspaceRefResolution {
   const { target, position, name } = parseWorkspaceRef(ref);
   const found = (meta: WorkspaceMeta): WorkspaceRefResolution =>
     ({ ok: true, ...meta, ref: workspaceRefFor(meta.id) });
   if (position !== null) {
-    const positional = state.workspaces[position - 1];
-    if (positional) return found(positional);
+    const match = refsArePositional()
+      ? state.workspaces[position - 1]
+      : state.workspaces.find((ws) => workspaceRefNumber(ws.id) === position);
+    if (match) return found(match);
   } else if (name) {
+    const byId = registryInstalled && state.workspaces.find((ws) => ws.id === name);
+    if (byId) return found(byId);
     const matches = state.workspaces.filter((workspace) => workspace.name === name);
     if (matches.length === 1) return found(matches[0]);
     if (matches.length > 1) {

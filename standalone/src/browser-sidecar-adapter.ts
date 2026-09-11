@@ -1,4 +1,5 @@
 import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../../lib/src/lib/terminal-context-types';
+import { installWorkspaceRegistry, type WorkspaceRegistrySnapshot } from "./workspace-registry";
 import type {
   AgentBrowserCommandResult,
   AgentBrowserEditOp,
@@ -71,6 +72,8 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   private alertStateHandlers = new Set<(detail: AlertStateDetail) => void>();
   private alertManager = new AlertManager();
   private unlistenHost: (() => void) | null = null;
+  private unlistenRegistry: (() => void) | null = null;
+  private onRegistrySnapshot: ((snapshot: WorkspaceRegistrySnapshot) => void) | null = null;
   private static STATE_KEY = 'dormouse.browser-sidecar.session';
   private windowSlot = windowStateSlot(localStorage, BrowserSidecarAdapter.STATE_KEY, 'browser-sidecar');
   // Remote-host bridge, identical in shape to TauriAdapter's — the dev harness
@@ -110,6 +113,14 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     await this.host.init();
     this.unlistenHost = this.host.onEvent(({ event, data }) => this.handleHostEvent(event, data));
     this.installConsoleForwarder();
+    this.unlistenRegistry = await installWorkspaceRegistry({
+      invoke: (cmd, args) => this.host.invoke(cmd, args),
+      // Through the one host subscription above, not a second one.
+      onSnapshot: (handler) => {
+        this.onRegistrySnapshot = handler;
+        return () => { this.onRegistrySnapshot = null; };
+      },
+    });
     // Started, not awaited — see TauriAdapter.
     this.recoveryReady = claimRecoveryCommands(
       (paneIds) => this.host.invoke<Record<string, string>>("take_recovery_commands", { paneIds }),
@@ -122,6 +133,8 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     this.alertManager.dispose();
     this.unlistenHost?.();
     this.unlistenHost = null;
+    this.unlistenRegistry?.();
+    this.unlistenRegistry = null;
     this.burrowClient.dispose();
     this.host.send("kill_sidecar_now");
     this.host.close();
@@ -346,6 +359,10 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   readonly browserReservesNotepadChord = true;
 
   private handleHostEvent(event: string, data: unknown): void {
+    if (event === "dormouse://workspaces") {
+      this.onRegistrySnapshot?.(data as WorkspaceRegistrySnapshot);
+      return;
+    }
     if (event === "pty:data") {
       // Already parsed by the sidecar, which owns the PTY; its events arrive as
       // the two messages below (docs/specs/terminal-escapes.md).
