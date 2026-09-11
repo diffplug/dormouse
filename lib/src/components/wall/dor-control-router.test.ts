@@ -149,8 +149,11 @@ describe('dor control routing', () => {
     expect(resolveDorControlRoute(request({ params: { window: 'window:1' } })).kind).toBe('error');
   });
 
-  it('does nothing when no Wall is mounted', () => {
-    expect(resolveDorControlRoute(request())).toEqual({ kind: 'none' });
+  it('names the active Workspace as still mounting when no Wall is mounted', () => {
+    expect(resolveDorControlRoute(request())).toEqual({
+      kind: 'none',
+      message: "workspace 'workspace:1' is still mounting",
+    });
   });
 
   it('shares one window listener across every Wall that holds it', () => {
@@ -258,13 +261,18 @@ describe('dor control routing', () => {
     }
   });
 
-  it('gives up after a bounded number of retries when nothing ever mounts', async () => {
+  it('gives up after a bounded number of retries when nothing ever mounts, and says so', async () => {
     vi.useFakeTimers();
     try {
       const release = installDorControlRouter();
       const detail = request();
       window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail }));
+      expect(detail.respond).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(10);
+      // Answered promptly, not left to the client's own deadline: `dor ab`
+      // makes this round trip on every managed invocation and must fail fast.
+      expect(detail.respond).toHaveBeenCalledTimes(1);
+      expect(detail.respond).toHaveBeenCalledWith({ ok: false, error: "workspace 'workspace:1' is still mounting" });
       // The retry chain is finite: registering afterwards is too late.
       const handle = handleFor(getWorkspacesSnapshot().workspaces[0].id);
       await vi.advanceTimersByTimeAsync(10);

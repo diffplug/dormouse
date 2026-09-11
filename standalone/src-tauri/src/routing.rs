@@ -294,11 +294,12 @@ pub fn arrival_ids(arrivals: &Arrivals) -> HashSet<String> {
         .collect()
 }
 
-/// What a window's own `pty:requestInit` may name: the ids it owns, **minus
-/// every id an arrival claims**. Ownership moves at the source's invoke, so a
-/// window booting with a Workspace already queued for it owns those shells
-/// before it has any idea what they belong to; listed here they would be placed
-/// as top-level panes beside the Workspace about to mount them.
+/// What a window's own `pty:requestInit` may name — and what its teardown may
+/// kill or interrupt: the ids it owns, **minus every id an arrival claims**.
+/// Ownership moves at the source's invoke, so a window with a Workspace queued
+/// for it owns those shells while the source is still showing them; listed at
+/// boot they would be placed as top-level panes beside the Workspace about to
+/// mount them, and in a teardown's kill set they would die under the source.
 pub fn boot_list_ids(owned: Vec<String>, arrivals: &Arrivals) -> Vec<String> {
     if arrivals.is_empty() {
         return owned;
@@ -848,7 +849,9 @@ mod tests {
 
     /// A window booting with a Workspace already queued for it owns those shells
     /// from the source's invoke. Listing them here would place them as top-level
-    /// panes beside the Workspace about to mount them.
+    /// panes beside the Workspace about to mount them; the same set is a
+    /// teardown's kill and interrupt list, where they would die under the source
+    /// still showing them (`pty_graceful_kill`, `capture_agent_recovery`).
     #[test]
     fn a_boot_list_never_names_an_arrivals_shells() {
         let owned = || vec!["own-1".to_string(), "a".to_string(), "own-2".to_string()];
