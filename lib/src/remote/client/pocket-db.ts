@@ -259,7 +259,6 @@ export interface KnownBurrowStore {
   listSummaries(): Promise<KnownBurrowSummary[]>;
   put(record: KnownBurrowV1): Promise<void>;
   delete(burrowId: string): Promise<void>;
-  list(): Promise<KnownBurrowV1[]>;
 }
 
 /** Where {@link PendingDeliveryDeletionV1} tombstones live; faked in tests. */
@@ -479,11 +478,6 @@ export function indexedDbKnownBurrowStore(): KnownBurrowStore {
       withPocketStore(KNOWN_BURROWS_STORE, 'readwrite', (store) => {
         store.delete(burrowId);
         return promisifyTransaction(store.transaction);
-      }),
-    list: () =>
-      withPocketStore(KNOWN_BURROWS_STORE, 'readonly', async (store) => {
-        const values = await promisifyRequest<StoredRecord[]>(store.getAll());
-        return Promise.all(values.map(restore));
       }),
   };
 }

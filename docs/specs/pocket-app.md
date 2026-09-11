@@ -410,6 +410,10 @@ material without decryption/import. Corrupt keys cannot block these operations;
 re-pairing requires fresh approval and preserves the Burrow pin. Connection
 and push decryption use full records.
 
+**Must report connection-record read failures with fixed retry/scan recovery
+text, never browser exception details or authorization changes.** A fresh scan
+retains the pin and requires approval; a read failure grants nothing.
+
 **Must use the selected format for new keys and decode both formats in the
 shared page/worker store.** The encrypted format stores AES-GCM ciphertext,
 a nonextractable per-key AES-256 key, a random 96-bit IV, and authenticated

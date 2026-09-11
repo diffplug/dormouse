@@ -123,6 +123,13 @@ it('re-pairs a damaged envelope only after approval, preserving the Burrow pin a
       await promisifyRequest(target.put(raw));
     });
     await expect(store.get(harness.burrowId)).rejects.toThrow();
+    const failed = await harness.client.connect(harness.burrowId);
+    expect(failed).toMatchObject({ ok: false, pairingRequired: false });
+    if (!failed.ok) expect(failed.message).toContain('Scan a setup code');
+    const read = vi.spyOn(store, 'get').mockRejectedValueOnce(new DOMException('private browser details', 'OperationError'));
+    expect(await harness.client.connect(harness.burrowId)).toEqual(failed);
+    read.mockRestore();
+    expect(harness.savedAcl).toHaveLength(1);
     expect((await rawRecord(harness.burrowId)).clientStaticKeyPair.publicKeyRaw).toBe(oldPublic);
 
     expect(await harness.pairAndApprove(await harness.mintInvitation())).toMatchObject({ ok: true });
@@ -204,7 +211,7 @@ it('does not persist an encrypted identity when the laptop denies pairing', asyn
       code: shown => shown === '00' ? '01' : '00',
     });
     expect(result.ok).toBe(false);
-    expect(await store.list()).toEqual([]);
+    expect(await store.listSummaries()).toEqual([]);
   } finally { harness.client.close(); harness.burrow.stop(); }
 });
 
@@ -262,9 +269,9 @@ it('pairs, reconnects after fresh module load, and decrypts worker push with the
     expect(showNotification).toHaveBeenCalledWith('Saved key works', expect.objectContaining({ body: 'Worker decrypted' }));
     await freshStore.put({ ...record, authorization: { state: 'pairing-required' } });
     expect((await rawRecord(harness.burrowId)).clientStaticKeyPair.privateKey.format).toBe('aes-gcm-x25519-v1');
-    expect((await freshStore.list())[0]!.authorization.state).toBe('pairing-required');
+    expect((await freshStore.listSummaries())[0]!.authorization.state).toBe('pairing-required');
     await freshStore.delete(harness.burrowId);
-    expect(await freshStore.list()).toEqual([]);
+    expect(await freshStore.listSummaries()).toEqual([]);
   } finally { harness.client.close(); harness.burrow.stop(); }
 });
 

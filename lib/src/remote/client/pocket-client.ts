@@ -867,7 +867,18 @@ export class PocketClient {
    */
   async connect(burrowId: string): Promise<ConnectResult> {
     await this.#ensureSocket();
-    const record = await this.#knownBurrows.get(burrowId);
+    let record: KnownBurrowV1 | null;
+    try {
+      record = await this.#knownBurrows.get(burrowId);
+    } catch {
+      // A local read failure is not an authenticated revocation. Preserve the
+      // pin and delivery capability, and never expose browser exception text.
+      return {
+        ok: false,
+        message: 'This browser could not read the saved pairing record. Try again, or use Scan a setup code to pair again with fresh approval. Diagnostics: /diagnostics/index.html.',
+        pairingRequired: false,
+      };
+    }
     if (!record) {
       return { ok: false, message: CONNECTION_DENIAL_MESSAGES['pairing-required'], pairingRequired: true };
     }

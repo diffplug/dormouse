@@ -97,6 +97,12 @@ key despite using metadata alone. Besides duplicate work, this prevented
 listing/removing a record with a damaged envelope. Summary reads omit the
 private-key field without interpreting it.
 
+A connection-record read failure can be transient database unavailability or
+an undecodable key, not evidence of Burrow revocation. The fixed error points
+to retry or the existing Scan a setup code action. That action preserves the
+pin and requires fresh approval, while marking every read failure as pairing
+required would conflate local availability with an authenticated denial.
+
 The operator confirmed successful production pairing on the affected iPhone on
 September 11, 2026 after installing the encrypted fallback. No Android hardware
 was tested in this investigation; the retained harness measures the device on

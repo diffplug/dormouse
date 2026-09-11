@@ -138,7 +138,6 @@ export function memoryKnownBurrows(): MemoryKnownBurrows {
     listSummaries: async () => [...records.values()].map(({ clientStaticKeyPair: _key, ...summary }) => summary),
     put: async (record) => void records.set(record.burrowId, record),
     delete: async (burrowId) => void records.delete(burrowId),
-    list: async () => [...records.values()],
   };
 }
 

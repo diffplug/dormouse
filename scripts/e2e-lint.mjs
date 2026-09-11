@@ -165,7 +165,7 @@ export const RULES = [
   },
   {
     rule: 'No second AEAD outside Pocket at-rest key wrapping',
-    security: 'AES-GCM appears in production source under',
+    security: 'AES-GCM appears in production source under `remote-lib-common/src/`',
     kind: 'forbid',
     trees: SOURCE_TREES,
     allow: (match, file) => file === AT_REST_KEY_WRAPPER,

@@ -218,19 +218,19 @@ describe('the pocket database', () => {
     await store.put(knownBurrow('burrow-2', { authorization: { state: 'pairing-required' } }));
     expect((await store.get('burrow-1'))?.label).toBe('Laptop');
     expect((await store.get('burrow-2'))?.authorization).toEqual({ state: 'pairing-required' });
-    expect((await store.list()).map((record) => record.burrowId).sort()).toEqual([
+    expect((await store.listSummaries()).map((record) => record.burrowId).sort()).toEqual([
       'burrow-1',
       'burrow-2',
     ]);
 
     // Keyed by `burrowId`, so a second put for the same Burrow replaces it.
     await store.put(knownBurrow('burrow-1', { label: 'Renamed' }));
-    expect(await store.list()).toHaveLength(2);
+    expect(await store.listSummaries()).toHaveLength(2);
     expect((await store.get('burrow-1'))?.label).toBe('Renamed');
 
     await store.delete('burrow-1');
     expect(await store.get('burrow-1')).toBeNull();
-    expect(await store.list()).toHaveLength(1);
+    expect(await store.listSummaries()).toHaveLength(1);
   });
 
   it('files a pending deletion under burrowId:deliveryId', async () => {
