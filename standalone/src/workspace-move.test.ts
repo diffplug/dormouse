@@ -427,6 +427,17 @@ describe("the target half", () => {
     expect(getNotes("pane-a").map((note) => note.content)).toEqual([{ kind: "plain", text: "keep me" }]);
   });
 
+  it("seeds the persisted alert before asking for the replay that rebuilds WATCHING", async () => {
+    const order: string[] = [];
+    const platform = fakePlatform(order);
+    vi.mocked(platform.alertSeed!).mockImplementation(() => { order.push("seed"); });
+    arrivals = [payload()];
+    initWorkspaceMoves(platform);
+    await settle();
+    expect(order.indexOf("seed")).toBeGreaterThan(-1);
+    expect(order.indexOf("seed")).toBeLessThan(order.indexOf("adopt_ready"));
+  });
+
   it("resumes each of two simultaneous arrivals over its own PTYs", async () => {
     // A tear-out with a second tab dropped on it moments later. A window-wide
     // answer would let each collector finish on the other's shells.

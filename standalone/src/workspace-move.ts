@@ -300,6 +300,10 @@ async function planArrival(
   platform: PlatformAdapter,
   payload: MovePayload,
 ): Promise<WallBootPlans[string]> {
+  // Seed the older persisted state before replay re-derives a running watch.
+  for (const pane of payload.workspace.session.panes) {
+    if (pane.alert) platform.alertSeed?.(pane.id, pane.alert);
+  }
   const ptyIds = new Set(payload.terminalIds);
   const live = await collectLivePtys(platform, {
     // The token rides through Rust to the sidecar's `list` and comes back on the
@@ -335,11 +339,6 @@ async function planArrival(
   if (payload.pins?.length) {
     await Promise.all([...ptyIds].map((id) => flushTerminal(id)));
     restoreTerminalPins(payload.pins);
-  }
-  // The AlertManager is per webview, so a persisted TODO has to be seeded into
-  // this one — the source's went with its window.
-  for (const pane of payload.workspace.session.panes) {
-    if (pane.alert) platform.alertSeed?.(pane.id, pane.alert);
   }
   return wallBootFromResult(result);
 }
