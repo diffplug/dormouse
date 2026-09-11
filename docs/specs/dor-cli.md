@@ -282,18 +282,28 @@ Invariants:
 - Text list output defaults to refs; commands that list handles accept
   `--id-format refs|ids|both` (`uuids` is a compatibility alias for `ids`). JSON
   list output always includes both refs and stable ids.
-- Reserved: `workspace:<n>` (and `workspace:<name>` when exactly one Workspace
-  matches) and `window:<n>` select a container. The grammar is reserved now so
-  Surface refs never collide with it; the flag and the commands consuming it are
-  staged — see [Future](#future). The webview handler already rejects any
-  workspace/window target other than the singleton `workspace:1` / `window:1`.
-  Today's handler resolves stable Surface ids within the mounted Workspace;
-  cross-Workspace routing is staged with Workspace-aware listing/targeting.
-  Cross-window duplicate ids follow `docs/specs/vscode.md` → "Peer surfaces
-  across windows".
+- `workspace:<n>` selects a container and is **positional**, so a strip reorder
+  renumbers it; `workspace:<name>` is the stable handle and is staged with the
+  `dor workspace` commands (see [Future](#future)). `window:<n>` is rejected for
+  every `n` but 1. **Every Workspace has a `surface:1`**, so a Surface ref alone
+  never identifies a Workspace.
+- **One Wall answers each request**, resolved in order: an explicit
+  `workspace:<n>`, else the Workspace owning the calling Surface, else the
+  active one; nothing mounted leaves the request unanswered, after a bounded
+  retry that covers the tick between a Workspace being created and its Wall
+  registering. **Every request is answered, including a container ref of the
+  wrong type and a handler that throws** — an unanswered one blocks its caller
+  to the deadline. A Workspace being closed refuses the Surface-creating verbs
+  (`docs/specs/layout.md` → "Workspaces"). **Surface targets
+  resolve within the answering Workspace** — refs are Workspace-scoped — so a
+  `dor split` from a background Workspace lands beside its caller rather than
+  wherever the user is looking. Cross-Workspace targeting is staged with
+  Workspace-aware listing. Cross-window duplicate ids follow
+  `docs/specs/vscode.md` → "Peer surfaces across windows".
 
-Source of truth: `dor/src/commands/shared.ts`, `dor/src/commands/types.ts`, and
-`surfaceRefForId` / `transferSurfaceRef` in `lib/src/components/Wall.tsx`.
+Source of truth: `dor/src/commands/shared.ts`, `dor/src/commands/types.ts`,
+`surfaceRefForId` / `transferSurfaceRef` in `lib/src/components/Wall.tsx`, and
+`resolveDorControlRoute` in `lib/src/components/wall/dor-control-router.ts`.
 
 ## Current Implemented Commands
 
@@ -302,8 +312,8 @@ in `dor/src/protocol.ts` (`SURFACE_CONTROL_METHODS`)** so the emitting client
 and the dispatching webview cannot drift. `surface.list` joins the current
 Workspace's Surfaces — visible panes **plus minimized (doored)** ones, each
 tagged `view` (`paned` / `zoomed` / `minimized`) — with terminal state and
-activity snapshots, and reports the single active Workspace as `workspace:1` /
-`window:1` (Workspace-aware tagging is staged; see [Future](#future)). Per the
+activity snapshots, and reports the answering Workspace's own `workspace:<n>`
+alongside `window:1`. Per the
 visible-vs-listed split [Handle Model](#handle-model) states, **a visible split
 reference adds a pane in Lath, a minimized one a sibling Door in the
 baseboard.** **`dor list` rows sort by the Workspace-stable `surface:N` ref**, a
@@ -583,6 +593,3 @@ Source of truth: `buildDorSurfacesInternal` in `lib/src/components/Wall.tsx`; `d
   Like every command they ship with snapshot-tested help and the control methods
   that back them, not ahead of them. Staged with the workspaces rollout
   (`docs/specs/layout.md` `## Future`, workspaces-rollout).
-- **Workspace-aware `surface.list`** — tags each surface with its real
-  `workspace:<n>` / `window:<n>` membership instead of reporting the single
-  active Workspace.

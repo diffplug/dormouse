@@ -10,7 +10,7 @@ import type { PaneProps } from './pane-props';
 import { AgentBrowserPanel, HIDDEN_PARK_DELAY_MS } from './AgentBrowserPanel';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
 import { disposeAllAgentBrowserSurfaceControllers } from './agent-browser-surface-controller';
-import { ModeContext, PaneWriteContext, SelectedIdContext, WallActionsContext, type PaneWriteActions } from './wall-context';
+import { ModeContext, PaneWriteContext, SelectedIdContext, WallActionsContext, WorkspaceActiveContext, type PaneWriteActions } from './wall-context';
 import { stubWallActions as stubActions } from './wall-test-utils';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -439,11 +439,11 @@ describe('AgentBrowserPanel render mode controller', () => {
 });
 
 describe('AgentBrowserPanel visibility parking', () => {
-  // Two things hide a surface (`useSurfaceVisibility`): a backgrounded window, and a
-  // PARKED leaf — minimized, so mounted but out of the tree
-  // (docs/specs/tiling-engine.md → "Parked leaves"). A window transition is a
+  // Three things hide a surface (`useSurfaceVisibility`): a backgrounded window,
+  // a hidden Workspace, and a PARKED leaf — minimized, so mounted but out of the
+  // tree (docs/specs/tiling-engine.md → "Parked leaves"). A window transition is a
   // `visibilitychange` event, driven here by overriding `document.visibilityState`;
-  // a park transition is the `parked` pane prop, driven by re-rendering.
+  // a Workspace and a park transition are both props, driven by re-rendering.
   function setDocumentHidden(hidden: boolean): void {
     Object.defineProperty(document, 'visibilityState', {
       configurable: true,
@@ -453,16 +453,22 @@ describe('AgentBrowserPanel visibility parking', () => {
 
   async function renderVisibilityPanel(
     params: TestPanelParams,
-  ): Promise<{ setVisible: (visible: boolean) => void; setParked: (parked: boolean) => void }> {
+  ): Promise<{
+    setVisible: (visible: boolean) => void;
+    setParked: (parked: boolean) => void;
+    setWorkspaceActive: (active: boolean) => void;
+  }> {
     setDocumentHidden(false); // mount on-screen
-    const render = (parked: boolean) => {
+    const render = (parked: boolean, workspaceActive = true) => {
       root.render(
         <StrictMode>
-          <PaneWriteContext.Provider value={paneWriteFor(() => {})}>
-            <WallActionsContext.Provider value={stubActions()}>
-              <AgentBrowserPanel {...paneProps('ab-panel', params)} parked={parked} />
-            </WallActionsContext.Provider>
-          </PaneWriteContext.Provider>
+          <WorkspaceActiveContext.Provider value={workspaceActive}>
+            <PaneWriteContext.Provider value={paneWriteFor(() => {})}>
+              <WallActionsContext.Provider value={stubActions()}>
+                <AgentBrowserPanel {...paneProps('ab-panel', params)} parked={parked} />
+              </WallActionsContext.Provider>
+            </PaneWriteContext.Provider>
+          </WorkspaceActiveContext.Provider>
         </StrictMode>,
       );
     };
@@ -473,6 +479,7 @@ describe('AgentBrowserPanel visibility parking', () => {
         document.dispatchEvent(new Event('visibilitychange'));
       },
       setParked: (parked) => { render(parked); },
+      setWorkspaceActive: (active) => { render(false, active); },
     };
   }
 
@@ -521,6 +528,27 @@ describe('AgentBrowserPanel visibility parking', () => {
 
     // Reattach reconnects without the panel ever having unmounted.
     await act(async () => { setParked(false); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(streamSockets(4321).length).toBeGreaterThan(before);
+    expect(liveStreamSocket(4321)?.readyState).toBe(1);
+  });
+
+  it('idles a screencast whose Workspace is hidden, and resumes it on return', async () => {
+    const { setWorkspaceActive } = await renderVisibilityPanel({
+      surfaceType: 'browser', session: 'browser-session', wsPort: 4321,
+    });
+
+    const socket = liveStreamSocket(4321);
+    expect(socket?.readyState).toBe(1);
+    const before = streamSockets(4321).length;
+
+    // The Wall stays mounted and live; only its visibility changed.
+    await act(async () => { setWorkspaceActive(false); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(HIDDEN_PARK_DELAY_MS + 50); });
+    expect(socket?.readyState).toBe(3);
+    expect(streamSockets(4321).length).toBe(before);
+
+    await act(async () => { setWorkspaceActive(true); });
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
     expect(streamSockets(4321).length).toBeGreaterThan(before);
     expect(liveStreamSocket(4321)?.readyState).toBe(1);
@@ -629,20 +657,26 @@ describe('AgentBrowserPanel canvas input forwarding', () => {
   // is), so the FIRST click on the browser surface must still reach the page —
   // it is the click that selects the pane. Mouse-down/up therefore gate on
   // passthrough mode alone, not full `interactive` (mode && selected).
-  async function renderWithMode(mode: 'passthrough' | 'command', selectedId: string | null): Promise<HTMLCanvasElement> {
+  async function renderWithMode(
+    mode: 'passthrough' | 'command',
+    selectedId: string | null,
+    workspaceActive = true,
+  ): Promise<HTMLCanvasElement> {
     const props = paneProps('ab-panel', { surfaceType: 'agent-browser', session: 'browser-session', wsPort: 4321 });
     await act(async () => {
       root.render(
         <StrictMode>
-          <PaneWriteContext.Provider value={paneWriteFor(() => {})}>
-            <WallActionsContext.Provider value={stubActions()}>
-              <ModeContext.Provider value={mode}>
-                <SelectedIdContext.Provider value={selectedId}>
-                  <AgentBrowserPanel {...props} />
-                </SelectedIdContext.Provider>
-              </ModeContext.Provider>
-            </WallActionsContext.Provider>
-          </PaneWriteContext.Provider>
+          <WorkspaceActiveContext.Provider value={workspaceActive}>
+            <PaneWriteContext.Provider value={paneWriteFor(() => {})}>
+              <WallActionsContext.Provider value={stubActions()}>
+                <ModeContext.Provider value={mode}>
+                  <SelectedIdContext.Provider value={selectedId}>
+                    <AgentBrowserPanel {...props} />
+                  </SelectedIdContext.Provider>
+                </ModeContext.Provider>
+              </WallActionsContext.Provider>
+            </PaneWriteContext.Provider>
+          </WorkspaceActiveContext.Provider>
         </StrictMode>,
       );
     });
@@ -676,6 +710,36 @@ describe('AgentBrowserPanel canvas input forwarding', () => {
       canvas.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: 100, clientY: 50, button: 0 }));
     });
     expect(sentMouseEvents()).toHaveLength(0);
+  });
+
+  const sentKeyEvents = () => WebSocketMock.instances
+    .flatMap((ws) => ws.sent)
+    .filter((m) => m.includes('"type":"input_keyboard"'));
+
+  // The window key forwarder is a capture-phase listener that preventDefaults
+  // what it takes, so a Workspace left in passthrough on a browser pane would go
+  // on eating every keystroke while hidden (docs/specs/layout.md → "Workspaces").
+  it('stops forwarding window keys once its Workspace is hidden, and resumes on return', async () => {
+    await renderWithMode('passthrough', 'ab-panel');
+    const press = async () => {
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true, cancelable: true }));
+      });
+    };
+
+    await press();
+    expect(sentKeyEvents().length).toBeGreaterThan(0);
+
+    await renderWithMode('passthrough', 'ab-panel', false);
+    const whileHidden = sentKeyEvents().length;
+    const swallowed = new KeyboardEvent('keydown', { key: 'a', bubbles: true, cancelable: true });
+    await act(async () => { window.dispatchEvent(swallowed); });
+    expect(sentKeyEvents().length).toBe(whileHidden);
+    expect(swallowed.defaultPrevented).toBe(false);
+
+    await renderWithMode('passthrough', 'ab-panel', true);
+    await press();
+    expect(sentKeyEvents().length).toBeGreaterThan(whileHidden);
   });
 });
 

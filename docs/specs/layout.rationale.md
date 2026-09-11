@@ -14,6 +14,20 @@ xterm.js paints only its own rendered surface, and integer row fitting leaves a 
 
 **Why header popovers are not a factor.** Every one — pane context menu, title candidates, notification preview, rename warning — portals to `document.body` with `position: fixed`, so it renders in the root stacking context above the whole wall regardless of leaf z-indices.
 
+## Workspaces
+
+**Why `visibility: hidden` in one grid cell rather than `display: none`.** A `display:none` Wall has no box, so every xterm in it would refit on the way back — including a resize that happened while it was hidden. Sharing one grid cell keeps every Wall's box identical, so a switch's reattach fit finds an unchanged grid (checked in the browser-dev harness by resizing with Workspace 2 visible and finding Workspace 1's screen already at the new size, 2026-09).
+
+**Why a hidden Workspace's terminals are detached rather than merely hidden.** xterm pauses rendering only when its screen element stops intersecting (`RenderService` in `@xterm/xterm`), and a `visibility: hidden` box still intersects, so a hidden pane kept rasterizing every output frame and holding a GL context. Reusing the minimize primitives pauses it and releases the context; the box stays laid out, so the reattach fit finds the same grid and sends no PTY resize (2026-09).
+
+**Why `inert` is only defense in depth.** `visibility: hidden` already removes focusability, so the attribute exists for a future presentation that keeps the subtree visible.
+
+**Why the strip's reorder drag does not capture the pointer on press.** A captured pointer retargets the following `click` to the capture element, so capturing on `pointerdown` swallowed the activate button's click and no tab could be activated by mouse (found in the browser-dev harness, 2026-09). Capture is only useful once the gesture is a drag, which is where it now happens.
+
+**Why the close confirmation anchors to the Wall, not the tab.** `ModalOverlay` centers inside the target's box and does not clamp to the viewport, so a 24px tab at the top of the window left the dialog clipped. Every Wall shares one grid cell, so the anchor lands in the same place whether or not that Workspace is visible.
+
+**Why the modal hosts are gated rather than hoisted.** Each calls `useDialogKeyboardOwner`, which reads the *active* Wall's `DialogKeyboardContext`; hoisting them above `WorkspaceWindow` would leave them with no coordinator to suppress command-mode dispatch through. The cost is that a modal's React-local state resets on a switch — accepted, since every modal that matters keeps its state in a store.
+
 ## Baseboard
 
 **Why `showBaseboard={false}` is a seam.** The mobile Pocket composition — the obvious candidate — is a separate `MobileWall` (`docs/specs/mobile-terminal-ui.md`), not a baseboard-less Wall.

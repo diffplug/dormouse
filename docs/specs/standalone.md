@@ -50,10 +50,12 @@ Source of truth: `standalone/src/main.tsx` (`bootstrap()`).
 8. `resumeOrRestore(platform)` — the priority-based recovery from
    `docs/specs/transport.md`.
 9. `startUpdateCheck()` (`docs/specs/auto-update.md`), then render `AppBar` +
-   `App` with `enableBurrow` — the mount gate for the lazily-imported
+   `App` with `multiWorkspace` — one Wall per Workspace (`docs/specs/layout.md`
+   → Workspaces) — and `enableBurrow`, the mount gate for the lazily-imported
    Burrow UI chunk (§Burrow service); the Burrow itself runs in the
    sidecar regardless. `<ConnectedUpdateBanner />` rides the `baseboardNotice`
-   slot, `<QuitConfirmModalHost />` the `dialogHost` slot.
+   slot, `<QuitConfirmModalHost />` the `dialogHost` slot; both go to the
+   visible Workspace's Wall.
 
 ## Rust ↔ sidecar bridge
 
@@ -235,19 +237,30 @@ orchestrator (§Quit flow, which owns the teardown/install/exit sequence); Tauri
 
 Source of truth: `standalone/src/AppBar.tsx`.
 
-The AppBar is the draggable titlebar region, carrying left to right a
-`[New workspace]` button and — Windows/Linux only, since macOS gets native traffic
+The AppBar is the draggable titlebar region, carrying left to right the
+**Workspace strip** and — Windows/Linux only, since macOS gets native traffic
 lights from `titleBarStyle: "Overlay"` and left padding instead — the window
 controls (minimize / maximize / close via `@tauri-apps/api/window`, dimmed by
 window-focus tracking). **Neither a theme picker nor a shell picker belongs here**:
 both live in the Settings dialog at the bottom-right of the window
 (`docs/specs/theme.md`).
 
-`[New workspace]` is a placeholder holding the spot the workspace strip will take.
-It creates nothing — it calls `openExternal` on
-https://github.com/diffplug/dormouse/issues/406, the tracking issue. The strip
-lands here at stage 3 of the rollout (`docs/specs/layout.md` `## Future`,
-workspaces-rollout).
+The strip is one tab per Workspace: click activates, double-click renames,
+middle-click or the tab's `×` closes, `+` creates, and a drag past the shared
+threshold reorders. Behavior is `docs/specs/layout.md` → Workspaces and its
+indicators `docs/specs/alert.md` → Workspace union; tabs shrink to a floor and
+then the strip scrolls, with no overflow arrows.
+
+- **Never put `data-tauri-drag-region` on a tab or anything inside one.** Tauri
+  matches that attribute on the event target alone, so a tab carrying it would
+  drag the window instead of activating, renaming, or reordering. **A dedicated
+  spacer after the strip carries it, with a minimum width**, so the window stays
+  draggable at every tab count and the strip scrolls into what is left.
+- `onDragOutsideWindow` / `onDropOnOtherWindow` are the strip's tear-out seams,
+  staged in `docs/specs/layout.md` `## Future` (workspaces-rollout).
+
+Source of truth: `WorkspaceStrip` in `lib/src/components/WorkspaceStrip.tsx`;
+`createWorkspaceStripDrag` in `lib/src/components/workspace-strip-drag.ts`.
 
 Shell selection lives in the Settings dialog's **Shell** row
 (`lib/src/components/ShellPicker.tsx` over `lib/src/lib/shell-store.ts`), hidden

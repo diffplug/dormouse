@@ -4,11 +4,14 @@ import {
   createWorkspace,
   getActiveWorkspaceId,
   getWorkspacesSnapshot,
+  moveWorkspace,
   renameWorkspace,
   resetWorkspaces,
   setActiveWorkspace,
   setWorkspaces,
   subscribeToWorkspaces,
+  workspaceIdForRef,
+  workspaceRefFor,
 } from './workspace-store';
 import { DEFAULT_WORKSPACE_ID, DEFAULT_WORKSPACE_NAME } from './session-types';
 
@@ -133,5 +136,38 @@ describe('workspace-store', () => {
     unsub();
     createWorkspace({ id: 'ws-3' });
     expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it('moveWorkspace reorders and clamps, and reports whether the list changed', () => {
+    createWorkspace({ id: 'ws-2' });
+    createWorkspace({ id: 'ws-3' });
+    const ids = () => getWorkspacesSnapshot().workspaces.map((w) => w.id);
+
+    expect(moveWorkspace('ws-3', 0)).toBe(true);
+    expect(ids()).toEqual(['ws-3', DEFAULT_WORKSPACE_ID, 'ws-2']);
+    // Clamped into range rather than refused.
+    expect(moveWorkspace('ws-3', 99)).toBe(true);
+    expect(ids()).toEqual([DEFAULT_WORKSPACE_ID, 'ws-2', 'ws-3']);
+    expect(moveWorkspace('ws-3', 2)).toBe(false);
+    expect(moveWorkspace('missing', 0)).toBe(false);
+    // Reordering never changes which Workspace is active.
+    expect(getActiveWorkspaceId()).toBe('ws-3');
+  });
+
+  it('workspace refs are positional and renumber on reorder', () => {
+    createWorkspace({ id: 'ws-2' });
+    expect(workspaceRefFor(DEFAULT_WORKSPACE_ID)).toBe('workspace:1');
+    expect(workspaceRefFor('ws-2')).toBe('workspace:2');
+    // A Workspace already gone (its Wall is mid-unmount) answers the first ref.
+    expect(workspaceRefFor('missing')).toBe('workspace:1');
+    expect(workspaceIdForRef('workspace:2')).toBe('ws-2');
+    expect(workspaceIdForRef('2')).toBe('ws-2');
+    expect(workspaceIdForRef('workspace:9')).toBeNull();
+    expect(workspaceIdForRef('workspace:0')).toBeNull();
+    expect(workspaceIdForRef('nonsense')).toBeNull();
+
+    moveWorkspace('ws-2', 0);
+    expect(workspaceRefFor('ws-2')).toBe('workspace:1');
+    expect(workspaceIdForRef('workspace:1')).toBe('ws-2');
   });
 });

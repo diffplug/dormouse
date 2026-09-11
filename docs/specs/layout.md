@@ -10,7 +10,7 @@
 
 ## Conceptual model
 
-A Wall renders one Workspace's Surfaces as Panes in Content or Doors on the Baseboard. Pane↔Door preserves the Surface; a Doored browser Surface keeps its backing session while releasing its viewer resources ([Minimize and reattach](#minimize-and-reattach)). The standalone Workspace strip and switching are staged in [Future](#future) (**Scope: workspaces-rollout**); VS Code maps each Workspace to a webview (`docs/specs/vscode.md`).
+A Wall renders one Workspace's Surfaces as Panes in Content or Doors on the Baseboard. Pane↔Door preserves the Surface; a Doored browser Surface keeps its backing session while releasing its viewer resources ([Minimize and reattach](#minimize-and-reattach)). Standalone mounts one Wall per Workspace and switches between them ([Workspaces](#workspaces)); what that feature still owes is staged in [Future](#future) (**Scope: workspaces-rollout**). VS Code maps each Workspace to a webview (`docs/specs/vscode.md`).
 
 ## Shell layout
 
@@ -141,13 +141,25 @@ Source of truth: `lib/src/components/Baseboard.tsx`, `lib/src/components/Door.ts
 
 ## Workspaces
 
-Each Wall renders one Workspace's Content (Lath layout) and Baseboard (doors). VS Code's per-webview mapping is owned by `docs/specs/vscode.md`.
+Each Wall renders one Workspace's Content (Lath layout) and Baseboard (doors). Standalone mounts one Wall **per Workspace**; VS Code and the website playground mount a bare Wall with no Workspace id, which behaves exactly as a single-Workspace Window (VS Code's per-webview mapping is `docs/specs/vscode.md`).
 
-The in-memory model, container verbs, and Window persistence wrapper are implemented but unwired. The live union projection and its host displays are owned by `docs/specs/alert.md` → Workspace union. **Must reject duplicate Workspace IDs before mutating the model**, preserving the last-Workspace close guard (`workspace-store.test.ts`). `dormouse.flags.workspaces` is off by default and selects the wrapper's bare `PersistedSession` versus `PersistedWindow` format (`docs/specs/transport.md`). **Both standalone adapters disable session persistence**, so the flag alone enables no storage or Workspace UI. No production code calls the container verbs; `setActiveWorkspace` does not re-render the Wall, and standalone runs one implicit Workspace.
+- **Must mount every Workspace's Wall in one grid cell**, inactive Walls `visibility:hidden` (plus `inert`) and never `display:none` (rationale).
+- **Must switch by flipping `active` alone**: no re-seed, no re-parent, no leaf unmount, and no `resumeTerminal` / `restoreTerminal`; the only mount work is the terminal reattach below, which replays nothing, so I8 holds by construction (`WorkspaceWindow.test.tsx`).
+- **A hidden Wall's terminals hold no element and no GL context**: deactivation runs `unmountElement` on every terminal pane, exactly as minimize does ([Renderer](#renderer)); activation runs `mountElement` and fits through the [Animations](#animations) gate, so an unchanged grid sends no PTY resize (`TerminalPane.test.tsx`). Browser Surfaces keep their live documents (rationale).
+- **A hidden Wall consumes no window input**: every listener it keeps is gated on `active`, so nothing it hears is dispatched, forwarded, or `preventDefault`ed. **Only the active Wall renders the modal hosts and the overlays that trap keys** — the kill confirmation, the refused-archive prompt, a terminal's selection popup (rationale): a staged prompt survives the switch and is answered only where the user can see it.
+- **Exactly one Wall answers a `dor` request**, chosen by `docs/specs/dor-cli.md` → "Handle Model". Every Wall registers a handle, a bare one under `DEFAULT_WORKSPACE_ID`, so the router always finds one.
+- **Never unmount a Wall before its Surfaces are disposed** — `closeAll` waits for the kill fade to commit, bounded by the engine's exit duration, since unmounting mid-fade would leave `Orphaned` Registry entries (`docs/specs/glossary.md` → "Invariants" I4). **The deadline refuses rather than reporting clean**, and the walk re-reads membership until nothing is left, so a Surface born behind it is closed too.
+- **A closing Workspace takes no new Surfaces**: while `closeAll` walks, this Wall answers every Surface-creating `dor` verb with an error (`docs/specs/dor-cli.md` → "Handle Model").
+- **Must reject duplicate Workspace IDs before mutating the model**, preserving the last-Workspace close guard (`workspace-store.test.ts`).
+- Each Wall keeps its own mode and selection across switches: deactivating blurs its selected pane, activating focuses it a frame later, since focus into a hidden subtree is a no-op.
 
-Source of truth: `createWorkspace` / `setWorkspaces` / `closeWorkspace` / `renameWorkspace` / `setActiveWorkspace` in `lib/src/lib/workspace-store.ts`; `WORKSPACES_FLAG_KEY` in `lib/src/lib/feature-flags.ts`; `loadSessionState` / `saveSessionState` in `lib/src/lib/window-persistence.ts`; `PERSIST_SESSION` in `standalone/src/tauri-adapter.ts` and `standalone/src/browser-sidecar-adapter.ts`.
+**Create** adds a Workspace named `Workspace N`, makes it active, and gives its Wall no restored record, so Lath's fresh branch spawns one default-shell pane. **Close** confirms first when the Workspace holds touched Surfaces or running work, reusing the kill-confirm letter and key rule over the Window's content area (**a bare `Shift` or `Meta` is not an answer**, as for a pane kill), then routes every member Surface through the closure coordinator; **the last remaining Workspace cannot be closed** — there is always one active Workspace, as there is always one visible pane (corner case #5). **One close runs at a time for the whole Window**, with the count re-checked after the confirmation, so two of them cannot empty two Walls between them; **a close the store then refuses hands the Wall back its auto-spawn** rather than leaving it mounted and empty. **Rename** edits the Workspace `name` only — no Surface title, and not the per-pane inline rename. **Reorder** moves a tab in the strip and renumbers the positional `workspace:<n>` refs with it; **a press inside the open rename editor never starts a reorder**. **Must drop only the closing Workspace’s rename editor and pending confirmation**, or a stale `renamingId` holds the chrome keyboard lease for the session (`WorkspaceStrip.test.tsx`). **Every Workspace verb runs outside the strip**, which renders the rename editor and confirmation from a store, so a tab gesture and a command-mode key take one path.
 
-The strip UI, real switching, and lifecycle UX are staged in [Future](#future) — this spec's `## Future` is the single rollout ledger; other specs link here.
+The union projection and its indicators are owned by `docs/specs/alert.md` → Workspace union; the strip that renders them by `docs/specs/standalone.md` → AppBar. Persisted containers are owned by `docs/specs/transport.md`; `dormouse.flags.workspaces` still selects the bare `PersistedSession` versus `PersistedWindow` stored format, and **both standalone adapters still disable session persistence**, so a relaunch restores one Workspace.
+
+Source of truth: `WorkspaceWindow` in `lib/src/components/WorkspaceWindow.tsx`; `registerWallHandle` in `lib/src/components/wall/wall-handles.ts`; `closeAll` in `lib/src/components/Wall.tsx`; `requestWorkspaceClose` in `lib/src/components/wall/workspace-lifecycle.ts`; `createWorkspace` / `closeWorkspace` / `renameWorkspace` / `moveWorkspace` / `setActiveWorkspace` in `lib/src/lib/workspace-store.ts`; `getWorkspaceUiSnapshot` in `lib/src/lib/workspace-ui-store.ts`; `setWorkspaceSurfaces` in `lib/src/lib/workspace-surfaces.ts`; `PERSIST_SESSION` in `standalone/src/tauri-adapter.ts` and `standalone/src/browser-sidecar-adapter.ts`.
+
+What multi-window, per-Workspace persistence, and the `dor workspace` verbs still owe is staged in [Future](#future) — this spec's `## Future` is the single rollout ledger; other specs link here.
 
 ## Modes
 
@@ -178,11 +190,13 @@ Wall starts in `command` mode. Embedders may pass `initialMode="passthrough"` wh
 
 `docs/specs/shortcuts.md` tables every binding; this section owns the dispatch behavior behind it.
 
-All keys are handled in one capture-phase `keydown` listener on `window` (`use-wall-keyboard.ts`), which delegates in a fixed order to the modules in `lib/src/components/wall/keyboard/`: dual-tap → editable-field clipboard → mouse-selection keys → *(passthrough stops here)* → *(rename stops here)* → kill confirmation → *(an open dialog stops here)* → pane shortcuts → pane navigation. **Must prevent default and stop propagation for handled command keys.** Bare Meta/Shift presses stop only internal dispatch; the detector leaves their DOM event untouched.
+All keys are handled in one capture-phase `keydown` listener on `window` (`use-wall-keyboard.ts`), which delegates in a fixed order to the modules in `lib/src/components/wall/keyboard/`: *(an inactive Workspace stops here)* → dual-tap → editable-field clipboard → mouse-selection keys → *(passthrough stops here)* → *(a rename or the chrome lease stops here)* → kill confirmation → *(an open dialog stops here)* → Workspace shortcuts → pane shortcuts → pane navigation. **Must prevent default and stop propagation for handled command keys.** Bare Meta/Shift presses stop only internal dispatch; the detector leaves their DOM event untouched.
 
 That order is load-bearing twice: a rename input suppresses the pane shortcuts but **not** the mode-exit gesture or the field's own clipboard chords; and a staged kill confirmation hijacks each key reaching it before the dialog gate, so the confirm letter works even though the modal is open.
 
 **Every open dialog holds its own reference-counted lease on that gate**, and command-mode dispatch resumes only once the last lease is released — so a dialog closing over another cannot lift the survivor's suppression (`createDialogKeyboardCoordinator` in `lib/src/components/wall/wall-context.tsx`).
+
+**Chrome outside every Wall takes the chrome keyboard lease instead**: the Workspace strip's rename editor and close confirmation live in the app bar, where `stopPropagation` cannot reach a capture-phase window listener. **The Workspace branch is inert on a Wall with no Workspace id**, which is what leaves those keys unbound on a bare Wall. Source of truth: `acquireChromeKeyboardLease` in `lib/src/components/wall/chrome-keyboard-lease.ts`; `handleWorkspaceShortcuts` in `lib/src/components/wall/keyboard/handle-workspace-shortcuts.ts`.
 
 ### Split cwd inheritance
 
@@ -324,7 +338,7 @@ On cold restore, a terminal pane with a host-captured recovery invocation runs i
 **Must use `@xterm/addon-webgl` for mounted terminals when available**, falling back to xterm's DOM renderer on unsupported WebGL, activation failure, or context-budget eviction. `cfg.terminal.webglRenderer` disables WebGL and is off under Chromatic. ImageAddon owns its separate canvas layers (`docs/specs/terminal-escapes.md` → "Inline graphics"). (rationale)
 
 - **Must acquire GPU resources at mount, never at Session creation**, and keep a successfully activated renderer when context capture or explicit loss is unavailable. (rationale)
-- **Must dispose the addon on unmount/minimize, helper parking, and Session disposal**, then explicitly lose its context when captured and supported. Report addon or extension failures without aborting teardown. Minimize preserves the xterm, grid, buffers, PTY, and other addons.
+- **Must dispose the addon on unmount/minimize, Workspace deactivation, helper parking, and Session disposal**, then explicitly lose its context when captured and supported. Report addon or extension failures without aborting teardown. Minimize preserves the xterm, grid, buffers, PTY, and other addons.
 - **Must load a fresh addon on reattachment without resizing the terminal for the renderer swap.** Terminal fitting follows "Animations". A stale mount's cleanup must not release a newer mount's renderer.
 - **Must attempt WebGL at most once per mount.** Failure or context loss stays on DOM until the next unmount/remount; focus and metadata changes never retry. Focus-based recovery remains under `## Future`.
 - **Must preserve the addon's shared atlas cache.** Compatible mounted terminals share rasterized atlas canvases; GPU texture copies remain per context. Releasing one renderer releases only its atlas ownership; the last owner releases the cache. (rationale)
@@ -409,28 +423,16 @@ A store commit that empties the tree (last pane killed or minimized) triggers th
 4. **Asymmetric back-navigation**: the breadcrumb ([Spatial navigation](#spatial-navigation)) makes every arrow move reversible even where no spatial query would return you.
 5. **Door keeps selection through the auto-spawn refill** ([Auto-spawn refill](#auto-spawn-refill)). Explicit user selection of a pane — a click, a drag, or an embed focusing itself — still moves selection off a door.
 6. **Focus-neutral surface creation (`dor ensure` / `dor iframe` / `dor ab`)**: unlike `dor split`, these open in the background without moving focus off the caller (`docs/specs/dor-cli.md`, `docs/specs/dor-browser.md`). An add never re-parents the caller's subtree or steals activation, and the create does not call `selectPane` (`settleAddSelection` returns false for a focus-neutral, non-selection-replacing add). **The one exception**: `dor iframe` / `dor ab` replacing the pane the user is *currently selected on* moves selection to the replacement, else it would dangle on the removed leaf; any other pane, or a door selection, is left untouched. Cleanup of a `dor ensure` temporary Surface follows `docs/specs/notepad.md` → "Closure"; any completed teardown preserves the caller's live selection.
+7. **A hidden Workspace is not minimized**: its Surfaces stay `Paned` / `Doored` and its Sessions keep running; only painting stops, because `useSurfaceVisibility` reports a Workspace-inactive Surface as off screen and its streaming bodies idle.
+8. **A refused close reveals its Workspace**: a `closeAll` that returns a refusal activates that Workspace, so the prompt behind the refusal is on screen rather than inside a hidden Wall.
 
 ## Future
 
-**Scope: workspaces-rollout** — the remaining stages of the multi-Workspace feature. Current implementation: [Workspaces](#workspaces). Persisted containers are owned by `docs/specs/transport.md`; union projection by `docs/specs/alert.md`. This ledger is the single home for what remains; other specs link here rather than restating it.
+**Scope: workspaces-rollout** — what the multi-Workspace feature still owes. Current implementation: [Workspaces](#workspaces). Persisted containers are owned by `docs/specs/transport.md`; union projection by `docs/specs/alert.md`. This ledger is the single home for what remains; other specs link here rather than restating it.
 
-### Stage 3 — workspace strip and switching UI (standalone)
-
-The standalone app bar (`standalone/src/AppBar.tsx`) grows a horizontal **workspace strip**: one tab per Workspace, in the bar's draggable region. Each tab shows the Workspace `name` and, for **inactive** Workspaces only, the union `ringing` bell and `todo` pill from `docs/specs/alert.md`, reusing the Door indicator vocabulary — the active tab needs no union indicator, its alerts already being visible on its own panes and doors. Exact tab visuals settle in the Storybook UI pass.
-
-Switch/create/close/rename shortcuts are chosen alongside that pass. Command mode is their natural home, following the tmux *window* bindings the rest of the keymap mirrors (a Dormouse Workspace is the analogue of a tmux window). `docs/specs/shortcuts.md` lists them once bound.
-
-### Stage 4 — real switching and multi-Workspace activation
-
-`switchWorkspace` presents the target Workspace's panes and doors and hides the previously active Workspace's. Terminals reuse the `mount` / `unmount` path: the Registry entry, xterm buffer, and PTY survive, Process is unchanged, and nothing replays. Browser Surfaces keep their backing agent-browser session or proxy grant; parking follows below.
-
-Switching **parks** the outgoing Workspace's browser Surfaces rather than unmounting them, on exactly the terms minimize already does (`docs/specs/tiling-engine.md` → "Parked leaves"): the switch parks each one, then seeds the incoming Workspace's tree, which `seed` is already written to survive — it keeps parked leaves except any the seed itself admits. That is what makes an iframe survive a round trip through another Workspace. VS Code is out of reach either way — one webview per Workspace ([Workspaces](#workspaces)) bounds cross-Workspace DOM survival by webview lifetime, not by anything the Wall does. Because a terminal's Activity keeps flowing while unmounted, an inactive Workspace's tab can begin ringing or showing TODO while the user is elsewhere; **mounting must not fire a fresh ring** (glossary I8, mirroring the minimize/reattach rule I3).
-
-Stage 4 also enables multiple Workspaces in the standalone presentation and wires the lifecycle UX:
-
-- **Create** (`createWorkspace`): adds a Workspace, names it `Workspace N`, makes it active, and spawns a single fresh pane — matching the empty-state behavior in Session persistence.
-- **Close** (`closeWorkspace`): `kill`s each member Surface and removes the Workspace. Closing one holding touched Surfaces confirms first, reusing the kill-confirm vocabulary; the confirmation surface settles in the Storybook UI pass. **The last remaining Workspace cannot be closed** — there is always one active Workspace, as there is always one visible pane (corner case #5).
-- **Rename** (`renameWorkspace`): edits the Workspace `name` only — no Surface title, and not the per-pane inline rename.
+- **Standalone persistence and agent recovery.** Every Workspace's record already reaches the Window collector, which has no writer, so nothing is stored and a relaunch restores one Workspace. Turning it on means seeding the collector at boot, debouncing and flushing its writes, adopting a restored `PersistedWindow` into the Workspace store, and lifting VS Code's agent-recovery capture into a host-agnostic module the sidecar bundles.
+- **Multiple OS windows.** PTY ownership routing in Rust, window lifecycle, tearing a Workspace out into its own window, dropping one onto another window, and restoring N windows. `WorkspaceStrip`'s `onDragOutsideWindow` / `onDropOnOtherWindow` and the router's `window:<n>` rejection are the seams; `WINDOW_REF` names the only Window this build addresses.
+- **`dor workspace` verbs.** `new` / `rename` / `close` / `switch`, plus `dor list --all` for cross-Workspace targeting and `workspace:<name>` as the stable handle beside today's positional `workspace:<n>`.
 
 ### Re-arming the WebGL renderer after context loss
 

@@ -32,6 +32,7 @@ import {
 } from '../lib/mouse-selection';
 import { getTerminalOverlayDims } from '../lib/terminal-registry';
 import { SelectionPopup } from './SelectionPopup';
+import { WorkspaceActiveContext } from './wall/wall-context';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -250,5 +251,46 @@ describe('SelectionPopup: copy and flash', () => {
     await act(async () => complete(true));
     expect(getMouseSelectionState('term-1').copyFlash).toBeNull();
     expect(getMouseSelectionState('term-1').selection?.startRow).toBe(8);
+  });
+});
+
+describe('SelectionPopup: hidden Workspace', () => {
+  /** The same finalized selection, rendered inside a Wall that is not the
+   *  visible Workspace. */
+  function renderHidden(): void {
+    act(() => {
+      setSelection('term-1', {
+        startRow: 1,
+        startCol: 0,
+        endRow: 2,
+        endCol: 10,
+        shape: 'linewise',
+        dragging: false,
+        startedInScrollback: false,
+      });
+    });
+    act(() => root.render(
+      <WorkspaceActiveContext.Provider value={false}>
+        <SelectionPopup terminalId="term-1" />
+      </WorkspaceActiveContext.Provider>,
+    ));
+  }
+
+  it('renders nothing and swallows no window input, keeping the selection for the way back', () => {
+    renderHidden();
+    expect(container.querySelector('[data-selection-popup-for="term-1"]')).toBeNull();
+
+    // The dismissal listeners are capture-phase window listeners: answering
+    // these would take an Escape or a click from the visible Workspace
+    // (docs/specs/layout.md -> "Workspaces").
+    const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    act(() => { window.dispatchEvent(escape); });
+    expect(escape.defaultPrevented).toBe(false);
+    act(() => { window.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); });
+    expect(getMouseSelectionState('term-1').selection).not.toBeNull();
+
+    // Visible again: the popup comes back over the same selection.
+    act(() => root.render(<SelectionPopup terminalId="term-1" />));
+    expect(container.querySelector('[data-selection-popup-for="term-1"]')).not.toBeNull();
   });
 });

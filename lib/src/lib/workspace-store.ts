@@ -1,11 +1,10 @@
 import { DEFAULT_WORKSPACE_ID, DEFAULT_WORKSPACE_NAME, type WorkspaceId } from './session-types';
 
 /**
- * In-memory model of the Window's Workspaces (stage 2b). Holds the ordered list
- * and which one is active, plus the container verbs (`docs/specs/glossary.md`).
- * Stage 3 binds the standalone strip to this via `useSyncExternalStore`; stage 4
- * wires the verbs to actual Wall mount/unmount. Until then the model defaults to
- * a single Workspace and the verbs only mutate the model.
+ * In-memory model of the Window's Workspaces: the ordered list, which one is
+ * active, and the container verbs (`docs/specs/glossary.md`). `WorkspaceWindow`
+ * mounts one Wall per entry and the standalone strip renders it; both subscribe
+ * through `useSyncExternalStore`.
  */
 
 export interface WorkspaceMeta {
@@ -88,6 +87,20 @@ export function setActiveWorkspace(id: WorkspaceId): void {
   emit({ ...state, activeId: id });
 }
 
+/** Activate the Workspace `delta` places from the active one, wrapping at both ends. */
+export function activateAdjacentWorkspace(delta: 1 | -1): void {
+  const index = state.workspaces.findIndex((ws) => ws.id === state.activeId);
+  if (index === -1) return;
+  const { workspaces } = state;
+  setActiveWorkspace(workspaces[(index + delta + workspaces.length) % workspaces.length].id);
+}
+
+/** Activate the nth Workspace in strip order (0-based); out of range does nothing. */
+export function activateWorkspaceAt(index: number): void {
+  const target = state.workspaces[index];
+  if (target) setActiveWorkspace(target.id);
+}
+
 export function createWorkspace(opts?: { id?: WorkspaceId; name?: string; activate?: boolean }): WorkspaceMeta {
   let id = opts?.id ?? generateWorkspaceId();
   while (state.workspaces.some((workspace) => workspace.id === id)) {
@@ -123,6 +136,46 @@ export function closeWorkspace(id: WorkspaceId): boolean {
   const activeId = state.activeId === id ? workspaces[Math.max(0, index - 1)].id : state.activeId;
   emit({ workspaces, activeId });
   return true;
+}
+
+/**
+ * Move a Workspace to `toIndex` (clamped into range), keeping every other
+ * Workspace's relative order. Returns whether the list changed. Reordering
+ * renumbers `workspace:<n>` refs, which are positional by design
+ * (`docs/specs/dor-cli.md` → "Handle Model").
+ */
+export function moveWorkspace(id: WorkspaceId, toIndex: number): boolean {
+  const from = state.workspaces.findIndex((ws) => ws.id === id);
+  if (from === -1) return false;
+  const to = Math.max(0, Math.min(state.workspaces.length - 1, Math.trunc(toIndex)));
+  if (from === to) return false;
+  const workspaces = [...state.workspaces];
+  const [moved] = workspaces.splice(from, 1);
+  workspaces.splice(to, 0, moved);
+  emit({ ...state, workspaces });
+  return true;
+}
+
+/** The only Window this build addresses; `window:<n>` beyond it is an error. */
+export const WINDOW_REF = 'window:1';
+
+/** Whether `ref` names this Window — `window:1`, or the bare `1`. */
+export function isWindowRef(ref: string): boolean {
+  return ref.trim() === WINDOW_REF || ref.trim() === '1';
+}
+
+/** A Workspace's positional `dor` ref. One no longer in this Window — its Wall is
+ *  mid-unmount — reports the first ref, which is what a lone Workspace answers. */
+export function workspaceRefFor(id: WorkspaceId): string {
+  const index = state.workspaces.findIndex((ws) => ws.id === id);
+  return `workspace:${index === -1 ? 1 : index + 1}`;
+}
+
+/** Resolve `workspace:<n>` or a bare `<n>` (1-based) to a Workspace id. */
+export function workspaceIdForRef(ref: string): WorkspaceId | null {
+  const match = /^(?:workspace:)?([1-9]\d*)$/.exec(ref.trim());
+  if (!match) return null;
+  return state.workspaces[Number(match[1]) - 1]?.id ?? null;
 }
 
 /** Reset to the single default Workspace (fresh start / tests). */

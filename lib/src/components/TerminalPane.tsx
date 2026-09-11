@@ -11,7 +11,7 @@ import { SelectionOverlay } from './SelectionOverlay';
 import { SelectionPopup } from './SelectionPopup';
 import { MouseOverrideBanner } from './wall/MouseOverrideBanner';
 import { TERMINAL_BOTTOM_RADIUS_CLASS } from './design';
-import { TerminalResizeContext } from './wall/wall-context';
+import { TerminalResizeContext, WorkspaceActiveContext } from './wall/wall-context';
 
 interface TerminalPaneProps {
   id: string;
@@ -31,12 +31,18 @@ const REFIT_DEBOUNCE_MS = 150;
 export function TerminalPane({ id, isFocused = true }: TerminalPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const resize = useContext(TerminalResizeContext);
+  const workspaceActive = useContext(WorkspaceActiveContext);
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
     getOrCreateTerminal(id);
+    // A hidden Workspace's terminal is minimized: the Session and PTY exist, but
+    // the element stays detached so xterm stops rasterizing and holds no GL
+    // context (docs/specs/layout.md → "Workspaces"). Activation re-runs this
+    // effect, and the reattach fit finds the box the hidden Wall kept.
+    if (!workspaceActive) return;
     mountElement(id, container);
     // The one fit path, whatever wakes it: the layout coordinator when it has painted
     // committed geometry, a debounced container resize otherwise. Both drop a pending
@@ -63,7 +69,7 @@ export function TerminalPane({ id, isFocused = true }: TerminalPaneProps) {
       clearTimeout(timer);
       unmountElement(id, container);
     };
-  }, [id, resize]);
+  }, [id, resize, workspaceActive]);
 
   useEffect(() => {
     focusSession(id, isFocused);

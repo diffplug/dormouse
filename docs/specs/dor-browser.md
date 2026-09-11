@@ -130,10 +130,13 @@ Source of truth: `lib/src/components/wall/SurfacePaneHeader.tsx`,
 ## Dev-Server Chip
 
 For loopback URLs (`localhost`, `*.localhost`, `127.0.0.1`, `::1`) the header
-registers interest in the port. The Wall scans terminal panes and minimized doors
-via `PlatformAdapter.getOpenPorts(id)` and **shows a chip only when exactly one
-terminal owns that port**; zero or two-plus leave it unsettled, so a dev server
-that starts later still matches. **Match only binds that serve localhost** —
+registers interest in the port. **One scan loop per Window, over every mounted
+Wall's terminal panes and minimized doors** — each Wall registers its Surfaces as
+a candidate source, since the wanted-port store and the resolutions are
+window-wide. It reads `PlatformAdapter.getOpenPorts(id)` and **shows a chip only
+when exactly one terminal owns that port**; zero or two-plus leave it unsettled,
+so a dev server that starts later still matches, and a Wall arriving or leaving
+re-validates what had settled. **Match only binds that serve localhost** —
 loopback or any-interface (`0.0.0.0`, `::`), never a specific non-loopback bind.
 Scanning is debounced, idle-scheduled, and polls only while a wanted port is
 unmatched; reload revalidates optimistically.

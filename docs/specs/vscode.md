@@ -79,7 +79,7 @@ Consequences:
 >
 > Union reflection onto native chrome is always-on — the extension host has no `localStorage` for the standalone workspaces flag ([Future](#future)). The Window persistence container is standalone-only; VS Code keeps one bare `PersistedSession` per webview.
 
-**One webview is one Workspace.** The bottom-panel `WebviewView` ("Dormouse") is the default Workspace; each `dormouse.open` editor-tab `WebviewPanel` is an independent Workspace. Several are visible at once, and VS Code — not Dormouse — owns their tabs, creation, and closing, so **Dormouse adds no create/rename/close affordances here**. A Workspace's Surfaces are the terminal Sessions whose PTYs its router tracks (`ownedPtyIds`, `docs/specs/transport.md`) plus the browser Surfaces rendered in it.
+**One webview is one Workspace.** The bottom-panel `WebviewView` ("Dormouse") is the default Workspace; each `dormouse.open` editor-tab `WebviewPanel` is an independent Workspace. Several are visible at once, and VS Code — not Dormouse — owns their tabs, creation, and closing, so **Dormouse adds no create/rename/close affordances here**: the webview mounts a bare `<Wall>`, which leaves the Workspace strip and its shortcuts to standalone (`docs/specs/layout.md` → Workspaces). A Workspace's Surfaces are the terminal Sessions whose PTYs its router tracks (`ownedPtyIds`, `docs/specs/transport.md`) plus the browser Surfaces rendered in it.
 
 #### Surfacing union status on native chrome
 

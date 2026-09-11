@@ -33,6 +33,12 @@ export const TERMINAL_SELECTION_BORDER_RADIUS = `${TERMINAL_BORDER_RADIUS_REM}re
 // (`*-1.75` = 7px) — keep them in sync.
 export const PANE_GUTTER_PX = 7;
 
+/** Pointer travel before a press becomes a drag; below it the element's own
+ *  click behavior (select / enter passthrough / rename / activate) is untouched.
+ *  Shared by the pane/Door drag and the Workspace strip's reorder, so both feel
+ *  like one gesture vocabulary. */
+export const DRAG_THRESHOLD_PX = 5;
+
 // Concentric-corners rule: when a rounded outline wraps a rounded edge, both
 // arcs must share a corner center — outer radius = inner radius + offset.
 // Never tighten the inner radius to compensate. The pane focus ring draws on

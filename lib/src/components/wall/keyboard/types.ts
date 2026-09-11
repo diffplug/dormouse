@@ -2,6 +2,7 @@ import type { Dispatch, RefObject, SetStateAction } from 'react';
 import type { ConfirmKill } from '../../KillConfirm';
 import type { DoorAfterRestoreAction, DooredItem, WallEvent, WallMode, WallSelectionKind } from '../wall-types';
 import type { WallActions } from '../wall-context';
+import type { WorkspaceId } from '../../../lib/session-types';
 
 /** The navigation/query seam the keyboard handlers read, backed by the Lath engine
  *  (docs/specs/tiling-engine.md). */
@@ -20,6 +21,12 @@ export interface WallNav {
  *  signatures on each handler. */
 export interface WallKeyboardCtx {
   nav: WallNav;
+  /** Whether this Wall's Workspace is the visible one. Listeners stay per Wall;
+   *  only dispatch is gated, so a hidden Workspace sees no window input. */
+  activeRef: RefObject<boolean>;
+  /** This Wall's Workspace. Absent on a bare Wall, which leaves the Workspace
+   *  keys unbound. */
+  workspaceId?: WorkspaceId;
   /** Swap two panes' surfaces (Cmd-Arrow): swap leaf identities (meta follows ids,
    *  so no companion title swap). */
   swapWithNeighbor: (fromId: string, toId: string) => void;

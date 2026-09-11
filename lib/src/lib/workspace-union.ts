@@ -12,9 +12,12 @@ export interface WorkspaceUnion {
   todo: boolean;
   /** Number of member Surfaces owing attention (ringing or todo); each counts once. */
   count: number;
+  /** The largest member `ringSeq`. Read only for change: a new ring replays the
+   *  Workspace indicator's burst, and returning to the Workspace does not. */
+  ringSeq: number;
 }
 
-export const EMPTY_WORKSPACE_UNION: WorkspaceUnion = { ringing: false, todo: false, count: 0 };
+export const EMPTY_WORKSPACE_UNION: WorkspaceUnion = { ringing: false, todo: false, count: 0, ringSeq: 0 };
 
 /**
  * Project the union over a Workspace's member Surfaces. `surfaceIds` are the
@@ -29,6 +32,7 @@ export function computeWorkspaceUnion(
   let ringing = false;
   let todo = false;
   let count = 0;
+  let ringSeq = 0;
   for (const id of surfaceIds) {
     const state = activity.get(id);
     if (!state) continue;
@@ -37,6 +41,7 @@ export function computeWorkspaceUnion(
     if (isRinging) ringing = true;
     if (isTodo) todo = true;
     if (isRinging || isTodo) count += 1;
+    ringSeq = Math.max(ringSeq, state.ringSeq);
   }
-  return { ringing, todo, count };
+  return { ringing, todo, count, ringSeq };
 }

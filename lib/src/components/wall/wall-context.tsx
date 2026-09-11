@@ -96,6 +96,12 @@ export const PaneWriteContext = createContext<PaneWriteActions>({
   updateParams: () => {},
 });
 
+/** Whether this Wall's Workspace is the visible one. A hidden Workspace stays
+ *  mounted and live, so streaming bodies read this to idle
+ *  (`docs/specs/layout.md` → "Workspaces"). Default true: a bare Wall, and any
+ *  component rendered outside one, is always active. */
+export const WorkspaceActiveContext = createContext(true);
+
 export const RenamingIdContext = createContext<string | null>(null);
 /** Exact zoom owner for pane-local chrome. Pane chrome compares against its own id
  * rather than reading a boolean, so a partially exposed pane does not render

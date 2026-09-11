@@ -1,5 +1,6 @@
 import type { SurfaceKind } from 'dor/commands/types';
 import type { BrowserDisplayMode } from './agent-browser-screen';
+import type { PersistedDoor, PersistedSurfaceRefs } from '../../lib/session-types';
 
 /** A minimized Surface's baseboard chip, at RUNTIME: an identity plus the Lath
  *  restore `token` that says where it goes back. Deliberately carries no
@@ -44,6 +45,20 @@ export type DoorAfterRestoreAction =
       shellName: string;
       announce: boolean;
     };
+
+/**
+ * The restored record a Wall boots from, passed through unchanged by every
+ * composition above it. Only the Workspace whose id was captured at first render
+ * receives one; every other Wall takes Lath's fresh branch
+ * (docs/specs/layout.md → "Workspaces").
+ */
+export interface WallBootProps {
+  initialPaneIds?: string[];
+  restoredLathLayout?: unknown;
+  initialDoors?: PersistedDoor[];
+  initialSurfaceRefs?: PersistedSurfaceRefs;
+  initialSurfaceRefsNext?: number;
+}
 
 export type WallEvent =
   | { type: 'modeChange'; mode: WallMode }

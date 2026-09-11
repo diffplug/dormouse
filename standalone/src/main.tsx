@@ -140,6 +140,7 @@ async function bootstrap() {
         baseboardNotice={<ConnectedUpdateBanner />}
         dialogHost={<QuitConfirmModalHost />}
         enableBurrow
+        multiWorkspace
       />
     </StrictMode>,
   );

@@ -20,7 +20,7 @@ import {
   pendingBatchId,
   pruneEmptyNote,
   removeSurface,
-  setNotepadSurfaceMetaResolver,
+  registerNotepadSurfaceMetaResolver,
   setNoteText,
   setOpenNotepadId,
   setStagedArchiveDeletions,
@@ -424,7 +424,7 @@ const CWD: CwdState = {
 describe('volatile mirror', () => {
   it('mirrors every Surface holding notes, without markers, once per burst', async () => {
     const sync = vi.spyOn(adapter.notepadArchive, 'syncVolatile');
-    setNotepadSurfaceMetaResolver((surfaceId) =>
+    registerNotepadSurfaceMetaResolver((surfaceId) =>
       surfaceId === 's1' ? { surfaceTitle: 'zsh', surfaceKind: 'terminal', cwd: CWD } : null,
     );
 
@@ -463,7 +463,7 @@ describe('volatile mirror', () => {
   });
 
   it('carries the PTY id for terminal Surfaces only, resolved to the Session', async () => {
-    setNotepadSurfaceMetaResolver((surfaceId) => ({
+    registerNotepadSurfaceMetaResolver((surfaceId) => ({
       surfaceTitle: surfaceId,
       surfaceKind: surfaceId === 's1' ? 'terminal' : 'browser',
       cwd: null,
@@ -477,6 +477,29 @@ describe('volatile mirror', () => {
     // Absent, not `undefined`: the mirror is round-tripped through the archive
     // validator on the host, which rejects a field it does not know.
     expect(Object.keys(surfaces[1])).not.toContain('terminalId');
+  });
+
+  it('asks every registered resolver and takes the owning one\u2019s answer', async () => {
+    // One resolver per mounted Wall; a Wall answers null for a Surface it does
+    // not own, so the first non-null answer is the owner\u2019s.
+    const dispose = registerNotepadSurfaceMetaResolver((surfaceId) =>
+      surfaceId === 's1' ? { surfaceTitle: 'from ws-1', surfaceKind: 'terminal', cwd: null } : null,
+    );
+    registerNotepadSurfaceMetaResolver((surfaceId) =>
+      surfaceId === 's2' ? { surfaceTitle: 'from ws-2', surfaceKind: 'terminal', cwd: null } : null,
+    );
+    addPlainNote('s1', 'a');
+    addPlainNote('s2', 'b');
+    await flush();
+    expect(adapter.notepadArchive.lastVolatileSnapshot()!.surfaces.map((s) => s.surfaceTitle))
+      .toEqual(['from ws-1', 'from ws-2']);
+
+    // Unregistering one Wall leaves the other answering.
+    dispose();
+    addPlainNote('s1', 'c');
+    await flush();
+    expect(adapter.notepadArchive.lastVolatileSnapshot()!.surfaces.map((s) => s.surfaceTitle))
+      .toEqual(['', 'from ws-2']);
   });
 
   it('carries staged archive deletions', async () => {

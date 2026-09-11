@@ -40,6 +40,7 @@ function makeNav(overrides: Partial<WallKeyboardCtx['nav']> = {}): WallKeyboardC
 function makeCtx(overrides: Partial<WallKeyboardCtx> = {}): WallKeyboardCtx {
   return {
     nav: makeNav(),
+    activeRef: { current: true },
     swapWithNeighbor: vi.fn(),
     modeRef: { current: 'command' },
     selectedIdRef: { current: 'pane-a' },
