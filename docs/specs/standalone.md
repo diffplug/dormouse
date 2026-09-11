@@ -639,7 +639,9 @@ below reads that record rather than inferring itself from the suppression map.
   submission and the source invoke reply may both still be pending. **Must discard
   cuts on explicit kill and never recreate an exited PTY’s owner on hand-back.**
   **Must apply a handed-back PTY’s exit status after its replay**, leaving its
-  existing pane dead with no running command. An id the
+  existing pane dead with no running command or active watch
+  (`settles the replayed watch when a marked buffer belongs to an exited PTY` in
+  `standalone/src/tauri-adapter.test.ts`). An id the
   sidecar never stamped goes straight back: a whole-buffer
   replay would paint it twice (`a_hand_back_replays_only_the_marked_ids`;
   rationale).
