@@ -650,7 +650,7 @@ export class PocketClient {
     burrowId: string,
     subscription: PushSubscriptionPayload,
   ): Promise<PushSubscribeResponse> {
-    const record = await this.#knownBurrows.get(burrowId);
+    const record = await this.#knownBurrows.getSummary(burrowId);
     if (record?.authorization.state !== 'paired') {
       throw new Error('this phone is not paired with that computer');
     }
@@ -824,7 +824,7 @@ export class PocketClient {
     ) {
       return { ok: false, message: PAIRING_DENIAL_MESSAGES['burrow-error'] };
     }
-    const existing = await this.#knownBurrows.get(burrowId);
+    const existing = await this.#knownBurrows.getSummary(burrowId);
     if (existing && existing.burrowStaticPublicKey !== outcome.burrowStaticPublicKey) {
       // Terminal, and the old record is untouched — see BurrowIdentityMismatchError.
       throw new BurrowIdentityMismatchError();

@@ -136,7 +136,10 @@ Harness v1/v2 encrypted tests were experimental look-alikes without production
 AAD. Their restart results established primitive persistence, not the shipped
 envelope. Harness v3 imports the production codec through the same Vite build
 as Pocket and rejects the old checkpoint schema instead of upgrading its
-evidence. A new device restart run is needed for that stronger claim.
+evidence. On September 11, 2026, the operator's new Home Screen v3 checkpoint
+prepared at 17:14:19 UTC passed at 17:17:44 UTC: production format,
+authenticated context, retained key, and a new page instance. This followed
+the requested phone-restart sequence; the page itself cannot prove an OS reboot.
 
 Measured on iPhone 15 Pro, Safari 26.6.1, September 2026: X25519 generation
 worked, but structured cloning failed, inline IndexedDB writes raised DataError,

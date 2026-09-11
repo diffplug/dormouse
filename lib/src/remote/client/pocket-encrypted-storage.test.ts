@@ -109,6 +109,33 @@ it('lists and removes a paired record without decrypting its corrupt key', async
   } finally { harness.client.close(); harness.burrow.stop(); }
 });
 
+it('re-pairs a damaged envelope only after approval, preserving the Burrow pin and retiring the old delivery id', async () => {
+  breakNativeStorage();
+  const store = indexedDbKnownBurrowStore();
+  const harness = await makeE2eHarness({ deps: { knownBurrows: store } });
+  try {
+    expect(await harness.pairAndApprove(await harness.mintInvitation())).toMatchObject({ ok: true });
+    const raw = await rawRecord(harness.burrowId);
+    const oldPublic = raw.clientStaticKeyPair.publicKeyRaw;
+    const oldDelivery = raw.authorization.deliveryId;
+    raw.clientStaticKeyPair.privateKey.ciphertext = new ArrayBuffer(16);
+    await withPocketStore(KNOWN_BURROWS_STORE, 'readwrite', async target => {
+      await promisifyRequest(target.put(raw));
+    });
+    await expect(store.get(harness.burrowId)).rejects.toThrow();
+    expect((await rawRecord(harness.burrowId)).clientStaticKeyPair.publicKeyRaw).toBe(oldPublic);
+
+    expect(await harness.pairAndApprove(await harness.mintInvitation())).toMatchObject({ ok: true });
+    const restored = (await store.get(harness.burrowId))!;
+    expect(restored.burrowStaticPublicKey).toBe(raw.burrowStaticPublicKey);
+    expect(restored.clientStaticKeyPair.publicKeyRaw).not.toBe(oldPublic);
+    expect(await harness.pendingDeletions.list()).toContainEqual(expect.objectContaining({ deliveryId: oldDelivery }));
+    await harness.client.retirePendingDeletions();
+    expect(harness.calls.some(call => call.method === 'DELETE' && call.url.endsWith(oldDelivery))).toBe(true);
+    expect(await harness.client.connect(harness.burrowId)).toMatchObject({ ok: true });
+  } finally { harness.client.close(); harness.burrow.stop(); }
+});
+
 beforeEach(() => {
   invalidatePocketKeyStorage();
   vi.stubGlobal('crypto', webcrypto);

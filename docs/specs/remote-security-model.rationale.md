@@ -24,6 +24,10 @@ environment.
 The initial restart harness used an experimental envelope without the
 production AAD binding. Its restart evidence below is primitive-level evidence;
 the v3 harness uses the production codec and requires a fresh checkpoint.
+The operator's v3 Home Screen report at 17:17:44 UTC on September 11, 2026
+passed with authenticated context and a retained production-format key from
+17:14:19 UTC. It detects a new page instance after the requested phone restart,
+not process termination itself.
 
 On September 11, 2026, an iPhone 15 Pro running Safari 26.6.1 failed X25519
 structured cloning and native IndexedDB persistence in both Safari and a Home

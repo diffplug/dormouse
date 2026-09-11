@@ -404,9 +404,10 @@ never display browser exception messages or key material.**
 **Must keep the separate-key experiment out of pairing preflight.** Direct
 compatibility failures to `/diagnostics/index.html`.
 
-**Must use metadata-only summaries for Burrow listing, push-subscription queries,
-and removal.** `getSummary` and `listSummaries` omit key material and perform no
-decryption/import; a corrupt key must not block listing or removal. Connection
+**Must use metadata-only summaries for listing, push registration/queries,
+removal, and re-pair identity checks.** `getSummary` and `listSummaries` omit key
+material without decryption/import. Corrupt keys cannot block these operations;
+re-pairing requires fresh approval and preserves the Burrow pin. Connection
 and push decryption use full records.
 
 **Must use the selected format for new keys and decode both formats in the

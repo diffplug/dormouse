@@ -101,10 +101,11 @@ per-Burrow browser storage follows `docs/specs/remote-security-model.md` ->
   `lib/src/remote/client/pocket-private-key.ts` and
   `lib/src/remote/client/pocket-db.ts`; pinned by
   `lib/src/remote/client/pocket-encrypted-storage.test.ts`.
-- **FAIL IF** AES-GCM appears in non-diagnostic production source outside the local at-rest
-  wrapper `lib/src/remote/client/pocket-private-key.ts`. The wire cipher remains
+- **FAIL IF** AES-GCM appears in production source under `remote-lib-common/src/`,
+  `lib/src/`, or `relay/src/` outside the local at-rest
+  wrapper `lib/src/remote/client/pocket-private-key.ts`. The wire cipher is
   unchanged; `scripts/e2e-lint.mjs` and `scripts/e2e-lint-selftest.mjs` pin
-  the file-scoped exception.
+  this exception.
 
 - **FAIL IF** `relay/src/state.ts` stops creating `$DORMOUSE_STATE_DIR` mode `0o700`, or stops writing every file through `writeAtomic` at mode `0o600`. The "every file" clause is a negative search over `relay/src/`: no `writeFile`, `appendFile`, or `createWriteStream` may target the state directory outside `writeAtomic`. A cheap default, not a cross-platform guarantee; the installer's directory permissions below protect the installed Relay's state (rationale).
 - **FAIL IF** `FileBurrowStateStore` (`lib/src/host/remote/burrow-state-store.ts`) stops creating its directory `0o700` and writing `0o600` on non-Windows platforms, or if `VsCodeBurrowStateStore` stops keeping the **enrollment** in `SecretStorage`. The ACL's home in `globalState` is deliberate and is not a finding; the enrollment's is what carries `burrowToken`.
