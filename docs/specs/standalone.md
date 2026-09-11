@@ -629,10 +629,13 @@ below reads that record rather than inferring itself from the suppression map.
   window's snapshot (rationale). **Must retain an adopted record until target
   and source snapshots both reflect the move**, marking it settled at
   `adopt_done` and checking after each `save_session` or source-window close
-  (`adoption_keeps_the_journal_until_both_snapshots_are_durable`). Every hand-back path
-  (`adopt_failed`, the target's `Destroyed`, the watchdog, a failed
-  `build_window`) drop the record; a record left at boot is merged into its
-  target's snapshot before `restore_windows` — a tear-out target gets a file
+  (`adoption_keeps_the_journal_until_both_snapshots_are_durable`). **Must reverse
+  the durable destination on hand-back and retain the record until both
+  snapshots reflect the return** (`a_hand_back_is_recovered_in_the_source_before_its_next_flush`).
+  **Must tombstone settled arrivals into a deliberately closed Window until
+  both snapshots omit them**, including during boot recovery
+  (`closing_an_adopted_target_never_resurrects_either_copy`).
+  A record left at boot is merged into its recorded destination before `restore_windows` — a tear-out target gets a file
   holding just it, active; a source snapshot still naming the id loses it, an
   emptied one is removed — so the Workspace restores once, with fresh shells,
   and successful records are deleted; **must retain failed records for retry
@@ -643,6 +646,9 @@ below reads that record rather than inferring itself from the suppression map.
   `a_leftover_arrival_boots_into_a_tear_out_targets_new_snapshot`,
   `a_leftover_arrival_leaves_a_source_snapshot_that_still_names_it`,
   `the_arrivals_file_is_gone_after_the_boot_merge`).
+- **Must run journal I/O and its lock waits off the main thread**, including
+  transfer/settlement/close commands and destroyed-window cleanup
+  (`journal_commands_run_off_the_main_thread`).
 - **An arrival unadopted after `ARRIVAL_MAX` is handed back** by a watchdog armed
   at `begin_arrival`, retiring only the record it was armed for (`queued_at`):
   a target alive but wedged never reaches `adopt_failed` or `Destroyed`, and the
