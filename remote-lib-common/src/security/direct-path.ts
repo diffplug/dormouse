@@ -11,7 +11,6 @@
  */
 
 import { isBoundedString } from './bytes.js';
-import { CONTROL_PAYLOAD_SIZE } from './noise-transport.js';
 
 /**
  * How long a peer waits for the channel to open before abandoning the attempt
@@ -51,7 +50,8 @@ export const DIRECT_GATHER_TIMEOUT_MS = 3_000;
 /**
  * The most SDP one signal may carry, in characters.
  *
- * Derived from {@link CONTROL_PAYLOAD_SIZE}, which every control body is padded
+ * Derived from `CONTROL_PAYLOAD_SIZE` in
+ * `remote-lib-common/src/security/noise-transport.ts`, which every control body is padded
  * to and may not exceed: with the SDP restricted to the characters SDP is made
  * of ({@link isDirectSdp}), JSON encodes each of them as at most two bytes, so
  * `2 * MAX_DIRECT_SDP_LENGTH` plus the envelope always fits. The relationship
@@ -284,14 +284,6 @@ export type DirectRelayOutcome = 'process' | 'violation';
 /** What one inbound channel frame turned out to be. */
 export type DirectChannelOutcome = 'process' | 'held' | 'overflow';
 
-/**
- * How far this end's one attempt has got: `idle` before it starts, `attempting`
- * from {@link DirectCutover.begin} until {@link DirectCutover.abandon}, and
- * `abandoned` forever after. There is no way back to `idle`, which is what makes
- * the attempt once-per-session.
- */
-export type DirectAttemptState = 'idle' | 'attempting' | 'abandoned';
-
 /** What the peer's `direct-switch` turned out to mean; see {@link DirectCutover.onSwitchDecrypted}. */
 export type DirectSwitchOutcome =
   | { readonly kind: 'drain'; readonly frames: Uint8Array[] }
@@ -313,15 +305,16 @@ export type DirectSwitchOutcome =
  * when one may start or what a switch means after one has been given up.
  */
 export class DirectCutover {
-  #state: DirectAttemptState = 'idle';
+  /**
+   * How far this end's one attempt has got: `idle` before it starts,
+   * `attempting` from {@link begin} until {@link abandon}, and `abandoned`
+   * forever after. There is no way back to `idle`, which is what makes the
+   * attempt once-per-session.
+   */
+  #state: 'idle' | 'attempting' | 'abandoned' = 'idle';
   #outbound: DirectPath = 'relay';
   #inbound: DirectPath = 'relay';
   readonly #held = new DirectFrameQueue(MAX_DIRECT_PENDING_FRAMES, MAX_DIRECT_PENDING_BYTES);
-
-  /** How far this end's one attempt has got. */
-  get state(): DirectAttemptState {
-    return this.#state;
-  }
 
   /** Where this end's own messages go. */
   get outbound(): DirectPath {
@@ -379,15 +372,11 @@ export class DirectCutover {
   /**
    * Move this end's sends onto the channel. The caller sends its
    * `direct-switch` on the relay *first*: this is the line after which nothing
-   * else may.
-   *
-   * Answers `false` for a second call, so a duplicate open cannot put two
-   * switches on the wire.
+   * else may. Idempotent; what keeps a duplicate open from putting a second
+   * switch on the wire is `DirectPeer`'s own once-only open guard.
    */
-  switchOutbound(): boolean {
-    if (this.#outbound === 'direct') return false;
+  switchOutbound(): void {
     this.#outbound = 'direct';
-    return true;
   }
 
   /**

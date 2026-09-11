@@ -1451,22 +1451,24 @@ export class BurrowRuntime {
       this.#pruneClient(clientId);
       return;
     }
-    // Destructured, so the `send` closure retains only what an established
+    // Destructured, so the endpoint's closures retain only what an established
     // session is — the id and the two cipher states — and not the pending
     // record, whose handshake hash, Client static and challenge are spent.
     const { connectionId, session, clientStaticPublicKey } = pending;
+    // Declared first so the send path and the endpoint's liveness check can both
+    // name the session they belong to; assigned before any frame can reach it.
+    let established: EstablishedSession;
     const api = this.#createSession({
       burrowId: this.#enrollment.burrowId,
       send: (payload) => {
-        this.#sendApp(clientId, connectionId, session, payload);
+        this.#sendApp(clientId, established, payload);
       },
     });
-    // Declared first so the endpoint's liveness check can name the session it
-    // belongs to; assigned before any frame can reach it.
-    let established: EstablishedSession;
     const direct = new DirectEndpoint('answerer', {
       createPeer: this.#createDirectPeer,
       sendSignal: (signal) => this.#sendControl(clientId, 'connection', connectionId, session, signal),
+      sendRelay: (ciphertext) =>
+        this.#sendE2e(clientId, 'connection', connectionId, 'transport', ciphertext),
       receive: (ciphertext) => this.#receiveOnSession(clientId, established, ciphertext),
       fatal: (reason) => {
         console.warn(`[burrow] the direct path ended this session: ${reason}`);
@@ -1617,25 +1619,20 @@ export class BurrowRuntime {
     return receipt;
   }
 
-  #sendApp(
-    clientId: string,
-    connectionId: string,
-    session: NoiseTransportSession,
-    payload: unknown,
-  ): void {
-    // Resolved once for the whole message: every chunk of it takes the path the
-    // first one did, and "after the switch, nothing on the relay" is this line.
-    const direct = this.#directFor(clientId, connectionId);
+  /**
+   * One protocol-v1 message on an established session, chunked as it needs.
+   * **The endpoint routes every chunk**, relay or channel, so which path carries
+   * them is {@link DirectEndpoint.send}'s rule rather than this loop's.
+   */
+  #sendApp(clientId: string, established: EstablishedSession, payload: unknown): void {
+    const { session, direct } = established;
     try {
       for (const ciphertext of session.sendApp(utf8Encode(JSON.stringify(payload)))) {
-        if (direct?.send(ciphertext)) {
-          // A channel that refuses a chunk disposes this session synchronously:
-          // the rest of the message has no session left to belong to, and must
-          // not fall back onto the relay of one that is over.
-          if (this.#directFor(clientId, connectionId) !== direct) return;
-          continue;
-        }
-        this.#sendE2e(clientId, 'connection', connectionId, 'transport', ciphertext);
+        // A channel that refuses a chunk disposes this session synchronously,
+        // and so does the promotion that replaces it: the rest of the message
+        // has no session left to belong to, and must reach neither path.
+        if (direct.disposed) return;
+        direct.send(ciphertext);
       }
     } catch {
       // **Only a poisoned session is burrow loss.** An over-cap message is
@@ -1648,15 +1645,6 @@ export class BurrowRuntime {
       }
       this.#disposeEstablished(clientId);
     }
-  }
-
-  /**
-   * The endpoint carrying one connection, or null once that connection is no
-   * longer this client's live session.
-   */
-  #directFor(clientId: string, connectionId: string): DirectEndpoint | null {
-    const established = this.#clients.get(clientId)?.established;
-    return established?.connectionId === connectionId ? established.direct : null;
   }
 
   #disposeEstablished(clientId: string): void {

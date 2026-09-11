@@ -334,6 +334,14 @@ interface PendingRequest {
 interface EstablishedSession {
   readonly connectionId: string;
   readonly session: NoiseTransportSession;
+  /** Where this session's frames are addressed on the relay; fixed for its life. */
+  readonly route: E2eRoute;
+  /**
+   * This session's direct path, created with it and disposed with it. **Every
+   * byte this Client sends goes through it**, relayed or not, so there is no
+   * moment at which a live session has no endpoint to route through.
+   */
+  readonly direct: DirectEndpoint;
   /**
    * When this Client last put a byte on this session — the mirror of the
    * Burrow's `lastClientActivityAt`, because that is the clock the Burrow reaps on
@@ -363,8 +371,6 @@ export class PocketClient {
   #established: EstablishedSession | null = null;
   #connectedBurrowId: string | null = null;
   #onBurrowGone: (() => void) | null = null;
-  /** This session's direct path, or null while there is no authorized session. */
-  #direct: DirectEndpoint | null = null;
   #onTransportChanged:
     | ((path: DirectPath, cause: DirectRelayCause | null) => void)
     | null = null;
@@ -414,19 +420,14 @@ export class PocketClient {
    * have left the relay — before that the relay is still carrying half of it.
    */
   get transportPath(): DirectPath {
-    return this.#direct?.path ?? 'relay';
+    return this.#established?.direct.path ?? 'relay';
   }
 
   /**
-   * Why this session is still relayed, or `null` where there is nothing to say
-   * — what the indicator explains, so a session that quietly stayed relayed can
-   * say which of the three it was.
+   * Notified whenever {@link transportPath} or the reason a session is still
+   * relayed changes — the indicator's one seam, since a cause is only ever read
+   * as it changes.
    */
-  get transportRelayCause(): DirectRelayCause | null {
-    return this.#direct?.relayCause ?? null;
-  }
-
-  /** Notified whenever {@link transportPath} or {@link transportRelayCause} changes. */
   setOnTransportChanged(
     callback: ((path: DirectPath, cause: DirectRelayCause | null) => void) | null,
   ): void {
@@ -930,13 +931,18 @@ export class PocketClient {
       // the retire above cannot see: without it that session's endpoint and
       // peer would be overwritten below rather than closed.
       this.#disposeCeremony();
-      this.#established = { connectionId, session, lastSentAt: this.#now() };
-      this.#connectedBurrowId = burrowId;
-      this.#startKeepalives();
+      // Declared first so the endpoint's deps can name the session they serve;
+      // assigned before anything can reach them.
+      let established: EstablishedSession;
+      const route: E2eRoute = { kind: 'connection', id: connectionId, burrowId };
       // After the outcome and never before: a peer connection that existed
       // ahead of authorization would be one an unauthorized party had steered.
-      this.#direct = this.#directEndpoint(this.#established, burrowId);
-      void this.#direct.offer();
+      const direct = this.#directEndpoint(() => established, route);
+      established = { connectionId, session, route, direct, lastSentAt: this.#now() };
+      this.#established = established;
+      this.#connectedBurrowId = burrowId;
+      this.#startKeepalives();
+      void direct.offer();
       return { ok: true, burrowLabel: outcome.burrowLabel };
     }
     if (outcome.code === 'pairing-required') {
@@ -1190,15 +1196,16 @@ export class PocketClient {
    * {@link DirectEndpoint}'s; what is injected here is how this Client puts a
    * signal on the relay, decrypts a channel frame, and reports the session gone.
    */
-  #directEndpoint(established: EstablishedSession, burrowId: string): DirectEndpoint {
+  #directEndpoint(current: () => EstablishedSession, route: E2eRoute): DirectEndpoint {
     return new DirectEndpoint('offerer', {
       createPeer: this.#createDirectPeer,
-      sendSignal: (signal) => this.#sendDirectSignal(established, burrowId, signal),
-      receive: (ciphertext) => this.#receiveOnSession(established, ciphertext),
+      sendSignal: (signal) => this.#sendDirectSignal(current(), signal),
+      sendRelay: (ciphertext) => this.#sendE2e(route, 'transport', ciphertext),
+      receive: (ciphertext) => this.#receiveOnSession(current(), ciphertext),
       // Reported exactly as a `burrow-gone` frame is: from here they are the
       // same event, and the app must leave the wall either way.
       fatal: (reason) => this.#loseBurrow(reason),
-      isCurrent: () => this.#established === established,
+      isCurrent: () => this.#established === current(),
       onTransportChanged: (path, cause) => this.#onTransportChanged?.(path, cause),
       setTimer: this.#setTimer,
     });
@@ -1208,17 +1215,9 @@ export class PocketClient {
    * One signal on the relay — the path that carries them until the switch. A
    * poisoned session has nothing to say; whatever poisoned it ends it.
    */
-  #sendDirectSignal(
-    established: EstablishedSession,
-    burrowId: string,
-    signal: DirectSignalV1,
-  ): boolean {
+  #sendDirectSignal(established: EstablishedSession, signal: DirectSignalV1): boolean {
     try {
-      this.#sendE2e(
-        this.#route(established, burrowId),
-        'transport',
-        established.session.sendControl({ ...signal }),
-      );
+      this.#sendE2e(established.route, 'transport', established.session.sendControl({ ...signal }));
       return true;
     } catch {
       return false;
@@ -1238,11 +1237,6 @@ export class PocketClient {
     this.#endSession(reason, { notifyGone: true });
   }
 
-  /** Where this session's frames are addressed on the relay. */
-  #route(established: EstablishedSession, burrowId: string): E2eRoute {
-    return { kind: 'connection', id: established.connectionId, burrowId };
-  }
-
   // --- Keepalives ----------------------------------------------------------
 
   /**
@@ -1252,13 +1246,12 @@ export class PocketClient {
    */
   sendKeepalive(): void {
     const established = this.#established;
-    const burrowId = this.#connectedBurrowId;
-    if (!established || burrowId === null) return;
+    if (!established) return;
     if (this.#reapedByBurrow(established)) return;
     try {
       // Path-agnostic: a keepalive off the channel refreshes the Burrow's idle
       // deadline exactly as one off the relay does.
-      this.#deliver(established, burrowId, established.session.sendKeepalive());
+      established.direct.send(established.session.sendKeepalive());
       established.lastSentAt = this.#now();
     } catch {
       // A closed socket or a poisoned session; both have their own teardown,
@@ -1339,31 +1332,23 @@ export class PocketClient {
     });
   }
 
-  /** One protocol-v1 message on the established session, chunked as it needs. */
+  /**
+   * One protocol-v1 message on the established session, chunked as it needs.
+   * **The endpoint routes every chunk**, relay or channel, so which path carries
+   * them is {@link DirectEndpoint.send}'s rule rather than this loop's.
+   */
   #sendApp(payload: unknown): void {
     const established = this.#established;
     if (!established) throw new Error('not connected to a burrow');
-    const burrowId = this.#connectedBurrowId;
-    if (burrowId === null) throw new Error('not connected to a burrow');
     if (this.#reapedByBurrow(established)) throw new Error(BURROW_SESSION_REAPED_MESSAGE);
     for (const ciphertext of established.session.sendApp(utf8Encode(JSON.stringify(payload)))) {
-      this.#deliver(established, burrowId, ciphertext);
       // A channel that refuses a chunk is burrow loss, taken synchronously: the
-      // rest of this message has no session left to belong to, and must not
-      // fall back onto the relay of one that has just been torn down.
-      if (this.#established !== established) return;
+      // rest of this message has no session left to belong to, and must reach
+      // neither path.
+      if (established.direct.disposed) return;
+      established.direct.send(ciphertext);
     }
     established.lastSentAt = this.#now();
-  }
-
-  /**
-   * One transport ciphertext on whichever path this end has switched to. Every
-   * byte of an established session goes through here, so "after the switch,
-   * nothing on the relay" is one line rather than a rule each caller keeps.
-   */
-  #deliver(established: EstablishedSession, burrowId: string, ciphertext: Uint8Array): void {
-    if (this.#direct?.send(ciphertext)) return;
-    this.#sendE2e(this.#route(established, burrowId), 'transport', ciphertext);
   }
 
   #send(frame: E2eClientFrame): void {
@@ -1453,7 +1438,7 @@ export class PocketClient {
       // carry it, and that its `ct` must decode — is the endpoint's, and it is
       // created and dropped with `#established` (`docs/specs/remote-api.md` →
       // Transport → "Direct path").
-      this.#direct?.onRelayFrame(frame.ct);
+      established.direct.onRelayFrame(frame.ct);
       return;
     }
     const key = waiterKey(frame.kind, frame.id, frame.step);
@@ -1549,8 +1534,13 @@ export class PocketClient {
     this.#stopKeepalives();
     // The peer connection is this session's: every disposal path closes it, so
     // none can outlive the session that authorized it.
-    this.#direct?.dispose();
-    this.#direct = null;
+    const direct = this.#established?.direct ?? null;
+    direct?.dispose();
+    // The endpoint's "announce only what changed" ends with the endpoint, while
+    // the subscriber outlives it and the next session's fresh endpoint announces
+    // nothing until something changes. Without this, the reason *this* session
+    // stayed relayed would sit in the indicator through the whole of the next.
+    if (direct?.relayCause) this.#onTransportChanged?.('relay', null);
     this.#connectedBurrowId = null;
     this.#established = null;
   }

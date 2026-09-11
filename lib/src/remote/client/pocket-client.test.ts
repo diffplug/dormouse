@@ -65,6 +65,7 @@ import {
   RP_ID,
   SESSION_TOKEN,
   STREAMED_CHUNK,
+  collect,
   makeE2eHarness,
   makeFetch,
   memoryKnownBurrows,
@@ -747,23 +748,11 @@ describe('the direct path, end to end', () => {
         setTimer: timers.setTimer,
         ...(options.clientHasPeer === false
           ? {}
-          : {
-              createDirectPeer: () => {
-                const peer = network.createOfferer();
-                clientPeers.push(peer);
-                return peer;
-              },
-            }),
+          : { createDirectPeer: collect(clientPeers, () => network.createOfferer()) }),
       },
       ...(options.burrowHasPeer === false
         ? {}
-        : {
-            burrowDirect: () => {
-              const peer = network.createAnswerer();
-              burrowPeers.push(peer);
-              return peer;
-            },
-          }),
+        : { burrowDirect: collect(burrowPeers, () => network.createAnswerer()) }),
     });
     await harness.connectPaired();
     return {

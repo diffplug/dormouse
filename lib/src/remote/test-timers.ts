@@ -21,30 +21,33 @@ export interface FakeTimers {
 }
 
 export function fakeTimers(): FakeTimers {
-  const armed: Array<{ run: () => void; delayMs: number; cancelled: boolean }> = [];
+  // Dropped on cancel and on fire rather than flagged, so this *is* `live`: a
+  // case that re-arms a keepalive a hundred times neither grows it without
+  // bound nor pays a filtered copy per read.
+  const live: Array<{ run: () => void; delayMs: number; cancelled: boolean }> = [];
+  const take = (index: number): (() => void) => {
+    const timer = live.splice(index, 1)[0]!;
+    timer.cancelled = true;
+    return timer.run;
+  };
   return {
     setTimer(run: () => void, delayMs: number): () => void {
       const timer = { run, delayMs, cancelled: false };
-      armed.push(timer);
+      live.push(timer);
       return () => {
-        timer.cancelled = true;
+        const index = live.indexOf(timer);
+        if (index >= 0) take(index);
       };
     },
-    get live() {
-      return armed.filter((timer) => !timer.cancelled);
-    },
+    live,
     fire(): void {
-      const live = this.live;
-      const timer = live[live.length - 1];
-      if (!timer) throw new Error('no timer is armed');
-      timer.cancelled = true;
-      timer.run();
+      if (live.length === 0) throw new Error('no timer is armed');
+      take(live.length - 1)();
     },
     fireAt(delayMs: number): void {
-      const timer = this.live.find((entry) => entry.delayMs === delayMs);
-      if (!timer) throw new Error(`no timer armed for ${delayMs}ms`);
-      timer.cancelled = true;
-      timer.run();
+      const index = live.findIndex((entry) => entry.delayMs === delayMs);
+      if (index < 0) throw new Error(`no timer armed for ${delayMs}ms`);
+      take(index)();
     },
   };
 }

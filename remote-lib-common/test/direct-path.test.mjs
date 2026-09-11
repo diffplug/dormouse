@@ -233,13 +233,10 @@ test('starts relayed in both directions', () => {
 
 test('claims the session’s one attempt, and never a second', () => {
   const cutover = new DirectCutover();
-  assert.equal(cutover.state, 'idle');
   assert.equal(cutover.begin(), true);
-  assert.equal(cutover.state, 'attempting');
   // The one-attempt-per-session gate: a second offer allocates nothing.
   assert.equal(cutover.begin(), false);
   cutover.abandon();
-  assert.equal(cutover.state, 'abandoned');
   // And an attempt that was given up cannot be restarted either.
   assert.equal(cutover.begin(), false);
 });
@@ -282,9 +279,10 @@ test('a switch onto an abandoned channel is fatal, and a switch while attempting
 test('switches each direction on its own, and only both make it direct', () => {
   const cutover = new DirectCutover();
   cutover.begin();
-  assert.equal(cutover.switchOutbound(), true);
-  // A second open must not put a second switch on the relay.
-  assert.equal(cutover.switchOutbound(), false);
+  cutover.switchOutbound();
+  // Idempotent, so a duplicate open cannot move the cutover twice.
+  cutover.switchOutbound();
+  assert.equal(cutover.outbound, 'direct');
   assert.equal(cutover.switched, true);
   // The peer is still on the relay, so the relay still carries half of it.
   assert.equal(cutover.path, 'relay');

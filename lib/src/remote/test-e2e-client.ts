@@ -156,7 +156,7 @@ export async function flushUntil<T>(get: () => T | undefined, timeoutMs = 2000):
 }
 
 /** Poll for at most `timeoutMs`, answering `undefined` if it never arrives. */
-async function pollFor<T>(get: () => T | undefined, timeoutMs: number): Promise<T | undefined> {
+export async function pollFor<T>(get: () => T | undefined, timeoutMs: number): Promise<T | undefined> {
   const start = Date.now();
   for (;;) {
     const value = get();
@@ -228,13 +228,21 @@ export async function settleUntilQuiet(read: () => number, stableRounds = 3): Pr
   throw new Error(`settleUntilQuiet: reading never went quiet after 40 settles (last ${last})`);
 }
 
-/** The Burrow's outgoing `e2e` frames for one ceremony, in order. */
+/**
+ * The Burrow's outgoing `e2e` frames for one ceremony, in order, narrowed to one
+ * `step` where a caller wants only the transport half.
+ */
 export function e2eFramesFor(
   socket: FakeSocket,
   kind: string,
   id: string,
+  step?: string,
 ): Array<Record<string, unknown>> {
-  return socket.frames('e2e').filter((frame) => frame.kind === kind && frame.id === id);
+  return socket
+    .frames('e2e')
+    .filter(
+      (frame) => frame.kind === kind && frame.id === id && (step === undefined || frame.step === step),
+    );
 }
 
 /** Deliver one relay-stamped `e2e` frame to the Burrow. */
@@ -253,8 +261,9 @@ export function sendE2eFrame(
 }
 
 /**
- * Decrypt the Burrow's most recent control message on one ceremony, waiting for
- * one to arrive.
+ * Decrypt one of the Burrow's control messages on a ceremony, waiting for it to
+ * arrive: the most recent by default, or the one at `index` where a case is
+ * reading a session's signals in order.
  *
  * The wait is the point: every step of a ceremony awaits several WebCrypto
  * calls, so a test that read the frame log after a fixed number of turns would
@@ -266,13 +275,14 @@ export async function readOutcome(
   session: NoiseTransportSession,
   kind: string,
   id: string,
+  index?: number,
 ): Promise<Record<string, unknown>> {
-  const last = await pollFor(() => {
-    const frames = e2eFramesFor(socket, kind, id).filter((frame) => frame.step === 'transport');
-    return frames[frames.length - 1];
+  const frame = await pollFor(() => {
+    const frames = e2eFramesFor(socket, kind, id, 'transport');
+    return index === undefined ? frames[frames.length - 1] : frames[index];
   }, 2000);
-  if (!last) throw new Error('the Burrow sent no outcome');
-  const receipt = session.receive(fromBase64Url(last.ct as string));
+  if (!frame) throw new Error('the Burrow sent no outcome');
+  const receipt = session.receive(fromBase64Url(frame.ct as string));
   if (receipt.kind !== 'control') {
     throw new Error(`expected a control message, got ${receipt.kind}`);
   }
@@ -438,16 +448,12 @@ export async function openDirectPath(options: {
       onViolation: () => {},
     },
   });
-  const transportFrames = () =>
-    e2eFramesFor(socket, 'connection', connectionId).filter((frame) => frame.step === 'transport');
-  let cursor = transportFrames().length;
+  let cursor = e2eFramesFor(socket, 'connection', connectionId, 'transport').length;
   const nextSignal = async (): Promise<Record<string, unknown>> => {
-    const frame = await flushUntil(() => transportFrames()[cursor]);
+    const value = await readOutcome(socket, session, 'connection', connectionId, cursor);
     cursor += 1;
-    const receipt = session.receive(fromBase64Url(frame.ct as string));
-    if (receipt.kind !== 'control') throw new Error(`expected a signal, got ${receipt.kind}`);
-    signals.push(receipt.value);
-    return receipt.value;
+    signals.push(value);
+    return value;
   };
   const sendControl = (value: Record<string, unknown>): void => {
     sendE2eFrame(socket, {

@@ -49,7 +49,7 @@ import type { BurrowEnrollment } from '../burrow/enrollment';
 import type { PendingPairing } from '../burrow/pairing-approval';
 import type { DirectPeerLike } from '../direct/direct-peer';
 import { FakeSocket } from '../test-fake-socket';
-import { createTestAuthenticator, type TestAuthenticator } from '../test-e2e-client';
+import { createTestAuthenticator, pollFor, type TestAuthenticator } from '../test-e2e-client';
 import { createTestRelay, type TestRelay } from '../test-relay';
 
 // --- Fakes ------------------------------------------------------------------
@@ -161,12 +161,20 @@ export async function waitFor(
   what = 'a condition',
   timeoutMs = 800,
 ): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    if (predicate()) return;
-    if (Date.now() >= deadline) throw new Error(`timed out waiting for ${what}`);
-    await new Promise((r) => setTimeout(r, 2));
-  }
+  const held = await pollFor(() => predicate() || undefined, timeoutMs);
+  if (!held) throw new Error(`timed out waiting for ${what}`);
+}
+
+/**
+ * A peer factory that keeps what it builds, so a case can close or inspect the
+ * far end by hand. Both ends of a session get their own array.
+ */
+export function collect<T>(into: T[], build: () => T): () => T {
+  return () => {
+    const peer = build();
+    into.push(peer);
+    return peer;
+  };
 }
 
 export const CREDENTIAL_ID = 'cred-123';

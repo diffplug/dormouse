@@ -183,7 +183,7 @@ their guard, the constants, the `DirectFrameQueue` both queues are, and the
 `lib/src/remote/direct/direct-peer.ts` (`DirectPeerLike` and the negotiation),
 `DirectEndpoint` in `lib/src/remote/direct/direct-endpoint.ts` (the whole
 direct-path policy, one per authorized session; `onRelayFrame` is both ends' only
-way in from the relay; constructed at promotion by
+way in from the relay and `send` their only way out; constructed at promotion by
 `PocketClient.#directEndpoint` in `lib/src/remote/client/pocket-client.ts` and
 `BurrowRuntime.#promoteConnection` in
 `lib/src/remote/burrow/burrow-runtime.ts`); pinned by

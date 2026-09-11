@@ -28,7 +28,12 @@ import {
 } from 'remote-lib-common';
 
 import { DirectEndpoint } from './direct-endpoint';
-import { FakeDirectNetwork, type FakeDirectNetworkOptions, type FakePeer } from './test-fake-peer';
+import {
+  FakeDirectNetwork,
+  flushMicrotasks,
+  type FakeDirectNetworkOptions,
+  type FakePeer,
+} from './test-fake-peer';
 import { fakeTimers } from '../test-timers';
 
 interface Side {
@@ -45,6 +50,8 @@ interface Side {
   readonly causes: Array<DirectRelayCause | null>;
   /** Every signal this side put on the relay. */
   readonly sent: DirectSignalV1[];
+  /** Every transport ciphertext this side put on the relay. */
+  readonly relayed: Uint8Array[];
   /** What `isCurrent()` answers; a promotion or teardown flips it. */
   live: boolean;
   /** Whether the session can still encrypt a signal. */
@@ -76,6 +83,7 @@ function pair(options: Options = {}) {
       peers,
       received: [],
       fatals: [],
+      relayed: [],
       paths: [],
       causes: [],
       sent: [],
@@ -107,6 +115,7 @@ function pair(options: Options = {}) {
         else deliver(signal);
         return true;
       },
+      sendRelay: (ciphertext) => void side.relayed.push(ciphertext),
       receive: (ciphertext) => {
         side.received.push(ciphertext);
         // Signals ride the stand-in relay here rather than a real session, so
@@ -129,9 +138,6 @@ function pair(options: Options = {}) {
   const answerer = build('answerer', answererHasPeer);
   return { fake, timers, offerer, answerer };
 }
-
-/** Let the fake network's queued microtasks run. */
-const flushMicrotasks = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 /** Offer, answer, and let the channel open at both ends. */
 async function cutover(run: ReturnType<typeof pair>): Promise<void> {
@@ -305,7 +311,8 @@ describe('DirectEndpoint', () => {
     expect(run.offerer.endpoint.path).toBe('relay');
     // Never switched, so this is an abandoned attempt rather than burrow loss.
     expect(run.offerer.fatals).toEqual([]);
-    expect(run.offerer.endpoint.send(frame(1))).toBe(false);
+    run.offerer.endpoint.send(frame(1));
+    expect(run.offerer.relayed).toEqual([frame(1)]);
   });
 
   it('ends the session when the channel dies after the switch', async () => {
@@ -533,11 +540,14 @@ describe('DirectEndpoint', () => {
   it('routes a ciphertext onto the channel only after this end has switched', async () => {
     const run = pair({ opening: 'manual' });
     await cutover(run);
-    // Nothing on the channel yet: the caller puts it on the relay.
-    expect(run.offerer.endpoint.send(frame(1))).toBe(false);
+    // Nothing on the channel yet: it goes on the relay.
+    run.offerer.endpoint.send(frame(1));
+    expect(run.offerer.relayed).toEqual([frame(1)]);
 
     run.fake.openChannels();
-    expect(run.offerer.endpoint.send(frame(2))).toBe(true);
+    run.offerer.endpoint.send(frame(2));
+    // Switched, so the channel is the only path left for it.
+    expect(run.offerer.relayed).toEqual([frame(1)]);
     await flushMicrotasks();
     expect(run.answerer.received).toEqual([frame(2)]);
   });
@@ -548,8 +558,10 @@ describe('DirectEndpoint', () => {
     // Closed under the endpoint, which a radio gap does between two sends.
     run.fake.offererChannel!.close();
 
-    expect(run.offerer.endpoint.send(frame(1))).toBe(true);
+    run.offerer.endpoint.send(frame(1));
     expect(run.offerer.fatals).toEqual(['the direct channel refused a message']);
+    // And never onto the relay of a session the refusal has just ended.
+    expect(run.offerer.relayed).toEqual([]);
   });
 
   it('disposes idempotently, closing the peer and reporting the relay', async () => {
@@ -563,9 +575,10 @@ describe('DirectEndpoint', () => {
     expect(run.offerer.endpoint.path).toBe('relay');
     expect(run.offerer.paths).toEqual(['direct', 'relay']);
     // Inert afterwards: nothing it is told does anything to a dead session, and
-    // a send is consumed rather than handed back for the relay to carry.
-    expect(run.offerer.endpoint.send(frame(1))).toBe(true);
+    // a send is dropped rather than falling back onto the relay.
+    run.offerer.endpoint.send(frame(1));
     expect(run.fake.offererChannel!.sent).toEqual([]);
+    expect(run.offerer.relayed).toEqual([]);
     run.offerer.endpoint.onSignal({ v: 1, t: 'direct-switch' });
     expect(run.offerer.fatals).toEqual([]);
   });
