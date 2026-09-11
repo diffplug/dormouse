@@ -1137,13 +1137,16 @@ const OPEN_PORT_TIMEOUT_MS: u64 = 3000;
 // pinned by `lib/src/lib/mirrored-constants.test.ts`.
 const OPEN_PORT_TIMEOUT_PER_ID_MS: u64 = 100;
 
+// Mirrors platform/types.ts; pinned by mirrored-constants.test.ts.
+const OPEN_PORT_ROUND_TRIP_MARGIN_MS: u64 = 1000;
+
 /// Budget for either port command over `count` ids, including 1 s for IPC. The sidecar runs two
 /// scans serially: the process table under `OPEN_PORT_TIMEOUT_MS`, then one
 /// socket scan under that cap plus `OPEN_PORT_TIMEOUT_PER_ID_MS` per id
 /// (`getOpenPortsForPids` in `standalone/sidecar/pty-core.js`) — so the whole
 /// Window is not held to one terminal's budget, and the reply outlasts both.
 fn open_ports_many_timeout(count: usize) -> Duration {
-    Duration::from_millis(2 * OPEN_PORT_TIMEOUT_MS + OPEN_PORT_TIMEOUT_PER_ID_MS * count as u64 + 1000)
+    Duration::from_millis(2 * OPEN_PORT_TIMEOUT_MS + OPEN_PORT_TIMEOUT_PER_ID_MS * count as u64 + OPEN_PORT_ROUND_TRIP_MARGIN_MS)
 }
 
 #[tauri::command(async)]
@@ -3821,7 +3824,7 @@ mod tests {
         resolve_dor_cli_paths, resolve_sidecar_path, session_file_name, state_root_from,
         strip_windows_verbatim_prefix, sweep_orphan_session_temps, temp_write_path,
         write_notepad_archive_to, write_session_to, NOTEPAD_ARCHIVE_FILE,
-        OPEN_PORT_TIMEOUT_MS, OPEN_PORT_TIMEOUT_PER_ID_MS, SESSION_TEMP_SUFFIX,
+        OPEN_PORT_TIMEOUT_MS, OPEN_PORT_TIMEOUT_PER_ID_MS, OPEN_PORT_ROUND_TRIP_MARGIN_MS, SESSION_TEMP_SUFFIX,
     };
     use super::guard;
     use std::collections::HashSet;
@@ -3837,7 +3840,7 @@ mod tests {
     fn open_ports_many_timeout_scales_with_the_batch() {
         let one = open_ports_many_timeout(1).as_millis() as u64;
         let twenty = open_ports_many_timeout(20).as_millis() as u64;
-        assert_eq!(one, 2 * OPEN_PORT_TIMEOUT_MS + OPEN_PORT_TIMEOUT_PER_ID_MS + 1000);
+        assert_eq!(one, 2 * OPEN_PORT_TIMEOUT_MS + OPEN_PORT_TIMEOUT_PER_ID_MS + OPEN_PORT_ROUND_TRIP_MARGIN_MS);
         assert_eq!(twenty - one, 19 * OPEN_PORT_TIMEOUT_PER_ID_MS);
     }
 
