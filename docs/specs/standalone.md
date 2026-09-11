@@ -598,6 +598,8 @@ below reads that record rather than inferring itself from the suppression map.
   since the source is still showing them. A quit or a close in the gap would
   otherwise persist the same Workspace in two windows, or kill it under the
   source.
+- **Must await `adopt_done` before installing a torn-out Window; refusal releases
+  its resumed Sessions and notes and boots fresh.**
 - **A refused `adopt_done` unwinds the mount.** The `ARRIVAL_MAX` watchdog has
   already handed the shells back and the source kept the Workspace, so the
   target releases its Sessions (never kills them), drops the notes, and closes
