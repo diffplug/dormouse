@@ -1490,7 +1490,7 @@ test('Windows port subprocesses share the socket budget, including netstat fallb
       return JSON.stringify([{ ProcessId: 4242, ParentProcessId: 1 }]);
     }
     if (script.includes('Win32_Process')) {
-      now += 500;
+      now += options.timeout;
       return JSON.stringify([{ ProcessId: 4242, Name: 'node.exe' }]);
     }
     if (script.includes('Get-NetTCPConnection')) {
@@ -1498,12 +1498,12 @@ test('Windows port subprocesses share the socket budget, including netstat fallb
       throw new Error('cmdlet failed');
     }
     assert.equal(cmd, 'netstat');
-    now += options.timeout;
+    now += 500;
     return '  TCP    0.0.0.0:3000   0.0.0.0:0   LISTENING   4242\n';
   };
   const result = getOpenPortsForPids([4242], { platform: 'win32', execFileSync, now: () => now });
   const budget = openPortScanTimeoutMs(1);
-  assert.deepEqual(timeouts, [OPEN_PORT_TIMEOUT_MS, budget, budget - 500, budget - 1500]);
+  assert.deepEqual(timeouts, [OPEN_PORT_TIMEOUT_MS, budget, budget - 1000, budget - 1500]);
   assert.equal(now, OPEN_PORT_TIMEOUT_MS + budget);
   assert.equal(result.get(4242)[0].processName, 'node.exe');
 });
@@ -1520,7 +1520,26 @@ test('Windows does not start netstat after the socket deadline expires', () => {
   assert.deepEqual(getListeningPortsForPids([4242], {
     platform: 'win32', execFileSync, now: () => now, scanTimeoutMs: 3100,
   }), []);
-  assert.deepEqual(commands, ['powershell.exe', 'powershell.exe']);
+  assert.deepEqual(commands, ['powershell.exe']);
+  assert.equal(now, 3100);
+});
+
+test('a slow optional Windows name lookup cannot hide already enumerated ports', () => {
+  let now = 0;
+  const execFileSync = (cmd, args, options) => {
+    if (args.at(-1).includes('Get-NetTCPConnection')) {
+      now += 10;
+      return JSON.stringify([{ LocalAddress: '0.0.0.0', LocalPort: 3000, OwningProcess: 4242 }]);
+    }
+    assert.ok(args.at(-1).includes('Win32_Process'));
+    assert.equal(options.timeout, 3090);
+    now += options.timeout;
+    throw new Error('WMI timed out');
+  };
+  const ports = getListeningPortsForPids([4242], {
+    platform: 'win32', execFileSync, now: () => now, scanTimeoutMs: 3100,
+  });
+  assert.deepEqual(ports.map(({ port, processName }) => ({ port, processName })), [{ port: 3000, processName: undefined }]);
   assert.equal(now, 3100);
 });
 
