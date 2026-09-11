@@ -502,6 +502,31 @@ fn send_window_labels(app: &AppHandle) {
 struct QuitState {
     machine: Mutex<QuitMachine>,
     close: Mutex<CloseMachine>,
+    cleanup: Mutex<CleanupGate>,
+}
+
+/// An approved quit waits for destroyed windows to journal their hand-backs.
+#[derive(Default)]
+struct CleanupGate {
+    pending: usize,
+    exit_requested: bool,
+}
+
+impl CleanupGate {
+    fn begin(&mut self) { self.pending += 1; }
+    fn request_exit(&mut self) -> bool {
+        if self.pending == 0 { return true; }
+        self.exit_requested = true;
+        false
+    }
+    fn finish(&mut self) -> bool {
+        self.pending -= 1;
+        self.pending == 0 && std::mem::take(&mut self.exit_requested)
+    }
+}
+
+fn exit_after_cleanup(app: &AppHandle) -> bool {
+    app.try_state::<QuitState>().is_none_or(|state| guard(&state.cleanup).request_exit())
 }
 
 // Phase 1: no ack within this window ⇒ a webview listener is dead — exit.
@@ -568,6 +593,7 @@ fn apply_quit_actions(app: &AppHandle, actions: Vec<QuitAction>) {
                 }
             }
             QuitAction::Exit => {
+                if !exit_after_cleanup(app) { continue; }
                 if let Some(state) = app.try_state::<QuitState>() {
                     guard(&state.machine).approved = true;
                 }
@@ -3898,41 +3924,41 @@ pub fn run() {
                         request_quit(app);
                     }
                 }
-                // The window is gone. Everything keyed by its label is settled
-                // here, and only here: this is the first moment Tauri has taken
-                // it out of `webview_windows()`.
+                // The window is gone: clear its label-keyed state here, after
+                // Tauri removes it from `webview_windows()`. Journal hand-backs
+                // run off-thread behind the approved-exit gate.
                 WindowEvent::Destroyed => {
                     let label = window.label().to_string();
-                    let cleanup_app = app.clone();
-                    let cleanup_label = label.clone();
-                    tauri::async_runtime::spawn_blocking(move || {
-                        let app = &cleanup_app;
-                        let label = cleanup_label;
-                        if let Some(state) = app.try_state::<WindowState>() {
-                            // Shells it still owned belong to nobody now, and
-                            // unowned output routes nowhere.
-                            let (lost, orphaned) = state.drop_window(&label);
-                            // The webview is gone, so no save can arrive under this
-                            // label again and the refusal can go with it.
-                            guard(&state.closing).remove(&label);
-                            reap_orphaned_ptys(app, &label, orphaned);
-                            // A Workspace on its way here can never arrive: its
-                            // source still shows it, still holds its Sessions, and
-                            // has released nothing (§Arrival queue).
-                            for arrival in lost {
-                                hand_back_arrival(
-                                    app,
-                                    &state,
-                                    &arrival,
-                                    "the target window closed mid-arrival",
-                                );
-                            }
-                            let changed = workspaces::forget_window(&mut guard(&state.registry), &label);
-                            if changed {
-                                broadcast_registry(app, &state);
-                            }
+                    let lost = if let Some(state) = app.try_state::<WindowState>() {
+                        // Drop label-keyed ownership synchronously; only the
+                        // returned arrivals need the blocking journal worker.
+                        let (lost, orphaned) = state.drop_window(&label);
+                        guard(&state.closing).remove(&label);
+                        reap_orphaned_ptys(app, &label, orphaned);
+                        let changed = workspaces::forget_window(&mut guard(&state.registry), &label);
+                        if changed { broadcast_registry(app, &state); }
+                        lost
+                    } else { Vec::new() };
+                    if !lost.is_empty() {
+                        if let Some(state) = app.try_state::<QuitState>() {
+                            guard(&state.cleanup).begin();
                         }
-                    });
+                        let cleanup_app = app.clone();
+                        tauri::async_runtime::spawn_blocking(move || {
+                            if let Some(state) = cleanup_app.try_state::<WindowState>() {
+                                for arrival in lost {
+                                    hand_back_arrival(&cleanup_app, &state, &arrival,
+                                        "the target window closed mid-arrival");
+                                }
+                            }
+                            let finish_app = cleanup_app.clone();
+                            let _ = cleanup_app.run_on_main_thread(move || {
+                                let exit = finish_app.try_state::<QuitState>()
+                                    .is_some_and(|state| guard(&state.cleanup).finish());
+                                if exit { apply_quit_actions(&finish_app, vec![QuitAction::Exit]); }
+                            });
+                        });
+                    }
                     if let Some(state) = app.try_state::<GeometryState>() {
                         state.forget(&label);
                     }
@@ -4123,6 +4149,8 @@ pub fn run() {
                 if !quit_approved(app) {
                     api.prevent_exit();
                     request_quit(app);
+                } else if !exit_after_cleanup(app) {
+                    api.prevent_exit();
                 }
             }
             // Harmless after teardown: the PTY map is already empty, so the
@@ -4367,6 +4395,20 @@ mod tests {
         assert!(read_session_from(dir.path(), "ws-2").unwrap().is_none());
         assert_eq!(snapshot_ids(&read_snapshot(dir.path(), "main").unwrap()), vec!["workspace-8"]);
         assert!(!arrivals_path(dir.path()).exists());
+    }
+
+    #[test]
+    fn quit_waits_for_every_destroyed_window_handback() {
+        let mut gate = super::CleanupGate::default();
+        gate.begin();
+        gate.begin();
+        assert!(!gate.request_exit());
+        assert!(!gate.finish());
+        assert!(!gate.request_exit());
+        assert!(gate.finish());
+        assert!(gate.request_exit());
+        gate.begin();
+        assert!(!gate.finish()); // ordinary close does not request a quit
     }
 
     #[test]
