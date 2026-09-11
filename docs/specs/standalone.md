@@ -377,7 +377,8 @@ Source of truth: `route` in `standalone/src-tauri/src/routing.rs`,
 | `pty:data` | `data.id` | its owner; the source until the id's mark passes, then dropped until its replay, its bytes being in it |
 | `terminal:semanticEvents` | `data.id` | its owner; the source until the id's mark passes, then dropped until its replay — the window receiving the replay re-derives them from it, feeding both pane state and its `AlertManager` (rationale) |
 | `terminal:protocolEvents` | `data.id` | its owner; the source until the id's mark passes, then **held** and delivered, in order, behind the replay, which rebuilds none of them; at most `HELD_EVENTS_MAX` (256) per id, the oldest dropped past it (`held_events_come_back_in_order_and_bounded`) |
-| `pty:exit`, `pty:replay` | `data.id` | its owner, never suppressed |
+| `pty:exit` | `data.id` | its owner, never suppressed |
+| `pty:replay` | `data.forWindow`, then `data.id` | the requesting window, including exited buffers; without an address, its owner; never suppressed |
 | `pty:marked` | `data.id` | the source still consuming the id, which then falls silent until its replay; otherwise its owner |
 | `pty:list` | `data.forWindow` | the window that asked |
 | `alert:*` carrying `data.id` | `data.id` | its owner |
@@ -632,7 +633,9 @@ below reads that record rather than inferring itself from the suppression map.
   **Must record source cuts at `pty:marked`, retaining them through target
   replay and natural PTY exit until settlement, and carry replay ids in the failure event**; content
   submission and the source invoke reply may both still be pending. **Must discard
-  cuts on explicit kill and never recreate an exited PTY’s owner on hand-back.** An id the
+  cuts on explicit kill and never recreate an exited PTY’s owner on hand-back.**
+  **Must apply a handed-back PTY’s exit status after its replay**, leaving its
+  existing pane dead with no running command. An id the
   sidecar never stamped goes straight back: a whole-buffer
   replay would paint it twice (`a_hand_back_replays_only_the_marked_ids`;
   rationale).

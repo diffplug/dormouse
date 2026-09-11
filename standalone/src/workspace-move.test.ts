@@ -111,6 +111,7 @@ function payload(overrides: Partial<WorkspaceTransferPayload> = {}): WorkspaceTr
 let arrivals: WorkspaceTransferPayload[] = [];
 
 /** Push one `pty:replay` at whatever this window's adapter has subscribed. */
+let deliverList: (detail: { ptys: PtyInfo[]; requestId?: string }) => void = () => {};
 let deliverReplay: (detail: { id: string; data: string; requestId?: string }) => void = () => {};
 
 /** A prepared transfer whose commit is observable. */
@@ -142,6 +143,7 @@ function fakePlatform(
   vi.spyOn(platform, "offPtyReplay").mockImplementation(() => { replayHandler = null; });
   // What Rust routes to this window unasked: a hand-back's since-mark replay.
   deliverReplay = (detail) => replayHandler?.(detail);
+  deliverList = (detail) => listHandler?.(detail);
   let markedHandler: ((detail: { id: string; mark: number; requestId?: string }) => void) | null = null;
   (platform as unknown as { onPtyMarked: unknown }).onPtyMarked = (handler: typeof markedHandler) => {
     markedHandler = handler;
@@ -309,6 +311,25 @@ describe("the source half", () => {
     expect(platform.offPtyReplay).toHaveBeenCalled();
     deliverReplay({ id: "pane-a", data: "late", requestId: `handback-${WORKSPACE_ID}` });
     expect(mocks.writes).toEqual(["since-the-mark"]);
+  });
+
+  it("marks a handed-back exited PTY dead after replaying its final bytes", async () => {
+    const platform = fakePlatform();
+    initWorkspaceMoves(platform);
+    const entry = getOrCreateTerminal("pane-a");
+    registerWallHandle(stubWallHandle(WORKSPACE_ID, { prepareWorkspaceTransfer: async () => prepared() }));
+    const transfer = transferWorkspaceTo(WORKSPACE_ID, "ws-2", { x: 0, y: 0 });
+    await vi.waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("transfer_workspace_content", expect.anything()));
+    await emit("dormouse://workspace-arrival-failed", { workspaceId: WORKSPACE_ID, replayIds: ["pane-a"] });
+    const requestId = `handback-${WORKSPACE_ID}`;
+    deliverList({ ptys: [{ id: "pane-a", alive: false, exitCode: 7 }], requestId });
+    mocks.writes.length = 0;
+    deliverReplay({ id: "pane-a", data: "final-output", requestId });
+    await transfer;
+    expect(entry.exited).toBe(true);
+    expect(mocks.writes[0]).toContain("final-output");
+    expect(mocks.writes[mocks.writes.length - 1]).toContain("Process exited with code 7");
+    expect(platform.offPtyList).toHaveBeenCalled();
   });
 
   it("receives recovery replay when hand-back precedes the source invoke reply", async () => {
