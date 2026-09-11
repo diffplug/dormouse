@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { closeWorkspaceWithSurfaces, LAST_WORKSPACE_REFUSAL, requestWorkspaceClose } from './workspace-lifecycle';
 import { registerWallHandle, resetWallHandles, stubWallHandle, type WallHandle } from './wall-handles';
-import { getWorkspaceUiSnapshot, resetWorkspaceUi, setRenamingWorkspace } from '../../lib/workspace-ui-store';
+import { getWorkspaceUiSnapshot, resetWorkspaceUi, setPendingWorkspaceClose, setRenamingWorkspace } from '../../lib/workspace-ui-store';
 import {
   closeWorkspace,
   createWorkspace,
@@ -98,9 +98,20 @@ describe('closeWorkspaceWithSurfaces', () => {
     // The rename editor is open on the Workspace being closed: nothing unmounts
     // it through `blur`, so the verb itself has to clear it.
     setRenamingWorkspace('ws-2');
+    setPendingWorkspaceClose({ id: 'ws-2', char: 'x' });
 
     expect(await closeWorkspaceWithSurfaces('ws-2')).toBeNull();
     expect(getWorkspaceUiSnapshot().renamingId).toBeNull();
     expect(getWorkspaceUiSnapshot().pendingClose).toBeNull();
   });
+});
+
+it('preserves another Workspace’s rename and close confirmation when closing a sibling', async () => {
+  const [first] = ids();
+  createWorkspace({ id: 'ws-2' });
+  setRenamingWorkspace(first);
+  setPendingWorkspaceClose({ id: first, char: 'x' });
+  const before = getWorkspaceUiSnapshot();
+  expect(await closeWorkspaceWithSurfaces('ws-2')).toBeNull();
+  expect(getWorkspaceUiSnapshot()).toBe(before);
 });
