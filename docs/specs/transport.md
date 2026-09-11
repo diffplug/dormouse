@@ -143,8 +143,11 @@ and it turns on three rules:
   it. The target writes the serialized buffer, then the replay of everything
   after the mark, so the whole transcript crosses, not the sidecar's bounded
   tail, and no byte is painted twice or lost. An id the host never marked is
-  serialized anyway and replayed whole. Suppression fails open after a bound
-  rather than silencing a pane forever (rationale).
+  serialized anyway and replayed whole. A hand-back is the same split kept: the
+  source still holds the bytes before the mark and receives the host's replay of
+  everything after it into the same xterm (`docs/specs/standalone.md` →
+  "Arrival queue"). Suppression fails open after a bound rather than silencing
+  a pane forever (rationale).
 - **Ask for exactly the moving ids, at their marks.** `pty:requestInit` names
   them with their marks, and `list(ids, …, marks)` replays `outputSince(mark)`
   for a marked id and the whole buffer otherwise; ids follow the same **omitted

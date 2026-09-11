@@ -367,7 +367,8 @@ Source of truth: `route` in `standalone/src-tauri/src/routing.rs`,
 | Sidecar event | Key | Goes to |
 |---|---|---|
 | `pty:data` | `data.id` | its owner; the source until the id's mark passes, then dropped until its replay, its bytes being in it |
-| `terminal:semanticEvents`, `terminal:protocolEvents` | `data.id` | its owner; **held** while the id is mid-transfer and delivered, in order, behind the replay (`held_events_come_back_in_order_and_bounded`) — no replay carries them |
+| `terminal:protocolEvents` | `data.id` | its owner; the source until the id's mark passes, then **held** and delivered, in order, behind the replay (`held_events_come_back_in_order_and_bounded`) — no replay carries them |
+| `terminal:semanticEvents` | `data.id` | its owner; the source until the id's mark passes, then dropped until its replay — the window receiving the replay re-derives them from it |
 | `pty:exit`, `pty:replay` | `data.id` | its owner, never suppressed |
 | `pty:marked` | `data.id` | the source still consuming the id, which then falls silent until its replay; otherwise its owner |
 | `pty:list` | `data.forWindow` | the window that asked |
@@ -585,6 +586,16 @@ below reads that record rather than inferring itself from the suppression map.
   source unsuppressed, drop the record, and emit `workspace-arrival-failed`; the
   source clears **transferring** and the Workspace is simply still there. With
   both ends gone the shells are reaped rather than left owned by a dead label.
+- **A hand-back replays what the marked ids missed.** From an id's mark to the
+  hand-back every byte went to the target, or nowhere, so `hand_back_arrival`
+  returns each id the content marked to the source *suppressed* and asks the
+  sidecar for `outputSince(mark)` scoped to the source (`requestId`
+  `handback-<workspaceId>`); that replay lifts the suppression and lands in the
+  existing xterms (`acceptHandBackReplay`), the held protocol events behind it.
+  An id without a mark — no content yet, or one the sidecar never stamped —
+  missed nothing its source does not hold and goes straight back: a whole-buffer
+  replay would paint it twice (`a_hand_back_replays_only_the_marked_ids`;
+  rationale).
 - **`planArrival` never throws into `bootstrap()`.** A refused sole arrival on
   the boot path renders a fresh one-pane Workspace, never a blank window.
 - **`take_arrivals` does not consume.** The record settles at `adopt_done`, so a

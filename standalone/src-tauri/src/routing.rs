@@ -116,9 +116,25 @@ pub fn route<'a>(event: &str, data: &'a JsonValue, view: &RouteView<'a>) -> Rout
             }
             owner(view.owners, id)
         }
-        // Derived once at the sidecar's parse site and carried by no replay, so
-        // a chunk's events outlive the chunk's drop.
-        "terminal:semanticEvents" | "terminal:protocolEvents" => {
+        // Derived once at the sidecar's parse site. A semantic event (CWD,
+        // prompt, title) is re-derived from the replay by whichever window
+        // receives it, so it goes with its chunk: to the source until the mark,
+        // dropped while suppressed.
+        "terminal:semanticEvents" => {
+            let Some(id) = str_field(data, "id") else {
+                return Route::Broadcast;
+            };
+            if let Some(source) = view.marking.get(id) {
+                return Route::EmitTo(source.as_str());
+            }
+            if view.awaiting_replay.contains_key(id) {
+                return Route::Drop;
+            }
+            owner(view.owners, id)
+        }
+        // A protocol event (a notification, a progress bar) is carried by no
+        // replay, so it outlives its chunk's drop: held for the id's next owner.
+        "terminal:protocolEvents" => {
             let Some(id) = str_field(data, "id") else {
                 return Route::Broadcast;
             };
@@ -351,6 +367,19 @@ pub fn arrival_marks(arrival: &Arrival) -> JsonValue {
         }
     }
     JsonValue::Object(marks)
+}
+
+/// What a hand-back does with an arrival's ids, split by whether `marks`
+/// (`arrival_marks`) carries one: the marked ids go back to the source
+/// suppressed, behind a replay since their marks, and the rest go straight
+/// back — the source still holds their whole buffer, so a replay would paint
+/// it twice.
+pub fn hand_back_ids(arrival: &Arrival, marks: &JsonValue) -> (Vec<String>, Vec<String>) {
+    arrival
+        .terminal_ids
+        .iter()
+        .cloned()
+        .partition(|id| marks.get(id).is_some())
 }
 
 /// Every id an in-flight arrival claims: the ids the sweep may not release and
@@ -741,13 +770,13 @@ mod tests {
     #[test]
     fn held_events_come_back_in_order_and_bounded() {
         let mut held = HashMap::new();
-        hold_event(&mut held, "a", "terminal:semanticEvents", json!({"n":1}));
+        hold_event(&mut held, "a", "terminal:protocolEvents", json!({"n":1}));
         hold_event(&mut held, "a", "terminal:protocolEvents", json!({"n":2}));
-        hold_event(&mut held, "b", "terminal:semanticEvents", json!({"n":3}));
+        hold_event(&mut held, "b", "terminal:protocolEvents", json!({"n":3}));
         assert_eq!(
             take_held(&mut held, "a"),
             vec![
-                ("terminal:semanticEvents".to_string(), json!({"n":1})),
+                ("terminal:protocolEvents".to_string(), json!({"n":1})),
                 ("terminal:protocolEvents".to_string(), json!({"n":2})),
             ]
         );
@@ -755,7 +784,7 @@ mod tests {
         assert_eq!(held.len(), 1);
 
         for n in 0..(HELD_EVENTS_MAX + 5) {
-            hold_event(&mut held, "c", "terminal:semanticEvents", json!({"n":n}));
+            hold_event(&mut held, "c", "terminal:protocolEvents", json!({"n":n}));
         }
         let queue = take_held(&mut held, "c");
         assert_eq!(queue.len(), HELD_EVENTS_MAX);
@@ -793,11 +822,17 @@ mod tests {
             route("terminal:semanticEvents", &json!({"id":"a"}), &marking_view),
             Route::EmitTo("main")
         );
+        assert_eq!(
+            route("terminal:protocolEvents", &json!({"id":"a"}), &marking_view),
+            Route::EmitTo("main")
+        );
         assert_eq!(route("pty:marked", &json!({"id":"a"}), &marking_view), Route::EmitTo("main"));
-        // A chunk's derived events are in no replay: held, not dropped.
+        // A chunk's semantic events are re-derived from the replay by whoever
+        // receives it: dropped with the chunk. Its protocol events are in no
+        // replay: held, not dropped.
         assert_eq!(
             route("terminal:semanticEvents", &json!({"id":"a"}), &suppressed),
-            Route::Hold
+            Route::Drop
         );
         assert_eq!(
             route("terminal:protocolEvents", &json!({"id":"a"}), &suppressed),
@@ -925,6 +960,29 @@ mod tests {
         assert_eq!(payloads[0]["terminals"]["t1"]["mark"], 42);
         assert_eq!(payloads[0]["pins"], json!([]));
         assert_eq!(arrival_marks(&arrivals[0]), json!({ "t1": 42 }));
+    }
+
+    /// A hand-back replays exactly the marked ids since their marks; an id the
+    /// content did not mark, or an arrival with no content yet, goes straight
+    /// back — its source still holds the whole buffer.
+    #[test]
+    fn a_hand_back_replays_only_the_marked_ids() {
+        let mut pending = arrival("ws-a", "main", "ws-2", &["t1", "t2"]);
+        pending.content = None;
+        let marks = arrival_marks(&pending);
+        assert_eq!(
+            hand_back_ids(&pending, &marks),
+            (vec![], vec!["t1".to_string(), "t2".to_string()])
+        );
+
+        pending.content = Some(json!({
+            "terminals": { "t1": { "serialized": "", "mark": 42 }, "t2": { "serialized": "" } },
+        }));
+        let marks = arrival_marks(&pending);
+        assert_eq!(
+            hand_back_ids(&pending, &marks),
+            (vec!["t1".to_string()], vec!["t2".to_string()])
+        );
     }
 
     #[test]

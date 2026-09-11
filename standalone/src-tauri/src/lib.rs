@@ -87,8 +87,8 @@ struct RoutingState {
     /// dor requestId -> the window handling it, so a cancel reaches the window
     /// holding the subscription, watch or completion claim it releases.
     dor_targets: HashMap<String, String>,
-    /// Derived terminal events that arrived while their id was suppressed,
-    /// delivered to the new owner behind its replay (`routing::Route::Hold`).
+    /// Protocol events that arrived while their id was suppressed, delivered
+    /// to the new owner behind its replay (`routing::Route::Hold`).
     held: HashMap<String, Vec<routing::HeldEvent>>,
     /// Ids between a transfer's invoke and the sidecar's `marked` line, each
     /// with the source still consuming (`routing::RouteView::marking`).
@@ -180,8 +180,8 @@ impl WindowState {
                 routing.awaiting_replay.insert(id.clone(), now);
             } else {
                 routing.awaiting_replay.remove(id);
-                // A hand-back: what was held for the target belongs to the
-                // source again, which saw the bytes live and needs no events.
+                // An unmarked hand-back: the source saw every byte live, so
+                // what was held for the target has nothing to follow.
                 routing.held.remove(id);
                 routing.marking.remove(id);
             }
@@ -2582,10 +2582,19 @@ fn spawn_arrival_watchdog(app: AppHandle, arrival: &routing::Arrival) {
     });
 }
 
-/// One arrival will never be adopted: give its shells back to the source,
-/// unsuppressed, and tell the source so it clears the Workspace's transferring
-/// mark. **The Workspace simply stays where it is** — nothing was released, so
-/// there is nothing to put back.
+/// One arrival will never be adopted: give its shells back to the source and
+/// tell the source so it clears the Workspace's transferring mark. **The
+/// Workspace simply stays where it is** — nothing was released, so there is
+/// nothing to put back.
+///
+/// **A marked id goes back suppressed, behind a replay of what it missed.**
+/// From its mark to now every byte went to the target, or nowhere, and the
+/// source's xterm stands at the mark; so the sidecar is asked for
+/// `outputSince(mark)` scoped to the source, and that replay lifts the
+/// suppression on its way out (`dispatch_sidecar_event`), the held protocol
+/// events behind it. An id with no mark — no content yet, or one the sidecar
+/// never stamped — missed nothing the source does not hold, and a whole-buffer
+/// replay would paint its transcript twice: it goes straight back.
 ///
 /// The record must already be out of the queue; the caller took it.
 fn hand_back_arrival(
@@ -2606,12 +2615,32 @@ fn hand_back_arrival(
         }
     }
     if app.get_webview_window(&arrival.from).is_some() {
-        windows.reassign(&arrival.terminal_ids, &arrival.from, false);
+        let marks = routing::arrival_marks(arrival);
+        let (marked, unmarked) = routing::hand_back_ids(arrival, &marks);
+        windows.reassign(&unmarked, &arrival.from, false);
+        windows.reassign(&marked, &arrival.from, true);
+        // Told before the replay is asked for, so the source is listening for
+        // it (`acceptHandBackReplay` in `standalone/src/workspace-move.ts`).
         let _ = app.emit_to(
             arrival.from.as_str(),
             "dormouse://workspace-arrival-failed",
             serde_json::json!({ "workspaceId": arrival.workspace_id, "reason": reason }),
         );
+        if marked.is_empty() {
+            return;
+        }
+        if let Some(sidecar) = app.try_state::<SidecarState>() {
+            let msg = serde_json::json!({
+                "event": "pty:requestInit",
+                "data": {
+                    "forWindow": arrival.from,
+                    "ids": marked,
+                    "requestId": format!("handback-{}", arrival.workspace_id),
+                    "marks": marks,
+                },
+            });
+            send_to_sidecar(&sidecar, msg.to_string());
+        }
         return;
     }
     // Both ends are gone, so these shells belong to no window and nothing would
@@ -2699,17 +2728,14 @@ fn transfer_workspace_content(
                 height: g.get("height").and_then(JsonValue::as_f64).unwrap_or(0.0),
             });
             if let Err(err) = build_window(&app, &to, geometry) {
-                // Nothing will ever drain the queue, and the PTYs would stay
-                // ownerless. The source has released nothing, so the ids go
-                // back in silence — no `arrival-failed`, which would clear a
-                // transferring mark the source still holds and expects.
+                // Nothing will ever drain the queue, and the source has
+                // already marked the Workspace transferring — `handOff` set
+                // it when the invoke returned. So the ids go back *and* the
+                // source is told: `arrival-failed` is what clears that mark.
                 if let Some(arrival) =
                     routing::take_arrival(&mut guard(&windows.arrivals), &workspace_id, &to)
                 {
-                    windows.reassign(&arrival.terminal_ids, &arrival.from, false);
-                    if let Ok(dir) = sessions_dir(&app) {
-                        let _ = unstage_arrival_on_disk(&dir, &to, &arrival.workspace_id);
-                    }
+                    hand_back_arrival(&app, &windows, &arrival, "the new window could not be built");
                 }
                 return Err(err);
             }

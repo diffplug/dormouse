@@ -70,7 +70,7 @@ import {
   resetWindowSessionAggregator,
 } from "dormouse-lib/lib/window-session-aggregator";
 import { setPlatform } from "dormouse-lib/lib/platform";
-import { disposeAllSessions } from "dormouse-lib/lib/terminal-registry";
+import { disposeAllSessions, getOrCreateTerminal } from "dormouse-lib/lib/terminal-registry";
 import { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
 
 const WORKSPACE_ID = "ws-moving";
@@ -109,6 +109,9 @@ function payload(overrides: Partial<WorkspaceTransferPayload> = {}): WorkspaceTr
 /** Rust's arrival table: what is in flight into this window, keyed by Workspace. */
 let arrivals: WorkspaceTransferPayload[] = [];
 
+/** Push one `pty:replay` at whatever this window's adapter has subscribed. */
+let deliverReplay: (detail: { id: string; data: string; requestId?: string }) => void = () => {};
+
 /** A prepared transfer whose commit is observable. */
 function prepared(
   onCommit: () => void = () => {},
@@ -125,7 +128,10 @@ function prepared(
  * The adapter's `pty:list` / `pty:replay` answer only once something asks —
  * which is the property the `adopt_ready` hop exists to guarantee.
  */
-function fakePlatform(order: string[] = [], opts: { answer?: boolean; marks?: Record<string, number> } = {}): PlatformAdapter {
+function fakePlatform(
+  order: string[] = [],
+  opts: { answer?: boolean; marks?: Record<string, number>; stamp?: boolean } = {},
+): PlatformAdapter {
   const platform = new FakePtyAdapter();
   let listHandler: ((detail: { ptys: PtyInfo[]; requestId?: string }) => void) | null = null;
   let replayHandler: ((detail: { id: string; data: string; requestId?: string }) => void) | null = null;
@@ -133,6 +139,8 @@ function fakePlatform(order: string[] = [], opts: { answer?: boolean; marks?: Re
   vi.spyOn(platform, "offPtyList").mockImplementation(() => { listHandler = null; });
   vi.spyOn(platform, "onPtyReplay").mockImplementation((handler) => { replayHandler = handler; });
   vi.spyOn(platform, "offPtyReplay").mockImplementation(() => { replayHandler = null; });
+  // What Rust routes to this window unasked: a hand-back's since-mark replay.
+  deliverReplay = (detail) => replayHandler?.(detail);
   let markedHandler: ((detail: { id: string; mark: number; requestId?: string }) => void) | null = null;
   (platform as unknown as { onPtyMarked: unknown }).onPtyMarked = (handler: typeof markedHandler) => {
     markedHandler = handler;
@@ -156,11 +164,11 @@ function fakePlatform(order: string[] = [], opts: { answer?: boolean; marks?: Re
     if (cmd === "take_arrivals") return arrivals.map((arrival) => ({ ...arrival }));
     if (cmd === "transfer_workspace" || cmd === "open_workspace_window") {
       // The host stamps each id's mark in the stream, behind every byte the
-      // source was sent; the source serializes at that line.
-      const ids = (args as { payload: { terminalIds: string[] } }).payload.terminalIds;
-      setTimeout(() => {
-        for (const id of ids) markedHandler?.({ id, mark: opts.marks?.[id] ?? 0, requestId: `mark-${workspaceId}` });
-      }, 0);
+      // source was sent; the source serializes at that line. Stamped *before*
+      // the invoke resolves, as Rust does inside `begin_arrival`: a source that
+      // only listens once the invoke is back misses every one of them.
+      const ids = opts.stamp === false ? [] : (args as { payload: { terminalIds: string[] } }).payload.terminalIds;
+      for (const id of ids) markedHandler?.({ id, mark: opts.marks?.[id] ?? 0, requestId: `mark-${workspaceId}` });
     }
     if (cmd === "adopt_done" || cmd === "adopt_failed") { settle(); return undefined; }
     if (cmd === "adopt_ready") {
@@ -272,6 +280,66 @@ describe("the source half", () => {
 
     expect(committed).not.toHaveBeenCalled();
     expect(getWorkspacesSnapshot().workspaces.map((w) => w.id)).toContain(WORKSPACE_ID);
+  });
+
+  it("writes a hand-back's since-mark replay into the xterms that never left", async () => {
+    // Between the mark and the hand-back every byte went to the target, or
+    // nowhere. Rust replays that slice to this window; it lands in the existing
+    // instances, and no Session is restarted or killed for it.
+    const platform = fakePlatform([], { marks: { "pane-a": 42 } });
+    const killed = vi.spyOn(platform, "killPty");
+    initWorkspaceMoves(platform);
+    getOrCreateTerminal("pane-a");
+    registerWallHandle(stubWallHandle(WORKSPACE_ID, {
+      prepareWorkspaceTransfer: async () => prepared(),
+    }));
+    createWorkspace({ id: WORKSPACE_ID, name: "Deploys" });
+    await transferWorkspaceTo(WORKSPACE_ID, "ws-2", { x: 10, y: 4 });
+    mocks.writes.length = 0;
+
+    await emit("dormouse://workspace-arrival-failed", { workspaceId: WORKSPACE_ID, reason: "wedged" });
+    // Another collection's replay is not this one's.
+    deliverReplay({ id: "pane-a", data: "not-mine", requestId: "boot-1" });
+    deliverReplay({ id: "pane-a", data: "since-the-mark", requestId: `handback-${WORKSPACE_ID}` });
+
+    expect(mocks.writes).toEqual(["since-the-mark"]);
+    expect(killed).not.toHaveBeenCalled();
+    // The last id lets go of the adapter.
+    expect(platform.offPtyReplay).toHaveBeenCalled();
+    deliverReplay({ id: "pane-a", data: "late", requestId: `handback-${WORKSPACE_ID}` });
+    expect(mocks.writes).toEqual(["since-the-mark"]);
+  });
+
+  it("accepts no hand-back replay for an id the host never marked", async () => {
+    // An unmarked id was serialized whole and its xterm still holds every
+    // byte: Rust asks the sidecar for nothing, and a whole-buffer replay
+    // arriving anyway would paint the transcript twice.
+    vi.useFakeTimers();
+    try {
+      const platform = fakePlatform([], { stamp: false });
+      initWorkspaceMoves(platform);
+      getOrCreateTerminal("pane-a");
+      registerWallHandle(stubWallHandle(WORKSPACE_ID, {
+        prepareWorkspaceTransfer: async () => prepared(),
+      }));
+      createWorkspace({ id: WORKSPACE_ID, name: "Deploys" });
+      const moved = transferWorkspaceTo(WORKSPACE_ID, "ws-2", { x: 10, y: 4 });
+      await vi.advanceTimersByTimeAsync(3000); // past the mark wait
+      await moved;
+      const [, args] = mocks.invoke.mock.calls.find(([cmd]) => cmd === "transfer_workspace_content")!;
+      expect(args).toMatchObject({ content: { terminals: { "pane-a": { serialized: "" } } } });
+      mocks.writes.length = 0;
+
+      const failed = emit("dormouse://workspace-arrival-failed", { workspaceId: WORKSPACE_ID, reason: "wedged" });
+      await vi.advanceTimersByTimeAsync(1);
+      await failed;
+      deliverReplay({ id: "pane-a", data: "whole-buffer", requestId: `handback-${WORKSPACE_ID}` });
+
+      expect(mocks.writes).toEqual([]);
+      expect(getWorkspacesSnapshot().workspaces.map((w) => w.id)).toContain(WORKSPACE_ID);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("releases only the Workspace that departed", async () => {

@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { collectLivePtys, resumeOrRestoreFrom } from "dormouse-lib/lib/reconnect";
 import { flushTerminal } from "dormouse-lib/lib/terminal-registry";
+import { writeReplay } from "dormouse-lib/lib/terminal-report-filter";
+import { registry as terminalRegistry } from "dormouse-lib/lib/terminal-store";
 import { hydrateNotepadFromVolatile, restoreTerminalPins } from "dormouse-lib/lib/notepad/notepad-store";
 import { getWallHandle } from "dormouse-lib/components/wall/wall-handles";
 import { setWorkspaceBootPlan } from "dormouse-lib/components/wall/workspace-boot-plans";
@@ -24,7 +26,7 @@ import {
   moveWorkspace,
   setActiveWorkspace,
 } from "dormouse-lib/lib/workspace-store";
-import type { PlatformAdapter } from "dormouse-lib/lib/platform/types";
+import type { PlatformAdapter, PtyReplayDetail } from "dormouse-lib/lib/platform/types";
 import type { WorkspaceId } from "dormouse-lib/lib/session-types";
 import { installWindowPersistence } from "./window-restore";
 import { listenToWindow } from "./window-label";
@@ -84,6 +86,14 @@ const ARRIVAL_TIMEOUT_MS = 3000;
  */
 const inFlight = new Map<WorkspaceId, PreparedWorkspaceTransfer>();
 
+/**
+ * The marks the content this Window handed over carries, by Workspace: exactly
+ * the ids whose bytes since the mark went to the target — or nowhere — and so
+ * exactly what a hand-back replays into the xterms still here. Recorded before
+ * `transfer_workspace_content`, because that invoke can itself hand back.
+ */
+const handedMarks = new Map<WorkspaceId, ReadonlyMap<string, number>>();
+
 async function prepare(workspaceId: WorkspaceId): Promise<PreparedWorkspaceTransfer | null> {
   const handle = getWallHandle(workspaceId);
   if (!handle) return null;
@@ -103,21 +113,26 @@ async function handOff(
   command: string,
   args: Record<string, unknown>,
 ): Promise<void> {
+  const { workspaceId, terminalIds } = prepared.payload;
+  // Armed before the invoke: Rust asks the sidecar to stamp the marks inside
+  // `begin_arrival`, so a `marked` line can arrive ahead of the invoke's reply.
+  const pendingMarks = marksFor(terminalIds, `mark-${workspaceId}`);
   try {
     await invoke(command, args);
   } catch (err) {
     console.warn(`[workspace-move] ${command} refused; the Workspace stays here`, err);
-    return;
+    return; // `pendingMarks` unsubscribes itself at the timeout
   }
-  const { workspaceId, terminalIds } = prepared.payload;
   inFlight.set(workspaceId, prepared);
   markWorkspaceTransferring(workspaceId);
   // The second half: once every terminal's mark has passed this window, what it
   // holds is exactly the bytes before the mark. Serialized here, attached to the
   // arrival by Rust, and only then drained by the target.
-  const marks = await marksFor(terminalIds, `mark-${workspaceId}`);
+  const marks = await pendingMarks;
   if (!inFlight.has(workspaceId)) return; // handed back while we waited
   const content = await captureTransferContent(terminalIds, marks);
+  if (!inFlight.has(workspaceId)) return; // handed back while serializing
+  handedMarks.set(workspaceId, marks);
   try {
     await invoke("transfer_workspace_content", { workspaceId, content });
   } catch (err) {
@@ -196,6 +211,7 @@ function handleDeparted(workspaceId: WorkspaceId): void {
     return;
   }
   inFlight.delete(workspaceId);
+  handedMarks.delete(workspaceId);
   prepared.commit();
   // Moving a Window's last Workspace away closes it — without confirming,
   // archiving or killing, because nothing ended: the Surfaces are alive
@@ -213,12 +229,47 @@ function handleDeparted(workspaceId: WorkspaceId): void {
 /**
  * The target never took it. Nothing was released, so there is nothing to put
  * back: drop the transferring mark and the Workspace is simply still here, its
- * xterms receiving output again the moment Rust unsuppresses them.
+ * xterms receiving output again the moment Rust unsuppresses them — behind the
+ * replay of what they missed, where a mark had passed.
  */
 function handleArrivalFailed(workspaceId: WorkspaceId, reason: string): void {
   if (!inFlight.delete(workspaceId)) return;
+  const marks = handedMarks.get(workspaceId);
+  handedMarks.delete(workspaceId);
   clearWorkspaceTransferring(workspaceId);
   console.warn(`[workspace-move] ${workspaceId} was not adopted (${reason}); it stays here`);
+  if (marks?.size) acceptHandBackReplay(workspaceId, [...marks.keys()]);
+}
+
+/** A hand-back's replay is one since-mark slice per id over the sidecar's
+ *  stdio; the same room an arrival gets. */
+const HAND_BACK_REPLAY_TIMEOUT_MS = ARRIVAL_TIMEOUT_MS;
+
+/**
+ * Catch the replay Rust requests for a handed-back Workspace: every byte from
+ * each id's mark to the hand-back went to the target, or nowhere, and its xterm
+ * here stands at the mark. The replay of `outputSince(mark)` for exactly the
+ * marked ids goes into the existing instances (`docs/specs/standalone.md` →
+ * "Arrival queue"). Collector-free: subscribe, write, and let go on the last
+ * id or the timeout.
+ */
+function acceptHandBackReplay(workspaceId: WorkspaceId, ids: readonly string[]): void {
+  const platform = movePlatform;
+  if (!platform) return;
+  const requestId = `handback-${workspaceId}`;
+  const wanted = new Set(ids);
+  const finish = () => {
+    clearTimeout(timer);
+    platform.offPtyReplay(onReplay);
+  };
+  const onReplay = (detail: PtyReplayDetail) => {
+    if (detail.requestId !== requestId || !wanted.delete(detail.id)) return;
+    const entry = terminalRegistry.get(detail.id);
+    if (entry) writeReplay(entry, detail.data);
+    if (wanted.size === 0) finish();
+  };
+  platform.onPtyReplay(onReplay);
+  const timer = setTimeout(finish, HAND_BACK_REPLAY_TIMEOUT_MS);
 }
 
 // --- Target ------------------------------------------------------------------
@@ -409,5 +460,6 @@ export async function bootFromTearOut(platform: PlatformAdapter): Promise<WallBo
 /** @internal Forget what this window is moving (tests). */
 export function _resetWorkspaceMovesForTesting(): void {
   inFlight.clear();
+  handedMarks.clear();
   adopting.clear();
 }

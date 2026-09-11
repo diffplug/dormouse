@@ -112,6 +112,17 @@ always made, and the target's parser resynchronizes on the next ground byte
 
 
 
+**Why a hand-back replays since the mark, and only the marked ids.** The first
+hand-back returned the ids unsuppressed and silent: the source's xterm stood at
+the mark, and every byte from there to the hand-back had gone to a target that
+never mounted it — dropped while suppressed, or painted in a webview that then
+closed. The since-mark replay is the arrival's own second half aimed back at the
+source, which is why it rides the same `pty:requestInit` and the same
+suppression-lifting `pty:replay` path rather than a new message. An id the
+content did not mark has no such gap: the source either saw every byte live or
+serialized the whole buffer it still holds, and the sidecar's only answer for
+an unmarked id is that whole buffer again (2026-09).
+
 The first build emitted `workspace-arriving` straight at the target. A window
 torn out seconds earlier, or one restoring at launch, has no listener yet and is
 a perfectly ordinary drop target — the payload went nowhere, and because the
