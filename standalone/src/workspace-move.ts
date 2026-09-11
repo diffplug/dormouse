@@ -1,9 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
+import { releaseSession } from "dormouse-lib/lib/terminal-registry";
+import { forgetHelper } from "dormouse-lib/lib/helper-terminal";
 import { collectLivePtys, resumeOrRestoreFrom } from "dormouse-lib/lib/reconnect";
 import { flushTerminal } from "dormouse-lib/lib/terminal-registry";
 import { writeReplay } from "dormouse-lib/lib/terminal-report-filter";
 import { registry as terminalRegistry } from "dormouse-lib/lib/terminal-store";
-import { hydrateNotepadFromVolatile, restoreTerminalPins } from "dormouse-lib/lib/notepad/notepad-store";
+import { hydrateNotepadFromVolatile, removeSurface, restoreTerminalPins } from "dormouse-lib/lib/notepad/notepad-store";
 import { getWallHandle } from "dormouse-lib/components/wall/wall-handles";
 import { forgetWorkspaceBootPlan, setWorkspaceBootPlan } from "dormouse-lib/components/wall/workspace-boot-plans";
 import { wallBootFromResult, type WallBootPlans } from "dormouse-lib/components/wall/wall-types";
@@ -512,12 +514,23 @@ export async function bootFromTearOut(platform: PlatformAdapter): Promise<WallBo
     adopting.delete(id);
     return null;
   }
+  try {
+    await invoke("adopt_done", { workspaceId: id });
+  } catch (err) {
+    console.error("[workspace-move] torn-out adoption refused; starting fresh", err);
+    for (const surfaceId of first.allIds) {
+      removeSurface(surfaceId);
+      forgetHelper(surfaceId);
+    }
+    for (const terminalId of first.terminalIds) releaseSession(terminalId);
+    adopting.delete(id);
+    return null;
+  }
   // Nothing on disk yet: this window's first aggregator flush writes its
   // snapshot, and from there it is an ordinary restorable window. After the
   // plan, so a refused arrival leaves no half-installed Window behind.
   installWindowPersistence(platform, { version: 1, workspaces: [{ id, name, session }], activeWorkspaceId: id });
   publishWorkspaceSession(id, session);
-  settle("adopt_done", id);
   adopting.delete(id);
   // A second Workspace dropped on this window between the tear-out and this
   // drain rides in the same queue.
