@@ -614,6 +614,9 @@ below reads that record rather than inferring itself from the suppression map.
   source unsuppressed, drop the record, and emit `workspace-arrival-failed`; the
   source clears **transferring** and the Workspace is simply still there. With
   both ends gone the shells are reaped rather than left owned by a dead label.
+- **Must change transfer ownership and source routing under one routing lock**,
+  so output before the mark always reaches the source
+  (`transfer_ownership_and_source_routing_change_together`).
 - **Must reject a repeated move while that Workspace is in flight**, preserving
   the first attempt’s content and recovery state. Async continuations act only
   on their own attempt (`keeps the first move recoverable when the same tab is
@@ -625,8 +628,9 @@ below reads that record rather than inferring itself from the suppression map.
   `handback-<workspaceId>`); that replay lifts the suppression and lands in the
   existing xterms (`acceptHandBackReplay`), the held protocol events behind it.
   **Must record source cuts at `pty:marked`, retaining them through target
-  replay and PTY exit until settlement, and carry replay ids in the failure event**; content
-  submission and the source invoke reply may both still be pending. An id the
+  replay and natural PTY exit until settlement, and carry replay ids in the failure event**; content
+  submission and the source invoke reply may both still be pending. **Must discard
+  cuts on explicit kill and never recreate an exited PTY’s owner on hand-back.** An id the
   sidecar never stamped goes straight back: a whole-buffer
   replay would paint it twice (`a_hand_back_replays_only_the_marked_ids`;
   rationale).

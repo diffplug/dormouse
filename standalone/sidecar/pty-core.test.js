@@ -1898,6 +1898,34 @@ test('a mark is ordered in the stream and a since-mark replay is exactly the rem
   assert.equal(events.filter((entry) => entry.event === 'replay').at(-1).data.data, 'onetwothree');
 });
 
+test('marked requests recover exited buffers without reviving or discovering the PTY', () => {
+  const events = [];
+  const pty = fakePtyModule();
+  const mgr = create((event, data) => events.push({ event, data }), pty.module, {
+    replay: true,
+    sliceSince: (chunks, held, received, mark) => chunks.join('').slice(Math.max(0, held - (received - mark))),
+  });
+  mgr.spawn('a');
+  pty.listeners.get('a').data('before');
+  mgr.mark(['a'], 'mark-1');
+  pty.listeners.get('a').data('after');
+  pty.listeners.get('a').exit({ exitCode: 7 });
+  assert.equal(mgr.hasPty('a'), false);
+  events.length = 0;
+  mgr.list(undefined, 'main', 'discovery');
+  assert.deepEqual(events[0].data.ptys, []);
+  assert.equal(events.length, 1);
+  events.length = 0;
+  mgr.list(['a'], 'main', 'handback-1', { a: 6 });
+  assert.deepEqual(events[0].data.ptys.map(({ id, alive, exitCode }) => ({ id, alive, exitCode })), [{ id: 'a', alive: false, exitCode: 7 }]);
+  assert.deepEqual(events[1], { event: 'replay', data: { id: 'a', data: 'after', forWindow: 'main', requestId: 'handback-1' } });
+  mgr.kill('a');
+  events.length = 0;
+  mgr.list(['a'], 'main', 'after-kill', { a: 6 });
+  assert.deepEqual(events[0].data.ptys, []);
+  assert.equal(events.length, 1);
+});
+
 test('gracefulKill targets only the named PTYs', async () => {
   const events = [];
   const pty = fakePtyModule();
