@@ -260,8 +260,12 @@ export async function handleWorkspaceControl(detail: DorControlRequest): Promise
           return;
         }
         const label = toWindow.startsWith('window:') ? toWindow.slice('window:'.length) : toWindow;
+        // The index travels with it: the slot it names is in the target's strip.
+        // `moved` only once that Window has adopted the Workspace; one handed
+        // back is an error naming why, and it is still here
+        // (`docs/specs/dor-cli.md` → "dor workspace").
         try {
-          await platform.transferWorkspace(target.id, label);
+          await platform.transferWorkspace(target.id, label, index === undefined ? {} : { index });
         } catch (err) {
           detail.respond({ ok: false, error: `workspace '${target.ref}' was not moved: ${errorText(err)}` });
           return;

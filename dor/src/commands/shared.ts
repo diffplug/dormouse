@@ -34,6 +34,15 @@ export function parsePositiveInt(input: string, flag: string, max = Number.POSIT
   return value;
 }
 
+/** Flag parser for non-negative integers (`--index`, 0-based). */
+export function parseNonNegativeInt(input: string, flag: string): number {
+  const value = Number(input);
+  if (input.trim() === '' || !Number.isInteger(value) || value < 0) {
+    throw new SyntaxError(`invalid ${flag} '${input}'`);
+  }
+  return value;
+}
+
 export function renderJson(payload: unknown): string {
   return `${JSON.stringify(payload, null, 2)}\n`;
 }

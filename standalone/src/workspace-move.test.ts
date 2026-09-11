@@ -78,6 +78,12 @@ const WORKSPACE_ID = "ws-moving";
 /** Drain the microtask chain the arrival drain runs on. */
 const settle = () => new Promise((r) => setTimeout(r, 0));
 
+/** The source's second half has gone over: the marks passed and the content
+ *  followed. A hand-off resolves only when the target settles it, so a test
+ *  that needs the invoke sequence waits for this rather than the call. */
+const contentSent = () => vi.waitFor(() =>
+  expect(mocks.invoke).toHaveBeenCalledWith("transfer_workspace_content", expect.anything()));
+
 function payload(overrides: Partial<WorkspaceTransferPayload> = {}): WorkspaceTransferPayload {
   return {
     workspaceId: WORKSPACE_ID,
@@ -210,29 +216,45 @@ const emit = async (event: string, data: unknown) => {
 describe("the source half", () => {
   it("prepares the Workspace, tells the host, and commits only when it lands", async () => {
     const order: string[] = [];
-    mocks.invoke.mockImplementation(async (cmd: string) => void order.push(cmd));
     registerWallHandle(stubWallHandle(WORKSPACE_ID, {
       prepareWorkspaceTransfer: async () => {
         order.push("prepare");
         return prepared(() => order.push("commit"));
       },
     }));
-    initWorkspaceMoves(fakePlatform());
-    mocks.invoke.mockImplementation(async (cmd: string) => void order.push(cmd));
+    initWorkspaceMoves(fakePlatform(order));
 
-    await transferWorkspaceTo(WORKSPACE_ID, "ws-2", { x: 10, y: 4 });
+    const moved = transferWorkspaceTo(WORKSPACE_ID, "ws-2", { x: 10, y: 4 });
+    await contentSent();
 
     // The record is built while the Sessions are live. Nothing is released at
     // the invoke: the target can still refuse, and a Workspace released here
-    // would have no Sessions and no window that owned them.
-    // The content follows once the marks pass: the fake host stamps none,
-    // so it is serialized at once and replayed whole.
-    expect(order).toEqual(["prepare", "transfer_workspace", "transfer_workspace_content"]);
+    // would have no Sessions and no window that owned them. The content
+    // follows once the marks pass.
+    expect(order.filter((cmd) => cmd !== "take_arrivals"))
+      .toEqual(["prepare", "transfer_workspace", "transfer_workspace_content"]);
     const [, args] = mocks.invoke.mock.calls.find(([cmd]) => cmd === "transfer_workspace")!;
     expect(args).toMatchObject({ to: "ws-2", payload: { at: { x: 10, y: 4 }, terminalIds: ["pane-a"] } });
+    expect(order).not.toContain("commit");
 
     await emit("dormouse://workspace-departed", { workspaceId: WORKSPACE_ID });
     expect(order).toContain("commit");
+    // `moved` is the target's adoption, not the host taking the invoke: a
+    // caller told sooner (`dor workspace move`) would read a move that can
+    // still be handed back.
+    await expect(moved).resolves.toEqual({ moved: true });
+  });
+
+  it("carries a strip slot named outright, which the target reads ahead of a pointer", async () => {
+    registerWallHandle(stubWallHandle(WORKSPACE_ID, { prepareWorkspaceTransfer: async () => prepared() }));
+    initWorkspaceMoves(fakePlatform());
+
+    void transferWorkspaceTo(WORKSPACE_ID, "ws-2", undefined, 2);
+    await settle();
+
+    const [, args] = mocks.invoke.mock.calls.find(([cmd]) => cmd === "transfer_workspace")!;
+    expect(args).toMatchObject({ to: "ws-2", payload: { index: 2 } });
+    expect((args as { payload: { at?: unknown } }).payload.at).toBeUndefined();
   });
 
   it("keeps a transferring Workspace out of every snapshot until it settles", async () => {
@@ -246,12 +268,15 @@ describe("the source half", () => {
     }));
     expect(getWindowSnapshot().workspaces.map((w) => w.id)).toContain(WORKSPACE_ID);
 
-    await transferWorkspaceTo(WORKSPACE_ID, "ws-2", { x: 10, y: 4 });
+    const moved = transferWorkspaceTo(WORKSPACE_ID, "ws-2", { x: 10, y: 4 });
+    await settle();
     expect(getWindowSnapshot().workspaces.map((w) => w.id)).not.toContain(WORKSPACE_ID);
 
-    // Refused: it is this Window's again, snapshot included.
+    // Refused: it is this Window's again, snapshot included, and the caller
+    // hears the host's reason rather than `moved`.
     await emit("dormouse://workspace-arrival-failed", { workspaceId: WORKSPACE_ID, reason: "closed" });
     expect(getWindowSnapshot().workspaces.map((w) => w.id)).toContain(WORKSPACE_ID);
+    await expect(moved).resolves.toEqual({ moved: false, reason: "closed" });
   });
 
   it("keeps the Workspace, with its Sessions, when the target never adopts it", async () => {
@@ -264,7 +289,8 @@ describe("the source half", () => {
     }));
     createWorkspace({ id: WORKSPACE_ID, name: "Deploys" });
 
-    await transferWorkspaceTo(WORKSPACE_ID, "ws-2", { x: 10, y: 4 });
+    const moved = transferWorkspaceTo(WORKSPACE_ID, "ws-2", { x: 10, y: 4 });
+    await settle();
     await emit("dormouse://workspace-arrival-failed", {
       workspaceId: WORKSPACE_ID,
       reason: "the target window closed mid-arrival",
@@ -272,6 +298,7 @@ describe("the source half", () => {
 
     expect(committed).not.toHaveBeenCalled();
     expect(getWorkspacesSnapshot().workspaces.map((w) => w.id)).toContain(WORKSPACE_ID);
+    await expect(moved).resolves.toEqual({ moved: false, reason: "the target window closed mid-arrival" });
   });
 
   it("releases only the Workspace that departed", async () => {
@@ -284,7 +311,8 @@ describe("the source half", () => {
       registerWallHandle(stubWallHandle(id, {
         prepareWorkspaceTransfer: async () => prepared(commit, { workspaceId: id }),
       }));
-      await transferWorkspaceTo(id, "ws-2", { x: 0, y: 0 });
+      void transferWorkspaceTo(id, "ws-2", { x: 0, y: 0 });
+      await settle();
     }
 
     await emit("dormouse://workspace-departed", { workspaceId: "ws-a" });
@@ -302,7 +330,9 @@ describe("the source half", () => {
       prepareWorkspaceTransfer: async () => prepared(committed),
     }));
 
-    await transferWorkspaceTo(WORKSPACE_ID, "ws-2", { x: 10, y: 4 });
+    // A refused invoke settles at once, with the host's reason.
+    await expect(transferWorkspaceTo(WORKSPACE_ID, "ws-2", { x: 10, y: 4 }))
+      .resolves.toEqual({ moved: false, reason: "no window 'ws-2'" });
 
     expect(committed).not.toHaveBeenCalled();
   });
@@ -314,7 +344,8 @@ describe("the source half", () => {
       prepareWorkspaceTransfer: async () => prepared(committed),
     }));
 
-    await tearOutWorkspace(WORKSPACE_ID, { x: 90, y: 12 });
+    await expect(tearOutWorkspace(WORKSPACE_ID, { x: 90, y: 12 }))
+      .resolves.toEqual({ moved: false, reason: "build window ws-3: no display" });
 
     expect(committed).not.toHaveBeenCalled();
   });
@@ -323,14 +354,15 @@ describe("the source half", () => {
     registerWallHandle(stubWallHandle(WORKSPACE_ID, { prepareWorkspaceTransfer: async () => prepared() }));
     // Only Rust knows where the cursor is on screen, so the payload carries
     // where the tab should sit inside the new window rather than a position.
-    await tearOutWorkspace(WORKSPACE_ID, { x: 90, y: 12 });
+    void tearOutWorkspace(WORKSPACE_ID, { x: 90, y: 12 });
+    await settle();
     expect(mocks.invoke).toHaveBeenCalledWith("open_workspace_window", {
       payload: expect.objectContaining({ grab: { x: 90, y: 12 } }),
     });
   });
 
   it("does nothing when the Workspace has no mounted Wall", async () => {
-    await transferWorkspaceTo("gone", "ws-2", { x: 0, y: 0 });
+    await expect(transferWorkspaceTo("gone", "ws-2", { x: 0, y: 0 })).resolves.toMatchObject({ moved: false });
     expect(mocks.invoke).not.toHaveBeenCalled();
   });
 });
@@ -419,6 +451,18 @@ describe("the target half", () => {
     expect(getWorkspacesSnapshot().workspaces.filter((w) => w.id === WORKSPACE_ID)).toHaveLength(1);
   });
 
+  it("lands at the slot the payload names, ahead of the pointer's", async () => {
+    // `dor workspace move --window ws-2 --index 0` names the target's slot
+    // outright; a drag sends only a point, and with no tab under it appends.
+    createWorkspace({ id: "ws-here", name: "Here" });
+    arrivals = [{ ...payload(), index: 0, at: { x: 900, y: 0 } } as WorkspaceTransferPayload];
+
+    initWorkspaceMoves(fakePlatform());
+    await settle();
+
+    expect(getWorkspacesSnapshot().workspaces[0]?.id).toBe(WORKSPACE_ID);
+  });
+
   it("seeds a persisted TODO into this window's own AlertManager", async () => {
     const platform = fakePlatform();
     const alert = { kind: "todo" } as never;
@@ -458,13 +502,19 @@ describe("the target half", () => {
     registerWallHandle(stubWallHandle(workspaceId, {
       prepareWorkspaceTransfer: async () => prepared(() => {}, { workspaceId }),
     }));
-    await transferWorkspaceTo(workspaceId, "ws-2", { x: 0, y: 0 });
+    const moved = transferWorkspaceTo(workspaceId, "ws-2", { x: 0, y: 0 });
+    await contentSent();
+    const order: string[] = [];
+    void moved.then(() => order.push("answered"));
+    mocks.invoke.mockImplementation(async (cmd: string) => void order.push(cmd));
 
     await emit("dormouse://workspace-departed", { workspaceId });
 
     // Nothing ended — the Surfaces are alive in another window — so this is a
-    // close with no confirmation, no archive and no kill.
-    expect(mocks.invoke).toHaveBeenCalledWith("close_window");
+    // close with no confirmation, no archive and no kill. The caller's answer
+    // goes first: Rust destroys the window on `close_window`, and a `dor
+    // workspace move` that emptied it still has `moved` to say.
+    expect(order).toEqual(["answered", "close_window"]);
     expect(getWorkspacesSnapshot().workspaces).toHaveLength(1);
   });
 });
@@ -477,7 +527,8 @@ describe("a transfer's content", () => {
       prepareWorkspaceTransfer: async () => prepared(),
     }));
 
-    await transferWorkspaceTo(WORKSPACE_ID, "ws-2", { x: 1, y: 1 });
+    void transferWorkspaceTo(WORKSPACE_ID, "ws-2", { x: 1, y: 1 });
+    await contentSent();
 
     expect(order.filter((cmd) => cmd !== "take_arrivals")).toEqual(["transfer_workspace", "transfer_workspace_content"]);
     const [, args] = mocks.invoke.mock.calls.find(([cmd]) => cmd === "transfer_workspace_content")!;

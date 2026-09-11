@@ -11,7 +11,12 @@ import { ensureResizeObserver } from './wall/wall-test-utils';
 import { requestWorkspaceClose, requestWorkspaceRename } from './wall/workspace-lifecycle';
 import { resetWorkspaceSurfaces, setWorkspaceSurfaces } from '../lib/workspace-surfaces';
 import { clearTerminalActivity, setTerminalActivity } from '../lib/terminal-registry';
-import { resetWorkspaceUi } from '../lib/workspace-ui-store';
+import {
+  getWorkspaceUiSnapshot,
+  resetWorkspaceUi,
+  setPendingWorkspaceClose,
+  setPendingWorkspaceMove,
+} from '../lib/workspace-ui-store';
 import {
   createWorkspace,
   getActiveWorkspaceId,
@@ -277,5 +282,44 @@ describe('WorkspaceStrip', () => {
     stubHandle('ws-2', { closeAll: closed });
     await act(async () => { requestWorkspaceClose('ws-2'); });
     expect(closed).toHaveBeenCalled();
+  });
+
+  it('keeps the move gate behind a close confirmation, and ignores a bare Shift or Meta', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    stubHandle(first);
+    const closed = vi.fn(async () => null);
+    stubHandle('ws-2', { closeAll: closed });
+    await render();
+    const proceed = vi.fn();
+    await act(async () => { setPendingWorkspaceMove({ id: first, char: 'k', iframeCount: 1, proceed }); });
+    expect(container.querySelector('#kill-confirm-title')).not.toBeNull();
+
+    // A bare modifier is the dual-tap detector's, never an answer to the gate.
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', bubbles: true }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Meta', bubbles: true }));
+    });
+    expect(proceed).not.toHaveBeenCalled();
+    expect(getWorkspaceUiSnapshot().pendingMove).not.toBeNull();
+
+    // A close raised over it shows its own letter; the same letter typed at it
+    // closes and must not also move, however the two were minted.
+    await act(async () => { setPendingWorkspaceClose({ id: 'ws-2', char: 'k' }); });
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', bubbles: true }));
+    });
+    await act(async () => { await Promise.resolve(); });
+    expect(closed).toHaveBeenCalledTimes(1);
+    expect(proceed).not.toHaveBeenCalled();
+    expect(getWorkspaceUiSnapshot().pendingClose).toBeNull();
+    expect(getWorkspaceUiSnapshot().pendingMove).not.toBeNull();
+
+    // With the close resolved the gate is armed again, and its letter moves.
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', bubbles: true }));
+    });
+    expect(proceed).toHaveBeenCalledTimes(1);
+    expect(getWorkspaceUiSnapshot().pendingMove).toBeNull();
   });
 });

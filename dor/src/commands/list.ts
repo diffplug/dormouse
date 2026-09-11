@@ -215,7 +215,7 @@ async function runListCommand(
 
 /** The only flags the Workspace overview takes — an allowlist, so a flag added
  *  to this command is refused there until it is named here. */
-const WORKSPACES_FLAGS: ReadonlySet<keyof ListFlags> = new Set(['json', 'workspaces']);
+const WORKSPACES_FLAGS: ReadonlySet<keyof ListFlags> = new Set(['json', 'window', 'workspaces']);
 
 /** A flag as the user typed it, from the name stricli parsed it into. */
 function flagSpelling(name: string): string {
@@ -234,7 +234,7 @@ function checkScopeFlags(flags: ListFlags): { ok: true } | { ok: false; message:
       .map((name) => flagSpelling(name))
       .sort();
     if (others.length > 0) {
-      return { ok: false, message: `dor list --workspaces takes only --json, not ${others.join(', ')}` };
+      return { ok: false, message: `dor list --workspaces takes only --json and --window, not ${others.join(', ')}` };
     }
   }
   return { ok: true };
