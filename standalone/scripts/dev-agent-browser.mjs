@@ -111,6 +111,10 @@ const fireAndForget = {
   // The Burrow's whole bridge rides one passthrough, exactly as it does
   // through Rust (`burrow_command` in src-tauri/src/lib.rs).
   burrow_command: ({ payload }) => writeSidecar('burrow:command', payload),
+  // The app-global alert stores live in the sidecar; their broadcasts come back
+  // over the event stream like every other sidecar line (`alert_command` in
+  // src-tauri/src/lib.rs).
+  alert_command: ({ payload }) => writeSidecar('alert:command', payload),
   kill_sidecar_now: () => shutdown(),
 };
 
@@ -174,7 +178,7 @@ let registryRevision = 0;
 function registrySnapshot() {
   const workspaces = JSON.parse(registryEntries).map((entry) => ({
     id: entry.id,
-    ref: /^workspace-(\d+)$/.test(entry.id) ? `workspace:${entry.id.slice('workspace-'.length)}` : null,
+    ref: /^workspace-(\d+)$/.test(entry.id) ? `workspace:${entry.id.slice('workspace-'.length)}` : `workspace:${entry.id}`,
     name: entry.name,
     active: Boolean(entry.active),
   }));

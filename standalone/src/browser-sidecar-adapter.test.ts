@@ -13,6 +13,9 @@ vi.mock("@tauri-apps/plugin-shell", () => ({ open: vi.fn(async () => {}) }));
 import { BrowserSidecarAdapter } from "./browser-sidecar-adapter";
 import { BrowserSidecarHost } from "./browser-sidecar-host";
 import { TauriAdapter } from "./tauri-adapter";
+import type { AlertManager } from "dormouse-lib/lib/alert-manager";
+import type { AlertSettings } from "dormouse-lib/lib/alert-settings";
+import { DEFAULT_ALERT_SETTINGS } from "dormouse-lib/lib/alert-settings-model";
 
 // Both adapters are viewed as `PlatformAdapter` here on purpose: `onFilesDropped`
 // is optional precisely so consumers can probe for it
@@ -104,9 +107,14 @@ describe("BrowserSidecarAdapter terminal stream", () => {
   async function listening() {
     const host = new BrowserSidecarHost("http://localhost:1234");
     let emit: (event: { event: string; data: unknown }) => void = () => {};
+    let reconnect: () => void = () => {};
     vi.spyOn(host, "init").mockResolvedValue(undefined);
     vi.spyOn(host, "onEvent").mockImplementation((listener) => {
       emit = listener;
+      return () => {};
+    });
+    vi.spyOn(host, "onReconnect").mockImplementation((listener) => {
+      reconnect = listener;
       return () => {};
     });
     const send = vi.spyOn(host, "send").mockImplementation(() => {});
@@ -116,7 +124,16 @@ describe("BrowserSidecarAdapter terminal stream", () => {
     const adapter = new BrowserSidecarAdapter(host);
     await adapter.init();
     send.mockClear();
-    return { adapter, send, deliver: (event: string, data: unknown) => emit({ event, data }) };
+    // The manager is where a broadcast has to land for the rule to bite; the
+    // handler fan-out alone would pass with a private copy of the store.
+    const manager = (adapter as unknown as { alertManager: AlertManager }).alertManager;
+    const alertCommands = () =>
+      send.mock.calls.filter(([cmd]) => cmd === "alert_command").map(([, args]) => args);
+    return {
+      adapter, send, manager, alertCommands,
+      reconnect: () => reconnect(),
+      deliver: (event: string, data: unknown) => emit({ event, data }),
+    };
   }
 
   it("forwards the projection pair it was handed, parsing nothing again", async () => {
@@ -130,13 +147,69 @@ describe("BrowserSidecarAdapter terminal stream", () => {
     expect(send.mock.calls.filter(([cmd]) => cmd === "pty_write")).toEqual([]);
   });
 
+  it("routes the alert stores through the sidecar and applies their broadcasts", async () => {
+    const { adapter, manager, alertCommands, deliver } = await listening();
+    const quiet: AlertSettings = { ...DEFAULT_ALERT_SETTINGS, speakEnabled: false };
+    adapter.alertSetCommandWatched("cargo", true);
+    adapter.alertPublishSettings(quiet, { seed: true });
+    expect(alertCommands()).toEqual([
+      { payload: { op: "setCommandWatched", name: "cargo", watched: true } },
+      { payload: { op: "initializeSettings", settings: quiet } },
+    ]);
+
+    const setWatched = vi.spyOn(manager, "setWatchedCommands");
+    const applySettings = vi.spyOn(manager, "applySettings");
+    const names: string[][] = [];
+    const settings: AlertSettings[] = [];
+    adapter.onWatchedCommands((next) => void names.push(next));
+    adapter.onAlertSettings((next) => void settings.push(next));
+
+    deliver("alert:watchedCommands", { names: ["cargo", "make"] });
+    expect(setWatched).toHaveBeenCalledWith(["cargo", "make"]);
+    expect(names).toEqual([["cargo", "make"]]);
+
+    const canonical: AlertSettings = { ...DEFAULT_ALERT_SETTINGS, deferAlertsUntilQuiet: true };
+    deliver("alert:settings", { settings: canonical });
+    expect(applySettings).toHaveBeenCalledWith(canonical);
+    expect(settings).toEqual([canonical]);
+
+    // A broadcast with no blob is dropped, not applied as "no settings".
+    deliver("alert:settings", {});
+    expect(applySettings).toHaveBeenCalledTimes(1);
+    expect(settings).toEqual([canonical]);
+  });
+
+  // The stream is the only path a store's snapshot takes back, and a dropped
+  // stream loses the bridge's fan-out entry with it. Re-offering the seeds is
+  // what makes the sidecar republish; a repeat seed is refused as a seed but
+  // still answered (lib/src/lib/watched-command-host.ts `initialize`).
+  it("re-sends its last seeds when the event stream reconnects", async () => {
+    const { adapter, alertCommands, reconnect, send } = await listening();
+    const quiet: AlertSettings = { ...DEFAULT_ALERT_SETTINGS, speakEnabled: false };
+    adapter.alertSetWatchedCommands(["cargo"]);
+    adapter.alertPublishSettings(quiet, { seed: true });
+    // Neither a mutation nor a non-seed publish is a seed; neither is replayed.
+    adapter.alertSetCommandWatched("make", true);
+    adapter.alertPublishSettings({ ...quiet, pushEnabled: true }, { seed: false });
+    send.mockClear();
+
+    reconnect();
+    expect(alertCommands()).toEqual([
+      { payload: { op: "initializeWatchedCommands", names: ["cargo"] } },
+      { payload: { op: "initializeSettings", settings: quiet } },
+    ]);
+  });
+
   // Same contract as TauriAdapter: the replay is all a transferred pane's new
   // window sees, so it rebuilds the AlertManager's half too.
   it("rebuilds alert state from a replay, not only pane state", async () => {
     const { adapter, deliver } = await listening();
     const alerts: AlertStateDetail[] = [];
     adapter.onAlertState((detail) => void alerts.push(detail));
+    // The rule set lives in the sidecar here: the seed goes out, its snapshot
+    // comes back, and only then does this manager watch anything.
     adapter.alertSetWatchedCommands(["sleep"]);
+    deliver("alert:watchedCommands", { names: ["sleep"] });
 
     deliver("pty:replay", { id: "replay-b", data: "\x1b]633;E;sleep 5\x07\x1b]633;C\x07" });
 
