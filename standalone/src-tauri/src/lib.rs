@@ -704,7 +704,8 @@ fn finish_window_close(app: &AppHandle, label: &str) {
         state.begin_closing(label);
     }
     if let Ok(dir) = sessions_dir(app) {
-        if let Err(err) = remove_session_from(&dir, label) {
+        let _disk = guard(&ARRIVAL_DISK_LOCK);
+        if let Err(err) = remove_session_from(&dir, label).and_then(|_| retire_saved_arrivals(&dir)) {
             append_log(format!("[session] {err}"));
         }
     }
@@ -1810,6 +1811,7 @@ async fn load_session(window: tauri::Window) -> Result<Option<String>, String> {
 
 #[tauri::command]
 async fn save_session(window: tauri::Window, state: String) -> Result<(), String> {
+    let _disk = guard(&ARRIVAL_DISK_LOCK);
     // A deliberate close removes the snapshot; a save still in flight from the
     // webview that is going away must not put it back
     // (docs/specs/standalone.md §Per-window close).
@@ -1818,7 +1820,6 @@ async fn save_session(window: tauri::Window, state: String) -> Result<(), String
             return Ok(());
         }
     }
-    let _disk = guard(&ARRIVAL_DISK_LOCK);
     let dir = sessions_dir(window.app_handle())?;
     write_session_to(&dir, window.label(), &state)?;
     retire_saved_arrivals(&dir)
@@ -2652,7 +2653,15 @@ fn restore_arrival(dir: &Path, record: &JsonValue) -> Result<(), String> {
     // target write, restore its old bytes and retain the journal for retry.
     let previous_target = read_snapshot_from(dir, to)?;
     let source = read_snapshot_from(dir, from)?;
-    let merged = snapshot_with_workspace(previous_target.clone(), workspace)?;
+    // Once adoption settled, the target may already hold a newer snapshot.
+    // Preserve that record while finishing the source side of the transaction.
+    let existing = previous_target.as_ref()
+        .and_then(|s| s.get("workspaces")).and_then(JsonValue::as_array)
+        .and_then(|entries| entries.iter().find(|entry| entry.get("id").and_then(JsonValue::as_str) == Some(id)));
+    let restore = if record.get("settled").and_then(JsonValue::as_bool) == Some(true) {
+        existing.unwrap_or(workspace)
+    } else { workspace };
+    let merged = snapshot_with_workspace(previous_target.clone(), restore)?;
     write_session_to(dir, to, &merged.to_string())?;
     let trim = (|| -> Result<(), String> {
         let Some(mut source) = source else { return Ok(()); };
@@ -4276,6 +4285,34 @@ mod tests {
         write_session_to(dir.path(), "main", &snapshot_json(&[], "workspace-1")).unwrap();
         super::retire_saved_arrivals(dir.path()).unwrap();
         assert!(!arrivals_path(dir.path()).exists());
+    }
+
+    #[test]
+    fn a_settled_recovery_preserves_the_targets_newer_snapshot() {
+        let dir = TempDir::new("arrival-newer-target");
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace-7", "main", "ws-2")).unwrap();
+        super::mark_arrival_adopted_on_disk(dir.path(), "workspace-7").unwrap();
+        write_session_to(dir.path(), "ws-2", &snapshot_json(&[("workspace-7", "Renamed after adoption")], "workspace-7")).unwrap();
+        restore_arrivals(dir.path()).unwrap();
+        assert_eq!(read_snapshot(dir.path(), "ws-2").unwrap()["workspaces"][0]["name"], "Renamed after adoption");
+    }
+
+    #[test]
+    fn a_failed_source_write_rolls_back_the_target_and_retries() {
+        let dir = TempDir::new("arrival-source-write");
+        write_session_to(dir.path(), "main", &snapshot_json(&[("workspace-7", "Moved"), ("workspace-8", "Keep")], "workspace-8")).unwrap();
+        let before = snapshot_json(&[("workspace-9", "Target")], "workspace-9");
+        write_session_to(dir.path(), "ws-2", &before).unwrap();
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace-7", "main", "ws-2")).unwrap();
+        let blocked = temp_write_path(&dir.path().join(session_file_name("main")));
+        fs::create_dir(&blocked).unwrap();
+        restore_arrivals(dir.path()).unwrap();
+        assert_eq!(read_snapshot(dir.path(), "ws-2").unwrap(), serde_json::from_str::<serde_json::Value>(&before).unwrap());
+        assert_eq!(read_arrivals_from(dir.path()).unwrap().len(), 1);
+        fs::remove_dir(blocked).unwrap();
+        restore_arrivals(dir.path()).unwrap();
+        assert!(!arrivals_path(dir.path()).exists());
+        assert_eq!(snapshot_ids(&read_snapshot(dir.path(), "main").unwrap()), vec!["workspace-8"]);
     }
 
     #[test]
