@@ -161,12 +161,12 @@ export function AppBar() {
           we just leave padding on the left (pl-[78px]) to avoid overlapping them. */}
 
       {/* The Workspace strip: after the traffic lights on macOS, at the start of
-          the bar on Windows/Linux. Its wrapper is also the draggable spacer, so
-          the bar past the last tab still moves the window. Tauri matches
-          `data-tauri-drag-region` on the event target alone, so no tab or tab
-          button may carry it — that is what leaves a press on a tab free to
-          activate, rename, or reorder. */}
-      <div data-tauri-drag-region className="flex min-w-0 flex-1 items-center self-stretch pl-2">
+          the bar on Windows/Linux. The spacer after it is the drag target, with
+          a floor so it survives any tab count — the strip scrolls into what is
+          left rather than growing over it. Tauri matches `data-tauri-drag-region`
+          on the event target alone, so no tab or tab button may carry it — that
+          is what leaves a press on a tab free to activate, rename, or reorder. */}
+      <div className="flex min-w-0 items-center self-stretch pl-2">
         <WorkspaceStrip
           className="min-w-0"
           onDragOutsideWindow={BROWSER_DEV ? undefined : onDragOutsideWindow}
@@ -175,6 +175,7 @@ export function AppBar() {
           onDragCancelled={BROWSER_DEV ? undefined : onDragCancelled}
         />
       </div>
+      <div data-tauri-drag-region className="min-w-8 flex-1 self-stretch" />
       <DropCaret />
 
       {/* Theme and shell selection live in the Settings dialog at the

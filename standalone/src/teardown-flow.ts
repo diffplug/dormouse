@@ -83,8 +83,13 @@ let holder: TeardownClaim | null = null;
  * could not store to the user, and a decline there cancels the close and leaves
  * the window standing — with a quit already voted for it and its own question
  * never asked. Re-driving the quit intent is what puts that question back.
+ *
+ * `by` is the quit flow that registered it, `against` the holder it waits on.
+ * A quit cancelled elsewhere resets `by` and must forget the entry — Rust has
+ * abandoned that quit, and re-driving it later would open a dialog whose vote
+ * goes into an idle machine.
  */
-let deferredQuit: { against: TeardownClaim; rerun: () => void } | null = null;
+let deferredQuit: { by: TeardownClaim; against: TeardownClaim; rerun: () => void } | null = null;
 
 /** @internal Forget the window-wide claim (tests). */
 export function _resetTeardownArbiterForTesting(): void {
@@ -192,11 +197,17 @@ export function createTeardownFlow(options: {
           // nothing — a window that never votes holds the whole app in `Voting`
           // with no dialog for the user to answer. Kept, in case that holder
           // retreats and is cancelled (`deferredQuit`).
-          deferredQuit = { against: holder, rerun: () => flow.request(intent) };
+          deferredQuit = { by: claim, against: holder, rerun: () => flow.request(intent) };
           void options.proceed();
           return;
         }
         holder.abandon();
+        // Abandoning a holder that retreated re-drives the quit deferred to it —
+        // re-entering this `request` from inside the holder's `cancel`, with
+        // the intent already gated by the time control returns here. Gating it
+        // again would open a second dialog into the store's refusal, whose
+        // `cancel` aborts the whole quit under the dialog the rerun opened.
+        if (phase !== "idle") return;
       }
 
       // The registry is per webview, so this is already this window's own work.
@@ -213,7 +224,7 @@ export function createTeardownFlow(options: {
     reset() {
       phase = "idle";
       if (holder === claim) holder = null;
-      if (deferredQuit?.against === claim) deferredQuit = null;
+      if (deferredQuit?.by === claim || deferredQuit?.against === claim) deferredQuit = null;
     },
   };
   return flow;

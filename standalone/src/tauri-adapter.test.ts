@@ -453,6 +453,25 @@ describe("TauriAdapter terminal stream", () => {
     expect(alerts.some((detail) => detail.id === "sem-pty")).toBe(true);
   });
 
+  // A transferred pane's new window sees nothing but the replay: Rust drops the
+  // gap's semantic events because this path re-derives them, so it must rebuild
+  // both halves — pane state and the AlertManager's watch.
+  it("rebuilds alert state from a replay, not only pane state", async () => {
+    const { adapter, deliver } = await listening();
+    const alerts: AlertStateDetail[] = [];
+    adapter.onAlertState((detail) => void alerts.push(detail));
+    // The rule set is the sidecar's; this window hears it as a broadcast.
+    deliver("alert:watchedCommands", { names: ["sleep"] });
+
+    deliver("pty:replay", {
+      id: "replay-pty",
+      data: "\x1b]633;E;sleep 5\x07\x1b]633;C\x07",
+    });
+
+    expect(getTerminalPaneState("replay-pty").currentCommand?.rawCommandLine).toBe("sleep 5");
+    expect(alerts.some((detail) => detail.id === "replay-pty" && detail.watchingEnabled)).toBe(true);
+  });
+
   it("pushes the resolved theme so the sidecar can answer a colour query", async () => {
     const { adapter, invoke } = await listening();
     adapter.requestInit();

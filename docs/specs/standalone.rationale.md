@@ -43,6 +43,16 @@ minted in `pty_spawn`, so an unowned id is one whose window went away, and the
 broadcast reached every sibling's AlertManager — which rang, and offered a TODO,
 for a pane none of them showed.
 
+The first hold queued both derived streams, on the premise that neither is in
+any replay. Semantic events are: the replay is the raw bytes, OSCs included, and
+the target's replay listener re-parses them. The flushed queue then re-applied
+`commandStart` on top of state the replay had just rebuilt, and `commandStart`
+is not idempotent — it mints a fresh id and consumes the pending command line —
+so a transfer that split a command's `commandLine` from its `commandStart` left
+the arriving window with a derived title for a command whose real line the
+replay had already recovered. What the replay path genuinely did not rebuild was
+the AlertManager's copy, and that is a listener fix, not a routing one.
+
 ## What a window's `Destroyed` settles
 
 Tauri removes a label from `webview_windows()` only when the window is actually
