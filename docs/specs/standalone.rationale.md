@@ -138,6 +138,20 @@ left to fall back on. With the record settling at `adopt_done` the drain is
 idempotent, and a reload mid-arrival finds its Workspace again instead of losing
 it. The webview's `adopting` set is what makes repeated drains safe.
 
+The pending-arrival record is its own file rather than an entry staged into a
+snapshot. The first durability attempt wrote the arriving Workspace into the
+target's `sessions/<label>.json` at the invoke and it failed two ways. A torn-out
+window then had a snapshot before it opened, and `bootFromTearOut` reads "this
+window has a snapshot" as "this is an ordinary restore": the new window
+cold-restored the staged copy over fresh shells, drained the arrival, and threw
+`Duplicate Workspace id` adopting the real one — the tear-out was handed back and
+both windows persisted the id. And for a transfer into a live window the staged
+entry did not survive to adoption: `getWindowSnapshot` iterates the target's
+store, which does not hold the Workspace yet, so the target's next debounced
+flush (500 ms after any change, inside the 3 s arrival timeout) rewrote its file
+without it. A file neither webview writes has neither problem, and merging it at
+boot is the only moment no flush can race it.
+
 ## Dragging a Workspace between windows
 
 Spiked before the drag was built, because it was the one unverified platform

@@ -502,6 +502,59 @@ fn send_window_labels(app: &AppHandle) {
 struct QuitState {
     machine: Mutex<QuitMachine>,
     close: Mutex<CloseMachine>,
+    cleanup: Mutex<CleanupGate>,
+}
+
+/// An approved quit waits for destroyed windows to journal their hand-backs.
+#[derive(Default)]
+struct CleanupGate {
+    pending: usize,
+    exit_requested: bool,
+    forced: bool,
+}
+
+impl CleanupGate {
+    fn begin(&mut self) { self.pending += 1; }
+    fn request_exit(&mut self) -> bool {
+        if self.pending == 0 || self.forced { return true; }
+        self.exit_requested = true;
+        false
+    }
+    fn force_if_waiting(&mut self) -> bool {
+        if self.pending == 0 || !self.exit_requested { return false; }
+        self.forced = true;
+        true
+    }
+    fn finish(&mut self) -> bool {
+        self.pending -= 1;
+        self.pending == 0 && std::mem::take(&mut self.exit_requested)
+    }
+}
+
+fn exit_after_cleanup(app: &AppHandle) -> bool {
+    let Some(state) = app.try_state::<QuitState>() else { return true; };
+    let (exit, start_watchdog) = {
+        let mut gate = guard(&state.cleanup);
+        let was_waiting = gate.exit_requested;
+        let exit = gate.request_exit();
+        (exit, !exit && !was_waiting)
+    };
+    if start_watchdog {
+        let app = app.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            std::thread::sleep(Duration::from_millis(QUIT_PHASE_TIMEOUT_MS));
+            let force = app.try_state::<QuitState>()
+                .is_some_and(|state| guard(&state.cleanup).force_if_waiting());
+            if force {
+                append_log("[quit] hand-back cleanup timed out; forcing exit");
+                if let Some(state) = app.try_state::<QuitState>() {
+                    guard(&state.machine).approved = true;
+                }
+                app.exit(0);
+            }
+        });
+    }
+    exit
 }
 
 // Phase 1: no ack within this window ⇒ a webview listener is dead — exit.
@@ -568,6 +621,7 @@ fn apply_quit_actions(app: &AppHandle, actions: Vec<QuitAction>) {
                 }
             }
             QuitAction::Exit => {
+                if !exit_after_cleanup(app) { continue; }
                 if let Some(state) = app.try_state::<QuitState>() {
                     guard(&state.machine).approved = true;
                 }
@@ -704,7 +758,7 @@ fn finish_window_close(app: &AppHandle, label: &str) {
         state.begin_closing(label);
     }
     if let Ok(dir) = sessions_dir(app) {
-        if let Err(err) = remove_session_from(&dir, label) {
+        if let Err(err) = close_window_snapshot(&dir, label) {
             append_log(format!("[session] {err}"));
         }
     }
@@ -1813,6 +1867,7 @@ async fn load_session(window: tauri::Window) -> Result<Option<String>, String> {
 
 #[tauri::command]
 async fn save_session(window: tauri::Window, state: String) -> Result<(), String> {
+    let _disk = guard(&ARRIVAL_DISK_LOCK);
     // A deliberate close removes the snapshot; a save still in flight from the
     // webview that is going away must not put it back
     // (docs/specs/standalone.md §Per-window close).
@@ -1821,7 +1876,9 @@ async fn save_session(window: tauri::Window, state: String) -> Result<(), String
             return Ok(());
         }
     }
-    write_session_to(&sessions_dir(window.app_handle())?, window.label(), &state)
+    let dir = sessions_dir(window.app_handle())?;
+    write_session_to(&dir, window.label(), &state)?;
+    retire_saved_arrivals(&dir)
 }
 
 /// The suffix `write_file_atomically` leaves on a session snapshot's temp
@@ -2454,6 +2511,279 @@ fn payload_terminal_ids(payload: &JsonValue) -> Vec<String> {
         .unwrap_or_default()
 }
 
+// ── Pending arrivals on disk (docs/specs/standalone.md §Arrival queue) ───────
+//
+// A transferring Workspace is in neither window's snapshot: the source omits it
+// from its saves the moment the invoke returns and the target writes only after
+// adoption. `sessions/arrivals.json` — a JSON array of
+// `{ workspaceId, from, to, workspace }` — is what a crash in that gap restores
+// it from. Its own file, never an entry planted in a snapshot: a tear-out
+// window that finds a snapshot boots as a restore (`bootFromTearOut`) and then
+// throws on adopting the same id, and a live target's own debounced flush
+// rewrites its file without anything it has not adopted yet. On the normal
+// path the record retires after both windows flush their new membership.
+
+const ARRIVALS_FILE: &str = "arrivals.json";
+// Serializes journal updates with snapshot writes and retirement checks. Never
+// acquired while emitting events; helpers below do not acquire it recursively.
+static ARRIVAL_DISK_LOCK: Mutex<()> = Mutex::new(());
+
+/// An adopted arrival stays recoverable until BOTH snapshots reflect the move.
+fn retire_saved_arrivals(dir: &Path) -> Result<(), String> {
+    let records = read_arrivals_from(dir)?;
+    let mut keep = Vec::new();
+    for record in &records {
+        let durable = (|| -> Result<bool, String> {
+            if record.get("settled").and_then(JsonValue::as_bool) != Some(true) { return Ok(false); }
+            let Some(id) = record_workspace_id(record) else { return Ok(false); };
+            let Some(from) = record.get("from").and_then(JsonValue::as_str) else { return Ok(false); };
+            let Some(to) = record.get("to").and_then(JsonValue::as_str) else { return Ok(false); };
+            let target_has = read_snapshot_from(dir, to)?.is_some_and(|s| workspaces::snapshot_ids(&s).iter().any(|v| v == id));
+            let source_has = read_snapshot_from(dir, from)?.is_some_and(|s| workspaces::snapshot_ids(&s).iter().any(|v| v == id));
+            Ok(if record.get("discarded").and_then(JsonValue::as_bool) == Some(true) {
+                !target_has && !source_has
+            } else { target_has && !source_has })
+        })();
+        if !matches!(durable, Ok(true)) { keep.push(record.clone()); }
+    }
+    if keep.len() != records.len() { write_arrivals_to(dir, &keep)?; }
+    Ok(())
+}
+
+fn mark_arrival_adopted_on_disk(dir: &Path, workspace_id: &str) -> Result<(), String> {
+    let _disk = guard(&ARRIVAL_DISK_LOCK);
+    let mut records = read_arrivals_from(dir)?;
+    for record in &mut records {
+        if record_workspace_id(record) == Some(workspace_id) { record["settled"] = JsonValue::Bool(true); }
+    }
+    write_arrivals_to(dir, &records)?;
+    retire_saved_arrivals(dir)
+}
+
+/// Refusal reverses the durable destination before the source is told to save.
+fn return_arrival_on_disk(dir: &Path, arrival: &routing::Arrival) -> Result<(), String> {
+    let _disk = guard(&ARRIVAL_DISK_LOCK);
+    let mut records = read_arrivals_from(dir)?;
+    records.retain(|r| record_workspace_id(r) != Some(&arrival.workspace_id));
+    records.push(serde_json::json!({
+        "workspaceId": arrival.workspace_id, "from": arrival.to, "to": arrival.from,
+        "workspace": arrival.payload["workspace"], "settled": true,
+    }));
+    write_arrivals_to(dir, &records)?;
+    retire_saved_arrivals(dir)
+}
+
+/// A deliberate close cancels recovery into this window. Keep a tombstone
+/// while another snapshot still contains the transferred Workspace, so boot
+/// removes that stale copy instead of resurrecting it in either window.
+fn close_window_snapshot(dir: &Path, label: &str) -> Result<(), String> {
+    let _disk = guard(&ARRIVAL_DISK_LOCK);
+    let mut records = read_arrivals_from(dir)?;
+    let mut changed = false;
+    for record in &mut records {
+        if record.get("to").and_then(JsonValue::as_str) == Some(label)
+            && record.get("settled").and_then(JsonValue::as_bool) == Some(true)
+        {
+            record["discarded"] = JsonValue::Bool(true);
+            changed = true;
+        }
+    }
+    if changed { write_arrivals_to(dir, &records)?; }
+    remove_session_from(dir, label)?;
+    retire_saved_arrivals(dir)
+}
+
+fn remove_workspace_from_disk(dir: &Path, label: &str, id: &str) -> Result<(), String> {
+    let Some(mut snapshot) = read_snapshot_from(dir, label)? else { return Ok(()); };
+    if !snapshot_without_workspace(&mut snapshot, id) { return Ok(()); }
+    if snapshot.get("workspaces").and_then(JsonValue::as_array).is_some_and(Vec::is_empty) {
+        remove_session_from(dir, label)
+    } else { write_session_to(dir, label, &snapshot.to_string()) }
+}
+
+fn arrivals_path(dir: &Path) -> PathBuf {
+    dir.join(ARRIVALS_FILE)
+}
+
+fn read_arrivals_from(dir: &Path) -> Result<Vec<JsonValue>, String> {
+    match std::fs::read_to_string(arrivals_path(dir)) {
+        Ok(contents) => serde_json::from_str::<Vec<JsonValue>>(&contents)
+            .map_err(|e| format!("unreadable {ARRIVALS_FILE}: {e}")),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(e) => Err(format!("read {ARRIVALS_FILE}: {e}")),
+    }
+}
+
+/// An empty list removes the file, so a run with nothing in flight leaves none.
+fn write_arrivals_to(dir: &Path, records: &[JsonValue]) -> Result<(), String> {
+    if records.is_empty() {
+        return match std::fs::remove_file(arrivals_path(dir)) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(format!("remove {ARRIVALS_FILE}: {e}")),
+        };
+    }
+    write_file_atomically(&arrivals_path(dir), &JsonValue::Array(records.to_vec()).to_string())
+}
+
+fn record_workspace_id(record: &JsonValue) -> Option<&str> {
+    record.get("workspaceId").and_then(JsonValue::as_str)
+}
+
+/// Append one arrival's record, replacing any earlier record of the same id.
+fn record_arrival_on_disk(dir: &Path, arrival: &routing::Arrival) -> Result<(), String> {
+    let _disk = guard(&ARRIVAL_DISK_LOCK);
+    let Some(workspace) = arrival.payload.get("workspace") else {
+        return Err("arrival payload carries no workspace".to_string());
+    };
+    let mut records = read_arrivals_from(dir)?;
+    records.retain(|record| record_workspace_id(record) != Some(&arrival.workspace_id));
+    records.push(serde_json::json!({
+        "workspaceId": arrival.workspace_id,
+        "from": arrival.from,
+        "to": arrival.to,
+        "workspace": workspace,
+    }));
+    write_arrivals_to(dir, &records)
+}
+
+/// Drop the record: the arrival settled, one way or the other. Adopted, the
+/// target flushes the Workspace itself; handed back, the source persists it
+/// again as soon as it clears the transferring mark. A no-op for an id that
+/// was never recorded.
+fn forget_arrival_on_disk(dir: &Path, workspace_id: &str) -> Result<(), String> {
+    let _disk = guard(&ARRIVAL_DISK_LOCK);
+    let mut records = read_arrivals_from(dir)?;
+    let before = records.len();
+    records.retain(|record| record_workspace_id(record) != Some(workspace_id));
+    if records.len() == before {
+        return Ok(());
+    }
+    write_arrivals_to(dir, &records)
+}
+
+/// `snapshot` (a `PersistedWindow`, or none for a window that never wrote one)
+/// with `workspace` in its list, replacing any entry of the same id. A snapshot
+/// created here holds just this Workspace, active.
+fn snapshot_with_workspace(
+    snapshot: Option<JsonValue>,
+    workspace: &JsonValue,
+) -> Result<JsonValue, String> {
+    let Some(id) = workspace.get("id").and_then(JsonValue::as_str) else {
+        return Err("arrival record names no workspace.id".to_string());
+    };
+    let mut snapshot = snapshot.unwrap_or_else(
+        || serde_json::json!({ "version": 1, "workspaces": [], "activeWorkspaceId": id }),
+    );
+    let workspaces = snapshot
+        .get_mut("workspaces")
+        .and_then(JsonValue::as_array_mut)
+        .ok_or_else(|| "snapshot has no workspaces list".to_string())?;
+    workspaces.retain(|entry| entry.get("id").and_then(JsonValue::as_str) != Some(id));
+    workspaces.push(workspace.clone());
+    Ok(snapshot)
+}
+
+/// Take `id` out of `snapshot`'s list; whether it was there.
+fn snapshot_without_workspace(snapshot: &mut JsonValue, id: &str) -> bool {
+    let Some(workspaces) = snapshot.get_mut("workspaces").and_then(JsonValue::as_array_mut) else {
+        return false;
+    };
+    let before = workspaces.len();
+    workspaces.retain(|entry| entry.get("id").and_then(JsonValue::as_str) != Some(id));
+    workspaces.len() != before
+}
+
+fn read_snapshot_from(dir: &Path, label: &str) -> Result<Option<JsonValue>, String> {
+    read_session_from(dir, label)?
+        .map(|contents| {
+            serde_json::from_str::<JsonValue>(&contents)
+                .map_err(|e| format!("unreadable snapshot for {label}: {e}"))
+        })
+        .transpose()
+}
+
+/// Every record still on disk at boot is a crash's leftover, so the Workspace
+/// is in no snapshot. Put it into its target's — a tear-out target that never
+/// opened gets a file, which the boot enumeration then reopens — and take it
+/// out of the source's where that still names it (the source crashed before its
+/// own flush), so it restores once. A source emptied that way is removed like
+/// a closed window: its last Workspace left. The file goes last, so a crash
+/// mid-merge replays it; a failed record stays for retry. An unreadable journal
+/// is logged and dropped because its entries cannot be recovered.
+fn restore_arrivals(dir: &Path) -> Result<(), String> {
+    let _disk = guard(&ARRIVAL_DISK_LOCK);
+    let records = match read_arrivals_from(dir) {
+        Ok(records) => records,
+        Err(e) => {
+            let _ = write_arrivals_to(dir, &[]);
+            return Err(e);
+        }
+    };
+    if records.is_empty() {
+        return Ok(());
+    }
+    let mut failed = Vec::new();
+    for record in &records {
+        if let Err(e) = restore_arrival(dir, record) {
+            append_log(format!("[window] retaining a record from {ARRIVALS_FILE}: {e}"));
+            failed.push(record.clone());
+        }
+    }
+    write_arrivals_to(dir, &failed)
+}
+
+/// One record of the boot merge above: into the target's snapshot, out of the
+/// source's.
+fn restore_arrival(dir: &Path, record: &JsonValue) -> Result<(), String> {
+    let fields = (
+        record_workspace_id(record),
+        record.get("from").and_then(JsonValue::as_str),
+        record.get("to").and_then(JsonValue::as_str),
+        record.get("workspace"),
+    );
+    let (Some(id), Some(from), Some(to), Some(workspace)) = fields else {
+        return Err("malformed record".to_string());
+    };
+    if record.get("discarded").and_then(JsonValue::as_bool) == Some(true) {
+        remove_workspace_from_disk(dir, from, id)?;
+        return remove_workspace_from_disk(dir, to, id);
+    }
+    append_log(format!(
+        "[window] {id} was in flight from {from} to {to} at the last exit; restoring it in {to}"
+    ));
+    // Read both before writing either. If trimming the source fails after the
+    // target write, restore its old bytes and retain the journal for retry.
+    let previous_target = read_snapshot_from(dir, to)?;
+    let source = read_snapshot_from(dir, from)?;
+    // Once adoption settled, the target may already hold a newer snapshot.
+    // Preserve that record while finishing the source side of the transaction.
+    let existing = previous_target.as_ref()
+        .and_then(|s| s.get("workspaces")).and_then(JsonValue::as_array)
+        .and_then(|entries| entries.iter().find(|entry| entry.get("id").and_then(JsonValue::as_str) == Some(id)));
+    let restore = if record.get("settled").and_then(JsonValue::as_bool) == Some(true) {
+        existing.unwrap_or(workspace)
+    } else { workspace };
+    let merged = snapshot_with_workspace(previous_target.clone(), restore)?;
+    write_session_to(dir, to, &merged.to_string())?;
+    let trim = (|| -> Result<(), String> {
+        let Some(mut source) = source else { return Ok(()); };
+        if !snapshot_without_workspace(&mut source, id) { return Ok(()); }
+        let emptied = source.get("workspaces").and_then(JsonValue::as_array).is_some_and(Vec::is_empty);
+        if emptied { remove_session_from(dir, from) }
+        else { write_session_to(dir, from, &source.to_string()) }
+    })();
+    if let Err(error) = trim {
+        let rollback = match previous_target {
+            Some(snapshot) => write_session_to(dir, to, &snapshot.to_string()),
+            None => std::fs::remove_file(dir.join(session_file_name(to))).map_err(|e| e.to_string()),
+        };
+        if let Err(e) = rollback { append_log(format!("[window] arrival rollback failed: {e}")); }
+        return Err(error);
+    }
+    Ok(())
+}
+
 /// The record one drop becomes.
 fn arrival_from(from: &str, to: &str, payload: JsonValue) -> Result<routing::Arrival, String> {
     let workspace_id = payload
@@ -2493,6 +2823,19 @@ fn begin_arrival(
         }
         windows.reassign(&arrival.terminal_ids, &arrival.to, true);
         routing::queue_arrival(&mut arrivals, arrival.clone());
+    }
+    // Recorded on disk here, in neither window's snapshot: the source omits a
+    // transferring Workspace from its saves and the target writes only after
+    // adoption, so a crash in the gap would otherwise restore it nowhere
+    // (§Arrival queue). Never fatal: a failed write is logged and the transfer
+    // proceeds.
+    match sessions_dir(app) {
+        Ok(dir) => {
+            if let Err(e) = record_arrival_on_disk(&dir, &arrival) {
+                append_log(format!("[window] could not record {} on disk: {e}", arrival.workspace_id));
+            }
+        }
+        Err(e) => append_log(format!("[window] {e}")),
     }
     spawn_arrival_watchdog(app.clone(), &arrival);
     Ok(())
@@ -2540,6 +2883,11 @@ fn hand_back_arrival(
         arrival.workspace_id, arrival.to, arrival.from
     ));
     if app.get_webview_window(&arrival.from).is_some() {
+        if let Ok(dir) = sessions_dir(app) {
+            if let Err(e) = return_arrival_on_disk(&dir, arrival) {
+                append_log(format!("[window] could not record hand-back: {e}"));
+            }
+        }
         windows.reassign(&arrival.terminal_ids, &arrival.from, false);
         let _ = app.emit_to(
             arrival.from.as_str(),
@@ -2547,6 +2895,11 @@ fn hand_back_arrival(
             serde_json::json!({ "workspaceId": arrival.workspace_id, "reason": reason }),
         );
         return;
+    }
+    if let Ok(dir) = sessions_dir(app) {
+        if let Err(e) = forget_arrival_on_disk(&dir, &arrival.workspace_id) {
+            append_log(format!("[window] could not forget orphaned arrival: {e}"));
+        }
     }
     // Both ends are gone, so these shells belong to no window and nothing would
     // ever paint them (`routing::owner`).
@@ -2561,7 +2914,7 @@ fn hand_back_arrival(
 /// The payload is *queued*, never emitted: an `emit_to` a window that does not
 /// exist yet is lost, so the new webview drains it with `take_arrivals` during
 /// its own boot (docs/specs/standalone.md §Arrival queue).
-#[tauri::command]
+#[tauri::command(async)]
 fn open_workspace_window(
     app: AppHandle,
     window: tauri::Window,
@@ -2607,6 +2960,9 @@ fn open_workspace_window(
             routing::take_arrival(&mut guard(&windows.arrivals), &workspace_id, &label)
         {
             windows.reassign(&arrival.terminal_ids, &arrival.from, false);
+            if let Ok(dir) = sessions_dir(&app) {
+                let _ = return_arrival_on_disk(&dir, &arrival);
+            }
         }
         return Err(err);
     }
@@ -2615,7 +2971,7 @@ fn open_workspace_window(
 }
 
 /// Move a Workspace into a window that already exists.
-#[tauri::command]
+#[tauri::command(async)]
 fn transfer_workspace(
     app: AppHandle,
     window: tauri::Window,
@@ -2694,7 +3050,7 @@ fn adopt_ready(
 ///
 /// One Workspace, one message: a source with two Workspaces in flight into the
 /// same window must not lose both because one of them landed.
-#[tauri::command]
+#[tauri::command(async)]
 fn adopt_done(
     app: AppHandle,
     window: tauri::Window,
@@ -2708,6 +3064,12 @@ fn adopt_done(
     )
     .ok_or_else(|| format!("no arrival of '{workspace_id}' into {}", window.label()))?;
     windows.clear_suppression(&arrival.terminal_ids);
+    // Keep the journal until source and target saves both reflect the move.
+    if let Ok(dir) = sessions_dir(&app) {
+        if let Err(e) = mark_arrival_adopted_on_disk(&dir, &workspace_id) {
+            append_log(format!("[window] could not forget {workspace_id} on disk: {e}"));
+        }
+    }
     append_log(format!(
         "[window] {workspace_id} adopted by {}; telling {}",
         arrival.to, arrival.from
@@ -2721,7 +3083,7 @@ fn adopt_done(
 }
 
 /// The target refused the arrival — its PTYs never answered, or the mount threw.
-#[tauri::command]
+#[tauri::command(async)]
 fn adopt_failed(
     app: AppHandle,
     window: tauri::Window,
@@ -2822,7 +3184,7 @@ async fn remove_window_session(window: tauri::Window) -> Result<(), String> {
     if let Some(windows) = app.try_state::<WindowState>() {
         windows.begin_closing(window.label());
     }
-    remove_session_from(&sessions_dir(app)?, window.label())
+    close_window_snapshot(&sessions_dir(app)?, window.label())
 }
 
 /// Which window is under the cursor, in that window's own logical client space.
@@ -2967,7 +3329,7 @@ fn window_close_cancel(window: tauri::Window, state: tauri::State<'_, QuitState>
 // nothing to end at all. Rust's half is the same either way; what separates the
 // two is what the webview did first, so the intent lives at the call sites
 // (standalone/src/window-close.ts, standalone/src/workspace-move.ts).
-#[tauri::command]
+#[tauri::command(async)]
 fn close_window(app: AppHandle, window: tauri::Window) {
     finish_window_close(&app, window.label());
 }
@@ -3590,34 +3952,42 @@ pub fn run() {
                         request_quit(app);
                     }
                 }
-                // The window is gone. Everything keyed by its label is settled
-                // here, and only here: this is the first moment Tauri has taken
-                // it out of `webview_windows()`.
+                // The window is gone: clear its label-keyed state here, after
+                // Tauri removes it from `webview_windows()`. Journal hand-backs
+                // run off-thread behind the approved-exit gate.
                 WindowEvent::Destroyed => {
                     let label = window.label().to_string();
-                    if let Some(state) = app.try_state::<WindowState>() {
-                        // Shells it still owned belong to nobody now, and
-                        // unowned output routes nowhere.
+                    let lost = if let Some(state) = app.try_state::<WindowState>() {
+                        // Drop label-keyed ownership synchronously; only the
+                        // returned arrivals need the blocking journal worker.
                         let (lost, orphaned) = state.drop_window(&label);
-                        // The webview is gone, so no save can arrive under this
-                        // label again and the refusal can go with it.
                         guard(&state.closing).remove(&label);
                         reap_orphaned_ptys(app, &label, orphaned);
-                        // A Workspace on its way here can never arrive: its
-                        // source still shows it, still holds its Sessions, and
-                        // has released nothing (§Arrival queue).
-                        for arrival in lost {
-                            hand_back_arrival(
-                                app,
-                                &state,
-                                &arrival,
-                                "the target window closed mid-arrival",
-                            );
-                        }
                         let changed = workspaces::forget_window(&mut guard(&state.registry), &label);
-                        if changed {
-                            broadcast_registry(app, &state);
+                        if changed { broadcast_registry(app, &state); }
+                        lost
+                    } else { Vec::new() };
+                    if !lost.is_empty() {
+                        if let Some(state) = app.try_state::<QuitState>() {
+                            guard(&state.cleanup).begin();
                         }
+                        let cleanup_app = app.clone();
+                        tauri::async_runtime::spawn_blocking(move || {
+                            if let Some(state) = cleanup_app.try_state::<WindowState>() {
+                                for arrival in lost {
+                                    hand_back_arrival(&cleanup_app, &state, &arrival,
+                                        "the target window closed mid-arrival");
+                                }
+                            }
+                            let finish_app = cleanup_app.clone();
+                            if let Err(err) = cleanup_app.run_on_main_thread(move || {
+                                let exit = finish_app.try_state::<QuitState>()
+                                    .is_some_and(|state| guard(&state.cleanup).finish());
+                                if exit { apply_quit_actions(&finish_app, vec![QuitAction::Exit]); }
+                            }) {
+                                append_log(format!("[quit] could not complete hand-back cleanup: {err}"));
+                            }
+                        });
                     }
                     if let Some(state) = app.try_state::<GeometryState>() {
                         state.forget(&label);
@@ -3701,6 +4071,13 @@ pub fn run() {
             // already up from the config; the rest are cloned from it.
             match sessions_dir(app.handle()) {
                 Ok(dir) => {
+                    // First: a Workspace in flight at the last exit is in no
+                    // snapshot until this puts it in its target's, and a
+                    // tear-out target's file must exist before the enumeration
+                    // below (§Arrival queue).
+                    if let Err(e) = restore_arrivals(&dir) {
+                        append_log(format!("[window] {e}"));
+                    }
                     let labels = routing::restorable_labels(session_file_names(&dir));
                     // Above every SAVED label too, not just the live ones: a
                     // torn-out window must never claim a snapshot still on disk.
@@ -3802,6 +4179,8 @@ pub fn run() {
                 if !quit_approved(app) {
                     api.prevent_exit();
                     request_quit(app);
+                } else if !exit_after_cleanup(app) {
+                    api.prevent_exit();
                 }
             }
             // Harmless after teardown: the PTY map is already empty, so the
@@ -3819,13 +4198,16 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        find_node_binary, notepad_archive_lock_path, open_ports_many_timeout,
-        read_notepad_archive_from, read_session_from, reset_notepad_archive_at,
-        resolve_dor_cli_paths, resolve_sidecar_path, session_file_name, state_root_from,
-        strip_windows_verbatim_prefix, sweep_orphan_session_temps, temp_write_path,
-        write_notepad_archive_to, write_session_to, NOTEPAD_ARCHIVE_FILE,
-        OPEN_PORT_TIMEOUT_MS, OPEN_PORT_TIMEOUT_PER_ID_MS, OPEN_PORT_ROUND_TRIP_MARGIN_MS, SESSION_TEMP_SUFFIX,
+        arrivals_path, find_node_binary, forget_arrival_on_disk, notepad_archive_lock_path,
+        open_ports_many_timeout, read_arrivals_from, read_notepad_archive_from,
+        read_session_from, record_arrival_on_disk, reset_notepad_archive_at,
+        resolve_dor_cli_paths, resolve_sidecar_path, restore_arrivals, session_file_name,
+        session_file_names, state_root_from, strip_windows_verbatim_prefix,
+        sweep_orphan_session_temps, temp_write_path, write_notepad_archive_to,
+        write_session_to, JsonValue, NOTEPAD_ARCHIVE_FILE, OPEN_PORT_TIMEOUT_MS,
+        OPEN_PORT_TIMEOUT_PER_ID_MS, OPEN_PORT_ROUND_TRIP_MARGIN_MS, SESSION_TEMP_SUFFIX,
     };
+    use super::routing;
     use super::guard;
     use std::collections::HashSet;
     use std::fs;
@@ -3864,6 +4246,292 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    // --- Pending arrivals on disk (§Arrival queue) ---------------------------
+
+    fn workspace_json(id: &str, name: &str) -> JsonValue {
+        serde_json::json!({ "id": id, "name": name, "session": { "version": 3, "panes": [] } })
+    }
+
+    fn arrival_of(id: &str, from: &str, to: &str) -> routing::Arrival {
+        routing::Arrival {
+            workspace_id: id.to_string(),
+            from: from.to_string(),
+            to: to.to_string(),
+            terminal_ids: Vec::new(),
+            payload: serde_json::json!({ "workspaceId": id, "workspace": workspace_json(id, "Moved") }),
+            queued_at: std::time::Instant::now(),
+        }
+    }
+
+    fn snapshot_json(entries: &[(&str, &str)], active: &str) -> String {
+        let workspaces: Vec<JsonValue> =
+            entries.iter().map(|(id, name)| workspace_json(id, name)).collect();
+        serde_json::json!({ "version": 1, "workspaces": workspaces, "activeWorkspaceId": active })
+            .to_string()
+    }
+
+    fn read_snapshot(dir: &Path, label: &str) -> Option<JsonValue> {
+        read_session_from(dir, label)
+            .unwrap()
+            .map(|contents| serde_json::from_str(&contents).unwrap())
+    }
+
+    fn snapshot_ids(snapshot: &JsonValue) -> Vec<String> {
+        super::workspaces::snapshot_ids(snapshot)
+    }
+
+    #[test]
+    fn an_arrival_record_round_trips_until_it_is_forgotten() {
+        let dir = TempDir::new("arrivals-round-trip");
+        // Nothing in flight is no file at all, and forgetting is then a no-op.
+        assert!(read_arrivals_from(dir.path()).unwrap().is_empty());
+        forget_arrival_on_disk(dir.path(), "workspace-7").unwrap();
+        assert!(!arrivals_path(dir.path()).exists());
+
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace-7", "main", "ws-2")).unwrap();
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace-8", "main", "ws-3")).unwrap();
+        // Recording the same id again replaces rather than duplicates.
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace-7", "main", "ws-2")).unwrap();
+        let records = read_arrivals_from(dir.path()).unwrap();
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[1]["workspaceId"], "workspace-7");
+        assert_eq!(records[1]["from"], "main");
+        assert_eq!(records[1]["to"], "ws-2");
+        assert_eq!(records[1]["workspace"]["name"], "Moved");
+        // Neither window's snapshot was touched.
+        assert!(read_session_from(dir.path(), "main").unwrap().is_none());
+        assert!(read_session_from(dir.path(), "ws-2").unwrap().is_none());
+        // The file is never a window the boot enumeration would reopen.
+        assert_eq!(
+            routing::restorable_labels(session_file_names(dir.path())),
+            Vec::<String>::new()
+        );
+
+        forget_arrival_on_disk(dir.path(), "workspace-7").unwrap();
+        let records = read_arrivals_from(dir.path()).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0]["workspaceId"], "workspace-8");
+        // Forgetting the last record removes the file.
+        forget_arrival_on_disk(dir.path(), "workspace-8").unwrap();
+        assert!(!arrivals_path(dir.path()).exists());
+    }
+
+    #[test]
+    fn a_leftover_arrival_boots_into_an_existing_target_snapshot() {
+        let dir = TempDir::new("arrivals-existing-target");
+        write_session_to(
+            dir.path(),
+            "main",
+            &snapshot_json(&[("workspace-2", "A"), ("workspace-7", "Stale")], "workspace-2"),
+        )
+        .unwrap();
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace-7", "ws-3", "main")).unwrap();
+
+        restore_arrivals(dir.path()).unwrap();
+
+        // Appended, or here replaced by id: the target keeps what it had and
+        // its own active Workspace.
+        let main = read_snapshot(dir.path(), "main").unwrap();
+        assert_eq!(snapshot_ids(&main), vec!["workspace-2", "workspace-7"]);
+        assert_eq!(main["activeWorkspaceId"], "workspace-2");
+        assert_eq!(main["workspaces"][1]["name"], "Moved");
+        // A source that never had a snapshot gets none.
+        assert!(read_session_from(dir.path(), "ws-3").unwrap().is_none());
+    }
+
+    #[test]
+    fn a_leftover_arrival_boots_into_a_tear_out_targets_new_snapshot() {
+        let dir = TempDir::new("arrivals-tear-out-target");
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace-7", "main", "ws-2")).unwrap();
+        assert!(read_session_from(dir.path(), "ws-2").unwrap().is_none());
+
+        restore_arrivals(dir.path()).unwrap();
+
+        let ws2 = read_snapshot(dir.path(), "ws-2").unwrap();
+        assert_eq!(snapshot_ids(&ws2), vec!["workspace-7"]);
+        assert_eq!(ws2["activeWorkspaceId"], "workspace-7");
+        assert_eq!(ws2["version"], 1);
+        // The window the merge created is one the boot enumeration reopens.
+        assert_eq!(routing::restorable_labels(session_file_names(dir.path())), vec!["ws-2"]);
+    }
+
+    #[test]
+    fn a_leftover_arrival_leaves_a_source_snapshot_that_still_names_it() {
+        let dir = TempDir::new("arrivals-source");
+        // The source crashed before its own flush omitted the Workspace.
+        write_session_to(
+            dir.path(),
+            "ws-3",
+            &snapshot_json(&[("workspace-7", "Docs"), ("workspace-8", "Keep")], "workspace-7"),
+        )
+        .unwrap();
+        // A source whose only Workspace left is a closed window.
+        write_session_to(dir.path(), "ws-4", &snapshot_json(&[("workspace-9", "Only")], "workspace-9"))
+            .unwrap();
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace-7", "ws-3", "main")).unwrap();
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace-9", "ws-4", "main")).unwrap();
+
+        restore_arrivals(dir.path()).unwrap();
+
+        let ws3 = read_snapshot(dir.path(), "ws-3").unwrap();
+        assert_eq!(snapshot_ids(&ws3), vec!["workspace-8"]);
+        assert!(read_session_from(dir.path(), "ws-4").unwrap().is_none());
+        let main = read_snapshot(dir.path(), "main").unwrap();
+        assert_eq!(snapshot_ids(&main), vec!["workspace-7", "workspace-9"]);
+        // Each id is now in exactly one snapshot.
+        assert_eq!(
+            routing::restorable_labels(session_file_names(dir.path())),
+            vec!["main", "ws-3"]
+        );
+    }
+
+    #[test]
+    fn adoption_keeps_the_journal_until_both_snapshots_are_durable() {
+        let dir = TempDir::new("arrival-commit");
+        write_session_to(dir.path(), "main", &snapshot_json(&[("workspace-7", "Moved")], "workspace-7")).unwrap();
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace-7", "main", "ws-2")).unwrap();
+        super::mark_arrival_adopted_on_disk(dir.path(), "workspace-7").unwrap();
+        assert_eq!(read_arrivals_from(dir.path()).unwrap().len(), 1);
+        write_session_to(dir.path(), "ws-2", &snapshot_json(&[("workspace-7", "Moved")], "workspace-7")).unwrap();
+        super::retire_saved_arrivals(dir.path()).unwrap();
+        assert_eq!(read_arrivals_from(dir.path()).unwrap().len(), 1);
+        write_session_to(dir.path(), "main", &snapshot_json(&[], "workspace-1")).unwrap();
+        super::retire_saved_arrivals(dir.path()).unwrap();
+        assert!(!arrivals_path(dir.path()).exists());
+    }
+
+    #[test]
+    fn a_hand_back_is_recovered_in_the_source_before_its_next_flush() {
+        let dir = TempDir::new("arrival-handback");
+        let arrival = arrival_of("workspace-7", "main", "ws-2");
+        record_arrival_on_disk(dir.path(), &arrival).unwrap();
+        super::return_arrival_on_disk(dir.path(), &arrival).unwrap();
+        assert_eq!(read_arrivals_from(dir.path()).unwrap()[0]["to"], "main");
+        restore_arrivals(dir.path()).unwrap();
+        assert_eq!(snapshot_ids(&read_snapshot(dir.path(), "main").unwrap()), vec!["workspace-7"]);
+        assert!(read_session_from(dir.path(), "ws-2").unwrap().is_none());
+    }
+
+    #[test]
+    fn closing_an_adopted_target_never_resurrects_either_copy() {
+        let dir = TempDir::new("arrival-target-close");
+        write_session_to(dir.path(), "main", &snapshot_json(&[("workspace-7", "Stale"), ("workspace-8", "Keep")], "workspace-8")).unwrap();
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace-7", "main", "ws-2")).unwrap();
+        super::mark_arrival_adopted_on_disk(dir.path(), "workspace-7").unwrap();
+        super::close_window_snapshot(dir.path(), "ws-2").unwrap();
+        restore_arrivals(dir.path()).unwrap();
+        assert!(read_session_from(dir.path(), "ws-2").unwrap().is_none());
+        assert_eq!(snapshot_ids(&read_snapshot(dir.path(), "main").unwrap()), vec!["workspace-8"]);
+        assert!(!arrivals_path(dir.path()).exists());
+    }
+
+    #[test]
+    fn every_approved_exit_path_checks_cleanup() {
+        let source = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
+        let action = source.split("QuitAction::Exit => {").nth(1).unwrap().split("app.exit(0)").next().unwrap();
+        assert!(action.contains("exit_after_cleanup(app)"));
+        let event = source.split("RunEvent::ExitRequested { api, .. } => {").nth(1).unwrap().split("RunEvent::Exit =>").next().unwrap();
+        assert!(event.contains("exit_after_cleanup(app)"));
+        let macos = include_str!("macos_terminate.rs");
+        let delegate = macos.split("if quit_approved(app) {").nth(1).unwrap().split("append_log(").next().unwrap();
+        assert!(delegate.contains("exit_after_cleanup(app)"));
+        assert!(delegate.contains("TerminateCancel"));
+    }
+
+    #[test]
+    fn stalled_cleanup_cannot_block_an_approved_exit_forever() {
+        let mut gate = super::CleanupGate::default();
+        gate.begin();
+        assert!(!gate.force_if_waiting()); // no quit requested yet
+        assert!(!gate.request_exit());
+        assert!(gate.force_if_waiting()); // cleanup watchdog expired
+        assert!(gate.request_exit());
+        assert!(gate.finish()); // late completion remains safe
+        assert!(!gate.force_if_waiting());
+    }
+
+    #[test]
+    fn quit_waits_for_every_destroyed_window_handback() {
+        let mut gate = super::CleanupGate::default();
+        gate.begin();
+        gate.begin();
+        assert!(!gate.request_exit());
+        assert!(!gate.finish());
+        assert!(!gate.request_exit());
+        assert!(gate.finish());
+        assert!(gate.request_exit());
+        gate.begin();
+        assert!(!gate.finish()); // ordinary close does not request a quit
+    }
+
+    #[test]
+    fn journal_commands_run_off_the_main_thread() {
+        let source = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap().replace("\r\n", "\n");
+        for command in ["transfer_workspace", "open_workspace_window", "adopt_done", "adopt_failed", "close_window"] {
+            assert!(source.contains(&format!("#[tauri::command(async)]\nfn {command}(")), "{command} must run off the UI thread");
+        }
+    }
+
+    #[test]
+    fn a_settled_recovery_preserves_the_targets_newer_snapshot() {
+        let dir = TempDir::new("arrival-newer-target");
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace-7", "main", "ws-2")).unwrap();
+        super::mark_arrival_adopted_on_disk(dir.path(), "workspace-7").unwrap();
+        write_session_to(dir.path(), "ws-2", &snapshot_json(&[("workspace-7", "Renamed after adoption")], "workspace-7")).unwrap();
+        restore_arrivals(dir.path()).unwrap();
+        assert_eq!(read_snapshot(dir.path(), "ws-2").unwrap()["workspaces"][0]["name"], "Renamed after adoption");
+    }
+
+    #[test]
+    fn a_failed_source_write_rolls_back_the_target_and_retries() {
+        let dir = TempDir::new("arrival-source-write");
+        write_session_to(dir.path(), "main", &snapshot_json(&[("workspace-7", "Moved"), ("workspace-8", "Keep")], "workspace-8")).unwrap();
+        let before = snapshot_json(&[("workspace-9", "Target")], "workspace-9");
+        write_session_to(dir.path(), "ws-2", &before).unwrap();
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace-7", "main", "ws-2")).unwrap();
+        let blocked = temp_write_path(&dir.path().join(session_file_name("main")));
+        fs::create_dir(&blocked).unwrap();
+        restore_arrivals(dir.path()).unwrap();
+        assert_eq!(read_snapshot(dir.path(), "ws-2").unwrap(), serde_json::from_str::<serde_json::Value>(&before).unwrap());
+        assert_eq!(read_arrivals_from(dir.path()).unwrap().len(), 1);
+        fs::remove_dir(blocked).unwrap();
+        restore_arrivals(dir.path()).unwrap();
+        assert!(!arrivals_path(dir.path()).exists());
+        assert_eq!(snapshot_ids(&read_snapshot(dir.path(), "main").unwrap()), vec!["workspace-8"]);
+    }
+
+    #[test]
+    fn an_unreadable_source_retains_the_record_without_changing_the_target() {
+        let dir = TempDir::new("arrival-retry");
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace-7", "main", "ws-2")).unwrap();
+        write_session_to(dir.path(), "main", "broken json").unwrap();
+        restore_arrivals(dir.path()).unwrap();
+        assert!(read_session_from(dir.path(), "ws-2").unwrap().is_none());
+        assert_eq!(read_arrivals_from(dir.path()).unwrap().len(), 1);
+        write_session_to(dir.path(), "main", &snapshot_json(&[("workspace-7", "Moved")], "workspace-7")).unwrap();
+        restore_arrivals(dir.path()).unwrap();
+        assert!(!arrivals_path(dir.path()).exists());
+        assert_eq!(snapshot_ids(&read_snapshot(dir.path(), "ws-2").unwrap()), vec!["workspace-7"]);
+    }
+
+    #[test]
+    fn the_arrivals_file_is_gone_after_the_boot_merge() {
+        let dir = TempDir::new("arrivals-gone");
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace-7", "main", "ws-2")).unwrap();
+        assert!(arrivals_path(dir.path()).exists());
+
+        restore_arrivals(dir.path()).unwrap();
+        assert!(!arrivals_path(dir.path()).exists());
+        // Idempotent: a second boot has nothing to merge and changes nothing.
+        restore_arrivals(dir.path()).unwrap();
+        assert_eq!(snapshot_ids(&read_snapshot(dir.path(), "ws-2").unwrap()), vec!["workspace-7"]);
+
+        // An unreadable file is dropped rather than replayed on every launch.
+        fs::write(arrivals_path(dir.path()), "{not json").unwrap();
+        assert!(restore_arrivals(dir.path()).is_err());
+        assert!(!arrivals_path(dir.path()).exists());
     }
 
     /// The Windows half of `restrict_to_owner`: after it runs, the DACL must be

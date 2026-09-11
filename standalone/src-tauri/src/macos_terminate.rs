@@ -18,7 +18,7 @@ use objc2_app_kit::{NSApplication, NSApplicationTerminateReply};
 use std::sync::OnceLock;
 use tauri::AppHandle;
 
-use crate::{append_log, quit_approved, request_quit};
+use crate::{append_log, exit_after_cleanup, quit_approved, request_quit};
 
 /// The handle the spliced method answers on behalf of. Set once, at `Ready`.
 static APP: OnceLock<AppHandle> = OnceLock::new();
@@ -33,7 +33,7 @@ const SHOULD_TERMINATE_TYPES: &[u8] = b"L@:@\0";
 ///
 /// Answers `Cancel` and starts the flow the first time; the flow's own
 /// `app.exit(0)` comes back through here with the quit already approved, and
-/// that pass answers `Now`. Panic-free by construction: the release profile
+/// that pass answers `Now` once the bounded hand-back cleanup gate permits it. Panic-free by construction: the release profile
 /// aborts on unwind, and this runs inside AppKit's stack.
 unsafe extern "C-unwind" fn should_terminate(
     _this: *mut AnyObject,
@@ -45,7 +45,11 @@ unsafe extern "C-unwind" fn should_terminate(
         return NSApplicationTerminateReply::TerminateNow;
     };
     if quit_approved(app) {
-        return NSApplicationTerminateReply::TerminateNow;
+        return if exit_after_cleanup(app) {
+            NSApplicationTerminateReply::TerminateNow
+        } else {
+            NSApplicationTerminateReply::TerminateCancel
+        };
     }
     append_log("[quit] intercepted an AppKit terminate (Dock, logout, or script)");
     request_quit(app);

@@ -450,16 +450,22 @@ by `the_geometry_flush_slot_is_released_with_the_drain`.
 
 ### What a window's `Destroyed` settles
 
-**Everything keyed by a label is settled in the `Destroyed` arm, and only
-there**: Tauri takes the label out of `webview_windows()` at that moment and not
-before, so a `burrow:windows` push sent ahead of it names a window that can never
-answer — and every ask then waits out its whole budget. The arm forgets the
-window's PTY ownership and reaps what it still owned, hands back every arrival it
-will never take (§Arrival queue), drops the save refusal (nothing can save under
-a dead label), forgets its geometry, tells the quit machine (§Quit flow) and
-pushes the live labels to the sidecar. **An arriving Workspace's shells are taken
-out of the reap first**: they belong to its source again, which is still showing
-those terminals.
+**Must clear label-keyed ownership, registry, geometry, and close state in the
+`Destroyed` arm**, when Tauri has removed the window from `webview_windows()`.
+**Must remove incoming arrivals from the reap before killing orphaned PTYs**;
+the source still holds those Sessions. Hand-backs run in a blocking worker that
+reports completion on the main thread. **Must defer every approved exit until all
+such workers have completed**, including exit requested through the quit walk
+or Tauri/AppKit (`every_approved_exit_path_checks_cleanup`;
+`quit_waits_for_every_destroyed_window_handback` pins the counter). **Must force an
+approved exit after `QUIT_PHASE_TIMEOUT_MS` waiting for cleanup**, logging the
+timeout; a stalled disk operation or completion callback cannot trap the app
+(`stalled_cleanup_cannot_block_an_approved_exit_forever`). The arm updates the
+quit machine and sends the remaining live labels to the sidecar; the Burrow’s
+ask collector must never wait for a window that cannot answer.
+
+Source of truth: `CleanupGate` and `WindowEvent::Destroyed` in
+`standalone/src-tauri/src/lib.rs`.
 
 ### Per-window close
 
@@ -624,6 +630,31 @@ below reads that record rather than inferring itself from the suppression map.
 - **A boot's `pty_request_init` excludes every id an arrival claims.** Ownership
   moves at the invoke, so those shells would otherwise be listed as top-level
   panes beside the Workspace about to mount them.
+- **`begin_arrival` records the arrival in `sessions/arrivals.json`** — a JSON
+  array of `{ workspaceId, from, to, workspace }`, never an entry in either
+  window's snapshot (rationale). **Must retain an adopted record until target
+  and source snapshots both reflect the move**, marking it settled at
+  `adopt_done` and checking after each `save_session` or source-window close
+  (`adoption_keeps_the_journal_until_both_snapshots_are_durable`). **Must reverse
+  the durable destination on hand-back and retain the record until both
+  snapshots reflect the return** (`a_hand_back_is_recovered_in_the_source_before_its_next_flush`).
+  **Must tombstone settled arrivals into a deliberately closed Window until
+  both snapshots omit them**, including during boot recovery
+  (`closing_an_adopted_target_never_resurrects_either_copy`).
+  A record left at boot is merged into its recorded destination before `restore_windows` — a tear-out target gets a file
+  holding just it, active; a source snapshot still naming the id loses it, an
+  emptied one is removed — so the Workspace restores once, with fresh shells,
+  and successful records are deleted; **must retain failed records for retry
+  and roll back the target if trimming the source fails**. **Must preserve a
+  settled arrival’s newer target record during boot recovery**
+  (`an_arrival_record_round_trips_until_it_is_forgotten`,
+  `a_leftover_arrival_boots_into_an_existing_target_snapshot`,
+  `a_leftover_arrival_boots_into_a_tear_out_targets_new_snapshot`,
+  `a_leftover_arrival_leaves_a_source_snapshot_that_still_names_it`,
+  `the_arrivals_file_is_gone_after_the_boot_merge`).
+- **Must run journal I/O and its lock waits off the main thread**, including
+  transfer/settlement/close commands and destroyed-window cleanup
+  (`journal_commands_run_off_the_main_thread`).
 - **An arrival unadopted after `ARRIVAL_MAX` is handed back** by a watchdog armed
   at `begin_arrival`, retiring only the record it was armed for (`queued_at`):
   a target alive but wedged never reaches `adopt_failed` or `Destroyed`, and the
@@ -632,10 +663,12 @@ below reads that record rather than inferring itself from the suppression map.
 
 Source of truth: `Arrival` / `sweep_awaiting` / `expire_arrival` / `boot_list_ids` in
 `standalone/src-tauri/src/routing.rs`; `begin_arrival` / `adopt_ready` /
-`adopt_done` / `adopt_failed` / `hand_back_arrival` in
+`adopt_done` / `adopt_failed` / `hand_back_arrival` / `record_arrival_on_disk` /
+`forget_arrival_on_disk` / `restore_arrivals` in
 `standalone/src-tauri/src/lib.rs`; `standalone/src/workspace-move.ts`;
 `markWorkspaceTransferring` in `lib/src/lib/window-session-aggregator.ts`.
-Pinned by `standalone/src/workspace-move.test.ts` and the arrival tests in
+Pinned by `standalone/src/workspace-move.test.ts`, the disk tests in
+`standalone/src-tauri/src/lib.rs`, and the arrival tests in
 `standalone/src-tauri/src/routing.rs`.
 
 ### Dragging a Workspace between windows
@@ -749,7 +782,8 @@ written.
 - **The writer removes its own temp file on every error path**, so only a crash
   can leave one behind.
 - **A per-window close removes the blob, its temp sibling and its geometry**
-  (§Per-window close); nothing else deletes a snapshot.
+  (§Per-window close); nothing else deletes a snapshot but the boot merge
+  (§Arrival queue).
 - **`sweep_orphan_session_temps` runs once in `setup()`** and deletes every
   `<label>.json.tmp` — the legacy and hard-crash migration, given the rule above.
   `SESSION_TEMP_SUFFIX` is pinned against the writer by
@@ -881,9 +915,9 @@ Every trigger funnels into `request_quit(app)`:
 | Arm | Fired by | Guard |
 |---|---|---|
 | `WindowEvent::CloseRequested` | the window close button | `api.prevent_close()` unless the quit is approved. Refused outright while the walk is running: a window taken out from under its own teardown leaves the walk emitting to a dead label. Only the **last** window's close is a quit; every other one is a per-window close (§Windows) |
-| `RunEvent::ExitRequested` | a window-level exit request | `api.prevent_exit()` unless approved. The event's `code` is ignored: the `approved` gate alone is what lets the flow's own terminating `app.exit(0)` through without re-catching it |
+| `RunEvent::ExitRequested` | a window-level exit request | `api.prevent_exit()` unless approved and cleared by the bounded cleanup gate (§What a window's `Destroyed` settles). The event's `code` is ignored |
 | the app menu's Quit item | the menu, and its `Cmd+Q` accelerator | a **custom** `MenuItem`, never `PredefinedMenuItem::quit`, whose event calls `request_quit`; muda wires the predefined one straight to AppKit's `terminate:` (macOS; rationale) |
-| `applicationShouldTerminate:` | the Dock's Quit, `osascript`, logout, restart | spliced onto tao's live delegate class at `Ready`, answering `NSTerminateCancel` and starting the flow, then `NSTerminateNow` once the flow's own `app.exit(0)` comes back through it (macOS; rationale) |
+| `applicationShouldTerminate:` | the Dock's Quit, `osascript`, logout, restart | spliced onto tao's live delegate class at `Ready`, answering `NSTerminateCancel` and starting the flow, then `NSTerminateNow` once approved and cleared by the bounded cleanup gate (§What a window's `Destroyed` settles; macOS; rationale) |
 
 Source of truth: `standalone/src-tauri/src/macos_terminate.rs`.
 
@@ -924,6 +958,9 @@ wedged webview, in three phases:
 | 1 — ack | some window has not acked | ~2 s; a listener is dead ⇒ log and `app.exit(0)` |
 | 2 — voting | acked, no window walking yet | **none** — a window may be parked on its confirmation dialog waiting on a human, who must never be force-quit out from under it. Only `quit_proceed` (`approved`) or `quit_cancel`/repeat-trigger (`seq` bump) ends the wait |
 | 3 — walking | one window tearing down | **per phase**, ~14 s, refreshed by its `quit_progress` bumps *and* by the walk advancing to the next window, so each phase and each window gets its own budget; no progress for the budget ⇒ log and exit |
+
+Approved exits from these watchdogs also pass the bounded cleanup gate
+(§What a window’s `Destroyed` settles).
 
 Phase 3's budget comfortably exceeds the webview's own teardown ceiling. Each
 watchdog captures the `seq` it was spawned for, so a **repeated quit trigger** —

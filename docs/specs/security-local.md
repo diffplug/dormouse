@@ -139,7 +139,9 @@ behind is `docs/specs/security-remote.md` -> "Credentials at rest".
 persists one window's structure per file as `<state root>/sessions/<label>.json`
 — panes, cwds, titles, doors, layout, TODO flags, never terminal text
 (`docs/specs/standalone.md` -> "Persistence"), plus a
-`<label>.geometry.json` sibling holding that window's box and nothing else.
+`<label>.geometry.json` sibling holding that window's box and nothing else, and
+`arrivals.json`, the Workspaces mid-transfer between windows, written the same way
+(`docs/specs/standalone.md` -> "Arrival queue").
 `restrict_to_owner` locks the directory and, *first*, the temp file renamed into
 it, applying a protected single-ACE DACL on Windows where a unix mode is a
 silent no-op. The same helper
