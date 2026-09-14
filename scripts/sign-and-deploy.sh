@@ -629,6 +629,12 @@ sign_macos_app() {
         || error "Signed Node sidecar failed to launch"
     (cd "$sidecar_dir" && "$node_sidecar" -e "require('node-pty')") \
         || error "Signed Node sidecar failed to load node-pty"
+    # The direct path's addon, loaded through the same bare specifier the
+    # sidecar uses. Its own `.node` is signed by the sweep above, but only a
+    # load proves the hardened runtime lets it open one — and nothing before a
+    # phone's first `direct-offer` on a user's machine would otherwise find out.
+    (cd "$sidecar_dir" && "$node_sidecar" -e "require('node-datachannel/polyfill')") \
+        || error "Signed Node sidecar failed to load node-datachannel"
 
     log "macOS signing complete ($arch_label)"
 }

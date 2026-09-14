@@ -47,6 +47,7 @@ import {
   DELIVERY_ID_BYTE_LENGTH,
   type ConnectionOutcomeV1,
   type ConnectionPolicy,
+  type DirectSignalV1,
   type E2eRelayToBurrowFrame,
   type BurrowAclRecord,
   type BurrowFrame,
@@ -57,9 +58,12 @@ import {
   type PresenceBinding,
   type SealedPushV1,
   type RelayToBurrowFrame,
+  type TransportReceipt,
 } from 'remote-lib-common';
 import type { BurrowEnrollment } from './enrollment';
 import { createSerialQueue } from '../../host/remote/serial-queue';
+import { DirectEndpoint } from '../direct/direct-endpoint';
+import type { DirectPeerFactory } from '../direct/direct-peer';
 import { realTimer, type RemoteTimer, type RemoteWebSocket } from '../ws';
 import { loadBurrowAcl } from './acl';
 import type { PendingPairing } from './pairing-approval';
@@ -212,8 +216,17 @@ interface EstablishedSession {
   readonly api: RemoteApiSessionLike;
   /** The IK-authenticated Client static — what the session cap is keyed on. */
   readonly clientStaticPublicKey: string;
-  /** When this Burrow last **decrypted** a Client→Burrow transport message here. */
+  /**
+   * When this Burrow last **decrypted** a Client→Burrow transport message here,
+   * on either path: the idle deadline is path-agnostic.
+   */
   lastClientActivityAt: number;
+  /**
+   * This session's direct path, as the answerer runs it. Created with the
+   * session and disposed with it, so a peer connection can neither precede
+   * authorization nor outlive it.
+   */
+  readonly direct: DirectEndpoint;
 }
 
 /** Per-client lifecycle state tracked by the Burrow, keyed by clientId. */
@@ -281,6 +294,13 @@ export interface BurrowOptions {
   setTimer?: RemoteTimer;
   /** Auto-reconnect with backoff (default true; tests pass false). */
   reconnect?: boolean;
+  /**
+   * How this host builds a peer connection for the direct path
+   * (`docs/specs/remote-api.md` → Transport → "Direct path"), or `null` where it
+   * has none. Absent, every `direct-offer` is declined and every session stays
+   * relayed.
+   */
+  createDirectPeer?: DirectPeerFactory;
 }
 
 const INITIAL_BACKOFF_MS = 1_000;
@@ -302,6 +322,7 @@ export class BurrowRuntime {
   readonly #now: () => number;
   readonly #setTimer: RemoteTimer;
   readonly #reconnect: boolean;
+  readonly #createDirectPeer: DirectPeerFactory | null;
 
   /**
    * Per-client lifecycle state keyed by clientId. Folding the three concerns
@@ -418,6 +439,7 @@ export class BurrowRuntime {
     this.#onInvitationChanged = options.onInvitationChanged ?? (() => {});
     this.#setTimer = options.setTimer ?? realTimer;
     this.#reconnect = options.reconnect ?? true;
+    this.#createDirectPeer = options.createDirectPeer ?? null;
   }
 
   get status(): BurrowStatus {
@@ -1315,7 +1337,10 @@ export class BurrowRuntime {
     const state = this.#clients.get(frame.clientId);
     if (!state) return;
     if (state.established?.connectionId === frame.id) {
-      this.#onEstablishedFrame(frame.clientId, state.established, frame.ct);
+      // Every rule about a frame on an authorized session — which path may
+      // carry it, and that its `ct` must decode — is the endpoint's
+      // (`docs/specs/remote-api.md` → Transport → "Direct path").
+      state.established.direct.onRelayFrame(frame.ct);
       return;
     }
     const pending = state.connection;
@@ -1413,8 +1438,9 @@ export class BurrowRuntime {
     // Cleared with the dispose, not merely overwritten below: without a session
     // factory there is no replacement, and a leftover reference would route the
     // next frame on the old id into a handler that has already been disposed.
-    state.established?.api.dispose();
-    state.established = undefined;
+    // Never `#disposeEstablished`, whose prune would detach the `state` this
+    // promotion is about to write into.
+    this.#clearEstablished(state);
     this.#sendControl(clientId, 'connection', pending.connectionId, pending.session, {
       ok: true,
       burrowLabel: boundedBurrowLabel(this.#enrollment.label),
@@ -1425,23 +1451,41 @@ export class BurrowRuntime {
       this.#pruneClient(clientId);
       return;
     }
-    // Destructured, so the `send` closure retains only what an established
+    // Destructured, so the endpoint's closures retain only what an established
     // session is — the id and the two cipher states — and not the pending
     // record, whose handshake hash, Client static and challenge are spent.
     const { connectionId, session, clientStaticPublicKey } = pending;
+    // Declared first so the send path and the endpoint's liveness check can both
+    // name the session they belong to; assigned before any frame can reach it.
+    let established: EstablishedSession;
     const api = this.#createSession({
       burrowId: this.#enrollment.burrowId,
       send: (payload) => {
-        this.#sendApp(clientId, connectionId, session, payload);
+        this.#sendApp(clientId, established, payload);
       },
     });
-    state.established = {
+    const direct = new DirectEndpoint('answerer', {
+      createPeer: this.#createDirectPeer,
+      sendSignal: (signal) => this.#sendControl(clientId, 'connection', connectionId, session, signal),
+      sendRelay: (ciphertext) =>
+        this.#sendE2e(clientId, 'connection', connectionId, 'transport', ciphertext),
+      receive: (ciphertext) => this.#receiveOnSession(clientId, established, ciphertext),
+      fatal: (reason) => {
+        console.warn(`[burrow] the direct path ended this session: ${reason}`);
+        this.#disposeEstablished(clientId);
+      },
+      isCurrent: () => this.#clients.get(clientId)?.established === established,
+      setTimer: this.#setTimer,
+    });
+    established = {
       connectionId,
       session,
       api,
       clientStaticPublicKey,
       lastClientActivityAt: this.#now(),
+      direct,
     };
+    state.established = established;
     this.#armReaper();
   }
 
@@ -1530,21 +1574,30 @@ export class BurrowRuntime {
     }
   }
 
-  /** One transport frame on an authorized session: protocol-v1, or a keepalive. */
-  #onEstablishedFrame(clientId: string, established: EstablishedSession, ct: string): void {
-    let receipt;
+  /**
+   * Decrypt one transport ciphertext, whichever path carried it — protocol-v1,
+   * a keepalive, or one of the direct path's signals — and answer the receipt
+   * for the endpoint to read a signal out of.
+   */
+  #receiveOnSession(
+    clientId: string,
+    established: EstablishedSession,
+    ciphertext: Uint8Array,
+  ): TransportReceipt | null {
+    let receipt: TransportReceipt;
     try {
-      receipt = established.session.receive(fromBase64Url(ct));
+      receipt = established.session.receive(ciphertext);
     } catch {
       // A failed decrypt is not activity: it proves only that *something*
-      // reached the relay, and the session is dead either way.
+      // reached this Burrow, and the session is dead either way.
       this.#disposeEstablished(clientId);
-      return;
+      return null;
     }
     // The one thing that refreshes the idle deadline, keepalive or application
-    // data alike (`docs/specs/remote-security-model.md` → Burrow bounds).
+    // data alike, and on either path
+    // (`docs/specs/remote-security-model.md` → Burrow bounds).
     established.lastClientActivityAt = this.#now();
-    if (receipt.kind !== 'app') return;
+    if (receipt.kind !== 'app') return receipt;
     for (const message of receipt.messages) {
       let payload: unknown;
       try {
@@ -1561,25 +1614,31 @@ export class BurrowRuntime {
       // session from inside this loop. Handing the rest of the receipt to an
       // api that is already disposed would leave whatever it allocates with no
       // owner left to tear it down.
-      if (this.#clients.get(clientId)?.established !== established) return;
+      if (this.#clients.get(clientId)?.established !== established) return null;
     }
+    return receipt;
   }
 
-  #sendApp(
-    clientId: string,
-    connectionId: string,
-    session: NoiseTransportSession,
-    payload: unknown,
-  ): void {
+  /**
+   * One protocol-v1 message on an established session, chunked as it needs.
+   * **The endpoint routes every chunk**, relay or channel, so which path carries
+   * them is {@link DirectEndpoint.send}'s rule rather than this loop's.
+   */
+  #sendApp(clientId: string, established: EstablishedSession, payload: unknown): void {
+    const { session, direct } = established;
     try {
       for (const ciphertext of session.sendApp(utf8Encode(JSON.stringify(payload)))) {
-        this.#sendE2e(clientId, 'connection', connectionId, 'transport', ciphertext);
+        // A channel that refuses a chunk disposes this session synchronously,
+        // and so does the promotion that replaces it: the rest of the message
+        // has no session left to belong to, and must reach neither path.
+        if (direct.disposed) return;
+        direct.send(ciphertext);
       }
     } catch {
       // **Only a poisoned session is burrow loss.** An over-cap message is
       // refused before the first `encryptWithAd`, so no ciphertext exists and
       // no counter moved; disposing there would turn a caller's size error into
-      // a re-handshake, re-entrantly from inside `#onEstablishedFrame`'s loop.
+      // a re-handshake, re-entrantly from inside `#receiveOnSession`'s loop.
       if (!session.isPoisoned) {
         console.warn('[burrow] discarding an application message the transport refused');
         return;
@@ -1591,32 +1650,45 @@ export class BurrowRuntime {
   #disposeEstablished(clientId: string): void {
     const state = this.#clients.get(clientId);
     if (!state?.established) return;
+    this.#clearEstablished(state);
+    this.#pruneClient(clientId);
+  }
+
+  /**
+   * Tear one established session down and clear the slot, leaving the entry
+   * itself to the caller — a promotion is about to fill it, a disposal prunes.
+   */
+  #clearEstablished(state: ClientState): void {
+    if (!state.established) return;
+    state.established.direct.dispose();
     state.established.api.dispose();
     state.established = undefined;
-    this.#pruneClient(clientId);
   }
 
   // --- Shared plumbing -----------------------------------------------------
 
   /**
-   * One control message on a ceremony session; the transport pads every one to
-   * the same size (`docs/specs/relay.md` → E2E framing).
+   * One control message on a ceremony or established session — an outcome, or
+   * one of the direct path's signals, which ride the relay until the switch.
+   * The transport pads every one to the same size (`docs/specs/relay.md` → E2E
+   * framing). Answers `false` for a poisoned session, which has nothing to say.
    */
   #sendControl(
     clientId: string,
     kind: 'pairing' | 'connection',
     id: string,
     session: NoiseTransportSession,
-    value: PairingOutcomeV1 | ConnectionOutcomeV1,
-  ): void {
+    value: PairingOutcomeV1 | ConnectionOutcomeV1 | DirectSignalV1,
+  ): boolean {
     let ciphertext: Uint8Array;
     try {
       ciphertext = session.sendControl({ ...value });
     } catch {
-      // A poisoned session has nothing to say; the caller disposes it anyway.
-      return;
+      // Whatever poisoned it disposes it; the caller need not.
+      return false;
     }
     this.#sendE2e(clientId, kind, id, 'transport', ciphertext);
+    return true;
   }
 
   /** Forget a client that holds nothing, so a relay-chosen key cannot accumulate. */
