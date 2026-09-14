@@ -326,8 +326,8 @@ importers:
         specifier: 0.33.2
         version: 0.33.2
       '@node-datachannel/linux-arm64-gnu':
-        specifier: 0.33.2
-        version: 0.33.2
+        specifier: 0.33.4
+        version: 0.33.4
       '@node-datachannel/linux-x64-gnu':
         specifier: 0.33.2
         version: 0.33.2
@@ -1267,6 +1267,12 @@ packages:
 
   '@node-datachannel/linux-arm64-gnu@0.33.2':
     resolution: {integrity: sha512-YWAu3EiMl2HRi/fwWlfFTW30wFTkRVYJWRHQcI1uDSeZYG/tfyBqBy6CRy9Sgrb0xjOYZ6XhLDj8cdX0foPlpg==}
+    cpu: [arm64]
+    os: [linux]
+    libc: [glibc]
+
+  '@node-datachannel/linux-arm64-gnu@0.33.4':
+    resolution: {integrity: sha512-rR4yjwxpI1miLSrruLGcfR9yfw0Qebw+Twt+u+lKsL9SwmXxTm5pJhUAa9RU+c35oZ98IyAxGFjRwwq85BTbog==}
     cpu: [arm64]
     os: [linux]
     libc: [glibc]
@@ -5557,6 +5563,9 @@ snapshots:
     optional: true
 
   '@node-datachannel/linux-arm64-gnu@0.33.2':
+    optional: true
+
+  '@node-datachannel/linux-arm64-gnu@0.33.4':
     optional: true
 
   '@node-datachannel/linux-arm64-musl@0.33.2':
