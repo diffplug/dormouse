@@ -22,42 +22,42 @@
   },
   {
     "name": "@node-datachannel/darwin-arm64",
-    "version": "0.33.2",
+    "version": "0.33.4",
     "license": "MPL 2.0",
     "author": "Murat Doğan, Paul-Louis Ageneau",
     "homepage": "https://github.com/murat-dogan/node-datachannel"
   },
   {
     "name": "@node-datachannel/darwin-x64",
-    "version": "0.33.2",
+    "version": "0.33.4",
     "license": "MPL 2.0",
     "author": "Murat Doğan, Paul-Louis Ageneau",
     "homepage": "https://github.com/murat-dogan/node-datachannel"
   },
   {
     "name": "@node-datachannel/linux-arm64-gnu",
-    "version": "0.33.2",
+    "version": "0.33.4",
     "license": "MPL 2.0",
     "author": "Murat Doğan, Paul-Louis Ageneau",
     "homepage": "https://github.com/murat-dogan/node-datachannel"
   },
   {
     "name": "@node-datachannel/linux-x64-gnu",
-    "version": "0.33.2",
+    "version": "0.33.4",
     "license": "MPL 2.0",
     "author": "Murat Doğan, Paul-Louis Ageneau",
     "homepage": "https://github.com/murat-dogan/node-datachannel"
   },
   {
     "name": "@node-datachannel/win32-arm64-msvc",
-    "version": "0.33.2",
+    "version": "0.33.4",
     "license": "MPL 2.0",
     "author": "Murat Doğan, Paul-Louis Ageneau",
     "homepage": "https://github.com/murat-dogan/node-datachannel"
   },
   {
     "name": "@node-datachannel/win32-x64-msvc",
-    "version": "0.33.2",
+    "version": "0.33.4",
     "license": "MPL 2.0",
     "author": "Murat Doğan, Paul-Louis Ageneau",
     "homepage": "https://github.com/murat-dogan/node-datachannel"
@@ -309,7 +309,7 @@
   },
   {
     "name": "node-datachannel",
-    "version": "0.33.2",
+    "version": "0.33.4",
     "license": "MPL 2.0",
     "author": "Murat Doğan, Paul-Louis Ageneau",
     "homepage": "https://github.com/murat-dogan/node-datachannel#readme"
