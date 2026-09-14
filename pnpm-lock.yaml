@@ -313,30 +313,30 @@ importers:
         specifier: 2.1.2
         version: 2.1.2
       node-datachannel:
-        specifier: 0.33.2
-        version: 0.33.2
+        specifier: 0.33.4
+        version: 0.33.4
       node-pty:
         specifier: 1.2.0-beta.15
         version: 1.2.0-beta.15
     optionalDependencies:
       '@node-datachannel/darwin-arm64':
-        specifier: 0.33.2
-        version: 0.33.2
+        specifier: 0.33.4
+        version: 0.33.4
       '@node-datachannel/darwin-x64':
-        specifier: 0.33.2
-        version: 0.33.2
+        specifier: 0.33.4
+        version: 0.33.4
       '@node-datachannel/linux-arm64-gnu':
-        specifier: 0.33.2
-        version: 0.33.2
+        specifier: 0.33.4
+        version: 0.33.4
       '@node-datachannel/linux-x64-gnu':
-        specifier: 0.33.2
-        version: 0.33.2
+        specifier: 0.33.4
+        version: 0.33.4
       '@node-datachannel/win32-arm64-msvc':
-        specifier: 0.33.2
-        version: 0.33.2
+        specifier: 0.33.4
+        version: 0.33.4
       '@node-datachannel/win32-x64-msvc':
-        specifier: 0.33.2
-        version: 0.33.2
+        specifier: 0.33.4
+        version: 0.33.4
 
   vscode-ext:
     dependencies:
@@ -1250,52 +1250,52 @@ packages:
     resolution: {integrity: sha512-AnjFn0Jv92laAkvMrghlFZq4qQCIN/4DxFV/eooqtC2YTjB7kBeLMS2T9KJX4Dn+ZVXLOwK0lSgqDtx9gvxtiw==}
     engines: {node: '>= 20.19.0'}
 
-  '@node-datachannel/android-arm64@0.33.2':
-    resolution: {integrity: sha512-I71a0jICUNYgh4ZI5AcINEMuRtQSVyrpp4FV3kJZMcx31xS0vKKtf06tpsUAtW5uS+uRXbZR+vlMEqS1h710wQ==}
+  '@node-datachannel/android-arm64@0.33.4':
+    resolution: {integrity: sha512-Kd1K+drJlxdGmZYBlzh5HHX2E7les99eTWlt7WldZgvJmcGf2z9L/bnUVn4zbhNm2q/MtNZ2tPX2bd+fGlDDpQ==}
     cpu: [arm64]
     os: [android]
 
-  '@node-datachannel/darwin-arm64@0.33.2':
-    resolution: {integrity: sha512-EwBGiaMh3MX6zjYoZHuK02Q6hmQQIvR39335Kb/ZnP3fXZU0/VWx6ksHLM6K0XFFYRfP+yJeVgU79g++xoeQpw==}
+  '@node-datachannel/darwin-arm64@0.33.4':
+    resolution: {integrity: sha512-bkIA+IbModz/NUmbVYTSWj8dZvkiab+cU4zOa6rhfKsNcW3EkdD2/DDoJjUrRrw+LbEZ40V7NuAKUlMNFDXFsw==}
     cpu: [arm64]
     os: [darwin]
 
-  '@node-datachannel/darwin-x64@0.33.2':
-    resolution: {integrity: sha512-a1nvL6MiskSjV3TWTNXdVpI/2kHNIOP2AbuBZjR5eC7VSrH/6hCFfHIBW4SFKXGFm8LOGliY9Df10UnJUutjwA==}
+  '@node-datachannel/darwin-x64@0.33.4':
+    resolution: {integrity: sha512-+dLnwiwC3GdWqW0OQShZcSFYrx3hRx0+7U85swoiP3iiRqtDUARME6AIAmW3glpP0vmus1jv5KhPCy/Q+jAvqw==}
     cpu: [x64]
     os: [darwin]
 
-  '@node-datachannel/linux-arm64-gnu@0.33.2':
-    resolution: {integrity: sha512-YWAu3EiMl2HRi/fwWlfFTW30wFTkRVYJWRHQcI1uDSeZYG/tfyBqBy6CRy9Sgrb0xjOYZ6XhLDj8cdX0foPlpg==}
+  '@node-datachannel/linux-arm64-gnu@0.33.4':
+    resolution: {integrity: sha512-rR4yjwxpI1miLSrruLGcfR9yfw0Qebw+Twt+u+lKsL9SwmXxTm5pJhUAa9RU+c35oZ98IyAxGFjRwwq85BTbog==}
     cpu: [arm64]
     os: [linux]
     libc: [glibc]
 
-  '@node-datachannel/linux-arm64-musl@0.33.2':
-    resolution: {integrity: sha512-16o3Ny5hbxTTjDmhsZog/t7p2tRP6s/Oa/V9kKzZfiGlCqvxxCE4ACOWw/MWHOhN0xI9/63IIRfrrnQnPxjK8g==}
+  '@node-datachannel/linux-arm64-musl@0.33.4':
+    resolution: {integrity: sha512-MR4o1F0aREj/AtbNlXL20YiNx8/pDI8L/5B4Vr9ldiEDottD0IOdCd0khB8fpr5Np2CW7WwU9QG+uto00QGVdw==}
     cpu: [arm64]
     os: [linux]
     libc: [musl]
 
-  '@node-datachannel/linux-x64-gnu@0.33.2':
-    resolution: {integrity: sha512-grLRAbZgSIX8nmObciblyCmnevDCst0snhV+z1fvDmUlzXIVXeDmv6lEzAaWs3KRleagqwSsFg5d1td1bwMT9w==}
+  '@node-datachannel/linux-x64-gnu@0.33.4':
+    resolution: {integrity: sha512-xN0x3lcQ87qwOAmf1dBLVWrYY40LQ7pM4Y9wuNjP+EtN4IwiXqrhPdgupzGAElxna+n2NgBG0gT60dZpgoYU2Q==}
     cpu: [x64]
     os: [linux]
     libc: [glibc]
 
-  '@node-datachannel/linux-x64-musl@0.33.2':
-    resolution: {integrity: sha512-PlpgvYjo+gmBhIkRFaZWIhCF335FMTJmCpl+FVa4XliEgyOqD+cvjQPWcbnlrA2Jd+QnLiZt+NxT7nv4QXpoiQ==}
+  '@node-datachannel/linux-x64-musl@0.33.4':
+    resolution: {integrity: sha512-FWqJEjL7TqOPmsqdfwmG/BUwOXQN7MfpEU8kzw6ePbglUbwgdc3976Ls9BCBUXyPgEJyLo8YE1LJyWAlbXWyvA==}
     cpu: [x64]
     os: [linux]
     libc: [musl]
 
-  '@node-datachannel/win32-arm64-msvc@0.33.2':
-    resolution: {integrity: sha512-8NpHkm7R8EY0jHGHOXdK7K0wjWY34PJ+PJY++2VDHTAtXGazNm28zcnVE/4IU0N26YGdCDSSWat3OO3W6nwoRw==}
+  '@node-datachannel/win32-arm64-msvc@0.33.4':
+    resolution: {integrity: sha512-TeDV2tSPm+qAnF6MIPlLFTIlobSYLwOVe3/wQl+8hD/q3cEPTQi7vByFaQQ5lRULKKdnjKRR5iDMsxMilqbtXA==}
     cpu: [arm64]
     os: [win32]
 
-  '@node-datachannel/win32-x64-msvc@0.33.2':
-    resolution: {integrity: sha512-aLk0O/M1JNVpzxx4RVBXMJTMlpswE04Cz5baayKwuEN+qk9hO6DSJgYMR6Wq9a5zGYAmvLFlOg+LsePyXkWliA==}
+  '@node-datachannel/win32-x64-msvc@0.33.4':
+    resolution: {integrity: sha512-eU0w/9ykrNaA5vWs5gjVs3Qxa45jbQ8mYoMyh5OWnRCE5GzXKxHCpfhFUnO+jGqi0KxkyP0hSA6fiwXXkirk6g==}
     cpu: [x64]
     os: [win32]
 
@@ -3765,8 +3765,8 @@ packages:
     resolution: {integrity: sha512-Jx5lPaaLdIaOsj2mVLWMWulXF6GQVdyLvNSxmiYCvZ8Ma2hfKX0POoR2kgKOqz+oFsRreq0yYZjQ2wjE9VNzCA==}
     engines: {node: '>=v0.6.5'}
 
-  node-datachannel@0.33.2:
-    resolution: {integrity: sha512-WRL+uqYG2eSvpnKuCOKueaMiyKlDjkJFd6pFH/f2SbD/EiXLMXwmYNU5z+TDQPrAv+BMgkuC40UESeRRL+4zBw==}
+  node-datachannel@0.33.4:
+    resolution: {integrity: sha512-qiUrdh8vY9XhglEnx91HK0N2JEAAu8qTZl0fcR3yQd0fFrdO39NwDeJD/KpG+WKUb9/o4p2UwnP+/HftA/xMbQ==}
     engines: {node: '>=18.20.0'}
 
   node-pty@1.2.0-beta.15:
@@ -5547,31 +5547,31 @@ snapshots:
 
   '@noble/ciphers@2.4.0': {}
 
-  '@node-datachannel/android-arm64@0.33.2':
+  '@node-datachannel/android-arm64@0.33.4':
     optional: true
 
-  '@node-datachannel/darwin-arm64@0.33.2':
+  '@node-datachannel/darwin-arm64@0.33.4':
     optional: true
 
-  '@node-datachannel/darwin-x64@0.33.2':
+  '@node-datachannel/darwin-x64@0.33.4':
     optional: true
 
-  '@node-datachannel/linux-arm64-gnu@0.33.2':
+  '@node-datachannel/linux-arm64-gnu@0.33.4':
     optional: true
 
-  '@node-datachannel/linux-arm64-musl@0.33.2':
+  '@node-datachannel/linux-arm64-musl@0.33.4':
     optional: true
 
-  '@node-datachannel/linux-x64-gnu@0.33.2':
+  '@node-datachannel/linux-x64-gnu@0.33.4':
     optional: true
 
-  '@node-datachannel/linux-x64-musl@0.33.2':
+  '@node-datachannel/linux-x64-musl@0.33.4':
     optional: true
 
-  '@node-datachannel/win32-arm64-msvc@0.33.2':
+  '@node-datachannel/win32-arm64-msvc@0.33.4':
     optional: true
 
-  '@node-datachannel/win32-x64-msvc@0.33.2':
+  '@node-datachannel/win32-x64-msvc@0.33.4':
     optional: true
 
   '@node-rs/crc32-android-arm-eabi@1.10.7':
@@ -7962,19 +7962,19 @@ snapshots:
 
   node-bitmap@0.0.1: {}
 
-  node-datachannel@0.33.2:
+  node-datachannel@0.33.4:
     dependencies:
       detect-libc: 2.1.2
     optionalDependencies:
-      '@node-datachannel/android-arm64': 0.33.2
-      '@node-datachannel/darwin-arm64': 0.33.2
-      '@node-datachannel/darwin-x64': 0.33.2
-      '@node-datachannel/linux-arm64-gnu': 0.33.2
-      '@node-datachannel/linux-arm64-musl': 0.33.2
-      '@node-datachannel/linux-x64-gnu': 0.33.2
-      '@node-datachannel/linux-x64-musl': 0.33.2
-      '@node-datachannel/win32-arm64-msvc': 0.33.2
-      '@node-datachannel/win32-x64-msvc': 0.33.2
+      '@node-datachannel/android-arm64': 0.33.4
+      '@node-datachannel/darwin-arm64': 0.33.4
+      '@node-datachannel/darwin-x64': 0.33.4
+      '@node-datachannel/linux-arm64-gnu': 0.33.4
+      '@node-datachannel/linux-arm64-musl': 0.33.4
+      '@node-datachannel/linux-x64-gnu': 0.33.4
+      '@node-datachannel/linux-x64-musl': 0.33.4
+      '@node-datachannel/win32-arm64-msvc': 0.33.4
+      '@node-datachannel/win32-x64-msvc': 0.33.4
 
   node-pty@1.2.0-beta.15:
     dependencies:
