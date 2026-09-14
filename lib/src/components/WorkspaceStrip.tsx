@@ -126,13 +126,14 @@ export function WorkspaceStrip({
     [drag],
   );
 
+  // Rename owns its input until it ends; both typed gates wait behind it.
   // The move gate is the same typed letter: the page state it destroys is as
   // gone as a killed pane's process. It waits behind a close confirmation,
   // which the render below shows instead: the letter on screen is the close's,
   // and a key typed at it must reach that handler alone — the two are siblings
   // on one node, so `stopPropagation` would not keep it from this one.
   useEffect(() => {
-    if (!pendingMove || pendingClose) return;
+    if (!pendingMove || pendingClose || renamingId) return;
     const { char, proceed } = pendingMove;
     const onKeyDown = (event: KeyboardEvent) => {
       event.preventDefault();
@@ -145,7 +146,7 @@ export function WorkspaceStrip({
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [pendingMove, pendingClose]);
+  }, [pendingMove, pendingClose, renamingId]);
 
   // Anchored to the Window's content area, not the tab: a 24px tab is too small
   // a box to center a dialog over, and every Wall shares one grid cell, so the
@@ -215,7 +216,7 @@ export function WorkspaceStrip({
       >
         <PlusIcon size={12} weight="bold" aria-hidden="true" />
       </button>
-      {pendingClose && (
+      {pendingClose && !renamingId && (
         <WorkspaceKillConfirm
           char={pendingClose.char}
           detail={workspaces.find(workspace => workspace.id === pendingClose.id)?.name}
@@ -229,7 +230,7 @@ export function WorkspaceStrip({
           onCancel={() => setPendingWorkspaceClose(null)}
         />
       )}
-      {pendingMove && !pendingClose && (
+      {pendingMove && !pendingClose && !renamingId && (
         <KillConfirmModal
           char={pendingMove.char}
           targetElement={confirmTarget}

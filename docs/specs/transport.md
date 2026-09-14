@@ -145,8 +145,9 @@ with these transfer rules:
   `@xterm/addon-serialize`) and hands it over as the arrival's *content*; from
   the mark the host drops the id's output until the target's replay has reached
   it. The target writes the serialized buffer, then the replay of everything
-  after the mark, so the whole transcript crosses, not the sidecar's bounded
-  tail, and no byte is painted twice or lost. An id the host never marked is
+  after the mark, preserving the source xterm’s retained screen and scrollback
+  independently of the sidecar’s bounded tail, with no duplicate or lost bytes
+  at the marked seam. Output already trimmed from xterm is not recovered. An id the host never marked is
   serialized anyway and replayed whole. A hand-back is the same split kept: the
   source still holds the bytes before the mark and receives the host's replay of
   everything after it into the same xterm (`docs/specs/standalone.md` →

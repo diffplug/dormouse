@@ -1,7 +1,7 @@
 import type { WorkspaceId } from './session-types';
 
 /**
- * The Workspace strip's two transient UI states, held outside it because the
+ * The Workspace strip's transient UI states, held outside it because the
  * command-mode `$` and `&` are heard inside a Wall while the strip lives in the
  * app bar (`docs/specs/layout.md` → "Workspaces"). The strip renders from this;
  * nothing else reads it, and nothing mounted is required to write it.
@@ -55,7 +55,7 @@ export function setPendingWorkspaceMove(pending: WorkspaceUiState['pendingMove']
   emit({ ...state, pendingMove: pending });
 }
 
-/** Drop both (a Workspace closed, or tests). */
+/** Reset all transient Workspace UI and transfer guards (tests). */
 export function resetWorkspaceUi(): void {
   pendingTransfers.clear();
   if (state === EMPTY) return;

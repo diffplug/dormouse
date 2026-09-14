@@ -162,6 +162,11 @@ const invokeMap = {
     return Array.from({ length: n }, (_, i) => `workspace-${first + i}`);
   },
   workspace_report: ({ entries }) => {
+    // Restored browser state survives this process; mirror Rust's report seed.
+    for (const entry of entries ?? []) {
+      const minted = /^workspace-(\d+)$/.exec(entry?.id ?? '');
+      if (minted) nextWorkspaceId = Math.max(nextWorkspaceId, Number(minted[1]) + 1);
+    }
     const next = JSON.stringify(entries ?? []);
     if (next === registryEntries) return null;
     registryEntries = next;
@@ -178,7 +183,7 @@ let registryRevision = 0;
 function registrySnapshot() {
   const workspaces = JSON.parse(registryEntries).map((entry) => ({
     id: entry.id,
-    ref: /^workspace-(\d+)$/.test(entry.id) ? `workspace:${entry.id.slice('workspace-'.length)}` : `workspace:${entry.id}`,
+    ref: /^workspace-(\d+)$/.test(entry.id) ? `workspace:${Number(entry.id.slice('workspace-'.length))}` : `workspace:${entry.id}`,
     name: entry.name,
     active: Boolean(entry.active),
   }));

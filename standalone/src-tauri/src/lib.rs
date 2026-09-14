@@ -187,30 +187,6 @@ impl WindowState {
         guard(&self.closing).contains(label)
     }
 
-    /// Hand `ids` to `label`. `suppress` holds their output until each one's
-    /// replay has been emitted to it (docs/specs/standalone.md §Transfer);
-    /// without it the ids go straight back into service, which is how a refused
-    /// arrival returns them to the window that still has them.
-    fn reassign(&self, ids: &[String], label: &str, suppress: bool) {
-        let mut routing = guard(&self.routing);
-        let now = Instant::now();
-        for id in ids {
-            routing.owners.insert(id.clone(), label.to_string());
-            if suppress {
-                routing.awaiting_replay.insert(id.clone(), now);
-            } else {
-                // A hand-back. What was held for the target has nothing to
-                // follow here: an unmarked id's source saw every byte live,
-                // and a marked one is re-suppressed by `hand_back_arrival`
-                // until its since-mark replay.
-                routing.lift_suppression(id);
-                routing.marking.remove(id);
-            }
-        }
-        self.suppressed
-            .store(routing.awaiting_replay.len(), Ordering::Relaxed);
-    }
-
     /// Move ownership and open source routing under one lock, before any chunk
     /// can observe the target owner without the source's marking phase.
     fn begin_transfer(&self, ids: &[String], source: &str, target: &str) {
@@ -260,13 +236,13 @@ impl WindowState {
 
     /// Drop any suppression on `ids`, leaving ownership alone. What settles an
     /// adopted arrival: each replay lifted its own on the way out, and this is
-    /// the defensive clear for an id whose replay never came because the shell
-    /// exited mid-transfer.
+    /// the defensive clear for an id whose mark or replay never arrived.
     fn clear_suppression(&self, ids: &[String]) {
         let mut routing = guard(&self.routing);
         for id in ids {
             routing.lift_suppression(id);
             routing.transfer_marks.remove(id);
+            routing.marking.remove(id);
         }
         self.suppressed
             .store(routing.awaiting_replay.len(), Ordering::Relaxed);
@@ -365,22 +341,21 @@ fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
         };
         let mut routing = guard(&state.routing);
         if state.suppressed.load(Ordering::Relaxed) > 0 {
-            released = routing::sweep_awaiting(
-                &mut routing.awaiting_replay,
+            let RoutingState { awaiting_replay, held, .. } = &mut *routing;
+            let swept = routing::sweep_awaiting(
+                awaiting_replay,
+                held,
                 Instant::now(),
                 routing::AWAITING_REPLAY_MAX,
                 &arriving,
             );
-            if !released.is_empty() {
-                state
-                    .suppressed
-                    .store(routing.awaiting_replay.len(), Ordering::Relaxed);
-                for id in &released {
-                    // The sweep already took the map entry; this takes the queue.
-                    let queue = routing.lift_suppression(id);
-                    if let (false, Some(label)) = (queue.is_empty(), routing.owners.get(id)) {
+            if !swept.is_empty() {
+                state.suppressed.store(routing.awaiting_replay.len(), Ordering::Relaxed);
+                for (id, queue) in swept {
+                    if let (false, Some(label)) = (queue.is_empty(), routing.owners.get(&id)) {
                         flushed.push((label.clone(), queue));
                     }
+                    released.push(id);
                 }
             }
         }
@@ -1647,14 +1622,10 @@ fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
         .map_err(|e| format!("app_data_dir unavailable: {e}"))
 }
 
-/// Everything this build's own state lives under.
-///
-/// `app_data_dir()` is keyed by the Tauri identifier, so a `pnpm dev:standalone`
-/// run and the installed app resolve to the same directory: without this split a
-/// dev launch would restore the installed app's Workspaces and the two would
-/// clobber one another's snapshot. The notepad archive and the Burrow state
-/// directory stay shared — they are machine-local stores, not this build's copy
-/// of the user's window.
+/// Per-build window and recovery state. The supported dev wrapper already uses
+/// a worktree-specific identifier; this subtree also protects raw `tauri dev`
+/// launches that retain the installed identifier. Archive and Burrow stores stay
+/// at the identifier's app-data root, not shared across different identifiers.
 fn state_root_from(app_data: PathBuf) -> PathBuf {
     if cfg!(debug_assertions) {
         app_data.join("dev")
@@ -3254,17 +3225,32 @@ fn adopt_failed(
     Ok(())
 }
 
-/// Every Workspace id every snapshot on disk names. Read once at setup to
-/// seed the id counter; an unreadable file contributes nothing, which is safe
-/// because such a file restores nothing either.
+/// Window labels reserved by snapshots or retained journal records. Journal-only
+/// windows reserve their labels without opening until recovery can finish.
+fn saved_window_labels(dir: &Path) -> Vec<String> {
+    let mut labels = routing::restorable_labels(session_file_names(dir));
+    if let Ok(records) = read_arrivals_from(dir) {
+        for record in records {
+            labels.extend(["from", "to"].into_iter()
+                .filter_map(|field| record.get(field).and_then(JsonValue::as_str).map(str::to_owned)));
+        }
+    }
+    labels
+}
+
+/// Workspace ids from snapshots and retained journal records reserve the counter.
 fn saved_workspace_ids(dir: &Path) -> Vec<String> {
-    session_file_names(dir)
+    let mut ids: Vec<String> = session_file_names(dir)
         .iter()
         .filter_map(|name| name.strip_suffix(".json"))
         .filter_map(|label| read_session_from(dir, label).ok().flatten())
         .filter_map(|contents| serde_json::from_str::<JsonValue>(&contents).ok())
         .flat_map(|snapshot| workspaces::snapshot_ids(&snapshot))
-        .collect()
+        .collect();
+    if let Ok(records) = read_arrivals_from(dir) {
+        ids.extend(records.iter().filter_map(record_workspace_id).map(str::to_owned));
+    }
+    ids
 }
 
 /// Hand a webview a block of ids to mint from. Ids come only from this
@@ -4227,12 +4213,12 @@ pub fn run() {
                         append_log(format!("[window] {e}"));
                     }
                     let labels = routing::restorable_labels(session_file_names(&dir));
-                    // Above every SAVED label too, not just the live ones: a
-                    // torn-out window must never claim a snapshot still on disk.
+                    // Retained journal endpoints reserve their labels too: a
+                    // new tear-out must not claim a failed recovery's window.
                     app.state::<WindowState>()
                         .next_ws
-                        .store(routing::seed_next_ws(&labels), Ordering::SeqCst);
-                    // Likewise above every Workspace id any snapshot names, so
+                        .store(routing::seed_next_ws(saved_window_labels(&dir)), Ordering::SeqCst);
+                    // Above every Workspace id snapshots or retained arrivals name, so
                     // a fresh id never collides with one about to be restored.
                     app.state::<WindowState>()
                         .next_workspace
@@ -4554,6 +4540,27 @@ mod tests {
     }
 
     #[test]
+    fn adoption_without_a_mark_routes_live_output_to_the_target() {
+        let windows = super::WindowState::default();
+        let ids = ["t1".to_string()];
+        windows.mint("t1", "main");
+        windows.begin_transfer(&ids, "main", "ws-2");
+        assert!(guard(&windows.routing).marking.contains_key("t1"));
+        windows.clear_suppression(&ids); // adopt_done after the mark wait expired
+        let mut state = guard(&windows.routing);
+        state.mark_transfer("t1", 42); // a late reply must not suppress it again
+        assert!(state.marking.is_empty());
+        assert!(state.awaiting_replay.is_empty());
+        assert!(state.transfer_marks.is_empty());
+        let registry = super::workspaces::Registry::default();
+        let view = super::RouteView {
+            owners: &state.owners, awaiting_replay: &state.awaiting_replay,
+            dor_targets: &state.dor_targets, registry: &registry, marking: &state.marking,
+        };
+        assert!(matches!(super::routing::route("pty:data", &serde_json::json!({"id": "t1", "data": "live"}), &view), super::routing::Route::EmitTo("ws-2")));
+    }
+
+    #[test]
     fn transfer_ownership_and_source_routing_change_together() {
         let windows = super::WindowState::default();
         windows.mint("t1", "main");
@@ -4601,6 +4608,9 @@ mod tests {
         write_session_to(dir.path(), "ws-2", &snapshot_json(&[("workspace-7", "Moved")], "workspace-7")).unwrap();
         super::retire_saved_arrivals(dir.path()).unwrap();
         assert_eq!(read_arrivals_from(dir.path()).unwrap().len(), 1);
+        // The only readable durable copy is still the journal; reservations
+        // must not reuse its id before a later boot can complete recovery.
+        assert_eq!(super::workspaces::seed_next(super::saved_workspace_ids(dir.path())), 8);
         write_session_to(dir.path(), "main", &snapshot_json(&[], "workspace-1")).unwrap();
         super::retire_saved_arrivals(dir.path()).unwrap();
         assert!(!arrivals_path(dir.path()).exists());
@@ -4721,10 +4731,25 @@ mod tests {
         restore_arrivals(dir.path()).unwrap();
         assert!(read_session_from(dir.path(), "ws-2").unwrap().is_none());
         assert_eq!(read_arrivals_from(dir.path()).unwrap().len(), 1);
+        // The only readable durable copy is still the journal; reservations
+        // must not reuse its id before a later boot can complete recovery.
+        assert_eq!(super::workspaces::seed_next(super::saved_workspace_ids(dir.path())), 8);
         write_session_to(dir.path(), "main", &snapshot_json(&[("workspace-7", "Moved")], "workspace-7")).unwrap();
         restore_arrivals(dir.path()).unwrap();
         assert!(!arrivals_path(dir.path()).exists());
         assert_eq!(snapshot_ids(&read_snapshot(dir.path(), "ws-2").unwrap()), vec!["workspace-7"]);
+    }
+
+    #[test]
+    fn a_retained_arrival_reserves_both_window_labels_without_opening_them() {
+        let dir = TempDir::new("arrival-label-reservation");
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace-7", "ws-40", "ws-50")).unwrap();
+        // Fail recovery before either endpoint has a readable snapshot.
+        fs::create_dir(dir.path().join("ws-40.json")).unwrap();
+        restore_arrivals(dir.path()).unwrap();
+        assert_eq!(read_arrivals_from(dir.path()).unwrap().len(), 1);
+        assert_eq!(super::routing::seed_next_ws(super::saved_window_labels(dir.path())), 51);
+        assert!(read_session_from(dir.path(), "ws-50").unwrap().is_none());
     }
 
     #[test]
@@ -5342,13 +5367,21 @@ mod tests {
         assert!(!state.refuses_save("ws-2"));
     }
 
+    fn queue_test_suppression(state: &super::WindowState, id: &str) {
+        state.mint(id, "main");
+        state.begin_transfer(&[id.to_string()], "main", "ws-2");
+        let mut routing = guard(&state.routing);
+        routing.mark_transfer(id, 42);
+        state.suppressed.store(routing.awaiting_replay.len(), Ordering::Relaxed);
+    }
+
     /// A spawn reusing a transferring id must not inherit its suppression: no
     /// replay is coming for the new PTY, so it would paint nothing until the
     /// fail-open sweep (`routing::AWAITING_REPLAY_MAX`).
     #[test]
     fn minting_a_pty_clears_a_stale_transfer_suppression() {
         let state = super::WindowState::default();
-        state.reassign(&["pane-a".to_string()], "ws-2", true);
+        queue_test_suppression(&state, "pane-a");
         assert_eq!(state.suppressed.load(Ordering::Relaxed), 1);
 
         super::routing::hold_event(
@@ -5373,7 +5406,7 @@ mod tests {
         let state = super::WindowState::default();
         let ids = ["pane-a".to_string()];
         let queue_up = || {
-            state.reassign(&ids, "ws-2", true);
+            queue_test_suppression(&state, "pane-a");
             super::routing::hold_event(
                 &mut guard(&state.routing).held,
                 "pane-a",
@@ -5393,7 +5426,9 @@ mod tests {
         assert_eq!(state.suppressed.load(Ordering::Relaxed), 0);
 
         queue_up();
-        state.reassign(&ids, "main", false);
+        // An unmarked hand-back releases its queue without requesting replay.
+        guard(&state.routing).transfer_marks.remove("pane-a");
+        state.hand_back(&ids, "main");
         assert!(lifted());
 
         queue_up();
@@ -5453,11 +5488,10 @@ mod tests {
         );
     }
 
-    /// A dev build and the installed app share one `app_data_dir()`, so this
-    /// split is what keeps a `pnpm dev:standalone` run from restoring the
-    /// installed app's Workspaces and clobbering its snapshot.
+    /// Raw debug launches retain the production identifier; the dev wrapper
+    /// additionally isolates the entire app-data directory per worktree.
     #[test]
-    fn dev_and_installed_state_roots_are_separate() {
+    fn raw_debug_and_release_state_roots_are_separate() {
         let app_data = PathBuf::from("/app-data");
         let root = state_root_from(app_data.clone());
         if cfg!(debug_assertions) {
@@ -5465,9 +5499,6 @@ mod tests {
         } else {
             assert_eq!(root, app_data);
         }
-        // The notepad archive is a sibling of app_data, never under the root, so
-        // dev and the installed app keep sharing it.
-        assert_ne!(root.join("sessions"), app_data.join(NOTEPAD_ARCHIVE_FILE));
     }
 
     #[test]

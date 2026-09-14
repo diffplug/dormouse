@@ -36,7 +36,11 @@ pub struct Registry {
 /// The counter's suffix of a `workspace-<n>` id, if it has one. Ids minted
 /// elsewhere retain their opaque id as a stable ref.
 pub fn ref_number(id: &str) -> Option<u64> {
-    id.strip_prefix("workspace-")?.parse().ok()
+    let suffix = id.strip_prefix("workspace-")?;
+    if suffix.is_empty() || !suffix.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    suffix.parse().ok()
 }
 
 /// The stable `dor` ref of an id: its counter number, else the id itself.
@@ -170,6 +174,16 @@ mod tests {
             id: id.to_string(),
             name: name.to_string(),
             active,
+        }
+    }
+
+    #[test]
+    fn refs_match_the_shared_host_grammar() {
+        let cases: Vec<JsonValue> = serde_json::from_str(include_str!("../../scripts/workspace-ref-cases.json")).unwrap();
+        assert!(!cases.is_empty());
+        for case in cases {
+            let id = case["id"].as_str().unwrap();
+            assert_eq!(ref_for(id), case["ref"].as_str().unwrap(), "{id}");
         }
     }
 

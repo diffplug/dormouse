@@ -338,8 +338,11 @@ the map from PTY to window** and every stdout line passes through it.
 
 **The label is the window's persistence identity**: `main` for the first window
 (fixed in `tauri.conf.json`), `ws-<n>` for every later one, seeded above every
-live label *and* every `sessions/ws-*.json` on disk so a new window can never
-claim a saved one's file. `standalone/scripts/tauri-conf.test.mjs` pins the
+live label, every `sessions/ws-*.json` on disk, and retained arrival-journal
+endpoints so a new window cannot claim a saved or pending identity. Journal-only
+labels reserve numbers without opening windows (`saved_window_labels` and
+`a_retained_arrival_reserves_both_window_labels_without_opening_them` in
+`standalone/src-tauri/src/lib.rs`). `standalone/scripts/tauri-conf.test.mjs` pins the
 label.
 
 **Every new window is cloned from `app.windows[0]`** (`WebviewWindowBuilder::from_config`),
@@ -368,8 +371,10 @@ behind the one it holds.
   ids; log the failure. **Must retain those opaque IDs and refs for their lifetime**,
   even after reservation recovers. Canonical refs follow
   `docs/specs/dor-cli.md` → "Handle Model" (`lib/src/lib/workspace-store.test.ts`).
-- **The counter is seeded above every id any snapshot on disk names**, and
-  above every id a window reports, so a fresh id never meets a restored one.
+- **Must seed the counter above every id named by a snapshot or retained arrival-journal record**,
+  and above every id a window reports. Pinned by
+  `an_unreadable_source_retains_the_record_without_changing_the_target` in
+  `standalone/src-tauri/src/lib.rs`.
   Never below 2: `workspace-1` is a bare Wall's only Workspace.
 - **A `dor` request naming a Workspace or Window routes to the window holding
   it** (§Routing precedence). A target the registry cannot place — one no
@@ -378,10 +383,22 @@ behind the one it holds.
   so a local Workspace wins. **A target routes as a number only when it reads
   as `POSITIONAL_WORKSPACE_REF`** (`dor/src/protocol.ts`); `007` and `0` are
   names (`a_number_with_a_leading_zero_is_a_name`).
+- **Must log a rejected Workspace report and retry on the next store notification.**
+  A stale failed attempt cannot invalidate a newer report’s cache. Pinned by
+  `retries a failed report on the next store notification with the same final entries`
+  and `does not invalidate a newer same-shaped report when an older attempt fails`
+  in `standalone/src/workspace-registry.test.ts`.
+- **Must keep numbered and opaque refs consistent across Rust, the webview, and
+  the browser harness.** Shared cases pin `refs_match_the_shared_host_grammar` in
+  `standalone/src-tauri/src/workspaces.rs`,
+  `shares canonical numbered and opaque refs with Rust and the browser harness`
+  in `standalone/src/workspace-registry.test.ts`, and
+  `registry seeds reservations above restored IDs and mirrors canonical workspace refs`
+  in `standalone/scripts/dev-agent-browser.test.mjs`.
 - **`Destroyed` forgets the window's entries** and broadcasts.
 
 Source of truth: `standalone/src-tauri/src/workspaces.rs`;
-`workspace_reserve_ids` / `workspace_report` / `workspace_registry` in
+`saved_workspace_ids` / `workspace_reserve_ids` / `workspace_report` / `workspace_registry` in
 `standalone/src-tauri/src/lib.rs`; `installWorkspaceRegistry` in
 `standalone/src/workspace-registry.ts`; `installWorkspaceIdPool` /
 `workspaceRefFor` in `lib/src/lib/workspace-store.ts`. Pinned by the tests in
@@ -611,11 +628,12 @@ below reads that record rather than inferring itself from the suppression map.
    "arrived before armed" class of bug (rationale). Rust answers
    `pty:requestInit` with **that arrival's ids and no others**; `pty:list` and
    each `pty:replay` echo the collector's token. The target resumes over them,
-   hydrates the notes and mounts the Workspace at the drop index.
+   hydrates the notes and mounts the Workspace at the payload’s index, else the drop index.
    **Must seed persisted alerts before requesting replay**, so the older state
    cannot erase WATCHING rebuilt by replay (`standalone/src/workspace-move.test.ts`).
 4. **Target adopted** invokes `adopt_done(workspaceId)`. Rust retires the record,
-   clears what is left of the suppression, and emits `workspace-departed` for
+   clears pending marks and suppression so live output routes to the target,
+   and emits `workspace-departed` for
    **that Workspace alone** to its own source.
 5. **Source** commits on `workspace-departed`: releases every Session (never
    kills one), drops the notes and the helper, closes the Workspace, and closes
@@ -836,19 +854,20 @@ written.
 - **A per-window close removes the blob, its temp sibling and its geometry**
   (§Per-window close); nothing else deletes a snapshot but the boot merge
   (§Arrival queue).
-- **`sweep_orphan_session_temps` runs once in `setup()`** and deletes every
-  `<label>.json.tmp` — the legacy and hard-crash migration, given the rule above.
+- **Must sweep orphan session temp files once at boot** in the active sessions
+  directory.
   `SESSION_TEMP_SUFFIX` is pinned against the writer by
-  `session_temp_suffix_matches_what_the_writer_leaves`, so the two cannot drift.
-  It **never touches a live snapshot**.
+  `session_temp_suffix_matches_what_the_writer_leaves`.
+  Transcript migration follows `docs/specs/transport.md` → "Retiring the transcripts already on disk".
 
-**The state root is `<app_data_dir>`, or `<app_data_dir>/dev` under
-`cfg(debug_assertions)`.** `app_data_dir()` is keyed by the Tauri identifier, so a
-`pnpm dev:standalone` run and the installed app resolve to the same directory:
-without the split a dev launch would restore the installed app's Workspaces and the
-two would clobber one snapshot. **The notepad archive and the Burrow state directory
-stay under `app_data_dir` itself** — machine-local stores, not this build's copy of
-the user's window. `state_root_from` in `standalone/src-tauri/src/lib.rs`.
+**Must use `<app_data_dir>/dev` as the debug state root and `<app_data_dir>` for
+release builds** (rationale). `app_data_dir()` follows the Tauri identifier;
+`pnpm dev:standalone` already supplies a distinct per-worktree identifier
+(§Build and development). The subtree also isolates session/recovery state when
+raw Tauri dev bypasses that wrapper. **Must keep the notepad archive and Burrow
+state directly under that identifier’s `app_data_dir`**.
+Source of truth: `state_root_from` and `sweep_orphan_session_temps` in
+`standalone/src-tauri/src/lib.rs`.
 
 **Rust passes the sidecar its two directories by environment**, each created
 owner-only first and each an empty string when it could not be:
@@ -889,7 +908,7 @@ captures**: a reload there is a live resume over PTYs that survive it, so pressi
 `^C` would interrupt work that is still running. Source of truth:
 `pty:captureRecovery` / `recovery:take` in `standalone/sidecar/main.js`.
 
-**The notepad archive is outside `sessions/`, and outside the state root** —
+**Must keep the notepad archive outside `sessions/` and the debug subtree** —
 `<app_data_dir>/notepad-archive-v1.json`, its own compare-and-swap commands and
 its own lifetime, so the session sweep never reaches it
 (`docs/specs/notepad.md` -> "Standalone quit"). Both stores write through the one

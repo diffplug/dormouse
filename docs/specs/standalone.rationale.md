@@ -210,7 +210,7 @@ controller must simply not assume in-range coordinates.
 
 **Why the aggregator debounces on top of the Wall's own debounce.** Each Wall already coalesces its own record; the second stage coalesces *across* Walls, so one window-wide event (a store change, a theme push, a burst of output in two Workspaces) becomes one host write rather than one per Workspace.
 
-**Why the dev state root is a subtree rather than a separate identifier.** `app_data_dir()` is derived from the Tauri identifier, and changing the identifier for debug builds would move the notepad archive and the Burrow enrollment too — stranding a developer's notes and forcing a re-pair on every switch between the dev and installed app. A subtree splits exactly the state that is a copy of the user's window and shares the rest.
+**Why debug keeps a state subtree as well as the wrapper identifier.** The native dev wrapper already selects a stable per-worktree Tauri identifier, including separate archive and Burrow stores. Raw Tauri dev bypasses that wrapper and can use the installed identifier; the subtree protects its session and recovery files without changing where that identifier’s archive and enrollment live. Older debug builds used the identifier root directly, so their snapshots need targeted transcript migration after the split. Deleting those snapshots could remove installed layouts for a raw-dev launch.
 
 ## Trigger interception
 

@@ -161,8 +161,8 @@ buffer, unlinked as it is read (`docs/specs/standalone.md` -> "Agent recovery").
 excerpts the user explicitly captured, their colors, the Surface title and kind,
 and the CWD at closure, appended only by a Surface closing
 (`docs/specs/notepad.md` -> "Archive"). Standalone keeps it as
-`<app_data_dir>/notepad-archive-v1.json`, owner-only and shared by every build
-so notes are not stranded in a dev subtree; VS Code keeps it in
+`<app_data_dir>/notepad-archive-v1.json`, owner-only and shared by builds with the
+same Tauri identifier; the dev wrapper uses a per-worktree identifier. VS Code keeps it in
 `<globalStorageUri>/notepad-archive.json`, mode `0600` on Unix and inheriting VS Code's directory ACL on Windows. Migration and Settings Sync follow `docs/specs/notepad.md` -> "VS Code lifecycle". Its live half never reaches disk.
 
 **VS Code persists pane structure in VS Code's own storage** — `workspaceState`

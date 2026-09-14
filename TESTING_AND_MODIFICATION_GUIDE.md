@@ -6,7 +6,9 @@ spec conventions); this guide covers only what is specific to the stack.
 ## 1. Where the code is
 
 The work is a stack of eleven branches, each PR based on the one before it.
-Every branch has its own worktree as a sibling of the repo:
+Every branch has its own worktree listed below. **Sections 1 and 1a apply while
+the stack is open**; after it lands, use `main` and the owning specs. Branch and
+worktree paths below are historical after merge:
 
 | # | PR | Branch | Worktree | What it adds |
 |---|---|---|---|---|
@@ -102,7 +104,8 @@ Per package, from the worktree root:
 (cd standalone/sidecar && node --test)
 (cd dor && node --test)                                        # help snapshots
 (cd vscode-ext && npx vitest run)
-pnpm lint:specs && node scripts/xterm-lint.mjs
+pnpm lint:specs && node scripts/xterm-lint.mjs                  # fast inner loop
+pnpm test                                                      # full CI test gate
 cargo test                                                     # see §2
 ```
 

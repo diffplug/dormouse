@@ -286,6 +286,29 @@ describe('WorkspaceStrip', () => {
     expect(closed).toHaveBeenCalled();
   });
 
+  it.each(['close', 'move'] as const)('defers the %s gate while another Workspace is being renamed', async (kind) => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    const proceed = vi.fn(async () => null);
+    stubHandle('ws-2', { closeAll: proceed });
+    await render();
+    await act(async () => { requestWorkspaceRename(first); });
+    await act(async () => {
+      if (kind === 'close') setPendingWorkspaceClose({ id: 'ws-2', char: 'q' });
+      else setPendingWorkspaceMove({ id: 'ws-2', char: 'q', iframeCount: 1, proceed });
+    });
+    const input = container.querySelector<HTMLInputElement>(`[data-workspace-rename-for="${first}"]`)!;
+    expect(container.querySelector('#kill-confirm-title')).toBeNull();
+    const typing = new KeyboardEvent('keydown', { key: 'q', bubbles: true, cancelable: true });
+    await act(async () => { input.dispatchEvent(typing); });
+    expect(typing.defaultPrevented).toBe(false);
+    expect(proceed).not.toHaveBeenCalled();
+    await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+    expect(container.querySelector('#kill-confirm-title')).not.toBeNull();
+    await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'q', bubbles: true })); });
+    expect(proceed).toHaveBeenCalledOnce();
+  });
+
   it('keeps the move gate behind a close confirmation, and ignores a bare Shift or Meta', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     await act(async () => { createWorkspace({ id: 'ws-2' }); });

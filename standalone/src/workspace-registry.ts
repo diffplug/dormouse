@@ -75,6 +75,7 @@ export interface RegistryHost {
 export async function installWorkspaceRegistry(host: RegistryHost): Promise<() => void> {
   let scheduled = false;
   let last = "";
+  let reportSequence = 0;
   const report = () => {
     scheduled = false;
     const { workspaces, activeId } = getWorkspacesSnapshot();
@@ -82,7 +83,13 @@ export async function installWorkspaceRegistry(host: RegistryHost): Promise<() =
     const key = JSON.stringify(entries);
     if (key === last) return;
     last = key;
-    void host.invoke("workspace_report", { entries }).catch(() => {});
+    const sequence = ++reportSequence;
+    void host.invoke("workspace_report", { entries }).catch((error: unknown) => {
+      // An older A report can fail after B and a newer A; only the newest
+      // attempt may invalidate the cache for the next store notification.
+      if (sequence === reportSequence) last = "";
+      console.error("[workspace-registry] the host did not accept the Workspace report", error);
+    });
   };
   const schedule = () => {
     if (scheduled) return;

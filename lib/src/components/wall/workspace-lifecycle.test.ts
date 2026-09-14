@@ -10,7 +10,7 @@ import {
   requestWorkspaceClose,
 } from './workspace-lifecycle';
 import { registerWallHandle, resetWallHandles, stubWallHandle, type WallHandle } from './wall-handles';
-import { getWorkspaceUiSnapshot, resetWorkspaceUi, setPendingWorkspaceClose, setRenamingWorkspace } from '../../lib/workspace-ui-store';
+import { getWorkspaceUiSnapshot, resetWorkspaceUi, setPendingWorkspaceClose, setPendingWorkspaceMove, setRenamingWorkspace } from '../../lib/workspace-ui-store';
 import {
   closeWorkspace,
   createWorkspace,
@@ -130,8 +130,10 @@ describe('closeWorkspaceWithSurfaces', () => {
     // it through `blur`, so the verb itself has to clear it.
     setRenamingWorkspace('ws-2');
     setPendingWorkspaceClose({ id: 'ws-2', char: 'x' });
+    setPendingWorkspaceMove({ id: 'ws-2', char: 'a', iframeCount: 1, proceed: vi.fn() });
 
     expect(await closeWorkspaceWithSurfaces('ws-2')).toBeNull();
+    expect(getWorkspaceUiSnapshot().pendingMove).toBeNull();
     expect(getWorkspaceUiSnapshot().renamingId).toBeNull();
     expect(getWorkspaceUiSnapshot().pendingClose).toBeNull();
   });
@@ -177,6 +179,7 @@ it('preserves another Workspace’s rename and close confirmation when closing a
   handleFor('ws-2');
   setRenamingWorkspace(first);
   setPendingWorkspaceClose({ id: first, char: 'x' });
+  setPendingWorkspaceMove({ id: first, char: 'a', iframeCount: 1, proceed: vi.fn() });
   const before = getWorkspaceUiSnapshot();
   expect(await closeWorkspaceWithSurfaces('ws-2')).toBeNull();
   expect(getWorkspaceUiSnapshot()).toBe(before);

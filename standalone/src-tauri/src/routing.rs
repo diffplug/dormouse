@@ -413,7 +413,7 @@ pub fn boot_list_ids(owned: Vec<String>, arrivals: &Arrivals) -> Vec<String> {
 }
 
 /// Release every suppression older than `max` that **no arrival claims**,
-/// returning what was released.
+/// returning each released id and its held events together.
 ///
 /// Fail open, but only defensively: a suppression whose arrival record is gone
 /// is bookkeeping nothing will ever lift, while a real arrival's is lifted by
@@ -421,10 +421,11 @@ pub fn boot_list_ids(owned: Vec<String>, arrivals: &Arrivals) -> Vec<String> {
 /// have its shells unsilenced into a window that has not resumed them yet.
 pub fn sweep_awaiting(
     map: &mut HashMap<String, Instant>,
+    held: &mut HashMap<String, Vec<HeldEvent>>,
     now: Instant,
     max: Duration,
     arriving: &HashSet<String>,
-) -> Vec<String> {
+) -> Vec<(String, Vec<HeldEvent>)> {
     // The steady state: nothing is transferring, so this costs one branch.
     if map.is_empty() {
         return Vec::new();
@@ -434,10 +435,10 @@ pub fn sweep_awaiting(
         .filter(|(id, at)| now.duration_since(**at) >= max && !arriving.contains(*id))
         .map(|(id, _)| id.clone())
         .collect();
-    for id in &stale {
-        map.remove(id);
-    }
-    stale
+    stale.into_iter().map(|id| {
+        let queue = lift_suppression(map, held, &id);
+        (id, queue)
+    }).collect()
 }
 
 /// One event held for an id mid-transfer, in arrival order.
@@ -890,9 +891,19 @@ mod tests {
         let now = Instant::now();
         map.insert("old".to_string(), now - Duration::from_secs(9));
         map.insert("fresh".to_string(), now);
-        let swept = sweep_awaiting(&mut map, now, AWAITING_REPLAY_MAX, &HashSet::new());
-        assert_eq!(swept, vec!["old".to_string()]);
+        let mut held = HashMap::new();
+        let event = ("pty:exit".to_string(), json!({"id": "old", "exitCode": 0}));
+        held.insert("old".to_string(), vec![event.clone()]);
+        held.insert("fresh".to_string(), vec![("pty:title".into(), json!({"id": "fresh"}))]);
+        let swept = sweep_awaiting(&mut map, &mut held, now, AWAITING_REPLAY_MAX, &HashSet::new());
+        assert_eq!(swept, vec![("old".to_string(), vec![event])]);
+        assert!(!map.contains_key("old"));
+        assert!(!held.contains_key("old"));
         assert!(map.contains_key("fresh"));
+        assert!(held.contains_key("fresh"));
+        // Reusing this id cannot flush the previous gap's events.
+        map.insert("old".to_string(), now);
+        assert!(lift_suppression(&mut map, &mut held, "old").is_empty());
     }
 
     /// A cold boot slower than `AWAITING_REPLAY_MAX` must not have its shells
@@ -907,15 +918,19 @@ mod tests {
         let mut arrivals = Arrivals::new();
         queue_arrival(&mut arrivals, arrival("w1", "main", "ws-2", &["arriving"]));
 
-        let swept = sweep_awaiting(&mut map, now, AWAITING_REPLAY_MAX, &arrival_ids(&arrivals));
-        assert_eq!(swept, vec!["orphan".to_string()]);
+        let mut held = HashMap::new();
+        let event = ("pty:title".to_string(), json!({"id": "arriving"}));
+        held.insert("arriving".to_string(), vec![event.clone()]);
+        let swept = sweep_awaiting(&mut map, &mut held, now, AWAITING_REPLAY_MAX, &arrival_ids(&arrivals));
+        assert_eq!(swept, vec![("orphan".to_string(), vec![])]);
+        assert_eq!(held.get("arriving"), Some(&vec![event.clone()]));
         assert!(map.contains_key("arriving"));
 
         // Its record settled: the suppression is ordinary bookkeeping again.
         take_arrival(&mut arrivals, "w1", "ws-2").unwrap();
         assert_eq!(
-            sweep_awaiting(&mut map, now, AWAITING_REPLAY_MAX, &arrival_ids(&arrivals)),
-            vec!["arriving".to_string()]
+            sweep_awaiting(&mut map, &mut held, now, AWAITING_REPLAY_MAX, &arrival_ids(&arrivals)),
+            vec![("arriving".to_string(), vec![event])]
         );
     }
 

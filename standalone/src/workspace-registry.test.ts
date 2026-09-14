@@ -1,3 +1,4 @@
+import workspaceRefCases from "../scripts/workspace-ref-cases.json?raw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createWorkspace,
@@ -5,6 +6,7 @@ import {
   renameWorkspace,
   resetWorkspaces,
   setActiveWorkspace,
+  workspaceRefFor,
 } from "dormouse-lib/lib/workspace-store";
 import {
   acceptRegistrySnapshot,
@@ -14,13 +16,14 @@ import {
   type WorkspaceRegistrySnapshot,
 } from "./workspace-registry";
 
-function host() {
+function host(report?: () => Promise<unknown>) {
   const invoke = vi.fn(async (cmd: string, args?: Record<string, unknown>): Promise<unknown> => {
     if (cmd === "workspace_reserve_ids") {
       const count = Number(args?.count);
       return Array.from({ length: count }, (_, i) => `workspace-${50 + i}`);
     }
     if (cmd === "workspace_registry") return { revision: 3, windows: [{ label: "main", workspaces: [] }] };
+    if (cmd === "workspace_report") return report?.() ?? null;
     return null;
   });
   let push: ((snapshot: WorkspaceRegistrySnapshot) => void) | null = null;
@@ -44,6 +47,7 @@ describe("workspace registry", () => {
   afterEach(() => {
     uninstall?.();
     uninstall = null;
+    vi.restoreAllMocks();
   });
 
   it("mints from the host's block and reports the store once per change, coalesced", async () => {
@@ -78,4 +82,45 @@ describe("workspace registry", () => {
     acceptRegistrySnapshot({ revision: 4, windows: [] });
     expect(getRegistrySnapshot().windows).toEqual([]);
   });
+
+  it('retries a failed report on the next store notification with the same final entries', async () => {
+    let reject!: (error: Error) => void;
+    const report = vi.fn().mockImplementationOnce(() => new Promise((_, fail) => { reject = fail; })).mockResolvedValue(null);
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const h = host(report);
+    uninstall = await installWorkspaceRegistry(h);
+    reject(new Error('bridge unavailable'));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    renameWorkspace('workspace-1', 'changed');
+    renameWorkspace('workspace-1', 'Workspace 1');
+    await Promise.resolve();
+    expect(h.reports()).toHaveLength(2);
+    expect(h.reports()[1]).toEqual(h.reports()[0]);
+    expect(logged).toHaveBeenCalledWith('[workspace-registry] the host did not accept the Workspace report', expect.any(Error));
+  });
+
+  it('does not invalidate a newer same-shaped report when an older attempt fails', async () => {
+    let reject!: (error: Error) => void;
+    const report = vi.fn().mockImplementationOnce(() => new Promise((_, fail) => { reject = fail; })).mockResolvedValue(null);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const h = host(report);
+    uninstall = await installWorkspaceRegistry(h);
+    renameWorkspace('workspace-1', 'B');
+    await Promise.resolve();
+    renameWorkspace('workspace-1', 'Workspace 1');
+    await Promise.resolve();
+    reject(new Error('late A failure'));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    renameWorkspace('workspace-1', 'temporary');
+    renameWorkspace('workspace-1', 'Workspace 1');
+    await Promise.resolve();
+    expect(h.reports()).toHaveLength(3);
+  });
+
+  it('shares canonical numbered and opaque refs with Rust and the browser harness', async () => {
+    uninstall = await installWorkspaceRegistry(host());
+    const cases: { id: string; ref: string }[] = JSON.parse(workspaceRefCases);
+    for (const { id, ref } of cases) expect(workspaceRefFor(id)).toBe(ref);
+  });
+
 });
