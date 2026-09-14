@@ -86,7 +86,7 @@ export function WorkspaceTeardownModal({
     );
   }
   if (!archiveError) {
-    const names = workspaceNames.length ? workspaceNames.join(', ') : intent.windowName;
+    const names = workspaceNames.join(', ');
     const scope = names ? `Workspaces: ${names}. ` : '';
     const count = hasRunning ? `${runningCount} running command${runningCount === 1 ? '' : 's'} will be stopped.` : 'No commands are still running.';
     const update = intent.discardsUpdate ? ' The downloaded update will be discarded.' : '';

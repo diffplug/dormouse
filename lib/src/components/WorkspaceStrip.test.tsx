@@ -1,5 +1,3 @@
-import { setWorkspaceTransferPending } from '../lib/workspace-ui-store';
-import { dismissWorkspaceUi } from '../lib/workspace-ui-store';
 /**
  * @vitest-environment jsdom
  */
@@ -15,6 +13,8 @@ import { resetWorkspaceSurfaces, setWorkspaceSurfaces } from '../lib/workspace-s
 import { clearTerminalActivity, setTerminalActivity } from '../lib/terminal-registry';
 import {
   getWorkspaceUiSnapshot,
+  setWorkspaceTransferPending,
+  dismissWorkspaceUi,
   resetWorkspaceUi,
   setPendingWorkspaceClose,
   setPendingWorkspaceMove,

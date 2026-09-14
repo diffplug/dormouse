@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { countRunningSessions } from "dormouse-lib/lib/terminal-registry";
 import { openQuitConfirm } from "./quit-confirm-store";
-import { createTeardownFlow, describeWindow } from "./teardown-flow";
+import { createTeardownFlow } from "./teardown-flow";
 import type { TauriAdapter } from "./tauri-adapter";
 import { hasPendingUpdate } from "./updater";
 import { withTimeout } from "./with-timeout";
@@ -46,7 +46,6 @@ export function initWindowClose(adapter: TauriAdapter): void {
   void listenToWindow("dormouse://window-close-requested", () => {
     flow.request({
       kind: "close-window",
-      windowName: describeWindow(),
       ...(hasPendingUpdate() ? { discardsUpdate: true } : {}),
     });
   });

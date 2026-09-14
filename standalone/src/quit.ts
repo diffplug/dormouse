@@ -3,7 +3,7 @@ import { flushWindowSession } from "dormouse-lib/lib/window-session-aggregator";
 import { DEFAULT_RECOVERY_WAIT_MS } from "dormouse-lib/host/recovery-capture";
 import type { TauriAdapter } from "./tauri-adapter";
 import { dismissQuitConfirm } from "./quit-confirm-store";
-import { createTeardownFlow, describeWindow, type TeardownConfirmGate } from "./teardown-flow";
+import { createTeardownFlow, type TeardownConfirmGate } from "./teardown-flow";
 import { hasPendingUpdate, installPendingUpdate } from "./updater";
 import { withTimeout } from "./with-timeout";
 import { listenToWindow } from "./window-label";
@@ -49,10 +49,8 @@ const flow = createTeardownFlow({
 
 export function initQuitFlow(adapter: TauriAdapter): void {
   quitAdapter = adapter;
-  void listenToWindow<{ windows?: number }>("dormouse://quit-requested", (event) => {
-    const windows = event.payload?.windows ?? 1;
-    // Named only when there is more than one window to tell apart.
-    flow.request({ kind: "quit", ...(windows > 1 ? { windowName: describeWindow() } : {}) });
+  void listenToWindow("dormouse://quit-requested", () => {
+    flow.request({ kind: "quit" });
   });
   // Another window said no. Nothing was destroyed; drop this window's dialog
   // and go back to idle so a later quit asks again. No call back into Rust —

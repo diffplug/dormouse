@@ -10,7 +10,7 @@ mod workspaces;
 // interception).
 #[cfg(target_os = "macos")]
 mod macos_terminate;
-use quit_state::{CleanupGate, CloseMachine, QuitAction, QuitMachine};
+use quit_state::{CleanupGate, CloseMachine, DeferredTeardown, QuitAction, QuitMachine};
 use routing::{Route, RouteView};
 use std::{
     collections::{HashMap, HashSet},
@@ -545,6 +545,7 @@ struct QuitState {
     machine: Mutex<QuitMachine>,
     close: Mutex<CloseMachine>,
     cleanup: Mutex<CleanupGate>,
+    deferred: Mutex<DeferredTeardown>,
 }
 
 fn exit_after_cleanup(app: &AppHandle) -> bool {
@@ -647,6 +648,34 @@ fn apply_quit_actions(app: &AppHandle, actions: Vec<QuitAction>) {
     }
 }
 
+/// Re-enter the normal admission and confirmation paths after a transfer
+/// settles. Registration shares the arrivals lock, so a settlement cannot miss
+/// a request queued concurrently. The callback takes requests only when it runs.
+fn redrive_deferred_teardown(app: &AppHandle) {
+    let retry = app.clone();
+    if let Err(error) = app.run_on_main_thread(move || {
+        let Some(state) = retry.try_state::<QuitState>() else { return; };
+        let Some(windows) = retry.try_state::<WindowState>() else { return; };
+        let (quit, closes) = {
+            let arrivals = guard(&windows.arrivals);
+            let endpoints = arrivals.iter().flat_map(|arrival| [arrival.from.clone(), arrival.to.clone()]).collect();
+            let live = window_labels(&retry).into_iter().collect();
+            guard(&state.deferred).take_ready(&endpoints, &live)
+        };
+        if quit { request_quit(&retry); }
+        else {
+            for label in closes {
+                if retry.get_webview_window(&label).is_some() {
+                    if retry.webview_windows().len() == 1 { request_quit(&retry); }
+                    else { request_window_close(&retry, &label); }
+                }
+            }
+        }
+    }) {
+        append_log(format!("[quit] could not retry deferred teardown: {error}"));
+    }
+}
+
 fn request_quit(app: &AppHandle) {
     let Some(state) = app.try_state::<QuitState>() else {
         return;
@@ -659,8 +688,9 @@ fn request_quit(app: &AppHandle) {
         let windows = app.state::<WindowState>();
         let arrivals = guard(&windows.arrivals);
         if !arrivals.is_empty() {
+            guard(&state.deferred).request_quit();
             drop(arrivals);
-            append_log("[quit] transfer in progress; retry quit after it settles");
+            append_log("[quit] transfer in progress; quit queued until settlement");
             return;
         }
         let labels = window_labels(app);
@@ -749,8 +779,9 @@ fn request_window_close(app: &AppHandle, label: &str) {
         let windows = app.state::<WindowState>();
         let arrivals = guard(&windows.arrivals);
         if arrivals.iter().any(|arrival| arrival.from == label || arrival.to == label) {
+            guard(&state.deferred).request_close(label);
             drop(arrivals);
-            append_log(format!("[window] {label} transfer in progress; retry close after it settles"));
+            append_log(format!("[window] {label} transfer in progress; close queued until settlement"));
             return;
         }
         guard(&state.close).request(label)
@@ -2917,6 +2948,7 @@ fn begin_arrival(
             let machine = guard(&state.machine);
             let close = guard(&state.close);
             if !transfer_admitted(&machine, &close, &arrival.from, &arrival.to)
+                || guard(&state.deferred).blocks_transfer(&arrival.from, &arrival.to)
                 || windows.refuses_save(&arrival.from) || windows.refuses_save(&arrival.to)
             {
                 return Err("cannot transfer a Workspace while its window is closing or Dormouse is quitting".to_string());
@@ -3027,6 +3059,7 @@ fn hand_back_arrival(
             serde_json::json!({ "workspaceId": arrival.workspace_id, "reason": reason, "replayIds": marked }),
         );
         if marked.is_empty() {
+            redrive_deferred_teardown(app);
             return;
         }
         if let Some(sidecar) = app.try_state::<SidecarState>() {
@@ -3041,6 +3074,7 @@ fn hand_back_arrival(
             });
             send_to_sidecar(&sidecar, msg.to_string());
         }
+        redrive_deferred_teardown(app);
         return;
     }
     if let Ok(dir) = sessions_dir(app) {
@@ -3054,6 +3088,7 @@ fn hand_back_arrival(
         windows.forget_pty(id);
     }
     reap_orphaned_ptys(app, &arrival.from, arrival.terminal_ids.clone());
+    redrive_deferred_teardown(app);
 }
 
 /// Tear a Workspace out into a brand-new window under the cursor.
@@ -3263,6 +3298,7 @@ fn adopt_done(
         "dormouse://workspace-departed",
         serde_json::json!({ "workspaceId": arrival.workspace_id }),
     );
+    redrive_deferred_teardown(&app);
     Ok(())
 }
 
@@ -3488,6 +3524,7 @@ fn quit_progress(window: tauri::Window, state: tauri::State<'_, QuitState>) {
 // destroyed — which is the whole reason the windows vote before they walk.
 #[tauri::command]
 fn quit_cancel(app: AppHandle, state: tauri::State<'_, QuitState>) {
+    guard(&state.deferred).cancel();
     let actions = guard(&state.machine).cancel();
     apply_quit_actions(&app, actions);
 }
@@ -3520,6 +3557,7 @@ fn window_close_ack(window: tauri::Window, state: tauri::State<'_, QuitState>) {
 // exactly as it was.
 #[tauri::command]
 fn window_close_cancel(window: tauri::Window, state: tauri::State<'_, QuitState>) {
+    guard(&state.deferred).forget_window(window.label());
     guard(&state.close).clear(window.label());
 }
 
@@ -4193,6 +4231,7 @@ pub fn run() {
                     }
                     if let Some(state) = app.try_state::<QuitState>() {
                         guard(&state.close).clear(&label);
+                        guard(&state.deferred).forget_window(&label);
                         // A window that left outside the flow can never vote or
                         // finish, so the quit advances past it rather than
                         // waiting out its budget. Bound before the call: the
@@ -4214,6 +4253,7 @@ pub fn run() {
                     // every live window, so it must learn about this one only
                     // now that asking it would be impossible.
                     send_window_labels(app);
+                    redrive_deferred_teardown(app);
                 }
                 _ => {}
             }
@@ -4713,6 +4753,14 @@ mod tests {
         let quit = body("request_quit");
         assert!(quit.contains("let arrivals = guard(&windows.arrivals)"));
         assert!(quit.contains("if !arrivals.is_empty()"));
+        assert!(quit.contains("guard(&state.deferred).request_quit()"));
+        assert!(body("adopt_done").contains("redrive_deferred_teardown(&app)"));
+        assert!(body("hand_back_arrival").contains("redrive_deferred_teardown(app)"));
+        let redrive = body("redrive_deferred_teardown");
+        assert!(redrive.contains("run_on_main_thread"));
+        assert!(redrive.contains("take_ready(&endpoints, &live)"));
+        assert!(redrive.contains("request_quit(&retry)"));
+        assert!(redrive.contains("request_window_close(&retry, &label)"));
         assert!(quit.contains("guard(&state.machine).request(&labels)"));
         let close = body("request_window_close");
         assert!(close.contains("let arrivals = guard(&windows.arrivals)"));

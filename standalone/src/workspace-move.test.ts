@@ -648,9 +648,16 @@ describe("the target half", () => {
     vi.useFakeTimers();
     try {
       const platform = fakePlatform([], { answer: false });
-      arrivals = [payload()];
+      const moving = payload();
+      const alert = { kind: "todo" } as never;
+      moving.workspace.session.panes.push({ ...moving.workspace.session.panes[0]!, id: "browser-1", alert });
+      moving.allIds.push("browser-1");
+      const removeAlert = vi.spyOn(platform, "alertRemove");
+      arrivals = [moving];
       initWorkspaceMoves(platform);
       await vi.advanceTimersByTimeAsync(5000);
+      expect(platform.alertSeed).toHaveBeenCalledWith("browser-1", alert);
+      expect(removeAlert).toHaveBeenCalledWith("browser-1");
 
       expect(getWorkspacesSnapshot().workspaces.map((w) => w.name)).not.toContain("Deploys");
       expect(getWorkspaceBootPlan(WORKSPACE_ID)).toEqual({});

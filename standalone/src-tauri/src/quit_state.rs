@@ -7,7 +7,37 @@
 //! to perform; `lib.rs` owns the emitting, destroying and exiting.
 
 use crate::routing::quit_order;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+
+/// User requests delayed until transfer membership is settled. A quit absorbs
+/// earlier per-window closes; cancellation and destruction retire queued work.
+#[derive(Default)]
+pub struct DeferredTeardown {
+    quit: bool,
+    closes: HashSet<String>,
+}
+
+impl DeferredTeardown {
+    pub fn request_quit(&mut self) { self.quit = true; self.closes.clear(); }
+    pub fn request_close(&mut self, label: &str) {
+        if !self.quit { self.closes.insert(label.to_string()); }
+    }
+    pub fn blocks_transfer(&self, from: &str, to: &str) -> bool {
+        self.quit || self.closes.contains(from) || self.closes.contains(to)
+    }
+    pub fn cancel(&mut self) { self.quit = false; self.closes.clear(); }
+    pub fn forget_window(&mut self, label: &str) { self.closes.remove(label); }
+    pub fn take_ready(&mut self, endpoints: &HashSet<String>, live: &HashSet<String>) -> (bool, Vec<String>) {
+        self.closes.retain(|label| live.contains(label));
+        if self.quit {
+            if endpoints.is_empty() { self.quit = false; return (true, Vec::new()); }
+            return (false, Vec::new());
+        }
+        let ready: Vec<_> = self.closes.iter().filter(|label| !endpoints.contains(*label)).cloned().collect();
+        for label in &ready { self.closes.remove(label); }
+        (false, ready)
+    }
+}
 
 /// An approved quit waits for destroyed windows to journal their hand-backs.
 #[derive(Default)]
@@ -352,6 +382,34 @@ impl CloseMachine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deferred_quit_and_close_requests_wait_for_membership_then_run_once() {
+        let mut deferred = DeferredTeardown::default();
+        let live = HashSet::from(["main".to_string(), "ws-2".to_string(), "ws-3".to_string()]);
+        let moving = HashSet::from(["main".to_string(), "ws-2".to_string()]);
+        deferred.request_close("ws-2");
+        deferred.request_close("ws-2"); // a repeated click coalesces
+        assert!(deferred.blocks_transfer("ws-3", "ws-2"));
+        assert_eq!(deferred.take_ready(&moving, &live), (false, vec![]));
+        assert_eq!(deferred.take_ready(&HashSet::new(), &live), (false, vec!["ws-2".into()]));
+        assert_eq!(deferred.take_ready(&HashSet::new(), &live), (false, vec![]));
+        deferred.request_close("ws-2");
+        deferred.request_quit(); // quit supersedes queued window closes
+        deferred.request_close("ws-3");
+        assert!(deferred.blocks_transfer("ws-3", "main"));
+        assert_eq!(deferred.take_ready(&moving, &live), (false, vec![]));
+        assert_eq!(deferred.take_ready(&HashSet::new(), &live), (true, vec![]));
+        assert_eq!(deferred.take_ready(&HashSet::new(), &live), (false, vec![]));
+        deferred.request_quit();
+        deferred.cancel();
+        assert_eq!(deferred.take_ready(&HashSet::new(), &live), (false, vec![]));
+        deferred.request_close("ws-2");
+        deferred.forget_window("ws-2");
+        deferred.request_close("gone");
+        assert_eq!(deferred.take_ready(&HashSet::new(), &live), (false, vec![]));
+        assert!(!deferred.blocks_transfer("main", "ws-2"));
+    }
 
     #[test]
     fn stalled_cleanup_cannot_block_an_approved_exit_forever() {

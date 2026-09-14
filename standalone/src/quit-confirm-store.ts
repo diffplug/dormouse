@@ -16,12 +16,10 @@ export type QuitConfirmPhase = "open" | "quitting" | "archive-failed";
 /**
  * What the dialog is asking about. A quit tears every window down; a
  * close ends this one alone (docs/specs/standalone.md §Per-window close). The
- * Workspace name is carried only while several windows are open, so a single
- * window's dialog is not made to name itself.
+ * affected Workspace names are captured separately by this store.
  */
 export interface QuitConfirmIntent {
   kind: "quit" | "close-window";
-  windowName?: string;
   /** This window holds an approved, downloaded update that closing throws away:
    *  the download lives in the webview, so nothing else can install it
    *  (docs/specs/auto-update.md). Never set on a quit, which installs it. */

@@ -31,7 +31,7 @@ describe("WorkspaceTeardownModal copy", () => {
   it("warns that closing discards the update this window is holding", () => {
     const text = render({
       confirming: false,
-      intent: { kind: "close-window", windowName: "Deploys", discardsUpdate: true },
+      intent: { kind: "close-window", discardsUpdate: true },
     });
     expect(text).toContain("Confirm kill workspace");
     expect(text).toContain("The downloaded update will be discarded.");

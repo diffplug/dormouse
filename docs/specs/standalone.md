@@ -1054,11 +1054,15 @@ asks before discarding a pending download (§Per-window close).
 - **Must clear competing Workspace close/move/rename prompts when opening the
   gate, preserving transfer guards.** A full-window overlay covers the strip;
   its keyboard lease lasts through confirmation, archive failure, and teardown.
-- **Must exclude transfers from host teardown.** Refuse app quit while an arrival
-  is pending, native window close while that window is an arrival endpoint, and
-  transfers during app quit or either endpoint's native close confirmation or
-  teardown. Retry a refused quit/close after the transfer settles; cancelling
-  teardown permits transfers again. Pinned by
+- **Must exclude transfers from host teardown.** Queue app quit while any arrival
+  is pending, and native window close while that window is an arrival endpoint;
+  automatically retry through normal confirmation once the relevant transfer
+  settles. Repeated requests coalesce; quit supersedes queued closes, and
+  cancellation or window destruction retires applicable queued requests.
+  **Must refuse new transfers while app quit or either endpoint’s close is
+  queued, confirming, or tearing down.** Pinned by
+  `deferred_quit_and_close_requests_wait_for_membership_then_run_once` in
+  `standalone/src-tauri/src/quit_state.rs` and
   `transfers_cannot_change_membership_after_close_or_quit_confirmation_begins` in
   `standalone/src-tauri/src/lib.rs`.
 - **Must collect votes before killing any window's Sessions.** Confirmation

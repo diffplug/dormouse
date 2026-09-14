@@ -1,7 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { countRunningSessions } from "dormouse-lib/lib/terminal-registry";
 import { notepadSurfaceIds, removeSurface } from "dormouse-lib/lib/notepad/notepad-store";
-import { getWorkspacesSnapshot } from "dormouse-lib/lib/workspace-store";
 import {
   beginQuitProgress,
   dismissQuitConfirm,
@@ -39,16 +38,6 @@ export interface TeardownFlow {
   cancel(): void;
   /** @internal Back to idle, for a decision made elsewhere and for tests. */
   reset(): void;
-}
-
-/**
- * How a window names itself in a dialog: by the Workspace it is showing, which
- * is the only name a user has for one (`docs/specs/standalone.md` → "Quit flow",
- * Confirmation dialog).
- */
-export function describeWindow(): string | undefined {
-  const { workspaces, activeId } = getWorkspacesSnapshot();
-  return workspaces.find((workspace) => workspace.id === activeId)?.name;
 }
 
 /**

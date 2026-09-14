@@ -385,7 +385,7 @@ async function planArrival(
     timeoutMs: ARRIVAL_TIMEOUT_MS,
   });
   if (live.timedOut) {
-    for (const id of ptyIds) {
+    for (const id of new Set([...ptyIds, ...payload.workspace.session.panes.map((pane) => pane.id)])) {
       if (terminalRegistry.has(id)) continue;
       platform.alertRemove(id);
       clearTerminalActivity(id);

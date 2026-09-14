@@ -121,7 +121,7 @@ describe("per-window close", () => {
 
     expect(getQuitConfirmPhase()).toBe("open");
     // The dialog says "close", not "quit", and names the window.
-    expect(getQuitConfirmIntent()).toEqual({ kind: "close-window", windowName: "Deploys" });
+    expect(getQuitConfirmIntent()).toEqual({ kind: "close-window" });
     expect(adapter.gracefulKillPtys).not.toHaveBeenCalled();
 
     dismissDialog();

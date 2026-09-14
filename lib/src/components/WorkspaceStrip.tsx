@@ -1,4 +1,3 @@
-import { isWorkspaceTransferPending } from '../lib/workspace-ui-store';
 import {
   memo,
   useCallback,
@@ -27,6 +26,7 @@ import { getWorkspaceSurfacesSnapshot, subscribeToWorkspaceSurfaces } from '../l
 import { computeWorkspaceUnion, EMPTY_WORKSPACE_UNION, type WorkspaceUnion } from '../lib/workspace-union';
 import {
   getWorkspaceUiSnapshot,
+  isWorkspaceTransferPending,
   setPendingWorkspaceClose,
   setPendingWorkspaceMove,
   setRenamingWorkspace,

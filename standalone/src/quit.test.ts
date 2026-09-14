@@ -599,7 +599,7 @@ describe("quit orchestrator", () => {
     expect(mocks.invoke).not.toHaveBeenCalledWith("quit_cancel");
   });
 
-  it("names the window in its dialog only when more than one is open", async () => {
+  it("uses the same quit intent regardless of window count", async () => {
     mocks.countRunningSessions.mockReturnValue(1);
     const gate = vi.fn();
     setQuitConfirmGate(gate);
@@ -615,7 +615,7 @@ describe("quit orchestrator", () => {
     initQuitFlow(fakeAdapter());
     quitRequested(2);
     await settle();
-    expect(gate.mock.calls[0]![1]).toEqual({ kind: "quit", windowName: "Deploys" });
+    expect(gate.mock.calls[0]![1]).toEqual({ kind: "quit" });
   });
 
   it("falls through to teardown when no gate is installed even with running sessions", async () => {
