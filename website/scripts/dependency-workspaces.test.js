@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assertWorkspaceCoverage } from './dependency-workspaces.js';
+import { assertWorkspaceCoverage, getDependencyNames } from './dependency-workspaces.js';
 
 const workspace = (name, fields = {}) => ({ pkg: { name, ...fields } });
 
@@ -33,5 +33,22 @@ describe('dependency disclosure workspace coverage', () => {
   it('rejects duplicate workspace names that would hide a dependency graph', () => {
     expect(() => assertWorkspaceCoverage([workspace('app'), workspace('app')], ['app'], []))
       .toThrow('Workspace package names must be unique');
+  });
+});
+
+describe('dependency edges', () => {
+  it('flags which edges are optional and drops development ones', () => {
+    expect(getDependencyNames({
+      dependencies: { runtime: '1.0.0' },
+      optionalDependencies: { 'native-darwin': '2.0.0' },
+      devDependencies: { builder: '3.0.0' },
+    })).toEqual([
+      { name: 'runtime', optional: false },
+      { name: 'native-darwin', optional: true },
+    ]);
+  });
+
+  it('accepts a manifest declaring neither block', () => {
+    expect(getDependencyNames({})).toEqual([]);
   });
 });

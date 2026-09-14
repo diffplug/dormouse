@@ -37,13 +37,18 @@ The roots are `productDependencyFilters` in `website/scripts/generate-deps.js`. 
 
 **Must reject unclassified workspaces and exclusions reachable from a product root before generating disclosure.** Runtime and optional edges count; development edges do not. `website/scripts/dependency-workspaces.test.js` pins coverage.
 
+**An unresolvable dependency throws unless an optional-edge rule covers it.** `node-datachannel` — the sidecar's second native addon, beside `node-pty` — publishes one prebuilt package per platform, and pnpm installs only the host's.
+
+- **Optional, declared by an external package: skipped.** The bundle copies `standalone/sidecar/node_modules`, so a prebuild the addon alone declares (android, musl) reaches nobody.
+- **Optional, declared by a product root: described from a sibling in the same `optionalDependencies` block at the same exact version string** — published in lockstep, so the disclosure is identical on every machine. No such sibling installed throws.
+
 **Bundled themes are disclosed outside that lockfile walk.** The themes compiled into every build (`lib/src/lib/themes/bundled.json`) come from OpenVSX extensions, not npm, so `website/scripts/generate-deps.js` appends the checked-in `lib/src/lib/themes/bundled-extensions.json` to the npm table instead. The two come from one run of `lib/scripts/bundle-themes.mjs` but both are committed and can drift, which the CI gate below cannot see (rationale). `lib/src/lib/themes/bundled-extensions.test.ts` pins them, joining on the `extensionId` each disclosure record carries: a bundled theme whose extension has no record, or a record with no bundled theme left, fails. **The join is on the extension set only** — `bundled.json` carries no version or license, so nothing pins a hand-edit to those published fields.
 
 - **FAIL IF** `node website/scripts/generate-deps.js` changes `website/src/data/dependencies-npm.json`, `website/src/data/dependencies-cargo.json`, or `website/src/data/dependencies-runtime.json` when run against a clean working tree after `pnpm install --frozen-lockfile`. The install is a precondition: the generator walks real `node_modules` directories and throws rather than under-reporting if they are absent.
 - **FAIL IF** `.github/workflows/ci.yml` stops running that generator under that same install precondition, or stops failing on a diff (rationale).
 - **FAIL IF** the disclosure omits a shipped workspace's graph or excludes a shipped package. Derive shipping routes from `pnpm-workspace.yaml` and the builds, not the enumeration above; the generator enforces classification, but cannot establish whether an exclusion is justified (rationale).
 
-Source of truth: `productDependencyFilters` / `excludedWorkspacePackages` in `website/scripts/generate-deps.js`; `assertWorkspaceCoverage` in `website/scripts/dependency-workspaces.js`.
+Source of truth: `productDependencyFilters` / `excludedWorkspacePackages` / `optionalSiblingsAtSameVersion` in `website/scripts/generate-deps.js`; `assertWorkspaceCoverage` in `website/scripts/dependency-workspaces.js`.
 
 ## Bundled runtime
 
