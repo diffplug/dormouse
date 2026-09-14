@@ -20,6 +20,8 @@ import App, {
   BURROWS_EMPTY,
   BURROWS_TITLE,
   SCAN_LABEL,
+  TRANSPORT_PATH_LABELS,
+  TRANSPORT_RELAY_CAUSES,
   UNSUPPORTED_BROWSER_TITLE,
 } from './App';
 import type { ConnectResult, PairingResult } from '../client/pocket-client';
@@ -43,7 +45,12 @@ import {
 import { setNativeFieldValue } from '../../lib/dom';
 
 const fake = vi.hoisted(() => ({
+  keyStorage: vi.fn<() => Promise<void>>(),
   noiseSupported: true as boolean,
+  /** The path callback `App` registered, so a case can report a cutover. */
+  onTransportPath: null as
+    | ((path: 'relay' | 'direct', cause: 'unsupported' | 'declined' | 'failed' | null) => void)
+    | null,
   hasPriorUse: false,
   sessionToken: null as string | null,
   setup: vi.fn<(credential: { setupToken: string }, label: string) => Promise<unknown>>(),
@@ -82,6 +89,11 @@ vi.mock('../client/push-subscribe', () => ({
   subscribeToPushInBrowser: () => Promise.reject(new Error('not under test')),
 }));
 
+vi.mock('../client/pocket-db', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../client/pocket-db')>()),
+  requirePocketKeyStorage: () => fake.keyStorage(),
+}));
+
 // Only `PocketClient` is doubled: the error classes and their messages are the
 // real ones, so a test asserting on what the screen says is asserting on what
 // ships rather than on a string this file made up.
@@ -95,6 +107,13 @@ vi.mock('../client/pocket-client', async (importOriginal) => ({
     hasPriorUse = () => fake.hasPriorUse;
     registeredPushEndpoint = () => null;
     setOnBurrowGone = () => undefined;
+    setOnTransportChanged = (
+      callback:
+        | ((path: 'relay' | 'direct', cause: 'unsupported' | 'declined' | 'failed' | null) => void)
+        | null,
+    ) => {
+      fake.onTransportPath = callback;
+    };
     close = () => fake.clientClose();
     openSocket = async () => undefined;
     setup = (credential: { setupToken: string }, label: string) => fake.setup(credential, label);
@@ -168,6 +187,7 @@ async function knownBurrow(burrowId: string, label = 'First laptop'): Promise<Kn
 const invitationUrl = () => sharedInvitationUrl(location.origin);
 
 beforeEach(() => {
+  fake.keyStorage.mockReset().mockResolvedValue(undefined);
   fake.noiseSupported = true;
   fake.hasPriorUse = false;
   fake.sessionToken = null;
@@ -190,6 +210,7 @@ beforeEach(() => {
   fake.hello.mockReset().mockResolvedValue({});
   fake.adapterInit.mockReset().mockResolvedValue(undefined);
   fake.adapterDispose.mockReset();
+  fake.onTransportPath = null;
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -252,6 +273,16 @@ describe('the capability gate', () => {
 });
 
 describe('a first run, from the scan to the terminal', () => {
+  it('stops failed key storage before registration, token retirement, or pairing', async () => {
+    fake.keyStorage.mockRejectedValue(new Error('Private key storage is unavailable'));
+    await boot();
+    await pasteCode((await invitationUrl()).url);
+    expect(alertText(container)).toContain('Private key storage is unavailable');
+    expect(fake.setup).not.toHaveBeenCalled();
+    expect(fake.signin).not.toHaveBeenCalled();
+    expect(fake.retireSetupToken).not.toHaveBeenCalled();
+    expect(fake.pair).not.toHaveBeenCalled();
+  });
   it('registers with the scanned token, pairs, shows the code, and connects', async () => {
     const { url, invitation } = await invitationUrl();
     let releasePair!: (result: PairingResult) => void;
@@ -479,6 +510,42 @@ describe('the Burrows list', () => {
     expect(container.textContent).not.toContain('Someone else’s');
     // No `GET /api/burrows` row means offline, not absent.
     expect(rowFor(container, 'Second laptop').textContent).toContain('Offline');
+  });
+
+  /**
+   * **Which path carries the session is shown, never inferred**, so a relayed
+   * fallback is visible rather than silent (`docs/specs/pocket-app.md`).
+   */
+  it('says which path carries the session, and re-reads it at the cutover', async () => {
+    fake.hasPriorUse = true;
+    fake.listKnownBurrows.mockResolvedValue([await knownBurrow('burrow-1', 'First laptop')]);
+    fake.listBurrows.mockResolvedValue([{ burrowId: 'burrow-1', label: '', online: true }]);
+    await boot();
+    await click(container, 'Sign in with passkey');
+
+    await click(container, 'Connect');
+
+    // Every session starts on the relay and says so.
+    expect(container.textContent).toContain(TRANSPORT_PATH_LABELS.relay.label);
+
+    // An attempt that quietly stayed relayed changes only the reason, so the
+    // label alone would say nothing had happened. **The reason rides the hover
+    // text, never the label**: a third state for the common case would read as
+    // a fault.
+    act(() => fake.onTransportPath?.('relay', 'declined'));
+    await settle();
+
+    const note = container.querySelector(`[title="${TRANSPORT_PATH_LABELS.relay.title} ` +
+      `${TRANSPORT_RELAY_CAUSES.declined}"]`);
+    expect(note?.textContent).toBe(TRANSPORT_PATH_LABELS.relay.label);
+
+    act(() => fake.onTransportPath?.('direct', null));
+    await settle();
+
+    expect(container.textContent).toContain(TRANSPORT_PATH_LABELS.direct.label);
+    expect(container.textContent).not.toContain(TRANSPORT_PATH_LABELS.relay.label);
+    // Nothing left to explain: the hover text is the path alone.
+    expect(container.querySelector(`[title="${TRANSPORT_PATH_LABELS.direct.title}"]`)).not.toBeNull();
   });
 
   /**
