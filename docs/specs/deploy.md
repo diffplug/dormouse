@@ -120,7 +120,7 @@ pnpm --dir standalone exec tauri signer generate  # creates the Tauri update sig
 
 Two macOS packaging edge cases the script enforces; each would ship a release that fails only on the user's machine:
 
-- **Never `--deep`-sign the outer `.app`** — it would re-sign the Node sidecar and drop the hardened-runtime entitlements it needs. Nested binaries (the Node sidecar, node-pty prebuilds, `spawn-helper`) are signed individually first, and the script then launches the signed sidecar and `require('node-pty')` from it.
+- **Never `--deep`-sign the outer `.app`** — it would re-sign the Node sidecar and drop the hardened-runtime entitlements it needs. Nested binaries (the Node sidecar, the node-pty and node-datachannel prebuilds, `spawn-helper`) are signed individually first, and the script then launches the signed sidecar and requires both native addons from it.
 - **Build the `.tar.gz` with `COPYFILE_DISABLE=1`** and re-scan the result for `._*` entries — AppleDouble resource-fork files make the Tauri updater's extraction fail with `failed to unpack ._Dormouse.app`.
 
 ### Packaged app logging
