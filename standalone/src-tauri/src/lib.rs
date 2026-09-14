@@ -10,7 +10,7 @@ mod workspaces;
 // interception).
 #[cfg(target_os = "macos")]
 mod macos_terminate;
-use quit_state::{CloseMachine, QuitAction, QuitMachine};
+use quit_state::{CleanupGate, CloseMachine, QuitAction, QuitMachine};
 use routing::{Route, RouteView};
 use std::{
     collections::{HashMap, HashSet},
@@ -99,8 +99,7 @@ struct RoutingState {
 }
 
 impl RoutingState {
-    /// `routing::lift_suppression` over this state's two halves. The caller
-    /// republishes `WindowState::suppressed` after it, still under the lock.
+    /// Begin replay suppression at the source cut after its mark arrives.
     fn mark_transfer(&mut self, id: &str, mark: u64) {
         if self.marking.remove(id).is_some() {
             self.transfer_marks.insert(id.to_string(), mark);
@@ -108,6 +107,8 @@ impl RoutingState {
         }
     }
 
+    /// `routing::lift_suppression` over this state's two halves. The caller
+    /// republishes `WindowState::suppressed` after it, still under the lock.
     fn lift_suppression(&mut self, id: &str) -> Vec<routing::HeldEvent> {
         routing::lift_suppression(&mut self.awaiting_replay, &mut self.held, id)
     }
@@ -571,32 +572,6 @@ struct QuitState {
     cleanup: Mutex<CleanupGate>,
 }
 
-/// An approved quit waits for destroyed windows to journal their hand-backs.
-#[derive(Default)]
-struct CleanupGate {
-    pending: usize,
-    exit_requested: bool,
-    forced: bool,
-}
-
-impl CleanupGate {
-    fn begin(&mut self) { self.pending += 1; }
-    fn request_exit(&mut self) -> bool {
-        if self.pending == 0 || self.forced { return true; }
-        self.exit_requested = true;
-        false
-    }
-    fn force_if_waiting(&mut self) -> bool {
-        if self.pending == 0 || !self.exit_requested { return false; }
-        self.forced = true;
-        true
-    }
-    fn finish(&mut self) -> bool {
-        self.pending -= 1;
-        self.pending == 0 && std::mem::take(&mut self.exit_requested)
-    }
-}
-
 fn exit_after_cleanup(app: &AppHandle) -> bool {
     let Some(state) = app.try_state::<QuitState>() else { return true; };
     let (exit, start_watchdog) = {
@@ -627,7 +602,7 @@ fn exit_after_cleanup(app: &AppHandle) -> bool {
 const QUIT_ACK_TIMEOUT_MS: u64 = 2_000;
 // Phase 3: per-phase budget once teardown is running. Each reported phase
 // (teardown, install) refreshes it, so it bounds a single stalled phase, not the
-// sum of all teardown work. Comfortably exceeds the webview's own teardown
+// sum of all teardown work. Sits above the webview's own teardown
 // ceiling (docs/specs/standalone.md §Quit flow) — `QUIT_TEARDOWN_CEILING_MS` in
 // `standalone/src/quit.ts`, pinned under this by
 // `lib/src/lib/mirrored-constants.test.ts`.
@@ -701,9 +676,21 @@ fn request_quit(app: &AppHandle) {
     let Some(state) = app.try_state::<QuitState>() else {
         return;
     };
-    let labels = window_labels(app);
-    append_log(format!("[quit] requested across {labels:?}"));
-    let (my_seq, actions) = guard(&state.machine).request(&labels);
+    let (my_seq, actions) = {
+        // Lock order: arrivals, quit machine, close machine. No disk I/O or
+        // event emission under these locks. Arrival admission takes this same
+        // lock before checking the quit phase, so membership cannot change
+        // between this check and beginning the vote.
+        let windows = app.state::<WindowState>();
+        let arrivals = guard(&windows.arrivals);
+        if !arrivals.is_empty() {
+            drop(arrivals);
+            append_log("[quit] transfer in progress; retry quit after it settles");
+            return;
+        }
+        let labels = window_labels(app);
+        guard(&state.machine).request(&labels)
+    };
     apply_quit_actions(app, actions);
 
     // Watchdog: a cloned handle polls the machine so a dead or wedged webview
@@ -783,7 +770,16 @@ fn request_window_close(app: &AppHandle, label: &str) {
         return;
     };
     append_log(format!("[window] close requested for {label}"));
-    let my_seq = guard(&state.close).request(label);
+    let my_seq = {
+        let windows = app.state::<WindowState>();
+        let arrivals = guard(&windows.arrivals);
+        if arrivals.iter().any(|arrival| arrival.from == label || arrival.to == label) {
+            drop(arrivals);
+            append_log(format!("[window] {label} transfer in progress; retry close after it settles"));
+            return;
+        }
+        guard(&state.close).request(label)
+    };
     let _ = app.emit_to(label, "dormouse://window-close-requested", ());
 
     let app = app.clone();
@@ -814,14 +810,14 @@ fn request_window_close(app: &AppHandle, label: &str) {
 /// Tauri has actually taken the label out of `webview_windows()`.
 fn finish_window_close(app: &AppHandle, label: &str) {
     append_log(format!("[window] closing {label} and removing its snapshot"));
-    if let Some(state) = app.try_state::<QuitState>() {
-        guard(&state.close).clear(label);
-    }
     if let Some(state) = app.try_state::<WindowState>() {
         // Before the removal, not after: a save already in flight from this
         // webview would otherwise put the snapshot back. Reached from the
         // watchdog too, where the webview never called `remove_window_session`.
         state.begin_closing(label);
+    }
+    if let Some(state) = app.try_state::<QuitState>() {
+        guard(&state.close).clear(label);
     }
     if let Ok(dir) = sessions_dir(app) {
         if let Err(err) = close_window_snapshot(&dir, label) {
@@ -1260,7 +1256,7 @@ const OPEN_PORT_TIMEOUT_PER_ID_MS: u64 = 100;
 // Mirrors platform/types.ts; pinned by mirrored-constants.test.ts.
 const OPEN_PORT_ROUND_TRIP_MARGIN_MS: u64 = 1000;
 
-/// Budget for either port command over `count` ids, including 1 s for IPC. The sidecar runs two
+/// Budget for either port command over `count` ids, plus `OPEN_PORT_ROUND_TRIP_MARGIN_MS` for IPC. The sidecar runs two
 /// scans serially: the process table under `OPEN_PORT_TIMEOUT_MS`, then one
 /// socket scan under that cap plus `OPEN_PORT_TIMEOUT_PER_ID_MS` per id
 /// (`getOpenPortsForPids` in `standalone/sidecar/pty-core.js`) — so the whole
@@ -1346,7 +1342,7 @@ async fn pty_graceful_kill(
 // because the replay buffers the detection reads live there and its lifetime is
 // exactly one activation. Both are `(async)` because they reach the blocking
 // sidecar helper (see the INVARIANT above `request_from_sidecar_timeout`;
-// `sidecar_commands_are_async` enforces it).
+// `blocking_commands_run_off_the_main_thread` enforces it).
 
 /// Interrupt the live PTYs and let the sidecar detect and record each agent's
 /// resume invocation. First step of the quit teardown: the hint exists only
@@ -2821,7 +2817,7 @@ fn restore_arrival(dir: &Path, record: &JsonValue) -> Result<(), String> {
     // Read both before writing either. If trimming the source fails after the
     // target write, restore its old bytes and retain the journal for retry.
     let previous_target = read_snapshot_from(dir, to)?;
-    let source = read_snapshot_from(dir, from)?;
+    read_snapshot_from(dir, from)?;
     // Once adoption settled, the target may already hold a newer snapshot.
     // Preserve that record while finishing the source side of the transaction.
     let existing = previous_target.as_ref()
@@ -2832,14 +2828,7 @@ fn restore_arrival(dir: &Path, record: &JsonValue) -> Result<(), String> {
     } else { workspace };
     let merged = snapshot_with_workspace(previous_target.clone(), restore)?;
     write_session_to(dir, to, &merged.to_string())?;
-    let trim = (|| -> Result<(), String> {
-        let Some(mut source) = source else { return Ok(()); };
-        if !snapshot_without_workspace(&mut source, id) { return Ok(()); }
-        let emptied = source.get("workspaces").and_then(JsonValue::as_array).is_some_and(Vec::is_empty);
-        if emptied { remove_session_from(dir, from) }
-        else { write_session_to(dir, from, &source.to_string()) }
-    })();
-    if let Err(error) = trim {
+    if let Err(error) = remove_workspace_from_disk(dir, from, id) {
         let rollback = match previous_target {
             Some(snapshot) => write_session_to(dir, to, &snapshot.to_string()),
             None => std::fs::remove_file(dir.join(session_file_name(to))).map_err(|e| e.to_string()),
@@ -2870,6 +2859,11 @@ fn arrival_from(from: &str, to: &str, payload: JsonValue) -> Result<routing::Arr
     })
 }
 
+fn transfer_admitted(machine: &QuitMachine, close: &CloseMachine, from: &str, to: &str) -> bool {
+    machine.phase == quit_state::QuitPhase::Idle && !machine.approved
+        && !close.active(from) && !close.active(to)
+}
+
 /// Open one arrival: reassign its shells to the target and suppress them, then
 /// queue the record. **Ownership moves synchronously here**, before either
 /// window is told anything — the single Rust reader thread processes sidecar
@@ -2883,6 +2877,15 @@ fn begin_arrival(
 ) -> Result<(), String> {
     {
         let mut arrivals = guard(&windows.arrivals);
+        if let Some(state) = app.try_state::<QuitState>() {
+            let machine = guard(&state.machine);
+            let close = guard(&state.close);
+            if !transfer_admitted(&machine, &close, &arrival.from, &arrival.to)
+                || windows.refuses_save(&arrival.from) || windows.refuses_save(&arrival.to)
+            {
+                return Err("cannot transfer a Workspace while its window is closing or Dormouse is quitting".to_string());
+            }
+        }
         if routing::has_arrival(&arrivals, &arrival.workspace_id) {
             return Err(format!(
                 "Workspace '{}' is already in flight",
@@ -3212,7 +3215,7 @@ fn adopt_done(
     // Keep the journal until source and target saves both reflect the move.
     if let Ok(dir) = sessions_dir(&app) {
         if let Err(e) = mark_arrival_adopted_on_disk(&dir, &workspace_id) {
-            append_log(format!("[window] could not forget {workspace_id} on disk: {e}"));
+            append_log(format!("[window] could not mark {workspace_id} adopted on disk: {e}"));
         }
     }
     append_log(format!(
@@ -4629,51 +4632,57 @@ mod tests {
     }
 
     #[test]
+    fn transfer_and_teardown_admission_share_the_arrivals_lock() {
+        let src = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
+        let body = |name: &str| src.split(&format!("fn {name}(")).nth(1).unwrap().split("\n}").next().unwrap();
+        let quit = body("request_quit");
+        assert!(quit.contains("let arrivals = guard(&windows.arrivals)"));
+        assert!(quit.contains("if !arrivals.is_empty()"));
+        assert!(quit.contains("guard(&state.machine).request(&labels)"));
+        let close = body("request_window_close");
+        assert!(close.contains("let arrivals = guard(&windows.arrivals)"));
+        assert!(close.contains("arrival.from == label || arrival.to == label"));
+        assert!(close.contains("guard(&state.close).request(label)"));
+        let arrival = body("begin_arrival");
+        let lock = arrival.find("let mut arrivals = guard(&windows.arrivals)").unwrap();
+        let check = arrival.find("!transfer_admitted(").unwrap();
+        let queue = arrival.find("routing::queue_arrival").unwrap();
+        assert!(lock < check && check < queue);
+        assert!(arrival[check..queue].contains("return Err("));
+    }
+
+    #[test]
+    fn transfers_cannot_change_membership_after_close_or_quit_confirmation_begins() {
+        let mut machine = super::QuitMachine::default();
+        let mut close = super::CloseMachine::default();
+        assert!(super::transfer_admitted(&machine, &close, "main", "ws-2"));
+        close.request("ws-2");
+        assert!(!super::transfer_admitted(&machine, &close, "main", "ws-2"));
+        assert!(!super::transfer_admitted(&machine, &close, "ws-2", "main"));
+        close.clear("ws-2");
+        assert!(super::transfer_admitted(&machine, &close, "main", "ws-2"));
+        machine.request(&["main".into(), "ws-2".into()]);
+        assert!(!super::transfer_admitted(&machine, &close, "main", "ws-2"));
+        machine.vote("main");
+        machine.vote("ws-2");
+        assert!(!super::transfer_admitted(&machine, &close, "main", "ws-2"));
+        machine.proceed();
+        assert!(!super::transfer_admitted(&machine, &close, "main", "ws-2"));
+    }
+
+    #[test]
     fn every_approved_exit_path_checks_cleanup() {
         let source = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
         let action = source.split("QuitAction::Exit => {").nth(1).unwrap().split("app.exit(0)").next().unwrap();
-        assert!(action.contains("exit_after_cleanup(app)"));
+        assert!(action.contains("!exit_after_cleanup(app)"));
         let event = source.split("RunEvent::ExitRequested { api, .. } => {").nth(1).unwrap().split("RunEvent::Exit =>").next().unwrap();
-        assert!(event.contains("exit_after_cleanup(app)"));
+        assert!(event.contains("!exit_after_cleanup(app)"));
+        let gate = source.split("fn exit_after_cleanup").nth(1).unwrap().split("\n}").next().unwrap();
+        assert!(gate.contains("if start_watchdog") && gate.contains("force_if_waiting") && gate.contains("QUIT_PHASE_TIMEOUT_MS"));
         let macos = include_str!("macos_terminate.rs");
         let delegate = macos.split("if quit_approved(app) {").nth(1).unwrap().split("append_log(").next().unwrap();
         assert!(delegate.contains("exit_after_cleanup(app)"));
         assert!(delegate.contains("TerminateCancel"));
-    }
-
-    #[test]
-    fn stalled_cleanup_cannot_block_an_approved_exit_forever() {
-        let mut gate = super::CleanupGate::default();
-        gate.begin();
-        assert!(!gate.force_if_waiting()); // no quit requested yet
-        assert!(!gate.request_exit());
-        assert!(gate.force_if_waiting()); // cleanup watchdog expired
-        assert!(gate.request_exit());
-        assert!(gate.finish()); // late completion remains safe
-        assert!(!gate.force_if_waiting());
-    }
-
-    #[test]
-    fn quit_waits_for_every_destroyed_window_handback() {
-        let mut gate = super::CleanupGate::default();
-        gate.begin();
-        gate.begin();
-        assert!(!gate.request_exit());
-        assert!(!gate.finish());
-        assert!(!gate.request_exit());
-        assert!(gate.finish());
-        assert!(gate.request_exit());
-        gate.begin();
-        assert!(!gate.finish()); // ordinary close does not request a quit
-    }
-
-    #[test]
-    fn journal_commands_run_off_the_main_thread() {
-        let source = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap().replace("\r\n", "\n");
-        for command in ["transfer_workspace", "transfer_workspace_content", "open_workspace_window", "adopt_done", "adopt_failed", "close_window"] {
-
-            assert!(source.contains(&format!("#[tauri::command(async)]\nfn {command}(")), "{command} must run off the UI thread");
-        }
     }
 
     #[test]
@@ -5738,15 +5747,35 @@ mod tests {
     }
 
     // Enforces the INVARIANT documented above `request_from_sidecar_timeout`:
-    // every `#[tauri::command]` whose body reaches the blocking sidecar helpers
+    // every `#[tauri::command]` whose body reaches blocking sidecar or journal helpers
     // must be `#[tauri::command(async)]` (or an `async fn`). A plain-sync command
     // runs on the main thread, where `recv_timeout` freezes the webview for the
     // whole round trip — up to 10s on a clipboard image paste. Three clipboard
     // commands once slipped through the async port; this scans the source so the
     // omission can't silently recur.
     #[test]
-    fn sidecar_commands_are_async() {
-        let src = include_str!("lib.rs");
+    fn journal_locks_never_span_an_await() {
+        let src = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
+        // Top-level function endings also bound nested scopes conservatively:
+        // no async suspension anywhere in a function acquiring this sync lock.
+        let mut acquisitions = 0;
+        for function in src.split("\n}") {
+            if function.contains("guard(&ARRIVAL_DISK_LOCK)") {
+                acquisitions += 1;
+                assert!(!function.contains(".await"), "journal lock may span an await: {function}");
+            }
+        }
+        assert!(acquisitions > 0, "journal lock scan must inspect its callers");
+    }
+
+    #[test]
+    fn blocking_commands_run_off_the_main_thread() {
+        let src = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
+        let destroyed = src.split("WindowEvent::Destroyed => {").nth(1).unwrap()
+            .split("if let Some(state) = app.try_state::<GeometryState>()").next().unwrap();
+        let worker = destroyed.split("tauri::async_runtime::spawn_blocking(move || {").nth(1).unwrap();
+        assert!(!destroyed.split("tauri::async_runtime::spawn_blocking").next().unwrap().contains("hand_back_arrival("));
+        assert!(worker.contains("hand_back_arrival("));
         let lines: Vec<&str> = src.lines().collect();
         let mut offenders: Vec<String> = Vec::new();
 
@@ -5812,16 +5841,20 @@ mod tests {
             // `request_from_sidecar` directly). That family carries the longest
             // timeout (AGENT_BROWSER_TIMEOUT = 30s), so it's the worst case to
             // let slip plain-sync.
-            let reaches_sidecar =
-                body.contains("request_from_sidecar") || body.contains("agent_browser_forward");
-            if reaches_sidecar && !(is_async_attr || is_async_fn) {
+            let reaches_blocking = [
+                "request_from_sidecar", "agent_browser_forward", "ARRIVAL_DISK_LOCK",
+                "record_arrival_on_disk", "mark_arrival_adopted_on_disk", "return_arrival_on_disk",
+                "forget_arrival_on_disk", "read_arrivals_from", "write_arrivals_to", "restore_arrivals",
+                "close_window_snapshot", "finish_window_close", "begin_arrival", "hand_back_arrival",
+            ].iter().any(|helper| body.contains(helper));
+            if reaches_blocking && !(is_async_attr || is_async_fn) {
                 offenders.push(name.to_string());
             }
         }
 
         assert!(
             offenders.is_empty(),
-            "these #[tauri::command] fns reach the blocking sidecar helpers but are \
+            "these #[tauri::command] fns reach blocking sidecar or journal helpers but are \
              not declared #[tauri::command(async)] (see the INVARIANT above \
              request_from_sidecar_timeout): {offenders:?}",
         );

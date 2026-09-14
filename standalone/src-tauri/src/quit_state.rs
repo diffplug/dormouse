@@ -9,6 +9,32 @@
 use crate::routing::quit_order;
 use std::collections::HashMap;
 
+/// An approved quit waits for destroyed windows to journal their hand-backs.
+#[derive(Default)]
+pub struct CleanupGate {
+    pending: usize,
+    pub exit_requested: bool,
+    forced: bool,
+}
+
+impl CleanupGate {
+    pub fn begin(&mut self) { self.pending += 1; }
+    pub fn request_exit(&mut self) -> bool {
+        if self.pending == 0 || self.forced { return true; }
+        self.exit_requested = true;
+        false
+    }
+    pub fn force_if_waiting(&mut self) -> bool {
+        if self.pending == 0 || !self.exit_requested { return false; }
+        self.forced = true;
+        true
+    }
+    pub fn finish(&mut self) -> bool {
+        self.pending -= 1;
+        self.pending == 0 && std::mem::take(&mut self.exit_requested)
+    }
+}
+
 /// What the caller must do after a transition, in order.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QuitAction {
@@ -274,6 +300,7 @@ pub struct CloseMachine {
 
 #[derive(Debug, Default, Clone)]
 struct CloseEntry {
+    active: bool,
     seq: u64,
     acked: bool,
 }
@@ -284,6 +311,7 @@ impl CloseMachine {
     pub fn request(&mut self, label: &str) -> u64 {
         let entry = self.pending.entry(label.to_string()).or_default();
         entry.seq += 1;
+        entry.active = true;
         entry.acked = false;
         entry.seq
     }
@@ -302,6 +330,7 @@ impl CloseMachine {
     pub fn clear(&mut self, label: &str) {
         if let Some(entry) = self.pending.get_mut(label) {
             entry.seq += 1;
+            entry.active = false;
             entry.acked = false;
         }
     }
@@ -309,6 +338,10 @@ impl CloseMachine {
     /// Whether a watchdog spawned for `seq` still speaks for `label`'s close.
     pub fn stale(&self, label: &str, seq: u64) -> bool {
         self.pending.get(label).map(|entry| entry.seq) != Some(seq)
+    }
+
+    pub fn active(&self, label: &str) -> bool {
+        self.pending.get(label).is_some_and(|entry| entry.active)
     }
 
     pub fn acked(&self, label: &str) -> bool {
@@ -319,6 +352,32 @@ impl CloseMachine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stalled_cleanup_cannot_block_an_approved_exit_forever() {
+        let mut gate = CleanupGate::default();
+        gate.begin();
+        assert!(!gate.force_if_waiting()); // no quit requested yet
+        assert!(!gate.request_exit());
+        assert!(gate.force_if_waiting()); // cleanup watchdog expired
+        assert!(gate.request_exit());
+        assert!(gate.finish()); // late completion remains safe
+        assert!(!gate.force_if_waiting());
+    }
+
+    #[test]
+    fn quit_waits_for_every_destroyed_window_handback() {
+        let mut gate = CleanupGate::default();
+        gate.begin();
+        gate.begin();
+        assert!(!gate.request_exit());
+        assert!(!gate.finish());
+        assert!(!gate.request_exit());
+        assert!(gate.finish());
+        assert!(gate.request_exit());
+        gate.begin();
+        assert!(!gate.finish()); // ordinary close does not request a quit
+    }
 
     fn labels(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).to_string()).collect()

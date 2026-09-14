@@ -12,7 +12,7 @@ import App from "dormouse-lib/App";
 import "dormouse-lib/index.css";
 import { UpdateBanner } from "./UpdateBanner";
 import { UpdateDebugModal } from "./UpdateDebugModal";
-import { QuitConfirmModalHost } from "./QuitConfirmModal";
+import { WorkspaceTeardownModalHost } from "./WorkspaceTeardownModal";
 import { AppBar } from "./AppBar";
 import {
   startUpdateCheck,
@@ -120,7 +120,7 @@ async function bootstrap() {
     const adapter = platform as import("./tauri-adapter").TauriAdapter;
     initQuitFlow(adapter);
     initWindowClose(adapter);
-    // A quit or a close with ≥1 running command opens <QuitConfirmModalHost>.
+    // A quit or a close with ≥1 running command opens <WorkspaceTeardownModalHost>.
     setQuitConfirmGate(openQuitConfirm);
   }
   const { initAlertStateReceiver } = await import("dormouse-lib/lib/terminal-registry");
@@ -166,7 +166,7 @@ async function bootstrap() {
       <App
         initialPlans={initialPlans}
         baseboardNotice={<ConnectedUpdateBanner />}
-        dialogHost={<QuitConfirmModalHost />}
+        dialogHost={<WorkspaceTeardownModalHost />}
         enableBurrow
         multiWorkspace
       />

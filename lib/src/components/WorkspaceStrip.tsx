@@ -1,3 +1,4 @@
+import { isWorkspaceTransferPending } from '../lib/workspace-ui-store';
 import {
   memo,
   useCallback,
@@ -13,6 +14,7 @@ import { PlusIcon, XIcon } from '@phosphor-icons/react';
 import { AlertBell } from './AlertBell';
 import { InlineEditInput } from './wall/InlineEditInput';
 import { KillConfirmModal } from './KillConfirm';
+import { WorkspaceKillConfirm } from './WorkspaceKillConfirm';
 import { useTodoPillContent } from './TodoPillBody';
 import { chromeButton, TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from './design';
 import { createWorkspaceStripDrag, type StripDragHost } from './workspace-strip-drag';
@@ -124,27 +126,6 @@ export function WorkspaceStrip({
     [drag],
   );
 
-  // The confirmation is a typed letter, exactly as a pane kill is, down to the
-  // key rule: a case-insensitive match accepts and any other key dismisses. The
-  // Wall's own handler is behind the chrome lease this dialog holds, so the
-  // strip listens for itself.
-  useEffect(() => {
-    if (!pendingClose) return;
-    const { id, char } = pendingClose;
-    const onKeyDown = (event: KeyboardEvent) => {
-      event.preventDefault();
-      event.stopPropagation();
-      // A bare modifier is not an answer: `handleDualTap` consumes Meta and
-      // Shift before the pane kill confirmation sees them, so neither may
-      // dismiss this one either.
-      if (event.key === 'Shift' || event.key === 'Meta') return;
-      setPendingWorkspaceClose(null);
-      if (acceptsKillChar(event.key, char)) void closeWorkspaceWithSurfaces(id);
-    };
-    window.addEventListener('keydown', onKeyDown, true);
-    return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [pendingClose]);
-
   // The move gate is the same typed letter: the page state it destroys is as
   // gone as a killed pane's process. It waits behind a close confirmation,
   // which the render below shows instead: the letter on screen is the close's,
@@ -235,8 +216,15 @@ export function WorkspaceStrip({
         <PlusIcon size={12} weight="bold" aria-hidden="true" />
       </button>
       {pendingClose && (
-        <KillConfirmModal
+        <WorkspaceKillConfirm
           char={pendingClose.char}
+          detail={workspaces.find(workspace => workspace.id === pendingClose.id)?.name}
+          canConfirm={() => !isWorkspaceTransferPending(pendingClose.id)}
+          onConfirm={() => {
+            const id = pendingClose.id;
+            setPendingWorkspaceClose(null);
+            void closeWorkspaceWithSurfaces(id);
+          }}
           targetElement={confirmTarget}
           onCancel={() => setPendingWorkspaceClose(null)}
         />

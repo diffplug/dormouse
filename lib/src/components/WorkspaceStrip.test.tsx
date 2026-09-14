@@ -1,3 +1,5 @@
+import { setWorkspaceTransferPending } from '../lib/workspace-ui-store';
+import { dismissWorkspaceUi } from '../lib/workspace-ui-store';
 /**
  * @vitest-environment jsdom
  */
@@ -371,6 +373,27 @@ describe('WorkspaceStrip', () => {
     expect(order()).toEqual([first, 'ws-2', 'ws-3']);
     expect(capture).not.toHaveBeenCalled();
     expect(getWorkspaceUiSnapshot().renamingId).toBe(first);
+  });
+
+  it('does not accept a pending kill during transfer and releases its keyboard lease on departure', async () => {
+    createWorkspace({ id: 'ws-2' });
+    const closeAll = vi.fn(async () => null);
+    stubHandle('ws-2', { hasTouchedSurfaces: () => true, closeAll });
+    await render();
+    await act(async () => { setPendingWorkspaceClose({ id: 'ws-2', char: 'q' }); });
+    expect(container.querySelector('#kill-confirm-title')?.textContent).toBe('Confirm kill workspace');
+    expect(chromeKeyboardHeld()).toBe(true);
+    setWorkspaceTransferPending('ws-2', true);
+    await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'q', bubbles: true })); });
+    expect(closeAll).not.toHaveBeenCalled();
+    expect(getWorkspaceUiSnapshot().pendingClose?.id).toBe('ws-2');
+    // A failed transfer leaves this prompt usable; successful commit dismisses it.
+    setWorkspaceTransferPending('ws-2', false);
+    await act(async () => { dismissWorkspaceUi('ws-2'); });
+    expect(container.querySelector('#kill-confirm-title')).toBeNull();
+    expect(chromeKeyboardHeld()).toBe(false);
+    await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'q', bubbles: true })); });
+    expect(closeAll).not.toHaveBeenCalled();
   });
 
   it('keeps the close confirmation up through a bare Shift or Meta, as the pane kill does', async () => {

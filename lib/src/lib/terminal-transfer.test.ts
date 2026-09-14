@@ -14,6 +14,10 @@ async function mode(terminal: Terminal, number: number): Promise<string> {
 }
 
 describe('terminal transfer serialization', () => {
+  it('still transfers the buffer if private mouse state is unavailable', () => {
+    expect(serializeTransferTerminal({} as Terminal, { serialize: () => 'screen' } as SerializeAddon)).toBe('screen');
+  });
+
   it.each([1006, 1016])('preserves mouse tracking and encoding %i through real xterm parsing', async encoding => {
     const source = new Terminal({ allowProposedApi: true });
     const target = new Terminal({ allowProposedApi: true });

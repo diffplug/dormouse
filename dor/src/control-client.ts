@@ -71,7 +71,9 @@ function proofMatches(provided: unknown, expected: string): boolean {
 }
 
 /** `dor workspace close` archives and tears down every member Surface, which a
- *  refused notepad archive can park on; the server's own reaper sits above it. */
+ *  refused notepad archive can park on; the server's own reaper sits above it.
+ *  Also covers moves: must exceed `ARRIVAL_MAX` in
+ *  `standalone/src-tauri/src/routing.rs` so hand-back reasons arrive before timeout. */
 const CLOSE_WORKSPACE_TIMEOUT_MS = 30_000;
 
 export class SocketControlClient implements ControlClient {

@@ -39,6 +39,7 @@ vi.mock("dormouse-lib/lib/window-session-aggregator", () => ({
   flushWindowSession: mocks.flushWindowSession,
 }));
 vi.mock("dormouse-lib/lib/workspace-store", () => ({
+  subscribeToWorkspaces: () => () => {},
   getWorkspacesSnapshot: mocks.getWorkspacesSnapshot,
 }));
 vi.mock("./updater", () => ({

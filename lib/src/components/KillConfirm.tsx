@@ -1,6 +1,6 @@
 import { useRef } from 'react';
 import { resolvePaneElement } from './wall/resolve-pane-element';
-import { ModalFrame, Shortcut } from './design';
+import { ModalFrame, Shortcut, type ModalLayer } from './design';
 
 export type KillExit = 'shake' | 'confirm';
 
@@ -26,6 +26,7 @@ export function KillConfirmModal({
   targetElement,
   title = 'Confirm kill',
   detail,
+  layer,
 }: {
   char: string;
   onCancel?: () => void;
@@ -35,11 +36,13 @@ export function KillConfirmModal({
    *  (a Workspace move that loses iframe page state); they name themselves. */
   title?: string;
   detail?: string;
+  layer?: ModalLayer;
 }) {
   const cancelButtonRef = useRef<HTMLButtonElement>(null);
   return (
     <ModalFrame
       titleId="kill-confirm-title"
+      layer={layer}
       targetElement={targetElement}
       padding="spacious"
       align="center"

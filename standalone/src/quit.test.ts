@@ -44,6 +44,7 @@ vi.mock("dormouse-lib/lib/window-session-aggregator", () => ({
 }));
 // How a window names itself in its dialog: the Workspace it is showing.
 vi.mock("dormouse-lib/lib/workspace-store", () => ({
+  subscribeToWorkspaces: () => () => {},
   getWorkspacesSnapshot: mocks.getWorkspacesSnapshot,
 }));
 vi.mock("./updater", () => ({
@@ -208,7 +209,7 @@ describe("quit orchestrator", () => {
         gracefulKill: slow("gracefulKill", 2000 + 1500),
         drain: slow("drain", 2000),
       });
-      mocks.flushWindowSession.mockImplementation(slow("flushWindow", 1000));
+      mocks.flushWindowSession.mockImplementation(slow("flushWindow", 999));
 
       initQuitFlow(adapter);
       quitRequested();

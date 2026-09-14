@@ -1,3 +1,4 @@
+import { getWorkspaceUiSnapshot, setPendingWorkspaceClose, resetWorkspaceUi } from '../../lib/workspace-ui-store';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { addPlainNote, clearAllNotepads, getNotes, notepadSurfaceIds } from '../../lib/notepad/notepad-store';
 import { prepareWorkspaceTransfer } from './workspace-transfer';
@@ -26,6 +27,7 @@ vi.mock('../../lib/helper-terminal', () => ({
 const SESSION: PersistedSession = { version: 3, panes: [{ id: 'pane-a', title: 'a', cwd: '/tmp', untouched: false, alert: null }] };
 
 beforeEach(() => {
+  resetWorkspaceUi();
   released.length = 0;
   forgotten.length = 0;
   helpers.clear();
@@ -47,6 +49,17 @@ function deps(order: string[] = [], overrides: Partial<Parameters<typeof prepare
 }
 
 describe('prepareWorkspaceTransfer', () => {
+  it('keeps the pending kill until commit, then dismisses only the departing Workspace', async () => {
+    setPendingWorkspaceClose({ id: 'ws-id', char: 'q' });
+    const prepared = await prepareWorkspaceTransfer(deps());
+    expect(getWorkspaceUiSnapshot().pendingClose).toEqual({ id: 'ws-id', char: 'q' });
+    prepared.commit();
+    expect(getWorkspaceUiSnapshot().pendingClose).toBeNull();
+    setPendingWorkspaceClose({ id: 'sibling', char: 'k' });
+    prepared.commit();
+    expect(getWorkspaceUiSnapshot().pendingClose).toEqual({ id: 'sibling', char: 'k' });
+  });
+
   it('serializes with a live cwd probe before anything is detached', async () => {
     const order: string[] = [];
     const d = deps(order, {});

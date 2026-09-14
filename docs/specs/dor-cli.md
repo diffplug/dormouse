@@ -301,8 +301,8 @@ Invariants:
   **Must address unnumbered registry Workspaces as `workspace:<id>`, resolving
   exact ids before names**, so legacy snapshots, duplicate names, and numeric
   names cannot redirect a ref. `workspace:<name>` **resolves only when exactly one
-  Workspace carries that name**, else the error lists the candidates. Both are
-  accepted bare (`2`, `build`), and **a ref that reads as a number is a ref**,
+  Workspace carries that name**, else the error lists the candidates. All three are
+  accepted bare (`2`, `ws-a`, `build`), and **a ref that reads as a number is a ref**,
   never a name. **A Window is `window:<label>` — its host's own name for it**
   (`window:main`, `window:ws-2`), and a host with one Window answers
   `window:1`; each accepts its own ref bare.
@@ -364,7 +364,7 @@ order.
 **Port enumeration is opt-in.** With `includePorts` set (`dor list --ports` /
 `--port`) the host scans each terminal Surface's process tree
 (`docs/specs/dor-browser.md` → Dev-Server Chip), shelling out (`lsof` /
-`Get-NetTCPConnection`) under `OPEN_PORT_TIMEOUT_MS`. **One listing costs one
+`Get-NetTCPConnection`). **One listing costs one
 scan where the adapter can batch it** (`PlatformAdapter.getOpenPortsMany`), and
 `getOpenPorts(id)` per Surface in parallel where it cannot — so a listing
 spanning Workspaces does not multiply a synchronous host scan by its row count.

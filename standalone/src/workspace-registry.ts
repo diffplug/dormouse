@@ -14,8 +14,8 @@ import {
 
 export interface RegistryWorkspace {
   id: string;
-  /** `workspace:<n>` for a minted id; `null` for one the registry did not mint. */
-  ref: string | null;
+  /** `workspace:<n>` for a numbered id; `workspace:<id>` for an opaque id. */
+  ref: string;
   name: string;
   active: boolean;
 }

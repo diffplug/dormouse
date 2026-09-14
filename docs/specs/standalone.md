@@ -57,8 +57,11 @@ Source of truth: `standalone/src/main.tsx` (`bootstrap()`).
    → Workspaces) — and `enableBurrow`, the mount gate for the lazily-imported
    Burrow UI chunk (§Burrow service); the Burrow itself runs in the
    sidecar regardless. `<ConnectedUpdateBanner />` rides the `baseboardNotice`
-   slot, `<QuitConfirmModalHost />` the `dialogHost` slot; both go to the
+   slot, `<WorkspaceTeardownModalHost />` the `dialogHost` slot; both go to the
    visible Workspace's Wall.
+
+**Must display fatal bootstrap errors with a reload action**, for both Tauri and
+the browser harness, instead of leaving a blank window.
 
 ## Rust ↔ sidecar bridge
 
@@ -345,8 +348,9 @@ behind the one it holds.
   The ref `workspace:<n>` is the id's number, so it never renumbers and never
   collides across windows; an unused reservation is a gap, nothing more.
 - **Must allow boot and creation when reservation fails**, using opaque UUID
-  ids until the pool recovers; log the failure. Canonical refs follow
-  `docs/specs/dor-cli.md` → "Handle Model" (`workspace-store.test.ts`).
+  ids; log the failure. **Must retain those opaque IDs and refs for their lifetime**,
+  even after reservation recovers. Canonical refs follow
+  `docs/specs/dor-cli.md` → "Handle Model" (`lib/src/lib/workspace-store.test.ts`).
 - **The counter is seeded above every id any snapshot on disk names**, and
   above every id a window reports, so a fresh id never meets a restored one.
   Never below 2: `workspace-1` is a bare Wall's only Workspace.
@@ -459,7 +463,8 @@ the source still holds those Sessions. Hand-backs run in a blocking worker that
 reports completion on the main thread. **Must defer every approved exit until all
 such workers have completed**, including exit requested through the quit walk
 or Tauri/AppKit (`every_approved_exit_path_checks_cleanup`;
-`quit_waits_for_every_destroyed_window_handback` pins the counter). **Must force an
+`quit_waits_for_every_destroyed_window_handback` in
+`standalone/src-tauri/src/quit_state.rs` pins the counter). **Must force an
 approved exit after `QUIT_PHASE_TIMEOUT_MS` waiting for cleanup**, logging the
 timeout; a stalled disk operation or completion callback cannot trap the app
 (`stalled_cleanup_cannot_block_an_approved_exit_forever`). The arm updates the
@@ -615,6 +620,8 @@ below reads that record rather than inferring itself from the suppression map.
   already handed the shells back and the source kept the Workspace, so the
   target releases its Sessions (never kills them), drops the notes, and closes
   the Workspace rather than leaving it live and persisted in two windows.
+- **Must remove unmounted semantic and alert state when arrival collection times out.**
+  Source of truth: `planArrival` in `standalone/src/workspace-move.ts`.
 - **A refused arrival hands the shells back.** The target's `adopt_failed`
   (a `planArrival` timeout, a missing list, a mount error) and a target
   `Destroyed` with the arrival still queued both return `terminalIds` to the
@@ -682,7 +689,7 @@ below reads that record rather than inferring itself from the suppression map.
   `the_arrivals_file_is_gone_after_the_boot_merge`).
 - **Must run journal I/O and its lock waits off the main thread**, including
   transfer/settlement/close commands and destroyed-window cleanup
-  (`journal_commands_run_off_the_main_thread`).
+  (`blocking_commands_run_off_the_main_thread`).
 - **An arrival unadopted after `ARRIVAL_MAX` is handed back** by a watchdog armed
   at `begin_arrival`, retiring only the record it was armed for (`queued_at`):
   a target alive but wedged never reaches `adopt_failed` or `Destroyed`, and the
@@ -995,42 +1002,45 @@ watchdog captures the `seq` it was spawned for, so a **repeated quit trigger** �
 which bumps `seq`, spawns a fresh watchdog and re-emits — leaves the stale one to
 exit without acting: the user's escape hatch if the webview acked then wedged.
 
-**Confirmation dialog.** One dialog per window, shared with the per-window close,
-which asks about closing rather than quitting. **A window names itself by its
-visible Workspace only while more than one window is open.** The registry and the
-notepad store are per webview, so the count and the notes a dialog speaks for are
-already its own window's. `handleQuitRequested` hands the decision to the installed
-gate when it finds **≥1 running session**; with no running work (or no gate) it
-falls straight through to the teardown, so an all-idle quit never prompts. **A
-close asks on a pending download too** (§Per-window close), which a quit never
-does — it installs it. A
-session counts as running iff its latest activity is a live command
-(`activity.kind === 'running'`); `countRunningSessions`
-(`lib/src/lib/terminal-state-store.ts`) is both the gate's predicate and the
-dialog's live count. `main.tsx` wires the gate on the Tauri branch
-(`setQuitConfirmGate(openQuitConfirm)`); order relative to `initQuitFlow` is
-irrelevant — the gate is read only at quit time.
+**Must use the Workspace typed-letter confirmation for window close and quit**,
+naming every Workspace in the window, including hidden ones. The gate opens for
+running Sessions; an all-idle quit proceeds without a prompt. Window close also
+asks before discarding a pending download (§Per-window close).
 
-- **Live count.** `useSyncExternalStore(subscribeToTerminalPaneState, …)` tracks
-  commands finishing while the dialog is up. **A count dropping to 0 leaves the
-  dialog open** — auto-quitting out from under the user would surprise — showing
-  "No commands are still running." with the same buttons.
-- **Cancel / Escape** (the Cancel button takes initial focus as the safe default)
-  close the dialog and call `ctx.cancel()` → `quit_cancel`: the app and every
-  terminal are left untouched and a later quit starts fresh.
-- **Confirm** calls `ctx.confirm()`, which runs the normal teardown; the dialog goes
-  non-interactive ("Quitting…", both buttons disabled, Escape inert) until the
-  process exits. The store nulls its context the instant a decision is made, so a
-  redundant confirm/cancel is a no-op; with the orchestrator's `quitPhase` dedupe, a
-  repeated quit trigger while the dialog is open neither re-opens nor stacks it.
-- **Mount.** `<QuitConfirmModalHost>` rides Wall's `dialogHost` prop (`main.tsx` →
-  `App` → `Wall`), rendered unconditionally inside Wall's `DialogKeyboardContext`
-  provider, which the host toggles while visible so command-mode dispatch is
-  suppressed under the modal. Focus-trapped `ModalFrame` (`layer="critical"`,
-  `backdrop="strong"`), like ExternalLinkModal (`docs/specs/terminal-escapes.md` → "OSC 8 hyperlinks").
+- **Must keep one letter per request across Workspace switches and repeat quit
+  triggers.** Modified keys, including Cmd+Q, never answer it; a bare matching
+  letter confirms, another bare key cancels. `WorkspaceKillConfirm` supplies the
+  interaction defined in `docs/specs/layout.md` → Workspaces.
+- **Must leave the prompt open when its running count reaches zero.**
+- **Must cancel an unconfirmed request if Workspace membership changes**, so a
+  transfer cannot leave approval addressing a different set. Switching and
+  reordering preserve it.
+- **Must clear competing Workspace close/move/rename prompts when opening the
+  gate, preserving transfer guards.** A full-window overlay covers the strip;
+  its keyboard lease lasts through confirmation, archive failure, and teardown.
+- **Must exclude transfers from host teardown.** Refuse app quit while an arrival
+  is pending, native window close while that window is an arrival endpoint, and
+  transfers during app quit or either endpoint's native close confirmation or
+  teardown. Retry a refused quit/close after the transfer settles; cancelling
+  teardown permits transfers again. Pinned by
+  `transfers_cannot_change_membership_after_close_or_quit_confirmation_begins` in
+  `standalone/src-tauri/src/lib.rs`.
+- **Must collect votes before killing any window's Sessions.** Confirmation
+  consumes its callback once; a noninteractive full-window progress overlay
+  remains through voting, archive, recovery, persistence, and teardown.
+- **Must retain the separate note-loss decision on archive failure**, with Cancel
+  focused by default; process-kill approval never approves discarding notes.
 
-Source of truth: `standalone/src/quit-confirm-store.ts` (the module store + gate),
-`standalone/src/QuitConfirmModal.tsx` (the modal).
+Source of truth: `openQuitConfirm` in `standalone/src/quit-confirm-store.ts`;
+`WorkspaceTeardownModalHost` in `standalone/src/WorkspaceTeardownModal.tsx`;
+`WorkspaceKillConfirm` in `lib/src/components/WorkspaceKillConfirm.tsx`.
+Pinned by `holds one keyboard lease through commitment and releases it on matching dismissal`
+in `standalone/src/quit-confirm-store.test.ts`,
+`blocks the entire window during confirmation and while waiting for other votes`
+and `retains the letter across host remount and names hidden workspaces` in
+`standalone/src/WorkspaceTeardownModal.test.ts`, and
+`ignores repeat Cmd+Q, other modified letters, and bare modifiers` in
+`lib/src/components/WorkspaceKillConfirm.test.tsx`.
 
 **Teardown ordering (`runQuitTeardown`), and why.** **Every step is individually
 bounded** so a stall cannot wedge quit, and the whole is wrapped in a ceiling

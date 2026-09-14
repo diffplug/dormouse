@@ -12,7 +12,7 @@ import { PAIRING_CODE_LABEL } from '../remote/pocket-app/App';
 import { SCAN_REJECTED_MESSAGE } from '../remote/pocket-app/ScanInvitation';
 import { SCAN_LABEL } from '../remote/setup-copy';
 import { ITERM2_COMPAT_VERSION } from './terminal-protocol';
-import { OPEN_PORT_TIMEOUT_MS, OPEN_PORT_TIMEOUT_PER_ID_MS, OPEN_PORT_ROUND_TRIP_MARGIN_MS } from './platform/types';
+import { OPEN_PORT_TIMEOUT_MS, OPEN_PORT_TIMEOUT_PER_ID_MS, OPEN_PORT_ROUND_TRIP_MARGIN_MS, openPortRequestTimeoutMs } from './platform/types';
 import { DEFAULT_RECOVERY_WAIT_MS } from '../host/recovery-capture';
 
 // Pins for constants defined in more than one language/runtime, where an
@@ -281,7 +281,18 @@ describe('quit teardown budget mirrors', () => {
   it('keeps the webview ceiling under the Rust per-phase watchdog', () => {
     const ceiling = valueOf('QUIT_TEARDOWN_CEILING_MS');
     expect(ceiling).toBeGreaterThan(valueOf('STEP_BUDGET_TOTAL_MS'));
-    expect(ceiling).toBeLessThan(rustMs('QUIT_PHASE_TIMEOUT_MS'));
+    // Leave time for quit_proceed beyond the Rust watchdog's polling granularity.
+    expect(rustMs('QUIT_PHASE_TIMEOUT_MS') - ceiling).toBeGreaterThan(rustMs('QUIT_POLL_STEP_MS'));
+  });
+
+  it('counts every bounded teardown operation and both sidecar margins', () => {
+    const teardown = extract(tsSrc, ts, /(async function runQuitTeardown\([^]*?\n})/);
+    const calls = [...teardown.matchAll(/await adapter\.(captureAgentRecovery|requestSessionFlush|gracefulKillPtys|drainSessionSaves)\(([A-Z_]+_MS)/g)];
+    expect(calls).toHaveLength(5);
+    const work = calls.reduce((total, [, method, budget]) => total + valueOf(budget)
+      + (['captureAgentRecovery', 'gracefulKillPtys'].includes(method) ? valueOf('SIDECAR_ROUND_TRIP_MARGIN_MS') : 0), 0);
+    const windowBudget = extract(teardown, ts, /flushWindowSession\(\),\s*([A-Z_]+_MS)/);
+    expect(valueOf('STEP_BUDGET_TOTAL_MS')).toBe(work + valueOf(windowBudget));
   });
 
   it.each(['capture_agent_recovery', 'pty_graceful_kill'])(
@@ -300,5 +311,29 @@ describe('port request IPC margin', () => {
     const file = 'standalone/src-tauri/src/lib.rs';
     const ms = extract(readRepoFile(file), file, /^const OPEN_PORT_ROUND_TRIP_MARGIN_MS: u64 = (\d+);$/m);
     expect(Number(ms)).toBe(OPEN_PORT_ROUND_TRIP_MARGIN_MS);
+  });
+});
+
+// docs/specs/transport.md -> "Port scan deadlines"
+describe('port request deadline derivation mirrors', () => {
+  it.each([0, 1, 20, 100])('matches the Rust request budget for %i terminals', (count) => {
+    const file = 'standalone/src-tauri/src/lib.rs';
+    const source = readRepoFile(file);
+    const body = extract(source, file, /fn open_ports_many_timeout\([^)]*\) -> Duration \{([\s\S]*?)\n\}/);
+    const expression = extract(body, file, /Duration::from_millis\(([^)]+)\)/);
+    const values: Record<string, number> = { count };
+    for (const name of ['OPEN_PORT_TIMEOUT_MS', 'OPEN_PORT_TIMEOUT_PER_ID_MS', 'OPEN_PORT_ROUND_TRIP_MARGIN_MS']) {
+      values[name] = Number(extract(source, file, new RegExp(`^const ${name}: u64 = (\\d+);$`, 'm')));
+    }
+    // Evaluate Rust's actual sum/products, rather than duplicate its formula.
+    // Unknown terms fail so changing the derivation cannot silently weaken the pin.
+    const rustMs = expression.replace(/\s+as\s+u64/g, '').split('+').reduce((sum, term) =>
+      sum + term.split('*').reduce((product, factor) => {
+        const token = factor.trim();
+        const value = /^\d+$/.test(token) ? Number(token) : values[token];
+        if (value === undefined) throw new Error(`Unknown Rust port budget term: ${token}`);
+        return product * value;
+      }, 1), 0);
+    expect(openPortRequestTimeoutMs(count)).toBe(rustMs);
   });
 });

@@ -1,5 +1,6 @@
+import { snapshotTerminalState, type TransferredTerminalState } from '../../lib/terminal-state-store';
+import { dismissWorkspaceUi } from '../../lib/workspace-ui-store';
 import { snapshotNotepadForTransfer, removeSurface } from '../../lib/notepad/notepad-store';
-import type { TransferredPin } from '../../lib/notepad/source-link';
 import type { TerminalGrid } from '../../lib/terminal-transfer';
 import { forgetHelper, getHelper } from '../../lib/helper-terminal';
 import { releaseSession, serializeTerminal, getTerminalInstance } from '../../lib/terminal-registry';
@@ -106,6 +107,7 @@ export async function prepareWorkspaceTransfer(
       allIds,
     },
     commit() {
+      dismissWorkspaceUi(deps.workspaceId);
       // Leaving them behind would show the departed Workspace's notes here.
       for (const id of allIds) removeSurface(id);
       // Forgotten before its Session goes, so the status poller stops and the
@@ -124,7 +126,9 @@ export interface TransferredTerminal {
   /** The buffer as the escape stream that rebuilds it; `''` for a Session this
    *  Window no longer held. */
   serialized: string;
+  /** Grid at serialization, applied before replay and before destination fitting. */
   grid?: TerminalGrid;
+  semanticState?: TransferredTerminalState;
   /** The sidecar's output position the serialization stands at; absent when
    *  the host never stamped one, and the target then replays the whole buffer
    *  behind the serialized one. */
@@ -136,8 +140,7 @@ export interface TransferredTerminal {
  *  passed, and attached to the arrival the host queued at the invoke. */
 export interface WorkspaceTransferContent {
   terminals: Record<string, TransferredTerminal>;
-  /** Kept empty; old payloads may contain pins, which arrivals ignore. */
-  pins: TransferredPin[];
+
 }
 
 /**
@@ -160,7 +163,7 @@ export async function captureTransferContent(
     const terminal = getTerminalInstance(id);
     const grid = terminal ? { cols: terminal.cols, rows: terminal.rows } : undefined;
     const mark = marks.get(id);
-    terminals[id] = { serialized, ...(grid ? { grid } : {}), ...(mark === undefined ? {} : { mark }) };
+    terminals[id] = { serialized, ...(grid ? { grid, semanticState: snapshotTerminalState(id) } : {}), ...(mark === undefined ? {} : { mark }) };
   }
-  return { terminals, pins: [] };
+  return { terminals };
 }

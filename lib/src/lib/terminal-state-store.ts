@@ -127,6 +127,22 @@ export function resetTerminalPaneState(id: string, initial?: Partial<TerminalPan
   notifyTerminalPaneStateListeners(id);
 }
 
+/** Runtime-only state at a transfer mark; never part of disk persistence. */
+export interface TransferredTerminalState {
+  pane: TerminalPaneState;
+  oscDriven: boolean;
+}
+
+export function snapshotTerminalState(id: string): TransferredTerminalState {
+  return { pane: getTerminalPaneState(id), oscDriven: isPaneOscDriven(id) };
+}
+
+/** Seed before the since-mark replay so its newer events remain authoritative. */
+export function restoreTransferredTerminalState(id: string, state: TransferredTerminalState): void {
+  resetTerminalPaneState(id, state.pane);
+  if (state.oscDriven) oscDrivenPanes.add(id);
+}
+
 export function removeTerminalPaneState(id: string): void {
   clearPaneScratch(id);
   if (!paneStates.delete(id)) return;

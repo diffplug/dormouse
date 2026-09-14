@@ -1,10 +1,11 @@
+import { isWorkspaceTransferPending, setWorkspaceTransferPending } from "dormouse-lib/lib/workspace-ui-store";
 import { invoke } from "@tauri-apps/api/core";
-import { releaseSession } from "dormouse-lib/lib/terminal-registry";
+import { releaseSession, clearTerminalActivity } from "dormouse-lib/lib/terminal-registry";
 import { forgetHelper } from "dormouse-lib/lib/helper-terminal";
 import { collectLivePtys, resumeOrRestoreFrom } from "dormouse-lib/lib/reconnect";
 import { flushTerminal } from "dormouse-lib/lib/terminal-registry";
 import { REPLAY_MODE_RESET, writeReplay } from "dormouse-lib/lib/terminal-report-filter";
-import { applyTerminalSemanticEvents } from "dormouse-lib/lib/terminal-state-store";
+import { restoreTransferredTerminalState, removeTerminalPaneState } from "dormouse-lib/lib/terminal-state-store";
 import { registry as terminalRegistry } from "dormouse-lib/lib/terminal-store";
 import { hydrateNotepadFromVolatile, removeSurface } from "dormouse-lib/lib/notepad/notepad-store";
 import { getWallHandle } from "dormouse-lib/components/wall/wall-handles";
@@ -108,7 +109,14 @@ const reasonOf = (err: unknown): string => (err instanceof Error ? err.message :
 async function prepare(workspaceId: WorkspaceId): Promise<PreparedWorkspaceTransfer | null> {
   const handle = getWallHandle(workspaceId);
   if (!handle) return null;
-  return handle.prepareWorkspaceTransfer();
+  // The CWD probe awaits: close must already be blocked while it runs.
+  setWorkspaceTransferPending(workspaceId, true);
+  try {
+    return await handle.prepareWorkspaceTransfer();
+  } catch (error) {
+    setWorkspaceTransferPending(workspaceId, false);
+    throw error;
+  }
 }
 
 /**
@@ -135,10 +143,12 @@ async function handOff(
   // `begin_arrival`, so a `marked` line can arrive ahead of the invoke's reply.
   const pendingMarks = marksFor(terminalIds, `mark-${workspaceId}`);
   const outcome = new Promise<MoveOutcome>((settle) => inFlight.set(workspaceId, { prepared, settle }));
+  setWorkspaceTransferPending(workspaceId, true);
   try {
     await invoke(command, args);
   } catch (err) {
     if (inFlight.get(workspaceId)?.prepared === prepared) inFlight.delete(workspaceId);
+    setWorkspaceTransferPending(workspaceId, false);
     console.warn(`[workspace-move] ${command} refused; the Workspace stays here`, err);
     return { moved: false, reason: reasonOf(err) }; // `pendingMarks` unsubscribes itself at the timeout
   }
@@ -206,6 +216,7 @@ export async function transferWorkspaceTo(
   at?: { x: number; y: number },
   index?: number,
 ): Promise<MoveOutcome> {
+  if (isWorkspaceTransferPending(workspaceId)) return { moved: false, reason: "Workspace is already in flight" };
   const prepared = await prepare(workspaceId);
   if (!prepared) return { moved: false, reason: `no mounted Wall for '${workspaceId}'` };
   return handOff(prepared, "transfer_workspace", {
@@ -224,6 +235,7 @@ export async function tearOutWorkspace(
   workspaceId: WorkspaceId,
   grab: { x: number; y: number },
 ): Promise<MoveOutcome> {
+  if (isWorkspaceTransferPending(workspaceId)) return { moved: false, reason: "Workspace is already in flight" };
   const prepared = await prepare(workspaceId);
   if (!prepared) return { moved: false, reason: `no mounted Wall for '${workspaceId}'` };
   return handOff(prepared, "open_workspace_window", {
@@ -244,6 +256,7 @@ function handleDeparted(workspaceId: WorkspaceId): void {
   }
   inFlight.delete(workspaceId);
   move.prepared.commit();
+  setWorkspaceTransferPending(workspaceId, false);
   move.settle({ moved: true });
   // Moving a Window's last Workspace away closes it — without confirming,
   // archiving or killing, because nothing ended: the Surfaces are alive
@@ -274,6 +287,7 @@ function handleArrivalFailed(workspaceId: WorkspaceId, reason: string, replayIds
   if (!move) return;
   inFlight.delete(workspaceId);
   clearWorkspaceTransferring(workspaceId);
+  setWorkspaceTransferPending(workspaceId, false);
   console.warn(`[workspace-move] ${workspaceId} was not adopted (${reason}); it stays here`);
   if (replayIds.length) acceptHandBackReplay(workspaceId, replayIds);
   move.settle({ moved: false, reason });
@@ -317,7 +331,6 @@ function acceptHandBackReplay(workspaceId: WorkspaceId, ids: readonly string[]):
       if (exitCode !== undefined) {
         if (!entry.exited) entry.terminal.write(`\r\n[Process exited with code ${exitCode}]\r\n`);
         entry.exited = true;
-        applyTerminalSemanticEvents(detail.id, [{ type: 'commandFinish', exitCode }]);
       }
     }
     if (wanted.size === 0) finish();
@@ -353,11 +366,15 @@ async function planArrival(
   platform: PlatformAdapter,
   payload: MovePayload,
 ): Promise<WallBootPlans[string]> {
-  // Seed the older persisted state before replay re-derives a running watch.
+  // TODO has no replay event: seed it in the receiving webview before replay
+  // re-derives the running watch (seeding afterwards would clear that watch).
   for (const pane of payload.workspace.session.panes) {
     if (pane.alert) platform.alertSeed?.(pane.id, pane.alert);
   }
   const ptyIds = new Set(payload.terminalIds);
+  for (const [id, terminal] of Object.entries(payload.terminals ?? {})) {
+    if (ptyIds.has(id) && terminal.semanticState) restoreTransferredTerminalState(id, terminal.semanticState);
+  }
   const live = await collectLivePtys(platform, {
     // The token rides through Rust to the sidecar's `list` and comes back on the
     // answer, so two Workspaces arriving at once cannot finish on each other's.
@@ -368,6 +385,12 @@ async function planArrival(
     timeoutMs: ARRIVAL_TIMEOUT_MS,
   });
   if (live.timedOut) {
+    for (const id of ptyIds) {
+      if (terminalRegistry.has(id)) continue;
+      platform.alertRemove(id);
+      clearTerminalActivity(id);
+      removeTerminalPaneState(id);
+    }
     throw new Error(
       `the arriving Workspace's PTYs did not answer within ${ARRIVAL_TIMEOUT_MS}ms; `
       + "refusing rather than restarting shells that are still running",
@@ -550,6 +573,7 @@ export async function bootFromTearOut(platform: PlatformAdapter): Promise<WallBo
 
 /** @internal Forget what this window is moving (tests). */
 export function _resetWorkspaceMovesForTesting(): void {
+  for (const id of inFlight.keys()) setWorkspaceTransferPending(id, false);
   inFlight.clear();
   adopting.clear();
 }

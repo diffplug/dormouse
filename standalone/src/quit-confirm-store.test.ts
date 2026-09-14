@@ -1,6 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cancelQuit,
+  dismissQuitConfirm,
+  getQuitConfirmChar,
+  getQuitConfirmWorkspaceNames,
   confirmQuit,
   getQuitArchiveError,
   getQuitConfirmPhase,
@@ -10,15 +13,20 @@ import {
   _resetQuitConfirmForTesting,
 } from "./quit-confirm-store";
 
-// The store imports one erased TYPE and nothing else, so these tests need no
-// Tauri/orchestrator mocks: drive the gate with a hand-made context. The
-// gate↔orchestrator seam itself is covered by quit.test.ts.
+import { chromeKeyboardHeld } from '../../lib/src/components/wall/chrome-keyboard-lease';
+import { createWorkspace, closeWorkspace, moveWorkspace, renameWorkspace, resetWorkspaces, setActiveWorkspace } from 'dormouse-lib/lib/workspace-store';
+import { getWorkspaceUiSnapshot, isWorkspaceTransferPending, resetWorkspaceUi, setPendingWorkspaceClose, setPendingWorkspaceMove, setRenamingWorkspace, setWorkspaceTransferPending } from 'dormouse-lib/lib/workspace-ui-store';
+
+// The gate↔orchestrator seam itself is covered by quit.test.ts.
 const makeCtx = () => ({ confirm: vi.fn(), cancel: vi.fn() });
 
 describe("quit-confirm store", () => {
   beforeEach(() => {
     _resetQuitConfirmForTesting();
+    resetWorkspaces();
+    resetWorkspaceUi();
   });
+  afterEach(() => _resetQuitConfirmForTesting());
 
   it("opens with phase 'open' and notifies subscribers", () => {
     const listener = vi.fn();
@@ -101,4 +109,77 @@ describe("quit-confirm store", () => {
     expect(first.confirm).toHaveBeenCalledTimes(1);
     expect(second.confirm).not.toHaveBeenCalled();
   });
+
+  it('keeps its letter and captured scope through focus, reorder and rename', () => {
+    const second = createWorkspace({ id: 'second', name: 'Second' });
+    const ctx = makeCtx();
+    openQuitConfirm(ctx);
+    const char = getQuitConfirmChar();
+    const names = getQuitConfirmWorkspaceNames();
+    expect(char).toMatch(/^[a-z]$/);
+    expect(names).toContain('Second');
+    setActiveWorkspace('workspace-1');
+    moveWorkspace(second.id, 0);
+    renameWorkspace(second.id, 'Renamed');
+    expect(getQuitConfirmChar()).toBe(char);
+    expect(getQuitConfirmWorkspaceNames()).toBe(names);
+    expect(ctx.cancel).not.toHaveBeenCalled();
+  });
+
+  it.each(['arrival', 'departure'])('cancels a pending decision on workspace %s', (change) => {
+    createWorkspace({ id: 'second' });
+    const ctx = makeCtx();
+    openQuitConfirm(ctx);
+    if (change === 'arrival') createWorkspace({ id: 'third' });
+    else closeWorkspace('second');
+    expect(ctx.cancel).toHaveBeenCalledExactlyOnceWith();
+    expect(getQuitConfirmPhase()).toBeNull();
+    expect(chromeKeyboardHeld()).toBe(false);
+    createWorkspace({ id: 'fourth' });
+    expect(ctx.cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a committed or archive-failed decision through membership changes', () => {
+    const ctx = makeCtx();
+    openQuitConfirm(ctx);
+    confirmQuit();
+    createWorkspace({ id: 'second' });
+    expect(ctx.cancel).not.toHaveBeenCalled();
+    const archiveCtx = makeCtx();
+    openQuitArchiveFailure('disk full', archiveCtx);
+    closeWorkspace('second');
+    expect(getQuitConfirmPhase()).toBe('archive-failed');
+    expect(archiveCtx.cancel).not.toHaveBeenCalled();
+    expect(chromeKeyboardHeld()).toBe(true);
+    cancelQuit();
+    expect(archiveCtx.cancel).toHaveBeenCalledOnce();
+    expect(chromeKeyboardHeld()).toBe(false);
+  });
+
+  it.each(['confirm', 'archive'])('clears competing chrome when opening %s without dropping transfer guards', (kind) => {
+    setPendingWorkspaceClose({ id: 'workspace-1', char: 'a' });
+    setPendingWorkspaceMove({ id: 'workspace-1', char: 'b', iframeCount: 1, proceed: vi.fn() });
+    setRenamingWorkspace('workspace-1');
+    setWorkspaceTransferPending('workspace-1', true);
+    if (kind === 'confirm') openQuitConfirm(makeCtx());
+    else openQuitArchiveFailure('disk full', makeCtx());
+    expect(getWorkspaceUiSnapshot()).toEqual({ pendingClose: null, pendingMove: null, renamingId: null });
+    expect(isWorkspaceTransferPending('workspace-1')).toBe(true);
+    expect(chromeKeyboardHeld()).toBe(true);
+  });
+
+  it('holds one keyboard lease through commitment and releases it on matching dismissal', () => {
+    openQuitConfirm(makeCtx(), { kind: 'close-window' });
+    expect(chromeKeyboardHeld()).toBe(true);
+    confirmQuit();
+    expect(chromeKeyboardHeld()).toBe(true);
+    dismissQuitConfirm('quit');
+    expect(chromeKeyboardHeld()).toBe(true);
+    dismissQuitConfirm('close-window');
+    expect(chromeKeyboardHeld()).toBe(false);
+    openQuitConfirm(makeCtx());
+    _resetQuitConfirmForTesting();
+    expect(chromeKeyboardHeld()).toBe(false);
+  });
+
 });

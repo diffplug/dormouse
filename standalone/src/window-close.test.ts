@@ -33,6 +33,7 @@ vi.mock("dormouse-lib/lib/notepad/notepad-store", () => ({
 }));
 // How a window names itself in its dialog: the Workspace it is showing.
 vi.mock("dormouse-lib/lib/workspace-store", () => ({
+  subscribeToWorkspaces: () => () => {},
   getWorkspacesSnapshot: mocks.getWorkspacesSnapshot,
 }));
 // Closing a window throws away the download it is holding, so the close asks

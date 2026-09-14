@@ -551,8 +551,7 @@ export async function serializeTerminal(id: string): Promise<string | null> {
 }
 
 /** Resolves once everything written to the Session so far is in its buffer.
- *  xterm parses asynchronously, so a reader of buffer lines — a pin being
- *  re-registered over a rebuilt transcript — waits here first. */
+ *  xterm parses asynchronously, so transfer waits here before reading or mounting a rebuilt buffer. */
 export function flushTerminal(id: string): Promise<void> {
   const entry = registry.get(id);
   if (!entry) return Promise.resolve();
@@ -640,8 +639,7 @@ export function disposeSession(id: string): void {
  *
  * **Never reachable from a Wall unmount.** A Wall unmounts on a reload, a
  * StrictMode double-mount, and a Workspace switch, and releasing there would
- * silently strand every PTY the Window still owns. The only caller is the
- * explicit transfer verb on the Wall's handle.
+ * silently strand every PTY the Window still owns. Only explicit transfer departure and refused-adoption cleanup may call it.
  */
 export function releaseSession(id: string): void {
   teardownSession(id, { kill: false });

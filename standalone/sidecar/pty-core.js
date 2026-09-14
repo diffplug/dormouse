@@ -1037,27 +1037,27 @@ function windowsListeningPorts(pids, runtime = {}) {
     return rawExecFileSync(command, args, { ...options, timeout: remaining });
   };
   const pidSet = new Set(pids);
-  const nameByPid = new Map();
   let ports;
   try {
     const json = runPowerShell(
       'Get-NetTCPConnection -State Listen | Select-Object LocalAddress,LocalPort,OwningProcess | ConvertTo-Json -Compress',
       execFileSyncFn,
     );
-    ports = parseNetTcpConnections(json, pidSet, nameByPid);
+    ports = parseNetTcpConnections(json, pidSet);
   } catch {
     try {
       const out = execFileSyncFn('netstat', ['-ano', '-p', 'TCP'], {
         encoding: 'utf-8',
         stdio: ['ignore', 'pipe', 'ignore'],
-        windowsHide: true,
+        windowsHide: true, // see runPowerShell: avoid the console-allocation deadlock
       });
-      ports = parseNetstatListening(out, pidSet, nameByPid);
+      ports = parseNetstatListening(out, pidSet);
     } catch { return []; }
   }
   if (!ports.length) return ports;
 
   // Names are best-effort: exhaustion here must still return the ports.
+  const nameByPid = new Map();
   try {
     const rows = runPowerShellJson(
       'Get-CimInstance Win32_Process | Select-Object ProcessId,Name | ConvertTo-Json -Compress',

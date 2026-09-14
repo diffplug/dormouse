@@ -2,7 +2,7 @@ import { randomKillChar } from '../KillConfirm';
 import { awaitWallHandle, mountingRefusal } from './dor-control-shared';
 import { getWallHandle } from './wall-handles';
 import { forgetWorkspaceSession } from '../../lib/window-session-aggregator';
-import { getWorkspaceUiSnapshot, setPendingWorkspaceClose, setRenamingWorkspace } from '../../lib/workspace-ui-store';
+import { getWorkspaceUiSnapshot, isWorkspaceTransferPending, setPendingWorkspaceClose, setRenamingWorkspace } from '../../lib/workspace-ui-store';
 import { closeWorkspace, getWorkspacesSnapshot, setActiveWorkspace, workspaceRefFor } from '../../lib/workspace-store';
 import type { WorkspaceId } from '../../lib/session-types';
 import type { CloseSurfaceMode } from './wall-types';
@@ -55,6 +55,7 @@ export async function closeWorkspaceWithSurfaces(
   id: WorkspaceId,
   mode: CloseSurfaceMode = 'prompt',
 ): Promise<string | null> {
+  if (isWorkspaceTransferPending(id)) return 'Workspace is transferring';
   if (closeInFlight) return CLOSE_IN_FLIGHT_REFUSAL;
   // Re-checked here, not only in `requestWorkspaceClose`: the count can drop
   // while the typed confirmation is on screen, and emptying the Wall for a
@@ -98,7 +99,7 @@ export async function closeWorkspaceWithSurfaces(
  * other goes immediately.
  */
 export function requestWorkspaceClose(id: WorkspaceId): void {
-  if (closeInFlight) return;
+  if (closeInFlight || isWorkspaceTransferPending(id)) return;
   if (getWorkspacesSnapshot().workspaces.length <= 1) return;
   void closeOnceWallRegisters(id);
 }
@@ -112,7 +113,7 @@ export function requestWorkspaceClose(id: WorkspaceId): void {
  */
 async function closeOnceWallRegisters(id: WorkspaceId): Promise<void> {
   await awaitWallHandle(id);
-  if (closeInFlight) return;
+  if (closeInFlight || isWorkspaceTransferPending(id)) return;
   if (workspaceNeedsCloseConfirmation(id)) {
     setPendingWorkspaceClose({ id, char: randomKillChar() });
     return;

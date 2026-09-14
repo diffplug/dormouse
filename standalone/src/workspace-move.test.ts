@@ -1,3 +1,5 @@
+import { isWorkspaceTransferPending } from "dormouse-lib/lib/workspace-ui-store";
+import { applyTerminalSemanticEvents, snapshotTerminalState, removeTerminalPaneState, countRunningSessionsIn, getTerminalPaneState, isPaneOscDriven } from 'dormouse-lib/lib/terminal-state-store';
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PlatformAdapter, PtyInfo } from "dormouse-lib/lib/platform/types";
@@ -147,7 +149,7 @@ function prepared(
  */
 function fakePlatform(
   order: string[] = [],
-  opts: { answer?: boolean; marks?: Record<string, number>; stamp?: boolean } = {},
+  opts: { answer?: boolean; marks?: Record<string, number>; stamp?: boolean; beforeReplay?: () => void } = {},
 ): PlatformAdapter {
   const platform = new FakePtyAdapter();
   let listHandler: ((detail: { ptys: PtyInfo[]; requestId?: string }) => void) | null = null;
@@ -194,6 +196,7 @@ function fakePlatform(
       if (!arrival) throw new Error(`no arrival of '${workspaceId}'`);
       if (opts.answer === false) return undefined;
       order.push(`answered:${workspaceId}`);
+      opts.beforeReplay?.();
       // The host echoes the collector's own token, and lists exactly this
       // arrival's ids: two arrivals at once must not finish on each other's.
       const requestId = (args as { requestId?: string } | undefined)?.requestId;
@@ -717,6 +720,38 @@ describe("the target half", () => {
 });
 
 describe("a transfer's content", () => {
+  it("guards close during preparation and releases the guard if preparation fails", async () => {
+    let rejectPrepare!: (error: Error) => void;
+    registerWallHandle(stubWallHandle(WORKSPACE_ID, {
+      prepareWorkspaceTransfer: () => new Promise((_, reject) => { rejectPrepare = reject; }),
+    }));
+    const moving = transferWorkspaceTo(WORKSPACE_ID, "ws-2");
+    expect(isWorkspaceTransferPending(WORKSPACE_ID)).toBe(true);
+    expect(await tearOutWorkspace(WORKSPACE_ID, { x: 0, y: 0 })).toEqual({ moved: false, reason: "Workspace is already in flight" });
+    const rejected = expect(moving).rejects.toThrow("probe failed");
+    rejectPrepare(new Error("probe failed"));
+    await rejected;
+    expect(isWorkspaceTransferPending(WORKSPACE_ID)).toBe(false);
+  });
+
+  it.each([false, true])("preserves running-work confirmation state, unless newer replay finishes it (%s)", async finished => {
+    applyTerminalSemanticEvents("pane-a", [
+      { type: "commandLine", commandLine: "ascii-splash" },
+      { type: "commandStart", source: "osc633_boundaries" },
+    ]);
+    const semanticState = snapshotTerminalState("pane-a");
+    removeTerminalPaneState("pane-a");
+    arrivals = [payload({ terminals: { "pane-a": { serialized: "screen", semanticState } } } as Partial<WorkspaceTransferPayload>)];
+    await bootFromTearOut(fakePlatform([], { beforeReplay: () => {
+      expect(countRunningSessionsIn(["pane-a"])).toBe(1);
+      if (finished) applyTerminalSemanticEvents("pane-a", [{ type: "commandFinish", exitCode: 0 }]);
+    } }));
+    expect(countRunningSessionsIn(["pane-a"])).toBe(finished ? 0 : 1);
+    expect(isPaneOscDriven("pane-a")).toBe(true);
+    const state = getTerminalPaneState("pane-a");
+    expect((finished ? state.lastCommand : state.currentCommand)?.rawCommandLine).toBe("ascii-splash");
+  });
+
   it("drains replay before adopting even when no note has a pin", async () => {
     arrivals = [payload()];
     mocks.deferWrites = true;
@@ -728,15 +763,6 @@ describe("a transfer's content", () => {
     expect(mocks.invoke).toHaveBeenCalledWith("adopt_done", { workspaceId: WORKSPACE_ID });
   });
 
-  it("keeps notes without restoring legacy transferred pins", async () => {
-    arrivals = [payload({ pins: [{
-      surfaceId: "pane-a", noteId: "n1", startLine: 0, endLine: 0,
-      startColumn: 0, endColumn: 1, shape: "linewise", expectedRawText: "x",
-    }] } as Partial<WorkspaceTransferPayload>)];
-    await bootFromTearOut(fakePlatform());
-    expect(getNotes("pane-a")).toHaveLength(1);
-    expect(getNotes("pane-a")[0].source).toBeUndefined();
-  });
 
   it("serializes each terminal at the host's mark and hands the content over behind the invoke", async () => {
     const order: string[] = [];
@@ -752,14 +778,13 @@ describe("a transfer's content", () => {
     const [, args] = mocks.invoke.mock.calls.find(([cmd]) => cmd === "transfer_workspace_content")!;
     expect(args).toEqual({
       workspaceId: WORKSPACE_ID,
-      content: { terminals: { "pane-a": { serialized: "", mark: 42 } }, pins: [] },
+      content: { terminals: { "pane-a": { serialized: "", mark: 42 } } },
     });
   });
 
   it("writes the source's buffer ahead of the since-mark replay when it mounts the arrival", async () => {
     arrivals = [payload({
       terminals: { "pane-a": { serialized: "\u001b[1mfrom-source\u001b[0m", mark: 42, grid: { cols: 120, rows: 45 } } },
-      pins: [],
     } as Partial<WorkspaceTransferPayload>)];
     await bootFromTearOut(fakePlatform());
     expect(mocks.grids[mocks.grids.length - 1]).toMatchObject({ cols: 120, rows: 45 });

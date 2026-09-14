@@ -39,9 +39,9 @@ pub fn ref_number(id: &str) -> Option<u64> {
     id.strip_prefix("workspace-")?.parse().ok()
 }
 
-/// The stable `dor` ref of an id, when it has one.
-pub fn ref_for(id: &str) -> Option<String> {
-    Some(ref_number(id).map_or_else(|| format!("workspace:{id}"), |n| format!("workspace:{n}")))
+/// The stable `dor` ref of an id: its counter number, else the id itself.
+pub fn ref_for(id: &str) -> String {
+    ref_number(id).map_or_else(|| format!("workspace:{id}"), |n| format!("workspace:{n}"))
 }
 
 /// The next counter value, above every id given. Never below 2: `workspace-1`
@@ -175,9 +175,9 @@ mod tests {
 
     #[test]
     fn refs_come_from_the_id_and_never_from_position() {
-        assert_eq!(ref_for("workspace-7"), Some("workspace:7".to_string()));
-        assert_eq!(ref_for("workspace-abc12345-3"), Some("workspace:workspace-abc12345-3".to_string()));
-        assert_eq!(ref_for("workspace-"), Some("workspace:workspace-".to_string()));
+        assert_eq!(ref_for("workspace-7"), "workspace:7".to_string());
+        assert_eq!(ref_for("workspace-abc12345-3"), "workspace:workspace-abc12345-3".to_string());
+        assert_eq!(ref_for("workspace-"), "workspace:workspace-".to_string());
     }
 
     #[test]
@@ -238,7 +238,7 @@ mod tests {
         report(&mut registry, "ws-2", vec![entry("workspace-2", "ws-b", true)]);
         assert_eq!(window_of(&registry, "workspace:ws-b"), Some("main"));
         assert_eq!(window_of(&registry, "workspace:2"), Some("ws-2"));
-        assert_eq!(window_of(&registry, &ref_for("ws-a").unwrap()), Some("main"));
+        assert_eq!(window_of(&registry, &ref_for("ws-a")), Some("main"));
     }
 
     #[test]

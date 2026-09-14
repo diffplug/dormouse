@@ -5,7 +5,7 @@ spec conventions); this guide covers only what is specific to the stack.
 
 ## 1. Where the code is
 
-The work is a stack of ten branches, each a draft PR based on the one before it.
+The work is a stack of eleven branches, each PR based on the one before it.
 Every branch has its own worktree as a sibling of the repo:
 
 | # | PR | Branch | Worktree | What it adds |
@@ -16,12 +16,13 @@ Every branch has its own worktree as a sibling of the repo:
 | 4 | #617 | `workspaces-dor` | `dormouse.workspaces-2/.claude/worktrees/workspaces-dor` | `dor workspace` verbs |
 | 5 | #618 | `workspaces-harden` | `dormouse.workspaces-harden` | Held events in the transfer gap, drift cleanup |
 | 6 | #619 | `workspaces-registry` | `dormouse.workspaces-registry` | Rust registry, stable `workspace:<n>` refs, cross-window routing |
-| 7 | #620 | `workspaces-durability` | `dormouse.workspaces-durability` | Transfer moves the snapshot between files on disk |
-| 8 | #621 | `workspaces-fidelity` | `dormouse.workspaces-fidelity` | Marks, serialized xterm buffers, pins across a move |
+| 7 | #620 | `workspaces-durability` | `dormouse.workspaces-durability` | Journal in-flight transfers for crash recovery |
+| 8 | #621 | `workspaces-fidelity` | `dormouse.workspaces-fidelity` | Marks and serialized xterm buffers; pin transfer superseded by #630 |
 | 9 | #622 | `workspaces-move-verb` | `dormouse.workspaces-move-verb` | `dor workspace move`, `dor list --window`, iframe move gate |
 | 10 | #623 | `workspaces-harness` | `dormouse.workspaces-harness` | Harness alert stores through the sidecar |
+| 11 | #630 | `workspaces-transfer-fixes` | `dormouse.workspaces-transfer-fixes` | Transfer mouse/grid/command state, notes without pins, shared Workspace kill confirmation, review fixes |
 
-**Work on the tip** (`dormouse.workspaces-harness`) for testing and for any tweak,
+**Work on the tip** (`dormouse.workspaces-transfer-fixes`) for testing and for any tweak,
 unless the tweak clearly belongs to an earlier stage and you want it reviewed
 there. If you commit on an earlier stage, merge it forward through every later
 branch (`git merge --no-ff <previous>` in each worktree, in order), or the PRs
@@ -32,7 +33,10 @@ Never `git switch -c` inside an existing worktree. New branches:
 
 ## 1a. Changing the stack, and landing it
 
-**Default: put changes in new PRs on top of the tip.** A change to an early
+**Test Workspace changes locally before opening a PR.** The final fixes for this
+stack are collected in #630.
+
+**Default after this stack: put changes in new PRs on top of the tip.** A change to an early
 stage has to be merged forward through every later branch; a new PR at the tip
 touches nothing behind it, and testing findings usually cut across stages anyway.
 Edit an existing PR only when (a) the bug would make that PR wrong to merge on
@@ -65,10 +69,11 @@ var at that source path, **never at the worktree's own `binaries/` path** (the
 build script copies source onto destination and truncates the file to 0 bytes):
 
 ```
+DORMOUSE_MAIN_CHECKOUT=/path/to/main-checkout
 mkdir -p standalone/src-tauri/binaries
-cp /Users/ntwigg/projects/dormouse/standalone/src-tauri/binaries/node-aarch64-apple-darwin standalone/src-tauri/binaries/
+cp "$DORMOUSE_MAIN_CHECKOUT/standalone/src-tauri/binaries/node-aarch64-apple-darwin" standalone/src-tauri/binaries/
 cd standalone/src-tauri
-DORMOUSE_NODE_BINARY=/Users/ntwigg/projects/dormouse/standalone/src-tauri/binaries/node-aarch64-apple-darwin cargo test
+DORMOUSE_NODE_BINARY="$DORMOUSE_MAIN_CHECKOUT/standalone/src-tauri/binaries/node-aarch64-apple-darwin" cargo test
 ```
 
 ## 3. Running the app
@@ -112,15 +117,15 @@ Tests that pin the stack's non-obvious rules, by concern:
 | Hidden-Workspace minimize | `lib/src/components/TerminalPane.test.tsx` ("a hidden Workspace minimizes its terminals") |
 | Composition, switching, close race | `lib/src/components/WorkspaceWindow.test.tsx`, `Wall.test.tsx` |
 | Strip | `lib/src/components/WorkspaceStrip.test.tsx`, `workspace-strip-drag.test.ts` |
-| Quit / close arbitration | `standalone/src/quit.test.ts`, `teardown-arbiter.test.ts`, `window-close.test.ts`; Rust `quit_state` |
+| Quit / close arbitration and shared confirmation | `standalone/src/quit.test.ts`, `teardown-arbiter.test.ts`, `window-close.test.ts`, `WorkspaceTeardownModal.test.ts`, `lib/src/components/WorkspaceStrip.test.tsx`; Rust `quit_state` |
 | Routing table, arrivals, marking, held events | Rust `routing::tests` |
 | Transfer, content, tear-out boot | `standalone/src/workspace-move.test.ts` |
 | Cross-window drag and iframe gate | `standalone/src/workspace-drag.test.ts` |
 | Registry, stable refs | Rust `workspaces::tests`, `standalone/src/workspace-registry.test.ts`, `lib/src/lib/workspace-store.test.ts` |
 | Sidecar marks and since-mark replay | `standalone/sidecar/pty-core.test.js` |
-| Pins across a move | `lib/src/lib/notepad/source-link.test.ts`, `notepad-store.test.ts` |
+| Notes across a move | `lib/src/components/wall/workspace-transfer.test.ts` |
 | `dor workspace` verbs, move gate | `lib/src/components/wall/workspace-control.test.ts`, `dor-control-router.test.ts` |
-| Disk staging of a transfer | Rust `tests::a_staged_arrival_is_in_the_target_snapshot_until_it_is_handed_back` |
+| Crash durability of a transfer | Rust `tests::an_arrival_record_round_trips_until_it_is_forgotten` and the `a_leftover_arrival_*` boot-merge tests |
 
 ## 5. Manual test checklist
 
@@ -167,7 +172,9 @@ User-run results are recorded under "Transfer findings" below. Items marked
   `dor list --window ws-2` answer from B.
 - `dor workspace move --index 0` reorders without changing the ref.
 
-**Quit**
+**Quit (shared confirmation UI still needs native retesting)**
+- Workspace close, window close, and app quit should all show "Confirm kill
+  workspace" with the affected Workspace names. Escape must leave the app usable.
 - Two windows, one with a running command. Cmd+Q, then Cmd+Q again while the
   dialog is up, then confirm: the app quits (this was the wedge).
 - Relaunch: both windows and their Workspaces come back; the interrupted agent
@@ -188,7 +195,7 @@ the heading, and the rule gets a `(rationale)` marker.
 | Concern | Code | Spec |
 |---|---|---|
 | Strip look, tabs, menus, rename, indicators | `lib/src/components/WorkspaceStrip.tsx`, `workspace-strip-drag.ts`, stories in `lib/src/stories/` | `docs/specs/layout.md` → Workspaces; `standalone.md` → AppBar; `alert.md` → Workspace union |
-| Close confirmation, move confirmation dialogs | `WorkspaceStrip.tsx` (renders `KillConfirmModal` for `pendingClose` / `pendingMove`), `lib/src/lib/workspace-ui-store.ts`, `lib/src/components/KillConfirm.tsx` (`title`, `detail` props) | `layout.md` → Workspaces |
+| Shared Workspace kill confirmation and iframe move gate | `lib/src/components/WorkspaceKillConfirm.tsx` ("Confirm kill workspace"), `lib/src/components/WorkspaceStrip.tsx` (`pendingClose`; separate iframe `pendingMove` gate), `standalone/src/WorkspaceTeardownModal.tsx` (window close / app quit), `lib/src/lib/workspace-ui-store.ts` | `layout.md` → Workspaces; `standalone.md` → Confirmation UI |
 | Command-mode keys (`c n p l 1-9 W & !` etc.) | `lib/src/components/wall/keyboard/handle-workspace-shortcuts.ts` | `layout.md` → Workspaces, `shortcuts.md` |
 | Composition, active/hidden Wall, input gating | `lib/src/components/WorkspaceWindow.tsx`, `Wall.tsx` (`WorkspaceActiveContext`) | `layout.md` → Workspaces |
 | Hidden-Workspace terminal minimize | `lib/src/components/TerminalPane.tsx` mount effect (gated on `workspaceActive`), `lib/src/lib/terminal-lifecycle.ts` (`mountElement`/`unmountElement`), `terminal-webgl.ts` | `layout.md` → Workspaces, Renderer; `layout.rationale.md` → Workspaces |
@@ -197,9 +204,9 @@ the heading, and the rule gets a `(rationale)` marker.
 | Sidecar event routing | `standalone/src-tauri/src/routing.rs` (`route`, pure) and `dispatch_sidecar_event` in `lib.rs` | `standalone.md` → Routing (the table) |
 | Transfer protocol | Source and target halves in `standalone/src/workspace-move.ts`; lib half in `lib/src/components/wall/workspace-transfer.ts` (`prepareWorkspaceTransfer`, `captureTransferContent`); Rust `begin_arrival` / `transfer_workspace_content` / `adopt_ready` / `adopt_done` / `hand_back_arrival` in `lib.rs`, `Arrival` in `routing.rs` | `standalone.md` → Transfer, Tear-out, Arrival queue; `transport.md` → Transferring a Workspace |
 | Marks and since-mark replay | `mark` / `list` in `standalone/sidecar/pty-core.js`; `pty:marked` routing and bookkeeping in `routing.rs` / `lib.rs`; `serializeTerminal` / `flushTerminal` in `terminal-lifecycle.ts` | `transport.md` → Transferring a Workspace; `standalone.rationale.md` → Arrival queue |
-| Pins across a move | `lib/src/lib/notepad/source-link.ts` (`transferredPinOf`, `registerTerminalSourceAtLines`), `notepad-store.ts` (`snapshotTerminalPins`, `restoreTerminalPins`) | `transport.md`, `notepad.md` |
-| Disk staging of a transfer | `stage_arrival_on_disk` / `unstage_arrival_on_disk` in `lib.rs` | `standalone.md` → Arrival queue |
-| Arrival deadline, held events | `ARRIVAL_MAX`, `expire_arrival`, `hold_event` / `take_held` in `routing.rs`; `spawn_arrival_watchdog` in `lib.rs` | `standalone.md` → Arrival queue, Routing |
+| Notes across a move | `lib/src/components/wall/workspace-transfer.ts` | `transport.md`, `notepad.md` |
+| Crash durability of a transfer | `record_arrival_on_disk` / `forget_arrival_on_disk` / `restore_arrivals` in `standalone/src-tauri/src/lib.rs` (`sessions/arrivals.json`, merged at boot) | `standalone.md` → Arrival queue |
+| Arrival deadline, held events, hand-back replay | `ARRIVAL_MAX`, `expire_arrival`, `hold_event` / `lift_suppression`, `hand_back_ids` in `standalone/src-tauri/src/routing.rs`; `spawn_arrival_watchdog`, `hand_back_arrival` in `standalone/src-tauri/src/lib.rs`; `acceptHandBackReplay` in `standalone/src/workspace-move.ts` | `standalone.md` → Arrival queue, Routing |
 | Cross-window drag | `standalone/src/workspace-drag.ts` (release gate in `onDropOnOtherWindow`), `window_at_cursor` in Rust | `standalone.md` → Dragging a Workspace between windows |
 | Quit and per-window close | `standalone/src/quit.ts`, `teardown-flow.ts`, `window-close.ts`; Rust `quit_state.rs`, `macos_terminate.rs` | `standalone.md` → Quit flow, Per-window close |
 | Persistence and restore | `lib/src/lib/window-session-aggregator.ts`, `standalone/src/window-restore.ts`, Rust `save_session` etc. | `standalone.md` → Persistence; `transport.md` |
@@ -212,10 +219,10 @@ the heading, and the rule gets a `(rationale)` marker.
 - **Every Tauri `listen` must be `listenToWindow`** (`standalone/src/window-label.ts`).
   A bare `listen` receives every window's traffic; `scripts/window-listeners.test.mjs`
   fails the build otherwise. Broadcasts (`app.emit`) still reach scoped listeners.
-- **Ids are minted only by Rust** in standalone. `createWorkspace()` draws from the
-  pool `installWorkspaceIdPool` fills at adapter init; do not hand-roll ids.
-- **Never release a Session from an unmount.** `releaseSession` is reachable only
-  from a transfer's `commit`; `Wall.test.tsx` pins it.
+- Workspace id allocation and reservation-failure fallback follow
+  `docs/specs/standalone.md` → Workspace registry; use `createWorkspace()`.
+- Session release boundaries follow `docs/specs/transport.md` → Transferring a
+  Workspace and the `releaseSession` comment in `lib/src/lib/terminal-lifecycle.ts`.
 - **`take_arrivals` does not consume**, and an arrival without content is not
   drainable. If you change the transfer sequence, keep: source invokes → Rust marks
   → source serializes → `transfer_workspace_content` → target nudged/built.
@@ -234,11 +241,14 @@ the heading, and the rule gets a `(rationale)` marker.
   target's parser resynchronizes on the next ground byte, the same class of cut
   the old bounded replay made. Documented in `standalone.rationale.md` → Arrival queue.
 - The alert stores in the sidecar are memory-only; a sidecar respawn loses them
-  until a window re-seeds.
+  until a window re-seeds (the harness re-seeds on stream reconnect).
+- `dor workspace move` reports `moved` only once the target adopted the
+  Workspace; a hand-back is an error with its reason. `dor ab` fails fast when
+  no Wall answers; there is no CLI-side key fallback.
 - The one-frame blank on switch-back and WKWebView context release are unverified
   (§5).
 
-## Transfer findings (user-run Tauri, 2026-09-11)
+## Transfer findings (user-run Tauri, 2026-09-11 through 2026-09-14)
 
 - `ascii-splash` mouse interaction failed after both tear-out and transfer into
   an existing window; resizing did not repair it, restarting the TUI did.
@@ -250,3 +260,17 @@ the heading, and the rule gets a `(rationale)` marker.
 - Earlier checks passed: switching, idle tear-out, stable cross-window refs,
   continuous numbered output without observed gaps, and identical retained
   scrollback before and after transfer.
+
+Native follow-up checks passed:
+- `ascii-splash` mouse interaction survives transfer after the mouse-mode fix.
+- A transferred running command prompts before window close after preserving
+  semantic state across the move.
+- With a Workspace kill confirmation open, tearing out dismisses the source
+  confirmation without killing the process; closing the destination asks again.
+- Retained scrollback after 12,000 numbered lines had the same topmost line
+  (10953) before and after transfer.
+
+The shared "Confirm kill workspace" component now also handles app quit and
+window close. Its automated tests pass; the replacement app-quit UI has not yet
+been manually tested. The last-Workspace merge redraw needs a specific native
+retest; the successful mouse retest does not establish that drawing result.

@@ -25,6 +25,8 @@ pub const AWAITING_REPLAY_MAX: Duration = Duration::from_secs(5);
 /// target's own collection times out at 3 s and a torn-out window boots in
 /// well under this; past it the target webview is wedged, and its shells
 /// would otherwise stay silent in the source forever.
+/// Must remain below `CLOSE_WORKSPACE_TIMEOUT_MS` in `dor/src/control-client.ts`,
+/// so a hand-back reaches the CLI before its transport deadline.
 pub const ARRIVAL_MAX: Duration = Duration::from_secs(20);
 
 /// Where one sidecar event goes. Every label is borrowed from the state it was
@@ -264,7 +266,7 @@ pub struct Arrival {
     /// Workspace into the same window.
     pub queued_at: Instant,
     /// What the source serialized once every mark had passed — each terminal's
-    /// buffer and mark, and the notepad pins — merged into the payload the
+    /// buffer and mark — merged into the payload the
     /// target drains. **An arrival without it is not yet drainable.**
     pub content: Option<JsonValue>,
     /// A tear-out's window geometry, held until the content lands: the window
@@ -976,13 +978,11 @@ mod tests {
 
         arrivals[0].content = Some(json!({
             "terminals": { "t1": { "serialized": "\x1b[1mhi", "mark": 42 }, "t2": { "serialized": "" } },
-            "pins": [],
         }));
         let payloads = arrival_payloads(&arrivals, "ws-2");
         assert_eq!(payloads.len(), 1);
         assert_eq!(payloads[0]["workspaceId"], "ws-a");
         assert_eq!(payloads[0]["terminals"]["t1"]["mark"], 42);
-        assert_eq!(payloads[0]["pins"], json!([]));
         assert_eq!(arrival_marks(&arrivals[0]), json!({ "t1": 42 }));
     }
 

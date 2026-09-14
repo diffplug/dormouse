@@ -1,9 +1,13 @@
+import { randomKillChar } from '../../lib/src/components/KillConfirm';
+import { acquireChromeKeyboardLease } from '../../lib/src/components/wall/chrome-keyboard-lease';
+import { getWorkspacesSnapshot, subscribeToWorkspaces } from 'dormouse-lib/lib/workspace-store';
+import { setPendingWorkspaceClose, setPendingWorkspaceMove, setRenamingWorkspace } from 'dormouse-lib/lib/workspace-ui-store';
 import type { TeardownConfirmContext } from "./teardown-flow";
 
 /**
  * Module store backing the quit-confirmation dialog. The quit orchestrator's
  * gate (`openQuitConfirm`, wired via `setQuitConfirmGate` in bootstrap) opens
- * it; `<QuitConfirmModalHost>` renders off the phase. Behavior:
+ * it; `<WorkspaceTeardownModalHost>` renders off the phase. Behavior:
  * docs/specs/standalone.md §Quit flow, "Confirmation dialog".
  */
 
@@ -34,6 +38,45 @@ let archiveError: string | null = null;
 // is made, so a repeated confirm / a late cancel is a no-op.
 let activeCtx: TeardownConfirmContext | null = null;
 const listeners = new Set<() => void>();
+let confirmChar = '';
+let workspaceNames: readonly string[] = [];
+let releaseKeyboard: (() => void) | null = null;
+let unsubscribeWorkspaces: (() => void) | null = null;
+
+export function getQuitConfirmChar(): string { return confirmChar; }
+export function getQuitConfirmWorkspaceNames(): readonly string[] { return workspaceNames; }
+
+function stopWatchingWorkspaces(): void {
+  unsubscribeWorkspaces?.();
+  unsubscribeWorkspaces = null;
+}
+
+function releaseDialog(): void {
+  stopWatchingWorkspaces();
+  releaseKeyboard?.();
+  releaseKeyboard = null;
+}
+
+function ownDialog(): void {
+  releaseKeyboard ??= acquireChromeKeyboardLease();
+  // Clear competing typed gates without clearing in-flight transfer guards.
+  setPendingWorkspaceClose(null);
+  setPendingWorkspaceMove(null);
+  setRenamingWorkspace(null);
+}
+
+function captureWorkspaces(): void {
+  const workspaces = getWorkspacesSnapshot().workspaces;
+  workspaceNames = workspaces.map((workspace) => workspace.name);
+  const ids = new Set(workspaces.map((workspace) => workspace.id));
+  unsubscribeWorkspaces = subscribeToWorkspaces(() => {
+    const current = getWorkspacesSnapshot().workspaces;
+    // A changed destination invalidates consent; focus, rename and order do not.
+    if (phase === 'open' && (current.length !== ids.size || current.some((workspace) => !ids.has(workspace.id)))) {
+      cancelQuit();
+    }
+  });
+}
 
 export function subscribeQuitConfirm(listener: () => void): () => void {
   listeners.add(listener);
@@ -75,7 +118,10 @@ export function openQuitConfirm(ctx: TeardownConfirmContext, next: QuitConfirmIn
   }
   activeCtx = ctx;
   intent = next;
+  confirmChar = randomKillChar();
   phase = "open";
+  ownDialog();
+  captureWorkspaces();
   emit();
 }
 
@@ -92,8 +138,10 @@ export function openQuitArchiveFailure(
   ctx: TeardownConfirmContext,
   next: QuitConfirmIntent = QUIT_INTENT,
 ): void {
+  stopWatchingWorkspaces();
   activeCtx = ctx;
   intent = next;
+  ownDialog();
   archiveError = message;
   phase = "archive-failed";
   emit();
@@ -104,6 +152,7 @@ export function openQuitArchiveFailure(
 export function confirmQuit(): void {
   const ctx = activeCtx;
   if (!ctx) return;
+  stopWatchingWorkspaces();
   activeCtx = null;
   archiveError = null;
   phase = "quitting";
@@ -114,6 +163,7 @@ export function confirmQuit(): void {
 export function cancelQuit(): void {
   const ctx = activeCtx;
   if (!ctx) return;
+  releaseDialog();
   activeCtx = null;
   archiveError = null;
   phase = null;
@@ -131,6 +181,7 @@ export function dismissQuitConfirm(kind?: QuitConfirmIntent["kind"]): void {
   if (phase === null) return;
   // A quit cancelled elsewhere says nothing about this window's own close.
   if (kind !== undefined && intent.kind !== kind) return;
+  releaseDialog();
   activeCtx = null;
   archiveError = null;
   phase = null;
@@ -140,6 +191,9 @@ export function dismissQuitConfirm(kind?: QuitConfirmIntent["kind"]): void {
 
 /** @internal Reset module state for testing. */
 export function _resetQuitConfirmForTesting(): void {
+  releaseDialog();
+  confirmChar = '';
+  workspaceNames = [];
   phase = null;
   intent = QUIT_INTENT;
   activeCtx = null;
