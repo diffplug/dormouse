@@ -335,8 +335,8 @@ importers:
         specifier: 0.33.2
         version: 0.33.2
       '@node-datachannel/win32-x64-msvc':
-        specifier: 0.33.2
-        version: 0.33.2
+        specifier: 0.33.4
+        version: 0.33.4
 
   vscode-ext:
     dependencies:
@@ -1296,6 +1296,11 @@ packages:
 
   '@node-datachannel/win32-x64-msvc@0.33.2':
     resolution: {integrity: sha512-aLk0O/M1JNVpzxx4RVBXMJTMlpswE04Cz5baayKwuEN+qk9hO6DSJgYMR6Wq9a5zGYAmvLFlOg+LsePyXkWliA==}
+    cpu: [x64]
+    os: [win32]
+
+  '@node-datachannel/win32-x64-msvc@0.33.4':
+    resolution: {integrity: sha512-eU0w/9ykrNaA5vWs5gjVs3Qxa45jbQ8mYoMyh5OWnRCE5GzXKxHCpfhFUnO+jGqi0KxkyP0hSA6fiwXXkirk6g==}
     cpu: [x64]
     os: [win32]
 
@@ -5572,6 +5577,9 @@ snapshots:
     optional: true
 
   '@node-datachannel/win32-x64-msvc@0.33.2':
+    optional: true
+
+  '@node-datachannel/win32-x64-msvc@0.33.4':
     optional: true
 
   '@node-rs/crc32-android-arm-eabi@1.10.7':
