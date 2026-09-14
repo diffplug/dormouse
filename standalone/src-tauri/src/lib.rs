@@ -1959,6 +1959,71 @@ fn sweep_orphan_session_temps(dir: &Path) -> Result<(), String> {
     first_error.map_or(Ok(()), Err)
 }
 
+/// Retire only the known pane transcript field, preserving all other state.
+fn strip_legacy_scrollback(value: &mut JsonValue) -> Result<bool, String> {
+    if value.get("version").and_then(JsonValue::as_u64) == Some(1) {
+        if let Some(workspaces) = value.get_mut("workspaces").and_then(JsonValue::as_array_mut) {
+            let mut changed = false;
+            for workspace in workspaces {
+                changed |= strip_legacy_scrollback(workspace.get_mut("session").ok_or("Workspace has no Session")?)?;
+            }
+            return Ok(changed);
+        }
+    }
+    if value.get("version").and_then(JsonValue::as_u64) != Some(3) { return Ok(false); }
+    let panes = value.get_mut("panes").and_then(JsonValue::as_array_mut).ok_or("Session has no panes array")?;
+    let mut changed = false;
+    for pane in panes {
+        let pane = pane.as_object_mut().ok_or("Session pane is not an object")?;
+        if !pane.get("id").is_some_and(JsonValue::is_string) { return Err("Session pane has no id".into()); }
+        changed |= pane.remove("scrollback").is_some();
+    }
+    Ok(changed)
+}
+
+fn scrub_legacy_session_transcripts(dir: &Path) -> Vec<String> {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+        Err(e) => return vec![format!("read legacy sessions {}: {e}", dir.display())],
+    };
+    let mut errors = Vec::new();
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(e) => { errors.push(format!("read legacy session entry: {e}")); continue; }
+        };
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        if !name.ends_with(".json") || name.ends_with(".geometry.json") || name == "arrivals.json" { continue; }
+        let path = entry.path();
+        let scrub = || -> Result<(), String> {
+            let contents = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+            let mut value: JsonValue = serde_json::from_str(&contents).map_err(|e| e.to_string())?;
+            if strip_legacy_scrollback(&mut value)? {
+                write_file_atomically(&path, &serde_json::to_string(&value).map_err(|e| e.to_string())?)?;
+            }
+            Ok(())
+        };
+        if let Err(e) = scrub() { errors.push(format!("scrub legacy session {}: {e}", path.display())); }
+    }
+    errors
+}
+
+/// Active snapshots retain their normal webview rewrite. Only debug builds have
+/// an abandoned root requiring targeted migration; never delete its layouts.
+fn sweep_session_roots(app_data: &Path) -> Vec<String> {
+    let root = state_root_from(app_data.to_path_buf());
+    let mut errors = Vec::new();
+    if let Err(e) = sweep_orphan_session_temps(&root.join("sessions")) { errors.push(e); }
+    if root != app_data {
+        let legacy = app_data.join("sessions");
+        if let Err(e) = sweep_orphan_session_temps(&legacy) { errors.push(e); }
+        errors.extend(scrub_legacy_session_transcripts(&legacy));
+    }
+    errors
+}
+
 /// Delete everything a window leaves on disk: its snapshot, any temp write, and
 /// its geometry sibling. A per-window close is deliberate, so unlike a quit it
 /// takes the window off the next launch's restore list
@@ -4176,9 +4241,9 @@ pub fn run() {
             // file nothing will ever read or overwrite; one written before
             // Dormouse stopped storing transcripts carries one
             // (docs/specs/standalone.md §Persistence). Never fatal.
-            match sessions_dir(app.handle()) {
+            match app_data_dir(app.handle()) {
                 Ok(dir) => {
-                    if let Err(e) = sweep_orphan_session_temps(&dir) {
+                    for e in sweep_session_roots(&dir) {
                         append_log(format!("[session] {e}"));
                     }
                 }
@@ -5499,6 +5564,49 @@ mod tests {
         } else {
             assert_eq!(root, app_data);
         }
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn debug_sweep_retires_legacy_transcripts_without_changing_other_state() {
+        let dir = TempDir::new("legacy-root-transcripts");
+        let legacy = dir.path().join("sessions");
+        let active = state_root_from(dir.path().to_path_buf()).join("sessions");
+        let session = serde_json::json!({"version": 3, "panes": [{"id": "p", "cwd": "/work", "scrollback": "secret", "resumeCommand": "kept"}], "layout": {"scrollback": "unrelated"}});
+        let window = serde_json::json!({"version": 1, "workspaces": [{"id": "w", "name": "build", "session": session}], "activeWorkspaceId": "w", "extra": true});
+        write_session_to(&legacy, "main", &session.to_string()).unwrap();
+        write_session_to(&legacy, "ws-2", &window.to_string()).unwrap();
+        write_session_to(&active, "main", &session.to_string()).unwrap();
+        fs::write(legacy.join("main.json.tmp"), "secret").unwrap();
+        fs::write(active.join("main.json.tmp"), "secret").unwrap();
+        fs::write(legacy.join("main.geometry.json"), "geometry").unwrap();
+        fs::write(dir.path().join(NOTEPAD_ARCHIVE_FILE), "captured note").unwrap();
+        assert!(super::sweep_session_roots(dir.path()).is_empty());
+        let mut expected_session = session.clone();
+        expected_session["panes"][0].as_object_mut().unwrap().remove("scrollback");
+        let mut expected_window = window.clone();
+        expected_window["workspaces"][0]["session"] = expected_session.clone();
+        let read = |dir: &Path, label| serde_json::from_str::<JsonValue>(&read_session_from(dir, label).unwrap().unwrap()).unwrap();
+        assert_eq!(read(&legacy, "main"), expected_session);
+        assert_eq!(read(&legacy, "ws-2"), expected_window);
+        assert_eq!(read(&active, "main"), session);
+        assert!(!legacy.join("main.json.tmp").exists());
+        assert!(!active.join("main.json.tmp").exists());
+        assert_eq!(fs::read_to_string(legacy.join("main.geometry.json")).unwrap(), "geometry");
+        assert_eq!(fs::read_to_string(dir.path().join(NOTEPAD_ARCHIVE_FILE)).unwrap(), "captured note");
+    }
+
+    #[test]
+    fn legacy_transcript_scrub_preserves_malformed_snapshots() {
+        let dir = TempDir::new("legacy-malformed");
+        let malformed = "{ invalid json";
+        let malformed_panes = r#"{"version":3,"panes":[{"id":"p","scrollback":"secret"},null]}"#;
+        fs::write(dir.path().join("main.json"), malformed).unwrap();
+        fs::write(dir.path().join("ws-2.json"), malformed_panes).unwrap();
+        let errors = super::scrub_legacy_session_transcripts(dir.path());
+        assert_eq!(errors.len(), 2);
+        assert_eq!(fs::read_to_string(dir.path().join("main.json")).unwrap(), malformed);
+        assert_eq!(fs::read_to_string(dir.path().join("ws-2.json")).unwrap(), malformed_panes);
     }
 
     #[test]

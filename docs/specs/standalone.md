@@ -855,7 +855,7 @@ written.
   (§Per-window close); nothing else deletes a snapshot but the boot merge
   (§Arrival queue).
 - **Must sweep orphan session temp files once at boot** in the active sessions
-  directory.
+  directory and, for debug builds, the legacy `<app_data_dir>/sessions` directory.
   `SESSION_TEMP_SUFFIX` is pinned against the writer by
   `session_temp_suffix_matches_what_the_writer_leaves`.
   Transcript migration follows `docs/specs/transport.md` → "Retiring the transcripts already on disk".
@@ -866,7 +866,7 @@ release builds** (rationale). `app_data_dir()` follows the Tauri identifier;
 (§Build and development). The subtree also isolates session/recovery state when
 raw Tauri dev bypasses that wrapper. **Must keep the notepad archive and Burrow
 state directly under that identifier’s `app_data_dir`**.
-Source of truth: `state_root_from` and `sweep_orphan_session_temps` in
+Source of truth: `state_root_from` and `sweep_session_roots` in
 `standalone/src-tauri/src/lib.rs`.
 
 **Rust passes the sidecar its two directories by environment**, each created

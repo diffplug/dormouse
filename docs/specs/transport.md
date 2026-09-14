@@ -271,6 +271,7 @@ Structure only: panes (id, cwd, title, `untouched`, `surfaceType`, TODO/alert bl
 - **`readPersistedSession` drops `scrollback` when present**, along with any `resumeCommand`, and does not *require* it, so a snapshot written without it stays readable. A transcript can be read out of a legacy blob but never survives into a parsed Session, so nothing downstream can persist it forward.
 - **The first save after upgrade rewrites each store without transcripts**, standalone included: it reads its store again, and `readPersistedSession` is what strips them on the way in.
 - **Standalone sweeps orphaned session temp files at boot.** A crash between the temp write and the atomic rename leaves a file `load_session` cannot see and no later save will overwrite, so the sweep is the only thing that can retire a transcript sitting in one. It **never touches a live snapshot** — the window that owns one rewrites it itself. `sweep_orphan_session_temps` in `standalone/src-tauri/src/lib.rs`.
+- **Debug standalone must atomically remove obsolete pane `scrollback` from recognized legacy-root snapshots**, preserving other fields and leaving malformed snapshots untouched. Pinned by `debug_sweep_retires_legacy_transcripts_without_changing_other_state` and `legacy_transcript_scrub_preserves_malformed_snapshots` in `standalone/src-tauri/src/lib.rs`.
 - **No writer accepts a transcript-bearing Session shape.**
 
 ### The governing rule
