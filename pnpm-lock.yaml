@@ -323,8 +323,8 @@ importers:
         specifier: 0.33.2
         version: 0.33.2
       '@node-datachannel/darwin-x64':
-        specifier: 0.33.2
-        version: 0.33.2
+        specifier: 0.33.4
+        version: 0.33.4
       '@node-datachannel/linux-arm64-gnu':
         specifier: 0.33.2
         version: 0.33.2
@@ -1262,6 +1262,11 @@ packages:
 
   '@node-datachannel/darwin-x64@0.33.2':
     resolution: {integrity: sha512-a1nvL6MiskSjV3TWTNXdVpI/2kHNIOP2AbuBZjR5eC7VSrH/6hCFfHIBW4SFKXGFm8LOGliY9Df10UnJUutjwA==}
+    cpu: [x64]
+    os: [darwin]
+
+  '@node-datachannel/darwin-x64@0.33.4':
+    resolution: {integrity: sha512-+dLnwiwC3GdWqW0OQShZcSFYrx3hRx0+7U85swoiP3iiRqtDUARME6AIAmW3glpP0vmus1jv5KhPCy/Q+jAvqw==}
     cpu: [x64]
     os: [darwin]
 
@@ -5554,6 +5559,9 @@ snapshots:
     optional: true
 
   '@node-datachannel/darwin-x64@0.33.2':
+    optional: true
+
+  '@node-datachannel/darwin-x64@0.33.4':
     optional: true
 
   '@node-datachannel/linux-arm64-gnu@0.33.2':
