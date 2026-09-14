@@ -9,7 +9,8 @@
  * Why this exists: the properties the trust boundary rests on are *absences* —
  * one Noise suite and no way to select another, no JavaScript curve, no
  * plaintext relay route, no legacy frame discriminant left to answer, no
- * Relay-side view of protocol-v1, no checked-in service worker shadowing the
+ * Relay-side view of protocol-v1 or of the direct path's signaling, no ICE
+ * server, no checked-in service worker shadowing the
  * built one. An absence is exactly what a reviewer stops noticing: nothing in a
  * diff says "a second cipher suite is now reachable", and the nightly audit is
  * thorough but probabilistic. This makes the cheap half deterministic, so
@@ -74,6 +75,12 @@ const E2E_MODULES = [
   // `passkey.ts` does, which is why that one is out of scope and this one is in.
   'remote-lib-common/src/security/presence.ts',
   'remote-lib-common/src/security/acl.ts',
+  // The direct path carries the same promoted session onto a data channel, so
+  // it is inside the boundary for the same reasons the transport is: one key
+  // agreement, one AEAD, and no second construction reachable from either.
+  'remote-lib-common/src/security/direct-path.ts',
+  'lib/src/remote/direct/direct-endpoint.ts',
+  'lib/src/remote/direct/direct-peer.ts',
   'remote-lib-common/src/remote/wire.ts',
   'lib/src/remote/burrow/burrow-runtime.ts',
   'lib/src/remote/burrow/push-delivery.ts',
@@ -100,6 +107,13 @@ const FRAME_MODULES = [
 
 /** The three shipped source trees, scanned whole for the dependency rules. */
 const SOURCE_TREES = ['remote-lib-common/src/', 'lib/src/', 'relay/src/'];
+
+/**
+ * The one file the AES-GCM ban excuses, as `docs/specs/security-remote.md` ->
+ * "Credentials at rest" names it. Excused by path rather than dropped from the
+ * scan, so a rename that leaves the cipher behind turns the rule red.
+ */
+const AT_REST_KEY_WRAPPER = 'lib/src/remote/client/pocket-private-key.ts';
 
 /**
  * One entry per structural property. Every rule states the `SECURITY_SPEC`
@@ -150,10 +164,12 @@ export const RULES = [
     violation: '\nexport interface SelftestOptions {\n  readonly pattern: string;\n}\n',
   },
   {
-    rule: 'No second AEAD anywhere in the shipped source',
-    security: 'no negotiation, no cipher or pattern selector',
+    rule: 'No second AEAD outside Pocket at-rest key wrapping',
+    security: 'AES-GCM appears in production source under `remote-lib-common/src/`',
     kind: 'forbid',
     trees: SOURCE_TREES,
+    allow: (match, file) => file === AT_REST_KEY_WRAPPER,
+    // The one exception encrypts local private-key storage, never wire data.
     // `AES-GCM` is the substitution the Noise suite exists to refuse: it *is* in
     // shipping WebCrypto, which is exactly what makes it the tempting one, and
     // the protocol name is part of the transcript so swapping it is a different
@@ -224,6 +240,45 @@ export const RULES = [
     violation: "\nimport type { DirectoryEntry } from 'remote-lib-common';\n",
   },
   {
+    rule: 'No STUN or TURN URL in shipped source',
+    security: 'any ICE server reaches shipped source',
+    kind: 'forbid',
+    trees: SOURCE_TREES,
+    // Anchored on the quote that opens the literal, because the bare scheme is
+    // a substring of ordinary prose: `// ... early return:` and `Saturn:` both
+    // contain `turn:`, and a rule that reddened on those would be deleted.
+    pattern: /['"`](?:stuns?|turns?):/g,
+    violationFile: 'lib/src/remote/pocket-app/App.tsx',
+    violation: "\nconst __selftest = 'stun:stun.example.net:19302';\n",
+  },
+  {
+    rule: 'No non-empty `iceServers` list anywhere',
+    security: 'any ICE server reaches shipped source',
+    kind: 'forbid',
+    trees: SOURCE_TREES,
+    // The empty array is the shipped value at both ends and must keep passing,
+    // so the pattern demands a first element: anything after `[` that is
+    // neither whitespace nor the closing bracket. A server assembled at runtime
+    // is past what a regex can see, which is why the spec row is read by hand
+    // as well.
+    pattern: /iceServers\s*:\s*\[\s*[^\]\s]/g,
+    violationFile: 'lib/src/remote/pocket-app/App.tsx',
+    violation: '\nconst __selftest = { iceServers: [{ urls: [] }] };\n',
+  },
+  {
+    rule: 'The Relay never names a direct-path signal or an SDP',
+    security: 'any signaling leaves the ciphertext',
+    kind: 'forbid',
+    trees: ['relay/src/'],
+    // The signals ride as `control` messages inside the session, so the Relay
+    // routes them without knowing they exist. Naming one is the leading
+    // indicator that a route, a guard, or a frame type has started to care —
+    // the same reasoning as the protocol-v1 rule above.
+    pattern: /\b(?:direct-offer|direct-answer|direct-decline|direct-switch|RTCPeerConnection|sdp)\b/gi,
+    violationFile: 'relay/src/relay.ts',
+    violation: "\nconst __selftest = { sdp: '' };\n",
+  },
+  {
     rule: 'No checked-in service worker beside the built one',
     security: 'the worker in `lib/src/remote/pocket-app/sw.ts` is the only thing that opens one',
     kind: 'absent',
@@ -257,6 +312,14 @@ export const RULES = [
     // Every one of these is load-bearing on every message that carries it, so
     // an optional spelling is a shape where a peer can simply omit the
     // authentication and have the type still check.
+    //
+    // `lib/src/remote/direct/direct-peer.ts` is deliberately not in this list,
+    // even though it is an `E2E_MODULES` entry: its `readonly sdp?: string`
+    // mirrors `RTCSessionDescriptionInit`, whose optionality is the W3C API's,
+    // not ours. The signal that *does* carry an SDP over the wire keeps it
+    // required — `DirectSignalV1` in
+    // `remote-lib-common/src/security/direct-path.ts`, whose guard demands the
+    // exact key set.
     pattern: /\b(?:ct|salt|sealed|handshakeHash|key|ciphertext|plaintext|proof|assertion)[ \t]*\?[ \t]*:/g,
     violationFile: 'remote-lib-common/src/security/push-seal.ts',
     violation: '\nexport interface SelftestSeal {\n  readonly ct?: string;\n}\n',
@@ -367,7 +430,7 @@ export function check() {
         failures.push(`${rule.rule}\n    ${file}: missing`);
         continue;
       }
-      const hits = (text.match(rule.pattern) ?? []).filter((m) => !rule.allow?.(m));
+      const hits = (text.match(rule.pattern) ?? []).filter((m) => !rule.allow?.(m, file));
       total += hits.length;
       if (rule.kind === 'forbid' && hits.length > 0) {
         failures.push(`${rule.rule}\n    ${file}: ${[...new Set(hits)].join(', ')}`);

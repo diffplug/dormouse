@@ -97,6 +97,77 @@ describe('IframePanel', () => {
     expect(onOpenBrowserPane).not.toHaveBeenCalled();
   });
 
+  // The raw fallback puts `params.url` straight into `<iframe src>`, and the
+  // sandbox keeps `allow-same-origin`, so a non-http(s) scheme there can reach
+  // the embedding webview's realm. `browserSurfaceUrl` guards the control
+  // socket and the `open-window` message, but the panel is the sink every
+  // writer of `params.url` ends at — including the header's URL editor, whose
+  // `normalizeNavUrl` passes `javascript:` and `data:` through on purpose.
+  // React neutralizes `javascript:` in a `src` prop and nothing else, so
+  // `data:` is the case that proves this guard does its own work.
+  it.each([
+    'javascript:alert(1)',
+    'data:text/html,<script>alert(1)</script>',
+  ])('refuses %s as a source url instead of framing it', async (url) => {
+    await act(async () => {
+      root.render(
+        <StrictMode>
+          <PaneWriteContext.Provider value={{ updateParams: () => {}, setTitle: () => {} }}>
+            <WallActionsContext.Provider value={stubActions()}>
+              <IframePanel id="iframe-scheme" title="Raw iframe" params={{ url }} />
+            </WallActionsContext.Provider>
+          </PaneWriteContext.Provider>
+        </StrictMode>,
+      );
+    });
+
+    expect(container.querySelector('iframe')).toBeNull();
+    expect(container.textContent).toContain('only frames');
+    // `dor ab open` refuses a non-http(s) target too, so it is not the remedy here.
+    expect(container.textContent).not.toContain('dor ab open');
+  });
+
+  // The panel frames the string it checked, not the one it was handed: a
+  // schemeless `host:port` in `<iframe src>` would resolve against the app's
+  // own origin instead of the dev server.
+  it('frames the normalized url for a schemeless source', async () => {
+    const iframe = await renderPanel(stubActions(), { id: 'iframe-bare', title: 'Raw iframe', params: { url: 'localhost:5173' } });
+
+    expect(iframe.getAttribute('src')).toBe('http://localhost:5173');
+  });
+
+  it('proxies the normalized url for a schemeless source', async () => {
+    const createIframeProxyUrl = vi.fn(async () => ({ ok: true as const, url: 'http://127.0.0.1:61234/app' }));
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'createIframeProxyUrl'>;
+    platform.createIframeProxyUrl = createIframeProxyUrl;
+    setPlatform(platform);
+    await renderPanel(stubActions(), { id: 'iframe-bare-proxy', title: 'Raw iframe', params: { url: 'localhost:5173' } });
+
+    expect(createIframeProxyUrl).toHaveBeenCalledWith('http://localhost:5173');
+  });
+
+  // The frame is not the only consumer of the source URL: `liveUrl`, the
+  // history entries, and the upstream base that in-frame locations are mapped
+  // against all read the same string. Normalized only at the frame, a
+  // schemeless `localhost:5173` parses as scheme `localhost:` with origin
+  // `"null"`, so this navigation would land on `null/app` — and Back would
+  // persist that into `params.url`.
+  it('maps an in-frame navigation against the normalized source url', async () => {
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'createIframeProxyUrl'>;
+    platform.createIframeProxyUrl = vi.fn(async () => ({ ok: true as const, url: 'http://127.0.0.1:61234/' }));
+    setPlatform(platform);
+    await renderPanel(stubActions(), { id: 'iframe-bare-nav', title: 'Raw iframe', params: { url: 'localhost:5173' } });
+
+    await act(async () => {
+      window.dispatchEvent(new MessageEvent('message', {
+        origin: 'http://127.0.0.1:61234',
+        data: { __dormouse: 'location', url: 'http://127.0.0.1:61234/app' },
+      }));
+    });
+
+    expect(getAgentBrowserScreenController('iframe-bare-nav')?.chrome().url).toBe('http://localhost:5173/app');
+  });
+
   it('adopts clicks into the raw iframe fallback via window blur focus', async () => {
     const onClickPanel = vi.fn();
     const actions = stubActions({ onClickPanel });
