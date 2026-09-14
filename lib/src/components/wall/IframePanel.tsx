@@ -42,7 +42,9 @@ type Resolution =
   // The host can't run a proxy (e.g. the web host) — keep the blind raw-iframe
   // fallback rather than hiding the surface.
   | { kind: 'raw'; src: string }
-  | { kind: 'error'; reason: 'unreachable' | 'scheme'; detail?: string };
+  // 'non-http' is the panel's own refusal of a non-http(s) `params.url`;
+  // 'scheme'/'unreachable' come back from the proxy.
+  | { kind: 'error'; reason: 'unreachable' | 'scheme' | 'non-http'; detail?: string };
 
 type IframeHistory = {
   entries: string[];
@@ -93,7 +95,16 @@ export function IframePanel({ id, title, params }: PaneProps) {
   const elRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   usePaneChrome(id, elRef);
-  const sourceUrl = typeof params?.url === 'string' ? params.url : '';
+  const rawUrl = typeof params?.url === 'string' ? params.url : '';
+  // Normalize once, at the source. `sourceUrl` is not only what gets framed: it
+  // seeds `liveUrl` and the history entries, and it is the upstream base
+  // `upstreamUrlFromFrameLocation` parses. Normalizing only at the frame would
+  // leave a schemeless `host:port` parsed as scheme `host:` everywhere else —
+  // `.origin` is the string "null", so an in-frame navigation would map to
+  // `null/<path>` and Back would persist that into `params.url`. A non-http(s)
+  // URL has no normalized form, so it survives raw and the refusal below fires.
+  const framedUrl = browserSurfaceUrl(rawUrl);
+  const sourceUrl = framedUrl ?? rawUrl;
   const [liveUrl, setLiveUrl] = useState(sourceUrl);
   // A new-tab/window request from the proxy shim, pending the user's choice to
   // open it as a new pane (docs/specs/dor-browser.md → "Iframe Shim").
@@ -167,6 +178,19 @@ export function IframePanel({ id, title, params }: PaneProps) {
   useEffect(() => {
     if (!sourceUrl) {
       setResolution({ kind: 'empty' });
+      return;
+    }
+    // The panel is the sink every writer of `params.url` ends at, and the raw
+    // fallback hands the string straight to `<iframe src>` under a sandbox that
+    // keeps allow-same-origin — so the scheme is checked here rather than only
+    // at the two callers the spec names (docs/specs/dor-browser.md → "Iframe
+    // Shim"). The header's URL editor is the third: `normalizeNavUrl` keeps a
+    // typed `javascript:` or `data:` scheme on purpose. React blanks a
+    // `javascript:` src and nothing else, which is not a boundary to rely on.
+    // `framedUrl` is the string this guard checks and `sourceUrl` is the string
+    // that gets framed, so they are the same value wherever one exists at all.
+    if (!framedUrl) {
+      setResolution({ kind: 'error', reason: 'non-http' });
       return;
     }
     const createProxy = getPlatform().createIframeProxyUrl;
@@ -409,11 +433,16 @@ function PanelMessage({ resolution, url }: { resolution: Resolution; url: string
   // 'error' — the proxy turned a dead end into something actionable. (Unreachable
   // cases are served as a page inside the frame; this covers the synchronous
   // ones, chiefly an unproxyable scheme such as https://.)
+  // `dor ab open` is the remedy only where the URL itself is fine and the proxy
+  // can't front it. It refuses a non-http(s) target too (`normalizeConcreteOpenUrl`),
+  // so pointing a refused scheme at it would be a dead end.
   return (
     <div className={`${base} flex-col gap-2`}>
       <div>{messageFor(resolution)}</div>
       <div className="text-xs text-muted/80">
-        For arbitrary web pages, use <code className="rounded bg-app-bg px-1 py-0.5">dor ab open {url}</code>
+        {resolution.reason === 'non-http'
+          ? 'Enter an http:// or https:// address in the URL bar above.'
+          : <>For arbitrary web pages, use <code className="rounded bg-app-bg px-1 py-0.5">dor ab open {url}</code></>}
       </div>
     </div>
   );
@@ -421,6 +450,8 @@ function PanelMessage({ resolution, url }: { resolution: Resolution; url: string
 
 function messageFor(resolution: Extract<Resolution, { kind: 'error' }>): string {
   switch (resolution.reason) {
+    case 'non-http':
+      return 'The iframe surface only frames http:// and https:// URLs.';
     case 'scheme':
       return resolution.detail
         ? `Can’t frame this URL — ${resolution.detail}.`

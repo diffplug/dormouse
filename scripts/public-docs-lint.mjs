@@ -495,9 +495,13 @@ async function checkGenerated() {
 /**
  * Public copy must not present staged remote transports as shipped.
  *
- * Scoped by the spec that stages them: the ban applies only while WebRTC is
- * still below docs/specs/remote-api.md's `## Future` fold, so promoting it
- * retires this rule in the same commit that ships it.
+ * Scoped by the spec that stages them: the ban holds while docs/specs/
+ * remote-api.md's `## Future` still names WebRTC, and the last item that does
+ * retires this rule in the commit that ships it. The direct path is half
+ * promoted — the phone offers one and the standalone Burrow answers, while the
+ * VS Code Burrow and relay-supplied ICE servers are still staged — so "Dormouse
+ * connects your phone directly" is exactly the sentence this rule is still here
+ * to stop, since it would be false for a VS Code user reading it.
  */
 function checkNoStagedClaims() {
   const api = readRepoFile('docs/specs/remote-api.md');
