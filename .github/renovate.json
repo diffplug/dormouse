@@ -90,6 +90,14 @@
       "separateMajorMinor": false
     },
     {
+      "description": "node-datachannel publishes one prebuilt package per platform from one repository at one version, and the sidecar declares all six beside the core package. website/scripts/generate-deps.js describes the five platforms pnpm did not install from whichever sibling it did — matching on the exact version string — and throws when no sibling sits at that version, so a split bump fails the `Dependency disclosure is current` CI step and cannot go green on its own (docs/specs/security-supply-chain.md -> Disclosure). The core package belongs in the group too: it declares its own optionalDependencies at its own version and the addon resolves the platform binary relative to its own directory, so bumping the platform packages alone ships a prebuild nothing loads",
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["node-datachannel", "@node-datachannel/**"],
+      "groupName": "node-datachannel",
+      "groupSlug": "node-datachannel",
+      "separateMajorMinor": false
+    },
+    {
       "description": "@types/node must track the pinned Node runtime major and must not expose APIs newer than the runtime we bundle",
       "matchManagers": ["npm"],
       "matchPackageNames": ["@types/node"],
