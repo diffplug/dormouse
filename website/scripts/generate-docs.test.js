@@ -111,7 +111,12 @@ describe('self-host runbook', () => {
     for (const id of ['mechanism-map', 'invariants', 'mechanical-traps', 'operator-surface-and-test-hooks']) {
       expect(ids, `#${id} outlived its parent section`).not.toContain(id);
     }
-    expect(data.selfhost.headings.every((h) => h.depth === 2)).toBe(true);
+  });
+
+  it('preserves subsections of the published troubleshooting section', () => {
+    for (const id of ['phone-capability-diagnostics', 'service-and-deployment-failures']) {
+      expect(data.selfhost.headings).toContainEqual(expect.objectContaining({ id, depth: 3 }));
+    }
   });
 
   it('keeps every checkpoint the runbook walks through', () => {
