@@ -3,6 +3,7 @@ import { countRunningSessions } from "dormouse-lib/lib/terminal-registry";
 import { notepadSurfaceIds, removeSurface } from "dormouse-lib/lib/notepad/notepad-store";
 import { getWorkspacesSnapshot } from "dormouse-lib/lib/workspace-store";
 import {
+  beginQuitProgress,
   dismissQuitConfirm,
   openQuitArchiveFailure,
   type QuitConfirmIntent,
@@ -151,6 +152,7 @@ export function createTeardownFlow(options: {
     // Committed from here: the archive is an await, so without this a second
     // trigger arriving mid-archive would start a parallel flow.
     enter("committed");
+    beginQuitProgress(intent);
     try {
       await archiveNotesBeforeTeardown();
     } catch (err) {

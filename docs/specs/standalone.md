@@ -1044,14 +1044,17 @@ asks before discarding a pending download (§Per-window close).
   `standalone/src-tauri/src/lib.rs`.
 - **Must collect votes before killing any window's Sessions.** Confirmation
   consumes its callback once; a noninteractive full-window progress overlay
-  remains through voting, archive, recovery, persistence, and teardown.
+  remains through voting, archive, recovery, persistence, and teardown. All-idle
+  requests acquire the same overlay and keyboard lease before archiving or voting.
 - **Must retain the separate note-loss decision on archive failure**, with Cancel
   focused by default; process-kill approval never approves discarding notes.
 
 Source of truth: `openQuitConfirm` in `standalone/src/quit-confirm-store.ts`;
 `WorkspaceTeardownModalHost` in `standalone/src/WorkspaceTeardownModal.tsx`;
 `WorkspaceKillConfirm` in `lib/src/components/WorkspaceKillConfirm.tsx`.
-Pinned by `holds one keyboard lease through commitment and releases it on matching dismissal`
+Pinned by `holds an all-idle window through archiving and voting until another window cancels`
+in `standalone/src/quit.test.ts`,
+`holds one keyboard lease through commitment and releases it on matching dismissal`
 in `standalone/src/quit-confirm-store.test.ts`,
 `blocks the entire window during confirmation and while waiting for other votes`
 and `retains the letter across host remount and names hidden workspaces` in

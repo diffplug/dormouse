@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  beginQuitProgress,
+  getQuitConfirmIntent,
   cancelQuit,
   dismissQuitConfirm,
   getQuitConfirmChar,
@@ -179,6 +181,19 @@ describe("quit-confirm store", () => {
     expect(chromeKeyboardHeld()).toBe(false);
     openQuitConfirm(makeCtx());
     _resetQuitConfirmForTesting();
+    expect(chromeKeyboardHeld()).toBe(false);
+  });
+
+
+  it('owns an all-idle progress request and releases its lease on reset', () => {
+    beginQuitProgress({ kind: 'close-window', discardsUpdate: true });
+    expect(getQuitConfirmPhase()).toBe('quitting');
+    expect(getQuitConfirmIntent()).toEqual({ kind: 'close-window', discardsUpdate: true });
+    expect(chromeKeyboardHeld()).toBe(true);
+    cancelQuit();
+    expect(getQuitConfirmPhase()).toBe('quitting');
+    _resetQuitConfirmForTesting();
+    expect(getQuitConfirmPhase()).toBeNull();
     expect(chromeKeyboardHeld()).toBe(false);
   });
 

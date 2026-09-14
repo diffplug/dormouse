@@ -125,6 +125,18 @@ export function openQuitConfirm(ctx: TeardownConfirmContext, next: QuitConfirmIn
   emit();
 }
 
+/** Own the window before archiving or voting, including an all-idle request. */
+export function beginQuitProgress(next: QuitConfirmIntent): void {
+  stopWatchingWorkspaces();
+  activeCtx = null;
+  intent = next;
+  archiveError = null;
+  workspaceNames = getWorkspacesSnapshot().workspaces.map((workspace) => workspace.name);
+  phase = 'quitting';
+  ownDialog();
+  emit();
+}
+
 /**
  * The archive gate refused the quit (docs/specs/notepad.md → "Standalone
  * quit"). Reached either from "quitting" — the user already confirmed and the

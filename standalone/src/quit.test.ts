@@ -52,6 +52,7 @@ vi.mock("./updater", () => ({
   installPendingUpdate: mocks.installPendingUpdate,
 }));
 
+import { chromeKeyboardHeld } from '../../lib/src/components/wall/chrome-keyboard-lease';
 import { initQuitFlow, setQuitConfirmGate, _resetForTesting } from "./quit";
 // The quit-confirm store is the real one: the archive-failed phase is the
 // observable half of the gate's failure path.
@@ -134,6 +135,25 @@ describe("quit orchestrator", () => {
   });
 
   afterEach(() => setQuitConfirmGate(null));
+
+  it('holds an all-idle window through archiving and voting until another window cancels', async () => {
+    let archived!: () => void;
+    mocks.notepadSurfaceIds.mockReturnValue(oneNotedSurface());
+    mocks.archiveSurfaceNotes.mockImplementationOnce(() => new Promise<void>((resolve) => { archived = resolve; }));
+    initQuitFlow(fakeAdapter());
+    quitRequested(2);
+    expect(getQuitConfirmPhase()).toBe('quitting');
+    expect(chromeKeyboardHeld()).toBe(true);
+    expect(voted()).toBe(false);
+    archived();
+    await settle();
+    expect(voted()).toBe(true);
+    expect(getQuitConfirmPhase()).toBe('quitting');
+    expect(chromeKeyboardHeld()).toBe(true);
+    quitCancelled();
+    expect(getQuitConfirmPhase()).toBeNull();
+    expect(chromeKeyboardHeld()).toBe(false);
+  });
 
   it("always acks the quit-requested event", async () => {
     await triggerQuit(fakeAdapter());

@@ -267,7 +267,7 @@ describe("one window, two teardown flows", () => {
     expect(count("quit_cancel")).toBe(0);
   });
 
-  it("archives and votes once for a re-driven quit that needs no dialog", async () => {
+  it("archives and votes once for a re-driven quit that needs no confirmation", async () => {
     await deferredQuitAgainstRetreatedClose();
     const archives = mocks.archiveSurfaceNotes.mock.calls.length;
 
@@ -279,7 +279,7 @@ describe("one window, two teardown flows", () => {
     expect(mocks.archiveSurfaceNotes.mock.calls.length - archives).toBe(1);
     // The deferred vote, then the re-driven one — never a third.
     expect(count("quit_vote")).toBe(2);
-    expect(getQuitConfirmPhase()).toBeNull();
+    expect(getQuitConfirmPhase()).toBe("quitting");
   });
 
   it("a quit cancelled elsewhere is not re-driven when the close it deferred to retreats", async () => {
