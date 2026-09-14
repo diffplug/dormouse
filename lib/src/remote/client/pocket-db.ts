@@ -9,6 +9,12 @@
  * `docs/specs/remote-security-model.md`.
  */
 
+import { constantTimeEqual, toBase64Url, type NoiseKeyPair } from 'remote-lib-common';
+import {
+  generatePocketKeyPair, loadPocketPrivateKey, storePocketPrivateKey,
+  type PocketKeyStorageMode, type StoredPocketPrivateKey,
+} from './pocket-private-key';
+
 export const POCKET_DB_NAME = 'dormouse-pocket';
 
 /**
@@ -29,6 +35,147 @@ export const POCKET_DB_VERSION = 4;
 export const DEVICE_KEY_STORE = 'device-key';
 export const KNOWN_BURROWS_STORE = 'known-burrows';
 export const PENDING_DELETIONS_STORE = 'pending-deletions';
+
+export const POCKET_KEY_STORAGE_ERROR =
+  'This browser could not save and reload the private key needed for pairing. '
+  + 'Pairing has not started. No permission dialog is expected. '
+  + 'Keep your existing passkey and website data. Run /diagnostics/index.html and report the results.';
+
+/** One side of an X25519 agreement against `publicKey`; the probe's only measurement. */
+function deriveShared(publicKey: CryptoKey, key: CryptoKey): Promise<ArrayBuffer> {
+  return crypto.subtle.deriveBits({ name: 'X25519', public: publicKey }, key, 256);
+}
+
+/**
+ * Write inside `tx` and wait for it to commit, aborting on a throw so a failed
+ * probe leaves no half-open transaction behind. `write` runs inside the try, so
+ * a `DataCloneError` on the `put` itself takes the same path as a failed commit.
+ */
+async function commitOrAbort(tx: IDBTransaction, write: () => void): Promise<void> {
+  const done = promisifyTransaction(tx);
+  try {
+    write();
+    await done;
+  } catch (error) {
+    try { tx.abort(); } catch { /* It may have already finished. */ }
+    await done.catch(() => {});
+    throw error;
+  }
+}
+
+function storageErrorName(error: unknown): string {
+  // Fixed names only: browser error messages can contain private details.
+  return error instanceof Error && [
+    'DataError', 'DataCloneError', 'SecurityError', 'QuotaExceededError',
+    'InvalidAccessError', 'InvalidStateError', 'NotSupportedError',
+    'OperationError', 'AbortError', 'UnknownError', 'TypeError',
+  ].includes(error.name) ? error.name : 'Error';
+}
+
+/**
+ * WebKit checks inline keys on a clone, so a failed embedded-key clone can
+ * appear to be a missing burrowId. Reopen and use the key, not just write it.
+ * The disposable database never opens or resets the user's pairing records.
+ */
+export async function probePocketKeyStorage(mode: PocketKeyStorageMode = 'native'): Promise<void> {
+  let db: IDBDatabase | undefined;
+  let name: string | undefined;
+  let stage = 'generate-key';
+  let pair: CryptoKeyPair | undefined;
+  const open = (databaseName: string) => {
+    const request = indexedDB.open(databaseName, 1);
+    request.onupgradeneeded = () => {
+      request.result.createObjectStore(KNOWN_BURROWS_STORE, { keyPath: 'burrowId' });
+    };
+    return promisifyRequest(request);
+  };
+  try {
+    pair = await generatePocketKeyPair(mode, 'probe');
+    const publicKeyRaw = toBase64Url(new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey)));
+    stage = 'use-original-key';
+    const expected = new Uint8Array(await deriveShared(pair.publicKey, pair.privateKey));
+    stage = 'open-database';
+    name = `dormouse-pocket-key-probe-${crypto.randomUUID()}`;
+    db = await open(name);
+    stage = 'write-record';
+    const tx = db.transaction(KNOWN_BURROWS_STORE, 'readwrite');
+    await commitOrAbort(tx, () => {
+      tx.objectStore(KNOWN_BURROWS_STORE).put({
+        burrowId: 'probe', clientStaticKeyPair: {
+          privateKey: storePocketPrivateKey(pair!.privateKey), publicKeyRaw,
+        },
+      });
+      stage = 'commit-record';
+    });
+    db.close();
+    stage = 'reopen-database';
+    db = await open(name);
+    stage = 'read-record';
+    const saved = await promisifyRequest(db.transaction(KNOWN_BURROWS_STORE)
+      .objectStore(KNOWN_BURROWS_STORE).get('probe'));
+    stage = 'validate-record';
+    const key = saved?.clientStaticKeyPair?.privateKey
+      ? await loadPocketPrivateKey(saved.clientStaticKeyPair.privateKey, 'probe', publicKeyRaw)
+      : undefined;
+    if (saved?.burrowId !== 'probe' || key?.type !== 'private' || key.extractable !== false) {
+      throw new Error('stored key did not survive');
+    }
+    stage = 'use-reloaded-key';
+    const actual = new Uint8Array(await deriveShared(pair.publicKey, key));
+    stage = 'compare-key-agreement';
+    if (!constantTimeEqual(actual, expected)) throw new Error('stored key changed');
+  } catch (error) {
+    const failure = `${stage} / ${storageErrorName(error)}`;
+    throw new Error(`Diagnostic: ${failure}.`);
+  } finally {
+    db?.close();
+    if (name) {
+      // Cleanup must not mask the diagnostic or strand the UI.
+      try { indexedDB.deleteDatabase(name); } catch { /* Best effort. */ }
+    }
+  }
+}
+
+let storageProbe: Promise<PocketKeyStorageMode> | undefined;
+
+/** A storage/key failure invalidates compatibility evidence for this page. */
+export function invalidatePocketKeyStorage(): void {
+  storageProbe = undefined;
+}
+
+function selectedKeyStorage(): Promise<PocketKeyStorageMode> {
+  if (storageProbe) return storageProbe;
+  const pending = selectKeyStorage();
+  storageProbe = pending;
+  // Attach the rejection handler immediately; do not retain failed evidence.
+  void pending.catch(() => {
+    if (storageProbe === pending) invalidatePocketKeyStorage();
+  });
+  return pending;
+}
+
+/** Select only a format that actually survives reopen and key agreement. */
+export async function requirePocketKeyStorage(): Promise<void> {
+  const pending = selectedKeyStorage();
+  await pending;
+  if (storageProbe !== pending) throw new Error(POCKET_KEY_STORAGE_ERROR);
+}
+
+async function selectKeyStorage(): Promise<PocketKeyStorageMode> {
+  try {
+    await probePocketKeyStorage('native');
+    return 'native';
+  } catch (nativeError) {
+    try {
+      await probePocketKeyStorage('encrypted');
+      return 'encrypted';
+    } catch (encryptedError) {
+      // Both probe errors contain only fixed diagnostics, never browser messages.
+      throw new Error(`${POCKET_KEY_STORAGE_ERROR} ${(nativeError as Error).message}`
+        + ` Encrypted storage: ${(encryptedError as Error).message}`);
+    }
+  }
+}
 
 /**
  * What {@link KNOWN_BURROWS_STORE} was called before the Burrow rename. Dropped
@@ -57,7 +204,7 @@ export type KnownBurrowAuthorization =
  * One Burrow this Client has paired with, keyed by `burrowId`.
  *
  * The Client static is per Burrow and never shared between them, and its private
- * half is a nonextractable `CryptoKey` stored directly — never exported.
+ * half is nonextractable at runtime. The store owns its at-rest encoding.
  */
 export interface KnownBurrowV1 {
   readonly burrowId: string;
@@ -82,6 +229,16 @@ export interface KnownBurrowV1 {
   readonly authorization: KnownBurrowAuthorization;
 }
 
+/** Display/push/removal metadata; never includes either private-key encoding. */
+export type KnownBurrowSummary = Omit<KnownBurrowV1, 'clientStaticKeyPair'>;
+
+export function summarizeKnownBurrow(
+  record: KnownBurrowSummary & { readonly clientStaticKeyPair: unknown },
+): KnownBurrowSummary {
+  const { clientStaticKeyPair: _key, ...summary } = record;
+  return summary;
+}
+
 /**
  * A delivery mapping this Client owes the Relay a deletion for, written
  * *before* the `KnownBurrowV1` forgets the id — the id is the only handle that
@@ -95,10 +252,13 @@ export interface PendingDeliveryDeletionV1 {
 
 /** Where {@link KnownBurrowV1} records live; faked in tests. */
 export interface KnownBurrowStore {
+  /** Production stores generate a key in a verified, persistable format. */
+  generateKey(burrowId: string): Promise<NoiseKeyPair>;
   get(burrowId: string): Promise<KnownBurrowV1 | null>;
+  getSummary(burrowId: string): Promise<KnownBurrowSummary | null>;
+  listSummaries(): Promise<KnownBurrowSummary[]>;
   put(record: KnownBurrowV1): Promise<void>;
   delete(burrowId: string): Promise<void>;
-  list(): Promise<KnownBurrowV1[]>;
 }
 
 /** Where {@link PendingDeliveryDeletionV1} tombstones live; faked in tests. */
@@ -244,9 +404,15 @@ export async function withPocketStore<T>(
   mode: IDBTransactionMode,
   run: (store: IDBObjectStore) => Promise<T>,
 ): Promise<T> {
-  const db = await openPocketDb();
+  const db = await openPocketDb().catch(error => {
+    invalidatePocketKeyStorage();
+    throw error;
+  });
   try {
     return await run(db.transaction(storeName, mode).objectStore(storeName));
+  } catch (error) {
+    invalidatePocketKeyStorage();
+    throw error;
   } finally {
     db.close();
   }
@@ -254,17 +420,57 @@ export async function withPocketStore<T>(
 
 /** The IndexedDB-backed {@link KnownBurrowStore}. */
 export function indexedDbKnownBurrowStore(): KnownBurrowStore {
+  type StoredRecord = Omit<KnownBurrowV1, 'clientStaticKeyPair'> & {
+    clientStaticKeyPair: { privateKey: StoredPocketPrivateKey; publicKeyRaw: string };
+  };
+  const restore = async (value: StoredRecord): Promise<KnownBurrowV1> => ({
+    ...value,
+    clientStaticKeyPair: {
+      ...value.clientStaticKeyPair,
+      privateKey: await loadPocketPrivateKey(value.clientStaticKeyPair.privateKey,
+        value.burrowId, value.clientStaticKeyPair.publicKeyRaw),
+    },
+  });
   return {
+    async generateKey(burrowId) {
+      try {
+        const pending = selectedKeyStorage();
+        const mode = await pending;
+        if (storageProbe !== pending) throw new Error(POCKET_KEY_STORAGE_ERROR);
+        const pair = await generatePocketKeyPair(mode, burrowId);
+        return {
+          privateKey: pair.privateKey,
+          publicKey: new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey)),
+        };
+      } catch (error) {
+        invalidatePocketKeyStorage();
+        throw error;
+      }
+    },
+    getSummary: (burrowId) =>
+      withPocketStore(KNOWN_BURROWS_STORE, 'readonly', async store => {
+        const value = await promisifyRequest<StoredRecord | undefined>(store.get(burrowId));
+        return value ? summarizeKnownBurrow(value) : null;
+      }),
+    listSummaries: () =>
+      withPocketStore(KNOWN_BURROWS_STORE, 'readonly', async store =>
+        (await promisifyRequest<StoredRecord[]>(store.getAll())).map(summarizeKnownBurrow)),
     get: (burrowId) =>
       withPocketStore(KNOWN_BURROWS_STORE, 'readonly', async (store) => {
-        const value = await promisifyRequest<KnownBurrowV1 | undefined>(store.get(burrowId));
-        return value ?? null;
+        const value = await promisifyRequest<StoredRecord | undefined>(store.get(burrowId));
+        return value ? restore(value) : null;
       }),
     async put(record) {
       // Before the first write, per the storage-durability rule.
       await requestPersistenceOnce();
       await withPocketStore(KNOWN_BURROWS_STORE, 'readwrite', (store) => {
-        store.put(record);
+        store.put({
+          ...record,
+          clientStaticKeyPair: {
+            ...record.clientStaticKeyPair,
+            privateKey: storePocketPrivateKey(record.clientStaticKeyPair.privateKey),
+          },
+        });
         return promisifyTransaction(store.transaction);
       });
     },
@@ -273,10 +479,6 @@ export function indexedDbKnownBurrowStore(): KnownBurrowStore {
         store.delete(burrowId);
         return promisifyTransaction(store.transaction);
       }),
-    list: () =>
-      withPocketStore(KNOWN_BURROWS_STORE, 'readonly', (store) =>
-        promisifyRequest<KnownBurrowV1[]>(store.getAll()),
-      ),
   };
 }
 
