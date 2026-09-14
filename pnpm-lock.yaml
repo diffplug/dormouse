@@ -332,8 +332,8 @@ importers:
         specifier: 0.33.2
         version: 0.33.2
       '@node-datachannel/win32-arm64-msvc':
-        specifier: 0.33.2
-        version: 0.33.2
+        specifier: 0.33.4
+        version: 0.33.4
       '@node-datachannel/win32-x64-msvc':
         specifier: 0.33.2
         version: 0.33.2
@@ -1291,6 +1291,11 @@ packages:
 
   '@node-datachannel/win32-arm64-msvc@0.33.2':
     resolution: {integrity: sha512-8NpHkm7R8EY0jHGHOXdK7K0wjWY34PJ+PJY++2VDHTAtXGazNm28zcnVE/4IU0N26YGdCDSSWat3OO3W6nwoRw==}
+    cpu: [arm64]
+    os: [win32]
+
+  '@node-datachannel/win32-arm64-msvc@0.33.4':
+    resolution: {integrity: sha512-TeDV2tSPm+qAnF6MIPlLFTIlobSYLwOVe3/wQl+8hD/q3cEPTQi7vByFaQQ5lRULKKdnjKRR5iDMsxMilqbtXA==}
     cpu: [arm64]
     os: [win32]
 
@@ -5569,6 +5574,9 @@ snapshots:
     optional: true
 
   '@node-datachannel/win32-arm64-msvc@0.33.2':
+    optional: true
+
+  '@node-datachannel/win32-arm64-msvc@0.33.4':
     optional: true
 
   '@node-datachannel/win32-x64-msvc@0.33.2':

@@ -16,7 +16,7 @@
     "@node-datachannel/darwin-x64": "0.33.2",
     "@node-datachannel/linux-arm64-gnu": "0.33.2",
     "@node-datachannel/linux-x64-gnu": "0.33.2",
-    "@node-datachannel/win32-arm64-msvc": "0.33.2",
+    "@node-datachannel/win32-arm64-msvc": "0.33.4",
     "@node-datachannel/win32-x64-msvc": "0.33.2"
   }
 }
