@@ -21,6 +21,48 @@
     "homepage": "https://paulmillr.com/noble/"
   },
   {
+    "name": "@node-datachannel/darwin-arm64",
+    "version": "0.33.2",
+    "license": "MPL 2.0",
+    "author": "Murat Doğan, Paul-Louis Ageneau",
+    "homepage": "https://github.com/murat-dogan/node-datachannel"
+  },
+  {
+    "name": "@node-datachannel/darwin-x64",
+    "version": "0.33.2",
+    "license": "MPL 2.0",
+    "author": "Murat Doğan, Paul-Louis Ageneau",
+    "homepage": "https://github.com/murat-dogan/node-datachannel"
+  },
+  {
+    "name": "@node-datachannel/linux-arm64-gnu",
+    "version": "0.33.2",
+    "license": "MPL 2.0",
+    "author": "Murat Doğan, Paul-Louis Ageneau",
+    "homepage": "https://github.com/murat-dogan/node-datachannel"
+  },
+  {
+    "name": "@node-datachannel/linux-x64-gnu",
+    "version": "0.33.2",
+    "license": "MPL 2.0",
+    "author": "Murat Doğan, Paul-Louis Ageneau",
+    "homepage": "https://github.com/murat-dogan/node-datachannel"
+  },
+  {
+    "name": "@node-datachannel/win32-arm64-msvc",
+    "version": "0.33.2",
+    "license": "MPL 2.0",
+    "author": "Murat Doğan, Paul-Louis Ageneau",
+    "homepage": "https://github.com/murat-dogan/node-datachannel"
+  },
+  {
+    "name": "@node-datachannel/win32-x64-msvc",
+    "version": "0.33.2",
+    "license": "MPL 2.0",
+    "author": "Murat Doğan, Paul-Louis Ageneau",
+    "homepage": "https://github.com/murat-dogan/node-datachannel"
+  },
+  {
     "name": "@phosphor-icons/react",
     "version": "2.1.10",
     "license": "MIT",
@@ -161,6 +203,13 @@
     "homepage": "https://github.com/debug-js/debug"
   },
   {
+    "name": "detect-libc",
+    "version": "2.1.2",
+    "license": "Apache-2.0",
+    "author": "Lovell Fuller <npm@lovell.info>",
+    "homepage": "https://github.com/lovell/detect-libc"
+  },
+  {
     "name": "ecdsa-sig-formatter",
     "version": "1.0.11",
     "license": "Apache-2.0",
@@ -257,6 +306,13 @@
     "license": "MIT",
     "author": "Node.js API collaborators",
     "homepage": "https://github.com/nodejs/node-addon-api"
+  },
+  {
+    "name": "node-datachannel",
+    "version": "0.33.2",
+    "license": "MPL 2.0",
+    "author": "Murat Doğan, Paul-Louis Ageneau",
+    "homepage": "https://github.com/murat-dogan/node-datachannel#readme"
   },
   {
     "name": "node-pty",

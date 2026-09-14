@@ -1,0 +1,8 @@
+{
+  "id": "/diagnostics/",
+  "name": "Pocket Key Test",
+  "short_name": "Pocket Key Test",
+  "start_url": "/diagnostics/index.html",
+  "scope": "/diagnostics/",
+  "display": "standalone"
+}

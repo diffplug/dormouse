@@ -151,6 +151,11 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
     return e2eFramesFor(socket, kind, id);
   }
 
+  /** The Burrow's transport frames on one connection; index 0 is the outcome. */
+  function transportFrames(connectionId: string): Array<Record<string, unknown>> {
+    return e2eFramesFor(socket, 'connection', connectionId, 'transport');
+  }
+
   function sendE2e(
     clientId: string,
     kind: 'pairing' | 'connection',
@@ -1339,5 +1344,103 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
     expect(burrow.trackedClientCount).toBe(0);
     expect(burrow.invitationState(invitation.inviteId)).toBe('live');
     generateKey.mockRestore();
+  });
+
+  // --- The direct path -------------------------------------------------------
+
+  /** Pair, connect, and promote one client; the whole Client side is real. */
+  async function establishSession(clientId = 'c1') {
+    const { authenticator, clientStatic } = await pairedClient(clientId);
+    const connectionId = testRoutingId();
+    const { session, burrowChallenge } = await openConnection(clientId, clientStatic, connectionId);
+    const binding = connectionBinding(
+      connectionId,
+      burrowChallenge,
+      session,
+      authenticator.credentialId,
+    );
+    sendE2e(
+      clientId,
+      'connection',
+      connectionId,
+      'transport',
+      toBase64Url(session.sendControl({ presence: await presenceProofFor(authenticator, binding) })),
+    );
+    await settle();
+    expect(await outcome(session, 'connection', connectionId)).toEqual({
+      ok: true,
+      burrowLabel: BURROW_LABEL,
+    });
+    return { session, connectionId, clientId };
+  }
+
+  /**
+   * Decrypt the transport frame at `index`, which must be a control message;
+   * index 0 is the connection outcome and the signals follow it.
+   */
+  function controlAt(
+    session: NoiseTransportSession,
+    connectionId: string,
+    index: number,
+  ): Promise<Record<string, unknown>> {
+    return readOutcome(socket, session, 'connection', connectionId, index);
+  }
+
+  /** One `direct-*` signal from the Client, on the established session. */
+  function sendSignal(
+    clientId: string,
+    connectionId: string,
+    session: NoiseTransportSession,
+    signal: Record<string, unknown>,
+  ): void {
+    sendE2e(clientId, 'connection', connectionId, 'transport', toBase64Url(session.sendControl(signal)));
+  }
+
+  const OFFER_SDP = 'v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n';
+
+  it('declines an offer it has no way to answer, and answers a second one not at all', async () => {
+    // No `createDirectPeer`: the VS Code host, and any runtime whose native
+    // addon will not load (`docs/specs/remote-api.md` → Transport →
+    // "Direct path").
+    makeBurrow();
+    const { session, connectionId, clientId } = await establishSession();
+
+    sendSignal(clientId, connectionId, session, { v: 1, t: 'direct-offer', sdp: OFFER_SDP });
+
+    expect(await controlAt(session, connectionId, 1)).toEqual({ v: 1, t: 'direct-decline' });
+
+    // **One attempt per session.** A second offer allocates nothing and is not
+    // answered — not even with another decline.
+    sendSignal(clientId, connectionId, session, { v: 1, t: 'direct-offer', sdp: OFFER_SDP });
+    await settle();
+    expect(transportFrames(connectionId)).toHaveLength(2);
+
+    // And the session is untouched: protocol-v1 still crosses it.
+    for (const ciphertext of session.sendApp(
+      utf8Encode(JSON.stringify({ requestId: 'r1', method: 'hello' })),
+    )) {
+      sendE2e(clientId, 'connection', connectionId, 'transport', toBase64Url(ciphertext));
+    }
+    await settle();
+    expect(sessions[0]!.handled).toEqual([{ requestId: 'r1', method: 'hello' }]);
+    expect(sessions[0]!.disposed).toBe(false);
+  });
+
+  it('ignores a control message that is not a signal, rather than failing the session', async () => {
+    // The compatibility rule the whole staging rests on: an established session
+    // carrying a control shape this peer does not know stays up.
+    makeBurrow();
+    const { session, connectionId, clientId } = await establishSession();
+
+    sendSignal(clientId, connectionId, session, { v: 2, t: 'direct-offer', sdp: OFFER_SDP });
+    sendSignal(clientId, connectionId, session, { t: 'something-else' });
+    sendSignal(clientId, connectionId, session, { v: 1, t: 'direct-offer' });
+    // A signal only the Burrow sends is ignored coming the other way.
+    sendSignal(clientId, connectionId, session, { v: 1, t: 'direct-decline' });
+    await settle();
+
+    expect(transportFrames(connectionId)).toHaveLength(1);
+    expect(burrow.establishedSessionCount).toBe(1);
+    expect(sessions[0]!.disposed).toBe(false);
   });
 });

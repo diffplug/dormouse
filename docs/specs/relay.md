@@ -643,6 +643,9 @@ framed as application messages on the Noise session (below).
   reorder (which Noise's counter turns into a decrypt failure), or a framing
   violation destroys it and every later call throws — there is no
   resynchronization point in a stream cipher.
+- **The control messages are the two ceremonies' outcomes and the direct path's
+  four signals** ([remote-api.md](./remote-api.md) → Direct path), which the
+  Relay routes without reading, like every other ciphertext.
 - **Prologues are `lengthPrefixedConcat`** of `dormouse/e2e/v1`, the ceremony
   kind, the `burrowId`, and — for a connection — the connection id; for a pairing,
   every field of its invitation in QR order ("Setup tokens and the pairing QR"
