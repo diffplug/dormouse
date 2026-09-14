@@ -487,3 +487,40 @@ describe('agent-browser host screenshot transport', () => {
     }
   });
 });
+
+describe('agent-browser host edit ops', () => {
+  beforeEach(() => { spawnMock.mockReset(); });
+
+  // `op` is a TypeScript type, not a runtime check — it arrives from webview IPC
+  // (`vscode-ext/src/message-router.ts`, `standalone/sidecar/main.js`) with no
+  // validation. A plain-object lookup resolves inherited keys, so an `op` naming
+  // an `Object.prototype` member selected a script the table never listed and
+  // reached the daemon's `eval`, which is exactly what `EDIT_SCRIPTS`'s own
+  // comment says cannot happen.
+  it('refuses an edit op that is only an inherited property of the script table', async () => {
+    const host = createAgentBrowserHost({ writeClipboardText: vi.fn() });
+
+    for (const op of ['constructor', 'toString', 'hasOwnProperty', '__proto__']) {
+      expect(await host.edit('sess', op as never)).toEqual({
+        ok: false,
+        error: `unknown edit op '${op}'`,
+      });
+    }
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it('still runs the three ops the table does own', async () => {
+    for (const op of ['selectAll', 'copy', 'cut'] as const) {
+      spawnMock.mockReset();
+      enqueueSpawnResults([{ stdout: JSON.stringify({ success: true, data: { result: 'x' } }) }]);
+      const host = createAgentBrowserHost({ writeClipboardText: vi.fn() });
+
+      expect((await host.edit('sess', op)).ok).toBe(true);
+      // `eval` with the table's script, not a stringified prototype member.
+      const args = spawnMock.mock.calls[0][1] as string[];
+      expect(args.slice(0, 3)).toEqual(['--session', 'sess', 'eval']);
+      expect(typeof args[3]).toBe('string');
+      expect(args[3]).toContain('document');
+    }
+  });
+});

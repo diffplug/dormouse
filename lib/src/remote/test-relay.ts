@@ -17,7 +17,12 @@
  * session, so a pairing or connection that succeeds here succeeded end to end.
  */
 
-import { isE2eClientFrame, isE2eBurrowFrame, type E2eKind } from 'remote-lib-common';
+import {
+  isE2eClientFrame,
+  isE2eBurrowFrame,
+  type E2eBurrowFrame,
+  type E2eKind,
+} from 'remote-lib-common';
 import { FakeSocket } from './test-fake-socket';
 import { testRoutingId } from './test-e2e-client';
 
@@ -39,6 +44,30 @@ export interface TestRelay {
   errorClient(message: string): void;
   /** Corrupt the `ct` of the next Burrow→Client frame, as a hostile relay would. */
   tamperNextBurrowFrame(): void;
+  /**
+   * Buffer Burrow→Client frames instead of delivering them, until
+   * {@link releaseToClient}. The one ordering an in-memory relay cannot
+   * otherwise produce: this relay routes synchronously, so a direct channel
+   * frame can never overtake the `direct-switch` that precedes it — which is
+   * exactly the race the receiver's holding queue exists for.
+   */
+  holdToClient(): void;
+  /**
+   * Start holding at the first Burrow→Client frame `match` answers true for,
+   * and hold everything after it. For an ordering that depends on *which*
+   * frame is in flight — a replacement session's outcome, say — where
+   * {@link holdToClient} would have to be armed before the frame exists.
+   */
+  holdToClientWhen(match: (frame: E2eBurrowFrame) => boolean): void;
+  /**
+   * Whether frames are being held. **A case that armed
+   * {@link holdToClientWhen} must wait for this before releasing**: releasing
+   * first leaves the arming predicate live, so the frame it was meant to catch
+   * is buffered with nothing left to let it go.
+   */
+  isHoldingToClient(): boolean;
+  /** Deliver everything held, in the order it was sent. */
+  releaseToClient(): void;
   /** Stop routing, without closing either socket. */
   stop(): void;
 }
@@ -58,6 +87,10 @@ export function createTestRelay(options: {
   let client: { socket: FakeSocket; bound: string | null } | null = null;
   let live = true;
   let tamper = false;
+  /** Buffered Burrow→Client deliveries, or null while routing normally. */
+  let held: Array<() => void> | null = null;
+  /** Arms {@link TestRelay.holdToClientWhen}, and is spent by the frame it matches. */
+  let holdWhen: ((frame: E2eBurrowFrame) => boolean) | null = null;
 
   burrowSocket.onSend = (frame) => {
     if (!live || !client) return;
@@ -70,14 +103,22 @@ export function createTestRelay(options: {
     if (client.bound !== burrowId) return;
     const ct = tamper ? flipLastCharacter(frame.ct) : frame.ct;
     tamper = false;
-    client.socket.receive({
-      t: 'e2e',
-      burrowId,
-      kind: frame.kind as E2eKind,
-      id: frame.id,
-      step: frame.step,
-      ct,
-    });
+    const target = client.socket;
+    const deliver = () =>
+      target.receive({
+        t: 'e2e',
+        burrowId,
+        kind: frame.kind as E2eKind,
+        id: frame.id,
+        step: frame.step,
+        ct,
+      });
+    if (holdWhen?.(frame)) {
+      held ??= [];
+      holdWhen = null;
+    }
+    if (held) held.push(deliver);
+    else deliver();
   };
 
   return {
@@ -124,6 +165,20 @@ export function createTestRelay(options: {
     },
     tamperNextBurrowFrame() {
       tamper = true;
+    },
+    holdToClient() {
+      held ??= [];
+    },
+    holdToClientWhen(match) {
+      holdWhen = match;
+    },
+    isHoldingToClient() {
+      return held !== null;
+    },
+    releaseToClient() {
+      const pending = held ?? [];
+      held = null;
+      for (const deliver of pending) deliver();
     },
     stop() {
       live = false;

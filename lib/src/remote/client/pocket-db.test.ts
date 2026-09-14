@@ -2,10 +2,9 @@
  * Pocket's IndexedDB layout (`docs/specs/pocket-app.md` → "What Pocket
  * stores"): the v4 upgrade, and the two stores it leaves behind.
  *
- * `fake-indexeddb` structured-clones what it is handed, and a `CryptoKey` is
- * not cloneable there, so the records below carry plain stand-ins where the
- * real ones carry keys. What is under test is the database shape and the store
- * operations, not what a browser does with key material.
+ * These schema tests use plain key stand-ins. `pocket-key-storage.test.ts`
+ * exercises real keys with Node's structured clone; neither emulates WebKit's
+ * platform-specific key serialization.
  */
 
 import 'fake-indexeddb/auto';
@@ -37,7 +36,9 @@ function knownBurrow(burrowId: string, overrides: Partial<KnownBurrowV1> = {}): 
     burrowStaticPublicKey: 'aG9zdC1zdGF0aWM',
     clientStaticKeyPair: {
       // A stand-in: see the file header.
-      privateKey: { kind: 'private' } as unknown as CryptoKey,
+      privateKey: {
+        type: 'private', extractable: false, algorithm: { name: 'X25519' }, usages: ['deriveBits'],
+      } as unknown as CryptoKey,
       publicKeyRaw: 'Y2xpZW50LXN0YXRpYw',
     },
     passkeyCredentialId: 'cred-1',
@@ -217,19 +218,19 @@ describe('the pocket database', () => {
     await store.put(knownBurrow('burrow-2', { authorization: { state: 'pairing-required' } }));
     expect((await store.get('burrow-1'))?.label).toBe('Laptop');
     expect((await store.get('burrow-2'))?.authorization).toEqual({ state: 'pairing-required' });
-    expect((await store.list()).map((record) => record.burrowId).sort()).toEqual([
+    expect((await store.listSummaries()).map((record) => record.burrowId).sort()).toEqual([
       'burrow-1',
       'burrow-2',
     ]);
 
     // Keyed by `burrowId`, so a second put for the same Burrow replaces it.
     await store.put(knownBurrow('burrow-1', { label: 'Renamed' }));
-    expect(await store.list()).toHaveLength(2);
+    expect(await store.listSummaries()).toHaveLength(2);
     expect((await store.get('burrow-1'))?.label).toBe('Renamed');
 
     await store.delete('burrow-1');
     expect(await store.get('burrow-1')).toBeNull();
-    expect(await store.list()).toHaveLength(1);
+    expect(await store.listSummaries()).toHaveLength(1);
   });
 
   it('files a pending deletion under burrowId:deliveryId', async () => {
