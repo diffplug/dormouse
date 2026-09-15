@@ -38,3 +38,14 @@ it('seeds new, transferred, or restored members and forgets closed Workspaces', 
   cues.update([], new Map(), activity);
   expect(cues.get('v')).toEqual({ sequence: 0, at: null });
 });
+
+it('forgets a departed member replaced by one without Activity, so its rejoin seeds silently', () => {
+  const cues = new WorkspaceRingCues();
+  const activity = new Map([['a', { ...DEFAULT_ACTIVITY_STATE, status: 'ALERT_RINGING' as const, ringSeq: 1 }]]);
+  cues.update(['w'], new Map([['w', ['a']]]), activity);
+  // `a` leaves and `b` joins before its Activity entry exists: same size, different ids.
+  cues.update(['w'], new Map([['w', ['b']]]), activity);
+  activity.set('a', { ...activity.get('a')!, ringSeq: 3 });
+  cues.update(['w'], new Map([['w', ['a', 'b']]]), activity);
+  expect(cues.get('w').sequence).toBe(0);
+});

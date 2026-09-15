@@ -18,7 +18,9 @@ export class WorkspaceRingCues {
       let observation = this.workspaces.get(id);
       if (!observation) this.workspaces.set(id, observation = { members: new Map(), cue: { sequence: 0, at: null } });
       const { members } = observation;
-      const current = membership.get(id) ?? [];
+      const current = new Set(membership.get(id) ?? []);
+      // A departed member forgets its counter, so rejoining seeds it silently.
+      for (const sessionId of members.keys()) if (!current.has(sessionId)) members.delete(sessionId);
       let fresh = false;
       for (const sessionId of current) {
         const state = activity.get(sessionId);
@@ -26,9 +28,6 @@ export class WorkspaceRingCues {
         const before = members.get(sessionId);
         if (before !== undefined && state.ringSeq > before && state.status === 'ALERT_RINGING') fresh = true;
         members.set(sessionId, state.ringSeq);
-      }
-      if (members.size > current.length) {
-        for (const sessionId of members.keys()) if (!current.includes(sessionId)) members.delete(sessionId);
       }
       if (fresh) observation.cue = { sequence: observation.cue.sequence + 1, at: Date.now() };
     }
