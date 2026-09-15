@@ -79,7 +79,7 @@ Source of truth: `acquireToolSpawnLock` / the `surface.tool` handler in `lib/src
 6. **Must share grant updates safely across host processes**, merging against the latest file under the existing lock and atomic-write protocol.
 7. **Never content-hash grants or re-prompt solely because the config changed.** (rationale)
 
-Reserved: **Must keep future implicit glob dispatch user-global and limited to user-global Tools**, and gate any future repo `prespawn_*` execution on the same approval; see scope **dor-tools** under [Future](#future).
+**Must keep implicit file dispatch user-global and limited to user-global Tools.** Reserved: any future repo `prespawn_*` execution uses the same approval; see scope **dor-tools** under [Future](#future).
 
 Source of truth: `createToolHost` in `lib/src/host/tool-host.ts`; `FileToolTrustStore` / `lookupTool` in `lib/src/host/tool-trust.ts`; `resolveUpstreamUrl` in `lib/src/host/git-upstream.ts`; `ToolApproval` in `lib/src/components/wall/ToolApproval.tsx`; `resolveToolApproval` in `lib/src/components/Wall.tsx`. Tests: `lib/src/host/tool-trust.test.ts`, `lib/src/components/Wall.test.tsx`.
 
@@ -130,6 +130,18 @@ Source of truth: `ToolPanel` in `lib/src/components/wall/ToolPanel.tsx`; `ToolPa
 **Must retain `dor tool` as a Surface-producing command on every supported host**, never route it to a native editor. Generated help owns syntax and response types own shape.
 
 Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `dor/test/snapshots/help/tool.md`; `ToolSurfaceResponse` in `dor/src/commands/types.ts`.
+
+## Opening local files
+
+**Must accept exactly one existing local regular file for `dor open`.** Resolve it with the `$TARGET` rules in Declaring tools. URLs (including `file:`), directories, and Surface handles fail; no native-editor fallback occurs.
+
+**Must select the first matching entry of the user file's ordered `open` list**, whose entries contain `match` and `tool`. `--tool` explicitly selects a user Tool. Every association must name a Tool in that same user file. Never discover project configuration during this lookup; project `open` rules are ignored with a warning during explicit project-tool lookup.
+
+**Must match patterns without `/` against the canonical filename, and patterns with `/` against the canonical path relative to the invocation CWD.** Normalize separators to `/` and use Node's POSIX `matchesGlob` semantics, including explicit patterns for dotfiles. A miss names the user config path and suggests `--tool`.
+
+**Must pass the canonical file path as one input to the selected Tool.** Reuse follows Identity and dedupe; `$TARGET` in the key provides per-file identity. `--fresh` bypasses reuse. **Never transform a plain calling terminal through `dor open`.** Create a focus-neutral split or reveal the existing Tool; an idle match in the caller's Tool pane uses the answer/prompt handshake only for a standalone integrated `dor open` invocation.
+
+Source of truth: `openCommand` in `dor/src/commands/open.ts`; `resolveOpenTool` in `lib/src/host/tool-open.ts`; `parseToolFile` in `lib/src/host/tool-registry.ts`; `surface.tool` in `lib/src/components/wall/use-dor-control.ts`. Tests: `lib/src/host/tool-open.test.ts`, `dor/test/cli-output.test.mjs`, `lib/src/components/Wall.test.tsx`.
 
 ## Take-over
 
@@ -193,10 +205,8 @@ Source of truth: `PersistedToolMetadata` in `lib/src/lib/session-types.ts`; `sav
 
 **Scope: dor-tools** — remaining design, in implementation order.
 
-- **C — glob table + `dor open`.** User-global glob rules
-  (pattern → tool name), `dor open <local-file>` as sugar over `dor tool`,
-  and the loopback file/viewer endpoint a local *file* needs (the
-  iframe proxy instruments only `http://` upstreams).
+- **C — local-file presentation.** The loopback file/viewer endpoint a local
+  file needs (the iframe proxy instruments only `http://` upstreams).
 - **D1 — reaping without cooperation.** Idle-threshold reap +
   rehydrate-from-args + `persist: "never"`: every stateless tool, no new API,
   no Windows question.

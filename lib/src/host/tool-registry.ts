@@ -42,7 +42,10 @@ export interface ToolEntry {
   readonly dedupeTemplate: readonly string[] | null;
 }
 
+export interface OpenRule { readonly match: string; readonly tool: string }
+
 export interface ToolFile {
+  readonly open: readonly OpenRule[];
   readonly scope: ToolScope;
   /** Absolute directory holding the file. `$PROJECT_ROOT` for a repo scope. */
   readonly dir: string;
@@ -123,12 +126,11 @@ export function parseToolFile(
   }
   // An empty file is a valid file with no tools, not a broken one.
   if (doc === null || doc === undefined) {
-    return { scope, dir, tools: new Map(), warnings: [] };
+    return { scope, dir, tools: new Map(), warnings: [], open: [] };
   }
   if (!isRecord(doc)) throw new ToolFileError(`${path}: expected a mapping at the top level`);
 
-  const toolsNode = doc.tools;
-  if (toolsNode === undefined) return { scope, dir, tools: new Map(), warnings: [] };
+  const toolsNode = doc.tools ?? {};
   if (!isRecord(toolsNode)) throw new ToolFileError(`${path}: 'tools' must be a mapping of name to entry`);
 
   const tools = new Map<string, ToolEntry>();
@@ -186,7 +188,21 @@ export function parseToolFile(
     tools.set(name, { name, run: typeof run === 'string' ? run.trim() : run, render, port, dedupeTemplate });
   }
 
-  return { scope, dir, tools, warnings };
+  const open: OpenRule[] = [];
+  if (doc.open !== undefined) {
+    if (scope === 'repo') warnings.push(`${path}: project open rules are ignored; configure associations in the user file`);
+    else {
+      if (!Array.isArray(doc.open)) throw new ToolFileError(`${path}: 'open' must be an ordered list`);
+      for (const rule of doc.open) {
+        if (!isRecord(rule) || typeof rule.match !== 'string' || !rule.match || typeof rule.tool !== 'string'
+          || !tools.has(rule.tool) || Object.keys(rule).some(key => key !== 'match' && key !== 'tool')) {
+          throw new ToolFileError(`${path}: each open rule needs a match pattern and a tool defined in this user file`);
+        }
+        open.push({ match: rule.match, tool: rule.tool });
+      }
+    }
+  }
+  return { scope, dir, tools, warnings, open };
 }
 
 /**

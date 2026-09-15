@@ -22,11 +22,11 @@ const COMPOUND_SYNTAX = /[;&|<>()`\n\r]/;
  * (`docs/specs/dor-tool.md` -> Take-over). Case folds on the launcher, which is
  * a filename, and not on the verb, which stricli parses case-sensitively.
  */
-export function isNakedToolInvocation(rawCommandLine: string | null | undefined): boolean {
+export function isNakedToolInvocation(rawCommandLine: string | null | undefined, verb: 'tool' | 'open' = 'tool'): boolean {
   const line = rawCommandLine?.trim();
   if (!line || COMPOUND_SYNTAX.test(line)) return false;
   const argv0 = commandArgv0(line)?.toLowerCase();
-  return argv0 === 'dor' && primaryCommandTokens(line)[1] === 'tool';
+  return argv0 === 'dor' && primaryCommandTokens(line)[1] === verb;
 }
 
 /** What the placement rule reads. Every field is already known to the handler. */
@@ -57,8 +57,8 @@ export interface ToolTakeoverGate {
  * pane whose reported line is this invocation and nothing else. Both placements
  * need it, and neither can proceed without it.
  */
-function callerTypedTool(gate: ToolTakeoverGate): boolean {
-  return gate.oscDriven && isNakedToolInvocation(gate.rawCommandLine);
+function callerTypedTool(gate: ToolTakeoverGate, verb: 'tool' | 'open' = 'tool'): boolean {
+  return gate.oscDriven && isNakedToolInvocation(gate.rawCommandLine, verb);
 }
 
 /**
@@ -82,6 +82,6 @@ export function toolTakesOverCaller(gate: ToolTakeoverGate): boolean {
  * nothing to place, and the tool re-runs in its own directory, exactly as an
  * `adopted` match from any other pane does.
  */
-export function toolRerunsInCaller(gate: ToolTakeoverGate): boolean {
-  return gate.kind === 'tool' && callerTypedTool(gate);
+export function toolRerunsInCaller(gate: ToolTakeoverGate, verb: 'tool' | 'open' = 'tool'): boolean {
+  return gate.kind === 'tool' && callerTypedTool(gate, verb);
 }

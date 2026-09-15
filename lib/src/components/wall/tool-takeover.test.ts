@@ -57,6 +57,14 @@ describe('toolTakesOverCaller', () => {
     expect(toolTakesOverCaller(passing)).toBe(true);
   });
 
+  it('only permits open to rerun an existing Tool, never take over a terminal', () => {
+    const opening = { ...passing, rawCommandLine: 'dor open README.md' };
+    expect(toolTakesOverCaller(opening)).toBe(false);
+    expect(toolRerunsInCaller(opening, 'open')).toBe(false);
+    expect(toolRerunsInCaller({ ...opening, kind: 'tool' }, 'open')).toBe(true);
+    expect(toolRerunsInCaller({ ...opening, kind: 'tool', rawCommandLine: 'dor open README.md && echo done' }, 'open')).toBe(false);
+  });
+
   it('splits when any condition fails', () => {
     const splits: Array<[string, Partial<ToolTakeoverGate>]> = [
       ['--surface named a reference', { explicitSurface: true }],

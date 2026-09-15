@@ -187,7 +187,7 @@ async function runToolCommand(this: DorCommandContext, flags: ToolFlags, ...rest
   }
 }
 
-function renderToolResponse(response: ToolSurfaceResponse, json: boolean): string {
+export function renderToolResponse(response: ToolSurfaceResponse, json: boolean): string {
   if (json) {
     return renderJson({
       status: response.status,

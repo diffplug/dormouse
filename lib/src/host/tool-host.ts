@@ -11,6 +11,7 @@
 import type { ToolControlResult, ToolHostRequest } from '../lib/platform/tool-types';
 import { resolveUpstreamUrl } from './git-upstream';
 import { resolveToolInput } from './tool-input';
+import { resolveOpenTool } from './tool-open';
 import { readUserToolFile, userToolConfigPath } from './tool-user-config';
 import {
   FileToolTrustStore,
@@ -54,6 +55,7 @@ export function createToolHost(options: { stateDir?: string; userConfigPath?: st
       }
 
       try {
+        if (request.op === 'open') return await resolveOpenTool(request, options.userConfigPath ?? userToolConfigPath());
         const args = request.args ?? [];
         const lookup = request.global ? { status: 'no-file' as const } : await lookupTool(request.name, request.cwd, trust);
         if (lookup.status === 'no-file' || lookup.status === 'unknown-tool') {

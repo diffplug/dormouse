@@ -81,6 +81,8 @@ export type DorControlParams = {
   fresh?: unknown;
   args?: unknown;
   global?: unknown;
+  file?: unknown;
+  tool?: unknown;
 };
 
 // The webview view of a control request: the shared wire payload, but with
@@ -865,7 +867,12 @@ export function useDorControl({
           detail.respond({ ok: false, error: 'cwd is required' });
           return;
         }
-        const toolName = stringParam(params.name)?.trim();
+        let toolName = stringParam(params.name)?.trim();
+        const openFile = stringParam(params.file);
+        if (openFile !== undefined && (params.name !== undefined || params.command !== undefined || params.args !== undefined)) {
+          detail.respond({ ok: false, error: 'open accepts a file and optional tool, not a command' });
+          return;
+        }
         let command: string;
         let key: string[] | null = null;
         let toolScope: 'user' | undefined;
@@ -878,7 +885,7 @@ export function useDorControl({
         let port: 'announced' | 'auto' = 'auto';
         const toolShell = getDefaultShellOpts()?.shell;
 
-        if (toolName) {
+        if (toolName || openFile !== undefined) {
           // The registry, the closed substitution set, and the trust gate all
           // live behind this one host call (`dor/commands/types` ->
           // ToolSurfaceRequest).
@@ -887,7 +894,9 @@ export function useDorControl({
             detail.respond({ ok: false, error: 'this host cannot read a dormouse.yml; use `dor tool -- <command>`' });
             return;
           }
-          const lookup = await toolControl({ op: 'lookup', name: toolName, cwd, args: toolArgs, global: booleanParam(params.global) });
+          const lookup = await toolControl(openFile !== undefined
+            ? { op: 'open', target: openFile, cwd, tool: stringParam(params.tool) }
+            : { op: 'lookup', name: toolName!, cwd, args: toolArgs, global: booleanParam(params.global) });
           if (unavailable()) return;
           switch (lookup.status) {
             case 'trust-recorded':
@@ -897,6 +906,7 @@ export function useDorControl({
             case 'ok':
               command = typeof lookup.run === 'string' ? lookup.run : dorCommandString([...lookup.run])!;
               toolScope = lookup.scope;
+              toolName = lookup.name;
               // Namespaced under the host-resolved tool name, so two tools in
               // one repo with scope-only keys stay distinct and a runtime
               // re-key cannot name another tool's key.
@@ -1071,7 +1081,7 @@ export function useDorControl({
             const matchedCwd = getTerminalPaneState(match.id).cwd?.path ?? cwd;
             if (match.id === callerId
               && !surfaceRunsCommand(getTerminalPaneState(match.id), matchedCommand, matchedCwd)) {
-              if (!callerGate || !toolRerunsInCaller(callerGate)) {
+              if (!callerGate || !toolRerunsInCaller(callerGate, openFile !== undefined ? 'open' : 'tool')) {
                 // Nothing can be typed behind a line that is not this
                 // invocation alone, and there is no survivor to reveal — the
                 // user is sitting in it. Say so instead of reporting a tool
@@ -1144,7 +1154,7 @@ export function useDorControl({
         // rather than splitting (docs/specs/dor-tool.md -> Take-over). Must stay
         // below the pending-approval and key-match returns above: both of those
         // placements win over this one.
-        if (callerId && callerGate && toolTakesOverCaller(callerGate)) {
+        if (openFile === undefined && callerId && callerGate && toolTakesOverCaller(callerGate)) {
           // Answered before the tool starts, because answering is what frees
           // the shell to run it.
           detail.respond({

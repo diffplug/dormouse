@@ -1457,6 +1457,36 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it('dispatches open through the user host and splits even when the caller could be taken over', async () => {
+    setToolsEnabled(true);
+    vi.spyOn(terminalRegistry, 'isPaneOscDriven').mockReturnValue(true);
+    const toolControl = vi.fn(async () => ({ status: 'ok' as const, scope: 'user' as const,
+      projectRoot: '/config', path: '/config/dormouse.yml', name: 'viewer', run: ['view', '/repo/a.md'],
+      key: ['/repo/a.md'], render: 'iframe' as const, port: 'auto' as const, warnings: [] }));
+    Object.assign(fake, { toolControl });
+    try {
+      await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
+      await flush();
+      terminalRegistry.seedTerminalManualCwd('pane-a', '/repo');
+      terminalRegistry.applyTerminalSemanticEvents('pane-a', [
+        { type: 'commandLine', commandLine: 'dor tool viewer a.md' },
+        { type: 'commandStart', source: 'osc633_boundaries' },
+      ]);
+      const respond = vi.fn();
+      await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+        method: SURFACE_CONTROL_METHODS.tool, surfaceId: 'pane-a', params: { file: 'a.md', cwd: '/repo' }, respond,
+      } })));
+      await settle(() => respond.mock.calls.length > 0);
+      expect(toolControl).toHaveBeenCalledWith({ op: 'open', target: 'a.md', cwd: '/repo', tool: undefined });
+      expect(respond).toHaveBeenCalledWith(expect.objectContaining({ ok: true, result: expect.objectContaining({ status: 'created' }) }));
+      expect(respond.mock.calls[0][0].result.surfaceId).not.toBe('pane-a');
+      expect(leafCount()).toBe(2);
+    } finally {
+      act(() => terminalRegistry.removeTerminalPaneState('pane-a'));
+      setToolsEnabled(false);
+    }
+  });
+
   it('keeps pending file inputs distinct and quotes argv after approval', async () => {
     setToolsEnabled(true);
     let trusted = false;

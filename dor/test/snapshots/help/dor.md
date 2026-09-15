@@ -8,6 +8,7 @@ USAGE
   dor ensure [--json] [--minimize] [--restart] [--surface id|ref] [--cwd path] [--workspace ref] -- <command>...
   dor tool [--global] [--json] [--minimize] [--fresh] [--surface id|ref] [--cwd path] [--workspace ref] <name> [args...]
   dor tool [--json] [--minimize] [--surface id|ref] [--cwd path] [--workspace ref] -- <command>...
+  dor open [--json] [--minimize] [--fresh] [--surface id|ref] [--workspace ref] [--cwd path] [--tool name] <file>
   dor version [--json]
   dor skill [--install] [--json]
   dor send <surface> ([--text value] [--key value] | --stdin | --sequence json) [--json] [--raw] [--workspace ref]
@@ -30,6 +31,7 @@ COMMANDS
   split          Create a new terminal surface by splitting an existing surface.
   ensure         Ensure one surface is running a command.
   tool           Run a command as a Dor Tool.
+  open           Open a local file with a Dor Tool.
   version        Print the dor CLI version.
   skill          Print the Dormouse agent skill, or install its bootstrap stub.
   send           Send text or key input to a terminal surface.
