@@ -27,9 +27,9 @@ marking a PR ready for review is what spends them.
 - **`lib/`** — Shared React + TailwindCSS frontend library: components, tests, Storybook.
   - `lib/src/lib/platform/` — platform abstraction (`PlatformAdapter` interface, fake + VSCode adapters)
   - `lib/src/host/` — Node-side host modules bundled into both hosts: the iframe proxy, the agent-browser host, and `remote/` (the `BurrowService` that runs in the Tauri sidecar and the VS Code extension host)
-  - `lib/src/remote/` — remote control: `burrow/` (laptop side: protocol-v1 session, security, the webview's responder + pairing UI), `client/` (phone-side protocol + `RemotePtyAdapter`), `pocket-app/` (Pocket shell), `ws.ts` (shared socket surface)
+  - `lib/src/remote/` — remote control: `burrow/` (laptop side: protocol-v1 session, security, the webview's responder + pairing UI), `client/` (phone-side protocol + `RemotePtyAdapter`), `pocket-app/` (Pocket shell), `direct/` (the WebRTC direct path both ends run), `ws.ts` (shared socket surface)
 - **`standalone/`** — Tauri desktop app (Rust + Vite frontend).
-  - `standalone/sidecar/` — Node.js PTY manager (native PTY via node-pty), bundled as the Tauri sidecar
+  - `standalone/sidecar/` — Node.js PTY manager (native PTY via node-pty, direct-path WebRTC via node-datachannel), bundled as the Tauri sidecar
   - `standalone/src-tauri/` — Rust backend bridging webview ↔ sidecar
 - **`vscode-ext/`** — VS Code extension wrapping the lib in a webview (esbuild; node-pty via forked child process)
 - **`website/`** — Marketing site (Vite) bundling part of the lib as an interactive demo on `FakePtyAdapter`
@@ -48,7 +48,7 @@ A spec is the accurate reference for the current code: it states the invariants 
 **May combine a concise `Files` / `Code Map` section with section-local `Source of truth:` pointers.** The map gives readers key entrypoints to follow through imports; the pointers locate the implementation of a particular rule. Map the useful starting points, not every file. Short specs need no map when their local pointers already make navigation clear. Keep behavior and invariants in their owning sections, rather than repeating them in map descriptions.
 
 - **`docs/specs/glossary.md`** — Canonical vocabulary: the Surface model, Session layers, `Window ⊃ Workspace ⊃ Pane ⊃ Surface`, transition verbs, invariants I1–I10. Read first; every spec defers to it for state, kind, and verb names.
-- **`docs/specs/layout.md`** — The interaction model over the tiling engine: modes, command-mode dispatch, navigation, minimize/reattach, kill/rename, session lifecycle and persistence recovery, the workspaces-rollout ledger. Read before touching keyboard/navigation/mode/workspace behavior.
+- **`docs/specs/layout.md`** — The interaction model over the tiling engine: modes, command-mode dispatch, navigation, minimize/reattach, kill/rename, session lifecycle and persistence recovery, the Workspace model. Read before touching keyboard/navigation/mode/workspace behavior.
 - **`docs/specs/shortcuts.md`** — Quick-reference table of every shortcut by mode/context; layout.md owns the behavior — update both when a binding changes.
 - **`docs/specs/tiling-engine.md`** — **Lath**, the in-house headless tiling engine: pure split-tree core, never-re-parent LathHost adapter, wall store + engine, Lath-only persistence.
 - **`docs/specs/alert.md`** — The Activity layer: alert tracks, attention model, TODO lifecycle, notification protocols with their sanitization rules, the Workspace union projection.
@@ -101,7 +101,7 @@ Specs are written ahead of the code: a new component's spec starts as a full des
 
 - **The fold.** Everything above `## Future` describes the code as it is — present tense, anchored with `Source of truth:` pointers. Everything unbuilt lives under `## Future`, always the last section; a spec with no unbuilt design has none.
 - **Design-stage specs.** A spec for a component that does not exist yet keeps its whole design under `## Future`, opens with `> Status: design — nothing here is implemented yet.`, and is indexed above like any other.
-- **Named scopes.** A cut is recorded as a named scope at the top of `## Future` (`**Scope: workspaces-rollout**`), listing what remains in staged order. A scope is defined in exactly one spec; other specs link it by name and never restate it. Rollout ledgers live in the owning spec's `## Future`, nowhere else.
+- **Named scopes.** A cut is recorded as a named scope at the top of `## Future` (`**Scope: dor-tools**`), listing what remains in staged order. A scope is defined in exactly one spec; other specs link it by name and never restate it. Rollout ledgers live in the owning spec's `## Future`, nowhere else.
 - **Reservations.** Unbuilt design that constrains present code — a reserved wire field, a reserved ref grammar, an additive-evolution guarantee — is stated in the body, marked `Reserved:`, pointing at the `## Future` item it serves. Test: if deleting the sentence would let someone break future compatibility today, it belongs in the body.
 - **Promotion is part of done.** A staged item is finished only when its text moves above the fold — "will" rewritten to "is", `Source of truth:` added — and the built portion is deleted from `## Future`. Never leave completed plan text (build orders, phase lists) below the fold; git keeps the record.
 

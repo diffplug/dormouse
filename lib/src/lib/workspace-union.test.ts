@@ -22,22 +22,22 @@ describe('computeWorkspaceUnion', () => {
 
   it('reports ringing when any terminal Session is ALERT_RINGING', () => {
     const union = computeWorkspaceUnion(['a', 'b'], activity({ a: {}, b: { status: 'ALERT_RINGING' } }));
-    expect(union).toEqual({ ringing: true, todo: false, count: 1 });
+    expect(union).toEqual({ ringing: true, todo: false, count: 1, ringSeq: 0 });
   });
 
   it('reports todo for a flagged terminal Session', () => {
     const union = computeWorkspaceUnion(['a'], activity({ a: { todo: true } }));
-    expect(union).toEqual({ ringing: false, todo: true, count: 1 });
+    expect(union).toEqual({ ringing: false, todo: true, count: 1, ringSeq: 0 });
   });
 
   it('counts a browser Surface TODO (no ring) — status stays WATCHING_DISABLED', () => {
     const union = computeWorkspaceUnion(['web'], activity({ web: { status: 'WATCHING_DISABLED', todo: true } }));
-    expect(union).toEqual({ ringing: false, todo: true, count: 1 });
+    expect(union).toEqual({ ringing: false, todo: true, count: 1, ringSeq: 0 });
   });
 
   it('counts a surface that is both ringing and todo only once', () => {
     const union = computeWorkspaceUnion(['a'], activity({ a: { status: 'ALERT_RINGING', todo: true } }));
-    expect(union).toEqual({ ringing: true, todo: true, count: 1 });
+    expect(union).toEqual({ ringing: true, todo: true, count: 1, ringSeq: 0 });
   });
 
   it('sums distinct surfaces owing attention', () => {
@@ -45,12 +45,20 @@ describe('computeWorkspaceUnion', () => {
       ['a', 'b', 'c', 'd'],
       activity({ a: { status: 'ALERT_RINGING' }, b: { todo: true }, c: { status: 'BUSY' }, d: {} }),
     );
-    expect(union).toEqual({ ringing: true, todo: true, count: 2 });
+    expect(union).toEqual({ ringing: true, todo: true, count: 2, ringSeq: 0 });
   });
 
   it('ignores surface ids with no activity entry', () => {
     const union = computeWorkspaceUnion(['a', 'missing'], activity({ a: { todo: true } }));
-    expect(union).toEqual({ ringing: false, todo: true, count: 1 });
+    expect(union).toEqual({ ringing: false, todo: true, count: 1, ringSeq: 0 });
+  });
+
+  it('carries the largest member ringSeq, so a new ring replays and a return does not', () => {
+    const union = computeWorkspaceUnion(
+      ['a', 'b'],
+      activity({ a: { status: 'ALERT_RINGING', ringSeq: 3 }, b: { status: 'ALERT_RINGING', ringSeq: 7 } }),
+    );
+    expect(union).toEqual({ ringing: true, todo: false, count: 2, ringSeq: 7 });
   });
 
   it('is empty for an empty surface set', () => {

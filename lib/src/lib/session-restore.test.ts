@@ -314,3 +314,59 @@ describe('restoreSession', () => {
     );
   });
 });
+
+describe('restoreSession alert seeding', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const alert = { status: 'WATCHING_DISABLED' as const, todo: true, notification: null };
+
+  it('seeds a terminal pane\'s persisted TODO and leaves browser panes to the todo restore', () => {
+    const saved: PersistedSession = {
+      version: 3,
+      panes: [
+        { id: 'shell', title: 'Shell', cwd: '/tmp', untouched: false, alert },
+        { id: 'quiet', title: 'Quiet', cwd: '/tmp', untouched: false },
+        { id: 'web', title: 'Web', cwd: null, untouched: false, surfaceType: 'browser', alert },
+      ],
+    };
+    const platform = createPlatform(saved);
+    const alertSeed = vi.fn();
+    platform.alertSeed = alertSeed;
+
+    restoreSession(platform);
+
+    // Only the terminal pane that carried one, and only that pane's blob.
+    expect(alertSeed.mock.calls).toEqual([['shell', alert]]);
+  });
+
+  it('restores without a seeding host', () => {
+    const saved: PersistedSession = {
+      version: 3,
+      panes: [{ id: 'shell', title: 'Shell', cwd: '/tmp', untouched: false, alert }],
+    };
+    // VS Code omits `alertSeed`; its extension host seeds its own manager.
+    expect(restoreSession(createPlatform(saved))?.paneIds).toEqual(['shell']);
+  });
+
+  it('restores the record it is handed with the commands it is handed', () => {
+    const given: PersistedSession = {
+      version: 3,
+      panes: [{ id: 'given', title: 'Given', cwd: '/w', untouched: false }],
+    };
+    const platform = createPlatform(
+      { version: 3, panes: [{ id: 'slot', title: 'Slot', cwd: null, untouched: false }] },
+      { given: 'claude --resume xyz' },
+    );
+
+    const result = restoreSession(platform, { savedSession: given });
+
+    expect(result?.paneIds).toEqual(['given']);
+    expect(terminalRegistryMocks.restoreTerminal).toHaveBeenCalledWith(
+      'given', expect.objectContaining({ cwd: '/w', resumeCommand: 'claude --resume xyz' }),
+    );
+    // An explicit `null` is "no record", never a fallback to the slot.
+    expect(restoreSession(platform, { savedSession: null })).toBeNull();
+  });
+});

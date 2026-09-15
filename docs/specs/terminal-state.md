@@ -13,6 +13,12 @@
 - **`ShellActivity` is not `isRunning`** — the shell process keeps running; what matters is whether a foreground command is active.
 - **Terminal title is a label override, never a command lifecycle signal.** `title` is the latest title event of any source; `titleCandidates` keeps the latest value per channel with its own timestamp, so app, shell, and user sources stay independently inspectable.
 
+**Must transfer semantic state and OSC-driven status at the stream mark, before
+applying the destination's since-mark replay.** Screen serialization carries no
+command lifecycle; newer replay events still win, including command finish.
+Source of truth: `snapshotTerminalState` / `restoreTransferredTerminalState` in
+`lib/src/lib/terminal-state-store.ts`; tested in `standalone/src/workspace-move.test.ts`.
+
 ## Normalized Events
 
 - **Feature code must consume `TerminalPaneState` or `TerminalSemanticEvent`, never raw OSC sequences** — all protocol parsing emits that canonical union (`lib/src/lib/terminal-state.ts`) first.

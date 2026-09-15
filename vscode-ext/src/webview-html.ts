@@ -18,6 +18,43 @@ function serializeForInlineScript(value: unknown): string {
 }
 
 /**
+ * Splice `replacement` in at the first `marker`, never expanding it. Throws
+ * when the marker is absent.
+ *
+ * Every document edit uses a function replacement — this helper or a callback
+ * passed to `replace`/`replaceAll`. String replacements expand `$&`, `` $` ``,
+ * `$'`, `$<name>`, and `$$`; raw terminal state may contain those sequences.
+ * A function replacement is inserted verbatim, preserving the value escaped by
+ * `serializeForInlineScript`.
+ * Pinned by "treats a `$` in serialized state as data, not a substitution
+ * pattern" in `vscode-ext/test/webview-html.test.ts`.
+ *
+ * The marker is matched as a case-sensitive literal against whatever Vite built
+ * from `lib/index.html`, so an attribute added to `<head>` there stops it
+ * matching. Splicing nothing would serve a document with no CSP meta tag or no
+ * boot script and report neither — the same unrecoverable-looking failure the
+ * nonce-placeholder check below rejects, and one the boot smoketest could not
+ * see, because a document carrying no policy violates none. Pinned by "refuses
+ * a document whose splice marker was edited away" in
+ * `vscode-ext/test/webview-html.test.ts`.
+ */
+function spliceOnce(
+  html: string,
+  indexPath: string,
+  marker: string,
+  replacement: string,
+): string {
+  if (!html.includes(marker)) {
+    throw new Error(
+      `Webview HTML at ${indexPath} carries no \`${marker}\` to splice at. ` +
+        'The Vite entry (`lib/index.html`) must keep `<head>` and `</head>` verbatim; ' +
+        'an attribute added to `<head>` stops the match.',
+    );
+  }
+  return html.replace(marker, () => replacement);
+}
+
+/**
  * Build a webview document. Returns the message token minted for it alongside
  * the HTML, because the two are only meaningful together — `serveWebview` in
  * `webview-messaging.ts` is what pairs them.
@@ -55,7 +92,10 @@ export function getWebviewHtml(
   // lib/src/lib/vscode-message-token.ts.
   const messageToken = randomSecret();
 
-  html = html.replace(/(href|src)="\.?\/?assets\//g, `$1="${mediaUri}/assets/`);
+  html = html.replace(
+    /(href|src)="\.?\/?assets\//g,
+    (_match, attr: string) => `${attr}="${mediaUri}/assets/`,
+  );
 
   const csp = [
     `default-src 'none'`,
@@ -87,7 +127,9 @@ export function getWebviewHtml(
     `frame-src http://127.0.0.1:* http://localhost:*`,
   ].join('; ');
 
-  html = html.replace(
+  html = spliceOnce(
+    html,
+    indexPath,
     '<head>',
     `<head>\n    <meta http-equiv="Content-Security-Policy" content="${csp}">`,
   );
@@ -109,12 +151,14 @@ export function getWebviewHtml(
         'The build dropped `html.cspNonce` (vscode-ext/vite.config.ts); rebuild with `pnpm build:vscode`.',
     );
   }
-  html = html.replaceAll(CSP_NONCE_PLACEHOLDER, nonce);
+  html = html.replaceAll(CSP_NONCE_PLACEHOLDER, () => nonce);
 
   // The inline state script is ours, not Vite's, so it carries no placeholder —
   // nonce it directly. Injected AFTER the swap so its nonce cannot be
   // substituted a second time.
-  html = html.replace(
+  html = spliceOnce(
+    html,
+    indexPath,
     '</head>',
     `    <script nonce="${nonce}">globalThis.${HOST_MESSAGE_TOKEN_GLOBAL} = ${serializeForInlineScript(messageToken)};\nglobalThis.__DORMOUSE_HOST_STATE__ = ${serializeForInlineScript(initialState)};\nglobalThis.__DORMOUSE_SELECTED_SHELL__ = ${serializeForInlineScript(selectedShell ?? null)};\nglobalThis.${RECOVERY_COMMANDS_GLOBAL} = ${serializeForInlineScript(recoveryCommands ?? null)};\nglobalThis.${NOTEPAD_VOLATILE_GLOBAL} = ${serializeForInlineScript(notepadVolatile ?? null)};</script>\n  </head>`,
   );

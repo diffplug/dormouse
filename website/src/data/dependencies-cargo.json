@@ -42,7 +42,7 @@
     },
     {
       "name": "process-wrap",
-      "version": "9.1.0",
+      "version": "10.0.0",
       "license": "MIT OR Apache-2.0",
       "author": "Félix Saparelli <felix@passcod.name>",
       "homepage": "https://github.com/watchexec/process-wrap",
@@ -2082,14 +2082,14 @@
     },
     {
       "name": "serde_with",
-      "version": "3.20.0",
+      "version": "3.21.0",
       "license": "MIT OR Apache-2.0",
       "author": "Jonas Bushart, Marcin Kaźmierczak",
       "homepage": "https://github.com/jonasbb/serde_with/"
     },
     {
       "name": "serde_with_macros",
-      "version": "3.20.0",
+      "version": "3.21.0",
       "license": "MIT OR Apache-2.0",
       "author": "Jonas Bushart",
       "homepage": "https://github.com/jonasbb/serde_with/"

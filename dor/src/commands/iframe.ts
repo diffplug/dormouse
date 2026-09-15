@@ -5,12 +5,15 @@ import type {
   Command,
   DorCommandContext,
   IframeSurfaceResponse,
+  WorkspaceScopedFlags,
 } from './types.js';
 import {
   errorMessage,
   renderJson,
   requireControlClient,
   stringParser,
+  workspaceFlag,
+  workspaceParam,
   writeStdout,
 } from './shared.js';
 import {
@@ -19,7 +22,7 @@ import {
   resolveSurfaceOpenTarget,
 } from './open-target.js';
 
-interface IframeFlags {
+interface IframeFlags extends WorkspaceScopedFlags {
   readonly json?: boolean;
   readonly minimize?: boolean;
   readonly surface?: string;
@@ -64,6 +67,7 @@ JSON output:
         json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
         minimize: { kind: 'boolean', brief: 'Create or replace the surface minimized.', optional: true, withNegated: false },
         surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to replace or split from.', optional: true, placeholder: 'id|ref' },
+        workspace: workspaceFlag,
       },
       positional: {
         kind: 'tuple',
@@ -84,7 +88,7 @@ async function runIframeCommand(this: DorCommandContext, flags: IframeFlags, tar
   // concrete targets (URL / bare :port) were already normalized at parse time.
   let url = target;
   if (isSurfaceOpenTarget(target)) {
-    const resolved = await resolveSurfaceOpenTarget(target, client);
+    const resolved = await resolveSurfaceOpenTarget(target, client, flags.workspace);
     if (!resolved.ok) return new Error(resolved.message);
     url = resolved.value;
   }
@@ -94,6 +98,7 @@ async function runIframeCommand(this: DorCommandContext, flags: IframeFlags, tar
       minimized: flags.minimize === true,
       surface: flags.surface,
       url,
+      ...workspaceParam(flags.workspace),
     });
     writeStdout(this, renderIframeResponse(response, flags.json === true));
     return undefined;

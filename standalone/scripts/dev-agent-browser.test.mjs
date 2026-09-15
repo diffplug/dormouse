@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { copyFile, mkdir, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
@@ -74,10 +74,10 @@ async function fixture(t) {
   };
 }
 
-async function invoke(run, token = run.token, origin = run.app) {
+async function invoke(run, token = run.token, origin = run.app, cmd = 'pty_get_cwd', args = { id: 'test' }) {
   return fetch(`${run.bridge}/__dormouse_dev_host/invoke?t=${token}`, {
     method: 'POST', headers: { 'content-type': 'application/json', origin },
-    body: JSON.stringify({ cmd: 'pty_get_cwd', args: { id: 'test' } }),
+    body: JSON.stringify({ cmd, args }),
     signal: AbortSignal.timeout(5000),
   });
 }
@@ -183,4 +183,24 @@ test('shutdown kills an owned browser launcher that ignores SIGTERM', {
       await delay(25);
     }
   }, { code: 'ESRCH' });
+});
+
+
+test('registry seeds reservations above restored IDs and mirrors canonical workspace refs', async t => {
+  const f = await fixture(t);
+  const run = await f.start().ready();
+  async function command(cmd, args = {}) {
+    const response = await invoke(run, run.token, run.app, cmd, args);
+    assert.equal(response.status, 200);
+    return (await response.json()).result;
+  }
+  const cases = JSON.parse(await readFile(path.join(scripts, 'workspace-ref-cases.json'), 'utf8'));
+  await command('workspace_report', { entries: cases.map(({ id }) => ({ id, name: id, active: false })) });
+  const registry = await command('workspace_registry');
+  assert.deepEqual(registry.windows[0].workspaces.map(({ id, ref }) => ({ id, ref })), cases);
+  await command('workspace_report', { entries: [{ id: 'workspace-400', name: 'Restored', active: true }] });
+  assert.deepEqual(await command('workspace_reserve_ids', { count: 2 }), ['workspace-401', 'workspace-402']);
+  // Repeated/lower restored reports never wind the process counter backwards.
+  await command('workspace_report', { entries: [{ id: 'workspace-400', name: 'Restored', active: true }] });
+  assert.deepEqual(await command('workspace_reserve_ids', { count: 1 }), ['workspace-403']);
 });

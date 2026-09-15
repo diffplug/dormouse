@@ -14,6 +14,14 @@ import type {
   KillSurfaceResponse,
   ListSurfacesRequest,
   ListSurfacesResponse,
+  ListWorkspacesRequest,
+  ListWorkspacesResponse,
+  NewWorkspaceRequest,
+  CloseWorkspaceRequest,
+  RenameWorkspaceRequest,
+  MoveWorkspaceRequest,
+  SwitchWorkspaceRequest,
+  WorkspaceMutationResponse,
   ReadSurfaceRequest,
   ReadSurfaceResponse,
   ResolveAgentBrowserSessionRequest,
@@ -25,7 +33,7 @@ import type {
   SplitSurfaceRequest,
   SplitSurfaceResponse,
 } from './commands/types.js';
-import { SURFACE_CONTROL_METHODS, type SurfaceControlMethod } from './protocol.js';
+import { SURFACE_CONTROL_METHODS, WORKSPACE_CONTROL_METHODS, type DorControlMethod } from './protocol.js';
 import type { DorControlResult } from './protocol.js';
 
 export interface SocketControlClientOptions {
@@ -61,6 +69,12 @@ function proofMatches(provided: unknown, expected: string): boolean {
   const b = createHash('sha256').update(expected).digest();
   return timingSafeEqual(a, b);
 }
+
+/** `dor workspace close` archives and tears down every member Surface, which a
+ *  refused notepad archive can park on; the server's own reaper sits above it.
+ *  Also covers moves: must exceed `ARRIVAL_MAX` in
+ *  `standalone/src-tauri/src/routing.rs` so hand-back reasons arrive before timeout. */
+const CLOSE_WORKSPACE_TIMEOUT_MS = 30_000;
 
 export class SocketControlClient implements ControlClient {
   private readonly socketPath: string;
@@ -139,6 +153,42 @@ export class SocketControlClient implements ControlClient {
     );
   }
 
+  listWorkspaces(request: ListWorkspacesRequest): Promise<ListWorkspacesResponse> {
+    return this.request<ListWorkspacesResponse>(WORKSPACE_CONTROL_METHODS.list, request);
+  }
+
+  newWorkspace(request: NewWorkspaceRequest): Promise<WorkspaceMutationResponse> {
+    return this.request<WorkspaceMutationResponse>(WORKSPACE_CONTROL_METHODS.new, request);
+  }
+
+  renameWorkspace(request: RenameWorkspaceRequest): Promise<WorkspaceMutationResponse> {
+    return this.request<WorkspaceMutationResponse>(WORKSPACE_CONTROL_METHODS.rename, request);
+  }
+
+  // A Workspace close walks every member Surface through the closure
+  // coordinator, so it can outlast the client's ordinary 5s deadline.
+  closeWorkspace(request: CloseWorkspaceRequest): Promise<WorkspaceMutationResponse> {
+    return this.request<WorkspaceMutationResponse>(
+      WORKSPACE_CONTROL_METHODS.close,
+      request,
+      { timeoutMs: CLOSE_WORKSPACE_TIMEOUT_MS },
+    );
+  }
+
+  switchWorkspace(request: SwitchWorkspaceRequest): Promise<WorkspaceMutationResponse> {
+    return this.request<WorkspaceMutationResponse>(WORKSPACE_CONTROL_METHODS.switch, request);
+  }
+
+  // A move between windows serializes every terminal and waits for the target
+  // to adopt the Workspace, so it too can outlast the ordinary deadline.
+  moveWorkspace(request: MoveWorkspaceRequest): Promise<WorkspaceMutationResponse> {
+    return this.request<WorkspaceMutationResponse>(
+      WORKSPACE_CONTROL_METHODS.move,
+      request,
+      { timeoutMs: CLOSE_WORKSPACE_TIMEOUT_MS },
+    );
+  }
+
   /**
    * One request over one socket, preceded by a mutual handshake.
    *
@@ -155,7 +205,7 @@ export class SocketControlClient implements ControlClient {
    * client gave up.
    */
   private request<T>(
-    method: SurfaceControlMethod,
+    method: DorControlMethod,
     params: unknown,
     options?: { timeoutMs?: number },
   ): Promise<T> {

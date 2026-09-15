@@ -34,6 +34,15 @@ export function parsePositiveInt(input: string, flag: string, max = Number.POSIT
   return value;
 }
 
+/** Flag parser for non-negative integers (`--index`, 0-based). */
+export function parseNonNegativeInt(input: string, flag: string): number {
+  const value = Number(input);
+  if (input.trim() === '' || !Number.isInteger(value) || value < 0) {
+    throw new SyntaxError(`invalid ${flag} '${input}'`);
+  }
+  return value;
+}
+
 export function renderJson(payload: unknown): string {
   return `${JSON.stringify(payload, null, 2)}\n`;
 }
@@ -75,6 +84,21 @@ function resolveControlClient(options: CliOptions, timeoutMs?: number): ParseRes
 export function requireControlClient(options: CliOptions, timeoutMs?: number): ControlClient | Error {
   const result = resolveControlClient(options, timeoutMs);
   return result.ok ? result.value : new Error(result.message);
+}
+
+/** The `--workspace <ref>` flag every action command carries, defined once so
+ *  its wording cannot drift (`docs/specs/dor-cli.md` → "Handle Model"). */
+export const workspaceFlag = {
+  kind: 'parsed',
+  parse: stringParser,
+  brief: "Workspace to act in, instead of the caller's.",
+  optional: true,
+  placeholder: 'ref',
+} as const;
+
+/** The `workspace` field of a request, present only when the flag was given. */
+export function workspaceParam(workspace: string | undefined): { workspace?: string } {
+  return workspace === undefined ? {} : { workspace };
 }
 
 export function renderHandle(handle: { ref: string; id: string }, idFormat: IdFormat): string {
