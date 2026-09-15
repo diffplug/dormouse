@@ -25,8 +25,8 @@ function serializeForInlineScript(value: unknown): string {
  * `$'`, `$<name>`, and `$$`; raw terminal state may contain those sequences.
  * A function replacement is inserted verbatim, preserving the value escaped by
  * `serializeForInlineScript`.
- * Pinned by "a `$` in serialized state is not a substitution pattern" in
- * `vscode-ext/test/webview-html.test.ts`.
+ * Pinned by "treats a `$` in serialized state as data, not a substitution
+ * pattern" in `vscode-ext/test/webview-html.test.ts`.
  */
 function spliceOnce(html: string, marker: string, replacement: string): string {
   return html.replace(marker, () => replacement);

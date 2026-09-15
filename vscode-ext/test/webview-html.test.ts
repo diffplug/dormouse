@@ -1,4 +1,4 @@
-import { writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -146,6 +146,21 @@ describe('getWebviewHtml', () => {
     expect(html).not.toContain('"./assets/');
     expect(html).toContain(`${CSP_SOURCE}${mediaPath}/assets/index-AAAAAAAA.js`);
     expect(html).toContain(`${CSP_SOURCE}${mediaPath}/assets/rolldown-runtime-BBBBBBBB.js`);
+  });
+
+  it('treats a `$` in the media path as data while rewriting assets', async () => {
+    // A `$&` in a Windows extension install path expands to the matched asset
+    // attribute with replace's string form, quietly corrupting every asset URI.
+    const dollarMediaPath = `${mediaPath}$&`;
+    await mkdir(dollarMediaPath);
+    try {
+      await writeFile(join(dollarMediaPath, 'index.html'), VITE_INDEX_HTML);
+      const { html } = getWebviewHtml(webview, dollarMediaPath);
+      expect(html).toContain(`${CSP_SOURCE}${dollarMediaPath}/assets/index-AAAAAAAA.js`);
+      expect(html).toContain(`${CSP_SOURCE}${dollarMediaPath}/assets/rolldown-runtime-BBBBBBBB.js`);
+    } finally {
+      await removeDir(dollarMediaPath);
+    }
   });
 
   it('boots with no notepad mirror unless one is handed to it', () => {
