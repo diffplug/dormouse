@@ -6,7 +6,7 @@ import type { RestoredSession } from '../../lib/session-restore';
 const params = {
   surfaceType: 'tool', command: 'pnpm storybook', toolRender: 'ab-screencast',
   url: 'http://localhost:6006/edited', renderMode: 'ab-screencast',
-  session: 'dormouse.1.tool-one', wsPort: 9222, toolAnnouncedPort: 6006,
+  session: 'dormouse.1.tool-one', wsPort: 9222, toolAnnouncedPort: 6006, toolAnnouncedPath: '/token/view',
 };
 
 function engine(initial = params) {
@@ -27,6 +27,7 @@ describe('Tool Workspace transfer', () => {
     expect(plan.doors[0].params).toEqual(params);
     expect(durable.leafMeta.tool.params).not.toHaveProperty('url');
     expect(durable.leafMeta.tool.params).not.toHaveProperty('toolAnnouncedPort');
+    expect(durable.leafMeta.tool.params).not.toHaveProperty('toolAnnouncedPath');
     expect(door.params).not.toHaveProperty('session');
     expect(lath.getMeta('tool')!.params).toEqual(params);
   });

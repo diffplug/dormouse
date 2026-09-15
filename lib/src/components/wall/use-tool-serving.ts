@@ -19,6 +19,7 @@ import {
 import { attachAgentBrowserSession } from './tool-browser-session';
 import { listenerUrlsByPort } from './port-url';
 import { getToolAnnounce } from '../../lib/tool-announce-store';
+import { validToolServePath } from '../../lib/tool-announce';
 import { sessionForKey } from 'dor-lib-common/agent-browser';
 import { markAgentBrowserSessionClosed } from './agent-browser-sessions';
 import { disposeAgentBrowserSurfaceController } from './agent-browser-surface-controller';
@@ -66,10 +67,10 @@ export function useToolServing({
   // A ref, not state: it drives no render, and a leaf's entry is dropped when
   // its command exits so a re-run settles again from scratch.
   const seenPorts = useRef<Map<string, number[]>>(new Map());
-  // The announced port last applied to each leaf. A changed announcement may
+  // The announced port/path last applied to each leaf. A changed announcement may
   // re-point a live browser, but the same announcement must not keep undoing
   // URL-bar navigation just because params.url no longer names that port.
-  const appliedAnnouncedPorts = useRef<Map<string, number>>(new Map());
+  const appliedAnnouncements = useRef<Map<string, string>>(new Map());
 
   useEffect(() => {
     const platform = getPlatform();
@@ -84,8 +85,8 @@ export function useToolServing({
       for (const id of seenPorts.current.keys()) {
         if (!live.has(id)) seenPorts.current.delete(id);
       }
-      for (const id of appliedAnnouncedPorts.current.keys()) {
-        if (!live.has(id)) appliedAnnouncedPorts.current.delete(id);
+      for (const id of appliedAnnouncements.current.keys()) {
+        if (!live.has(id)) appliedAnnouncements.current.delete(id);
       }
 
       for (const leaf of leaves) {
@@ -118,7 +119,7 @@ export function useToolServing({
         // the regression the settle window exists to prevent.
         if (!running) {
           seenPorts.current.delete(leaf.id);
-          appliedAnnouncedPorts.current.delete(leaf.id);
+          appliedAnnouncements.current.delete(leaf.id);
         }
 
         if ((hasUrl || hasConflict) && !running) {
@@ -137,6 +138,7 @@ export function useToolServing({
           lath.store.updateParams(leaf.id, {
             url: undefined,
             toolAnnouncedPort: undefined,
+            toolAnnouncedPath: undefined,
             toolPortConflict: undefined,
             session: undefined,
             wsPort: undefined,
@@ -151,18 +153,20 @@ export function useToolServing({
         // the pane would show the conflict for the life of the command, telling
         // the user to announce a port it had just announced.
         // An announcement outranks whatever autobind decided, framed or
-        // refused. Only a *changed* announced port re-points a live browser:
+        // refused. Only a *changed* announced port/path re-points a live browser:
         // treating a mismatch with params.url as a change would undo URL-bar
         // navigation every poll after the user left the announced origin.
         const announcedPort = announce?.port ?? null;
-        if (announcedPort === null) appliedAnnouncedPorts.current.delete(leaf.id);
-        if (!appliedAnnouncedPorts.current.has(leaf.id) && typeof leaf.params?.toolAnnouncedPort === 'number') {
-          appliedAnnouncedPorts.current.set(leaf.id, leaf.params.toolAnnouncedPort);
+        const announcedPath = validToolServePath(announce?.path) ? announce.path : '/';
+        const announcementKey = JSON.stringify([announcedPort, announcedPath]);
+        if (announcedPort === null) appliedAnnouncements.current.delete(leaf.id);
+        if (!appliedAnnouncements.current.has(leaf.id) && typeof leaf.params?.toolAnnouncedPort === 'number') {
+          appliedAnnouncements.current.set(leaf.id, JSON.stringify([leaf.params.toolAnnouncedPort, leaf.params.toolAnnouncedPath ?? '/']));
         }
-        const announcedPortChanged = announcedPort !== null
-          && appliedAnnouncedPorts.current.get(leaf.id) !== announcedPort;
+        const announcementChanged = announcedPort !== null
+          && appliedAnnouncements.current.get(leaf.id) !== announcementKey;
         if (!running) continue;
-        if ((hasUrl || hasConflict) && !announcedPortChanged) continue;
+        if ((hasUrl || hasConflict) && !announcementChanged) continue;
 
         let ports;
         try {
@@ -180,7 +184,7 @@ export function useToolServing({
           // announced port that nothing bound frames nothing.
           entry = entries.find((candidate) => candidate.port === announce.port);
           if (!entry) continue;
-          appliedAnnouncedPorts.current.set(leaf.id, announce.port);
+          appliedAnnouncements.current.set(leaf.id, announcementKey);
         } else if (leaf.params?.toolPort !== 'auto') {
           // `announced`: never guess. No announcement, no browser.
           continue;
@@ -215,11 +219,13 @@ export function useToolServing({
         // -> Instant create). `toolFace` tests the conflict before the url, so
         // a stale verdict would keep the conflict forward over the browser.
         const agentDrivable = leaf.params?.toolRender === 'ab-screencast';
+        const url = new URL(announcedPath, entry.url).href;
         lath.store.updateParams(leaf.id, {
-          url: entry.url,
+          url,
           renderMode: agentDrivable ? 'ab-screencast' : 'iframe',
           toolPortConflict: undefined,
           toolAnnouncedPort: announcedPort ?? undefined,
+          toolAnnouncedPath: announcedPort === null ? undefined : announcedPath,
           // Reopening an existing browser is also an in-flight connection:
           // withhold its binding until open settles so a Workspace move cannot
           // capture the old stream while this webview still owns the launch.
@@ -233,7 +239,7 @@ export function useToolServing({
         // its id stable while its capabilities come and go.
         const session = sessionForKey(`tool.${leaf.id}`);
         await attachAgentBrowserSession({
-          url: entry.url,
+          url,
           platform,
           session,
           surfaceId: leaf.id,

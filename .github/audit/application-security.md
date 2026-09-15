@@ -44,7 +44,9 @@ harnesses that already exercise this are
 For `## Loopback Listeners`, read `lib/src/host/loopback-guard.ts` first — it
 states the rule — then each listener it names. Derive the set of listeners by
 searching the shipped trees yourself; the section's own list is a description of
-today's tree, not the scope.
+today's tree, not the scope. The Local-file viewer subsection adds a tokenized
+file grant: read `dor/src/file-viewer.ts` and `dor/src/file-viewer-loopback-guard.ts`,
+including its static asset discovery, descriptor lifetime, and every request gate.
 
 For the rest of `docs/specs/security-local.md`, read each section's owner first
 — `docs/specs/terminal-escapes.md`, `docs/specs/dor-browser.md`,

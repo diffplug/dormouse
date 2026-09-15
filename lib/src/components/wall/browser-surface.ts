@@ -139,7 +139,7 @@ export function namespacedToolKey(
   scope?: unknown,
 ): string[] | null {
   if (!toolName || key === null) return null;
-  return scope === 'user' ? ['user', toolName, ...key] : [toolName, ...key];
+  return scope === 'user' || scope === 'builtin' ? [scope, toolName, ...key] : [toolName, ...key];
 }
 
 /** Whether params describe a plain browser surface (vs a terminal): the unified

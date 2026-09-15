@@ -64,3 +64,15 @@ it('names the user configuration in unmatched-file errors and refuses broken ass
   await writeFile(config, 'open:\n  - {match: "*", tool: undeclared}\n');
   expect(await host().handle({ op: 'open', target, cwd: root })).toMatchObject({ status: 'error', message: expect.stringContaining('defined in this user file') });
 });
+
+it('uses the built-in viewer only as a fallback or explicit choice', async () => {
+  const target = join(root, 'docs', 'README.md');
+  expect(await host().handle({ op: 'open', target, cwd: root, tool: 'builtin:file' })).toMatchObject({
+    status: 'ok', scope: 'builtin', run: ['dor', '__view-file', target], key: [target], port: 'announced',
+  });
+  await writeFile(config, 'open:\n  - {match: "*.md", tool: "builtin:file"}\n');
+  expect(await host().handle({ op: 'open', target, cwd: root })).toMatchObject({ status: 'ok', scope: 'builtin' });
+  await rm(config);
+  expect(await host().handle({ op: 'open', target, cwd: root })).toMatchObject({ status: 'ok', scope: 'builtin' });
+  expect(await host().handle({ op: 'open', target, cwd: root, tool: 'missing' })).toMatchObject({ status: 'error' });
+});

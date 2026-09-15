@@ -875,7 +875,7 @@ export function useDorControl({
         }
         let command: string;
         let key: string[] | null = null;
-        let toolScope: 'user' | undefined;
+        let toolScope: 'user' | 'builtin' | undefined;
         const toolArgs = stringArrayParam(params.args) ?? [];
         let warnings: string[] = [];
         let render: 'iframe' | 'ab-screencast' = 'iframe';

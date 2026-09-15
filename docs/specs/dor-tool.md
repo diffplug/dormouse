@@ -95,7 +95,7 @@ Source of truth: `createToolHost` in `lib/src/host/tool-host.ts`; `FileToolTrust
 | Anonymous command | Uses `auto` |
 
 - **Must poll unbound Tools every 1.5 seconds while their command runs.** Reset settle memory on command exit. (rationale)
-- **Must let a changed announced port override a committed conflict or browser**, but only after a matching scan. An unchanged announcement never undoes URL-bar navigation. (rationale)
+- **Must let a changed announced port or path override a committed conflict or browser**, but only after a matching scan. An unchanged announcement never undoes URL-bar navigation. (rationale)
 - **Must stop ordinary port scans once a browser or conflict is committed.** An unannounced additional port appearing after settle is not detected.
 - **Must display the browser destination before awaiting agent-browser startup**, leaving the session-less renderer inert until the binding arrives. Close any browser session whose Tool disappeared or changed command during startup.
 - **Must retain a runtime re-key within the Tool's namespace**, following [Identity and dedupe](#identity-and-dedupe).
@@ -135,13 +135,21 @@ Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `dor/test/snapshot
 
 **Must accept exactly one existing local regular file for `dor open`.** Resolve it with the `$TARGET` rules in Declaring tools. URLs (including `file:`), directories, and Surface handles fail; no native-editor fallback occurs.
 
-**Must select the first matching entry of the user file's ordered `open` list**, whose entries contain `match` and `tool`. `--tool` explicitly selects a user Tool. Every association must name a Tool in that same user file. Never discover project configuration during this lookup; project `open` rules are ignored with a warning during explicit project-tool lookup.
+**Must select the first matching entry of the user file's ordered `open` list**, whose entries contain `match` and `tool`. `--tool` explicitly selects a handler. Every association must name a Tool in that same user file or `builtin:file`. Never discover project configuration during this lookup; project `open` rules are ignored with a warning during explicit project-tool lookup.
 
 **Must match patterns without `/` against the canonical filename, and patterns with `/` against the canonical path relative to the invocation CWD.** Normalize separators to `/` and use Node's POSIX `matchesGlob` semantics, including explicit patterns for dotfiles. A miss names the user config path and suggests `--tool`.
 
 **Must pass the canonical file path as one input to the selected Tool.** Reuse follows Identity and dedupe; `$TARGET` in the key provides per-file identity. `--fresh` bypasses reuse. **Never transform a plain calling terminal through `dor open`.** Create a focus-neutral split or reveal the existing Tool; an idle match in the caller's Tool pane uses the answer/prompt handshake only for a standalone integrated `dor open` invocation.
 
+**Must use `builtin:file` for supported files when no user rule matches.** An explicit unknown handler or malformed user configuration fails without fallback. Built-in identity is the canonical file path in its own scope, separate from user and project Tools.
+
+**Must run the built-in viewer as a Tool-owned `dor` process**, serving HTML, images, PDF/media, and escaped text/source previews. Markdown is source text; custom viewers may render it. Text previews and HTML/CSS dependency inspection are limited to 8 MiB per file. The grant contains at most 256 files: the opened document and statically referenced relative HTML/CSS assets within its directory tree. Root-relative, external, dynamically discovered, and unreferenced resources are unavailable.
+
+**Must retain the viewer's opened file descriptors until the Tool exits.** Refresh reads those files again, but atomic replacements and changes to the dependency graph require restarting the viewer. Cold restore runs the saved file command with a fresh URL capability; Workspace movement keeps the live binding. The listener's authority is `docs/specs/security-local.md` → Local-file viewer.
+
 Source of truth: `openCommand` in `dor/src/commands/open.ts`; `resolveOpenTool` in `lib/src/host/tool-open.ts`; `parseToolFile` in `lib/src/host/tool-registry.ts`; `surface.tool` in `lib/src/components/wall/use-dor-control.ts`. Tests: `lib/src/host/tool-open.test.ts`, `dor/test/cli-output.test.mjs`, `lib/src/components/Wall.test.tsx`.
+
+Source of truth: `fileViewerFormat` in `dor/src/file-viewer-format.ts`; `startFileViewer` / `runFileViewer` in `dor/src/file-viewer.ts`; `dor/test/file-viewer.test.mjs`.
 
 ## Take-over
 
@@ -174,6 +182,7 @@ Source of truth: `toolTakesOverCaller` / `toolRerunsInCaller` in `lib/src/compon
 **Must consume OSC 367 at the PTY owner's parser**, including malformed and unknown verbs, and emit no reply. `serve` is the only implemented verb. The escape registry is `docs/specs/terminal-escapes.md`.
 
 - **Must sanitize and bound the payload before retaining it.** `ToolAnnounce` and `parseToolAnnounce` own the field shapes and validation limits.
+- **Must treat an optional serve `path` as a path/query on the discovered port, never as another authority.** Accept at most 2,048 characters starting with one `/`, with no backslash, ASCII whitespace/control, or DEL; invalid paths are ignored and the default is `/`. The port still must belong to the designated Session's process tree. Live binding memory includes the path; durable saves omit it.
 - **Must forward parsed announcements from the host to the owning renderer**, which records the latest announcement per Session. Standalone uses `terminal:protocolEvents`; VS Code uses `terminal:toolAnnounce` scoped to the owning webview. The fake adapter applies locally.
 - **Must reconstruct announcements from raw replay without emitting replies**, and clear the renderer record on Session disposal. Ordinary terminal announcements stay inert.
 - Reserved: **Must retain `name`, `dehydrate`, and `persist` as inert parsed fields**, serving the announced-name and D1/D2 items under [Future](#future). Neither `persist: never` nor a `dehydrate` verb changes current persistence.
@@ -205,8 +214,6 @@ Source of truth: `PersistedToolMetadata` in `lib/src/lib/session-types.ts`; `sav
 
 **Scope: dor-tools** — remaining design, in implementation order.
 
-- **C — local-file presentation.** The loopback file/viewer endpoint a local
-  file needs (the iframe proxy instruments only `http://` upstreams).
 - **D1 — reaping without cooperation.** Idle-threshold reap +
   rehydrate-from-args + `persist: "never"`: every stateless tool, no new API,
   no Windows question.

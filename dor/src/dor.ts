@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { runCli } from './cli.js';
+import { runFileViewer } from './file-viewer.js';
 
 type ProcessLike = {
   argv: string[];
@@ -19,7 +20,10 @@ type ProcessLike = {
 
 declare const process: ProcessLike;
 
-runCli(process.argv.slice(2), { env: process.env, readStdin }).then(
+const execution = process.argv[2] === '__view-file' && process.argv.length === 4
+  ? runFileViewer(process.argv[3]).then(() => ({ stdout: '', stderr: '', exitCode: 0 }))
+  : runCli(process.argv.slice(2), { env: process.env, readStdin });
+execution.then(
   (result) => {
     process.stdout.write(result.stdout);
     process.stderr.write(result.stderr);

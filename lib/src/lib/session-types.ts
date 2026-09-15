@@ -16,7 +16,7 @@ export type PersistedSurfaceType = 'terminal' | 'browser' | 'tool';
  * is respawned. Derived browser state (URL/session/port conflict) never enters
  * this projection. */
 export interface PersistedToolMetadata {
-  scope?: 'user';
+  scope?: 'user' | 'builtin';
   name?: string;
   render: 'iframe' | 'ab-screencast';
   port: 'announced' | 'auto';
@@ -169,7 +169,7 @@ function isPersistedToolMetadataShape(value: unknown): boolean {
   if (!isRecord(value)) return false;
   return (
     (value.name === undefined || typeof value.name === 'string') &&
-    (value.scope === undefined || value.scope === 'user') &&
+    (value.scope === undefined || value.scope === 'user' || value.scope === 'builtin') &&
     (value.render === 'iframe' || value.render === 'ab-screencast') &&
     (value.port === 'announced' || value.port === 'auto') &&
     (value.key === undefined || (Array.isArray(value.key) && value.key.every((part) => typeof part === 'string')))

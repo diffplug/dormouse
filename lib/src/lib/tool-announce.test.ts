@@ -7,6 +7,13 @@ import { applyTerminalProtocolEvents } from './terminal-protocol';
 const serve = (payload: unknown) => `serve;${JSON.stringify(payload)}`;
 
 describe('parseToolAnnounce', () => {
+  it('accepts a same-origin serve path and drops authority-changing or malformed paths', () => {
+    expect(parseToolAnnounce(serve({ port: 6006, path: '/token/file/a%20b.html?mode=1' }))?.path).toBe('/token/file/a%20b.html?mode=1');
+    for (const path of ['https://evil.test/', '//evil.test/', '/\\evil.test/', '/a\nb', 'relative', `/${'a'.repeat(2048)}`]) {
+      expect(parseToolAnnounce(serve({ port: 6006, path }))?.path).toBeUndefined();
+    }
+  });
+
   it('reads a full serve payload', () => {
     expect(parseToolAnnounce(serve({ port: 6006, name: 'Storybook', key: ['storybook', '/repo'], dehydrate: true, persist: 'never', v: 1 }))).toEqual({
       port: 6006,

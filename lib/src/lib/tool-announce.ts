@@ -23,6 +23,8 @@ const KEY_ELEMENTS_LIMIT = 8;
 export type ToolAnnounce = {
   /** Which of the tool's ports to frame. Null when unstated. */
   port: number | null;
+  /** Same-origin path/query for the discovered port; never an authority. */
+  path?: string;
   /** Title candidate, feeding the existing channel in terminal-state.md. */
   name: string | null;
   /** Re-key request. Never dedupes — a runtime re-key only re-labels its own
@@ -81,6 +83,7 @@ export function parseToolAnnounce(content: string): ToolAnnounce | null {
 
   const announce: ToolAnnounce = {
     port: readPort(record.port),
+    ...(validToolServePath(record.path) ? { path: record.path } : {}),
     name: sanitize(record.name, NAME_LIMIT),
     key: readKey(record.key),
     dehydrate: record.dehydrate === true,
@@ -89,4 +92,10 @@ export function parseToolAnnounce(content: string): ToolAnnounce | null {
   // An announcement that says nothing actionable is not an announcement.
   if (announce.port === null && announce.name === null && announce.key === null) return null;
   return announce;
+}
+
+/** Reject authority changes rather than trying to repair process output. */
+export function validToolServePath(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= 2048 && value.startsWith('/')
+    && !value.startsWith('//') && !/[\\\u0000-\u0020\u007f]/.test(value);
 }

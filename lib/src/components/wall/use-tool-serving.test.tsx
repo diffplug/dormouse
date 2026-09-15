@@ -91,6 +91,19 @@ async function run(params: Record<string, unknown>, scans: OpenPort[][]) {
 describe('port: announced', () => {
   const announced = { surfaceType: 'tool', command: 'x', toolPort: 'announced' };
 
+  it('uses a same-origin announced path and follows path changes without resetting navigation', async () => {
+    const announce = { port: 6006, path: '/first/view', name: null, key: null, dehydrate: false, persist: null };
+    recordToolAnnounce('tool-1', announce);
+    const { state } = await run(announced, [[tcp(6006)]]);
+    expect(state.params.url).toBe('http://localhost:6006/first/view');
+    state.params.url = 'http://localhost:6006/first/edited';
+    await act(async () => { await vi.advanceTimersByTimeAsync(POLL_MS); });
+    expect(state.params.url).toBe('http://localhost:6006/first/edited');
+    recordToolAnnounce('tool-1', { ...announce, path: '/second/view' });
+    await act(async () => { await vi.advanceTimersByTimeAsync(POLL_MS); });
+    expect(state.params.url).toBe('http://localhost:6006/second/view');
+  });
+
   it('defers Workspace transfer until reopening an existing browser has settled', async () => {
     const { lath, state } = fakeLath({
       ...announced, toolRender: 'ab-screencast', renderMode: 'ab-screencast',

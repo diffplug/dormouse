@@ -195,7 +195,7 @@ export function parseToolFile(
       if (!Array.isArray(doc.open)) throw new ToolFileError(`${path}: 'open' must be an ordered list`);
       for (const rule of doc.open) {
         if (!isRecord(rule) || typeof rule.match !== 'string' || !rule.match || typeof rule.tool !== 'string'
-          || !tools.has(rule.tool) || Object.keys(rule).some(key => key !== 'match' && key !== 'tool')) {
+          || (rule.tool !== 'builtin:file' && !tools.has(rule.tool)) || Object.keys(rule).some(key => key !== 'match' && key !== 'tool')) {
           throw new ToolFileError(`${path}: each open rule needs a match pattern and a tool defined in this user file`);
         }
         open.push({ match: rule.match, tool: rule.tool });
