@@ -16,6 +16,7 @@ import type {
  */
 
 const mocks = vi.hoisted(() => ({
+  serialize: vi.fn(() => ""),
   writes: [] as string[],
   grids: [] as unknown[],
   deferWrites: false,
@@ -35,7 +36,7 @@ vi.mock("@xterm/addon-fit", () => ({
   },
 }));
 vi.mock("@xterm/addon-image", () => ({ ImageAddon: class {} }));
-vi.mock("@xterm/addon-serialize", () => ({ SerializeAddon: class { serialize(): string { return ""; } } }));
+vi.mock("@xterm/addon-serialize", () => ({ SerializeAddon: class { serialize(): string { return mocks.serialize(); } } }));
 vi.mock("@xterm/addon-unicode-graphemes", () => ({ UnicodeGraphemesAddon: class {} }));
 vi.mock("@xterm/xterm", () => ({
   Terminal: class {
@@ -223,6 +224,7 @@ beforeEach(() => {
   mocks.writeCallbacks.length = 0;
   mocks.grids.length = 0;
   vi.clearAllMocks();
+  mocks.serialize.mockReset().mockReturnValue("");
   mocks.writes.length = 0;
   arrivals = [];
   disposeAllSessions();
@@ -479,6 +481,47 @@ describe("the source half", () => {
     expect(committed.first).toHaveBeenCalledTimes(1);
     expect(committed.second).not.toHaveBeenCalled();
     expect(getWorkspacesSnapshot().workspaces.map((w) => w.id)).toContain("ws-b");
+  });
+
+  it("recovers serialization failure through host hand-back before resuming delivery or another move", async () => {
+    initWorkspaceMoves(fakePlatform());
+    getOrCreateTerminal("pane-a");
+    createWorkspace({ id: WORKSPACE_ID });
+    publishWorkspaceSession(WORKSPACE_ID, payload().workspace.session);
+    const committed = vi.fn();
+    registerWallHandle(stubWallHandle(WORKSPACE_ID, {
+      prepareWorkspaceTransfer: async () => prepared(committed),
+    }));
+    mocks.serialize.mockImplementationOnce(() => { throw new Error("serialize failed"); });
+    const moving = transferWorkspaceTo(WORKSPACE_ID, "ws-2");
+    let finished = false;
+    void moving.then(() => { finished = true; });
+    await vi.waitFor(() => expect(mocks.serialize).toHaveBeenCalled());
+    await settle();
+    expect(finished).toBe(false);
+    expect(isAlertDeliveryPaused("pane-a")).toBe(true);
+    expect(isWorkspaceTransferPending(WORKSPACE_ID)).toBe(true);
+    expect(getWindowSnapshot().workspaces.map(w => w.id)).not.toContain(WORKSPACE_ID);
+    expect(mocks.invoke).not.toHaveBeenCalledWith("transfer_workspace_content", expect.anything());
+    await expect(transferWorkspaceTo(WORKSPACE_ID, "ws-3"))
+      .resolves.toEqual({ moved: false, reason: "Workspace is already in flight" });
+
+    // Rust's ARRIVAL_MAX watchdog returns ownership even without submitted content.
+    await emit("dormouse://workspace-arrival-failed", {
+      workspaceId: WORKSPACE_ID, reason: "arrival timed out", replayIds: ["pane-a"],
+    });
+    deliverReplay({ id: "pane-a", data: "missed output", requestId: `handback-${WORKSPACE_ID}` });
+    await expect(moving).resolves.toEqual({ moved: false, reason: "arrival timed out" });
+    expect(isAlertDeliveryPaused("pane-a")).toBe(false);
+    expect(isWorkspaceTransferPending(WORKSPACE_ID)).toBe(false);
+    expect(getWindowSnapshot().workspaces.map(w => w.id)).toContain(WORKSPACE_ID);
+    expect(mocks.writes).toContain("missed output");
+    expect(committed).not.toHaveBeenCalled();
+
+    const retry = transferWorkspaceTo(WORKSPACE_ID, "ws-3");
+    await contentSent();
+    await emit("dormouse://workspace-departed", { workspaceId: WORKSPACE_ID });
+    await expect(retry).resolves.toEqual({ moved: true });
   });
 
   it("leaves the source Workspace intact when the host refuses", async () => {

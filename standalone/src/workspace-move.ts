@@ -185,30 +185,37 @@ async function handOff(
   // The second half: once every terminal's mark has passed this window, what it
   // holds is exactly the bytes before the mark. Serialized here, attached to the
   // arrival by Rust, and only then drained by the target.
-  const marks = await pendingMarks;
-  if (inFlight.get(workspaceId)?.prepared === prepared) { // else handed back while we waited: nothing to send
-    const content = await captureTransferContent(terminalIds, marks);
-    if (inFlight.get(workspaceId)?.prepared === prepared) { // else handed back while serializing
-      const alertRuntime = new Map<string, AlertRuntimeSnapshot>();
-      for (const id of terminalIds) {
-        const runtime = movePlatform?.alertPauseForTransfer?.(id);
-        if (runtime) {
-          alertRuntime.set(id, runtime);
-          content.terminals[id].alertRuntime = runtime;
+  try {
+    const marks = await pendingMarks;
+    if (inFlight.get(workspaceId)?.prepared === prepared) { // else handed back while we waited: nothing to send
+      const content = await captureTransferContent(terminalIds, marks);
+      if (inFlight.get(workspaceId)?.prepared === prepared) { // else handed back while serializing
+        const alertRuntime = new Map<string, AlertRuntimeSnapshot>();
+        inFlight.get(workspaceId)!.alertRuntime = alertRuntime;
+        for (const id of terminalIds) {
+          const runtime = movePlatform?.alertPauseForTransfer?.(id);
+          if (runtime) {
+            alertRuntime.set(id, runtime);
+            content.terminals[id].alertRuntime = runtime;
+          }
+          const delivery = snapshotAlertDelivery(id);
+          if (Object.keys(delivery).length) content.terminals[id].alertDelivery = delivery;
         }
-        const delivery = snapshotAlertDelivery(id);
-        if (Object.keys(delivery).length) content.terminals[id].alertDelivery = delivery;
-      }
-      inFlight.get(workspaceId)!.alertRuntime = alertRuntime;
-      try {
-        await invoke("transfer_workspace_content", { workspaceId, content });
-      } catch (err) {
-        // The arrival is gone (the target closed, or the watchdog handed it back);
-        // `workspace-arrival-failed` has put, or will put, this Window back.
-        console.warn("[workspace-move] transfer_workspace_content refused", err);
+        try {
+          await invoke("transfer_workspace_content", { workspaceId, content });
+        } catch (err) {
+          // The arrival is gone (the target closed, or the watchdog handed it back);
+          // `workspace-arrival-failed` has put, or will put, this Window back.
+          console.warn("[workspace-move] transfer_workspace_content refused", err);
+        }
       }
     }
-
+  } catch (err) {
+    // Rust already owns the transaction. Its ARRIVAL_MAX watchdog hands back
+    // an arrival with no content; keep the guard and delivery pause until that
+    // event restores routing, replay, runtime, and receipts together. Clearing
+    // them locally would permit another move while this one still owns PTYs.
+    console.warn("[workspace-move] content capture failed; awaiting host hand-back", err);
   }
   return outcome;
 }
