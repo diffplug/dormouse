@@ -336,6 +336,13 @@
     "homepage": "https://github.com/sindresorhus/path-key"
   },
   {
+    "name": "picomatch",
+    "version": "4.0.7",
+    "license": "MIT",
+    "author": "Jon Schlinkert (https://github.com/jonschlinkert)",
+    "homepage": "https://github.com/micromatch/picomatch"
+  },
+  {
     "name": "react",
     "version": "19.3.0",
     "license": "MIT",
