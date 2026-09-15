@@ -55,13 +55,9 @@ A `FAIL IF` that says "any" quantifies over what exists now; illustrative
 - Judge every discovered member against the applicable conditions, including
   explicit exceptions. Record FAIL for a violated condition. The secret-placement
   inventory in `security-ci.md` is normative: a secret outside the specified
-  placements is a FAIL, not a documentation omission. Apply the shared
-  preamble's exclusions for accepted risks and known gaps in `docs/specs/security.md`
-  ("What is not defended" and "Known gaps"). In particular, repo-level
-  `CHROMATIC_PROJECT_TOKEN` is explicitly accepted under "What is not defended":
-  it is not a departure from placement; record PASS for that repo-level placement
-  clause citing the acceptance. A mere mention elsewhere in the scoped specs,
-  such as a blast-radius table row, grants no exclusion.
+  placements is a FAIL, not a documentation omission. A mere mention elsewhere
+  in the scoped specs, such as a blast-radius table row, grants no exception to
+  a placement requirement.
 - Absence from an illustrative environment `Today:` list alone is not a
   violation. Report documentation omissions as INFO under `### Qualitative findings`;
   skip the INFO when another section of the scoped specs already covers the
