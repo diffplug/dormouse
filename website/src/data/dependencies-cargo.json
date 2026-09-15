@@ -42,7 +42,7 @@
     },
     {
       "name": "process-wrap",
-      "version": "9.1.0",
+      "version": "10.0.0",
       "license": "MIT OR Apache-2.0",
       "author": "Félix Saparelli <felix@passcod.name>",
       "homepage": "https://github.com/watchexec/process-wrap",
