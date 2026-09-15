@@ -257,6 +257,8 @@ export interface EnsureSurfaceResponse {
 export interface ToolSurfaceRequest extends WorkspaceScopedRequest {
   /** Registered tool name (`dor tool <name>`). */
   name?: string;
+  args?: string[];
+  global?: boolean;
   /** Raw argv (`dor tool -- <command>`); the host quotes it for the shell. */
   command?: string[];
   /** Ignore any declared key and always create — `--fresh`. */
@@ -502,6 +504,7 @@ export interface DorCommandContext extends CommandContext {
    *  only way a command can tell `dor split --` (empty tail) from a bare
    *  `dor split`. Computed once in `cli.ts` from the pre-parse argv. */
   readonly hasArgumentEscape: boolean;
+  readonly commandArgs: readonly string[];
 }
 
 export interface Command {

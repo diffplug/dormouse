@@ -27,7 +27,7 @@ const TOOL_FILE_MAX_BYTES = 256 * 1024;
 
 /** Refuse stable symlinks on every host, then fstat and cap one descriptor.
  *  POSIX also opens no-follow, closing the lstat/open replacement race there. */
-async function readToolFile(path: string): Promise<string> {
+export async function readToolFile(path: string): Promise<string> {
   const entry = await lstat(path);
   if (entry.isSymbolicLink()) {
     throw new ToolFileError(`${path}: tool file must be a regular file, not a symbolic link`);
@@ -423,7 +423,7 @@ export type ToolLookup =
       projectRoot: string;
       path: string;
       name: string;
-      run: string;
+      run: string | readonly string[];
       /** Canonical upstream URL, or null when there is no resolvable remote —
        *  the approval UI then offers only the folder grant. */
       upstreamUrl: string | null;

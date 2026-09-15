@@ -7,7 +7,7 @@
  */
 
 export type ToolHostRequest =
-  | { op: 'lookup'; name: string; cwd: string }
+  | { op: 'lookup'; name: string; cwd: string; args?: string[]; global?: boolean }
   | { op: 'trust'; kind: 'upstream' | 'folder'; projectRoot: string };
 
 /** Result of resolving a tool name. `ok` carries the rendered dedupe key: the
@@ -20,7 +20,7 @@ export type ToolLookupResult =
       projectRoot: string;
       path: string;
       name: string;
-      run: string;
+      run: string | readonly string[];
       /** Canonical upstream URL, or null when there is no resolvable remote. */
       upstreamUrl: string | null;
     }
@@ -30,9 +30,10 @@ export type ToolLookupResult =
       projectRoot: string;
       path: string;
       name: string;
-      run: string;
+      run: string | readonly string[];
       /** Renderer for the tool's browser once it serves; 'iframe' by default. */
       render: 'iframe' | 'ab-screencast';
+      scope?: 'user';
       /** How to pick the port to frame absent an announcement; 'announced' by
        *  default, meaning nothing is framed without OSC 367. */
       port: 'announced' | 'auto';

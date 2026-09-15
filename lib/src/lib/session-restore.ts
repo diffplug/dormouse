@@ -54,7 +54,7 @@ export function restoreSession(platform: PlatformAdapter, sources: RestoreSource
       leafMeta: Object.fromEntries(recoverable.map(pane => [pane.id, pane.surfaceType === 'tool' ? {
         component: 'tool', tabComponent: 'tool', title: pane.title,
         params: { surfaceType: 'tool', command: pane.command, cwd: pane.cwd,
-          toolName: pane.tool?.name, toolRender: pane.tool?.render ?? 'iframe',
+          toolScope: pane.tool?.scope, toolName: pane.tool?.name, toolRender: pane.tool?.render ?? 'iframe',
           toolPort: pane.tool?.port ?? 'announced', toolKey: pane.tool?.key },
       } : { component: 'terminal', tabComponent: 'terminal', title: pane.title }])),
     };

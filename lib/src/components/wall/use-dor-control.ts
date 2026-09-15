@@ -79,6 +79,8 @@ export type DorControlParams = {
   wsPort?: unknown;
   name?: unknown;
   fresh?: unknown;
+  args?: unknown;
+  global?: unknown;
 };
 
 // The webview view of a control request: the shared wire payload, but with
@@ -866,6 +868,8 @@ export function useDorControl({
         const toolName = stringParam(params.name)?.trim();
         let command: string;
         let key: string[] | null = null;
+        let toolScope: 'user' | undefined;
+        const toolArgs = stringArrayParam(params.args) ?? [];
         let warnings: string[] = [];
         let render: 'iframe' | 'ab-screencast' = 'iframe';
         // `dor tool -- <command>` has nowhere to declare a strategy, so it
@@ -883,7 +887,7 @@ export function useDorControl({
             detail.respond({ ok: false, error: 'this host cannot read a dormouse.yml; use `dor tool -- <command>`' });
             return;
           }
-          const lookup = await toolControl({ op: 'lookup', name: toolName, cwd });
+          const lookup = await toolControl({ op: 'lookup', name: toolName, cwd, args: toolArgs, global: booleanParam(params.global) });
           if (unavailable()) return;
           switch (lookup.status) {
             case 'trust-recorded':
@@ -891,11 +895,12 @@ export function useDorControl({
               detail.respond({ ok: false, error: 'unexpected tool host response' });
               return;
             case 'ok':
-              command = lookup.run;
+              command = typeof lookup.run === 'string' ? lookup.run : dorCommandString([...lookup.run])!;
+              toolScope = lookup.scope;
               // Namespaced under the host-resolved tool name, so two tools in
               // one repo with scope-only keys stay distinct and a runtime
               // re-key cannot name another tool's key.
-              key = namespacedToolKey(lookup.name, lookup.key);
+              key = namespacedToolKey(lookup.name, lookup.key, lookup.scope);
               render = lookup.render;
               port = lookup.port;
               warnings = lookup.warnings;
@@ -912,6 +917,7 @@ export function useDorControl({
               });
               return;
             case 'untrusted': {
+              const pendingCommand = typeof lookup.run === 'string' ? lookup.run : dorCommandString([...lookup.run])!;
               // Approval can only lead to a command gated on OSC 633. Reject
               // a shell known never to emit it before offering a prompt that
               // would otherwise approve, spawn, then silently drop the command.
@@ -931,7 +937,8 @@ export function useDorControl({
               // it keys on what the prompt is about.
               const matchesPending = (candidate: unknown) => {
                 const waiting = toolPendingFromParams(candidate);
-                return waiting?.name === lookup.name && waiting.projectRoot === lookup.projectRoot;
+                return waiting?.name === lookup.name && waiting.projectRoot === lookup.projectRoot
+                  && JSON.stringify(waiting.args ?? []) === JSON.stringify(toolArgs);
               };
               const already = findSurfaceByParams(matchesPending);
               if (already) {
@@ -942,7 +949,7 @@ export function useDorControl({
                     status: 'pending',
                     surfaceId: already.id,
                     surfaceRef: surfaceRefForId(already.id),
-                    command: lookup.run,
+                    command: pendingCommand,
                     cwd,
                     minimized: findSurfaceByParams(matchesPending)?.minimized ?? false,
                     key: null,
@@ -957,7 +964,8 @@ export function useDorControl({
               // carried and applied once they do.
               const pendingMeta: ToolPending = {
                 name: lookup.name,
-                run: lookup.run,
+                run: pendingCommand,
+                args: toolArgs,
                 path: lookup.path,
                 projectRoot: lookup.projectRoot,
                 minimized: booleanParam(params.minimized),
@@ -975,7 +983,7 @@ export function useDorControl({
                 deferTerminal: true,
                 leafMeta: toolLeafMeta(lookup.name, {
                   surfaceType: 'tool',
-                  command: lookup.run,
+                  command: pendingCommand,
                   cwd,
                   toolName: lookup.name,
                   toolPending: pendingMeta,
@@ -995,7 +1003,7 @@ export function useDorControl({
                   status: 'pending',
                   surfaceId: pending.value.id,
                   surfaceRef: pending.value.ref,
-                  command: lookup.run,
+                  command: pendingCommand,
                   cwd,
                   minimized: findSurfaceByParams(matchesPending)?.minimized ?? false,
                   key: null,
@@ -1021,6 +1029,7 @@ export function useDorControl({
           command,
           cwd,
           toolRender: render,
+          ...(toolScope ? { toolScope } : {}),
           toolPort: port,
           ...(key ? { toolKey: key } : {}),
           ...(toolName ? { toolName } : {}),
@@ -1047,7 +1056,8 @@ export function useDorControl({
         // (docs/specs/dor-tool.md -> Identity and dedupe).
         if (key && !booleanParam(params.fresh)) {
           const matchesToolKey = (candidate: unknown) =>
-            toolKeysEqual((candidate as { toolKey?: unknown } | null | undefined)?.toolKey, key);
+            (candidate as { toolScope?: unknown } | null | undefined)?.toolScope === toolScope
+            && toolKeysEqual((candidate as { toolKey?: unknown } | null | undefined)?.toolKey, key);
           const match = findSurfaceByParams(matchesToolKey);
           if (match) {
             const matchedCommand = toolCommandFromParams(lath.getMeta(match.id)?.params) || command;

@@ -1457,6 +1457,38 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it('keeps pending file inputs distinct and quotes argv after approval', async () => {
+    setToolsEnabled(true);
+    let trusted = false;
+    const toolControl = vi.fn(async (request: { op: string; args?: string[] }) => {
+      if (request.op === 'trust') { trusted = true; return { status: 'trust-recorded' as const }; }
+      const common = { projectRoot: '/repo', path: '/repo/dormouse.yml', name: 'viewer', run: ['view', ...(request.args ?? [])] };
+      return trusted ? { ...common, status: 'ok' as const, render: 'iframe' as const, port: 'auto' as const, key: request.args ?? [], warnings: [] }
+        : { ...common, status: 'untrusted' as const, upstreamUrl: null };
+    });
+    Object.assign(fake, { toolControl });
+    try {
+      await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
+      await flush();
+      const ids: string[] = [];
+      for (const target of ['a b;$(bad).md', 'second.md', 'a b;$(bad).md']) {
+        const respond = vi.fn();
+        await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+          method: SURFACE_CONTROL_METHODS.tool, params: { name: 'viewer', cwd: '/repo', args: [target] }, respond,
+        } })));
+        ids.push(respond.mock.calls[0][0].result.surfaceId);
+      }
+      expect(ids[0]).not.toBe(ids[1]);
+      expect(ids[2]).toBe(ids[0]);
+      const allow = [...container.querySelectorAll('button')].find(button => button.textContent?.includes('Always allow for folder'))!;
+      await act(async () => allow.click());
+      await flush();
+      expect(toolControl).toHaveBeenLastCalledWith({ op: 'lookup', name: 'viewer', cwd: '/repo', args: ['a b;$(bad).md'] });
+      expect(pendingShellOpts.get(ids[0])?.command).toBe("view 'a b;$(bad).md'");
+      ids.forEach(id => pendingShellOpts.delete(id));
+    } finally { setToolsEnabled(false); }
+  });
+
   it('keeps an approved tool deferred until trust lookup and shell staging finish', async () => {
     setToolsEnabled(true);
     let toolId: string | undefined;

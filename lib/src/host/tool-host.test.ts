@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -20,7 +20,7 @@ let repo = '';
 let stateDir = '';
 
 beforeEach(async () => {
-  repo = await mkdtemp(join(tmpdir(), 'dor-tool-host-'));
+  repo = await realpath(await mkdtemp(join(tmpdir(), 'dor-tool-host-')));
   stateDir = join(repo, '.state');
   await writeFile(join(repo, 'dormouse.yml'), YML);
 });
@@ -117,4 +117,41 @@ describe('createToolHost', () => {
     const result = await createToolHost({ stateDir }).handle({ op: 'lookup', name: 't', cwd: repo });
     expect(result).toMatchObject({ status: 'error' });
   });
+});
+
+it('resolves user tools without repo approval and keeps explicit project names ahead of them', async () => {
+  const path = join(repo, 'user.yml');
+  await writeFile(path, `tools:\n  storybook:\n    run: [user-storybook, $ARGS]\n  viewer:\n    run: [viewer, $TARGET]\n    prespawn_dedupe: [$TARGET]\n`);
+  const target = join(repo, 'a b; $(echo bad).md');
+  await writeFile(target, 'hello');
+  const host = createToolHost({ stateDir, userConfigPath: path });
+  expect(await host.handle({ op: 'lookup', name: 'storybook', cwd: repo })).toMatchObject({ status: 'untrusted', run: 'pnpm storybook' });
+  expect(await host.handle({ op: 'lookup', name: 'storybook', global: true, cwd: repo, args: ['--port', '1234'] }))
+    .toMatchObject({ status: 'ok', scope: 'user', run: ['user-storybook', '--port', '1234'] });
+  expect(await host.handle({ op: 'lookup', name: 'viewer', cwd: repo, args: ['a b; $(echo bad).md'] }))
+    .toMatchObject({ status: 'ok', scope: 'user', run: ['viewer', target], key: [target] });
+  expect(await host.handle({ op: 'lookup', name: 'viewer', cwd: repo, args: ['https://example.com/a.md'] }))
+    .toMatchObject({ status: 'error', message: expect.stringContaining('local file') });
+  expect(await host.handle({ op: 'lookup', name: 'viewer', cwd: repo, args: [] }))
+    .toMatchObject({ status: 'error', message: expect.stringContaining('exactly one') });
+});
+
+it('re-resolves input argv after project approval without shell interpolation', async () => {
+  await writeFile(join(repo, 'dormouse.yml'), 'tools:\n  viewer:\n    run: [viewer, $TARGET]\n    prespawn_dedupe: [$PROJECT_ROOT, $TARGET]\n');
+  const target = join(repo, "quoted ' document.md");
+  await writeFile(target, 'hello');
+  const host = createToolHost({ stateDir });
+  const request = { op: 'lookup' as const, name: 'viewer', cwd: repo, args: [target] };
+  expect(await host.handle(request)).toMatchObject({ status: 'untrusted', run: ['viewer', target] });
+  await host.handle({ op: 'trust', kind: 'folder', projectRoot: repo });
+  expect(await host.handle(request)).toMatchObject({ status: 'ok', run: ['viewer', target], key: [repo, target] });
+});
+
+it('does not silently ignore malformed user configuration or input to shell strings', async () => {
+  const path = join(repo, 'user.yml');
+  const host = createToolHost({ stateDir, userConfigPath: path });
+  await writeFile(path, 'tools:\n  viewer:\n    run: [viewer, $PROJECT_ROOT]\n');
+  expect(await host.handle({ op: 'lookup', name: 'viewer', cwd: repo })).toMatchObject({ status: 'error' });
+  expect(await host.handle({ op: 'lookup', name: 'storybook', cwd: repo, args: ['input'] }))
+    .toMatchObject({ status: 'error', message: expect.stringContaining('argument-list run') });
 });

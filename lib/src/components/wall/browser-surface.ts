@@ -60,6 +60,7 @@ export function toolPortConflictFromParams(params: unknown): number[] | null {
 export interface ToolPending {
   readonly name: string;
   readonly run: string;
+  readonly args?: string[];
   readonly path: string;
   readonly projectRoot: string;
   /** Requested at launch; applied after approval, since a pane the user cannot
@@ -135,9 +136,10 @@ export function toolKeysEqual(paramsKey: unknown, key: readonly string[] | null)
 export function namespacedToolKey(
   toolName: string | null,
   key: readonly string[] | null,
+  scope?: unknown,
 ): string[] | null {
   if (!toolName || key === null) return null;
-  return [toolName, ...key];
+  return scope === 'user' ? ['user', toolName, ...key] : [toolName, ...key];
 }
 
 /** Whether params describe a plain browser surface (vs a terminal): the unified

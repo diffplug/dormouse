@@ -29,7 +29,7 @@ const TOOL_PORT_MODES: readonly ToolPortMode[] = ['announced', 'auto'];
 export interface ToolEntry {
   readonly name: string;
   /** Command typed into the spawned shell, exactly as `dor ensure` types one. */
-  readonly run: string;
+  readonly run: string | readonly string[];
   /** Renderer for its browser; `iframe` when unstated. */
   readonly render: ToolRender;
   /** Port-selection strategy; `announced` when unstated. */
@@ -56,7 +56,7 @@ export class ToolFileError extends Error {}
 /** Substitutions a `prespawn_dedupe` element may use. Closed set: an
  *  unrecognized `$NAME` is a parse error, never a literal, because a typo kept
  *  as a constant string dedupes across every worktree on the machine. */
-const SUBSTITUTIONS = ['$PROJECT_ROOT', '$CWD'] as const;
+const SUBSTITUTIONS = ['$PROJECT_ROOT', '$CWD', '$TARGET'] as const;
 export type Substitution = (typeof SUBSTITUTIONS)[number];
 
 // `$` followed by an identifier. Matches the whole token so an unknown one can
@@ -89,7 +89,7 @@ function readDedupeTemplate(value: unknown, where: string): string[] {
 }
 
 /** Reject unknown `$NAME` tokens, and `$PROJECT_ROOT` outside a repo scope. */
-function validateSubstitutions(template: readonly string[], scope: ToolScope, where: string): void {
+export function validateSubstitutions(template: readonly string[], scope: ToolScope, where: string): void {
   for (const element of template) {
     for (const token of element.match(SUBSTITUTION_TOKEN) ?? []) {
       if (!(SUBSTITUTIONS as readonly string[]).includes(token)) {
@@ -147,8 +147,13 @@ export function parseToolFile(
     }
 
     const run = rawEntry.run;
-    if (typeof run !== 'string' || run.trim() === '') {
-      throw new ToolFileError(`${where}: 'run' is required and must be a non-empty string`);
+    if (Array.isArray(run)) {
+      if (!run.length || !run.every(arg => typeof arg === 'string' && !arg.includes('\0')) || !run[0].trim()) {
+        throw new ToolFileError(`${where}: 'run' must be a non-empty argument list`);
+      }
+      validateSubstitutions(run.filter(arg => arg !== '$ARGS'), scope, where);
+    } else if (typeof run !== 'string' || run.trim() === '') {
+      throw new ToolFileError(`${where}: 'run' is required and must be a non-empty string or argument list`);
     }
 
     let dedupeTemplate: string[] | null = null;
@@ -178,7 +183,7 @@ export function parseToolFile(
     }
     const port = (rawPort as ToolPortMode | undefined) ?? 'announced';
 
-    tools.set(name, { name, run: run.trim(), render, port, dedupeTemplate });
+    tools.set(name, { name, run: typeof run === 'string' ? run.trim() : run, render, port, dedupeTemplate });
   }
 
   return { scope, dir, tools, warnings };
@@ -190,13 +195,17 @@ export function parseToolFile(
  * one, so a null key means a fresh Surface every time.
  */
 export function resolveDedupeKey(
-  entry: ToolEntry,
-  context: { projectRoot: string | null; cwd: string },
+  entry: Pick<ToolEntry, 'name' | 'dedupeTemplate'>,
+  context: { projectRoot: string | null; cwd: string; target?: string },
 ): string[] | null {
   if (!entry.dedupeTemplate) return null;
   return entry.dedupeTemplate.map((element) =>
     element.replace(SUBSTITUTION_TOKEN, (token) => {
       if (token === '$CWD') return context.cwd;
+      if (token === '$TARGET') {
+        if (!context.target) throw new ToolFileError(`tool '${entry.name}': $TARGET requires one local file argument`);
+        return context.target;
+      }
       if (token === '$PROJECT_ROOT') {
         // Unreachable via parseToolFile, which rejects $PROJECT_ROOT outside a
         // repo scope; guard anyway so a caller assembling entries by hand

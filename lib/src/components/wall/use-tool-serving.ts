@@ -98,7 +98,7 @@ export function useToolServing({
         // dedupes (docs/specs/dor-tool.md -> Identity and dedupe). The
         // namespace that keeps process output from claiming another tool's key
         // is `namespacedToolKey`'s job; see its doc comment.
-        const announcedKey = namespacedToolKey(toolNameFromParams(leaf.params), announce?.key ?? null);
+        const announcedKey = namespacedToolKey(toolNameFromParams(leaf.params), announce?.key ?? null, leaf.params?.toolScope);
         if (announcedKey && !toolKeysEqual(leaf.params?.toolKey, announcedKey)) {
           lath.store.updateParams(leaf.id, { toolKey: announcedKey });
         }

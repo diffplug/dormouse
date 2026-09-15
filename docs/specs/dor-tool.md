@@ -32,21 +32,27 @@ Source of truth: `surfaceKindFromParams` / `isToolParams` in `lib/src/components
 
 ## Declaring tools
 
-**Must resolve a named Tool from the nearest ancestor `dormouse.yml`.** The host owns discovery, bounded reads, YAML parsing, and substitutions; the renderer receives the resolved result. Canonical field shapes are `ToolEntry` in `lib/src/host/tool-registry.ts`.
+**Must resolve a named Tool from the nearest ancestor `dormouse.yml`, then fall back to user Tools when that name is absent.** `--global` skips project discovery. A malformed project file fails lookup rather than falling back. The host owns discovery, bounded reads, YAML parsing, and substitutions; the renderer receives the resolved result. Canonical field shapes are `ToolEntry` in `lib/src/host/tool-registry.ts`.
+
+**Must read user Tools from `$XDG_CONFIG_HOME/dormouse/dormouse.yml` when that environment value is absolute, otherwise `~/.config/dormouse/dormouse.yml`.** Both local hosts use this location. User Tools require no project grant; malformed or unreadable user configuration fails lookup. Project and user Tools occupy separate reuse scopes.
 
 | Field | Behavior |
 | --- | --- |
-| `run` | Required command, typed into the configured shell after integration readiness |
+| `run` | Required shell command string or argument list, typed into the configured shell after integration readiness |
 | `render` | `iframe` by default, or `ab-screencast` |
 | `port` | `announced` by default, or `auto`; [Serving](#serving) owns selection |
 | `prespawn_dedupe` | Optional scalar or list of literal key elements with substitutions |
 
-- **Must reject unknown `prespawn_*` fields and unknown substitutions**; unknown ordinary fields produce warnings. The substitution set is `$PROJECT_ROOT`, the declaring directory, and `$CWD`, the caller's resolved directory. (rationale)
+- **Must reject unknown `prespawn_*` fields and unknown substitutions**; unknown ordinary fields produce warnings. `$PROJECT_ROOT` is the declaring directory, `$CWD` the caller's resolved directory, and `$TARGET` the canonical local file input. (rationale)
 - **Must preserve scalar `prespawn_dedupe` as a one-element literal list**, never interpret it as a command to execute. Reserve separate fields for future computed keys. (rationale)
 - **Must warn when a repo-local key omits `$PROJECT_ROOT`**, while allowing intentional cross-checkout dedupe.
-- Reserved: **Must reject `$PROJECT_ROOT` in the future user-global configuration**, which has no project root; see scope **dor-tools** under [Future](#future).
+- **Must reject `$PROJECT_ROOT` in user configuration**, which has no project root.
 
-Source of truth: `lookupTool` in `lib/src/host/tool-trust.ts`; `parseToolFile` / `resolveDedupeKey` in `lib/src/host/tool-registry.ts`; `lib/src/host/tool-registry.test.ts`.
+**Must pass named-tool inputs as argument values, never substitute them into a shell-command string.** String `run` accepts no arguments and remains literal shell syntax. List `run` expands `$TARGET`, `$CWD`, and `$PROJECT_ROOT` within elements; a whole `$ARGS` element expands all input arguments. Without `$ARGS` or `$TARGET` in the list, append the inputs. The renderer quotes the resulting argv for its configured shell.
+
+**Must require exactly one existing regular local file when `$TARGET` appears in the run list or dedupe key.** Resolve relative paths against the invocation CWD and follow symlinks to a canonical absolute path before substitution and reuse. Reject URLs, directories, and missing files. Pending approval retains the original arguments and distinguishes requests with different inputs; approval re-resolves them before launch.
+
+Source of truth: `lookupTool` in `lib/src/host/tool-trust.ts`; `parseToolFile` / `resolveDedupeKey` in `lib/src/host/tool-registry.ts`; `resolveToolInput` in `lib/src/host/tool-input.ts`; `readUserToolFile` in `lib/src/host/tool-user-config.ts`; `lib/src/host/tool-host.test.ts`, `lib/src/host/tool-registry.test.ts`.
 
 ## Identity and dedupe
 
@@ -187,10 +193,9 @@ Source of truth: `PersistedToolMetadata` in `lib/src/lib/session-types.ts`; `sav
 
 **Scope: dor-tools** — remaining design, in implementation order.
 
-- **C — glob table + `dor open`.** The user-global tools file, glob rules
-  (pattern → tool name), `dor open <target>` as sugar over `dor tool`, argument
-  substitution in `prespawn_dedupe` so per-target viewers do not collapse into
-  one pane, and the loopback file/viewer endpoint a local *file* needs (the
+- **C — glob table + `dor open`.** User-global glob rules
+  (pattern → tool name), `dor open <local-file>` as sugar over `dor tool`,
+  and the loopback file/viewer endpoint a local *file* needs (the
   iframe proxy instruments only `http://` upstreams).
 - **D1 — reaping without cooperation.** Idle-threshold reap +
   rehydrate-from-args + `persist: "never"`: every stateless tool, no new API,

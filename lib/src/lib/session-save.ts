@@ -181,7 +181,7 @@ function toolMetadataFromParams(params: Record<string, unknown> | undefined): Pe
   const key = Array.isArray(params.toolKey) && params.toolKey.every((part) => typeof part === 'string')
     ? params.toolKey as string[]
     : undefined;
-  return { ...(name ? { name } : {}), render, port, ...(key ? { key } : {}) };
+  return { ...(name ? { name } : {}), ...(params.toolScope === 'user' ? { scope: 'user' as const } : {}), render, port, ...(key ? { key } : {}) };
 }
 
 function persistedVisiblePaneTitle(title: string): string {

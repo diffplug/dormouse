@@ -6,7 +6,8 @@ Invocation: `dor --help`
 USAGE
   dor split [--left|--right|--up|--down|--auto] [--json] [--minimize] [--surface id|ref] [--workspace ref] [-- <command>...]
   dor ensure [--json] [--minimize] [--restart] [--surface id|ref] [--cwd path] [--workspace ref] -- <command>...
-  dor tool [--json] [--minimize] [--fresh] [--surface id|ref] [--workspace ref] [--cwd path] <name>...
+  dor tool [--global] [--json] [--minimize] [--fresh] [--surface id|ref] [--cwd path] [--workspace ref] <name> [args...]
+  dor tool [--json] [--minimize] [--surface id|ref] [--cwd path] [--workspace ref] -- <command>...
   dor version [--json]
   dor skill [--install] [--json]
   dor send <surface> ([--text value] [--key value] | --stdin | --sequence json) [--json] [--raw] [--workspace ref]

@@ -1719,6 +1719,8 @@ test('tool sends the name, never a command', async () => {
     method: 'toolSurface',
     request: {
       name: 'storybook',
+      args: [],
+      global: false,
       fresh: false,
       minimized: false,
       surface: undefined,
@@ -1727,8 +1729,13 @@ test('tool sends the name, never a command', async () => {
   }]);
 });
 
-test('tool rejects arguments after a name', async () => {
-  await snapshot('tool-name-args', await runCli(['tool', 'storybook', 'extra'], { client: fixtureClient() }));
+test('tool forwards named arguments as separate argv values', async () => {
+  const client = fixtureClient();
+  const result = await runCli(['tool', '--global', 'viewer', 'a b; $(bad).md'], { client });
+  assert.equal(result.exitCode, 0);
+  assert.equal(client.requests[0].request.name, 'viewer');
+  assert.equal(client.requests[0].request.global, true);
+  assert.deepEqual(client.requests[0].request.args, ['a b; $(bad).md']);
 });
 
 test('tool -- sends argv as a command, never a name', async () => {
@@ -1766,11 +1773,13 @@ test('tool with neither a name nor a command tail', async () => {
   await snapshot('tool-missing-target', await runCli(['tool'], { client: fixtureClient() }));
 });
 
-test('tool rejects a name and a command tail together', async () => {
-  await snapshot(
-    'tool-name-and-tail',
-    await runCli(['tool', 'storybook', '--', 'pnpm', 'dev'], { client: fixtureClient() }),
-  );
+test('tool keeps escaped named arguments separate from anonymous commands', async () => {
+  const client = fixtureClient();
+  const result = await runCli(['tool', 'viewer', '--', '--flag', 'a b'], { client });
+  assert.equal(result.exitCode, 0);
+  assert.equal(client.requests[0].request.name, 'viewer');
+  assert.deepEqual(client.requests[0].request.args, ['--flag', 'a b']);
+  assert.equal(client.requests[0].request.command, undefined);
 });
 
 test('tool rejects an empty command tail', async () => {

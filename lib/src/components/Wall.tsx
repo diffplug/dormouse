@@ -1,3 +1,4 @@
+import { buildShellCommandForKind, shellCommandKind } from 'dor/commands/shell-quote';
 import { captureToolParams } from './wall/tool-transfer';
 import { isWorkspaceTransferPending } from '../lib/window-session-aggregator';
 import { TerminalContextContext, type TerminalContextOpenOptions, type TerminalContextState } from './wall/wall-context';
@@ -59,7 +60,7 @@ import {
   createTerminalPaneState,
   deriveSurfaceLabel,
 } from '../lib/terminal-state';
-import { getPlatform } from '../lib/platform';
+import { getPlatform, PLATFORM_STRING } from '../lib/platform';
 import type {
   Surface as DorSurface,
   ResolvedSplitDirection as DorResolvedSplitDirection,
@@ -1585,18 +1586,21 @@ export function Wall({
       // asking again is what gives an approved tool the config its dormouse.yml
       // declared, rather than silently running it as a keyless default iframe.
       const cwd = typeof meta?.params?.cwd === 'string' ? meta.params.cwd : pending.projectRoot;
-      const resolved = await platform.toolControl?.({ op: 'lookup', name: pending.name, cwd });
+      const resolved = await platform.toolControl?.({ op: 'lookup', name: pending.name, cwd, args: pending.args });
       if (resolved?.status !== 'ok') {
         await closeSurface(id);
         return;
       }
 
       if (closingWorkspaceRef.current || isWorkspaceTransferPending(effectiveWorkspaceId) || !lath.getMeta(id) || lath.isDying(id) || isSurfaceClosing(id)) return;
+      const command = typeof resolved.run === 'string' ? resolved.run
+        : buildShellCommandForKind(shellCommandKind(getDefaultShellOpts()?.shell, PLATFORM_STRING), resolved.run);
       lath.store.updateParams(id, {
-        command: resolved.run,
+        command,
+        toolScope: resolved.scope,
         toolRender: resolved.render,
         toolPort: resolved.port,
-        ...(resolved.key ? { toolKey: namespacedToolKey(resolved.name, resolved.key) } : {}),
+        ...(resolved.key ? { toolKey: namespacedToolKey(resolved.name, resolved.key, resolved.scope) } : {}),
       });
       // Hand the leaf its command only now. The approval marker stays in place
       // until after this write, so TerminalPanel cannot consume default options
@@ -1607,7 +1611,7 @@ export function Wall({
         args: defaults?.args,
         cwd,
         untouched: true,
-        command: resolved.run,
+        command,
         requireIntegration: true,
       });
       lath.store.updateParams(id, { toolPending: undefined });

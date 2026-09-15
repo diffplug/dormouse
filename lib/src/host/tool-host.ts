@@ -10,7 +10,8 @@
  */
 import type { ToolControlResult, ToolHostRequest } from '../lib/platform/tool-types';
 import { resolveUpstreamUrl } from './git-upstream';
-import { resolveDedupeKey } from './tool-registry';
+import { resolveToolInput } from './tool-input';
+import { readUserToolFile, userToolConfigPath } from './tool-user-config';
 import {
   FileToolTrustStore,
   MemoryToolTrustStore,
@@ -30,7 +31,7 @@ export interface ToolHost {
  * run, which is annoying but never wrong, where inventing a location could put
  * a security decision somewhere the user cannot find to revoke it.
  */
-export function createToolHost(options: { stateDir?: string } = {}): ToolHost {
+export function createToolHost(options: { stateDir?: string; userConfigPath?: string } = {}): ToolHost {
   const trust: ToolTrustStore = options.stateDir
     ? new FileToolTrustStore(options.stateDir)
     : new MemoryToolTrustStore();
@@ -52,22 +53,37 @@ export function createToolHost(options: { stateDir?: string } = {}): ToolHost {
         return { status: 'trust-recorded' };
       }
 
-      const lookup = await lookupTool(request.name, request.cwd, trust);
-      if (lookup.status !== 'ok') {
-        // Every non-ok arm is already wire-shaped.
-        return lookup;
-      }
-      const { entry } = lookup;
       try {
+        const args = request.args ?? [];
+        const lookup = request.global ? { status: 'no-file' as const } : await lookupTool(request.name, request.cwd, trust);
+        if (lookup.status === 'no-file' || lookup.status === 'unknown-tool') {
+          const path = options.userConfigPath ?? userToolConfigPath();
+          const file = await readUserToolFile(path);
+          const entry = file?.tools.get(request.name);
+          if (file && entry) {
+            const input = await resolveToolInput(entry, { projectRoot: null, cwd: request.cwd, args });
+            return { status: 'ok', projectRoot: file.dir, path, name: entry.name,
+              ...input, scope: 'user', render: entry.render, port: entry.port, warnings: [...file.warnings] };
+          }
+          if (request.global && file) return { status: 'unknown-tool', projectRoot: file.dir, path, names: [...file.tools.keys()].sort() };
+          return lookup;
+        }
+        if (lookup.status === 'untrusted') {
+          const input = await resolveToolInput({ name: lookup.name, run: lookup.run, dedupeTemplate: null },
+            { projectRoot: lookup.projectRoot, cwd: request.cwd, args });
+          return { ...lookup, run: input.run };
+        }
+        if (lookup.status !== 'ok') return lookup;
+        const { entry } = lookup;
+        const input = await resolveToolInput(entry, { projectRoot: lookup.projectRoot, cwd: request.cwd, args });
         return {
           status: 'ok',
           projectRoot: lookup.projectRoot,
           path: lookup.path,
           name: entry.name,
-          run: entry.run,
+          ...input,
           render: entry.render,
           port: entry.port,
-          key: resolveDedupeKey(entry, { projectRoot: lookup.projectRoot, cwd: request.cwd }),
           warnings: [...lookup.file.warnings],
         };
       } catch (error) {

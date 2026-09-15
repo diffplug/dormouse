@@ -218,6 +218,7 @@ export async function runCli(rawArgv: string[], options: CliOptions = {}): Promi
       process: capture.process,
       options,
       hasArgumentEscape,
+      commandArgs: args,
     }),
   });
 
