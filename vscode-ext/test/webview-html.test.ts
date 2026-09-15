@@ -141,6 +141,24 @@ describe('getWebviewHtml', () => {
     }
   });
 
+  it('refuses a document whose splice marker was edited away', async () => {
+    // `<head>` is matched as a literal, so an attribute added to it in
+    // `lib/index.html` would stop the match. Splicing nothing serves a document
+    // with no CSP at all, which the boot smoketest reads as zero violations —
+    // so the throw is the only thing standing between that edit and an
+    // unpoliced webview.
+    const editedPath = await tempStorageDir();
+    try {
+      await writeFile(
+        join(editedPath, 'index.html'),
+        VITE_INDEX_HTML.replace('<head>', '<head class="dormouse">'),
+      );
+      expect(() => getWebviewHtml(webview, editedPath)).toThrow(/carries no `<head>`/);
+    } finally {
+      await removeDir(editedPath);
+    }
+  });
+
   it('rewrites asset paths onto the webview URI', () => {
     const { html } = getWebviewHtml(webview, mediaPath);
     expect(html).not.toContain('"./assets/');

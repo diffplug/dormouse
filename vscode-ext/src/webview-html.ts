@@ -18,7 +18,8 @@ function serializeForInlineScript(value: unknown): string {
 }
 
 /**
- * Splice `replacement` in at the first `marker`, never expanding it.
+ * Splice `replacement` in at the first `marker`, never expanding it. Throws
+ * when the marker is absent.
  *
  * Every document edit uses a function replacement — this helper or a callback
  * passed to `replace`/`replaceAll`. String replacements expand `$&`, `` $` ``,
@@ -27,8 +28,23 @@ function serializeForInlineScript(value: unknown): string {
  * `serializeForInlineScript`.
  * Pinned by "treats a `$` in serialized state as data, not a substitution
  * pattern" in `vscode-ext/test/webview-html.test.ts`.
+ *
+ * The marker is matched as a case-sensitive literal against whatever Vite built
+ * from `lib/index.html`, so an attribute added to `<head>` there stops it
+ * matching. Splicing nothing would serve a document with no CSP meta tag or no
+ * boot script and report neither — the same unrecoverable-looking failure the
+ * nonce-placeholder check below rejects, and one the boot smoketest could not
+ * see, because a document carrying no policy violates none. Pinned by "refuses
+ * a document whose splice marker was edited away" in
+ * `vscode-ext/test/webview-html.test.ts`.
  */
 function spliceOnce(html: string, marker: string, replacement: string): string {
+  if (!html.includes(marker)) {
+    throw new Error(
+      `Webview HTML carries no \`${marker}\` to splice at. ` +
+        'The Vite entry (`lib/index.html`) must keep the tag verbatim; an attribute on it stops the match.',
+    );
+  }
   return html.replace(marker, () => replacement);
 }
 
