@@ -115,7 +115,7 @@ const BIND_FORMS = [
 
 const LISTEN_RE = new RegExp(BIND_FORMS.map((form) => form.re).join('|'), 'gs');
 
-const SOURCE_EXT = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/;
+const SOURCE_EXT = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
 const IS_TEST = /(?:\.test\.|\.spec\.|[\\/]tests?[\\/])/;
 // These two files spell out the pattern this lint looks for — one documenting
 // it, one adding each form to prove it is load-bearing — so they can match

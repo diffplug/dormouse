@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
  * Proves `loopback-lint.mjs` is load-bearing: add one unguarded loopback
- * listener, in each bind form the tree can express, and require the lint to go
- * red. Also add one to a test file and require the lint to report it separately
- * without failing.
+ * listener, in each bind form the tree can express and in a source extension the
+ * other fixtures do not reach, and require the lint to go red. Also add one to a
+ * test file and require the lint to report it separately without failing.
  *
  * Why this exists rather than trusting a green run: the lint's whole job is to
  * *find* a bind, and the characteristic failure of a finding check is passing
@@ -39,6 +39,14 @@ const TARGET = 'standalone/scripts/clean-dev-sidecar.mjs';
 const TEST_TARGET = 'lib/src/lib/feature-flags.test.ts';
 
 /**
+ * A tracked file in a source extension `TARGET` does not exercise. `SOURCE_EXT`
+ * decides which files are read at all, so a narrowed extension list exempts a
+ * whole language variant silently — the failure the bind-form fixtures cannot
+ * see, because they only ever appear in a `.mjs` file.
+ */
+const EXT_TARGET = 'vscode-ext/vitest.smoketest.config.mts';
+
+/**
  * A fixture per bind form, keyed by the label the lint's own `BIND_FORMS`
  * carries. Written as code rather than a comment: the lint is textual and would
  * match either, but a comment would not survive someone deciding to parse
@@ -65,6 +73,15 @@ for (const [name, source] of FIXTURES) {
     `${name}\n      adding this bind to ${TARGET} stays green — loopback-lint cannot see it`,
   );
 }
+
+// `.mts` and `.cts` are TypeScript too, and the spec, the audit prompt and this
+// lint's own header all say it scans every tracked JavaScript and TypeScript
+// file. Without this case that claim rests on an extension list nothing reads.
+selftest.withAppended(
+  EXT_TARGET,
+  FIXTURES[0][1],
+  `${EXT_TARGET}\n      adding this bind stays green — SOURCE_EXT in scripts/loopback-lint.mjs skips this extension`,
+);
 
 // Test listeners belong in the live inventory but do not need a product guard.
 // Mutate a test that has no loopback bind of its own: this must stay green and
@@ -101,5 +118,7 @@ selftest.finish(
   + 'reported with no fixture is one nothing has ever matched. Either way the\n'
   + '"A new non-test listener without a guard reference fails the build"\n'
   + 'clause in docs/specs/security-local.md -> "Loopback Listeners" is not true of it.\n'
+  + 'A green extension case means SOURCE_EXT does not read that file type, so the\n'
+  + '"all tracked JavaScript and TypeScript" scope is narrower than it claims.\n'
   + 'The test case must stay green and appear under the test heading.',
 );
