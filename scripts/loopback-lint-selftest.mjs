@@ -2,7 +2,8 @@
 /**
  * Proves `loopback-lint.mjs` is load-bearing: add one unguarded loopback
  * listener, in each bind form the tree can express, and require the lint to go
- * red.
+ * red. Also add one to a test file and require the lint to report it separately
+ * without failing.
  *
  * Why this exists rather than trusting a green run: the lint's whole job is to
  * *find* a bind, and the characteristic failure of a finding check is passing
@@ -35,6 +36,7 @@ const LINT = 'scripts/loopback-lint.mjs';
  * between the edit and the restore.
  */
 const TARGET = 'standalone/scripts/clean-dev-sidecar.mjs';
+const TEST_TARGET = 'lib/src/lib/feature-flags.test.ts';
 
 /**
  * A fixture per bind form, keyed by the label the lint's own `BIND_FORMS`
@@ -64,6 +66,16 @@ for (const [name, source] of FIXTURES) {
   );
 }
 
+// Test listeners belong in the live inventory but do not need a product guard.
+// Mutate a test that has no loopback bind of its own: this must stay green and
+// print the path under the test heading.
+selftest.withAppendedOutput(
+  TEST_TARGET,
+  FIXTURES[0][1],
+  `${TEST_TARGET}:`,
+  `${TEST_TARGET}\n      a test listener is not reported separately by loopback-lint`,
+);
+
 // Every alternative the lint declares needs a fixture above, or it is a claim
 // nothing checks — which is how a `WebSocket.Relay` branch that matched no real
 // API rode along beside a working one. Read as text because `loopback-lint.mjs`
@@ -88,5 +100,6 @@ selftest.finish(
   + 'LISTEN_RE in scripts/loopback-lint.mjs does not match that bind form — and a form\n'
   + 'reported with no fixture is one nothing has ever matched. Either way the\n'
   + '"a new loopback bind that does not reference a guard module fails the build"\n'
-  + 'clause in docs/specs/security-local.md -> "Loopback Listeners" is not true of it.',
+  + 'clause in docs/specs/security-local.md -> "Loopback Listeners" is not true of it.\n'
+  + 'The test case must stay green and appear under the test heading.',
 );
