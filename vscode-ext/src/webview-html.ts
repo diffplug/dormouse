@@ -38,11 +38,17 @@ function serializeForInlineScript(value: unknown): string {
  * a document whose splice marker was edited away" in
  * `vscode-ext/test/webview-html.test.ts`.
  */
-function spliceOnce(html: string, marker: string, replacement: string): string {
+function spliceOnce(
+  html: string,
+  indexPath: string,
+  marker: string,
+  replacement: string,
+): string {
   if (!html.includes(marker)) {
     throw new Error(
-      `Webview HTML carries no \`${marker}\` to splice at. ` +
-        'The Vite entry (`lib/index.html`) must keep the tag verbatim; an attribute on it stops the match.',
+      `Webview HTML at ${indexPath} carries no \`${marker}\` to splice at. ` +
+        'The Vite entry (`lib/index.html`) must keep `<head>` and `</head>` verbatim; ' +
+        'an attribute added to `<head>` stops the match.',
     );
   }
   return html.replace(marker, () => replacement);
@@ -123,6 +129,7 @@ export function getWebviewHtml(
 
   html = spliceOnce(
     html,
+    indexPath,
     '<head>',
     `<head>\n    <meta http-equiv="Content-Security-Policy" content="${csp}">`,
   );
@@ -151,6 +158,7 @@ export function getWebviewHtml(
   // substituted a second time.
   html = spliceOnce(
     html,
+    indexPath,
     '</head>',
     `    <script nonce="${nonce}">globalThis.${HOST_MESSAGE_TOKEN_GLOBAL} = ${serializeForInlineScript(messageToken)};\nglobalThis.__DORMOUSE_HOST_STATE__ = ${serializeForInlineScript(initialState)};\nglobalThis.__DORMOUSE_SELECTED_SHELL__ = ${serializeForInlineScript(selectedShell ?? null)};\nglobalThis.${RECOVERY_COMMANDS_GLOBAL} = ${serializeForInlineScript(recoveryCommands ?? null)};\nglobalThis.${NOTEPAD_VOLATILE_GLOBAL} = ${serializeForInlineScript(notepadVolatile ?? null)};</script>\n  </head>`,
   );
