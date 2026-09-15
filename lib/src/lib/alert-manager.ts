@@ -366,10 +366,25 @@ export class AlertManager {
       // transition change the projection.
       onChange: () => {
         const entry = this.entries.get(id);
-        if (entry && this.isWatching(entry)) this.notify(id);
+        if (!entry || !this.isWatching(entry)) return;
+        this.withdrawResumedWatchingRing(entry);
+        this.notify(id);
       },
       onSettled: () => this.onSettled(id),
     });
+  }
+
+  /**
+   * Watched work that resumed invalidates a ring inferred from silence, so the
+   * next settle raises a fresh one on fresh delivery delays. Not `releaseRing`:
+   * that resets the detector, which would stop this run from settling again.
+   * Callers are the WATCHING-only paths; this adds no rule-set check of its own.
+   */
+  private withdrawResumedWatchingRing(entry: AlertEntry): void {
+    if (!this.deferAlertsUntilQuiet || entry.watchingRingingCommand === null) return;
+    if (!entry.detector.isConfirmedBusy()) return;
+    entry.watchingRingingCommand = null;
+    entry.outputSinceWatchingRing = false;
   }
 
   /** A busy Session went quiet. Whether that rings is decided downstream. */

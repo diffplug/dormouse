@@ -238,9 +238,9 @@ The source cwd is read from `getTerminalPaneState(sourceId).cwd`. **Never inheri
 
 **Every kill routes through the notepad close coordinator**, confirmed and untouched-fast-path alike, which archives the Surface's notes before teardown and can refuse the close (`docs/specs/notepad.md` → "Closure"; that spec also names who may still tear a Surface down immediately).
 
-**Untouched sessions skip this confirmation.** A newly spawned shell starts `untouched: true`; the first user-originated PTY input flips it to false. Counted: printable keys, Enter, control keys, keyboard CSI such as arrows/history, paste, file-drop path insertion. Not counted: replay-shaped terminal reports and stripped mouse-report-only input — **the gate checks `inputIsReplayTerminalReport`**, the broader synthetic-report check gating input recording and alert attention, not this flag. Killing an untouched pane runs the normal kill animation/dispose path immediately; killing an untouched door first reattaches it only far enough to reuse that removal path, then kills it with no overlay.
+**Untouched sessions skip this confirmation.** A newly spawned shell starts `untouched: true`; the first user-originated PTY input flips it to false. Counted: printable keys, Enter, control keys, keyboard CSI such as arrows/history, paste, file-drop path insertion, forwarded mouse reports. Not counted: replay-shaped terminal reports and mouse reports removed by an override. Killing an untouched pane runs the normal kill animation/dispose path immediately; killing an untouched door first reattaches it only far enough to reuse that removal path, then kills it with no overlay.
 
-Source of truth: `requestKill` (every kill gesture: Door reattach, untouched fast path, or staging the overlay) and `acceptKill` in `lib/src/components/Wall.tsx`, `lib/src/components/KillConfirm.tsx`.
+Source of truth: `requestKill` (every kill gesture: Door reattach, untouched fast path, or staging the overlay) and `acceptKill` in `lib/src/components/Wall.tsx`, `lib/src/components/KillConfirm.tsx`; `wireXtermHandlers` in `lib/src/lib/terminal-lifecycle.ts` (untouched input gate).
 
 ## Selection overlay
 

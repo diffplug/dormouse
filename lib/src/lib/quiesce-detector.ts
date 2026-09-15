@@ -30,6 +30,9 @@ const T_RESIZE_DEBOUNCE = cfg.alert.resizeDebounce;
 /** Silence from the last accepted output through a confirmed settle. */
 const QUIESCE_AFTER_OUTPUT_MS = T_MIGHT_NEED_ATTENTION + T_SETTLED_CONFIRM;
 
+/** Longest silence unconfirmed candidate history can span and still count. */
+const CANDIDATE_HISTORY_TTL_MS = T_BUSY_CANDIDATE_GAP + T_BUSY_CONFIRM_GAP;
+
 /**
  * Watches one Session's PTY output and reports busy/quiet transitions.
  *
@@ -95,6 +98,15 @@ export class QuiesceDetector {
     if (this.disposed || this.resizeGrace) return;
 
     const now = Date.now();
+    // Candidate history only describes one run of output. Timer callbacks can
+    // be delayed in hidden views, so expire it against the clock on arrival.
+    if (
+      !this.isConfirmedBusy() && this.lastOutputAt !== null
+      && now - this.lastOutputAt > CANDIDATE_HISTORY_TTL_MS
+    ) {
+      this.reset();
+    }
+
     this.lastOutputAt = now;
     this.lastAcceptedOutputAt = now;
 
