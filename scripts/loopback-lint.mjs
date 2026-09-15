@@ -7,10 +7,12 @@
  * Why this exists: a loopback bind is not an access control — the attacker that
  * matters is a page open in the user's own browser, which reaches `127.0.0.1`
  * as easily as our webview does, and an ephemeral port is not a secret. Two of
- * the three listeners we ship got that wrong at some point, and both were found
+ * the listeners in this tree got that wrong at some point, and both were found
  * by an LLM audit rather than by CI. The audit is thorough but probabilistic;
- * this makes the cheap half of the rule deterministic, so a *fourth* listener
- * fails a build instead of waiting for the next audit to notice it.
+ * this makes the cheap half of the rule deterministic, so the *next* listener
+ * fails a build instead of waiting for the next audit to notice it. No count
+ * lives here: the inventory is docs/specs/security-local.md's, and a count
+ * repeated in two places is one that drifts in one of them.
  *
  * The check: any non-test source file that binds a TCP listener to loopback
  * must reference one of the guard modules — `lib/src/host/loopback-guard.ts`
