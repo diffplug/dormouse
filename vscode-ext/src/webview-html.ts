@@ -20,20 +20,11 @@ function serializeForInlineScript(value: unknown): string {
 /**
  * Splice `replacement` in at the first `marker`, never expanding it.
  *
- * Every edit this file makes to the document uses a *function* replacement —
- * this helper, or a callback passed to `replace`/`replaceAll` directly. A
- * *string* replacement expands `$&`, `` $` ``, `$'`, `$<name>` and `$$` inside
- * itself, so any `$` in it is read as a substitution pattern against the
- * document being edited. `serializeForInlineScript` does not escape `$` (nor
- * does `JSON.stringify`), and the titles, notes and recovery commands it
- * serializes are raw terminal output that keeps `$` verbatim — `sanitizeText`
- * in `lib/src/lib/terminal-protocol.ts` strips only C0/C1 and whitespace. So a
- * pane title of `` $` `` would splice a copy of the document prefix into the
- * boot script, literal `</script>` from Vite's own module tag included, closing
- * that script at the tokenizer level so none of the boot globals are ever set;
- * because the title arrives from `workspaceState`, every later launch would do
- * it again. A function replacement is inserted verbatim, so what
- * `serializeForInlineScript` escaped is the whole of what the document gets.
+ * Every document edit uses a function replacement — this helper or a callback
+ * passed to `replace`/`replaceAll`. String replacements expand `$&`, `` $` ``,
+ * `$'`, `$<name>`, and `$$`; raw terminal state may contain those sequences.
+ * A function replacement is inserted verbatim, preserving the value escaped by
+ * `serializeForInlineScript`.
  * Pinned by "a `$` in serialized state is not a substitution pattern" in
  * `vscode-ext/test/webview-html.test.ts`.
  */
@@ -79,7 +70,10 @@ export function getWebviewHtml(
   // lib/src/lib/vscode-message-token.ts.
   const messageToken = randomSecret();
 
-  html = html.replace(/(href|src)="\.?\/?assets\//g, (_match, attr: string) => `${attr}="${mediaUri}/assets/`);
+  html = html.replace(
+    /(href|src)="\.?\/?assets\//g,
+    (_match, attr: string) => `${attr}="${mediaUri}/assets/`,
+  );
 
   const csp = [
     `default-src 'none'`,
