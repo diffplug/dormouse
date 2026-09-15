@@ -904,6 +904,7 @@ describe('terminal-registry alert behavior', () => {
     ['win32 key', '\x1b[88;45;120;1;0;1_'],
     ['arrow key', '\x1b[A'],
     ['SS3 key', '\x1bOA'],
+    ['mouse report with a real key', '\x1b[<35;10;20Mx'],
   ])('counts a %s as attention and forwards it unchanged', (_name, input) => {
     const id = 'encoded-input-attention';
     const entry = createSession(id);
@@ -924,6 +925,12 @@ describe('terminal-registry alert behavior', () => {
     ['device attributes', '\x1b[?1;2c'],
     ['focus report', '\x1b[I'],
     ['combined replies', '\x1bP1$r0m\x1b\\\x1b[?1;2c'],
+    ['SGR hover report', '\x1b[<35;10;20M'],
+    ['SGR wheel report', '\x1b[<64;10;20M'],
+    ['SGR release report', '\x1b[<0;10;20m'],
+    ['urxvt mouse report', '\x1b[64;10;20M'],
+    ['X10 mouse report', '\x1b[M@!!'],
+    ['combined mouse reports', '\x1b[<35;10;20M\x1b[64;10;20M\x1b[M@!!'],
   ])('forwards a live %s without taking attention from another pane', (_name, input) => {
     const id = 'reply-attention';
     const entry = createSession(id);

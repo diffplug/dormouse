@@ -8,7 +8,7 @@
 
 ## Attention
 
-**Why attention uses the narrow reply classifier.** The prompt recorder filters every CSI/SS3 sequence because it cannot interpret them as command text. Reusing that filter for attention ignored real encoded keys, while its omission of DCS let device-query replies attend background panes; regression tests reproduced both failures in September 2026. The narrower reply classifier already used for replay and untouched-session tracking separates keys from replies without changing live PTY forwarding.
+**Why attention uses the narrow reply classifier.** The prompt recorder filters every CSI/SS3 sequence because it cannot interpret them as command text. Reusing that filter for attention ignored real encoded keys, while its omission of DCS let device-query replies attend background panes; regression tests reproduced both failures in September 2026. The narrower reply classifier already used for replay and untouched-session tracking separates keys from replies without changing live PTY forwarding. Mouse-only chunks need a separate guard: the narrower classifier does not include mouse encodings, and inside programs can request hover and wheel reports without a click. Those reports otherwise dismiss a ring and cancel its pending alarms. Actual clicks already attend through the Pane’s DOM handler.
 
 ## Completion events
 

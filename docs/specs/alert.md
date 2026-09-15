@@ -44,7 +44,7 @@ Source of truth: `AlertState` / `ActivityNotification` / `SessionStatus` in `lib
 
 ## Attention
 
-**Must set `attentionId` only for Pane body/header clicks, entering passthrough, typing in passthrough (including CSI/SS3 keyboard encodings), or a Door click or `Enter` on one** — both reattach into passthrough. **Never treat terminal replies as human attention** (rationale).
+**Must set `attentionId` only for Pane body/header clicks, entering passthrough, typing in passthrough (including CSI/SS3 keyboard encodings), or a Door click or `Enter` on one** — both reattach into passthrough. **Never treat terminal replies or mouse-only report chunks as keyboard input or attention** (rationale).
 
 **Never count** visibility, command-mode selection, hover, a Door existing in the baseboard, or reattaching a Door with `d` into command mode.
 
