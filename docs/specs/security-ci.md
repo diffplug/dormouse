@@ -73,12 +73,13 @@ This repository runs the [tend](https://github.com/max-sixty/tend) agent harness
   - No org-level secret visible to this repository at all (see "Org-level secrets").
 - **FAIL IF** `CHROMATIC_PROJECT_TOKEN` is missing from `secrets.allowed` in `.config/tend.yaml` (rationale).
 - **FAIL IF** `.github/workflows/workflow-audit.yaml` is missing, disabled, or has not produced a successful run in the last 48 hours. Treat one skipped run as a signal rather than as slack in the window (rationale).
+- **FAIL IF** Renovate's `github-actions` manager can update `.github/workflows/tend-*.yaml`; the tend generator owns every dependency pin (rationale).
 - **FAIL IF** any `tend-*.yaml` pins `max-sixty/tend` below `0.1.19`, the release that pins instruction files by glob at any depth (rationale).
 - **FAIL IF** any `tend-*.yaml` workflow uses an unpinned action reference (e.g. `@main`, no version). Tag pins are accepted inside `tend-*.yaml` alone, the file being owned by the upstream generator; every other workflow — agent-managed or not — must SHA-pin per "GitHub Actions Policies".
 - **FAIL IF** any job in an agent-managed workflow has **effective** `GITHUB_TOKEN` permissions beyond `contents: write`, `pull-requests: write`, `issues: write`, `id-token: write`, `actions: read`, or any `read` permission. Effective, not declared: apply job permissions over workflow permissions over the repository default; omitted scopes in an explicit block become `none` (rationale).
 - **FAIL IF** `default_workflow_permissions` for this repository is not `read`, or `can_approve_pull_request_reviews` is not `false` (`gh api repos/diffplug/dormouse/actions/permissions/workflow`) — the backstop for every permission bullet in this spec (rationale).
 
-Source of truth: `WINDOW` and `is_tend_regen` in `.github/workflows/workflow-audit.yaml`.
+Source of truth: `packageRules` in `.github/renovate.json`; `WINDOW` and `is_tend_regen` in `.github/workflows/workflow-audit.yaml`.
 
 ## VS Code Extension Releases
 

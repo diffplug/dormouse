@@ -131,9 +131,9 @@
       "allowedVersions": "1.85.0"
     },
     {
-      "description": "tend manages its own action version (the tend bot opens its own update PRs); don't let Renovate bump max-sixty/tend",
+      "description": "tend-generated workflows are replaced byte-for-byte by nightly regeneration; let the generator own every dependency pin so Renovate and tend cannot alternate upgrades and downgrades",
       "matchManagers": ["github-actions"],
-      "matchPackageNames": ["max-sixty/tend"],
+      "matchFileNames": [".github/workflows/tend-*.yaml"],
       "enabled": false
     },
     {
