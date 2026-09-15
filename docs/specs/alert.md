@@ -157,7 +157,7 @@ Rules:
 - **Editing the rule set re-derives WATCHING across every live Session immediately**, so a mid-command enable shows what that command is doing *right now* rather than a fresh `NOTHING_TO_SHOW` (rationale).
 - **A WATCHING ring outlives the command that raised it.** Watching switches off when the watched command exits; its ring and originating command key remain in `watchingRingingCommand`.
 - **Removing a rule silences its WATCHING rings**, even after the command has exited; other dismissal paths follow Clearing And TODO. A command merely ending never clears the ring.
-- **The rule set is app-global and persisted** (`dormouse:watched-commands`), starting empty, so WATCHING is off everywhere until the user turns it on. **In VS Code the shared extension host is authoritative**, so a stale webview can neither replace unrelated rules nor keep reporting an obsolete list; the seed/mutation/broadcast wire contract is `docs/specs/transport.md`.
+- **The rule set is app-global and persisted** (`dormouse:watched-commands`), starting empty, so WATCHING is off everywhere until the user turns it on. **The host is authoritative wherever one serves several webviews** — the VS Code extension host, and the standalone sidecar — so a stale webview can neither replace unrelated rules nor keep reporting an obsolete list: the first webview's persisted copy is taken as the seed, an edit is a delta, and the host broadcasts its canonical snapshot back. The seed/mutation/broadcast wire contract is `docs/specs/transport.md`.
 
 **Limitation:** WATCHING needs the shell to report command boundaries (`OSC 633` / `OSC 133`). Shells without integration (`docs/specs/terminal-escapes.md`) never report a command name, so WATCHING never engages and the bell reports "nothing is running". Terminal reports still work; command-exit alerting also requires semantic command boundaries. **Never route the keystroke fallback in `docs/specs/terminal-state.md` into the `AlertManager`** (rationale).
 
@@ -241,7 +241,7 @@ Clearing behavior:
 
 ## Alarm settings
 
-The alarm settings are a second app-global store beside the WATCHING rule set, edited in the app-global **Settings** dialog (below), which also carries the theme picker ([theme.md](./theme.md)), the shell picker ([standalone.md](./standalone.md)), and the remote-control section ([relay.md](./relay.md)). **Each of those keeps its own store — never fold one into `AlertSettings`**, which is relayed wholesale to the VS Code extension host.
+The alarm settings are a second app-global store beside the WATCHING rule set, edited in the app-global **Settings** dialog (below), which also carries the theme picker ([theme.md](./theme.md)), the shell picker ([standalone.md](./standalone.md)), and the remote-control section ([relay.md](./relay.md)). **Each of those keeps its own store — never fold one into `AlertSettings`**, which is relayed wholesale to the host. **A host revalidates the blob before installing it** (`normalizeAlertSettings`): a webview must never be able to hand it a NaN or an absurd timer. Both stores run the same two classes in either host (`lib/src/lib/watched-command-host.ts`, `lib/src/lib/alert-settings-host.ts`), bound for standalone by `lib/src/host/alert-store-host.ts`; the shape, its defaults and its validation are the platform-free `lib/src/lib/alert-settings-model.ts`.
 
 | Field | Meaning |
 |---|---|
@@ -332,17 +332,18 @@ Source of truth: `lib/src/components/SettingsDialog.tsx`; `SettingsPreview` in `
 | `ringing` | Any member Session is `ALERT_RINGING`. |
 | `todo` | Any member Surface has `todo === true`. |
 | `count` | Number of members ringing or TODO; each Surface counts once. |
+| `ringSeq` | The largest member `ringSeq`; read only for change, so a new ring replays the indicator's burst and returning to the Workspace does not. |
 
 **Must keep the projection display-only:** it never enters the Activity machine or fires its own ring. A Surface with no activity entry contributes nothing. Callers **must include** minimized (`Doored`) Surfaces.
 
-Reserved: **Must include inactive Workspaces' Surfaces when projecting their unions** (`docs/specs/layout.md` → Future, workspaces-rollout).
+**Must project every Workspace, active or not.** The Activity store spans the whole Window, so what scopes it to one Workspace is the membership each mounted Wall publishes — panes ∪ doors, on every layout commit.
 
-Source of truth: `computeWorkspaceUnion` in `lib/src/lib/workspace-union.ts`; `lib/src/lib/workspace-union.test.ts`.
+Source of truth: `computeWorkspaceUnion` in `lib/src/lib/workspace-union.ts`; `setWorkspaceSurfaces` in `lib/src/lib/workspace-surfaces.ts`; `lib/src/lib/workspace-union.test.ts`.
 
 Where it surfaces is host-specific:
 
 - **VS Code** reflects the terminal portion onto native chrome — `docs/specs/vscode.md`, which also owns why browser-surface TODO stays webview-local.
-- **Standalone** shows terminal rings/TODOs on panes and doors, and a browser Surface's `todo` on its own door. The workspace-strip union indicators are staged with the strip — `docs/specs/layout.md` `## Future` (workspaces-rollout).
+- **Standalone** shows terminal rings/TODOs on panes and doors, and a browser Surface's `todo` on its own door. A **hidden** Workspace's tab additionally carries its union's TODO pill and bell, with `count` in the tab's accessible name; the visible Workspace's tab carries none, its panes and doors already saying it (`WorkspaceStrip` in `lib/src/components/WorkspaceStrip.tsx`).
 
 ## UI Contract
 

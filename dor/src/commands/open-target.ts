@@ -1,7 +1,7 @@
 /** Target normalization shared by `dor iframe` and `dor ab open`; see
  * docs/specs/dor-cli.md → "Browser Open Target Resolution". */
 
-import { errorMessage } from './shared.js';
+import { errorMessage, workspaceParam } from './shared.js';
 import type { ControlClient, ParseResult } from './types.js';
 
 declare const URL: {
@@ -88,9 +88,10 @@ export function normalizeConcreteOpenUrl(target: string): string {
 export async function resolveSurfaceOpenTarget(
   target: string,
   client: ControlClient,
+  workspace?: string,
 ): Promise<ParseResult<string>> {
   try {
-    const { url } = await client.resolveOpenTarget({ surface: target });
+    const { url } = await client.resolveOpenTarget({ surface: target, ...workspaceParam(workspace) });
     return { ok: true, value: url };
   } catch (error) {
     return { ok: false, message: errorMessage(error) };

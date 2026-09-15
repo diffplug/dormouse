@@ -24,6 +24,7 @@ import {
   PaneWriteContext,
   SelectedIdContext,
   WallActionsContext,
+  WorkspaceActiveContext,
 } from './wall-context';
 
 type AgentBrowserPanelParams = AgentBrowserSurfaceParams;
@@ -67,7 +68,12 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   const snapshot = useSyncExternalStore(controller.subscribe, controller.snapshot);
   const { tabs, status, connectionLost, hasFrame, poppedOut, relaunching, streamPort } = snapshot;
 
-  const interactive = mode === 'passthrough' && selectedId === id;
+  // Gated on the same Workspace-aware visibility the streaming body reads, so a
+  // Workspace left in passthrough on a browser pane stops forwarding (and
+  // preventDefault-ing) window keystrokes the moment it is hidden. `parked` is
+  // deliberately not part of it: a parked leaf is never the selected pane.
+  const workspaceActive = useContext(WorkspaceActiveContext);
+  const interactive = workspaceActive && mode === 'passthrough' && selectedId === id;
   const interactiveRef = useRef(interactive);
   interactiveRef.current = interactive;
   // A direct mouse click on the canvas should reach the page even when this pane

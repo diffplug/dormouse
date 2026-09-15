@@ -87,17 +87,131 @@ describe("TauriAdapter session-flush handshake", () => {
   });
 });
 
-describe("TauriAdapter legacy session cleanup", () => {
-  it("asks Rust to clear orphaned temp state when no main snapshot exists", async () => {
+describe("TauriAdapter cwd probing", () => {
+  it("sends one pty_get_cwds for the Workspaces saving together", async () => {
+    // Every Wall answers the quit flush with its own `getCwds`; uncoalesced,
+    // N Workspaces cost N sidecar round trips and N `lsof` spawns inside them.
+    const adapter = new TauriAdapter();
+    vi.mocked(rawInvoke).mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd !== "pty_get_cwds") return undefined;
+      const ids = (args as { ids: string[] }).ids;
+      return Object.fromEntries(ids.map((id) => [id, `/cwd/${id}`]));
+    });
+
+    const [a, b] = await Promise.all([adapter.getCwds(["pane-a"]), adapter.getCwds(["pane-b"])]);
+
+    const cwdCalls = vi.mocked(rawInvoke).mock.calls.filter(([cmd]) => cmd === "pty_get_cwds");
+    expect(cwdCalls).toHaveLength(1);
+    expect(cwdCalls[0][1]).toEqual({ ids: ["pane-a", "pane-b"] });
+    expect(a).toEqual({ "pane-a": "/cwd/pane-a" });
+    expect(b).toEqual({ "pane-b": "/cwd/pane-b" });
+  });
+});
+
+describe("TauriAdapter port probing", () => {
+  it("sends one pty_get_open_ports_many for a whole listing, and fails soft", async () => {
+    // `dor list --ports` across Workspaces asks once for every terminal: the
+    // sidecar's scan is synchronous, so one call is one pass over the process
+    // and socket tables instead of one per terminal.
+    const adapter = new TauriAdapter();
+    const port = (value: number) => ({ family: "IPv4", address: "127.0.0.1", port: value, pid: 1 });
+    vi.mocked(rawInvoke).mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd !== "pty_get_open_ports_many") return undefined;
+      const ids = (args as { ids: string[] }).ids;
+      return Object.fromEntries(ids.map((id, index) => [id, [port(5000 + index)]]));
+    });
+
+    expect(await adapter.getOpenPortsMany(["pane-a", "pane-b"])).toEqual({
+      "pane-a": [port(5000)],
+      "pane-b": [port(5001)],
+    });
+    const calls = vi.mocked(rawInvoke).mock.calls.filter(([cmd]) => cmd === "pty_get_open_ports_many");
+    expect(calls).toHaveLength(1);
+    expect(calls[0][1]).toEqual({ ids: ["pane-a", "pane-b"] });
+
+    // A failed scan is no ports, never a rejected listing.
+    vi.mocked(rawInvoke).mockRejectedValueOnce(new Error("sidecar is gone"));
+    expect(await adapter.getOpenPortsMany(["pane-a"])).toEqual({});
+  });
+});
+
+// docs/specs/transport.md -> "The governing rule": standalone restores window
+// state, so nothing is deleted at boot and the record is claimed once.
+describe("TauriAdapter window persistence", () => {
+  const session = { version: 3 as const, panes: [{ id: "pane-a", title: "A", cwd: "/a", untouched: false }] };
+  const windowBlob = {
+    version: 1 as const,
+    workspaces: [{ id: "ws-1", name: "One", session }],
+    activeWorkspaceId: "ws-1",
+  };
+
+  /** Stub Rust with a per-command implementation and boot the adapter. */
+  async function booted(impl: (cmd: string, args?: Record<string, unknown>) => unknown) {
     const invoke = vi.mocked(rawInvoke);
     invoke.mockClear();
-    invoke.mockResolvedValue(undefined);
+    invoke.mockImplementation((async (cmd: string, args?: Record<string, unknown>) =>
+      impl(cmd, args)) as unknown as typeof rawInvoke);
     const adapter = new TauriAdapter();
-
     await adapter.init();
+    // `init()` starts the recovery claim without awaiting it; the boot awaits it
+    // before planning (`standalone/src/main.tsx`), so do the same here.
+    await adapter.recoveryReady;
+    return { adapter, invoke };
+  }
 
-    expect(invoke).toHaveBeenNthCalledWith(1, "load_session");
-    expect(invoke).toHaveBeenNthCalledWith(2, "clear_session");
+  it("persists, and never clears the snapshot at boot", async () => {
+    const { adapter, invoke } = await booted((cmd) => (cmd === "load_session" ? JSON.stringify(windowBlob) : undefined));
+
+    expect(adapter.persistsSession).toBe(true);
+    expect(adapter.getWindowState()).toEqual(windowBlob);
+    expect(invoke.mock.calls.map(([cmd]) => cmd)).not.toContain("clear_session");
+    adapter.shutdown();
+  });
+
+  it("wraps a pre-Window blob as the one Workspace", async () => {
+    const { adapter } = await booted((cmd) => (cmd === "load_session" ? JSON.stringify(session) : undefined));
+    expect(adapter.getWindowState()?.workspaces.map((ws) => ws.session)).toEqual([session]);
+    adapter.shutdown();
+  });
+
+  it("claims the recovery commands for every saved pane, before restore reads them", async () => {
+    const { adapter, invoke } = await booted((cmd) => {
+      if (cmd === "load_session") return JSON.stringify(windowBlob);
+      if (cmd === "take_recovery_commands") return { "pane-a": "claude --continue" };
+      return undefined;
+    });
+
+    expect(invoke).toHaveBeenCalledWith("take_recovery_commands", { paneIds: ["pane-a"] });
+    // Synchronous by the time the cold restore asks, which is what awaiting
+    // `recoveryReady` before planning buys.
+    expect(adapter.getRecoveryCommands()).toEqual({ "pane-a": "claude --continue" });
+    adapter.shutdown();
+  });
+
+  it("restores without recovery when the record cannot be read", async () => {
+    const { adapter } = await booted((cmd) => {
+      if (cmd === "load_session") return JSON.stringify(windowBlob);
+      if (cmd === "take_recovery_commands") throw new Error("sidecar gone");
+      return undefined;
+    });
+    expect(adapter.getRecoveryCommands()).toEqual({});
+    adapter.shutdown();
+  });
+
+  it("asks for nothing when there are no saved panes", async () => {
+    const { adapter, invoke } = await booted(() => undefined);
+    expect(invoke.mock.calls.map(([cmd]) => cmd)).not.toContain("take_recovery_commands");
+    expect(adapter.getRecoveryCommands()).toEqual({});
+    adapter.shutdown();
+  });
+
+  it("captures agent recovery and proceeds when the capture fails", async () => {
+    const { adapter, invoke } = await booted((cmd) => {
+      if (cmd === "capture_agent_recovery") throw new Error("sidecar gone");
+      return undefined;
+    });
+    await expect(adapter.captureAgentRecovery(1300)).resolves.toBeUndefined();
+    expect(invoke).toHaveBeenCalledWith("capture_agent_recovery", { timeout: 1300 });
     adapter.shutdown();
   });
 });
@@ -337,6 +451,39 @@ describe("TauriAdapter terminal stream", () => {
 
     expect(getTerminalPaneState("sem-pty").cwd?.path).toBe("/tmp/here");
     expect(alerts.some((detail) => detail.id === "sem-pty")).toBe(true);
+  });
+
+  // A transferred pane's new window sees nothing but the replay: Rust drops the
+  // gap's semantic events because this path re-derives them, so it must rebuild
+  // both halves — pane state and the AlertManager's watch.
+  it("rebuilds alert state from a replay, not only pane state", async () => {
+    const { adapter, deliver } = await listening();
+    const alerts: AlertStateDetail[] = [];
+    adapter.onAlertState((detail) => void alerts.push(detail));
+    // The rule set is the sidecar's; this window hears it as a broadcast.
+    deliver("alert:watchedCommands", { names: ["sleep"] });
+
+    deliver("pty:replay", {
+      id: "replay-pty",
+      data: "\x1b]633;E;sleep 5\x07\x1b]633;C\x07",
+    });
+
+    expect(getTerminalPaneState("replay-pty").currentCommand?.rawCommandLine).toBe("sleep 5");
+    expect(alerts.some((detail) => detail.id === "replay-pty" && detail.watchingEnabled)).toBe(true);
+  });
+
+  it("settles the replayed watch when a marked buffer belongs to an exited PTY", async () => {
+    const { adapter, deliver } = await listening();
+    const alerts: AlertStateDetail[] = [];
+    adapter.onAlertState((detail) => void alerts.push(detail));
+    deliver("alert:watchedCommands", { names: ["sleep"] });
+    deliver("pty:list", { ptys: [{ id: "exited-replay", alive: false, exitCode: 7 }], requestId: "handback-1" });
+    deliver("pty:replay", {
+      id: "exited-replay", requestId: "handback-1",
+      data: "\x1b]633;E;sleep 5\x07\x1b]633;C\x07",
+    });
+    expect(getTerminalPaneState("exited-replay").currentCommand).toBeNull();
+    expect(alerts[alerts.length - 1]?.watchingEnabled).toBe(false);
   });
 
   it("pushes the resolved theme so the sidecar can answer a colour query", async () => {

@@ -1,90 +1,22 @@
-import { cfg } from '../cfg';
 import { loadJson, saveJson } from './local-json-store';
 import { getPlatform } from './platform';
+import {
+  alertSettingsEqual,
+  normalizeAlertSettings,
+  type AlertSettings,
+} from './alert-settings-model';
 
 /**
- * The app-global alarm settings edited by the Alarm settings dialog
- * (`docs/specs/alert.md` -> Alarm settings). Like the WATCHING rule set, these
- * are a property of the app, not of a Session.
+ * The renderer's copy of the app-global alarm settings: what the dialog edits
+ * and what `localStorage` holds. The shape, its defaults and its validation are
+ * the platform-free `alert-settings-model.ts`, so a host can run them beside
+ * the PTYs (`lib/src/host/alert-store-host.ts`) without dragging a renderer in.
  *
- * This renderer-side copy drives the UI and persists to `localStorage`. In
- * VS Code it is a mirror of the extension host's authoritative copy: the first
- * renderer seeds the host, an edit relays the whole normalized blob, and the
- * host broadcasts its canonical snapshot to every webview. The host needs
- * `inactivityTimeoutMs` for its `AlertManager`; it relays the rest untouched so
- * two webviews cannot disagree about whether alarms speak.
+ * Re-exported here so every existing importer keeps one name to reach for.
  */
-export interface AlertSettings {
-  /** ms — how long "looking at this pane" lasts before the user counts as away. */
-  inactivityTimeoutMs: number;
-  /** Delay terminal-notification rings behind confirmed animation. */
-  deferAlertsUntilQuiet: boolean;
-  /** Speak an unattended alarm out loud after `speakDelayMs`. */
-  speakEnabled: boolean;
-  /** ms after a ring before speaking, if the ring is still unattended. */
-  speakDelayMs: number;
-  /** Push an unattended alarm to paired phones after `pushDelayMs`. */
-  pushEnabled: boolean;
-  /** ms after a ring before pushing, if the ring is still unattended. */
-  pushDelayMs: number;
-}
+export * from './alert-settings-model';
 
 const STORAGE_KEY = 'dormouse:alert-settings';
-
-/** Shared bounds for every delay field. Seconds in the UI, ms on the wire. */
-export const MIN_DELAY_MS = 1_000;
-export const MAX_DELAY_MS = 600_000;
-
-export const DEFAULT_ALERT_SETTINGS: AlertSettings = {
-  // cfg.ts stays the single source of the shipped default.
-  inactivityTimeoutMs: cfg.alert.userAttention,
-  deferAlertsUntilQuiet: false,
-  speakEnabled: false,
-  speakDelayMs: 10_000,
-  pushEnabled: false,
-  pushDelayMs: 20_000,
-};
-
-/** Force a millisecond delay into the shared bounds. The one clamp rule. */
-export function clampAlertDelayMs(ms: number): number {
-  return Math.min(MAX_DELAY_MS, Math.max(MIN_DELAY_MS, Math.round(ms)));
-}
-
-function clampDelay(value: unknown, fallback: number): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
-  return clampAlertDelayMs(value);
-}
-
-function bool(value: unknown, fallback: boolean): boolean {
-  return typeof value === 'boolean' ? value : fallback;
-}
-
-/**
- * Coerce an arbitrary value into a complete `AlertSettings`. Unknown keys are
- * dropped and missing keys defaulted, so the blob evolves additively without a
- * version field — and a hand-edited `localStorage` value can never produce a
- * `NaN` timer.
- */
-export function normalizeAlertSettings(value: unknown): AlertSettings {
-  const raw = (typeof value === 'object' && value !== null ? value : {}) as Partial<Record<keyof AlertSettings, unknown>>;
-  return {
-    inactivityTimeoutMs: clampDelay(raw.inactivityTimeoutMs, DEFAULT_ALERT_SETTINGS.inactivityTimeoutMs),
-    deferAlertsUntilQuiet: bool(raw.deferAlertsUntilQuiet, DEFAULT_ALERT_SETTINGS.deferAlertsUntilQuiet),
-    speakEnabled: bool(raw.speakEnabled, DEFAULT_ALERT_SETTINGS.speakEnabled),
-    speakDelayMs: clampDelay(raw.speakDelayMs, DEFAULT_ALERT_SETTINGS.speakDelayMs),
-    pushEnabled: bool(raw.pushEnabled, DEFAULT_ALERT_SETTINGS.pushEnabled),
-    pushDelayMs: clampDelay(raw.pushDelayMs, DEFAULT_ALERT_SETTINGS.pushDelayMs),
-  };
-}
-
-function alertSettingsEqual(a: AlertSettings, b: AlertSettings): boolean {
-  return a.inactivityTimeoutMs === b.inactivityTimeoutMs
-    && a.deferAlertsUntilQuiet === b.deferAlertsUntilQuiet
-    && a.speakEnabled === b.speakEnabled
-    && a.speakDelayMs === b.speakDelayMs
-    && a.pushEnabled === b.pushEnabled
-    && a.pushDelayMs === b.pushDelayMs;
-}
 
 let settings: AlertSettings = normalizeAlertSettings(loadJson<unknown, null>(STORAGE_KEY, null));
 const listeners = new Set<() => void>();

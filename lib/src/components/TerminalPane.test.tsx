@@ -8,6 +8,7 @@ import { createLathWallEngine, terminalLeafMeta, type LathWallEngine } from './w
 import { createLathWallStore, type LathWallStore } from './wall/lath-wall-store';
 import { leaf, split, tree } from '../lib/lath/test-util';
 import { PANE_HEADER_HEIGHT_PX } from './design';
+import { WorkspaceActiveContext } from './wall/wall-context';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -124,11 +125,14 @@ function settle() {
   for (let i = 0; i < 30; i++) frame();
   act(() => vi.advanceTimersByTime(200));
 }
-function mount() {
-  act(() => root.render(<LathHost lath={engine}
+function render(active: boolean) {
+  act(() => root.render(<WorkspaceActiveContext.Provider value={active}><LathHost lath={engine}
     onCommitResize={(path, boundary, delta) => { store.resizeBoundary(path, boundary, delta); }}
     componentsOverride={{ bodies: { terminal: ({ id }) => <TerminalPane id={id} /> }, tabs: { terminal: () => null } }}
-  />));
+  /></WorkspaceActiveContext.Provider>));
+}
+function mount(active = true) {
+  render(active);
   settle();
   registry.resizes.length = 0;
   registry.fits.mockClear();
@@ -254,5 +258,61 @@ describe('terminal fitting follows settled layout, not animated geometry', () =>
     notifyResize();
     act(() => vi.advanceTimersByTime(150));
     expect(registry.resizes).toEqual([{ id: 'standalone', cols: 100, rows: 30 }]);
+  });
+});
+
+describe('a hidden Workspace minimizes its terminals', () => {
+  it('detaches every terminal and fits nothing, even when the host resizes', () => {
+    mount();
+    expect(registry.entries.get('a')!.container).toBeDefined();
+    render(false);
+    settle();
+    expect(registry.entries.get('a')!.container).toBeUndefined();
+    expect(registry.entries.get('b')!.container).toBeUndefined();
+    registry.fits.mockClear();
+    hostWidth = 1200;
+    notifyResize();
+    settle();
+    expect(registry.fits).not.toHaveBeenCalled();
+    expect(registry.resizes).toEqual([]);
+  });
+
+  it('reattaches on activation with no PTY resize at the same grid', () => {
+    mount();
+    const terminal = registry.entries.get('b');
+    render(false);
+    settle();
+    render(true);
+    settle();
+    expect(registry.entries.get('b')).toBe(terminal);
+    expect(registry.entries.get('b')!.container).toBeDefined();
+    expect(registry.resizes).toEqual([]);
+  });
+
+  it('sends exactly one grid transition per terminal after a resize while hidden', () => {
+    mount();
+    render(false);
+    settle();
+    hostWidth = 1200;
+    notifyResize();
+    settle();
+    expect(registry.resizes).toEqual([]);
+    render(true);
+    settle();
+    expect(registry.resizes).toEqual([
+      { id: 'a', cols: 59, rows: 28 }, { id: 'b', cols: 59, rows: 28 },
+    ]);
+  });
+
+  it('creates a Session mounted into a hidden Workspace without attaching it', () => {
+    mount(false);
+    expect(registry.entries.has('a')).toBe(true);
+    expect(registry.entries.get('a')!.container).toBeUndefined();
+    expect(registry.fits).not.toHaveBeenCalled();
+    render(true);
+    settle();
+    expect(registry.entries.get('a')!.container).toBeDefined();
+    // The first fit of any Session, hidden-born or not: one transition per terminal.
+    expect(registry.resizes.map(e => e.id).sort()).toEqual(['a', 'b']);
   });
 });

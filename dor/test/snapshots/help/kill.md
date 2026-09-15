@@ -4,7 +4,7 @@ Invocation: `dor kill --help`
 
 ```text
 USAGE
-  dor kill <surface> [--confirm-if-read text|--confirm-dangerously] [--json]
+  dor kill <surface> [--confirm-if-read text|--confirm-dangerously] [--json] [--workspace ref]
   dor kill --help
 
 Kills a surface. One confirmation mode is required.
@@ -27,6 +27,7 @@ FLAGS
      [--confirm-dangerously]  Kill without further confirmation.
      [--confirm-if-read]      Kill only if dor read contains this text.
      [--json]                 Print JSON output.
+     [--workspace]            Workspace to act in, instead of the caller's.
   -h  --help                  Print help information and exit
       --                      All subsequent inputs should be interpreted as arguments
 

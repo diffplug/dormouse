@@ -40,6 +40,37 @@ import { cfg } from '../src/cfg';
 import type { DormouseTheme } from '../src/lib/themes';
 import { clearPersistedShellSelection, seedShellStore } from '../src/lib/shell-store';
 import type { ShellEntry } from '../src/lib/shell-defaults';
+import { getWorkspacesSnapshot, resetWorkspaces, setWorkspaces, type WorkspaceMeta } from '../src/lib/workspace-store';
+import { resetWorkspaceSurfaces, setWorkspaceSurfaces } from '../src/lib/workspace-surfaces';
+import { resetWorkspaceUi } from '../src/lib/workspace-ui-store';
+
+/** `parameters.primedWorkspaces`: the Window a Workspace story renders. */
+interface PrimedWorkspaces {
+  workspaces: WorkspaceMeta[];
+  /** Defaults to the first. */
+  activeId?: string;
+  /** Member Surface ids per Workspace id, for the union indicators. */
+  membership?: Record<string, string[]>;
+}
+
+/** Written during render, not in the effect below: the strip and the Window read
+ *  the Workspace store on their FIRST render, so priming a frame later would
+ *  paint the default single Workspace first. Re-applied only when it differs, so
+ *  a re-render never notifies a subscriber mid-render. */
+function applyPrimedWorkspaces(primed: PrimedWorkspaces | undefined): void {
+  if (!primed) return;
+  const current = getWorkspacesSnapshot();
+  const activeId = primed.activeId ?? primed.workspaces[0]?.id;
+  const same = current.activeId === activeId
+    && current.workspaces.length === primed.workspaces.length
+    && current.workspaces.every((ws, i) => ws.id === primed.workspaces[i].id && ws.name === primed.workspaces[i].name);
+  if (same) return;
+  setWorkspaces({ workspaces: primed.workspaces, activeId });
+  resetWorkspaceSurfaces();
+  for (const [id, surfaceIds] of Object.entries(primed.membership ?? {})) {
+    setWorkspaceSurfaces(id, surfaceIds);
+  }
+}
 
 /** Fallback for one frame when the renderer is not painting (see `afterFrame`).
  *  Matches `paintFrame()` in `settle-terminals.ts`: long enough that a slow-but-real
@@ -318,6 +349,11 @@ const preview: Preview = {
       clearPersistedShellSelection();
       seedShellStore(primedShells ?? []);
 
+      // The Workspace model a strip / Window story renders, and the membership
+      // its indicators project. Activity for those members is primed with the
+      // rest below, two frames in.
+      applyPrimedWorkspaces(context.parameters?.primedWorkspaces as PrimedWorkspaces | undefined);
+
       useEffect(() => {
         let cancelled = false;
         let raf = 0;
@@ -408,6 +444,10 @@ const preview: Preview = {
           }
           platform.clearDefaultScenario();
           disposeAllSessions();
+          // A story must not leak its Workspaces into the next one.
+          resetWorkspaces();
+          resetWorkspaceSurfaces();
+          resetWorkspaceUi();
         };
       }, [platform, primedSessionState, primedTerminalState, primedWatchedCommands, primedAlertSettings, primedPushDevices, primedAlertSpeech]);
 

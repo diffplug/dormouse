@@ -17,6 +17,7 @@ import { IS_MAC } from '../lib/platform';
 import { getTerminalOverlayDims } from '../lib/terminal-registry';
 import { PopupButtonRow, popupButton, Shortcut } from './design';
 import { TouchUiContext } from './touch-ui-context';
+import { WorkspaceActiveContext } from './wall/wall-context';
 
 interface Anchor {
   left: number;
@@ -49,10 +50,15 @@ export function SelectionPopup({ terminalId }: Props) {
   const touchUi = useContext(TouchUiContext);
   const states = useSyncExternalStore(subscribeToMouseSelection, getMouseSelectionSnapshot);
   const renderTick = useSyncExternalStore(subscribeToRenderTick, getRenderTick);
+  // A hidden Workspace consumes no window input (docs/specs/layout.md →
+  // "Workspaces"): the dismissal listeners below are capture-phase and would
+  // otherwise answer an Escape or a click meant for the visible Workspace. The
+  // selection itself lives in the store, so it is still there on the way back.
+  const workspaceActive = useContext(WorkspaceActiveContext);
 
   const state = states.get(terminalId) ?? DEFAULT_MOUSE_SELECTION_STATE;
   const selection = state.selection;
-  const shouldRender = (!!selection && !selection.dragging) || !!state.copyFlash;
+  const shouldRender = workspaceActive && ((!!selection && !selection.dragging) || !!state.copyFlash);
 
   const [anchor, setAnchor] = useState<Anchor | null>(null);
 

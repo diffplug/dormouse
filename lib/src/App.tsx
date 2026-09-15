@@ -1,7 +1,8 @@
 import { Component, type ReactNode } from "react";
 import { Wall } from "./components/Wall";
+import { WorkspaceWindow } from "./components/WorkspaceWindow";
 import { ThemeDebuggerGlobal } from "./components/ThemeDebugger";
-import type { PersistedDoor, PersistedSurfaceRefs } from "./lib/session-types";
+import type { WallBootPlans, WallBootProps } from "./components/wall/wall-types";
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -23,27 +24,30 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
 }
 
 export default function App({
-  initialPaneIds,
-  restoredLathLayout,
-  initialDoors,
-  initialSurfaceRefs,
-  initialSurfaceRefsNext,
   baseboardNotice,
   dialogHost,
   enableBurrow,
-}: {
-  initialPaneIds?: string[];
-  restoredLathLayout?: unknown;
-  initialDoors?: PersistedDoor[];
-  initialSurfaceRefs?: PersistedSurfaceRefs;
-  initialSurfaceRefsNext?: number;
+  multiWorkspace = false,
+  initialPlans,
+  ...boot
+}: WallBootProps & {
   baseboardNotice?: ReactNode;
   dialogHost?: ReactNode;
   enableBurrow?: boolean;
+  /** Render one Wall per Workspace instead of one for the whole page. Only the
+   *  standalone host sets it; VS Code and the website playground mount a bare
+   *  Wall (docs/specs/layout.md → "Workspaces"). */
+  multiWorkspace?: boolean;
+  /** One boot record per Workspace; `multiWorkspace` only. */
+  initialPlans?: WallBootPlans;
 }) {
+  // The chrome both branches take; only the boot record differs between them.
+  const shell = { baseboardNotice, dialogHost, enableBurrow };
   return (
     <ErrorBoundary>
-      <Wall initialPaneIds={initialPaneIds} restoredLathLayout={restoredLathLayout} initialDoors={initialDoors} initialSurfaceRefs={initialSurfaceRefs} initialSurfaceRefsNext={initialSurfaceRefsNext} baseboardNotice={baseboardNotice} dialogHost={dialogHost} enableBurrow={enableBurrow} />
+      {multiWorkspace
+        ? <WorkspaceWindow {...boot} {...shell} initialPlans={initialPlans} />
+        : <Wall {...boot} {...shell} />}
 
       <ThemeDebuggerGlobal />
     </ErrorBoundary>

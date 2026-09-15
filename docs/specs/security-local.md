@@ -135,31 +135,43 @@ Source of truth: the shared rule and predicates — `isLoopbackHost`, `isOwnOrig
 The attacker is another local account reading disk; what the remote stack leaves
 behind is `docs/specs/security-remote.md` -> "Credentials at rest".
 
-**Session snapshots are owner-only before any bytes are written.**
-`restrict_to_owner` locks `<app_data_dir>/sessions/` and, *first*, the temp file
-renamed into it, applying a protected single-ACE DACL on Windows where a unix
-mode is a silent no-op (`docs/specs/standalone.md` -> "Persistence"). The same
-helper locks the whole standalone app-data directory before the sidecar spawns.
+**Session snapshots are owner-only before any bytes are written.** Standalone
+persists one window's structure per file as `<state root>/sessions/<label>.json`
+— panes, cwds, titles, doors, layout, TODO flags, never terminal text
+(`docs/specs/standalone.md` -> "Persistence"), plus a
+`<label>.geometry.json` sibling holding that window's box and nothing else, and
+`arrivals.json`, the Workspaces mid-transfer between windows, written the same way
+(`docs/specs/standalone.md` -> "Arrival queue").
+`restrict_to_owner` locks the directory and, *first*, the temp file renamed into
+it, applying a protected single-ACE DACL on Windows where a unix mode is a
+silent no-op. The same helper
+locks the whole standalone app-data directory before the sidecar spawns.
 
 **No writer persists scrollback** (`docs/specs/transport.md` -> "What is
-persisted"): `normalizeSessionV3` strips it on read, and the standalone store is
-switched off today, clearing any legacy snapshot at boot. Snapshots older
-versions left behind do carry transcripts (rationale).
+persisted"): `normalizeSessionV3` strips it on read, so the first save after an
+upgrade rewrites the snapshot without it, and a boot sweep deletes orphaned
+`*.json.tmp` files no save would ever overwrite. Snapshots older versions left
+behind do carry transcripts (rationale).
+
+**Standalone writes `recovery.json` beside its sessions directory**, under the
+state root, owner-only: one rebuilt agent-resume invocation per Surface, never a
+buffer, unlinked as it is read (`docs/specs/standalone.md` -> "Agent recovery").
 
 **The notepad archive is the one store holding terminal text on purpose** —
 excerpts the user explicitly captured, their colors, the Surface title and kind,
 and the CWD at closure, appended only by a Surface closing
 (`docs/specs/notepad.md` -> "Archive"). Standalone keeps it as
-`<app_data_dir>/notepad-archive-v1.json`, owner-only; VS Code keeps it in
+`<app_data_dir>/notepad-archive-v1.json`, owner-only and shared by builds with the
+same Tauri identifier; the dev wrapper uses a per-worktree identifier. VS Code keeps it in
 `<globalStorageUri>/notepad-archive.json`, mode `0600` on Unix and inheriting VS Code's directory ACL on Windows. Migration and Settings Sync follow `docs/specs/notepad.md` -> "VS Code lifecycle". Its live half never reaches disk.
 
 **VS Code persists pane structure in VS Code's own storage** — `workspaceState`
 under `dormouse.session`, and `vscode.setState()`, a WebviewPanel's only store —
 so the modes there are VS Code's, not ours, and no transcript reaches either
 (`docs/specs/vscode.md` -> "Serialization and restore"). Dormouse also writes
-`recovery.json` there, at the umask: one rebuilt agent-resume
-invocation per Surface, no buffer, unlinked as it is read
-(`docs/specs/vscode.md` -> "Capturing agent recovery").
+`recovery.json` under the extension's storage directory, owner-only and
+temp-then-rename: one rebuilt agent-resume invocation per Surface, no buffer,
+unlinked as it is read (`docs/specs/vscode.md` -> "Capturing agent recovery").
 
 **The VS Code peer-link token is a local credential at rest** —
 `burrow.peer-token` in the extension's global storage, written mode `0600`
@@ -173,7 +185,7 @@ lands at the umask — readable by another local account wherever `<tmpdir>` is
 shared (rationale). No log call carries PTY bytes; the `dor` control socket path
 does. A gap, not an accepted risk.
 
-- **FAIL IF** `write_file_atomically` in `standalone/src-tauri/src/lib.rs` stops restricting the directory and the file it writes to the owning user on **every** platform `restrict_to_owner` has an arm for — `0700`/`0600` on unix, and on Windows a DACL protected from inheritance carrying exactly one ACE for the current user, asserted by `restrict_to_owner_leaves_one_owner_only_ace` — or if either of its two callers, `write_session_to` (the session snapshot) and `write_notepad_archive_to` (the notepad archive), stops going through it. `session_write_tightens_directory_and_existing_temp_file` pins unix modes; `session_permission_failures_preserve_previous_snapshot_without_writing_bytes` pins both failure gates. The mode reaches the temp file *before* any bytes are written (rationale).
+- **FAIL IF** `write_file_atomically` in `standalone/src-tauri/src/lib.rs` stops restricting the directory and the file it writes to the owning user on **every** platform `restrict_to_owner` has an arm for — `0700`/`0600` on unix, and on Windows a DACL protected from inheritance carrying exactly one ACE for the current user, asserted by `restrict_to_owner_leaves_one_owner_only_ace` — or if any of its three callers — `write_session_to` (the session snapshot), the window-geometry sibling beside it, and `write_notepad_archive_to` (the notepad archive) — stops going through it. `session_write_tightens_directory_and_existing_temp_file` pins unix modes; `session_permission_failures_preserve_previous_snapshot_without_writing_bytes` pins both failure gates. The mode reaches the temp file *before* any bytes are written (rationale).
 - **FAIL IF** the VS Code notepad archive key — `NOTEPAD_ARCHIVE_KEY` in `vscode-ext/src/notepad-archive-store.ts` — is passed to `context.globalState.setKeysForSync`, directly or as part of any list. It holds captured terminal excerpts, their CWDs, and their Surface titles, and Settings Sync would copy them to every machine the account signs into. Nothing in the extension calls that API today, so the rule is kept by that call not existing; a call added for anything else must exclude this key.
 
 Source of truth: `SESSION_STATE_KEY` in `vscode-ext/src/session-state.ts`,

@@ -1,4 +1,5 @@
 import type { TerminalWebglRenderer } from './terminal-webgl';
+import type { SerializeAddon } from '@xterm/addon-serialize';
 import type { HelperIdentity } from './terminal-context-types';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
@@ -23,6 +24,9 @@ export interface TerminalEntry {
   untouched: boolean;
   /** Renderer ownership follows mount/unmount rather than terminal lifetime. */
   webglRenderer?: TerminalWebglRenderer;
+  /** Reads the buffer back as the escape stream that rebuilds it, for a
+   *  transfer (`serializeTerminal`). Loaded at create: it costs nothing idle. */
+  serialize: SerializeAddon;
   /**
    * The PTY process has exited (onPtyExit fired or resume restored it as
    * exited) but the pane lingers in the registry showing "[Process exited…]".

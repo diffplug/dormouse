@@ -5,8 +5,11 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const conf = JSON.parse(readFileSync(join(here, '..', 'src-tauri', 'tauri.conf.json'), 'utf8'));
+const srcTauri = join(here, '..', 'src-tauri');
+const conf = JSON.parse(readFileSync(join(srcTauri, 'tauri.conf.json'), 'utf8'));
 const csp = conf.app.security.csp;
+const capability = (name) =>
+  JSON.parse(readFileSync(join(srcTauri, 'capabilities', `${name}.json`), 'utf8'));
 
 // The Burrow moved into the sidecar, so the webview never speaks to a relay
 // server and its connect-src must not be able to. The allowlist that does apply
@@ -36,4 +39,26 @@ test('script-src grants WebAssembly compilation and nothing more', () => {
 test('localhost stays allowed for dev and the loopback proxies', () => {
   assert.ok(csp.includes('http://localhost:*') && csp.includes('ws://localhost:*'));
   assert.ok(csp.startsWith("default-src 'self'"));
+});
+
+// Every window is cloned from this config (`WebviewWindowBuilder::from_config`),
+// and the first one's label is its persistence identity: the snapshot it wrote
+// before multi-window shipped is `main.json`, and `restorable_labels` puts
+// `main` first (docs/specs/standalone.md -> "Windows").
+test('the first window is labelled main', () => {
+  assert.equal(conf.app.windows[0].label, 'main');
+});
+
+// Least privilege, and it is what structurally enforces that the update
+// install runs in the window the quit walk tears down last
+// (docs/specs/auto-update.md).
+test('only the first window may check for or install an update', () => {
+  const dflt = capability('default');
+  const mainOnly = capability('main-only');
+  assert.deepEqual(dflt.windows, ['main', 'ws-*'], 'torn-out windows need the AppBar controls');
+  assert.deepEqual(mainOnly.windows, ['main']);
+  for (const permission of ['updater:default', 'core:app:allow-version']) {
+    assert.ok(mainOnly.permissions.includes(permission), `main-only holds ${permission}`);
+    assert.ok(!dflt.permissions.includes(permission), `default does not hold ${permission}`);
+  }
 });
