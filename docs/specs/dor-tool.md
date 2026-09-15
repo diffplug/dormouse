@@ -135,9 +135,9 @@ Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `dor/test/snapshot
 
 **Must accept exactly one existing local regular file for `dor open`.** Resolve it with the `$TARGET` rules in Declaring tools. URLs (including `file:`), directories, and Surface handles fail; no native-editor fallback occurs.
 
-**Must select the first matching entry of the user file's ordered `open` list**, whose entries contain `match` and `tool`. `--tool` explicitly selects a user Tool. Every association must name a Tool in that same user file. Never discover project configuration during this lookup; project `open` rules are ignored with a warning during explicit project-tool lookup.
+**Must select the first matching entry of the user file's ordered `open` list**, whose entries contain `match` and `tool`. `--tool` explicitly selects a user Tool. Every association must name an argument-list Tool in that same user file. Never discover project configuration during this lookup; project `open` rules are ignored with a warning during explicit project-tool lookup.
 
-**Must match patterns without `/` against the canonical filename, and patterns with `/` against the canonical path relative to the invocation CWD.** Normalize separators to `/` and use Node's POSIX `matchesGlob` semantics, including explicit patterns for dotfiles. A miss names the user config path and suggests `--tool`.
+**Must match patterns without `/` against the canonical filename, and patterns with `/` against both the CWD-relative and canonical absolute paths.** Normalize separators to `/` and use bundled picomatch with POSIX separators, case-sensitive matching, and explicit patterns for dotfiles. A miss names the user config path and suggests `--tool`.
 
 **Must pass the canonical file path as one input to the selected Tool.** Reuse follows Identity and dedupe; `$TARGET` in the key provides per-file identity. `--fresh` bypasses reuse. **Never transform a plain calling terminal through `dor open`.** Create a focus-neutral split or reveal the existing Tool; an idle match in the caller's Tool pane uses the answer/prompt handshake only for a standalone integrated `dor open` invocation.
 

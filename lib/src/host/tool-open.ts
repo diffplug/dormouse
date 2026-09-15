@@ -1,4 +1,5 @@
-import { basename, posix, relative, sep } from 'node:path';
+import { basename, relative, sep } from 'node:path';
+import picomatch from 'picomatch';
 import type { ToolLookupResult } from '../lib/platform/tool-types';
 import { resolveLocalToolTarget, resolveToolInput } from './tool-input';
 import { readUserToolFile } from './tool-user-config';
@@ -12,8 +13,11 @@ export async function resolveOpenTool(
   const target = await resolveLocalToolTarget(request.target, request.cwd);
   const file = await readUserToolFile(path);
   const relativePath = relative(request.cwd, target).split(sep).join('/');
-  const name = request.tool ?? file?.open.find(rule =>
-    posix.matchesGlob(rule.match.includes('/') ? relativePath : basename(target), rule.match))?.tool;
+  const canonicalPath = target.split(sep).join('/');
+  const name = request.tool ?? file?.open.find(rule => {
+    const matches = picomatch(rule.match, { windows: false });
+    return rule.match.includes('/') ? matches(relativePath) || matches(canonicalPath) : matches(basename(target));
+  })?.tool;
   const entry = name && file?.tools.get(name);
   if (!file || !entry) return { status: 'error', message: request.tool
     ? `no user Tool '${request.tool}' in ${path}`

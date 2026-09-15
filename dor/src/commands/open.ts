@@ -22,7 +22,7 @@ export const openCommand: Command = {
 
 The first matching rule in the user dormouse.yml selects a user Tool. --tool chooses a user Tool explicitly. Project associations and project Tools never participate in this lookup. The user file is $XDG_CONFIG_HOME/dormouse/dormouse.yml, or ~/.config/dormouse/dormouse.yml.
 
-The ordered open list contains {match, tool} entries. Patterns without a slash match the filename; patterns with a slash match the canonical file path relative to the invocation directory, using forward slashes and Node glob syntax. Dotfiles require explicit patterns.
+The ordered open list contains {match, tool} entries. Patterns without a slash match the filename; patterns with a slash match both the canonical absolute path and the path relative to the invocation directory. Matching uses picomatch glob syntax with forward slashes and case sensitivity. Dotfiles require explicit patterns.
 
 The selected Tool receives the canonical absolute filename as one argument. Configure prespawn_dedupe: [$TARGET] to reveal the same file on repeated opens within a Workspace. --fresh bypasses reuse.
 

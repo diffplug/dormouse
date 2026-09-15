@@ -201,6 +201,9 @@ export function parseToolFile(
           || !tools.has(rule.tool) || Object.keys(rule).some(key => key !== 'match' && key !== 'tool')) {
           throw new ToolFileError(`${path}: each open rule needs a match pattern and a tool defined in this user file`);
         }
+        if (typeof tools.get(rule.tool)!.run === 'string') {
+          throw new ToolFileError(`${path}: open rule for '${rule.tool}' needs an argument-list run to receive the file`);
+        }
         open.push({ match: rule.match, tool: rule.tool });
       }
     }
