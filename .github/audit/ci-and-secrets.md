@@ -33,6 +33,17 @@ block overrides the workflow-level block; absent both, the repository default
 applies. Unspecified scopes in an explicit block are `none`. Read
 `actions/permissions/workflow` before judging any inherited-permission check.
 
+**Derive every inventory from the live API, never from the spec's own list.** A
+`FAIL IF` that says "any" quantifies over what exists now; the `Today:` or
+inventory lines under it illustrate the expected answer and go stale the moment
+someone adds a member. So enumerate `GET /repos/$GITHUB_REPOSITORY/environments`
+before checking deployment-branch-policies, `GET .../actions/secrets` and each
+environment's own secret listing before checking placement, and
+`GET .../rulesets` before checking bypass actors — then check every member the
+API returned. An unlisted member is a finding, not out of scope: report each one
+you found that the spec's list omits, and never record `PASS` on a condition you
+only evaluated over the listed subset.
+
 ## Qualitative pass
 
 You own `.github/` (including `.github/audit/`, which holds this audit's own
