@@ -337,14 +337,14 @@
   },
   {
     "name": "react",
-    "version": "19.2.8",
+    "version": "19.3.0",
     "license": "MIT",
     "author": "Meta Platforms, Inc. and affiliates",
     "homepage": "https://react.dev/"
   },
   {
     "name": "react-dom",
-    "version": "19.2.8",
+    "version": "19.3.0",
     "license": "MIT",
     "author": "Meta Platforms, Inc. and affiliates",
     "homepage": "https://react.dev/"
@@ -365,7 +365,7 @@
   },
   {
     "name": "scheduler",
-    "version": "0.27.0",
+    "version": "0.28.0",
     "license": "MIT",
     "author": "Meta Platforms, Inc. and affiliates",
     "homepage": "https://react.dev/"
