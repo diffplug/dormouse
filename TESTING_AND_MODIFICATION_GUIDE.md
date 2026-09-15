@@ -9,7 +9,7 @@ All of it is on `main`. The eleven-branch stack that built Workspaces merged on
 2026-09-15, so change it on `main` like any other feature, led by the owning
 specs in section 6. The table below is kept only as an index of which PR
 introduced what, for when `git blame` or a merge commit lands on one of them;
-those branches and their worktrees are gone.
+those branches are merged and no longer worked on, and their worktrees are gone.
 
 | # | PR | Branch | What it added |
 |---|---|---|---|
