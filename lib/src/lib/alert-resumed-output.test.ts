@@ -49,7 +49,7 @@ beforeEach(() => {
   ]);
   stopSpeech = startAlertSpeech();
   // Push shares the ring watcher; exercise its delivery decision without a Relay.
-  stopPush = watchUnattendedRings({ enabled: () => true, delayMs: () => DELAY, fire: pushed });
+  stopPush = watchUnattendedRings({ sink: 'push', subscribe: () => () => {}, enabled: () => true, delayMs: () => DELAY, fire: pushed });
 });
 
 afterEach(() => {
@@ -87,7 +87,7 @@ describe('WATCHING output resuming before alarm delivery', () => {
     expect(pushed).not.toHaveBeenCalled();
     vi.advanceTimersByTime(1);
     expect(spoken).toHaveBeenCalledOnce();
-    expect(pushed).toHaveBeenCalledExactlyOnceWith(ID);
+    expect(pushed).toHaveBeenCalledExactlyOnceWith(ID, manager.getState(ID).episode);
   });
 
   it('keeps an inferred ring through a short redraw that never confirms BUSY', () => {

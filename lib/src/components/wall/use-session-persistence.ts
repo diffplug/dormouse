@@ -1,10 +1,11 @@
+import { DEFAULT_WORKSPACE_ID, readPersistedSession } from '../../lib/session-types';
 import { useCallback, useEffect, useMemo, useRef, type RefObject } from 'react';
 import { pasteFilePaths } from '../../lib/clipboard';
 import { getPlatform } from '../../lib/platform';
 import { buildPersistedSession, saveSession, type SaveOptions, type SaveSink } from '../../lib/session-save';
 import { createSessionDirtyTracker } from '../../lib/session-dirty';
 import { previousWorkspaceSession, publishWorkspaceSession, SESSION_SAVE_DEBOUNCE_MS } from '../../lib/window-session-aggregator';
-import { hasWorkspace } from '../../lib/workspace-store';
+import { getWorkspace, setWorkspaceAlertDelivery, subscribeToWorkspaces, hasWorkspace } from '../../lib/workspace-store';
 import {
   subscribeToActivity,
   subscribeToTerminalPaneState,
@@ -61,6 +62,17 @@ export function useSessionPersistence({
   workspaceId?: WorkspaceId;
 }): SessionPersistenceHandle {
   const ownsHostFlush = workspaceId === undefined;
+  const effectiveWorkspaceId = workspaceId ?? DEFAULT_WORKSPACE_ID;
+  // A host with no Window aggregator (VS Code, a bare Wall) keeps the Workspace's
+  // delivery overrides in the one session it owns: seeded from it here, saved
+  // back below. Under an aggregator the Window blob carries them from the store.
+  useEffect(() => {
+    if (ownsHostFlush) setWorkspaceAlertDelivery(effectiveWorkspaceId, readPersistedSession(getPlatform().getState())?.alertDelivery ?? {});
+  }, [ownsHostFlush, effectiveWorkspaceId]);
+  const saveOptions = useCallback((options?: SaveOptions): SaveOptions => ({
+    ...options,
+    alertDelivery: getWorkspace(effectiveWorkspaceId)?.alertDelivery ?? {},
+  }), [effectiveWorkspaceId]);
   const sessionSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sessionSavePromiseRef = useRef<Promise<void> | null>(null);
   const pendingSaveNeededRef = useRef(false);
@@ -106,8 +118,8 @@ export function useSessionPersistence({
 
   const doSave = useCallback((options?: SaveOptions): Promise<void> => {
     const { panes, doors, lathLayout, surfaceRefs } = collect();
-    return saveSession(getPlatform(), panes, doors, lathLayout, surfaceRefs?.refs, surfaceRefs?.next, sink, options);
-  }, [collect, sink]);
+    return saveSession(getPlatform(), panes, doors, lathLayout, surfaceRefs?.refs, surfaceRefs?.next, sink, saveOptions(options));
+  }, [collect, sink, saveOptions]);
 
   /** The same record a save would publish, handed back instead. The Workspace
    *  is leaving, so nothing here may touch this Window's aggregator. */
@@ -115,9 +127,9 @@ export function useSessionPersistence({
     const { panes, doors, lathLayout, surfaceRefs } = collect();
     return buildPersistedSession(
       getPlatform(), panes, doors, lathLayout, surfaceRefs?.refs, surfaceRefs?.next,
-      sink?.previous() ?? null, options,
+      sink?.previous() ?? null, saveOptions(options),
     );
-  }, [collect, sink]);
+  }, [collect, sink, saveOptions]);
 
   const persistSessionNow = useCallback(async (options?: SaveOptions): Promise<void> => {
     const runSave = (): Promise<void> => {
@@ -209,6 +221,13 @@ export function useSessionPersistence({
     // One subscription: every store commit (add/remove/resize/swap/meta, including
     // the active-pane the serialized layout records) schedules a save.
     const unsubscribeStore = lath.store.subscribe(scheduleSessionSave);
+    let savedOverrides = getWorkspace(effectiveWorkspaceId)?.alertDelivery;
+    const stopPolicies = ownsHostFlush ? subscribeToWorkspaces(() => {
+      const next = getWorkspace(effectiveWorkspaceId)?.alertDelivery;
+      if (next === savedOverrides) return;
+      savedOverrides = next;
+      scheduleSessionSave();
+    }) : () => {};
 
     // Content inputs mark dirty but never schedule — the heartbeat persists them
     // (docs/specs/layout.md → "Session persistence"). An untouched flip has no
@@ -253,6 +272,7 @@ export function useSessionPersistence({
       unsubActivity();
       unsubPaneState();
       unsubscribeStore();
+      stopPolicies();
       clearInterval(interval);
       // A Wall unmounting because its Workspace was closed must not publish on
       // the way out: `closeWorkspaceWithSurfaces` has already forgotten the
@@ -263,6 +283,8 @@ export function useSessionPersistence({
       }
     };
   }, [
+    effectiveWorkspaceId,
+    ownsHostFlush,
     workspaceId,
     lath,
     flushSessionSave,

@@ -1,3 +1,4 @@
+import { WorkspaceRingCues, type WorkspaceRingCue } from '../lib/workspace-ring-cues';
 import {
   memo,
   useCallback,
@@ -133,6 +134,9 @@ export function WorkspaceStrip({
     [pendingClose, pendingMove],
   );
 
+  // Cues observe the active Workspace too, so switching tabs cannot create one.
+  const ringCues = useRef(new WorkspaceRingCues());
+  ringCues.current.update(workspaces.map(workspace => workspace.id), membership, activity);
   // One union per tab, computed in the loop it is rendered in. The visible
   // Workspace never shows indicators, so it skips the projection entirely.
   const unionsRef = useRef(new Map<WorkspaceId, WorkspaceUnion>());
@@ -148,7 +152,7 @@ export function WorkspaceStrip({
     // tab re-renders only when its own indicators do.
     const previous = unionsRef.current.get(id);
     if (previous && previous.ringing === next.ringing && previous.todo === next.todo
-      && previous.count === next.count && previous.ringSeq === next.ringSeq) return previous;
+      && previous.count === next.count) return previous;
     unionsRef.current.set(id, next);
     return next;
   };
@@ -168,6 +172,7 @@ export function WorkspaceStrip({
             name={workspace.name}
             active={isActive}
             union={unionFor(workspace.id, isActive)}
+            ringCue={ringCues.current.get(workspace.id)}
             renaming={renamingId === workspace.id}
             dragging={draggingId === workspace.id}
             closable={workspaces.length > 1}
@@ -235,6 +240,7 @@ const WorkspaceTab = memo(function WorkspaceTab({
   name,
   active,
   union,
+  ringCue,
   renaming,
   dragging,
   closable,
@@ -251,6 +257,7 @@ const WorkspaceTab = memo(function WorkspaceTab({
   name: string;
   active: boolean;
   union: WorkspaceUnion;
+  ringCue: WorkspaceRingCue;
   renaming: boolean;
   dragging: boolean;
   closable: boolean;
@@ -333,7 +340,7 @@ const WorkspaceTab = memo(function WorkspaceTab({
                   Door, so the bell takes the header's alarm color. */}
               {union.ringing && (
                 <span className="text-alarm-vs-header-active">
-                  <AlertBell status="ALERT_RINGING" ringSeq={union.ringSeq} size={11} />
+                  <AlertBell status="ALERT_RINGING" ringSeq={ringCue.sequence} ringStartedAt={ringCue.at} size={11} />
                 </span>
               )}
             </span>

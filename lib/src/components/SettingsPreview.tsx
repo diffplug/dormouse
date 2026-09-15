@@ -1,9 +1,9 @@
-import { useEffect, useLayoutEffect, useState, useSyncExternalStore } from 'react';
+import { useWorkspaceAlertPolicy } from './wall/use-workspace-alert-policy';
+import { useEffect, useLayoutEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { POPUP_SURFACE_CLASS } from './design';
 import { AlarmSettingsSection, type AlarmSink } from './SettingsDialog';
 import { useAnchoredMenu } from './use-anchored-menu';
-import { getAlertSettings, subscribeToAlertSettings } from '../lib/terminal-registry';
 import { OVERLAY_VIEWPORT_MARGIN_PX } from '../lib/ui-geometry';
 
 /** Remount for every toggle, including repeated clicks on the same setting,
@@ -17,7 +17,7 @@ export function SettingsPreview({
   anchor: HTMLElement;
   onClose: () => void;
 }) {
-  const settings = useSyncExternalStore(subscribeToAlertSettings, getAlertSettings);
+  const { policy: settings } = useWorkspaceAlertPolicy();
   const [fading, setFading] = useState(false);
   const { setTriggerEl, setMenuEl, menuStyle } = useAnchoredMenu(true, 416, {
     side: 'above',

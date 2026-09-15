@@ -1,3 +1,4 @@
+import type { AlertRuntimeSnapshot } from 'dormouse-lib/lib/alert-manager';
 import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../../lib/src/lib/terminal-context-types';
 import { installWorkspaceRegistry, type WorkspaceRegistrySnapshot } from "./workspace-registry";
 import type {
@@ -42,7 +43,6 @@ import { claimRecoveryCommands, windowStateSlot } from "./window-recovery";
 import { coalesceCwds } from "./coalesce-cwds";
 import {
   applyTerminalProtocolEvents,
-  collectTerminalSemanticEvents,
   TerminalProtocolParser,
   type TerminalProtocolEvent,
 } from "dormouse-lib/lib/terminal-protocol";
@@ -332,6 +332,11 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
   offRequestSessionFlush(_handler: (detail: { requestId: string }) => void): void {}
   notifySessionFlushComplete(_requestId: string): void {}
 
+  alertPauseForTransfer(id: string): AlertRuntimeSnapshot | null { return this.alertManager.pauseForTransfer(id); }
+  alertResumeFromTransfer(id: string, snapshot: AlertRuntimeSnapshot, replayRequestId?: string): void {
+    this.alertManager.resumeFromTransfer(id, snapshot, replayRequestId);
+  }
+
   alertRemove(id: string): void { this.alertManager.remove(id); }
   // Through the sidecar's app-global stores and back as their broadcasts, the
   // path the shipped app takes (see TauriAdapter), so the harness exercises
@@ -436,9 +441,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
       // why the one-shot parser still needs the theme.
       const { id, data: text, requestId } = data as PtyReplayDetail;
       const parsed = new TerminalProtocolParser(themeColorProvider).process(text);
-      const events = collectTerminalSemanticEvents(parsed.events);
-      this.alertManager.applyTerminalSemanticEvents(id, events);
-      applyTerminalSemanticEvents(id, events);
+      applyTerminalSemanticEvents(id, this.alertManager.applyReplay(id, requestId, parsed));
       for (const handler of this.replayHandlers) handler({ id, data: parsed.visibleData, requestId });
     } else if (event === BURROW_RESULT_EVENT) {
       this.burrowClient.onResult(data as BurrowResult);

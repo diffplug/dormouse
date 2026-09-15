@@ -16,6 +16,7 @@ import type {
  */
 
 const mocks = vi.hoisted(() => ({
+  serialize: vi.fn(() => ""),
   writes: [] as string[],
   grids: [] as unknown[],
   deferWrites: false,
@@ -35,7 +36,7 @@ vi.mock("@xterm/addon-fit", () => ({
   },
 }));
 vi.mock("@xterm/addon-image", () => ({ ImageAddon: class {} }));
-vi.mock("@xterm/addon-serialize", () => ({ SerializeAddon: class { serialize(): string { return ""; } } }));
+vi.mock("@xterm/addon-serialize", () => ({ SerializeAddon: class { serialize(): string { return mocks.serialize(); } } }));
 vi.mock("@xterm/addon-unicode-graphemes", () => ({ UnicodeGraphemesAddon: class {} }));
 vi.mock("@xterm/xterm", () => ({
   Terminal: class {
@@ -84,6 +85,10 @@ import { getTerminalInstance } from "dormouse-lib/lib/terminal-registry";
 import { setPlatform } from "dormouse-lib/lib/platform";
 import { disposeAllSessions, getOrCreateTerminal } from "dormouse-lib/lib/terminal-registry";
 import { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
+import { AlertManager } from "dormouse-lib/lib/alert-manager";
+import { getAlertDeliveryReceipts, isAlertDeliveryPaused } from "dormouse-lib/lib/alert-delivery-state";
+import { watchUnattendedRings } from "dormouse-lib/lib/alert-ring-watch";
+import { clearTerminalActivity, getActivitySnapshot, setTerminalActivity } from "dormouse-lib/lib/session-activity-store";
 
 const WORKSPACE_ID = "ws-moving";
 
@@ -219,6 +224,7 @@ beforeEach(() => {
   mocks.writeCallbacks.length = 0;
   mocks.grids.length = 0;
   vi.clearAllMocks();
+  mocks.serialize.mockReset().mockReturnValue("");
   mocks.writes.length = 0;
   arrivals = [];
   disposeAllSessions();
@@ -229,6 +235,7 @@ beforeEach(() => {
   resetWorkspaces();
   resetWindowSessionAggregator();
   clearAllNotepads();
+  clearTerminalActivity();
   _resetWorkspaceMovesForTesting();
 });
 
@@ -474,6 +481,47 @@ describe("the source half", () => {
     expect(committed.first).toHaveBeenCalledTimes(1);
     expect(committed.second).not.toHaveBeenCalled();
     expect(getWorkspacesSnapshot().workspaces.map((w) => w.id)).toContain("ws-b");
+  });
+
+  it("recovers serialization failure through host hand-back before resuming delivery or another move", async () => {
+    initWorkspaceMoves(fakePlatform());
+    getOrCreateTerminal("pane-a");
+    createWorkspace({ id: WORKSPACE_ID });
+    publishWorkspaceSession(WORKSPACE_ID, payload().workspace.session);
+    const committed = vi.fn();
+    registerWallHandle(stubWallHandle(WORKSPACE_ID, {
+      prepareWorkspaceTransfer: async () => prepared(committed),
+    }));
+    mocks.serialize.mockImplementationOnce(() => { throw new Error("serialize failed"); });
+    const moving = transferWorkspaceTo(WORKSPACE_ID, "ws-2");
+    let finished = false;
+    void moving.then(() => { finished = true; });
+    await vi.waitFor(() => expect(mocks.serialize).toHaveBeenCalled());
+    await settle();
+    expect(finished).toBe(false);
+    expect(isAlertDeliveryPaused("pane-a")).toBe(true);
+    expect(isWorkspaceTransferPending(WORKSPACE_ID)).toBe(true);
+    expect(getWindowSnapshot().workspaces.map(w => w.id)).not.toContain(WORKSPACE_ID);
+    expect(mocks.invoke).not.toHaveBeenCalledWith("transfer_workspace_content", expect.anything());
+    await expect(transferWorkspaceTo(WORKSPACE_ID, "ws-3"))
+      .resolves.toEqual({ moved: false, reason: "Workspace is already in flight" });
+
+    // Rust's ARRIVAL_MAX watchdog returns ownership even without submitted content.
+    await emit("dormouse://workspace-arrival-failed", {
+      workspaceId: WORKSPACE_ID, reason: "arrival timed out", replayIds: ["pane-a"],
+    });
+    deliverReplay({ id: "pane-a", data: "missed output", requestId: `handback-${WORKSPACE_ID}` });
+    await expect(moving).resolves.toEqual({ moved: false, reason: "arrival timed out" });
+    expect(isAlertDeliveryPaused("pane-a")).toBe(false);
+    expect(isWorkspaceTransferPending(WORKSPACE_ID)).toBe(false);
+    expect(getWindowSnapshot().workspaces.map(w => w.id)).toContain(WORKSPACE_ID);
+    expect(mocks.writes).toContain("missed output");
+    expect(committed).not.toHaveBeenCalled();
+
+    const retry = transferWorkspaceTo(WORKSPACE_ID, "ws-3");
+    await contentSent();
+    await emit("dormouse://workspace-departed", { workspaceId: WORKSPACE_ID });
+    await expect(retry).resolves.toEqual({ moved: true });
   });
 
   it("leaves the source Workspace intact when the host refuses", async () => {
@@ -724,6 +772,41 @@ describe("the target half", () => {
     expect(released).toHaveBeenCalledTimes(1);
     expect(killPty).not.toHaveBeenCalled();
     expect(mocks.invoke).not.toHaveBeenCalledWith("adopt_failed", expect.anything());
+  });
+
+  it("discards imported alert state when adopt_done is refused before the Wall mounts", async () => {
+    const platform = fakePlatform();
+    platform.onAlertState((detail) => setTerminalActivity(detail.id, detail));
+    const host = mocks.invoke.getMockImplementation()!;
+    mocks.invoke.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "adopt_done") arrivals = [];
+      return host(cmd, args);
+    });
+    // The source's live ring and its still-pending speech receipt ride along.
+    const source = new AlertManager();
+    source.notifyFromProtocol("pane-a", { source: "OSC 9", title: "Done", body: null });
+    const episode = source.getState("pane-a").episode!;
+    const alertRuntime = source.pauseForTransfer("pane-a")!;
+    const fire = vi.fn();
+    const stopWatch = watchUnattendedRings({ sink: "speech", subscribe: () => () => {}, enabled: () => true, delayMs: () => 0, fire });
+    arrivals = [payload({
+      terminals: { "pane-a": { serialized: "", alertRuntime, alertDelivery: { speech: { episodeId: episode.id, dueAt: 0, phase: "pending" } } } },
+    } as Partial<WorkspaceTransferPayload>)];
+    try {
+      // No Wall handle: React never mounted the arrival before the refusal.
+      initWorkspaceMoves(platform);
+      await settle();
+      await settle();
+      expect(mocks.invoke).toHaveBeenCalledWith("adopt_done", { workspaceId: WORKSPACE_ID });
+      expect(getActivitySnapshot().has("pane-a")).toBe(false);
+      expect(isAlertDeliveryPaused("pane-a")).toBe(false);
+      expect(getAlertDeliveryReceipts("speech").has("pane-a")).toBe(false);
+      await settle();
+      expect(fire).not.toHaveBeenCalled();
+    } finally {
+      stopWatch();
+      source.dispose();
+    }
   });
 
   it("closes the window when its last Workspace leaves, instead of emptying it", async () => {
