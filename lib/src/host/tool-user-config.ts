@@ -10,7 +10,7 @@ export function userToolConfigPath(): string {
 
 export async function readUserToolFile(path: string): Promise<ToolFile | null> {
   try {
-    return parseToolFile(await readToolFile(path), { path, dir: dirname(path), scope: 'user' });
+    return parseToolFile(await readToolFile(path, true), { path, dir: dirname(path), scope: 'user' });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
     throw error;

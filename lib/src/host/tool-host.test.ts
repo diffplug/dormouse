@@ -1,4 +1,4 @@
-import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -154,4 +154,29 @@ it('does not silently ignore malformed user configuration or input to shell stri
   expect(await host.handle({ op: 'lookup', name: 'viewer', cwd: repo })).toMatchObject({ status: 'error' });
   expect(await host.handle({ op: 'lookup', name: 'storybook', cwd: repo, args: ['input'] }))
     .toMatchObject({ status: 'error', message: expect.stringContaining('argument-list run') });
+});
+
+
+it('validates target-only dedupe inputs before asking for project approval', async () => {
+  await writeFile(join(repo, 'dormouse.yml'), 'tools:\n  view:\n    run: [viewer, $ARGS]\n    prespawn_dedupe: [$TARGET]\n');
+  const host = createToolHost({ stateDir });
+  expect(await host.handle({ op: 'lookup', name: 'view', cwd: repo, args: ['missing.md'] }))
+    .toMatchObject({ status: 'error' });
+  expect(await host.handle({ op: 'lookup', name: 'view', cwd: repo, args: [] }))
+    .toMatchObject({ status: 'error', message: expect.stringContaining('exactly one') });
+});
+
+it('names the actual user path when --global has no config', async () => {
+  const path = join(repo, 'absent-user.yml');
+  expect(await createToolHost({ userConfigPath: path }).handle({ op: 'lookup', name: 'view', cwd: repo, global: true }))
+    .toMatchObject({ status: 'unknown-tool', path, names: [] });
+});
+
+it.skipIf(process.platform === 'win32')('follows user-config dotfile symlinks while keeping project symlinks inert', async () => {
+  const path = join(repo, 'user-link.yml');
+  const source = join(repo, 'dotfiles.yml');
+  await writeFile(source, 'tools:\n  scratch:\n    run: echo hi\n');
+  await symlink(source, path);
+  const result = await createToolHost({ userConfigPath: path }).handle({ op: 'lookup', name: 'scratch', cwd: repo, global: true });
+  expect(result).toMatchObject({ status: 'ok', scope: 'user', run: 'echo hi' });
 });

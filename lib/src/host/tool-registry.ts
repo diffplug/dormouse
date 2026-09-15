@@ -162,6 +162,9 @@ export function parseToolFile(
     if (rawEntry.prespawn_dedupe !== undefined && rawEntry.prespawn_dedupe !== null) {
       dedupeTemplate = readDedupeTemplate(rawEntry.prespawn_dedupe, where);
       validateSubstitutions(dedupeTemplate, scope, where);
+      if (typeof run === 'string' && dedupeTemplate.some(arg => /\$TARGET\b/.test(arg))) {
+        throw new ToolFileError(`${where}: $TARGET in prespawn_dedupe requires an argument-list run`);
+      }
       // A repo-local key with no project scope dedupes across every checkout
       // that declares the name, so a second worktree's tool would reveal the
       // first instead of starting. Warn, not error: a repo-declared
