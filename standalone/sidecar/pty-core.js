@@ -961,7 +961,7 @@ function normalizeJsonArray(parsed) {
  * Parse `Get-NetTCPConnection -State Listen | Select LocalAddress,LocalPort,
  * OwningProcess` JSON, keeping rows owned by a pid in `pidSet`.
  */
-function parseNetTcpConnections(json, pidSet, nameByPid = new Map()) {
+function parseNetTcpConnections(json, pidSet) {
   const rows = normalizeJsonArray(JSON.parse(json));
   const ports = [];
   for (const row of rows) {
@@ -976,7 +976,6 @@ function parseNetTcpConnections(json, pidSet, nameByPid = new Map()) {
       address,
       port,
       pid,
-      processName: nameByPid.get(pid),
     });
   }
   return ports;
@@ -985,7 +984,7 @@ function parseNetTcpConnections(json, pidSet, nameByPid = new Map()) {
 module.exports.parseNetTcpConnections = parseNetTcpConnections;
 
 /** Parse `netstat -ano` LISTENING TCP rows (Windows fallback for older hosts). */
-function parseNetstatListening(output, pidSet, nameByPid = new Map()) {
+function parseNetstatListening(output, pidSet) {
   const ports = [];
   for (const line of output.split(/\r?\n/)) {
     const tokens = line.trim().split(/\s+/);
@@ -1002,7 +1001,6 @@ function parseNetstatListening(output, pidSet, nameByPid = new Map()) {
       address: parsed.address,
       port: parsed.port,
       pid,
-      processName: nameByPid.get(pid),
     });
   }
   return ports;

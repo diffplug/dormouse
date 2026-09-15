@@ -51,6 +51,13 @@ describe('WorkspaceKillConfirm keyboard', () => {
     expect(cancel).toHaveBeenCalledOnce();
     expect(confirm).not.toHaveBeenCalled();
   });
+  it('keeps the frame answering Escape first after re-rendering with fresh callbacks', () => {
+    render(() => false);
+    const { confirm, cancel } = render(() => false);
+    key('Escape');
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(confirm).not.toHaveBeenCalled();
+  });
   it('blocks a confirmation while its workspace is transferring', () => {
     const { confirm, cancel } = render(() => false);
     key('q');

@@ -1,9 +1,7 @@
-import { isWorkspaceTransferPending, setWorkspaceTransferPending } from "dormouse-lib/lib/workspace-ui-store";
 import { invoke } from "@tauri-apps/api/core";
-import { releaseSession, clearTerminalActivity } from "dormouse-lib/lib/terminal-registry";
+import { clearTerminalActivity, flushTerminal, releaseSession } from "dormouse-lib/lib/terminal-registry";
 import { forgetHelper } from "dormouse-lib/lib/helper-terminal";
 import { collectLivePtys, resumeOrRestoreFrom } from "dormouse-lib/lib/reconnect";
-import { flushTerminal } from "dormouse-lib/lib/terminal-registry";
 import { REPLAY_MODE_RESET, writeReplay } from "dormouse-lib/lib/terminal-report-filter";
 import { restoreTransferredTerminalState, removeTerminalPaneState } from "dormouse-lib/lib/terminal-state-store";
 import { registry as terminalRegistry } from "dormouse-lib/lib/terminal-store";
@@ -20,8 +18,10 @@ import {
 import {
   clearWorkspaceTransferring,
   forgetWorkspaceSession,
+  isWorkspaceTransferPending,
   markWorkspaceTransferring,
   publishWorkspaceSession,
+  setWorkspaceTransferPending,
 } from "dormouse-lib/lib/window-session-aggregator";
 import {
   closeWorkspace,
@@ -31,6 +31,7 @@ import {
   setActiveWorkspace,
 } from "dormouse-lib/lib/workspace-store";
 import type { PlatformAdapter, PtyInfo, PtyReplayDetail } from "dormouse-lib/lib/platform/types";
+import type { TerminalGrid } from "dormouse-lib/lib/terminal-transfer";
 import type { WorkspaceId } from "dormouse-lib/lib/session-types";
 import { installWindowPersistence } from "./window-restore";
 import { listenToWindow } from "./window-label";
@@ -89,8 +90,8 @@ export type MoveOutcome = { moved: true } | { moved: false; reason: string };
 
 interface InFlightMove {
   prepared: PreparedWorkspaceTransfer;
-  /** Settles the caller's promise: `handleDeparted` with `moved`,
-   *  `handleArrivalFailed` with the host's reason. */
+  /** Releases the pending guard and settles the caller's promise:
+   *  `handleDeparted` with `moved`, `handleArrivalFailed` with the host's reason. */
   settle: (outcome: MoveOutcome) => void;
 }
 
@@ -106,17 +107,31 @@ const inFlight = new Map<WorkspaceId, InFlightMove>();
 
 const reasonOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
-async function prepare(workspaceId: WorkspaceId): Promise<PreparedWorkspaceTransfer | null> {
+/**
+ * The one way into a move. **The pending guard spans the whole transaction**:
+ * set before the CWD probe awaits, so a close is already refused while it runs,
+ * and released by whatever ends it — a failed preparation, a refused invoke, or
+ * the in-flight `settle`. Never released when `handOff` returns: a hand-back can
+ * settle while it still awaits the invoke's reply or the marks, and a later
+ * release would drop the guard of the next move.
+ */
+async function startMove(
+  workspaceId: WorkspaceId,
+  command: string,
+  args: (payload: WorkspaceTransferPayload) => Record<string, unknown>,
+): Promise<MoveOutcome> {
+  if (isWorkspaceTransferPending(workspaceId)) return { moved: false, reason: "Workspace is already in flight" };
   const handle = getWallHandle(workspaceId);
-  if (!handle) return null;
-  // The CWD probe awaits: close must already be blocked while it runs.
+  if (!handle) return { moved: false, reason: `no mounted Wall for '${workspaceId}'` };
   setWorkspaceTransferPending(workspaceId, true);
+  let prepared: PreparedWorkspaceTransfer;
   try {
-    return await handle.prepareWorkspaceTransfer();
+    prepared = await handle.prepareWorkspaceTransfer();
   } catch (error) {
     setWorkspaceTransferPending(workspaceId, false);
     throw error;
   }
+  return handOff(prepared, command, args(prepared.payload));
 }
 
 /**
@@ -138,12 +153,16 @@ async function handOff(
   args: Record<string, unknown>,
 ): Promise<MoveOutcome> {
   const { workspaceId, terminalIds } = prepared.payload;
-  if (inFlight.has(workspaceId)) return { moved: false, reason: "Workspace is already in flight" };
   // Armed before the invoke: Rust asks the sidecar to stamp the marks inside
   // `begin_arrival`, so a `marked` line can arrive ahead of the invoke's reply.
   const pendingMarks = marksFor(terminalIds, `mark-${workspaceId}`);
-  const outcome = new Promise<MoveOutcome>((settle) => inFlight.set(workspaceId, { prepared, settle }));
-  setWorkspaceTransferPending(workspaceId, true);
+  const outcome = new Promise<MoveOutcome>((resolve) => inFlight.set(workspaceId, {
+    prepared,
+    settle: (result) => {
+      setWorkspaceTransferPending(workspaceId, false);
+      resolve(result);
+    },
+  }));
   try {
     await invoke(command, args);
   } catch (err) {
@@ -216,17 +235,14 @@ export async function transferWorkspaceTo(
   at?: { x: number; y: number },
   index?: number,
 ): Promise<MoveOutcome> {
-  if (isWorkspaceTransferPending(workspaceId)) return { moved: false, reason: "Workspace is already in flight" };
-  const prepared = await prepare(workspaceId);
-  if (!prepared) return { moved: false, reason: `no mounted Wall for '${workspaceId}'` };
-  return handOff(prepared, "transfer_workspace", {
+  return startMove(workspaceId, "transfer_workspace", (payload) => ({
     to,
     payload: {
-      ...prepared.payload,
+      ...payload,
       ...(at ? { at } : {}),
       ...(index === undefined ? {} : { index }),
     } satisfies MovePayload,
-  });
+  }));
 }
 
 /** Tear this Workspace out into a new window under the cursor. Resolves once
@@ -235,12 +251,9 @@ export async function tearOutWorkspace(
   workspaceId: WorkspaceId,
   grab: { x: number; y: number },
 ): Promise<MoveOutcome> {
-  if (isWorkspaceTransferPending(workspaceId)) return { moved: false, reason: "Workspace is already in flight" };
-  const prepared = await prepare(workspaceId);
-  if (!prepared) return { moved: false, reason: `no mounted Wall for '${workspaceId}'` };
-  return handOff(prepared, "open_workspace_window", {
-    payload: { ...prepared.payload, grab } satisfies MovePayload,
-  });
+  return startMove(workspaceId, "open_workspace_window", (payload) => ({
+    payload: { ...payload, grab } satisfies MovePayload,
+  }));
 }
 
 /**
@@ -256,7 +269,6 @@ function handleDeparted(workspaceId: WorkspaceId): void {
   }
   inFlight.delete(workspaceId);
   move.prepared.commit();
-  setWorkspaceTransferPending(workspaceId, false);
   move.settle({ moved: true });
   // Moving a Window's last Workspace away closes it — without confirming,
   // archiving or killing, because nothing ended: the Surfaces are alive
@@ -287,7 +299,6 @@ function handleArrivalFailed(workspaceId: WorkspaceId, reason: string, replayIds
   if (!move) return;
   inFlight.delete(workspaceId);
   clearWorkspaceTransferring(workspaceId);
-  setWorkspaceTransferPending(workspaceId, false);
   console.warn(`[workspace-move] ${workspaceId} was not adopted (${reason}); it stays here`);
   if (replayIds.length) acceptHandBackReplay(workspaceId, replayIds);
   move.settle({ moved: false, reason });
@@ -396,19 +407,20 @@ async function planArrival(
       + "refusing rather than restarting shells that are still running",
     );
   }
-  // The source's buffers come first, then the host's replay of everything
-  // after each mark: together they are the whole transcript, not the sidecar's
-  // bounded tail (`docs/specs/transport.md` → "Transferring a Workspace").
+  const terminalGrids = new Map<string, TerminalGrid>();
   for (const [id, terminal] of Object.entries(payload.terminals ?? {})) {
-    if (!ptyIds.has(id) || !terminal.serialized) continue;
-    live.replay.set(id, terminal.serialized + (live.replay.get(id) ?? ""));
+    if (terminal.grid) terminalGrids.set(id, terminal.grid);
+    // The source's buffers come first, then the host's replay of everything
+    // after each mark: together they are the whole transcript, not the sidecar's
+    // bounded tail (`docs/specs/transport.md` → "Transferring a Workspace").
+    if (ptyIds.has(id) && terminal.serialized) {
+      live.replay.set(id, terminal.serialized + (live.replay.get(id) ?? ""));
+    }
   }
   const result = resumeOrRestoreFrom(platform, live, {
     savedSession: payload.workspace.session,
     ptyIds,
-    terminalGrids: new Map(Object.entries(payload.terminals ?? {}).flatMap(
-      ([id, terminal]) => terminal.grid ? [[id, terminal.grid] as const] : [],
-    )),
+    terminalGrids,
   });
   // The notes travelled in the payload rather than through the archive: a move
   // is not a closure (`docs/specs/notepad.md` → "Closure").

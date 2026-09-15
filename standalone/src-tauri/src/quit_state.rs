@@ -6,34 +6,66 @@
 //! transitions live here, free of Tauri, and hand the caller a list of actions
 //! to perform; `lib.rs` owns the emitting, destroying and exiting.
 
-use crate::routing::quit_order;
+use crate::routing::{quit_order, Arrivals};
 use std::collections::{HashMap, HashSet};
+use std::ops::{Deref, DerefMut};
 
-/// User requests delayed until transfer membership is settled. A quit absorbs
-/// earlier per-window closes; cancellation and destruction retire queued work.
+/// Every Workspace in flight (the `routing::Arrivals` this derefs to) and the
+/// user teardown requests delayed until their transfers settle, behind one
+/// lock: a request queues against the same records a transfer is admitted
+/// against, so a settlement cannot miss a request queued concurrently. A quit
+/// absorbs earlier per-window closes; cancellation and destruction retire
+/// queued work.
 #[derive(Default)]
-pub struct DeferredTeardown {
+pub struct ArrivalQueue {
+    records: Arrivals,
     quit: bool,
     closes: HashSet<String>,
 }
 
-impl DeferredTeardown {
-    pub fn request_quit(&mut self) { self.quit = true; self.closes.clear(); }
-    pub fn request_close(&mut self, label: &str) {
+impl Deref for ArrivalQueue {
+    type Target = Arrivals;
+    fn deref(&self) -> &Arrivals { &self.records }
+}
+
+impl DerefMut for ArrivalQueue {
+    fn deref_mut(&mut self) -> &mut Arrivals { &mut self.records }
+}
+
+impl ArrivalQueue {
+    /// Queue a quit while anything is in flight; whether it was queued.
+    pub fn defer_quit(&mut self) -> bool {
+        if self.records.is_empty() { return false; }
+        self.quit = true;
+        self.closes.clear();
+        true
+    }
+    /// Queue `label`'s close while it is either end of a transfer; whether it
+    /// was queued (a queued quit absorbs it).
+    pub fn defer_close(&mut self, label: &str) -> bool {
+        if !self.records.iter().any(|arrival| arrival.from == label || arrival.to == label) { return false; }
         if !self.quit { self.closes.insert(label.to_string()); }
+        true
     }
     pub fn blocks_transfer(&self, from: &str, to: &str) -> bool {
         self.quit || self.closes.contains(from) || self.closes.contains(to)
     }
-    pub fn cancel(&mut self) { self.quit = false; self.closes.clear(); }
-    pub fn forget_window(&mut self, label: &str) { self.closes.remove(label); }
-    pub fn take_ready(&mut self, endpoints: &HashSet<String>, live: &HashSet<String>) -> (bool, Vec<String>) {
+    pub fn cancel_deferred(&mut self) { self.quit = false; self.closes.clear(); }
+    pub fn forget_deferred_close(&mut self, label: &str) { self.closes.remove(label); }
+    /// Take the requests no transfer holds any more: the quit once nothing is
+    /// in flight, else every close whose window is no endpoint. `live` (the
+    /// open window labels) is read only when something is queued.
+    pub fn take_ready(&mut self, live: impl FnOnce() -> HashSet<String>) -> (bool, Vec<String>) {
+        if !self.quit && self.closes.is_empty() { return (false, Vec::new()); }
+        let live = live();
         self.closes.retain(|label| live.contains(label));
         if self.quit {
-            if endpoints.is_empty() { self.quit = false; return (true, Vec::new()); }
+            if self.records.is_empty() { self.quit = false; return (true, Vec::new()); }
             return (false, Vec::new());
         }
-        let ready: Vec<_> = self.closes.iter().filter(|label| !endpoints.contains(*label)).cloned().collect();
+        let endpoints: HashSet<&str> =
+            self.records.iter().flat_map(|arrival| [arrival.from.as_str(), arrival.to.as_str()]).collect();
+        let ready: Vec<_> = self.closes.iter().filter(|label| !endpoints.contains(label.as_str())).cloned().collect();
         for label in &ready { self.closes.remove(label); }
         (false, ready)
     }
@@ -383,32 +415,59 @@ impl CloseMachine {
 mod tests {
     use super::*;
 
+    fn arrival(from: &str, to: &str) -> crate::routing::Arrival {
+        crate::routing::Arrival {
+            workspace_id: format!("{from}-to-{to}"),
+            from: from.to_string(),
+            to: to.to_string(),
+            terminal_ids: Vec::new(),
+            payload: serde_json::Value::Null,
+            queued_at: std::time::Instant::now(),
+            content: None,
+            pending_window: None,
+        }
+    }
+
     #[test]
     fn deferred_quit_and_close_requests_wait_for_membership_then_run_once() {
-        let mut deferred = DeferredTeardown::default();
-        let live = HashSet::from(["main".to_string(), "ws-2".to_string(), "ws-3".to_string()]);
-        let moving = HashSet::from(["main".to_string(), "ws-2".to_string()]);
-        deferred.request_close("ws-2");
-        deferred.request_close("ws-2"); // a repeated click coalesces
-        assert!(deferred.blocks_transfer("ws-3", "ws-2"));
-        assert_eq!(deferred.take_ready(&moving, &live), (false, vec![]));
-        assert_eq!(deferred.take_ready(&HashSet::new(), &live), (false, vec!["ws-2".into()]));
-        assert_eq!(deferred.take_ready(&HashSet::new(), &live), (false, vec![]));
-        deferred.request_close("ws-2");
-        deferred.request_quit(); // quit supersedes queued window closes
-        deferred.request_close("ws-3");
-        assert!(deferred.blocks_transfer("ws-3", "main"));
-        assert_eq!(deferred.take_ready(&moving, &live), (false, vec![]));
-        assert_eq!(deferred.take_ready(&HashSet::new(), &live), (true, vec![]));
-        assert_eq!(deferred.take_ready(&HashSet::new(), &live), (false, vec![]));
-        deferred.request_quit();
-        deferred.cancel();
-        assert_eq!(deferred.take_ready(&HashSet::new(), &live), (false, vec![]));
-        deferred.request_close("ws-2");
-        deferred.forget_window("ws-2");
-        deferred.request_close("gone");
-        assert_eq!(deferred.take_ready(&HashSet::new(), &live), (false, vec![]));
-        assert!(!deferred.blocks_transfer("main", "ws-2"));
+        let mut queue = ArrivalQueue::default();
+        let live = || HashSet::from(["main".to_string(), "ws-2".to_string(), "ws-3".to_string()]);
+        let quiet = || -> HashSet<String> { panic!("nothing is queued, so no live labels are read") };
+        // Nothing in flight: nothing to wait behind, so neither request queues.
+        assert!(!queue.defer_quit());
+        assert!(!queue.defer_close("ws-2"));
+        assert_eq!(queue.take_ready(quiet), (false, vec![]));
+        queue.push(arrival("main", "ws-2"));
+        assert!(!queue.defer_close("ws-3")); // not an endpoint, so it closes now
+        assert!(!queue.blocks_transfer("ws-3", "main"));
+        assert!(queue.defer_close("ws-2"));
+        assert!(queue.defer_close("ws-2")); // a repeated click coalesces
+        assert!(queue.blocks_transfer("ws-3", "ws-2"));
+        assert_eq!(queue.take_ready(live), (false, vec![]));
+        let settled = queue.pop().unwrap();
+        assert_eq!(queue.take_ready(live), (false, vec!["ws-2".into()]));
+        assert_eq!(queue.take_ready(quiet), (false, vec![]));
+        queue.push(settled);
+        queue.defer_close("ws-2");
+        assert!(queue.defer_quit()); // quit supersedes queued window closes
+        assert!(queue.defer_close("ws-2"));
+        assert!(queue.blocks_transfer("ws-3", "main"));
+        assert_eq!(queue.take_ready(live), (false, vec![]));
+        let settled = queue.pop().unwrap();
+        assert_eq!(queue.take_ready(live), (true, vec![]));
+        assert_eq!(queue.take_ready(quiet), (false, vec![]));
+        queue.push(settled);
+        queue.defer_quit();
+        queue.cancel_deferred();
+        assert_eq!(queue.take_ready(quiet), (false, vec![]));
+        queue.push(arrival("gone", "main"));
+        queue.defer_close("ws-2");
+        queue.forget_deferred_close("ws-2");
+        queue.defer_close("gone");
+        queue.clear();
+        assert_eq!(queue.take_ready(live), (false, vec![]));
+        assert_eq!(queue.take_ready(quiet), (false, vec![]));
+        assert!(!queue.blocks_transfer("main", "ws-2"));
     }
 
     #[test]

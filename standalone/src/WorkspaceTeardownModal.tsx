@@ -4,7 +4,6 @@ import { useRef, useSyncExternalStore } from 'react';
 // `dormouse-lib` alias, matching quit.ts.
 import { ModalFrame, modalActionButton } from '../../lib/src/components/design';
 import { WorkspaceKillConfirm } from '../../lib/src/components/WorkspaceKillConfirm';
-import { useDialogKeyboardOwner } from '../../lib/src/components/wall/wall-context';
 import {
   countRunningSessions,
   subscribeToTerminalPaneState,
@@ -22,21 +21,17 @@ import {
 } from './quit-confirm-store';
 
 /**
- * Quit-confirmation dialog (docs/specs/standalone.md §Quit flow, "Confirmation
- * dialog"). Mounted through Wall's `dialogHost` slot, which renders it beside
- * the built-in modal hosts inside Wall's `DialogKeyboardContext` provider; it
- * suppresses command-mode keyboard handling while visible. Store-connected
- * shell + presentational modal, mirror of the ExternalLinkModalHost /
- * ExternalLinkModal pair.
+ * The window-close and quit teardown dialog (docs/specs/standalone.md §Quit
+ * flow, "Confirmation dialog"): the typed-letter confirmation, the progress
+ * overlay, and the archive-failure decision. Mounted through Wall's
+ * `dialogHost` slot. Command-mode suppression is the store's chrome keyboard
+ * lease, held for every phase. Store-connected shell + presentational modal,
+ * mirror of the ExternalLinkModalHost / ExternalLinkModal pair.
  */
 export function WorkspaceTeardownModalHost() {
   const phase = useSyncExternalStore(subscribeQuitConfirm, getQuitConfirmPhase);
   const storedArchiveError = useSyncExternalStore(subscribeQuitConfirm, getQuitArchiveError);
   const intent = useSyncExternalStore(subscribeQuitConfirm, getQuitConfirmIntent);
-  const open = phase !== null;
-
-  // Suppress the Wall's command-mode key dispatch while the dialog is up.
-  useDialogKeyboardOwner(open);
 
   if (!phase) return null;
   return (
@@ -66,7 +61,8 @@ export function WorkspaceTeardownModal({
    *  "Standalone quit"). Set means the running-command decision is already made
    *  and this dialog now asks only whether to lose the notes. */
   archiveError?: string | null;
-  /** Whether this asks about the whole app or one window, and which one. */
+  /** Whether this tears down the whole app or one window, and whether that
+   *  discards a downloaded update. */
   intent?: QuitConfirmIntent;
 }) {
   const cancelButtonRef = useRef<HTMLButtonElement>(null);
@@ -94,11 +90,6 @@ export function WorkspaceTeardownModal({
       layer="critical" />;
   }
   // Note loss needs its own decision even after process termination was approved.
-  const title = 'Notes could not be archived';
-  const body = `${archiveError} Continuing discards them.`;
-  const confirmLabel = 'Discard notes and continue';
-  const cancelTone = 'primary';
-  const confirmTone = 'secondary';
   return (
     <ModalFrame
       titleId="quit-confirm-modal-title"
@@ -108,28 +99,26 @@ export function WorkspaceTeardownModal({
       overlayClassName="px-4 py-6"
       className="w-full max-w-[26rem]"
       initialFocusRef={cancelButtonRef}
-      onEscape={confirming ? undefined : cancelQuit}
+      onEscape={cancelQuit}
     >
-      <h2 id="quit-confirm-modal-title" className="text-sm leading-5 text-foreground">{title}</h2>
-      <p className="mt-2 text-sm text-muted">{body}</p>
+      <h2 id="quit-confirm-modal-title" className="text-sm leading-5 text-foreground">Notes could not be archived</h2>
+      <p className="mt-2 text-sm text-muted">{archiveError} Continuing discards them.</p>
 
       <div className="mt-4 flex justify-end gap-2">
         <button
           ref={cancelButtonRef}
           type="button"
           onClick={cancelQuit}
-          disabled={confirming}
-          className={`${modalActionButton({ tone: cancelTone })} min-w-[5rem]`}
+          className={`${modalActionButton({ tone: 'primary' })} min-w-[5rem]`}
         >
           Cancel
         </button>
         <button
           type="button"
           onClick={confirmQuit}
-          disabled={confirming}
-          className={`${modalActionButton({ tone: confirmTone })} min-w-[5rem]`}
+          className={`${modalActionButton({ tone: 'secondary' })} min-w-[5rem]`}
         >
-          {confirmLabel}
+          Discard notes and continue
         </button>
       </div>
     </ModalFrame>

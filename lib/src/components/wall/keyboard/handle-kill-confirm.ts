@@ -4,7 +4,7 @@ import type { WallKeyboardCtx } from './types';
  * Whether a key accepts a staged kill confirmation: a case-insensitive match of
  * the confirm letter, so Caps Lock still confirms. Every other key rejects, which
  * is why the confirmation hijacks each key it sees rather than testing for one.
- * Shared with the Workspace strip's own confirmation, which listens outside every
+ * Shared with `WorkspaceKillConfirm`, which listens outside every
  * Wall (`docs/specs/shortcuts.md` → "Dialogs, menus & prompts").
  */
 export function acceptsKillChar(key: string, char: string): boolean {

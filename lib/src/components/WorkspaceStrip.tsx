@@ -12,21 +12,19 @@ import { clsx } from 'clsx';
 import { PlusIcon, XIcon } from '@phosphor-icons/react';
 import { AlertBell } from './AlertBell';
 import { InlineEditInput } from './wall/InlineEditInput';
-import { KillConfirmModal } from './KillConfirm';
 import { WorkspaceKillConfirm } from './WorkspaceKillConfirm';
 import { useTodoPillContent } from './TodoPillBody';
 import { chromeButton, TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from './design';
 import { createWorkspaceStripDrag, type StripDragHost } from './workspace-strip-drag';
 import { acquireChromeKeyboardLease } from './wall/chrome-keyboard-lease';
-import { acceptsKillChar } from './wall/keyboard/handle-kill-confirm';
 import { useDialogKeyboardOwner } from './wall/wall-context';
 import { closeWorkspaceWithSurfaces, requestWorkspaceClose, requestWorkspaceRename } from './wall/workspace-lifecycle';
 import { getActivitySnapshot, subscribeToActivity } from '../lib/terminal-registry';
 import { getWorkspaceSurfacesSnapshot, subscribeToWorkspaceSurfaces } from '../lib/workspace-surfaces';
 import { computeWorkspaceUnion, EMPTY_WORKSPACE_UNION, type WorkspaceUnion } from '../lib/workspace-union';
+import { isWorkspaceTransferPending } from '../lib/window-session-aggregator';
 import {
   getWorkspaceUiSnapshot,
-  isWorkspaceTransferPending,
   setPendingWorkspaceClose,
   setPendingWorkspaceMove,
   setRenamingWorkspace,
@@ -126,28 +124,6 @@ export function WorkspaceStrip({
     [drag],
   );
 
-  // Rename owns its input until it ends; both typed gates wait behind it.
-  // The move gate is the same typed letter: the page state it destroys is as
-  // gone as a killed pane's process. It waits behind a close confirmation,
-  // which the render below shows instead: the letter on screen is the close's,
-  // and a key typed at it must reach that handler alone — the two are siblings
-  // on one node, so `stopPropagation` would not keep it from this one.
-  useEffect(() => {
-    if (!pendingMove || pendingClose || renamingId) return;
-    const { char, proceed } = pendingMove;
-    const onKeyDown = (event: KeyboardEvent) => {
-      event.preventDefault();
-      event.stopPropagation();
-      // handleDualTap consumes a bare Shift or Meta before the pane kill
-      // confirmation sees it; the strip's own listener keeps the same rule.
-      if (event.key === 'Shift' || event.key === 'Meta') return;
-      setPendingWorkspaceMove(null);
-      if (acceptsKillChar(event.key, char)) proceed();
-    };
-    window.addEventListener('keydown', onKeyDown, true);
-    return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [pendingMove, pendingClose, renamingId]);
-
   // Anchored to the Window's content area, not the tab: a 24px tab is too small
   // a box to center a dialog over, and every Wall shares one grid cell, so the
   // confirmation lands in the same place whichever Workspace it is about. No
@@ -216,6 +192,10 @@ export function WorkspaceStrip({
       >
         <PlusIcon size={12} weight="bold" aria-hidden="true" />
       </button>
+      {/* Rename owns its input until it ends; both typed gates wait behind it.
+          The move gate is the same typed letter (the page state it destroys is
+          as gone as a killed pane's process) and waits behind a close, so only
+          one gate ever listens for the letter on screen. */}
       {pendingClose && !renamingId && (
         <WorkspaceKillConfirm
           char={pendingClose.char}
@@ -231,11 +211,16 @@ export function WorkspaceStrip({
         />
       )}
       {pendingMove && !pendingClose && !renamingId && (
-        <KillConfirmModal
+        <WorkspaceKillConfirm
           char={pendingMove.char}
           targetElement={confirmTarget}
           title="Move and lose page state?"
           detail={`${pendingMove.iframeCount === 1 ? 'An iframe Surface' : `${pendingMove.iframeCount} iframe Surfaces`} in this Workspace will reload at ${pendingMove.iframeCount === 1 ? 'its' : 'their'} saved URL; a page cannot leave its window.`}
+          onConfirm={() => {
+            const { proceed } = pendingMove;
+            setPendingWorkspaceMove(null);
+            proceed();
+          }}
           onCancel={() => setPendingWorkspaceMove(null)}
         />
       )}

@@ -55,29 +55,20 @@ export function setPendingWorkspaceMove(pending: WorkspaceUiState['pendingMove']
   emit({ ...state, pendingMove: pending });
 }
 
-/** Reset all transient Workspace UI and transfer guards (tests). */
+/** Clear every transient Workspace UI state in one notification: the host's
+ *  teardown dialog taking the window, and tests. */
 export function resetWorkspaceUi(): void {
-  pendingTransfers.clear();
   if (state === EMPTY) return;
   emit(EMPTY);
 }
 
 /** Forget only the departing Workspace's chrome, preserving sibling dialogs. */
 export function dismissWorkspaceUi(id: WorkspaceId): void {
-  const next = {
-    renamingId: state.renamingId === id ? null : state.renamingId,
-    pendingClose: state.pendingClose?.id === id ? null : state.pendingClose,
-    pendingMove: state.pendingMove?.id === id ? null : state.pendingMove,
-  };
-  if (next.renamingId !== state.renamingId || next.pendingClose !== state.pendingClose || next.pendingMove !== state.pendingMove) emit(next);
-}
-
-// UI guard starts before the host accepts; persistence exclusion starts after.
-const pendingTransfers = new Set<WorkspaceId>();
-export function setWorkspaceTransferPending(id: WorkspaceId, pending: boolean): void {
-  if (pending) pendingTransfers.add(id);
-  else pendingTransfers.delete(id);
-}
-export function isWorkspaceTransferPending(id: WorkspaceId): boolean {
-  return pendingTransfers.has(id);
+  const { renamingId, pendingClose, pendingMove } = state;
+  if (renamingId !== id && pendingClose?.id !== id && pendingMove?.id !== id) return;
+  emit({
+    renamingId: renamingId === id ? null : renamingId,
+    pendingClose: pendingClose?.id === id ? null : pendingClose,
+    pendingMove: pendingMove?.id === id ? null : pendingMove,
+  });
 }

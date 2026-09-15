@@ -31,7 +31,7 @@ vi.mock("dormouse-lib/lib/notepad/notepad-store", () => ({
   notepadSurfaceIds: mocks.notepadSurfaceIds,
   removeSurface: mocks.removeSurface,
 }));
-// How a window names itself in its dialog: the Workspace it is showing.
+// The Workspaces the dialog names, which the quit-confirm store captures.
 vi.mock("dormouse-lib/lib/workspace-store", () => ({
   subscribeToWorkspaces: () => () => {},
   getWorkspacesSnapshot: mocks.getWorkspacesSnapshot,
@@ -120,7 +120,7 @@ describe("per-window close", () => {
     await settle();
 
     expect(getQuitConfirmPhase()).toBe("open");
-    // The dialog says "close", not "quit", and names the window.
+    // The dialog says "close", not "quit".
     expect(getQuitConfirmIntent()).toEqual({ kind: "close-window" });
     expect(adapter.gracefulKillPtys).not.toHaveBeenCalled();
 

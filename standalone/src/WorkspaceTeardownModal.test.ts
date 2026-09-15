@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { createElement, act } from "react";
+import { createElement, act, type ReactElement } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceTeardownModalHost, WorkspaceTeardownModal } from "./WorkspaceTeardownModal";
@@ -8,22 +8,43 @@ import { openQuitConfirm, openQuitArchiveFailure, confirmQuit, getQuitConfirmCha
 import { createWorkspace, resetWorkspaces } from 'dormouse-lib/lib/workspace-store';
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
-afterEach(() => { _resetQuitConfirmForTesting(); resetWorkspaces(); });
+
+/** Teardowns for every root still mounted; the afterEach runs what a test left. */
+const mounted = new Set<() => void>();
+
+afterEach(() => {
+  for (const unmount of [...mounted]) unmount();
+  _resetQuitConfirmForTesting();
+  resetWorkspaces();
+});
+
+/**
+ * Render `element` into `container` (a fresh div by default) attached to the
+ * document, and return its idempotent teardown. No JSX: the standalone suite has
+ * no React transform, and this needs none.
+ */
+function mount(element: ReactElement, container: HTMLElement = document.createElement("div")): () => void {
+  document.body.append(container);
+  const root = createRoot(container);
+  act(() => { root.render(element); });
+  const unmount = () => {
+    if (!mounted.delete(unmount)) return;
+    act(() => { root.unmount(); });
+    container.remove();
+  };
+  mounted.add(unmount);
+  return unmount;
+}
 
 /**
  * The dialog's copy, at the one place it depends on something other than the
  * running count (`docs/specs/standalone.md` → "Quit flow", Confirmation
- * dialog). No JSX: the standalone suite has no React transform, and this needs
- * none.
+ * dialog).
  */
 function render(props: Parameters<typeof WorkspaceTeardownModal>[0]): string {
-  const host = document.createElement("div");
-  document.body.append(host);
-  const root = createRoot(host);
-  act(() => { root.render(createElement(WorkspaceTeardownModal, props)); });
+  const unmount = mount(createElement(WorkspaceTeardownModal, props));
   const text = document.body.textContent ?? "";
-  act(() => { root.unmount(); });
-  host.remove();
+  unmount();
   return text;
 }
 
@@ -46,34 +67,24 @@ describe("WorkspaceTeardownModal copy", () => {
   });
 });
 
-
 describe('WorkspaceTeardownModal host decisions', () => {
   it('retains the letter across host remount and names hidden workspaces', () => {
     createWorkspace({ id: 'hidden', name: 'Background build', activate: false });
     const ctx = { confirm: vi.fn(), cancel: vi.fn() };
     openQuitConfirm(ctx);
     const letter = getQuitConfirmChar();
-    const host = document.createElement('div');
-    document.body.append(host);
-    let root = createRoot(host);
-    try {
-      act(() => root.render(createElement(WorkspaceTeardownModalHost)));
-      expect(document.body.textContent).toContain('Background build');
-      expect(document.body.textContent).toContain('Confirm kill workspace');
-      expect(document.body.textContent).not.toMatch(/Quit Dormouse|Close this window/);
-      act(() => root.unmount());
-      root = createRoot(host);
-      act(() => root.render(createElement(WorkspaceTeardownModalHost)));
-      expect(getQuitConfirmChar()).toBe(letter);
-      act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: letter, cancelable: true })); });
-      expect(ctx.confirm).toHaveBeenCalledOnce();
-      expect(ctx.cancel).not.toHaveBeenCalled();
-      expect(getQuitConfirmPhase()).toBe('quitting');
-      expect(document.body.textContent).toContain('Waiting for all windows, then closing…');
-    } finally {
-      act(() => root.unmount());
-      host.remove();
-    }
+    const unmountFirst = mount(createElement(WorkspaceTeardownModalHost));
+    expect(document.body.textContent).toContain('Background build');
+    expect(document.body.textContent).toContain('Confirm kill workspace');
+    expect(document.body.textContent).not.toMatch(/Quit Dormouse|Close this window/);
+    unmountFirst();
+    mount(createElement(WorkspaceTeardownModalHost));
+    expect(getQuitConfirmChar()).toBe(letter);
+    act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: letter, cancelable: true })); });
+    expect(ctx.confirm).toHaveBeenCalledOnce();
+    expect(ctx.cancel).not.toHaveBeenCalled();
+    expect(getQuitConfirmPhase()).toBe('quitting');
+    expect(document.body.textContent).toContain('Waiting for all windows, then closing…');
   });
 
   it.each(['Cancel', 'Discard notes and continue'])('requires an independent archive-loss decision: %s', (choice) => {
@@ -83,40 +94,27 @@ describe('WorkspaceTeardownModal host decisions', () => {
     const letter = getQuitConfirmChar();
     confirmQuit();
     openQuitArchiveFailure('disk is full', archive);
-    const host = document.createElement('div');
-    document.body.append(host);
-    const root = createRoot(host);
-    try {
-      act(() => root.render(createElement(WorkspaceTeardownModalHost)));
-      expect(document.body.textContent).toContain('Notes could not be archived');
-      expect(document.body.textContent).toContain('disk is full');
-      expect(document.body.textContent).not.toContain('Confirm kill workspace');
-      expect(document.activeElement?.textContent).toBe('Cancel');
-      act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: letter, cancelable: true })); });
-      expect(archive.confirm).not.toHaveBeenCalled();
-      expect(archive.cancel).not.toHaveBeenCalled();
-      const button = [...document.querySelectorAll('button')].find((button) => button.textContent === choice)!;
-      act(() => button.click());
-      expect(choice === 'Cancel' ? archive.cancel : archive.confirm).toHaveBeenCalledOnce();
-      expect(kill.confirm).toHaveBeenCalledOnce();
-    } finally {
-      act(() => root.unmount());
-      host.remove();
-    }
+    mount(createElement(WorkspaceTeardownModalHost));
+    expect(document.body.textContent).toContain('Notes could not be archived');
+    expect(document.body.textContent).toContain('disk is full');
+    expect(document.body.textContent).not.toContain('Confirm kill workspace');
+    expect(document.activeElement?.textContent).toBe('Cancel');
+    act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: letter, cancelable: true })); });
+    expect(archive.confirm).not.toHaveBeenCalled();
+    expect(archive.cancel).not.toHaveBeenCalled();
+    const button = [...document.querySelectorAll('button')].find((button) => button.textContent === choice)!;
+    act(() => button.click());
+    expect(choice === 'Cancel' ? archive.cancel : archive.confirm).toHaveBeenCalledOnce();
+    expect(kill.confirm).toHaveBeenCalledOnce();
   });
-});
 
-
-it('blocks the entire window during confirmation and while waiting for other votes', () => {
-  const ctx = { confirm: vi.fn(), cancel: vi.fn() };
-  const content = document.createElement('div');
-  content.dataset.workspaceContent = '';
-  content.getBoundingClientRect = () => ({ x: 0, y: 30, top: 30, left: 0, bottom: 430, right: 600, width: 600, height: 400, toJSON() {} });
-  document.body.append(content);
-  const root = createRoot(content);
-  try {
+  it('blocks the entire window during confirmation and while waiting for other votes', () => {
+    const ctx = { confirm: vi.fn(), cancel: vi.fn() };
+    const content = document.createElement('div');
+    content.dataset.workspaceContent = '';
+    content.getBoundingClientRect = () => ({ x: 0, y: 30, top: 30, left: 0, bottom: 430, right: 600, width: 600, height: 400, toJSON() {} });
     openQuitConfirm(ctx);
-    act(() => root.render(createElement(WorkspaceTeardownModalHost)));
+    mount(createElement(WorkspaceTeardownModalHost), content);
     const overlay = () => document.querySelector('[role="dialog"]')!.parentElement!;
     expect(overlay().classList.contains('fixed')).toBe(true);
     expect(overlay().classList.contains('inset-0')).toBe(true);
@@ -131,8 +129,5 @@ it('blocks the entire window during confirmation and while waiting for other vot
     expect(getQuitConfirmPhase()).toBe('quitting');
     expect(ctx.cancel).not.toHaveBeenCalled();
     expect(ctx.confirm).toHaveBeenCalledOnce();
-  } finally {
-    act(() => root.unmount());
-    content.remove();
-  }
+  });
 });

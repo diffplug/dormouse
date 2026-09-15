@@ -11,9 +11,9 @@ import { ensureResizeObserver } from './wall/wall-test-utils';
 import { requestWorkspaceClose, requestWorkspaceRename } from './wall/workspace-lifecycle';
 import { resetWorkspaceSurfaces, setWorkspaceSurfaces } from '../lib/workspace-surfaces';
 import { clearTerminalActivity, setTerminalActivity } from '../lib/terminal-registry';
+import { resetWindowSessionAggregator, setWorkspaceTransferPending } from '../lib/window-session-aggregator';
 import {
   getWorkspaceUiSnapshot,
-  setWorkspaceTransferPending,
   dismissWorkspaceUi,
   resetWorkspaceUi,
   setPendingWorkspaceClose,
@@ -72,6 +72,7 @@ beforeEach(() => {
   ensureResizeObserver();
   resetWorkspaces();
   resetWorkspaceUi();
+  resetWindowSessionAggregator();
   resetWorkspaceSurfaces();
   resetWallHandles();
   resetChromeKeyboardLeases();
@@ -309,7 +310,7 @@ describe('WorkspaceStrip', () => {
     expect(proceed).toHaveBeenCalledOnce();
   });
 
-  it('keeps the move gate behind a close confirmation, and ignores a bare Shift or Meta', async () => {
+  it('keeps the move gate behind a close confirmation, and ignores modifiers and chords', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     await act(async () => { createWorkspace({ id: 'ws-2' }); });
     stubHandle(first);
@@ -320,10 +321,13 @@ describe('WorkspaceStrip', () => {
     await act(async () => { setPendingWorkspaceMove({ id: first, char: 'k', iframeCount: 1, proceed }); });
     expect(container.querySelector('#kill-confirm-title')).not.toBeNull();
 
-    // A bare modifier is the dual-tap detector's, never an answer to the gate.
+    // A bare modifier or a chord is never an answer, even on the gate's letter.
     await act(async () => {
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', bubbles: true }));
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Meta', bubbles: true }));
+      for (const key of ['Shift', 'Meta', 'Control', 'Alt']) {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+      }
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true, bubbles: true }));
     });
     expect(proceed).not.toHaveBeenCalled();
     expect(getWorkspaceUiSnapshot().pendingMove).not.toBeNull();

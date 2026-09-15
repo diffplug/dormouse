@@ -17,6 +17,8 @@ import type { PersistedSession, PersistedWindow, PersistedWorkspace, WorkspaceId
 const records = new Map<WorkspaceId, PersistedSession>();
 /** Workspaces this Window has handed to another one and not yet released. */
 const transferring = new Set<WorkspaceId>();
+/** Workspaces whose move has started and not settled; wider than `transferring`. */
+const pendingTransfers = new Set<WorkspaceId>();
 let writer: ((snapshot: PersistedWindow) => void | Promise<void>) | null = null;
 let unsubscribeWorkspaces: (() => void) | null = null;
 let timer: ReturnType<typeof setTimeout> | null = null;
@@ -85,6 +87,20 @@ export function markWorkspaceTransferring(workspaceId: WorkspaceId): void {
 export function clearWorkspaceTransferring(workspaceId: WorkspaceId): void {
   if (!transferring.delete(workspaceId)) return;
   scheduleWrite();
+}
+
+/**
+ * The guard that refuses a close, or a second move, of a Workspace mid-move. UI
+ * guard starts before the host accepts; persistence exclusion
+ * (`markWorkspaceTransferring`) starts after. Snapshots never read it.
+ */
+export function setWorkspaceTransferPending(workspaceId: WorkspaceId, pending: boolean): void {
+  if (pending) pendingTransfers.add(workspaceId);
+  else pendingTransfers.delete(workspaceId);
+}
+
+export function isWorkspaceTransferPending(workspaceId: WorkspaceId): boolean {
+  return pendingTransfers.has(workspaceId);
 }
 
 /**
@@ -212,10 +228,11 @@ function cancelPending(): void {
   timer = null;
 }
 
-/** Forget every session, seed, and installed writer (tests). */
+/** Forget every session, seed, transfer guard, and installed writer (tests). */
 export function resetWindowSessionAggregator(): void {
   records.clear();
   transferring.clear();
+  pendingTransfers.clear();
   writer = null;
   unsubscribeWorkspaces?.();
   unsubscribeWorkspaces = null;

@@ -1329,10 +1329,10 @@ test('parseNetTcpConnections filters by owning pid and detects family', () => {
     { LocalAddress: '::', LocalPort: 8080, OwningProcess: 4242 },
     { LocalAddress: '0.0.0.0', LocalPort: 9999, OwningProcess: 1 }, // not ours
   ]);
-  const ports = parseNetTcpConnections(json, new Set([4242]), new Map([[4242, 'node.exe']]));
+  const ports = parseNetTcpConnections(json, new Set([4242]));
   assert.deepEqual(ports, [
-    { protocol: 'tcp', family: 'IPv4', address: '0.0.0.0', port: 3000, pid: 4242, processName: 'node.exe' },
-    { protocol: 'tcp', family: 'IPv6', address: '::', port: 8080, pid: 4242, processName: 'node.exe' },
+    { protocol: 'tcp', family: 'IPv4', address: '0.0.0.0', port: 3000, pid: 4242 },
+    { protocol: 'tcp', family: 'IPv6', address: '::', port: 8080, pid: 4242 },
   ]);
 });
 
@@ -1354,8 +1354,8 @@ test('parseNetstatListening parses LISTENING TCP rows for tracked pids', () => {
   ].join('\n');
   const ports = parseNetstatListening(output, new Set([4242]));
   assert.deepEqual(ports, [
-    { protocol: 'tcp', family: 'IPv4', address: '0.0.0.0', port: 3000, pid: 4242, processName: undefined },
-    { protocol: 'tcp', family: 'IPv6', address: '::', port: 8080, pid: 4242, processName: undefined },
+    { protocol: 'tcp', family: 'IPv4', address: '0.0.0.0', port: 3000, pid: 4242 },
+    { protocol: 'tcp', family: 'IPv6', address: '::', port: 8080, pid: 4242 },
   ]);
 });
 

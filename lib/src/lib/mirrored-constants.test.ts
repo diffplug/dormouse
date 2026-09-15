@@ -12,7 +12,7 @@ import { PAIRING_CODE_LABEL } from '../remote/pocket-app/App';
 import { SCAN_REJECTED_MESSAGE } from '../remote/pocket-app/ScanInvitation';
 import { SCAN_LABEL } from '../remote/setup-copy';
 import { ITERM2_COMPAT_VERSION } from './terminal-protocol';
-import { OPEN_PORT_TIMEOUT_MS, OPEN_PORT_TIMEOUT_PER_ID_MS, OPEN_PORT_ROUND_TRIP_MARGIN_MS, openPortRequestTimeoutMs } from './platform/types';
+import { OPEN_PORT_TIMEOUT_MS, OPEN_PORT_TIMEOUT_PER_ID_MS, openPortRequestTimeoutMs } from './platform/types';
 import { DEFAULT_RECOVERY_WAIT_MS } from '../host/recovery-capture';
 
 // Pins for constants defined in more than one language/runtime, where an
@@ -30,6 +30,12 @@ function extract(source: string, file: string, re: RegExp): string {
   if (!m) throw new Error(`Could not locate ${re} in ${file}`);
   return m[1];
 }
+
+const rs = 'standalone/src-tauri/src/lib.rs';
+const rsSrc = readRepoFile(rs);
+/** A `const NAME: u64` millisecond value in the Tauri backend, `_` digit separators allowed. */
+const rustMs = (name: string) =>
+  Number(extract(rsSrc, rs, new RegExp(`^const ${name}: u64 = ([\\d_]+);$`, 'm')).replace(/_/g, ''));
 
 // docs/specs/terminal-escapes.md -> "iTerm2 identity"
 describe('ITERM2_COMPAT_VERSION mirrors', () => {
@@ -257,9 +263,7 @@ describe('OPEN_PORT_TIMEOUT_PER_ID_MS mirrors', () => {
 // other fails loudly instead of aborting the final save.
 describe('quit teardown budget mirrors', () => {
   const ts = 'standalone/src/quit.ts';
-  const rs = 'standalone/src-tauri/src/lib.rs';
   const tsSrc = readRepoFile(ts);
-  const rsSrc = readRepoFile(rs);
 
   /** A `quit.ts` millisecond constant, following its derivation term by term. */
   const valueOf = (name: string): number => {
@@ -275,8 +279,6 @@ describe('quit teardown budget mirrors', () => {
       })
       .reduce((sum, term) => sum + term, 0);
   };
-  const rustMs = (name: string) =>
-    Number(extract(rsSrc, rs, new RegExp(`^const ${name}: u64 = ([\\d_]+);$`, 'm')).replace(/_/g, ''));
 
   it('keeps the webview ceiling under the Rust per-phase watchdog', () => {
     const ceiling = valueOf('QUIT_TEARDOWN_CEILING_MS');
@@ -305,35 +307,24 @@ describe('quit teardown budget mirrors', () => {
   );
 });
 
-
-describe('port request IPC margin', () => {
-  it('matches the Rust boundary margin', () => {
-    const file = 'standalone/src-tauri/src/lib.rs';
-    const ms = extract(readRepoFile(file), file, /^const OPEN_PORT_ROUND_TRIP_MARGIN_MS: u64 = (\d+);$/m);
-    expect(Number(ms)).toBe(OPEN_PORT_ROUND_TRIP_MARGIN_MS);
-  });
-});
-
 // docs/specs/transport.md -> "Port scan deadlines"
 describe('port request deadline derivation mirrors', () => {
+  const body = extract(rsSrc, rs, /fn open_ports_many_timeout\([^)]*\) -> Duration \{([\s\S]*?)\n\}/);
+  const expression = extract(body, rs, /Duration::from_millis\(([^)]+)\)/);
+  const constants = Object.fromEntries(['OPEN_PORT_TIMEOUT_MS', 'OPEN_PORT_TIMEOUT_PER_ID_MS', 'OPEN_PORT_ROUND_TRIP_MARGIN_MS']
+    .map((name) => [name, rustMs(name)]));
+
   it.each([0, 1, 20, 100])('matches the Rust request budget for %i terminals', (count) => {
-    const file = 'standalone/src-tauri/src/lib.rs';
-    const source = readRepoFile(file);
-    const body = extract(source, file, /fn open_ports_many_timeout\([^)]*\) -> Duration \{([\s\S]*?)\n\}/);
-    const expression = extract(body, file, /Duration::from_millis\(([^)]+)\)/);
-    const values: Record<string, number> = { count };
-    for (const name of ['OPEN_PORT_TIMEOUT_MS', 'OPEN_PORT_TIMEOUT_PER_ID_MS', 'OPEN_PORT_ROUND_TRIP_MARGIN_MS']) {
-      values[name] = Number(extract(source, file, new RegExp(`^const ${name}: u64 = (\\d+);$`, 'm')));
-    }
+    const values: Record<string, number> = { ...constants, count };
     // Evaluate Rust's actual sum/products, rather than duplicate its formula.
     // Unknown terms fail so changing the derivation cannot silently weaken the pin.
-    const rustMs = expression.replace(/\s+as\s+u64/g, '').split('+').reduce((sum, term) =>
+    const rustBudget = expression.replace(/\s+as\s+u64/g, '').split('+').reduce((sum, term) =>
       sum + term.split('*').reduce((product, factor) => {
         const token = factor.trim();
         const value = /^\d+$/.test(token) ? Number(token) : values[token];
         if (value === undefined) throw new Error(`Unknown Rust port budget term: ${token}`);
         return product * value;
       }, 1), 0);
-    expect(openPortRequestTimeoutMs(count)).toBe(rustMs);
+    expect(openPortRequestTimeoutMs(count)).toBe(rustBudget);
   });
 });

@@ -1,7 +1,7 @@
 import { randomKillChar } from '../../lib/src/components/KillConfirm';
 import { acquireChromeKeyboardLease } from '../../lib/src/components/wall/chrome-keyboard-lease';
 import { getWorkspacesSnapshot, subscribeToWorkspaces } from 'dormouse-lib/lib/workspace-store';
-import { setPendingWorkspaceClose, setPendingWorkspaceMove, setRenamingWorkspace } from 'dormouse-lib/lib/workspace-ui-store';
+import { resetWorkspaceUi } from 'dormouse-lib/lib/workspace-ui-store';
 import type { TeardownConfirmContext } from "./teardown-flow";
 
 /**
@@ -57,10 +57,8 @@ function releaseDialog(): void {
 
 function ownDialog(): void {
   releaseKeyboard ??= acquireChromeKeyboardLease();
-  // Clear competing typed gates without clearing in-flight transfer guards.
-  setPendingWorkspaceClose(null);
-  setPendingWorkspaceMove(null);
-  setRenamingWorkspace(null);
+  // Clear competing typed gates; in-flight transfer guards live elsewhere.
+  resetWorkspaceUi();
 }
 
 function captureWorkspaces(): void {
@@ -70,7 +68,8 @@ function captureWorkspaces(): void {
   unsubscribeWorkspaces = subscribeToWorkspaces(() => {
     const current = getWorkspacesSnapshot().workspaces;
     // A changed destination invalidates consent; focus, rename and order do not.
-    if (phase === 'open' && (current.length !== ids.size || current.some((workspace) => !ids.has(workspace.id)))) {
+    // Every exit from 'open' stops this watch, so no phase check is needed.
+    if (current.length !== ids.size || current.some((workspace) => !ids.has(workspace.id))) {
       cancelQuit();
     }
   });
@@ -129,7 +128,6 @@ export function beginQuitProgress(next: QuitConfirmIntent): void {
   activeCtx = null;
   intent = next;
   archiveError = null;
-  workspaceNames = getWorkspacesSnapshot().workspaces.map((workspace) => workspace.name);
   phase = 'quitting';
   ownDialog();
   emit();

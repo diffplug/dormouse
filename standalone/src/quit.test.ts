@@ -42,7 +42,7 @@ vi.mock("dormouse-lib/lib/notepad/notepad-store", () => ({
 vi.mock("dormouse-lib/lib/window-session-aggregator", () => ({
   flushWindowSession: mocks.flushWindowSession,
 }));
-// How a window names itself in its dialog: the Workspace it is showing.
+// The Workspaces the dialog names, which the quit-confirm store captures.
 vi.mock("dormouse-lib/lib/workspace-store", () => ({
   subscribeToWorkspaces: () => () => {},
   getWorkspacesSnapshot: mocks.getWorkspacesSnapshot,
@@ -73,7 +73,7 @@ const oneNotedSurface = () => ["pane-a"];
 // (`quit-cancelled`), and walks them one at a time (`quit-teardown`).
 const listeners = new Map<string, (event: { payload?: unknown }) => void>();
 const fire = (event: string, payload?: unknown) => listeners.get(event)?.({ payload });
-const quitRequested = (windows = 1) => fire("dormouse://quit-requested", { windows });
+const quitRequested = () => fire("dormouse://quit-requested");
 const quitTeardown = (last = true) => fire("dormouse://quit-teardown", { last });
 const quitCancelled = () => fire("dormouse://quit-cancelled");
 const voted = () => mocks.invoke.mock.calls.some((call) => call[0] === "quit_vote");
@@ -105,10 +105,10 @@ function fakeAdapter(order: string[] = [], overrides: Partial<Record<string, () 
  */
 async function triggerQuit(
   adapter: TauriAdapter,
-  { windows = 1, last = true }: { windows?: number; last?: boolean } = {},
+  { last = true }: { last?: boolean } = {},
 ): Promise<void> {
   initQuitFlow(adapter);
-  quitRequested(windows);
+  quitRequested();
   await settle();
   if (!voted()) return;
   quitTeardown(last);
@@ -141,7 +141,7 @@ describe("quit orchestrator", () => {
     mocks.notepadSurfaceIds.mockReturnValue(oneNotedSurface());
     mocks.archiveSurfaceNotes.mockImplementationOnce(() => new Promise<void>((resolve) => { archived = resolve; }));
     initQuitFlow(fakeAdapter());
-    quitRequested(2);
+    quitRequested();
     expect(getQuitConfirmPhase()).toBe('quitting');
     expect(chromeKeyboardHeld()).toBe(true);
     expect(voted()).toBe(false);
@@ -597,25 +597,6 @@ describe("quit orchestrator", () => {
     // The cancel already happened elsewhere; calling back would bounce it
     // around the windows.
     expect(mocks.invoke).not.toHaveBeenCalledWith("quit_cancel");
-  });
-
-  it("uses the same quit intent regardless of window count", async () => {
-    mocks.countRunningSessions.mockReturnValue(1);
-    const gate = vi.fn();
-    setQuitConfirmGate(gate);
-
-    initQuitFlow(fakeAdapter());
-    quitRequested(1);
-    await settle();
-    expect(gate.mock.calls[0]![1]).toEqual({ kind: "quit" });
-
-    _resetForTesting();
-    gate.mockClear();
-    setQuitConfirmGate(gate);
-    initQuitFlow(fakeAdapter());
-    quitRequested(2);
-    await settle();
-    expect(gate.mock.calls[0]![1]).toEqual({ kind: "quit" });
   });
 
   it("falls through to teardown when no gate is installed even with running sessions", async () => {

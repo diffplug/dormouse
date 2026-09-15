@@ -1,8 +1,8 @@
 import { randomKillChar } from '../KillConfirm';
 import { awaitWallHandle, mountingRefusal } from './dor-control-shared';
 import { getWallHandle } from './wall-handles';
-import { forgetWorkspaceSession } from '../../lib/window-session-aggregator';
-import { dismissWorkspaceUi, isWorkspaceTransferPending, setPendingWorkspaceClose, setRenamingWorkspace } from '../../lib/workspace-ui-store';
+import { forgetWorkspaceSession, isWorkspaceTransferPending } from '../../lib/window-session-aggregator';
+import { dismissWorkspaceUi, setPendingWorkspaceClose, setRenamingWorkspace } from '../../lib/workspace-ui-store';
 import { closeWorkspace, getWorkspacesSnapshot, setActiveWorkspace, workspaceRefFor } from '../../lib/workspace-store';
 import type { WorkspaceId } from '../../lib/session-types';
 import type { CloseSurfaceMode } from './wall-types';

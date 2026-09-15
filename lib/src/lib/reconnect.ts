@@ -4,6 +4,7 @@ import type { LathPersistedLayout } from './lath/persistence';
 import type { PlatformAdapter, PtyInfo } from './platform/types';
 import { hydrateNotepadFromVolatile } from './notepad/notepad-store';
 import { restoreBrowserSurfaceTodo, resumeTerminal } from './terminal-registry';
+import type { TerminalResumeInfo } from './terminal-lifecycle';
 import { carrySurfaceRefs, readPersistedSession, type PersistedDoor, type PersistedSession, type PersistedSurfaceRefs } from './session-types';
 import { persistedLathLayout, restoreSession } from './session-restore';
 
@@ -226,7 +227,7 @@ function resumeLivePtys(
   const ids: string[] = [];
   const ptyById = new Map(ptyList.map((pty) => [pty.id, pty]));
   for (const pty of ptyList) {
-    const resumeInfo: { alive: boolean; exitCode?: number; shell?: string; title?: string; untouched?: boolean; helper?: PtyInfo['helper']; grid?: TerminalGrid } = {
+    const resumeInfo: TerminalResumeInfo = {
       alive: pty.alive,
       exitCode: pty.exitCode,
     };

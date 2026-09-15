@@ -1,4 +1,3 @@
-import { isWorkspaceTransferPending } from "dormouse-lib/lib/workspace-ui-store";
 import { applyTerminalSemanticEvents, snapshotTerminalState, removeTerminalPaneState, countRunningSessionsIn, getTerminalPaneState, isPaneOscDriven } from 'dormouse-lib/lib/terminal-state-store';
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -77,6 +76,7 @@ import { createWorkspace, getWorkspacesSnapshot, resetWorkspaces } from "dormous
 import { getNotes, clearAllNotepads } from "dormouse-lib/lib/notepad/notepad-store";
 import {
   getWindowSnapshot,
+  isWorkspaceTransferPending,
   publishWorkspaceSession,
   resetWindowSessionAggregator,
 } from "dormouse-lib/lib/window-session-aggregator";

@@ -74,10 +74,10 @@ async function fixture(t) {
   };
 }
 
-async function invoke(run, token = run.token, origin = run.app) {
+async function invoke(run, token = run.token, origin = run.app, cmd = 'pty_get_cwd', args = { id: 'test' }) {
   return fetch(`${run.bridge}/__dormouse_dev_host/invoke?t=${token}`, {
     method: 'POST', headers: { 'content-type': 'application/json', origin },
-    body: JSON.stringify({ cmd: 'pty_get_cwd', args: { id: 'test' } }),
+    body: JSON.stringify({ cmd, args }),
     signal: AbortSignal.timeout(5000),
   });
 }
@@ -190,10 +190,7 @@ test('registry seeds reservations above restored IDs and mirrors canonical works
   const f = await fixture(t);
   const run = await f.start().ready();
   async function command(cmd, args = {}) {
-    const response = await fetch(`${run.bridge}/__dormouse_dev_host/invoke?t=${run.token}`, {
-      method: 'POST', headers: { 'content-type': 'application/json', origin: run.app },
-      body: JSON.stringify({ cmd, args }), signal: AbortSignal.timeout(5000),
-    });
+    const response = await invoke(run, run.token, run.app, cmd, args);
     assert.equal(response.status, 200);
     return (await response.json()).result;
   }

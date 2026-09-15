@@ -37,7 +37,7 @@ pub struct Registry {
 /// elsewhere retain their opaque id as a stable ref.
 pub fn ref_number(id: &str) -> Option<u64> {
     let suffix = id.strip_prefix("workspace-")?;
-    if suffix.is_empty() || !suffix.bytes().all(|byte| byte.is_ascii_digit()) {
+    if !suffix.bytes().all(|byte| byte.is_ascii_digit()) {
         return None;
     }
     suffix.parse().ok()

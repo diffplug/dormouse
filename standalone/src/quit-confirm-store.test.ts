@@ -17,7 +17,8 @@ import {
 
 import { chromeKeyboardHeld } from '../../lib/src/components/wall/chrome-keyboard-lease';
 import { createWorkspace, closeWorkspace, moveWorkspace, renameWorkspace, resetWorkspaces, setActiveWorkspace } from 'dormouse-lib/lib/workspace-store';
-import { getWorkspaceUiSnapshot, isWorkspaceTransferPending, resetWorkspaceUi, setPendingWorkspaceClose, setPendingWorkspaceMove, setRenamingWorkspace, setWorkspaceTransferPending } from 'dormouse-lib/lib/workspace-ui-store';
+import { getWorkspaceUiSnapshot, resetWorkspaceUi, setPendingWorkspaceClose, setPendingWorkspaceMove, setRenamingWorkspace } from 'dormouse-lib/lib/workspace-ui-store';
+import { isWorkspaceTransferPending, resetWindowSessionAggregator, setWorkspaceTransferPending } from 'dormouse-lib/lib/window-session-aggregator';
 
 // The gate↔orchestrator seam itself is covered by quit.test.ts.
 const makeCtx = () => ({ confirm: vi.fn(), cancel: vi.fn() });
@@ -27,6 +28,7 @@ describe("quit-confirm store", () => {
     _resetQuitConfirmForTesting();
     resetWorkspaces();
     resetWorkspaceUi();
+    resetWindowSessionAggregator();
   });
   afterEach(() => _resetQuitConfirmForTesting());
 

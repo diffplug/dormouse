@@ -340,7 +340,7 @@ the map from PTY to window** and every stdout line passes through it.
 (fixed in `tauri.conf.json`), `ws-<n>` for every later one, seeded above every
 live label, every `sessions/ws-*.json` on disk, and retained arrival-journal
 endpoints so a new window cannot claim a saved or pending identity. Journal-only
-labels reserve numbers without opening windows (`saved_window_labels` and
+labels reserve numbers without opening windows (`saved_windows` and
 `a_retained_arrival_reserves_both_window_labels_without_opening_them` in
 `standalone/src-tauri/src/lib.rs`). `standalone/scripts/tauri-conf.test.mjs` pins the
 label.
@@ -398,7 +398,7 @@ behind the one it holds.
 - **`Destroyed` forgets the window's entries** and broadcasts.
 
 Source of truth: `standalone/src-tauri/src/workspaces.rs`;
-`saved_workspace_ids` / `workspace_reserve_ids` / `workspace_report` / `workspace_registry` in
+`saved_windows` / `workspace_reserve_ids` / `workspace_report` / `workspace_registry` in
 `standalone/src-tauri/src/lib.rs`; `installWorkspaceRegistry` in
 `standalone/src/workspace-registry.ts`; `installWorkspaceIdPool` /
 `workspaceRefFor` in `lib/src/lib/workspace-store.ts`. Pinned by the tests in
@@ -993,8 +993,8 @@ Every trigger funnels into `request_quit(app)`:
 Source of truth: `standalone/src-tauri/src/macos_terminate.rs`.
 
 **The ack / vote / progress / proceed / cancel protocol.** `request_quit` clears
-every window's `acked`, bumps `seq`, and broadcasts `dormouse://quit-requested`
-carrying the window count. It **must leave a walk in flight alone** — a repeat
+every window's `acked`, bumps `seq`, and broadcasts `dormouse://quit-requested`.
+It **must leave a walk in flight alone** — a repeat
 trigger fired mid-teardown must not send the machine back to voting, or the fresh
 watchdog drops into the unbounded vote wait and stops bounding the teardown that
 is running. It **must keep every vote already cast**: a committed window answers
@@ -1044,9 +1044,8 @@ running Sessions; an all-idle quit proceeds without a prompt. Window close also
 asks before discarding a pending download (§Per-window close).
 
 - **Must keep one letter per request across Workspace switches and repeat quit
-  triggers.** Modified keys, including Cmd+Q, never answer it; a bare matching
-  letter confirms, another bare key cancels. `WorkspaceKillConfirm` supplies the
-  interaction defined in `docs/specs/layout.md` → Workspaces.
+  triggers.** `WorkspaceKillConfirm` supplies the key rule defined in
+  `docs/specs/layout.md` → Workspaces.
 - **Must leave the prompt open when its running count reaches zero.**
 - **Must cancel an unconfirmed request if Workspace membership changes**, so a
   transfer cannot leave approval addressing a different set. Switching and
@@ -1060,10 +1059,12 @@ asks before discarding a pending download (§Per-window close).
   settles. Repeated requests coalesce; quit supersedes queued closes, and
   cancellation or window destruction retires applicable queued requests.
   **Must refuse new transfers while app quit or either endpoint’s close is
-  queued, confirming, or tearing down.** Pinned by
+  queued, confirming, or tearing down.** Both are decided under one lock
+  (`ArrivalQueue`). Pinned by
   `deferred_quit_and_close_requests_wait_for_membership_then_run_once` in
-  `standalone/src-tauri/src/quit_state.rs` and
-  `transfers_cannot_change_membership_after_close_or_quit_confirmation_begins` in
+  `standalone/src-tauri/src/quit_state.rs`, and
+  `transfers_cannot_change_membership_after_close_or_quit_confirmation_begins` and
+  `begin_arrival_admits_under_the_arrivals_lock_before_queueing` in
   `standalone/src-tauri/src/lib.rs`.
 - **Must collect votes before killing any window's Sessions.** Confirmation
   consumes its callback once; a noninteractive full-window progress overlay

@@ -61,7 +61,7 @@ import {
 
 const listeners = new Map<string, (event: { payload?: unknown }) => void>();
 const fire = (event: string, payload?: unknown) => listeners.get(event)?.({ payload });
-const quitRequested = (windows = 2) => fire("dormouse://quit-requested", { windows });
+const quitRequested = () => fire("dormouse://quit-requested");
 const quitCancelled = () => fire("dormouse://quit-cancelled");
 const closeRequested = () => fire("dormouse://window-close-requested");
 const settle = () => new Promise((r) => setTimeout(r, 0));

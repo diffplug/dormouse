@@ -292,7 +292,9 @@ function wireXtermHandlers(
   };
 }
 
-function setupTerminalEntry(id: string, options: { shell?: string; untouched?: boolean; helper?: HelperIdentity; grid?: TerminalGrid } = {}): TerminalEntry {
+interface TerminalEntryOptions { shell?: string; untouched?: boolean; helper?: HelperIdentity; grid?: TerminalGrid }
+
+function setupTerminalEntry(id: string, options: TerminalEntryOptions = {}): TerminalEntry {
   const { terminal, fit, serialize, element } = createXtermHost(options.grid);
   const selectionBaselineRef = { current: null as string | null };
   // Every module that finalizes a selection arms the render handler through
@@ -438,10 +440,13 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
   return entry;
 }
 
+/** A PTY `resumeTerminal` rebuilds: its entry options plus its liveness and saved title. */
+export interface TerminalResumeInfo extends TerminalEntryOptions { alive: boolean; exitCode?: number; title?: string | null }
+
 export function resumeTerminal(
   id: string,
   replayData: string | null,
-  exitInfo?: { alive: boolean; exitCode?: number; shell?: string; title?: string | null; untouched?: boolean; helper?: HelperIdentity; grid?: TerminalGrid },
+  exitInfo?: TerminalResumeInfo,
 ): TerminalEntry {
   const existing = registry.get(id);
   if (existing) return existing;
