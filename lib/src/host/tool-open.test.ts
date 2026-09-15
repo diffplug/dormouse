@@ -76,3 +76,13 @@ it('uses the built-in viewer only as a fallback or explicit choice', async () =>
   expect(await host().handle({ op: 'open', target, cwd: root })).toMatchObject({ status: 'ok', scope: 'builtin' });
   expect(await host().handle({ op: 'open', target, cwd: root, tool: 'missing' })).toMatchObject({ status: 'error' });
 });
+
+it('matches catch-all rules above the invocation directory and canonical absolute rules', async () => {
+  await mkdir(join(root, 'work'));
+  await writeFile(config, `tools:\n  viewer:\n    run: [view, $TARGET]\nopen:\n  - {match: '**/*.md', tool: viewer}\n`);
+  const request = { op: 'open', target: '../docs/README.md', cwd: join(root, 'work') } as const;
+  expect(await host().handle(request)).toMatchObject({ status: 'ok', name: 'viewer' });
+  const canonicalPattern = join(root, 'docs').replace(/\\/g, '/') + '/**';
+  await writeFile(config, `tools:\n  viewer:\n    run: [view, $TARGET]\nopen:\n  - {match: '${canonicalPattern}', tool: viewer}\n`);
+  expect(await host().handle(request)).toMatchObject({ status: 'ok', name: 'viewer' });
+});

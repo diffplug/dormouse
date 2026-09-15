@@ -162,6 +162,9 @@ export function parseToolFile(
     if (rawEntry.prespawn_dedupe !== undefined && rawEntry.prespawn_dedupe !== null) {
       dedupeTemplate = readDedupeTemplate(rawEntry.prespawn_dedupe, where);
       validateSubstitutions(dedupeTemplate, scope, where);
+      if (typeof run === 'string' && dedupeTemplate.some(arg => /\$TARGET\b/.test(arg))) {
+        throw new ToolFileError(`${where}: $TARGET in prespawn_dedupe requires an argument-list run`);
+      }
       // A repo-local key with no project scope dedupes across every checkout
       // that declares the name, so a second worktree's tool would reveal the
       // first instead of starting. Warn, not error: a repo-declared
@@ -197,6 +200,9 @@ export function parseToolFile(
         if (!isRecord(rule) || typeof rule.match !== 'string' || !rule.match || typeof rule.tool !== 'string'
           || (rule.tool !== 'builtin:file' && !tools.has(rule.tool)) || Object.keys(rule).some(key => key !== 'match' && key !== 'tool')) {
           throw new ToolFileError(`${path}: each open rule needs a match pattern and a tool defined in this user file`);
+        }
+        if (rule.tool !== 'builtin:file' && typeof tools.get(rule.tool)!.run === 'string') {
+          throw new ToolFileError(`${path}: open rule for '${rule.tool}' needs an argument-list run to receive the file`);
         }
         open.push({ match: rule.match, tool: rule.tool });
       }

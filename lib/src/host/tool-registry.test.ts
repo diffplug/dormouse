@@ -194,3 +194,17 @@ describe("this repo's own dormouse.yml", () => {
     }
   });
 });
+
+
+it('rejects a shell command with a target-only dedupe key at declaration time', () => {
+  expect(() => parse('tools:\n  viewer:\n    run: view\n    prespawn_dedupe: [$TARGET]\n'))
+    .toThrow('$TARGET in prespawn_dedupe requires an argument-list run');
+});
+
+
+it('keeps project associations inert and validates user associations at declaration time', () => {
+  expect(parse('open: malformed-but-inert\n').warnings).toEqual([expect.stringContaining('project open rules are ignored')]);
+  expect(() => parse('open: nope\n', USER)).toThrow("'open' must be an ordered list");
+  expect(() => parse('tools:\n  viewer:\n    run: viewer\nopen:\n  - {match: "*.md", tool: viewer}\n', USER))
+    .toThrow("open rule for 'viewer' needs an argument-list run");
+});

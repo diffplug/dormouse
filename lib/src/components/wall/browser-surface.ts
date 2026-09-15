@@ -61,6 +61,7 @@ export interface ToolPending {
   readonly name: string;
   readonly run: string;
   readonly args?: string[];
+  readonly error?: string;
   readonly path: string;
   readonly projectRoot: string;
   /** Requested at launch; applied after approval, since a pane the user cannot
