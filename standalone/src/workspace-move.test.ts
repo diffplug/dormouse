@@ -491,6 +491,29 @@ describe("the source half", () => {
     expect(committed).not.toHaveBeenCalled();
   });
 
+  it("keeps a newer move's guard when an older invoke is refused after its hand-back", async () => {
+    // A hand-back can settle a move while its invoke still waits on Rust; that
+    // invoke's late refusal belongs to the settled move, not to the next one.
+    initWorkspaceMoves(fakePlatform());
+    createWorkspace({ id: WORKSPACE_ID, name: "Deploys" });
+    registerWallHandle(stubWallHandle(WORKSPACE_ID, { prepareWorkspaceTransfer: async () => prepared() }));
+    let refuse!: (error: Error) => void;
+    mocks.invoke.mockImplementationOnce(() => new Promise((_, reject) => { refuse = reject; }));
+
+    const first = transferWorkspaceTo(WORKSPACE_ID, "ws-2", { x: 0, y: 0 });
+    await settle();
+    await emit("dormouse://workspace-arrival-failed", { workspaceId: WORKSPACE_ID, reason: "closed" });
+    expect(isWorkspaceTransferPending(WORKSPACE_ID)).toBe(false);
+
+    void transferWorkspaceTo(WORKSPACE_ID, "ws-3", { x: 0, y: 0 });
+    await settle();
+    expect(isWorkspaceTransferPending(WORKSPACE_ID)).toBe(true);
+
+    refuse(new Error("no window 'ws-2'"));
+    await first;
+    expect(isWorkspaceTransferPending(WORKSPACE_ID)).toBe(true);
+  });
+
   it("leaves the source Workspace intact when the tear-out cannot build a window", async () => {
     mocks.invoke.mockRejectedValue(new Error("build window ws-3: no display"));
     const committed = vi.fn();

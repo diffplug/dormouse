@@ -166,8 +166,10 @@ async function handOff(
   try {
     await invoke(command, args);
   } catch (err) {
-    if (inFlight.get(workspaceId)?.prepared === prepared) inFlight.delete(workspaceId);
-    setWorkspaceTransferPending(workspaceId, false);
+    if (inFlight.get(workspaceId)?.prepared === prepared) {
+      inFlight.delete(workspaceId);
+      setWorkspaceTransferPending(workspaceId, false); // else `settle` already did
+    }
     console.warn(`[workspace-move] ${command} refused; the Workspace stays here`, err);
     return { moved: false, reason: reasonOf(err) }; // `pendingMarks` unsubscribes itself at the timeout
   }
