@@ -18,6 +18,30 @@ function serializeForInlineScript(value: unknown): string {
 }
 
 /**
+ * Splice `replacement` in at the first `marker`, never expanding it.
+ *
+ * Every edit this file makes to the document uses a *function* replacement —
+ * this helper, or a callback passed to `replace`/`replaceAll` directly. A
+ * *string* replacement expands `$&`, `` $` ``, `$'`, `$<name>` and `$$` inside
+ * itself, so any `$` in it is read as a substitution pattern against the
+ * document being edited. `serializeForInlineScript` does not escape `$` (nor
+ * does `JSON.stringify`), and the titles, notes and recovery commands it
+ * serializes are raw terminal output that keeps `$` verbatim — `sanitizeText`
+ * in `lib/src/lib/terminal-protocol.ts` strips only C0/C1 and whitespace. So a
+ * pane title of `` $` `` would splice a copy of the document prefix into the
+ * boot script, literal `</script>` from Vite's own module tag included, closing
+ * that script at the tokenizer level so none of the boot globals are ever set;
+ * because the title arrives from `workspaceState`, every later launch would do
+ * it again. A function replacement is inserted verbatim, so what
+ * `serializeForInlineScript` escaped is the whole of what the document gets.
+ * Pinned by "a `$` in serialized state is not a substitution pattern" in
+ * `vscode-ext/test/webview-html.test.ts`.
+ */
+function spliceOnce(html: string, marker: string, replacement: string): string {
+  return html.replace(marker, () => replacement);
+}
+
+/**
  * Build a webview document. Returns the message token minted for it alongside
  * the HTML, because the two are only meaningful together — `serveWebview` in
  * `webview-messaging.ts` is what pairs them.
@@ -55,7 +79,7 @@ export function getWebviewHtml(
   // lib/src/lib/vscode-message-token.ts.
   const messageToken = randomSecret();
 
-  html = html.replace(/(href|src)="\.?\/?assets\//g, `$1="${mediaUri}/assets/`);
+  html = html.replace(/(href|src)="\.?\/?assets\//g, (_match, attr: string) => `${attr}="${mediaUri}/assets/`);
 
   const csp = [
     `default-src 'none'`,
@@ -87,7 +111,8 @@ export function getWebviewHtml(
     `frame-src http://127.0.0.1:* http://localhost:*`,
   ].join('; ');
 
-  html = html.replace(
+  html = spliceOnce(
+    html,
     '<head>',
     `<head>\n    <meta http-equiv="Content-Security-Policy" content="${csp}">`,
   );
@@ -109,12 +134,13 @@ export function getWebviewHtml(
         'The build dropped `html.cspNonce` (vscode-ext/vite.config.ts); rebuild with `pnpm build:vscode`.',
     );
   }
-  html = html.replaceAll(CSP_NONCE_PLACEHOLDER, nonce);
+  html = html.replaceAll(CSP_NONCE_PLACEHOLDER, () => nonce);
 
   // The inline state script is ours, not Vite's, so it carries no placeholder —
   // nonce it directly. Injected AFTER the swap so its nonce cannot be
   // substituted a second time.
-  html = html.replace(
+  html = spliceOnce(
+    html,
     '</head>',
     `    <script nonce="${nonce}">globalThis.${HOST_MESSAGE_TOKEN_GLOBAL} = ${serializeForInlineScript(messageToken)};\nglobalThis.__DORMOUSE_HOST_STATE__ = ${serializeForInlineScript(initialState)};\nglobalThis.__DORMOUSE_SELECTED_SHELL__ = ${serializeForInlineScript(selectedShell ?? null)};\nglobalThis.${RECOVERY_COMMANDS_GLOBAL} = ${serializeForInlineScript(recoveryCommands ?? null)};\nglobalThis.${NOTEPAD_VOLATILE_GLOBAL} = ${serializeForInlineScript(notepadVolatile ?? null)};</script>\n  </head>`,
   );

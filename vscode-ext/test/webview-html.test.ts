@@ -174,6 +174,25 @@ describe('getWebviewHtml', () => {
     expect(html).not.toContain('<img src=x>');
   });
 
+  it('treats a `$` in serialized state as data, not a substitution pattern', () => {
+    // A pane title is raw terminal output: OSC 0/2/9/99/777 set it, and the
+    // protocol parser strips only control characters, so `$` and a backtick
+    // survive into `workspaceState` and come back as `initialState`. Built with
+    // `replace`'s string form, `` $` `` would expand to the document prefix
+    // already emitted — Vite's own `</script>` included — closing the boot
+    // script so none of its globals are ever set, on every launch until the
+    // workspace state is cleared.
+    const title = '$`$&' + "$'" + '$$PWNED';
+    const { html } = getWebviewHtml(webview, mediaPath, { panes: [{ id: 'p1', title }] });
+
+    const inline = /<script nonce="[^"]+">([\s\S]*?)<\/script>/.exec(html);
+    expect(inline, 'the boot payload script was cut short').not.toBeNull();
+    // The title reaches the document exactly as written, and nothing else does.
+    expect(inline![1]).toContain(JSON.stringify(title));
+    expect(html.indexOf('<!DOCTYPE html>')).toBe(html.lastIndexOf('<!DOCTYPE html>'));
+    expect(inline![1]).not.toContain('<meta http-equiv="Content-Security-Policy"');
+  });
+
   it('mints a fresh nonce and message token per document', () => {
     const first = getWebviewHtml(webview, mediaPath);
     const second = getWebviewHtml(webview, mediaPath);
