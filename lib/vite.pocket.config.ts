@@ -80,6 +80,12 @@ export default defineConfig({
     },
   },
   build: {
+    rolldownOptions: {
+      input: {
+        pocket: fileURLToPath(new URL('./pocket/index.html', import.meta.url)),
+        diagnostics: fileURLToPath(new URL('./pocket/diagnostics/index.html', import.meta.url)),
+      },
+    },
     outDir: fileURLToPath(new URL("./dist-pocket", import.meta.url)),
     emptyOutDir: true,
   },

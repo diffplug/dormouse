@@ -16,10 +16,11 @@ vi.mock('./terminal-registry', () => ({
   getDefaultShellOpts: terminalRegistryMocks.getDefaultShellOpts,
 }));
 
-import { resumeOrRestore } from './reconnect';
+import { collectLivePtys, resumeOrRestore, resumeOrRestoreFrom } from './reconnect';
 import { addPlainNote, buildVolatileSnapshot, clearAllNotepads, getNotes } from './notepad/notepad-store';
 import type { VolatileNotepadSnapshot } from './notepad/types';
 import { getHelper, forgetHelper } from './helper-terminal';
+import { setPlatform } from './platform';
 import type { LathNode } from './lath/model';
 
 /** A native Lath persisted layout over `ids` (row split; empty tree for none) —
@@ -87,6 +88,18 @@ function createPlatform(ptys: PtyInfo[], savedState: PersistedSession | null): P
 describe('resumeOrRestore', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('resumes an explicitly listed exited buffer without restarting its shell', async () => {
+    const platform = createPlatform([{ id: 'exited', alive: false, exitCode: 7 }], null);
+    const live = await collectLivePtys(platform);
+    expect(live.timedOut).toBe(false);
+    expect(live.replay.get('exited')).toBe('exited-replay');
+    const result = resumeOrRestoreFrom(platform, live);
+    expect(result.paneIds).toEqual(['exited']);
+    expect(terminalRegistryMocks.resumeTerminal).toHaveBeenCalledWith('exited', 'exited-replay', { alive: false, exitCode: 7 });
+    expect(terminalRegistryMocks.restoreTerminal).not.toHaveBeenCalled();
+    expect(platform.spawnPty).not.toHaveBeenCalled();
   });
 
   it('restores helpers outside the primary layout and disarms autorun', async () => {
@@ -567,5 +580,285 @@ describe('browser-only notepad resume', () => {
     expect(buildVolatileSnapshot().surfaces.find((surface) => surface.surfaceId === 'web')?.notes)
       .toHaveLength(sameHost ? 2 : 1);
     expect(platform.spawnPty).not.toHaveBeenCalled();
+  });
+});
+
+describe('resumeOrRestoreFrom', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const savedFor = (...ids: string[]): PersistedSession => ({
+    version: 3,
+    lathLayout: lathLayoutFor(...ids),
+    panes: ids.map((id) => ({ id, title: id, cwd: null, untouched: false })),
+  });
+
+  /** One `collectLivePtys` for the whole Window, exactly as `main.tsx` boots. */
+  async function live(ptys: PtyInfo[], savedState: PersistedSession | null = null) {
+    const platform = createPlatform(ptys, savedState);
+    return { platform, live: await collectLivePtys(platform) };
+  }
+
+  it('gives each Workspace only the live PTYs its own saved record names', async () => {
+    const { platform, live: collected } = await live([
+      { id: 'a1', alive: true },
+      { id: 'b1', alive: true },
+    ]);
+
+    const a = resumeOrRestoreFrom(platform, collected, {
+      savedSession: savedFor('a1'),
+      ptyIds: new Set(['a1']),
+    });
+    const b = resumeOrRestoreFrom(platform, collected, {
+      savedSession: savedFor('b1'),
+      ptyIds: new Set(['b1']),
+    });
+
+    expect(a.paneIds).toEqual(['a1']);
+    expect(b.paneIds).toEqual(['b1']);
+    expect(terminalRegistryMocks.resumeTerminal).toHaveBeenCalledWith('a1', 'a1-replay', expect.anything());
+    expect(terminalRegistryMocks.resumeTerminal).toHaveBeenCalledWith('b1', 'b1-replay', expect.anything());
+  });
+
+  it('keeps a helper with the Workspace that holds its source', async () => {
+    const helper = { parentId: 'a1', command: 'git status' };
+    const { platform, live: collected } = await live([
+      { id: 'a1', alive: true },
+      { id: 'a-helper', alive: true, helper },
+      { id: 'b1', alive: true },
+    ]);
+
+    const a = resumeOrRestoreFrom(platform, collected, {
+      savedSession: savedFor('a1'),
+      ptyIds: new Set(['a1', 'a-helper']),
+    });
+    expect(a.paneIds).toEqual(['a1']);
+    expect(getHelper('a1')?.status).toBe('preserved');
+    forgetHelper('a1');
+
+    // The same helper handed to a Workspace WITHOUT its source is an ordinary
+    // pane there: `ptyById` is the slice, so the parent lookup misses and the
+    // orphan is adopted rather than restored as a helper.
+    vi.clearAllMocks();
+    setPlatform(platform);
+    const b = resumeOrRestoreFrom(platform, collected, {
+      savedSession: null,
+      ptyIds: new Set(['b1', 'a-helper']),
+    });
+    expect(b.paneIds).toEqual(['a-helper', 'b1']);
+    expect(getHelper('a1')).toBeUndefined();
+  });
+
+  it('claims a live PTY no saved Workspace names for the plan that asks', async () => {
+    const { platform, live: collected } = await live([
+      { id: 'a1', alive: true },
+      { id: 'stray', alive: true },
+    ]);
+
+    const inactive = resumeOrRestoreFrom(platform, collected, {
+      savedSession: savedFor('b1'),
+      ptyIds: new Set(['b1']),
+    });
+    // No live PTY of its own: a cold restore of its saved panes.
+    expect(inactive.paneIds).toEqual(['b1']);
+
+    const active = resumeOrRestoreFrom(platform, collected, {
+      savedSession: savedFor('a1'),
+      ptyIds: new Set(['a1']),
+      claimUnowned: new Set(['stray']),
+    });
+    // An adopted id has no saved layout slot, so the plan degrades to the flat
+    // live list rather than restoring a layout that cannot hold it.
+    expect(active.paneIds).toEqual(['a1', 'stray']);
+    expect(active.lathLayout).toBeUndefined();
+  });
+
+  it('plans against the record it is handed, not the platform slot', async () => {
+    const { platform, live: collected } = await live([], savedFor('slot-pane'));
+
+    expect(resumeOrRestoreFrom(platform, collected, { savedSession: savedFor('given') }).paneIds)
+      .toEqual(['given']);
+    // `null` is "this Workspace has no record", never "read the slot".
+    expect(resumeOrRestoreFrom(platform, collected, { savedSession: null }).paneIds).toEqual([]);
+    // Omitted still reads the slot, which is what the single-Wall hosts take.
+    expect(resumeOrRestoreFrom(platform, collected, {}).paneIds).toEqual(['slot-pane']);
+  });
+
+  it('takes the host record on the cold-restore branch', async () => {
+    const { platform, live: collected } = await live([]);
+    platform.getRecoveryCommands = vi.fn(() => ({ 'a1': 'claude --resume abc' }));
+
+    resumeOrRestoreFrom(platform, collected, { savedSession: savedFor('a1') });
+    expect(terminalRegistryMocks.restoreTerminal).toHaveBeenCalledWith(
+      'a1', expect.objectContaining({ resumeCommand: 'claude --resume abc' }),
+    );
+  });
+});
+
+/**
+ * One webview can have two collections outstanding at once — a boot and a
+ * Workspace arriving from another Window, or two arrivals — and every listener
+ * sees every answer. The token is what keeps each on its own
+ * (`docs/specs/transport.md` → "Reconnection").
+ */
+describe('collectLivePtys addressing', () => {
+  /** A host that answers each `requestInit` with only the PTYs named for that
+   *  token, echoing it exactly as the sidecar's `list` does. */
+  function addressedPlatform() {
+    const listHandlers = new Set<(detail: { ptys: PtyInfo[]; requestId?: string }) => void>();
+    const replayHandlers = new Set<(detail: { id: string; data: string; requestId?: string }) => void>();
+    const asked: string[] = [];
+    const platform = {
+      requestInit: (requestId?: string) => {
+        asked.push(requestId ?? '(none)');
+      },
+      onPtyList: (handler: (detail: { ptys: PtyInfo[]; requestId?: string }) => void) => { listHandlers.add(handler); },
+      offPtyList: (handler: (detail: { ptys: PtyInfo[]; requestId?: string }) => void) => { listHandlers.delete(handler); },
+      onPtyReplay: (handler: (detail: { id: string; data: string; requestId?: string }) => void) => { replayHandlers.add(handler); },
+      offPtyReplay: (handler: (detail: { id: string; data: string; requestId?: string }) => void) => { replayHandlers.delete(handler); },
+    } as unknown as PlatformAdapter;
+    const answer = (requestId: string, ids: string[] = []) => {
+      const ptys = ids.map((id) => ({ id, alive: true }) as PtyInfo);
+      for (const handler of [...listHandlers]) handler({ ptys, requestId });
+      for (const id of ids) {
+        for (const handler of [...replayHandlers]) handler({ id, data: `${id}-replay`, requestId });
+      }
+    };
+    return { platform, asked, answer };
+  }
+
+  it('gives two concurrent arrivals their own PTYs', async () => {
+    const { platform, asked, answer } = addressedPlatform();
+    const first = collectLivePtys(platform, { accept: (id) => id === 'a', timeoutMs: 1000 });
+    const second = collectLivePtys(platform, { accept: (id) => id === 'b', timeoutMs: 1000 });
+    await Promise.resolve();
+    const [firstToken, secondToken] = asked;
+    expect(firstToken).not.toBe(secondToken);
+
+    // The second arrival's list reaches the first collector too. Filtered by
+    // `accept` it is empty, and taken as this collector's own answer it would
+    // read as "the host holds none" — a cold restore over live shells.
+    answer(secondToken!, ['b']);
+    answer(firstToken!, ['a']);
+
+    const [a, b] = await Promise.all([first, second]);
+    expect(a).toMatchObject({ timedOut: false });
+    expect(b).toMatchObject({ timedOut: false });
+    expect(a.ptys.map((pty) => pty.id)).toEqual(['a']);
+    expect(b.ptys.map((pty) => pty.id)).toEqual(['b']);
+    // Each resumes over its own replay, never the other's.
+    expect([...a.replay.keys()]).toEqual(['a']);
+    expect([...b.replay.keys()]).toEqual(['b']);
+  });
+
+  it('tells an empty answer apart from no answer at all', async () => {
+    vi.useFakeTimers();
+    try {
+      const { platform, asked, answer } = addressedPlatform();
+      const empty = collectLivePtys(platform, { timeoutMs: 100 });
+      await Promise.resolve();
+      answer(asked[0]!);
+      const settled = await empty;
+      // The host answered, and it holds nothing.
+      expect(settled).toMatchObject({ ptys: [], timedOut: false });
+
+      const silent = collectLivePtys(platform, { timeoutMs: 100 });
+      await vi.advanceTimersByTimeAsync(200);
+      // Nothing came back, so nothing is known: a caller that cold-restores
+      // here starts fresh shells over PTYs that are still running.
+      expect(await silent).toMatchObject({ ptys: [], timedOut: true });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('resumeOrRestore buys the retry only for a saved terminal pane', async () => {
+    vi.useFakeTimers();
+    try {
+      // Nothing saved, and a host that never answers: the retry protects live
+      // shells a cold restore would start over, and there are none to protect,
+      // so first paint is not held for its whole budget.
+      const fresh = addressedPlatform();
+      (fresh.platform as { getState: () => unknown }).getState = () => null;
+      const booted = resumeOrRestore(fresh.platform);
+      await vi.advanceTimersByTimeAsync(600);
+      expect(await booted).toEqual({ paneIds: [] });
+      expect(fresh.asked).toHaveLength(1);
+
+      // A saved terminal pane is exactly what the retry protects: ask again.
+      const saved = addressedPlatform();
+      (saved.platform as { getState: () => unknown }).getState = () => ({
+        version: 3,
+        panes: [{ id: 'a', title: 'a', cwd: '/tmp', untouched: false, alert: null }],
+      });
+      const restoring = resumeOrRestore(saved.platform);
+      await vi.advanceTimersByTimeAsync(600);
+      expect(saved.asked).toHaveLength(2);
+      saved.answer(saved.asked[1]!, ['a']);
+      expect((await restoring).paneIds).toEqual(['a']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('asks a second time before believing silence, and resumes on the late answer', async () => {
+    vi.useFakeTimers();
+    try {
+      const { platform, asked, answer } = addressedPlatform();
+      const collecting = collectLivePtys(platform, { timeoutMs: 100, retryTimeoutMs: 3000 });
+      // The first wait runs out with nothing back: a boot that believed it here
+      // would cold-restore, starting a second set of shells over live ones.
+      await vi.advanceTimersByTimeAsync(200);
+      expect(asked).toHaveLength(2);
+
+      // The host is just slow. Its answer to the second ask is what resumes.
+      answer(asked[1]!, ['a']);
+      const collected = await collecting;
+      expect(collected.timedOut).toBe(false);
+      expect(collected.ptys.map((pty) => pty.id)).toEqual(['a']);
+      expect([...collected.replay.keys()]).toEqual(['a']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('asks once when told to, and once more only on silence', async () => {
+    vi.useFakeTimers();
+    try {
+      const { platform, asked, answer } = addressedPlatform();
+      const answered = collectLivePtys(platform, { timeoutMs: 100, retryTimeoutMs: 3000 });
+      await Promise.resolve();
+      answer(asked[0]!);
+      expect(await answered).toMatchObject({ ptys: [], timedOut: false });
+      // An answered ask is never repeated.
+      expect(asked).toHaveLength(1);
+
+      // No `retryTimeoutMs`: one ask, and the silence stands.
+      const once = collectLivePtys(platform, { timeoutMs: 100 });
+      await vi.advanceTimersByTimeAsync(200);
+      expect(await once).toMatchObject({ timedOut: true });
+      expect(asked).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('accepts an answer from a host that echoes no token', async () => {
+    // VS Code, Pocket and the website each serve one webview, so their answers
+    // carry none and there is nothing to tell apart.
+    const listHandlers = new Set<(detail: { ptys: PtyInfo[] }) => void>();
+    const platform = {
+      requestInit: () => {
+        for (const handler of [...listHandlers]) handler({ ptys: [{ id: 'a', alive: true } as PtyInfo] });
+      },
+      onPtyList: (handler: (detail: { ptys: PtyInfo[] }) => void) => { listHandlers.add(handler); },
+      offPtyList: (handler: (detail: { ptys: PtyInfo[] }) => void) => { listHandlers.delete(handler); },
+      onPtyReplay: () => {},
+      offPtyReplay: () => {},
+    } as unknown as PlatformAdapter;
+    const collected = await collectLivePtys(platform, { timeoutMs: 1000 });
+    expect(collected.ptys.map((pty) => pty.id)).toEqual(['a']);
+    expect(collected.timedOut).toBe(false);
   });
 });

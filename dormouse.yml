@@ -16,7 +16,7 @@ tools:
     prespawn_dedupe: [storybook, $PROJECT_ROOT]
 
   standalone-harness:
-    run: pnpm dev:standalone:ab
+    run: pnpm innerdogfood
     # A real browser rather than an iframe, so an agent can drive the harness
     # with `dor ab --surface surface:N <verb>`.
     render: ab-screencast

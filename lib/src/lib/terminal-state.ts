@@ -273,7 +273,10 @@ export function cwdFromOsc7(rawUriInput: string, now = Date.now()): CwdState | n
   if (parsed.protocol !== 'file:') return null;
 
   const decodedPath = boundedCwdValue(normalizeFileUriPath(safeDecodeURIComponent(parsed.pathname)));
-  const host = extractFileUriHost(rawUri) || parsed.hostname || undefined;
+  // Bounded the same way `decodedPath` is. The host is retained, rendered, and
+  // part of `cwdIdentity`, so it is sanitized where it is built rather than on
+  // the URL parser rejecting every control character a host could decode to.
+  const host = boundedCwdValue(fileUriHost(rawUri, parsed.hostname)) || undefined;
   return {
     uri: rawUri,
     path: decodedPath,
@@ -701,8 +704,35 @@ function normalizeFileUriPath(pathname: string): string {
   return pathname;
 }
 
+/**
+ * The OSC 7 host, taken from the URL parser except where the raw slice is the
+ * only place a distinction the header and `cwdIdentity` need survives.
+ *
+ * `parsed.hostname` is the mapped host: lowercased, IDNA-mapped (ignorable code
+ * points removed, non-ASCII punycoded), and — for the file scheme alone —
+ * `localhost` flattened to the empty string. Two of those erase something
+ * worth keeping, so the raw slice wins for them and only them:
+ *
+ * - case, which is why the slice exists at all (`Prod-Box`, not `prod-box`);
+ * - the literal `localhost` spelling, which the parser drops.
+ *
+ * Every other divergence is the parser normalizing input the slice reproduces
+ * verbatim, and the mapped answer is the truthful one: `file://loc<ZWSP>alhost`
+ * is localhost, so taking the slice would render a zero-width `localhost` that
+ * reads as remote and splits its pane from the real one in the same directory.
+ */
+function fileUriHost(uri: string, parsedHostname: string): string {
+  const sliced = extractFileUriHost(uri);
+  if (!sliced) return parsedHostname;
+  if (sliced.toLowerCase() === parsedHostname) return sliced;
+  if (!parsedHostname && sliced.toLowerCase() === 'localhost') return sliced;
+  return parsedHostname;
+}
+
 function extractFileUriHost(uri: string): string | undefined {
-  const match = uri.match(/^file:\/\/([^/]*)(?:\/|$)/i);
+  // Anchored at the delimiters `new URL` honours: an unanchored `[^/]*` swallows
+  // a `?`/`#` tail into the host, which then reads as remote and skews grouping.
+  const match = uri.match(/^file:\/\/([^/?#]*)(?:[/?#]|$)/i);
   if (!match || !match[1]) return undefined;
   return safeDecodeURIComponent(match[1]);
 }

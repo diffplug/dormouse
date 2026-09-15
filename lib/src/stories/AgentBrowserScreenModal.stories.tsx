@@ -128,20 +128,6 @@ export const ScaledCustom: Story = {
   },
 };
 
-// A phone-emulating viewport (e.g. after `set device "iPhone 16"`). Still
-// pre-selects Custom (devices can't be pre-matched without a dims map), but the
-// Device list is the obvious next pick.
-export const PhoneViewport: Story = {
-  args: {
-    state: 'SCALED',
-    vpW: 393, vpH: 852, vpDpr: 3,
-    paneW: 980, paneH: 560,
-    displayDpr: 2,
-    syncEngaged: false,
-    hostCapable: true,
-  },
-};
-
 // Host can't drive the viewport (Tauri) ⇒ Apply is disabled and a note points
 // the user at `dor ab set …`.
 export const HostIncapable: Story = {

@@ -111,20 +111,6 @@ const meta: Meta<typeof SelectionOverlayStory> = {
 export default meta;
 type Story = StoryObj<typeof SelectionOverlayStory>;
 
-export const LinewiseDrag: Story = {
-  args: {
-    id: 'selection-overlay-linewise-drag',
-    selection: {
-      startRow: 2,
-      startCol: 5,
-      endRow: 6,
-      endCol: 24,
-      shape: 'linewise',
-      dragging: true,
-    },
-  },
-};
-
 export const BlockDrag: Story = {
   args: {
     id: 'selection-overlay-block-drag',

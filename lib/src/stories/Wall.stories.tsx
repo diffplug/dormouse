@@ -4,7 +4,6 @@ import {
   flattenScenario,
   SCENARIO_SHELL_PROMPT,
   SCENARIO_LS_OUTPUT,
-  SCENARIO_ANSI_COLORS,
 } from '../lib/platform';
 import type { ActivityState } from '../lib/terminal-registry';
 import { requireElement, settleTerminals, waitForCondition } from './settle-terminals';
@@ -110,14 +109,6 @@ export const Default: Story = {
   parameters: { fakePty: { scenario: flattenScenario(SCENARIO_SHELL_PROMPT) } },
 };
 
-export const WithLsOutput: Story = {
-  parameters: { fakePty: { scenario: flattenScenario(SCENARIO_LS_OUTPUT) } },
-};
-
-export const WithAnsiColors: Story = {
-  parameters: { fakePty: { scenario: flattenScenario(SCENARIO_ANSI_COLORS) } },
-};
-
 export const MultiPane: Story = {
   parameters: { fakePty: { scenario: flattenScenario(SCENARIO_LS_OUTPUT) } },
   play: async () => {
@@ -133,36 +124,6 @@ export const WithDoors: Story = {
     await minimizeFirstVisiblePane();
     await minimizeFirstVisiblePane();
     await settleTerminals();
-  },
-};
-
-export const AlertEnabledIdlePane: Story = {
-  args: {
-    initialPaneIds: ['wall-alert-enabled'],
-  },
-  parameters: {
-    fakePty: { scenario: flattenScenario(SCENARIO_SHELL_PROMPT) },
-    ...withPrimedActivity({
-      'wall-alert-enabled': {
-        status: 'NOTHING_TO_SHOW',
-        todo: false,
-      },
-    }),
-  },
-};
-
-export const AlertRingingPane: Story = {
-  args: {
-    initialPaneIds: ['wall-alert-ringing'],
-  },
-  parameters: {
-    fakePty: { scenario: flattenScenario(SCENARIO_SHELL_PROMPT) },
-    ...withPrimedActivity({
-      'wall-alert-ringing': {
-        status: 'ALERT_RINGING',
-        todo: false,
-      },
-    }),
   },
 };
 
@@ -205,21 +166,6 @@ export const AlertModalOpen: Story = {
     // snapshots a wall with no context.
     await settleTerminals();
     await openAlertDialog();
-  },
-};
-
-export const TodoAfterDismiss: Story = {
-  args: {
-    initialPaneIds: ['wall-todo-after-dismiss'],
-  },
-  parameters: {
-    fakePty: { scenario: flattenScenario(SCENARIO_SHELL_PROMPT) },
-    ...withPrimedActivity({
-      'wall-todo-after-dismiss': {
-        status: 'ALERT_RINGING',
-        todo: true,
-      },
-    }),
   },
 };
 

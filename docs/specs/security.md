@@ -69,12 +69,16 @@ run this knows what they are taking on.
   Code's own storage under its modes, never a transcript
   ([Persisted state](./security-local.md#persisted-state)).
 - **A compromised browser or operating system, on either end.** Active XSS in
-  the Pocket origin can *use* the phone's key without extracting it. Exactly
+  the Pocket origin can use the phone's key and, with encrypted fallback storage,
+  extract its private bytes ([Client statics](./remote-security-model.md#client-statics)). Exactly
   two endpoints are trusted: the distributed Burrow binaries and the exact Pocket
   artifact the origin serves ([Trust Model](./remote-security-model.md#trust-model)).
 - **Traffic analysis.** The Relay sees who talks to whom, when, how often, and
   how large each ciphertext is, and keystroke timing, never keystroke values
-  ([Residual metadata](./remote-security-model.md#residual-metadata)).
+  ([Residual metadata](./remote-security-model.md#residual-metadata)). An
+  authorized session may move onto a direct connection between the two devices,
+  after which the Relay sees that the session exists and nothing about its
+  traffic ([Direct path](./remote-security-model.md#direct-path)).
 - **Push replay, when push is enabled.** A push proves confidentiality, not freshness: a Relay that
   kept an envelope can re-deliver it ([Push sealing](./remote-security-model.md#push-sealing)).
 - **Per-Burrow unlinkability, when push is enabled.** One push endpoint per browser lets the Relay see

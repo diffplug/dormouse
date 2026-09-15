@@ -19,6 +19,7 @@ import { skillCommand } from './commands/skill.js';
 import { splitCommand } from './commands/split.js';
 import { toolCommand } from './commands/tool.js';
 import { versionCommand } from './commands/version.js';
+import { workspaceCommand } from './commands/workspace.js';
 import { errorLine, errorMessage, fail } from './commands/shared.js';
 import type {
   CliEnv,
@@ -53,8 +54,17 @@ export type {
   KillSurfaceConfirmation,
   KillSurfaceRequest,
   KillSurfaceResponse,
+  ListScope,
   ListSurfacesRequest,
   ListSurfacesResponse,
+  ListWorkspacesRequest,
+  ListWorkspacesResponse,
+  NewWorkspaceRequest,
+  CloseWorkspaceRequest,
+  RenameWorkspaceRequest,
+  SwitchWorkspaceRequest,
+  WorkspaceMutationResponse,
+  WorkspaceRow,
   ReadSurfaceRequest,
   ReadSurfaceResponse,
   ResolvedSplitDirection,
@@ -89,6 +99,7 @@ const COMMANDS = [
   iframeCommand,
   agentBrowserCommand,
   listCommand,
+  workspaceCommand,
 ] as const satisfies readonly Command[];
 
 const ROUTES = {
@@ -104,6 +115,7 @@ const ROUTES = {
   iframe: iframeCommand.command,
   'agent-browser': agentBrowserCommand.command,
   list: listCommand.command,
+  workspace: workspaceCommand.command,
 };
 
 const DOR_TEXT: ApplicationText = {

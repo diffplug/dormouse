@@ -34,6 +34,7 @@ class ListenerHost {
 class FakeElement extends ListenerHost {
   setPointerCapture = vi.fn();
   releasePointerCapture = vi.fn();
+  querySelector = vi.fn();
 
   getBoundingClientRect(): Pick<DOMRect, 'left' | 'top'> {
     return { left: 0, top: 0 };
@@ -86,6 +87,8 @@ const dims: TerminalOverlayDims = {
 
 function createHarness(windowHost: ListenerHost) {
   const element = new FakeElement();
+  const screen = new FakeElement();
+  element.querySelector.mockReturnValue(screen);
   const terminal = {
     cols: 80,
     clearSelection: vi.fn(),
@@ -103,7 +106,7 @@ function createHarness(windowHost: ListenerHost) {
     getOverlayDims: () => dims,
     setSelectionBaseline: vi.fn(),
   });
-  return { cleanup, element, terminal, windowHost };
+  return { cleanup, element, screen, terminal, windowHost };
 }
 
 let windowHost: ListenerHost;
@@ -349,35 +352,63 @@ describe('terminal-mouse-router: override suppression', () => {
     return pointerEvent({ pointerType: 'mouse', ...overrides });
   }
 
-  // Drives a left-button mouse press into an active selection drag (capture +
-  // pendingDrag created on press, drag begun once movement crosses threshold).
+  // Drives a left-button mouse press into an active selection drag (pendingDrag
+  // and screen capture created on press; drag begins once movement crosses threshold).
   function startMouseDrag(element: FakeElement) {
     element.emit('pointerdown', mousePointer({ clientX: 5, clientY: 5 }));
     element.emit('mousedown', mouseEvent({ clientX: 5, clientY: 5 }));
     windowHost.emit('mousemove', mouseEvent({ clientX: 25, clientY: 15 }));
   }
 
-  it('captures the mouse pointer on a left-button press over terminal-owned content', () => {
-    const { cleanup, element } = createHarness(windowHost);
+  it('captures a plain click on xterm’s screen without suppressing its hyperlink events', () => {
+    const { cleanup, element, screen } = createHarness(windowHost);
+    const down = mouseEvent();
+    const up = mouseEvent();
 
-    element.emit('pointerdown', mousePointer({ clientX: 5, clientY: 5 }));
+    element.emit('pointerdown', mousePointer());
+    element.emit('mousedown', down);
+    windowHost.emit('mousemove', mouseEvent({ clientX: 6, buttons: 1 }));
+    windowHost.emit('pointerup', mousePointer({ clientX: 6 }));
+    windowHost.emit('mouseup', up);
 
-    expect(element.setPointerCapture).toHaveBeenCalledWith(1);
+    expect(element.setPointerCapture).not.toHaveBeenCalled();
+    expect(element.querySelector).toHaveBeenCalledWith('.xterm-screen');
+    expect(screen.setPointerCapture).toHaveBeenCalledWith(1);
+    expect(screen.releasePointerCapture).toHaveBeenCalledWith(1);
+    expect(down.stopPropagation).not.toHaveBeenCalled();
+    expect(up.stopPropagation).not.toHaveBeenCalled();
+    expect(getMouseSelectionState('t1').selection).toBeNull();
+    cleanup();
+  });
+
+  it('captures before the first move so a drag can begin outside the iframe', () => {
+    const { cleanup, element, screen } = createHarness(windowHost);
+
+    element.emit('pointerdown', mousePointer({ clientY: 2 }));
+    element.emit('mousedown', mouseEvent({ clientY: 2 }));
+    expect(screen.setPointerCapture).toHaveBeenCalledWith(1);
+    expect(getMouseSelectionState('t1').selection).toBeNull();
+
+    windowHost.emit('mousemove', mouseEvent({ clientY: -20, buttons: 1 }));
+    expect(getMouseSelectionState('t1').selection).toMatchObject({ dragging: true });
     cleanup();
   });
 
   it('does not capture the mouse pointer for non-left buttons', () => {
-    const { cleanup, element } = createHarness(windowHost);
+    const { cleanup, element, screen } = createHarness(windowHost);
 
-    element.emit('pointerdown', mousePointer({ button: 2 }));
+    element.emit('pointerdown', mousePointer({ button: 2, clientX: 5, clientY: 5 }));
+    element.emit('mousedown', mouseEvent({ button: 2, clientX: 5, clientY: 5 }));
+    windowHost.emit('mousemove', mouseEvent({ button: 2, clientX: 25, clientY: 15 }));
 
     expect(element.setPointerCapture).not.toHaveBeenCalled();
+    expect(screen.setPointerCapture).not.toHaveBeenCalled();
     cleanup();
   });
 
   it('finalizes a mouse drag from a captured pointerup when the button is released outside the iframe', () => {
     vi.useFakeTimers();
-    const { cleanup, element } = createHarness(windowHost);
+    const { cleanup, element, screen } = createHarness(windowHost);
 
     startMouseDrag(element);
     expect(getMouseSelectionState('t1').selection).toMatchObject({ dragging: true });
@@ -385,7 +416,7 @@ describe('terminal-mouse-router: override suppression', () => {
     // Released outside the iframe: only the captured pointerup reaches us, never
     // the compatibility mouseup. The deferred finalize ends the drag in place.
     windowHost.emit('pointerup', mousePointer({ clientX: 500, clientY: 500 }));
-    expect(element.releasePointerCapture).toHaveBeenCalledWith(1);
+    expect(screen.releasePointerCapture).toHaveBeenCalledWith(1);
     expect(getMouseSelectionState('t1').selection).toMatchObject({ dragging: true });
 
     vi.runAllTimers();

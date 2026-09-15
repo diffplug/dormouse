@@ -157,7 +157,7 @@ Rules:
 - **Editing the rule set re-derives WATCHING across every live Session immediately**, so a mid-command enable shows what that command is doing *right now* rather than a fresh `NOTHING_TO_SHOW` (rationale).
 - **A WATCHING ring outlives the command that raised it.** Watching switches off when the watched command exits; its ring and originating command key remain in `watchingRingingCommand`.
 - **Removing a rule silences its WATCHING rings**, even after the command has exited; other dismissal paths follow Clearing And TODO. A command merely ending never clears the ring.
-- **The rule set is app-global and persisted** (`dormouse:watched-commands`), starting empty, so WATCHING is off everywhere until the user turns it on. **In VS Code the shared extension host is authoritative**, so a stale webview can neither replace unrelated rules nor keep reporting an obsolete list; the seed/mutation/broadcast wire contract is `docs/specs/transport.md`.
+- **The rule set is app-global and persisted** (`dormouse:watched-commands`), starting empty, so WATCHING is off everywhere until the user turns it on. **The host is authoritative wherever one serves several webviews** — the VS Code extension host, and the standalone sidecar — so a stale webview can neither replace unrelated rules nor keep reporting an obsolete list: the first webview's persisted copy is taken as the seed, an edit is a delta, and the host broadcasts its canonical snapshot back. The seed/mutation/broadcast wire contract is `docs/specs/transport.md`.
 
 **Limitation:** WATCHING needs the shell to report command boundaries (`OSC 633` / `OSC 133`). Shells without integration (`docs/specs/terminal-escapes.md`) never report a command name, so WATCHING never engages and the bell reports "nothing is running". Terminal reports still work; command-exit alerting also requires semantic command boundaries. **Never route the keystroke fallback in `docs/specs/terminal-state.md` into the `AlertManager`** (rationale).
 
@@ -241,7 +241,7 @@ Clearing behavior:
 
 ## Alarm settings
 
-The alarm settings are a second app-global store beside the WATCHING rule set, edited in the app-global **Settings** dialog (below), which also carries the theme picker ([theme.md](./theme.md)), the shell picker ([standalone.md](./standalone.md)), and the remote-control section ([relay.md](./relay.md)). **Each of those keeps its own store — never fold one into `AlertSettings`**, which is relayed wholesale to the VS Code extension host.
+The alarm settings are a second app-global store beside the WATCHING rule set, edited in the app-global **Settings** dialog (below), which also carries the theme picker ([theme.md](./theme.md)), the shell picker ([standalone.md](./standalone.md)), and the remote-control section ([relay.md](./relay.md)). **Each of those keeps its own store — never fold one into `AlertSettings`**, which is relayed wholesale to the host. **A host revalidates the blob before installing it** (`normalizeAlertSettings`): a webview must never be able to hand it a NaN or an absurd timer. Both stores run the same two classes in either host (`lib/src/lib/watched-command-host.ts`, `lib/src/lib/alert-settings-host.ts`), bound for standalone by `lib/src/host/alert-store-host.ts`; the shape, its defaults and its validation are the platform-free `lib/src/lib/alert-settings-model.ts`.
 
 | Field | Meaning |
 |---|---|
@@ -281,6 +281,7 @@ Source of truth: `AlertSettings` in `lib/src/lib/alert-settings.ts` (renderer mi
 
 ### Spoken alarms
 
+- **Must replace high-entropy ASCII tokens with `REDACTED` locally before punctuation cleanup and truncation**, including trailing padding but preserving `=` separators (rationale). Hex candidates include embedded hyphen/underscore groups. False positives and negatives remain possible; word-passphrase detection is excluded. Pinned by `lib/src/lib/redact-high-entropy.test.ts` and `redacts whole tokens before punctuation cleanup and truncation` in `lib/src/lib/alert-speech.test.ts`.
 - **The label must be sanitized before it reaches the engine** (`toSpokenText`): all Unicode punctuation, symbols, and `Other` characters (including controls, bidi controls, and zero-width formats) become spaces, except apostrophes, which are elided so contractions survive; letters, numbers, and their combining marks from every script remain. Whitespace collapses, the result is capped in code points, and an empty result falls back to `terminal`. **Security, not tidiness:** WebKit wedges its synthesizer on angle brackets, and terminal-supplied text reaches Pane labels (rationale).
 - **Delivery state follows actual engine callbacks, not queue admission.** `AlertSpeechState` is a renderer-local `speaking | spoken` map keyed by Session: `start` publishes `speaking`; `end`, or `error` after a real start, publishes `spoken`; an utterance that never starts publishes neither. **Must check delivery identity before accepting `start` or completion**, including after redispatch, eviction, or teardown. Pinned by `ignores an older ring starting after a newer ring has begun speaking` and `bounds tracked utterances when the engine never calls back` in `lib/src/lib/alert-speech.test.ts`.
 - **Nothing in the settle path may assume the callback arrives after `speak()` returns** — an engine may dispatch `start` then `end`/`error` *synchronously* inside `speechSynthesis.speak()` (rationale). Handlers therefore close over the utterance itself and registration happens before dispatch. A dispatch the engine refuses outright settles too.
@@ -290,7 +291,7 @@ Source of truth: `AlertSettings` in `lib/src/lib/alert-settings.ts` (renderer mi
 - **In-flight tracking is bounded.** The utterance set and queued index evict their oldest entry past a shared cap. Delivery identities retain one token per ringing Session until the ring resolves. An evicted utterance that still fires settles normally; it is no longer eligible for collateral re-dispatch.
 - `speaking` / `spoken` remains only while the originating Session is still `ALERT_RINGING`: any action that resolves the ring (Clearing And TODO) clears it, killing the Session included, while visibility, hover, and command-mode selection do not. **Never persist it or send it to the host**, so restore/reconnect cannot recreate it.
 
-Source of truth: `toSpokenText` in `lib/src/lib/alert-speech.ts`, armed by `lib/src/components/wall/use-alert-speech.ts`; label derivation in `lib/src/lib/session-label.ts`; `AlertSpeechState` in `lib/src/lib/alert-speech-state.ts`.
+Source of truth: `toSpokenText` in `lib/src/lib/alert-speech.ts`, armed by `lib/src/components/wall/use-alert-speech.ts`; `redactHighEntropyTokens` in `lib/src/lib/redact-high-entropy.ts`; label derivation in `lib/src/lib/session-label.ts`; `AlertSpeechState` in `lib/src/lib/alert-speech-state.ts`.
 
 ### Push notifications
 
@@ -331,17 +332,18 @@ Source of truth: `lib/src/components/SettingsDialog.tsx`; `SettingsPreview` in `
 | `ringing` | Any member Session is `ALERT_RINGING`. |
 | `todo` | Any member Surface has `todo === true`. |
 | `count` | Number of members ringing or TODO; each Surface counts once. |
+| `ringSeq` | The largest member `ringSeq`; read only for change, so a new ring replays the indicator's burst and returning to the Workspace does not. |
 
 **Must keep the projection display-only:** it never enters the Activity machine or fires its own ring. A Surface with no activity entry contributes nothing. Callers **must include** minimized (`Doored`) Surfaces.
 
-Reserved: **Must include inactive Workspaces' Surfaces when projecting their unions** (`docs/specs/layout.md` → Future, workspaces-rollout).
+**Must project every Workspace, active or not.** The Activity store spans the whole Window, so what scopes it to one Workspace is the membership each mounted Wall publishes — panes ∪ doors, on every layout commit.
 
-Source of truth: `computeWorkspaceUnion` in `lib/src/lib/workspace-union.ts`; `lib/src/lib/workspace-union.test.ts`.
+Source of truth: `computeWorkspaceUnion` in `lib/src/lib/workspace-union.ts`; `setWorkspaceSurfaces` in `lib/src/lib/workspace-surfaces.ts`; `lib/src/lib/workspace-union.test.ts`.
 
 Where it surfaces is host-specific:
 
 - **VS Code** reflects the terminal portion onto native chrome — `docs/specs/vscode.md`, which also owns why browser-surface TODO stays webview-local.
-- **Standalone** shows terminal rings/TODOs on panes and doors, and a browser Surface's `todo` on its own door. The workspace-strip union indicators are staged with the strip — `docs/specs/layout.md` `## Future` (workspaces-rollout).
+- **Standalone** shows terminal rings/TODOs on panes and doors, and a browser Surface's `todo` on its own door. A **hidden** Workspace's tab additionally carries its union's TODO pill and bell, with `count` in the tab's accessible name; the visible Workspace's tab carries none, its panes and doors already saying it (`WorkspaceStrip` in `lib/src/components/WorkspaceStrip.tsx`).
 
 ## UI Contract
 

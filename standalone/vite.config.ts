@@ -28,7 +28,7 @@ export default defineConfig({
       "remote-lib-common": path.resolve(remoteLibCommonDir, "src"),
     },
   },
-  // Tauri expects a fixed port; fail if that port is not available
+  // Direct Tauri CLI defaults; the dev runners override the listener in-process.
   server: {
     host: host || false,
     port,

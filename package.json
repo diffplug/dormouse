@@ -2,7 +2,7 @@
   "name": "dormouse-root",
   "private": true,
   "license": "FSL-1.1-MIT",
-  "packageManager": "pnpm@11.24.0",
+  "packageManager": "pnpm@11.26.0",
   "devEngines": {
     "runtime": {
       "name": "node",
@@ -21,8 +21,8 @@
     "bump:xterm": "node scripts/xterm-bump.mjs",
     "dev:canopy": "pnpm --filter canopy storybook",
     "dev:lib": "pnpm --filter dormouse-lib dev",
-    "dev:standalone": "node scripts/free-dev-port.mjs && pnpm --filter dormouse-standalone tauri dev",
-    "dev:standalone:ab": "pnpm --filter dormouse-standalone dev:agent-browser",
+    "dev:standalone": "pnpm --filter dormouse-standalone tauri dev",
+    "innerdogfood": "pnpm --filter dormouse-standalone innerdogfood",
     "dev:relay": "pnpm --filter dormouse-lib build:pocket && pnpm --filter relay dev",
     "dev:website": "pnpm --filter dormouse-website dev",
     "build:vscode": "pnpm --filter dormouse-lib build && pnpm --filter dormouse build:frontend && pnpm --filter dormouse build",

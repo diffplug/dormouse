@@ -108,7 +108,7 @@ Two things to carry forward:
 - **HTTPS is not optional.** WebAuthn needs a secure context and only
   `localhost` is exempt, so a real phone needs the TLS origin. For a
   desktop-only dev loop, the shortcut is
-  `pnpm dev:relay` on `localhost:3000`; the Relay writes its generated
+  `PORT=3000 pnpm dev:relay` on `localhost:3000`; the Relay writes its generated
   password to `setup-password.json` in its data directory.
 
 The Relay-generated setup password gates exactly one thing: enrolling a Burrow from somewhere
@@ -264,10 +264,10 @@ Either way, that one action creates the account's first passkey (or signs in
 with a synced one) and moves straight into pairing. Three things happen that you
 cannot see:
 
-- A **per-Burrow key** is minted — a non-extractable X25519 keypair, held in
-  memory until the laptop approves and only then written to IndexedDB. This
-  browser can agree with it and can never export it. It is this browser's
-  identity *for this laptop*; a different laptop gets a different key.
+- A **per-Burrow key** is minted and held in memory until the laptop approves,
+  then written to IndexedDB. Storage and the encrypted fallback's security
+  tradeoff follow `docs/specs/remote-security-model.md` → Client statics.
+  It identifies this browser for this laptop; another laptop gets another key.
 - **The code is spent either way.** A phone with no passkey redeems it to
   register one; a phone that already has one retires it at
   `POST /api/setup/retire`, so a photograph of the laptop's screen cannot

@@ -94,10 +94,6 @@ const meta: Meta<typeof MouseIconStoryFrame> = {
 export default meta;
 type Story = StoryObj<typeof MouseIconStoryFrame>;
 
-export const Hidden: Story = {
-  args: { mouseReporting: 'none', override: 'off' },
-};
-
 export const ReportingOn: Story = {
   args: { mouseReporting: 'vt200', override: 'off' },
 };

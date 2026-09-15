@@ -15,11 +15,11 @@ export interface ThrottledFn {
  *  - Once calls stop, one final trailing call fires so the last state is always
  *    applied exactly.
  *
- * Used for the terminal-refit ResizeObserver: Lath tweens real pane geometry
- * across many animation frames and sash drags stream live resizes, and each
- * fit() reflows the xterm buffer + fires a PTY resize (ioctl + SIGWINCH). The
- * leading edge keeps single resizes (zoom) instant, the throttle caps reflows
- * during motion, and the trailing call fits the final geometry exactly.
+ * Used by the cross-window Workspace drag: every pointer move asks Rust which
+ * window is under the cursor, and the answer must be current when the pointer
+ * stops (`standalone/src/workspace-drag.ts`). The leading edge answers the first
+ * move at once, the throttle caps the probe rate, and the trailing call reports
+ * the last point exactly.
  */
 export function throttleTrailing(fn: () => void, ms: number): ThrottledFn {
   let timer: ReturnType<typeof setTimeout> | null = null;

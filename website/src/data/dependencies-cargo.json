@@ -42,7 +42,7 @@
     },
     {
       "name": "process-wrap",
-      "version": "9.1.0",
+      "version": "10.0.0",
       "license": "MIT OR Apache-2.0",
       "author": "Félix Saparelli <felix@passcod.name>",
       "homepage": "https://github.com/watchexec/process-wrap",
@@ -82,7 +82,7 @@
     },
     {
       "name": "tauri-plugin-shell",
-      "version": "2.3.5",
+      "version": "2.3.6",
       "license": "MIT OR Apache-2.0",
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://github.com/tauri-apps/plugins-workspace",
@@ -90,7 +90,7 @@
     },
     {
       "name": "tauri-plugin-updater",
-      "version": "2.10.1",
+      "version": "2.11.0",
       "license": "MIT OR Apache-2.0",
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://github.com/tauri-apps/plugins-workspace",
@@ -396,6 +396,13 @@
     {
       "name": "core-foundation",
       "version": "0.10.1",
+      "license": "MIT OR Apache-2.0",
+      "author": "The Servo Project Developers",
+      "homepage": "https://github.com/servo/core-foundation-rs"
+    },
+    {
+      "name": "core-foundation",
+      "version": "0.9.4",
       "license": "MIT OR Apache-2.0",
       "author": "The Servo Project Developers",
       "homepage": "https://github.com/servo/core-foundation-rs"
@@ -2075,14 +2082,14 @@
     },
     {
       "name": "serde_with",
-      "version": "3.20.0",
+      "version": "3.21.0",
       "license": "MIT OR Apache-2.0",
       "author": "Jonas Bushart, Marcin Kaźmierczak",
       "homepage": "https://github.com/jonasbb/serde_with/"
     },
     {
       "name": "serde_with_macros",
-      "version": "3.20.0",
+      "version": "3.21.0",
       "license": "MIT OR Apache-2.0",
       "author": "Jonas Bushart",
       "homepage": "https://github.com/jonasbb/serde_with/"
@@ -2303,6 +2310,20 @@
       "license": "MIT",
       "author": "Nika Layzell <nika@thelayzells.com>",
       "homepage": "https://github.com/mystor/synstructure"
+    },
+    {
+      "name": "system-configuration",
+      "version": "0.7.0",
+      "license": "MIT OR Apache-2.0",
+      "author": "Mullvad VPN",
+      "homepage": "https://github.com/mullvad/system-configuration-rs"
+    },
+    {
+      "name": "system-configuration-sys",
+      "version": "0.6.0",
+      "license": "MIT OR Apache-2.0",
+      "author": "Mullvad VPN",
+      "homepage": "https://github.com/mullvad/system-configuration-rs"
     },
     {
       "name": "system-deps",
@@ -3175,6 +3196,13 @@
     {
       "name": "windows-numerics",
       "version": "0.3.1",
+      "license": "MIT OR Apache-2.0",
+      "author": null,
+      "homepage": "https://github.com/microsoft/windows-rs"
+    },
+    {
+      "name": "windows-registry",
+      "version": "0.6.1",
       "license": "MIT OR Apache-2.0",
       "author": null,
       "homepage": "https://github.com/microsoft/windows-rs"

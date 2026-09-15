@@ -31,6 +31,8 @@ import type { DooredItem } from './wall-types';
 // cadence is deliberately slow and only tools without a URL are scanned.
 const POLL_MS = 1500;
 
+const neverPaused = () => false;
+
 type ToolLeaf = { id: string; params: Record<string, unknown> | undefined };
 
 /** The registered name a tool was spawned under; null for `dor tool -- <cmd>`. */
@@ -54,9 +56,11 @@ function toolLeaves(lath: LathWallEngine, doors: DooredItem[]): ToolLeaf[] {
 export function useToolServing({
   lath,
   doorsRef,
+  paused = neverPaused,
 }: {
   lath: LathWallEngine;
   doorsRef: React.MutableRefObject<DooredItem[]>;
+  paused?: () => boolean;
 }): void {
   // Ports seen on the previous tick, per leaf — the settle check's memory.
   // A ref, not state: it drives no render, and a leaf's entry is dropped when
@@ -73,6 +77,7 @@ export function useToolServing({
     let cancelled = false;
 
     const tick = async () => {
+      if (paused()) return;
       const leaves = toolLeaves(lath, doorsRef.current);
       // A killed tool never reaches the exit branch below, so prune by absence.
       const live = new Set(leaves.map((leaf) => leaf.id));
@@ -84,7 +89,7 @@ export function useToolServing({
       }
 
       for (const leaf of leaves) {
-        if (cancelled) return;
+        if (cancelled || paused()) return;
         const run = getTerminalPaneState(leaf.id).currentCommand;
         const running = run !== null && run.rawCommandLine === leaf.params?.command;
         const announce = running ? getToolAnnounce(leaf.id) : null;
@@ -131,6 +136,7 @@ export function useToolServing({
           disposeAgentBrowserSurfaceController(leaf.id);
           lath.store.updateParams(leaf.id, {
             url: undefined,
+            toolAnnouncedPort: undefined,
             toolPortConflict: undefined,
             session: undefined,
             wsPort: undefined,
@@ -150,6 +156,9 @@ export function useToolServing({
         // navigation every poll after the user left the announced origin.
         const announcedPort = announce?.port ?? null;
         if (announcedPort === null) appliedAnnouncedPorts.current.delete(leaf.id);
+        if (!appliedAnnouncedPorts.current.has(leaf.id) && typeof leaf.params?.toolAnnouncedPort === 'number') {
+          appliedAnnouncedPorts.current.set(leaf.id, leaf.params.toolAnnouncedPort);
+        }
         const announcedPortChanged = announcedPort !== null
           && appliedAnnouncedPorts.current.get(leaf.id) !== announcedPort;
         if (!running) continue;
@@ -161,7 +170,7 @@ export function useToolServing({
         } catch {
           continue; // A scan that fails is a scan that finds nothing yet.
         }
-        if (cancelled) return;
+        if (cancelled || paused()) return;
         if (!lath.getMeta(leaf.id) || getTerminalPaneState(leaf.id).currentCommand?.id !== run?.id) continue;
         const entries = listenerUrlsByPort(ports);
         let entry;
@@ -210,6 +219,7 @@ export function useToolServing({
           url: entry.url,
           renderMode: agentDrivable ? 'ab-screencast' : 'iframe',
           toolPortConflict: undefined,
+          toolAnnouncedPort: announcedPort ?? undefined,
         });
         if (!agentDrivable) continue;
 
@@ -260,5 +270,5 @@ export function useToolServing({
       cancelled = true;
       clearInterval(timer);
     };
-  }, [lath, doorsRef]);
+  }, [lath, doorsRef, paused]);
 }

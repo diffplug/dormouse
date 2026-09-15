@@ -10,7 +10,7 @@
  * afterwards.
  */
 
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { homedir, platform } from 'node:os';
 import { join } from 'node:path';
 
@@ -132,20 +132,39 @@ export function resolveChrome() {
  * with the Y4M the QR step wrote. Chrome opens that file at `getUserMedia`
  * time, not at launch, so it may be rewritten right up to the scan.
  */
+/**
+ * The port Chrome wrote for `--remote-debugging-port=0`, or `null` while it has
+ * yet to write one. Chrome creates this file only once its DevTools socket is
+ * listening, so its absence is the normal early state rather than an error —
+ * one read answers both, where `existsSync` first would be two syscalls for it.
+ */
+function readActivePort(activePortFile) {
+  let written;
+  try {
+    written = readFileSync(activePortFile, 'utf8');
+  } catch (err) {
+    if (err.code === 'ENOENT') return null;
+    throw err;
+  }
+  const port = Number(written.split('\n')[0]);
+  return Number.isInteger(port) && port >= 1 && port <= 65535 ? port : null;
+}
+
 export async function launchChrome({
   binary,
-  port,
   userDataDir,
   fakeVideoFile,
   width,
   height,
   logPath,
 }) {
+  const activePortFile = join(userDataDir, 'DevToolsActivePort');
+  rmSync(activePortFile, { force: true });
   const handle = spawnLogged(
     binary,
     [
       '--headless=new',
-      `--remote-debugging-port=${port}`,
+      '--remote-debugging-port=0',
       `--user-data-dir=${userDataDir}`,
       '--use-fake-device-for-media-stream',
       '--use-fake-ui-for-media-stream',
@@ -158,7 +177,10 @@ export async function launchChrome({
     ],
     { logPath, prefix: 'pocket-chrome' },
   );
-  const version = await waitFor(
+  // `waitFor` hands back whatever the probe returned, so the port travels out
+  // with the version rather than through a `let` the probe assigns: a tick that
+  // reads the file but whose fetch then fails leaves nothing half-set behind.
+  const { port, version } = await waitFor(
     async () => {
       // Fatal, so the wait ends here: a Chrome that refused a flag or found its
       // profile locked is gone, and polling on would report a 60s timeout
@@ -166,10 +188,12 @@ export async function launchChrome({
       if (handle.exit) {
         throw Object.assign(new Error(`Chrome exited (see ${logPath})`), { fatal: true });
       }
-      const res = await fetch(`http://127.0.0.1:${port}/json/version`).catch(() => null);
-      return res?.ok ? res.json() : null;
+      const written = readActivePort(activePortFile);
+      if (written === null) return null;
+      const res = await fetch(`http://127.0.0.1:${written}/json/version`).catch(() => null);
+      return res?.ok ? { port: written, version: await res.json() } : null;
     },
-    { what: `Chrome's DevTools port :${port}`, timeoutMs: 60_000, intervalMs: 200 },
+    { what: "Chrome's DevTools listener", timeoutMs: 60_000, intervalMs: 200 },
   );
-  return { handle, version };
+  return { handle, version, port };
 }

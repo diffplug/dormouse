@@ -67,20 +67,6 @@ const meta: Meta<typeof TextSelectionStory> = {
 export default meta;
 type Story = StoryObj<typeof TextSelectionStory>;
 
-// --- Outlines ------------------------------------------------------------
-
-export const LinewiseOutline: Story = {
-  args: {
-    id: 'text-sel-linewise',
-    selection: {
-      startRow: 2, startCol: 6,
-      endRow: 5, endCol: 34,
-      shape: 'linewise',
-      dragging: false,
-    },
-  },
-};
-
 export const BlockOutline: Story = {
   args: {
     id: 'text-sel-block',

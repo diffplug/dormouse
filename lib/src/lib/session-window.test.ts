@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  activeWorkspaceSession,
   readPersistedWindow,
+  windowPaneIds,
   wrapSessionInWindow,
   type PersistedSession,
   type PersistedWindow,
@@ -58,6 +58,23 @@ describe('readPersistedWindow', () => {
     expect(read?.workspaces[0].id).toBe('ws-a');
   });
 
+  it('keeps only the first of a duplicated Workspace id', () => {
+    // `setWorkspaces` rejects a duplicate outright, so a blob carrying one would
+    // otherwise take the whole launch down before anything rendered.
+    const win = {
+      version: 1 as const,
+      activeWorkspaceId: 'ws-a',
+      workspaces: [
+        { id: 'ws-a', name: 'First', session: sessionA },
+        { id: 'ws-a', name: 'Second', session: sessionB },
+      ],
+    };
+    const read = readPersistedWindow(win);
+    expect(read?.workspaces).toHaveLength(1);
+    expect(read?.workspaces[0].name).toBe('First');
+    expect(read?.activeWorkspaceId).toBe('ws-a');
+  });
+
   it('returns null for unusable input', () => {
     expect(readPersistedWindow(null)).toBeNull();
     expect(readPersistedWindow({ random: 'junk' })).toBeNull();
@@ -65,25 +82,17 @@ describe('readPersistedWindow', () => {
   });
 });
 
-describe('activeWorkspaceSession', () => {
-  it('returns the active Workspace session', () => {
+describe('windowPaneIds', () => {
+  it('names every pane across every Workspace, and nothing without a Window', () => {
     const win: PersistedWindow = {
       version: 1,
-      activeWorkspaceId: 'ws-b',
+      activeWorkspaceId: 'ws-a',
       workspaces: [
         { id: 'ws-a', name: 'A', session: sessionA },
         { id: 'ws-b', name: 'B', session: sessionB },
       ],
     };
-    expect(activeWorkspaceSession(win)).toBe(sessionB);
-  });
-
-  it('falls back to the first Workspace when the active id is missing', () => {
-    const win: PersistedWindow = {
-      version: 1,
-      activeWorkspaceId: 'gone',
-      workspaces: [{ id: 'ws-a', name: 'A', session: sessionA }],
-    };
-    expect(activeWorkspaceSession(win)).toBe(sessionA);
+    expect(windowPaneIds(win)).toEqual(['pane-a', 'pane-b']);
+    expect(windowPaneIds(null)).toEqual([]);
   });
 });

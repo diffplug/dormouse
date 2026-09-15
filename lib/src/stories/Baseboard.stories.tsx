@@ -95,19 +95,6 @@ export const BrowserSurfaces: Story = {
   ],
 };
 
-export const OneRingingDoor: Story = {
-  args: {
-    items: oneRingingDoorItems,
-  },
-  parameters: withState(oneRingingDoorItems, {
-    p1: {
-      status: 'ALERT_RINGING',
-
-      todo: false,
-    },
-  }),
-};
-
 export const OneSpeakingDoor: Story = {
   args: {
     items: oneRingingDoorItems,

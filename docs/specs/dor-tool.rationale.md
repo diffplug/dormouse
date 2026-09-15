@@ -43,3 +43,5 @@ Hostile text printed by the designated command can contain an announcement. The 
 A derived URL or browser daemon binding belongs to one execution. Reusing it after cold restore can connect a Tool to another process that obtained the old port. The saved command and declaration metadata are sufficient to start again and discover the new endpoint.
 
 Routing `dor tool` to a native editor on one host would change its result from a Surface handle to a host-specific side effect. Native file opening remains a separate operation.
+
+A Workspace transfer carries the live browser binding separately from its durable record. The arrival record can reach disk while the windows coordinate, whereas the content channel stays in memory; reusing the saved-record projection alone would reopen a Tool browser and lose its current page state. Pending approvals and unfinished browser startup still own asynchronous work in the source window, so the move waits for the user to resolve the approval or retry after startup.

@@ -300,3 +300,31 @@ it('ignores a scan that finishes after the command has changed', async () => {
   await act(async () => { resolve([tcp(6006)]); });
   expect(state.params.url).toBeUndefined();
 });
+
+it('keeps the destination and browser binding after a Workspace transfer', async () => {
+  recordToolAnnounce('tool-1', { port: 6006, name: null, key: null, dehydrate: false, persist: null });
+  const { state, platform } = await run({
+    surfaceType: 'tool', command: 'x', toolRender: 'ab-screencast',
+    renderMode: 'ab-screencast', session: 'existing-browser',
+    url: 'http://localhost:6006/edited', toolAnnouncedPort: 6006,
+  }, [[tcp(6006)], [tcp(6006)]]);
+  expect(platform.getOpenPorts).not.toHaveBeenCalled();
+  expect(state.params.url).toBe('http://localhost:6006/edited');
+  expect(state.params.session).toBe('existing-browser');
+});
+
+it('does not commit an in-flight scan once its Workspace begins transferring', async () => {
+  const { lath, state } = fakeLath({ surfaceType: 'tool', command: 'x', toolPort: 'announced' });
+  recordToolAnnounce('tool-1', { port: 6006, name: null, key: null, dehydrate: false, persist: null });
+  const gate = Promise.withResolvers<OpenPort[]>();
+  const platform = new FakePtyAdapter();
+  platform.getOpenPorts = vi.fn(() => gate.promise);
+  setPlatform(platform);
+  let moving = false;
+  const doorsRef = { current: [] };
+  function Probe() { useToolServing({ lath, doorsRef, paused: () => moving }); return null; }
+  await act(async () => root.render(<Probe />));
+  moving = true;
+  await act(async () => gate.resolve([tcp(6006)]));
+  expect(state.params.url).toBeUndefined();
+});

@@ -1,6 +1,6 @@
 /**
- * Environment → {@link RelayConfig}. Pure and separate from `index.ts` so the
- * mapping is testable without binding a port or mutating `process.env`
+ * Environment → {@link RelayConfig}. `readConfig` is pure; `loadConfig` formats
+ * startup errors for the entrypoints. Neither binds a port or mutates `process.env`
  * (docs/specs/relay.md, "Configuration").
  */
 
@@ -67,6 +67,24 @@ export interface RelayConfig {
 export class ConfigError extends Error {}
 
 type Env = Record<string, string | undefined>;
+
+/**
+ * {@link readConfig} with the exit every entrypoint owes a `ConfigError`: the
+ * message alone, never a stack, because the reader is an operator fixing an env
+ * var. Both entrypoints (`index.ts`, `scripts/dev.mjs`) go through this, so a
+ * bad `DORMOUSE_*` reads the same either way.
+ */
+export function loadConfig(env: Env = process.env): RelayConfig {
+  try {
+    return readConfig(env);
+  } catch (err) {
+    if (err instanceof ConfigError) {
+      console.error(err.message);
+      process.exit(1);
+    }
+    throw err;
+  }
+}
 
 export function readConfig(env: Env = process.env): RelayConfig {
   // Blank is unset, the way `DORMOUSE_BIND_HOST` reads it below. `Number('')` is

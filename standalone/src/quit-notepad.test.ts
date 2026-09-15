@@ -8,7 +8,7 @@ vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn() }));
 vi.mock('dormouse-lib/lib/terminal-registry', () => ({ countRunningSessions: () => 0 }));
 vi.mock('./updater', () => ({ hasPendingUpdate: () => false, installPendingUpdate: vi.fn() }));
 
-import { archiveNotesBeforeQuit } from './quit';
+import { archiveNotesBeforeTeardown } from './teardown-archive';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -30,7 +30,7 @@ it('deletes a landed batch on the next quit after timeout, cancellation, and del
     await reply;
     return result;
   });
-  const attempt = archiveNotesBeforeQuit();
+  const attempt = archiveNotesBeforeTeardown();
   const timedOut = expect(attempt).rejects.toThrow('3s');
   await vi.advanceTimersByTimeAsync(3000);
   await timedOut;
@@ -41,6 +41,6 @@ it('deletes a landed batch on the next quit after timeout, cancellation, and del
   // The user cancelled quit and then removed everything the timed-out save kept.
   deleteNote('pane-a', noteId!);
   expect(getNotepadSnapshot().size).toBe(0);
-  await archiveNotesBeforeQuit();
+  await archiveNotesBeforeTeardown();
   expect((await port.load())?.raw).toEqual({ version: 1, batches: [] });
 });

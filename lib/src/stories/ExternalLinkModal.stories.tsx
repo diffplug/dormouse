@@ -51,15 +51,7 @@ export const PlainLabel: Story = {
   },
 };
 
-// Deceptive: link text looks like a URL but resolves to a different host.
-export const DeceptiveDomain: Story = {
-  args: {
-    uri: 'https://evil.example.com/phish',
-    displayText: 'goog1e.com',
-  },
-};
-
-// Deceptive variant where the label is a full URL pretending to be the target.
+// Deceptive: the label is a full URL pretending to be the target.
 export const DeceptiveFullUrl: Story = {
   args: {
     uri: 'https://evil.example.com/phish',
@@ -72,14 +64,6 @@ export const CustomScheme: Story = {
   args: {
     uri: 'vscode://file/Users/dev/project/src/App.tsx:42:7',
     displayText: '',
-  },
-};
-
-// Custom scheme with a plain label.
-export const CustomSchemePlain: Story = {
-  args: {
-    uri: 'vscode://file/Users/dev/project/src/App.tsx:42:7',
-    displayText: 'open in editor',
   },
 };
 
@@ -112,13 +96,5 @@ export const Blocked: Story = {
   args: {
     uri: 'javascript:alert(document.cookie)',
     displayText: '',
-  },
-};
-
-// Blocked URL hidden behind a plain label.
-export const BlockedWithLabel: Story = {
-  args: {
-    uri: 'javascript:alert(document.cookie)',
-    displayText: 'click for free shipping',
   },
 };

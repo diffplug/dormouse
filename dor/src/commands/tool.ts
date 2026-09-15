@@ -13,6 +13,8 @@ import {
   renderJson,
   requireControlClient,
   stringParser,
+  workspaceFlag,
+  workspaceParam,
   writeStderr,
   writeStdout,
 } from './shared.js';
@@ -23,13 +25,14 @@ interface ToolFlags {
   readonly fresh?: boolean;
   readonly surface?: string;
   readonly cwd?: string;
+  readonly workspace?: string;
 }
 
 // A named tool waits on the same shell-integration handshake `dor ensure` does,
 // plus a `dormouse.yml` read; both are bounded well under this.
 const TOOL_TIMEOUT_MS = 20_000;
 
-const FLAGS_WITH_VALUES = new Set(['--cwd', '--surface']);
+const FLAGS_WITH_VALUES = new Set(['--cwd', '--surface', '--workspace']);
 const BOOLEAN_FLAGS = new Set(['--json', '--minimize', '--fresh']);
 
 /**
@@ -86,15 +89,15 @@ export const toolCommand: Command = {
     {
       scope: 'root',
       findReplace: [
-        '  dor tool [--json] [--minimize] [--fresh] [--surface id|ref] [--cwd path]<TO-EOL>',
-        '  dor tool [--json] [--minimize] [--fresh] [--surface id|ref] [--cwd path] <name>\n  dor tool [--json] [--minimize] [--surface id|ref] [--cwd path] -- <command>...\n',
+        '  dor tool [--json] [--minimize] [--fresh] [--surface id|ref] [--cwd path] [--workspace ref]<TO-EOL>',
+        '  dor tool [--json] [--minimize] [--fresh] [--surface id|ref] [--cwd path] [--workspace ref] <name>\n  dor tool [--json] [--minimize] [--surface id|ref] [--cwd path] [--workspace ref] -- <command>...\n',
       ],
     },
     {
       scope: 'command-usage',
       findReplace: [
-        '  dor tool [--json] [--minimize] [--fresh] [--surface id|ref] [--cwd path]<TO-EOL>',
-        '  dor tool [--json] [--minimize] [--fresh] [--surface id|ref] [--cwd path] <name>\n  dor tool [--json] [--minimize] [--surface id|ref] [--cwd path] -- <command>...\n',
+        '  dor tool [--json] [--minimize] [--fresh] [--surface id|ref] [--cwd path] [--workspace ref]<TO-EOL>',
+        '  dor tool [--json] [--minimize] [--fresh] [--surface id|ref] [--cwd path] [--workspace ref] <name>\n  dor tool [--json] [--minimize] [--surface id|ref] [--cwd path] [--workspace ref] -- <command>...\n',
       ],
     },
     {
@@ -142,6 +145,7 @@ JSON output:
         minimize: { kind: 'boolean', brief: 'Create the surface minimized.', optional: true, withNegated: false },
         fresh: { kind: 'boolean', brief: 'Ignore a declared key and always create.', optional: true, withNegated: false },
         surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to split when creating.', optional: true, placeholder: 'id|ref' },
+        workspace: workspaceFlag,
         cwd: { kind: 'parsed', parse: stringParser, brief: 'Working directory for the tool file and the command.', optional: true, placeholder: 'path' },
       },
       positional: {
@@ -168,6 +172,7 @@ async function runToolCommand(this: DorCommandContext, flags: ToolFlags, ...rest
   try {
     const response = await client.toolSurface({
       ...(named ? { name: rest[0] } : { command: rest }),
+      ...workspaceParam(flags.workspace),
       fresh: flags.fresh === true,
       minimized: flags.minimize === true,
       surface: flags.surface,

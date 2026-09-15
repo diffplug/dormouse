@@ -19,6 +19,7 @@ import {
   E2E_INIT_BURST,
   ESTABLISHED_E2E_IDLE_TIMEOUT_MS,
   E2E_KEEPALIVE_INTERVAL_MS,
+  MAX_DIRECT_PENDING_FRAMES,
   MAX_ESTABLISHED_E2E_SESSIONS,
   MAX_E2E_CIPHERTEXT_LENGTH,
   MAX_CLIENT_ID_LENGTH,
@@ -43,11 +44,14 @@ import {
 import type { BurrowEnrollment } from './enrollment';
 import type { PendingPairing } from './pairing-approval';
 import { FakeSocket } from '../test-fake-socket';
+import { FakeDirectNetwork } from '../direct/test-fake-peer';
+import type { DirectPeerFactory } from '../direct/direct-peer';
 import {
   createTestAuthenticator,
   e2eFramesFor,
   flushUntil,
   openConnectionSession,
+  openDirectPath,
   openPairingSession,
   pairThroughSocket,
   presenceProofFor,
@@ -192,10 +196,14 @@ describe('BurrowRuntime bounds', () => {
     crypto.restore();
   });
 
-  function makeBurrow(enrollmentOverrides?: Partial<BurrowEnrollment>): BurrowRuntime {
+  function makeBurrow(
+    enrollmentOverrides?: Partial<BurrowEnrollment>,
+    options: { createDirectPeer?: DirectPeerFactory } = {},
+  ): BurrowRuntime {
     const created = new BurrowRuntime({
       enrollment: { ...enrollment, ...enrollmentOverrides },
       reconnect: false,
+      ...(options.createDirectPeer ? { createDirectPeer: options.createDirectPeer } : {}),
       createWebSocket: () => (socket = new FakeSocket()),
       loadAcl: () => [] as BurrowAclRecord[],
       saveAcl: () => {},
@@ -953,5 +961,100 @@ describe('BurrowRuntime bounds', () => {
 
     burrow.stop();
     expect(clock.armed).toBe(0);
+  });
+
+  // --- The direct path, which changes none of the bounds ---------------------
+
+  /** A Burrow that can answer an offer, and the network holding both ends. */
+  function directBurrow(): FakeDirectNetwork {
+    burrow.stop();
+    const network = new FakeDirectNetwork();
+    burrow = makeBurrow(undefined, { createDirectPeer: () => network.createAnswerer() });
+    return network;
+  }
+
+  it('extends the idle deadline on a keepalive that arrived off the channel', async () => {
+    // Every bound is path-agnostic: what refreshes the deadline is a decrypted
+    // Client message, not the transport that carried it
+    // (`docs/specs/remote-api.md` → Transport → "Direct path").
+    const network = directBurrow();
+    const live = await establish('c1');
+    const path = await openDirectPath({
+      socket,
+      burrowId: enrollment.burrowId,
+      clientId: 'c1',
+      connectionId: live.connectionId,
+      session: live.session,
+      network,
+      setTimer: clock.setTimer,
+    });
+
+    for (let i = 0; i < 6; i += 1) {
+      clock.advance(E2E_KEEPALIVE_INTERVAL_MS);
+      path.peer.send(live.session.sendKeepalive());
+      await settle();
+    }
+    expect(sessions[0]!.disposed).toBe(false);
+    expect(burrow.establishedSessionCount).toBe(1);
+
+    // And silence on the channel reaps it exactly as silence on the relay does.
+    clock.advance(ESTABLISHED_E2E_IDLE_TIMEOUT_MS);
+    expect(sessions[0]!.disposed).toBe(true);
+  });
+
+  /**
+   * The Burrow's half of the same rule the Client keeps: a refused chunk
+   * disposes the session synchronously, from inside the loop still chunking the
+   * message, and the rest of it must not fall back onto the relay.
+   */
+  it('stops a multi-chunk reply when the channel refuses its first chunk', async () => {
+    const network = directBurrow();
+    const live = await establish('c1');
+    await openDirectPath({
+      socket,
+      burrowId: enrollment.burrowId,
+      clientId: 'c1',
+      connectionId: live.connectionId,
+      session: live.session,
+      network,
+      setTimer: clock.setTimer,
+    });
+    const before = e2eFramesFor(socket, 'connection', live.connectionId).length;
+    // Closed under the session, which a radio gap does between two sends.
+    network.answererChannel!.close();
+
+    // Over one Noise message, so the transport chunks it into two ciphertexts.
+    sessions[0]!.send({ requestId: 'r1', ok: true, result: 'x'.repeat(70_000) });
+    await settle();
+
+    expect(sessions[0]!.disposed).toBe(true);
+    expect(burrow.establishedSessionCount).toBe(0);
+    expect(e2eFramesFor(socket, 'connection', live.connectionId)).toHaveLength(before);
+  });
+
+  it('disposes a session whose held channel frames outrun the queue', async () => {
+    const network = directBurrow();
+    const live = await establish('c1');
+    // The Client never announces its switch, so every channel frame is held —
+    // which is what makes the cap the only thing bounding this.
+    const path = await openDirectPath({
+      socket,
+      burrowId: enrollment.burrowId,
+      clientId: 'c1',
+      connectionId: live.connectionId,
+      session: live.session,
+      network,
+      switchOutbound: false,
+      setTimer: clock.setTimer,
+    });
+
+    for (let i = 0; i <= MAX_DIRECT_PENDING_FRAMES; i += 1) {
+      path.peer.send(live.session.sendKeepalive());
+    }
+    await settle();
+
+    expect(sessions[0]!.disposed).toBe(true);
+    expect(burrow.establishedSessionCount).toBe(0);
+    expect(burrow.trackedClientCount).toBe(0);
   });
 });

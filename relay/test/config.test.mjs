@@ -21,7 +21,7 @@ test('DORMOUSE_BIND_HOST pins the listen interface', () => {
   assert.equal(config.bindHost, '127.0.0.1');
 });
 
-test('a blank DORMOUSE_BIND_HOST is treated as unset, not as an empty burrow', () => {
+test('a blank DORMOUSE_BIND_HOST is treated as unset, not as an empty host', () => {
   assert.equal(readConfig({ DORMOUSE_BIND_HOST: '' }).bindHost, undefined);
   assert.equal(readConfig({ DORMOUSE_BIND_HOST: '   ' }).bindHost, undefined);
 });
@@ -40,7 +40,7 @@ test('DORMOUSE_ORIGIN wins over the port-derived default', () => {
 
 test('DORMOUSE_ORIGIN is normalized to a bare origin', () => {
   // The only normalization there is — `createApp` compares against this string
-  // rather than re-parsing it. A trailing slash, a path, or a capitalized burrow
+  // rather than re-parsing it. A trailing slash, a path, or a capitalized host
   // reads as correct in an `.env` and fails every compare it reaches: the
   // WebAuthn `clientData.origin` check, and the `<origin>/#pair?…` QR a Burrow
   // composes, which would scan to `//#pair`.

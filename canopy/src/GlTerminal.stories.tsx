@@ -272,16 +272,8 @@ const meta: Meta<typeof PageStory> = {
 export default meta;
 type Story = StoryObj<typeof PageStory>;
 
-export const ColorsAndGlyphs: Story = {
-  args: { content: demoContent() },
-};
-
 export const TextureAtlas: Story = {
   args: { content: demoContent(), showAtlas: true },
-};
-
-export const Sdf: Story = {
-  args: { content: demoContent(), renderer: 'fork-sdf' },
 };
 
 export const SdfTextureAtlas: Story = {
