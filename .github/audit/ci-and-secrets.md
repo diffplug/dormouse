@@ -33,16 +33,25 @@ block overrides the workflow-level block; absent both, the repository default
 applies. Unspecified scopes in an explicit block are `none`. Read
 `actions/permissions/workflow` before judging any inherited-permission check.
 
-**Derive every inventory from the live API, never from the spec's own list.** A
-`FAIL IF` that says "any" quantifies over what exists now; the `Today:` or
-inventory lines under it illustrate the expected answer and go stale the moment
-someone adds a member. So enumerate `GET /repos/$GITHUB_REPOSITORY/environments`
-before checking deployment-branch-policies, `GET .../actions/secrets` and each
-environment's own secret listing before checking placement, and
-`GET .../rulesets` before checking bypass actors — then check every member the
-API returned. An unlisted member is a finding, not out of scope: report each one
-you found that the spec's list omits, and never record `PASS` on a condition you
-only evaluated over the listed subset.
+**Derive every inventory from the live API, never from the spec's own list.**
+A `FAIL IF` that says "any" quantifies over what exists now; illustrative
+`Today:` lists do not limit its scope.
+
+- Enumerate `GET /repos/$GITHUB_REPOSITORY/environments` before checking each
+  environment's deployment-branch-policies.
+- Enumerate `GET .../actions/secrets`, `GET .../actions/organization-secrets`,
+  and each environment's own secret listing before checking placement.
+- Enumerate `GET .../rulesets` before checking bypass actors.
+- Use `gh api --paginate` for every list request, including deployment policies
+  and secret listings, and check every member across all returned pages.
+- Judge every discovered member against the applicable conditions, including
+  explicit exceptions. Record FAIL for a violated condition. Report a
+  documentation omission separately as INFO under `### Qualitative findings`;
+  absence from an illustrative list alone is not a violation. Do not report an
+  omission when another section of the scoped specs already covers the member.
+- Never record `PASS` on a condition evaluated over only the spec's listed
+  subset or an incomplete API enumeration. Apply the access-error handling
+  above and the shared preamble's incomplete-check verdict rules.
 
 ## Qualitative pass
 
