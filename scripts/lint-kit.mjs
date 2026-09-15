@@ -87,14 +87,27 @@ export function trackedFiles() {
   return trackedCache;
 }
 
+/** Run one of the lints in a child and capture the result. */
+export function runLint(script) {
+  try {
+    return {
+      ok: true,
+      stdout: execFileSync('node', [join(repoRoot, 'scripts', script)], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      stdout: typeof error?.stdout === 'string' ? error.stdout : '',
+    };
+  }
+}
+
 /** Run one of the lints in a child, so a thrown rule cannot pass as a failure. */
 export function lintFails(script) {
-  try {
-    execFileSync('node', [join(repoRoot, 'scripts', script)], { stdio: 'pipe' });
-    return false;
-  } catch {
-    return true;
-  }
+  return !runLint(script).ok;
 }
 
 /**
@@ -107,6 +120,8 @@ export function lintFails(script) {
 export function makeSelftest(script, backupSuffix) {
   const weak = [];
   let held = 0;
+  const appendTo = (text) => (path) =>
+    writeFileSync(path, (existsSync(path) ? readFileSync(path, 'utf8') : '') + text);
 
   /** Edit `relative` with `mutate`, run the lint, restore, and record. */
   function runMutation(relative, mutate, check, label) {
@@ -138,7 +153,7 @@ export function makeSelftest(script, backupSuffix) {
     withAppended(relative, text, label) {
       runMutation(
         relative,
-        (path) => writeFileSync(path, (existsSync(path) ? readFileSync(path, 'utf8') : '') + text),
+        appendTo(text),
         () => lintFails(script),
         label,
       );
@@ -147,16 +162,10 @@ export function makeSelftest(script, backupSuffix) {
     withAppendedOutput(relative, text, expected, label) {
       runMutation(
         relative,
-        (path) => writeFileSync(path, (existsSync(path) ? readFileSync(path, 'utf8') : '') + text),
+        appendTo(text),
         () => {
-          try {
-            return execFileSync('node', [join(repoRoot, 'scripts', script)], {
-              encoding: 'utf8',
-              stdio: ['ignore', 'pipe', 'pipe'],
-            }).includes(expected);
-          } catch {
-            return false;
-          }
+          const result = runLint(script);
+          return result.ok && result.stdout.includes(expected);
         },
         label,
       );

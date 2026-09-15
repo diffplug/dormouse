@@ -99,7 +99,7 @@ selftest.finish(
   'Each fixture adds one unguarded loopback listener. A case that stays green means\n'
   + 'LISTEN_RE in scripts/loopback-lint.mjs does not match that bind form — and a form\n'
   + 'reported with no fixture is one nothing has ever matched. Either way the\n'
-  + '"a new loopback bind that does not reference a guard module fails the build"\n'
+  + '"A new non-test listener without a guard reference fails the build"\n'
   + 'clause in docs/specs/security-local.md -> "Loopback Listeners" is not true of it.\n'
   + 'The test case must stay green and appear under the test heading.',
 );

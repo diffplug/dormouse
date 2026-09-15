@@ -42,7 +42,7 @@ harnesses that already exercise this are
 — read what they *do not* cover, and say so.
 
 For `## Loopback Listeners`, read `lib/src/host/loopback-guard.ts` first — it
-states the rule — then run `pnpm lint:loopback`. Inspect every non-test listener
+states the rule — then run `node scripts/loopback-lint.mjs`. Inspect every non-test listener
 it prints; test listeners and self-test fixtures need no further investigation.
 The lint scans all tracked JavaScript and TypeScript. Search the same files for
 `createServer`, `.listen(`, `serve(` and `WebSocket` too, because a new API or a
