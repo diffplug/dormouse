@@ -65,13 +65,6 @@ export const Idle: Story = {
   },
 };
 
-export const Dismissed: Story = {
-  args: {
-    state: { status: 'dismissed' },
-    expectedNullReason: 'the user has already dismissed this notice.',
-  },
-};
-
 export const NarrowViewport: Story = {
   args: {
     state: { status: 'available', version: '0.5.0' },

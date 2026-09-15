@@ -49,8 +49,11 @@ export {
   mountElement,
   refitSession,
   registerSurfaceFocusHandle,
+  releaseSession,
   restoreTerminal,
   resumeTerminal,
+  serializeTerminal,
+  flushTerminal,
   setPendingShellOpts,
   unmountElement,
 } from './terminal-lifecycle';
@@ -96,6 +99,7 @@ export {
 export {
   applyTerminalSemanticEvents,
   countRunningSessions,
+  countRunningSessionsIn,
   ensureTerminalPaneState,
   fillTerminalProcessCwd,
   getRunningCommandArgv0,

@@ -5,7 +5,6 @@ import {
   SCENARIO_SHELL_PROMPT,
   SCENARIO_LS_OUTPUT,
   SCENARIO_ANSI_COLORS,
-  SCENARIO_LONG_RUNNING,
   SCENARIO_FAST_OUTPUT,
 } from './fake-scenarios';
 import type { FakeScenario } from './fake-adapter';
@@ -42,11 +41,6 @@ describe('Fake Scenarios', () => {
     expect(allData).toContain('\x1b[31m'); // red
     expect(allData).toContain('\x1b[32m'); // green
     expect(allData).toContain('\x1b[91m'); // bright red
-  });
-
-  it('SCENARIO_LONG_RUNNING has valid structure', () => {
-    validateScenario(SCENARIO_LONG_RUNNING);
-    expect(SCENARIO_LONG_RUNNING.name).toBe('long-running');
   });
 
   it('SCENARIO_FAST_OUTPUT has valid structure with substantial data', () => {

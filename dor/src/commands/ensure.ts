@@ -6,6 +6,7 @@ import type {
   DorCommandContext,
   EnsureSurfaceResponse,
   ParseResult,
+  WorkspaceScopedFlags,
 } from './types.js';
 import {
   callerWorkingDirectory,
@@ -13,10 +14,12 @@ import {
   renderJson,
   requireControlClient,
   stringParser,
+  workspaceFlag,
+  workspaceParam,
   writeStdout,
 } from './shared.js';
 
-interface EnsureFlags {
+interface EnsureFlags extends WorkspaceScopedFlags {
   readonly json?: boolean;
   readonly minimize?: boolean;
   readonly restart?: boolean;
@@ -51,7 +54,7 @@ export function validateEnsureDelimiter(args: string[]): ParseResult<void> {
     if (arg === '--json' || arg === '--minimize' || arg === '--restart') {
       continue;
     }
-    if (arg === '--cwd' || arg === '--surface') {
+    if (arg === '--cwd' || arg === '--surface' || arg === '--workspace') {
       const value = args[index + 1];
       if (!value || value.startsWith('-') || index + 1 >= delimiterIndex) {
         return { ok: false, message: `${arg} requires a value` };
@@ -80,15 +83,15 @@ export const ensureCommand: Command = {
     {
       scope: 'root',
       findReplace: [
-        '  dor ensure [--json] [--minimize] [--restart] [--surface id|ref] [--cwd path]<TO-EOL>',
-        '  dor ensure [--json] [--minimize] [--restart] [--surface id|ref] [--cwd path] -- <command>...\n',
+        '  dor ensure [--json] [--minimize] [--restart] [--surface id|ref] [--cwd path] [--workspace ref]<TO-EOL>',
+        '  dor ensure [--json] [--minimize] [--restart] [--surface id|ref] [--cwd path] [--workspace ref] -- <command>...\n',
       ],
     },
     {
       scope: 'command-usage',
       findReplace: [
-        '  dor ensure [--json] [--minimize] [--restart] [--surface id|ref] [--cwd path]<TO-EOL>',
-        '  dor ensure [--json] [--minimize] [--restart] [--surface id|ref] [--cwd path] -- <command>...\n',
+        '  dor ensure [--json] [--minimize] [--restart] [--surface id|ref] [--cwd path] [--workspace ref]<TO-EOL>',
+        '  dor ensure [--json] [--minimize] [--restart] [--surface id|ref] [--cwd path] [--workspace ref] -- <command>...\n',
       ],
     },
     {
@@ -141,6 +144,7 @@ JSON output:
         restart: { kind: 'boolean', brief: 'Restart a matching surface in place.', optional: true, withNegated: false },
         surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to split when creating.', optional: true, placeholder: 'id|ref' },
         cwd: { kind: 'parsed', parse: stringParser, brief: 'Working directory for matching and for the new command.', optional: true, placeholder: 'path' },
+        workspace: workspaceFlag,
       },
       positional: {
         kind: 'array',
@@ -167,6 +171,7 @@ async function runEnsureCommand(this: DorCommandContext, flags: EnsureFlags, ...
       restart: flags.restart === true,
       surface: flags.surface,
       cwd: callerWorkingDirectory(flags.cwd, this.options.env),
+      ...workspaceParam(flags.workspace),
     });
     writeStdout(this, renderEnsureResponse(response, flags.json === true));
     return undefined;

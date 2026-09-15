@@ -4,8 +4,7 @@ Invocation: `dor tool --help`
 
 ```text
 USAGE
-  dor tool [--json] [--minimize] [--fresh] [--surface id|ref] [--cwd path] <name>
-  dor tool [--json] [--minimize] [--surface id|ref] [--cwd path] -- <command>...
+  dor tool [--json] [--minimize] [--fresh] [--surface id|ref] [--workspace ref] [--cwd path] <name>...
   dor tool --help
 
 Runs a command in a new surface and watches the ports it opens. When the command starts serving, the surface grows a browser in place — same surface, same id, no second pane — and the pane flips to it with the terminal behind the header's far-left chip. When the command exits the browser retires and the pane flips back.
@@ -41,12 +40,13 @@ JSON output:
   }
 
 FLAGS
-     [--json]      Print JSON output.
-     [--minimize]  Create the surface minimized.
-     [--fresh]     Ignore a declared key and always create.
-     [--surface]   Surface to split when creating.
-     [--cwd]       Working directory for the tool file and the command.
-  -h  --help       Print help information and exit
-      --           All subsequent inputs should be interpreted as arguments
+     [--json]       Print JSON output.
+     [--minimize]   Create the surface minimized.
+     [--fresh]      Ignore a declared key and always create.
+     [--surface]    Surface to split when creating.
+     [--workspace]  Workspace to act in, instead of the caller's.
+     [--cwd]        Working directory for the tool file and the command.
+  -h  --help        Print help information and exit
+      --            All subsequent inputs should be interpreted as arguments
 
 ```

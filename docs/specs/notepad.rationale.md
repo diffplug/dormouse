@@ -67,6 +67,10 @@ first sixteen are the user's and the rest are a fixed formula xterm itself appli
 
 ## Source links
 
+In Tauri manual testing (2026-09-11), a transferred pin remained visible but failed
+its text proof on use. Rebuilt buffers do not guarantee identical absolute row
+positions. Transfers therefore retain notes without presenting unusable pins.
+
 The pin could have stored a scrollback line number. It stores two xterm markers
 because a marker is the only handle xterm keeps correct as the buffer scrolls, and
 scrolling is the normal case — a capture is usually of something that has already
@@ -203,16 +207,16 @@ who had just been told the notes were not stored and had chosen Cancel.
 quit they already asked for; a slower answer is a failure worth surfacing.
 
 The file is a sibling of `sessions/` rather than a member of it because the two have
-different lifetimes: session snapshots are per window and swept by `clear_session`,
+different lifetimes: session snapshots are per window and swept with it,
 while archived notes outlive the window that produced them and must survive that
 sweep. They share `write_file_atomically` because both carry user text and both
 must survive a crash mid-write; that is one implementation, not two.
 
 The revision was a process-local counter until it turned out two processes can hold
-this file: `app_data_dir()` is keyed by the Tauri identifier, which `pnpm
-dev:standalone` shares with the installed app, and a counter tracks only its own
-process's writes — so the loser of an overlapping load→save reported no conflict and
-dropped the winner's batches. A content hash is what two processes agree on without
+this file: `app_data_dir()` is keyed by the Tauri identifier and nothing enforces
+one launch per identifier, and a counter tracks only its own process's writes — so
+the loser of an overlapping load→save reported no conflict and dropped the winner's
+batches. A content hash is what two processes agree on without
 talking, where an mtime is coarse on some filesystems and moves for reasons that are
 not a content change; `DefaultHasher` is used because it is fixed-key rather than
 randomly seeded, so a second process and a second run derive the same token from the

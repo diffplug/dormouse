@@ -175,7 +175,7 @@ describe("this repo's own dormouse.yml", () => {
   it('declares the two shipped tools', () => {
     expect([...file.tools.keys()].sort()).toEqual(['standalone-harness', 'storybook']);
     expect(file.tools.get('storybook')?.run).toBe('pnpm storybook');
-    expect(file.tools.get('standalone-harness')?.run).toBe('pnpm dev:standalone:ab');
+    expect(file.tools.get('standalone-harness')?.run).toBe('pnpm innerdogfood');
     // The harness is the agent-drivable one; storybook only needs framing.
     expect(file.tools.get('standalone-harness')?.render).toBe('ab-screencast');
     expect(file.tools.get('storybook')?.render).toBe('iframe');

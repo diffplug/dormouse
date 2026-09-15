@@ -20,4 +20,6 @@ test('the harness writes an OSC 367 serve naming its vite port', () => {
   const payload = JSON.parse(JSON.stringify(eval(`(${emitted[1].replace('vitePort', '1420')})`)));
   assert.equal(payload.port, 1420, 'must announce the vite port it chose');
   assert.equal(payload.v, 1, 'must carry the contract version');
+  assert.match(source, /const vitePort = Number\(new URL\(viteOrigin\).port\)/);
+  assert.ok(source.indexOf('await startVite();') < source.indexOf('const vitePort ='));
 });

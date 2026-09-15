@@ -14,7 +14,7 @@ const LIVE_SESSION = { expiresAt: Number.POSITIVE_INFINITY };
 
 /**
  * `docs/specs/relay.md` -> Guardrails owns the rule. Driven through
- * `sweepRevokedBurrows` rather than its interval, which `index.ts` owns: the
+ * `sweepRevokedBurrows` rather than its interval, which `start.ts` owns: the
  * timer is wall-clock plumbing, and what needs proving is the decision.
  */
 
@@ -64,7 +64,7 @@ test('a `burrows.json` caught mid-edit revokes nobody', async () => {
   // The file this reads is the one an operator edits by hand, so a partial
   // write is a real state — and it must never read as "no Burrow is enrolled",
   // which would close every socket on the Relay over a half-saved buffer. The
-  // sweep rejects instead, and `index.ts`'s interval swallows that and reads
+  // sweep rejects instead, and `start.ts`'s interval swallows that and reads
   // again a minute later.
   const created = await freshApp();
   const { hub, stateDir } = created;

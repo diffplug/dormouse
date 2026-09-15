@@ -53,6 +53,7 @@ Source of truth: `lookupTool` in `lib/src/host/tool-trust.ts`; `parseToolFile` /
 **Must dedupe only when an explicit key exists and `--fresh` is absent.** Neither a command nor its CWD implicitly creates identity; anonymous `dor tool -- <command>` invocations create fresh Surfaces. (rationale)
 
 - **Must namespace keys by the host-resolved Tool name**; runtime output supplies scope elements, never another Tool's namespace.
+- **Must dedupe within the answering Workspace.** `--workspace` uses the routing in `docs/specs/dor-cli.md` → Handle Model.
 - **Must serialize Tool launch requests in the renderer**, covering lookup, matching, creation, and startup. The current lock serializes all Tool requests, not only matching keys.
 - **Must reveal a live matching Tool and report `existing` without sending input.** An idle match restarts its stored command in its own directory and reports `adopted`; a failed restart reports an error.
 - **Must reuse and reveal a matching pending approval Surface**, preserving its approval state and reporting `pending`.
@@ -118,7 +119,7 @@ Source of truth: `ToolPanel` in `lib/src/components/wall/ToolPanel.tsx`; `ToolPa
 
 ## CLI
 
-**Must split focus-neutrally for a new Tool and return its Surface handle.** Calling-pane take-over is staged under [Future](#future). A matching Tool follows [Identity and dedupe](#identity-and-dedupe).
+**Must return the Tool Surface handle.** A new Tool follows [Take-over](#take-over), otherwise splitting focus-neutrally. A matching Tool follows [Identity and dedupe](#identity-and-dedupe).
 
 **Must retain `dor tool` as a Surface-producing command on every supported host**, never route it to a native editor. Generated help owns syntax and response types own shape.
 
@@ -139,7 +140,7 @@ Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `dor/test/snapshot
 
 **Must answer `takeover` before waiting for the calling shell's prompt**, then transform and type the command. The answer promises placement, not successful command startup.
 
-- **Must leave the caller unchanged on prompt timeout or cancellation**, and recheck visibility, closing state, CWD, kind, and helper presence after the wait. A helper opened during the handshake prevents transformation.
+- **Must leave the caller unchanged on prompt timeout or cancellation**, and recheck active Workspace, transfer/closing state, visibility, CWD, kind, and helper presence after the wait. A helper opened during the handshake prevents transformation.
 - **Must change components and params in one metadata commit**, retaining the Session id, Surface ref, scrollback, notes, source pins, and any user rename.
 - **Must clear previous OSC 367 hints before typing the new command.**
 - **Must retain the spawn lock until the typed command is observed running or a new completed run is observed**, or the wait ends. A command that starts and exits between samples releases the lock too.
@@ -172,6 +173,12 @@ The Tool-specific local boundaries are `docs/specs/security-local.md` → Dor To
 
 **Must cold-restore an approved Tool by starting its saved command through integration-gated shell readiness**, then rediscover its port. Agent-resume commands do not override the saved Tool command. Pending approvals restore as ordinary terminals and execute nothing. **Must rebuild visible Tool metadata from its pane row when layout geometry is unusable**, rather than starting the command in a plain terminal with no serving behavior.
 
+**Must retain live Tool browser params and OSC announcements in volatile Workspace-transfer content**, applying them to the destination plan without mutating the durable record. A serving iframe Tool participates in the ordinary iframe move confirmation. **Must refuse transfer while a Tool awaits approval or its browser startup has no session binding.**
+
+**Must pause serving updates during Workspace closure or transfer**, and recheck that a Workspace remains available after asynchronous launch lookup. Approval completion must not launch into a closing or transferring Workspace.
+
+Source of truth: `captureToolParams` / `restoreToolParams` in `lib/src/components/wall/tool-transfer.ts`; `captureTransferContent` in `lib/src/components/wall/workspace-transfer.ts`; `planArrival` in `standalone/src/workspace-move.ts`. Tests: `lib/src/components/wall/tool-transfer.test.ts`, `lib/src/components/WorkspaceWindow.test.tsx`, `lib/src/components/wall/use-tool-serving.test.tsx`.
+
 **Must provide Tool host operations in standalone and VS Code.** Remote terminal transport remains protocol-v1; remote browser presentation is staged in `docs/specs/remote-api.md`.
 
 Source of truth: `PersistedToolMetadata` in `lib/src/lib/session-types.ts`; `saveSession` in `lib/src/lib/session-save.ts`; `restoreSession` in `lib/src/lib/session-restore.ts`; `restoreTerminal` in `lib/src/lib/terminal-lifecycle.ts`; `toolControl` in `lib/src/lib/platform/types.ts`. Tests: `lib/src/lib/session-save.test.ts`, `lib/src/lib/session-restore.test.ts`.
@@ -202,13 +209,13 @@ Source of truth: `PersistedToolMetadata` in `lib/src/lib/session-types.ts`; `sav
 
 ### Dehydrate and rehydrate
 
-For tools announcing `dehydrate: true`. Reap on an idle threshold while
-`Doored` / `Hidden` — including an inactive Workspace's Surfaces — **never on
-the minimize itself** (reattach must not cost a boot) or under memory pressure.
-The headline case is Workspaces: an inactive one full of dehydratable tools
-drops to zero processes, relieving the parked-surface pressure the workspaces
-rollout projects (`docs/specs/layout.md` Stage 4; `MAX_PARKED_SURFACES` in
-`docs/specs/tiling-engine.md`).
+**Reap a tool announcing `dehydrate: true` on an idle threshold while
+`Doored` / `Hidden`** — Surfaces of an inactive Workspace included — **never on
+the minimize itself** (reattach must not cost a boot every time) **or under
+memory pressure**. The headline case is Workspaces, not shutdown: an inactive
+Workspace of dehydratable tools drops to zero processes, relieving the
+parked-surface pressure hidden Workspaces carry (`docs/specs/layout.md`
+→ Workspaces; `docs/specs/tiling-engine.md` → Parked leaves).
 
 **This is an in-session mechanism.** The payload lives with the running host;
 whether it survives a host quit follows each host's session-persistence story

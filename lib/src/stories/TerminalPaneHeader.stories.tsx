@@ -319,16 +319,6 @@ const NOTIFICATIONS = {
     title: 'Claude is waiting',
     body: null,
   },
-  progressComplete: {
-    source: 'OSC 9;4',
-    title: 'Progress complete',
-    body: 'Progress 100%',
-  },
-  terminalBell: {
-    source: 'BEL',
-    title: 'Terminal bell',
-    body: null,
-  },
   longBody: {
     source: 'OSC 99',
     title: 'Long notification text should wrap without pushing controls out of the header',
@@ -495,18 +485,6 @@ export const NotificationDialogTitleOnly: Story = {
   play: openAlertRightClickDialog,
 };
 
-export const NotificationDialogProgressComplete: Story = {
-  render: ContextWallStory,
-  parameters: primedNotificationState(NOTIFICATIONS.progressComplete, 'ALERT_RINGING'),
-  play: openAlertRightClickDialog,
-};
-
-export const NotificationDialogTerminalBell: Story = {
-  render: ContextWallStory,
-  parameters: primedNotificationState(NOTIFICATIONS.terminalBell, 'ALERT_RINGING'),
-  play: openAlertRightClickDialog,
-};
-
 export const NotificationDialogLongBody: Story = {
   render: ContextWallStory,
   args: {
@@ -566,17 +544,6 @@ export const LongTitleWithAlertAndTodo: Story = {
   }),
 };
 
-export const ReducedMotionRinging: Story = {
-  args: {
-    reducedMotion: true,
-  },
-  parameters: primedState({
-    status: 'ALERT_RINGING',
-
-    todo: false,
-  }),
-};
-
 export const RenameRejectedReserved: Story = {
   args: {
     title: 'build-server',
@@ -631,15 +598,8 @@ export const NarrowWithMouseCaptureControlsVisible: Story = {
   play: assertControlsVisible,
 };
 
-// --- Notepad icon across the tiers -----------------------------------------
-//
-// Present at `full` and `compact`; at `minimal` an empty notepad yields its
-// 20px to the title, and one with notes keeps it (`docs/specs/notepad.md`).
-
-export const NotepadEmpty: Story = {
-  parameters: primedState({ status: 'NOTHING_TO_SHOW', todo: false }),
-};
-
+// Notepad icons with notes across the full, compact, and minimal tiers.
+// AlertEnabled and MinimalWidthWithAlert cover the empty notepad.
 export const NotepadWithNotes: Story = {
   args: { noteCount: 3 },
   parameters: primedState({ status: 'NOTHING_TO_SHOW', todo: false }),
@@ -647,11 +607,6 @@ export const NotepadWithNotes: Story = {
 
 export const NotepadCompactWidth: Story = {
   args: { width: 220, noteCount: 3 },
-  parameters: primedState({ status: 'NOTHING_TO_SHOW', todo: false }),
-};
-
-export const NotepadMinimalWidthEmpty: Story = {
-  args: { width: 150 },
   parameters: primedState({ status: 'NOTHING_TO_SHOW', todo: false }),
 };
 

@@ -9,8 +9,7 @@
 import type { SurfaceKind } from 'dor/commands/types';
 import { commandArgv0, primaryCommandTokens } from '../../lib/terminal-state';
 
-/** The launcher names `dor/bin/` ships, lowercased. */
-const DOR_ARGV0 = new Set(['dor', 'dor.cmd']);
+/** commandArgv0 already removes platform launcher suffixes such as .cmd. */
 
 /** Shell syntax that can make one line more than one command: separators,
  *  pipelines, backgrounding, redirection, substitution. Tested against the raw
@@ -27,7 +26,7 @@ export function isNakedToolInvocation(rawCommandLine: string | null | undefined)
   const line = rawCommandLine?.trim();
   if (!line || COMPOUND_SYNTAX.test(line)) return false;
   const argv0 = commandArgv0(line)?.toLowerCase();
-  return !!argv0 && DOR_ARGV0.has(argv0) && primaryCommandTokens(line)[1] === 'tool';
+  return argv0 === 'dor' && primaryCommandTokens(line)[1] === 'tool';
 }
 
 /** What the placement rule reads. Every field is already known to the handler. */

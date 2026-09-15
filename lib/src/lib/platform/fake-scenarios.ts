@@ -124,22 +124,6 @@ export const SCENARIO_ANSI_COLORS: FakeScenario = {
   endsWithPrompt: true,
 };
 
-/** Shows a long-running process with progress dots. */
-export const SCENARIO_LONG_RUNNING: FakeScenario = {
-  name: 'long-running',
-  chunks: [
-    instant(PROMPT, 500),
-    ...typeChars('npm install'),
-    instant('\r\n', 50),
-    instant(`${fg(33)}Installing dependencies...${RESET} `, 300),
-    ...Array.from({ length: 10 }, () => instant('.', 500)),
-    instant(` ${fg(32)}done!${RESET}\r\n`, 200),
-    instant(`\r\nadded 847 packages in 5.2s\r\n\r\n`, 100),
-    instant(PROMPT, 200),
-  ],
-  endsWithPrompt: true,
-};
-
 /** Rapid output burst — tests xterm.js scroll performance. */
 export const SCENARIO_FAST_OUTPUT: FakeScenario = {
   name: 'fast-output',

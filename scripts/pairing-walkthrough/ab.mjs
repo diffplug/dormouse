@@ -3,7 +3,7 @@
  * (`scripts/pairing-walkthrough/README.md`).
  *
  * One instance is one `--session`, which is one isolated browser. The Burrow runs
- * in the session the `dev:standalone:ab` harness opened; the Pocket browser is a
+ * in the session the `innerdogfood` harness opened; the Pocket browser is a
  * second instance with its own session name, which is why this is a class rather
  * than a module of free functions.
  */

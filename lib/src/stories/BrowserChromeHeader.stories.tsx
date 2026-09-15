@@ -230,11 +230,6 @@ export const RawSession: Story = {
   args: { paneKey: '', devServerLabel: '', url: 'https://example.com/docs' },
 };
 
-/** The differentiated piece: a localhost URL correlated to a terminal pane. */
-export const DevServerConnected: Story = {
-  args: { url: 'http://localhost:6006/', devServerLabel: 'storybook', paneKey: 'storybook' },
-};
-
 /** Narrow header: split/zoom collapse first (≤420px), then nav (≤360px). */
 export const Narrow: Story = {
   args: { width: 340 },

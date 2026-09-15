@@ -7,7 +7,7 @@
  * geometry — the acceptance matrix in tiling-engine.md is the live gate.
  */
 import { act } from 'react';
-import { createRoot, type Root } from 'react-dom/client';
+import { type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SURFACE_CONTROL_METHODS } from 'dor/protocol';
 import { sessionForKey } from 'dor-lib-common/agent-browser';
@@ -25,6 +25,12 @@ import { __resetArchiveServiceForTests } from '../lib/notepad/archive-service';
 import { addPlainNote, beginClosing, clearAllNotepads, getNotes, setOpenNotepadId } from '../lib/notepad/notepad-store';
 import type { NotepadArchiveV1 } from '../lib/notepad/types';
 import { createTerminalPaneState, type TerminalPaneState } from '../lib/terminal-state';
+import { getWallHandle, listWallHandles } from './wall/wall-handles';
+import { mountWallHarness, type WallHarness } from './wall/wall-test-utils';
+import { DEFAULT_WORKSPACE_ID } from '../lib/session-types';
+import { clearTerminalActivity, setTerminalActivity } from '../lib/session-activity-store';
+import { resetTerminalPaneState } from '../lib/terminal-state-store';
+import { setWindowLabel } from '../lib/workspace-store';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -40,6 +46,7 @@ vi.mock('./TerminalPane', () => ({
   ),
 }));
 
+let harness: WallHarness;
 let container: HTMLDivElement;
 let root: Root;
 let fake: FakePtyAdapter;
@@ -53,47 +60,19 @@ beforeEach(() => {
   clearAllNotepads();
   fake = new FakePtyAdapter();
   setPlatform(fake);
-  // jsdom lacks these; Baseboard / dynamic-palette / reduced-motion need them.
-  globalThis.ResizeObserver ??= class {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  } as unknown as typeof ResizeObserver;
-  // Reduced motion so the Lath engine runs a 0 duration: the two-phase kill's
-  // deferred removal fires on a setTimeout(0); archive decisions may queue it
-  // after a flush has started, so those tests wait for the removal itself. The
-  // instant path is also stage 3's "reduced motion" acceptance requirement.
-  globalThis.matchMedia = ((query: string) => ({
-    matches: query.includes('prefers-reduced-motion'),
-    media: query,
-    onchange: null,
-    addEventListener() {},
-    removeEventListener() {},
-    addListener() {},
-    removeListener() {},
-    dispatchEvent() { return false; },
-  })) as unknown as typeof matchMedia;
-  Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
-    configurable: true,
-    value: vi.fn(() => null),
-  });
-  container = document.createElement('div');
-  document.body.appendChild(container);
-  root = createRoot(container);
+  harness = mountWallHarness();
+  ({ container, root } = harness);
 });
 
 afterEach(() => {
-  act(() => root.unmount());
-  container.remove();
+  harness.dispose();
   vi.clearAllMocks();
   vi.restoreAllMocks();
   __resetArchiveServiceForTests();
   clearAllNotepads();
 });
 
-async function flush(): Promise<void> {
-  await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
-}
+const flush = (): Promise<void> => harness.flush();
 
 /** Poll until `ready()` — for the host's own 100ms state waits (a tool taking
  *  over a pane, a split waiting on OSC 633), which no event can flush. */
@@ -905,6 +884,48 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it('refuses a render swap away from an iframe surface holding a non-http(s) URL', async () => {
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(true);
+    const open = vi.fn(async () => ({ ok: true, session: 'dormouse.1.gui-a1b2c3', wsPort: 4321 }));
+    (fake as PlatformAdapter).agentBrowserOpen = open;
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      await act(async () => {
+        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+      });
+      await flush();
+      const iframeId = (await dispatchIframe('http://localhost:5173/')).id;
+
+      // The header's URL editor is the writer the control socket never sees:
+      // `normalizeNavUrl` keeps a typed `data:` scheme on purpose, so `params.url`
+      // (and the chrome URL this swap reads first) can hold one. IframePanel
+      // refuses to frame it; the swap must refuse to spawn it too, rather than
+      // opening it in a real Chromium tab.
+      await act(async () => {
+        getAgentBrowserScreenController(iframeId)?.chromeActions.navigate('data:text/html,<script>alert(1)</script>');
+      });
+      await flush();
+
+      await act(async () => {
+        getAgentBrowserScreenController(iframeId)?.actions.setRenderMode?.('ab-screencast');
+      });
+      await flush();
+
+      expect(open).not.toHaveBeenCalled();
+      expect(getAgentBrowserScreenController(iframeId)?.snapshot().renderMode).toBe('iframe');
+      // The Display modal closes itself on Apply, so the console is the only
+      // channel this refusal has of its own.
+      expect(warn).toHaveBeenCalledWith(
+        `[dormouse] cannot swap surface '${iframeId}' to agent-browser: `
+        + "'data:text/html,<script>alert(1)</script>' is not an http(s) URL",
+      );
+    } finally {
+      warn.mockRestore();
+      untouchedSpy.mockRestore();
+    }
+  });
+
   it('resolves a browser surface handle to its agent-browser session, and gates the rest', async () => {
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
     (fake as PlatformAdapter).agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
@@ -940,6 +961,13 @@ describe('Wall on the Lath engine', () => {
       expect(await dispatchResolveAgentBrowser(iframeRef)).toEqual({
         ok: false,
         error: `surface '${iframeRef}' is not agent-browser rendered (render_mode: iframe)`,
+      });
+
+      // A managed `--key` names no Surface, and a bare Wall — VS Code, the
+      // website — keeps the unscoped session names it always had.
+      expect(await dispatchResolveAgentBrowserKey('storybook')).toEqual({
+        ok: true,
+        result: { session: sessionForKey('storybook') },
       });
     } finally {
       untouchedSpy.mockRestore();
@@ -2299,6 +2327,22 @@ describe('Wall on the Lath engine', () => {
   }
 
   /** `dor ab --surface <handle>`'s host half; returns the raw control response. */
+  /** `dor ab --key <name>` asking this Wall what that key's session is called. */
+  async function dispatchResolveAgentBrowserKey(key: string): Promise<unknown> {
+    let response: unknown;
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+        detail: {
+          method: SURFACE_CONTROL_METHODS.resolveAgentBrowser,
+          params: { key },
+          respond: (r: unknown) => { response = r; },
+        },
+      }));
+    });
+    await flush();
+    return response;
+  }
+
   async function dispatchResolveAgentBrowser(surface: string): Promise<unknown> {
     let response: unknown;
     await act(async () => {
@@ -2448,11 +2492,19 @@ describe('Wall on the Lath engine', () => {
     return container.querySelector<HTMLElement>('[aria-labelledby="notepad-archive-failure-title"]');
   }
 
-  function clickButton(label: string): void {
+  /** Answer the prompt and settle the closure it starts. `Close anyway` runs an async
+   *  chain that ends on the two-phase kill's deferred removal timer, so the click's
+   *  own async work is awaited BEFORE `flush()` registers the timer that has to fire
+   *  after it. A bare `act(click)` leaves the two `setTimeout(0)`s racing: the
+   *  removal is registered while the test awaits `flush()`, so it lands second and
+   *  the leaf is still mid-fade when the assertion runs. (`Keep open` only shifts the
+   *  prompt queue, so it needs no ordering — one helper still covers both.) */
+  async function clickButton(label: string): Promise<void> {
     const button = Array.from(container.querySelectorAll<HTMLButtonElement>('button'))
       .find((candidate) => candidate.textContent?.trim() === label);
     expect(button, `no "${label}" button`).toBeDefined();
-    act(() => { button!.click(); });
+    await act(async () => { button!.click(); });
+    await flush();
   }
 
   /** The pane header's Kill button — a user-visible closure, which does prompt.
@@ -2620,9 +2672,7 @@ describe('Wall on the Lath engine', () => {
     await clickHeaderKill('pane-a');
     expect(archiveFailureModal()).not.toBeNull();
     setBusy(true);
-    clickButton('Close anyway');
-    await flush();
-    await flush();
+    await clickButton('Close anyway');
     expect(getNotes('pane-a')).toHaveLength(1);
     expect(dispose).not.toHaveBeenCalled();
     expect(container.querySelector('[data-lath-leaf="pane-a"]')).not.toBeNull();
@@ -2692,8 +2742,7 @@ describe('Wall on the Lath engine', () => {
     act(() => { addPlainNote('pane-a', 'keep me'); });
     await clickHeaderKill('pane-a');
 
-    clickButton('Keep open');
-    await flush();
+    await clickButton('Keep open');
 
     expect(archiveFailureModal()).toBeNull();
     expect(container.querySelector('[data-lath-leaf="pane-a"]')).not.toBeNull();
@@ -2709,8 +2758,7 @@ describe('Wall on the Lath engine', () => {
     act(() => { addPlainNote('pane-a', 'expendable'); });
     await clickHeaderKill('pane-a');
 
-    clickButton('Close anyway');
-    await flush();
+    await clickButton('Close anyway');
 
     expect(archiveFailureModal()).toBeNull();
     await vi.waitFor(async () => {
@@ -2742,12 +2790,10 @@ describe('Wall on the Lath engine', () => {
 
     // A's prompt is the one on screen; B's is behind it.
     expect(archiveFailureModal()?.textContent).toContain('a could not be written');
-    clickButton('Keep open');
-    await flush();
+    await clickButton('Keep open');
 
     expect(archiveFailureModal()?.textContent).toContain('b could not be written');
-    clickButton('Close anyway');
-    await flush();
+    await clickButton('Close anyway');
 
     expect(archiveFailureModal()).toBeNull();
     expect(container.querySelector('[data-lath-leaf="pane-a"]')).not.toBeNull();
@@ -2822,6 +2868,163 @@ describe('Wall on the Lath engine', () => {
       expect(heightOf('pane-b')).toBeLessThan(500);
     } finally {
       HTMLElement.prototype.getBoundingClientRect = origRect;
+    }
+  });
+
+  it('registers exactly one handle, under the default Workspace, for a bare Wall', async () => {
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
+    await flush();
+    // The compatibility rule: a Wall with no `workspaceId` still registers, so
+    // the `dor` router always finds one (docs/specs/layout.md → "Workspaces").
+    expect(listWallHandles()).toHaveLength(1);
+    const handle = getWallHandle(DEFAULT_WORKSPACE_ID)!;
+    expect(handle.surfaceIds()).toEqual(['pane-a']);
+    expect(handle.ownsSurface('pane-a')).toBe(true);
+    expect(handle.ownsSurface('pane-elsewhere')).toBe(false);
+  });
+
+  it('unmounting leaves every PTY alive and every registry entry intact', async () => {
+    // The two teardown verbs are explicit handle methods, never unmount
+    // effects: a Wall unmounts on a reload, a StrictMode double-mount, and a
+    // Workspace switch, and killing or releasing there would cost the user
+    // every Session (`releaseSession` in `lib/src/lib/terminal-lifecycle.ts`).
+    const killPty = vi.spyOn(fake, 'killPty');
+    const dispose = vi.spyOn(terminalRegistry, 'disposeSession');
+    const release = vi.spyOn(terminalRegistry, 'releaseSession');
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} />));
+    await flush();
+    const handle = getWallHandle(DEFAULT_WORKSPACE_ID)!;
+    expect(handle.surfaceIds()).toEqual(['pane-a', 'pane-b']);
+
+    await act(async () => root.render(<></>));
+    await flush();
+
+    expect(dispose).not.toHaveBeenCalled();
+    expect(release).not.toHaveBeenCalled();
+    expect(killPty).not.toHaveBeenCalled();
+    // The handle deregisters, so nothing addresses the gone Wall — but the
+    // Sessions it held are untouched.
+    expect(getWallHandle(DEFAULT_WORKSPACE_ID)).toBeNull();
+  });
+
+  it('names the Window that answered `dor list`, once the host has named it', async () => {
+    // A caller needs a ref it can hand back, and with several Windows open
+    // `window:1` names none of them (docs/specs/dor-cli.md -> "Handle Model").
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
+    await flush();
+
+    const list = async (): Promise<{ workspaceRef: string; windowRef: string }> => {
+      let listed: { result?: { workspaceRef: string; windowRef: string } } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.list,
+            params: {},
+            respond: (r: typeof listed) => { listed = r; },
+          },
+        }));
+      });
+      await flush();
+      return listed!.result!;
+    };
+
+    // A Window that never names itself, which is every host but standalone.
+    expect(await list()).toMatchObject({ workspaceRef: 'workspace:1', windowRef: 'window:1' });
+
+    setWindowLabel('ws-3');
+    expect(await list()).toMatchObject({ workspaceRef: 'workspace:1', windowRef: 'window:ws-3' });
+  });
+});
+
+describe('Wall session persistence: ownership filtering', () => {
+  /** The pty-data handlers the Wall and the registry registered, invoked
+   *  directly. Going through `FakePtyAdapter.writePty` would also move the alert
+   *  manager, whose activity change marks the session dirty on its own — this
+   *  isolates the ownership filter under test. */
+  function capturePtyHandlers(): Array<(detail: { id: string; data: string; textData: string }) => void> {
+    const handlers: Array<(detail: { id: string; data: string; textData: string }) => void> = [];
+    const subscribe = fake.onPtyData.bind(fake);
+    vi.spyOn(fake, 'onPtyData').mockImplementation((handler) => {
+      handlers.push(handler as (detail: { id: string; data: string; textData: string }) => void);
+      subscribe(handler);
+    });
+    return handlers;
+  }
+
+  it('marks a minimized Session\'s pty echo dirty, and ignores a foreign Session\'s', async () => {
+    vi.useFakeTimers();
+    try {
+      const ptyHandlers = capturePtyHandlers();
+      const saveState = vi.spyOn(fake, 'saveState');
+      const settle = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+      const echo = (id: string) => act(() => {
+        ptyHandlers.forEach((handler) => handler({ id, data: '', textData: '' }));
+      });
+
+      await act(async () => {
+        root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="command" showBaseboard />);
+      });
+      await settle(0);
+      await act(async () => {
+        container.querySelector<HTMLElement>('[data-lath-leaf="pane-a"] [aria-label="Minimize"]')!.click();
+      });
+      // Past the debounce, so the commit's own save has landed and the tracker
+      // is clean again.
+      await settle(1_000);
+      expect(container.querySelector('[data-door-id="pane-a"]')).not.toBeNull();
+      saveState.mockClear();
+
+      // The heartbeat writes only when something marked dirty.
+      await settle(31_000);
+      expect(saveState).not.toHaveBeenCalled();
+
+      // Another Workspace's Session, fanned to this Wall by the adapter.
+      await echo('pane-elsewhere');
+      await settle(31_000);
+      expect(saveState).not.toHaveBeenCalled();
+
+      // The Door's own Session: its `untouched` flip rides this echo and nothing
+      // else reports it, so the Wall has to hear it.
+      await echo('pane-a');
+      await settle(31_000);
+      expect(saveState).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('ignores an activity or pane-state change belonging to another Workspace', async () => {
+    vi.useFakeTimers();
+    try {
+      const saveState = vi.spyOn(fake, 'saveState');
+      const settle = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+
+      await act(async () => {
+        root.render(<Wall initialPaneIds={['pane-a']} showBaseboard />);
+      });
+      // Past a heartbeat, so the mount's own dirty state has been written off.
+      await settle(31_000);
+      saveState.mockClear();
+
+      // Both stores are Window-global. A change keyed to a foreign Surface must
+      // not make this Wall rebuild its record — that is a `getCwd` per pane, on
+      // every idle Workspace, every heartbeat.
+      await act(async () => { setTerminalActivity('pane-elsewhere', { todo: true }); });
+      await act(async () => { resetTerminalPaneState('pane-elsewhere'); });
+      await settle(31_000);
+      expect(saveState, 'foreign Surface').not.toHaveBeenCalled();
+
+      await act(async () => { setTerminalActivity('pane-a', { todo: true }); });
+      await settle(31_000);
+      expect(saveState, 'own Surface').toHaveBeenCalled();
+      saveState.mockClear();
+
+      // An unkeyed notification is a store-wide reset, which every Wall takes.
+      await act(async () => { clearTerminalActivity(); });
+      await settle(31_000);
+      expect(saveState, 'store-wide reset').toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
     }
   });
 });

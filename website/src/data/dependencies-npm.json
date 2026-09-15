@@ -21,6 +21,48 @@
     "homepage": "https://paulmillr.com/noble/"
   },
   {
+    "name": "@node-datachannel/darwin-arm64",
+    "version": "0.33.4",
+    "license": "MPL 2.0",
+    "author": "Murat Doğan, Paul-Louis Ageneau",
+    "homepage": "https://github.com/murat-dogan/node-datachannel"
+  },
+  {
+    "name": "@node-datachannel/darwin-x64",
+    "version": "0.33.4",
+    "license": "MPL 2.0",
+    "author": "Murat Doğan, Paul-Louis Ageneau",
+    "homepage": "https://github.com/murat-dogan/node-datachannel"
+  },
+  {
+    "name": "@node-datachannel/linux-arm64-gnu",
+    "version": "0.33.4",
+    "license": "MPL 2.0",
+    "author": "Murat Doğan, Paul-Louis Ageneau",
+    "homepage": "https://github.com/murat-dogan/node-datachannel"
+  },
+  {
+    "name": "@node-datachannel/linux-x64-gnu",
+    "version": "0.33.4",
+    "license": "MPL 2.0",
+    "author": "Murat Doğan, Paul-Louis Ageneau",
+    "homepage": "https://github.com/murat-dogan/node-datachannel"
+  },
+  {
+    "name": "@node-datachannel/win32-arm64-msvc",
+    "version": "0.33.4",
+    "license": "MPL 2.0",
+    "author": "Murat Doğan, Paul-Louis Ageneau",
+    "homepage": "https://github.com/murat-dogan/node-datachannel"
+  },
+  {
+    "name": "@node-datachannel/win32-x64-msvc",
+    "version": "0.33.4",
+    "license": "MPL 2.0",
+    "author": "Murat Doğan, Paul-Louis Ageneau",
+    "homepage": "https://github.com/murat-dogan/node-datachannel"
+  },
+  {
     "name": "@phosphor-icons/react",
     "version": "2.1.10",
     "license": "MIT",
@@ -43,14 +85,14 @@
   },
   {
     "name": "@tauri-apps/plugin-shell",
-    "version": "2.3.5",
+    "version": "2.3.6",
     "license": "MIT OR Apache-2.0",
     "author": "Tauri Apps Contributors",
     "homepage": "https://github.com/tauri-apps/plugins-workspace"
   },
   {
     "name": "@tauri-apps/plugin-updater",
-    "version": "2.10.1",
+    "version": "2.11.0",
     "license": "MIT OR Apache-2.0",
     "author": "Tauri Apps Contributors",
     "homepage": "https://github.com/tauri-apps/plugins-workspace"
@@ -68,6 +110,13 @@
     "license": "MIT",
     "author": "The xterm.js authors",
     "homepage": "https://github.com/xtermjs/xterm.js/tree/master/addons/addon-image"
+  },
+  {
+    "name": "@xterm/addon-serialize",
+    "version": "0.15.0-beta.301",
+    "license": "MIT",
+    "author": "The xterm.js authors",
+    "homepage": "https://github.com/xtermjs/xterm.js/tree/master/addons/addon-serialize"
   },
   {
     "name": "@xterm/addon-unicode-graphemes",
@@ -161,6 +210,13 @@
     "homepage": "https://github.com/debug-js/debug"
   },
   {
+    "name": "detect-libc",
+    "version": "2.1.2",
+    "license": "Apache-2.0",
+    "author": "Lovell Fuller <npm@lovell.info>",
+    "homepage": "https://github.com/lovell/detect-libc"
+  },
+  {
     "name": "ecdsa-sig-formatter",
     "version": "1.0.11",
     "license": "Apache-2.0",
@@ -176,7 +232,7 @@
   },
   {
     "name": "hono",
-    "version": "4.13.5",
+    "version": "4.13.7",
     "license": "MIT",
     "author": "Yusuke Wada <yusuke@kamawada.com> (https://github.com/yusukebe)",
     "homepage": "https://hono.dev"
@@ -259,6 +315,13 @@
     "homepage": "https://github.com/nodejs/node-addon-api"
   },
   {
+    "name": "node-datachannel",
+    "version": "0.33.4",
+    "license": "MPL 2.0",
+    "author": "Murat Doğan, Paul-Louis Ageneau",
+    "homepage": "https://github.com/murat-dogan/node-datachannel#readme"
+  },
+  {
     "name": "node-pty",
     "version": "1.2.0-beta.15",
     "license": "MIT",
@@ -274,14 +337,14 @@
   },
   {
     "name": "react",
-    "version": "19.2.8",
+    "version": "19.3.0",
     "license": "MIT",
     "author": "Meta Platforms, Inc. and affiliates",
     "homepage": "https://react.dev/"
   },
   {
     "name": "react-dom",
-    "version": "19.2.8",
+    "version": "19.3.0",
     "license": "MIT",
     "author": "Meta Platforms, Inc. and affiliates",
     "homepage": "https://react.dev/"
@@ -302,7 +365,7 @@
   },
   {
     "name": "scheduler",
-    "version": "0.27.0",
+    "version": "0.28.0",
     "license": "MIT",
     "author": "Meta Platforms, Inc. and affiliates",
     "homepage": "https://react.dev/"
@@ -337,7 +400,7 @@
   },
   {
     "name": "tailwind-variants",
-    "version": "3.2.2",
+    "version": "3.3.1",
     "license": "MIT",
     "author": "Junior Garcia <jrgarciadev@gmail.com>",
     "homepage": "https://github.com/heroui-inc/tailwind-variants"

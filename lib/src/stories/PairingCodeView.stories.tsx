@@ -32,12 +32,6 @@ export const WaitingKimbieDark: Story = {
   globals: { theme: 'Kimbie Dark' },
 };
 
-// A leading zero is a digit: the code is sampled uniformly over 00–99 and
-// rendered as two characters either way.
-export const LeadingZero: Story = {
-  args: { code: '00' },
-};
-
 // The moment between the handshake completing and the code being sampled. It
 // is deliberately not blank — a screen showing nothing is the state the
 // laptop's copy tells the user to cancel on.

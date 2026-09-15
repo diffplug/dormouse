@@ -124,6 +124,7 @@ export function persistableLeafMeta(meta: LeafMeta): LeafMeta {
     // Retired development snapshots may carry this; never save it again.
     showTerminal: _showTerminal,
     toolPortConflict: _toolPortConflict,
+    toolAnnouncedPort: _toolAnnouncedPort,
     ...rest
   } = meta.params;
   return { ...meta, params: rest };

@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakePtyAdapter, setPlatform } from '../../lib/platform';
 import { recordToolAnnounce, resetToolAnnounces } from '../../lib/tool-announce-store';
 import { useToolServing } from './use-tool-serving';
+import { captureToolParams } from './tool-transfer';
 import type { LathWallEngine } from './lath-wall-engine';
 import type { OpenPort } from '../../lib/platform/types';
 
@@ -89,6 +90,27 @@ async function run(params: Record<string, unknown>, scans: OpenPort[][]) {
 
 describe('port: announced', () => {
   const announced = { surfaceType: 'tool', command: 'x', toolPort: 'announced' };
+
+  it('defers Workspace transfer until reopening an existing browser has settled', async () => {
+    const { lath, state } = fakeLath({
+      ...announced, toolRender: 'ab-screencast', renderMode: 'ab-screencast',
+      session: 'existing-browser', wsPort: 9222, url: 'http://localhost:6006/', toolAnnouncedPort: 6006,
+    });
+    const opened = Promise.withResolvers<{ exitCode: number; stdout: string; stderr: string }>();
+    const platform = Object.assign(new FakePtyAdapter(), {
+      getOpenPorts: vi.fn(async () => [tcp(6007)]),
+      agentBrowserCommand: vi.fn(() => opened.promise),
+    });
+    setPlatform(platform);
+    recordToolAnnounce('tool-1', { port: 6007, name: null, key: null, dehydrate: false, persist: null });
+    const doorsRef = { current: [] };
+    function Probe() { useToolServing({ lath, doorsRef }); return null; }
+    await act(async () => root.render(<Probe />));
+    expect(state.params.url).toBe('http://localhost:6007/');
+    expect(() => captureToolParams(lath, ['tool-1'])).toThrow('Wait for the Tool browser to connect');
+    await act(async () => opened.resolve({ exitCode: 0, stdout: '', stderr: '' }));
+    expect(captureToolParams(lath, ['tool-1'])['tool-1'].session).toBeTruthy();
+  });
 
   it('frames nothing without an announcement, however many ports bind', async () => {
     const { state } = await run(announced, [[tcp(6006)], [tcp(6006)], [tcp(6006)]]);
@@ -298,5 +320,33 @@ it('ignores a scan that finishes after the command has changed', async () => {
   await act(async () => { root.render(<Probe />); });
   currentCommand = 'cat other.log';
   await act(async () => { resolve([tcp(6006)]); });
+  expect(state.params.url).toBeUndefined();
+});
+
+it('keeps the destination and browser binding after a Workspace transfer', async () => {
+  recordToolAnnounce('tool-1', { port: 6006, name: null, key: null, dehydrate: false, persist: null });
+  const { state, platform } = await run({
+    surfaceType: 'tool', command: 'x', toolRender: 'ab-screencast',
+    renderMode: 'ab-screencast', session: 'existing-browser',
+    url: 'http://localhost:6006/edited', toolAnnouncedPort: 6006,
+  }, [[tcp(6006)], [tcp(6006)]]);
+  expect(platform.getOpenPorts).not.toHaveBeenCalled();
+  expect(state.params.url).toBe('http://localhost:6006/edited');
+  expect(state.params.session).toBe('existing-browser');
+});
+
+it('does not commit an in-flight scan once its Workspace begins transferring', async () => {
+  const { lath, state } = fakeLath({ surfaceType: 'tool', command: 'x', toolPort: 'announced' });
+  recordToolAnnounce('tool-1', { port: 6006, name: null, key: null, dehydrate: false, persist: null });
+  const gate = Promise.withResolvers<OpenPort[]>();
+  const platform = new FakePtyAdapter();
+  platform.getOpenPorts = vi.fn(() => gate.promise);
+  setPlatform(platform);
+  let moving = false;
+  const doorsRef = { current: [] };
+  function Probe() { useToolServing({ lath, doorsRef, paused: () => moving }); return null; }
+  await act(async () => root.render(<Probe />));
+  moving = true;
+  await act(async () => gate.resolve([tcp(6006)]));
   expect(state.params.url).toBeUndefined();
 });

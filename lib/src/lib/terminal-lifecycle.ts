@@ -1,9 +1,11 @@
 import { clearToolAnnounce } from './tool-announce-store';
+import { serializeTransferTerminal, type TerminalGrid } from './terminal-transfer';
 import { Terminal, type IBufferRange } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { SerializeAddon } from '@xterm/addon-serialize';
 import { ImageAddon, type IImageAddonOptions } from '@xterm/addon-image';
 import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes';
-import { WebglAddon } from '@xterm/addon-webgl';
+import { TerminalWebglRenderer } from './terminal-webgl';
 import { shellCommandKind, type ShellCommandKind } from 'dor/commands/shell-quote';
 import { getPlatform, IS_MAC, IS_WINDOWS, PLATFORM_STRING } from './platform';
 import type { PtyDataDetail } from './platform/types';
@@ -133,68 +135,14 @@ function readDisplayTextFromBuffer(terminal: Terminal, range: IBufferRange): str
   }
 }
 
-/**
- * Swap xterm's DOM renderer for the WebGL one, and record which one this
- * terminal ended up on as `data-renderer` on its host element.
- *
- * The DOM renderer emits one `<span>` per style run per row, so a TUI that
- * paints every cell a different truecolor (an animated pattern, `btop`, a
- * syntax-highlighted pager) turns into one span-with-inline-style per cell,
- * rebuilt every frame. On a 99x25 pane that is ~1150 elements of style
- * recalc + layout per frame; WebKit spends ~95ms/frame on it and the whole
- * page drops to ~9fps. The WebGL renderer rasterizes the same grid from a
- * glyph atlas and leaves the DOM untouched.
- *
- * Called on first MOUNT, not on create: a GL context is a scarce per-page
- * resource (16 in Safari, evicted oldest-first), and cold restore builds a
- * session for every persisted pane *including minimized doors*, which never
- * paint. Claiming contexts at create would spend the budget on invisible
- * surfaces and, because eviction is oldest-first and one-way, permanently
- * demote the earliest-restored panes.
- *
- * Falls back to the DOM renderer whenever WebGL is unavailable: no GL
- * context (headless/jsdom, blocklisted GPU) throws at construction, and
- * exceeding the browser's live-context budget fires `onContextLoss` later.
- * Both paths dispose the addon, which is xterm's documented signal to
- * resume DOM rendering — degraded, never broken.
- */
-function tryEnableWebglRenderer(terminal: Terminal, host: HTMLElement): void {
-  const markDom = () => host.setAttribute('data-renderer', 'dom');
-  // Cheap pre-check so environments that could never succeed don't pay for a
-  // doomed context request. jsdom in particular has no `getContext`, and
-  // attempting one makes every terminal-creating unit test log a
-  // "Not implemented" error through the virtual console.
-  if (!cfg.terminal.webglRenderer || typeof WebGL2RenderingContext === 'undefined') {
-    markDom();
-    return;
-  }
-  let addon: WebglAddon;
-  try {
-    addon = new WebglAddon();
-  } catch {
-    markDom();
-    return;
-  }
-  addon.onContextLoss(() => {
-    addon.dispose();
-    markDom();
-  });
-  try {
-    terminal.loadAddon(addon);
-    host.setAttribute('data-renderer', 'webgl');
-  } catch {
-    addon.dispose();
-    markDom();
-  }
-}
-
-function createXtermHost(): { terminal: Terminal; fit: FitAddon; element: HTMLDivElement } {
+function createXtermHost(grid?: TerminalGrid): { terminal: Terminal; fit: FitAddon; serialize: SerializeAddon; element: HTMLDivElement } {
   const styles = getComputedStyle(document.body);
   const editorFontSize = parseInt(styles.getPropertyValue('--vscode-editor-font-size'), 10) || 12;
   const editorFontFamily = styles.getPropertyValue('--vscode-editor-font-family').trim() || "'SF Mono', Menlo, Monaco, monospace";
 
   const theme = getTerminalTheme();
   const terminal = new Terminal({
+    ...grid,
     allowProposedApi: true,
     fontSize: editorFontSize,
     fontFamily: editorFontFamily,
@@ -235,6 +183,8 @@ function createXtermHost(): { terminal: Terminal; fit: FitAddon; element: HTMLDi
   terminal.loadAddon(new UnicodeGraphemesAddon());
   const fit = new FitAddon();
   terminal.loadAddon(fit);
+  const serialize = new SerializeAddon();
+  terminal.loadAddon(serialize);
   if (cfg.terminal.inlineImages) terminal.loadAddon(new ImageAddon(IMAGE_ADDON_OPTIONS));
 
   const element = document.createElement('div');
@@ -243,7 +193,7 @@ function createXtermHost(): { terminal: Terminal; fit: FitAddon; element: HTMLDi
   terminal.open(element);
   paintTerminalHost(element, terminal, theme.background);
 
-  return { terminal, fit, element };
+  return { terminal, fit, serialize, element };
 }
 
 /** PTY data/exit listeners. Returns the unsubscribe pair. */
@@ -343,8 +293,10 @@ function wireXtermHandlers(
   };
 }
 
-function setupTerminalEntry(id: string, options: { shell?: string; untouched?: boolean; helper?: HelperIdentity } = {}): TerminalEntry {
-  const { terminal, fit, element } = createXtermHost();
+interface TerminalEntryOptions { shell?: string; untouched?: boolean; helper?: HelperIdentity; grid?: TerminalGrid }
+
+function setupTerminalEntry(id: string, options: TerminalEntryOptions = {}): TerminalEntry {
+  const { terminal, fit, serialize, element } = createXtermHost(options.grid);
   const selectionBaselineRef = { current: null as string | null };
   // Every module that finalizes a selection arms the render handler through
   // this one setter: the mouse router at drag end, a note's pin on reveal.
@@ -379,6 +331,7 @@ function setupTerminalEntry(id: string, options: { shell?: string; untouched?: b
     shellKind: shellCommandKind(options.shell, PLATFORM_STRING),
     terminal,
     fit,
+    serialize,
     element,
     cleanup,
     setSelectionBaseline,
@@ -388,7 +341,7 @@ function setupTerminalEntry(id: string, options: { shell?: string; untouched?: b
 
   registry.set(id, entry);
   ensureTerminalPaneState(id);
-  notifyActivityListeners();
+  notifyActivityListeners(id);
   startThemeObserver();
   return entry;
 }
@@ -488,15 +441,19 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
   return entry;
 }
 
+/** A PTY `resumeTerminal` rebuilds: its entry options plus its liveness and saved title. */
+export interface TerminalResumeInfo extends TerminalEntryOptions { alive: boolean; exitCode?: number; title?: string | null }
+
 export function resumeTerminal(
   id: string,
   replayData: string | null,
-  exitInfo?: { alive: boolean; exitCode?: number; shell?: string; title?: string | null; untouched?: boolean; helper?: HelperIdentity },
+  exitInfo?: TerminalResumeInfo,
 ): TerminalEntry {
   const existing = registry.get(id);
   if (existing) return existing;
 
   const entry = setupTerminalEntry(id, {
+    grid: exitInfo?.grid,
     helper: exitInfo?.helper,
     shell: exitInfo?.shell,
     untouched: exitInfo?.untouched ?? false,
@@ -581,21 +538,41 @@ export function restoreTerminal(
   return entry;
 }
 
+/** Reveal a Session's element in `container`. The caller owns fitting: only it knows
+ *  whether the container's geometry has settled (`docs/specs/layout.md` -> Animations). */
 export function mountElement(id: string, container: HTMLElement): void {
   const entry = registry.get(id);
   if (!entry) return;
   container.appendChild(entry.element);
-  // First paint is the earliest point worth claiming a GL context — see
-  // `tryEnableWebglRenderer` on why create is too early.
-  if (!entry.webglAttempted) {
-    entry.webglAttempted = true;
-    tryEnableWebglRenderer(entry.terminal, entry.element);
-  }
-  requestAnimationFrame(() => entry.fit.fit());
+  // The renderer owns only this mount's GPU resources; xterm state survives it.
+  (entry.webglRenderer ??= new TerminalWebglRenderer(entry.terminal, entry.element)).mount();
+}
+
+/**
+ * The buffer as the escape stream that rebuilds it — scrollback, cursor, modes
+ * — for a Session about to be handed to another Window
+ * (`docs/specs/transport.md` → "Transferring a Workspace"). **Flushed first**:
+ * xterm parses writes asynchronously, and the split point the host stamped is
+ * everything this Session was *sent*, so anything still queued is drained into
+ * the buffer before it is read. Null for a Session this webview does not hold.
+ */
+export async function serializeTerminal(id: string): Promise<string | null> {
+  const entry = registry.get(id);
+  if (!entry) return null;
+  await flushTerminal(id);
+  return serializeTransferTerminal(entry.terminal, entry.serialize);
+}
+
+/** Resolves once everything written to the Session so far is in its buffer.
+ *  xterm parses asynchronously, so transfer waits here before reading or mounting a rebuilt buffer. */
+export function flushTerminal(id: string): Promise<void> {
+  const entry = registry.get(id);
+  if (!entry) return Promise.resolve();
+  return new Promise<void>((resolve) => entry.terminal.write('', resolve));
 }
 
 /** Where a hidden helper's xterm element waits between reveals: still in the
- *  document, so its renderer and scrollback survive
+ *  document, preserving its DOM state and scrollback
  *  (docs/specs/terminal-context.md → Helper lifecycle). */
 let helperParking: HTMLElement | null = null;
 
@@ -604,6 +581,7 @@ let helperParking: HTMLElement | null = null;
 export function parkElement(id: string): void {
   const entry = registry.get(id);
   if (!entry) return;
+  entry.webglRenderer?.unmount();
   // Revalidated, not just cached: a host that replaces the body (a docs iframe,
   // a test teardown) would otherwise park every helper in a detached subtree.
   if (!helperParking?.isConnected) {
@@ -621,7 +599,10 @@ export function unmountElement(id: string, container?: HTMLElement): void {
   const entry = registry.get(id);
   if (!entry || (container && entry.element.parentElement !== container)) return;
   if (entry.helper) parkElement(id);
-  else entry.element.remove();
+  else {
+    entry.webglRenderer?.unmount();
+    entry.element.remove();
+  }
 }
 
 export function disposeAllSessions(): void {
@@ -630,7 +611,15 @@ export function disposeAllSessions(): void {
   }
 }
 
-export function disposeSession(id: string): void {
+/**
+ * Tear this webview's half of a Session down: the alert, the notepad pins, the
+ * listeners, the element and the xterm instance, plus the registry, pane,
+ * selection and activity state keyed to it.
+ *
+ * `kill` is the only difference between the two verbs below, and it is the
+ * whole difference between ending a Session and letting another Window take it.
+ */
+function teardownSession(id: string, { kill }: { kill: boolean }): void {
   const entry = registry.get(id);
   if (!entry) return;
   getPlatform().alertRemove(id);
@@ -638,14 +627,36 @@ export function disposeSession(id: string): void {
   // a disposed marker cannot be dropped cleanly afterwards. The notes stay.
   dropSourcesForTerminal(id);
   entry.cleanup();
-  getPlatform().killPty(id);
+  if (kill) getPlatform().killPty(id);
+  // Detach before releasing: unlike a minimize, nothing here has to survive, so the
+  // fallback renderer the addon's disposal constructs never touches the document.
+  // A released Session's context goes too: the target Window mounts its own.
   entry.element.remove();
+  entry.webglRenderer?.unmount();
   entry.terminal.dispose();
   registry.delete(id);
   removeTerminalPaneState(id);
   removeMouseSelectionState(id);
   clearToolAnnounce(id);
   clearTerminalActivity(id);
+}
+
+/** End a Session: the process goes with it. */
+export function disposeSession(id: string): void {
+  teardownSession(id, { kill: true });
+}
+
+/**
+ * Detach a Session from this Window WITHOUT killing it — the process keeps
+ * running and another Window resumes over it
+ * (`docs/specs/transport.md` → "Transferring a Workspace").
+ *
+ * **Never reachable from a Wall unmount.** A Wall unmounts on a reload, a
+ * StrictMode double-mount, and a Workspace switch, and releasing there would
+ * silently strand every PTY the Window still owns. Only explicit transfer departure and refused-adoption cleanup may call it.
+ */
+export function releaseSession(id: string): void {
+  teardownSession(id, { kill: false });
 }
 
 export function refitSession(id: string): void {

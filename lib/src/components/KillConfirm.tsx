@@ -1,6 +1,6 @@
 import { useRef } from 'react';
 import { resolvePaneElement } from './wall/resolve-pane-element';
-import { ModalFrame, Shortcut } from './design';
+import { ModalFrame, Shortcut, type ModalLayer } from './design';
 
 export type KillExit = 'shake' | 'confirm';
 
@@ -24,16 +24,25 @@ export function KillConfirmModal({
   onCancel,
   exit,
   targetElement,
+  title = 'Confirm kill',
+  detail,
+  layer,
 }: {
   char: string;
   onCancel?: () => void;
   exit?: KillExit;
   targetElement?: HTMLElement | null;
+  /** The same typed-letter gate stands in front of other destructive steps
+   *  (a Workspace move that loses iframe page state); they name themselves. */
+  title?: string;
+  detail?: string;
+  layer?: ModalLayer;
 }) {
   const cancelButtonRef = useRef<HTMLButtonElement>(null);
   return (
     <ModalFrame
       titleId="kill-confirm-title"
+      layer={layer}
       targetElement={targetElement}
       padding="spacious"
       align="center"
@@ -43,8 +52,9 @@ export function KillConfirmModal({
       onEscape={onCancel}
     >
       <h2 id="kill-confirm-title" className="text-base font-bold mb-3 text-foreground">
-        Confirm kill
+        {title}
       </h2>
+      {detail && <p className="text-sm text-muted mb-3 max-w-xs">{detail}</p>}
       <div className="bg-app-bg py-2 px-6 rounded border border-border inline-block mb-2">
         <span
           className={`text-xl font-bold${exit === 'confirm' ? ' kill-letter-flash' : ''}`}

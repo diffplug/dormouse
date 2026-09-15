@@ -14,6 +14,13 @@ export interface PaneElementsState {
 export const ModeContext = createContext<WallMode>('command');
 export const SelectedIdContext = createContext<string | null>(null);
 
+/** Terminal fitting waits for committed, fully painted geometry. Standalone
+ *  terminal mounts have no layout coordinator and use their resize observer. */
+export const TerminalResizeContext = createContext<{
+  canFit(id: string): boolean;
+  subscribe(listener: () => void): () => void;
+} | null>(null);
+
 export const PaneElementsContext = createContext<PaneElementsState>({
   elements: new Map(),
   version: 0,
@@ -92,6 +99,12 @@ export const PaneWriteContext = createContext<PaneWriteActions>({
   setTitle: () => {},
   updateParams: () => {},
 });
+
+/** Whether this Wall's Workspace is the visible one. A hidden Workspace stays
+ *  mounted and live, so streaming bodies read this to idle
+ *  (`docs/specs/layout.md` → "Workspaces"). Default true: a bare Wall, and any
+ *  component rendered outside one, is always active. */
+export const WorkspaceActiveContext = createContext(true);
 
 export const RenamingIdContext = createContext<string | null>(null);
 /** Exact zoom owner for pane-local chrome. Pane chrome compares against its own id

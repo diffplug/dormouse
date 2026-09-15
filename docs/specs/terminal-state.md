@@ -13,6 +13,12 @@
 - **`ShellActivity` is not `isRunning`** — the shell process keeps running; what matters is whether a foreground command is active.
 - **Terminal title is a label override, never a command lifecycle signal.** `title` is the latest title event of any source; `titleCandidates` keeps the latest value per channel with its own timestamp, so app, shell, and user sources stay independently inspectable.
 
+**Must transfer semantic state and OSC-driven status at the stream mark, before
+applying the destination's since-mark replay.** Screen serialization carries no
+command lifecycle; newer replay events still win, including command finish.
+Source of truth: `snapshotTerminalState` / `restoreTransferredTerminalState` in
+`lib/src/lib/terminal-state-store.ts`; tested in `standalone/src/workspace-move.test.ts`.
+
 ## Normalized Events
 
 - **Feature code must consume `TerminalPaneState` or `TerminalSemanticEvent`, never raw OSC sequences** — all protocol parsing emits that canonical union (`lib/src/lib/terminal-state.ts`) first.
@@ -25,7 +31,7 @@ CWD:
 
 | Sequence | Source | Notes |
 |---|---|---|
-| `OSC 7 ; file://host/path ST` | `osc7` | Parsed as a `file:` URI; path decoded, host preserved. |
+| `OSC 7 ; file://host/path ST` | `osc7` | Parsed as a `file:` URI; path decoded, host derived from the parser. |
 | `OSC 9 ; 9 ; <cwd> ST` | `osc9_9` | Windows Terminal / ConEmu. Drive-letter and UNC paths are Windows paths; every other path is `unknown`, never `posix` (rationale). |
 | `OSC 633 ; P ; Cwd=<cwd> ST` | `osc633` | VS Code-style. |
 | `OSC 1337 ; CurrentDir=<cwd> ST` | `osc1337` | iTerm2 compatibility. |
@@ -33,6 +39,8 @@ CWD:
 **Must preserve native CWD text, including percent signs, semicolons and edge spaces; percent-decode only OSC 7 file URIs.** Pinned by `preserves literal percent escapes and whitespace in native CWDs` in `lib/src/lib/terminal-state.test.ts` and `preserves semicolons in OSC 633 CWD %j` in `lib/src/lib/terminal-protocol.test.ts`.
 
 **Every CWD is bounded at `MAX_CWD_LENGTH` and stripped of control characters before storage**, whatever the source ([terminal-escapes.md](terminal-escapes.md), rationale).
+
+**The OSC 7 host is the URL parser's mapped hostname except in case and the literal `localhost` spelling** — the two the raw slice alone preserves; a slice diverging further is unnormalized input, and taking it would let an ignorable code point inside `localhost` read as remote. Pinned by `bounds every CWD source and strips control characters` in `lib/src/lib/terminal-state.test.ts`. Source of truth: `fileUriHost` in `lib/src/lib/terminal-state.ts`.
 
 Non-OSC CWD sources:
 

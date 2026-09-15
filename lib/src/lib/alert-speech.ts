@@ -8,6 +8,7 @@ import {
 } from './alert-speech-state';
 import { getActivity, getActivitySnapshot, subscribeToActivity } from './session-activity-store';
 import { deriveSessionLabel } from './session-label';
+import { redactHighEntropyTokens } from './redact-high-entropy';
 
 // Speech sink and sanitizer; alert-ring-watch owns ring timing/cancellation.
 // Engine callbacks publish transient renderer-local delivery state.
@@ -21,7 +22,9 @@ const MAX_TRACKED_UTTERANCES = 8;
 /** Sanitize a display label for speech. WebKit wedges on angle brackets; replace
  * punctuation, symbols, and controls with spaces so adjacent words do not join. */
 export function toSpokenText(label: string): string {
-  const cleaned = label
+  // Detect whole tokens before punctuation splitting or the speech length cap
+  // can leave a secret's otherwise unrecognizable fragments in the utterance.
+  const cleaned = redactHighEntropyTokens(label)
     // Elide apostrophes so contractions stay intact: spacing `didn't` would
     // leave a lone `t` for the engine to announce.
     .replace(/['’]/gu, '')

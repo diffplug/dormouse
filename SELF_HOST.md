@@ -232,7 +232,7 @@ Establish with the user what the script cannot:
 - **Their phone runs Tailscale** and is signed in to the same tailnet.
 - **Port 3100 is free.** Unchecked before installation; a stale listener blocks
   the new Relay from binding and fails the post-install identity check
-  (`pnpm dev:relay` uses 3000):
+  (`PORT=3000 pnpm dev:relay` pins the dev Relay to 3000):
 
   ```sh
   # macOS
@@ -468,6 +468,27 @@ plus the sleep/shutdown/logout availability limit; and the installed
 
 ## Troubleshooting boundaries
 
+### Phone capability diagnostics
+
+For pairing-storage failures on iOS, Android, or desktop, open
+`https://<relay-origin>/diagnostics/index.html` in the affected browser and
+choose **Run checks**, then **Copy results**. No setup code is needed. The
+report distinguishes API presence from working crypto and storage; inspect it
+before sharing because it includes browser/version information.
+
+For persistence across app or phone restarts, use **Prepare restart test**,
+close and reopen the same browser/app, then **Verify saved key** and **Copy
+restart result**. Do not prepare again between those steps. Finish with
+**Remove test data** in each context where you prepared a checkpoint.
+Browser and installed-app results are separate evidence; a passing test on one
+device is not certification of another. The diagnostic contract is
+`docs/specs/pocket-app.md` -> "Serving the built bundle".
+Harness v3 tests the production encrypted-key format, including authenticated
+context. A v1/v2 experimental checkpoint must be removed and prepared again;
+old restart reports do not establish the production-format restart result.
+
+### Service and deployment failures
+
 None of the three service managers runs the user's interactive shell or
 PowerShell startup files, so a `PATH` that works in a terminal proves nothing
 about any of them.
@@ -639,8 +660,8 @@ reports which mode is live rather than asserting either.
   protection: `docs/specs/security-remote.md` → "Credentials at rest".
 - **Loopback backend, publicly safe HTTPS origin.** The install pins
   `DORMOUSE_BIND_HOST=127.0.0.1` and refuses to proceed without it
-  (`docs/specs/relay.md` → Configuration). Port 3100, not 3000, so the service
-  coexists with `pnpm dev:relay`. Serve is the private default; Funnel is safe
+  (`docs/specs/relay.md` → Configuration). Port 3100 lets the service
+  coexist with `PORT=3000 pnpm dev:relay`. Serve is the private default; Funnel is safe
   to enable because the application controls, not network privacy, govern
   admission (`docs/specs/security-remote.md` → "Network posture").
 - **`DORMOUSE_ORIGIN` is durable WebAuthn identity**, derived from the node's

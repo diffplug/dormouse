@@ -31,10 +31,6 @@ export const Default: Story = {
   args: { char: 'G' },
 };
 
-export const RandomChar: Story = {
-  args: { char: 'W' },
-};
-
 export const Shaking: Story = {
   args: { char: 'G', exit: 'shake' },
 };
