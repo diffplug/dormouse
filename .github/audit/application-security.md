@@ -42,7 +42,7 @@ harnesses that already exercise this are
 — read what they *do not* cover, and say so.
 
 For `## Loopback Listeners`, read `lib/src/host/loopback-guard.ts` first — it
-states the rule — then each listener it names. Derive the set of listeners by
+states the rule — then each listener the section names. Derive the set of listeners by
 searching the tracked, non-test source trees yourself, as the lint does; the
 section's own list is a description of today's tree, not the scope.
 
