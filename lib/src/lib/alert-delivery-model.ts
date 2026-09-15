@@ -30,4 +30,3 @@ export function resolveAlertDeliveryPolicy(defaults: AlertSettings, overrides: A
     ...overrides,
   };
 }
-
