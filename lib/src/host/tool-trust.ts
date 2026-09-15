@@ -15,6 +15,7 @@ import { randomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { ToolFileError, parseToolFile, type ToolEntry, type ToolFile } from './tool-registry';
 import { resolveUpstreamUrl } from './git-upstream';
+import { resolveToolInput } from './tool-input';
 
 export const TOOL_FILE_NAME = 'dormouse.yml';
 /**
@@ -25,18 +26,20 @@ export const TOOL_FILE_NAME = 'dormouse.yml';
  */
 const TOOL_FILE_MAX_BYTES = 256 * 1024;
 
-/** Refuse stable symlinks on every host, then fstat and cap one descriptor.
+/** Refuse repo-config symlinks; user config may follow a dotfiles link.
+ *  Both paths fstat and cap one descriptor.
  *  POSIX also opens no-follow, closing the lstat/open replacement race there. */
-export async function readToolFile(path: string): Promise<string> {
+export async function readToolFile(path: string, allowSymlink = false): Promise<string> {
   const entry = await lstat(path);
-  if (entry.isSymbolicLink()) {
+  if (entry.isSymbolicLink() && !allowSymlink) {
     throw new ToolFileError(`${path}: tool file must be a regular file, not a symbolic link`);
   }
 
+  if (!entry.isSymbolicLink() && !entry.isFile()) throw new ToolFileError(`${path}: tool file must be a regular file`);
   let file;
   try {
-    const noFollow = typeof constants.O_NOFOLLOW === 'number' ? constants.O_NOFOLLOW : 0;
-    file = await open(path, constants.O_RDONLY | noFollow);
+    const noFollow = !allowSymlink && typeof constants.O_NOFOLLOW === 'number' ? constants.O_NOFOLLOW : 0;
+    file = await open(path, constants.O_RDONLY | noFollow | (constants.O_NONBLOCK ?? 0));
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === 'ELOOP' || code === 'EMLINK') {
@@ -429,7 +432,7 @@ export type ToolLookup =
       upstreamUrl: string | null;
     }
   | { status: 'error'; message: string }
-  | { status: 'ok'; projectRoot: string; path: string; file: ToolFile; entry: ToolEntry };
+  | { status: 'ok'; projectRoot: string; path: string; file: ToolFile; entry: ToolEntry; input: Awaited<ReturnType<typeof resolveToolInput>> };
 
 /**
  * Find, parse, and trust-check the entry named `name` for a caller in `cwd`.
@@ -444,6 +447,7 @@ export async function lookupTool(
   trust: ToolTrustStore,
   readTextFile?: (path: string) => Promise<string>,
   resolveUpstream: (dir: string) => Promise<string | null> = resolveUpstreamUrl,
+  args: readonly string[] = [],
 ): Promise<ToolLookup> {
   let found;
   try {
@@ -473,20 +477,27 @@ export async function lookupTool(
     };
   }
 
+  let input: Awaited<ReturnType<typeof resolveToolInput>>;
+  try {
+    input = await resolveToolInput(entry, { projectRoot: found.dir, cwd, args });
+  } catch (error) {
+    return { status: 'error', message: error instanceof Error ? error.message : String(error) };
+  }
+
   // Either grant covers this project: the upstream every worktree shares, or
   // this folder alone. Resolved before the check so the approval UI can offer
   // both, and so a hit on either short-circuits identically.
   const upstreamUrl = await resolveUpstream(found.dir);
   const keys = [folderGrantKey(found.dir), ...(upstreamUrl ? [upstreamGrantKey(upstreamUrl)] : [])];
   if (await trust.isTrusted(keys)) {
-    return { status: 'ok', projectRoot: found.dir, path: found.path, file, entry };
+    return { status: 'ok', projectRoot: found.dir, path: found.path, file, entry, input };
   }
   return {
     status: 'untrusted',
     projectRoot: found.dir,
     path: found.path,
     name: entry.name,
-    run: entry.run,
+    run: input.run,
     upstreamUrl,
   };
 }

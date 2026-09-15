@@ -1572,6 +1572,11 @@ export function Wall({
     }
     if (toolApprovalsInFlightRef.current.has(id)) return;
     toolApprovalsInFlightRef.current.add(id);
+    const showFailure = (message: string) => {
+      if (!closingWorkspaceRef.current && lath.getMeta(id) && !lath.isDying(id) && !isSurfaceClosing(id)) {
+        lath.store.updateParams(id, { toolPending: { ...pending, error: message } });
+      }
+    };
 
     try {
       const platform = getPlatform();
@@ -1588,7 +1593,7 @@ export function Wall({
       const cwd = typeof meta?.params?.cwd === 'string' ? meta.params.cwd : pending.projectRoot;
       const resolved = await platform.toolControl?.({ op: 'lookup', name: pending.name, cwd, args: pending.args });
       if (resolved?.status !== 'ok') {
-        await closeSurface(id);
+        showFailure(resolved?.status === 'error' ? resolved.message : 'The Tool is no longer available. Check its configuration and try again.');
         return;
       }
 
@@ -1623,6 +1628,8 @@ export function Wall({
         getOrCreateTerminal(id);
         minimizePane(id);
       }
+    } catch (error) {
+      showFailure(error instanceof Error ? error.message : String(error));
     } finally {
       toolApprovalsInFlightRef.current.delete(id);
     }

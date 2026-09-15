@@ -1457,6 +1457,31 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it('retains the approval pane and explains an input that disappeared before approval', async () => {
+    setToolsEnabled(true);
+    let calls = 0;
+    Object.assign(fake, { toolControl: vi.fn(async (request: { op: string }) => {
+      if (request.op === 'trust') return { status: 'trust-recorded' };
+      if (calls++) return { status: 'error', message: 'The selected file is missing' };
+      return { status: 'untrusted', projectRoot: '/repo', path: '/repo/dormouse.yml', name: 'viewer', run: ['view', '/repo/file.md'], upstreamUrl: null };
+    }) });
+    try {
+      await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
+      await flush();
+      const respond = vi.fn();
+      await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+        method: SURFACE_CONTROL_METHODS.tool, params: { name: 'viewer', cwd: '/repo', args: ['file.md'] }, respond,
+      } })));
+      const id = respond.mock.calls[0][0].result.surfaceId;
+      const allow = [...container.querySelectorAll('button')].find(button => button.textContent?.includes('Always allow for folder'))!;
+      await act(async () => allow.click());
+      await flush();
+      expect(container.querySelector('[role="alert"]')?.textContent).toBe('The selected file is missing');
+      expect(container.querySelector(`[data-lath-leaf="${id}"]`)).not.toBeNull();
+      expect(container.querySelector(`[data-session-id="${id}"]`)).toBeNull();
+    } finally { setToolsEnabled(false); }
+  });
+
   it('keeps pending file inputs distinct and quotes argv after approval', async () => {
     setToolsEnabled(true);
     let trusted = false;

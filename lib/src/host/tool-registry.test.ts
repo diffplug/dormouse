@@ -194,3 +194,9 @@ describe("this repo's own dormouse.yml", () => {
     }
   });
 });
+
+
+it('rejects a shell command with a target-only dedupe key at declaration time', () => {
+  expect(() => parse('tools:\n  viewer:\n    run: view\n    prespawn_dedupe: [$TARGET]\n'))
+    .toThrow('$TARGET in prespawn_dedupe requires an argument-list run');
+});

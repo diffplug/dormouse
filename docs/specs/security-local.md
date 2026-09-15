@@ -204,7 +204,7 @@ Source of truth: `context` in `standalone/sidecar/pty-core.js`; `attachRouter` i
 
 **Must keep named-tool inputs as argv until the renderer quotes them for the target shell.** User configuration is the local user's authority; a project name cannot replace a user Tool during user-only lookup. Resolution belongs to `docs/specs/dor-tool.md` → Declaring tools.
 
-**Must derive the grant key in the host**, using the canonical upstream URL or project-root folder; a renderer request cannot supply an arbitrary grant URL. **Must bound config reads and refuse symlinks on every host.**
+**Must derive the grant key in the host**, using the canonical upstream URL or project-root folder; a renderer request cannot supply an arbitrary grant URL. **Must bound config reads and refuse repo-config symlinks on every host.** The user config may follow a dotfiles symlink; its opened descriptor must still be a bounded regular file.
 
 **An upstream grant trusts the claimed URL, not authenticated checkout provenance.** A supplied directory containing its own `.git/config` can claim an already-granted upstream; folder-only grants limit this sharing. **Must not describe the chrome gesture as a boundary against other processes running as the user**; the local account model is The dor control socket above.
 
