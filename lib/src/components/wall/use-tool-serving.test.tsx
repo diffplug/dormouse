@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakePtyAdapter, setPlatform } from '../../lib/platform';
 import { recordToolAnnounce, resetToolAnnounces } from '../../lib/tool-announce-store';
 import { useToolServing } from './use-tool-serving';
+import { captureToolParams } from './tool-transfer';
 import type { LathWallEngine } from './lath-wall-engine';
 import type { OpenPort } from '../../lib/platform/types';
 
@@ -89,6 +90,27 @@ async function run(params: Record<string, unknown>, scans: OpenPort[][]) {
 
 describe('port: announced', () => {
   const announced = { surfaceType: 'tool', command: 'x', toolPort: 'announced' };
+
+  it('defers Workspace transfer until reopening an existing browser has settled', async () => {
+    const { lath, state } = fakeLath({
+      ...announced, toolRender: 'ab-screencast', renderMode: 'ab-screencast',
+      session: 'existing-browser', wsPort: 9222, url: 'http://localhost:6006/', toolAnnouncedPort: 6006,
+    });
+    const opened = Promise.withResolvers<{ exitCode: number; stdout: string; stderr: string }>();
+    const platform = Object.assign(new FakePtyAdapter(), {
+      getOpenPorts: vi.fn(async () => [tcp(6007)]),
+      agentBrowserCommand: vi.fn(() => opened.promise),
+    });
+    setPlatform(platform);
+    recordToolAnnounce('tool-1', { port: 6007, name: null, key: null, dehydrate: false, persist: null });
+    const doorsRef = { current: [] };
+    function Probe() { useToolServing({ lath, doorsRef }); return null; }
+    await act(async () => root.render(<Probe />));
+    expect(state.params.url).toBe('http://localhost:6007/');
+    expect(() => captureToolParams(lath, ['tool-1'])).toThrow('Wait for the Tool browser to connect');
+    await act(async () => opened.resolve({ exitCode: 0, stdout: '', stderr: '' }));
+    expect(captureToolParams(lath, ['tool-1'])['tool-1'].session).toBeTruthy();
+  });
 
   it('frames nothing without an announcement, however many ports bind', async () => {
     const { state } = await run(announced, [[tcp(6006)], [tcp(6006)], [tcp(6006)]]);

@@ -220,6 +220,10 @@ export function useToolServing({
           renderMode: agentDrivable ? 'ab-screencast' : 'iframe',
           toolPortConflict: undefined,
           toolAnnouncedPort: announcedPort ?? undefined,
+          // Reopening an existing browser is also an in-flight connection:
+          // withhold its binding until open settles so a Workspace move cannot
+          // capture the old stream while this webview still owns the launch.
+          ...(agentDrivable ? { session: undefined, wsPort: undefined } : {}),
         });
         if (!agentDrivable) continue;
 

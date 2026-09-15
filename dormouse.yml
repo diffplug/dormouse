@@ -20,9 +20,7 @@ tools:
     # A real browser rather than an iframe, so an agent can drive the harness
     # with `dor ab --surface surface:N <verb>`.
     render: ab-screencast
-    # The harness binds the dev bridge (1422) *before* vite (1420), so a scan can
-    # catch the bridge alone and autobind would refuse the pair a tick later.
-    # It announces vite's port via OSC 367 instead; the scan still supplies the
-    # number it actually got, which is what survives an env override.
+    # The bridge and Vite each bind an OS-assigned port. Announce Vite's actual
+    # port via OSC 367 so Dormouse selects the UI from that pair of listeners.
     port: announced
     prespawn_dedupe: [standalone-harness, $PROJECT_ROOT]
