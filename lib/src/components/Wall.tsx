@@ -106,6 +106,7 @@ import {
   DoorElementsContext,
   ModeContext,
   WorkspaceActiveContext,
+  WorkspaceIdContext,
   PaneElementsContext,
   PaneWriteContext,
   WallActionsContext,
@@ -2021,6 +2022,7 @@ export function Wall({
   // --- Render ---
 
   return (
+    <WorkspaceIdContext.Provider value={effectiveWorkspaceId}>
     <WorkspaceActiveContext.Provider value={active}>
     <ModeContext.Provider value={mode}>
       <SelectedIdContext.Provider value={selectedId}>
@@ -2128,5 +2130,6 @@ export function Wall({
       </SelectedIdContext.Provider>
     </ModeContext.Provider>
     </WorkspaceActiveContext.Provider>
+    </WorkspaceIdContext.Provider>
   );
 }

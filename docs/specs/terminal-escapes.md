@@ -40,7 +40,7 @@ Source of truth: `oscDispositionAt` in `lib/src/lib/terminal-protocol.ts`, `boun
 
 Each chunk is also classified for the quiesce detector: **the activity monitor's `onData()` fires only when `visibleData` is non-empty**, so a chunk of nothing but notification/progress OSCs is not meaningful output, while one carrying visible output alongside them is.
 
-Replay (`pty:replay`) is the one raw stream and the one legitimate re-parse: **the webview runs a one-shot parser over the buffered bytes**, so semantic state repopulates and OSCs are stripped before xterm sees them. **Replay must not re-fire** alerts, quiesce events, protocol notifications, or query responses — it applies the semantic events and drops the rest (rationale). **Every parser in a realm holding the theme takes `themeColorProvider`**, one-shot replay parsers included: a *declined* query stays in `visibleData` for the receiving renderer to answer, and answering is the owner's alone (rationale).
+Replay (`pty:replay`) is the raw stream requiring re-parse: **the webview runs a one-shot parser over the buffered bytes**, so semantic state repopulates and OSCs are stripped before xterm sees them. **Historical replay must not re-fire** alerts, quiesce events, protocol notifications, or query responses — it applies the semantic events and drops the rest (rationale). Live since-mark alert replay follows `docs/specs/alert.md` → Live Workspace transfer. **Every parser in a realm holding the theme takes `themeColorProvider`**, one-shot replay parsers included: a *declined* query stays in `visibleData` for the receiving renderer to answer, and answering is the owner's alone (rationale).
 
 ## Supported OSCs
 

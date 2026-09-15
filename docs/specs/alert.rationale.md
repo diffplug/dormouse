@@ -117,3 +117,11 @@ Guarding only completion leaves a stale `start` free to replace the active utter
 ## Text And Security
 
 **Why the cold-restore path is not re-sanitized.** Reaching it requires a corrupted or hand-edited session store, and the text is rendered as plain text everywhere, so the residual exposure is layout — a very long or control-bearing string in a preview — rather than markup.
+
+## Live Workspace transfer
+
+A persisted reminder intentionally forgets rings and detector history. Reusing it for a live move erased alert episodes and pending delivery; recreating them from public status could instead speak twice. The live snapshot and per-sink receipt distinguish this handoff from cold restore. Receipt consumption occurs at sink admission because there is no transactional acknowledgement tying audible sound or phone display to Workspace ownership (2026-09).
+
+## Workspace union
+
+The maximum child counter hides a new alert from a child with a smaller counter. Summing counters would turn adding or removing a member into a notification. Per-member observation keeps semantic union and presentation edges separate; retaining the cue's clock also prevents switching Workspaces from restarting an old burst (2026-09).

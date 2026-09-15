@@ -84,6 +84,10 @@ import { getTerminalInstance } from "dormouse-lib/lib/terminal-registry";
 import { setPlatform } from "dormouse-lib/lib/platform";
 import { disposeAllSessions, getOrCreateTerminal } from "dormouse-lib/lib/terminal-registry";
 import { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
+import { AlertManager } from "dormouse-lib/lib/alert-manager";
+import { getAlertDeliveryReceipts, isAlertDeliveryPaused } from "dormouse-lib/lib/alert-delivery-state";
+import { watchUnattendedRings } from "dormouse-lib/lib/alert-ring-watch";
+import { clearTerminalActivity, getActivitySnapshot, setTerminalActivity } from "dormouse-lib/lib/session-activity-store";
 
 const WORKSPACE_ID = "ws-moving";
 
@@ -229,6 +233,7 @@ beforeEach(() => {
   resetWorkspaces();
   resetWindowSessionAggregator();
   clearAllNotepads();
+  clearTerminalActivity();
   _resetWorkspaceMovesForTesting();
 });
 
@@ -724,6 +729,41 @@ describe("the target half", () => {
     expect(released).toHaveBeenCalledTimes(1);
     expect(killPty).not.toHaveBeenCalled();
     expect(mocks.invoke).not.toHaveBeenCalledWith("adopt_failed", expect.anything());
+  });
+
+  it("discards imported alert state when adopt_done is refused before the Wall mounts", async () => {
+    const platform = fakePlatform();
+    platform.onAlertState((detail) => setTerminalActivity(detail.id, detail));
+    const host = mocks.invoke.getMockImplementation()!;
+    mocks.invoke.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "adopt_done") arrivals = [];
+      return host(cmd, args);
+    });
+    // The source's live ring and its still-pending speech receipt ride along.
+    const source = new AlertManager();
+    source.notifyFromProtocol("pane-a", { source: "OSC 9", title: "Done", body: null });
+    const episode = source.getState("pane-a").episode!;
+    const alertRuntime = source.pauseForTransfer("pane-a")!;
+    const fire = vi.fn();
+    const stopWatch = watchUnattendedRings({ sink: "speech", subscribe: () => () => {}, enabled: () => true, delayMs: () => 0, fire });
+    arrivals = [payload({
+      terminals: { "pane-a": { serialized: "", alertRuntime, alertDelivery: { speech: { episodeId: episode.id, dueAt: 0, phase: "pending" } } } },
+    } as Partial<WorkspaceTransferPayload>)];
+    try {
+      // No Wall handle: React never mounted the arrival before the refusal.
+      initWorkspaceMoves(platform);
+      await settle();
+      await settle();
+      expect(mocks.invoke).toHaveBeenCalledWith("adopt_done", { workspaceId: WORKSPACE_ID });
+      expect(getActivitySnapshot().has("pane-a")).toBe(false);
+      expect(isAlertDeliveryPaused("pane-a")).toBe(false);
+      expect(getAlertDeliveryReceipts("speech").has("pane-a")).toBe(false);
+      await settle();
+      expect(fire).not.toHaveBeenCalled();
+    } finally {
+      stopWatch();
+      source.dispose();
+    }
   });
 
   it("closes the window when its last Workspace leaves, instead of emptying it", async () => {
