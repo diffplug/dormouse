@@ -244,10 +244,12 @@ function wireXtermHandlers(
 
     if (isReplayTerminalReport && registry.get(id)?.isReplaying) return;
 
+    // Forwarded mouse interaction still counts as touched for kill confirmation.
+    if (!isReplayTerminalReport) markSessionTouched(id);
+
     // Inside programs can request hover and wheel reports. Mouse-only chunks
     // are not keystrokes; actual clicks attend through the Pane's DOM handler.
     if (!isReplayTerminalReport && stripMouseReportsFromInput(input).length > 0) {
-      markSessionTouched(id);
       // CSI/SS3 can encode real keys. The broader filter protects the prompt
       // recorder only; terminal replies must neither record input nor attend.
       if (!inputIsSyntheticTerminalReport(input)) {

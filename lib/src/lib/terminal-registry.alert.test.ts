@@ -452,6 +452,16 @@ describe('terminal-registry alert behavior', () => {
     expect(isUntouched(id)).toBe(false);
   });
 
+  it.each(['\x1b[<35;10;20M', '\x1b[64;10;20M', '\x1b[M@!!'])(
+    'keeps forwarded mouse interaction touched for kill confirmation: %j', (input) => {
+      const id = 'mouse-touched';
+      const entry = createSession(id);
+      expect(isUntouched(id)).toBe(true);
+      entry.terminal.emitInput(input);
+      expect(isUntouched(id)).toBe(false);
+    },
+  );
+
   it('does not mark synthetic terminal reports as touched', () => {
     const id = 'synthetic-report-untouched';
     const entry = createSession(id);
@@ -923,6 +933,9 @@ describe('terminal-registry alert behavior', () => {
   it.each([
     ['DCS reply', '\x1bP1$r0m\x1b\\'],
     ['device attributes', '\x1b[?1;2c'],
+    ['kitty keyboard query reply', '\x1b[?0u'],
+    ['kitty keyboard flags reply', '\x1b[?31u'],
+    ['kitty support probe replies', '\x1b[?0u\x1b[?1;2c'],
     ['focus report', '\x1b[I'],
     ['combined replies', '\x1bP1$r0m\x1b\\\x1b[?1;2c'],
     ['SGR hover report', '\x1b[<35;10;20M'],

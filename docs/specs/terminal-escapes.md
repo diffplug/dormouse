@@ -121,9 +121,9 @@ Source of truth: `getWebviewHtml` in `vscode-ext/src/webview-html.ts`, `app.secu
 
 ### Report filtering on the input side
 
-`onData` includes xterm.js's own *replies* as candidate PTY input. **The two classifiers below require every token of a chunk to match**, so a report glued onto real keystrokes is never mistaken for one.
+`onData` includes xterm.js *replies*. **Both classifiers require every chunk token to match**, so a report glued onto real keystrokes is never mistaken for one.
 
-- **`inputIsReplayTerminalReport`** — dropped outright while `isReplaying` (rationale). Shapes: cursor-position / device-status (`CSI [?]<params> R` / `n`), device attributes (`CSI [?>=]<params> c`), window-manipulation reports (`CSI <params> t` / `x`), DECRQSS and XTSMGRAPHICS reports (`CSI [?]<params> $y` / `S`), focus in/out (`CSI I` / `CSI O`), and OSC, DCS, or APC replies of any shape. It also gates input recording, attention ([alert.md](alert.md)), and the untouched-session flag ([layout.md](layout.md)).
+- **`inputIsReplayTerminalReport`** — dropped outright while `isReplaying` (rationale). Shapes: cursor-position / device-status (`CSI [?]<params> R` / `n`), device attributes (`CSI [?>=]<params> c`), window-manipulation reports (`CSI <params> t` / `x`), DECRQSS and XTSMGRAPHICS reports (`CSI [?]<params> $y` / `S`), focus in/out (`CSI I` / `CSI O`), kitty keyboard-query replies (`CSI ? <flags> u`), and OSC, DCS, or APC replies of any shape. Also gates recording, attention ([alert.md](alert.md)), and untouched state ([layout.md](layout.md)).
 - **`inputIsSyntheticTerminalReport`** — the broader prompt-recording guard (any chunk built only of CSI, SS3 `ESC O <final>`, OSC, or APC tokens). **Never dropped, and must suppress input recording alone** — these sequences can encode real keys.
 - **`stripMouseReportsFromInput`** — removes X10 (`CSI M <3 bytes>`), SGR (`CSI < b;x;y M/m`) and urxvt (`CSI b;x;y M`) mouse reports during mouse-mode override, so reports bypassing DOM interception never reach the PTY ([mouse-and-clipboard.md](mouse-and-clipboard.md)). Keyboard-attention gating: `docs/specs/alert.md` → Attention.
 
