@@ -44,7 +44,7 @@ Source of truth: `AlertState` / `ActivityNotification` / `SessionStatus` in `lib
 
 ## Attention
 
-**Set `attentionId` only from explicit user actions** that plausibly mean "I am looking at this Session": clicking a Pane body or header, entering passthrough on a Pane, typing into a Session in passthrough, and clicking a Door or pressing `Enter` on one (both reattach into passthrough).
+**Must set `attentionId` only for Pane body/header clicks, entering passthrough, typing in passthrough (including CSI/SS3 keyboard encodings), or a Door click or `Enter` on one** — both reattach into passthrough. **Never treat terminal replies as human attention** (rationale).
 
 **Never count** visibility, command-mode selection, hover, a Door existing in the baseboard, or reattaching a Door with `d` into command mode.
 
@@ -52,7 +52,7 @@ Attention is lost when the attention timer expires, the app loses focus, the att
 
 `T_USER_ATTENTION` is the user-facing **inactivity timeout** (Alarm settings) and also the **minimum runtime for a command-exit ring** — a command shorter than the walk-away window was probably watched. It is instance state on the `AlertManager`, not a module constant, and both uses follow the configured value; changing it re-arms a live attention timer from that moment, so a shortened window applies immediately.
 
-Source of truth: `cfg.alert` in `lib/src/cfg.ts`; `setInactivityTimeoutMs` in `lib/src/lib/alert-manager.ts`.
+Source of truth: `cfg.alert` in `lib/src/cfg.ts`; `setInactivityTimeoutMs` in `lib/src/lib/alert-manager.ts`; `wireXtermHandlers` in `lib/src/lib/terminal-lifecycle.ts`, pinned by `lib/src/lib/terminal-registry.alert.test.ts`.
 
 ## Completion events
 
@@ -144,7 +144,7 @@ Source of truth: `awaitCompletion` in `lib/src/lib/alert-manager.ts`; `alertAwai
 
 ## WATCHING Track
 
-**WATCHING is a property of the command, not of a Session.** The user maintains a set of watched command names; WATCHING is on for a Session exactly while its foreground command's name is in that set, so a rule reaches every Session running that command and removing it anywhere removes it everywhere (rationale). There is no per-Session enable, and no per-Session mute.
+**Must key WATCHING by foreground command name.** A Session is watched exactly while that name belongs to the watched set; edits reach every matching Session. **Never add per-Session enable or mute** (rationale).
 
 **The output/silence detector is always on.** Every Session runs one `QuiesceDetector` for its whole lifetime, fed by every output chunk and reset at every command boundary. It never latches and knows nothing about attention or rules; the rule set decides only whether its state is publicly visible and whether a settle — a busy Session that stayed quiet — may *ring*.
 
@@ -174,12 +174,14 @@ Meaningful output excludes resize redraw noise during `T_RESIZE_DEBOUNCE`; theme
 
 - Output drives the detector up `NOTHING_TO_SHOW` -> `MIGHT_BE_BUSY` -> `BUSY`; silence drives it down `BUSY` -> `MIGHT_NEED_ATTENTION` -> settled. The `MIGHT_*` states are debounce windows in both directions.
 - First output starts candidate tracking without changing status; unconfirmed `MIGHT_BE_BUSY` returns to `NOTHING_TO_SHOW`.
-- **The detector never holds `ALERT_RINGING`.** A settle is reported once and the detector immediately returns to `NOTHING_TO_SHOW`; the ring it may raise latches in the Session entry (`watchingRingingCommand`), which makes the public status `ALERT_RINGING` and keeps it there through further output.
+- **Must discard unconfirmed candidate history after an output gap beyond `busyCandidateGap + busyConfirmGap`, including when a timer runs late** (rationale). Pinned by `forgets stale candidate history` and `expires candidate history even when the confirmation timer has not run` in `lib/src/lib/quiesce-detector.test.ts`.
+- **The detector never holds `ALERT_RINGING`.** It reports each settle once and returns to `NOTHING_TO_SHOW`; rings latch in `watchingRingingCommand`.
+- **With `deferAlertsUntilQuiet`, withdraw a WATCHING ring when watched work resumes confirmed BUSY.** Preserve the detector, TODO, notification detail, and other tracks. The next unattended settle restarts speech/push delays. Short redraws and post-exit output retain the ring (rationale).
 - **A settle rings only if** a rule matches the foreground command *and* the Session lacks attention at the confirmation moment.
-- **Attention alone never resets the detector** — an in-flight `BUSY` -> `MIGHT_NEED_ATTENTION` -> settled transition continues, so a parked quiet await still receives its completion. **Only attending or dismissing an actual WATCHING ring resets it**, to `NOTHING_TO_SHOW`, so the tail of the run that just rang cannot settle again.
+- **Never reset the detector for attention alone**; settles must reach awaits. **Must reset to `NOTHING_TO_SHOW` when attending or dismissing a WATCHING ring**, preventing its output tail from settling again.
 - **Rings must be caused by a fresh transition** — a settle the detector just reported — never by rerender, theme change, remount, minimize, or reattach.
 
-Source of truth: `commandArgv0` in `lib/src/lib/terminal-state.ts`; `QuiesceDetector` in `lib/src/lib/quiesce-detector.ts`; `onSettled` in `lib/src/lib/alert-manager.ts`; renderer mirror `lib/src/lib/watched-commands.ts`, multi-renderer coordinator `lib/src/lib/watched-command-host.ts`.
+Source of truth: `commandArgv0` in `lib/src/lib/terminal-state.ts`; `QuiesceDetector` in `lib/src/lib/quiesce-detector.ts`; `onSettled` / `withdrawResumedWatchingRing` in `lib/src/lib/alert-manager.ts` (pinned by `lib/src/lib/alert-resumed-output.test.ts`); renderer mirror `lib/src/lib/watched-commands.ts`, multi-renderer coordinator `lib/src/lib/watched-command-host.ts`.
 
 ## Terminal reports
 

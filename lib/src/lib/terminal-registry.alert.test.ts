@@ -898,6 +898,52 @@ describe('terminal-registry alert behavior', () => {
     expect(getActivity(id).todo).toBe(true);
   });
 
+  it.each([
+    ['kitty key', '\x1b[120u'],
+    ['modified key', '\x1b[120;5u'],
+    ['win32 key', '\x1b[88;45;120;1;0;1_'],
+    ['arrow key', '\x1b[A'],
+    ['SS3 key', '\x1bOA'],
+  ])('counts a %s as attention and forwards it unchanged', (_name, input) => {
+    const id = 'encoded-input-attention';
+    const entry = createSession(id);
+    enableAlert(id);
+    driveToRingingNeedsAttention(id);
+    const write = vi.spyOn(fakePlatform, 'writePty');
+    try {
+      entry.terminal.emitInput(input);
+      expect(write).toHaveBeenCalledWith(id, input);
+      expect(getActivity(id)).toMatchObject({ status: 'NOTHING_TO_SHOW', todo: true });
+    } finally {
+      write.mockRestore();
+    }
+  });
+
+  it.each([
+    ['DCS reply', '\x1bP1$r0m\x1b\\'],
+    ['device attributes', '\x1b[?1;2c'],
+    ['focus report', '\x1b[I'],
+    ['combined replies', '\x1bP1$r0m\x1b\\\x1b[?1;2c'],
+  ])('forwards a live %s without taking attention from another pane', (_name, input) => {
+    const id = 'reply-attention';
+    const entry = createSession(id);
+    enableAlert(id);
+    driveToRingingNeedsAttention(id);
+    createSession('attended-pane');
+    attendSession('attended-pane');
+    const attend = vi.spyOn(fakePlatform, 'alertAttend');
+    const write = vi.spyOn(fakePlatform, 'writePty');
+    try {
+      entry.terminal.emitInput(input);
+      expect(write).toHaveBeenCalledWith(id, input);
+      expect(attend).not.toHaveBeenCalled();
+      expect(getActivity(id)).toMatchObject({ status: 'ALERT_RINGING', todo: false });
+    } finally {
+      attend.mockRestore();
+      write.mockRestore();
+    }
+  });
+
   it('Enter that dismisses a ringing alert leaves the auto-created TODO visible', () => {
     const id = 'enter-dismisses-ringing';
     const entry = createSession(id);
