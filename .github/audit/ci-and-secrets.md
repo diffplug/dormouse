@@ -53,14 +53,16 @@ A `FAIL IF` that says "any" quantifies over what exists now; illustrative
 - Use `gh api --paginate` for every list request, including deployment policies
   and secret listings, and check every member across all returned pages.
 - Judge every discovered member against the applicable conditions, including
-  explicit exceptions. Record FAIL for a violated condition.
-  The secret-placement inventory in `security-ci.md` is
-  normative: a secret outside the specified placements and explicit acceptances
-  is a FAIL, not a documentation omission. Absence from an illustrative
-  environment `Today:` list alone is not a violation. Report documentation
-  omissions separately as INFO under `### Qualitative findings`, and do not
-  report an omission when another section of the scoped specs already covers
-  the member. Coverage elsewhere never waives an applicable condition.
+  explicit exceptions. Record FAIL for a violated condition. The secret-placement
+  inventory in `security-ci.md` is normative: a secret outside the specified
+  placements is a FAIL, not a documentation omission. Apply the shared
+  preamble's exclusions for accepted risks and known gaps in `docs/specs/security.md`
+  ("What is not defended" and "Known gaps"). A mere mention elsewhere in the
+  scoped specs, such as a blast-radius table row, grants no exclusion.
+- Absence from an illustrative environment `Today:` list alone is not a
+  violation. Report documentation omissions as INFO under `### Qualitative findings`;
+  skip the INFO when another section of the scoped specs already covers the
+  member. This only suppresses the documentation finding, not a placement FAIL.
 - Never record `PASS` on a condition evaluated over only the spec's listed
   subset or an incomplete API enumeration. Apply the access-error handling
   above and the shared preamble's incomplete-check verdict rules.
