@@ -93,17 +93,26 @@ interface Negotiation {
  * that. The claim under test is that the addon carries the session when a
  * channel comes up, not that ICE never loses one, so a lost attempt is retried
  * on a fresh session rather than reported as a broken addon.
+ *
+ * **A negotiation that throws is retried like one that never opens.** `start`
+ * runs inside the attempt, not in front of it: {@link startReliabilityProbe}
+ * exchanges its whole description pair there, so the addon raising an ICE-level
+ * error mid-exchange is the same lost attempt as a channel that stays shut, and
+ * spending an attempt on it is the point. Each `start` drops its own peers
+ * before rethrowing, so the retry never runs beside them.
  */
 async function untilOpen<T extends Negotiation>(start: () => Promise<T>, what: string): Promise<T> {
   let lost: unknown;
   for (let attempt = 1; attempt <= NEGOTIATION_ATTEMPTS; attempt += 1) {
-    const run = await start();
+    let started: T | undefined;
     try {
+      const run = await start();
+      started = run;
       await waitFor(() => run.open(), what, ATTEMPT_BUDGET_MS);
       return run;
     } catch (error) {
       lost = error;
-      run.abandon();
+      started?.abandon();
     }
   }
   throw lost;
@@ -116,20 +125,29 @@ async function untilOpen<T extends Negotiation>(start: () => Promise<T>, what: s
 async function startConnected() {
   const clientPeers: DirectPeerLike[] = [];
   const burrowPeers: DirectPeerLike[] = [];
-  const harness = await makeE2eHarness({
-    deps: { createDirectPeer: collect(clientPeers, buildPeer) },
-    burrowDirect: collect(burrowPeers, buildPeer),
-  });
-  await harness.connectPaired();
-  return {
-    harness,
-    clientPeers,
-    burrowPeers,
-    open: () => harness.client.transportPath === 'direct',
-    abandon: () => {
-      for (const peer of [...clientPeers, ...burrowPeers]) peer.close();
-    },
+  // Standing before the ceremony runs, because `untilOpen` retries a setup that
+  // throws: whatever `collect` had already taken by then is dropped here rather
+  // than left holding native threads beside the next attempt.
+  const abandon = () => {
+    for (const peer of [...clientPeers, ...burrowPeers]) peer.close();
   };
+  try {
+    const harness = await makeE2eHarness({
+      deps: { createDirectPeer: collect(clientPeers, buildPeer) },
+      burrowDirect: collect(burrowPeers, buildPeer),
+    });
+    await harness.connectPaired();
+    return {
+      harness,
+      clientPeers,
+      burrowPeers,
+      open: () => harness.client.transportPath === 'direct',
+      abandon,
+    };
+  } catch (error) {
+    abandon();
+    throw error;
+  }
 }
 
 const connectedDirect = () => untilOpen(startConnected, 'the session to go direct');
@@ -164,30 +182,46 @@ async function startReliabilityProbe() {
   ] as const) {
     from.addEventListener('icecandidate', (ev) => {
       const candidate = (ev as { candidate?: unknown }).candidate;
-      if (candidate) void (to as unknown as AddsCandidates).addIceCandidate(candidate);
+      // Trickled, while the descriptions are still crossing below. This
+      // polyfill hands a candidate straight to libdatachannel with no
+      // buffering, so one that arrives before the far end has its remote
+      // description throws there — unhandled, and outside any attempt's reach.
+      // Dropped instead: it costs this negotiation at worst, and `untilOpen`
+      // spends a fresh pair on the next one.
+      if (candidate)
+        void (to as unknown as AddsCandidates).addIceCandidate(candidate).catch(() => {});
     });
   }
-  const asked = offerer.createDataChannel(DIRECT_CHANNEL_LABEL, {
-    ordered: false,
-    maxRetransmits: 0,
-  } as { ordered?: boolean }) as unknown as ChannelFacts;
-  const offer = await offerer.createOffer();
-  await offerer.setLocalDescription(offer);
-  await answerer.setRemoteDescription(offerer.localDescription!);
-  const answer = await answerer.createAnswer();
-  await answerer.setLocalDescription(answer);
-  await offerer.setRemoteDescription(answerer.localDescription!);
-  return {
-    asked,
-    get adopted() {
-      return adopted;
-    },
-    open: () => adopted !== null,
-    abandon: () => {
-      offerer.close();
-      answerer.close();
-    },
+  const abandon = () => {
+    offerer.close();
+    answerer.close();
   };
+  try {
+    const asked = offerer.createDataChannel(DIRECT_CHANNEL_LABEL, {
+      ordered: false,
+      maxRetransmits: 0,
+    } as { ordered?: boolean }) as unknown as ChannelFacts;
+    const offer = await offerer.createOffer();
+    await offerer.setLocalDescription(offer);
+    await answerer.setRemoteDescription(offerer.localDescription!);
+    const answer = await answerer.createAnswer();
+    await answerer.setLocalDescription(answer);
+    await offerer.setRemoteDescription(answerer.localDescription!);
+    return {
+      asked,
+      get adopted() {
+        return adopted;
+      },
+      open: () => adopted !== null,
+      abandon,
+    };
+  } catch (error) {
+    // The exchange is the whole of this `start`, so an ICE-level throw anywhere
+    // in it leaves both peers built and negotiating. Dropped before the throw
+    // reaches `untilOpen`, which answers it with a fresh pair.
+    abandon();
+    throw error;
+  }
 }
 
 describe('the direct path over the native addon', () => {
