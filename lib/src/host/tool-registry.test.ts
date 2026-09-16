@@ -225,7 +225,17 @@ it('keeps project associations inert and validates user associations at declarat
   expect(() => parse('open:\n  - {match: "*.md", tool: missing}\n', USER))
     .toThrow('defined in this user file');
   expect(() => parse('tools:\n  viewer:\n    run: [viewer]\nopen:\n  - {match: "*.md", tool: viewer, extra: true}\n', USER))
-    .toThrow('defined in this user file');
+    .toThrow("unknown field 'extra'");
   expect(() => parse('tools:\n  viewer:\n    run: viewer\nopen:\n  - {match: "*.md", tool: viewer}\n', USER))
     .toThrow("open rule for 'viewer' needs an argument-list run");
+});
+
+it('rejects an explicit empty tools block while allowing an absent block', () => {
+  expect(() => parse('tools:\nopen: []\n', USER)).toThrow("'tools' must be a mapping");
+  expect(parse('open: []\n', USER).tools.size).toBe(0);
+});
+
+it('names unknown fields on built-in file associations', () => {
+  expect(() => parse('open:\n  - {match: "*.md", tool: "builtin:file", extra: true}\n', USER))
+    .toThrow("open rule for 'builtin:file' has an unknown field 'extra'");
 });
