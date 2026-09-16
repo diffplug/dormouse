@@ -62,6 +62,14 @@ const FIXTURES = [
   ['ws, explicit loopback host', "\nexport function __selftest() { return new WebSocket.Server({ host: '127.0.0.1' }); }\n"],
   ['ws, port only', '\nexport function __selftest() { return new WebSocketServer({ port: 9999 }); }\n'],
   ['ws, port only', '\nexport function __selftest() { return new WebSocket.Server({ port: 9999 }); }\n'],
+  ['vite, server.host', "\nexport const __selftest = { server: { host: '127.0.0.1', strictPort: true } };\n"],
+  // A nested `server` key above `host` — the shape a real `vite.config.ts` has
+  // and the one a first-brace-terminated scan misses.
+  ['vite, server.host', "\nexport const __selftest = { server: { fs: { allow: ['.'] }, host: '127.0.0.1' } };\n"],
+  // `proxy` nests a target object per route — two levels, the deepest the form
+  // reaches. A route option that nests again (`headers`, `configure`) is past
+  // the ceiling `scripts/loopback-lint.mjs` states.
+  ['vite, server.host', "\nexport const __selftest = { server: { proxy: { '/api': { target: 'http://up' } }, host: '127.0.0.1' } };\n"],
 ];
 
 const selftest = makeSelftest('loopback-lint.mjs', '.loopback-selftest.bak');

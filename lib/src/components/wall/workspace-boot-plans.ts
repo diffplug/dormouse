@@ -56,7 +56,7 @@ export function getWorkspaceBootPlan(workspaceId: WorkspaceId): WallBootProps {
 }
 
 /** Drop one Workspace's parked plan: its mount was unwound before the store's
- *  lifecycle would have pruned it (`unwindAdoption` in
+ *  lifecycle would have pruned it (`discardArrival` in
  *  `standalone/src/workspace-move.ts`). */
 export function forgetWorkspaceBootPlan(workspaceId: WorkspaceId): void {
   plans.delete(workspaceId);

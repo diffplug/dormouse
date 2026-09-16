@@ -188,8 +188,8 @@ export type LathWallEngine = {
 
   /** Hydration: a persisted Lath layout when usable, else a fresh tree from
    *  `initialPaneIds` (or one generated id). Returns the resulting pane ids
-   *  (pre-order) and whether the fresh path was taken (so the Wall knows to prime
-   *  default-shell opts, mirroring `addTerminalPanel`). */
+   *  (pre-order) and whether the fresh path was taken, which is what tells the
+   *  Wall's seed effect to prime default-shell opts for the generated ids. */
   seed(
     lathBlob: unknown,
     initialPaneIds: string[] | undefined,
@@ -278,7 +278,8 @@ export function createLathWallEngine(
       }
 
       // 2. Fresh tree from the restored session ids (or one generated id), splitting
-      //    successive panes via the store's autoEdge (as `addTerminalPanel` does).
+      //    successive panes via the store's autoEdge — the `null` position every
+      //    Wall-level add without a reference pane uses.
       const ids = initialPaneIds && initialPaneIds.length > 0 ? initialPaneIds : [generatePaneId()];
       store.seed(leafTree(ids[0]), [[ids[0], terminalLeafMeta()], ...doorMeta]);
       for (let i = 1; i < ids.length; i++) {

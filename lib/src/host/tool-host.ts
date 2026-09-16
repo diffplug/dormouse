@@ -88,7 +88,7 @@ export function createToolHost(options: { stateDir?: string; userConfigPath?: st
         const file = await readUserToolFile(userPath);
         const entry = file?.tools.get(request.name);
         if (file && entry) return await resolveUserTool(file, userPath, entry, request.cwd, args);
-        if (project) return project;
+        if (project && (project.status !== 'no-file' || !file)) return project;
         return { status: 'unknown-tool', projectRoot: dirname(userPath), path: userPath, names: [...(file?.tools.keys() ?? [])].sort() };
       } catch (error) {
         return { status: 'error', message: error instanceof Error ? error.message : String(error) };

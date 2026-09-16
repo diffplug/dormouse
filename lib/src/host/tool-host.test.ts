@@ -112,6 +112,14 @@ describe('createToolHost', () => {
     }
   });
 
+  it('names the user configuration and available tools after a project-file miss', async () => {
+    await rm(join(repo, 'dormouse.yml'));
+    const path = join(repo, 'user.yml');
+    await writeFile(path, 'tools:\n  viewer:\n    run: viewer\n');
+    expect(await createToolHost({ stateDir, userConfigPath: path }).handle({ op: 'lookup', name: 'viewr', cwd: repo }))
+      .toEqual({ status: 'unknown-tool', projectRoot: repo, path, names: ['viewer'] });
+  });
+
   it('returns a parse error rather than throwing across the wire', async () => {
     await writeFile(join(repo, 'dormouse.yml'), 'tools:\n  t:\n    run: x\n    prespawn_dedupe: [$NOPE]\n');
     const result = await createToolHost({ stateDir }).handle({ op: 'lookup', name: 't', cwd: repo });
