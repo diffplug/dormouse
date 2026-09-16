@@ -1575,11 +1575,12 @@ export function Wall({
 
     try {
       const platform = getPlatform();
-      await platform.toolControl?.({
+      const grant = await platform.toolControl?.({
         op: 'trust',
         kind: choice,
         projectRoot: pending.projectRoot,
       });
+      if (grant?.status !== 'trust-recorded') return;
 
       // Re-resolve now that the grant exists. The untrusted lookup deliberately
       // withholds `render` / `port` / `key` — they live only in the `ok` arm — so

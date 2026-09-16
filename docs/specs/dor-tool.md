@@ -69,7 +69,7 @@ Source of truth: `acquireToolSpawnLock` / the `surface.tool` handler in `lib/src
 1. **Must derive grant keys host-side from the canonical upstream remote URL or project-root folder.** Either recorded key satisfies lookup; upstream trust spans clones and worktrees. (rationale)
 2. **Must present unapproved named invocations in a visible pending Tool pane**, returning `pending` without spawning a PTY. Defer requested minimization until approval. Pending approval is never persisted as a runnable Tool.
 3. **Must grant only through the approval controls in Dormouse chrome**, never through a `dor` verb or terminal output. The prompt names the proposed command; it is not itself executable terminal content. (rationale)
-4. **Must re-resolve the named entry after the grant is written**, then stage the resolved command, renderer, port strategy, and key before exposing its terminal. A Surface closed during the host calls must not start later.
+4. **Must require `trust-recorded` before re-resolving the named entry**, retaining the pending pane after a rejected grant, then stage the resolved command, renderer, port strategy, and key before exposing its terminal. A Surface closed during the host calls must not start later.
 5. **Must close a declined approval through the ordinary close coordinator and record no denial.** Archive failure may retain the pane. (rationale)
 6. **Must share grant updates safely across host processes**, merging against the latest file under the existing lock and atomic-write protocol.
 7. **Never content-hash grants or re-prompt solely because the config changed.** (rationale)

@@ -1448,10 +1448,10 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
-  it('keeps an approved tool deferred until trust lookup and shell staging finish', async () => {
+  it.each([true, false])('keeps a tool deferred until trust succeeds (%s), lookup and shell staging finish', async grantSucceeds => {
     setToolsEnabled(true);
     let toolId: string | undefined;
-    const trustGate = Promise.withResolvers<{ status: 'trust-recorded' }>();
+    const trustGate = Promise.withResolvers<{ status: 'trust-recorded' } | { status: 'error'; message: string }>();
     const resolvedGate = Promise.withResolvers<{
       status: 'ok';
       projectRoot: string;
@@ -1510,9 +1510,15 @@ describe('Wall on the Lath engine', () => {
       expect(toolControl.mock.calls.filter(([request]) => request.op === 'trust')).toHaveLength(1);
       expect(container.querySelector(`[data-session-id="${toolId}"]`)).toBeNull();
 
-      await act(async () => { trustGate.resolve({ status: 'trust-recorded' }); });
+      await act(async () => { trustGate.resolve(grantSucceeds ? { status: 'trust-recorded' } : { status: 'error', message: 'grant could not be saved' }); });
       await flush();
       expect(container.querySelector(`[data-session-id="${toolId}"]`)).toBeNull();
+      if (!grantSucceeds) {
+        expect(toolControl.mock.calls.filter(([request]) => request.op === 'lookup')).toHaveLength(1);
+        expect(container.querySelector(`[data-lath-leaf="${toolId}"]`)).not.toBeNull();
+        expect(pendingShellOpts.has(toolId)).toBe(false);
+        return;
+      }
 
       await act(async () => {
         resolvedGate.resolve({
