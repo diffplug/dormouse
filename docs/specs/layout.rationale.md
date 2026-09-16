@@ -2,6 +2,10 @@
 
 > Informative companion to [layout.md](layout.md): the evidence, measurements, and dead-approach history behind its rules, keyed by that spec's headings (AGENTS.md → "What, not why"). Nothing here is normative.
 
+## Pane header
+
+Viewport breakpoints keep every button visible when a wide window contains a narrow split. Tool headers have even less browser width because Terminal Context occupies its own button. Measuring the browser header and moving fixed controls together prevents long keys, note buttons, or renderer chips from pushing minimize/kill into a neighboring pane.
+
 ## Pane body
 
 xterm.js paints only its own rendered surface, and integer row fitting leaves a sub-row remainder at the bottom of the pane: a host background differing from the terminal screen shows as a stripe under the last row, and an unclipped host squares off the rounded bottom corners.

@@ -5,10 +5,11 @@ import { join } from 'node:path';
 import { request } from 'node:http';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, test } from 'node:test';
 import { startFileViewer } from '../dist/file-viewer.js';
 import { fileViewerFormat } from '../dist/file-viewer-format.js';
+import { stageDorCli } from '../../scripts/stage-dor-cli.mjs';
+import { buildPdfViewer } from '../scripts/build-pdf-viewer.mjs';
 
 let root;
 const viewers = [];
@@ -100,8 +101,9 @@ test('rejects parent-directory references and symlinks escaping the document dir
   assert.notEqual((await get(viewer, asset(viewer, '../secret.txt'))).status, 200);
 });
 
-test('supports byte ranges and HEAD for native PDF/image presentation', async () => {
-  const viewer = await start('README.pdf', '%PDF-1.7 example bytes');
+test('keeps descriptor-backed PDF byte ranges and HEAD behind the rendered preview', async () => {
+  const opened = await start('README.pdf', '%PDF-1.7 example bytes');
+  const viewer = { ...opened, path: opened.path.replace(/view$/, 'file/README.pdf') };
   assert.equal((await get(viewer)).headers['content-type'], 'application/pdf');
   const range = await get(viewer, viewer.path, { Range: 'bytes=0-3' });
   assert.equal(range.status, 206);
@@ -110,6 +112,38 @@ test('supports byte ranges and HEAD for native PDF/image presentation', async ()
   assert.equal((await get(viewer, viewer.path, { Range: 'bytes=999-1000' })).status, 416);
   assert.equal((await get(viewer, viewer.path, { Range: 'bytes=0-1,4-6' })).status, 416);
   assert.equal((await get(viewer, viewer.path, {}, 'HEAD')).body, '');
+});
+
+test('serves an exact capability-gated PDF renderer inventory with narrowly scoped WASM permission', async () => {
+  const viewer = await start('report & notes.pdf', '%PDF-1.7 example bytes');
+  const prefix = viewer.path.slice(0, -'view'.length);
+  const shell = await get(viewer);
+  assert.equal(shell.headers['content-type'], 'text/html; charset=utf-8');
+  assert.match(shell.body, /report &amp; notes.pdf/);
+  assert.match(shell.body, /data-document="\.\/file\/report%20%26%20notes.pdf"/);
+  assert.match(shell.body, /Page number/);
+  assert.match(shell.headers['content-security-policy'], /worker-src 'self'/);
+  assert.match(shell.headers['content-security-policy'], /'wasm-unsafe-eval'/);
+  assert.doesNotMatch(shell.headers['content-security-policy'], /(?:^| )'unsafe-eval'/);
+  for (const name of ['viewer.mjs', 'controller.mjs', 'pdf.mjs', 'pdf.worker.mjs', 'pdf_viewer.css', 'viewer.css',
+    'cmaps/Adobe-Japan1-UCS2.bcmap', 'standard_fonts/LiberationSans-Regular.ttf', 'wasm/openjpeg.wasm', 'LICENSE']) {
+    const path = `${prefix}pdfjs/${name}`;
+    const response = await get(viewer, path);
+    assert.equal(response.status, 200, name);
+    assert.ok(response.body.length > 0, name);
+    assert.equal(response.headers['cache-control'], 'no-store');
+    assert.equal(response.headers['referrer-policy'], 'no-referrer');
+    assert.equal(response.headers['content-security-policy'].includes("'wasm-unsafe-eval'"), name === 'pdf.worker.mjs');
+    assert.equal((await get(viewer, path, {}, 'HEAD')).body, '');
+    assert.equal((await get(viewer, path, { Origin: 'https://evil.test' })).status, 403);
+    assert.equal((await get(viewer, path.replace(prefix, '/wrong/'))).status, 403);
+  }
+  for (const name of ['manifest.json', 'viewer.html', '../package.json', '%2e%2e/package.json', 'pdf.sandbox.mjs', 'wasm/quickjs-eval.wasm']) {
+    assert.notEqual((await get(viewer, `${prefix}pdfjs/${name}`)).status, 200, name);
+  }
+  assert.equal((await get(viewer, `${prefix}file/private.pdf`)).status, 404);
+  const text = await start('plain.txt', 'text');
+  assert.equal((await get(text, text.path.replace(/view$/, 'pdfjs/pdf.mjs'))).status, 404);
 });
 
 test('fails unsupported formats and oversized text before starting a viewer', async () => {
@@ -167,10 +201,17 @@ test('bounds the asset graph and keeps a grant on the opened file after path rep
   await assert.rejects(startFileViewer(html), /256 referenced files/);
 });
 
-test('the bundled private entry announces its port and path, then exits on termination', { timeout: 10_000 }, async () => {
-  const file = join(root, 'cli.txt');
-  await writeFile(file, 'cli preview');
-  const child = spawn(process.execPath, [fileURLToPath(new URL('../dist/dor.js', import.meta.url)), '__view-file', file], { stdio: ['ignore', 'pipe', 'pipe'] });
+test('the staged private entry serves PDF assets without node_modules and exits on termination', { timeout: 10_000 }, async () => {
+  const file = join(root, 'cli.pdf');
+  await writeFile(file, '%PDF-1.7 example bytes');
+  const staged = join(root, 'staged');
+  await stageDorCli(staged);
+  // The library pretest runs this asset-only prerequisite on a clean checkout.
+  // Rebuild into an empty staged directory, without relying on dor's artifacts.
+  const assets = join(staged, 'dist/pdf-viewer');
+  await rm(assets, { recursive: true });
+  await buildPdfViewer(assets);
+  const child = spawn(process.execPath, [join(staged, 'dist/dor.js'), '__view-file', file], { stdio: ['ignore', 'pipe', 'pipe'] });
   try {
     let output = '';
     const announce = await new Promise((resolve, reject) => {
@@ -182,7 +223,8 @@ test('the bundled private entry announces its port and path, then exits on termi
         if (match) resolve(JSON.parse(match[1]));
       });
     });
-    assert.equal((await get(announce)).status, 200);
+    assert.match((await get(announce)).body, /PDF controls/);
+    assert.equal((await get(announce, announce.path.replace(/view$/, 'pdfjs/pdf.worker.mjs'))).status, 200);
     const exited = once(child, 'exit');
     child.kill('SIGTERM');
     await exited;

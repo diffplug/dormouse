@@ -76,7 +76,6 @@ it('retains the policy for an escaped text preview', async () => {
 
 it.each([
   ['image.svg', '<svg xmlns="http://www.w3.org/2000/svg"/>', 'image/svg+xml'],
-  ['document.pdf', '%PDF-1.7 example bytes', 'application/pdf'],
   ['readme.png', 'image bytes', 'image/png'],
   ['video.mp4', 'video bytes', 'video/mp4'],
 ])('retains CSP, bytes, HEAD, and ranges for %s through the proxy', async (name, bytes, mime) => {
@@ -95,4 +94,25 @@ it.each([
   expect(range.status).toBe(206);
   expect(range.headers['content-range']).toBe(`bytes 0-3/${Buffer.byteLength(bytes)}`);
   expect(range.body).toBe(bytes.slice(0, 4));
+});
+
+it('retains the PDF shell, module worker policy and descriptor ranges through the real proxy', async () => {
+  const url = await frame('document.pdf', '%PDF-1.7 example bytes');
+  const shell = await read(url);
+  expectViewerPolicy(shell.headers);
+  expect(shell.headers['content-type']).toBe('text/html; charset=utf-8');
+  expect(shell.body).toContain('data-document="./file/document.pdf"');
+  expect(shell.body).toContain('__dormouse');
+  expect(shell.headers['content-security-policy']).toContain("worker-src 'self'");
+  expect(shell.headers['content-security-policy']).toContain("'wasm-unsafe-eval'");
+  const worker = await read(new URL('./pdfjs/pdf.worker.mjs', url).href);
+  expect(worker.status).toBe(200);
+  expect(worker.headers['content-type']).toBe('text/javascript; charset=utf-8');
+  expectViewerPolicy(worker.headers);
+  expect(worker.headers['content-security-policy']).toContain("'wasm-unsafe-eval'");
+  const file = await read(new URL('./file/document.pdf', url).href, 'GET', { Range: 'bytes=0-3' });
+  expect(file.status).toBe(206);
+  expect(file.body).toBe('%PDF');
+  expect(file.headers['content-security-policy']).not.toContain("'wasm-unsafe-eval'");
+  expect((await read(new URL('./pdfjs/manifest.json', url).href)).status).toBe(404);
 });

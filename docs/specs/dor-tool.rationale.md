@@ -44,6 +44,8 @@ The September 2026 integration reuses Terminal Context for the Tool's primary te
 
 ## Opening local files
 
+The native PDF plugin rendered a gray pane under the required iframe sandbox in the September 2026 browser harness, while the same 586-byte PDF rendered after removing that sandbox. A bundled PDF.js browser renderer preserves the framing boundary. Its assets ride the existing recursive CLI staging path, so the Node 18 host never imports a package whose Node renderer requires a newer runtime. The browser build excludes the optional native canvas backend and document-scripting sandbox.
+
 A CSS source preview escapes its contents, so its URLs cannot load assets. Scanning those references adds unused authority and can reject a small source file at the asset limit. CSS loaded by HTML is active, so its dependencies still enter the bounded grant.
 
 Keeping the built-in viewer in the Tool's process tree reuses port discovery, kill, restart, and Workspace transfer. An OSC path carries the per-run URL capability without saving that secret in the restart command. Holding the selected file descriptors bounds what the server can read after launch; it trades automatic replacement-file refresh for a grant whose contents cannot widen through path replacement.

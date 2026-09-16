@@ -116,8 +116,7 @@ Header contract:
 - **Must keep back/forward/reload enabled.** Agent-browser uses native commands;
   iframe uses parent history and re-resolves its proxy.
 - **Must show non-default managed `--key` as a badge, never a title prefix.**
-- **Must hide split/zoom below `420px` and nav below `360px`;** minimize and kill
-  remain.
+Header sizing and narrow-pane control placement follow `docs/specs/layout.md` → Pane header.
 
 Source of truth: `lib/src/components/wall/SurfacePaneHeader.tsx`,
 `lib/src/components/wall/agent-browser-screen.ts`,

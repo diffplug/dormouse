@@ -8,6 +8,8 @@ import {
   type WallActions,
 } from '../components/wall/wall-context';
 import { SurfacePaneHeader } from '../components/wall/SurfacePaneHeader';
+import { ToolPaneHeader } from '../components/wall/ToolPaneHeader';
+import { PANE_HEADER_HEIGHT_PX } from '../components/design';
 import {
   registerAgentBrowserScreen,
   type ChromeSnapshot,
@@ -69,6 +71,8 @@ interface StoryArgs {
   hostCapable: boolean;
   /** Header width — shrink past 420/360 to watch split-zoom then nav collapse. */
   width: number;
+  /** Include the Tool Terminal Context button beside the browser header. */
+  tool: boolean;
   /** Whether the surface is the selected/active pane (header highlight). */
   selected: boolean;
 }
@@ -150,12 +154,13 @@ function BrowserChromeStory(args: StoryArgs) {
               story's un-zoomed header. */}
           <WallActionsContext.Provider value={loggingActions}>
             <div style={{ width: args.width }}>
-              <div className="bg-app-bg" style={{ height: 26 }}>
-                <SurfacePaneHeader
+              <div className="bg-app-bg" style={{ height: PANE_HEADER_HEIGHT_PX }}>
+                {args.tool ? <ToolPaneHeader id={surfaceId} title={args.htmlTitle}
+                  params={{ surfaceType: 'tool', url: args.url }} /> : <SurfacePaneHeader
                   id={surfaceId}
                   title={args.htmlTitle || hostPathDisplay(args.url)}
                   params={undefined}
-                />
+                />}
               </div>
             </div>
           </WallActionsContext.Provider>
@@ -177,8 +182,9 @@ const meta: Meta<typeof BrowserChromeStory> = {
     paneKey: { control: 'select', options: ['', 'default', 'storybook'] },
     devServerLabel: { control: 'text' },
     hostCapable: { control: 'boolean' },
-    width: { control: { type: 'range', min: 200, max: 900, step: 10 } },
+    width: { control: { type: 'range', min: 80, max: 900, step: 10 } },
     selected: { control: 'boolean' },
+    tool: { control: 'boolean' },
   },
   args: {
     renderMode: 'ab-screencast',
@@ -190,6 +196,7 @@ const meta: Meta<typeof BrowserChromeStory> = {
     devServerLabel: 'pnpm dev',
     hostCapable: true,
     width: 620,
+    tool: false,
     selected: true,
   },
 };
@@ -234,4 +241,17 @@ export const RawSession: Story = {
 /** Narrow header: split/zoom collapse first (≤420px), then nav (≤360px). */
 export const Narrow: Story = {
   args: { width: 340 },
+};
+
+/** Real narrow split: the Tool context button leaves 79px for browser chrome. */
+export const TinyTool: Story = {
+  args: { width: 103, tool: true, paneKey: 'a-very-long-tool-identity', devServerLabel: 'pnpm --filter a-very-long-project-name dev' },
+};
+
+export const TinyBrowser: Story = {
+  args: { width: 103, paneKey: 'a-very-long-browser-identity' },
+};
+
+export const SmallestTool: Story = {
+  args: { width: 80, tool: true },
 };
