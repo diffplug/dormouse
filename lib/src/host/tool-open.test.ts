@@ -65,6 +65,16 @@ it('names the user configuration in unmatched-file errors', async () => {
   expect(await host().handle({ op: 'open', target, cwd: root })).toMatchObject({ status: 'error', message: expect.stringContaining(config) });
 });
 
+it.each(['explicit', 'association'] as const)('explains unsupported formats when builtin:file is selected by %s', async selection => {
+  const target = join(root, 'unknown.binary');
+  await writeFile(target, 'hi');
+  if (selection === 'association') await writeConfig('open:\n  - {match: "*.binary", tool: "builtin:file"}\n');
+  else await rm(config);
+  expect(await host().handle({ op: 'open', target, cwd: root, ...(selection === 'explicit' ? { tool: 'builtin:file' } : {}) })).toEqual({
+    status: 'error', message: `the built-in viewer does not support 'unknown.binary'; add an open rule to ${config} naming a user Tool`,
+  });
+});
+
 it('uses the built-in viewer only as a fallback or explicit choice', async () => {
   const target = join(root, 'docs', 'README.md');
   expect(await host().handle({ op: 'open', target, cwd: root, tool: 'builtin:file' })).toMatchObject({

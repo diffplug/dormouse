@@ -122,6 +122,24 @@ test('streams oversized HTML and referenced CSS without scanning their dependenc
   await assert.rejects(startFileViewer(join(root, 'large.css')), /8 MiB/); // a direct CSS text preview stays capped
 });
 
+test('previews CSS source without granting dependencies but still bounds HTML-referenced CSS', async () => {
+  const names = Array.from({ length: 256 }, (_, i) => `image${i}.svg`);
+  await Promise.all(names.map(name => writeFile(join(root, name), '<svg/>')));
+  const css = names.map(name => `body { background: url("${name}") }`).join('\n');
+  const viewer = await start('source.css', css);
+  const response = await get(viewer);
+  assert.equal(response.status, 200);
+  assert.match(response.body, /url\(&quot;image255.svg&quot;\)/);
+  const prefix = viewer.path.slice(0, -'view'.length);
+  assert.equal((await get(viewer, `${prefix}file/image0.svg`)).status, 404);
+  assert.equal((await get(viewer, `${prefix}file/source.css`)).status, 200);
+
+  // The same CSS is an active stylesheet when reached through HTML. Its
+  // dependencies still count against that viewer's grant and abort the open.
+  await writeFile(join(root, 'index.html'), '<link rel="stylesheet" href="source.css">');
+  await assert.rejects(startFileViewer(join(root, 'index.html')), /256 referenced files/);
+});
+
 test('bounds the asset graph and keeps a grant on the opened file after path replacement', async () => {
   const viewer = await start('original.txt', 'original content');
   await rm(join(root, 'original.txt'));

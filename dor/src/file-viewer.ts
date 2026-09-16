@@ -65,6 +65,8 @@ export async function startFileViewer(input: string): Promise<{ port: number; pa
   const target = await realpath(input);
   const format = fileViewerFormat(target);
   if (!format) throw new Error('unsupported file format; configure a user Tool association');
+  // A source preview escapes the document; none of its references load.
+  const inspectDependencies = !format.text;
   const root = dirname(target);
   const prefix = `/${randomBytes(32).toString('hex')}/`;
   const resources = new Map<string, Resource>();
@@ -90,7 +92,7 @@ export async function startFileViewer(input: string): Promise<{ port: number; pa
       const resource = { file, mime: type.mime };
       resources.set(route, resource); // the grant owns the descriptor from here
       const html = type.mime.startsWith('text/html');
-      if ((html || type.mime.startsWith('text/css')) && !scanned.has(canonical)) {
+      if (inspectDependencies && (html || type.mime.startsWith('text/css')) && !scanned.has(canonical)) {
         scanned.add(canonical);
         // Inspection is optional: large or changing HTML/CSS can still stream.
         const contents = await readText(file).catch(() => '');

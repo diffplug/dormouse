@@ -44,6 +44,8 @@ The September 2026 integration reuses Terminal Context for the Tool's primary te
 
 ## Opening local files
 
+A CSS source preview escapes its contents, so its URLs cannot load assets. Scanning those references adds unused authority and can reject a small source file at the asset limit. CSS loaded by HTML is active, so its dependencies still enter the bounded grant.
+
 Keeping the built-in viewer in the Tool's process tree reuses port discovery, kill, restart, and Workspace transfer. An OSC path carries the per-run URL capability without saving that secret in the restart command. Holding the selected file descriptors bounds what the server can read after launch; it trades automatic replacement-file refresh for a grant whose contents cannot widen through path replacement.
 
 
