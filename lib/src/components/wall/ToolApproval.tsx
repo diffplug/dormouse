@@ -13,7 +13,7 @@
  */
 import { useRef } from 'react';
 import { usePaneChrome } from './use-pane-chrome';
-import { PANE_MESSAGE_CLASS, modalActionButton } from '../design';
+import { modalActionButton } from '../design';
 import { toolPendingFromParams } from './browser-surface';
 import type { PaneProps } from './pane-props';
 
@@ -26,58 +26,62 @@ export function ToolApproval({ params, id, onResolve }: PaneProps & {
   if (!pending) return null;
 
   return (
-    <div ref={elRef} className={`${PANE_MESSAGE_CLASS} flex-col gap-4`}>
-      <div className="flex flex-col gap-1 font-mono text-muted">
-        <div className="text-foreground">dor tool {pending.name}</div>
-        <div>will launch</div>
-        <code className="rounded bg-app-bg px-2 py-1 text-foreground">{pending.run}</code>
-        <div>and then open a browser</div>
-      </div>
+    <div ref={elRef} className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-auto bg-terminal-bg px-6 py-6 text-center text-sm">
+      {/* Auto margins center only spare space; overflowing content starts at the
+          scroll origin instead of being centered beyond its reachable bounds. */}
+      <div className="my-auto flex w-full min-w-0 max-w-[30rem] shrink-0 flex-col gap-4 self-center [overflow-wrap:anywhere]">
+        <div className="flex flex-col gap-1 font-mono text-muted">
+          <div className="text-foreground">dor tool {pending.name}</div>
+          <div>will launch</div>
+          <code className="rounded bg-app-bg px-2 py-1 text-foreground">{pending.run}</code>
+          <div>and then open a browser</div>
+        </div>
 
-      {pending.error ? <div role="alert" className="text-error">{pending.error}</div> : null}
+        {pending.error ? <div role="alert" className="text-error">{pending.error}</div> : null}
 
-      <div className="flex w-full max-w-[30rem] flex-col gap-2">
-        {pending.trustRecorded ? (
-          <button
-            type="button"
-            className={modalActionButton({ tone: 'primary' })}
-            onClick={() => onResolve(id, 'retry')}
-          >
-            Retry
-          </button>
-        ) : pending.upstreamUrl ? (
-          <button
-            type="button"
-            className={modalActionButton({ tone: 'primary' })}
-            onClick={() => onResolve(id, 'upstream')}
-          >
-            Always allow for upstream {pending.upstreamUrl}
-          </button>
-        ) : null}
-        {!pending.trustRecorded ? (
+        <div className="flex flex-col gap-2">
+          {pending.trustRecorded ? (
+            <button
+              type="button"
+              className={modalActionButton({ tone: 'primary' })}
+              onClick={() => onResolve(id, 'retry')}
+            >
+              Retry
+            </button>
+          ) : pending.upstreamUrl ? (
+            <button
+              type="button"
+              className={modalActionButton({ tone: 'primary' })}
+              onClick={() => onResolve(id, 'upstream')}
+            >
+              Always allow for upstream {pending.upstreamUrl}
+            </button>
+          ) : null}
+          {!pending.trustRecorded ? (
+            <button
+              type="button"
+              className={modalActionButton()}
+              onClick={() => onResolve(id, 'folder')}
+            >
+              Always allow for folder {pending.projectRoot}
+            </button>
+          ) : null}
           <button
             type="button"
             className={modalActionButton()}
-            onClick={() => onResolve(id, 'folder')}
+            onClick={() => onResolve(id, 'decline')}
           >
-            Always allow for folder {pending.projectRoot}
+            {pending.trustRecorded ? 'Close' : 'Disallow and close'}
           </button>
-        ) : null}
-        <button
-          type="button"
-          className={modalActionButton()}
-          onClick={() => onResolve(id, 'decline')}
-        >
-          {pending.trustRecorded ? 'Close' : 'Disallow and close'}
-        </button>
-      </div>
+        </div>
 
-      <div className="max-w-[30rem] text-xs text-muted/80">
-        {pending.trustRecorded ? 'Permission is saved. Retry checks the Tool configuration again. Closing this pane keeps the permission.' : (
-          <>{pending.path} decides what this runs. Allowing the upstream covers every
-            worktree of it; allowing the folder covers this checkout only. Declining
-            records nothing.</>
-        )}
+        <div className="text-xs text-muted/80">
+          {pending.trustRecorded ? 'Permission is saved. Retry checks the Tool configuration again. Closing this pane keeps the permission.' : (
+            <>{pending.path} decides what this runs. Allowing the upstream covers every
+              worktree of it; allowing the folder covers this checkout only. Declining
+              records nothing.</>
+          )}
+        </div>
       </div>
     </div>
   );
