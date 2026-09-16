@@ -64,6 +64,7 @@ This repository runs the [tend](https://github.com/max-sixty/tend) agent harness
 - **FAIL IF** `dormouse-bot` holds `maintain` or `admin` on this repository. `GET /collaborators/dormouse-bot/permission` spells `push` as `write` in both `permission` and `role_name`, so check that neither of those two roles appears rather than string-comparing against `push`.
 - **FAIL IF** any GitHub environment's deployment-branch-policies admit a ref that is not admin-gated by the `Tag operations` or `Merge access` rulesets. Today: `vscode-extension-publish` and `release-attest` (`v*` tag, admin-only via `Tag operations`); `security-audit` (`main` admin-only via `Merge access`, plus `v*` tag); `tend` (`main` only, admin-only via `Merge access`).
 - **FAIL IF** the secret inventory departs from this placement (rationale). One pass over `actions/secrets`, `actions/organization-secrets`, and each environment's secret listing answers every line:
+  - `CHROMATIC_PROJECT_TOKEN` — repo level, the only secret there; accepted with rotation (see "Reachable repo-level secrets").
   - `AUDIT_PAT` — in `security-audit`, absent at repo level.
   - `TEND_BOT_TOKEN` — in `tend`, absent at repo level.
   - `CLAUDE_CODE_OAUTH_TOKEN` — in **both** `tend` and `security-audit`, absent at repo level. Environments do not inherit each other's secrets, so a rotation must set both.

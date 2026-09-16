@@ -1,3 +1,5 @@
+import { setWorkspaceAlertDelivery } from '../lib/workspace-store';
+import { useWorkspaceAlertPolicy } from './wall/use-workspace-alert-policy';
 import { useCallback, useRef, useState, useMemo, useLayoutEffect, useContext, useSyncExternalStore, type ReactNode } from 'react';
 import {
   DeviceMobileSlashIcon,
@@ -29,11 +31,9 @@ import {
   buildAppTitleResolver,
   DEFAULT_ACTIVITY_STATE,
   getActivitySnapshot,
-  getAlertSettings,
   getAlertSpeechSnapshot,
   getTerminalPaneStateSnapshot,
   subscribeToActivity,
-  subscribeToAlertSettings,
   subscribeToAlertSpeech,
   subscribeToTerminalPaneState,
   updateAlertSettings,
@@ -63,7 +63,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   const { elements: doorElements, bumpVersion } = useContext(DoorElementsContext);
   const activityStates = useSyncExternalStore(subscribeToActivity, getActivitySnapshot);
   const speechStates = useSyncExternalStore(subscribeToAlertSpeech, getAlertSpeechSnapshot);
-  const settings = useSyncExternalStore(subscribeToAlertSettings, getAlertSettings);
+  const { workspaceId, overrides, policy: settings } = useWorkspaceAlertPolicy();
   const terminalStates = useSyncExternalStore(subscribeToTerminalPaneState, getTerminalPaneStateSnapshot);
   // One subscription for every Door's note count, like the activity one above.
   // A host with no notepad reports zero everywhere, so the Door stays a pure
@@ -100,10 +100,11 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   const previewSequence = useRef(0);
   const closeSettingsPreview = useCallback(() => setSettingsPreview(null), []);
   const toggleAlarm = (sink: AlarmSink, anchor: HTMLElement) => {
-    const current = getAlertSettings();
-    updateAlertSettings(sink === 'speech'
-      ? { speakEnabled: !current.speakEnabled }
-      : { pushEnabled: !current.pushEnabled });
+    const patch = sink === 'speech'
+      ? { speakEnabled: !settings.speakEnabled }
+      : { pushEnabled: !settings.pushEnabled };
+    if (workspaceId) setWorkspaceAlertDelivery(workspaceId, { ...overrides, ...patch });
+    else updateAlertSettings(patch);
     setSettingsPreview({ sink, anchor, sequence: ++previewSequence.current });
   };
 

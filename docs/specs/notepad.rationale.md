@@ -84,11 +84,14 @@ scrollback, a program that overwrote the rows — into one honest outcome instea
 scrolling the user to plausible-looking wrong output. It is why column restoration
 is allowed to be best effort at all.
 
-Failure removes the pin rather than leaving it to fail again. A pin the user can
-see is one that resolved the last time it was asked, which is a more useful promise
-than a button that sometimes apologizes.
+An initial proof failure removes the pin rather than leaving it to fail again.
+Opening Tool context is different: its narrower grid can change wrapping after
+the same pin has just passed its proof. A second proof prevents stale-coordinate
+selection, while keeping the link avoids treating our own layout change as lost
+content. This bounded exception does not reconstruct columns or soft-wrap proof;
+trying again while the grid still differs can fail the ordinary initial check.
 
-The alternate buffer is the one failure that is not about the capture. A
+The alternate buffer also fails for a reason unrelated to the capture. A
 full-screen program covers the normal buffer rather than rewriting it, so the
 markers stay live and the range is still there underneath; the earlier code let
 the out-of-range rows fall through to the same removal as a dead pin, which meant

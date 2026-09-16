@@ -1,3 +1,4 @@
+import { normalizeAlertDeliveryOverrides, type AlertDeliveryOverrides } from './alert-delivery-model';
 import type { PlatformAdapter } from './platform/types';
 import { browserPersistedPane, readPersistedSession, toPersistedAlertState, type PersistedDoor, type PersistedPane, type PersistedSession, type PersistedSurfaceRefs, type PersistedToolMetadata, type PersistedSurfaceType } from './session-types';
 import { getActivity, getLivePersistedAlertState, getTerminalPaneState, isUntouched } from './terminal-registry';
@@ -31,6 +32,7 @@ export interface SavePaneInput {
 
 /** What one save may skip. See `SessionFlushRequest.probeCwd`. */
 export interface SaveOptions {
+  alertDelivery?: AlertDeliveryOverrides;
   /** Re-read each terminal pane's cwd from the host. Defaults to true; `false`
    *  keeps whatever the previous record held. */
   probeCwd?: boolean;
@@ -134,8 +136,10 @@ export async function buildPersistedSession(
       ...(tool ? { tool } : {}),
     };
   });
+  const alertDelivery = normalizeAlertDeliveryOverrides(options.alertDelivery ?? previous?.alertDelivery);
   return {
     version: 3,
+    ...(Object.keys(alertDelivery).length ? { alertDelivery } : {}),
     panes: persisted,
     doors: persistedDoors,
     ...(lathLayout !== undefined ? { lathLayout } : {}),

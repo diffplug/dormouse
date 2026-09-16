@@ -62,16 +62,17 @@ Source of truth: `extractRichRuns` and `captureRichSelection` in `lib/src/lib/no
 A pin is the runtime link from a captured note back to the scrollback it came from.
 
 - **Pin an ordinary Session's normal-buffer capture with two xterm markers plus the normalized endpoint columns and the raw text.** Markers ride the buffer as it scrolls; the columns and text rebuild and prove the range.
-- Clicking a pin runs five steps: close the notepad; reattach a minimized Surface; resolve both markers and rebuild the range from their current lines and the stored columns; read it back and compare **exactly** with the captured raw text; on success scroll it into view and restore the Dormouse selection, outline and finalized popup included, plus the selection baseline a drag would leave — render-tick invalidation applies to a restored selection as to a dragged one.
+- **Must prove a pin before opening Tool context.** Close the notepad, reattach a minimized Surface, rebuild the range from markers and columns, and compare it exactly with the captured raw text. On success open context, prove the displayed range again, then scroll and restore the Dormouse selection, popup, and render-invalidation baseline.
 - **Column restoration after a resize is best effort**; the raw-text equality is what prevents navigating to the wrong output. Trimmed scrollback is discovered only when a pin is used.
 - **While the alternate buffer is active a pin is temporarily unavailable and kept** — the markers belong to the normal buffer and resolve again once the program exits; the notepad says to exit it.
-- **Every other pin failure removes the pin and keeps the note.** Disposed markers, rows out of range, and a text mismatch all report that the source is no longer available, the notepad kept or reopened to say so.
+- **Must retain a pin that resolves before opening context but fails after its synchronous refit**, reporting that the layout changed without selecting stale coordinates. This does not remap wrapped text; subsequent attempts use ordinary proof and failure rules (rationale).
+- **Every other pin failure removes the pin and keeps the note.** Disposed markers, rows out of range, and a text mismatch report that the source is unavailable; the notepad stays or reopens with the notice.
 - **Disposing or replacing a terminal instance drops its pins immediately**, notes untouched — a marker belongs to one xterm instance.
 - **Must drop source pins when a Workspace moves between windows**, keeping the
   notes (rationale).
 - **Pins never affect ordering and are not user-controlled favorites.**
 
-Source of truth: `registerTerminalSource`, `resolveTerminalSource` and `revealResolvedSource` in `lib/src/lib/notepad/source-link.ts`; `revealNoteSource` in `lib/src/lib/notepad/pin.ts`; `setTerminalSelectionBaseline` in `lib/src/lib/terminal-store.ts`; `dropSourcesForTerminal` in `lib/src/lib/notepad/notepad-store.ts`, called from `disposeSession` in `lib/src/lib/terminal-lifecycle.ts`.
+Source of truth: `registerTerminalSource`, `resolveTerminalSource` and `revealResolvedSource` in `lib/src/lib/notepad/source-link.ts`; `revealNoteSource` in `lib/src/lib/notepad/pin.ts` (tested in `lib/src/lib/notepad/pin.test.ts`); `setTerminalSelectionBaseline` in `lib/src/lib/terminal-store.ts`; `dropSourcesForTerminal` in `lib/src/lib/notepad/notepad-store.ts`, called from `disposeSession` in `lib/src/lib/terminal-lifecycle.ts`.
 
 ## Notepad UI
 
