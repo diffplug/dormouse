@@ -3059,29 +3059,29 @@ describe('Wall session persistence: ownership filtering', () => {
       await act(async () => {
         root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="command" showBaseboard />);
       });
-      await waitUntil(0);
+      await settle(0);
       await act(async () => {
         container.querySelector<HTMLElement>('[data-lath-leaf="pane-a"] [aria-label="Minimize"]')!.click();
       });
       // Past the debounce, so the commit's own save has landed and the tracker
       // is clean again.
-      await waitUntil(1_000);
+      await settle(1_000);
       expect(container.querySelector('[data-door-id="pane-a"]')).not.toBeNull();
       saveState.mockClear();
 
       // The heartbeat writes only when something marked dirty.
-      await waitUntil(31_000);
+      await settle(31_000);
       expect(saveState).not.toHaveBeenCalled();
 
       // Another Workspace's Session, fanned to this Wall by the adapter.
       await echo('pane-elsewhere');
-      await waitUntil(31_000);
+      await settle(31_000);
       expect(saveState).not.toHaveBeenCalled();
 
       // The Door's own Session: its `untouched` flip rides this echo and nothing
       // else reports it, so the Wall has to hear it.
       await echo('pane-a');
-      await waitUntil(31_000);
+      await settle(31_000);
       expect(saveState).toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
@@ -3098,7 +3098,7 @@ describe('Wall session persistence: ownership filtering', () => {
         root.render(<Wall initialPaneIds={['pane-a']} showBaseboard />);
       });
       // Past a heartbeat, so the mount's own dirty state has been written off.
-      await waitUntil(31_000);
+      await settle(31_000);
       saveState.mockClear();
 
       // Both stores are Window-global. A change keyed to a foreign Surface must
@@ -3106,17 +3106,17 @@ describe('Wall session persistence: ownership filtering', () => {
       // every idle Workspace, every heartbeat.
       await act(async () => { setTerminalActivity('pane-elsewhere', { todo: true }); });
       await act(async () => { resetTerminalPaneState('pane-elsewhere'); });
-      await waitUntil(31_000);
+      await settle(31_000);
       expect(saveState, 'foreign Surface').not.toHaveBeenCalled();
 
       await act(async () => { setTerminalActivity('pane-a', { todo: true }); });
-      await waitUntil(31_000);
+      await settle(31_000);
       expect(saveState, 'own Surface').toHaveBeenCalled();
       saveState.mockClear();
 
       // An unkeyed notification is a store-wide reset, which every Wall takes.
       await act(async () => { clearTerminalActivity(); });
-      await waitUntil(31_000);
+      await settle(31_000);
       expect(saveState, 'store-wide reset').toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
