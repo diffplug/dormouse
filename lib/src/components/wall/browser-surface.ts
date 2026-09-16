@@ -10,6 +10,7 @@ import {
   type RenderMode,
 } from './agent-browser-screen';
 import type { SurfaceKind } from 'dor/commands/types';
+import { isToolKeyScope, type ToolKeyScope } from '../../lib/platform/tool-types';
 
 type BrowserParamsLike = {
   surfaceType?: unknown;
@@ -158,8 +159,9 @@ export function namespacedToolKey(
  *  a project `dormouse.yml`. Project and user Tools are separate reuse scopes
  *  (`docs/specs/dor-tool.md` -> Declaring tools), so dedupe compares this
  *  alongside the key. */
-export function toolScopeFromParams(params: unknown): 'user' | undefined {
-  return asParams(params).toolScope === 'user' ? 'user' : undefined;
+export function toolScopeFromParams(params: unknown): ToolKeyScope | undefined {
+  const scope = asParams(params).toolScope;
+  return isToolKeyScope(scope) ? scope : undefined;
 }
 
 /** Whether params describe a plain browser surface (vs a terminal): the unified

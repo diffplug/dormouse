@@ -168,3 +168,7 @@ neither sets a mode, and `restrict_to_owner` is never called on it. The socket
 path arrives via the sidecar's stderr, which Rust appends verbatim.
 
 What the snapshot tests cover. `restrict_to_owner_leaves_one_owner_only_ace` is Windows-only and asserts `SE_DACL_PROTECTED`, one ACE, and the SID. `session_write_tightens_directory_and_existing_temp_file` exercises the unix writer against deliberately loose modes. The failure regression injects rejection at each permission stage, verifying the old snapshot survives and no replacement bytes reach disk. The single-ACE property depends on `FILE_ALL_ACCESS` rather than `GENERIC_ALL`, which would split into two ACEs.
+
+## Local-file viewer
+
+The viewer allows inline and granted scripts for interactive local reports. CSP fetch directives constrain resource requests, but do not prevent a script assigning an external URL to its own frame. `form-action` constrains form submissions, not arbitrary navigation. Preserving the policy through the proxy repairs the resource-load boundary; it does not establish that active documents cannot send granted contents outside the machine. [CSP3 navigation checks](https://www.w3.org/TR/CSP3/) and its multiple-policy rules distinguish these mechanisms.

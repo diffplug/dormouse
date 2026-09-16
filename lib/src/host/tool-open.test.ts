@@ -65,6 +65,28 @@ it('names the user configuration in unmatched-file errors', async () => {
   expect(await host().handle({ op: 'open', target, cwd: root })).toMatchObject({ status: 'error', message: expect.stringContaining(config) });
 });
 
+it.each(['explicit', 'association'] as const)('explains unsupported formats when builtin:file is selected by %s', async selection => {
+  const target = join(root, 'unknown.binary');
+  await writeFile(target, 'hi');
+  if (selection === 'association') await writeConfig('open:\n  - {match: "*.binary", tool: "builtin:file"}\n');
+  else await rm(config);
+  expect(await host().handle({ op: 'open', target, cwd: root, ...(selection === 'explicit' ? { tool: 'builtin:file' } : {}) })).toEqual({
+    status: 'error', message: `the built-in viewer does not support 'unknown.binary'; add an open rule to ${config} naming a user Tool`,
+  });
+});
+
+it('uses the built-in viewer only as a fallback or explicit choice', async () => {
+  const target = join(root, 'docs', 'README.md');
+  expect(await host().handle({ op: 'open', target, cwd: root, tool: 'builtin:file' })).toMatchObject({
+    status: 'ok', scope: 'builtin', run: ['dor', '__view-file', target], key: [target], port: 'announced',
+  });
+  await writeFile(config, 'open:\n  - {match: "*.md", tool: "builtin:file"}\n');
+  expect(await host().handle({ op: 'open', target, cwd: root })).toMatchObject({ status: 'ok', scope: 'builtin' });
+  await rm(config);
+  expect(await host().handle({ op: 'open', target, cwd: root })).toMatchObject({ status: 'ok', scope: 'builtin' });
+  expect(await host().handle({ op: 'open', target, cwd: root, tool: 'missing' })).toMatchObject({ status: 'error' });
+});
+
 it('matches catch-all rules above the invocation directory and canonical absolute rules', async () => {
   await mkdir(join(root, 'work'));
   await writeConfig(viewerConfig('**/*.md'));

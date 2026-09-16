@@ -112,6 +112,9 @@ for (const { entry, out, define, assertBaked, external } of bundles) {
     outfile,
     bundle: true,
     platform: 'node', // node builtins (http/net/fs/child_process) stay external
+    // Match the frontend and VS Code host's dor/* source mapping. Host modules
+    // also share the CLI's pure file-format registry.
+    alias: { dor: path.resolve(here, '../../dor/src') },
     format: 'cjs',
     target: 'node24',
     logLevel: 'warning',

@@ -16,7 +16,8 @@
  * bind it recognizes. Test files and this lint's own fixtures are reported
  * separately; every other file that binds a TCP listener to loopback must
  * reference one of the guard modules — `lib/src/host/loopback-guard.ts` for
- * shipped code, `standalone/scripts/dev-host-guard.mjs` for the dev harness —
+ * shipped code, `dor/src/file-viewer-loopback-guard.ts` for the CLI,
+ * `standalone/scripts/dev-host-guard.mjs` for the dev harness —
  * or sit on ALLOWED below with a stated reason.
  *
  * `scripts/loopback-lint-selftest.mjs` proves each bind form is load-bearing by

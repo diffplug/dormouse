@@ -1523,6 +1523,56 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it('reuses a builtin viewer by canonical target without matching same-named project or user Tools', async () => {
+    setToolsEnabled(true);
+    vi.spyOn(terminalRegistry, 'isPaneOscDriven').mockReturnValue(true);
+    const target = '/repo/docs/readme.md';
+    const command = `dor __view-file ${target}`;
+    const toolControl = vi.fn(async (request: { op: string; global?: boolean }) => ({
+      status: 'ok' as const,
+      scope: request.op === 'open' ? 'builtin' as const : request.global ? 'user' as const : undefined,
+      projectRoot: '/repo', path: '/repo/dormouse.yml', name: 'file',
+      run: ['dor', '__view-file', target], key: [target],
+      render: 'iframe' as const, port: 'announced' as const, warnings: [],
+    }));
+    Object.assign(fake, { toolControl });
+    const ids: string[] = [];
+    const requestTool = async (params: Record<string, unknown>) => {
+      const respond = vi.fn();
+      await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+        method: SURFACE_CONTROL_METHODS.tool, surfaceId: 'pane-a', params: { cwd: '/repo', ...params }, respond,
+      } })));
+      await waitUntil(() => respond.mock.calls.length > 0);
+      const response = respond.mock.calls[0][0];
+      expect(response.ok).toBe(true);
+      return response.result as { status: string; surfaceId: string };
+    };
+    try {
+      await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
+      await flush();
+      for (const params of [{ name: 'file' }, { name: 'file', global: true }, { file: 'docs/readme.md' }]) {
+        const result = await requestTool(params);
+        expect(result.status).toBe('created');
+        ids.push(result.surfaceId);
+        act(() => {
+          terminalRegistry.seedTerminalManualCwd(result.surfaceId, '/repo');
+          reportRunning(result.surfaceId, command);
+        });
+      }
+      expect(new Set(ids).size).toBe(3);
+      expect(leafCount()).toBe(4);
+
+      // Host resolution gives both spellings the same canonical document key.
+      const reused = await requestTool({ file: './docs/../docs/readme.md' });
+      expect(toolControl).toHaveBeenLastCalledWith({ op: 'open', target: './docs/../docs/readme.md', cwd: '/repo', tool: undefined });
+      expect(reused).toMatchObject({ status: 'existing', surfaceId: ids[2] });
+      expect(leafCount()).toBe(4);
+    } finally {
+      act(() => ids.forEach(id => terminalRegistry.removeTerminalPaneState(id)));
+      setToolsEnabled(false);
+    }
+  });
+
   it('retries failed post-grant lookup without recording permission again', async () => {
     setToolsEnabled(true);
     let calls = 0;

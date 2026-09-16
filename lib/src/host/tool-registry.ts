@@ -7,6 +7,7 @@
  * bundle.
  */
 import { parse as parseYaml } from 'yaml';
+import { BUILTIN_FILE_TOOL } from 'dor/file-viewer-format';
 import { isRecord } from '../lib/is-record';
 import { hasShellInputControls } from 'dor/commands/shell-quote';
 
@@ -141,6 +142,7 @@ export function parseToolFile(
 
   for (const [name, rawEntry] of Object.entries(toolsNode)) {
     const where = `${path}: tools.${name}`;
+    if (name.startsWith('builtin:')) throw new ToolFileError(`${where}: the 'builtin:' prefix is reserved`);
     if (!isRecord(rawEntry)) throw new ToolFileError(`${where}: entry must be a mapping`);
 
     for (const field of Object.keys(rawEntry)) {
@@ -238,14 +240,15 @@ function parseOpenRules(node: unknown, tools: ReadonlyMap<string, ToolEntry>, pa
   if (!Array.isArray(node)) throw new ToolFileError(`${path}: 'open' must be an ordered list`);
   return node.map((rule: unknown) => {
     const entry = isRecord(rule) && typeof rule.tool === 'string' ? tools.get(rule.tool) : undefined;
-    if (!isRecord(rule) || !entry || typeof rule.match !== 'string' || !rule.match
+    const builtin = isRecord(rule) && rule.tool === BUILTIN_FILE_TOOL;
+    if (!isRecord(rule) || (!builtin && !entry) || typeof rule.match !== 'string' || !rule.match
       || Object.keys(rule).some(key => key !== 'match' && key !== 'tool')) {
       throw new ToolFileError(`${path}: each open rule needs a match pattern and a tool defined in this user file`);
     }
-    if (typeof entry.run === 'string') {
+    if (entry && typeof entry.run === 'string') {
       throw new ToolFileError(`${path}: open rule for '${entry.name}' needs an argument-list run to receive the file`);
     }
-    return { match: rule.match, tool: entry.name };
+    return { match: rule.match, tool: builtin ? BUILTIN_FILE_TOOL : entry!.name };
   });
 }
 

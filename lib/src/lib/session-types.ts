@@ -1,5 +1,6 @@
 import { normalizeAlertDeliveryOverrides, type AlertDeliveryOverrides } from './alert-delivery-model';
 import { isRecord } from './is-record';
+import { isToolKeyScope, type ToolKeyScope } from './platform/tool-types';
 import type { SessionStatus } from './alert-manager';
 import { hasShellInputControls } from 'dor/commands/shell-quote';
 import { ACTIVITY_NOTIFICATION_SOURCES, type ActivityNotification, type TodoState } from './alert-manager';
@@ -20,7 +21,7 @@ export type PersistedSurfaceType = 'terminal' | 'browser' | 'tool';
 export interface PersistedToolMetadata {
   /** Resolved arguments, re-quoted for the shell selected at cold restore. */
   argv?: string[];
-  scope?: 'user';
+  scope?: ToolKeyScope;
   name?: string;
   render: 'iframe' | 'ab-screencast';
   port: 'announced' | 'auto';
@@ -177,7 +178,7 @@ function isPersistedToolMetadataShape(value: unknown): boolean {
   return (
     (value.argv === undefined || isToolCommandArgv(value.argv)) &&
     (value.name === undefined || typeof value.name === 'string') &&
-    (value.scope === undefined || value.scope === 'user') &&
+    (value.scope === undefined || isToolKeyScope(value.scope)) &&
     (value.render === 'iframe' || value.render === 'ab-screencast') &&
     (value.port === 'announced' || value.port === 'auto') &&
     (value.key === undefined || (Array.isArray(value.key) && value.key.every((part) => typeof part === 'string')))

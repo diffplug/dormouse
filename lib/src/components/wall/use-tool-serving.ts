@@ -19,6 +19,7 @@ import {
 import { attachAgentBrowserSession } from './tool-browser-session';
 import { listenerUrlsByPort } from './port-url';
 import { getToolAnnounce } from '../../lib/tool-announce-store';
+import { validToolServePath } from '../../lib/tool-announce';
 import { sessionForKey } from 'dor-lib-common/agent-browser';
 import { markAgentBrowserSessionClosed } from './agent-browser-sessions';
 import { disposeAgentBrowserSurfaceController } from './agent-browser-surface-controller';
@@ -91,7 +92,7 @@ export function useToolServing({
       // Pass one, synchronous: fold in whatever the running commands announced
       // and decide which leaves still need a port scan. Nothing here awaits, so
       // no leaf can be retired out from under a later one.
-      const scanning: { leaf: ToolLeaf; run: CommandRun; announcedPort: number | null }[] = [];
+      const scanning: { leaf: ToolLeaf; run: CommandRun; announcedPort: number | null; announcedPath: string }[] = [];
       for (const leaf of leaves) {
         const run = getTerminalPaneState(leaf.id).currentCommand;
         const runId = run?.id ?? null;
@@ -140,6 +141,7 @@ export function useToolServing({
           lath.store.updateParams(leaf.id, {
             url: undefined,
             toolAnnouncedPort: undefined,
+            toolAnnouncedPath: undefined,
             toolPortConflict: undefined,
             session: undefined,
             wsPort: undefined,
@@ -152,16 +154,18 @@ export function useToolServing({
         // refused: a conflict is a verdict about *guessing*, not a final state,
         // so a tool that names its port after autobind refused must still be
         // framed rather than be told to announce a port it just announced.
-        // Only a *changed* announced port re-points a live browser — treating a
-        // mismatch with params.url as a change would undo URL-bar navigation
-        // every poll after the user left the announced origin. The memory is
-        // `params.toolAnnouncedPort`, the announcement the framed URL came
-        // from, so there is no second map to keep in step with it.
+        // Only a changed port/path re-points a live browser. Compare the
+        // applied announcement params, not params.url, to preserve navigation.
         const announcedPort = announce?.port ?? null;
-        const announcedPortChanged = announcedPort !== null && leaf.params.toolAnnouncedPort !== announcedPort;
+        // Transfer content bypasses the parser; reject authority-bearing paths
+        // here too before resolving the path against the scanned listener.
+        const announcedPath = validToolServePath(announce?.path) ? announce.path : '/';
+        const appliedPath = validToolServePath(leaf.params.toolAnnouncedPath) ? leaf.params.toolAnnouncedPath : '/';
+        const announcementChanged = announcedPort !== null
+          && (leaf.params.toolAnnouncedPort !== announcedPort || appliedPath !== announcedPath);
         if (!running) continue;
-        if ((hasUrl || hasConflict) && !announcedPortChanged) continue;
-        scanning.push({ leaf, run, announcedPort });
+        if ((hasUrl || hasConflict) && !announcementChanged) continue;
+        scanning.push({ leaf, run, announcedPort, announcedPath });
       }
 
       if (scanning.length === 0 || cancelled || paused()) return;
@@ -180,7 +184,7 @@ export function useToolServing({
         if (cancelled || paused()) return;
         const ports = scans[index];
         if (ports === null) continue;
-        const { leaf, run, announcedPort } = scanning[index];
+        const { leaf, run, announcedPort, announcedPath } = scanning[index];
         if (!lath.getMeta(leaf.id) || getTerminalPaneState(leaf.id).currentCommand?.id !== run.id) continue;
         const entries = listenerUrlsByPort(ports);
         let entry;
@@ -224,13 +228,15 @@ export function useToolServing({
         // -> Instant create). `toolFace` tests the conflict before the url, so
         // a stale verdict would keep the conflict forward over the browser.
         const agentDrivable = leaf.params.toolRender === 'ab-screencast';
+        const url = new URL(announcedPath, entry.url).href;
         const session = typeof leaf.params.session === 'string' ? leaf.params.session : sessionForKey(`tool.${leaf.id}`);
         const binaryPath = typeof leaf.params.binaryPath === 'string' ? leaf.params.binaryPath : undefined;
         lath.store.updateParams(leaf.id, {
-          url: entry.url,
+          url,
           renderMode: agentDrivable ? 'ab-screencast' : 'iframe',
           toolPortConflict: undefined,
           toolAnnouncedPort: announcedPort ?? undefined,
+          toolAnnouncedPath: announcedPort === null ? undefined : announcedPath,
           // Reopening an existing browser is also an in-flight connection:
           // withhold its binding until open settles so a Workspace move cannot
           // capture the old stream while this webview still owns the launch.
@@ -243,7 +249,7 @@ export function useToolServing({
         // one: a tool's browser is a param of its own leaf, which is what keeps
         // its id stable while its capabilities come and go.
         await attachAgentBrowserSession({
-          url: entry.url,
+          url,
           platform,
           session,
           surfaceId: leaf.id,
