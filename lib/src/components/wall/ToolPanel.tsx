@@ -40,7 +40,7 @@ export function ToolPanel(props: PaneProps) {
     return (
       <div className="relative h-full w-full"><ToolApproval
         {...props}
-        onResolve={(id, choice) => void actions.onResolveToolApproval?.(id, choice)}
+        onResolve={(id, choice) => actions.onResolveToolApproval(id, choice)}
       />{notepad}</div>
     );
   }

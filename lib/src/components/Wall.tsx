@@ -256,10 +256,6 @@ function ShellSpawnNotice({
 
 // --- Main component ---
 
-/** A blank shell may be replaced in place; one that owns a helper is not blank
- *  (docs/specs/terminal-context.md → Helper lifecycle). */
-const isReplaceableShell = (id: string): boolean => isUntouched(id) && !getHelper(id);
-
 export function Wall({
   initialPaneIds,
   initialMode = 'command',
@@ -324,6 +320,15 @@ export function Wall({
   const lathRef = useRef<LathWallEngine | null>(null);
   if (lathRef.current === null) lathRef.current = createLathWallEngine();
   const lath = lathRef.current;
+  /** An untouched *shell* — the only thing the kill-without-confirm and
+   *  replace-in-place shortcuts may take. A Tool is never one: input to either
+   *  of its capabilities is input to the Tool (docs/specs/dor-tool.md → The
+   *  tool capability set). */
+  const isUntouchedShell = (id: string): boolean =>
+    isUntouched(id) && !isToolParams(lath.getMeta(id)?.params);
+  /** A blank shell may be replaced in place; one that owns a helper is not blank
+   *  (docs/specs/terminal-context.md → Helper lifecycle). */
+  const isReplaceableShell = (id: string): boolean => isUntouchedShell(id) && !getHelper(id);
   const restoredLathLayoutRef = useRef(restoredLathLayout);
   const dorSurfaceRefsRef = useRef<Map<string, string> | null>(null);
   const nextDorSurfaceRefIndexRef = useRef(1);
@@ -742,13 +747,13 @@ export function Wall({
     const stage = () => {
       const door = doorsRef.current.find(item => item.id === id);
       if (door) {
-        handleReattachRef.current(door, { enterPassthrough: false, afterRestore: isUntouched(id) && !isToolParams(lath.getMeta(id)?.params) ? 'close' : 'confirm-kill' });
+        handleReattachRef.current(door, { enterPassthrough: false, afterRestore: isUntouchedShell(id) ? 'close' : 'confirm-kill' });
         return;
       }
       // The helper inspection below can outlive the Surface (an exit, a `dor
       // kill`); a confirm overlay for a gone pane would never clear itself.
       if (!nav.hasPane(id) || lath.isDying(id)) return;
-      if (isUntouched(id) && !isToolParams(lath.getMeta(id)?.params)) { void closeSurface(id); return; }
+      if (isUntouchedShell(id)) { void closeSurface(id); return; }
       setConfirmKill({ id, char: randomKillChar() });
     };
     if (!getHelper(id)) { stage(); return; }
@@ -1170,14 +1175,19 @@ export function Wall({
    *  a port row is an explicit request to look at and control that browser. A visible pane
    *  enters passthrough in place; a minimized one reattaches on the same terms
    *  as clicking its Door chip. This is deliberately unlike `dor ab`, whose
-   *  agent-initiated control path remains focus-neutral. */
-  const revealSurface = useCallback((id: string) => {
+   *  agent-initiated control path remains focus-neutral.
+   *
+   *  Returns whether the Surface ended up visible, so `dor` can report the
+   *  outcome without re-querying: the reattach commits to the store before it
+   *  returns, and `nav.hasPane` reads the store, not React state. */
+  const revealSurface = useCallback((id: string): boolean => {
     if (nav.hasPane(id)) {
       enterTerminalMode(id);
-      return;
+      return true;
     }
     const door = doorsRef.current.find((item) => item.id === id);
     if (door) handleReattachRef.current(door);
+    return nav.hasPane(id);
   }, [nav, enterTerminalMode]);
 
   // The Surfaces of the current Workspace. `buildDorSurfaces` is the visible-pane
@@ -1321,10 +1331,11 @@ export function Wall({
         shell: defaults?.shell,
         args: defaults?.args,
         cwd: inheritedCwd,
-        // Starting the command is Dormouse orchestration, not user input. A
-        // tool stays untouched until its terminal or browser receives input;
-        // other commanded splits retain their established conservative state.
-        untouched: leafMeta?.component === 'tool',
+        // Starting the command is Dormouse orchestration, not user input, but
+        // a commanded split keeps the conservative state anyway: a Tool is
+        // excluded from the untouched shortcuts by kind, not by this flag
+        // (docs/specs/dor-tool.md → The tool capability set).
+        untouched: false,
         command,
         ...(requireIntegration ? { requireIntegration: true } : {}),
       });
@@ -1511,7 +1522,7 @@ export function Wall({
       const shouldReplaceUntouched =
         detail.replaceUntouched === true &&
         selectedPaneVisible &&
-        !isToolParams(lath.getMeta(selectedPaneId!)?.params) && isReplaceableShell(selectedPaneId!);
+        isReplaceableShell(selectedPaneId!);
       const shellName = detail.name?.trim() || 'terminal';
 
       if (shouldReplaceUntouched) {
@@ -1528,7 +1539,7 @@ export function Wall({
         return;
       }
 
-      if (detail.replaceUntouched === true && selectedDoor && !isToolParams(lath.getMeta(selectedDoor.id)?.params) && isReplaceableShell(selectedDoor.id)) {
+      if (detail.replaceUntouched === true && selectedDoor && isReplaceableShell(selectedDoor.id)) {
         handleReattachRef.current(selectedDoor, {
           enterPassthrough: false,
           afterRestore: {
@@ -1629,7 +1640,7 @@ export function Wall({
         shell: defaults?.shell,
         args: defaults?.args,
         cwd,
-        untouched: true,
+        untouched: false,
         command,
         requireIntegration: true,
       });
@@ -1691,7 +1702,8 @@ export function Wall({
     iframeSurfaceIds,
     hasTouchedSurfaces: () => memberSurfaceIds().some((id) => {
       // A browser Surface has no "untouched" notion and always holds a page, so
-      // it counts; a terminal counts once its Session exists and has input.
+      // it counts; so does a Tool, before its terminal exists to be asked. A
+      // terminal counts once its Session exists and has input.
       if (!surfaceHasTerminal(id) || isToolParams(lath.getMeta(id)?.params)) return true;
       return getTerminalInstance(id) !== null && !isReplaceableShell(id);
     }),
@@ -1905,7 +1917,7 @@ export function Wall({
       if ((currentRenderMode === 'ab-screencast' || currentRenderMode === 'ab-popout') && mode === 'iframe') {
         // Canonical params.url (mirrored from the chrome snapshot) first; fall
         // back to the live snapshot for a surface that hasn't reported a tab yet.
-        const url = (typeof params?.url === 'string' && params.url) || getAgentBrowserScreenController(id)?.chrome().url;
+        const url = browserUrlFromParams(params) || getAgentBrowserScreenController(id)?.chrome().url;
         if (!url) {
           console.warn(`[dormouse] cannot swap surface '${id}' to iframe: no URL observed yet`);
           return;
@@ -1930,7 +1942,7 @@ export function Wall({
       if (currentRenderMode === 'iframe' && (mode === 'ab-screencast' || mode === 'ab-popout')) {
         const chromeUrl = getAgentBrowserScreenController(id)?.chrome().url;
         const rawUrl = (typeof chromeUrl === 'string' && chromeUrl)
-          || (typeof params?.url === 'string' ? params.url : '');
+          || (browserUrlFromParams(params) ?? '');
         // The swap is the second sink params.url reaches: IframePanel refuses a
         // non-http(s) source but still holds it, and this path would hand it to
         // a real Chromium tab — which `dor ab open` refuses at the CLI
@@ -2014,8 +2026,6 @@ export function Wall({
       });
     },
     resolveSurfaceRef: surfaceRefForId,
-    // Pin the terminal forward past serving, or release it. Visibility only —
-    // ToolPanel keeps both halves mounted (docs/specs/dor-tool.md).
     onResolveToolApproval: (id: string, choice: 'upstream' | 'folder' | 'decline' | 'retry') => {
       void resolveToolApproval(id, choice);
     },

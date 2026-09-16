@@ -1,3 +1,4 @@
+import { createSerialQueue } from '../../host/remote/serial-queue';
 import { useCallback, type MutableRefObject } from 'react';
 import { sessionForKey } from 'dor-lib-common/agent-browser';
 import { getPlatform, PLATFORM_STRING } from '../../lib/platform';
@@ -17,12 +18,13 @@ import { MAX_AWAIT_TIMEOUT_MS } from '../../lib/alert-manager';
 import { TOOLS_FLAG_KEY, isToolsEnabled } from '../../lib/feature-flags';
 import type { OpenPort } from '../../lib/platform/types';
 import type { ToolKeyScope } from '../../lib/platform/tool-types';
-import { buildShellCommandForKind, shellCommandKind } from 'dor/commands/shell-quote';
+import { buildShellCommandForKind, hasShellInputControls, shellCommandKind } from 'dor/commands/shell-quote';
 import {
   UNNAMED_PANEL_TITLE,
   getDefaultShellOpts,
   getTerminalInstance,
   getTerminalPaneState,
+  getTerminalShellKind,
   isPaneOscDriven,
 } from '../../lib/terminal-registry';
 import { cwdPathsEqual, surfaceRunsCommand, type TerminalPaneState } from '../../lib/terminal-state';
@@ -54,6 +56,7 @@ import {
 import { listenerUrlsByPort } from './port-url';
 import { dorDirectionForEdge, toolLeafMeta, type LathWallEngine } from './lath-wall-engine';
 import type { WallNav } from './keyboard/types';
+import { toolCommandFromParams } from '../../lib/session-save';
 import type { LeafMeta } from '../../lib/lath/persistence';
 import type { CloseSurfaceMode, DooredItem } from './wall-types';
 
@@ -285,26 +288,12 @@ const PROMPT_RETURN_TIMEOUT_MS = 15_000;
 const COMMAND_START_TIMEOUT_MS = 15_000;
 
 /**
- * Serializes `surface.tool` requests. A plain promise chain rather than a real
- * mutex: the critical section is "check for a key match, then create", and the
- * only contender is another tool request, so ordering them is enough. Module
- * scope because each `dor` invocation arrives as its own control request.
+ * Serializes `surface.tool` requests. The critical section is "check for a key
+ * match, then create", and the only contender is another tool request, so
+ * ordering them is enough. Module scope because each `dor` invocation arrives
+ * as its own control request.
  */
-let toolSpawnChain: Promise<void> = Promise.resolve();
-function acquireToolSpawnLock(): Promise<() => void> {
-  let release!: () => void;
-  const held = new Promise<void>((resolve) => { release = resolve; });
-  const waited = toolSpawnChain.then(() => release);
-  // A handler that throws must not wedge every later one.
-  toolSpawnChain = toolSpawnChain.then(() => held).catch(() => {});
-  return waited;
-}
-
-/** The rendered command a tool Surface is running, for the reuse note. */
-function toolCommandFromParams(params: unknown): string {
-  const value = (params as { command?: unknown } | null | undefined)?.command;
-  return typeof value === 'string' ? value : '';
-}
+const queueToolSpawn = createSerialQueue();
 
 type WaitOutcome = 'ready' | 'timeout' | 'aborted';
 
@@ -489,11 +478,14 @@ function dorCommandString(args: string[] | undefined): string | undefined {
 }
 
 /** The command a resolved Tool types into its shell: a string `run` is literal
- *  shell syntax, an argument-list `run` is quoted here for the default shell
+ *  shell syntax, an argument-list `run` uses the destination Session's shell
+ *  or the default shell when launching a new Session
  *  (`docs/specs/dor-tool.md` -> Declaring tools). The host guarantees a list
  *  names an executable, so the empty-argv case cannot arise. */
-export function toolRunCommand(run: string | readonly string[]): string {
-  return typeof run === 'string' ? run : dorCommandString([...run])!;
+export function toolRunCommand(run: string | readonly string[], terminalId?: string): string {
+  const kind = (terminalId ? getTerminalShellKind(terminalId) : null)
+    ?? shellCommandKind(getDefaultShellOpts()?.shell, PLATFORM_STRING);
+  return typeof run === 'string' ? run : buildShellCommandForKind(kind, run);
 }
 
 /**
@@ -566,7 +558,9 @@ export function useDorControl({
    *  down. A string means the closure was refused, and is why; the Surface is
    *  still here. */
   closeSurface: (id: string, mode?: CloseSurfaceMode) => Promise<string | null>;
-  revealSurface: (id: string) => void;
+  /** Reveal a Surface (reattaching a Door first) and report whether it ended up
+   *  visible. `Wall.tsx` -> `revealSurface`. */
+  revealSurface: (id: string) => boolean;
   /** The last binary path a `dor ab` surface resolved on a terminal's PATH. */
   lastAgentBrowserBinaryPathRef: MutableRefObject<string | undefined>;
   /** This Wall's own positional Workspace ref, reported by `dor list` so a caller
@@ -849,10 +843,8 @@ export function useDorControl({
       // Serialize every tool request behind the last one. Each `dor`
       // invocation is its own socket connection, so two handlers otherwise
       // interleave across the host lookup, both clear the key check, and both
-      // create — two panes with one key, two servers on one port. `finally`
-      // still runs on every `return` in the body below.
-      const releaseToolLock = await acquireToolSpawnLock();
-      try {
+      // create — two panes with one key, two servers on one port.
+      await queueToolSpawn(async () => {
         // Lookup and the launch lock can outlive the Workspace's close gesture.
         const scope = workspaceScope();
         const workspaceGone = () => scope && isWorkspaceTransferPending(scope) ? 'this workspace is transferring'
@@ -885,6 +877,7 @@ export function useDorControl({
           return;
         }
         let command: string;
+        let toolRun: string | readonly string[];
         let key: string[] | null = null;
         let toolScope: ToolKeyScope | undefined;
         const toolArgs = stringArrayParam(params.args) ?? [];
@@ -895,6 +888,12 @@ export function useDorControl({
         // rather than tie-breaking; a declared tool opts in with one line.
         let port: 'announced' | 'auto' = 'auto';
         const toolShell = getDefaultShellOpts()?.shell;
+        /** Approval and spawn both require an OSC 633-integrated shell. */
+        const refuseCmdShell = (): boolean => {
+          if (!toolShell || shellCommandKind(toolShell, PLATFORM_STRING) !== 'cmd') return false;
+          detail.respond({ ok: false, error: missingIntegrationError(toolShell) });
+          return true;
+        };
         // `key` and `warnings` are read when called, after the lookup fills them.
         const respondTool = (
           status: ToolSurfaceResponse['status'],
@@ -949,6 +948,7 @@ export function useDorControl({
               detail.respond({ ok: false, error: 'unexpected tool host response' });
               return;
             case 'ok':
+              toolRun = lookup.run;
               command = toolRunCommand(lookup.run);
               toolScope = lookup.scope;
               toolName = lookup.name;
@@ -973,13 +973,7 @@ export function useDorControl({
               return;
             case 'untrusted': {
               const pendingCommand = toolRunCommand(lookup.run);
-              // Approval can only lead to a command gated on OSC 633. Reject
-              // a shell known never to emit it before offering a prompt that
-              // would otherwise approve, spawn, then silently drop the command.
-              if (toolShell && shellCommandKind(toolShell, PLATFORM_STRING) === 'cmd') {
-                detail.respond({ ok: false, error: missingIntegrationError(toolShell) });
-                return;
-              }
+              if (refuseCmdShell()) return;
               // The pane appears now and asks; the command spawns only on
               // approval (docs/specs/dor-tool.md -> Trust). Nothing from the
               // repo has executed to reach this point — the file was read and
@@ -993,16 +987,17 @@ export function useDorControl({
               const matchesPending = (candidate: unknown) => {
                 const waiting = toolPendingFromParams(candidate);
                 return waiting?.name === lookup.name && waiting.projectRoot === lookup.projectRoot
+                  && cwdPathsEqual(stringParam((candidate as { cwd?: unknown } | null)?.cwd), cwd)
                   && toolKeysEqual(waiting.args ?? [], toolArgs);
               };
               const already = findSurfaceByParams(matchesPending);
               if (already) {
-                revealSurface(already.id);
+                const revealed = revealSurface(already.id);
                 respondTool('pending', {
                   surfaceId: already.id,
                   command: pendingCommand,
                   cwd,
-                  minimized: findSurfaceByParams(matchesPending)?.minimized ?? false,
+                  minimized: !revealed,
                 });
                 return;
               }
@@ -1045,13 +1040,13 @@ export function useDorControl({
               // A minimized reference creates its sibling as a Door even
               // when `minimized` is false. Pending approval must stay visible,
               // so immediately reattach that exceptional creation path.
-              if (pending.value.minimized) revealSurface(pending.value.id);
+              const stillMinimized = pending.value.minimized && !revealSurface(pending.value.id);
               respondTool('pending', {
                 surfaceId: pending.value.id,
                 surfaceRef: pending.value.ref,
                 command: pendingCommand,
                 cwd,
-                minimized: findSurfaceByParams(matchesPending)?.minimized ?? false,
+                minimized: stillMinimized,
               });
               return;
             }
@@ -1061,11 +1056,16 @@ export function useDorControl({
           }
         } else {
           const argv = stringArrayParam(params.command);
+          if (argv?.some(hasShellInputControls)) {
+            detail.respond({ ok: false, error: 'tool arguments cannot contain terminal control characters' });
+            return;
+          }
           command = dorCommandString(argv) ?? '';
           if (!command) {
             detail.respond({ ok: false, error: 'command cannot be empty' });
             return;
           }
+          toolRun = argv!;
         }
 
         const toolParams = {
@@ -1090,7 +1090,7 @@ export function useDorControl({
             && toolKeysEqual((candidate as { toolKey?: unknown } | null | undefined)?.toolKey, key);
           const match = findSurfaceByParams(matchesToolKey);
           if (match) {
-            const matchedCommand = toolCommandFromParams(lath.getMeta(match.id)?.params) || command;
+            const matchedCommand = toolCommandFromParams(lath.getMeta(match.id)?.params) ?? toolRunCommand(toolRun, match.id);
             const matchState = getTerminalPaneState(match.id);
             // The tool's own cwd, not the caller's: `surfaceRunsCommand`
             // compares against the matched Surface's `cwdAtStart`, so waiting
@@ -1144,13 +1144,12 @@ export function useDorControl({
             // Reveal, reattaching a Door first: a match that only printed a
             // handle would leave a minimized tool minimized, which is exactly
             // the "appears to do nothing" the invariant is written against.
-            revealSurface(match.id);
-            const survivor = findSurfaceByParams(matchesToolKey);
+            const revealed = revealSurface(match.id);
             respondTool(idle ? 'adopted' : 'existing', {
               surfaceId: match.id,
               command: matchedCommand,
               cwd,
-              minimized: survivor?.minimized ?? false,
+              minimized: !revealed,
             });
             return;
           }
@@ -1161,6 +1160,8 @@ export function useDorControl({
         // below the pending-approval and key-match returns above: both of those
         // placements win over this one.
         if (callerId && callerGate && toolTakesOverCaller(callerGate)) {
+          command = toolRunCommand(toolRun, callerId);
+          toolParams.command = command;
           // Answered before the tool starts, because answering is what frees
           // the shell to run it.
           respondTool('takeover', { surfaceId: callerId, command, cwd, minimized: false });
@@ -1179,10 +1180,7 @@ export function useDorControl({
         // A tool is a shell-hosted PTY with the command typed into it, exactly
         // as `dor ensure` spawns one — but with no command+cwd matching, and a
         // leaf that renders both capabilities.
-        if (toolShell && shellCommandKind(toolShell, PLATFORM_STRING) === 'cmd') {
-          detail.respond({ ok: false, error: missingIntegrationError(toolShell) });
-          return;
-        }
+        if (refuseCmdShell()) return;
         const toolTarget = resolveSplitTarget();
         if (!toolTarget) return;
         const created = createSplitSurface({
@@ -1219,11 +1217,8 @@ export function useDorControl({
           cwd,
           minimized: created.value.minimized,
         });
-        return;
-
-      } finally {
-        releaseToolLock();
-      }
+      });
+      return;
     }
 
     if (detail.method === SURFACE_CONTROL_METHODS.ensure) {

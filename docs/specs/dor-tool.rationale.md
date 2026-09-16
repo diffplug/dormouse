@@ -10,6 +10,8 @@ A misspelled substitution such as `$PROJECTROOT` retained as a literal silently 
 
 Argument-list commands let the renderer quote each value for the actual target shell. Keeping shell strings literal avoids needing a shell-template parser to distinguish an author-provided pipeline from punctuation in a filename. Canonical file targets make symlink aliases reuse the same document viewer.
 
+A Session can keep running PowerShell after its user's default changes to Bash. Takeover therefore cannot use the default's quotation rules: apostrophes and quoted executable paths differ between those shells. Pending invocations also depend on their CWD, since identical relative filenames in two subdirectories identify different documents.
+
 ## Identity and dedupe
 
 `pnpm storybook`, `pnpm run storybook`, and `pnpm storybook --quiet` are different command strings for the same intended tool. `dor ensure` already supplies exact-command/CWD identity. An explicit Tool key allows authors to choose their own scope without making the declaration of a short command name implicitly enable dedupe.

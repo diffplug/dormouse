@@ -10,6 +10,7 @@
  * it is sanitized and size-capped like OSC 9/99/777 (`docs/specs/alert.md`).
  */
 
+import { isRecord } from './is-record';
 import { sanitizeText } from './osc-sanitize';
 
 /** Cap on the whole payload before parsing. A tool's announcement is a handful
@@ -78,8 +79,8 @@ export function parseToolAnnounce(content: string): ToolAnnounce | null {
   } catch {
     return null;
   }
-  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return null;
-  const record = payload as Record<string, unknown>;
+  if (!isRecord(payload)) return null;
+  const record = payload;
 
   const announce: ToolAnnounce = {
     port: readPort(record.port),

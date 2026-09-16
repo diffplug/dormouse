@@ -53,10 +53,6 @@ describe('which half of a tool is forward', () => {
     expect(toolFace(serving)).toBe('browser');
   });
 
-  it('ignores a retired terminal-pin param once the tool serves', () => {
-    expect(toolFace({ ...serving, showTerminal: true })).toBe('browser');
-  });
-
   it('shows the terminal after the command exits and the url is retired', () => {
     expect(toolFace({ ...serving, url: undefined })).toBe('terminal');
   });
@@ -155,7 +151,6 @@ describe('tool persistence (regression: review findings 4 and 11)', () => {
       renderMode: 'ab-screencast',
       session: 'dormouse.w.tool.p1',
       wsPort: 51234,
-      showTerminal: true,
     });
     expect(persistableLeafMeta(meta).params).toEqual({
       surfaceType: 'tool',
