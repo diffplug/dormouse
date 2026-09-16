@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseToolAnnounce } from './tool-announce';
 import { collectTerminalProtocolAlerts, collectTerminalProtocolResponses, TerminalProtocolParser } from './terminal-protocol';
-import { getToolAnnounce, resetToolAnnounces } from './tool-announce-store';
+import { getToolAnnounce, recordToolAnnounces, resetToolAnnounces } from './tool-announce-store';
 import { applyTerminalProtocolEvents } from './terminal-protocol';
 
 const serve = (payload: unknown) => `serve;${JSON.stringify(payload)}`;
@@ -82,6 +82,24 @@ describe('parseToolAnnounce', () => {
 
 describe('OSC 367 at the PTY boundary', () => {
   const sink = { notifyFromProtocol: () => {}, updateProtocolProgress: () => {} };
+
+  it.each(['live', 'replay', 'forwarded'] as const)('isolates successive commands without losing same-chunk serves (%s)', mode => {
+    const record = (data: string) => {
+      const events = new TerminalProtocolParser().process(data).events;
+      if (mode === 'replay') recordToolAnnounces('epoch', events);
+      else applyTerminalProtocolEvents(sink, 'epoch', mode === 'forwarded' ? collectTerminalProtocolAlerts(events) : events);
+    };
+    const oldServe = '\x1b]367;serve;{"port":6006,"key":["old"]}\x07';
+    const start = '\x1b]633;C\x07';
+    record(oldServe + start);
+    expect(getToolAnnounce('epoch')).toBeNull();
+    record(oldServe + start + '\x1b]367;serve;{"port":6007}\x07');
+    expect(getToolAnnounce('epoch')?.port).toBe(6007);
+    record('since-mark replay without a command boundary');
+    expect(getToolAnnounce('epoch')?.port).toBe(6007);
+    record(start);
+    expect(getToolAnnounce('epoch')).toBeNull();
+  });
 
   function feed(id: string, data: string) {
     const parser = new TerminalProtocolParser();

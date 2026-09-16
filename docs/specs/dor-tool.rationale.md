@@ -28,6 +28,10 @@ Remembering a denial would disable tools across worktrees without a correspondin
 
 ## Serving
 
+An exit and rerun can both occur inside the 1.5-second polling interval. Command text alone then leaves the previous browser and settle state attached to a new process. Run ids expose that transition; observing a transferred Workspace for the first time does not imply a restart. Clearing hints at the command-start event, in stream order, also avoids deleting a new serve emitted before the next poll.
+
+Renderer swaps and Workspace transfers can give a Tool a browser session name other than the serving hook's default. Reopening that existing session preserves its browser state and avoids orphaning it behind a second daemon.
+
 The standalone browser harness binds more than one HTTP port. Choosing the lowest port or the first observed listener cannot identify which service the user intended to see. A conflict in the browser area gives that refusal a visible explanation while keeping the terminal accessible.
 
 Successive startup listeners can appear in different scan ticks. One unchanged tick catches changes within that window; it does not prove no later listener will appear. Remembering the last applied announced port keeps repeated announcements from undoing URL-bar navigation.
