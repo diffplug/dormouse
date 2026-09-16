@@ -170,11 +170,11 @@ Source of truth: `openCommand` in `dor/src/commands/open.ts`; `resolveOpenTool` 
 
 ## Take-over
 
-**Must run a standalone `dor tool` invocation in its calling pane when every takeover condition holds.** Otherwise use the ordinary split path. Trust approval and keyed reuse take precedence. (rationale)
+**Must run a standalone `dor tool` or `dor open` invocation in its calling pane when every takeover condition holds.** Otherwise use the ordinary split path. Trust approval and keyed reuse take precedence. (rationale)
 
 | Condition | Required state |
 | --- | --- |
-| Verb | `dor tool`; `dor open` never transforms a plain terminal, though a keyed match in its own Tool pane reruns there |
+| Verb | `dor tool` or `dor open` |
 | Caller | Visible pane of the active Workspace; integrated plain terminal; not closing or dying |
 | Command line | OSC 633 reports the invocation alone; compound shell syntax rejects takeover |
 | Directory | Resolved Tool CWD equals the caller's reported CWD |

@@ -1478,10 +1478,15 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
-  it('dispatches open through the user host and splits even when the caller could be taken over', async () => {
+  it.each([
+    { line: 'dor open a.md', explicitSurface: false, status: 'takeover' },
+    { line: 'claude', explicitSurface: false, status: 'created' },
+    { line: 'dor open --surface surface:self a.md', explicitSurface: true, status: 'created' },
+  ])('dispatches open through the user host with $status placement for $line', async ({ line, explicitSurface, status }) => {
     setToolsEnabled(true);
     const controller = new AbortController();
     let toolId: string | undefined;
+    const typed: string[] = [];
     vi.spyOn(terminalRegistry, 'isPaneOscDriven').mockReturnValue(true);
     const toolControl = vi.fn(async () => ({ status: 'ok' as const, scope: 'user' as const,
       projectRoot: '/config', path: '/config/dormouse.yml', name: 'viewer', run: ['view', '/repo/a.md'],
@@ -1490,21 +1495,32 @@ describe('Wall on the Lath engine', () => {
     try {
       await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
       await flush();
+      act(() => fake.spawnPty('pane-a'));
+      fake.setInputHandler('pane-a', data => typed.push(data));
       terminalRegistry.seedTerminalManualCwd('pane-a', '/repo');
       terminalRegistry.applyTerminalSemanticEvents('pane-a', [
-        { type: 'commandLine', commandLine: 'dor open a.md' },
+        { type: 'commandLine', commandLine: line },
         { type: 'commandStart', source: 'osc633_boundaries' },
       ]);
       const respond = vi.fn();
       await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
-        method: SURFACE_CONTROL_METHODS.tool, surfaceId: 'pane-a', params: { file: 'a.md', cwd: '/repo' }, signal: controller.signal, respond,
+        method: SURFACE_CONTROL_METHODS.tool, surfaceId: 'pane-a', params: { file: 'a.md', cwd: '/repo', ...(explicitSurface ? { surface: 'pane-a' } : {}) }, signal: controller.signal, respond,
       } })));
       await waitUntil(() => respond.mock.calls.length > 0);
       expect(toolControl).toHaveBeenCalledWith({ op: 'open', target: 'a.md', cwd: '/repo', tool: undefined });
-      expect(respond).toHaveBeenCalledWith(expect.objectContaining({ ok: true, result: expect.objectContaining({ status: 'created' }) }));
+      expect(respond).toHaveBeenCalledWith(expect.objectContaining({ ok: true, result: expect.objectContaining({ status }) }));
       toolId = respond.mock.calls[0][0].result.surfaceId;
-      expect(toolId).not.toBe('pane-a');
-      expect(leafCount()).toBe(2);
+      expect(typed).toEqual([]);
+      if (status === 'takeover') {
+        expect(toolId).toBe('pane-a');
+        expect(leafCount()).toBe(1);
+        act(() => promptBack('pane-a'));
+        await waitUntil(() => typed.length > 0);
+        expect(typed).toEqual(['view /repo/a.md\r']);
+      } else {
+        expect(toolId).not.toBe('pane-a');
+        expect(leafCount()).toBe(2);
+      }
       // This fixture stubs TerminalPane, so report the staged command's startup
       // explicitly before disposing the Wall and its shared launch queue wait.
       act(() => {
@@ -1514,6 +1530,7 @@ describe('Wall on the Lath engine', () => {
       await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
     } finally {
       await act(async () => controller.abort());
+      fake.clearInputHandler('pane-a');
       if (toolId) {
         pendingShellOpts.delete(toolId);
         act(() => terminalRegistry.removeTerminalPaneState(toolId!));
