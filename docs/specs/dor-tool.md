@@ -85,7 +85,7 @@ Source of truth: `queueToolSpawn` / the `surface.tool` handler in `lib/src/compo
 
 **Must offer Retry and Close after post-grant lookup failure**, preserving the error with no PTY. Retry repeats only lookup; Close retains permission; the footer states both. **Never restore pending approval once launch clears its marker**, including after PTY/minimization failure.
 
-**Must keep approval controls reachable**, wrapping long content and scrolling overflow in small panes.
+Approval layout follows `docs/specs/layout.md` → Pane body.
 
 **Must validate a bounded regular, non-symlink grant receipt for the requested key.** Missing, corrupt, or mismatched records grant nothing; a filename alone is never approval.
 
