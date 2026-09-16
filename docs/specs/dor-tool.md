@@ -2,7 +2,6 @@
 
 > See `docs/specs/glossary.md` for Surface / Session / Pane / Door vocabulary.
 > Owns tool designation, configuration, trust workflow, serving, and command lifecycle. Browser chrome belongs to `docs/specs/dor-browser.md`; notes and closure belong to `docs/specs/notepad.md`; helpers belong to `docs/specs/terminal-context.md`.
-> Status: implemented behind `dormouse.flags.tools`, off by default. Unbuilt design is under [Future](#future).
 
 ## Files
 
@@ -12,11 +11,11 @@
 - `lib/src/components/wall/use-tool-serving.ts` — port discovery and browser lifetime.
 - `lib/src/components/wall/ToolPanel.tsx` — terminal/browser composition.
 
-## Capability gating
+## Availability
 
-**Must gate tool creation on `isToolsEnabled`.** The flag disables new designation; existing Tools retain serving and exit cleanup. Inert announcement parsing and capability predicates remain active. Capability semantics belong to `docs/specs/glossary.md` → Panes and Surfaces; CLI reporting belongs to `docs/specs/dor-cli.md` → `dor list`.
+**Must make `dor tool` and `dor open` available without a feature flag or Settings opt-in.** Project execution follows [Trust](#trust).
 
-Source of truth: `isToolsEnabled` in `lib/src/lib/feature-flags.ts`; `surface.tool` in `lib/src/components/wall/use-dor-control.ts`; `useToolServing` in `lib/src/components/wall/use-tool-serving.ts`.
+Source of truth: `surface.tool` in `lib/src/components/wall/use-dor-control.ts`; `lib/src/components/Wall.test.tsx`.
 
 ## The tool capability set
 
@@ -132,6 +131,8 @@ Source of truth: `useToolServing` in `lib/src/components/wall/use-tool-serving.t
 
 **Must show the full terminal before serving and after command exit.** A serving Tool shows its browser, and Terminal Context reveals the same primary terminal (`docs/specs/terminal-context.md` → Tool context). Keep the browser mounted behind context, and keep the hidden terminal sized with `visibility` and `inert`, never `display: none`. Pending approval mounts neither capability.
 
+**Must hide Tools in inactive Workspaces and minimized leaves without unmounting.**
+
 Notepad follows `docs/specs/notepad.md` → Notepad UI. Tool context follows `docs/specs/terminal-context.md` → Tool context.
 
 Source of truth: `TerminalPane` in `lib/src/components/TerminalPane.tsx`; `focusSession` in `lib/src/lib/terminal-lifecycle.ts`; `ToolPanel` in `lib/src/components/wall/ToolPanel.tsx`; `ToolPaneHeader` in `lib/src/components/wall/ToolPaneHeader.tsx`; `toolLeafMeta` / `shouldParkOnMinimize` in `lib/src/components/wall/lath-wall-engine.ts`; `closeSurface` in `lib/src/components/Wall.tsx`. Tests: `lib/src/components/wall/ToolPanel.test.tsx`, `lib/src/components/Wall.test.tsx`, `lib/src/components/TerminalPane.test.tsx`, `lib/src/lib/terminal-registry.alert.test.ts`.
@@ -170,11 +171,11 @@ Source of truth: `openCommand` in `dor/src/commands/open.ts`; `resolveOpenTool` 
 
 ## Take-over
 
-**Must run a standalone `dor tool` invocation in its calling pane when every takeover condition holds.** Otherwise use the ordinary split path. Trust approval and keyed reuse take precedence. (rationale)
+**Must run a standalone `dor tool` or `dor open` invocation in its calling pane when every takeover condition holds.** Otherwise use the ordinary split path. Trust approval and keyed reuse take precedence. (rationale)
 
 | Condition | Required state |
 | --- | --- |
-| Verb | `dor tool`; `dor open` never transforms a plain terminal, though a keyed match in its own Tool pane reruns there |
+| Verb | `dor tool` or `dor open` |
 | Caller | Visible pane of the active Workspace; integrated plain terminal; not closing or dying |
 | Command line | OSC 633 reports the invocation alone; compound shell syntax rejects takeover |
 | Directory | Resolved Tool CWD equals the caller's reported CWD |
