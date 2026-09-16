@@ -4,6 +4,7 @@ import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
+import { get } from 'node:http';
 import { setTimeout as delay } from 'node:timers/promises';
 import { sessionForKey } from 'dor-lib-common/agent-browser';
 import { cleanEnv, devWorkspace, runner, writeShims } from './dev-fixture.mjs';
@@ -104,6 +105,23 @@ test('parallel worktrees own ports, browser identities and bridges; stopping one
   for (const [run, dir, other] of [[one, a.root, two], [two, b.root, one]]) {
     const js = await (await fetch(`${run.app}/app.js`)).text();
     assert.ok(js.includes(`${run.bridge}/?t=${run.token}`));
+    // `cors: false` in dev-run.mjs, pinned here because nothing else would
+    // notice its removal: these modules carry the bridge token, and Vite's
+    // default answers every http://localhost:* origin with an acao of its own,
+    // which is a read of the token by any other page in the developer's browser.
+    const foreign = await fetch(`${run.app}/app.js`, { headers: { origin: 'http://localhost:31337' } });
+    assert.equal(foreign.status, 200);
+    assert.equal(foreign.headers.get('access-control-allow-origin'), null);
+    // DNS rebinding looks same-origin to a browser; the Host check must refuse it.
+    const reboundStatus = await new Promise((resolve, reject) => {
+      get(`${run.app}/app.js`, {
+        headers: { host: 'evil.example' }, signal: AbortSignal.timeout(5000),
+      }, response => {
+        response.resume();
+        resolve(response.statusCode);
+      }).on('error', reject);
+    });
+    assert.equal(reboundStatus, 403);
     // HMR must share this listener, even with a Tauri-specific host inherited.
     await new Promise((resolve, reject) => {
       const ws = new WebSocket(run.app.replace('http:', 'ws:'), 'vite-ping');

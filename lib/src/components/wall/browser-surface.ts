@@ -155,10 +155,9 @@ export function namespacedToolKey(
   return [toolName, ...key];
 }
 
-/** Which file declared a tool: `user` for the user-global config, undefined for
- *  a project `dormouse.yml`. Project and user Tools are separate reuse scopes
- *  (`docs/specs/dor-tool.md` -> Declaring tools), so dedupe compares this
- *  alongside the key. */
+/** Tool reuse scope: `user` for user-global config, undefined for project
+ *  `dormouse.yml`, and `builtin` for the built-in viewer. Dedupe compares the
+ *  scope alongside the key (`docs/specs/dor-tool.md` -> Declaring tools). */
 export function toolScopeFromParams(params: unknown): ToolKeyScope | undefined {
   const scope = asParams(params).toolScope;
   return isToolKeyScope(scope) ? scope : undefined;

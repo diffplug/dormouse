@@ -111,6 +111,19 @@ tools:
     expect(parse('tools:\n  t:\n    run: x\n    prespawn_dedupe: [t]\n', USER).warnings).toEqual([]);
   });
 
+  it('warns when different target files would reuse one Tool', () => {
+    const file = parse('tools:\n  viewer:\n    run: [viewer, --file=$TARGET]\n    prespawn_dedupe: [viewer]\n', USER);
+    expect(file.warnings).toEqual([expect.stringContaining('no $TARGET')]);
+    expect(file.tools.get('viewer')?.dedupeTemplate).toEqual(['viewer']);
+  });
+
+  it.each([
+    '    prespawn_dedupe: [viewer, file=$TARGET]\n',
+    '',
+  ])('does not warn for target-aware reuse or a fresh Tool: %s', (dedupe) => {
+    expect(parse('tools:\n  viewer:\n    run: [viewer, $TARGET]\n' + dedupe, USER).warnings).toEqual([]);
+  });
+
   it('requires a non-empty run', () => {
     expect(() => parse('tools:\n  t:\n    prespawn_dedupe: [t]\n')).toThrow(/'run' is required/);
     expect(() => parse('tools:\n  t:\n    run: "   "\n')).toThrow(/'run' is required/);

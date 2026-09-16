@@ -124,11 +124,13 @@ embedder, and the browser checks the whole chain (rationale).
 - **FAIL IF** a request bearing a *foreign* `Origin` refreshes a grant's idle timer: a grant holds a live upstream binding, and a stranger polling it keeps a closed pane's binding open. An *absent* `Origin` must keep refreshing it — that is what a live frame's own navigations and sub-resources send.
 - **FAIL IF** the stream relay's grant stops being single-use, TTL-bounded, and pinned to one target port, or if it begins rewriting `Origin` rather than dropping it. It needs no `Host` check while the token holds (rationale).
 - **FAIL IF** the browser-dev bridge drops any of its four gates — the per-run token, the loopback `Host` check, the `application/json` content-type required of every non-GET, and the exact-origin `access-control-allow-origin`. The first three live together in the gate that runs before routing, so a route that never reads a body is covered by all of them. It is dev-only and ships in nothing, but it dispatches `pty_spawn` with caller-supplied `shell`, `args`, `cwd` and `env` — arbitrary command execution on a maintainer or CI-agent machine (`docs/specs/security-ci.md` -> "Automated Maintainer (tend)"). The content-type rule is a security control, not tidiness (rationale).
+- **FAIL IF** the browser-dev Vite server permits cross-origin reads of token-bearing modules or disables its DNS-rebinding Host check. Pinned by `standalone/scripts/dev-agent-browser.test.mjs` (rationale).
 
 **Cookie-authenticated iframe pages are unsupported.** Header stripping does not isolate `document.cookie`: proxied scripts still share the loopback hostname's non-HttpOnly cookies across grant ports. This remains a browser-pane isolation gap (rationale).
 
 Source of truth: the shared rule and predicates — `isLoopbackHost`, `isOwnOrigin`,
-`isForeignOrigin` — in `lib/src/host/loopback-guard.ts`.
+`isForeignOrigin` — in `lib/src/host/loopback-guard.ts`;
+`startDevVite` in `standalone/scripts/dev-run.mjs`.
 
 ### Local-file viewer
 

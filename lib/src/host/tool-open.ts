@@ -1,3 +1,4 @@
+import { realpath } from 'node:fs/promises';
 import { basename, relative, sep } from 'node:path';
 import picomatch from 'picomatch';
 import type { ToolLookupResult } from '../lib/platform/tool-types';
@@ -13,7 +14,8 @@ export async function resolveOpenTool(
 ): Promise<ToolLookupResult> {
   const target = await resolveLocalToolTarget(request.target, request.cwd);
   const file = await readUserToolFile(path);
-  const relativePath = relative(request.cwd, target).split(sep).join('/');
+  const relativeBase = await realpath(request.cwd).catch(() => request.cwd);
+  const relativePath = relative(relativeBase, target).split(sep).join('/');
   const canonicalPath = target.split(sep).join('/');
   const name = request.tool ?? file?.open.find(rule => {
     const matches = picomatch(rule.match, { windows: false });

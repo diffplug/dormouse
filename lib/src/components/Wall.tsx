@@ -1649,7 +1649,7 @@ export function Wall({
         const cwd = typeof meta?.params?.cwd === 'string' ? meta.params.cwd : pending.projectRoot;
         const resolved = await platform.toolControl?.({ op: 'lookup', name: pending.name, cwd, args: pending.args });
         if (resolved?.status !== 'ok') {
-          showFailure(resolved?.status === 'error' ? resolved.message : 'The Tool is no longer available. Check its configuration and try again.');
+          showFailure(resolved?.status === 'error' && resolved.message.trim() ? resolved.message : 'The Tool is no longer available. Check its configuration and try again.');
           return;
         }
 

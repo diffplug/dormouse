@@ -122,12 +122,12 @@ Source of truth: `RestoreToken` / `restore` in `lib/src/lib/lath/ops.ts`.
 
 A **parked** leaf is mounted by the adapter but absent from the split tree: its DOM survives while it lays out nothing, paints nothing, and takes no input. It exists for Surfaces whose state lives *in the DOM* — an `<iframe>`'s document, a screencast canvas — where a plain remove turns reattach into a reload.
 
-**Detaching and parking are separate things.** Every minimize doors, terminal or browser, because the store stays the authority for a Doored Surface's live title and params; only `{ park: true }` also keeps the DOM.
+**Detaching and parking are separate things.** Every minimize doors, regardless of Surface kind, because the store stays the authority for a Doored Surface's live title and params; only `{ park: true }` also keeps the DOM.
 
 | Store op | Tree | Meta | DOM |
 | --- | --- | --- | --- |
 | `doorLeaf(id)` | out | kept | unmounted |
-| `doorLeaf(id, { park: true })` | out | kept | **mounted** — browser Surfaces only |
+| `doorLeaf(id, { park: true })` | out | kept | **mounted** — browser and Tool Surfaces |
 | `addDoor(id, meta)` | never in | registered | none — a Surface **born minimized**, with no pane to detach (`dor split` / `dor ensure` targeting another Door) |
 | `removeLeaf(id)` | out | destroyed | unmounted — a kill |
 | `forgetLeaf(id)` | — | destroyed | unmounted if parked — destroys a Door |
@@ -136,8 +136,8 @@ A **parked** leaf is mounted by the adapter but absent from the split tree: its 
 - **One `leafMeta` map holds every leaf the Wall owns**, laid out or Doored; `parked` is pure render state (`Map<id, Rect | null>`) naming the subset that keeps its DOM. Detachment is a fact about the *tree*, so **no Door record carries a metadata copy that can go stale** — `setTitle` / `updateParams` / `setMeta` reach a Doored leaf by the same single path as a visible one, and every reader goes through `lath.getMeta(id)` (rationale). `serializeLayout` filters `leafMeta` to the tree's own leaves; a Door persists as its own row.
 - **The store holds a parked leaf's last rect, never the adapter** — `registerEl(null)` is a ref detach, not an unmount (rationale). `doorLeaf({ park: true })` captures the rect in the commit that removes the leaf from the tree, `admit` replays it into the animator on re-admission (Animation → Enter), and LathHost renders parked ids there behind `visibility: hidden; pointer-events: none` and `data-lath-parked`, so the guest never sees a zero-extent viewport (rationale). A leaf parked before the Wall reports geometry falls back to the whole wall rect.
 - **Parked is a visibility signal, not just a layout fact** — it reaches the body as `PaneProps.parked` (Pane props contract), so a minimized `ab-screencast` stays mounted, releases viewer resources, and retains its daemon session.
-- **Who parks**: `shouldParkOnMinimize` — browser Surfaces, not terminals, whose persistent xterm instance remounts without replay ([glossary.md → View](glossary.md#view)).
-- **Never evict parked browser DOM to enforce a count limit.** Parked documents remain mounted until reattachment or Surface destruction; retention is unbounded. Tests: `lib/src/components/wall/LathHost.test.tsx`. (rationale) Parking budgets **minimized browser Surfaces only**: a hidden Workspace parks nothing — its leaves stay mounted and merely stop painting (`docs/specs/layout.md` → Workspaces).
+- **Must park browser and Tool Surfaces** via `shouldParkOnMinimize`, unlike terminals, whose persistent xterm instance remounts without replay ([glossary.md → View](glossary.md#view)).
+- **Never evict parked browser or Tool DOM to enforce a count limit.** Parked documents remain mounted until reattachment or Surface destruction; retention is unbounded. Tests: `lib/src/components/wall/LathHost.test.tsx`. (rationale) Parking budgets **minimized browser and Tool Surfaces only**: a hidden Workspace parks nothing — its leaves stay mounted and merely stop painting (`docs/specs/layout.md` → Workspaces).
 - **Hydration.** A restored session's Doors have no store entry yet, so `seed` puts the persisted rows' meta into `leafMeta` beside the tree's leaves (`leafMetaFromPersistedDoor`) — the only place a Door's wire row is read for metadata. The runtime record is `{ id, token }`.
 
 Source of truth: `parked` / `doorLeaf` / `addDoor` / `forgetLeaf` / `parkedIds` in `lib/src/components/wall/lath-wall-store.ts`; `shouldParkOnMinimize` / `leafMetaFromPersistedDoor` in `lib/src/components/wall/lath-wall-engine.ts`; `minimizePane` in `lib/src/components/Wall.tsx`; the parked render branch in `lib/src/components/wall/LathHost.tsx`.
@@ -190,7 +190,7 @@ Source of truth: `createAnimator` in `lib/src/lib/lath/animator.ts`; the animato
 
 - **Read side**: `PaneProps` — `{ id, title, params, parked? }`, supplied by LathHost straight from `leafMeta`, parked leaves included; a meta commit re-renders the leaf, so params stay live either way.
 - **Write side**: `PaneWriteContext` (`{ setTitle(id, t), updateParams(id, patch) }`), provided by the Wall over the store (`lath.store.setTitle` / `lath.store.updateParams`); the `wsPort`-refresh and render-swap flows route through the same seam. The value is stable per mount; the `AgentBrowserPanel` controller sink captures it once.
-- **Visibility**: a mounted leaf is engine-visible unless **parked**, so `parked` is the one non-meta pane prop and absent means "not parked" — right for anything rendered outside LathHost. `useSurfaceVisibility(parked)` folds it with document visibility and the Wall's Workspace being the visible one (`docs/specs/layout.md` → "Workspaces"), so a backgrounded window, a hidden Workspace, and a minimized browser Surface all gate streaming while the session stays alive.
+- **Visibility**: a mounted leaf is engine-visible unless **parked**, so `parked` is the one non-meta pane prop and absent means "not parked" — right for anything rendered outside LathHost. `useSurfaceVisibility(parked)` folds it with document visibility and the Wall's Workspace being the visible one (`docs/specs/layout.md` → "Workspaces"), so a backgrounded window, a hidden Workspace, and a minimized browser or Tool Surface all gate streaming while the session stays alive.
 - **Terminal sizing**: `TerminalResizeContext` gates fitting; `docs/specs/layout.md` → "Animations" owns the rule.
 - `use-pane-chrome` registers the pane's root element in `PaneElementsContext`, for the overlays to measure, and nothing else — there is no CSS spawn-animation to trigger.
 
