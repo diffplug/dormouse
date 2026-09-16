@@ -12,7 +12,7 @@ export interface ToolInput {
 
 /** A target is one existing regular file on this host. Resolve symlinks before
  * keying, so two paths to the same document reveal the same Tool. */
-async function resolveLocalToolTarget(input: string, cwd: string): Promise<string> {
+export async function resolveLocalToolTarget(input: string, cwd: string): Promise<string> {
   if (hasShellInputControls(input) || hasShellInputControls(cwd)) {
     throw new ToolFileError('local file paths cannot contain terminal control characters');
   }

@@ -5,6 +5,7 @@ import type {
   Command,
   DorCommandContext,
   ParseResult,
+  ToolSurfaceRequest,
   ToolSurfaceResponse,
 } from './types.js';
 import {
@@ -160,21 +161,28 @@ async function runToolCommand(this: DorCommandContext, flags: ToolFlags, ...rest
     return new Error('dor tool requires a tool name or -- <command...>');
   }
 
-  const client = requireControlClient(this.options, TOOL_TIMEOUT_MS);
-  if (client instanceof Error) return client;
+  return dispatchToolSurface(this, {
+    ...(named ? { name: rest[0], args: rest.slice(1), global: flags.global === true } : { command: rest }),
+    ...workspaceParam(flags.workspace),
+    fresh: flags.fresh === true,
+    minimized: flags.minimize === true,
+    surface: flags.surface,
+    cwd: callerWorkingDirectory(flags.cwd, this.options.env),
+  }, flags.json === true);
+}
 
+/** The launch round trip `dor tool` and `dor open` share: one Tool request in,
+ *  its handle out. */
+export async function dispatchToolSurface(
+  context: DorCommandContext, request: ToolSurfaceRequest, json: boolean,
+): Promise<void | Error> {
+  const client = requireControlClient(context.options, TOOL_TIMEOUT_MS);
+  if (client instanceof Error) return client;
   try {
-    const response = await client.toolSurface({
-      ...(named ? { name: rest[0], args: rest.slice(1), global: flags.global === true } : { command: rest }),
-      ...workspaceParam(flags.workspace),
-      fresh: flags.fresh === true,
-      minimized: flags.minimize === true,
-      surface: flags.surface,
-      cwd: callerWorkingDirectory(flags.cwd, this.options.env),
-    });
+    const response = await client.toolSurface(request);
     // Lint output is advisory and must not pollute a `--json` parse.
-    for (const warning of response.warnings ?? []) writeStderr(this, `${warning}\n`);
-    writeStdout(this, renderToolResponse(response, flags.json === true));
+    for (const warning of response.warnings ?? []) writeStderr(context, `${warning}\n`);
+    writeStdout(context, renderToolResponse(response, json));
     return undefined;
   } catch (error) {
     return new Error(errorMessage(error));

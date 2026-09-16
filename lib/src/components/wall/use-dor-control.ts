@@ -92,6 +92,8 @@ export type DorControlParams = {
   fresh?: unknown;
   args?: unknown;
   global?: unknown;
+  file?: unknown;
+  tool?: unknown;
 };
 
 // The webview view of a control request: the shared wire payload, but with
@@ -888,7 +890,13 @@ export function useDorControl({
           detail.respond({ ok: false, error: 'cwd is required' });
           return;
         }
-        const toolName = stringParam(params.name)?.trim();
+        let toolName = stringParam(params.name)?.trim();
+        const openFile = stringParam(params.file);
+        const opening = openFile !== undefined;
+        if (opening && (params.name !== undefined || params.command !== undefined || params.args !== undefined)) {
+          detail.respond({ ok: false, error: 'open accepts a file and optional tool, not a command' });
+          return;
+        }
         let command: string;
         let toolRun: string | readonly string[];
         let key: string[] | null = null;
@@ -929,6 +937,7 @@ export function useDorControl({
         const readCallerGate = (id: string, toolCwd: string): ToolTakeoverGate => {
           const state = getTerminalPaneState(id);
           return {
+            verb: opening ? 'open' : 'tool',
             explicitSurface: stringParam(params.surface) !== undefined,
             minimized: booleanParam(params.minimized),
             workspaceActive: !scope || getActiveWorkspaceId() === scope,
@@ -941,7 +950,7 @@ export function useDorControl({
           };
         };
 
-        if (toolName) {
+        if (toolName || opening) {
           // The registry, the closed substitution set, and the trust gate all
           // live behind this one host call (`dor/commands/types` ->
           // ToolSurfaceRequest).
@@ -950,7 +959,9 @@ export function useDorControl({
             detail.respond({ ok: false, error: 'this host cannot read a dormouse.yml; use `dor tool -- <command>`' });
             return;
           }
-          const lookup = await toolControl({ op: 'lookup', name: toolName, cwd, args: toolArgs, global: booleanParam(params.global) });
+          const lookup = await toolControl(opening
+            ? { op: 'open', target: openFile, cwd, tool: stringParam(params.tool) }
+            : { op: 'lookup', name: toolName!, cwd, args: toolArgs, global: booleanParam(params.global) });
           if (unavailable()) return;
           switch (lookup.status) {
             case 'trust-recorded':
@@ -961,6 +972,7 @@ export function useDorControl({
               toolRun = lookup.run;
               command = toolRunCommand(lookup.run);
               toolScope = lookup.scope;
+              toolName = lookup.name;
               // Namespaced under the host-resolved tool name, so two tools in
               // one repo with scope-only keys stay distinct and a runtime
               // re-key cannot name another tool's key.

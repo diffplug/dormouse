@@ -18,6 +18,7 @@ import { sendCommand } from './commands/send.js';
 import { skillCommand } from './commands/skill.js';
 import { splitCommand } from './commands/split.js';
 import { toolCommand } from './commands/tool.js';
+import { openCommand } from './commands/open.js';
 import { versionCommand } from './commands/version.js';
 import { workspaceCommand } from './commands/workspace.js';
 import { errorLine, errorMessage, fail } from './commands/shared.js';
@@ -90,6 +91,7 @@ const COMMANDS = [
   splitCommand,
   ensureCommand,
   toolCommand,
+  openCommand,
   versionCommand,
   skillCommand,
   sendCommand,
@@ -106,6 +108,7 @@ const ROUTES = {
   split: splitCommand.command,
   ensure: ensureCommand.command,
   tool: toolCommand.command,
+  open: openCommand.command,
   version: versionCommand.command,
   skill: skillCommand.command,
   send: sendCommand.command,

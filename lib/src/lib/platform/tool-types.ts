@@ -7,6 +7,7 @@
  */
 
 export type ToolHostRequest =
+  | { op: 'open'; target: string; cwd: string; tool?: string }
   | { op: 'lookup'; name: string; cwd: string; args?: string[]; global?: boolean }
   | { op: 'trust'; kind: 'upstream' | 'folder'; projectRoot: string };
 

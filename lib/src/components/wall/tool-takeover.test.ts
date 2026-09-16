@@ -45,6 +45,7 @@ describe('isNakedToolInvocation', () => {
 
 describe('toolTakesOverCaller', () => {
   const passing: ToolTakeoverGate = {
+    verb: 'tool',
     explicitSurface: false,
     minimized: false,
     workspaceActive: true,
@@ -58,6 +59,12 @@ describe('toolTakesOverCaller', () => {
 
   it('takes over the pane the invocation was typed in', () => {
     expect(toolTakesOverCaller(passing)).toBe(true);
+  });
+
+  it('only permits open to rerun an existing Tool, never take over a terminal', () => {
+    const opening: ToolTakeoverGate = { ...passing, verb: 'open', rawCommandLine: 'dor open README.md' };
+    expect(toolTakesOverCaller(opening)).toBe(false);
+    expect(toolRerunsInCaller({ ...opening, kind: 'tool' })).toBe(true);
   });
 
   it('splits when any condition fails', () => {
@@ -99,6 +106,7 @@ describe('toolTakesOverCaller', () => {
 // command line has finished by then, so it is not among the conditions.
 describe('after the prompt wait', () => {
   const passing: ToolTakeoverGate = {
+    verb: 'tool',
     explicitSurface: false,
     minimized: false,
     workspaceActive: true,

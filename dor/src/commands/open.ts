@@ -1,0 +1,54 @@
+import { buildCommand } from '@stricli/core';
+import type { Command, DorCommandContext, WorkspaceScopedFlags } from './types.js';
+import { callerWorkingDirectory, stringParser, workspaceFlag, workspaceParam } from './shared.js';
+import { dispatchToolSurface } from './tool.js';
+
+interface OpenFlags extends WorkspaceScopedFlags {
+  readonly json?: boolean;
+  readonly minimize?: boolean;
+  readonly fresh?: boolean;
+  readonly surface?: string;
+  readonly cwd?: string;
+  readonly tool?: string;
+}
+
+export const openCommand: Command = {
+  name: 'open',
+  command: buildCommand<OpenFlags, [string], DorCommandContext>({
+    docs: {
+      brief: 'Open a local file with a Dor Tool.',
+      fullDescription: `Opens one existing local file. Relative paths resolve from the caller's directory (or --cwd); symlink aliases resolve to the same file. URLs, directories, and Surface handles are not accepted.
+
+The first matching rule in the user dormouse.yml selects a user Tool. --tool chooses a user Tool explicitly. Project associations and project Tools never participate in this lookup. The user file is $XDG_CONFIG_HOME/dormouse/dormouse.yml, or ~/.config/dormouse/dormouse.yml.
+
+The ordered open list contains {match, tool} entries. Patterns without a slash match the filename; patterns with a slash match both the canonical absolute path and the path relative to the invocation directory. Matching uses picomatch glob syntax with forward slashes and case sensitivity. Dotfiles require explicit patterns.
+
+The selected Tool receives the canonical absolute filename as one argument. Configure prespawn_dedupe: [$TARGET] to reveal the same file on repeated opens within a Workspace. --fresh bypasses reuse.
+
+Opening creates a focus-neutral split or reveals an existing Tool, never taking over the caller's terminal. The command prints the Surface handle; --json prints structured output.`,
+    },
+    parameters: {
+      flags: {
+        json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
+        minimize: { kind: 'boolean', brief: 'Create the surface minimized.', optional: true, withNegated: false },
+        fresh: { kind: 'boolean', brief: 'Open another instance even when the Tool has a key.', optional: true, withNegated: false },
+        surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to split when creating.', optional: true, placeholder: 'id|ref' },
+        workspace: workspaceFlag,
+        cwd: { kind: 'parsed', parse: stringParser, brief: 'Directory for resolving the file.', optional: true, placeholder: 'path' },
+        tool: { kind: 'parsed', parse: stringParser, brief: 'Use this user-global Tool.', optional: true, placeholder: 'name' },
+      },
+      positional: { kind: 'tuple', parameters: [{ parse: stringParser, brief: 'Local file to open.', placeholder: 'file' }] },
+    },
+    func(this: DorCommandContext, flags: OpenFlags, file: string) {
+      return dispatchToolSurface(this, {
+        file,
+        tool: flags.tool,
+        ...workspaceParam(flags.workspace),
+        fresh: flags.fresh === true,
+        minimized: flags.minimize === true,
+        surface: flags.surface,
+        cwd: callerWorkingDirectory(flags.cwd, this.options.env),
+      }, flags.json === true);
+    },
+  }),
+};

@@ -20,15 +20,18 @@ const COMPOUND_SYNTAX = /[;&|<>()`\n\r]/;
  * (`docs/specs/dor-tool.md` -> Take-over). Case folds on the launcher, which is
  * a filename, and not on the verb, which stricli parses case-sensitively.
  */
-export function isNakedToolInvocation(rawCommandLine: string | null | undefined): boolean {
+export function isNakedToolInvocation(rawCommandLine: string | null | undefined, verb: 'tool' | 'open' = 'tool'): boolean {
   const line = rawCommandLine?.trim();
   if (!line || COMPOUND_SYNTAX.test(line)) return false;
-  const [launcher, verb] = primaryCommandTokens(line);
-  return verb === 'tool' && commandProgramName(launcher ?? '').toLowerCase() === 'dor';
+  const [launcher, commandVerb] = primaryCommandTokens(line);
+  return commandVerb === verb && commandProgramName(launcher ?? '').toLowerCase() === 'dor';
 }
 
 /** What the placement rule reads. Every field is already known to the handler. */
 export interface ToolTakeoverGate {
+  /** The `dor` verb the request came from: `open` never transforms a plain
+   *  terminal, but may re-run its own Tool pane. */
+  verb: 'tool' | 'open';
   /** `--surface`: an explicit placement, which take-over must not override. */
   explicitSurface: boolean;
   /** `--minimize`: a request for a background Surface, which the caller is not. */
@@ -59,7 +62,7 @@ export interface ToolTakeoverGate {
  * need it, and neither can proceed without it.
  */
 function callerTypedTool(gate: ToolTakeoverGate): boolean {
-  return gate.oscDriven && isNakedToolInvocation(gate.rawCommandLine);
+  return gate.oscDriven && isNakedToolInvocation(gate.rawCommandLine, gate.verb);
 }
 
 /**
@@ -68,7 +71,8 @@ function callerTypedTool(gate: ToolTakeoverGate): boolean {
  * (rationale).
  */
 export function toolTakesOverCaller(gate: ToolTakeoverGate): boolean {
-  return gate.workspaceActive
+  return gate.verb === 'tool'
+    && gate.workspaceActive
     && !gate.explicitSurface
     && !gate.minimized
     && callerStillPlaceable(gate)

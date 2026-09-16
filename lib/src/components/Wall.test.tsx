@@ -1478,6 +1478,51 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it('dispatches open through the user host and splits even when the caller could be taken over', async () => {
+    setToolsEnabled(true);
+    const controller = new AbortController();
+    let toolId: string | undefined;
+    vi.spyOn(terminalRegistry, 'isPaneOscDriven').mockReturnValue(true);
+    const toolControl = vi.fn(async () => ({ status: 'ok' as const, scope: 'user' as const,
+      projectRoot: '/config', path: '/config/dormouse.yml', name: 'viewer', run: ['view', '/repo/a.md'],
+      key: ['/repo/a.md'], render: 'iframe' as const, port: 'auto' as const, warnings: [] }));
+    Object.assign(fake, { toolControl });
+    try {
+      await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
+      await flush();
+      terminalRegistry.seedTerminalManualCwd('pane-a', '/repo');
+      terminalRegistry.applyTerminalSemanticEvents('pane-a', [
+        { type: 'commandLine', commandLine: 'dor open a.md' },
+        { type: 'commandStart', source: 'osc633_boundaries' },
+      ]);
+      const respond = vi.fn();
+      await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+        method: SURFACE_CONTROL_METHODS.tool, surfaceId: 'pane-a', params: { file: 'a.md', cwd: '/repo' }, signal: controller.signal, respond,
+      } })));
+      await waitUntil(() => respond.mock.calls.length > 0);
+      expect(toolControl).toHaveBeenCalledWith({ op: 'open', target: 'a.md', cwd: '/repo', tool: undefined });
+      expect(respond).toHaveBeenCalledWith(expect.objectContaining({ ok: true, result: expect.objectContaining({ status: 'created' }) }));
+      toolId = respond.mock.calls[0][0].result.surfaceId;
+      expect(toolId).not.toBe('pane-a');
+      expect(leafCount()).toBe(2);
+      // This fixture stubs TerminalPane, so report the staged command's startup
+      // explicitly before disposing the Wall and its shared launch queue wait.
+      act(() => {
+        terminalRegistry.seedTerminalManualCwd(toolId!, '/repo');
+        reportRunning(toolId!, 'view /repo/a.md');
+      });
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
+    } finally {
+      await act(async () => controller.abort());
+      if (toolId) {
+        pendingShellOpts.delete(toolId);
+        act(() => terminalRegistry.removeTerminalPaneState(toolId!));
+      }
+      act(() => terminalRegistry.removeTerminalPaneState('pane-a'));
+      setToolsEnabled(false);
+    }
+  });
+
   it('retries failed post-grant lookup without recording permission again', async () => {
     setToolsEnabled(true);
     let calls = 0;

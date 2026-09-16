@@ -185,7 +185,7 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
       const named = typeof request.name === 'string';
       const command = named
         ? `pnpm ${request.name}`
-        : buildShellCommandForKind('posix', request.command);
+        : request.file ? `viewer ${request.file}` : buildShellCommandForKind('posix', request.command);
       const keyed = named && request.name === 'storybook' && !request.fresh;
       return {
         status: keyed ? 'existing' : 'created',
@@ -1797,5 +1797,26 @@ test('tool routes named and anonymous launches to an explicit Workspace', async 
     assert.equal(result.exitCode, 0);
     assert.equal(client.requests[0].method, 'toolSurface');
     assert.equal(client.requests[0].request.workspace, 'workspace:2');
+  }
+});
+
+test('open forwards one file, explicit handler, placement, and Workspace to Tool dispatch', async () => {
+  const client = fixtureClient();
+  const result = await runCli(['open', '--json', '--tool', 'markdown', '--workspace', 'workspace:2', '--fresh', '--minimize', '--surface', 'surface:4', 'a b.md'], { client, env: { PWD: '/repo' } });
+  assert.equal(result.exitCode, 0);
+  client.requests[0].request.cwd = smudgeWindowsPaths(client.requests[0].request.cwd);
+  assert.deepEqual(client.requests[0], { method: 'toolSurface', request: {
+    file: 'a b.md', tool: 'markdown', cwd: '/repo',
+    workspace: 'workspace:2', fresh: true, minimized: true, surface: 'surface:4',
+  } });
+  assert.equal(JSON.parse(result.stdout).surface_ref, 'surface:4');
+});
+
+test('open requires exactly one file', async () => {
+  for (const args of [['open'], ['open', 'one.md', 'two.md']]) {
+    const client = fixtureClient();
+    const result = await runCli(args, { client });
+    assert.equal(result.exitCode, 1);
+    assert.equal(client.requests.length, 0);
   }
 });
