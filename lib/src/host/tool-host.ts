@@ -28,11 +28,11 @@ export interface ToolHost {
   handle(request: ToolHostRequest): Promise<ToolControlResult>;
 }
 
-/** The one wire shape for a resolved Tool, whichever file declared it. */
+/** The `ok` result for a project Tool after its trust gate. */
 function okResult(
   entry: ToolEntry,
   input: ToolInput,
-  source: { projectRoot: string; path: string; warnings: readonly string[]; scope?: 'user' },
+  source: { projectRoot: string; path: string; warnings: readonly string[] },
 ): ToolControlResult {
   return {
     status: 'ok',
@@ -40,7 +40,6 @@ function okResult(
     path: source.path,
     name: entry.name,
     ...input,
-    ...(source.scope ? { scope: source.scope } : {}),
     render: entry.render,
     port: entry.port,
     warnings: [...source.warnings],

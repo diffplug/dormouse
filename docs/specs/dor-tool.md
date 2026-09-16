@@ -151,7 +151,7 @@ Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `dor/test/snapshot
 
 **Must select the first matching entry of the user file's ordered `open` list**, whose entries contain `match` and `tool`. `--tool` explicitly selects a user Tool. Every association must name an argument-list Tool in that same user file. Never discover project configuration during this lookup; project `open` rules are ignored with a warning during explicit project-tool lookup.
 
-**Must match patterns without `/` against the canonical filename, and patterns with `/` against both the CWD-relative and canonical absolute paths**, separators normalized to `/`, with bundled picomatch: case-sensitive, dotfiles only by explicit pattern. A miss names the user config path and suggests `--tool`. (rationale)
+**Must match patterns without `/` against the canonical filename, and patterns with `/` against both paths relative to the canonical CWD and canonical absolute paths**, separators normalized to `/`, with bundled picomatch: case-sensitive, dotfiles only by explicit pattern. Use the supplied CWD if canonicalization fails; matching never changes the Tool's run directory or `$CWD`. A miss names the user config path and suggests `--tool`. (rationale)
 
 **Must pass the canonical file path as the selected Tool's one input.** Reuse follows [Identity and dedupe](#identity-and-dedupe), `$TARGET` in the key providing per-file identity; placement follows [Take-over](#take-over).
 

@@ -73,3 +73,30 @@ it('matches catch-all rules above the invocation directory and canonical absolut
   await writeConfig(viewerConfig(join(root, 'docs').replace(/\\/g, '/') + '/**'));
   expect(await host().handle(request)).toMatchObject({ status: 'ok', name: 'viewer' });
 });
+
+it('matches the first specific rule through a symlinked working directory without changing the run directory', async () => {
+  await writeConfig(`tools:
+  special:
+    run: [special, $TARGET, $CWD]
+    prespawn_dedupe: [$TARGET]
+  markdown:
+    run: [markdown, $TARGET]
+open:
+  - {match: docs/README.md, tool: special}
+  - {match: '**/*.md', tool: markdown}
+`);
+  const cwd = join(root, 'alias');
+  await symlink(root, cwd, 'junction');
+  const target = join(root, 'docs', 'README.md');
+  expect(await host().handle({ op: 'open', target: 'docs/README.md', cwd })).toMatchObject({
+    status: 'ok', name: 'special', run: ['special', target, cwd], key: [target],
+  });
+});
+
+it('still matches an absolute target when the working directory no longer exists', async () => {
+  const target = join(root, 'docs', 'README.md');
+  const cwd = join(root, 'missing');
+  expect(await host().handle({ op: 'open', target, cwd })).toMatchObject({
+    status: 'ok', name: 'markdown', run: ['markdown', target],
+  });
+});
