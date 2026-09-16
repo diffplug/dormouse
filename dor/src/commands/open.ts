@@ -1,16 +1,15 @@
 import { buildCommand } from '@stricli/core';
-import type { Command, DorCommandContext } from './types.js';
-import { callerWorkingDirectory, errorMessage, requireControlClient, stringParser, workspaceFlag, workspaceParam, writeStderr, writeStdout } from './shared.js';
-import { renderToolResponse } from './tool.js';
+import type { Command, DorCommandContext, WorkspaceScopedFlags } from './types.js';
+import { callerWorkingDirectory, stringParser, workspaceFlag, workspaceParam } from './shared.js';
+import { dispatchToolSurface } from './tool.js';
 
-interface OpenFlags {
-  json?: boolean;
-  minimize?: boolean;
-  fresh?: boolean;
-  surface?: string;
-  workspace?: string;
-  cwd?: string;
-  tool?: string;
+interface OpenFlags extends WorkspaceScopedFlags {
+  readonly json?: boolean;
+  readonly minimize?: boolean;
+  readonly fresh?: boolean;
+  readonly surface?: string;
+  readonly cwd?: string;
+  readonly tool?: string;
 }
 
 export const openCommand: Command = {
@@ -40,15 +39,16 @@ Opening creates a focus-neutral split or reveals an existing Tool, never taking 
       },
       positional: { kind: 'tuple', parameters: [{ parse: stringParser, brief: 'Local file to open.', placeholder: 'file' }] },
     },
-    async func(this: DorCommandContext, flags: OpenFlags, file: string) {
-      const client = requireControlClient(this.options, 20_000);
-      if (client instanceof Error) return client;
-      try {
-        const response = await client.toolSurface({ file, tool: flags.tool, cwd: callerWorkingDirectory(flags.cwd, this.options.env),
-          fresh: flags.fresh === true, minimized: flags.minimize === true, surface: flags.surface, ...workspaceParam(flags.workspace) });
-        for (const warning of response.warnings ?? []) writeStderr(this, `${warning}\n`);
-        writeStdout(this, renderToolResponse(response, flags.json === true));
-      } catch (error) { return new Error(errorMessage(error)); }
+    func(this: DorCommandContext, flags: OpenFlags, file: string) {
+      return dispatchToolSurface(this, {
+        file,
+        tool: flags.tool,
+        ...workspaceParam(flags.workspace),
+        fresh: flags.fresh === true,
+        minimized: flags.minimize === true,
+        surface: flags.surface,
+        cwd: callerWorkingDirectory(flags.cwd, this.options.env),
+      }, flags.json === true);
     },
   }),
 };

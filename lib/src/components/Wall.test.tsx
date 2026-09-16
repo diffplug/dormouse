@@ -1489,7 +1489,7 @@ describe('Wall on the Lath engine', () => {
       await flush();
       terminalRegistry.seedTerminalManualCwd('pane-a', '/repo');
       terminalRegistry.applyTerminalSemanticEvents('pane-a', [
-        { type: 'commandLine', commandLine: 'dor tool viewer a.md' },
+        { type: 'commandLine', commandLine: 'dor open a.md' },
         { type: 'commandStart', source: 'osc633_boundaries' },
       ]);
       const respond = vi.fn();

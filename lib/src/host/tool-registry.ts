@@ -196,23 +196,11 @@ export function parseToolFile(
     tools.set(name, { name, run: typeof run === 'string' ? run.trim() : run, render, port, dedupeTemplate });
   }
 
-  const open: OpenRule[] = [];
-  if (doc.open !== undefined) {
-    if (scope === 'repo') warnings.push(`${path}: project open rules are ignored; configure associations in the user file`);
-    else {
-      if (!Array.isArray(doc.open)) throw new ToolFileError(`${path}: 'open' must be an ordered list`);
-      for (const rule of doc.open) {
-        if (!isRecord(rule) || typeof rule.match !== 'string' || !rule.match || typeof rule.tool !== 'string'
-          || !tools.has(rule.tool) || Object.keys(rule).some(key => key !== 'match' && key !== 'tool')) {
-          throw new ToolFileError(`${path}: each open rule needs a match pattern and a tool defined in this user file`);
-        }
-        if (typeof tools.get(rule.tool)!.run === 'string') {
-          throw new ToolFileError(`${path}: open rule for '${rule.tool}' needs an argument-list run to receive the file`);
-        }
-        open.push({ match: rule.match, tool: rule.tool });
-      }
-    }
+  // Associations are user-only (`docs/specs/dor-tool.md` -> Opening local files).
+  if (scope === 'repo' && doc.open !== undefined) {
+    warnings.push(`${path}: project open rules are ignored; configure associations in the user file`);
   }
+  const open = scope === 'repo' ? [] : parseOpenRules(doc.open, tools, path);
   return { scope, dir, tools, warnings, open };
 }
 
@@ -243,6 +231,22 @@ export function substituteToolTokens(element: string, context: SubstitutionConte
       return context.projectRoot;
     }
     throw new ToolFileError(`tool '${toolName}': unknown substitution '${token}'`);
+  });
+}
+
+function parseOpenRules(node: unknown, tools: ReadonlyMap<string, ToolEntry>, path: string): OpenRule[] {
+  if (node === undefined) return [];
+  if (!Array.isArray(node)) throw new ToolFileError(`${path}: 'open' must be an ordered list`);
+  return node.map((rule: unknown) => {
+    const entry = isRecord(rule) && typeof rule.tool === 'string' ? tools.get(rule.tool) : undefined;
+    if (!isRecord(rule) || !entry || typeof rule.match !== 'string' || !rule.match
+      || Object.keys(rule).some(key => key !== 'match' && key !== 'tool')) {
+      throw new ToolFileError(`${path}: each open rule needs a match pattern and a tool defined in this user file`);
+    }
+    if (typeof entry.run === 'string') {
+      throw new ToolFileError(`${path}: open rule for '${entry.name}' needs an argument-list run to receive the file`);
+    }
+    return { match: rule.match, tool: entry.name };
   });
 }
 

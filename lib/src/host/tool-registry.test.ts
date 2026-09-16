@@ -200,7 +200,6 @@ it('rejects a shell command with a target-only dedupe key at declaration time', 
     .toThrow('$TARGET in prespawn_dedupe requires an argument-list run');
 });
 
-
 it('keeps project associations inert and validates user associations at declaration time', () => {
   expect(parse('open: malformed-but-inert\n').warnings).toEqual([expect.stringContaining('project open rules are ignored')]);
   expect(() => parse('open: nope\n', USER)).toThrow("'open' must be an ordered list");

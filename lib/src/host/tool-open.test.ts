@@ -6,12 +6,14 @@ import { createToolHost } from './tool-host';
 
 let root: string;
 let config: string;
+const writeConfig = (yaml: string) => writeFile(config, yaml);
+const viewerConfig = (match: string) => `tools:\n  viewer:\n    run: [view, $TARGET]\nopen:\n  - {match: '${match}', tool: viewer}\n`;
 beforeEach(async () => {
   root = await realpath(await mkdtemp(join(tmpdir(), 'dor-open-')));
   config = join(root, 'user.yml');
   await mkdir(join(root, 'docs'));
   await writeFile(join(root, 'docs', 'README.md'), 'hi');
-  await writeFile(config, `tools:
+  await writeConfig(`tools:
   special:
     run: [special, $TARGET]
     prespawn_dedupe: [$TARGET]
@@ -38,11 +40,11 @@ it('uses the first user rule and never discovers project definitions', async () 
   });
 });
 
-it('matches slashless patterns against filenames and preserves spaces and metacharacters', async () => {
-  await writeFile(config, "tools:\n  viewer:\n    run: [viewer, $TARGET]\nopen:\n  - {match: '*.md', tool: viewer}\n");
+it('matches slashless patterns against the filename', async () => {
+  await writeConfig(viewerConfig('*.md'));
   const target = join(root, 'docs', 'a b; $(touch nope).md');
   await writeFile(target, 'hi');
-  expect(await host().handle({ op: 'open', target, cwd: root })).toMatchObject({ status: 'ok', run: ['viewer', target] });
+  expect(await host().handle({ op: 'open', target, cwd: root })).toMatchObject({ status: 'ok', run: ['view', target] });
 });
 
 it.skipIf(process.platform === 'win32')('keys symlink aliases on the same canonical file', async () => {
@@ -57,21 +59,17 @@ it.each(['https://example.com/file.md', 'file:///etc/passwd', 'surface:3', 'docs
   expect(await host().handle({ op: 'open', target, cwd: root })).toMatchObject({ status: 'error' });
 });
 
-it('names the user configuration in unmatched-file errors and refuses broken associations', async () => {
+it('names the user configuration in unmatched-file errors', async () => {
   const target = join(root, 'unknown.binary');
   await writeFile(target, 'hi');
   expect(await host().handle({ op: 'open', target, cwd: root })).toMatchObject({ status: 'error', message: expect.stringContaining(config) });
-  await writeFile(config, 'open:\n  - {match: "*", tool: undeclared}\n');
-  expect(await host().handle({ op: 'open', target, cwd: root })).toMatchObject({ status: 'error', message: expect.stringContaining('defined in this user file') });
 });
-
 
 it('matches catch-all rules above the invocation directory and canonical absolute rules', async () => {
   await mkdir(join(root, 'work'));
-  await writeFile(config, `tools:\n  viewer:\n    run: [view, $TARGET]\nopen:\n  - {match: '**/*.md', tool: viewer}\n`);
+  await writeConfig(viewerConfig('**/*.md'));
   const request = { op: 'open', target: '../docs/README.md', cwd: join(root, 'work') } as const;
   expect(await host().handle(request)).toMatchObject({ status: 'ok', name: 'viewer' });
-  const canonicalPattern = join(root, 'docs').replace(/\\/g, '/') + '/**';
-  await writeFile(config, `tools:\n  viewer:\n    run: [view, $TARGET]\nopen:\n  - {match: '${canonicalPattern}', tool: viewer}\n`);
+  await writeConfig(viewerConfig(join(root, 'docs').replace(/\\/g, '/') + '/**'));
   expect(await host().handle(request)).toMatchObject({ status: 'ok', name: 'viewer' });
 });

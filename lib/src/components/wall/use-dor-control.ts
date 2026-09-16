@@ -878,7 +878,8 @@ export function useDorControl({
         }
         let toolName = stringParam(params.name)?.trim();
         const openFile = stringParam(params.file);
-        if (openFile !== undefined && (params.name !== undefined || params.command !== undefined || params.args !== undefined)) {
+        const opening = openFile !== undefined;
+        if (opening && (params.name !== undefined || params.command !== undefined || params.args !== undefined)) {
           detail.respond({ ok: false, error: 'open accepts a file and optional tool, not a command' });
           return;
         }
@@ -915,6 +916,7 @@ export function useDorControl({
         const readCallerGate = (id: string, toolCwd: string): ToolTakeoverGate => {
           const state = getTerminalPaneState(id);
           return {
+            verb: opening ? 'open' : 'tool',
             explicitSurface: stringParam(params.surface) !== undefined,
             minimized: booleanParam(params.minimized),
             workspaceActive: !scope || getActiveWorkspaceId() === scope,
@@ -927,7 +929,7 @@ export function useDorControl({
           };
         };
 
-        if (toolName || openFile !== undefined) {
+        if (toolName || opening) {
           // The registry, the closed substitution set, and the trust gate all
           // live behind this one host call (`dor/commands/types` ->
           // ToolSurfaceRequest).
@@ -936,7 +938,7 @@ export function useDorControl({
             detail.respond({ ok: false, error: 'this host cannot read a dormouse.yml; use `dor tool -- <command>`' });
             return;
           }
-          const lookup = await toolControl(openFile !== undefined
+          const lookup = await toolControl(opening
             ? { op: 'open', target: openFile, cwd, tool: stringParam(params.tool) }
             : { op: 'lookup', name: toolName!, cwd, args: toolArgs, global: booleanParam(params.global) });
           if (unavailable()) return;
@@ -1102,7 +1104,7 @@ export function useDorControl({
             // match. Through the handshake, never `restartSurfaceInPlace`,
             // whose Ctrl+C would kill the `dor` awaiting this answer.
             if (match.id === callerId && !surfaceRunsCommand(matchState, matchedCommand, matchedCwd)) {
-              if (!callerGate || !toolRerunsInCaller(callerGate, openFile !== undefined ? 'open' : 'tool')) {
+              if (!callerGate || !toolRerunsInCaller(callerGate)) {
                 // Nothing can be typed behind a line that is not this
                 // invocation alone, and there is no survivor to reveal — the
                 // user is sitting in it. Say so instead of reporting a tool
@@ -1157,7 +1159,7 @@ export function useDorControl({
         // rather than splitting (docs/specs/dor-tool.md -> Take-over). Must stay
         // below the pending-approval and key-match returns above: both of those
         // placements win over this one.
-        if (openFile === undefined && callerId && callerGate && toolTakesOverCaller(callerGate)) {
+        if (callerId && callerGate && toolTakesOverCaller(callerGate)) {
           // Answered before the tool starts, because answering is what frees
           // the shell to run it.
           respondTool('takeover', { surfaceId: callerId, command, cwd, minimized: false });

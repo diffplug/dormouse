@@ -129,19 +129,19 @@ Source of truth: `ToolPanel` in `lib/src/components/wall/ToolPanel.tsx`; `ToolPa
 
 **Must return the Tool Surface handle.** A new Tool follows [Take-over](#take-over), otherwise splitting focus-neutrally. A matching Tool follows [Identity and dedupe](#identity-and-dedupe).
 
-**Must retain `dor tool` as a Surface-producing command on every supported host**, never route it to a native editor. Generated help owns syntax and response types own shape.
+**Must retain `dor tool` and `dor open` as Surface-producing commands on every supported host**, never route them to a native editor. Generated help owns syntax and response types own shape.
 
 Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `dor/test/snapshots/help/tool.md`; `ToolSurfaceResponse` in `dor/src/commands/types.ts`.
 
 ## Opening local files
 
-**Must accept exactly one existing local regular file for `dor open`.** Resolve it with the `$TARGET` rules in Declaring tools. URLs (including `file:`), directories, and Surface handles fail; no native-editor fallback occurs.
+**Must accept exactly one existing local regular file for `dor open`**, resolved by the `$TARGET` rules in [Declaring tools](#declaring-tools).
 
 **Must select the first matching entry of the user file's ordered `open` list**, whose entries contain `match` and `tool`. `--tool` explicitly selects a user Tool. Every association must name an argument-list Tool in that same user file. Never discover project configuration during this lookup; project `open` rules are ignored with a warning during explicit project-tool lookup.
 
-**Must match patterns without `/` against the canonical filename, and patterns with `/` against both the CWD-relative and canonical absolute paths.** Normalize separators to `/` and use bundled picomatch with POSIX separators, case-sensitive matching, and explicit patterns for dotfiles. A miss names the user config path and suggests `--tool`.
+**Must match patterns without `/` against the canonical filename, and patterns with `/` against both the CWD-relative and canonical absolute paths**, separators normalized to `/`, with bundled picomatch: case-sensitive, dotfiles only by explicit pattern. A miss names the user config path and suggests `--tool`.
 
-**Must pass the canonical file path as one input to the selected Tool.** Reuse follows Identity and dedupe; `$TARGET` in the key provides per-file identity. `--fresh` bypasses reuse. **Never transform a plain calling terminal through `dor open`.** Create a focus-neutral split or reveal the existing Tool; an idle match in the caller's Tool pane uses the answer/prompt handshake only for a standalone integrated `dor open` invocation.
+**Must pass the canonical file path as the selected Tool's one input.** Reuse follows [Identity and dedupe](#identity-and-dedupe), `$TARGET` in the key providing per-file identity; placement follows [Take-over](#take-over).
 
 Source of truth: `openCommand` in `dor/src/commands/open.ts`; `resolveOpenTool` in `lib/src/host/tool-open.ts`; `parseToolFile` in `lib/src/host/tool-registry.ts`; `surface.tool` in `lib/src/components/wall/use-dor-control.ts`. Tests: `lib/src/host/tool-open.test.ts`, `dor/test/cli-output.test.mjs`, `lib/src/components/Wall.test.tsx`.
 
@@ -151,8 +151,9 @@ Source of truth: `openCommand` in `dor/src/commands/open.ts`; `resolveOpenTool` 
 
 | Condition | Required state |
 | --- | --- |
+| Verb | `dor tool`; `dor open` never transforms a plain terminal, though a keyed match in its own Tool pane reruns there |
 | Caller | Visible, integrated plain terminal; not closing or dying |
-| Command line | OSC 633 reports `dor tool` alone; compound shell syntax rejects takeover |
+| Command line | OSC 633 reports the invocation alone; compound shell syntax rejects takeover |
 | Directory | Resolved Tool CWD equals the caller's reported CWD |
 | Placement | Neither `--surface` nor `--minimize` supplied |
 | Helper | No existing auxiliary helper; preserve it by splitting |

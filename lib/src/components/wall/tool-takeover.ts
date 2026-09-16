@@ -29,6 +29,9 @@ export function isNakedToolInvocation(rawCommandLine: string | null | undefined,
 
 /** What the placement rule reads. Every field is already known to the handler. */
 export interface ToolTakeoverGate {
+  /** The `dor` verb the request came from: `open` never transforms a plain
+   *  terminal, but may re-run its own Tool pane. */
+  verb: 'tool' | 'open';
   /** `--surface`: an explicit placement, which take-over must not override. */
   explicitSurface: boolean;
   /** `--minimize`: a request for a background Surface, which the caller is not. */
@@ -58,8 +61,8 @@ export interface ToolTakeoverGate {
  * pane whose reported line is this invocation and nothing else. Both placements
  * need it, and neither can proceed without it.
  */
-function callerTypedTool(gate: ToolTakeoverGate, verb: 'tool' | 'open' = 'tool'): boolean {
-  return gate.oscDriven && isNakedToolInvocation(gate.rawCommandLine, verb);
+function callerTypedTool(gate: ToolTakeoverGate): boolean {
+  return gate.oscDriven && isNakedToolInvocation(gate.rawCommandLine, gate.verb);
 }
 
 /**
@@ -68,7 +71,8 @@ function callerTypedTool(gate: ToolTakeoverGate, verb: 'tool' | 'open' = 'tool')
  * (rationale).
  */
 export function toolTakesOverCaller(gate: ToolTakeoverGate): boolean {
-  return gate.workspaceActive
+  return gate.verb === 'tool'
+    && gate.workspaceActive
     && !gate.explicitSurface
     && !gate.minimized
     && callerStillPlaceable(gate)
@@ -94,8 +98,8 @@ export function callerStillPlaceable(gate: ToolTakeoverGate): boolean {
  * nothing to place, and the tool re-runs in its own directory, exactly as an
  * `adopted` match from any other pane does.
  */
-export function toolRerunsInCaller(gate: ToolTakeoverGate, verb: 'tool' | 'open' = 'tool'): boolean {
-  return gate.kind === 'tool' && callerTypedTool(gate, verb);
+export function toolRerunsInCaller(gate: ToolTakeoverGate): boolean {
+  return gate.kind === 'tool' && callerTypedTool(gate);
 }
 
 /** What a re-run re-reads after the prompt wait: the pane survived it, in the
