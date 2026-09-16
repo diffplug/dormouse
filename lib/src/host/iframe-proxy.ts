@@ -364,11 +364,11 @@ function sanitizeResponseHeaders(grant: Grant, headers: http.IncomingHttpHeaders
   }
   if (grant.embedderOrigins !== null) {
     const upstreamCsp = out['content-security-policy'];
-    // Separate policies intersect: retain every upstream directive verbatim,
+    // Comma-separated policies intersect: retain every upstream directive verbatim,
     // including stricter frame-ancestors, and add our embedder boundary.
     out['content-security-policy'] = upstreamCsp === undefined
       ? frameAncestorsCsp(grant.embedderOrigins)
-      : [...(Array.isArray(upstreamCsp) ? upstreamCsp : [String(upstreamCsp)]), frameAncestorsCsp(grant.embedderOrigins)];
+      : [...(Array.isArray(upstreamCsp) ? upstreamCsp : [String(upstreamCsp)]), frameAncestorsCsp(grant.embedderOrigins)].join(', ');
   }
   // Keep upstream redirects on the proxy origin so they don't bounce the frame
   // straight at the un-instrumented upstream.
