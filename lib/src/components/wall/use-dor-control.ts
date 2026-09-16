@@ -306,6 +306,15 @@ function waitForTerminalState(
   });
 }
 
+/** A newly spawned Tool has no earlier command history. Its first command may
+ * finish before the caller starts waiting, so a matching completion counts too.
+ * Hold the launch queue through this wait; integration alone precedes injection. */
+export function waitForNewToolCommand(id: string, command: string, cwd: string, signal?: AbortSignal): Promise<WaitOutcome> {
+  return waitForTerminalState(id, state => surfaceRunsCommand(state, command, cwd)
+    || (state.lastCommand !== null && surfaceRunsCommand({ ...state, currentCommand: state.lastCommand }, command, cwd)),
+  RESTART_START_TIMEOUT_MS, signal);
+}
+
 const RESTART_CANCELLED: ParseResult<undefined> = { ok: false, message: 'restart was cancelled' };
 /** The control verbs that can add a Surface to the Wall. `resolveOpen` and
  *  `resolveAgentBrowser` only answer questions, and every other verb addresses a
@@ -1021,6 +1030,7 @@ export function useDorControl({
             ...(warnings.length > 0 ? { warnings } : {}),
           },
         });
+        await waitForNewToolCommand(created.value.id, command, cwd, detail.signal);
       });
       return;
     }

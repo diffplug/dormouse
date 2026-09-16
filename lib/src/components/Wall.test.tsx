@@ -1448,6 +1448,63 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it.each([false, true])('serializes a newly created Tool until startup, including completion before waiting (%s)', async finishesBeforeWait => {
+    setToolsEnabled(true);
+    const controller = new AbortController();
+    const command = 'pnpm storybook';
+    let id: string | undefined;
+    const toolControl = vi.fn(async (request: { name?: string }) => request.name === 'probe'
+      ? { status: 'error', message: 'probe reached lookup' }
+      : { status: 'ok', name: 'storybook', projectRoot: '/repo', path: '/repo/dormouse.yml', run: command, render: 'iframe', port: 'announced', key: ['/repo'], warnings: [] });
+    Object.assign(fake, { toolControl });
+    vi.spyOn(terminalRegistry, 'isPaneOscDriven').mockReturnValue(true);
+    const write = vi.spyOn(fake, 'writePty');
+    const reportStart = (toolId: string) => {
+      terminalRegistry.seedTerminalManualCwd(toolId, '/repo');
+      terminalRegistry.applyTerminalSemanticEvents(toolId, [{ type: 'commandLine', commandLine: command }, { type: 'commandStart', source: 'osc633_boundaries' }]);
+    };
+    try {
+      await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
+      await flush();
+      const first = vi.fn((response: { result?: { surfaceId: string } }) => {
+        id = response.result?.surfaceId;
+        if (finishesBeforeWait && id) {
+          reportStart(id);
+          terminalRegistry.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }, { type: 'promptStart' }]);
+        }
+      });
+      await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+        method: SURFACE_CONTROL_METHODS.tool, surfaceId: 'pane-a', params: { name: 'storybook', cwd: '/repo' }, signal: controller.signal, respond: first,
+      } })));
+      await flush();
+      expect(first).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status: 'created' }) }));
+      const second = vi.fn();
+      await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+        method: SURFACE_CONTROL_METHODS.tool, surfaceId: 'pane-a', params: { name: finishesBeforeWait ? 'probe' : 'storybook', cwd: '/repo' }, signal: controller.signal, respond: second,
+      } })));
+      if (!finishesBeforeWait) {
+        await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
+        expect(toolControl).toHaveBeenCalledTimes(1);
+        expect(second).not.toHaveBeenCalled();
+        expect(write).not.toHaveBeenCalled();
+        act(() => reportStart(id!));
+      }
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
+      expect(second).toHaveBeenCalledWith(finishesBeforeWait ? { ok: false, error: 'probe reached lookup' }
+        : expect.objectContaining({ result: expect.objectContaining({ status: 'existing', surfaceId: id }) }));
+      expect(toolControl).toHaveBeenCalledTimes(2);
+      expect(write).not.toHaveBeenCalled();
+      expect(leafCount()).toBe(2);
+    } finally {
+      await act(async () => { controller.abort(); await new Promise(resolve => setTimeout(resolve, 125)); });
+      if (id) {
+        pendingShellOpts.delete(id);
+        act(() => terminalRegistry.removeTerminalPaneState(id!));
+      }
+      setToolsEnabled(false);
+    }
+  });
+
   it.each([true, false])('keeps a tool deferred until trust succeeds (%s), lookup and shell staging finish', async grantSucceeds => {
     setToolsEnabled(true);
     let toolId: string | undefined;
