@@ -29,6 +29,12 @@
  *   - It knows the bind forms listed at BIND_FORMS and no others. A library
  *     nobody has added yet spells its bind some way this file has never seen,
  *     so adding a server dependency means adding its spelling here.
+ *   - The `server`-block form scans past nested objects two levels deep, which
+ *     reaches `fs`, `hmr`, `headers`, `watch` and a `proxy` route object. It
+ *     stops there because no depth is the last one: a `proxy` route's own
+ *     options nest again (`headers`, `cookieDomainRewrite`), and `configure`
+ *     takes a function whose body carries braces of its own. A `host` written
+ *     below one of those is a miss, and the audit is what covers it.
  *   - Outside `ws`, it matches only an explicit loopback host. A listener that
  *     binds every interface (`.listen(port)` with no host) is a different and
  *     larger problem, and `relay/` does it deliberately from config, so
@@ -111,8 +117,8 @@ const WS_NEW = '\\bnew\\s+WebSocket\\.?Server\\(\\s*\\{[^}]*?';
 // first `}`, so a form that uses it only matches while its key precedes every
 // nested object — fine for a call's flat options, wrong for a `vite.config.ts`
 // `server` block, where a nested key above `host` is the common shape. Two
-// levels is as deep as a `server` key goes; deeper is the regex ceiling this
-// file's header already disclaims.
+// levels is where this stops, not where `server` keys stop — the header states
+// what that leaves out.
 const NESTED_KEYS = '(?:[^{}]|\\{(?:[^{}]|\\{[^{}]*\\})*\\})*?';
 
 /**
@@ -133,9 +139,10 @@ const BIND_FORMS = [
   // form can see it. Matched on the `server` block rather than on `createServer`
   // because the same block is what a `vite.config.ts` — or Vitest, or
   // Storybook's builder — passes to the same server. `NESTED_KEYS`, not
-  // `[^}]*?`, because `fs`, `hmr`, `headers` and `watch` (one level) and
-  // `proxy` (two: a target object per route) are ordinary `server` keys, and
-  // any of them written above `host` would otherwise end the scan.
+  // `[^}]*?`, because `fs`, `hmr`, `headers` and `watch` (one level) and a
+  // `proxy` route object (two) are ordinary `server` keys, and any of them
+  // written above `host` would otherwise end the scan. A route's own nested
+  // options go deeper than the scan does — see this file's header.
   { label: 'vite, server.host', re: `\\bserver\\s*:\\s*\\{${NESTED_KEYS}host\\s*:\\s*${LOOPBACK}` },
 ];
 
