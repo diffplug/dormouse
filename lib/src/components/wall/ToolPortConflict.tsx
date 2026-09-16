@@ -6,7 +6,7 @@
  * bound there is nothing to frame, so the pane's second half explains why
  * rather than sitting empty or silently framing a guess.
  */
-import { PANE_MESSAGE_CLASS } from '../design';
+import { PaneMessage } from '../design';
 import { toolPortConflictFromParams } from './browser-surface';
 import type { PaneProps } from './pane-props';
 
@@ -14,7 +14,7 @@ export function ToolPortConflict({ params }: PaneProps) {
   const ports = toolPortConflictFromParams(params) ?? [];
 
   return (
-    <div className={`${PANE_MESSAGE_CLASS} flex-col gap-3 text-muted`}>
+    <PaneMessage className="text-muted" contentClassName="flex flex-col gap-3">
       <div className="text-foreground">
         This tool opened {ports.length} ports, so Dormouse did not frame any of them.
       </div>
@@ -33,6 +33,6 @@ export function ToolPortConflict({ params }: PaneProps) {
           there is exactly one.
         </div>
       </div>
-    </div>
+    </PaneMessage>
   );
 }
