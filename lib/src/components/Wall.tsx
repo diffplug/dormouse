@@ -1649,7 +1649,7 @@ export function Wall({
           if (state.currentCommand === null) {
             const matchedCommand = lath.getMeta(match.id)?.params?.command;
             const restarted = await restartSurfaceInPlace(match.id,
-              typeof matchedCommand === 'string' ? matchedCommand : resolved.run, state.cwd?.path ?? cwd);
+              typeof matchedCommand === 'string' ? matchedCommand : resolved.run, state.cwd?.path ?? cwd, undefined, { acceptCompletedRun: true });
             if (!restarted.ok) showShellSpawnNotice(match.id, restarted.message);
           }
           revealSurface(match.id);

@@ -74,6 +74,35 @@ afterEach(() => {
 
 const flush = (): Promise<void> => harness.flush();
 
+/** Wait out the host's own 100ms state polls (a tool taking over a pane, a
+ *  split waiting on OSC 633), which no event can flush. Throws on timeout. */
+const waitUntil = (ready: () => boolean): Promise<void> => vi.waitFor(async () => {
+  await act(async () => { await new Promise((r) => setTimeout(r, 25)); });
+  expect(ready()).toBe(true);
+}, { timeout: 2_000, interval: 25 });
+
+/** The host's answer for an approved `storybook` tool. */
+const okToolLookup = (key: string[] | null) => ({
+  status: 'ok' as const,
+  projectRoot: '/repo',
+  path: '/repo/dormouse.yml',
+  name: 'storybook',
+  run: 'pnpm storybook',
+  render: 'iframe' as const,
+  port: 'announced' as const,
+  key,
+  warnings: [],
+});
+
+/** The integrated shell in `id` reports `line` as its running command. */
+const reportRunning = (id: string, line: string): void => terminalRegistry.applyTerminalSemanticEvents(id, [
+  { type: 'commandLine', commandLine: line },
+  { type: 'commandStart', source: 'osc633_boundaries' },
+]);
+
+/** The shell in `id` is back at its prompt. */
+const promptBack = (id: string): void => terminalRegistry.applyTerminalSemanticEvents(id, [{ type: 'promptStart' }]);
+
 async function flushFrame(): Promise<void> {
   await act(async () => { await new Promise((r) => requestAnimationFrame(() => r(undefined))); });
 }
@@ -1726,17 +1755,7 @@ describe('Wall on the Lath engine', () => {
           upstreamUrl: null,
         };
       }
-      return {
-        status: 'ok' as const,
-        projectRoot: '/repo',
-        path: '/repo/dormouse.yml',
-        name: 'storybook',
-        run: 'pnpm storybook',
-        render: 'iframe' as const,
-        port: 'announced' as const,
-        key: null,
-        warnings: [],
-      };
+      return okToolLookup(null);
     });
     (fake as FakePtyAdapter & Pick<PlatformAdapter, 'toolControl'>).toolControl = toolControl;
 
@@ -1899,6 +1918,60 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it.each([true, false])('accepts a newly completed keyed Tool restart without mistaking old or unrelated completions (%s)', async completesDuringWrite => {
+    setToolsEnabled(true);
+    const id = 'short-tool';
+    const command = 'pnpm storybook';
+    const controller = new AbortController();
+    const typed: string[] = [];
+    Object.assign(fake, { toolControl: vi.fn(async () => okToolLookup(['/repo'])) });
+    const finish = (line: string) => {
+      reportRunning(id, line);
+      terminalRegistry.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }, { type: 'promptStart' }]);
+    };
+    try {
+      await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialDoors={[{
+        id, title: 'storybook', component: 'tool', tabComponent: 'tool',
+        params: { surfaceType: 'tool', command, cwd: '/repo', toolName: 'storybook', toolKey: ['storybook', '/repo'], toolRender: 'iframe', toolPort: 'announced' },
+      }]} />));
+      await flush();
+      act(() => {
+        fake.spawnPty(id);
+        terminalRegistry.seedTerminalManualCwd(id, '/repo');
+        finish(command);
+      });
+      const oldRun = terminalRegistry.getTerminalPaneState(id).lastCommand!.id;
+      fake.setInputHandler(id, data => {
+        typed.push(data);
+        if (completesDuringWrite && data === `${command}\r`) finish(command);
+      });
+      const respond = vi.fn();
+      await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+        method: SURFACE_CONTROL_METHODS.tool, surfaceId: 'pane-a', params: { name: 'storybook', cwd: '/repo' }, signal: controller.signal, respond,
+      } })));
+      if (!completesDuringWrite) {
+        await waitUntil(() => typed.includes(`${command}\r`));
+        expect(terminalRegistry.getTerminalPaneState(id).lastCommand!.id).toBe(oldRun);
+        await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
+        expect(respond).not.toHaveBeenCalled();
+        act(() => finish('echo unrelated'));
+        await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
+        expect(respond).not.toHaveBeenCalled();
+        act(() => finish(command));
+      }
+      await waitUntil(() => respond.mock.calls.length > 0);
+      expect(respond).toHaveBeenCalledWith(expect.objectContaining({ ok: true, result: expect.objectContaining({ status: 'adopted', surfaceId: id }) }));
+      expect(typed).toEqual(['\x03', `${command}\r`]);
+      expect(terminalRegistry.getTerminalPaneState(id).currentCommand).toBeNull();
+      expect(terminalRegistry.getTerminalPaneState(id).lastCommand!.id).not.toBe(oldRun);
+    } finally {
+      await act(async () => { controller.abort(); await new Promise(resolve => setTimeout(resolve, 125)); });
+      fake.clearInputHandler(id);
+      act(() => terminalRegistry.removeTerminalPaneState(id));
+      setToolsEnabled(false);
+    }
+  });
+
   it('reports a reused minimized tool as visible after reattaching it', async () => {
     setToolsEnabled(true);
     const toolId = 'tool-door';
@@ -1906,17 +1979,7 @@ describe('Wall on the Lath engine', () => {
       { type: 'commandLine', commandLine: 'pnpm storybook' },
       { type: 'commandStart' },
     ]);
-    (fake as FakePtyAdapter & Pick<PlatformAdapter, 'toolControl'>).toolControl = vi.fn(async () => ({
-      status: 'ok' as const,
-      projectRoot: '/repo',
-      path: '/repo/dormouse.yml',
-      name: 'storybook',
-      run: 'pnpm storybook',
-      render: 'iframe' as const,
-      port: 'announced' as const,
-      key: ['/repo'],
-      warnings: [],
-    }));
+    (fake as FakePtyAdapter & Pick<PlatformAdapter, 'toolControl'>).toolControl = vi.fn(async () => okToolLookup(['/repo']));
 
     try {
       await act(async () => {
@@ -1966,6 +2029,295 @@ describe('Wall on the Lath engine', () => {
       expect(container.querySelector(`[data-lath-leaf="${toolId}"]`)).not.toBeNull();
     } finally {
       act(() => terminalRegistry.removeTerminalPaneState(toolId));
+      setToolsEnabled(false);
+    }
+  });
+
+  // Pane take-over: `dor tool` typed alone at a prompt runs in that pane rather
+  // than splitting (docs/specs/dor-tool.md -> Take-over). The handshake is the
+  // point — `dor` is the pane's foreground process when the host answers, so the
+  // command may only be typed once its own shell is back at a prompt.
+  it.each(['cancelled', 'helper opened', 'cwd changed', 'closing'] as const)('abandons takeover if the caller becomes %s while returning to its prompt', async (change) => {
+    setToolsEnabled(true);
+    const controller = new AbortController();
+    const typed: string[] = [];
+    let releaseClosing: (() => void) | undefined;
+    try {
+      await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />));
+      await flush();
+      act(() => { fake.spawnPty('pane-a'); addPlainNote('pane-a', 'Preserve me'); });
+      fake.setInputHandler('pane-a', data => typed.push(data));
+      terminalRegistry.seedTerminalManualCwd('pane-a', '/repo');
+      reportRunning('pane-a', 'dor tool -- pnpm dev');
+      const respond = vi.fn();
+      await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+        method: SURFACE_CONTROL_METHODS.tool, surfaceId: 'pane-a',
+        params: { command: ['pnpm', 'dev'], cwd: '/repo' }, signal: controller.signal, respond,
+      } })));
+      await waitUntil(() => respond.mock.calls.length > 0);
+      expect(respond).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status: 'takeover' }) }));
+      if (change === 'cancelled') controller.abort();
+      if (change === 'helper opened') vi.spyOn(helpers, 'getHelper').mockImplementation(id => id === 'pane-a' ? { id: 'helper-a', parentId: 'pane-a', command: '', status: 'off' } : undefined);
+      if (change === 'cwd changed') terminalRegistry.applyTerminalSemanticEvents('pane-a', [{ type: 'cwd', cwd: terminalRegistry.cwdFromOsc633('/elsewhere')! }]);
+      if (change === 'closing') releaseClosing = beginClosing(['pane-a']);
+      act(() => promptBack('pane-a'));
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
+      expect(typed).toEqual([]);
+      expect(leafCount()).toBe(1);
+      expect(getNotes('pane-a')).toHaveLength(1);
+      await act(async () => window.dispatchEvent(new Event('pagehide')));
+      await flush();
+      expect((fake.getState() as { panes: Array<{ surfaceType?: string }> }).panes[0]?.surfaceType).not.toBe('tool');
+    } finally {
+      controller.abort(); releaseClosing?.(); fake.clearInputHandler('pane-a');
+      act(() => terminalRegistry.removeTerminalPaneState('pane-a'));
+      setToolsEnabled(false);
+    }
+  });
+
+  it('holds the takeover queue through unrelated completions until the typed Tool completes', async () => {
+    setToolsEnabled(true);
+    const id = 'pane-a';
+    const command = 'pnpm storybook';
+    const controller = new AbortController();
+    const typed: string[] = [];
+    const toolControl = vi.fn(async (request: { name?: string }) => request.name === 'probe'
+      ? { status: 'error', message: 'probe reached lookup' }
+      : okToolLookup(['/repo']));
+    Object.assign(fake, { toolControl });
+    const finish = (line: string, cwd = '/repo') => {
+      terminalRegistry.applyTerminalSemanticEvents(id, [{ type: 'cwd', cwd: terminalRegistry.cwdFromOsc633(cwd)! }]);
+      reportRunning(id, line);
+      terminalRegistry.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }, { type: 'promptStart' }]);
+    };
+    try {
+      await act(async () => root.render(<Wall initialPaneIds={[id]} />));
+      await flush();
+      act(() => {
+        fake.spawnPty(id);
+        terminalRegistry.seedTerminalManualCwd(id, '/repo');
+        reportRunning(id, 'dor tool storybook');
+      });
+      fake.setInputHandler(id, data => typed.push(data));
+      const first = vi.fn();
+      await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+        method: SURFACE_CONTROL_METHODS.tool, surfaceId: id, params: { name: 'storybook', cwd: '/repo' }, signal: controller.signal, respond: first,
+      } })));
+      await waitUntil(() => first.mock.calls.length > 0);
+      expect(first).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status: 'takeover' }) }));
+      act(() => terminalRegistry.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }, { type: 'promptStart' }]));
+      await waitUntil(() => typed.length > 0);
+      const previousRun = terminalRegistry.getTerminalPaneState(id).lastCommand!.id;
+      const probe = vi.fn();
+      await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+        method: SURFACE_CONTROL_METHODS.tool, surfaceId: id, params: { name: 'probe', cwd: '/repo' }, signal: controller.signal, respond: probe,
+      } })));
+      // Neither another command nor this command in another directory is the
+      // Tool launch. Each completion remains observable for a full poll tick.
+      for (const [line, cwd] of [['echo unrelated', '/repo'], [command, '/elsewhere']] as const) {
+        act(() => finish(line, cwd));
+        expect(terminalRegistry.getTerminalPaneState(id).lastCommand!.id).not.toBe(previousRun);
+        await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
+        expect(toolControl).toHaveBeenCalledTimes(1);
+        expect(probe).not.toHaveBeenCalled();
+      }
+      act(() => finish(command));
+      expect(terminalRegistry.getTerminalPaneState(id).currentCommand).toBeNull();
+      await waitUntil(() => probe.mock.calls.length > 0);
+      expect(probe).toHaveBeenCalledWith({ ok: false, error: 'probe reached lookup' });
+      expect(toolControl).toHaveBeenCalledTimes(2);
+      expect(typed).toEqual([`${command}\r`]);
+      expect(leafCount()).toBe(1);
+    } finally {
+      await act(async () => { controller.abort(); await new Promise(resolve => setTimeout(resolve, 125)); });
+      fake.clearInputHandler(id);
+      act(() => terminalRegistry.removeTerminalPaneState(id));
+      setToolsEnabled(false);
+    }
+  });
+
+  it('takes over the calling pane when `dor tool` is typed alone at a prompt', async () => {
+    setToolsEnabled(true);
+    const typed: string[] = [];
+    (fake as FakePtyAdapter & Pick<PlatformAdapter, 'toolControl'>).toolControl = vi.fn(async () => okToolLookup(['/repo']));
+
+    try {
+      await act(async () => {
+        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+      });
+      await flush();
+      act(() => { fake.spawnPty('pane-a'); addPlainNote('pane-a', 'Keep my takeover notes'); });
+      fake.setInputHandler('pane-a', (data) => typed.push(data));
+      terminalRegistry.seedTerminalManualCwd('pane-a', '/repo');
+      reportRunning('pane-a', 'dor tool storybook');
+
+      let response: { ok: boolean; result?: { status: string; surfaceId: string; minimized: boolean } } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.tool,
+            surfaceId: 'pane-a',
+            params: { name: 'storybook', cwd: '/repo', minimized: false, fresh: false },
+            respond: (result: typeof response) => { response = result; },
+          },
+        }));
+      });
+      await flush();
+
+      // Answered before the tool starts, and nothing typed while `dor` still owns
+      // the shell: waiting for the prompt first would deadlock.
+      expect(response).toMatchObject({
+        ok: true,
+        result: { status: 'takeover', surfaceId: 'pane-a', minimized: false },
+      });
+      expect(leafCount()).toBe(1);
+      expect(typed).toEqual([]);
+
+      // `dor` exits; the shell reports its prompt back and the command lands.
+      act(() => promptBack('pane-a'));
+      await waitUntil(() => typed.length > 0);
+      expect(typed).toEqual(['pnpm storybook\r']);
+      expect(leafCount()).toBe(1);
+      expect(getNotes('pane-a').some(note => note.content.kind === 'plain' && note.content.text === 'Keep my takeover notes')).toBe(true);
+
+      // The tool goes live, which releases the spawn lock, and then exits. The
+      // host learns that from its own 100ms state poll, so the live state has to
+      // outlast one tick.
+      act(() => reportRunning('pane-a', 'pnpm storybook'));
+      await act(async () => { await new Promise((r) => setTimeout(r, 150)); });
+      act(() => promptBack('pane-a'));
+
+      // Retyped in the tool's own pane: a key match on the caller re-runs there
+      // through the same handshake, never an interrupt — Ctrl+C would kill the
+      // `dor` still waiting for the answer.
+      act(() => reportRunning('pane-a', 'dor tool storybook'));
+      let rerun: { ok: boolean; result?: { status: string; surfaceId: string } } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.tool,
+            surfaceId: 'pane-a',
+            params: { name: 'storybook', cwd: '/repo', minimized: false, fresh: false },
+            respond: (result: typeof rerun) => { rerun = result; },
+          },
+        }));
+      });
+      await waitUntil(() => rerun !== undefined);
+      expect(rerun).toMatchObject({ ok: true, result: { status: 'adopted', surfaceId: 'pane-a' } });
+      act(() => promptBack('pane-a'));
+      await waitUntil(() => typed.length > 1);
+      expect(typed).toEqual(['pnpm storybook\r', 'pnpm storybook\r']);
+      expect(leafCount()).toBe(1);
+
+      // The re-run starts and dies inside one 100ms sample, so no poll ever sees
+      // it live: the lock has to release on the finished run instead. Without
+      // that, the request below waits out the 15s timeout and `settle` gives up.
+      act(() => {
+        terminalRegistry.applyTerminalSemanticEvents('pane-a', [
+          { type: 'commandLine', commandLine: 'pnpm storybook' },
+          { type: 'commandStart', source: 'osc633_boundaries' },
+          { type: 'commandFinish', exitCode: 1 },
+          { type: 'promptStart' },
+        ]);
+      });
+
+      // A line the host cannot type behind says so, rather than reporting a tool
+      // that is not running as `existing` back into the pane it is sitting in.
+      act(() => reportRunning('pane-a', 'dor tool storybook && open http://localhost:6006'));
+      let compound: { ok: boolean; error?: string } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.tool,
+            surfaceId: 'pane-a',
+            params: { name: 'storybook', cwd: '/repo', minimized: false, fresh: false },
+            respond: (result: typeof compound) => { compound = result; },
+          },
+        }));
+      });
+      await waitUntil(() => compound !== undefined);
+      expect(compound?.ok).toBe(false);
+      expect(compound?.error).toContain("is this tool's own pane");
+      expect(typed).toHaveLength(2);
+      act(() => promptBack('pane-a'));
+
+      // Same Surface throughout: the leaf changed kind without changing id, so
+      // the session persists as one.
+      await act(async () => { window.dispatchEvent(new Event('pagehide')); });
+      await flush();
+      await flush();
+      const saved = fake.getState() as {
+        panes?: Array<{ id: string; surfaceType?: string; command?: string }>;
+      } | null;
+      expect(saved?.panes?.find((pane) => pane.id === 'pane-a')).toMatchObject({
+        surfaceType: 'tool',
+        command: 'pnpm storybook',
+      });
+    } finally {
+      fake.clearInputHandler('pane-a');
+      act(() => terminalRegistry.removeTerminalPaneState('pane-a'));
+      setToolsEnabled(false);
+    }
+  });
+
+  it.each(['agent', 'helper'] as const)('splits instead of taking over a caller with an existing %s', async (reason) => {
+    if (reason === 'helper') vi.spyOn(helpers, 'getHelper').mockImplementation(id => id === 'pane-a' ? { id: 'helper-a', parentId: 'pane-a', command: '', status: 'off' } : undefined);
+    setToolsEnabled(true);
+    const typed: string[] = [];
+    const controller = new AbortController();
+    (fake as FakePtyAdapter & Pick<PlatformAdapter, 'toolControl'>).toolControl = vi.fn(async () => okToolLookup(null));
+    let splitId: string | undefined;
+
+    try {
+      await act(async () => {
+        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />);
+      });
+      await flush();
+      act(() => fake.spawnPty('pane-a'));
+      fake.setInputHandler('pane-a', (data) => typed.push(data));
+      terminalRegistry.seedTerminalManualCwd('pane-a', '/repo');
+      // An agent's `dor tool` runs under the agent, so the pane reports that line.
+      reportRunning('pane-a', reason === 'agent' ? 'claude' : 'dor tool storybook');
+
+      let response: { ok: boolean; result?: { status: string; surfaceId: string } } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.tool,
+            surfaceId: 'pane-a',
+            params: { name: 'storybook', cwd: '/repo', minimized: false, fresh: false },
+            signal: controller.signal,
+            respond: (result: typeof response) => { response = result; },
+          },
+        }));
+      });
+      await flush();
+      // The split exists before its handle is reported: a created tool answers
+      // only once the new shell reports OSC 633.
+      expect(leafCount()).toBe(2);
+      splitId = Array.from(container.querySelectorAll('[data-lath-leaf]'))
+        .map((leaf) => leaf.getAttribute('data-lath-leaf')!)
+        .find((id) => id !== 'pane-a');
+      act(() => promptBack(splitId!));
+      await waitUntil(() => response !== undefined);
+
+      expect(response?.result).toMatchObject({ status: 'created', surfaceId: splitId });
+      expect(typed).toEqual([]);
+      // The launch queue outlives the created response until the staged command
+      // actually starts. This stubbed TerminalPane must report that startup.
+      act(() => {
+        terminalRegistry.seedTerminalManualCwd(splitId!, '/repo');
+        reportRunning(splitId!, 'pnpm storybook');
+      });
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
+    } finally {
+      await act(async () => controller.abort());
+      if (splitId) {
+        pendingShellOpts.delete(splitId);
+        act(() => terminalRegistry.removeTerminalPaneState(splitId!));
+      }
+      fake.clearInputHandler('pane-a');
+      act(() => terminalRegistry.removeTerminalPaneState('pane-a'));
       setToolsEnabled(false);
     }
   });

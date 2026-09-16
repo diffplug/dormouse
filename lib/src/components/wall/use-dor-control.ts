@@ -1,9 +1,8 @@
-import { isWorkspaceTransferPending } from '../../lib/window-session-aggregator';
 import { createSerialQueue } from '../../host/remote/serial-queue';
 import { useCallback, type MutableRefObject } from 'react';
 import { sessionForKey } from 'dor-lib-common/agent-browser';
 import { getPlatform, PLATFORM_STRING } from '../../lib/platform';
-import { currentWindowRef } from '../../lib/workspace-store';
+import { currentWindowRef, getActiveWorkspaceId } from '../../lib/workspace-store';
 import type { WorkspaceId } from '../../lib/session-types';
 import type { DorControlRequestPayload, DorControlResult } from 'dor/protocol';
 import { SURFACE_CONTROL_METHODS } from 'dor/protocol';
@@ -12,6 +11,7 @@ import type {
   SplitDirection as DorSplitDirection,
   ResolvedSplitDirection as DorResolvedSplitDirection,
   ParseResult,
+  ToolSurfaceResponse,
 } from 'dor/commands/types';
 import { hasBrowser, hasTerminal } from 'dor/commands/types';
 import { MAX_AWAIT_TIMEOUT_MS } from '../../lib/alert-manager';
@@ -19,19 +19,32 @@ import { TOOLS_FLAG_KEY, isToolsEnabled } from '../../lib/feature-flags';
 import type { OpenPort } from '../../lib/platform/types';
 import { buildShellCommandForKind, shellCommandKind } from 'dor/commands/shell-quote';
 import {
+  UNNAMED_PANEL_TITLE,
   getDefaultShellOpts,
   getTerminalInstance,
   getTerminalPaneState,
   isPaneOscDriven,
 } from '../../lib/terminal-registry';
-import { surfaceRunsCommand, type TerminalPaneState } from '../../lib/terminal-state';
+import { cwdPathsEqual, surfaceRunsCommand, type TerminalPaneState } from '../../lib/terminal-state';
 import { isAllowedAgentBrowserBinary } from '../../lib/agent-browser-binary';
+import { getHelper } from '../../lib/helper-terminal';
+import { isSurfaceClosing } from '../../lib/notepad/notepad-store';
+import { clearToolAnnounce } from '../../lib/tool-announce-store';
+import { isWorkspaceTransferPending } from '../../lib/window-session-aggregator';
 import { stringParam } from './dor-control-shared';
+import {
+  callerStillPlaceable,
+  callerStillRunnable,
+  toolRerunsInCaller,
+  toolTakesOverCaller,
+  type ToolTakeoverGate,
+} from './tool-takeover';
 import { attachSurfacePorts } from './surface-ports';
 import { browserSurfaceUrl, hostPathDisplay } from './browser-url';
 import {
   agentBrowserSessionFromParams,
   namespacedToolKey,
+  surfaceKindFromParams,
   toolKeysEqual,
   toolPendingFromParams,
   type ToolPending,
@@ -263,9 +276,9 @@ function readSurfaceText(surfaceId: string, lines: number | undefined, scrollbac
 // re-run it. Rather than guess at timings, poll the integration-derived
 // terminal state: a command is gone once `currentCommand` clears (commandFinish
 // → prompt) and back once the surface reports the same command live again.
-const RESTART_POLL_INTERVAL_MS = 100;
-const RESTART_INTERRUPT_TIMEOUT_MS = 15_000;
-const RESTART_START_TIMEOUT_MS = 15_000;
+const TERMINAL_STATE_POLL_MS = 100;
+const PROMPT_RETURN_TIMEOUT_MS = 15_000;
+const COMMAND_START_TIMEOUT_MS = 15_000;
 
 /**
  * Serialize Tool requests and approval completions across lookup, key matching,
@@ -297,12 +310,21 @@ function waitForTerminalState(
     const timer = setInterval(() => {
       if (predicate(getTerminalPaneState(id))) {
         finish('ready');
-      } else if ((elapsed += RESTART_POLL_INTERVAL_MS) >= timeoutMs) {
+      } else if ((elapsed += TERMINAL_STATE_POLL_MS) >= timeoutMs) {
         finish('timeout');
       }
-    }, RESTART_POLL_INTERVAL_MS);
+    }, TERMINAL_STATE_POLL_MS);
     signal?.addEventListener('abort', cancel, { once: true });
   });
+}
+
+/** A completed run proves startup only for this command and directory, and
+ * only when it differs from the completion observed before injection. */
+function completedCommandMatches(
+  state: TerminalPaneState, command: string, cwd: string, previousRunId: string | null = null,
+): boolean {
+  return state.lastCommand !== null && state.lastCommand.id !== previousRunId
+    && surfaceRunsCommand({ ...state, currentCommand: state.lastCommand }, command, cwd);
 }
 
 /** A newly spawned Tool has no earlier command history. Its first command may
@@ -310,8 +332,8 @@ function waitForTerminalState(
  * Hold the launch queue through this wait; integration alone precedes injection. */
 export function waitForNewToolCommand(id: string, command: string, cwd: string, signal?: AbortSignal): Promise<WaitOutcome> {
   return waitForTerminalState(id, state => surfaceRunsCommand(state, command, cwd)
-    || (state.lastCommand !== null && surfaceRunsCommand({ ...state, currentCommand: state.lastCommand }, command, cwd)),
-  RESTART_START_TIMEOUT_MS, signal);
+    || completedCommandMatches(state, command, cwd),
+  COMMAND_START_TIMEOUT_MS, signal);
 }
 
 const RESTART_CANCELLED: ParseResult<undefined> = { ok: false, message: 'restart was cancelled' };
@@ -334,7 +356,10 @@ const ENSURE_CANCELLED = 'ensure was cancelled';
  * for it to go live. Drives the live PTY directly, so it works for minimized
  * doors too (their PTY keeps running). Returns a message on failure.
  */
-export async function restartSurfaceInPlace(id: string, command: string, cwd: string, signal?: AbortSignal): Promise<ParseResult<undefined>> {
+export async function restartSurfaceInPlace(
+  id: string, command: string, cwd: string, signal?: AbortSignal,
+  options: { acceptCompletedRun?: boolean } = {},
+): Promise<ParseResult<undefined>> {
   // Checked before the interrupt is written, not just before each wait.
   if (signal?.aborted) return RESTART_CANCELLED;
   // A match is by construction OSC-driven (surfaceRunsCommand only matches a
@@ -347,7 +372,7 @@ export async function restartSurfaceInPlace(id: string, command: string, cwd: st
   const interrupted = await waitForTerminalState(
     id,
     (state) => state.currentCommand === null,
-    RESTART_INTERRUPT_TIMEOUT_MS,
+    PROMPT_RETURN_TIMEOUT_MS,
     signal,
   );
   // Re-check the signal itself, not only the outcome: an already-satisfied wait
@@ -355,16 +380,74 @@ export async function restartSurfaceInPlace(id: string, command: string, cwd: st
   // otherwise slip past and type the command.
   if (signal?.aborted || interrupted === 'aborted') return RESTART_CANCELLED;
   if (interrupted === 'timeout') return { ok: false, message: 'did not return to a prompt after interrupt' };
+  const previousRun = getTerminalPaneState(id).lastCommand?.id ?? null;
   platform.writePty(id, `${command}\r`);
   const restarted = await waitForTerminalState(
     id,
-    (state) => surfaceRunsCommand(state, command, cwd),
-    RESTART_START_TIMEOUT_MS,
+    (state) => surfaceRunsCommand(state, command, cwd)
+      || (options.acceptCompletedRun === true && completedCommandMatches(state, command, cwd, previousRun)),
+    COMMAND_START_TIMEOUT_MS,
     signal,
   );
   if (signal?.aborted || restarted === 'aborted') return RESTART_CANCELLED;
   if (restarted === 'timeout') return { ok: false, message: 'command did not restart' };
   return { ok: true, value: undefined };
+}
+
+/**
+ * The take-over handshake (docs/specs/dor-tool.md -> Take-over): `dor` is the
+ * pane's foreground process until the host answers it, so the command can only
+ * be typed once its own shell is back at a prompt. A shell that never comes back
+ * — or a pane killed while we wait — is left exactly as it was. Shared by the
+ * take-over, which transforms the pane on the way in, and a keyed re-run in the
+ * tool's own pane, which does not.
+ */
+async function runToolInCallerPane(
+  lath: LathWallEngine,
+  id: string,
+  tool: {
+    command: string;
+    cwd: string;
+    /** The tool leaf to become — omitted when the pane already is this tool and
+     *  is only re-running it. */
+    become?: { title: string; params: Record<string, unknown> };
+  },
+  /** Re-read after the wait, not only before it: the Workspace can close or
+   *  transfer and the pane can be killed, minimized, or moved while `dor` exits. */
+  stillEligible: () => boolean,
+  signal?: AbortSignal,
+): Promise<void> {
+  const backAtPrompt = await waitForTerminalState(
+    id,
+    (state) => state.currentCommand === null,
+    PROMPT_RETURN_TIMEOUT_MS,
+    signal,
+  );
+  const meta = lath.getMeta(id);
+  if (signal?.aborted || backAtPrompt !== 'ready' || !meta || !stillEligible()) return;
+  // Whatever this Session announced under its previous command is not this run's:
+  // a stale OSC 367 would hand the tool that port, or re-key it.
+  clearToolAnnounce(id);
+  if (tool.become) {
+    // A rename the user made outlives the transformation; an untouched fallback
+    // title becomes the tool's, as a spawned one would be.
+    const title = meta.title === UNNAMED_PANEL_TITLE ? tool.become.title : meta.title;
+    lath.store.setMeta(id, toolLeafMeta(title, tool.become.params));
+  }
+  const previousRun = getTerminalPaneState(id).lastCommand?.id ?? null;
+  getPlatform().writePty(id, `${tool.command}\r`);
+  // The caller holds the spawn lock until this resolves: a pane typed into but
+  // not yet reporting reads as an idle tool, which a queued invocation of the
+  // same key would interrupt and retype. It ends on either outcome — a command
+  // that dies on boot (a typo, a missing `pnpm`) can start and finish between two
+  // samples, and waiting out the timeout for it would pin the lock for 15s.
+  await waitForTerminalState(
+    id,
+    (state) => surfaceRunsCommand(state, tool.command, tool.cwd)
+      || completedCommandMatches(state, tool.command, tool.cwd, previousRun),
+    COMMAND_START_TIMEOUT_MS,
+    signal,
+  );
 }
 
 // A `dor ensure -- <command>` command is typed into the shell programmatically,
@@ -767,11 +850,11 @@ export function useDorControl({
       // create — two panes with one key, two servers on one port.
       await queueToolSpawn(async () => {
         // Lookup and the launch lock can outlive the Workspace's close gesture.
+        const scope = workspaceScope();
+        const workspaceGone = () => scope && isWorkspaceTransferPending(scope) ? 'this workspace is transferring'
+          : isClosingWorkspace() ? 'this workspace is closing' : null;
         const unavailable = () => {
-          const scope = workspaceScope();
-          const error = detail.signal?.aborted ? 'tool launch cancelled'
-            : scope && isWorkspaceTransferPending(scope) ? 'this workspace is transferring'
-            : isClosingWorkspace() ? 'this workspace is closing' : null;
+          const error = detail.signal?.aborted ? 'tool launch cancelled' : workspaceGone();
           if (error) detail.respond({ ok: false, error });
           return error !== null;
         };
@@ -800,14 +883,44 @@ export function useDorControl({
         // rather than tie-breaking; a declared tool opts in with one line.
         let port: 'announced' | 'auto' = 'auto';
         const toolShell = getDefaultShellOpts()?.shell;
-        /** Approval, and a spawn, can only lead to a command gated on OSC 633.
-         *  Reject a shell known never to emit it before offering a prompt that
-         *  would otherwise approve, spawn, then silently drop the command.
-         *  Responds and returns true when it refuses. */
+        /** Approval and spawn both require an OSC 633-integrated shell. */
         const refuseCmdShell = (): boolean => {
           if (!toolShell || shellCommandKind(toolShell, PLATFORM_STRING) !== 'cmd') return false;
           detail.respond({ ok: false, error: missingIntegrationError(toolShell) });
           return true;
+        };
+        // `key` and `warnings` are read when called, after the lookup fills them.
+        const respondTool = (
+          status: ToolSurfaceResponse['status'],
+          surface: { surfaceId: string; surfaceRef?: string; command: string; cwd: string; minimized: boolean },
+        ) => detail.respond({
+          ok: true,
+          result: {
+            status,
+            surfaceId: surface.surfaceId,
+            surfaceRef: surface.surfaceRef ?? surfaceRefForId(surface.surfaceId),
+            command: surface.command,
+            cwd: surface.cwd,
+            minimized: surface.minimized,
+            key,
+            ...(warnings.length > 0 ? { warnings } : {}),
+          },
+        });
+        // What both placements read of the pane `dor` ran in, before the prompt
+        // wait and again after it (docs/specs/dor-tool.md -> Take-over).
+        const readCallerGate = (id: string, toolCwd: string): ToolTakeoverGate => {
+          const state = getTerminalPaneState(id);
+          return {
+            explicitSurface: stringParam(params.surface) !== undefined,
+            minimized: booleanParam(params.minimized),
+            workspaceActive: !scope || getActiveWorkspaceId() === scope,
+            visible: nav.hasPane(id) && !lath.isDying(id) && !isSurfaceClosing(id),
+            kind: surfaceKindFromParams(lath.getMeta(id)?.params),
+            oscDriven: isPaneOscDriven(id),
+            rawCommandLine: state.currentCommand?.rawCommandLine ?? null,
+            cwdMatches: cwdPathsEqual(state.cwd?.path, toolCwd),
+            helperPresent: !!getHelper(id),
+          };
         };
 
         if (toolName) {
@@ -865,13 +978,15 @@ export function useDorControl({
                   && (candidate as { cwd?: unknown }).cwd === cwd
                   && Boolean(waiting.fresh) === booleanParam(params.fresh);
               };
-              const respondPending = (id: string, ref: string, minimized: boolean) => detail.respond({
-                ok: true,
-                result: { status: 'pending', surfaceId: id, surfaceRef: ref, command: lookup.run, cwd, minimized, key: null },
-              });
               const already = booleanParam(params.fresh) ? null : findSurfaceByParams(matchesPending);
               if (already) {
-                respondPending(already.id, surfaceRefForId(already.id), !revealSurface(already.id));
+                const revealed = revealSurface(already.id);
+                respondTool('pending', {
+                  surfaceId: already.id,
+                  command: lookup.run,
+                  cwd,
+                  minimized: !revealed,
+                });
                 return;
               }
               const pendingTarget = resolveSplitTarget();
@@ -914,7 +1029,13 @@ export function useDorControl({
               // when `minimized` is false. Pending approval must stay visible,
               // so immediately reattach that exceptional creation path.
               const stillMinimized = pending.value.minimized && !revealSurface(pending.value.id);
-              respondPending(pending.value.id, pending.value.ref, stillMinimized);
+              respondTool('pending', {
+                surfaceId: pending.value.id,
+                surfaceRef: pending.value.ref,
+                command: lookup.run,
+                cwd,
+                minimized: stillMinimized,
+              });
               return;
             }
             default:
@@ -930,6 +1051,19 @@ export function useDorControl({
           }
         }
 
+        const toolParams = {
+          surfaceType: 'tool',
+          command,
+          cwd,
+          toolRender: render,
+          toolPort: port,
+          ...(key ? { toolKey: key } : {}),
+          ...(toolName ? { toolName } : {}),
+        };
+
+        const callerId = detail.surfaceId;
+        const callerGate = callerId === undefined ? null : readCallerGate(callerId, cwd);
+
         // Spawn-time dedupe, and only for a tool that was given an identity
         // (docs/specs/dor-tool.md -> Identity and dedupe).
         if (key && !booleanParam(params.fresh)) {
@@ -938,17 +1072,48 @@ export function useDorControl({
           const match = findSurfaceByParams(matchesToolKey);
           if (match) {
             const matchedCommand = toolCommandFromParams(lath.getMeta(match.id)?.params) ?? command;
+            const matchState = getTerminalPaneState(match.id);
+            // The tool's own cwd, not the caller's: `surfaceRunsCommand`
+            // compares against the matched Surface's `cwdAtStart`, so waiting
+            // on the caller's would never resolve when `dor tool` is run from
+            // a subdirectory — the command restarts and we report failure.
+            const matchedCwd = matchState.cwd?.path ?? cwd;
+            // A match that is the calling pane is the tool's own Surface — the
+            // place take-over makes normal to retype in. Its command is live
+            // only when the tool itself spawned this `dor`; otherwise `dor` is
+            // what its shell is running, so the tool is idle however its pane
+            // reads, and it re-runs in its own directory like any `adopted`
+            // match. Through the handshake, never `restartSurfaceInPlace`,
+            // whose Ctrl+C would kill the `dor` awaiting this answer.
+            if (match.id === callerId && !surfaceRunsCommand(matchState, matchedCommand, matchedCwd)) {
+              if (!callerGate || !toolRerunsInCaller(callerGate)) {
+                // Nothing can be typed behind a line that is not this
+                // invocation alone, and there is no survivor to reveal — the
+                // user is sitting in it. Say so instead of reporting a tool
+                // that is not running as `existing`.
+                detail.respond({
+                  ok: false,
+                  error: `surface '${surfaceRefForId(match.id)}' is this tool's own pane and its command is not running; re-run it by typing the invocation alone at its prompt`,
+                });
+                return;
+              }
+              revealSurface(match.id);
+              respondTool('adopted', { surfaceId: match.id, command: matchedCommand, cwd: matchedCwd, minimized: false });
+              await runToolInCallerPane(
+                lath,
+                match.id,
+                { command: matchedCommand, cwd: matchedCwd },
+                () => !workspaceGone() && callerStillRunnable(readCallerGate(match.id, matchedCwd)),
+                detail.signal,
+              );
+              return;
+            }
             // A dedicated Surface whose command exited is unambiguously free,
             // so re-run in place rather than splitting — where `dor ensure`,
             // aimed at arbitrary shells, would stop matching.
-            const idle = getTerminalPaneState(match.id).currentCommand === null;
+            const idle = matchState.currentCommand === null;
             if (idle) {
-              // The tool's own cwd, not the caller's: `surfaceRunsCommand`
-              // compares against the matched Surface's `cwdAtStart`, so waiting
-              // on the caller's would never resolve when `dor tool` is run from
-              // a subdirectory — the command restarts and we report failure.
-              const matchedCwd = getTerminalPaneState(match.id).cwd?.path ?? cwd;
-              const restarted = await restartSurfaceInPlace(match.id, matchedCommand, matchedCwd, detail.signal);
+              const restarted = await restartSurfaceInPlace(match.id, matchedCommand, matchedCwd, detail.signal, { acceptCompletedRun: true });
               if (!restarted.ok) {
                 detail.respond({
                   ok: false,
@@ -961,21 +1126,34 @@ export function useDorControl({
             // handle would leave a minimized tool minimized, which is exactly
             // the "appears to do nothing" the invariant is written against.
             const revealed = revealSurface(match.id);
-            detail.respond({
-              ok: true,
-              result: {
-                status: idle ? 'adopted' : 'existing',
-                surfaceId: match.id,
-                surfaceRef: surfaceRefForId(match.id),
-                command: matchedCommand,
-                cwd,
-                minimized: !revealed,
-                key,
-                ...(warnings.length > 0 ? { warnings } : {}),
-              },
+            respondTool(idle ? 'adopted' : 'existing', {
+              surfaceId: match.id,
+              command: matchedCommand,
+              cwd,
+              minimized: !revealed,
             });
             return;
           }
+        }
+
+        // Take-over: typed alone at a prompt, the tool runs in the calling pane
+        // rather than splitting (docs/specs/dor-tool.md -> Take-over). Must stay
+        // below the pending-approval and key-match returns above: both of those
+        // placements win over this one.
+        if (callerId && callerGate && toolTakesOverCaller(callerGate)) {
+          // Answered before the tool starts, because answering is what frees
+          // the shell to run it.
+          respondTool('takeover', { surfaceId: callerId, command, cwd, minimized: false });
+          // Awaited inside the spawn lock: the key reaches the leaf's params in
+          // there, and a queued invocation of it must find a running tool.
+          await runToolInCallerPane(
+            lath,
+            callerId,
+            { command, cwd, become: { title: toolName ?? command, params: toolParams } },
+            () => !workspaceGone() && callerStillPlaceable(readCallerGate(callerId, cwd)),
+            detail.signal,
+          );
+          return;
         }
 
         // A tool is a shell-hosted PTY with the command typed into it, exactly
@@ -994,15 +1172,7 @@ export function useDorControl({
           // Focus-neutral like `dor ensure`: a tool spawned by a script or an
           // agent must not steal the caller's selection.
           focusNeutral: true,
-          leafMeta: toolLeafMeta(toolName ?? command, {
-            surfaceType: 'tool',
-            command,
-            cwd,
-            toolRender: render,
-            toolPort: port,
-            ...(key ? { toolKey: key } : {}),
-            ...(toolName ? { toolName } : {}),
-          }),
+          leafMeta: toolLeafMeta(toolName ?? command, toolParams),
         });
         if (!created.ok) {
           detail.respond({ ok: false, error: created.message });
@@ -1019,18 +1189,12 @@ export function useDorControl({
           detail.respond({ ok: false, error: refused ?? (detail.signal?.aborted ? 'tool launch cancelled' : missingIntegrationError(toolShell)) });
           return;
         }
-        detail.respond({
-          ok: true,
-          result: {
-            status: 'created',
-            surfaceId: created.value.id,
-            surfaceRef: created.value.ref,
-            command,
-            cwd,
-            minimized: created.value.minimized,
-            key,
-            ...(warnings.length > 0 ? { warnings } : {}),
-          },
+        respondTool('created', {
+          surfaceId: created.value.id,
+          surfaceRef: created.value.ref,
+          command,
+          cwd,
+          minimized: created.value.minimized,
         });
         await waitForNewToolCommand(created.value.id, command, cwd, detail.signal);
       });

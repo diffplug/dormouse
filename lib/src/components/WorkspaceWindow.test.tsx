@@ -1,4 +1,3 @@
-import { setToolsEnabled } from '../lib/feature-flags';
 /**
  * @vitest-environment jsdom
  *
@@ -10,6 +9,7 @@ import { StrictMode, act } from 'react';
 import { type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SURFACE_CONTROL_METHODS } from 'dor/protocol';
+import { setToolsEnabled } from '../lib/feature-flags';
 import { WorkspaceWindow } from './WorkspaceWindow';
 import { closeWorkspaceWithSurfaces } from './wall/workspace-lifecycle';
 import * as terminalRegistry from '../lib/terminal-registry';
@@ -22,7 +22,7 @@ import { getWallHandle, listWallHandles, resetWallHandles } from './wall/wall-ha
 import { resetWorkspaceBootPlans, setWorkspaceBootPlan } from './wall/workspace-boot-plans';
 import { mountWallHarness, type WallHarness } from './wall/wall-test-utils';
 import { getWorkspaceSurfacesSnapshot, resetWorkspaceSurfaces } from '../lib/workspace-surfaces';
-import { previousWorkspaceSession, publishWorkspaceSession, resetWindowSessionAggregator, seedWindowSession } from '../lib/window-session-aggregator';
+import { previousWorkspaceSession, publishWorkspaceSession, resetWindowSessionAggregator, seedWindowSession, setWorkspaceTransferPending } from '../lib/window-session-aggregator';
 import { resetWorkspaceUi } from '../lib/workspace-ui-store';
 import {
   closeWorkspace,
@@ -436,6 +436,62 @@ describe('WorkspaceWindow', () => {
   });
 });
 
+
+it.each([
+  ['switched', true],
+  ['transferring', false],
+  ['closed', false],
+] as const)('respects Workspace lifecycle after takeover acceptance: %s', async (change, launches) => {
+  setToolsEnabled(true);
+  const controller = new AbortController();
+  const typed: string[] = [];
+  const first = getActiveWorkspaceId();
+  try {
+    await render();
+    act(() => fake.spawnPty('pane-a'));
+    fake.setInputHandler('pane-a', data => typed.push(data));
+    terminalRegistry.seedTerminalManualCwd('pane-a', '/repo');
+    terminalRegistry.applyTerminalSemanticEvents('pane-a', [
+      { type: 'commandLine', commandLine: 'dor tool -- pnpm dev' },
+      { type: 'commandStart', source: 'osc633_boundaries' },
+    ]);
+    const respond = vi.fn();
+    await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+      method: SURFACE_CONTROL_METHODS.tool, surfaceId: 'pane-a',
+      params: { command: ['pnpm', 'dev'], cwd: '/repo' }, signal: controller.signal, respond,
+    } })));
+    expect(respond).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status: 'takeover' }) }));
+    await act(async () => {
+      if (change === 'transferring') setWorkspaceTransferPending(first, true);
+      else createWorkspace({ id: 'ws-2' });
+    });
+    if (change === 'closed') {
+      await act(async () => {
+        expect(await closeWorkspaceWithSurfaces(first, 'silent')).toBeNull();
+      });
+    }
+    await act(async () => {
+      terminalRegistry.applyTerminalSemanticEvents('pane-a', [{ type: 'promptStart' }]);
+    });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
+    expect(typed).toEqual(launches ? ['pnpm dev\r'] : []);
+    if (change === 'closed') {
+      expect(getWallHandle(first)).toBeNull();
+      expect(getWorkspacesSnapshot().workspaces.map(workspace => workspace.id)).toEqual(['ws-2']);
+    } else {
+      expect(leafIdsIn(first)).toEqual(['pane-a']);
+      const prepared = await getWallHandle(first)!.prepareWorkspaceTransfer();
+      expect(prepared.payload.workspace.session.panes[0]?.surfaceType === 'tool').toBe(launches);
+    }
+    if (change !== 'transferring') expect(getActiveWorkspaceId()).toBe('ws-2');
+  } finally {
+    controller.abort();
+    setWorkspaceTransferPending(first, false);
+    fake.clearInputHandler('pane-a');
+    act(() => terminalRegistry.removeTerminalPaneState('pane-a'));
+    setToolsEnabled(false);
+  }
+});
 
 it('routes Tools to the requested Workspace and never launches after lookup races closure', async () => {
   setToolsEnabled(true);

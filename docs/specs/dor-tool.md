@@ -59,6 +59,7 @@ Source of truth: `lookupTool` in `lib/src/host/tool-trust.ts`; `parseToolFile` /
 - **Must retain the queue after integration until the new Tool command starts or completes**, or startup times out or is cancelled. A matching completion before waiting counts; integration alone does not prove injection occurred.
 - **Must reveal a live matching Tool and report `existing` without sending input.** An idle match restarts its stored command in its own directory and reports `adopted`; a failed restart reports an error.
 - **Must reuse and reveal a matching pending approval Surface unless `--fresh` is set**, matching Tool name, project root, CWD, and fresh intent; preserve its approval state and report `pending`.
+- **Must accept a short-lived keyed restart after observing its new completed command id**, matching the stored command and directory. A completion predating injection or belonging to another command does not prove restart.
 - **Must apply runtime re-keys only to the announcing Tool**, without merging Surfaces, transferring state, or killing either side of a collision. (rationale)
 
 Source of truth: `queueToolSpawn` / the `surface.tool` handler in `lib/src/components/wall/use-dor-control.ts`; `namespacedToolKey` / `toolKeysEqual` in `lib/src/components/wall/browser-surface.ts`; `lib/src/components/Wall.test.tsx`.
@@ -70,7 +71,7 @@ Source of truth: `queueToolSpawn` / the `surface.tool` handler in `lib/src/compo
 1. **Must derive grant keys host-side from the canonical upstream remote URL or project-root folder.** Either recorded key satisfies lookup; upstream trust spans clones and worktrees. (rationale)
 2. **Must present unapproved named invocations in a visible pending Tool pane**, returning `pending` without spawning a PTY. Defer requested minimization until approval. Pending approval is never persisted as a runnable Tool.
 3. **Must grant only through the approval controls in Dormouse chrome**, never through a `dor` verb or terminal output. The prompt names the proposed command; it is not itself executable terminal content. (rationale)
-4. **Must require `trust-recorded` before re-resolving the named entry**, retaining the pending pane with visible feedback after a rejected grant, then stage the resolved command, renderer, port strategy, and key before exposing its terminal. A Surface closed during host calls must not start later or show a stale grant notice.
+4. **Must require `trust-recorded` before re-resolving the named entry**, retaining the pending pane with visible feedback after a rejected grant, then stage the command, renderer, port strategy, and key before exposing its terminal. A Surface closed during host calls must not start later or show stale grant errors.
 5. **Must recheck the resolved key before launching an approved Tool**, honoring its original `--fresh` intent. Close a redundant approval through the ordinary close coordinator before revealing or restarting the match; a failed closure retains the approval and sends no command.
 6. **Must close a declined approval through the ordinary close coordinator and record no denial.** Archive failure may retain the pane. (rationale)
 7. **Must record each grant as its own atomically written file**, so hosts sharing one state directory never lock or merge.
@@ -127,11 +128,36 @@ Source of truth: `TerminalPane` in `lib/src/components/TerminalPane.tsx`; `focus
 
 ## CLI
 
-**Must split focus-neutrally for a new Tool and return its Surface handle.** Calling-pane take-over is staged under [Future](#future). A matching Tool follows [Identity and dedupe](#identity-and-dedupe).
+**Must return the Tool Surface handle.** A new Tool follows [Take-over](#take-over), otherwise splitting focus-neutrally. A matching Tool follows [Identity and dedupe](#identity-and-dedupe).
 
 **Must retain `dor tool` as a Surface-producing command on every supported host**, never route it to a native editor. Generated help owns syntax and response types own shape.
 
 Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `dor/test/snapshots/help/tool.md`; `ToolSurfaceResponse` in `dor/src/commands/types.ts`.
+
+## Take-over
+
+**Must run a standalone `dor tool` invocation in its calling pane when every takeover condition holds.** Otherwise use the ordinary split path. Trust approval and keyed reuse take precedence. (rationale)
+
+| Condition | Required state |
+| --- | --- |
+| Caller | Visible pane of the active Workspace; integrated plain terminal; not closing or dying |
+| Command line | OSC 633 reports `dor tool` alone; compound shell syntax rejects takeover |
+| Directory | Resolved Tool CWD equals the caller's reported CWD |
+| Placement | Neither `--surface` nor `--minimize` supplied |
+| Helper | No existing auxiliary helper; preserve it by splitting |
+
+**Must answer `takeover` before waiting for the calling shell's prompt**, then transform and type the command. The answer promises placement, not successful command startup.
+
+- **Must leave the caller unchanged on prompt timeout or cancellation**, and recheck transfer/closing state, pane membership, CWD, kind, and helper presence after the wait. A helper opened during the handshake prevents transformation. **Must complete an accepted takeover after switching Workspaces** without changing the active Workspace. (rationale)
+- **Must change components and params in one metadata commit**, retaining the Session id, Surface ref, scrollback, notes, source pins, and any user rename.
+- **Must clear previous OSC 367 hints before typing the new command.**
+- **Must retain the spawn lock until the typed command is observed running or newly completed in its requested CWD**, or the wait ends. A command that starts and exits between samples releases the lock too. (rationale)
+- **Must rerun a keyed match in the caller through the same answer/prompt handshake**, reporting `adopted`, when its line is standalone and integrated. Never interrupt the waiting `dor` process. Placement flags do not relocate an existing match; run in its current directory.
+- **Must report an error when the caller is the keyed match but its command line cannot be typed behind**, instead of reporting a misleading `existing` result.
+- **May interleave user keystrokes arriving between the prompt and command injection.**
+- **Must include already-owned background listeners in the usual process-tree scan.** [Serving](#serving) owns selection.
+
+Source of truth: `toolTakesOverCaller` / `toolRerunsInCaller` / `callerStillPlaceable` / `callerStillRunnable` in `lib/src/components/wall/tool-takeover.ts`; `runToolInCallerPane` in `lib/src/components/wall/use-dor-control.ts`; `setMeta` in `lib/src/components/wall/lath-wall-store.ts`. Tests: `lib/src/components/wall/tool-takeover.test.ts`, `lib/src/components/Wall.test.tsx`.
 
 ## OSC 367
 
@@ -181,12 +207,6 @@ Source of truth: `PersistedToolMetadata` in `lib/src/lib/session-types.ts`; `sav
   `DORMOUSE_DEHYDRATE`; the `dehydrate` flag is reserved in the serve payload
   from the shipped `serve` payload. The Windows graceful-stop is needed here
   only.
-- **Pane take-over.** `dor tool` typed alone at a prompt should run in that
-  pane rather than splitting — typing a command at a prompt is how a terminal
-  works. The gate is three conditions the host can already read (sole command on
-  the OSC 633 line, pane at a prompt, pane not already a tool); what it needs is
-  the handshake, since `dor` is itself the foreground process when it answers,
-  so the command can only be typed once its own shell returns to a prompt.
 - **The announced `name`.** Wire the reserved [OSC 367](#osc-367) `name` into
   the title-candidates channel and `dor list`'s location column.
 - **Later** — `prespawn_*` beyond the dedupe literal: a computed key, and
