@@ -31,7 +31,7 @@ export function isToolsEnabled(): boolean {
   return readBoolFlag(TOOLS_FLAG_KEY);
 }
 
-/** Toggle the tools flag (dev tooling / Storybook). */
+/** Toggle Dor Tools from Settings, dev tooling, or Storybook. */
 export function setToolsEnabled(enabled: boolean): void {
   writeBoolFlag(TOOLS_FLAG_KEY, enabled);
 }

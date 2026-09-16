@@ -15,7 +15,7 @@ import type {
 } from 'dor/commands/types';
 import { hasBrowser, hasTerminal } from 'dor/commands/types';
 import { MAX_AWAIT_TIMEOUT_MS } from '../../lib/alert-manager';
-import { TOOLS_FLAG_KEY, isToolsEnabled } from '../../lib/feature-flags';
+import { isToolsEnabled } from '../../lib/feature-flags';
 import type { OpenPort } from '../../lib/platform/types';
 import type { ToolKeyScope } from '../../lib/platform/tool-types';
 import { buildShellCommandForKind, hasShellInputControls, shellCommandKind } from 'dor/commands/shell-quote';
@@ -882,7 +882,7 @@ export function useDorControl({
         if (!isToolsEnabled()) {
           detail.respond({
             ok: false,
-            error: `Dor Tools are off. Enable them by setting localStorage '${TOOLS_FLAG_KEY}' to 'true'.`,
+            error: 'Dor Tools are off. Enable them in Settings → Experimental → Dor Tools.',
           });
           return;
         }
