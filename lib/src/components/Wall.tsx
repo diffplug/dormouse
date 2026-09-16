@@ -1618,7 +1618,11 @@ export function Wall({
           kind: choice,
           projectRoot: pending.projectRoot,
         });
-        if (grant?.status !== 'trust-recorded' || !isCurrent()) return;
+        if (!isCurrent()) return;
+        if (grant?.status !== 'trust-recorded') {
+          showShellSpawnNotice(id, grant?.status === 'error' ? grant.message : 'The Tool permission could not be saved. Try allowing it again.');
+          return;
+        }
 
         // Re-resolve now that the grant exists. The untrusted lookup deliberately
         // withholds `render` / `port` / `key` — they live only in the `ok` arm — so
