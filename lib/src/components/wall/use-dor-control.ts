@@ -1071,6 +1071,7 @@ export function useDorControl({
         const toolParams = {
           surfaceType: 'tool',
           command,
+          ...(typeof toolRun === 'string' ? {} : { toolArgv: [...toolRun] }),
           cwd,
           toolRender: render,
           ...(toolScope ? { toolScope } : {}),

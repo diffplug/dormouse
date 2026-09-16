@@ -1627,6 +1627,7 @@ export function Wall({
       const command = toolRunCommand(resolved.run);
       lath.store.updateParams(id, {
         command,
+        toolArgv: typeof resolved.run === 'string' ? undefined : [...resolved.run],
         ...(resolved.scope ? { toolScope: resolved.scope } : {}),
         toolRender: resolved.render,
         toolPort: resolved.port,

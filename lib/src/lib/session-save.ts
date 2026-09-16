@@ -1,7 +1,7 @@
+import { isToolKeyScope } from './platform/tool-types';
 import { normalizeAlertDeliveryOverrides, type AlertDeliveryOverrides } from './alert-delivery-model';
 import type { PlatformAdapter } from './platform/types';
-import { isToolKeyScope } from './platform/tool-types';
-import { browserPersistedPane, readPersistedSession, toPersistedAlertState, type PersistedDoor, type PersistedPane, type PersistedSession, type PersistedSurfaceRefs, type PersistedToolMetadata, type PersistedSurfaceType } from './session-types';
+import { browserPersistedPane, isToolCommandArgv, readPersistedSession, toPersistedAlertState, type PersistedDoor, type PersistedPane, type PersistedSession, type PersistedSurfaceRefs, type PersistedToolMetadata, type PersistedSurfaceType } from './session-types';
 import { getActivity, getLivePersistedAlertState, getTerminalPaneState, isUntouched } from './terminal-registry';
 import { UNNAMED_PANEL_TITLE } from './terminal-state';
 
@@ -188,7 +188,8 @@ function toolMetadataFromParams(params: Record<string, unknown> | undefined): Pe
   const key = Array.isArray(params.toolKey) && params.toolKey.every((part) => typeof part === 'string')
     ? params.toolKey as string[]
     : undefined;
-  return { ...(name ? { name } : {}), ...(isToolKeyScope(params.toolScope) ? { scope: params.toolScope } : {}), render, port, ...(key ? { key } : {}) };
+  const argv = isToolCommandArgv(params.toolArgv) ? [...params.toolArgv] : undefined;
+  return { ...(argv ? { argv } : {}), ...(name ? { name } : {}), ...(isToolKeyScope(params.toolScope) ? { scope: params.toolScope } : {}), render, port, ...(key ? { key } : {}) };
 }
 
 function persistedVisiblePaneTitle(title: string): string {
