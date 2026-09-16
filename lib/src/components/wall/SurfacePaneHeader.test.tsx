@@ -165,6 +165,8 @@ describe('SurfacePaneHeader — browser chrome', () => {
         expect(container.querySelector('[aria-label="Kill"]')).toBeNull();
         openPopup();
         expect(inPopup('[aria-label="Kill"]')).not.toBeNull();
+        act(() => inPopup('[aria-label="Kill"]')!.focus());
+        expect(document.activeElement).toBe(inPopup('[aria-label="Kill"]'));
       } else {
         expect(container.querySelector('[aria-label="Kill"]')).not.toBeNull();
       }
@@ -172,6 +174,10 @@ describe('SurfacePaneHeader — browser chrome', () => {
       expect(container.querySelector('[aria-label="Unsaved changes"]')).toBeNull();
       expect(container.querySelector('[aria-label="Kill"]')).not.toBeNull();
       expect(inPopup('[aria-label="Kill"]')).toBeNull();
+      if (width < 80) {
+        expect(popup()).toBeNull();
+        expect(document.activeElement).toBe(overflowTrigger());
+      }
     } finally {
       registration.dispose();
     }

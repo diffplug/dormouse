@@ -118,6 +118,11 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
   const inline: BrowserInlineTier | null = tier === 'overflow' || tier === 'tight' || tier === 'tiny' ? null : tier;
   // Keep 72–79px distinct so a dirty report can move actions without a resize.
   const inlinePaneActions = tier !== 'tiny' && (tier !== 'tight' || !dirty);
+  const previousInlinePaneActions = useRef(inlinePaneActions);
+  useLayoutEffect(() => {
+    if (previousInlinePaneActions.current !== inlinePaneActions && menuOpen) closeMenu();
+    previousInlinePaneActions.current = inlinePaneActions;
+  }, [inlinePaneActions, menuOpen, closeMenu]);
   const popoverOpen = visible && inline === null && menuOpen;
   const noteCount = useNoteCount(id);
   const overflowLabel = `Browser controls${noteCount ? `, ${noteCountPhrase(noteCount)}` : ''}`;

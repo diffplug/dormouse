@@ -124,7 +124,7 @@ A browser header, including a Tool's (Terminal Context sits outside the measured
 | 180px | Chrome moves into a viewport-clamped popover behind one trigger; minimize and kill stay inline. |
 | 72px (80px with an unsaved-change dot) | Minimize and kill join the popover. |
 
-**Must keep the popover keyboard reachable** (focus enters on open, Tab stays inside, Escape returns it to the trigger) **and dismiss it on a pane resize or, without restoring focus, when its Surface is hidden**; otherwise `lib/src/components/wall/use-dismiss-overlay.ts` applies, and a control inside dismisses only after its action ran. The trigger shows a filled notepad glyph and the note count while the Surface has notes; long keys and connection labels truncate before controls.
+**Must keep the popover keyboard reachable** (focus enters on open, Tab stays inside, Escape returns it to the trigger) **and dismiss it on resize, when a dirty report moves essential controls (returning focus to the trigger), or when its Surface is hidden (without restoring focus)**; `lib/src/components/wall/use-dismiss-overlay.ts` handles other dismissal, and controls dismiss only after acting. The trigger shows a filled notepad glyph and count with notes; long keys and connection labels truncate before controls.
 
 Source of truth: `SurfacePaneHeader` in `lib/src/components/wall/SurfacePaneHeader.tsx`; `TerminalPaneHeader` in `lib/src/components/wall/TerminalPaneHeader.tsx`; `useHeaderTier` in `lib/src/components/wall/use-header-tier.ts`; `lib/src/components/wall/SurfacePaneHeader.test.tsx`; `lib/src/components/wall/TerminalPaneHeader.test.tsx`; `lib/src/stories/BrowserChromeHeader.stories.tsx`.
 

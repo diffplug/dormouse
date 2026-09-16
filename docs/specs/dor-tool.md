@@ -218,7 +218,7 @@ Source of truth: `TerminalProtocolParser` / `collectTerminalProtocolAlerts` in `
 
 **Must retain unsaved state through minimize/reattach, renderer changes, and live Workspace transfer.** Never write it to durable session metadata; a cold-started Tool reports its own new state. Layout owns the Pane and Door indicator under `docs/specs/layout.md` → Pane header.
 
-**Must treat this state as indication only.** It neither writes files nor acknowledges a save, changes kill/close behavior, or authorizes automatic reaping. Save coordination and close protection are under [Future](#future).
+**Must treat this state as indication only.** It does not write files, acknowledge a save, change kill/close behavior, or authorize automatic reaping. Save coordination and close protection are under [Future](#future).
 
 A Tool writes reports to its terminal output, for example:
 
