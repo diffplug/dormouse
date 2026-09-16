@@ -89,7 +89,7 @@ export const POPUP_SURFACE_CLASS = 'z-[1000] rounded border border-border bg-sur
 // Message-only panes use the terminal ground because they stand in for a
 // Surface, not chrome. PaneMessage pairs this scrollable root with content that
 // stays centered when it fits and fully reachable when the pane is small.
-export const PANE_MESSAGE_CLASS = 'flex h-full min-h-0 w-full min-w-0 flex-col overflow-auto bg-terminal-bg px-6 py-6 text-center text-sm';
+const PANE_MESSAGE_CLASS = 'flex h-full min-h-0 w-full min-w-0 flex-col overflow-auto bg-terminal-bg px-6 py-6 text-center text-sm';
 
 export function PaneMessage({
   children,
