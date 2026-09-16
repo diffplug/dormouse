@@ -47,6 +47,11 @@ test('renders text as escaped content and requires the per-run token on every me
     assert.equal((await get(viewer, path)).status, 403);
   }
   assert.equal((await get(viewer, viewer.path, { Host: `evil.test:${viewer.port}` })).status, 403);
+  assert.equal((await get(viewer, viewer.path, { Host: `LOCALHOST:${viewer.port}` })).status, 200);
+  const prefix = viewer.path.split('/')[1];
+  for (const token of [prefix.slice(1), prefix + '0', `${prefix[0] === '0' ? '1' : '0'}${prefix.slice(1)}`, `${prefix.slice(0, -1)}${prefix.at(-1) === '0' ? '1' : '0'}`]) {
+    assert.equal((await get(viewer, viewer.path.replace(prefix, token))).status, 403);
+  }
   assert.equal((await get(viewer, viewer.path, { Origin: 'https://evil.test' })).status, 403);
   assert.equal((await get(viewer, viewer.path, {}, 'POST')).status, 403);
   assert.equal((await get(viewer, viewer.path, {}, 'HEAD')).body, '');
@@ -97,6 +102,24 @@ test('fails unsupported formats and oversized text before starting a viewer', as
   await assert.rejects(startFileViewer(join(root, 'unknown.bin')), /unsupported/);
   await writeFile(join(root, 'large.txt'), Buffer.alloc(8 * 1024 * 1024 + 1));
   await assert.rejects(startFileViewer(join(root, 'large.txt')), /8 MiB/);
+});
+
+test('streams oversized HTML and referenced CSS without scanning their dependencies', async () => {
+  const large = ' '.repeat(8 * 1024 * 1024 + 1);
+  await writeFile(join(root, 'hidden.svg'), '<svg/>');
+  const html = await start('large.html', `<img src="hidden.svg">${large}`);
+  const htmlResponse = await get(html);
+  assert.equal(htmlResponse.status, 200);
+  assert.equal(htmlResponse.body.length, large.length + '<img src="hidden.svg">'.length);
+  assert.equal((await get(html, asset(html, 'hidden.svg'))).status, 404);
+
+  await writeFile(join(root, 'large.css'), `body { background: url(hidden.svg) }${large}`);
+  const withCss = await start('index.html', '<link href="large.css" rel="stylesheet">');
+  const cssResponse = await get(withCss, asset(withCss, 'large.css'));
+  assert.equal(cssResponse.status, 200);
+  assert.ok(cssResponse.body.length > 8 * 1024 * 1024);
+  assert.equal((await get(withCss, asset(withCss, 'hidden.svg'))).status, 404);
+  await assert.rejects(startFileViewer(join(root, 'large.css')), /8 MiB/); // a direct CSS text preview stays capped
 });
 
 test('bounds the asset graph and keeps a grant on the opened file after path replacement', async () => {

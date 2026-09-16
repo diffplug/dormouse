@@ -143,9 +143,11 @@ Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `dor/test/snapshot
 
 **Must pass the canonical file path as the selected Tool's one input.** Reuse follows [Identity and dedupe](#identity-and-dedupe), `$TARGET` in the key providing per-file identity; placement follows [Take-over](#take-over).
 
+**Must reject declared Tool names beginning with `builtin:` in either configuration scope.** Built-in handler names cannot be shadowed.
+
 **Must use `builtin:file` for supported files when no user rule matches.** An explicit unknown handler or malformed user configuration fails without fallback. Built-in identity is the canonical file path in its own scope, separate from user and project Tools.
 
-**Must run the built-in viewer as a Tool-owned `dor` process**, serving HTML, images, PDF/media, and escaped text/source previews. Markdown is source text; custom viewers may render it. Text previews and HTML/CSS dependency inspection are limited to 8 MiB per file. The grant contains at most 256 files: the opened document and statically referenced relative HTML/CSS assets within its directory tree. Root-relative, external, dynamically discovered, and unreferenced resources are unavailable.
+**Must run the built-in viewer as a Tool-owned `dor` process**, serving HTML, images, PDF/media, and escaped text/source previews. Markdown is source text; custom viewers may render it. Text previews and HTML/CSS dependency inspection are limited to 8 MiB per file. Oversized HTML and referenced CSS still stream without dependency inspection. The grant contains at most 256 files: the opened document and statically referenced relative HTML/CSS assets within its directory tree. Never expand the grant through root-relative, external, or dynamic references; requests can read only granted paths.
 
 **Must retain the viewer's opened file descriptors until the Tool exits.** Refresh reads those files again, but atomic replacements and changes to the dependency graph require restarting the viewer. Cold restore runs the saved file command with a fresh URL capability; Workspace movement keeps the live binding. The listener's authority is `docs/specs/security-local.md` → Local-file viewer.
 

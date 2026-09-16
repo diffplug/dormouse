@@ -144,6 +144,7 @@ export function parseToolFile(
 
   for (const [name, rawEntry] of Object.entries(toolsNode)) {
     const where = `${path}: tools.${name}`;
+    if (name.startsWith('builtin:')) throw new ToolFileError(`${where}: the 'builtin:' prefix is reserved`);
     if (!isRecord(rawEntry)) throw new ToolFileError(`${where}: entry must be a mapping`);
 
     for (const field of Object.keys(rawEntry)) {

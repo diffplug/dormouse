@@ -132,11 +132,13 @@ Source of truth: the shared rule and predicates — `isLoopbackHost`, `isOwnOrig
 
 ### Local-file viewer
 
-**FAIL IF** `dor/src/file-viewer.ts` serves any request without the fresh 256-bit URL capability, its own loopback `Host`, an absent or same-listener `Origin`, and a GET/HEAD method. `allowsFileViewerRequest` in `dor/src/file-viewer-loopback-guard.ts` gates every route. Never grant CORS access to foreign origins, cache responses, or send the capability as a referrer.
+**FAIL IF** `dor/src/file-viewer.ts` serves any request without the fresh 256-bit URL capability, its own case-insensitive loopback `Host`, an absent or same-listener `Origin`, and a GET/HEAD method. Compare capability prefixes by SHA-256 then `timingSafeEqual`, including malformed lengths. `allowsFileViewerRequest` in `dor/src/file-viewer-loopback-guard.ts` gates every route. Never grant CORS access to foreign origins, cache responses, or send the capability as a referrer.
 
-**FAIL IF** the local-file viewer exposes directory listings, arbitrary path reads, writes, or a file outside its opened-document grant. Grant construction permits only regular files, rejects symlinks escaping the canonical document directory, bounds static dependency discovery, and retains descriptors so later path replacement cannot widen the grant. Viewer content is restricted by CSP to its own origin plus inline scripts/styles and data images; escaped text previews execute no document markup.
+**FAIL IF** the local-file viewer exposes directory listings, arbitrary path reads, writes, or a file outside its opened-document grant. Grant construction permits only regular files, rejects symlinks escaping the canonical document directory, bounds static dependency discovery, and retains descriptors so later path replacement cannot widen the grant. Viewer resource loads are restricted by CSP to its own origin plus inline scripts/styles and data images, including through the iframe proxy; escaped text previews execute no document markup. The viewer opts into the proxy's upstream-policy preservation (`docs/specs/dor-browser.md` → Iframe Renderer).
 
-Source of truth: `startFileViewer` in `dor/src/file-viewer.ts`; `allowsFileViewerRequest` in `dor/src/file-viewer-loopback-guard.ts`; `dor/test/file-viewer.test.mjs`.
+**Must not describe the viewer CSP as confining active documents' navigation.** HTML/SVG scripts can navigate their frame to external URLs, including with granted contents; the resource policy is not a no-egress boundary. (rationale)
+
+Source of truth: `startFileViewer` in `dor/src/file-viewer.ts`; `allowsFileViewerRequest` in `dor/src/file-viewer-loopback-guard.ts`; `sanitizeResponseHeaders` in `lib/src/host/iframe-proxy.ts`. Tests: `dor/test/file-viewer.test.mjs`, `lib/src/host/file-viewer-proxy.test.ts`.
 
 ## Persisted state
 

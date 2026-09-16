@@ -16,6 +16,12 @@ function parse(text: string, opts = REPO) {
 }
 
 describe('parseToolFile', () => {
+  it.each([REPO, USER])('reserves builtin: tool names in $scope configuration', opts => {
+    for (const name of ['builtin:file', 'builtin:other']) {
+      expect(() => parse(`tools:\n  ${name}:\n    run: [viewer]\n`, opts)).toThrow(/'builtin:' prefix is reserved/);
+    }
+  });
+
   it('reads an entry with a key template', () => {
     const file = parse(`
 tools:

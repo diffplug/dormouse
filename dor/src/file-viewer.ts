@@ -92,7 +92,9 @@ export async function startFileViewer(input: string): Promise<{ port: number; pa
       const html = type.mime.startsWith('text/html');
       if ((html || type.mime.startsWith('text/css')) && !scanned.has(canonical)) {
         scanned.add(canonical);
-        for (const ref of references(await readText(file), html)) {
+        // Inspection is optional: large or changing HTML/CSS can still stream.
+        const contents = await readText(file).catch(() => '');
+        for (const ref of references(contents, html)) {
           if (!ref || ref.startsWith('/') || ref.startsWith('#') || /^[a-z][a-z\d+.-]*:/i.test(ref) || ref.includes('\\')) continue;
           let local: string;
           try { local = decodeURIComponent(ref.split(/[?#]/, 1)[0]); } catch { continue; }
@@ -117,6 +119,8 @@ export async function startFileViewer(input: string): Promise<{ port: number; pa
       res.setHeader('Cache-Control', 'no-store');
       res.setHeader('Referrer-Policy', 'no-referrer');
       res.setHeader('X-Content-Type-Options', 'nosniff');
+      // The iframe proxy must retain this policy on every MIME type.
+      res.setHeader('X-Dormouse-Preserve-CSP', '1');
       res.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; font-src 'self'; connect-src 'self'; frame-src 'self'; object-src 'self'; base-uri 'self'; form-action 'none'");
       if (!allowsFileViewerRequest(req, port, prefix)) { finish(res, 403); return; }
       void (async () => {
