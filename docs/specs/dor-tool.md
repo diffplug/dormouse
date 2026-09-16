@@ -89,7 +89,6 @@ Approval layout follows `docs/specs/layout.md` → Pane body.
 
 **Must validate a bounded regular, non-symlink grant receipt for the requested key.** Missing, corrupt, or mismatched records grant nothing; a filename alone is never approval.
 
-
 **Must keep implicit file dispatch user-global and limited to user-global Tools.** Reserved: any future repo `prespawn_*` execution uses the same approval; see scope **dor-tools** under [Future](#future).
 
 Source of truth: `createToolHost` in `lib/src/host/tool-host.ts`; `FileToolTrustStore` / `lookupTool` in `lib/src/host/tool-trust.ts`; `resolveUpstreamUrl` in `lib/src/host/git-upstream.ts`; `ToolApproval` in `lib/src/components/wall/ToolApproval.tsx`; `resolveToolApproval` in `lib/src/components/Wall.tsx`; `toolPendingFromParams` in `lib/src/components/wall/browser-surface.ts`. Tests: `lib/src/host/tool-trust.test.ts`, `lib/src/components/Wall.test.tsx`, `lib/src/components/wall/tool-surface.test.ts`.

@@ -133,7 +133,7 @@ export function parseToolFile(
   }
   if (!isRecord(doc)) throw new ToolFileError(`${path}: expected a mapping at the top level`);
 
-  const toolsNode = doc.tools ?? {};
+  const toolsNode = doc.tools === undefined ? {} : doc.tools;
   if (!isRecord(toolsNode)) throw new ToolFileError(`${path}: 'tools' must be a mapping of name to entry`);
 
   const tools = new Map<string, ToolEntry>();
@@ -241,9 +241,12 @@ function parseOpenRules(node: unknown, tools: ReadonlyMap<string, ToolEntry>, pa
   if (!Array.isArray(node)) throw new ToolFileError(`${path}: 'open' must be an ordered list`);
   return node.map((rule: unknown) => {
     const entry = isRecord(rule) && typeof rule.tool === 'string' ? tools.get(rule.tool) : undefined;
-    if (!isRecord(rule) || !entry || typeof rule.match !== 'string' || !rule.match
-      || Object.keys(rule).some(key => key !== 'match' && key !== 'tool')) {
+    if (!isRecord(rule) || !entry || typeof rule.match !== 'string' || !rule.match) {
       throw new ToolFileError(`${path}: each open rule needs a match pattern and a tool defined in this user file`);
+    }
+    const unknown = Object.keys(rule).find(key => key !== 'match' && key !== 'tool');
+    if (unknown !== undefined) {
+      throw new ToolFileError(`${path}: open rule for '${entry.name}' has an unknown field '${unknown}' (known: match, tool)`);
     }
     if (typeof entry.run === 'string') {
       throw new ToolFileError(`${path}: open rule for '${entry.name}' needs an argument-list run to receive the file`);
