@@ -114,6 +114,7 @@ import {
   DoorElementsContext,
   ModeContext,
   WorkspaceActiveContext,
+  WorkspaceIdContext,
   PaneElementsContext,
   PaneWriteContext,
   WallActionsContext,
@@ -1580,11 +1581,12 @@ export function Wall({
 
     try {
       const platform = getPlatform();
-      await platform.toolControl?.({
+      const grant = await platform.toolControl?.({
         op: 'trust',
         kind: choice,
         projectRoot: pending.projectRoot,
       });
+      if (grant?.status !== 'trust-recorded') return;
 
       // Re-resolve now that the grant exists. The untrusted lookup deliberately
       // withholds `render` / `port` / `key` — they live only in the `ok` arm — so
@@ -2183,6 +2185,7 @@ export function Wall({
   // --- Render ---
 
   return (
+    <WorkspaceIdContext.Provider value={effectiveWorkspaceId}>
     <WorkspaceActiveContext.Provider value={active}>
     <ModeContext.Provider value={mode}>
       <SelectedIdContext.Provider value={selectedId}>
@@ -2290,5 +2293,6 @@ export function Wall({
       </SelectedIdContext.Provider>
     </ModeContext.Provider>
     </WorkspaceActiveContext.Provider>
+    </WorkspaceIdContext.Provider>
   );
 }

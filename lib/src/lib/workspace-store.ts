@@ -1,3 +1,4 @@
+import { normalizeAlertDeliveryOverrides, type AlertDeliveryOverrides } from './alert-delivery-model';
 import { parseWorkspaceRef } from 'dor/protocol';
 import { DEFAULT_WORKSPACE_ID, DEFAULT_WORKSPACE_NAME, type WorkspaceId } from './session-types';
 
@@ -9,6 +10,7 @@ import { DEFAULT_WORKSPACE_ID, DEFAULT_WORKSPACE_NAME, type WorkspaceId } from '
  */
 
 export interface WorkspaceMeta {
+  alertDelivery?: AlertDeliveryOverrides;
   id: WorkspaceId;
   name: string;
 }
@@ -53,6 +55,10 @@ export function getActiveWorkspaceId(): WorkspaceId {
  *  Workspace was closed reads `false`, which is what stops its teardown save. */
 export function hasWorkspace(id: WorkspaceId): boolean {
   return state.workspaces.some((workspace) => workspace.id === id);
+}
+
+export function getWorkspace(id: WorkspaceId): WorkspaceMeta | undefined {
+  return state.workspaces.find((workspace) => workspace.id === id);
 }
 
 let workspaceSequence = 0;
@@ -171,13 +177,13 @@ export function activateWorkspaceAt(index: number): void {
   if (target) setActiveWorkspace(target.id);
 }
 
-export function createWorkspace(opts?: { id?: WorkspaceId; name?: string; activate?: boolean }): WorkspaceMeta {
+export function createWorkspace(opts?: { id?: WorkspaceId; name?: string; activate?: boolean; alertDelivery?: AlertDeliveryOverrides }): WorkspaceMeta {
   let id = opts?.id ?? generateWorkspaceId();
   while (state.workspaces.some((workspace) => workspace.id === id)) {
     if (opts?.id !== undefined) throw new Error(`Duplicate Workspace id: ${id}`);
     id = generateWorkspaceId();
   }
-  const meta: WorkspaceMeta = { id, name: opts?.name ?? nextDefaultName() };
+  const meta: WorkspaceMeta = { id, name: opts?.name ?? nextDefaultName(), ...(opts?.alertDelivery ? { alertDelivery: normalizeAlertDeliveryOverrides(opts.alertDelivery) } : {}) };
   const activeId = opts?.activate === false ? state.activeId : meta.id;
   emit({ workspaces: [...state.workspaces, meta], activeId });
   return meta;
@@ -301,4 +307,22 @@ export function resolveWorkspaceRef(ref: string): WorkspaceRefResolution {
 /** Reset to the single default Workspace (fresh start / tests). */
 export function resetWorkspaces(): void {
   emit(defaultState());
+}
+
+/** Replace sparse overrides. An empty object restores application defaults. */
+export function setWorkspaceAlertDelivery(id: WorkspaceId, value: AlertDeliveryOverrides): void {
+  const alertDelivery = normalizeAlertDeliveryOverrides(value);
+  const current = getWorkspace(id);
+  if (!current || sameOverrides(current.alertDelivery ?? {}, alertDelivery)) return;
+  emit({ ...state, workspaces: state.workspaces.map((workspace) => {
+    if (workspace.id !== id) return workspace;
+    const { alertDelivery: _old, ...rest } = workspace;
+    return Object.keys(alertDelivery).length ? { ...rest, alertDelivery } : rest;
+  }) });
+}
+
+function sameOverrides(a: AlertDeliveryOverrides, b: AlertDeliveryOverrides): boolean {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]) as Set<keyof AlertDeliveryOverrides>;
+  for (const key of keys) if (a[key] !== b[key]) return false;
+  return true;
 }

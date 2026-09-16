@@ -74,7 +74,7 @@ Source of truth: `acquireToolSpawnLock` / the `surface.tool` handler in `lib/src
 1. **Must derive grant keys host-side from the canonical upstream remote URL or project-root folder.** Either recorded key satisfies lookup; upstream trust spans clones and worktrees. (rationale)
 2. **Must present unapproved named invocations in a visible pending Tool pane**, returning `pending` without spawning a PTY. Defer requested minimization until approval. Pending approval is never persisted as a runnable Tool.
 3. **Must grant only through the approval controls in Dormouse chrome**, never through a `dor` verb or terminal output. The prompt names the proposed command; it is not itself executable terminal content. (rationale)
-4. **Must re-resolve the named entry after the grant is written**, then stage the resolved command, renderer, port strategy, and key before exposing its terminal. A Surface closed during the host calls must not start later.
+4. **Must require `trust-recorded` before re-resolving the named entry**, retaining the pending pane after a rejected grant, then stage the resolved command, renderer, port strategy, and key before exposing its terminal. A Surface closed during the host calls must not start later.
 5. **Must close a declined approval through the ordinary close coordinator and record no denial.** Archive failure may retain the pane. (rationale)
 6. **Must share grant updates safely across host processes**, merging against the latest file under the existing lock and atomic-write protocol.
 7. **Never content-hash grants or re-prompt solely because the config changed.** (rationale)
@@ -97,7 +97,7 @@ Source of truth: `createToolHost` in `lib/src/host/tool-host.ts`; `FileToolTrust
 - **Must poll unbound Tools every 1.5 seconds while their command runs.** Reset settle memory on command exit. (rationale)
 - **Must let a changed announced port override a committed conflict or browser**, but only after a matching scan. An unchanged announcement never undoes URL-bar navigation. (rationale)
 - **Must stop ordinary port scans once a browser or conflict is committed.** An unannounced additional port appearing after settle is not detected.
-- **Must display the browser destination before awaiting agent-browser startup**, leaving the session-less renderer inert until the binding arrives. Close any browser session whose Tool disappeared or changed command during startup.
+- **Must display the browser destination before awaiting agent-browser startup**, clearing the existing session/stream binding during a reopen as well. Keep the session-less renderer inert and block Workspace transfer until the binding arrives. Close any browser session whose Tool disappeared or changed command during startup.
 - **Must retain a runtime re-key within the Tool's namespace**, following [Identity and dedupe](#identity-and-dedupe).
 
 Reserved: **Must derive a Tool's URL again on cold restore**, compatible with future `prespawn_port` and `DORMOUSE_TOOL_PORT` in scope **dor-tools**; [Persistence and hosts](#persistence-and-hosts) owns the saved projection.
@@ -142,20 +142,19 @@ Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `dor/test/snapshot
 | Directory | Resolved Tool CWD equals the caller's reported CWD |
 | Placement | Neither `--surface` nor `--minimize` supplied |
 | Helper | No existing auxiliary helper; preserve it by splitting |
-| Trust | Already approved; pending approval always uses its own pane |
 
 **Must answer `takeover` before waiting for the calling shell's prompt**, then transform and type the command. The answer promises placement, not successful command startup.
 
-- **Must leave the caller unchanged on prompt timeout or cancellation**, and recheck active Workspace, transfer/closing state, visibility, CWD, kind, and helper presence after the wait. A helper opened during the handshake prevents transformation.
+- **Must leave the caller unchanged on prompt timeout or cancellation**, and recheck transfer/closing state, pane membership, CWD, kind, and helper presence after the wait. A helper opened during the handshake prevents transformation. **Must complete an accepted takeover after switching Workspaces** without changing the active Workspace. (rationale)
 - **Must change components and params in one metadata commit**, retaining the Session id, Surface ref, scrollback, notes, source pins, and any user rename.
 - **Must clear previous OSC 367 hints before typing the new command.**
 - **Must retain the spawn lock until the typed command is observed running or a new completed run is observed**, or the wait ends. A command that starts and exits between samples releases the lock too.
 - **Must rerun a keyed match in the caller through the same answer/prompt handshake**, reporting `adopted`, when its line is standalone and integrated. Never interrupt the waiting `dor` process. Placement flags do not relocate an existing match; run in its current directory.
 - **Must report an error when the caller is the keyed match but its command line cannot be typed behind**, instead of reporting a misleading `existing` result.
-- **May interleave user keystrokes arriving between the prompt and command injection.** Takeover does not reserve the shell input buffer.
-- **Must include already-owned background listeners in the usual process-tree scan.** Under `auto`, they can become the sole candidate or cause a conflict.
+- **May interleave user keystrokes arriving between the prompt and command injection.**
+- **Must include already-owned background listeners in the usual process-tree scan.** [Serving](#serving) owns selection.
 
-Source of truth: `toolTakesOverCaller` / `toolRerunsInCaller` in `lib/src/components/wall/tool-takeover.ts`; `runToolInCallerPane` in `lib/src/components/wall/use-dor-control.ts`; `setMeta` in `lib/src/components/wall/lath-wall-store.ts`. Tests: `lib/src/components/wall/tool-takeover.test.ts`, `lib/src/components/Wall.test.tsx`.
+Source of truth: `toolTakesOverCaller` / `toolRerunsInCaller` / `callerStillPlaceable` / `callerStillRunnable` in `lib/src/components/wall/tool-takeover.ts`; `runToolInCallerPane` in `lib/src/components/wall/use-dor-control.ts`; `setMeta` in `lib/src/components/wall/lath-wall-store.ts`. Tests: `lib/src/components/wall/tool-takeover.test.ts`, `lib/src/components/Wall.test.tsx`.
 
 ## OSC 367
 

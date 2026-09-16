@@ -407,17 +407,14 @@ export function summarizeCommandLine(raw: string): string {
  * This is the key WATCHING rules are stored under — see `docs/specs/alert.md`.
  */
 export function commandArgv0(raw: string): string | null {
-  const commandTokens = primaryCommandTokens(raw);
-  const command = commandTokens[0];
-  if (!command) return null;
-  return commandProgramName(command) || null;
+  return commandProgramName(primaryCommandTokens(raw)[0] ?? '') || null;
 }
 
 /**
  * The tokens of the first command on a line: quote- and escape-aware, truncated
  * at the first pipeline/compound boundary, with leading `VAR=value` assignments
- * and a leading `env` skipped. `commandArgv0` is this reduced to a program name;
- * `dor tool`'s take-over gate reads the verb after it.
+ * and a leading `env` skipped. `commandArgv0` is `commandProgramName` of the
+ * first of these.
  */
 export function primaryCommandTokens(raw: string): string[] {
   return takePrimaryCommandTokens(tokenizeCommand(raw.trim()));
@@ -1020,7 +1017,7 @@ export const WINDOWS_EXECUTABLE_SUFFIX = /\.(?:exe|cmd|bat|com|ps1)$/i;
  * suffix. The single answer to "which program is this", so the header, the
  * WATCHING rule row and the bell tooltip cannot disagree about it.
  */
-function commandProgramName(command: string): string {
+export function commandProgramName(command: string): string {
   return commandBasename(command).replace(WINDOWS_EXECUTABLE_SUFFIX, '');
 }
 

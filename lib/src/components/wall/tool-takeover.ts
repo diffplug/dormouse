@@ -7,9 +7,7 @@
  * facts, this decides, and the handshake that follows is the handler's.
  */
 import type { SurfaceKind } from 'dor/commands/types';
-import { commandArgv0, primaryCommandTokens } from '../../lib/terminal-state';
-
-/** commandArgv0 already removes platform launcher suffixes such as .cmd. */
+import { commandProgramName, primaryCommandTokens } from '../../lib/terminal-state';
 
 /** Shell syntax that can make one line more than one command: separators,
  *  pipelines, backgrounding, redirection, substitution. Tested against the raw
@@ -25,8 +23,8 @@ const COMPOUND_SYNTAX = /[;&|<>()`\n\r]/;
 export function isNakedToolInvocation(rawCommandLine: string | null | undefined): boolean {
   const line = rawCommandLine?.trim();
   if (!line || COMPOUND_SYNTAX.test(line)) return false;
-  const argv0 = commandArgv0(line)?.toLowerCase();
-  return argv0 === 'dor' && primaryCommandTokens(line)[1] === 'tool';
+  const [launcher, verb] = primaryCommandTokens(line);
+  return verb === 'tool' && commandProgramName(launcher ?? '').toLowerCase() === 'dor';
 }
 
 /** What the placement rule reads. Every field is already known to the handler. */
@@ -35,8 +33,11 @@ export interface ToolTakeoverGate {
   explicitSurface: boolean;
   /** `--minimize`: a request for a background Surface, which the caller is not. */
   minimized: boolean;
-  /** Whether the caller is a visible pane of the active Workspace — a Door is
-   *  not a pane a human is typing in. */
+  /** Whether the answering Workspace is the active one — a pane a human is
+   *  typing in is on screen. */
+  workspaceActive: boolean;
+  /** Whether the caller is a laid-out pane of that Workspace, neither a Door
+   *  nor on its way out. */
   visible: boolean;
   /** The caller's Surface kind; only a plain terminal may transform. */
   kind: SurfaceKind;
@@ -67,13 +68,24 @@ function callerTypedTool(gate: ToolTakeoverGate): boolean {
  * (rationale).
  */
 export function toolTakesOverCaller(gate: ToolTakeoverGate): boolean {
-  return gate.kind === 'terminal'
-    && !gate.helperPresent
+  return gate.workspaceActive
     && !gate.explicitSurface
     && !gate.minimized
-    && gate.visible
-    && gate.cwdMatches
+    && callerStillPlaceable(gate)
     && callerTypedTool(gate);
+}
+
+/**
+ * The placement facts that can change while the caller's shell returns to its
+ * prompt, re-read once it has: still a pane, still a plain helper-less
+ * terminal, still in the tool's directory. The command line is not among them —
+ * by then it has finished. Workspace activation is only an initial gate.
+ */
+export function callerStillPlaceable(gate: ToolTakeoverGate): boolean {
+  return gate.visible
+    && gate.cwdMatches
+    && gate.kind === 'terminal'
+    && !gate.helperPresent;
 }
 
 /**
@@ -84,4 +96,10 @@ export function toolTakesOverCaller(gate: ToolTakeoverGate): boolean {
  */
 export function toolRerunsInCaller(gate: ToolTakeoverGate): boolean {
   return gate.kind === 'tool' && callerTypedTool(gate);
+}
+
+/** What a re-run re-reads after the prompt wait: the pane survived it, in the
+ *  directory the tool was answered with. */
+export function callerStillRunnable(gate: ToolTakeoverGate): boolean {
+  return gate.visible && gate.cwdMatches;
 }

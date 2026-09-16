@@ -33,6 +33,39 @@ block overrides the workflow-level block; absent both, the repository default
 applies. Unspecified scopes in an explicit block are `none`. Read
 `actions/permissions/workflow` before judging any inherited-permission check.
 
+**Derive every inventory from the live API, never from the spec's own list.**
+A `FAIL IF` that says "any" quantifies over what exists now; illustrative
+`Today:` lists do not limit its scope.
+
+- Enumerate `GET /repos/$GITHUB_REPOSITORY/environments` and read each
+  environment's `deployment_branch_policy` before determining its admitted refs.
+  An empty custom-policy listing alone never proves that no refs are admitted:
+  - `null` admits every branch and tag.
+  - `protected_branches: true` admits branches with branch protection; if no
+    branch protection rules exist in the repository, all branches can deploy.
+    Check the admitted branches against the spec's admin-gating requirement;
+    branch protection alone does not establish admin-only access.
+  - `custom_branch_policies: true` uses `.../deployment-branch-policies`;
+    enumerate those entries and check the refs their patterns admit.
+- Enumerate `GET .../actions/secrets`, `GET .../actions/organization-secrets`,
+  and each environment's own secret listing before checking placement.
+- Enumerate `GET .../rulesets` before checking bypass actors.
+- Use `gh api --paginate` for every list request, including deployment policies
+  and secret listings, and check every member across all returned pages.
+- Judge every discovered member against the applicable conditions, including
+  explicit exceptions. Record FAIL for a violated condition. The secret-placement
+  inventory in `security-ci.md` is normative: a secret outside the specified
+  placements is a FAIL, not a documentation omission. A mere mention elsewhere
+  in the scoped specs, such as a blast-radius table row, grants no exception to
+  a placement requirement.
+- Absence from an illustrative environment `Today:` list alone is not a
+  violation. Report documentation omissions as INFO under `### Qualitative findings`;
+  skip the INFO when another section of the scoped specs already covers the
+  member. This only suppresses the documentation finding, not a placement FAIL.
+- Never record `PASS` on a condition evaluated over only the spec's listed
+  subset or an incomplete API enumeration. Apply the access-error handling
+  above and the shared preamble's incomplete-check verdict rules.
+
 ## Qualitative pass
 
 You own `.github/` (including `.github/audit/`, which holds this audit's own

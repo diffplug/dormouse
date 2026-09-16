@@ -1,3 +1,4 @@
+import { markAlertConsumed } from '../../lib/alert-delivery-state';
 /**
  * Push notifications for unattended alarms (`docs/specs/alert.md` -> Push
  * notifications). When a Session rings and stays unattended for `pushDelayMs`,
@@ -15,7 +16,7 @@
  * never fetches it.
  */
 
-import { getAlertSettings } from '../../lib/alert-settings';
+import { getSessionAlertPolicy, subscribeToAlertDeliveryPolicy } from '../../lib/alert-delivery-policy';
 import { watchUnattendedRings } from '../../lib/alert-ring-watch';
 import { deriveSessionLabel } from '../../lib/session-label';
 import { setPushDevices, type PushDevice, type PushDevicesState } from '../../lib/push-devices';
@@ -76,8 +77,10 @@ export function invalidatePushDeviceRefreshes(): void {
  */
 export function watchPushRings(fire: (sessionId: string, title: string) => void): () => void {
   return watchUnattendedRings({
-    enabled: () => getAlertSettings().pushEnabled,
-    delayMs: () => getAlertSettings().pushDelayMs,
-    fire: (id) => fire(id, deriveSessionLabel(id)),
+    sink: 'push',
+    enabled: (id) => getSessionAlertPolicy(id).pushEnabled,
+    delayMs: (id) => getSessionAlertPolicy(id).pushDelayMs,
+    subscribe: subscribeToAlertDeliveryPolicy,
+    fire: (id, episode) => { markAlertConsumed('push', id, episode.id); fire(id, deriveSessionLabel(id)); },
   });
 }

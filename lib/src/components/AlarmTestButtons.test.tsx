@@ -58,7 +58,7 @@ describe('SpeakTestButton', () => {
     await act(async () => button().click());
 
     expect(speak).toHaveBeenCalledTimes(1);
-    expect(text()).toContain('Speaking now');
+    expect(text()).toContain('Test sound queued');
   });
 
   it('says there is no speech engine rather than looking like it worked', async () => {

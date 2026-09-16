@@ -57,7 +57,7 @@ function ResultLine({ result }: { result: { text: string; tone: 'ok' | 'bad' } |
  * backend at all, which would otherwise be indistinguishable from a working one
  * with the volume down.
  */
-export function SpeakTestButton() {
+export function SpeakTestButton({ voice }: { voice?: string | null }) {
   const [result, show] = useTransientResult();
 
   return (
@@ -66,7 +66,7 @@ export function SpeakTestButton() {
         type="button"
         className={modalActionButton()}
         onClick={() => {
-          if (speakTestUtterance()) show('Speaking now.', 'ok');
+          if (speakTestUtterance(voice)) show('Test sound queued.', 'ok');
           else show('This app has no speech engine available.', 'bad');
         }}
       >

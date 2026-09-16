@@ -1,3 +1,4 @@
+import type { AlertRuntimeSnapshot } from '../alert-manager';
 import { DEFAULT_HELPER_COMMAND, type HelperIdentity, type TerminalContextRequest, type TerminalContextInfo } from '../terminal-context-types';
 import type { AlertStateDetail, OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, BurrowLink } from './types';
 import { AlertManager } from '../alert-manager';
@@ -325,6 +326,11 @@ export class FakePtyAdapter implements PlatformAdapter {
   notifySessionFlushComplete(_requestId: string): void {}
 
   // Alert management (local AlertManager, same as TauriAdapter)
+  alertPauseForTransfer(id: string): AlertRuntimeSnapshot | null { return this.alertManager.pauseForTransfer(id); }
+  alertResumeFromTransfer(id: string, snapshot: AlertRuntimeSnapshot, replayRequestId?: string): void {
+    this.alertManager.resumeFromTransfer(id, snapshot, replayRequestId);
+  }
+
   alertRemove(id: string): void { this.alertManager.remove(id); }
   alertSetWatchedCommands(names: string[]): void { this.alertManager.setWatchedCommands(names); }
   alertSetCommandWatched(name: string, watched: boolean): void { this.alertManager.setCommandWatched(name, watched); }
