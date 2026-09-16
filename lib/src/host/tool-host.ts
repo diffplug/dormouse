@@ -79,7 +79,7 @@ export function createToolHost(options: { stateDir?: string; userConfigPath?: st
         const userPath = options.userConfigPath ?? userToolConfigPath();
         if (request.op === 'open') return await resolveOpenTool(request, userPath);
         const args = request.args ?? [];
-const project = request.global ? null : await lookupTool(request.name, request.cwd, trust, { args });
+        const project = request.global ? null : await lookupTool(request.name, request.cwd, trust, { args });
         if (project?.status === 'ok') {
           return okResult(project.entry, project.input, { projectRoot: project.projectRoot, path: project.path, warnings: project.file.warnings });
         }
