@@ -77,7 +77,7 @@ Source of truth: `queueToolSpawn` / the `surface.tool` handler in `lib/src/compo
 1. **Must derive grant keys host-side from the canonical upstream remote URL or project-root folder.** Either recorded key satisfies lookup; upstream trust spans clones and worktrees. (rationale)
 2. **Must present unapproved named invocations in a visible pending Tool pane**, returning `pending` without spawning a PTY. Defer requested minimization until approval. Pending approval is never persisted as a runnable Tool.
 3. **Must grant only through the approval controls in Dormouse chrome**, never through a `dor` verb or terminal output. The prompt names the proposed command; it is not itself executable terminal content. (rationale)
-4. **Must require the host's `trust-recorded` result before re-resolving the named entry**, then stage the command, renderer, port strategy, and key before exposing its terminal. Failed grants retain approval choices and display errors. Closed Surfaces must not start later.
+4. **Must require the host's `trust-recorded` result before re-resolving the named entry**, then stage the command, renderer, port strategy, and key before exposing its terminal. Failed grants retain approval choices and display errors. Closed Surfaces must not start later or show stale errors.
 5. **Must recheck the resolved key before launching an approved Tool**, honoring its original `--fresh` intent. Close a redundant approval through the ordinary close coordinator before revealing or restarting the match; a failed closure retains the approval and sends no command.
 6. **Must close a declined approval through the ordinary close coordinator and record no denial.** Archive failure may retain the pane. (rationale)
 7. **Must record each grant as its own atomically written file**, so hosts sharing one state directory never lock or merge.
@@ -89,7 +89,7 @@ Source of truth: `queueToolSpawn` / the `surface.tool` handler in `lib/src/compo
 
 **Must keep implicit file dispatch user-global and limited to user-global Tools or the built-in viewer.** Reserved: any future repo `prespawn_*` execution uses the same approval; see scope **dor-tools** under [Future](#future).
 
-Source of truth: `createToolHost` in `lib/src/host/tool-host.ts`; `FileToolTrustStore` / `lookupTool` in `lib/src/host/tool-trust.ts`; `resolveUpstreamUrl` in `lib/src/host/git-upstream.ts`; `ToolApproval` in `lib/src/components/wall/ToolApproval.tsx`; `resolveToolApproval` in `lib/src/components/Wall.tsx`. Tests: `lib/src/host/tool-trust.test.ts`, `lib/src/components/Wall.test.tsx`.
+Source of truth: `createToolHost` in `lib/src/host/tool-host.ts`; `FileToolTrustStore` / `lookupTool` in `lib/src/host/tool-trust.ts`; `resolveUpstreamUrl` in `lib/src/host/git-upstream.ts`; `ToolApproval` in `lib/src/components/wall/ToolApproval.tsx`; `resolveToolApproval` in `lib/src/components/Wall.tsx`; `toolPendingFromParams` in `lib/src/components/wall/browser-surface.ts`. Tests: `lib/src/host/tool-trust.test.ts`, `lib/src/components/Wall.test.tsx`, `lib/src/components/wall/tool-surface.test.ts`.
 
 ## Serving
 
@@ -169,7 +169,7 @@ Source of truth: `openCommand` in `dor/src/commands/open.ts`; `resolveOpenTool` 
 | Condition | Required state |
 | --- | --- |
 | Verb | `dor tool`; `dor open` never transforms a plain terminal, though a keyed match in its own Tool pane reruns there |
-| Caller | Visible, integrated plain terminal; not closing or dying |
+| Caller | Visible pane of the active Workspace; integrated plain terminal; not closing or dying |
 | Command line | OSC 633 reports the invocation alone; compound shell syntax rejects takeover |
 | Directory | Resolved Tool CWD equals the caller's reported CWD |
 | Placement | Neither `--surface` nor `--minimize` supplied |
@@ -180,7 +180,7 @@ Source of truth: `openCommand` in `dor/src/commands/open.ts`; `resolveOpenTool` 
 - **Must leave the caller unchanged on prompt timeout or cancellation**, and recheck transfer/closing state, pane membership, CWD, kind, and helper presence after the wait. A helper opened during the handshake prevents transformation. **Must complete an accepted takeover after switching Workspaces** without changing the active Workspace. (rationale)
 - **Must change components and params in one metadata commit**, retaining the Session id, Surface ref, scrollback, notes, source pins, and any user rename.
 - **Must clear previous OSC 367 hints before typing the new command.**
-- **Must retain the spawn lock until the typed command is observed running or a new completed run is observed**, or the wait ends. A command that starts and exits between samples releases the lock too.
+- **Must retain the spawn lock until the typed command is observed running or newly completed in its requested CWD**, or the wait ends. A command that starts and exits between samples releases the lock too. (rationale)
 - **Must rerun a keyed match in the caller through the same answer/prompt handshake**, reporting `adopted`, when its line is standalone and integrated. Never interrupt the waiting `dor` process. Placement flags do not relocate an existing match; run in its current directory.
 - **Must report an error when the caller is the keyed match but its command line cannot be typed behind**, instead of reporting a misleading `existing` result.
 - **May interleave user keystrokes arriving between the prompt and command injection.**
