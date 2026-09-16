@@ -35,6 +35,9 @@ export async function readToolFile(path: string, options: { followSymlink?: bool
   if (entry.isSymbolicLink() && !options.followSymlink) {
     throw new ToolFileError(`${path}: tool file must be a regular file, not a symbolic link`);
   }
+  // Avoid opening known devices/FIFOs; fstat below also checks the actual
+  // descriptor after a symlink follow or concurrent path replacement.
+  if (!entry.isSymbolicLink() && !entry.isFile()) throw new ToolFileError(`${path}: tool file must be a regular file`);
 
   let file;
   try {
