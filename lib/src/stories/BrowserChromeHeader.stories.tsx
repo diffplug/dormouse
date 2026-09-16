@@ -152,6 +152,7 @@ function BrowserChromeStory(args: StoryArgs) {
     setDevServerResolution(port, label ? { paneId: 'term-dev', label } : null);
   }, [port, args.devServerLabel]);
 
+  const Header = args.tool ? ToolPaneHeader : SurfacePaneHeader;
   return (
     <ModeContext.Provider value="passthrough">
       <SelectedIdContext.Provider value={args.selected ? surfaceId : null}>
@@ -161,12 +162,11 @@ function BrowserChromeStory(args: StoryArgs) {
           <WallActionsContext.Provider value={loggingActions}>
             <div style={{ width: args.width }}>
               <div className="bg-app-bg" style={{ height: PANE_HEADER_HEIGHT_PX }}>
-                {args.tool ? <ToolPaneHeader id={surfaceId} title={args.htmlTitle}
-                  params={{ surfaceType: 'tool', url: args.url }} /> : <SurfacePaneHeader
+                <Header
                   id={surfaceId}
                   title={args.htmlTitle || hostPathDisplay(args.url)}
-                  params={undefined}
-                />}
+                  params={args.tool ? { surfaceType: 'tool', url: args.url } : undefined}
+                />
               </div>
             </div>
           </WallActionsContext.Provider>
@@ -251,15 +251,13 @@ export const Narrow: Story = {
   args: { width: 340 },
 };
 
-/** Real narrow split: the Tool context button leaves 79px for browser chrome. */
+/** Real narrow split: the Tool context button leaves 79px for browser chrome,
+ *  so the chrome sits behind one trigger while minimize/kill stay inline. */
 export const TinyTool: Story = {
   args: { width: 103, tool: true, paneKey: 'a-very-long-tool-identity', devServerLabel: 'pnpm --filter a-very-long-project-name dev' },
 };
 
-export const TinyBrowser: Story = {
-  args: { width: 103, paneKey: 'a-very-long-browser-identity' },
-};
-
+/** Below 72px minimize/kill join the popover too. */
 export const SmallestTool: Story = {
   args: { width: 80, tool: true },
 };

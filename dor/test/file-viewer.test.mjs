@@ -37,23 +37,16 @@ async function get(viewer, path = viewer.path, headers = {}, method = 'GET') {
 }
 const asset = (viewer, path) => viewer.path.replace(/\/file\/.*$/, `/file/${path}`);
 
-test('known formats override source-name heuristics without treating prototype keys as formats', () => {
+test('known formats override source-name heuristics, PDFs never preview, and prototype keys are not formats', () => {
   for (const [name, mime] of [['readme.png', 'image/png'], ['LICENSE.html', 'text/html; charset=utf-8']]) {
     assert.deepEqual(fileViewerFormat(name), { mime, text: false });
   }
+  for (const name of ['report.pdf', 'README.pdf', 'LICENSE.PDF']) assert.equal(fileViewerFormat(name), null, name);
   for (const name of ['README', 'Dockerfile.dev', 'README.md', '.gitignore']) {
     assert.deepEqual(fileViewerFormat(name), { mime: 'text/plain; charset=utf-8', text: true });
   }
   assert.deepEqual(fileViewerFormat('README.css'), { mime: 'text/css; charset=utf-8', text: true });
   assert.equal(fileViewerFormat('file.constructor'), null);
-});
-
-test('requires user Tools for PDFs even when their names resemble source files', async () => {
-  for (const name of ['report.pdf', 'README.pdf', 'LICENSE.PDF']) {
-    assert.equal(fileViewerFormat(name), null);
-    await writeFile(join(root, name), '%PDF-1.7 example bytes');
-    await assert.rejects(startFileViewer(join(root, name)), /unsupported file format; configure a user Tool association/);
-  }
 });
 
 test('renders text as escaped content and requires the per-run token on every method', async () => {

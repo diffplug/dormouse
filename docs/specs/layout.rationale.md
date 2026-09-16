@@ -2,9 +2,9 @@
 
 > Informative companion to [layout.md](layout.md): the evidence, measurements, and dead-approach history behind its rules, keyed by that spec's headings (AGENTS.md → "What, not why"). Nothing here is normative.
 
-## Pane header
+## Pane header responsive sizing
 
-Viewport breakpoints keep every button visible when a wide window contains a narrow split. Tool headers have even less browser width because Terminal Context occupies its own button. Measuring the browser header and moving fixed controls together prevents long keys, note buttons, or renderer chips from pushing minimize/kill into a neighboring pane.
+A viewport breakpoint says nothing about a narrow split inside a wide window: at a 1200px viewport every control stayed rendered in a 103px pane and overflowed into its neighbor (innerdogfood QC, 2026-09). Tool headers have even less browser width because Terminal Context occupies its own button. Measuring the header and moving fixed controls together keeps long keys, note buttons, and renderer chips from pushing minimize/kill into a neighboring pane; quantizing the measurement to a tier keeps the header from re-rendering on every frame of a sash drag or tween.
 
 ## Pane body
 

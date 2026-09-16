@@ -52,11 +52,6 @@ A 30px header doubling as a drag handle: **a `pointerdown` past a 5px threshold 
 
 **Must use browser chrome for a serving Tool, with a Terminal Context disclosure for its serving terminal.** Tool composition belongs to `docs/specs/dor-tool.md` → Lifecycle.
 
-**Must size browser chrome by available pane width, excluding Tool context.** Hide inline split/zoom below 420px and navigation below 360px. Below 180px, use a keyboard-accessible, viewport-clamped popover; minimize/kill remain inline until 72px (80px with the unsaved-change dot), then join the popover. Dismiss without restoring focus when hidden. Its trigger identifies notes by filled notepad glyph and count. Long keys and connection labels yield before controls. (rationale)
-
-Source of truth: `SurfacePaneHeader` in `lib/src/components/wall/SurfacePaneHeader.tsx`; tests: `lib/src/components/wall/SurfacePaneHeader.test.tsx`; stories: `lib/src/stories/BrowserChromeHeader.stories.tsx`.
-
-
 Elements left to right: derived label; alert bell; TODO pill (compact+); flexible gap; mouse-reporting override icon (compact+, only while the inside program requests mouse reporting); notepad icon (`docs/specs/notepad.md` → "Notepad UI"); split left/right, split top/bottom, zoom/unzoom (full only); minimize; kill (hover turns error-red).
 
 The label is the `DerivedHeader` from `deriveHeader(...)`; `docs/specs/terminal-state.md` owns the priority chain and disambiguator. Layout renders it: primary truncates with ellipsis, secondary muted beside it, a failed last command appends an error-colored glyph. Click renames/pins; right-click — or `>` in command mode — opens the header context menu.
@@ -114,11 +109,24 @@ Both layers wear the leaf's own rounding (header radius on top, terminal radius 
 
 ### Pane header responsive sizing
 
-A ResizeObserver picks one of three tiers by header width:
+**Must pick each header's tier from its own measured width, never the viewport** (rationale). A terminal header has three tiers:
 
 - **Full** (>280px): everything.
 - **Compact** (>160px): split, zoom, and unzoom hidden.
 - **Minimal** (≤160px): also hides the TODO pill and the mouse-override icon, leaving alert, minimize, and kill. **The notepad icon survives this tier only while the Surface has notes** (`docs/specs/notepad.md` → "Notepad UI"). The label truncates with ellipsis.
+
+A browser header, including a Tool's (Terminal Context sits outside the measured width), collapses by border-box width:
+
+| Below | Change |
+|---|---|
+| 420px | Split and zoom hidden. |
+| 360px | Navigation hidden. |
+| 180px | Chrome moves into a viewport-clamped popover behind one trigger; minimize and kill stay inline. |
+| 72px (80px with an unsaved-change dot) | Minimize and kill join the popover. |
+
+**Must keep the popover keyboard reachable** (focus enters on open, Tab stays inside, Escape returns it to the trigger) **and dismiss it on a pane resize or, without restoring focus, when its Surface is hidden**; otherwise `lib/src/components/wall/use-dismiss-overlay.ts` applies, and a control inside dismisses only after its action ran. The trigger shows a filled notepad glyph and the note count while the Surface has notes; long keys and connection labels truncate before controls.
+
+Source of truth: `SurfacePaneHeader` in `lib/src/components/wall/SurfacePaneHeader.tsx`; `useHeaderTier` in `lib/src/components/wall/use-header-tier.ts`; `lib/src/components/wall/SurfacePaneHeader.test.tsx`; `lib/src/stories/BrowserChromeHeader.stories.tsx`.
 
 ## Baseboard
 

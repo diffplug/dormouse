@@ -5,7 +5,9 @@ Branch: `dor-tool-qc`, based on the reviewed stack at `4c7f9012`.
 ## Harness and isolation
 
 Run source-mutating root self-tests before starting the live harness. Run
-`pnpm innerdogfood` in a visible `dor ensure` pane. Use its real sidecar,
+`pnpm innerdogfood` in a visible `dor ensure` pane. The serving fixture is
+`scripts/dor-tool-qc/server.mjs` (`--ports N`, `--label`, `--path`,
+`--announce`; `SIGUSR1` re-announces over OSC 367). Use its real sidecar,
 PTYs, staged CLI, and browser UI through `dor ab`. Keep fixture files, captured
 inner CLI credentials, and the separate XDG user config under this worktree's
 ignored `standalone/src-tauri/target/dor-tool-qc/` directory. Never use the

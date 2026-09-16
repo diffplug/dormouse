@@ -116,7 +116,7 @@ Header contract:
 - **Must keep back/forward/reload enabled.** Agent-browser uses native commands;
   iframe uses parent history and re-resolves its proxy.
 - **Must show non-default managed `--key` as a badge, never a title prefix.**
-Header sizing and narrow-pane control placement follow `docs/specs/layout.md` → Pane header.
+- Width tiers and the narrow-pane popover: `docs/specs/layout.md` → "Pane header responsive sizing".
 
 Source of truth: `lib/src/components/wall/SurfacePaneHeader.tsx`,
 `lib/src/components/wall/agent-browser-screen.ts`,

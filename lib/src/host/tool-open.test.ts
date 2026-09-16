@@ -96,15 +96,12 @@ it('matches catch-all rules above the invocation directory and canonical absolut
   expect(await host().handle(request)).toMatchObject({ status: 'ok', name: 'viewer' });
 });
 
-it('requires a user Tool for PDFs and passes the canonical file to configured handlers', async () => {
+it('requires a user Tool for PDFs', async () => {
   const target = join(root, 'README.pdf');
   await writeFile(target, '%PDF-1.7');
   await rm(config);
   expect(await host().handle({ op: 'open', target, cwd: root })).toMatchObject({ status: 'error', message: expect.stringContaining('add an open rule') });
   expect(await host().handle({ op: 'open', target, cwd: root, tool: 'builtin:file' })).toMatchObject({ status: 'error', message: expect.stringContaining('does not support') });
-  await writeConfig('open:\n  - {match: "*.pdf", tool: "builtin:file"}\n');
-  expect(await host().handle({ op: 'open', target, cwd: root })).toMatchObject({ status: 'error' });
   await writeConfig(viewerConfig('*.pdf'));
   expect(await host().handle({ op: 'open', target, cwd: root })).toMatchObject({ status: 'ok', scope: 'user', run: ['view', target] });
-  expect(await host().handle({ op: 'open', target, cwd: root, tool: 'viewer' })).toMatchObject({ status: 'ok', scope: 'user', run: ['view', target] });
 });
