@@ -106,12 +106,14 @@ const LOOPBACK = "['\"](?:127\\.0\\.0\\.1|localhost)['\"]";
 // branch that can rot alone, which is how `WebSocket\.Relay` sat here matching
 // nothing while the `WebSocketServer` branch beside it kept the lint green.
 const WS_NEW = '\\bnew\\s+WebSocket\\.?Server\\(\\s*\\{[^}]*?';
-// Keys of one options object, allowing one level of nested object between the
-// opening brace and the key being looked for. `[^}]*?` stops at the first `}`,
-// so a form that uses it only matches while its key precedes every nested
-// object — fine for a call's flat options, wrong for a `vite.config.ts` `server`
-// block, where a nested key above `host` is the common shape.
-const ONE_NESTED = '(?:[^{}]|\\{[^{}]*\\})*?';
+// Keys of one options object, allowing nested objects up to two levels deep
+// between the opening brace and the key being looked for. `[^}]*?` stops at the
+// first `}`, so a form that uses it only matches while its key precedes every
+// nested object — fine for a call's flat options, wrong for a `vite.config.ts`
+// `server` block, where a nested key above `host` is the common shape. Two
+// levels is as deep as a `server` key goes; deeper is the regex ceiling this
+// file's header already disclaims.
+const NESTED_KEYS = '(?:[^{}]|\\{(?:[^{}]|\\{[^{}]*\\})*\\})*?';
 
 /**
  * Every bind form `LISTEN_RE` looks for, one entry per alternative — the
@@ -130,10 +132,11 @@ const BIND_FORMS = [
   // server: { host } })` then an argument-less `listen()`, so neither `.listen`
   // form can see it. Matched on the `server` block rather than on `createServer`
   // because the same block is what a `vite.config.ts` — or Vitest, or
-  // Storybook's builder — passes to the same server. `ONE_NESTED`, not `[^}]*?`,
-  // because `fs`, `hmr`, `proxy`, `headers` and `watch` are ordinary `server`
-  // keys and any of them written above `host` would otherwise end the scan.
-  { label: 'vite, server.host', re: `\\bserver\\s*:\\s*\\{${ONE_NESTED}host\\s*:\\s*${LOOPBACK}` },
+  // Storybook's builder — passes to the same server. `NESTED_KEYS`, not
+  // `[^}]*?`, because `fs`, `hmr`, `headers` and `watch` (one level) and
+  // `proxy` (two: a target object per route) are ordinary `server` keys, and
+  // any of them written above `host` would otherwise end the scan.
+  { label: 'vite, server.host', re: `\\bserver\\s*:\\s*\\{${NESTED_KEYS}host\\s*:\\s*${LOOPBACK}` },
 ];
 
 const LISTEN_RE = new RegExp(BIND_FORMS.map((form) => form.re).join('|'), 'gs');

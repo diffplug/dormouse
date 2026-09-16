@@ -66,6 +66,9 @@ const FIXTURES = [
   // A nested `server` key above `host` — the shape a real `vite.config.ts` has
   // and the one a first-brace-terminated scan misses.
   ['vite, server.host', "\nexport const __selftest = { server: { fs: { allow: ['.'] }, host: '127.0.0.1' } };\n"],
+  // `proxy` nests a target object per route — two levels, and the deepest shape
+  // this form reaches.
+  ['vite, server.host', "\nexport const __selftest = { server: { proxy: { '/api': { target: 'http://up' } }, host: '127.0.0.1' } };\n"],
 ];
 
 const selftest = makeSelftest('loopback-lint.mjs', '.loopback-selftest.bak');
