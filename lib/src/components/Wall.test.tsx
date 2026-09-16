@@ -1876,6 +1876,60 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it.each([true, false])('accepts a newly completed keyed Tool restart without mistaking old or unrelated completions (%s)', async completesDuringWrite => {
+    setToolsEnabled(true);
+    const id = 'short-tool';
+    const command = 'pnpm storybook';
+    const controller = new AbortController();
+    const typed: string[] = [];
+    Object.assign(fake, { toolControl: vi.fn(async () => okToolLookup(['/repo'])) });
+    const finish = (line: string) => {
+      reportRunning(id, line);
+      terminalRegistry.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }, { type: 'promptStart' }]);
+    };
+    try {
+      await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialDoors={[{
+        id, title: 'storybook', component: 'tool', tabComponent: 'tool',
+        params: { surfaceType: 'tool', command, cwd: '/repo', toolName: 'storybook', toolKey: ['storybook', '/repo'], toolRender: 'iframe', toolPort: 'announced' },
+      }]} />));
+      await flush();
+      act(() => {
+        fake.spawnPty(id);
+        terminalRegistry.seedTerminalManualCwd(id, '/repo');
+        finish(command);
+      });
+      const oldRun = terminalRegistry.getTerminalPaneState(id).lastCommand!.id;
+      fake.setInputHandler(id, data => {
+        typed.push(data);
+        if (completesDuringWrite && data === `${command}\r`) finish(command);
+      });
+      const respond = vi.fn();
+      await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+        method: SURFACE_CONTROL_METHODS.tool, surfaceId: 'pane-a', params: { name: 'storybook', cwd: '/repo' }, signal: controller.signal, respond,
+      } })));
+      if (!completesDuringWrite) {
+        await waitUntil(() => typed.includes(`${command}\r`));
+        expect(terminalRegistry.getTerminalPaneState(id).lastCommand!.id).toBe(oldRun);
+        await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
+        expect(respond).not.toHaveBeenCalled();
+        act(() => finish('echo unrelated'));
+        await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
+        expect(respond).not.toHaveBeenCalled();
+        act(() => finish(command));
+      }
+      await waitUntil(() => respond.mock.calls.length > 0);
+      expect(respond).toHaveBeenCalledWith(expect.objectContaining({ ok: true, result: expect.objectContaining({ status: 'adopted', surfaceId: id }) }));
+      expect(typed).toEqual(['\x03', `${command}\r`]);
+      expect(terminalRegistry.getTerminalPaneState(id).currentCommand).toBeNull();
+      expect(terminalRegistry.getTerminalPaneState(id).lastCommand!.id).not.toBe(oldRun);
+    } finally {
+      await act(async () => { controller.abort(); await new Promise(resolve => setTimeout(resolve, 125)); });
+      fake.clearInputHandler(id);
+      act(() => terminalRegistry.removeTerminalPaneState(id));
+      setToolsEnabled(false);
+    }
+  });
+
   it('reports a reused minimized tool as visible after reattaching it', async () => {
     setToolsEnabled(true);
     const toolId = 'tool-door';
