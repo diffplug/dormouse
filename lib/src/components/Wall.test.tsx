@@ -74,14 +74,34 @@ afterEach(() => {
 
 const flush = (): Promise<void> => harness.flush();
 
-/** Poll until `ready()` — for the host's own 100ms state waits (a tool taking
- *  over a pane, a split waiting on OSC 633), which no event can flush. */
-async function settle(ready: () => boolean, timeoutMs = 2_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!ready() && Date.now() < deadline) {
-    await act(async () => { await new Promise((r) => setTimeout(r, 25)); });
-  }
-}
+/** Wait out the host's own 100ms state polls (a tool taking over a pane, a
+ *  split waiting on OSC 633), which no event can flush. Throws on timeout. */
+const waitUntil = (ready: () => boolean): Promise<void> => vi.waitFor(async () => {
+  await act(async () => { await new Promise((r) => setTimeout(r, 25)); });
+  expect(ready()).toBe(true);
+}, { timeout: 2_000, interval: 25 });
+
+/** The host's answer for an approved `storybook` tool. */
+const okToolLookup = (key: string[] | null) => ({
+  status: 'ok' as const,
+  projectRoot: '/repo',
+  path: '/repo/dormouse.yml',
+  name: 'storybook',
+  run: 'pnpm storybook',
+  render: 'iframe' as const,
+  port: 'announced' as const,
+  key,
+  warnings: [],
+});
+
+/** The integrated shell in `id` reports `line` as its running command. */
+const reportRunning = (id: string, line: string): void => terminalRegistry.applyTerminalSemanticEvents(id, [
+  { type: 'commandLine', commandLine: line },
+  { type: 'commandStart', source: 'osc633_boundaries' },
+]);
+
+/** The shell in `id` is back at its prompt. */
+const promptBack = (id: string): void => terminalRegistry.applyTerminalSemanticEvents(id, [{ type: 'promptStart' }]);
 
 async function flushFrame(): Promise<void> {
   await act(async () => { await new Promise((r) => requestAnimationFrame(() => r(undefined))); });
@@ -1575,17 +1595,7 @@ describe('Wall on the Lath engine', () => {
           upstreamUrl: null,
         };
       }
-      return {
-        status: 'ok' as const,
-        projectRoot: '/repo',
-        path: '/repo/dormouse.yml',
-        name: 'storybook',
-        run: 'pnpm storybook',
-        render: 'iframe' as const,
-        port: 'announced' as const,
-        key: null,
-        warnings: [],
-      };
+      return okToolLookup(null);
     });
     (fake as FakePtyAdapter & Pick<PlatformAdapter, 'toolControl'>).toolControl = toolControl;
 
@@ -1755,17 +1765,7 @@ describe('Wall on the Lath engine', () => {
       { type: 'commandLine', commandLine: 'pnpm storybook' },
       { type: 'commandStart' },
     ]);
-    (fake as FakePtyAdapter & Pick<PlatformAdapter, 'toolControl'>).toolControl = vi.fn(async () => ({
-      status: 'ok' as const,
-      projectRoot: '/repo',
-      path: '/repo/dormouse.yml',
-      name: 'storybook',
-      run: 'pnpm storybook',
-      render: 'iframe' as const,
-      port: 'announced' as const,
-      key: ['/repo'],
-      warnings: [],
-    }));
+    (fake as FakePtyAdapter & Pick<PlatformAdapter, 'toolControl'>).toolControl = vi.fn(async () => okToolLookup(['/repo']));
 
     try {
       await act(async () => {
@@ -1834,22 +1834,19 @@ describe('Wall on the Lath engine', () => {
       act(() => { fake.spawnPty('pane-a'); addPlainNote('pane-a', 'Preserve me'); });
       fake.setInputHandler('pane-a', data => typed.push(data));
       terminalRegistry.seedTerminalManualCwd('pane-a', '/repo');
-      terminalRegistry.applyTerminalSemanticEvents('pane-a', [
-        { type: 'commandLine', commandLine: 'dor tool -- pnpm dev' },
-        { type: 'commandStart', source: 'osc633_boundaries' },
-      ]);
+      reportRunning('pane-a', 'dor tool -- pnpm dev');
       const respond = vi.fn();
       await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
         method: SURFACE_CONTROL_METHODS.tool, surfaceId: 'pane-a',
         params: { command: ['pnpm', 'dev'], cwd: '/repo' }, signal: controller.signal, respond,
       } })));
-      await settle(() => respond.mock.calls.length > 0);
+      await waitUntil(() => respond.mock.calls.length > 0);
       expect(respond).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status: 'takeover' }) }));
       if (change === 'cancelled') controller.abort();
       if (change === 'helper opened') vi.spyOn(helpers, 'getHelper').mockImplementation(id => id === 'pane-a' ? { id: 'helper-a', parentId: 'pane-a', command: '', status: 'off' } : undefined);
       if (change === 'cwd changed') terminalRegistry.applyTerminalSemanticEvents('pane-a', [{ type: 'cwd', cwd: terminalRegistry.cwdFromOsc633('/elsewhere')! }]);
       if (change === 'closing') releaseClosing = beginClosing(['pane-a']);
-      act(() => terminalRegistry.applyTerminalSemanticEvents('pane-a', [{ type: 'promptStart' }]));
+      act(() => promptBack('pane-a'));
       await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
       expect(typed).toEqual([]);
       expect(leafCount()).toBe(1);
@@ -1867,17 +1864,7 @@ describe('Wall on the Lath engine', () => {
   it('takes over the calling pane when `dor tool` is typed alone at a prompt', async () => {
     setToolsEnabled(true);
     const typed: string[] = [];
-    (fake as FakePtyAdapter & Pick<PlatformAdapter, 'toolControl'>).toolControl = vi.fn(async () => ({
-      status: 'ok' as const,
-      projectRoot: '/repo',
-      path: '/repo/dormouse.yml',
-      name: 'storybook',
-      run: 'pnpm storybook',
-      render: 'iframe' as const,
-      port: 'announced' as const,
-      key: ['/repo'],
-      warnings: [],
-    }));
+    (fake as FakePtyAdapter & Pick<PlatformAdapter, 'toolControl'>).toolControl = vi.fn(async () => okToolLookup(['/repo']));
 
     try {
       await act(async () => {
@@ -1887,10 +1874,7 @@ describe('Wall on the Lath engine', () => {
       act(() => { fake.spawnPty('pane-a'); addPlainNote('pane-a', 'Keep my takeover notes'); });
       fake.setInputHandler('pane-a', (data) => typed.push(data));
       terminalRegistry.seedTerminalManualCwd('pane-a', '/repo');
-      terminalRegistry.applyTerminalSemanticEvents('pane-a', [
-        { type: 'commandLine', commandLine: 'dor tool storybook' },
-        { type: 'commandStart', source: 'osc633_boundaries' },
-      ]);
+      reportRunning('pane-a', 'dor tool storybook');
 
       let response: { ok: boolean; result?: { status: string; surfaceId: string; minimized: boolean } } | undefined;
       await act(async () => {
@@ -1915,10 +1899,8 @@ describe('Wall on the Lath engine', () => {
       expect(typed).toEqual([]);
 
       // `dor` exits; the shell reports its prompt back and the command lands.
-      act(() => {
-        terminalRegistry.applyTerminalSemanticEvents('pane-a', [{ type: 'promptStart' }]);
-      });
-      await settle(() => typed.length > 0);
+      act(() => promptBack('pane-a'));
+      await waitUntil(() => typed.length > 0);
       expect(typed).toEqual(['pnpm storybook\r']);
       expect(leafCount()).toBe(1);
       expect(getNotes('pane-a').some(note => note.content.kind === 'plain' && note.content.text === 'Keep my takeover notes')).toBe(true);
@@ -1926,26 +1908,14 @@ describe('Wall on the Lath engine', () => {
       // The tool goes live, which releases the spawn lock, and then exits. The
       // host learns that from its own 100ms state poll, so the live state has to
       // outlast one tick.
-      act(() => {
-        terminalRegistry.applyTerminalSemanticEvents('pane-a', [
-          { type: 'commandLine', commandLine: 'pnpm storybook' },
-          { type: 'commandStart', source: 'osc633_boundaries' },
-        ]);
-      });
+      act(() => reportRunning('pane-a', 'pnpm storybook'));
       await act(async () => { await new Promise((r) => setTimeout(r, 150)); });
-      act(() => {
-        terminalRegistry.applyTerminalSemanticEvents('pane-a', [{ type: 'promptStart' }]);
-      });
+      act(() => promptBack('pane-a'));
 
       // Retyped in the tool's own pane: a key match on the caller re-runs there
       // through the same handshake, never an interrupt — Ctrl+C would kill the
       // `dor` still waiting for the answer.
-      act(() => {
-        terminalRegistry.applyTerminalSemanticEvents('pane-a', [
-          { type: 'commandLine', commandLine: 'dor tool storybook' },
-          { type: 'commandStart', source: 'osc633_boundaries' },
-        ]);
-      });
+      act(() => reportRunning('pane-a', 'dor tool storybook'));
       let rerun: { ok: boolean; result?: { status: string; surfaceId: string } } | undefined;
       await act(async () => {
         window.dispatchEvent(new CustomEvent('dormouse:control-request', {
@@ -1957,12 +1927,10 @@ describe('Wall on the Lath engine', () => {
           },
         }));
       });
-      await settle(() => rerun !== undefined);
+      await waitUntil(() => rerun !== undefined);
       expect(rerun).toMatchObject({ ok: true, result: { status: 'adopted', surfaceId: 'pane-a' } });
-      act(() => {
-        terminalRegistry.applyTerminalSemanticEvents('pane-a', [{ type: 'promptStart' }]);
-      });
-      await settle(() => typed.length > 1);
+      act(() => promptBack('pane-a'));
+      await waitUntil(() => typed.length > 1);
       expect(typed).toEqual(['pnpm storybook\r', 'pnpm storybook\r']);
       expect(leafCount()).toBe(1);
 
@@ -1980,12 +1948,7 @@ describe('Wall on the Lath engine', () => {
 
       // A line the host cannot type behind says so, rather than reporting a tool
       // that is not running as `existing` back into the pane it is sitting in.
-      act(() => {
-        terminalRegistry.applyTerminalSemanticEvents('pane-a', [
-          { type: 'commandLine', commandLine: 'dor tool storybook && open http://localhost:6006' },
-          { type: 'commandStart', source: 'osc633_boundaries' },
-        ]);
-      });
+      act(() => reportRunning('pane-a', 'dor tool storybook && open http://localhost:6006'));
       let compound: { ok: boolean; error?: string } | undefined;
       await act(async () => {
         window.dispatchEvent(new CustomEvent('dormouse:control-request', {
@@ -1997,13 +1960,11 @@ describe('Wall on the Lath engine', () => {
           },
         }));
       });
-      await settle(() => compound !== undefined);
+      await waitUntil(() => compound !== undefined);
       expect(compound?.ok).toBe(false);
       expect(compound?.error).toContain("is this tool's own pane");
       expect(typed).toHaveLength(2);
-      act(() => {
-        terminalRegistry.applyTerminalSemanticEvents('pane-a', [{ type: 'promptStart' }]);
-      });
+      act(() => promptBack('pane-a'));
 
       // Same Surface throughout: the leaf changed kind without changing id, so
       // the session persists as one.
@@ -2028,17 +1989,7 @@ describe('Wall on the Lath engine', () => {
     if (reason === 'helper') vi.spyOn(helpers, 'getHelper').mockImplementation(id => id === 'pane-a' ? { id: 'helper-a', parentId: 'pane-a', command: '', status: 'off' } : undefined);
     setToolsEnabled(true);
     const typed: string[] = [];
-    (fake as FakePtyAdapter & Pick<PlatformAdapter, 'toolControl'>).toolControl = vi.fn(async () => ({
-      status: 'ok' as const,
-      projectRoot: '/repo',
-      path: '/repo/dormouse.yml',
-      name: 'storybook',
-      run: 'pnpm storybook',
-      render: 'iframe' as const,
-      port: 'announced' as const,
-      key: null,
-      warnings: [],
-    }));
+    (fake as FakePtyAdapter & Pick<PlatformAdapter, 'toolControl'>).toolControl = vi.fn(async () => okToolLookup(null));
     let splitId: string | undefined;
 
     try {
@@ -2050,10 +2001,7 @@ describe('Wall on the Lath engine', () => {
       fake.setInputHandler('pane-a', (data) => typed.push(data));
       terminalRegistry.seedTerminalManualCwd('pane-a', '/repo');
       // An agent's `dor tool` runs under the agent, so the pane reports that line.
-      terminalRegistry.applyTerminalSemanticEvents('pane-a', [
-        { type: 'commandLine', commandLine: reason === 'agent' ? 'claude' : 'dor tool storybook' },
-        { type: 'commandStart', source: 'osc633_boundaries' },
-      ]);
+      reportRunning('pane-a', reason === 'agent' ? 'claude' : 'dor tool storybook');
 
       let response: { ok: boolean; result?: { status: string; surfaceId: string } } | undefined;
       await act(async () => {
@@ -2073,10 +2021,8 @@ describe('Wall on the Lath engine', () => {
       splitId = Array.from(container.querySelectorAll('[data-lath-leaf]'))
         .map((leaf) => leaf.getAttribute('data-lath-leaf')!)
         .find((id) => id !== 'pane-a');
-      act(() => {
-        terminalRegistry.applyTerminalSemanticEvents(splitId!, [{ type: 'promptStart' }]);
-      });
-      await settle(() => response !== undefined);
+      act(() => promptBack(splitId!));
+      await waitUntil(() => response !== undefined);
 
       expect(response?.result).toMatchObject({ status: 'created', surfaceId: splitId });
       expect(typed).toEqual([]);

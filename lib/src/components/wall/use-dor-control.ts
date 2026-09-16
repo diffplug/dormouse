@@ -1,8 +1,3 @@
-import { getHelper } from '../../lib/helper-terminal';
-import { isSurfaceClosing } from '../../lib/notepad/notepad-store';
-import { clearToolAnnounce } from '../../lib/tool-announce-store';
-import { toolTakesOverCaller, toolRerunsInCaller, type ToolTakeoverGate } from './tool-takeover';
-import { isWorkspaceTransferPending } from '../../lib/window-session-aggregator';
 import { useCallback, type MutableRefObject } from 'react';
 import { sessionForKey } from 'dor-lib-common/agent-browser';
 import { getPlatform, PLATFORM_STRING } from '../../lib/platform';
@@ -15,6 +10,7 @@ import type {
   SplitDirection as DorSplitDirection,
   ResolvedSplitDirection as DorResolvedSplitDirection,
   ParseResult,
+  ToolSurfaceResponse,
 } from 'dor/commands/types';
 import { hasBrowser, hasTerminal } from 'dor/commands/types';
 import { MAX_AWAIT_TIMEOUT_MS } from '../../lib/alert-manager';
@@ -30,13 +26,24 @@ import {
 } from '../../lib/terminal-registry';
 import { cwdPathsEqual, surfaceRunsCommand, type TerminalPaneState } from '../../lib/terminal-state';
 import { isAllowedAgentBrowserBinary } from '../../lib/agent-browser-binary';
+import { getHelper } from '../../lib/helper-terminal';
+import { isSurfaceClosing } from '../../lib/notepad/notepad-store';
+import { clearToolAnnounce } from '../../lib/tool-announce-store';
+import { isWorkspaceTransferPending } from '../../lib/window-session-aggregator';
 import { stringParam } from './dor-control-shared';
+import {
+  callerStillPlaceable,
+  callerStillRunnable,
+  toolRerunsInCaller,
+  toolTakesOverCaller,
+  type ToolTakeoverGate,
+} from './tool-takeover';
 import { attachSurfacePorts } from './surface-ports';
 import { browserSurfaceUrl, hostPathDisplay } from './browser-url';
 import {
-  surfaceKindFromParams,
   agentBrowserSessionFromParams,
   namespacedToolKey,
+  surfaceKindFromParams,
   toolKeysEqual,
   toolPendingFromParams,
   type ToolPending,
@@ -267,9 +274,9 @@ function readSurfaceText(surfaceId: string, lines: number | undefined, scrollbac
 // re-run it. Rather than guess at timings, poll the integration-derived
 // terminal state: a command is gone once `currentCommand` clears (commandFinish
 // → prompt) and back once the surface reports the same command live again.
-const RESTART_POLL_INTERVAL_MS = 100;
+const TERMINAL_STATE_POLL_MS = 100;
 const PROMPT_RETURN_TIMEOUT_MS = 15_000;
-const RESTART_START_TIMEOUT_MS = 15_000;
+const COMMAND_START_TIMEOUT_MS = 15_000;
 
 /**
  * Serializes `surface.tool` requests. A plain promise chain rather than a real
@@ -316,10 +323,10 @@ function waitForTerminalState(
     const timer = setInterval(() => {
       if (predicate(getTerminalPaneState(id))) {
         finish('ready');
-      } else if ((elapsed += RESTART_POLL_INTERVAL_MS) >= timeoutMs) {
+      } else if ((elapsed += TERMINAL_STATE_POLL_MS) >= timeoutMs) {
         finish('timeout');
       }
-    }, RESTART_POLL_INTERVAL_MS);
+    }, TERMINAL_STATE_POLL_MS);
     signal?.addEventListener('abort', cancel, { once: true });
   });
 }
@@ -369,7 +376,7 @@ async function restartSurfaceInPlace(id: string, command: string, cwd: string, s
   const restarted = await waitForTerminalState(
     id,
     (state) => surfaceRunsCommand(state, command, cwd),
-    RESTART_START_TIMEOUT_MS,
+    COMMAND_START_TIMEOUT_MS,
     signal,
   );
   if (signal?.aborted || restarted === 'aborted') return RESTART_CANCELLED;
@@ -395,7 +402,9 @@ async function runToolInCallerPane(
      *  is only re-running it. */
     become?: { title: string; params: Record<string, unknown> };
   },
-  isAvailable: () => boolean,
+  /** Re-read after the wait, not only before it: the Workspace can close or
+   *  transfer and the pane can be killed, minimized, or moved while `dor` exits. */
+  stillEligible: () => boolean,
   signal?: AbortSignal,
 ): Promise<void> {
   const backAtPrompt = await waitForTerminalState(
@@ -405,12 +414,7 @@ async function runToolInCallerPane(
     signal,
   );
   const meta = lath.getMeta(id);
-  // Re-checked after the wait, not only before it: the pane can be killed or
-  // minimized while `dor` exits, and a Door keeps its meta — `store.has` is
-  // membership of the tree, so it answers both.
-  if (!isAvailable() || signal?.aborted || backAtPrompt !== 'ready' || !meta || !lath.store.has(id) || lath.isDying(id) || isSurfaceClosing(id)) return;
-  if (!cwdPathsEqual(getTerminalPaneState(id).cwd?.path, tool.cwd)) return;
-  if (tool.become && (surfaceKindFromParams(meta.params) !== 'terminal' || getHelper(id))) return;
+  if (signal?.aborted || backAtPrompt !== 'ready' || !meta || !stillEligible()) return;
   // Whatever this Session announced under its previous command is not this run's:
   // a stale OSC 367 would hand the tool that port, or re-key it.
   clearToolAnnounce(id);
@@ -431,7 +435,7 @@ async function runToolInCallerPane(
     id,
     (state) => surfaceRunsCommand(state, tool.command, tool.cwd)
       || (state.lastCommand !== null && state.lastCommand.id !== previousRun),
-    RESTART_START_TIMEOUT_MS,
+    COMMAND_START_TIMEOUT_MS,
     signal,
   );
 }
@@ -836,18 +840,14 @@ export function useDorControl({
       const releaseToolLock = await acquireToolSpawnLock();
       try {
         // Lookup and the launch lock can outlive the Workspace's close gesture.
+        const scope = workspaceScope();
+        const workspaceGone = () => scope && isWorkspaceTransferPending(scope) ? 'this workspace is transferring'
+          : isClosingWorkspace() ? 'this workspace is closing' : null;
         const unavailable = () => {
-          const scope = workspaceScope();
-          const error = detail.signal?.aborted ? 'tool launch cancelled'
-            : scope && isWorkspaceTransferPending(scope) ? 'this workspace is transferring'
-            : isClosingWorkspace() ? 'this workspace is closing' : null;
+          const error = detail.signal?.aborted ? 'tool launch cancelled' : workspaceGone();
           if (error) detail.respond({ ok: false, error });
           return error !== null;
         };
-        const scope = workspaceScope();
-        const canRunInCaller = () => !isClosingWorkspace()
-          && (!scope || !isWorkspaceTransferPending(scope));
-        const callerVisible = () => !scope || getActiveWorkspaceId() === scope;
         if (unavailable()) return;
         // Off by default. With the flag off nothing is ever designated a tool,
         // so the serving trigger has nothing to watch and no pane can transform.
@@ -873,6 +873,39 @@ export function useDorControl({
         // rather than tie-breaking; a declared tool opts in with one line.
         let port: 'announced' | 'auto' = 'auto';
         const toolShell = getDefaultShellOpts()?.shell;
+        // `key` and `warnings` are read when called, after the lookup fills them.
+        const respondTool = (
+          status: ToolSurfaceResponse['status'],
+          surface: { surfaceId: string; surfaceRef?: string; command: string; cwd: string; minimized: boolean },
+        ) => detail.respond({
+          ok: true,
+          result: {
+            status,
+            surfaceId: surface.surfaceId,
+            surfaceRef: surface.surfaceRef ?? surfaceRefForId(surface.surfaceId),
+            command: surface.command,
+            cwd: surface.cwd,
+            minimized: surface.minimized,
+            key,
+            ...(warnings.length > 0 ? { warnings } : {}),
+          },
+        });
+        // What both placements read of the pane `dor` ran in, before the prompt
+        // wait and again after it (docs/specs/dor-tool.md -> Take-over).
+        const readCallerGate = (id: string, toolCwd: string): ToolTakeoverGate => {
+          const state = getTerminalPaneState(id);
+          return {
+            explicitSurface: stringParam(params.surface) !== undefined,
+            minimized: booleanParam(params.minimized),
+            workspaceActive: !scope || getActiveWorkspaceId() === scope,
+            visible: nav.hasPane(id) && !lath.isDying(id) && !isSurfaceClosing(id),
+            kind: surfaceKindFromParams(lath.getMeta(id)?.params),
+            oscDriven: isPaneOscDriven(id),
+            rawCommandLine: state.currentCommand?.rawCommandLine ?? null,
+            cwdMatches: cwdPathsEqual(state.cwd?.path, toolCwd),
+            helperPresent: !!getHelper(id),
+          };
+        };
 
         if (toolName) {
           // The registry, the closed substitution set, and the trust gate all
@@ -936,17 +969,11 @@ export function useDorControl({
               const already = findSurfaceByParams(matchesPending);
               if (already) {
                 revealSurface(already.id);
-                detail.respond({
-                  ok: true,
-                  result: {
-                    status: 'pending',
-                    surfaceId: already.id,
-                    surfaceRef: surfaceRefForId(already.id),
-                    command: lookup.run,
-                    cwd,
-                    minimized: findSurfaceByParams(matchesPending)?.minimized ?? false,
-                    key: null,
-                  },
+                respondTool('pending', {
+                  surfaceId: already.id,
+                  command: lookup.run,
+                  cwd,
+                  minimized: findSurfaceByParams(matchesPending)?.minimized ?? false,
                 });
                 return;
               }
@@ -989,17 +1016,12 @@ export function useDorControl({
               // when `minimized` is false. Pending approval must stay visible,
               // so immediately reattach that exceptional creation path.
               if (pending.value.minimized) revealSurface(pending.value.id);
-              detail.respond({
-                ok: true,
-                result: {
-                  status: 'pending',
-                  surfaceId: pending.value.id,
-                  surfaceRef: pending.value.ref,
-                  command: lookup.run,
-                  cwd,
-                  minimized: findSurfaceByParams(matchesPending)?.minimized ?? false,
-                  key: null,
-                },
+              respondTool('pending', {
+                surfaceId: pending.value.id,
+                surfaceRef: pending.value.ref,
+                command: lookup.run,
+                cwd,
+                minimized: findSurfaceByParams(matchesPending)?.minimized ?? false,
               });
               return;
             }
@@ -1026,22 +1048,8 @@ export function useDorControl({
           ...(toolName ? { toolName } : {}),
         };
 
-        // What both placements below read of the pane `dor` ran in
-        // (docs/specs/dor-tool.md -> Take-over).
         const callerId = detail.surfaceId;
-        const callerGate = callerId === undefined ? null : ((): ToolTakeoverGate => {
-          const state = getTerminalPaneState(callerId);
-          return {
-            explicitSurface: stringParam(params.surface) !== undefined,
-            minimized: booleanParam(params.minimized),
-            visible: callerVisible() && nav.hasPane(callerId) && !lath.isDying(callerId) && !isSurfaceClosing(callerId),
-            kind: surfaceKindFromParams(lath.getMeta(callerId)?.params),
-            oscDriven: isPaneOscDriven(callerId),
-            rawCommandLine: state.currentCommand?.rawCommandLine ?? null,
-            cwdMatches: cwdPathsEqual(state.cwd?.path, cwd),
-            helperPresent: !!getHelper(callerId),
-          };
-        })();
+        const callerGate = callerId === undefined ? null : readCallerGate(callerId, cwd);
 
         // Spawn-time dedupe, and only for a tool that was given an identity
         // (docs/specs/dor-tool.md -> Identity and dedupe).
@@ -1051,6 +1059,12 @@ export function useDorControl({
           const match = findSurfaceByParams(matchesToolKey);
           if (match) {
             const matchedCommand = toolCommandFromParams(lath.getMeta(match.id)?.params) || command;
+            const matchState = getTerminalPaneState(match.id);
+            // The tool's own cwd, not the caller's: `surfaceRunsCommand`
+            // compares against the matched Surface's `cwdAtStart`, so waiting
+            // on the caller's would never resolve when `dor tool` is run from
+            // a subdirectory — the command restarts and we report failure.
+            const matchedCwd = matchState.cwd?.path ?? cwd;
             // A match that is the calling pane is the tool's own Surface — the
             // place take-over makes normal to retype in. Its command is live
             // only when the tool itself spawned this `dor`; otherwise `dor` is
@@ -1058,9 +1072,7 @@ export function useDorControl({
             // reads, and it re-runs in its own directory like any `adopted`
             // match. Through the handshake, never `restartSurfaceInPlace`,
             // whose Ctrl+C would kill the `dor` awaiting this answer.
-            const matchedCwd = getTerminalPaneState(match.id).cwd?.path ?? cwd;
-            if (match.id === callerId
-              && !surfaceRunsCommand(getTerminalPaneState(match.id), matchedCommand, matchedCwd)) {
+            if (match.id === callerId && !surfaceRunsCommand(matchState, matchedCommand, matchedCwd)) {
               if (!callerGate || !toolRerunsInCaller(callerGate)) {
                 // Nothing can be typed behind a line that is not this
                 // invocation alone, and there is no survivor to reveal — the
@@ -1073,32 +1085,21 @@ export function useDorControl({
                 return;
               }
               revealSurface(match.id);
-              detail.respond({
-                ok: true,
-                result: {
-                  status: 'adopted',
-                  surfaceId: match.id,
-                  surfaceRef: surfaceRefForId(match.id),
-                  command: matchedCommand,
-                  cwd: matchedCwd,
-                  minimized: false,
-                  key,
-                  ...(warnings.length > 0 ? { warnings } : {}),
-                },
-              });
-              await runToolInCallerPane(lath, match.id, { command: matchedCommand, cwd: matchedCwd }, canRunInCaller, detail.signal);
+              respondTool('adopted', { surfaceId: match.id, command: matchedCommand, cwd: matchedCwd, minimized: false });
+              await runToolInCallerPane(
+                lath,
+                match.id,
+                { command: matchedCommand, cwd: matchedCwd },
+                () => !workspaceGone() && callerStillRunnable(readCallerGate(match.id, matchedCwd)),
+                detail.signal,
+              );
               return;
             }
             // A dedicated Surface whose command exited is unambiguously free,
             // so re-run in place rather than splitting — where `dor ensure`,
             // aimed at arbitrary shells, would stop matching.
-            const idle = getTerminalPaneState(match.id).currentCommand === null;
+            const idle = matchState.currentCommand === null;
             if (idle) {
-              // `matchedCwd` above is the tool's own, not the caller's:
-              // `surfaceRunsCommand` compares against the matched Surface's
-              // `cwdAtStart`, so waiting on the caller's would never resolve
-              // when `dor tool` is run from a subdirectory — the command
-              // restarts and we report failure.
               const restarted = await restartSurfaceInPlace(match.id, matchedCommand, matchedCwd, detail.signal);
               if (!restarted.ok) {
                 detail.respond({
@@ -1113,18 +1114,11 @@ export function useDorControl({
             // the "appears to do nothing" the invariant is written against.
             revealSurface(match.id);
             const survivor = findSurfaceByParams(matchesToolKey);
-            detail.respond({
-              ok: true,
-              result: {
-                status: idle ? 'adopted' : 'existing',
-                surfaceId: match.id,
-                surfaceRef: surfaceRefForId(match.id),
-                command: matchedCommand,
-                cwd,
-                minimized: survivor?.minimized ?? false,
-                key,
-                ...(warnings.length > 0 ? { warnings } : {}),
-              },
+            respondTool(idle ? 'adopted' : 'existing', {
+              surfaceId: match.id,
+              command: matchedCommand,
+              cwd,
+              minimized: survivor?.minimized ?? false,
             });
             return;
           }
@@ -1137,26 +1131,16 @@ export function useDorControl({
         if (callerId && callerGate && toolTakesOverCaller(callerGate)) {
           // Answered before the tool starts, because answering is what frees
           // the shell to run it.
-          detail.respond({
-            ok: true,
-            result: {
-              status: 'takeover',
-              surfaceId: callerId,
-              surfaceRef: surfaceRefForId(callerId),
-              command,
-              cwd,
-              minimized: false,
-              key,
-              ...(warnings.length > 0 ? { warnings } : {}),
-            },
-          });
+          respondTool('takeover', { surfaceId: callerId, command, cwd, minimized: false });
           // Awaited inside the spawn lock: the key reaches the leaf's params in
           // there, and a queued invocation of it must find a running tool.
-          await runToolInCallerPane(lath, callerId, {
-            command,
-            cwd,
-            become: { title: toolName ?? command, params: toolParams },
-          }, () => canRunInCaller() && callerVisible(), detail.signal);
+          await runToolInCallerPane(
+            lath,
+            callerId,
+            { command, cwd, become: { title: toolName ?? command, params: toolParams } },
+            () => !workspaceGone() && callerStillPlaceable(readCallerGate(callerId, cwd)),
+            detail.signal,
+          );
           return;
         }
 
@@ -1196,18 +1180,12 @@ export function useDorControl({
           detail.respond({ ok: false, error: refused ?? (detail.signal?.aborted ? 'tool launch cancelled' : missingIntegrationError(toolShell)) });
           return;
         }
-        detail.respond({
-          ok: true,
-          result: {
-            status: 'created',
-            surfaceId: created.value.id,
-            surfaceRef: created.value.ref,
-            command,
-            cwd,
-            minimized: created.value.minimized,
-            key,
-            ...(warnings.length > 0 ? { warnings } : {}),
-          },
+        respondTool('created', {
+          surfaceId: created.value.id,
+          surfaceRef: created.value.ref,
+          command,
+          cwd,
+          minimized: created.value.minimized,
         });
         return;
 
