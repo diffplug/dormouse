@@ -739,10 +739,10 @@ export function registerSurfaceFocusHandle(id: string, handle: SurfaceFocusHandl
   };
 }
 
-export function focusSession(id: string, focused: boolean): void {
+export function focusSession(id: string, focused: boolean, target: 'surface' | 'terminal' = 'surface'): void {
   // Non-terminal surfaces (iframe) aren't in the xterm registry — route to
   // their focus handle so onClickPanel → enterTerminalMode focuses them too.
-  const handle = surfaceFocusHandles.get(id);
+  const handle = target === 'surface' ? surfaceFocusHandles.get(id) : undefined;
   if (handle) {
     if (focused) handle.focus();
     else handle.blur();
