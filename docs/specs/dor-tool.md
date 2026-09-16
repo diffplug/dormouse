@@ -174,11 +174,13 @@ Source of truth: `openCommand` in `dor/src/commands/open.ts`; `resolveOpenTool` 
 | Condition | Required state |
 | --- | --- |
 | Verb | `dor tool` or `dor open` |
-| Caller | Visible pane of the active Workspace; integrated plain terminal; not closing or dying |
+| Caller | Visible pane of the active Workspace; integrated plain terminal (not an existing Tool); not closing or dying |
 | Command line | OSC 633 reports the invocation alone; compound shell syntax rejects takeover |
 | Directory | Resolved Tool CWD equals the caller's reported CWD |
 | Placement | Neither `--surface` nor `--minimize` supplied |
 | Helper | No existing auxiliary helper; preserve it by splitting |
+
+**Must retain Tool designation after its command exits.** Takeover is one-shot per Surface: a later invocation from that prompt splits unless keyed reuse finds a match; the same keyed Tool reruns in place through the handshake below.
 
 **Must answer `takeover` before waiting for the calling shell's prompt**, then transform and type the command. The answer promises placement, not successful command startup.
 

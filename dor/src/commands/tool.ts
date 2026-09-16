@@ -113,7 +113,7 @@ A project dormouse.yml is repo-controlled and its entries execute, so it is iner
 
 Approving an upstream covers every worktree and clone of that repo. Approving a folder covers that checkout only, which is what you want for a branch you have not read.
 
-Where the tool lands: typed alone at a prompt in a visible, integrated plain terminal whose directory is the tool's, it takes over that pane — no split, same surface, same scrollback — and reports "takeover". Anything else — an agent's invocation, a compound line, a pane with a helper, --minimize, --surface, --cwd elsewhere — splits without taking focus and prints the new surface's handle. The handle prints before the command starts, since dor has to exit before its own shell is free to run it.
+Where the tool lands: typed alone at a prompt in a visible, integrated plain terminal whose directory is the tool's, it takes over that pane — no split, same surface, same scrollback — and reports "takeover". Anything else — an agent's invocation, a compound line, a pane with a helper, --minimize, --surface, --cwd elsewhere — splits without taking focus and prints the new surface's handle. The pane remains a Tool after its command exits: another invocation from that prompt splits unless it matches a keyed Tool; the same keyed Tool reruns in place. The handle prints before the command starts, since dor has to exit before its own shell is free to run it.
 
 --cwd sets the working directory used to find dormouse.yml and to run the command; it defaults to the directory dor was invoked from.
 

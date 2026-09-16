@@ -15,7 +15,7 @@ The ordered open list contains {match, tool} entries. Patterns without a slash m
 
 The selected Tool receives the canonical absolute filename as one argument. Configure prespawn_dedupe: [$TARGET] to reveal the same file on repeated opens within a Workspace. --fresh bypasses reuse.
 
-Placement follows dor tool: typed alone at a prompt in a visible, integrated plain terminal in the requested directory, opening takes over that pane, preserving its terminal and scrollback. Agent/script invocations, compound lines, a pane with a helper, --minimize, --surface, or --cwd elsewhere split without taking focus. A matching Tool is reused. The command prints the Surface handle; --json prints structured output.
+Placement follows dor tool: typed alone at a prompt in a visible, integrated plain terminal in the requested directory, opening takes over that pane, preserving its terminal and scrollback. Agent/script invocations, compound lines, a pane with a helper, --minimize, --surface, or --cwd elsewhere split without taking focus. The pane remains a Tool after its command exits: opening a different file from that prompt splits unless keyed reuse finds an existing Tool; the same keyed file reruns in place. A matching Tool elsewhere is reused. The command prints the Surface handle; --json prints structured output.
 
 FLAGS
      [--json]       Print JSON output.

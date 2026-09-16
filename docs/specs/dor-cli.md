@@ -63,6 +63,8 @@ and Tauri's `resource_dir()` hands out a verbatim prefix (rationale).
 misparses LF-only batch files (rationale), and staging copies bytes verbatim.
 `.gitattributes` pins it (`*.cmd text eol=crlf`; the POSIX launcher `eol=lf`).
 
+**Must keep browser-shared CLI modules free of Node runtime dependencies**, even though the CLI package uses Node types. `dor/test/browser-shared.test.mjs` bundles their dependency graphs for the browser. (rationale)
+
 ### Git Bash PATH survival
 
 **On Windows the `PATH` prepend must survive Git Bash / MSYS login:** the PTY
