@@ -11,6 +11,8 @@
  *
  * The pane holds no PTY while this is showing. Nothing from the repo has run.
  */
+import { useRef } from 'react';
+import { usePaneChrome } from './use-pane-chrome';
 import { PANE_MESSAGE_CLASS, modalActionButton } from '../design';
 import { toolPendingFromParams } from './browser-surface';
 import type { PaneProps } from './pane-props';
@@ -18,11 +20,13 @@ import type { PaneProps } from './pane-props';
 export function ToolApproval({ params, id, onResolve }: PaneProps & {
   onResolve: (id: string, choice: 'upstream' | 'folder' | 'decline') => void;
 }) {
+  const elRef = useRef<HTMLDivElement>(null);
+  usePaneChrome(id, elRef);
   const pending = toolPendingFromParams(params);
   if (!pending) return null;
 
   return (
-    <div className={`${PANE_MESSAGE_CLASS} flex-col gap-4`}>
+    <div ref={elRef} className={`${PANE_MESSAGE_CLASS} flex-col gap-4`}>
       <div className="flex flex-col gap-1 font-mono text-muted">
         <div className="text-foreground">dor tool {pending.name}</div>
         <div>will launch</div>

@@ -1669,6 +1669,7 @@ describe('Wall on the Lath engine', () => {
         expect(toolControl.mock.calls.filter(([request]) => request.op === 'lookup')).toHaveLength(1);
         expect(container.querySelector(`[data-lath-leaf="${toolId}"]`)).not.toBeNull();
         expect(pendingShellOpts.has(toolId)).toBe(false);
+        expect(container.textContent).toContain('grant could not be saved');
         return;
       }
 
