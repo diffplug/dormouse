@@ -345,7 +345,10 @@ const ENSURE_CANCELLED = 'ensure was cancelled';
  * for it to go live. Drives the live PTY directly, so it works for minimized
  * doors too (their PTY keeps running). Returns a message on failure.
  */
-async function restartSurfaceInPlace(id: string, command: string, cwd: string, signal?: AbortSignal): Promise<ParseResult<undefined>> {
+async function restartSurfaceInPlace(
+  id: string, command: string, cwd: string, signal?: AbortSignal,
+  options: { acceptCompletedRun?: boolean } = {},
+): Promise<ParseResult<undefined>> {
   // Checked before the interrupt is written, not just before each wait.
   if (signal?.aborted) return RESTART_CANCELLED;
   // A match is by construction OSC-driven (surfaceRunsCommand only matches a
@@ -366,10 +369,16 @@ async function restartSurfaceInPlace(id: string, command: string, cwd: string, s
   // otherwise slip past and type the command.
   if (signal?.aborted || interrupted === 'aborted') return RESTART_CANCELLED;
   if (interrupted === 'timeout') return { ok: false, message: 'did not return to a prompt after interrupt' };
+  const previousRun = getTerminalPaneState(id).lastCommand?.id ?? null;
   platform.writePty(id, `${command}\r`);
   const restarted = await waitForTerminalState(
     id,
-    (state) => surfaceRunsCommand(state, command, cwd),
+    (state) => surfaceRunsCommand(state, command, cwd)
+      // A short-lived Tool can finish before the first state sample. Require a
+      // new completion of this command, not an old run or unrelated user work.
+      || (options.acceptCompletedRun === true && state.lastCommand !== null
+        && state.lastCommand.id !== previousRun
+        && surfaceRunsCommand({ ...state, currentCommand: state.lastCommand }, command, cwd)),
     COMMAND_START_TIMEOUT_MS,
     signal,
   );
@@ -1132,7 +1141,7 @@ export function useDorControl({
             // aimed at arbitrary shells, would stop matching.
             const idle = matchState.currentCommand === null;
             if (idle) {
-              const restarted = await restartSurfaceInPlace(match.id, matchedCommand, matchedCwd, detail.signal);
+              const restarted = await restartSurfaceInPlace(match.id, matchedCommand, matchedCwd, detail.signal, { acceptCompletedRun: true });
               if (!restarted.ok) {
                 detail.respond({
                   ok: false,
