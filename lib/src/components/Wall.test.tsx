@@ -2074,6 +2074,67 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it('holds the takeover queue through unrelated completions until the typed Tool completes', async () => {
+    setToolsEnabled(true);
+    const id = 'pane-a';
+    const command = 'pnpm storybook';
+    const controller = new AbortController();
+    const typed: string[] = [];
+    const toolControl = vi.fn(async (request: { name?: string }) => request.name === 'probe'
+      ? { status: 'error', message: 'probe reached lookup' }
+      : okToolLookup(['/repo']));
+    Object.assign(fake, { toolControl });
+    const finish = (line: string, cwd = '/repo') => {
+      terminalRegistry.applyTerminalSemanticEvents(id, [{ type: 'cwd', cwd: terminalRegistry.cwdFromOsc633(cwd)! }]);
+      reportRunning(id, line);
+      terminalRegistry.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }, { type: 'promptStart' }]);
+    };
+    try {
+      await act(async () => root.render(<Wall initialPaneIds={[id]} />));
+      await flush();
+      act(() => {
+        fake.spawnPty(id);
+        terminalRegistry.seedTerminalManualCwd(id, '/repo');
+        reportRunning(id, 'dor tool storybook');
+      });
+      fake.setInputHandler(id, data => typed.push(data));
+      const first = vi.fn();
+      await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+        method: SURFACE_CONTROL_METHODS.tool, surfaceId: id, params: { name: 'storybook', cwd: '/repo' }, signal: controller.signal, respond: first,
+      } })));
+      await waitUntil(() => first.mock.calls.length > 0);
+      expect(first).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status: 'takeover' }) }));
+      act(() => terminalRegistry.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }, { type: 'promptStart' }]));
+      await waitUntil(() => typed.length > 0);
+      const previousRun = terminalRegistry.getTerminalPaneState(id).lastCommand!.id;
+      const probe = vi.fn();
+      await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+        method: SURFACE_CONTROL_METHODS.tool, surfaceId: id, params: { name: 'probe', cwd: '/repo' }, signal: controller.signal, respond: probe,
+      } })));
+      // Neither another command nor this command in another directory is the
+      // Tool launch. Each completion remains observable for a full poll tick.
+      for (const [line, cwd] of [['echo unrelated', '/repo'], [command, '/elsewhere']] as const) {
+        act(() => finish(line, cwd));
+        expect(terminalRegistry.getTerminalPaneState(id).lastCommand!.id).not.toBe(previousRun);
+        await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
+        expect(toolControl).toHaveBeenCalledTimes(1);
+        expect(probe).not.toHaveBeenCalled();
+      }
+      act(() => finish(command));
+      expect(terminalRegistry.getTerminalPaneState(id).currentCommand).toBeNull();
+      await waitUntil(() => probe.mock.calls.length > 0);
+      expect(probe).toHaveBeenCalledWith({ ok: false, error: 'probe reached lookup' });
+      expect(toolControl).toHaveBeenCalledTimes(2);
+      expect(typed).toEqual([`${command}\r`]);
+      expect(leafCount()).toBe(1);
+    } finally {
+      await act(async () => { controller.abort(); await new Promise(resolve => setTimeout(resolve, 125)); });
+      fake.clearInputHandler(id);
+      act(() => terminalRegistry.removeTerminalPaneState(id));
+      setToolsEnabled(false);
+    }
+  });
+
   it('takes over the calling pane when `dor tool` is typed alone at a prompt', async () => {
     setToolsEnabled(true);
     const typed: string[] = [];

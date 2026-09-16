@@ -318,12 +318,21 @@ function waitForTerminalState(
   });
 }
 
+/** A completed run proves startup only for this command and directory, and
+ * only when it differs from the completion observed before injection. */
+function completedCommandMatches(
+  state: TerminalPaneState, command: string, cwd: string, previousRunId: string | null = null,
+): boolean {
+  return state.lastCommand !== null && state.lastCommand.id !== previousRunId
+    && surfaceRunsCommand({ ...state, currentCommand: state.lastCommand }, command, cwd);
+}
+
 /** A newly spawned Tool has no earlier command history. Its first command may
  * finish before the caller starts waiting, so a matching completion counts too.
  * Hold the launch queue through this wait; integration alone precedes injection. */
 export function waitForNewToolCommand(id: string, command: string, cwd: string, signal?: AbortSignal): Promise<WaitOutcome> {
   return waitForTerminalState(id, state => surfaceRunsCommand(state, command, cwd)
-    || (state.lastCommand !== null && surfaceRunsCommand({ ...state, currentCommand: state.lastCommand }, command, cwd)),
+    || completedCommandMatches(state, command, cwd),
   COMMAND_START_TIMEOUT_MS, signal);
 }
 
@@ -376,11 +385,7 @@ export async function restartSurfaceInPlace(
   const restarted = await waitForTerminalState(
     id,
     (state) => surfaceRunsCommand(state, command, cwd)
-      // A short-lived Tool can finish before the first state sample. Require a
-      // new completion of this command, not an old run or unrelated user work.
-      || (options.acceptCompletedRun === true && state.lastCommand !== null
-        && state.lastCommand.id !== previousRun
-        && surfaceRunsCommand({ ...state, currentCommand: state.lastCommand }, command, cwd)),
+      || (options.acceptCompletedRun === true && completedCommandMatches(state, command, cwd, previousRun)),
     COMMAND_START_TIMEOUT_MS,
     signal,
   );
@@ -439,7 +444,7 @@ async function runToolInCallerPane(
   await waitForTerminalState(
     id,
     (state) => surfaceRunsCommand(state, tool.command, tool.cwd)
-      || (state.lastCommand !== null && state.lastCommand.id !== previousRun),
+      || completedCommandMatches(state, tool.command, tool.cwd, previousRun),
     COMMAND_START_TIMEOUT_MS,
     signal,
   );
