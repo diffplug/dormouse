@@ -45,8 +45,8 @@ import {
 /** What the browser chrome shows inline at a header width (`docs/specs/layout.md`
  *  → "Pane header responsive sizing"). Below `minimal` the chrome moves into the
  *  popover, where it renders at `full`. */
-type InlineTier = 'full' | 'compact' | 'minimal';
-type BrowserHeaderTier = InlineTier | 'overflow' | 'tiny';
+type BrowserInlineTier = 'full' | 'compact' | 'minimal';
+type BrowserHeaderTier = BrowserInlineTier | 'overflow' | 'tiny';
 const browserHeaderTier = (width: number): BrowserHeaderTier =>
   width >= 420 ? 'full' : width >= 360 ? 'compact' : width >= 180 ? 'minimal' : width >= 72 ? 'overflow' : 'tiny';
 
@@ -112,8 +112,8 @@ export function SurfacePaneHeader({ id, title, parked }: PaneProps) {
     setEditingUrl(false);
     if (restoreFocus && visibleRef.current) overflowRef.current?.focus();
   }, []);
-  const tier = useHeaderTier(headerRef, browserHeaderTier, () => closeMenu(false));
-  const inline: InlineTier | null = tier === 'overflow' || tier === 'tiny' ? null : tier;
+  const tier = useHeaderTier(headerRef, browserHeaderTier, { onResize: () => closeMenu(false) });
+  const inline: BrowserInlineTier | null = tier === 'overflow' || tier === 'tiny' ? null : tier;
   const popoverOpen = visible && inline === null && menuOpen;
   const noteCount = useNoteCount(id);
   const overflowLabel = `Browser controls${noteCount ? `, ${noteCountPhrase(noteCount)}` : ''}`;
@@ -121,7 +121,7 @@ export function SurfacePaneHeader({ id, title, parked }: PaneProps) {
     if (!visible) closeMenu(false);
   }, [visible, closeMenu]);
 
-  const renderBrowserControls = (placement: InlineTier | 'popover') => (
+  const renderBrowserControls = (placement: BrowserInlineTier | 'popover') => (
     <>
       {screen && screenSnapshot && chrome ? (
         <>

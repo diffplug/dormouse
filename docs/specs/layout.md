@@ -107,7 +107,7 @@ Both layers wear the leaf's own rounding (header radius on top, terminal radius 
 
 ### Pane header responsive sizing
 
-**Must pick each header's tier from its own measured width, never the viewport** (rationale). A terminal header has three tiers:
+**Must measure each header's own width, never the viewport, retaining its tier at zero width** (rationale). Terminal content-box tiers:
 
 - **Full** (>280px): everything.
 - **Compact** (>160px): split, zoom, and unzoom hidden.
@@ -124,7 +124,7 @@ A browser header, including a Tool's (Terminal Context sits outside the measured
 
 **Must keep the popover keyboard reachable** (focus enters on open, Tab stays inside, Escape returns it to the trigger) **and dismiss it on a pane resize or, without restoring focus, when its Surface is hidden**; otherwise `lib/src/components/wall/use-dismiss-overlay.ts` applies, and a control inside dismisses only after its action ran. The trigger shows a filled notepad glyph and the note count while the Surface has notes; long keys and connection labels truncate before controls.
 
-Source of truth: `SurfacePaneHeader` in `lib/src/components/wall/SurfacePaneHeader.tsx`; `useHeaderTier` in `lib/src/components/wall/use-header-tier.ts`; `lib/src/components/wall/SurfacePaneHeader.test.tsx`; `lib/src/stories/BrowserChromeHeader.stories.tsx`.
+Source of truth: `SurfacePaneHeader` in `lib/src/components/wall/SurfacePaneHeader.tsx`; `TerminalPaneHeader` in `lib/src/components/wall/TerminalPaneHeader.tsx`; `useHeaderTier` in `lib/src/components/wall/use-header-tier.ts`; `lib/src/components/wall/SurfacePaneHeader.test.tsx`; `lib/src/components/wall/TerminalPaneHeader.test.tsx`; `lib/src/stories/BrowserChromeHeader.stories.tsx`.
 
 ## Baseboard
 
