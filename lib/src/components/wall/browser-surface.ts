@@ -90,6 +90,7 @@ export function toolPendingFromParams(params: unknown): ToolPending | null {
   if (pending.upstreamUrl !== null && typeof pending.upstreamUrl !== 'string') return null;
   if (pending.args !== undefined && !(Array.isArray(pending.args) && pending.args.every((arg) => typeof arg === 'string'))) return null;
   if (pending.error !== undefined && typeof pending.error !== 'string') return null;
+  if (pending.trustRecorded !== undefined && typeof pending.trustRecorded !== 'boolean') return null;
   return pending as unknown as ToolPending;
 }
 
