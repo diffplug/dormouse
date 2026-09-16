@@ -82,8 +82,23 @@ interface Negotiation {
   abandon(): void;
 }
 
+/** Anything an attempt has to close on its way out. */
+interface Closes {
+  close(): void;
+}
+
+/** What {@link untilOpen} hands the `start` it is spending an attempt on. */
+interface Attempt {
+  /**
+   * Register a peer against this attempt, and hand it back. Everything given
+   * here is closed if the attempt is lost — including when `start` itself
+   * throws, which is the case no `start` can clean up after on its own.
+   */
+  keep<T extends Closes>(peer: T): T;
+}
+
 /**
- * Run `start` until the channel it negotiates comes up, abandoning an attempt
+ * Run `start` until the channel it negotiates comes up, dropping an attempt
  * that does not.
  *
  * **Retried on purpose.** Two agents in one process occasionally settle on a
@@ -93,17 +108,39 @@ interface Negotiation {
  * that. The claim under test is that the addon carries the session when a
  * channel comes up, not that ICE never loses one, so a lost attempt is retried
  * on a fresh session rather than reported as a broken addon.
+ *
+ * **A negotiation that throws is retried like one that never opens.** `start`
+ * runs inside the attempt, not in front of it: every `start` here exchanges
+ * descriptions inline, so the addon raising an ICE-level error mid-exchange —
+ * or an expectation firing on the `null` a {@link DirectPeer} returns when it
+ * swallowed one — is the same lost attempt as a channel that stays shut.
+ *
+ * **Peers are closed by the attempt, not by `start`.** A `start` that throws
+ * part-way has no `Negotiation` to abandon and no `finally` that could reach
+ * the peers it already built, so `Attempt.keep` holds them instead: one place
+ * owns the retry and the cleanup it implies, rather than three call sites
+ * each remembering the same convention.
  */
-async function untilOpen<T extends Negotiation>(start: () => Promise<T>, what: string): Promise<T> {
+async function untilOpen<T extends Negotiation>(
+  start: (attempt: Attempt) => Promise<T>,
+  what: string,
+): Promise<T> {
   let lost: unknown;
-  for (let attempt = 1; attempt <= NEGOTIATION_ATTEMPTS; attempt += 1) {
-    const run = await start();
+  for (let n = 1; n <= NEGOTIATION_ATTEMPTS; n += 1) {
+    const kept: Closes[] = [];
+    const attempt: Attempt = {
+      keep: (peer) => {
+        kept.push(peer);
+        return peer;
+      },
+    };
     try {
+      const run = await start(attempt);
       await waitFor(() => run.open(), what, ATTEMPT_BUDGET_MS);
       return run;
     } catch (error) {
       lost = error;
-      run.abandon();
+      for (const peer of kept) peer.close();
     }
   }
   throw lost;
@@ -113,12 +150,15 @@ async function untilOpen<T extends Negotiation>(start: () => Promise<T>, what: s
  * The whole loop — phone, relay, Burrow — with both ends on the native addon,
  * paired, connected, and offered a direct path.
  */
-async function startConnected() {
+async function startConnected(attempt: Attempt) {
   const clientPeers: DirectPeerLike[] = [];
   const burrowPeers: DirectPeerLike[] = [];
+  // Registered as each is built, so a ceremony that throws part-way still drops
+  // whichever ends `collect` had already taken.
+  const build = () => attempt.keep(buildPeer());
   const harness = await makeE2eHarness({
-    deps: { createDirectPeer: collect(clientPeers, buildPeer) },
-    burrowDirect: collect(burrowPeers, buildPeer),
+    deps: { createDirectPeer: collect(clientPeers, build) },
+    burrowDirect: collect(burrowPeers, build),
   });
   await harness.connectPaired();
   return {
@@ -151,9 +191,9 @@ interface ChannelFacts {
  * negotiation has to complete — which is why it goes through
  * {@link untilOpen} like every other one here.
  */
-async function startReliabilityProbe() {
-  const offerer = buildPeer();
-  const answerer = buildPeer();
+async function startReliabilityProbe(attempt: Attempt) {
+  const offerer = attempt.keep(buildPeer());
+  const answerer = attempt.keep(buildPeer());
   let adopted: ChannelFacts | null = null;
   answerer.addEventListener('datachannel', (ev) => {
     adopted = (ev as { channel: ChannelFacts }).channel;
@@ -164,7 +204,14 @@ async function startReliabilityProbe() {
   ] as const) {
     from.addEventListener('icecandidate', (ev) => {
       const candidate = (ev as { candidate?: unknown }).candidate;
-      if (candidate) void (to as unknown as AddsCandidates).addIceCandidate(candidate);
+      // Trickled, while the descriptions are still crossing below. This
+      // polyfill hands a candidate straight to libdatachannel with no
+      // buffering, so one that arrives before the far end has its remote
+      // description throws there — unhandled, and outside any attempt's reach.
+      // Dropped instead: it costs this negotiation at worst, and `untilOpen`
+      // spends a fresh pair on the next one.
+      if (candidate)
+        void (to as unknown as AddsCandidates).addIceCandidate(candidate).catch(() => {});
     });
   }
   const asked = offerer.createDataChannel(DIRECT_CHANNEL_LABEL, {
@@ -246,7 +293,7 @@ describe('the direct path over the native addon', () => {
   it(
     'carries a full-size Noise transport message in one frame, intact',
     async () => {
-      const run = await untilOpen(async () => {
+      const run = await untilOpen(async (attempt) => {
         let opened = 0;
         const inbound: Uint8Array[] = [];
         const lost: string[] = [];
@@ -256,11 +303,19 @@ describe('the direct path over the native addon', () => {
           onClosed: (reason: string) => lost.push(reason),
           onViolation: (reason: string) => lost.push(reason),
         });
-        const offerer = new DirectPeer({ peer: buildPeer(), handlers: handlers(() => {}) });
-        const answerer = new DirectPeer({
-          peer: buildPeer(),
-          handlers: handlers((frame) => inbound.push(frame)),
-        });
+        // Kept by the attempt because the guards below throw on the `null` a
+        // `DirectPeer` returns when it swallowed an ICE-level error, and its
+        // own `#fail` closed only the end that saw it — leaving the other one
+        // gathering with nothing left to abandon it.
+        const offerer = attempt.keep(
+          new DirectPeer({ peer: buildPeer(), handlers: handlers(() => {}) }),
+        );
+        const answerer = attempt.keep(
+          new DirectPeer({
+            peer: buildPeer(),
+            handlers: handlers((frame) => inbound.push(frame)),
+          }),
+        );
         const offer = await offerer.offer();
         expect(offer).not.toBeNull();
         const answer = await answerer.answer(offer!);

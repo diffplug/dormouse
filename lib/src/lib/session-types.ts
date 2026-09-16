@@ -1,3 +1,4 @@
+import { normalizeAlertDeliveryOverrides, type AlertDeliveryOverrides } from './alert-delivery-model';
 import { isRecord } from './is-record';
 import type { SessionStatus } from './alert-manager';
 import { ACTIVITY_NOTIFICATION_SOURCES, type ActivityNotification, type TodoState } from './alert-manager';
@@ -83,6 +84,8 @@ export interface PersistedDoor {
 export type PersistedSurfaceRefs = Record<string, string>;
 
 export interface PersistedSession {
+  /** Workspace delivery overrides, shared by standalone and VS Code snapshots. */
+  alertDelivery?: AlertDeliveryOverrides;
   version: 3;
   panes: PersistedPane[];
   doors?: PersistedDoor[];
@@ -120,6 +123,7 @@ export const DEFAULT_WORKSPACE_NAME = 'Workspace 1';
 type PersistedPaneInput = Omit<PersistedPane, 'untouched'> & { untouched?: boolean };
 
 interface PersistedSessionV3Input {
+  alertDelivery?: unknown;
   version: 3;
   panes: PersistedPaneInput[];
   doors?: PersistedDoor[];
@@ -234,9 +238,10 @@ export function readPersistedSession(raw: unknown): PersistedSession | null {
 }
 
 function normalizeSessionV3(session: PersistedSessionV3Input): PersistedSession {
+  const alertDelivery = normalizeAlertDeliveryOverrides(session.alertDelivery);
   const surfaceRefs = normalizeSurfaceRefs(session.surfaceRefs);
   const surfaceRefsNext = normalizeSurfaceRefsNext(session.surfaceRefsNext);
-  const { surfaceRefs: _rawRefs, surfaceRefsNext: _rawNext, ...rest } = session;
+  const { alertDelivery: _rawDelivery, surfaceRefs: _rawRefs, surfaceRefsNext: _rawNext, ...rest } = session;
   // Deny-list retired fields so future PersistedPane fields pass through without
   // manual allowlist updates. Neither retired field is on PersistedPaneInput.
   const panes: PersistedPane[] = session.panes.map((pane) => {
@@ -250,6 +255,7 @@ function normalizeSessionV3(session: PersistedSessionV3Input): PersistedSession 
   return {
     ...(rest as Omit<PersistedSession, 'panes' | 'surfaceRefs' | 'surfaceRefsNext'>),
     panes,
+    ...(Object.keys(alertDelivery).length ? { alertDelivery } : {}),
     ...carrySurfaceRefs({ surfaceRefs, surfaceRefsNext }),
   };
 }

@@ -128,7 +128,10 @@ export function getWindowSnapshot(): PersistedWindow {
     if (transferring.has(workspace.id)) continue;
     const session = previousWorkspaceSession(workspace.id);
     if (!session) continue;
-    collected.push({ id: workspace.id, name: workspace.name, session });
+    const { alertDelivery: _old, ...saved } = session;
+    collected.push({ id: workspace.id, name: workspace.name, session: {
+      ...saved, ...(workspace.alertDelivery ? { alertDelivery: workspace.alertDelivery } : {}),
+    } });
   }
   const activeWorkspaceId = collected.some((workspace) => workspace.id === activeId)
     ? activeId
