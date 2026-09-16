@@ -18,7 +18,7 @@ const COMPOUND_SYNTAX = /[;&|<>()`\n\r]/;
  * Whether the shell reported running exactly one command and that command is
  * the requested `dor` verb — the human-intent signal, not a security boundary
  * (`docs/specs/dor-tool.md` -> Take-over). Case folds on the launcher, which is
- * a filename, and not on the verb, which stricli parses case-sensitively.
+ * a filename; the requested verb must match exactly.
  */
 export function isNakedToolInvocation(rawCommandLine: string | null | undefined, verb: 'tool' | 'open' = 'tool'): boolean {
   const line = rawCommandLine?.trim();

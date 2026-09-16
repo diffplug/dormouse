@@ -171,6 +171,9 @@ export function parseToolFile(
       if (typeof run === 'string' && usesTarget(dedupeTemplate)) {
         throw new ToolFileError(`${where}: $TARGET in prespawn_dedupe requires an argument-list run`);
       }
+      if (Array.isArray(run) && usesTarget(run) && !usesTarget(dedupeTemplate)) {
+        warnings.push(`${where}: prespawn_dedupe has no $TARGET, so different files reuse the first file's Tool`);
+      }
       // A repo-local key with no project scope dedupes across every checkout
       // that declares the name, so a second worktree's tool would reveal the
       // first instead of starting. Warn, not error: a repo-declared

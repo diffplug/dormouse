@@ -1891,6 +1891,45 @@ describe('Wall on the Lath engine', () => {
     expect(toolControl.mock.calls.filter(([request]) => request.op === 'lookup')).toHaveLength(1);
   });
 
+  it.each(['read error', 'unknown tool'])('retains a failed post-grant lookup with retry and quiet stale completion (%s)', async failure => {
+    const untrusted = { status: 'untrusted', projectRoot: '/repo', path: '/repo/dormouse.yml', name: 'storybook', run: 'pnpm storybook', upstreamUrl: null };
+    const failed = failure === 'read error'
+    ? { status: 'error', message: 'configuration temporarily unreadable' }
+    : { status: 'unknown-tool', projectRoot: '/repo', path: '/repo/dormouse.yml', names: [] };
+    const toolControl = vi.fn(async (request: { op: string }) => request.op === 'trust'
+    ? { status: 'trust-recorded' } : toolControl.mock.calls.length === 1 ? untrusted : failed);
+    Object.assign(fake, { toolControl });
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
+    await flush();
+    const respond = vi.fn();
+    await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+      method: SURFACE_CONTROL_METHODS.tool, params: { name: 'storybook', cwd: '/repo' }, respond,
+    } })));
+    const id = respond.mock.calls[0][0].result.surfaceId;
+    const allow = [...container.querySelectorAll('button')].find(button => button.textContent?.includes('Always allow for folder'))!;
+    await act(async () => allow.click());
+    await flush();
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(failure === 'read error'
+      ? 'configuration temporarily unreadable' : 'The Tool is no longer available. Check its configuration and try again.');
+    expect(container.querySelector(`[data-lath-leaf="${id}"]`)).not.toBeNull();
+    expect(container.querySelector(`[data-session-id="${id}"]`)).toBeNull();
+    expect(pendingShellOpts.has(id)).toBe(false);
+
+    const retry = Promise.withResolvers<typeof failed>();
+    toolControl.mockImplementation(async request => request.op === 'trust' ? { status: 'trust-recorded' } : retry.promise);
+    await act(async () => allow.click());
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(toolControl.mock.calls.filter(([request]) => request.op === 'lookup')).toHaveLength(3);
+    const decline = [...container.querySelectorAll('button')].find(button => button.textContent === 'Disallow and close')!;
+    await act(async () => decline.click());
+    await flush();
+    await act(async () => retry.resolve(failed));
+    await flush();
+    expect(container.querySelector(`[data-lath-leaf="${id}"]`)).toBeNull();
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(pendingShellOpts.has(id)).toBe(false);
+  });
+
   it.each([true, false])('keeps a tool deferred until trust succeeds (%s), lookup and shell staging finish', async grantSucceeds => {
     let toolId: string | undefined;
     vi.spyOn(terminalRegistry, 'getTerminalPaneState').mockImplementation(id => {

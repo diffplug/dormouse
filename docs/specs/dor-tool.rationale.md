@@ -74,3 +74,7 @@ A derived URL or browser daemon binding belongs to one execution. Reusing it aft
 Routing `dor tool` to a native editor on one host would change its result from a Surface handle to a host-specific side effect. Native file opening remains a separate operation.
 
 A Workspace transfer carries the live browser binding separately from its durable record. The arrival record can reach disk while the windows coordinate, whereas the content channel stays in memory; reusing the saved-record projection alone would reopen a Tool browser and lose its current page state. Pending approvals and unfinished browser startup still own asynchronous work in the source window, so the move waits for the user to resolve the approval or retry after startup.
+
+## Opening local files
+
+The VS Code host supports Node 18, which lacks native glob matching. Bundled picomatch keeps association behavior the same across hosts. Patterns with separators test both the CWD-relative and canonical absolute path: files above the CWD otherwise start with `../` and can miss patterns intended to cover an absolute directory. Canonicalization also gives symlink aliases one matching identity. Canonicalizing only the target mixed physical and logical paths under a symlinked CWD, so relative slash patterns missed files inside that directory. An absolute target can still be opened after its caller's CWD disappears; matching falls back to the supplied directory in that case.

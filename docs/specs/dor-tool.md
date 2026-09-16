@@ -31,7 +31,7 @@ Source of truth: `surfaceKindFromParams` / `isToolParams` in `lib/src/components
 
 ## Declaring tools
 
-**Must resolve a named Tool from the nearest ancestor `dormouse.yml`, then fall back to user Tools when that name is absent.** `--global` skips project discovery. A malformed project file fails lookup rather than falling back. The host owns discovery, bounded reads, YAML parsing, and substitutions; the renderer receives the resolved result. Canonical field shapes are `ToolEntry` in `lib/src/host/tool-registry.ts`.
+**Must resolve a named Tool from the nearest ancestor `dormouse.yml`, then fall back to user Tools when that name is absent.** `--global` skips project discovery. Malformed project files fail lookup. If only the user file exists, an unknown name reports that file and its Tool names. The host owns discovery, bounded reads, YAML parsing, and substitutions; the renderer receives the resolved result. Canonical field shapes are `ToolEntry` in `lib/src/host/tool-registry.ts`.
 
 **Must read user Tools from `$XDG_CONFIG_HOME/dormouse/dormouse.yml` when that environment value is absolute, otherwise `~/.config/dormouse/dormouse.yml`.** Both local hosts use this location. User Tools require no project grant; malformed or unreadable user configuration fails lookup. Project and user Tools occupy separate reuse scopes.
 
@@ -44,7 +44,7 @@ Source of truth: `surfaceKindFromParams` / `isToolParams` in `lib/src/components
 
 - **Must reject unknown `prespawn_*` fields and unknown substitutions**; unknown ordinary fields produce warnings. `$PROJECT_ROOT` is the declaring directory, `$CWD` the caller's resolved directory, and `$TARGET` the canonical local file input. (rationale)
 - **Must preserve scalar `prespawn_dedupe` as a one-element literal list**, never interpret it as a command to execute. Reserve separate fields for future computed keys. (rationale)
-- **Must warn when a repo-local key omits `$PROJECT_ROOT`**, while allowing intentional cross-checkout dedupe.
+- **Must warn when a repo-local key omits `$PROJECT_ROOT`, or a `$TARGET` run has a key without `$TARGET`.** Allow intentional cross-checkout or cross-file dedupe.
 - **Must reject `$PROJECT_ROOT` in user configuration**, which has no project root.
 
 **Must pass named-tool inputs as argument values, never substitute them into a shell-command string.** String `run` accepts no arguments and remains literal shell syntax. List `run` expands `$TARGET`, `$CWD`, and `$PROJECT_ROOT` within elements; a whole `$ARGS` element expands all input arguments. Without `$ARGS` or `$TARGET` in the list, append the inputs. **Must quote argv for the destination Session's shell**, using the current default only for new Sessions; takeover stores that quoted command for reruns.
@@ -76,7 +76,7 @@ Source of truth: `queueToolSpawn` / the `surface.tool` handler in `lib/src/compo
 1. **Must derive grant keys host-side from the canonical upstream remote URL or project-root folder.** Either recorded key satisfies lookup; upstream trust spans clones and worktrees. (rationale)
 2. **Must present unapproved named invocations in a visible pending Tool pane**, returning `pending` without spawning a PTY. Defer requested minimization until approval. Pending approval is never persisted as a runnable Tool.
 3. **Must grant only through the approval controls in Dormouse chrome**, never through a `dor` verb or terminal output. The prompt names the proposed command; it is not itself executable terminal content. (rationale)
-4. **Must require `trust-recorded` before re-resolving the named entry**, then stage the command, renderer, port strategy, and key before exposing its terminal. Rejected grants retain approval and display an error until the next attempt; blank reasons use a fallback. Closed Surfaces must not start later or show stale errors.
+4. **Must require `trust-recorded` before re-resolving the named entry**, then stage the command, renderer, port strategy, and key before exposing its terminal. Rejected grants or failed re-resolution retain approval and display an error until retry; blank reasons use a fallback. Closed Surfaces must not start later or show stale errors.
 5. **Must recheck the resolved key before launching an approved Tool**, honoring its original `--fresh` intent. Close a redundant approval through the ordinary close coordinator before revealing or restarting the match; a failed closure retains the approval and sends no command.
 6. **Must close a declined approval through the ordinary close coordinator and record no denial.** Archive failure may retain the pane. (rationale)
 7. **Must record each grant as its own atomically written file**, so hosts sharing one state directory never lock or merge.
@@ -151,7 +151,7 @@ Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `dor/test/snapshot
 
 **Must select the first matching entry of the user file's ordered `open` list**, whose entries contain `match` and `tool`. `--tool` explicitly selects a handler. Every association must name an argument-list Tool in that same user file or `builtin:file`. Never discover project configuration during this lookup; project `open` rules are ignored with a warning during explicit project-tool lookup.
 
-**Must match patterns without `/` against the canonical filename, and patterns with `/` against both the CWD-relative and canonical absolute paths**, separators normalized to `/`, with bundled picomatch: case-sensitive, dotfiles only by explicit pattern. A miss names the user config path and suggests `--tool`. (rationale)
+**Must match patterns without `/` against the canonical filename, and patterns with `/` against both paths relative to the canonical CWD and canonical absolute paths**, separators normalized to `/`, with bundled picomatch: case-sensitive, dotfiles only by explicit pattern. Use the supplied CWD if canonicalization fails; matching never changes the Tool's run directory or `$CWD`. A miss names the user config path and suggests `--tool`. (rationale)
 
 **Must pass the canonical file path as the selected Tool's one input.** Reuse follows [Identity and dedupe](#identity-and-dedupe), `$TARGET` in the key providing per-file identity; placement follows [Take-over](#take-over).
 

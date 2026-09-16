@@ -108,6 +108,8 @@ ends at `adopt_failed` or at the target's `Destroyed`, not at a timer.
 
 ## Arrival queue
 
+A target whose `adopt_done` is refused already has the arrival payload needed to release its Sessions. Preparing a new transfer first re-entered Tool startup checks and could throw while ownership was already back at the source; unwinding directly also avoids sending `adopt_failed` for that retired arrival.
+
 **Why the mark is stamped in the stream rather than asked for.** A mark fetched
 by request answers at some instant the sidecar chose, while the source's xterm
 stands at whatever `pty:data` had reached it — two clocks nothing aligns, so a
