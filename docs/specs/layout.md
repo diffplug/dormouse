@@ -50,7 +50,7 @@ A 30px header doubling as a drag handle: **a `pointerdown` past a 5px threshold 
 
 **Must use browser chrome for a serving Tool, with a Terminal Context disclosure for its serving terminal.** Tool composition belongs to `docs/specs/dor-tool.md` → Lifecycle.
 
-**Must size browser chrome by available pane width, excluding Tool context.** Hide inline split/zoom below 420px and navigation below 360px. Below 180px, move browser controls into a keyboard-accessible, viewport-clamped popover; minimize/kill remain inline until 72px, then join the popover. A filled notepad glyph and note count identify saved notes on its trigger. Long keys and connection labels yield before controls. (rationale)
+**Must size browser chrome by available pane width, excluding Tool context.** Hide inline split/zoom below 420px and navigation below 360px. Below 180px, use a keyboard-accessible, viewport-clamped popover; minimize/kill remain inline until 72px, then join the popover. Dismiss without restoring focus when hidden. Its trigger identifies notes by filled notepad glyph and count. Long keys and connection labels yield before controls. (rationale)
 
 Source of truth: `SurfacePaneHeader` in `lib/src/components/wall/SurfacePaneHeader.tsx`; tests: `lib/src/components/wall/SurfacePaneHeader.test.tsx`; stories: `lib/src/stories/BrowserChromeHeader.stories.tsx`.
 

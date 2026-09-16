@@ -18,6 +18,7 @@ import {
 import { setDevServerResolution } from './agent-browser-ports';
 import {
   ModeContext,
+  WorkspaceActiveContext,
   SelectedIdContext,
   WallActionsContext,
   WindowFocusedContext,
@@ -70,11 +71,12 @@ afterEach(() => {
 function renderHeader(
   props: PaneProps,
   actions: WallActions,
-  state: { active?: boolean; zoomedId?: string | null; tool?: boolean } = {},
+  state: { active?: boolean; zoomedId?: string | null; tool?: boolean; workspaceActive?: boolean } = {},
 ) {
   act(() => {
     root.render(
       <StrictMode>
+        <WorkspaceActiveContext.Provider value={state.workspaceActive ?? true}>
         <ModeContext.Provider value={state.active ? 'passthrough' : 'command'}>
           <SelectedIdContext.Provider value={state.active ? props.id : null}>
             <WindowFocusedContext.Provider value={true}>
@@ -86,12 +88,38 @@ function renderHeader(
             </WindowFocusedContext.Provider>
           </SelectedIdContext.Provider>
         </ModeContext.Provider>
+        </WorkspaceActiveContext.Provider>
       </StrictMode>,
     );
   });
 }
 
 describe('SurfacePaneHeader — browser chrome', () => {
+  it.each(['workspace', 'parked'] as const)('dismisses compact controls without stealing focus when hidden by %s', hiddenBy => {
+    const id = 'pane-hidden-controls';
+    const registration = register(id);
+    const props = headerProps(id, 'Browser');
+    const actions = stubActions();
+    const otherWorkspaceControl = document.createElement('button');
+    document.body.appendChild(otherWorkspaceControl);
+    try {
+      renderHeader(props, actions);
+      act(() => resizeHeader(79));
+      act(() => container.querySelector<HTMLButtonElement>('[aria-label="Browser controls"]')!.click());
+      expect(document.querySelector('[role="dialog"][aria-label="Browser controls"]')).not.toBeNull();
+      otherWorkspaceControl.focus();
+      renderHeader({ ...props, parked: hiddenBy === 'parked' }, actions, { workspaceActive: hiddenBy !== 'workspace' });
+      expect(document.querySelector('[role="dialog"][aria-label="Browser controls"]')).toBeNull();
+      expect(document.activeElement).toBe(otherWorkspaceControl);
+      renderHeader(props, actions);
+      expect(document.querySelector('[role="dialog"][aria-label="Browser controls"]')).toBeNull();
+      expect(container.querySelector('[aria-label="Browser controls"]')?.getAttribute('aria-expanded')).toBe('false');
+    } finally {
+      otherWorkspaceControl.remove();
+      registration.dispose();
+    }
+  });
+
   it('adapts to pane resizes in a wide window and keeps compact controls keyboard reachable', async () => {
     const registration = register('pane-resize', { ...CHROME, key: 'a'.repeat(300) });
     const actions = stubActions();
