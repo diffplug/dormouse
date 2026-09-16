@@ -76,7 +76,7 @@ Source of truth: `queueToolSpawn` / the `surface.tool` handler in `lib/src/compo
 7. **Must record each grant as its own atomically written file**, so hosts sharing one state directory never lock or merge.
 8. **Never content-hash grants or re-prompt solely because the config changed.** (rationale)
 
-**Must keep approval controls reachable**, wrapping long content and scrolling overflow in small panes.
+Approval layout follows `docs/specs/layout.md` → Pane body.
 
 **Must validate a bounded regular, non-symlink grant receipt for the requested key.** Missing, corrupt, or mismatched records grant nothing; a filename alone is never approval.
 
