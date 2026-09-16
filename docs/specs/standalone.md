@@ -614,7 +614,7 @@ source's invoke until the target adopts the Workspace or dies, and every step
 below reads that record rather than inferring itself from the suppression map.
 
 1. **Source** prepares the Workspace, touching nothing, and invokes
-   `transfer_workspace` / `open_workspace_window`. On `Ok` it marks the Workspace
+   `transfer_workspace` / `open_workspace_window`. **Must return preparation refusals as `{ moved: false, reason }` without changing ownership.** On `Ok` it marks the Workspace
    **transferring**: the Wall stays mounted and the notes stay put, nothing is
    released, and `getWindowSnapshot` omits it.
 2. **Rust** reassigns `terminalIds` to the target, keeps routing their output to
@@ -658,7 +658,7 @@ below reads that record rather than inferring itself from the suppression map.
 - **A refused `adopt_done` unwinds the mount.** The `ARRIVAL_MAX` watchdog has
   already handed the shells back and the source kept the Workspace, so the
   target releases its Sessions (never kills them), drops the notes, and closes
-  the Workspace rather than leaving it live and persisted in two windows.
+  the Workspace rather than leaving it live and persisted in two windows. **Must unwind from the received payload without preparing another move.**
 - **Must remove unmounted semantic and alert state when arrival collection times out.**
   Source of truth: `planArrival` in `standalone/src/workspace-move.ts`.
 - **A refused arrival hands the shells back.** The target's `adopt_failed`

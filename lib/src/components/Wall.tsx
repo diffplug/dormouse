@@ -1638,8 +1638,12 @@ export function Wall({
         // declared, rather than silently running it as a keyless default iframe.
         const cwd = typeof meta?.params?.cwd === 'string' ? meta.params.cwd : pending.projectRoot;
         const resolved = await platform.toolControl?.({ op: 'lookup', name: pending.name, cwd });
+        if (!isCurrent()) return;
         if (resolved?.status !== 'ok') {
-          await closeSurface(id);
+          lath.store.updateParams(id, { toolPending: {
+            ...pending,
+            error: resolved?.status === 'error' && resolved.message.trim() ? resolved.message : 'This Tool could not be resolved. Check dormouse.yml and try allowing it again.',
+          } });
           return;
         }
 
