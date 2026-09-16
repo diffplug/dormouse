@@ -2,7 +2,6 @@
 
 > See `docs/specs/glossary.md` for Surface / Session / Pane / Door vocabulary.
 > Owns tool designation, configuration, trust workflow, serving, and command lifecycle. Browser chrome belongs to `docs/specs/dor-browser.md`; notes and closure belong to `docs/specs/notepad.md`; helpers belong to `docs/specs/terminal-context.md`.
-> Status: implemented behind `dormouse.flags.tools`, off by default. Unbuilt design is under [Future](#future).
 
 ## Files
 
@@ -12,13 +11,11 @@
 - `lib/src/components/wall/use-tool-serving.ts` — port discovery and browser lifetime.
 - `lib/src/components/wall/ToolPanel.tsx` — terminal/browser composition.
 
-## Capability gating
+## Availability
 
-**Must gate tool creation on `isToolsEnabled`.** The flag disables new designation; existing Tools retain serving and exit cleanup. Inert announcement parsing and capability predicates remain active. Capability semantics belong to `docs/specs/glossary.md` → Panes and Surfaces; CLI reporting belongs to `docs/specs/dor-cli.md` → `dor list`.
+**Must make `dor tool` and `dor open` available without a feature flag or Settings opt-in.** Project execution follows [Trust](#trust).
 
-**Must expose the flag in Settings → Experimental → Dor Tools.** Persist localStorage changes for subsequent launches without reloading; disabled-launch errors point here.
-
-Source of truth: `isToolsEnabled` in `lib/src/lib/feature-flags.ts`; `SettingsDialog` in `lib/src/components/SettingsDialog.tsx`; `surface.tool` in `lib/src/components/wall/use-dor-control.ts`; `useToolServing` in `lib/src/components/wall/use-tool-serving.ts`.
+Source of truth: `surface.tool` in `lib/src/components/wall/use-dor-control.ts`; `lib/src/components/Wall.test.tsx`.
 
 ## The tool capability set
 

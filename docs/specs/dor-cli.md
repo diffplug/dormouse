@@ -645,7 +645,7 @@ Source of truth: `buildDorSurfacesInternal` in `lib/src/components/Wall.tsx`; `d
 
 ## Dor Tools
 
-**Must route `dor tool` and `dor open` through the Tool launch contract**, including feature gating, approval, explicit-key reuse, and focus-neutral placement (`docs/specs/dor-tool.md` → CLI). Generated help owns syntax.
+**Must route `dor tool` and `dor open` through the Tool launch contract**, including approval, explicit-key reuse, and placement (`docs/specs/dor-tool.md` → CLI). Generated help owns syntax.
 
 Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `openCommand` in `dor/src/commands/open.ts`; `ToolSurfaceResponse` in `dor/src/commands/types.ts`.
 

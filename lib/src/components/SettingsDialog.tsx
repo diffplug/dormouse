@@ -20,7 +20,6 @@ import { WatchedCommandList } from './WatchedCommandList';
 import { RemoteControlSection } from './RemoteControlSection';
 import { PushTestButton, SpeakTestButton } from './AlarmTestButtons';
 import { getPlatform } from '../lib/platform';
-import { isToolsEnabled, setToolsEnabled } from '../lib/feature-flags';
 import { hasNotepadArchive } from '../lib/notepad/archive-service';
 import { getShellsSnapshot, subscribeToShells } from '../lib/shell-store';
 import {
@@ -93,7 +92,6 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const watched = useSyncExternalStore(subscribeToWatchedCommands, getWatchedCommandsSnapshot);
   const settings = useSyncExternalStore(subscribeToAlertSettings, getAlertSettings);
   const shellState = useSyncExternalStore(subscribeToShells, getShellsSnapshot);
-  const [toolsEnabled, setToolsEnabledState] = useState(isToolsEnabled);
   const closeRef = useRef<HTMLButtonElement>(null);
   // One union rather than a boolean per picker, so two menus can never be open
   // at once and Escape has a single thing to close.
@@ -216,21 +214,6 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           the feature that makes a reader care, and "no Burrow" is the reason it
           has nowhere to go. Renders nothing on a build with no Burrow service. */}
       <RemoteControlSection />
-
-      <section className={SECTION}>
-        <h3 className="mb-2 text-sm font-semibold text-foreground">Experimental</h3>
-        <SwitchRow
-          label="Dor Tools"
-          on={toolsEnabled}
-          onChange={(enabled) => {
-            setToolsEnabled(enabled);
-            setToolsEnabledState(isToolsEnabled());
-          }}
-        />
-        <div className={`${UNDER_SWITCH_INDENT} mt-1 text-sm leading-relaxed text-muted`}>
-          Open local files with dor open and run tools with dor tool. Changes apply immediately.
-        </div>
-      </section>
 
       {/* Last: the only row here that leads somewhere instead of setting
           something, so it reads as the door it is. */}

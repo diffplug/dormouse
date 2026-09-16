@@ -15,7 +15,6 @@ import type {
 } from 'dor/commands/types';
 import { hasBrowser, hasTerminal } from 'dor/commands/types';
 import { MAX_AWAIT_TIMEOUT_MS } from '../../lib/alert-manager';
-import { isToolsEnabled } from '../../lib/feature-flags';
 import type { OpenPort } from '../../lib/platform/types';
 import type { ToolKeyScope } from '../../lib/platform/tool-types';
 import { buildShellCommandForKind, hasShellInputControls, shellCommandKind } from 'dor/commands/shell-quote';
@@ -877,15 +876,6 @@ export function useDorControl({
           return error !== null;
         };
         if (unavailable()) return;
-        // Off by default. With the flag off nothing is ever designated a tool,
-        // so the serving trigger has nothing to watch and no pane can transform.
-        if (!isToolsEnabled()) {
-          detail.respond({
-            ok: false,
-            error: 'Dor Tools are off. Enable them in Settings → Experimental → Dor Tools.',
-          });
-          return;
-        }
         const cwd = stringParam(params.cwd)?.trim();
         if (!cwd) {
           detail.respond({ ok: false, error: 'cwd is required' });
