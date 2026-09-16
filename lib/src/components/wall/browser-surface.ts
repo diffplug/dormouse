@@ -68,6 +68,7 @@ export interface ToolPending {
   /** Preserve the launch request across the trust gate. */
   readonly fresh?: boolean;
   readonly upstreamUrl: string | null;
+  readonly error?: string;
 }
 
 /** The approval a tool Surface is waiting on, or null once it may run. */
@@ -79,6 +80,7 @@ export function toolPendingFromParams(params: unknown): ToolPending | null {
   if (!strings.every((field) => typeof pending[field] === 'string')) return null;
   if (typeof pending.minimized !== 'boolean') return null;
   if (pending.fresh !== undefined && typeof pending.fresh !== 'boolean') return null;
+  if (pending.error !== undefined && typeof pending.error !== 'string') return null;
   if (pending.upstreamUrl !== null && typeof pending.upstreamUrl !== 'string') return null;
   return pending as unknown as ToolPending;
 }

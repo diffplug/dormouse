@@ -199,6 +199,11 @@ describe('the pending-approval shape (regression: PR #493 review)', () => {
     }
   });
 
+  it('keeps failed approval feedback in the pending shape and rejects non-text errors', () => {
+    expect(toolPendingFromParams({ toolPending: { ...pending, error: 'disk full' } })?.error).toBe('disk full');
+    expect(toolPendingFromParams({ toolPending: { ...pending, error: 42 } })).toBeNull();
+  });
+
   it('allows a null upstream, which is how a repo with no remote arrives', () => {
     expect(toolPendingFromParams({ surfaceType: 'tool', toolPending: pending })).not.toBeNull();
   });
