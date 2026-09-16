@@ -1627,7 +1627,7 @@ export function Wall({
         if (grant?.status !== 'trust-recorded') {
           lath.store.updateParams(id, { toolPending: {
             ...pending,
-            error: grant?.status === 'error' ? grant.message : 'The Tool permission could not be saved. Try allowing it again.',
+            error: grant?.status === 'error' && grant.message.trim() ? grant.message : 'The Tool permission could not be saved. Try allowing it again.',
           } });
           return;
         }

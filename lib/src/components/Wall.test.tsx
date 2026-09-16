@@ -1629,6 +1629,30 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it.each(['', ' \t\n'])('shows a useful fallback for a blank grant failure (%j)', async message => {
+    setToolsEnabled(true);
+    const toolControl = vi.fn(async (request: { op: string }) => request.op === 'trust'
+      ? { status: 'error', message }
+      : { status: 'untrusted', projectRoot: '/repo', path: '/repo/dormouse.yml', name: 'storybook', run: 'pnpm storybook', upstreamUrl: null });
+    Object.assign(fake, { toolControl });
+    try {
+      await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
+      await flush();
+      const respond = vi.fn();
+      await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+        method: SURFACE_CONTROL_METHODS.tool, params: { name: 'storybook', cwd: '/repo' }, respond,
+      } })));
+      const id = respond.mock.calls[0][0].result.surfaceId;
+      const allow = [...container.querySelectorAll('button')].find(button => button.textContent?.includes('Always allow for folder'))!;
+      await act(async () => allow.click());
+      expect(container.querySelector('[role="alert"]')?.textContent).toBe('The Tool permission could not be saved. Try allowing it again.');
+      expect(container.querySelector(`[data-session-id="${id}"]`)).toBeNull();
+      expect(toolControl.mock.calls.filter(([request]) => request.op === 'lookup')).toHaveLength(1);
+    } finally {
+      setToolsEnabled(false);
+    }
+  });
+
   it.each([true, false])('keeps a tool deferred until trust succeeds (%s), lookup and shell staging finish', async grantSucceeds => {
     setToolsEnabled(true);
     let toolId: string | undefined;
