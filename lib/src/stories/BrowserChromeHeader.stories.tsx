@@ -8,6 +8,7 @@ import {
   type WallActions,
 } from '../components/wall/wall-context';
 import { SurfacePaneHeader } from '../components/wall/SurfacePaneHeader';
+import { recordToolDirty } from '../lib/tool-dirty-store';
 import { ToolPaneHeader } from '../components/wall/ToolPaneHeader';
 import { PANE_HEADER_HEIGHT_PX } from '../components/design';
 import {
@@ -73,6 +74,7 @@ interface StoryArgs {
   width: number;
   /** Include the Tool Terminal Context button beside the browser header. */
   tool: boolean;
+  dirty: 'unknown' | 'clean' | 'dirty';
   /** Whether the surface is the selected/active pane (header highlight). */
   selected: boolean;
 }
@@ -82,6 +84,10 @@ function BrowserChromeStory(args: StoryArgs) {
   // collide on one registry id.
   const surfaceId = useId();
   const registrationRef = useRef<ScreenRegistration | null>(null);
+  useEffect(() => {
+    recordToolDirty(surfaceId, args.dirty === 'unknown' ? null : args.dirty === 'dirty');
+    return () => recordToolDirty(surfaceId, null);
+  }, [surfaceId, args.dirty]);
 
   const screenSnapshot: ScreenSnapshot = useMemo(() => ({
     state: args.state,
@@ -185,6 +191,7 @@ const meta: Meta<typeof BrowserChromeStory> = {
     width: { control: { type: 'range', min: 80, max: 900, step: 10 } },
     selected: { control: 'boolean' },
     tool: { control: 'boolean' },
+    dirty: { control: 'inline-radio', options: ['unknown', 'clean', 'dirty'] },
   },
   args: {
     renderMode: 'ab-screencast',
@@ -197,6 +204,7 @@ const meta: Meta<typeof BrowserChromeStory> = {
     hostCapable: true,
     width: 620,
     tool: false,
+    dirty: 'unknown',
     selected: true,
   },
 };
@@ -255,3 +263,9 @@ export const TinyBrowser: Story = {
 export const SmallestTool: Story = {
   args: { width: 80, tool: true },
 };
+
+
+export const DirtyTool: Story = { args: { tool: true, dirty: 'dirty' } };
+export const CleanTool: Story = { args: { tool: true, dirty: 'clean' } };
+export const UnknownTool: Story = { args: { tool: true, dirty: 'unknown' } };
+export const NarrowDirtyTool: Story = { args: { tool: true, dirty: 'dirty', width: 103 } };

@@ -1,3 +1,5 @@
+import { parseToolState, type ToolState } from './tool-state';
+import { recordToolStates } from './tool-dirty-store';
 import type { ActivityNotification, ProtocolProgressUpdate } from './alert-manager';
 import { parseColor } from './css-color';
 import { sanitizeText, truncateText } from './osc-sanitize';
@@ -24,6 +26,7 @@ import {
 export type TerminalProtocolEvent =
   | { kind: 'notification'; notification: ActivityNotification }
   | { kind: 'toolAnnounce'; announce: ToolAnnounce }
+  | { kind: 'toolState'; state: ToolState }
   | { kind: 'progress'; progress: ProtocolProgressUpdate }
   | { kind: 'response'; data: string }
   | { kind: 'semantic'; event: TerminalSemanticEvent };
@@ -297,7 +300,9 @@ export class TerminalProtocolParser {
     // must not print itself into the user's scrollback.
     if (content === '367' || content.startsWith('367;')) {
       const announce = content.startsWith('367;') ? parseToolAnnounce(content.slice('367;'.length)) : null;
-      return announce ? [{ kind: 'toolAnnounce', announce }] : [];
+      if (announce) return [{ kind: 'toolAnnounce', announce }];
+      const state = content.startsWith('367;') ? parseToolState(content.slice('367;'.length)) : null;
+      return state ? [{ kind: 'toolState', state }] : [];
     }
     const colorResponse = this.parseColorQuery(content);
     if (colorResponse) return colorResponse;
@@ -434,6 +439,7 @@ export function applyTerminalProtocolEvents(
   events: TerminalProtocolEvent[],
 ): void {
   recordToolAnnounces(id, events);
+  recordToolStates(id, events);
   for (const event of events) {
     if (event.kind === 'notification') {
       sink.notifyFromProtocol(id, event.notification);
@@ -452,7 +458,7 @@ export function applyTerminalProtocolEvents(
 export function collectTerminalProtocolAlerts(
   events: TerminalProtocolEvent[],
 ): TerminalProtocolEvent[] {
-  return events.filter((event) => event.kind === 'notification' || event.kind === 'progress' || event.kind === 'toolAnnounce'
+  return events.filter((event) => event.kind === 'notification' || event.kind === 'progress' || event.kind === 'toolAnnounce' || event.kind === 'toolState'
     || (event.kind === 'semantic' && event.event.type === 'commandStart'));
 }
 

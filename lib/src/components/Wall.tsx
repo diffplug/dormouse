@@ -461,7 +461,7 @@ export function Wall({
     const meta = lath.store.getSnapshot().leafMeta;
     return doorsRef.current.map((door) => {
       const leaf = meta.get(door.id);
-      return `${leaf?.title ?? ''}\u0001${browserDisplayModeFromParams(leaf?.params) ?? ''}`;
+      return `${leaf?.title ?? ''}\u0001${surfaceKindFromParams(leaf?.params)}\u0001${browserDisplayModeFromParams(leaf?.params) ?? ''}`;
     }).join('\u0000');
   });
   // The Baseboard's chips: the runtime Doors plus the store's current fallback title

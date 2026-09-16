@@ -95,6 +95,7 @@ export type ExtensionMessage =
   | { type: 'pty:data'; id: string; data: string; textData?: string }
   | { type: 'pty:exit'; id: string; exitCode: number }
   | { type: 'terminal:toolAnnounce'; id: string; announce: ToolAnnounce | null }
+  | { type: 'terminal:toolState'; id: string; dirty: boolean | null }
   | { type: 'terminal:semanticEvents'; id: string; events: TerminalSemanticEvent[] }
   | { type: 'pty:list'; ptys: PtyInfo[] }
   | { type: 'pty:replay'; id: string; data: string }

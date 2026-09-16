@@ -1,3 +1,4 @@
+import { recordToolDirty } from './tool-dirty-store';
 import { registry } from './terminal-store';
 import {
   commandArgv0,
@@ -122,6 +123,7 @@ function clearPaneScratch(id: string): void {
 }
 
 export function resetTerminalPaneState(id: string, initial?: Partial<TerminalPaneState>): void {
+  recordToolDirty(id, null);
   clearPaneScratch(id);
   paneStates.set(id, createTerminalPaneState(initial));
   notifyTerminalPaneStateListeners(id);
@@ -144,6 +146,7 @@ export function restoreTransferredTerminalState(id: string, state: TransferredTe
 }
 
 export function removeTerminalPaneState(id: string): void {
+  recordToolDirty(id, null);
   clearPaneScratch(id);
   if (!paneStates.delete(id)) return;
   notifyTerminalPaneStateListeners(id);
@@ -155,6 +158,9 @@ export function applyTerminalSemanticEvents(
   options?: { keystrokeHeuristic?: boolean },
 ): void {
   if (events.length === 0) return;
+  // OSC starts reset in protocol stream order, before any following state report.
+  // Only synthetic starts originate here without that ordered protocol event.
+  if (events.some(event => event.type === 'commandStart' && event.source === 'user_input')) recordToolDirty(id, null);
   // `keystrokeHeuristic` marks the fallback's own synthesized markers, which must
   // not promote the pane — that would retire the very path emitting them.
   if (!options?.keystrokeHeuristic && !oscDrivenPanes.has(id) && events.some(isOscDrivenBoundary)) {

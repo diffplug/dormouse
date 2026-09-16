@@ -131,3 +131,15 @@ describe('Door notepad button', () => {
     expect(onDragPress).toHaveBeenCalledTimes(1);
   });
 });
+
+
+describe('Door unsaved changes', () => {
+  it.each(['speaking', 'spoken'] as const)('keeps the dirty dot beside notes and %s state', speechState => {
+    act(() => root.render(<Door doorId="dirty" title="Editor" ringSeq={1} toolDirty
+      speechState={speechState} noteCount={2} todo status="ALERT_RINGING" />));
+    const door = container.querySelector('[data-door-id="dirty"]')!;
+    expect(door.querySelector('[role="img"][aria-label="Unsaved changes"]')).not.toBeNull();
+    expect(door.querySelector('[data-door-notepad-for="dirty"]')).not.toBeNull();
+    expect(door.getAttribute('aria-label')).toBe(`Editor, ${speechState}, Unsaved changes`);
+  });
+});

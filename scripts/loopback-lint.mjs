@@ -70,6 +70,9 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
  * review; forgetting the guard entirely does not.
  */
 const ALLOWED = {
+  'scripts/dor-tool-qc/server.mjs':
+    'Unshipped innerdogfood fixture serving generated test content only; no file, '
+    + 'credential, or command API. Dirty/clean buttons only emit fixture state reports.',
   'vscode-ext/src/agent-browser-host.ts':
     'The stream relay authenticates with a single-use 64-hex token (60s TTL, '
     + 'pinned to one target port) and drops Origin rather than rewriting it, so '

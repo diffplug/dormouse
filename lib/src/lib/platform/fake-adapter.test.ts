@@ -1,3 +1,4 @@
+import { getToolDirty, recordToolDirty } from '../tool-dirty-store';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { FakePtyAdapter, type FakeScenario } from './fake-adapter';
 import { ITERM2_DEVICE_ATTRIBUTES_RESPONSE } from '../terminal-protocol';
@@ -23,6 +24,16 @@ describe('FakePtyAdapter', () => {
   }
 
   // --- Core (Story 11.1) ---
+
+  it('records ordered dirty reports from ordinary PTYs without inferring clean on exit', () => {
+    const { adapter } = createAdapter();
+    adapter.spawnPty('dirty-fake');
+    adapter.writePty('dirty-fake', '\x1b]633;C\x07\x1b]367;state;{"v":1,"dirty":false}\x07');
+    expect(getToolDirty('dirty-fake')).toBe(false);
+    adapter.writePty('dirty-fake', '\x1b]367;state;{"v":1,"dirty":true}\x07\x1b]633;D;0\x07');
+    expect(getToolDirty('dirty-fake')).toBe(true);
+    recordToolDirty('dirty-fake', null);
+  });
 
   it('init resolves without error', async () => {
     const { adapter } = createAdapter();

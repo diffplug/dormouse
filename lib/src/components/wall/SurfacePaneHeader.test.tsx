@@ -5,6 +5,7 @@ import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PaneProps } from './pane-props';
+import { recordToolDirty } from '../../lib/tool-dirty-store';
 import { SurfacePaneHeader } from './SurfacePaneHeader';
 import { ToolPaneHeader } from './ToolPaneHeader';
 import { FakePtyAdapter } from '../../lib/platform/fake-adapter';
@@ -54,7 +55,7 @@ beforeEach(() => {
   vi.stubGlobal('ResizeObserver', class {
     constructor(private callback: ResizeObserverCallback) {}
     observe(target: Element) {
-      resizeHeader = width => this.callback([{ target, borderBoxSize: [{ inlineSize: width }] } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver);
+      resizeHeader = width => this.callback([{ target, borderBoxSize: [{ inlineSize: width }], contentRect: { width } } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver);
       resizeHeader(620);
     }
     disconnect() {}
@@ -92,6 +93,58 @@ function renderHeader(
 }
 
 describe('SurfacePaneHeader — browser chrome', () => {
+  it.each([
+    ['terminal', {}],
+    ['port conflict', { toolPortConflict: [3000, 4000] }],
+    ['browser', { url: CHROME.url }],
+  ])('shows live unsaved changes on the Tool %s face at narrow widths', (_face, params) => {
+    const id = 'dirty-tool-header';
+    const registration = register(id);
+    try {
+      renderHeader({ ...headerProps(id, 'Tool'), params: { surfaceType: 'tool', ...params } }, stubActions(), { tool: true });
+      act(() => resizeHeader(100));
+      const indicator = () => container.querySelector('[role="img"][aria-label="Unsaved changes"]');
+      expect(indicator()).toBeNull();
+      act(() => recordToolDirty(id, true));
+      expect(indicator()).not.toBeNull();
+      expect(container.querySelector('[aria-label="Kill"]')).not.toBeNull();
+      act(() => addPlainNote(id, 'Keep this note'));
+      expect(indicator()).not.toBeNull();
+      if ('url' in params) {
+        // A 103px Tool has only 79px of browser chrome. The dirty dot remains
+        // outside the menu; essential controls join the menu before overflowing.
+        act(() => resizeHeader(79));
+        expect(indicator()).not.toBeNull();
+        expect(container.querySelector('[aria-label="Kill"]')).toBeNull();
+        act(() => container.querySelector<HTMLButtonElement>('[aria-label="Browser controls, 1 note"]')!.click());
+        expect(document.querySelector('[role="dialog"] [aria-label="Kill"]')).not.toBeNull();
+        expect(container.contains(indicator())).toBe(true);
+      }
+      act(() => recordToolDirty(id, false));
+      expect(indicator()).toBeNull();
+      act(() => recordToolDirty(id, true));
+      expect(indicator()).not.toBeNull();
+      act(() => recordToolDirty(id, null));
+      expect(indicator()).toBeNull();
+    } finally {
+      registration.dispose();
+      act(() => recordToolDirty(id, null));
+    }
+  });
+
+  it.each(['terminal', 'browser'] as const)('ignores dirty reports on an ordinary %s', kind => {
+    const id = 'dirty-non-tool-header';
+    const registration = register(id);
+    try {
+      act(() => recordToolDirty(id, true));
+      renderHeader({ ...headerProps(id, 'Ordinary'), params: { surfaceType: kind, url: CHROME.url } }, stubActions(), { tool: kind === 'terminal' });
+      expect(container.querySelector('[aria-label="Unsaved changes"]')).toBeNull();
+    } finally {
+      registration.dispose();
+      act(() => recordToolDirty(id, null));
+    }
+  });
+
   it('adapts to pane resizes in a wide window and keeps compact controls keyboard reachable', async () => {
     const registration = register('pane-resize', { ...CHROME, key: 'a'.repeat(300) });
     const actions = stubActions();

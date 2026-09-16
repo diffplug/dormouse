@@ -1,3 +1,4 @@
+import { recordToolStates, recordToolDirty } from '../tool-dirty-store';
 import { recordToolAnnounce, recordToolAnnounces } from '../tool-announce-store';
 import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../terminal-context-types';
 import type { AgentBrowserCommandResult, AgentBrowserEditOp, AgentBrowserEditResult, AgentBrowserOpenResult, AgentBrowserPopResult, AgentBrowserScreenshotResult, AgentBrowserStreamStatusResult, AlertStateDetail, IframeProxyResult, OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, BurrowLink, ToolControlResult, ToolHostRequest } from './types';
@@ -180,10 +181,13 @@ export class VSCodeAdapter implements PlatformAdapter {
         const parser = new TerminalProtocolParser(themeColorProvider);
         const parsed = parser.process(msg.data);
         recordToolAnnounces(msg.id, parsed.events);
+        recordToolStates(msg.id, parsed.events);
         applyTerminalSemanticEvents(msg.id, collectTerminalSemanticEvents(parsed.events));
         for (const handler of this.replayHandlers) {
           handler({ id: msg.id, data: parsed.visibleData });
         }
+      } else if (msg.type === 'terminal:toolState') {
+        recordToolDirty(msg.id, msg.dirty);
       } else if (msg.type === 'terminal:toolAnnounce') {
         recordToolAnnounce(msg.id, msg.announce);
       } else if (msg.type === 'terminal:semanticEvents') {

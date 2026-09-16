@@ -1,3 +1,4 @@
+import { getToolDirty, subscribeToToolDirty } from '../lib/tool-dirty-store';
 import { setWorkspaceAlertDelivery } from '../lib/workspace-store';
 import { useWorkspaceAlertPolicy } from './wall/use-workspace-alert-policy';
 import { useCallback, useRef, useState, useMemo, useLayoutEffect, useContext, useSyncExternalStore, type ReactNode } from 'react';
@@ -70,6 +71,9 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   // props component and never asks the platform anything.
   const notepadNotes = useSyncExternalStore(subscribeToNotepad, getNotepadSnapshot);
   const notepadAvailable = hasNotepadArchive();
+  // A stable primitive snapshot also invalidates the hidden Door width pass.
+  const dirtyTools = useSyncExternalStore(subscribeToToolDirty,
+    () => items.map(item => item.kind === 'tool' && getToolDirty(item.id) === true ? '1' : '0').join(''));
   const appTitleForPane = useMemo(
     () => buildAppTitleResolver(terminalStates, activityStates),
     [terminalStates, activityStates],
@@ -157,7 +161,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
     if (arrowMeasureEl.current) {
       layoutMetrics.current.arrowWidth = arrowMeasureEl.current.offsetWidth;
     }
-  }, [items, activityStates, speechStates, terminalStates, notepadNotes]);
+  }, [items, activityStates, speechStates, terminalStates, notepadNotes, dirtyTools]);
 
   // Reset startIndex when the set of door items changes (not just count)
   const itemKey = useMemo(() => items.map(i => i.id).join('\0'), [items]);
@@ -244,6 +248,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
         ? deriveSurfaceLabel(terminalStates.get(item.id) ?? createTerminalPaneState(), appTitleForPane, item.title)
         : item.title,
       browserDisplay: item.browserDisplay,
+      toolDirty: item.kind === 'tool' && getToolDirty(item.id) === true,
       status: activity.status,
       ringSeq: activity.ringSeq,
       todo: activity.todo,

@@ -1,3 +1,4 @@
+import { getToolDirty, recordToolDirty } from 'dormouse-lib/lib/tool-dirty-store';
 import { getToolAnnounce, resetToolAnnounces } from 'dormouse-lib/lib/tool-announce-store';
 import { applyTerminalSemanticEvents, snapshotTerminalState, removeTerminalPaneState, countRunningSessionsIn, getTerminalPaneState, isPaneOscDriven } from 'dormouse-lib/lib/terminal-state-store';
 // @vitest-environment jsdom
@@ -1024,7 +1025,7 @@ describe("workspaceDropTarget", () => {
 });
 
 
-it('restores volatile Tool browser state without publishing it in the durable Workspace', async () => {
+it.each([true, false])('restores volatile Tool browser/dirty state (%s) without publishing it in the durable Workspace', async dirty => {
   resetToolAnnounces();
   const move = payload();
   const stable = { surfaceType: 'tool', command: 'pnpm storybook', toolRender: 'ab-screencast', toolPort: 'announced' };
@@ -1035,23 +1036,29 @@ it('restores volatile Tool browser state without publishing it in the durable Wo
   };
   const browser = { ...stable, url: 'http://localhost:6006/edited', session: 'browser-to-keep', renderMode: 'ab-screencast', toolAnnouncedPort: 6006 };
   const announce = { port: 6006, name: null, key: null, dehydrate: false, persist: null };
-  arrivals = [Object.assign(move, { tools: { 'pane-a': browser }, terminals: { 'pane-a': { serialized: '', toolAnnounce: announce } } })];
+  arrivals = [Object.assign(move, { tools: { 'pane-a': browser }, terminals: { 'pane-a': { serialized: '', toolAnnounce: announce, toolDirty: dirty } } })];
   const plans = await bootFromTearOut(fakePlatform());
   expect(plans?.[WORKSPACE_ID].restoredLathLayout).toMatchObject({ leafMeta: { 'pane-a': { params: browser } } });
   expect(getToolAnnounce('pane-a')).toEqual(announce);
+  expect(getToolDirty('pane-a')).toBe(dirty);
+  expect(JSON.stringify(move.workspace.session)).not.toContain('toolDirty');
+  recordToolDirty('pane-a', null);
   expect(move.workspace.session.lathLayout).toMatchObject({ leafMeta: { 'pane-a': { params: stable } } });
   expect(JSON.stringify(move.workspace.session)).not.toContain('browser-to-keep');
   resetToolAnnounces();
 });
 
-it('sends Tool browser bindings only with volatile transfer content', async () => {
+it('sends Tool browser bindings and explicit clean only with volatile transfer content', async () => {
+  recordToolDirty('pane-a', false);
   initWorkspaceMoves(fakePlatform([], { marks: { 'pane-a': 42 } }));
   const move = { ...prepared(), tools: { 'pane-a': { surfaceType: 'tool', session: 'browser-to-keep' } } };
   registerWallHandle(stubWallHandle(WORKSPACE_ID, { prepareWorkspaceTransfer: async () => move }));
   void transferWorkspaceTo(WORKSPACE_ID, 'ws-2');
   await contentSent();
   const [, args] = mocks.invoke.mock.calls.find(([cmd]) => cmd === 'transfer_workspace_content')!;
-  expect(args).toMatchObject({ content: { tools: move.tools } });
+  expect(args).toMatchObject({ content: { tools: move.tools, terminals: { 'pane-a': { toolDirty: false } } } });
   const [, persisted] = mocks.invoke.mock.calls.find(([cmd]) => cmd === 'transfer_workspace')!;
   expect(JSON.stringify(persisted)).not.toContain('browser-to-keep');
+  expect(JSON.stringify(persisted)).not.toContain('toolDirty');
+  recordToolDirty('pane-a', null);
 });

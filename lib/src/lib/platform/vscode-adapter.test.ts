@@ -1,3 +1,4 @@
+import { getToolDirty, recordToolDirty } from '../tool-dirty-store';
 import { getToolAnnounce, resetToolAnnounces } from '../tool-announce-store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -222,6 +223,24 @@ describe('VSCodeAdapter PTY exit handling', () => {
     windowTarget.dispatchEvent(hostMessage({ type: 'alert:watchedCommands', names: ['claude', 'npm'] }));
 
     expect(snapshots).toEqual([['claude', 'npm']]);
+  });
+
+  it('receives dirty state/reset messages and retains ordered replay reports through the semantic batch', () => {
+    new VSCodeAdapter();
+    const id = 'dirty-vscode';
+    windowTarget.dispatchEvent(hostMessage({ type: 'terminal:toolState', id, dirty: true }));
+    expect(getToolDirty(id)).toBe(true);
+    windowTarget.dispatchEvent(hostMessage({ type: 'terminal:toolState', id, dirty: null }));
+    expect(getToolDirty(id)).toBeNull();
+    const before = postMessage.mock.calls.length;
+    windowTarget.dispatchEvent(hostMessage({ type: 'pty:replay', id, data: '\x1b]633;C\x07\x1b]367;state;{"v":1,"dirty":false}\x07\x1b]633;D;0\x07' }));
+    expect(getToolDirty(id)).toBe(false);
+    expect(postMessage.mock.calls).toHaveLength(before);
+    windowTarget.dispatchEvent(hostMessage({ type: 'pty:replay', id, data: 'tail without state' }));
+    expect(getToolDirty(id)).toBe(false);
+    windowTarget.dispatchEvent(hostMessage({ type: 'pty:replay', id, data: '\x1b]633;C\x07' }));
+    expect(getToolDirty(id)).toBeNull();
+    recordToolDirty(id, null);
   });
 
   it('receives owner-parsed Tool announcements and reconstructs them on replay', () => {

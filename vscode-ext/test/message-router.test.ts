@@ -136,6 +136,21 @@ it('reports rejected helper creation as an exited terminal', () => {
   } finally { disposable.dispose(); }
 });
 
+it('forwards dirty reports and command resets in order only to the PTY owner', () => {
+  const owner = fakeWebview();
+  const other = fakeWebview();
+  const first = router.attachRouter(owner.channel, {});
+  const second = router.attachRouter(other.channel, {});
+  try {
+    owner.send({ type: 'dormouse:init' });
+    other.send({ type: 'dormouse:init' });
+    owner.send({ type: 'pty:spawn', id: 'dirty-owner', options: { cwd: '/repo' } });
+    ptys.callbacks!.onData('dirty-owner', '\x1b]367;state;{"v":1,"dirty":true}\x07\x1b]633;C\x07\x1b]367;state;{"v":1,"dirty":false}\x07\x1b]367;serve;{"port":6006}\x07\x1b]633;D;0\x07');
+    expect(owner.posted.filter(message => message.type === 'terminal:toolState').map(message => message.dirty)).toEqual([true, null, false]);
+    expect(other.posted.filter(message => message.type === 'terminal:toolState')).toEqual([]);
+  } finally { first.dispose(); second.dispose(); }
+});
+
 it('forwards command-start resets and Tool announcements in stream order only to the owning webview', () => {
   const owner = fakeWebview();
   const other = fakeWebview();

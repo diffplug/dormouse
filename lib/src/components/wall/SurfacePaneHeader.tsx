@@ -16,6 +16,8 @@ import {
   SplitVerticalIcon,
   XIcon,
 } from '@phosphor-icons/react';
+import { ToolDirtyIndicator, useToolDirty } from '../ToolDirtyIndicator';
+import { isToolParams } from './browser-surface';
 import { HeaderActionButton } from '../HeaderActionButton';
 import { HEADER_PALETTE_TRANSITION_CLASS, POPUP_SURFACE_CLASS, paneZoomButtonClass, TERMINAL_TOP_RADIUS_CLASS } from '../design';
 import { NotepadHeaderButton } from './NotepadHeaderButton';
@@ -39,7 +41,9 @@ import {
   useDialogKeyboardOwner,
 } from './wall-context';
 
-export function SurfacePaneHeader({ id, title }: PaneProps) {
+export function SurfacePaneHeader({ id, title, params }: PaneProps) {
+  const reportedDirty = useToolDirty(id);
+  const dirty = isToolParams(params) && reportedDirty === true;
   const mode = useContext(ModeContext);
   const selectedId = useContext(SelectedIdContext);
   const windowFocused = useContext(WindowFocusedContext);
@@ -90,6 +94,8 @@ export function SurfacePaneHeader({ id, title }: PaneProps) {
   const overflowRef = useRef<HTMLButtonElement>(null);
   const [width, setWidth] = useState(Number.POSITIVE_INFINITY);
   const compact = width < 180;
+  // A dirty dot and its compact gap take 8px beside the persistent controls.
+  const inlinePaneActions = width >= 72 + (dirty ? 8 : 0);
   const [menuAnchor, setMenuAnchor] = useState<DOMRect | null>(null);
   const noteCount = useNoteCount(id);
   const overflowLabel = `Browser controls${noteCount ? `, ${noteCount} ${noteCount === 1 ? 'note' : 'notes'}` : ''}`;
@@ -262,6 +268,7 @@ export function SurfacePaneHeader({ id, title }: PaneProps) {
       className={`flex h-full min-w-0 flex-1 cursor-grab items-center ${compact ? 'gap-0.5 px-1' : 'gap-1.5 pl-2 pr-[5px]'} ${TERMINAL_TOP_RADIUS_CLASS} text-sm leading-none font-mono select-none active:cursor-grabbing ${HEADER_PALETTE_TRANSITION_CLASS} ${isActiveHeader ? 'bg-header-active-bg text-header-active-fg' : 'bg-header-inactive-bg text-header-inactive-fg'}`}
       onMouseDown={() => actions.onClickPanel(id)}
     >
+      <ToolDirtyIndicator dirty={dirty} />
       {compact ? (
         <button ref={overflowRef} type="button" aria-label={overflowLabel}
           aria-haspopup="dialog" aria-expanded={menuAnchor !== null}
@@ -272,10 +279,10 @@ export function SurfacePaneHeader({ id, title }: PaneProps) {
           {noteCount ? <NotepadIcon size={14} weight="fill" /> : <DotsThreeIcon size={14} />}
         </button>
       ) : browserControls}
-      {width >= 72 && paneActions}
+      {inlinePaneActions && paneActions}
       {compact && menuAnchor && <BrowserHeaderPopover anchor={menuAnchor} onClose={closeMenu}>
         {browserControls}
-        {width < 72 && paneActions}
+        {!inlinePaneActions && paneActions}
       </BrowserHeaderPopover>}
     </div>
   );

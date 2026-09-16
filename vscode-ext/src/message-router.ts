@@ -210,6 +210,7 @@ type ProcessedExitListener = (id: string, exitCode: number) => void;
 const processedExitListeners = new Set<ProcessedExitListener>();
 type SemanticEventsListener = (id: string, events: TerminalSemanticEvent[]) => void;
 const semanticEventsListeners = new Set<SemanticEventsListener>();
+const toolStateListeners = new Set<(id: string, dirty: boolean | null) => void>();
 const toolAnnounceListeners = new Set<(id: string, announce: ToolAnnounce | null) => void>();
 
 export function onProcessedPtyData(listener: ProcessedDataListener): () => void {
@@ -293,11 +294,14 @@ function createOwnerPtyStream(id: string): ProcessedPtyStream {
       // this process cannot reach, so the router withholds them and forwards
       // them to the webviews instead — and only the rare chunk that carries one
       // pays for the filtered copy.
-      const hasAnnounce = events.some(event => event.kind === 'toolAnnounce');
-      applyTerminalProtocolEvents(alertManager, id, hasAnnounce ? events.filter(event => event.kind !== 'toolAnnounce') : events);
+      const hasToolEvent = events.some(event => event.kind === 'toolAnnounce' || event.kind === 'toolState');
+      applyTerminalProtocolEvents(alertManager, id, hasToolEvent ? events.filter(event => event.kind !== 'toolAnnounce' && event.kind !== 'toolState') : events);
       // A null announcement retires the previous command's hint in the owning
       // webview. Keep starts and serves in parse order, including one chunk.
       for (const event of events) {
+        if (event.kind === 'toolState' || (event.kind === 'semantic' && event.event.type === 'commandStart')) {
+          for (const listener of toolStateListeners) listener(id, event.kind === 'toolState' ? event.state.dirty : null);
+        }
         if (event.kind === 'toolAnnounce' || (event.kind === 'semantic' && event.event.type === 'commandStart')) {
           const announce = event.kind === 'toolAnnounce' ? event.announce : null;
           for (const listener of toolAnnounceListeners) listener(id, announce);
@@ -561,6 +565,10 @@ export function attachRouter(
       if (ownedPtyIds.has(id)) post({ type: 'terminal:toolAnnounce', id, announce } satisfies ExtensionMessage);
     };
     toolAnnounceListeners.add(onToolAnnounce);
+    const onToolState = (id: string, dirty: boolean | null) => {
+      if (ownedPtyIds.has(id)) post({ type: 'terminal:toolState', id, dirty } satisfies ExtensionMessage);
+    };
+    toolStateListeners.add(onToolState);
     const removeSemanticListener = onTerminalSemanticEvents((id, events) => {
       if (!ownedPtyIds.has(id)) return;
       post({ type: 'terminal:semanticEvents', id, events } satisfies ExtensionMessage);
@@ -580,6 +588,7 @@ export function attachRouter(
       removeProcessedListener();
       removeSemanticListener();
       toolAnnounceListeners.delete(onToolAnnounce);
+      toolStateListeners.delete(onToolState);
       removeExitListener();
       removeAlertListener();
     };

@@ -196,16 +196,35 @@ Source of truth: `toolTakesOverCaller` / `toolRerunsInCaller` / `callerStillPlac
 
 ## OSC 367
 
-**Must consume OSC 367 at the PTY owner's parser**, including malformed and unknown verbs, and emit no reply. `serve` is the only implemented verb. The escape registry is `docs/specs/terminal-escapes.md`.
+**Must consume OSC 367 at the PTY owner's parser**, including malformed and unknown verbs, and emit no reply. `serve` and `state` are implemented verbs. The escape registry is `docs/specs/terminal-escapes.md`.
 
-- **Must sanitize and bound the payload before retaining it.** `ToolAnnounce` and `parseToolAnnounce` own the field shapes and validation limits.
+- **Must sanitize and bound the payload before retaining it.** `ToolAnnounce` / `parseToolAnnounce` and `ToolState` / `parseToolState` own the field shapes and validation limits.
 - **Must treat an optional serve `path` as a path/query on the discovered port, never as another authority.** Accept at most 2,048 characters starting with one `/`, with no backslash, ASCII whitespace/control, or DEL; invalid paths are ignored and the default is `/`. The port still must belong to the designated Session's process tree. Live binding memory includes the path; durable saves omit it.
-- **Must forward parsed announcements and command-start resets in stream order to the owning renderer.** A start clears the previous command's announcement; a later serve in the same chunk survives. Standalone uses `terminal:protocolEvents`; VS Code uses nullable `terminal:toolAnnounce` scoped to the owning webview, with null clearing the hint. The fake adapter applies locally.
-- **Must reconstruct announcements and resets from raw replay without emitting replies**, preserving transferred announcements when since-mark replay has no command start, and clear the renderer record on Session disposal. Ordinary terminal announcements stay inert.
+- **Must forward parsed announcements, state reports, and command-start resets in stream order to the owning renderer.** A start clears the previous command's announcement and unsaved state; later reports in that chunk survive. Standalone uses `terminal:protocolEvents`; VS Code uses nullable `terminal:toolAnnounce` and `terminal:toolState` scoped to the owning webview, with null clearing the corresponding record. The fake adapter applies locally.
+- **Must reconstruct announcements, state, and resets from raw replay without emitting replies**, preserving transferred announcements when since-mark replay has no command start, and clear the renderer record on Session disposal. Ordinary terminal announcements stay inert.
 - Reserved: **Must retain `name`, `dehydrate`, and `persist` as inert parsed fields**, serving the announced-name and D1/D2 items under [Future](#future). Neither `persist: never` nor a `dehydrate` verb changes current persistence.
-- Reserved: **Never assign a third OSC 367 verb**; `dehydrate` belongs to D2 under [Future](#future), while existing title/progress protocols keep those roles.
+- Reserved: **Must reserve `dehydrate` for D2 under [Future](#future)**; existing title/progress protocols keep those roles.
 
 Source of truth: `TerminalProtocolParser` / `collectTerminalProtocolAlerts` in `lib/src/lib/terminal-protocol.ts`; `parseToolAnnounce` in `lib/src/lib/tool-announce.ts`; `recordToolAnnounce` in `lib/src/lib/tool-announce-store.ts`; `createOwnerPtyStream` in `vscode-ext/src/message-router.ts`; `ownerStream` in `lib/src/host/remote/sidecar-entry.ts`. Tests: `lib/src/lib/tool-announce.test.ts`, `standalone/scripts/dev-agent-browser-announce.test.mjs`.
+
+## Unsaved changes
+
+**Must accept a Tool's `OSC 367;state;{"v":1,"dirty":true}` report as unsaved state**, with `false` reporting clean. Require version 1 and a boolean; malformed, oversized, and unknown-version reports leave the last state unchanged. State reports never change serving hints, Tool identity, or designation; ordinary terminal reports have no dirty UI. The parser consumes them without replying.
+
+**Must distinguish unreported state from clean.** Start unknown, update immediately on valid reports, and return to unknown on command start, explicit restart, or Session disposal. Command completion is not a save: retain its last report until reset. Serve announcements never clear unsaved state.
+
+**Must retain unsaved state through minimize/reattach, renderer changes, and live Workspace transfer**, and reconstruct it in stream order during raw replay. Never write it to durable session metadata; a cold-started Tool reports its own new state. Layout owns the Pane and Door indicator under `docs/specs/layout.md` → Pane header.
+
+**Must treat this state as indication only.** It neither writes files nor acknowledges a save, changes kill/close behavior, or authorizes automatic reaping. Save coordination and close protection are under [Future](#future).
+
+A Tool writes reports to its terminal output, for example:
+
+```sh
+printf '\033]367;state;{"v":1,"dirty":true}\033\\'
+printf '\033]367;state;{"v":1,"dirty":false}\033\\'
+```
+
+Source of truth: `parseToolState` in `lib/src/lib/tool-state.ts`; `getToolDirty` / `recordToolDirty` / `recordToolStates` in `lib/src/lib/tool-dirty-store.ts`; `ToolDirtyIndicator` in `lib/src/components/ToolDirtyIndicator.tsx`. Tests: `lib/src/lib/tool-state.test.ts`, `lib/src/components/wall/SurfacePaneHeader.test.tsx`, `lib/src/components/Baseboard.test.tsx`.
 
 ## Security
 
@@ -232,6 +251,8 @@ Source of truth: `PersistedToolMetadata` in `lib/src/lib/session-types.ts`; `sav
 ## Future
 
 **Scope: dor-tools** — remaining design, in implementation order.
+
+- **Save coordination and close protection.** Optional save requests with completion/failure and protection against clearing newer edits; dirty-aware Pane/Workspace/app closure. Establish an explicit safe-to-stop contract before automatic reaping; clean or unknown state alone is insufficient.
 
 - **D1 — reaping without cooperation.** Idle-threshold reap +
   rehydrate-from-args + `persist: "never"`: every stateless tool, no new API,

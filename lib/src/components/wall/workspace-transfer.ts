@@ -1,3 +1,4 @@
+import { getToolDirty } from '../../lib/tool-dirty-store';
 import type { TransferredTools } from './tool-transfer';
 import { getToolAnnounce } from '../../lib/tool-announce-store';
 import type { ToolAnnounce } from '../../lib/tool-announce';
@@ -139,6 +140,7 @@ export interface TransferredTerminal {
    *  Window no longer held. */
   serialized: string;
   toolAnnounce?: ToolAnnounce;
+  toolDirty?: boolean;
   /** Grid at serialization, applied before replay and before destination fitting. */
   grid?: TerminalGrid;
   semanticState?: TransferredTerminalState;
@@ -177,7 +179,8 @@ export async function captureTransferContent(
     const grid = terminal ? { cols: terminal.cols, rows: terminal.rows } : undefined;
     const mark = marks.get(id);
     const toolAnnounce = getToolAnnounce(id);
-    terminals[id] = { serialized, ...(toolAnnounce ? { toolAnnounce } : {}), ...(grid ? { grid, semanticState: snapshotTerminalState(id) } : {}), ...(mark === undefined ? {} : { mark }) };
+    const toolDirty = getToolDirty(id);
+    terminals[id] = { serialized, ...(toolDirty === null ? {} : { toolDirty }), ...(toolAnnounce ? { toolAnnounce } : {}), ...(grid ? { grid, semanticState: snapshotTerminalState(id) } : {}), ...(mark === undefined ? {} : { mark }) };
   }
   return { terminals };
 }

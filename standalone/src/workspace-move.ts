@@ -1,3 +1,4 @@
+import { recordToolDirty } from "dormouse-lib/lib/tool-dirty-store";
 import { restoreToolParams } from 'dormouse-lib/components/wall/tool-transfer';
 import { recordToolAnnounce } from 'dormouse-lib/lib/tool-announce-store';
 import { pauseAlertDelivery, resumeAlertDelivery, snapshotAlertDelivery, restoreAlertDelivery, forgetAlertDelivery } from 'dormouse-lib/lib/alert-delivery-state';
@@ -427,6 +428,7 @@ async function planArrival(
     if (terminal.alertDelivery) restoreAlertDelivery(id, terminal.alertDelivery);
     if (terminal.semanticState) restoreTransferredTerminalState(id, terminal.semanticState);
     if (terminal.toolAnnounce) recordToolAnnounce(id, terminal.toolAnnounce);
+    recordToolDirty(id, typeof terminal.toolDirty === 'boolean' ? terminal.toolDirty : null);
   }
   const live = await collectLivePtys(platform, {
     // The token rides through Rust to the sidecar's `list` and comes back on the

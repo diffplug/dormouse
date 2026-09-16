@@ -1,3 +1,4 @@
+import { recordToolDirty } from '../../lib/tool-dirty-store';
 import { createSerialQueue } from '../../host/remote/serial-queue';
 import { useCallback, type MutableRefObject } from 'react';
 import { sessionForKey } from 'dor-lib-common/agent-browser';
@@ -388,6 +389,7 @@ export async function restartSurfaceInPlace(
   if (signal?.aborted || interrupted === 'aborted') return RESTART_CANCELLED;
   if (interrupted === 'timeout') return { ok: false, message: 'did not return to a prompt after interrupt' };
   const previousRun = getTerminalPaneState(id).lastCommand?.id ?? null;
+  recordToolDirty(id, null);
   platform.writePty(id, `${command}\r`);
   const restarted = await waitForTerminalState(
     id,
@@ -435,6 +437,7 @@ async function runToolInCallerPane(
   // Whatever this Session announced under its previous command is not this run's:
   // a stale OSC 367 would hand the tool that port, or re-key it.
   clearToolAnnounce(id);
+  recordToolDirty(id, null);
   if (tool.become) {
     // A rename the user made outlives the transformation; an untouched fallback
     // title becomes the tool's, as a spawned one would be.

@@ -46,11 +46,13 @@ Panes are separated by a 7px gap (`PANE_GUTTER_PX`), odd so the 1px selection ri
 
 ### Pane header
 
+**Must keep a Tool's unsaved-change dot visible in its Pane header and minimized Door**, across header widths and terminal/browser faces. Use inherited foreground, without animation; label and tooltip it “Unsaved changes”. Show it only for an explicit dirty report; never hide it inside browser overflow controls or replace Kill. State semantics belong to `docs/specs/dor-tool.md` → Unsaved changes.
+
 A 30px header doubling as a drag handle: **a `pointerdown` past a 5px threshold begins a Lath pane drag**; below the threshold the header's own click behavior stands. It uses `cursor-grab` / `active:cursor-grabbing`, `select-none`, the shared terminal top radius from `lib/src/components/design.tsx`, and the `--color-header-active-*` / `--color-header-inactive-*` token pairs (VSCode file-tree list colors).
 
 **Must use browser chrome for a serving Tool, with a Terminal Context disclosure for its serving terminal.** Tool composition belongs to `docs/specs/dor-tool.md` → Lifecycle.
 
-**Must size browser chrome by available pane width, excluding Tool context.** Hide inline split/zoom below 420px and navigation below 360px. Below 180px, move browser controls into a keyboard-accessible, viewport-clamped popover; minimize/kill remain inline until 72px, then join the popover. A filled notepad glyph and note count identify saved notes on its trigger. Long keys and connection labels yield before controls. (rationale)
+**Must size browser chrome by available pane width, excluding Tool context.** Hide inline split/zoom below 420px and navigation below 360px. Below 180px, move browser controls into a keyboard-accessible, viewport-clamped popover; minimize/kill remain inline until 72px (80px with the unsaved-change dot), then join the popover. A filled notepad glyph and note count identify saved notes on its trigger. Long keys and connection labels yield before controls. (rationale)
 
 Source of truth: `SurfacePaneHeader` in `lib/src/components/wall/SurfacePaneHeader.tsx`; tests: `lib/src/components/wall/SurfacePaneHeader.test.tsx`; stories: `lib/src/stories/BrowserChromeHeader.stories.tsx`.
 

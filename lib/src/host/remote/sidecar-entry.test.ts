@@ -487,6 +487,15 @@ describe('the webview’s half of the parse', () => {
     ]);
   });
 
+  it('forwards dirty state and command resets separately from serve metadata', () => {
+    bridge.onPtyEvent('data', { id: 'pty-1', data: '\x1b]367;state;{"v":1,"dirty":true}\x07\x1b]633;C\x07\x1b]367;state;{"v":1,"dirty":false}\x07' });
+    expect(emitted<{ events: unknown[] }>('terminal:protocolEvents')[0]?.events).toEqual([
+      { kind: 'toolState', state: { dirty: true } },
+      { kind: 'semantic', event: { type: 'commandStart', source: 'osc633_boundaries' } },
+      { kind: 'toolState', state: { dirty: false } },
+    ]);
+  });
+
   it('preserves command-start resets between forwarded Tool announcements', () => {
     bridge.onPtyEvent('data', { id: 'pty-1', data: '\x1b]367;serve;{"port":6006}\x07\x1b]633;C\x07\x1b]367;serve;{"port":6007}\x07' });
     expect(emitted<{ events: unknown[] }>('terminal:protocolEvents')[0]?.events).toEqual([
