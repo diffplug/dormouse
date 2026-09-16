@@ -69,6 +69,14 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
  * review; forgetting the guard entirely does not.
  */
 const ALLOWED = {
+  'standalone/scripts/dev-run.mjs':
+    'The Vite dev server owns its own request path, so neither guard module can '
+    + 'run on it. What stands in for them is pinned at the bind: cors: false, '
+    + 'because the modules Vite serves carry the browser-dev bridge token and '
+    + 'Vite\'s default admits every http://localhost:* origin to read them; and '
+    + 'allowedHosts: [], the Host check that makes DNS rebinding fail. Dev-only '
+    + 'and unbundled — it ships in nothing. See standalone/scripts/dev-run.mjs '
+    + 'and standalone/scripts/dev-host-guard.mjs for the bridge beside it.',
   'vscode-ext/src/agent-browser-host.ts':
     'The stream relay authenticates with a single-use 64-hex token (60s TTL, '
     + 'pinned to one target port) and drops Origin rather than rewriting it, so '
@@ -111,6 +119,12 @@ const BIND_FORMS = [
   { label: '@hono/node-server', re: `\\bserve\\(\\s*\\{[^}]*?hostname\\s*:\\s*${LOOPBACK}` },
   { label: 'ws, explicit loopback host', re: `${WS_NEW}host\\s*:\\s*${LOOPBACK}` },
   { label: 'ws, port only', re: `${WS_NEW}port\\s*:` },
+  // Vite binds from config rather than from a call argument: `createServer({
+  // server: { host } })` then an argument-less `listen()`, so neither `.listen`
+  // form can see it. Matched on the `server` block rather than on `createServer`
+  // because the same block is what a `vite.config.ts` — or Vitest, or
+  // Storybook's builder — passes to the same server.
+  { label: 'vite, server.host', re: `\\bserver\\s*:\\s*\\{[^}]*?host\\s*:\\s*${LOOPBACK}` },
 ];
 
 const LISTEN_RE = new RegExp(BIND_FORMS.map((form) => form.re).join('|'), 'gs');

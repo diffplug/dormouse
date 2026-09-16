@@ -62,6 +62,7 @@ const FIXTURES = [
   ['ws, explicit loopback host', "\nexport function __selftest() { return new WebSocket.Server({ host: '127.0.0.1' }); }\n"],
   ['ws, port only', '\nexport function __selftest() { return new WebSocketServer({ port: 9999 }); }\n'],
   ['ws, port only', '\nexport function __selftest() { return new WebSocket.Server({ port: 9999 }); }\n'],
+  ['vite, server.host', "\nexport const __selftest = { server: { host: '127.0.0.1', strictPort: true } };\n"],
 ];
 
 const selftest = makeSelftest('loopback-lint.mjs', '.loopback-selftest.bak');
