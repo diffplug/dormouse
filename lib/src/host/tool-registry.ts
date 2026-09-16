@@ -7,6 +7,8 @@
  * bundle.
  */
 import { parse as parseYaml } from 'yaml';
+import { isRecord } from '../lib/is-record';
+import { hasShellInputControls } from 'dor/commands/shell-quote';
 
 /** Where a tool file came from. `$PROJECT_ROOT` exists only for `repo`. */
 export type ToolScope = 'repo' | 'user';
@@ -76,10 +78,6 @@ export function usesTarget(elements: readonly string[]): boolean {
 // destructive failure (two tools, one port), where failing to parse is loud.
 const KNOWN_PRESPAWN_FIELDS = new Set(['prespawn_dedupe']);
 const KNOWN_ENTRY_FIELDS = new Set(['run', 'render', 'port', 'prespawn_dedupe']);
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 /** Coerce one `prespawn_dedupe` value to its element list. A bare scalar is a
  *  one-element key, unambiguous because the field has exactly one value shape
@@ -155,9 +153,10 @@ export function parseToolFile(
 
     const run = rawEntry.run;
     if (Array.isArray(run)) {
-      if (!run.length || !run.every(arg => typeof arg === 'string' && !arg.includes('\0')) || !run[0].trim()) {
+      if (!run.length || !run.every(arg => typeof arg === 'string') || !run[0].trim()) {
         throw new ToolFileError(`${where}: 'run' must be a non-empty argument list`);
       }
+      if (run.some(hasShellInputControls)) throw new ToolFileError(`${where}: run arguments cannot contain terminal control characters`);
       validateSubstitutions(run.filter(arg => arg !== '$ARGS'), scope, where);
     } else if (typeof run !== 'string' || run.trim() === '') {
       throw new ToolFileError(`${where}: 'run' is required and must be a non-empty string or argument list`);

@@ -1594,15 +1594,16 @@ describe('Wall on the Lath engine', () => {
       await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
       await flush();
       const ids: string[] = [];
-      for (const target of ['a b;$(bad).md', 'second.md', 'a b;$(bad).md']) {
+      for (const [cwd, target] of [['/repo', 'a b;$(bad).md'], ['/repo', 'second.md'], ['/repo', 'a b;$(bad).md'], ['/repo/subdir', 'a b;$(bad).md']]) {
         const respond = vi.fn();
         await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
-          method: SURFACE_CONTROL_METHODS.tool, params: { name: 'viewer', cwd: '/repo', args: [target] }, respond,
+          method: SURFACE_CONTROL_METHODS.tool, params: { name: 'viewer', cwd, args: [target] }, respond,
         } })));
         ids.push(respond.mock.calls[0][0].result.surfaceId);
       }
       expect(ids[0]).not.toBe(ids[1]);
       expect(ids[2]).toBe(ids[0]);
+      expect(ids[3]).not.toBe(ids[0]);
       const allow = [...container.querySelectorAll('button')].find(button => button.textContent?.includes('Always allow for folder'))!;
       await act(async () => allow.click());
       await flush();
@@ -1699,7 +1700,7 @@ describe('Wall on the Lath engine', () => {
       });
       await flush();
       expect(container.querySelector(`[data-session-id="${toolId}"]`)).not.toBeNull();
-      expect(pendingShellOpts.get(toolId)?.untouched).toBe(true);
+      expect(pendingShellOpts.get(toolId)?.untouched).toBe(false);
     } finally {
       if (toolId) pendingShellOpts.delete(toolId);
       setToolsEnabled(false);
@@ -1762,7 +1763,7 @@ describe('Wall on the Lath engine', () => {
 
       expect(fake.hasPty(toolId)).toBe(true);
       expect(getTerminalSpy).toHaveBeenCalledWith(toolId);
-      expect(consumedOpts).toMatchObject({ cwd: '/repo', command: 'pnpm storybook', untouched: true });
+      expect(consumedOpts).toMatchObject({ cwd: '/repo', command: 'pnpm storybook', untouched: false });
       expect(pendingShellOpts.has(toolId)).toBe(false);
       expect(container.textContent).not.toContain('Always allow');
       expect(container.querySelector('[role="alert"]')).toBeNull();
@@ -1999,6 +2000,67 @@ describe('Wall on the Lath engine', () => {
       expect((fake.getState() as { panes: Array<{ surfaceType?: string }> }).panes[0]?.surfaceType).not.toBe('tool');
     } finally {
       controller.abort(); releaseClosing?.(); fake.clearInputHandler('pane-a');
+      act(() => terminalRegistry.removeTerminalPaneState('pane-a'));
+      setToolsEnabled(false);
+    }
+  });
+
+  it('rejects anonymous Tool argv containing terminal editing controls before launching', async () => {
+    setToolsEnabled(true);
+    try {
+      await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
+      await flush();
+      const write = vi.spyOn(fake, 'writePty');
+      const respond = vi.fn();
+      await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+        method: SURFACE_CONTROL_METHODS.tool, surfaceId: 'pane-a',
+        params: { command: ['view', '/tmp/\x15printf unwanted\n#'], cwd: '/repo' }, respond,
+      } })));
+      expect(respond).toHaveBeenCalledWith({ ok: false, error: 'tool arguments cannot contain terminal control characters' });
+      expect(write).not.toHaveBeenCalled();
+      expect(leafCount()).toBe(1);
+    } finally { setToolsEnabled(false); }
+  });
+
+  it.each([
+    { kind: 'powershell' as const, defaultShell: '/bin/bash', command: "& 'program path' 'it''s.txt'" },
+    { kind: 'posix' as const, defaultShell: 'pwsh.exe', command: "'program path' 'it'\\''s.txt'" },
+  ])('quotes takeover and keyed rerun for the existing $kind Session after changing defaults', async ({ kind, defaultShell, command }) => {
+    setToolsEnabled(true);
+    const controller = new AbortController();
+    const typed: string[] = [];
+    vi.spyOn(terminalRegistry, 'getTerminalShellKind').mockImplementation(id => id === 'pane-a' ? kind : null);
+    vi.spyOn(terminalRegistry, 'getDefaultShellOpts').mockReturnValue({ shell: defaultShell });
+    Object.assign(fake, { toolControl: vi.fn(async () => ({ ...okToolLookup(['/repo']), run: ['program path', "it's.txt"] })) });
+    try {
+      await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
+      await flush();
+      act(() => fake.spawnPty('pane-a'));
+      fake.setInputHandler('pane-a', data => typed.push(data));
+      terminalRegistry.seedTerminalManualCwd('pane-a', '/repo');
+      for (const status of ['takeover', 'adopted']) {
+        act(() => reportRunning('pane-a', 'dor tool storybook'));
+        const respond = vi.fn();
+        await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+          method: SURFACE_CONTROL_METHODS.tool, surfaceId: 'pane-a',
+          params: { name: 'storybook', cwd: '/repo' }, signal: controller.signal, respond,
+        } })));
+        await waitUntil(() => respond.mock.calls.length > 0);
+        expect(respond).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status, command }) }));
+        const before = typed.length;
+        act(() => promptBack('pane-a'));
+        await waitUntil(() => typed.length > before);
+        expect(typed.at(-1)).toBe(`${command}\r`);
+        act(() => {
+          reportRunning('pane-a', command);
+          terminalRegistry.applyTerminalSemanticEvents('pane-a', [{ type: 'commandFinish', exitCode: 0 }, { type: 'promptStart' }]);
+        });
+        await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
+      }
+      expect(leafCount()).toBe(1);
+    } finally {
+      await act(async () => { controller.abort(); await new Promise(resolve => setTimeout(resolve, 125)); });
+      fake.clearInputHandler('pane-a');
       act(() => terminalRegistry.removeTerminalPaneState('pane-a'));
       setToolsEnabled(false);
     }

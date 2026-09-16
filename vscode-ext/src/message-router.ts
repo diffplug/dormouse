@@ -289,9 +289,16 @@ function createOwnerPtyStream(id: string): ProcessedPtyStream {
   return createProcessedPtyStream({
     colorProvider: themeColorProvider,
     onEvents(events) {
-      applyTerminalProtocolEvents(alertManager, id, events.filter(event => event.kind !== 'toolAnnounce'));
-      for (const event of events) if (event.kind === 'toolAnnounce') {
-        for (const listener of toolAnnounceListeners) listener(id, event.announce);
+      // `applyTerminalProtocolEvents` records announcements into renderer state
+      // this process cannot reach, so the router withholds them and forwards
+      // them to the webviews instead — and only the rare chunk that carries one
+      // pays for the filtered copy.
+      const hasAnnounce = events.some(event => event.kind === 'toolAnnounce');
+      applyTerminalProtocolEvents(alertManager, id, hasAnnounce ? events.filter(event => event.kind !== 'toolAnnounce') : events);
+      if (hasAnnounce) {
+        for (const event of events) if (event.kind === 'toolAnnounce') {
+          for (const listener of toolAnnounceListeners) listener(id, event.announce);
+        }
       }
       const semanticEvents = collectTerminalSemanticEvents(events);
       alertManager.applyTerminalSemanticEvents(id, semanticEvents);

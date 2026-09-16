@@ -70,10 +70,8 @@ describe('ToolPanel', () => {
     expect(half('browser').style.visibility).toBe('hidden');
   });
 
-  it('shows the browser once serving, ignoring retired terminal-pin params', () => {
+  it('shows the browser once serving', () => {
     show(serving);
-    expect(half('browser').style.visibility).toBe('visible');
-    show({ ...serving, showTerminal: true });
     expect(half('terminal').style.visibility).toBe('hidden');
     expect(half('browser').style.visibility).toBe('visible');
   });
@@ -108,11 +106,6 @@ describe('the port-conflict face', () => {
   it('mounts no browser for a conflict', () => {
     show(conflicted);
     expect(container.querySelector('[data-testid="browser"]')).toBeNull();
-  });
-
-  it('keeps a conflict visible despite retired terminal-pin params', () => {
-    show({ ...conflicted, showTerminal: true });
-    expect(half('terminal').style.visibility).toBe('hidden');
   });
 });
 
@@ -159,10 +152,5 @@ describe('the pending-approval face', () => {
     const labels = [...container.querySelectorAll('button')].map((b) => b.textContent ?? '');
     expect(labels.some((l) => l.includes('upstream'))).toBe(false);
     expect(labels.some((l) => l.includes('folder'))).toBe(true);
-  });
-
-  it('takes precedence over the terminal pin, since there is no terminal yet', () => {
-    show({ ...pending, showTerminal: true });
-    expect(container.querySelector('[data-testid="terminal"]')).toBeNull();
   });
 });
