@@ -1,5 +1,5 @@
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { PANE_MESSAGE_CLASS, TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
+import { PaneMessage, TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
 import { getPlatform } from '../../lib/platform';
 import { registerProxyOrigin } from '../../lib/iframe-proxy-registry';
 import { registerSurfaceFocusHandle } from '../../lib/terminal-registry';
@@ -425,13 +425,11 @@ export function IframePanel({ id, title, params }: PaneProps) {
 }
 
 function PanelMessage({ resolution, url }: { resolution: Resolution; url: string }) {
-  const base = `${PANE_MESSAGE_CLASS} text-muted`;
-
   if (resolution.kind === 'resolving') {
-    return <div className={base}>Connecting to <span className="ml-1 font-semibold">{url}</span>…</div>;
+    return <PaneMessage className="text-muted">Connecting to <span className="ml-1 font-semibold">{url}</span>…</PaneMessage>;
   }
   if (resolution.kind === 'empty') {
-    return <div className={base}>No iframe URL was provided.</div>;
+    return <PaneMessage className="text-muted">No iframe URL was provided.</PaneMessage>;
   }
   // proxied/raw render the iframe itself, never this fallback.
   if (resolution.kind !== 'error') return null;
@@ -442,14 +440,14 @@ function PanelMessage({ resolution, url }: { resolution: Resolution; url: string
   // can't front it. It refuses a non-http(s) target too (`normalizeConcreteOpenUrl`),
   // so pointing a refused scheme at it would be a dead end.
   return (
-    <div className={`${base} flex-col gap-2`}>
+    <PaneMessage className="text-muted" contentClassName="flex flex-col gap-2">
       <div>{messageFor(resolution)}</div>
       <div className="text-xs text-muted/80">
         {resolution.reason === 'non-http'
           ? 'Enter an http:// or https:// address in the URL bar above.'
           : <>For arbitrary web pages, use <code className="rounded bg-app-bg px-1 py-0.5">dor ab open {url}</code></>}
       </div>
-    </div>
+    </PaneMessage>
   );
 }
 
