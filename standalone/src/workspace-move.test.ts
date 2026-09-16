@@ -741,7 +741,7 @@ describe("the target half", () => {
     }
   });
 
-  it("unwinds the mount when adopt_done is refused, releasing the Sessions rather than killing them", async () => {
+  it("unwinds an expired arrival without preparing another move, even while a Tool is starting", async () => {
     const platform = fakePlatform();
     const killPty = vi.spyOn(platform, "killPty");
     const host = mocks.invoke.getMockImplementation()!;
@@ -749,14 +749,14 @@ describe("the target half", () => {
       // The `ARRIVAL_MAX` watchdog retired the record while this window was
       // wedged between the drain and the mount: Rust has handed the shells
       // back to the source, so `adopt_done` finds no arrival to settle.
-      if (cmd === "adopt_done") arrivals = [];
+      if (cmd === "adopt_done") {
+        expect(getTerminalInstance("pane-a")).not.toBeNull();
+        arrivals = [];
+      }
       return host(cmd, args);
     });
-    // The Wall this window mounts for the arrival, with its release observable.
-    const released = vi.fn();
-    registerWallHandle(stubWallHandle(WORKSPACE_ID, {
-      prepareWorkspaceTransfer: async () => prepared(released),
-    }));
+    const prepare = vi.fn(async () => { throw new Error("Wait for the Tool browser to connect before moving this Workspace"); });
+    registerWallHandle(stubWallHandle(WORKSPACE_ID, { prepareWorkspaceTransfer: prepare }));
     arrivals = [payload()];
     initWorkspaceMoves(platform);
     await settle();
@@ -770,7 +770,8 @@ describe("the target half", () => {
     expect(getWorkspaceBootPlan(WORKSPACE_ID)).toEqual({});
     // Its Sessions were released — the shells are the source's again — and
     // nothing was killed.
-    expect(released).toHaveBeenCalledTimes(1);
+    expect(prepare).not.toHaveBeenCalled();
+    expect(getTerminalInstance("pane-a")).toBeNull();
     expect(killPty).not.toHaveBeenCalled();
     expect(mocks.invoke).not.toHaveBeenCalledWith("adopt_failed", expect.anything());
   });
@@ -834,7 +835,7 @@ describe("the target half", () => {
 });
 
 describe("a transfer's content", () => {
-  it("guards close during preparation and releases the guard if preparation fails", async () => {
+  it.each(['probe failed', 'Approve or decline pending Tools before moving this Workspace', 'Wait for the Tool browser to connect before moving this Workspace'])("returns a preparation refusal without retaining the close guard (%s)", async reason => {
     let rejectPrepare!: (error: Error) => void;
     registerWallHandle(stubWallHandle(WORKSPACE_ID, {
       prepareWorkspaceTransfer: () => new Promise((_, reject) => { rejectPrepare = reject; }),
@@ -842,8 +843,8 @@ describe("a transfer's content", () => {
     const moving = transferWorkspaceTo(WORKSPACE_ID, "ws-2");
     expect(isWorkspaceTransferPending(WORKSPACE_ID)).toBe(true);
     expect(await tearOutWorkspace(WORKSPACE_ID, { x: 0, y: 0 })).toEqual({ moved: false, reason: "Workspace is already in flight" });
-    const rejected = expect(moving).rejects.toThrow("probe failed");
-    rejectPrepare(new Error("probe failed"));
+    const rejected = expect(moving).resolves.toEqual({ moved: false, reason });
+    rejectPrepare(new Error(reason));
     await rejected;
     expect(isWorkspaceTransferPending(WORKSPACE_ID)).toBe(false);
   });
