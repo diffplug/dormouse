@@ -90,7 +90,7 @@ export function createToolHost(options: { stateDir?: string; userConfigPath?: st
           const input = await resolveToolInput(entry, { projectRoot: null, cwd: request.cwd, args });
           return okResult(entry, input, { projectRoot: file.dir, path, warnings: file.warnings, scope: 'user' });
         }
-        if (project) return project;
+        if (project && (project.status !== 'no-file' || !file)) return project;
         return { status: 'unknown-tool', projectRoot: dirname(path), path, names: [...(file?.tools.keys() ?? [])].sort() };
       } catch (error) {
         return { status: 'error', message: error instanceof Error ? error.message : String(error) };
