@@ -67,6 +67,9 @@ export function useToolServing({
   // A ref, not state: it drives no render, and a leaf's entry is dropped when
   // its command exits so a re-run settles again from scratch.
   const seenPorts = useRef<Map<string, number[]>>(new Map());
+  // A prompt and same-command restart can both happen between polls. Seed the
+  // first observed run without retiring an imported live Workspace binding.
+  const observedRuns = useRef<Map<string, string | null>>(new Map());
 
   useEffect(() => {
     const platform = getPlatform();
@@ -81,6 +84,9 @@ export function useToolServing({
       for (const id of seenPorts.current.keys()) {
         if (!live.has(id)) seenPorts.current.delete(id);
       }
+      for (const id of observedRuns.current.keys()) {
+        if (!live.has(id)) observedRuns.current.delete(id);
+      }
 
       // Pass one, synchronous: fold in whatever the running commands announced
       // and decide which leaves still need a port scan. Nothing here awaits, so
@@ -88,6 +94,9 @@ export function useToolServing({
       const scanning: { leaf: ToolLeaf; run: CommandRun; announcedPort: number | null }[] = [];
       for (const leaf of leaves) {
         const run = getTerminalPaneState(leaf.id).currentCommand;
+        const runId = run?.id ?? null;
+        const runChanged = observedRuns.current.has(leaf.id) && observedRuns.current.get(leaf.id) !== runId;
+        observedRuns.current.set(leaf.id, runId);
         const running = run !== null && run.rawCommandLine === leaf.params.command;
         const announce = running ? getToolAnnounce(leaf.id) : null;
 
@@ -113,9 +122,9 @@ export function useToolServing({
         // behind, and the next run's first tick would compare equal to it and
         // commit immediately — framing whichever port bound earliest, which is
         // the regression the settle window exists to prevent.
-        if (!running) seenPorts.current.delete(leaf.id);
+        if (!running || runChanged) seenPorts.current.delete(leaf.id);
 
-        if ((hasUrl || hasConflict) && !running) {
+        if ((hasUrl || hasConflict) && (!running || runChanged)) {
           const session = typeof leaf.params.session === 'string' ? leaf.params.session : null;
           if (session) {
             const binaryPath = typeof leaf.params.binaryPath === 'string' ? leaf.params.binaryPath : undefined;
@@ -215,6 +224,8 @@ export function useToolServing({
         // -> Instant create). `toolFace` tests the conflict before the url, so
         // a stale verdict would keep the conflict forward over the browser.
         const agentDrivable = leaf.params.toolRender === 'ab-screencast';
+        const session = typeof leaf.params.session === 'string' ? leaf.params.session : sessionForKey(`tool.${leaf.id}`);
+        const binaryPath = typeof leaf.params.binaryPath === 'string' ? leaf.params.binaryPath : undefined;
         lath.store.updateParams(leaf.id, {
           url: entry.url,
           renderMode: agentDrivable ? 'ab-screencast' : 'iframe',
@@ -231,12 +242,12 @@ export function useToolServing({
         // session to the tool's *own* Surface rather than creating a second
         // one: a tool's browser is a param of its own leaf, which is what keeps
         // its id stable while its capabilities come and go.
-        const session = sessionForKey(`tool.${leaf.id}`);
         await attachAgentBrowserSession({
           url: entry.url,
           platform,
           session,
           surfaceId: leaf.id,
+          binaryPath,
           refreshSurface: (id, patch) => {
             if (!cancelled && getTerminalPaneState(id).currentCommand?.id === run.id) lath.store.updateParams(id, patch);
           },
@@ -248,7 +259,7 @@ export function useToolServing({
         // (docs/specs/dor-tool.md -> Lifecycle: kill reaps the browser's
         // resources).
         if (cancelled || !lath.getMeta(leaf.id) || getTerminalPaneState(leaf.id).currentCommand?.id !== run.id) {
-          void platform.agentBrowserCommand?.(session, ['close']).catch(() => {});
+          void platform.agentBrowserCommand?.(session, ['close'], binaryPath).catch(() => {});
         }
       }
     };

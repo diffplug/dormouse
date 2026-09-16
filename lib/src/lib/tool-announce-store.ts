@@ -18,14 +18,20 @@ const announces = new Map<string, ToolAnnounce>();
 
 /** Last-write-wins: the announcement is re-emittable, so a tool that changes
  *  its port or its name simply says so again. */
-export function recordToolAnnounce(id: string, announce: ToolAnnounce): void {
-  announces.set(id, announce);
+export function recordToolAnnounce(id: string, announce: ToolAnnounce | null): void {
+  if (announce) announces.set(id, announce);
+  else announces.delete(id);
 }
 
 /** The one spelling of "record whatever announcements this parse produced",
  *  shared by every renderer-side seam that parses raw replay itself. */
 export function recordToolAnnounces(id: string, events: readonly TerminalProtocolEvent[]): void {
-  for (const event of events) if (event.kind === 'toolAnnounce') recordToolAnnounce(id, event.announce);
+  // Preserve stream order: a fresh command retires the previous run's hint,
+  // but a serve later in the same parsed chunk belongs to the new run.
+  for (const event of events) {
+    if (event.kind === 'toolAnnounce') recordToolAnnounce(id, event.announce);
+    else if (event.kind === 'semantic' && event.event.type === 'commandStart') clearToolAnnounce(id);
+  }
 }
 
 /** Drop a Session's announcement when it dies, so a recycled pane id cannot

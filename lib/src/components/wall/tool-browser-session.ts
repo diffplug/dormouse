@@ -15,18 +15,20 @@ export async function attachAgentBrowserSession({
   platform,
   session,
   surfaceId,
+  binaryPath,
   refreshSurface,
 }: {
   url: string;
   platform: ConnectPlatform;
   session: string;
   surfaceId: string;
+  binaryPath?: string;
   refreshSurface: (surfaceId: string, patch: Record<string, unknown>) => void;
 }): Promise<void> {
   if (!platform.agentBrowserCommand) return;
   // 'open' is on the host's subcommand allowlist; the CLI boots the daemon/browser
   // if it isn't already running.
-  const opened = await platform.agentBrowserCommand(session, ['open', url]);
+  const opened = await platform.agentBrowserCommand(session, ['open', url], binaryPath);
   if (opened.exitCode !== 0) {
     refreshSurface(surfaceId, { session });
     return;
@@ -35,7 +37,7 @@ export async function attachAgentBrowserSession({
   // if it's absent or stale the panel recovers it later, so a miss is non-fatal.
   let wsPort: number | undefined;
   if (platform.agentBrowserStreamStatus) {
-    const status = await platform.agentBrowserStreamStatus(session);
+    const status = await platform.agentBrowserStreamStatus(session, binaryPath);
     if (status.ok) wsPort = status.wsPort;
   }
   // Setting `session` connects the controller (the daemon is up now, so its

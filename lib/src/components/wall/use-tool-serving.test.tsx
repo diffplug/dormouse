@@ -9,7 +9,8 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakePtyAdapter, setPlatform } from '../../lib/platform';
 import { setToolsEnabled } from '../../lib/feature-flags';
-import { recordToolAnnounce, resetToolAnnounces } from '../../lib/tool-announce-store';
+import { recordToolAnnounce, recordToolAnnounces, resetToolAnnounces } from '../../lib/tool-announce-store';
+import { TerminalProtocolParser } from '../../lib/terminal-protocol';
 import { useToolServing } from './use-tool-serving';
 import { captureToolParams } from './tool-transfer';
 import { createLathWallEngine, toolLeafMeta } from './lath-wall-engine';
@@ -44,9 +45,10 @@ function toolEngine(params: Record<string, unknown>) {
 let container: HTMLDivElement;
 let root: Root;
 let currentCommand: string | null = 'x';
+let runId = 0;
 
 vi.mock('../../lib/terminal-registry', () => ({
-  getTerminalPaneState: () => ({ currentCommand: currentCommand === null ? null : { id: currentCommand, rawCommandLine: currentCommand } }),
+  getTerminalPaneState: () => ({ currentCommand: currentCommand === null ? null : { id: `${runId}-${currentCommand}`, rawCommandLine: currentCommand } }),
 }));
 
 beforeEach(() => {
@@ -54,6 +56,7 @@ beforeEach(() => {
   setToolsEnabled(true);
   resetToolAnnounces();
   currentCommand = 'x';
+  runId = 0;
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -95,6 +98,7 @@ describe('port: announced', () => {
     const { lath, state } = toolEngine({
       ...announced, toolRender: 'ab-screencast', renderMode: 'ab-screencast',
       session: 'existing-browser', wsPort: 9222, url: 'http://localhost:6006/', toolAnnouncedPort: 6006,
+      binaryPath: '/opt/custom-agent-browser',
     });
     const opened = Promise.withResolvers<{ exitCode: number; stdout: string; stderr: string }>();
     const platform = Object.assign(new FakePtyAdapter(), {
@@ -109,7 +113,8 @@ describe('port: announced', () => {
     expect(state.params.url).toBe('http://localhost:6007/');
     expect(() => captureToolParams(lath, ['tool-1'])).toThrow('Wait for the Tool browser to connect');
     await act(async () => opened.resolve({ exitCode: 0, stdout: '', stderr: '' }));
-    expect(captureToolParams(lath, ['tool-1'])['tool-1'].session).toBeTruthy();
+    expect(captureToolParams(lath, ['tool-1'])['tool-1'].session).toBe('existing-browser');
+    expect(platform.agentBrowserCommand).toHaveBeenCalledExactlyOnceWith('existing-browser', ['open', 'http://localhost:6007/'], '/opt/custom-agent-browser');
   });
 
   it('frames nothing without an announcement, however many ports bind', async () => {
@@ -349,5 +354,40 @@ it('does not commit an in-flight scan once its Workspace begins transferring', a
   await act(async () => root.render(<Probe />));
   moving = true;
   await act(async () => gate.resolve([tcp(6006)]));
+  expect(state.params.url).toBeUndefined();
+});
+
+it('rediscovers ports after the same command restarts between polls', async () => {
+  const { state, platform } = await run({ surfaceType: 'tool', command: 'x', toolPort: 'auto' }, [[tcp(6006)], [tcp(6006)]]);
+  expect(state.params.url).toBe('http://localhost:6006/');
+  runId += 1;
+  platform.getOpenPorts = vi.fn(async () => [tcp(6007)]);
+  await act(async () => { await vi.advanceTimersByTimeAsync(POLL_MS); });
+  expect(state.params.url).toBeUndefined();
+  await act(async () => { await vi.advanceTimersByTimeAsync(POLL_MS); });
+  expect(state.params.url).toBeUndefined(); // the new run must settle independently
+  await act(async () => { await vi.advanceTimersByTimeAsync(POLL_MS); });
+  expect(state.params.url).toBe('http://localhost:6007/');
+});
+
+it('keeps a fresh same-chunk announcement emitted before the restart is polled', async () => {
+  recordToolAnnounce('tool-1', { port: 6006, name: null, key: null, dehydrate: false, persist: null });
+  const { state, platform } = await run({ surfaceType: 'tool', command: 'x', toolPort: 'announced' }, [[tcp(6006)]]);
+  runId += 1;
+  recordToolAnnounces('tool-1', new TerminalProtocolParser().process('\x1b]633;C\x07\x1b]367;serve;{"port":6007}\x07').events);
+  platform.getOpenPorts = vi.fn(async () => [tcp(6007)]);
+  await act(async () => { await vi.advanceTimersByTimeAsync(POLL_MS * 2); });
+  expect(state.params.url).toBe('http://localhost:6007/');
+});
+
+it('does not inherit another command announcement when the designated command starts', async () => {
+  currentCommand = 'cat log';
+  recordToolAnnounce('tool-1', { port: 6006, name: null, key: ['spoof'], dehydrate: false, persist: null });
+  const { state } = await run({ surfaceType: 'tool', command: 'x', toolPort: 'announced', toolName: 'named', toolKey: ['named', 'original'] }, [[tcp(6006)]]);
+  currentCommand = 'x';
+  runId += 1;
+  recordToolAnnounces('tool-1', new TerminalProtocolParser().process('\x1b]633;C\x07').events);
+  await act(async () => { await vi.advanceTimersByTimeAsync(POLL_MS); });
+  expect(state.params.toolKey).toEqual(['named', 'original']);
   expect(state.params.url).toBeUndefined();
 });

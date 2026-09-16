@@ -285,12 +285,11 @@ const PROMPT_RETURN_TIMEOUT_MS = 15_000;
 const COMMAND_START_TIMEOUT_MS = 15_000;
 
 /**
- * Serializes `surface.tool` requests. The critical section is "check for a key
- * match, then create", and the only contender is another tool request, so
- * ordering them is enough. Module scope because each `dor` invocation arrives
- * as its own control request.
+ * Serialize Tool requests and approval completions across lookup, key matching,
+ * creation, and startup. Module scope shares the queue across control requests
+ * and Walls in this renderer.
  */
-const queueToolSpawn = createSerialQueue();
+export const queueToolSpawn = createSerialQueue();
 
 type WaitOutcome = 'ready' | 'timeout' | 'aborted';
 
@@ -323,6 +322,15 @@ function waitForTerminalState(
   });
 }
 
+/** A newly spawned Tool has no earlier command history. Its first command may
+ * finish before the caller starts waiting, so a matching completion counts too.
+ * Hold the launch queue through this wait; integration alone precedes injection. */
+export function waitForNewToolCommand(id: string, command: string, cwd: string, signal?: AbortSignal): Promise<WaitOutcome> {
+  return waitForTerminalState(id, state => surfaceRunsCommand(state, command, cwd)
+    || (state.lastCommand !== null && surfaceRunsCommand({ ...state, currentCommand: state.lastCommand }, command, cwd)),
+  COMMAND_START_TIMEOUT_MS, signal);
+}
+
 const RESTART_CANCELLED: ParseResult<undefined> = { ok: false, message: 'restart was cancelled' };
 /** The control verbs that can add a Surface to the Wall. `resolveOpen` and
  *  `resolveAgentBrowser` only answer questions, and every other verb addresses a
@@ -343,7 +351,7 @@ const ENSURE_CANCELLED = 'ensure was cancelled';
  * for it to go live. Drives the live PTY directly, so it works for minimized
  * doors too (their PTY keeps running). Returns a message on failure.
  */
-async function restartSurfaceInPlace(
+export async function restartSurfaceInPlace(
   id: string, command: string, cwd: string, signal?: AbortSignal,
   options: { acceptCompletedRun?: boolean } = {},
 ): Promise<ParseResult<undefined>> {
@@ -984,9 +992,10 @@ export function useDorControl({
                 const waiting = toolPendingFromParams(candidate);
                 return waiting?.name === lookup.name && waiting.projectRoot === lookup.projectRoot
                   && cwdPathsEqual(stringParam((candidate as { cwd?: unknown } | null)?.cwd), cwd)
-                  && toolKeysEqual(waiting.args ?? [], toolArgs);
+                  && toolKeysEqual(waiting.args ?? [], toolArgs)
+                  && Boolean(waiting.fresh) === booleanParam(params.fresh);
               };
-              const already = findSurfaceByParams(matchesPending);
+              const already = booleanParam(params.fresh) ? null : findSurfaceByParams(matchesPending);
               if (already) {
                 const revealed = revealSurface(already.id);
                 respondTool('pending', {
@@ -1009,6 +1018,7 @@ export function useDorControl({
                 path: lookup.path,
                 projectRoot: lookup.projectRoot,
                 minimized: booleanParam(params.minimized),
+                fresh: booleanParam(params.fresh),
                 upstreamUrl: lookup.upstreamUrl,
               };
               const pending = createSplitSurface({
@@ -1214,6 +1224,7 @@ export function useDorControl({
           cwd,
           minimized: created.value.minimized,
         });
+        await waitForNewToolCommand(created.value.id, command, cwd, detail.signal);
       });
       return;
     }
