@@ -8,6 +8,7 @@ import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, test } from 'node:test';
 import { startFileViewer } from '../dist/file-viewer.js';
+import { fileViewerFormat } from '../dist/file-viewer-format.js';
 
 let root;
 const viewers = [];
@@ -35,6 +36,17 @@ async function get(viewer, path = viewer.path, headers = {}, method = 'GET') {
   });
 }
 const asset = (viewer, path) => viewer.path.replace(/\/file\/.*$/, `/file/${path}`);
+
+test('known formats override source-name heuristics without treating prototype keys as formats', () => {
+  for (const [name, mime] of [['README.pdf', 'application/pdf'], ['readme.png', 'image/png'], ['LICENSE.html', 'text/html; charset=utf-8']]) {
+    assert.deepEqual(fileViewerFormat(name), { mime, text: false });
+  }
+  for (const name of ['README', 'Dockerfile.dev', 'README.md', '.gitignore']) {
+    assert.deepEqual(fileViewerFormat(name), { mime: 'text/plain; charset=utf-8', text: true });
+  }
+  assert.deepEqual(fileViewerFormat('README.css'), { mime: 'text/css; charset=utf-8', text: true });
+  assert.equal(fileViewerFormat('file.constructor'), null);
+});
 
 test('renders text as escaped content and requires the per-run token on every method', async () => {
   const viewer = await start('README.md', '<script>bad()</script> & hello');
@@ -67,8 +79,11 @@ test('serves only the HTML document and its bounded relative dependency graph', 
   await writeFile(join(root, 'assets', 'more.css'), 'body { color: red }');
   await writeFile(join(root, 'assets', 'pic.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>');
   await writeFile(join(root, 'unreferenced.txt'), 'private sibling');
-  const viewer = await start('index.html', '<link href="assets/style.css" rel="stylesheet"><h1>Preview</h1>');
-  assert.equal((await get(viewer)).status, 200);
+  const viewer = await start('LICENSE.html', '<link href="assets/style.css" rel="stylesheet"><h1>Preview</h1>');
+  const response = await get(viewer);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers['content-type'], 'text/html; charset=utf-8');
+  assert.match(response.body, /<h1>Preview<\/h1>/);
   for (const path of ['assets/style.css', 'assets/more.css', 'assets/pic.svg']) assert.equal((await get(viewer, asset(viewer, path))).status, 200);
   assert.equal((await get(viewer, asset(viewer, 'unreferenced.txt'))).status, 404);
   assert.notEqual((await get(viewer, asset(viewer, '%2e%2e/unreferenced.txt'))).status, 200);
@@ -86,7 +101,7 @@ test('rejects parent-directory references and symlinks escaping the document dir
 });
 
 test('supports byte ranges and HEAD for native PDF/image presentation', async () => {
-  const viewer = await start('sample.pdf', '%PDF-1.7 example bytes');
+  const viewer = await start('README.pdf', '%PDF-1.7 example bytes');
   assert.equal((await get(viewer)).headers['content-type'], 'application/pdf');
   const range = await get(viewer, viewer.path, { Range: 'bytes=0-3' });
   assert.equal(range.status, 206);

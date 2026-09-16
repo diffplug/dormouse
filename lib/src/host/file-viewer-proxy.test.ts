@@ -77,7 +77,7 @@ it('retains the policy for an escaped text preview', async () => {
 it.each([
   ['image.svg', '<svg xmlns="http://www.w3.org/2000/svg"/>', 'image/svg+xml'],
   ['document.pdf', '%PDF-1.7 example bytes', 'application/pdf'],
-  ['image.png', 'image bytes', 'image/png'],
+  ['readme.png', 'image bytes', 'image/png'],
   ['video.mp4', 'video bytes', 'video/mp4'],
 ])('retains CSP, bytes, HEAD, and ranges for %s through the proxy', async (name, bytes, mime) => {
   const url = await frame(name, bytes);

@@ -20,7 +20,8 @@ export const VIEW_FILE_ARGV = '__view-file';
 export function fileViewerFormat(path: string): { mime: string; text: boolean } | null {
   const name = path.replace(/\\/g, '/').split('/').pop()!.toLowerCase();
   const ext = name.includes('.') ? name.split('.').pop()! : '';
-  const text = TEXT.has(ext) || /^(readme|license|licence|makefile|dockerfile|\.gitignore|\.env)(\..*)?$/.test(name);
-  const mime = MIME[ext] ?? (text ? 'text/plain; charset=utf-8' : null);
+  const knownMime = Object.prototype.hasOwnProperty.call(MIME, ext) ? MIME[ext] : undefined;
+  const text = TEXT.has(ext) || (!knownMime && /^(readme|license|licence|makefile|dockerfile|\.gitignore|\.env)(\..*)?$/.test(name));
+  const mime = knownMime ?? (text ? 'text/plain; charset=utf-8' : null);
   return mime ? { mime, text } : null;
 }
