@@ -9,8 +9,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn(async (_cmd: string, _args?: unknown) => undefined as unknown),
-  transferWorkspaceTo: vi.fn(async () => {}),
-  tearOutWorkspace: vi.fn(async () => {}),
+  transferWorkspaceTo: vi.fn(async (): Promise<import('./workspace-move').MoveOutcome> => ({ moved: true })),
+  tearOutWorkspace: vi.fn(async (): Promise<import('./workspace-move').MoveOutcome> => ({ moved: true })),
 }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
 vi.mock("./workspace-move", async (importOriginal) => ({
@@ -286,4 +286,18 @@ describe("releasing the drag", () => {
     expect(mocks.transferWorkspaceTo).not.toHaveBeenCalled();
     expect(mocks.tearOutWorkspace).not.toHaveBeenCalled();
   });
+});
+
+
+it.each([false, true])('shows a blocked Tool move reason for drag transfer and tear-out (%s)', async transfer => {
+  hit = transfer ? { label: 'ws-2', x: 10, y: 4 } : null;
+  const move = transfer ? mocks.transferWorkspaceTo : mocks.tearOutWorkspace;
+  const reason = 'Approve or decline pending Tools before moving this Workspace';
+  move.mockResolvedValueOnce({ moved: false, reason });
+  onDropOnOtherWindow('ws-1', { clientX: 900, clientY: 8 }, false);
+  await settle();
+  expect(getWorkspaceUiSnapshot().moveError).toEqual({ id: 'ws-1', reason });
+  onDropOnOtherWindow('ws-1', { clientX: 900, clientY: 8 }, false);
+  await settle();
+  expect(getWorkspaceUiSnapshot().moveError).toBeNull();
 });
