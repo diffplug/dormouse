@@ -17,12 +17,13 @@ import { hasBrowser, hasTerminal } from 'dor/commands/types';
 import { MAX_AWAIT_TIMEOUT_MS } from '../../lib/alert-manager';
 import { TOOLS_FLAG_KEY, isToolsEnabled } from '../../lib/feature-flags';
 import type { OpenPort } from '../../lib/platform/types';
-import { buildShellCommandForKind, shellCommandKind } from 'dor/commands/shell-quote';
+import { buildShellCommandForKind, hasShellInputControls, shellCommandKind } from 'dor/commands/shell-quote';
 import {
   UNNAMED_PANEL_TITLE,
   getDefaultShellOpts,
   getTerminalInstance,
   getTerminalPaneState,
+  getTerminalShellKind,
   isPaneOscDriven,
 } from '../../lib/terminal-registry';
 import { cwdPathsEqual, surfaceRunsCommand, type TerminalPaneState } from '../../lib/terminal-state';
@@ -474,11 +475,14 @@ function dorCommandString(args: string[] | undefined): string | undefined {
 }
 
 /** The command a resolved Tool types into its shell: a string `run` is literal
- *  shell syntax, an argument-list `run` is quoted here for the default shell
+ *  shell syntax, an argument-list `run` uses the destination Session's shell
+ *  or the default shell when launching a new Session
  *  (`docs/specs/dor-tool.md` -> Declaring tools). The host guarantees a list
  *  names an executable, so the empty-argv case cannot arise. */
-export function toolRunCommand(run: string | readonly string[]): string {
-  return typeof run === 'string' ? run : dorCommandString([...run])!;
+export function toolRunCommand(run: string | readonly string[], terminalId?: string): string {
+  const kind = (terminalId ? getTerminalShellKind(terminalId) : null)
+    ?? shellCommandKind(getDefaultShellOpts()?.shell, PLATFORM_STRING);
+  return typeof run === 'string' ? run : buildShellCommandForKind(kind, run);
 }
 
 /**
@@ -864,6 +868,7 @@ export function useDorControl({
         }
         const toolName = stringParam(params.name)?.trim();
         let command: string;
+        let toolRun: string | readonly string[];
         let key: string[] | null = null;
         let toolScope: 'user' | undefined;
         const toolArgs = stringArrayParam(params.args) ?? [];
@@ -931,6 +936,7 @@ export function useDorControl({
               detail.respond({ ok: false, error: 'unexpected tool host response' });
               return;
             case 'ok':
+              toolRun = lookup.run;
               command = toolRunCommand(lookup.run);
               toolScope = lookup.scope;
               // Namespaced under the host-resolved tool name, so two tools in
@@ -968,6 +974,7 @@ export function useDorControl({
               const matchesPending = (candidate: unknown) => {
                 const waiting = toolPendingFromParams(candidate);
                 return waiting?.name === lookup.name && waiting.projectRoot === lookup.projectRoot
+                  && cwdPathsEqual(stringParam((candidate as { cwd?: unknown } | null)?.cwd), cwd)
                   && toolKeysEqual(waiting.args ?? [], toolArgs);
               };
               const already = findSurfaceByParams(matchesPending);
@@ -1036,11 +1043,16 @@ export function useDorControl({
           }
         } else {
           const argv = stringArrayParam(params.command);
+          if (argv?.some(hasShellInputControls)) {
+            detail.respond({ ok: false, error: 'tool arguments cannot contain terminal control characters' });
+            return;
+          }
           command = dorCommandString(argv) ?? '';
           if (!command) {
             detail.respond({ ok: false, error: 'command cannot be empty' });
             return;
           }
+          toolRun = argv!;
         }
 
         const toolParams = {
@@ -1065,7 +1077,7 @@ export function useDorControl({
             && toolKeysEqual((candidate as { toolKey?: unknown } | null | undefined)?.toolKey, key);
           const match = findSurfaceByParams(matchesToolKey);
           if (match) {
-            const matchedCommand = toolCommandFromParams(lath.getMeta(match.id)?.params) ?? command;
+            const matchedCommand = toolCommandFromParams(lath.getMeta(match.id)?.params) ?? toolRunCommand(toolRun, match.id);
             const matchState = getTerminalPaneState(match.id);
             // The tool's own cwd, not the caller's: `surfaceRunsCommand`
             // compares against the matched Surface's `cwdAtStart`, so waiting
@@ -1135,6 +1147,8 @@ export function useDorControl({
         // below the pending-approval and key-match returns above: both of those
         // placements win over this one.
         if (callerId && callerGate && toolTakesOverCaller(callerGate)) {
+          command = toolRunCommand(toolRun, callerId);
+          toolParams.command = command;
           // Answered before the tool starts, because answering is what frees
           // the shell to run it.
           respondTool('takeover', { surfaceId: callerId, command, cwd, minimized: false });
