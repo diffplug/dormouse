@@ -1634,7 +1634,7 @@ export function Wall({
             projectRoot: pending.projectRoot,
           });
           if (grant?.status !== 'trust-recorded') {
-            showFailure(grant?.status === 'error' ? grant.message : 'The Tool permission could not be saved. Try allowing it again.');
+            showFailure(grant?.status === 'error' && grant.message.trim() ? grant.message : 'The Tool permission could not be saved. Try allowing it again.');
             return;
           }
           if (!isCurrent()) return;
