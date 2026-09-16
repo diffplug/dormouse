@@ -104,6 +104,13 @@ test('parallel worktrees own ports, browser identities and bridges; stopping one
   for (const [run, dir, other] of [[one, a.root, two], [two, b.root, one]]) {
     const js = await (await fetch(`${run.app}/app.js`)).text();
     assert.ok(js.includes(`${run.bridge}/?t=${run.token}`));
+    // `cors: false` in dev-run.mjs, pinned here because nothing else would
+    // notice its removal: these modules carry the bridge token, and Vite's
+    // default answers every http://localhost:* origin with an acao of its own,
+    // which is a read of the token by any other page in the developer's browser.
+    const foreign = await fetch(`${run.app}/app.js`, { headers: { origin: 'http://localhost:31337' } });
+    assert.equal(foreign.status, 200);
+    assert.equal(foreign.headers.get('access-control-allow-origin'), null);
     // HMR must share this listener, even with a Tauri-specific host inherited.
     await new Promise((resolve, reject) => {
       const ws = new WebSocket(run.app.replace('http:', 'ws:'), 'vite-ping');

@@ -75,8 +75,9 @@ const ALLOWED = {
     + 'because the modules Vite serves carry the browser-dev bridge token and '
     + 'Vite\'s default admits every http://localhost:* origin to read them; and '
     + 'allowedHosts: [], the Host check that makes DNS rebinding fail. Dev-only '
-    + 'and unbundled — it ships in nothing. See standalone/scripts/dev-run.mjs '
-    + 'and standalone/scripts/dev-host-guard.mjs for the bridge beside it.',
+    + 'and unbundled — it ships in nothing. The cors pin is checked by '
+    + 'standalone/scripts/dev-agent-browser.test.mjs; see '
+    + 'standalone/scripts/dev-host-guard.mjs for the bridge beside it.',
   'vscode-ext/src/agent-browser-host.ts':
     'The stream relay authenticates with a single-use 64-hex token (60s TTL, '
     + 'pinned to one target port) and drops Origin rather than rewriting it, so '
@@ -105,6 +106,12 @@ const LOOPBACK = "['\"](?:127\\.0\\.0\\.1|localhost)['\"]";
 // branch that can rot alone, which is how `WebSocket\.Relay` sat here matching
 // nothing while the `WebSocketServer` branch beside it kept the lint green.
 const WS_NEW = '\\bnew\\s+WebSocket\\.?Server\\(\\s*\\{[^}]*?';
+// Keys of one options object, allowing one level of nested object between the
+// opening brace and the key being looked for. `[^}]*?` stops at the first `}`,
+// so a form that uses it only matches while its key precedes every nested
+// object — fine for a call's flat options, wrong for a `vite.config.ts` `server`
+// block, where a nested key above `host` is the common shape.
+const ONE_NESTED = '(?:[^{}]|\\{[^{}]*\\})*?';
 
 /**
  * Every bind form `LISTEN_RE` looks for, one entry per alternative — the
@@ -123,8 +130,10 @@ const BIND_FORMS = [
   // server: { host } })` then an argument-less `listen()`, so neither `.listen`
   // form can see it. Matched on the `server` block rather than on `createServer`
   // because the same block is what a `vite.config.ts` — or Vitest, or
-  // Storybook's builder — passes to the same server.
-  { label: 'vite, server.host', re: `\\bserver\\s*:\\s*\\{[^}]*?host\\s*:\\s*${LOOPBACK}` },
+  // Storybook's builder — passes to the same server. `ONE_NESTED`, not `[^}]*?`,
+  // because `fs`, `hmr`, `proxy`, `headers` and `watch` are ordinary `server`
+  // keys and any of them written above `host` would otherwise end the scan.
+  { label: 'vite, server.host', re: `\\bserver\\s*:\\s*\\{${ONE_NESTED}host\\s*:\\s*${LOOPBACK}` },
 ];
 
 const LISTEN_RE = new RegExp(BIND_FORMS.map((form) => form.re).join('|'), 'gs');
