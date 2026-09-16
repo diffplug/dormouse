@@ -422,7 +422,6 @@ The spec keeps the behavior help cannot express:
 | `list` | Filters are ANDed client-side; `--port` filters terminals (browser Surfaces never match) and implies the opt-in detail scan, `--ports` only requests it. **Owns every Workspace read**: `--workspace` narrows to one, `--all` groups every Workspace's rows under its header — **every Workspace keeps its header**, including one a filter emptied, so the text listing and the JSON `workspaces` array name the same Workspaces — `--workspaces` is the overview, and the three cannot be combined. **`--all --json` adds `caller_workspace_ref` / `focused_workspace_ref`** beside the `_surface_ref` pair, which under `--all` names a `surface:N` every Workspace has; the `_surface_id` halves stay unique. **`--workspaces` takes `--json` and nothing else**, by an allowlist, so a flag added to `list` is refused there until it is named. |
 | `workspace` | **Mutation only** ([dor workspace](#dor-workspace)). |
 | `skill` | Prints the bundled skill or installs its bootstrap stub; [Agent Skill](#agent-skill) owns the contract. |
-| `tool`, `open` | `docs/specs/dor-tool.md` owns Tool inputs and local-file dispatch. |
 
 **`await` never prints terminal text.** Stdout is only the resolution cause, the
 narrative goes to stderr on every outcome, and JSON appears only on a resolution
@@ -646,9 +645,9 @@ Source of truth: `buildDorSurfacesInternal` in `lib/src/components/Wall.tsx`; `d
 
 ## Dor Tools
 
-**Must route `dor tool` through the Tool launch contract**, including feature gating, approval, explicit-key reuse, and focus-neutral placement (`docs/specs/dor-tool.md` → CLI). Generated help owns syntax.
+**Must route `dor tool` and `dor open` through the Tool launch contract**, including feature gating, approval, explicit-key reuse, and focus-neutral placement (`docs/specs/dor-tool.md` → CLI). Generated help owns syntax.
 
-Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `ToolSurfaceResponse` in `dor/src/commands/types.ts`.
+Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `openCommand` in `dor/src/commands/open.ts`; `ToolSurfaceResponse` in `dor/src/commands/types.ts`.
 
 ## Future
 

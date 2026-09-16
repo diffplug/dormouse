@@ -66,6 +66,11 @@ export type Substitution = (typeof SUBSTITUTIONS)[number];
 // be named in the error rather than silently surviving as text.
 const SUBSTITUTION_TOKEN = /\$[A-Za-z_][A-Za-z0-9_]*/g;
 
+/** Whether any element names the `$TARGET` input. */
+export function usesTarget(elements: readonly string[]): boolean {
+  return elements.some((element) => /\$TARGET\b/.test(element));
+}
+
 // The reserved namespace. An unknown member is an error rather than an ignored
 // field: silently dropping a dedupe directive the author wrote is the
 // destructive failure (two tools, one port), where failing to parse is loud.
@@ -92,7 +97,7 @@ function readDedupeTemplate(value: unknown, where: string): string[] {
 }
 
 /** Reject unknown `$NAME` tokens, and `$PROJECT_ROOT` outside a repo scope. */
-export function validateSubstitutions(template: readonly string[], scope: ToolScope, where: string): void {
+function validateSubstitutions(template: readonly string[], scope: ToolScope, where: string): void {
   for (const element of template) {
     for (const token of element.match(SUBSTITUTION_TOKEN) ?? []) {
       if (!(SUBSTITUTIONS as readonly string[]).includes(token)) {
@@ -162,7 +167,7 @@ export function parseToolFile(
     if (rawEntry.prespawn_dedupe !== undefined && rawEntry.prespawn_dedupe !== null) {
       dedupeTemplate = readDedupeTemplate(rawEntry.prespawn_dedupe, where);
       validateSubstitutions(dedupeTemplate, scope, where);
-      if (typeof run === 'string' && dedupeTemplate.some(arg => /\$TARGET\b/.test(arg))) {
+      if (typeof run === 'string' && usesTarget(dedupeTemplate)) {
         throw new ToolFileError(`${where}: $TARGET in prespawn_dedupe requires an argument-list run`);
       }
       // A repo-local key with no project scope dedupes across every checkout
@@ -191,24 +196,59 @@ export function parseToolFile(
     tools.set(name, { name, run: typeof run === 'string' ? run.trim() : run, render, port, dedupeTemplate });
   }
 
-  const open: OpenRule[] = [];
-  if (doc.open !== undefined) {
-    if (scope === 'repo') warnings.push(`${path}: project open rules are ignored; configure associations in the user file`);
-    else {
-      if (!Array.isArray(doc.open)) throw new ToolFileError(`${path}: 'open' must be an ordered list`);
-      for (const rule of doc.open) {
-        if (!isRecord(rule) || typeof rule.match !== 'string' || !rule.match || typeof rule.tool !== 'string'
-          || (rule.tool !== 'builtin:file' && !tools.has(rule.tool)) || Object.keys(rule).some(key => key !== 'match' && key !== 'tool')) {
-          throw new ToolFileError(`${path}: each open rule needs a match pattern and a tool defined in this user file`);
-        }
-        if (rule.tool !== 'builtin:file' && typeof tools.get(rule.tool)!.run === 'string') {
-          throw new ToolFileError(`${path}: open rule for '${rule.tool}' needs an argument-list run to receive the file`);
-        }
-        open.push({ match: rule.match, tool: rule.tool });
-      }
-    }
+  // Associations are user-only (`docs/specs/dor-tool.md` -> Opening local files).
+  if (scope === 'repo' && doc.open !== undefined) {
+    warnings.push(`${path}: project open rules are ignored; configure associations in the user file`);
   }
+  const open = scope === 'repo' ? [] : parseOpenRules(doc.open, tools, path);
   return { scope, dir, tools, warnings, open };
+}
+
+export interface SubstitutionContext {
+  readonly projectRoot: string | null;
+  readonly cwd: string;
+  /** The canonical local file, present only when the invocation resolved one. */
+  readonly target?: string;
+}
+
+/**
+ * Expand every `$NAME` in one template element. Closed set: an unknown token
+ * throws rather than surviving as text (see `SUBSTITUTIONS`), and a token
+ * whose value is absent from `context` throws so a caller assembling entries
+ * by hand cannot produce a literal `$PROJECT_ROOT` in a key or a command.
+ */
+export function substituteToolTokens(element: string, context: SubstitutionContext, toolName: string): string {
+  return element.replace(SUBSTITUTION_TOKEN, (token) => {
+    if (token === '$CWD') return context.cwd;
+    if (token === '$TARGET') {
+      if (!context.target) throw new ToolFileError(`tool '${toolName}': $TARGET requires one local file argument`);
+      return context.target;
+    }
+    if (token === '$PROJECT_ROOT') {
+      if (context.projectRoot === null) {
+        throw new ToolFileError(`tool '${toolName}': $PROJECT_ROOT is not defined here`);
+      }
+      return context.projectRoot;
+    }
+    throw new ToolFileError(`tool '${toolName}': unknown substitution '${token}'`);
+  });
+}
+
+function parseOpenRules(node: unknown, tools: ReadonlyMap<string, ToolEntry>, path: string): OpenRule[] {
+  if (node === undefined) return [];
+  if (!Array.isArray(node)) throw new ToolFileError(`${path}: 'open' must be an ordered list`);
+  return node.map((rule: unknown) => {
+    const entry = isRecord(rule) && typeof rule.tool === 'string' ? tools.get(rule.tool) : undefined;
+    const builtin = isRecord(rule) && rule.tool === 'builtin:file';
+    if (!isRecord(rule) || (!builtin && !entry) || typeof rule.match !== 'string' || !rule.match
+      || Object.keys(rule).some(key => key !== 'match' && key !== 'tool')) {
+      throw new ToolFileError(`${path}: each open rule needs a match pattern and a tool defined in this user file`);
+    }
+    if (entry && typeof entry.run === 'string') {
+      throw new ToolFileError(`${path}: open rule for '${entry.name}' needs an argument-list run to receive the file`);
+    }
+    return { match: rule.match, tool: builtin ? 'builtin:file' : entry!.name };
+  });
 }
 
 /**
@@ -218,26 +258,8 @@ export function parseToolFile(
  */
 export function resolveDedupeKey(
   entry: Pick<ToolEntry, 'name' | 'dedupeTemplate'>,
-  context: { projectRoot: string | null; cwd: string; target?: string },
+  context: SubstitutionContext,
 ): string[] | null {
   if (!entry.dedupeTemplate) return null;
-  return entry.dedupeTemplate.map((element) =>
-    element.replace(SUBSTITUTION_TOKEN, (token) => {
-      if (token === '$CWD') return context.cwd;
-      if (token === '$TARGET') {
-        if (!context.target) throw new ToolFileError(`tool '${entry.name}': $TARGET requires one local file argument`);
-        return context.target;
-      }
-      if (token === '$PROJECT_ROOT') {
-        // Unreachable via parseToolFile, which rejects $PROJECT_ROOT outside a
-        // repo scope; guard anyway so a caller assembling entries by hand
-        // cannot produce a key with a literal '$PROJECT_ROOT' in it.
-        if (context.projectRoot === null) {
-          throw new ToolFileError(`tool '${entry.name}': $PROJECT_ROOT is not defined here`);
-        }
-        return context.projectRoot;
-      }
-      return token;
-    }),
-  );
+  return entry.dedupeTemplate.map((element) => substituteToolTokens(element, context, entry.name));
 }

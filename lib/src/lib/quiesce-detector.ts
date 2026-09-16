@@ -30,6 +30,9 @@ const T_RESIZE_DEBOUNCE = cfg.alert.resizeDebounce;
 /** Silence from the last accepted output through a confirmed settle. */
 const QUIESCE_AFTER_OUTPUT_MS = T_MIGHT_NEED_ATTENTION + T_SETTLED_CONFIRM;
 
+/** Longest silence unconfirmed candidate history can span and still count. */
+const CANDIDATE_HISTORY_TTL_MS = T_BUSY_CANDIDATE_GAP + T_BUSY_CONFIRM_GAP;
+
 /**
  * Watches one Session's PTY output and reports busy/quiet transitions.
  *
@@ -37,15 +40,22 @@ const QUIESCE_AFTER_OUTPUT_MS = T_MIGHT_NEED_ATTENTION + T_SETTLED_CONFIRM;
  * observer, not an alarm. It never latches: a settle is announced through
  * `onSettled` and the detector immediately starts over.
  */
+type DetectorTimer = 'busyCandidate' | 'busyConfirm' | 'mightNeedAttention' | 'settledConfirm' | 'resize';
+export interface QuiesceSnapshot {
+  status: QuiesceStatus;
+  resizeGrace: boolean;
+  firstOutputAt: number | null;
+  lastOutputAt: number | null;
+  lastAcceptedOutputAt: number | null;
+  outputCountSinceReset: number;
+  deadlines: Partial<Record<DetectorTimer, number>>;
+}
+
 export class QuiesceDetector {
   private status: QuiesceStatus = 'NOTHING_TO_SHOW';
   private resizeGrace = false;
-  private busyCandidateTimer: ReturnType<typeof setTimeout> | null = null;
-  private busyConfirmTimer: ReturnType<typeof setTimeout> | null = null;
-  private mightNeedAttentionTimer: ReturnType<typeof setTimeout> | null = null;
-  private settledConfirmTimer: ReturnType<typeof setTimeout> | null = null;
-  private resizeTimer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
+  private timers = new Map<DetectorTimer, { timer: ReturnType<typeof setTimeout>; dueAt: number }>();
   private firstOutputAt: number | null = null;
   private lastOutputAt: number | null = null;
   /**
@@ -95,6 +105,15 @@ export class QuiesceDetector {
     if (this.disposed || this.resizeGrace) return;
 
     const now = Date.now();
+    // Candidate history only describes one run of output. Timer callbacks can
+    // be delayed in hidden views, so expire it against the clock on arrival.
+    if (
+      !this.isConfirmedBusy() && this.lastOutputAt !== null
+      && now - this.lastOutputAt > CANDIDATE_HISTORY_TTL_MS
+    ) {
+      this.reset();
+    }
+
     this.lastOutputAt = now;
     this.lastAcceptedOutputAt = now;
 
@@ -117,20 +136,40 @@ export class QuiesceDetector {
   onResize(): void {
     if (this.disposed) return;
     this.resizeGrace = true;
-    if (this.resizeTimer !== null) clearTimeout(this.resizeTimer);
-    this.resizeTimer = setTimeout(() => {
-      this.resizeGrace = false;
-      this.resizeTimer = null;
-    }, T_RESIZE_DEBOUNCE);
+    this.schedule('resize', T_RESIZE_DEBOUNCE);
+  }
+
+  /** Freeze timers at a live ownership boundary. Cold restore never reads this. */
+  snapshot(): QuiesceSnapshot {
+    return {
+      status: this.status, resizeGrace: this.resizeGrace,
+      firstOutputAt: this.firstOutputAt, lastOutputAt: this.lastOutputAt,
+      lastAcceptedOutputAt: this.lastAcceptedOutputAt,
+      outputCountSinceReset: this.outputCountSinceReset,
+      deadlines: Object.fromEntries([...this.timers].map(([key, value]) => [key, value.dueAt])),
+    };
+  }
+
+  restore(snapshot: QuiesceSnapshot): void {
+    this.dispose();
+    this.disposed = false;
+    this.status = snapshot.status;
+    this.resizeGrace = snapshot.resizeGrace;
+    this.firstOutputAt = snapshot.firstOutputAt;
+    this.lastOutputAt = snapshot.lastOutputAt;
+    this.lastAcceptedOutputAt = snapshot.lastAcceptedOutputAt;
+    this.outputCountSinceReset = snapshot.outputCountSinceReset;
+    for (const [key, dueAt] of Object.entries(snapshot.deadlines)) {
+      // An expired grace must not swallow the output that follows restore.
+      if (key === 'resize' && dueAt <= Date.now()) { this.resizeGrace = false; continue; }
+      this.schedule(key as DetectorTimer, dueAt - Date.now());
+    }
   }
 
   dispose(): void {
     this.disposed = true;
-    this.clearActivityTimers();
-    if (this.resizeTimer !== null) {
-      clearTimeout(this.resizeTimer);
-      this.resizeTimer = null;
-    }
+    for (const { timer } of this.timers.values()) clearTimeout(timer);
+    this.timers.clear();
   }
 
   private handleNothingToShowOutput(now: number): void {
@@ -151,12 +190,7 @@ export class QuiesceDetector {
   private enterMightBeBusy(): void {
     this.clearActivityTimers();
     this.setStatus('MIGHT_BE_BUSY');
-    this.busyConfirmTimer = setTimeout(() => {
-      this.busyConfirmTimer = null;
-      if (this.status !== 'MIGHT_BE_BUSY') return;
-      this.seedFromLatestOutput();
-      this.setStatus('NOTHING_TO_SHOW');
-    }, T_BUSY_CONFIRM_GAP);
+    this.schedule('busyConfirm', T_BUSY_CONFIRM_GAP);
   }
 
   private enterBusy(): void {
@@ -167,58 +201,52 @@ export class QuiesceDetector {
   }
 
   private startBusyCandidateTimer(): void {
-    if (this.busyCandidateTimer !== null) return;
-    this.busyCandidateTimer = setTimeout(() => {
-      this.busyCandidateTimer = null;
-      if (this.status !== 'NOTHING_TO_SHOW') return;
-      if (this.outputCountSinceReset >= 2) {
-        this.enterMightBeBusy();
-      }
-    }, T_BUSY_CANDIDATE_GAP);
+    if (!this.timers.has('busyCandidate')) this.schedule('busyCandidate', T_BUSY_CANDIDATE_GAP);
   }
 
   private startMightNeedAttentionTimer(): void {
-    if (this.mightNeedAttentionTimer !== null) {
-      clearTimeout(this.mightNeedAttentionTimer);
-    }
-    this.mightNeedAttentionTimer = setTimeout(() => {
-      this.mightNeedAttentionTimer = null;
-      if (this.status !== 'BUSY') return;
-      this.setStatus('MIGHT_NEED_ATTENTION');
-      this.startSettledConfirmTimer();
-    }, T_MIGHT_NEED_ATTENTION);
+    this.schedule('mightNeedAttention', T_MIGHT_NEED_ATTENTION);
   }
 
-  private startSettledConfirmTimer(): void {
-    this.settledConfirmTimer = setTimeout(() => {
-      this.settledConfirmTimer = null;
-      if (this.status !== 'MIGHT_NEED_ATTENTION') return;
-      this.resetOutputTracking();
-      // Announce the settle before the status change: an owner that latches a
-      // ring in the handler already owns the projection when `NOTHING_TO_SHOW`
-      // is notified, so subscribers never see a non-ringing blip in between. If
-      // the handler reset us, the transition below is a no-op.
-      this.onSettled?.();
-      this.setStatus('NOTHING_TO_SHOW');
-    }, T_SETTLED_CONFIRM);
+  private schedule(kind: DetectorTimer, delay: number): void {
+    const previous = this.timers.get(kind);
+    if (previous) clearTimeout(previous.timer);
+    const dueAt = Date.now() + delay;
+    const timer = setTimeout(() => {
+      this.timers.delete(kind);
+      if (this.disposed) return;
+      switch (kind) {
+        case 'resize': this.resizeGrace = false; break;
+        case 'busyCandidate':
+          if (this.status === 'NOTHING_TO_SHOW' && this.outputCountSinceReset >= 2) this.enterMightBeBusy();
+          break;
+        case 'busyConfirm':
+          if (this.status !== 'MIGHT_BE_BUSY') break;
+          this.seedFromLatestOutput();
+          this.setStatus('NOTHING_TO_SHOW');
+          break;
+        case 'mightNeedAttention':
+          if (this.status !== 'BUSY') break;
+          this.setStatus('MIGHT_NEED_ATTENTION');
+          // Carry the original deadline through a suspended renderer.
+          this.schedule('settledConfirm', Math.max(0, dueAt + T_SETTLED_CONFIRM - Date.now()));
+          break;
+        case 'settledConfirm':
+          if (this.status !== 'MIGHT_NEED_ATTENTION') break;
+          this.resetOutputTracking();
+          this.onSettled?.();
+          this.setStatus('NOTHING_TO_SHOW');
+          break;
+      }
+    }, delay);
+    this.timers.set(kind, { timer, dueAt });
   }
 
   private clearActivityTimers(): void {
-    if (this.busyCandidateTimer !== null) {
-      clearTimeout(this.busyCandidateTimer);
-      this.busyCandidateTimer = null;
-    }
-    if (this.busyConfirmTimer !== null) {
-      clearTimeout(this.busyConfirmTimer);
-      this.busyConfirmTimer = null;
-    }
-    if (this.mightNeedAttentionTimer !== null) {
-      clearTimeout(this.mightNeedAttentionTimer);
-      this.mightNeedAttentionTimer = null;
-    }
-    if (this.settledConfirmTimer !== null) {
-      clearTimeout(this.settledConfirmTimer);
-      this.settledConfirmTimer = null;
+    for (const [kind, { timer }] of this.timers) {
+      if (kind === 'resize') continue;
+      clearTimeout(timer);
+      this.timers.delete(kind);
     }
   }
 

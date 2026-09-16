@@ -5,6 +5,7 @@ import type {
   Command,
   DorCommandContext,
   ParseResult,
+  ToolSurfaceRequest,
   ToolSurfaceResponse,
 } from './types.js';
 import {
@@ -42,10 +43,33 @@ const BOOLEAN_FLAGS = new Set(['--json', '--minimize', '--fresh', '--global']);
  * same pre-parse contract `dor ensure` uses. Keep the flag lists above in sync
  * with `parameters.flags`.
  */
-export function validateToolArgs(args: string[]): ParseResult<void> {
+export function validateToolArgs(args: readonly string[]): ParseResult<void> {
+  const delimiterIndex = args.indexOf('--');
+  const head = headPositionals(args);
+  if (!head.ok) return head;
+  const { value: positionals } = head;
+
+  if (delimiterIndex === -1) {
+    if (positionals.length === 0) {
+      return { ok: false, message: 'dor tool requires a tool name or -- <command...>' };
+    }
+    return { ok: true, value: undefined };
+  }
+
+  if (positionals.length > 0) return { ok: true, value: undefined };
+  if (args.slice(0, delimiterIndex).includes('--global')) return { ok: false, message: '--global requires a named tool' };
+  if (args.slice(delimiterIndex + 1).join(' ').trim() === '') {
+    return { ok: false, message: 'dor tool requires a command after --' };
+  }
+  return { ok: true, value: undefined };
+}
+
+/** The positionals before `--`: a tool name and its dash-free inputs. Non-empty
+ *  means the named form; stricli discards the separator, so this is the one
+ *  walk that can tell `dor tool viewer -- --flag` from `dor tool -- viewer`. */
+function headPositionals(args: readonly string[]): ParseResult<string[]> {
   const delimiterIndex = args.indexOf('--');
   const head = delimiterIndex === -1 ? args : args.slice(0, delimiterIndex);
-
   const positionals: string[] = [];
   for (let index = 0; index < head.length; index += 1) {
     const arg = head[index];
@@ -59,20 +83,7 @@ export function validateToolArgs(args: string[]): ParseResult<void> {
     if (arg.startsWith('-')) return { ok: false, message: `unknown option '${arg}'` };
     positionals.push(arg);
   }
-
-  if (delimiterIndex === -1) {
-    if (positionals.length === 0) {
-      return { ok: false, message: 'dor tool requires a tool name or -- <command...>' };
-    }
-    return { ok: true, value: undefined };
-  }
-
-  if (positionals.length > 0) return { ok: true, value: undefined };
-  if (head.includes('--global')) return { ok: false, message: '--global requires a named tool' };
-  if (args.slice(delimiterIndex + 1).join(' ').trim() === '') {
-    return { ok: false, message: 'dor tool requires a command after --' };
-  }
-  return { ok: true, value: undefined };
+  return { ok: true, value: positionals };
 }
 
 export const toolCommand: Command = {
@@ -113,7 +124,7 @@ A project dormouse.yml is repo-controlled and its entries execute, so it is iner
 
 Approving an upstream covers every worktree and clone of that repo. Approving a folder covers that checkout only, which is what you want for a branch you have not read.
 
-Where the tool lands: typed alone at a prompt, it takes over the pane you typed it in — no split, same surface, same scrollback — and reports "takeover". Anything else splits without taking focus and prints the new surface's handle. The take-over needs an integrated shell running \`dor tool\` as the whole command line, a visible plain terminal pane without an auxiliary helper, and the tool's directory to be that pane's own, so an agent's invocation, a compound line, --minimize, --surface, and --cwd elsewhere all split instead. The handle prints before the command starts, since dor has to exit before its own shell is free to run it.
+Where the tool lands: typed alone at a prompt in a visible, integrated plain terminal whose directory is the tool's, it takes over that pane — no split, same surface, same scrollback — and reports "takeover". Anything else — an agent's invocation, a compound line, a pane with a helper, --minimize, --surface, --cwd elsewhere — splits without taking focus and prints the new surface's handle. The handle prints before the command starts, since dor has to exit before its own shell is free to run it.
 
 --cwd sets the working directory used to find dormouse.yml and to run the command; it defaults to the directory dor was invoked from.
 
@@ -154,40 +165,42 @@ JSON output:
 };
 
 async function runToolCommand(this: DorCommandContext, flags: ToolFlags, ...rest: string[]): Promise<void | Error> {
-  // The name precedes `--` for a named invocation; an anonymous command has
-  // only flags before it. stricli discards the separator, so inspect raw argv.
-  const head = this.commandArgs.slice(0, this.hasArgumentEscape ? this.commandArgs.indexOf('--') : undefined);
-  let named = false;
-  for (let i = 0; i < head.length; i++) {
-    if (FLAGS_WITH_VALUES.has(head[i])) i++;
-    else if (!BOOLEAN_FLAGS.has(head[i])) named = true;
-  }
+  // `validateToolArgs` already accepted this argv, so the walk cannot fail.
+  const head = headPositionals(this.commandArgs);
+  const named = head.ok && head.value.length > 0;
   if (named && rest.length === 0) {
     return new Error('dor tool requires a tool name or -- <command...>');
   }
 
-  const client = requireControlClient(this.options, TOOL_TIMEOUT_MS);
-  if (client instanceof Error) return client;
+  return dispatchToolSurface(this, {
+    ...(named ? { name: rest[0], args: rest.slice(1), global: flags.global === true } : { command: rest }),
+    ...workspaceParam(flags.workspace),
+    fresh: flags.fresh === true,
+    minimized: flags.minimize === true,
+    surface: flags.surface,
+    cwd: callerWorkingDirectory(flags.cwd, this.options.env),
+  }, flags.json === true);
+}
 
+/** The launch round trip `dor tool` and `dor open` share: one Tool request in,
+ *  its handle out. */
+export async function dispatchToolSurface(
+  context: DorCommandContext, request: ToolSurfaceRequest, json: boolean,
+): Promise<void | Error> {
+  const client = requireControlClient(context.options, TOOL_TIMEOUT_MS);
+  if (client instanceof Error) return client;
   try {
-    const response = await client.toolSurface({
-      ...(named ? { name: rest[0], args: rest.slice(1), global: flags.global === true } : { command: rest }),
-      ...workspaceParam(flags.workspace),
-      fresh: flags.fresh === true,
-      minimized: flags.minimize === true,
-      surface: flags.surface,
-      cwd: callerWorkingDirectory(flags.cwd, this.options.env),
-    });
+    const response = await client.toolSurface(request);
     // Lint output is advisory and must not pollute a `--json` parse.
-    for (const warning of response.warnings ?? []) writeStderr(this, `${warning}\n`);
-    writeStdout(this, renderToolResponse(response, flags.json === true));
+    for (const warning of response.warnings ?? []) writeStderr(context, `${warning}\n`);
+    writeStdout(context, renderToolResponse(response, json));
     return undefined;
   } catch (error) {
     return new Error(errorMessage(error));
   }
 }
 
-export function renderToolResponse(response: ToolSurfaceResponse, json: boolean): string {
+function renderToolResponse(response: ToolSurfaceResponse, json: boolean): string {
   if (json) {
     return renderJson({
       status: response.status,

@@ -40,7 +40,12 @@ The September 2026 integration reuses Terminal Context for the Tool's primary te
 
 Keeping the built-in viewer in the Tool's process tree reuses port discovery, kill, restart, and Workspace transfer. An OSC path carries the per-run URL capability without saving that secret in the restart command. Holding the selected file descriptors bounds what the server can read after launch; it trades automatic replacement-file refresh for a grant whose contents cannot widen through path replacement.
 
+
+The VS Code host supports Node 18, which lacks native glob matching. Bundled picomatch keeps association behavior the same across hosts. Patterns with separators test both the CWD-relative and canonical absolute path: files above the CWD otherwise start with `../` and can miss patterns intended to cover an absolute directory. Canonicalization also gives symlink aliases one matching identity.
+
 ## Take-over
+
+An accepted takeover has already answered the CLI and promised its placement. Switching Workspaces while the shell returns to its prompt changes presentation without changing ownership of that shell; abandoning the launch then silently loses a successful request. Initial visibility still distinguishes a human's invocation from background placement, while the post-prompt checks protect the live Session and Workspace.
 
 **Why the gate is conservative in the split direction.** Every condition can be read wrong in two directions, and the two costs are nowhere near equal. Declining a take-over that should have happened costs a pane the user closes — the tool still runs, in the placement `dor tool` has always used. Taking over a pane that should have split types a command into a shell that belongs to something else: an agent's session, a line with work queued behind `dor`, a directory the tool was not asked to run in. So each condition is written to fail closed, and quoting is not unpicked — a line carrying `&&` inside quotes splits rather than being parsed for whether that `&&` is real.
 

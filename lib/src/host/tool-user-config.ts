@@ -1,6 +1,8 @@
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
-import { parseToolFile, type ToolFile } from './tool-registry';
+import type { ToolLookupResult } from '../lib/platform/tool-types';
+import { resolveToolInput } from './tool-input';
+import { parseToolFile, type ToolEntry, type ToolFile } from './tool-registry';
 import { readToolFile } from './tool-trust';
 
 export function userToolConfigPath(): string {
@@ -10,9 +12,18 @@ export function userToolConfigPath(): string {
 
 export async function readUserToolFile(path: string): Promise<ToolFile | null> {
   try {
-    return parseToolFile(await readToolFile(path, true), { path, dir: dirname(path), scope: 'user' });
+    return parseToolFile(await readToolFile(path, { followSymlink: true }), { path, dir: dirname(path), scope: 'user' });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
     throw error;
   }
+}
+
+/** The `ok` result for a user Tool: no project root, no trust gate. */
+export async function resolveUserTool(
+  file: ToolFile, path: string, entry: ToolEntry, cwd: string, args: readonly string[],
+): Promise<ToolLookupResult> {
+  const input = await resolveToolInput(entry, { cwd, projectRoot: null, args });
+  return { status: 'ok', projectRoot: file.dir, path, name: entry.name, scope: 'user',
+    ...input, render: entry.render, port: entry.port, warnings: [...file.warnings] };
 }

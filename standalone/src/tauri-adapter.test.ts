@@ -472,6 +472,23 @@ describe("TauriAdapter terminal stream", () => {
     expect(alerts.some((detail) => detail.id === "replay-pty" && detail.watchingEnabled)).toBe(true);
   });
 
+  it("applies notification side effects only to the marked live handoff replay", async () => {
+    const { adapter, deliver } = await listening();
+    const alerts: AlertStateDetail[] = [];
+    adapter.onAlertState((detail) => void alerts.push(detail));
+    adapter.alertSeed('marked-alert', { status: 'WATCHING_DISABLED', todo: false, notification: null });
+    const runtime = adapter.alertPauseForTransfer('marked-alert')!;
+    adapter.alertResumeFromTransfer('marked-alert', runtime, 'init-live');
+    // A historical replay racing the since-mark one carries another token: inert, and it does not consume the permission.
+    deliver('pty:replay', { id: 'marked-alert', data: '\x1b]9;Historical replay\x07', requestId: 'init-boot' });
+    expect(alerts[alerts.length - 1]?.status).not.toBe('ALERT_RINGING');
+    deliver('pty:replay', { id: 'marked-alert', data: '\x1b]9;Finished in transit\x07', requestId: 'init-live' });
+    expect(alerts[alerts.length - 1]?.status).toBe('ALERT_RINGING');
+    adapter.alertDismiss('marked-alert');
+    deliver('pty:replay', { id: 'marked-alert', data: '\x1b]9;Later replay\x07', requestId: 'init-live' });
+    expect(alerts[alerts.length - 1]?.status).not.toBe('ALERT_RINGING');
+  });
+
   it("settles the replayed watch when a marked buffer belongs to an exited PTY", async () => {
     const { adapter, deliver } = await listening();
     const alerts: AlertStateDetail[] = [];

@@ -1,4 +1,3 @@
-import { buildShellCommandForKind, shellCommandKind } from 'dor/commands/shell-quote';
 import { captureToolParams } from './wall/tool-transfer';
 import { isWorkspaceTransferPending } from '../lib/window-session-aggregator';
 import { TerminalContextContext, type TerminalContextOpenOptions, type TerminalContextState } from './wall/wall-context';
@@ -60,7 +59,7 @@ import {
   createTerminalPaneState,
   deriveSurfaceLabel,
 } from '../lib/terminal-state';
-import { getPlatform, PLATFORM_STRING } from '../lib/platform';
+import { getPlatform } from '../lib/platform';
 import type {
   Surface as DorSurface,
   ResolvedSplitDirection as DorResolvedSplitDirection,
@@ -107,13 +106,15 @@ import { useWallKeyboard } from './wall/use-wall-keyboard';
 import { useSessionPersistence } from './wall/use-session-persistence';
 import { useDevServerPortCorrelation } from './wall/use-dev-server-ports';
 import { useAlertSpeech } from './wall/use-alert-speech';
-import { useDorControl } from './wall/use-dor-control';
+import { toolRunCommand, useDorControl } from './wall/use-dor-control';
+import { errorText } from './wall/dor-control-shared';
 import { useWindowFocused } from './wall/use-window-focused';
 import {
   DialogKeyboardContext,
   DoorElementsContext,
   ModeContext,
   WorkspaceActiveContext,
+  WorkspaceIdContext,
   PaneElementsContext,
   PaneWriteContext,
   WallActionsContext,
@@ -1560,31 +1561,45 @@ export function Wall({
   // Approving a pending tool: record the grant, then start the command in the
   // pane that has been showing the prompt. The two steps are ordered so a
   // failed write never leaves a running command in an unapproved repo.
-  const resolveToolApproval = useCallback(async (id: string, choice: 'upstream' | 'folder' | 'decline') => {
+  const resolveToolApproval = useCallback(async (id: string, choice: 'upstream' | 'folder' | 'decline' | 'retry') => {
     const meta = lath.getMeta(id);
-    const pending = toolPendingFromParams(meta?.params);
+    let pending = toolPendingFromParams(meta?.params);
     if (!pending || closingWorkspaceRef.current || isWorkspaceTransferPending(effectiveWorkspaceId)) return;
     if (choice === 'decline') {
-      // A refusal writes nothing: it closes the pane and leaves no record, so a
-      // reflexive decline cannot permanently disable tools for this repo.
+      // Closing writes no denial and does not revoke an already saved grant.
       await closeSurface(id);
       return;
     }
     if (toolApprovalsInFlightRef.current.has(id)) return;
     toolApprovalsInFlightRef.current.add(id);
+    const isCurrent = () => !closingWorkspaceRef.current
+      && !isWorkspaceTransferPending(effectiveWorkspaceId)
+      && toolPendingFromParams(lath.getMeta(id)?.params) === pending
+      && !lath.isDying(id) && !isSurfaceClosing(id);
     const showFailure = (message: string) => {
-      if (!closingWorkspaceRef.current && lath.getMeta(id) && !lath.isDying(id) && !isSurfaceClosing(id)) {
+      if (isCurrent()) {
         lath.store.updateParams(id, { toolPending: { ...pending, error: message } });
       }
     };
 
     try {
       const platform = getPlatform();
-      await platform.toolControl?.({
-        op: 'trust',
-        kind: choice,
-        projectRoot: pending.projectRoot,
-      });
+      if (!pending.trustRecorded) {
+        // A stale Retry action cannot grant trust.
+        if (choice === 'retry') return;
+        const grant = await platform.toolControl?.({
+          op: 'trust',
+          kind: choice,
+          projectRoot: pending.projectRoot,
+        });
+        if (grant?.status !== 'trust-recorded') {
+          showFailure(grant?.status === 'error' ? grant.message : 'The Tool permission could not be saved. Try allowing it again.');
+          return;
+        }
+        if (!isCurrent()) return;
+        pending = { ...pending, trustRecorded: true, error: undefined };
+        lath.store.updateParams(id, { toolPending: pending });
+      }
 
       // Re-resolve now that the grant exists. The untrusted lookup deliberately
       // withholds `render` / `port` / `key` — they live only in the `ok` arm — so
@@ -1597,15 +1612,14 @@ export function Wall({
         return;
       }
 
-      if (closingWorkspaceRef.current || isWorkspaceTransferPending(effectiveWorkspaceId) || !lath.getMeta(id) || lath.isDying(id) || isSurfaceClosing(id)) return;
-      const command = typeof resolved.run === 'string' ? resolved.run
-        : buildShellCommandForKind(shellCommandKind(getDefaultShellOpts()?.shell, PLATFORM_STRING), resolved.run);
+      if (!isCurrent()) return;
+      const command = toolRunCommand(resolved.run);
       lath.store.updateParams(id, {
         command,
-        toolScope: resolved.scope,
+        ...(resolved.scope ? { toolScope: resolved.scope } : {}),
         toolRender: resolved.render,
         toolPort: resolved.port,
-        ...(resolved.key ? { toolKey: namespacedToolKey(resolved.name, resolved.key, resolved.scope) } : {}),
+        ...(resolved.key ? { toolKey: namespacedToolKey(resolved.name, resolved.key) } : {}),
       });
       // Hand the leaf its command only now. The approval marker stays in place
       // until after this write, so TerminalPanel cannot consume default options
@@ -1629,7 +1643,7 @@ export function Wall({
         minimizePane(id);
       }
     } catch (error) {
-      showFailure(error instanceof Error ? error.message : String(error));
+      showFailure(errorText(error));
     } finally {
       toolApprovalsInFlightRef.current.delete(id);
     }
@@ -2002,7 +2016,7 @@ export function Wall({
     resolveSurfaceRef: surfaceRefForId,
     // Pin the terminal forward past serving, or release it. Visibility only —
     // ToolPanel keeps both halves mounted (docs/specs/dor-tool.md).
-    onResolveToolApproval: (id: string, choice: 'upstream' | 'folder' | 'decline') => {
+    onResolveToolApproval: (id: string, choice: 'upstream' | 'folder' | 'decline' | 'retry') => {
       void resolveToolApproval(id, choice);
     },
   }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, requestKill, replaceSurface, buildDorSurfaces, createContentSurface, surfaceRefForId, updateSurfaceParams, resolveToolApproval, lath, nav]);
@@ -2183,6 +2197,7 @@ export function Wall({
   // --- Render ---
 
   return (
+    <WorkspaceIdContext.Provider value={effectiveWorkspaceId}>
     <WorkspaceActiveContext.Provider value={active}>
     <ModeContext.Provider value={mode}>
       <SelectedIdContext.Provider value={selectedId}>
@@ -2290,5 +2305,6 @@ export function Wall({
       </SelectedIdContext.Provider>
     </ModeContext.Provider>
     </WorkspaceActiveContext.Provider>
+    </WorkspaceIdContext.Provider>
   );
 }

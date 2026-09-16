@@ -192,13 +192,13 @@ describe('lookupTool', () => {
   const write = (text = YML) => writeFile(join(root, 'dormouse.yml'), text);
 
   it('reports no-file when there is nothing to read', async () => {
-    expect(await lookupTool('storybook', root, new MemoryToolTrustStore(), undefined, noUpstream))
+    expect(await lookupTool('storybook', root, new MemoryToolTrustStore(), { resolveUpstream: noUpstream }))
       .toEqual({ status: 'no-file' });
   });
 
   it('asks for trust before running anything, naming the command', async () => {
     await write();
-    expect(await lookupTool('storybook', root, new MemoryToolTrustStore(), undefined, noUpstream))
+    expect(await lookupTool('storybook', root, new MemoryToolTrustStore(), { resolveUpstream: noUpstream }))
       .toMatchObject({
         status: 'untrusted',
         projectRoot: root,
@@ -211,7 +211,7 @@ describe('lookupTool', () => {
   it('offers the upstream when git resolves one', async () => {
     await write();
     const upstream = async () => 'https://github.com/diffplug/dormouse';
-    expect(await lookupTool('storybook', root, new MemoryToolTrustStore(), undefined, upstream))
+    expect(await lookupTool('storybook', root, new MemoryToolTrustStore(), { resolveUpstream: upstream }))
       .toMatchObject({ status: 'untrusted', upstreamUrl: 'https://github.com/diffplug/dormouse' });
   });
 
@@ -220,14 +220,14 @@ describe('lookupTool', () => {
     const trust = new MemoryToolTrustStore();
     await trust.grant(upstreamGrantKey('https://github.com/diffplug/dormouse'), 'upstream');
     const upstream = async () => 'https://github.com/diffplug/dormouse';
-    expect((await lookupTool('storybook', root, trust, undefined, upstream)).status).toBe('ok');
+    expect((await lookupTool('storybook', root, trust, { resolveUpstream: upstream })).status).toBe('ok');
   });
 
   it('resolves once the folder is granted', async () => {
     await write();
     const trust = new MemoryToolTrustStore();
     await trust.grant(folderGrantKey(root), 'folder');
-    const result = await lookupTool('storybook', root, trust, undefined, noUpstream);
+    const result = await lookupTool('storybook', root, trust, { resolveUpstream: noUpstream });
     expect(result.status).toBe('ok');
     if (result.status !== 'ok') return;
     expect(result.entry.run).toBe('pnpm storybook');
@@ -237,7 +237,7 @@ describe('lookupTool', () => {
 
   it('reports an unknown tool with the names it does know, before any trust check', async () => {
     await write();
-    expect(await lookupTool('nope', root, new MemoryToolTrustStore(), undefined, noUpstream)).toMatchObject({
+    expect(await lookupTool('nope', root, new MemoryToolTrustStore(), { resolveUpstream: noUpstream })).toMatchObject({
       status: 'unknown-tool',
       names: ['once', 'storybook'],
     });
@@ -245,7 +245,7 @@ describe('lookupTool', () => {
 
   it('surfaces a parse error as an error rather than throwing', async () => {
     await write('tools:\n  t:\n    run: x\n    prespawn_dedupe: [$NOPE]\n');
-    const result = await lookupTool('t', root, new MemoryToolTrustStore(), undefined, noUpstream);
+    const result = await lookupTool('t', root, new MemoryToolTrustStore(), { resolveUpstream: noUpstream });
     expect(result).toMatchObject({ status: 'error' });
     if (result.status !== 'error') return;
     expect(result.message).toMatch(/unknown substitution '\$NOPE'/);
@@ -268,7 +268,7 @@ describe('the pre-approval read (regression: review finding 13, PR #493 review)'
 
   it('still reads a normal file', async () => {
     await writeFile(join(root, 'dormouse.yml'), YML);
-    expect((await lookupTool('storybook', root, new MemoryToolTrustStore(), undefined, noUpstream)).status).toBe('untrusted');
+    expect((await lookupTool('storybook', root, new MemoryToolTrustStore(), { resolveUpstream: noUpstream })).status).toBe('untrusted');
   });
 
   it('refuses a symlink instead of following it before trust', async () => {
@@ -276,7 +276,7 @@ describe('the pre-approval read (regression: review finding 13, PR #493 review)'
     await writeFile(target, YML);
     await symlink(target, join(root, 'dormouse.yml'));
 
-    const result = await lookupTool('storybook', root, new MemoryToolTrustStore(), undefined, noUpstream);
+    const result = await lookupTool('storybook', root, new MemoryToolTrustStore(), { resolveUpstream: noUpstream });
     expect(result).toMatchObject({ status: 'error' });
     if (result.status !== 'error') return;
     expect(result.message).toMatch(/must be a regular file, not a symbolic link$/);
@@ -287,7 +287,7 @@ describe('the pre-approval read (regression: review finding 13, PR #493 review)'
     // check standing. 100k four-byte characters: well under the cap by
     // `.length`, well over it by bytes. Counting code units would let it through.
     const oversized = `# ${'\u{1F600}'.repeat(100_000)}\n`;
-    const result = await lookupTool('storybook', root, new MemoryToolTrustStore(), async () => oversized, noUpstream);
+    const result = await lookupTool('storybook', root, new MemoryToolTrustStore(), { readTextFile: async () => oversized, resolveUpstream: noUpstream });
     expect(result).toMatchObject({ status: 'error' });
     if (result.status !== 'error') return;
     expect(result.message).toMatch(/after reading$/);
