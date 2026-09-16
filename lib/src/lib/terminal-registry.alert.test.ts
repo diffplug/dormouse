@@ -121,6 +121,7 @@ import {
   dismissOrToggleAlert,
   dismissSessionAlert,
   focusSession,
+  registerSurfaceFocusHandle,
   getOrCreateTerminal,
   getActivity,
   getLivePersistedAlertState,
@@ -1277,6 +1278,26 @@ describe('terminal-registry alert behavior', () => {
       status: 'NOTHING_TO_SHOW',
       todo: true,
     });
+  });
+
+  it('focuses a Tool terminal while its retiring browser handle is still registered', () => {
+    const id = 'retiring-tool-browser';
+    const session = createSession(id);
+    const focus = vi.spyOn(session.terminal, 'focus');
+    const blur = vi.spyOn(session.terminal, 'blur');
+    const browser = { focus: vi.fn(), blur: vi.fn() };
+    const unregister = registerSurfaceFocusHandle(id, browser);
+    try {
+      focusSession(id, true);
+      expect(browser.focus).toHaveBeenCalledOnce();
+      expect(focus).not.toHaveBeenCalled();
+      focusSession(id, true, 'terminal');
+      expect(focus).toHaveBeenCalledOnce();
+      expect(browser.focus).toHaveBeenCalledOnce();
+      focusSession(id, false, 'terminal');
+      expect(blur).toHaveBeenCalledOnce();
+      expect(browser.blur).not.toHaveBeenCalled();
+    } finally { unregister(); }
   });
 
   it('programmatic terminal focus does not count as attention', () => {

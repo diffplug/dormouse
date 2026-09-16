@@ -210,7 +210,7 @@ type ProcessedExitListener = (id: string, exitCode: number) => void;
 const processedExitListeners = new Set<ProcessedExitListener>();
 type SemanticEventsListener = (id: string, events: TerminalSemanticEvent[]) => void;
 const semanticEventsListeners = new Set<SemanticEventsListener>();
-const toolAnnounceListeners = new Set<(id: string, announce: ToolAnnounce) => void>();
+const toolAnnounceListeners = new Set<(id: string, announce: ToolAnnounce | null) => void>();
 
 export function onProcessedPtyData(listener: ProcessedDataListener): () => void {
   processedDataListeners.add(listener);
@@ -295,9 +295,12 @@ function createOwnerPtyStream(id: string): ProcessedPtyStream {
       // pays for the filtered copy.
       const hasAnnounce = events.some(event => event.kind === 'toolAnnounce');
       applyTerminalProtocolEvents(alertManager, id, hasAnnounce ? events.filter(event => event.kind !== 'toolAnnounce') : events);
-      if (hasAnnounce) {
-        for (const event of events) if (event.kind === 'toolAnnounce') {
-          for (const listener of toolAnnounceListeners) listener(id, event.announce);
+      // A null announcement retires the previous command's hint in the owning
+      // webview. Keep starts and serves in parse order, including one chunk.
+      for (const event of events) {
+        if (event.kind === 'toolAnnounce' || (event.kind === 'semantic' && event.event.type === 'commandStart')) {
+          const announce = event.kind === 'toolAnnounce' ? event.announce : null;
+          for (const listener of toolAnnounceListeners) listener(id, announce);
         }
       }
       const semanticEvents = collectTerminalSemanticEvents(events);
@@ -554,7 +557,7 @@ export function attachRouter(
       if (!ownedPtyIds.has(id)) return;
       post({ type: 'pty:data', id, data: visibleData, textData } satisfies ExtensionMessage);
     });
-    const onToolAnnounce = (id: string, announce: ToolAnnounce) => {
+    const onToolAnnounce = (id: string, announce: ToolAnnounce | null) => {
       if (ownedPtyIds.has(id)) post({ type: 'terminal:toolAnnounce', id, announce } satisfies ExtensionMessage);
     };
     toolAnnounceListeners.add(onToolAnnounce);
