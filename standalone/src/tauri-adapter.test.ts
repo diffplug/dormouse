@@ -1,5 +1,5 @@
-import { getToolDirty, recordToolDirty } from 'dormouse-lib/lib/tool-dirty-store';
-import { describe, expect, it, vi } from "vitest";
+import { getToolDirty, resetToolDirty } from 'dormouse-lib/lib/tool-dirty-store';
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 // The in-process session-flush handshake and drain wrappers on TauriAdapter are
 // pure webview-side logic — they never invoke Tauri — so we only need to stub the
@@ -377,6 +377,8 @@ describe("TauriAdapter remote host link", () => {
 // location"), so this adapter forwards what it is given and never re-derives
 // it. What is covered here is exactly that boundary.
 describe("TauriAdapter terminal stream", () => {
+  afterEach(resetToolDirty);
+
   async function listening() {
     const handlers = new Map<string, (event: { payload: unknown }) => void>();
     vi.mocked(listen).mockImplementation((async (
@@ -419,7 +421,6 @@ describe("TauriAdapter terminal stream", () => {
     expect(getToolDirty(id)).toBe(true);
     deliver('pty:replay', { id, data: '\x1b]633;C\x07' });
     expect(getToolDirty(id)).toBeNull();
-    recordToolDirty(id, null);
   });
 
   it("forwards the projection pair it was handed, parsing nothing again", async () => {

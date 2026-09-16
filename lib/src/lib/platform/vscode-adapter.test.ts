@@ -1,4 +1,4 @@
-import { getToolDirty, recordToolDirty } from '../tool-dirty-store';
+import { getToolDirty, resetToolDirty } from '../tool-dirty-store';
 import { getToolAnnounce, resetToolAnnounces } from '../tool-announce-store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -87,6 +87,7 @@ describe('VSCodeAdapter PTY exit handling', () => {
   beforeEach(stubWebviewEnv);
 
   afterEach(() => {
+    resetToolDirty();
     vi.unstubAllGlobals();
     vi.clearAllMocks();
   });
@@ -240,7 +241,6 @@ describe('VSCodeAdapter PTY exit handling', () => {
     expect(getToolDirty(id)).toBe(false);
     windowTarget.dispatchEvent(hostMessage({ type: 'pty:replay', id, data: '\x1b]633;C\x07' }));
     expect(getToolDirty(id)).toBeNull();
-    recordToolDirty(id, null);
   });
 
   it('receives owner-parsed Tool announcements and reconstructs them on replay', () => {

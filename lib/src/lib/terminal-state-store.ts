@@ -123,7 +123,6 @@ function clearPaneScratch(id: string): void {
 }
 
 export function resetTerminalPaneState(id: string, initial?: Partial<TerminalPaneState>): void {
-  recordToolDirty(id, null);
   clearPaneScratch(id);
   paneStates.set(id, createTerminalPaneState(initial));
   notifyTerminalPaneStateListeners(id);
@@ -146,7 +145,6 @@ export function restoreTransferredTerminalState(id: string, state: TransferredTe
 }
 
 export function removeTerminalPaneState(id: string): void {
-  recordToolDirty(id, null);
   clearPaneScratch(id);
   if (!paneStates.delete(id)) return;
   notifyTerminalPaneStateListeners(id);
@@ -158,9 +156,6 @@ export function applyTerminalSemanticEvents(
   options?: { keystrokeHeuristic?: boolean },
 ): void {
   if (events.length === 0) return;
-  // OSC starts reset in protocol stream order, before any following state report.
-  // Only synthetic starts originate here without that ordered protocol event.
-  if (events.some(event => event.type === 'commandStart' && event.source === 'user_input')) recordToolDirty(id, null);
   // `keystrokeHeuristic` marks the fallback's own synthesized markers, which must
   // not promote the pane — that would retire the very path emitting them.
   if (!options?.keystrokeHeuristic && !oscDrivenPanes.has(id) && events.some(isOscDrivenBoundary)) {
@@ -210,6 +205,8 @@ export function recordTerminalUserInput(id: string, input: string, reader?: Prom
   const shape = promptShapes.get(id) ?? null;
   const commandLine = renderedLine && shape ? extractCommand(renderedLine, shape) : null;
   if (commandLine) {
+    // A synthetic start has no protocol event to retire the Tool's last report.
+    recordToolDirty(id, null);
     applyTerminalSemanticEvents(id, [
       { type: 'commandLine', commandLine },
       { type: 'commandStart', source: 'user_input' },
@@ -227,6 +224,7 @@ export function seedLaunchedCommand(id: string, command: string, cwdPath?: strin
   if (cwd) events.push({ type: 'cwd', cwd });
   events.push({ type: 'commandLine', commandLine: command });
   events.push({ type: 'commandStart', source: 'user_input' });
+  recordToolDirty(id, null);
   applyTerminalSemanticEvents(id, events);
 }
 

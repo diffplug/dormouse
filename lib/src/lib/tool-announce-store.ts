@@ -2,7 +2,8 @@
  * Per-Session record of the latest OSC 367 `serve` announcement
  * (`docs/specs/dor-tool.md` -> Serving, OSC 367).
  *
- * Host-parsed live events and renderer-parsed raw replay feed this store.
+ * Host-parsed live events and renderer-parsed raw replay feed this store
+ * through `recordToolEvents` in `./tool-events.ts`.
  * It is renderer state; owners forward announcements rather than keep a second
  * copy that cannot reach the Wall.
  *
@@ -11,7 +12,6 @@
  * then it only *selects among* the ports the scan found. Output alone never
  * creates surfaces.
  */
-import type { TerminalProtocolEvent } from './terminal-protocol';
 import type { ToolAnnounce } from './tool-announce';
 
 const announces = new Map<string, ToolAnnounce>();
@@ -21,17 +21,6 @@ const announces = new Map<string, ToolAnnounce>();
 export function recordToolAnnounce(id: string, announce: ToolAnnounce | null): void {
   if (announce) announces.set(id, announce);
   else announces.delete(id);
-}
-
-/** The one spelling of "record whatever announcements this parse produced",
- *  shared by every renderer-side seam that parses raw replay itself. */
-export function recordToolAnnounces(id: string, events: readonly TerminalProtocolEvent[]): void {
-  // Preserve stream order: a fresh command retires the previous run's hint,
-  // but a serve later in the same parsed chunk belongs to the new run.
-  for (const event of events) {
-    if (event.kind === 'toolAnnounce') recordToolAnnounce(id, event.announce);
-    else if (event.kind === 'semantic' && event.event.type === 'commandStart') clearToolAnnounce(id);
-  }
 }
 
 /** Drop a Session's announcement when it dies, so a recycled pane id cannot

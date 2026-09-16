@@ -10,7 +10,9 @@ import {
   collectTerminalProtocolResponses,
   type TerminalColorProvider,
   type TerminalColors,
+  type TerminalProtocolEvent,
 } from '../../lib/src/lib/terminal-protocol';
+import { isProtocolCommandStart } from '../../lib/src/lib/tool-events';
 import {
   createProcessedPtyStream,
   type ProcessedPtyChunk,
@@ -294,17 +296,17 @@ function createOwnerPtyStream(id: string): ProcessedPtyStream {
       // this process cannot reach, so the router withholds them and forwards
       // them to the webviews instead — and only the rare chunk that carries one
       // pays for the filtered copy.
-      const hasToolEvent = events.some(event => event.kind === 'toolAnnounce' || event.kind === 'toolState');
-      applyTerminalProtocolEvents(alertManager, id, hasToolEvent ? events.filter(event => event.kind !== 'toolAnnounce' && event.kind !== 'toolState') : events);
-      // A null announcement retires the previous command's hint in the owning
-      // webview. Keep starts and serves in parse order, including one chunk.
+      const isToolEvent = (event: TerminalProtocolEvent) => event.kind === 'toolAnnounce' || event.kind === 'toolState';
+      applyTerminalProtocolEvents(alertManager, id, events.some(isToolEvent) ? events.filter(event => !isToolEvent(event)) : events);
+      // A start retires the previous command's announcement and state in the
+      // owning webview (null). Keep starts and reports in parse order, including one chunk.
       for (const event of events) {
-        if (event.kind === 'toolState' || (event.kind === 'semantic' && event.event.type === 'commandStart')) {
+        const start = isProtocolCommandStart(event);
+        if (event.kind === 'toolState' || start) {
           for (const listener of toolStateListeners) listener(id, event.kind === 'toolState' ? event.state.dirty : null);
         }
-        if (event.kind === 'toolAnnounce' || (event.kind === 'semantic' && event.event.type === 'commandStart')) {
-          const announce = event.kind === 'toolAnnounce' ? event.announce : null;
-          for (const listener of toolAnnounceListeners) listener(id, announce);
+        if (event.kind === 'toolAnnounce' || start) {
+          for (const listener of toolAnnounceListeners) listener(id, event.kind === 'toolAnnounce' ? event.announce : null);
         }
       }
       const semanticEvents = collectTerminalSemanticEvents(events);

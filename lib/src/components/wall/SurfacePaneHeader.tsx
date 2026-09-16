@@ -18,7 +18,6 @@ import {
   XIcon,
 } from '@phosphor-icons/react';
 import { ToolDirtyIndicator, useToolDirty } from '../ToolDirtyIndicator';
-import { isToolParams } from './browser-surface';
 import { HeaderActionButton } from '../HeaderActionButton';
 import { HEADER_PALETTE_TRANSITION_CLASS, POPUP_SURFACE_CLASS, paneZoomButtonClass, TERMINAL_TOP_RADIUS_CLASS } from '../design';
 import { NotepadHeaderButton } from './NotepadHeaderButton';
@@ -43,8 +42,7 @@ import {
 } from './wall-context';
 
 export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
-  const reportedDirty = useToolDirty(id);
-  const dirty = isToolParams(params) && reportedDirty === true;
+  const dirty = useToolDirty(id, params);
   const visible = useSurfaceVisibility(parked);
   const visibleRef = useRef(visible);
   visibleRef.current = visible;

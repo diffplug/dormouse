@@ -16,7 +16,7 @@ import { sanitizeText } from './osc-sanitize';
 /** Cap on the whole payload before parsing. A tool's announcement is a handful
  *  of fields; anything larger is a mistake or an attack, and JSON.parse on
  *  unbounded terminal output is not something to offer. */
-const PAYLOAD_LIMIT = 4096;
+export const PAYLOAD_LIMIT = 4096;
 const NAME_LIMIT = 200;
 const KEY_ELEMENT_LIMIT = 512;
 const KEY_ELEMENTS_LIMIT = 8;
@@ -59,28 +59,27 @@ function readKey(value: unknown): string[] | null {
 }
 
 /**
- * Parse an OSC 367 payload. `content` is everything after `367;`, i.e.
- * `<verb>;<json>`. Returns null for an unknown verb, a malformed payload, or a
- * payload with nothing usable in it — never throws, because this runs on
- * arbitrary process output.
+ * Split `<verb>;<json>` for one OSC 367 verb and parse its object payload.
+ * Returns null for another verb, an oversized or malformed payload, or a
+ * non-object — never throws, because this runs on arbitrary process output.
  */
-export function parseToolAnnounce(content: string): ToolAnnounce | null {
-  const separator = content.indexOf(';');
-  if (separator === -1) return null;
-  const verb = content.slice(0, separator);
-  // `dehydrate` is D2's verb; parsed as unknown here rather than half-honored.
-  if (verb !== 'serve') return null;
-  const raw = content.slice(separator + 1);
+export function parseToolPayload(content: string, verb: string): Record<string, unknown> | null {
+  if (!content.startsWith(`${verb};`)) return null;
+  const raw = content.slice(verb.length + 1);
   if (raw.length === 0 || raw.length > PAYLOAD_LIMIT) return null;
-
-  let payload: unknown;
   try {
-    payload = JSON.parse(raw);
+    const payload: unknown = JSON.parse(raw);
+    return isRecord(payload) ? payload : null;
   } catch {
     return null;
   }
-  if (!isRecord(payload)) return null;
-  const record = payload;
+}
+
+/** Parse a `serve` announcement; `content` is everything after `367;`.
+ *  `dehydrate` is D2's verb; parsed as unknown here rather than half-honored. */
+export function parseToolAnnounce(content: string): ToolAnnounce | null {
+  const record = parseToolPayload(content, 'serve');
+  if (!record) return null;
 
   const announce: ToolAnnounce = {
     port: readPort(record.port),

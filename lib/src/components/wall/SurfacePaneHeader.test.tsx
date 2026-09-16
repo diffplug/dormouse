@@ -5,7 +5,7 @@ import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PaneProps } from './pane-props';
-import { recordToolDirty } from '../../lib/tool-dirty-store';
+import { recordToolDirty, resetToolDirty } from '../../lib/tool-dirty-store';
 import { SurfacePaneHeader } from './SurfacePaneHeader';
 import { ToolPaneHeader } from './ToolPaneHeader';
 import { FakePtyAdapter } from '../../lib/platform/fake-adapter';
@@ -67,6 +67,7 @@ afterEach(() => {
   act(() => root.unmount());
   container.remove();
   vi.unstubAllGlobals();
+  resetToolDirty();
 });
 
 function renderHeader(
@@ -113,16 +114,6 @@ describe('SurfacePaneHeader — browser chrome', () => {
       expect(container.querySelector('[aria-label="Kill"]')).not.toBeNull();
       act(() => addPlainNote(id, 'Keep this note'));
       expect(indicator()).not.toBeNull();
-      if ('url' in params) {
-        // A 103px Tool has only 79px of browser chrome. The dirty dot remains
-        // outside the menu; essential controls join the menu before overflowing.
-        act(() => resizeHeader(79));
-        expect(indicator()).not.toBeNull();
-        expect(container.querySelector('[aria-label="Kill"]')).toBeNull();
-        act(() => container.querySelector<HTMLButtonElement>('[aria-label="Browser controls, 1 note"]')!.click());
-        expect(document.querySelector('[role="dialog"] [aria-label="Kill"]')).not.toBeNull();
-        expect(container.contains(indicator())).toBe(true);
-      }
       act(() => recordToolDirty(id, false));
       expect(indicator()).toBeNull();
       act(() => recordToolDirty(id, true));
@@ -131,7 +122,27 @@ describe('SurfacePaneHeader — browser chrome', () => {
       expect(indicator()).toBeNull();
     } finally {
       registration.dispose();
-      act(() => recordToolDirty(id, null));
+    }
+  });
+
+  it('keeps the dirty dot outside the browser overflow menu that Kill joins at 79px', () => {
+    // A 103px Tool has only 79px of browser chrome: the dot stays inline and
+    // essential controls join the menu before overflowing.
+    const id = 'dirty-tool-header-narrow';
+    const registration = register(id);
+    try {
+      recordToolDirty(id, true);
+      addPlainNote(id, 'Keep this note');
+      renderHeader({ ...headerProps(id, 'Tool'), params: { surfaceType: 'tool', url: CHROME.url } }, stubActions(), { tool: true });
+      act(() => resizeHeader(79));
+      const indicator = () => container.querySelector('[role="img"][aria-label="Unsaved changes"]');
+      expect(indicator()).not.toBeNull();
+      expect(container.querySelector('[aria-label="Kill"]')).toBeNull();
+      act(() => container.querySelector<HTMLButtonElement>('[aria-label="Browser controls, 1 note"]')!.click());
+      expect(document.querySelector('[role="dialog"] [aria-label="Kill"]')).not.toBeNull();
+      expect(container.contains(indicator())).toBe(true);
+    } finally {
+      registration.dispose();
     }
   });
 
@@ -144,7 +155,6 @@ describe('SurfacePaneHeader — browser chrome', () => {
       expect(container.querySelector('[aria-label="Unsaved changes"]')).toBeNull();
     } finally {
       registration.dispose();
-      act(() => recordToolDirty(id, null));
     }
   });
 

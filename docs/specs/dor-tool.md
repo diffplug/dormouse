@@ -204,17 +204,17 @@ Source of truth: `toolTakesOverCaller` / `toolRerunsInCaller` / `callerStillPlac
 - **Must forward parsed announcements, state reports, and command-start resets in stream order to the owning renderer.** A start clears the previous command's announcement and unsaved state; later reports in that chunk survive. Standalone uses `terminal:protocolEvents`; VS Code uses nullable `terminal:toolAnnounce` and `terminal:toolState` scoped to the owning webview, with null clearing the corresponding record. The fake adapter applies locally.
 - **Must reconstruct announcements, state, and resets from raw replay without emitting replies**, preserving transferred announcements when since-mark replay has no command start, and clear the renderer record on Session disposal. Ordinary terminal announcements stay inert.
 - Reserved: **Must retain `name`, `dehydrate`, and `persist` as inert parsed fields**, serving the announced-name and D1/D2 items under [Future](#future). Neither `persist: never` nor a `dehydrate` verb changes current persistence.
-- Reserved: **Must reserve `dehydrate` for D2 under [Future](#future)**; existing title/progress protocols keep those roles.
+- Reserved: **Never assign an OSC 367 verb beyond `serve`, `state`, and `dehydrate`**; `dehydrate` belongs to D2 under [Future](#future), while existing title/progress protocols keep those roles.
 
-Source of truth: `TerminalProtocolParser` / `collectTerminalProtocolAlerts` in `lib/src/lib/terminal-protocol.ts`; `parseToolAnnounce` in `lib/src/lib/tool-announce.ts`; `recordToolAnnounce` in `lib/src/lib/tool-announce-store.ts`; `createOwnerPtyStream` in `vscode-ext/src/message-router.ts`; `ownerStream` in `lib/src/host/remote/sidecar-entry.ts`. Tests: `lib/src/lib/tool-announce.test.ts`, `standalone/scripts/dev-agent-browser-announce.test.mjs`.
+Source of truth: `TerminalProtocolParser` / `collectTerminalProtocolAlerts` in `lib/src/lib/terminal-protocol.ts`; `parseToolAnnounce` in `lib/src/lib/tool-announce.ts`; `recordToolAnnounce` in `lib/src/lib/tool-announce-store.ts`; `recordToolEvents` in `lib/src/lib/tool-events.ts`; `createOwnerPtyStream` in `vscode-ext/src/message-router.ts`; `ownerStream` in `lib/src/host/remote/sidecar-entry.ts`. Tests: `lib/src/lib/tool-announce.test.ts`, `standalone/scripts/dev-agent-browser-announce.test.mjs`.
 
 ## Unsaved changes
 
-**Must accept a Tool's `OSC 367;state;{"v":1,"dirty":true}` report as unsaved state**, with `false` reporting clean. Require version 1 and a boolean; malformed, oversized, and unknown-version reports leave the last state unchanged. State reports never change serving hints, Tool identity, or designation; ordinary terminal reports have no dirty UI. The parser consumes them without replying.
+**Must accept a Tool's `OSC 367;state;{"v":1,"dirty":true}` report as unsaved state**, with `false` reporting clean. Require version 1 and a boolean; malformed, oversized, and unknown-version reports leave the last state unchanged. State reports never change serving hints, Tool identity, or designation; ordinary terminal reports have no dirty UI.
 
 **Must distinguish unreported state from clean.** Start unknown, update immediately on valid reports, and return to unknown on command start, explicit restart, or Session disposal. Command completion is not a save: retain its last report until reset. Serve announcements never clear unsaved state.
 
-**Must retain unsaved state through minimize/reattach, renderer changes, and live Workspace transfer**, and reconstruct it in stream order during raw replay. Never write it to durable session metadata; a cold-started Tool reports its own new state. Layout owns the Pane and Door indicator under `docs/specs/layout.md` → Pane header.
+**Must retain unsaved state through minimize/reattach, renderer changes, and live Workspace transfer.** Never write it to durable session metadata; a cold-started Tool reports its own new state. Layout owns the Pane and Door indicator under `docs/specs/layout.md` → Pane header.
 
 **Must treat this state as indication only.** It neither writes files nor acknowledges a save, changes kill/close behavior, or authorizes automatic reaping. Save coordination and close protection are under [Future](#future).
 
@@ -225,7 +225,7 @@ printf '\033]367;state;{"v":1,"dirty":true}\033\\'
 printf '\033]367;state;{"v":1,"dirty":false}\033\\'
 ```
 
-Source of truth: `parseToolState` in `lib/src/lib/tool-state.ts`; `getToolDirty` / `recordToolDirty` / `recordToolStates` in `lib/src/lib/tool-dirty-store.ts`; `ToolDirtyIndicator` in `lib/src/components/ToolDirtyIndicator.tsx`. Tests: `lib/src/lib/tool-state.test.ts`, `lib/src/components/wall/SurfacePaneHeader.test.tsx`, `lib/src/components/Baseboard.test.tsx`.
+Source of truth: `parseToolState` in `lib/src/lib/tool-state.ts`; `getToolDirty` / `recordToolDirty` in `lib/src/lib/tool-dirty-store.ts`; `recordToolEvents` in `lib/src/lib/tool-events.ts`; `ToolDirtyIndicator` in `lib/src/components/ToolDirtyIndicator.tsx`. Tests: `lib/src/lib/tool-state.test.ts`, `lib/src/components/wall/SurfacePaneHeader.test.tsx`, `lib/src/components/Baseboard.test.tsx`.
 
 ## Security
 

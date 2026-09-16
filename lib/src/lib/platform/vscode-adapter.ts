@@ -1,5 +1,6 @@
-import { recordToolStates, recordToolDirty } from '../tool-dirty-store';
-import { recordToolAnnounce, recordToolAnnounces } from '../tool-announce-store';
+import { recordToolDirty } from '../tool-dirty-store';
+import { recordToolAnnounce } from '../tool-announce-store';
+import { recordToolEvents } from '../tool-events';
 import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../terminal-context-types';
 import type { AgentBrowserCommandResult, AgentBrowserEditOp, AgentBrowserEditResult, AgentBrowserOpenResult, AgentBrowserPopResult, AgentBrowserScreenshotResult, AgentBrowserStreamStatusResult, AlertStateDetail, IframeProxyResult, OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, BurrowLink, ToolControlResult, ToolHostRequest } from './types';
 import { openPortRequestTimeoutMs } from './types';
@@ -180,8 +181,7 @@ export class VSCodeAdapter implements PlatformAdapter {
         // backstop, not the contract.
         const parser = new TerminalProtocolParser(themeColorProvider);
         const parsed = parser.process(msg.data);
-        recordToolAnnounces(msg.id, parsed.events);
-        recordToolStates(msg.id, parsed.events);
+        recordToolEvents(msg.id, parsed.events);
         applyTerminalSemanticEvents(msg.id, collectTerminalSemanticEvents(parsed.events));
         for (const handler of this.replayHandlers) {
           handler({ id: msg.id, data: parsed.visibleData });

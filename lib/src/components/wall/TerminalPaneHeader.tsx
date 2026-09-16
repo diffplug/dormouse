@@ -13,7 +13,6 @@ import {
   XIcon,
 } from '@phosphor-icons/react';
 import { ToolDirtyIndicator, useToolDirty } from '../ToolDirtyIndicator';
-import { isToolParams } from './browser-surface';
 import { HeaderActionButton } from '../HeaderActionButton';
 import { HEADER_PALETTE_TRANSITION_CLASS, paneZoomButtonClass, POPUP_SURFACE_CLASS, TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from '../design';
 import { AlertBell } from '../AlertBell';
@@ -83,7 +82,7 @@ const TODO_PREVIEW_GAP = 6;
 const TODO_PREVIEW_MARGIN = 8;
 
 export function TerminalPaneHeader({ id, title, params }: PaneProps) {
-  const dirty = useToolDirty(id);
+  const dirty = useToolDirty(id, params);
   const mode = useContext(ModeContext);
   const selectedId = useContext(SelectedIdContext);
   const renamingId = useContext(RenamingIdContext);
@@ -202,7 +201,7 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
         context.open(id, { origin: { x: e.clientX, y: e.clientY } });
       }}
     >
-      {isToolParams(params) && <ToolDirtyIndicator dirty={dirty} />}
+      <ToolDirtyIndicator dirty={dirty} />
       <div className="flex flex-1 min-w-0 items-center gap-1.5 overflow-hidden">
         {isRenaming ? (
           <InlineEditInput

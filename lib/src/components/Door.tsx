@@ -71,7 +71,8 @@ export function Door({
   const speaking = speechState === 'speaking';
   const spoken = speechState === 'spoken';
   const detail = browserDisplay ? BROWSER_DISPLAY_LABEL[browserDisplay] : undefined;
-  const nameParts = [title, detail, speechState, toolDirty ? 'Unsaved changes' : undefined].filter(Boolean);
+  const extras = [detail, speechState, toolDirty && 'Unsaved changes'].filter(Boolean);
+  const nameParts = [title, ...extras];
   const doorRef = useRef<HTMLDivElement>(null);
   const showNotepad = noteCount > 0;
 
@@ -102,7 +103,7 @@ export function Door({
       )}
       onPointerDown={onPointerDown}
       title={nameParts.join(' — ')}
-      aria-label={detail || speechState || toolDirty ? nameParts.join(', ') : undefined}
+      aria-label={extras.length ? nameParts.join(', ') : undefined}
       data-alert-speech-state={speechState}
     >
       <button

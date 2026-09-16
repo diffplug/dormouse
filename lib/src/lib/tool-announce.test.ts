@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { parseToolAnnounce } from './tool-announce';
 import { collectTerminalProtocolAlerts, collectTerminalProtocolResponses, TerminalProtocolParser } from './terminal-protocol';
-import { getToolAnnounce, recordToolAnnounces, resetToolAnnounces } from './tool-announce-store';
+import { getToolAnnounce, resetToolAnnounces } from './tool-announce-store';
+import { recordToolEvents } from './tool-events';
 import { applyTerminalProtocolEvents } from './terminal-protocol';
 
 const serve = (payload: unknown) => `serve;${JSON.stringify(payload)}`;
@@ -86,7 +87,7 @@ describe('OSC 367 at the PTY boundary', () => {
   it.each(['live', 'replay', 'forwarded'] as const)('isolates successive commands without losing same-chunk serves (%s)', mode => {
     const record = (data: string) => {
       const events = new TerminalProtocolParser().process(data).events;
-      if (mode === 'replay') recordToolAnnounces('epoch', events);
+      if (mode === 'replay') recordToolEvents('epoch', events);
       else applyTerminalProtocolEvents(sink, 'epoch', mode === 'forwarded' ? collectTerminalProtocolAlerts(events) : events);
     };
     const oldServe = '\x1b]367;serve;{"port":6006,"key":["old"]}\x07';

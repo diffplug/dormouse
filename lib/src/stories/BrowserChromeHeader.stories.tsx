@@ -191,7 +191,7 @@ const meta: Meta<typeof BrowserChromeStory> = {
     width: { control: { type: 'range', min: 80, max: 900, step: 10 } },
     selected: { control: 'boolean' },
     tool: { control: 'boolean' },
-    dirty: { control: 'inline-radio', options: ['unknown', 'clean', 'dirty'] },
+    dirty: { control: 'inline-radio', options: ['unknown', 'clean', 'dirty'], if: { arg: 'tool' } },
   },
   args: {
     renderMode: 'ab-screencast',
@@ -266,6 +266,6 @@ export const SmallestTool: Story = {
 
 
 export const DirtyTool: Story = { args: { tool: true, dirty: 'dirty' } };
+// Clean and unknown render the same chrome; the tri-state is pinned by tool-state.test.ts.
 export const CleanTool: Story = { args: { tool: true, dirty: 'clean' } };
-export const UnknownTool: Story = { args: { tool: true, dirty: 'unknown' } };
 export const NarrowDirtyTool: Story = { args: { tool: true, dirty: 'dirty', width: 103 } };

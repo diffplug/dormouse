@@ -1,9 +1,8 @@
 import { parseToolState, type ToolState } from './tool-state';
-import { recordToolStates } from './tool-dirty-store';
 import type { ActivityNotification, ProtocolProgressUpdate } from './alert-manager';
 import { parseColor } from './css-color';
 import { sanitizeText, truncateText } from './osc-sanitize';
-import { recordToolAnnounces } from './tool-announce-store';
+import { isProtocolCommandStart, recordToolEvents } from './tool-events';
 import { parseToolAnnounce, type ToolAnnounce } from './tool-announce';
 import {
   STRING_CONTROL_INTRODUCER,
@@ -298,10 +297,12 @@ export class TerminalProtocolParser {
     if (content === '777' || content.startsWith('777;')) return this.parseOsc777(content);
     // OSC 367 is stripped whether or not it parses: a malformed announcement
     // must not print itself into the user's scrollback.
-    if (content === '367' || content.startsWith('367;')) {
-      const announce = content.startsWith('367;') ? parseToolAnnounce(content.slice('367;'.length)) : null;
+    if (content === '367') return [];
+    if (content.startsWith('367;')) {
+      const payload = content.slice('367;'.length);
+      const announce = parseToolAnnounce(payload);
       if (announce) return [{ kind: 'toolAnnounce', announce }];
-      const state = content.startsWith('367;') ? parseToolState(content.slice('367;'.length)) : null;
+      const state = parseToolState(payload);
       return state ? [{ kind: 'toolState', state }] : [];
     }
     const colorResponse = this.parseColorQuery(content);
@@ -438,8 +439,7 @@ export function applyTerminalProtocolEvents(
   id: string,
   events: TerminalProtocolEvent[],
 ): void {
-  recordToolAnnounces(id, events);
-  recordToolStates(id, events);
+  recordToolEvents(id, events);
   for (const event of events) {
     if (event.kind === 'notification') {
       sink.notifyFromProtocol(id, event.notification);
@@ -459,7 +459,7 @@ export function collectTerminalProtocolAlerts(
   events: TerminalProtocolEvent[],
 ): TerminalProtocolEvent[] {
   return events.filter((event) => event.kind === 'notification' || event.kind === 'progress' || event.kind === 'toolAnnounce' || event.kind === 'toolState'
-    || (event.kind === 'semantic' && event.event.type === 'commandStart'));
+    || isProtocolCommandStart(event));
 }
 
 export function collectTerminalProtocolResponses(events: TerminalProtocolEvent[]): string[] {

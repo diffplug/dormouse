@@ -13,7 +13,7 @@ vi.mock('../lib/platform', () => ({
   getPlatformOrNull: () => ({ alertPublishSettings: vi.fn(), notepadArchive: {} }),
 }));
 
-import { recordToolDirty } from '../lib/tool-dirty-store';
+import { recordToolDirty, resetToolDirty } from '../lib/tool-dirty-store';
 import { Baseboard } from './Baseboard';
 import { installLocalStorageStub } from '../lib/test-local-storage';
 import { applyAlertSettingsFromHost, DEFAULT_ALERT_SETTINGS, getAlertSettings } from '../lib/alert-settings';
@@ -373,6 +373,8 @@ describe('Baseboard Door notepad', () => {
 
 
 describe('Baseboard Tool unsaved changes', () => {
+  afterEach(() => act(() => resetToolDirty()));
+
   it('refits Door overflow when a live dirty report changes a measured width', () => {
     vi.stubGlobal('ResizeObserver', class {
       constructor(private callback: ResizeObserverCallback) {}
@@ -387,19 +389,15 @@ describe('Baseboard Tool unsaved changes', () => {
       return this.querySelector('[aria-label="Unsaved changes"]') ? 94 : 80;
     });
     const id = 'dirty-door-fit';
-    try {
-      act(() => root.render(<Baseboard items={[
-        { id, kind: 'tool', title: 'Editor' },
-        { id: 'other-door', kind: 'terminal', title: 'Shell' },
-      ]} onReattach={() => {}} />));
-      expect(container.querySelectorAll('[data-door-id]')).toHaveLength(2);
-      act(() => recordToolDirty(id, true));
-      expect(container.querySelectorAll('[data-door-id]')).toHaveLength(1);
-      act(() => recordToolDirty(id, false));
-      expect(container.querySelectorAll('[data-door-id]')).toHaveLength(2);
-    } finally {
-      act(() => recordToolDirty(id, null));
-    }
+    act(() => root.render(<Baseboard items={[
+      { id, kind: 'tool', title: 'Editor' },
+      { id: 'other-door', kind: 'terminal', title: 'Shell' },
+    ]} onReattach={() => {}} />));
+    expect(container.querySelectorAll('[data-door-id]')).toHaveLength(2);
+    act(() => recordToolDirty(id, true));
+    expect(container.querySelectorAll('[data-door-id]')).toHaveLength(1);
+    act(() => recordToolDirty(id, false));
+    expect(container.querySelectorAll('[data-door-id]')).toHaveLength(2);
   });
 
   it('updates a terminal-faced Tool Door and suppresses reports for other kinds', () => {
@@ -408,26 +406,22 @@ describe('Baseboard Tool unsaved changes', () => {
       <Baseboard items={[{ id, kind, title: 'Editor' }]} onReattach={() => {}} />,
     ));
     const visibleDot = () => container.querySelector(`[data-door-id="${id}"] [aria-label="Unsaved changes"]`);
-    try {
-      renderKind('tool');
-      expect(visibleDot()).toBeNull();
-      act(() => recordToolDirty(id, true));
-      expect(visibleDot()).not.toBeNull();
-      // The hidden measurement pass and the visible Door must grow together.
-      expect(container.querySelectorAll('[role="img"][aria-label="Unsaved changes"]')).toHaveLength(2);
-      expect(container.querySelector(`[data-door-id="${id}"]`)?.getAttribute('aria-label')).toContain('Unsaved changes');
-      renderKind('terminal');
-      expect(visibleDot()).toBeNull();
-      renderKind('browser');
-      expect(visibleDot()).toBeNull();
-      renderKind('tool');
-      expect(visibleDot()).not.toBeNull();
-      act(() => recordToolDirty(id, false));
-      expect(visibleDot()).toBeNull();
-      act(() => recordToolDirty(id, null));
-      expect(visibleDot()).toBeNull();
-    } finally {
-      act(() => recordToolDirty(id, null));
-    }
+    renderKind('tool');
+    expect(visibleDot()).toBeNull();
+    act(() => recordToolDirty(id, true));
+    expect(visibleDot()).not.toBeNull();
+    // The hidden measurement pass and the visible Door must grow together.
+    expect(container.querySelectorAll('[role="img"][aria-label="Unsaved changes"]')).toHaveLength(2);
+    expect(container.querySelector(`[data-door-id="${id}"]`)?.getAttribute('aria-label')).toContain('Unsaved changes');
+    renderKind('terminal');
+    expect(visibleDot()).toBeNull();
+    renderKind('browser');
+    expect(visibleDot()).toBeNull();
+    renderKind('tool');
+    expect(visibleDot()).not.toBeNull();
+    act(() => recordToolDirty(id, false));
+    expect(visibleDot()).toBeNull();
+    act(() => recordToolDirty(id, null));
+    expect(visibleDot()).toBeNull();
   });
 });

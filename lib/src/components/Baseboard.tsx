@@ -1,4 +1,4 @@
-import { getToolDirty, subscribeToToolDirty } from '../lib/tool-dirty-store';
+import { getToolDirtySnapshot, subscribeToToolDirty } from '../lib/tool-dirty-store';
 import { setWorkspaceAlertDelivery } from '../lib/workspace-store';
 import { useWorkspaceAlertPolicy } from './wall/use-workspace-alert-policy';
 import { useCallback, useRef, useState, useMemo, useLayoutEffect, useContext, useSyncExternalStore, type ReactNode } from 'react';
@@ -71,9 +71,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   // props component and never asks the platform anything.
   const notepadNotes = useSyncExternalStore(subscribeToNotepad, getNotepadSnapshot);
   const notepadAvailable = hasNotepadArchive();
-  // A stable primitive snapshot also invalidates the hidden Door width pass.
-  const dirtyTools = useSyncExternalStore(subscribeToToolDirty,
-    () => items.map(item => item.kind === 'tool' && getToolDirty(item.id) === true ? '1' : '0').join(''));
+  const dirtyTools = useSyncExternalStore(subscribeToToolDirty, getToolDirtySnapshot);
   const appTitleForPane = useMemo(
     () => buildAppTitleResolver(terminalStates, activityStates),
     [terminalStates, activityStates],
@@ -248,7 +246,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
         ? deriveSurfaceLabel(terminalStates.get(item.id) ?? createTerminalPaneState(), appTitleForPane, item.title)
         : item.title,
       browserDisplay: item.browserDisplay,
-      toolDirty: item.kind === 'tool' && getToolDirty(item.id) === true,
+      toolDirty: item.kind === 'tool' && dirtyTools.get(item.id) === true,
       status: activity.status,
       ringSeq: activity.ringSeq,
       todo: activity.todo,

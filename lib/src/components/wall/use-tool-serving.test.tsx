@@ -8,7 +8,8 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakePtyAdapter, setPlatform } from '../../lib/platform';
-import { recordToolAnnounce, recordToolAnnounces, resetToolAnnounces } from '../../lib/tool-announce-store';
+import { recordToolAnnounce, resetToolAnnounces } from '../../lib/tool-announce-store';
+import { recordToolEvents } from '../../lib/tool-events';
 import { TerminalProtocolParser } from '../../lib/terminal-protocol';
 import { useToolServing } from './use-tool-serving';
 import { captureToolParams } from './tool-transfer';
@@ -383,7 +384,7 @@ it('keeps a fresh same-chunk announcement emitted before the restart is polled',
   recordToolAnnounce('tool-1', { port: 6006, name: null, key: null, dehydrate: false, persist: null });
   const { state, platform } = await run({ surfaceType: 'tool', command: 'x', toolPort: 'announced' }, [[tcp(6006)]]);
   runId += 1;
-  recordToolAnnounces('tool-1', new TerminalProtocolParser().process('\x1b]633;C\x07\x1b]367;serve;{"port":6007}\x07').events);
+  recordToolEvents('tool-1', new TerminalProtocolParser().process('\x1b]633;C\x07\x1b]367;serve;{"port":6007}\x07').events);
   platform.getOpenPorts = vi.fn(async () => [tcp(6007)]);
   await act(async () => { await vi.advanceTimersByTimeAsync(POLL_MS * 2); });
   expect(state.params.url).toBe('http://localhost:6007/');
@@ -395,7 +396,7 @@ it('does not inherit another command announcement when the designated command st
   const { state } = await run({ surfaceType: 'tool', command: 'x', toolPort: 'announced', toolName: 'named', toolKey: ['named', 'original'] }, [[tcp(6006)]]);
   currentCommand = 'x';
   runId += 1;
-  recordToolAnnounces('tool-1', new TerminalProtocolParser().process('\x1b]633;C\x07').events);
+  recordToolEvents('tool-1', new TerminalProtocolParser().process('\x1b]633;C\x07').events);
   await act(async () => { await vi.advanceTimersByTimeAsync(POLL_MS); });
   expect(state.params.toolKey).toEqual(['named', 'original']);
   expect(state.params.url).toBeUndefined();

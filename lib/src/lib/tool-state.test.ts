@@ -1,16 +1,17 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { parseToolState } from './tool-state';
-import { getToolDirty, recordToolDirty, recordToolStates, subscribeToToolDirty } from './tool-dirty-store';
-import { getToolAnnounce, recordToolAnnounces, resetToolAnnounces } from './tool-announce-store';
+import { clearToolDirty, getToolDirty, recordToolDirty, resetToolDirty, subscribeToToolDirty } from './tool-dirty-store';
+import { getToolAnnounce, resetToolAnnounces } from './tool-announce-store';
+import { recordToolEvents } from './tool-events';
 import { applyTerminalProtocolEvents, collectTerminalProtocolAlerts, collectTerminalProtocolResponses, collectTerminalSemanticEvents, TerminalProtocolParser } from './terminal-protocol';
-import { applyTerminalSemanticEvents, removeTerminalPaneState, resetTerminalPaneState } from './terminal-state-store';
+import { applyTerminalSemanticEvents, removeTerminalPaneState, seedLaunchedCommand } from './terminal-state-store';
 
 const id = 'dirty-state-test';
 const state = (dirty: boolean) => `\x1b]367;state;${JSON.stringify({ v: 1, dirty })}\x07`;
 const start = '\x1b]633;C\x07';
 const serve = '\x1b]367;serve;{"port":6006}\x07';
 const sink = { notifyFromProtocol() {}, updateProtocolProgress() {} };
-afterEach(() => { removeTerminalPaneState(id); resetToolAnnounces(); });
+afterEach(() => { removeTerminalPaneState(id); resetToolAnnounces(); resetToolDirty(); });
 
 it.each([true, false])('parses strict v1 dirty=%s without a response, including split/ST output', dirty => {
   expect(parseToolState(`state;${JSON.stringify({ v: 1, dirty })}`)).toEqual({ dirty });
@@ -41,7 +42,7 @@ it('bounds malformed/oversized payloads before JSON parsing', () => {
 it.each(['live', 'forwarded', 'replay'] as const)('preserves serve/state/start order and retains exit reports through %s', mode => {
   const feed = (data: string) => {
     const events = new TerminalProtocolParser().process(data).events;
-    if (mode === 'replay') { recordToolAnnounces(id, events); recordToolStates(id, events); }
+    if (mode === 'replay') recordToolEvents(id, events);
     else applyTerminalProtocolEvents(sink, id, mode === 'forwarded' ? collectTerminalProtocolAlerts(events) : events);
     // Adapters deliver semantic batches after protocol reports. This must not
     // erase a state that followed the start inside the same read.
@@ -68,13 +69,14 @@ it('distinguishes clean from unknown, notifies changes only, and resets on synth
   expect(getToolDirty(id)).toBe(false);
   expect(listener).toHaveBeenCalledTimes(1);
   recordToolDirty(id, true);
-  applyTerminalSemanticEvents(id, [{ type: 'commandStart', source: 'user_input' }]);
+  seedLaunchedCommand(id, 'pnpm dev');
   expect(getToolDirty(id)).toBeNull();
   recordToolDirty(id, true);
-  resetTerminalPaneState(id);
-  expect(getToolDirty(id)).toBeNull();
+  // A host-parsed semantic batch alone is not a boundary: the ordered protocol event is.
+  applyTerminalSemanticEvents(id, [{ type: 'commandStart', source: 'osc633_boundaries' }]);
+  expect(getToolDirty(id)).toBe(true);
   recordToolDirty(id, false);
-  removeTerminalPaneState(id);
+  clearToolDirty(id);
   expect(getToolDirty(id)).toBeNull();
   stop();
   listener.mockClear();

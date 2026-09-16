@@ -1,4 +1,4 @@
-import { getToolDirty, recordToolDirty } from 'dormouse-lib/lib/tool-dirty-store';
+import { getToolDirty, recordToolDirty, resetToolDirty } from 'dormouse-lib/lib/tool-dirty-store';
 import { getToolAnnounce, resetToolAnnounces } from 'dormouse-lib/lib/tool-announce-store';
 import { applyTerminalSemanticEvents, snapshotTerminalState, removeTerminalPaneState, countRunningSessionsIn, getTerminalPaneState, isPaneOscDriven } from 'dormouse-lib/lib/terminal-state-store';
 // @vitest-environment jsdom
@@ -229,6 +229,7 @@ beforeEach(() => {
   mocks.serialize.mockReset().mockReturnValue("");
   mocks.writes.length = 0;
   arrivals = [];
+  resetToolDirty();
   disposeAllSessions();
   mocks.invoke.mockResolvedValue(undefined);
   mocks.listen.mockResolvedValue(() => {});
@@ -1042,7 +1043,6 @@ it.each([true, false])('restores volatile Tool browser/dirty state (%s) without 
   expect(getToolAnnounce('pane-a')).toEqual(announce);
   expect(getToolDirty('pane-a')).toBe(dirty);
   expect(JSON.stringify(move.workspace.session)).not.toContain('toolDirty');
-  recordToolDirty('pane-a', null);
   expect(move.workspace.session.lathLayout).toMatchObject({ leafMeta: { 'pane-a': { params: stable } } });
   expect(JSON.stringify(move.workspace.session)).not.toContain('browser-to-keep');
   resetToolAnnounces();
@@ -1060,5 +1060,4 @@ it('sends Tool browser bindings and explicit clean only with volatile transfer c
   const [, persisted] = mocks.invoke.mock.calls.find(([cmd]) => cmd === 'transfer_workspace')!;
   expect(JSON.stringify(persisted)).not.toContain('browser-to-keep');
   expect(JSON.stringify(persisted)).not.toContain('toolDirty');
-  recordToolDirty('pane-a', null);
 });

@@ -1,5 +1,5 @@
-import { getToolDirty, recordToolDirty } from 'dormouse-lib/lib/tool-dirty-store';
-import { describe, expect, it, vi } from "vitest";
+import { getToolDirty, resetToolDirty } from 'dormouse-lib/lib/tool-dirty-store';
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AlertStateDetail, PlatformAdapter, PtyDataDetail } from "dormouse-lib/lib/platform/types";
 import { getTerminalPaneState } from "dormouse-lib/lib/terminal-state-store";
 
@@ -105,6 +105,8 @@ describe("BrowserSidecarAdapter session persistence", () => {
 // The harness rides the same sidecar, so the parse boundary is the same one
 // TauriAdapter has: forward the pair, apply the events, push the theme.
 describe("BrowserSidecarAdapter terminal stream", () => {
+  afterEach(resetToolDirty);
+
   async function listening() {
     const host = new BrowserSidecarHost("http://localhost:1234");
     let emit: (event: { event: string; data: unknown }) => void = () => {};
@@ -155,7 +157,6 @@ describe("BrowserSidecarAdapter terminal stream", () => {
     expect(getToolDirty(id)).toBe(true);
     deliver('pty:replay', { id, data: '\x1b]633;C\x07' });
     expect(getToolDirty(id)).toBeNull();
-    recordToolDirty(id, null);
   });
 
   it("forwards the projection pair it was handed, parsing nothing again", async () => {
