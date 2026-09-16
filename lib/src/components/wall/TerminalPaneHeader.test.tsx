@@ -157,11 +157,12 @@ describe('TerminalPaneHeader — notepad icon', () => {
   let resizeHeader: (width: number) => void;
 
   beforeEach(() => {
-    resizeHeader = stubResizeObserver(400);
+    resizeHeader = stubResizeObserver(400, 13);
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
     // Still mounted at this point (the outer hook unmounts), so both stores
     // notify a live header.
     act(() => {
@@ -216,6 +217,34 @@ describe('TerminalPaneHeader — notepad icon', () => {
 
     // Notes are never invisible: the icon comes back to carry them.
     act(() => { addPlainNote('term-1', 'a note'); });
+    expect(notepadButton()).not.toBeNull();
+  });
+
+  it('preserves content-box breakpoints and the previous tier while hidden', () => {
+    renderHeader(stubActions(), null);
+    const split = () => container.querySelector('[aria-label="Split left/right"]');
+    act(() => resizeHeader(280));
+    expect(split()).toBeNull();
+    expect(notepadButton()).not.toBeNull();
+    act(() => resizeHeader(0));
+    expect(split()).toBeNull();
+    expect(notepadButton()).not.toBeNull();
+    act(() => resizeHeader(281));
+    expect(split()).not.toBeNull();
+    act(() => resizeHeader(160));
+    expect(notepadButton()).toBeNull();
+    act(() => resizeHeader(161));
+    expect(notepadButton()).not.toBeNull();
+  });
+
+  it('measures the initial content width before ResizeObserver delivers', () => {
+    stubResizeObserver(0);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 293, 30));
+    vi.spyOn(window, 'getComputedStyle').mockReturnValue({
+      paddingLeft: '8px', paddingRight: '5px', borderLeftWidth: '0px', borderRightWidth: '0px',
+    } as CSSStyleDeclaration);
+    renderHeader(stubActions(), null);
+    expect(container.querySelector('[aria-label="Split left/right"]')).toBeNull();
     expect(notepadButton()).not.toBeNull();
   });
 

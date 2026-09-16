@@ -17,6 +17,7 @@ import { HeaderActionButton } from '../HeaderActionButton';
 import { HEADER_PALETTE_TRANSITION_CLASS, paneZoomButtonClass, POPUP_SURFACE_CLASS, TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from '../design';
 import { AlertBell } from '../AlertBell';
 import { useTodoPillContent } from '../TodoPillBody';
+import { useHeaderTier } from './use-header-tier';
 import { NotepadHeaderButton } from './NotepadHeaderButton';
 import type { PaneProps } from './pane-props';
 import { IllegalRenameWarning, type RenameRejection } from './IllegalRenameWarning';
@@ -65,7 +66,8 @@ const tabVariant = tv({
   },
 });
 
-type HeaderTier = 'full' | 'compact' | 'minimal';
+type TerminalHeaderTier = 'full' | 'compact' | 'minimal';
+const terminalHeaderTier = (width: number): TerminalHeaderTier => width > 280 ? 'full' : width > 160 ? 'compact' : 'minimal';
 
 // WATCHING is a rule on the running command, so the bell says which command it
 // would act on rather than naming an abstract toggle (`docs/specs/alert.md`).
@@ -128,7 +130,7 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
   const isRenaming = renamingId === id;
   const tabRef = useRef<HTMLDivElement>(null);
   const suppressAlertClickRef = useRef(false);
-  const [tier, setTier] = useState<HeaderTier>('full');
+  const tier = useHeaderTier(tabRef, terminalHeaderTier, { box: 'content-box' });
   const [todoPreviewRect, setTodoPreviewRect] = useState<DOMRect | null>(null);
   const [renameWarning, setRenameWarning] = useState<{ rect: DOMRect; reason: RenameRejection; value: string } | null>(null);
   const todoPill = useTodoPillContent(activity.todo);
@@ -170,19 +172,6 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
       context.open(id, { origin: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } });
     }
   }, [actions, id, context]);
-
-  useEffect(() => {
-    const el = tabRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(([entry]) => {
-      const w = entry.contentRect.width;
-      if (w > 280) setTier('full');
-      else if (w > 160) setTier('compact');
-      else setTier('minimal');
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
 
   useEffect(() => {
     if (!activity.notification) setTodoPreviewRect(null);

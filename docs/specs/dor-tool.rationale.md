@@ -40,6 +40,45 @@ A hardcoded Storybook port can disagree with the port it obtains under contentio
 
 ## Lifecycle
 
+### September 2026 innerdogfood QC record
+
+The `dor-tool-qc` run began at `4c7f9012` and used the real standalone sidecar,
+staged CLI, PTYs, and iframe proxy. At that historical baseline the Tools flag
+could reject creation and standalone `dor open` split; both behaviors were
+subsequently superseded by always-enabled Tools and eligible inline opening.
+
+Observed passes covered project approval (pending dedupe, decline/re-prompt,
+folder-only permission, failed spawn without a PTY, repair and Retry); literal
+argv and canonical symlink targets; three concurrent keyed invocations sharing
+one Tool, fresh instances, idle/fast-command restart with stable refs; automatic
+single-port serving, three-port refusal, and announced port/path selection.
+User-rule ordering and explicit overrides worked; malformed user configuration
+failed, and project associations did not intercept file opens. Text/Markdown
+source, HTML/CSS/image, SVG, audio, and awkward filenames rendered; URL,
+directory, missing/unsupported-file and oversized-text cases failed usefully.
+
+Approval controls remained usable at 249×203 pixels. Terminal Context,
+minimize/reveal, exit/refocus, and iframe/screencast round trips passed. A clean
+harness reload preserved every ID, kind, URL, and Workspace; cross-Workspace
+identity stayed scoped. The four final viewer processes and earlier fixture
+listeners exited when their Tools closed; both owned harnesses stopped and
+private credential captures were deleted.
+
+Full `pnpm test` and `pnpm build` passed during the run, plus 139 focused UI
+checks. The PDF-policy follow-up passed 168 CLI tests, 20 host dispatch/proxy
+tests, and spec/public-doc lints; staged hosts contained no PDF renderer assets.
+These counts describe that run, not the current test inventory.
+
+One development-state reset made Tools appear as terminals while root tests
+and builds ran beside the harness. Investigation confirmed that
+`e2e-lint-selftest` temporarily mutates Vite inputs, including invalid root
+package JSON; the exact metadata-loss trigger was not captured. A clean
+restart and stable-build reload passed. This run did not exercise Tool transfer,
+native-window movement, native Tauri/VS Code rendering, Windows shells, or cold
+restore. Screenshots and raw JSON were local ignored artifacts, not portable
+verification evidence. The reusable recipe is `docs/testing/dor-tool-qc.md`.
+
+
 The September 2026 integration reuses Terminal Context for the Tool's primary terminal. The auxiliary helper's automatic refresh, Reset, and Promote semantics do not describe a serving command, whose Session also owns the browser and remote terminal identity. Sharing the presentation avoids introducing a second navigation mechanism or a second shell.
 
 ## Opening local files
