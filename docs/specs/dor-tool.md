@@ -92,7 +92,7 @@ Source of truth: `createToolHost` in `lib/src/host/tool-host.ts`; `FileToolTrust
 - **Must poll unbound Tools every 1.5 seconds while their command runs.** Reset settle memory on command exit. (rationale)
 - **Must let a changed announced port override a committed conflict or browser**, but only after a matching scan. An unchanged announcement never undoes URL-bar navigation. (rationale)
 - **Must stop ordinary port scans once a browser or conflict is committed.** An unannounced additional port appearing after settle is not detected.
-- **Must display the browser destination before awaiting agent-browser startup**, leaving the session-less renderer inert until the binding arrives. Close any browser session whose Tool disappeared or changed command during startup.
+- **Must display the browser destination before awaiting agent-browser startup**, clearing the existing session/stream binding during a reopen as well. Keep the session-less renderer inert and block Workspace transfer until the binding arrives. Close any browser session whose Tool disappeared or changed command during startup.
 - **Must retain a runtime re-key within the Tool's namespace**, following [Identity and dedupe](#identity-and-dedupe).
 
 Reserved: **Must derive a Tool's URL again on cold restore**, compatible with future `prespawn_port` and `DORMOUSE_TOOL_PORT` in scope **dor-tools**; [Persistence and hosts](#persistence-and-hosts) owns the saved projection.

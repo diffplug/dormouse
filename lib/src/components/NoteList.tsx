@@ -11,24 +11,22 @@ import type { LiveNote, RichTextRun } from '../lib/notepad/types';
 const COPY_FLASH_MS = 700;
 
 /** What a note's row says about a pin that just refused to resolve
- *  (docs/specs/notepad.md → Source links). `alternate-buffer` is the one
- *  failure that keeps the pin, so its row invites a retry. */
+ *  (docs/specs/notepad.md → Source links). */
 export interface SourceNotice {
   noteId: string;
-  kind: 'unavailable' | 'alternate-buffer';
+  kind: 'unavailable' | 'alternate-buffer' | 'layout-changed';
 }
 
 const SOURCE_NOTICE_TEXT: Record<SourceNotice['kind'], string> = {
   unavailable: 'Source no longer available',
   'alternate-buffer': 'Exit the full-screen program to show this source',
+  'layout-changed': 'Opening the terminal changed its layout. Source link kept, but the range could not be shown.',
 };
 
-/** The notice a pin's outcome earns, or `null` when it resolved and there is
- *  nothing to say. A kept pin is the retryable one, so the kind follows
- *  `outcome.kept` rather than the reason. */
+/** The notice a pin's outcome earns, or `null` when it resolved. */
 export function sourceNoticeFor(noteId: string, outcome: PinOutcome): SourceNotice | null {
   if (outcome.ok) return null;
-  return { noteId, kind: outcome.kept ? 'alternate-buffer' : 'unavailable' };
+  return { noteId, kind: outcome.reason === 'alternate-buffer' || outcome.reason === 'layout-changed' ? outcome.reason : 'unavailable' };
 }
 
 export interface NoteListProps {
