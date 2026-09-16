@@ -1,4 +1,5 @@
 import { recordToolAnnounce } from '../../lib/src/lib/tool-announce-store';
+import type { AlertRuntimeSnapshot } from 'dormouse-lib/lib/alert-manager';
 import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../../lib/src/lib/terminal-context-types';
 import { invoke as rawInvoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-shell";
@@ -56,7 +57,6 @@ import { installWorkspaceRegistry, type WorkspaceRegistrySnapshot } from "./work
 import { withTimeout } from "./with-timeout";
 import {
   applyTerminalProtocolEvents,
-  collectTerminalSemanticEvents,
   TerminalProtocolParser,
   type TerminalProtocolEvent,
 } from "dormouse-lib/lib/terminal-protocol";
@@ -207,9 +207,7 @@ export class TauriAdapter implements PlatformAdapter {
         const { id, data, requestId } = event.payload;
         const parsed = new TerminalProtocolParser(themeColorProvider).process(data);
         for (const event of parsed.events) if (event.kind === 'toolAnnounce') recordToolAnnounce(id, event.announce);
-        const events = collectTerminalSemanticEvents(parsed.events);
-        this.alertManager.applyTerminalSemanticEvents(id, events);
-        applyTerminalSemanticEvents(id, events);
+        applyTerminalSemanticEvents(id, this.alertManager.applyReplay(id, requestId, parsed));
         // A listed exited buffer can contain a command-start with no finish.
         // Apply its exit after rebuilding the replay's watch, for either target
         // adoption or source hand-back.
@@ -695,6 +693,11 @@ export class TauriAdapter implements PlatformAdapter {
   }
 
   // --- Alert management (local AlertManager) ---
+
+  alertPauseForTransfer(id: string): AlertRuntimeSnapshot | null { return this.alertManager.pauseForTransfer(id); }
+  alertResumeFromTransfer(id: string, snapshot: AlertRuntimeSnapshot, replayRequestId?: string): void {
+    this.alertManager.resumeFromTransfer(id, snapshot, replayRequestId);
+  }
 
   alertRemove(id: string): void {
     this.alertManager.remove(id);

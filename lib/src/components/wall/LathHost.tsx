@@ -1,4 +1,3 @@
-import { isToolParams } from './browser-surface';
 // Lath's HTML adapter. Leaves use stable id-sorted DOM order and geometric
 // positioning only; gestures surface as proposals and never activate/focus.
 // See docs/specs/tiling-engine.md → "The HTML adapter (LathHost)".
@@ -30,6 +29,7 @@ import { type DragController, createDragController } from './lath-drag-controlle
 import { TerminalPanel } from './TerminalPanel';
 import { BrowserPanel } from './BrowserPanel';
 import { ToolPanel } from './ToolPanel';
+import { isToolParams } from './browser-surface';
 import { ToolPaneHeader } from './ToolPaneHeader';
 import { TerminalPaneHeader } from './TerminalPaneHeader';
 import { SurfacePaneHeader } from './SurfacePaneHeader';

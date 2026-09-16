@@ -169,6 +169,7 @@ with these transfer rules:
   in `lib/src/lib/terminal-transfer.test.ts` and `drains replay before adopting even when no note has a pin`
   in `standalone/src/workspace-move.test.ts`.
 - Tool browser bindings and announcements follow `docs/specs/dor-tool.md` → Persistence and hosts.
+- Live Activity and delivery handoff follows `docs/specs/alert.md` → Live Workspace transfer.
 - Semantic-state transfer follows `docs/specs/terminal-state.md` → Core Model.
 - Source-pin limitations belong to `docs/specs/notepad.md` → Source links.
 
@@ -230,6 +231,8 @@ OSC parsing/stripping rules for those rows, and the rule that **only the process
 
 **The layout field.** A `PersistedSession` records the layout as `lathLayout` — the native Lath tree (`docs/specs/tiling-engine.md` → "Persistence"). Each `PersistedDoor` carries a Lath restore `token` as its sole restore payload.
 
+**Must carry Workspace delivery overrides in `PersistedSession.alertDelivery`**, across hosts; inheritance and validation follow `docs/specs/alert.md` → Alarm settings.
+
 **Workspace-scoped dor refs.** A `PersistedSession` may record `surfaceRefs` — stable Surface id → Workspace-local `dor` short ref (`surface:N`) — plus `surfaceRefsNext`, the next number to hand out. Ref-preserving layout moves and replacement transfers follow `docs/specs/dor-cli.md` → Handle Model. **Must drop a killed Surface's entry without reusing its retired ref**: persist `surfaceRefsNext` independently rather than deriving it from the map, and clamp it above the map's highest ref on load. Old snapshots without the fields allocate refs from the restored Surfaces on first mount.
 
 **Surface kinds in the snapshot.** Each `PersistedPane` records a `surfaceType` (`docs/specs/glossary.md`): `'terminal'` — the default, **omitted from the row** so terminal snapshots stay byte-identical — or `'browser'`. It routes restore/resume, and **a pane lacking it reads as `'terminal'`**. `restoreSession` skips terminal restoration for a browser pane rather than minting a stray PTY + xterm per browser pane id, and the resume plan keeps browser panes and minimized browser doors despite their having no live PTY, so the saved layout's leaf set still matches and is not discarded. A browser pane rebuilds from the persisted layout (visible) or `PersistedDoor.params` (minimized) — its render params (`renderMode`, `url`, agent-browser `session`) live there, not in `PersistedPane`. **Must reject a layout whose leaves differ from the visible pane set during restore or resume, and omit visible browser ids from the terminal fallback.** Browser doors retain their independent render params; pinned by `lib/src/lib/session-restore.test.ts` and `lib/src/lib/reconnect.test.ts`.
@@ -263,7 +266,7 @@ Source of truth: `PersistedSession` in `lib/src/lib/session-types.ts`; `surfaceR
 
 ### What is persisted
 
-Structure only: panes (id, cwd, title, `untouched`, `surfaceType`, TODO/alert blob), doors and their Lath restore tokens, the Lath layout, and the Workspace's `dor` surface refs. **Scrollback is never persisted by any writer**, and neither is the recovery command (above). **Live notepad notes are never persisted here either** — the notepad archive is a separate per-host store written only by a closure (`docs/specs/notepad.md` → "Live resume").
+Structure only: panes (id, cwd, title, `untouched`, `surfaceType`, TODO/alert blob), doors and their Lath restore tokens, the Lath layout, and the Workspace's `dor` surface refs and delivery overrides. **Scrollback is never persisted by any writer**, and neither is the recovery command (above). **Live notepad notes are never persisted here either** — the notepad archive is a separate per-host store written only by a closure (`docs/specs/notepad.md` → "Live resume").
 
 ### Retiring the transcripts already on disk
 

@@ -1,3 +1,4 @@
+import type { WorkspaceId } from '../../lib/session-types';
 import type { PortMode } from './TerminalContextView';
 import type { PortUrlEntry } from './port-url';
 import { createContext, useContext, useEffect } from 'react';
@@ -63,7 +64,7 @@ export interface WallActions {
   resolveSurfaceRef: (id: string) => string;
   /** Resolve a pending tool's approval: grant and start it, or close its pane
    *  (docs/specs/dor-tool.md -> Trust). */
-  onResolveToolApproval?: (id: string, choice: 'upstream' | 'folder' | 'decline') => void;
+  onResolveToolApproval?: (id: string, choice: 'upstream' | 'folder' | 'decline' | 'retry') => void;
 }
 
 export const WallActionsContext = createContext<WallActions>({
@@ -99,6 +100,10 @@ export const PaneWriteContext = createContext<PaneWriteActions>({
   setTitle: () => {},
   updateParams: () => {},
 });
+
+/** The Workspace this Wall renders, for Workspace-scoped settings such as
+ *  alarm delivery overrides. Null outside a Wall. */
+export const WorkspaceIdContext = createContext<WorkspaceId | null>(null);
 
 /** Whether this Wall's Workspace is the visible one. A hidden Workspace stays
  *  mounted and live, so streaming bodies read this to idle

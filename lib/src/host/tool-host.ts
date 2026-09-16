@@ -11,8 +11,9 @@
 import { dirname } from 'node:path';
 import type { ToolControlResult, ToolHostRequest } from '../lib/platform/tool-types';
 import { resolveUpstreamUrl } from './git-upstream';
-import { resolveToolInput } from './tool-input';
 import { resolveOpenTool } from './tool-open';
+import { resolveToolInput, type ToolInput } from './tool-input';
+import type { ToolEntry } from './tool-registry';
 import { readUserToolFile, userToolConfigPath } from './tool-user-config';
 import {
   FileToolTrustStore,
@@ -25,6 +26,25 @@ import {
 
 export interface ToolHost {
   handle(request: ToolHostRequest): Promise<ToolControlResult>;
+}
+
+/** The one wire shape for a resolved Tool, whichever file declared it. */
+function okResult(
+  entry: ToolEntry,
+  input: ToolInput,
+  source: { projectRoot: string; path: string; warnings: readonly string[]; scope?: 'user' },
+): ToolControlResult {
+  return {
+    status: 'ok',
+    projectRoot: source.projectRoot,
+    path: source.path,
+    name: entry.name,
+    ...input,
+    ...(source.scope ? { scope: source.scope } : {}),
+    render: entry.render,
+    port: entry.port,
+    warnings: [...source.warnings],
+  };
 }
 
 /**
@@ -58,31 +78,22 @@ export function createToolHost(options: { stateDir?: string; userConfigPath?: st
       try {
         if (request.op === 'open') return await resolveOpenTool(request, options.userConfigPath ?? userToolConfigPath());
         const args = request.args ?? [];
-        const lookup = request.global ? { status: 'no-file' as const } : await lookupTool(request.name, request.cwd, trust, undefined, undefined, args);
-        if (lookup.status === 'no-file' || lookup.status === 'unknown-tool') {
-          const path = options.userConfigPath ?? userToolConfigPath();
-          const file = await readUserToolFile(path);
-          const entry = file?.tools.get(request.name);
-          if (file && entry) {
-            const input = await resolveToolInput(entry, { projectRoot: null, cwd: request.cwd, args });
-            return { status: 'ok', projectRoot: file.dir, path, name: entry.name,
-              ...input, scope: 'user', render: entry.render, port: entry.port, warnings: [...file.warnings] };
-          }
-          if (request.global) return { status: 'unknown-tool', projectRoot: dirname(path), path, names: [...(file?.tools.keys() ?? [])].sort() };
-          return lookup;
+        const project = request.global ? null : await lookupTool(request.name, request.cwd, trust, { args });
+        if (project?.status === 'ok') {
+          return okResult(project.entry, project.input, { projectRoot: project.projectRoot, path: project.path, warnings: project.file.warnings });
         }
-        if (lookup.status !== 'ok') return lookup;
-        const { entry, input } = lookup;
-        return {
-          status: 'ok',
-          projectRoot: lookup.projectRoot,
-          path: lookup.path,
-          name: entry.name,
-          ...input,
-          render: entry.render,
-          port: entry.port,
-          warnings: [...lookup.file.warnings],
-        };
+        if (project && project.status !== 'no-file' && project.status !== 'unknown-tool') return project;
+
+        // A project miss falls through to the user's own Tools, which need no grant.
+        const path = options.userConfigPath ?? userToolConfigPath();
+        const file = await readUserToolFile(path);
+        const entry = file?.tools.get(request.name);
+        if (file && entry) {
+          const input = await resolveToolInput(entry, { projectRoot: null, cwd: request.cwd, args });
+          return okResult(entry, input, { projectRoot: file.dir, path, warnings: file.warnings, scope: 'user' });
+        }
+        if (project) return project;
+        return { status: 'unknown-tool', projectRoot: dirname(path), path, names: [...(file?.tools.keys() ?? [])].sort() };
       } catch (error) {
         return { status: 'error', message: error instanceof Error ? error.message : String(error) };
       }

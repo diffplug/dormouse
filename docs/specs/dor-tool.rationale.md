@@ -38,6 +38,8 @@ The September 2026 integration reuses Terminal Context for the Tool's primary te
 
 ## Take-over
 
+An accepted takeover has already answered the CLI and promised its placement. Switching Workspaces while the shell returns to its prompt changes presentation without changing ownership of that shell; abandoning the launch then silently loses a successful request. Initial visibility still distinguishes a human's invocation from background placement, while the post-prompt checks protect the live Session and Workspace.
+
 **Why the gate is conservative in the split direction.** Every condition can be read wrong in two directions, and the two costs are nowhere near equal. Declining a take-over that should have happened costs a pane the user closes — the tool still runs, in the placement `dor tool` has always used. Taking over a pane that should have split types a command into a shell that belongs to something else: an agent's session, a line with work queued behind `dor`, a directory the tool was not asked to run in. So each condition is written to fail closed, and quoting is not unpicked — a line carrying `&&` inside quotes splits rather than being parsed for whether that `&&` is real.
 
 **Why the naked test is worth having at all, given `dor send`.** It answers "did a human ask for this *here*", not "is this trustworthy". The discrimination it actually makes is placement: an agent's `dor tool` runs under the agent's own command line, so the pane reports `claude` (or `bash script.sh`) and never matches — which is the whole point, since an agent's tool must not commandeer the pane the human is watching the agent in. Trust is a separate gate with a separate ceremony, and it is the one that carries the security weight.

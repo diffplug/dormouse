@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  callerStillPlaceable,
+  callerStillRunnable,
   isNakedToolInvocation,
   toolRerunsInCaller,
   toolTakesOverCaller,
@@ -45,6 +47,7 @@ describe('toolTakesOverCaller', () => {
   const passing: ToolTakeoverGate = {
     explicitSurface: false,
     minimized: false,
+    workspaceActive: true,
     visible: true,
     kind: 'terminal',
     oscDriven: true,
@@ -70,6 +73,7 @@ describe('toolTakesOverCaller', () => {
       ['--surface named a reference', { explicitSurface: true }],
       ['--minimize asked for a background surface', { minimized: true }],
       ['the caller is minimized', { visible: false }],
+      ['another Workspace is active', { workspaceActive: false }],
       ['the caller has an auxiliary helper', { helperPresent: true }],
       ['the caller is already a tool', { kind: 'tool' }],
       ['the caller is a browser', { kind: 'browser' }],
@@ -82,8 +86,6 @@ describe('toolTakesOverCaller', () => {
     }
   });
 
-  // The two placements are the same conditions over different caller kinds: a
-  // plain terminal becomes the tool, the tool's own pane re-runs it.
   it('re-runs in the caller only when the caller is that tool', () => {
     expect(toolRerunsInCaller({ ...passing, kind: 'tool' })).toBe(true);
     expect(toolRerunsInCaller(passing)).toBe(false);
@@ -94,9 +96,39 @@ describe('toolTakesOverCaller', () => {
   // The pane already is the tool, so there is nothing to place and the tool
   // re-runs in its own directory — as an `adopted` match from any pane does.
   it('re-runs regardless of the conditions that only govern placement', () => {
-    for (const override of [{ cwdMatches: false }, { explicitSurface: true }, { minimized: true }, { visible: false }]) {
+    for (const override of [{ cwdMatches: false }, { explicitSurface: true }, { minimized: true }, { visible: false }, { workspaceActive: false }]) {
       expect(toolRerunsInCaller({ ...passing, kind: 'tool', ...override })).toBe(true);
       expect(toolTakesOverCaller({ ...passing, ...override })).toBe(false);
     }
+  });
+});
+
+// What each placement re-reads once the caller's shell is back at a prompt: the
+// command line has finished by then, so it is not among the conditions.
+describe('after the prompt wait', () => {
+  const passing: ToolTakeoverGate = {
+    explicitSurface: false,
+    minimized: false,
+    workspaceActive: true,
+    visible: true,
+    kind: 'terminal',
+    oscDriven: true,
+    rawCommandLine: null,
+    cwdMatches: true,
+    helperPresent: false,
+  };
+
+  it('a transformation needs a surviving plain helper-less pane in place, regardless of Workspace selection', () => {
+    expect(callerStillPlaceable(passing)).toBe(true);
+    expect(callerStillPlaceable({ ...passing, workspaceActive: false })).toBe(true);
+    for (const override of [ { visible: false }, { cwdMatches: false }, { kind: 'tool' as const }, { helperPresent: true }]) {
+      expect(callerStillPlaceable({ ...passing, ...override })).toBe(false);
+    }
+  });
+
+  it('a re-run needs only the pane and its directory', () => {
+    expect(callerStillRunnable({ ...passing, kind: 'tool', helperPresent: true, workspaceActive: false })).toBe(true);
+    expect(callerStillRunnable({ ...passing, visible: false })).toBe(false);
+    expect(callerStillRunnable({ ...passing, cwdMatches: false })).toBe(false);
   });
 });

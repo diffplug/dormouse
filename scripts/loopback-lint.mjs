@@ -6,16 +6,18 @@
  *
  * Why this exists: a loopback bind is not an access control — the attacker that
  * matters is a page open in the user's own browser, which reaches `127.0.0.1`
- * as easily as our webview does, and an ephemeral port is not a secret. Two of
- * the three listeners we ship got that wrong at some point, and both were found
+ * as easily as our webview does, and an ephemeral port is not a secret. Two
+ * listeners got that wrong at some point, and both were found
  * by an LLM audit rather than by CI. The audit is thorough but probabilistic;
- * this makes the cheap half of the rule deterministic, so a *fourth* listener
+ * this makes the cheap half of the rule deterministic, so a new listener
  * fails a build instead of waiting for the next audit to notice it.
  *
- * The check: any non-test source file that binds a TCP listener to loopback
- * must reference one of the guard modules — `lib/src/host/loopback-guard.ts`
- * for shipped code, `standalone/scripts/dev-host-guard.mjs` for the dev
- * harness — or sit on ALLOWED below with a stated reason.
+ * The check scans every tracked JavaScript and TypeScript file and prints every
+ * bind it recognizes. Test files and this lint's own fixtures are reported
+ * separately; every other file that binds a TCP listener to loopback must
+ * reference one of the guard modules — `lib/src/host/loopback-guard.ts` for
+ * shipped code, `standalone/scripts/dev-host-guard.mjs` for the dev harness —
+ * or sit on ALLOWED below with a stated reason.
  *
  * `scripts/loopback-lint-selftest.mjs` proves each bind form is load-bearing by
  * adding one and requiring this lint to go red, and goes red itself on a form in
@@ -37,8 +39,8 @@
  *   - Unix-domain sockets and named pipes are out of scope by design: no
  *     browser can reach one, which is why the `dor` control channel is bounded
  *     by socket permissions instead.
- *   - Test files are skipped. A fixture that stands up a loopback server is not
- *     a product listener.
+ *   - Test files and this lint's own fixtures are reported, but need no guard.
+ *     A fixture that stands up a loopback server is not a product listener.
  *
  * Scans `git ls-files`, not the working tree. Build output is exactly what must
  * not be scanned: `standalone/sidecar/iframe-proxy.cjs` is a bundle of the very
@@ -47,12 +49,12 @@
  * depend on whether someone had run a build.
  *
  * Checks:
- *   1. Every matching listener references a guard module or is allowlisted.
+ *   1. Every matching non-test listener references a guard module or is allowlisted.
  *   2. Every ALLOWED entry still names a real file that still matches — a stale
  *      allowlist silently exempts nothing, or worse, the next file to reuse
  *      that path.
- *   3. Finding no listeners at all is a failure, not a pass: it means the bind
- *      shape moved and this lint has quietly stopped checking anything.
+ *   3. Finding no non-test listeners at all is a failure, not a pass: it means
+ *      the bind shape moved and this lint has quietly stopped checking anything.
  */
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -111,39 +113,48 @@ const BIND_FORMS = [
   { label: 'ws, port only', re: `${WS_NEW}port\\s*:` },
 ];
 
-const LISTEN_RE = new RegExp(BIND_FORMS.map((form) => form.re).join('|'), 's');
+const LISTEN_RE = new RegExp(BIND_FORMS.map((form) => form.re).join('|'), 'gs');
 
-const SOURCE_EXT = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/;
+const SOURCE_EXT = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
 const IS_TEST = /(?:\.test\.|\.spec\.|[\\/]tests?[\\/])/;
 // These two files spell out the pattern this lint looks for — one documenting
-// it, one adding each form to prove it is load-bearing — so they match
-// themselves. Excluded by name rather than exempted by a guard reference: an
-// exemption would leave them counted as listeners, which is a count nobody can
-// read.
+// it, one adding each form to prove it is load-bearing — so they can match
+// themselves. Report those matches as fixtures rather than listeners.
 const SELF = new Set([
   'scripts/loopback-lint.mjs',
   'scripts/loopback-lint-selftest.mjs',
 ]);
 
-/** Every tracked, non-test source file, as repo-relative POSIX paths. */
+/** Every tracked JavaScript and TypeScript file, as a repo-relative POSIX path. */
 function sourceFiles() {
-  return trackedFiles().filter((rel) => (
-    !SELF.has(rel) && SOURCE_EXT.test(rel) && !IS_TEST.test(rel)
-  ));
+  return trackedFiles().filter((rel) => SOURCE_EXT.test(rel));
 }
 
 const problems = [];
-const listeners = [];
+const nonTestListeners = [];
+const testListeners = [];
+const selfTestFixtures = [];
 const matchedAllowed = new Set();
 
 for (const rel of sourceFiles()) {
   // A tracked path can still be absent mid-rebase or in a sparse checkout.
   if (!existsSync(join(ROOT, rel))) continue;
   const text = readFileSync(join(ROOT, rel), 'utf-8');
-  const match = LISTEN_RE.exec(text);
-  if (!match) continue;
-  const line = text.slice(0, match.index).split('\n').length;
-  listeners.push(rel);
+  const matches = [...text.matchAll(LISTEN_RE)];
+  if (matches.length === 0) continue;
+  const sites = matches.map((match) => ({
+    rel,
+    line: text.slice(0, match.index).split('\n').length,
+  }));
+  if (SELF.has(rel)) {
+    selfTestFixtures.push(...sites);
+    continue;
+  }
+  if (IS_TEST.test(rel)) {
+    testListeners.push(...sites);
+    continue;
+  }
+  nonTestListeners.push(...sites);
 
   if (rel in ALLOWED) {
     matchedAllowed.add(rel);
@@ -152,7 +163,7 @@ for (const rel of sourceFiles()) {
   if (GUARD_REFERENCES.some((g) => text.includes(g))) continue;
 
   problems.push(
-    `${rel}:${line}: binds a loopback listener without referencing a guard module.\n`
+    `${rel}:${sites[0].line}: binds a loopback listener without referencing a guard module.\n`
     + '      A loopback bind is not an access control: a page in the user\'s own browser\n'
     + '      reaches 127.0.0.1 too, and the port is not a secret. Check Host and\n'
     + '      authenticate the caller — see lib/src/host/loopback-guard.ts and\n'
@@ -172,9 +183,9 @@ for (const rel of Object.keys(ALLOWED)) {
 }
 
 // --- Check 3: the pattern still finds something ------------------------------
-if (listeners.length === 0) {
+if (nonTestListeners.length === 0) {
   problems.push(
-    'no loopback listeners matched at all — the bind shape has moved and LISTEN_RE\n'
+    'no non-test loopback listeners matched at all — the bind shape has moved and LISTEN_RE\n'
     + '      in scripts/loopback-lint.mjs no longer matches anything. This lint is not\n'
     + '      passing, it has stopped looking.',
   );
@@ -187,7 +198,12 @@ if (problems.length > 0) {
   console.error('\nThe rule is in docs/specs/security-local.md ("Loopback Listeners").');
   process.exit(1);
 }
-console.log(
-  `loopback-lint: OK (${listeners.length} loopback listeners, `
-  + `${Object.keys(ALLOWED).length} allowlisted)`,
-);
+console.log(`loopback-lint: OK (${Object.keys(ALLOWED).length} allowlisted)\n`);
+for (const [label, sites] of [
+  ['non-test listeners', nonTestListeners],
+  ['test listeners (no audit needed)', testListeners],
+  ['self-test fixtures', selfTestFixtures],
+]) {
+  console.log(`  ${label}:`);
+  for (const { rel, line } of sites) console.log(`    ${rel}:${line}`);
+}

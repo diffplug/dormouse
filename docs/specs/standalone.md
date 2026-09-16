@@ -597,6 +597,8 @@ Source of truth: `prepareWorkspaceTransfer` in
 
 Tool transfer follows `docs/specs/dor-tool.md` → Persistence and hosts.
 
+Live Activity and alarm delivery follow `docs/specs/alert.md` → Live Workspace transfer.
+
 ### Tear-out
 
 **A tear-out opens the window positioned so the dragged tab lands under the
@@ -631,8 +633,8 @@ below reads that record rather than inferring itself from the suppression map.
    `pty:requestInit` with **that arrival's ids and no others**; `pty:list` and
    each `pty:replay` echo the collector's token. The target resumes over them,
    hydrates the notes and mounts the Workspace at the payload’s index, else the drop index.
-   **Must seed persisted alerts before requesting replay**, so the older state
-   cannot erase WATCHING rebuilt by replay (`standalone/src/workspace-move.test.ts`).
+   **Must seed alert state before requesting replay**, preferring explicit live
+   transfer content to persisted reminders, so older state cannot erase WATCHING rebuilt by replay (`standalone/src/workspace-move.test.ts`).
 4. **Target adopted** invokes `adopt_done(workspaceId)`. Rust retires the record,
    clears pending marks and suppression so live output routes to the target,
    and emits `workspace-departed` for

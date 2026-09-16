@@ -437,7 +437,11 @@ describe('WorkspaceWindow', () => {
 });
 
 
-it.each(['switched', 'transferring'] as const)('abandons takeover when the Workspace becomes %s before the prompt returns', async (change) => {
+it.each([
+  ['switched', true],
+  ['transferring', false],
+  ['closed', false],
+] as const)('respects Workspace lifecycle after takeover acceptance: %s', async (change, launches) => {
   setToolsEnabled(true);
   const controller = new AbortController();
   const typed: string[] = [];
@@ -458,15 +462,28 @@ it.each(['switched', 'transferring'] as const)('abandons takeover when the Works
     } })));
     expect(respond).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status: 'takeover' }) }));
     await act(async () => {
-      if (change === 'switched') createWorkspace({ id: 'ws-2' });
-      else setWorkspaceTransferPending(first, true);
+      if (change === 'transferring') setWorkspaceTransferPending(first, true);
+      else createWorkspace({ id: 'ws-2' });
+    });
+    if (change === 'closed') {
+      await act(async () => {
+        expect(await closeWorkspaceWithSurfaces(first, 'silent')).toBeNull();
+      });
+    }
+    await act(async () => {
       terminalRegistry.applyTerminalSemanticEvents('pane-a', [{ type: 'promptStart' }]);
     });
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
-    expect(typed).toEqual([]);
-    expect(leafIdsIn(first)).toEqual(['pane-a']);
-    const prepared = await getWallHandle(first)!.prepareWorkspaceTransfer();
-    expect(prepared.payload.workspace.session.panes[0]?.surfaceType).not.toBe('tool');
+    expect(typed).toEqual(launches ? ['pnpm dev\r'] : []);
+    if (change === 'closed') {
+      expect(getWallHandle(first)).toBeNull();
+      expect(getWorkspacesSnapshot().workspaces.map(workspace => workspace.id)).toEqual(['ws-2']);
+    } else {
+      expect(leafIdsIn(first)).toEqual(['pane-a']);
+      const prepared = await getWallHandle(first)!.prepareWorkspaceTransfer();
+      expect(prepared.payload.workspace.session.panes[0]?.surfaceType === 'tool').toBe(launches);
+    }
+    if (change !== 'transferring') expect(getActiveWorkspaceId()).toBe('ws-2');
   } finally {
     controller.abort();
     setWorkspaceTransferPending(first, false);

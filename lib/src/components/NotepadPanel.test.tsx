@@ -628,6 +628,31 @@ describe('NotepadPanel — source pins', () => {
     // The markers outlive the program, so the pin is still there to retry.
     expect(container.querySelector('[aria-label="Show source"]')).not.toBeNull();
   });
+
+  it('keeps the pin and explains when opening the terminal changed its layout', () => {
+    const marker = { line: 0, isDisposed: false, dispose: vi.fn() };
+    const source = { ...deadSource(), startMarker: marker, endMarker: marker, startColumn: 0, endColumn: 3, expectedRawText: 'gone' };
+    addTerminalNote(SURFACE, [{ text: 'gone' }], source);
+    let text = 'gone';
+    registry.set(SURFACE, {
+      terminal: {
+        cols: 4,
+        buffer: { active: { type: 'normal', length: 1, baseY: 0, getLine: () => ({ translateToString: () => text }) } },
+      },
+    } as unknown as TerminalEntry);
+    const reflow = () => { text = 'go'; };
+    window.addEventListener('dormouse:reveal-note-source', reflow);
+    try {
+      renderPanels();
+      open();
+      click(container.querySelector('[aria-label="Show source"]'));
+      expect(getOpenNotepadId()).toBe(SURFACE);
+      expect(panel()!.textContent).toContain('Opening the terminal changed its layout. Source link kept');
+      expect(panel()!.textContent).not.toContain('Exit the full-screen program');
+      expect(container.querySelector('[aria-label="Show source"]')).not.toBeNull();
+      expect(marker.dispose).not.toHaveBeenCalled();
+    } finally { window.removeEventListener('dormouse:reveal-note-source', reflow); }
+  });
 });
 
 describe('applyPlainEdit', () => {

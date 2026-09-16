@@ -15,7 +15,7 @@ import { randomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { ToolFileError, parseToolFile, type ToolEntry, type ToolFile } from './tool-registry';
 import { resolveUpstreamUrl } from './git-upstream';
-import { resolveToolInput } from './tool-input';
+import { resolveToolInput, type ToolInput } from './tool-input';
 
 export const TOOL_FILE_NAME = 'dormouse.yml';
 /**
@@ -26,19 +26,22 @@ export const TOOL_FILE_NAME = 'dormouse.yml';
  */
 const TOOL_FILE_MAX_BYTES = 256 * 1024;
 
-/** Refuse repo-config symlinks; user config may follow a dotfiles link.
- *  Both paths fstat and cap one descriptor.
+/** Refuse repo-config symlinks; user config may follow a dotfiles link
+ *  (`followSymlink`). Both paths fstat and cap one descriptor, and open
+ *  non-blocking so a FIFO at the path fails the fstat check instead of hanging.
  *  POSIX also opens no-follow, closing the lstat/open replacement race there. */
-export async function readToolFile(path: string, allowSymlink = false): Promise<string> {
+export async function readToolFile(path: string, options: { followSymlink?: boolean } = {}): Promise<string> {
   const entry = await lstat(path);
-  if (entry.isSymbolicLink() && !allowSymlink) {
+  if (entry.isSymbolicLink() && !options.followSymlink) {
     throw new ToolFileError(`${path}: tool file must be a regular file, not a symbolic link`);
   }
-
+  // Avoid opening known devices/FIFOs; fstat below also checks the actual
+  // descriptor after a symlink follow or concurrent path replacement.
   if (!entry.isSymbolicLink() && !entry.isFile()) throw new ToolFileError(`${path}: tool file must be a regular file`);
+
   let file;
   try {
-    const noFollow = !allowSymlink && typeof constants.O_NOFOLLOW === 'number' ? constants.O_NOFOLLOW : 0;
+    const noFollow = options.followSymlink ? 0 : (constants.O_NOFOLLOW ?? 0);
     file = await open(path, constants.O_RDONLY | noFollow | (constants.O_NONBLOCK ?? 0));
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
@@ -432,7 +435,7 @@ export type ToolLookup =
       upstreamUrl: string | null;
     }
   | { status: 'error'; message: string }
-  | { status: 'ok'; projectRoot: string; path: string; file: ToolFile; entry: ToolEntry; input: Awaited<ReturnType<typeof resolveToolInput>> };
+  | { status: 'ok'; projectRoot: string; path: string; file: ToolFile; entry: ToolEntry; input: ToolInput };
 
 /**
  * Find, parse, and trust-check the entry named `name` for a caller in `cwd`.
@@ -445,10 +448,15 @@ export async function lookupTool(
   name: string,
   cwd: string,
   trust: ToolTrustStore,
-  readTextFile?: (path: string) => Promise<string>,
-  resolveUpstream: (dir: string) => Promise<string | null> = resolveUpstreamUrl,
-  args: readonly string[] = [],
+  options: {
+    /** Invocation inputs for `$ARGS` / `$TARGET`; none by default. */
+    args?: readonly string[];
+    /** Test seams. */
+    readTextFile?: (path: string) => Promise<string>;
+    resolveUpstream?: (dir: string) => Promise<string | null>;
+  } = {},
 ): Promise<ToolLookup> {
+  const { args = [], readTextFile, resolveUpstream = resolveUpstreamUrl } = options;
   let found;
   try {
     found = await findToolFile(cwd, readTextFile);
@@ -477,7 +485,7 @@ export async function lookupTool(
     };
   }
 
-  let input: Awaited<ReturnType<typeof resolveToolInput>>;
+  let input: ToolInput;
   try {
     input = await resolveToolInput(entry, { projectRoot: found.dir, cwd, args });
   } catch (error) {
