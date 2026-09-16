@@ -203,6 +203,10 @@ it('rejects a shell command with a target-only dedupe key at declaration time', 
 it('keeps project associations inert and validates user associations at declaration time', () => {
   expect(parse('open: malformed-but-inert\n').warnings).toEqual([expect.stringContaining('project open rules are ignored')]);
   expect(() => parse('open: nope\n', USER)).toThrow("'open' must be an ordered list");
+  expect(() => parse('open:\n  - {match: "*.md", tool: missing}\n', USER))
+    .toThrow('defined in this user file');
+  expect(() => parse('tools:\n  viewer:\n    run: [viewer]\nopen:\n  - {match: "*.md", tool: viewer, extra: true}\n', USER))
+    .toThrow('defined in this user file');
   expect(() => parse('tools:\n  viewer:\n    run: viewer\nopen:\n  - {match: "*.md", tool: viewer}\n', USER))
     .toThrow("open rule for 'viewer' needs an argument-list run");
 });
