@@ -163,7 +163,7 @@ Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `dor/test/snapshot
 
 **Must run the built-in viewer as a Tool-owned `dor` process**, serving HTML, images, media, and escaped text/source previews. Markdown is source text; custom viewers may render it. Text previews and HTML/CSS dependency inspection are limited to 8 MiB per file. Text/source previews grant only their opened file and skip dependency inspection. (rationale) Oversized HTML and referenced CSS still stream without dependency inspection. The grant contains at most 256 files: the opened document and statically referenced relative HTML/CSS assets within its directory tree; exceeding that bound fails the open without serving a partial grant. Never expand the grant through root-relative, external, or dynamic references; requests can read only granted paths.
 
-**Must require a user Tool for PDFs**, including files named `README.pdf`; never pass them to the built-in viewer. (rationale)
+**Must require a user Tool for PDFs**, including files named `README.pdf`. (rationale)
 
 **Must retain the viewer's opened file descriptors until the Tool exits.** Refresh reads those files again, but atomic replacements and changes to the dependency graph require restarting the viewer. Cold restore runs the saved file command with a fresh URL capability; Workspace movement keeps the live binding. The listener's authority is `docs/specs/security-local.md` → Local-file viewer.
 

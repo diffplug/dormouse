@@ -76,6 +76,11 @@ const ALLOWED = {
     + 'it vouches for no one. It skips the Host check on purpose: rebinding '
     + 'exists to make same-origin-looking requests, which buys nothing against '
     + 'an unguessable one-shot secret. See lib/src/host/loopback-guard.ts.',
+  'scripts/dor-tool-qc/server.mjs':
+    'A hand-run QC fixture (docs/testing/dor-tool-qc.md), never shipped or '
+    + 'started by a host. It serves one static page echoing its own argv and '
+    + 'the request path, holds no state and reaches nothing, so a page that '
+    + 'finds the port learns only what the QC operator typed.',
 };
 
 const GUARD_REFERENCES = ['loopback-guard', 'dev-host-guard'];

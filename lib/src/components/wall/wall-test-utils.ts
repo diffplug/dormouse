@@ -40,6 +40,39 @@ export function ensureResizeObserver(): void {
   } as unknown as typeof ResizeObserver;
 }
 
+/**
+ * A ResizeObserver whose width the test drives: every observed element is told
+ * `initialWidth` on observe, and the returned setter re-delivers a new width to
+ * all of them. Stubbed through `vi.stubGlobal`, so `vi.unstubAllGlobals()` in
+ * `afterEach` restores jsdom.
+ */
+export function stubResizeObserver(initialWidth: number): (width: number) => void {
+  let width = initialWidth;
+  const deliveries = new Set<() => void>();
+  vi.stubGlobal('ResizeObserver', class {
+    private readonly delivery = new Set<() => void>();
+    constructor(private readonly callback: ResizeObserverCallback) {}
+    observe(target: Element): void {
+      const deliver = () => this.callback([{
+        target,
+        borderBoxSize: [{ inlineSize: width, blockSize: 0 }],
+        contentRect: { width },
+      } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver);
+      this.delivery.add(deliver);
+      deliveries.add(deliver);
+      deliver();
+    }
+    unobserve(): void {}
+    disconnect(): void {
+      for (const deliver of this.delivery) deliveries.delete(deliver);
+    }
+  });
+  return (next) => {
+    width = next;
+    for (const deliver of deliveries) deliver();
+  };
+}
+
 export interface WallHarness {
   container: HTMLDivElement;
   root: Root;

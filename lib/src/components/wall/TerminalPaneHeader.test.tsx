@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PaneProps } from './pane-props';
 import { TerminalPaneHeader } from './TerminalPaneHeader';
 import { RenamingIdContext, WallActionsContext, type WallActions } from './wall-context';
-import { ensureResizeObserver, stubWallActions as stubActions } from './wall-test-utils';
+import { ensureResizeObserver, stubResizeObserver, stubWallActions as stubActions } from './wall-test-utils';
 import { FakePtyAdapter } from '../../lib/platform/fake-adapter';
 import { setPlatform } from '../../lib/platform';
 import { setNativeFieldValue } from '../../lib/dom';
@@ -154,27 +154,14 @@ describe('TerminalPaneHeader — inline rename', () => {
 describe('TerminalPaneHeader — notepad icon', () => {
   // The tier is ResizeObserver-driven, so the suite's inert stub can only ever
   // show `full`. This one reports a width the test picks.
-  let headerWidth = 400;
-  let previousObserver: typeof ResizeObserver;
+  let resizeHeader: (width: number) => void;
 
   beforeEach(() => {
-    headerWidth = 400;
-    previousObserver = globalThis.ResizeObserver;
-    globalThis.ResizeObserver = class {
-      constructor(private readonly callback: ResizeObserverCallback) {}
-      observe(target: Element): void {
-        this.callback(
-          [{ target, contentRect: { width: headerWidth } } as unknown as ResizeObserverEntry],
-          this as unknown as ResizeObserver,
-        );
-      }
-      unobserve(): void {}
-      disconnect(): void {}
-    } as unknown as typeof ResizeObserver;
+    resizeHeader = stubResizeObserver(400);
   });
 
   afterEach(() => {
-    globalThis.ResizeObserver = previousObserver;
+    vi.unstubAllGlobals();
     // Still mounted at this point (the outer hook unmounts), so both stores
     // notify a live header.
     act(() => {
@@ -220,14 +207,11 @@ describe('TerminalPaneHeader — notepad icon', () => {
   });
 
   it('keeps its place at the compact tier and yields it at minimal only when empty', () => {
-    headerWidth = 200;
     renderHeader(stubActions(), null);
+    act(() => resizeHeader(200));
     expect(notepadButton()).not.toBeNull();
 
-    headerWidth = 100;
-    act(() => root.unmount());
-    root = createRoot(container);
-    renderHeader(stubActions(), null);
+    act(() => resizeHeader(100));
     expect(notepadButton()).toBeNull();
 
     // Notes are never invisible: the icon comes back to carry them.

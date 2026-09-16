@@ -25,7 +25,7 @@ import {
   ZoomedIdContext,
   type WallActions,
 } from './wall-context';
-import { registerStubScreen, STUB_CHROME, STUB_SCREEN, stubWallActions as stubActions } from './wall-test-utils';
+import { registerStubScreen, STUB_CHROME, STUB_SCREEN, stubResizeObserver, stubWallActions as stubActions } from './wall-test-utils';
 import { setNativeFieldValue } from '../../lib/dom';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -45,21 +45,13 @@ let container: HTMLDivElement;
 let root: Root;
 let resizeHeader: (width: number) => void;
 
-
 beforeEach(() => {
   setPlatform(new FakePtyAdapter());
   clearAllNotepads();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
-  vi.stubGlobal('ResizeObserver', class {
-    constructor(private callback: ResizeObserverCallback) {}
-    observe(target: Element) {
-      resizeHeader = width => this.callback([{ target, borderBoxSize: [{ inlineSize: width }] } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver);
-      resizeHeader(620);
-    }
-    disconnect() {}
-  });
+  resizeHeader = stubResizeObserver(620);
 });
 
 afterEach(() => {
@@ -77,21 +69,35 @@ function renderHeader(
     root.render(
       <StrictMode>
         <WorkspaceActiveContext.Provider value={state.workspaceActive ?? true}>
-        <ModeContext.Provider value={state.active ? 'passthrough' : 'command'}>
-          <SelectedIdContext.Provider value={state.active ? props.id : null}>
-            <WindowFocusedContext.Provider value={true}>
-              <ZoomedIdContext.Provider value={state.zoomedId ?? null}>
-                <WallActionsContext.Provider value={actions}>
-                  {state.tool ? <ToolPaneHeader {...props} /> : <SurfacePaneHeader {...props} />}
-                </WallActionsContext.Provider>
-              </ZoomedIdContext.Provider>
-            </WindowFocusedContext.Provider>
-          </SelectedIdContext.Provider>
-        </ModeContext.Provider>
+          <ModeContext.Provider value={state.active ? 'passthrough' : 'command'}>
+            <SelectedIdContext.Provider value={state.active ? props.id : null}>
+              <WindowFocusedContext.Provider value={true}>
+                <ZoomedIdContext.Provider value={state.zoomedId ?? null}>
+                  <WallActionsContext.Provider value={actions}>
+                    {state.tool ? <ToolPaneHeader {...props} /> : <SurfacePaneHeader {...props} />}
+                  </WallActionsContext.Provider>
+                </ZoomedIdContext.Provider>
+              </WindowFocusedContext.Provider>
+            </SelectedIdContext.Provider>
+          </ModeContext.Provider>
         </WorkspaceActiveContext.Provider>
       </StrictMode>,
     );
   });
+}
+
+/** The compact header's popover, portaled to `document.body`. */
+const popup = () => document.querySelector<HTMLElement>('[role="dialog"][aria-label="Browser controls"]');
+/** The compact header's trigger; its label grows a note count. */
+const overflowTrigger = () => container.querySelector<HTMLButtonElement>('[aria-label^="Browser controls"]')!;
+const inPopup = (selector: string) => popup()?.querySelector<HTMLElement>(selector) ?? null;
+/** Click, then let the popover's deferred dismissal (a 0ms task) run. */
+async function clickAndSettle(element: HTMLElement) {
+  await act(async () => { element.click(); await new Promise(resolve => setTimeout(resolve, 0)); });
+}
+function openPopup() {
+  act(() => overflowTrigger().click());
+  expect(popup()).not.toBeNull();
 }
 
 describe('SurfacePaneHeader — browser chrome', () => {
@@ -105,27 +111,24 @@ describe('SurfacePaneHeader — browser chrome', () => {
     try {
       renderHeader(props, actions);
       act(() => resizeHeader(79));
-      act(() => container.querySelector<HTMLButtonElement>('[aria-label="Browser controls"]')!.click());
-      expect(document.querySelector('[role="dialog"][aria-label="Browser controls"]')).not.toBeNull();
+      openPopup();
       otherWorkspaceControl.focus();
       renderHeader({ ...props, parked: hiddenBy === 'parked' }, actions, { workspaceActive: hiddenBy !== 'workspace' });
-      expect(document.querySelector('[role="dialog"][aria-label="Browser controls"]')).toBeNull();
+      expect(popup()).toBeNull();
       expect(document.activeElement).toBe(otherWorkspaceControl);
       renderHeader(props, actions);
-      expect(document.querySelector('[role="dialog"][aria-label="Browser controls"]')).toBeNull();
-      expect(container.querySelector('[aria-label="Browser controls"]')?.getAttribute('aria-expanded')).toBe('false');
+      expect(popup()).toBeNull();
+      expect(overflowTrigger().getAttribute('aria-expanded')).toBe('false');
     } finally {
       otherWorkspaceControl.remove();
       registration.dispose();
     }
   });
 
-  it('adapts to pane resizes in a wide window and keeps compact controls keyboard reachable', async () => {
+  it('collapses chrome by its own width, excluding the Tool context button', () => {
     const registration = register('pane-resize', { ...CHROME, key: 'a'.repeat(300) });
-    const actions = stubActions();
-    renderHeader({ ...headerProps('pane-resize', 'Browser'), params: { surfaceType: 'tool', url: CHROME.url } }, actions, { tool: true });
+    renderHeader({ ...headerProps('pane-resize', 'Browser'), params: { surfaceType: 'tool', url: CHROME.url } }, stubActions(), { tool: true });
     expect(container.querySelector('[aria-label="Terminal context"]')).not.toBeNull();
-    const viewport = window.innerWidth;
     expect(container.querySelector('[aria-label="Back"]')).not.toBeNull();
     expect(container.querySelector('[aria-label="Zoom"]')).not.toBeNull();
     act(() => resizeHeader(400));
@@ -135,64 +138,93 @@ describe('SurfacePaneHeader — browser chrome', () => {
     expect(container.querySelector('[aria-label="Back"]')).toBeNull();
     // A 103px Tool leaves 79px beside its Terminal Context button.
     act(() => resizeHeader(79));
-    const overflow = container.querySelector<HTMLButtonElement>('[aria-label="Browser controls"]')!;
-    expect(overflow).not.toBeNull();
-    for (const label of ['Minimize', 'Kill']) {
-      act(() => overflow.click());
-      act(() => container.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!.click());
-      expect(document.querySelector('[role="dialog"][aria-label="Browser controls"]')).toBeNull();
-    }
-    expect(actions.onMinimize).toHaveBeenCalledWith('pane-resize');
-    expect(actions.onKill).toHaveBeenCalledWith('pane-resize');
-    act(() => overflow.click());
-    let dialog = document.querySelector<HTMLElement>('[role="dialog"][aria-label="Browser controls"]')!;
-    expect(dialog).not.toBeNull();
-    expect(dialog.contains(document.activeElement)).toBe(true);
-    const firstControl = document.activeElement;
-    act(() => firstControl!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true })));
-    expect(document.activeElement).not.toBe(firstControl);
-    expect(dialog.contains(document.activeElement)).toBe(true);
-    expect(dialog.querySelector('[aria-label="Back"]')).not.toBeNull();
-    await act(async () => { dialog.querySelector<HTMLButtonElement>('[aria-label="Split left/right"]')!.click(); await new Promise(resolve => setTimeout(resolve, 0)); });
-    expect(actions.onSplitH).toHaveBeenCalledWith('pane-resize');
-    expect(document.querySelector('[role="dialog"][aria-label="Browser controls"]')).toBeNull();
-    act(() => overflow.click());
-    dialog = document.querySelector<HTMLElement>('[role="dialog"][aria-label="Browser controls"]')!;
-    const url = dialog.querySelector<HTMLElement>('[role="button"]')!;
-    act(() => { url.focus(); url.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
-    expect(dialog.querySelector('input')).not.toBeNull();
-    act(() => dialog.querySelector('input')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
-    expect(document.querySelector('[role="dialog"][aria-label="Browser controls"]')).toBeNull();
-    expect(document.activeElement).toBe(overflow);
-    act(() => addPlainNote('pane-resize', 'A saved note'));
-    expect(overflow.getAttribute('aria-label')).toBe('Browser controls, 1 note');
-    act(() => overflow.click());
-    expect(document.querySelector('[role="dialog"] input')).toBeNull();
-    await act(async () => { document.querySelector<HTMLButtonElement>('[role="dialog"] button[aria-label^="Notepad"]')!.click(); await new Promise(resolve => setTimeout(resolve, 0)); });
-    expect(getOpenNotepadId()).toBe('pane-resize');
+    expect(overflowTrigger()).not.toBeNull();
+    expect(container.querySelector('[aria-label="Kill"]')).not.toBeNull();
     act(() => resizeHeader(56));
     expect(container.querySelector('[aria-label="Kill"]')).toBeNull();
-    for (const label of ['Minimize', 'Kill']) {
-      act(() => overflow.click());
-      await act(async () => { document.querySelector<HTMLButtonElement>(`[role="dialog"] [aria-label="${label}"]`)!.click(); await new Promise(resolve => setTimeout(resolve, 0)); });
-    }
-    expect(actions.onMinimize).toHaveBeenCalledTimes(2);
-    expect(actions.onKill).toHaveBeenCalledTimes(2);
     act(() => resizeHeader(620));
     expect(container.querySelector('[aria-label^="Browser controls"]')).toBeNull();
     expect(container.querySelector('[aria-label="Back"]')).not.toBeNull();
     expect(container.querySelector('[aria-label="Zoom"]')).not.toBeNull();
-    expect(window.innerWidth).toBe(viewport);
+    registration.dispose();
+  });
+
+  it('keeps the popover keyboard reachable and hands focus back to its trigger', async () => {
+    const registration = register('pane-popup');
+    const actions = stubActions();
+    renderHeader(headerProps('pane-popup', 'Browser'), actions);
+    act(() => resizeHeader(79));
+    openPopup();
+    expect(popup()!.contains(document.activeElement)).toBe(true);
+    const firstControl = document.activeElement!;
+    act(() => firstControl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true })));
+    expect(document.activeElement).not.toBe(firstControl);
+    expect(popup()!.contains(document.activeElement)).toBe(true);
+    expect(inPopup('[aria-label="Back"]')).not.toBeNull();
+    await clickAndSettle(inPopup('[aria-label="Split left/right"]')!);
+    expect(actions.onSplitH).toHaveBeenCalledWith('pane-popup');
+    expect(popup()).toBeNull();
+
+    openPopup();
+    const url = inPopup('[role="button"]')!;
+    act(() => { url.focus(); url.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+    expect(inPopup('input')).not.toBeNull();
+    act(() => inPopup('input')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(popup()).toBeNull();
+    expect(document.activeElement).toBe(overflowTrigger());
+
+    openPopup();
+    act(() => document.body.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+    expect(popup()).toBeNull();
+
+    openPopup();
+    // Separate acts: a browser flushes the pointerdown's state before the click.
+    act(() => overflowTrigger().dispatchEvent(new Event('pointerdown', { bubbles: true })));
+    act(() => overflowTrigger().click());
+    expect(popup()).toBeNull();
+    expect(overflowTrigger().getAttribute('aria-expanded')).toBe('false');
+    registration.dispose();
+  });
+
+  it('names notes on the trigger and opens the notepad from the popover', async () => {
+    const registration = register('pane-notes');
+    renderHeader(headerProps('pane-notes', 'Browser'), stubActions());
+    act(() => resizeHeader(79));
+    act(() => addPlainNote('pane-notes', 'A saved note'));
+    expect(overflowTrigger().getAttribute('aria-label')).toBe('Browser controls, 1 note');
+    openPopup();
+    expect(inPopup('input')).toBeNull();
+    await clickAndSettle(inPopup('button[aria-label^="Notepad"]')!);
+    expect(getOpenNotepadId()).toBe('pane-notes');
+    registration.dispose();
+  });
+
+  it('closes the popover from Minimize and Kill wherever they render', async () => {
+    const registration = register('pane-actions');
+    const actions = stubActions();
+    renderHeader(headerProps('pane-actions', 'Browser'), actions);
+    act(() => resizeHeader(79));
+    for (const label of ['Minimize', 'Kill']) {
+      openPopup();
+      act(() => container.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!.click());
+      expect(popup()).toBeNull();
+    }
+    act(() => resizeHeader(56));
+    for (const label of ['Minimize', 'Kill']) {
+      openPopup();
+      await clickAndSettle(inPopup(`[aria-label="${label}"]`)!);
+      expect(popup()).toBeNull();
+    }
+    expect(actions.onMinimize).toHaveBeenCalledTimes(2);
+    expect(actions.onKill).toHaveBeenCalledTimes(2);
+    expect(actions.onKill).toHaveBeenCalledWith('pane-actions');
     registration.dispose();
   });
 
   it('runs popup Zoom, Reload and Display before dismissal and preserves modal focus', async () => {
     const modalControl = document.createElement('button');
     document.body.appendChild(modalControl);
-    const stillOwnsFocus = () => {
-      const popup = document.querySelector('[role="dialog"][aria-label="Browser controls"]');
-      expect(popup?.contains(document.activeElement)).toBe(true);
-    };
+    const stillOwnsFocus = () => expect(popup()?.contains(document.activeElement)).toBe(true);
     const onZoom = vi.fn(stillOwnsFocus);
     const reload = vi.fn(stillOwnsFocus);
     const openModal = vi.fn(() => { stillOwnsFocus(); modalControl.focus(); });
@@ -204,12 +236,12 @@ describe('SurfacePaneHeader — browser chrome', () => {
     try {
       renderHeader(headerProps('pane-popup-actions', 'Browser'), stubActions({ onZoom }));
       act(() => resizeHeader(79));
-      const trigger = container.querySelector<HTMLButtonElement>('[aria-label="Browser controls"]')!;
       for (const selector of ['[aria-label="Zoom"]', '[aria-label="Reload"]', '[data-browser-display-trigger]']) {
-        act(() => trigger.click());
-        const action = document.querySelector<HTMLButtonElement>(`[role="dialog"] ${selector}`)!;
-        await act(async () => { action.focus(); action.click(); await new Promise(resolve => setTimeout(resolve, 0)); });
-        expect(document.querySelector('[role="dialog"][aria-label="Browser controls"]')).toBeNull();
+        openPopup();
+        const action = inPopup(selector)!;
+        action.focus();
+        await clickAndSettle(action);
+        expect(popup()).toBeNull();
       }
       expect(onZoom).toHaveBeenCalledWith('pane-popup-actions');
       expect(reload).toHaveBeenCalledOnce();
