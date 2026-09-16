@@ -59,7 +59,7 @@ describe('ToolPanel', () => {
     ['terminal', booting],
     ['iframe', serving],
     ['agent-browser', { ...serving, renderMode: 'ab-screencast' }],
-  ])('hides the %s face with its Workspace or parked leaf without remounting', (_face, params) => {
+  ])('hides the %s face with its Workspace or parked leaf and restores only the foreground face', (_face, params) => {
     show(params);
     const terminal = half('terminal');
     const browser = half('browser');
@@ -67,9 +67,8 @@ describe('ToolPanel', () => {
     expect(getComputedStyle(terminal).visibility).toBe('hidden');
     expect(getComputedStyle(browser).visibility).toBe('hidden');
     container.style.visibility = 'visible';
-    expect(half('terminal')).toBe(terminal);
-    expect(half('browser')).toBe(browser);
     expect(getComputedStyle('url' in params ? browser : terminal).visibility).toBe('visible');
+    expect(getComputedStyle('url' in params ? terminal : browser).visibility).toBe('hidden');
   });
 
   it('hides with visibility, never display', () => {
