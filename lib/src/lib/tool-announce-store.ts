@@ -11,45 +11,34 @@
  * then it only *selects among* the ports the scan found. Output alone never
  * creates surfaces.
  */
+import type { TerminalProtocolEvent } from './terminal-protocol';
 import type { ToolAnnounce } from './tool-announce';
 
 const announces = new Map<string, ToolAnnounce>();
-const listeners = new Set<() => void>();
-let snapshot: ReadonlyMap<string, ToolAnnounce> = new Map();
-
-function publish(): void {
-  snapshot = new Map(announces);
-  for (const listener of listeners) listener();
-}
 
 /** Last-write-wins: the announcement is re-emittable, so a tool that changes
  *  its port or its name simply says so again. */
 export function recordToolAnnounce(id: string, announce: ToolAnnounce): void {
   announces.set(id, announce);
-  publish();
+}
+
+/** The one spelling of "record whatever announcements this parse produced",
+ *  shared by every renderer-side seam that parses raw replay itself. */
+export function recordToolAnnounces(id: string, events: readonly TerminalProtocolEvent[]): void {
+  for (const event of events) if (event.kind === 'toolAnnounce') recordToolAnnounce(id, event.announce);
 }
 
 /** Drop a Session's announcement when it dies, so a recycled pane id cannot
  *  inherit the previous tenant's port hint. */
 export function clearToolAnnounce(id: string): void {
-  if (announces.delete(id)) publish();
+  announces.delete(id);
 }
 
 export function getToolAnnounce(id: string): ToolAnnounce | null {
   return announces.get(id) ?? null;
 }
 
-export function getToolAnnounceSnapshot(): ReadonlyMap<string, ToolAnnounce> {
-  return snapshot;
-}
-
-export function subscribeToToolAnnounce(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
-}
-
 /** Test seam. */
 export function resetToolAnnounces(): void {
   announces.clear();
-  publish();
 }

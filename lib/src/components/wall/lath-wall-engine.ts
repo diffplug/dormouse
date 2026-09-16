@@ -121,8 +121,6 @@ export function persistableLeafMeta(meta: LeafMeta): LeafMeta {
     session: _session,
     wsPort: _wsPort,
     renderMode: _renderMode,
-    // Retired development snapshots may carry this; never save it again.
-    showTerminal: _showTerminal,
     toolPortConflict: _toolPortConflict,
     toolAnnouncedPort: _toolAnnouncedPort,
     ...rest

@@ -33,6 +33,7 @@ const noopActions: WallActions = {
   onCancelRename: () => {},
   onSwapRenderMode: () => {},
   resolveSurfaceRef: (id) => id,
+  onResolveToolApproval: () => {},
 };
 
 function actionsRejecting(reason: 'empty' | 'reserved'): WallActions {

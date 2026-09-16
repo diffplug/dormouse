@@ -12,6 +12,7 @@ import {
   errorMessage,
   renderJson,
   requireControlClient,
+  scanPreDelimiterArgs,
   stringParser,
   workspaceFlag,
   workspaceParam,
@@ -32,32 +33,26 @@ interface ToolFlags {
 // plus a `dormouse.yml` read; both are bounded well under this.
 const TOOL_TIMEOUT_MS = 20_000;
 
+// Keep in sync with `parameters.flags`.
 const FLAGS_WITH_VALUES = new Set(['--cwd', '--surface', '--workspace']);
 const BOOLEAN_FLAGS = new Set(['--json', '--minimize', '--fresh']);
 
 /**
  * `dor tool` takes either a registered name or a `--` command tail, never both.
  * stricli cannot express that, so the shape is checked before it parses — the
- * same pre-parse contract `dor ensure` uses. Keep the flag lists above in sync
- * with `parameters.flags`.
+ * same pre-parse contract `dor ensure` uses.
  */
 export function validateToolArgs(args: string[]): ParseResult<void> {
   const delimiterIndex = args.indexOf('--');
-  const head = delimiterIndex === -1 ? args : args.slice(0, delimiterIndex);
-
-  const positionals: string[] = [];
-  for (let index = 0; index < head.length; index += 1) {
-    const arg = head[index];
-    if (BOOLEAN_FLAGS.has(arg)) continue;
-    if (FLAGS_WITH_VALUES.has(arg)) {
-      const value = head[index + 1];
-      if (!value || value.startsWith('-')) return { ok: false, message: `${arg} requires a value` };
-      index += 1;
-      continue;
-    }
-    if (arg.startsWith('-')) return { ok: false, message: `unknown option '${arg}'` };
-    positionals.push(arg);
-  }
+  // A positional is the tool name when there is no `--` and an error when there
+  // is, so the scan collects them and each form judges them below.
+  const scan = scanPreDelimiterArgs(delimiterIndex === -1 ? args : args.slice(0, delimiterIndex), {
+    booleans: BOOLEAN_FLAGS,
+    valued: FLAGS_WITH_VALUES,
+    positionals: 'collect',
+  });
+  if (!scan.ok) return scan;
+  const positionals = scan.value;
 
   if (delimiterIndex === -1) {
     if (positionals.length === 0) {

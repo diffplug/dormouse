@@ -1,7 +1,7 @@
-import { lstat, mkdtemp, mkdir, rm, symlink, unlink, utimes, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   FileToolTrustStore,
   MemoryToolTrustStore,
@@ -86,7 +86,7 @@ describe('FileToolTrustStore', () => {
     expect(await store.isTrusted([upstreamGrantKey('/repo')])).toBe(false);
   });
 
-  it('serializes concurrent grants and merges each against the committed file', async () => {
+  it('lands concurrent grants for different keys without a lock between them', async () => {
     const stateDir = join(root, 'state');
     const first = new FileToolTrustStore(stateDir);
     const second = new FileToolTrustStore(stateDir);
@@ -101,90 +101,90 @@ describe('FileToolTrustStore', () => {
     const reader = new FileToolTrustStore(stateDir);
     expect(await reader.isTrusted([folder])).toBe(true);
     expect(await reader.isTrusted([upstream])).toBe(true);
-    // Long-lived instances also re-read the shared file instead of retaining a
+    // Long-lived instances also re-read the directory instead of retaining a
     // cache that cannot observe another window's grant.
     expect(await first.isTrusted([upstream])).toBe(true);
   });
 
-  it('reclaims an aged lock even when its pid has been recycled', async () => {
+  it('is idempotent: granting the same key twice leaves one grant', async () => {
     const stateDir = join(root, 'state');
-    const lockDir = join(stateDir, 'tool-trust.json.lock');
-    const lockPath = join(lockDir, 'ticket-orphaned.json');
-    await mkdir(lockDir, { recursive: true });
-    await writeFile(lockPath, JSON.stringify({ pid: process.pid, token: 'orphaned', ticket: 1 }));
-    const stale = new Date(Date.now() - 31_000);
-    await utimes(lockPath, stale, stale);
+    const key = folderGrantKey('/repo');
+    const store = new FileToolTrustStore(stateDir);
+    await store.grant(key, 'folder');
+    await Promise.all([store.grant(key, 'folder'), new FileToolTrustStore(stateDir).grant(key, 'folder')]);
+
+    expect(await store.isTrusted([key])).toBe(true);
+    // One file per grant, and no temp file left behind by the repeat writes.
+    expect(await readdir(join(stateDir, 'tool-trust'))).toHaveLength(1);
+  });
+
+  it('ignores files outside the expected grant path', async () => {
+    // Every grant is named for the hash of its key, so nothing an unrelated
+    // writer drops in the directory can vouch for a key.
+    const stateDir = join(root, 'state');
+    const trustDir = join(stateDir, 'tool-trust');
+    await mkdir(trustDir, { recursive: true });
+    await writeFile(join(trustDir, 'tool-trust.json'), '{not json');
+    await writeFile(join(trustDir, 'deadbeef.json'), JSON.stringify({ version: 1, key: folderGrantKey('/repo'), kind: 'folder' }));
 
     const store = new FileToolTrustStore(stateDir);
-    const grant = store.grant(folderGrantKey('/repo'), 'folder');
-    let timeout: ReturnType<typeof setTimeout> | undefined;
-    const reclaimed = await Promise.race([
-      grant.then(() => {
-        if (timeout) clearTimeout(timeout);
-        return true;
-      }),
-      new Promise<false>((resolve) => {
-        timeout = setTimeout(() => resolve(false), 250);
-      }),
-    ]);
-    // Keep a mutation that refuses to age out a live pid from leaving a retry
-    // loop behind after the assertion has proved the regression.
-    if (!reclaimed) await unlink(lockPath).catch(() => {});
-    await grant;
-
-    expect(reclaimed).toBe(true);
-    expect(await store.isTrusted([folderGrantKey('/repo')])).toBe(true);
+    expect(await store.isTrusted([folderGrantKey('/repo')])).toBe(false);
+    expect(await store.isTrusted([upstreamGrantKey('https://github.com/diffplug/dormouse')])).toBe(false);
   });
 
-  it('migrates a leftover single-file lock from the previous format', async () => {
+  it('validates the receipt at the exact grant path and still checks other covering keys', async () => {
     const stateDir = join(root, 'state');
-    const lockPath = join(stateDir, 'tool-trust.json.lock');
-    await mkdir(stateDir, { recursive: true });
-    await writeFile(lockPath, JSON.stringify({ pid: process.pid, token: 'legacy' }));
-
+    const key = folderGrantKey('/repo');
     const store = new FileToolTrustStore(stateDir);
-    await store.grant(folderGrantKey('/repo'), 'folder');
+    await store.grant(key, 'folder');
+    const [name] = await readdir(join(stateDir, 'tool-trust'));
+    const path = join(stateDir, 'tool-trust', name);
+    const valid = JSON.parse(await readFile(path, 'utf8'));
+    const upstream = upstreamGrantKey('https://github.com/diffplug/dormouse');
+    await store.grant(upstream, 'upstream');
 
-    expect((await lstat(lockPath)).isDirectory()).toBe(true);
-    expect(await store.isTrusted([folderGrantKey('/repo')])).toBe(true);
+    for (const invalid of [
+      '', '{not json', 'null', '[]', '{}',
+      JSON.stringify({ ...valid, version: 2 }),
+      JSON.stringify({ ...valid, key: folderGrantKey('/other') }),
+      JSON.stringify({ ...valid, kind: 'upstream' }),
+      JSON.stringify({ ...valid, kind: 'unknown' }),
+      JSON.stringify({ ...valid, grantedAt: undefined }),
+      JSON.stringify({ ...valid, grantedAt: 0 }),
+      JSON.stringify({ ...valid, padding: 'x'.repeat(256 * 1024) }),
+    ]) {
+      await writeFile(path, invalid);
+      expect(await store.isTrusted([key])).toBe(false);
+      expect(await store.isTrusted([key, upstream])).toBe(true);
+    }
+    await writeFile(path, JSON.stringify(valid));
+    expect(await store.isTrusted([key])).toBe(true);
   });
 
-  it('merges concurrent grants after reclaiming one aged lock', async () => {
+  it('does not accept a directory at the exact grant path', async () => {
     const stateDir = join(root, 'state');
-    const lockDir = join(stateDir, 'tool-trust.json.lock');
-    const lockPath = join(lockDir, 'ticket-orphaned.json');
-    await mkdir(lockDir, { recursive: true });
-    await writeFile(lockPath, JSON.stringify({ pid: process.pid, token: 'orphaned', ticket: 1 }));
-    const stale = new Date(Date.now() - 31_000);
-    await utimes(lockPath, stale, stale);
-
-    const keys = Array.from({ length: 8 }, (_, index) => folderGrantKey(`/repo/${index}`));
-    await Promise.all(keys.map((key) => new FileToolTrustStore(stateDir).grant(key, 'folder')));
-
-    const reader = new FileToolTrustStore(stateDir);
-    for (const key of keys) expect(await reader.isTrusted([key])).toBe(true);
-  });
-
-  it('starts empty on a corrupt file rather than failing every tool', async () => {
-    const stateDir = join(root, 'state');
-    await mkdir(stateDir, { recursive: true });
-    await writeFile(join(stateDir, 'tool-trust.json'), '{not json');
-    expect(await new FileToolTrustStore(stateDir).isTrusted([folderGrantKey('/repo')])).toBe(false);
-  });
-
-  it('migrates the pre-versioned shape, keeping grants and dropping denials', async () => {
-    // v0 was `{ roots: Record<absPath, 'trusted' | 'denied'> }`. A stored denial
-    // must not survive as anything: the state no longer exists, and nothing can
-    // revoke or even list it.
-    const stateDir = join(root, 'state');
-    await mkdir(stateDir, { recursive: true });
-    await writeFile(
-      join(stateDir, 'tool-trust.json'),
-      JSON.stringify({ roots: { '/old/yes': 'trusted', '/old/no': 'denied' } }),
-    );
+    const key = folderGrantKey('/repo');
     const store = new FileToolTrustStore(stateDir);
-    expect(await store.isTrusted([folderGrantKey('/old/yes')])).toBe(true);
-    expect(await store.isTrusted([folderGrantKey('/old/no')])).toBe(false);
+    await store.grant(key, 'folder');
+    const [name] = await readdir(join(stateDir, 'tool-trust'));
+    const path = join(stateDir, 'tool-trust', name);
+    await rm(path);
+    await mkdir(path);
+    expect(await store.isTrusted([key])).toBe(false);
+  });
+
+  it.skipIf(process.platform === 'win32')('does not follow a symlink receipt even when its target is a valid grant', async () => {
+    const stateDir = join(root, 'state');
+    const key = folderGrantKey('/repo');
+    const store = new FileToolTrustStore(stateDir);
+    await store.grant(key, 'folder');
+    const [name] = await readdir(join(stateDir, 'tool-trust'));
+    const path = join(stateDir, 'tool-trust', name);
+    const target = join(root, 'another-file.json');
+    await writeFile(target, await readFile(path));
+    await rm(path);
+    await symlink(target, path);
+    expect(await store.isTrusted([key])).toBe(false);
   });
 });
 
@@ -232,6 +232,16 @@ describe('lookupTool', () => {
     if (result.status !== 'ok') return;
     expect(result.entry.run).toBe('pnpm storybook');
     expect(result.projectRoot).toBe(root);
+  });
+
+  it('does not spawn git once the folder grant already answers', async () => {
+    await write();
+    const trust = new MemoryToolTrustStore();
+    await trust.grant(folderGrantKey(root), 'folder');
+    // `resolveUpstreamUrl` is two `git` subprocesses on every named invocation.
+    const upstream = vi.fn(async () => 'https://github.com/diffplug/dormouse');
+    expect((await lookupTool('storybook', root, trust, undefined, upstream)).status).toBe('ok');
+    expect(upstream).not.toHaveBeenCalled();
   });
 
 

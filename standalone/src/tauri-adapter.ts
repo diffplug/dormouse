@@ -1,4 +1,4 @@
-import { recordToolAnnounce } from '../../lib/src/lib/tool-announce-store';
+import { recordToolAnnounces } from '../../lib/src/lib/tool-announce-store';
 import type { AlertRuntimeSnapshot } from 'dormouse-lib/lib/alert-manager';
 import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../../lib/src/lib/terminal-context-types';
 import { invoke as rawInvoke } from "@tauri-apps/api/core";
@@ -206,7 +206,7 @@ export class TauriAdapter implements PlatformAdapter {
         // (docs/specs/standalone.md → "Routing").
         const { id, data, requestId } = event.payload;
         const parsed = new TerminalProtocolParser(themeColorProvider).process(data);
-        for (const event of parsed.events) if (event.kind === 'toolAnnounce') recordToolAnnounce(id, event.announce);
+        recordToolAnnounces(id, parsed.events);
         applyTerminalSemanticEvents(id, this.alertManager.applyReplay(id, requestId, parsed));
         // A listed exited buffer can contain a command-start with no finish.
         // Apply its exit after rebuilding the replay's watch, for either target
