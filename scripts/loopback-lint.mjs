@@ -30,6 +30,12 @@
  *   - It knows the bind forms listed at BIND_FORMS and no others. A library
  *     nobody has added yet spells its bind some way this file has never seen,
  *     so adding a server dependency means adding its spelling here.
+ *   - The `server`-block form scans past nested objects two levels deep, which
+ *     reaches `fs`, `hmr`, `headers`, `watch` and a `proxy` route object. It
+ *     stops there because no depth is the last one: a `proxy` route's own
+ *     options nest again (`headers`, `cookieDomainRewrite`), and `configure`
+ *     takes a function whose body carries braces of its own. A `host` written
+ *     below one of those is a miss, and the audit is what covers it.
  *   - Outside `ws`, it matches only an explicit loopback host. A listener that
  *     binds every interface (`.listen(port)` with no host) is a different and
  *     larger problem, and `relay/` does it deliberately from config, so
@@ -70,6 +76,15 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
  * review; forgetting the guard entirely does not.
  */
 const ALLOWED = {
+  'standalone/scripts/dev-run.mjs':
+    'The Vite dev server owns its own request path, so neither guard module can '
+    + 'run on it. What stands in for them is pinned at the bind: cors: false, '
+    + 'because the modules Vite serves carry the browser-dev bridge token and '
+    + 'Vite\'s default admits every http://localhost:* origin to read them; and '
+    + 'allowedHosts: [], the Host check that makes DNS rebinding fail. Dev-only '
+    + 'and unbundled — it ships in nothing. Both controls are checked by '
+    + 'standalone/scripts/dev-agent-browser.test.mjs; see '
+    + 'standalone/scripts/dev-host-guard.mjs for the bridge beside it.',
   'vscode-ext/src/agent-browser-host.ts':
     'The stream relay authenticates with a single-use 64-hex token (60s TTL, '
     + 'pinned to one target port) and drops Origin rather than rewriting it, so '
@@ -103,6 +118,14 @@ const LOOPBACK = "['\"](?:127\\.0\\.0\\.1|localhost)['\"]";
 // branch that can rot alone, which is how `WebSocket\.Relay` sat here matching
 // nothing while the `WebSocketServer` branch beside it kept the lint green.
 const WS_NEW = '\\bnew\\s+WebSocket\\.?Server\\(\\s*\\{[^}]*?';
+// Keys of one options object, allowing nested objects up to two levels deep
+// between the opening brace and the key being looked for. `[^}]*?` stops at the
+// first `}`, so a form that uses it only matches while its key precedes every
+// nested object — fine for a call's flat options, wrong for a `vite.config.ts`
+// `server` block, where a nested key above `host` is the common shape. Two
+// levels is where this stops, not where `server` keys stop — the header states
+// what that leaves out.
+const NESTED_KEYS = '(?:[^{}]|\\{(?:[^{}]|\\{[^{}]*\\})*\\})*?';
 
 /**
  * Every bind form `LISTEN_RE` looks for, one entry per alternative — the
@@ -117,6 +140,16 @@ const BIND_FORMS = [
   { label: '@hono/node-server', re: `\\bserve\\(\\s*\\{[^}]*?hostname\\s*:\\s*${LOOPBACK}` },
   { label: 'ws, explicit loopback host', re: `${WS_NEW}host\\s*:\\s*${LOOPBACK}` },
   { label: 'ws, port only', re: `${WS_NEW}port\\s*:` },
+  // Vite binds from config rather than from a call argument: `createServer({
+  // server: { host } })` then an argument-less `listen()`, so neither `.listen`
+  // form can see it. Matched on the `server` block rather than on `createServer`
+  // because the same block is what a `vite.config.ts` — or Vitest, or
+  // Storybook's builder — passes to the same server. `NESTED_KEYS`, not
+  // `[^}]*?`, because `fs`, `hmr`, `headers` and `watch` (one level) and a
+  // `proxy` route object (two) are ordinary `server` keys, and any of them
+  // written above `host` would otherwise end the scan. A route's own nested
+  // options go deeper than the scan does — see this file's header.
+  { label: 'vite, server.host', re: `\\bserver\\s*:\\s*\\{${NESTED_KEYS}host\\s*:\\s*${LOOPBACK}` },
 ];
 
 const LISTEN_RE = new RegExp(BIND_FORMS.map((form) => form.re).join('|'), 'gs');
