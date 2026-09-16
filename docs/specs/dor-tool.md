@@ -134,6 +134,8 @@ Source of truth: `useToolServing` in `lib/src/components/wall/use-tool-serving.t
 
 **Must show the full terminal before serving and after command exit.** A serving Tool shows its browser, and Terminal Context reveals the same primary terminal (`docs/specs/terminal-context.md` → Tool context). Keep the browser mounted behind context, and keep the hidden terminal sized with `visibility` and `inert`, never `display: none`. Pending approval mounts neither capability.
 
+**Must hide Tools in inactive Workspaces and minimized leaves without unmounting.**
+
 Notepad follows `docs/specs/notepad.md` → Notepad UI. Tool context follows `docs/specs/terminal-context.md` → Tool context.
 
 Source of truth: `TerminalPane` in `lib/src/components/TerminalPane.tsx`; `focusSession` in `lib/src/lib/terminal-lifecycle.ts`; `ToolPanel` in `lib/src/components/wall/ToolPanel.tsx`; `ToolPaneHeader` in `lib/src/components/wall/ToolPaneHeader.tsx`; `toolLeafMeta` / `shouldParkOnMinimize` in `lib/src/components/wall/lath-wall-engine.ts`; `closeSurface` in `lib/src/components/Wall.tsx`. Tests: `lib/src/components/wall/ToolPanel.test.tsx`, `lib/src/components/Wall.test.tsx`, `lib/src/components/TerminalPane.test.tsx`, `lib/src/lib/terminal-registry.alert.test.ts`.

@@ -19,7 +19,9 @@ function Half({ shown, children }: { shown: boolean; children: React.ReactNode }
   return (
     <div
       className="absolute inset-0"
-      style={{ visibility: shown ? 'visible' : 'hidden' }}
+      // Inherit when shown: explicit `visible` escapes a hidden Workspace or
+      // parked leaf, painting this face over the active Workspace.
+      style={{ visibility: shown ? undefined : 'hidden' }}
       aria-hidden={!shown}
       inert={!shown}
     >
