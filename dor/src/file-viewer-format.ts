@@ -11,6 +11,12 @@ const MIME: Record<string, string> = {
 const TEXT = new Set(['txt', 'md', 'mdx', 'log', 'csv', 'tsv', 'json', 'jsonl', 'yaml', 'yml', 'toml', 'xml',
   'css', 'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'py', 'rs', 'go', 'java', 'c', 'h', 'cpp', 'sh', 'ps1', 'sql', 'ini', 'conf']);
 
+/** The handler name an `open` rule or `--tool` uses to select the viewer, and
+ * the private `dor` argv verb that runs it. The lib host's `resolveOpenTool`
+ * shares both through the `dor/*` alias; this module stays free of Node APIs. */
+export const BUILTIN_FILE_TOOL = 'builtin:file';
+export const VIEW_FILE_ARGV = '__view-file';
+
 export function fileViewerFormat(path: string): { mime: string; text: boolean } | null {
   const name = path.replace(/\\/g, '/').split('/').pop()!.toLowerCase();
   const ext = name.includes('.') ? name.split('.').pop()! : '';

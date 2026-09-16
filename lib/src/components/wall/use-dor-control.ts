@@ -16,6 +16,7 @@ import { hasBrowser, hasTerminal } from 'dor/commands/types';
 import { MAX_AWAIT_TIMEOUT_MS } from '../../lib/alert-manager';
 import { TOOLS_FLAG_KEY, isToolsEnabled } from '../../lib/feature-flags';
 import type { OpenPort } from '../../lib/platform/types';
+import type { ToolKeyScope } from '../../lib/platform/tool-types';
 import { buildShellCommandForKind, shellCommandKind } from 'dor/commands/shell-quote';
 import {
   UNNAMED_PANEL_TITLE,
@@ -885,7 +886,7 @@ export function useDorControl({
         }
         let command: string;
         let key: string[] | null = null;
-        let toolScope: 'user' | 'builtin' | undefined;
+        let toolScope: ToolKeyScope | undefined;
         const toolArgs = stringArrayParam(params.args) ?? [];
         let warnings: string[] = [];
         let render: 'iframe' | 'ab-screencast' = 'iframe';

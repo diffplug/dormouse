@@ -149,9 +149,7 @@ Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `dor/test/snapshot
 
 **Must retain the viewer's opened file descriptors until the Tool exits.** Refresh reads those files again, but atomic replacements and changes to the dependency graph require restarting the viewer. Cold restore runs the saved file command with a fresh URL capability; Workspace movement keeps the live binding. The listener's authority is `docs/specs/security-local.md` → Local-file viewer.
 
-Source of truth: `openCommand` in `dor/src/commands/open.ts`; `resolveOpenTool` in `lib/src/host/tool-open.ts`; `parseToolFile` in `lib/src/host/tool-registry.ts`; `surface.tool` in `lib/src/components/wall/use-dor-control.ts`. Tests: `lib/src/host/tool-open.test.ts`, `dor/test/cli-output.test.mjs`, `lib/src/components/Wall.test.tsx`.
-
-Source of truth: `fileViewerFormat` in `dor/src/file-viewer-format.ts`; `startFileViewer` / `runFileViewer` in `dor/src/file-viewer.ts`; `dor/test/file-viewer.test.mjs`.
+Source of truth: `openCommand` in `dor/src/commands/open.ts`; `resolveOpenTool` in `lib/src/host/tool-open.ts`; `parseToolFile` in `lib/src/host/tool-registry.ts`; `surface.tool` in `lib/src/components/wall/use-dor-control.ts`; `fileViewerFormat` in `dor/src/file-viewer-format.ts`; `startFileViewer` / `runFileViewer` in `dor/src/file-viewer.ts`. Tests: `lib/src/host/tool-open.test.ts`, `dor/test/cli-output.test.mjs`, `lib/src/components/Wall.test.tsx`, `dor/test/file-viewer.test.mjs`.
 
 ## Take-over
 

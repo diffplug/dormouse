@@ -1,7 +1,7 @@
 import { basename, relative, sep } from 'node:path';
 import picomatch from 'picomatch';
 import type { ToolLookupResult } from '../lib/platform/tool-types';
-import { fileViewerFormat } from 'dor/file-viewer-format';
+import { BUILTIN_FILE_TOOL, VIEW_FILE_ARGV, fileViewerFormat } from 'dor/file-viewer-format';
 import { resolveLocalToolTarget } from './tool-input';
 import { readUserToolFile, resolveUserTool } from './tool-user-config';
 
@@ -20,9 +20,9 @@ export async function resolveOpenTool(
     return rule.match.includes('/') ? matches(relativePath) || matches(canonicalPath) : matches(basename(target));
   })?.tool;
   const entry = name && file?.tools.get(name);
-  if ((!name || name === 'builtin:file') && fileViewerFormat(target)) {
+  if ((!name || name === BUILTIN_FILE_TOOL) && fileViewerFormat(target)) {
     return { status: 'ok', projectRoot: request.cwd, path: '<built-in>', name: 'file', scope: 'builtin',
-      run: ['dor', '__view-file', target], key: [target], render: 'iframe', port: 'announced', warnings: [] };
+      run: ['dor', VIEW_FILE_ARGV, target], key: [target], render: 'iframe', port: 'announced', warnings: [] };
   }
   if (!file || !entry) return { status: 'error', message: request.tool
     ? `no user Tool '${request.tool}' in ${path}`

@@ -54,6 +54,10 @@ function toolLeaves(lath: LathWallEngine, doors: DooredItem[]): ToolLeaf[] {
   return leaves;
 }
 
+/** One string per applied (port, path) announcement. A valid path starts with
+ * `/`, so the port cannot bleed into it; an absent path is the origin root. */
+const announcementKey = (port: number, path: unknown) => `${port}${typeof path === 'string' ? path : '/'}`;
+
 export function useToolServing({
   lath,
   doorsRef,
@@ -67,9 +71,9 @@ export function useToolServing({
   // A ref, not state: it drives no render, and a leaf's entry is dropped when
   // its command exits so a re-run settles again from scratch.
   const seenPorts = useRef<Map<string, number[]>>(new Map());
-  // The announced port/path last applied to each leaf. A changed announcement may
-  // re-point a live browser, but the same announcement must not keep undoing
-  // URL-bar navigation just because params.url no longer names that port.
+  // The announcement (as `announcementKey`) last applied to each leaf. A changed
+  // announcement may re-point a live browser, but the same announcement must not
+  // keep undoing URL-bar navigation just because params.url no longer names it.
   const appliedAnnouncements = useRef<Map<string, string>>(new Map());
 
   useEffect(() => {
@@ -157,14 +161,16 @@ export function useToolServing({
         // treating a mismatch with params.url as a change would undo URL-bar
         // navigation every poll after the user left the announced origin.
         const announcedPort = announce?.port ?? null;
+        // Re-checked here, not only in parseToolAnnounce: a Workspace transfer
+        // records the moved Session's announcement as data, and `new URL` below
+        // would honor `//host` as an authority.
         const announcedPath = validToolServePath(announce?.path) ? announce.path : '/';
-        const announcementKey = JSON.stringify([announcedPort, announcedPath]);
         if (announcedPort === null) appliedAnnouncements.current.delete(leaf.id);
         if (!appliedAnnouncements.current.has(leaf.id) && typeof leaf.params?.toolAnnouncedPort === 'number') {
-          appliedAnnouncements.current.set(leaf.id, JSON.stringify([leaf.params.toolAnnouncedPort, leaf.params.toolAnnouncedPath ?? '/']));
+          appliedAnnouncements.current.set(leaf.id, announcementKey(leaf.params.toolAnnouncedPort, leaf.params.toolAnnouncedPath));
         }
         const announcementChanged = announcedPort !== null
-          && appliedAnnouncements.current.get(leaf.id) !== announcementKey;
+          && appliedAnnouncements.current.get(leaf.id) !== announcementKey(announcedPort, announcedPath);
         if (!running) continue;
         if ((hasUrl || hasConflict) && !announcementChanged) continue;
 
@@ -184,7 +190,7 @@ export function useToolServing({
           // announced port that nothing bound frames nothing.
           entry = entries.find((candidate) => candidate.port === announce.port);
           if (!entry) continue;
-          appliedAnnouncements.current.set(leaf.id, announcementKey);
+          appliedAnnouncements.current.set(leaf.id, announcementKey(announce.port, announcedPath));
         } else if (leaf.params?.toolPort !== 'auto') {
           // `announced`: never guess. No announcement, no browser.
           continue;

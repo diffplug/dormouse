@@ -22,6 +22,8 @@ import { openCommand } from './commands/open.js';
 import { versionCommand } from './commands/version.js';
 import { workspaceCommand } from './commands/workspace.js';
 import { errorLine, errorMessage, fail } from './commands/shared.js';
+import { VIEW_FILE_ARGV } from './file-viewer-format.js';
+import { runFileViewer } from './file-viewer.js';
 import type {
   CliEnv,
   CliOptions,
@@ -193,6 +195,12 @@ export async function runCli(rawArgv: string[], options: CliOptions = {}): Promi
   // `dor help agent-browser`, normalized above) falls through to stricli.
   if (argv[0] === 'agent-browser' && !isAgentBrowserHelpInvocation(argv)) {
     return runAgentBrowserCli(argv.slice(1), options);
+  }
+  // `dor __view-file <file>` is the built-in viewer's private entry
+  // (docs/specs/dor-tool.md -> Opening local files). Its server outlives this
+  // call; the announcement is the only output.
+  if (argv[0] === VIEW_FILE_ARGV && argv.length === 2) {
+    return { stdout: await runFileViewer(argv[1]), stderr: '', exitCode: 0 };
   }
 
   const helpTarget = getHelpTarget(argv);

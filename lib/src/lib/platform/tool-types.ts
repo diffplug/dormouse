@@ -11,6 +11,12 @@ export type ToolHostRequest =
   | { op: 'lookup'; name: string; cwd: string; args?: string[]; global?: boolean }
   | { op: 'trust'; kind: 'upstream' | 'folder'; projectRoot: string };
 
+/** Which authority declared a Tool, namespacing its dedupe key and persisted
+ *  `scope`. Project Tools carry none. `docs/specs/dor-tool.md` -> Identity and
+ *  dedupe. */
+export type ToolKeyScope = 'user' | 'builtin';
+export const isToolKeyScope = (value: unknown): value is ToolKeyScope => value === 'user' || value === 'builtin';
+
 /** Result of resolving a tool name. `ok` carries the rendered dedupe key: the
  *  host owns `$PROJECT_ROOT`, so the webview never sees a template. */
 export type ToolLookupResult =
@@ -34,7 +40,7 @@ export type ToolLookupResult =
       run: string | readonly string[];
       /** Renderer for the tool's browser once it serves; 'iframe' by default. */
       render: 'iframe' | 'ab-screencast';
-      scope?: 'user' | 'builtin';
+      scope?: ToolKeyScope;
       /** How to pick the port to frame absent an announcement; 'announced' by
        *  default, meaning nothing is framed without OSC 367. */
       port: 'announced' | 'auto';

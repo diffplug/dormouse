@@ -7,6 +7,7 @@
  * bundle.
  */
 import { parse as parseYaml } from 'yaml';
+import { BUILTIN_FILE_TOOL } from 'dor/file-viewer-format';
 
 /** Where a tool file came from. `$PROJECT_ROOT` exists only for `repo`. */
 export type ToolScope = 'repo' | 'user';
@@ -239,7 +240,7 @@ function parseOpenRules(node: unknown, tools: ReadonlyMap<string, ToolEntry>, pa
   if (!Array.isArray(node)) throw new ToolFileError(`${path}: 'open' must be an ordered list`);
   return node.map((rule: unknown) => {
     const entry = isRecord(rule) && typeof rule.tool === 'string' ? tools.get(rule.tool) : undefined;
-    const builtin = isRecord(rule) && rule.tool === 'builtin:file';
+    const builtin = isRecord(rule) && rule.tool === BUILTIN_FILE_TOOL;
     if (!isRecord(rule) || (!builtin && !entry) || typeof rule.match !== 'string' || !rule.match
       || Object.keys(rule).some(key => key !== 'match' && key !== 'tool')) {
       throw new ToolFileError(`${path}: each open rule needs a match pattern and a tool defined in this user file`);
@@ -247,7 +248,7 @@ function parseOpenRules(node: unknown, tools: ReadonlyMap<string, ToolEntry>, pa
     if (entry && typeof entry.run === 'string') {
       throw new ToolFileError(`${path}: open rule for '${entry.name}' needs an argument-list run to receive the file`);
     }
-    return { match: rule.match, tool: builtin ? 'builtin:file' : entry!.name };
+    return { match: rule.match, tool: builtin ? BUILTIN_FILE_TOOL : entry!.name };
   });
 }
 

@@ -1,5 +1,6 @@
 import { normalizeAlertDeliveryOverrides, type AlertDeliveryOverrides } from './alert-delivery-model';
 import { isRecord } from './is-record';
+import { isToolKeyScope, type ToolKeyScope } from './platform/tool-types';
 import type { SessionStatus } from './alert-manager';
 import { ACTIVITY_NOTIFICATION_SOURCES, type ActivityNotification, type TodoState } from './alert-manager';
 
@@ -17,7 +18,7 @@ export type PersistedSurfaceType = 'terminal' | 'browser' | 'tool';
  * is respawned. Derived browser state (URL/session/port conflict) never enters
  * this projection. */
 export interface PersistedToolMetadata {
-  scope?: 'user' | 'builtin';
+  scope?: ToolKeyScope;
   name?: string;
   render: 'iframe' | 'ab-screencast';
   port: 'announced' | 'auto';
@@ -173,7 +174,7 @@ function isPersistedToolMetadataShape(value: unknown): boolean {
   if (!isRecord(value)) return false;
   return (
     (value.name === undefined || typeof value.name === 'string') &&
-    (value.scope === undefined || value.scope === 'user' || value.scope === 'builtin') &&
+    (value.scope === undefined || isToolKeyScope(value.scope)) &&
     (value.render === 'iframe' || value.render === 'ab-screencast') &&
     (value.port === 'announced' || value.port === 'auto') &&
     (value.key === undefined || (Array.isArray(value.key) && value.key.every((part) => typeof part === 'string')))

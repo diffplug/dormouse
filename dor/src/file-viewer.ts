@@ -1,20 +1,29 @@
 import { randomBytes } from 'node:crypto';
 import { constants } from 'node:fs';
-import { open, realpath, type FileHandle } from 'node:fs/promises';
-import { createServer, type ServerResponse } from 'node:http';
+import type { FileHandle } from 'node:fs/promises';
+import type { ServerResponse } from 'node:http';
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileViewerFormat } from './file-viewer-format.js';
 import { allowsFileViewerRequest } from './file-viewer-loopback-guard.js';
 
 const TEXT_LIMIT = 8 * 1024 * 1024;
 const ASSET_LIMIT = 256;
-type Resource = { file: FileHandle; mime: string; text: boolean; path: string };
-const escapeHtml = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+const CHUNK = 64 * 1024;
+type Resource = { file: FileHandle; mime: string };
+/** A bound on the grant itself: fatal even when reached through an optional asset. */
+class ViewerLimitError extends Error {}
+const HTML_ESCAPES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+const escapeHtml = (s: string) => s.replace(/[&<>"']/g, c => HTML_ESCAPES[c]!);
+
+async function textSize(file: FileHandle): Promise<number> {
+  const { size } = await file.stat();
+  if (size > TEXT_LIMIT) throw new ViewerLimitError('text preview exceeds 8 MiB; configure a Tool for this file');
+  return size;
+}
 
 async function readText(file: FileHandle): Promise<string> {
-  const size = (await file.stat()).size;
-  if (size > TEXT_LIMIT) throw new Error('text preview exceeds 8 MiB; configure a Tool for this file');
-  const bytes = Buffer.alloc(size + 1);
+  const size = await textSize(file);
+  const bytes = Buffer.allocUnsafe(size + 1);
   let offset = 0;
   while (offset < bytes.length) {
     const { bytesRead } = await file.read(bytes, offset, bytes.length - offset, offset);
@@ -50,57 +59,59 @@ function finish(res: ServerResponse, status: number, message = ''): void {
 /** One Tool process owns one file grant and its file descriptors. Restarting
  * creates a fresh capability; only the file argument is persisted by Dormouse. */
 export async function startFileViewer(input: string): Promise<{ port: number; path: string; close(): Promise<void> }> {
+  // Loaded on demand: this module is bundled into every `dor` invocation, and
+  // these two builtins cost more to load than everything else the CLI touches.
+  const [{ open, realpath }, { createServer }] = await Promise.all([import('node:fs/promises'), import('node:http')]);
   const target = await realpath(input);
   const format = fileViewerFormat(target);
   if (!format) throw new Error('unsupported file format; configure a user Tool association');
   const root = dirname(target);
   const prefix = `/${randomBytes(32).toString('hex')}/`;
   const resources = new Map<string, Resource>();
-  const paths = new Set<string>();
+  const scanned = new Set<string>();
   const closeFiles = async () => { await Promise.all([...resources.values()].map(r => r.file.close())); };
+  const outsideRoot = (path: string) => {
+    const rel = relative(root, path);
+    return isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`);
+  };
 
-  async function register(path: string, required: boolean): Promise<void> {
-    let file: FileHandle | undefined;
+  async function register(path: string, required: boolean): Promise<Resource | undefined> {
     try {
-      const canonical = await realpath(path);
-      const rel = relative(root, canonical);
-      if (isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`)) return;
       const route = `file/${relative(root, path).split(sep).join('/')}`;
-      if (resources.has(route)) return;
-      if (resources.size >= ASSET_LIMIT) throw new Error('local preview exceeds 256 referenced files');
+      if (resources.has(route)) return resources.get(route);
+      const canonical = await realpath(path);
+      if (outsideRoot(canonical)) return;
+      if (resources.size >= ASSET_LIMIT) throw new ViewerLimitError('local preview exceeds 256 referenced files');
       const type = fileViewerFormat(canonical);
       if (!type) return;
-      file = await open(canonical, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
-      if (!(await file.stat()).isFile()) throw new Error('not a regular file');
-      const resource = { file, ...type, path: canonical };
-      resources.set(route, resource);
-      file = undefined; // grant owns it now
-      if (paths.has(canonical)) return;
-      paths.add(canonical);
+      const file = await open(canonical, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+      try { if (!(await file.stat()).isFile()) throw new Error('not a regular file'); }
+      catch (error) { await file.close(); throw error; }
+      const resource = { file, mime: type.mime };
+      resources.set(route, resource); // the grant owns the descriptor from here
       const html = type.mime.startsWith('text/html');
-      if (html || type.mime.startsWith('text/css')) {
-        const contents = await readText(resource.file);
-        for (const ref of references(contents, html)) {
+      if ((html || type.mime.startsWith('text/css')) && !scanned.has(canonical)) {
+        scanned.add(canonical);
+        for (const ref of references(await readText(file), html)) {
           if (!ref || ref.startsWith('/') || ref.startsWith('#') || /^[a-z][a-z\d+.-]*:/i.test(ref) || ref.includes('\\')) continue;
           let local: string;
           try { local = decodeURIComponent(ref.split(/[?#]/, 1)[0]); } catch { continue; }
           const asset = resolve(dirname(path), local);
-          const inside = relative(root, asset);
-          if (isAbsolute(inside) || inside === '..' || inside.startsWith(`..${sep}`)) continue;
+          if (outsideRoot(asset)) continue;
           await register(asset, false);
         }
       }
+      return resource;
     } catch (error) {
-      if (required || (error instanceof Error && /exceeds/.test(error.message))) throw error;
-      // A missing/broken relative asset stays unavailable; never broaden the grant.
-    } finally { await file?.close(); }
+      if (required || error instanceof ViewerLimitError) throw error;
+      return; // A missing/broken relative asset stays unavailable; never broaden the grant.
+    }
   }
 
   try {
-    await register(target, true);
-    const main = resources.get(`file/${basename(target)}`)!;
+    const main = await register(target, true);
     if (!main) throw new Error('not a supported regular file');
-    if (format.text) await readText(main.file); // fail oversized text before announcing
+    if (format.text) await textSize(main.file); // fail oversized text before announcing
     let port = 0;
     const server = createServer((req, res) => {
       res.setHeader('Cache-Control', 'no-store');
@@ -138,15 +149,15 @@ export async function startFileViewer(input: string): Promise<{ port: number; pa
         }
         res.writeHead(range ? 206 : 200, { 'Content-Type': resource.mime, 'Content-Length': Math.max(0, end - start + 1), 'Accept-Ranges': 'bytes' });
         if (req.method === 'HEAD' || size === 0) { res.end(); return; }
-        // Positional reads let simultaneous range requests share a descriptor.
-        // A disconnected response must not destroy the grant's shared handle.
-        const buffer = Buffer.alloc(64 * 1024);
+        // Positional reads let simultaneous range requests share a descriptor,
+        // and a disconnected response must not destroy the grant's shared handle.
+        // Each chunk is a fresh buffer because res.write queues it without copying.
         for (let offset = start; offset <= end && !res.destroyed;) {
-          const { bytesRead } = await resource.file.read(buffer, 0, Math.min(buffer.length, end - offset + 1), offset);
+          const chunk = Buffer.allocUnsafe(Math.min(CHUNK, end - offset + 1));
+          const { bytesRead } = await resource.file.read(chunk, 0, chunk.length, offset);
           if (!bytesRead) { res.destroy(); return; }
           offset += bytesRead;
-          const chunk = Buffer.from(buffer.subarray(0, bytesRead));
-          if (!res.write(chunk) && !res.destroyed) await new Promise<void>(done => {
+          if (!res.write(bytesRead === chunk.length ? chunk : chunk.subarray(0, bytesRead)) && !res.destroyed) await new Promise<void>(done => {
             const complete = () => { res.off('drain', complete); res.off('close', complete); done(); };
             res.once('drain', complete);
             res.once('close', complete);
@@ -167,10 +178,12 @@ export async function startFileViewer(input: string): Promise<{ port: number; pa
   } catch (error) { await closeFiles(); throw error; }
 }
 
-export async function runFileViewer(file: string): Promise<void> {
+/** The `dor __view-file <file>` entry: starts the viewer, which outlives the
+ * call, and returns the OSC 367 announcement for the caller to print. */
+export async function runFileViewer(file: string): Promise<string> {
   const viewer = await startFileViewer(file);
   const stop = () => { void viewer.close().then(() => { process.exitCode = 0; }); };
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);
-  process.stdout.write(`\x1b]367;serve;${JSON.stringify({ port: viewer.port, path: viewer.path, v: 1 })}\x07`);
+  return `\x1b]367;serve;${JSON.stringify({ port: viewer.port, path: viewer.path, v: 1 })}\x07`;
 }
