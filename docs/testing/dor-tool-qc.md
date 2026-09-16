@@ -12,7 +12,12 @@ ignored `standalone/src-tauri/target/dor-tool-qc/` directory. Never use the
 installed application's configuration or trust records. Capture credentials
 only to a mode-0600 local file; do not include them in reports.
 
-## Test plan
+## Original QC baseline results
+
+The flag and placement rows below record the original `4c7f9012` baseline.
+They are superseded by the integrated stack: Tools are always available, and
+a standalone `dor open` can take over an eligible caller like `dor tool`.
+Current behavior is specified in `docs/specs/dor-tool.md`.
 
 | Area | Exercise | Expected result | Result |
 | --- | --- | --- | --- |
