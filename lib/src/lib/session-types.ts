@@ -1,6 +1,7 @@
 import { normalizeAlertDeliveryOverrides, type AlertDeliveryOverrides } from './alert-delivery-model';
 import { isRecord } from './is-record';
 import type { SessionStatus } from './alert-manager';
+import { hasShellInputControls } from 'dor/commands/shell-quote';
 import { ACTIVITY_NOTIFICATION_SOURCES, type ActivityNotification, type TodoState } from './alert-manager';
 
 /** Only TODO/detail restore; `status` is diagnostic and never resurrects a ring. */
@@ -17,6 +18,9 @@ export type PersistedSurfaceType = 'terminal' | 'browser' | 'tool';
  * is respawned. Derived browser state (URL/session/port conflict) never enters
  * this projection. */
 export interface PersistedToolMetadata {
+  /** Resolved arguments, re-quoted for the shell selected at cold restore. */
+  argv?: string[];
+  scope?: 'user';
   name?: string;
   render: 'iframe' | 'ab-screencast';
   port: 'announced' | 'auto';
@@ -171,11 +175,20 @@ function isPersistedPaneShape(value: unknown): boolean {
 function isPersistedToolMetadataShape(value: unknown): boolean {
   if (!isRecord(value)) return false;
   return (
+    (value.argv === undefined || isToolCommandArgv(value.argv)) &&
     (value.name === undefined || typeof value.name === 'string') &&
+    (value.scope === undefined || value.scope === 'user') &&
     (value.render === 'iframe' || value.render === 'ab-screencast') &&
     (value.port === 'announced' || value.port === 'auto') &&
     (value.key === undefined || (Array.isArray(value.key) && value.key.every((part) => typeof part === 'string')))
   );
+}
+
+/** Typed into a terminal after quoting: controls cannot be made safe by quotes. */
+export function isToolCommandArgv(value: unknown): value is string[] {
+  return Array.isArray(value) && value.length > 0
+    && value.every(arg => typeof arg === 'string' && !hasShellInputControls(arg))
+    && value[0].trim().length > 0;
 }
 
 function isPersistedDoor(value: unknown): value is PersistedDoor {

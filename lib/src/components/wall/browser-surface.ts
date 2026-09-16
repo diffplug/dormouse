@@ -18,6 +18,8 @@ type BrowserParamsLike = {
   url?: unknown;
   /** Tool only: the ports found when autobind refused to choose. */
   toolPortConflict?: unknown;
+  /** Tool only: `user` when the user-global config declared it. */
+  toolScope?: unknown;
   /** Tool only: the approval this Surface is waiting on before it runs. */
   toolPending?: unknown;
   syncEngaged?: unknown;
@@ -60,6 +62,12 @@ export function toolPortConflictFromParams(params: unknown): number[] | null {
 export interface ToolPending {
   readonly name: string;
   readonly run: string;
+  /** Inputs as invoked; approval re-resolves them. */
+  readonly args?: string[];
+  /** Why the last approval attempt launched nothing; the prompt stays up. */
+  readonly error?: string;
+  /** The host confirmed the grant; subsequent attempts only repeat lookup. */
+  readonly trustRecorded?: boolean;
   readonly path: string;
   readonly projectRoot: string;
   /** Requested at launch; applied after approval, since a pane the user cannot
@@ -80,6 +88,9 @@ export function toolPendingFromParams(params: unknown): ToolPending | null {
   if (typeof pending.minimized !== 'boolean') return null;
   if (pending.fresh !== undefined && typeof pending.fresh !== 'boolean') return null;
   if (pending.upstreamUrl !== null && typeof pending.upstreamUrl !== 'string') return null;
+  if (pending.args !== undefined && !(Array.isArray(pending.args) && pending.args.every((arg) => typeof arg === 'string'))) return null;
+  if (pending.error !== undefined && typeof pending.error !== 'string') return null;
+  if (pending.trustRecorded !== undefined && typeof pending.trustRecorded !== 'boolean') return null;
   return pending as unknown as ToolPending;
 }
 
@@ -141,6 +152,14 @@ export function namespacedToolKey(
 ): string[] | null {
   if (!toolName || key === null) return null;
   return [toolName, ...key];
+}
+
+/** Which file declared a tool: `user` for the user-global config, undefined for
+ *  a project `dormouse.yml`. Project and user Tools are separate reuse scopes
+ *  (`docs/specs/dor-tool.md` -> Declaring tools), so dedupe compares this
+ *  alongside the key. */
+export function toolScopeFromParams(params: unknown): 'user' | undefined {
+  return asParams(params).toolScope === 'user' ? 'user' : undefined;
 }
 
 /** Whether params describe a plain browser surface (vs a terminal): the unified

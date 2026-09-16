@@ -8,6 +8,7 @@
  */
 import { parse as parseYaml } from 'yaml';
 import { isRecord } from '../lib/is-record';
+import { hasShellInputControls } from 'dor/commands/shell-quote';
 
 /** Where a tool file came from. `$PROJECT_ROOT` exists only for `repo`. */
 export type ToolScope = 'repo' | 'user';
@@ -30,7 +31,7 @@ const TOOL_PORT_MODES: readonly ToolPortMode[] = ['announced', 'auto'];
 export interface ToolEntry {
   readonly name: string;
   /** Command typed into the spawned shell, exactly as `dor ensure` types one. */
-  readonly run: string;
+  readonly run: string | readonly string[];
   /** Renderer for its browser; `iframe` when unstated. */
   readonly render: ToolRender;
   /** Port-selection strategy; `announced` when unstated. */
@@ -57,12 +58,17 @@ export class ToolFileError extends Error {}
 /** Substitutions a `prespawn_dedupe` element may use. Closed set: an
  *  unrecognized `$NAME` is a parse error, never a literal, because a typo kept
  *  as a constant string dedupes across every worktree on the machine. */
-const SUBSTITUTIONS = ['$PROJECT_ROOT', '$CWD'] as const;
+const SUBSTITUTIONS = ['$PROJECT_ROOT', '$CWD', '$TARGET'] as const;
 export type Substitution = (typeof SUBSTITUTIONS)[number];
 
 // `$` followed by an identifier. Matches the whole token so an unknown one can
 // be named in the error rather than silently surviving as text.
 const SUBSTITUTION_TOKEN = /\$[A-Za-z_][A-Za-z0-9_]*/g;
+
+/** Whether any element names the `$TARGET` input. */
+export function usesTarget(elements: readonly string[]): boolean {
+  return elements.some((element) => /\$TARGET\b/.test(element));
+}
 
 // The reserved namespace. An unknown member is an error rather than an ignored
 // field: silently dropping a dedupe directive the author wrote is the
@@ -144,14 +150,23 @@ export function parseToolFile(
     }
 
     const run = rawEntry.run;
-    if (typeof run !== 'string' || run.trim() === '') {
-      throw new ToolFileError(`${where}: 'run' is required and must be a non-empty string`);
+    if (Array.isArray(run)) {
+      if (!run.length || !run.every(arg => typeof arg === 'string') || !run[0].trim()) {
+        throw new ToolFileError(`${where}: 'run' must be a non-empty argument list`);
+      }
+      if (run.some(hasShellInputControls)) throw new ToolFileError(`${where}: run arguments cannot contain terminal control characters`);
+      validateSubstitutions(run.filter(arg => arg !== '$ARGS'), scope, where);
+    } else if (typeof run !== 'string' || run.trim() === '') {
+      throw new ToolFileError(`${where}: 'run' is required and must be a non-empty string or argument list`);
     }
 
     let dedupeTemplate: string[] | null = null;
     if (rawEntry.prespawn_dedupe !== undefined && rawEntry.prespawn_dedupe !== null) {
       dedupeTemplate = readDedupeTemplate(rawEntry.prespawn_dedupe, where);
       validateSubstitutions(dedupeTemplate, scope, where);
+      if (typeof run === 'string' && usesTarget(dedupeTemplate)) {
+        throw new ToolFileError(`${where}: $TARGET in prespawn_dedupe requires an argument-list run`);
+      }
       // A repo-local key with no project scope dedupes across every checkout
       // that declares the name, so a second worktree's tool would reveal the
       // first instead of starting. Warn, not error: a repo-declared
@@ -175,10 +190,40 @@ export function parseToolFile(
     }
     const port = (rawPort as ToolPortMode | undefined) ?? 'announced';
 
-    tools.set(name, { name, run: run.trim(), render, port, dedupeTemplate });
+    tools.set(name, { name, run: typeof run === 'string' ? run.trim() : run, render, port, dedupeTemplate });
   }
 
   return { scope, dir, tools, warnings };
+}
+
+export interface SubstitutionContext {
+  readonly projectRoot: string | null;
+  readonly cwd: string;
+  /** The canonical local file, present only when the invocation resolved one. */
+  readonly target?: string;
+}
+
+/**
+ * Expand every `$NAME` in one template element. Closed set: an unknown token
+ * throws rather than surviving as text (see `SUBSTITUTIONS`), and a token
+ * whose value is absent from `context` throws so a caller assembling entries
+ * by hand cannot produce a literal `$PROJECT_ROOT` in a key or a command.
+ */
+export function substituteToolTokens(element: string, context: SubstitutionContext, toolName: string): string {
+  return element.replace(SUBSTITUTION_TOKEN, (token) => {
+    if (token === '$CWD') return context.cwd;
+    if (token === '$TARGET') {
+      if (!context.target) throw new ToolFileError(`tool '${toolName}': $TARGET requires one local file argument`);
+      return context.target;
+    }
+    if (token === '$PROJECT_ROOT') {
+      if (context.projectRoot === null) {
+        throw new ToolFileError(`tool '${toolName}': $PROJECT_ROOT is not defined here`);
+      }
+      return context.projectRoot;
+    }
+    throw new ToolFileError(`tool '${toolName}': unknown substitution '${token}'`);
+  });
 }
 
 /**
@@ -187,23 +232,9 @@ export function parseToolFile(
  * one, so a null key means a fresh Surface every time.
  */
 export function resolveDedupeKey(
-  entry: ToolEntry,
-  context: { projectRoot: string | null; cwd: string },
+  entry: Pick<ToolEntry, 'name' | 'dedupeTemplate'>,
+  context: SubstitutionContext,
 ): string[] | null {
   if (!entry.dedupeTemplate) return null;
-  return entry.dedupeTemplate.map((element) =>
-    element.replace(SUBSTITUTION_TOKEN, (token) => {
-      if (token === '$CWD') return context.cwd;
-      if (token === '$PROJECT_ROOT') {
-        // Unreachable via parseToolFile, which rejects $PROJECT_ROOT outside a
-        // repo scope; guard anyway so a caller assembling entries by hand
-        // cannot produce a key with a literal '$PROJECT_ROOT' in it.
-        if (context.projectRoot === null) {
-          throw new ToolFileError(`tool '${entry.name}': $PROJECT_ROOT is not defined here`);
-        }
-        return context.projectRoot;
-      }
-      return token;
-    }),
-  );
+  return entry.dedupeTemplate.map((element) => substituteToolTokens(element, context, entry.name));
 }

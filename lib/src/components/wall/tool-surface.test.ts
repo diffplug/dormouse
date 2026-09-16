@@ -202,6 +202,15 @@ describe('the pending-approval shape (regression: PR #493 review)', () => {
   it('allows a null upstream, which is how a repo with no remote arrives', () => {
     expect(toolPendingFromParams({ surfaceType: 'tool', toolPending: pending })).not.toBeNull();
   });
+
+  it('accepts boolean grant state but rejects truthy non-boolean values', () => {
+    for (const trustRecorded of [false, true]) {
+      expect(toolPendingFromParams({ toolPending: { ...pending, trustRecorded } })?.trustRecorded).toBe(trustRecorded);
+    }
+    for (const trustRecorded of ['false', 'true', 1, {}]) {
+      expect(toolPendingFromParams({ toolPending: { ...pending, trustRecorded } })).toBeNull();
+    }
+  });
 });
 
 describe('a pending tool is not persisted (regression: PR #493 review)', () => {

@@ -8,6 +8,10 @@ YAML authors naturally collapse one-element lists to scalars. Overloading a scal
 
 A misspelled substitution such as `$PROJECTROOT` retained as a literal silently makes distinct checkouts share a key. Rejecting unknown substitutions exposes the typo before reuse can target another checkout.
 
+Argument-list commands let the renderer quote each value for the actual target shell. Keeping shell strings literal avoids needing a shell-template parser to distinguish an author-provided pipeline from punctuation in a filename. Canonical file targets make symlink aliases reuse the same document viewer.
+
+A Session can keep running PowerShell after its user's default changes to Bash. Takeover therefore cannot use the default's quotation rules: apostrophes and quoted executable paths differ between those shells. Pending invocations also depend on their CWD, since identical relative filenames in two subdirectories identify different documents.
+
 ## Identity and dedupe
 
 `pnpm storybook`, `pnpm run storybook`, and `pnpm storybook --quiet` are different command strings for the same intended tool. `dor ensure` already supplies exact-command/CWD identity. An explicit Tool key allows authors to choose their own scope without making the declaration of a short command name implicitly enable dedupe.
@@ -53,6 +57,8 @@ An accepted takeover has already answered the CLI and promised its placement. Sw
 Hostile text printed by the designated command can contain an announcement. The current process-tree check limits port selection to that Session's discovered listeners; browser content still executes under the existing renderer boundaries. Earlier text describing arbitrary local-port selection did not match the scan implementation.
 
 ## Persistence and hosts
+
+A Tool may take over a PowerShell Session even while the selected default is Bash, and the selected default may change before restart. Its already-quoted command string cannot safely move between those shells. Retaining resolved argv preserves literal filenames and lets cold restore quote for its actual shell without retaining an obsolete shell executable.
 
 A derived URL or browser daemon binding belongs to one execution. Reusing it after cold restore can connect a Tool to another process that obtained the old port. The saved command and declaration metadata are sufficient to start again and discover the new endpoint.
 

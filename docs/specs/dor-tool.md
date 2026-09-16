@@ -32,21 +32,27 @@ Source of truth: `surfaceKindFromParams` / `isToolParams` in `lib/src/components
 
 ## Declaring tools
 
-**Must resolve a named Tool from the nearest ancestor `dormouse.yml`.** The host owns discovery, bounded reads, YAML parsing, and substitutions; the renderer receives the resolved result. Canonical field shapes are `ToolEntry` in `lib/src/host/tool-registry.ts`.
+**Must resolve a named Tool from the nearest ancestor `dormouse.yml`, then fall back to user Tools when that name is absent.** `--global` skips project discovery. A malformed project file fails lookup rather than falling back. The host owns discovery, bounded reads, YAML parsing, and substitutions; the renderer receives the resolved result. Canonical field shapes are `ToolEntry` in `lib/src/host/tool-registry.ts`.
+
+**Must read user Tools from `$XDG_CONFIG_HOME/dormouse/dormouse.yml` when that environment value is absolute, otherwise `~/.config/dormouse/dormouse.yml`.** Both local hosts use this location. User Tools require no project grant; malformed or unreadable user configuration fails lookup. Project and user Tools occupy separate reuse scopes.
 
 | Field | Behavior |
 | --- | --- |
-| `run` | Required command, typed into the configured shell after integration readiness |
+| `run` | Required shell command string or argument list, typed into the configured shell after integration readiness |
 | `render` | `iframe` by default, or `ab-screencast` |
 | `port` | `announced` by default, or `auto`; [Serving](#serving) owns selection |
 | `prespawn_dedupe` | Optional scalar or list of literal key elements with substitutions |
 
-- **Must reject unknown `prespawn_*` fields and unknown substitutions**; unknown ordinary fields produce warnings. The substitution set is `$PROJECT_ROOT`, the declaring directory, and `$CWD`, the caller's resolved directory. (rationale)
+- **Must reject unknown `prespawn_*` fields and unknown substitutions**; unknown ordinary fields produce warnings. `$PROJECT_ROOT` is the declaring directory, `$CWD` the caller's resolved directory, and `$TARGET` the canonical local file input. (rationale)
 - **Must preserve scalar `prespawn_dedupe` as a one-element literal list**, never interpret it as a command to execute. Reserve separate fields for future computed keys. (rationale)
 - **Must warn when a repo-local key omits `$PROJECT_ROOT`**, while allowing intentional cross-checkout dedupe.
-- Reserved: **Must reject `$PROJECT_ROOT` in the future user-global configuration**, which has no project root; see scope **dor-tools** under [Future](#future).
+- **Must reject `$PROJECT_ROOT` in user configuration**, which has no project root.
 
-Source of truth: `lookupTool` in `lib/src/host/tool-trust.ts`; `parseToolFile` / `resolveDedupeKey` in `lib/src/host/tool-registry.ts`; `lib/src/host/tool-registry.test.ts`.
+**Must pass named-tool inputs as argument values, never substitute them into a shell-command string.** String `run` accepts no arguments and remains literal shell syntax. List `run` expands `$TARGET`, `$CWD`, and `$PROJECT_ROOT` within elements; a whole `$ARGS` element expands all input arguments. Without `$ARGS` or `$TARGET` in the list, append the inputs. **Must quote argv for the destination Session's shell**, using the current default only for new Sessions; takeover stores that quoted command for reruns.
+
+**Must require exactly one existing regular local file when `$TARGET` appears in the run list or dedupe key.** Resolve relative paths against the invocation CWD and follow symlinks to a canonical absolute path before substitution and reuse. Reject URLs, directories, and missing files. Validate run and key inputs before showing approval. Pending approval distinguishes the original arguments and invocation CWD; [Trust](#trust) owns re-resolution and recovery. Input control-character restrictions belong to `docs/specs/security-local.md` → Dor Tool configuration.
+
+Source of truth: `lookupTool` in `lib/src/host/tool-trust.ts`; `parseToolFile` / `resolveDedupeKey` in `lib/src/host/tool-registry.ts`; `resolveToolInput` in `lib/src/host/tool-input.ts`; `readUserToolFile` in `lib/src/host/tool-user-config.ts`; `toolRunCommand` in `lib/src/components/wall/use-dor-control.ts`; `lib/src/host/tool-host.test.ts`, `lib/src/components/Wall.test.tsx`.
 
 ## Identity and dedupe
 
@@ -58,7 +64,7 @@ Source of truth: `lookupTool` in `lib/src/host/tool-trust.ts`; `parseToolFile` /
 - **Must serialize Tool launch requests and approval completion in the renderer**, covering lookup, matching, creation, and startup. The current lock serializes all Tool requests, not only matching keys.
 - **Must retain the queue after integration until the new Tool command starts or completes**, or startup times out or is cancelled. A matching completion before waiting counts; integration alone does not prove injection occurred.
 - **Must reveal a live matching Tool and report `existing` without sending input.** An idle match restarts its stored command in its own directory and reports `adopted`; a failed restart reports an error.
-- **Must reuse and reveal a matching pending approval Surface unless `--fresh` is set**, matching Tool name, project root, CWD, and fresh intent; preserve its approval state and report `pending`.
+- **Must reuse and reveal a matching pending approval Surface unless `--fresh` is set**, matching Tool name, project root, CWD, arguments, and fresh intent; preserve its approval state and report `pending`.
 - **Must accept a short-lived keyed restart after observing its new completed command id**, matching the stored command and directory. A completion predating injection or belonging to another command does not prove restart.
 - **Must apply runtime re-keys only to the announcing Tool**, without merging Surfaces, transferring state, or killing either side of a collision. (rationale)
 
@@ -71,17 +77,19 @@ Source of truth: `queueToolSpawn` / the `surface.tool` handler in `lib/src/compo
 1. **Must derive grant keys host-side from the canonical upstream remote URL or project-root folder.** Either recorded key satisfies lookup; upstream trust spans clones and worktrees. (rationale)
 2. **Must present unapproved named invocations in a visible pending Tool pane**, returning `pending` without spawning a PTY. Defer requested minimization until approval. Pending approval is never persisted as a runnable Tool.
 3. **Must grant only through the approval controls in Dormouse chrome**, never through a `dor` verb or terminal output. The prompt names the proposed command; it is not itself executable terminal content. (rationale)
-4. **Must require `trust-recorded` before re-resolving the named entry**, retaining the pending pane with visible feedback after a rejected grant, then stage the command, renderer, port strategy, and key before exposing its terminal. A Surface closed during host calls must not start later or show stale grant errors.
+4. **Must require the host's `trust-recorded` result before re-resolving the named entry**, then stage the command, renderer, port strategy, and key before exposing its terminal. Failed grants retain approval choices and display errors. Closed Surfaces must not start later or show stale errors.
 5. **Must recheck the resolved key before launching an approved Tool**, honoring its original `--fresh` intent. Close a redundant approval through the ordinary close coordinator before revealing or restarting the match; a failed closure retains the approval and sends no command.
 6. **Must close a declined approval through the ordinary close coordinator and record no denial.** Archive failure may retain the pane. (rationale)
 7. **Must record each grant as its own atomically written file**, so hosts sharing one state directory never lock or merge.
 8. **Never content-hash grants or re-prompt solely because the config changed.** (rationale)
 
+**Must offer Retry and Close after post-grant lookup failure**, preserving the error with no PTY. Retry repeats only lookup; Close retains permission; the footer states both. **Never restore pending approval once launch clears its marker**, including after PTY/minimization failure.
+
 **Must validate a bounded regular, non-symlink grant receipt for the requested key.** Missing, corrupt, or mismatched records grant nothing; a filename alone is never approval.
 
 Reserved: **Must keep future implicit glob dispatch user-global and limited to user-global Tools**, and gate any future repo `prespawn_*` execution on the same approval; see scope **dor-tools** under [Future](#future).
 
-Source of truth: `createToolHost` in `lib/src/host/tool-host.ts`; `FileToolTrustStore` / `lookupTool` in `lib/src/host/tool-trust.ts`; `resolveUpstreamUrl` in `lib/src/host/git-upstream.ts`; `ToolApproval` in `lib/src/components/wall/ToolApproval.tsx`; `resolveToolApproval` in `lib/src/components/Wall.tsx`. Tests: `lib/src/host/tool-trust.test.ts`, `lib/src/components/Wall.test.tsx`.
+Source of truth: `createToolHost` in `lib/src/host/tool-host.ts`; `FileToolTrustStore` / `lookupTool` in `lib/src/host/tool-trust.ts`; `resolveUpstreamUrl` in `lib/src/host/git-upstream.ts`; `ToolApproval` in `lib/src/components/wall/ToolApproval.tsx`; `resolveToolApproval` in `lib/src/components/Wall.tsx`; `toolPendingFromParams` in `lib/src/components/wall/browser-surface.ts`. Tests: `lib/src/host/tool-trust.test.ts`, `lib/src/components/Wall.test.tsx`, `lib/src/components/wall/tool-surface.test.ts`.
 
 ## Serving
 
@@ -179,6 +187,8 @@ The Tool-specific local boundaries are `docs/specs/security-local.md` → Dor To
 
 **Must persist the command and stable Tool metadata with `surfaceType: 'tool'`**, retaining the ordinary CWD field. Never persist a derived URL, browser session binding, conflict, or pending approval as runnable Tool state. Live notes follow `docs/specs/notepad.md` → Live resume.
 
+**Must retain resolved argv for argument-list Tools and re-quote it for the shell selected at cold restore.** Update the restored command in terminal options and Tool pane/door metadata. Literal shell-string commands retain their saved text. Reject persisted argv containing terminal controls before restoring any PTY.
+
 **Must cold-restore an approved Tool by starting its saved command through integration-gated shell readiness**, then rediscover its port. Agent-resume commands do not override the saved Tool command. Pending approvals restore as ordinary terminals and execute nothing. **Must rebuild visible Tool metadata from its pane row when layout geometry is unusable**, rather than starting the command in a plain terminal with no serving behavior.
 
 **Must retain live Tool browser params and OSC announcements in volatile Workspace-transfer content**, applying them to the destination plan without mutating the durable record. A serving iframe Tool participates in the ordinary iframe move confirmation. **Must refuse transfer while a Tool awaits approval or its browser startup has no session binding.**
@@ -195,10 +205,9 @@ Source of truth: `PersistedToolMetadata` in `lib/src/lib/session-types.ts`; `sav
 
 **Scope: dor-tools** — remaining design, in implementation order.
 
-- **C — glob table + `dor open`.** The user-global tools file, glob rules
-  (pattern → tool name), `dor open <target>` as sugar over `dor tool`, argument
-  substitution in `prespawn_dedupe` so per-target viewers do not collapse into
-  one pane, and the loopback file/viewer endpoint a local *file* needs (the
+- **C — glob table + `dor open`.** User-global glob rules
+  (pattern → tool name), `dor open <local-file>` as sugar over `dor tool`,
+  and the loopback file/viewer endpoint a local *file* needs (the
   iframe proxy instruments only `http://` upstreams).
 - **D1 — reaping without cooperation.** Idle-threshold reap +
   rehydrate-from-args + `persist: "never"`: every stateless tool, no new API,

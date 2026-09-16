@@ -85,7 +85,7 @@ import {
   browserUrlFromParams,
   isBrowserParams,
   surfaceKindFromParams,
-  isToolParams, namespacedToolKey, toolKeysEqual, toolPendingFromParams,
+  isToolParams, namespacedToolKey, toolKeysEqual, toolPendingFromParams, toolScopeFromParams,
 } from './wall/browser-surface';
 import { browserSurfaceUrl, hostPathDisplay } from './wall/browser-url';
 import { WorkspaceSelectionOverlay } from './wall/WorkspaceSelectionOverlay';
@@ -106,7 +106,8 @@ import { useWallKeyboard } from './wall/use-wall-keyboard';
 import { useSessionPersistence } from './wall/use-session-persistence';
 import { useDevServerPortCorrelation } from './wall/use-dev-server-ports';
 import { useAlertSpeech } from './wall/use-alert-speech';
-import { queueToolSpawn, restartSurfaceInPlace, useDorControl, waitForNewToolCommand } from './wall/use-dor-control';
+import { queueToolSpawn, restartSurfaceInPlace, toolRunCommand, useDorControl, waitForNewToolCommand } from './wall/use-dor-control';
+import { errorText } from './wall/dor-control-shared';
 import { useWindowFocused } from './wall/use-window-focused';
 import {
   DialogKeyboardContext,
@@ -1594,34 +1595,47 @@ export function Wall({
   // Approving a pending tool: record the grant, then start the command in the
   // pane that has been showing the prompt. The two steps are ordered so a
   // failed write never leaves a running command in an unapproved repo.
-  const resolveToolApproval = useCallback(async (id: string, choice: 'upstream' | 'folder' | 'decline') => {
+  const resolveToolApproval = useCallback(async (id: string, choice: 'upstream' | 'folder' | 'decline' | 'retry') => {
     const meta = lath.getMeta(id);
-    const pending = toolPendingFromParams(meta?.params);
-    if (!pending || closingWorkspaceRef.current || isWorkspaceTransferPending(effectiveWorkspaceId)) return;
+    const initialPending = toolPendingFromParams(meta?.params);
+    if (!initialPending || closingWorkspaceRef.current || isWorkspaceTransferPending(effectiveWorkspaceId)) return;
+    let pending = initialPending;
     if (choice === 'decline') {
-      // A refusal writes nothing: it closes the pane and leaves no record, so a
-      // reflexive decline cannot permanently disable tools for this repo.
+      // Closing writes no denial and does not revoke an already saved grant.
       await closeSurface(id);
       return;
     }
     if (toolApprovalsInFlightRef.current.has(id)) return;
     toolApprovalsInFlightRef.current.add(id);
+    const isCurrent = () => !closingWorkspaceRef.current
+      && !isWorkspaceTransferPending(effectiveWorkspaceId)
+      && toolPendingFromParams(lath.getMeta(id)?.params) === pending
+      && !lath.isDying(id) && !isSurfaceClosing(id);
+    const showFailure = (message: string) => {
+      if (isCurrent()) {
+        lath.store.updateParams(id, { toolPending: { ...pending, error: message } });
+      }
+    };
 
-    const isCurrent = () => !closingWorkspaceRef.current && !isWorkspaceTransferPending(effectiveWorkspaceId)
-      && toolPendingFromParams(lath.getMeta(id)?.params) === pending && !lath.isDying(id) && !isSurfaceClosing(id);
     try {
       await queueToolSpawn(async () => {
         if (!isCurrent()) return;
         const platform = getPlatform();
-        const grant = await platform.toolControl?.({
-          op: 'trust',
-          kind: choice,
-          projectRoot: pending.projectRoot,
-        });
-        if (!isCurrent()) return;
-        if (grant?.status !== 'trust-recorded') {
-          showShellSpawnNotice(id, grant?.status === 'error' ? grant.message : 'The Tool permission could not be saved. Try allowing it again.');
-          return;
+        if (!pending.trustRecorded) {
+          // A stale Retry action cannot grant trust.
+          if (choice === 'retry') return;
+          const grant = await platform.toolControl?.({
+            op: 'trust',
+            kind: choice,
+            projectRoot: pending.projectRoot,
+          });
+          if (grant?.status !== 'trust-recorded') {
+            showFailure(grant?.status === 'error' ? grant.message : 'The Tool permission could not be saved. Try allowing it again.');
+            return;
+          }
+          if (!isCurrent()) return;
+          pending = { ...pending, trustRecorded: true, error: undefined };
+          lath.store.updateParams(id, { toolPending: pending });
         }
 
         // Re-resolve now that the grant exists. The untrusted lookup deliberately
@@ -1629,34 +1643,37 @@ export function Wall({
         // asking again is what gives an approved tool the config its dormouse.yml
         // declared, rather than silently running it as a keyless default iframe.
         const cwd = typeof meta?.params?.cwd === 'string' ? meta.params.cwd : pending.projectRoot;
-        const resolved = await platform.toolControl?.({ op: 'lookup', name: pending.name, cwd });
+        const resolved = await platform.toolControl?.({ op: 'lookup', name: pending.name, cwd, args: pending.args });
         if (resolved?.status !== 'ok') {
-          await closeSurface(id);
+          showFailure(resolved?.status === 'error' ? resolved.message : 'The Tool is no longer available. Check its configuration and try again.');
           return;
         }
 
         if (!isCurrent()) return;
         const key = namespacedToolKey(resolved.name, resolved.key);
         const match = !pending.fresh && key ? findSurfaceByParams(candidate =>
-          toolKeysEqual((candidate as { toolKey?: unknown } | undefined)?.toolKey, key)) : null;
+          toolScopeFromParams(candidate) === resolved.scope
+          && toolKeysEqual((candidate as { toolKey?: unknown } | undefined)?.toolKey, key)) : null;
         if (match) {
-          // Closing can fail while archiving notes. Retain the pending pane and
-          // do not restart the matching command unless that closure succeeds.
+          // Archive failure retains the pending pane and never restarts the match.
           if (await closeSurface(id)) return;
           if (closingWorkspaceRef.current || isWorkspaceTransferPending(effectiveWorkspaceId)
             || !lath.getMeta(match.id) || lath.isDying(match.id) || isSurfaceClosing(match.id)) return;
           const state = getTerminalPaneState(match.id);
           if (state.currentCommand === null) {
             const matchedCommand = lath.getMeta(match.id)?.params?.command;
-            const restarted = await restartSurfaceInPlace(match.id,
-              typeof matchedCommand === 'string' ? matchedCommand : resolved.run, state.cwd?.path ?? cwd, undefined, { acceptCompletedRun: true });
+            const command = typeof matchedCommand === 'string' ? matchedCommand : toolRunCommand(resolved.run, match.id);
+            const restarted = await restartSurfaceInPlace(match.id, command, state.cwd?.path ?? cwd, undefined, { acceptCompletedRun: true });
             if (!restarted.ok) showShellSpawnNotice(match.id, restarted.message);
           }
           revealSurface(match.id);
           return;
         }
+        const command = toolRunCommand(resolved.run);
         lath.store.updateParams(id, {
-          command: resolved.run,
+          command,
+          toolArgv: typeof resolved.run === 'string' ? undefined : [...resolved.run],
+          ...(resolved.scope ? { toolScope: resolved.scope } : {}),
           toolRender: resolved.render,
           toolPort: resolved.port,
           ...(key ? { toolKey: key } : {}),
@@ -1670,7 +1687,7 @@ export function Wall({
           args: defaults?.args,
           cwd,
           untouched: false,
-          command: resolved.run,
+          command,
           requireIntegration: true,
         });
         lath.store.updateParams(id, { toolPending: undefined });
@@ -1682,8 +1699,10 @@ export function Wall({
           getOrCreateTerminal(id);
           minimizePane(id);
         }
-        await waitForNewToolCommand(id, resolved.run, cwd);
+        await waitForNewToolCommand(id, command, cwd);
       });
+    } catch (error) {
+      showFailure(errorText(error));
     } finally {
       toolApprovalsInFlightRef.current.delete(id);
     }
@@ -2032,7 +2051,7 @@ export function Wall({
       });
     },
     resolveSurfaceRef: surfaceRefForId,
-    onResolveToolApproval: (id: string, choice: 'upstream' | 'folder' | 'decline') => {
+    onResolveToolApproval: (id: string, choice: 'upstream' | 'folder' | 'decline' | 'retry') => {
       void resolveToolApproval(id, choice);
     },
   }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, requestKill, replaceSurface, buildDorSurfaces, createContentSurface, surfaceRefForId, updateSurfaceParams, resolveToolApproval, lath, nav]);

@@ -257,6 +257,8 @@ export interface EnsureSurfaceResponse {
 export interface ToolSurfaceRequest extends WorkspaceScopedRequest {
   /** Registered tool name (`dor tool <name>`). */
   name?: string;
+  args?: string[];
+  global?: boolean;
   /** Raw argv (`dor tool -- <command>`); the host quotes it for the shell. */
   command?: string[];
   /** Ignore any declared key and always create — `--fresh`. */
@@ -497,11 +499,12 @@ export interface DorCommandContext extends CommandContext {
    *  command's wins. */
   readonly process: StricliProcess;
   readonly options: CliOptions;
-  /** Whether the raw argv carried the `--` argument-escape sequence. stricli
-   *  consumes `--` and leaves no trace in the parsed positionals, so this is the
-   *  only way a command can tell `dor split --` (empty tail) from a bare
-   *  `dor split`. Computed once in `cli.ts` from the pre-parse argv. */
-  readonly hasArgumentEscape: boolean;
+  /** The raw argv after the command name, as `cli.ts` saw it before stricli
+   *  parsed it. stricli consumes `--` and leaves no trace in the parsed
+   *  positionals, so this is the only way a command can tell `dor split --`
+   *  (empty tail) from a bare `dor split`, or a named `dor tool` from an
+   *  anonymous one. */
+  readonly commandArgs: readonly string[];
 }
 
 export interface Command {

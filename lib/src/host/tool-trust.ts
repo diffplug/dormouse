@@ -17,6 +17,7 @@ import { dirname, join, resolve } from 'node:path';
 import { writeJsonAtomic } from './atomic-json-file';
 import { ToolFileError, parseToolFile, type ToolEntry, type ToolFile } from './tool-registry';
 import { resolveUpstreamUrl } from './git-upstream';
+import { resolveToolInput, type ToolInput } from './tool-input';
 
 export const TOOL_FILE_NAME = 'dormouse.yml';
 /**
@@ -27,18 +28,23 @@ export const TOOL_FILE_NAME = 'dormouse.yml';
  */
 const TOOL_FILE_MAX_BYTES = 256 * 1024;
 
-/** Refuse stable symlinks on every host, then fstat and cap one descriptor.
+/** Refuse repo-config symlinks; user config may follow a dotfiles link
+ *  (`followSymlink`). Both paths fstat and cap one descriptor, and open
+ *  non-blocking so a FIFO at the path fails the fstat check instead of hanging.
  *  POSIX also opens no-follow, closing the lstat/open replacement race there. */
-async function readToolFile(path: string): Promise<string> {
+export async function readToolFile(path: string, options: { followSymlink?: boolean } = {}): Promise<string> {
   const entry = await lstat(path);
-  if (entry.isSymbolicLink()) {
+  if (entry.isSymbolicLink() && !options.followSymlink) {
     throw new ToolFileError(`${path}: tool file must be a regular file, not a symbolic link`);
   }
+  // Avoid opening known devices/FIFOs; fstat below also checks the actual
+  // descriptor after a symlink follow or concurrent path replacement.
+  if (!entry.isSymbolicLink() && !entry.isFile()) throw new ToolFileError(`${path}: tool file must be a regular file`);
 
   let file;
   try {
-    const noFollow = typeof constants.O_NOFOLLOW === 'number' ? constants.O_NOFOLLOW : 0;
-    file = await open(path, constants.O_RDONLY | noFollow);
+    const noFollow = options.followSymlink ? 0 : (constants.O_NOFOLLOW ?? 0);
+    file = await open(path, constants.O_RDONLY | noFollow | (constants.O_NONBLOCK ?? 0));
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === 'ELOOP' || code === 'EMLINK') {
@@ -227,13 +233,13 @@ export type ToolLookup =
       projectRoot: string;
       path: string;
       name: string;
-      run: string;
+      run: string | readonly string[];
       /** Canonical upstream URL, or null when there is no resolvable remote —
        *  the approval UI then offers only the folder grant. */
       upstreamUrl: string | null;
     }
   | { status: 'error'; message: string }
-  | { status: 'ok'; projectRoot: string; path: string; file: ToolFile; entry: ToolEntry };
+  | { status: 'ok'; projectRoot: string; path: string; file: ToolFile; entry: ToolEntry; input: ToolInput };
 
 /**
  * Find, parse, and trust-check the entry named `name` for a caller in `cwd`.
@@ -246,9 +252,15 @@ export async function lookupTool(
   name: string,
   cwd: string,
   trust: ToolTrustStore,
-  readTextFile?: (path: string) => Promise<string>,
-  resolveUpstream: (dir: string) => Promise<string | null> = resolveUpstreamUrl,
+  options: {
+    /** Invocation inputs for `$ARGS` / `$TARGET`; none by default. */
+    args?: readonly string[];
+    /** Test seams. */
+    readTextFile?: (path: string) => Promise<string>;
+    resolveUpstream?: (dir: string) => Promise<string | null>;
+  } = {},
 ): Promise<ToolLookup> {
+  const { args = [], readTextFile, resolveUpstream = resolveUpstreamUrl } = options;
   let found;
   try {
     found = await findToolFile(cwd, readTextFile);
@@ -277,22 +289,30 @@ export async function lookupTool(
     };
   }
 
+  let input: ToolInput;
+  try {
+    input = await resolveToolInput(entry, { projectRoot: found.dir, cwd, args });
+  } catch (error) {
+    return { status: 'error', message: error instanceof Error ? error.message : String(error) };
+  }
+
   // Either grant covers this project: this folder alone, or the upstream every
   // worktree shares. The folder key is free, so it is checked first — a granted
   // folder answers without spawning git at all.
-  const ok = { status: 'ok', projectRoot: found.dir, path: found.path, file, entry } as const;
+  const ok = { status: 'ok', projectRoot: found.dir, path: found.path, file, entry, input } as const;
   if (await trust.isTrusted([folderGrantKey(found.dir)])) return ok;
 
   // Only now pay for git, which the untrusted answer needs anyway so the
   // approval UI can offer the upstream grant.
   const upstreamUrl = await resolveUpstream(found.dir);
   if (upstreamUrl && await trust.isTrusted([upstreamGrantKey(upstreamUrl)])) return ok;
+
   return {
     status: 'untrusted',
     projectRoot: found.dir,
     path: found.path,
     name: entry.name,
-    run: entry.run,
+    run: input.run,
     upstreamUrl,
   };
 }
