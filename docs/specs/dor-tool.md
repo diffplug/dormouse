@@ -56,6 +56,7 @@ Source of truth: `lookupTool` in `lib/src/host/tool-trust.ts`; `parseToolFile` /
 - **Must dedupe within the answering Workspace.** `--workspace` uses the routing in `docs/specs/dor-cli.md` → Handle Model.
 - **Must serialize Tool launch requests in the renderer**, covering lookup, matching, creation, and startup. The current lock serializes all Tool requests, not only matching keys.
 - **Must reveal a live matching Tool and report `existing` without sending input.** An idle match restarts its stored command in its own directory and reports `adopted`; a failed restart reports an error.
+- **Must accept a short-lived keyed restart after observing its new completed command id**, matching the stored command and directory. A completion predating injection or belonging to another command does not prove restart.
 - **Must reuse and reveal a matching pending approval Surface**, preserving its approval state and reporting `pending`.
 - **Must apply runtime re-keys only to the announcing Tool**, without merging Surfaces, transferring state, or killing either side of a collision. (rationale)
 
