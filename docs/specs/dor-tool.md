@@ -55,10 +55,10 @@ Source of truth: `lookupTool` in `lib/src/host/tool-trust.ts`; `parseToolFile` /
 - **Must namespace keys by the host-resolved Tool name**; runtime output supplies scope elements, never another Tool's namespace.
 - **Must dedupe within the answering Workspace.** `--workspace` uses the routing in `docs/specs/dor-cli.md` → Handle Model.
 
-- **Must serialize Tool launch requests in the renderer**, covering lookup, matching, creation, and startup. The current lock serializes all Tool requests, not only matching keys.
+- **Must serialize Tool launch requests and approval completion in the renderer**, covering lookup, matching, creation, and startup. The current lock serializes all Tool requests, not only matching keys.
 - **Must retain the queue after integration until the new Tool command starts or completes**, or startup times out or is cancelled. A matching completion before waiting counts; integration alone does not prove injection occurred.
 - **Must reveal a live matching Tool and report `existing` without sending input.** An idle match restarts its stored command in its own directory and reports `adopted`; a failed restart reports an error.
-- **Must reuse and reveal a matching pending approval Surface**, preserving its approval state and reporting `pending`.
+- **Must reuse and reveal a matching pending approval Surface unless `--fresh` is set**, matching Tool name, project root, CWD, and fresh intent; preserve its approval state and report `pending`.
 - **Must apply runtime re-keys only to the announcing Tool**, without merging Surfaces, transferring state, or killing either side of a collision. (rationale)
 
 Source of truth: `queueToolSpawn` / the `surface.tool` handler in `lib/src/components/wall/use-dor-control.ts`; `namespacedToolKey` / `toolKeysEqual` in `lib/src/components/wall/browser-surface.ts`; `lib/src/components/Wall.test.tsx`.
@@ -71,9 +71,10 @@ Source of truth: `queueToolSpawn` / the `surface.tool` handler in `lib/src/compo
 2. **Must present unapproved named invocations in a visible pending Tool pane**, returning `pending` without spawning a PTY. Defer requested minimization until approval. Pending approval is never persisted as a runnable Tool.
 3. **Must grant only through the approval controls in Dormouse chrome**, never through a `dor` verb or terminal output. The prompt names the proposed command; it is not itself executable terminal content. (rationale)
 4. **Must require `trust-recorded` before re-resolving the named entry**, retaining the pending pane after a rejected grant, then stage the resolved command, renderer, port strategy, and key before exposing its terminal. A Surface closed during the host calls must not start later.
-5. **Must close a declined approval through the ordinary close coordinator and record no denial.** Archive failure may retain the pane. (rationale)
-6. **Must record each grant as its own atomically written file**, so hosts sharing one state directory never lock or merge.
-7. **Never content-hash grants or re-prompt solely because the config changed.** (rationale)
+5. **Must recheck the resolved key before launching an approved Tool**, honoring its original `--fresh` intent. Close a redundant approval through the ordinary close coordinator before revealing or restarting the match; a failed closure retains the approval and sends no command.
+6. **Must close a declined approval through the ordinary close coordinator and record no denial.** Archive failure may retain the pane. (rationale)
+7. **Must record each grant as its own atomically written file**, so hosts sharing one state directory never lock or merge.
+8. **Never content-hash grants or re-prompt solely because the config changed.** (rationale)
 
 **Must validate a bounded regular, non-symlink grant receipt for the requested key.** Missing, corrupt, or mismatched records grant nothing; a filename alone is never approval.
 

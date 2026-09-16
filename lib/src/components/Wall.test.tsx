@@ -1505,9 +1505,104 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it.each([
+    { fresh: false, archiveFails: false, idle: false },
+    { fresh: true, archiveFails: false, idle: false },
+    { fresh: false, archiveFails: false, idle: true },
+    { fresh: false, archiveFails: true, idle: true },
+  ])('serializes approval key reuse and preserves fresh/notes: %j', async ({ fresh, archiveFails, idle }) => {
+    setToolsEnabled(true);
+    const ids: string[] = [];
+    const cwd = { path: '/repo', pathKind: 'posix', isRemote: false, source: 'osc633', updatedAt: 0 } as const;
+    const idleState = createTerminalPaneState({ cwd });
+    const runningState = createTerminalPaneState({ cwd, currentCommand: {
+      id: 'run-tool', rawCommandLine: 'pnpm storybook', displayCommand: 'pnpm storybook',
+      cwdAtStart: cwd, startedAt: 0, source: 'osc633_E',
+    } });
+    let firstState = idleState;
+    vi.spyOn(terminalRegistry, 'getTerminalPaneState').mockImplementation(id =>
+      id === ids[0] ? firstState : ids.includes(id) ? runningState : idleState);
+    vi.spyOn(terminalRegistry, 'isPaneOscDriven').mockReturnValue(true);
+    const write = vi.spyOn(fake, 'writePty').mockImplementation((id, data) => {
+      if (id === ids[0] && data === 'pnpm storybook\r') firstState = runningState;
+    });
+    let trusted = false;
+    const toolControl = vi.fn(async (request: { op: 'lookup' | 'trust' }) => {
+      const config = { projectRoot: '/repo', path: '/repo/dormouse.yml', name: 'storybook', run: 'pnpm storybook' };
+      if (request.op === 'trust') { trusted = true; return { status: 'trust-recorded' as const }; }
+      return trusted
+        ? { ...config, status: 'ok' as const, render: 'iframe' as const, port: 'announced' as const, key: ['/repo'], warnings: [] }
+        : { ...config, status: 'untrusted' as const, upstreamUrl: null };
+    });
+    (fake as FakePtyAdapter & Pick<PlatformAdapter, 'toolControl'>).toolControl = toolControl;
+    try {
+      await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" showBaseboard />));
+      await flush();
+      for (const launchCwd of ['/repo', fresh ? '/repo' : '/repo/subdir']) {
+        const respond = vi.fn();
+        await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+          method: SURFACE_CONTROL_METHODS.tool, params: { name: 'storybook', cwd: launchCwd, fresh }, respond,
+        } })));
+        ids.push(respond.mock.calls[0][0].result.surfaceId);
+      }
+      expect(ids[0]).not.toBe(ids[1]);
+      act(() => addPlainNote(ids[1], 'keep this approval note'));
+      if (archiveFails) vi.spyOn(fake.notepadArchive, 'save').mockRejectedValue(new Error('disk full'));
+      const approvals = Array.from(container.querySelectorAll('button')).filter(button => button.textContent?.includes('Always allow for folder'));
+      vi.useFakeTimers();
+      await act(async () => {
+        approvals[0].click();
+        if (!idle) approvals[1].click();
+      });
+      expect(toolControl.mock.calls.filter(([request]) => request.op === 'trust')).toHaveLength(1);
+      expect(pendingShellOpts.has(ids[0])).toBe(true);
+      expect(pendingShellOpts.has(ids[1])).toBe(false);
+      const queuedLaunch = vi.fn();
+      if (!fresh && !idle) {
+        await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+          method: SURFACE_CONTROL_METHODS.tool, params: { name: 'storybook', cwd: '/repo' }, respond: queuedLaunch,
+        } })));
+        expect(queuedLaunch).not.toHaveBeenCalled();
+      }
+      firstState = runningState;
+      await act(async () => vi.advanceTimersByTimeAsync(100));
+      if (idle) {
+        firstState = idleState;
+        await act(async () => approvals[1].click());
+      }
+      await act(async () => vi.advanceTimersByTimeAsync(100));
+      expect(toolControl.mock.calls.filter(([request]) => request.op === 'trust')).toHaveLength(2);
+      if (!fresh && !idle) expect(queuedLaunch).toHaveBeenCalledWith(expect.objectContaining({
+        ok: true, result: expect.objectContaining({ status: 'existing', surfaceId: ids[0] }),
+      }));
+      expect(pendingShellOpts.has(ids[1])).toBe(fresh);
+      expect(write.mock.calls.filter(([, data]) => data === 'pnpm storybook\r')).toHaveLength(idle && !archiveFails ? 1 : 0);
+      if (fresh || archiveFails) {
+        expect(container.querySelector(`[data-lath-leaf="${ids[1]}"]`)).not.toBeNull();
+        expect(getNotes(ids[1])).toHaveLength(1);
+        if (archiveFails) expect(container.querySelector('[aria-labelledby="notepad-archive-failure-title"]')).not.toBeNull();
+      } else {
+        expect(container.querySelector(`[data-lath-leaf="${ids[1]}"]`)).toBeNull();
+        const archive = (await fake.notepadArchive.load())?.raw as NotepadArchiveV1;
+        expect(archive.batches.flatMap(batch => batch.notes)).toEqual([expect.objectContaining({ content: { kind: 'plain', text: 'keep this approval note' } })]);
+      }
+    } finally {
+      vi.useRealTimers();
+      ids.forEach(id => pendingShellOpts.delete(id));
+      setToolsEnabled(false);
+    }
+  });
+
   it.each([true, false])('keeps a tool deferred until trust succeeds (%s), lookup and shell staging finish', async grantSucceeds => {
     setToolsEnabled(true);
     let toolId: string | undefined;
+    vi.spyOn(terminalRegistry, 'getTerminalPaneState').mockImplementation(id => {
+      const cwd = { path: '/repo', pathKind: 'posix', isRemote: false, source: 'osc633', updatedAt: 0 } as const;
+      return createTerminalPaneState({ cwd, currentCommand: id === toolId ? {
+        id: 'approved-run', rawCommandLine: 'pnpm storybook', displayCommand: 'pnpm storybook',
+        cwdAtStart: cwd, startedAt: 0, source: 'osc633_E',
+      } : null });
+    });
     const trustGate = Promise.withResolvers<{ status: 'trust-recorded' } | { status: 'error'; message: string }>();
     const resolvedGate = Promise.withResolvers<{
       status: 'ok';
@@ -1602,6 +1697,13 @@ describe('Wall on the Lath engine', () => {
   it('starts an approved tool before applying its deferred minimize', async () => {
     setToolsEnabled(true);
     let toolId: string | undefined;
+    vi.spyOn(terminalRegistry, 'getTerminalPaneState').mockImplementation(id => {
+      const cwd = { path: '/repo', pathKind: 'posix', isRemote: false, source: 'osc633', updatedAt: 0 } as const;
+      return createTerminalPaneState({ cwd, currentCommand: id === toolId ? {
+        id: 'approved-run', rawCommandLine: 'pnpm storybook', displayCommand: 'pnpm storybook',
+        cwdAtStart: cwd, startedAt: 0, source: 'osc633_E',
+      } : null });
+    });
     let consumedOpts: (typeof pendingShellOpts extends Map<string, infer T> ? T : never) | undefined;
     const getTerminalSpy = vi.spyOn(terminalRegistry, 'getOrCreateTerminal').mockImplementation((id) => {
       consumedOpts = pendingShellOpts.get(id);

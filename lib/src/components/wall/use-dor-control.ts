@@ -268,12 +268,11 @@ const RESTART_INTERRUPT_TIMEOUT_MS = 15_000;
 const RESTART_START_TIMEOUT_MS = 15_000;
 
 /**
- * Serializes `surface.tool` requests. The critical section is "check for a key
- * match, then create", and the only contender is another tool request, so
- * ordering them is enough. Module scope because each `dor` invocation arrives
- * as its own control request.
+ * Serialize Tool requests and approval completions across lookup, key matching,
+ * creation, and startup. Module scope shares the queue across control requests
+ * and Walls in this renderer.
  */
-const queueToolSpawn = createSerialQueue();
+export const queueToolSpawn = createSerialQueue();
 
 type WaitOutcome = 'ready' | 'timeout' | 'aborted';
 
@@ -335,7 +334,7 @@ const ENSURE_CANCELLED = 'ensure was cancelled';
  * for it to go live. Drives the live PTY directly, so it works for minimized
  * doors too (their PTY keeps running). Returns a message on failure.
  */
-async function restartSurfaceInPlace(id: string, command: string, cwd: string, signal?: AbortSignal): Promise<ParseResult<undefined>> {
+export async function restartSurfaceInPlace(id: string, command: string, cwd: string, signal?: AbortSignal): Promise<ParseResult<undefined>> {
   // Checked before the interrupt is written, not just before each wait.
   if (signal?.aborted) return RESTART_CANCELLED;
   // A match is by construction OSC-driven (surfaceRunsCommand only matches a
@@ -862,13 +861,15 @@ export function useDorControl({
               // it keys on what the prompt is about.
               const matchesPending = (candidate: unknown) => {
                 const waiting = toolPendingFromParams(candidate);
-                return waiting?.name === lookup.name && waiting.projectRoot === lookup.projectRoot;
+                return waiting?.name === lookup.name && waiting.projectRoot === lookup.projectRoot
+                  && (candidate as { cwd?: unknown }).cwd === cwd
+                  && Boolean(waiting.fresh) === booleanParam(params.fresh);
               };
               const respondPending = (id: string, ref: string, minimized: boolean) => detail.respond({
                 ok: true,
                 result: { status: 'pending', surfaceId: id, surfaceRef: ref, command: lookup.run, cwd, minimized, key: null },
               });
-              const already = findSurfaceByParams(matchesPending);
+              const already = booleanParam(params.fresh) ? null : findSurfaceByParams(matchesPending);
               if (already) {
                 respondPending(already.id, surfaceRefForId(already.id), !revealSurface(already.id));
                 return;
@@ -884,6 +885,7 @@ export function useDorControl({
                 path: lookup.path,
                 projectRoot: lookup.projectRoot,
                 minimized: booleanParam(params.minimized),
+                fresh: booleanParam(params.fresh),
                 upstreamUrl: lookup.upstreamUrl,
               };
               const pending = createSplitSurface({

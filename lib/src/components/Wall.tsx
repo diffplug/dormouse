@@ -85,7 +85,7 @@ import {
   browserUrlFromParams,
   isBrowserParams,
   surfaceKindFromParams,
-  isToolParams, namespacedToolKey, toolPendingFromParams,
+  isToolParams, namespacedToolKey, toolKeysEqual, toolPendingFromParams,
 } from './wall/browser-surface';
 import { browserSurfaceUrl, hostPathDisplay } from './wall/browser-url';
 import { WorkspaceSelectionOverlay } from './wall/WorkspaceSelectionOverlay';
@@ -106,7 +106,7 @@ import { useWallKeyboard } from './wall/use-wall-keyboard';
 import { useSessionPersistence } from './wall/use-session-persistence';
 import { useDevServerPortCorrelation } from './wall/use-dev-server-ports';
 import { useAlertSpeech } from './wall/use-alert-speech';
-import { useDorControl } from './wall/use-dor-control';
+import { queueToolSpawn, restartSurfaceInPlace, useDorControl, waitForNewToolCommand } from './wall/use-dor-control';
 import { useWindowFocused } from './wall/use-window-focused';
 import {
   DialogKeyboardContext,
@@ -1568,75 +1568,6 @@ export function Wall({
   }, [generatePaneId, surfaceRefForId, forgetSurfaceRef, selectPane, enterTerminalMode, showShellSpawnNotice, lath, nav]);
 
   // --- dor control plane (the `dor` CLI's webview handler) ---
-  // Approving a pending tool: record the grant, then start the command in the
-  // pane that has been showing the prompt. The two steps are ordered so a
-  // failed write never leaves a running command in an unapproved repo.
-  const resolveToolApproval = useCallback(async (id: string, choice: 'upstream' | 'folder' | 'decline') => {
-    const meta = lath.getMeta(id);
-    const pending = toolPendingFromParams(meta?.params);
-    if (!pending || closingWorkspaceRef.current || isWorkspaceTransferPending(effectiveWorkspaceId)) return;
-    if (choice === 'decline') {
-      // A refusal writes nothing: it closes the pane and leaves no record, so a
-      // reflexive decline cannot permanently disable tools for this repo.
-      await closeSurface(id);
-      return;
-    }
-    if (toolApprovalsInFlightRef.current.has(id)) return;
-    toolApprovalsInFlightRef.current.add(id);
-
-    try {
-      const platform = getPlatform();
-      const grant = await platform.toolControl?.({
-        op: 'trust',
-        kind: choice,
-        projectRoot: pending.projectRoot,
-      });
-      if (grant?.status !== 'trust-recorded') return;
-
-      // Re-resolve now that the grant exists. The untrusted lookup deliberately
-      // withholds `render` / `port` / `key` — they live only in the `ok` arm — so
-      // asking again is what gives an approved tool the config its dormouse.yml
-      // declared, rather than silently running it as a keyless default iframe.
-      const cwd = typeof meta?.params?.cwd === 'string' ? meta.params.cwd : pending.projectRoot;
-      const resolved = await platform.toolControl?.({ op: 'lookup', name: pending.name, cwd });
-      if (resolved?.status !== 'ok') {
-        await closeSurface(id);
-        return;
-      }
-
-      if (closingWorkspaceRef.current || isWorkspaceTransferPending(effectiveWorkspaceId) || !lath.getMeta(id) || lath.isDying(id) || isSurfaceClosing(id)) return;
-      lath.store.updateParams(id, {
-        command: resolved.run,
-        toolRender: resolved.render,
-        toolPort: resolved.port,
-        ...(resolved.key ? { toolKey: namespacedToolKey(resolved.name, resolved.key) } : {}),
-      });
-      // Hand the leaf its command only now. The approval marker stays in place
-      // until after this write, so TerminalPanel cannot consume default options
-      // while the host calls above are pending.
-      const defaults = getDefaultShellOpts();
-      setPendingShellOpts(id, {
-        shell: defaults?.shell,
-        args: defaults?.args,
-        cwd,
-        untouched: false,
-        command: resolved.run,
-        requireIntegration: true,
-      });
-      lath.store.updateParams(id, { toolPending: undefined });
-      // The launch asked for this, and it was withheld so the prompt could be seen.
-      if (pending.minimized) {
-        // Minimizing detaches the leaf before it can mount, so the PTY that
-        // consumes the staged opts has to be created here — the same reason
-        // `createSplitSurface` spawns before `addDoor` / `minimizePane`.
-        getOrCreateTerminal(id);
-        minimizePane(id);
-      }
-    } finally {
-      toolApprovalsInFlightRef.current.delete(id);
-    }
-  }, [lath, closeSurface, minimizePane, effectiveWorkspaceId]);
-
   // A tool grows its browser when its command starts serving.
   useToolServing({ lath, doorsRef, paused: useCallback(() => closingWorkspaceRef.current || isWorkspaceTransferPending(effectiveWorkspaceId), [effectiveWorkspaceId]) });
 
@@ -1659,6 +1590,100 @@ export function Wall({
     // agent-browser session names (docs/specs/dor-browser.md → Managed identity).
     workspaceScope: useCallback(() => workspaceId, [workspaceId]),
   });
+
+  // Approving a pending tool: record the grant, then start the command in the
+  // pane that has been showing the prompt. The two steps are ordered so a
+  // failed write never leaves a running command in an unapproved repo.
+  const resolveToolApproval = useCallback(async (id: string, choice: 'upstream' | 'folder' | 'decline') => {
+    const meta = lath.getMeta(id);
+    const pending = toolPendingFromParams(meta?.params);
+    if (!pending || closingWorkspaceRef.current || isWorkspaceTransferPending(effectiveWorkspaceId)) return;
+    if (choice === 'decline') {
+      // A refusal writes nothing: it closes the pane and leaves no record, so a
+      // reflexive decline cannot permanently disable tools for this repo.
+      await closeSurface(id);
+      return;
+    }
+    if (toolApprovalsInFlightRef.current.has(id)) return;
+    toolApprovalsInFlightRef.current.add(id);
+
+    const isCurrent = () => !closingWorkspaceRef.current && !isWorkspaceTransferPending(effectiveWorkspaceId)
+      && toolPendingFromParams(lath.getMeta(id)?.params) === pending && !lath.isDying(id) && !isSurfaceClosing(id);
+    try {
+      await queueToolSpawn(async () => {
+        if (!isCurrent()) return;
+        const platform = getPlatform();
+        const grant = await platform.toolControl?.({
+          op: 'trust',
+          kind: choice,
+          projectRoot: pending.projectRoot,
+        });
+        if (grant?.status !== 'trust-recorded' || !isCurrent()) return;
+
+        // Re-resolve now that the grant exists. The untrusted lookup deliberately
+        // withholds `render` / `port` / `key` — they live only in the `ok` arm — so
+        // asking again is what gives an approved tool the config its dormouse.yml
+        // declared, rather than silently running it as a keyless default iframe.
+        const cwd = typeof meta?.params?.cwd === 'string' ? meta.params.cwd : pending.projectRoot;
+        const resolved = await platform.toolControl?.({ op: 'lookup', name: pending.name, cwd });
+        if (resolved?.status !== 'ok') {
+          await closeSurface(id);
+          return;
+        }
+
+        if (!isCurrent()) return;
+        const key = namespacedToolKey(resolved.name, resolved.key);
+        const match = !pending.fresh && key ? findSurfaceByParams(candidate =>
+          toolKeysEqual((candidate as { toolKey?: unknown } | undefined)?.toolKey, key)) : null;
+        if (match) {
+          // Closing can fail while archiving notes. Retain the pending pane and
+          // do not restart the matching command unless that closure succeeds.
+          if (await closeSurface(id)) return;
+          if (closingWorkspaceRef.current || isWorkspaceTransferPending(effectiveWorkspaceId)
+            || !lath.getMeta(match.id) || lath.isDying(match.id) || isSurfaceClosing(match.id)) return;
+          const state = getTerminalPaneState(match.id);
+          if (state.currentCommand === null) {
+            const matchedCommand = lath.getMeta(match.id)?.params?.command;
+            const restarted = await restartSurfaceInPlace(match.id,
+              typeof matchedCommand === 'string' ? matchedCommand : resolved.run, state.cwd?.path ?? cwd);
+            if (!restarted.ok) showShellSpawnNotice(match.id, restarted.message);
+          }
+          revealSurface(match.id);
+          return;
+        }
+        lath.store.updateParams(id, {
+          command: resolved.run,
+          toolRender: resolved.render,
+          toolPort: resolved.port,
+          ...(key ? { toolKey: key } : {}),
+        });
+        // Hand the leaf its command only now. The approval marker stays in place
+        // until after this write, so TerminalPanel cannot consume default options
+        // while the host calls above are pending.
+        const defaults = getDefaultShellOpts();
+        setPendingShellOpts(id, {
+          shell: defaults?.shell,
+          args: defaults?.args,
+          cwd,
+          untouched: false,
+          command: resolved.run,
+          requireIntegration: true,
+        });
+        lath.store.updateParams(id, { toolPending: undefined });
+        // The launch asked for this, and it was withheld so the prompt could be seen.
+        if (pending.minimized) {
+          // Minimizing detaches the leaf before it can mount, so the PTY that
+          // consumes the staged opts has to be created here — the same reason
+          // `createSplitSurface` spawns before `addDoor` / `minimizePane`.
+          getOrCreateTerminal(id);
+          minimizePane(id);
+        }
+        await waitForNewToolCommand(id, resolved.run, cwd);
+      });
+    } finally {
+      toolApprovalsInFlightRef.current.delete(id);
+    }
+  }, [lath, closeSurface, minimizePane, effectiveWorkspaceId, findSurfaceByParams, revealSurface, showShellSpawnNotice]);
 
   // --- Workspace handle ---
 
