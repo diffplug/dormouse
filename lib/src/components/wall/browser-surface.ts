@@ -66,6 +66,8 @@ export interface ToolPending {
   readonly args?: string[];
   /** Why the last approval attempt launched nothing; the prompt stays up. */
   readonly error?: string;
+  /** The host confirmed the grant; subsequent attempts only repeat lookup. */
+  readonly trustRecorded?: boolean;
   readonly path: string;
   readonly projectRoot: string;
   /** Requested at launch; applied after approval, since a pane the user cannot

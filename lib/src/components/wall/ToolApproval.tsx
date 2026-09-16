@@ -16,7 +16,7 @@ import { toolPendingFromParams } from './browser-surface';
 import type { PaneProps } from './pane-props';
 
 export function ToolApproval({ params, id, onResolve }: PaneProps & {
-  onResolve: (id: string, choice: 'upstream' | 'folder' | 'decline') => void;
+  onResolve: (id: string, choice: 'upstream' | 'folder' | 'decline' | 'retry') => void;
 }) {
   const pending = toolPendingFromParams(params);
   if (!pending) return null;
@@ -33,9 +33,15 @@ export function ToolApproval({ params, id, onResolve }: PaneProps & {
       {pending.error ? <div role="alert" className="text-error">{pending.error}</div> : null}
 
       <div className="flex w-full max-w-[30rem] flex-col gap-2">
-        {/* Omitted when git named no remote: there is no URL to key a grant on,
-            so the folder is the only honest scope. */}
-        {pending.upstreamUrl ? (
+        {pending.trustRecorded ? (
+          <button
+            type="button"
+            className={modalActionButton({ tone: 'primary' })}
+            onClick={() => onResolve(id, 'retry')}
+          >
+            Retry
+          </button>
+        ) : pending.upstreamUrl ? (
           <button
             type="button"
             className={modalActionButton({ tone: 'primary' })}
@@ -44,26 +50,30 @@ export function ToolApproval({ params, id, onResolve }: PaneProps & {
             Always allow for upstream {pending.upstreamUrl}
           </button>
         ) : null}
-        <button
-          type="button"
-          className={modalActionButton()}
-          onClick={() => onResolve(id, 'folder')}
-        >
-          Always allow for folder {pending.projectRoot}
-        </button>
+        {!pending.trustRecorded ? (
+          <button
+            type="button"
+            className={modalActionButton()}
+            onClick={() => onResolve(id, 'folder')}
+          >
+            Always allow for folder {pending.projectRoot}
+          </button>
+        ) : null}
         <button
           type="button"
           className={modalActionButton()}
           onClick={() => onResolve(id, 'decline')}
         >
-          Disallow and close
+          {pending.trustRecorded ? 'Close' : 'Disallow and close'}
         </button>
       </div>
 
       <div className="max-w-[30rem] text-xs text-muted/80">
-        {pending.path} decides what this runs. Allowing the upstream covers every
-        worktree of it; allowing the folder covers this checkout only. Declining
-        records nothing.
+        {pending.trustRecorded ? 'Permission is saved. Retry checks the Tool configuration again. Closing this pane keeps the permission.' : (
+          <>{pending.path} decides what this runs. Allowing the upstream covers every
+            worktree of it; allowing the folder covers this checkout only. Declining
+            records nothing.</>
+        )}
       </div>
     </div>
   );

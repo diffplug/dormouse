@@ -1477,14 +1477,18 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
-  it('retains the approval pane and explains an input that disappeared before approval', async () => {
+  it('retries failed post-grant lookup without recording permission again', async () => {
     setToolsEnabled(true);
     let calls = 0;
-    Object.assign(fake, { toolControl: vi.fn(async (request: { op: string }) => {
+    const toolControl = vi.fn(async (request: { op: string }) => {
       if (request.op === 'trust') return { status: 'trust-recorded' };
-      if (calls++) return { status: 'error', message: 'The selected file is missing' };
-      return { status: 'untrusted', projectRoot: '/repo', path: '/repo/dormouse.yml', name: 'viewer', run: ['view', '/repo/file.md'], upstreamUrl: null };
-    }) });
+      const common = { projectRoot: '/repo', path: '/repo/dormouse.yml', name: 'viewer', run: ['view', '/repo/file.md'] };
+      if (calls++ === 0) return { ...common, status: 'untrusted', upstreamUrl: null };
+      if (calls === 2) return { status: 'error', message: 'The selected file is missing' };
+      return { ...common, status: 'ok', render: 'iframe', port: 'auto', key: null, warnings: [] };
+    });
+    Object.assign(fake, { toolControl });
+    let id: string | undefined;
     try {
       await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
       await flush();
@@ -1492,13 +1496,57 @@ describe('Wall on the Lath engine', () => {
       await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
         method: SURFACE_CONTROL_METHODS.tool, params: { name: 'viewer', cwd: '/repo', args: ['file.md'] }, respond,
       } })));
-      const id = respond.mock.calls[0][0].result.surfaceId;
+      id = respond.mock.calls[0][0].result.surfaceId;
       const allow = [...container.querySelectorAll('button')].find(button => button.textContent?.includes('Always allow for folder'))!;
       await act(async () => allow.click());
       await flush();
       expect(container.querySelector('[role="alert"]')?.textContent).toBe('The selected file is missing');
       expect(container.querySelector(`[data-lath-leaf="${id}"]`)).not.toBeNull();
       expect(container.querySelector(`[data-session-id="${id}"]`)).toBeNull();
+      const pane = container.querySelector(`[data-lath-leaf="${id}"]`)!;
+      expect(pane.textContent).toContain('Permission is saved');
+      expect(pane.textContent).not.toContain('Always allow');
+      expect(pane.textContent).not.toContain('Declining records nothing');
+      expect([...pane.querySelectorAll('button')].some(button => button.textContent === 'Close')).toBe(true);
+      const retry = [...pane.querySelectorAll('button')].find(button => button.textContent === 'Retry')!;
+      await act(async () => retry.click());
+      await flush();
+      expect(toolControl.mock.calls.filter(([request]) => request.op === 'trust')).toHaveLength(1);
+      expect(toolControl.mock.calls.filter(([request]) => request.op === 'lookup')).toHaveLength(3);
+      expect(container.querySelector(`[data-session-id="${id}"]`)).not.toBeNull();
+      expect(container.querySelector('[role="alert"]')).toBeNull();
+      expect(pendingShellOpts.get(id!)?.command).toBe('view /repo/file.md');
+    } finally { if (id) pendingShellOpts.delete(id); setToolsEnabled(false); }
+  });
+
+  it.each(['error', 'missing', 'throws'] as const)('keeps approval choices and stops before lookup when recording trust %s', async failure => {
+    setToolsEnabled(true);
+    const toolControl = vi.fn(async (request: { op: string }) => {
+      if (request.op === 'trust') {
+        if (failure === 'throws') throw new Error('Permission storage is unavailable');
+        return failure === 'missing' ? undefined : { status: 'error', message: 'Permission storage is unavailable' };
+      }
+      return { status: 'untrusted', projectRoot: '/repo', path: '/repo/dormouse.yml', name: 'viewer', run: 'view', upstreamUrl: 'https://example.com/repo.git' };
+    });
+    Object.assign(fake, { toolControl });
+    try {
+      await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
+      await flush();
+      const respond = vi.fn();
+      await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+        method: SURFACE_CONTROL_METHODS.tool, params: { name: 'viewer', cwd: '/repo' }, respond,
+      } })));
+      const id = respond.mock.calls[0][0].result.surfaceId;
+      const allow = [...container.querySelectorAll('button')].find(button => button.textContent?.includes('Always allow for folder'))!;
+      await act(async () => allow.click());
+      await flush();
+      expect(toolControl.mock.calls.filter(([request]) => request.op === 'lookup')).toHaveLength(1);
+      expect(container.querySelector('[role="alert"]')?.textContent).toContain(failure === 'missing' ? 'could not be saved' : 'Permission storage is unavailable');
+      expect(container.textContent).toContain('Always allow for upstream');
+      expect(container.textContent).toContain('Always allow for folder');
+      expect(container.textContent).not.toContain('Permission is saved');
+      expect(container.querySelector(`[data-session-id="${id}"]`)).toBeNull();
+      expect(pendingShellOpts.has(id)).toBe(false);
     } finally { setToolsEnabled(false); }
   });
 
@@ -1628,7 +1676,7 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
-  it('starts an approved tool before applying its deferred minimize', async () => {
+  it.each([false, true])('starts an approved tool before deferred minimize and never resurrects approval after a PTY creation error (%s)', async failAfterSpawn => {
     setToolsEnabled(true);
     let toolId: string | undefined;
     let consumedOpts: (typeof pendingShellOpts extends Map<string, infer T> ? T : never) | undefined;
@@ -1636,6 +1684,7 @@ describe('Wall on the Lath engine', () => {
       consumedOpts = pendingShellOpts.get(id);
       pendingShellOpts.delete(id);
       fake.spawnPty(id);
+      if (failAfterSpawn) throw new Error('PTY setup failed after spawning');
       return {} as ReturnType<typeof terminalRegistry.getOrCreateTerminal>;
     });
     let lookupCount = 0;
@@ -1685,8 +1734,15 @@ describe('Wall on the Lath engine', () => {
       expect(getTerminalSpy).toHaveBeenCalledWith(toolId);
       expect(consumedOpts).toMatchObject({ cwd: '/repo', command: 'pnpm storybook', untouched: true });
       expect(pendingShellOpts.has(toolId)).toBe(false);
-      expect(container.querySelector(`[data-door-id="${toolId}"]`)).not.toBeNull();
-      expect(container.querySelector(`[data-lath-leaf="${toolId}"]`)?.hasAttribute('data-lath-parked')).toBe(true);
+      expect(container.textContent).not.toContain('Always allow');
+      expect(container.querySelector('[role="alert"]')).toBeNull();
+      if (failAfterSpawn) {
+        expect(container.querySelector(`[data-session-id="${toolId}"]`)).not.toBeNull();
+        expect(container.querySelector(`[data-door-id="${toolId}"]`)).toBeNull();
+      } else {
+        expect(container.querySelector(`[data-door-id="${toolId}"]`)).not.toBeNull();
+        expect(container.querySelector(`[data-lath-leaf="${toolId}"]`)?.hasAttribute('data-lath-parked')).toBe(true);
+      }
     } finally {
       if (toolId && fake.hasPty(toolId)) act(() => fake.killPty(toolId));
       getTerminalSpy.mockRestore();

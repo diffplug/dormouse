@@ -1561,35 +1561,45 @@ export function Wall({
   // Approving a pending tool: record the grant, then start the command in the
   // pane that has been showing the prompt. The two steps are ordered so a
   // failed write never leaves a running command in an unapproved repo.
-  const resolveToolApproval = useCallback(async (id: string, choice: 'upstream' | 'folder' | 'decline') => {
+  const resolveToolApproval = useCallback(async (id: string, choice: 'upstream' | 'folder' | 'decline' | 'retry') => {
     const meta = lath.getMeta(id);
-    const pending = toolPendingFromParams(meta?.params);
+    let pending = toolPendingFromParams(meta?.params);
     if (!pending || closingWorkspaceRef.current || isWorkspaceTransferPending(effectiveWorkspaceId)) return;
     if (choice === 'decline') {
-      // A refusal writes nothing: it closes the pane and leaves no record, so a
-      // reflexive decline cannot permanently disable tools for this repo.
+      // Closing writes no denial and does not revoke an already saved grant.
       await closeSurface(id);
       return;
     }
     if (toolApprovalsInFlightRef.current.has(id)) return;
     toolApprovalsInFlightRef.current.add(id);
-    // Whether the prompt's pane is still ours to write to after an await.
-    const stillPending = () => !closingWorkspaceRef.current && !isWorkspaceTransferPending(effectiveWorkspaceId)
-      && !!lath.getMeta(id) && !lath.isDying(id) && !isSurfaceClosing(id);
-    // A failed launch keeps the prompt up with its reason, so the user can fix
-    // the input and approve again or close the pane.
+    const isCurrent = () => !closingWorkspaceRef.current
+      && !isWorkspaceTransferPending(effectiveWorkspaceId)
+      && toolPendingFromParams(lath.getMeta(id)?.params) === pending
+      && !lath.isDying(id) && !isSurfaceClosing(id);
     const showFailure = (message: string) => {
-      if (stillPending()) lath.store.updateParams(id, { toolPending: { ...pending, error: message } });
+      if (isCurrent()) {
+        lath.store.updateParams(id, { toolPending: { ...pending, error: message } });
+      }
     };
 
     try {
       const platform = getPlatform();
-      const grant = await platform.toolControl?.({
-        op: 'trust',
-        kind: choice,
-        projectRoot: pending.projectRoot,
-      });
-      if (grant?.status !== 'trust-recorded') return;
+      if (!pending.trustRecorded) {
+        // A stale Retry action cannot grant trust.
+        if (choice === 'retry') return;
+        const grant = await platform.toolControl?.({
+          op: 'trust',
+          kind: choice,
+          projectRoot: pending.projectRoot,
+        });
+        if (grant?.status !== 'trust-recorded') {
+          showFailure(grant?.status === 'error' ? grant.message : 'The Tool permission could not be saved. Try allowing it again.');
+          return;
+        }
+        if (!isCurrent()) return;
+        pending = { ...pending, trustRecorded: true, error: undefined };
+        lath.store.updateParams(id, { toolPending: pending });
+      }
 
       // Re-resolve now that the grant exists. The untrusted lookup deliberately
       // withholds `render` / `port` / `key` — they live only in the `ok` arm — so
@@ -1602,7 +1612,7 @@ export function Wall({
         return;
       }
 
-      if (!stillPending()) return;
+      if (!isCurrent()) return;
       const command = toolRunCommand(resolved.run);
       lath.store.updateParams(id, {
         command,
@@ -2006,7 +2016,7 @@ export function Wall({
     resolveSurfaceRef: surfaceRefForId,
     // Pin the terminal forward past serving, or release it. Visibility only —
     // ToolPanel keeps both halves mounted (docs/specs/dor-tool.md).
-    onResolveToolApproval: (id: string, choice: 'upstream' | 'folder' | 'decline') => {
+    onResolveToolApproval: (id: string, choice: 'upstream' | 'folder' | 'decline' | 'retry') => {
       void resolveToolApproval(id, choice);
     },
   }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, requestKill, replaceSurface, buildDorSurfaces, createContentSurface, surfaceRefForId, updateSurfaceParams, resolveToolApproval, lath, nav]);
