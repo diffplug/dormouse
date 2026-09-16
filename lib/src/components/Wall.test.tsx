@@ -1669,7 +1669,7 @@ describe('Wall on the Lath engine', () => {
       });
       await flush();
       expect(container.querySelector(`[data-session-id="${toolId}"]`)).not.toBeNull();
-      expect(pendingShellOpts.get(toolId)?.untouched).toBe(true);
+      expect(pendingShellOpts.get(toolId)?.untouched).toBe(false);
     } finally {
       if (toolId) pendingShellOpts.delete(toolId);
       setToolsEnabled(false);
@@ -1732,7 +1732,7 @@ describe('Wall on the Lath engine', () => {
 
       expect(fake.hasPty(toolId)).toBe(true);
       expect(getTerminalSpy).toHaveBeenCalledWith(toolId);
-      expect(consumedOpts).toMatchObject({ cwd: '/repo', command: 'pnpm storybook', untouched: true });
+      expect(consumedOpts).toMatchObject({ cwd: '/repo', command: 'pnpm storybook', untouched: false });
       expect(pendingShellOpts.has(toolId)).toBe(false);
       expect(container.textContent).not.toContain('Always allow');
       expect(container.querySelector('[role="alert"]')).toBeNull();

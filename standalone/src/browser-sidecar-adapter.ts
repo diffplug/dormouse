@@ -1,4 +1,4 @@
-import { recordToolAnnounce } from '../../lib/src/lib/tool-announce-store';
+import { recordToolAnnounces } from '../../lib/src/lib/tool-announce-store';
 import type { AlertRuntimeSnapshot } from 'dormouse-lib/lib/alert-manager';
 import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../../lib/src/lib/terminal-context-types';
 import { installWorkspaceRegistry, type WorkspaceRegistrySnapshot } from "./workspace-registry";
@@ -453,7 +453,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
       // why the one-shot parser still needs the theme.
       const { id, data: text, requestId } = data as PtyReplayDetail;
       const parsed = new TerminalProtocolParser(themeColorProvider).process(text);
-      for (const event of parsed.events) if (event.kind === 'toolAnnounce') recordToolAnnounce(id, event.announce);
+      recordToolAnnounces(id, parsed.events);
       applyTerminalSemanticEvents(id, this.alertManager.applyReplay(id, requestId, parsed));
       for (const handler of this.replayHandlers) handler({ id, data: parsed.visibleData, requestId });
     } else if (event === BURROW_RESULT_EVENT) {

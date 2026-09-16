@@ -45,7 +45,7 @@ export function isAgentBrowserParams(params: unknown): boolean {
 /** Whether params describe a `tool` Surface — one Session with a terminal and,
  *  once it serves, a browser (`docs/specs/dor-tool.md`). Checked before the
  *  browser test below, because a serving tool also carries a `renderMode`. */
-export function isToolParams(params: unknown): boolean {
+export function isToolParams(params: unknown): params is Record<string, unknown> {
   return asParams(params).surfaceType === 'tool';
 }
 
@@ -105,7 +105,7 @@ export type ToolFace = 'terminal' | 'browser' | 'port-conflict' | 'pending-appro
 
 /** What occupies the tool's second half, or null when it has none yet.
  *  `toolFace` reads the conflict/browser mutual exclusion from this one place. */
-export function toolSecondFace(params: unknown): 'browser' | 'port-conflict' | null {
+function toolSecondFace(params: unknown): 'browser' | 'port-conflict' | null {
   if (!isToolParams(params)) return null;
   if (toolPortConflictFromParams(params) !== null) return 'port-conflict';
   return browserUrlFromParams(params) !== null ? 'browser' : null;
