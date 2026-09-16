@@ -75,7 +75,7 @@ const ALLOWED = {
     + 'because the modules Vite serves carry the browser-dev bridge token and '
     + 'Vite\'s default admits every http://localhost:* origin to read them; and '
     + 'allowedHosts: [], the Host check that makes DNS rebinding fail. Dev-only '
-    + 'and unbundled — it ships in nothing. The cors pin is checked by '
+    + 'and unbundled — it ships in nothing. Both controls are checked by '
     + 'standalone/scripts/dev-agent-browser.test.mjs; see '
     + 'standalone/scripts/dev-host-guard.mjs for the bridge beside it.',
   'vscode-ext/src/agent-browser-host.ts':
