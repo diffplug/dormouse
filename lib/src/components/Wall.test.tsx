@@ -17,6 +17,7 @@ import { getAgentBrowserScreenController } from './wall/agent-browser-screen';
 import { setPlatform } from '../lib/platform';
 import { FakePtyAdapter } from '../lib/platform/fake-adapter';
 import type { PlatformAdapter } from '../lib/platform/types';
+import type { PersistedSession } from '../lib/session-types';
 import * as terminalRegistry from '../lib/terminal-registry';
 import { UNNAMED_PANEL_TITLE } from '../lib/terminal-registry';
 import { pendingShellOpts } from '../lib/terminal-store';
@@ -1579,6 +1580,9 @@ describe('Wall on the Lath engine', () => {
       await flush();
       expect(toolControl).toHaveBeenLastCalledWith({ op: 'lookup', name: 'viewer', cwd: '/repo', args: ['a b;$(bad).md'] });
       expect(pendingShellOpts.get(ids[0])?.command).toBe("view 'a b;$(bad).md'");
+      await act(async () => window.dispatchEvent(new Event('pagehide')));
+      await flush();
+      expect((fake.getState() as PersistedSession).panes.find(pane => pane.id === ids[0])?.tool?.argv).toEqual(['view', 'a b;$(bad).md']);
       ids.forEach(id => pendingShellOpts.delete(id));
     } finally { setToolsEnabled(false); }
   });
@@ -2028,6 +2032,11 @@ describe('Wall on the Lath engine', () => {
         await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
       }
       expect(leafCount()).toBe(1);
+      await act(async () => window.dispatchEvent(new Event('pagehide')));
+      await flush();
+      expect((fake.getState() as PersistedSession).panes.find(pane => pane.id === 'pane-a')).toMatchObject({
+        command, tool: { argv: ['program path', "it's.txt"] },
+      });
     } finally {
       await act(async () => { controller.abort(); await new Promise(resolve => setTimeout(resolve, 125)); });
       fake.clearInputHandler('pane-a');
