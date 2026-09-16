@@ -91,10 +91,11 @@ Source of truth: `createToolHost` in `lib/src/host/tool-host.ts`; `FileToolTrust
 | `port: auto`, no announced port | Wait for one unchanged scan tick; one port frames, several show a conflict, zero keeps waiting |
 | Anonymous command | Uses `auto` |
 
-- **Must poll unbound Tools every 1.5 seconds while their command runs.** Reset settle memory on command exit. (rationale)
+- **Must poll unbound Tools every 1.5 seconds while their command runs.** Reset settle memory and retire browser resources when the observed command-run id changes, even when the command text is unchanged; an initial observation preserves an imported live binding. (rationale)
 - **Must let a changed announced port override a committed conflict or browser**, but only after a matching scan. An unchanged announcement never undoes URL-bar navigation. (rationale)
 - **Must stop ordinary port scans once a browser or conflict is committed.** An unannounced additional port appearing after settle is not detected.
 - **Must display the browser destination before awaiting agent-browser startup**, clearing the existing session/stream binding during a reopen as well. Keep the session-less renderer inert and block Workspace transfer until the binding arrives. Close any browser session whose Tool disappeared or changed command during startup.
+- **Must reuse an existing browser session and its binary path when an announcement changes its destination.**
 - **Must retain a runtime re-key within the Tool's namespace**, following [Identity and dedupe](#identity-and-dedupe).
 
 Reserved: **Must derive a Tool's URL again on cold restore**, compatible with future `prespawn_port` and `DORMOUSE_TOOL_PORT` in scope **dor-tools**; [Persistence and hosts](#persistence-and-hosts) owns the saved projection.
@@ -135,8 +136,8 @@ Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `dor/test/snapshot
 **Must consume OSC 367 at the PTY owner's parser**, including malformed and unknown verbs, and emit no reply. `serve` is the only implemented verb. The escape registry is `docs/specs/terminal-escapes.md`.
 
 - **Must sanitize and bound the payload before retaining it.** `ToolAnnounce` and `parseToolAnnounce` own the field shapes and validation limits.
-- **Must forward parsed announcements from the host to the owning renderer**, which records the latest announcement per Session. Standalone uses `terminal:protocolEvents`; VS Code uses `terminal:toolAnnounce` scoped to the owning webview. The fake adapter applies locally.
-- **Must reconstruct announcements from raw replay without emitting replies**, and clear the renderer record on Session disposal. Ordinary terminal announcements stay inert.
+- **Must forward parsed announcements and command-start resets in stream order to the owning renderer.** A start clears the previous command's announcement; a later serve in the same chunk survives. Standalone uses `terminal:protocolEvents`; VS Code uses nullable `terminal:toolAnnounce` scoped to the owning webview, with null clearing the hint. The fake adapter applies locally.
+- **Must reconstruct announcements and resets from raw replay without emitting replies**, preserving transferred announcements when since-mark replay has no command start, and clear the renderer record on Session disposal. Ordinary terminal announcements stay inert.
 - Reserved: **Must retain `name`, `dehydrate`, and `persist` as inert parsed fields**, serving the announced-name and D1/D2 items under [Future](#future). Neither `persist: never` nor a `dehydrate` verb changes current persistence.
 - Reserved: **Never assign a third OSC 367 verb**; `dehydrate` belongs to D2 under [Future](#future), while existing title/progress protocols keep those roles.
 

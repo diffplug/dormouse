@@ -94,7 +94,7 @@ export type ExtensionMessage =
   // so this never doubles the bytes on the wire (docs/specs/transport.md).
   | { type: 'pty:data'; id: string; data: string; textData?: string }
   | { type: 'pty:exit'; id: string; exitCode: number }
-  | { type: 'terminal:toolAnnounce'; id: string; announce: ToolAnnounce }
+  | { type: 'terminal:toolAnnounce'; id: string; announce: ToolAnnounce | null }
   | { type: 'terminal:semanticEvents'; id: string; events: TerminalSemanticEvent[] }
   | { type: 'pty:list'; ptys: PtyInfo[] }
   | { type: 'pty:replay'; id: string; data: string }
