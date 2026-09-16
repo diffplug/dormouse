@@ -44,7 +44,7 @@ The September 2026 integration reuses Terminal Context for the Tool's primary te
 
 ## Opening local files
 
-The native PDF plugin rendered a gray pane under the required iframe sandbox in the September 2026 browser harness, while the same 586-byte PDF rendered after removing that sandbox. A bundled PDF.js browser renderer preserves the framing boundary. Its assets ride the existing recursive CLI staging path, so the Node 18 host never imports a package whose Node renderer requires a newer runtime. The browser build excludes the optional native canvas backend and document-scripting sandbox.
+Innerdogfood QC in Chromium (2026-09) showed the native PDF plugin failing inside the normal iframe sandbox. PDFs use configured user Tools; the built-in viewer carries no PDF renderer dependency.
 
 A CSS source preview escapes its contents, so its URLs cannot load assets. Scanning those references adds unused authority and can reject a small source file at the asset limit. CSS loaded by HTML is active, so its dependencies still enter the bounded grant.
 

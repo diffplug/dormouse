@@ -65,7 +65,6 @@ export async function startFileViewer(input: string): Promise<{ port: number; pa
   const target = await realpath(input);
   const format = fileViewerFormat(target);
   if (!format) throw new Error('unsupported file format; configure a user Tool association');
-  const pdf = format.mime === 'application/pdf' ? await (await import('./pdf-viewer-assets.js')).pdfViewerAssets() : null;
   // A source preview escapes the document; none of its references load.
   const inspectDependencies = !format.text;
   const root = dirname(target);
@@ -131,21 +130,6 @@ export async function startFileViewer(input: string): Promise<{ port: number; pa
         try { route = decodeURIComponent(new URL(req.url!, 'http://localhost').pathname.slice(prefix.length)); }
         catch { finish(res, 400); return; }
         if (route.includes('\\') || route.split('/').some(part => part === '..' || part === '.')) { finish(res, 403); return; }
-        if (pdf && (route === 'view' || route.startsWith('pdfjs/'))) {
-          // Only our PDF renderer compiles local decoder WASM. Document routes
-          // retain the ordinary viewer policy; iframe sandboxing is unchanged.
-          // unsafe-inline is required by the proxy's injected navigation/focus shim.
-          if (route === 'view' || route === 'pdfjs/pdf.worker.mjs') res.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; worker-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'");
-          const asset = route === 'view' ? {
-            bytes: Buffer.from(pdf.html.replace(/__DOR_PDF_(TITLE|DOCUMENT)__/g, (_, part: string) => escapeHtml(part === 'TITLE'
-              ? basename(target) : `./file/${encodeURIComponent(basename(target))}`))),
-            mime: 'text/html; charset=utf-8',
-          } : await pdf.read(route.slice('pdfjs/'.length));
-          if (!asset) { finish(res, 404); return; }
-          res.writeHead(200, { 'Content-Type': asset.mime, 'Content-Length': asset.bytes.length });
-          res.end(req.method === 'HEAD' ? undefined : asset.bytes);
-          return;
-        }
         if (route === 'view' && format.text) {
           const text = await readText(main.file);
           const body = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${escapeHtml(basename(target))}</title><style>:root{color-scheme:light dark}body{margin:1rem;background:Canvas;color:CanvasText}pre{font:14px/1.5 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere}</style><pre>${escapeHtml(text)}</pre>`;
@@ -191,7 +175,7 @@ export async function startFileViewer(input: string): Promise<{ port: number; pa
     await new Promise<void>((yes, no) => { server.once('error', no); server.listen(0, '127.0.0.1', yes); });
     port = (server.address() as { port: number }).port;
     let closing: Promise<void> | undefined;
-    return { port, path: `${prefix}${format.text || pdf ? 'view' : `file/${encodeURIComponent(basename(target))}`}`,
+    return { port, path: `${prefix}${format.text ? 'view' : `file/${encodeURIComponent(basename(target))}`}`,
       close: () => closing ??= new Promise<void>((yes, no) => {
         server.close(error => { void closeFiles().then(() => error ? no(error) : yes(), no); });
         server.closeAllConnections();

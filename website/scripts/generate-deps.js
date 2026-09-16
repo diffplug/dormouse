@@ -306,7 +306,6 @@ const missingLicense = {
   "Solarized & Selenized": "MIT",
 };
 const missingAuthor = {
-  "pdfjs-dist": "Mozilla Foundation and PDF.js contributors",
   "@hono/node-ws": "Hono middleware contributors",
   // The addon ships a `contributors` array rather than npm's singular `author`
   // field, and its prebuilt platform packages carry neither.

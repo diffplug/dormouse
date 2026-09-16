@@ -171,6 +171,4 @@ What the snapshot tests cover. `restrict_to_owner_leaves_one_owner_only_ace` is 
 
 ## Local-file viewer
 
-PDF.js uses local WebAssembly decoders for embedded images and ICC color conversion. Their compilation permission is confined to the generated PDF shell and its worker response; raw document resources keep the ordinary viewer policy. Both the worker and its assets share the capability URL and listener origin, avoiding blob/CDN worker permissions. The build inventory excludes PDF.js document-scripting assets.
-
 The viewer allows inline and granted scripts for interactive local reports. CSP fetch directives constrain resource requests, but do not prevent a script assigning an external URL to its own frame. `form-action` constrains form submissions, not arbitrary navigation. Preserving the policy through the proxy repairs the resource-load boundary; it does not establish that active documents cannot send granted contents outside the machine. [CSP3 navigation checks](https://www.w3.org/TR/CSP3/) and its multiple-policy rules distinguish these mechanisms.

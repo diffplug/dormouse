@@ -33,7 +33,3 @@ peerDependencyRules:
     # sockets that would break first.
     "@hono/node-ws>@hono/node-server": ^2.0.0
 minimumReleaseAge: 1440
-
-# PDF.js runs only as staged browser assets; its optional Node canvas backend is unused.
-overrides:
-  "pdfjs-dist>@napi-rs/canvas": "-"

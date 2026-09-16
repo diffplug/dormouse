@@ -336,13 +336,6 @@
     "homepage": "https://github.com/sindresorhus/path-key"
   },
   {
-    "name": "pdfjs-dist",
-    "version": "6.3.289",
-    "license": "Apache-2.0",
-    "author": "Mozilla Foundation and PDF.js contributors",
-    "homepage": "https://mozilla.github.io/pdf.js/"
-  },
-  {
     "name": "picomatch",
     "version": "4.0.7",
     "license": "MIT",
