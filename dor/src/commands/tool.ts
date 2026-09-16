@@ -42,10 +42,33 @@ const BOOLEAN_FLAGS = new Set(['--json', '--minimize', '--fresh', '--global']);
  * same pre-parse contract `dor ensure` uses. Keep the flag lists above in sync
  * with `parameters.flags`.
  */
-export function validateToolArgs(args: string[]): ParseResult<void> {
+export function validateToolArgs(args: readonly string[]): ParseResult<void> {
+  const delimiterIndex = args.indexOf('--');
+  const head = headPositionals(args);
+  if (!head.ok) return head;
+  const { value: positionals } = head;
+
+  if (delimiterIndex === -1) {
+    if (positionals.length === 0) {
+      return { ok: false, message: 'dor tool requires a tool name or -- <command...>' };
+    }
+    return { ok: true, value: undefined };
+  }
+
+  if (positionals.length > 0) return { ok: true, value: undefined };
+  if (args.slice(0, delimiterIndex).includes('--global')) return { ok: false, message: '--global requires a named tool' };
+  if (args.slice(delimiterIndex + 1).join(' ').trim() === '') {
+    return { ok: false, message: 'dor tool requires a command after --' };
+  }
+  return { ok: true, value: undefined };
+}
+
+/** The positionals before `--`: a tool name and its dash-free inputs. Non-empty
+ *  means the named form; stricli discards the separator, so this is the one
+ *  walk that can tell `dor tool viewer -- --flag` from `dor tool -- viewer`. */
+function headPositionals(args: readonly string[]): ParseResult<string[]> {
   const delimiterIndex = args.indexOf('--');
   const head = delimiterIndex === -1 ? args : args.slice(0, delimiterIndex);
-
   const positionals: string[] = [];
   for (let index = 0; index < head.length; index += 1) {
     const arg = head[index];
@@ -59,20 +82,7 @@ export function validateToolArgs(args: string[]): ParseResult<void> {
     if (arg.startsWith('-')) return { ok: false, message: `unknown option '${arg}'` };
     positionals.push(arg);
   }
-
-  if (delimiterIndex === -1) {
-    if (positionals.length === 0) {
-      return { ok: false, message: 'dor tool requires a tool name or -- <command...>' };
-    }
-    return { ok: true, value: undefined };
-  }
-
-  if (positionals.length > 0) return { ok: true, value: undefined };
-  if (head.includes('--global')) return { ok: false, message: '--global requires a named tool' };
-  if (args.slice(delimiterIndex + 1).join(' ').trim() === '') {
-    return { ok: false, message: 'dor tool requires a command after --' };
-  }
-  return { ok: true, value: undefined };
+  return { ok: true, value: positionals };
 }
 
 export const toolCommand: Command = {
@@ -154,14 +164,9 @@ JSON output:
 };
 
 async function runToolCommand(this: DorCommandContext, flags: ToolFlags, ...rest: string[]): Promise<void | Error> {
-  // The name precedes `--` for a named invocation; an anonymous command has
-  // only flags before it. stricli discards the separator, so inspect raw argv.
-  const head = this.commandArgs.slice(0, this.hasArgumentEscape ? this.commandArgs.indexOf('--') : undefined);
-  let named = false;
-  for (let i = 0; i < head.length; i++) {
-    if (FLAGS_WITH_VALUES.has(head[i])) i++;
-    else if (!BOOLEAN_FLAGS.has(head[i])) named = true;
-  }
+  // `validateToolArgs` already accepted this argv, so the walk cannot fail.
+  const head = headPositionals(this.commandArgs);
+  const named = head.ok && head.value.length > 0;
   if (named && rest.length === 0) {
     return new Error('dor tool requires a tool name or -- <command...>');
   }

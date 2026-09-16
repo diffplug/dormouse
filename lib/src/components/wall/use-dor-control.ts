@@ -46,6 +46,7 @@ import {
   surfaceKindFromParams,
   toolKeysEqual,
   toolPendingFromParams,
+  toolScopeFromParams,
   type ToolPending,
 } from './browser-surface';
 
@@ -482,6 +483,14 @@ function dorCommandString(args: string[] | undefined): string | undefined {
   if (!args || args.join('').trim() === '') return undefined;
   const shell = getDefaultShellOpts()?.shell;
   return buildShellCommandForKind(shellCommandKind(shell, PLATFORM_STRING), args);
+}
+
+/** The command a resolved Tool types into its shell: a string `run` is literal
+ *  shell syntax, an argument-list `run` is quoted here for the default shell
+ *  (`docs/specs/dor-tool.md` -> Declaring tools). The host guarantees a list
+ *  names an executable, so the empty-argv case cannot arise. */
+export function toolRunCommand(run: string | readonly string[]): string {
+  return typeof run === 'string' ? run : dorCommandString([...run])!;
 }
 
 /**
@@ -928,12 +937,12 @@ export function useDorControl({
               detail.respond({ ok: false, error: 'unexpected tool host response' });
               return;
             case 'ok':
-              command = typeof lookup.run === 'string' ? lookup.run : dorCommandString([...lookup.run])!;
+              command = toolRunCommand(lookup.run);
               toolScope = lookup.scope;
               // Namespaced under the host-resolved tool name, so two tools in
               // one repo with scope-only keys stay distinct and a runtime
               // re-key cannot name another tool's key.
-              key = namespacedToolKey(lookup.name, lookup.key, lookup.scope);
+              key = namespacedToolKey(lookup.name, lookup.key);
               render = lookup.render;
               port = lookup.port;
               warnings = lookup.warnings;
@@ -950,7 +959,7 @@ export function useDorControl({
               });
               return;
             case 'untrusted': {
-              const pendingCommand = typeof lookup.run === 'string' ? lookup.run : dorCommandString([...lookup.run])!;
+              const pendingCommand = toolRunCommand(lookup.run);
               // Approval can only lead to a command gated on OSC 633. Reject
               // a shell known never to emit it before offering a prompt that
               // would otherwise approve, spawn, then silently drop the command.
@@ -971,7 +980,7 @@ export function useDorControl({
               const matchesPending = (candidate: unknown) => {
                 const waiting = toolPendingFromParams(candidate);
                 return waiting?.name === lookup.name && waiting.projectRoot === lookup.projectRoot
-                  && JSON.stringify(waiting.args ?? []) === JSON.stringify(toolArgs);
+                  && toolKeysEqual(waiting.args ?? [], toolArgs);
               };
               const already = findSurfaceByParams(matchesPending);
               if (already) {
@@ -1064,7 +1073,7 @@ export function useDorControl({
         // (docs/specs/dor-tool.md -> Identity and dedupe).
         if (key && !booleanParam(params.fresh)) {
           const matchesToolKey = (candidate: unknown) =>
-            (candidate as { toolScope?: unknown } | null | undefined)?.toolScope === toolScope
+            toolScopeFromParams(candidate) === toolScope
             && toolKeysEqual((candidate as { toolKey?: unknown } | null | undefined)?.toolKey, key);
           const match = findSurfaceByParams(matchesToolKey);
           if (match) {

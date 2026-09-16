@@ -1,4 +1,3 @@
-import { buildShellCommandForKind, shellCommandKind } from 'dor/commands/shell-quote';
 import { captureToolParams } from './wall/tool-transfer';
 import { isWorkspaceTransferPending } from '../lib/window-session-aggregator';
 import { TerminalContextContext, type TerminalContextOpenOptions, type TerminalContextState } from './wall/wall-context';
@@ -60,7 +59,7 @@ import {
   createTerminalPaneState,
   deriveSurfaceLabel,
 } from '../lib/terminal-state';
-import { getPlatform, PLATFORM_STRING } from '../lib/platform';
+import { getPlatform } from '../lib/platform';
 import type {
   Surface as DorSurface,
   ResolvedSplitDirection as DorResolvedSplitDirection,
@@ -107,7 +106,8 @@ import { useWallKeyboard } from './wall/use-wall-keyboard';
 import { useSessionPersistence } from './wall/use-session-persistence';
 import { useDevServerPortCorrelation } from './wall/use-dev-server-ports';
 import { useAlertSpeech } from './wall/use-alert-speech';
-import { useDorControl } from './wall/use-dor-control';
+import { toolRunCommand, useDorControl } from './wall/use-dor-control';
+import { errorText } from './wall/dor-control-shared';
 import { useWindowFocused } from './wall/use-window-focused';
 import {
   DialogKeyboardContext,
@@ -1573,10 +1573,13 @@ export function Wall({
     }
     if (toolApprovalsInFlightRef.current.has(id)) return;
     toolApprovalsInFlightRef.current.add(id);
+    // Whether the prompt's pane is still ours to write to after an await.
+    const stillPending = () => !closingWorkspaceRef.current && !isWorkspaceTransferPending(effectiveWorkspaceId)
+      && !!lath.getMeta(id) && !lath.isDying(id) && !isSurfaceClosing(id);
+    // A failed launch keeps the prompt up with its reason, so the user can fix
+    // the input and approve again or close the pane.
     const showFailure = (message: string) => {
-      if (!closingWorkspaceRef.current && lath.getMeta(id) && !lath.isDying(id) && !isSurfaceClosing(id)) {
-        lath.store.updateParams(id, { toolPending: { ...pending, error: message } });
-      }
+      if (stillPending()) lath.store.updateParams(id, { toolPending: { ...pending, error: message } });
     };
 
     try {
@@ -1599,15 +1602,14 @@ export function Wall({
         return;
       }
 
-      if (closingWorkspaceRef.current || isWorkspaceTransferPending(effectiveWorkspaceId) || !lath.getMeta(id) || lath.isDying(id) || isSurfaceClosing(id)) return;
-      const command = typeof resolved.run === 'string' ? resolved.run
-        : buildShellCommandForKind(shellCommandKind(getDefaultShellOpts()?.shell, PLATFORM_STRING), resolved.run);
+      if (!stillPending()) return;
+      const command = toolRunCommand(resolved.run);
       lath.store.updateParams(id, {
         command,
-        toolScope: resolved.scope,
+        ...(resolved.scope ? { toolScope: resolved.scope } : {}),
         toolRender: resolved.render,
         toolPort: resolved.port,
-        ...(resolved.key ? { toolKey: namespacedToolKey(resolved.name, resolved.key, resolved.scope) } : {}),
+        ...(resolved.key ? { toolKey: namespacedToolKey(resolved.name, resolved.key) } : {}),
       });
       // Hand the leaf its command only now. The approval marker stays in place
       // until after this write, so TerminalPanel cannot consume default options
@@ -1631,7 +1633,7 @@ export function Wall({
         minimizePane(id);
       }
     } catch (error) {
-      showFailure(error instanceof Error ? error.message : String(error));
+      showFailure(errorText(error));
     } finally {
       toolApprovalsInFlightRef.current.delete(id);
     }
