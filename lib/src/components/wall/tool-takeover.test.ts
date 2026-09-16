@@ -110,9 +110,10 @@ describe('after the prompt wait', () => {
     helperPresent: false,
   };
 
-  it('a transformation needs the pane still on screen, plain, helper-less, and in place', () => {
+  it('a transformation needs a surviving plain helper-less pane in place, regardless of Workspace selection', () => {
     expect(callerStillPlaceable(passing)).toBe(true);
-    for (const override of [{ workspaceActive: false }, { visible: false }, { cwdMatches: false }, { kind: 'tool' as const }, { helperPresent: true }]) {
+    expect(callerStillPlaceable({ ...passing, workspaceActive: false })).toBe(true);
+    for (const override of [ { visible: false }, { cwdMatches: false }, { kind: 'tool' as const }, { helperPresent: true }]) {
       expect(callerStillPlaceable({ ...passing, ...override })).toBe(false);
     }
   });

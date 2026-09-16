@@ -68,7 +68,8 @@ function callerTypedTool(gate: ToolTakeoverGate): boolean {
  * (rationale).
  */
 export function toolTakesOverCaller(gate: ToolTakeoverGate): boolean {
-  return !gate.explicitSurface
+  return gate.workspaceActive
+    && !gate.explicitSurface
     && !gate.minimized
     && callerStillPlaceable(gate)
     && callerTypedTool(gate);
@@ -76,13 +77,12 @@ export function toolTakesOverCaller(gate: ToolTakeoverGate): boolean {
 
 /**
  * The placement facts that can change while the caller's shell returns to its
- * prompt, re-read once it has: still on screen, still a plain helper-less
+ * prompt, re-read once it has: still a pane, still a plain helper-less
  * terminal, still in the tool's directory. The command line is not among them —
- * by then it has finished.
+ * by then it has finished. Workspace activation is only an initial gate.
  */
 export function callerStillPlaceable(gate: ToolTakeoverGate): boolean {
-  return gate.workspaceActive
-    && gate.visible
+  return gate.visible
     && gate.cwdMatches
     && gate.kind === 'terminal'
     && !gate.helperPresent;

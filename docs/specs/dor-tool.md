@@ -139,7 +139,7 @@ Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `dor/test/snapshot
 
 **Must answer `takeover` before waiting for the calling shell's prompt**, then transform and type the command. The answer promises placement, not successful command startup.
 
-- **Must leave the caller unchanged on prompt timeout or cancellation**, and recheck active Workspace, transfer/closing state, visibility, CWD, kind, and helper presence after the wait.
+- **Must leave the caller unchanged on prompt timeout or cancellation**, and recheck transfer/closing state, pane membership, CWD, kind, and helper presence after the wait. A helper opened during the handshake prevents transformation. **Must complete an accepted takeover after switching Workspaces** without changing the active Workspace. (rationale)
 - **Must change components and params in one metadata commit**, retaining the Session id, Surface ref, scrollback, notes, source pins, and any user rename.
 - **Must clear previous OSC 367 hints before typing the new command.**
 - **Must retain the spawn lock until the typed command is observed running or a new completed run is observed**, or the wait ends. A command that starts and exits between samples releases the lock too.
