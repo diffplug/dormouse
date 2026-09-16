@@ -63,6 +63,18 @@ Source of truth: `context` in `standalone/sidecar/pty-core.js`; `terminalContext
 
 Source of truth: `TerminalContextView` in `lib/src/components/wall/TerminalContextView.tsx`; `lib/src/stories/TerminalContext.stories.tsx` supplies sample output; `lib/src/stories/Wall.stories.tsx` exercises the live helper with the fake shell.
 
+## Tool context
+
+**Must show a Tool's primary Session in Terminal Context instead of creating an auxiliary helper.** Reuse the title, directory, port, alert, and notepad presentation, showing Tool command status without helper Modify, Reset, or Promote controls. Pending approval cannot open context.
+
+**Must preflight a note source pin before opening Tool context, then mount and refit context before resolving its displayed selection.** Failed refit resolution follows `docs/specs/notepad.md` → Source links.
+
+**Must focus the Tool terminal instance directly**, bypassing its browser Surface focus handle.
+
+**Must mount only one terminal view for the Tool at a time**, moving its retained xterm between the full pane and context without disposing the Session. Context keystrokes, including terminal clipboard chords, belong to that terminal and never reach the browser underneath. Closing context preserves both processes and browser state.
+
+Source of truth: `revealNoteSource` in `lib/src/lib/notepad/pin.ts`; the `dormouse:reveal-note-source` listener in `lib/src/components/Wall.tsx`; `TerminalContext` in `lib/src/components/wall/TerminalContext.tsx`; `TerminalContextView` in `lib/src/components/wall/TerminalContextView.tsx`; `ToolPanel` in `lib/src/components/wall/ToolPanel.tsx`. Tests: `lib/src/components/wall/TerminalContext.test.tsx`, `lib/src/components/Wall.test.tsx`.
+
 ## Future
 
 Pocket context composition, remote helper creation, and SSH integration are unbuilt.

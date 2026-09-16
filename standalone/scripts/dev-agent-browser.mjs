@@ -144,6 +144,8 @@ const invokeMap = {
     return result;
   },
   agent_browser_stream_status: ({ session, binaryPath }) => requestSidecar('agentBrowser:streamStatus', { session, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
+  tool_control: ({ request }) =>
+    requestSidecar('tool:control', { request }, 'tool:result', (data) => data.result),
   agent_browser_open: ({ url, headed, binaryPath }) => requestSidecar('agentBrowser:open', { url, headed, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
   agent_browser_pop_out: ({ session, url, rect, binaryPath }) => requestSidecar('agentBrowser:popOut', { session, url, rect, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
   agent_browser_pop_in: ({ session, url, binaryPath }) => requestSidecar('agentBrowser:popIn', { session, url, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
@@ -404,6 +406,11 @@ try {
   log(`try: curl -H 'content-type: application/json' -d '{"cmd":"pty_request_init"}' 'http://127.0.0.1:${hostPort}/__dormouse_dev_host/send?t=${bridgeToken}'`);
   await startVite();
   startSidecar();
+  // Announce the actual bound port, including an OS-assigned one.
+  const vitePort = Number(new URL(viteOrigin).port);
+  process.stdout.write(
+    `\u001b]367;serve;${JSON.stringify({ port: vitePort, name: 'Dormouse dev', v: 1 })}\u001b\\`,
+  );
   await openAgentBrowser();
   log('running; Ctrl-C to stop');
 } catch (err) {

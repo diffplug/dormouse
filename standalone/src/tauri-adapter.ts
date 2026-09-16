@@ -1,3 +1,4 @@
+import { recordToolAnnounces } from '../../lib/src/lib/tool-announce-store';
 import type { AlertRuntimeSnapshot } from 'dormouse-lib/lib/alert-manager';
 import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../../lib/src/lib/terminal-context-types';
 import { invoke as rawInvoke } from "@tauri-apps/api/core";
@@ -21,6 +22,8 @@ import type {
   PtyMarkedDetail,
   PtyReplayDetail,
   BurrowLink,
+  ToolControlResult,
+  ToolHostRequest,
   SessionFlushRequest,
 } from "dormouse-lib/lib/platform/types";
 import type {
@@ -203,6 +206,7 @@ export class TauriAdapter implements PlatformAdapter {
         // (docs/specs/standalone.md → "Routing").
         const { id, data, requestId } = event.payload;
         const parsed = new TerminalProtocolParser(themeColorProvider).process(data);
+        recordToolAnnounces(id, parsed.events);
         applyTerminalSemanticEvents(id, this.alertManager.applyReplay(id, requestId, parsed));
         // A listed exited buffer can contain a command-start with no finish.
         // Apply its exit after rebuilding the replay's watch, for either target
@@ -450,6 +454,15 @@ export class TauriAdapter implements PlatformAdapter {
     try {
       return await rawInvoke<string>("read_clipboard_text");
     } catch { return null; }
+  }
+
+  async toolControl(request: ToolHostRequest): Promise<ToolControlResult> {
+    // The sidecar owns the filesystem (shared lib/src/host/tool-host.ts).
+    try {
+      return await rawInvoke<ToolControlResult>("tool_control", { request });
+    } catch (err) {
+      return { status: "error", message: errMessage(err) };
+    }
   }
 
   async createIframeProxyUrl(targetUrl: string): Promise<IframeProxyResult> {

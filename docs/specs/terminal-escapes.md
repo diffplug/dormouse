@@ -61,6 +61,8 @@ Replay (`pty:replay`) is the raw stream requiring re-parse: **the webview runs a
 | `OSC 633 ; E ; <commandline> [; <nonce>] ST` | VS Code command line | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
 | `OSC 633 ; P ; Cwd=<cwd> ST` | CWD (VS Code) | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
 | `OSC 777 ; notify ; <title> ; <body> ST` | rxvt/WezTerm notification | [alert.md](alert.md#terminal-reports) |
+| `OSC 367 ; serve ; <json> ST` | Dor Tool announcement: names which bound port to frame, plus a reserved name and runtime re-key | [dor-tool.md](dor-tool.md#osc-367) |
+| `OSC 367 ; <any other verb> ST` | Reserved for the staged `dehydrate` verb; consumed and ignored. | [dor-tool.md](dor-tool.md#osc-367) |
 | `OSC 1337 ; CurrentDir=<cwd> ST` | CWD (iTerm2 compatibility) | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
 | `OSC 1337 ; File=...:<data> ST` / `MultipartFile=...` / `FilePart=...` / `FileEnd` | iTerm2 inline image protocol (IIP); passed through to ImageAddon. | [Inline graphics](#inline-graphics) |
 | `OSC 1337 ; ReportCellSize ST` | iTerm2 cell-size query; passed through and answered by the owner's ImageAddon. | [Inline graphics](#inline-graphics) |

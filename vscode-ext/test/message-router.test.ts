@@ -34,6 +34,7 @@ vi.mock('../src/peer-link', () => ({
 /** The pty host, as far as a disposal is concerned: what it was asked, what it
  *  answered, and the order the archive write and the kills happened in. */
 const ptys = vi.hoisted(() => ({
+  callbacks: null as { onData(id: string, data: string): void; onExit(id: string, code: number): void } | null,
   cwd: null as string | null,
   cwdAsked: [] as string[],
   cwdWait: null as Promise<void> | null,
@@ -44,6 +45,10 @@ const ptys = vi.hoisted(() => ({
 
 vi.mock('../src/pty-manager', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/pty-manager')>()),
+  addCallbacks: (callbacks: NonNullable<typeof ptys.callbacks>) => {
+    ptys.callbacks = callbacks;
+    return () => {};
+  },
   spawn: (id: string) => { ptys.buffered.set(id, { alive: true }); },
   getBufferedPtys: () => new Map(ptys.buffered),
   getCwd: async (id: string) => {
@@ -129,6 +134,25 @@ it('reports rejected helper creation as an exited terminal', () => {
     webview.send({ type: 'pty:spawn', id: 'rejected-helper', options: { helper: { parentId: 'unowned-parent', command: 'git status' } } });
     expect(webview.posted).toContainEqual({ type: 'pty:exit', id: 'rejected-helper', exitCode: 1 });
   } finally { disposable.dispose(); }
+});
+
+it('forwards command-start resets and Tool announcements in stream order only to the owning webview', () => {
+  const owner = fakeWebview();
+  const other = fakeWebview();
+  const first = router.attachRouter(owner.channel, {});
+  const second = router.attachRouter(other.channel, {});
+  try {
+    owner.send({ type: 'dormouse:init' });
+    other.send({ type: 'dormouse:init' });
+    owner.send({ type: 'pty:spawn', id: 'tool-epoch', options: { cwd: '/repo' } });
+    ptys.callbacks!.onData('tool-epoch', '\x1b]367;serve;{"port":6006}\x07\x1b]633;C\x07\x1b]367;serve;{"port":6007}\x07');
+    const announcements = owner.posted.filter(message => message.type === 'terminal:toolAnnounce');
+    expect(announcements.map(message => message.announce?.port ?? null)).toEqual([6006, null, 6007]);
+    expect(other.posted.filter(message => message.type === 'terminal:toolAnnounce')).toEqual([]);
+  } finally {
+    first.dispose();
+    second.dispose();
+  }
 });
 
 describe('session flush', () => {

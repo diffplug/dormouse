@@ -62,6 +62,9 @@ export interface WallActions {
   /** The stable `surface:N` ref for a pane/door id (minted lazily, exactly as
    *  `dor list` assigns refs). Used by the pane context menu to show the handle. */
   resolveSurfaceRef: (id: string) => string;
+  /** Resolve a pending tool's approval: grant and start it, or close its pane
+   *  (docs/specs/dor-tool.md -> Trust). */
+  onResolveToolApproval: (id: string, choice: 'upstream' | 'folder' | 'decline') => void;
 }
 
 export const WallActionsContext = createContext<WallActions>({
@@ -80,6 +83,7 @@ export const WallActionsContext = createContext<WallActions>({
   onSwapRenderMode: () => {},
   onOpenBrowserPane: () => {},
   resolveSurfaceRef: (id: string) => id,
+  onResolveToolApproval: () => {},
 });
 
 /** Engine-directed writes from a pane/header (title + params). The read side is

@@ -197,3 +197,15 @@ Source of truth: `SESSION_STATE_KEY` in `vscode-ext/src/session-state.ts`,
 **Must validate context directory arguments as existing absolute directories and pass the canonical path as one process argument without shell interpretation.** Keep this capability separate from the external-URL allowlist. VS Code per-terminal context requests and helper ownership updates remain scoped to the owning router.
 
 Source of truth: `context` in `standalone/sidecar/pty-core.js`; `attachRouter` in `vscode-ext/src/message-router.ts`. Test: `standalone/sidecar/helper-terminal.test.js`.
+
+## Dor Tool configuration
+
+**Must keep repo-local named Tools inert until the user grants trust through Dormouse chrome.** The control socket exposes lookup and launch, never a trust-grant verb. Pending approval spawns neither its terminal nor a helper. Approval workflow belongs to `docs/specs/dor-tool.md` → Trust.
+
+**Must derive the grant key in the host**, using the canonical upstream URL or project-root folder; a renderer request cannot supply an arbitrary grant URL. **Must bound config reads and refuse symlinks on every host.**
+
+**An upstream grant trusts the claimed URL, not authenticated checkout provenance.** A supplied directory containing its own `.git/config` can claim an already-granted upstream; folder-only grants limit this sharing. **Must not describe the chrome gesture as a boundary against other processes running as the user**; the local account model is The dor control socket above.
+
+**Must restrict announced ports to the designated command's Session process tree** (`docs/specs/dor-tool.md` → Serving). Process output may select among that tree's discovered ports; it cannot turn an ordinary terminal into a Tool.
+
+Source of truth: `createToolHost` in `lib/src/host/tool-host.ts`; `lookupTool` / `FileToolTrustStore` in `lib/src/host/tool-trust.ts`; `useToolServing` in `lib/src/components/wall/use-tool-serving.ts`. Tests: `lib/src/host/tool-host.test.ts`, `lib/src/host/tool-trust.test.ts`, `lib/src/components/wall/use-tool-serving.test.tsx`.

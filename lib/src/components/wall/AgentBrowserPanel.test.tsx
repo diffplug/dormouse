@@ -824,3 +824,28 @@ describe('AgentBrowserPanel tab strip actions', () => {
     expect(screenshot).toHaveBeenCalled();
   });
 });
+
+describe('the pop-out affordance on a tool (regression: PR #493 review)', () => {
+  // The second of the two screen-registration sites (the other is
+  // `IframePanel`): a tool declaring `render: ab-screencast` mounts this panel,
+  // so the gate has to be here too. Why it exists is at the gate itself, in
+  // `agent-browser-surface-controller.ts`.
+  function withPopOutCapableHost() {
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'agentBrowserCommand' | 'agentBrowserPopOut'>;
+    platform.agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
+    platform.agentBrowserPopOut = vi.fn(async (): Promise<AgentBrowserPopResult> => ({ ok: true, wsPort: 1 }));
+    setPlatform(platform);
+  }
+
+  it('offers pop-out on a plain browser surface', async () => {
+    withPopOutCapableHost();
+    await renderPanel(paneProps('ab-plain', { surfaceType: 'browser', session: 's', renderMode: 'ab-screencast' }));
+    expect(getAgentBrowserScreenController('ab-plain')?.canPopOut).toBe(true);
+  });
+
+  it('never offers it on a tool', async () => {
+    withPopOutCapableHost();
+    await renderPanel(paneProps('ab-tool', { surfaceType: 'tool', session: 's', renderMode: 'ab-screencast' }));
+    expect(getAgentBrowserScreenController('ab-tool')?.canPopOut).toBe(false);
+  });
+});

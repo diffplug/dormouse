@@ -1,5 +1,8 @@
 import type { ActivityNotification, ProtocolProgressUpdate } from './alert-manager';
 import { parseColor } from './css-color';
+import { sanitizeText, truncateText } from './osc-sanitize';
+import { recordToolAnnounces } from './tool-announce-store';
+import { parseToolAnnounce, type ToolAnnounce } from './tool-announce';
 import {
   STRING_CONTROL_INTRODUCER,
   STRING_CONTROL_INTRODUCER_SCAN,
@@ -20,6 +23,7 @@ import {
 
 export type TerminalProtocolEvent =
   | { kind: 'notification'; notification: ActivityNotification }
+  | { kind: 'toolAnnounce'; announce: ToolAnnounce }
   | { kind: 'progress'; progress: ProtocolProgressUpdate }
   | { kind: 'response'; data: string }
   | { kind: 'semantic'; event: TerminalSemanticEvent };
@@ -90,7 +94,7 @@ const OSC99_SUPPORT_PAYLOAD = 'o=always:p=title,body';
 const OSC99_RESPONSE_ID_RE = /^[^\s:;\x00-\x1f\x7f-\x9f]+$/;
 // Every OSC id `parseOsc` claims. Anything else is xterm.js's, which is what
 // lets an unterminated one stream instead of filling `pending`.
-const OSC_CONSUMED_IDS = new Set(['0', '2', '7', '9', '10', '11', '12', '50', '52', '99', '133', '633', '777']);
+const OSC_CONSUMED_IDS = new Set(['0', '2', '7', '9', '10', '11', '12', '50', '52', '99', '133', '367', '633', '777']);
 // The OSC 1337 subcommands ImageAddon owns; every other 1337 is consumed.
 const OSC1337_FORWARDED = ['File=', 'MultipartFile=', 'FilePart=', 'FileEnd', 'ReportCellSize'] as const;
 const TERMINAL_BELL_NOTIFICATION: ActivityNotification = { source: 'BEL', title: 'Terminal bell', body: null };
@@ -289,6 +293,12 @@ export class TerminalProtocolParser {
     if (content === '2' || content.startsWith('2;')) return parseOscTitle(content, 'osc2');
     if (content === '99' || content.startsWith('99;')) return this.parseOsc99(content);
     if (content === '777' || content.startsWith('777;')) return this.parseOsc777(content);
+    // OSC 367 is stripped whether or not it parses: a malformed announcement
+    // must not print itself into the user's scrollback.
+    if (content === '367' || content.startsWith('367;')) {
+      const announce = content.startsWith('367;') ? parseToolAnnounce(content.slice('367;'.length)) : null;
+      return announce ? [{ kind: 'toolAnnounce', announce }] : [];
+    }
     const colorResponse = this.parseColorQuery(content);
     if (colorResponse) return colorResponse;
     if (isKnownUnsupportedIterm2Osc(content)) return [];
@@ -423,6 +433,7 @@ export function applyTerminalProtocolEvents(
   id: string,
   events: TerminalProtocolEvent[],
 ): void {
+  recordToolAnnounces(id, events);
   for (const event of events) {
     if (event.kind === 'notification') {
       sink.notifyFromProtocol(id, event.notification);
@@ -433,7 +444,7 @@ export function applyTerminalProtocolEvents(
 }
 
 /**
- * The notification and progress events {@link applyTerminalProtocolEvents} acts
+ * The notification, progress, Tool announcement and command-start events {@link applyTerminalProtocolEvents} acts
  * on. An owner whose `AlertManager` lives in another process — standalone's
  * sidecar, whose webview holds it — forwards exactly these; every other kind is
  * the owner's own to settle, a response above all.
@@ -441,7 +452,8 @@ export function applyTerminalProtocolEvents(
 export function collectTerminalProtocolAlerts(
   events: TerminalProtocolEvent[],
 ): TerminalProtocolEvent[] {
-  return events.filter((event) => event.kind === 'notification' || event.kind === 'progress');
+  return events.filter((event) => event.kind === 'notification' || event.kind === 'progress' || event.kind === 'toolAnnounce'
+    || (event.kind === 'semantic' && event.event.type === 'commandStart'));
 }
 
 export function collectTerminalProtocolResponses(events: TerminalProtocolEvent[]): string[] {
@@ -818,22 +830,8 @@ function decodeBase64(input: string): string | null {
   }
 }
 
-function sanitizeText(input: string, limit: number): string | null {
-  const collapsed = input
-    .replace(/[\x00-\x1f\x7f-\x9f]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  if (!collapsed) return null;
-  return truncateText(collapsed, limit);
-}
-
 function appendLimited(existing: string, next: string, limit: number): string {
   return truncateText(`${existing}${next}`, limit);
-}
-
-function truncateText(input: string, limit: number): string {
-  if (input.length <= limit) return input;
-  return Array.from(input).slice(0, limit).join('');
 }
 
 const DEVICE_ATTRIBUTE_PENDING_SUFFIXES = ['\x1b[>', '\x1b[', '\x1b', '\x9b>', '\x9b'];

@@ -197,6 +197,29 @@ describe('restoreSession', () => {
     expect(result?.paneIds).toEqual(['pane-term', 'pane-web']);
   });
 
+  it('respawns a restored tool command with integration gating', () => {
+    const saved: PersistedSession = {
+      version: 3,
+      panes: [{
+        id: 'pane-tool',
+        title: 'storybook',
+        cwd: '/repo',
+        untouched: true,
+        surfaceType: 'tool',
+        command: 'pnpm storybook',
+        tool: { name: 'storybook', render: 'iframe', port: 'announced' },
+      }],
+    };
+
+    restoreSession(createPlatform(saved, { 'pane-tool': 'claude --resume should-not-win' }));
+
+    expect(terminalRegistryMocks.restoreTerminal).toHaveBeenCalledWith('pane-tool', expect.objectContaining({
+      command: 'pnpm storybook',
+      requireIntegration: true,
+      resumeCommand: null,
+    }));
+  });
+
   it.each([undefined, { version: 1 }, {
     version: 1,
     tree: { root: { kind: 'leaf', id: 'stale-pane' } },
@@ -313,6 +336,17 @@ describe('restoreSession', () => {
       }),
     );
   });
+});
+
+
+it('recovers Tool metadata from pane rows when its layout is unusable', () => {
+  const restored = restoreSession(createPlatform({ version: 3, panes: [
+    { id: 'tool', title: 'Storybook', cwd: '/repo', untouched: false, surfaceType: 'tool', command: 'pnpm storybook', tool: { render: 'iframe', port: 'auto', name: 'storybook', key: ['storybook', '/repo'] } },
+    { id: 'web', title: 'Web', cwd: null, untouched: false, surfaceType: 'browser' },
+  ] }));
+  expect(restored?.paneIds).toEqual(['tool']);
+  expect(restored?.lathLayout?.leafMeta.tool).toMatchObject({ component: 'tool', tabComponent: 'tool', params: { command: 'pnpm storybook', toolRender: 'iframe', toolPort: 'auto', toolName: 'storybook' } });
+  expect(restored?.lathLayout?.leafMeta.tool.params?.url).toBeUndefined();
 });
 
 describe('restoreSession alert seeding', () => {

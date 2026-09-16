@@ -9,6 +9,8 @@ import {
 } from '../../../lib/mouse-selection';
 import { addSelectionToNotepad, isNotepadChordBound } from '../../../lib/notepad/capture';
 import { hasCopyModifier, hasPasteModifier } from './chords';
+import { hasTerminal } from 'dor/commands/types';
+import { surfaceKindFromParams, toolFace } from '../browser-surface';
 import type { WallKeyboardCtx } from './types';
 
 /**
@@ -31,7 +33,8 @@ export function handleMouseSelectionKeys(e: KeyboardEvent, ctx: WallKeyboardCtx)
   // These chords copy/paste against a terminal's pty and mouse selection.
   // Non-terminal surfaces (agent-browser, iframe) own their clipboard keys —
   // e.g. AgentBrowserPanel forwards cmd-V to the embedded page — so yield.
-  if (surfaceTypeForId(ctx, sid) !== 'terminal') return false;
+  const contextTerminal = tgt?.closest?.<HTMLElement>('[data-context-terminal]');
+  if (contextTerminal?.dataset.contextTerminal !== sid && !hasActiveTerminal(ctx, sid)) return false;
 
   const mouseState = getMouseSelectionState(sid);
   const sel = mouseState.selection;
@@ -91,7 +94,12 @@ export function handleMouseSelectionKeys(e: KeyboardEvent, ctx: WallKeyboardCtx)
 
 /** `paneParams` reads the store, which holds a Surface's params whether it is a pane
  *  or a Door, so a minimized Surface needs no separate lookup. */
-function surfaceTypeForId(ctx: WallKeyboardCtx, id: string): string {
-  const params = ctx.nav.paneParams(id) as { surfaceType?: unknown } | undefined;
-  return typeof params?.surfaceType === 'string' ? params.surfaceType : 'terminal';
+function hasActiveTerminal(ctx: WallKeyboardCtx, id: string): boolean {
+  const params = ctx.nav.paneParams(id);
+  const kind = surfaceKindFromParams(params);
+  if (!hasTerminal(kind)) return false;
+  // A tool owns both capabilities, so only its forward half owns keyboard
+  // clipboard/selection handling. Pending approval and the second half have no
+  // active xterm even though the Surface kind is terminal-capable.
+  return kind !== 'tool' || toolFace(params) === 'terminal';
 }

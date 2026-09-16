@@ -61,7 +61,7 @@ A spec is the accurate reference for the current code: it states the invariants 
 - **`docs/specs/theme.md`** — The two-layer CSS variable strategy, consumed-token resolver, terminal color contract, theme debugger.
 - **`docs/specs/dor-cli.md`** — The `dor` CLI on every Dormouse terminal's `PATH`: bundling and env contract, `spawnAndCapture` rules, control-socket plumbing, the Surface handle model, the command set.
 - **`docs/specs/dor-browser.md`** — The browser surface: `BrowserPanel` with swappable `renderMode`, browser chrome, the agent-browser stack, the iframe proxy and CSP boundaries.
-- **`docs/specs/dor-tool.md`** — Dor Tools (design-stage): the `tool` Surface — a terminal and a browser on one Session spine — its capability-gated verbs and OSC 367 contract. Only capability gating is built.
+- **`docs/specs/dor-tool.md`** — Dor Tools: the `tool` Surface — a terminal and a browser on one Session spine — its capability-gated verbs and OSC 367 contract. Designation, trust, serving, and persistence are built behind the Tools flag.
 - **`docs/specs/vscode.md`** — VS Code host: webview hosting, webview ↔ Workspace mapping, persistence ordering, theme integration, CSP, the build/dogfood pipeline.
 - **`docs/specs/standalone.md`** — Tauri host: the Rust ↔ Node-sidecar bridge, boot sequence, AppBar, persistence, shutdown ordering, the build/dev workflow.
 - **`docs/specs/auto-update.md`** — Standalone auto-update: check → approved download → install-on-quit, the Baseboard notice, Windows sidecar teardown, per-platform quit behavior.

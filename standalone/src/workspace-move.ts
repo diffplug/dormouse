@@ -1,3 +1,5 @@
+import { restoreToolParams } from 'dormouse-lib/components/wall/tool-transfer';
+import { recordToolAnnounce } from 'dormouse-lib/lib/tool-announce-store';
 import { pauseAlertDelivery, resumeAlertDelivery, snapshotAlertDelivery, restoreAlertDelivery, forgetAlertDelivery } from 'dormouse-lib/lib/alert-delivery-state';
 import { setIncomingAlertPolicy } from 'dormouse-lib/lib/alert-delivery-policy';
 import type { AlertRuntimeSnapshot } from 'dormouse-lib/lib/alert-manager';
@@ -189,6 +191,7 @@ async function handOff(
     const marks = await pendingMarks;
     if (inFlight.get(workspaceId)?.prepared === prepared) { // else handed back while we waited: nothing to send
       const content = await captureTransferContent(terminalIds, marks);
+      if (prepared.tools) content.tools = prepared.tools;
       if (inFlight.get(workspaceId)?.prepared === prepared) { // else handed back while serializing
         const alertRuntime = new Map<string, AlertRuntimeSnapshot>();
         inFlight.get(workspaceId)!.alertRuntime = alertRuntime;
@@ -423,6 +426,7 @@ async function planArrival(
   for (const [id, terminal] of transferred) {
     if (terminal.alertDelivery) restoreAlertDelivery(id, terminal.alertDelivery);
     if (terminal.semanticState) restoreTransferredTerminalState(id, terminal.semanticState);
+    if (terminal.toolAnnounce) recordToolAnnounce(id, terminal.toolAnnounce);
   }
   const live = await collectLivePtys(platform, {
     // The token rides through Rust to the sidecar's `list` and comes back on the
@@ -460,6 +464,7 @@ async function planArrival(
     ptyIds,
     terminalGrids,
   });
+  if (payload.tools) restoreToolParams(result, payload.tools);
   // The notes travelled in the payload rather than through the archive: a move
   // is not a closure (`docs/specs/notepad.md` → "Closure").
   hydrateNotepadFromVolatile(payload.notepad, payload.allIds);

@@ -104,4 +104,3 @@ The standalone host contributes no chords; `docs/specs/standalone.md` owns its n
 - `lib/src/lib/terminal-mouse-router.ts` — live Alt tracking during a drag
 - `lib/src/components/SelectionPopup.tsx`, `lib/src/components/wall/TerminalContextView.tsx`, `lib/src/components/wall/InlineEditInput.tsx` — the popover/dialog handlers
 - `lib/src/components/wall/agent-browser-surface-controller.ts` — browser key forwarding and the edit-chord bridge
-

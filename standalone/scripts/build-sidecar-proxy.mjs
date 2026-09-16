@@ -3,6 +3,7 @@
 // TypeScript source while the sidecar itself stays plain CJS.
 //   - lib/src/host/iframe-proxy.ts        → sidecar/iframe-proxy.cjs
 //   - lib/src/host/agent-browser-host.ts  → sidecar/agent-browser-host.cjs
+//   - lib/src/host/tool-host.ts           → sidecar/tool-host.cjs
 //   - lib/src/host/remote/sidecar-entry.ts → sidecar/burrow.cjs
 //   - lib/src/host/recovery.ts             → sidecar/recovery.cjs
 //   - lib/src/host/alert-store-host.ts     → sidecar/alert-store.cjs
@@ -52,6 +53,7 @@ if (!SIDECAR_RUNTIME_DEPS.includes('node-datachannel')) {
 const bundles = [
   { entry: 'iframe-proxy.ts', out: 'iframe-proxy.cjs' },
   { entry: 'agent-browser-host.ts', out: 'agent-browser-host.cjs' },
+  { entry: 'tool-host.ts', out: 'tool-host.cjs' },
   { entry: 'recovery.ts', out: 'recovery.cjs' },
   { entry: 'alert-store-host.ts', out: 'alert-store.cjs' },
   {

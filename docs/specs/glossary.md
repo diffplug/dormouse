@@ -4,9 +4,10 @@
 
 ## The core idea
 
-A **Surface** is the durable occupant of a Pane — the content in a slot. Two kinds:
+A **Surface** is the durable occupant of a Pane — the content in a slot. Three kinds:
 
 - a **terminal Surface**, which Dormouse calls a **Session**: a PTY-backed shell with scrollback and semantic terminal state. The six-axis model below describes this kind.
+- a **tool Surface**: a Session with terminal and browser capabilities (`docs/specs/dor-tool.md`).
 - a **browser Surface**: a web view (`docs/specs/dor-browser.md`), taking only a subset of the axes ([Panes and Surfaces](#panes-and-surfaces)).
 
 **Unless a passage says "Surface" or "browser Surface," it describes a Session.** A Session's state lives on six distinct axes; an operation can change several together. Their separate preconditions define the **[Liskov contract](#liskov-contract)**.
@@ -22,18 +23,20 @@ A Pane holds exactly one Surface today, but the model reserves several (a future
 | Kind | Sub-kinds | Backed by |
 |---|---|---|
 | `terminal` | — | a PTY + xterm.js instance — a **Session** |
+| `tool` | — | a PTY and an optional browser on the same Session |
 | `browser` | `iframe`, `ab-screencast`, `ab-popout` | an iframe proxy grant, or an agent-browser daemon session (`docs/specs/dor-browser.md`) |
 
 **For a browser Surface `renderMode` is canonical**; the CLI `render_mode` is derived from it and never stored.
 
 | Surface | Persisted `surfaceType` (`docs/specs/transport.md`) | `renderMode` (`docs/specs/dor-browser.md`) | CLI `kind` | CLI `render_mode` |
 |---|---|---|---|---|
+| tool Session | `'tool'` | `iframe` or `ab-screencast` when serving | `tool` | renderer or `null` |
 | terminal Session | `'terminal'` (default, omitted) | — | `terminal` | `null` |
 | browser · iframe | `'browser'` | `iframe` | `browser` | `iframe` |
 | browser · screencast | `'browser'` | `ab-screencast` | `browser` | `ab-screencast` |
 | browser · popped out | `'browser'` | `ab-popout` | `browser` | `ab-popout` |
 
-**Kinds are capability sets, not exclusive categories** — the two above carry one capability each, the staged `tool` (`docs/specs/dor-tool.md`) both. **Operations gate on the capability they need, never on the kind enum** ([Liskov contract](#liskov-contract)): `read` / `send` / `await` / port scans need the terminal, nav / render-mode / agent-browser verbs the browser. **`dor list --json` rows always emit `has_terminal` and `has_browser`** (rationale). **Must declare each kind's capabilities in the `hasTerminal` / `hasBrowser` table.** Persistence keeps its own `PersistedSurfaceType` discriminant (`docs/specs/transport.md`).
+**Kinds are capability sets, not exclusive categories** — terminal and browser carry one capability each, `tool` both. **Operations gate on the capability they need, never on the kind enum** ([Liskov contract](#liskov-contract)): `read` / `send` / `await` / port scans need the terminal, nav / render-mode / agent-browser verbs the browser. **`dor list --json` rows always emit `has_terminal` and `has_browser`** (rationale). **Must declare each kind's capabilities in the `hasTerminal` / `hasBrowser` table.** Persistence keeps its own `PersistedSurfaceType` discriminant (`docs/specs/transport.md`).
 
 Source of truth: `hasTerminal` / `hasBrowser` in `dor/src/commands/types.ts`; `surfaceKindFromParams` in `lib/src/components/wall/browser-surface.ts`.
 

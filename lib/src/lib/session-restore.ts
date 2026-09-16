@@ -1,3 +1,4 @@
+import type { LathNode } from './lath/model';
 import { type LathPersistedLayout, isLathPersistedLayout } from './lath/persistence';
 import type { PlatformAdapter } from './platform/types';
 import { carrySurfaceRefs, readPersistedSession, type PersistedDoor, type PersistedSession, type PersistedSurfaceRefs } from './session-types';
@@ -40,8 +41,24 @@ export function restoreSession(platform: PlatformAdapter, sources: RestoreSource
   const visibleIds = new Set(visiblePanes.map((pane) => pane.id));
   const candidateLayout = persistedLathLayout(saved);
   const leafIds = candidateLayout ? Object.keys(candidateLayout.leafMeta) : [];
-  const lathLayout = candidateLayout && leafIds.length === visibleIds.size && leafIds.every((id) => visibleIds.has(id))
+  let lathLayout = candidateLayout && leafIds.length === visibleIds.size && leafIds.every((id) => visibleIds.has(id))
     ? candidateLayout : undefined;
+  // Tool commands remain runnable when geometry is corrupt. Rebuild their kind
+  // and stable metadata from the pane projection instead of seeding plain shells.
+  if (!lathLayout && visiblePanes.some(pane => pane.surfaceType === 'tool')) {
+    const recoverable = visiblePanes.filter(pane => pane.surfaceType !== 'browser');
+    const nodes: LathNode[] = recoverable.map(pane => ({ kind: 'leaf', id: pane.id }));
+    lathLayout = {
+      version: 1,
+      tree: { root: nodes.length === 1 ? nodes[0] : { kind: 'split', dir: 'row', children: nodes.map(node => ({ node, weight: 1 })) } },
+      leafMeta: Object.fromEntries(recoverable.map(pane => [pane.id, pane.surfaceType === 'tool' ? {
+        component: 'tool', tabComponent: 'tool', title: pane.title,
+        params: { surfaceType: 'tool', command: pane.command, cwd: pane.cwd,
+          toolName: pane.tool?.name, toolRender: pane.tool?.render ?? 'iframe',
+          toolPort: pane.tool?.port ?? 'announced', toolKey: pane.tool?.key },
+      } : { component: 'terminal', tabComponent: 'terminal', title: pane.title }])),
+    };
+  }
   const shellOpts = getDefaultShellOpts();
   // Host-owned and single-use, and read here rather than off the pane: the
   // session blob the webview saves must never carry one, or a later restore
@@ -64,7 +81,11 @@ export function restoreSession(platform: PlatformAdapter, sources: RestoreSource
       shell: shellOpts?.shell,
       args: shellOpts?.args,
       untouched: pane.untouched,
-      resumeCommand: recoveryCommands[pane.id] ?? null,
+      // A tool command is durable, approved Session state and wins over the
+      // host's unrelated single-use agent recovery channel.
+      ...(pane.surfaceType === 'tool'
+        ? { command: pane.command ?? null, requireIntegration: true, resumeCommand: null }
+        : { resumeCommand: recoveryCommands[pane.id] ?? null }),
     });
     // The fresh PTY inherits the pane's persisted TODO/alert, on the hosts whose
     // AlertManager lives in the webview. Seeded after `restoreTerminal` so the
@@ -77,7 +98,7 @@ export function restoreSession(platform: PlatformAdapter, sources: RestoreSource
     // Without a usable layout Wall seeds terminal metadata for each id. Browser
     // render params live only in that layout (or a door), so omit visible browser
     // ids instead of silently restoring them as shells.
-    paneIds: visiblePanes.filter((pane) => lathLayout || pane.surfaceType !== 'browser').map((pane) => pane.id),
+    paneIds: visiblePanes.filter((pane) => lathLayout ? !!lathLayout.leafMeta[pane.id] : pane.surfaceType !== 'browser').map((pane) => pane.id),
     lathLayout,
     doors,
     ...carrySurfaceRefs(saved),

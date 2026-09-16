@@ -1,3 +1,4 @@
+import type { ToolAnnounce } from '../../lib/src/lib/tool-announce';
 import * as vscode from 'vscode';
 import * as ptyManager from './pty-manager';
 import { AlertManager, type AwaitHandle, type AwaitOutcome } from '../../lib/src/lib/alert-manager';
@@ -26,6 +27,8 @@ import type { DorControlRequest } from './pty-manager';
 import { dorWorkspaceRefusal } from './dor-workspace-guard';
 import { createStreamRelayUrl, runAgentBrowserCommand, runAgentBrowserEdit, runAgentBrowserOpen, runAgentBrowserPopIn, runAgentBrowserPopOut, runAgentBrowserScreenshot, runAgentBrowserStreamStatus } from './agent-browser-host';
 import { createIframeProxyUrl } from './iframe-proxy-host';
+import { toolControl } from './tool-host';
+import type { ToolHostRequest } from '../../lib/src/lib/platform/types';
 import {
   archiveVolatileMirror,
   loadNotepadArchive,
@@ -207,6 +210,7 @@ type ProcessedExitListener = (id: string, exitCode: number) => void;
 const processedExitListeners = new Set<ProcessedExitListener>();
 type SemanticEventsListener = (id: string, events: TerminalSemanticEvent[]) => void;
 const semanticEventsListeners = new Set<SemanticEventsListener>();
+const toolAnnounceListeners = new Set<(id: string, announce: ToolAnnounce | null) => void>();
 
 export function onProcessedPtyData(listener: ProcessedDataListener): () => void {
   processedDataListeners.add(listener);
@@ -285,7 +289,20 @@ function createOwnerPtyStream(id: string): ProcessedPtyStream {
   return createProcessedPtyStream({
     colorProvider: themeColorProvider,
     onEvents(events) {
-      applyTerminalProtocolEvents(alertManager, id, events);
+      // `applyTerminalProtocolEvents` records announcements into renderer state
+      // this process cannot reach, so the router withholds them and forwards
+      // them to the webviews instead — and only the rare chunk that carries one
+      // pays for the filtered copy.
+      const hasAnnounce = events.some(event => event.kind === 'toolAnnounce');
+      applyTerminalProtocolEvents(alertManager, id, hasAnnounce ? events.filter(event => event.kind !== 'toolAnnounce') : events);
+      // A null announcement retires the previous command's hint in the owning
+      // webview. Keep starts and serves in parse order, including one chunk.
+      for (const event of events) {
+        if (event.kind === 'toolAnnounce' || (event.kind === 'semantic' && event.event.type === 'commandStart')) {
+          const announce = event.kind === 'toolAnnounce' ? event.announce : null;
+          for (const listener of toolAnnounceListeners) listener(id, announce);
+        }
+      }
       const semanticEvents = collectTerminalSemanticEvents(events);
       alertManager.applyTerminalSemanticEvents(id, semanticEvents);
       if (semanticEvents.length > 0) {
@@ -540,6 +557,10 @@ export function attachRouter(
       if (!ownedPtyIds.has(id)) return;
       post({ type: 'pty:data', id, data: visibleData, textData } satisfies ExtensionMessage);
     });
+    const onToolAnnounce = (id: string, announce: ToolAnnounce | null) => {
+      if (ownedPtyIds.has(id)) post({ type: 'terminal:toolAnnounce', id, announce } satisfies ExtensionMessage);
+    };
+    toolAnnounceListeners.add(onToolAnnounce);
     const removeSemanticListener = onTerminalSemanticEvents((id, events) => {
       if (!ownedPtyIds.has(id)) return;
       post({ type: 'terminal:semanticEvents', id, events } satisfies ExtensionMessage);
@@ -558,6 +579,7 @@ export function attachRouter(
     return () => {
       removeProcessedListener();
       removeSemanticListener();
+      toolAnnounceListeners.delete(onToolAnnounce);
       removeExitListener();
       removeAlertListener();
     };
@@ -742,6 +764,15 @@ export function attachRouter(
         ).then((result) => {
           post({ type: 'agentBrowser:popResult', requestId: msg.requestId, ...result } satisfies ExtensionMessage);
         });
+        break;
+      case 'tool:control':
+        toolControl(msg.request as ToolHostRequest).then(
+          (result) => post({ type: 'tool:result', requestId: msg.requestId, result } satisfies ExtensionMessage),
+          (err) => post({
+            type: 'tool:result', requestId: msg.requestId,
+            result: { status: 'error', message: err?.message ?? String(err) },
+          } satisfies ExtensionMessage),
+        );
         break;
       case 'iframe:createProxyUrl':
         createIframeProxyUrl(

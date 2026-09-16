@@ -1,3 +1,4 @@
+import { setToolsEnabled } from '../lib/feature-flags';
 /**
  * @vitest-environment jsdom
  *
@@ -302,7 +303,7 @@ describe('WorkspaceWindow', () => {
     expect(leafIdsIn(survivors[0].id)).toHaveLength(1);
   });
 
-  it('refuses a Surface-creating dor request while its Workspace is closing', async () => {
+  it.each([SURFACE_CONTROL_METHODS.split, SURFACE_CONTROL_METHODS.tool])('refuses %s while its Workspace is closing', async (method) => {
     await render();
     await act(async () => { createWorkspace({ id: 'ws-2' }); });
     await flush();
@@ -316,7 +317,7 @@ describe('WorkspaceWindow', () => {
       const closing = handle.closeAll('silent');
       handle.handleDorControl({
         requestId: 'r1',
-        method: SURFACE_CONTROL_METHODS.split,
+        method,
         surfaceId: paneId,
         params: { direction: 'right' },
         respond,
@@ -433,4 +434,40 @@ describe('WorkspaceWindow', () => {
     expect(handle.hasTouchedSurfaces()).toBe(false);
     expect(handle.runningCount()).toBe(0);
   });
+});
+
+
+it('routes Tools to the requested Workspace and never launches after lookup races closure', async () => {
+  setToolsEnabled(true);
+  const lookup = { status: 'untrusted' as const, projectRoot: '/repo', path: '/repo/dormouse.yml', name: 'storybook', run: 'pnpm storybook', upstreamUrl: null };
+  const gate = Promise.withResolvers<typeof lookup>();
+  const toolControl = vi.fn().mockResolvedValueOnce(lookup).mockImplementationOnce(() => gate.promise);
+  Object.assign(fake, { toolControl });
+  try {
+    await render();
+    const first = getActiveWorkspaceId();
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    await flush();
+    const respond = vi.fn();
+    await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+      requestId: 'tool-route', surfaceId: 'pane-a', method: SURFACE_CONTROL_METHODS.tool,
+      params: { workspace: 'workspace:2', name: 'storybook', cwd: '/repo' }, respond,
+    } })));
+    await flush();
+    expect(respond).toHaveBeenCalledWith(expect.objectContaining({ ok: true, result: expect.objectContaining({ status: 'pending' }) }));
+    expect(leafIdsIn(first)).toEqual(['pane-a']);
+    expect(leafIdsIn('ws-2')).toHaveLength(2);
+    expect(getActiveWorkspaceId()).toBe('ws-2');
+
+    const handle = getWallHandle('ws-2')!;
+    const late = vi.fn();
+    act(() => handle.handleDorControl({ requestId: 'late-tool', method: SURFACE_CONTROL_METHODS.tool,
+      params: { name: 'storybook', cwd: '/repo' }, respond: late }));
+    await flush();
+    await act(async () => { await handle.closeAll('discard'); });
+    await act(async () => gate.resolve(lookup));
+    await flush();
+    expect(late).toHaveBeenCalledWith({ ok: false, error: 'this workspace is closing' });
+    expect(handle.surfaceIds()).toEqual([]);
+  } finally { setToolsEnabled(false); }
 });

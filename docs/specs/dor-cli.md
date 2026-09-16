@@ -643,6 +643,12 @@ Source of truth: `dor/src/commands/skill.ts`, `scripts/generate-dor-skill.mjs`,
 
 Source of truth: `buildDorSurfacesInternal` in `lib/src/components/Wall.tsx`; `dispatchDorControlRequest` in `lib/src/lib/platform/dor-control-dispatch.ts`.
 
+## Dor Tools
+
+**Must route `dor tool` through the Tool launch contract**, including feature gating, approval, explicit-key reuse, and focus-neutral placement (`docs/specs/dor-tool.md` → CLI). Generated help owns syntax.
+
+Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `ToolSurfaceResponse` in `dor/src/commands/types.ts`.
+
 ## Future
 
 - **Surface a dead control channel in the UI.** A lost bind leaves one

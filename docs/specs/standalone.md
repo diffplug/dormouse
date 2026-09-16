@@ -595,6 +595,8 @@ Source of truth: `prepareWorkspaceTransfer` in
 `lib/src/components/wall/workspace-transfer.ts`, `standalone/src/workspace-move.ts`,
 `transfer_workspace` in `standalone/src-tauri/src/lib.rs`.
 
+Tool transfer follows `docs/specs/dor-tool.md` → Persistence and hosts.
+
 Live Activity and alarm delivery follow `docs/specs/alert.md` → Live Workspace transfer.
 
 ### Tear-out

@@ -12,12 +12,12 @@ import {
   SelectedIdContext,
 } from './wall-context';
 
-export function TerminalPanel(props: PaneProps) {
+export function TerminalPanel(props: PaneProps & { renderNotepad?: boolean; renderTerminal?: boolean }) {
   const context = useContext(TerminalContextContext);
   const mode = useContext(ModeContext);
   const selectedId = useContext(SelectedIdContext);
   const actions = useContext(WallActionsContext);
-  const isFocused = mode === 'passthrough' && selectedId === props.id && context.id !== props.id;
+  const isFocused = !props.parked && mode === 'passthrough' && selectedId === props.id && context.id !== props.id;
   const elRef = useRef<HTMLDivElement>(null);
   usePaneChrome(props.id, elRef);
 
@@ -29,8 +29,8 @@ export function TerminalPanel(props: PaneProps) {
       if (mouse.mouseReporting !== 'none' && mouse.override === 'off') return;
       context.open(props.id, { origin: { x: event.clientX, y: event.clientY } });
     }}>
-      <TerminalPane id={props.id} isFocused={isFocused} />
-      {context.mounted?.id !== props.id && <NotepadPanel surfaceId={props.id} />}
+      {props.renderTerminal !== false && <TerminalPane id={props.id} isFocused={isFocused} />}
+      {props.renderNotepad !== false && context.mounted?.id !== props.id && <NotepadPanel surfaceId={props.id} />}
     </div>
   );
 }

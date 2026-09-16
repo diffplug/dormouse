@@ -1,3 +1,6 @@
+import type { TransferredTools } from './tool-transfer';
+import { getToolAnnounce } from '../../lib/tool-announce-store';
+import type { ToolAnnounce } from '../../lib/tool-announce';
 import type { AlertRuntimeSnapshot } from '../../lib/alert-manager';
 import type { AlertDeliveryHandoff } from '../../lib/alert-delivery-state';
 import { snapshotTerminalState, type TransferredTerminalState } from '../../lib/terminal-state-store';
@@ -45,6 +48,7 @@ export interface ReleaseForTransferDeps {
   surfaceIds: () => string[];
   /** Whether a member Surface has a PTY behind it. */
   hasTerminal: (id: string) => boolean;
+  captureTools?: () => TransferredTools;
 }
 
 /**
@@ -57,6 +61,8 @@ export interface ReleaseForTransferDeps {
  */
 export interface PreparedWorkspaceTransfer {
   payload: WorkspaceTransferPayload;
+  /** Kept out of the durable payload; sent with the volatile content. */
+  tools?: TransferredTools;
   /**
    * The host took it. Forget the notes and detach every Session — **the point
    * of no return**, and never reachable from a Wall unmount.
@@ -99,8 +105,10 @@ export async function prepareWorkspaceTransfer(
   });
 
   const notepad = snapshotNotepadForTransfer(allIds);
+  const tools = deps.captureTools?.();
 
   return {
+    ...(tools && Object.keys(tools).length ? { tools } : {}),
     payload: {
       workspaceId: deps.workspaceId,
       workspace: { id: deps.workspaceId, name: deps.name, session },
@@ -130,6 +138,7 @@ export interface TransferredTerminal {
   /** The buffer as the escape stream that rebuilds it; `''` for a Session this
    *  Window no longer held. */
   serialized: string;
+  toolAnnounce?: ToolAnnounce;
   /** Grid at serialization, applied before replay and before destination fitting. */
   grid?: TerminalGrid;
   semanticState?: TransferredTerminalState;
@@ -144,7 +153,7 @@ export interface TransferredTerminal {
  *  passed, and attached to the arrival the host queued at the invoke. */
 export interface WorkspaceTransferContent {
   terminals: Record<string, TransferredTerminal>;
-
+  tools?: TransferredTools;
 }
 
 /**
@@ -167,7 +176,8 @@ export async function captureTransferContent(
     const terminal = getTerminalInstance(id);
     const grid = terminal ? { cols: terminal.cols, rows: terminal.rows } : undefined;
     const mark = marks.get(id);
-    terminals[id] = { serialized, ...(grid ? { grid, semanticState: snapshotTerminalState(id) } : {}), ...(mark === undefined ? {} : { mark }) };
+    const toolAnnounce = getToolAnnounce(id);
+    terminals[id] = { serialized, ...(toolAnnounce ? { toolAnnounce } : {}), ...(grid ? { grid, semanticState: snapshotTerminalState(id) } : {}), ...(mark === undefined ? {} : { mark }) };
   }
   return { terminals };
 }

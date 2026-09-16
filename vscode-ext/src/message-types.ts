@@ -1,3 +1,4 @@
+import type { ToolAnnounce } from '../../lib/src/lib/tool-announce';
 import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../../lib/src/lib/terminal-context-types';
 import type {
   AwaitOutcome,
@@ -7,7 +8,7 @@ import type { AlertSettings } from '../../lib/src/lib/alert-settings';
 import type { TerminalSemanticEvent } from '../../lib/src/lib/terminal-state';
 import type { TerminalColors } from '../../lib/src/lib/terminal-protocol';
 import type { DorControlCancelPayload, DorControlRequestPayload, DorControlResponsePayload } from '../../dor/src/protocol';
-import type { AgentBrowserStreamStatusResult, AlertStateDetail, IframeProxyResult, OpenPort } from '../../lib/src/lib/platform/types';
+import type { AgentBrowserStreamStatusResult, AlertStateDetail, IframeProxyResult, OpenPort, ToolControlResult, ToolHostRequest } from '../../lib/src/lib/platform/types';
 import type { VSCodeWorkbenchCommand } from '../../lib/src/lib/vscode-keybindings';
 import type { BurrowCommand, BurrowResult } from '../../lib/src/host/remote/service-protocol';
 import type { VolatileNotepadSnapshot } from '../../lib/src/lib/notepad/types';
@@ -35,6 +36,7 @@ export type WebviewMessage =
   | { type: 'agentBrowser:popOut'; session: string; url?: string; rect?: { x: number; y: number; width: number; height: number }; binaryPath?: string; requestId: string }
   | { type: 'agentBrowser:popIn'; session: string; url?: string; binaryPath?: string; requestId: string }
   | { type: 'iframe:createProxyUrl'; url: string; embedderOrigins: string[]; requestId: string }
+  | { type: 'tool:control'; request: ToolHostRequest; requestId: string }
   // Peer surfaces: the Burrow runs in the extension host, but the terminals
   // live in whichever webview opened them. See docs/specs/vscode.md → "Peer
   // surfaces". `op` is opaque to the router: the operation map lives in
@@ -92,6 +94,7 @@ export type ExtensionMessage =
   // so this never doubles the bytes on the wire (docs/specs/transport.md).
   | { type: 'pty:data'; id: string; data: string; textData?: string }
   | { type: 'pty:exit'; id: string; exitCode: number }
+  | { type: 'terminal:toolAnnounce'; id: string; announce: ToolAnnounce | null }
   | { type: 'terminal:semanticEvents'; id: string; events: TerminalSemanticEvent[] }
   | { type: 'pty:list'; ptys: PtyInfo[] }
   | { type: 'pty:replay'; id: string; data: string }
@@ -108,6 +111,7 @@ export type ExtensionMessage =
   | { type: 'agentBrowser:openResult'; requestId: string; ok: boolean; session?: string; wsPort?: number; binaryPath?: string; error?: string }
   | { type: 'agentBrowser:popResult'; requestId: string; ok: boolean; wsPort?: number; error?: string }
   | { type: 'iframe:proxyUrl'; requestId: string; result: IframeProxyResult }
+  | { type: 'tool:result'; requestId: string; result: ToolControlResult }
   | { type: 'peer:ask'; requestId: string; op: string; params: unknown }
   // Broadcast to every webview: `burrowRequestId` carries a per-adapter tag, so only the
   // one that asked finds a pending command to settle.
