@@ -14,7 +14,7 @@
 
 ## Capability gating
 
-**Must gate tool creation on `isToolsEnabled`.** The flag disables designation, not parsing of inert announcements or the capability predicates. Capability semantics belong to `docs/specs/glossary.md` → Panes and Surfaces; CLI reporting belongs to `docs/specs/dor-cli.md` → `dor list`.
+**Must gate tool creation on `isToolsEnabled`.** The flag disables new designation; existing Tools retain serving and exit cleanup. Inert announcement parsing and capability predicates remain active. Capability semantics belong to `docs/specs/glossary.md` → Panes and Surfaces; CLI reporting belongs to `docs/specs/dor-cli.md` → `dor list`.
 
 Source of truth: `isToolsEnabled` in `lib/src/lib/feature-flags.ts`; `surface.tool` in `lib/src/components/wall/use-dor-control.ts`; `useToolServing` in `lib/src/components/wall/use-tool-serving.ts`.
 

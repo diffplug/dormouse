@@ -268,7 +268,7 @@ describe('the settle memory resets on any exit (regression: PR #493 review)', ()
 });
 
 describe('agent-browser retirement on command exit', () => {
-  it('closes the daemon session, disposes the controller, and clears its params', async () => {
+  it.each([true, false])('retires the daemon and browser params with Tools enabled=%s', async (enabled) => {
     currentCommand = null;
     const params = {
       surfaceType: 'tool',
@@ -287,6 +287,7 @@ describe('agent-browser retirement on command exit', () => {
     // The first tick ran during mount before the close stub was installed; put
     // the browser state back, then let the next poll exercise retirement.
     state.set(params);
+    setToolsEnabled(enabled);
     await act(async () => { await vi.advanceTimersByTimeAsync(POLL_MS); });
 
     expect(close).toHaveBeenCalledWith('dormouse.1.tool-1', ['close'], '/opt/agent-browser');

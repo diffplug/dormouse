@@ -19,7 +19,6 @@ import {
 import { attachAgentBrowserSession } from './tool-browser-session';
 import { listenerUrlsByPort } from './port-url';
 import { getToolAnnounce } from '../../lib/tool-announce-store';
-import { isToolsEnabled } from '../../lib/feature-flags';
 import { sessionForKey } from 'dor-lib-common/agent-browser';
 import { markAgentBrowserSessionClosed } from './agent-browser-sessions';
 import { disposeAgentBrowserSurfaceController } from './agent-browser-surface-controller';
@@ -75,10 +74,6 @@ export function useToolServing({
     let cancelled = false;
 
     const tick = async () => {
-      // Per tick, not per mount: flipping the flag takes effect without a
-      // reload, as it does for `dor tool` (docs/specs/dor-tool.md -> Capability
-      // gating).
-      if (!isToolsEnabled()) return;
       if (paused()) return;
       const leaves = toolLeaves(lath, doorsRef.current);
       // A killed tool never reaches the exit branch below, so prune by absence.
