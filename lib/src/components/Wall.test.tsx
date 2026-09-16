@@ -1879,10 +1879,11 @@ describe('Wall on the Lath engine', () => {
 
       const retry = Promise.withResolvers<typeof failed>();
       toolControl.mockImplementation(async request => request.op === 'trust' ? { status: 'trust-recorded' } : retry.promise);
-      await act(async () => allow.click());
+      await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === 'Retry')!.click());
       expect(container.querySelector('[role="alert"]')).toBeNull();
       expect(toolControl.mock.calls.filter(([request]) => request.op === 'lookup')).toHaveLength(3);
-      const decline = [...container.querySelectorAll('button')].find(button => button.textContent === 'Disallow and close')!;
+      expect(toolControl.mock.calls.filter(([request]) => request.op === 'trust')).toHaveLength(1);
+      const decline = [...container.querySelectorAll('button')].find(button => button.textContent === 'Close')!;
       await act(async () => decline.click());
       await flush();
       await act(async () => retry.resolve(failed));
