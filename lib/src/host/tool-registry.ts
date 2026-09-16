@@ -7,6 +7,7 @@
  * bundle.
  */
 import { parse as parseYaml } from 'yaml';
+import { isRecord } from '../lib/is-record';
 
 /** Where a tool file came from. `$PROJECT_ROOT` exists only for `repo`. */
 export type ToolScope = 'repo' | 'user';
@@ -68,10 +69,6 @@ const SUBSTITUTION_TOKEN = /\$[A-Za-z_][A-Za-z0-9_]*/g;
 // destructive failure (two tools, one port), where failing to parse is loud.
 const KNOWN_PRESPAWN_FIELDS = new Set(['prespawn_dedupe']);
 const KNOWN_ENTRY_FIELDS = new Set(['run', 'render', 'port', 'prespawn_dedupe']);
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 /** Coerce one `prespawn_dedupe` value to its element list. A bare scalar is a
  *  one-element key, unambiguous because the field has exactly one value shape

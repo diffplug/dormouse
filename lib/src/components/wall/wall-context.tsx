@@ -64,7 +64,7 @@ export interface WallActions {
   resolveSurfaceRef: (id: string) => string;
   /** Resolve a pending tool's approval: grant and start it, or close its pane
    *  (docs/specs/dor-tool.md -> Trust). */
-  onResolveToolApproval?: (id: string, choice: 'upstream' | 'folder' | 'decline') => void;
+  onResolveToolApproval: (id: string, choice: 'upstream' | 'folder' | 'decline') => void;
 }
 
 export const WallActionsContext = createContext<WallActions>({

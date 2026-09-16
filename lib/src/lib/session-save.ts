@@ -172,7 +172,9 @@ export async function saveSession(
   else platform.saveState(session);
 }
 
-function toolCommandFromParams(params: Record<string, unknown> | undefined): string | null {
+/** The command a tool Surface was given, or null when it has none yet — what
+ *  persistence records and what a dedupe match re-runs. */
+export function toolCommandFromParams(params: Record<string, unknown> | undefined): string | null {
   const command = params?.command;
   return typeof command === 'string' && command.trim() ? command : null;
 }

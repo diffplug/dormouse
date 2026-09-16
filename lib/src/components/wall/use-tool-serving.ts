@@ -19,11 +19,13 @@ import {
 import { attachAgentBrowserSession } from './tool-browser-session';
 import { listenerUrlsByPort } from './port-url';
 import { getToolAnnounce } from '../../lib/tool-announce-store';
+import { isToolsEnabled } from '../../lib/feature-flags';
 import { sessionForKey } from 'dor-lib-common/agent-browser';
 import { markAgentBrowserSessionClosed } from './agent-browser-sessions';
 import { disposeAgentBrowserSurfaceController } from './agent-browser-surface-controller';
 import type { LathWallEngine } from './lath-wall-engine';
 import type { DooredItem } from './wall-types';
+import type { CommandRun } from '../../lib/terminal-state';
 
 // A serving command usually binds within a second or two of starting, but a
 // cold `pnpm` boot can take much longer, so this keeps polling for as long as
@@ -33,11 +35,11 @@ const POLL_MS = 1500;
 
 const neverPaused = () => false;
 
-type ToolLeaf = { id: string; params: Record<string, unknown> | undefined };
+type ToolLeaf = { id: string; params: Record<string, unknown> };
 
 /** The registered name a tool was spawned under; null for `dor tool -- <cmd>`. */
-function toolNameFromParams(params: Record<string, unknown> | undefined): string | null {
-  const name = params?.toolName;
+function toolNameFromParams(params: Record<string, unknown>): string | null {
+  const name = params.toolName;
   return typeof name === 'string' ? name : null;
 }
 
@@ -66,10 +68,6 @@ export function useToolServing({
   // A ref, not state: it drives no render, and a leaf's entry is dropped when
   // its command exits so a re-run settles again from scratch.
   const seenPorts = useRef<Map<string, number[]>>(new Map());
-  // The announced port last applied to each leaf. A changed announcement may
-  // re-point a live browser, but the same announcement must not keep undoing
-  // URL-bar navigation just because params.url no longer names that port.
-  const appliedAnnouncedPorts = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
     const platform = getPlatform();
@@ -77,6 +75,10 @@ export function useToolServing({
     let cancelled = false;
 
     const tick = async () => {
+      // Per tick, not per mount: flipping the flag takes effect without a
+      // reload, as it does for `dor tool` (docs/specs/dor-tool.md -> Capability
+      // gating).
+      if (!isToolsEnabled()) return;
       if (paused()) return;
       const leaves = toolLeaves(lath, doorsRef.current);
       // A killed tool never reaches the exit branch below, so prune by absence.
@@ -84,14 +86,14 @@ export function useToolServing({
       for (const id of seenPorts.current.keys()) {
         if (!live.has(id)) seenPorts.current.delete(id);
       }
-      for (const id of appliedAnnouncedPorts.current.keys()) {
-        if (!live.has(id)) appliedAnnouncedPorts.current.delete(id);
-      }
 
+      // Pass one, synchronous: fold in whatever the running commands announced
+      // and decide which leaves still need a port scan. Nothing here awaits, so
+      // no leaf can be retired out from under a later one.
+      const scanning: { leaf: ToolLeaf; run: CommandRun; announcedPort: number | null }[] = [];
       for (const leaf of leaves) {
-        if (cancelled || paused()) return;
         const run = getTerminalPaneState(leaf.id).currentCommand;
-        const running = run !== null && run.rawCommandLine === leaf.params?.command;
+        const running = run !== null && run.rawCommandLine === leaf.params.command;
         const announce = running ? getToolAnnounce(leaf.id) : null;
 
         // A runtime re-key re-labels this Surface and nothing else — it never
@@ -99,7 +101,7 @@ export function useToolServing({
         // namespace that keeps process output from claiming another tool's key
         // is `namespacedToolKey`'s job; see its doc comment.
         const announcedKey = namespacedToolKey(toolNameFromParams(leaf.params), announce?.key ?? null);
-        if (announcedKey && !toolKeysEqual(leaf.params?.toolKey, announcedKey)) {
+        if (announcedKey && !toolKeysEqual(leaf.params.toolKey, announcedKey)) {
           lath.store.updateParams(leaf.id, { toolKey: announcedKey });
         }
 
@@ -116,15 +118,12 @@ export function useToolServing({
         // behind, and the next run's first tick would compare equal to it and
         // commit immediately — framing whichever port bound earliest, which is
         // the regression the settle window exists to prevent.
-        if (!running) {
-          seenPorts.current.delete(leaf.id);
-          appliedAnnouncedPorts.current.delete(leaf.id);
-        }
+        if (!running) seenPorts.current.delete(leaf.id);
 
         if ((hasUrl || hasConflict) && !running) {
-          const session = typeof leaf.params?.session === 'string' ? leaf.params.session : null;
+          const session = typeof leaf.params.session === 'string' ? leaf.params.session : null;
           if (session) {
-            const binaryPath = typeof leaf.params?.binaryPath === 'string' ? leaf.params.binaryPath : undefined;
+            const binaryPath = typeof leaf.params.binaryPath === 'string' ? leaf.params.binaryPath : undefined;
             // Mark before close so a popped-out/stream-loss callback cannot
             // auto-relaunch a browser the command exit is retiring.
             markAgentBrowserSessionClosed(session);
@@ -145,43 +144,49 @@ export function useToolServing({
           });
           continue;
         }
-        // A conflict is a verdict about *guessing*, not a final state: the
-        // announcement always wins, so a tool that names its port after autobind
-        // has already refused must still be framed. Without the second clause
-        // the pane would show the conflict for the life of the command, telling
-        // the user to announce a port it had just announced.
         // An announcement outranks whatever autobind decided, framed or
-        // refused. Only a *changed* announced port re-points a live browser:
-        // treating a mismatch with params.url as a change would undo URL-bar
-        // navigation every poll after the user left the announced origin.
+        // refused: a conflict is a verdict about *guessing*, not a final state,
+        // so a tool that names its port after autobind refused must still be
+        // framed rather than be told to announce a port it just announced.
+        // Only a *changed* announced port re-points a live browser — treating a
+        // mismatch with params.url as a change would undo URL-bar navigation
+        // every poll after the user left the announced origin. The memory is
+        // `params.toolAnnouncedPort`, the announcement the framed URL came
+        // from, so there is no second map to keep in step with it.
         const announcedPort = announce?.port ?? null;
-        if (announcedPort === null) appliedAnnouncedPorts.current.delete(leaf.id);
-        if (!appliedAnnouncedPorts.current.has(leaf.id) && typeof leaf.params?.toolAnnouncedPort === 'number') {
-          appliedAnnouncedPorts.current.set(leaf.id, leaf.params.toolAnnouncedPort);
-        }
-        const announcedPortChanged = announcedPort !== null
-          && appliedAnnouncedPorts.current.get(leaf.id) !== announcedPort;
+        const announcedPortChanged = announcedPort !== null && leaf.params.toolAnnouncedPort !== announcedPort;
         if (!running) continue;
         if ((hasUrl || hasConflict) && !announcedPortChanged) continue;
+        scanning.push({ leaf, run, announcedPort });
+      }
 
-        let ports;
-        try {
-          ports = await platform.getOpenPorts!(leaf.id);
-        } catch {
-          continue; // A scan that fails is a scan that finds nothing yet.
-        }
+      if (scanning.length === 0 || cancelled || paused()) return;
+      // One scan per leaf, all in flight together: each shells out (lsof /
+      // PowerShell), so running them in series would make a Workspace of tools
+      // take that cost times the number of tools on every poll.
+      const scans = await Promise.all(
+        // A scan that fails is a scan that finds nothing yet.
+        scanning.map(({ leaf }) => platform.getOpenPorts!(leaf.id).catch(() => null)),
+      );
+
+      // Pass two: apply each verdict, re-checking the state every scan was
+      // decided against — the awaits above gave the Surface time to be killed,
+      // moved, or handed a different command.
+      for (let index = 0; index < scanning.length; index += 1) {
         if (cancelled || paused()) return;
-        if (!lath.getMeta(leaf.id) || getTerminalPaneState(leaf.id).currentCommand?.id !== run?.id) continue;
+        const ports = scans[index];
+        if (ports === null) continue;
+        const { leaf, run, announcedPort } = scanning[index];
+        if (!lath.getMeta(leaf.id) || getTerminalPaneState(leaf.id).currentCommand?.id !== run.id) continue;
         const entries = listenerUrlsByPort(ports);
         let entry;
 
-        if (announce?.port != null) {
+        if (announcedPort !== null) {
           // The announcement disambiguates; the scan supplies the number, so an
           // announced port that nothing bound frames nothing.
-          entry = entries.find((candidate) => candidate.port === announce.port);
+          entry = entries.find((candidate) => candidate.port === announcedPort);
           if (!entry) continue;
-          appliedAnnouncedPorts.current.set(leaf.id, announce.port);
-        } else if (leaf.params?.toolPort !== 'auto') {
+        } else if (leaf.params.toolPort !== 'auto') {
           // `announced`: never guess. No announcement, no browser.
           continue;
         } else {
@@ -214,7 +219,7 @@ export function useToolServing({
         // the daemon boots, and cannot race it (see docs/specs/dor-browser.md
         // -> Instant create). `toolFace` tests the conflict before the url, so
         // a stale verdict would keep the conflict forward over the browser.
-        const agentDrivable = leaf.params?.toolRender === 'ab-screencast';
+        const agentDrivable = leaf.params.toolRender === 'ab-screencast';
         lath.store.updateParams(leaf.id, {
           url: entry.url,
           renderMode: agentDrivable ? 'ab-screencast' : 'iframe',
@@ -238,7 +243,7 @@ export function useToolServing({
           session,
           surfaceId: leaf.id,
           refreshSurface: (id, patch) => {
-            if (!cancelled && getTerminalPaneState(id).currentCommand?.id === run?.id) lath.store.updateParams(id, patch);
+            if (!cancelled && getTerminalPaneState(id).currentCommand?.id === run.id) lath.store.updateParams(id, patch);
           },
         });
         // The Surface can be killed while the daemon boots. Param writes no-op
@@ -247,7 +252,7 @@ export function useToolServing({
         // `session` param this leaf no longer has. Close it here instead
         // (docs/specs/dor-tool.md -> Lifecycle: kill reaps the browser's
         // resources).
-        if (cancelled || !lath.getMeta(leaf.id) || getTerminalPaneState(leaf.id).currentCommand?.id !== run?.id) {
+        if (cancelled || !lath.getMeta(leaf.id) || getTerminalPaneState(leaf.id).currentCommand?.id !== run.id) {
           void platform.agentBrowserCommand?.(session, ['close']).catch(() => {});
         }
       }

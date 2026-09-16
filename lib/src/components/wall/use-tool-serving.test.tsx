@@ -8,10 +8,11 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakePtyAdapter, setPlatform } from '../../lib/platform';
+import { setToolsEnabled } from '../../lib/feature-flags';
 import { recordToolAnnounce, resetToolAnnounces } from '../../lib/tool-announce-store';
 import { useToolServing } from './use-tool-serving';
 import { captureToolParams } from './tool-transfer';
-import type { LathWallEngine } from './lath-wall-engine';
+import { createLathWallEngine, toolLeafMeta } from './lath-wall-engine';
 import type { OpenPort } from '../../lib/platform/types';
 
 const controllerMocks = vi.hoisted(() => ({
@@ -26,20 +27,17 @@ function tcp(port: number): OpenPort {
   return { protocol: 'tcp', family: 'IPv4', address: '127.0.0.1', port, pid: 1 };
 }
 
-/** Minimal Lath stand-in: one tool leaf whose params the hook reads and writes. */
-function fakeLath(params: Record<string, unknown>) {
-  const state = { params: { ...params } };
-  const updateParams = vi.fn((_id: string, patch: Record<string, unknown>) => {
-    for (const [key, value] of Object.entries(patch)) {
-      if (value === undefined) delete state.params[key];
-      else state.params[key] = value;
-    }
-  });
-  const lath = {
-    listPanes: () => [{ id: 'tool-1', params: state.params }],
-    getMeta: (id: string) => (id === 'tool-1' ? { params: state.params } : undefined),
-    store: { updateParams },
-  } as unknown as LathWallEngine;
+/** A real engine holding one tool leaf, the way the Wall builds one. */
+function toolEngine(params: Record<string, unknown>) {
+  const lath = createLathWallEngine();
+  lath.store.addLeaf('tool-1', toolLeafMeta('Tool', params), null);
+  const updateParams = vi.spyOn(lath.store, 'updateParams');
+  const state = {
+    get params() { return (lath.getMeta('tool-1')?.params ?? {}) as Record<string, unknown>; },
+    /** Write params the way anything outside the hook does — a URL-bar
+     *  navigation, a restore — since the store owns them. */
+    set(patch: Record<string, unknown>) { lath.store.updateParams('tool-1', patch); },
+  };
   return { lath, state, updateParams };
 }
 
@@ -53,6 +51,7 @@ vi.mock('../../lib/terminal-registry', () => ({
 
 beforeEach(() => {
   vi.useFakeTimers();
+  setToolsEnabled(true);
   resetToolAnnounces();
   currentCommand = 'x';
   container = document.createElement('div');
@@ -61,6 +60,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  setToolsEnabled(false);
   act(() => root.unmount());
   container.remove();
   vi.useRealTimers();
@@ -69,7 +69,7 @@ afterEach(() => {
 
 /** Mount the hook with a scripted sequence of scan results, one per tick. */
 async function run(params: Record<string, unknown>, scans: OpenPort[][]) {
-  const { lath, state, updateParams } = fakeLath(params);
+  const { lath, state, updateParams } = toolEngine(params);
   let call = 0;
   const platform = new FakePtyAdapter() as FakePtyAdapter & { getOpenPorts: () => Promise<OpenPort[]> };
   platform.getOpenPorts = vi.fn(async () => scans[Math.min(call++, scans.length - 1)] ?? []);
@@ -85,14 +85,14 @@ async function run(params: Record<string, unknown>, scans: OpenPort[][]) {
   for (let i = 1; i < scans.length; i += 1) {
     await act(async () => { await vi.advanceTimersByTimeAsync(POLL_MS); });
   }
-  return { state, updateParams, platform };
+  return { lath, state, updateParams, platform };
 }
 
 describe('port: announced', () => {
   const announced = { surfaceType: 'tool', command: 'x', toolPort: 'announced' };
 
   it('defers Workspace transfer until reopening an existing browser has settled', async () => {
-    const { lath, state } = fakeLath({
+    const { lath, state } = toolEngine({
       ...announced, toolRender: 'ab-screencast', renderMode: 'ab-screencast',
       session: 'existing-browser', wsPort: 9222, url: 'http://localhost:6006/', toolAnnouncedPort: 6006,
     });
@@ -127,7 +127,7 @@ describe('port: announced', () => {
   it('does not undo URL-bar navigation while the announcement is unchanged', async () => {
     recordToolAnnounce('tool-1', { port: 6006, name: null, key: null, dehydrate: false, persist: null });
     const { state, platform } = await run(announced, [[tcp(6006)]]);
-    state.params.url = 'https://example.com/docs';
+    state.set({ url: 'https://example.com/docs' });
 
     await act(async () => { await vi.advanceTimersByTimeAsync(POLL_MS); });
 
@@ -209,7 +209,7 @@ describe('an announcement overrides a committed conflict', () => {
     // The spec says the announcement always wins. A tool that names its port
     // *after* the set settled would otherwise be stuck on the conflict face for
     // the life of the command — told to announce a port it had just announced.
-    const { lath, state, updateParams } = fakeLath(auto);
+    const { lath, state, updateParams } = toolEngine(auto);
     let call = 0;
     const scans = [[tcp(1420), tcp(1422)], [tcp(1420), tcp(1422)], [tcp(1420), tcp(1422)]];
     const platform = new FakePtyAdapter() as FakePtyAdapter & { getOpenPorts: () => Promise<OpenPort[]> };
@@ -244,7 +244,7 @@ describe('the settle memory resets on any exit (regression: PR #493 review)', ()
     // Run 1 sees only the bridge and dies before committing anything. Keeping
     // that port list would make run 2's first tick compare equal and frame the
     // bridge — the exact regression the settle window exists to prevent.
-    const { lath, state } = fakeLath(auto);
+    const { lath, state } = toolEngine(auto);
     let call = 0;
     const scans = [[tcp(1422)], [tcp(1422)], [tcp(1422)]];
     const platform = new FakePtyAdapter() as FakePtyAdapter & { getOpenPorts: () => Promise<OpenPort[]> };
@@ -286,16 +286,16 @@ describe('agent-browser retirement on command exit', () => {
 
     // The first tick ran during mount before the close stub was installed; put
     // the browser state back, then let the next poll exercise retirement.
-    Object.assign(state.params, params);
+    state.set(params);
     await act(async () => { await vi.advanceTimersByTimeAsync(POLL_MS); });
 
     expect(close).toHaveBeenCalledWith('dormouse.1.tool-1', ['close'], '/opt/agent-browser');
     expect(controllerMocks.disposeAgentBrowserSurfaceController).toHaveBeenCalledWith('tool-1');
-    expect(state.params).not.toHaveProperty('url');
-    expect(state.params).not.toHaveProperty('session');
-    expect(state.params).not.toHaveProperty('wsPort');
-    expect(state.params).not.toHaveProperty('renderMode');
-    expect(state.params).not.toHaveProperty('syncEngaged');
+    expect(state.params.url).toBeUndefined();
+    expect(state.params.session).toBeUndefined();
+    expect(state.params.wsPort).toBeUndefined();
+    expect(state.params.renderMode).toBeUndefined();
+    expect(state.params.syncEngaged).toBeUndefined();
   });
 });
 
@@ -310,7 +310,7 @@ it('does not frame or re-key a different command running in a Tool Session', asy
 });
 
 it('ignores a scan that finishes after the command has changed', async () => {
-  const { lath, state } = fakeLath({ surfaceType: 'tool', command: 'x', toolPort: 'announced' });
+  const { lath, state } = toolEngine({ surfaceType: 'tool', command: 'x', toolPort: 'announced' });
   recordToolAnnounce('tool-1', { port: 6006, name: null, key: null, dehydrate: false, persist: null });
   let resolve!: (ports: OpenPort[]) => void;
   const platform = new FakePtyAdapter();
@@ -336,7 +336,7 @@ it('keeps the destination and browser binding after a Workspace transfer', async
 });
 
 it('does not commit an in-flight scan once its Workspace begins transferring', async () => {
-  const { lath, state } = fakeLath({ surfaceType: 'tool', command: 'x', toolPort: 'announced' });
+  const { lath, state } = toolEngine({ surfaceType: 'tool', command: 'x', toolPort: 'announced' });
   recordToolAnnounce('tool-1', { port: 6006, name: null, key: null, dehydrate: false, persist: null });
   const gate = Promise.withResolvers<OpenPort[]>();
   const platform = new FakePtyAdapter();

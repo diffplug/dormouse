@@ -7,12 +7,14 @@
  *
  * Granting is *not* implemented here: only a gesture in Dormouse's own chrome
  * may grant trust (`ToolApproval.tsx`). This module records the decision a
- * gesture produced and answers "is it trusted yet?".
+ * gesture produced — one file per grant, so two hosts sharing the state
+ * directory need no lock between them — and answers "is it trusted yet?".
  */
 import { constants } from 'node:fs';
-import { chmod, lstat, mkdir, open, readFile, readdir, rename, unlink, utimes, writeFile } from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
+import { lstat, open, stat } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
+import { writeJsonAtomic } from './atomic-json-file';
 import { ToolFileError, parseToolFile, type ToolEntry, type ToolFile } from './tool-registry';
 import { resolveUpstreamUrl } from './git-upstream';
 
@@ -70,14 +72,9 @@ async function readToolFile(path: string): Promise<string> {
     await file.close();
   }
 }
-const TRUST_FILE_NAME = 'tool-trust.json';
-const TRUST_LOCK_RETRY_MS = 20;
-const TRUST_LOCK_STALE_MS = 30_000;
 
-interface TrustLockParticipant {
-  readonly contents: string;
-  readonly mtimeMs: number;
-}
+/** Directory under the state dir; one file inside it per recorded grant. */
+const TRUST_DIR_NAME = 'tool-trust';
 
 /**
  * What a grant covers. `upstream` is the canonical remote URL the project's
@@ -87,7 +84,7 @@ interface TrustLockParticipant {
  */
 export type TrustGrantKind = 'upstream' | 'folder';
 
-/** A grant key: kind-prefixed so one map holds both without collisions. */
+/** A grant key: kind-prefixed so one directory holds both without collisions. */
 export function upstreamGrantKey(canonicalUrl: string): string {
   return `upstream:${canonicalUrl}`;
 }
@@ -95,273 +92,73 @@ export function folderGrantKey(root: string): string {
   return `folder:${resolve(root)}`;
 }
 
-interface TrustGrant {
-  readonly kind: TrustGrantKind;
-  /** ISO timestamp. Not read by anything yet; see the schema note below. */
-  readonly grantedAt: string;
-}
-
 /**
+ * One recorded grant — the whole content of one file.
+ *
  * There is no `denied`. A refusal closes the tool's pane and writes nothing, so
  * a reflexive decline cannot permanently disable tools for every checkout of a
  * repo — which would be unrecoverable, since nothing can revoke or even list a
  * decision (`docs/specs/dor-tool.md` -> Trust).
  *
- * The entry is an object rather than a bare `true` on purpose:
+ * A file rather than a bare marker on purpose:
  * `docs/specs/remote-security-model.md` designed revocation into its ACL record
  * from the start and still shipped without callers, but the *field* was there.
- * A flat boolean map has nowhere to put one, so adding revocation later would be
- * a schema change on a security file.
+ * An empty marker file has nowhere to put one, so adding revocation later would
+ * be a schema change on a security file. `key` is here for the same reason: the
+ * name on disk is a hash, so only the file itself can say what was granted.
  */
-interface TrustFile {
+interface TrustGrant {
   readonly version: 1;
-  readonly grants: Record<string, TrustGrant>;
+  readonly key: string;
+  readonly kind: TrustGrantKind;
+  /** ISO timestamp. Not read by anything yet; see the schema note above. */
+  readonly grantedAt: string;
 }
 
-function emptyTrust(): TrustFile {
-  return { version: 1, grants: {} };
+function newGrant(key: string, kind: TrustGrantKind): TrustGrant {
+  return { version: 1, key, kind, grantedAt: new Date().toISOString() };
 }
 
 /**
- * Read a stored file, migrating the pre-versioned shape.
+ * Records grants, one file per grant under `<stateDir>/tool-trust/`, named for
+ * the SHA-256 of its key.
  *
- * v0 was `{ roots: Record<absPath, 'trusted' | 'denied'> }`. Its trusted entries
- * become folder grants; its denials are dropped, because the state no longer
- * exists and a stored denial would otherwise be permanent and invisible.
+ * Grants are add-only and idempotent, so nothing here merges and nothing here
+ * locks: two hosts granting at once write two different paths, and two hosts
+ * granting the same key write the same bytes. The write is still
+ * temp-then-rename, so a crash mid-write cannot leave a truncated file — and,
+ * because existence alone is the grant, cannot leave a partial one that reads as
+ * trusted either.
  */
-function parseTrustFile(parsed: unknown): TrustFile {
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return emptyTrust();
-  const record = parsed as { version?: unknown; grants?: unknown; roots?: unknown };
-
-  if (record.version === 1 && record.grants && typeof record.grants === 'object' && !Array.isArray(record.grants)) {
-    const grants: Record<string, TrustGrant> = {};
-    for (const [key, value] of Object.entries(record.grants as Record<string, unknown>)) {
-      const grant = value as { kind?: unknown; grantedAt?: unknown };
-      if (grant?.kind !== 'upstream' && grant?.kind !== 'folder') continue;
-      grants[key] = { kind: grant.kind, grantedAt: typeof grant.grantedAt === 'string' ? grant.grantedAt : '' };
-    }
-    return { version: 1, grants };
-  }
-
-  if (record.roots && typeof record.roots === 'object' && !Array.isArray(record.roots)) {
-    const grants: Record<string, TrustGrant> = {};
-    for (const [root, decision] of Object.entries(record.roots as Record<string, unknown>)) {
-      if (decision !== 'trusted') continue;
-      grants[folderGrantKey(root)] = { kind: 'folder', grantedAt: '' };
-    }
-    return { version: 1, grants };
-  }
-
-  return emptyTrust();
-}
-
-/** Records grants. One small JSON file, written temp-then-rename so a crash
- *  mid-write cannot leave a truncated file that reads as "nothing is trusted". */
 export class FileToolTrustStore {
   readonly #dir: string;
-  readonly #path: string;
-  readonly #lockPath: string;
 
   constructor(stateDir: string) {
-    this.#dir = stateDir;
-    this.#path = join(stateDir, TRUST_FILE_NAME);
-    this.#lockPath = `${this.#path}.lock`;
+    this.#dir = join(stateDir, TRUST_DIR_NAME);
+  }
+
+  /** Hashed rather than escaped: a key is an arbitrary URL or absolute path,
+   *  and a hash is a filename on every platform with no length limit to hit. */
+  #pathFor(key: string): string {
+    return join(this.#dir, `${createHash('sha256').update(key).digest('hex')}.json`);
   }
 
   /** Whether any of these keys has been granted. Callers pass every key that
    *  would cover this project — the upstream and the folder — so one lookup
    *  answers "may this run?". */
   async isTrusted(keys: readonly string[]): Promise<boolean> {
-    const { grants } = await this.#read();
-    return keys.some((key) => grants[key] !== undefined);
-  }
-
-  /** Record a grant a human made in Dormouse's chrome. */
-  async grant(key: string, kind: TrustGrantKind): Promise<void> {
-    const release = await this.#acquireCommitLock();
-    try {
-      // Read only after acquiring the cross-process lock. Every host sharing
-      // this global directory therefore merges against the latest committed
-      // file rather than a snapshot captured before another grant.
-      const current = await this.#read();
-      const next: TrustFile = {
-        version: 1,
-        grants: { ...current.grants, [key]: { kind, grantedAt: new Date().toISOString() } },
-      };
-      await this.#write(next);
-    } finally {
-      await release();
-    }
-  }
-
-  async #read(): Promise<TrustFile> {
-    try {
-      return parseTrustFile(JSON.parse(await readFile(this.#path, 'utf-8')));
-    } catch {
-      // A missing file is the common case (nothing trusted yet). A corrupt one
-      // starts empty rather than throwing: failing closed here means every tool
-      // stops working, and the cost of starting empty is one more approval.
-      return emptyTrust();
-    }
-  }
-
-  async #ensureDir(): Promise<void> {
-    await mkdir(this.#dir, { recursive: true, mode: 0o700 });
-    if (process.platform !== 'win32') await chmod(this.#dir, 0o700).catch(() => {});
-  }
-
-  async #ensureLockDirectory(): Promise<void> {
-    for (;;) {
-      try {
-        await mkdir(this.#lockPath, { recursive: true, mode: 0o700 });
-        return;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      }
-
-      // The lock was one file before it became a directory of participants.
-      // `recursive` tolerates an existing directory but not that leftover file,
-      // so remove the obsolete shape before trying the directory create again.
-      try {
-        await unlink(this.#lockPath);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
-        // Another new host may have won the migration between our failed mkdir
-        // and unlink. In that case the desired directory already exists.
-        const entry = await lstat(this.#lockPath).catch(() => null);
-        if (entry?.isDirectory()) return;
-        throw error;
-      }
-    }
-  }
-
-  async #acquireCommitLock(): Promise<() => Promise<void>> {
-    await this.#ensureDir();
-    await this.#ensureLockDirectory();
-    const token = randomUUID();
-    const choosingPath = join(this.#lockPath, `choosing-${token}.json`);
-    const ticketPath = join(this.#lockPath, `ticket-${token}.json`);
-    const owner = { pid: process.pid, token };
-    await writeFile(choosingPath, JSON.stringify(owner), { flag: 'wx', mode: 0o600 });
-    let ticket: number;
-    try {
-      ticket = 1 + await this.#highestPublishedTicket();
-      await writeFile(ticketPath, JSON.stringify({ ...owner, ticket }), { flag: 'wx', mode: 0o600 });
-    } finally {
-      await unlink(choosingPath).catch(() => {});
-    }
-
-    // A live participant refreshes its unique file, so a genuinely long grant
-    // keeps its lease while a crash whose pid is later recycled still ages out.
-    // Unique participant paths make recovery race-free: no waiter ever unlinks
-    // the pathname a newer owner would reuse.
-    const heartbeat = setInterval(() => {
-      const now = new Date();
-      void utimes(ticketPath, now, now).catch(() => {});
-    }, TRUST_LOCK_STALE_MS / 3);
-    heartbeat.unref?.();
-
-    try {
-      for (;;) {
-        if (!await this.#hasEarlierParticipant(token, ticket)) break;
-        await new Promise((resolve) => setTimeout(resolve, TRUST_LOCK_RETRY_MS));
-      }
-      return async () => {
-        clearInterval(heartbeat);
-        await unlink(ticketPath).catch(() => {});
-      };
-    } catch (error) {
-      clearInterval(heartbeat);
-      await unlink(ticketPath).catch(() => {});
-      throw error;
-    }
-  }
-
-  async #highestPublishedTicket(): Promise<number> {
-    let highest = 0;
-    for (const name of await readdir(this.#lockPath)) {
-      if (!name.startsWith('ticket-')) continue;
-      const participant = await this.#readLockParticipant(join(this.#lockPath, name));
-      if (!participant || await this.#reapIfStale(join(this.#lockPath, name), participant)) continue;
-      try {
-        const value = JSON.parse(participant.contents) as { ticket?: unknown };
-        if (typeof value.ticket === 'number' && Number.isSafeInteger(value.ticket) && value.ticket > highest) {
-          highest = value.ticket;
-        }
-      } catch {
-        // A fresh malformed participant is handled as a blocker in the wait
-        // loop; it cannot safely contribute a ticket number here.
-      }
-    }
-    return highest;
-  }
-
-  async #hasEarlierParticipant(token: string, ticket: number): Promise<boolean> {
-    for (const name of await readdir(this.#lockPath)) {
-      const isChoosing = name.startsWith('choosing-');
-      const isTicket = name.startsWith('ticket-');
-      if (!isChoosing && !isTicket) continue;
-      const path = join(this.#lockPath, name);
-      const participant = await this.#readLockParticipant(path);
-      if (!participant || await this.#reapIfStale(path, participant)) continue;
-      let value: { token?: unknown; ticket?: unknown };
-      try {
-        value = JSON.parse(participant.contents) as typeof value;
-      } catch {
-        return true;
-      }
-      if (value.token === token) continue;
-      if (typeof value.token !== 'string') return true;
-      // Lamport's choosing marker closes the race where two processes inspect
-      // the same maximum before either publishes its ticket.
-      if (isChoosing) return true;
-      if (typeof value.ticket !== 'number' || !Number.isSafeInteger(value.ticket)) return true;
-      if (value.ticket < ticket || (value.ticket === ticket && value.token < token)) return true;
+    for (const key of keys) {
+      // Existence is the grant; the contents are for a future revocation UI.
+      // A directory or anything else at that path is not one.
+      const entry = await stat(this.#pathFor(key)).catch(() => null);
+      if (entry?.isFile()) return true;
     }
     return false;
   }
 
-  async #readLockParticipant(path: string): Promise<TrustLockParticipant | null> {
-    let participant;
-    try {
-      participant = await open(path, constants.O_RDONLY);
-      const info = await participant.stat();
-      return { contents: await participant.readFile('utf-8'), mtimeMs: info.mtimeMs };
-    } catch {
-      return null;
-    } finally {
-      await participant?.close().catch(() => {});
-    }
-  }
-
-  async #reapIfStale(path: string, participant: TrustLockParticipant): Promise<boolean> {
-    let owner: { pid?: unknown } = {};
-    try {
-      owner = JSON.parse(participant.contents) as typeof owner;
-    } catch {
-      // A publisher exposes an empty file only while its choosing marker is
-      // present. Keep any fresh malformed record until its lease expires.
-    }
-    if (typeof owner.pid === 'number' && Number.isInteger(owner.pid) && owner.pid > 0) {
-      try {
-        process.kill(owner.pid, 0);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ESRCH') {
-          await unlink(path).catch(() => {});
-          return true;
-        }
-      }
-    }
-    if (Date.now() - participant.mtimeMs <= TRUST_LOCK_STALE_MS) return false;
-    await unlink(path).catch(() => {});
-    return true;
-  }
-
-  async #write(state: TrustFile): Promise<void> {
-    await this.#ensureDir();
-    const tmp = `${this.#path}.${randomUUID()}.tmp`;
-    await writeFile(tmp, JSON.stringify(state), { mode: 0o600 });
-    await rename(tmp, this.#path);
+  /** Record a grant a human made in Dormouse's chrome. */
+  async grant(key: string, kind: TrustGrantKind): Promise<void> {
+    await writeJsonAtomic(this.#dir, this.#pathFor(key), newGrant(key, kind));
   }
 }
 
@@ -374,7 +171,7 @@ export class MemoryToolTrustStore {
   }
 
   async grant(key: string, kind: TrustGrantKind): Promise<void> {
-    this.#grants.set(key, { kind, grantedAt: new Date().toISOString() });
+    this.#grants.set(key, newGrant(key, kind));
   }
 }
 
@@ -473,14 +270,16 @@ export async function lookupTool(
     };
   }
 
-  // Either grant covers this project: the upstream every worktree shares, or
-  // this folder alone. Resolved before the check so the approval UI can offer
-  // both, and so a hit on either short-circuits identically.
+  // Either grant covers this project: this folder alone, or the upstream every
+  // worktree shares. The folder key is free, so it is checked first — a granted
+  // folder answers without spawning git at all.
+  const ok = { status: 'ok', projectRoot: found.dir, path: found.path, file, entry } as const;
+  if (await trust.isTrusted([folderGrantKey(found.dir)])) return ok;
+
+  // Only now pay for git, which the untrusted answer needs anyway so the
+  // approval UI can offer the upstream grant.
   const upstreamUrl = await resolveUpstream(found.dir);
-  const keys = [folderGrantKey(found.dir), ...(upstreamUrl ? [upstreamGrantKey(upstreamUrl)] : [])];
-  if (await trust.isTrusted(keys)) {
-    return { status: 'ok', projectRoot: found.dir, path: found.path, file, entry };
-  }
+  if (upstreamUrl && await trust.isTrusted([upstreamGrantKey(upstreamUrl)])) return ok;
   return {
     status: 'untrusted',
     projectRoot: found.dir,
