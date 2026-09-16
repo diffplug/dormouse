@@ -1,6 +1,6 @@
 /**
- * The take-over gate: `dor tool` typed alone at a prompt runs the tool in that
- * pane instead of splitting (`docs/specs/dor-tool.md` -> Take-over).
+ * The take-over gate: `dor tool` or `dor open` typed alone at a prompt runs the
+ * tool in that pane instead of splitting (`docs/specs/dor-tool.md` -> Take-over).
  *
  * Pure predicates over facts the host has already read, so the placement rule is
  * testable without a Wall: the handler in `use-dor-control.ts` gathers the
@@ -16,7 +16,7 @@ const COMPOUND_SYNTAX = /[;&|<>()`\n\r]/;
 
 /**
  * Whether the shell reported running exactly one command and that command is
- * `dor tool` — the human-intent signal, not a security boundary
+ * the requested `dor` verb — the human-intent signal, not a security boundary
  * (`docs/specs/dor-tool.md` -> Take-over). Case folds on the launcher, which is
  * a filename, and not on the verb, which stricli parses case-sensitively.
  */
@@ -29,8 +29,7 @@ export function isNakedToolInvocation(rawCommandLine: string | null | undefined,
 
 /** What the placement rule reads. Every field is already known to the handler. */
 export interface ToolTakeoverGate {
-  /** The `dor` verb the request came from: `open` never transforms a plain
-   *  terminal, but may re-run its own Tool pane. */
+  /** The `dor` verb the request came from. */
   verb: 'tool' | 'open';
   /** `--surface`: an explicit placement, which take-over must not override. */
   explicitSurface: boolean;
@@ -66,13 +65,12 @@ function callerTypedTool(gate: ToolTakeoverGate): boolean {
 }
 
 /**
- * Whether this `dor tool` transforms its calling pane into the tool. Every
+ * Whether this Tool launch transforms its calling pane into the tool. Every
  * condition is conservative — failing one is a split, which is never wrong
  * (rationale).
  */
 export function toolTakesOverCaller(gate: ToolTakeoverGate): boolean {
-  return gate.verb === 'tool'
-    && gate.workspaceActive
+  return gate.workspaceActive
     && !gate.explicitSurface
     && !gate.minimized
     && callerStillPlaceable(gate)

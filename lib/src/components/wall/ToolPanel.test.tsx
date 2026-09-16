@@ -4,6 +4,8 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToolPanel } from './ToolPanel';
 
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+
 vi.mock('./TerminalPanel', () => ({
   TerminalPanel: () => <div data-testid="terminal">terminal</div>,
 }));
@@ -53,6 +55,22 @@ describe('ToolPanel', () => {
     expect(container.querySelector('[data-testid="browser"]')).not.toBeNull();
   });
 
+  it.each([
+    ['terminal', booting],
+    ['iframe', serving],
+    ['agent-browser', { ...serving, renderMode: 'ab-screencast' }],
+  ])('hides the %s face with its Workspace or parked leaf and restores only the foreground face', (_face, params) => {
+    show(params);
+    const terminal = half('terminal');
+    const browser = half('browser');
+    container.style.visibility = 'hidden';
+    expect(getComputedStyle(terminal).visibility).toBe('hidden');
+    expect(getComputedStyle(browser).visibility).toBe('hidden');
+    container.style.visibility = 'visible';
+    expect(getComputedStyle('url' in params ? browser : terminal).visibility).toBe('visible');
+    expect(getComputedStyle('url' in params ? terminal : browser).visibility).toBe('hidden');
+  });
+
   it('hides with visibility, never display', () => {
     // A display:none container measures zero, so the fit addon would resize the
     // PTY to a degenerate size and reflow the output of the command still
@@ -66,14 +84,14 @@ describe('ToolPanel', () => {
 
   it('shows the terminal and hides the browser before the tool serves', () => {
     show(booting);
-    expect(half('terminal').style.visibility).toBe('visible');
+    expect(getComputedStyle(half('terminal')).visibility).toBe('visible');
     expect(half('browser').style.visibility).toBe('hidden');
   });
 
   it('shows the browser once serving', () => {
     show(serving);
     expect(half('terminal').style.visibility).toBe('hidden');
-    expect(half('browser').style.visibility).toBe('visible');
+    expect(getComputedStyle(half('browser')).visibility).toBe('visible');
   });
 
   it('parks the browser while it is hidden, so a screencast stops decoding', () => {

@@ -43,28 +43,22 @@ describe('isNakedToolInvocation', () => {
   });
 });
 
-describe('toolTakesOverCaller', () => {
+describe.each(['tool', 'open'] as const)('toolTakesOverCaller for dor %s', (verb) => {
   const passing: ToolTakeoverGate = {
-    verb: 'tool',
+    verb,
     explicitSurface: false,
     minimized: false,
     workspaceActive: true,
     visible: true,
     kind: 'terminal',
     oscDriven: true,
-    rawCommandLine: 'dor tool storybook',
+    rawCommandLine: verb === 'tool' ? 'dor tool storybook' : 'dor open README.md',
     cwdMatches: true,
     helperPresent: false,
   };
 
   it('takes over the pane the invocation was typed in', () => {
     expect(toolTakesOverCaller(passing)).toBe(true);
-  });
-
-  it('only permits open to rerun an existing Tool, never take over a terminal', () => {
-    const opening: ToolTakeoverGate = { ...passing, verb: 'open', rawCommandLine: 'dor open README.md' };
-    expect(toolTakesOverCaller(opening)).toBe(false);
-    expect(toolRerunsInCaller({ ...opening, kind: 'tool' })).toBe(true);
   });
 
   it('splits when any condition fails', () => {
@@ -78,6 +72,8 @@ describe('toolTakesOverCaller', () => {
       ['the caller is a browser', { kind: 'browser' }],
       ['the shell reports no OSC 633', { oscDriven: false }],
       ['the line is not naked', { rawCommandLine: 'claude' }],
+      ['the line is compound', { rawCommandLine: `${passing.rawCommandLine} && echo done` }],
+      ['the verb does not match', { rawCommandLine: verb === 'tool' ? 'dor open README.md' : 'dor tool storybook' }],
       ['--cwd named another directory', { cwdMatches: false }],
     ];
     for (const [why, override] of splits) {

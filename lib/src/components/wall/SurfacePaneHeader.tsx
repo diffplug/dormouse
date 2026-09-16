@@ -1,6 +1,7 @@
 import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { usePopoverFocusTrap } from '../use-popover-focus-trap';
+import { useSurfaceVisibility } from './use-surface-visibility';
 import { useNoteCount } from '../use-notepad';
 import { clampOverlayPosition } from '../../lib/ui-geometry';
 import {
@@ -41,9 +42,12 @@ import {
   useDialogKeyboardOwner,
 } from './wall-context';
 
-export function SurfacePaneHeader({ id, title, params }: PaneProps) {
+export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
   const reportedDirty = useToolDirty(id);
   const dirty = isToolParams(params) && reportedDirty === true;
+  const visible = useSurfaceVisibility(parked);
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
   const mode = useContext(ModeContext);
   const selectedId = useContext(SelectedIdContext);
   const windowFocused = useContext(WindowFocusedContext);
@@ -78,7 +82,7 @@ export function SurfacePaneHeader({ id, title, params }: PaneProps) {
   // keyboard handler stands down (the panel's own key-forwarder skips editable
   // targets); the editor closes itself when the surface stops being a browser.
   const [editingUrl, setEditingUrl] = useState(false);
-  useDialogKeyboardOwner(editingUrl);
+  useDialogKeyboardOwner(editingUrl && visible);
   useEffect(() => {
     if (!screen && editingUrl) setEditingUrl(false);
   }, [screen, editingUrl]);
@@ -99,7 +103,10 @@ export function SurfacePaneHeader({ id, title, params }: PaneProps) {
   const [menuAnchor, setMenuAnchor] = useState<DOMRect | null>(null);
   const noteCount = useNoteCount(id);
   const overflowLabel = `Browser controls${noteCount ? `, ${noteCount} ${noteCount === 1 ? 'note' : 'notes'}` : ''}`;
-  const closeMenu = useCallback((restoreFocus = true) => { setMenuAnchor(null); setEditingUrl(false); if (restoreFocus) overflowRef.current?.focus(); }, []);
+  const closeMenu = useCallback((restoreFocus = true) => { setMenuAnchor(null); setEditingUrl(false); if (restoreFocus && visibleRef.current) overflowRef.current?.focus(); }, []);
+  useEffect(() => {
+    if (!visible) closeMenu(false);
+  }, [visible, closeMenu]);
   useLayoutEffect(() => {
     const header = headerRef.current;
     if (!header) return;
@@ -271,7 +278,7 @@ export function SurfacePaneHeader({ id, title, params }: PaneProps) {
       <ToolDirtyIndicator dirty={dirty} />
       {compact ? (
         <button ref={overflowRef} type="button" aria-label={overflowLabel}
-          aria-haspopup="dialog" aria-expanded={menuAnchor !== null}
+          aria-haspopup="dialog" aria-expanded={visible && menuAnchor !== null}
           title={overflowLabel}
           className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded hover:bg-current/10"
           onMouseDown={event => event.stopPropagation()}
@@ -280,7 +287,7 @@ export function SurfacePaneHeader({ id, title, params }: PaneProps) {
         </button>
       ) : browserControls}
       {inlinePaneActions && paneActions}
-      {compact && menuAnchor && <BrowserHeaderPopover anchor={menuAnchor} onClose={closeMenu}>
+      {visible && compact && menuAnchor && <BrowserHeaderPopover anchor={menuAnchor} onClose={closeMenu}>
         {browserControls}
         {!inlinePaneActions && paneActions}
       </BrowserHeaderPopover>}
