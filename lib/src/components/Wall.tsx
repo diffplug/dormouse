@@ -1620,6 +1620,10 @@ export function Wall({
     try {
       await queueToolSpawn(async () => {
         if (!isCurrent()) return;
+        if (pending.error !== undefined) {
+          pending = { ...pending, error: undefined };
+          lath.store.updateParams(id, { toolPending: pending });
+        }
         const platform = getPlatform();
         if (!pending.trustRecorded) {
           // A stale Retry action cannot grant trust.

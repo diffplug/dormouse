@@ -2,8 +2,7 @@ import { useContext, useEffect, type RefObject } from 'react';
 import { PaneElementsContext } from './wall-context';
 
 /**
- * Shared surface-pane boilerplate used by every panel component
- * (terminal / iframe / agent-browser): registers the pane's root element in
+ * Registers a Surface body's root element in
  * `PaneElementsContext` so overlays (the selection ring, kill overlay,
  * shell-spawn notice) can measure it, and unregisters on unmount.
  */

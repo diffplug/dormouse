@@ -1841,6 +1841,42 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it('moves the selection ring from a terminal to a pending Tool approval', async () => {
+    setToolsEnabled(true);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const left = this.dataset.lathLeaf === 'pane-a' ? 100 : 500;
+      return { x: left, y: 40, left, top: 40, right: left + 300, bottom: 240, width: 300, height: 200, toJSON() {} };
+    });
+    (fake as FakePtyAdapter & Pick<PlatformAdapter, 'toolControl'>).toolControl = vi.fn(async () => ({
+      status: 'untrusted' as const, projectRoot: '/repo', path: '/repo/dormouse.yml',
+      name: 'storybook', run: 'pnpm storybook', upstreamUrl: null,
+    }));
+    const ring = () => container.querySelector('[data-ring="outline"]')?.closest('svg')?.parentElement;
+    try {
+      await act(async () => { root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />); });
+      await flush();
+      expect(ring()?.style.left).toBe('96px');
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.tool,
+            params: { name: 'storybook', cwd: '/repo', minimized: false, fresh: false },
+            respond: vi.fn(),
+          },
+        }));
+      });
+      await flush();
+      expect(container.textContent).toContain('Always allow for folder');
+      const approvalHeader = container.querySelector<HTMLElement>('[data-lath-leaf]:not([data-lath-leaf="pane-a"]) .lath-leaf-header > div');
+      expect(approvalHeader).not.toBeNull();
+      await act(async () => { approvalHeader!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); });
+      await flush();
+      expect(ring()?.style.left).toBe('496px');
+    } finally {
+      setToolsEnabled(false);
+    }
+  });
+
   it.each([true, false])('keeps a tool deferred until trust succeeds (%s), lookup and shell staging finish', async grantSucceeds => {
     setToolsEnabled(true);
     let toolId: string | undefined;
@@ -1917,7 +1953,39 @@ describe('Wall on the Lath engine', () => {
         expect(toolControl.mock.calls.filter(([request]) => request.op === 'lookup')).toHaveLength(1);
         expect(container.querySelector(`[data-lath-leaf="${toolId}"]`)).not.toBeNull();
         expect(pendingShellOpts.has(toolId)).toBe(false);
-        expect(container.textContent).toContain('grant could not be saved');
+        expect(container.querySelector('[role="alert"]')?.textContent).toBe('grant could not be saved');
+        // A hidden Workspace can miss a transient notice. Its approval error
+        // remains when shown again, well past the old notice interval.
+        container.hidden = true;
+        vi.useFakeTimers();
+        await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+        vi.useRealTimers();
+        container.hidden = false;
+        expect(container.querySelector('[role="alert"]')?.textContent).toBe('grant could not be saved');
+
+        const retryGate = Promise.withResolvers<{ status: 'error'; message: string }>();
+        toolControl.mockImplementation(() => retryGate.promise);
+        await act(async () => { allow!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+        expect(toolControl.mock.calls.filter(([request]) => request.op === 'trust')).toHaveLength(2);
+        expect(container.querySelector('[role="alert"]')).toBeNull();
+        expect(container.querySelector(`[data-session-id="${toolId}"]`)).toBeNull();
+
+        await act(async () => { retryGate.resolve({ status: 'error', message: 'retry grant failed' }); });
+        expect(container.querySelector('[role="alert"]')?.textContent).toBe('retry grant failed');
+
+        const staleGate = Promise.withResolvers<{ status: 'error'; message: string }>();
+        toolControl.mockImplementation(() => staleGate.promise);
+        await act(async () => { allow!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+        expect(container.querySelector('[role="alert"]')).toBeNull();
+        const decline = Array.from(container.querySelectorAll('button'))
+          .find(button => button.textContent === 'Disallow and close');
+        await act(async () => { decline!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+        await flush();
+        await act(async () => { staleGate.resolve({ status: 'error', message: 'late rejected grant' }); });
+        await flush();
+        expect(container.querySelector(`[data-lath-leaf="${toolId}"]`)).toBeNull();
+        expect(container.textContent).not.toContain('late rejected grant');
+        expect(pendingShellOpts.has(toolId)).toBe(false);
         return;
       }
 
@@ -1938,6 +2006,7 @@ describe('Wall on the Lath engine', () => {
       expect(container.querySelector(`[data-session-id="${toolId}"]`)).not.toBeNull();
       expect(pendingShellOpts.get(toolId)?.untouched).toBe(false);
     } finally {
+      vi.useRealTimers();
       if (toolId) pendingShellOpts.delete(toolId);
       setToolsEnabled(false);
     }
