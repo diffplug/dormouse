@@ -229,10 +229,16 @@ describe('VSCodeAdapter PTY exit handling', () => {
     const adapter = new VSCodeAdapter();
     windowTarget.dispatchEvent(hostMessage({ type: 'terminal:toolAnnounce', id: 'tool-1', announce: { port: 6006, name: null, key: null, dehydrate: false, persist: null } }));
     expect(getToolAnnounce('tool-1')?.port).toBe(6006);
+    windowTarget.dispatchEvent(hostMessage({ type: 'terminal:toolAnnounce', id: 'tool-1', announce: null }));
+    expect(getToolAnnounce('tool-1')).toBeNull();
     const repliesBeforeReplay = postMessage.mock.calls.length;
     windowTarget.dispatchEvent(hostMessage({ type: 'pty:replay', id: 'tool-1', data: '\x1b]367;serve;{"port":6007}\x1b\\' }));
     expect(getToolAnnounce('tool-1')?.port).toBe(6007);
     expect(postMessage.mock.calls).toHaveLength(repliesBeforeReplay);
+    windowTarget.dispatchEvent(hostMessage({ type: 'pty:replay', id: 'tool-1', data: '\x1b]633;C\x07' }));
+    expect(getToolAnnounce('tool-1')).toBeNull();
+    windowTarget.dispatchEvent(hostMessage({ type: 'pty:replay', id: 'tool-1', data: '\x1b]633;C\x07\x1b]367;serve;{"port":6008}\x07' }));
+    expect(getToolAnnounce('tool-1')?.port).toBe(6008);
   });
 
   it('parses replay buffers into semantic events and strips OSCs before forwarding', () => {

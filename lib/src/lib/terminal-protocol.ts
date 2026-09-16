@@ -1,7 +1,7 @@
 import type { ActivityNotification, ProtocolProgressUpdate } from './alert-manager';
 import { parseColor } from './css-color';
 import { sanitizeText, truncateText } from './osc-sanitize';
-import { recordToolAnnounce } from './tool-announce-store';
+import { recordToolAnnounces } from './tool-announce-store';
 import { parseToolAnnounce, type ToolAnnounce } from './tool-announce';
 import {
   STRING_CONTROL_INTRODUCER,
@@ -433,20 +433,18 @@ export function applyTerminalProtocolEvents(
   id: string,
   events: TerminalProtocolEvent[],
 ): void {
+  recordToolAnnounces(id, events);
   for (const event of events) {
     if (event.kind === 'notification') {
       sink.notifyFromProtocol(id, event.notification);
     } else if (event.kind === 'progress') {
       sink.updateProtocolProgress(id, event.progress);
-    } else if (event.kind === 'toolAnnounce') {
-      // Recording is not acting — see `tool-announce-store.ts`.
-      recordToolAnnounce(id, event.announce);
     }
   }
 }
 
 /**
- * The notification, progress, and Tool announcement events {@link applyTerminalProtocolEvents} acts
+ * The notification, progress, Tool announcement and command-start events {@link applyTerminalProtocolEvents} acts
  * on. An owner whose `AlertManager` lives in another process — standalone's
  * sidecar, whose webview holds it — forwards exactly these; every other kind is
  * the owner's own to settle, a response above all.
@@ -454,7 +452,8 @@ export function applyTerminalProtocolEvents(
 export function collectTerminalProtocolAlerts(
   events: TerminalProtocolEvent[],
 ): TerminalProtocolEvent[] {
-  return events.filter((event) => event.kind === 'notification' || event.kind === 'progress' || event.kind === 'toolAnnounce');
+  return events.filter((event) => event.kind === 'notification' || event.kind === 'progress' || event.kind === 'toolAnnounce'
+    || (event.kind === 'semantic' && event.event.type === 'commandStart'));
 }
 
 export function collectTerminalProtocolResponses(events: TerminalProtocolEvent[]): string[] {

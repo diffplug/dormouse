@@ -65,6 +65,8 @@ export interface ToolPending {
   /** Requested at launch; applied after approval, since a pane the user cannot
    *  see is a pane they cannot approve. */
   readonly minimized: boolean;
+  /** Preserve the launch request across the trust gate. */
+  readonly fresh?: boolean;
   readonly upstreamUrl: string | null;
 }
 
@@ -76,6 +78,7 @@ export function toolPendingFromParams(params: unknown): ToolPending | null {
   const strings = ['name', 'run', 'path', 'projectRoot'] as const;
   if (!strings.every((field) => typeof pending[field] === 'string')) return null;
   if (typeof pending.minimized !== 'boolean') return null;
+  if (pending.fresh !== undefined && typeof pending.fresh !== 'boolean') return null;
   if (pending.upstreamUrl !== null && typeof pending.upstreamUrl !== 'string') return null;
   return pending as unknown as ToolPending;
 }
