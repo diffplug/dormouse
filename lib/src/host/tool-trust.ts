@@ -11,7 +11,7 @@
  * directory need no lock between them — and answers "is it trusted yet?".
  */
 import { constants } from 'node:fs';
-import { lstat, open, stat } from 'node:fs/promises';
+import { lstat, open } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { writeJsonAtomic } from './atomic-json-file';
@@ -111,7 +111,7 @@ interface TrustGrant {
   readonly version: 1;
   readonly key: string;
   readonly kind: TrustGrantKind;
-  /** ISO timestamp. Not read by anything yet; see the schema note above. */
+  /** ISO timestamp, retained for display; grants do not expire. */
   readonly grantedAt: string;
 }
 
@@ -125,10 +125,9 @@ function newGrant(key: string, kind: TrustGrantKind): TrustGrant {
  *
  * Grants are add-only and idempotent, so nothing here merges and nothing here
  * locks: two hosts granting at once write two different paths, and two hosts
- * granting the same key write the same bytes. The write is still
- * temp-then-rename, so a crash mid-write cannot leave a truncated file — and,
- * because existence alone is the grant, cannot leave a partial one that reads as
- * trusted either.
+ * granting the same key record the same authority. The write is still
+ * temp-then-rename, so a crash mid-write cannot publish a truncated record.
+ * Reads validate the receipt; a filename alone never grants trust.
  */
 export class FileToolTrustStore {
   readonly #dir: string;
@@ -148,10 +147,18 @@ export class FileToolTrustStore {
    *  answers "may this run?". */
   async isTrusted(keys: readonly string[]): Promise<boolean> {
     for (const key of keys) {
-      // Existence is the grant; the contents are for a future revocation UI.
-      // A directory or anything else at that path is not one.
-      const entry = await stat(this.#pathFor(key)).catch(() => null);
-      if (entry?.isFile()) return true;
+      try {
+        const path = this.#pathFor(key);
+        // Reject special entries before opening: a FIFO must not block lookup.
+        if (!(await lstat(path)).isFile()) continue;
+        const grant = JSON.parse(await readToolFile(path)) as Partial<TrustGrant> | null;
+        if (grant?.version === 1 && grant.key === key
+          && (grant.kind === 'folder' || grant.kind === 'upstream')
+          && key.startsWith(`${grant.kind}:`) && typeof grant.grantedAt === 'string') return true;
+      } catch {
+        // Missing, unreadable, oversized, or malformed receipts grant nothing.
+        // Another key may still cover this project.
+      }
     }
     return false;
   }

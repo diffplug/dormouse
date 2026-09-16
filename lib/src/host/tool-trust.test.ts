@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -118,7 +118,7 @@ describe('FileToolTrustStore', () => {
     expect(await readdir(join(stateDir, 'tool-trust'))).toHaveLength(1);
   });
 
-  it('does not read a corrupt or foreign file in the directory as a grant', async () => {
+  it('ignores files outside the expected grant path', async () => {
     // Every grant is named for the hash of its key, so nothing an unrelated
     // writer drops in the directory can vouch for a key.
     const stateDir = join(root, 'state');
@@ -130,6 +130,61 @@ describe('FileToolTrustStore', () => {
     const store = new FileToolTrustStore(stateDir);
     expect(await store.isTrusted([folderGrantKey('/repo')])).toBe(false);
     expect(await store.isTrusted([upstreamGrantKey('https://github.com/diffplug/dormouse')])).toBe(false);
+  });
+
+  it('validates the receipt at the exact grant path and still checks other covering keys', async () => {
+    const stateDir = join(root, 'state');
+    const key = folderGrantKey('/repo');
+    const store = new FileToolTrustStore(stateDir);
+    await store.grant(key, 'folder');
+    const [name] = await readdir(join(stateDir, 'tool-trust'));
+    const path = join(stateDir, 'tool-trust', name);
+    const valid = JSON.parse(await readFile(path, 'utf8'));
+    const upstream = upstreamGrantKey('https://github.com/diffplug/dormouse');
+    await store.grant(upstream, 'upstream');
+
+    for (const invalid of [
+      '', '{not json', 'null', '[]', '{}',
+      JSON.stringify({ ...valid, version: 2 }),
+      JSON.stringify({ ...valid, key: folderGrantKey('/other') }),
+      JSON.stringify({ ...valid, kind: 'upstream' }),
+      JSON.stringify({ ...valid, kind: 'unknown' }),
+      JSON.stringify({ ...valid, grantedAt: undefined }),
+      JSON.stringify({ ...valid, grantedAt: 0 }),
+      JSON.stringify({ ...valid, padding: 'x'.repeat(256 * 1024) }),
+    ]) {
+      await writeFile(path, invalid);
+      expect(await store.isTrusted([key])).toBe(false);
+      expect(await store.isTrusted([key, upstream])).toBe(true);
+    }
+    await writeFile(path, JSON.stringify(valid));
+    expect(await store.isTrusted([key])).toBe(true);
+  });
+
+  it('does not accept a directory at the exact grant path', async () => {
+    const stateDir = join(root, 'state');
+    const key = folderGrantKey('/repo');
+    const store = new FileToolTrustStore(stateDir);
+    await store.grant(key, 'folder');
+    const [name] = await readdir(join(stateDir, 'tool-trust'));
+    const path = join(stateDir, 'tool-trust', name);
+    await rm(path);
+    await mkdir(path);
+    expect(await store.isTrusted([key])).toBe(false);
+  });
+
+  it.skipIf(process.platform === 'win32')('does not follow a symlink receipt even when its target is a valid grant', async () => {
+    const stateDir = join(root, 'state');
+    const key = folderGrantKey('/repo');
+    const store = new FileToolTrustStore(stateDir);
+    await store.grant(key, 'folder');
+    const [name] = await readdir(join(stateDir, 'tool-trust'));
+    const path = join(stateDir, 'tool-trust', name);
+    const target = join(root, 'another-file.json');
+    await writeFile(target, await readFile(path));
+    await rm(path);
+    await symlink(target, path);
+    expect(await store.isTrusted([key])).toBe(false);
   });
 });
 
