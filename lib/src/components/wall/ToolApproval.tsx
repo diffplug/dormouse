@@ -34,6 +34,8 @@ export function ToolApproval({ params, id, onResolve }: PaneProps & {
         <div>and then open a browser</div>
       </div>
 
+      {pending.error ? <div role="alert" className="text-error">{pending.error}</div> : null}
+
       <div className="flex w-full max-w-[30rem] flex-col gap-2">
         {/* Omitted when git named no remote: there is no URL to key a grant on,
             so the folder is the only honest scope. */}

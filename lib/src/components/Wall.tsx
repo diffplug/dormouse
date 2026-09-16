@@ -1596,8 +1596,9 @@ export function Wall({
   // failed write never leaves a running command in an unapproved repo.
   const resolveToolApproval = useCallback(async (id: string, choice: 'upstream' | 'folder' | 'decline') => {
     const meta = lath.getMeta(id);
-    const pending = toolPendingFromParams(meta?.params);
-    if (!pending || closingWorkspaceRef.current || isWorkspaceTransferPending(effectiveWorkspaceId)) return;
+    const initialPending = toolPendingFromParams(meta?.params);
+    if (!initialPending || closingWorkspaceRef.current || isWorkspaceTransferPending(effectiveWorkspaceId)) return;
+    let pending = initialPending;
     if (choice === 'decline') {
       // A refusal writes nothing: it closes the pane and leaves no record, so a
       // reflexive decline cannot permanently disable tools for this repo.
@@ -1612,6 +1613,10 @@ export function Wall({
     try {
       await queueToolSpawn(async () => {
         if (!isCurrent()) return;
+        if (pending.error !== undefined) {
+          pending = { ...pending, error: undefined };
+          lath.store.updateParams(id, { toolPending: pending });
+        }
         const platform = getPlatform();
         const grant = await platform.toolControl?.({
           op: 'trust',
@@ -1620,7 +1625,10 @@ export function Wall({
         });
         if (!isCurrent()) return;
         if (grant?.status !== 'trust-recorded') {
-          showShellSpawnNotice(id, grant?.status === 'error' ? grant.message : 'The Tool permission could not be saved. Try allowing it again.');
+          lath.store.updateParams(id, { toolPending: {
+            ...pending,
+            error: grant?.status === 'error' ? grant.message : 'The Tool permission could not be saved. Try allowing it again.',
+          } });
           return;
         }
 
