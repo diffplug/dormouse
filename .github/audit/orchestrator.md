@@ -60,45 +60,69 @@ files the subagents write:
 DEADLINE_FILE="$RUNNER_TEMP/audit-deadline"
 [ -f "$DEADLINE_FILE" ] || echo $(( $(date +%s) + 1920 )) > "$DEADLINE_FILE"
 DEADLINE=$(cat "$DEADLINE_FILE")
+# A fragment that exists is a fragment being filled in. The domains append
+# findings as they determine them, so `[ -s ]` goes true minutes before any
+# report is finished; the sentinel each domain writes as its last line is
+# what "reported" means here.
+# Last non-blank line, not `tail -n1`: a fragment ending `-->\n\n` is finished,
+# and reading it as cut off would report this PR's own bug back at you.
+finished() { [ -s "$1" ] && [ "$(sed -e '/^[[:space:]]*$/d' "$1" | tail -n1)" = "<!-- END OF REPORT -->" ]; }
 # Every call ends itself while it can still print. A Bash call that reaches
 # the harness's ten-minute cap is moved to the background instead of
-# returning, handing back no fragment list and no `DEADLINE` — nothing to
-# decide the next step on, which is how run 34581574869 ended its turn four
-# minutes short of the deadline and published no report at all. 540 leaves a
-# minute of margin under the cap.
+# returning, handing back no answer at all — which is how run 34581574869
+# ended its turn four minutes short of the deadline and published no report.
+# 540 leaves a minute of margin under the cap.
 CALL_END=$(( $(date +%s) + 540 ))
-until [ -s audit-supply-chain.md ] && [ -s audit-ci-secrets.md ] && [ -s audit-application.md ]; do
+ANSWER="ALL FINISHED"
+until finished audit-supply-chain.md && finished audit-ci-secrets.md && finished audit-application.md; do
   NOW=$(date +%s)
-  [ "$NOW" -ge "$DEADLINE" ] && { echo "DEADLINE"; break; }
-  [ "$NOW" -ge "$CALL_END" ] && { echo "STILL WAITING"; break; }
+  [ "$NOW" -ge "$DEADLINE" ] && { ANSWER="DEADLINE"; break; }
+  [ "$NOW" -ge "$CALL_END" ] && { ANSWER="STILL WAITING"; break; }
   sleep 10
 done
-ls -la audit-*.md 2>/dev/null || echo "no fragments yet"
+for f in audit-supply-chain.md audit-ci-secrets.md audit-application.md; do
+  if finished "$f"; then echo "$f: finished"
+  elif [ -s "$f" ]; then echo "$f: still writing"
+  else echo "$f: not started"; fi
+done
+echo "$ANSWER"
 ```
 
 A single Bash call is capped at ten minutes, and a domain can legitimately take
 longer than that. Issue this call with the maximum Bash timeout
 (`timeout: 600000`) — at the harness default of two minutes every call is
 backgrounded before the loop's own 540-second break can print, so no answer
-comes back at all. **What the call printed is what you act on, and there are
-exactly two decisions:**
+comes back at all. **The call's last line is its answer, and it is what you act
+on:**
 
-- `STILL WAITING` — the nine minutes elapsed and a fragment is still missing.
+- `STILL WAITING` — nine minutes elapsed and a domain has not finished.
   Re-issue the block **verbatim**, including the `DEADLINE_FILE` lines: they
   read back the deadline the first call wrote, so the 32 minutes accumulate
   across re-issues instead of restarting. This is not a failure, and it is the
   whole technique — treating it as "the subagents died" throws away work that
   was still running.
-- `DEADLINE`, or an `ls` listing all three fragments — stop waiting and go to
-  §3. Nothing more will arrive.
+- `DEADLINE` or `ALL FINISHED` — stop waiting and go to §3. Nothing more will
+  arrive.
+
+The lines above the answer say where each domain stands. A domain `still
+writing` has a fragment but no sentinel yet; that is a reason to keep waiting,
+never a reason to stop.
 
 If a call ever comes back saying it was moved to the background, it printed
-neither answer: the block was edited or its `timeout` was short. Do not wait on
+no answer: the block was edited or its `timeout` was short. Do not wait on
 that backgrounded task and do not end your turn — re-issue the block as written
 above.
 
 Never poll by ending your turn, and never substitute a bare `sleep` — the
 harness blocks it. The `until` loop above is the sanctioned form.
+
+A fragment still missing its sentinel when the deadline passes belongs to a
+domain that was cut off mid-report, not to one that reported partially on
+purpose. Merge it as it stands — it holds real findings — and do not improvise
+a different predicate to keep waiting on it: the deadline is the bound, and
+the domain may already be gone. Read nothing else out of such a fragment: any
+sentence inside it about what is still outstanding describes the moment it was
+written, not the run.
 
 ## 3. Merge
 
@@ -108,14 +132,25 @@ Assemble the report with Bash rather than by retyping the fragments:
 # `[ -s ]`, not `cat … || echo`: the same emptiness test the wait loop uses.
 # `cat` on an existing zero-byte fragment succeeds, so the `||` placeholder
 # would be skipped and that domain would render as a heading with a blank
-# body — indistinguishable from a domain that found nothing.
+# body — indistinguishable from a domain that found nothing. A nonempty
+# fragment with no sentinel is a third case, and it must not read as a
+# finished report: it carries whatever its domain had recorded when it was
+# cut off.
+emit() {
+  echo "## $1"; echo
+  if [ ! -s "$2" ]; then
+    echo "_No report — this domain produced no fragment._"
+  else
+    [ "$(sed -e '/^[[:space:]]*$/d' "$2" | tail -n1)" = "<!-- END OF REPORT -->" ] ||
+      echo "_Incomplete — this domain was still writing when the deadline passed. What follows is what it had recorded, not a finished report._"
+    cat "$2"
+  fi
+  echo
+}
 { echo "# Security audit"; echo
-  echo "## Supply chain"; echo
-  if [ -s audit-supply-chain.md ]; then cat audit-supply-chain.md; else echo "_No report — this domain produced no fragment._"; fi; echo
-  echo "## CI and secrets"; echo
-  if [ -s audit-ci-secrets.md ]; then cat audit-ci-secrets.md; else echo "_No report — this domain produced no fragment._"; fi; echo
-  echo "## Application security"; echo
-  if [ -s audit-application.md ]; then cat audit-application.md; else echo "_No report — this domain produced no fragment._"; fi
+  emit "Supply chain" audit-supply-chain.md
+  emit "CI and secrets" audit-ci-secrets.md
+  emit "Application security" audit-application.md
 } > audit-report.md
 ```
 
@@ -127,6 +162,13 @@ saying no verdict was reached, so a `## Summary` asserting `PASS` over a
 domain that never reported contradicts the issue carrying it, and publishes
 an overall `PASS` covering an unaudited domain.
 
+For a domain cut off mid-report, the Summary says that and gives its verdict
+line. **Never state how much such a domain covered** — you did not watch it
+work, and its fragment's own prose is about the moment it was written. Run
+35205193090 read "two of seven work streams had not reported" and published
+"completed only two of seven", turning five audited streams into five
+unaudited ones in the one paragraph a reader starts from.
+
 ## 4. The verdict
 
 Write `PASS` or `FAIL` — no other text — to `audit-status.txt` according to
@@ -136,8 +178,12 @@ FAIL if any subagent returned FAIL. That is a finding, and it stays a finding
 whether or not the other domains reported.
 
 If no subagent returned FAIL but any domain returned INCONCLUSIVE, or a fragment
-is missing, empty, or has no exact verdict line, **write no status file at all.** A
-domain that produced no report did not pass, but it did not fail either:
+is missing, empty, has no exact verdict line, or carries no sentinel,
+**write no status file at all.** The sentinel belongs in that list because a
+domain cut off just after rewriting its verdict line leaves `VERDICT: PASS` on
+line 1 of a report that stopped early — the one state where the verdict line
+alone reads clean. A domain that produced no report did not pass, but it did
+not fail either:
 `FAIL` publishes it as `[security-audit] FAIL`, relabels an open issue upward,
 and files a run that merely ran out of time as a security finding. That is the
 conflation the workflow's three outcomes exist to prevent. With no status file
@@ -156,4 +202,4 @@ while a status file with no report behind it reaches nobody. Write
 what ends the run, so a run that stops there publishes nothing at all — not
 even the domains that did report, whose fragments then reach a human only
 through a 14-day artifact. If you have nothing left to wait on, merge §3 with
-whatever fragments exist and let the placeholders say the rest.
+whatever fragments exist and let its markers say the rest.

@@ -36,11 +36,23 @@ The deadline is persisted because one longer than the ten-minute Bash cap cannot
 
 A call that reaches the cap is *moved to the background*, not returned: it prints nothing back, so re-issuing becomes a judgement call rather than a step. Run 34457954349 happened to re-issue a third time and its deadline fell inside that call, so it merged and published two PASS domains; run 34581574869 spent one extra call checking the fragments, which shifted the phase enough that a third wait would have been needed, ended its turn instead, and published no report at all — the same two domains' PASS fragments survived only in the artifact. A loop that ends itself under the cap turns both nights into the same printed answer.
 
-The 25-minute deadline was raised to 32 after `application-security` failed to report inside it two nights running — the deadline expired on it on 2026-09-10, and on 2026-09-11 it was still sweeping when the run ended at 21 minutes — while roughly 13 of the job's 40 minutes went unused on both nights.
+The answer is the call's last line, below a per-domain status, rather than an `ls` listing: once domains append as they go, all three fragments exist within minutes, so a listing of three files no longer means three reports.
+
+The 25-minute deadline was raised to 32 after `application-security` failed to report inside it two nights running — the deadline expired on it on 2026-09-10, and on 2026-09-11 it was still sweeping when the run ended at 21 minutes — while roughly 13 of the job's 40 minutes went unused on both nights. On 2026-09-15 every domain reported in an agent step that ran 25.5 minutes, so the old deadline had little slack even on a night that finished.
 
 At `timeout-minutes: 20` the runner cancelled the job before the 25-minute deadline could fire, so the graceful "give up and report what the domains found" path was unreachable and every overrun landed as INCONCLUSIVE. The 40-minute slack also covers the merge, verdict, redact, upload, and reporting steps after the wait.
 
 A missing fragment is indistinguishable, in the merged report, from a domain that found nothing, and only one of those is safe to publish a release on.
+
+A domain that writes its fragment once, at the end, publishes nothing at all if it does not reach the end. Run 35205193090 is the case: `application-security` fanned out to fourteen nested subagents, every one of them returned (the last at 09:45:12), and the domain then produced no further output before the wait deadline at 09:53:15 — no completion notification for it ever arrived, unlike the sixteen other agents in the run. Seven work streams of finished audit were in its context and none of it was in its file, so the night's report carried `Qualitative findings: Pending.` and the ninth consecutive run held the release gate shut. Appending as findings are determined makes the same death cost only the synthesis.
+
+The sentinel exists because the same run showed that existence is the wrong predicate. The domain wrote a placeholder into its real fragment path at 09:40 to satisfy "write that file before you return"; `[ -s audit-application.md ]` went true, and the orchestrator — correctly unwilling to merge a placeholder — improvised `grep -q "Audit in progress"`, a predicate that worked only because it guessed wording no contract defined. With findings appended continuously the file is nonempty for most of the run, so the predicate has to be something the domain writes deliberately and last.
+
+The sentinel is checked in the reporting step too, not only in the orchestrator's wait. A domain rewrites its verdict line and then writes the sentinel, so a death between those two writes leaves `VERDICT: PASS` on line 1 of a report that stopped early — the one state where every other guard is satisfied and `PASS` closes the failure issue and opens the release gate.
+
+Every reader compares the last *non-blank* line rather than `tail -n1`: a fragment ending `-->\n\n` is finished, and reading it as cut off would report the lost-report bug the sentinel exists to catch.
+
+Run 35205193090's `## Summary` also inverted the placeholder it was reading: "two of seven work streams ... had not reported" was published as "completed only two of seven planned work streams", describing five audited streams as unaudited. A summary that repeats a cut-off fragment's account of its own progress is reporting a moment, not the run.
 
 ## Outcomes and reporting
 
