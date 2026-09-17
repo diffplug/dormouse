@@ -252,8 +252,9 @@ export function SurfacePaneHeader({ id, title, parked }: PaneProps) {
     </>
   );
 
+  // Preserve the 4px separation with inline chrome; collapsed controls align right.
   const paneActions = (
-    <div className="ml-auto flex shrink-0 items-center gap-0.5">
+    <div className={`${inline ? 'ml-1' : 'ml-auto'} flex shrink-0 items-center gap-0.5`}>
       <HeaderActionButton
         className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
         onClick={(e) => { e.stopPropagation(); closeMenu(); actions.onMinimize(id); }}
