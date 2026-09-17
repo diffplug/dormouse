@@ -151,10 +151,10 @@ describe('WorkspaceStrip', () => {
     expect(chromeKeyboardHeld()).toBe(false);
   });
 
-  it('hides the close button with one Workspace and closes an untouched one outright', async () => {
+  it('shows the close button with one Workspace and closes an untouched one outright', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     await render();
-    expect(container.querySelector('[data-workspace-tab-close]')).toBeNull();
+    expect(container.querySelector('[data-workspace-tab-close]')).not.toBeNull();
 
     await act(async () => { createWorkspace({ id: 'ws-2' }); });
     const closed = vi.fn(async () => null);

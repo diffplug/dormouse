@@ -183,7 +183,6 @@ export function WorkspaceStrip({
             ringCue={ringCues.current.get(workspace.id)}
             renaming={renamingId === workspace.id}
             dragging={draggingId === workspace.id}
-            closable={workspaces.length > 1}
             registerElement={registerElement}
             onActivate={activate}
             onStartRename={requestWorkspaceRename}
@@ -251,7 +250,6 @@ const WorkspaceTab = memo(function WorkspaceTab({
   ringCue,
   renaming,
   dragging,
-  closable,
   registerElement,
   onActivate,
   onStartRename,
@@ -268,7 +266,6 @@ const WorkspaceTab = memo(function WorkspaceTab({
   ringCue: WorkspaceRingCue;
   renaming: boolean;
   dragging: boolean;
-  closable: boolean;
   registerElement: (element: HTMLElement | null) => (() => void) | undefined;
   onActivate: (id: WorkspaceId) => void;
   onStartRename: (id: WorkspaceId) => void;
@@ -305,7 +302,7 @@ const WorkspaceTab = memo(function WorkspaceTab({
         onPress(id, event);
       }}
       onAuxClick={(event) => {
-        if (event.button !== 1 || !closable) return;
+        if (event.button !== 1) return;
         event.preventDefault();
         onRequestClose(id);
       }}
@@ -324,7 +321,7 @@ const WorkspaceTab = memo(function WorkspaceTab({
           type="button"
           className={clsx(
             'flex h-full min-w-0 flex-1 items-center gap-2 overflow-hidden pl-2.5 text-left',
-            active && closable ? 'pr-1' : 'pr-2.5',
+            active ? 'pr-1' : 'pr-2.5',
           )}
           aria-label={label}
           title={label}
@@ -355,7 +352,7 @@ const WorkspaceTab = memo(function WorkspaceTab({
           )}
         </button>
       )}
-      {active && closable && !renaming && (
+      {active && !renaming && (
         <button
           type="button"
           data-workspace-tab-close={id}

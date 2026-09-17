@@ -6,7 +6,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   closeWorkspaceWithSurfaces,
-  LAST_WORKSPACE_REFUSAL,
   requestWorkspaceClose,
 } from './workspace-lifecycle';
 import { registerWallHandle, resetWallHandles, stubWallHandle, type WallHandle } from './wall-handles';
@@ -38,14 +37,15 @@ afterEach(() => {
 });
 
 describe('closeWorkspaceWithSurfaces', () => {
-  it('refuses the last Workspace before emptying its Wall', async () => {
+  it('closes the last Workspace before creating its replacement', async () => {
     const [only] = ids();
     const closeAll = vi.fn(async () => null);
     handleFor(only, { closeAll });
 
-    expect(await closeWorkspaceWithSurfaces(only)).toBe(LAST_WORKSPACE_REFUSAL);
-    expect(closeAll).not.toHaveBeenCalled();
-    expect(ids()).toEqual([only]);
+    expect(await closeWorkspaceWithSurfaces(only)).toBeNull();
+    expect(closeAll).toHaveBeenCalledWith('prompt');
+    expect(ids()).toHaveLength(1);
+    expect(ids()).not.toContain(only);
   });
 
   it('refuses a second close while one is in flight, so both Walls cannot empty', async () => {
@@ -69,20 +69,20 @@ describe('closeWorkspaceWithSurfaces', () => {
     expect(ids()).toEqual(['ws-2']);
   });
 
-  it('hands the Wall back its auto-spawn when the store refuses after a clean closeAll', async () => {
+  it('replaces the last Workspace even when a sibling disappears during closure', async () => {
     const [first] = ids();
     createWorkspace({ id: 'ws-2' });
     const cancelClose = vi.fn();
-    // The count drops to one WHILE this close is walking its Surfaces, so the
-    // store refuses to remove the Workspace the Wall has already emptied.
+    // A sibling disappears while this close is walking its Surfaces.
     handleFor('ws-2', {
       closeAll: async () => { closeWorkspace(first); return null; },
       cancelClose,
     });
 
-    expect(await closeWorkspaceWithSurfaces('ws-2')).toBe(LAST_WORKSPACE_REFUSAL);
-    expect(cancelClose).toHaveBeenCalledTimes(1);
-    expect(ids()).toEqual(['ws-2']);
+    expect(await closeWorkspaceWithSurfaces('ws-2')).toBeNull();
+    expect(cancelClose).not.toHaveBeenCalled();
+    expect(ids()).toHaveLength(1);
+    expect(ids()).not.toContain('ws-2');
   });
 
   it('reveals a refused Workspace only when a prompt is what refused it', async () => {

@@ -126,8 +126,16 @@ describe('WorkspaceWindow', () => {
     await flush();
     expect(getActiveWorkspaceId()).toBe(first);
     await press('x');
-    expect(getWorkspaceUiSnapshot().pendingClose).toBeNull();
+    expect(getWorkspaceUiSnapshot().pendingClose?.id).toBe(first);
+    await press(getWorkspaceUiSnapshot().pendingClose!.char);
+    const replacement = getActiveWorkspaceId();
+    expect(replacement).not.toBe(first);
     expect(getWorkspacesSnapshot().workspaces).toHaveLength(1);
+    expect(leafIdsIn(replacement)).toHaveLength(1);
+    expect(getWallHandle(first)).toBeNull();
+    expect(leafIdsIn(replacement)).not.toContain('pane-a');
+    await press('x');
+    expect(getWorkspaceUiSnapshot().pendingClose?.id).toBe(replacement);
   });
 
   it('keeps the closing tab and its Surfaces until the workspace collapse finishes', async () => {
@@ -560,14 +568,6 @@ describe('WorkspaceWindow', () => {
     // Exactly one Wall dispatches, so two mounted Walls create one Workspace.
     await press('c');
     expect(ids()).toHaveLength(3);
-  });
-
-  it('refuses to close the last Workspace', async () => {
-    const first = getWorkspacesSnapshot().workspaces[0].id;
-    await render();
-    expect(closeWorkspace(first)).toBe(false);
-    expect(getWorkspacesSnapshot().workspaces).toHaveLength(1);
-    expect(walls()).toHaveLength(1);
   });
 
   it('reports a fresh Workspace as untouched with nothing running', async () => {

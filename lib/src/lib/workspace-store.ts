@@ -143,8 +143,7 @@ function nextDefaultName(): string {
 
 /** Replace the whole model (used on restore to load the persisted Window). */
 export function setWorkspaces(next: WorkspacesState): void {
-  // Duplicate identities would let closeWorkspace remove the entire list despite
-  // its last-Workspace guard. Reject the whole update before notifying listeners.
+  // Reject duplicate identities before notifying listeners.
   const ids = new Set(next.workspaces.map((workspace) => workspace.id));
   if (ids.size !== next.workspaces.length) throw new Error('Duplicate Workspace id');
   if (next.workspaces.length === 0) {
@@ -200,15 +199,19 @@ export function renameWorkspace(id: WorkspaceId, name: string): void {
 }
 
 /**
- * Remove a Workspace. The last remaining Workspace cannot be closed (there is
- * always one active Workspace — glossary lifecycle). Closing the active one
+ * Remove a Workspace, atomically replacing the last one with a fresh Workspace.
+ * Closing the active one
  * activates its next neighbor (previous at the end). Returns whether one was removed.
  */
 export function closeWorkspace(id: WorkspaceId): boolean {
-  if (state.workspaces.length <= 1) return false;
   const index = state.workspaces.findIndex((ws) => ws.id === id);
   if (index === -1) return false;
   const workspaces = state.workspaces.filter((ws) => ws.id !== id);
+  if (workspaces.length === 0) {
+    let replacementId = generateWorkspaceId();
+    while (replacementId === id) replacementId = generateWorkspaceId();
+    workspaces.push({ id: replacementId, name: nextDefaultName() });
+  }
   const activeId = state.activeId === id ? workspaces[Math.min(index, workspaces.length - 1)].id : state.activeId;
   emit({ workspaces, activeId });
   return true;

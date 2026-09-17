@@ -199,7 +199,7 @@ A user verb is an intentional action that produces a single observable change.
 | `swap` | Exchange two Surfaces' layout slots; ids travel with them, so Registry entries, Processes, and titles are untouched |
 | `switchWorkspace` | Set the active Workspace (`setActiveWorkspace`), revealing its Wall and hiding the outgoing one. Terminal elements reattach; nothing resumes or restores; I8 holds by construction. |
 | `createWorkspace` | Add a Workspace and mount its Wall, which spawns one pane; activate by default, unless `activate: false`. |
-| `closeWorkspace` | `kill` each member Surface, then remove the Workspace; the last remaining Workspace cannot be closed. |
+| `closeWorkspace` | `kill` each member Surface, then remove the Workspace; closing the last Workspace atomically creates a fresh replacement. |
 | `renameWorkspace` | Update a Workspace's `name`; touches no Session |
 | `moveWorkspace` | Reorder a Workspace within its Window; a minted ref renames nothing (a host with no registry still numbers by position) and touches no Session |
 | `transferWorkspace` | Move a Workspace to another Window, Surfaces and Sessions intact: `release` each member Session (detached, Process still Live) and resume it there. Kills nothing and archives nothing — not a `closeWorkspace`. |
