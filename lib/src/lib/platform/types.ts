@@ -224,6 +224,11 @@ export interface SessionFlushRequest {
   probeCwd?: boolean;
 }
 
+export interface WritePtyOptions {
+  /** Deliver at typing pace (`docs/specs/transport.md` → "Paced input"). */
+  paced?: boolean;
+}
+
 export interface PlatformAdapter {
   // Lifecycle
   init(): Promise<void>;
@@ -244,7 +249,7 @@ export interface PlatformAdapter {
 
   // PTY operations
   spawnPty(id: string, options?: { cols?: number; rows?: number; cwd?: string; shell?: string; args?: string[]; helper?: HelperIdentity }): void;
-  writePty(id: string, data: string): void;
+  writePty(id: string, data: string, options?: WritePtyOptions): void;
   resizePty(id: string, cols: number, rows: number): void;
   killPty(id: string): void;
 

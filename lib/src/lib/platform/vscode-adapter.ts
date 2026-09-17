@@ -2,7 +2,7 @@ import { recordToolDirty } from '../tool-dirty-store';
 import { recordToolAnnounce } from '../tool-announce-store';
 import { recordToolEvents } from '../tool-events';
 import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../terminal-context-types';
-import type { AgentBrowserCommandResult, AgentBrowserEditOp, AgentBrowserEditResult, AgentBrowserOpenResult, AgentBrowserPopResult, AgentBrowserScreenshotResult, AgentBrowserStreamStatusResult, AlertStateDetail, IframeProxyResult, OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, BurrowLink, ToolControlResult, ToolHostRequest } from './types';
+import type { AgentBrowserCommandResult, AgentBrowserEditOp, AgentBrowserEditResult, AgentBrowserOpenResult, AgentBrowserPopResult, AgentBrowserScreenshotResult, AgentBrowserStreamStatusResult, AlertStateDetail, IframeProxyResult, OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, BurrowLink, ToolControlResult, ToolHostRequest, WritePtyOptions } from './types';
 import { openPortRequestTimeoutMs } from './types';
 import { createBurrowLinkClient } from '../../host/remote/link-client';
 import type { AwaitHandle, AwaitOptions, AwaitOutcome } from '../alert-manager';
@@ -351,8 +351,8 @@ export class VSCodeAdapter implements PlatformAdapter {
     this.vscode.postMessage({ type: 'pty:spawn', id, options });
   }
 
-  writePty(id: string, data: string): void {
-    this.vscode.postMessage({ type: 'pty:input', id, data });
+  writePty(id: string, data: string, options?: WritePtyOptions): void {
+    this.vscode.postMessage({ type: 'pty:input', id, data, paced: options?.paced });
   }
 
   resizePty(id: string, cols: number, rows: number): void {

@@ -13,6 +13,8 @@ Exactly one input mode is required: --text/--key, --stdin, or --sequence. --text
 
 Text input interprets backslash escapes for \n, \r, \t, and \\ unless --raw is set.
 
+Input arrives at typing pace: text in short bursts, and a key only after the text before it has settled, so interactive programs read it as typed. "sent" means the host accepted the input; the program may still be reading it.
+
 Supported keys: enter, escape, esc, tab, backspace, delete, up, down, left, right, ctrl-a through ctrl-z.
 
 Sequence input is an ordered JSON array of {"text":"..."} and {"key":"..."} objects.

@@ -1148,6 +1148,63 @@ function openNativeDirectory(nativePath, done, runtime = {}) {
 }
 module.exports.openNativeDirectory = openNativeDirectory;
 
+// Paced input: docs/specs/transport.md -> "Paced input"; its rationale holds
+// the measurements behind these numbers.
+const PACED_CHUNK_BYTES = 256;
+const PACED_CHUNK_GAP_MS = 10;
+const PACED_KEY_SETTLE_MS = 100;
+
+// A key is one whole escape sequence, DEL, or a C0 control other than tab and
+// line feed, which stay text. Returns `i` when `data[i]` starts text.
+function keyTokenEnd(data, i) {
+  const code = data.charCodeAt(i);
+  if (code === 0x1b) {
+    const next = data[i + 1];
+    if (next === '[') {
+      // CSI: parameter and intermediate bytes (0x20-0x3F), then a final byte
+      // (0x40-0x7E); a sequence cut short ends where its valid bytes do.
+      let j = i + 2;
+      while (j < data.length && data.charCodeAt(j) >= 0x20 && data.charCodeAt(j) <= 0x3f) j += 1;
+      const final = data.charCodeAt(j);
+      return final >= 0x40 && final <= 0x7e ? j + 1 : j;
+    }
+    if (next === 'O') return Math.min(i + 3, data.length);
+    return Math.min(i + 2, data.length);
+  }
+  if (code === 0x7f || (code < 0x20 && code !== 0x09 && code !== 0x0a)) return i + 1;
+  return i;
+}
+
+/** Split input into text runs of at most PACED_CHUNK_BYTES UTF-8 bytes and
+ *  whole keys, never cutting a code point or an escape sequence. */
+function pacedInputSegments(data) {
+  const segments = [];
+  let start = 0;
+  let bytes = 0;
+  const flush = (end) => {
+    if (end > start) segments.push({ data: data.slice(start, end), key: false });
+    start = end;
+    bytes = 0;
+  };
+  for (let i = 0; i < data.length;) {
+    const keyEnd = keyTokenEnd(data, i);
+    if (keyEnd > i) {
+      flush(i);
+      segments.push({ data: data.slice(i, keyEnd), key: true });
+      start = i = keyEnd;
+      continue;
+    }
+    const codePoint = data.codePointAt(i);
+    const size = codePoint < 0x80 ? 1 : codePoint < 0x800 ? 2 : codePoint < 0x10000 ? 3 : 4;
+    if (bytes + size > PACED_CHUNK_BYTES) flush(i);
+    bytes += size;
+    i += codePoint > 0xffff ? 2 : 1;
+  }
+  flush(data.length);
+  return segments;
+}
+module.exports.pacedInputSegments = pacedInputSegments;
+
 /**
  * Shared PTY manager — the single place where node-pty processes are managed.
  *
@@ -1193,6 +1250,50 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
   function cancelRepaint(id) {
     clearTimeout(repaintTimers.get(id));
     repaintTimers.delete(id);
+  }
+
+  // Per-PTY paced input, kept after its steps drain: `at` / `textAt` time the
+  // last paced write and paced text, so a key sent by a later request still
+  // settles. While steps are pending, every write for the id joins them, so
+  // input keeps its order. Every path that retires a PTY cancels its input
+  // first, so the `p` a drain captured is still the live one.
+  const inputs = new Map(); // id -> { steps: [{ data, key, paced }], timer, at, textAt }
+
+  function cancelInput(id) {
+    clearTimeout(inputs.get(id)?.timer);
+    inputs.delete(id);
+  }
+
+  function drainInput(id, p, input) {
+    input.timer = undefined;
+    while (input.steps.length > 0) {
+      const step = input.steps[0];
+      if (step.paced) {
+        const dueAt = step.key
+          ? Math.max(input.at + PACED_CHUNK_GAP_MS, input.textAt + PACED_KEY_SETTLE_MS)
+          : input.at + PACED_CHUNK_GAP_MS;
+        const wait = dueAt - Date.now();
+        if (wait > 0) {
+          input.timer = setTimeout(() => drainInput(id, p, input), wait);
+          return;
+        }
+      }
+      input.steps.shift();
+      try {
+        p.write(step.data);
+      } catch {
+        // A PTY can die between its last write and the `onExit` that cancels
+        // its input. Drop the rest rather than throw from a timer, which has
+        // no caller to catch it and would take down every PTY in the process.
+        cancelInput(id);
+        return;
+      }
+      // Every write paces what follows it; only paced text settles a key. An
+      // unpaced step drains in the same millisecond as the paced one before
+      // it, so only a write straddling a millisecond can show the difference.
+      input.at = Date.now();
+      if (step.paced && !step.key) input.textAt = input.at;
+    }
   }
 
   function validHelperOwner(id, helper) {
@@ -1242,6 +1343,7 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
     }
 
     cancelRepaint(id);
+    cancelInput(id);
     ptys.set(id, p);
     const session = { chunks: [], chars: 0, received: 0, shell: config.shell };
     sessions.set(id, session);
@@ -1270,6 +1372,7 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
       send('exit', { id, exitCode, signal });
       if (ptys.get(id) === p) {
         cancelRepaint(id);
+        cancelInput(id);
         ptys.delete(id);
         ptyShells.delete(id);
       }
@@ -1282,9 +1385,28 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
     console.error(`[pty-core] spawned: ${id} (${config.shell}, ${config.cols}x${config.rows})`);
   }
 
-  function write(id, data) {
+  function write(id, data, { paced = false } = {}) {
     const p = ptys.get(id);
-    if (p) p.write(data);
+    if (!p) return;
+    // An interrupt skips the line and discards what waits in it, as the tty
+    // flushes its own input queue on one. `dor send --key ctrl-c` is paced and
+    // is the interrupt agents are taught, so this cannot test for unpaced.
+    if (data === '\x03') cancelInput(id);
+    let input = inputs.get(id);
+    if (!paced && !input?.steps.length) {
+      p.write(data);
+      return;
+    }
+    if (!input) {
+      input = { steps: [], timer: undefined, at: -Infinity, textAt: -Infinity };
+      inputs.set(id, input);
+    }
+    if (paced) {
+      for (const segment of pacedInputSegments(data)) input.steps.push({ ...segment, paced: true });
+    } else {
+      input.steps.push({ data, key: false, paced: false });
+    }
+    if (input.timer === undefined) drainInput(id, p, input);
   }
 
   function resize(id, cols, rows, repaint = false) {
@@ -1345,6 +1467,7 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
     helpers.delete(id);
     sessions.delete(id);
     cancelRepaint(id);
+    cancelInput(id);
     const p = ptys.get(id);
     if (p) {
       p.kill();
@@ -1355,6 +1478,7 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
 
   function killAll() {
     for (const id of repaintTimers.keys()) cancelRepaint(id);
+    for (const id of inputs.keys()) cancelInput(id);
     for (const [, p] of ptys) {
       p.kill();
     }

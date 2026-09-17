@@ -5,7 +5,7 @@ import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
 import { log } from './log';
 import type { DorControlCancelPayload, DorControlRequestPayload, DorControlResponsePayload } from '../../dor/src/protocol';
-import type { OpenPort } from '../../lib/src/lib/platform/types';
+import type { OpenPort, WritePtyOptions } from '../../lib/src/lib/platform/types';
 import { openPortRequestTimeoutMs } from '../../lib/src/lib/platform/types';
 import { sliceSince } from '../../lib/src/host/replay-buffer';
 
@@ -443,8 +443,8 @@ export function getOpenPorts(id: string): Promise<OpenPort[]> {
     .then((msg) => msg.ports || [], () => []);
 }
 
-export function write(id: string, data: string): void {
-  sendToChild({ type: 'input', id, data });
+export function write(id: string, data: string, options: WritePtyOptions = {}): void {
+  sendToChild({ type: 'input', id, data, paced: options.paced });
 }
 
 export function resize(id: string, cols: number, rows: number, repaint?: boolean): void {

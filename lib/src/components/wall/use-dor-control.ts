@@ -1360,7 +1360,7 @@ export function useDorControl({
       }
       const target = requireTerminalSurface(params.surface, detail);
       if (!target) return;
-      getPlatform().writePty(target.id, input);
+      getPlatform().writePty(target.id, input, { paced: true });
       detail.respond({
         ok: true,
         result: {

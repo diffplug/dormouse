@@ -1092,11 +1092,12 @@ fn pty_spawn(
 }
 
 #[tauri::command]
-fn pty_write(state: tauri::State<'_, SidecarState>, id: String, data: String) {
-    let msg = serde_json::json!({
-        "event": "pty:input",
-        "data": { "id": id, "data": data }
-    });
+fn pty_write(state: tauri::State<'_, SidecarState>, id: String, data: String, paced: Option<bool>) {
+    let mut input = serde_json::json!({ "id": id, "data": data });
+    if paced == Some(true) {
+        input["paced"] = true.into();
+    }
+    let msg = serde_json::json!({ "event": "pty:input", "data": input });
     send_to_sidecar(&state, msg.to_string());
 }
 
