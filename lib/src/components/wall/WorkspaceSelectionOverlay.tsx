@@ -88,8 +88,7 @@ function measureFrame(el: HTMLElement, kind: WallSelectionKind): RingFrame | nul
   };
 }
 
-// The active selection's identity. One definition because two mechanisms key off
-// it: the travel tween restarts when it changes, and so does the marching burst.
+// The active selection's identity; the travel tween restarts when it changes.
 function ringIdentity(type: WallSelectionKind, id: string): string {
   return `${type}:${id}`;
 }
@@ -489,7 +488,6 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
   const ring = (
     <SelectionRing
       variant={mode === 'passthrough' ? 'solid' : 'ants'}
-      animationKey={`${ringIdentity(selectedType, selectedId)}:${renamingId ?? ''}`}
       paused={renamingId !== null}
       color={selectionColor}
       windowFocused={windowFocused}

@@ -79,6 +79,11 @@ body {
   to { stroke-dashoffset: var(--march-offset); }
 }
 
+/* A still dashed ring. `!important` because SelectionRing writes `animation` inline. */
+@media (prefers-reduced-motion: reduce) {
+  [data-ring='outline'] { animation: none !important; }
+}
+
 /* --- Kill-dialog confirm animation --- */
 
 @keyframes kill-overlay-confirm {

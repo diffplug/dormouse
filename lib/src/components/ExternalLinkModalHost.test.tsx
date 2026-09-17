@@ -35,7 +35,7 @@ afterEach(() => {
 
 it('offers no open action for deceptive text, focuses copy, and rejects even a stale confirmation callback', () => {
   act(() => requestExternalLinkConfirmation('https://evil.example/', 'https://trusted.example/'));
-  const buttons = [...container.querySelectorAll('button')];
+  const buttons = [...document.body.querySelectorAll('button')];
   expect(buttons.some((button) => button.textContent?.startsWith('Open '))).toBe(false);
   expect(document.activeElement?.textContent).toBe('Copy deceptive URL to clipboard');
   act(() => mocks.confirm());
@@ -45,7 +45,7 @@ it('offers no open action for deceptive text, focuses copy, and rejects even a s
 it('opens an ordinary URL only after the user confirms', () => {
   act(() => requestExternalLinkConfirmation('https://trusted.example/'));
   expect(mocks.open).not.toHaveBeenCalled();
-  const open = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Open URL');
+  const open = [...document.body.querySelectorAll('button')].find((button) => button.textContent === 'Open URL');
   expect(open).toBeDefined();
   act(() => open!.click());
   expect(mocks.open).toHaveBeenCalledWith('https://trusted.example/');

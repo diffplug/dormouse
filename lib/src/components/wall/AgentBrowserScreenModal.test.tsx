@@ -37,7 +37,7 @@ describe('AgentBrowserScreenModal', () => {
     ));
 
     const option = (title: string) =>
-      [...container.querySelectorAll('label')].find((label) => label.textContent?.includes(title));
+      [...document.body.querySelectorAll('label')].find((label) => label.textContent?.includes(title));
 
     // Only the two agent-browser render options carry the robot; the nested
     // resolution rows and the iframe option are presentation-only.
@@ -56,7 +56,7 @@ describe('AgentBrowserScreenModal', () => {
       else expect(capability, label).toBeNull();
     }
 
-    for (const icon of container.querySelectorAll('label svg')) {
+    for (const icon of document.body.querySelectorAll('label svg')) {
       expect(icon.getAttribute('width')).toBe('14');
       expect(icon.getAttribute('height')).toBe('14');
     }
@@ -81,14 +81,14 @@ describe('AgentBrowserScreenModal', () => {
     ));
 
     const optionInput = (title: string) =>
-      [...container.querySelectorAll('label')]
+      [...document.body.querySelectorAll('label')]
         .find((label) => label.textContent?.includes(title))
         ?.querySelector<HTMLInputElement>('input[type="radio"]');
 
     expect(optionInput('Resize with pane')?.checked).toBe(true);
     expect(optionInput('Fixed size')?.checked).toBe(false);
 
-    const apply = [...container.querySelectorAll('button')]
+    const apply = [...document.body.querySelectorAll('button')]
       .find((button) => button.textContent === 'Apply');
     act(() => apply?.click());
     expect(controller!.actions.engageSync).toHaveBeenCalledOnce();

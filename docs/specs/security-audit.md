@@ -52,16 +52,17 @@ Source of truth: `--agents` in `.github/workflows/security-audit.yaml`; `run_dom
 
 **Subagents launch in the background** — the Task tool returns an id, not a report — so an orchestrator that ends its turn to await a completion notification ends the whole run: one headless turn, nothing resumes it (rationale).
 
-- **The job's `timeout-minutes: 40` stays above the orchestrator's 25-minute wait deadline** (rationale).
+- **The job's `timeout-minutes: 40` stays above the orchestrator's 32-minute wait deadline** (rationale).
 - **`--allowed-tools` enforces none of this**: it only auto-approves and removes nothing. `Task`/`Agent` are allowed on purpose; only `Workflow` is denied.
 - **Each subagent appends to its own fragment as it determines each result**, never holding findings for a write-up at the end — `audit-supply-chain.md`, `audit-ci-secrets.md`, `audit-application.md` — and the orchestrator concatenates them rather than retyping. Fragments upload with the transcript, so an orchestrator that dies mid-merge still ships what the domains found.
 - **A fragment opens `VERDICT: INCONCLUSIVE` and closes with the literal `<!-- END OF REPORT -->`**, its verdict rewritten once at the end. The sentinel is what every reader treats as finished; an unfinished fragment fails closed on its opening line (rationale).
 
-- **FAIL IF** the orchestrator prompt stops requiring a non-turn-ending wait — a Bash `until` loop over the fragment files, re-issued past the ten-minute Bash cap, under a bounded 25-minute deadline **persisted to a file** (`$RUNNER_TEMP/audit-deadline`) rather than recomputed from `now` (rationale).
+- **FAIL IF** the orchestrator prompt stops requiring a non-turn-ending wait — a Bash `until` loop over the fragments' sentinels, **breaking on its own sub-cap under the ten-minute Bash cap** so every call ends by printing its answer, re-issued under a bounded 32-minute deadline **persisted to a file** (`$RUNNER_TEMP/audit-deadline`) rather than recomputed from `now` (rationale).
+- **FAIL IF** the prompt permits ending the turn without `audit-report.md` (rationale).
 - **FAIL IF** a domain prompt lets findings be held for a write-up at the end, or the wait, the merge, or the verdict treats existence rather than the sentinel as a domain having reported (rationale).
 - **FAIL IF** the orchestrator can report `PASS` while a subagent left no report fragment — nor `FAIL`, unless some domain actually returned one: the prompt writes no status file when a fragment is missing and no domain failed, routing an audit that ran out of time to INCONCLUSIVE. Both exit non-zero and hold the release gate shut (rationale).
 
-Source of truth: `2. Wait without ending your turn`, `3. Merge`, and `4. The verdict` in `.github/audit/orchestrator.md`; the fragment contract in `.github/audit/_preamble.md`.
+Source of truth: `2. Wait without ending your turn`, `3. Merge`, and `4. The verdict` in `.github/audit/orchestrator.md`; the fragment contract in `.github/audit/_preamble.md`; the wait and merge blocks run as shipped in `scripts/security-audit.test.mjs`.
 
 ## Outcomes and reporting
 
@@ -75,6 +76,7 @@ Source of truth: `2. Wait without ending your turn`, `3. Merge`, and `4. The ver
 
 - **Must write `audit-report.md` before `audit-status.txt`.** A partial report can support FAIL; PASS requires every domain's completed checks.
 - **Partial has three shapes**, each named in the INCONCLUSIVE issue: `UNVERIFIABLE` for a check reached but not determined; `_Incomplete …_` above a fragment cut off mid-report; `_No report …_` for a domain that never wrote one. The merged `## Summary` may likewise read `INCONCLUSIVE`, and **gives no coverage count for a cut-off domain** (rationale).
+- **With no `audit-report.md` the reporting step publishes each fragment verbatim under its own heading**, unmerged (rationale).
 - **Must return `VERDICT: INCONCLUSIVE` from a domain with any undetermined check unless it found a failure.** Only all-determined passing checks permit `VERDICT: PASS`; a domain's inconclusive verdict prevents a merged pass.
 - **`STATUS` is assigned in exactly two places**: where the status file is parsed, and in the single escalation block, **which orders `FAIL` > `MISSING` > `PASS`** — a dissent can raise `MISSING` to `FAIL` and never the reverse, and a `FAIL` alongside missing or unreadable fragments still reports them. Both fragment guards run unconditionally and only record.
 - **The report is truncated to 32,000 characters before posting**, head kept, by `scripts/clamp-issue-body.mjs` (self-tested by `scripts/clamp-issue-body-selftest.mjs`). The call is non-fatal; the `audit-transcript` artifact holds the report in full; `.github/workflows/workflow-audit.yaml` truncates its commit list the same way (rationale).
