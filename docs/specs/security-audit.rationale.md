@@ -38,6 +38,14 @@ At `timeout-minutes: 20` the runner cancelled the job before the 25-minute deadl
 
 A missing fragment is indistinguishable, in the merged report, from a domain that found nothing, and only one of those is safe to publish a release on.
 
+A domain that writes its fragment once, at the end, publishes nothing at all if it does not reach the end. Run 35205193090 is the case: `application-security` fanned out to fourteen nested subagents, every one of them returned (the last at 09:45:12), and the domain then produced no further output before the wait deadline at 09:53:15 — no completion notification for it ever arrived, unlike the sixteen other agents in the run. Seven work streams of finished audit were in its context and none of it was in its file, so the night's report carried `Qualitative findings: Pending.` and the ninth consecutive run held the release gate shut. Appending as findings are determined makes the same death cost only the synthesis.
+
+The sentinel exists because the same run showed that existence is the wrong predicate. The domain wrote a placeholder into its real fragment path at 09:40 to satisfy "write that file before you return"; `[ -s audit-application.md ]` went true, and the orchestrator — correctly unwilling to merge a placeholder — improvised `grep -q "Audit in progress"`, a predicate that worked only because it guessed wording no contract defined. With findings appended continuously the file is nonempty for most of the run, so the predicate has to be something the domain writes deliberately and last.
+
+The sentinel is checked in the reporting step too, not only in the orchestrator's wait. A domain rewrites its verdict line and then writes the sentinel, so a death between those two writes leaves `VERDICT: PASS` on line 1 of a report that stopped early — the one state where every other guard is satisfied and `PASS` closes the failure issue and opens the release gate.
+
+Run 35205193090's `## Summary` also inverted the placeholder it was reading: "two of seven work streams ... had not reported" was published as "completed only two of seven planned work streams", describing five audited streams as unaudited. A summary that repeats a cut-off fragment's account of its own progress is reporting a moment, not the run.
+
 ## Outcomes and reporting
 
 Collapsing the inconclusive case into `FAIL`, as the step originally did, filed an identical issue for "the repo is insecure" and "the auditor stopped early".

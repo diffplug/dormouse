@@ -73,6 +73,13 @@ run_domain() {
   fi
   if [ -s "$out" ]; then
     echo "==> wrote $out"
+    # Same sentinel CI reads, for the same reason: the domain appends findings
+    # as it determines them, so a fragment without its last line is one whose
+    # domain stopped early — and its first line may already say PASS.
+    if [ "$(tail -n1 "$out")" != "<!-- END OF REPORT -->" ]; then
+      echo "==> $domain was cut off before finishing $out — findings kept, verdict does not stand" >&2
+      return 1
+    fi
     # The same grammar CI applies in .github/workflows/security-audit.yaml, and
     # for the same reason: a failure with an appended explanation is still a
     # finding, so only the PASS arm matches exactly. Drifting from CI here would

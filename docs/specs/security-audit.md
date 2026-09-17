@@ -31,7 +31,7 @@
 
 **Must keep shared CI/local prompts and their scope declarations in `.github/audit/`** (rationale).
 
-**Must make the sequential local runner exit nonzero for a failed process, missing fragment, or any verdict other than exact `VERDICT: PASS`.** It uses the operator's `gh` authentication when no `AUDIT_PAT` is supplied; inaccessible local checks are inconclusive.
+**Must make the sequential local runner exit nonzero for a failed process, a missing or unfinished fragment, or any verdict other than exact `VERDICT: PASS`.** It uses the operator's `gh` authentication when no `AUDIT_PAT` is supplied; inaccessible local checks are inconclusive.
 
 **The qualitative scopes are stated by subtraction, so adding a directory cannot orphan it** (rationale).
 
@@ -54,12 +54,14 @@ Source of truth: `--agents` in `.github/workflows/security-audit.yaml`; `run_dom
 
 - **The job's `timeout-minutes: 40` stays above the orchestrator's 25-minute wait deadline** (rationale).
 - **`--allowed-tools` enforces none of this**: it only auto-approves and removes nothing. `Task`/`Agent` are allowed on purpose; only `Workflow` is denied.
-- **Each subagent writes its own report fragment before returning its verdict** — `audit-supply-chain.md`, `audit-ci-secrets.md`, `audit-application.md` — and the orchestrator concatenates them rather than retyping. Fragments upload with the transcript, so an orchestrator that dies mid-merge still ships what the domains found.
+- **Each subagent appends to its own fragment as it determines each result**, never holding findings for a write-up at the end — `audit-supply-chain.md`, `audit-ci-secrets.md`, `audit-application.md` — and the orchestrator concatenates them rather than retyping. Fragments upload with the transcript, so an orchestrator that dies mid-merge still ships what the domains found.
+- **A fragment opens `VERDICT: INCONCLUSIVE` and closes with the literal `<!-- END OF REPORT -->`**, its verdict rewritten once at the end. The sentinel, not existence, is what every reader treats as finished; an unfinished fragment fails closed on its opening line (rationale).
 
 - **FAIL IF** the orchestrator prompt stops requiring a non-turn-ending wait — a Bash `until` loop over the fragment files, re-issued past the ten-minute Bash cap, under a bounded 25-minute deadline **persisted to a file** (`$RUNNER_TEMP/audit-deadline`) rather than recomputed from `now` (rationale).
+- **FAIL IF** a domain prompt lets findings be held for a write-up at the end, or the wait treats existence rather than the sentinel as a domain having reported (rationale).
 - **FAIL IF** the orchestrator can report `PASS` while a subagent left no report fragment — nor `FAIL`, unless some domain actually returned one: the prompt writes no status file when a fragment is missing and no domain failed, routing an audit that ran out of time to INCONCLUSIVE. Both exit non-zero and hold the release gate shut (rationale).
 
-Source of truth: `2. Wait without ending your turn` and `4. The verdict` in `.github/audit/orchestrator.md`.
+Source of truth: `2. Wait without ending your turn`, `3. Merge`, and `4. The verdict` in `.github/audit/orchestrator.md`; the fragment contract in `.github/audit/_preamble.md`.
 
 ## Outcomes and reporting
 
@@ -72,7 +74,7 @@ Source of truth: `2. Wait without ending your turn` and `4. The verdict` in `.gi
 | INCONCLUSIVE | missing, empty, or anything else | filed under the same label, titled `INCONCLUSIVE`, body reproducing the partial report and saying it is not a security finding; exit non-zero |
 
 - **Must write `audit-report.md` before `audit-status.txt`.** A partial report can support FAIL; PASS requires every domain's completed checks.
-- **Partial has two shapes**, both named in the INCONCLUSIVE issue: `UNVERIFIABLE` for a check the agent reached but could not determine, inside its domain's fragment; a `_No report …_` placeholder for a domain that never reported. The merged `## Summary` may likewise read `INCONCLUSIVE`.
+- **Partial has three shapes**: `UNVERIFIABLE` for a check reached but not determined; `_Incomplete …_` above a fragment cut off mid-report; `_No report …_` for a domain that never wrote one. The merged `## Summary` may likewise read `INCONCLUSIVE`, and **gives no coverage count for a cut-off domain** — its prose describes the moment it was written (rationale).
 - **Must return `VERDICT: INCONCLUSIVE` from a domain with any undetermined check unless it found a failure.** Only all-determined passing checks permit `VERDICT: PASS`; a domain's inconclusive verdict prevents a merged pass.
 - **`STATUS` is assigned in exactly two places**: where the status file is parsed, and in the single escalation block, **which orders `FAIL` > `MISSING` > `PASS`** — a dissent can raise `MISSING` to `FAIL` and never the reverse, and a `FAIL` alongside missing or unreadable fragments still reports them. Both fragment guards run unconditionally and only record.
 - **The report is truncated to 32,000 characters before posting**, head kept, by `scripts/clamp-issue-body.mjs` (self-tested by `scripts/clamp-issue-body-selftest.mjs`). The call is non-fatal; the `audit-transcript` artifact holds the report in full; `.github/workflows/workflow-audit.yaml` truncates its commit list the same way (rationale).
@@ -81,7 +83,7 @@ Source of truth: `2. Wait without ending your turn` and `4. The verdict` in `.gi
 - **FAIL IF** the `Redact secrets from agent output` step is removed, stops covering any sink that is later published (`audit-report.md`, the three per-domain fragments, and the transcript), or stops failing closed by deleting those files when the redactor itself throws (rationale).
 - **FAIL IF** the reporting step writes issue prose per *combination* of conditions rather than one note per condition that holds (rationale).
 - **FAIL IF** either fragment guard is gated on the status at all (rationale).
-- **FAIL IF** the reporting step accepts any domain verdict other than exact `VERDICT: PASS` as passing, fails to recognize a `VERDICT: FAIL` prefix as dissent, ignores an inconclusive domain, or accepts status text other than literal `PASS`/`FAIL` (rationale).
+- **FAIL IF** the reporting step accepts any domain verdict other than exact `VERDICT: PASS` as passing, fails to recognize a `VERDICT: FAIL` prefix as dissent, ignores an inconclusive domain, accepts a fragment with no completion sentinel as finished, or accepts status text other than literal `PASS`/`FAIL` (rationale).
 - **FAIL IF** the audit has been weakened in any other way — e.g. the prompt no longer requires the qualitative pass, a `FAIL IF` can be ignored, the failure-reporting step that opens a `security-audit-failure` issue and exits non-zero has been removed, or the `AUDIT_PAT` pre-check is removed or bypassed. **This bullet is a judgement item, not a checklist**: the examples are the ones that have come up, not the ones that exist (rationale).
 
 Source of truth: `clampIssueBody` in `scripts/clamp-issue-body.mjs`; `Surface result, file or close issue` in `.github/workflows/security-audit.yaml`; reporting, redaction, and local-runner regressions in `scripts/security-audit.test.mjs`.

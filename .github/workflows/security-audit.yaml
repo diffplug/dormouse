@@ -353,6 +353,18 @@ jobs:
           # shellcheck disable=SC2086
           for f in $AUDIT_FRAGMENTS; do
             [ -s "$f" ] || continue
+            # A verdict line is not a finished report. Domains append findings
+            # as they determine them and write the sentinel last, so a fragment
+            # without one belongs to a domain that was cut off — and its first
+            # line may already have been rewritten to `VERDICT: PASS` in the
+            # moment before it died. Checked here rather than left to
+            # `.github/audit/orchestrator.md` §4 for the same reason as every
+            # other guard in this loop: a prompt is not a control, and this is
+            # the one that decides whether the release gate opens.
+            if [ "$(tail -n1 "$f")" != "<!-- END OF REPORT -->" ]; then
+              echo "::warning::$f has no completion sentinel; its domain was cut off mid-report."
+              UNFINISHED="${UNFINISHED:+$UNFINISHED, }$f"
+            fi
             # An unrecognized first line — a subagent that ignored the preamble, a stray heading
             # or blank line — must not fall through to an unchallenged PASS:
             # that would put the verdict back on a prompt having been
@@ -391,7 +403,7 @@ jobs:
           if [ -n "${DISSENTING:-}" ]; then
             STATUS=FAIL
           elif [ "$STATUS" != "FAIL" ] &&
-               { [ -n "${MISSING_FRAGMENTS:-}" ] || [ -n "${UNREADABLE_VERDICTS:-}" ] || [ -n "${INCONCLUSIVE_DOMAINS:-}" ]; }; then
+               { [ -n "${MISSING_FRAGMENTS:-}" ] || [ -n "${UNREADABLE_VERDICTS:-}" ] || [ -n "${INCONCLUSIVE_DOMAINS:-}" ] || [ -n "${UNFINISHED:-}" ]; }; then
             STATUS=MISSING
           fi
 
@@ -453,6 +465,9 @@ jobs:
           fi
           if [ -n "${UNREADABLE_VERDICTS:-}" ]; then
             echo "- **A domain's verdict could not be read.** The first line of $UNREADABLE_VERDICTS is not an exact \`VERDICT: PASS\`, \`VERDICT: FAIL\`, or \`VERDICT: INCONCLUSIVE\`. Read its fragment; the domain did report, but its verdict is unconfirmed." >> "$NOTES"
+          fi
+          if [ -n "${UNFINISHED:-}" ]; then
+            echo "- **A domain was cut off mid-report.** $UNFINISHED never wrote its \`<!-- END OF REPORT -->\` sentinel, so what it published is what it had recorded when it stopped, and its verdict line covers less than it appears to. The findings it did write are still findings." >> "$NOTES"
           fi
           if [ -n "${INCONCLUSIVE_DOMAINS:-}" ]; then
             echo "- **A domain could not determine every check.** $INCONCLUSIVE_DOMAINS returned \`VERDICT: INCONCLUSIVE\`; read its \`UNVERIFIABLE\` checks. Those checks do not count as passing." >> "$NOTES"
