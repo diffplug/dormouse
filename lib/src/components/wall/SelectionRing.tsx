@@ -1,7 +1,7 @@
 import { type Ref } from 'react';
 import { cfg } from '../../cfg';
 import { RING_PIECES } from '../../lib/ring-geometry';
-import { FOCUS_MOTION_MS } from '../design';
+import { FOCUS_MOTION_MS, SELECTION_RING_Z_INDEX } from '../design';
 
 // SelectionRing owns a stable structural shell and hands its nodes back through
 // refs; the overlay drives geometry, path `d`, and the smear imperatively from its
@@ -44,7 +44,7 @@ export function SelectionRing({
       style={{
         position: 'fixed',
         pointerEvents: 'none',
-        zIndex: 50,
+        zIndex: SELECTION_RING_Z_INDEX,
         // Geometry is written imperatively (see the overlay's rAF loop); only the
         // unfocus-saturate fade rides a CSS transition.
         transition: `filter ${FOCUS_MOTION_MS}ms`,

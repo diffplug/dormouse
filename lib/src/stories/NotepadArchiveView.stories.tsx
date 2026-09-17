@@ -8,6 +8,13 @@ import { refreshArchive } from '../lib/notepad/archive-service';
 import type { ArchiveBatch, NotepadArchiveV1 } from '../lib/notepad/types';
 import type { CwdState } from '../lib/terminal-state';
 
+/** The view renders into `document.body`, outside `canvasElement`
+ *  (docs/specs/layout.md → "Selection overlay"), so play queries scope to the
+ *  document body. */
+function view(canvasElement: HTMLElement) {
+  return within(canvasElement.ownerDocument.body);
+}
+
 /**
  * Batch times are frozen literals rather than offsets from `Date.now()`: the
  * header renders an absolute date, so a live clock would make every snapshot a
@@ -157,7 +164,7 @@ type Story = StoryObj<typeof ArchiveStory>;
 export const Populated: Story = {
   args: { seed: POPULATED },
   play: async ({ canvasElement }) => {
-    await within(canvasElement).findByText('pnpm test');
+    await view(canvasElement).findByText('pnpm test');
   },
 };
 
@@ -168,11 +175,11 @@ export const Populated: Story = {
 export const StagedDeletion: Story = {
   args: { seed: POPULATED },
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
-    await canvas.findByText('pnpm test');
-    const deletes = await canvas.findAllByLabelText('Delete note');
+    const body = view(canvasElement);
+    await body.findByText('pnpm test');
+    const deletes = await body.findAllByLabelText('Delete note');
     await userEvent.click(deletes[0]!);
-    await canvas.findByText(/Deletion is irreversible/);
+    await body.findByText(/Deletion is irreversible/);
   },
 };
 
@@ -181,7 +188,7 @@ export const StagedDeletion: Story = {
 export const EmptyArchive: Story = {
   args: { seed: { version: 1, batches: [] } },
   play: async ({ canvasElement }) => {
-    await within(canvasElement).findByText(/Nothing archived yet/);
+    await view(canvasElement).findByText(/Nothing archived yet/);
   },
 };
 
@@ -193,6 +200,6 @@ export const EmptyArchive: Story = {
 export const Unreadable: Story = {
   args: { corrupt: true },
   play: async ({ canvasElement }) => {
-    await within(canvasElement).findByText(/could not be read/);
+    await view(canvasElement).findByText(/could not be read/);
   },
 };

@@ -153,8 +153,13 @@ export interface ModalRect {
   height: number;
 }
 
+/** The selection ring's z-index. Under `WorkspaceWindow` it paints from
+ *  `document.body`, where every modal layer must sit above it
+ *  (docs/specs/layout.md → "Selection overlay"). */
+export const SELECTION_RING_Z_INDEX = 50;
+
 export const MODAL_LAYERS = {
-  app: 50,
+  app: 60,
   pane: 100,
   critical: 9999,
 } as const;

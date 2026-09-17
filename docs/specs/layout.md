@@ -301,8 +301,8 @@ A fixed-positioned element on top of the Lath host, covering the active element'
 - **Must pause the ants during Workspace title editing and restart their burst when editing ends**, without changing mode. Pinned by `pauses during workspace rename and restarts the burst when editing finishes` in `lib/src/components/wall/WorkspaceSelectionOverlay.test.tsx`.
 - Border radius follows DESIGN.md's Concentric-Corners Rule: the pane ring's radius is the pane radius plus the inflate (`PANE_SELECTION_RING_RADIUS_PX`), with the marching-ants path inset so its stroke centerline sits on the same gutter midline; doors sit at zero offset and keep `0.5rem 0.5rem 0 0`.
 - Color is the resolved `--color-focus-ring`, **re-read whenever `document.body`'s class/style changes**, because the dynamic palette publishes it there (`useFocusRingColor`).
-- `z-index: 50`, `pointer-events: none`. Under `WorkspaceWindow` the ring renders into `document.body`, outside the Workspace's presentation transform, so it paints above the active Workspace's stacking context.
-- **Every modal must render into `document.body` too** (`ModalOverlay`), or the ring crosses it. Pinned by `renders into document.body, outside the stacking context that rendered it` in `lib/src/components/ModalOverlay.test.tsx`.
+- `z-index: SELECTION_RING_Z_INDEX` (50), `pointer-events: none`. Under `WorkspaceWindow` it renders into `document.body`, outside the Workspace's transform and stacking context.
+- **Every modal must render into `document.body` too, at a `MODAL_LAYERS` value above the ring's** (`ModalOverlay`), or the ring crosses it — by value, never insertion order. Pinned by `lib/src/components/ModalOverlay.test.tsx`.
 
 ### Ring travel
 

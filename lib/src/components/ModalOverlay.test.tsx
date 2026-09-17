@@ -2,7 +2,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { ModalFrame } from './design';
+import { MODAL_LAYERS, ModalFrame, SELECTION_RING_Z_INDEX } from './design';
 import { ensureResizeObserver } from './wall/wall-test-utils';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -25,6 +25,12 @@ afterEach(() => {
 });
 
 describe('ModalOverlay', () => {
+  // Both share body's stacking context, so only the value keeps a modal above
+  // the ring; insertion order must not be what does it.
+  it('stacks every modal layer above the selection ring', () => {
+    expect(Math.min(...Object.values(MODAL_LAYERS))).toBeGreaterThan(SELECTION_RING_Z_INDEX);
+  });
+
   it('renders into document.body, outside the stacking context that rendered it', () => {
     act(() => root.render(<ModalFrame titleId="t"><h2 id="t">Title</h2></ModalFrame>));
     const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]')!;
