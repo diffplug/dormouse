@@ -158,17 +158,20 @@ describe('SurfacePaneHeader — browser chrome', () => {
     try {
       renderHeader({ ...headerProps(id, 'Tool'), params: { surfaceType: 'tool', url: CHROME.url } }, stubActions(), { tool: true });
       act(() => resizeHeader(width));
-      expect(container.querySelector('[aria-label="Kill"]')).not.toBeNull();
+      const inlineKill = container.querySelector<HTMLButtonElement>('[aria-label="Kill"]')!;
+      act(() => inlineKill.focus());
+      expect(document.activeElement).toBe(inlineKill);
       act(() => recordToolDirty(id, true));
       expect(container.querySelector('[aria-label="Unsaved changes"]')).not.toBeNull();
       if (width < 80) {
         expect(container.querySelector('[aria-label="Kill"]')).toBeNull();
+        expect(document.activeElement).toBe(overflowTrigger());
         openPopup();
         expect(inPopup('[aria-label="Kill"]')).not.toBeNull();
         act(() => inPopup('[aria-label="Kill"]')!.focus());
         expect(document.activeElement).toBe(inPopup('[aria-label="Kill"]'));
       } else {
-        expect(container.querySelector('[aria-label="Kill"]')).not.toBeNull();
+        expect(document.activeElement).toBe(inlineKill);
       }
       act(() => recordToolDirty(id, false));
       expect(container.querySelector('[aria-label="Unsaved changes"]')).toBeNull();
@@ -179,6 +182,32 @@ describe('SurfacePaneHeader — browser chrome', () => {
         expect(document.activeElement).toBe(overflowTrigger());
       }
     } finally {
+      registration.dispose();
+    }
+  });
+
+  it.each([null, false].flatMap(initial =>
+    (['inline', 'elsewhere', 'hidden'] as const).map(focus => ({ initial, focus })),
+  ))('handles $initial → dirty with $focus focus at a fixed narrow width', ({ initial, focus }) => {
+    const id = 'dirty-inline-focus';
+    const registration = register(id);
+    const props = { ...headerProps(id, 'Tool'), params: { surfaceType: 'tool', url: CHROME.url } };
+    const actions = stubActions();
+    const other = document.createElement('button');
+    document.body.appendChild(other);
+    try {
+      recordToolDirty(id, initial);
+      renderHeader(props, actions, { tool: true });
+      act(() => resizeHeader(79));
+      act(() => container.querySelector<HTMLButtonElement>('[aria-label="Minimize"]')!.focus());
+      if (focus === 'elsewhere') act(() => other.focus());
+      if (focus === 'hidden') renderHeader(props, actions, { tool: true, workspaceActive: false });
+      act(() => recordToolDirty(id, true));
+      expect(container.querySelector('[aria-label="Minimize"]')).toBeNull();
+      expect(popup()).toBeNull();
+      expect(document.activeElement).toBe(focus === 'inline' ? overflowTrigger() : focus === 'elsewhere' ? other : document.body);
+    } finally {
+      other.remove();
       registration.dispose();
     }
   });

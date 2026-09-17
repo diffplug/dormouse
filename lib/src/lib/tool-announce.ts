@@ -16,7 +16,7 @@ import { sanitizeText } from './osc-sanitize';
 /** Cap on the whole payload before parsing. A tool's announcement is a handful
  *  of fields; anything larger is a mistake or an attack, and JSON.parse on
  *  unbounded terminal output is not something to offer. */
-export const PAYLOAD_LIMIT = 4096;
+const PAYLOAD_LIMIT = 4096;
 const NAME_LIMIT = 200;
 const KEY_ELEMENT_LIMIT = 512;
 const KEY_ELEMENTS_LIMIT = 8;

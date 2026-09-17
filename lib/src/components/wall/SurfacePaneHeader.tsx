@@ -103,8 +103,8 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
   const closeUrlEditor = () => setEditingUrl(false);
 
   // Below the `minimal` tier the chrome lives in a popover behind one trigger;
-  // a pane resize or a hidden Surface closes it, the latter without pulling
-  // focus back to a trigger nobody can see. `closeMenu` stays identity-stable
+  // resizing, moved essential controls, or a hidden Surface closes it, the
+  // last without pulling focus back to a trigger nobody can see. `closeMenu` stays identity-stable
   // (reading `visibleRef`) so the popover's listeners subscribe once.
   const headerRef = useRef<HTMLDivElement>(null);
   const overflowRef = useRef<HTMLButtonElement>(null);
@@ -118,9 +118,13 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
   const inline: BrowserInlineTier | null = tier === 'overflow' || tier === 'tight' || tier === 'tiny' ? null : tier;
   // Keep 72–79px distinct so a dirty report can move actions without a resize.
   const inlinePaneActions = tier !== 'tiny' && (tier !== 'tight' || !dirty);
+  const paneActionsFocused = useRef(false);
   const previousInlinePaneActions = useRef(inlinePaneActions);
   useLayoutEffect(() => {
-    if (previousInlinePaneActions.current !== inlinePaneActions && menuOpen) closeMenu();
+    if (previousInlinePaneActions.current !== inlinePaneActions) {
+      if (menuOpen || (!inlinePaneActions && paneActionsFocused.current)) closeMenu();
+      paneActionsFocused.current = false;
+    }
     previousInlinePaneActions.current = inlinePaneActions;
   }, [inlinePaneActions, menuOpen, closeMenu]);
   const popoverOpen = visible && inline === null && menuOpen;
@@ -262,7 +266,9 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
   );
 
   const paneActions = (
-    <div className="ml-auto flex shrink-0 items-center gap-0.5">
+    <div className="ml-auto flex shrink-0 items-center gap-0.5"
+      onFocus={() => { paneActionsFocused.current = true; }}
+      onBlur={() => { paneActionsFocused.current = false; }}>
       <HeaderActionButton
         className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
         onClick={(e) => { e.stopPropagation(); closeMenu(); actions.onMinimize(id); }}
