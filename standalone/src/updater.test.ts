@@ -58,8 +58,10 @@ import {
   useUpdateState,
   hasPendingUpdate,
   installPendingUpdate,
+  restartToUpdate,
   _resetForTesting,
 } from './updater';
+import { UpdateBanner } from './UpdateBanner';
 
 function readBannerState(): UpdateBannerState {
   let state!: UpdateBannerState;
@@ -362,6 +364,42 @@ describe('updater', () => {
   });
 
   describe('actions', () => {
+    it('restartToUpdate asks Rust for a restart, which installs on the way out', async () => {
+      mocks.invoke.mockResolvedValue(true);
+      restartToUpdate();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(mocks.invoke).toHaveBeenCalledWith('quit_restart');
+    });
+
+    it('offers Restart now only once the update is downloaded', () => {
+      const onRestart = vi.fn();
+      const render = (state: UpdateBannerState) => {
+        const container = document.createElement('div');
+        const root = createRoot(container);
+        flushSync(() => root.render(createElement(UpdateBanner, {
+          state,
+          onDismiss: vi.fn(),
+          onApproveUpdate: vi.fn(),
+          onRestart,
+          onOpenChangelog: vi.fn(),
+          onOpenDebug: vi.fn(),
+        })));
+        return { container, unmount: () => root.unmount() };
+      };
+      const restartButton = (container: HTMLElement) =>
+        [...container.querySelectorAll('button')].find((button) => button.textContent === 'Restart now');
+
+      const available = render({ status: 'available', version: '0.5.0' });
+      expect(restartButton(available.container)).toBeUndefined();
+      available.unmount();
+
+      const downloaded = render({ status: 'downloaded', version: '0.5.0' });
+      restartButton(downloaded.container)!.click();
+      expect(onRestart).toHaveBeenCalledOnce();
+      downloaded.unmount();
+    });
+
     it('openChangelog reads the current app version and opens release notes after it', async () => {
       openChangelog();
       await vi.advanceTimersByTimeAsync(0);

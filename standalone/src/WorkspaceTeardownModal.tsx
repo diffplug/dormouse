@@ -61,8 +61,8 @@ export function WorkspaceTeardownModal({
    *  "Standalone quit"). Set means the running-command decision is already made
    *  and this dialog now asks only whether to lose the notes. */
   archiveError?: string | null;
-  /** Whether this tears down the whole app or one window, and whether that
-   *  discards a downloaded update. */
+  /** Whether this tears down the whole app or one window, whether that
+   *  discards a downloaded update, and whether the app relaunches after. */
   intent?: QuitConfirmIntent;
 }) {
   const cancelButtonRef = useRef<HTMLButtonElement>(null);
@@ -76,7 +76,8 @@ export function WorkspaceTeardownModal({
       <ModalFrame titleId="workspace-kill-progress-title" layer="critical" padding="spacious" align="center" initialFocusRef={progressRef}>
         <h2 id="workspace-kill-progress-title" className="text-base font-bold mb-3 text-foreground">Confirm kill workspace</h2>
         <p ref={progressRef} tabIndex={-1} role="status" className="text-sm text-muted">
-          {intent.kind === 'quit' ? 'Waiting for all windows, then closing…' : 'Closing workspaces…'}
+          {intent.kind !== 'quit' ? 'Closing workspaces…'
+            : intent.restart ? 'Waiting for all windows, then restarting…' : 'Waiting for all windows, then closing…'}
         </p>
       </ModalFrame>
     );
@@ -86,7 +87,8 @@ export function WorkspaceTeardownModal({
     const scope = names ? `Workspaces: ${names}. ` : '';
     const count = hasRunning ? `${runningCount} running command${runningCount === 1 ? '' : 's'} will be stopped.` : 'No commands are still running.';
     const update = intent.discardsUpdate ? ' The downloaded update will be discarded.' : '';
-    return <WorkspaceKillConfirm char={char} detail={`${scope}${count}${update}`} onConfirm={confirmQuit} onCancel={cancelQuit}
+    const restart = intent.restart ? ' Claude and Codex sessions resume after the restart.' : '';
+    return <WorkspaceKillConfirm char={char} detail={`${scope}${count}${update}${restart}`} onConfirm={confirmQuit} onCancel={cancelQuit}
       layer="critical" />;
   }
   // Note loss needs its own decision even after process termination was approved.

@@ -371,6 +371,28 @@ describe("quit orchestrator", () => {
     expect(mocks.invoke).toHaveBeenCalledWith("quit_proceed");
   });
 
+  it("hands the gate the restart intent Rust sent, and a plain quit without one", async () => {
+    mocks.countRunningSessions.mockReturnValue(1);
+    const gate = vi.fn();
+    setQuitConfirmGate(gate);
+    initQuitFlow(fakeAdapter());
+
+    fire("dormouse://quit-requested", { restart: true });
+    expect(gate).toHaveBeenLastCalledWith(expect.anything(), { kind: "quit", restart: true });
+
+    // A payload-less event (any sender that predates restart) is a plain quit.
+    quitCancelled();
+    quitRequested();
+    expect(gate).toHaveBeenLastCalledWith(expect.anything(), { kind: "quit", restart: false });
+
+    // The teardown itself does not change: the relaunch is Rust's.
+    gate.mock.lastCall![0].confirm();
+    await settle();
+    quitTeardown();
+    await settle();
+    expect(mocks.invoke).toHaveBeenCalledWith("quit_proceed");
+  });
+
   it("does not re-invoke the gate while a confirmation is pending", async () => {
     mocks.countRunningSessions.mockReturnValue(1);
     const adapter = fakeAdapter();

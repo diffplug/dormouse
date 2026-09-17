@@ -79,6 +79,17 @@ export function approveUpdate(): void {
   void downloadApprovedUpdate();
 }
 
+/** Quit now and relaunch. The quit installs the pending update on its way out
+ *  (docs/specs/auto-update.md → "Quit-time install"). */
+export function restartToUpdate(): void {
+  if (BROWSER_DEV_HOST) return;
+  invokeTauri<boolean>('quit_restart')
+    .then((relaunches) => {
+      if (!relaunches) console.warn('[updater] Joined a quit already under way; Dormouse will not relaunch.');
+    })
+    .catch((e) => console.error('[updater] Restart failed:', e));
+}
+
 export function openChangelog(): void {
   void openCurrentVersionChangelog();
 }

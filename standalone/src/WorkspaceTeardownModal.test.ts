@@ -58,6 +58,16 @@ describe("WorkspaceTeardownModal copy", () => {
     expect(text).toContain("The downloaded update will be discarded.");
   });
 
+  it("says which sessions come back when the quit is a restart", () => {
+    const text = render({ confirming: false, intent: { kind: "quit", restart: true } });
+    expect(text).toContain("Claude and Codex sessions resume after the restart.");
+    expect(render({ confirming: true, intent: { kind: "quit", restart: true } }))
+      .toContain("Waiting for all windows, then restarting…");
+    expect(render({ confirming: false, intent: { kind: "quit" } })).not.toContain("restart");
+    expect(render({ confirming: true, intent: { kind: "quit" } }))
+      .toContain("Waiting for all windows, then closing…");
+  });
+
   it("says nothing about an update otherwise", () => {
     expect(render({ confirming: false, intent: { kind: "close-window" } }))
       .not.toContain("downloaded update");

@@ -14,6 +14,7 @@ interface UpdateBannerProps {
   state: UpdateBannerState;
   onDismiss: () => void;
   onApproveUpdate: () => void;
+  onRestart: () => void;
   onOpenChangelog: () => void;
   onOpenDebug: () => void;
 }
@@ -21,7 +22,7 @@ interface UpdateBannerProps {
 const linkClass = 'shrink-0 hover:underline';
 const linkStyle = { color: 'var(--vscode-textLink-foreground)' };
 
-export function UpdateBanner({ state, onDismiss, onApproveUpdate, onOpenChangelog, onOpenDebug }: UpdateBannerProps) {
+export function UpdateBanner({ state, onDismiss, onApproveUpdate, onRestart, onOpenChangelog, onOpenDebug }: UpdateBannerProps) {
   if (state.status === 'idle' || state.status === 'dismissed') return null;
 
   let message: ReactNode;
@@ -50,7 +51,10 @@ export function UpdateBanner({ state, onDismiss, onApproveUpdate, onOpenChangelo
       break;
     case 'downloaded':
       message = `Update downloaded (v${state.version}) — will install when you quit`;
-      links = [{ label: 'Changelog', onClick: onOpenChangelog }];
+      links = [
+        { label: 'Changelog', onClick: onOpenChangelog },
+        { label: 'Restart now', onClick: onRestart },
+      ];
       break;
     case 'post-update-success':
       message = `Updated to v${state.to} — from v${state.from}`;

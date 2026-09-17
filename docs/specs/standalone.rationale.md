@@ -262,3 +262,21 @@ be N checks against the endpoint.
 **Why the teardown ordering survived the transcript removal.** Flush → graceful kill → flush → drain was built to capture the final scrollback of dying terminals into the persisted session. The transcripts are gone, but the shape is still what makes the *structure* correct: the first flush reads cwds while the shells are alive, and the second catches whatever changed as they died, retaining the earlier cwd for a PTY `getCwd` can no longer answer.
 
 **Why the capture goes first and cannot abort the rest.** The resume hint exists only in the window between the interrupt and the kill, so no later step can reconstruct it — but it is also the step most likely to be slow or to fail, and losing an agent's resume is much cheaper than losing the layout, cwds, and notes behind it.
+
+## Restart
+
+**Why not `AppHandle::request_restart`.** It raises `ExitRequested` with
+`RESTART_EXIT_CODE`, and `ExitRequestApi::prevent_exit` ignores that code
+(`tauri-2.11.5/src/app.rs`). A restart would slip past the unapproved-exit guard
+and the hand-back cleanup gate, and the watchdog and `Destroyed` exits, which
+call `app.exit(0)`, would drop the relaunch. Relaunching from `RunEvent::Exit`
+keeps one exit path. That exit stops tao's run loop with `[NSApp stop:]`, never
+`terminate:` (`tao-0.35.2/src/platform_impl/macos/app_state.rs`), so the spliced
+`applicationShouldTerminate:` sees only OS-initiated terminates. Checked
+2026-09.
+
+**Why the refusals.** Under `tauri dev` the relaunched binary outlives the CLI
+and the Vite server it loads from. `tauri::process::restart` just calls `exit(0)`
+when `current_binary` fails — on macOS, for a path through a symlink
+(`tauri-utils-2.9.3/src/platform/starting_binary.rs`) — so the check turns a
+silent quit into an answer.
