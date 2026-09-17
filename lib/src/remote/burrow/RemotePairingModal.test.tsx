@@ -27,17 +27,17 @@ async function render(label = 'Ned’s iPhone') {
 }
 
 function text(): string {
-  return container.textContent ?? '';
+  return document.body.textContent ?? '';
 }
 
 function codeInput(): HTMLInputElement {
-  const input = container.querySelector<HTMLInputElement>('input');
+  const input = document.body.querySelector<HTMLInputElement>('input');
   if (!input) throw new Error('the code field is not mounted');
   return input;
 }
 
 function buttonLabelled(label: string): HTMLButtonElement {
-  const button = [...container.querySelectorAll('button')].find(
+  const button = [...document.body.querySelectorAll('button')].find(
     (candidate) => candidate.textContent?.trim() === label,
   );
   if (!button) throw new Error(`no button labelled ${label}`);

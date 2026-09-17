@@ -2,6 +2,7 @@ import { clsx } from 'clsx';
 import { tv, type VariantProps } from 'tailwind-variants';
 import { XIcon } from '@phosphor-icons/react';
 import { forwardRef, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { ButtonHTMLAttributes, ComponentProps, CSSProperties, HTMLAttributes, InputHTMLAttributes, ReactNode, RefObject } from 'react';
 import { stepFocus } from './focus-step';
 import { OVERLAY_VIEWPORT_MARGIN_PX } from '../lib/ui-geometry';
@@ -530,7 +531,7 @@ export function ModalOverlay({
       }
     : { zIndex: resolvedZIndex, ...style };
 
-  return (
+  const overlay = (
     <div
       className={clsx(modalOverlay({ scope: rect ? 'target' : 'viewport', backdrop }), className)}
       style={overlayStyle}
@@ -539,6 +540,10 @@ export function ModalOverlay({
       {children}
     </div>
   );
+  // In `document.body`, so no Workspace's stacking context or presentation
+  // transform holds it under the selection ring (docs/specs/layout.md ->
+  // "Selection overlay"). The server renderer has no portals.
+  return typeof document === 'undefined' ? overlay : createPortal(overlay, document.body);
 }
 
 export type ModalSurfaceProps = HTMLAttributes<HTMLDivElement> & ModalSurfaceVariants;
