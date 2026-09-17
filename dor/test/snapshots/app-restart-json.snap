@@ -1,7 +1,7 @@
 exitCode: 0
 stdout:
 {
-  "status": "restarting"
+  "status": "requested"
 }
 
 stderr:

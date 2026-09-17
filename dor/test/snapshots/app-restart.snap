@@ -1,5 +1,5 @@
 exitCode: 0
 stdout:
-restarting Dormouse; Claude and Codex sessions resume when it reopens
+restart requested; Dormouse asks first if commands are running, and Claude and Codex sessions resume when it reopens
 
 stderr:

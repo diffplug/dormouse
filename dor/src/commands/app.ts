@@ -29,11 +29,11 @@ export const appCommand: Command = {
 restart quits Dormouse and reopens it. Every window and Workspace comes back with its layout and working directories, and Claude and Codex sessions resume where they left off. Every other process is stopped and all scrollback is cleared. It goes through the app's normal quit, so Dormouse asks first when commands are still running (this command's own terminal does not count). A development build refuses, since its dev server does not survive a relaunch.
 
 Text output:
-  restarting Dormouse; Claude and Codex sessions resume when it reopens
+  restart requested; Dormouse asks first if commands are running, and Claude and Codex sessions resume when it reopens
 
 JSON output:
   {
-    "status": "restarting"
+    "status": "requested"
   }`,
     },
     parameters: {
@@ -81,7 +81,7 @@ async function runAppCommand(
     return new Error('a quit is already in progress; Dormouse will quit without relaunching');
   }
   writeStdout(this, flags.json === true
-    ? renderJson({ status: 'restarting' })
-    : 'restarting Dormouse; Claude and Codex sessions resume when it reopens\n');
+    ? renderJson({ status: 'requested' })
+    : 'restart requested; Dormouse asks first if commands are running, and Claude and Codex sessions resume when it reopens\n');
   return undefined;
 }

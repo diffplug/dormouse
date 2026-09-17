@@ -48,8 +48,11 @@ unsafe extern "C-unwind" fn should_terminate(
         return NSApplicationTerminateReply::TerminateNow;
     };
     if quit_approved(app) {
+        // Whichever way this answers, the OS asked to end the app; a Cancel
+        // here aborts a logout, and the gated exit that follows must not
+        // relaunch into it.
+        forget_restart(app);
         return if exit_after_cleanup(app) {
-            forget_restart(app);
             NSApplicationTerminateReply::TerminateNow
         } else {
             NSApplicationTerminateReply::TerminateCancel
