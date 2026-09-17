@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { installDorControlRouter, resolveDorControlRoute } from './dor-control-router';
 import { registerWallHandle, resetWallHandles, stubWallHandle, type WallHandle } from './wall-handles';
 import type { DorControlRequest } from './use-dor-control';
+import { getPlatformOrNull, setPlatform } from '../../lib/platform';
+import type { PlatformAdapter } from '../../lib/platform/types';
 import {
   createWorkspace,
   currentWindowRef,
@@ -311,6 +313,63 @@ describe('dor control routing', () => {
     window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail }));
     expect(handle.handleDorControl).not.toHaveBeenCalled();
     expect(detail.respond).toHaveBeenCalledWith({ ok: false, error: "unknown workspace target 'workspace:9'" });
+    release();
+  });
+});
+
+describe('dor app verbs', () => {
+  const previous = getPlatformOrNull();
+  afterEach(() => setPlatform(previous as PlatformAdapter));
+
+  function withRestart(requestAppRestart?: (requester?: string) => Promise<boolean>): void {
+    setPlatform({ requestAppRestart } as unknown as PlatformAdapter);
+  }
+
+  it('answers at the Window before resolving any Workspace, Surface, or Window param', () => {
+    const handle = handleFor(getWorkspacesSnapshot().workspaces[0].id, ['pane-a']);
+    for (const params of [{}, { window: 1 }, { workspace: 'workspace:9' }]) {
+      expect(resolveDorControlRoute(request({ method: 'app.restart', surfaceId: 'pane-a', params: params as never })))
+        .toEqual({ kind: 'app' });
+    }
+    expect(handle.handleDorControl).not.toHaveBeenCalled();
+  });
+
+  // The caller is the requester, so its own pane never counts as running work
+  // in the restart's confirmation.
+  it('requests the restart for the caller first, then answers with whether it will relaunch', async () => {
+    let settle!: (relaunch: boolean) => void;
+    const requestAppRestart = vi.fn((_requester?: string) => new Promise<boolean>((resolve) => { settle = resolve; }));
+    withRestart(requestAppRestart);
+    const release = installDorControlRouter();
+    const detail = request({ method: 'app.restart', surfaceId: 'pane-a' });
+    window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail }));
+    expect(requestAppRestart).toHaveBeenCalledExactlyOnceWith('pane-a');
+    expect(detail.respond).not.toHaveBeenCalled();
+
+    settle(false);
+    await vi.waitFor(() => expect(detail.respond).toHaveBeenCalledWith({ ok: true, result: { relaunch: false } }));
+    release();
+  });
+
+  it('passes the host refusal through as the error', async () => {
+    // Tauri rejects an invoke with the command's error string, not an Error.
+    withRestart(() => Promise.reject('Restart needs a packaged build'));
+    const release = installDorControlRouter();
+    const detail = request({ method: 'app.restart' });
+    window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail }));
+    await vi.waitFor(() => expect(detail.respond).toHaveBeenCalledWith({ ok: false, error: 'Restart needs a packaged build' }));
+    release();
+  });
+
+  it('refuses on a host that cannot restart itself', () => {
+    withRestart(undefined);
+    const release = installDorControlRouter();
+    const detail = request({ method: 'app.restart' });
+    window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail }));
+    expect(detail.respond).toHaveBeenCalledWith({
+      ok: false,
+      error: 'dor app restart is available only in Dormouse Standalone',
+    });
     release();
   });
 });

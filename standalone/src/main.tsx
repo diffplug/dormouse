@@ -19,6 +19,7 @@ import {
   useUpdateState,
   dismissBanner,
   approveUpdate,
+  restartToUpdate,
   openChangelog,
   buildDebugReport,
 } from "./updater";
@@ -47,6 +48,7 @@ function ConnectedUpdateBanner() {
         state={state}
         onDismiss={dismissBanner}
         onApproveUpdate={approveUpdate}
+        onRestart={restartToUpdate}
         onOpenChangelog={openChangelog}
         onOpenDebug={() => {
           if (liveFailure) {

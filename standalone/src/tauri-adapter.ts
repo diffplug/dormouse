@@ -387,6 +387,11 @@ export class TauriAdapter implements PlatformAdapter {
     }
   }
 
+  /** docs/specs/standalone.md -> "Restart". */
+  requestAppRestart(requester?: string): Promise<boolean> {
+    return rawInvoke<boolean>("quit_restart", { requester });
+  }
+
   async getCwd(id: string): Promise<string | null> {
     try {
       return await rawInvoke<string | null>("pty_get_cwd", { id });

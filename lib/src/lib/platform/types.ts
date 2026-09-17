@@ -299,6 +299,13 @@ export interface PlatformAdapter {
    */
   recoveryReady?: Promise<void>;
 
+  /**
+   * Quit and relaunch; resolves whether the quit relaunches, and `requester`
+   * never counts as running work in its confirmation
+   * (`docs/specs/standalone.md` → "Restart"). Absent where a host cannot.
+   */
+  requestAppRestart?(requester?: string): Promise<boolean>;
+
   /** Explicit live Workspace handoff, never a persistence reader. */
   alertPauseForTransfer?(id: string): AlertRuntimeSnapshot | null;
   /** `replayRequestId` names the one since-mark `pty:replay` whose notification

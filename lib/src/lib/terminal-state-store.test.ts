@@ -415,6 +415,14 @@ describe('countRunningSessions (quit-confirmation gate)', () => {
     applyTerminalSemanticEvents('run-a', [{ type: 'commandFinish', exitCode: 0 }]);
     expect(countRunningSessions()).toBe(1);
   });
+
+  it('leaves out the excepted session and nothing else', () => {
+    applyTerminalSemanticEvents('run-a', [{ type: 'commandStart', source: 'osc633_boundaries' }]);
+    applyTerminalSemanticEvents('run-b', [{ type: 'commandStart', source: 'osc633_boundaries' }]);
+    expect(countRunningSessions('run-a')).toBe(1);
+    expect(countRunningSessions('idle')).toBe(2);
+    expect(countRunningSessions(null)).toBe(2);
+  });
 });
 
 describe('seedLaunchedCommand (dor split/ensure -lc launches)', () => {

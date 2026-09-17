@@ -990,7 +990,8 @@ Every trigger funnels into `request_quit(app)`:
 | `WindowEvent::CloseRequested` | the window close button | `api.prevent_close()` unless the quit is approved. Refused outright while the walk is running: a window taken out from under its own teardown leaves the walk emitting to a dead label. Only the **last** window's close is a quit; every other one is a per-window close (§Windows) |
 | `RunEvent::ExitRequested` | a window-level exit request | `api.prevent_exit()` unless approved and cleared by the bounded cleanup gate (§What a window's `Destroyed` settles). The event's `code` is ignored |
 | the app menu's Quit item | the menu, and its `Cmd+Q` accelerator | a **custom** `MenuItem`, never `PredefinedMenuItem::quit`, whose event calls `request_quit`; muda wires the predefined one straight to AppKit's `terminate:` (macOS; rationale) |
-| `applicationShouldTerminate:` | the Dock's Quit, `osascript`, logout, restart | spliced onto tao's live delegate class at `Ready`, answering `NSTerminateCancel` and starting the flow, then `NSTerminateNow` once approved and cleared by the bounded cleanup gate (§What a window's `Destroyed` settles; macOS; rationale) |
+| `applicationShouldTerminate:` | the Dock's Quit, `osascript`, logout, restart | spliced onto tao's live delegate class at `Ready`, answering `NSTerminateCancel` and starting the flow; a terminate the OS re-sends after approval gets `NSTerminateNow` once cleared by the bounded cleanup gate (§What a window's `Destroyed` settles; macOS; rationale). The flow's own `app.exit(0)` never arrives here |
+| the `quit_restart` command | the update notice's "Restart now", `dor app restart` | `request_quit` with the restart intent (§Restart) |
 
 Source of truth: `standalone/src-tauri/src/macos_terminate.rs`.
 
@@ -1042,7 +1043,9 @@ exit without acting: the user's escape hatch if the webview acked then wedged.
 
 **Must use the Workspace typed-letter confirmation for window close and quit**,
 naming every Workspace in the window, including hidden ones. The gate opens for
-running Sessions; an all-idle quit proceeds without a prompt. Window close also
+running Sessions; an all-idle quit proceeds without a prompt. **A quit's prompt
+says Claude and Codex sessions resume when Dormouse reopens** (§Agent recovery);
+a window close's never does, since it runs no capture. Window close also
 asks before discarding a pending download (§Per-window close).
 
 - **Must keep one letter per request across Workspace switches and repeat quit
@@ -1129,6 +1132,45 @@ so step 2 terminates promptly there, retaining the same final-output grace tick.
 
 **Dev-mode note.** The browser-dev harness has no Rust quit interception, and the
 flow never initializes there (§Boot sequence, step 5).
+
+### Restart
+
+A restart is a quit that relaunches: the same vote, confirmation and teardown,
+with only the exit changed.
+
+- **The trigger that leaves `Idle` unapproved fixes the intent** — whether to
+  relaunch, and the requesting Surface. A repeat trigger keeps it, a cancel
+  clears it, and a quit queued behind a transfer carries it (`ArrivalQueue`).
+  `quit_restart` answers whether the quit it landed in relaunches — `false` when
+  it joined a plain quit.
+- **A restart asks exactly what a quit asks** (§Quit flow), so
+  `dormouse://quit-requested` carries only `{ requester }`, never whether the
+  quit relaunches.
+- **The requester never counts as running work in the restart's confirmation**
+  (`quitRunningWork`): it is the `dor app restart` still waiting on its answer.
+  Every other running Session still asks, and Workspace and window closes count
+  everything.
+- **Every approved exit stays `app.exit(0)`; the relaunch runs in
+  `RunEvent::Exit`, after `shutdown_sidecar_and_wait`**, as `cleanup_before_exit`
+  then `tauri::process::restart`, which on macOS re-reads `Info.plist`, so a
+  bundle replaced in place starts as the new version. **Never
+  `AppHandle::request_restart`** (rationale).
+- **A terminate the OS re-sends after approval clears the intent**, so logout
+  never relaunches.
+- **`quit_restart` refuses a debug build and an executable
+  `tauri::process::current_binary` cannot resolve**, where `restart` would exit
+  without relaunching (rationale).
+- A Windows quit holding an update relaunches by its installer instead
+  (`docs/specs/auto-update.md` → "Platform behavior at quit").
+
+Source of truth: `quit_restart`, `relaunch_requested` and the `RunEvent::Exit`
+arm in `standalone/src-tauri/src/lib.rs`; `QuitIntent`, `QuitMachine::request` and
+`ArrivalQueue::defer_quit` in `standalone/src-tauri/src/quit_state.rs`;
+`quitRunningWork` in `standalone/src/quit-confirm-store.ts`. Pinned by the
+restart-intent tests in `standalone/src-tauri/src/quit_state.rs`,
+`a_restart_relaunches_only_after_the_sidecar_shuts_down` in
+`standalone/src-tauri/src/lib.rs`, and the requester and copy cases in
+`standalone/src/quit.test.ts` and `standalone/src/WorkspaceTeardownModal.test.ts`.
 
 ## File drop
 

@@ -12,6 +12,11 @@
 #   Requires a one-time install first (NSIS installer on Windows, DMG on macOS)
 #   so that the install location exists.
 #
+#   macOS swaps the bundle in place and leaves a running Dormouse alone; run
+#   `dor app restart` in any Dormouse terminal to switch to the new build and
+#   resume your Claude and Codex sessions. Windows cannot replace files the
+#   running app holds, so it still kills Dormouse before copying.
+#
 # Launch mode (--no-install):
 #   Runs the built binary directly from target/release. Works on Windows, macOS,
 #   and Linux with no prior setup. This is the fastest way to test changes.
@@ -81,21 +86,31 @@ if [[ "${1:-}" != "--no-install" ]]; then
         echo "After that, 'dogfood:standalone' will work from then on."
         exit 1
       fi
-      if pgrep -x dormouse >/dev/null 2>&1; then
-        osascript -e 'tell application id "sh.dormouse.standalone" to quit' \
-          >/dev/null 2>&1 || true
-        for _ in {1..50}; do
-          pgrep -x dormouse >/dev/null 2>&1 || break
-          sleep 0.1
-        done
-        pkill -x dormouse >/dev/null 2>&1 || true
+      # Renames keep a running Dormouse's mapped binary and sidecar alive; the
+      # terminals it spawns before `dor app restart` already get the new
+      # bundle's `dor`, node-pty spawn-helper, and shell integration. The
+      # staging names do not end in `.app`, so LaunchServices ignores them.
+      STAGED="/Applications/.dormouse-dogfood-new"
+      RETIRED="/Applications/.dormouse-dogfood-old"
+      rm -rf "$STAGED" "$RETIRED"
+      ditto --clone "$RELEASE_DIR/bundle/macos/Dormouse Terminal.app" "$STAGED"
+      mv "$INSTALL_DIR" "$RETIRED"
+      if ! mv "$STAGED" "$INSTALL_DIR"; then
+        mv "$RETIRED" "$INSTALL_DIR"
+        echo "Could not move the new build into place; kept the installed one."
+        exit 1
       fi
-      rm -rf "$INSTALL_DIR"
-      cp -r "$RELEASE_DIR/bundle/macos/Dormouse Terminal.app" "$INSTALL_DIR"
+      rm -rf "$RETIRED"
       touch "$INSTALL_DIR"
       /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
         -f "$INSTALL_DIR" >/dev/null 2>&1 || true
       echo "✦ Installed to $INSTALL_DIR"
+      if pgrep -f "$INSTALL_DIR/Contents/MacOS/" >/dev/null 2>&1; then
+        echo "  Dormouse is still running the previous build. To switch, run this in any"
+        echo "  Dormouse terminal (Claude and Codex sessions resume):"
+        echo ""
+        echo "    dor app restart"
+      fi
       ;;
     *)
       echo "Install mode is not yet implemented for this platform."

@@ -204,6 +204,11 @@ export interface WorkspaceMutationResponse {
   name: string;
 }
 
+/** The host's answer to `dor app restart` (`docs/specs/dor-cli.md` → "dor app"). */
+export interface AppRestartResponse {
+  relaunch: boolean;
+}
+
 export interface SplitSurfaceRequest extends WorkspaceScopedRequest {
   /** Raw argv for the initial command; the host quotes it for the target shell. */
   command?: string[];
@@ -465,6 +470,7 @@ export interface ControlClient {
   closeWorkspace(request: CloseWorkspaceRequest): Promise<WorkspaceMutationResponse>;
   switchWorkspace(request: SwitchWorkspaceRequest): Promise<WorkspaceMutationResponse>;
   moveWorkspace(request: MoveWorkspaceRequest): Promise<WorkspaceMutationResponse>;
+  restartApp(): Promise<AppRestartResponse>;
 }
 
 export interface AgentBrowserExecResult {
