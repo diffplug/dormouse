@@ -149,6 +149,35 @@ describe('workspace motion', () => {
     expect(workspaceIsCollapsed('ws-a')).toBe(true);
   });
 
+  it.each(['hidden', 'fading'] as const)('keeps an inactive %s Workspace hidden after a refused close, then expands on activation', async (state) => {
+    const visibility = vi.fn();
+    motion.dispose();
+    motion = createWorkspaceMotion(wall, 'ws-a', visibility);
+    if (state === 'fading') {
+      motion.expand();
+      frame(LATH_MOTION_MS);
+      motion.fade();
+      frame(100);
+    }
+    wall.dataset.workspaceActive = 'false';
+    await motion.collapse();
+    visibility.mockClear();
+    restoreWorkspaceMotion('ws-a');
+    expect(visibility).not.toHaveBeenCalledWith(true);
+    expect(visibility).toHaveBeenLastCalledWith(false);
+    expect(workspaceIsCollapsed('ws-a')).toBe(false);
+    expect(callbacks.size).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+
+    wall.dataset.workspaceActive = 'true';
+    motion.expand();
+    expect(wall.style.opacity).toBe('0');
+    expect(wall.style.transform).toBe('translate(100px, -32px) scale(0.1, 0.04)');
+    frame(LATH_MOTION_MS);
+    expect(wall.style.opacity).toBe('');
+    expect(visibility).toHaveBeenLastCalledWith(true);
+  });
+
   it('finishes a departure when a background window stops painting frames', async () => {
     const pending = motion.collapse();
     await vi.advanceTimersByTimeAsync(LATH_MOTION_MS);

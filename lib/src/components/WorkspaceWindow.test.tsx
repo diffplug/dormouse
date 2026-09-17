@@ -385,9 +385,10 @@ describe('WorkspaceWindow', () => {
     expect(leafIdsIn('ws-2')).toEqual([]);
   });
 
-  it('a refused closure leaves the Workspace intact and re-arms its auto-spawn', async () => {
+  it.each([true, false])('a refused closure preserves Workspace visibility (active: %s) and re-arms its auto-spawn', async (activate) => {
+    const first = getActiveWorkspaceId();
     await render();
-    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    await act(async () => { createWorkspace({ id: 'ws-2', activate }); });
     await flush();
     const handle = getWallHandle('ws-2')!;
     const [paneId] = handle.surfaceIds();
@@ -400,6 +401,8 @@ describe('WorkspaceWindow', () => {
     expect(refusal).toContain('notepad archive failed');
     expect(handle.surfaceIds()).toEqual([paneId]);
     expect(workspaceMotion.workspaceIsCollapsed('ws-2')).toBe(false);
+    expect(getActiveWorkspaceId()).toBe(activate ? 'ws-2' : first);
+    expect(wallFor('ws-2').classList.contains('invisible')).toBe(!activate);
 
     // The flag is cleared, so the Wall's "always one pane" rule works again.
     vi.mocked(fake.notepadArchive.save).mockResolvedValue(undefined);

@@ -118,6 +118,12 @@ export function createWorkspaceMotion(element: HTMLElement, id: string, onVisibi
       // Switching away and back must not undo an accepted close or transfer.
       if (departing && !restore) return;
       departing = false;
+      // A refused background close must not reveal the Wall or leave a
+      // cancelled outgoing fade visible. Its next activation owns the expand.
+      if (restore && element.dataset.workspaceActive !== 'true') {
+        motion.hide();
+        return;
+      }
       if (!visible && raf === null) { progress = 0; alpha = 1; }
       setVisible(true);
       void animate(1);
