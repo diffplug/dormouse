@@ -141,6 +141,16 @@ Source of truth: `lib/src/components/Baseboard.tsx`, `lib/src/components/Door.ts
 
 ## Workspaces
 
+### Workspace tabs
+
+- **Must size tabs to their contents using the shared Door geometry**: 24px high, 68–220px wide, terminal top radius, Door typography and label/action padding, with 6px gaps. Shrink to the minimum before scrolling.
+- **Must use active and inactive pane-header foreground/background pairs** on the corresponding tabs, over the app background. **Must join the active tab directly to a full-width vertical gradient**, active-header background at the top to app background at the bottom, occupying the existing top pane gutter.
+- **Must show `×` only on the active tab**, only with multiple Workspaces and outside rename. Middle-click may close an inactive tab. Reveal the active tab after its width changes on activation.
+
+Source of truth: `DOOR_TAB_CLASS` in `lib/src/components/design.tsx`; `WorkspaceStrip` in `lib/src/components/WorkspaceStrip.tsx`; `AppBar` in `standalone/src/AppBar.tsx`. Close visibility is pinned by `activates on click` in `lib/src/components/WorkspaceStrip.test.tsx`.
+
+### Workspace lifecycle
+
 Each Wall renders one Workspace's Content (Lath layout) and Baseboard (doors). Standalone mounts one Wall **per Workspace**; VS Code and the website playground mount a bare Wall with no Workspace id, which behaves exactly as a single-Workspace Window (VS Code's per-webview mapping is `docs/specs/vscode.md`).
 
 - **Must mount every Workspace's Wall in one grid cell**, inactive Walls `visibility:hidden` (plus `inert`) and never `display:none` (rationale).

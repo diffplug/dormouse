@@ -1,6 +1,6 @@
 import { useState, useEffect, useSyncExternalStore } from 'react';
 import { MinusIcon, CornersOutIcon, CornersInIcon, XIcon } from '@phosphor-icons/react';
-import { PopupButtonRow, chromeButton } from '../../lib/src/components/design';
+import { PANE_GUTTER_PX, PopupButtonRow, chromeButton } from '../../lib/src/components/design';
 import { WorkspaceStrip } from '../../lib/src/components/WorkspaceStrip';
 import { IS_MAC } from '../../lib/src/lib/platform';
 import { onDragBackInsideStrip, onDragCancelled, onDragOutsideWindow, onDropOnOtherWindow } from './workspace-drag';
@@ -149,11 +149,7 @@ export function AppBar() {
   return (
     <div
       data-tauri-drag-region
-      className={`flex h-[30px] shrink-0 select-none items-center text-xs ${
-        windowFocused
-          ? 'bg-header-active-bg text-header-active-fg'
-          : 'bg-header-inactive-bg text-header-inactive-fg'
-      } ${
+      className={`relative flex h-[30px] shrink-0 select-none items-center bg-app-bg text-app-fg text-xs ${
         IS_MAC ? 'pl-[78px]' : ''
       }`}
     >
@@ -166,7 +162,7 @@ export function AppBar() {
           left rather than growing over it. Tauri matches `data-tauri-drag-region`
           on the event target alone, so no tab or tab button may carry it — that
           is what leaves a press on a tab free to activate, rename, or reorder. */}
-      <div className="flex min-w-0 items-center self-stretch pl-2">
+      <div className="flex min-w-0 items-end self-stretch pl-1.75">
         <WorkspaceStrip
           className="min-w-0"
           onDragOutsideWindow={BROWSER_DEV ? undefined : onDragOutsideWindow}
@@ -182,7 +178,13 @@ export function AppBar() {
           bottom-right of the window (docs/specs/theme.md,
           docs/specs/standalone.md), so the titlebar carries only the
           native-style window controls on Windows/Linux. */}
-      {!IS_MAC && <WinControls />}
+      {!IS_MAC && <div className={`flex self-stretch ${windowFocused ? '' : 'opacity-60'}`}><WinControls /></div>}
+      {/* Paint into the Wall's existing top gutter, preserving its geometry. */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 top-full z-10"
+        style={{ height: PANE_GUTTER_PX, backgroundImage: 'linear-gradient(to bottom, var(--color-header-active-bg), var(--color-app-bg))' }}
+      />
     </div>
   );
 }

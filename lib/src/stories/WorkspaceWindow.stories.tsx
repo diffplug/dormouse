@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import { WorkspaceStrip } from '../components/WorkspaceStrip';
+import { AppBar } from '../../../standalone/src/AppBar';
 import { WorkspaceWindow } from '../components/WorkspaceWindow';
 import { flattenScenario, SCENARIO_LS_OUTPUT } from '../lib/platform';
 import { requireElement, settleTerminals, waitForCondition } from './settle-terminals';
@@ -15,9 +15,7 @@ const WORKSPACES = [
 function WorkspaceWindowStory() {
   return (
     <div className="flex h-[520px] flex-col">
-      <div className="bg-header-active-bg text-header-active-fg flex h-[30px] shrink-0 items-center">
-        <WorkspaceStrip className="min-w-0 pl-2" />
-      </div>
+      <AppBar />
       <WorkspaceWindow initialPaneIds={['workspace-window-story']} />
     </div>
   );

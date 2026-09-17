@@ -25,6 +25,12 @@ export const TERMINAL_TOP_RADIUS_CLASS = 'rounded-t-lg';
 export const TERMINAL_BOTTOM_RADIUS_CLASS = 'rounded-b-lg';
 export const TERMINAL_SELECTION_BORDER_RADIUS = `${TERMINAL_BORDER_RADIUS_REM}rem`;
 
+/** Shared shape, size bounds, and type for Baseboard Doors and Workspace tabs. */
+export const DOOR_TAB_CLASS = clsx(
+  'relative flex h-6 max-w-[220px] min-w-[68px] items-center overflow-hidden text-sm font-medium font-mono',
+  TERMINAL_TOP_RADIUS_CLASS,
+);
+
 // The gutter between panes (and around the wall's top/sides — the baseboard
 // side stays a tight 2px). Deliberately ODD: the passthrough ring is a 1px
 // stroke, and a 1px stroke can only sit dead-center of a gutter on whole

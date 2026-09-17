@@ -3,7 +3,7 @@ import isChromatic from 'chromatic/isChromatic';
 import { useEffect, useLayoutEffect, StrictMode } from 'react';
 import { createElement } from 'react';
 import '../src/theme.css';
-import '../src/index.css';
+import './preview.css';
 import { initPlatform, type FakeScenario } from '../src/lib/platform';
 import {
   applyAlertSettingsFromHost,

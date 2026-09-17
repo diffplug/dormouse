@@ -10,7 +10,7 @@ import { AlertBell } from './AlertBell';
 import { notepadLabel } from './use-notepad';
 import {
   ALERT_SPEECH_TRACKING_CLASS,
-  TERMINAL_TOP_RADIUS_CLASS,
+  DOOR_TAB_CLASS,
   TODO_PILL_TRACKING_CLASS,
 } from './design';
 
@@ -88,9 +88,7 @@ export function Door({
       // display/speech detail belongs to the Door, not to either button.
       role="group"
       className={clsx(
-        'relative flex h-6 max-w-[220px] min-w-[68px] items-center overflow-hidden',
-        'text-sm font-medium font-mono',
-        TERMINAL_TOP_RADIUS_CLASS,
+        DOOR_TAB_CLASS,
         speaking
           ? clsx('bg-alarm-vs-door text-door-bg', alertSpeakingAnimationClass())
           : 'bg-door-bg text-door-fg',

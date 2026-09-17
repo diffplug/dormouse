@@ -107,8 +107,12 @@ describe('WorkspaceStrip', () => {
     await act(async () => { createWorkspace({ id: 'ws-2' }); });
     await render();
     expect(getActiveWorkspaceId()).toBe('ws-2');
+    expect(tabFor(first).querySelector('[data-workspace-tab-close]')).toBeNull();
+    expect(tabFor('ws-2').querySelector('[data-workspace-tab-close]')).not.toBeNull();
     await act(async () => { activateButton(first).click(); });
     expect(getActiveWorkspaceId()).toBe(first);
+    expect(tabFor(first).querySelector('[data-workspace-tab-close]')).not.toBeNull();
+    expect(tabFor('ws-2').querySelector('[data-workspace-tab-close]')).toBeNull();
   });
 
   it('shows indicators for a hidden Workspace only, counting them in its label', async () => {
@@ -171,7 +175,7 @@ describe('WorkspaceStrip', () => {
     await act(async () => { activateButton(first).click(); });
 
     await act(async () => {
-      container.querySelector<HTMLButtonElement>('[data-workspace-tab-close="ws-2"]')!.click();
+      tabFor('ws-2').dispatchEvent(new MouseEvent('auxclick', { button: 1, bubbles: true }));
     });
     expect(container.querySelector('#kill-confirm-title')).not.toBeNull();
     expect(chromeKeyboardHeld()).toBe(true);

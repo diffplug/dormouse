@@ -366,6 +366,8 @@ Where it surfaces is host-specific:
 - **VS Code** reflects the terminal portion onto native chrome — `docs/specs/vscode.md`, which also owns why browser-surface TODO stays webview-local.
 - **Standalone** shows terminal rings/TODOs on panes and doors, and a browser Surface's `todo` on its own door. A **hidden** Workspace's tab additionally carries its union's TODO pill and bell, with `count` in the tab's accessible name; the visible Workspace's tab carries none, its panes and doors already saying it (`WorkspaceStrip` in `lib/src/components/WorkspaceStrip.tsx`).
 
+**Must use `alarm-vs-header-inactive` for the hidden Workspace tab's bell**, matching its inactive-header background.
+
 ## UI Contract
 
 ### Pane Header

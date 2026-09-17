@@ -268,7 +268,9 @@ each pinned by the test beside it except `getThemePreview`, covered by
 
 ## Storybook simulation
 
-`lib/.storybook/themes.ts` builds the switcher's color maps from `bundled.json`
+**Must scan `standalone/src` in `lib/.storybook/preview.css`** for host utilities.
+
+`lib/.storybook/themes.ts` builds switcher colors from `bundled.json`
 and **must run them through `completeThemeVars()` and `flattenSelectionAlpha()`**
 (with `applyTheme()`'s host typography defaults) so isolated stories see the
 materialized `--vscode-*` set the app sees. The preview decorator writes them to
@@ -276,7 +278,7 @@ both `html` (VSCode's host globals) and `body` (matching `applyTheme()`), and
 publishes the dynamic palette through `computeDynamicPalette()` so stories
 outside a full Wall — doors, focus rings, ringing bells — still get the runtime
 picks. `PREFERRED_STORYBOOK_THEME` in `lib/.storybook/preview.ts` names
-the default simulated host theme, **falling back to the first bundled theme** so
+the default theme, **falling back to the first bundled theme** so
 a renamed or removed bundle cannot leave stories without theme vars.
 
 ## Theme debugger

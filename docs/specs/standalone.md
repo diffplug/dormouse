@@ -282,8 +282,8 @@ both live in the Settings dialog at the bottom-right of the window
 The strip is one tab per Workspace: click activates, double-click renames,
 middle-click or the tab's `×` closes, `+` creates, and a drag past the shared
 threshold reorders. Behavior is `docs/specs/layout.md` → Workspaces and its
-indicators `docs/specs/alert.md` → Workspace union; tabs shrink to a floor and
-then the strip scrolls, with no overflow arrows.
+indicators `docs/specs/alert.md` → Workspace union; tab geometry, palettes, close
+visibility, and the gradient into the Wall are `docs/specs/layout.md` → Workspace tabs.
 
 - **Never put `data-tauri-drag-region` on a tab or anything inside one.** Tauri
   matches that attribute on the event target alone, so a tab carrying it would

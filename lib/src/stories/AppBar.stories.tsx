@@ -4,7 +4,7 @@ import { AppBar } from '../../../standalone/src/AppBar';
 /** The bar's strip reads the Workspace store, primed by the preview decorator
  *  from `parameters.primedWorkspaces` before first render and reset after. */
 function AppBarStory() {
-  return <div style={{ width: '100%' }}><AppBar /></div>;
+  return <div className="bg-app-bg pb-1.75" style={{ width: '100%' }}><AppBar /></div>;
 }
 
 function primed(names: string[]) {

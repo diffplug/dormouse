@@ -35,8 +35,8 @@ function StripStory({ width = 640, busyIndex }: { width?: number; busyIndex?: nu
   }, [busyIndex]);
 
   return (
-    <div className="bg-header-active-bg text-header-active-fg flex h-[30px] items-center" style={{ width }}>
-      <WorkspaceStrip className="min-w-0 pl-2" />
+    <div className="bg-app-bg text-app-fg flex h-[30px] items-end" style={{ width }}>
+      <WorkspaceStrip className="min-w-0 pl-1.75" />
     </div>
   );
 }
@@ -49,10 +49,13 @@ const meta: Meta<typeof StripStory> = {
 export default meta;
 type Story = StoryObj<typeof StripStory>;
 
-/** Two Workspaces, the second active: the active tab takes the wall's own
- *  background and the terminal top radius, the other is transparent. */
+/** Content-sized tabs share the Door geometry and use the pane-header palettes. */
 export const Default: Story = {
   parameters: { primedWorkspaces: primed(['Workspace 1', 'Deploys'], 1) },
+};
+
+export const ContentSized: Story = {
+  parameters: { primedWorkspaces: primed(['App', 'Agents', 'Release pipeline', 'Docs'], 0) },
 };
 
 /** Only a HIDDEN Workspace shows indicators — the visible one's panes already
