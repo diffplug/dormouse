@@ -41,3 +41,6 @@ minimumReleaseAge: 1440
 overrides:
   pgstencil: file:vendor/pgstencil-0.1.0.tgz
   '@pgstencil/auth': file:vendor/pgstencil-auth-0.1.0.tgz
+minimumReleaseAgeExclude:
+  # Renovate security update: @hono/node-server@2.0.10
+  - "@hono/node-server@2.0.10"
