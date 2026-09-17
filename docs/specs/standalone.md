@@ -1045,7 +1045,9 @@ exit without acting: the user's escape hatch if the webview acked then wedged.
 
 **Must use the Workspace typed-letter confirmation for window close and quit**,
 naming every Workspace in the window, including hidden ones. The gate opens for
-running Sessions; an all-idle quit proceeds without a prompt. Window close also
+running Sessions; an all-idle quit proceeds without a prompt. **A quit's prompt
+says Claude and Codex sessions resume when Dormouse reopens** (§Agent recovery);
+a window close's never does, since it runs no capture. Window close also
 asks before discarding a pending download (§Per-window close).
 
 - **Must keep one letter per request across Workspace switches and repeat quit
@@ -1143,8 +1145,9 @@ with only the exit changed.
   clears it, and a quit queued behind a transfer carries it (`ArrivalQueue`).
   `quit_restart` answers whether the quit it landed in relaunches — `false` when
   it joined a plain quit.
-- **`dormouse://quit-requested` carries `{ restart, requester }`**, and the
-  dialog then says Claude and Codex sessions resume.
+- **A restart asks exactly what a quit asks** (§Quit flow), so
+  `dormouse://quit-requested` carries only `{ requester }`, never whether the
+  quit relaunches.
 - **The requester never counts as running work in the restart's confirmation**
   (`quitRunningWork`): it is the `dor app restart` still waiting on its answer.
   Every other running Session still asks, and Workspace and window closes count
@@ -1168,7 +1171,7 @@ arm in `standalone/src-tauri/src/lib.rs`; `QuitIntent`, `QuitMachine::request` a
 `quitRunningWork` in `standalone/src/quit-confirm-store.ts`. Pinned by the
 restart-intent tests in `standalone/src-tauri/src/quit_state.rs`,
 `a_restart_relaunches_only_after_the_sidecar_shuts_down` in
-`standalone/src-tauri/src/lib.rs`, and the restart cases in
+`standalone/src-tauri/src/lib.rs`, and the requester and copy cases in
 `standalone/src/quit.test.ts` and `standalone/src/WorkspaceTeardownModal.test.ts`.
 
 ## File drop

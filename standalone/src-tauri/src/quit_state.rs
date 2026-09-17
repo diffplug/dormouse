@@ -7,7 +7,6 @@
 //! to perform; `lib.rs` owns the emitting, destroying and exiting.
 
 use crate::routing::{quit_order, Arrivals};
-use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
 
@@ -101,9 +100,8 @@ impl CleanupGate {
     }
 }
 
-/// What a quit does once it exits (docs/specs/standalone.md -> "Restart"). It
-/// is the `dormouse://quit-requested` payload as is.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
+/// What a quit does once it exits (docs/specs/standalone.md -> "Restart").
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct QuitIntent {
     /// Relaunch after the exit.
     pub restart: bool,
@@ -121,9 +119,10 @@ impl QuitIntent {
 /// What the caller must do after a transition, in order.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QuitAction {
-    /// Emit `dormouse://quit-requested` to every window, carrying the quit's
-    /// intent so each dialog can say what happens next.
-    RequestAll { intent: QuitIntent },
+    /// Emit `dormouse://quit-requested` to every window, carrying the Surface
+    /// its confirmation leaves out of the running work. The dialog is the same
+    /// for a quit and a restart, so the windows are never told which this is.
+    RequestAll { requester: Option<String> },
     /// Emit `dormouse://quit-cancelled` to every window; nothing was destroyed.
     CancelAll,
     /// Emit `dormouse://quit-teardown` to one window. `last` is what tells it to
@@ -221,7 +220,7 @@ impl QuitMachine {
         if !walking {
             self.phase = QuitPhase::Voting;
         }
-        (self.seq, vec![QuitAction::RequestAll { intent: self.intent.clone() }])
+        (self.seq, vec![QuitAction::RequestAll { requester: self.intent.requester.clone() }])
     }
 
     pub fn intent(&self) -> &QuitIntent {
@@ -551,7 +550,7 @@ mod tests {
         let mut quit = QuitMachine::default();
         let (seq, actions) = quit.request(&labels(&["main", "ws-2"]), QuitIntent::default());
         assert_eq!(seq, 1);
-        assert_eq!(actions, vec![QuitAction::RequestAll { intent: QuitIntent::default() }]);
+        assert_eq!(actions, vec![QuitAction::RequestAll { requester: None }]);
 
         quit.ack("main");
         quit.ack("ws-2");
@@ -621,7 +620,7 @@ mod tests {
 
         let (seq, actions) = quit.request(&labels(&["main", "ws-2"]), QuitIntent::default());
         assert_eq!(seq, 2);
-        assert_eq!(actions, vec![QuitAction::RequestAll { intent: QuitIntent::default() }]);
+        assert_eq!(actions, vec![QuitAction::RequestAll { requester: None }]);
         // The walk survives, and so does the in-flight teardown's progress —
         // which is what keeps the fresh watchdog bounding it rather than
         // dropping into the unbounded voting wait.
@@ -643,7 +642,7 @@ mod tests {
         // Cmd+Q again: `main` is committed and only re-acks, never re-votes.
         let (seq, actions) = quit.request(&labels(&["main", "ws-2"]), QuitIntent::default());
         assert_eq!(seq, 2);
-        assert_eq!(actions, vec![QuitAction::RequestAll { intent: QuitIntent::default() }]);
+        assert_eq!(actions, vec![QuitAction::RequestAll { requester: None }]);
         assert_eq!(quit.phase, QuitPhase::Voting);
 
         // The dialog's yes is the last vote: the walk starts instead of wedging.
@@ -797,19 +796,22 @@ mod tests {
     fn the_trigger_leaving_idle_fixes_the_restart_intent() {
         let mut quit = QuitMachine::default();
         let (_, actions) = quit.request(&labels(&["main", "ws-2"]), restart_by("pane-1"));
-        assert_eq!(actions, vec![QuitAction::RequestAll { intent: restart_by("pane-1") }]);
+        let asked = vec![QuitAction::RequestAll { requester: Some("pane-1".into()) }];
+        assert_eq!(actions, asked);
+        assert_eq!(quit.intent(), &restart_by("pane-1"));
 
-        // A plain Cmd+Q while the restart is voting joins it; the dialogs
-        // already say "restart", so the intent stands, requester and all.
+        // A plain Cmd+Q while the restart is voting joins it, and the intent
+        // stands, requester and all.
         let (_, actions) = quit.request(&labels(&["main", "ws-2"]), QuitIntent::default());
-        assert_eq!(actions, vec![QuitAction::RequestAll { intent: restart_by("pane-1") }]);
+        assert_eq!(actions, asked);
+        assert_eq!(quit.intent(), &restart_by("pane-1"));
 
         // A cancel forgets it, and the next trigger decides afresh.
         quit.cancel();
         assert_eq!(quit.intent(), &QuitIntent::default());
         quit.request(&labels(&["main", "ws-2"]), QuitIntent::default());
         let (_, actions) = quit.request(&labels(&["main", "ws-2"]), restart_by("pane-2"));
-        assert_eq!(actions, vec![QuitAction::RequestAll { intent: QuitIntent::default() }]);
+        assert_eq!(actions, vec![QuitAction::RequestAll { requester: None }]);
 
         // Walking: the intent stands through a repeat trigger and the exit.
         let mut walking = QuitMachine::default();

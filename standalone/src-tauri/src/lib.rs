@@ -615,8 +615,11 @@ fn window_labels(app: &AppHandle) -> Vec<String> {
 fn apply_quit_actions(app: &AppHandle, actions: Vec<QuitAction>) {
     for action in actions {
         match action {
-            QuitAction::RequestAll { intent } => {
-                let _ = app.emit("dormouse://quit-requested", &intent);
+            QuitAction::RequestAll { requester } => {
+                let _ = app.emit(
+                    "dormouse://quit-requested",
+                    serde_json::json!({ "requester": requester }),
+                );
             }
             QuitAction::CancelAll => {
                 let _ = app.emit("dormouse://quit-cancelled", ());

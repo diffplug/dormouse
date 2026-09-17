@@ -59,13 +59,14 @@ describe("WorkspaceTeardownModal copy", () => {
     expect(text).toContain("The downloaded update will be discarded.");
   });
 
-  it("says which sessions come back when the quit is a restart", () => {
-    const text = render({ confirming: false, intent: { kind: "quit", restart: true } });
-    expect(text).toContain("Claude and Codex sessions resume after the restart.");
-    expect(render({ confirming: true, intent: { kind: "quit", restart: true } }))
-      .toContain("Waiting for all windows, then restarting…");
-    expect(render({ confirming: false, intent: { kind: "quit" } })).not.toContain("restart");
-    expect(render({ confirming: true, intent: { kind: "quit" } }))
+  it("says on every quit that agent sessions come back, and never on a window close", () => {
+    expect(render({ confirming: false, intent: { kind: "quit" } }))
+      .toContain("Claude and Codex sessions resume when Dormouse reopens.");
+    expect(render({ confirming: false, intent: { kind: "quit", requester: "pane-1" } }))
+      .toContain("Claude and Codex sessions resume when Dormouse reopens.");
+    expect(render({ confirming: false, intent: { kind: "close-window" } }))
+      .not.toContain("resume");
+    expect(render({ confirming: true, intent: { kind: "quit", requester: "pane-1" } }))
       .toContain("Waiting for all windows, then closing…");
   });
 
@@ -74,7 +75,7 @@ describe("WorkspaceTeardownModal copy", () => {
       applyTerminalSemanticEvents(id, [{ type: "commandStart", source: "osc633_boundaries" }]);
     }
     try {
-      expect(render({ confirming: false, intent: { kind: "quit", restart: true, requester: "requester" } }))
+      expect(render({ confirming: false, intent: { kind: "quit", requester: "requester" } }))
         .toContain("1 running command will be stopped.");
       expect(render({ confirming: false, intent: { kind: "quit" } }))
         .toContain("2 running commands will be stopped.");

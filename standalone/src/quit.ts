@@ -50,10 +50,10 @@ const flow = createTeardownFlow({
 
 export function initQuitFlow(adapter: TauriAdapter): void {
   quitAdapter = adapter;
-  // The intent is Rust's (docs/specs/standalone.md → "Restart").
-  void listenToWindow<{ restart: boolean; requester: string | null }>("dormouse://quit-requested", (event) => {
-    const { restart, requester } = event.payload;
-    flow.request({ kind: "quit", restart, requester });
+  // A quit and a restart ask the same question (docs/specs/standalone.md →
+  // "Restart"); only the requester changes what counts.
+  void listenToWindow<{ requester: string | null }>("dormouse://quit-requested", (event) => {
+    flow.request({ kind: "quit", requester: event.payload.requester });
   });
   // Another window said no. Nothing was destroyed; drop this window's dialog
   // and go back to idle so a later quit asks again. No call back into Rust —

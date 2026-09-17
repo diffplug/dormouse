@@ -182,8 +182,8 @@ User-run results are recorded under "Transfer findings" below. Items marked
   dialog is up, then confirm: the app quits (this was the wedge).
 - Relaunch: both windows and their Workspaces come back; the interrupted agent
   resumes on its own.
-- `dor app restart` (packaged build) runs the same quit, restart-worded, and
-  relaunches into whatever bundle is installed.
+- `dor app restart` (packaged build) asks what Cmd+Q asks — the requesting pane
+  aside — then relaunches into whatever bundle is installed.
 
 **Harness alert stores**
 - In `innerdogfood`, toggle a watched command and change alarm settings: they
