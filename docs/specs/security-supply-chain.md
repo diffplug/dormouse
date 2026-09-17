@@ -26,10 +26,11 @@ The roots are `productDependencyFilters` in `website/scripts/generate-deps.js`. 
 
 **Must list `dormouse-lib` as a root independently of workspace edges**; `remote-lib-common` and `dor-lib-common` are workspace edges from those roots. **Must use package names for roots and exclusions**; for example, `vscode-ext/` declares itself `dormouse` and `website/` declares itself `dormouse-website`.
 
-**Two workspace packages are deliberately not roots:**
+**Must exclude workspaces that install no artifact:**
 
 - `canopy` — a Storybook-only rendering lab no shipped build imports.
 - `website` — runs in a visitor's browser rather than being installed anywhere, which is what makes "puts on a user's machine" the operative test (rationale).
+- `dormouse-hosted` — runs on Workers and in the browser; no installed desktop or selfhost artifact imports it.
 
 **External binaries are outside this graph by construction** — the user's shell, and the `agent-browser` CLI `dor ab` forwards to (`npm i -g agent-browser`, a dependency of nothing here, resolved off `PATH`). **Dormouse instead ships nothing that pulls them in silently** (rationale).
 
