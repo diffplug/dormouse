@@ -349,9 +349,10 @@ describe('SurfacePaneHeader — browser chrome', () => {
       act(() => resizePopup());
       expect(popup()!.style.top).toBe('208px');
       expect(Number.parseFloat(popup()!.style.top) + 80).toBe(288);
+      const disconnectsBeforeClose = disconnect.mock.calls.length;
       act(() => overflowTrigger().click());
       expect(popup()).toBeNull();
-      expect(disconnect).toHaveBeenCalled();
+      expect(disconnect.mock.calls.length).toBeGreaterThan(disconnectsBeforeClose);
     } finally {
       registration.dispose();
     }
