@@ -151,6 +151,62 @@ test('resolveSpawnConfig keeps ORIGINAL_PATH on non-win32', () => {
   assert.equal(config.env.ORIGINAL_PATH, '/whatever');
 });
 
+test('resolveSpawnConfig drops the GUI node directory from a pane PATH on win32', () => {
+  // `cargo run` puts the dev app's target dir on PATH, and the node.exe there
+  // is patched to the GUI subsystem, so it never attaches to the pane's
+  // inherited console. The target entry is spelled with `/`, a trailing
+  // separator and a different case, pinning that matching ignores all three;
+  // `debug\deps` is a sibling, pinning that this is not prefix matching.
+  const config = resolveSpawnConfig(
+    { surfaceId: 'pane-1' },
+    {
+      platform: 'win32',
+      env: {
+        Path: [
+          'C:/Repo/Target/Debug\\',
+          'C:\\repo\\target\\debug\\deps',
+          'C:\\Windows\\System32',
+        ].join(';'),
+        DORMOUSE_GUI_NODE_DIR: 'C:\\repo\\target\\debug',
+        DORMOUSE_CLI_BIN: 'C:\\Dormouse\\dor-cli\\bin',
+      },
+      osModule: {
+        homedir: () => 'C:\\Users\\tester',
+        tmpdir: () => 'C:\\Temp',
+      },
+    },
+  );
+
+  assert.equal(
+    config.env.Path,
+    ['C:\\Dormouse\\dor-cli\\bin', 'C:\\repo\\target\\debug\\deps', 'C:\\Windows\\System32'].join(';'),
+  );
+  assert.equal(config.env.DORMOUSE_GUI_NODE_DIR, undefined);
+});
+
+test('resolveSpawnConfig keeps the GUI node directory on non-win32', () => {
+  // Only the standalone host sets the variable, always to the bundled node's
+  // directory — but on macOS and Linux the app's directory is never on PATH,
+  // so the strip would be a no-op at best and is gated off.
+  const config = resolveSpawnConfig(
+    { surfaceId: 'pane-1' },
+    {
+      platform: 'linux',
+      env: {
+        PATH: '/usr/bin:/bin',
+        DORMOUSE_GUI_NODE_DIR: '/usr/bin',
+      },
+      osModule: {
+        homedir: () => '/home/tester',
+        tmpdir: () => '/tmp/fallback',
+      },
+    },
+  );
+
+  assert.equal(config.env.PATH, '/usr/bin:/bin');
+  assert.equal(config.env.DORMOUSE_GUI_NODE_DIR, undefined);
+});
+
 test('withPrependedPath preserves Windows Path casing', () => {
   const env = withPrependedPath(
     { Path: 'C:\\Windows\\System32' },

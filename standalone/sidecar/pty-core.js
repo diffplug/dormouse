@@ -138,8 +138,28 @@ function withPrependedPath(env, dir, platform = process.platform) {
 function withoutInternalDormouseEnv(env) {
   const next = { ...env };
   delete next.DORMOUSE_CLI_BIN;
+  delete next.DORMOUSE_GUI_NODE_DIR;
   delete next.DORMOUSE_SHELL_INTEGRATION_DIR;
   return next;
+}
+
+// Win32 only. The bundled node.exe is patched to the GUI subsystem
+// (docs/specs/standalone.md -> "Windows node subsystem"), and a GUI-subsystem
+// binary does not attach to an inherited console: run it inside a pane's
+// ConPTY and stdin is already at EOF, there is no `setRawMode`, and output is
+// dropped. `cargo run` leaves that node.exe's directory on the dev app's PATH
+// for DLL resolution and panes inherit the app's env, so a bare `node` in a
+// pane would find it. Never derive the directory from `process.execPath` —
+// this module is also the VS Code pty host, and the agent-browser harness runs
+// the sidecar under the developer's node (rationale).
+function withoutGuiNodeDir(env, platform = process.platform) {
+  const key = pathEnvKey(env);
+  if (platform !== 'win32' || !env.DORMOUSE_GUI_NODE_DIR || !env[key]) return env;
+  // Entries compare case-insensitively, `/` as `\`, trailing separators ignored.
+  const norm = (entry) => String(entry).replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase();
+  const target = norm(env.DORMOUSE_GUI_NODE_DIR);
+  const kept = env[key].split(';').filter((entry) => norm(entry) !== target);
+  return { ...env, [key]: kept.join(';') };
 }
 
 // Win32 only. Git Bash / MSYS `/etc/profile` reconstructs PATH from an
@@ -294,8 +314,9 @@ function resolveSpawnConfig(options, runtime = {}) {
   // Resolve the integration dir from the original env before the internal
   // DORMOUSE_* vars are stripped below.
   const integrationDir = resolveShellIntegrationDir(env, runtime);
+  const paneEnv = withoutGuiNodeDir(env, platform);
   const envWithCliPath = withoutInheritedMsysOriginalPath(
-    withoutInternalDormouseEnv(withPrependedPath(env, env.DORMOUSE_CLI_BIN, platform)),
+    withoutInternalDormouseEnv(withPrependedPath(paneEnv, env.DORMOUSE_CLI_BIN, platform)),
     platform,
   );
   const childEnv = {

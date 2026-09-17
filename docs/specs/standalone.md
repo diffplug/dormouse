@@ -237,9 +237,19 @@ because the sidecar and the `dor` CLI have opposite console requirements:
   `DORMOUSE_NODE` at it. `dor` always runs inside an existing pseudo-console, so
   that copy can never cause a stray window.
 
+- **Never leave the GUI node's directory on a pane's PATH.** `cargo run` puts it
+  there for DLL resolution, so a bare `node` in a dev pane would get a
+  console-less one and fail silently in both directions (rationale).
+  `start_sidecar` passes it as `DORMOUSE_GUI_NODE_DIR`; the sidecar strips it
+  from each pane's PATH.
+
 The byte-flip lives in `standalone/src-tauri/src/pe_subsystem.rs`, shared with
 `build.rs`, so the load-bearing PE offsets are in one place; the mechanism is in
 the comments at `force_windows_gui_subsystem` and `resolve_dor_node_path`.
+
+Source of truth: `withoutGuiNodeDir` in `standalone/sidecar/pty-core.js`,
+pinned by `resolveSpawnConfig drops the GUI node directory from a pane PATH on
+win32` in `standalone/sidecar/pty-core.test.js`.
 
 ## Sidecar lifecycle
 
