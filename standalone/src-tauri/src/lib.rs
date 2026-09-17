@@ -3974,12 +3974,9 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
     let node_path = resolve_node_binary_path()?;
     let dor_cli_paths = resolve_dor_cli_paths(&sidecar_path, manifest_dir);
     let dor_node_path = resolve_dor_node_path(&node_path, app);
-    // The directory the GUI-subsystem node sits in, for the sidecar to drop
-    // from every pane's PATH — `cargo run` puts it there for DLL resolution
-    // and a bare `node` in a dev pane would otherwise find a node with no
-    // console. Only this side knows which binary was patched; the sidecar
-    // also runs under the VS Code pty host, where nothing is.
-    let gui_node_dir = node_path.parent().unwrap_or_else(|| Path::new(""));
+    // Our own directory, which holds the GUI-subsystem node. The sidecar drops
+    // it from every pane's PATH (standalone.md -> "Windows node subsystem").
+    let gui_node_dir = node_path.parent().unwrap_or(Path::new(""));
     let dor_control_token = dor_control_token();
     let state_dir = burrow_state_dir(app);
     let recovery_dir = recovery_state_dir(app);

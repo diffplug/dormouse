@@ -143,42 +143,22 @@ function withoutInternalDormouseEnv(env) {
   return next;
 }
 
-// Compare Windows PATH entries: case-insensitive, `/` and `\` equivalent, and
-// ignoring trailing separators and the quotes an entry may carry.
-function normalizeWindowsPathEntry(entry) {
-  return String(entry || '')
-    .trim()
-    .replace(/^"(.*)"$/, '$1')
-    .replace(/\//g, '\\')
-    .replace(/\\+$/, '')
-    .toLowerCase();
-}
-
-// Win32 only. The bundled node.exe is patched to the GUI subsystem so spawning
-// the sidecar never flashes a console window (docs/specs/standalone.md ->
-// "Windows node subsystem"; build.rs `force_windows_gui_subsystem`). A
-// GUI-subsystem process gets no console, so a *child* of it sees stdin already
-// at EOF, has no
-// `setRawMode`, and has every byte it writes dropped. `cargo run` puts the
-// directory holding it — the dev app's `target/debug` — on the app's PATH so
-// Windows resolves the app's DLLs, and panes inherit the app's env, leaving
-// that node.exe to shadow the developer's own on a bare `node`. The failure is
-// silent in both directions, so drop the directory here: the installed app
-// never has it on PATH, and a pane needs nothing from it.
-//
-// Only the host knows which directory it patched, so it passes
-// `DORMOUSE_GUI_NODE_DIR`. This module also runs under the VS Code pty host,
-// where `process.execPath` is an unrelated node whose directory (`/usr/bin`,
-// say) must stay on PATH — hence an explicit variable and not execPath.
+// Win32 only. The bundled node.exe is patched to the GUI subsystem
+// (docs/specs/standalone.md -> "Windows node subsystem"), and a child of a
+// GUI-subsystem process gets no console at all: stdin at EOF, no `setRawMode`,
+// output dropped. `cargo run` leaves that node.exe's directory on the dev
+// app's PATH for DLL resolution and panes inherit the app's env, so a bare
+// `node` in a pane would find it. Never derive the directory from
+// `process.execPath` — this module is also the VS Code pty host, and the
+// agent-browser harness runs the sidecar under the developer's node
+// (rationale).
 function withoutGuiNodeDir(env, platform = process.platform) {
-  const dir = env.DORMOUSE_GUI_NODE_DIR;
-  if (platform !== 'win32' || !dir) return env;
   const key = pathEnvKey(env);
-  const existing = env[key];
-  if (!existing) return env;
-  const target = normalizeWindowsPathEntry(dir);
-  if (!target) return env;
-  const kept = existing.split(';').filter((entry) => normalizeWindowsPathEntry(entry) !== target);
+  if (platform !== 'win32' || !env.DORMOUSE_GUI_NODE_DIR || !env[key]) return env;
+  // Entries compare case-insensitively, `/` as `\`, trailing separators ignored.
+  const norm = (entry) => String(entry).replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase();
+  const target = norm(env.DORMOUSE_GUI_NODE_DIR);
+  const kept = env[key].split(';').filter((entry) => norm(entry) !== target);
   return { ...env, [key]: kept.join(';') };
 }
 
@@ -334,10 +314,9 @@ function resolveSpawnConfig(options, runtime = {}) {
   // Resolve the integration dir from the original env before the internal
   // DORMOUSE_* vars are stripped below.
   const integrationDir = resolveShellIntegrationDir(env, runtime);
+  const paneEnv = withoutGuiNodeDir(env, platform);
   const envWithCliPath = withoutInheritedMsysOriginalPath(
-    withoutInternalDormouseEnv(
-      withPrependedPath(withoutGuiNodeDir(env, platform), env.DORMOUSE_CLI_BIN, platform),
-    ),
+    withoutInternalDormouseEnv(withPrependedPath(paneEnv, env.DORMOUSE_CLI_BIN, platform)),
     platform,
   );
   const childEnv = {
