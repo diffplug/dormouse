@@ -320,9 +320,11 @@ prepare_artifact() {
     fi
 }
 
+# The signed executable is not passed in: `patch-nsis-paths.pl` rewrites the
+# .nsi's CI-runner paths to point at "$SIGN_DIR/standalone-win-x64", which is
+# where `sign_windows` signed it in place.
 rebuild_windows_installer() {
-    local signed_exe="$1"
-    local installer_path="$2"
+    local installer_path="$1"
 
     check_command makensis "Install NSIS: brew install makensis"
 
@@ -752,7 +754,7 @@ sign_windows() {
     local installer_path
     installer_path=$(windows_installer_path "$version")
 
-    rebuild_windows_installer "$exe_path" "$installer_path"
+    rebuild_windows_installer "$installer_path"
     log "Signing installer: $installer_path"
     EV_SIGN_PIN="$EV_SIGN_PIN" jsign \
         --storetype PIV \
