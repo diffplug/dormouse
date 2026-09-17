@@ -321,7 +321,7 @@ describe('dor app verbs', () => {
   const previous = getPlatformOrNull();
   afterEach(() => setPlatform(previous as PlatformAdapter));
 
-  function withRestart(requestAppRestart?: () => Promise<boolean>): void {
+  function withRestart(requestAppRestart?: (requester?: string | null) => Promise<boolean>): void {
     setPlatform({ requestAppRestart } as unknown as PlatformAdapter);
   }
 
@@ -334,17 +334,16 @@ describe('dor app verbs', () => {
     expect(handle.handleDorControl).not.toHaveBeenCalled();
   });
 
-  // The restart is requested before the answer, so the caller learns whether it
-  // will relaunch; its own `dor app restart` never counts as running work while
-  // the quit asks (`countRunningSessionsIn`).
-  it('requests the restart first, then answers with whether it will relaunch', async () => {
+  // The caller is the requester, so its own pane never counts as running work
+  // in the restart's confirmation.
+  it('requests the restart for the caller first, then answers with whether it will relaunch', async () => {
     let settle!: (relaunch: boolean) => void;
-    const requestAppRestart = vi.fn(() => new Promise<boolean>((resolve) => { settle = resolve; }));
+    const requestAppRestart = vi.fn((_requester?: string | null) => new Promise<boolean>((resolve) => { settle = resolve; }));
     withRestart(requestAppRestart);
     const release = installDorControlRouter();
     const detail = request({ method: 'app.restart', surfaceId: 'pane-a' });
     window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail }));
-    expect(requestAppRestart).toHaveBeenCalledTimes(1);
+    expect(requestAppRestart).toHaveBeenCalledExactlyOnceWith('pane-a');
     expect(detail.respond).not.toHaveBeenCalled();
 
     settle(false);

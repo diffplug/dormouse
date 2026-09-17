@@ -52,15 +52,17 @@ Update status is a text notice in the Baseboard, the always-visible bottom strip
 
 ## Platform behavior at quit
 
-**`quit_proceed` runs on every path** (`docs/specs/standalone.md` §Quit flow), so app exit is uniform (Windows aside); only the install step and who relaunches differ:
+**`quit_proceed` runs on every path** (`docs/specs/standalone.md` §Quit flow), so app exit is uniform (Windows aside); only the install step differs:
 
-| Platform | Install step | Relaunch |
-|----------|--------------|----------|
-| Windows | Awaits `kill_sidecar_now`, then `install()` starts the NSIS installer in passive mode (progress bar, no interaction) and exits the process itself, before `quit_proceed` is reached | Always, by NSIS (`/R`) |
-| macOS | `install()` replaces the `.app` bundle in place | Only on a restart |
-| Linux | `install()` replaces the AppImage in place | Only on a restart |
-| No pending update | — (`installPendingUpdate` not called) | Only on a restart |
-| Vite dev mode | Skips `install()`, which would replace the dev executable directory | Never (`quit_restart` refuses) |
+| Platform | Install step |
+|----------|--------------|
+| Windows | Awaits `kill_sidecar_now`, then `install()` starts the NSIS installer in passive mode (progress bar, no interaction) and exits the process itself, before `quit_proceed` is reached |
+| macOS | `install()` replaces the `.app` bundle in place |
+| Linux | `install()` replaces the AppImage in place |
+| No pending update | — (`installPendingUpdate` not called) |
+| Vite dev mode | Skips `install()`, which would replace the dev executable directory |
+
+**The app relaunches only on a restart** (`docs/specs/standalone.md` → "Restart"), which Vite dev mode refuses — except that a Windows install always relaunches, by NSIS (`/R`).
 
 ## localStorage
 

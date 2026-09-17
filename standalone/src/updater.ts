@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import { IS_WINDOWS, PLATFORM_STRING } from 'dormouse-lib/lib/platform';
+import { getPlatformOrNull, IS_WINDOWS, PLATFORM_STRING } from 'dormouse-lib/lib/platform';
 import type { UpdateBannerState } from './UpdateBanner';
 import type { Update } from '@tauri-apps/plugin-updater';
 
@@ -79,11 +79,10 @@ export function approveUpdate(): void {
   void downloadApprovedUpdate();
 }
 
-/** Quit now and relaunch. The quit installs the pending update on its way out
+/** Quit now and relaunch; the quit installs the pending update on its way out
  *  (docs/specs/auto-update.md → "Quit-time install"). */
 export function restartToUpdate(): void {
-  if (BROWSER_DEV_HOST) return;
-  invokeTauri<boolean>('quit_restart')
+  getPlatformOrNull()?.requestAppRestart?.()
     .then((relaunches) => {
       if (!relaunches) console.warn('[updater] Joined a quit already under way; Dormouse will not relaunch.');
     })

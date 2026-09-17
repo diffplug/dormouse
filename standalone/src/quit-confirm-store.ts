@@ -24,9 +24,11 @@ export interface QuitConfirmIntent {
    *  the download lives in the webview, so nothing else can install it
    *  (docs/specs/auto-update.md). Never set on a quit, which installs it. */
   discardsUpdate?: boolean;
-  /** This quit relaunches the app once it exits (docs/specs/standalone.md →
-   *  "Restart"). Only ever set on a quit. */
+  /** This quit relaunches the app once it exits, and `requester` is the
+   *  Surface that asked, which never counts as running work here
+   *  (docs/specs/standalone.md → "Restart"). Only ever set on a quit. */
   restart?: boolean;
+  requester?: string | null;
 }
 
 const QUIT_INTENT: QuitConfirmIntent = { kind: "quit" };

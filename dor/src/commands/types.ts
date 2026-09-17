@@ -204,8 +204,7 @@ export interface WorkspaceMutationResponse {
   name: string;
 }
 
-/** The host's answer to `dor app restart`. `relaunch` is false when the request
- *  joined a quit already in progress, which exits without relaunching. */
+/** The host's answer to `dor app restart` (`docs/specs/dor-cli.md` → "dor app"). */
 export interface AppRestartResponse {
   relaunch: boolean;
 }

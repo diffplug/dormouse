@@ -1138,12 +1138,17 @@ flow never initializes there (§Boot sequence, step 5).
 A restart is a quit that relaunches: the same vote, confirmation and teardown,
 with only the exit changed.
 
-- **The trigger that leaves `Idle` unapproved fixes the intent.** A repeat
-  trigger keeps it, a cancel clears it, and a quit queued behind a transfer
-  carries it (`ArrivalQueue`). `quit_restart` answers whether the quit it landed
-  in relaunches — `false` when it joined a plain quit.
-- **`dormouse://quit-requested` carries `{ restart }`**, and the dialog then
-  says Claude and Codex sessions resume. A payload-less event is a plain quit.
+- **The trigger that leaves `Idle` unapproved fixes the intent** — whether to
+  relaunch, and the requesting Surface. A repeat trigger keeps it, a cancel
+  clears it, and a quit queued behind a transfer carries it (`ArrivalQueue`).
+  `quit_restart` answers whether the quit it landed in relaunches — `false` when
+  it joined a plain quit.
+- **`dormouse://quit-requested` carries `{ restart, requester }`**, and the
+  dialog then says Claude and Codex sessions resume.
+- **The requester never counts as running work in the restart's confirmation**
+  (`countRunningSessions(except)`): it is the `dor app restart` still waiting on
+  its answer. Every other running Session still asks, and Workspace and window
+  closes count everything.
 - **Every approved exit stays `app.exit(0)`; the relaunch runs in
   `RunEvent::Exit`, after `shutdown_sidecar_and_wait`**, as `cleanup_before_exit`
   then `tauri::process::restart`, which on macOS re-reads `Info.plist`, so a
@@ -1159,14 +1164,16 @@ with only the exit changed.
   behavior at quit").
 
 Source of truth: `quit_restart`, `relaunch_requested` and the `RunEvent::Exit`
-arm in `standalone/src-tauri/src/lib.rs`; `QuitMachine::request` and
-`ArrivalQueue::defer_quit` in `standalone/src-tauri/src/quit_state.rs`. Pinned by
+arm in `standalone/src-tauri/src/lib.rs`; `QuitIntent`, `QuitMachine::request` and
+`ArrivalQueue::defer_quit` in `standalone/src-tauri/src/quit_state.rs`; the
+default `mustConfirm` in `standalone/src/teardown-flow.ts`. Pinned by
 `the_trigger_leaving_idle_fixes_the_restart_intent`,
-`a_trigger_after_approval_cannot_rewrite_the_exit` and
-`a_deferred_quit_carries_its_restart_intent` in
-`standalone/src-tauri/src/quit_state.rs`, and
+`a_trigger_after_approval_cannot_rewrite_the_exit`,
+`an_os_terminate_never_relaunches` and `a_deferred_quit_carries_its_intent` in
+`standalone/src-tauri/src/quit_state.rs`,
 `a_restart_relaunches_only_after_the_sidecar_shuts_down` in
-`standalone/src-tauri/src/lib.rs`.
+`standalone/src-tauri/src/lib.rs`, and `does not count the restart's requester as
+running work` in `standalone/src/WorkspaceTeardownModal.test.ts`.
 
 ## File drop
 

@@ -300,14 +300,11 @@ export interface PlatformAdapter {
   recoveryReady?: Promise<void>;
 
   /**
-   * Quit the app and relaunch it: the host's own quit, with its running-work
-   * confirmation, ending in a relaunch (`docs/specs/standalone.md` → "Quit
-   * flow"). Resolves once the request is accepted — false when it joined a quit
-   * already in progress, which will not relaunch — and rejects when the host
-   * cannot relaunch (a dev build). Absent on hosts that cannot restart
-   * themselves.
+   * Quit and relaunch; resolves whether the quit relaunches, and `requester`
+   * never counts as running work in its confirmation
+   * (`docs/specs/standalone.md` → "Restart"). Absent where a host cannot.
    */
-  requestAppRestart?(): Promise<boolean>;
+  requestAppRestart?(requester?: string | null): Promise<boolean>;
 
   /** Explicit live Workspace handoff, never a persistence reader. */
   alertPauseForTransfer?(id: string): AlertRuntimeSnapshot | null;

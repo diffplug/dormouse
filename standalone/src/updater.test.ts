@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   getVersion: vi.fn(),
   shellOpen: vi.fn(),
   invoke: vi.fn(),
+  requestAppRestart: vi.fn(),
 }));
 
 vi.mock('@tauri-apps/plugin-updater', () => ({
@@ -35,6 +36,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 vi.mock('dormouse-lib/lib/platform', () => ({
   PLATFORM_STRING: 'Windows',
   IS_WINDOWS: true,
+  getPlatformOrNull: () => ({ requestAppRestart: mocks.requestAppRestart }),
 }));
 
 // --- Helpers ---
@@ -364,12 +366,12 @@ describe('updater', () => {
   });
 
   describe('actions', () => {
-    it('restartToUpdate asks Rust for a restart, which installs on the way out', async () => {
-      mocks.invoke.mockResolvedValue(true);
+    it('restartToUpdate asks the host for a restart, which installs on the way out', async () => {
+      mocks.requestAppRestart.mockResolvedValue(true);
       restartToUpdate();
       await vi.advanceTimersByTimeAsync(0);
 
-      expect(mocks.invoke).toHaveBeenCalledWith('quit_restart');
+      expect(mocks.requestAppRestart).toHaveBeenCalledExactlyOnceWith();
     });
 
     it('offers Restart now only once the update is downloaded', () => {

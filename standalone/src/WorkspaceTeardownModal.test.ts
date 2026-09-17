@@ -6,6 +6,7 @@ import { WorkspaceTeardownModalHost, WorkspaceTeardownModal } from "./WorkspaceT
 
 import { openQuitConfirm, openQuitArchiveFailure, confirmQuit, getQuitConfirmChar, getQuitConfirmPhase, _resetQuitConfirmForTesting } from './quit-confirm-store';
 import { createWorkspace, resetWorkspaces } from 'dormouse-lib/lib/workspace-store';
+import { applyTerminalSemanticEvents, removeTerminalPaneState } from 'dormouse-lib/lib/terminal-registry';
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
@@ -66,6 +67,21 @@ describe("WorkspaceTeardownModal copy", () => {
     expect(render({ confirming: false, intent: { kind: "quit" } })).not.toContain("restart");
     expect(render({ confirming: true, intent: { kind: "quit" } }))
       .toContain("Waiting for all windows, then closing…");
+  });
+
+  it("does not count the restart's requester as running work", () => {
+    for (const id of ["requester", "other"]) {
+      applyTerminalSemanticEvents(id, [{ type: "commandStart", source: "osc633_boundaries" }]);
+    }
+    try {
+      expect(render({ confirming: false, intent: { kind: "quit", restart: true, requester: "requester" } }))
+        .toContain("1 running command will be stopped.");
+      expect(render({ confirming: false, intent: { kind: "quit" } }))
+        .toContain("2 running commands will be stopped.");
+    } finally {
+      removeTerminalPaneState("requester");
+      removeTerminalPaneState("other");
+    }
   });
 
   it("says nothing about an update otherwise", () => {

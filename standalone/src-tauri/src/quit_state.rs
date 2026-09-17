@@ -19,9 +19,9 @@ use std::ops::{Deref, DerefMut};
 #[derive(Default)]
 pub struct ArrivalQueue {
     records: Arrivals,
-    /// The queued quit, if any, and whether it relaunches. The first request
-    /// to queue fixes the intent, as leaving `Idle` does for `QuitMachine`.
-    quit: Option<bool>,
+    /// The queued quit, if any, with its intent. The first request to queue
+    /// fixes it, as leaving `Idle` does for `QuitMachine`.
+    quit: Option<QuitIntent>,
     closes: HashSet<String>,
 }
 
@@ -36,12 +36,12 @@ impl DerefMut for ArrivalQueue {
 
 impl ArrivalQueue {
     /// Queue a quit while anything is in flight. `None` means nothing is in
-    /// flight and the quit runs now; otherwise the queued quit's restart intent.
-    pub fn defer_quit(&mut self, restart: bool) -> Option<bool> {
+    /// flight and the quit runs now; otherwise the queued quit's intent.
+    pub fn defer_quit(&mut self, intent: &QuitIntent) -> Option<QuitIntent> {
         if self.records.is_empty() { return None; }
-        let intent = *self.quit.get_or_insert(restart);
+        let queued = self.quit.get_or_insert_with(|| intent.clone()).clone();
         self.closes.clear();
-        Some(intent)
+        Some(queued)
     }
     /// Queue `label`'s close while it is either end of a transfer; whether it
     /// was queued (a queued quit absorbs it).
@@ -55,11 +55,10 @@ impl ArrivalQueue {
     }
     pub fn cancel_deferred(&mut self) { self.quit = None; self.closes.clear(); }
     pub fn forget_deferred_close(&mut self, label: &str) { self.closes.remove(label); }
-    /// Take the requests no transfer holds any more: the quit (with its restart
-    /// intent) once nothing is in flight, else every close whose window is no
-    /// endpoint. `live` (the open window labels) is read only when something is
-    /// queued.
-    pub fn take_ready(&mut self, live: impl FnOnce() -> HashSet<String>) -> (Option<bool>, Vec<String>) {
+    /// Take the requests no transfer holds any more: the quit (with its intent)
+    /// once nothing is in flight, else every close whose window is no endpoint.
+    /// `live` (the open window labels) is read only when something is queued.
+    pub fn take_ready(&mut self, live: impl FnOnce() -> HashSet<String>) -> (Option<QuitIntent>, Vec<String>) {
         if self.quit.is_none() && self.closes.is_empty() { return (None, Vec::new()); }
         let live = live();
         self.closes.retain(|label| live.contains(label));
@@ -101,12 +100,28 @@ impl CleanupGate {
     }
 }
 
+/// What a quit does once it exits (docs/specs/standalone.md -> "Restart").
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct QuitIntent {
+    /// Relaunch after the exit.
+    pub restart: bool,
+    /// The Surface that asked for the restart, which its own confirmation does
+    /// not count as running work.
+    pub requester: Option<String>,
+}
+
+impl QuitIntent {
+    pub fn restart(requester: Option<String>) -> Self {
+        Self { restart: true, requester }
+    }
+}
+
 /// What the caller must do after a transition, in order.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QuitAction {
     /// Emit `dormouse://quit-requested` to every window, carrying the quit's
-    /// restart intent so each dialog can say what happens next.
-    RequestAll { restart: bool },
+    /// intent so each dialog can say what happens next.
+    RequestAll { intent: QuitIntent },
     /// Emit `dormouse://quit-cancelled` to every window; nothing was destroyed.
     CancelAll,
     /// Emit `dormouse://quit-teardown` to one window. `last` is what tells it to
@@ -160,17 +175,16 @@ pub struct QuitMachine {
     /// Cleared to exit: gates the `CloseRequested` / `ExitRequested` arms so the
     /// flow's own `app.exit(0)` is not re-caught.
     pub approved: bool,
-    /// The approved exit relaunches the app (docs/specs/standalone.md ->
-    /// "Restart"). Fixed by the trigger that leaves `Idle` before approval; a
-    /// repeat trigger keeps it, and a cancel clears it.
-    pub restart: bool,
+    /// Fixed by the trigger that leaves `Idle` before approval; a repeat trigger
+    /// keeps it, and a cancel clears it (docs/specs/standalone.md -> "Restart").
+    intent: QuitIntent,
     pub phase: QuitPhase,
     pub windows: HashMap<String, WindowQuit>,
 }
 
 impl QuitMachine {
-    /// A quit trigger over the live windows; `restart` is its intent, which only
-    /// the trigger leaving `Idle` unapproved may set.
+    /// A quit trigger over the live windows, with the intent only the trigger
+    /// leaving `Idle` unapproved may set.
     ///
     /// Clears `voted` only from `Idle`. A vote already cast stands through a
     /// repeat trigger: the webview that cast it is committed and answers the
@@ -178,13 +192,13 @@ impl QuitMachine {
     /// `Voting` with no dialog left to answer. Once the walk has started the
     /// repeat must also leave the walk in flight, or the fresh watchdog drops
     /// into the unbounded voting wait and stops bounding it.
-    pub fn request(&mut self, labels: &[String], restart: bool) -> (u64, Vec<QuitAction>) {
+    pub fn request(&mut self, labels: &[String], intent: QuitIntent) -> (u64, Vec<QuitAction>) {
         self.seq += 1;
         let idle = self.phase == QuitPhase::Idle;
         // An approved exit parked on the cleanup gate is `Idle` too, and a
         // Cmd+Q landing there must not rewrite what that exit does.
         if idle && !self.approved {
-            self.restart = restart;
+            self.intent = intent;
         }
         let walking = matches!(self.phase, QuitPhase::Walking { .. });
         let mut next: HashMap<String, WindowQuit> = HashMap::new();
@@ -206,7 +220,22 @@ impl QuitMachine {
         if !walking {
             self.phase = QuitPhase::Voting;
         }
-        (self.seq, vec![QuitAction::RequestAll { restart: self.restart }])
+        (self.seq, vec![QuitAction::RequestAll { intent: self.intent.clone() }])
+    }
+
+    pub fn intent(&self) -> &QuitIntent {
+        &self.intent
+    }
+
+    /// Whether the exit now running was an approved restart.
+    pub fn relaunches(&self) -> bool {
+        self.approved && self.intent.restart
+    }
+
+    /// The OS terminated the app itself (Dock Quit, logout), which never
+    /// relaunches.
+    pub fn os_terminated(&mut self) {
+        self.intent = QuitIntent::default();
     }
 
     pub fn ack(&mut self, label: &str) {
@@ -237,7 +266,7 @@ impl QuitMachine {
         }
         self.seq += 1;
         self.phase = QuitPhase::Idle;
-        self.restart = false;
+        self.intent = QuitIntent::default();
         for entry in self.windows.values_mut() {
             entry.voted = false;
         }
@@ -450,7 +479,7 @@ mod tests {
         let live = || HashSet::from(["main".to_string(), "ws-2".to_string(), "ws-3".to_string()]);
         let quiet = || -> HashSet<String> { panic!("nothing is queued, so no live labels are read") };
         // Nothing in flight: nothing to wait behind, so neither request queues.
-        assert_eq!(queue.defer_quit(false), None);
+        assert_eq!(queue.defer_quit(&QuitIntent::default()), None);
         assert!(!queue.defer_close("ws-2"));
         assert_eq!(queue.take_ready(quiet), (None, vec![]));
         queue.push(arrival("main", "ws-2"));
@@ -465,15 +494,15 @@ mod tests {
         assert_eq!(queue.take_ready(quiet), (None, vec![]));
         queue.push(settled);
         queue.defer_close("ws-2");
-        assert_eq!(queue.defer_quit(false), Some(false)); // quit supersedes queued window closes
+        assert_eq!(queue.defer_quit(&QuitIntent::default()), Some(QuitIntent::default())); // quit supersedes queued window closes
         assert!(queue.defer_close("ws-2"));
         assert!(queue.blocks_transfer("ws-3", "main"));
         assert_eq!(queue.take_ready(live), (None, vec![]));
         let settled = queue.pop().unwrap();
-        assert_eq!(queue.take_ready(live), (Some(false), vec![]));
+        assert_eq!(queue.take_ready(live), (Some(QuitIntent::default()), vec![]));
         assert_eq!(queue.take_ready(quiet), (None, vec![]));
         queue.push(settled);
-        queue.defer_quit(false);
+        queue.defer_quit(&QuitIntent::default());
         queue.cancel_deferred();
         assert_eq!(queue.take_ready(quiet), (None, vec![]));
         queue.push(arrival("gone", "main"));
@@ -519,9 +548,9 @@ mod tests {
     #[test]
     fn all_votes_walk_the_windows_with_main_last() {
         let mut quit = QuitMachine::default();
-        let (seq, actions) = quit.request(&labels(&["main", "ws-2"]), false);
+        let (seq, actions) = quit.request(&labels(&["main", "ws-2"]), QuitIntent::default());
         assert_eq!(seq, 1);
-        assert_eq!(actions, vec![QuitAction::RequestAll { restart: false }]);
+        assert_eq!(actions, vec![QuitAction::RequestAll { intent: QuitIntent::default() }]);
 
         quit.ack("main");
         quit.ack("ws-2");
@@ -557,7 +586,7 @@ mod tests {
     #[test]
     fn any_cancel_aborts_with_nothing_destroyed() {
         let mut quit = QuitMachine::default();
-        quit.request(&labels(&["main", "ws-2"]), false);
+        quit.request(&labels(&["main", "ws-2"]), QuitIntent::default());
         quit.vote("main");
         let actions = quit.cancel();
         assert_eq!(actions, vec![QuitAction::CancelAll]);
@@ -573,7 +602,7 @@ mod tests {
     #[test]
     fn a_cancel_after_the_walk_started_is_refused() {
         let mut quit = QuitMachine::default();
-        quit.request(&labels(&["main"]), false);
+        quit.request(&labels(&["main"]), QuitIntent::default());
         quit.vote("main");
         assert!(matches!(quit.phase, QuitPhase::Walking { .. }));
         assert_eq!(quit.cancel(), Vec::new());
@@ -583,15 +612,15 @@ mod tests {
     #[test]
     fn a_repeat_trigger_re_emits_without_interrupting_the_walk() {
         let mut quit = QuitMachine::default();
-        quit.request(&labels(&["main", "ws-2"]), false);
+        quit.request(&labels(&["main", "ws-2"]), QuitIntent::default());
         quit.vote("main");
         quit.vote("ws-2");
         quit.progress("ws-2");
         assert_eq!(quit.walking_progress(), Some(("ws-2".into(), 1)));
 
-        let (seq, actions) = quit.request(&labels(&["main", "ws-2"]), false);
+        let (seq, actions) = quit.request(&labels(&["main", "ws-2"]), QuitIntent::default());
         assert_eq!(seq, 2);
-        assert_eq!(actions, vec![QuitAction::RequestAll { restart: false }]);
+        assert_eq!(actions, vec![QuitAction::RequestAll { intent: QuitIntent::default() }]);
         // The walk survives, and so does the in-flight teardown's progress —
         // which is what keeps the fresh watchdog bounding it rather than
         // dropping into the unbounded voting wait.
@@ -605,15 +634,15 @@ mod tests {
     #[test]
     fn a_repeat_trigger_while_voting_keeps_the_votes_already_cast() {
         let mut quit = QuitMachine::default();
-        quit.request(&labels(&["main", "ws-2"]), false);
+        quit.request(&labels(&["main", "ws-2"]), QuitIntent::default());
         // `main` had nothing running and voted at once; `ws-2` is on its dialog.
         quit.vote("main");
         assert_eq!(quit.phase, QuitPhase::Voting);
 
         // Cmd+Q again: `main` is committed and only re-acks, never re-votes.
-        let (seq, actions) = quit.request(&labels(&["main", "ws-2"]), false);
+        let (seq, actions) = quit.request(&labels(&["main", "ws-2"]), QuitIntent::default());
         assert_eq!(seq, 2);
-        assert_eq!(actions, vec![QuitAction::RequestAll { restart: false }]);
+        assert_eq!(actions, vec![QuitAction::RequestAll { intent: QuitIntent::default() }]);
         assert_eq!(quit.phase, QuitPhase::Voting);
 
         // The dialog's yes is the last vote: the walk starts instead of wedging.
@@ -625,13 +654,13 @@ mod tests {
     #[test]
     fn a_cancelled_quit_asks_every_window_again() {
         let mut quit = QuitMachine::default();
-        quit.request(&labels(&["main", "ws-2"]), false);
+        quit.request(&labels(&["main", "ws-2"]), QuitIntent::default());
         quit.vote("main");
         quit.cancel();
         assert_eq!(quit.phase, QuitPhase::Idle);
 
         // From Idle every vote is fresh: `main` alone no longer carries the quit.
-        quit.request(&labels(&["main", "ws-2"]), false);
+        quit.request(&labels(&["main", "ws-2"]), QuitIntent::default());
         quit.vote("ws-2");
         assert_eq!(quit.phase, QuitPhase::Voting);
         quit.vote("main");
@@ -641,7 +670,7 @@ mod tests {
     #[test]
     fn the_last_window_exits_and_a_destroy_cannot_re_enter() {
         let mut quit = QuitMachine::default();
-        quit.request(&labels(&["main"]), false);
+        quit.request(&labels(&["main"]), QuitIntent::default());
         assert_eq!(
             quit.vote("main"),
             vec![QuitAction::Teardown {
@@ -666,7 +695,7 @@ mod tests {
     #[test]
     fn a_window_that_leaves_mid_vote_does_not_hold_the_quit_open() {
         let mut quit = QuitMachine::default();
-        quit.request(&labels(&["main", "ws-2"]), false);
+        quit.request(&labels(&["main", "ws-2"]), QuitIntent::default());
         quit.vote("main");
         assert_eq!(
             quit.forget_window("ws-2"),
@@ -680,7 +709,7 @@ mod tests {
     #[test]
     fn a_window_that_leaves_mid_walk_advances_the_order() {
         let mut quit = QuitMachine::default();
-        quit.request(&labels(&["main", "ws-2", "ws-3"]), false);
+        quit.request(&labels(&["main", "ws-2", "ws-3"]), QuitIntent::default());
         quit.vote("main");
         quit.vote("ws-2");
         let actions = quit.vote("ws-3");
@@ -698,7 +727,7 @@ mod tests {
     #[test]
     fn a_quit_that_runs_out_of_windows_exits_instead_of_going_headless() {
         let mut voting = QuitMachine::default();
-        voting.request(&labels(&["main", "ws-2"]), false);
+        voting.request(&labels(&["main", "ws-2"]), QuitIntent::default());
         assert_eq!(voting.forget_window("main"), Vec::new());
         assert_eq!(voting.forget_window("ws-2"), vec![QuitAction::Exit]);
         // Approved, so the `app.exit(0)` this asks for is not re-caught as a
@@ -706,7 +735,7 @@ mod tests {
         assert!(voting.approved);
 
         let mut walking = QuitMachine::default();
-        walking.request(&labels(&["main", "ws-2"]), false);
+        walking.request(&labels(&["main", "ws-2"]), QuitIntent::default());
         walking.vote("main");
         walking.vote("ws-2");
         assert!(matches!(walking.phase, QuitPhase::Walking { .. }));
@@ -723,7 +752,7 @@ mod tests {
     #[test]
     fn a_trigger_with_no_windows_exits_instead_of_parking_in_voting() {
         let mut quit = QuitMachine::default();
-        let (seq, actions) = quit.request(&labels(&[]), false);
+        let (seq, actions) = quit.request(&labels(&[]), QuitIntent::default());
         assert_eq!(seq, 1);
         assert_eq!(actions, vec![QuitAction::Exit]);
         assert_eq!(quit.phase, QuitPhase::Idle);
@@ -737,7 +766,7 @@ mod tests {
     #[test]
     fn without_main_the_walk_still_ends_on_a_last_window() {
         let mut quit = QuitMachine::default();
-        quit.request(&labels(&["ws-2", "ws-5"]), false);
+        quit.request(&labels(&["ws-2", "ws-5"]), QuitIntent::default());
         quit.vote("ws-5");
         let actions = quit.vote("ws-2");
         let [QuitAction::Teardown { label: first, last }] = actions.as_slice() else {
@@ -759,34 +788,36 @@ mod tests {
         );
     }
 
+    fn restart_by(requester: &str) -> QuitIntent {
+        QuitIntent::restart(Some(requester.to_string()))
+    }
+
     #[test]
     fn the_trigger_leaving_idle_fixes_the_restart_intent() {
         let mut quit = QuitMachine::default();
-        let (_, actions) = quit.request(&labels(&["main", "ws-2"]), true);
-        assert_eq!(actions, vec![QuitAction::RequestAll { restart: true }]);
-        assert!(quit.restart);
+        let (_, actions) = quit.request(&labels(&["main", "ws-2"]), restart_by("pane-1"));
+        assert_eq!(actions, vec![QuitAction::RequestAll { intent: restart_by("pane-1") }]);
 
         // A plain Cmd+Q while the restart is voting joins it; the dialogs
-        // already say "restart", so the intent stands.
-        let (_, actions) = quit.request(&labels(&["main", "ws-2"]), false);
-        assert_eq!(actions, vec![QuitAction::RequestAll { restart: true }]);
-        assert!(quit.restart);
+        // already say "restart", so the intent stands, requester and all.
+        let (_, actions) = quit.request(&labels(&["main", "ws-2"]), QuitIntent::default());
+        assert_eq!(actions, vec![QuitAction::RequestAll { intent: restart_by("pane-1") }]);
 
         // A cancel forgets it, and the next trigger decides afresh.
         quit.cancel();
-        assert!(!quit.restart);
-        quit.request(&labels(&["main", "ws-2"]), false);
-        let (_, actions) = quit.request(&labels(&["main", "ws-2"]), true);
-        assert_eq!(actions, vec![QuitAction::RequestAll { restart: false }]);
-        assert!(!quit.restart, "a restart joining a plain quit does not relaunch it");
+        assert_eq!(quit.intent(), &QuitIntent::default());
+        quit.request(&labels(&["main", "ws-2"]), QuitIntent::default());
+        let (_, actions) = quit.request(&labels(&["main", "ws-2"]), restart_by("pane-2"));
+        assert_eq!(actions, vec![QuitAction::RequestAll { intent: QuitIntent::default() }]);
 
         // Walking: the intent stands through a repeat trigger and the exit.
         let mut walking = QuitMachine::default();
-        walking.request(&labels(&["main"]), true);
+        walking.request(&labels(&["main"]), restart_by("pane-1"));
         walking.vote("main");
-        walking.request(&labels(&["main"]), false);
+        assert!(!walking.relaunches(), "nothing relaunches before approval");
+        walking.request(&labels(&["main"]), QuitIntent::default());
         assert_eq!(walking.proceed(), vec![QuitAction::Exit]);
-        assert!(walking.approved && walking.restart);
+        assert!(walking.relaunches());
     }
 
     /// An approved exit parked on the cleanup gate sits in `Idle`, and the
@@ -794,34 +825,46 @@ mod tests {
     #[test]
     fn a_trigger_after_approval_cannot_rewrite_the_exit() {
         let mut restart = QuitMachine::default();
-        restart.request(&labels(&[]), true);
-        assert!(restart.approved && restart.restart);
-        restart.request(&labels(&[]), false);
-        assert!(restart.restart, "the pending relaunch survives a late Cmd+Q");
+        restart.request(&labels(&[]), restart_by("pane-1"));
+        assert!(restart.relaunches());
+        restart.request(&labels(&[]), QuitIntent::default());
+        assert!(restart.relaunches(), "the pending relaunch survives a late Cmd+Q");
 
         let mut quit = QuitMachine::default();
-        quit.request(&labels(&[]), false);
-        quit.request(&labels(&[]), true);
-        assert!(!quit.restart, "a late restart cannot turn an approved quit into one");
+        quit.request(&labels(&[]), QuitIntent::default());
+        quit.request(&labels(&[]), restart_by("pane-1"));
+        assert!(!quit.relaunches(), "a late restart cannot turn an approved quit into one");
     }
 
     #[test]
-    fn a_deferred_quit_carries_its_restart_intent() {
+    fn an_os_terminate_never_relaunches() {
+        let mut quit = QuitMachine::default();
+        quit.request(&labels(&[]), restart_by("pane-1"));
+        quit.os_terminated();
+        assert!(quit.approved && !quit.relaunches());
+    }
+
+    #[test]
+    fn a_deferred_quit_carries_its_intent() {
         let mut queue = ArrivalQueue::default();
         let live = || HashSet::from(["main".to_string()]);
-        assert_eq!(queue.defer_quit(true), None, "nothing in flight: the restart runs now");
+        assert_eq!(queue.defer_quit(&restart_by("pane-1")), None, "nothing in flight: the restart runs now");
         queue.push(arrival("main", "ws-2"));
-        assert_eq!(queue.defer_quit(true), Some(true));
+        assert_eq!(queue.defer_quit(&restart_by("pane-1")), Some(restart_by("pane-1")));
         // The first request to queue fixes the intent.
-        assert_eq!(queue.defer_quit(false), Some(true));
+        assert_eq!(queue.defer_quit(&QuitIntent::default()), Some(restart_by("pane-1")));
         let settled = queue.pop().unwrap();
-        assert_eq!(queue.take_ready(live), (Some(true), vec![]));
+        assert_eq!(queue.take_ready(live), (Some(restart_by("pane-1")), vec![]));
         assert_eq!(queue.take_ready(live), (None, vec![]));
 
         queue.push(settled);
-        queue.defer_quit(true);
+        queue.defer_quit(&restart_by("pane-1"));
         queue.cancel_deferred();
-        assert_eq!(queue.defer_quit(false), Some(false), "a cancel forgets the queued intent");
+        assert_eq!(
+            queue.defer_quit(&QuitIntent::default()),
+            Some(QuitIntent::default()),
+            "a cancel forgets the queued intent"
+        );
     }
 
     #[test]

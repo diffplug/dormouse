@@ -488,31 +488,29 @@ Source of truth: `dor/src/commands/workspace.ts`, `WORKSPACE_CONTROL_METHODS` /
 **`dor app` verbs act on the running app, so the router answers them before
 resolving any Workspace, Surface, or Window param.** `restart` is the only one:
 it asks the host for the quit that relaunches (`docs/specs/standalone.md` →
-"Quit flow"), so the running-work confirmation still applies and the relaunch
+"Restart"), so the running-work confirmation still applies and the relaunch
 restores what any quit restores (`docs/specs/transport.md` → "The governing
 rule").
 
 - **Must request the restart before answering**, so the caller sees a host
   refusal (a dev build) and whether the request joined a quit already in
   progress, which exits without relaunching. The CLI fails on the latter.
-- **Never count a pane whose whole command line is `dor app restart
-  [--json]` as running work** (`countRunningSessionsIn`): it is the caller,
-  still waiting on its answer while the quit asks. Anything more on the line
-  counts.
+- **The caller's `DORMOUSE_SURFACE_ID` is the restart's requester**, which
+  that confirmation never counts as running work (`docs/specs/standalone.md` →
+  "Restart"). An agent's pane that runs the command is its requester too.
 - **A host without `PlatformAdapter.requestAppRestart` refuses** with `dor app
   restart is available only in Dormouse Standalone` — VS Code and the
   browser-dev harness.
 - **A Dormouse older than the verb answers `unsupported Dormouse control method
-  'app.restart'`**, which a newer `dor` meets once the bundle is replaced under
-  the running app. The CLI turns it into a quit-and-reopen hint **only when
-  `DORMOUSE_HOST` is `standalone`**; VS Code answers with the same text.
+  'app.restart'`** (`unsupportedControlMethodMessage`, whose text is frozen),
+  which a newer `dor` meets once the bundle is replaced under the running app.
+  The CLI turns it into a quit-and-reopen hint **only when `DORMOUSE_HOST` is
+  `standalone`**; VS Code answers with the same text.
 
 Source of truth: `dor/src/commands/app.ts`, `APP_CONTROL_METHODS` in
 `dor/src/protocol.ts`, `handleAppControl` in
-`lib/src/components/wall/app-control.ts`, `runsAppRestart` in
-`lib/src/lib/terminal-state-store.ts`. Pinned by `dor app verbs` in
-`lib/src/components/wall/dor-control-router.test.ts` and `never counts a pane
-whose command is dor app restart` in `lib/src/lib/terminal-state-store.test.ts`.
+`lib/src/components/wall/app-control.ts`. Pinned by `dor app verbs` in
+`lib/src/components/wall/dor-control-router.test.ts`.
 
 ## Browser Open Target Resolution
 

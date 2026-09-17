@@ -64,6 +64,14 @@ export type DorControlMethod = SurfaceControlMethod | WorkspaceControlMethod | A
 const WORKSPACE_METHOD_SET: ReadonlySet<string> = new Set(Object.values(WORKSPACE_CONTROL_METHODS));
 const APP_METHOD_SET: ReadonlySet<string> = new Set(Object.values(APP_CONTROL_METHODS));
 
+/**
+ * A host's refusal of a method it does not know. **Frozen text:** a newer `dor`
+ * recognizes an older host by it (`docs/specs/dor-cli.md` → "dor app").
+ */
+export function unsupportedControlMethodMessage(method: string): string {
+  return `unsupported Dormouse control method '${method}'`;
+}
+
 /** Whether this method acts on the running app rather than on any Workspace. */
 export function isAppControlMethod(method: string): method is AppControlMethod {
   return APP_METHOD_SET.has(method);

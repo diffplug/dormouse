@@ -10,7 +10,7 @@ mod workspaces;
 // interception).
 #[cfg(target_os = "macos")]
 mod macos_terminate;
-use quit_state::{ArrivalQueue, CleanupGate, CloseMachine, QuitAction, QuitMachine};
+use quit_state::{ArrivalQueue, CleanupGate, CloseMachine, QuitAction, QuitIntent, QuitMachine};
 use routing::{Route, RouteView};
 use std::{
     collections::{HashMap, HashSet},
@@ -615,10 +615,10 @@ fn window_labels(app: &AppHandle) -> Vec<String> {
 fn apply_quit_actions(app: &AppHandle, actions: Vec<QuitAction>) {
     for action in actions {
         match action {
-            QuitAction::RequestAll { restart } => {
+            QuitAction::RequestAll { intent } => {
                 let _ = app.emit(
                     "dormouse://quit-requested",
-                    serde_json::json!({ "restart": restart }),
+                    serde_json::json!({ "restart": intent.restart, "requester": intent.requester }),
                 );
             }
             QuitAction::CancelAll => {
@@ -660,7 +660,7 @@ fn redrive_deferred_teardown(app: &AppHandle) {
         let Some(windows) = retry.try_state::<WindowState>() else { return; };
         let (quit, closes) =
             guard(&windows.arrivals).take_ready(|| window_labels(&retry).into_iter().collect());
-        if let Some(restart) = quit { request_quit(&retry, restart); }
+        if let Some(intent) = quit { request_quit(&retry, intent); }
         else {
             for label in closes {
                 if retry.get_webview_window(&label).is_some() { request_close_or_quit(&retry, &label); }
@@ -676,14 +676,13 @@ fn request_close_or_quit(app: &AppHandle, label: &str) {
     if app.webview_windows().len() > 1 {
         request_window_close(app, label);
     } else {
-        request_quit(app, false);
+        request_quit(app, QuitIntent::default());
     }
 }
 
-/// Start (or join) a quit; `restart` asks for a relaunch once it exits
-/// (§Restart). Returns whether the quit this trigger landed in relaunches — a
-/// restart that joins a plain quit already under way does not.
-fn request_quit(app: &AppHandle, restart: bool) -> bool {
+/// Start (or join) a quit with `intent` (docs/specs/standalone.md -> "Restart").
+/// Returns whether the quit this trigger landed in relaunches.
+fn request_quit(app: &AppHandle, intent: QuitIntent) -> bool {
     let Some(state) = app.try_state::<QuitState>() else {
         return false;
     };
@@ -694,15 +693,15 @@ fn request_quit(app: &AppHandle, restart: bool) -> bool {
         // between this check and beginning the vote.
         let windows = app.state::<WindowState>();
         let mut arrivals = guard(&windows.arrivals);
-        if let Some(relaunches) = arrivals.defer_quit(restart) {
+        if let Some(queued) = arrivals.defer_quit(&intent) {
             drop(arrivals);
             append_log("[quit] transfer in progress; quit queued until settlement");
-            return relaunches;
+            return queued.restart;
         }
         let labels = window_labels(app);
         let mut machine = guard(&state.machine);
-        let (seq, actions) = machine.request(&labels, restart);
-        (seq, actions, machine.restart)
+        let (seq, actions) = machine.request(&labels, intent);
+        (seq, actions, machine.intent().restart)
     };
     apply_quit_actions(app, actions);
 
@@ -3591,54 +3590,33 @@ fn quit_proceed(app: AppHandle, state: tauri::State<'_, QuitState>) {
     apply_quit_actions(&app, actions);
 }
 
-// ── Restart (docs/specs/standalone.md §Restart) ─────────────────────────────
+// ── Restart (docs/specs/standalone.md -> "Restart") ─────────────────────────
 //
-// A restart is a quit whose approved `app.exit(0)` ends in a relaunch from the
-// `RunEvent::Exit` arm. Never `AppHandle::request_restart`: its exit code makes
-// `prevent_exit` a no-op, which would let it past the unapproved-exit guard and
-// the hand-back cleanup gate.
+// A quit whose approved `app.exit(0)` ends in a relaunch from the
+// `RunEvent::Exit` arm — never `AppHandle::request_restart` (see the spec).
 
-/// Why this build cannot relaunch itself, if it cannot. A dev build's Vite
-/// server dies with it; an unresolvable binary would turn the relaunch into a
-/// silent plain exit (`tauri::process::restart` just exits when it fails).
-fn restart_refusal(dev_build: bool, binary: std::io::Result<PathBuf>) -> Option<String> {
-    if dev_build {
-        return Some("Restart needs a packaged build; restart the dev command instead".into());
-    }
-    binary
-        .err()
-        .map(|err| format!("Dormouse cannot find its own executable to relaunch: {err}"))
-}
-
-// Quit, then relaunch: the update notice's "Restart now" and `dor app restart`.
-// Every window may call it — `dor` requests land in whichever window owns the
-// caller. `Ok(false)`: it joined a quit already under way, which will not
-// relaunch.
+// The update notice's "Restart now" and `dor app restart`, from any window.
+// `Ok(false)`: it joined a quit already under way, which will not relaunch.
 #[tauri::command]
-fn quit_restart(app: AppHandle) -> Result<bool, String> {
-    if let Some(refusal) = restart_refusal(
-        cfg!(debug_assertions),
-        tauri::process::current_binary(&app.env()),
-    ) {
-        return Err(refusal);
+fn quit_restart(app: AppHandle, requester: Option<String>) -> Result<bool, String> {
+    if cfg!(debug_assertions) {
+        return Err("Restart needs a packaged build; restart the dev command instead".into());
     }
+    tauri::process::current_binary(&app.env())
+        .map_err(|err| format!("Dormouse cannot find its own executable to relaunch: {err}"))?;
     append_log("[quit] restart requested");
-    Ok(request_quit(&app, true))
+    Ok(request_quit(&app, QuitIntent::restart(requester)))
 }
 
-/// Whether the exit now running was an approved restart.
 fn relaunch_requested(app: &AppHandle) -> bool {
-    app.try_state::<QuitState>().is_some_and(|state| {
-        let machine = guard(&state.machine);
-        machine.approved && machine.restart
-    })
+    app.try_state::<QuitState>()
+        .is_some_and(|state| guard(&state.machine).relaunches())
 }
 
-/// An OS-initiated terminate (Dock Quit, logout) overrides a pending relaunch.
 #[cfg(target_os = "macos")]
 fn forget_restart(app: &AppHandle) {
     if let Some(state) = app.try_state::<QuitState>() {
-        guard(&state.machine).restart = false;
+        guard(&state.machine).os_terminated();
     }
 }
 
@@ -4239,7 +4217,7 @@ pub fn run() {
         })
         .on_menu_event(|app, event| {
             if event.id() == QUIT_MENU_ITEM_ID {
-                request_quit(app, false);
+                request_quit(app, QuitIntent::default());
             }
         })
         .on_window_event(|window, event| {
@@ -4512,7 +4490,7 @@ pub fn run() {
             RunEvent::ExitRequested { api, .. } => {
                 if !quit_approved(app) {
                     api.prevent_exit();
-                    request_quit(app, false);
+                    request_quit(app, QuitIntent::default());
                 } else if !exit_after_cleanup(app) {
                     api.prevent_exit();
                 }
@@ -4524,9 +4502,8 @@ pub fn run() {
                     append_log("[app] exit — shutting down sidecar");
                     shutdown_sidecar_and_wait(&state);
                 }
-                // Relaunch only once the old sidecar is gone (§Restart). On
-                // macOS `restart` re-reads Info.plist, so a bundle replaced in
-                // place starts as the new version. Never returns.
+                // Relaunch once the old sidecar is gone
+                // (docs/specs/standalone.md -> "Restart"). Never returns.
                 if relaunch_requested(app) {
                     append_log("[app] relaunching");
                     app.cleanup_before_exit();
@@ -4543,8 +4520,7 @@ mod tests {
         arrivals_path, find_node_binary, forget_arrival_on_disk, notepad_archive_lock_path,
         open_ports_many_timeout, read_arrivals_from, read_notepad_archive_from,
         read_session_from, record_arrival_on_disk, reset_notepad_archive_at,
-        resolve_dor_cli_paths, resolve_sidecar_path, restart_refusal, restore_arrivals,
-        session_file_name,
+        resolve_dor_cli_paths, resolve_sidecar_path, restore_arrivals, session_file_name,
         session_file_names, state_root_from, strip_windows_verbatim_prefix,
         sweep_orphan_session_temps, temp_write_path, write_notepad_archive_to,
         write_session_to, JsonValue, NOTEPAD_ARCHIVE_FILE, OPEN_PORT_TIMEOUT_MS,
@@ -4882,7 +4858,7 @@ mod tests {
         assert!(!admitted(&arrivals, &machine, &close, &closing, "ws-2", "main"));
         closing.clear();
         assert!(admitted(&arrivals, &machine, &close, &closing, "main", "ws-2"));
-        machine.request(&["main".into(), "ws-2".into()], false);
+        machine.request(&["main".into(), "ws-2".into()], super::QuitIntent::default());
         assert!(!admitted(&arrivals, &machine, &close, &closing, "main", "ws-2"));
         machine.vote("main");
         machine.vote("ws-2");
@@ -4904,33 +4880,20 @@ mod tests {
         let delegate = macos.split("if quit_approved(app) {").nth(1).unwrap().split("append_log(").next().unwrap();
         assert!(delegate.contains("exit_after_cleanup(app)"));
         assert!(delegate.contains("TerminateCancel"));
+        // An OS terminate never relaunches (docs/specs/standalone.md -> "Restart").
+        assert!(delegate.contains("forget_restart(app)"));
     }
 
-    /// A restart relaunches from the `Exit` arm after the sidecar is gone, and
-    /// never through `AppHandle::request_restart`, whose exit code `prevent_exit`
-    /// cannot hold (docs/specs/standalone.md -> "Restart").
+    /// docs/specs/standalone.md -> "Restart".
     #[test]
     fn a_restart_relaunches_only_after_the_sidecar_shuts_down() {
         let source = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
         assert!(!source.contains(".request_restart("));
-        assert!(!include_str!("macos_terminate.rs").contains("request_restart"));
         let exit = source.split("RunEvent::Exit => {").nth(1).unwrap().split("_ => {}").next().unwrap();
         let shutdown = exit.find("shutdown_sidecar_and_wait(").unwrap();
         let relaunch = exit.find("tauri::process::restart(").unwrap();
         assert!(shutdown < relaunch);
         assert!(exit.contains("relaunch_requested(app)"));
-        let macos = include_str!("macos_terminate.rs");
-        let now = macos.split("if exit_after_cleanup(app) {").nth(1).unwrap().split("TerminateNow").next().unwrap();
-        assert!(now.contains("forget_restart(app)"), "an OS terminate never relaunches");
-    }
-
-    #[test]
-    fn a_restart_is_refused_where_it_could_not_relaunch() {
-        let found = || Ok(PathBuf::from("/Applications/Dormouse Terminal.app/Contents/MacOS/dormouse"));
-        assert_eq!(restart_refusal(false, found()), None);
-        assert!(restart_refusal(true, found()).unwrap().contains("packaged build"));
-        let missing = restart_refusal(false, Err(std::io::Error::other("symlinked path")));
-        assert!(missing.unwrap().contains("symlinked path"));
     }
 
     #[test]

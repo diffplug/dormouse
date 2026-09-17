@@ -387,10 +387,9 @@ export class TauriAdapter implements PlatformAdapter {
     }
   }
 
-  /** A quit that relaunches (docs/specs/standalone.md -> "Quit flow"). Rust
-   *  refuses in a dev build, and the refusal is the rejection. */
-  requestAppRestart(): Promise<boolean> {
-    return rawInvoke<boolean>("quit_restart");
+  /** docs/specs/standalone.md -> "Restart". */
+  requestAppRestart(requester?: string | null): Promise<boolean> {
+    return rawInvoke<boolean>("quit_restart", { requester: requester ?? null });
   }
 
   async getCwd(id: string): Promise<string | null> {

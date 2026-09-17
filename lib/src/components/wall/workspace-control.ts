@@ -1,4 +1,4 @@
-import { isWorkspaceControlMethod, WORKSPACE_CONTROL_METHODS } from 'dor/protocol';
+import { isWorkspaceControlMethod, unsupportedControlMethodMessage, WORKSPACE_CONTROL_METHODS } from 'dor/protocol';
 import type { DorControlResult } from 'dor/protocol';
 import type {
   GroupedSurface,
@@ -186,7 +186,7 @@ export async function handleWorkspaceControl(detail: DorControlRequest): Promise
   // Narrowed before the switch, whose exhaustiveness is then what makes a new
   // container verb a compile error here rather than a silent no-op.
   if (!isWorkspaceControlMethod(detail.method)) {
-    detail.respond({ ok: false, error: `unsupported Dormouse control method '${detail.method}'` });
+    detail.respond({ ok: false, error: unsupportedControlMethodMessage(detail.method) });
     return;
   }
   switch (detail.method) {

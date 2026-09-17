@@ -49,10 +49,10 @@ const flow = createTeardownFlow({
 
 export function initQuitFlow(adapter: TauriAdapter): void {
   quitAdapter = adapter;
-  // The intent is Rust's: fixed by the trigger that left Idle, and absent
-  // (a plain quit) from any sender that predates restart.
-  void listenToWindow<{ restart?: boolean } | undefined>("dormouse://quit-requested", (event) => {
-    flow.request({ kind: "quit", restart: event.payload?.restart === true });
+  // The intent is Rust's (docs/specs/standalone.md → "Restart").
+  void listenToWindow<{ restart: boolean; requester?: string | null }>("dormouse://quit-requested", (event) => {
+    const { restart, requester = null } = event.payload;
+    flow.request({ kind: "quit", restart, requester });
   });
   // Another window said no. Nothing was destroyed; drop this window's dialog
   // and go back to idle so a later quit asks again. No call back into Rust —

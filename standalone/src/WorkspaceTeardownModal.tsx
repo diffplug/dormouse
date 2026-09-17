@@ -68,7 +68,7 @@ export function WorkspaceTeardownModal({
   const cancelButtonRef = useRef<HTMLButtonElement>(null);
   const progressRef = useRef<HTMLParagraphElement>(null);
   // Live count — the dialog stays open even if it drops to 0 (see spec).
-  const runningCount = useSyncExternalStore(subscribeToTerminalPaneState, countRunningSessions);
+  const runningCount = useSyncExternalStore(subscribeToTerminalPaneState, () => countRunningSessions(intent.requester));
   const hasRunning = runningCount > 0;
 
   if (confirming) {
@@ -76,8 +76,7 @@ export function WorkspaceTeardownModal({
       <ModalFrame titleId="workspace-kill-progress-title" layer="critical" padding="spacious" align="center" initialFocusRef={progressRef}>
         <h2 id="workspace-kill-progress-title" className="text-base font-bold mb-3 text-foreground">Confirm kill workspace</h2>
         <p ref={progressRef} tabIndex={-1} role="status" className="text-sm text-muted">
-          {intent.kind !== 'quit' ? 'Closing workspaces…'
-            : intent.restart ? 'Waiting for all windows, then restarting…' : 'Waiting for all windows, then closing…'}
+          {intent.kind === 'quit' ? `Waiting for all windows, then ${intent.restart ? 'restarting' : 'closing'}…` : 'Closing workspaces…'}
         </p>
       </ModalFrame>
     );

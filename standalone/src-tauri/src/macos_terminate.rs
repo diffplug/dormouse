@@ -18,7 +18,7 @@ use objc2_app_kit::{NSApplication, NSApplicationTerminateReply};
 use std::sync::OnceLock;
 use tauri::AppHandle;
 
-use crate::{append_log, exit_after_cleanup, forget_restart, quit_approved, request_quit};
+use crate::{append_log, exit_after_cleanup, forget_restart, quit_approved, request_quit, QuitIntent};
 
 /// The handle the spliced method answers on behalf of. Set once, at `Ready`.
 static APP: OnceLock<AppHandle> = OnceLock::new();
@@ -56,7 +56,7 @@ unsafe extern "C-unwind" fn should_terminate(
         };
     }
     append_log("[quit] intercepted an AppKit terminate (Dock, logout, or script)");
-    request_quit(app, false);
+    request_quit(app, QuitIntent::default());
     NSApplicationTerminateReply::TerminateCancel
 }
 

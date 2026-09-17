@@ -1,7 +1,7 @@
 import { isAppControlMethod, isWorkspaceControlMethod, SURFACE_CONTROL_METHODS } from 'dor/protocol';
 import { createRefCount } from '../../lib/ref-count';
-import { handleAppControl } from './app-control';
 import { getActiveWorkspaceId, isWindowRef, resolveWorkspaceRef, workspaceRefFor } from '../../lib/workspace-store';
+import { handleAppControl } from './app-control';
 import { errorText, mountingRefusal, ROUTE_RETRIES } from './dor-control-shared';
 import { getWallHandle, wallHandleOwning, type WallHandle } from './wall-handles';
 import { handleWorkspaceControl, listAllWorkspaceSurfaces, type WindowControlParams } from './workspace-control';
@@ -118,14 +118,18 @@ function dispatchDorControl(detail: DorControlRequest, attempt: number): void {
   // (`docs/specs/dor-cli.md` → "Handle Model").
   const fail = (error: unknown) => detail.respond({ ok: false, error: errorText(error) });
   try {
-    const running = route.kind === 'app'
-      ? handleAppControl(detail)
-      : route.kind === 'window'
-        ? (route.container ? handleWorkspaceControl(detail) : listAllWorkspaceSurfaces(detail))
-        : (route.handle.handleDorControl(callerFor(route.handle, detail)) as unknown);
+    const running = runRoute(route, detail);
     if (running instanceof Promise) void running.catch(fail);
   } catch (error) {
     fail(error);
+  }
+}
+
+function runRoute(route: Extract<DorControlRoute, { kind: 'app' | 'window' | 'handle' }>, detail: DorControlRequest): unknown {
+  switch (route.kind) {
+    case 'app': return handleAppControl(detail);
+    case 'window': return route.container ? handleWorkspaceControl(detail) : listAllWorkspaceSurfaces(detail);
+    case 'handle': return route.handle.handleDorControl(callerFor(route.handle, detail));
   }
 }
 

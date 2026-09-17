@@ -86,16 +86,14 @@ if [[ "${1:-}" != "--no-install" ]]; then
         echo "After that, 'dogfood:standalone' will work from then on."
         exit 1
       fi
-      # Swap the bundle in place, leaving a running Dormouse up: renames keep
-      # its mapped binary and sidecar alive, and `dor app restart` relaunches
-      # it from the new bundle through the normal quit (sessions saved, agent
-      # resume captured). Until then, terminals it spawns already pick up the
-      # new bundle's `dor`, node-pty spawn-helper, and shell integration.
-      # The staging names do not end in `.app`, so LaunchServices ignores them.
+      # Renames keep a running Dormouse's mapped binary and sidecar alive; the
+      # terminals it spawns before `dor app restart` already get the new
+      # bundle's `dor`, node-pty spawn-helper, and shell integration. The
+      # staging names do not end in `.app`, so LaunchServices ignores them.
       STAGED="/Applications/.dormouse-dogfood-new"
       RETIRED="/Applications/.dormouse-dogfood-old"
       rm -rf "$STAGED" "$RETIRED"
-      ditto "$RELEASE_DIR/bundle/macos/Dormouse Terminal.app" "$STAGED"
+      ditto --clone "$RELEASE_DIR/bundle/macos/Dormouse Terminal.app" "$STAGED"
       mv "$INSTALL_DIR" "$RETIRED"
       if ! mv "$STAGED" "$INSTALL_DIR"; then
         mv "$RETIRED" "$INSTALL_DIR"
