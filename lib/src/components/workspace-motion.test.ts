@@ -65,6 +65,62 @@ describe('workspace motion', () => {
     expect(wall.style.opacity).toBe('');
   });
 
+  it('keeps the outgoing Wall visible through its fade, then releases its rendering', () => {
+    const visibility = vi.fn();
+    motion.dispose();
+    motion = createWorkspaceMotion(wall, 'ws-a', visibility);
+    motion.expand();
+    frame(LATH_MOTION_MS);
+    visibility.mockClear();
+    motion.fade();
+    frame(LATH_MOTION_MS / 2);
+    expect(wall.style.transform).toBe('');
+    expect(Number(wall.style.opacity)).toBeCloseTo(1 - LATH_EASING(0.5));
+    expect(visibility).not.toHaveBeenCalled();
+    frame(LATH_MOTION_MS / 2);
+    expect(visibility).toHaveBeenCalledWith(false);
+    expect(wall.style.opacity).toBe('0');
+  });
+
+  it('reverses a rapid switch without jumping or hiding the reactivated Wall', () => {
+    const visibility = vi.fn();
+    motion.dispose();
+    motion = createWorkspaceMotion(wall, 'ws-a', visibility);
+    motion.expand();
+    frame(100);
+    motion.fade();
+    frame(50);
+    const displayed = { transform: wall.style.transform, opacity: wall.style.opacity };
+    // The active tab grows to fit its close button on reactivation.
+    tab.getBoundingClientRect = () => ({ left: 110, top: 8, width: 120, height: 24 }) as DOMRect;
+    visibility.mockClear();
+    motion.expand();
+    expect({ transform: wall.style.transform, opacity: wall.style.opacity }).toEqual(displayed);
+    frame(LATH_MOTION_MS);
+    expect(wall.style.transform).toBe('');
+    expect(wall.style.opacity).toBe('');
+    expect(visibility).not.toHaveBeenCalledWith(false);
+  });
+
+  it('releases a fade without frames and cancels its completion on disposal', async () => {
+    const visibility = vi.fn();
+    motion.dispose();
+    motion = createWorkspaceMotion(wall, 'ws-a', visibility);
+    motion.expand();
+    frame(LATH_MOTION_MS);
+    motion.fade();
+    await vi.advanceTimersByTimeAsync(LATH_MOTION_MS);
+    expect(visibility).toHaveBeenLastCalledWith(false);
+    motion.expand();
+    frame(LATH_MOTION_MS);
+    motion.fade();
+    visibility.mockClear();
+    motion.dispose();
+    await vi.advanceTimersByTimeAsync(LATH_MOTION_MS);
+    expect(visibility).not.toHaveBeenCalled();
+    expect(callbacks.size).toBe(0);
+  });
+
   it('holds the collapsed workspace until removal and can expand after a refusal', async () => {
     const finished = vi.fn();
     const pending = collapseWorkspace('ws-a').then(finished);

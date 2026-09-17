@@ -63,7 +63,7 @@ export function WorkspaceWindow({
     <RingHandoffContext.Provider value={ringHandoff}>
       <div
         data-workspace-content
-        className="grid min-h-0 flex-1 grid-cols-1 grid-rows-1 overflow-hidden"
+        className="grid min-h-0 flex-1 grid-cols-1 grid-rows-1 overflow-hidden bg-app-bg"
       >
         {workspaces.map((workspace) => {
           const isActive = workspace.id === activeId;

@@ -8,7 +8,7 @@ import { createLathWallEngine, terminalLeafMeta, type LathWallEngine } from './w
 import { createLathWallStore, type LathWallStore } from './wall/lath-wall-store';
 import { leaf, split, tree } from '../lib/lath/test-util';
 import { PANE_HEADER_HEIGHT_PX } from './design';
-import { WorkspaceActiveContext } from './wall/wall-context';
+import { WorkspaceActiveContext, WorkspaceVisibleContext } from './wall/wall-context';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -125,11 +125,15 @@ function settle() {
   for (let i = 0; i < 30; i++) frame();
   act(() => vi.advanceTimersByTime(200));
 }
-function render(active: boolean) {
-  act(() => root.render(<WorkspaceActiveContext.Provider value={active}><LathHost lath={engine}
+const paneComponents = {
+  bodies: { terminal: ({ id }: { id: string }) => <TerminalPane id={id} /> },
+  tabs: { terminal: () => null },
+};
+function render(active: boolean, visible: boolean | null = null) {
+  act(() => root.render(<WorkspaceActiveContext.Provider value={active}><WorkspaceVisibleContext.Provider value={visible}><LathHost lath={engine}
     onCommitResize={(path, boundary, delta) => { store.resizeBoundary(path, boundary, delta); }}
-    componentsOverride={{ bodies: { terminal: ({ id }) => <TerminalPane id={id} /> }, tabs: { terminal: () => null } }}
-  /></WorkspaceActiveContext.Provider>));
+    componentsOverride={paneComponents}
+  /></WorkspaceVisibleContext.Provider></WorkspaceActiveContext.Provider>));
 }
 function mount(active = true) {
   render(active);
@@ -262,6 +266,19 @@ describe('terminal fitting follows settled layout, not animated geometry', () =>
 });
 
 describe('a hidden Workspace minimizes its terminals', () => {
+  it('keeps terminal elements attached during an inactive Workspace fade', () => {
+    mount();
+    const original = registry.entries.get('a')!.container;
+    render(false, true);
+    settle();
+    expect(registry.entries.get('a')!.container).toBe(original);
+    expect(registry.resizes).toEqual([]);
+    render(false, false);
+    settle();
+    expect(registry.entries.get('a')!.container).toBeUndefined();
+    expect(registry.entries.get('b')!.container).toBeUndefined();
+  });
+
   it('detaches every terminal and fits nothing, even when the host resizes', () => {
     mount();
     expect(registry.entries.get('a')!.container).toBeDefined();

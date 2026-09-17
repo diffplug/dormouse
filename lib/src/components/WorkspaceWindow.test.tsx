@@ -12,6 +12,8 @@ import { SURFACE_CONTROL_METHODS } from 'dor/protocol';
 import { WorkspaceWindow } from './WorkspaceWindow';
 import { WorkspaceStrip } from './WorkspaceStrip';
 import * as workspaceMotion from './workspace-motion';
+import * as uiGeometry from '../lib/ui-geometry';
+import { LATH_MOTION_MS } from '../lib/lath/animator';
 import { closeWorkspaceWithSurfaces } from './wall/workspace-lifecycle';
 import * as terminalRegistry from '../lib/terminal-registry';
 import { setPlatform } from '../lib/platform';
@@ -96,6 +98,27 @@ async function render(node = <WorkspaceWindow initialPaneIds={['pane-a']} />): P
 }
 
 describe('WorkspaceWindow', () => {
+  it('keeps the outgoing Wall inert and visible beneath the incoming Wall until its fade ends', async () => {
+    const first = getActiveWorkspaceId();
+    createWorkspace({ id: 'ws-2', activate: false });
+    await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['pane-a']} /></>);
+    vi.spyOn(uiGeometry, 'motionIsInstant').mockReturnValue(false);
+    for (const wall of walls()) {
+      wall.getBoundingClientRect = () => ({ left: 0, top: 40, width: 1000, height: 600 }) as DOMRect;
+    }
+    for (const tab of container.querySelectorAll<HTMLElement>('[data-workspace-tab]')) {
+      tab.getBoundingClientRect = () => ({ left: 0, top: 0, width: 100, height: 24 }) as DOMRect;
+    }
+    await act(async () => { setActiveWorkspace('ws-2'); });
+    expect(wallFor(first).hasAttribute('inert')).toBe(true);
+    expect(wallFor(first).classList.contains('invisible')).toBe(false);
+    expect(wallFor('ws-2').hasAttribute('inert')).toBe(false);
+    expect(wallFor('ws-2').classList.contains('z-10')).toBe(true);
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, LATH_MOTION_MS + 30)); });
+    expect(wallFor(first).classList.contains('invisible')).toBe(true);
+    expect(wallFor('ws-2').classList.contains('invisible')).toBe(false);
+  });
+
   it('reveals and confirms x on a highlighted workspace, then selects the next tab for repeated deletion', async () => {
     const first = getActiveWorkspaceId();
     createWorkspace({ id: 'ws-2', activate: false });

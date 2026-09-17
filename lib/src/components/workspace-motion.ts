@@ -25,8 +25,14 @@ export function workspaceIsCollapsed(id: string): boolean {
 
 /** Presentation only: the grid box stays full-size, so terminals never fit to
  * intermediate dimensions. The ring lives outside this transformed subtree. */
-export function createWorkspaceMotion(element: HTMLElement, id: string) {
+export function createWorkspaceMotion(element: HTMLElement, id: string, onVisibilityChange: (visible: boolean) => void = () => {}) {
   let progress = 1;
+  let alpha = 1;
+  let visible = false;
+  const setVisible = (next: boolean) => {
+    visible = next;
+    onVisibilityChange(next);
+  };
   let raf: number | null = null;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let complete: (() => void) | undefined;
@@ -37,13 +43,12 @@ export function createWorkspaceMotion(element: HTMLElement, id: string) {
     if (progress === 1) {
       element.style.transform = '';
       element.style.transformOrigin = '';
-      element.style.opacity = '';
     } else {
       const remainder = 1 - progress;
       element.style.transformOrigin = '0 0';
       element.style.transform = `translate(${anchor.x * remainder}px, ${anchor.y * remainder}px) scale(${anchor.sx + (1 - anchor.sx) * progress}, ${anchor.sy + (1 - anchor.sy) * progress})`;
-      element.style.opacity = String(progress);
     }
+    element.style.opacity = progress * alpha === 1 ? '' : String(progress * alpha);
     element.style.pointerEvents = departing ? 'none' : '';
     notify();
   };
@@ -65,26 +70,36 @@ export function createWorkspaceMotion(element: HTMLElement, id: string) {
     anchor = { x: tab.left - rect.left, y: tab.top - rect.top, sx: tab.width / rect.width, sy: tab.height / rect.height };
     return true;
   };
-  const animate = (to: number): Promise<void> => {
+  const animate = (to: number, toAlpha = 1, onFinish?: () => void): Promise<void> => {
     cancel();
-    if (!measure() || motionIsInstant() || progress === to) {
+    // Keep the same anchor when reversing a partial transform: tab widths can
+    // change on activation, but the frame already on screen must not jump.
+    const measurable = (progress > 0 && progress < 1) || measure();
+    if (!measurable || motionIsInstant() || (progress === to && alpha === toAlpha)) {
       progress = to;
+      alpha = toAlpha;
       paint();
+      onFinish?.();
       return Promise.resolve();
     }
     const from = progress;
+    const fromAlpha = alpha;
     const start = performance.now();
     paint();
     return new Promise(resolve => {
       complete = resolve;
       const finish = () => {
         progress = to;
+        alpha = toAlpha;
         paint();
         cancel();
+        onFinish?.();
       };
       const tick = (now: number) => {
         const t = Math.min(1, Math.max(0, (now - start) / LATH_MOTION_MS));
-        progress = from + (to - from) * LATH_EASING(t);
+        const eased = LATH_EASING(t);
+        progress = from + (to - from) * eased;
+        alpha = fromAlpha + (toAlpha - fromAlpha) * eased;
         paint();
         if (t === 1) finish();
         else raf = requestAnimationFrame(tick);
@@ -99,7 +114,8 @@ export function createWorkspaceMotion(element: HTMLElement, id: string) {
       // Switching away and back must not undo an accepted close or transfer.
       if (departing && !restore) return;
       departing = false;
-      if (raf === null) progress = 0;
+      if (!visible && raf === null) { progress = 0; alpha = 1; }
+      setVisible(true);
       void animate(1);
     },
     collapse() {
@@ -113,9 +129,16 @@ export function createWorkspaceMotion(element: HTMLElement, id: string) {
       return animate(0);
     },
     collapsed: () => departing && progress === 0,
+    fade() {
+      if (!visible || departing) { motion.hide(); return; }
+      // Freeze its geometry beneath the incoming Wall; detach only after fading.
+      void animate(progress, 0, () => setVisible(false));
+    },
     hide() {
       cancel();
       progress = departing ? 0 : 1;
+      alpha = 1;
+      setVisible(false);
       paint();
     },
     dispose() {

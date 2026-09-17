@@ -111,6 +111,10 @@ export const WorkspaceIdContext = createContext<WorkspaceId | null>(null);
  *  component rendered outside one, is always active. */
 export const WorkspaceActiveContext = createContext(true);
 
+/** Presentation can outlive activation while the outgoing Workspace fades.
+ * Null outside WorkspaceMotion: bare Walls follow their active state. */
+export const WorkspaceVisibleContext = createContext<boolean | null>(null);
+
 export const RenamingIdContext = createContext<string | null>(null);
 /** Exact zoom owner for pane-local chrome. Pane chrome compares against its own id
  * rather than reading a boolean, so a partially exposed pane does not render
