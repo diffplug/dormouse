@@ -121,7 +121,7 @@ for (const [verdict, cliExit, expected, sentinel = true] of [['PASS', 0, 0], ['F
       const fs = require('node:fs');
       const prompt = process.argv[3];
       const output = prompt.match(/\\*\\*Output file:\\*\\* \\x60([^\\x60]+)\\x60/)[1];
-      fs.writeFileSync(output, ${JSON.stringify(`VERDICT: ${verdict}\nEvidence\n${sentinel ? '<!-- END OF REPORT -->\n' : ''}`)});
+      fs.writeFileSync(output, ${JSON.stringify(`VERDICT: ${verdict}\nEvidence\n${sentinel ? `${SENTINEL}\n\n` : ''}`)});
       process.exit(${cliExit});
     `);
     // The all-domains path calls run_domain in a conditional: Bash disables
@@ -187,7 +187,9 @@ const merge = promptShellBlock(orchestrator, 'audit-report.md');
 
 test('merge distinguishes finished, cut-off, and absent domains', (t) => {
   const dir = tempDir(t, 'dormouse-audit-merge-');
-  writeFileSync(join(dir, 'audit-supply-chain.md'), `VERDICT: PASS\nsupply evidence\n\n${SENTINEL}\n`);
+  // The trailing blank line is what pins `emit` to the last non-blank line: on
+  // exact `tail -n1` this finished domain is published under the cut-off caveat.
+  writeFileSync(join(dir, 'audit-supply-chain.md'), `VERDICT: PASS\nsupply evidence\n\n${SENTINEL}\n\n`);
   writeFileSync(join(dir, 'audit-ci-secrets.md'), 'VERDICT: INCONCLUSIVE\nci evidence\n');
   const result = spawnSync('bash', ['-c', merge], { cwd: dir, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
