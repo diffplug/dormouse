@@ -30,7 +30,7 @@ export type VisiblePane = { id: string; title: string | undefined; params: Recor
 
 export type WallMode = 'command' | 'passthrough';
 
-export type WallSelectionKind = 'pane' | 'door';
+export type WallSelectionKind = 'pane' | 'door' | 'workspace' | 'workspace-new';
 
 /** How a Surface closure answers the archive: `prompt` raises the Keep open /
  *  Close anyway prompt on refusal, `silent` only returns the refusal, `discard`

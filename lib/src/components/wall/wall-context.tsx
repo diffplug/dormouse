@@ -1,7 +1,8 @@
 import type { WorkspaceId } from '../../lib/session-types';
 import type { PortMode } from './TerminalContextView';
 import type { PortUrlEntry } from './port-url';
-import { createContext, useContext, useEffect } from 'react';
+import { createContext, useContext, useEffect, type RefObject } from 'react';
+import type { RingFrame } from '../../lib/rect-tween';
 import type { AlertButtonActionResult, SessionStatus, SetTerminalUserTitleResult } from '../../lib/terminal-registry';
 import type { WallMode } from './wall-types';
 import type { RenderMode } from './agent-browser-screen';
@@ -14,6 +15,9 @@ export interface PaneElementsState {
 
 export const ModeContext = createContext<WallMode>('command');
 export const SelectedIdContext = createContext<string | null>(null);
+
+/** The last visible ring frame, carried between active Walls in one Window. */
+export const RingHandoffContext = createContext<RefObject<RingFrame | null> | null>(null);
 
 /** Terminal fitting waits for committed, fully painted geometry. Standalone
  *  terminal mounts have no layout coordinator and use their resize observer. */

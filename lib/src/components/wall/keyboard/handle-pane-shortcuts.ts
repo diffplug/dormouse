@@ -23,6 +23,14 @@ export function handlePaneShortcuts(
   navHistory: NavHistoryRef,
 ): boolean {
   const sid = ctx.selectedIdRef.current;
+  // Workspace chrome has its own Enter and navigation paths, never pane verbs.
+  if (ctx.selectedTypeRef.current === 'workspace' || ctx.selectedTypeRef.current === 'workspace-new') {
+    const paneVerb = ['Enter', '|', '%', '-', '"', 'k', 'x', ',', 'm', 'd', 't', 'a', 'z', '>'].includes(e.key);
+    if (!paneVerb && !(isArrowKey(e.key) && (e.metaKey || e.ctrlKey))) return false;
+    e.preventDefault();
+    e.stopPropagation();
+    return true;
+  }
 
   if (e.key === 'Enter' && sid) {
     e.preventDefault();

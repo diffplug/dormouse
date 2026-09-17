@@ -27,6 +27,7 @@ export function handleMouseSelectionKeys(e: KeyboardEvent, ctx: WallKeyboardCtx)
 
   const sid = ctx.selectedIdRef.current;
   if (!sid) return false;
+  if (ctx.selectedTypeRef.current === 'workspace' || ctx.selectedTypeRef.current === 'workspace-new') return false;
 
   // These chords copy/paste against a terminal's pty and mouse selection.
   // Non-terminal surfaces (agent-browser, iframe) own their clipboard keys —

@@ -4,7 +4,7 @@ import {
   createWorkspace,
   getActiveWorkspaceId,
 } from '../../../lib/workspace-store';
-import { requestWorkspaceClose, requestWorkspaceRename } from '../workspace-lifecycle';
+import { enterWorkspace, requestWorkspaceClose, requestWorkspaceRename } from '../workspace-lifecycle';
 import type { WallKeyboardCtx } from './types';
 
 /**
@@ -27,6 +27,16 @@ export function handleWorkspaceShortcuts(e: KeyboardEvent, ctx: WallKeyboardCtx)
     action();
     return true;
   };
+
+  if (e.key === 'Enter') {
+    const kind = ctx.selectedTypeRef.current;
+    if (kind === 'workspace' || kind === 'workspace-new') {
+      return run(() => {
+        const id = kind === 'workspace-new' ? createWorkspace().id : ctx.selectedIdRef.current;
+        if (id) void enterWorkspace(id);
+      });
+    }
+  }
 
   // Targets resolve through the ACTIVE Workspace, never the Wall that heard the
   // key, so a stale keystroke from a hidden one could not act on the wrong one.

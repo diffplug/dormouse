@@ -8,6 +8,7 @@ import { isHelperSession } from '../lib/terminal-store';
 import { useRef, useState, useEffect, useCallback, useMemo, useSyncExternalStore, lazy, Suspense, type ReactNode } from 'react';
 import { clsx } from 'clsx';
 import { Baseboard } from './Baseboard';
+import { workspaceTabElement } from './workspace-tab-elements';
 import { ExternalLinkModalHost } from './ExternalLinkModalHost';
 import { AgentBrowserScreenModalHost } from './AgentBrowserScreenModalHost';
 // Remote-host code (relay/WebSocket/enrollment + the window.dormouseBurrow
@@ -66,7 +67,7 @@ import type {
 import { hasBrowser, hasTerminal } from 'dor/commands/types';
 import { DEFAULT_WORKSPACE_ID, type PersistedSurfaceRefs, type WorkspaceId } from '../lib/session-types';
 import { clearWorkspaceSurfaces, setWorkspaceSurfaces } from '../lib/workspace-surfaces';
-import { getWorkspacesSnapshot, workspaceRefFor } from '../lib/workspace-store';
+import { getWorkspacesSnapshot, subscribeToWorkspaces, workspaceRefFor } from '../lib/workspace-store';
 import { awaitWallEmpty } from './wall/close-all';
 import { registerWallHandle, type WallHandle } from './wall/wall-handles';
 import { prepareWorkspaceTransfer } from './wall/workspace-transfer';
@@ -396,6 +397,7 @@ export function Wall({
   const [mode, setMode] = useState<WallMode>(initialMode);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedType, setSelectedType] = useState<WallSelectionKind>('pane');
+  const lastPaneIdRef = useRef<string | null>(null);
 
   const windowFocused = useWindowFocused();
   useDynamicPalette();
@@ -530,11 +532,34 @@ export function Wall({
    *  concept of selection/activation). */
   const selectPane = useCallback((id: string) => {
     releaseZoomExcept(id);
+    lastPaneIdRef.current = id;
     selectedIdRef.current = id;
     selectedTypeRef.current = 'pane';
     setSelectedId(id);
     setSelectedType('pane');
   }, [releaseZoomExcept]);
+
+  const returnToPane = useCallback(() => {
+    const last = lastPaneIdRef.current;
+    const id = last && nav.hasPane(last) ? last : nav.panes()[0];
+    if (id) selectPane(id);
+  }, [nav, selectPane]);
+
+  const selectWorkspace = useCallback((id: string | null) => {
+    const element = workspaceTabElement(id);
+    if (workspaceId === undefined || !element) return;
+    releaseZoomExcept();
+    selectedIdRef.current = id ?? '+';
+    selectedTypeRef.current = id === null ? 'workspace-new' : 'workspace';
+    setSelectedId(selectedIdRef.current);
+    setSelectedType(selectedTypeRef.current);
+    element.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  }, [workspaceId, releaseZoomExcept]);
+
+  useEffect(() => subscribeToWorkspaces(() => {
+    if (selectedTypeRef.current === 'workspace'
+      && !getWorkspacesSnapshot().workspaces.some(workspace => workspace.id === selectedIdRef.current)) returnToPane();
+  }), [returnToPane]);
 
   // The shared tail of both reattach paths (click-reattach + drag-out): drop the Door
   // chip from the baseboard and select the now-restored pane.
@@ -924,6 +949,7 @@ export function Wall({
       }
     }
     setSelectedId(paneIds[0] ?? null);
+    lastPaneIdRef.current = paneIds[0] ?? null;
     // Announce the seeded panes and prime the diff set so the store subscription
     // only fires for ids added later (the seed's own commits predate its subscribe).
     prevLeafIdsRef.current = new Set(paneIds);
@@ -1572,6 +1598,11 @@ export function Wall({
       return getTerminalInstance(id) !== null && !isReplaceableShell(id);
     }),
     runningCount: () => countRunningSessionsIn(memberSurfaceIds()),
+    enterSelectedPane: () => {
+      const last = lastPaneIdRef.current;
+      const id = last && nav.hasPane(last) ? last : nav.panes()[0];
+      if (id) enterTerminalMode(id);
+    },
     flushPersistence: (options) => persistence.flush(options),
     prepareWorkspaceTransfer: () => prepareWorkspaceTransfer({
       workspaceId: effectiveWorkspaceId,
@@ -1611,11 +1642,13 @@ export function Wall({
     prevActiveRef.current = active;
     if (!active) {
       focusSelected(false);
+      // Chrome selection is a command-mode cursor in the visible Window only.
+      if (selectedTypeRef.current === 'workspace' || selectedTypeRef.current === 'workspace-new') returnToPane();
       return;
     }
     const frame = requestAnimationFrame(() => focusSelected(true));
     return () => cancelAnimationFrame(frame);
-  }, [active, focusSelected]);
+  }, [active, focusSelected, returnToPane]);
 
   const addSplitPanel = useCallback((
     id: string | null,
@@ -1942,6 +1975,8 @@ export function Wall({
     handleReattachRef,
     selectPane,
     selectDoor,
+    selectWorkspace,
+    returnToPane,
     enterTerminalMode,
     exitTerminalMode,
     minimizePane,
@@ -2050,7 +2085,7 @@ export function Wall({
                   externalDrag={doorDrag ? { id: doorDrag.item.id, startX: doorDrag.startX, startY: doorDrag.startY } : null}
                   onExternalDrop={onExternalDrop}
                 />
-                <WorkspaceSelectionOverlay lathStore={lath.store} subscribeLathFrames={lath.subscribeFrames} selectedId={selectedId} selectedType={selectedType} mode={mode} />
+                <WorkspaceSelectionOverlay lathStore={lath.store} subscribeLathFrames={lath.subscribeFrames} selectedId={selectedId} selectedType={selectedType} mode={mode} active={active} />
               </div>
             </div>
 

@@ -3,7 +3,7 @@ import { awaitWallHandle, mountingRefusal } from './dor-control-shared';
 import { getWallHandle } from './wall-handles';
 import { forgetWorkspaceSession, isWorkspaceTransferPending } from '../../lib/window-session-aggregator';
 import { dismissWorkspaceUi, setPendingWorkspaceClose, setRenamingWorkspace } from '../../lib/workspace-ui-store';
-import { closeWorkspace, getWorkspacesSnapshot, setActiveWorkspace, workspaceRefFor } from '../../lib/workspace-store';
+import { closeWorkspace, getActiveWorkspaceId, getWorkspacesSnapshot, setActiveWorkspace, workspaceRefFor } from '../../lib/workspace-store';
 import type { WorkspaceId } from '../../lib/session-types';
 import type { CloseSurfaceMode } from './wall-types';
 
@@ -19,6 +19,13 @@ import type { CloseSurfaceMode } from './wall-types';
 export function workspaceNeedsCloseConfirmation(id: WorkspaceId): boolean {
   const handle = getWallHandle(id);
   return !!handle && (handle.hasTouchedSurfaces() || handle.runningCount() > 0);
+}
+
+/** Keyboard Enter on a tab/+ waits for a fresh Wall just like close does. */
+export async function enterWorkspace(id: WorkspaceId): Promise<void> {
+  setActiveWorkspace(id);
+  const handle = await awaitWallHandle(id);
+  if (getActiveWorkspaceId() === id) handle?.enterSelectedPane();
 }
 
 /** The ways a close is turned down before it starts — these two, and

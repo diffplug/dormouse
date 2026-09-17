@@ -10,6 +10,7 @@ import { type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SURFACE_CONTROL_METHODS } from 'dor/protocol';
 import { WorkspaceWindow } from './WorkspaceWindow';
+import { WorkspaceStrip } from './WorkspaceStrip';
 import { closeWorkspaceWithSurfaces } from './wall/workspace-lifecycle';
 import * as terminalRegistry from '../lib/terminal-registry';
 import { setPlatform } from '../lib/platform';
@@ -94,6 +95,56 @@ async function render(node = <WorkspaceWindow initialPaneIds={['pane-a']} />): P
 }
 
 describe('WorkspaceWindow', () => {
+  it('highlights tabs without switching and Enter activates or creates into a live pane', async () => {
+    const first = getActiveWorkspaceId();
+    createWorkspace({ id: 'ws-2', activate: false });
+    await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['pane-a']} /></>);
+    const press = async (key: string, location = 0) => {
+      await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key, location, bubbles: true, cancelable: true })); });
+      await flush();
+    };
+    await press('ArrowUp');
+    await press('ArrowRight');
+    expect(getActiveWorkspaceId()).toBe(first);
+    await press('ArrowDown');
+    await press('Enter');
+    expect(getActiveWorkspaceId()).toBe(first);
+    expect(wallFor(first).querySelector('[data-session-id="pane-a"][data-focused="true"]')).not.toBeNull();
+
+    await press('Shift', 1);
+    await press('Shift', 2);
+    await press('ArrowUp');
+    await press('ArrowRight');
+    await press('Enter');
+    expect(getActiveWorkspaceId()).toBe('ws-2');
+    expect(wallFor('ws-2').querySelector('[data-focused="true"]')).not.toBeNull();
+
+    await press('Shift', 1);
+    await press('Shift', 2);
+    await press('ArrowUp');
+    await press('ArrowRight'); // +
+    expect(getWorkspacesSnapshot().workspaces).toHaveLength(2);
+    await press('Enter');
+    const created = getActiveWorkspaceId();
+    expect(getWorkspacesSnapshot().workspaces).toHaveLength(3);
+    expect(created).not.toBe('ws-2');
+    expect(wallFor(created).querySelector('[data-focused="true"]')).not.toBeNull();
+  });
+
+  it('returns to a live pane when the highlighted Workspace disappears', async () => {
+    const first = getActiveWorkspaceId();
+    createWorkspace({ id: 'ws-2', activate: false });
+    await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['pane-a']} /></>);
+    for (const key of ['ArrowUp', 'ArrowRight']) {
+      await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })); });
+    }
+    await act(async () => { closeWorkspace('ws-2'); });
+    await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+    await flush();
+    expect(getActiveWorkspaceId()).toBe(first);
+    expect(wallFor(first).querySelector('[data-session-id="pane-a"][data-focused="true"]')).not.toBeNull();
+  });
+
   it('mounts one Wall per Workspace with exactly one active, and seeds only the boot Workspace', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     await render();

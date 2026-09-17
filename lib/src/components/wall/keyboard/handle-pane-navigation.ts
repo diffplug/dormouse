@@ -1,4 +1,5 @@
 import { ARROW_OPPOSITES, isArrowKey, type NavHistoryRef, type WallKeyboardCtx } from './types';
+import { getWorkspacesSnapshot } from '../../../lib/workspace-store';
 
 /**
  * Plain arrow navigation: across panes (tiled), or across doors (in the
@@ -21,6 +22,18 @@ export function handlePaneNavigation(
   const dir = e.key;
   const currentType = ctx.selectedTypeRef.current;
   const currentDoors = ctx.doorsRef.current;
+
+  if (currentType === 'workspace' || currentType === 'workspace-new') {
+    navHistory.current = null;
+    if (dir === 'ArrowDown') ctx.returnToPane();
+    else if (dir === 'ArrowLeft' || dir === 'ArrowRight') {
+      const ids = [...getWorkspacesSnapshot().workspaces.map(workspace => workspace.id), null];
+      const index = ids.indexOf(currentType === 'workspace-new' ? null : sid);
+      const next = index + (dir === 'ArrowLeft' ? -1 : 1);
+      if (index >= 0 && next >= 0 && next < ids.length) ctx.selectWorkspace(ids[next]);
+    }
+    return true;
+  }
 
   if (currentType === 'door') {
     if (dir === 'ArrowUp') {
@@ -46,7 +59,11 @@ export function handlePaneNavigation(
     navHistory.current = { direction: dir, fromId: sid };
     ctx.selectPane(targetId);
   } else if (dir === 'ArrowDown' && currentDoors.length > 0) {
+    navHistory.current = null;
     ctx.selectDoor(currentDoors[0].id);
+  } else if (dir === 'ArrowUp' && ctx.workspaceId !== undefined) {
+    navHistory.current = null;
+    ctx.selectWorkspace(getWorkspacesSnapshot().activeId);
   }
   return true;
 }

@@ -147,6 +147,7 @@ Source of truth: `lib/src/components/Baseboard.tsx`, `lib/src/components/Door.ts
 - **Must use active and inactive pane-header foreground/background pairs** on the corresponding tabs, over the app background. **Must join the active tab directly to a full-width vertical gradient**, active-header background at the top to app background at the bottom. Reserve one `PANE_GUTTER_PX` band for the gradient above the Wall's normal top gutter, keeping it clear of the focus ring.
 - **Must show `×` only on the active tab**, only with multiple Workspaces and outside rename. Middle-click may close an inactive tab. Reveal the active tab after its width changes on activation.
 - **Must reuse `HEADER_PALETTE_TRANSITION_CLASS` for tab palette tweening and reduced motion.**
+- **Must keep tab highlighting separate from activation.** `Enter` on a highlighted tab activates that Workspace and enters passthrough on its last live selected pane (first live pane if unavailable); on `+`, create a Workspace and enter its pane after mount. Deactivation clears a Wall's chrome selection back to its last live pane. Removing the highlighted Workspace returns selection to a live pane.
 
 Source of truth: `DOOR_TAB_CLASS` in `lib/src/components/design.tsx`; `WorkspaceStrip` in `lib/src/components/WorkspaceStrip.tsx`; `AppBar` in `standalone/src/AppBar.tsx`. Close visibility: `activates on click` in `lib/src/components/WorkspaceStrip.test.tsx`.
 
@@ -276,6 +277,7 @@ Per-frame writes are **imperative**: `SelectionRing` gives the overlay refs to i
 - **Snap gate.** `motionIsInstant()` — `!cfg.layout.animate` (Chromatic) or `prefersReducedMotion()` — settles the ring instantly; it is the same predicate the Lath animator's duration uses, so ring and leaves agree. **A ring appearing with nothing on screen also snaps**: there is no `from` to glide from.
 - **The unfocus-saturate fade is the one CSS transition** (`filter ${FOCUS_MOTION_MS}ms`, set inline by `SelectionRing.tsx`); neither the snap gate nor reduced motion touches it. Under Chromatic it snapshots already finished (pinned in `lib/.storybook/preview.ts`).
 - Pane↔door selection morphs the corner radii (12px all-round ⇄ `8,8,0,0`) and stroke inset through the same tween, so the shape lerps instead of popping.
+- **Must continue from the last painted frame across Workspace activation**, not the incoming Wall's stale frame. Hidden Walls neither animate nor publish ring geometry. Tabs use Door geometry; `+` uses its button rectangle and 4px corners. Pinned by `carries the last visible ring across Walls instead of their stale pane positions` in `lib/src/components/wall/WorkspaceSelectionOverlay.test.tsx`.
 
 Source of truth: `lib/src/lib/rect-tween.ts` (position and velocity), `lib/src/lib/ring-geometry.ts` (outline/smear geometry), `lib/src/components/wall/WorkspaceSelectionOverlay.tsx` (the rAF loop), `lib/src/components/wall/SelectionRing.tsx` (the SVG shell).
 
@@ -297,7 +299,7 @@ Source of truth: `lib/src/lib/ring-geometry.ts`.
 
 Each pane body registers its DOM element in a `paneElements` Map on mount and removes it on unmount (`usePaneChrome`); the overlay resolves the enclosing Lath leaf (`[data-lath-leaf]`) via `resolvePaneElement`, so the ring covers header + body. Doors are registered by the `Baseboard` through `DoorElementsContext` (`[data-door-id]`), **only the *visible* subset** — an overflowed door has no element to measure.
 
-Re-measures on: selection change, `ResizeObserver` on the target, every Lath store commit (`revision` via `useSyncExternalStore`), and — while the wall streams animator frames — every frame, so the ring tracks kills, restores and tweens frame-accurately. **If the selected leaf is momentarily absent the overlay bails and holds the last rect.**
+Re-measures on: selection change, target resize, scroll, window resize, Workspace changes, every Lath store commit, and each Lath animation frame. **Must hold the last painted frame when the target is missing, detached, or zero-sized**, including stale Door observer notifications during restore. Pinned by `restores from the last painted Door through a %s target` in `lib/src/components/wall/WorkspaceSelectionOverlay.test.tsx`.
 
 Source of truth: `lib/src/components/wall/WorkspaceSelectionOverlay.tsx`, `lib/src/components/wall/resolve-pane-element.ts`, `lib/src/components/wall/use-window-focused.ts`.
 
@@ -309,9 +311,13 @@ Source of truth: `lib/src/components/wall/WorkspaceSelectionOverlay.tsx`, `lib/s
 
 **Pane↔door.** Down from a pane with no pane below it selects the *first* door; Up from a door selects the *last* pane; Left/Right moves between doors. **Doors have no spatial query** — they are an ordered list.
 
+**Must let Up from a top-edge pane highlight the active Workspace tab when a strip is mounted.** Left/Right traverses tabs in strip order and then `+`, stopping at either end; Down returns to the originating live pane, or the first live pane if it disappeared. Clear pane backtracking on entry to either chrome row. Scroll highlighted tabs into view; highlighting changes neither the active Workspace nor DOM focus.
+
+**Must keep workspace tabs and `+` command-mode-only selection targets.** Pane actions and terminal clipboard operations are inert there; Workspace shortcuts retain their active-Workspace scope. Every passthrough entry selects a live pane. Navigation is pinned by `lib/src/components/wall/keyboard/handle-pane-navigation.test.ts`; activation by `highlights tabs without switching and Enter activates or creates into a live pane` in `lib/src/components/WorkspaceWindow.test.tsx`.
+
 **`Cmd/Ctrl+Arrow` swap.** Swaps Surface **content** between two panes, leaving the layout shape unchanged. One Lath `swap` op trades the two leaf identities, and because per-leaf metadata and terminal-registry entries are keyed by id, title/params/session follow automatically — **never write a companion title swap** — with no DOM reattach. Selection stays on the moved Surface, so **the breadcrumb records the *partner*** (the pane now holding the old slot): the opposite `Cmd+Arrow` swaps back exactly and a plain opposite arrow selects the partner.
 
-**Must ignore swap chords while a Door is selected**, including when a prior pane move left a breadcrumb (`handle-pane-shortcuts.test.ts`). Source of truth: `handlePaneShortcuts` in `lib/src/components/wall/keyboard/handle-pane-shortcuts.ts`.
+**Must ignore swap chords while non-pane chrome is selected**, including when a prior pane move left a breadcrumb (`handle-pane-shortcuts.test.ts`). Source of truth: `handlePaneShortcuts` in `lib/src/components/wall/keyboard/handle-pane-shortcuts.ts`.
 
 ## Minimize and reattach
 

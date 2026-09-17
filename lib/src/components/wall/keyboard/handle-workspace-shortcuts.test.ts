@@ -16,7 +16,7 @@ import type { WallKeyboardCtx } from './types';
 const KEYS = ['c', 'n', 'p', '&', '$', '1', '5', '9'];
 
 function ctxWith(workspaceId?: string): WallKeyboardCtx {
-  return { activeRef: { current: true }, workspaceId } as unknown as WallKeyboardCtx;
+  return { activeRef: { current: true }, selectedTypeRef: { current: 'pane' }, workspaceId } as unknown as WallKeyboardCtx;
 }
 
 function keydown(key: string, init: KeyboardEventInit = {}): KeyboardEvent {

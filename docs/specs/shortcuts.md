@@ -10,7 +10,7 @@
 |-----|--------|-------------|
 | Left ⌘ → Right ⌘ (within 500 ms) | Enter command mode | Only exits passthrough; inert in command mode. |
 | Left ⇧ → Right ⇧ (within 500 ms) | Enter command mode | Independent of the ⌘ track; the gesture for keyboards with no right ⌘. |
-| `Enter` (command) | Enter passthrough mode | Focus the selected pane; reattach the selected door and focus it. |
+| `Enter` (command) | Enter passthrough mode | Focus the selected pane; reattach a door; activate a highlighted Workspace or create one from `+` and focus its pane. |
 
 A focused cross-origin iframe surface swallows the gesture; the proxy shim detects it in-frame and re-posts it to the Wall (`docs/specs/dor-browser.md`).
 
@@ -44,8 +44,9 @@ Standalone only — a bare Wall (VS Code, the website playground) leaves every k
 
 | Key | Action | Description |
 |-----|--------|-------------|
-| `↑` / `↓` / `←` / `→` | Move selection | Navigate panes and doors; opposite directions backtrack between panes. Down with no pane below selects the first door; Up from a door selects the last pane. |
-| `⌘`+arrows or `Ctrl`+arrows | Swap surfaces | Swap the two panes' Surfaces; the opposite chord swaps back exactly. Either modifier, every platform; consumed no-op on doors. |
+| `↑` / `↓` / `←` / `→` | Move selection | Navigate panes and doors; opposite directions backtrack between panes. Down with no pane below selects the first door; Up from a door selects the last pane. Up with no pane above highlights the active Workspace tab when a strip exists. |
+| `←` / `→` (Workspace strip) | Highlight tab / `+` | Move through tabs and then `+`, stopping at either end, without activation. Down returns to the originating pane (first live pane if gone). |
+| `⌘`+arrows or `Ctrl`+arrows | Swap surfaces | Swap the two panes' Surfaces; the opposite chord swaps back exactly. Either modifier, every platform; consumed no-op on non-pane chrome. |
 
 ## Terminal selection & clipboard
 
@@ -104,4 +105,3 @@ The standalone host contributes no chords; `docs/specs/standalone.md` owns its n
 - `lib/src/lib/terminal-mouse-router.ts` — live Alt tracking during a drag
 - `lib/src/components/SelectionPopup.tsx`, `lib/src/components/wall/TerminalContextView.tsx`, `lib/src/components/wall/InlineEditInput.tsx` — the popover/dialog handlers
 - `lib/src/components/wall/agent-browser-surface-controller.ts` — browser key forwarding and the edit-chord bridge
-
