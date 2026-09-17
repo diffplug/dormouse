@@ -343,8 +343,8 @@ in `lib/src/components/wall/use-dor-control.ts`, `resolveWorkspaceRef` in
 ## Current Implemented Commands
 
 Implemented commands call private `surface.*` control methods, **enumerated once
-in `dor/src/protocol.ts` (`SURFACE_CONTROL_METHODS`, and `WORKSPACE_CONTROL_METHODS`
-beside it)** so the emitting client and the dispatching webview cannot drift.
+in `dor/src/protocol.ts` (`SURFACE_CONTROL_METHODS`, with `WORKSPACE_CONTROL_METHODS`
+and `APP_CONTROL_METHODS` beside it)** so the emitting client and the dispatching webview cannot drift.
 `surface.list` joins one Workspace's Surfaces — visible panes
 **plus minimized (doored)** ones, each tagged `view` (`paned` / `zoomed` /
 `minimized`) — with terminal state and activity snapshots, and reports the
@@ -423,6 +423,7 @@ The spec keeps the behavior help cannot express:
 | `iframe`, `agent-browser` / `ab` | `dor-browser.md` owns the renderers; see [target resolution](#browser-open-target-resolution) and [addressing](#agent-browser-surface-addressing). The passthrough is intercepted before stricli parses it. |
 | `list` | Filters are ANDed client-side; `--port` filters terminals (browser Surfaces never match) and implies the opt-in detail scan, `--ports` only requests it. **Owns every Workspace read**: `--workspace` narrows to one, `--all` groups every Workspace's rows under its header — **every Workspace keeps its header**, including one a filter emptied, so the text listing and the JSON `workspaces` array name the same Workspaces — `--workspaces` is the overview, and the three cannot be combined. **`--all --json` adds `caller_workspace_ref` / `focused_workspace_ref`** beside the `_surface_ref` pair, which under `--all` names a `surface:N` every Workspace has; the `_surface_id` halves stay unique. **`--workspaces` takes `--json` and nothing else**, by an allowlist, so a flag added to `list` is refused there until it is named. |
 | `workspace` | **Mutation only** ([dor workspace](#dor-workspace)). |
+| `app` | Standalone only ([dor app](#dor-app)). |
 | `skill` | Prints the bundled skill or installs its bootstrap stub; [Agent Skill](#agent-skill) owns the contract. |
 
 **`await` never prints terminal text.** Stdout is only the resolution cause, the
@@ -481,6 +482,37 @@ Source of truth: `dor/src/commands/workspace.ts`, `WORKSPACE_CONTROL_METHODS` /
 `lib/src/components/wall/workspace-control.ts`, `closeWorkspaceWithSurfaces` in
 `lib/src/components/wall/workspace-lifecycle.ts`, and `dorWorkspaceRefusal` in
 `vscode-ext/src/dor-workspace-guard.ts`.
+
+## dor app
+
+**`dor app` verbs act on the running app, so the router answers them before
+resolving any Workspace, Surface, or Window param.** `restart` is the only one:
+it asks the host for the quit that relaunches (`docs/specs/standalone.md` →
+"Quit flow"), so the running-work confirmation still applies and the relaunch
+restores what any quit restores (`docs/specs/transport.md` → "The governing
+rule").
+
+- **Must request the restart before answering**, so the caller sees a host
+  refusal (a dev build) and whether the request joined a quit already in
+  progress, which exits without relaunching. The CLI fails on the latter.
+- **Never count a pane whose whole command line is `dor app restart
+  [--json]` as running work** (`countRunningSessionsIn`): it is the caller,
+  still waiting on its answer while the quit asks. Anything more on the line
+  counts.
+- **A host without `PlatformAdapter.requestAppRestart` refuses** with `dor app
+  restart is available only in Dormouse Standalone` — VS Code and the
+  browser-dev harness.
+- **A Dormouse older than the verb answers `unsupported Dormouse control method
+  'app.restart'`**, which a newer `dor` meets once the bundle is replaced under
+  the running app. The CLI turns it into a quit-and-reopen hint **only when
+  `DORMOUSE_HOST` is `standalone`**; VS Code answers with the same text.
+
+Source of truth: `dor/src/commands/app.ts`, `APP_CONTROL_METHODS` in
+`dor/src/protocol.ts`, `handleAppControl` in
+`lib/src/components/wall/app-control.ts`, `runsAppRestart` in
+`lib/src/lib/terminal-state-store.ts`. Pinned by `dor app verbs` in
+`lib/src/components/wall/dor-control-router.test.ts` and `never counts a pane
+whose command is dor app restart` in `lib/src/lib/terminal-state-store.test.ts`.
 
 ## Browser Open Target Resolution
 

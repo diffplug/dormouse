@@ -4,9 +4,9 @@
  * overview, `--all` for every Workspace's Surfaces), so this command never
  * grows a `list`.
  *
- * One command with a leading action rather than a route map: `dor` has no other
- * nested command, and the generated help — one page per top-level command — is
- * what the published CLI reference renders (`docs/specs/website-docs.md`).
+ * One command with a leading action rather than a route map, as `dor app` is
+ * too: the generated help — one page per top-level command — is what the
+ * published CLI reference renders (`docs/specs/website-docs.md`).
  */
 
 import { buildCommand } from '@stricli/core';

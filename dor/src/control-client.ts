@@ -2,6 +2,7 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypt
 import { createConnection } from 'node:net';
 import type {
   AgentBrowserSurfaceRequest,
+  AppRestartResponse,
   AgentBrowserSurfaceResponse,
   AwaitSurfaceRequest,
   AwaitSurfaceResponse,
@@ -35,7 +36,12 @@ import type {
   ToolSurfaceRequest,
   ToolSurfaceResponse,
 } from './commands/types.js';
-import { SURFACE_CONTROL_METHODS, WORKSPACE_CONTROL_METHODS, type DorControlMethod } from './protocol.js';
+import {
+  APP_CONTROL_METHODS,
+  SURFACE_CONTROL_METHODS,
+  WORKSPACE_CONTROL_METHODS,
+  type DorControlMethod,
+} from './protocol.js';
 import type { DorControlResult } from './protocol.js';
 
 export interface SocketControlClientOptions {
@@ -193,6 +199,10 @@ export class SocketControlClient implements ControlClient {
       request,
       { timeoutMs: CLOSE_WORKSPACE_TIMEOUT_MS },
     );
+  }
+
+  restartApp(): Promise<AppRestartResponse> {
+    return this.request<AppRestartResponse>(APP_CONTROL_METHODS.restart, {});
   }
 
   /**

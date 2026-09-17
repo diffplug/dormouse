@@ -8,6 +8,7 @@ import {
   type StricliProcess,
 } from '@stricli/core';
 import { agentBrowserCommand, runAgentBrowserCli } from './commands/agent-browser.js';
+import { appCommand } from './commands/app.js';
 import { awaitCommand } from './commands/await.js';
 import { ensureCommand } from './commands/ensure.js';
 import { iframeCommand } from './commands/iframe.js';
@@ -38,6 +39,7 @@ export type {
   AgentBrowserExecResult,
   AgentBrowserSurfaceRequest,
   AgentBrowserSurfaceResponse,
+  AppRestartResponse,
   AwaitCause,
   AwaitSurfaceOutcome,
   AwaitSurfaceRequest,
@@ -104,6 +106,7 @@ const COMMANDS = [
   agentBrowserCommand,
   listCommand,
   workspaceCommand,
+  appCommand,
 ] as const satisfies readonly Command[];
 
 const ROUTES = {
@@ -121,6 +124,7 @@ const ROUTES = {
   'agent-browser': agentBrowserCommand.command,
   list: listCommand.command,
   workspace: workspaceCommand.command,
+  app: appCommand.command,
 };
 
 const DOR_TEXT: ApplicationText = {

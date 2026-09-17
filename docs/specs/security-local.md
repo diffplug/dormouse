@@ -72,8 +72,9 @@ per-panel check in `lib/src/components/wall/IframePanel.tsx`.
 ## The dor control socket
 
 The attacker is another local account. The channel carries the whole Surface API
-— keystrokes into any Pane, its screen and scrollback back out, `dor kill`
-(`docs/specs/dor-cli.md` -> "Control-channel security").
+— keystrokes into any Pane, its screen and scrollback back out, `dor kill` — and
+an app restart behind the running-work confirmation (`docs/specs/dor-cli.md` ->
+"Control-channel security", "dor app").
 
 **A process running as the user is the user.** The socket bounds other local
 accounts, never the user's own: an agent holding `dor` has the power of the

@@ -299,6 +299,16 @@ export interface PlatformAdapter {
    */
   recoveryReady?: Promise<void>;
 
+  /**
+   * Quit the app and relaunch it: the host's own quit, with its running-work
+   * confirmation, ending in a relaunch (`docs/specs/standalone.md` → "Quit
+   * flow"). Resolves once the request is accepted — false when it joined a quit
+   * already in progress, which will not relaunch — and rejects when the host
+   * cannot relaunch (a dev build). Absent on hosts that cannot restart
+   * themselves.
+   */
+  requestAppRestart?(): Promise<boolean>;
+
   /** Explicit live Workspace handoff, never a persistence reader. */
   alertPauseForTransfer?(id: string): AlertRuntimeSnapshot | null;
   /** `replayRequestId` names the one since-mark `pty:replay` whose notification

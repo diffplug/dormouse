@@ -415,6 +415,21 @@ describe('countRunningSessions (quit-confirmation gate)', () => {
     applyTerminalSemanticEvents('run-a', [{ type: 'commandFinish', exitCode: 0 }]);
     expect(countRunningSessions()).toBe(1);
   });
+
+  // The request itself, still waiting on its answer while the quit asks.
+  it('never counts a pane whose command is dor app restart', () => {
+    for (const commandLine of ['dor app restart', '  dor app restart --json ', '/opt/dormouse/bin/dor app restart']) {
+      applyTerminalSemanticEvents('run-a', [{ type: 'commandLine', commandLine }, { type: 'commandStart', source: 'osc633_boundaries' }]);
+      expect(countRunningSessions()).toBe(0);
+      applyTerminalSemanticEvents('run-a', [{ type: 'commandFinish', exitCode: 0 }]);
+    }
+    // Anything more on the line is work the restart would stop.
+    for (const commandLine of ['dor app restart; sleep 100', 'pnpm build && dor app restart', 'dor app restartx', 'claude']) {
+      applyTerminalSemanticEvents('run-a', [{ type: 'commandLine', commandLine }, { type: 'commandStart', source: 'osc633_boundaries' }]);
+      expect(countRunningSessions(), commandLine).toBe(1);
+      applyTerminalSemanticEvents('run-a', [{ type: 'commandFinish', exitCode: 0 }]);
+    }
+  });
 });
 
 describe('seedLaunchedCommand (dor split/ensure -lc launches)', () => {

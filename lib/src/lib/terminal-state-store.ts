@@ -92,9 +92,21 @@ export function countRunningSessionsIn(ids: Iterable<string> | null): number {
   for (const [id, state] of paneStates) {
     if (scope && !scope.has(id)) continue;
     const entry = registry.get(id);
-    if (state.activity.kind === 'running' || (entry?.helper && !entry.exited && entry.helperBusy !== false)) count++;
+    const running = state.activity.kind === 'running' && !runsAppRestart(state);
+    if (running || (entry?.helper && !entry.exited && entry.helperBusy !== false)) count++;
   }
   return count;
+}
+
+// The whole command line is `dor app restart`, and nothing after it.
+const APP_RESTART_COMMAND_LINE = /^\s*(?:\S*[\\/])?dor(?:\.cmd)?\s+app\s+restart(?:\s+--json)?\s*$/;
+
+/** A pane whose command is `dor app restart` is never running work: it is the
+ *  restart request itself, still waiting on its answer while the quit asks
+ *  about running work (`docs/specs/dor-cli.md` → "dor app"). */
+function runsAppRestart(state: TerminalPaneState): boolean {
+  const raw = state.currentCommand?.rawCommandLine;
+  return raw != null && APP_RESTART_COMMAND_LINE.test(raw);
 }
 
 // Whether shell integration can re-report a programmatic `dor ensure` command,
